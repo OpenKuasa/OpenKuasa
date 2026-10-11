@@ -51,7 +51,7 @@ import type { CvReader } from '@/lib/hire/cv-read';
 import { timeToHire } from '@/lib/hire/dashboard';
 import { careersPath, careersUrl } from '@/lib/hire/public-careers';
 import { applicantsByJob, overviewTotals, sourceBreakdown } from '@/lib/hire/overview';
-import { APPLICATION_STAGES, type HireData, type Job } from '@/lib/hire/types';
+import { APPLICATION_STAGES, HIRE_READ_CAP, type HireData, type Job } from '@/lib/hire/types';
 
 export const HIRE_TOOL_NAMES = [
   'getHiringOverview',
@@ -431,8 +431,16 @@ export function createHireTools(
               matchesText(c.location, location) &&
               (!skill?.trim() || c.skills.some((s) => matchesText(s, skill))),
           );
+          // The read keeps only the newest HIRE_READ_CAP rows. At the cap, an older match may be missing.
+          const readCapped = people.length >= HIRE_READ_CAP || apps.length >= HIRE_READ_CAP;
           return {
             total: rows.length,
+            ...(readCapped && {
+              read_capped: true,
+              note:
+                `Only the newest ${HIRE_READ_CAP} candidates and applications were searched, so an older ` +
+                'candidate may be missing and the application counts may be low. Narrow the search or say so.',
+            }),
             candidates: rows.slice(0, rowLimit(requested, 20)).map((c) => ({
               id: c.id,
               name: c.name,

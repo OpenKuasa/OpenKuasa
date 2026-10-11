@@ -114,6 +114,9 @@ export type Interview = {
   created_at: string;
 };
 
+/** The most rows one list read returns: the API's page size. A list that long may have been cut short. */
+export const HIRE_READ_CAP = 1000;
+
 /** Everything the screens and the AI tools read. One provider per request. */
 export type HireData = {
   listJobs(): Promise<Job[]>;

@@ -17,7 +17,7 @@ import { timeToHire } from '@/lib/hire/dashboard';
 import { createSeedHireData } from '@/lib/hire/seed';
 import { createSeedReachData } from '@/lib/reach/seed';
 import type { CvRead, CvReader } from '@/lib/hire/cv-read';
-import type { HireData } from '@/lib/hire/types';
+import { HIRE_READ_CAP, type HireData } from '@/lib/hire/types';
 
 // The real schemas; only the four application changes are recorded instead of run.
 const applied = vi.hoisted(() => ({ move: vi.fn(), close: vi.fn(), reopen: vi.fn(), rate: vi.fn(), addCandidate: vi.fn(), updateCandidate: vi.fn() }));
@@ -313,6 +313,17 @@ describe('listCandidates', () => {
     const apps = await data.listApplications();
     const counted = apps.filter((a) => a.candidate_id === candidates[0].id).length;
     expect(candidates[0].applications).toBe(counted);
+  });
+  it('says so when the read stopped at the row cap, since an older candidate may then be missing', async () => {
+    const base = (await data.listCandidates())[0];
+    const full = Array.from({ length: HIRE_READ_CAP }, (_, i) => ({ ...base, id: `c${i}`, name: `Person ${i}` }));
+    const capped = createHireTools({ ...data, listCandidates: async () => full }, NOW);
+    const result = (await (capped.listCandidates as unknown as { execute: (i: unknown, o: unknown) => Promise<Loose> })
+      .execute({ name: 'nobody' }, { toolCallId: 't', messages: [] }));
+    expect(result.total).toBe(0);
+    expect(result.read_capped).toBe(true);
+    expect(result.note).toMatch(/newest/i);
+    expect(await rows({ limit: 5 })).not.toHaveProperty('read_capped');
   });
   it('adds email and phone only with includeContact', async () => {
     const [one] = (await rows({ limit: 1, includeContact: true })).candidates;

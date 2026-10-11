@@ -2,11 +2,11 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { getCurrentOrg } from '@/lib/auth/current-org';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
 import { createSeedHireData } from './seed';
-import { DEFAULT_HIRE_SETTINGS, JOB_COLUMNS, SETTINGS_COLUMNS } from './types';
+import { DEFAULT_HIRE_SETTINGS, HIRE_READ_CAP, JOB_COLUMNS, SETTINGS_COLUMNS } from './types';
 import type { Application, Candidate, HireData, HireSettings, Interview, Job } from './types';
 
 /** The API answers with at most this many rows per request. */
-const PAGE_SIZE = 1000;
+const PAGE_SIZE = HIRE_READ_CAP;
 
 const CANDIDATE_COLUMNS = 'id,name,email,phone,headline,location,skills,source,pool_status,created_at';
 const APPLICATION_COLUMNS =
