@@ -12,6 +12,17 @@ alter table public.hire_applications
 -- Matching an applicant to a candidate by email must find at most one.
 create unique index hire_candidates_org_email_key on public.hire_candidates (org_id, lower(email)) where email is not null;
 
+-- One row per accepted submission to a job, new or repeat: what the rate limit
+-- counts. Counting application rows would let a caller learn whether an email
+-- had already applied (a repeat adds no row). No personal data: a job and a time.
+create table private.hire_apply_ticks (
+  job_id uuid not null references public.hire_jobs(id) on delete cascade,
+  at timestamptz not null default now()
+);
+create index hire_apply_ticks_job_at_idx on private.hire_apply_ticks (job_id, at);
+alter table private.hire_apply_ticks enable row level security;
+revoke all on private.hire_apply_ticks from public, anon, authenticated;
+
 -- ---------------------------------------------------------------------------
 -- Takes one application from a visitor. Answers with a word, never an id:
 -- 'ok', or which rule stopped it. A refused submission writes nothing. An
@@ -53,6 +64,7 @@ declare
   v_ask_portfolio boolean;
   v_ask_salary boolean;
   v_candidate_id uuid;
+  v_known_name text;
   v_application_id uuid;
   r record;
 begin
@@ -104,21 +116,26 @@ begin
   if p_consent is not true then return 'consent_required'; end if;
 
   if v_require_cv and v_cv = '' then return 'cv_required'; end if;
+  if v_cover !~ '\S' then v_cover := ''; end if;
   if v_require_cover and v_cover = '' then return 'cover_letter_required'; end if;
   -- Not asked for by this workspace: not kept.
   if not v_ask_portfolio then v_portfolio := ''; end if;
   if not v_ask_salary then v_salary := null; end if;
 
-  if (select count(*) from public.hire_applications a
-       where a.job_id = v_job_id and a.applied_at > now() - interval '1 minute') >= 30 then
+  if (select count(*) from private.hire_apply_ticks t
+       where t.job_id = v_job_id and t.at > now() - interval '1 minute') >= 30 then
     return 'throttled';
   end if;
+  -- From here the submission is accepted, whether or not it turns out to be a repeat.
+  delete from private.hire_apply_ticks t
+   where t.job_id = v_job_id and t.at <= now() - interval '1 minute';
+  insert into private.hire_apply_ticks (job_id) values (v_job_id);
 
   -- Two jobs of one workspace receiving the same new email at the same moment
   -- must not race to make the candidate.
   perform pg_advisory_xact_lock(hashtextextended(p_org_id::text || ':' || v_email, 0));
 
-  select c.id into v_candidate_id
+  select c.id, c.name into v_candidate_id, v_known_name
     from public.hire_candidates c
    where c.org_id = p_org_id and lower(c.email) = v_email;
 
@@ -150,10 +167,11 @@ begin
       for r in select m.user_id from public.org_members m where m.org_id = p_org_id loop
         perform private.deliver_notification(
           r.user_id, p_org_id, 'hiring', 'New application',
-          v_name || ' applied for ' || v_title, '/hire/applications');
+          -- A known candidate keeps the name the workspace has for them.
+          coalesce(v_known_name, v_name) || ' applied for ' || v_title, '/hire/applications');
       end loop;
     exception when others then
-      null;
+      raise log 'submit_public_application: notification skipped (%)', sqlstate;
     end;
   end if;
 

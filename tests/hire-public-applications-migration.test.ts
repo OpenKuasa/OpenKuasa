@@ -85,6 +85,47 @@ describe('hire public applications migration', () => {
     expect(body).toMatch(/exception\s+when others then/);
   });
 
+  test('keeps every read and write inside the workspace and the job that were asked for', () => {
+    const body = fn('submit_public_application');
+    expect(body).toContain('where j.id = p_job_id and j.org_id = p_org_id');
+    expect(body).toContain('where c.org_id = p_org_id and lower(c.email) = v_email');
+    expect(body).toContain('if v_application_id is not null then');
+    // The honeypot is the first thing checked in the body, before any length.
+    const begin = body.indexOf('\nbegin\n');
+    expect(body.indexOf("btrim(coalesce(p_honeypot, '')) <> ''", begin)).toBeLessThan(body.indexOf("'name_too_long'"));
+    // Every part of the closed rule is in the one condition.
+    const closed = body.slice(body.indexOf('if not v_enabled'), body.indexOf("return 'closed'"));
+    for (const part of ['not v_enabled', "'rimba-ventures-demo'", "v_status <> 'open'", 'v_described is not true', 'v_closes <']) {
+      expect(closed, part).toContain(part);
+    }
+    // A web address and nothing else.
+    expect(body).toContain("v_cv !~ '^https?://[^\\s]+$'");
+    expect(body).toContain("v_portfolio !~ '^https?://[^\\s]+$'");
+    // Nothing is returned but a literal word.
+    expect(body.match(/\breturn\b(?! '[a-z_]+';)/g) ?? []).toEqual([]);
+  });
+
+  test('the rate limit counts accepted submissions, so a repeat cannot be told from a new one', () => {
+    const body = fn('submit_public_application');
+    expect(sql).toContain('create table private.hire_apply_ticks');
+    expect(sql).toContain('alter table private.hire_apply_ticks enable row level security');
+    expect(sql).toContain('revoke all on private.hire_apply_ticks from public, anon, authenticated');
+    expect(body).toContain('from private.hire_apply_ticks t');
+    expect(body).not.toMatch(/count\(\*\) from public\.hire_applications/);
+    // The tick is written after the last refusal and before the candidate is looked up.
+    const tick = body.indexOf('insert into private.hire_apply_ticks');
+    expect(tick).toBeGreaterThan(body.indexOf("return 'throttled'"));
+    expect(tick).toBeLessThan(body.indexOf('insert into public.hire_candidates'));
+    expect(body).toContain("raise log 'submit_public_application: notification skipped (%)', sqlstate");
+  });
+
+  test('the public job function still shows only open, described jobs of a board that is on', () => {
+    const body = fn('get_public_job');
+    for (const part of ['s.careers_enabled', "j.status = 'open'", "j.description ~ '\\S'", "o.slug is distinct from 'rimba-ventures-demo'", 'j.org_id = o.id', 'case when j.show_salary then j.salary_min_cents end']) {
+      expect(body, part).toContain(part);
+    }
+  });
+
   test('the public job function now also says what the form asks for, and still hides what it hid', () => {
     const body = fn('get_public_job');
     const returns = body.slice(body.indexOf('returns table'), body.indexOf('language sql'));
