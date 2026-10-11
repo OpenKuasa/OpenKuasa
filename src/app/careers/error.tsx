@@ -18,7 +18,6 @@ export default function CareersError({
   error: Error & { digest?: string };
   /** Fetches the page again and draws it in place of this message. */
   retry: () => void;
-  reset: () => void;
 }) {
   return (
     <PublicCareersShell>

@@ -61,6 +61,7 @@ export const NOTIFY_EVENTS = [
   { id: 'deal_stages', name: 'Deal stage changes', help: 'Movement across your CRM pipeline' },
   { id: 'payments', name: 'Payments & invoices', help: 'Receipts, overdue invoices & e-Invoice status' },
   { id: 'team_activity', name: 'Team activity', help: 'Leave & claims approvals waiting on you' },
+  { id: 'hiring', name: 'Hiring', help: 'When someone applies to one of your jobs' },
   { id: 'weekly_summary', name: 'Weekly summary', help: 'A Monday digest of last week across your workspace' },
   { id: 'product_updates', name: 'Product updates', help: 'New features and improvements to OpenKuasa OS' },
 ] as const;
@@ -84,6 +85,7 @@ export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
     deal_stages: { email: true, push: false, inapp: true },
     payments: { email: true, push: true, inapp: true },
     team_activity: { email: false, push: false, inapp: true },
+    hiring: { email: false, push: false, inapp: true },
     weekly_summary: { email: true, push: false, inapp: false },
     product_updates: { email: false, push: false, inapp: true },
   },

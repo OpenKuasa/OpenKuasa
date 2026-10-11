@@ -320,7 +320,7 @@ describe('the page for a link with nothing behind it', () => {
 
 describe('the page for anything that went wrong under /careers', () => {
   const error = Object.assign(new Error('relation "hire_jobs" does not exist'), { digest: 'abc123' });
-  const html = renderToStaticMarkup(<CareersError error={error} retry={() => {}} reset={() => {}} />);
+  const html = renderToStaticMarkup(<CareersError error={error} retry={() => {}} />);
 
   it('says something went wrong inside the careers frame, with a button to try again', () => {
     expect(html).toMatch(/<h1[^>]*>Something went wrong<\/h1>/);

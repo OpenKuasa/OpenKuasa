@@ -446,6 +446,8 @@ testWithSupabase('13. the public job carries the four requirement columns, match
   expect(rows).toHaveLength(1);
   expect(rows[0]).toMatchObject(mixed);
   for (const key of FORBIDDEN_KEYS) expect(Object.keys(rows[0])).not.toContain(key);
+  // The throttle cases below apply with the least a form asks for: no CV may be required by then.
+  await setSettings(owner, ALL_OFF);
 }, 30_000);
 
 // The two throttle cases are last and each use their own fresh job: every accepted submission to a job

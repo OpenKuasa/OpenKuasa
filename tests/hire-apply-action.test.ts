@@ -227,6 +227,12 @@ describe('a form with problems', () => {
     expect(mocks.submitPublicApplication.mock.calls[0][3].cover_letter).toBe(lines.replace(/\r\n/g, '\n'));
   });
 
+  it('drops a NUL character, which the database would refuse as an error of ours', async () => {
+    await applyAction(ORG, JOB, undefined, post({ name: 'Ai\u0000syah Rahman' }));
+    expect(mocks.submitPublicApplication).toHaveBeenCalledTimes(1);
+    expect(mocks.submitPublicApplication.mock.calls[0][3].name).toBe('Aisyah Rahman');
+  });
+
   it('reads a field that is not text (a file) as empty', async () => {
     const formData = post();
     formData.set('name', new Blob(['Aisyah']), 'name.txt');

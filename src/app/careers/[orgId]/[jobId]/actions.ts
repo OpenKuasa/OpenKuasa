@@ -46,7 +46,7 @@ const READ_LIMIT = 9000;
  */
 function read(formData: FormData, key: string): string {
   const value = formData.get(key);
-  return typeof value === 'string' ? value.replace(/\r\n?/g, '\n').slice(0, READ_LIMIT) : '';
+  return typeof value === 'string' ? value.replace(/\u0000/g, '').replace(/\r\n?/g, '\n').slice(0, READ_LIMIT) : '';
 }
 
 const isUuid = (value: unknown) => z.uuid().safeParse(value).success;

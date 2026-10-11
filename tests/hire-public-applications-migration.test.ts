@@ -105,6 +105,11 @@ describe('hire public applications migration', () => {
     expect(body.match(/\breturn\b(?! '[a-z_]+';)/g) ?? []).toEqual([]);
   });
 
+  test('a cover letter is trimmed of line breaks as well as spaces, as the page trims it', () => {
+    const body = fn('submit_public_application');
+    expect(body).toContain("v_cover text := regexp_replace(coalesce(p_cover_letter, ''), '^\\s+|\\s+$', '', 'g');");
+  });
+
   test('the rate limit counts accepted submissions, so a repeat cannot be told from a new one', () => {
     const body = fn('submit_public_application');
     expect(sql).toContain('create table private.hire_apply_ticks');

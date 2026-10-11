@@ -48,7 +48,8 @@ declare
   v_name text := btrim(coalesce(p_name, ''));
   v_email text := lower(btrim(coalesce(p_email, '')));
   v_phone text := btrim(coalesce(p_phone, ''));
-  v_cover text := btrim(coalesce(p_cover_letter, ''));
+  -- Every kind of space at the ends, line breaks included: counted and kept as the page counts it.
+  v_cover text := regexp_replace(coalesce(p_cover_letter, ''), '^\s+|\s+$', '', 'g');
   v_cv text := btrim(coalesce(p_cv_url, ''));
   v_portfolio text := btrim(coalesce(p_portfolio_url, ''));
   v_salary bigint := p_expected_salary_cents;
