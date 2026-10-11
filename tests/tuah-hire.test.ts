@@ -74,7 +74,9 @@ describe('Tuah with hiring', () => {
   it('holds the hiring lookups as a single agent', async () => {
     seen.calls = [];
     await runTuah(ask, reach(), undefined, undefined, null, null, null, hire()).consumeStream();
-    for (const name of HIRE_TOOL_NAMES) expect(seen.calls[0].tools, name).toContain(name);
+    // Reading a CV belongs to Lekir: Tuah on its own is given no file reader, so that tool is not made.
+    for (const name of HIRE_TOOL_NAMES.filter((n) => n !== 'readCandidateCv')) expect(seen.calls[0].tools, name).toContain(name);
+    expect(seen.calls[0].tools).not.toContain('readCandidateCv');
   });
 
   it('has no hiring tools when no hiring data is passed', async () => {
@@ -98,7 +100,7 @@ describe('Tuah as a single agent with hiring changes', () => {
   it('a viewer (no write access) gets the lookups and no change tools', async () => {
     seen.calls = [];
     await runTuah(ask, reach(), undefined, undefined, null, null, null, hire()).consumeStream();
-    for (const name of HIRE_TOOL_NAMES) expect(seen.calls[0].tools).toContain(name);
+    for (const name of HIRE_TOOL_NAMES.filter((n) => n !== 'readCandidateCv')) expect(seen.calls[0].tools).toContain(name);
     for (const name of HIRE_WRITE_TOOL_NAMES) expect(seen.calls[0].tools).not.toContain(name);
   });
   it('a writer gets all four change tools', async () => {
