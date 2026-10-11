@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 const raw = readFileSync(
-  join(process.cwd(), 'supabase/migrations', '20261024090000_hire_candidate_changes.sql'), 'utf8',
+  join(process.cwd(), 'supabase/migrations', '20261026090000_hire_candidate_changes.sql'), 'utf8',
 );
 // Comment lines are dropped so an explanation can never satisfy an order check.
 const sql = raw.split('\n').filter((line) => !line.trim().startsWith('--')).join('\n');

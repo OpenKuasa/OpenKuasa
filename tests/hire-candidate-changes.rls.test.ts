@@ -4,7 +4,7 @@
 // application (Lekir slice 3b): public.hire_add_candidate, hire_update_candidate and hire_attach_cv.
 // Needs NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY; without all
 // three every case is skipped.
-// WRITTEN, NOT YET RUN: it runs only after the migration 20261024090000_hire_candidate_changes.sql is applied.
+// WRITTEN, NOT YET RUN: it runs only after the migration 20261026090000_hire_candidate_changes.sql is applied.
 //
 // Who calls what. hire_add_candidate and hire_update_candidate are granted to `authenticated` only, so every call
 // is made by a signed-in client (the owner, the owner of another workspace, a demo viewer) or by the signed-out

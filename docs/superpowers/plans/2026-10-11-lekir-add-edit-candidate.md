@@ -62,7 +62,7 @@
 ### Task 1: The migration
 
 **Files:**
-- Create: `supabase/migrations/20261024090000_hire_candidate_changes.sql`
+- Create: `supabase/migrations/20261026090000_hire_candidate_changes.sql`
 - Test: `tests/hire-candidate-changes-migration.test.ts`
 
 **Interfaces:**
@@ -79,7 +79,7 @@
 - [ ] **Step 3: Write the migration, exactly:**
 
 ```sql
--- supabase/migrations/20261024090000_hire_candidate_changes.sql
+-- supabase/migrations/20261026090000_hire_candidate_changes.sql
 -- Lekir slice 3b: a recruiter can add a candidate by hand and edit a candidate.
 -- Three functions are the only way. Members get no write on either table, and
 -- only the server may attach a stored file to an application.
