@@ -29,7 +29,8 @@ and through Lekir with an Approve card.
   numbers.
 - After a deletion, the message says what was really removed, from the database's own
   answer.
-- No stored CV file outlives its application by more than the cleanup run's interval.
+- A stored CV file is queued for removal the moment its application goes, and from then
+  on nothing in the app can open it.
 - A deletion that meets another change at the same moment (a move, an edit, a new
   application from the public form) ends in one clear state, and nobody is shown an error
   that is not theirs.
