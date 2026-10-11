@@ -30,6 +30,7 @@ const SERVER_PAGES = {
   'crm/deals': '@/screens/crm/deals-page',
   // The registry's Calendar is the sample the People product still shows.
   'crm/calendar': '@/screens/crm/calendar-page',
+  'crm/billings': '@/screens/crm/billings-page',
 };
 
 /**

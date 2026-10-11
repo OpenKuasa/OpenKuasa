@@ -26,6 +26,8 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'crm/appointments',
   // Shared with People (registry 'people/calendar'), which still shows the sample.
   'crm/calendar',
+  // Reads Bendahara's invoices; they are created and changed on finance/invoices.
+  'crm/billings',
   // Shared with Jebat's analytics (registry 'reach/reports'); /reach/reports
   // is not a nav item, so the screen is served at /crm/reports.
   'crm/reports',
