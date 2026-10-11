@@ -26,10 +26,12 @@ export const APPLY_LIMITS = {
 
 /**
  * A field people never see. A filled one means a script wrote the application,
- * which is then thanked and thrown away. The name is one a script fills and no
- * browser keeps an autofill value for.
+ * which is then thanked and thrown away. So it must be a field no browser or
+ * password manager fills in for a real person from what it has saved (a
+ * company, a website, an address): the name is the one the public lead form
+ * uses for the same reason, and the form labels it "Leave this field empty".
  */
-export const APPLY_HONEYPOT = 'company_website';
+export const APPLY_HONEYPOT = 'referral_code';
 
 export const APPLY_MESSAGES = {
   name: 'Enter your full name.',
@@ -51,6 +53,8 @@ export const APPLY_MESSAGES = {
   /** The post got no answer, so nobody knows whether it arrived: this one does not say "wasn't sent". */
   unreachable:
     "We couldn't reach the server, so we don't know whether your application was sent. Check your connection and try again.",
+  /** The workspace changed what its form asks for while this visitor had it open. */
+  formChanged: 'This form has just changed. Please check the new fields below and send again.',
 } as const;
 
 /** The fields this workspace's form shows. A CV link and a cover letter appear only when required. */
@@ -71,6 +75,15 @@ export function isRequired(field: ApplyField, form: ApplicationFormValues): bool
   if (field === 'cv_url') return form.require_cv;
   if (field === 'cover_letter') return form.require_cover_letter;
   return false;
+}
+
+/**
+ * True when an answer has a problem with a field the open form does not show:
+ * what the workspace asks for changed after the page was loaded. Such a
+ * problem cannot be shown under its field, so the form has to be fetched again.
+ */
+export function isStaleForm(errors: ApplyErrors, shown: readonly ApplyField[]): boolean {
+  return APPLY_FIELDS.some((field) => Boolean(errors[field]) && !shown.includes(field));
 }
 
 /** Counted the way the database counts: one per character, not per UTF-16 unit. */

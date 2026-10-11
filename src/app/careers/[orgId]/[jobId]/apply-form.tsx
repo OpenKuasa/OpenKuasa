@@ -4,6 +4,7 @@ import {
   useActionState, useEffect, useRef, useState, useTransition,
   type ChangeEvent, type FocusEvent, type FormEvent, type MouseEvent, type ReactNode,
 } from 'react';
+import { useRouter } from 'next/navigation';
 import { CAREERS_LINK_FOCUS } from '@/components/hire/public-careers-shell';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import type { ApplicationFormValues } from '@/lib/hire/application-form';
 import {
-  APPLY_HONEYPOT, APPLY_LIMITS, APPLY_MESSAGES, applyProblems, fieldProblem, isRequired, shownFields,
+  APPLY_HONEYPOT, APPLY_LIMITS, APPLY_MESSAGES, applyProblems, fieldProblem, isRequired, isStaleForm, shownFields,
   type ApplyErrors, type ApplyField, type ApplyValues,
 } from '@/lib/hire/application-fields';
 import type { ApplyState } from './actions';
@@ -30,6 +31,10 @@ import type { ApplyState } from './actions';
  *    sent from here, not posted by the browser, so that a post that fails
  *    can be caught and said in the form with everything typed still in it.
  *    The answer is drawn by layer 1, exactly as a posted one would be.
+ *
+ * The whole-form message (`state.error`) is the server's for a refusal, and
+ * the script's own for the two things only it can know: that no answer came,
+ * and that the form on screen is no longer the one the workspace asks for.
  */
 
 const LABELS: Record<Exclude<ApplyField, 'consent'>, string> = {
@@ -84,8 +89,16 @@ type Action = (prev: ApplyState, formData: FormData) => Promise<ApplyState>;
  * when it finishes React resets the form. Called from a submit handler that
  * has stopped the browser's own post, neither happens: a failure is caught
  * here, and no field is touched.
+ *
+ * One answer needs more than showing: a problem with a field this form does
+ * not have. The workspace started asking for it after the page was loaded.
+ * The page is fetched again, which brings the form as it is now (the fields
+ * already here stay as they are, with what was typed), and the answer is
+ * kept with a line saying so. Its problem appears under the new field as
+ * soon as that field does.
  */
-function useSending(action: Action) {
+function useSending(action: Action, form: ApplicationFormValues) {
+  const router = useRouter();
   const [answer, setAnswer] = useState<ApplyState>(undefined);
   const [pending, startSending] = useTransition();
 
@@ -95,7 +108,12 @@ function useSending(action: Action) {
       try {
         // The previous answer is not sent back: the action ignores it, and it holds what was typed.
         const next = await action(undefined, formData);
-        setAnswer(next ?? { error: APPLY_MESSAGES.failed, values });
+        if (isStaleForm(next?.errors ?? {}, shownFields(form))) {
+          router.refresh();
+          setAnswer({ ...next, error: APPLY_MESSAGES.formChanged });
+        } else {
+          setAnswer(next ?? { error: APPLY_MESSAGES.failed, values });
+        }
       } catch {
         // No connection, a page older than the site, a post too large: nothing is known but that no answer came.
         setAnswer({ error: APPLY_MESSAGES.unreachable, values });
@@ -291,7 +309,7 @@ export function ApplyForm({
   // Without the script: the browser posts the form and the page comes back with the answer in `posted`.
   const [posted, formAction, posting] = useActionState<ApplyState, FormData>(action, undefined);
   // With it: the form is sent from the submit handler, and the answer is kept here.
-  const sent = useSending(action);
+  const sent = useSending(action, form);
   /** The last answer, however it came. Everything below is drawn from it alone. */
   const state = sent.answer ?? posted;
   const pending = posting || sent.pending;
@@ -311,7 +329,7 @@ export function ApplyForm({
   if (state?.closed) return <Outcome>{APPLY_MESSAGES.closed}</Outcome>;
 
   const shown = shownFields(form);
-  /** A problem with a field this form does not have is never shown. */
+  /** A problem with a field this form does not have cannot be shown here; `useSending` fetches the form that has it. */
   const problems = shown.filter((field) => errors[field]);
   const counted = letterCount ?? letterLength(values?.cover_letter ?? '');
 
@@ -499,7 +517,7 @@ export function ApplyForm({
         field gives itself away.
       */}
       <div aria-hidden="true" className="absolute -left-[9999px] top-auto size-px overflow-hidden">
-        <label htmlFor="apply-extra">Company website (leave this empty)</label>
+        <label htmlFor="apply-extra">Leave this field empty</label>
         <input id="apply-extra" name={APPLY_HONEYPOT} type="text" tabIndex={-1} autoComplete="off" defaultValue="" />
       </div>
 

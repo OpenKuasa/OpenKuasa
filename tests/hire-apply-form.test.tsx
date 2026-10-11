@@ -28,6 +28,9 @@ vi.mock('react', async (importOriginal) => {
   };
 });
 
+// The real hook needs the app's router around it. Nothing here runs a handler, so nothing refreshes.
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }));
+
 import { ApplyForm } from '@/app/careers/[orgId]/[jobId]/apply-form';
 
 const FORMS: Record<string, ApplicationFormValues> = {
@@ -247,7 +250,10 @@ describe('the form before anything is typed', () => {
     expect(attr(wrapper[1], 'class')).toContain('-left-[9999px]');
     expect(wrapper[0]).not.toMatch(/hidden=""|display:\s*none|type="hidden"/);
     expect(attr(wrapper[1], 'class')!.split(' ')).not.toContain('hidden');
-    expect(text(labelFor(html, attr(attrs, 'id')!)!)).toBeTruthy();
+    // Words a script reads as a field to fill, and that no browser matches to something it has saved.
+    expect(text(labelFor(html, attr(attrs, 'id')!)!)).toBe('Leave this field empty');
+    expect(attr(attrs, 'name')).toBe('referral_code');
+    expect(html).not.toMatch(/company|website/i);
   });
 
   it('has one button, "Send application", ready to press', () => {
@@ -378,6 +384,32 @@ describe('the form after a problem with the whole application', () => {
     expect(attr(control(html, 'email').attrs, 'value')).toBe('aisyah@example.com');
     expect(has(control(html, 'consent').attrs, 'checked')).toBe(true);
     expect(html).not.toMatch(/needs? fixing/);
+  });
+});
+
+describe('the form after its requirements changed while it was open', () => {
+  const values = { ...EMPTY_APPLY_VALUES, name: 'Aisyah Rahman', email: 'aisyah@example.com', consent: true };
+  const state = { error: APPLY_MESSAGES.formChanged, errors: { cv_url: APPLY_MESSAGES.cvRequired }, values };
+
+  it('says the form changed above the button while the new field is still on its way', () => {
+    const html = render(FORMS['all off'], state);
+    const alerts = [...html.matchAll(/<p[^>]*\srole="alert"[^>]*>([\s\S]*?)<\/p>/g)].map((match) => text(match[1]));
+    expect(alerts).toEqual([APPLY_MESSAGES.formChanged]);
+    expect(attr(control(html, 'name').attrs, 'value')).toBe('Aisyah Rahman');
+    expect(has(control(html, 'consent').attrs, 'checked')).toBe(true);
+  });
+
+  it('shows the new field with its problem under it once the page has the current form, with or without a script', () => {
+    const html = render(FORMS['CV only'], state);
+    const { attrs } = control(html, 'cv_url');
+    expect(attr(attrs, 'aria-invalid')).toBe('true');
+    expect(text(byId(html, `${attr(attrs, 'id')}-error`)![3])).toBe(APPLY_MESSAGES.cvRequired);
+    expect(text(html)).toContain('1 thing needs fixing');
+    expect(text(html)).toContain(APPLY_MESSAGES.formChanged);
+    expect(attr(control(html, 'name').attrs, 'value')).toBe('Aisyah Rahman');
+    // Without a script the answer carries no such notice; the field and its problem are there all the same.
+    const posted = render(FORMS['CV only'], { errors: state.errors, values });
+    expect(text(byId(posted, 'apply-cv_url-error')![3])).toBe(APPLY_MESSAGES.cvRequired);
   });
 });
 

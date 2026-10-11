@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  APPLY_FIELDS, APPLY_LIMITS, APPLY_MESSAGES, EMPTY_APPLY_VALUES, applyProblems, fieldProblem,
-  firstName, isRequired, ringgitToSen, shownFields,
+  APPLY_FIELDS, APPLY_HONEYPOT, APPLY_LIMITS, APPLY_MESSAGES, EMPTY_APPLY_VALUES, applyProblems, fieldProblem,
+  firstName, isRequired, isStaleForm, ringgitToSen, shownFields,
 } from '@/lib/hire/application-fields';
 
 const OFF = { require_cv: false, require_cover_letter: false, ask_portfolio: false, ask_expected_salary: false };
@@ -93,5 +93,32 @@ describe('the words for a post that did not arrive', () => {
     expect(APPLY_MESSAGES.unreachable).toBe(
       "We couldn't reach the server, so we don't know whether your application was sent. Check your connection and try again.",
     );
+  });
+});
+
+describe('a form whose requirements changed while it was open', () => {
+  it('is stale when the answer has a problem with a field the form does not show', () => {
+    expect(isStaleForm({ cv_url: APPLY_MESSAGES.cvRequired }, shownFields(OFF))).toBe(true);
+    expect(isStaleForm({ email: APPLY_MESSAGES.email, cover_letter: APPLY_MESSAGES.coverLetterRequired }, shownFields(OFF))).toBe(true);
+    expect(isStaleForm({ expected_salary: APPLY_MESSAGES.salaryInvalid }, shownFields({ ...OFF, ask_portfolio: true }))).toBe(true);
+  });
+  it('is not stale when every problem is with a field the form shows, or there is none', () => {
+    expect(isStaleForm({}, shownFields(OFF))).toBe(false);
+    expect(isStaleForm({ name: APPLY_MESSAGES.name, consent: APPLY_MESSAGES.consent }, shownFields(OFF))).toBe(false);
+    expect(isStaleForm({ cv_url: APPLY_MESSAGES.cvRequired }, shownFields({ ...OFF, require_cv: true }))).toBe(false);
+    expect(isStaleForm(applyProblems({ ...EMPTY_APPLY_VALUES }, ALL), shownFields(ALL))).toBe(false);
+  });
+  it('does not count a field named with no message', () => {
+    expect(isStaleForm({ cv_url: undefined }, shownFields(OFF))).toBe(false);
+    expect(isStaleForm({ cv_url: '' }, shownFields(OFF))).toBe(false);
+  });
+  it('has its own words', () => {
+    expect(APPLY_MESSAGES.formChanged).toBe('This form has just changed. Please check the new fields below and send again.');
+  });
+});
+
+describe('the field no person sees', () => {
+  it('has the name the public lead form uses, which no browser fills in for a person', () => {
+    expect(APPLY_HONEYPOT).toBe('referral_code');
   });
 });
