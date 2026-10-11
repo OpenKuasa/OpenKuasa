@@ -9,6 +9,7 @@
  * instead of being answered from nothing.
  */
 
+import { streamErrorHandler } from '@/lib/ai/call-log';
 import { chatJson, prepareChat } from '@/lib/ai/chat-request';
 import { runKasturi } from '@/lib/ai/agents/orchestrator';
 import { getCurrentOrg } from '@/lib/auth/current-org';
@@ -46,9 +47,6 @@ export async function POST(request: Request) {
   );
 
   return result.toUIMessageStreamResponse({
-    onError: (error) => {
-      console.error('[ask-kasturi] stream error:', error);
-      return 'Kasturi ran into a problem. Please try again in a moment.';
-    },
+    onError: streamErrorHandler('ask-kasturi', 'Kasturi ran into a problem. Please try again in a moment.'),
   });
 }

@@ -42,6 +42,18 @@ export function modelErrorCode(error: unknown): { code: unknown } {
 }
 
 /**
+ * The `onError` of a chat route's stream: logs the tag and a code, and answers
+ * with the sentence the user is shown. Every chat route uses it, so none logs
+ * the error itself, which carries the chat and any file attached to it.
+ */
+export function streamErrorHandler(tag: string, message: string) {
+  return (error: unknown): string => {
+    console.error(`[${tag}] stream error:`, modelErrorCode(error));
+    return message;
+  };
+}
+
+/**
  * The `onError` for every model call. Without one the AI SDK logs the whole
  * error object, request body included.
  */

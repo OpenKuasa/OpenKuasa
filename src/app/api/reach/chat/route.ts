@@ -7,6 +7,7 @@
  * from `getReachData` (RLS-scoped Supabase in prod, seed in dev).
  */
 
+import { streamErrorHandler } from '@/lib/ai/call-log';
 import { prepareChat } from '@/lib/ai/chat-request';
 import { runJebat } from '@/lib/ai/agents/orchestrator';
 import { getCurrentOrg } from '@/lib/auth/current-org';
@@ -33,9 +34,6 @@ export async function POST(request: Request) {
   const result = runJebat(chat.messages, { data, write }, request.signal, chat.apiKey);
 
   return result.toUIMessageStreamResponse({
-    onError: (error) => {
-      console.error('[ask-jebat] stream error:', error);
-      return 'Jebat ran into a problem. Please try again in a moment.';
-    },
+    onError: streamErrorHandler('ask-jebat', 'Jebat ran into a problem. Please try again in a moment.'),
   });
 }
