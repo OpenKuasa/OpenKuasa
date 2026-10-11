@@ -37,6 +37,8 @@ the data layer, with unit tests; the client components only draw them.
 | `receipt-form.ts` | The payment-in form: which invoices can take a payment and how much (`receivableInvoices`), defaults, validation, what is sent. It has no scheduling |
 | `credit-note-form.ts` | The credit note form: which invoices can take a credit note and how much (`creditableInvoices`: posted, for the total less what is already credited), defaults, validation, what is sent. `creditNoteSavedNotIssued` words a credit note that was saved as a draft but not issued |
 | `refund-form.ts` | The refund form: what can be refunded and how much (`refundTargets`: an invoice whose customer is in credit, or one of its issued credit notes, less refunds that are pending), defaults, validation, what is sent |
+| `cash-book.ts` | Reading the cash book: one row per movement of money in (`listCashReceipts`, from the view `finance_cash_receipts`) and out (`listPaymentVouchers`, from `finance_payment_vouchers`), a page at a time, with the row types and the kinds a receipt and a voucher can be. It only reads |
+| `expenses.ts` | Reading expenses (`listExpenses`, from the view `finance_expense_totals`), a page at a time, with the row type, the three statuses a person sets and `paid`, which is only how an expense reads. It only reads |
 | `cash-book-views.ts` | KPI figures, chart data, table filters, status words and CSV rows for Cash Receipts, Payment Vouchers and Expenses; the period selector of the first two (`inPeriod`); which category a voucher counts under (`voucherCategory`) and which screen changes it (`voucherHome`) |
 | `csv.ts` | CSV text for Export: RFC 4180, a UTF-8 byte-order mark, and a guard against spreadsheet formulas |
 
@@ -213,8 +215,9 @@ bill that such payments already cover; Supplier Bills shows what is held under
 the bill's balance (`heldByBill`), for viewers too.
 
 Statuses of a transaction: `draft` (being written by a database function, or
-a cash receipt not yet posted), `pending_approval` (money out waiting for an
-owner or admin), `scheduled` (allowed to be paid, not yet money out), `posted`
+a cash receipt not yet posted), `pending_approval` (waiting for an owner or
+admin; the database functions put only money out there, though the guard
+lets any draft be submitted, money in included), `scheduled` (allowed to be paid, not yet money out), `posted`
 (paid or received; numbered `PV-0001` for money out and `RC-0001` for money
 in), `rejected` (refused by an owner or admin; final), `void`. A payment is
 always created as a draft: a direct INSERT with any other status is refused
@@ -282,8 +285,9 @@ approves or rejects it: a change of status and nothing else, and the database
 writes down who and when. Saved by an owner or admin
 (`finance_save_expense`), it is approved in the same call. An approved
 expense is locked; an owner or admin can still reject it while no payment
-stands against it. A rejected expense can be deleted, or edited, which puts
-it back to pending.
+stands against it. A rejected expense can be deleted, or edited, and the
+edit must itself set its status back to pending, as `finance_save_expense`
+does: an update that leaves it rejected is refused (`FIN01`).
 
 The view `finance_expense_totals` adds the category's and the vendor's name,
 `paid` (posted money out allocated to the expense), `held` (what payments not
@@ -345,20 +349,31 @@ themselves, so no caller gets round it.
   after it.
 
 **Who writes `approved_by` and `approved_at`.** The guards do, and nobody
-else. On a payment they are written in three cases: when an owner or admin
-approves a waiting payment, when one of them rejects a payment, and when one
-of them schedules, pays or raises money out that is above its split. On an
+else. On a payment they are written in four cases: when an owner or admin
+approves a waiting payment, when one of them rejects a payment, when one of
+them schedules or pays money out that is above its split, and when one of
+them changes a scheduled payment that nobody approved so that it is then
+money out above its split, which is what raising its amount or turning
+scheduled money in into money out does. On an
 expense they are written when an owner or admin approves or rejects it. In
-each case the guard writes the caller's own id and the time of the update. An
-update from a signed-in person that changes either column by hand is refused
-with `FIN14`, whoever sends it and whatever else it changes: an editor cannot
+each case, when the caller is a signed-in person, the guard writes the
+caller's own id and the time of the update; for a session with no signed-in
+user it leaves `approved_by` as it is and keeps an `approved_at` that was
+given, writing the time only when none was. An
+update from a signed-in person that changes either column by hand is
+refused, whoever sends it and whatever else it changes. The code is `FIN14`
+unless an earlier rule of the guard refuses the update first, as `FIN09`
+does on a posted or void payment and `FIN01` on an approved or rejected
+expense whose status is left as it was. So an editor cannot
 fill them in on a draft, an owner cannot back-date an approval, and nobody
 approves in another person's name. An INSERT that carries them has them
 cleared, on a payment and on an expense. This matters because the rules above
 ask "was this approved" by reading `approved_at`; if a caller could write it,
 the payment's own maker could approve it.
 
-The two columns are cleared in one other way. `approved_by`, like
+The two columns are cleared in two other ways. The first is on an expense:
+when a rejected expense goes back to pending, the guard clears both. The
+second is a deleted user. `approved_by`, like
 `created_by`, points at a user, and its foreign key sets it to null when that
 user is deleted. The guards let that update through whatever the status of
 the row, in three cases only. The first is an update made from inside another
@@ -371,8 +386,10 @@ signed-in user. The third is an update that changes nothing at all. A
 signed-in person who blanks `approved_by` or
 `created_by` by hand meets the ordinary rules: `FIN09` on a posted or void
 payment, `FIN14` on an approved or waiting one, `FIN01` on an approved or
-rejected expense. `approved_at` is never cleared this way, so a row keeps the
-fact and the time of its approval after its approver is gone.
+rejected expense. `approved_at` is never cleared by the foreign key, so a row
+keeps the fact and the time of its approval after its approver is gone. An
+expense loses them in the first way, when it was rejected and goes back to
+pending.
 
 **What approval does not reach yet.** A payment to a supplier recorded on
 Payments Out and a refund recorded on Refunds are exactly their split, so the
@@ -648,8 +665,11 @@ Triggers enforce it, so no caller can get round it:
 - A payment starts as a draft (`FIN09`), and the approval rules above hold
   whichever way a status is changed.
 - Changing a payment's split locks the payment. The guard on allocations
-  reads the payment's row with a share lock before it looks at anything else,
-  on insert, update and delete, and keeps it until the transaction ends. The
+  reads the payment's row with a share lock on insert, update and delete, and
+  keeps it until the transaction ends. Only two tests come before that read:
+  whether the workspace itself is being deleted, in which case the guard
+  steps aside, and whether the update changes `org_id`, which is refused
+  (`FIN09`). The
   guard on payments runs with the payment's row already locked by its own
   update, and reads the split. So a change to a payment (paid, scheduled,
   submitted, approved, lowered) and a change to its split cannot both go
@@ -751,8 +771,8 @@ quotation, a credit note or a refund by the file that made the call.
 | `FIN11` | The bill, invoice, quotation, credit note or payment no longer exists. `finance_post_invoice`, `finance_send_quotation`, `finance_convert_quotation` and `finance_issue_credit_note` also answer this to a viewer: each locks its row first, and a viewer may not, so to them it is not there |
 | `FIN12` | The invoice has a credit note that is a draft or issued, so it cannot be voided. `invoices.ts` words it: "This invoice has credit notes. Void them on Credit Notes, or delete the drafts, before voiding it." |
 | `FIN13` | The quotation already has an invoice that is not void: it cannot be converted again, and its answer can no longer change. `quotations.ts` words it |
-| `FIN14` | Approval. Only an owner or admin approves or rejects an expense or a payment; a payment is submitted for approval only from a draft and rejected only before it is approved; money out that settles no document needs one of them before it is scheduled or paid; a payment waiting for approval, or rejected, cannot be changed; a rejected payment is final; an approved payment is paid as it was approved, with nothing but its status, number and date changing. Also: `approved_by` and `approved_at` on a payment or an expense are written by the database, and an update from a signed-in person that changes either by hand is this code; a scheduled payment out that nobody approved cannot be raised above its split, or made from scheduled money in, by someone who is not an owner or admin, and its split cannot be deleted or lowered below the payment by any signed-in person. Nothing in the app meets it yet |
-| `FIN15` | A receipt, a voucher or an expense names the wrong thing: a receipt is for invoices or for an income category, a voucher for expenses or for an expense category, never both and never neither; an expense needs an expense category of its own workspace. Nothing in the app meets it yet |
+| `FIN14` | Approval. Only an owner or admin approves or rejects an expense or a payment; a payment is submitted for approval only from a draft and rejected only before it is approved; money out that settles no document needs one of them before it is scheduled or paid; a payment waiting for approval, or rejected, cannot be changed; a rejected payment is final; an approved payment is paid as it was approved, with nothing but its status, number and date changing. Also: `approved_by` and `approved_at` on a payment or an expense are written by the database, and an update from a signed-in person that changes either by hand is this code, unless an earlier rule refuses it first (`FIN09` on a posted or void payment, `FIN01` on an approved or rejected expense whose status is left as it was); a scheduled payment out that nobody approved cannot be raised above its split, or made from scheduled money in, by someone who is not an owner or admin, and its split cannot be deleted or lowered below the payment by any signed-in person. Nothing in the app meets it yet |
+| `FIN15` | A receipt, a voucher or an expense names the wrong thing: a receipt is for invoices or for an income category, a voucher for expenses or for an expense category, never both and never neither; a receipt for invoices that is being posted must be exactly its split and carry no category; an expense needs an expense category of its own workspace. Nothing in the app meets it yet |
 | `42501` | Row-level security refused the write: "You do not have permission to make changes here." |
 | `22003` | A number does not fit its column (quantity × unit price can overflow): "That amount is too large." |
 | `22023` | `finance_record_refund` was given a status other than `posted` or `scheduled`. The app always sends one of the two, so only a direct call reaches it; `refunds.ts` has no sentence for it. |
@@ -820,7 +840,7 @@ is not the caller's to change. `22023`: `finance_record_voucher` was given a
 status other than `posted` or `scheduled`. `23514`: an expense with both a
 contact and a typed vendor or neither, with more SST than its amount, or of
 nothing; a payment with both a contact and a typed name. `23503`: an expense
-that a voided payment still names cannot be deleted. For these cases none of
+that a voided or rejected payment still names cannot be deleted. For these cases none of
 the codes has a sentence yet: the files that word them arrive with the forms.
 
 ## Known limits
@@ -1073,8 +1093,9 @@ the codes has a sentence yet: the files that word them arrive with the forms.
   top. An expense has one category and no lines.
 - An approved expense cannot be edited. An owner or admin rejects it, while
   nothing has been paid against it, and it is then edited back to pending.
-- An expense that a voided payment still names cannot be deleted: the voided
-  payment keeps its split as a record.
+- An expense that a voided or rejected payment still names cannot be deleted:
+  the voided payment keeps its split as a record, and a rejected one keeps
+  its split until it is deleted.
 - An expense can be paid in parts; it reads Approved until posted money out
   covers it. One voucher can pay several expenses, and they need not share a
   vendor: who is paid is what the voucher says.
