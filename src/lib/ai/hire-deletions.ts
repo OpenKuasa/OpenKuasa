@@ -64,8 +64,9 @@ export function oneDeletionRefusal(preparedHere: number, deletionsThisTurn: numb
   return preparedHere > 0 || deletionsThisTurn > 0 ? ONE_DELETION : null;
 }
 
-type Part = { type?: unknown; toolName?: unknown; toolCallId?: unknown; input?: unknown; output?: unknown };
-const partsOf = (message: ModelMessage): Part[] =>
+export type MessagePart = { type?: unknown; toolName?: unknown; toolCallId?: unknown; input?: unknown; output?: unknown };
+type Part = MessagePart;
+export const partsOf = (message: ModelMessage): Part[] =>
   Array.isArray(message.content) ? (message.content as unknown as Part[]) : [];
 
 /**
@@ -73,7 +74,7 @@ const partsOf = (message: ModelMessage): Part[] =>
  * the assistant fetched also sits in a user message (see `withHeldCvs`), in
  * the middle of a turn: that one is not the user speaking.
  */
-function thisTurn(messages: readonly ModelMessage[]): ModelMessage[] {
+export function thisTurn(messages: readonly ModelMessage[]): ModelMessage[] {
   let from = 0;
   messages.forEach((message, index) => {
     if (message.role === 'user' && !isHeldCvMessage(message)) from = index + 1;
@@ -89,7 +90,7 @@ function thisTurn(messages: readonly ModelMessage[]): ModelMessage[] {
  * Known by its reason, which is all that comes back in every form: in the same
  * request as `execution-denied`, from the browser as `error-text`.
  */
-function deniedHere(turn: readonly ModelMessage[]): Set<unknown> {
+export function deniedHere(turn: readonly ModelMessage[]): Set<unknown> {
   const ids = new Set<unknown>();
   for (const message of turn) {
     if (message.role !== 'tool') continue;
@@ -172,7 +173,7 @@ export type DeletionGate = (input: unknown, options: { toolCallId: string; messa
  * that call is let through again and is then that request's one.
  */
 export function guardDeletions(
-  approval: Record<string, 'user-approval'> | undefined,
+  approval: Record<string, 'user-approval' | DeletionGate> | undefined,
 ): Record<string, 'user-approval' | DeletionGate> | undefined {
   if (!approval) return undefined;
   const names = HIRE_DELETE_TOOL_NAMES.filter((name) => name in approval);

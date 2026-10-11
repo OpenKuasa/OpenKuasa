@@ -41,6 +41,8 @@ export type Delegation = {
   proposals: Proposal[];
   /** Names of the rows it came across, so a later change can be worded with them. */
   names?: KnownNames;
+  /** Ids a lookup of its returned while saying the name fits several rows: held back from deletion for the rest of the turn. */
+  ambiguous?: string[];
 };
 
 function isProposal(value: unknown): value is Proposal {

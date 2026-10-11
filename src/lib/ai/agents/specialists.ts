@@ -15,6 +15,7 @@ import {
   streamText,
   tool,
   type LanguageModel,
+  type ModelMessage,
   type Tool,
   type ToolSet,
 } from 'ai';
@@ -25,8 +26,13 @@ import {
   AMBIGUOUS_DELETION,
   HIRE_DELETE_TOOL_NAMES,
   ambiguousLookup,
+  ONE_DELETION,
+  deniedHere,
   notLookedUp,
   oneDeletionRefusal,
+  partsOf,
+  thisTurn,
+  type DeletionGate,
 } from '@/lib/ai/hire-deletions';
 import type { ProductToolkit } from '@/lib/ai/products';
 import { logModelCall, logModelError, modelErrorCode } from '@/lib/ai/call-log';
@@ -90,9 +96,16 @@ const ONE_CANDIDATE_CHANGE = 'One candidate change at a time. One is already pre
 
 /** The two deletions: one a turn, across every delegation in it, and never from a lookup that said several rows match. */
 const DELETIONS = new Set<string>(HIRE_DELETE_TOOL_NAMES);
-/** What one request (one turn of the conversation) has prepared so far. Made once per request by createTeamTools. */
+/**
+ * What the turn in progress holds, for the two rules about a deletion. A turn is everything after the last thing
+ * the user said, and can span two requests (the one that shows a card, and the one with the user's answer). So
+ * this is read from the conversation's messages when a request starts, and added to as the request goes.
+ */
 type TurnState = {
-  deletions: number;
+  /** Deletions a specialist prepared in this turn, by proposal id. */
+  prepared: Set<string>;
+  /** Deletions put in front of the user in this turn, whatever they answered: proposal id, and the call that asked. */
+  shown: Map<string, unknown>;
   /**
    * Every id a lookup returned while saying its name fits several rows, whichever delegation ran it. A later
    * delegation that looks the same person up by a fuller name must not get past the question the user was owed.
@@ -107,6 +120,59 @@ export function idsIn(value: unknown, depth = 0): string[] {
   if (typeof value === 'string') return UUID.test(value) ? [value] : [];
   if (!value || typeof value !== 'object' || depth > 4) return [];
   return Object.values(value).flatMap((inner) => idsIn(inner, depth + 1));
+}
+
+/** Every id that a lookup among these returned while saying its name fits several rows. */
+function ambiguousIn(results: ToolResult[]): string[] {
+  return [...new Set(results.flatMap((r) => idsIn(r.output).filter((id) => ambiguousLookup([r.output], id))))];
+}
+
+const isDeletionProposal = (proposal: Proposal | undefined): proposal is Proposal => !!proposal && DELETIONS.has(proposal.action);
+
+/**
+ * The turn's state as a request finds it. The browser sends the chat back whole, so the turn's earlier request is
+ * in these messages: what a specialist reported (its prepared changes and its ambiguous lookups), and each
+ * `applyChange` call. A call the gate itself denied was never shown to the user and is not counted.
+ */
+function turnStateFrom(messages: readonly ModelMessage[], proposals: Map<string, Proposal>): TurnState {
+  const state: TurnState = { prepared: new Set(), shown: new Map(), ambiguous: new Set() };
+  const turn = thisTurn(messages);
+  const denied = deniedHere(turn);
+  for (const message of turn) {
+    for (const part of partsOf(message)) {
+      if (message.role === 'tool' && part.type === 'tool-result' && typeof part.toolName === 'string' && part.toolName.startsWith(ASK_PREFIX)) {
+        const output = part.output as { type?: unknown; value?: unknown } | null | undefined;
+        const report = output?.type === 'json' ? output.value : null;
+        if (!isDelegation(report)) continue;
+        for (const proposal of report.proposals) if (isDeletionProposal(proposal)) state.prepared.add(proposal.id);
+        for (const id of Array.isArray(report.ambiguous) ? report.ambiguous : []) if (typeof id === 'string') state.ambiguous.add(id);
+      } else if (message.role === 'assistant' && part.type === 'tool-call' && part.toolName === APPLY_TOOL && !denied.has(part.toolCallId)) {
+        const id = (part.input as { proposalId?: unknown } | null | undefined)?.proposalId;
+        if (typeof id === 'string' && isDeletionProposal(proposals.get(id))) state.shown.set(id, part.toolCallId);
+      }
+    }
+  }
+  return state;
+}
+
+/**
+ * The approval for `applyChange`: a card for the user, except a deletion beside another deletion of the same turn,
+ * which is denied before a card exists. "Another" is one a specialist prepared in this turn or one already put to
+ * the user in it, under a different proposal; the same proposal asked for again under a new call is another too.
+ * The SDK asks again about a call the user approved, when their answer arrives: same proposal, same call, so it passes.
+ */
+function applyGate(team: TeamContext, turn: TurnState): DeletionGate {
+  return (input, { toolCallId }) => {
+    const id = (input as { proposalId?: unknown } | null)?.proposalId;
+    const proposal = typeof id === 'string' ? team.proposals.get(id) : undefined;
+    if (!isDeletionProposal(proposal)) return 'user-approval';
+    const another =
+      [...turn.prepared, ...turn.shown.keys()].some((other) => other !== proposal.id) ||
+      (turn.shown.has(proposal.id) && turn.shown.get(proposal.id) !== toolCallId);
+    if (another) return { type: 'denied', reason: ONE_DELETION };
+    turn.shown.set(proposal.id, toolCallId);
+    return 'user-approval';
+  };
 }
 
 /**
@@ -132,7 +198,7 @@ function specialistTools(
       execute: async (input: unknown, options: unknown) => {
         const output = await run?.(input, options);
         results.push({ tool: name, output });
-        for (const id of idsIn(output)) if (ambiguousLookup([output], id)) turn.ambiguous.add(id);
+        for (const id of ambiguousIn([{ tool: name, output }])) turn.ambiguous.add(id);
         return output;
       },
     } as Tool;
@@ -154,7 +220,7 @@ function specialistTools(
           return { prepared: false, error: ONE_CANDIDATE_CHANGE };
         }
         if (DELETIONS.has(name)) {
-          const refusal = oneDeletionRefusal(prepared.length, turn.deletions);
+          const refusal = oneDeletionRefusal(prepared.length, turn.prepared.size + turn.shown.size);
           if (refusal) return { prepared: false, error: refusal };
         }
         // An id must have come from somewhere: a lookup just now, an earlier
@@ -225,7 +291,7 @@ function specialistTools(
         };
         team.proposals.set(proposal.id, proposal);
         prepared.push(proposal);
-        if (DELETIONS.has(name)) turn.deletions += 1;
+        if (DELETIONS.has(name)) turn.prepared.add(proposal.id);
         return { prepared: true, proposalId: proposal.id, card: proposal.title };
       },
     });
@@ -260,6 +326,7 @@ function askTool(product: ProductToolkit, team: TeamContext, turn: TurnState): T
             : `Prepared: ${prepared.map((p) => p.title).join(' ')}`,
         proposals: [...prepared],
         ...(status === 'working' ? {} : { names: collectNames(results) }),
+        ...(status !== 'working' && ambiguousIn(results).length > 0 && { ambiguous: ambiguousIn(results) }),
       });
 
       const given =
@@ -418,15 +485,17 @@ export function changeToApply(step: StepLike | undefined): Proposal | null {
 export function createTeamTools(
   products: ProductToolkit[],
   team: TeamContext,
+  /** The conversation as this request received it: the turn in progress is read from it. */
+  messages: readonly ModelMessage[] = [],
 ): {
   tools: ToolSet;
-  toolApproval: Record<string, 'user-approval'> | undefined;
+  toolApproval: Record<string, 'user-approval' | DeletionGate> | undefined;
   /** Chooses the model for a step: the scripted one when a single change is ready to apply. */
   prepareStep?: (options: { steps: StepLike[] }) => { model: LanguageModel } | undefined;
 } {
   const tools: ToolSet = {};
-  // One request is one turn: every specialist asked in it shares this count.
-  const turn: TurnState = { deletions: 0, ambiguous: new Set() };
+  // Every specialist asked in this request, and applyChange, share what the turn holds.
+  const turn = turnStateFrom(messages, team.proposals);
   for (const product of products) {
     tools[`${ASK_PREFIX}${product.name}`] = askTool(product, team, turn);
   }
@@ -446,7 +515,12 @@ export function createTeamTools(
   });
   return {
     tools,
-    toolApproval: { [APPLY_TOOL]: 'user-approval' },
+    // Only a team that can prepare a deletion needs the gate; any other keeps the plain card.
+    toolApproval: {
+      [APPLY_TOOL]: products.some((p) => Object.keys(p.write).some((name) => DELETIONS.has(name)))
+        ? applyGate(team, turn)
+        : 'user-approval',
+    },
     prepareStep: ({ steps }) => {
       const proposal = changeToApply(steps[steps.length - 1]);
       return proposal ? { model: applyStep(proposal.id) } : undefined;

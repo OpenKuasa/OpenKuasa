@@ -113,6 +113,7 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
 
 const { runLekir, runTuah } = await import('@/lib/ai/agents/orchestrator');
 const { createTeamTools } = await import('@/lib/ai/agents/specialists');
+const { namesIn, proposalsIn } = await import('@/lib/chat/delegation');
 const { combineToolkits, hireProduct, reachProduct } = await import('@/lib/ai/products');
 const { TUAH_SYSTEM, tuahTeamSystem, subAgentSystem } = await import('@/lib/ai/agents/prompts');
 
@@ -231,7 +232,10 @@ describe('Tuah’s team changing a job', () => {
       transcript: '',
       proposals: context.proposals,
     });
-    expect(toolApproval).toEqual({ applyChange: 'user-approval' });
+    // A team that can prepare a deletion asks through a gate; for a change that is not a deletion it answers as before.
+    expect(Object.keys(toolApproval!)).toEqual(['applyChange']);
+    expect(await (toolApproval!.applyChange as (i: unknown, o: unknown) => unknown)({ proposalId: proposal.id }, { toolCallId: 't', messages: [] }))
+      .toBe('user-approval');
     const apply = tools.applyChange as unknown as { execute: (i: unknown, o: unknown) => Promise<unknown> };
     const out = await apply.execute({ proposalId: proposal.id }, { toolCallId: 't', messages: [] });
 
@@ -1059,5 +1063,204 @@ describe('one agent holding the delete tools', () => {
     await runLekir(asked, { ...hire(), write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: false } }).consumeStream();
     expect(seen.calls[0].tools).not.toContain('deleteCandidate');
     expect(seen.calls[0].tools).not.toContain('deleteApplication');
+  });
+});
+
+// The browser keeps the chat and sends all of it with each request; a turn that has an approval in it is two
+// requests. These run each request as the route does: the chat is turned into model messages by the SDK, the answer
+// is read back as the browser reads it, and the user's yes or no is written on the part the way the chat does.
+describe('one deletion a turn, as the browser carries the turn between requests', () => {
+  type UI = import('ai').UIMessage;
+  type Model = import('ai').ModelMessage;
+  type ToolPart = { type: string; state?: string; toolCallId?: string; input?: unknown; approval?: { id: string; approved?: boolean; reason?: string; isAutomatic?: boolean } };
+  const A = '11111111-1111-4111-8111-111111111111';
+  const B = '22222222-2222-4222-8222-222222222222';
+  const ONE_DELETION = 'One deletion at a time. One is already prepared for approval.';
+  const removed = { ok: true, data: { id: A, name: 'Aisyah Lim', job: null, applications: 0, interviews: 0, cv_files: 0, message: 'Deleted Aisyah Lim.' } };
+  const say = (id: string, text: string): UI => ({ id, role: 'user', parts: [{ type: 'text', text }] });
+  /** Two candidates with real ids and names nobody else in the seed has. */
+  const access = () => {
+    const base = hire().data;
+    const listCandidates = async () =>
+      (await base.listCandidates())
+        .filter((c, n) => n < 2 || !c.name.includes('Aisyah'))
+        .map((c, n) => (n === 0 ? { ...c, id: A, name: 'Aisyah Lim' } : n === 1 ? { ...c, id: B, name: 'Aisyah binti Karim' } : c));
+    return { data: { ...base, listCandidates }, write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true } };
+  };
+  type Runner = (messages: Model[], chat: UI[]) => { toUIMessageStream: () => ReadableStream<unknown> };
+  const asTeam: Runner = (messages, chat) =>
+    runTuah(messages, reach(), undefined, undefined, null, null, { transcript: '', proposals: proposalsIn(chat), names: namesIn(chat) }, access());
+  const alone: Runner = (messages) => runTuah(messages, reach(), undefined, undefined, null, null, null, access());
+  /** One request, and the chat as the browser holds it afterwards. */
+  const exchange = async (chat: UI[], run: Runner): Promise<UI[]> => {
+    const { convertToModelMessages, readUIMessageStream } = await import('ai');
+    const last = chat[chat.length - 1];
+    const paused = last.role === 'assistant' ? structuredClone(last) : undefined;
+    seen.calls = [];
+    const result = run(await convertToModelMessages(chat), chat);
+    let answer: UI | undefined;
+    for await (const message of readUIMessageStream({ message: paused, stream: result.toUIMessageStream() as never })) answer = message as UI;
+    return paused ? [...chat.slice(0, -1), answer!] : [...chat, answer!];
+  };
+  const toolParts = (chat: UI[]) => chat.flatMap((m) => m.parts as unknown as ToolPart[]).filter((p) => p.type.startsWith('tool-'));
+  /** The cards waiting for the user. */
+  const waiting = (chat: UI[]) => toolParts(chat).filter((p) => p.state === 'approval-requested' && !p.approval?.isAutomatic);
+  /** The chat after the user answered its one waiting card. */
+  const decide = (chat: UI[], approved: boolean): UI[] => {
+    const next = structuredClone(chat);
+    const [card] = waiting(next);
+    card.state = 'approval-responded';
+    card.approval = { ...card.approval!, approved };
+    return next;
+  };
+
+  it('one agent: the browser\'s form of a denied second deletion does not stop the first card being approved', async () => {
+    candidateDeleted.mockReset();
+    candidateDeleted.mockResolvedValue(removed);
+    seen.singleScript = [
+      [{ tool: 'listCandidates', input: {} }],
+      [{ tool: 'deleteCandidate', input: { id: A } }, { tool: 'deleteCandidate', input: { id: B } }],
+    ];
+    try {
+      const shown = await exchange([say('u1', 'Delete Aisyah Lim and Aisyah binti Karim')], alone);
+      expect(waiting(shown)).toHaveLength(1);
+      expect(waiting(shown)[0]).toMatchObject({ type: 'tool-deleteCandidate', input: { id: A } });
+      // The second call reached the browser as a denial of the gate's, with its reason.
+      const denied = toolParts(shown).filter((p) => p.state === 'output-denied');
+      expect(denied).toHaveLength(1);
+      expect(denied[0]).toMatchObject({ input: { id: B }, approval: { approved: false, reason: ONE_DELETION, isAutomatic: true } });
+      // What the server is sent next holds that denial as an error text, not as the SDK wrote it in the first request.
+      const { convertToModelMessages } = await import('ai');
+      const sent = JSON.stringify(await convertToModelMessages(decide(shown, true)));
+      expect(sent).toContain(`{"type":"error-text","value":"${ONE_DELETION}"}`);
+      // The model, after the deletion ran, asks for the other one again in the same turn.
+      seen.singleScript = [[{ tool: 'deleteCandidate', input: { id: B } }]];
+      const after = await exchange(decide(shown, true), alone);
+      expect(candidateDeleted).toHaveBeenCalledTimes(1);
+      expect(candidateDeleted.mock.calls[0][1]).toEqual({ id: A });
+      expect(waiting(after)).toEqual([]);
+    } finally {
+      seen.singleScript = null;
+    }
+  });
+
+  it('team: after an approval, a second deletion in the same turn is refused and no card is shown; the next message allows one', async () => {
+    candidateDeleted.mockReset();
+    candidateDeleted.mockResolvedValue(removed);
+    seen.refusals = [];
+    seen.workerStep = 0;
+    seen.workerScript = [
+      { tool: 'listCandidates', input: { name: 'Aisyah Lim' } },
+      { tool: 'deleteCandidate', input: { id: A } },
+      // The request that carries the approval: Tuah asks Lekir again, for the other person.
+      { tool: 'listCandidates', input: {} },
+      { tool: 'deleteCandidate', input: { id: B } },
+    ];
+    try {
+      const shown = await exchange([say('u1', 'Delete Aisyah Lim and Aisyah binti Karim')], asTeam);
+      expect(waiting(shown)).toHaveLength(1);
+      expect(waiting(shown)[0].type).toBe('tool-applyChange');
+      expect(candidateDeleted).not.toHaveBeenCalled();
+
+      const after = await exchange(decide(shown, true), asTeam);
+      expect(candidateDeleted).toHaveBeenCalledTimes(1);
+      expect(candidateDeleted.mock.calls[0][1]).toEqual({ id: A });
+      expect(waiting(after)).toEqual([]);
+      expect(seen.refusals.length).toBeGreaterThan(0);
+      for (const refusal of seen.refusals) expect(refusal).toBe(ONE_DELETION);
+      // Nothing was prepared for the other person.
+      expect([...proposalsIn(after).values()].map((p) => p.input)).toEqual([{ id: A }]);
+
+      // The user speaks again: a new turn, with one deletion of its own.
+      seen.workerStep = 0;
+      seen.workerScript = [{ tool: 'listCandidates', input: {} }, { tool: 'deleteCandidate', input: { id: B } }];
+      const next = await exchange([...after, say('u2', 'Now delete Aisyah binti Karim')], asTeam);
+      expect(waiting(next)).toHaveLength(1);
+      const proposalId = (waiting(next)[0].input as { proposalId: string }).proposalId;
+      expect(proposalsIn(next).get(proposalId)).toMatchObject({ action: 'deleteCandidate', input: { id: B } });
+      expect(candidateDeleted).toHaveBeenCalledTimes(1);
+    } finally {
+      seen.workerScript = null;
+    }
+  });
+
+  it('team: a rejected deletion still counts as the turn\'s one', async () => {
+    candidateDeleted.mockReset();
+    seen.refusals = [];
+    seen.workerStep = 0;
+    seen.workerScript = [
+      { tool: 'listCandidates', input: { name: 'Aisyah Lim' } },
+      { tool: 'deleteCandidate', input: { id: A } },
+      { tool: 'listCandidates', input: {} },
+      { tool: 'deleteCandidate', input: { id: B } },
+    ];
+    try {
+      const shown = await exchange([say('u1', 'Delete Aisyah Lim and Aisyah binti Karim')], asTeam);
+      const after = await exchange(decide(shown, false), asTeam);
+      expect(waiting(after)).toEqual([]);
+      expect(seen.refusals.length).toBeGreaterThan(0);
+      for (const refusal of seen.refusals) expect(refusal).toBe(ONE_DELETION);
+      expect(candidateDeleted).not.toHaveBeenCalled();
+    } finally {
+      seen.workerScript = null;
+    }
+  });
+
+  describe('applyChange, asked about a deletion a specialist prepared', () => {
+    type Gate = (input: unknown, options: { toolCallId: string; messages: Model[] }) => unknown;
+    const deletion = (id: string, row: string) =>
+      ({ id, product: 'hire', action: 'deleteCandidate', input: { id: row }, title: 'Delete candidate?', detail: null });
+    const edit = { id: 'p-edit', product: 'hire', action: 'updateCandidate', input: { id: A, location: 'Klang' }, title: 'Save?', detail: null };
+    const older = deletion('p-old', A);
+    const newer = deletion('p-new', B);
+    const report = (toolCallId: string, proposals: unknown[]): Model =>
+      ({ role: 'tool', content: [{ type: 'tool-result', toolCallId, toolName: 'askLekir', output: { type: 'json', value: { agent: 'Lekir', product: 'hire', status: 'done', steps: [], answer: '', proposals } } }] }) as Model;
+    const applied = (toolCallId: string, proposalId: string): Model =>
+      ({ role: 'assistant', content: [{ type: 'tool-call', toolCallId, toolName: 'applyChange', input: { proposalId } }] }) as Model;
+    const user = (text: string): Model => ({ role: 'user', content: text });
+    const gateFor = (messages: Model[]) => {
+      const proposals = new Map([older, newer, edit].map((p) => [p.id, p]));
+      const made = createTeamTools([hireProduct(access())], { transcript: '', proposals, names: {} }, messages);
+      return (input: unknown, toolCallId: string) => (made.toolApproval!.applyChange as Gate)(input, { toolCallId, messages });
+    };
+    const DENIED = { type: 'denied', reason: ONE_DELETION };
+
+    it('asks the user about the turn\'s first deletion, and about any change that is not a deletion', async () => {
+      const gate = gateFor([user('Delete Aisyah Lim'), report('t1', [newer])]);
+      expect(await gate({ proposalId: 'p-edit' }, 'c0')).toBe('user-approval');
+      expect(await gate({ proposalId: 'p-new' }, 'c1')).toBe('user-approval');
+      expect(await gate({ proposalId: 'p-edit' }, 'c2')).toBe('user-approval');
+    });
+    it('denies an older deletion beside one prepared in this turn, in either order', async () => {
+      const turn = [user('Delete Aisyah Lim'), report('t0', [older]), user('And the other'), report('t1', [newer])];
+      expect(await gateFor(turn)({ proposalId: 'p-old' }, 'c1')).toEqual(DENIED);
+      const gate = gateFor(turn);
+      expect(await gate({ proposalId: 'p-new' }, 'c1')).toBe('user-approval');
+      expect(await gate({ proposalId: 'p-old' }, 'c2')).toEqual(DENIED);
+    });
+    it('denies a second deletion in one request when neither was prepared in this turn', async () => {
+      const gate = gateFor([user('x'), report('t0', [older, newer]), user('Do both now')]);
+      expect(await gate({ proposalId: 'p-old' }, 'c1')).toBe('user-approval');
+      expect(await gate({ proposalId: 'p-new' }, 'c2')).toEqual(DENIED);
+    });
+    it('denies a deletion after another was put to the user earlier in the turn, whatever they answered', async () => {
+      const turn = [user('x'), report('t0', [older, newer]), user('Do both now'), applied('c1', 'p-old')];
+      expect(await gateFor(turn)({ proposalId: 'p-new' }, 'c2')).toEqual(DENIED);
+      // The same card asked about again by the SDK, when the user's answer arrives: itself, so it passes.
+      expect(await gateFor(turn)({ proposalId: 'p-old' }, 'c1')).toBe('user-approval');
+      // The same deletion asked for a second time under another call is not itself.
+      expect(await gateFor(turn)({ proposalId: 'p-old' }, 'c9')).toEqual(DENIED);
+    });
+    it('does not count a call this gate denied', async () => {
+      const turn = [
+        user('x'), report('t0', [older, newer]), user('Do both now'), applied('c1', 'p-old'), applied('c2', 'p-new'),
+        { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'c2', toolName: 'applyChange', output: { type: 'error-text', value: ONE_DELETION } }] } as Model,
+      ];
+      expect(await gateFor(turn)({ proposalId: 'p-old' }, 'c1')).toBe('user-approval');
+    });
+    it('starts again once the user has spoken', async () => {
+      const turn = [user('x'), report('t0', [older, newer]), user('Delete the first'), applied('c1', 'p-old'), user('Now the second')];
+      expect(await gateFor(turn)({ proposalId: 'p-new' }, 'c2')).toBe('user-approval');
+    });
   });
 });

@@ -195,7 +195,7 @@ export function runTuah(
     ...(crm ? [crmProduct(crm)] : []),
     ...(hire ? [hireProduct(hire)] : []),
   ];
-  const teamTools = team ? createTeamTools(products, { ...team, apiKey }) : null;
+  const teamTools = team ? createTeamTools(products, { ...team, apiKey }, messages) : null;
   const { tools, toolApproval } = teamTools ?? combineToolkits(products);
   const system = team
     ? tuahTeamSystem(
