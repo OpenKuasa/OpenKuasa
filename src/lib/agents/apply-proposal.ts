@@ -56,6 +56,11 @@ export async function runProposalAction(
   const found = ALLOWED_ACTIONS[action];
   const parsed = found.schema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'That proposed change is no longer valid.' };
-  const res = await found.run(ctx, parsed.data);
+  let res: Awaited<ReturnType<typeof found.run>>;
+  try {
+    res = await found.run(ctx, parsed.data);
+  } catch {
+    return { ok: false, error: 'That change could not be applied.' };
+  }
   return res.ok ? { ok: true, result: res.data } : { ok: false, error: res.error };
 }

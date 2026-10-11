@@ -22,9 +22,14 @@ export function PendingApprovals({
     setError(null);
     setBusyId(id);
     start(async () => {
-      const res = await p;
-      if (!res.ok) setError(res.error ?? 'Something went wrong.');
-      setBusyId(null);
+      try {
+        const res = await p;
+        if (!res.ok) setError(res.error ?? 'Something went wrong.');
+      } catch {
+        setError('Something went wrong.');
+      } finally {
+        setBusyId(null);
+      }
     });
   }
 

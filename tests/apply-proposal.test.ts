@@ -79,6 +79,13 @@ describe('runProposalAction', () => {
     const res = await runProposalAction(ctx, 'promoteLeadToContact', { id });
     expect(res).toEqual({ ok: false, error: 'That lead was not found.' });
   });
+
+  it('catches a capability that throws and returns ok:false', async () => {
+    (promoteLeadToContact as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('network boom'));
+    const id = '55555555-5555-4555-8555-555555555555';
+    const res = await runProposalAction(ctx, 'promoteLeadToContact', { id });
+    expect(res.ok).toBe(false);
+  });
 });
 
 const ID = '44444444-4444-4444-8444-444444444444';
@@ -126,6 +133,13 @@ describe('applyProposalAction', () => {
     expect(updates[0].patch).toMatchObject({ status: 'approved' });
     expect(updates[1].patch).toMatchObject({ status: 'failed', result: { error: 'That lead was not found.' } });
     expect(updates[1].chain).toEqual(['eq', 'eq']);
+  });
+  it('flips approved to failed when the capability throws after the claim', async () => {
+    (promoteLeadToContact as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('network boom'));
+    const res = await applyProposalAction({ id: ID });
+    expect(res.ok).toBe(false);
+    expect(updates).toHaveLength(2);
+    expect(updates[1].patch).toMatchObject({ status: 'failed' });
   });
 });
 
