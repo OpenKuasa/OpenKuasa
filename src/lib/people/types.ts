@@ -200,6 +200,8 @@ export type PayslipLine = {
   source: PayslipLineSource;
   label: string;
   amount_cents: number;
+  /** An overtime line: the day the work was done. Null (or absent) for every other line. */
+  work_date?: string | null;
 };
 export type StatutoryField = 'epf' | 'socso' | 'eis' | 'pcb';
 
@@ -364,7 +366,8 @@ export type PeopleData = {
   listShifts(fromDate: string, toDate: string): Promise<Shift[]>;
   listPublicHolidays(): Promise<PublicHoliday[]>;
   listPayrollRuns(): Promise<PayrollRun[]>;
-  listPayslips(): Promise<Payslip[]>;
+  /** Every payslip the caller may read, or (with `employeeId`) that one employee's only. */
+  listPayslips(employeeId?: string): Promise<Payslip[]>;
   listGoals(): Promise<Goal[]>;
   listScorecards(): Promise<Scorecard[]>;
   listReviews(): Promise<Review[]>;

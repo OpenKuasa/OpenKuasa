@@ -40,6 +40,18 @@ export type ServiceLike = {
   };
 };
 
+/** The slice of the service client `createConfirmedTestUser` touches. */
+export type AdminLike = {
+  auth: {
+    admin: {
+      createUser(attrs: { email: string; password: string; email_confirm: boolean }): PromiseLike<{
+        data: { user: { id: string } | null } | null;
+        error: Failure;
+      }>;
+    };
+  };
+};
+
 export type UserGuard = { kind: 'anonymous' } | { kind: 'signup'; email: string };
 export type CleanupResult = {
   skipped: boolean;
@@ -109,6 +121,29 @@ export function createRegistry(options: RegistryOptions = {}) {
       const id = result.data?.user?.id;
       if (id) recordUser(id, { kind: 'signup', email });
       return { ...result, email };
+    },
+    /**
+     * For a test that needs a user who can sign in at once. `signUpTestUser` is a plain sign-up, which returns no
+     * session when the project requires email confirmation. This creates the user already confirmed through the
+     * service client (same address pattern, same recording), then signs in with the password and insists on a
+     * session. The user is recorded before the sign-in so a failure there still gets cleaned up.
+     */
+    async createConfirmedTestUser(admin: AdminLike | null, client: SupabaseClient, password: string) {
+      if (!admin) {
+        throw new Error('createConfirmedTestUser needs SUPABASE_SERVICE_ROLE_KEY (and the project URL) to be set.');
+      }
+      const email = `qa-${runToken}-${++emailCounter}@example.com`;
+      const created = await admin.auth.admin.createUser({ email, password, email_confirm: true });
+      const id = created.data?.user?.id;
+      if (id) recordUser(id, { kind: 'signup', email });
+      if (created.error || !id) {
+        throw new Error(`creating the test user failed: ${created.error?.message ?? 'no user returned'}`);
+      }
+      const signedIn = await client.auth.signInWithPassword({ email, password });
+      if (signedIn.error || !signedIn.data.session) {
+        throw new Error(`the confirmed test user got no session: ${signedIn.error?.message ?? 'no session returned'}`);
+      }
+      return { ...signedIn, email, userId: id };
     },
 
     async cleanup(
@@ -274,6 +309,12 @@ export const joinDemo = (client: SupabaseClient) => registry.joinDemo(client);
 /** Sign up an email user with a generated test address; cleanup deletes it. */
 export const signUpTestUser = (client: SupabaseClient, password: string) =>
   registry.signUpTestUser(client, password);
+/**
+ * A confirmed email user who can sign in at once (see `createConfirmedTestUser` on the registry); cleanup
+ * deletes it. Needs the service key. `signUpTestUser` is unchanged for its other callers.
+ */
+export const createConfirmedTestUser = (client: SupabaseClient, password: string) =>
+  registry.createConfirmedTestUser(serviceClient() as unknown as AdminLike | null, client, password);
 /**
  * Register a teardown step that runs first in the file's cleanup, even when the delete is
  * skipped (missing key / migration) and even if the file's own hooks failed.

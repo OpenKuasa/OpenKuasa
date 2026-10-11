@@ -25,16 +25,15 @@ import type {
   Review,
   Scorecard,
   Shift,
-  StatutoryField,
   TimeOffRequest,
   TimesheetEntry,
   Training,
   TrainingEnrolment,
   Weekday,
 } from './types';
+import { STATUTORY_FIELDS } from './statutory-fields';
 import { DEFAULT_PEOPLE_SETTINGS, WEEKDAYS } from './types';
 
-const STATUTORY_FIELDS: StatutoryField[] = ['epf', 'socso', 'eis', 'pcb'];
 
 /** The API answers with at most this many rows per request. */
 const PAGE_SIZE = 1000;
@@ -51,6 +50,9 @@ const PRIVATE_COLUMNS =
 // A payslip reaches an employee by a composite foreign key (employee_id, org_id), which Postgres named by its
 // columns. The hint keeps the embed unambiguous if another path between the tables ever appears.
 const PAYSLIP_NAME = 'employee:hr_employees!hr_payslips_employee_id_org_id_fkey(name)';
+// An overtime line reaches its record by `overtime_record_id` (default constraint name); the record's day lets the
+// screen count overtime paid late. Other lines, and a record the caller cannot read, give null.
+const LINE_WORK_DATE = 'overtime:hr_overtime_records!hr_payslip_lines_overtime_record_id_fkey(work_date)';
 const LEAVE_COLUMNS = `id,employee_id,leave_type,start_date,end_date,days,half_day,reason,status,decision_note,created_at,${NAME}`;
 const TIME_OFF_COLUMNS = `id,employee_id,off_date,start_time,end_time,reason,status,decision_note,created_at,${NAME}`;
 const CLAIM_COLUMNS = `id,employee_id,category,amount_cents,claim_date,description,has_receipt,status,decision_note,receipt_path,paid_on,paid_reference,created_at,${NAME}`;
@@ -61,7 +63,7 @@ const OVERTIME_COLUMNS =
   `payslip:hr_payslips!hr_overtime_records_payslip_id_fkey(period_month,status),${NAME}`;
 const PAYSLIP_COLUMNS =
   'id,employee_id,payroll_run_id,period_month,basic_cents,gross_cents,epf_cents,socso_cents,eis_cents,pcb_cents,' +
-  `other_deductions_cents,net_cents,set_by_hr,status,lines:hr_payslip_lines(id,payslip_id,kind,source,label,amount_cents,created_at),${PAYSLIP_NAME}`;
+  `other_deductions_cents,net_cents,set_by_hr,status,lines:hr_payslip_lines(id,payslip_id,kind,source,label,amount_cents,created_at,${LINE_WORK_DATE}),${PAYSLIP_NAME}`;
 const GOAL_COLUMNS = `id,employee_id,title,progress,due_date,status,${NAME}`;
 const SCORECARD_COLUMNS = `id,employee_id,period,score,competencies,${NAME}`;
 const DOCUMENT_COLUMNS = `id,employee_id,title,doc_type,status,issued_on,expires_on,${NAME}`;
@@ -73,7 +75,9 @@ const REVIEW_COLUMNS = `id,employee_id,period,rating,score,reviewer_name,reviewe
 
 type Named = { name?: string | null } | null | undefined;
 type WithEmployee<T> = Omit<T, 'employee_name'> & { employee: Named };
-type PayslipRow = WithEmployee<Omit<Payslip, 'lines'>> & { lines: (PayslipLine & { created_at: string })[] | null };
+type PayslipRow = WithEmployee<Omit<Payslip, 'lines'>> & {
+  lines: (Omit<PayslipLine, 'work_date'> & { created_at: string; overtime?: { work_date: string } | null })[] | null;
+};
 type OvertimeRow = WithEmployee<Omit<OvertimeRecord, 'paid_month'>> & {
   payslip: { period_month: string; status: string } | null;
 };
@@ -121,6 +125,7 @@ function payslipOf({ lines, ...row }: PayslipRow): Payslip {
       source: line.source,
       label: line.label,
       amount_cents: line.amount_cents,
+      work_date: line.overtime?.work_date ?? null,
     })),
   };
 }
@@ -253,8 +258,15 @@ export function createSupabasePeopleData(client: SupabaseClient, orgId: string):
         col: 'period_month',
         asc: false,
       }).then((list) => list.map((run) => ({ ...run, paid_by_name: null }))),
-    listPayslips: async () =>
-      (await rows<PayslipRow>('hr_payslips', PAYSLIP_COLUMNS, { col: 'period_month', asc: false })).map(payslipOf),
+    listPayslips: async (employeeId) =>
+      (
+        await rows<PayslipRow>(
+          'hr_payslips',
+          PAYSLIP_COLUMNS,
+          { col: 'period_month', asc: false },
+          employeeId ? { eq: ['employee_id', employeeId] } : {},
+        )
+      ).map(payslipOf),
     listGoals: async () =>
       (await rows<WithEmployee<Goal>>('hr_goals', GOAL_COLUMNS, { col: 'due_date', asc: true })).map(named),
     listScorecards: async () =>

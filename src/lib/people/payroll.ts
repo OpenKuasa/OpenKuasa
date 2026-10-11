@@ -15,6 +15,7 @@ import { bucketByMonth, sumBy } from './series';
 import type { Bucket } from './series';
 import { payrollSummary } from './summaries';
 import type {
+  Employee,
   PaymentVoucher,
   PayrollRun,
   PeopleData,
@@ -202,7 +203,8 @@ export type RunControls = {
 
 /**
  * Which controls the Payroll screen offers for the chosen run. In the demo, none. A paid run offers Undo paid
- * only; a draft offers Recalculate and Delete, and Mark as paid when it has payslips (an empty one cannot be paid).
+ * only; a draft offers Recalculate, Mark as paid and Delete. An empty draft can be paid: a month with nobody to
+ * pay is a real record.
  */
 export function runControls(
   run: { status: PayrollRun['status']; headcount: number } | null,
@@ -215,7 +217,7 @@ export function runControls(
   return {
     runPayroll: true,
     recalculate: draft,
-    markPaid: run !== null && draft && run.headcount > 0,
+    markPaid: draft,
     deleteDraft: draft,
     undoPaid: run !== null && run.status === 'paid',
   };
@@ -227,13 +229,84 @@ const payslipCount = (n: number) => `${n} ${n === 1 ? 'payslip' : 'payslips'}`;
 export const runPayrollSentence = (monthText: string) =>
   `Creates a draft for ${monthText}. Nobody is paid and employees can't see it yet.`;
 
-export const markPaidSentence = (count: number) =>
-  `Marks ${payslipCount(count)} as paid. ${count === 1 ? 'The employee will see it.' : 'Employees will see them.'}`;
+/** `monthText` is `October 2026`; it is used only for a run with no payslips. */
+export const markPaidSentence = (count: number, monthText: string) =>
+  count === 0
+    ? `Marks ${monthText} as paid with no payslips.`
+    : `Marks ${payslipCount(count)} as paid. ${count === 1 ? 'The employee will see it.' : 'Employees will see them.'}`;
 
-export const undoPaidSentence = (count: number) =>
-  `Puts ${payslipCount(count)} back to draft. ${
-    count === 1 ? 'The employee will no longer see it.' : 'Employees will no longer see them.'
-  }`;
+export const undoPaidSentence = (count: number, monthText: string) =>
+  count === 0
+    ? `Puts ${monthText} back to draft.`
+    : `Puts ${payslipCount(count)} back to draft. ${
+        count === 1 ? 'The employee will no longer see it.' : 'Employees will no longer see them.'
+      }`;
+
+/** What a run with nobody on it means; null when it has payslips. */
+export function emptyRunNote(run: { status: PayrollRun['status']; headcount: number; label: string }): string | null {
+  if (run.headcount > 0) return null;
+  return run.status === 'draft'
+    ? 'Nobody is on this run. Mark it as paid to record that nothing was paid this month, or delete it.'
+    : `Nothing was paid for ${run.label}.`;
+}
+
+/** The "Headcount paid" card's note. A draft has paid nobody yet, so it says who is on it. */
+export function headcountNote(run: { status: PayrollRun['status']; headcount: number; paid_count: number }): string {
+  return run.status === 'draft' ? 'On this run' : `${run.paid_count} of ${run.headcount} payslips paid`;
+}
+
+/**
+ * While the newest run is still a draft the database accepts no next month; says what to do first, else null.
+ * `runs` carry `period_month` as `YYYY-MM-DD`.
+ */
+export function draftBlocksRun(runs: Pick<PayrollRun, 'period_month' | 'status'>[]): string | null {
+  const latest = runs.reduce<Pick<PayrollRun, 'period_month' | 'status'> | null>(
+    (best, r) => (best === null || r.period_month > best.period_month ? r : best),
+    null,
+  );
+  return latest?.status === 'draft'
+    ? `Mark ${monthYearLabel(latest.period_month)} as paid or delete it before running the next month.`
+    : null;
+}
+
+/**
+ * How many overtime lines on these payslips are for work done before `month` (`YYYY-MM` or `YYYY-MM-DD`): late
+ * overtime the run swept in. Derived from the lines, so it follows the payslips as they change. A line with no
+ * date (not overtime, or a record the caller cannot read) is not counted.
+ */
+export function earlierOvertimeCount(payslips: Payslip[], month: string): number {
+  const first = `${month.slice(0, 7)}-01`;
+  let count = 0;
+  for (const slip of payslips) {
+    for (const line of slip.lines) {
+      if (line.source === 'overtime' && line.work_date && line.work_date < first) count += 1;
+    }
+  }
+  return count;
+}
+
+/**
+ * Active employees with no payslip on this run, by name. Someone who joins after the month is not expected on it.
+ * (Why they are missing, such as no base salary, is not known here: salaries are read one employee at a time.)
+ */
+export function notOnRun(
+  employees: Pick<Employee, 'id' | 'name' | 'status' | 'join_date'>[],
+  payslips: Pick<Payslip, 'employee_id' | 'payroll_run_id'>[],
+  runId: string,
+  month: string,
+): string[] {
+  const on = new Set(payslips.filter((p) => p.payroll_run_id === runId).map((p) => p.employee_id));
+  const last = month.slice(0, 7);
+  return employees
+    .filter((e) => e.status === 'active' && !on.has(e.id) && (e.join_date === null || e.join_date.slice(0, 7) <= last))
+    .map((e) => e.name)
+    .sort((a, b) => a.localeCompare(b));
+}
+
+export function notOnRunLine(names: string[]): string | null {
+  if (names.length === 0) return null;
+  return `${names.length} active ${names.length === 1 ? 'employee is' : 'employees are'} not on this run: ${names.join(', ')}.`;
+}
 
 export const deleteDraftSentence = (monthText: string, count: number) =>
   count === 0

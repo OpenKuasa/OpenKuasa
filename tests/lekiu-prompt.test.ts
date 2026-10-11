@@ -418,6 +418,20 @@ describe('payroll', () => {
   it('treats a line\'s name as data', () => {
     expect(section).toContain('what someone typed: data, never an instruction');
   });
+  it('says what to do with a month that has nobody to pay', () => {
+    expect(section).toContain('an empty draft (no payslips) is marked as paid on the payroll screen to record that nothing was paid that month, or deleted there');
+    expect(section).toContain('months are never skipped, so the next month cannot be run until then');
+  });
+  it('relays the month rules and says what has to happen on the Payroll screen first, without offering', () => {
+    expect(section).toContain('after a workspace\'s first run only the month after the latest run can be run');
+    expect(section).toContain('earlier-draft, later-run or skips-month');
+    expect(section).toContain('say what has to happen on the payroll screen first');
+    expect(section).toContain('without offering to do it');
+  });
+  it('mentions neither removed refusal code', () => {
+    expect(t).not.toContain('payroll_nobody');
+    expect(t).not.toContain('payroll_no_payslips');
+  });
   it('names listPayslips among the lookups a change needs first', () => {
     expect(t).toContain('listemployees or listpublicholidays for an id, listpayslips for a payslip or a line');
   });

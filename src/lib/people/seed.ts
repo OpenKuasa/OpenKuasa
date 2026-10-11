@@ -432,8 +432,11 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
     };
   });
 
-  // Payslips as the demo re-seed makes them: from the salary, then the lines, then every figure. The rule is the
-  // database's; this copy only has to look the same. Working days here are weekdays (the database also skips holidays).
+  // SAMPLE DATA ONLY, NOT THE PAYROLL RULE. This copy makes the demo look like what the demo re-seed produces; the
+  // rule lives in the database (`hr_run_payroll` and friends) and nothing should read this as it. It does NOT
+  // model: public holidays (working days are plain weekdays, so a joiner's cut can differ by a day), unpaid leave
+  // (there are no unpaid-leave lines), overtime paid late (every overtime line is on its own month's payslip),
+  // or a figure set by hand (`set_by_hr` is always empty).
   const lastDay = (month: string) => addDays(addMonths(month, 1), -1);
   const workingDays = (from: string, to: string) => {
     let n = 0;
@@ -646,7 +649,8 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
     listShifts: async (from, to) => shifts.filter((s) => between(s.work_date, from, to)),
     listPublicHolidays: async () => holidays,
     listPayrollRuns: async () => runs,
-    listPayslips: async () => payslips,
+    listPayslips: async (employeeId) =>
+      employeeId ? payslips.filter((p) => p.employee_id === employeeId) : payslips,
     listGoals: async () => goals,
     listScorecards: async () => scorecards,
     listReviews: async () => reviews,

@@ -9,7 +9,22 @@ import { ScreenContainer } from '@/components/screen/screen-container';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { todayInMalaysia } from '@/lib/people/dates';
-import { DRAFT_BANNER, NO_MONTH_TO_RUN, paidLine, readPayroll, runControls, runIdFromParam, runMonthChoice } from '@/lib/people/payroll';
+import {
+  DRAFT_BANNER,
+  NO_MONTH_TO_RUN,
+  draftBlocksRun,
+  earlierOvertimeCount,
+  earlierOvertimeLine,
+  emptyRunNote,
+  headcountNote,
+  notOnRun,
+  notOnRunLine,
+  paidLine,
+  readPayroll,
+  runControls,
+  runIdFromParam,
+  runMonthChoice,
+} from '@/lib/people/payroll';
 import { centsToRinggit } from '@/lib/people/payroll-forms';
 import type { StatutoryField } from '@/lib/people/types';
 import { HrOnlyScreen, LOAD_FAILED, LaterButton, Muted, StatusPill, loadPeople } from './parts';
@@ -49,7 +64,13 @@ export default async function PayrollScreen({
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const runId = runIdFromParam(((await searchParams) ?? {}).run);
-  const { model, viewer } = await loadPeople('payroll', (data, _now, ctx) => readPayroll(data, ctx.viewer, runId));
+  const { model: loaded, viewer } = await loadPeople('payroll', async (data, _now, ctx) => {
+    const payroll = await readPayroll(data, ctx.viewer, runId);
+    // Who is not on a draft: the directory is readable by the team, and a draft is the only run that can change.
+    const employees = payroll?.latest?.status === 'draft' ? await data.listEmployees() : [];
+    return { payroll, employees };
+  });
+  const model = loaded?.payroll ?? null;
   if (!viewer.isHr && !viewer.isDemo) return <HrOnlyScreen title="Payroll" />;
 
   const latest = model?.latest ?? null;
@@ -63,7 +84,17 @@ export default async function PayrollScreen({
     color: DEDUCTION_COLORS[index % DEDUCTION_COLORS.length],
   }));
   const noRun = <Muted>No payroll run yet</Muted>;
+  const blocked = draftBlocksRun(model?.runs ?? []);
   const monthChoice = runMonthChoice(model?.runs ?? [], todayInMalaysia(new Date()));
+  // Facts about the draft itself, worked out from its payslips each time the page loads, so they outlast the dialog.
+  const draftNotes =
+    latest && latest.status === 'draft'
+      ? [
+          earlierOvertimeLine(earlierOvertimeCount(latest.slips, latest.period_month)),
+          notOnRunLine(notOnRun(loaded?.employees ?? [], latest.slips, latest.run_id, latest.period_month)),
+        ].filter((note): note is string => note !== null)
+      : [];
+  const emptyNote = latest ? emptyRunNote(latest) : null;
 
   return (
     <ScreenContainer>
@@ -76,12 +107,12 @@ export default async function PayrollScreen({
             <LaterButton variant="outline" size="sm" compact>Export</LaterButton>
             {viewer.isDemo || !model ? (
               <LaterButton size="sm">Run payroll</LaterButton>
-            ) : monthChoice === null ? (
+            ) : blocked !== null || monthChoice === null ? (
               <span className="inline-flex items-center gap-2">
                 <Button type="button" size="sm" disabled>
                   Run payroll
                 </Button>
-                <span className="text-xs text-muted-foreground">{NO_MONTH_TO_RUN}</span>
+                <span className="text-xs text-muted-foreground">{blocked ?? NO_MONTH_TO_RUN}</span>
               </span>
             ) : (
               <RunPayrollDialog choice={monthChoice} />
@@ -97,6 +128,12 @@ export default async function PayrollScreen({
               <p className="text-sm font-medium">
                 {latest.status === 'draft' ? `${latest.label}: ${DRAFT_BANNER}` : `${latest.label}: ${paidLine(latest)}`}
               </p>
+              {emptyNote ? <p className="text-sm text-muted-foreground">{emptyNote}</p> : null}
+              {draftNotes.map((note) => (
+                <p key={note} className="text-sm text-muted-foreground">
+                  {note}
+                </p>
+              ))}
               {controls.recalculate || controls.undoPaid ? (
                 <RunActions
                   runId={latest.run_id}
@@ -138,7 +175,7 @@ export default async function PayrollScreen({
           <BentoStat
             label="Headcount paid"
             value={model ? (latest ? latest.headcount : dash) : dash}
-            delta={latest ? `${latest.paid_count} of ${latest.headcount} payslips paid` : undefined}
+            delta={latest ? headcountNote(latest) : undefined}
             deltaTone="flat"
           />
         </BentoCard>

@@ -5,6 +5,7 @@
  * and everything after that is cents.
  */
 import { monthYearLabel } from './dates';
+import { STATUTORY_FIELDS } from './statutory-fields';
 import type { PayrollRun, StatutoryField } from './types';
 
 type Converted<T> = { ok: true; input: T } | { ok: false; error: string };
@@ -55,7 +56,8 @@ export function monthLabel(month: string): string {
 
 /**
  * The month "Run payroll" starts on: the month after the latest run on record, never after this month, and this
- * month when there are no runs. A gap behind the latest run is not filled in; the month is still free to choose.
+ * month when there are no runs. After a workspace's first run the database accepts only this one month (the one
+ * right after the latest run); a gap earlier than the latest run can no longer be filled.
  * `YYYY-MM`, or null when the latest run is already this month or later: there is nothing the database would accept.
  */
 export function nextRunMonth(runs: Pick<PayrollRun, 'period_month'>[], today: string): string | null {
@@ -88,7 +90,7 @@ export function toLineInput(values: {
   return { ok: true, input: { kind: values.kind, label, amount_cents: amount } };
 }
 
-const FIELDS: readonly string[] = ['epf', 'socso', 'eis', 'pcb'];
+const FIELDS: readonly string[] = STATUTORY_FIELDS;
 
 /** What the statutory-figure form sends. An empty amount puts the figure back to the proposed amount; zero is a figure. */
 export function toStatutoryInput(values: {

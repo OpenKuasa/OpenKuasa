@@ -21,6 +21,7 @@ import {
 } from './capabilities';
 import { blank } from './loose-input';
 import { PAYROLL_REFUSALS } from './payroll-refusals';
+import { STATUTORY_FIELDS } from './statutory-fields';
 import type { StatutoryField } from './types';
 
 // ---- Sentences ---------------------------------------------------------------
@@ -52,7 +53,7 @@ const month = z
   .regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'The month must be a real month, as YYYY-MM.')
   .refine((value) => value >= '2000-01', 'The month cannot be before the year 2000.');
 
-const STATUTORY: readonly StatutoryField[] = ['epf', 'socso', 'eis', 'pcb'];
+const STATUTORY: readonly StatutoryField[] = STATUTORY_FIELDS;
 
 // An empty string from a model means "no line": the same helper reads it for the card and for the save.
 // Anything else that is not text (a number, an object) is refused, never read as "add a line".

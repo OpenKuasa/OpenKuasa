@@ -144,6 +144,42 @@ describe('getPeopleData', () => {
     expect(columns).toContain('lines:hr_payslip_lines(');
   });
 
+  it('gives an overtime line the date the work was done, through the named key, and null for other lines', async () => {
+    const saved = ROWS.hr_payslips;
+    ROWS.hr_payslips = [
+      {
+        id: 'p1', employee_id: 'e1', payroll_run_id: 'r1', period_month: '2026-10-01', status: 'pending', set_by_hr: [],
+        employee: { name: 'A' },
+        lines: [
+          { id: 'ot', payslip_id: 'p1', kind: 'earning', source: 'overtime', label: 'Overtime', amount_cents: 1,
+            created_at: '2026-10-11T00:00:00Z', overtime: { work_date: '2026-09-28' } },
+          { id: 'hr', payslip_id: 'p1', kind: 'earning', source: 'hr', label: 'Bonus', amount_cents: 1,
+            created_at: '2026-10-11T00:00:01Z', overtime: null },
+        ],
+      },
+    ];
+    try {
+      const [slip] = await (await getPeopleData(client)).listPayslips();
+      expect(slip.lines.map((l) => [l.id, l.work_date])).toEqual([['ot', '2026-09-28'], ['hr', null]]);
+      expect(calls.find((c) => c.table === 'hr_payslips')!.columns).toContain(
+        'overtime:hr_overtime_records!hr_payslip_lines_overtime_record_id_fkey(work_date)',
+      );
+    } finally {
+      ROWS.hr_payslips = saved;
+    }
+  });
+
+  it('can read one employee\'s payslips only', async () => {
+    await (await getPeopleData(client)).listPayslips('e1');
+    expect(calls.find((c) => c.table === 'hr_payslips')!.filters).toContainEqual(['eq', 'employee_id', 'e1']);
+  });
+
+  it('reads every payslip when no employee is named', async () => {
+    await (await getPeopleData(client)).listPayslips();
+    const filters = calls.find((c) => c.table === 'hr_payslips')!.filters;
+    expect(filters.some((f) => f[1] === 'employee_id')).toBe(false);
+  });
+
   it('orders lines by the moment they were made, not by the text of the timestamp', async () => {
     const line = (id: string, created_at: string) => ({
       id, payslip_id: 'p1', kind: 'earning', source: 'hr', label: id, amount_cents: 1, created_at,

@@ -6,6 +6,7 @@ const ctl = vi.hoisted(() => ({
   ran: [] as { fn: string; orgId: string; input: unknown }[],
   fail: null as string | null,
   earlier: 0,
+  payslips: 19,
 }));
 
 const SLIP = '77777777-7777-4777-8777-777777777777';
@@ -44,7 +45,7 @@ vi.mock('@/lib/people/payroll-writes', async (orig) => {
     runPayroll: record('runPayroll', (): RunResult => ({
       run_id: RUN,
       month: '2026-10',
-      payslips: 19,
+      payslips: ctl.payslips,
       earlier_overtime: ctl.earlier,
       skipped: [{ employee_id: 'e9', name: 'Siti Aminah', reason: 'no_salary' }],
     })),
@@ -103,6 +104,7 @@ beforeEach(() => {
   ctl.ran = [];
   ctl.fail = null;
   ctl.earlier = 0;
+  ctl.payslips = 19;
 });
 
 describe('who holds the payroll tools', () => {
@@ -488,6 +490,24 @@ describe('failures', () => {
     expect(logged).not.toContain('salary');
     expect(logged).toContain('savePayslipLine');
     spy.mockRestore();
+  });
+});
+
+describe('a month with nobody to pay', () => {
+  it('a draft with no payslips says so, then names who was left out', async () => {
+    ctl.payslips = 0;
+    const result = await run('runPayroll', { month: '2026-10' });
+    expect(result.ok).toBe(true);
+    expect(result.data.payslips).toBe(0);
+    expect(result.data.message).toBe(
+      'Payroll for October 2026 has a draft with no payslips: nobody active has a base salary recorded for it. Left out: Siti Aminah (no base salary recorded).',
+    );
+    expect(result.data.message).not.toContain('Nobody is paid');
+  });
+
+  it('a draft with some payslips is worded as before', async () => {
+    const result = await run('runPayroll', { month: '2026-10' });
+    expect(result.data.message).toContain('is a draft with 19 payslips');
   });
 });
 

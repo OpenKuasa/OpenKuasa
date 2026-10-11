@@ -15,6 +15,8 @@
  *
  * Workspaces and users come from tests/helpers/live-workspaces.ts, which also
  * removes them. Every sentence comes from PAYROLL_REFUSALS, never a literal.
+ *
+ * The demo part is skipped in minutes :00 to :02 of every hour (UTC), while the demo is re-seeded.
  */
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { type SupabaseClient } from '@supabase/supabase-js';
@@ -34,7 +36,7 @@ import {
 } from '@/lib/people/payroll-writes';
 import { createSupabasePeopleData } from '@/lib/people/supabase';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { createOrg, joinDemo, liveClient, signInAnon, signUpTestUser } from './helpers/live-workspaces';
+import { createConfirmedTestUser, createOrg, joinDemo, liveClient, signInAnon } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
@@ -60,6 +62,8 @@ const linked = { employeeId: '', slipId: '' };
 const other = { employeeId: '', slipId: '' };
 let noSalaryId = '';
 let overtimeId = '';
+// A line on the OTHER payslip: the member must not be able to name it.
+let otherLineId = '';
 
 const ownerCtx = () => ({ client: owner.c, orgId: owner.orgId });
 const memberCtx = () => ({ client: member.c, orgId: owner.orgId });
@@ -74,12 +78,11 @@ beforeAll(async () => {
   expect(org.error, org.error?.message).toBeNull();
   owner = { c, orgId: org.data as string };
 
-  // A member needs an address to accept an invite sent to it.
+  // A member needs an address to accept an invite sent to it. The user is created already confirmed (a plain
+  // sign-up returns no session while the project requires email confirmation) and signed in at once.
   const m = client();
-  const signUp = await signUpTestUser(m, PASSWORD);
-  expect(signUp.error, signUp.error?.message).toBeNull();
-  const userId = signUp.data.user?.id;
-  expect(userId).toBeTruthy();
+  const signUp = await createConfirmedTestUser(m, PASSWORD);
+  const userId = signUp.userId;
   const invite = await owner.c.rpc('create_invite', { p_email: signUp.email, p_role: 'member' });
   expect(invite.error, invite.error?.message).toBeNull();
   const accepted = await m.rpc('accept_invite', { p_token: invite.data });
@@ -198,6 +201,7 @@ testWithSupabase('an owner adds a line, types over a figure and puts it back', a
   const parking = await savePayslipLine(ctx, { payslip_id: other.slipId, kind: 'earning', label: 'Parking', amount_cents: 1_000 });
   expect(parking.ok, JSON.stringify(parking)).toBe(true);
   if (!parking.ok) return;
+  otherLineId = parking.data.line.id;
   expect(
     await savePayslipLine(ctx, {
       payslip_id: linked.slipId,
@@ -234,15 +238,18 @@ testWithSupabase('a member reads nothing of a draft, and every write is refused 
   const lines = await member.c.from('hr_payslip_lines').select('id');
   expect(lines.error).toBeNull();
   expect(lines.data ?? []).toEqual([]);
+  // The record is there to be read (it is the member's own), and says nothing of a payroll month yet.
   const ot = (await memberData().listOvertime()).find((r) => r.id === overtimeId);
-  expect(ot?.paid_month ?? null).toBeNull();
+  expect(ot, 'the member can read their own overtime record').toBeDefined();
+  expect(ot?.paid_month).toBeNull();
 
   const ctx = memberCtx();
   expect(await runPayroll(ctx, { month: '2026-02' })).toEqual({ ok: false, error: NOT_ALLOWED });
+  expect(otherLineId, 'a real line on another payslip, from the earlier test').not.toBe('');
   const refused = [
     await recalculatePayroll(ctx, { run_id: runId }),
     await savePayslipLine(ctx, { payslip_id: linked.slipId, kind: 'earning', label: 'Mine', amount_cents: 100 }),
-    await deletePayslipLine(ctx, { line_id: other.slipId }),
+    await deletePayslipLine(ctx, { line_id: otherLineId }),
     await setPayslipStatutory(ctx, { payslip_id: linked.slipId, field: 'epf', amount_cents: 1 }),
     await removePayslip(ctx, { payslip_id: linked.slipId }),
     await deletePayrollRun(ctx, { run_id: runId }),
@@ -318,16 +325,53 @@ testWithSupabase('an owner undoes paid, the member loses sight of it, and the dr
       ok: false,
       error: PAYROLL_REFUSALS.PAYROLL_LATER_RUN,
     });
-    // Skipping a month ahead of the latest run is refused too (March is the latest; May skips April).
+    // With March still a draft, even the next month is refused: the draft comes first.
+    expect(await runPayroll(ctx, { month: '2026-04' })).toEqual({
+      ok: false,
+      error: PAYROLL_REFUSALS.PAYROLL_EARLIER_DRAFT,
+    });
+    // Once March is paid, skipping a month ahead of it is refused (May skips April).
+    expect(await markPayrollPaid(ctx, { run_id: again.data.run_id })).toMatchObject({ ok: true });
     expect(await runPayroll(ctx, { month: '2026-05' })).toEqual({
       ok: false,
       error: PAYROLL_REFUSALS.PAYROLL_SKIPS_MONTH,
     });
+    expect(await unmarkPayrollPaid(ctx, { run_id: again.data.run_id })).toMatchObject({ ok: true });
     expect(await deletePayrollRun(ctx, { run_id: again.data.run_id })).toEqual({ ok: true, data: { id: again.data.run_id } });
   }
 });
 
+testWithSupabase('a month with nobody to pay is a real record: it is run, paid, and the next month follows', async () => {
+  // Its own workspace, with one employee and no salary on file.
+  const c = client();
+  expect((await signInAnon(c)).error).toBeNull();
+  const org = await createOrg(c, 'People Payroll Empty Sdn Bhd');
+  expect(org.error, org.error?.message).toBeNull();
+  const ctx = { client: c, orgId: org.data as string };
+  const made = await createEmployee(ctx, { name: 'Tiada Gaji', join_date: '2025-01-06' });
+  expect(made.ok, JSON.stringify(made)).toBe(true);
+  if (!made.ok) return;
+
+  const first = await runPayroll(ctx, { month: MONTH });
+  expect(first.ok, JSON.stringify(first)).toBe(true);
+  if (!first.ok) return;
+  expect(first.data).toMatchObject({ month: MONTH, payslips: 0 });
+  expect(first.data.skipped).toEqual([{ employee_id: made.data.id, name: 'Tiada Gaji', reason: 'no_salary' }]);
+
+  const paid = await markPayrollPaid(ctx, { run_id: first.data.run_id });
+  expect(paid, JSON.stringify(paid)).toEqual({ ok: true, data: { id: first.data.run_id, period_month: `${MONTH}-01` } });
+
+  const second = await runPayroll(ctx, { month: '2026-04' });
+  expect(second.ok, JSON.stringify(second)).toBe(true);
+  if (second.ok) expect(second.data).toMatchObject({ month: '2026-04', payslips: 0 });
+});
+
 testWithSupabase('a demo guest changes nothing', async () => {
+  // The demo is rebuilt at the top of every hour; its rows are not there to be tried in the first minutes of it.
+  if (new Date().getUTCMinutes() <= 2) {
+    console.warn('Skipped the demo part of the payroll live test: the demo is being re-seeded (minutes :00 to :02).');
+    return;
+  }
   const ctx = { client: guest.c, orgId: guest.demoId };
   const data = createSupabasePeopleData(guest.c, guest.demoId);
   const [runs, slips] = await Promise.all([data.listPayrollRuns(), data.listPayslips()]);

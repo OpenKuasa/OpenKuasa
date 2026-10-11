@@ -268,9 +268,9 @@ export function RunActions({
 
   const sentence =
     step === 'paying'
-      ? markPaidSentence(headcount)
+      ? markPaidSentence(headcount, monthText)
       : step === 'undoing'
-        ? undoPaidSentence(headcount)
+        ? undoPaidSentence(headcount, monthText)
         : step === 'deleting'
           ? deleteDraftSentence(monthText, headcount)
           : '';
@@ -342,7 +342,7 @@ export function RunActions({
           ) : null}
         </RowPrompt>
       ) : null}
-      {recalculated ? (
+      {recalculated && recalculated.payslips === headcount ? (
         <div role="status" className="space-y-2">
           <p className="text-sm text-muted-foreground">
             {recalculated.added

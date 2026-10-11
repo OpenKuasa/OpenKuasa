@@ -7,8 +7,14 @@ import {
   centsToField,
   deleteDraftSentence,
   deductionsOf,
+  draftBlocksRun,
+  earlierOvertimeCount,
   earlierOvertimeLine,
+  emptyRunNote,
+  headcountNote,
   monthInRange,
+  notOnRun,
+  notOnRunLine,
   markPaidSentence,
   paidLine,
   payslipDetailModel,
@@ -62,9 +68,9 @@ describe('runControls', () => {
       runPayroll: true, recalculate: true, markPaid: true, deleteDraft: true, undoPaid: false,
     });
   });
-  it('does not offer mark paid on an empty draft (it cannot be paid), but still offers delete and recalculate', () => {
+  it('offers mark paid on an empty draft too: a month with nobody to pay is a real record', () => {
     const c = runControls({ status: 'draft', headcount: 0 }, { isDemo: false });
-    expect(c.markPaid).toBe(false);
+    expect(c.markPaid).toBe(true);
     expect(c.deleteDraft).toBe(true);
     expect(c.recalculate).toBe(true);
   });
@@ -93,12 +99,16 @@ describe('confirmation sentences', () => {
     );
   });
   it('says what Mark as paid does, singular and plural', () => {
-    expect(markPaidSentence(12)).toBe('Marks 12 payslips as paid. Employees will see them.');
-    expect(markPaidSentence(1)).toBe('Marks 1 payslip as paid. The employee will see it.');
+    expect(markPaidSentence(12, 'October 2026')).toBe('Marks 12 payslips as paid. Employees will see them.');
+    expect(markPaidSentence(1, 'October 2026')).toBe('Marks 1 payslip as paid. The employee will see it.');
+  });
+  it('says what Mark as paid does on a run with nobody on it', () => {
+    expect(markPaidSentence(0, 'October 2026')).toBe('Marks October 2026 as paid with no payslips.');
+    expect(undoPaidSentence(0, 'October 2026')).toBe('Puts October 2026 back to draft.');
   });
   it('says what Undo paid, Delete draft and Remove payslip do', () => {
-    expect(undoPaidSentence(12)).toBe('Puts 12 payslips back to draft. Employees will no longer see them.');
-    expect(undoPaidSentence(1)).toBe('Puts 1 payslip back to draft. The employee will no longer see it.');
+    expect(undoPaidSentence(12, 'October 2026')).toBe('Puts 12 payslips back to draft. Employees will no longer see them.');
+    expect(undoPaidSentence(1, 'October 2026')).toBe('Puts 1 payslip back to draft. The employee will no longer see it.');
     expect(deleteDraftSentence('October 2026', 12)).toBe(
       'Deletes the October 2026 draft and its 12 payslips, with any lines and figures set by hand.',
     );
@@ -222,6 +232,79 @@ describe('runMonthChoice', () => {
   });
 });
 
+describe('empty runs', () => {
+  it('says what an empty draft and an empty paid run mean', () => {
+    expect(emptyRunNote({ status: 'draft', headcount: 0, label: 'October 2026' })).toBe(
+      'Nobody is on this run. Mark it as paid to record that nothing was paid this month, or delete it.',
+    );
+    expect(emptyRunNote({ status: 'paid', headcount: 0, label: 'October 2026' })).toBe('Nothing was paid for October 2026.');
+    expect(emptyRunNote({ status: 'draft', headcount: 2, label: 'October 2026' })).toBeNull();
+    expect(emptyRunNote({ status: 'paid', headcount: 2, label: 'October 2026' })).toBeNull();
+  });
+});
+
+describe('headcountNote', () => {
+  it('reads "On this run" on a draft and the paid count otherwise', () => {
+    expect(headcountNote({ status: 'draft', headcount: 3, paid_count: 0 })).toBe('On this run');
+    expect(headcountNote({ status: 'paid', headcount: 3, paid_count: 3 })).toBe('3 of 3 payslips paid');
+  });
+});
+
+describe('draftBlocksRun', () => {
+  const r = (period_month: string, status: 'draft' | 'paid') => ({ period_month, status });
+  it('blocks running the next month while the latest run is a draft, and says which', () => {
+    expect(draftBlocksRun([r('2026-08-01', 'paid'), r('2026-09-01', 'draft')])).toBe(
+      'Mark September 2026 as paid or delete it before running the next month.',
+    );
+  });
+  it('does not block when the latest run is paid, or there are none', () => {
+    expect(draftBlocksRun([r('2026-08-01', 'draft'), r('2026-09-01', 'paid')])).toBeNull();
+    expect(draftBlocksRun([])).toBeNull();
+  });
+});
+
+describe('earlierOvertimeCount', () => {
+  const ot = (work_date: string | null, source: 'overtime' | 'hr' = 'overtime') =>
+    line({ id: `l-${work_date}-${source}`, source, work_date, label: 'x' });
+  it('counts overtime lines for work before the month, across payslips', () => {
+    const slips = [
+      slip({ id: 'a', lines: [ot('2026-09-30'), ot('2026-10-01'), ot('2026-10-31')] }),
+      slip({ id: 'b', lines: [ot('2026-08-15'), ot('2026-09-02')] }),
+    ];
+    expect(earlierOvertimeCount(slips, '2026-10-01')).toBe(3);
+    expect(earlierOvertimeCount(slips, '2026-10')).toBe(3);
+  });
+  it('ignores lines with no date and lines that are not overtime', () => {
+    expect(earlierOvertimeCount([slip({ lines: [ot(null), ot('2026-01-01', 'hr')] })], '2026-10-01')).toBe(0);
+  });
+  it('drops when a payslip is removed', () => {
+    const a = slip({ id: 'a', lines: [ot('2026-09-30')] });
+    const b = slip({ id: 'b', lines: [ot('2026-09-29')] });
+    expect(earlierOvertimeCount([a, b], '2026-10-01')).toBe(2);
+    expect(earlierOvertimeCount([a], '2026-10-01')).toBe(1);
+  });
+});
+
+describe('notOnRun', () => {
+  const emp = (id: string, name: string, status: 'active' | 'inactive' = 'active', join_date: string | null = '2025-01-01') =>
+    ({ id, name, status, join_date }) as never;
+  it('names active employees with no payslip on the run, by name', () => {
+    const slips = [slip({ employee_id: 'e1', payroll_run_id: 'r1' })];
+    const list = [emp('e1', 'Aisyah'), emp('e2', 'Zul'), emp('e3', 'Ben'), emp('e4', 'Gone', 'inactive')];
+    expect(notOnRun(list, slips, 'r1', '2026-10-01')).toEqual(['Ben', 'Zul']);
+  });
+  it('does not count a payslip on another run, or someone who joins after the month', () => {
+    const slips = [slip({ employee_id: 'e1', payroll_run_id: 'r0' })];
+    const list = [emp('e1', 'Aisyah'), emp('e2', 'Late', 'active', '2026-11-03')];
+    expect(notOnRun(list, slips, 'r1', '2026-10-01')).toEqual(['Aisyah']);
+  });
+  it('says it in a sentence, singular and plural', () => {
+    expect(notOnRunLine([])).toBeNull();
+    expect(notOnRunLine(['Ben'])).toBe('1 active employee is not on this run: Ben.');
+    expect(notOnRunLine(['Ben', 'Zul'])).toBe('2 active employees are not on this run: Ben, Zul.');
+  });
+});
+
 describe('earlierOvertimeLine', () => {
   it('says nothing for none, and counts claims otherwise', () => {
     expect(earlierOvertimeLine(0)).toBeNull();
@@ -283,7 +366,7 @@ describe('PayslipDetail is safe to import into a member page', () => {
   });
   it('reaches no server action and no editing module', () => {
     for (const [file, source] of graph) {
-      expect(file, file).not.toMatch(/payroll-actions|payslip-editor|payslip-line-form|statutory-field/);
+      expect(file, file).not.toMatch(/payroll-actions|payslip-editor|payslip-line-form|components\/people\/statutory-field\.tsx/);
       expect(source, file).not.toMatch(/payroll-actions/);
       expect(source, file).not.toMatch(/['"]use server['"]/);
     }

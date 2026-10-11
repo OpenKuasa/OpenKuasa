@@ -9,6 +9,7 @@ import { REASON_LABEL } from '@/lib/hire/application-changes';
 import { STAGE_LABEL } from '@/lib/hire/applications-view';
 import { isRealDate, monthLabel, weekdayName } from '@/lib/people/dates';
 import { blank, hhmm } from '@/lib/people/loose-input';
+import { STATUTORY_FIELDS } from '@/lib/people/statutory-fields';
 import { centsToRinggit, monthLabel as payrollMonthLabel, ringgitToCents, toStatutoryInput } from '@/lib/people/payroll-forms';
 import type { ReceiptState } from '@/lib/people/receipts';
 
@@ -210,7 +211,8 @@ function gather(value: unknown, kind: ItemKind, into: KnownNames, depth = 0): vo
   const row = value as Record<string, unknown>;
   const label = typeof row.id === 'string' ? labelOf(row, kind) : null;
   if (typeof row.id === 'string' && label) {
-    if (Object.keys(into).length < NAMES_MAX) into[`${kind}:${row.id}`] = label;
+    const key = `${kind}:${row.id}`;
+    if (key in into || Object.keys(into).length < NAMES_MAX) into[key] = label;
   }
   for (const inner of Object.values(row)) gather(inner, kind, into, depth + 1);
 }
@@ -226,11 +228,11 @@ export function collectNames(results: ToolResult[], into: KnownNames = {}): Know
     const state = payslipState(results);
     for (const [id, fact] of state.slips) {
       if (fact === null) delete into[`payslip:${id}`];
-      else if (Object.keys(into).length < NAMES_MAX) into[`payslip:${id}`] = JSON.stringify(fact);
+      else if (`payslip:${id}` in into || Object.keys(into).length < NAMES_MAX) into[`payslip:${id}`] = JSON.stringify(fact);
     }
     for (const [id, fact] of state.lines) {
       if (fact === null) delete into[`payslip-line:${id}`];
-      else if (Object.keys(into).length < NAMES_MAX) into[`payslip-line:${id}`] = JSON.stringify(fact);
+      else if (`payslip-line:${id}` in into || Object.keys(into).length < NAMES_MAX) into[`payslip-line:${id}`] = JSON.stringify(fact);
     }
   }
   return into;
@@ -272,7 +274,7 @@ const UNLISTED_PAYSLIP = 'a payslip that was not in the list above';
 const UNLISTED_LINE = 'a payslip line that was not in the list above';
 
 const MONEY_WORDS = /^RM [\d,]+\.\d{2}$/;
-const STATUTORY_WORDS: Record<string, string> = { epf: 'EPF', socso: 'SOCSO', eis: 'EIS', pcb: 'PCB' };
+const STATUTORY_WORDS: Record<string, string> = Object.fromEntries(STATUTORY_FIELDS.map((field) => [field, field.toUpperCase()]));
 
 /**
  * What a model sends as a payroll month: `2026-10`, or the first of that month (`2026-10-01`). Null for anything
@@ -453,7 +455,6 @@ const monthWords = (value: unknown): string => {
 
 const slipOf = (employee: string | null, month: string): string =>
   employee ? `${employee}'s ${payrollMonthLabel(month)} payslip` : `the ${payrollMonthLabel(month)} payslip`;
-const refused = (what: string) => `${what}; this will be refused.`;
 
 /**
  * The payroll cards' question. It reads the input through the tools' own normalisers (payrollMonth, looseAmount,
@@ -465,13 +466,10 @@ function payrollTitle(toolName: string, i: Record<string, unknown>, find: NameFi
     case 'runPayroll':
       return `Run payroll for ${monthWords(i.month)}? This creates a draft. Nobody is paid and employees can't see it yet.`;
     case 'recalculatePayroll': {
-      const month = payrollMonth(i.month);
-      if (month && find(month, 'payroll-run') === 'paid') return refused(`The ${payrollMonthLabel(month)} run is already paid`);
       return `Recalculate the ${monthWords(i.month)} draft? Your own lines and figures are kept.`;
     }
     case 'savePayslipLine': {
-      const { words: slip, paid } = payslipWords(find, i.payslip_id);
-      if (paid) return refused(`${slip} is already paid`);
+      const { words: slip } = payslipWords(find, i.payslip_id);
       const kind = i.kind === 'earning' || i.kind === 'deduction' ? i.kind : null;
       const label = text(i.label);
       const cents = ringgitToCents(looseAmount(i.amount));
@@ -479,23 +477,17 @@ function payrollTitle(toolName: string, i: Record<string, unknown>, find: NameFi
       const amount = cents === null ? ' (the amount could not be read)' : `, ${centsToRinggit(cents)}`;
       const lineId = blank(i.line_id);
       if (lineId === null) return `Add ${what}${amount} to ${slip}?`;
-      const line = lineWords(find, lineId);
-      if (line.facts && typeof i.payslip_id === 'string' && line.facts.payslip_id !== i.payslip_id) {
-        return 'Change a line that is not on this payslip? This will be refused.';
-      }
-      if (systemLine(line.facts)) return refused(`Change ${line.words} is worked out by the system and can't be changed`);
+      // A line last seen on another payslip is not named here: the detail says so.
+      const line = lineOnPayslip(find, lineId, i.payslip_id) ? lineWords(find, lineId) : { words: UNLISTED_LINE };
       return `Change ${line.words} on ${slip} to ${what}${amount}?`;
     }
     case 'removePayslipLine': {
       const { words, facts } = lineWords(find, i.line_id);
       if (!facts) return `Remove ${words}?`;
-      if (payslipWords(find, facts.payslip_id).paid) return refused(`${slipOf(facts.employee, facts.month)} is already paid`);
-      if (systemLine(facts)) return refused(`Remove ${words} is worked out by the system and can't be changed`);
       return `Remove ${words} from ${slipOf(facts.employee, facts.month)}?`;
     }
     case 'setPayslipStatutory': {
-      const { words: slip, facts, paid } = payslipWords(find, i.payslip_id);
-      if (paid) return refused(`${slip} is already paid`);
+      const { words: slip, facts } = payslipWords(find, i.payslip_id);
       const field = typeof i.field === 'string' ? i.field : '';
       const figure = Object.hasOwn(STATUTORY_WORDS, field) ? STATUTORY_WORDS[field] : null;
       if (!figure) return `Change a statutory figure that could not be read on ${slip}?`;
@@ -510,13 +502,44 @@ function payrollTitle(toolName: string, i: Record<string, unknown>, find: NameFi
       return old ? `Change ${figure} on ${slip} from ${old} to ${next}?` : `Set ${figure} on ${slip} to ${next}?`;
     }
     case 'removePayslip': {
-      const { words: slip, paid } = payslipWords(find, i.payslip_id);
-      if (paid) return refused(`${slip} is already paid`);
-      return `Remove ${slip} from the draft?`;
+      return `Remove ${payslipWords(find, i.payslip_id).words} from the draft?`;
     }
     default:
       return 'Approve this change?';
   }
+}
+
+/** Whether a line the conversation knows is known to be on this payslip (or nothing is known about it). */
+const lineOnPayslip = (find: NameFinder, lineId: unknown, payslipId: unknown): boolean => {
+  const facts = factsOf<LineFact>(find(lineId, 'payslip-line'));
+  return !facts || typeof payslipId !== 'string' || facts.payslip_id === payslipId;
+};
+
+/**
+ * What the conversation suggests will make the database refuse a payroll change. It is a hedge in the detail, never a
+ * change to the question: the card always states exactly what will be saved, and what the chat saw can be out of date
+ * (paid can be undone on the Payroll screen).
+ */
+function payrollCaveat(toolName: string, i: Record<string, unknown>, find: NameFinder): string | null {
+  if (toolName === 'recalculatePayroll') {
+    const month = payrollMonth(i.month);
+    return month && find(month, 'payroll-run') === 'paid'
+      ? `The ${payrollMonthLabel(month)} run was paid when last checked, so this may be refused.`
+      : null;
+  }
+  const lineId = toolName === 'removePayslipLine' ? i.line_id : toolName === 'savePayslipLine' ? blank(i.line_id) : null;
+  if (typeof lineId === 'string') {
+    const line = factsOf<LineFact>(find(lineId, 'payslip-line'));
+    if (systemLine(line)) return 'This line is worked out by the system, so this will be refused.';
+    if (toolName === 'savePayslipLine' && !lineOnPayslip(find, lineId, i.payslip_id)) {
+      return 'This line was on a different payslip when last checked, so this may be refused.';
+    }
+    if (line && payslipWords(find, line.payslip_id).paid) return 'This payslip was paid when last checked, so this may be refused.';
+  }
+  if (toolName === 'savePayslipLine' || toolName === 'setPayslipStatutory' || toolName === 'removePayslip') {
+    if (payslipWords(find, i.payslip_id).paid) return 'This payslip was paid when last checked, so this may be refused.';
+  }
+  return null;
 }
 
 /** The second line of a payroll card: what else the change does. */
@@ -1147,8 +1170,9 @@ export function approvalDetail(
     return note ? `Note: “${note}”` : null;
   }
   if (toolName === 'saveAttendanceSettings') return settingsDetail(i);
-  if (['savePayslipLine', 'removePayslipLine', 'setPayslipStatutory', 'removePayslip'].includes(toolName)) {
-    return payrollDetail(toolName, i);
+  if (toolName === 'recalculatePayroll' || ['savePayslipLine', 'removePayslipLine', 'setPayslipStatutory', 'removePayslip'].includes(toolName)) {
+    const caveat = named ? payrollCaveat(toolName, i, named) : null;
+    return [payrollDetail(toolName, i), caveat].filter(Boolean).join(' ') || null;
   }
   if (toolName === 'removeHoliday' || (toolName === 'saveHoliday' && blank(i.id) !== null)) {
     return 'Leave and overtime already recorded are not changed.';

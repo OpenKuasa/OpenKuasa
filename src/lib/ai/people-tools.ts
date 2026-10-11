@@ -79,6 +79,7 @@ import {
 } from '@/lib/people/payroll-writes';
 import { monthLabel as payrollMonthLabel, ringgitToCents, toLineInput, toStatutoryInput } from '@/lib/people/payroll-forms';
 import { earlierOvertimeLine } from '@/lib/people/payroll';
+import { STATUTORY_FIELDS } from '@/lib/people/statutory-fields';
 import { listWorkspaceMembers } from '@/lib/people/members';
 import { overtimeCalculated } from '@/lib/people/overtime';
 import {
@@ -317,7 +318,7 @@ const savePayslipLineToolInput = z.object({
 });
 const setPayslipStatutoryToolInput = z.object({
   payslip_id: z.guid().describe('The payslip, by its id from listPayslips.'),
-  field: z.enum(['epf', 'socso', 'eis', 'pcb']).describe('Which figure, in lower case: epf, socso, eis or pcb.'),
+  field: z.enum(STATUTORY_FIELDS).describe('Which figure, in lower case: epf, socso, eis or pcb.'),
   amount: amountField
     .nullable()
     .refine(
@@ -350,7 +351,9 @@ function runWords(run: RunResult, recalculated: boolean) {
     skipped,
     message: recalculated
       ? `The ${month} draft now has ${count}.${added}${earlier}${left}`
-      : `Payroll for ${month} is a draft with ${count}. Nobody is paid and employees can't see it yet.${earlier}${left}`,
+      : run.payslips === 0
+        ? `Payroll for ${month} has a draft with no payslips: nobody active has a base salary recorded for it.${earlier}${left}`
+        : `Payroll for ${month} is a draft with ${count}. Nobody is paid and employees can't see it yet.${earlier}${left}`,
   };
 }
 
