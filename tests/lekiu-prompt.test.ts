@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LEKIU_SYSTEM } from '@/lib/ai/agents/prompts';
+import { LEKIU_SYSTEM, lekiuSystem } from '@/lib/ai/agents/prompts';
 import { PEOPLE_WRITE_TOOL_NAMES } from '@/lib/ai/products';
 
 const t = LEKIU_SYSTEM.toLowerCase();
@@ -246,5 +246,36 @@ describe('LEKIU_SYSTEM', () => {
       expect(t).toContain('a paid claim counts as approved');
       expect(t).toContain('an hourly rate is pay information');
     });
+  });
+});
+
+describe('lekiuSystem', () => {
+  it('carries the date and weekday in Malaysia, after the fixed prompt', () => {
+    // 11 Oct 2026, 04:00 UTC is Sunday 12:00 in Malaysia.
+    const prompt = lekiuSystem(new Date('2026-10-11T04:00:00.000Z'));
+    expect(prompt.startsWith(LEKIU_SYSTEM)).toBe(true);
+    expect(prompt).toContain('TODAY\n- It is Sunday, 2026-10-11, 12:00 in Malaysia (UTC+8).');
+    expect(prompt).toContain('never from memory');
+  });
+  it('is on the next day in Malaysia once it is past 16:00 UTC', () => {
+    expect(lekiuSystem(new Date('2026-10-10T15:59:00.000Z'))).toContain('It is Saturday, 2026-10-10, 23:59 in Malaysia');
+    expect(lekiuSystem(new Date('2026-10-10T16:00:00.000Z'))).toContain('It is Sunday, 2026-10-11, 00:00 in Malaysia');
+  });
+  it('points date questions at the TODAY block, not at a lookup', () => {
+    expect(t).not.toContain('getpeopleoverview gives it');
+    expect(t).toContain('from the today block');
+  });
+});
+
+describe('own requests and refused calls', () => {
+  it('has an owner or admin leave the employee out for their own request', () => {
+    expect(t).toContain('asks for their own leave or time-off');
+    expect(t).toContain('asks for their own claim or overtime');
+    expect(t).toContain('leave the employee out');
+  });
+  it('explains a refused call with the tool’s reason only', () => {
+    expect(t).toContain('repeat the reason the tool gave');
+    expect(t).toContain('never guess a reason');
+    expect(t).toContain('never tell someone their account is not linked to an employee record unless a tool result says so');
   });
 });

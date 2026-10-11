@@ -25,7 +25,7 @@ import {
 import {
   JEBAT_SYSTEM,
   LEKIR_SYSTEM,
-  LEKIU_SYSTEM,
+  lekiuSystem,
   kasturiSystem,
   tuahSystem,
   tuahTeamSystem,
@@ -137,7 +137,7 @@ export function runLekiu(
   const { tools, toolApproval } = combineToolkits([peopleProduct(people)]);
   return streamText({
     model: getModel('orchestrator', apiKey),
-    system: LEKIU_SYSTEM,
+    system: lekiuSystem(new Date()),
     messages,
     tools,
     toolApproval,
