@@ -4,6 +4,8 @@ import * as React from "react"
 import { cn } from "cn"
 import * as RechartsPrimitive from "recharts"
 import type { TooltipValueType } from "recharts"
+// Local addition (not shadcn): see the three "Local guard" comments in ChartStyle.
+import { isSafeCssColor, isSafeCssKey } from "./chart-style"
 
 // Format: { THEME_NAME: CSS_SELECTOR }
 const THEMES = { light: "", dark: ".dark" } as const
@@ -81,11 +83,13 @@ function ChartContainer({
 }
 
 const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
+  // Local guard 1/3: only keys that are plain identifiers reach the stylesheet.
   const colorConfig = Object.entries(config).filter(
-    ([, config]) => config.theme ?? config.color
+    ([key, config]) => isSafeCssKey(key) && (config.theme ?? config.color)
   )
 
-  if (!colorConfig.length) {
+  // Local guard 2/3: the chart id is written into the selector unescaped too.
+  if (!colorConfig.length || !isSafeCssKey(id)) {
     return null
   }
 
@@ -101,7 +105,8 @@ ${colorConfig
     const color =
       itemConfig.theme?.[theme as keyof typeof itemConfig.theme] ??
       itemConfig.color
-    return color ? `  --color-${key}: ${color};` : null
+    // Local guard 3/3: only values that are a colour are written.
+    return color && isSafeCssColor(color) ? `  --color-${key}: ${color};` : null
   })
   .join("\n")}
 }
