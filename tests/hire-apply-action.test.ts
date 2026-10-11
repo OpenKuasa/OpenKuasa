@@ -623,6 +623,43 @@ describe('a stored PDF whose application is not taken', () => {
     removedOnce();
   });
 
+  const attached = (answer: unknown) =>
+    mocks.rpc.mockImplementation(async (name: string) =>
+      name === 'hire_cv_attached' ? answer : { data: false, error: null });
+
+  it.each([
+    ['answers that it failed', () => mocks.submitPublicApplication.mockResolvedValue({ kind: 'failed' })],
+    ['throws', () => mocks.submitPublicApplication.mockRejectedValue(new Error('lost'))],
+  ])('the sender %s but the application was kept: the file stays and the visitor is thanked', async (_what, arrange) => {
+    arrange();
+    attached({ data: true, error: null });
+    expect(await applyAction(ORG, JOB, undefined, withFile({}, PDF))).toEqual({ done: { firstName: 'Aisyah' } });
+    expect(mocks.rpc).toHaveBeenCalledWith('hire_cv_attached', { p_path: PATH });
+    expect(mocks.removeCv).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['answers with an error', () => attached({ data: null, error: { code: '42501' } })],
+    ['throws', () => mocks.rpc.mockImplementation(async (name: string) => {
+      if (name === 'hire_cv_attached') throw new Error('network');
+      return { data: false, error: null };
+    })],
+  ])('nobody can say whether the application was kept (the question %s): the file is left, and the action fails plainly', async (_what, arrange) => {
+    arrange();
+    mocks.submitPublicApplication.mockResolvedValue({ kind: 'failed' });
+    expect(await applyAction(ORG, JOB, undefined, withFile({}, PDF))).toEqual({
+      error: APPLY_MESSAGES.failed, values: VALUES, fileDropped: true,
+    });
+    expect(mocks.removeCv).not.toHaveBeenCalled();
+  });
+
+  it('a definite refusal is not questioned: the file goes without asking', async () => {
+    mocks.submitPublicApplication.mockResolvedValue({ kind: 'closed' });
+    await applyAction(ORG, JOB, undefined, withFile({}, PDF));
+    expect(mocks.rpc).not.toHaveBeenCalledWith('hire_cv_attached', expect.anything());
+    removedOnce();
+  });
+
   it('is removed before the action answers', async () => {
     mocks.submitPublicApplication.mockResolvedValue({ kind: 'failed' });
     let removed = false;

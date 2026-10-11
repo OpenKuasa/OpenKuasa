@@ -122,6 +122,18 @@ function answerFor(outcome: ApplyOutcome, values: ApplyValues, dropped: { fileDr
  * them, the file's name or where it is stored, and nothing goes back but one
  * of the states above.
  */
+/** Whether an application holds this file: true, false, or null when the question could not be answered. */
+async function cvKept(service: ReturnType<typeof serviceClient>, path: string): Promise<boolean | null> {
+  try {
+    const { data, error } = await service.rpc('hire_cv_attached', { p_path: path });
+    if (!error && typeof data === 'boolean') return data;
+    console.error('[careers/apply] hire_cv_attached failed:', { code: error?.code });
+  } catch (error) {
+    console.error('[careers/apply] hire_cv_attached failed:', codeOf(error));
+  }
+  return null;
+}
+
 export async function applyAction(
   orgId: string,
   jobId: string,
@@ -215,14 +227,23 @@ export async function applyAction(
   if (!path) return { error: APPLY_MESSAGES.cvUploadFailed, values, ...dropped };
 
   // The file is stored. It stays only if the application is taken as a new one: any other end, a thrown
-  // error and a repeat application included, removes it before the visitor is answered.
+  // error and a repeat application included, removes it before the visitor is answered. One case is
+  // asked about first: a call that failed or threw may have been kept by the database all the same.
   let outcome: ApplyOutcome = { kind: 'failed' };
   try {
     outcome = await submitPublicApplication(service, orgId, jobId, values, job.form, null, path);
   } catch (error) {
     console.error('[careers/apply] sending an application with a CV failed:', codeOf(error));
   } finally {
-    if (outcome.kind !== 'ok') {
+    let remove = outcome.kind !== 'ok';
+    if (outcome.kind === 'failed') {
+      const kept = await cvKept(service, path);
+      // Kept: the application has its file, so this was a success the answer got lost from.
+      if (kept === true) outcome = { kind: 'ok' };
+      // Not known: a file with no application is the lesser harm than an application without its file.
+      if (kept !== false) remove = false;
+    }
+    if (remove) {
       try {
         await removeCv(service, path);
       } catch (error) {
