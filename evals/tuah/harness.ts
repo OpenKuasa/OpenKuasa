@@ -169,7 +169,18 @@ export class Conversation {
       },
       {
         data: extra
-          ? { ...realHire, listApplications: async () => [...extra.applications, ...(await realHire.listApplications())] }
+          ? {
+              ...realHire,
+              listApplications: async () => [...extra.applications, ...(await realHire.listApplications())],
+              // An application has a candidate behind it: a lookup by name must find the person too.
+              listCandidates: async () => [
+                ...extra.applications.map((a) => ({
+                  id: a.candidate_id, name: a.candidate_name, email: null, phone: null, headline: null, location: null,
+                  skills: [], source: a.source, pool_status: 'none' as const, created_at: a.created_at,
+                })),
+                ...(await realHire.listCandidates()),
+              ],
+            }
           : realHire,
         files: extra
           ? {
