@@ -1,23 +1,22 @@
 import { beforeAll, expect, test } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { createOrg, joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 function client(): SupabaseClient {
-  return createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
+  return liveClient();
 }
 
 async function anonUserWithOrg(orgName: string) {
   const c = client();
-  const { error: authErr } = await c.auth.signInAnonymously();
+  const { error: authErr } = await signInAnon(c);
   expect(authErr, authErr?.message).toBeNull();
-  const { data: orgId, error } = await c.rpc('create_org_for_current_user', { org_name: orgName });
+  const { data: orgId, error } = await createOrg(c, orgName);
   expect(error, error?.message).toBeNull();
   return { c, orgId: orgId as string };
 }
@@ -121,9 +120,9 @@ testWithSupabase('a number cannot be taken for another workspace, or for an unkn
 
 testWithSupabase('a demo viewer cannot take a number or add an account', async () => {
   const c = client();
-  const { error: authErr } = await c.auth.signInAnonymously();
+  const { error: authErr } = await signInAnon(c);
   expect(authErr, authErr?.message).toBeNull();
-  const { data: demoId, error } = await c.rpc('join_demo_org');
+  const { data: demoId, error } = await joinDemo(c);
   expect(error, error?.message).toBeNull();
   const number = await c.rpc('finance_next_number', { target_org: demoId, doc: 'invoice' });
   expect(number.error?.code).toBe('42501');

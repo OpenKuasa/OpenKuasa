@@ -1,16 +1,14 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { createOrg, joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const client = (): SupabaseClient => createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
+const client = liveClient;
 async function ownedOrg(name: string) {
   const c = client();
-  const e1 = await c.auth.signInAnonymously(); expect(e1.error, e1.error?.message).toBeNull();
-  const { data: orgId, error } = await c.rpc('create_org_for_current_user', { org_name: name });
+  const e1 = await signInAnon(c); expect(e1.error, e1.error?.message).toBeNull();
+  const { data: orgId, error } = await createOrg(c, name);
   expect(error, error?.message).toBeNull();
   return { c, orgId: orgId as string };
 }
@@ -60,9 +58,9 @@ testWithSupabase('a different org cannot see or update the owner’s agent_sched
 });
 
 testWithSupabase('a viewer (demo member) cannot insert agent_schedules', async () => {
-  const v = client(); await v.auth.signInAnonymously();
+  const v = client(); await signInAnon(v);
   try {
-    const { data: demoId } = await v.rpc('join_demo_org');
+    const { data: demoId } = await joinDemo(v);
     expect(demoId).toBeTruthy();
     const { error } = await v.from('agent_schedules').insert(newSchedule(demoId as string));
     expect(error?.code).toBe('42501');

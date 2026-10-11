@@ -1,25 +1,24 @@
 import { beforeAll, expect, test } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { createOrg, joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 function client(): SupabaseClient {
-  return createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
+  return liveClient();
 }
 
 type Org = { c: SupabaseClient; orgId: string; bank: string; cash: string; supplier: string };
 
 async function anonUserWithOrg(orgName: string): Promise<Org> {
   const c = client();
-  const { error: authErr } = await c.auth.signInAnonymously();
+  const { error: authErr } = await signInAnon(c);
   expect(authErr, authErr?.message).toBeNull();
-  const { data: orgId, error } = await c.rpc('create_org_for_current_user', { org_name: orgName });
+  const { data: orgId, error } = await createOrg(c, orgName);
   expect(error, error?.message).toBeNull();
   const { data: accounts } = await c.from('finance_accounts').select('id, name').eq('org_id', orgId);
   const bank = accounts?.find((a) => a.name === 'Main Bank')?.id as string;
@@ -316,9 +315,9 @@ testWithSupabase('a supplier with bills cannot be deleted or stop being a suppli
 
 testWithSupabase('a demo viewer reads the seeded bills and payments but cannot write', async () => {
   const c = client();
-  const { error: authErr } = await c.auth.signInAnonymously();
+  const { error: authErr } = await signInAnon(c);
   expect(authErr, authErr?.message).toBeNull();
-  const { data: demoId, error } = await c.rpc('join_demo_org');
+  const { data: demoId, error } = await joinDemo(c);
   expect(error, error?.message).toBeNull();
 
   const { data: bills } = await c.from('supplier_bill_totals').select('id, supplier_id').eq('org_id', demoId);
