@@ -211,6 +211,7 @@ export async function runWeeklyStudio(
     }
 
     // Autonomous proposals (5b/5c): suggest non-destructive changes for the owner to approve.
+    await reserve(TEXT_ESTIMATE_CENTS);
     try {
       const prop = await proposeChanges(
         service,
