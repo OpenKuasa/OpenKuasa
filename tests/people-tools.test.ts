@@ -21,8 +21,8 @@ const data = createSeedPeopleData(NOW);
 // The tool results are untyped JSON; the tests read them loosely.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Loose = any;
-const runner = (source: PeopleData, viewer: PeopleViewer = HR) => {
-  const tools = createPeopleTools(source, viewer, NOW);
+const runner = (source: PeopleData, viewer: PeopleViewer = HR, now: Date = NOW) => {
+  const tools = createPeopleTools(source, viewer, now);
   return (name: string) => (input: Record<string, unknown>): Promise<Loose> =>
     (tools[name] as unknown as { execute: (i: unknown, o: unknown) => Promise<unknown> }).execute(input, {
       toolCallId: 't', messages: [],
@@ -36,7 +36,7 @@ const EMPTY: PeopleData = {
   listClaims: async () => [], listOvertime: async () => [], listAttendance: async () => [],
   listTimesheet: async () => [], listShifts: async () => [], listPublicHolidays: async () => [],
   listPayrollRuns: async () => [], listPayslips: async () => [], listGoals: async () => [],
-  listScorecards: async () => [], listReviews: async () => [], listTrainings: async () => [],
+  listReviews: async () => [], listTrainings: async () => [],
   listTrainingEnrolments: async () => [], listAnnouncements: async () => [],
   listDocuments: async () => [], listLetters: async () => [], listPaymentVouchers: async () => [],
   getSettings: async () => structuredClone(DEFAULT_PEOPLE_SETTINGS),
@@ -526,5 +526,55 @@ describe('claim and overtime lookups', () => {
     const rows = await data.listClaims();
     const source: PeopleData = { ...data, listClaims: async () => rows.map((c) => ({ ...c, receipt_path: 'u1/secret-file.png' })) };
     expect(JSON.stringify(await runner(source)('listClaims')({}))).not.toContain('secret-file');
+  });
+});
+
+describe('the lookups after the performance slice', () => {
+  const OWN_DRAFT = {
+    id: 'own-draft', employee_id: 'seed-emp-2', employee_name: 'Faiz Hakim', period: 'H1 2026',
+    competencies: { Delivery: 5, Teamwork: 5, Ownership: 5, Communication: 5 }, rating: 'exceeds' as const, score: 5,
+    comment: 'SECRET', status: 'draft' as const, released_at: null, reviewer_name: 'Kavitha', reviewed_at: '2026-09-01',
+  };
+
+  it('counts released reviews only in the performance summary for HR: 18 of the 20, never a draft', async () => {
+    const summary = await run('getPerformanceSummary')({});
+    expect(summary.ratings.exceeds + summary.ratings.meets + summary.ratings.below).toBe(18);
+    const drafts = new Set((await data.listReviews()).filter((r) => r.status === 'draft').map((r) => r.employee_name));
+    expect(summary.top.some((t: { employee: string }) => drafts.has(t.employee))).toBe(false);
+  });
+
+  it('gives a member nothing from their own draft review, even when the rows they are handed include it', async () => {
+    const handed: PeopleData = { ...data, listReviews: async () => [OWN_DRAFT] };
+    const summary = await runner(handed, MEMBER)('getPerformanceSummary')({});
+    expect(summary.average_score).toBeNull();
+    expect(summary.ratings).toEqual({ exceeds: 0, meets: 0, below: 0 });
+    expect(summary.top).toEqual([]);
+    expect(JSON.stringify(summary)).not.toContain('SECRET');
+  });
+
+  it('gives a member their own released review in the summary', async () => {
+    const summary = await runner(asMember(data, 'seed-emp-5'), { ...MEMBER, employeeId: 'seed-emp-5' })('getPerformanceSummary')({});
+    expect(summary.ratings.meets + summary.ratings.exceeds + summary.ratings.below).toBe(1);
+    expect(summary.average_score).toBe(3);
+  });
+
+  it('never hands a member a draft announcement, but lists it for HR', async () => {
+    const asked = { limit: 20 };
+    const member = await runner(data, MEMBER)('listAnnouncements')(asked);
+    expect(member.total).toBe(5);
+    expect(JSON.stringify(member)).not.toContain('Year-end dinner');
+    const hr = await run('listAnnouncements')(asked);
+    expect(JSON.stringify(hr)).toContain('Year-end dinner');
+  });
+
+  it('works a course\'s status out from its dates and the clock, for the filter and for the result', async () => {
+    const trainings = await run('listTrainings')({});
+    expect(trainings.trainings.map((t: { status: string }) => t.status).sort()).toEqual([
+      'completed', 'completed', 'in_progress', 'upcoming', 'upcoming',
+    ]);
+    // Two weeks later the "Consultative selling" course has ended.
+    const later = runner(data, HR, new Date('2026-10-25T04:00:00Z'));
+    expect((await later('listTrainings')({ status: 'completed' })).trainings).toHaveLength(4);
+    expect((await later('listTrainings')({ status: 'in_progress' })).trainings).toHaveLength(0);
   });
 });

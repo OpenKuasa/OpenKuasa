@@ -9,7 +9,6 @@ import type {
   PayrollRun,
   Payslip,
   Review,
-  Scorecard,
   TimesheetEntry,
 } from './types';
 
@@ -97,19 +96,24 @@ export function timesheetByEmployee(
     .sort((a, b) => b.hours - a.hours || a.employee.localeCompare(b.employee));
 }
 
-export function performanceSummary(goals: Goal[], scorecards: Scorecard[], reviews: Review[]) {
+/**
+ * Goals and RELEASED reviews at a glance. A draft review is never counted, whoever asks and whatever rows they
+ * hold: the average, the ratings and the top five are over released reviews only.
+ */
+export function performanceSummary(goals: Goal[], reviews: Review[]) {
+  const released = reviews.filter((r) => r.status === 'released' && Number.isFinite(r.score));
   const goalCount = (status: Goal['status']) => goals.filter((g) => g.status === status).length;
-  const rated = (rating: Review['rating']) => reviews.filter((r) => r.rating === rating).length;
+  const rated = (rating: Review['rating']) => released.filter((r) => r.rating === rating).length;
   return {
     goals: { total: goals.length, on_track: goalCount('on_track'), at_risk: goalCount('at_risk'), done: goalCount('done') },
-    /** Mean scorecard score out of 5. Null when there are no scorecards. */
+    /** Mean review score out of 5. Null when there are no released reviews. */
     average_score:
-      scorecards.length === 0 ? null : oneDecimal(scorecards.reduce((sum, s) => sum + s.score, 0) / scorecards.length),
+      released.length === 0 ? null : oneDecimal(released.reduce((sum, r) => sum + r.score, 0) / released.length),
     ratings: { exceeds: rated('exceeds'), meets: rated('meets'), below: rated('below') },
-    top: [...scorecards]
+    top: [...released]
       .sort((a, b) => b.score - a.score || a.employee_name.localeCompare(b.employee_name))
       .slice(0, 5)
-      .map((s) => ({ employee: s.employee_name, period: s.period, score: s.score })),
+      .map((r) => ({ employee: r.employee_name, period: r.period, score: r.score })),
   };
 }
 

@@ -5,6 +5,7 @@ import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
 import { LiveDot } from '@/components/ui/live-dot';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { todayInMalaysia } from '@/lib/people/dates';
 import { TRAINING_STATUS_LABEL, type TrainingRow, buildTrainingModel } from '@/lib/people/performance';
 import { HR_ONLY, LOAD_FAILED, LaterButton, Muted, StatusPill, loadPeople } from './parts';
 
@@ -17,9 +18,9 @@ const STATUS_TONE = { completed: 'good', in_progress: 'pending', upcoming: 'neut
 const MINE_LABEL = { enrolled: 'You are enrolled', completed: 'Completed' } as const;
 
 export default async function TrainingScreen() {
-  const { model } = await loadPeople('training', async (data, _now, ctx) => {
-    const [trainings, enrolments] = await Promise.all([data.listTrainings(), data.listTrainingEnrolments()]);
-    return buildTrainingModel(trainings, enrolments, ctx.viewer);
+  const { model } = await loadPeople('training', async (data, now, ctx) => {
+    const [trainings, enrolments, employees] = await Promise.all([data.listTrainings(), data.listTrainingEnrolments(), data.listEmployees()]);
+    return buildTrainingModel(trainings, enrolments, ctx.viewer, todayInMalaysia(now), employees);
   });
   const dash = '—';
   const team = model?.team ?? true;

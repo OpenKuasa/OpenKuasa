@@ -9,8 +9,8 @@ import { LOAD_FAILED, LaterButton, Muted, loadPeople } from './parts';
 
 /** Company-wide posts. Every member of the workspace reads the same rows. */
 export default async function AnnouncementsScreen() {
-  const { model } = await loadPeople('announcements', async (data, now) =>
-    buildAnnouncementsModel(await data.listAnnouncements(), now),
+  const { model } = await loadPeople('announcements', async (data, now, ctx) =>
+    buildAnnouncementsModel(await data.listAnnouncements(), now, ctx.viewer),
   );
   const dash = '—';
 

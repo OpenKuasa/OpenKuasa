@@ -105,6 +105,7 @@ import { LOOKUP_MAX, limitSchema, rowLimit } from '@/lib/ai/limits';
 import { matchesText } from '@/lib/hire/applications-view';
 import { addDays, monthStart, timeInMalaysia, todayInMalaysia, weekStart } from '@/lib/people/dates';
 import { blank, hhmm } from '@/lib/people/loose-input';
+import { courseStatus } from '@/lib/people/performance-forms';
 import {
   approvalCounts,
   attendanceOn,
@@ -1034,10 +1035,9 @@ export function createPeopleTools(
       inputSchema: z.object({}),
       execute: async () =>
         safe('getPerformanceSummary', async () => {
-          const [goals, scorecards, reviews] = await Promise.all([
-            data.listGoals(), data.listScorecards(), data.listReviews(),
-          ]);
-          return { ...performanceSummary(goals, scorecards, reviews), scope, ...notLinked, ...askedBy };
+          const [goals, reviews] = await Promise.all([data.listGoals(), data.listReviews()]);
+          // Released reviews only: a draft is never counted, and `performanceSummary` filters again.
+          return { ...performanceSummary(goals, reviews), scope, ...notLinked, ...askedBy };
         }),
     }),
 
@@ -1055,15 +1055,16 @@ export function createPeopleTools(
           return {
             ...notLinked, ...askedBy,
             trainings: trainings
-              .filter((t) => !status || t.status === status)
+              .map((t) => ({ t, courseState: courseStatus(t, today()) }))
+              .filter(({ courseState }) => !status || courseState === status)
               .slice(0, LOOKUP_MAX)
-              .map((t) => ({
+              .map(({ t, courseState }) => ({
                 title: t.title,
                 category: t.category,
                 provider: t.provider,
                 starts_on: t.starts_on,
                 ends_on: t.ends_on,
-                status: t.status,
+                status: courseState,
                 ...(ownOnly
                   ? { you_are_enrolled: enrolments.some((e) => e.training_id === t.id) }
                   : { enrolled: enrolments.filter((e) => e.training_id === t.id).length }),
@@ -1077,7 +1078,8 @@ export function createPeopleTools(
       inputSchema: z.object({ limit }),
       execute: async ({ limit: requested }) =>
         safe('listAnnouncements', async () => {
-          const rows = await data.listAnnouncements();
+          // Someone who is not an owner or admin is never handed a draft, whatever rows came back.
+          const rows = (await data.listAnnouncements()).filter((a) => a.status === 'published' || !ownOnly);
           return {
             total: rows.length,
             announcements: rows.slice(0, rowLimit(requested, 10)).map((a) => ({

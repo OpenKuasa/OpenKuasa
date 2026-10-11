@@ -113,11 +113,10 @@ describe('people seed', () => {
     expect(await data.listShifts('2026-10-05', '2026-10-11')).toHaveLength(35);
     expect(await data.listPublicHolidays()).toHaveLength(6);
     expect(await data.listGoals()).toHaveLength(40);
-    expect(await data.listScorecards()).toHaveLength(20);
     expect(await data.listReviews()).toHaveLength(20);
     expect(await data.listTrainings()).toHaveLength(5);
     expect((await data.listTrainingEnrolments()).length).toBeGreaterThan(0);
-    expect(await data.listAnnouncements()).toHaveLength(5);
+    expect(await data.listAnnouncements()).toHaveLength(6);
     expect((await data.listTimesheet(addDays(TODAY, -55), TODAY)).length).toBeGreaterThan(600);
   });
 

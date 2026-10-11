@@ -33,7 +33,6 @@ import {
   type PublicHoliday,
   type RequestStatus,
   type Review,
-  type Scorecard,
   type Shift,
   type TimeOffRequest,
   type TimesheetEntry,
@@ -147,21 +146,23 @@ const GOALS: [string, number, number][] = [
   ['Mentor one new hire', 55, 75],
 ];
 
-/** title, category, provider, first and last day from today, status. */
-const TRAININGS: [string, string, string, number, number, Training['status']][] = [
-  ['Workplace safety refresher', 'Compliance', 'In-house', -60, -59, 'completed'],
-  ['PDPA for customer data', 'Compliance', 'In-house', -30, -30, 'completed'],
-  ['Consultative selling', 'Sales', 'External trainer', -3, 4, 'in_progress'],
-  ['Excel for finance teams', 'Skills', 'Online course', 12, 13, 'upcoming'],
-  ['First-time manager programme', 'Leadership', 'External trainer', 30, 32, 'upcoming'],
+/** title, category, provider, first and last day from today. A course's status follows its dates. */
+const TRAININGS: [string, string, string, number, number][] = [
+  ['Workplace safety refresher', 'Compliance', 'In-house', -60, -59],
+  ['PDPA for customer data', 'Compliance', 'In-house', -30, -30],
+  ['Consultative selling', 'Sales', 'External trainer', -3, 4],
+  ['Excel for finance teams', 'Skills', 'Online course', 12, 13],
+  ['First-time manager programme', 'Leadership', 'External trainer', 30, 32],
 ];
 
-const ANNOUNCEMENTS: [string, string, Announcement['category'], number][] = [
-  ['Office closed for National Day', 'The office is closed on 31 August. Support runs a skeleton shift.', 'holiday', 4],
-  ['New panel clinics added', 'Three more panel clinics are available under the medical benefit.', 'benefits', 9],
-  ['Quarterly town hall', 'Join the town hall this Friday at 3pm in the main meeting room.', 'general', 13],
-  ['Updated leave policy', 'Annual leave may now be carried forward up to five days.', 'policy', 21],
-  ['Second-half priorities', 'Leadership has shared the three priorities for the second half.', 'strategy', 34],
+/** title, text, category, status, days since it was published (0 for a draft). The last one is still a draft. */
+const ANNOUNCEMENTS: [string, string, Announcement['category'], Announcement['status'], number][] = [
+  ['Office closed for National Day', 'The office is closed on 31 August. Support runs a skeleton shift.', 'holiday', 'published', 4],
+  ['New panel clinics added', 'Three more panel clinics are available under the medical benefit.', 'benefits', 'published', 9],
+  ['Quarterly town hall', 'Join the town hall this Friday at 3pm in the main meeting room.', 'general', 'published', 13],
+  ['Updated leave policy', 'Annual leave may now be carried forward up to five days.', 'policy', 'published', 21],
+  ['Second-half priorities', 'Leadership has shared the three priorities for the second half.', 'strategy', 'published', 34],
+  ['Year-end dinner', 'Save the date for the year-end dinner. Venue and time to be confirmed.', 'general', 'draft', 0],
 ];
 
 /** title, document type, status, issued day from today, expiry day from today. All employee 1's, as in the demo. */
@@ -532,60 +533,76 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
     }),
   );
 
-  const scorecards: Scorecard[] = PEOPLE.map(([n, name]) => ({
-    id: `seed-score-${n}`,
-    employee_id: employeeId(n),
-    employee_name: name,
-    period: `H1 ${year}`,
-    score: 3 + ((n * 7) % 19) / 10,
-    competencies: {
-      Delivery: 3 + ((n * 3) % 20) / 10,
-      Teamwork: 3 + ((n * 5) % 20) / 10,
-      Ownership: 3 + ((n * 11) % 20) / 10,
-      Communication: 3 + ((n * 13) % 20) / 10,
-    },
-  }));
+  // Reviews as the demo's re-seed writes them: four scores in half steps, the overall score their average, all
+  // released but two (employees 10 and 16), which are still drafts.
+  const reviews: Review[] = PEOPLE.map(([n, name]) => {
+    const competencies = {
+      Delivery: 3 + ((n * 3) % 5) * 0.5,
+      Teamwork: 3 + ((n * 5) % 4) * 0.5,
+      Ownership: 2.5 + ((n * 11) % 5) * 0.5,
+      Communication: 3 + ((n * 13) % 5) * 0.5,
+    };
+    const mean = (competencies.Delivery + competencies.Teamwork + competencies.Ownership + competencies.Communication) / 4;
+    const rating: Review['rating'] = mean >= 4.3 ? 'exceeds' : mean >= 3.4 ? 'meets' : 'below';
+    const draft = n === 10 || n === 16;
+    return {
+      id: `seed-review-${n}`,
+      employee_id: employeeId(n),
+      employee_name: name,
+      period: `H1 ${year}`,
+      competencies,
+      rating,
+      score: Math.round(mean * 100) / 100,
+      comment:
+        rating === 'exceeds'
+          ? 'Consistently ahead of plan, and a steady hand for the team.'
+          : rating === 'meets'
+            ? 'A solid half. Keep building on ownership of the bigger pieces.'
+            : 'Below what the role needs this half. A plan for the next quarter is agreed.',
+      status: draft ? 'draft' : 'released',
+      released_at: draft ? null : ago(40),
+      reviewer_name: 'Kavitha Nair',
+      reviewed_at: addDays(today, -45),
+    };
+  });
 
-  const reviews: Review[] = scorecards.map((card) => ({
-    id: card.id.replace('score', 'review'),
-    employee_id: card.employee_id,
-    employee_name: card.employee_name,
-    period: card.period,
-    rating: card.score >= 4.3 ? 'exceeds' : card.score >= 3.4 ? 'meets' : 'below',
-    score: card.score,
-    reviewer_name: 'Kavitha Nair',
-    reviewed_at: addDays(today, -45),
-  }));
-
-  const trainings: Training[] = TRAININGS.map(([title, category, provider, from, to, status], index) => ({
+  const trainings: Training[] = TRAININGS.map(([title, category, provider, from, to], index) => ({
     id: `seed-training-${index + 1}`,
     title,
     category,
     provider,
     starts_on: addDays(today, from),
     ends_on: addDays(today, to),
-    status,
   }));
 
+  // Whoever is marked completed carries the time: the end of the course's last day, Malaysia time.
   const enrolments: TrainingEnrolment[] = PEOPLE.flatMap(([n]) =>
     trainings
       .map((training, index) => ({ training, k: index + 1 }))
       .filter(({ k }) => (n + k) % 3 === 0 || (n === 1 && k <= 3))
-      .map(({ training }): TrainingEnrolment => ({
-        id: `seed-enrol-${n}-${training.id}`,
-        employee_id: employeeId(n),
-        training_id: training.id,
-        completed: training.status === 'completed',
-      })),
+      .map(({ training }): TrainingEnrolment => {
+        const done = (training.ends_on ?? today) < today;
+        return {
+          id: `seed-enrol-${n}-${training.id}`,
+          employee_id: employeeId(n),
+          training_id: training.id,
+          completed: done,
+          completed_at: done ? `${training.ends_on}T10:00:00.000Z` : null,
+        };
+      }),
   );
 
-  const announcements: Announcement[] = ANNOUNCEMENTS.map(([title, body, category, days], index) => ({
+  const announcements: Announcement[] = ANNOUNCEMENTS.map(([title, body, category, status, days], index) => ({
     id: `seed-announcement-${index + 1}`,
     title,
     body,
     category,
-    published_at: ago(days),
-    author_name: 'Siti Lestari',
+    status,
+    published_at: status === 'published' ? ago(days) : null,
+    author_name: status === 'published' ? 'Siti Lestari' : null,
+    edited_at: null,
+    // The sample company is the demo: nobody in it has read marks, and its unread count is always zero.
+    unread: false,
   }));
 
   const documents: HrDocument[] = [
@@ -652,7 +669,6 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
     listPayslips: async (employeeId) =>
       employeeId ? payslips.filter((p) => p.employee_id === employeeId) : payslips,
     listGoals: async () => goals,
-    listScorecards: async () => scorecards,
     listReviews: async () => reviews,
     listTrainings: async () => trainings,
     listTrainingEnrolments: async () => enrolments,

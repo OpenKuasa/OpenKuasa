@@ -7,7 +7,14 @@ import {
 } from '@/lib/people/company';
 import { todayInMalaysia } from '@/lib/people/dates';
 import { createSeedPeopleData } from '@/lib/people/seed';
-import type { AttendanceDay, PayrollRun, PeopleData } from '@/lib/people/types';
+import {
+  type Announcement,
+  type AttendanceDay,
+  DEMO_EMPLOYEE_ID,
+  type PayrollRun,
+  type PeopleData,
+  type PeopleViewer,
+} from '@/lib/people/types';
 
 const NOW = new Date('2026-10-09T04:00:00Z');
 const TODAY = todayInMalaysia(NOW);
@@ -109,14 +116,59 @@ describe('buildDashboardModel', () => {
   });
 });
 
+const HR: PeopleViewer = { employeeId: null, isHr: true, isDemo: false };
+const MEMBER: PeopleViewer = { employeeId: 'seed-emp-5', isHr: false, isDemo: false };
+const DEMO: PeopleViewer = { employeeId: DEMO_EMPLOYEE_ID, isHr: false, isDemo: true };
+
+const post = (over: Partial<Announcement> = {}): Announcement => ({
+  id: '1',
+  title: 'a',
+  body: 'b',
+  category: 'general',
+  status: 'published',
+  published_at: '2026-10-02T01:00:00Z',
+  author_name: 'A',
+  edited_at: null,
+  unread: false,
+  ...over,
+});
+const draft = (over: Partial<Announcement> = {}) =>
+  post({ id: 'd', title: 'Draft one', status: 'draft', published_at: null, author_name: null, ...over });
+
 describe('buildAnnouncementsModel', () => {
-  it('counts the sample announcements, one per category', async () => {
-    const model = buildAnnouncementsModel(await data.listAnnouncements(), NOW);
+  it('counts the published sample announcements, one per category, and lists the draft apart for the team', async () => {
+    const model = buildAnnouncementsModel(await data.listAnnouncements(), NOW, HR);
     expect(model.total).toBe(5);
     expect(model.categories).toBe(5);
     expect(model.byCategory).toHaveLength(5);
     expect(model.byCategory.every((c) => c.value === 1)).toBe(true);
     expect(model.byCategory.map((c) => c.label)).toEqual(['General', 'Holiday', 'Benefits', 'Strategy', 'Policy']);
+    expect(model.drafts).toBe(1);
+    expect(model.list).toHaveLength(6);
+  });
+
+  it('puts drafts first for a team viewer, marked, and published ones newest first after them', async () => {
+    const model = buildAnnouncementsModel(await data.listAnnouncements(), NOW, HR);
+    expect(model.list[0]).toMatchObject({ title: 'Year-end dinner', draft: true, status: 'draft', when: 'Draft', published_at: null });
+    expect(model.list.slice(1).every((a) => !a.draft)).toBe(true);
+    expect(model.list.slice(1).map((a) => a.title)).toEqual([
+      'Office closed for National Day',
+      'New panel clinics added',
+      'Quarterly town hall',
+      'Updated leave policy',
+      'Second-half priorities',
+    ]);
+  });
+
+  it('never returns a draft to anyone else, however many are handed over, and says nothing of them', async () => {
+    const rows = [...(await data.listAnnouncements()), draft({ id: 'd2', title: 'SECRET DRAFT TITLE' })];
+    const model = buildAnnouncementsModel(rows, NOW, MEMBER);
+    expect(model.list).toHaveLength(5);
+    expect(model.list.every((a) => !a.draft && a.status === 'published')).toBe(true);
+    expect(model.total).toBe(5);
+    expect(model.drafts).toBeNull();
+    expect(JSON.stringify(model)).not.toContain('SECRET DRAFT TITLE');
+    expect(JSON.stringify(model)).not.toContain('Year-end dinner');
   });
 
   it('lists newest first with an author fallback and a relative time', async () => {
@@ -124,27 +176,65 @@ describe('buildAnnouncementsModel', () => {
     const model = buildAnnouncementsModel(
       [...rows, { ...rows[0], id: 'x', title: 'Fresh', published_at: '2026-10-09T03:00:00Z', author_name: null }],
       NOW,
+      MEMBER,
     );
     expect(model.list[0]).toMatchObject({ title: 'Fresh', author: 'Unknown', when: '1 hour ago' });
-    const times = model.list.map((a) => a.title);
-    expect(times).toHaveLength(6);
+    expect(model.list).toHaveLength(6);
   });
 
-  it('counts only this month in This month', () => {
-    const base = { id: '1', title: 'a', body: 'b', category: 'general' as const, author_name: 'A' };
+  it('counts only this month, over published announcements, in This month', () => {
     const model = buildAnnouncementsModel(
       [
-        { ...base, published_at: '2026-10-02T01:00:00Z' },
-        { ...base, id: '2', published_at: '2026-09-30T01:00:00Z' },
+        post({ published_at: '2026-10-02T01:00:00Z' }),
+        post({ id: '2', published_at: '2026-09-30T01:00:00Z' }),
+        draft({ id: '3' }),
       ],
       NOW,
+      HR,
     );
     expect(model.thisMonth).toBe(1);
+    expect(model.total).toBe(2);
+  });
+
+  it('carries the unread flag for the viewer and counts it, never on a draft', () => {
+    const rows = [post({ id: 'u', title: 'Unread', unread: true }), post({ id: 'r', title: 'Read' }), draft({ unread: true })];
+    const model = buildAnnouncementsModel(rows, NOW, HR);
+    expect(model.list.find((a) => a.id === 'u')?.unread).toBe(true);
+    expect(model.list.find((a) => a.id === 'r')?.unread).toBe(false);
+    expect(model.list.find((a) => a.id === 'd')?.unread).toBe(false);
+    expect(model.unread).toBe(1);
+    expect(buildAnnouncementsModel(rows, NOW, MEMBER).unread).toBe(1);
+  });
+
+  it('shows no unread flag and no count in the demo, whatever the rows say', () => {
+    const model = buildAnnouncementsModel([post({ unread: true })], NOW, DEMO);
+    expect(model.unread).toBe(0);
+    expect(model.list[0].unread).toBe(false);
+  });
+
+  it('marks an announcement edited after it was published', () => {
+    const model = buildAnnouncementsModel([post({ edited_at: '2026-10-05T01:00:00Z' }), post({ id: '2' })], NOW, MEMBER);
+    expect(model.list.map((a) => a.edited).sort()).toEqual([false, true]);
+  });
+
+  it('carries the key of the category for the edit form', () => {
+    expect(buildAnnouncementsModel([post({ category: 'policy' })], NOW, HR).list[0]).toMatchObject({
+      category: 'Policy',
+      category_key: 'policy',
+    });
+  });
+
+  it('tolerates a published row with no time: counted, never this month, sorted last, no NaN', () => {
+    const model = buildAnnouncementsModel([post({ id: 'n', title: 'No time', published_at: null }), post({ id: 'ok' })], NOW, MEMBER);
+    expect(model.total).toBe(2);
+    expect(model.thisMonth).toBe(1);
+    expect(model.list.map((a) => a.id)).toEqual(['ok', 'n']);
+    expect(JSON.stringify(model)).not.toMatch(/NaN|Infinity/);
   });
 
   it('is empty without rows', () => {
-    const model = buildAnnouncementsModel([], NOW);
-    expect(model).toMatchObject({ total: 0, thisMonth: 0, categories: 0, byCategory: [], list: [] });
+    const model = buildAnnouncementsModel([], NOW, HR);
+    expect(model).toMatchObject({ total: 0, thisMonth: 0, categories: 0, byCategory: [], list: [], drafts: 0, unread: 0 });
   });
 });
 

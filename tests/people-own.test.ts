@@ -84,7 +84,7 @@ describe('departmentAverages', () => {
 
   it('averages scores per department, highest first, with unassigned staff apart', async () => {
     const employees = await data.listEmployees();
-    const out = departmentAverages(await data.listScorecards(), employees);
+    const out = departmentAverages(await data.listReviews(), employees);
     expect(out.reduce((total, d) => total + d.count, 0)).toBe(20);
     const averages = out.map((d) => d.average);
     expect(averages).toEqual([...averages].sort((a, b) => b - a));

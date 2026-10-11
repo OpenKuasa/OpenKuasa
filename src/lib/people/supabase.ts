@@ -23,7 +23,6 @@ import type {
   PeopleSettings,
   PublicHoliday,
   Review,
-  Scorecard,
   Shift,
   TimeOffRequest,
   TimesheetEntry,
@@ -64,14 +63,20 @@ const OVERTIME_COLUMNS =
 const PAYSLIP_COLUMNS =
   'id,employee_id,payroll_run_id,period_month,basic_cents,gross_cents,epf_cents,socso_cents,eis_cents,pcb_cents,' +
   `other_deductions_cents,net_cents,set_by_hr,status,lines:hr_payslip_lines(id,payslip_id,kind,source,label,amount_cents,created_at,${LINE_WORK_DATE}),${PAYSLIP_NAME}`;
-const GOAL_COLUMNS = `id,employee_id,title,progress,due_date,status,${NAME}`;
-const SCORECARD_COLUMNS = `id,employee_id,period,score,competencies,${NAME}`;
+// A goal and a review reach their employee by a composite foreign key (employee_id, org_id), named by its columns.
+const GOAL_NAME = 'employee:hr_employees!hr_goals_employee_id_org_id_fkey(name)';
+const REVIEW_NAME = 'employee:hr_employees!hr_reviews_employee_id_org_id_fkey(name)';
+const GOAL_COLUMNS = `id,employee_id,title,progress,due_date,status,${GOAL_NAME}`;
 const DOCUMENT_COLUMNS = `id,employee_id,title,doc_type,status,issued_on,expires_on,${NAME}`;
 const LETTER_COLUMNS = `id,employee_id,letter_type,title,status,issued_on,created_at,${NAME}`;
 const VOUCHER_COLUMNS = 'id,voucher_no,payee,voucher_type,amount_cents,issued_date,status';
 const SETTINGS_COLUMNS = 'work_week,work_start_time,late_grace_minutes,default_annual_leave_days,default_medical_leave_days,default_emergency_leave_days,overtime_rates,notifications';
 const ATTENDANCE_COLUMNS = 'id,employee_id,work_date,clock_in,clock_out,status,corrected_at,correction_note';
-const REVIEW_COLUMNS = `id,employee_id,period,rating,score,reviewer_name,reviewed_at,${NAME}`;
+const REVIEW_COLUMNS =
+  'id,employee_id,period,competencies,rating,score,comment,status,released_at,reviewer_name,reviewed_at,' + REVIEW_NAME;
+const TRAINING_COLUMNS = 'id,title,category,provider,starts_on,ends_on';
+const ENROLMENT_COLUMNS = 'id,employee_id,training_id,completed,completed_at';
+const ANNOUNCEMENT_COLUMNS = 'id,title,body,category,status,published_at,author_name,edited_at';
 
 type Named = { name?: string | null } | null | undefined;
 type WithEmployee<T> = Omit<T, 'employee_name'> & { employee: Named };
@@ -135,6 +140,80 @@ function overtimeOf({ payslip, ...row }: OvertimeRow): OvertimeRecord {
   return {
     ...named(row),
     paid_month: payslip && payslip.status === 'paid' ? payslip.period_month.slice(0, 7) : null,
+  };
+}
+
+/** True when `a` is a later instant than `b` (microseconds compared, not just milliseconds). */
+export function isAfter(a: string, b: string): boolean {
+  const [ams, amicro] = instant(a);
+  const [bms, bmicro] = instant(b);
+  return ams - bms > 0 || (ams === bms && amicro > bmicro);
+}
+
+export type UnreadContext = { joinedAt: string | null; read: Set<string> };
+const NO_MARKS: UnreadContext = { joinedAt: null, read: new Set() };
+
+/**
+ * Unread for a person: published, published strictly after they joined the workspace, and not marked read by them.
+ * An owner and an admin count the same way (they have a join time too). Without a join time (no session or no
+ * membership) nothing is unread. The database function `hr_unread_announcements` counts by the same rule.
+ */
+export function isUnread(
+  row: { id: string; status: string; published_at: string | null },
+  context: UnreadContext,
+): boolean {
+  return (
+    row.status === 'published' &&
+    row.published_at !== null &&
+    context.joinedAt !== null &&
+    !context.read.has(row.id) &&
+    isAfter(row.published_at, context.joinedAt)
+  );
+}
+
+type ReviewRow = WithEmployee<Omit<Review, 'competencies' | 'score' | 'status'>> & {
+  competencies: unknown;
+  score: number | string;
+  status: string;
+};
+type EnrolmentRow = Omit<TrainingEnrolment, 'completed_at'> & { completed_at?: string | null };
+type AnnouncementRow = Omit<Announcement, 'unread' | 'status' | 'edited_at' | 'published_at'> & {
+  status: string;
+  published_at: string | null;
+  edited_at?: string | null;
+};
+
+/**
+ * A review as the screens read it. Anything that is not exactly `released` is a draft (fail closed); the scores are
+ * the finite numbers among the stored ones, so a review with `{}` has none and nothing downstream turns NaN.
+ */
+function reviewOf(row: ReviewRow): Review {
+  const { competencies, score, status, ...rest } = named(row);
+  const scores: Record<string, number> = {};
+  if (typeof competencies === 'object' && competencies !== null && !Array.isArray(competencies)) {
+    for (const [name, value] of Object.entries(competencies)) {
+      if (typeof value === 'number' && Number.isFinite(value)) scores[name] = value;
+    }
+  }
+  return {
+    ...rest,
+    competencies: scores as Review['competencies'],
+    score: Number.isFinite(Number(score)) ? Number(score) : 0,
+    status: status === 'released' ? 'released' : 'draft',
+    comment: rest.comment ?? null,
+    released_at: rest.released_at ?? null,
+  };
+}
+
+/** An announcement with its unread flag for the caller. Anything that is not exactly `published` is a draft (fail closed). */
+function announcementOf(row: AnnouncementRow, context: UnreadContext): Announcement {
+  const status = row.status === 'published' ? 'published' : 'draft';
+  return {
+    ...row,
+    status,
+    published_at: row.published_at ?? null,
+    edited_at: row.edited_at ?? null,
+    unread: isUnread({ id: row.id, status, published_at: row.published_at ?? null }, context),
   };
 }
 
@@ -209,6 +288,40 @@ export function createSupabasePeopleData(client: SupabaseClient, orgId: string):
 
   const byWorkDate = (from: string, to: string): Options => ({ window: { column: 'work_date', from, to } });
 
+  /**
+   * What decides "unread" for the caller: when they joined this workspace and which announcements they marked.
+   * Row level security gives a person only their own marks. Someone with no session, or no membership, has none.
+   */
+  async function unreadContext(): Promise<UnreadContext> {
+    const {
+      data: { user },
+    } = await client.auth.getUser();
+    if (!user) return NO_MARKS;
+    const { data: member, error } = await client
+      .from('org_members')
+      .select('created_at')
+      .eq('org_id', orgId)
+      .eq('user_id', user.id)
+      .maybeSingle();
+    if (error) throw error;
+    const joinedAt = (member as { created_at?: string } | null)?.created_at ?? null;
+    if (joinedAt === null) return NO_MARKS;
+    const read = new Set<string>();
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      const { data, error: readError } = await client
+        .from('hr_announcement_reads')
+        .select('announcement_id')
+        .eq('user_id', user.id)
+        .order('announcement_id', { ascending: true })
+        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+      if (readError) throw readError;
+      const batch = (data ?? []) as { announcement_id: string }[];
+      for (const mark of batch) read.add(mark.announcement_id);
+      if (batch.length < PAGE_SIZE) break;
+    }
+    return { joinedAt, read };
+  }
+
   return {
     listDepartments: () => rows<Department>('hr_departments', 'id,name,created_at', { col: 'name', asc: true }),
     listEmployees: async () =>
@@ -269,16 +382,25 @@ export function createSupabasePeopleData(client: SupabaseClient, orgId: string):
       ).map(payslipOf),
     listGoals: async () =>
       (await rows<WithEmployee<Goal>>('hr_goals', GOAL_COLUMNS, { col: 'due_date', asc: true })).map(named),
-    listScorecards: async () =>
-      (await rows<WithEmployee<Scorecard>>('hr_scorecards', SCORECARD_COLUMNS, { col: 'score', asc: false })).map(named),
+    // No status filter on reviews or announcements: the database decides who reads a draft (an owner or admin, and
+    // the demo), and the models filter again.
     listReviews: async () =>
-      (await rows<WithEmployee<Review>>('hr_reviews', REVIEW_COLUMNS, { col: 'score', asc: false })).map(named),
-    listTrainings: () =>
-      rows<Training>('hr_trainings', 'id,title,category,provider,starts_on,ends_on,status', { col: 'starts_on', asc: false }),
-    listTrainingEnrolments: () =>
-      rows<TrainingEnrolment>('hr_training_enrolments', 'id,employee_id,training_id,completed', { col: 'created_at', asc: false }),
-    listAnnouncements: () =>
-      rows<Announcement>('hr_announcements', 'id,title,body,category,published_at,author_name', { col: 'published_at', asc: false }),
+      (await rows<ReviewRow>('hr_reviews', REVIEW_COLUMNS, { col: 'score', asc: false })).map(reviewOf),
+    listTrainings: () => rows<Training>('hr_trainings', TRAINING_COLUMNS, { col: 'starts_on', asc: false }),
+    listTrainingEnrolments: async () =>
+      (await rows<EnrolmentRow>('hr_training_enrolments', ENROLMENT_COLUMNS, { col: 'created_at', asc: false })).map(
+        (row) => ({ ...row, completed_at: row.completed_at ?? null }),
+      ),
+    listAnnouncements: async () => {
+      const list = await rows<AnnouncementRow>('hr_announcements', ANNOUNCEMENT_COLUMNS, {
+        col: 'published_at',
+        asc: false,
+        nullsLast: true,
+      });
+      // The caller's own read marks and join time are read only when there is something published to be unread.
+      const marks = list.some((row) => row.status === 'published') ? await unreadContext() : NO_MARKS;
+      return list.map((row) => announcementOf(row, marks));
+    },
     listDocuments: async () =>
       (await rows<WithEmployee<HrDocument>>('hr_documents', DOCUMENT_COLUMNS, { col: 'issued_on', asc: false, nullsLast: true })).map(named),
     listLetters: async () =>
@@ -311,7 +433,6 @@ const EMPTY_PEOPLE_DATA: PeopleData = {
   listPayrollRuns: none,
   listPayslips: none,
   listGoals: none,
-  listScorecards: none,
   listReviews: none,
   listTrainings: none,
   listTrainingEnrolments: none,

@@ -12,8 +12,8 @@ const DEPT_SERIES: Series[] = [{ key: 'score', label: 'Avg score', color: 'var(-
 
 export default async function ScorecardScreen() {
   const { model } = await loadPeople('scorecard', async (data, _now, ctx) => {
-    const [scorecards, employees] = await Promise.all([data.listScorecards(), data.listEmployees()]);
-    return buildScorecardModel(scorecards, employees, ctx.viewer);
+    const [reviews, employees] = await Promise.all([data.listReviews(), data.listEmployees()]);
+    return buildScorecardModel(reviews, employees, ctx.viewer);
   });
   const dash = '—';
   const team = model?.team ?? true;
