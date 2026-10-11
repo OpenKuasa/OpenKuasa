@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, expect, test, type TestContext } from 'vitest';
+import { beforeAll, expect, test, type TestContext } from 'vitest';
 import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { createOrg, joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
+import { createOrg, joinDemo, signInAnon, liveClient, beforeCleanup } from './helpers/live-workspaces';
 import { formsTableMissing, formsTableSkipReason } from './helpers/forms-table';
 import { createSupabaseReachData } from '@/lib/reach/supabase';
 import { createForm, deleteForm, setFormStatus } from '@/lib/reach/capabilities';
@@ -42,9 +42,14 @@ beforeAll(async () => {
   owner = await ownedOrg(first, 'Forms Writer Sdn Bhd');
   other = await ownedOrg(await signedIn(), 'Forms Other Sdn Bhd');
 });
-afterAll(async () => {
-  await owner?.c.auth.signOut();
-  await other?.c.auth.signOut();
+// If the cleanup cannot delete the workspaces (no key, migration not applied), they must not keep
+// active public forms, so this pauses the forms this file created, first inside the helper's cleanup,
+// while the owners' sessions are still valid (nothing signs them out earlier).
+beforeCleanup(async () => {
+  for (const org of [owner, other]) {
+    if (!org) continue;
+    await org.c.from('forms').update({ status: 'paused' }).eq('org_id', org.orgId);
+  }
 });
 
 /** Skips a test, visibly, while the table is not there yet. */

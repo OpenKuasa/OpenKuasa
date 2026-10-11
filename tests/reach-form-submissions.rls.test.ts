@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, expect, test, type TestContext } from 'vitest';
+import { beforeAll, expect, test, type TestContext } from 'vitest';
 import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { createOrg, joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
+import { createOrg, joinDemo, signInAnon, liveClient, beforeCleanup } from './helpers/live-workspaces';
 import {
   formSubmissionsMissing,
   formSubmissionsSkipReason,
@@ -51,10 +51,13 @@ beforeAll(async () => {
   owner = await ownedOrg(first, ORG_NAME);
   other = await ownedOrg(await signedIn(), 'Public Forms Other Sdn Bhd');
 });
-afterAll(async () => {
+// If the cleanup cannot delete the workspaces (no key, migration not applied), they must not keep
+// active public forms, so this pauses the forms this file created, first inside the helper's cleanup,
+// while the owners' sessions are still valid (nothing signs them out earlier).
+beforeCleanup(async () => {
   for (const org of [owner, other]) {
     if (!org) continue;
-    await org.c.auth.signOut();
+    await org.c.from('forms').update({ status: 'paused' }).eq('org_id', org.orgId);
   }
 });
 
