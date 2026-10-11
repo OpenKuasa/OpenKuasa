@@ -224,6 +224,20 @@ describe('the Add Candidate form', () => {
     expect(html).not.toContain('name="cv_url"');
   });
 
+  it('with no job: the hint tied to the job select says the person will not be on the board, and that Lekir can find them', () => {
+    const html = addForm();
+    const hintId = attr(control(html, 'Job'), 'aria-describedby')!;
+    const hint = unescape(new RegExp(`<p\\b[^>]*id="${hintId}"[^>]*>([^<]*)</p>`).exec(html)?.[1] ?? '');
+    expect(hint).toBe(
+      'This person will not appear on the board until they are added to a job. Lekir can find them by name. '
+      + 'A CV can be added once the candidate is put forward for a job.',
+    );
+    // Said only while no job is picked, and never on the Edit form, which has no job.
+    expect(text(addForm(JOBS[0].id))).not.toMatch(/will not appear on the board|Lekir can find/);
+    expect(attr(control(addForm(JOBS[0].id), 'Job'), 'aria-describedby')).toBeUndefined();
+    expect(text(editForm())).not.toMatch(/will not appear on the board|Lekir can find/);
+  });
+
   it('with a job: a fieldset For this application with the cover note and its count, the CV link and the file input', () => {
     const html = addForm(JOBS[0].id);
     expect(text(html)).not.toContain('A CV can be added once');

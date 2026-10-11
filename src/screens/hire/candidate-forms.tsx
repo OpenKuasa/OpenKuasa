@@ -57,7 +57,13 @@ const NOT_SENT = 'That change could not be sent. Check your connection and try a
 const NOT_LOADED = "This candidate's details could not be loaded. Check your connection and try again.";
 const NOTHING_CHANGED = 'Nothing was changed.';
 const NO_EMAIL = "Without an email, this person can't be matched if they apply online later.";
-const CV_LATER = 'A CV can be added once the candidate is put forward for a job.';
+/**
+ * Under the job select while no job is picked. The board and the lists are drawn from applications, so
+ * someone added without a job is on none of them: the hint says so, and where they can still be found.
+ */
+const NO_JOB_HINT =
+  'This person will not appear on the board until they are added to a job. Lekir can find them by name. '
+  + 'A CV can be added once the candidate is put forward for a job.';
 
 /** The seven details of the person, in the order both forms show them. */
 const PERSON_FIELDS = ['name', 'email', 'phone', 'headline', 'location', 'skills', 'source'] as const satisfies readonly Field[];
@@ -457,7 +463,7 @@ function CandidateForm({
           {errorOf('job_id')}
           {hasJob ? null : (
             <p id={helpId('job_id')} className={HELP}>
-              {CV_LATER}
+              {NO_JOB_HINT}
             </p>
           )}
         </div>
