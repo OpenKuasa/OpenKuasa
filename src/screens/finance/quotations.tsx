@@ -1,23 +1,61 @@
-import { QuotationsView } from '@/components/finance/quotations-view';
+import {
+  acceptQuotationAction,
+  convertQuotationAction,
+  declineQuotationAction,
+  deleteQuotationAction,
+  getQuotationAction,
+  saveAndSendQuotationAction,
+  saveQuotationAction,
+  sendQuotationAction,
+} from '@/app/(app)/finance/actions';
+import { type QuotationActions, QuotationsView } from '@/components/finance/quotations-view';
+import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
+import { listContacts } from '@/lib/finance/contacts';
+import { listProducts } from '@/lib/finance/products';
 import { listQuotations } from '@/lib/finance/quotations';
 import { quotationsView } from '@/lib/finance/sales-followon-views';
 import { todayUtc } from '@/lib/finance/view-helpers';
 import { createClient } from '@/lib/supabase/server';
 import { SAMPLE_QUOTATIONS, SAMPLE_TODAY } from './sales-sample';
 
-/**
- * Quotations, read-only for everyone in this stage: the view takes no
- * actions, so nothing here depends on the viewer's role. The form and the row
- * actions arrive with the next stage, given only to people who may edit, as
- * on Invoices.
- */
+const ACTIONS: QuotationActions = {
+  save: saveQuotationAction,
+  saveAndPost: saveAndSendQuotationAction,
+  send: sendQuotationAction,
+  accept: acceptQuotationAction,
+  decline: declineQuotationAction,
+  remove: deleteQuotationAction,
+  get: getQuotationAction,
+  convert: convertQuotationAction,
+};
+
 export default async function QuotationsScreen() {
   if (!hasSupabaseEnv()) {
     return <QuotationsView rows={SAMPLE_QUOTATIONS} view={quotationsView(SAMPLE_QUOTATIONS, SAMPLE_TODAY)} />;
   }
   const viewer = await getViewer();
   const ctx = { client: await createClient(), orgId: viewer.orgId };
-  const rows = await listQuotations(ctx);
-  return <QuotationsView rows={rows} view={quotationsView(rows, todayUtc())} />;
+  const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
+  // The form offers customers and products; a viewer has no form, so neither is read for them.
+  const [rows, contacts, products] = await Promise.all([
+    listQuotations(ctx),
+    canEdit ? listContacts(ctx) : [],
+    canEdit ? listProducts(ctx) : [],
+  ]);
+  return (
+    <QuotationsView
+      rows={rows}
+      view={quotationsView(rows, todayUtc())}
+      writer={
+        canEdit
+          ? {
+              actions: ACTIONS,
+              customers: contacts.filter((c) => c.is_customer && c.active),
+              products: products.filter((p) => p.active),
+            }
+          : undefined
+      }
+    />
+  );
 }
