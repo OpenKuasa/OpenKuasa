@@ -474,7 +474,8 @@ export const CASES: Case[] = [
       const turn = await cvChat(ws).ask("Summarise Nurul Aisyah's CV for the Sales Executive role.");
       return [
         askedLekir(turn.asked),
-        check('says what is in the CV', /salesforce|key account|b2b/i.test(turn.text), turn.text),
+        // Words a guess from the job title would not produce: they are only in the file.
+        check('says what is in the CV', /salesforce|hokkien|politeknik|tanjung|95 accounts/i.test(turn.text), turn.text),
         check('proposed no change', turn.pending.length === 0),
       ];
     },
