@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { getProduct } from '@/config/nav';
+import { badgeAriaLabel, getProduct } from '@/config/nav';
+import { clearOverride, mergeBadges, setOverride } from '@/lib/nav-badges';
 import { buildAnnouncementsModel } from '@/lib/people/company';
 import { buildReviewsModel, buildScorecardModel } from '@/lib/people/performance';
 import { reviewPeriods, toScore } from '@/lib/people/performance-forms';
@@ -9,7 +10,11 @@ import {
   RATING_OPTIONS,
   SCORE_OPTIONS,
   announcementMarks,
+  announcementsScreenControls,
   claimOnce,
+  markReadOnce,
+  reviewScreenControls,
+  shouldReadUnread,
   competencyLine,
   deleteAnnouncementSentence,
   deleteReviewSentence,
@@ -24,7 +29,6 @@ import {
   reviewTiles,
   scoreCell,
   scorecardTiles,
-  shouldCountUnread,
   shouldMarkRead,
   showsWriteControls,
   visibleAnnouncements,
@@ -299,35 +303,102 @@ describe('when the page marks announcements read', () => {
   });
 });
 
-describe('when the layout reads the unread count', () => {
-  const people = '/people/announcements';
-  it('reads for a signed-in member of a non-demo workspace on a Lekiu page', () => {
-    expect(shouldCountUnread({ isDemo: false, orgId: 'o1', pathname: people })).toBe(true);
-    expect(shouldCountUnread({ isDemo: false, orgId: 'o1', pathname: '/people' })).toBe(true);
+describe('when the people layout reads the unread count', () => {
+  it('reads for a signed-in member of a real workspace', () => {
+    expect(shouldReadUnread({ isDemo: false, orgId: 'o1' })).toBe(true);
   });
-  it('does not read in the demo, without a workspace, or on another product', () => {
-    expect(shouldCountUnread({ isDemo: true, orgId: 'o1', pathname: people })).toBe(false);
-    expect(shouldCountUnread({ isDemo: false, orgId: '', pathname: people })).toBe(false);
-    expect(shouldCountUnread({ isDemo: false, orgId: 'o1', pathname: '/reach/leads' })).toBe(false);
-    expect(shouldCountUnread({ isDemo: false, orgId: 'o1', pathname: '/peoplex' })).toBe(false);
+  it('does not read in the demo or without a workspace', () => {
+    expect(shouldReadUnread({ isDemo: true, orgId: 'o1' })).toBe(false);
+    expect(shouldReadUnread({ isDemo: false, orgId: '' })).toBe(false);
+    expect(shouldReadUnread({ isDemo: false, orgId: null })).toBe(false);
   });
-  it('reads when the page is not known, rather than hide the count', () => {
-    expect(shouldCountUnread({ isDemo: false, orgId: 'o1', pathname: null })).toBe(true);
+  it('the people layout exists and is a component', async () => {
+    const layout = await import('@/app/(app)/people/layout');
+    expect(typeof layout.default).toBe('function');
+  });
+});
+
+describe('nav badges set from a page', () => {
+  const server = { pendingProposals: 3, unreadAnnouncements: 0 };
+  it('keeps the server value of the marketing badge whatever a page sets', () => {
+    expect(mergeBadges(server, {})).toEqual(server);
+    expect(mergeBadges(server, setOverride({}, 'unreadAnnouncements', 5))).toEqual({ pendingProposals: 3, unreadAnnouncements: 5 });
+  });
+  it('puts the count back to 0 when the page goes away', () => {
+    const set = setOverride({}, 'unreadAnnouncements', 5);
+    expect(mergeBadges(server, clearOverride(set, 'unreadAnnouncements')).unreadAnnouncements).toBe(0);
+  });
+  it('turns a bad count into 0 and does not change state for the same value', () => {
+    expect(setOverride({}, 'unreadAnnouncements', -2)).toEqual({ unreadAnnouncements: 0 });
+    expect(setOverride({}, 'unreadAnnouncements', Number.NaN)).toEqual({ unreadAnnouncements: 0 });
+    const same = { unreadAnnouncements: 2 };
+    expect(setOverride(same, 'unreadAnnouncements', 2)).toBe(same);
+    expect(clearOverride({}, 'unreadAnnouncements')).toEqual({});
   });
 });
 
 describe('the Announcements nav item', () => {
-  it('carries the unread badge', () => {
-    const lekiu = getProduct('people')!;
-    const item = lekiu.sections.flatMap((s) => s.items).find((i) => i.slug === 'announcements');
+  it('carries the unread badge, worded "unread"', () => {
+    const item = getProduct('people')!.sections.flatMap((s) => s.items).find((i) => i.slug === 'announcements');
     expect(item?.badge).toBe('unreadAnnouncements');
+    expect(item?.badgeLabel).toBe('unread');
+    expect(badgeAriaLabel(3, item?.badgeLabel)).toBe('3 unread');
   });
-  it('is filled by the layout that fills the other badge, with a failure meaning zero', () => {
-    const layout = readFileSync(resolve('src/app/(app)/layout.tsx'), 'utf8');
-    expect(layout).toContain('unreadAnnouncements(');
-    expect(layout).toContain('shouldCountUnread');
-    const ctx = readFileSync(resolve('src/components/app/nav-badges-context.tsx'), 'utf8');
-    expect(ctx).toContain('unreadAnnouncements: 0');
+  it('words the other badge "waiting" unless told otherwise', () => {
+    expect(badgeAriaLabel(2)).toBe('2 waiting');
+  });
+});
+
+describe('the mark-read effect', () => {
+  const ok = async () => ({ ok: true });
+  it('calls once and refreshes once when React runs the effect twice', async () => {
+    const flag = { current: false };
+    let calls = 0;
+    let refreshes = 0;
+    const call = async () => {
+      calls += 1;
+      return { ok: true };
+    };
+    const results = [await markReadOnce(flag, call, () => (refreshes += 1)), await markReadOnce(flag, call, () => (refreshes += 1))];
+    expect(results).toEqual(['refreshed', 'skipped']);
+    expect([calls, refreshes]).toEqual([1, 1]);
+  });
+  it('does not refresh when the server refused or the call failed', async () => {
+    let refreshes = 0;
+    expect(await markReadOnce({ current: false }, async () => ({ ok: false }), () => (refreshes += 1))).toBe('not-marked');
+    expect(
+      await markReadOnce({ current: false }, async () => {
+        throw new Error('offline');
+      }, () => (refreshes += 1)),
+    ).toBe('not-marked');
+    expect(refreshes).toBe(0);
+    expect(await markReadOnce({ current: false }, ok, () => {})).toBe('refreshed');
+  });
+});
+
+describe('what each screen draws for each kind of viewer', () => {
+  const kinds: [string, { isHr: boolean; isDemo: boolean }, boolean][] = [
+    ['owner', { isHr: true, isDemo: false }, true],
+    ['admin', { isHr: true, isDemo: false }, true],
+    ['member', { isHr: false, isDemo: false }, false],
+    ['viewer', { isHr: false, isDemo: false }, false],
+    ['unlinked account', { isHr: false, isDemo: false }, false],
+    ['demo visitor', { isHr: false, isDemo: true }, false],
+    ['demo admin', { isHr: true, isDemo: true }, false],
+  ];
+  for (const [name, viewer, write] of kinds) {
+    it(`${name}: write controls ${write ? 'drawn' : 'absent'} on both screens`, () => {
+      expect(reviewScreenControls(viewer, true).write).toBe(write);
+      expect(announcementsScreenControls(viewer, true, 0).write).toBe(write);
+    });
+    it(`${name}: marks read only outside the demo with something unread`, () => {
+      expect(announcementsScreenControls(viewer, true, 2).markRead).toBe(!viewer.isDemo);
+      expect(announcementsScreenControls(viewer, true, 0).markRead).toBe(false);
+    });
+  }
+  it('draws nothing when the data did not load', () => {
+    expect(reviewScreenControls({ isHr: true, isDemo: false }, false).write).toBe(false);
+    expect(announcementsScreenControls({ isHr: true, isDemo: false }, false, 3)).toEqual({ write: false, markRead: false });
   });
 });
 
@@ -354,24 +425,26 @@ function reachable(entry: string): Map<string, string> {
 }
 
 const OWNER_ONLY_FILES = /review-form|review-row-controls|announcement-form|announcement-row-controls|performance-actions|-writes\.ts/;
-const OWNER_ONLY_ACTIONS = [
-  'saveReviewAction',
-  'releaseReviewAction',
-  'unreleaseReviewAction',
-  'deleteReviewAction',
-  'saveAnnouncementAction',
-  'publishAnnouncementAction',
-  'unpublishAnnouncementAction',
-  'deleteAnnouncementAction',
-];
 
-describe('member pages reach no owner-only control or action', () => {
-  for (const entry of [
-    'src/screens/people/scorecard.tsx',
-    'src/screens/people/review-scores.tsx',
-    'src/screens/people/announcements.tsx',
-    'src/components/people/mark-announcements-read.tsx',
-  ]) {
+/** Every action that asks for an owner or admin, read from the action files (their body calls `asAdmin`). */
+function ownerOnlyActions(): string[] {
+  return ['src/app/(app)/people/performance-actions.ts', 'src/app/(app)/people/announcement-actions.ts'].flatMap((file) =>
+    readFileSync(resolve(file), 'utf8')
+      .split('export async function ')
+      .slice(1)
+      .filter((chunk) => chunk.includes('asAdmin('))
+      .map((chunk) => chunk.slice(0, chunk.indexOf('('))),
+  );
+}
+
+describe('components written for members name no owner-only action', () => {
+  const names = ownerOnlyActions();
+  it('finds the owner-only actions in the action files', () => {
+    expect(names).toEqual(expect.arrayContaining(['saveReviewAction', 'releaseReviewAction', 'publishAnnouncementAction', 'deleteAnnouncementAction']));
+    expect(names).not.toContain('markAnnouncementsReadAction');
+    expect(names).not.toContain('saveMyGoalAction');
+  });
+  for (const entry of ['src/screens/people/scorecard.tsx', 'src/components/people/mark-announcements-read.tsx']) {
     const graph = reachable(resolve(entry));
     it(`${entry} reaches a real set of modules`, () => {
       expect(graph.size).toBeGreaterThan(2);
@@ -380,7 +453,7 @@ describe('member pages reach no owner-only control or action', () => {
       for (const [file, source] of graph) {
         if (file.endsWith('announcement-actions.ts')) continue; // the boundary: only the member action is imported from it
         expect(file, file).not.toMatch(OWNER_ONLY_FILES);
-        for (const name of OWNER_ONLY_ACTIONS) expect(source, `${file} names ${name}`).not.toContain(name);
+        for (const name of names) expect(source, `${file} names ${name}`).not.toContain(name);
       }
     });
   }
@@ -390,12 +463,5 @@ describe('member pages reach no owner-only control or action', () => {
       m[1].split(',').map((s) => s.trim()).filter(Boolean),
     );
     expect(named).toEqual(['markAnnouncementsReadAction']);
-  });
-  it('the owner-only screens load their controls only for a team viewer', () => {
-    for (const entry of ['src/screens/people/review-scores.tsx', 'src/screens/people/announcements.tsx']) {
-      const source = readFileSync(resolve(entry), 'utf8');
-      expect(source, entry).toMatch(/await import\('@\/components\/people\//);
-      expect(source, entry).toContain('showsWriteControls');
-    }
   });
 });

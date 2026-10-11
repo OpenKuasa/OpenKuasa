@@ -99,7 +99,7 @@ export const scoreCell = (score: number | null | undefined): string =>
 export function competencyLine(competencies: Record<string, number> | null | undefined): string {
   const parts = COMPETENCIES.map((name) => {
     const value = competencies?.[name];
-    return typeof value === 'number' && Number.isFinite(value) ? `${name} ${(Math.round(value * 10) / 10).toFixed(1)}` : `${name} ${DASH}`;
+    return typeof value === 'number' && Number.isFinite(value) ? `${name} ${value.toFixed(1)}` : `${name} ${DASH}`;
   });
   return parts.every((p) => p.endsWith(DASH)) ? DASH : parts.join(' · ');
 }
@@ -182,10 +182,38 @@ export function claimOnce(flag: { current: boolean }): boolean {
 }
 
 /**
- * The layout reads the unread count for a signed-in member of a real workspace while Lekiu's navigation is shown.
- * `pathname` is the page's path when the request carries it; when it is not known the count is read rather than hidden.
+ * What the mark-read effect does: claim the flag (only the first run goes on), call the action, and refresh the
+ * route only when the server accepted. A throw or a refusal is silent and never refreshes.
  */
-export function shouldCountUnread(input: { isDemo: boolean; orgId: string | null | undefined; pathname: string | null }): boolean {
-  if (input.isDemo || !input.orgId) return false;
-  return input.pathname === null || /^\/people(\/|$)/.test(input.pathname);
+export async function markReadOnce(
+  flag: { current: boolean },
+  call: () => Promise<{ ok: boolean }>,
+  refresh: () => void,
+): Promise<'skipped' | 'refreshed' | 'not-marked'> {
+  if (!claimOnce(flag)) return 'skipped';
+  try {
+    const result = await call();
+    if (!result.ok) return 'not-marked';
+    refresh();
+    return 'refreshed';
+  } catch {
+    return 'not-marked';
+  }
 }
+
+/** The people layout reads the unread count for a signed-in member of a real (non-demo) workspace, and for no one else. */
+export const shouldReadUnread = (input: { isDemo: boolean; orgId: string | null | undefined }): boolean =>
+  !input.isDemo && Boolean(input.orgId);
+
+type ViewerKind = { isHr: boolean; isDemo: boolean };
+
+/** Review Scores: the write controls only for an owner or admin outside the demo, with the data loaded. */
+export const reviewScreenControls = (viewer: ViewerKind, loaded: boolean) => ({
+  write: loaded && viewer.isHr && !viewer.isDemo,
+});
+
+/** Announcements: write controls as above; mark-read only outside the demo with something unread. */
+export const announcementsScreenControls = (viewer: ViewerKind, loaded: boolean, unread: number) => ({
+  write: loaded && viewer.isHr && !viewer.isDemo,
+  markRead: loaded && shouldMarkRead({ isDemo: viewer.isDemo, unread }),
+});

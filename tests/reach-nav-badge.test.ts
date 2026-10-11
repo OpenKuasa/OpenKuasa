@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PRODUCTS, getProduct } from '@/config/nav';
+import { mergeBadges } from '@/lib/nav-badges';
 
 describe('AI Agents nav badge', () => {
   it('marks the reach AI Agents item with the pendingProposals badge', () => {
@@ -14,5 +15,9 @@ describe('AI Agents nav badge', () => {
       ['agents', 'pendingProposals'],
       ['announcements', 'unreadAnnouncements'],
     ]);
+  });
+
+  it('still gets the marketing count from the server value, whatever a page sets', () => {
+    expect(mergeBadges({ pendingProposals: 4, unreadAnnouncements: 0 }, { unreadAnnouncements: 2 }).pendingProposals).toBe(4);
   });
 });

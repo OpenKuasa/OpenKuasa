@@ -3,28 +3,20 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { markAnnouncementsReadAction } from '@/app/(app)/people/announcement-actions';
-import { claimOnce } from '@/lib/people/reviews-announcements';
+import { markReadOnce } from '@/lib/people/reviews-announcements';
 
 /**
  * Marks the signed-in person's unread announcements read, once, after the list has been drawn with its marks.
  * It runs in the browser (an effect), so a server render or a prefetch never marks anything; the page draws it only
  * for someone outside the demo with something unread. The call is made once per mount even though React runs
- * effects twice in development. When it succeeds the route is refreshed so the navigation count drops; the marks
+ * effects twice in development. When it succeeds the route is refreshed (a layout is not re-rendered by navigation, so this is what re-reads the navigation count); the marks
  * on the list stay for this view (see `UnreadMark`). A failure is silent: the marks simply stay unread.
  */
 export function MarkAnnouncementsRead() {
   const router = useRouter();
   const fired = useRef(false);
   useEffect(() => {
-    if (!claimOnce(fired)) return;
-    void (async () => {
-      try {
-        const result = await markAnnouncementsReadAction();
-        if (result.ok) router.refresh();
-      } catch {
-        // nothing to show: the next visit marks them
-      }
-    })();
+    void markReadOnce(fired, () => markAnnouncementsReadAction(), () => router.refresh());
   }, [router]);
   return null;
 }

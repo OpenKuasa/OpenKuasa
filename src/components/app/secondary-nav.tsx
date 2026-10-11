@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Settings, LogOut, PanelLeftClose } from 'lucide-react';
-import { type Product, firstItem, visibleSections } from '@/config/nav';
+import { type Product, badgeAriaLabel, firstItem, visibleSections } from '@/config/nav';
 import { useViewer } from '@/components/app/viewer-context';
 import { useNavBadges } from '@/components/app/nav-badges-context';
 import { useIconHover } from '@animateicons/react';
@@ -18,12 +18,14 @@ function NavItemLink({
   name,
   label,
   badgeCount = 0,
+  badgeWord,
 }: {
   href: string;
   active: boolean;
   name?: string;
   label: string;
   badgeCount?: number;
+  badgeWord?: string;
 }) {
   const { ref, triggerProps } = useIconHover();
   return (
@@ -41,7 +43,7 @@ function NavItemLink({
       {badgeCount > 0 && (
         <span
           className="ml-auto inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1.5 py-0.5 text-[11px] font-semibold leading-none text-primary-foreground tabular-nums"
-          aria-label={`${badgeCount} waiting`}
+          aria-label={badgeAriaLabel(badgeCount, badgeWord)}
         >
           {badgeCount > 99 ? '99+' : badgeCount}
         </span>
@@ -90,6 +92,7 @@ export function SecondaryNav({
                       name={(Icon as unknown as { displayName?: string }).displayName}
                       label={item.label}
                       badgeCount={item.badge ? badges[item.badge] : 0}
+                      badgeWord={item.badgeLabel}
                     />
                   </li>
                 );

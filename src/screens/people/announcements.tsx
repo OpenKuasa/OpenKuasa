@@ -1,6 +1,8 @@
-import { Bell, Megaphone, PieChart } from 'lucide-react';
+import { Bell, FileText, Megaphone, PieChart } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { DonutStat } from '@/components/charts';
+import { AnnouncementDialog } from '@/components/people/announcement-form';
+import { AnnouncementRowControls } from '@/components/people/announcement-row-controls';
 import { MarkAnnouncementsRead, UnreadMark } from '@/components/people/mark-announcements-read';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
@@ -8,8 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { buildAnnouncementsModel } from '@/lib/people/company';
 import {
   announcementMarks,
-  shouldMarkRead,
-  showsWriteControls,
+  announcementsScreenControls,
   visibleAnnouncements,
 } from '@/lib/people/reviews-announcements';
 import { LOAD_FAILED, Muted, StatusPill, loadPeople } from './parts';
@@ -24,15 +25,7 @@ export default async function AnnouncementsScreen() {
     buildAnnouncementsModel(await data.listAnnouncements(), now, ctx.viewer),
   );
   const dash = '—';
-  // The controls that change an announcement are loaded only for an owner or admin outside the demo: a member's
-  // page never imports them (nor the actions behind them).
-  const canWrite = showsWriteControls(viewer) && model !== null;
-  const editing = canWrite
-    ? {
-        form: await import('@/components/people/announcement-form'),
-        row: await import('@/components/people/announcement-row-controls'),
-      }
-    : null;
+  const show = announcementsScreenControls(viewer, model !== null, model?.unread ?? 0);
   const posts = model ? visibleAnnouncements(model) : [];
 
   return (
@@ -40,9 +33,9 @@ export default async function AnnouncementsScreen() {
       <PageHeader
         title="Announcements"
         subtitle="Company-wide updates for your team."
-        actions={editing ? <editing.form.AnnouncementDialog /> : null}
+        actions={show.write ? <AnnouncementDialog /> : null}
       />
-      {model && shouldMarkRead({ isDemo: viewer.isDemo, unread: model.unread }) ? <MarkAnnouncementsRead /> : null}
+      {show.markRead ? <MarkAnnouncementsRead /> : null}
 
       <BentoGrid>
         <BentoCard tone="primary" className="col-span-1 md:col-span-4">
@@ -93,7 +86,7 @@ export default async function AnnouncementsScreen() {
                 return (
                   <li key={post.id} className="flex gap-3 py-3 first:pt-0 last:pb-0">
                     <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-                      {post.author.slice(0, 1).toUpperCase()}
+                      {post.draft ? <FileText className="size-4" aria-hidden /> : post.author.slice(0, 1).toUpperCase()}
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
@@ -121,8 +114,8 @@ export default async function AnnouncementsScreen() {
                           </>
                         ) : null}
                       </div>
-                      {editing ? (
-                        <editing.row.AnnouncementRowControls
+                      {show.write ? (
+                        <AnnouncementRowControls
                           announcement={{
                             id: post.id,
                             title: post.title,

@@ -3,6 +3,8 @@ import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { BarGroup, DonutStat, type Series, type Slice } from '@/components/charts';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
+import { ReviewDialog } from '@/components/people/review-form';
+import { ReviewRowControls } from '@/components/people/review-row-controls';
 import { RequestRow } from '@/components/people/request-row';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatDate, todayInMalaysia } from '@/lib/people/dates';
@@ -13,7 +15,7 @@ import {
   reviewMark,
   reviewTiles,
   scoreCell,
-  showsWriteControls,
+  reviewScreenControls,
   visibleReviewRows,
 } from '@/lib/people/reviews-announcements';
 import { EmployeeCell, HR_ONLY, LOAD_FAILED, Muted, StatusPill, loadPeople } from './parts';
@@ -33,15 +35,8 @@ export default async function ReviewScoresScreen() {
   const model = loaded?.reviews ?? null;
   const dash = '—';
   const team = model?.team ?? true;
-  // The controls that change a review are loaded only for an owner or admin outside the demo: a member's page
-  // never imports them (nor the actions behind them).
-  const canWrite = showsWriteControls(viewer) && loaded !== null;
-  const editing = canWrite
-    ? {
-        form: await import('@/components/people/review-form'),
-        row: await import('@/components/people/review-row-controls'),
-      }
-    : null;
+  // The controls that change a review are drawn for an owner or admin outside the demo only.
+  const editing = reviewScreenControls(viewer, loaded !== null).write;
   const rows = model ? visibleReviewRows(model) : [];
   const reviewed = rows.map((r) => ({ id: r.id, employee_id: r.employee_id, period: r.period }));
 
@@ -65,7 +60,7 @@ export default async function ReviewScoresScreen() {
         subtitle={team ? 'Performance review results across the team' : 'Your performance review results'}
         actions={
           editing && loaded ? (
-            <editing.form.ReviewDialog employees={loaded.people} periods={loaded.periods} reviewed={reviewed} />
+            <ReviewDialog employees={loaded.people} periods={loaded.periods} reviewed={reviewed} />
           ) : null
         }
       />
@@ -179,7 +174,7 @@ export default async function ReviewScoresScreen() {
                         </TableCell>
                         {editing && loaded ? (
                           <TableCell>
-                            <editing.row.ReviewRowControls
+                            <ReviewRowControls
                               review={{
                                 id: row.id,
                                 employee_id: row.employee_id,

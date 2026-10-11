@@ -2,7 +2,7 @@
 
 import { Plus } from 'lucide-react';
 import { Dialog } from 'radix-ui';
-import { useId, useState, useTransition } from 'react';
+import { useEffect, useId, useState, useTransition } from 'react';
 import { saveReviewAction } from '@/app/(app)/people/performance-actions';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -42,6 +42,7 @@ function ReviewFormBody({
   reviewed,
   review,
   onClose,
+  onBusy,
 }: {
   employees: { id: string; name: string }[];
   periods: string[];
@@ -49,6 +50,8 @@ function ReviewFormBody({
   reviewed: ReviewedPeriod[];
   review: EditableReview | null;
   onClose: () => void;
+  /** Tells the dialog a save is in flight, so it stays open until the answer is shown. */
+  onBusy: (busy: boolean) => void;
 }) {
   const id = useId();
   // A new review starts with no employee, so no period is chosen until one is.
@@ -56,6 +59,9 @@ function ReviewFormBody({
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<Saved | null>(null);
   const [pending, start] = useTransition();
+  useEffect(() => {
+    onBusy(pending);
+  }, [pending, onBusy]);
 
   const edit = (next: Partial<ReviewFormValues>) => {
     setError(null);
@@ -265,8 +271,10 @@ export function ReviewDialog({
   review?: EditableReview | null;
 }) {
   const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
   return (
-    <Dialog.Root open={open} onOpenChange={setOpen}>
+    // While a save is in flight the dialog cannot be dismissed, so its answer (the saved score, or a refusal) is seen.
+    <Dialog.Root open={open} onOpenChange={(next) => (next || !busy) && setOpen(next)}>
       <Dialog.Trigger asChild>
         {review ? (
           <Button type="button" variant="outline" size="sm" aria-label={`Edit ${review.employee}'s ${review.period} review`}>
@@ -294,6 +302,7 @@ export function ReviewDialog({
             reviewed={reviewed}
             review={review}
             onClose={() => setOpen(false)}
+            onBusy={setBusy}
           />
         </Dialog.Content>
       </Dialog.Portal>
