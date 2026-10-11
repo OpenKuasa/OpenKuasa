@@ -270,6 +270,27 @@ export function refundedOnNote(note: CreditNoteRow): number | null {
   return note.status === 'issued' ? note.refunded : null;
 }
 
+export type CreditNoteAction = 'edit' | 'issue' | 'delete' | 'refund' | 'void';
+
+/**
+ * What a credit note's row menu offers, in order: only what the database
+ * allows for its status. A draft is edited, issued or deleted, never voided.
+ * An issued credit note is locked: it can be voided, and refunded while
+ * `canRefund`, which is when something of it can still be paid out. Voiding
+ * one that a refund depends on is offered and refused with the reason, as
+ * voiding a paid invoice is. A void credit note offers nothing.
+ */
+export function creditNoteActions(note: CreditNoteRow, canRefund: boolean): CreditNoteAction[] {
+  if (note.status === 'draft') return ['edit', 'issue', 'delete'];
+  if (note.status === 'issued') return canRefund ? ['refund', 'void'] : ['void'];
+  return [];
+}
+
+/** How a question or a menu names one credit note: its number, or "the draft credit note", and its customer. */
+export function creditNoteName(note: CreditNoteRow): string {
+  return `${note.credit_note_no ?? 'the draft credit note'} to ${note.customer_name}`;
+}
+
 /** The credit notes table as a CSV file. Amounts are numbers. */
 export function creditNotesCsv(rows: CreditNoteRow[]): string {
   return toCsv(
