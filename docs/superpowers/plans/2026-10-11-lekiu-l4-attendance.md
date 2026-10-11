@@ -29,7 +29,7 @@
 - No model call in any automated test. No change to Tuah. No Kuasa names in `src/`. No purple or violet.
 - A live test creates its users and workspaces through `tests/helpers/live-workspaces.ts`, and nothing else.
 - 2-space indent, single quotes, semicolons, named exports (screens keep `export default`).
-- The migrations are `supabase/migrations/20261022090000_people_attendance_writes.sql` and `20261022090100_people_attendance_cron.sql`; re-check just before the PR that they still sort after everything on `main` and share a 14-digit version with nothing.
+- The migrations are `supabase/migrations/20261023090000_people_attendance_writes.sql` and `20261023090100_people_attendance_cron.sql`; re-check just before the PR that they still sort after everything on `main` and share a 14-digit version with nothing.
 
 ## Review Focus
 
@@ -44,7 +44,7 @@
 ### Task 1: The database (most capable model)
 
 **Files:**
-- Create: `supabase/migrations/20261022090000_people_attendance_writes.sql`, `supabase/migrations/20261022090100_people_attendance_cron.sql`
+- Create: `supabase/migrations/20261023090000_people_attendance_writes.sql`, `supabase/migrations/20261023090100_people_attendance_cron.sql`
 - Create: `supabase/tests/people_attendance_check.sql`
 - Create: `tests/people-attendance-schema.test.ts`
 - Do not modify the demo seed or any applied migration: every new column is nullable or defaulted.
