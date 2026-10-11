@@ -1,8 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { checkVideo } from '@/lib/agents/openrouter-media';
 import { readWorkspaceKey } from '@/lib/ai/workspace-key';
+import { workspaceSpendCents } from '@/lib/agents/spend';
 import { runWeeklyStudio } from '@/lib/agents/weekly-studio';
-import { WEEKLY_STUDIO } from '@/lib/agents/types';
+import { RunInProgressError, WEEKLY_STUDIO } from '@/lib/agents/types';
 
 export type RunSchedulesSummary = {
   ran: number;
@@ -20,38 +21,58 @@ type OrgConfig = {
   weekly_cap_cents: number | null;
 };
 
+type BudgetRefusal = 'daily budget reached' | 'weekly budget reached';
+
+/** Why a run may not start now. */
+export type StartRefusal = 'disabled' | BudgetRefusal;
+
 /** Rolling-ceiling check. Returns a pause reason, or null if under budget. */
 async function overBudget(
   client: SupabaseClient,
   orgId: string,
   caps: OrgConfig | null,
-): Promise<string | null> {
+): Promise<BudgetRefusal | null> {
   const daily = caps?.daily_cap_cents ?? 500;
   const weekly = caps?.weekly_cap_cents ?? 2000;
-  const spentSince = async (sinceIso: string): Promise<number> => {
-    // Zero-cost rows (monitor-skips) are excluded: they add nothing and would
-    // otherwise push the window past PostgREST's row cap and undercount the sum.
-    const { data, error } = await client
-      .from('agent_runs')
-      .select('cost_cents')
-      .eq('org_id', orgId)
-      .gt('cost_cents', 0)
-      .gte('started_at', sinceIso);
-    // Fail closed: an unreadable spend must never read as "under budget". The
-    // per-schedule catch counts it failed and the next tick retries (no pause).
-    if (error) throw new Error('spend query failed');
-    return (data ?? []).reduce(
-      (a: number, r: { cost_cents: number | null }) => a + (r.cost_cents ?? 0),
-      0,
-    );
-  };
-  if ((await spentSince(new Date(Date.now() - DAY_MS).toISOString())) >= daily) {
+  // Fail closed: workspaceSpendCents throws on an unreadable spend. For a schedule,
+  // the per-schedule catch counts it failed and the next tick retries (no pause).
+  const since = (ms: number) => new Date(Date.now() - ms).toISOString();
+  if ((await workspaceSpendCents(client, orgId, since(DAY_MS))) >= daily) {
     return 'daily budget reached';
   }
-  if ((await spentSince(new Date(Date.now() - 7 * DAY_MS).toISOString())) >= weekly) {
+  if ((await workspaceSpendCents(client, orgId, since(7 * DAY_MS))) >= weekly) {
     return 'weekly budget reached';
   }
   return null;
+}
+
+async function readOrgConfig(client: SupabaseClient, orgId: string): Promise<OrgConfig | null> {
+  const { data, error } = await client
+    .from('agent_configs')
+    .select('enabled, daily_cap_cents, weekly_cap_cents')
+    .eq('org_id', orgId)
+    .eq('agent_key', WEEKLY_STUDIO)
+    .maybeSingle();
+  // Fail closed: unreadable settings must not read as "no settings, defaults apply".
+  if (error) throw new Error('config query failed');
+  return (data as OrgConfig | null) ?? null;
+}
+
+/**
+ * The one gate every run passes before it starts, scheduled or manual: the
+ * workspace's off switch, then its rolling daily and weekly spend caps. Returns
+ * why the run is refused, or null when it may start. A workspace with no saved
+ * settings is not switched off and uses the default caps. Throws when the
+ * settings or the spend cannot be read (callers treat that as "do not run").
+ */
+export async function startRefusal(
+  client: SupabaseClient,
+  orgId: string,
+  config?: OrgConfig | null,
+): Promise<StartRefusal | null> {
+  const cfg = config === undefined ? await readOrgConfig(client, orgId) : config;
+  if (cfg && cfg.enabled === false) return 'disabled';
+  return overBudget(client, orgId, cfg);
 }
 
 /** Monitor-skip: has the org's reach data changed since `sinceIso`? */
@@ -91,7 +112,8 @@ type DueSchedule = {
  * Schedule-driven driver. `client` MUST be the service-role client. Kill-switch:
  * does nothing unless AGENTS_ENABLED is 'true'/'1'. For each due active schedule:
  * finish it if its limits are spent, else check the workspace's rolling daily/weekly
- * ceilings BEFORE any run (over budget pauses the org's active schedules), then CLAIM
+ * ceilings BEFORE any run ({@link startRefusal}, the same gate "Run now" passes; over
+ * budget pauses the org's active schedules), then CLAIM
  * it with a conditional update so overlapping ticks run it once. If nothing in the
  * org's reach data is new since the last run, record a cost-0 skipped run instead of
  * generating. The org always comes from the schedule row. One failure never stops the
@@ -116,13 +138,7 @@ export async function runSchedules(client: SupabaseClient): Promise<RunSchedules
   const configs = new Map<string, OrgConfig | null>();
   const configFor = async (orgId: string): Promise<OrgConfig | null> => {
     if (configs.has(orgId)) return configs.get(orgId) ?? null;
-    const { data: cfg } = await client
-      .from('agent_configs')
-      .select('enabled, daily_cap_cents, weekly_cap_cents')
-      .eq('org_id', orgId)
-      .eq('agent_key', WEEKLY_STUDIO)
-      .maybeSingle();
-    const row = (cfg as OrgConfig | null) ?? null;
+    const row = await readOrgConfig(client, orgId);
     configs.set(orgId, row);
     return row;
   };
@@ -152,7 +168,7 @@ export async function runSchedules(client: SupabaseClient): Promise<RunSchedules
         continue;
       }
 
-      const reason = await overBudget(client, s.org_id, config);
+      const reason = await startRefusal(client, s.org_id, config);
       if (reason) {
         await client
           .from('agent_schedules')
@@ -195,7 +211,22 @@ export async function runSchedules(client: SupabaseClient): Promise<RunSchedules
         continue;
       }
 
-      const result = await runWeeklyStudio(client, s.org_id, 'schedule');
+      let result: Awaited<ReturnType<typeof runWeeklyStudio>>;
+      try {
+        result = await runWeeklyStudio(client, s.org_id, 'schedule');
+      } catch (e) {
+        if (!(e instanceof RunInProgressError)) throw e;
+        // The workspace already has a run in progress (e.g. a manual "Run now").
+        // Hand the slot back so the next tick retries instead of losing an interval.
+        await client
+          .from('agent_schedules')
+          .update({ next_run_at: s.next_run_at, updated_at: nowIso })
+          .eq('id', s.id)
+          .eq('org_id', s.org_id)
+          .eq('next_run_at', nextIso);
+        summary.skipped += 1;
+        continue;
+      }
       const { data: runRow } = await client
         .from('agent_runs')
         .select('cost_cents')

@@ -7,6 +7,7 @@ vi.mock('@/lib/agents/openrouter-media', () => ({ checkVideo: vi.fn() }));
 vi.mock('@/lib/ai/key-crypto', () => ({ hasKeySecret: () => true, decryptApiKey: () => 'k' }));
 
 import { runSchedules } from '@/lib/agents/runner';
+import { RunInProgressError } from '@/lib/agents/types';
 import { runWeeklyStudio } from '@/lib/agents/weekly-studio';
 
 const ORG = 'org-1';
@@ -61,19 +62,25 @@ type Write = {
 
 function fakeClient(schedules: Sched[], opts: Opts = {}) {
   const writes: Write[] = [];
-  const gteArgs: string[] = [];
-  const gtCalls: [string, unknown][] = [];
+  const rpcCalls: { name: string; args: { p_org_id: string; p_since: string } }[] = [];
+  let runRowListReads = 0;
   const o = { claim: true, cfg: null, recentRuns: [], runCost: 0, newData: false, ...opts };
   const client = {
+    // The workspace spend is one database-side sum per window, never a row fetch.
+    async rpc(name: string, args: { p_org_id: string; p_since: string }) {
+      rpcCalls.push({ name, args });
+      if (o.spendError) return { data: null, error: { message: 'x' } };
+      const rows = o.runsFor ? o.runsFor(Date.now() - new Date(args.p_since).getTime()) : o.recentRuns;
+      return { data: rows.reduce((n, r) => n + r.cost_cents, 0), error: null };
+    },
     from(table: string) {
       return {
         select() {
           const q: Record<string, unknown> = {};
           const eqs: [string, unknown][] = [];
           q.eq = (c: string, v: unknown) => (eqs.push([c, v]), q);
-          let since = '';
-          q.gte = (_c: string, v: string) => (gteArgs.push(v), (since = v), q);
-          q.gt = (c: string, v: unknown) => (gtCalls.push([c, v]), q);
+          q.gte = () => q;
+          q.gt = () => q;
           q.lte = () => q;
           q.limit = () => q;
           q.maybeSingle = async () => {
@@ -84,9 +91,8 @@ function fakeClient(schedules: Sched[], opts: Opts = {}) {
           q.then = (res: (v: unknown) => void) => {
             if (table === 'agent_schedules') return res({ data: schedules, error: null });
             if (table === 'agent_runs') {
-              if (o.spendError) return res({ data: null, error: { message: 'x' } });
-              const rows = o.runsFor ? o.runsFor(Date.now() - new Date(since).getTime()) : o.recentRuns;
-              return res({ data: rows, error: null });
+              runRowListReads += 1;
+              return res({ data: [], error: null });
             }
             return res({ data: [], error: null });
           };
@@ -110,7 +116,7 @@ function fakeClient(schedules: Sched[], opts: Opts = {}) {
       };
     },
   };
-  return { client: client as never, writes, gteArgs, gtCalls };
+  return { client: client as never, writes, rpcCalls, runRowListReads: () => runRowListReads };
 }
 
 const schedUpdates = (writes: Write[]) => writes.filter((w) => w.table === 'agent_schedules' && w.kind === 'update');
@@ -146,17 +152,20 @@ describe('runSchedules', () => {
   });
 
   it('pauses the org schedules with a reason when over the weekly ceiling, without running', async () => {
-    const { client, writes, gteArgs, gtCalls } = fakeClient([sched()], {
+    const { client, writes, rpcCalls, runRowListReads } = fakeClient([sched()], {
       cfg: { daily_cap_cents: 5000, weekly_cap_cents: 1000 },
       recentRuns: [{ cost_cents: 1500 }],
     });
     const out = await runSchedules(client);
     expect(runWeeklyStudio).not.toHaveBeenCalled();
-    expect(gteArgs).toHaveLength(2);
-    const ages = gteArgs.map((v) => Date.now() - new Date(v).getTime());
+    // One database-side sum per window (day, then week), scoped to the schedule's org.
+    expect(rpcCalls).toHaveLength(2);
+    expect(rpcCalls.every((c) => c.name === 'agent_spend_cents' && c.args.p_org_id === ORG)).toBe(true);
+    const ages = rpcCalls.map((c) => Date.now() - new Date(c.args.p_since).getTime());
     expect(Math.abs(ages[0] - 24 * 3600_000)).toBeLessThan(5000);
     expect(Math.abs(ages[1] - 7 * 24 * 3600_000)).toBeLessThan(5000);
-    expect(gtCalls).toContainEqual(['cost_cents', 0]);
+    // Run rows are never fetched to be added up in the app (a row cap would undercount).
+    expect(runRowListReads()).toBe(0);
     const u = schedUpdates(writes);
     expect(u).toHaveLength(1);
     expect(u[0].patch).toMatchObject({ status: 'paused', paused_reason: 'weekly budget reached' });
@@ -284,6 +293,20 @@ describe('runSchedules', () => {
     await runSchedules(client);
     const claim = schedUpdates(writes).find((w) => 'next_run_at' in w.patch)!;
     expect(claim.patch).toHaveProperty('paused_reason', null);
+  });
+
+  it('a run already in progress for the workspace skips this tick and hands the slot back', async () => {
+    vi.mocked(runWeeklyStudio).mockRejectedValueOnce(new RunInProgressError());
+    const due = sched();
+    const { client, writes } = fakeClient([due]);
+    const out = await runSchedules(client);
+    expect(out).toMatchObject({ ran: 0, skipped: 1, failed: 0 });
+    const last = schedUpdates(writes).at(-1)!;
+    // The claim pushed next_run_at forward; it is put back so the next tick retries.
+    expect(last.patch).toMatchObject({ next_run_at: due.next_run_at });
+    expect(last.patch).not.toHaveProperty('runs_used');
+    expect(last.eqs).toContainEqual(['id', 's1']);
+    expect(last.eqs).toContainEqual(['org_id', ORG]);
   });
 
   it('keeps looping when one schedule throws', async () => {
