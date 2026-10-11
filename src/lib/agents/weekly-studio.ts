@@ -1,5 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { generateImage, startVideo, webSearch, writeDigest } from '@/lib/agents/openrouter-media';
+import {
+  IMAGE_ESTIMATE_CENTS,
+  TEXT_ESTIMATE_CENTS,
+  VIDEO_ESTIMATE_CENTS,
+  costOr,
+} from '@/lib/agents/costs';
 import { proposeChanges } from '@/lib/agents/proposer';
 import {
   RunInProgressError,
@@ -12,10 +18,6 @@ import { createSupabaseReachData } from '@/lib/reach/supabase';
 import { deriveReportsModel, type ReportsModel } from '@/lib/reach/reports';
 
 const DEFAULT_MAX_COST_CENTS = 200;
-/** Conservative per-image estimate used to gate each paid step against the cap. */
-const IMAGE_ESTIMATE_CENTS = 5;
-/** Conservative per-clip estimate; video is the priciest step so it is gated last. */
-const VIDEO_ESTIMATE_CENTS = 50;
 
 const IMAGE_STEPS: { kind: 'poster' | 'image'; prompt: (context: string) => string }[] = [
   {
@@ -93,6 +95,23 @@ export async function runWeeklyStudio(
     return { runId, status };
   };
 
+  // What this run has spent so far, as far as it is known: each paid step adds the
+  // provider's figure, or the step's estimate when the provider gave none.
+  let cost = 0;
+  // Before each paid step, write the spend so far plus that step's estimate to the
+  // row. A run that is cut off mid-step (and later reaped as timed out) then still
+  // shows what it had spent and was about to spend, instead of zero. Bookkeeping
+  // only: a failed write must never abort the run.
+  const reserve = async (estimateCents: number) => {
+    const { error } = await service
+      .from('agent_runs')
+      .update({ cost_cents: Math.round(cost + estimateCents) })
+      .eq('org_id', orgId)
+      .eq('id', runId)
+      .eq('status', 'running');
+    void error;
+  };
+
   try {
     // The key opens only for the workspace this run belongs to.
     const stored = await readWorkspaceKey(service, orgId);
@@ -116,16 +135,19 @@ export async function runWeeklyStudio(
     ]);
     const context = summarize(deriveReportsModel(leads, campaigns, appts, '7d', new Date()));
 
+    await reserve(TEXT_ESTIMATE_CENTS);
     const search = await webSearch(
       apiKey,
       `Find 3 timely, practical marketing angles for a small business this week. Business snapshot:\n${context}`,
     );
+    cost += costOr(search.cost_cents, TEXT_ESTIMATE_CENTS);
+
+    await reserve(TEXT_ESTIMATE_CENTS);
     const digest = await writeDigest(
       apiKey,
       `Write a short weekly digest in markdown for the business owner.\n\nBusiness snapshot:\n${context}\n\nMarket angles:\n${search.text}`,
     );
-
-    let cost = search.cost_cents + digest.cost_cents;
+    cost += costOr(digest.cost_cents, TEXT_ESTIMATE_CENTS);
 
     const recordAsset = async (
       kind: 'poster' | 'image',
@@ -144,9 +166,10 @@ export async function runWeeklyStudio(
       // Gate each paid step: stop before anything that could exceed the cap.
       if (cost + IMAGE_ESTIMATE_CENTS > maxCost) break;
       const path = `${orgId}/${runId}/${step.kind}.png`;
+      await reserve(IMAGE_ESTIMATE_CENTS);
       try {
         const img = await generateImage(apiKey, step.prompt(context));
-        cost += img.cost_cents;
+        cost += costOr(img.cost_cents, IMAGE_ESTIMATE_CENTS);
         const { error: upErr } = await service.storage
           .from('agent-assets')
           .upload(path, img.bytes, { contentType: img.contentType, upsert: true });
@@ -160,12 +183,17 @@ export async function runWeeklyStudio(
 
     // Video is async: only kick it off here and store a pending asset; pollVideos finalizes it.
     if (cost + VIDEO_ESTIMATE_CENTS <= maxCost) {
+      await reserve(VIDEO_ESTIMATE_CENTS);
       try {
         const video = await startVideo(
           apiKey,
           `A short, upbeat 6-second promotional clip for a small business's weekly marketing update, no text overlays. Business snapshot:\n${context}`,
         );
-        cost += video.cost_cents;
+        // The real cost is only known when the clip finishes, after this run has
+        // ended. Book it now (the estimate, unless submit already named a figure) on
+        // both the run and the asset; pollVideos settles the difference later.
+        const videoCost = Math.round(costOr(video.cost_cents, VIDEO_ESTIMATE_CENTS));
+        cost += videoCost;
         // A failed insert (returned as { error }) just means the clip is not tracked.
         const { error: videoInsertErr } = await service.from('agent_run_assets').insert({
           org_id: orgId,
@@ -173,6 +201,8 @@ export async function runWeeklyStudio(
           kind: 'video',
           status: 'pending',
           provider_job_id: video.jobId,
+          cost_cents: videoCost,
+          cost_estimated: true,
         });
         void videoInsertErr;
       } catch {
@@ -199,6 +229,7 @@ export async function runWeeklyStudio(
     return await finish('done', { digest_md: digest.text, cost_cents: cost });
   } catch {
     // Deliberately drop the exception: it may carry request details or a key.
-    return finish('failed', { error: 'digest failed' });
+    // The steps that completed before the failure were still paid for.
+    return finish('failed', { error: 'digest failed', cost_cents: cost });
   }
 }

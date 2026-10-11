@@ -10,11 +10,22 @@
 
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { generateImage as aiGenerateImage, generateText } from 'ai';
+import { usdToCents } from '@/lib/agents/costs';
 
-export type DigestResult = { text: string; cost_cents: number };
-export type ImageResult = { bytes: Uint8Array; contentType: string; cost_cents: number };
-export type VideoStart = { jobId: string; cost_cents: number };
-export type VideoCheck = { status: 'pending' | 'done' | 'failed'; url?: string };
+/**
+ * `cost_cents` is what the provider reported for the call, in whole cents, or `null`
+ * when it reported nothing. `null` is NOT zero: the caller counts such a step at its
+ * estimate (see costs.ts) so the spend caps never read an unreported cost as free.
+ */
+export type DigestResult = { text: string; cost_cents: number | null };
+export type ImageResult = { bytes: Uint8Array; contentType: string; cost_cents: number | null };
+export type VideoStart = { jobId: string; cost_cents: number | null };
+export type VideoCheck = {
+  status: 'pending' | 'done' | 'failed';
+  url?: string;
+  /** Reported once the job has ended; absent while it is still rendering. */
+  cost_cents?: number | null;
+};
 
 /** Fallback slugs; override via env so self-hosters can swap models. */
 const SEARCH_MODEL = () => process.env.OPENKUASA_MODEL_AGENT_SEARCH?.trim() || 'perplexity/sonar';
@@ -31,12 +42,8 @@ function provider(apiKey: string) {
   return createOpenRouter({ apiKey, appName: 'OpenKuasa OS', appUrl: 'https://openkuasa.com' });
 }
 
-/** OpenRouter reports cost in USD credits; convert to whole cents, rounded up (0 when absent); agent_runs.cost_cents is INTEGER. */
-function usdToCents(usd: unknown): number {
-  return typeof usd === 'number' && Number.isFinite(usd) ? Math.ceil(usd * 100) : 0;
-}
-
-function costFromMetadata(meta: unknown): number {
+/** The cost the provider attached to a call, or null when it attached none. */
+function costFromMetadata(meta: unknown): number | null {
   const openrouter = (meta as { openrouter?: { usage?: { cost?: number }; cost?: number } } | undefined)
     ?.openrouter;
   return usdToCents(openrouter?.usage?.cost ?? openrouter?.cost);
@@ -70,7 +77,7 @@ export async function suggestProposals(
   context: string,
   candidates: { index: number; title: string }[],
   trend?: string,
-): Promise<{ keep: { index: number; rationale: string; name?: string }[]; cost_cents: number }> {
+): Promise<{ keep: { index: number; rationale: string; name?: string }[]; cost_cents: number | null }> {
   const list = candidates.map((c) => `${c.index}. ${c.title}`).join('\n');
   const prompt = [
     'You help a small business owner decide which suggested CRM changes are worth queueing for their approval.',
@@ -125,7 +132,7 @@ export async function generateImage(apiKey: string, prompt: string): Promise<Ima
 }
 
 type VideoSubmit = { id?: string; usage?: { cost?: number } };
-type VideoPoll = { status?: string; unsigned_urls?: string[] };
+type VideoPoll = { status?: string; unsigned_urls?: string[]; usage?: { cost?: number } };
 
 function authHeaders(apiKey: string): Record<string, string> {
   return { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
@@ -142,7 +149,8 @@ export async function startVideo(apiKey: string, prompt: string): Promise<VideoS
   if (!res.ok) throw new Error(`OpenRouter video start failed (${res.status}).`);
   const json = (await res.json()) as VideoSubmit;
   if (!json.id) throw new Error('OpenRouter video start returned no job id.');
-  // Final cost is only known on completion; submit may not report it.
+  // The cost is only known on completion, so submit usually reports none (null):
+  // the caller books an estimate now and checkVideo supplies the real figure later.
   return { jobId: json.id, cost_cents: usdToCents(json.usage?.cost) };
 }
 
@@ -152,9 +160,14 @@ export async function checkVideo(apiKey: string, jobId: string): Promise<VideoCh
   });
   if (!res.ok) throw new Error(`OpenRouter video status failed (${res.status}).`);
   const json = (await res.json()) as VideoPoll;
-  if (json.status === 'completed') return { status: 'done', url: json.unsigned_urls?.[0] };
+  // A job that has ended reports what it cost in `usage.cost` (the provider SDK's
+  // poll schema); null when it does not, and the caller keeps its estimate.
+  const cost_cents = usdToCents(json.usage?.cost);
+  if (json.status === 'completed') {
+    return { status: 'done', url: json.unsigned_urls?.[0], cost_cents };
+  }
   if (['failed', 'dead', 'cancelled', 'expired'].includes(json.status ?? '')) {
-    return { status: 'failed' };
+    return { status: 'failed', cost_cents };
   }
   return { status: 'pending' };
 }

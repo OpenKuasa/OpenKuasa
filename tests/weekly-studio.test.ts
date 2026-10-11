@@ -207,6 +207,74 @@ describe('runWeeklyStudio', () => {
     expect(writeDigest).not.toHaveBeenCalled();
   });
 
+  it('counts a step at its estimate when the provider reports no cost', async () => {
+    vi.mocked(webSearch).mockResolvedValue({ text: 'angle', cost_cents: null });
+    vi.mocked(writeDigest).mockResolvedValue({ text: '# Digest', cost_cents: null });
+    vi.mocked(generateImage).mockResolvedValue({
+      bytes: new Uint8Array([1]),
+      contentType: 'image/png',
+      cost_cents: null,
+    });
+    vi.mocked(startVideo).mockResolvedValue({ jobId: 'job-9', cost_cents: null });
+    vi.mocked(suggestProposals).mockResolvedValue({ keep: [], cost_cents: null });
+    const { service, runs } = fakeService({ ciphertext: 'abc' });
+    await runWeeklyStudio(service, ORG, 'manual');
+    // search + digest + two images + video + the proposal pick, each at its estimate
+    expect(runs[0]).toMatchObject({ status: 'done', cost_cents: 3 + 3 + 5 + 5 + 50 + 3 });
+  });
+
+  it('a reported cost of zero is kept as zero, not replaced by the estimate', async () => {
+    vi.mocked(webSearch).mockResolvedValue({ text: 'angle', cost_cents: 0 });
+    vi.mocked(writeDigest).mockResolvedValue({ text: '# Digest', cost_cents: 0 });
+    const { service, runs } = fakeService({ ciphertext: 'abc' }, { max_cost_cents: 1 });
+    await runWeeklyStudio(service, ORG, 'manual');
+    expect(runs[0]).toMatchObject({ status: 'done', cost_cents: 0 });
+  });
+
+  it('a run that fails part-way keeps the cost of the steps already paid for', async () => {
+    vi.mocked(webSearch).mockResolvedValue({ text: 'angle', cost_cents: 3 });
+    vi.mocked(writeDigest).mockRejectedValue(new Error('boom sk-or-secret'));
+    const { service, runs } = fakeService({ ciphertext: 'abc' });
+    const res = await runWeeklyStudio(service, ORG, 'manual');
+    expect(res.status).toBe('failed');
+    expect(runs[0]).toMatchObject({ status: 'failed', cost_cents: 3 });
+  });
+
+  it('before each paid step the run row already holds the spend so far plus that step', async () => {
+    const { service, runs } = fakeService({ ciphertext: 'abc' });
+    const seen: Record<string, unknown> = {};
+    vi.mocked(webSearch).mockImplementation(async () => {
+      seen.search = runs[0].cost_cents;
+      return { text: 'angle', cost_cents: 3 };
+    });
+    vi.mocked(writeDigest).mockImplementation(async () => {
+      seen.digest = runs[0].cost_cents;
+      return { text: '# Digest', cost_cents: 4 };
+    });
+    vi.mocked(startVideo).mockImplementation(async () => {
+      seen.video = runs[0].cost_cents;
+      seen.status = runs[0].status;
+      return { jobId: 'job-9', cost_cents: null };
+    });
+    await runWeeklyStudio(service, ORG, 'manual');
+    // If the process died inside a step, this is the figure a reaped run would keep.
+    expect(seen).toEqual({ search: 3, digest: 3 + 3, video: 3 + 4 + 5 + 5 + 50, status: 'running' });
+  });
+
+  it('records the video cost on its asset as an estimate to be settled when it is collected', async () => {
+    vi.mocked(webSearch).mockResolvedValue({ text: 'a', cost_cents: 3 });
+    vi.mocked(writeDigest).mockResolvedValue({ text: 'd', cost_cents: 4 });
+    vi.mocked(startVideo).mockResolvedValue({ jobId: 'job-9', cost_cents: null });
+    const { service, runs, assets } = fakeService({ ciphertext: 'abc' });
+    await runWeeklyStudio(service, ORG, 'manual');
+    expect(assets.find((a) => a.kind === 'video')).toMatchObject({
+      status: 'pending',
+      cost_cents: 50,
+      cost_estimated: true,
+    });
+    expect(runs[0].cost_cents).toBe(3 + 4 + 5 + 5 + 50);
+  });
+
   it('scopes the key read and every agent_runs write by org_id', async () => {
     vi.mocked(webSearch).mockResolvedValue({ text: 'a', cost_cents: 1 });
     vi.mocked(writeDigest).mockResolvedValue({ text: 'd', cost_cents: 1 });

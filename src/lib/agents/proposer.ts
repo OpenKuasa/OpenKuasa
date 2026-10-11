@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { type Lead, type Appointment, LEAD_STAGES } from '@/lib/reach/types';
 import { approvalDetail, approvalTitle, type ItemKind } from '@/lib/chat/change-titles';
 import { isAllowedAction, ALLOWED_ACTIONS } from '@/lib/agents/apply-proposal';
+import { TEXT_ESTIMATE_CENTS, costOr } from '@/lib/agents/costs';
 import { suggestProposals } from '@/lib/agents/openrouter-media';
 
 const MAX_PROPOSALS = 5;
@@ -147,12 +148,15 @@ export async function proposeChanges(
   }
   if (offered.length === 0) return { proposed: 0, cost_cents: 0 }; // nothing new to offer → no LLM call
 
-  const { keep, cost_cents } = await suggestProposals(
+  const picked = await suggestProposals(
     apiKey,
     reach.context,
     offered.map((c, index) => ({ index, title: c.title })),
     reach.trend,
   );
+  const keep = picked.keep;
+  // A call the provider put no price on still counts, at the text-call estimate.
+  const cost_cents = costOr(picked.cost_cents, TEXT_ESTIMATE_CENTS);
 
   let proposed = 0;
   try {

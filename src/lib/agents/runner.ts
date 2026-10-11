@@ -315,6 +315,8 @@ type PendingVideo = {
   run_id: string;
   provider_job_id: string | null;
   created_at: string;
+  cost_cents: number | null;
+  cost_estimated: boolean | null;
 };
 
 /**
@@ -322,11 +324,16 @@ type PendingVideo = {
  * Only status='pending' videos are read, and each is transitioned at most once
  * per call, so re-polling finished assets is a no-op. Never logs or stores the
  * key or any exception text.
+ *
+ * A video's cost was booked as an estimate when it was submitted. Once the job has
+ * ended and the provider says what it cost, that figure replaces the estimate on
+ * the asset and the run's total moves by the difference (`agent_settle_video_cost`,
+ * one transaction, applied once). When the provider says nothing, the estimate stands.
  */
 export async function pollVideos(client: SupabaseClient): Promise<void> {
   const { data, error } = await client
     .from('agent_run_assets')
-    .select('id, org_id, run_id, provider_job_id, created_at')
+    .select('id, org_id, run_id, provider_job_id, created_at, cost_cents, cost_estimated')
     .eq('kind', 'video')
     .eq('status', 'pending');
   if (error || !data) return;
@@ -356,6 +363,22 @@ export async function pollVideos(client: SupabaseClient): Promise<void> {
     void markErr;
   };
 
+  /**
+   * True when the asset's cost is final or nothing is known to replace the estimate;
+   * false when a reported cost could not be applied yet (the run is still writing
+   * its own total, or the write failed) and the caller should try again next poll.
+   */
+  const settle = async (asset: PendingVideo, reported: number | null | undefined) => {
+    if (!asset.cost_estimated || typeof reported !== 'number' || !Number.isFinite(reported)) {
+      return true;
+    }
+    const { data: settled, error: settleErr } = await client.rpc('agent_settle_video_cost', {
+      p_asset_id: asset.id,
+      p_cost_cents: Math.max(0, Math.round(reported)),
+    });
+    return !settleErr && settled === true;
+  };
+
   for (const asset of data as PendingVideo[]) {
     try {
       const expired = Date.now() - new Date(asset.created_at).getTime() > VIDEO_MAX_AGE_MS;
@@ -365,6 +388,11 @@ export async function pollVideos(client: SupabaseClient): Promise<void> {
         continue;
       }
       const check = await checkVideo(apiKey, asset.provider_job_id);
+      // Settle the cost before the asset leaves 'pending' (only pending assets are
+      // polled). If it cannot be settled yet, keep the asset pending and retry,
+      // unless it has expired: then it is finished on its estimate.
+      const ended = check.status === 'failed' || (check.status === 'done' && !!check.url);
+      if (ended && !(await settle(asset, check.cost_cents)) && !expired) continue;
       if (check.status === 'failed') {
         await mark(asset, { status: 'failed' });
       } else if (check.status === 'done' && check.url) {

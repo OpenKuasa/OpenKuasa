@@ -30,12 +30,21 @@ function pendingAsset(over: Partial<Asset> = {}): Asset {
   };
 }
 
-function fakeClient(rows: Asset[], keyRow: { ciphertext: string } | null = { ciphertext: 'abc' }) {
+function fakeClient(
+  rows: Asset[],
+  keyRow: { ciphertext: string } | null = { ciphertext: 'abc' },
+  settle: { data: boolean | null; error: { message: string } | null } = { data: true, error: null },
+) {
+  const rpcCalls: { name: string; args: Record<string, unknown> }[] = [];
   const updates: { patch: Asset; eqs: [string, unknown][] }[] = [];
   const selectEqs: [string, unknown][] = [];
   const keyEqs: [string, unknown][] = [];
   const uploads: { path: string; bytes: unknown; opts: unknown }[] = [];
   const client = {
+    async rpc(name: string, args: Record<string, unknown>) {
+      rpcCalls.push({ name, args });
+      return settle;
+    },
     from(table: string) {
       return {
         select() {
@@ -88,7 +97,7 @@ function fakeClient(rows: Asset[], keyRow: { ciphertext: string } | null = { cip
       }),
     },
   };
-  return { client: client as never, updates, selectEqs, keyEqs, uploads };
+  return { client: client as never, updates, selectEqs, keyEqs, uploads, rpcCalls };
 }
 
 beforeEach(() => {
@@ -157,6 +166,75 @@ describe('pollVideos', () => {
     const { client, updates, uploads } = fakeClient([pendingAsset({ created_at: old() })]);
     await pollVideos(client);
     expect(uploads).toHaveLength(0);
+    expect(updates[0].patch).toEqual({ status: 'failed' });
+  });
+
+  it('settles the estimated cost against the run with the figure the provider reports', async () => {
+    vi.mocked(checkVideo).mockResolvedValue({ status: 'done', url: 'https://cdn/v.mp4', cost_cents: 80 });
+    const { client, updates, rpcCalls } = fakeClient([
+      pendingAsset({ cost_cents: 50, cost_estimated: true }),
+    ]);
+    await pollVideos(client);
+    expect(rpcCalls).toEqual([
+      { name: 'agent_settle_video_cost', args: { p_asset_id: 'asset-1', p_cost_cents: 80 } },
+    ]);
+    expect(updates[0].patch).toMatchObject({ status: 'done' });
+  });
+
+  it('writes a whole number of cents', async () => {
+    vi.mocked(checkVideo).mockResolvedValue({ status: 'done', url: 'https://cdn/v.mp4', cost_cents: 41.6 });
+    const { client, rpcCalls } = fakeClient([pendingAsset({ cost_cents: 50, cost_estimated: true })]);
+    await pollVideos(client);
+    expect(rpcCalls[0].args.p_cost_cents).toBe(42);
+  });
+
+  it('keeps the estimate when the provider reports no cost for the finished video', async () => {
+    vi.mocked(checkVideo).mockResolvedValue({ status: 'done', url: 'https://cdn/v.mp4', cost_cents: null });
+    const { client, updates, rpcCalls } = fakeClient([
+      pendingAsset({ cost_cents: 50, cost_estimated: true }),
+    ]);
+    await pollVideos(client);
+    expect(rpcCalls).toHaveLength(0);
+    expect(updates[0].patch).toMatchObject({ status: 'done' });
+  });
+
+  it('does not settle twice: an asset whose cost is already final is left alone', async () => {
+    vi.mocked(checkVideo).mockResolvedValue({ status: 'done', url: 'https://cdn/v.mp4', cost_cents: 80 });
+    const { client, rpcCalls } = fakeClient([pendingAsset({ cost_cents: 80, cost_estimated: false })]);
+    await pollVideos(client);
+    expect(rpcCalls).toHaveLength(0);
+  });
+
+  it('waits for the next poll when the cost cannot be settled yet (its run is still in progress)', async () => {
+    vi.mocked(checkVideo).mockResolvedValue({ status: 'done', url: 'https://cdn/v.mp4', cost_cents: 80 });
+    const { client, updates, uploads } = fakeClient(
+      [pendingAsset({ cost_cents: 50, cost_estimated: true })],
+      undefined,
+      { data: false, error: null },
+    );
+    await pollVideos(client);
+    expect(uploads).toHaveLength(0);
+    expect(updates).toHaveLength(0);
+  });
+
+  it('still finishes an old video whose cost could not be settled, on its estimate', async () => {
+    vi.mocked(checkVideo).mockResolvedValue({ status: 'done', url: 'https://cdn/v.mp4', cost_cents: 80 });
+    const { client, updates } = fakeClient(
+      [pendingAsset({ cost_cents: 50, cost_estimated: true, created_at: old() })],
+      undefined,
+      { data: null, error: { message: 'x' } },
+    );
+    await pollVideos(client);
+    expect(updates[0].patch).toMatchObject({ status: 'done' });
+  });
+
+  it('settles a failed video too when the provider says what it cost', async () => {
+    vi.mocked(checkVideo).mockResolvedValue({ status: 'failed', cost_cents: 0 });
+    const { client, updates, rpcCalls } = fakeClient([
+      pendingAsset({ cost_cents: 50, cost_estimated: true }),
+    ]);
+    await pollVideos(client);
+    expect(rpcCalls[0].args).toEqual({ p_asset_id: 'asset-1', p_cost_cents: 0 });
     expect(updates[0].patch).toEqual({ status: 'failed' });
   });
 
