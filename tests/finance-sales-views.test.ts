@@ -9,6 +9,7 @@ import {
   filterPaymentsIn,
   invoiceCustomers,
   invoicesCsv,
+  owed,
   invoicesView,
   paymentsInCsv,
   paymentsInView,
@@ -354,6 +355,16 @@ describe('filterPaymentsIn', () => {
   });
 });
 
+describe('owed', () => {
+  it('is the balance of an issued invoice and nothing for a draft or a void one', () => {
+    expect(owed(invoice({ display_status: 'sent', balance: 40 }))).toBe(40);
+    expect(owed(invoice({ display_status: 'overdue', balance: 25 }))).toBe(25);
+    expect(owed(invoice({ display_status: 'paid', balance: 0 }))).toBe(0);
+    expect(owed(invoice({ display_status: 'draft', balance: 80 }))).toBeNull();
+    expect(owed(invoice({ display_status: 'void', balance: 80 }))).toBeNull();
+  });
+});
+
 describe('CSV export', () => {
   it('writes the invoices table, with a formula-looking customer name made harmless', () => {
     const csv = invoicesCsv([
@@ -363,8 +374,23 @@ describe('CSV export', () => {
     expect(csv).toBe(
       '\uFEFFNo.,Date,Customer,Due,Total,Paid,Balance,Status,e-Invois\r\n' +
         "INV-0007,2026-10-01,'=cmd|calc,2026-10-31,1250.5,1000,250.5,Sent,Validated\r\n" +
-        ',2026-10-01,"Lim, Tan & Co",2026-10-31,80,0,80,Draft,\r\n',
+        ',2026-10-01,"Lim, Tan & Co",2026-10-31,80,0,,Draft,\r\n',
     );
+  });
+
+  it('leaves the balance empty for a draft and a void invoice, and fills it for the rest', () => {
+    const csv = invoicesCsv([
+      invoice({ invoice_no: null, total: 80, balance: 80, display_status: 'draft' }),
+      invoice({ invoice_no: 'INV-0002', total: 90, balance: 90, display_status: 'void' }),
+      invoice({ invoice_no: 'INV-0003', total: 70, paid: 20, balance: 50, display_status: 'overdue' }),
+      invoice({ invoice_no: 'INV-0004', total: 60, paid: 60, balance: 0, display_status: 'paid' }),
+    ]);
+    expect(csv.split('\r\n').slice(1, 5)).toEqual([
+      ',2026-10-01,Aisyah Trading,2026-10-31,80,0,,Draft,',
+      'INV-0002,2026-10-01,Aisyah Trading,2026-10-31,90,0,,Void,',
+      'INV-0003,2026-10-01,Aisyah Trading,2026-10-31,70,20,50,Overdue,',
+      'INV-0004,2026-10-01,Aisyah Trading,2026-10-31,60,60,0,Paid,',
+    ]);
   });
 
   it('writes the payments table, one line per invoice paid, with the method and status as the screen words them', () => {

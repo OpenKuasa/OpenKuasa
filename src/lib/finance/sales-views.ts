@@ -78,6 +78,11 @@ function isIssued(invoice: InvoiceListRow): boolean {
   return invoice.display_status === 'sent' || invoice.display_status === 'overdue' || invoice.display_status === 'paid';
 }
 
+/** What a customer still owes on an invoice: its balance once it has gone out, nothing (null) on a draft or a void one. */
+export function owed(invoice: InvoiceListRow): number | null {
+  return isIssued(invoice) ? invoice.balance : null;
+}
+
 /** Only money that has actually arrived counts: not voided, not half-written. */
 function received(rows: PaymentInRow[]): PaymentInRow[] {
   return rows.filter((p) => p.status === 'posted');
@@ -166,7 +171,7 @@ export function invoicesCsv(invoices: InvoiceListRow[]): string {
       i.due_date,
       i.total,
       i.paid,
-      i.balance,
+      owed(i),
       INVOICE_STATUS_LABELS[i.display_status],
       EINVOICE_STATUS_LABELS[i.einvoice_status],
     ]),
