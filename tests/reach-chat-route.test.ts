@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // Shared, hoisted control surface so the mock factories can read mutable state.
 const ctl = vi.hoisted(() => ({
   user: null as { id: string; is_anonymous: boolean } | null,
+  /** The caller's workspace, or null when they are in none. */
+  org: null as { orgId: string; role: string } | null,
   /** What consume_free_question answers: questions left, or -1 when used up. */
   freeRemaining: 2 as number,
   /** The workspace's stored (sealed) key, or null when none is set. */
@@ -17,8 +19,8 @@ vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({
     auth: { getUser: async () => ({ data: { user: ctl.user }, error: null }) },
     rpc: async (name: string) => {
-      if (name === 'org_ai_key_ciphertext') {
-        return { data: ctl.sealedKey, error: null };
+      if (name === 'org_ai_key_status') {
+        return { data: ctl.sealedKey ? [{ key_hint: 'sk-or-…aaaa' }] : [], error: null };
       }
       if (name === 'consume_free_question') {
         ctl.freeConsumed += 1;
@@ -29,8 +31,26 @@ vi.mock('@/lib/supabase/server', () => ({
   }),
 }));
 
+// The sealed key is read on the server, by the service-role client.
+vi.mock('@/lib/supabase/service', () => ({
+  serviceClient: () => ({
+    from: () => {
+      const query = {
+        select: () => query,
+        eq: () => query,
+        maybeSingle: async () => ({
+          data: ctl.sealedKey ? { ciphertext: ctl.sealedKey } : null,
+          error: null,
+        }),
+      };
+      return query;
+    },
+  }),
+}));
+
 // The route also resolves the caller's org for write tools; the fake client has no tables.
-vi.mock('@/lib/auth/current-org', () => ({ getCurrentOrg: async () => null }));
+// No workspace by default; a test that stores a key gives the caller one.
+vi.mock('@/lib/auth/current-org', () => ({ getCurrentOrg: async () => ctl.org }));
 
 vi.mock('@/lib/reach/supabase', () => ({
   getReachData: async () => {
@@ -70,6 +90,13 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
 const SECRET = 'test-secret-for-sealing-workspace-keys-0123456789';
 const { encryptApiKey } = await import('@/lib/ai/key-crypto');
 
+const KEY_ORG = '11111111-1111-4111-8111-111111111111';
+/** Stores a key sealed for the caller's workspace, as the server does. */
+const sealForWorkspace = () => {
+  ctl.org = { orgId: KEY_ORG, role: 'owner' };
+  return encryptApiKey('sk-or-v1-workspace-key-aaaaaaaaaaaa', KEY_ORG);
+};
+
 const { POST } = await import('@/app/api/reach/chat/route');
 
 function post(body: unknown): Request {
@@ -86,6 +113,7 @@ const validBody = {
 
 beforeEach(() => {
   ctl.user = { id: 'u1', is_anonymous: false };
+  ctl.org = null;
   ctl.freeRemaining = 2;
   ctl.sealedKey = null;
   ctl.providerKey = true;
@@ -126,7 +154,7 @@ describe('POST /api/reach/chat gating', () => {
   });
 
   it('fails closed when the workspace key cannot be opened on this server', async () => {
-    ctl.sealedKey = encryptApiKey('sk-or-v1-workspace-key-aaaaaaaaaaaa');
+    ctl.sealedKey = sealForWorkspace();
     process.env.AI_KEYS_ENCRYPTION_SECRET = 'a-different-secret-than-the-one-used-to-seal-it';
     const res = await POST(post(validBody));
     expect(res.status).toBe(503);
@@ -152,7 +180,7 @@ describe('POST /api/reach/chat happy path', () => {
   });
 
   it('runs on the workspace key without touching the free allowance', async () => {
-    ctl.sealedKey = encryptApiKey('sk-or-v1-workspace-key-aaaaaaaaaaaa');
+    ctl.sealedKey = sealForWorkspace();
     // Even with the free questions used up and no platform key at all.
     ctl.freeRemaining = -1;
     ctl.providerKey = false;
