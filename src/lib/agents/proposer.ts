@@ -11,19 +11,32 @@ export type Candidate = {
   input: unknown;
   title: string;
   detail: string | null;
-  dedupeKey: string;
 };
+
+/** A stable dedupe key: the action + the input's identifying field, so it matches
+ * regardless of jsonb key order or a changing scheduled_at. */
+function dedupeKeyOf(action: string, input: unknown): string {
+  const i = (input ?? {}) as Record<string, unknown>;
+  const key =
+    typeof i.id === 'string'
+      ? i.id
+      : typeof i.contact_name === 'string'
+        ? i.contact_name
+        : typeof i.name === 'string'
+          ? i.name
+          : JSON.stringify(i);
+  return `${action}:${key}`;
+}
 
 /** Deterministic: the opportunities worth proposing from this week's data. */
 export function opportunityScan(leads: Lead[], appts: Appointment[], now: Date): Candidate[] {
   const nameOf = (id: unknown, kind?: ItemKind): string | null =>
     kind === 'lead' && typeof id === 'string' ? (leads.find((l) => l.id === id)?.name ?? null) : null;
-  const make = (action: string, input: unknown, dedupeKey: string): Candidate => ({
+  const make = (action: string, input: unknown): Candidate => ({
     action,
     input,
     title: approvalTitle(action, input, nameOf),
     detail: approvalDetail(action, input),
-    dedupeKey,
   });
   const upcomingByName = new Set(
     appts.filter((a) => new Date(a.scheduled_at) > now).map((a) => a.contact_name),
@@ -31,7 +44,7 @@ export function opportunityScan(leads: Lead[], appts: Appointment[], now: Date):
   const out: Candidate[] = [];
   for (const l of leads) {
     if (l.stage === 'won' && !l.promoted_contact_id) {
-      out.push(make('promoteLeadToContact', { id: l.id }, `promote:${l.id}`));
+      out.push(make('promoteLeadToContact', { id: l.id }));
     }
     if ((l.stage === 'qualified' || l.stage === 'booked') && !upcomingByName.has(l.name)) {
       const when = new Date(now.getTime() + 3 * 24 * 3600_000);
@@ -46,7 +59,6 @@ export function opportunityScan(leads: Lead[], appts: Appointment[], now: Date):
             via: 'Phone',
             status: 'scheduled',
           },
-          `appt:${l.id}`,
         ),
       );
     }
@@ -68,9 +80,10 @@ export async function proposeChanges(
   reach: { leads: Lead[]; appts: Appointment[]; context: string },
   maxCost: number,
   costSoFar: number,
+  scan: (leads: Lead[], appts: Appointment[], now: Date) => Candidate[] = opportunityScan,
 ): Promise<{ proposed: number; cost_cents: number }> {
   if (costSoFar >= maxCost) return { proposed: 0, cost_cents: 0 };
-  const candidates = opportunityScan(reach.leads, reach.appts, new Date());
+  const candidates = scan(reach.leads, reach.appts, new Date());
   if (candidates.length === 0) return { proposed: 0, cost_cents: 0 };
 
   const { keep, cost_cents } = await suggestProposals(
@@ -79,40 +92,47 @@ export async function proposeChanges(
     candidates.map((c, index) => ({ index, title: c.title })),
   );
 
-  // Existing pending proposals for this org, to de-dupe against.
-  const { data: existing } = await service
-    .from('agent_proposals')
-    .select('action, input')
-    .eq('org_id', orgId)
-    .eq('status', 'pending');
-  const keyOf = (action: string, input: unknown) => `${action}:${JSON.stringify(input)}`;
-  const pendingKeys = new Set(
-    (existing ?? []).map((r) => keyOf((r as { action: string }).action, (r as { input: unknown }).input)),
-  );
-
   let proposed = 0;
-  for (const sel of keep) {
-    if (proposed >= MAX_PROPOSALS) break;
-    const c = candidates[sel.index];
-    if (!c || !isAllowedAction(c.action)) continue; // tampered / off-list selection
-    if (!ALLOWED_ACTIONS[c.action].schema.safeParse(c.input).success) continue; // re-validate input
-    if (pendingKeys.has(keyOf(c.action, c.input))) continue; // dedupe
-    const { error } = await service.from('agent_proposals').insert({
-      org_id: orgId,
-      run_id: runId,
-      agent_key: 'weekly-studio',
-      product: 'reach',
-      action: c.action,
-      input: c.input,
-      title: c.title,
-      detail: c.detail,
-      rationale: sel.rationale.slice(0, 280),
-      status: 'pending',
-    });
-    if (!error) {
-      proposed += 1;
-      pendingKeys.add(keyOf(c.action, c.input));
+  try {
+    // Existing pending proposals for this org, to de-dupe against.
+    const { data: existing, error: dErr } = await service
+      .from('agent_proposals')
+      .select('action, input')
+      .eq('org_id', orgId)
+      .eq('status', 'pending');
+    if (dErr) return { proposed: 0, cost_cents }; // fail closed: never queue without dedupe
+    const pendingKeys = new Set(
+      (existing ?? []).map((r) =>
+        dedupeKeyOf((r as { action: string }).action, (r as { input: unknown }).input),
+      ),
+    );
+
+    for (const sel of keep) {
+      if (proposed >= MAX_PROPOSALS) break;
+      const c = candidates[sel.index];
+      if (!c || !isAllowedAction(c.action)) continue; // tampered / off-list selection
+      if (!ALLOWED_ACTIONS[c.action].schema.safeParse(c.input).success) continue; // re-validate input
+      const key = dedupeKeyOf(c.action, c.input);
+      if (pendingKeys.has(key)) continue; // dedupe
+      const { error } = await service.from('agent_proposals').insert({
+        org_id: orgId,
+        run_id: runId,
+        agent_key: 'weekly-studio',
+        product: 'reach',
+        action: c.action,
+        input: c.input,
+        title: c.title,
+        detail: c.detail,
+        rationale: sel.rationale.slice(0, 280),
+        status: 'pending',
+      });
+      if (!error) {
+        proposed += 1;
+        pendingKeys.add(key);
+      }
     }
+    return { proposed, cost_cents };
+  } catch {
+    return { proposed, cost_cents }; // keep the LLM spend even if a query/insert throws
   }
-  return { proposed, cost_cents };
 }

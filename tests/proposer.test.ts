@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/agents/openrouter-media', () => ({ suggestProposals: vi.fn() }));
 
-import { opportunityScan, proposeChanges } from '@/lib/agents/proposer';
+import { opportunityScan, proposeChanges, type Candidate } from '@/lib/agents/proposer';
 import { suggestProposals } from '@/lib/agents/openrouter-media';
 
 const now = new Date('2026-10-11T00:00:00Z');
@@ -73,7 +73,7 @@ describe('proposeChanges gate', () => {
     expect(inserts[0].title).toContain('Aina Rahman');
   });
 
-  it('drops a non-allowlisted selection (index out of range / tampered)', async () => {
+  it('drops an out-of-range selection', async () => {
     vi.mocked(suggestProposals).mockResolvedValue({ keep: [{ index: 99, rationale: 'x' }], cost_cents: 1 });
     const { client, inserts } = fakeService();
     const res = await proposeChanges(client, 'org-1', 'run-1', 'key', { leads: [lead()], appts: [], context: 'ctx' }, 200, 10);
@@ -95,5 +95,62 @@ describe('proposeChanges gate', () => {
     expect(suggestProposals).not.toHaveBeenCalled();
     expect(inserts).toHaveLength(0);
     expect(res).toEqual({ proposed: 0, cost_cents: 0 });
+  });
+
+  const uid = (n: number) => `${String(n).repeat(8)}-1111-4111-8111-111111111111`;
+
+  it('caps proposals at 5', async () => {
+    const leads = [1, 2, 3, 4, 5, 6].map((n) => lead({ id: uid(n), name: `Lead ${n}` }));
+    vi.mocked(suggestProposals).mockResolvedValue({
+      keep: leads.map((_, index) => ({ index, rationale: 'r' })),
+      cost_cents: 1,
+    });
+    const { client, inserts } = fakeService();
+    const res = await proposeChanges(client, 'org-1', 'run-1', 'key', { leads, appts: [], context: 'ctx' }, 200, 10);
+    expect(res.proposed).toBe(5);
+    expect(inserts).toHaveLength(5);
+  });
+
+  it('drops a schema-invalid candidate', async () => {
+    vi.mocked(suggestProposals).mockResolvedValue({ keep: [{ index: 0, rationale: 'x' }], cost_cents: 1 });
+    const { client, inserts } = fakeService();
+    const res = await proposeChanges(client, 'org-1', 'run-1', 'key', { leads: [lead({ id: 'not-a-uuid' })], appts: [], context: 'ctx' }, 200, 10);
+    expect(res.proposed).toBe(0);
+    expect(inserts).toHaveLength(0);
+  });
+
+  it('drops an off-list action (injected scan)', async () => {
+    vi.mocked(suggestProposals).mockResolvedValue({ keep: [{ index: 0, rationale: 'x' }], cost_cents: 1 });
+    const { client, inserts } = fakeService();
+    const scan = (): Candidate[] => [
+      { action: 'deleteLead', input: { id: LEAD_ID }, title: 'x', detail: null },
+    ];
+    const res = await proposeChanges(client, 'org-1', 'run-1', 'key', { leads: [], appts: [], context: 'ctx' }, 200, 10, scan);
+    expect(res.proposed).toBe(0);
+    expect(inserts).toHaveLength(0);
+  });
+
+  it('dedupes a multi-key pending appointment regardless of key order / scheduled_at', async () => {
+    vi.mocked(suggestProposals).mockResolvedValue({ keep: [{ index: 0, rationale: 'x' }], cost_cents: 1 });
+    const { client, inserts } = fakeService([
+      {
+        action: 'createAppointment',
+        input: { via: 'Phone', status: 'scheduled', kind: 'Follow-up call', contact_name: 'Aina Rahman', scheduled_at: '2020-01-01T09:00:00.000Z' },
+      },
+    ]);
+    const res = await proposeChanges(client, 'org-1', 'run-1', 'key', { leads: [lead({ stage: 'qualified' })], appts: [], context: 'ctx' }, 200, 10);
+    expect(res.proposed).toBe(0);
+    expect(inserts).toHaveLength(0);
+  });
+
+  it('passes the seam only { index, title }', async () => {
+    vi.mocked(suggestProposals).mockResolvedValue({ keep: [], cost_cents: 0 });
+    const { client } = fakeService();
+    await proposeChanges(client, 'org-1', 'run-1', 'key', { leads: [lead()], appts: [], context: 'ctx' }, 200, 10);
+    const arg = vi.mocked(suggestProposals).mock.calls[0];
+    expect(arg[0]).toBe('key');
+    expect(arg[1]).toBe('ctx');
+    expect(arg[2]).toEqual([{ index: 0, title: expect.any(String) }]);
+    expect(Object.keys(arg[2][0]).sort()).toEqual(['index', 'title']);
   });
 });
