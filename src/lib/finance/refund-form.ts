@@ -194,13 +194,15 @@ export type RefundSaved = {
 
 /**
  * What the form is about to record, for the note a page shows afterwards.
- * Null while the form has no target or no amount; a form that
- * `refundFormError` passes always has both.
+ * The amount is the one the schema makes of the payload, rounded to the sen
+ * as it is stored: 1.005 typed is RM 1.00 recorded, and the note must not say
+ * RM 1.01. Null while the form has no target or cannot be sent; a form that
+ * `refundFormError` passes always can.
  */
 export function refundSaved(form: RefundForm, targets: RefundTarget[]): RefundSaved | null {
   const target = targets.find((t) => t.key === form.target);
-  const amount = typedNumber(form.amount);
-  return target && amount !== null ? { target, amount, scheduled: form.scheduled } : null;
+  const parsed = recordRefundInput.safeParse(refundPayload(form, targets));
+  return target && parsed.success ? { target, amount: parsed.data.amount, scheduled: parsed.data.scheduled } : null;
 }
 
 /**

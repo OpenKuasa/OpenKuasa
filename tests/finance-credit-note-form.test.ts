@@ -231,8 +231,17 @@ describe('the note that a credit note was saved', () => {
     expect(creditNoteSavedNote(creditNoteSaved(form(), offered, true)!)).toEqual({
       title: 'Credit note issued',
       subtitle: 'INV-0007 to Aisyah Trading',
-      lead: 'A credit note of RM 30.00 was issued against INV-0007. It can be voided or refunded on',
+      // INV-0007 is still owed, so this credit note cannot be refunded: the note does not say it can.
+      lead: 'A credit note of RM 30.00 was issued against INV-0007. It can be voided, or refunded while the customer is in credit, on',
     });
+  });
+  it('states the amount as it was stored, rounded to the sen as the schema rounds it', () => {
+    // 1.005 is stored as RM 1.00 and 1.255 as RM 1.25: the note says the same, not a sen more.
+    const saved = creditNoteSaved(form({ amount: '1.005' }), offered, false)!;
+    expect(saved.amount).toBe(1);
+    expect(saved.amount).toBe(saveCreditNoteInput.parse(creditNotePayload(form({ amount: '1.005' }))).amount);
+    expect(creditNoteSavedNote(saved).lead).toBe('A draft credit note of RM 1.00 was saved against INV-0007. It is issued, changed or deleted on');
+    expect(creditNoteSaved(form({ amount: '1.255' }), offered, true)!.amount).toBe(1.25);
   });
   it('has nothing to say of a form whose invoice is not offered, or with no amount', () => {
     expect(creditNoteSaved(form({ invoiceId: DRAFT_NOTE }), offered, false)).toBeNull();

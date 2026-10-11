@@ -403,6 +403,14 @@ describe('the note that a refund was recorded', () => {
       lead: 'RM 12.50 was left pending against CN-0003 on INV-0007. It is marked as paid or deleted on',
     });
   });
+  it('states the amount as it was stored, rounded to the sen as the schema rounds it', () => {
+    // 1.005 is stored as RM 1.00 and 1.255 as RM 1.25: the note says the same, not a sen more.
+    const saved = refundSaved(form({ amount: '1.005' }), offered)!;
+    expect(saved.amount).toBe(1);
+    expect(saved.amount).toBe(recordRefundInput.parse(refundPayload(form({ amount: '1.005' }), offered)).amount);
+    expect(refundSavedNote(saved).lead).toBe('RM 1.00 was paid out against CN-0003 on INV-0007. It can be voided on');
+    expect(refundSaved(form({ amount: '1.255' }), offered)!.amount).toBe(1.25);
+  });
   it('has nothing to say of a form with no target or no amount', () => {
     expect(refundSaved(form({ target: '' }), offered)).toBeNull();
     expect(refundSaved(form({ amount: '1,200.50' }), offered)).toBeNull();

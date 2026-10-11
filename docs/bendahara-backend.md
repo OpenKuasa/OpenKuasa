@@ -64,11 +64,12 @@ invoice's row, the refund card on Refunds and from an invoice's or a credit
 note's row. Where the thing saved shows on another screen than the one the
 person is on, a note at the top says so and links there (`saved-note-card.tsx`).
 The card hands back what it saved, and the note is worded from that
-(`refundSavedNote`, `creditNoteSavedNote`): the amount, the invoice or credit
-note it went against, the customer, and whether a refund was paid out or left
-pending and a credit note issued or kept as a draft. A card opened from a row
-has that row chosen but its picker is not locked, so the note never names the
-row that was clicked.
+(`refundSavedNote`, `creditNoteSavedNote`): the amount as the schema rounds
+and stores it, the invoice or credit note it went against, the customer, and
+whether a refund was paid out or left pending and a credit note issued or kept
+as a draft. A card opened from a row has that row chosen but its picker is not
+locked, so the note names what was saved, whichever row the card was opened
+from.
 
 A server action refreshes the screens after every attempt that reached the
 database, refused or not, so a record someone else changed or removed shows as
@@ -555,9 +556,10 @@ instead."; see Known limits.
   invoice, a second quotation, a second credit note, a second part-payment, a
   second receipt or a second refund,
   until writes carry a client-generated id (which needs a migration). A second
-  credit note is refused once the two together exceed the invoice's total, and
-  a second refund once the two together exceed the customer's credit; below
-  those caps both go through. A second draft credit note or pending refund is
+  credit note is refused when it is issued (by Save and issue, or by Issue)
+  once the two together exceed the invoice's total; a second draft is not
+  refused, since a draft is not counted. A second refund is refused once the
+  two together exceed the customer's credit. Below those caps both go through. A second draft credit note or pending refund is
   deleted; a second issued credit note or paid refund is voided. A second
   draft quotation can be deleted; a second one that was marked as sent cannot,
   and is marked declined. Making an invoice from a quotation is not affected:
@@ -630,10 +632,13 @@ instead."; see Known limits.
   while something can be refunded there. A customer is only ever in credit
   because of a credit note: a payment in cannot exceed what is owed.
 - A credit note or a refund made from an invoice's row is saved on its own
-  screen; Invoices says so in a note with a link and does not go there by
-  itself.
-- An id that is not an id sent to `voidRefundAction` or `deleteRefundAction`
-  is answered "That payment no longer exists.": a refund's id is parsed by the
+  screen; once the card's save succeeds, Invoices says so in a note with a
+  link and does not go there by itself. There is one case with no note: Save
+  and issue saved the draft but could not issue it, the card stays open with
+  the reason, and the person then cancels. The draft is on Credit Notes and
+  nothing on Invoices says so.
+- An id that is not an id sent to `markRefundPaidAction`, `voidRefundAction`
+  or `deleteRefundAction` is answered "That payment no longer exists.": a refund's id is parsed by the
   schema a payment's is. Only a direct call can send one.
 - `voidPaymentIn` is kept to `direction = 'in'` and reads no view first: every
   movement of money in is a payment in. When cash receipts arrive (stage 5),

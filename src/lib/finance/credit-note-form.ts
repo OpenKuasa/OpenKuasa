@@ -138,22 +138,26 @@ export type CreditNoteSaved = {
 };
 
 /**
- * What the form is about to save, for the note a page shows afterwards. Null
- * while the form has no offered invoice or no amount; a form that
- * `creditNoteFormError` passes always has both.
+ * What the form is about to save, for the note a page shows afterwards. The
+ * amount is the one the schema makes of the payload, rounded to the sen as it
+ * is stored: 1.005 typed is RM 1.00 saved, and the note must not say RM 1.01.
+ * Null while the form has no offered invoice or cannot be sent; a form that
+ * `creditNoteFormError` passes always can.
  */
 export function creditNoteSaved(form: CreditNoteForm, creditable: CreditableInvoice[], issued: boolean): CreditNoteSaved | null {
   const invoice = creditable.find((i) => i.id === form.invoiceId);
-  const amount = typedNumber(form.amount);
-  if (!invoice || amount === null) return null;
-  return { invoice_no: invoice.invoice_no, customer_name: invoice.customer_name, amount, issued };
+  const parsed = saveCreditNoteInput.safeParse(creditNotePayload(form));
+  if (!invoice || !parsed.success) return null;
+  return { invoice_no: invoice.invoice_no, customer_name: invoice.customer_name, amount: parsed.data.amount, issued };
 }
 
 /**
  * The note a page shows once a credit note is saved from an invoice's row:
  * its title, the invoice and customer it is for, and a sentence that leads
  * up to the link to Credit Notes. It names the invoice the credit note went
- * against, which the person may have changed in the form.
+ * against, which the person may have changed in the form. An issued credit
+ * note can only be refunded while its customer is in credit, which one on an
+ * invoice that is still owed does not make them, so the note says when.
  */
 export function creditNoteSavedNote(saved: CreditNoteSaved): { title: string; subtitle: string; lead: string } {
   const numbered = saved.invoice_no !== '—';
@@ -162,7 +166,7 @@ export function creditNoteSavedNote(saved: CreditNoteSaved): { title: string; su
     title: saved.issued ? 'Credit note issued' : 'Credit note saved',
     subtitle: `${numbered ? saved.invoice_no : 'The invoice'} to ${saved.customer_name}`,
     lead: saved.issued
-      ? `A credit note of ${rm(saved.amount)} was issued against ${invoice}. It can be voided or refunded on`
+      ? `A credit note of ${rm(saved.amount)} was issued against ${invoice}. It can be voided, or refunded while the customer is in credit, on`
       : `A draft credit note of ${rm(saved.amount)} was saved against ${invoice}. It is issued, changed or deleted on`,
   };
 }
