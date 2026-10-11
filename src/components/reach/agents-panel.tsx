@@ -532,7 +532,11 @@ function SchedulesSection({
 
       {schedules.length === 0 && !adding ? (
         <div className="grid min-h-24 place-items-center gap-2 py-3 text-center text-sm text-muted-foreground">
-          <p>No schedules yet — ask Jebat &lsquo;run every Monday 9am&rsquo;, or add one here.</p>
+          <p>
+            {canEdit
+              ? 'No schedules yet — ask Jebat ‘run every Monday 9am’, or add one here.'
+              : 'No schedules yet. An owner or admin can add one.'}
+          </p>
           {canEdit && (
             <Button type="button" size="sm" variant="outline" onClick={() => setAdding(true)}>
               <Plus className="size-3.5" aria-hidden="true" /> Add schedule
@@ -582,6 +586,7 @@ export function AgentsPanel({
   assets,
   assetUrls,
   canEdit,
+  canManage,
   schedules,
   proposals,
   decided,
@@ -595,7 +600,10 @@ export function AgentsPanel({
   assets: AgentRunAsset[];
   /** Signed URL strings keyed by asset id, built server-side. */
   assetUrls: Record<string, string>;
+  /** May run the agent and decide on its suggestions (anyone who edits data). */
   canEdit: boolean;
+  /** May change the agent's settings, schedules and spend caps (owner/admin). */
+  canManage: boolean;
   schedules: AgentSchedule[];
   proposals: AgentProposal[];
   decided: AgentProposal[];
@@ -627,9 +635,20 @@ export function AgentsPanel({
 
   const assetCount = (runId: string) => assets.filter((a) => a.run_id === runId).length;
 
+  const runNow = (
+    <Button
+      type="button"
+      variant="outline"
+      disabled={pending}
+      onClick={() => act(runAgentNowAction({}))}
+    >
+      {pending ? 'Working…' : 'Run now'}
+    </Button>
+  );
+
   return (
     <div className="space-y-5">
-      {canEdit ? (
+      {canManage ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:items-end">
           <div className="flex items-center gap-3">
             <Switch
@@ -685,22 +704,18 @@ export function AgentsPanel({
             />
           </div>
 
-          <div>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={pending}
-              onClick={() => act(runAgentNowAction({}))}
-            >
-              {pending ? 'Working…' : 'Run now'}
-            </Button>
-          </div>
+          <div>{runNow}</div>
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground">
-          {config.enabled ? 'Enabled' : 'Disabled'} · {CADENCE_LABEL[config.cadence]} · cap RM{' '}
-          {(config.max_cost_cents / 100).toFixed(2)} per run. You need edit access to change these.
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">
+            {config.enabled ? 'Enabled' : 'Disabled'} · {CADENCE_LABEL[config.cadence]} · cap RM{' '}
+            {(config.max_cost_cents / 100).toFixed(2)} per run. Only an owner or admin can change
+            these, the schedules and the spend caps.
+          </p>
+          {/* A member may still start a run; it obeys the switch and every cap above. */}
+          {canEdit && runNow}
+        </div>
       )}
 
       {error && (
@@ -798,7 +813,7 @@ export function AgentsPanel({
 
       <SchedulesSection
         schedules={schedules}
-        canEdit={canEdit}
+        canEdit={canManage}
         dailyCapCents={dailyCapCents}
         weeklyCapCents={weeklyCapCents}
         spentTodayCents={spentTodayCents}

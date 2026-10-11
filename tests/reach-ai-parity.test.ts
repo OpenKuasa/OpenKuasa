@@ -29,9 +29,11 @@ import { WRITE_TOOL_NAMES } from '@/lib/ai/agents/orchestrator';
 
 const ctx = { client: {} as never, orgId: 'org1' };
 // The factory returns read tools or read+write tools; with canWrite it is the latter.
+// An owner/admin (canManageAgents) holds every write tool, including scheduling the agent.
 const tools = createReachTools(createSeedReachData(), () => new Date(), {
   ctx,
   canWrite: true,
+  canManageAgents: true,
 }) as Extract<ReachTools, { createCampaign: unknown }>;
 
 describe('AI write tools reuse the capability schemas (parity)', () => {

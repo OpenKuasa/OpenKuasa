@@ -25,3 +25,11 @@ test('demo guests can look at every screen', () => {
   expect(canSee(guest, 'manage-billing')).toBe(true);
   expect(canSee(guest, 'manage-developers')).toBe(true);
 });
+
+test('agent settings and schedules are owner/admin only; members keep data edits', () => {
+  expect(can('owner', 'manage-agents')).toBe(true);
+  expect(can('admin', 'manage-agents')).toBe(true);
+  expect(can('member', 'manage-agents')).toBe(false);
+  expect(can('viewer', 'manage-agents')).toBe(false);
+  expect(can('member', 'edit-data')).toBe(true);
+});

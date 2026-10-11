@@ -164,10 +164,16 @@ describe('setAgentEnabledAction', () => {
     expect(ctl.created).toHaveLength(0);
   });
   it('rejects invalid input before calling the capability', async () => {
+    ctl.viewer = { ...ctl.viewer, role: 'admin' };
     expect(await setAgentEnabledAction({ agent_key: 'nope', enabled: 'yes' })).toMatchObject({ ok: false });
     expect(ctl.created).toHaveLength(0);
   });
-  it('calls the capability for a member with valid input', async () => {
+  it('forbids a member: agent settings are owner/admin only', async () => {
+    expect(await setAgentEnabledAction(valid)).toMatchObject({ ok: false });
+    expect(ctl.created).toHaveLength(0);
+  });
+  it.each(['owner', 'admin'])('calls the capability for an %s with valid input', async (role) => {
+    ctl.viewer = { ...ctl.viewer, role };
     expect(await setAgentEnabledAction(valid)).toMatchObject({ ok: true });
     expect(ctl.created).toHaveLength(1);
   });
@@ -186,10 +192,16 @@ describe('createScheduleAction', () => {
     expect(ctl.created).toHaveLength(0);
   });
   it('rejects invalid input before calling the capability', async () => {
+    ctl.viewer = { ...ctl.viewer, role: 'admin' };
     expect(await createScheduleAction({ agent_key: 'nope', interval_seconds: 1 })).toMatchObject({ ok: false });
     expect(ctl.created).toHaveLength(0);
   });
-  it('calls the capability for a member with valid input', async () => {
+  it('forbids a member: agent settings are owner/admin only', async () => {
+    expect(await createScheduleAction(valid)).toMatchObject({ ok: false });
+    expect(ctl.created).toHaveLength(0);
+  });
+  it.each(['owner', 'admin'])('calls the capability for an %s with valid input', async (role) => {
+    ctl.viewer = { ...ctl.viewer, role };
     expect(await createScheduleAction(valid)).toMatchObject({ ok: true });
     expect(ctl.created).toHaveLength(1);
   });
@@ -207,7 +219,12 @@ describe('setWorkspaceCapsAction', () => {
     expect(await setWorkspaceCapsAction(valid)).toMatchObject({ ok: false });
     expect(ctl.created).toHaveLength(0);
   });
-  it('calls the capability for a member with valid input', async () => {
+  it('forbids a member: agent settings are owner/admin only', async () => {
+    expect(await setWorkspaceCapsAction(valid)).toMatchObject({ ok: false });
+    expect(ctl.created).toHaveLength(0);
+  });
+  it.each(['owner', 'admin'])('calls the capability for an %s with valid input', async (role) => {
+    ctl.viewer = { ...ctl.viewer, role };
     expect(await setWorkspaceCapsAction(valid)).toMatchObject({ ok: true });
     expect(ctl.created).toHaveLength(1);
   });

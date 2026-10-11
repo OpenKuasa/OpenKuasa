@@ -43,6 +43,8 @@ function isoAgo(ms: number): string {
 export default async function AgentsScreen() {
   const viewer = await getViewer();
   const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
+  // Settings, schedules and spend caps decide what the workspace key spends: owner/admin only.
+  const canManage = !viewer.isDemo && can(viewer.role, 'manage-agents');
 
   let config: AgentConfig = defaultConfig(viewer.orgId ?? '');
   let runs: AgentRun[] = [];
@@ -133,6 +135,7 @@ export default async function AgentsScreen() {
             assets={assets}
             assetUrls={assetUrls}
             canEdit={canEdit}
+            canManage={canManage}
             schedules={schedules}
             proposals={proposals}
             decided={decided}

@@ -98,6 +98,18 @@ async function writeCtx(): Promise<(ReachWriteContext & { userId: string }) | nu
   return { client, orgId: viewer.orgId, userId: viewer.userId };
 }
 
+/**
+ * Resolve a write context for agent settings, schedules and spend caps. These
+ * decide how much of the workspace's AI key is spent, so they are owner/admin
+ * only (the database policies say the same).
+ */
+async function agentAdminCtx(): Promise<(ReachWriteContext & { userId: string }) | null> {
+  const viewer = await getViewer();
+  if (viewer.isDemo || !can(viewer.role, 'manage-agents')) return null;
+  const client = await createClient();
+  return { client, orgId: viewer.orgId, userId: viewer.userId };
+}
+
 /** Parse → guard → capability → revalidate. The screens pass a typed object. */
 async function run<I, O>(
   schema: ZodType<I>,
@@ -290,13 +302,13 @@ export async function deleteAppointmentAction(input: unknown) {
 /** The Agents screen is Reach-only: crm/finance map to their own components. */
 const AGENTS_PATHS = ['/reach/agents'];
 
-/** Same shape as {@link runLeads}, refreshing the Agents screen. */
+/** Same shape as {@link runLeads}, for an owner or admin, refreshing the Agents screen. */
 async function runAgentConfig<I, O>(
   schema: ZodType<I>,
   input: unknown,
   fn: (ctx: ReachWriteContext, parsed: I) => Promise<CapResult<O>>,
 ): Promise<CapResult<O>> {
-  const ctx = await writeCtx();
+  const ctx = await agentAdminCtx();
   if (!ctx) return FORBIDDEN;
   const parsed = schema.safeParse(input);
   if (!parsed.success) {
@@ -329,7 +341,7 @@ async function runSchedule<I, O>(
   input: unknown,
   fn: (ctx: ReachWriteContext, parsed: I) => Promise<CapResult<O>>,
 ): Promise<CapResult<O>> {
-  const ctx = await writeCtx();
+  const ctx = await agentAdminCtx();
   if (!ctx) return FORBIDDEN;
   const parsed = schema.safeParse(input);
   if (!parsed.success) return INVALID;

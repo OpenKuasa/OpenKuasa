@@ -17,10 +17,9 @@ import {
   PEOPLE_TOOL_NAMES as PEOPLE_READ_TOOL_NAMES,
   type PeopleWrite,
 } from '@/lib/ai/people-tools';
-import { createReachTools } from '@/lib/ai/tools';
+import { createReachTools, type ReachWrite } from '@/lib/ai/tools';
 import type { HireWriteContext } from '@/lib/hire/capabilities';
 import type { CvReader } from '@/lib/hire/cv-read';
-import type { ReachWriteContext } from '@/lib/reach/capabilities';
 import type { HireData } from '@/lib/hire/types';
 import type { PeopleData, PeopleViewer } from '@/lib/people/types';
 import type { ReachData } from '@/lib/reach/types';
@@ -28,7 +27,7 @@ import type { ReachData } from '@/lib/reach/types';
 /** The marketing data an agent works on, and whether this caller may change it. */
 export type ReachAccess = {
   data: ReachData;
-  write?: { ctx: ReachWriteContext; canWrite: boolean };
+  write?: ReachWrite;
 };
 
 /** Marketing tools that change data. */

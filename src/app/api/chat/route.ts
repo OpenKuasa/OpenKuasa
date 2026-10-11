@@ -45,9 +45,14 @@ export async function POST(request: Request) {
   const org = hasSupabaseEnv() ? await getCurrentOrg(supabase) : null;
   const data = await getReachData(supabase);
   // Only a non-viewer member gets change tools (and each still needs approval).
+  // Scheduling the agent commits the workspace to spend, so that one is owner/admin only.
   const write =
     org && org.role !== 'viewer'
-      ? { ctx: { client: supabase, orgId: org.orgId }, canWrite: true }
+      ? {
+          ctx: { client: supabase, orgId: org.orgId },
+          canWrite: true,
+          canManageAgents: can(org.role, 'manage-agents'),
+        }
       : undefined;
   // Tuah answers with its team unless the chat asked for the single agent.
   // A turn resuming after an approval stays with whichever one started it.
