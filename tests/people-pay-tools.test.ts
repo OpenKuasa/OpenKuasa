@@ -93,7 +93,7 @@ type Receipt = { bytes: Buffer; mediaType: string } | null;
 const hr = (receipt: Receipt = null) => ({
   ctx: { client: {} as never, orgId: 'org-1' },
   tier: 'hr' as const,
-  employeeId: null,
+  employeeId: null as string | null,
   receipt,
   userId: USER,
 });
@@ -627,5 +627,48 @@ describe('what the model is told after a change', () => {
     expect(preview).toEqual({ ok: false, error: 'Could not work out the overtime just now.' });
     expect(JSON.stringify(log.mock.calls)).not.toContain('mother');
     log.mockRestore();
+  });
+});
+
+describe('an owner or admin’s own claims and overtime', () => {
+  const NO_ONE = 'Say which employee this is for. Your own account is not linked to an employee record.';
+  const linked = (employeeId: string | null) => ({ ...hr(), employeeId });
+  const OT = { work_date: '2026-10-08', hours: 3 };
+  const CALLS: [string, Record<string, unknown>][] = [
+    ['submitClaim', CLAIM],
+    ['submitOvertime', OT],
+    ['previewOvertime', OT],
+  ];
+
+  it('make the employee optional in the schema', () => {
+    for (const [name, input] of CALLS) {
+      expect(schemaOf(name, hr()).safeParse(input).success, name).toBe(true);
+      expect(keysOf(name, hr()), name).toContain('employee_id');
+    }
+  });
+
+  it('act for their own linked employee when none is named', async () => {
+    for (const [name, input] of CALLS) await call(name, input, HR_VIEWER, linked(ME));
+    expect(ctl.ran.map((r) => r.fn)).toEqual(['submitClaim', 'submitOvertime', 'previewOvertime']);
+    for (const r of ctl.ran) expect(r.input).toMatchObject({ employee_id: ME });
+  });
+
+  it('refuse, without touching the database, when none is named and their account is linked to no one', async () => {
+    for (const [name, input] of CALLS) {
+      expect(await call(name, input, HR_VIEWER, linked(null)), name).toEqual({ ok: false, error: NO_ONE });
+    }
+    expect(ctl.ran).toEqual([]);
+    expect(ctl.uploads).toEqual([]);
+  });
+
+  it('let an employee they name win over their own', async () => {
+    for (const [name, input] of CALLS) await call(name, { ...input, employee_id: OTHER }, HR_VIEWER, linked(ME));
+    for (const r of ctl.ran) expect(r.input).toMatchObject({ employee_id: OTHER });
+    expect(ctl.ran).toHaveLength(3);
+  });
+
+  it('upload no receipt when the claim is refused', async () => {
+    await call('submitClaim', CLAIM, HR_VIEWER, { ...hr(PNG), employeeId: null });
+    expect(ctl.uploads).toEqual([]);
   });
 });

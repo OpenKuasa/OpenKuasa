@@ -206,6 +206,9 @@ const days = z.number().optional().describe('How many days back to cover, counti
 const SCOPE_NOTE =
   ' The result says whose records it covers in "scope": for someone who is not an HR admin that is their own records only, so never present it as the whole team.';
 
+/** What an owner or admin hears when they name no employee and their own account is linked to none. */
+const NO_EMPLOYEE_GIVEN = 'Say which employee this is for. Your own account is not linked to an employee record.';
+
 const NOT_LINKED =
   'This account is not linked to an employee record yet, so none of this person\'s own records can be shown. It does not mean they have none.';
 
@@ -995,15 +998,27 @@ export function createPeopleTools(
 
   // A member's schemas have no employee field: the tool fills in their own id after the model's input,
   // so nothing the model sends (or a reason someone typed) can point a change at another employee.
-  const previewSchema = hr ? previewLeaveInput : previewLeaveInput.omit({ employee_id: true });
-  const applyLeaveSchema = hr ? applyLeaveInput : applyLeaveInput.omit({ employee_id: true });
-  const applyTimeOffSchema = hr ? applyTimeOffInput : applyTimeOffInput.omit({ employee_id: true });
+  // An owner or admin may name an employee, or leave it out for a request of their own.
+  const HR_EMPLOYEE_NOTE =
+    "the employee's id from listEmployees; leave it out when the request is for the person you are talking to";
+  const optionalEmployee = { employee_id: z.guid().optional().describe(HR_EMPLOYEE_NOTE) };
+  const previewSchema = hr ? previewLeaveInput.extend(optionalEmployee) : previewLeaveInput.omit({ employee_id: true });
+  const applyLeaveSchema = hr ? applyLeaveInput.extend(optionalEmployee) : applyLeaveInput.omit({ employee_id: true });
+  const applyTimeOffSchema = hr ? applyTimeOffInput.extend(optionalEmployee) : applyTimeOffInput.omit({ employee_id: true });
   // The receipt is not the model's to choose or mention: the file comes from the question, by the route.
-  const submitClaimSchema = (hr ? submitClaimInput : submitClaimInput.omit({ employee_id: true })).omit({ receipt_path: true });
-  const submitOvertimeSchema = hr ? submitOvertimeInput : submitOvertimeInput.omit({ employee_id: true });
-  const previewOvertimeSchema = hr ? previewOvertimeInput : previewOvertimeInput.omit({ employee_id: true });
-  const forEmployee = <T extends object>(input: T): T & { employee_id: string } =>
-    hr ? (input as T & { employee_id: string }) : { ...input, employee_id: ownId as string };
+  const submitClaimSchema = (hr ? submitClaimInput.extend(optionalEmployee) : submitClaimInput.omit({ employee_id: true })).omit({ receipt_path: true });
+  const submitOvertimeSchema = hr ? submitOvertimeInput.extend(optionalEmployee) : submitOvertimeInput.omit({ employee_id: true });
+  const previewOvertimeSchema = hr ? previewOvertimeInput.extend(optionalEmployee) : previewOvertimeInput.omit({ employee_id: true });
+  /**
+   * Whose request this is. A member: always their own. An owner or admin: the employee they named, else their own
+   * linked record, else a refusal that never reaches the database.
+   */
+  const forEmployee = <T extends object>(input: T): CapResult<T & { employee_id: string }> => {
+    const given = (input as { employee_id?: string | null }).employee_id;
+    if (hr && given) return { ok: true, data: input as T & { employee_id: string } };
+    if (hr && ownId === null) return { ok: false, error: NO_EMPLOYEE_GIVEN };
+    return { ok: true, data: { ...input, employee_id: ownId as string } };
+  };
 
   const previewTools: ToolSet = {
     previewLeave: tool({
@@ -1011,11 +1026,13 @@ export function createPeopleTools(
         'Count what a leave request would cost, without applying: the working days (weekends and public holidays ' +
         'are not counted), the balance left after it, and "over_by", how many days it is over the balance (0 when ' +
         'within). Call it before applyLeave and say the days and balance in your lead-in line. ' +
-        (hr ? 'Give the employee by their id from listEmployees.' : 'It is for the person you are talking to.'),
+        (hr ? 'Give the employee by their id from listEmployees, or leave it out for the person you are talking to.' : 'It is for the person you are talking to.'),
       inputSchema: previewSchema,
       execute: async (input) => {
         try {
-          return await capPreviewLeave(ctx, forEmployee(input as never));
+          const target = forEmployee(input as never);
+          if (!target.ok) return target;
+          return await capPreviewLeave(ctx, target.data);
         } catch (error) {
           console.error('[lekiu] previewLeave failed:', error instanceof Error ? error.name : 'error');
           return { ok: false as const, error: 'Could not work out the days just now.' };
@@ -1029,11 +1046,13 @@ export function createPeopleTools(
         'the rate multiplier and the amount in Ringgit. "amount_calculated" false means no salary is on file, so the ' +
         'amount will be worked out once HR sets the salary. Call it before submitOvertime and say the amount and the ' +
         'kind of day in your lead-in line. Date as YYYY-MM-DD; hours in whole or half hours. ' +
-        (hr ? 'Give the employee by their id from listEmployees.' : 'It is for the person you are talking to.'),
+        (hr ? 'Give the employee by their id from listEmployees, or leave it out for the person you are talking to.' : 'It is for the person you are talking to.'),
       inputSchema: previewOvertimeSchema,
       execute: async (input) => {
         try {
-          const { employee_id, work_date, hours } = forEmployee(input as never) as z.infer<typeof previewOvertimeInput>;
+          const target = forEmployee(input as never);
+          if (!target.ok) return target;
+          const { employee_id, work_date, hours } = target.data as z.infer<typeof previewOvertimeInput>;
           const result = await capPreviewOvertime(ctx, { employee_id, work_date, hours });
           if (!result.ok) return result;
           const { day_kind, multiplier, hourly_rate_cents, amount_cents } = result.data;
@@ -1065,19 +1084,25 @@ export function createPeopleTools(
   const sharedLeaveTools: ToolSet = {
     applyLeave: tool({
       description:
-        (hr ? 'Apply for leave on behalf of an employee. ' : 'Apply for leave for the person you are talking to. ') +
+        (hr ? 'Apply for leave on behalf of an employee, or for the person you are talking to when you leave the employee out. ' : 'Apply for leave for the person you are talking to. ') +
         'Dates are YYYY-MM-DD; a half day is for a single date. Weekends and public holidays are not counted. ' +
         'An over-balance request is still sent: it is flagged for the decider. Needs approval.',
       inputSchema: applyLeaveSchema,
-      execute: async (input) => change('applyLeave', () => capApplyLeave(ctx, forEmployee(input as never))),
+      execute: async (input) => change('applyLeave', async () => {
+          const target = forEmployee(input as never);
+          return target.ok ? capApplyLeave(ctx, target.data) : target;
+        }),
     }),
 
     applyTimeOff: tool({
       description:
-        (hr ? 'Request a few hours off on one day for an employee. ' : 'Request a few hours off on one day for the person you are talking to. ') +
+        (hr ? 'Request a few hours off on one day for an employee, or for the person you are talking to when you leave the employee out. ' : 'Request a few hours off on one day for the person you are talking to. ') +
         'Date as YYYY-MM-DD, times as HH:MM. Needs approval.',
       inputSchema: applyTimeOffSchema,
-      execute: async (input) => change('applyTimeOff', () => capApplyTimeOff(ctx, forEmployee(input as never))),
+      execute: async (input) => change('applyTimeOff', async () => {
+          const target = forEmployee(input as never);
+          return target.ok ? capApplyTimeOff(ctx, target.data) : target;
+        }),
     }),
 
     cancelLeaveRequest: tool({
@@ -1114,14 +1139,16 @@ export function createPeopleTools(
   const sharedPayTools: ToolSet = {
     submitClaim: tool({
       description:
-        (hr ? 'Submit an expense claim on behalf of an employee. ' : 'Submit an expense claim for the person you are talking to. ') +
+        (hr ? 'Submit an expense claim on behalf of an employee, or for the person you are talking to when you leave the employee out. ' : 'Submit an expense claim for the person you are talking to. ') +
         'The amount is in sen (RM 85.00 is 8500) and the date is YYYY-MM-DD: both must come from the person, never made up. ' +
         'A photo or PDF the person attached to the question goes with the claim by itself: you cannot read it or choose a ' +
         'file. Needs approval.',
       inputSchema: submitClaimSchema,
       execute: async (input) =>
         change('submitClaim', async () => {
-          const given = forEmployee(input as never) as z.infer<typeof submitClaimSchema> & { employee_id: string };
+          const target = forEmployee(input as never);
+          if (!target.ok) return target;
+          const given = target.data as z.infer<typeof submitClaimSchema> & { employee_id: string };
           // Built field by field: whatever else the model sent (a path, a file, another employee) goes nowhere.
           const claim = {
             employee_id: given.employee_id,
@@ -1174,13 +1201,15 @@ export function createPeopleTools(
 
     submitOvertime: tool({
       description:
-        (hr ? 'Submit overtime on behalf of an employee. ' : 'Submit overtime for the person you are talking to. ') +
+        (hr ? 'Submit overtime on behalf of an employee, or for the person you are talking to when you leave the employee out. ' : 'Submit overtime for the person you are talking to. ') +
         'Date as YYYY-MM-DD, hours in whole or half hours. The amount is worked out by the system from the salary on ' +
         'file, not by you: call previewOvertime first. Needs approval.',
       inputSchema: submitOvertimeSchema,
       execute: async (input) =>
         change('submitOvertime', async () => {
-          const { employee_id, work_date, hours, reason } = forEmployee(input as never) as z.infer<typeof submitOvertimeInput>;
+          const target = forEmployee(input as never);
+          if (!target.ok) return target;
+          const { employee_id, work_date, hours, reason } = target.data as z.infer<typeof submitOvertimeInput>;
           const result = await capSubmitOvertime(ctx, { employee_id, work_date, hours, reason });
           if (!result.ok) return result;
           const { id, status, amount_cents, hourly_rate_cents } = result.data;

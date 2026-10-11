@@ -328,3 +328,27 @@ describe('approval cards for claims and overtime', () => {
     });
   });
 });
+
+describe('approval cards for an owner or admin’s own request', () => {
+  const find = nameIn([{ tool: 'listEmployees', output: { total: 1, employees: [{ id: EMP, name: 'Faiz Hakim' }] } }]);
+  const leave = { leave_type: 'annual', start_date: '2026-10-20', end_date: '2026-10-22' };
+  const claim = { category: 'meals', amount_cents: 2340, claim_date: '2026-10-11' };
+
+  it('reads as the caller’s own, never “for this employee”, when no employee is in the input', () => {
+    for (const title of [
+      approvalTitle('applyLeave', leave, find),
+      approvalTitle('applyTimeOff', { off_date: '2026-10-20', start_time: '14:00', end_time: '16:00' }, find),
+      approvalTitle('submitClaim', claim, find),
+      approvalTitle('submitOvertime', { work_date: '2026-10-08', hours: 3 }, find),
+    ]) {
+      expect(title).not.toContain(' for this employee');
+      expect(title).not.toContain('Faiz');
+    }
+    expect(approvalTitle('submitClaim', claim, find)).toBe('Claim RM 23.40 for meals, 11 Oct?');
+  });
+
+  it('still names the employee when one is given, and never names a wrong-kind id', () => {
+    expect(approvalTitle('submitClaim', { ...claim, employee_id: EMP }, find)).toBe('Claim RM 23.40 for meals, 11 Oct, for Faiz Hakim?');
+    expect(approvalTitle('submitClaim', { ...claim, employee_id: DEPT }, find)).toBe('Claim RM 23.40 for meals, 11 Oct, for this employee?');
+  });
+});
