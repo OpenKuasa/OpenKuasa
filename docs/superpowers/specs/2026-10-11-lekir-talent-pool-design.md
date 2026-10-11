@@ -45,6 +45,9 @@ job goes into the pool, so nobody on file is invisible because of how they were 
   saved, and the people already added that way are moved in once, by the migration.
 - Through Lekir, nothing changes without an Approve tap on a card that names the person and
   the change. One person per card.
+- Anyone in the pool can be brought onto the Talent Pool screen by typing their name in
+  its search box, however long ago they were put on file (up to the 1,000-row read limit,
+  which the screen states when it is reached).
 - Lekir never moves someone into or out of the pool, or marks them Passive, on a protected
   ground.
 
@@ -57,7 +60,8 @@ job goes into the pool, so nobody on file is invisible because of how they were 
    and a one-time update of existing rows. No new table or column.
 2. Two capabilities, shared by server actions and Lekir's tools.
 3. The Talent Pool screen: a working "Add to Pool" picker, a working "Move to pipeline" on
-   each row, a row menu for the status and for removing, and an "Available" tile.
+   each row, a row menu for the status and for removing, an "Available" tile, and a
+   working search box over the whole pool.
 4. "Add to talent pool" on the Candidates board's card menu and in the Applications
    details panel.
 5. The reworded hint under "No job yet" on the Add candidate form, and the reworded
@@ -67,13 +71,18 @@ job goes into the pool, so nobody on file is invisible because of how they were 
 7. Tests, including a live database test, question-set cases and a browser smoke checklist.
 
 ### Out of scope
-- The search box and the role and source filters on the pool table. They stay disabled and
-  marked "Coming soon". (The picker has its own small filter; see 6.5.)
-- Paging the pool table. It keeps showing the newest 50 people on file
-  (`src/lib/hire/lists.ts:37, 411`). Someone put on file long ago and added to a pool of
-  more than 50 is counted in the tiles and the charts, and Lekir can list them, but they
-  are not in the table until search or paging is built. This piece says so in the table's
-  footer rather than hiding it (6.5).
+- The "All roles" select, the "Filter" button and the "All sources" button on the pool
+  table. All three stay disabled and marked "Coming soon". None of them comes for free
+  with search: each needs a list of choices and a menu of its own. The search box does
+  cover what they would mostly be used for, since it matches a person's headline (their
+  role) and their source as well as their name (6.5).
+- Paging the pool table. With no search it still draws the newest 50 people on file
+  (`src/lib/hire/lists.ts:37, 411`); search is the way to reach anyone else.
+- Raising the read limit. The screen reads the newest 1,000 candidates on file
+  (`src/lib/hire/types.ts:118`), as every Lekir screen does. A pool member older than
+  that is not read, so is not counted, drawn or found. The screen says so when the limit
+  is reached (6.5).
+- Ordering the table by when a person joined the pool. Nothing records that (section 3).
 - Changing several people from one request or one card.
 - A date for when someone joined the pool, who added them, notes, and tags. There is no
   column for any of them, and this piece adds none.
@@ -103,6 +112,9 @@ job goes into the pool, so nobody on file is invisible because of how they were 
 | Tiles | Add "Available" | It is now the status every new pool entry starts with, and the four status tiles then add up to the pool size. |
 | What the board and Applications know | Each row carries the person's stored pool status | So the menu offers "Add to talent pool" only when it applies, and otherwise says where the person stands. |
 | The picker's list | Loaded when the picker opens, for writers only, with a filter in the browser | Keeps up to 1,000 rows out of every page load and away from viewers. Without a filter a long list is unusable. |
+| Reaching everyone in the pool | The pool table's search box works, over the whole pool | The table draws 50 rows. Before this piece that only hid old pool members; now a person can be added to the pool long after they were put on file, and would be added straight into the hidden part. Search makes every pool member reachable by name. |
+| Where the search runs | On the server, from a `q` parameter in the page's address | The page already reads the whole pool on the server on every request and only then cuts it to 50 rows (`lists.ts:396-411`). Filtering before the cut costs nothing more. Filtering in the browser would mean sending every pool row, up to 1,000, to every visitor on every load, viewers included, to save one round trip. The address also keeps the search across the page refresh that follows each change. |
+| Order of the table | Unchanged: newest on file first. Not by when they joined the pool | There is no "joined the pool" date, and this piece adds no column. Nothing stored can stand in for one: `created_at` is when the person was first put on file; the status does not say when it was set; an application date exists only for people moved to the pipeline. So the spec does not pretend. A newly pooled person is found by search, and the sentence after an add names them. |
 | Lekir | Two change tools; one person per Approve card | As 3a and 3b. |
 
 ---
@@ -309,6 +321,10 @@ but types, so client components, the capabilities and the tests all read the sam
 - `PoolModel` rows gain `poolStatus` (the stored status; `status` stays the label shown),
   and the model gains `jobs`: the open and paused jobs by title, each with its status, the
   same list the board builds (`lists.ts:233-236`).
+- `buildPoolModel` takes an optional search text. `rows` are then the matches, cut to 50,
+  and the model also gains `search` (the text used, or null), `matched` (how many pool
+  members match, before the cut) and `readCapped`. `size`, the status counts and the two
+  chart tallies stay figures for the whole pool (6.5).
 
 ### 6.3 Capabilities — `src/lib/hire/capabilities.ts`
 One Zod schema each, which is also the AI tool's input schema. No `.transform()` and no
@@ -341,6 +357,7 @@ tenant key: the workspace is the session's.
   refused), the people not in the pool, newest on file first: `id`, `name`, `headline`,
   `location`, `skills`, `source`, and `capped` (true when the read returned its full
   1,000 rows, `src/lib/hire/types.ts:118`). Never an email or a phone number.
+- The pool table's search is not an action. It is a parameter of the page (6.5).
 
 ### 6.5 Talent Pool screen — `src/screens/hire/talent-pool.tsx` and a new client file `pool-actions.tsx`
 The page stays a server component. It works out `canEdit` as the Candidates board does
@@ -359,8 +376,8 @@ twelve columns and each status tile two.
   meaning sentence of the chosen status.
 - "Search people": a text field (placeholder "Name, headline or skill") that narrows the
   loaded list as it is typed, matching any part of the name, the headline or a skill, in
-  any letter case. This is a filter over rows already in the browser. It is not the pool
-  table's search, which stays "Coming soon".
+  any letter case. This is a filter over rows already in the browser, loaded for this
+  dialog. It is separate from the pool table's search box, described below.
 - The list: each row has the name, then headline and location on one line, then up to
   three skills, and an "Add" button. At most 50 rows are drawn at a time; with more, a
   line under the list reads "Showing 50 of 312. Type to narrow the list."
@@ -404,8 +421,64 @@ being saved). The button is not danger-coloured: nothing is deleted.
 **The table's subtitle** changes from "Most recently added first" to "Newest on file
 first". The rows are ordered by when the person was first put on file, not by when they
 joined the pool, and now that people can be added to the pool later the old wording would
-be untrue. When the pool is larger than the table, the footer reads "Showing the newest
-50 on file of 137. Ask Lekir to list the others." in place of today's line.
+be untrue. The order itself does not change (section 3).
+
+**Search.** The search box above the table (`talent-pool.tsx:183-191`) becomes real, for
+every member, viewers included: it changes nothing, it only finds.
+
+- *How it works.* The box is a small form whose field is named `q`. Searching puts
+  `?q=aina` in the page's address and the server draws the page again. The route is added
+  to the routes that hand the address's parameters to their screen
+  (`scripts/gen-screen-routes.mjs:39`), and `buildPoolModel` takes the search text.
+  The search runs when Enter is pressed and, with scripting on, also 300 ms after the
+  last keystroke, replacing the address without adding a step to the Back button and
+  without moving the page. With scripting off, Enter still works: it is a plain form.
+- *What is matched.* The text, trimmed and cut to 80 characters, in any letter case, as
+  one run of characters found anywhere in the person's name, their headline, their
+  location, their source or any one of their skills — the same loose match Lekir's
+  lookups use (`src/lib/hire/applications-view.ts:68-72`). All five are already in the
+  rows the server has read, so matching the other four costs nothing. Email and phone
+  are not searched.
+- *Over whom.* Every pool member the server read, not the 50 drawn. The filter is applied
+  before the cut to 50.
+- *With no search* the table is as today: the newest 50 on file. Its footer keeps today's
+  two lines, with one addition to the second: "Showing 37 candidates", or, when the pool
+  is larger than the table, "Showing the newest 50 of 137. Search to find anyone else."
+- *With a search* the table draws the matches, newest on file first, at most 50, and the
+  footer becomes a count:
+  - one match: "1 person matches “aina”."
+  - two to 50: "7 people match “aina”."
+  - more than 50: "Showing the newest 50 of 212 people who match “a”. Type more to narrow
+    it down."
+  - none: the table is replaced by "No one in the talent pool matches “aina”." and the
+    footer is not drawn.
+- *What search does not change.* The tiles and the two charts stay figures for the whole
+  pool. Only the table follows the search.
+- *The box* shows the text being searched for. When it holds text, a "Clear search"
+  button sits at its right-hand end; pressing it empties the box, removes `q` from the
+  address, shows the unfiltered table and leaves focus in the box. The placeholder
+  becomes "Search by name, skill or location…".
+- *After a change.* The page is drawn again with the same address, so the search stays.
+  A person removed from the pool drops out of the matches; a person whose status changed
+  stays where they were.
+- *At the read limit.* When the server's read came back with its full 1,000 candidates, a
+  line above the table says: "Only the newest 1,000 people on file are read, so someone
+  added long ago may be missing from this list and from search." The model carries a
+  `readCapped` flag for it.
+
+**Why nobody can now be "in the pool but not on the screen".** A person is in the pool
+when their stored status is not `none`. The server reads every candidate of the workspace
+up to the read limit and keeps all of those in the pool (`lists.ts:396-397`). Search is
+applied to that whole set, and it matches on the name. So typing a pool member's full
+name always puts them among the matches. If more than 50 people match, the footer says
+so and typing more of the name narrows it; a full name leaves only the people who carry
+it. The only pool members search cannot reach are those the server never read: the ones
+beyond the newest 1,000 candidates on file, in a workspace that has more than that. That
+limit is not new, it is not hidden, and the line above says when it applies.
+
+Someone just added to the pool is therefore always findable: every way of adding them —
+the picker, the board, the Applications panel, a no-job add, Lekir — ends with a sentence
+that gives their name, and that name typed into the box finds them.
 
 ### 6.6 Candidates board and Applications panel — `application-actions.tsx`
 `ApplicationSubject` gains `poolStatus`.
@@ -493,6 +566,16 @@ be untrue. When the pool is larger than the table, the footer reads "Showing the
   the row is gone, so focus goes to the table's heading, "Pool candidates".
 - **Every field has a visible label.** The Job select is marked required; "Choose a job."
   is shown under it and tied to it when nothing is picked.
+- **The pool search box** is a form with the role `search`. The field is a search field
+  with the label "Search the talent pool", which screen readers read; sighted users have
+  the magnifier and the placeholder, as today. "Clear search" is a real button with that
+  name, at least 44 by 44 pixels, reached with Tab straight after the field. While the
+  server is answering, the footer reads "Searching…". The footer is a polite live region
+  that is always in the page, so the count ("7 people match “aina”.") and the
+  empty-result sentence are read out when they arrive. Focus stays in the field while
+  typing and after a search. At 375 px the box takes the full width of the card, on a
+  line of its own above the three "Coming soon" controls, and nothing scrolls sideways
+  but the table.
 - **Pending:** the pressed button shows its "…ing" word, is marked `aria-disabled` and
   ignores further presses; nothing else in the dialog can send a second change.
 - **Announcements:** results appear in a polite live region that is always in the page;
@@ -542,6 +625,20 @@ be untrue. When the pool is larger than the table, the footer reads "Showing the
 The sentences for `not_found`, `forbidden`, `job_not_found` and `job_not_open` are the
 ones 3b already uses (`src/lib/hire/candidate-fields.ts:86-92`).
 
+**The pool table's search**
+- Label: "Search the talent pool". Placeholder: "Search by name, skill or location…".
+  Button: "Clear search".
+- While searching: "Searching…"
+- No search, everyone drawn: "Showing 37 candidates"
+- No search, more than 50: "Showing the newest 50 of 137. Search to find anyone else."
+- One match: "1 person matches “{text}”."
+- Two to 50 matches: "{count} people match “{text}”."
+- More than 50 matches: "Showing the newest 50 of {count} people who match “{text}”.
+  Type more to narrow it down."
+- No match: "No one in the talent pool matches “{text}”."
+- At the read limit: "Only the newest 1,000 people on file are read, so someone added
+  long ago may be missing from this list and from search."
+
 **The picker's other lines**
 - Loading: "Loading people…"
 - Could not load: "The list could not be loaded. Check your connection and try again."
@@ -588,6 +685,12 @@ sections 6.5 to 6.8.
 - **A lost answer.** Retrying a status change answers `same_status` or `already_in_pool`;
   retrying a move answers `already_applied`. Each says nothing was changed, so a retry
   never doubles anything.
+- **A person added to a pool of more than 50 who was put on file long ago** is not among
+  the 50 rows drawn. Their name in the search box brings them up (6.5).
+- **A search left in the address after its last match is removed** shows the
+  empty-result sentence, with "Clear search" to go back to the whole pool.
+- **A `q` given twice in the address, or longer than 80 characters:** the first value is
+  used, cut to 80.
 - **A person removed from the pool who has no application** is on no screen. They are in
   the picker, and Lekir finds them by name. The confirmation says they can be added back.
 
@@ -613,6 +716,18 @@ is covered by the smoke checklist, not by unit tests.
 - **Lists (pure):** pool rows carry `poolStatus` beside the label, including a row whose
   label is Shortlisted; the model carries the open and paused jobs; board cards and
   Applications rows carry `poolStatus`.
+- **Pool search (pure), in `tests/hire-lists.test.ts`:** with a pool of 60, a search for
+  the name of the oldest member returns that one row, though it is not among the 50
+  drawn without a search; a match on headline, on location, on source and on one skill;
+  any letter case, and spaces around the text ignored; a blank search is no search; a
+  search matching 55 draws 50 and reports 55; a search matching nobody gives no rows and
+  a count of 0; someone not in the pool is never a match; the size, the status counts and
+  the two chart tallies are the same with and without a search; text over 80 characters
+  is cut; `readCapped` is true at 1,000 candidates read and false below. The footer
+  sentences are built by a pure function in `pool.ts` and tested for 0, 1, 2, 50 and 51
+  matches, and for no search at 50 and 51 members.
+- **Routes:** a text check that the generated page for `hire/talent-pool` hands
+  `searchParams` to the screen.
 - **Capabilities:** each schema refuses a missing id, a bad status and an unknown key; no
   schema has an org key; each word becomes its sentence; a failed read-back still answers
   ok; a thrown call answers the generic sentence and logs a code only.
@@ -711,7 +826,18 @@ is covered by the smoke checklist, not by unit tests.
       the change. Then ask Lekir who is in the pool.
   12. As a viewer (the demo workspace): no "Add to Pool", no row controls, no pool item
       on the board.
-  13. No sideways scroll of the page at 375 px; every control can be reached and worked
+  13. With more than 50 people in the pool, the footer reads "Showing the newest 50 of
+      …. Search to find anyone else." Type the name of someone not among the 50: they
+      appear and the count line is right. Search a skill, then a location. Type
+      nonsense: the empty-result sentence. "Clear search": the 50 are back and focus is
+      in the box. Do all of it with the keyboard alone, and once at 375 px.
+  14. From the picker, add someone put on file long ago to a pool of more than 50. They
+      are not in the unfiltered table; their name in the search box finds them. With the
+      search still showing, change their status from the row menu: the search stays and
+      the row shows the new status.
+  15. The "All roles" select, "Filter" and "All sources" are still disabled and say
+      "Coming soon".
+  16. No sideways scroll of the page at 375 px; every control can be reached and worked
       with the keyboard alone; nothing on these screens is purple or violet.
 
 ---
@@ -772,4 +898,5 @@ the pull request. One pull request, from branch `feat-125-lekir-talent-pool`, re
   `src/lib/ai/{hire-tools,products}.ts`;
   `src/lib/ai/agents/{prompts,orchestrator,specialists}.ts`;
   `src/lib/chat/change-titles.ts`; `evals/tuah/{cases,harness}.ts`;
-  `tests/hire-tools.test.ts`.
+  `tests/hire-tools.test.ts`; `scripts/gen-screen-routes.mjs` and the page it generates
+  for `hire/talent-pool`.
