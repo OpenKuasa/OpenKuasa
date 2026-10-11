@@ -107,3 +107,98 @@ describe('approval cards for HR changes', () => {
     expect(collectNames(results)).toEqual({ [`employee:${EMP}`]: 'Faiz Hakim', [`department:${DEPT}`]: 'Marketing' });
   });
 });
+
+describe('approval cards for leave and time-off', () => {
+  const REQ = '44444444-4444-4444-8444-444444444444';
+  const TOREQ = '55555555-5555-4555-8555-555555555555';
+  const leave = [
+    { tool: 'listEmployees', output: { employees: [{ id: EMP, name: 'Farah Idris' }] } },
+    {
+      tool: 'listLeaveRequests',
+      output: {
+        requests: [
+          { id: REQ, employee: 'Amirul Hakim', type: 'Annual leave', leave_type: 'annual', start_date: '2026-10-16', end_date: '2026-10-16', status: 'pending' },
+        ],
+      },
+    },
+    {
+      tool: 'listTimeOffRequests',
+      output: { requests: [{ id: TOREQ, employee: 'Amirul Hakim', off_date: '2026-10-16', start_time: '14:00', end_time: '16:00' }] },
+    },
+  ];
+  const find = nameIn(leave);
+
+  it('words an application from its own input, with no day count or balance', () => {
+    const input = { leave_type: 'annual', start_date: '2026-10-20', end_date: '2026-10-22' };
+    expect(approvalTitle('applyLeave', input)).toBe('Apply for annual leave, 20–22 Oct?');
+    expect(approvalTitle('applyLeave', { ...input, leave_type: 'medical', end_date: '2026-10-20' })).toBe('Apply for medical leave, 20 Oct?');
+    expect(approvalTitle('applyLeave', { ...input, start_date: '2026-10-30', end_date: '2026-11-02' })).toBe(
+      'Apply for annual leave, 30 Oct–2 Nov?',
+    );
+    expect(approvalTitle('applyLeave', { ...input, end_date: '2026-10-20', half_day: true })).toBe(
+      'Apply for annual leave, 20 Oct (half day)?',
+    );
+    expect(approvalTitle('applyTimeOff', { off_date: '2026-10-20', start_time: '14:00', end_time: '16:00' })).toBe(
+      'Request time-off, 20 Oct, 14:00–16:00?',
+    );
+    expect(approvalDetail('applyLeave', { ...input, reason: 'Family trip' })).toBeNull();
+  });
+
+  it('a member’s card, which has no employee, names no one; an owner’s names who it is for', () => {
+    const input = { leave_type: 'annual', start_date: '2026-10-20', end_date: '2026-10-22' };
+    expect(approvalTitle('applyLeave', input, find)).toBe('Apply for annual leave, 20–22 Oct?');
+    expect(approvalTitle('applyLeave', { ...input, employee_id: EMP }, find)).toBe('Apply for annual leave for Farah Idris, 20–22 Oct?');
+  });
+
+  it('an employee id of the wrong kind never names someone', () => {
+    const input = { leave_type: 'annual', start_date: '2026-10-20', end_date: '2026-10-22' };
+    // A request's id, a department's id and an unknown id are not employees.
+    for (const id of [REQ, DEPT, 'nobody']) {
+      expect(approvalTitle('applyLeave', { ...input, employee_id: id }, find)).toBe('Apply for annual leave, 20–22 Oct?');
+    }
+    expect(approvalTitle('setLeaveEntitlement', { employee_id: REQ, leave_type: 'annual', year: 2026, days: 18 }, find)).toBe(
+      "Set this employee's annual leave for 2026 to 18 days?",
+    );
+    // And an employee's id never labels a request.
+    expect(approvalTitle('decideLeave', { id: EMP, approve: true }, find)).toBe('Approve this leave request?');
+    expect(approvalTitle('cancelLeaveRequest', { id: EMP }, find)).toBe('Cancel this leave request?');
+  });
+
+  it('names the request being cancelled, approved or rejected', () => {
+    expect(approvalTitle('cancelLeaveRequest', { id: REQ }, find)).toBe("Cancel Amirul Hakim's annual leave, 16 Oct?");
+    expect(approvalTitle('cancelTimeOffRequest', { id: TOREQ }, find)).toBe("Cancel Amirul Hakim's time-off, 16 Oct?");
+    expect(approvalTitle('decideLeave', { id: REQ, approve: true }, find)).toBe("Approve Amirul Hakim's annual leave, 16 Oct?");
+    expect(approvalTitle('decideLeave', { id: REQ, approve: false }, find)).toBe("Reject Amirul Hakim's annual leave, 16 Oct?");
+    expect(approvalTitle('decideTimeOff', { id: TOREQ, approve: true }, find)).toBe("Approve Amirul Hakim's time-off, 16 Oct?");
+    expect(approvalTitle('decideLeave', { id: REQ, approve: true })).toBe('Approve this leave request?');
+  });
+
+  it('shows the rejection note as the detail, and nothing for an approval', () => {
+    expect(approvalDetail('decideLeave', { id: REQ, approve: false, note: ' Busy week ' })).toBe('Busy week');
+    expect(approvalDetail('decideTimeOff', { id: TOREQ, approve: false, note: 'Clash' })).toBe('Clash');
+    expect(approvalDetail('decideLeave', { id: REQ, approve: false })).toBeNull();
+    expect(approvalDetail('decideLeave', { id: REQ, approve: true, note: 'ignored' })).toBeNull();
+  });
+
+  it('words an entitlement with the employee’s name', () => {
+    expect(approvalTitle('setLeaveEntitlement', { employee_id: EMP, leave_type: 'annual', year: 2026, days: 18 }, find)).toBe(
+      "Set Farah Idris's annual leave for 2026 to 18 days?",
+    );
+    expect(approvalTitle('setLeaveEntitlement', { employee_id: EMP, leave_type: 'medical', year: 2026, days: 1 }, find)).toBe(
+      "Set Farah Idris's medical leave for 2026 to 1 day?",
+    );
+  });
+
+  it('falls back to plain words for dates that are not dates, and does no arithmetic', () => {
+    expect(approvalTitle('applyLeave', { leave_type: 'annual', start_date: 'soon', end_date: '2026-13-40' })).toBe('Apply for annual leave?');
+    expect(approvalTitle('applyLeave', {})).toBe('Apply for leave?');
+  });
+
+  it('remembers a request by kind for later turns', () => {
+    expect(collectNames(leave)).toEqual({
+      [`employee:${EMP}`]: 'Farah Idris',
+      [`leave:${REQ}`]: "Amirul Hakim's annual leave, 16 Oct",
+      [`time-off:${TOREQ}`]: "Amirul Hakim's time-off, 16 Oct",
+    });
+  });
+});

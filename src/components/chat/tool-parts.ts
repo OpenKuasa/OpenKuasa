@@ -78,6 +78,8 @@ const TOOL_META: Record<string, { label: string; Icon: Icon }> = {
   getHeadcountByDepartment: { label: 'Headcount', Icon: ChartColumn },
   listWhoIsOnLeave: { label: 'On leave', Icon: CalendarDays },
   listLeaveRequests: { label: 'Leave requests', Icon: ClipboardList },
+  listTimeOffRequests: { label: 'Time-off requests', Icon: ClipboardList },
+  previewLeave: { label: 'Leave preview', Icon: CalendarDays },
   getLeaveBalances: { label: 'Leave balances', Icon: SlidersHorizontal },
   listPendingApprovals: { label: 'Pending approvals', Icon: ClipboardList },
   listClaims: { label: 'Claims', Icon: Coins },

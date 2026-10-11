@@ -13,20 +13,40 @@ const APPOINTMENT_STATUS_LABELS: Record<string, string> = {
   no_show: 'no-show',
 };
 
+/**
+ * What a row is called: its name, or for a leave or time-off request the words
+ * that say which request it is ("Amirul's annual leave, 16 Oct"). A request has
+ * no name of its own, so it is only labelled when the caller asks for that kind.
+ */
+function labelOf(row: Record<string, unknown>, kind?: ItemKind): string | null {
+  if (kind === 'leave' || kind === 'time-off') {
+    const who = text(row.employee);
+    const when = kind === 'leave' ? dayRangeText(row.start_date, row.end_date) : dayRangeText(row.off_date, row.off_date);
+    if (!who || !when) return null;
+    if (kind === 'time-off') return `${who}'s time-off, ${when}`;
+    const type = typeof row.leave_type === 'string' ? LEAVE_WORDS[row.leave_type] : undefined;
+    return `${who}'s ${type ?? 'leave'}, ${when}`;
+  }
+  return typeof row.name === 'string' && row.name.trim() ? row.name.trim() : null;
+}
+
 /** A named row with this id, anywhere in a tool result (a listing, or a saved row). */
-function nameOf(value: unknown, id: string, depth = 0): string | null {
+function nameOf(value: unknown, id: string, kind?: ItemKind, depth = 0): string | null {
   if (!value || typeof value !== 'object' || depth > 3) return null;
   if (Array.isArray(value)) {
     for (const item of value) {
-      const found = nameOf(item, id, depth + 1);
+      const found = nameOf(item, id, kind, depth + 1);
       if (found) return found;
     }
     return null;
   }
   const row = value as Record<string, unknown>;
-  if (row.id === id && typeof row.name === 'string' && row.name.trim()) return row.name.trim();
+  if (row.id === id) {
+    const label = labelOf(row, kind);
+    if (label) return label;
+  }
   for (const inner of Object.values(row)) {
-    const found = nameOf(inner, id, depth + 1);
+    const found = nameOf(inner, id, kind, depth + 1);
     if (found) return found;
   }
   return null;
@@ -45,7 +65,9 @@ export type ItemKind =
   | 'schedule'
   | 'job'
   | 'employee'
-  | 'department';
+  | 'department'
+  | 'leave'
+  | 'time-off';
 const KIND_OF_TOOL: Record<string, ItemKind> = {
   getCampaigns: 'campaign',
   createCampaign: 'campaign',
@@ -91,6 +113,8 @@ const KIND_OF_TOOL: Record<string, ItemKind> = {
   setEmployeeStatus: 'employee',
   deleteEmployee: 'employee',
   linkEmployeeToMember: 'employee',
+  listLeaveRequests: 'leave',
+  listTimeOffRequests: 'time-off',
   listDepartments: 'department',
   createDepartment: 'department',
   updateDepartment: 'department',
@@ -109,8 +133,9 @@ function gather(value: unknown, kind: ItemKind, into: KnownNames, depth = 0): vo
     return;
   }
   const row = value as Record<string, unknown>;
-  if (typeof row.id === 'string' && typeof row.name === 'string' && row.name.trim()) {
-    if (Object.keys(into).length < NAMES_MAX) into[`${kind}:${row.id}`] = row.name.trim();
+  const label = typeof row.id === 'string' ? labelOf(row, kind) : null;
+  if (typeof row.id === 'string' && label) {
+    if (Object.keys(into).length < NAMES_MAX) into[`${kind}:${row.id}`] = label;
   }
   for (const inner of Object.values(row)) gather(inner, kind, into, depth + 1);
 }
@@ -142,11 +167,43 @@ export function nameIn(results: ToolResult[]): NameFinder {
     if (typeof id !== 'string' || !id) return null;
     for (let r = results.length - 1; r >= 0; r -= 1) {
       if (kind && KIND_OF_TOOL[results[r].tool] !== kind) continue;
-      const found = nameOf(results[r].output, id);
+      const found = nameOf(results[r].output, id, kind);
       if (found) return found;
     }
     return null;
   };
+}
+
+const LEAVE_WORDS: Record<string, string> = {
+  annual: 'annual leave',
+  medical: 'medical leave',
+  emergency: 'emergency leave',
+  unpaid: 'unpaid leave',
+  maternity: 'maternity leave',
+  paternity: 'paternity leave',
+};
+const leaveWord = (type: unknown): string => (typeof type === 'string' ? LEAVE_WORDS[type] : undefined) ?? 'leave';
+
+/** "HH:MM" from "HH:MM" or "HH:MM:SS"; null for anything else. */
+const timeText = (value: unknown): string | null => {
+  const m = typeof value === 'string' ? /^([01]\d|2[0-3]):[0-5]\d/.exec(value) : null;
+  return m ? m[0] : null;
+};
+
+/** "16 Oct", "20–22 Oct", "30 Oct–2 Nov"; the year only when the range spans two. Null unless both are real dates. */
+function dayRangeText(from: unknown, to: unknown): string | null {
+  const part = (value: unknown) => {
+    const m = typeof value === 'string' ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(value) : null;
+    const month = m ? MONTHS[Number(m[2]) - 1] : undefined;
+    return m && month ? { year: m[1], month, day: Number(m[3]) } : null;
+  };
+  const a = part(from);
+  const b = part(to);
+  if (!a || !b) return null;
+  if (from === to) return `${a.day} ${a.month}`;
+  if (a.year !== b.year) return `${a.day} ${a.month} ${a.year}–${b.day} ${b.month} ${b.year}`;
+  if (a.month === b.month) return `${a.day}–${b.day} ${a.month}`;
+  return `${a.day} ${a.month}–${b.day} ${b.month}`;
 }
 
 /**
@@ -260,6 +317,42 @@ export function approvalTitle(
     case 'createDepartment': return `Add department “${i.name ?? ''}”?`;
     case 'updateDepartment': return `Rename ${the('department', 'department')} to “${i.name ?? ''}”?`;
     case 'deleteDepartment': return `Delete ${the('department', 'department')}?`;
+    case 'applyLeave': {
+      const who = find(i.employee_id, 'employee');
+      const when = dayRangeText(i.start_date, i.end_date);
+      const half = i.half_day === true ? ' (half day)' : '';
+      return `Apply for ${leaveWord(i.leave_type)}${who ? ` for ${who}` : ''}${when ? `, ${when}${half}` : ''}?`;
+    }
+    case 'applyTimeOff': {
+      const who = find(i.employee_id, 'employee');
+      const when = dayRangeText(i.off_date, i.off_date);
+      const from = timeText(i.start_time);
+      const to = timeText(i.end_time);
+      return `Request time-off${who ? ` for ${who}` : ''}${when ? `, ${when}` : ''}${from && to ? `, ${from}–${to}` : ''}?`;
+    }
+    case 'cancelLeaveRequest': {
+      const what = find(i.id, 'leave');
+      return what ? `Cancel ${what}?` : 'Cancel this leave request?';
+    }
+    case 'cancelTimeOffRequest': {
+      const what = find(i.id, 'time-off');
+      return what ? `Cancel ${what}?` : 'Cancel this time-off request?';
+    }
+    case 'decideLeave': {
+      const what = find(i.id, 'leave');
+      return `${i.approve === true ? 'Approve' : 'Reject'} ${what ?? 'this leave request'}?`;
+    }
+    case 'decideTimeOff': {
+      const what = find(i.id, 'time-off');
+      return `${i.approve === true ? 'Approve' : 'Reject'} ${what ?? 'this time-off request'}?`;
+    }
+    case 'setLeaveEntitlement': {
+      const who = find(i.employee_id, 'employee');
+      const days =
+        typeof i.days === 'number' && Number.isFinite(i.days) ? `${i.days} ${i.days === 1 ? 'day' : 'days'}` : 'a new number of days';
+      const year = typeof i.year === 'number' ? ` for ${i.year}` : '';
+      return `Set ${who ? `${who}'s` : "this employee's"} ${leaveWord(i.leave_type)}${year} to ${days}?`;
+    }
     case 'updateCareersPage':
       return i.careers_enabled === true
         ? 'Turn on the public careers page?'
@@ -397,6 +490,10 @@ export function approvalDetail(toolName: string, input?: unknown): string | null
     // A new employee has nothing to clear: a null or blank field simply sets nothing.
     const words = employeeFieldWords(i, false).filter((w) => !w.endsWith('(cleared)'));
     return words.length > 0 ? `Sets: ${words.join(', ')}` : null;
+  }
+  if (toolName === 'decideLeave' || toolName === 'decideTimeOff') {
+    // The note is only ever said on a rejection; an approval carries none.
+    return i.approve === false ? text(i.note) : null;
   }
   if (toolName === 'updateApplicationForm') {
     const changes = describeFormChange(i);

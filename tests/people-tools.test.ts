@@ -42,11 +42,11 @@ const EMPTY: PeopleData = {
 };
 
 describe('people tools', () => {
-  it('is exactly the twenty lookups, none sharing a name with another product', () => {
+  it('is exactly the twenty-one lookups, none sharing a name with another product', () => {
     expect(Object.keys(createPeopleTools(data, HR, NOW))).toEqual([...PEOPLE_TOOL_NAMES]);
     expect(PEOPLE_TOOL_NAMES).toEqual([
       'getPeopleOverview', 'listEmployees', 'getEmployee', 'listDepartments', 'getHeadcountByDepartment',
-      'listWhoIsOnLeave', 'listLeaveRequests', 'getLeaveBalances', 'listPendingApprovals', 'listClaims',
+      'listWhoIsOnLeave', 'listLeaveRequests', 'listTimeOffRequests', 'getLeaveBalances', 'listPendingApprovals', 'listClaims',
       'listOvertime', 'getAttendanceSummary', 'getTimesheet', 'listShifts', 'listPublicHolidays',
       'getPayrollSummary', 'listPayslips', 'getPerformanceSummary', 'listTrainings', 'listAnnouncements',
     ]);
@@ -445,9 +445,9 @@ describe('people tools', () => {
     expect(colleague.private).toBeNull();
   });
 
-  it('holds no change tool without write access', () => {
+  it('holds no change tool without write access, or as a member with no employee record of their own', () => {
     const none = Object.keys(createPeopleTools(data, HR, NOW));
-    const refused = Object.keys(createPeopleTools(data, HR, NOW, { ctx: { client: {} as never, orgId: 'o' }, canWrite: false }));
+    const refused = Object.keys(createPeopleTools(data, HR, NOW, { ctx: { client: {} as never, orgId: 'o' }, tier: 'self', employeeId: null }));
     expect(none).toEqual([...PEOPLE_TOOL_NAMES]);
     expect(refused).toEqual([...PEOPLE_TOOL_NAMES]);
   });

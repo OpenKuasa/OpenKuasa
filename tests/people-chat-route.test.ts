@@ -111,6 +111,10 @@ const { encryptApiKey } = await import('@/lib/ai/key-crypto');
 const { PEOPLE_TOOL_NAMES } = await import('@/lib/ai/people-tools');
 const { PEOPLE_WRITE_TOOL_NAMES } = await import('@/lib/ai/products');
 const { POST } = await import('@/app/api/people/chat/route');
+const { DEMO_ORG_SLUG } = await import('@/lib/people/types');
+
+/** What a linked member holds besides the lookups: their own leave, and nothing that decides. */
+const SELF_TOOLS = ['previewLeave', 'applyLeave', 'applyTimeOff', 'cancelLeaveRequest', 'cancelTimeOffRequest'];
 
 function post(body: unknown): Request {
   return new Request('http://localhost/api/people/chat', {
@@ -208,7 +212,7 @@ describe('POST /api/people/chat happy path', () => {
 
     const [call] = ctl.calls;
     expect(call.system).toMatch(/^You are Lekiu/);
-    expect(call.tools.sort()).toEqual([...PEOPLE_TOOL_NAMES, ...PEOPLE_WRITE_TOOL_NAMES].sort());
+    expect(call.tools.sort()).toEqual([...PEOPLE_TOOL_NAMES, 'previewLeave', ...PEOPLE_WRITE_TOOL_NAMES].sort());
     expect(call.tools).not.toContain('getCampaigns');
     expect(call.tools).not.toContain('listDeals');
     expect(call.tools).not.toContain('listJobs');
@@ -230,8 +234,8 @@ describe('POST /api/people/chat happy path', () => {
     expect(res.status).toBe(200);
     await res.text();
     expect(ctl.captured!.viewer).toEqual({ employeeId: 'emp-7', isHr: false, isDemo: false });
-    // Same lookups for everyone: the database, not the tool list, limits what a member reads.
-    expect(ctl.calls[0].tools.sort()).toEqual([...PEOPLE_TOOL_NAMES].sort());
+    // Same lookups for everyone (the database limits what a member reads), plus their own leave tools.
+    expect(ctl.calls[0].tools.sort()).toEqual([...PEOPLE_TOOL_NAMES, ...SELF_TOOLS].sort());
   });
 
   it('resolves the workspace exactly once', async () => {
@@ -258,7 +262,7 @@ describe('POST /api/people/chat happy path', () => {
     ctl.org = { orgId: 'org1', role };
     await (await POST(post({ ...validBody, orgId: 'someone-elses-org' }))).text();
     for (const name of PEOPLE_WRITE_TOOL_NAMES) expect(ctl.calls[0].tools).toContain(name);
-    expect(ctl.captured!.write?.canWrite).toBe(true);
+    expect(ctl.captured!.write?.tier).toBe('hr');
     expect(ctl.captured!.write?.ctx.orgId).toBe('org1');
   });
 
@@ -268,6 +272,34 @@ describe('POST /api/people/chat happy path', () => {
     expect(ctl.captured!.write).toBeUndefined();
     expect(ctl.calls[0].tools.sort()).toEqual([...PEOPLE_TOOL_NAMES].sort());
     for (const name of ctl.calls[0].tools) expect(name).toMatch(/^(get|list)/);
+  });
+
+  it.each(['member', 'viewer'])('gives a linked %s their own leave tools, bound to their own employee record', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    ctl.linkedEmployee = { id: 'emp-7' };
+    await (await POST(post({ ...validBody, employeeId: 'emp-9', employee_id: 'emp-9' }))).text();
+    expect(ctl.captured!.write).toMatchObject({ tier: 'self', employeeId: 'emp-7' });
+    expect(ctl.captured!.write?.ctx.orgId).toBe('org1');
+    expect(ctl.calls[0].tools.sort()).toEqual([...PEOPLE_TOOL_NAMES, ...SELF_TOOLS].sort());
+    for (const name of ['decideLeave', 'decideTimeOff', 'setLeaveEntitlement', 'createEmployee', 'deleteDepartment']) {
+      expect(ctl.calls[0].tools).not.toContain(name);
+    }
+  });
+
+  it('gives a member in the demo workspace the lookups only, even with a linked record', async () => {
+    ctl.org = { orgId: 'org1', role: 'member' };
+    ctl.slug = DEMO_ORG_SLUG;
+    ctl.linkedEmployee = { id: 'emp-7' };
+    await (await POST(post(validBody))).text();
+    expect(ctl.captured!.write).toBeUndefined();
+    expect(ctl.calls[0].tools.sort()).toEqual([...PEOPLE_TOOL_NAMES].sort());
+  });
+
+  it('gives an owner who is also an employee the hr tier, and their own employee id', async () => {
+    ctl.org = { orgId: 'org1', role: 'owner' };
+    ctl.linkedEmployee = { id: 'emp-3' };
+    await (await POST(post(validBody))).text();
+    expect(ctl.captured!.write).toMatchObject({ tier: 'hr', employeeId: 'emp-3' });
   });
 
   it('tells the tools the name of the employee who is asking', async () => {

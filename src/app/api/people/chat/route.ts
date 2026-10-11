@@ -6,10 +6,11 @@
  * lookups, which read a request-scoped provider built from the one workspace
  * resolved here (`createSupabasePeopleData`; the sample data when no project is
  * configured) through the caller's own session, so the database decides which rows they see: all
- * of them for an owner or admin, only their own for anyone else. An owner or admin also gets the change tools for employees and departments; each change waits for their approval.
+ * of them for an owner or admin, only their own for anyone else. An owner or admin also gets the change tools; a linked member gets leave and time-off tools for themselves. Each change waits for approval.
  */
 
 import { chatJson, prepareChat } from '@/lib/ai/chat-request';
+import type { PeopleWrite } from '@/lib/ai/people-tools';
 import { runLekiu } from '@/lib/ai/agents/orchestrator';
 import { getCurrentOrg } from '@/lib/auth/current-org';
 import { can } from '@/lib/auth/permissions';
@@ -52,11 +53,21 @@ export async function POST(request: Request) {
       code: 'data_unavailable',
     });
   }
-  // Change tools for an owner or admin only: the same rule the database enforces. Each still needs approval.
+  // Change tools: an owner or admin holds all of them (`hr`); a member linked to an employee record, outside the
+  // demo, holds leave and time-off tools for that employee alone (`self`), whatever their role. The member's
+  // employee id comes from the viewer, never from the request. The database enforces the same rules. Each change needs approval.
   // Nothing is revalidated here, as in the other chat routes: every /people page is rendered per request,
   // and only a server action can refresh the page the person is already looking at.
-  const write =
-    org && can(org.role, 'approve') ? { ctx: { client: chat.supabase, orgId: org.orgId }, canWrite: true } : undefined;
+  let write: PeopleWrite | undefined;
+  if (org && can(org.role, 'approve')) {
+    write = {
+      ctx: { client: chat.supabase, orgId: org.orgId },
+      tier: 'hr',
+      employeeId: viewer.isDemo ? null : viewer.employeeId,
+    };
+  } else if (org && !viewer.isDemo && viewer.employeeId !== null) {
+    write = { ctx: { client: chat.supabase, orgId: org.orgId }, tier: 'self', employeeId: viewer.employeeId };
+  }
   const result = runLekiu(chat.messages, { data, viewer, write }, request.signal, chat.apiKey);
 
   return result.toUIMessageStreamResponse({
