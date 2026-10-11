@@ -6,9 +6,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { type LineDraft, emptyLine, lineNumbers, withProduct } from '@/lib/finance/bill-form';
 import { billTotals, lineAmounts } from '@/lib/finance/bill-math';
-import { BILL_LINES_MAX } from '@/lib/finance/bills';
+import { type LineDraft, emptyLine, lineNumbers } from '@/lib/finance/document-form';
+import { DOCUMENT_LINES_MAX } from '@/lib/finance/document-lines';
 import { rm } from '@/lib/finance/format';
 import type { FinanceProduct } from '@/lib/finance/products';
 import { cn } from '@/lib/utils';
@@ -17,18 +17,22 @@ import { cn } from '@/lib/utils';
 const NO_PRODUCT = 'none';
 
 /**
- * The lines of a bill, with live totals. On a phone each line is a card with
- * its fields stacked two to a row; from the md breakpoint a line is one row.
- * Nothing scrolls sideways. The arithmetic is in src/lib/finance/bill-math.ts.
+ * The lines of a bill or an invoice, with live totals. On a phone each line
+ * is a card with its fields stacked two to a row; from the md breakpoint a
+ * line is one row. Nothing scrolls sideways. The arithmetic is in
+ * src/lib/finance/bill-math.ts.
  */
 export function LineItemsEditor({
   lines,
   products,
+  withProduct,
   onChange,
 }: {
   lines: LineDraft[];
   /** Active products and services, for the optional picker. */
   products: FinanceProduct[];
+  /** What choosing a product fills in: a bill takes its cost, an invoice its price. */
+  withProduct: (line: LineDraft, product: FinanceProduct | null) => LineDraft;
   onChange: (lines: LineDraft[]) => void;
 }) {
   const id = useId();
@@ -205,7 +209,7 @@ export function LineItemsEditor({
       </ol>
 
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <Button ref={addButton} type="button" variant="outline" size="sm" disabled={lines.length >= BILL_LINES_MAX} onClick={add}>
+        <Button ref={addButton} type="button" variant="outline" size="sm" disabled={lines.length >= DOCUMENT_LINES_MAX} onClick={add}>
           <Plus className="size-4" />
           Add line
         </Button>
