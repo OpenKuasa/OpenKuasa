@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   notFound: vi.fn(),
   hasSupabaseEnv: vi.fn(),
   connection: vi.fn(),
+  applyForm: vi.fn(),
+  submitPublicApplication: vi.fn(),
 }));
 
 vi.mock('@/lib/hire/public-careers', async (importOriginal) => ({
@@ -28,6 +30,18 @@ vi.mock('next/server', () => ({ connection: mocks.connection }));
 // The real check reads this shell's environment; the pages must not depend on it here.
 vi.mock('@/lib/auth/viewer', () => ({ hasSupabaseEnv: mocks.hasSupabaseEnv }));
 vi.mock('@/lib/supabase/anonymous', () => ({ createAnonymousClient: () => ({ anonymous: true }) }));
+// The apply form has its own test file. Here a stand-in shows where the page
+// puts it and what the page hands it.
+vi.mock('@/app/careers/[orgId]/[jobId]/apply-form', () => ({
+  ApplyForm: (props: Record<string, unknown>) => {
+    mocks.applyForm(props);
+    return <div data-apply-form="" />;
+  },
+}));
+vi.mock('@/lib/hire/public-applications', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/hire/public-applications')>()),
+  submitPublicApplication: mocks.submitPublicApplication,
+}));
 
 import BoardPage, { generateMetadata as boardMetadata } from '@/app/careers/[orgId]/page';
 import JobPage, { generateMetadata as jobMetadata } from '@/app/careers/[orgId]/[jobId]/page';
@@ -220,11 +234,53 @@ describe('the job page', () => {
     expect(html).not.toContain('<b>');
   });
 
-  it('links back to the board and offers no way to apply', async () => {
+  it('links back to the board, under the way to apply', async () => {
     const html = await renderJob();
     expect(html).toMatch(new RegExp(`<a[^>]*href="/careers/${ORG}"[^>]*>(?:<[^>]+>|[^<])*All open roles`));
-    expect(html).not.toMatch(/<(script|form|button|input)[\s>]/);
+    expect(html.indexOf('All open roles')).toBeGreaterThan(html.indexOf('data-apply-form'));
     expect(html).not.toMatch(/apply now/i);
+  });
+
+  it('offers the apply form under the description of a job that is taking applications', async () => {
+    mocks.getPublicJob.mockResolvedValue(job({ form: { ...job().form, require_cv: true } }));
+    const html = await renderJob();
+    expect(html).toMatch(/<h2[^>]*>Apply for this role<\/h2>/);
+    expect(count(html, /data-apply-form/g)).toBe(1);
+    expect(html.indexOf('Apply for this role')).toBeGreaterThan(html.indexOf('Keep the books.'));
+    expect(html.indexOf('data-apply-form')).toBeGreaterThan(html.indexOf('Apply for this role'));
+    expect(count(html, /<h1[\s>]/g)).toBe(1);
+    expect(mocks.applyForm).toHaveBeenCalledTimes(1);
+    const props = mocks.applyForm.mock.calls[0][0];
+    expect(props).toEqual({
+      action: expect.any(Function),
+      form: { require_cv: true, require_cover_letter: false, ask_portfolio: false, ask_expected_salary: false },
+      orgName: 'Tanjung Trading',
+    });
+  });
+
+  it('hands the form an action already tied to this workspace and this job', async () => {
+    await renderJob();
+    const { action } = mocks.applyForm.mock.calls[0][0];
+    mocks.getPublicJob.mockClear();
+    mocks.submitPublicApplication.mockResolvedValue({ kind: 'ok' });
+    const formData = new FormData();
+    for (const [key, value] of Object.entries({ name: 'Aisyah Rahman', email: 'aisyah@example.com', consent: 'on' })) {
+      formData.set(key, value);
+    }
+    expect(await action(undefined, formData)).toEqual({ done: { firstName: 'Aisyah' } });
+    expect(mocks.getPublicJob).toHaveBeenCalledWith({ anonymous: true }, ORG, JOB_A);
+    expect(mocks.submitPublicApplication.mock.calls[0].slice(1, 3)).toEqual([ORG, JOB_A]);
+  });
+
+  it('says "Applications closed" and offers no way to apply once a job has stopped taking applications', async () => {
+    mocks.getPublicJob.mockResolvedValue(job({ accepting: false }));
+    const html = await renderJob();
+    expect(html).toMatch(/<h2[^>]*>Apply for this role<\/h2>/);
+    const apply = html.slice(html.indexOf('Apply for this role'), html.indexOf('All open roles'));
+    expect(text(apply)).toContain('Applications closed');
+    expect(html).not.toContain('data-apply-form');
+    expect(mocks.applyForm).not.toHaveBeenCalled();
+    expect(html).not.toMatch(/<(script|form|button|input|textarea)[\s>]/);
   });
 
   it('is "not found" when the reader returns nothing', async () => {

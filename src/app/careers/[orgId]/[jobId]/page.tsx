@@ -15,11 +15,14 @@ import {
   type PublicJob,
 } from '@/lib/hire/public-careers';
 import { createAnonymousClient } from '@/lib/supabase/anonymous';
+import { applyAction } from './actions';
+import { ApplyForm } from './apply-form';
 
 /**
  * One open job on a workspace's public board: /careers/<workspace id>/<job id>.
- * Anyone can open it, signed in or not. It is for reading: there is nothing
- * to send from here.
+ * Anyone can open it, signed in or not. While the job is taking applications
+ * the apply form sits under the description; it is the one thing a visitor
+ * can send.
  */
 
 type Props = { params: Promise<{ orgId: string; jobId: string }> };
@@ -100,6 +103,14 @@ export default async function CareersJobPage({ params }: Props) {
         <section aria-labelledby="about-the-role">
           <h2 id="about-the-role" className="mb-3 text-lg font-semibold tracking-tight">About the role</h2>
           <p className="max-w-prose text-base leading-relaxed break-words whitespace-pre-line">{job.description}</p>
+        </section>
+        <section aria-labelledby="apply">
+          <h2 id="apply" className="mb-3 text-lg font-semibold tracking-tight">Apply for this role</h2>
+          {job.accepting ? (
+            <ApplyForm action={applyAction.bind(null, orgId, jobId)} form={job.form} orgName={job.orgName} />
+          ) : (
+            <p className="text-base text-muted-foreground">Applications closed</p>
+          )}
         </section>
         <p>
           <Link
