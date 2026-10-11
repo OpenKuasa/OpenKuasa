@@ -45,7 +45,7 @@ export function ToolStepCard({
         <span className="font-medium">{label}</span>
         {about ? <span className="min-w-0 truncate">{about}</span> : null}
         <span className="min-w-0 flex-1 truncate text-muted-foreground">
-          {step.running ? 'Working…' : step.denied ? 'Not approved' : 'Done'}
+          {step.running ? 'Working…' : step.reason ? 'Not shown for approval' : step.denied ? 'Not approved' : 'Done'}
         </span>
         {step.running ? (
           <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />
@@ -61,6 +61,9 @@ export function ToolStepCard({
           <Check className="size-4 shrink-0 text-muted-foreground" aria-hidden />
         )}
       </button>
+      {step.reason ? (
+        <p className="border-t px-3 py-2 leading-relaxed text-muted-foreground">{step.reason}</p>
+      ) : null}
       {canExpand && open ? (
         <pre className="max-h-48 overflow-auto border-t px-3 py-2 text-xs leading-relaxed text-muted-foreground">
           {JSON.stringify(step.output, null, 2)}

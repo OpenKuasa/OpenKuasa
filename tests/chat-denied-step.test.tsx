@@ -1,0 +1,52 @@
+// tests/chat-denied-step.test.tsx
+import { describe, expect, it } from 'vitest';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { ToolStepCard } from '@/components/chat/tool-cards';
+import { toPendingApproval, toToolStep } from '@/components/chat/tool-parts';
+
+/**
+ * A change can be stopped in two ways: the user says no on its card, or the
+ * server refuses it before any card exists (one deletion a turn, an unclear
+ * name). Only the first is the user's doing, and the chat must not say
+ * otherwise. As the server sends it: no DOM here, so nothing is pressed.
+ */
+const REASON = 'One deletion at a time. One is already prepared for approval.';
+const part = (approval: Record<string, unknown>, state = 'output-denied') =>
+  ({ type: 'tool-deleteCandidate', toolCallId: 'c1', state, input: { id: 'x' }, approval }) as never;
+
+describe('a change that did not run', () => {
+  it('keeps the server\'s reason when it refused the change itself', () => {
+    expect(toToolStep(part({ id: 'r1', approved: false, reason: REASON, isAutomatic: true }), 'm', 0)).toMatchObject({ denied: true, reason: REASON });
+    // A chat opened again keeps the reason and not the automatic mark.
+    expect(toToolStep(part({ id: 'r1', approved: false, reason: REASON }), 'm', 0)).toMatchObject({ denied: true, reason: REASON });
+  });
+  it('has no reason when the user said no', () => {
+    const step = toToolStep(part({ id: 'r1', approved: false }), 'm', 0)!;
+    expect(step.denied).toBe(true);
+    expect(step.reason).toBeUndefined();
+    expect(toToolStep(part({ id: 'r1', approved: false, reason: '' }), 'm', 0)!.reason).toBeUndefined();
+  });
+  it('has no reason on a change that ran', () => {
+    const step = toToolStep(part({ id: 'r1', approved: true, reason: 'fine' }, 'output-available'), 'm', 0)!;
+    expect(step.denied).toBe(false);
+    expect(step.reason).toBeUndefined();
+  });
+  it('shows the reason, and does not say "Not approved", for a change the server refused', () => {
+    const html = renderToStaticMarkup(<ToolStepCard step={toToolStep(part({ id: 'r1', approved: false, reason: REASON, isAutomatic: true }), 'm', 0)!} />);
+    expect(html).toContain(REASON);
+    expect(html).toContain('Not shown for approval');
+    expect(html).not.toContain('Not approved');
+  });
+  it('still reads "Not approved" for a change the user rejected', () => {
+    const html = renderToStaticMarkup(<ToolStepCard step={toToolStep(part({ id: 'r1', approved: false }), 'm', 0)!} />);
+    expect(html).toContain('Not approved');
+    expect(html).not.toContain('Not shown for approval');
+  });
+});
+
+describe('a card waiting for the user', () => {
+  it('is not made for a request the server answered itself', () => {
+    expect(toPendingApproval(part({ id: 'r1' }, 'approval-requested'))).toMatchObject({ approvalId: 'r1', toolName: 'deleteCandidate' });
+    expect(toPendingApproval(part({ id: 'r1', isAutomatic: true }, 'approval-requested'))).toBeNull();
+  });
+});

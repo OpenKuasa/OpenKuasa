@@ -156,8 +156,10 @@ export type ToolStep = {
   key: string;
   name: string;
   running: boolean;
-  /** The user said no to this change, so it never ran. */
+  /** The change never ran: the user said no to it, or the server refused it before asking (then `reason` says why). */
   denied: boolean;
+  /** Why the server refused the change itself. Absent when the user said no. */
+  reason?: string;
   output: unknown;
 };
 
@@ -170,7 +172,10 @@ export function toToolStep(part: AnyPart, messageId: string, index: number): Too
   const output = 'output' in part ? part.output : undefined;
   const key =
     ('toolCallId' in part ? (part.toolCallId as string) : undefined) ?? `${messageId}-${index}`;
-  return { key, name, running, denied, output };
+  // A refusal of the server's own carries its reason; the chat's Reject button sends none.
+  const said = denied ? (part as { approval?: { reason?: unknown } }).approval?.reason : undefined;
+  const reason = typeof said === 'string' && said.trim() ? said : undefined;
+  return { key, name, running, denied, ...(reason && { reason }), output };
 }
 
 /**
@@ -195,8 +200,9 @@ export function toPendingApproval(part: AnyPart): PendingApproval | null {
   const type = part.type;
   if (typeof type !== 'string' || !type.startsWith('tool-')) return null;
   if (!('state' in part) || (part as { state?: string }).state !== 'approval-requested') return null;
-  const approval = (part as { approval?: { id?: string } }).approval;
-  if (!approval?.id) return null;
+  const approval = (part as { approval?: { id?: string; isAutomatic?: boolean } }).approval;
+  // A request the server answered itself is never the user's to decide.
+  if (!approval?.id || approval.isAutomatic) return null;
   return {
     approvalId: approval.id,
     toolName: type.slice('tool-'.length),
