@@ -518,3 +518,17 @@ describe('the deletion rules, in every prompt that can prepare one', () => {
       .toContain('own CV. Lekir can also prepare deleting one application or one candidate');
   });
 });
+
+describe('two rows the card could not tell apart', () => {
+  const RULE =
+    'If a deletion is refused because more than one candidate or application has the same name, or because there are too many to be sure, ' +
+    'they cannot be told apart here: say so in the words the tool gave, point to the screen it names, and do not try another way to delete them.';
+  it.each([['Lekir', LEKIR_SYSTEM], ['the specialist', subAgentSystem('hire', true)]])('%s relays the refusal and does not try another way', (_who, p) => {
+    expect(p).toContain(`- ${RULE}`);
+  });
+  it('sits inside Lekir\'s deletion section', () => {
+    const at = LEKIR_SYSTEM.indexOf(RULE);
+    expect(at).toBeGreaterThan(LEKIR_SYSTEM.indexOf('DELETING AN APPLICATION OR A CANDIDATE'));
+    expect(at).toBeLessThan(LEKIR_SYSTEM.indexOf('\nSCOPE'));
+  });
+});

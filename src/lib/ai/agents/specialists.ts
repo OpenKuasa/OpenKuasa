@@ -161,8 +161,8 @@ function turnStateFrom(messages: readonly ModelMessage[], proposals: Map<string,
  * the user in it, under a different proposal; the same proposal asked for again under a new call is another too.
  * The SDK asks again about a call the user approved, when their answer arrives: same proposal, same call, so it passes.
  */
-function applyGate(team: TeamContext, turn: TurnState): DeletionGate {
-  return (input, { toolCallId }) => {
+function applyGate(products: ProductToolkit[], team: TeamContext, turn: TurnState): DeletionGate {
+  return async (input, { toolCallId }) => {
     const id = (input as { proposalId?: unknown } | null)?.proposalId;
     const proposal = typeof id === 'string' ? team.proposals.get(id) : undefined;
     if (!isDeletionProposal(proposal)) return 'user-approval';
@@ -170,6 +170,10 @@ function applyGate(team: TeamContext, turn: TurnState): DeletionGate {
       [...turn.prepared, ...turn.shown.keys()].some((other) => other !== proposal.id) ||
       (turn.shown.has(proposal.id) && turn.shown.get(proposal.id) !== toolCallId);
     if (another) return { type: 'denied', reason: ONE_DELETION };
+    // Asked again here, as it was when the change was prepared: the rows may have changed since, or the proposal may be an old one.
+    const check = products.find((p) => p.key === proposal.product)?.checkDeletion;
+    const unclear = await check?.(proposal.action, (proposal.input as { id?: unknown } | null)?.id);
+    if (unclear) return { type: 'denied', reason: unclear };
     turn.shown.set(proposal.id, toolCallId);
     return 'user-approval';
   };
@@ -211,6 +215,11 @@ function specialistTools(
         'Calling this only PREPARES the change: the user is shown an Approve card and nothing is saved until they approve.',
       inputSchema: change.inputSchema as z.ZodType,
       execute: async (input: unknown) => {
+        // The one thing here that waits is read first. Calls made in one step run side by side, and everything
+        // below, down to the proposal being kept, must run without a pause for "only the first is prepared" to hold.
+        const unclear = DELETIONS.has(name)
+          ? await product.checkDeletion?.(name, (input as { id?: unknown } | null)?.id)
+          : null;
         // A specialist stops after the step in which it prepared a change, but one step can hold
         // several calls. Each card is a decision about one person: only the first is prepared.
         if (APPLICATION_CHANGES.has(name) && prepared.length > 0) {
@@ -277,6 +286,8 @@ function specialistTools(
         ) {
           return { prepared: false, error: AMBIGUOUS_DELETION };
         }
+        // Last, the server's own rows (read above): a name two rows share cannot be told apart on a card.
+        if (unclear) return { prepared: false, error: unclear };
         // Named from what this specialist just looked up, else from earlier turns.
         const find = (id: unknown, kind?: ItemKind) =>
           nameIn(results)(id, kind) ??
@@ -518,7 +529,7 @@ export function createTeamTools(
     // Only a team that can prepare a deletion needs the gate; any other keeps the plain card.
     toolApproval: {
       [APPLY_TOOL]: products.some((p) => Object.keys(p.write).some((name) => DELETIONS.has(name)))
-        ? applyGate(team, turn)
+        ? applyGate(products, team, turn)
         : 'user-approval',
     },
     prepareStep: ({ steps }) => {

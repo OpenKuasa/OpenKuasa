@@ -8,6 +8,7 @@
  * rule is taken from which side a tool is on, never from a list kept elsewhere.
  */
 
+import { deletionCheckFor, type DeletionCheck } from '@/lib/ai/hire-deletions';
 import type { ToolSet } from 'ai';
 import { CRM_WRITE_TOOL_NAMES, createCrmTools, type CrmAccess } from '@/lib/ai/crm-tools';
 import { createHireTools, type HeldCv } from '@/lib/ai/hire-tools';
@@ -120,6 +121,8 @@ export type ProductToolkit = {
   write: ToolSet;
   /** Hiring only: the CVs this request has read, for whichever agent runs these tools to hand to its model. */
   cvShelf?: HeldCv[];
+  /** Hiring only: the server read asked before a deletion is put to the user (see hire-deletions.ts). */
+  checkDeletion?: DeletionCheck;
 };
 
 function split(all: ToolSet, writeNames: readonly string[]): Pick<ProductToolkit, 'read' | 'write'> {
@@ -150,7 +153,7 @@ export function hireProduct(hire: HireAccess): ProductToolkit {
   const all = createHireTools(
     hire.data, () => new Date(), hire.write, { origin: hire.origin ?? null }, hire.files, cvShelf,
   );
-  return { key: 'hire', name: 'Lekir', ...split(all, HIRE_WRITE_TOOL_NAMES), cvShelf };
+  return { key: 'hire', name: 'Lekir', ...split(all, HIRE_WRITE_TOOL_NAMES), cvShelf, checkDeletion: deletionCheckFor(hire.data) };
 }
 
 /** Lekiu: staff, leave, claims, overtime, attendance, payroll and performance. */

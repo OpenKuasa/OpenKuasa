@@ -863,6 +863,41 @@ describe('Tuah’s team deleting an application or a candidate', () => {
     for (const refusal of seen.refusals) expect(refusal === AMBIGUOUS || refusal.startsWith('You have not looked up')).toBe(true);
     nothingDeleted();
   });
+  it('refuses a candidate whose name another candidate has, read from the workspace and not from what was looked up', async () => {
+    const { access } = await withUuids();
+    const same = {
+      ...access,
+      data: {
+        ...access.data,
+        listCandidates: async () => (await access.data.listCandidates()).map((c) => (c.id === OTHER_CAND ? { ...c, name: ' aisyah  LIM' } : c)),
+      },
+    };
+    // The id comes from an earlier turn: this delegation looks nobody up, so no lookup of its own shows the shared name.
+    const context = await prepare([{ tool: 'deleteCandidate', input: { id: CAND_ID } }], same, { [`candidate:${CAND_ID}`]: 'Aisyah Lim' });
+    expect(context.proposals.size).toBe(0);
+    expect(seen.refusals[0]).toBe('More than one candidate is called Aisyah Lim, so I cannot tell them apart here. Delete the right one from the Candidates screen.');
+    nothingDeleted();
+  });
+  it('refuses an application when another is from someone of the same name for the same job', async () => {
+    const { application, access } = await withUuids();
+    const TWIN = '66666666-6666-4666-8666-666666666663';
+    const same = {
+      ...access,
+      data: {
+        ...access.data,
+        listApplications: async () => {
+          const rows = await access.data.listApplications();
+          return [...rows, { ...rows.find((a) => a.id === APP_ID)!, id: TWIN, candidate_id: 'someone-else' }];
+        },
+      },
+    };
+    const context = await prepare([{ tool: 'listApplications', input: {} }, { tool: 'deleteApplication', input: { id: APP_ID } }], same);
+    expect(context.proposals.size).toBe(0);
+    expect(seen.refusals[0]).toBe(
+      `More than one application is from someone called ${application.candidate_name} for ${application.job_title}, so I cannot tell them apart here. Delete the right one from the Applications screen.`,
+    );
+    nothingDeleted();
+  });
   it('accepts an id an earlier turn knew as a candidate, with no new lookup', async () => {
     const { access } = await withUuids();
     const context = await prepare(
@@ -1056,6 +1091,24 @@ describe('one agent holding the delete tools', () => {
     expect(run.denials).toEqual([AMBIGUOUS]);
     // The sentence must not send the model back to a lookup, which cannot clear the refusal in the same turn.
     expect(AMBIGUOUS).not.toMatch(/look it up again/);
+    expect(candidateDeleted).not.toHaveBeenCalled();
+  });
+  it.each(['tuah', 'lekir'] as const)('%s: two people with one name get no card, even when the model has an id from an earlier turn', async (agent) => {
+    candidateDeleted.mockReset();
+    const base = hire().data;
+    const listCandidates = async () =>
+      (await base.listCandidates()).map((c, n) => (n === 0 ? { ...c, id: A, name: 'Aisyah Lim' } : n === 1 ? { ...c, id: B, name: 'aisyah  lim' } : c));
+    const earlier = [
+      { role: 'user', content: 'Delete Aisyah Lim' },
+      { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'l1', toolName: 'listCandidates', input: { name: 'Aisyah Lim' } }] },
+      { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'l1', toolName: 'listCandidates', output: { type: 'json', value: { total: 2, candidates: [{ id: A, name: 'Aisyah Lim', location: 'Klang' }, { id: B, name: 'aisyah  lim', location: 'Ipoh' }] } } }] },
+      { role: 'assistant', content: 'Two people are called Aisyah Lim. Which one?' },
+      { role: 'user', content: 'The one in Klang' },
+    ] as Message[];
+    // No new lookup in this turn: nothing in the turn says the name is shared. The server's own rows do.
+    const run = await request(earlier, [{ tool: 'deleteCandidate', input: { id: A } }], agent, { ...writer(), data: { ...base, listCandidates } });
+    expect(run.cards).toEqual([]);
+    expect(run.denials).toEqual(['More than one candidate is called Aisyah Lim, so I cannot tell them apart here. Delete the right one from the Candidates screen.']);
     expect(candidateDeleted).not.toHaveBeenCalled();
   });
   it('a viewer holds no delete tool, so there is nothing to gate', async () => {

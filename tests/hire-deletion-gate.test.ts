@@ -1,10 +1,12 @@
 // tests/hire-deletion-gate.test.ts
 import type { ModelMessage } from 'ai';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
-  AMBIGUOUS_DELETION, HIRE_DELETE_TOOL_NAMES, ONE_DELETION, ambiguousLookup, deletionProblem, guardDeletions,
-  oneDeletionRefusal,
+  AMBIGUOUS_DELETION, DELETION_CHECK_FAILED, HIRE_DELETE_TOOL_NAMES, ONE_DELETION, TOO_MANY_APPLICATIONS, TOO_MANY_CANDIDATES,
+  ambiguousLookup, applicationNameProblem, candidateNameProblem, deletionCheckFor, deletionProblem, guardDeletions,
+  oneDeletionRefusal, sameNameApplication, sameNameCandidate,
 } from '@/lib/ai/hire-deletions';
+import { HIRE_READ_CAP } from '@/lib/hire/types';
 
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
@@ -257,5 +259,101 @@ describe('deletionProblem, as the turn reads once the SDK has written it down', 
     // A file the user sent themselves is them speaking.
     const upload = { role: 'user', content: [{ type: 'text', text: 'Aisyah Lim, this one' }, { type: 'file', mediaType: 'application/pdf', data: new Uint8Array([1]) }] } as ModelMessage;
     expect(deletionProblem([...looked, upload], { toolCallId: 'c2', id: A })).toBeNull();
+  });
+});
+
+// A card names a person, and two people can have one name: then an id the model got wrong cannot be seen on the
+// card. So the rows are read on the server when the deletion is asked for, and a shared name is refused.
+describe('two rows the card could not tell apart', () => {
+  const C = '33333333-3333-4333-8333-333333333333';
+  const people = (...names: string[]) => names.map((name, n) => ({ id: [A, B, C][n], name }));
+  const SAME = 'More than one candidate is called Aisyah Lim, so I cannot tell them apart here. Delete the right one from the Candidates screen.';
+
+  it('the sentences are as agreed', () => {
+    expect(sameNameCandidate('Aisyah Lim')).toBe(SAME);
+    expect(sameNameApplication('Aisyah Lim', 'Barista')).toBe(
+      'More than one application is from someone called Aisyah Lim for Barista, so I cannot tell them apart here. Delete the right one from the Applications screen.',
+    );
+    expect(TOO_MANY_CANDIDATES).toBe('There are too many candidates here to be sure which one this is. Delete them from the Candidates screen.');
+  });
+  it('refuses a candidate whose name another candidate has, whatever the letter case and spacing', () => {
+    expect(candidateNameProblem(people('Aisyah Lim', 'Farid Osman'), A)).toBeNull();
+    expect(candidateNameProblem(people('Aisyah Lim', 'Aisyah Lim'), A)).toBe(SAME);
+    expect(candidateNameProblem(people('Aisyah Lim', '  aisyah   LIM '), A)).toBe(SAME);
+    expect(candidateNameProblem(people('Aisyah Lim', 'Aisyah Lim', 'Farid Osman'), C)).toBeNull();
+    // A longer name is another name.
+    expect(candidateNameProblem(people('Aisyah Lim', 'Aisyah Lim Abdullah'), A)).toBeNull();
+  });
+  it('lets a row that is no longer there go on to the database, which says so', () => {
+    expect(candidateNameProblem(people('Aisyah Lim'), C)).toBeNull();
+    expect(candidateNameProblem([], undefined)).toBeNull();
+  });
+  it('refuses every candidate when the read was cut at the cap: a namesake may be among the rows left out', () => {
+    const full = Array.from({ length: HIRE_READ_CAP }, (_, n) => ({ id: `id-${n}`, name: `Person ${n}` }));
+    expect(candidateNameProblem(full, 'id-3')).toBe(TOO_MANY_CANDIDATES);
+    expect(candidateNameProblem(full, C)).toBe(TOO_MANY_CANDIDATES);
+    expect(candidateNameProblem(full.slice(1), 'id-3')).toBeNull();
+  });
+  it('refuses an application only when another has the same candidate name and the same job', () => {
+    const row = (id: string, candidate_name: string, job_title: string) => ({ id, candidate_name, job_title });
+    const SAME_APPLICATION = sameNameApplication('Aisyah Lim', 'Barista');
+    expect(applicationNameProblem([row(A, 'Aisyah Lim', 'Barista'), row(B, 'Aisyah Lim', 'Cashier')], A)).toBeNull();
+    expect(applicationNameProblem([row(A, 'Aisyah Lim', 'Barista'), row(B, 'Farid Osman', 'Barista')], A)).toBeNull();
+    expect(applicationNameProblem([row(A, 'Aisyah Lim', 'Barista'), row(B, 'aisyah lim ', ' BARISTA')], A)).toBe(SAME_APPLICATION);
+    expect(applicationNameProblem([row(A, 'Aisyah Lim', 'Barista')], C)).toBeNull();
+    const full = Array.from({ length: HIRE_READ_CAP }, (_, n) => row(`id-${n}`, `Person ${n}`, 'Barista'));
+    expect(applicationNameProblem(full, 'id-3')).toBe(TOO_MANY_APPLICATIONS);
+  });
+
+  describe('the read behind it', () => {
+    const data = (candidates: { id: string; name: string }[], applications: { id: string; candidate_name: string; job_title: string }[] = []) => ({
+      listCandidates: async () => candidates as never,
+      listApplications: async () => applications as never,
+    });
+    it('reads the candidates for a candidate and the applications for an application', async () => {
+      const check = deletionCheckFor(data(people('Aisyah Lim', 'Aisyah Lim'), [{ id: C, candidate_name: 'Farid Osman', job_title: 'Barista' }]));
+      expect(await check('deleteCandidate', A)).toBe(SAME);
+      expect(await check('deleteApplication', C)).toBeNull();
+    });
+    it('refuses when the read fails, and does not throw', async () => {
+      const broken = { listCandidates: async () => { throw new Error('Aisyah Lim could not be read'); }, listApplications: async () => [] as never };
+      const said = vi.spyOn(console, 'error').mockImplementation(() => {});
+      expect(await deletionCheckFor(broken)('deleteCandidate', A)).toBe(DELETION_CHECK_FAILED);
+      // A name is personal data: the error's own words are never logged.
+      expect(JSON.stringify(said.mock.calls)).not.toContain('Aisyah');
+      said.mockRestore();
+    });
+  });
+
+  describe('in the gate', () => {
+    const approval = { deleteApplication: 'user-approval', deleteCandidate: 'user-approval' } as const;
+    type Gate = (input: unknown, options: { toolCallId: string; messages: ModelMessage[] }) => unknown;
+    const listed = [user('Who is called Aisyah Lim?'), called('listCandidates', 'l1', A), answered('listCandidates', 'l1', { total: 2, candidates: [{ id: A, name: 'Aisyah Lim' }, { id: B, name: 'Aisyah Lim' }] }), user('Delete the one in Klang')];
+    it('denies before any card, and the denial is not the request\'s one deletion', async () => {
+      const asked: unknown[][] = [];
+      const guarded = guardDeletions(approval, async (tool, id) => {
+        asked.push([tool, id]);
+        return id === A ? SAME : null;
+      })!;
+      expect(await (guarded.deleteCandidate as Gate)({ id: A }, { toolCallId: 'c1', messages: listed })).toEqual({ type: 'denied', reason: SAME });
+      expect(await (guarded.deleteCandidate as Gate)({ id: B }, { toolCallId: 'c2', messages: listed })).toBe('user-approval');
+      expect(asked).toEqual([['deleteCandidate', A], ['deleteCandidate', B]]);
+    });
+    it('does not read the rows for a call that is refused anyway', async () => {
+      const check = vi.fn(async () => null);
+      const guarded = guardDeletions(approval, check)!;
+      await (guarded.deleteCandidate as Gate)({ id: C }, { toolCallId: 'c1', messages: listed });
+      expect(check).not.toHaveBeenCalled();
+    });
+    it('a call denied for a shared name, or at the cap, or by a failed read, is not the turn\'s one deletion', () => {
+      for (const reason of [SAME, sameNameApplication('Aisyah Lim', 'Barista'), TOO_MANY_CANDIDATES, TOO_MANY_APPLICATIONS, DELETION_CHECK_FAILED]) {
+        const turn = [
+          user('Delete both'),
+          { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'c1', toolName: 'deleteCandidate', input: { id: A } }] } as ModelMessage,
+          { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'c1', toolName: 'deleteCandidate', output: { type: 'execution-denied', reason } }] } as ModelMessage,
+        ];
+        expect(deletionProblem(turn, { toolCallId: 'c2', id: B }), reason).toBeNull();
+      }
+    });
   });
 });

@@ -112,7 +112,7 @@ export function runLekir(
     messages,
     tools,
     // The first deletion of a turn goes to the user as a card; any other is denied before a card exists.
-    toolApproval: guardDeletions(toolApproval),
+    toolApproval: guardDeletions(toolApproval, product.checkDeletion),
     // A CV Lekir has read reaches its model as a user file in the next step, never inside the tool result.
     prepareStep: prepareCvStep(product.cvShelf),
     onLanguageModelCallEnd: logModelCall('lekir', pickModelId('orchestrator')),
@@ -210,7 +210,7 @@ export function runTuah(
     messages,
     tools,
     // The first deletion of a turn goes to the user as a card; any other is denied before a card exists.
-    toolApproval: guardDeletions(toolApproval),
+    toolApproval: guardDeletions(toolApproval, products.find((p) => p.checkDeletion)?.checkDeletion),
     prepareStep: teamTools?.prepareStep as never,
     onLanguageModelCallEnd: logModelCall(team ? 'tuah-team' : 'tuah', pickModelId('orchestrator')),
     onError: logModelError(team ? 'tuah-team' : 'tuah'),

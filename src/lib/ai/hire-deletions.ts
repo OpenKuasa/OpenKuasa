@@ -9,6 +9,7 @@
 import type { ModelMessage } from 'ai';
 import { isHeldCvMessage } from '@/lib/ai/hire-tools';
 import { nameIn } from '@/lib/chat/change-titles';
+import { HIRE_READ_CAP, type HireData } from '@/lib/hire/types';
 
 export const HIRE_DELETE_TOOL_NAMES = ['deleteApplication', 'deleteCandidate'] as const;
 
@@ -37,7 +38,15 @@ export function notLookedUp(kind: DeletionKind, id: unknown): string {
  * how they begin; a reason kept with a stored chat is cut at 500 characters,
  * which leaves every beginning whole.
  */
-const GATE_REASON_STARTS = ['One deletion at a time.', 'More than one match was found', 'You have not looked up '];
+const GATE_REASON_STARTS = [
+  'One deletion at a time.',
+  'More than one match was found',
+  'You have not looked up ',
+  'More than one candidate is called ',
+  'More than one application is from someone called ',
+  'There are too many ',
+  'I could not check ',
+];
 export function isGateReason(reason: unknown): boolean {
   return typeof reason === 'string' && GATE_REASON_STARTS.some((start) => reason.startsWith(start));
 }
@@ -156,9 +165,73 @@ export function lookedUp(messages: readonly ModelMessage[], kind: DeletionKind, 
   return nameIn(results)(id, kind) !== null;
 }
 
+/*
+ * Two rows the card could not tell apart. A card names a person (and, for an application, the job); when two rows
+ * share that, a wrong id cannot be seen on the card, and approving it would delete the wrong one for good. So the
+ * workspace's rows are read on the server when a deletion is asked for, and a shared name is refused before any
+ * card. The read is the session's own (the one the lookups use), never what the model looked up or passed in.
+ */
+export const sameNameCandidate = (name: string) =>
+  `More than one candidate is called ${name}, so I cannot tell them apart here. Delete the right one from the Candidates screen.`;
+export const sameNameApplication = (name: string, job: string) =>
+  `More than one application is from someone called ${name} for ${job}, so I cannot tell them apart here. Delete the right one from the Applications screen.`;
+/** The read keeps the newest HIRE_READ_CAP rows: at the cap a namesake may be among those left out, so nothing can be said. */
+export const TOO_MANY_CANDIDATES =
+  'There are too many candidates here to be sure which one this is. Delete them from the Candidates screen.';
+export const TOO_MANY_APPLICATIONS =
+  'There are too many applications here to be sure which one this is. Delete it from the Applications screen.';
+export const DELETION_CHECK_FAILED =
+  'I could not check whether someone else has the same name just now, so no deletion was prepared. Try again in a moment.';
+
+/** Two names are one when they differ only in letter case and in spacing. */
+const sameText = (value: string) => value.trim().replace(/\s+/g, ' ').toLowerCase();
+
+/** Why this candidate cannot be told apart from another, or null. A row that is not there is left to the database to report. */
+export function candidateNameProblem(rows: readonly { id: string; name: string }[], id: unknown): string | null {
+  if (rows.length >= HIRE_READ_CAP) return TOO_MANY_CANDIDATES;
+  const row = rows.find((r) => r.id === id);
+  if (!row) return null;
+  const name = sameText(row.name);
+  return rows.some((r) => r.id !== row.id && sameText(r.name) === name) ? sameNameCandidate(row.name.trim()) : null;
+}
+
+/** The same for an application: another one from someone of the same name for the same job. */
+export function applicationNameProblem(
+  rows: readonly { id: string; candidate_name: string; job_title: string }[],
+  id: unknown,
+): string | null {
+  if (rows.length >= HIRE_READ_CAP) return TOO_MANY_APPLICATIONS;
+  const row = rows.find((r) => r.id === id);
+  if (!row) return null;
+  const [name, job] = [sameText(row.candidate_name), sameText(row.job_title)];
+  return rows.some((r) => r.id !== row.id && sameText(r.candidate_name) === name && sameText(r.job_title) === job)
+    ? sameNameApplication(row.candidate_name.trim(), row.job_title.trim())
+    : null;
+}
+
+/** Asks the server whether a deletion's row can be told apart: the refusal, or null. Never throws. */
+export type DeletionCheck = (tool: string, id: unknown) => Promise<string | null>;
+
+export function deletionCheckFor(data: Pick<HireData, 'listCandidates' | 'listApplications'>): DeletionCheck {
+  return async (tool, id) => {
+    try {
+      return kindOfDeletion(tool) === 'application'
+        ? applicationNameProblem(await data.listApplications(), id)
+        : candidateNameProblem(await data.listCandidates(), id);
+    } catch {
+      // Nothing of the error is logged: its words can hold a name.
+      console.error('[lekir] the same-name check before a deletion could not read the rows');
+      return DELETION_CHECK_FAILED;
+    }
+  };
+}
+
 type Decision = 'user-approval' | { type: 'denied'; reason: string };
 /** The approval function both delete tools share (the SDK's per-tool approval function). */
-export type DeletionGate = (input: unknown, options: { toolCallId: string; messages: ModelMessage[] }) => Decision;
+export type DeletionGate = (
+  input: unknown,
+  options: { toolCallId: string; messages: ModelMessage[] },
+) => Decision | Promise<Decision>;
 
 /**
  * An agent's approval map with the two delete tools gated: the first deletion
@@ -174,13 +247,15 @@ export type DeletionGate = (input: unknown, options: { toolCallId: string; messa
  */
 export function guardDeletions(
   approval: Record<string, 'user-approval' | DeletionGate> | undefined,
+  /** The server read that says whether the row can be told apart from another. Asked last, and only for a call nothing else refused. */
+  check?: DeletionCheck,
 ): Record<string, 'user-approval' | DeletionGate> | undefined {
   if (!approval) return undefined;
   const names = HIRE_DELETE_TOOL_NAMES.filter((name) => name in approval);
   if (names.length === 0) return approval;
   let asked = 0;
   // One gate per tool, because the SDK does not say which tool it is asking about; one count between them.
-  const gateFor = (tool: string): DeletionGate => (input, { toolCallId, messages }) => {
+  const gateFor = (tool: string): DeletionGate => async (input, { toolCallId, messages }) => {
     const id = (input as { id?: unknown } | null)?.id;
     const kind = kindOfDeletion(tool);
     // In this order: one a turn, then an id that was really looked up, then a lookup that was not ambiguous.
@@ -188,6 +263,9 @@ export function guardDeletions(
     const problem =
       inTurn === ONE_DELETION ? inTurn : ((lookedUp(messages, kind, id) ? null : notLookedUp(kind, id)) ?? inTurn);
     if (problem) return { type: 'denied', reason: problem };
+    // The SDK waits for each call's answer before asking about the next, so the count is safe across this read.
+    const unclear = check ? await check(tool, id) : null;
+    if (unclear) return { type: 'denied', reason: unclear };
     asked += 1;
     return 'user-approval';
   };
