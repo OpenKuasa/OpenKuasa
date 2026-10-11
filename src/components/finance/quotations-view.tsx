@@ -81,8 +81,8 @@ type Open =
   | { kind: 'new'; today: string; nonce: number }
   /** `detail` is null while the draft's lines are being read. */
   | { kind: 'edit'; quotation: QuotationListRow; detail: QuotationDetail | null; today: string }
-  /** A draft invoice has just been made from this quotation. */
-  | { kind: 'converted'; quotation: QuotationListRow }
+  /** A draft invoice has just been made from this quotation, dated `date`. */
+  | { kind: 'converted'; quotation: QuotationListRow; date: string }
   | { kind: Question; quotation: QuotationListRow }
   | null;
 
@@ -240,16 +240,18 @@ export function QuotationsView({
             label={`Make an invoice from ${name}`}
             confirmLabel="Make invoice"
             pendingLabel="Making…"
-            onConfirm={() =>
+            onConfirm={() => {
+              // The person's own date, as the forms take it: the database's is UTC, a day behind until 08:00 in Malaysia.
+              const date = now();
               confirm.run(
-                () => actions.convert(id),
+                () => actions.convert({ ...id, invoice_date: date }),
                 // The row's question goes; the note at the top of the page says where the invoice is.
-                () => ask({ kind: 'converted', quotation }),
-              )
-            }
+                () => ask({ kind: 'converted', quotation, date }),
+              );
+            }}
           >
             Make a draft invoice from {number} to {who} ({rm(quotation.total)})? It gets the same customer, notes and
-            lines, and stays a draft on Invoices until it is posted.
+            lines, is dated today, and stays a draft on Invoices until it is posted.
           </ConfirmRow>
         );
       case 'delete':
@@ -329,8 +331,8 @@ export function QuotationsView({
         >
           <div className="flex flex-wrap items-center gap-3">
             <p id="converted-note" role="status" className="text-sm text-muted-foreground">
-              It has the quotation’s customer, notes and lines. It is a draft: check its date and lines, then post
-              it, on{' '}
+              It has the quotation’s customer, notes and lines, and is dated {displayDate(open.date)}. It is a draft:
+              check it, then post it, on{' '}
               <Link
                 ref={invoicesLink}
                 href="/finance/invoices"

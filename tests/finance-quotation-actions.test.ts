@@ -82,6 +82,9 @@ const quotation = {
   lines: [{ description: 'Design work', quantity: 10, unit_price: 12.5 }],
 };
 
+/** What "Make invoice" sends: the quotation, and the date on the person's own calendar. */
+const CONVERT = { id: QUOTATION, invoice_date: '2026-10-12' };
+
 /** Every write action with an input its schema accepts, the data-layer function it must call, and the screens it refreshes. */
 const writes: [string, (input: unknown) => Promise<Answer>, unknown, string, string[]][] = [
   ['saveQuotationAction', actions.saveQuotationAction, quotation, 'saveQuotation', QUOTATIONS],
@@ -89,7 +92,7 @@ const writes: [string, (input: unknown) => Promise<Answer>, unknown, string, str
   ['acceptQuotationAction', actions.acceptQuotationAction, { id: QUOTATION }, 'acceptQuotation', QUOTATIONS],
   ['declineQuotationAction', actions.declineQuotationAction, { id: QUOTATION }, 'declineQuotation', QUOTATIONS],
   ['deleteQuotationAction', actions.deleteQuotationAction, { id: QUOTATION }, 'deleteQuotation', QUOTATIONS],
-  ['convertQuotationAction', actions.convertQuotationAction, { id: QUOTATION }, 'convertQuotation', QUOTATIONS_AND_INVOICES],
+  ['convertQuotationAction', actions.convertQuotationAction, CONVERT, 'convertQuotation', QUOTATIONS_AND_INVOICES],
 ];
 
 beforeEach(() => {
@@ -130,7 +133,7 @@ describe('who may write', () => {
     expect(await actions.acceptQuotationAction({ id: QUOTATION })).toEqual(FORBIDDEN);
     expect(await actions.declineQuotationAction({ id: QUOTATION })).toEqual(FORBIDDEN);
     expect(await actions.deleteQuotationAction({ id: QUOTATION })).toEqual(FORBIDDEN);
-    expect(await actions.convertQuotationAction({ id: QUOTATION })).toEqual(FORBIDDEN);
+    expect(await actions.convertQuotationAction(CONVERT)).toEqual(FORBIDDEN);
     expect(ctl.calls).toEqual([]);
   });
 });
@@ -156,12 +159,28 @@ describe('each write action', () => {
   });
 
   it('answers a conversion with the new invoice’s id', async () => {
-    expect(await actions.convertQuotationAction({ id: QUOTATION })).toEqual({ ok: true, data: { id: QUOTATION, invoice_id: INVOICE } });
+    expect(await actions.convertQuotationAction(CONVERT)).toEqual({ ok: true, data: { id: QUOTATION, invoice_id: INVOICE } });
+  });
+
+  it('hands a conversion the person’s date beside the quotation, and nothing else', async () => {
+    await actions.convertQuotationAction({ ...CONVERT, due_date: '2026-10-13' });
+    expect(ctl.calls).toEqual([{ fn: 'convertQuotation', orgId: 'org1', input: CONVERT }]);
+  });
+
+  it('refuses a conversion with no date, or one that is not a date, touching nothing', async () => {
+    for (const invoice_date of [undefined, '', '12/10/2026', '2026-02-30']) {
+      expect(await actions.convertQuotationAction({ id: QUOTATION, invoice_date }), String(invoice_date)).toEqual({
+        ok: false,
+        error: 'Enter a valid date.',
+      });
+    }
+    expect(ctl.calls).toEqual([]);
+    expect(ctl.revalidated).toEqual([]);
   });
 
   it('never takes the workspace from the input', async () => {
     await actions.saveQuotationAction({ ...quotation, org_id: 'someone-else' });
-    await actions.convertQuotationAction({ id: QUOTATION, org_id: 'someone-else', target_org: 'someone-else' });
+    await actions.convertQuotationAction({ ...CONVERT, org_id: 'someone-else', target_org: 'someone-else' });
     expect(ctl.calls.map((c) => c.orgId)).toEqual(['org1', 'org1']);
     expect(JSON.stringify(ctl.calls)).not.toContain('someone-else');
   });
@@ -212,7 +231,7 @@ describe('each write action', () => {
       ok: false,
       error: 'This quotation already has an invoice. Void that invoice, or delete it if it is a draft, first.',
     };
-    expect(await actions.convertQuotationAction({ id: QUOTATION })).toEqual(ctl.answers.convertQuotation);
+    expect(await actions.convertQuotationAction(CONVERT)).toEqual(ctl.answers.convertQuotation);
     expect(ctl.revalidated).toEqual(QUOTATIONS_AND_INVOICES);
   });
 });

@@ -77,6 +77,7 @@ import {
   type SaveAndSendQuotationResult,
   acceptQuotation,
   convertQuotation,
+  convertQuotationInput,
   declineQuotation,
   deleteQuotation,
   getQuotation,
@@ -352,9 +353,9 @@ export async function declineQuotationAction(input: unknown) {
 export async function deleteQuotationAction(input: unknown) {
   return run(QUOTATION_PATHS, quotationIdInput, input, deleteQuotation);
 }
-/** Makes a draft invoice from an accepted quotation, and refreshes Invoices as well. */
+/** Makes a draft invoice from an accepted quotation, dated with the date the person sends, and refreshes Invoices as well. */
 export async function convertQuotationAction(input: unknown) {
-  return run(CONVERT_PATHS, quotationIdInput, input, convertQuotation);
+  return run(CONVERT_PATHS, convertQuotationInput, input, convertQuotation);
 }
 
 /** Saves the quotation as a draft, then marks it as sent; see `saveThenPost`. */
