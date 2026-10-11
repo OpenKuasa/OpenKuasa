@@ -47,6 +47,8 @@ const self = (employeeId: string | null = ME) => ({ ctx: { client: {} as never, 
 const SELF_TOOLS = [
   'previewLeave', 'previewOvertime', 'applyLeave', 'applyTimeOff', 'cancelLeaveRequest', 'cancelTimeOffRequest',
   'submitClaim', 'cancelClaim', 'submitOvertime', 'cancelOvertime',
+  // Anyone linked to an employee record can clock in and out for themselves, and ask whether they have.
+  'clockIn', 'clockOut', 'getMyAttendanceToday',
 ];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -71,13 +73,19 @@ beforeEach(() => {
 
 describe('who holds which leave tools', () => {
   it('an owner or admin holds every change tool, and the preview', () => {
-    expect(Object.keys(tools(HR_VIEWER, hr()))).toEqual([...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', ...PEOPLE_WRITE_TOOL_NAMES]);
+    // This owner has no linked employee record, so the clock tools (and "have I clocked in?") are not theirs.
+    const held = Object.keys(tools(HR_VIEWER, hr()));
+    expect(held.sort()).toEqual(
+      [...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getAttendanceSettings', ...PEOPLE_WRITE_TOOL_NAMES]
+        .filter((name) => !['clockIn', 'clockOut'].includes(name))
+        .sort(),
+    );
     for (const name of ['decideLeave', 'decideTimeOff', 'setLeaveEntitlement']) expect(PEOPLE_WRITE_TOOL_NAMES).toContain(name);
   });
 
   it('a linked member holds the preview, apply and cancel for themselves, and nothing that decides', () => {
     const held = Object.keys(tools(MEMBER_VIEWER, self()));
-    expect(held).toEqual([...PEOPLE_TOOL_NAMES, ...SELF_TOOLS]);
+    expect(held.sort()).toEqual([...PEOPLE_TOOL_NAMES, ...SELF_TOOLS].sort());
     for (const name of ['decideLeave', 'decideTimeOff', 'setLeaveEntitlement', 'createEmployee', 'linkEmployeeToMember', 'deleteDepartment']) {
       expect(held, name).not.toContain(name);
     }
@@ -103,7 +111,7 @@ describe('who holds which leave tools', () => {
     const member = peopleProduct({ data: base, viewer: MEMBER_VIEWER, write: self() });
     expect(Object.keys(member.write).sort()).toEqual([
       'applyLeave', 'applyTimeOff', 'cancelClaim', 'cancelLeaveRequest', 'cancelOvertime', 'cancelTimeOffRequest',
-      'submitClaim', 'submitOvertime',
+      'clockIn', 'clockOut', 'submitClaim', 'submitOvertime',
     ]);
   });
 });

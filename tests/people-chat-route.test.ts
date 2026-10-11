@@ -135,6 +135,14 @@ const { DEMO_ORG_SLUG } = await import('@/lib/people/types');
 const SELF_TOOLS = [
   'previewLeave', 'previewOvertime', 'applyLeave', 'applyTimeOff', 'cancelLeaveRequest', 'cancelTimeOffRequest',
   'submitClaim', 'cancelClaim', 'submitOvertime', 'cancelOvertime',
+  'clockIn', 'clockOut', 'getMyAttendanceToday',
+];
+/** Anyone linked to an employee record holds these, an owner or admin included. */
+const CLOCK_TOOLS = ['clockIn', 'clockOut', 'getMyAttendanceToday'];
+/** What an owner or admin with no employee record holds: every change tool but the clock ones, and the settings lookup. */
+const UNLINKED_OWNER_TOOLS = [
+  ...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getAttendanceSettings',
+  ...PEOPLE_WRITE_TOOL_NAMES.filter((name) => name !== 'clockIn' && name !== 'clockOut'),
 ];
 
 function post(body: unknown): Request {
@@ -235,7 +243,7 @@ describe('POST /api/people/chat happy path', () => {
 
     const [call] = ctl.calls;
     expect(call.system).toMatch(/^You are Lekiu/);
-    expect(call.tools.sort()).toEqual([...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', ...PEOPLE_WRITE_TOOL_NAMES].sort());
+    expect(call.tools.sort()).toEqual([...UNLINKED_OWNER_TOOLS].sort());
     expect(call.tools).not.toContain('getCampaigns');
     expect(call.tools).not.toContain('listDeals');
     expect(call.tools).not.toContain('listJobs');
@@ -284,7 +292,7 @@ describe('POST /api/people/chat happy path', () => {
   it.each(['owner', 'admin'])('gives an %s the change tools, bound to their own workspace', async (role) => {
     ctl.org = { orgId: 'org1', role };
     await (await POST(post({ ...validBody, orgId: 'someone-elses-org' }))).text();
-    for (const name of PEOPLE_WRITE_TOOL_NAMES) expect(ctl.calls[0].tools).toContain(name);
+    for (const name of UNLINKED_OWNER_TOOLS) expect(ctl.calls[0].tools).toContain(name);
     expect(ctl.captured!.write?.tier).toBe('hr');
     expect(ctl.captured!.write?.ctx.orgId).toBe('org1');
   });
@@ -331,6 +339,17 @@ describe('POST /api/people/chat happy path', () => {
     ctl.linkedEmployee = { id: 'emp-3' };
     await (await POST(post(validBody))).text();
     expect(ctl.captured!.write).toMatchObject({ tier: 'hr', employeeId: 'emp-3' });
+    // Their own record is linked, so they hold the clock tools too, for that record.
+    for (const name of CLOCK_TOOLS) expect(ctl.calls[0].tools).toContain(name);
+  });
+
+  it('gives an owner with no employee record the owner tools but no clock tool', async () => {
+    ctl.org = { orgId: 'org1', role: 'owner' };
+    await (await POST(post(validBody))).text();
+    for (const name of CLOCK_TOOLS) expect(ctl.calls[0].tools).not.toContain(name);
+    for (const name of ['correctAttendance', 'saveHoliday', 'removeHoliday', 'saveAttendanceSettings', 'getAttendanceSettings']) {
+      expect(ctl.calls[0].tools).toContain(name);
+    }
   });
 
   it('tells the tools the name of the employee who is asking', async () => {

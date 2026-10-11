@@ -352,3 +352,106 @@ describe('approval cards for an owner or admin’s own request', () => {
     expect(approvalTitle('submitClaim', { ...claim, employee_id: DEPT }, find)).toBe('Claim RM 23.40 for meals, 11 Oct, for this employee?');
   });
 });
+
+describe('approval cards for attendance, holidays and attendance settings', () => {
+  const HOLIDAY = '55555555-5555-4555-8555-555555555555';
+  const lookups = [
+    { tool: 'listEmployees', output: { total: 1, employees: [{ id: EMP, name: 'Amirul Hakim' }] } },
+    { tool: 'listPublicHolidays', output: { holidays: [{ id: HOLIDAY, name: 'Deepavali', date: '2026-11-08', scope: 'national', state: null }] } },
+    {
+      tool: 'getAttendanceSettings',
+      output: { id: 'attendance-settings', work_week: ['mon', 'tue', 'wed', 'thu', 'fri'], work_start_time: '09:00', work_start_label: '9:00 am', late_grace_minutes: 15 },
+    },
+  ];
+  const find = nameIn(lookups);
+  const day = { work_date: '2026-10-09' };
+
+  it('the two clock cards carry no time, whatever the input holds', () => {
+    expect(approvalTitle('clockIn', {})).toBe('Clock in now?');
+    expect(approvalTitle('clockOut', {})).toBe('Clock out now?');
+    expect(approvalTitle('clockIn', { time: '2026-10-01T03:00:00Z', employee_id: EMP }, find)).toBe('Clock in now?');
+    expect(approvalDetail('clockIn', {})).toBeNull();
+    expect(approvalDetail('clockOut', {})).toBeNull();
+  });
+
+  it('names the employee and the day, with the times as "9:00 am"', () => {
+    expect(approvalTitle('correctAttendance', { employee_id: EMP, ...day, status: 'present', clock_in: '09:00', clock_out: '18:00' }, find)).toBe(
+      "Correct Amirul Hakim's attendance on 9 Oct to present, 9:00 am to 6:00 pm?",
+    );
+    expect(approvalTitle('correctAttendance', { employee_id: EMP, ...day, status: 'late', clock_in: '10:05' }, find)).toBe(
+      "Correct Amirul Hakim's attendance on 9 Oct to late, from 10:05 am?",
+    );
+    expect(approvalTitle('correctAttendance', { employee_id: EMP, ...day, status: 'on_leave' }, find)).toBe(
+      "Correct Amirul Hakim's attendance on 9 Oct to on leave?",
+    );
+  });
+
+  it('shows no times for an absence, even when the input holds some', () => {
+    expect(approvalTitle('correctAttendance', { employee_id: EMP, ...day, status: 'absent', clock_in: '09:00', clock_out: '18:00' }, find)).toBe(
+      "Correct Amirul Hakim's attendance on 9 Oct to absent?",
+    );
+  });
+
+  it('quotes the note on the second line, as typed', () => {
+    expect(approvalDetail('correctAttendance', { note: 'Forgot to clock out' })).toBe('Note: “Forgot to clock out”');
+    expect(approvalDetail('correctAttendance', { note: '  ' })).toBeNull();
+    expect(approvalDetail('correctAttendance', {})).toBeNull();
+  });
+
+  it('a wrong-kind id never names someone: a holiday id is not an employee, and an unlisted employee is "this employee"', () => {
+    expect(approvalTitle('correctAttendance', { employee_id: HOLIDAY, ...day, status: 'absent' }, find)).toBe(
+      "Correct this employee's attendance on 9 Oct to absent?",
+    );
+    expect(approvalTitle('correctAttendance', { employee_id: EMP, ...day, status: 'absent' })).toBe(
+      "Correct this employee's attendance on 9 Oct to absent?",
+    );
+    // And an employee id is not a holiday.
+    expect(approvalTitle('removeHoliday', { id: EMP }, find)).toBe('Remove a public holiday that was not in the list above?');
+    expect(approvalTitle('saveHoliday', { id: EMP, name: 'Deepavali', holiday_date: '2026-11-09' }, find)).toBe(
+      'Change a public holiday that was not in the list above to Deepavali, 9 Nov 2026?',
+    );
+  });
+
+  it('adds, changes and removes a holiday, naming it from the lookup', () => {
+    expect(approvalTitle('saveHoliday', { name: 'Deepavali', holiday_date: '2026-11-08' }, find)).toBe('Add public holiday: Deepavali, 8 Nov 2026?');
+    expect(approvalTitle('saveHoliday', { id: null, name: 'Deepavali', holiday_date: '2026-11-08' }, find)).toBe(
+      'Add public holiday: Deepavali, 8 Nov 2026?',
+    );
+    expect(approvalTitle('saveHoliday', { id: HOLIDAY, name: 'Deepavali', holiday_date: '2026-11-09' }, find)).toBe(
+      'Change public holiday Deepavali, 8 Nov 2026 to Deepavali, 9 Nov 2026?',
+    );
+    expect(approvalTitle('removeHoliday', { id: HOLIDAY }, find)).toBe('Remove public holiday: Deepavali, 8 Nov 2026?');
+    expect(approvalTitle('removeHoliday', { id: HOLIDAY })).toBe('Remove a public holiday that was not in the list above?');
+    expect(approvalDetail('removeHoliday', { id: HOLIDAY })).toBe('Leave and overtime already recorded are not changed.');
+    expect(approvalDetail('saveHoliday', { name: 'Deepavali', holiday_date: '2026-11-08' })).toBeNull();
+  });
+
+  it('with the earlier lookup, the settings card shows only what changes', () => {
+    const base = { work_week: ['mon', 'tue', 'wed', 'thu', 'fri'], work_start_time: '09:00', late_grace_minutes: 15 };
+    expect(approvalTitle('saveAttendanceSettings', { ...base, work_start_time: '08:30', late_grace_minutes: 10 }, find)).toBe(
+      "Change the work start time to 8:30 am, with 10 minutes' grace?",
+    );
+    expect(approvalTitle('saveAttendanceSettings', { ...base, work_start_time: '08:30' }, find)).toBe('Change the work start time to 8:30 am?');
+    expect(approvalTitle('saveAttendanceSettings', { ...base, late_grace_minutes: 5 }, find)).toBe('Change the grace period to 5 minutes?');
+    expect(approvalTitle('saveAttendanceSettings', { ...base, work_week: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'] }, find)).toBe(
+      'Change the work week to Mon to Sat?',
+    );
+    expect(approvalTitle('saveAttendanceSettings', { ...base, work_week: ['sun', 'mon', 'wed'], work_start_time: '08:30' }, find)).toBe(
+      'Change the work start time to 8:30 am and the work week to Mon, Wed, Sun?',
+    );
+    // Days sent in another order are the same week.
+    expect(approvalTitle('saveAttendanceSettings', { ...base, work_week: ['fri', 'thu', 'wed', 'tue', 'mon'] }, find)).toBe(
+      'Keep the attendance settings as they are?',
+    );
+  });
+
+  it('without the earlier lookup, the settings card shows all three', () => {
+    expect(
+      approvalTitle('saveAttendanceSettings', { work_week: ['mon', 'tue', 'wed', 'thu', 'fri'], work_start_time: '08:30', late_grace_minutes: 10 }, nameIn([])),
+    ).toBe("Change the work start time to 8:30 am, with 10 minutes' grace and the work week to Mon to Fri?");
+    expect(approvalTitle('saveAttendanceSettings', { work_week: ['mon'], work_start_time: '13:00', late_grace_minutes: 1 })).toBe(
+      "Change the work start time to 1:00 pm, with 1 minute's grace and the work week to Mon?",
+    );
+    expect(approvalDetail('saveAttendanceSettings', {})).toBe('Applies from the next clock-in.');
+  });
+});

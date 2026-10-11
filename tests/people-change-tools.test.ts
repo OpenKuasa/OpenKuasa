@@ -62,19 +62,30 @@ describe('Lekiu change tools', () => {
       'decideLeave', 'decideTimeOff', 'setLeaveEntitlement',
       'submitClaim', 'cancelClaim', 'submitOvertime', 'cancelOvertime',
       'decideClaim', 'markClaimPaid', 'unmarkClaimPaid', 'decideOvertime',
+      'clockIn', 'clockOut', 'correctAttendance', 'saveHoliday', 'removeHoliday', 'saveAttendanceSettings',
     ]);
-    expect(Object.keys(createPeopleTools(data, HR, NOW, write()))).toEqual([
-      ...PEOPLE_TOOL_NAMES,
-      'previewLeave',
-      'previewOvertime',
-      ...PEOPLE_WRITE_TOOL_NAMES,
-    ]);
+    // An owner with no linked employee record holds no clock tool; one with a record holds every one.
+    const unlinked = Object.keys(createPeopleTools(data, HR, NOW, write())).sort();
+    expect(unlinked).toEqual(
+      [...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getAttendanceSettings', ...PEOPLE_WRITE_TOOL_NAMES]
+        .filter((name) => name !== 'clockIn' && name !== 'clockOut')
+        .sort(),
+    );
+    const linked = Object.keys(
+      createPeopleTools(data, { ...HR, employeeId: EMP }, NOW, { ...write(), employeeId: EMP }),
+    ).sort();
+    expect(linked).toEqual(
+      [...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getMyAttendanceToday', 'getAttendanceSettings', ...PEOPLE_WRITE_TOOL_NAMES].sort(),
+    );
   });
 
   it('every one of them waits for approval, and none is a lookup', () => {
-    const kit = peopleProduct({ data, viewer: HR, write: write() });
+    const linked = { ...write(), employeeId: EMP };
+    const kit = peopleProduct({ data, viewer: { ...HR, employeeId: EMP }, write: linked });
     expect(Object.keys(kit.write).sort()).toEqual([...PEOPLE_WRITE_TOOL_NAMES].sort());
-    expect(Object.keys(kit.read).sort()).toEqual([...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime'].sort());
+    expect(Object.keys(kit.read).sort()).toEqual(
+      [...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getMyAttendanceToday', 'getAttendanceSettings'].sort(),
+    );
     const { toolApproval } = combineToolkits([kit]);
     for (const name of PEOPLE_WRITE_TOOL_NAMES) expect(toolApproval?.[name]).toBe('user-approval');
   });

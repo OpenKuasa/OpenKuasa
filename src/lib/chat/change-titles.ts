@@ -29,6 +29,20 @@ function labelOf(row: Record<string, unknown>, kind?: ItemKind): string | null {
     const job = text(row.job);
     return job ? `${who} (${job})` : who;
   }
+  if (kind === 'holiday') {
+    const name = text(row.name);
+    if (!name) return null;
+    const when = dateText(row.date ?? row.holiday_date);
+    return when ? `${name}, ${when}` : name;
+  }
+  if (kind === 'settings') {
+    // Not a name: the settings as they are now, so a save card can show only what it changes.
+    const week = weekWords(row.work_week);
+    const start = timeText(row.work_start_time);
+    const grace = row.late_grace_minutes;
+    if (!week || !start || typeof grace !== 'number') return null;
+    return JSON.stringify({ week: week.key, start, grace });
+  }
   if (kind === 'claim') {
     const who = text(row.employee);
     if (!who) return null;
@@ -96,7 +110,9 @@ export type ItemKind =
   | 'leave'
   | 'time-off'
   | 'claim'
-  | 'overtime';
+  | 'overtime'
+  | 'holiday'
+  | 'settings';
 const KIND_OF_TOOL: Record<string, ItemKind> = {
   getCampaigns: 'campaign',
   createCampaign: 'campaign',
@@ -151,6 +167,9 @@ const KIND_OF_TOOL: Record<string, ItemKind> = {
   listTimeOffRequests: 'time-off',
   listClaims: 'claim',
   listOvertime: 'overtime',
+  listPublicHolidays: 'holiday',
+  saveHoliday: 'holiday',
+  getAttendanceSettings: 'settings',
   listDepartments: 'department',
   createDepartment: 'department',
   updateDepartment: 'department',
@@ -215,6 +234,67 @@ const UNLISTED_LEAVE = 'a leave request that was not in the list above';
 const UNLISTED_TIME_OFF = 'a time-off request that was not in the list above';
 const UNLISTED_CLAIM = 'a claim that was not in the list above';
 const UNLISTED_OVERTIME = 'an overtime record that was not in the list above';
+const UNLISTED_HOLIDAY = 'a public holiday that was not in the list above';
+
+const DAY_NAMES: Record<string, string> = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' };
+const DAY_ORDER = Object.keys(DAY_NAMES);
+
+/** A work week in words ("Mon to Fri", "Mon, Wed"), with a key that is the same however the days were ordered. Null unless every day is a known one. */
+function weekWords(value: unknown): { key: string; words: string } | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  if (!value.every((d) => typeof d === 'string' && DAY_ORDER.includes(d))) return null;
+  const days = DAY_ORDER.filter((d) => value.includes(d));
+  const first = DAY_ORDER.indexOf(days[0]);
+  const run = days.length >= 3 && DAY_ORDER.indexOf(days[days.length - 1]) - first === days.length - 1;
+  const words = run ? `${DAY_NAMES[days[0]]} to ${DAY_NAMES[days[days.length - 1]]}` : days.map((d) => DAY_NAMES[d]).join(', ');
+  return { key: days.join(','), words };
+}
+
+/** "9:00 am" from "09:00" or "09:00:00"; null for anything else. */
+export function clockWords(value: unknown): string | null {
+  const m = typeof value === 'string' ? /^([01]\d|2[0-3]):([0-5]\d)/.exec(value) : null;
+  if (!m) return null;
+  const hour = Number(m[1]);
+  return `${hour % 12 === 0 ? 12 : hour % 12}:${m[2]} ${hour < 12 ? 'am' : 'pm'}`;
+}
+
+const minutesWord = (n: number) => `${n} ${n === 1 ? 'minute' : 'minutes'}`;
+
+const STATUS_WORDS: Record<string, string> = { present: 'present', late: 'late', absent: 'absent', on_leave: 'on leave' };
+
+/** The settings a save card compares with, from an earlier getAttendanceSettings result; null when it is not in the conversation. */
+function settingsBefore(find: NameFinder): { week: string; start: string; grace: number } | null {
+  const label = find('attendance-settings', 'settings');
+  if (!label) return null;
+  try {
+    const parsed = JSON.parse(label) as { week?: unknown; start?: unknown; grace?: unknown };
+    return typeof parsed.week === 'string' && typeof parsed.start === 'string' && typeof parsed.grace === 'number'
+      ? { week: parsed.week, start: parsed.start, grace: parsed.grace }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** "Change the work start time to 8:30 am, with 10 minutes' grace?": only what differs from the earlier lookup, else all three. */
+function settingsTitle(i: Record<string, unknown>, find: NameFinder): string {
+  const week = weekWords(i.work_week);
+  const start = timeText(i.work_start_time);
+  const grace = typeof i.late_grace_minutes === 'number' && Number.isInteger(i.late_grace_minutes) ? i.late_grace_minutes : null;
+  const before = settingsBefore(find);
+  const weekChanged = week !== null && (!before || before.week !== week.key);
+  const startChanged = start !== null && (!before || before.start !== start);
+  const graceChanged = grace !== null && (!before || before.grace !== grace);
+  const parts: string[] = [];
+  if (startChanged) {
+    const graceWords = graceChanged ? `, with ${grace === 1 ? "1 minute's" : `${grace} minutes'`} grace` : '';
+    parts.push(`the work start time to ${clockWords(start)}${graceWords}`);
+  } else if (graceChanged && grace !== null) {
+    parts.push(`the grace period to ${minutesWord(grace)}`);
+  }
+  if (weekChanged && week) parts.push(`the work week to ${week.words}`);
+  return parts.length > 0 ? `Change ${parts.join(' and ')}?` : 'Keep the attendance settings as they are?';
+}
 
 /** How a claim's category reads inside a sentence: "RM 85.00 travel claim". */
 const CLAIM_WORDS: Record<string, string> = {
@@ -459,6 +539,32 @@ export function approvalTitle(
     }
     case 'cancelOvertime': return `Cancel ${find(i.id, 'overtime') ?? UNLISTED_OVERTIME}?`;
     case 'decideOvertime': return `${i.approve === true ? 'Approve' : 'Reject'} ${find(i.id, 'overtime') ?? UNLISTED_OVERTIME}?`;
+    case 'clockIn': return 'Clock in now?';
+    case 'clockOut': return 'Clock out now?';
+    case 'correctAttendance': {
+      const who = find(i.employee_id, 'employee');
+      const when = dayRangeText(i.work_date, i.work_date);
+      const status = typeof i.status === 'string' ? STATUS_WORDS[i.status] : undefined;
+      // Times belong to a worked day only: an absence or a day of leave takes none.
+      const worked = i.status === 'present' || i.status === 'late';
+      const from = worked ? clockWords(i.clock_in) : null;
+      const to = worked ? clockWords(i.clock_out) : null;
+      const times = from && to ? `, ${from} to ${to}` : from ? `, from ${from}` : '';
+      return `Correct ${who ? `${who}'s` : "this employee's"} attendance${when ? ` on ${when}` : ''} to ${status ?? 'a new status'}${times}?`;
+    }
+    case 'saveHoliday': {
+      const name = text(i.name) ?? '';
+      const when = dateText(i.holiday_date);
+      const what = `${name}${when ? `, ${when}` : ''}`;
+      if (i.id === undefined || i.id === null) return `Add public holiday: ${what}?`;
+      const old = find(i.id, 'holiday');
+      return `Change ${old ? `public holiday ${old}` : UNLISTED_HOLIDAY} to ${what}?`;
+    }
+    case 'removeHoliday': {
+      const old = find(i.id, 'holiday');
+      return `Remove ${old ? `public holiday: ${old}` : UNLISTED_HOLIDAY}?`;
+    }
+    case 'saveAttendanceSettings': return settingsTitle(i, find);
     case 'setLeaveEntitlement': {
       const who = find(i.employee_id, 'employee');
       const days =
@@ -634,6 +740,15 @@ export function approvalDetail(toolName: string, input?: unknown, receipt?: Rece
     // it is written by the model and will be saved as the decision note.
     const note = i.approve === false ? text(i.note) : null;
     return note ? `Note: “${note}”` : null;
+  }
+  if (toolName === 'correctAttendance') {
+    // The note is saved on the day under the person's name: quoted and labelled, it is what was typed.
+    const note = text(i.note);
+    return note ? `Note: “${note}”` : null;
+  }
+  if (toolName === 'saveAttendanceSettings') return 'Applies from the next clock-in.';
+  if (toolName === 'removeHoliday' || (toolName === 'saveHoliday' && i.id != null)) {
+    return 'Leave and overtime already recorded are not changed.';
   }
   if (toolName === 'applyLeave' || toolName === 'applyTimeOff') {
     // What will be saved under the person's name.

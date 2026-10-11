@@ -54,8 +54,11 @@ export async function POST(request: Request) {
     });
   }
   // Change tools: an owner or admin holds all of them (`hr`); a member linked to an employee record, outside the
-  // demo, holds leave, time-off, claim and overtime tools for that employee alone (`self`), whatever their role. The member's
+  // demo, holds leave, time-off, claim, overtime and clock tools for that employee alone (`self`), whatever their role. The member's
   // employee id comes from the viewer, never from the request. The database enforces the same rules. Each change needs approval.
+  // The clock tools (clock in, clock out, "have I clocked in?") go to anyone with a linked employee, an owner or admin
+  // included: `write.employeeId` is the viewer's own record for both tiers, and null for an unlinked owner or admin,
+  // who then gets no clock tool (the tool set decides this, not the route).
   // Nothing is revalidated here, as in the other chat routes: every /people page is rendered per request,
   // and only a server action can refresh the page the person is already looking at.
   let write: PeopleWrite | undefined;
