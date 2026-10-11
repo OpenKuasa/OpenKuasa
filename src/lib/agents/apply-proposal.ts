@@ -59,7 +59,10 @@ export async function runProposalAction(
   let res: Awaited<ReturnType<typeof found.run>>;
   try {
     res = await found.run(ctx, parsed.data);
-  } catch {
+  } catch (e) {
+    // Log for ops (server-side only; this path holds no API keys). The caller keeps the
+    // generic message and never writes the raw error to the user-visible row.
+    console.error('[agent-proposals] apply capability threw', e);
     return { ok: false, error: 'That change could not be applied.' };
   }
   return res.ok ? { ok: true, result: res.data } : { ok: false, error: res.error };

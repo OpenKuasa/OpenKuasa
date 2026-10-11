@@ -451,8 +451,9 @@ export async function applyProposalAction(input: unknown): Promise<{ ok: boolean
       .update({ result: applied.result as never })
       .eq('id', parsed.data.id)
       .eq('org_id', ctx.orgId);
-  } catch {
-    // the apply succeeded; the result column is informational
+  } catch (e) {
+    // the apply succeeded; the result column is informational. Log for ops only.
+    console.error('[agent-proposals] result stamp failed', e);
   }
   for (const path of AGENTS_PATHS) revalidatePath(path);
   return { ok: true };
