@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState, useTransition, type FocusEvent, type RefObject } from 'react';
+import { useRouter } from 'next/navigation';
 import { AlertDialog } from 'radix-ui';
 import { ArrowLeft, MoreHorizontal, Star } from 'lucide-react';
 import {
@@ -66,8 +67,14 @@ const focusLost = () => !document.activeElement || document.activeElement === do
  * One change at a time for one application. `busy` names the change being
  * saved; `error` is the capability's own sentence, or the generic one when the
  * call did not come back. A second press while one is being saved does nothing.
+ *
+ * A refusal also asks the server for the screen again: what was refused is
+ * often a change someone else already made, and without the fresh row this
+ * person would keep pressing a button that can only be refused. The sentence
+ * stays, because a refresh keeps the state of a component that stays mounted.
  */
 function useApplicationChange(application: ApplicationSubject) {
+  const router = useRouter();
   const [pending, start] = useTransition();
   const [busyKey, setBusyKey] = useState<Busy | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -75,9 +82,18 @@ function useApplicationChange(application: ApplicationSubject) {
   const [confirming, setConfirming] = useState<CloseOutcome | null>(null);
   /** True from the press until the answer: `pending` only turns true on the next render. */
   const inFlight = useRef(false);
+  /** True once a reject or a withdrawal was saved: on the board that card is about to go. */
+  const closed = useRef(false);
+
+  /** Shows the sentence and fetches the screen again. Never on success: the action revalidates that itself. */
+  function refused(sentence: string) {
+    setError(sentence);
+    router.refresh();
+  }
 
   function run(key: Busy, send: () => Promise<ActionResult>, onOk?: () => void) {
-    if (inFlight.current) return;
+    // Both: `inFlight` covers the moment before `pending` turns true, `pending` the moment after `inFlight` clears.
+    if (pending || inFlight.current) return;
     inFlight.current = true;
     // Cleared first, so the same refusal twice in a row is announced twice.
     setError(null);
@@ -86,9 +102,9 @@ function useApplicationChange(application: ApplicationSubject) {
       try {
         const result = await send();
         if (result.ok) onOk?.();
-        else setError(result.error);
+        else refused(result.error);
       } catch {
-        setError(FAILED);
+        refused(FAILED);
       } finally {
         inFlight.current = false;
       }
@@ -102,20 +118,29 @@ function useApplicationChange(application: ApplicationSubject) {
     error,
     confirming,
     inFlight,
+    closed,
     move: (stage: ApplicationStage) => run(`move:${stage}`, () => moveApplicationAction({ id, stage })),
-    rate: (rating: number | null) => run(`rate:${rating ?? 'clear'}`, () => rateApplicationAction({ id, rating })),
+    rate: (rating: number | null) => {
+      // The rating it already has: nothing to save, so nothing is sent. Clearing is the Clear rating button.
+      if (rating !== null && rating === application.rating) return;
+      run(`rate:${rating ?? 'clear'}`, () => rateApplicationAction({ id, rating }));
+    },
     reopen: () => run('reopen', () => reopenApplicationAction({ id })),
     /** The confirm button of the dialog. Success closes it; a refusal leaves it open with the reason chosen. */
     close: (outcome: CloseOutcome, reason: RejectReason | null) =>
-      run(`close:${outcome}`, () => closeApplicationAction({ id, outcome, reason }), () => setConfirming(null)),
+      run(`close:${outcome}`, () => closeApplicationAction({ id, outcome, reason }), () => {
+        closed.current = true;
+        setConfirming(null);
+      }),
     askToClose: (outcome: CloseOutcome) => {
-      if (inFlight.current) return;
+      if (pending || inFlight.current) return;
+      closed.current = false;
       setError(null);
       setConfirming(outcome);
     },
     /** Cancel and Escape: nothing is sent and nothing changes. Ignored while a change is being saved. */
     cancelClose: () => {
-      if (inFlight.current) return;
+      if (pending || inFlight.current) return;
       setConfirming(null);
       setError(null);
     },
@@ -296,78 +321,85 @@ export function ApplicationActions({ application, canEdit }: { application: Appl
       onBlur={focusLeft}
       className={cn('flex max-w-prose flex-col gap-3 rounded-md', FOCUS)}
     >
-      {outcome === 'active' ? (
-        <>
-          <div className="flex flex-col gap-2">
-            <p className="text-sm">
+      <div className="flex flex-col gap-2">
+        {/*
+          Where it stands, in one element for both states and always in the page: a move, a rejection,
+          a withdrawal or a reopen changes its text, so a screen reader hears the new state once.
+        */}
+        <p aria-live="polite" aria-atomic="true" className="text-sm">
+          {outcome === 'active' ? (
+            <>
               Stage: <span className="font-semibold">{STAGE_LABEL[stage]}</span>
-            </p>
-            <div className="flex flex-wrap items-center gap-2">
-              {allowedMoves(stage, outcome).map((to) => {
-                const back = stageRank(to) < stageRank(stage);
-                return (
-                  <Button
-                    key={to}
-                    type="button"
-                    variant={back ? 'ghost' : 'outline'}
-                    size="sm"
-                    className={cn(TARGET, WAITING, back && 'text-muted-foreground')}
-                    aria-disabled={waiting}
-                    onClick={() => change.move(to)}
-                  >
-                    {back && <ArrowLeft aria-hidden />}
-                    {busy === `move:${to}` ? 'Moving…' : moveLabel(stage, to)}
-                  </Button>
-                );
-              })}
-            </div>
-          </div>
-          {/* Apart from the moves, under a rule of their own: ending an application is not a stage. */}
-          <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+            </>
+          ) : (
+            <>
+              <span className="font-semibold">{OUTCOME_LABEL[outcome]}</span>
+              {' · '}
+              {closedText(application)}
+            </>
+          )}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          {outcome === 'active' ? (
+            allowedMoves(stage, outcome).map((to) => {
+              const back = stageRank(to) < stageRank(stage);
+              return (
+                <Button
+                  key={to}
+                  type="button"
+                  variant={back ? 'ghost' : 'outline'}
+                  size="sm"
+                  className={cn(TARGET, WAITING, back && 'text-muted-foreground')}
+                  aria-disabled={waiting}
+                  onClick={() => change.move(to)}
+                >
+                  {back && <ArrowLeft aria-hidden />}
+                  {busy === `move:${to}` ? 'Moving…' : moveLabel(stage, to)}
+                </Button>
+              );
+            })
+          ) : (
             <Button
               type="button"
               variant="outline"
               size="sm"
               className={cn(TARGET, WAITING)}
               aria-disabled={waiting}
-              onClick={(event) => {
-                opener.current = event.currentTarget;
-                change.askToClose('withdrawn');
-              }}
+              onClick={() => change.reopen()}
             >
-              Mark withdrawn
+              {busy === 'reopen' ? 'Saving…' : 'Reopen'}
             </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              className={cn(TARGET, WAITING)}
-              aria-disabled={waiting}
-              onClick={(event) => {
-                opener.current = event.currentTarget;
-                change.askToClose('rejected');
-              }}
-            >
-              Reject
-            </Button>
-          </div>
-        </>
-      ) : (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <p className="text-sm">
-            <span className="font-semibold">{OUTCOME_LABEL[outcome]}</span>
-            {' · '}
-            {closedText(application)}
-          </p>
+          )}
+        </div>
+      </div>
+      {/* Apart from the moves, under a rule of their own: ending an application is not a stage. */}
+      {outcome === 'active' && (
+        <div className="flex flex-wrap items-center gap-2 border-t pt-3">
           <Button
             type="button"
             variant="outline"
             size="sm"
             className={cn(TARGET, WAITING)}
             aria-disabled={waiting}
-            onClick={() => change.reopen()}
+            onClick={(event) => {
+              opener.current = event.currentTarget;
+              change.askToClose('withdrawn');
+            }}
           >
-            {busy === 'reopen' ? 'Saving…' : 'Reopen'}
+            Mark withdrawn
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            className={cn(TARGET, WAITING)}
+            aria-disabled={waiting}
+            onClick={(event) => {
+              opener.current = event.currentTarget;
+              change.askToClose('rejected');
+            }}
+          >
+            Reject
           </Button>
         </div>
       )}
@@ -440,8 +472,21 @@ const busyWord = (busy: Busy | null) =>
  * The same choices as a menu, for a card on the Candidates board. The menu
  * button, then (on a line of their own in the card) what is being saved and
  * any refusal. Nothing for a viewer.
+ *
+ * A card that is rejected or withdrawn leaves the board, and its menu button
+ * with it. Focus then goes to the heading of the column it was in
+ * (`columnHeadingId`), so the keyboard is not dropped on the page body.
  */
-export function ApplicationMenu({ application, canEdit }: { application: ApplicationSubject; canEdit: boolean }) {
+export function ApplicationMenu({
+  application,
+  canEdit,
+  columnHeadingId,
+}: {
+  application: ApplicationSubject;
+  canEdit: boolean;
+  /** The id of the heading of the board column this card is drawn in. */
+  columnHeadingId?: string;
+}) {
   const change = useApplicationChange(application);
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -478,7 +523,7 @@ export function ApplicationMenu({ application, canEdit }: { application: Applica
         open={open}
         onOpenChange={(next) => {
           // While a change is being saved the menu stays shut: one change at a time.
-          if (next && change.inFlight.current) return;
+          if (next && (pending || change.inFlight.current)) return;
           setOpen(next);
         }}
       >
@@ -530,7 +575,11 @@ export function ApplicationMenu({ application, canEdit }: { application: Applica
           {/* Radio items: the current rating is the checked one, in words as well as by its tick. */}
           <DropdownMenuRadioGroup
             value={rating === null ? '' : String(rating)}
-            onValueChange={(value) => choose(() => change.rate(Number(value)))()}
+            onValueChange={(value) => {
+              // Choosing the rating it already has sends nothing, so there is no focus to hand on either.
+              if (Number(value) === rating) return;
+              choose(() => change.rate(Number(value)))();
+            }}
           >
             {RATINGS.map((n) => (
               <DropdownMenuRadioItem key={n} value={String(n)} className={item}>
@@ -578,7 +627,15 @@ export function ApplicationMenu({ application, canEdit }: { application: Applica
         </p>
       )}
 
-      <CloseDialog application={application} change={change} returnFocus={() => trigger.current?.focus()} />
+      <CloseDialog
+        application={application}
+        change={change}
+        returnFocus={() => {
+          // Saved: the card is going (or has gone), so its button is no place to leave focus.
+          const heading = change.closed.current && columnHeadingId ? document.getElementById(columnHeadingId) : null;
+          (heading ?? trigger.current)?.focus();
+        }}
+      />
     </>
   );
 }

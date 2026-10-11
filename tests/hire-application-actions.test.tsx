@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   applications: null as unknown,
   board: null as unknown,
   action: vi.fn(),
+  refresh: vi.fn(),
 }));
 
 // The real file is a server module (cookies, the database). Nothing here runs a handler.
@@ -25,6 +26,8 @@ vi.mock('@/app/(app)/hire/actions', () => ({
   rateApplicationAction: mocks.action,
   viewCvAction: mocks.action,
 }));
+// No app router is mounted in a string render: the controls only need one to ask for a refresh after a refusal.
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: mocks.refresh }) }));
 vi.mock('@/lib/auth/viewer', () => ({ getViewer: async () => mocks.viewer }));
 // The screens' loader reads the session and the database: replaced by the model under test.
 vi.mock('@/screens/hire/parts', () => ({
@@ -67,6 +70,7 @@ const STARS = [1, 2, 3, 4, 5].map((n) => `Rate ${n} out of 5`);
 beforeEach(() => {
   mocks.viewer = { orgId: 'org1', role: 'member', isDemo: false };
   mocks.action.mockReset();
+  mocks.refresh.mockReset();
 });
 
 describe('the controls for one application', () => {
@@ -164,6 +168,21 @@ describe('the controls for one application', () => {
     controls();
     controls({ outcome: 'rejected' });
     expect(mocks.action).not.toHaveBeenCalled();
+    // A refresh is for a refusal only: never for a render.
+    expect(mocks.refresh).not.toHaveBeenCalled();
+  });
+
+  it('states the stage or the outcome in one polite live region, and announces nothing twice', () => {
+    const live = (html: string) => [...html.matchAll(/<p\b[^>]*aria-live="polite"[^>]*>([\s\S]*?)<\/p>/g)].map(([, inner]) => text(inner));
+    // The same element in both states, so a rejection or a reopen changes its text instead of replacing it.
+    expect(live(controls())).toEqual(['Stage: Interview', 'Not rated']);
+    expect(live(controls({ stage: 'screening', outcome: 'rejected', rejectReason: 'experience', rating: 2 })))
+      .toEqual(['Rejected · Not enough experience', 'Rated 2 out of 5']);
+    expect(live(controls({ outcome: 'withdrawn' }))).toEqual(['Withdrawn · No reason given', 'Not rated']);
+    for (const html of [controls(), controls({ outcome: 'rejected' })]) {
+      expect(html.match(/aria-live=/g)).toHaveLength(2);
+      expect(html).not.toContain('aria-live="assertive"');
+    }
   });
 });
 
@@ -281,6 +300,17 @@ describe('the two screens', () => {
     expect(buttons(html)).toContain('Actions for Aina Rahman');
     // The rating is written, not only drawn.
     expect(html).toContain('Rated 4 out of 5');
+  });
+
+  it('Candidates: every column has a heading that script can focus, where focus goes when a card leaves the board', async () => {
+    const html = renderToStaticMarkup(await CandidatesScreen());
+    for (const key of ['applied', 'screening', 'interview', 'offer', 'hired']) {
+      const tag = [...html.matchAll(/<h3\b[^>]*>/g)].map(([t]) => t).find((t) => t.includes(`id="hire-stage-${key}"`));
+      expect(tag, key).toBeDefined();
+      // Not a tab stop: reached by script only.
+      expect(tag).toContain('tabindex="-1"');
+      expect(tag).toMatch(/focus-visible:ring-/);
+    }
   });
 
   it('Candidates: a viewer and the demo workspace get no menu button', async () => {

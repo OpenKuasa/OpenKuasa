@@ -54,6 +54,9 @@ function Stars({ rating }: { rating: number }) {
   );
 }
 
+/** The id of a board column's heading: where focus goes when a card leaves that column for good. */
+const headingId = (stage: string) => `hire-stage-${stage}`;
+
 function CandidateCard({ candidate, canEdit }: { candidate: Candidate; canEdit: boolean }) {
   return (
     <div className="space-y-2 rounded-xl border bg-card p-3 shadow-sm transition-colors hover:border-primary/40">
@@ -78,6 +81,7 @@ function CandidateCard({ candidate, canEdit }: { candidate: Candidate; canEdit: 
             stage: candidate.stage, outcome: candidate.outcome, rating: candidate.rating, rejectReason: candidate.rejectReason,
           }}
           canEdit={canEdit}
+          columnHeadingId={headingId(candidate.stage)}
         />
       </div>
       <div className="flex items-center justify-between gap-2">
@@ -218,7 +222,14 @@ export default async function CandidatesScreen() {
             >
               <div className="mb-2 flex items-center gap-2 px-2 py-1.5">
                 <span className={`size-2 rounded-full ${STAGE_DOT[stage.key]}`} />
-                <span className="text-sm font-semibold">{stage.name}</span>
+                {/* Focusable by script only: a rejected or withdrawn card hands focus here as it leaves. */}
+                <h3
+                  id={headingId(stage.key)}
+                  tabIndex={-1}
+                  className="rounded-sm text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  {stage.name}
+                </h3>
                 <span className="ml-auto flex items-center gap-1.5 rounded-full bg-background px-2 text-xs text-muted-foreground">
                   <Users className="size-3" />
                   {stage.count}
