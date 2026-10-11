@@ -89,43 +89,98 @@ describe('deletionProblem (one agent)', () => {
 
 describe('guardDeletions', () => {
   const approval = { createJob: 'user-approval', deleteApplication: 'user-approval', deleteCandidate: 'user-approval' } as const;
-  const opts = (toolCallId: string, messages: ModelMessage[] = [user('Delete them')]) => ({ toolCallId, messages });
+  const C = '33333333-3333-4333-8333-333333333333';
+  const APP = '77777777-7777-4777-8777-777777777777';
+  /** An earlier turn in which both candidates and one application were listed: where a real id comes from. */
+  const listed: ModelMessage[] = [
+    user('Who is on file?'),
+    called('listCandidates', 'l1', A),
+    answered('listCandidates', 'l1', { total: 2, candidates: [{ id: A, name: 'Aisyah Lim' }, { id: B, name: 'Farid Osman' }] }),
+    called('listApplications', 'l2', APP),
+    answered('listApplications', 'l2', { total: 1, applications: [{ id: APP, candidate: 'Aisyah Lim', job: 'Barista' }] }),
+    { role: 'assistant', content: 'Two candidates and one application.' },
+  ];
+  const opts = (toolCallId: string, turn: ModelMessage[] = [user('Delete them')]) => ({ toolCallId, messages: [...listed, ...turn] });
   type Gate = (input: unknown, options: { toolCallId: string; messages: ModelMessage[] }) => unknown;
+  const NOT_A_CANDIDATE = (id: string) =>
+    `You have not looked up ${id} as a candidate. Never guess an id: use listCandidates ` +
+    'to find the candidate and get its real id, then prepare the change again.';
+  const NOT_AN_APPLICATION = (id: string) =>
+    `You have not looked up ${id} as an application. Never guess an id: use listApplications ` +
+    'to find the application and get its real id, then prepare the change again.';
 
   it('leaves a toolkit with no delete tool, or no approval map, as it was', () => {
     const none = { createJob: 'user-approval' } as const;
     expect(guardDeletions(none)).toBe(none);
     expect(guardDeletions(undefined)).toBeUndefined();
   });
-  it('keeps every other tool on plain user approval, and gives both delete tools the same gate', () => {
+  it('keeps every other tool on plain user approval, and gates both delete tools', () => {
     const guarded = guardDeletions(approval)!;
     expect(guarded.createJob).toBe('user-approval');
     expect(typeof guarded.deleteApplication).toBe('function');
-    expect(guarded.deleteCandidate).toBe(guarded.deleteApplication);
+    expect(typeof guarded.deleteCandidate).toBe('function');
   });
-  it('asks the user about the first deletion of a request and denies every other, whichever tool it is', () => {
+  it('asks the user about the first deletion of a request and denies every other, whichever tool it is', async () => {
     const guarded = guardDeletions(approval)!;
-    const first = (guarded.deleteCandidate as Gate)({ id: A }, opts('c1'));
-    const second = (guarded.deleteCandidate as Gate)({ id: B }, opts('c2'));
-    const third = (guarded.deleteApplication as Gate)({ id: B }, opts('c3'));
+    const first = await (guarded.deleteCandidate as Gate)({ id: A }, opts('c1'));
+    const second = await (guarded.deleteCandidate as Gate)({ id: B }, opts('c2'));
+    const third = await (guarded.deleteApplication as Gate)({ id: APP }, opts('c3'));
     expect(first).toBe('user-approval');
     expect(second).toEqual({ type: 'denied', reason: ONE_DELETION });
     expect(third).toEqual({ type: 'denied', reason: ONE_DELETION });
   });
-  it('starts again for the next request', () => {
-    expect((guardDeletions(approval)!.deleteCandidate as Gate)({ id: A }, opts('c1'))).toBe('user-approval');
-    expect((guardDeletions(approval)!.deleteCandidate as Gate)({ id: B }, opts('c1'))).toBe('user-approval');
+  it('starts again for the next request', async () => {
+    expect(await (guardDeletions(approval)!.deleteCandidate as Gate)({ id: A }, opts('c1'))).toBe('user-approval');
+    expect(await (guardDeletions(approval)!.deleteCandidate as Gate)({ id: B }, opts('c1'))).toBe('user-approval');
   });
-  it('denies a deletion that follows one earlier in the same turn, in a new request', () => {
-    const messages = [user('Delete both'), called('deleteCandidate', 'c1', A)];
-    expect((guardDeletions(approval)!.deleteCandidate as Gate)({ id: B }, opts('c2', messages)))
+  it('denies a deletion that follows one earlier in the same turn, in a new request', async () => {
+    const turn = [user('Delete both'), called('deleteCandidate', 'c1', A)];
+    expect(await (guardDeletions(approval)!.deleteCandidate as Gate)({ id: B }, opts('c2', turn)))
       .toEqual({ type: 'denied', reason: ONE_DELETION });
   });
-  it('denies a deletion whose id came from an ambiguous lookup, and does not count it as the turn\'s one', () => {
+  it('denies a deletion whose id came from an ambiguous lookup, and does not count it as the turn\'s one', async () => {
     const guarded = guardDeletions(approval)!;
-    const asked = [user('Delete the candidate Aisyah'), called('listCandidates', 'c1', A), answered('listCandidates', 'c1', SEVERAL)];
-    expect((guarded.deleteCandidate as Gate)({ id: A }, opts('c2', asked))).toEqual({ type: 'denied', reason: AMBIGUOUS_DELETION });
-    expect((guarded.deleteCandidate as Gate)({ id: '33333333-3333-4333-8333-333333333333' }, opts('c3', asked))).toBe('user-approval');
+    const turn = [user('Delete the candidate Aisyah'), called('listCandidates', 'c1', A), answered('listCandidates', 'c1', SEVERAL)];
+    expect(await (guarded.deleteCandidate as Gate)({ id: A }, opts('c2', turn))).toEqual({ type: 'denied', reason: AMBIGUOUS_DELETION });
+    expect(await (guarded.deleteApplication as Gate)({ id: APP }, opts('c3', turn))).toBe('user-approval');
+  });
+  it('denies an id that no lookup in the conversation returned, in the words that send the model to the lookup', async () => {
+    const guarded = guardDeletions(approval)!;
+    expect(await (guarded.deleteCandidate as Gate)({ id: C }, opts('c1'))).toEqual({ type: 'denied', reason: NOT_A_CANDIDATE(C) });
+    expect(await (guarded.deleteApplication as Gate)({ id: C }, opts('c2'))).toEqual({ type: 'denied', reason: NOT_AN_APPLICATION(C) });
+    expect(await (guarded.deleteCandidate as Gate)({}, opts('c3'))).toEqual({ type: 'denied', reason: NOT_A_CANDIDATE('undefined') });
+    // None of those was the request's one deletion.
+    expect(await (guarded.deleteCandidate as Gate)({ id: A }, opts('c4'))).toBe('user-approval');
+  });
+  it('denies an id that was looked up as the other kind of thing', async () => {
+    const guarded = guardDeletions(approval)!;
+    expect(await (guarded.deleteCandidate as Gate)({ id: APP }, opts('c1'))).toEqual({ type: 'denied', reason: NOT_A_CANDIDATE(APP) });
+    expect(await (guarded.deleteApplication as Gate)({ id: A }, opts('c2'))).toEqual({ type: 'denied', reason: NOT_AN_APPLICATION(A) });
+  });
+  it('denies an id the user typed, or one that only appears in a call and not in a result', async () => {
+    const guarded = guardDeletions(approval)!;
+    const turn = [user(`Delete candidate ${C}`), called('listCandidates', 'c1', C), answered('listCandidates', 'c1', { total: 0, candidates: [] })];
+    expect(await (guarded.deleteCandidate as Gate)({ id: C }, { toolCallId: 'c2', messages: turn })).toEqual({ type: 'denied', reason: NOT_A_CANDIDATE(C) });
+  });
+  it('accepts an id from a listing many turns back, and from a listing in this turn', async () => {
+    const later = [user('And the jobs?'), { role: 'assistant', content: 'Three open.' } as ModelMessage, user('Delete Farid')];
+    expect(await (guardDeletions(approval)!.deleteCandidate as Gate)({ id: B }, opts('c1', later))).toBe('user-approval');
+    const fresh = [user('Delete Aisyah Lim'), called('listCandidates', 'c1', A), answered('listCandidates', 'c1', ONE)];
+    expect(await (guardDeletions(approval)!.deleteCandidate as Gate)({ id: A }, { toolCallId: 'c2', messages: fresh })).toBe('user-approval');
+  });
+  it('the card beside a call denied for a made-up id can still be approved', async () => {
+    // The request that carries the user's answer: the SDK asks about the approved call again, with its denied sibling in the messages.
+    const turn = [
+      user('Delete both'),
+      { role: 'assistant', content: [
+        { type: 'tool-call', toolCallId: 'c1', toolName: 'deleteCandidate', input: { id: A } },
+        { type: 'tool-call', toolCallId: 'c2', toolName: 'deleteCandidate', input: { id: C } },
+      ] } as ModelMessage,
+      { role: 'tool', content: [
+        { type: 'tool-result', toolCallId: 'c2', toolName: 'deleteCandidate', output: { type: 'error-text', value: NOT_A_CANDIDATE(C) } },
+      ] } as ModelMessage,
+    ];
+    expect(await (guardDeletions(approval)!.deleteCandidate as Gate)({ id: A }, opts('c1', turn))).toBe('user-approval');
   });
 });
 

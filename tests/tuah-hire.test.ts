@@ -865,6 +865,15 @@ describe('one agent holding the delete tools', () => {
   const writer = () => ({ ...hire(), write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true } });
   type Part = { type: string; isAutomatic?: boolean; toolCall?: { toolName?: string } };
   const ONE_DELETION = 'One deletion at a time. One is already prepared for approval.';
+  type Message = import('ai').ModelMessage;
+  /** An earlier turn that listed both candidates: an id may only come from a lookup the conversation holds. */
+  const listedBoth = [
+    { role: 'user', content: 'Who is on file?' },
+    { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'l1', toolName: 'listCandidates', input: {} }] },
+    { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'l1', toolName: 'listCandidates', output: { type: 'json', value: { total: 2, candidates: [{ id: A, name: 'Aina Rahman' }, { id: B, name: 'Farid Osman' }] } } }] },
+    { role: 'assistant', content: 'Two candidates.' },
+  ] as Message[];
+  const asked: Message[] = [...listedBoth, { role: 'user', content: 'Delete both candidates' }];
 
   // Tuah without a team holds the hiring tools itself, as Lekir does in its own chat: both go through the same gate.
   // The model here calls deleteCandidate twice in its first step (the script's list), as the worker would.
@@ -878,10 +887,7 @@ describe('one agent holding the delete tools', () => {
     ]];
     let steps: { content: Part[] }[] = [];
     try {
-      const result = runTuah(
-        [{ role: 'user' as const, content: 'Delete both candidates' }],
-        reach(), undefined, undefined, null, null, null, writer(),
-      );
+      const result = runTuah(asked, reach(), undefined, undefined, null, null, null, writer());
       await result.consumeStream();
       steps = (await result.steps) as unknown as { content: Part[] }[];
     } finally {
@@ -896,7 +902,6 @@ describe('one agent holding the delete tools', () => {
 
   // The rest drive the SDK through the whole exchange: the request that shows the card, then the one the browser
   // sends with the user's answer. The SDK asks the gate about an approved call a second time in that later request.
-  type Message = import('ai').ModelMessage;
   type Run = { cards: { approvalId: string; toolCall: { toolName: string; input: unknown } }[]; denials: (string | undefined)[]; messages: Message[] };
   type Call = { tool: string; input: unknown };
   /**
@@ -932,7 +937,6 @@ describe('one agent holding the delete tools', () => {
     { tool: 'deleteCandidate', input: { id: A } },
     { tool: 'deleteCandidate', input: { id: B } },
   ];
-  const asked: Message[] = [{ role: 'user', content: 'Delete both candidates' }];
   const removed = { ok: true, data: { id: A, name: 'Aina Rahman', job: null, applications: 0, interviews: 0, cv_files: 0, message: 'Deleted Aina Rahman.' } };
 
   it.each(['tuah', 'lekir'] as const)('%s: the second of two deletions is denied with the reason, and never becomes a card', async (agent) => {
@@ -983,6 +987,26 @@ describe('one agent holding the delete tools', () => {
     ]);
     expect(run.cards.map((c) => c.toolCall.toolName)).toEqual(['updateCandidate', 'deleteCandidate', 'updateCandidate']);
     expect(run.denials).toEqual([]);
+  });
+  it.each(['tuah', 'lekir'] as const)('%s: an id that no lookup in the conversation returned gets no card, and the model is sent to the lookup', async (agent) => {
+    candidateDeleted.mockReset();
+    const run = await request([{ role: 'user', content: `Delete candidate ${A}` }], [{ tool: 'deleteCandidate', input: { id: A } }], agent);
+    expect(run.cards).toEqual([]);
+    expect(run.denials).toEqual([
+      `You have not looked up ${A} as a candidate. Never guess an id: use listCandidates ` +
+        'to find the candidate and get its real id, then prepare the change again.',
+    ]);
+    expect(candidateDeleted).not.toHaveBeenCalled();
+  });
+  it('a card beside a call denied for a made-up id can still be approved', async () => {
+    candidateDeleted.mockReset();
+    candidateDeleted.mockResolvedValue(removed);
+    const MADE_UP = '99999999-9999-4999-8999-999999999999';
+    const first = await request(asked, [{ tool: 'deleteCandidate', input: { id: A } }, { tool: 'deleteCandidate', input: { id: MADE_UP } }]);
+    expect(first.cards).toHaveLength(1);
+    await request([...first.messages, answer(first.cards[0].approvalId, true)], []);
+    expect(candidateDeleted).toHaveBeenCalledTimes(1);
+    expect(candidateDeleted.mock.calls[0][1]).toEqual({ id: A });
   });
   const AMBIGUOUS =
     'More than one match was found for that name, so no deletion was prepared. Stop here: say who matches and ask the user which one they mean. ' +

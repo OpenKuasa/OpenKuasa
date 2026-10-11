@@ -8,6 +8,7 @@
  */
 import type { ModelMessage } from 'ai';
 import { isHeldCvMessage } from '@/lib/ai/hire-tools';
+import { nameIn } from '@/lib/chat/change-titles';
 
 export const HIRE_DELETE_TOOL_NAMES = ['deleteApplication', 'deleteCandidate'] as const;
 
@@ -16,6 +17,30 @@ export const AMBIGUOUS_DELETION =
   // No "look it up again": a later lookup cannot clear this in the same turn, and a model told to try would loop.
   'More than one match was found for that name, so no deletion was prepared. Stop here: say who matches and ask the user which one they mean. ' +
   'Once the user has said who, they can ask for the deletion again.';
+
+/** What each delete tool removes. */
+export type DeletionKind = 'application' | 'candidate';
+export const kindOfDeletion = (tool: string): DeletionKind => (tool === 'deleteApplication' ? 'application' : 'candidate');
+
+/** The refusal for an id that no lookup returned as this kind of thing. It tells the model which lookup to use. */
+export function notLookedUp(kind: DeletionKind, id: unknown): string {
+  return kind === 'application'
+    ? `You have not looked up ${String(id)} as an application. Never guess an id: use listApplications ` +
+        'to find the application and get its real id, then prepare the change again.'
+    : `You have not looked up ${String(id)} as a candidate. Never guess an id: use listCandidates ` +
+        'to find the candidate and get its real id, then prepare the change again.';
+}
+
+/**
+ * True for a reason one of the checks in this file gave. A call denied with one
+ * never became a card. Some reasons carry a name or an id, so they are known by
+ * how they begin; a reason kept with a stored chat is cut at 500 characters,
+ * which leaves every beginning whole.
+ */
+const GATE_REASON_STARTS = ['One deletion at a time.', 'More than one match was found', 'You have not looked up '];
+export function isGateReason(reason: unknown): boolean {
+  return typeof reason === 'string' && GATE_REASON_STARTS.some((start) => reason.startsWith(start));
+}
 
 const isDeletion = (name: unknown): boolean =>
   typeof name === 'string' && (HIRE_DELETE_TOOL_NAMES as readonly string[]).includes(name);
@@ -73,7 +98,7 @@ function deniedHere(turn: readonly ModelMessage[]): Set<unknown> {
       const output = part.output as { type?: unknown; reason?: unknown; value?: unknown } | null | undefined;
       const reason =
         output?.type === 'execution-denied' ? output.reason : output?.type === 'error-text' ? output.value : undefined;
-      if (reason === ONE_DELETION || reason === AMBIGUOUS_DELETION) ids.add(part.toolCallId);
+      if (isGateReason(reason)) ids.add(part.toolCallId);
     }
   }
   return ids;
@@ -110,6 +135,26 @@ export function deletionProblem(
   return ambiguousLookup(lookups, call.id) ? AMBIGUOUS_DELETION : null;
 }
 
+/**
+ * True when a lookup anywhere in the conversation returned this id as this
+ * kind of thing. The whole conversation, not the turn: "delete the one you
+ * listed" must work. A real id comes only from a lookup's result, so one typed
+ * by the user, made up, or seen only as another kind of row does not pass. A
+ * chat opened again whose listing was too long to keep needs a new lookup.
+ */
+export function lookedUp(messages: readonly ModelMessage[], kind: DeletionKind, id: unknown): boolean {
+  if (typeof id !== 'string' || !id) return false;
+  const results = messages
+    .filter((message) => message.role === 'tool')
+    .flatMap(partsOf)
+    .filter((part) => part.type === 'tool-result' && typeof part.toolName === 'string')
+    .map((part) => {
+      const output = part.output as { type?: unknown; value?: unknown } | null | undefined;
+      return { tool: part.toolName as string, output: output?.type === 'json' ? output.value : null };
+    });
+  return nameIn(results)(id, kind) !== null;
+}
+
 type Decision = 'user-approval' | { type: 'denied'; reason: string };
 /** The approval function both delete tools share (the SDK's per-tool approval function). */
 export type DeletionGate = (input: unknown, options: { toolCallId: string; messages: ModelMessage[] }) => Decision;
@@ -133,12 +178,17 @@ export function guardDeletions(
   const names = HIRE_DELETE_TOOL_NAMES.filter((name) => name in approval);
   if (names.length === 0) return approval;
   let asked = 0;
-  const gate: DeletionGate = (input, { toolCallId, messages }) => {
+  // One gate per tool, because the SDK does not say which tool it is asking about; one count between them.
+  const gateFor = (tool: string): DeletionGate => (input, { toolCallId, messages }) => {
     const id = (input as { id?: unknown } | null)?.id;
-    const problem = asked > 0 ? ONE_DELETION : deletionProblem(messages, { toolCallId, id });
+    const kind = kindOfDeletion(tool);
+    // In this order: one a turn, then an id that was really looked up, then a lookup that was not ambiguous.
+    const inTurn = asked > 0 ? ONE_DELETION : deletionProblem(messages, { toolCallId, id });
+    const problem =
+      inTurn === ONE_DELETION ? inTurn : ((lookedUp(messages, kind, id) ? null : notLookedUp(kind, id)) ?? inTurn);
     if (problem) return { type: 'denied', reason: problem };
     asked += 1;
     return 'user-approval';
   };
-  return { ...approval, ...Object.fromEntries(names.map((name) => [name, gate])) };
+  return { ...approval, ...Object.fromEntries(names.map((name) => [name, gateFor(name)])) };
 }

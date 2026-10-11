@@ -21,7 +21,13 @@ import {
 import { z } from 'zod';
 import { subAgentSystem } from '@/lib/ai/agents/prompts';
 import { prepareCvStep } from '@/lib/ai/hire-tools';
-import { AMBIGUOUS_DELETION, HIRE_DELETE_TOOL_NAMES, ambiguousLookup, oneDeletionRefusal } from '@/lib/ai/hire-deletions';
+import {
+  AMBIGUOUS_DELETION,
+  HIRE_DELETE_TOOL_NAMES,
+  ambiguousLookup,
+  notLookedUp,
+  oneDeletionRefusal,
+} from '@/lib/ai/hire-deletions';
 import type { ProductToolkit } from '@/lib/ai/products';
 import { logModelCall, logModelError, modelErrorCode } from '@/lib/ai/call-log';
 import { getModel, pickModelId } from '@/lib/ai/provider';
@@ -164,12 +170,7 @@ function specialistTools(
           const asApplication =
             typeof id === 'string' && (team.names?.[`application:${id}`] || nameIn(results)(id, 'application'));
           if (!asApplication) {
-            return {
-              prepared: false,
-              error:
-                `You have not looked up ${String(id)} as an application. Never guess an id: use listApplications ` +
-                'to find the application and get its real id, then prepare the change again.',
-            };
+            return { prepared: false, error: notLookedUp('application', id) };
           }
         }
         if (name === 'updateCandidate' || name === 'deleteCandidate') {
@@ -177,12 +178,7 @@ function specialistTools(
           const asCandidate =
             typeof id === 'string' && (team.names?.[`candidate:${id}`] || nameIn(results)(id, 'candidate'));
           if (!asCandidate) {
-            return {
-              prepared: false,
-              error:
-                `You have not looked up ${String(id)} as a candidate. Never guess an id: use listCandidates ` +
-                'to find the candidate and get its real id, then prepare the change again.',
-            };
+            return { prepared: false, error: notLookedUp('candidate', id) };
           }
         }
         if (name === 'addCandidate') {
