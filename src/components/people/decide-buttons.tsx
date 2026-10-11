@@ -2,6 +2,12 @@
 
 import { useState, useTransition } from 'react';
 import {
+  cancelClaimAction,
+  cancelOvertimeAction,
+  decideClaimAction,
+  decideOvertimeAction,
+} from '@/app/(app)/people/pay-actions';
+import {
   cancelLeaveAction,
   cancelTimeOffAction,
   decideLeaveAction,
@@ -11,11 +17,27 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { CapResult } from '@/lib/people/capabilities';
 
-export type DecideKind = 'leave' | 'time_off';
+export type DecideKind = 'leave' | 'time_off' | 'claim' | 'overtime';
+
+type Decide = (input: { id: string; approve: boolean; note: string | null }) => Promise<CapResult<unknown>>;
+type Cancel = (input: { id: string }) => Promise<CapResult<unknown>>;
+
+const DECIDE: Record<DecideKind, Decide> = {
+  leave: decideLeaveAction,
+  time_off: decideTimeOffAction,
+  claim: decideClaimAction,
+  overtime: decideOvertimeAction,
+};
+const CANCEL: Record<DecideKind, Cancel> = {
+  leave: cancelLeaveAction,
+  time_off: cancelTimeOffAction,
+  claim: cancelClaimAction,
+  overtime: cancelOvertimeAction,
+};
 
 /**
- * Approve, Reject (with an optional note) and Cancel for one leave or time-off
- * request. Every change is one call to the server action, which the database
+ * Approve, Reject (with an optional note) and Cancel for one leave, time-off,
+ * claim or overtime request. Every change is one call to the server action, which the database
  * checks again. A demo visitor sees the buttons disabled.
  */
 export function DecideButtons({
@@ -59,7 +81,7 @@ export function DecideButtons({
     const trimmed = note.trim();
     const input = { id, approve, note: approve || trimmed === '' ? null : trimmed };
     run(
-      () => (kind === 'leave' ? decideLeaveAction(input) : decideTimeOffAction(input)),
+      () => DECIDE[kind](input),
       () => {
         setRejecting(false);
         setNote('');
@@ -68,7 +90,7 @@ export function DecideButtons({
   };
   const cancel = () => {
     setConfirmingCancel(false);
-    run(() => (kind === 'leave' ? cancelLeaveAction({ id }) : cancelTimeOffAction({ id })));
+    run(() => CANCEL[kind]({ id }));
   };
   const closeNote = () => {
     setRejecting(false);
