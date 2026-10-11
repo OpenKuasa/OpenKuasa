@@ -68,7 +68,7 @@ All in `public`, `security definer`, `set search_path = public`, `execute` grant
 | `hr_decide_claim(request, approve boolean, note)` | Owner or admin | Only a `pending` claim. Sets `approved` or `rejected`, `decided_by`, `decided_at`, and the note on a rejection. |
 | `hr_mark_claim_paid(request, paid_on, reference)` | Owner or admin | Only an `approved` claim (`PAY_NOT_APPROVED`). `paid_on` not after today and not before the claim date. Sets `paid`, `paid_on`, `paid_reference`, `paid_by`. |
 | `hr_unmark_claim_paid(request)` | Owner or admin | Only a `paid` claim (`PAY_NOT_PAID`). Back to `approved`; the three paid columns cleared. |
-| `hr_overtime_preview(employee, work_date, hours)` returns one row | May act for E | `stable`; writes nothing. Returns `day_kind`, `multiplier`, `hourly_rate_cents` (null with no salary on file) and `amount_cents` (null likewise). |
+| `hr_overtime_preview(employee, work_date, hours)` returns one row | May act for E | `stable`; writes nothing. Refuses a bad date or hours (`PAY_BAD_INPUT`) but not an inactive employee. Returns `day_kind`, `multiplier`, `hourly_rate_cents` (null with no salary on file) and `amount_cents` (null likewise). |
 | `hr_submit_overtime(employee, work_date, hours, reason)` returns the record | May act for E | Refuses an inactive employee, hours not above zero, not in halves or above 24, a date after today or before 2000, and a total above 24 hours for that employee on that date across `pending` and `approved` records (`PAY_TOO_MANY_HOURS`). Saves `pending` with the worked-out figures (§4.3) and `requested_by`. |
 | `hr_cancel_overtime(request)` | The linked member: own record while `pending`. Owner or admin: any record not `cancelled`. | Sets `cancelled`. |
 | `hr_decide_overtime(request, approve boolean, note)` | Owner or admin | Only a `pending` record. On approval, if `hourly_rate_cents` is null and the employee now has a salary, works the figures out first. Sets the status, `decided_by`, `decided_at`, and the note on a rejection. |
@@ -80,8 +80,8 @@ As with leave, submit and cancel take the employee's row `for no key update`, an
 `private.hr_overtime_figures(org, employee, work_date, hours)`:
 
 - **Kind of day**, first match: the date is one of the workspace's `hr_public_holidays` → `public_holiday`; its weekday is not in the workspace's `work_week` (Monday to Friday with no settings row) → `rest_day`; otherwise `weekday`.
-- **Multiplier**: `hr_settings.overtime_rates` under that key (`weekday`, `rest_day`, `public_holiday`); the table defaults 1.5, 2.0 and 3.0 when the workspace has no settings row or the key is missing or not a number of at least 1.
-- **Hourly rate**: `round(base_salary_cents / 208.0)` from `hr_employee_private` (26 days of 8 hours). Null when there is no private row or no salary.
+- **Multiplier**: `hr_settings.overtime_rates` under that key (`weekday`, `rest_day`, `public_holiday`); the table defaults 1.5, 2.0 and 3.0 when the workspace has no settings row or the key is missing or not a number of at least 1. It is rounded to one decimal place (the column holds one) and capped at 99.9, and the amount is worked out from the rounded figure.
+- **Hourly rate**: `round(base_salary_cents / 208.0)` from `hr_employee_private` (26 days of 8 hours). Null when there is no private row, no salary, or a salary of 0.
 - **Amount**: `round(hourly_rate_cents × hours × multiplier)`; 0 when the rate is null.
 
 The record stores `day_kind`, `rate_multiplier`, `hourly_rate_cents` and `amount_cents` when it is made. A later change of salary, holiday list or multipliers does not alter it. The one exception is approving a record whose rate is null (§4.2).
@@ -98,7 +98,7 @@ A private bucket, `hr-receipts`: 5 MB a file; JPEG, PNG, WebP, HEIC and PDF only
 
 A restrictive policy requires the second factor for this bucket, as the other buckets have.
 
-- **Path.** `<uploader's user id>/<random uuid>.<ext>`. `hr_submit_claim` checks the first segment is the caller's own id and that the object exists in the bucket. So an owner entering a claim for someone uploads into their own folder, and the employee can still read it through the claim.
+- **Path.** `<uploader's user id>/<random uuid>.<ext>`. `hr_submit_claim` checks the first segment is the caller's own id and that the object exists in the bucket. A file can back one claim only (a unique index on `receipt_path`): attaching it to a second is `PAY_BAD_RECEIPT`, so cancelling one claim can never remove another's receipt. So an owner entering a claim for someone uploads into their own folder, and the employee can still read it through the claim.
 - **Opening.** The app makes a 60-second signed link as the signed-in user; storage's select policy is the check.
 - **Removing.** After `hr_cancel_claim` succeeds, the server action removes the returned path with the service client. If that fails, or no service key is configured, it logs the fact (never the path's owner or the claim) and the cancel still stands; the file is then an unreachable leftover, since no claim points at it.
 - **Unused uploads.** A file uploaded and never attached (the form was abandoned, or submit was refused) stays in the uploader's folder. Nobody but the service client can delete from the bucket, so the form cannot remove it; clearing those out is out of scope.
