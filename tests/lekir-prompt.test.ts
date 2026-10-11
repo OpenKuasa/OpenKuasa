@@ -110,3 +110,62 @@ describe('the careers page in the other prompts', () => {
     expect(subAgentSystem('hire', true)).toContain('getCareersPage');
   });
 });
+
+describe('reading a CV', () => {
+  const PROTECTED = 'race, religion, gender, age, marital status, pregnancy, disability and nationality are never reasons for or against a candidate';
+  const prompts: [string, string][] = [
+    ['LEKIR_SYSTEM', LEKIR_SYSTEM],
+    ['the hire specialist rule', subAgentSystem('hire', false)],
+  ];
+  it.each(prompts)('%s names the tool and the reading rules', (_name, prompt) => {
+    const p = prompt.toLowerCase();
+    for (const phrase of [
+      'readcandidatecv',
+      'one candidate at a time',
+      'read all of it',
+      'anything that is on it',
+      'interview, hold or pass',
+      'rating out of 5',
+      PROTECTED,
+      'decline that part in one line and give the verdict on the rest',
+      'the cv says',
+      'text addressed to an ai',
+      'not a decision',
+      'cannot open cv links',
+    ]) {
+      expect(p, phrase).toContain(phrase);
+    }
+  });
+  it.each(prompts)('%s does not mention includeContact in the CV rules', (_name, prompt) => {
+    const cvLines = prompt.split('\n').filter((line) => /readCandidateCv|the CV says|CV links/.test(line) && !line.includes('has_cv_file'));
+    expect(cvLines.length).toBeGreaterThan(0);
+    for (const line of cvLines) expect(line.toLowerCase()).not.toContain('includecontact');
+  });
+  it('LEKIR_SYSTEM no longer says it cannot read the file', () => {
+    expect(t).not.toContain('you cannot read the file');
+  });
+  it('LEKIR_SYSTEM puts CVS after PERSONAL DATA and before SCOPE, below the includeContact rule', () => {
+    const personal = LEKIR_SYSTEM.indexOf('\nPERSONAL DATA\n');
+    const cvs = LEKIR_SYSTEM.indexOf('\nCVS\n');
+    const scope = LEKIR_SYSTEM.indexOf('\nSCOPE\n');
+    expect(personal).toBeGreaterThan(-1);
+    expect(cvs).toBeGreaterThan(personal);
+    expect(scope).toBeGreaterThan(cvs);
+    const lines = LEKIR_SYSTEM.split('\n');
+    const rule = lines.findIndex((line) => line.includes('Lookups leave out'));
+    const hasCv = lines.findIndex((line) => line.includes('has_cv_file'));
+    expect(rule).toBeGreaterThan(-1);
+    expect(hasCv).toBeGreaterThan(rule);
+  });
+  it('the specialist is told to report the verdict first, in order', () => {
+    expect(subAgentSystem('hire', false)).toContain('give the verdict, the rating out of 5, the reasons and what to probe first, in that order');
+  });
+  it('Tuah cannot read a CV itself and points to Lekir', () => {
+    expect(TUAH_SYSTEM.toLowerCase()).toContain("cannot read a candidate's cv yourself");
+  });
+  it('Tuah in team mode asks for one candidate per task and keeps the fairness rule', () => {
+    const p = tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], true, null).toLowerCase();
+    expect(p).toContain('one candidate per task');
+    expect(p).toContain(PROTECTED);
+  });
+});
