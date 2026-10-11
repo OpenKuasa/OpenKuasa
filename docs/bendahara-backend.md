@@ -23,7 +23,8 @@ the data layer, with unit tests; the client components only draw them.
 | File | Holds |
 |---|---|
 | `purchase-views.ts` | KPI figures, chart data, table filters and CSV rows for Supplier Bills and Payments Out |
-| `sales-views.ts` | KPI figures, chart data, table filters, status words and CSV rows for Invoices and Payments In; what each row's menu offers (`invoiceActions`, `paymentInActions`); which customer the filter is on after a refresh (`customerChoice`) |
+| `sales-views.ts` | KPI figures, chart data, table filters, status words and CSV rows for Invoices and Payments In; what each row's menu offers (`invoiceActions`, `paymentInActions`); which customer the filter is on after a refresh (`customerChoice`); how an invoice's balance is worded, a customer in credit included (`owed`, `inCredit`, `balanceText`) |
+| `sales-followon-views.ts` | KPI figures, chart data, table filters, status words and CSV rows for Quotations, Credit Notes and Refunds |
 | `view-helpers.ts` | What those two share: dates, sums to the sen, the eight-month window of a trend chart, how payment methods are grouped and coloured, and the "This payment also covers …" sentence of a split payment |
 | `document-lines.ts` | What a bill and an invoice share: the line schema, the real-date and SST-rate rules (`isIsoDate`, `roundRate`), and reading a saved line |
 | `bill-math.ts` | Line amounts and bill totals, rounded exactly as the generated columns `amount` and `sst_amount` round them; the SST rate keeps two decimals, as its column does (`roundRate` in `document-lines.ts`) |
@@ -74,9 +75,11 @@ policy.
 | `finance_categories` | Expense and income categories. Every workspace starts with nine. No screen yet. |
 | `finance_sequences` | The next document number per type. |
 | `supplier_bills`, `supplier_bill_lines` | Supplier bills and their lines. A draft has no `bill_no`. |
-| `finance_invoices`, `finance_invoice_lines` | Sales invoices and their lines. A draft has no `invoice_no`. Lines keep the order they were entered in (`position`). |
+| `finance_invoices`, `finance_invoice_lines` | Sales invoices and their lines. A draft has no `invoice_no`. Lines keep the order they were entered in (`position`). `quotation_id` is the quotation an invoice was made from, if any. |
+| `finance_quotations`, `finance_quotation_lines` | Quotations and their lines, shaped like invoices. A draft has no `quotation_no`. |
+| `finance_credit_notes` | A credit against one posted invoice: one amount and a reason, no lines. A draft has no `credit_note_no`. |
 | `finance_transactions` | One row per movement of money: direction, account, date, amount, method, status. |
-| `finance_allocations` | How a movement is split across the documents it pays. Each row names exactly one document: a bill (`bill_id`) or an invoice (`invoice_id`). |
+| `finance_allocations` | How a movement is split across the documents it pays. Each row names exactly one document: a bill (`bill_id`), an invoice (`invoice_id`) or a credit note (`credit_note_id`). `reason` is what a refund is for. |
 
 ## Document numbers
 
@@ -86,6 +89,10 @@ type, so simultaneous callers never get the same number. Types: `invoice`,
 `quotation`, `credit_note`, `bill`, `receipt`, `voucher`. Call it from inside
 the database function that posts a document, so a failed post does not use up a
 number.
+
+A quotation takes its `QT-` number when it is sent and a credit note its `CN-`
+number when it is issued. A refund is money out and takes a `PV-` number when
+it is paid out, from the same counter as a payment to a supplier.
 
 ## Money
 
@@ -105,8 +112,27 @@ same columns as `finance_payments_out` (`invoice_id`, `invoice_no` and
 rows with one `transaction_id`, whose `amount`s add up to
 `transaction_amount`.
 
-A bill takes only money out and an invoice only money in. Money out against an
-invoice (a refund) arrives with the sales follow-ons.
+A bill takes only money out. An invoice takes money in, which pays it, and
+money out, which is a refund. A credit note takes only money out.
+
+A refund is one row with direction `out`, allocated to one invoice or to one
+credit note, with a `reason` on the allocation (`order_cancelled`,
+`damaged_goods`, `wrong_item`, `overpayment`, `other`). It is paid out at once
+(`posted`, numbered `PV-`) or left pending (`scheduled`). A pending refund is
+marked paid by `finance_mark_payment_paid` or deleted; a refund that was paid
+out can only be voided. These are the function, the delete and the update a
+payment to a supplier uses, but `markRefundPaid`, `voidRefund` and
+`deleteRefund` in `refunds.ts` first read the view `finance_refunds` for the
+workspace and the transaction, and refuse with "That refund no longer exists."
+anything it does not show. A payment to a supplier can therefore never be
+marked paid, voided or deleted through them. The view `finance_refunds` has one
+row per refund, with `invoice_id` set whichever way it was recorded and
+`credit_note_id` when it was put against a credit note.
+
+A refund is not on Payments Out: `finance_payments_out` joins each allocation
+to its bill, and a refund has none. `supplier_bill_totals` counts only money
+out allocated to a bill, so a refund is never counted as paid to a supplier.
+`finance_payments_in` shows only money in.
 
 The payment-in form is opened from Payments In, or from "Record payment" on a
 posted invoice's row with that customer chosen and that invoice ticked. It
@@ -138,12 +164,30 @@ any other status has one, and a posted invoice has `posted_at`. A write that
 breaks it is refused with a plain check-constraint error (23514).
 
 The view `finance_invoice_totals` adds the customer's name, `subtotal`, `sst`,
-`total`, `paid` (posted money in allocated to the invoice), `balance` and
-`display_status`: `draft`, `void`, `paid` (the total is above zero and nothing
-is left to pay), `overdue` (posted and past `due_date` by the database's UTC
-date), otherwise `sent`. "Sent" means posted; no email goes out. A part-paid
-invoice stays `sent` or `overdue` with a lower balance. Credit notes and
-refunds will change the balance when they exist.
+`total`, `paid` (posted money in allocated to the invoice), `credited` (its
+issued credit notes), `refunded` (posted refunds, put against the invoice
+itself or against one of its credit notes), `balance` and `display_status`:
+`draft`, `void`, `paid` (the total is above zero and nothing is left to pay),
+`overdue` (posted and past `due_date` by the database's UTC date), otherwise
+`sent`. "Sent" means posted; no email goes out. A part-paid invoice stays
+`sent` or `overdue` with a lower balance.
+
+`balance` is the total, less what was paid, less what was credited, plus what
+was refunded. This view is the one place it is worked out: the guards read
+their figures from it, and the screens read `balance` and never work it out
+again. **A balance below zero means the customer is in credit:** they have
+paid, or been credited, more than the invoice came to. Such an invoice reads
+`paid`. It takes no more money in, and a refund can pay the credit out, which
+brings the balance back to zero.
+
+How a customer in credit shows: on Invoices the Balance cell reads
+"RM 240.00 in credit" (`balanceText`), never a negative amount, and the CSV
+has Credited and Refunded columns beside a Balance that is below zero. The
+payment-in form does not offer the invoice. Total receivable on Invoices and
+Receivable on Customers & Suppliers add up only invoices that are `sent` or
+`overdue`, so a customer's credit on one invoice is not taken off what they
+owe on another. Refunds has a card, "In credit", that adds up every invoice's
+credit, pending refunds included.
 
 `einvoice_status` (`none`, `pending`, `validated`, `rejected`) and
 `einvoice_uuid` hold what a person has noted about the invoice's e-Invois at
@@ -157,6 +201,50 @@ edited, posted or deleted; a posted invoice takes a payment while something is
 still owed, has its e-Invois set, and can be voided; a void invoice offers
 nothing. Voiding an invoice that has payments is offered and refused with the
 reason, as on a paid bill.
+
+## Quotations
+
+A quotation is a `finance_quotations` row with its lines in
+`finance_quotation_lines`, which has the columns of `finance_invoice_lines`.
+`status` is what a person sets: `draft`, `sent`, `accepted` or `declined`.
+"Sent" records that the customer has been given the quotation; nothing is
+emailed. Sending gives it the next `QT-` number and locks its header and
+lines. After that only the customer's answer is recorded (`status`,
+`accepted_at`), and it can be corrected from one answer to the other until an
+invoice is made from the quotation. There is no void: a quotation that is no
+longer wanted is marked declined. The database checks that a draft has no
+number, any other status has one with `sent_at`, and that `accepted_at` is set
+exactly when the status is `accepted`.
+
+The view `finance_quotation_totals` adds the customer's name, `subtotal`,
+`sst`, `total`, `display_status` (`expired` for a sent quotation past
+`valid_until` by the database's UTC date, otherwise the status) and
+`invoice_id` and `invoice_no`: the invoice made from the quotation, if one
+stands. An accepted quotation stays `accepted` after its date; a sent one can
+still be accepted after it expired.
+
+`finance_convert_quotation` makes a draft invoice from an accepted quotation:
+the same customer, notes and lines, dated today, due after the customer's
+payment terms, with `quotation_id` set. A quotation has one invoice at a time
+(a unique index on `finance_invoices`); a void invoice does not count, so a
+quotation whose invoice was voided, or deleted as a draft, can be converted
+again. The invoice is an ordinary draft afterwards. The funnel on the screen
+has three steps, created, sent and accepted: nothing tracks a customer opening
+a quotation.
+
+## Credit notes
+
+A credit note is one `finance_credit_notes` row: one amount against one posted
+invoice, a `reason` (`returns`, `pricing_adjustment`, `overbilling`,
+`goodwill`, `other`), and a `status` of `draft`, `issued` or `void`. Issuing
+gives it the next `CN-` number, and from that moment its amount is taken off
+what the invoice owes. All the issued credit notes of an invoice together
+never exceed the invoice's total. What has been paid does not limit a credit
+note: one issued on a paid invoice leaves the customer in credit, and a refund
+pays that out.
+
+The view `finance_credit_note_totals` adds the invoice's number, the customer
+and `refunded`: posted refunds put against the note itself.
 
 ## Posted is locked
 
@@ -178,8 +266,24 @@ Triggers enforce it, so no caller can get round it:
   allowed on a posted payment.
 - An invoice follows the same rules as a bill: created as a draft, edited
   and deleted only as a draft, posted only once its lines add up to more than
-  zero, voided only when posted and only while no payment that is posted,
-  scheduled or in progress is allocated to it. Its lines are locked with it.
+  zero, voided only when posted and only while no payment or refund that is
+  posted, scheduled or in progress is allocated to it. Its lines are locked
+  with it. An invoice with a credit note that is a draft or issued cannot be
+  voided either.
+- `quotation_id` on an invoice may only name an accepted quotation of the
+  same customer, checked when the tie is made; a draft invoice can be untied.
+- A quotation is created as a draft, edited and deleted only as a draft, and
+  sent only once its lines add up to more than zero. Sent, accepted or
+  declined, nothing on it changes but the answer; once an invoice stands for
+  it, the answer cannot change either.
+- A credit note is created as a draft against a posted invoice, edited and
+  deleted only as a draft, and voided only when issued. It cannot be voided
+  while a refund is allocated to it, or while the refunds on its invoice
+  would no longer fit in the customer's credit without it.
+- A refund needs the customer to be in credit on the invoice and can be no
+  more than that credit, counting refunds that are pending; against a credit
+  note it is also never more than the note. The invoice row is locked while
+  this is checked. It is checked again when a pending refund is paid out.
 - On a posted invoice two columns may still change, `einvoice_status` and
   `einvoice_uuid` (with `updated_at`), and nothing else in the same update.
 - A payment in cannot exceed what is still owed on an invoice. The invoice row
@@ -193,10 +297,10 @@ Triggers enforce it, so no caller can get round it:
   been split across documents, its direction cannot change and its amount
   cannot go below the sum of its split. Otherwise a split could be left larger
   than its payment, or pointed at the wrong kind of document, and then posted.
-- A contact with invoices cannot have Customer unticked, as one with bills
-  cannot have Supplier unticked.
-- Clearing a deleted user from an invoice's `created_by` is allowed whatever
-  the invoice's status.
+- A contact with invoices or quotations cannot have Customer unticked, as one
+  with bills cannot have Supplier unticked.
+- Clearing a deleted user from the `created_by` of an invoice, a quotation or
+  a credit note is allowed whatever its status.
 - Each guard steps aside when the workspace itself is being deleted.
 
 ## Database functions
@@ -212,7 +316,19 @@ All run as the caller, so RLS decides who may write.
 | `finance_save_invoice(target_org, invoice, lines)` | Creates a draft invoice or replaces a draft's header and lines, keeping the lines in the order given. `invoice` has `id` (to change a draft), `customer_id`, `invoice_date`, `due_date`, `notes`. Returns the id. |
 | `finance_post_invoice(target_org, target_invoice)` | Posts a draft and returns its number. |
 | `finance_record_payment_in(target_org, payment, allocations)` | Records money received from one customer, split across that customer's posted invoices, and posts it at once. `payment` has `account_id`, `txn_date`, `method`, `reference`, `notes`; `allocations` is a list of `{ invoice_id, amount }`. The payment's amount is the sum of the allocation amounts, each rounded to the sen first, as each is when stored. Returns the id. |
+| `finance_save_quotation(target_org, quotation, lines)` | Creates a draft quotation or replaces a draft's header and lines, keeping the lines in the order given. `quotation` has `id` (to change a draft), `customer_id`, `quote_date`, `valid_until`, `notes`. Returns the id. |
+| `finance_send_quotation(target_org, target_quotation)` | Marks a draft as sent and returns its number. |
+| `finance_convert_quotation(target_org, target_quotation)` | Makes a draft invoice from an accepted quotation. Returns the invoice's id. |
+| `finance_save_credit_note(target_org, note)` | Creates a draft credit note or replaces a draft. `note` has `id` (to change a draft), `invoice_id`, `credit_date`, `reason`, `amount`, `notes`. Returns the id. |
+| `finance_issue_credit_note(target_org, target_note)` | Issues a draft and returns its number. |
+| `finance_record_refund(target_org, refund)` | Records one refund against one invoice or one credit note. `refund` has `invoice_id` or `credit_note_id`, `account_id`, `txn_date`, `method`, `reason`, `amount`, `reference`, `notes`, and `status`: `posted` (the default) or `scheduled`. Returns the id. |
 | `finance_next_number(target_org, doc)` | The next document number. |
+
+Accepting or declining a quotation, voiding a credit note or a refund, and
+deleting a draft quotation, a draft credit note or a pending refund, are plain
+updates and deletes too. The data layer for all of it is in `quotations.ts`,
+`credit-notes.ts` and `refunds.ts`; no server action calls the write functions
+yet.
 
 Voiding a bill, an invoice or a payment, and deleting a draft bill, a draft
 invoice or a scheduled payment, are plain updates and deletes; the guards
@@ -224,26 +340,36 @@ refreshes the sales screens. A payment in has no edit and no delete.
 ## Error codes
 
 The guards and functions raise these SQLSTATEs. `bills.ts`, `invoices.ts`,
-`money.ts` and `contacts.ts` turn them into sentences; the same code is worded
-for a bill or for an invoice by the file that made the call.
+`money.ts`, `contacts.ts`, `quotations.ts`, `credit-notes.ts` and `refunds.ts`
+turn them into sentences; the same code is worded for a bill, an invoice, a
+quotation, a credit note or a refund by the file that made the call.
 
 | Code | Meaning |
 |---|---|
 | `FIN01` | The bill or invoice is posted or void and cannot be changed or deleted. Also: a bill or an invoice must be created as a draft, a draft cannot be voided (delete it), and only a draft can be posted; the lines of a posted or void bill or invoice are locked with it. On a posted invoice only `einvoice_status` and `einvoice_uuid` may change; changing anything else, alone or with them, is this code. |
-| `FIN02` | The bill or invoice has payments (posted, scheduled or in progress), so it cannot be voided |
+| `FIN02` | The bill or invoice has payments (posted, scheduled or in progress), so it cannot be voided; for an invoice a refund put against it counts as one. Also: a credit note cannot be voided while a refund is allocated to it, or while the refunds on its invoice would not fit in the customer's credit without it |
 | `FIN03` | The allocations add up to more than the payment. Also: a payment that has been split across documents cannot be changed to an amount below the sum of its split (money out or money in, while it is not yet posted) |
-| `FIN04` | A payment can only go against a posted bill or a posted invoice; only money out pays a bill, and only money in pays an invoice. Also: a payment that has been split across documents cannot change direction (money out or money in, while it is not yet posted) |
-| `FIN05` | The amount is more than is still owed on the bill or the invoice, counting payments that are posted, scheduled, draft or pending approval |
-| `FIN06` | No bill was chosen or found, or the bills belong to different suppliers; for money in, no invoice was chosen or found, or the invoices belong to different customers |
+| `FIN04` | A payment can only go against a posted bill or a posted invoice; only money out pays a bill, and only money in pays an invoice. Money out against an invoice is a refund, and is this code unless the customer is in credit on that invoice; a refund against a credit note needs the note to be issued, and money in never goes against a credit note. Also: a payment that has been split across documents cannot change direction (money out or money in, while it is not yet posted); a credit note can only go against a posted invoice; only an accepted quotation becomes an invoice, and an invoice can only be tied to an accepted quotation of the same customer |
+| `FIN05` | The amount is more than is still owed on the bill or the invoice, counting payments that are posted, scheduled, draft or pending approval. For a refund: more than the customer is in credit on the invoice, counting pending refunds, or more than is left of the credit note; also when a pending refund is paid out after that credit has gone. For a credit note: more than the invoice's total less what is already credited |
+| `FIN06` | No bill was chosen or found, or the bills belong to different suppliers; for money in, no invoice was chosen or found, or the invoices belong to different customers; for a refund, it names no document, or an invoice and a credit note at once, or one that is not in the workspace |
 | `FIN07` | The contact has bills, so Supplier cannot be unticked |
-| `FIN08` | The contact has invoices, so Customer cannot be unticked |
+| `FIN08` | The contact has invoices or quotations, so Customer cannot be unticked |
 | `FIN09` | The payment, money out or money in, is posted or void and cannot be changed or deleted, its split cannot be changed, or it is not scheduled and so cannot be marked paid; a payment that was never posted cannot be voided (delete it) |
-| `FIN10` | The bill or invoice has no lines, or its lines total nothing; it cannot be saved without a line or posted without an amount |
-| `FIN11` | The bill, invoice or payment no longer exists. `finance_post_invoice` also answers this to a viewer: it locks the invoice before posting, and a viewer may not, so to them it is not there |
+| `FIN10` | The bill, invoice or quotation has no lines, or its lines total nothing; it cannot be saved without a line, and a bill or an invoice cannot be posted, nor a quotation sent, without an amount |
+| `FIN11` | The bill, invoice, quotation, credit note or payment no longer exists. `finance_post_invoice`, `finance_send_quotation`, `finance_convert_quotation` and `finance_issue_credit_note` also answer this to a viewer: each locks its row first, and a viewer may not, so to them it is not there |
+| `FIN12` | The invoice has a credit note that is a draft or issued, so it cannot be voided. `invoices.ts` words it: "This invoice has credit notes. Void them on Credit Notes, or delete the drafts, before voiding it." |
+| `FIN13` | The quotation already has an invoice that is not void: it cannot be converted again, and its answer can no longer change. `quotations.ts` words it |
 | `42501` | Row-level security refused the write: "You do not have permission to make changes here." |
 | `22003` | A number does not fit its column (quantity × unit price can overflow): "That amount is too large." |
-| `23514` | A check constraint refused the write. The one to know: an invoice's number must match its status (a draft has none, any other status has one, a posted invoice has `posted_at`). Only a direct write can break it; the app never does. Others include the due date before the invoice date, a line's quantity, price or SST rate out of range, and an allocation naming both a bill and an invoice; `invoices.ts` has no sentence for them. One has a sentence: e-Invois set on a draft, which `setEInvoice` words as "e-Invois details can be recorded once the invoice is posted." |
+| `22023` | `finance_record_refund` was given a status other than `posted` or `scheduled`. The app always sends one of the two, so only a direct call reaches it; `refunds.ts` has no sentence for it. |
+| `23514` | A check constraint refused the write. The one to know: an invoice's number must match its status (a draft has none, any other status has one, a posted invoice has `posted_at`); a quotation's and a credit note's number follow the same rule. Only a direct write can break it; the app never does. Others include the due date before the invoice date, a quotation valid until before its date, a line's quantity, price or SST rate out of range, a credit note of nothing, a refund reason outside the five, and an allocation naming more than one document, or none; `invoices.ts` has no sentence for them. One has a sentence: e-Invois set on a draft, which `setEInvoice` words as "e-Invois details can be recorded once the invoice is posted." |
 | `23505` | A unique constraint refused the write. `invoices.ts` words it as "That invoice number is already used.". When a payment is recorded it can only be the same bill or invoice twice on one payment (numbers are taken under a lock), so `recordPaymentOut` and `recordPaymentIn` word it as "Each bill can appear once on a payment." and "Each invoice can appear once on a payment."; the schemas refuse it first, comparing ids without regard to capitals. |
+
+`FIN01` is also raised for a quotation (created as a draft; one that has been
+sent is locked but for its answer, and its lines with it; a draft is not
+accepted or declined) and for a credit note (created as a draft; an issued or
+void one is locked; a draft is deleted, not voided). Their sentences are in
+`quotations.ts` and `credit-notes.ts`.
 
 The sentence for `FIN01` on an invoice is "This invoice has been posted or
 voided, so that can no longer be done.". The row menus offer only what a
@@ -313,7 +439,45 @@ instead."; see Known limits.
   saved together is no particular order. Invoice lines store their `position`.
 - Money in is never scheduled, but `finance_mark_payment_paid` does not check
   the direction: a scheduled movement of money in could only come from writing
-  to the table directly, and marking it paid would give it a `PV-` number.
+  to the table directly, and marking it paid would give it a `PV-` number. For
+  money out the function is used as it is, for a pending refund as much as for
+  a scheduled payment to a supplier: both are payment vouchers. The refund
+  functions do not rely on the missing check: `markRefundPaid`, `voidRefund`
+  and `deleteRefund` read `finance_refunds` first and refuse anything it does
+  not show, so a payment to a supplier is never marked paid, voided or deleted
+  through them.
+- Quotations, Credit Notes and Refunds are read-only so far: search, filters,
+  "View all" and Export, but no forms and no row actions. The data layer for
+  them is in `quotations.ts`, `credit-notes.ts` and `refunds.ts`.
+- A credit note is one amount with a reason. It has no lines and does not say
+  how much of it is SST.
+- A quotation has no void. One that was sent by mistake is marked declined,
+  and then counts as declined in the conversion figure.
+- A customer's credit on one invoice is not taken off what they owe on
+  another, in any total. To use it against another invoice, refund it and
+  record a payment in.
+- Voiding a payment in after its invoice was credited and refunded is allowed:
+  the invoice then shows the customer owing again, the refund included, which
+  is what is true. A refund that was still pending at that moment can no
+  longer be marked paid (`FIN05`); delete it.
+- That second look at a pending refund reads the invoice without locking it. A
+  payment in voided at the very moment a pending refund on the same invoice is
+  marked paid can slip past it; the invoice then shows the customer owing.
+- A refund is to one customer against one invoice or one credit note. One
+  payment out that refunds several invoices is not recorded as one refund.
+- The reason of a refund is one of five words; anything more is in the
+  payment's notes.
+- A void invoice does not hold its quotation: the quotation can be converted
+  again, and the void invoice keeps `quotation_id` as a record of where it
+  came from.
+- Editing the draft invoice made from a quotation can change its customer; the
+  tie to the quotation is checked only when it is made.
+- The demo workspace's quotations, credit notes and refunds were dated from
+  the day they were seeded, so its Sent quotations turn Expired as time passes
+  and its month-to-date figures empty out.
+- The database tests for this stage, `tests/bendahara-followons.test.ts`, run
+  against the hosted database. They create their users and workspaces through
+  `tests/helpers/live-workspaces.ts` and delete them when the file finishes.
 - The demo workspace's invoices were dated from the day they were seeded, so
   its Sent examples turn Overdue as time passes, as its bills do.
 - The checks between a payment and its split read each other without a lock.
