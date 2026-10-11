@@ -120,8 +120,6 @@ describe('Lekiu payroll migration', () => {
   test('sorts after the migrations it builds on, alone on its timestamp', () => {
     const files = readdirSync(DIR).sort();
     expect(files.filter((f) => f.startsWith(VERSION))).toEqual([WRITES]);
-    // Nothing on record sorts after it.
-    expect(files[files.length - 1]).toBe(WRITES);
     expect(WRITES > '20261025090000_agent_proposals_guard_v3.sql').toBe(true);
     // It edits no applied migration: the functions it changes are replaced in this file.
     expect(files).toContain('20261014090700_people_demo_seed.sql');

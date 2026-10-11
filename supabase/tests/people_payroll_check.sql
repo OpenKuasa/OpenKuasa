@@ -1264,7 +1264,8 @@ begin
     or p.epf_cents <> private.hr_payroll_proposal('epf', p.gross_cents)
     or p.socso_cents <> private.hr_payroll_proposal('socso', p.gross_cents)
     or p.eis_cents <> private.hr_payroll_proposal('eis', p.gross_cents)
-    or p.net_cents <= 0 or p.set_by_hr <> '{}');
+    -- Zero is possible: someone who joined on the last day of a month, a rest day, is paid nothing for it.
+    or p.net_cents < 0 or p.set_by_hr <> '{}');
   select count(*) into n2 from public.hr_payslips p where p.org_id = demo;
   if n <> 0 or n2 < 150 then fails := array_append(fails, format('%s of the demo''s %s payslips do not add up', n, n2)); end if;
   -- Lines of every source the demo can have, and every approved record held by one payslip.
