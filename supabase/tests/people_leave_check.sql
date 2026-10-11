@@ -18,12 +18,14 @@ declare
   ma uuid := gen_random_uuid();        -- member linked to employee A
   mb uuid := gen_random_uuid();        -- member linked to employee B
   mu uuid := gen_random_uuid();        -- member with no employee record
+  mv uuid := gen_random_uuid();        -- workspace role 'viewer', linked to employee V
   outsider uuid := gen_random_uuid();  -- owner of another workspace
   dv uuid := gen_random_uuid();        -- demo visitor (viewer)
   da uuid := gen_random_uuid();        -- an admin planted in the demo workspace
   ea uuid;
   eb uuid;
   ei uuid;                             -- inactive employee
+  ev uuid;
   ec uuid := gen_random_uuid();        -- employee added by the admin's own session
   demo_emp uuid := md5('rimba-emp-1')::uuid;
   demo_req uuid;
@@ -32,7 +34,8 @@ declare
   this_year int := extract(year from (now() at time zone 'Asia/Kuala_Lumpur'))::int;
   ra1 uuid; ra2 uuid; rhalf uuid; rover uuid; rpast uuid; rtoday uuid;
   rb1 uuid; rbx uuid; rbadm uuid;
-  ta1 uuid; ta2 uuid; tpast uuid; tb1 uuid; tbadm uuid;
+  ta1 uuid; ta2 uuid; tnew uuid; tpast uuid; tb1 uuid; tbadm uuid;
+  rv uuid; tv uuid; xa uuid; xb uuid;
   stage int;
   who uuid;
   label text;
@@ -59,8 +62,15 @@ declare
     'public.hr_set_leave_entitlement(uuid,text,integer,numeric)'];
   helpers text[] := array[
     'private.hr_leave_days(uuid,date,date,boolean)',
+    'private.hr_leave_days_in_year(uuid,date,date,boolean,integer)',
+    'private.hr_leave_request_days_in_year(uuid,date,date,boolean,numeric,integer)',
+    'private.hr_leave_count(uuid,text,date,date,boolean)',
+    'private.hr_default_leave_days(uuid,text)',
+    'private.hr_leave_may_act(uuid)',
     'private.hr_ensure_leave_balances(uuid,integer,uuid)',
-    'private.hr_ensure_leave_balances_all()'];
+    'private.hr_ensure_leave_balances_all()',
+    'private.hr_recount_leave_used(uuid,text)',
+    'private.hr_employee_leave_balances()'];
   leave_tables text[] := array['hr_leave_requests','hr_leave_balances','hr_time_off_requests'];
 begin
   begin  -- one sub-block, so a step that stops the script is reported, not lost
@@ -93,6 +103,17 @@ begin
       fails := array_append(fails, format('%s can be called directly', sig));
     end if;
   end loop;
+  -- And any other hr_ helper in the private schema, listed above or not.
+  for rec in
+    select p.oid::regprocedure::text as sig from pg_proc p
+    join pg_namespace ns on ns.oid = p.pronamespace
+    where ns.nspname = 'private' and p.proname like 'hr\_%'
+  loop
+    if has_function_privilege('authenticated', rec.sig, 'execute') or has_function_privilege('anon', rec.sig, 'execute')
+       or has_function_privilege('public', rec.sig, 'execute') then
+      fails := array_append(fails, format('%s can be called directly', rec.sig));
+    end if;
+  end loop;
   foreach t in array leave_tables loop
     if has_table_privilege('authenticated', 'public.' || t, 'INSERT, UPDATE, DELETE, TRUNCATE')
        or has_any_column_privilege('authenticated', 'public.' || t, 'INSERT, UPDATE')
@@ -108,11 +129,11 @@ begin
     email_confirmed_at, created_at, updated_at, raw_app_meta_data, raw_user_meta_data, is_anonymous)
   select u.id, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
     u.id || '@leave-check.openkuasa-test.dev', '', now(), now(), now(), '{}'::jsonb, '{}'::jsonb, false
-  from unnest(array[admin_id, ma, mb, mu, outsider, dv, da]) as u(id);
+  from unnest(array[admin_id, ma, mb, mu, mv, outsider, dv, da]) as u(id);
 
   insert into public.orgs (id, name) values (org, 'Leave Check Sdn Bhd'), (other_org, 'Leave Other Sdn Bhd');
   insert into public.org_members (org_id, user_id, role)
-  values (org, admin_id, 'admin'), (org, ma, 'member'), (org, mb, 'member'), (org, mu, 'member'),
+  values (org, admin_id, 'admin'), (org, ma, 'member'), (org, mb, 'member'), (org, mu, 'member'), (org, mv, 'viewer'),
          (other_org, outsider, 'owner'), (demo, dv, 'viewer'), (demo, da, 'admin');
 
   -- No settings row yet: adding an employee must still work, on the table defaults.
@@ -122,8 +143,10 @@ begin
   values (org, 'B', 'Member B', mb || '@leave-check.openkuasa-test.dev') returning id into eb;
   insert into public.hr_employees (org_id, employee_no, name, status)
   values (org, 'I', 'Inactive One', 'inactive') returning id into ei;
-  select count(*) into n from public.hr_employees where id in (ea, eb) and user_id in (ma, mb);
-  if n <> 2 then fails := array_append(fails, 'the two members were not linked to their employee records'); end if;
+  insert into public.hr_employees (org_id, employee_no, name, work_email)
+  values (org, 'V', 'Viewer V', mv || '@leave-check.openkuasa-test.dev') returning id into ev;
+  select count(*) into n from public.hr_employees where id in (ea, eb, ev) and user_id in (ma, mb, mv);
+  if n <> 3 then fails := array_append(fails, 'the members were not linked to their employee records'); end if;
 
   select count(*), count(*) filter (where (leave_type, entitled_days) in (('annual', 14), ('medical', 14), ('emergency', 3)) and used_days = 0)
   into n, n2 from public.hr_leave_balances where employee_id = ea and year = this_year;
@@ -237,6 +260,12 @@ begin
         (1, mb, 'member B applies for own leave on a day A is also away', format('select public.hr_apply_leave(%L, ''annual'', ''2030-03-01'', ''2030-03-01'', false, null)', eb), null),
         (1, mb, 'member B applies across New Year', format('select public.hr_apply_leave(%L, ''annual'', ''2030-12-30'', ''2031-01-04'', false, null)', eb), null),
         (1, mb, 'member B requests own time-off at the hours A is away', format('select public.hr_apply_time_off(%L, ''2030-03-13'', ''09:00'', ''11:00'', null)', eb), null),
+        (1, mv, 'a linked viewer applies for own leave', format('select public.hr_apply_leave(%L, ''annual'', ''2030-09-02'', ''2030-09-03'', false, null)', ev), null),
+        (1, mv, 'a linked viewer previews own leave', format('select public.hr_leave_preview(%L, ''annual'', ''2030-09-09'', ''2030-09-10'', false)', ev), null),
+        (1, mv, 'a linked viewer requests own time-off', format('select public.hr_apply_time_off(%L, ''2030-09-04'', ''09:00'', ''10:00'', null)', ev), null),
+        (1, mv, 'a linked viewer applies for member A', format('select public.hr_apply_leave(%L, ''annual'', ''2030-06-03'', ''2030-06-04'', false, null)', ea), 'LEAVE_NOT_ALLOWED'),
+        (1, mv, 'a linked viewer requests time-off for member A', format('select public.hr_apply_time_off(%L, ''2030-06-03'', ''09:00'', ''10:00'', null)', ea), 'LEAVE_NOT_ALLOWED'),
+        (1, mv, 'a linked viewer sets own entitlement', format('select public.hr_set_leave_entitlement(%L, ''annual'', 2030, 99)', ev), 'LEAVE_NOT_ALLOWED'),
         (1, mu, 'an unlinked member applies for member A', format('select public.hr_apply_leave(%L, ''annual'', ''2030-06-03'', ''2030-06-04'', false, null)', ea), 'LEAVE_NOT_ALLOWED'),
         (1, mu, 'an unlinked member previews member A''s leave', format('select public.hr_leave_preview(%L, ''annual'', ''2030-06-03'', ''2030-06-04'', false)', ea), 'LEAVE_NOT_ALLOWED'),
         (1, mu, 'an unlinked member requests time-off for member A', format('select public.hr_apply_time_off(%L, ''2030-06-03'', ''09:00'', ''10:00'', null)', ea), 'LEAVE_NOT_ALLOWED'),
@@ -264,6 +293,10 @@ begin
         (1, da, 'a demo admin cancels a demo request', format('select public.hr_cancel_leave(%L)', demo_req), 'LEAVE_NOT_ALLOWED'),
         (1, da, 'a demo admin decides demo time-off', format('select public.hr_decide_time_off(%L, false, null)', demo_toff), 'LEAVE_NOT_ALLOWED'),
         (1, da, 'a demo admin cancels demo time-off', format('select public.hr_cancel_time_off(%L)', demo_toff), 'LEAVE_NOT_ALLOWED'),
+        (1, dv, 'a demo visitor cancels a demo request', format('select public.hr_cancel_leave(%L)', demo_req), 'LEAVE_NOT_ALLOWED'),
+        (1, dv, 'a demo visitor approves a demo request', format('select public.hr_decide_leave(%L, true, null)', demo_req), 'LEAVE_NOT_ALLOWED'),
+        (1, outsider, 'someone outside the demo cancels a demo request', format('select public.hr_cancel_leave(%L)', demo_req), 'LEAVE_NOT_FOUND'),
+        (1, outsider, 'someone outside the demo approves demo time-off', format('select public.hr_decide_time_off(%L, true, null)', demo_toff), 'LEAVE_NOT_FOUND'),
 
         -- 2: a cancelled request does not block a new one
         (2, ma, 'member A cancels own pending leave', format('select public.hr_cancel_leave(%L)', ra1), null),
@@ -275,20 +308,25 @@ begin
         (3, ma, 'member A approves own leave', format('select public.hr_decide_leave(%L, true, null)', ra2), 'LEAVE_NOT_ALLOWED'),
         (3, ma, 'member A rejects own leave', format('select public.hr_decide_leave(%L, false, null)', ra2), 'LEAVE_NOT_ALLOWED'),
         (3, ma, 'member A approves own time-off', format('select public.hr_decide_time_off(%L, true, null)', ta1), 'LEAVE_NOT_ALLOWED'),
-        (3, ma, 'member A approves member B''s leave', format('select public.hr_decide_leave(%L, true, null)', rb1), 'LEAVE_NOT_ALLOWED'),
-        (3, ma, 'member A cancels member B''s leave', format('select public.hr_cancel_leave(%L)', rb1), 'LEAVE_NOT_ALLOWED'),
-        (3, ma, 'member A cancels member B''s time-off', format('select public.hr_cancel_time_off(%L)', tb1), 'LEAVE_NOT_ALLOWED'),
-        (3, mb, 'member B cancels member A''s leave', format('select public.hr_cancel_leave(%L)', ra2), 'LEAVE_NOT_ALLOWED'),
-        (3, mb, 'member B cancels member A''s time-off', format('select public.hr_cancel_time_off(%L)', ta1), 'LEAVE_NOT_ALLOWED'),
-        (3, mb, 'member B approves member A''s time-off', format('select public.hr_decide_time_off(%L, true, null)', ta1), 'LEAVE_NOT_ALLOWED'),
-        (3, mu, 'an unlinked member cancels member A''s leave', format('select public.hr_cancel_leave(%L)', ra2), 'LEAVE_NOT_ALLOWED'),
-        (3, mu, 'an unlinked member approves member A''s leave', format('select public.hr_decide_leave(%L, true, null)', ra2), 'LEAVE_NOT_ALLOWED'),
-        (3, mu, 'an unlinked member cancels member A''s time-off', format('select public.hr_cancel_time_off(%L)', ta1), 'LEAVE_NOT_ALLOWED'),
-        (3, mu, 'an unlinked member approves member A''s time-off', format('select public.hr_decide_time_off(%L, true, null)', ta1), 'LEAVE_NOT_ALLOWED'),
-        (3, outsider, 'another workspace cancels member A''s leave', format('select public.hr_cancel_leave(%L)', ra2), 'LEAVE_NOT_ALLOWED'),
-        (3, outsider, 'another workspace approves member A''s leave', format('select public.hr_decide_leave(%L, true, null)', ra2), 'LEAVE_NOT_ALLOWED'),
-        (3, outsider, 'another workspace cancels member A''s time-off', format('select public.hr_cancel_time_off(%L)', ta1), 'LEAVE_NOT_ALLOWED'),
-        (3, outsider, 'another workspace approves member A''s time-off', format('select public.hr_decide_time_off(%L, true, null)', ta1), 'LEAVE_NOT_ALLOWED'),
+        (3, ma, 'member A approves member B''s leave', format('select public.hr_decide_leave(%L, true, null)', rb1), 'LEAVE_NOT_FOUND'),
+        (3, ma, 'member A cancels member B''s leave', format('select public.hr_cancel_leave(%L)', rb1), 'LEAVE_NOT_FOUND'),
+        (3, ma, 'member A cancels member B''s time-off', format('select public.hr_cancel_time_off(%L)', tb1), 'LEAVE_NOT_FOUND'),
+        (3, mb, 'member B cancels member A''s leave', format('select public.hr_cancel_leave(%L)', ra2), 'LEAVE_NOT_FOUND'),
+        (3, mb, 'member B cancels member A''s time-off', format('select public.hr_cancel_time_off(%L)', ta1), 'LEAVE_NOT_FOUND'),
+        (3, mb, 'member B approves member A''s time-off', format('select public.hr_decide_time_off(%L, true, null)', ta1), 'LEAVE_NOT_FOUND'),
+        (3, mu, 'an unlinked member cancels member A''s leave', format('select public.hr_cancel_leave(%L)', ra2), 'LEAVE_NOT_FOUND'),
+        (3, mu, 'an unlinked member approves member A''s leave', format('select public.hr_decide_leave(%L, true, null)', ra2), 'LEAVE_NOT_FOUND'),
+        (3, mu, 'an unlinked member cancels member A''s time-off', format('select public.hr_cancel_time_off(%L)', ta1), 'LEAVE_NOT_FOUND'),
+        (3, mu, 'an unlinked member approves member A''s time-off', format('select public.hr_decide_time_off(%L, true, null)', ta1), 'LEAVE_NOT_FOUND'),
+        (3, outsider, 'another workspace cancels member A''s leave', format('select public.hr_cancel_leave(%L)', ra2), 'LEAVE_NOT_FOUND'),
+        (3, outsider, 'another workspace approves member A''s leave', format('select public.hr_decide_leave(%L, true, null)', ra2), 'LEAVE_NOT_FOUND'),
+        (3, outsider, 'another workspace cancels member A''s time-off', format('select public.hr_cancel_time_off(%L)', ta1), 'LEAVE_NOT_FOUND'),
+        (3, outsider, 'another workspace approves member A''s time-off', format('select public.hr_decide_time_off(%L, true, null)', ta1), 'LEAVE_NOT_FOUND'),
+        (3, mv, 'a linked viewer approves own leave', format('select public.hr_decide_leave(%L, true, null)', rv), 'LEAVE_NOT_ALLOWED'),
+        (3, mv, 'a linked viewer approves own time-off', format('select public.hr_decide_time_off(%L, true, null)', tv), 'LEAVE_NOT_ALLOWED'),
+        (3, mv, 'a linked viewer approves member A''s leave', format('select public.hr_decide_leave(%L, true, null)', ra2), 'LEAVE_NOT_FOUND'),
+        (3, mv, 'a linked viewer cancels member A''s leave', format('select public.hr_cancel_leave(%L)', ra2), 'LEAVE_NOT_FOUND'),
+        (3, mv, 'a linked viewer cancels member A''s time-off', format('select public.hr_cancel_time_off(%L)', ta1), 'LEAVE_NOT_FOUND'),
         (3, null, 'a session with no user approves leave', format('select public.hr_decide_leave(%L, true, null)', ra2), 'LEAVE_NOT_ALLOWED'),
         (3, null, 'a session with no user cancels leave', format('select public.hr_cancel_leave(%L)', ra2), 'LEAVE_NOT_ALLOWED'),
         (3, admin_id, 'a decision note over 500 characters', format('select public.hr_decide_leave(%L, false, %L)', rover, long_text), 'LEAVE_BAD_INPUT'),
@@ -322,6 +360,8 @@ begin
         (4, ma, 'member A cancels own leave twice', format('select public.hr_cancel_leave(%L)', ra1), 'LEAVE_NOT_PENDING'),
         (4, ma, 'member A cancels own approved leave in the future', format('select public.hr_cancel_leave(%L)', ra2), null),
         (4, ma, 'member A cancels own approved time-off in the future', format('select public.hr_cancel_time_off(%L)', ta1), null),
+        (4, mv, 'a linked viewer cancels own pending leave', format('select public.hr_cancel_leave(%L)', rv), null),
+        (4, mv, 'a linked viewer cancels own pending time-off', format('select public.hr_cancel_time_off(%L)', tv), null),
         (4, mb, 'member B cancels own rejected time-off', format('select public.hr_cancel_time_off(%L)', tb1), 'LEAVE_NOT_PENDING'),
         (4, mb, 'member B cancels own approved New Year leave', format('select public.hr_cancel_leave(%L)', rbx), null),
 
@@ -342,6 +382,12 @@ begin
         (6, ma, 'member A applies without the second factor', format('select public.hr_apply_leave(%L, ''annual'', ''2030-07-01'', ''2030-07-02'', false, null)', ea), 'LEAVE_NOT_ALLOWED'),
         (6, ma, 'member A previews without the second factor', format('select public.hr_leave_preview(%L, ''annual'', ''2030-07-01'', ''2030-07-02'', false)', ea), 'LEAVE_NOT_ALLOWED'),
         (6, ma, 'member A requests time-off without the second factor', format('select public.hr_apply_time_off(%L, ''2030-07-01'', ''09:00'', ''10:00'', null)', ea), 'LEAVE_NOT_ALLOWED'),
+        (6, ma, 'member A cancels own time-off without the second factor', format('select public.hr_cancel_time_off(%L)', tnew), 'LEAVE_NOT_FOUND'),
+        (6, ma, 'member A cancels own leave without the second factor', format('select public.hr_cancel_leave(%L)', ra2), 'LEAVE_NOT_FOUND'),
+        (6, admin_id, 'the admin approves time-off without the second factor', format('select public.hr_decide_time_off(%L, true, null)', tnew), 'LEAVE_NOT_FOUND'),
+        (6, admin_id, 'the admin cancels time-off without the second factor', format('select public.hr_cancel_time_off(%L)', tnew), 'LEAVE_NOT_FOUND'),
+        (6, admin_id, 'the admin rejects leave without the second factor', format('select public.hr_decide_leave(%L, false, null)', ra2), 'LEAVE_NOT_FOUND'),
+        (6, admin_id, 'the admin cancels leave without the second factor', format('select public.hr_cancel_leave(%L)', ra2), 'LEAVE_NOT_FOUND'),
         (6, admin_id, 'the admin applies without the second factor', format('select public.hr_apply_leave(%L, ''annual'', ''2030-07-01'', ''2030-07-02'', false, null)', eb), 'LEAVE_NOT_ALLOWED'),
         (6, admin_id, 'the admin sets an entitlement without the second factor', format('select public.hr_set_leave_entitlement(%L, ''annual'', 2030, 12)', eb), 'LEAVE_NOT_ALLOWED')
       ) as c(s, who, label, q, want)
@@ -376,11 +422,14 @@ begin
       select id into ta2 from public.hr_time_off_requests where employee_id = ea and start_time = '11:00';
       select id into tpast from public.hr_time_off_requests where employee_id = ea and off_date = today - 1;
       select id into tb1 from public.hr_time_off_requests where employee_id = eb;
+      select id into rv from public.hr_leave_requests where employee_id = ev;
+      select id into tv from public.hr_time_off_requests where employee_id = ev;
+      if rv is null or tv is null then fails := array_append(fails, 'a linked viewer''s own requests were not saved'); end if;
 
       select count(*) into n from public.hr_leave_requests where org_id = org;
-      if n <> 7 then fails := array_append(fails, format('%s leave requests after applying, expected 7', n)); end if;
+      if n <> 8 then fails := array_append(fails, format('%s leave requests after applying, expected 8', n)); end if;
       select count(*) into n from public.hr_time_off_requests where org_id = org;
-      if n <> 4 then fails := array_append(fails, format('%s time-off requests after applying, expected 4', n)); end if;
+      if n <> 5 then fails := array_append(fails, format('%s time-off requests after applying, expected 5', n)); end if;
 
       select count(*) into n from public.hr_leave_requests
       where id = ra1 and org_id = org and days = 3 and status = 'pending' and reason = 'Family trip'
@@ -405,6 +454,11 @@ begin
       if n <> 3 then fails := array_append(fails, format('applying across New Year left member B with %s balance rows for 2031, expected 3', n)); end if;
       select count(*) into n from public.hr_leave_balances where employee_id = ei;
       if n <> 0 then fails := array_append(fails, 'an inactive employee was given balances'); end if;
+      -- Applying makes rows for the person applied for, and for nobody else.
+      select count(*) into n from public.hr_leave_balances where org_id = org and year <> this_year and employee_id not in (ea, eb, ev);
+      if n <> 0 then fails := array_append(fails, format('applying made %s balance rows for employees who did not apply', n)); end if;
+      select count(*) into n from public.hr_leave_balances where org_id = org and year not in (this_year, 2030, 2031);
+      if n <> 0 then fails := array_append(fails, format('applying made %s balance rows for years it did not touch', n)); end if;
 
       -- What comes back, and the admin entering leave for someone.
       perform set_config('request.jwt.claims', json_build_object('sub', admin_id, 'role', 'authenticated', 'aal', 'aal1')::text, true);
@@ -440,6 +494,7 @@ begin
       if ra2 is null then fails := array_append(fails, 'a cancelled request blocked a new one for the same dates'); end if;
       select count(*) into n from public.hr_time_off_requests where employee_id = ea and off_date = '2030-03-13' and status = 'pending';
       if n <> 2 then fails := array_append(fails, 'a cancelled time-off request blocked a new one'); end if;
+      select id into tnew from public.hr_time_off_requests where employee_id = ea and start_time = '11:00' and status = 'pending';
 
     elsif stage = 3 then
       select count(*) into n from public.hr_leave_requests
@@ -478,12 +533,57 @@ begin
          or (r->'years'->0->>'pending')::numeric <> 0 or (r->'years'->0->>'remaining_after')::numeric <> 5.5 then
         fails := array_append(fails, 'the preview does not show the new entitlement and the days used: ' || r::text);
       end if;
-      -- A year nobody has rows for: the row is made for the employee, inactive or not.
+      -- A year nobody has rows for: the row is made for that employee, inactive or not, and nobody else.
       r := public.hr_set_leave_entitlement(ei, 'medical', 2032, 0);
       if (r->>'entitled_days')::numeric <> 0 or (r->>'used_days')::numeric <> 0 then
         fails := array_append(fails, 'setting an entitlement for a new year did not make the row: ' || r::text);
       end if;
+      r := public.hr_set_leave_entitlement(eb, 'medical', 2033, 9);
       reset role;
+      select count(*) filter (where year = 2032), count(*) filter (where year = 2033) into n, n2
+      from public.hr_leave_balances where org_id = org;
+      if n <> 1 or n2 <> 3 then
+        fails := array_append(fails, format('setting an entitlement left %s rows for 2032 and %s for 2033, expected 1 (the inactive employee) and 3 (member B only)', n, n2));
+      end if;
+
+      -- A request keeps the days counted when it was made. Two holidays are
+      -- now added inside leave already approved: 4 Mar 2030 inside member A's
+      -- 3 days, and 31 Dec 2030 inside member B's New Year leave (saved as 5,
+      -- split 2 + 3). Then other leave is approved and cancelled for each.
+      insert into public.hr_public_holidays (org_id, name, holiday_date)
+      values (org, 'Added Later', date '2030-03-04'), (org, 'Added Later Too', date '2030-12-31');
+      perform set_config('request.jwt.claims', json_build_object('sub', admin_id, 'role', 'authenticated', 'aal', 'aal1')::text, true);
+      set local role authenticated;
+      xa := (public.hr_apply_leave(ea, 'annual', date '2030-03-26', date '2030-03-27', false, null)->>'id')::uuid;
+      xb := (public.hr_apply_leave(eb, 'annual', date '2030-06-10', date '2030-06-10', false, null)->>'id')::uuid;
+      perform public.hr_decide_leave(xa, true, null);
+      perform public.hr_decide_leave(xb, true, null);
+      reset role;
+      select used_days into d from public.hr_leave_balances where employee_id = ea and leave_type = 'annual' and year = 2030;
+      if d is distinct from 5 then
+        fails := array_append(fails, format('after a holiday was added inside approved leave and more leave approved, member A has used %s days, expected the stored 3 + 2', d));
+      end if;
+      -- The New Year request still costs 5 in all; the day the new holiday took from 2030 moves to 2031.
+      select sum(used_days), max(used_days) filter (where year = 2030), max(used_days) filter (where year = 2031) into d, n, n2
+      from public.hr_leave_balances where employee_id = eb and leave_type = 'annual';
+      if d is distinct from 6 or n <> 2 or n2 <> 4 then
+        fails := array_append(fails, format('after a holiday was added inside New Year leave, member B has used %s days (%s in 2030, %s in 2031), expected the stored 5 + 1 as 2 and 4', d, n, n2));
+      end if;
+      perform set_config('request.jwt.claims', json_build_object('sub', admin_id, 'role', 'authenticated', 'aal', 'aal1')::text, true);
+      set local role authenticated;
+      perform public.hr_cancel_leave(xa);
+      perform public.hr_cancel_leave(xb);
+      reset role;
+      select used_days into d from public.hr_leave_balances where employee_id = ea and leave_type = 'annual' and year = 2030;
+      if d is distinct from 3 then
+        fails := array_append(fails, format('after cancelling the other leave, member A has used %s days, expected the stored 3', d));
+      end if;
+      select sum(used_days) into d from public.hr_leave_balances where employee_id = eb and leave_type = 'annual';
+      if d is distinct from 5 then
+        fails := array_append(fails, format('after cancelling the other leave, member B has used %s days, expected the stored 5', d));
+      end if;
+      select count(*) into n from public.hr_leave_requests where id in (ra2, rbx) and days in (3, 5);
+      if n <> 2 then fails := array_append(fails, 'a later holiday changed the days saved on a request'); end if;
 
     elsif stage = 4 then
       select count(*) into n from public.hr_leave_requests where id in (ra2, rbx) and status = 'cancelled' and days in (3, 5);
@@ -505,11 +605,14 @@ begin
       if n <> 0 then fails := array_append(fails, format('%s leave requests the admin could not cancel', n)); end if;
       select count(*) into n from public.hr_time_off_requests where org_id = org and status = 'cancelled';
       -- Everything but the one member A left pending (11:00 to 12:30).
-      if n <> 5 then fails := array_append(fails, format('%s time-off requests cancelled, expected 5', n)); end if;
+      if n <> 6 then fails := array_append(fails, format('%s time-off requests cancelled, expected 6', n)); end if;
       select coalesce(sum(used_days), 0) into d from public.hr_leave_balances where org_id = org;
       if d <> 0 then fails := array_append(fails, format('%s days still used after every request was cancelled', d)); end if;
 
-      insert into auth.mfa_factors (user_id, status) values (ma, 'verified'), (admin_id, 'verified');
+      -- Every column the real auth.mfa_factors requires (none has a default).
+      insert into auth.mfa_factors (id, user_id, factor_type, status, created_at, updated_at)
+      values (gen_random_uuid(), ma, 'totp', 'verified', now(), now()),
+             (gen_random_uuid(), admin_id, 'totp', 'verified', now(), now());
     end if;
   end loop;
 
@@ -559,8 +662,8 @@ begin
   select count(*) into n from public.hr_leave_requests where org_id = org and employee_id <> eb;
   select count(*) into n2 from public.hr_leave_requests where org_id = org and employee_id = eb;
   reset role;
-  if n <> 0 or n2 <> 3 then
-    fails := array_append(fails, format('member B reads %s of a colleague''s requests and %s of their own 3', n, n2));
+  if n <> 0 or n2 <> 4 then
+    fails := array_append(fails, format('member B reads %s of a colleague''s requests and %s of their own 4', n, n2));
   end if;
 
   -- ---- the yearly job, and the demo --------------------------------------

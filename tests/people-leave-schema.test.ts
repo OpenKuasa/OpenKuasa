@@ -140,8 +140,10 @@ describe('Lekiu leave migration', () => {
     }
     for (const helper of [
       'private.hr_leave_days',
+      'private.hr_leave_request_days_in_year',
       'private.hr_ensure_leave_balances',
       'private.hr_ensure_leave_balances_all',
+      'private.hr_recount_leave_used',
     ]) {
       expect(helpers).toContain(helper);
     }
@@ -167,14 +169,43 @@ describe('Lekiu leave migration', () => {
     },
   );
 
-  test.each(['hr_decide_leave', 'hr_decide_time_off', 'hr_set_leave_entitlement'])(
-    '%s is for owners and admins only',
+  test.each(['hr_decide_leave', 'hr_decide_time_off'])('%s is for owners and admins only', (name) => {
+    const { body } = fn(writes(), `public.${name}`);
+    expect(body).toContain('is_admin := private.is_org_admin(req.org_id);');
+    const gate = body.indexOf("if not is_admin then raise exception 'LEAVE_NOT_ALLOWED'; end if;");
+    expect(gate, name).toBeGreaterThan(-1);
+    // Nothing is changed, and no status is revealed, before that gate.
+    expect(body.indexOf('update public.'), name).toBeGreaterThan(gate);
+    expect(body.indexOf('req.status'), name).toBeGreaterThan(gate);
+    expect(body).not.toContain('is_org_writer');
+  });
+
+  test('hr_set_leave_entitlement is for owners and admins only', () => {
+    const { body } = fn(writes(), 'public.hr_set_leave_entitlement');
+    const gate = body.indexOf("if not private.is_org_admin(org) then raise exception 'LEAVE_NOT_ALLOWED'; end if;");
+    expect(gate).toBeGreaterThan(-1);
+    expect(body.indexOf('insert into'), 'writes after the gate').toBeGreaterThan(gate);
+    expect(body).not.toContain('is_own_employee');
+    expect(body).not.toContain('is_org_member');
+    expect(body).not.toContain('is_org_writer');
+  });
+
+  test.each(['hr_cancel_leave', 'hr_cancel_time_off', 'hr_decide_leave', 'hr_decide_time_off'])(
+    '%s tells someone with no business with the request only that it was not found',
     (name) => {
       const { body } = fn(writes(), `public.${name}`);
-      expect(body).toMatch(/if not private\.is_org_admin\((req\.org_id|org)\) then raise exception 'LEAVE_NOT_ALLOWED'; end if;/);
-      expect(body).not.toContain('is_own_employee');
-      expect(body).not.toContain('is_org_member');
-      expect(body).not.toContain('is_org_writer');
+      expect(body).toContain(
+        'if not (is_admin or private.is_own_employee(req.employee_id)\n'
+          + '          or (is_demo and private.is_org_member(req.org_id))) then\n'
+          + "    raise exception 'LEAVE_NOT_FOUND';",
+      );
+      expect(body.match(/raise exception 'LEAVE_NOT_FOUND'/g)).toHaveLength(2);
+      // That answer comes before any other refusal that depends on the request.
+      const hidden = body.lastIndexOf("raise exception 'LEAVE_NOT_FOUND'");
+      for (const later of ["if is_demo then raise exception 'LEAVE_NOT_ALLOWED'", 'req.status', 'LEAVE_BAD_INPUT']) {
+        const at = body.indexOf(later);
+        if (at > -1) expect(at, `${name}: ${later}`).toBeGreaterThan(hidden);
+      }
     },
   );
 
@@ -187,9 +218,10 @@ describe('Lekiu leave migration', () => {
       expect(fn(text, `public.${name}`).body, name).toContain('org := private.hr_leave_may_act(p_employee);');
     }
     for (const name of ['hr_cancel_leave', 'hr_cancel_time_off']) {
-      expect(fn(text, `public.${name}`).body, name).toContain(
-        'if not (is_admin or private.is_own_employee(req.employee_id)) then',
-      );
+      const body = fn(text, `public.${name}`).body;
+      expect(body, name).toContain('is_admin := private.is_org_admin(req.org_id);');
+      expect(body, name).toContain('if not (is_admin or private.is_own_employee(req.employee_id)');
+      expect(body, name).toContain('if not is_admin then');
     }
   });
 
@@ -199,9 +231,11 @@ describe('Lekiu leave migration', () => {
       "if private.is_demo_org(org) then raise exception 'LEAVE_NOT_ALLOWED'; end if;",
     );
     for (const name of ['hr_cancel_leave', 'hr_cancel_time_off', 'hr_decide_leave', 'hr_decide_time_off']) {
-      expect(fn(text, `public.${name}`).body, name).toContain(
-        "if private.is_demo_org(req.org_id) then raise exception 'LEAVE_NOT_ALLOWED'; end if;",
-      );
+      const body = fn(text, `public.${name}`).body;
+      expect(body, name).toContain('is_demo := private.is_demo_org(req.org_id);');
+      const refusal = body.indexOf("if is_demo then raise exception 'LEAVE_NOT_ALLOWED'; end if;");
+      expect(refusal, name).toBeGreaterThan(-1);
+      expect(body.indexOf('update public.'), name).toBeGreaterThan(refusal);
     }
     expect(fn(text, 'public.hr_set_leave_entitlement').body).toContain(
       "if private.is_demo_org(org) then raise exception 'LEAVE_NOT_ALLOWED'; end if;",
@@ -221,9 +255,39 @@ describe('Lekiu leave migration', () => {
     const { body } = fn(text, 'private.hr_recount_leave_used');
     expect(body.match(/update public\.hr_leave_balances/g)).toHaveLength(1);
     expect(body).toContain("r.status = 'approved'");
-    expect(body).toContain('private.hr_leave_days_in_year(');
+    // From each request's own stored days, not a fresh count of its dates.
+    expect(body).toContain(
+      'private.hr_leave_request_days_in_year(r.org_id, r.start_date, r.end_date, r.half_day, r.days, b.year)',
+    );
+    expect(body).not.toContain('private.hr_leave_days(');
     expect(fn(text, 'public.hr_decide_leave').body).toContain('perform private.hr_recount_leave_used(');
     expect(fn(text, 'public.hr_cancel_leave').body).toContain('perform private.hr_recount_leave_used(');
+  });
+
+  test('a saved request inside one year costs exactly its stored days', () => {
+    const text = writes();
+    const { body } = fn(text, 'private.hr_leave_request_days_in_year');
+    expect(body).toContain('if first_year = last_year then return p_days; end if;');
+    // Across New Year the parts add up to the stored days: the last year takes what is left.
+    expect(body).toContain('left_over numeric := p_days;');
+    expect(body).toContain('part := left_over;');
+    expect(body).toContain('least(private.hr_leave_days_in_year(p_org, p_start, p_end, p_half_day, y), left_over)');
+    expect(fn(text, 'public.hr_leave_preview').body).toContain(
+      'private.hr_leave_request_days_in_year(r.org_id, r.start_date, r.end_date, r.half_day, r.days, y)',
+    );
+  });
+
+  test('applying and setting an entitlement make balance rows for that employee only', () => {
+    const text = writes();
+    expect(fn(text, 'public.hr_apply_leave').body).toContain('perform private.hr_ensure_leave_balances(org, y, p_employee);');
+    expect(fn(text, 'public.hr_set_leave_entitlement').body).toContain(
+      'perform private.hr_ensure_leave_balances(org, p_year, p_employee);',
+    );
+    for (const { name } of FUNCTIONS) {
+      const { body } = fn(text, `public.${name}`);
+      expect(body, name).not.toMatch(/hr_ensure_leave_balances\([^,)]*,[^,)]*\)/);
+      expect(body, name).not.toContain('hr_ensure_leave_balances_all');
+    }
   });
 
   test('today is today in Malaysia', () => {

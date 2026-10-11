@@ -67,6 +67,36 @@ begin
 end; $$;
 revoke all on function private.hr_leave_days_in_year(uuid, date, date, boolean, int) from public, anon, authenticated;
 
+-- How many of a SAVED request's days belong to one calendar year. A request
+-- keeps the days counted when it was made, so one that sits inside a single
+-- year gives exactly its stored days. Only a request that crosses New Year is
+-- split with the day counter, and the parts always add up to the stored days:
+-- if a holiday added later makes the count differ, the difference goes to the
+-- later year.
+create or replace function private.hr_leave_request_days_in_year(
+  p_org uuid, p_start date, p_end date, p_half_day boolean, p_days numeric, p_year int)
+returns numeric language plpgsql stable set search_path = public as $$
+declare
+  first_year int := extract(year from p_start)::int;
+  last_year int := extract(year from p_end)::int;
+  left_over numeric := p_days;
+  part numeric := 0;
+  y int;
+begin
+  if p_year < first_year or p_year > last_year then return 0; end if;
+  if first_year = last_year then return p_days; end if;
+  for y in first_year .. p_year loop
+    if y = last_year then
+      part := left_over;
+    else
+      part := least(private.hr_leave_days_in_year(p_org, p_start, p_end, p_half_day, y), left_over);
+    end if;
+    left_over := left_over - part;
+  end loop;
+  return part;
+end; $$;
+revoke all on function private.hr_leave_request_days_in_year(uuid, date, date, boolean, numeric, int) from public, anon, authenticated;
+
 -- Checks a leave request's kind and dates, and returns the days it costs.
 create or replace function private.hr_leave_count(p_org uuid, p_leave_type text, p_start date, p_end date, p_half_day boolean)
 returns numeric language plpgsql stable set search_path = public as $$
@@ -153,26 +183,26 @@ begin
 end; $$;
 revoke all on function private.hr_ensure_leave_balances_all() from public, anon, authenticated;
 
--- used_days is recounted, never incremented: for each year the range touches,
--- one update that stores the employee's approved leave of that kind in that
--- year. Callers hold the employee's row lock, so two recounts cannot cross.
-create or replace function private.hr_recount_leave_used(p_employee uuid, p_leave_type text, p_start date, p_end date)
+-- used_days is recounted, never incremented: one update that stores, for
+-- each of the employee's balance rows of that kind, the stored days of their
+-- approved leave that fall in that row's year. Every year is redone, not only
+-- the ones the request touches, so the parts of a request that crosses New
+-- Year always add up. Callers hold the employee's row lock, so two recounts
+-- cannot cross.
+create or replace function private.hr_recount_leave_used(p_employee uuid, p_leave_type text)
 returns void language plpgsql security definer set search_path = public as $$
-declare y int;
 begin
   if p_leave_type not in ('annual','medical','emergency') then return; end if;
-  for y in extract(year from p_start)::int .. extract(year from p_end)::int loop
-    update public.hr_leave_balances b
-    set used_days = coalesce((
-      select sum(private.hr_leave_days_in_year(r.org_id, r.start_date, r.end_date, r.half_day, y))
-      from public.hr_leave_requests r
-      where r.employee_id = p_employee and r.leave_type = p_leave_type and r.status = 'approved'
-        and r.start_date <= make_date(y, 12, 31) and r.end_date >= make_date(y, 1, 1)
-    ), 0)
-    where b.employee_id = p_employee and b.leave_type = p_leave_type and b.year = y;
-  end loop;
+  update public.hr_leave_balances b
+  set used_days = coalesce((
+    select sum(private.hr_leave_request_days_in_year(r.org_id, r.start_date, r.end_date, r.half_day, r.days, b.year))
+    from public.hr_leave_requests r
+    where r.employee_id = b.employee_id and r.leave_type = b.leave_type and r.status = 'approved'
+      and r.start_date <= make_date(b.year, 12, 31) and r.end_date >= make_date(b.year, 1, 1)
+  ), 0)
+  where b.employee_id = p_employee and b.leave_type = p_leave_type;
 end; $$;
-revoke all on function private.hr_recount_leave_used(uuid, text, date, date) from public, anon, authenticated;
+revoke all on function private.hr_recount_leave_used(uuid, text) from public, anon, authenticated;
 
 -- A new active employee gets this year's three rows at once. Runs as the
 -- owner because the admin adding the employee holds no grant on the balances.
@@ -224,7 +254,7 @@ begin
         entitled := private.hr_default_leave_days(org, p_leave_type);
         used := 0;
       end if;
-      select coalesce(sum(private.hr_leave_days_in_year(r.org_id, r.start_date, r.end_date, r.half_day, y)), 0)
+      select coalesce(sum(private.hr_leave_request_days_in_year(r.org_id, r.start_date, r.end_date, r.half_day, r.days, y)), 0)
       into waiting
       from public.hr_leave_requests r
       where r.employee_id = p_employee and r.leave_type = p_leave_type and r.status = 'pending'
@@ -275,8 +305,9 @@ begin
     raise exception 'LEAVE_OVERLAP';
   end if;
 
+  -- Balance rows for this employee only, for the years the dates touch.
   for y in extract(year from p_start)::int .. extract(year from p_end)::int loop
-    perform private.hr_ensure_leave_balances(org, y);
+    perform private.hr_ensure_leave_balances(org, y, p_employee);
   end loop;
 
   insert into public.hr_leave_requests
@@ -334,6 +365,8 @@ grant execute on function public.hr_apply_time_off(uuid, date, time, time, text)
 -- ---- cancel ----------------------------------------------------------------
 -- An owner or admin: any request not already cancelled. The linked member:
 -- their own, while pending, or approved and starting after today in Malaysia.
+-- Anyone else is told LEAVE_NOT_FOUND, the same as for an id that is not a
+-- request, so the answer does not say which ids are real.
 -- The request row is taken `for update` before its status is read, so of two
 -- callers acting on one request the second sees what the first did.
 
@@ -342,16 +375,20 @@ returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   req public.hr_leave_requests;
   is_admin boolean;
+  is_demo boolean;
   today date := (now() at time zone 'Asia/Kuala_Lumpur')::date;
 begin
   if auth.uid() is null then raise exception 'LEAVE_NOT_ALLOWED'; end if;
   select * into req from public.hr_leave_requests r where r.id = p_request for update;
   if not found then raise exception 'LEAVE_NOT_FOUND'; end if;
-  if private.is_demo_org(req.org_id) then raise exception 'LEAVE_NOT_ALLOWED'; end if;
   is_admin := private.is_org_admin(req.org_id);
-  if not (is_admin or private.is_own_employee(req.employee_id)) then
-    raise exception 'LEAVE_NOT_ALLOWED';
+  is_demo := private.is_demo_org(req.org_id);
+  -- Someone with no business with this request learns nothing from the answer.
+  if not (is_admin or private.is_own_employee(req.employee_id)
+          or (is_demo and private.is_org_member(req.org_id))) then
+    raise exception 'LEAVE_NOT_FOUND';
   end if;
+  if is_demo then raise exception 'LEAVE_NOT_ALLOWED'; end if;
   if req.status = 'cancelled' then raise exception 'LEAVE_NOT_PENDING'; end if;
   if not is_admin then
     if req.status = 'rejected' then raise exception 'LEAVE_NOT_PENDING'; end if;
@@ -363,7 +400,7 @@ begin
   perform 1 from public.hr_employees e where e.id = req.employee_id for no key update;
   update public.hr_leave_requests set status = 'cancelled' where id = req.id;
   if req.status = 'approved' then
-    perform private.hr_recount_leave_used(req.employee_id, req.leave_type, req.start_date, req.end_date);
+    perform private.hr_recount_leave_used(req.employee_id, req.leave_type);
   end if;
   return jsonb_build_object('id', req.id, 'status', 'cancelled');
 end; $$;
@@ -375,16 +412,20 @@ returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   req public.hr_time_off_requests;
   is_admin boolean;
+  is_demo boolean;
   today date := (now() at time zone 'Asia/Kuala_Lumpur')::date;
 begin
   if auth.uid() is null then raise exception 'LEAVE_NOT_ALLOWED'; end if;
   select * into req from public.hr_time_off_requests r where r.id = p_request for update;
   if not found then raise exception 'LEAVE_NOT_FOUND'; end if;
-  if private.is_demo_org(req.org_id) then raise exception 'LEAVE_NOT_ALLOWED'; end if;
   is_admin := private.is_org_admin(req.org_id);
-  if not (is_admin or private.is_own_employee(req.employee_id)) then
-    raise exception 'LEAVE_NOT_ALLOWED';
+  is_demo := private.is_demo_org(req.org_id);
+  -- Someone with no business with this request learns nothing from the answer.
+  if not (is_admin or private.is_own_employee(req.employee_id)
+          or (is_demo and private.is_org_member(req.org_id))) then
+    raise exception 'LEAVE_NOT_FOUND';
   end if;
+  if is_demo then raise exception 'LEAVE_NOT_ALLOWED'; end if;
   if req.status = 'cancelled' then raise exception 'LEAVE_NOT_PENDING'; end if;
   if not is_admin then
     if req.status = 'rejected' then raise exception 'LEAVE_NOT_PENDING'; end if;
@@ -407,12 +448,21 @@ declare
   req public.hr_leave_requests;
   note text := nullif(trim(p_note), '');
   outcome text;
+  is_admin boolean;
+  is_demo boolean;
 begin
   if auth.uid() is null then raise exception 'LEAVE_NOT_ALLOWED'; end if;
   select * into req from public.hr_leave_requests r where r.id = p_request for update;
   if not found then raise exception 'LEAVE_NOT_FOUND'; end if;
-  if private.is_demo_org(req.org_id) then raise exception 'LEAVE_NOT_ALLOWED'; end if;
-  if not private.is_org_admin(req.org_id) then raise exception 'LEAVE_NOT_ALLOWED'; end if;
+  is_admin := private.is_org_admin(req.org_id);
+  is_demo := private.is_demo_org(req.org_id);
+  -- Someone with no business with this request learns nothing from the answer.
+  if not (is_admin or private.is_own_employee(req.employee_id)
+          or (is_demo and private.is_org_member(req.org_id))) then
+    raise exception 'LEAVE_NOT_FOUND';
+  end if;
+  if is_demo then raise exception 'LEAVE_NOT_ALLOWED'; end if;
+  if not is_admin then raise exception 'LEAVE_NOT_ALLOWED'; end if;
   if p_approve is null or char_length(note) > 500 then raise exception 'LEAVE_BAD_INPUT'; end if;
   if req.status <> 'pending' then raise exception 'LEAVE_NOT_PENDING'; end if;
 
@@ -423,7 +473,7 @@ begin
       decision_note = case when p_approve then null else note end
   where id = req.id;
   if p_approve then
-    perform private.hr_recount_leave_used(req.employee_id, req.leave_type, req.start_date, req.end_date);
+    perform private.hr_recount_leave_used(req.employee_id, req.leave_type);
   end if;
   return jsonb_build_object('id', req.id, 'status', outcome);
 end; $$;
@@ -436,12 +486,21 @@ declare
   req public.hr_time_off_requests;
   note text := nullif(trim(p_note), '');
   outcome text;
+  is_admin boolean;
+  is_demo boolean;
 begin
   if auth.uid() is null then raise exception 'LEAVE_NOT_ALLOWED'; end if;
   select * into req from public.hr_time_off_requests r where r.id = p_request for update;
   if not found then raise exception 'LEAVE_NOT_FOUND'; end if;
-  if private.is_demo_org(req.org_id) then raise exception 'LEAVE_NOT_ALLOWED'; end if;
-  if not private.is_org_admin(req.org_id) then raise exception 'LEAVE_NOT_ALLOWED'; end if;
+  is_admin := private.is_org_admin(req.org_id);
+  is_demo := private.is_demo_org(req.org_id);
+  -- Someone with no business with this request learns nothing from the answer.
+  if not (is_admin or private.is_own_employee(req.employee_id)
+          or (is_demo and private.is_org_member(req.org_id))) then
+    raise exception 'LEAVE_NOT_FOUND';
+  end if;
+  if is_demo then raise exception 'LEAVE_NOT_ALLOWED'; end if;
+  if not is_admin then raise exception 'LEAVE_NOT_ALLOWED'; end if;
   if p_approve is null or char_length(note) > 500 then raise exception 'LEAVE_BAD_INPUT'; end if;
   if req.status <> 'pending' then raise exception 'LEAVE_NOT_PENDING'; end if;
 
@@ -476,7 +535,7 @@ begin
   end if;
 
   perform 1 from public.hr_employees e where e.id = p_employee for no key update;
-  perform private.hr_ensure_leave_balances(org, p_year);
+  perform private.hr_ensure_leave_balances(org, p_year, p_employee);
   insert into public.hr_leave_balances (org_id, employee_id, leave_type, year, entitled_days)
   values (org, p_employee, p_leave_type, p_year, p_days)
   on conflict (employee_id, leave_type, year) do update set entitled_days = excluded.entitled_days
