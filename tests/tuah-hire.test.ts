@@ -567,6 +567,12 @@ describe('Tuah’s team adding and editing a candidate', () => {
     expect(context.proposals.size).toBe(1);
     expect([...context.proposals.values()][0]).toMatchObject({ action: 'addCandidate', title: 'Add candidate “Nur Aina”?', detail: null });
   });
+  it('shows no card for an add whose name is blank: the tool’s schema refuses it before the change is prepared', async () => {
+    const { access } = await withUuids();
+    const context = await prepare([{ tool: 'addCandidate', input: { name: '   ' } }], access);
+    expect(context.proposals.size).toBe(0);
+    nothingSaved();
+  });
   it('accepts a candidate id seen in an earlier turn, and names it', async () => {
     const { access } = await withUuids();
     const context = await prepare(
