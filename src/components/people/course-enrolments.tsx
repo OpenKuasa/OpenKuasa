@@ -41,7 +41,15 @@ export function CourseAdmin({
   const [busy, start] = useTransition();
   const [mode, setMode] = useState<Mode>(null);
   const [key, setKey] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  // A refusal belongs to the state it was given for: when the course or who is on it changes after a refresh, it goes.
+  const signature = JSON.stringify([course, people]);
+  const [held, setHeld] = useState<{ sig: string; map: Record<string, string> }>({ sig: '', map: {} });
+  const errors = held.sig === signature ? held.map : {};
+  const setErrors = (update: Record<string, string> | ((current: Record<string, string>) => Record<string, string>)) =>
+    setHeld((current) => {
+      const map = current.sig === signature ? current.map : {};
+      return { sig: signature, map: typeof update === 'function' ? update(map) : update };
+    });
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [pick, setPick] = useState('');
   const promptId = usePromptId();

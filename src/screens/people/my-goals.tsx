@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
 import { Progress } from '@/components/ui/progress';
 import { formatDate } from '@/lib/people/dates';
+import { myGoalsControls } from '@/lib/people/goals-training';
 import { type GoalRow, buildGoalsModel } from '@/lib/people/performance';
 import { LOAD_FAILED, LaterButton, Muted, NotLinkedCard, StatusPill, loadPeople } from './parts';
 
@@ -29,17 +30,17 @@ export default async function MyGoalsScreen() {
   });
   const dash = '—';
   // Every new control is absent in the demo (the server refuses there); the placeholder stays for the visitor.
-  const canChange = !viewer.isDemo;
+  const controls = myGoalsControls(viewer, model ? { linked: model.linked } : null);
   const header = (
     <PageHeader
       title="My Goals"
       subtitle="Your objectives and how far along they are"
       actions={
-        viewer.isDemo ? (
+        controls.placeholder ? (
           <LaterButton icon={Plus} size="sm">
             Add Goal
           </LaterButton>
-        ) : model?.linked ? (
+        ) : controls.add ? (
           <AddGoal save={saveMyGoalAction} />
         ) : null
       }
@@ -137,7 +138,7 @@ export default async function MyGoalsScreen() {
                       <span>Due {formatDate(g.due_date)}</span>
                     </div>
                   ) : null}
-                  {canChange ? (
+                  {controls.cards ? (
                     <GoalCardControls
                       key={`${g.id}-${g.progress}-${g.status}-${g.title}-${g.due_date}`}
                       goal={g}

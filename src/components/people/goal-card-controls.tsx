@@ -5,7 +5,7 @@ import { Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { WRITE_FAILED } from '@/lib/people/capabilities';
-import { type GoalLike, goalProgressInput, showAtRiskChoice } from '@/lib/people/goals-training';
+import { type GoalLike, goalCardView, goalProgressInput, typedProgress } from '@/lib/people/goals-training';
 import { GoalForm, type GoalResult, type SaveGoal } from './goal-form';
 
 export type RemoveGoal = (input: { goal_id: string }) => Promise<GoalResult>;
@@ -29,7 +29,8 @@ export function GoalCardControls({ goal, save, remove }: { goal: GoalLike; save:
   const [atRisk, setAtRisk] = useState(goal.status === 'at_risk');
   const [error, setError] = useState<{ at: Where; text: string } | null>(null);
   const ids = useId();
-  const showChoice = showAtRiskChoice(progress);
+  const view = goalCardView({ progress: typedProgress(progress, goal.progress), status: goal.status });
+  const showChoice = view.showAtRisk;
   const unchanged = progress.trim() === String(goal.progress) && (!showChoice || atRisk === (goal.status === 'at_risk'));
 
   function run(at: Where, call: () => Promise<GoalResult>, after?: () => void) {

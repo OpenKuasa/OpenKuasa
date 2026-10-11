@@ -66,14 +66,17 @@ export type GoalLike = Pick<Goal, 'id' | 'title' | 'progress' | 'due_date' | 'st
 
 const GOAL_LABEL = { on_track: 'On track', at_risk: 'At risk', done: 'Done' } as const;
 
-/** What a goal card reads. At 100 it is Done and there is no at-risk choice. */
-export function goalCardView(goal: Pick<Goal, 'progress' | 'status'>): { done: boolean; label: string; showAtRisk: boolean } {
-  const done = goal.progress >= 100 || goal.status === 'done';
-  return { done, label: done ? 'Done' : GOAL_LABEL[goal.status], showAtRisk: !done };
-}
+/** Progress as typed when it is a whole number of up to three digits, else the saved progress. */
+export const typedProgress = (text: string, fallback: number): number => (/^\d{1,3}$/.test(text.trim()) ? Number(text.trim()) : fallback);
 
-/** The at-risk choice is hidden while the progress typed is 100. */
-export const showAtRiskChoice = (progressText: string): boolean => progressText.trim() !== '100';
+/**
+ * The one source for a goal card: its label, whether it is Done, and whether the at-risk choice shows. At 100 the
+ * goal is Done whatever the stored status, and the choice is hidden. Pass the progress as typed (see `typedProgress`).
+ */
+export function goalCardView(goal: { progress: number; status: Goal['status'] }): { done: boolean; label: string; showAtRisk: boolean } {
+  const done = goal.progress >= 100;
+  return { done, label: done ? 'Done' : GOAL_LABEL[goal.status === 'done' ? 'on_track' : goal.status], showAtRisk: !done };
+}
 
 /** A progress change on a card: the title and due date stay, a finished goal is never sent as at risk. */
 export function goalProgressInput(goal: GoalLike, progressText: string, atRisk: boolean) {
@@ -81,7 +84,7 @@ export function goalProgressInput(goal: GoalLike, progressText: string, atRisk: 
     title: goal.title,
     progress: progressText,
     due_date: goal.due_date ?? '',
-    at_risk: atRisk && showAtRiskChoice(progressText),
+    at_risk: atRisk && goalCardView({ progress: typedProgress(progressText, goal.progress), status: goal.status }).showAtRisk,
   });
   return converted.ok ? { ok: true as const, input: { goal_id: goal.id, ...converted.input } } : converted;
 }
@@ -104,3 +107,31 @@ export function goalsByEmployee(goals: Goal[]): Record<string, GoalLike[]> {
   }
   return grouped;
 }
+
+// ---- What a screen renders for a viewer -------------------------------------------------
+
+type ViewerKind = { isHr: boolean; isDemo: boolean; employeeId: string | null };
+
+/**
+ * Training: owner controls (Add course, Manage) only for an owner or admin outside the demo and with the data
+ * loaded; placeholders only in the demo; the enrol column only for a linked member.
+ */
+export function trainingScreenControls(viewer: ViewerKind, loaded: boolean) {
+  return {
+    owner: loaded && viewer.isHr && !viewer.isDemo,
+    demoPlaceholders: viewer.isDemo,
+    memberEnrol: loaded && !viewer.isHr && !viewer.isDemo && viewer.employeeId !== null,
+  };
+}
+
+/** My Goals: card controls with the data loaded outside the demo; Add only when linked; the placeholder only in the demo. */
+export function myGoalsControls(viewer: ViewerKind, loaded: { linked: boolean } | null) {
+  return {
+    cards: !viewer.isDemo && loaded !== null,
+    add: !viewer.isDemo && loaded !== null && loaded.linked,
+    placeholder: viewer.isDemo,
+  };
+}
+
+/** Employees: the "Goals" row action needs a table that can edit and goals that loaded. */
+export const showGoalsAction = (canEdit: boolean, goals: unknown | null): boolean => canEdit && goals !== null;

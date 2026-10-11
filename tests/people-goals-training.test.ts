@@ -10,7 +10,10 @@ import {
   goalProgressInput,
   goalsByEmployee,
   memberCourseControl,
-  showAtRiskChoice,
+  myGoalsControls,
+  showGoalsAction,
+  trainingScreenControls,
+  typedProgress,
 } from '@/lib/people/goals-training';
 import type { Employee, Goal } from '@/lib/people/types';
 
@@ -45,11 +48,32 @@ describe('memberCourseControl', () => {
     expect(memberCourseControl({ starts_on: null, ends_on: null }, null, '2026-10-11', WHO)).toBe('enrol');
     expect(memberCourseControl({ starts_on: null, ends_on: null }, { completed: false }, '2026-10-11', WHO)).toBe('withdraw');
   });
-  it('gives exactly one answer for every day around the course', () => {
-    const answers = new Set(['enrol', 'withdraw', 'enrolled', 'completed', 'none']);
-    for (const today of ['2026-10-08', '2026-10-09', '2026-10-10', '2026-10-11', '2026-10-12', '2026-10-13']) {
-      for (const e of [null, { completed: false }, { completed: true }]) expect(answers.has(at(today, e))).toBe(true);
-    }
+  it('gives the one expected control on every day around the course', () => {
+    const none = null;
+    const open = { completed: false };
+    const done = { completed: true };
+    const table: [string, typeof none | typeof open | typeof done, string][] = [
+      ['2026-10-08', none, 'enrol'],
+      ['2026-10-09', none, 'enrol'],
+      ['2026-10-10', none, 'enrol'],
+      ['2026-10-11', none, 'enrol'],
+      ['2026-10-12', none, 'enrol'],
+      ['2026-10-13', none, 'none'],
+      ['2026-10-08', open, 'withdraw'],
+      ['2026-10-09', open, 'withdraw'],
+      ['2026-10-10', open, 'enrolled'],
+      ['2026-10-12', open, 'enrolled'],
+      ['2026-10-13', open, 'enrolled'],
+      ['2026-10-09', done, 'completed'],
+      ['2026-10-10', done, 'completed'],
+      ['2026-10-13', done, 'completed'],
+    ];
+    for (const [today, enrolment, expected] of table) expect(at(today, enrolment), `${today} ${JSON.stringify(enrolment)}`).toBe(expected);
+  });
+  it('compares only the date a one-date course has', () => {
+    expect(memberCourseControl({ starts_on: '2026-10-10', ends_on: null }, null, '2027-01-01', WHO)).toBe('enrol');
+    expect(memberCourseControl({ starts_on: null, ends_on: '2026-10-12' }, null, '2026-10-13', WHO)).toBe('none');
+    expect(memberCourseControl({ starts_on: null, ends_on: '2026-10-12' }, { completed: false }, '2026-10-13', WHO)).toBe('withdraw');
   });
 });
 
@@ -103,17 +127,22 @@ describe('enrolCandidates', () => {
 });
 
 describe('goal card', () => {
-  it('reads Done at 100 and hides the at-risk choice', () => {
+  it('reads Done at 100 whatever the stored status, and hides the at-risk choice', () => {
     expect(goalCardView({ progress: 100, status: 'done' })).toEqual({ done: true, label: 'Done', showAtRisk: false });
+    expect(goalCardView({ progress: 100, status: 'at_risk' })).toEqual({ done: true, label: 'Done', showAtRisk: false });
     expect(goalCardView({ progress: 40, status: 'at_risk' })).toEqual({ done: false, label: 'At risk', showAtRisk: true });
     expect(goalCardView({ progress: 0, status: 'on_track' })).toEqual({ done: false, label: 'On track', showAtRisk: true });
   });
-  it('hides the choice while the typed progress is 100', () => {
-    expect(showAtRiskChoice('100')).toBe(false);
-    expect(showAtRiskChoice(' 100 ')).toBe(false);
-    expect(showAtRiskChoice('99')).toBe(true);
-    expect(showAtRiskChoice('')).toBe(true);
-    expect(showAtRiskChoice('abc')).toBe(true);
+  it('shows the choice again when a done goal is retyped below 100', () => {
+    expect(goalCardView({ progress: typedProgress('80', 100), status: 'done' }).showAtRisk).toBe(true);
+    expect(goalCardView({ progress: typedProgress(' 100 ', 20), status: 'on_track' }).showAtRisk).toBe(false);
+  });
+  it('reads typed progress only when it is a whole number, else keeps the saved one', () => {
+    expect(typedProgress('55', 10)).toBe(55);
+    expect(typedProgress('', 10)).toBe(10);
+    expect(typedProgress('abc', 10)).toBe(10);
+    expect(typedProgress('5.5', 10)).toBe(10);
+    expect(typedProgress('1000', 10)).toBe(10);
   });
   const goal = { id: 'g1', title: 'Ship it', progress: 20, due_date: '2026-12-01', status: 'at_risk' as const };
   it('saves a progress change keeping the title and due date', () => {
@@ -185,59 +214,95 @@ function reachable(entry: string): Map<string, string> {
   return seen;
 }
 
-const OWNER_ONLY = [
-  'saveGoalForAction',
-  'deleteGoalForAction',
-  'saveTrainingAction',
-  'deleteTrainingAction',
-  'enrolAction',
-  'unenrolAction',
-  'setTrainingCompletedAction',
-  'saveReviewAction',
-  'releaseReviewAction',
-  'unreleaseReviewAction',
-  'deleteReviewAction',
-];
-const OWNER_ONLY_COMPONENTS = /employee-goals|course-form|course-enrolments/;
+const ACTIONS_FILE = resolve('src/app/(app)/people/performance-actions.ts');
+const OWN_ACTIONS = ['saveMyGoalAction', 'deleteMyGoalAction', 'enrolMeAction', 'withdrawMeAction'];
+const exportedActions = readFileSync(ACTIONS_FILE, 'utf8')
+  .split('\n')
+  .map((line) => /^export async function (\w+)/.exec(line)?.[1])
+  .filter((name): name is string => Boolean(name));
+// Owner-only = every action the module exports except the member's own four; read from the file, not listed by hand.
+const OWNER_ONLY = exportedActions.filter((name) => !OWN_ACTIONS.includes(name));
 
-describe('the member pages reach no owner-only control', () => {
-  // The own and owner-only actions share one server module (it only exports guarded actions); so what is proved is
-  // that no module a member page reaches names an owner-only action, and that the owner-only components are not reached.
+describe('the member-only components name no owner-only action', () => {
+  it('reads a real list of actions from the module', () => {
+    for (const name of OWN_ACTIONS) expect(exportedActions).toContain(name);
+    expect(OWNER_ONLY.length).toBeGreaterThanOrEqual(7);
+    expect(OWNER_ONLY).toContain('saveGoalForAction');
+    expect(OWNER_ONLY).toContain('enrolAction');
+  });
+  // goal-form.tsx is shared by the own-record and owner paths; it takes its action as a prop and imports none.
   for (const entry of [
     'src/components/people/goal-card-controls.tsx',
     'src/components/people/goal-form.tsx',
     'src/components/people/enrol-buttons.tsx',
     'src/screens/people/my-goals.tsx',
-    'src/screens/people/training.tsx',
   ]) {
-    const graph = reachable(resolve(entry));
-    it(`${entry} reaches a real set of modules`, () => {
+    it(`${entry} and what it imports name no owner-only action`, () => {
+      const graph = reachable(resolve(entry));
       expect(graph.size).toBeGreaterThan(2);
-    });
-    it(`${entry} reaches no owner-only component and names no owner-only action`, () => {
       for (const [file, source] of graph) {
-        if (file.endsWith('performance-actions.ts')) continue; // the boundary: it defines them, it does not import them into a page
-        expect(file, file).not.toMatch(OWNER_ONLY_COMPONENTS);
-        for (const name of OWNER_ONLY) expect(source, `${file} names ${name}`).not.toContain(name);
+        if (file === ACTIONS_FILE) continue; // the module that defines them
+        for (const name of OWNER_ONLY) expect(source, `${file} names ${name}`).not.toMatch(new RegExp(`\\b${name}\\b`));
       }
     });
   }
-  it('the owner-only components are only ever loaded dynamically by the Training screen, never imported', () => {
-    for (const entry of ['src/screens/people/my-goals.tsx', 'src/screens/people/training.tsx']) {
-      const source = readFileSync(resolve(entry), 'utf8');
-      expect(source, entry).not.toMatch(/from\s+'[^']*(employee-goals|course-form|course-enrolments)'/);
-      for (const name of OWNER_ONLY) expect(source, `${entry} names ${name}`).not.toContain(name);
-    }
-    expect(readFileSync(resolve('src/screens/people/training.tsx'), 'utf8')).toMatch(/import\('@\/components\/people\/course-form'\)/);
-  });
-  it('the own components import only the own actions from the actions module', () => {
+  it('the components that import from the actions module take only the own actions', () => {
     for (const entry of ['src/components/people/enrol-buttons.tsx', 'src/screens/people/my-goals.tsx']) {
       const source = readFileSync(resolve(entry), 'utf8');
       const imported = [...source.matchAll(/import\s*\{([^}]*)\}\s*from\s*'[^']*performance-actions'/g)].flatMap((m) =>
-        m[1].split(',').map((s) => s.trim()).filter(Boolean),
+        m[1].split(',').map((x) => x.trim()).filter(Boolean),
       );
       expect(imported.length, entry).toBeGreaterThan(0);
-      for (const name of imported) expect(['saveMyGoalAction', 'deleteMyGoalAction', 'enrolMeAction', 'withdrawMeAction'], entry).toContain(name);
+      for (const name of imported) expect(OWN_ACTIONS, entry).toContain(name);
     }
+  });
+});
+
+describe('what each screen renders for each kind of viewer', () => {
+  const viewers = {
+    owner: { isHr: true, isDemo: false, employeeId: 'e1' },
+    admin: { isHr: true, isDemo: false, employeeId: null },
+    member: { isHr: false, isDemo: false, employeeId: 'e2' },
+    readOnlyViewer: { isHr: false, isDemo: false, employeeId: 'e3' },
+    unlinked: { isHr: false, isDemo: false, employeeId: null },
+    demoVisitor: { isHr: false, isDemo: true, employeeId: null },
+    demoAdmin: { isHr: true, isDemo: true, employeeId: 'e4' },
+  };
+
+  it('Training: owner controls only for an owner or admin outside the demo', () => {
+    const owner = Object.entries(viewers).filter(([, v]) => trainingScreenControls(v, true).owner).map(([k]) => k);
+    expect(owner).toEqual(['owner', 'admin']);
+  });
+  it('Training: no owner control while nothing loaded', () => {
+    expect(trainingScreenControls(viewers.owner, false)).toEqual({ owner: false, demoPlaceholders: false, memberEnrol: false });
+  });
+  it('Training: a member gets the enrol column only when linked; the demo gets placeholders and nothing live', () => {
+    expect(trainingScreenControls(viewers.member, true)).toEqual({ owner: false, demoPlaceholders: false, memberEnrol: true });
+    expect(trainingScreenControls(viewers.readOnlyViewer, true).memberEnrol).toBe(true);
+    expect(trainingScreenControls(viewers.unlinked, true)).toEqual({ owner: false, demoPlaceholders: false, memberEnrol: false });
+    expect(trainingScreenControls(viewers.demoVisitor, true)).toEqual({ owner: false, demoPlaceholders: true, memberEnrol: false });
+    expect(trainingScreenControls(viewers.demoAdmin, true)).toEqual({ owner: false, demoPlaceholders: true, memberEnrol: false });
+    expect(trainingScreenControls(viewers.owner, true).memberEnrol).toBe(false);
+    expect(trainingScreenControls(viewers.admin, true).memberEnrol).toBe(false);
+  });
+  it('My Goals: own controls for a linked non-demo account; none for unlinked or the demo', () => {
+    expect(myGoalsControls(viewers.member, { linked: true })).toEqual({ cards: true, add: true, placeholder: false });
+    expect(myGoalsControls(viewers.unlinked, { linked: false })).toEqual({ cards: true, add: false, placeholder: false });
+    expect(myGoalsControls(viewers.demoVisitor, { linked: true })).toEqual({ cards: false, add: false, placeholder: true });
+    expect(myGoalsControls(viewers.demoAdmin, { linked: true })).toEqual({ cards: false, add: false, placeholder: true });
+    expect(myGoalsControls(viewers.member, null)).toEqual({ cards: false, add: false, placeholder: false });
+  });
+  it('Employees: the Goals action shows only when the table can edit and the goals loaded', () => {
+    expect(showGoalsAction(true, {})).toBe(true);
+    expect(showGoalsAction(true, null)).toBe(false);
+    expect(showGoalsAction(false, {})).toBe(false);
+    expect(showGoalsAction(false, null)).toBe(false);
+  });
+  it('the screens use these decisions', () => {
+    const training = readFileSync(resolve('src/screens/people/training.tsx'), 'utf8');
+    expect(training).toContain('trainingScreenControls(');
+    expect(training).not.toMatch(/import\('/);
+    expect(readFileSync(resolve('src/screens/people/my-goals.tsx'), 'utf8')).toContain('myGoalsControls(');
+    expect(readFileSync(resolve('src/components/people/employees-table.tsx'), 'utf8')).toContain('showGoalsAction(');
   });
 });

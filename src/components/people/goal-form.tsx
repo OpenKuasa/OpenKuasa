@@ -6,7 +6,7 @@ import { Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { WRITE_FAILED } from '@/lib/people/capabilities';
-import { type GoalLike, showAtRiskChoice } from '@/lib/people/goals-training';
+import { type GoalLike, goalCardView, typedProgress } from '@/lib/people/goals-training';
 import { GOAL_TITLE_MAX, toGoalInput } from '@/lib/people/performance-forms';
 
 /** What a goal write answers. The caller passes the right server action in: this file reaches no action itself. */
@@ -39,13 +39,14 @@ export function GoalForm({
   const [atRisk, setAtRisk] = useState(initial?.status === 'at_risk');
   const [error, setError] = useState<string | null>(null);
   const ids = useId();
+  const choiceShown = goalCardView({ progress: typedProgress(progress, initial?.progress ?? 0), status: initial?.status ?? 'on_track' }).showAtRisk;
   const change = <T,>(set: (value: T) => void) => (value: T) => {
     setError(null);
     set(value);
   };
 
   function submit() {
-    const converted = toGoalInput({ title, progress, due_date: due, at_risk: atRisk });
+    const converted = toGoalInput({ title, progress, due_date: due, at_risk: atRisk && choiceShown });
     if (!converted.ok) {
       setError(converted.error);
       return;
@@ -117,7 +118,7 @@ export function GoalForm({
             onChange={(event) => change(setDue)(event.target.value)}
           />
         </label>
-        {showAtRiskChoice(progress) ? (
+        {choiceShown ? (
           <label className="flex flex-col gap-1 text-xs text-muted-foreground" htmlFor={`${ids}-risk`}>
             Where it stands
             <select

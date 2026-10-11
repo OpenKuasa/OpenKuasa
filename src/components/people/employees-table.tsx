@@ -17,7 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatDay, todayInMalaysia } from '@/lib/people/dates';
-import type { GoalLike } from '@/lib/people/goals-training';
+import { type GoalLike, showGoalsAction } from '@/lib/people/goals-training';
 import { EMPLOYMENT_LABEL, type EmployeeFilter, filterEmployees, linkableMembers } from '@/lib/people/employees';
 import type { WorkspaceMember } from '@/lib/people/members';
 import type { Department, Employee } from '@/lib/people/types';
@@ -272,7 +272,7 @@ export function EmployeesTable({
                         <Pencil className="size-4" />
                         Edit
                       </Button>
-                      {goals ? (
+                      {showGoalsAction(canEdit, goals) ? (
                         <Button
                           type="button"
                           variant="ghost"
@@ -403,7 +403,7 @@ export function EmployeesTable({
         </Dialog.Portal>
       </Dialog.Root>
 
-      <Dialog.Root open={canEdit && goals !== null && goalsFor !== null} onOpenChange={(open) => !open && setGoalsFor(null)}>
+      <Dialog.Root open={showGoalsAction(canEdit, goals) && goalsFor !== null} onOpenChange={(open) => !open && setGoalsFor(null)}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
           <Dialog.Content className="fixed top-1/2 left-1/2 z-50 max-h-[90vh] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border bg-background p-5 shadow-lg outline-none">

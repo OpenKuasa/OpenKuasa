@@ -1,4 +1,6 @@
 import { BookOpen, ChartColumn, GraduationCap, PieChart, Plus } from 'lucide-react';
+import { CourseAdmin } from '@/components/people/course-enrolments';
+import { AddCourse } from '@/components/people/course-form';
 import { EnrolButtons } from '@/components/people/enrol-buttons';
 import { RequestRow } from '@/components/people/request-row';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
@@ -8,7 +10,7 @@ import { ScreenContainer } from '@/components/screen/screen-container';
 import { LiveDot } from '@/components/ui/live-dot';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { todayInMalaysia } from '@/lib/people/dates';
-import { enrolCandidates, memberCourseControl } from '@/lib/people/goals-training';
+import { enrolCandidates, memberCourseControl, trainingScreenControls } from '@/lib/people/goals-training';
 import { TRAINING_STATUS_LABEL, type TrainingRow, buildTrainingModel } from '@/lib/people/performance';
 import { HR_ONLY, LOAD_FAILED, LaterButton, Muted, StatusPill, loadPeople } from './parts';
 
@@ -21,24 +23,25 @@ const STATUS_TONE = { completed: 'good', in_progress: 'pending', upcoming: 'neut
 
 export default async function TrainingScreen() {
   const { model: loaded, viewer } = await loadPeople('training', async (data, now, ctx) => {
-    const [trainings, enrolments, employees] = await Promise.all([data.listTrainings(), data.listTrainingEnrolments(), data.listEmployees()]);
+    // Names are used only to list who is enrolled and who can be enrolled: an owner's or admin's controls.
+    const names = ctx.viewer.isHr && !ctx.viewer.isDemo;
+    const [trainings, enrolments, employees] = await Promise.all([
+      data.listTrainings(),
+      data.listTrainingEnrolments(),
+      names ? data.listEmployees() : Promise.resolve([]),
+    ]);
     const today = todayInMalaysia(now);
     return { model: buildTrainingModel(trainings, enrolments, ctx.viewer, today, employees), employees, today };
   });
   const model = loaded?.model ?? null;
   const today = loaded?.today ?? '';
   const employees = loaded?.employees ?? [];
-  // Owners and admins (not the demo) manage courses; the demo keeps the disabled placeholders; everyone else is a member.
-  const admin = viewer.isHr && !viewer.isDemo && model !== null;
+  // What is rendered for this viewer is decided by one pure function: owner controls only for an owner or admin
+  // outside the demo, placeholders only in the demo, the enrol column only for a linked member.
+  const controls = trainingScreenControls(viewer, model !== null);
+  const owner = controls.owner;
   const linked = viewer.employeeId !== null;
-  const memberControls = !viewer.isHr && !viewer.isDemo && linked;
-  // The owner-only controls are loaded only for an owner or admin, so a member's page never imports them.
-  const owner = admin
-    ? {
-        ...(await import('@/components/people/course-form')),
-        ...(await import('@/components/people/course-enrolments')),
-      }
-    : null;
+  const memberControls = controls.memberEnrol;
   const dash = '—';
   const team = model?.team ?? true;
   const stats = model?.team_stats ?? null;
@@ -64,12 +67,12 @@ export default async function TrainingScreen() {
         title="Training"
         subtitle={team ? 'Courses and sessions for your team' : 'Courses and sessions you can join'}
         actions={
-          viewer.isDemo ? (
+          controls.demoPlaceholders ? (
             <LaterButton icon={Plus} size="sm">
               Add course
             </LaterButton>
           ) : owner ? (
-            <owner.AddCourse />
+            <AddCourse />
           ) : null
         }
       />
@@ -155,7 +158,7 @@ export default async function TrainingScreen() {
                     ) : null}
                     <TableHead>Status</TableHead>
                     {owner ? <TableHead>Manage</TableHead> : null}
-                    {viewer.isDemo ? <TableHead>Enrol</TableHead> : null}
+                    {controls.demoPlaceholders ? <TableHead>Enrol</TableHead> : null}
                     {memberControls ? <TableHead>Your enrolment</TableHead> : null}
                   </TableRow>
                 </TableHeader>
@@ -185,7 +188,7 @@ export default async function TrainingScreen() {
                         <TableCell>{statusCell(row)}</TableCell>
                         {owner ? (
                           <TableCell className="whitespace-nowrap align-top">
-                            <owner.CourseAdmin
+                            <CourseAdmin
                               course={{
                                 id: row.id,
                                 title: row.title,
@@ -200,7 +203,7 @@ export default async function TrainingScreen() {
                             />
                           </TableCell>
                         ) : null}
-                        {viewer.isDemo ? (
+                        {controls.demoPlaceholders ? (
                           <TableCell>
                             {row.status !== 'completed' ? (
                               <LaterButton variant="outline" size="sm" compact>
