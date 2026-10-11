@@ -65,7 +65,7 @@ export const HIRE_WRITE_TOOL_NAMES = ['createJob', 'updateJob', 'setJobStatus', 
 /** The HR data an agent reads, who is asking, and whether they may change it. */
 export type PeopleAccess = { data: PeopleData; viewer: PeopleViewer; write?: PeopleWrite };
 
-/** HR tools that change data: employees, departments, leave and time-off. */
+/** HR tools that change data: employees, departments, leave, time-off, claims and overtime. */
 export const PEOPLE_WRITE_TOOL_NAMES = [
   'createEmployee',
   'updateEmployee',
@@ -82,6 +82,14 @@ export const PEOPLE_WRITE_TOOL_NAMES = [
   'decideLeave',
   'decideTimeOff',
   'setLeaveEntitlement',
+  'submitClaim',
+  'cancelClaim',
+  'submitOvertime',
+  'cancelOvertime',
+  'decideClaim',
+  'markClaimPaid',
+  'unmarkClaimPaid',
+  'decideOvertime',
 ] as const;
 
 export type ProductKey = 'reach' | 'crm' | 'hire' | 'people';

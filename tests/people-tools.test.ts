@@ -9,6 +9,7 @@ import { buildPeopleOverviewModel } from '@/lib/people/overview';
 import { createSeedPeopleData } from '@/lib/people/seed';
 import { asMember } from './setup/people-member-view';
 import { createSeedReachData } from '@/lib/reach/seed';
+import { rm } from '@/lib/reach/format';
 import { DEFAULT_PEOPLE_SETTINGS, type PeopleData, type PeopleViewer } from '@/lib/people/types';
 
 // A Friday in Kuala Lumpur.
@@ -450,5 +451,57 @@ describe('people tools', () => {
     const refused = Object.keys(createPeopleTools(data, HR, NOW, { ctx: { client: {} as never, orgId: 'o' }, tier: 'self', employeeId: null }));
     expect(none).toEqual([...PEOPLE_TOOL_NAMES]);
     expect(refused).toEqual([...PEOPLE_TOOL_NAMES]);
+  });
+});
+
+describe('claim and overtime lookups', () => {
+  it('has a named card for the overtime preview', () => {
+    expect(toolMeta('previewOvertime').isFallback).toBe(false);
+  });
+
+  it('offers paid as a status, and says approved means approved and not yet paid', () => {
+    const tools = createPeopleTools(data, HR, NOW);
+    const claims = tools.listClaims as unknown as {
+      inputSchema: { safeParse: (v: unknown) => { success: boolean }; shape: { status: { description?: string } } };
+    };
+    expect(claims.inputSchema.safeParse({ status: 'paid' }).success).toBe(true);
+    expect(claims.inputSchema.safeParse({ status: 'refunded' }).success).toBe(false);
+    expect(claims.inputSchema.shape.status.description).toContain('not yet paid');
+  });
+
+  it('counts a paid claim with the approved ones, from the same rows the screens use', async () => {
+    const rows = await data.listClaims();
+    const paid = { ...rows[0], id: 'paid-1', status: 'paid' as const, amount_cents: 7000, paid_on: '2026-10-08' };
+    const source: PeopleData = { ...data, listClaims: async () => [...rows, paid] };
+    const result = await runner(source)('listClaims')({});
+    const approvedCents = [...rows, paid]
+      .filter((c) => c.status === 'approved' || c.status === 'paid')
+      .reduce((sum, c) => sum + c.amount_cents, 0);
+    expect(result.approved_or_paid_total).toBe(rm(approvedCents));
+    expect((await runner(source)('listClaims')({ status: 'paid' })).claims).toMatchObject([{ status: 'paid', paid_on: '2026-10-08' }]);
+  });
+
+  it('gives a plain lookup (no change tools) no ids and no hourly rate, to HR or a member', async () => {
+    for (const result of [
+      await run('listOvertime')({}),
+      await runner(asMember(data, 'seed-emp-2'), MEMBER)('listOvertime')({}),
+    ]) {
+      for (const o of result.overtime) {
+        expect(o).not.toHaveProperty('id');
+        expect(o).not.toHaveProperty('hourly_rate');
+        expect(o).toHaveProperty('amount_calculated');
+      }
+    }
+    expect((await run('listOvertime')({})).overtime.length).toBeGreaterThan(0);
+    for (const c of (await run('listClaims')({})).claims) {
+      expect(c).not.toHaveProperty('id');
+      expect(c).not.toHaveProperty('approved_this_year');
+    }
+  });
+
+  it('never returns a receipt path', async () => {
+    const rows = await data.listClaims();
+    const source: PeopleData = { ...data, listClaims: async () => rows.map((c) => ({ ...c, receipt_path: 'u1/secret-file.png' })) };
+    expect(JSON.stringify(await runner(source)('listClaims')({}))).not.toContain('secret-file');
   });
 });
