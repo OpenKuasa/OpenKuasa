@@ -166,12 +166,13 @@ export function BentoStat({
       >
         {label}
       </p>
-      <div className="mt-1 flex items-baseline gap-2">
-        <span className="text-2xl font-bold tracking-tight tabular-nums">{value}</span>
+      {/* A figure and its chip never break inside themselves; in a narrow card the chip drops below the figure. */}
+      <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="text-2xl font-bold tracking-tight whitespace-nowrap tabular-nums">{value}</span>
         {delta != null ? (
           <span
             className={cn(
-              'rounded-full px-1.5 py-0.5 text-[11px] font-semibold',
+              'rounded-full px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap',
               deltaClass,
             )}
           >
