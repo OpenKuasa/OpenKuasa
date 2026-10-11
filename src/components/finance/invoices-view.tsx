@@ -61,6 +61,7 @@ import {
   customerChoice,
   filterInvoices,
   invoiceActions,
+  invoiceCan,
   invoiceCustomers,
   invoicesCsv,
 } from '@/lib/finance/sales-views';
@@ -91,10 +92,16 @@ export type InvoicesWriter = {
   accounts: FinanceAccount[];
   /** Every payment-in row, to know what an invoice can still take. */
   payments: PaymentInRow[];
-  /** Every credit note, so a refund can also be put against an issued one. */
-  creditNotes: CreditNoteRow[];
-  /** Every refund, to know what refunds that are pending already hold of a customer's credit. */
-  refunds: RefundRow[];
+  /**
+   * What "Credit note" and "Refund" on a row are decided by. Null when either could not be read: the page
+   * still shows, and no row offers the two.
+   */
+  followOn: {
+    /** Every credit note, so a refund can also be put against an issued one. */
+    creditNotes: CreditNoteRow[];
+    /** Every refund, to know what refunds that are pending already hold of a customer's credit. */
+    refunds: RefundRow[];
+  } | null;
 };
 
 const TREND_SERIES: Series[] = [
@@ -167,8 +174,11 @@ export function InvoicesView({
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
   const columns = writer ? 9 : 8;
   const receivable = writer ? receivableInvoices(rows, writer.payments) : [];
-  const creditable = writer ? creditableInvoices(rows) : [];
-  const targets = writer ? refundTargets(rows, writer.creditNotes, writer.refunds) : [];
+  // Null when the credit notes or the refunds could not be read: no row then offers a credit note or a refund.
+  const followOn = writer?.followOn
+    ? { creditable: creditableInvoices(rows), refundable: refundTargets(rows, writer.followOn.creditNotes, writer.followOn.refunds) }
+    : null;
+  const targets = followOn?.refundable ?? [];
   const asking = open && (open.kind === 'post' || open.kind === 'void' || open.kind === 'delete') ? open : null;
   // A form holds what was typed, so nothing else opens over it: it is closed with its own Cancel first.
   // The note that something was saved holds nothing, and locks nothing.
@@ -225,11 +235,7 @@ export function InvoicesView({
 
   // Each choice is offered exactly when the form it opens would offer this invoice.
   const menu = (invoice: InvoiceListRow, actions: InvoiceActions): RowMenuItem[] =>
-    invoiceActions(invoice, {
-      pay: receivable.some((r) => r.id === invoice.id),
-      credit: creditable.some((c) => c.id === invoice.id),
-      refund: targets.some((t) => t.key === invoiceTargetKey(invoice.id)),
-    }).map((action) => menuItem(invoice, action, actions));
+    invoiceActions(invoice, invoiceCan(invoice, { receivable, followOn })).map((action) => menuItem(invoice, action, actions));
 
   const question = (invoice: InvoiceListRow) => {
     if (!writer || !asking || asking.invoice.id !== invoice.id) return null;

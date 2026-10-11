@@ -6,6 +6,7 @@ import {
   alsoCoversInvoices,
   customerChoice,
   invoiceActions,
+  invoiceCan,
   invoiceCustomers,
   paymentInActions,
   siblingInvoices,
@@ -68,6 +69,34 @@ describe('invoiceActions, for a customer in credit', () => {
     expect(invoiceActions(invoice('sent'), EVERYTHING)).not.toContain('refund');
     expect(invoiceActions(invoice('overdue', { credited: 30, balance: 70 }), EVERYTHING)).not.toContain('refund');
     expect(invoiceActions(invoice('paid', { paid: 100, balance: 0 }), EVERYTHING)).not.toContain('refund');
+  });
+});
+
+describe('invoiceCan: what the forms offer an invoice', () => {
+  // RM 100 invoiced and paid, then RM 30 credited: the customer is RM 30 in credit.
+  const inCredit = invoice('paid', { paid: 100, credited: 30, balance: -30 });
+  const owing = invoice('sent');
+  const receivable = [{ id: owing.id }];
+  const followOn = {
+    creditable: [{ id: owing.id }, { id: inCredit.id }],
+    refundable: [
+      { kind: 'invoice' as const, id: inCredit.id },
+      { kind: 'credit_note' as const, id: 'note-1' },
+    ],
+  };
+
+  it('offers each of the three exactly when its form offers the invoice', () => {
+    expect(invoiceCan(owing, { receivable, followOn })).toEqual({ pay: true, credit: true, refund: false });
+    expect(invoiceCan(inCredit, { receivable, followOn })).toEqual({ pay: false, credit: true, refund: true });
+    // A credit note that can be refunded is not its invoice: an id is matched by kind.
+    expect(invoiceCan(invoice('paid', { id: 'note-1' }), { receivable, followOn })).toEqual({ pay: false, credit: false, refund: false });
+  });
+  it('offers neither a credit note nor a refund when the credit notes or the refunds could not be read', () => {
+    expect(invoiceCan(owing, { receivable, followOn: null })).toEqual({ pay: true, credit: false, refund: false });
+    expect(invoiceCan(inCredit, { receivable, followOn: null })).toEqual({ pay: false, credit: false, refund: false });
+    // The rest of each row's menu is as it was.
+    expect(invoiceActions(owing, invoiceCan(owing, { receivable, followOn: null }))).toEqual(['pay', 'einvoice', 'void']);
+    expect(invoiceActions(inCredit, invoiceCan(inCredit, { receivable, followOn: null }))).toEqual(['einvoice', 'void']);
   });
 });
 

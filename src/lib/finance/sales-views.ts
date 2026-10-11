@@ -211,6 +211,35 @@ export type InvoiceCan = {
 };
 
 /**
+ * What one invoice can still take, by what the three forms offer.
+ * `followOn` is null when the credit notes or the refunds could not be read:
+ * nothing can then say whether a credit note or a refund would be accepted,
+ * so neither is offered. Empty lists would not do instead: with no pending
+ * refund known, every customer in credit would be offered a refund the form
+ * cannot check. A payment in depends on neither read and is still offered.
+ */
+export function invoiceCan(
+  invoice: InvoiceListRow,
+  offers: {
+    /** `receivableInvoices`. */
+    receivable: { id: string }[];
+    followOn: {
+      /** `creditableInvoices`. */
+      creditable: { id: string }[];
+      /** `refundTargets`: invoices and credit notes. */
+      refundable: { kind: 'invoice' | 'credit_note'; id: string }[];
+    } | null;
+  },
+): InvoiceCan {
+  const { receivable, followOn } = offers;
+  return {
+    pay: receivable.some((r) => r.id === invoice.id),
+    credit: followOn !== null && followOn.creditable.some((c) => c.id === invoice.id),
+    refund: followOn !== null && followOn.refundable.some((t) => t.kind === 'invoice' && t.id === invoice.id),
+  };
+}
+
+/**
  * What an invoice's row menu offers, in order: only what the database allows
  * for its status. A draft is edited, posted or deleted, never voided. A
  * posted invoice ("Sent", "Overdue", "Paid") has its e-Invois details set and

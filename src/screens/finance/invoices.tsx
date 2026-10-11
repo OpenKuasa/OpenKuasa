@@ -11,7 +11,7 @@ import {
   setEInvoiceAction,
   voidInvoiceAction,
 } from '@/app/(app)/finance/actions';
-import { type InvoiceActions, InvoicesView } from '@/components/finance/invoices-view';
+import { type InvoiceActions, InvoicesView, type InvoicesWriter } from '@/components/finance/invoices-view';
 import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { listContacts } from '@/lib/finance/contacts';
@@ -38,6 +38,21 @@ const ACTIONS: InvoiceActions = {
   recordRefund: recordRefundAction,
 };
 
+/**
+ * The credit notes and the refunds, which only decide whether a row offers "Credit note" and "Refund".
+ * Null when either cannot be read: the invoices themselves were read, so the page shows without the two
+ * choices. Empty lists would not do: the menu would offer a refund that no pending refund is counted against.
+ */
+async function readFollowOn(ctx: Parameters<typeof listCreditNotes>[0]): Promise<InvoicesWriter['followOn']> {
+  try {
+    const [creditNotes, refunds] = await Promise.all([listCreditNotes(ctx), listRefunds(ctx)]);
+    return { creditNotes, refunds };
+  } catch (error) {
+    console.error('[finance] InvoicesScreen: credit notes or refunds could not be read:', error);
+    return null;
+  }
+}
+
 export default async function InvoicesScreen() {
   if (!hasSupabaseEnv()) {
     return <InvoicesView rows={SAMPLE_INVOICES} view={invoicesView(SAMPLE_INVOICES, SAMPLE_PAYMENTS_IN, SAMPLE_TODAY)} />;
@@ -47,15 +62,15 @@ export default async function InvoicesScreen() {
   const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
   // The payments feed "Received (MTD)" and the trend for everyone. The forms offer customers, products
   // and accounts, and a row offers a refund by what credit notes and pending refunds leave of a customer's
-  // credit; a viewer has no form and no menu, so none of them is read for them.
-  const [rows, payments, contacts, products, accounts, creditNotes, refunds] = await Promise.all([
+  // credit; a viewer has no form and no menu, so none of them is read for them. A failure of the last
+  // read costs a writer the two choices it decides, not the page; any other failure is the page's.
+  const [rows, payments, contacts, products, accounts, followOn] = await Promise.all([
     listInvoices(ctx),
     listPaymentsIn(ctx),
     canEdit ? listContacts(ctx) : [],
     canEdit ? listProducts(ctx) : [],
     canEdit ? listAccounts(ctx) : [],
-    canEdit ? listCreditNotes(ctx) : [],
-    canEdit ? listRefunds(ctx) : [],
+    canEdit ? readFollowOn(ctx) : null,
   ]);
   return (
     <InvoicesView
@@ -69,8 +84,7 @@ export default async function InvoicesScreen() {
               products: products.filter((p) => p.active),
               accounts,
               payments,
-              creditNotes,
-              refunds,
+              followOn,
             }
           : undefined
       }
