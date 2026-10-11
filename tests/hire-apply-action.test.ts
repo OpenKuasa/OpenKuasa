@@ -8,14 +8,14 @@ import type { PublicJob } from '@/lib/hire/public-careers';
  */
 
 const mocks = vi.hoisted(() => ({
-  getPublicJob: vi.fn(),
+  readPublicJob: vi.fn(),
   submitPublicApplication: vi.fn(),
   hasSupabaseEnv: vi.fn(),
 }));
 
 vi.mock('@/lib/hire/public-careers', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/hire/public-careers')>()),
-  getPublicJob: mocks.getPublicJob,
+  readPublicJob: mocks.readPublicJob,
 }));
 vi.mock('@/lib/hire/public-applications', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/hire/public-applications')>()),
@@ -41,6 +41,8 @@ const job = (over: Partial<PublicJob> = {}): PublicJob => ({
   salaryMinCents: null, salaryMaxCents: null, form: NO_EXTRAS,
   ...over,
 });
+/** The job reader's answer when the job is there. */
+const found = (over: Partial<PublicJob> = {}) => ({ state: 'found' as const, job: job(over) });
 
 /** What a browser posts: every text field, and `consent=on` only when the box is ticked. */
 function post(over: Record<string, string | null> = {}): FormData {
@@ -63,7 +65,7 @@ const VALUES = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.hasSupabaseEnv.mockReturnValue(true);
-  mocks.getPublicJob.mockResolvedValue(job());
+  mocks.readPublicJob.mockResolvedValue(found());
   mocks.submitPublicApplication.mockResolvedValue({ kind: 'ok' });
 });
 
@@ -80,14 +82,14 @@ describe('a filled honeypot', () => {
   it('is thanked by first name, with nothing read and nothing sent', async () => {
     const state = await applyAction(ORG, JOB, undefined, post({ [APPLY_HONEYPOT]: 'https://spam.example' }));
     expect(state).toEqual({ done: { firstName: 'Aisyah' } });
-    expect(mocks.getPublicJob).not.toHaveBeenCalled();
+    expect(mocks.readPublicJob).not.toHaveBeenCalled();
     expect(mocks.submitPublicApplication).not.toHaveBeenCalled();
   });
 
   it('is thanked even when the rest of the form is wrong', async () => {
     const state = await applyAction(ORG, JOB, undefined, post({ email: 'nope', consent: null, [APPLY_HONEYPOT]: 'x' }));
     expect(state).toEqual({ done: { firstName: 'Aisyah' } });
-    expect(mocks.getPublicJob).not.toHaveBeenCalled();
+    expect(mocks.readPublicJob).not.toHaveBeenCalled();
   });
 });
 
@@ -97,14 +99,14 @@ describe('an address that cannot be a job', () => {
     ['the job id', ORG, "1' or '1'='1"],
   ])('is closed, with nothing read and nothing sent, when %s is not a UUID', async (_what, orgId, jobId) => {
     expect(await applyAction(orgId, jobId, undefined, post())).toEqual({ closed: true });
-    expect(mocks.getPublicJob).not.toHaveBeenCalled();
+    expect(mocks.readPublicJob).not.toHaveBeenCalled();
     expect(mocks.submitPublicApplication).not.toHaveBeenCalled();
   });
 
   it('is closed, with nothing read, on a site with no database', async () => {
     mocks.hasSupabaseEnv.mockReturnValue(false);
     expect(await applyAction(ORG, JOB, undefined, post())).toEqual({ closed: true });
-    expect(mocks.getPublicJob).not.toHaveBeenCalled();
+    expect(mocks.readPublicJob).not.toHaveBeenCalled();
     expect(mocks.submitPublicApplication).not.toHaveBeenCalled();
   });
 });
@@ -112,23 +114,32 @@ describe('an address that cannot be a job', () => {
 describe('the job is read again by the action', () => {
   it('reads it with a client that carries no session', async () => {
     await applyAction(ORG, JOB, undefined, post());
-    expect(mocks.getPublicJob).toHaveBeenCalledWith({ anonymous: true }, ORG, JOB);
+    expect(mocks.readPublicJob).toHaveBeenCalledWith({ anonymous: true }, ORG, JOB);
   });
 
   it('is closed when there is no such job', async () => {
-    mocks.getPublicJob.mockResolvedValue(null);
+    mocks.readPublicJob.mockResolvedValue({ state: 'missing' });
     expect(await applyAction(ORG, JOB, undefined, post())).toEqual({ closed: true });
     expect(mocks.submitPublicApplication).not.toHaveBeenCalled();
   });
 
+  it('says it failed, keeps what was typed and sends nothing when the job could not be read', async () => {
+    mocks.readPublicJob.mockResolvedValue({ state: 'failed' });
+    // Not "closed": a read that failed says nothing about the job.
+    expect(await applyAction(ORG, JOB, undefined, post({ phone: '012-345 6789' }))).toEqual({
+      error: APPLY_MESSAGES.failed, values: { ...VALUES, phone: '012-345 6789' },
+    });
+    expect(mocks.submitPublicApplication).not.toHaveBeenCalled();
+  });
+
   it('is closed when the job has stopped taking applications', async () => {
-    mocks.getPublicJob.mockResolvedValue(job({ accepting: false }));
+    mocks.readPublicJob.mockResolvedValue(found({ accepting: false }));
     expect(await applyAction(ORG, JOB, undefined, post())).toEqual({ closed: true });
     expect(mocks.submitPublicApplication).not.toHaveBeenCalled();
   });
 
   it('takes what is required from the job, not from the post: no CV to a job that requires one', async () => {
-    mocks.getPublicJob.mockResolvedValue(job({ form: { ...NO_EXTRAS, require_cv: true } }));
+    mocks.readPublicJob.mockResolvedValue(found({ form: { ...NO_EXTRAS, require_cv: true } }));
     // A post that claims nothing is required changes nothing.
     const state = await applyAction(ORG, JOB, undefined, post({ require_cv: 'false', form: '{"require_cv":false}' }));
     expect(state?.errors).toEqual({ cv_url: APPLY_MESSAGES.cvRequired });
@@ -136,7 +147,7 @@ describe('the job is read again by the action', () => {
   });
 
   it('sends the job\'s own form with the application', async () => {
-    mocks.getPublicJob.mockResolvedValue(job({ form: ALL }));
+    mocks.readPublicJob.mockResolvedValue(found({ form: ALL }));
     const filled = {
       cv_url: 'https://example.com/cv.pdf', cover_letter: 'I close books on time.',
       portfolio_url: 'https://example.com/work', expected_salary: '3500',
@@ -179,7 +190,7 @@ describe('a form with problems', () => {
   });
 
   it('counts a line break of a posted cover letter once, as the browser counted it', async () => {
-    mocks.getPublicJob.mockResolvedValue(job({ form: { ...NO_EXTRAS, require_cover_letter: true } }));
+    mocks.readPublicJob.mockResolvedValue(found({ form: { ...NO_EXTRAS, require_cover_letter: true } }));
     // 4,000 characters as typed; a form post sends each of the 100 line breaks as two.
     const lines = Array.from({ length: 101 }, () => 'a'.repeat(39)).join('\r\n').slice(0, 4100);
     expect(lines.replace(/\r\n/g, '\n')).toHaveLength(4000);

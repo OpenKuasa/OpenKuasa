@@ -48,6 +48,9 @@ export const APPLY_MESSAGES = {
   closed: 'This role is no longer taking applications.',
   throttled: 'Lots of people are applying right now. Please try again in a minute.',
   failed: "Something went wrong on our side. Your application wasn't sent. Please try again.",
+  /** The post got no answer, so nobody knows whether it arrived: this one does not say "wasn't sent". */
+  unreachable:
+    "We couldn't reach the server, so we don't know whether your application was sent. Check your connection and try again.",
 } as const;
 
 /** The fields this workspace's form shows. A CV link and a cover letter appear only when required. */

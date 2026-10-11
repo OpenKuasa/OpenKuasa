@@ -1,7 +1,7 @@
 'use client';
 
 import {
-  useActionState, useEffect, useRef, useState,
+  useActionState, useEffect, useRef, useState, useTransition,
   type ChangeEvent, type FocusEvent, type FormEvent, type MouseEvent, type ReactNode,
 } from 'react';
 import { CAREERS_LINK_FOCUS } from '@/components/hire/public-careers-shell';
@@ -22,11 +22,14 @@ import type { ApplyState } from './actions';
  * 1. What the server answered. Everything drawn here comes from `state`, the
  *    action's last answer: the problems, what was typed, the thank-you. That
  *    is all there is before the script loads, and all there ever is without
- *    one: the form posts as a plain form and the page comes back with the
- *    answer in it.
- * 2. Checking in the browser (`useLiveChecks`). With the script running, a
- *    field is checked when the visitor leaves it and the whole form before it
- *    is sent, by the same rules and in the same words as the server.
+ *    one: the form posts as a plain form through `useActionState` and the
+ *    page comes back with the answer in it.
+ * 2. The script (`useSending`, `useLiveChecks`). With it running, a field is
+ *    checked when the visitor leaves it and the whole form before it is sent,
+ *    by the same rules and in the same words as the server. The form is then
+ *    sent from here, not posted by the browser, so that a post that fails
+ *    can be caught and said in the form with everything typed still in it.
+ *    The answer is drawn by layer 1, exactly as a posted one would be.
  */
 
 const LABELS: Record<Exclude<ApplyField, 'consent'>, string> = {
@@ -55,7 +58,7 @@ const letterLength = (letter: string) => [...letter.trim()].length;
 /** A text area's line breaks can arrive as two characters; the server counts them as one. */
 const oneLineBreak = (value: string) => value.replace(/\r\n?/g, '\n');
 
-/* ---- layer 2: checking in the browser -------------------------------- */
+/* ---- layer 2: the script --------------------------------------------- */
 
 /** The form's fields as they stand, read the way the action reads a post. */
 function typed(formElement: HTMLFormElement): ApplyValues {
@@ -70,6 +73,39 @@ function typed(formElement: HTMLFormElement): ApplyValues {
     expected_salary: text('expected_salary'),
     consent: data.get('consent') === 'on',
   };
+}
+
+type Action = (prev: ApplyState, formData: FormData) => Promise<ApplyState>;
+
+/**
+ * Sends the form from the script and keeps the answer. The action is called
+ * as a function, not through the form's `action`: a call made that way cannot
+ * be caught (a failure replaces the whole page with an error screen), and
+ * when it finishes React resets the form. Called from a submit handler that
+ * has stopped the browser's own post, neither happens: a failure is caught
+ * here, and no field is touched.
+ */
+function useSending(action: Action) {
+  const [answer, setAnswer] = useState<ApplyState>(undefined);
+  const [pending, startSending] = useTransition();
+
+  /** `values` is what the form holds, to show again if no answer comes. `settled` runs once it is over, either way. */
+  const send = (formData: FormData, values: ApplyValues, settled: () => void) => {
+    startSending(async () => {
+      try {
+        // The previous answer is not sent back: the action ignores it, and it holds what was typed.
+        const next = await action(undefined, formData);
+        setAnswer(next ?? { error: APPLY_MESSAGES.failed, values });
+      } catch {
+        // No connection, a page older than the site, a post too large: nothing is known but that no answer came.
+        setAnswer({ error: APPLY_MESSAGES.unreachable, values });
+      } finally {
+        settled();
+      }
+    });
+  };
+
+  return { answer, pending, send };
 }
 
 type Checks = {
@@ -91,10 +127,14 @@ const fromServer = (state: ApplyState): Checks => ({
  * The problems to show and the handlers that find them. Until a handler runs,
  * this returns exactly what the server answered.
  */
-function useLiveChecks(state: ApplyState, form: ApplicationFormValues) {
+function useLiveChecks(
+  state: ApplyState,
+  form: ApplicationFormValues,
+  send: (formData: FormData, values: ApplyValues, settled: () => void) => void,
+) {
   const [checks, setChecks] = useState<Checks | null>(null);
   const live = checks && checks.after === state ? checks : fromServer(state);
-  /** True from the moment a post is let through until the server answers. */
+  /** True from the moment the form is sent until the answer, or the failure, comes back. */
   const sending = useRef(false);
   /** The field to move to once the page has been redrawn with its problems. */
   const wanted = useRef<ApplyField | null>(null);
@@ -141,21 +181,26 @@ function useLiveChecks(state: ApplyState, form: ApplicationFormValues) {
     if (event.currentTarget.checked && event.currentTarget.form) check('consent', event.currentTarget.form);
   };
 
-  /** Sending checks everything. Any problem stops the post; none lets it through, once. */
+  /**
+   * Sending checks everything. Any problem stops it; none sends the form, once.
+   * The browser's own post is always stopped: this handler only runs with the
+   * script, and with the script the form is sent from here.
+   */
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
-    if (sending.current) {
-      event.preventDefault();
-      return;
-    }
-    const errors = applyProblems(typed(event.currentTarget), form);
+    event.preventDefault();
+    if (sending.current) return;
+    const values = typed(event.currentTarget);
+    const errors = applyProblems(values, form);
     const first = shownFields(form).find((field) => errors[field]);
     setChecks({ after: state, errors, summarised: true, retried: true });
     if (first) {
-      event.preventDefault();
       wanted.current = first;
-    } else {
-      sending.current = true;
+      return;
     }
+    sending.current = true;
+    send(new FormData(event.currentTarget), values, () => {
+      sending.current = false;
+    });
   };
 
   /** A summary link goes to its field and puts the cursor in it. Without the script it only scrolls there. */
@@ -229,7 +274,8 @@ function Field({ field, form, children }: { field: Exclude<ApplyField, 'consent'
 
 /**
  * The apply form for one job. Works as a plain form post without JavaScript;
- * with it, the page is not reloaded and problems are found before sending.
+ * with it, the page is not reloaded, problems are found before sending, and a
+ * post that fails leaves the form as it was.
  */
 export function ApplyForm({
   action,
@@ -237,14 +283,20 @@ export function ApplyForm({
   orgName,
 }: {
   /** The submit action, already tied to this workspace and job. */
-  action: (prev: ApplyState, formData: FormData) => Promise<ApplyState>;
+  action: Action;
   /** What this workspace's form asks for. Decides what is shown; the action decides for itself what is required. */
   form: ApplicationFormValues;
   orgName: string;
 }) {
-  const [state, formAction, pending] = useActionState<ApplyState, FormData>(action, undefined);
+  // Without the script: the browser posts the form and the page comes back with the answer in `posted`.
+  const [posted, formAction, posting] = useActionState<ApplyState, FormData>(action, undefined);
+  // With it: the form is sent from the submit handler, and the answer is kept here.
+  const sent = useSending(action);
+  /** The last answer, however it came. Everything below is drawn from it alone. */
+  const state = sent.answer ?? posted;
+  const pending = posting || sent.pending;
   const values = state?.values;
-  const { errors, summarised, notice, onBlur, onConsentChange, onSubmit, goTo } = useLiveChecks(state, form);
+  const { errors, summarised, notice, onBlur, onConsentChange, onSubmit, goTo } = useLiveChecks(state, form, sent.send);
   /** Null until the visitor types in the cover letter; until then the count is of what the server sent back. */
   const [letterCount, setLetterCount] = useState<number | null>(null);
 

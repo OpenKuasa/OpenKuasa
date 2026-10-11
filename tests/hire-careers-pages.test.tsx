@@ -12,6 +12,7 @@ const NOT_FOUND = 'NOT_FOUND_MARKER';
 const mocks = vi.hoisted(() => ({
   getPublicCareers: vi.fn(),
   getPublicJob: vi.fn(),
+  readPublicJob: vi.fn(),
   notFound: vi.fn(),
   hasSupabaseEnv: vi.fn(),
   connection: vi.fn(),
@@ -23,6 +24,8 @@ vi.mock('@/lib/hire/public-careers', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/hire/public-careers')>()),
   getPublicCareers: mocks.getPublicCareers,
   getPublicJob: mocks.getPublicJob,
+  // The page reads a job with the one above; the action it hands the form reads it with this one.
+  readPublicJob: mocks.readPublicJob,
 }));
 vi.mock('next/navigation', () => ({ notFound: mocks.notFound }));
 // The real one throws outside a request ("`connection` was called outside a request scope").
@@ -46,6 +49,7 @@ vi.mock('@/lib/hire/public-applications', async (importOriginal) => ({
 import BoardPage, { generateMetadata as boardMetadata } from '@/app/careers/[orgId]/page';
 import JobPage, { generateMetadata as jobMetadata } from '@/app/careers/[orgId]/[jobId]/page';
 import CareersNotFound, { metadata as notFoundMetadata } from '@/app/careers/[orgId]/not-found';
+import CareersError from '@/app/careers/error';
 
 const ORG = '11111111-1111-4111-8111-111111111111';
 const JOB_A = '22222222-2222-4222-8222-222222222222';
@@ -84,6 +88,7 @@ beforeEach(() => {
   mocks.notFound.mockImplementation(() => { throw new Error(NOT_FOUND); });
   mocks.getPublicCareers.mockResolvedValue(careers());
   mocks.getPublicJob.mockResolvedValue(job());
+  mocks.readPublicJob.mockResolvedValue({ state: 'found', job: job() });
 });
 
 describe('the board page', () => {
@@ -261,14 +266,13 @@ describe('the job page', () => {
   it('hands the form an action already tied to this workspace and this job', async () => {
     await renderJob();
     const { action } = mocks.applyForm.mock.calls[0][0];
-    mocks.getPublicJob.mockClear();
     mocks.submitPublicApplication.mockResolvedValue({ kind: 'ok' });
     const formData = new FormData();
     for (const [key, value] of Object.entries({ name: 'Aisyah Rahman', email: 'aisyah@example.com', consent: 'on' })) {
       formData.set(key, value);
     }
     expect(await action(undefined, formData)).toEqual({ done: { firstName: 'Aisyah' } });
-    expect(mocks.getPublicJob).toHaveBeenCalledWith({ anonymous: true }, ORG, JOB_A);
+    expect(mocks.readPublicJob).toHaveBeenCalledWith({ anonymous: true }, ORG, JOB_A);
     expect(mocks.submitPublicApplication.mock.calls[0].slice(1, 3)).toEqual([ORG, JOB_A]);
   });
 
@@ -311,6 +315,26 @@ describe('the page for a link with nothing behind it', () => {
       robots: { index: false, follow: false },
       openGraph: { title: 'Page not available' },
     });
+  });
+});
+
+describe('the page for anything that went wrong under /careers', () => {
+  const error = Object.assign(new Error('relation "hire_jobs" does not exist'), { digest: 'abc123' });
+  const html = renderToStaticMarkup(<CareersError error={error} retry={() => {}} reset={() => {}} />);
+
+  it('says something went wrong inside the careers frame, with a button to try again', () => {
+    expect(html).toMatch(/<h1[^>]*>Something went wrong<\/h1>/);
+    expect(html).toMatch(/This page couldn(?:'|&#x27;)t be shown\. Please try again\./);
+    expect(count(html, /<main[^>]*id="main"/g)).toBe(1);
+    expect(html).toContain('Powered by OpenKuasa');
+    const button = /<button([^>]*)>([\s\S]*?)<\/button>/.exec(html)!;
+    expect(button[1]).toContain('type="button"');
+    expect(button[2]).toBe('Try again');
+    expect(button[1]).toMatch(/class="[^"]*\bh-11\b/);
+  });
+  it('shows nothing of the error itself', () => {
+    expect(html).not.toContain('hire_jobs');
+    expect(html).not.toContain('abc123');
   });
 });
 

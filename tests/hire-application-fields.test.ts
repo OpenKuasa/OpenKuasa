@@ -87,3 +87,11 @@ describe('the name on the thank-you', () => {
     expect(firstName('')).toBe('');
   });
 });
+
+describe('the words for a post that did not arrive', () => {
+  it('says the outcome is not known, and to try again', () => {
+    expect(APPLY_MESSAGES.unreachable).toBe(
+      "We couldn't reach the server, so we don't know whether your application was sent. Check your connection and try again.",
+    );
+  });
+});

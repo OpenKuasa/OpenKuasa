@@ -11,7 +11,7 @@ import {
   type ApplyValues,
 } from '@/lib/hire/application-fields';
 import { submitPublicApplication } from '@/lib/hire/public-applications';
-import { getPublicJob } from '@/lib/hire/public-careers';
+import { readPublicJob } from '@/lib/hire/public-careers';
 import { createAnonymousClient } from '@/lib/supabase/anonymous';
 
 /** What the apply form shows after an application has been tried. */
@@ -79,8 +79,11 @@ export async function applyAction(
   if (!isUuid(orgId) || !isUuid(jobId) || !hasSupabaseEnv()) return { closed: true };
 
   const client = createAnonymousClient();
-  const job = await getPublicJob(client, orgId, jobId);
-  if (!job || !job.accepting) return { closed: true };
+  const lookup = await readPublicJob(client, orgId, jobId);
+  // The read did not work, which says nothing about the job: the form is kept, to be sent again.
+  if (lookup.state === 'failed') return { error: APPLY_MESSAGES.failed, values };
+  if (lookup.state === 'missing' || !lookup.job.accepting) return { closed: true };
+  const { job } = lookup;
 
   const errors = applyProblems(values, job.form);
   if (Object.keys(errors).length > 0) return { errors, values };
