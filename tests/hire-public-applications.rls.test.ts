@@ -2,25 +2,19 @@
 //
 // Live checks of public.submit_public_application and of what a signed-out visitor can and cannot do.
 //
-// What stays behind in the live database, and why: the rows this file creates through the function
-// (candidates, applications, notifications, and the private rate-limit ticks) cannot be removed by a
-// user. An owner can read candidates and applications but not insert, update or delete them (they are
-// read-only inside the app until a later slice). So they stay in the throwaway workspaces this run
-// makes, which stay too, as in the other RLS files. afterAll switches every board and form switch this
-// run turned on back off, deletes the jobs that have no applications, and sets the jobs that have
-// applications to closed (a job with applications cannot be deleted).
+// The rows this file creates through the function (candidates, applications, notifications, rate-limit
+// ticks) cannot be removed by a user, so they go with their throwaway workspaces: the shared
+// live-workspaces helper deletes those (and the anonymous users) when the file finishes.
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { type SupabaseClient } from '@supabase/supabase-js';
 import { createAnonymousClient } from '@/lib/supabase/anonymous';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { createOrg, joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const client = (): SupabaseClient =>
-  createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
+const client = liveClient;
 
 const PREFIX = 'RLS apply job';
 const OWNER_ORG_NAME = 'Hire Apply Owner Sdn Bhd';
@@ -38,9 +32,9 @@ const uniqueEmail = () => `rls-${RUN}-${++emailCounter}@example.com`;
 
 async function ownedOrg(name: string) {
   const c = client();
-  const { error: e1 } = await c.auth.signInAnonymously();
+  const { error: e1 } = await signInAnon(c);
   expect(e1, e1?.message).toBeNull();
-  const { data: orgId, error } = await c.rpc('create_org_for_current_user', { org_name: name });
+  const { data: orgId, error } = await createOrg(c, name);
   expect(error, error?.message).toBeNull();
   return { c, orgId: orgId as string };
 }
@@ -197,8 +191,8 @@ beforeAll(async () => {
   owner = await ownedOrg(OWNER_ORG_NAME);
   other = await ownedOrg('Hire Apply Other Sdn Bhd');
   viewer = client();
-  await viewer.auth.signInAnonymously();
-  const { data, error } = await viewer.rpc('join_demo_org');
+  await signInAnon(viewer);
+  const { data, error } = await joinDemo(viewer);
   expect(error, error?.message).toBeNull();
   demoId = data as string;
   visitor = createAnonymousClient();
@@ -217,19 +211,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!hasSupabaseEnv || !owner) return;
-  // Switch every board and form switch this run turned on back off (a settings row cannot be deleted by a user).
-  for (const who of [owner, other]) {
-    await who?.c.from('hire_settings').update({ careers_enabled: false, ...ALL_OFF }).eq('org_id', who.orgId);
-  }
-  // A job with applications cannot be deleted: close it. The rest are deleted.
-  for (const { who, id } of made) {
-    const applications = await who.c.from('hire_applications').select('*', { count: 'exact', head: true }).eq('job_id', id);
-    if (applications.error || (applications.count ?? 0) > 0) {
-      await who.c.from('hire_jobs').update({ status: 'closed', closed_at: new Date().toISOString() }).eq('id', id);
-    } else {
-      await who.c.from('hire_jobs').delete().eq('id', id);
-    }
-  }
+  // The workspaces (and their boards, forms, jobs and applications) are deleted by the live-workspaces helper.
   for (const who of [owner, other]) await who?.c.auth.signOut();
   await viewer?.auth.signOut();
 }, 120_000);

@@ -1,16 +1,14 @@
 // tests/hire-careers.rls.test.ts
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { type SupabaseClient } from '@supabase/supabase-js';
 import { createAnonymousClient } from '@/lib/supabase/anonymous';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { createOrg, joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const client = (): SupabaseClient =>
-  createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
+const client = liveClient;
 
 const PREFIX = 'RLS careers job';
 const OWNER_ORG_NAME = 'Hire Careers Owner Sdn Bhd';
@@ -18,9 +16,9 @@ const FORBIDDEN_KEYS = ['headcount', 'status', 'created_at', 'closed_at'];
 
 async function ownedOrg(name: string) {
   const c = client();
-  const { error: e1 } = await c.auth.signInAnonymously();
+  const { error: e1 } = await signInAnon(c);
   expect(e1, e1?.message).toBeNull();
-  const { data: orgId, error } = await c.rpc('create_org_for_current_user', { org_name: name });
+  const { data: orgId, error } = await createOrg(c, name);
   expect(error, error?.message).toBeNull();
   return { c, orgId: orgId as string };
 }
@@ -93,8 +91,8 @@ beforeAll(async () => {
   other = await ownedOrg('Hire Careers Other Sdn Bhd');
   empty = await ownedOrg('Hire Careers Empty Sdn Bhd');
   viewer = client();
-  await viewer.auth.signInAnonymously();
-  const { data, error } = await viewer.rpc('join_demo_org');
+  await signInAnon(viewer);
+  const { data, error } = await joinDemo(viewer);
   expect(error, error?.message).toBeNull();
   demoId = data as string;
   visitor = createAnonymousClient();
@@ -115,12 +113,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  // Switch every board this run turned on back off (a settings row cannot be deleted by a user),
-  // then remove the jobs (they have no applications). The workspaces themselves stay, as in
-  // the other RLS files.
+  // The workspaces (and their boards and jobs) are deleted by the live-workspaces helper.
   for (const who of [owner, other, empty]) {
-    await who?.c.from('hire_settings').update({ careers_enabled: false }).eq('org_id', who.orgId);
-    await who?.c.from('hire_jobs').delete().eq('org_id', who.orgId).like('title', `${PREFIX}%`);
     await who?.c.auth.signOut();
   }
   await viewer?.auth.signOut();

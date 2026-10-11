@@ -4,19 +4,16 @@
 // (Lekir slice 2e). Needs NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY and
 // SUPABASE_SERVICE_ROLE_KEY; without all three every case is skipped.
 //
-// What stays behind in the live database, and why: the rows this file creates through the function
-// (candidates, applications, notifications, and the private rate-limit ticks) cannot be removed by a
-// user, and no delete path for an application exists yet, so they stay in the throwaway workspaces this
-// run makes, which stay too, as in the other RLS files. The anonymous users this run signs in stay
-// too. afterAll removes every stored object this run uploaded (with the service client, so an
-// application row may keep a cv_path whose file is gone), switches every board and form switch this
-// run turned on back off, deletes the jobs that have no applications, and sets the jobs that have
-// applications to closed. The deletion trigger is not exercised here: Task 7 proves it by hand.
+// Cleanup: afterAll removes every stored object this run uploaded (with the service client, so an
+// application row may keep a cv_path whose file is gone). That has to happen while the workspaces still
+// exist; the shared live-workspaces helper then deletes the workspaces (and with them the jobs,
+// applications, candidates, notifications and settings this file made) and the anonymous users. The deletion trigger is not exercised here: Task 7 proves it by hand.
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { createAnonymousClient } from '@/lib/supabase/anonymous';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { createOrg, joinDemo, liveClient, signInAnon } from './helpers/live-workspaces';
 
 const hasService = hasSupabaseEnv && Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
 const testWithSupabase = hasService ? test : test.skip;
@@ -28,11 +25,11 @@ if (!hasService) {
   );
 }
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const noSession = { auth: { persistSession: false, autoRefreshToken: false } };
-const client = (): SupabaseClient => createClient(url, anon, noSession);
-const serviceClient = (): SupabaseClient => createClient(url, process.env.SUPABASE_SERVICE_ROLE_KEY!, noSession);
+const client = liveClient;
+const serviceClient = (): SupabaseClient =>
+  createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
 
 const BUCKET = 'hire-cvs';
 const PREFIX = 'RLS cv job';
@@ -49,9 +46,9 @@ const uniqueEmail = () => `rls-cv-${RUN}-${++emailCounter}@example.com`;
 
 async function ownedOrg(name: string) {
   const c = client();
-  const { error: e1 } = await c.auth.signInAnonymously();
+  const { error: e1 } = await signInAnon(c);
   expect(e1, e1?.message).toBeNull();
-  const { data: orgId, error } = await c.rpc('create_org_for_current_user', { org_name: name });
+  const { data: orgId, error } = await createOrg(c, name);
   expect(error, error?.message).toBeNull();
   return { c, orgId: orgId as string };
 }
@@ -69,8 +66,6 @@ let demoId: string;
 let openJob: { id: string; title: string };
 let secondJob: { id: string; title: string };
 
-// Every job this run makes, so afterAll can delete or close it.
-const made: Array<{ who: Owned; id: string }> = [];
 // Every object path this run stored, so afterAll can remove it.
 const stored: string[] = [];
 
@@ -83,7 +78,6 @@ async function newJob(who: Owned, title: string, fields: Record<string, unknown>
     .single();
   expect(ins.error, ins.error?.message).toBeNull();
   const created = { id: (ins.data as { id: string }).id, title: full };
-  made.push({ who, id: created.id });
   return created;
 }
 
@@ -243,12 +237,12 @@ beforeAll(async () => {
   owner = await ownedOrg('Hire CV Owner Sdn Bhd');
   other = await ownedOrg('Hire CV Other Sdn Bhd');
   viewer = client();
-  await viewer.auth.signInAnonymously();
-  const { data, error } = await viewer.rpc('join_demo_org');
+  await signInAnon(viewer);
+  const { data, error } = await joinDemo(viewer);
   expect(error, error?.message).toBeNull();
   demoId = data as string;
   stranger = client();
-  const signedIn = await stranger.auth.signInAnonymously();
+  const signedIn = await signInAnon(stranger);
   expect(signedIn.error, signedIn.error?.message).toBeNull();
   visitor = createAnonymousClient();
 
@@ -267,35 +261,11 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!hasService || !owner) return;
-  // Remove every object this run stored. Never let cleanup fail the run.
-  try {
-    for (let i = 0; i < stored.length; i += 50) {
-      await svc.storage.from(BUCKET).remove(stored.slice(i, i + 50));
-    }
-  } catch {
-    // ignore
-  }
-  try {
-    for (const who of [owner, other]) {
-      await who?.c.from('hire_settings').update({ careers_enabled: false, ...ALL_OFF }).eq('org_id', who.orgId);
-    }
-    // A job with applications cannot be deleted: close it. The rest are deleted.
-    for (const { who, id } of made) {
-      const applications = await who.c
-        .from('hire_applications')
-        .select('*', { count: 'exact', head: true })
-        .eq('job_id', id);
-      if (applications.error || (applications.count ?? 0) > 0) {
-        await who.c.from('hire_jobs').update({ status: 'closed', closed_at: new Date().toISOString() }).eq('id', id);
-      } else {
-        await who.c.from('hire_jobs').delete().eq('id', id);
-      }
-    }
-    for (const who of [owner, other]) await who?.c.auth.signOut();
-    await viewer?.auth.signOut();
-    await stranger?.auth.signOut();
-  } catch {
-    // ignore
+  // Remove every object this run stored, while the workspaces they belong to still exist (the
+  // live-workspaces helper deletes those afterwards). A failed removal fails this hook.
+  for (let i = 0; i < stored.length; i += 50) {
+    const removed = await svc.storage.from(BUCKET).remove(stored.slice(i, i + 50));
+    expect(removed.error, removed.error?.message).toBeNull();
   }
 }, 120_000);
 
