@@ -4,6 +4,8 @@ import { AreaTrend, type Series } from '@/components/charts';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
 import { LiveDot } from '@/components/ui/live-dot';
+import { AddLeaveFor, type LeaveEmployee } from '@/components/people/add-leave-for';
+import { DecideButtons } from '@/components/people/decide-buttons';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { APPROVAL_QUEUES, type ApprovalQueue, type ApprovalsModel } from '@/lib/people/approvals';
 import { isTeamView } from '@/lib/people/own';
@@ -34,17 +36,22 @@ function Breakdown({ rows }: { rows: NonNullable<ApprovalsModel['breakdown']> })
 }
 
 /**
- * The layout the four approval queues share. Read-only: Approve, Reject and
- * Export are disabled until the decisions are built.
+ * The layout the four approval queues share. On the queues whose config
+ * `decides` (leave, time-off) Approve, Reject and Cancel work; on the others
+ * (claims, overtime) they stay disabled, as does Export. A demo visitor sees
+ * the working controls disabled.
  */
 export function ApprovalsScreen({
   queue,
   model,
   viewer,
+  employees,
 }: {
   queue: ApprovalQueue;
   model: ApprovalsModel | null;
   viewer: PeopleViewer;
+  /** Active employees, for "Add leave for…" on the leave queue; omitted elsewhere. */
+  employees?: LeaveEmployee[];
 }) {
   const config = APPROVAL_QUEUES[queue];
   if (!isTeamView(viewer)) return <HrOnlyScreen title={config.title} />;
@@ -63,9 +70,12 @@ export function ApprovalsScreen({
         title={config.title}
         subtitle={config.subtitle}
         actions={
-          <LaterButton variant="outline" size="sm" icon={Download}>
-            Export
-          </LaterButton>
+          <div className="flex flex-wrap items-center gap-2">
+            {queue === 'leave' && employees ? <AddLeaveFor employees={employees} disabled={viewer.isDemo} /> : null}
+            <LaterButton variant="outline" size="sm" icon={Download}>
+              Export
+            </LaterButton>
+          </div>
         }
       />
 
@@ -129,7 +139,13 @@ export function ApprovalsScreen({
 
         <BentoCard
           title={config.tableTitle}
-          subtitle={`Most recent first · Approve and Reject: ${LATER_NOTE.toLowerCase()}`}
+          subtitle={
+            config.decides
+              ? viewer.isDemo
+                ? 'Most recent first · Sign up to decide requests in your own workspace'
+                : 'Most recent first'
+              : `Most recent first · Approve and Reject: ${LATER_NOTE.toLowerCase()}`
+          }
           icon={ListChecks}
           flush
           className="col-span-2 md:col-span-12"
@@ -168,13 +184,27 @@ export function ApprovalsScreen({
                         </TableCell>
                       ))}
                       <TableCell>
-                        <span className="flex items-center gap-2">
+                        <span className="flex flex-wrap items-center gap-2">
                           <LiveDot active={row.pending} />
                           <StatusPill tone={requestTone(row.status)}>{row.status_label}</StatusPill>
+                          {row.yours ? <StatusPill tone="neutral">Yours</StatusPill> : null}
+                          {row.over_by > 0 ? (
+                            <StatusPill tone="pending">
+                              Over balance by {row.over_by} {row.over_by === 1 ? 'day' : 'days'}
+                            </StatusPill>
+                          ) : null}
                         </span>
                       </TableCell>
                       <TableCell>
-                        {row.pending ? (
+                        {config.decides ? (
+                          <DecideButtons
+                            kind={queue === 'leave' ? 'leave' : 'time_off'}
+                            id={row.id}
+                            pending={row.pending}
+                            cancellable={row.cancellable}
+                            disabled={viewer.isDemo}
+                          />
+                        ) : row.pending ? (
                           <span className="flex gap-2">
                             <LaterButton size="sm" compact>
                               Approve

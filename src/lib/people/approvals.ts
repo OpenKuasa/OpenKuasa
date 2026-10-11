@@ -1,12 +1,14 @@
 /**
  * The four approval queues (leave, financial claims, overtime, time-off) as
  * plain models. Owners and admins only: a builder returns null, having read
- * nothing, for anyone else. Nothing here changes data.
+ * nothing, for anyone else. Nothing here changes data; the leave and time-off
+ * queues' buttons do, through the actions in `leave-actions.ts`.
  */
 
 import { rm } from '@/lib/reach/format';
 import { formatDate, formatDay, hoursBetweenTimes, malaysiaDate, monthStart, todayInMalaysia } from './dates';
 import { CLAIM_CATEGORY_LABEL, REQUEST_STATUS_LABEL, isTeamView } from './own';
+import { overBalanceBy } from './leave';
 import { overtimeModel } from './overtime';
 import { leaveLabel } from './overview';
 import { bucketByWeek, sumBy } from './series';
@@ -23,6 +25,12 @@ export type ApprovalRow = {
   status_label: string;
   pending: boolean;
   created_at: string;
+  /** Days by which a pending leave request exceeds the balance; 0 everywhere else. */
+  over_by: number;
+  /** The request belongs to the viewer's own employee record. */
+  yours: boolean;
+  /** An owner or admin may cancel it: anything not already cancelled. */
+  cancellable: boolean;
 };
 
 export type ApprovalsModel = {
@@ -47,8 +55,9 @@ type QueueConfig = {
   breakdownSubtitle: string | null;
   tableTitle: string;
   columns: { label: string; right?: boolean }[];
-  /** Said once in the table's subtitle, with the note on the disabled buttons. */
   emptyText: string;
+  /** Approve, Reject and Cancel work on this queue; false keeps the disabled buttons. */
+  decides: boolean;
 };
 
 export const APPROVAL_QUEUES: Record<ApprovalQueue, QueueConfig> = {
@@ -62,6 +71,7 @@ export const APPROVAL_QUEUES: Record<ApprovalQueue, QueueConfig> = {
     tableTitle: 'Leave requests',
     columns: [{ label: 'Type' }, { label: 'From–To' }, { label: 'Days', right: true }],
     emptyText: 'No leave requests yet',
+    decides: true,
   },
   claims: {
     title: 'Claim Approvals',
@@ -73,6 +83,7 @@ export const APPROVAL_QUEUES: Record<ApprovalQueue, QueueConfig> = {
     tableTitle: 'Expense claims',
     columns: [{ label: 'Category' }, { label: 'Amount', right: true }, { label: 'Date' }],
     emptyText: 'No claims yet',
+    decides: false,
   },
   overtime: {
     title: 'Overtime Approvals',
@@ -84,6 +95,7 @@ export const APPROVAL_QUEUES: Record<ApprovalQueue, QueueConfig> = {
     tableTitle: 'Overtime claims',
     columns: [{ label: 'Date' }, { label: 'Hours', right: true }, { label: 'Amount', right: true }],
     emptyText: 'No overtime claims yet',
+    decides: false,
   },
   time_off: {
     title: 'Time-Off Approvals',
@@ -95,6 +107,7 @@ export const APPROVAL_QUEUES: Record<ApprovalQueue, QueueConfig> = {
     tableTitle: 'Time-off requests',
     columns: [{ label: 'Date' }, { label: 'Duration', right: true }, { label: 'Reason' }],
     emptyText: 'No time-off requests yet',
+    decides: true,
   },
 };
 
@@ -107,7 +120,10 @@ const dayRange = (from: string, to: string) => (from === to ? formatDay(from) : 
 /** One request of any queue, reduced to what the shared model needs. */
 type Item = {
   id: string;
+  employee_id: string;
   employee_name: string;
+  /** Days over balance, for a pending leave request. */
+  over_by?: number;
   status: RequestStatus;
   created_at: string;
   /** The request's own date: start, claim, work or off date. */
@@ -123,6 +139,7 @@ type Item = {
 
 function buildQueue(
   items: Item[],
+  viewer: PeopleViewer,
   today: string,
   format: (measure: number) => string,
   breakdown: ApprovalsModel['breakdown'],
@@ -165,6 +182,9 @@ function buildQueue(
         status_label: REQUEST_STATUS_LABEL[item.status],
         pending: item.status === 'pending',
         created_at: item.created_at,
+        over_by: item.over_by ?? 0,
+        yours: viewer.employeeId !== null && item.employee_id === viewer.employeeId,
+        cancellable: item.status !== 'cancelled',
       })),
   };
 }
@@ -182,8 +202,13 @@ const grouped = (
 export async function leaveApprovals(data: PeopleData, viewer: PeopleViewer, now: Date): Promise<ApprovalsModel | null> {
   if (!isTeamView(viewer)) return null;
   const requests = await data.listLeaveRequests();
+  // The balances of each year a pending request starts in, read only here (team viewers only get this far).
+  const years = [...new Set(requests.filter((r) => r.status === 'pending').map((r) => Number(r.start_date.slice(0, 4))))];
+  const balances = (await Promise.all(years.map((year) => data.listLeaveBalances(year)))).flat();
   const items: Item[] = requests.map((r) => ({
     id: r.id,
+    employee_id: r.employee_id,
+    over_by: overBalanceBy(r, balances, requests),
     employee_name: r.employee_name,
     status: r.status,
     created_at: r.created_at,
@@ -193,7 +218,7 @@ export async function leaveApprovals(data: PeopleData, viewer: PeopleViewer, now
     group: leaveLabel(r.leave_type),
     cells: [leaveLabel(r.leave_type), dayRange(r.start_date, r.end_date), String(r.days)],
   }));
-  return buildQueue(items, todayInMalaysia(now), daysText, grouped(items, daysText));
+  return buildQueue(items, viewer, todayInMalaysia(now), daysText, grouped(items, daysText));
 }
 
 export async function claimApprovals(data: PeopleData, viewer: PeopleViewer, now: Date): Promise<ApprovalsModel | null> {
@@ -201,6 +226,7 @@ export async function claimApprovals(data: PeopleData, viewer: PeopleViewer, now
   const claims = await data.listClaims();
   const items: Item[] = claims.map((c) => ({
     id: c.id,
+    employee_id: c.employee_id,
     employee_name: c.employee_name,
     status: c.status,
     created_at: c.created_at,
@@ -210,7 +236,7 @@ export async function claimApprovals(data: PeopleData, viewer: PeopleViewer, now
     group: CLAIM_CATEGORY_LABEL[c.category] ?? 'Other',
     cells: [CLAIM_CATEGORY_LABEL[c.category] ?? 'Other', rm(c.amount_cents), formatDate(c.claim_date)],
   }));
-  return buildQueue(items, todayInMalaysia(now), rm, grouped(items, rm));
+  return buildQueue(items, viewer, todayInMalaysia(now), rm, grouped(items, rm));
 }
 
 export async function overtimeApprovals(data: PeopleData, viewer: PeopleViewer, now: Date): Promise<ApprovalsModel | null> {
@@ -219,6 +245,7 @@ export async function overtimeApprovals(data: PeopleData, viewer: PeopleViewer, 
   const today = todayInMalaysia(now);
   const items: Item[] = records.map((r) => ({
     id: r.id,
+    employee_id: r.employee_id,
     employee_name: r.employee_name,
     status: r.status,
     created_at: r.created_at,
@@ -233,7 +260,7 @@ export async function overtimeApprovals(data: PeopleData, viewer: PeopleViewer, 
     value: hours,
     text: hoursText(hours),
   }));
-  return buildQueue(items, today, hoursText, breakdown);
+  return buildQueue(items, viewer, today, hoursText, breakdown);
 }
 
 export async function timeOffApprovals(data: PeopleData, viewer: PeopleViewer, now: Date): Promise<ApprovalsModel | null> {
@@ -243,6 +270,7 @@ export async function timeOffApprovals(data: PeopleData, viewer: PeopleViewer, n
     const hours = hoursBetweenTimes(r.start_time, r.end_time);
     return {
       id: r.id,
+      employee_id: r.employee_id,
       employee_name: r.employee_name,
       status: r.status,
       created_at: r.created_at,
@@ -254,5 +282,5 @@ export async function timeOffApprovals(data: PeopleData, viewer: PeopleViewer, n
     };
   });
   // The reasons are free text, so there is nothing honest to group by.
-  return buildQueue(items, todayInMalaysia(now), hoursText, null);
+  return buildQueue(items, viewer, todayInMalaysia(now), hoursText, null);
 }

@@ -6,6 +6,7 @@ import {
   linkableMembers,
   toEmployeeInput,
 } from '@/lib/people/employees';
+import { entitlementChanges, entitlementValues } from '@/components/people/entitlements-fields';
 import { createSeedPeopleData } from '@/lib/people/seed';
 import { todayInMalaysia } from '@/lib/people/dates';
 import type { Employee } from '@/lib/people/types';
@@ -131,5 +132,50 @@ describe('linkableMembers', () => {
     const staff = [person({ id: 'a', user_id: 'u1' }), person({ id: 'b', user_id: null })];
     expect(linkableMembers(members, staff, staff[1]).map((m) => m.userId)).toEqual(['u2']);
     expect(linkableMembers(members, staff, staff[0]).map((m) => m.userId)).toEqual(['u1', 'u2']);
+  });
+});
+
+describe('the entitlement fields', () => {
+  const rows = [
+    { leave_type: 'annual', year: 2026, entitled_days: 14, used_days: 2 },
+    { leave_type: 'medical', year: 2026, entitled_days: 14.5, used_days: 0 },
+    { leave_type: 'annual', year: 2025, entitled_days: 99, used_days: 0 },
+  ];
+
+  it("starts from this year's rows only, blank where there is none", () => {
+    expect(entitlementValues(rows, 2026)).toEqual({ annual: '14', medical: '14.5', emergency: '' });
+  });
+
+  it("saves only what changed, for the form's year", () => {
+    const start = entitlementValues(rows, 2026);
+    expect(entitlementChanges(start, { ...start, annual: '18', emergency: '3' }, 2026)).toEqual({
+      ok: true,
+      changes: [
+        { leave_type: 'annual', year: 2026, days: 18 },
+        { leave_type: 'emergency', year: 2026, days: 3 },
+      ],
+    });
+    expect(entitlementChanges(start, start, 2026)).toEqual({ ok: true, changes: [] });
+  });
+
+  it('never sends a blank, and accepts 0 and halves', () => {
+    const start = entitlementValues(rows, 2026);
+    expect(entitlementChanges(start, { ...start, annual: '' }, 2026)).toEqual({ ok: true, changes: [] });
+    expect(entitlementChanges(start, { ...start, annual: '0', medical: '7.5' }, 2026)).toMatchObject({
+      ok: true,
+      changes: [
+        { leave_type: 'annual', days: 0 },
+        { leave_type: 'medical', days: 7.5 },
+      ],
+    });
+  });
+
+  it('refuses a negative, a quarter day, more than a year and text, naming the type', () => {
+    const start = entitlementValues(rows, 2026);
+    for (const bad of ['-1', '1.25', '366', 'abc']) {
+      const result = entitlementChanges(start, { ...start, annual: bad }, 2026);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('Annual');
+    }
   });
 });

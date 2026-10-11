@@ -12,9 +12,23 @@ import {
   toEmployeeInput,
 } from '@/lib/people/employees';
 import type { Department, Employee, EmployeePrivate, EmployeeStatus, EmploymentType } from '@/lib/people/types';
+import {
+  type EntitlementChange,
+  EntitlementsFields,
+  type EntitlementType,
+  type LoadedEntitlement,
+  entitlementChanges,
+  entitlementValues,
+} from './entitlements-fields';
 
 /** The employee being edited, with their private details as loaded when the form opened. */
-export type EditingEmployee = { employee: Employee; private: EmployeePrivate | null; privateLoaded: boolean };
+export type EditingEmployee = {
+  employee: Employee;
+  private: EmployeePrivate | null;
+  privateLoaded: boolean;
+  /** This year's annual, medical and emergency balances, loaded with the private details. */
+  entitlements: { year: number; rows: LoadedEntitlement[]; loaded: boolean };
+};
 
 const NO_DEPARTMENT = 'none';
 
@@ -36,12 +50,16 @@ export function EmployeeForm({
   /** What the server said about the last attempt. */
   error: string | null;
   onCancel: () => void;
-  onSubmit: (input: Record<string, unknown>) => void;
+  onSubmit: (input: Record<string, unknown>, entitlements: EntitlementChange[]) => void;
 }) {
   const [values, setValues] = useState<EmployeeFormValues>(() =>
     employeeFormValues(initial?.employee ?? null, initial?.private ?? null),
   );
   const [invalid, setInvalid] = useState<string | null>(null);
+  const [initialEntitlements] = useState(() =>
+    initial ? entitlementValues(initial.entitlements.rows, initial.entitlements.year) : null,
+  );
+  const [entitlements, setEntitlements] = useState(initialEntitlements);
   // A new employee can always be given private details. For an edit, only when they loaded:
   // sending them unloaded would blank what is saved.
   const includePrivate = initial ? initial.privateLoaded : true;
@@ -68,8 +86,15 @@ export function EmployeeForm({
       onSubmit={(event) => {
         event.preventDefault();
         const result = toEmployeeInput(values, { includePrivate });
-        setInvalid(result.ok ? null : result.error);
-        if (result.ok) onSubmit(result.input);
+        if (!result.ok) return setInvalid(result.error);
+        let changes: EntitlementChange[] = [];
+        if (initial && initial.entitlements.loaded && initialEntitlements && entitlements) {
+          const checked = entitlementChanges(initialEntitlements, entitlements, initial.entitlements.year);
+          if (!checked.ok) return setInvalid(checked.error);
+          changes = checked.changes;
+        }
+        setInvalid(null);
+        onSubmit(result.input, changes);
       }}
     >
       <div className="grid gap-3 sm:grid-cols-2">
@@ -163,6 +188,16 @@ export function EmployeeForm({
           </p>
         )}
       </div>
+
+      {initial && entitlements ? (
+        <EntitlementsFields
+          year={initial.entitlements.year}
+          loaded={initial.entitlements.loaded}
+          values={entitlements}
+          disabled={disabled}
+          onChange={(type: EntitlementType, value: string) => setEntitlements((current) => (current ? { ...current, [type]: value } : current))}
+        />
+      ) : null}
 
       {invalid || error ? (
         <p role="alert" className="text-sm text-destructive">

@@ -11,16 +11,18 @@ import {
   setEmployeeStatusAction,
   updateEmployeeAction,
 } from '@/app/(app)/people/actions';
+import { loadLeaveEntitlementsAction, setLeaveEntitlementAction } from '@/app/(app)/people/leave-actions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { formatDay } from '@/lib/people/dates';
+import { formatDay, todayInMalaysia } from '@/lib/people/dates';
 import { EMPLOYMENT_LABEL, type EmployeeFilter, filterEmployees, linkableMembers } from '@/lib/people/employees';
 import type { WorkspaceMember } from '@/lib/people/members';
 import type { Department, Employee } from '@/lib/people/types';
 import { cn } from '@/lib/utils';
 import { type EditingEmployee, EmployeeForm } from './employee-form';
+import type { EntitlementChange } from './entitlements-fields';
 
 type ActionResult = { ok: boolean; error?: string };
 
@@ -78,9 +80,32 @@ export function EmployeesTable({
   function openEdit(employee: Employee) {
     setError(null);
     start(async () => {
-      const res = await loadEmployeePrivateAction({ id: employee.id });
-      setEditing({ employee, private: res.ok ? res.data : null, privateLoaded: res.ok });
+      const [res, balances] = await Promise.all([
+        loadEmployeePrivateAction({ id: employee.id }),
+        loadLeaveEntitlementsAction({ employee_id: employee.id }),
+      ]);
+      setEditing({
+        employee,
+        private: res.ok ? res.data : null,
+        privateLoaded: res.ok,
+        entitlements: {
+          year: Number(todayInMalaysia(new Date()).slice(0, 4)),
+          rows: balances.ok ? balances.data : [],
+          loaded: balances.ok,
+        },
+      });
     });
+  }
+
+  /** Saves the employee, then each changed entitlement, stopping at the first refusal. */
+  async function saveEdit(id: string, input: Record<string, unknown>, changes: EntitlementChange[]): Promise<ActionResult> {
+    const saved = await updateEmployeeAction({ id, ...input });
+    if (!saved.ok) return saved;
+    for (const change of changes) {
+      const res = await setLeaveEntitlementAction({ employee_id: id, ...change });
+      if (!res.ok) return { ok: false, error: `The employee was saved, but an entitlement was not: ${res.error}` };
+    }
+    return { ok: true };
   }
 
   return (
@@ -350,8 +375,8 @@ export function EmployeesTable({
                   setEditing(null);
                   setError(null);
                 }}
-                onSubmit={(input) =>
-                  act(editing ? updateEmployeeAction({ id: editing.employee.id, ...input }) : createEmployeeAction(input))
+                onSubmit={(input, changes) =>
+                  act(editing ? saveEdit(editing.employee.id, input, changes) : createEmployeeAction(input))
                 }
               />
             ) : null}

@@ -38,7 +38,11 @@ export default async function SettingsScreen() {
           {!settings ? (
             LOAD_FAILED
           ) : (
-            <ValueRow label="Annual leave (days)">{settings.annual_leave_days}</ValueRow>
+            <>
+              <ValueRow label="Annual leave (days)">{settings.annual_leave_days}</ValueRow>
+              <ValueRow label="Medical leave (days)">{settings.medical_leave_days}</ValueRow>
+              <ValueRow label="Emergency leave (days)">{settings.emergency_leave_days}</ValueRow>
+            </>
           )}
         </BentoCard>
 

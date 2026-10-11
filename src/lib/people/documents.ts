@@ -361,6 +361,8 @@ export type SettingsModel =
       hr_only: false;
       working_days: string;
       annual_leave_days: string;
+      medical_leave_days: string;
+      emergency_leave_days: string;
       overtime: { label: string; value: string }[];
       notifications: { key: string; label: string; description: string; on: boolean }[];
     };
@@ -370,6 +372,8 @@ export function buildSettingsModel(settings: PeopleSettings): SettingsModel {
     hr_only: false,
     working_days: workWeekLabel(settings.work_week),
     annual_leave_days: String(settings.default_annual_leave_days),
+    medical_leave_days: String(settings.default_medical_leave_days),
+    emergency_leave_days: String(settings.default_emergency_leave_days),
     overtime: [
       { label: 'Weekday', value: multiplier(settings.overtime_rates.weekday) },
       { label: 'Rest day', value: multiplier(settings.overtime_rates.rest_day) },

@@ -9,6 +9,7 @@ import {
 import { createSeedPeopleData } from '@/lib/people/seed';
 import type {
   Claim,
+  LeaveBalance,
   LeaveRequest,
   OvertimeRecord,
   PeopleData,
@@ -203,5 +204,108 @@ describe('the queue rules', () => {
   it('has one config per queue, with a right-aligned flag per middle column', () => {
     expect(Object.keys(APPROVAL_QUEUES).sort()).toEqual(['claims', 'leave', 'overtime', 'time_off']);
     for (const queue of Object.values(APPROVAL_QUEUES)) expect(queue.columns.length).toBe(3);
+  });
+});
+
+describe('over balance, yours and cancel on the leave queue', () => {
+  const balance = (over: Partial<LeaveBalance>): LeaveBalance => ({
+    id: 'b', employee_id: 'e1', leave_type: 'annual', year: 2026, entitled_days: 10, used_days: 8, ...over,
+  });
+
+  it('flags a pending request by what it exceeds the balance by', async () => {
+    const model = (await leaveApprovals(
+      withRows({
+        listLeaveRequests: [leave({ id: 'a', days: 5 }), leave({ id: 'b', employee_id: 'e2', days: 1 })],
+        listLeaveBalances: [balance({}), balance({ employee_id: 'e2', used_days: 0 })],
+      }),
+      HR,
+      NOW,
+    ))!;
+    expect(model.rows.find((r) => r.id === 'a')!.over_by).toBe(3);
+    expect(model.rows.find((r) => r.id === 'b')!.over_by).toBe(0);
+  });
+
+  it('does not flag a decided request, and counts other pending requests against the balance', async () => {
+    const model = (await leaveApprovals(
+      withRows({
+        listLeaveRequests: [
+          leave({ id: 'a', days: 5, status: 'approved' }),
+          leave({ id: 'b', days: 1, status: 'pending' }),
+          leave({ id: 'c', days: 1, status: 'pending', start_date: '2026-11-02', end_date: '2026-11-02' }),
+        ],
+        listLeaveBalances: [balance({ entitled_days: 10, used_days: 8 })],
+      }),
+      HR,
+      NOW,
+    ))!;
+    expect(model.rows.find((r) => r.id === 'a')!.over_by).toBe(0);
+    // 10 - 8 - 1 (the other pending request) = 1 left, so one more day does not exceed it.
+    expect(model.rows.find((r) => r.id === 'b')!.over_by).toBe(0);
+  });
+
+  it('reads the balances of each year a pending request starts in, and nothing for a plain member', async () => {
+    const years: number[] = [];
+    const requests = [
+      leave({ id: 'a', start_date: '2026-12-30' }),
+      leave({ id: 'b', start_date: '2027-01-05', end_date: '2027-01-05' }),
+      leave({ id: 'c', start_date: '2026-03-02', status: 'approved' }),
+    ];
+    const spy = {
+      listLeaveRequests: async () => requests,
+      listLeaveBalances: async (year: number) => {
+        years.push(year);
+        return [];
+      },
+    } as unknown as PeopleData;
+    await leaveApprovals(spy, HR, NOW);
+    expect(years.sort()).toEqual([2026, 2027]);
+    years.length = 0;
+    expect(await leaveApprovals(spy, MEMBER, NOW)).toBeNull();
+    expect(years).toEqual([]);
+  });
+
+  it("marks the viewer's own request yours", async () => {
+    const viewer: PeopleViewer = { employeeId: 'e1', isHr: true, isDemo: false };
+    const model = (await leaveApprovals(
+      withRows({ listLeaveRequests: [leave({ id: 'a' }), leave({ id: 'b', employee_id: 'e2' })] }),
+      viewer,
+      NOW,
+    ))!;
+    expect(model.rows.find((r) => r.id === 'a')!.yours).toBe(true);
+    expect(model.rows.find((r) => r.id === 'b')!.yours).toBe(false);
+    const unlinked = (await leaveApprovals(withRows({ listLeaveRequests: [leave({})] }), HR, NOW))!;
+    expect(unlinked.rows[0].yours).toBe(false);
+  });
+
+  it('allows cancel on everything but a cancelled request, on leave and time-off', async () => {
+    const l = (await leaveApprovals(
+      withRows({
+        listLeaveRequests: [
+          leave({ id: 'p' }),
+          leave({ id: 'a', status: 'approved' }),
+          leave({ id: 'r', status: 'rejected' }),
+          leave({ id: 'c', status: 'cancelled' }),
+        ],
+      }),
+      HR,
+      NOW,
+    ))!;
+    expect(l.rows.map((r) => [r.id, r.cancellable]).sort()).toEqual([['a', true], ['c', false], ['p', true], ['r', true]]);
+    const t = (await timeOffApprovals(
+      withRows({ listTimeOffRequests: [timeOff({ id: 'x' }), timeOff({ id: 'y', status: 'cancelled' })] }),
+      HR,
+      NOW,
+    ))!;
+    expect(t.rows.find((r) => r.id === 'x')!.cancellable).toBe(true);
+    expect(t.rows.find((r) => r.id === 'y')!.cancellable).toBe(false);
+  });
+
+  it('only the leave and time-off queues decide; claims and overtime keep disabled buttons', () => {
+    expect(Object.fromEntries(Object.entries(APPROVAL_QUEUES).map(([k, v]) => [k, v.decides]))).toEqual({
+      leave: true,
+      claims: false,
+      overtime: false,
+      time_off: true,
+    });
   });
 });
