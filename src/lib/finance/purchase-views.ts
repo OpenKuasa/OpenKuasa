@@ -8,13 +8,22 @@ import type { BillDisplayStatus, BillListRow } from './bills';
 import { toCsv } from './csv';
 import { rmShort } from './format';
 import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentMethod, type PaymentOutRow } from './money';
+import {
+  ELECTRONIC,
+  METHOD_COLORS,
+  type Stat,
+  addDays,
+  count,
+  lastMonths,
+  monthOf,
+  paymentCount,
+  round2,
+  sum,
+  thousands,
+} from './view-helpers';
 
-export type Stat = {
-  label: string;
-  value: string;
-  delta?: string;
-  deltaTone?: 'up' | 'down' | 'flat';
-};
+// Defined in view-helpers.ts, which the sales screens share; exported from here for this module's existing importers.
+export { LATEST_ROWS, type Stat, displayDate, todayUtc } from './view-helpers';
 
 export type BillsViewData = {
   stats: Stat[];
@@ -35,9 +44,6 @@ export type PaymentsViewData = {
   paidMtd: string;
 };
 
-/** Rows a table shows before "View all" is pressed. */
-export const LATEST_ROWS = 10;
-
 export const BILL_STATUS_LABELS: Record<BillDisplayStatus, string> = {
   draft: 'Draft',
   pending: 'Pending',
@@ -54,57 +60,6 @@ export const PAYMENT_STATUS_LABELS: Record<PaymentOutRow['status'], string> = {
   rejected: 'Rejected',
   void: 'Void',
 };
-
-/** Money that has left an account without a note or a cheque changing hands. */
-const ELECTRONIC: ReadonlySet<PaymentMethod> = new Set(['bank_transfer', 'fpx', 'duitnow', 'card', 'ewallet']);
-
-/** Seven methods, five chart colours: Cash and Cheque get a fixed green and a fixed brown. */
-const METHOD_COLORS: Record<PaymentMethod, string> = {
-  bank_transfer: 'var(--chart-1)',
-  fpx: 'var(--chart-2)',
-  duitnow: 'var(--chart-5)',
-  card: 'var(--chart-3)',
-  ewallet: 'var(--chart-4)',
-  cash: 'oklch(0.7 0.13 130)',
-  cheque: 'oklch(0.6 0.09 55)',
-};
-
-/* ---- formatting --------------------------------------------------- */
-
-// Fixed names: Intl's short months vary by ICU version ('Sep' vs 'Sept').
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-/** 2026-10-08 → 08 Oct 2026 */
-export function displayDate(iso: string): string {
-  const [y, m, d] = iso.split('-');
-  return `${d} ${MONTHS[Number(m) - 1]} ${y}`;
-}
-
-/** Today's date in UTC, the date the database uses to decide what is overdue. */
-export function todayUtc(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function addDays(iso: string, days: number): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-function count(n: number, noun: string): string {
-  return `${n} ${noun}${n === 1 ? '' : 's'}`;
-}
-
-const round2 = (n: number) => Math.round(n * 100) / 100;
-
-function sum<T>(rows: T[], pick: (row: T) => number): number {
-  return round2(rows.reduce((total, row) => total + pick(row), 0));
-}
-
-/** How many payments the rows belong to: a payment split across bills is one payment. */
-function paymentCount(rows: PaymentOutRow[]): number {
-  return new Set(rows.map((row) => row.transaction_id)).size;
-}
 
 /* ---- Supplier Bills ----------------------------------------------- */
 
@@ -178,18 +133,15 @@ export function paymentsView(rows: PaymentOutRow[], today: string): PaymentsView
   const scheduled = rows.filter((p) => p.status === 'scheduled');
 
   // Last 8 months, oldest first, in RM thousands.
-  const [y, m] = month.split('-').map(Number);
-  const thousands = (list: PaymentOutRow[]) => Math.round(sum(list, (p) => p.amount) / 100) / 10;
+  const paidK = (list: PaymentOutRow[]) => thousands(sum(list, (p) => p.amount));
   let hasTrend = false;
-  const trend = Array.from({ length: 8 }, (_, i) => {
-    const start = new Date(Date.UTC(y, m - 8 + i, 1));
-    const key = start.toISOString().slice(0, 7);
-    const inMonth = paid.filter((p) => p.txn_date.slice(0, 7) === key);
+  const trend = lastMonths(today).map(({ key, label }) => {
+    const inMonth = paid.filter((p) => monthOf(p.txn_date) === key);
     if (inMonth.length > 0) hasTrend = true;
     return {
-      label: MONTHS[start.getUTCMonth()],
-      electronic: thousands(inMonth.filter((p) => ELECTRONIC.has(p.method))),
-      cash: thousands(inMonth.filter((p) => !ELECTRONIC.has(p.method))),
+      label,
+      electronic: paidK(inMonth.filter((p) => ELECTRONIC.has(p.method))),
+      cash: paidK(inMonth.filter((p) => !ELECTRONIC.has(p.method))),
     };
   });
 

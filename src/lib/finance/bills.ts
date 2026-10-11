@@ -5,6 +5,16 @@
  */
 import { z } from 'zod';
 import {
+  DOCUMENT_LINES_MAX,
+  DOCUMENT_LINE_COLUMNS,
+  type DocumentLineRow,
+  LINE_MESSAGES,
+  documentLine,
+  isoDate,
+  optionalText,
+  toDocumentLine,
+} from './document-lines';
+import {
   type FinResult,
   type FinanceWriteContext,
   NOT_ALLOWED,
@@ -17,93 +27,45 @@ import {
   writeFailed,
 } from './result';
 
-export const BILL_LINES_MAX = 100;
+// Defined in document-lines.ts, which invoices share; exported from here for this module's existing importers.
+export { isIsoDate, roundRate } from './document-lines';
+
+export const BILL_LINES_MAX = DOCUMENT_LINES_MAX;
 /** Bills loaded for a screen, a page at a time. */
 export const BILL_PAGE_SIZE = 1000;
 
 export const BILL_MESSAGES = {
   supplier: 'Choose a supplier.',
-  date: 'Enter a valid date.',
+  date: LINE_MESSAGES.date,
   dates: 'The due date cannot be before the bill date.',
-  lines: 'Add at least one line.',
+  lines: LINE_MESSAGES.lines,
   tooManyLines: `A bill can have at most ${BILL_LINES_MAX} lines.`,
-  description: 'Describe each line.',
-  quantity: 'Enter a quantity above 0.',
-  price: 'Enter a unit price of 0 or more.',
-  sst: 'Enter an SST rate between 0 and 100.',
-  tooLong: 'That is too long. Keep it to 200 characters or fewer.',
+  description: LINE_MESSAGES.description,
+  quantity: LINE_MESSAGES.quantity,
+  price: LINE_MESSAGES.price,
+  sst: LINE_MESSAGES.sst,
+  tooLong: LINE_MESSAGES.tooLong,
   gone: 'That bill no longer exists.',
   locked: 'This bill is posted and can no longer be changed. Void it instead.',
   hasPayments: 'This bill has payments. Void or delete them before voiding it.',
   empty: 'A bill needs at least one line with an amount.',
   numberTaken: 'That bill number is already used.',
   missing: 'The supplier or a product on this bill no longer exists.',
-  product: 'Choose a product from the list, or leave it empty.',
+  product: LINE_MESSAGES.product,
 } as const;
 
 const M = BILL_MESSAGES;
-
-/** YYYY-MM-DD that is a real calendar date from 1900 to 2200; a slipped key gives year 0202. */
-export function isIsoDate(value: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const year = Number(value.slice(0, 4));
-  if (year < 1900 || year > 2200) return false;
-  const d = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
-}
-
-const round = (places: number) => (v: number) => {
-  const f = 10 ** places;
-  return Math.round(v * f) / f;
-};
-
-/**
- * An SST rate as the column numeric(5,2) stores it: two decimals, half away
- * from zero, rounded on the figure as written. 1.005 is 1.01 here and in the
- * database, where `Math.round(1.005 * 100)` and `(1.005).toFixed(2)` both
- * give 1.00, because the nearest floating point number is a hair below 1.005.
- * Something that is not a number comes back as it was.
- */
-export function roundRate(value: number): number {
-  if (!Number.isFinite(value)) return value;
-  // The shortest digits that give this number back, e.g. "1.005e+0": shift the point two places in the text.
-  const [digits, exponent] = Math.abs(value).toExponential().split('e');
-  const hundredths = Math.round(Number(`${digits}e${Number(exponent) + 2}`));
-  return (Math.sign(value) * hundredths) / 100;
-}
-
-const date = z.string({ error: M.date }).refine(isIsoDate, M.date);
-const text = z
-  .string({ error: M.tooLong })
-  .trim()
-  .max(200, M.tooLong)
-  .transform((v) => (v === '' ? null : v))
-  .nullable();
-/** An id, or nothing chosen (an empty string from a select). */
-const optionalId = z
-  .union([z.string().uuid(M.product), z.literal(''), z.null()], { error: M.product })
-  .transform((v) => (v === '' ? null : v));
-
-const line = z.object({
-  product_id: optionalId.default(null),
-  description: z.string({ error: M.description }).trim().min(1, M.description).max(200, M.tooLong),
-  quantity: z.number({ error: M.quantity }).transform(round(3)).pipe(z.number().gt(0, M.quantity).max(99_999_999, M.quantity)),
-  uom: text.default(null),
-  pack_size: text.default(null),
-  unit_price: z.number({ error: M.price }).min(0, M.price).max(999_999_999, M.price).transform(round(4)),
-  sst_rate: z.number({ error: M.sst }).transform(roundRate).pipe(z.number().min(0, M.sst).max(100, M.sst)).default(0),
-});
 
 export const saveBillInput = z
   .object({
     /** Present to change a draft; absent to create one. */
     id: z.string({ error: M.gone }).uuid(M.gone).optional(),
     supplier_id: z.string({ error: M.supplier }).uuid(M.supplier),
-    supplier_ref: text.default(null),
-    bill_date: date,
-    due_date: date,
-    notes: text.default(null),
-    lines: z.array(line, { error: M.lines }).min(1, M.lines).max(BILL_LINES_MAX, M.tooManyLines),
+    supplier_ref: optionalText.default(null),
+    bill_date: isoDate,
+    due_date: isoDate,
+    notes: optionalText.default(null),
+    lines: z.array(documentLine, { error: M.lines }).min(1, M.lines).max(BILL_LINES_MAX, M.tooManyLines),
   })
   .refine((v) => v.due_date >= v.bill_date, { message: M.dates, path: ['due_date'] });
 
@@ -142,18 +104,7 @@ export type BillListRow = {
   display_status: BillDisplayStatus;
 };
 
-export type BillLine = {
-  id: string;
-  product_id: string | null;
-  description: string;
-  quantity: number;
-  uom: string | null;
-  pack_size: string | null;
-  unit_price: number;
-  sst_rate: number;
-  amount: number;
-  sst_amount: number;
-};
+export type BillLine = DocumentLineRow;
 
 export type BillDetail = BillListRow & { supplier_ref: string | null; notes: string | null; lines: BillLine[] };
 
@@ -207,7 +158,7 @@ export async function getBill(ctx: FinanceWriteContext, id: string): Promise<Bil
   if (!bill) return null;
   const { data: lines, error: linesError } = await ctx.client
     .from('supplier_bill_lines')
-    .select('id,product_id,description,quantity,uom,pack_size,unit_price,sst_rate,amount,sst_amount')
+    .select(DOCUMENT_LINE_COLUMNS)
     .eq('org_id', ctx.orgId)
     .eq('bill_id', id)
     .order('created_at', { ascending: true })
@@ -218,14 +169,7 @@ export async function getBill(ctx: FinanceWriteContext, id: string): Promise<Bil
     ...toListRow(header),
     supplier_ref: (header.supplier_ref as string | null) ?? null,
     notes: (header.notes as string | null) ?? null,
-    lines: ((lines ?? []) as unknown as Record<string, unknown>[]).map((l) => ({
-      ...(l as unknown as BillLine),
-      quantity: Number(l.quantity),
-      unit_price: Number(l.unit_price),
-      sst_rate: Number(l.sst_rate),
-      amount: Number(l.amount),
-      sst_amount: Number(l.sst_amount),
-    })),
+    lines: ((lines ?? []) as unknown as Record<string, unknown>[]).map(toDocumentLine),
   };
 }
 
