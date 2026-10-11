@@ -143,7 +143,7 @@ export function DecideButtons({
       </div>
       {cancellable && confirmingCancel ? (
         <p role="alert" className="max-w-64 whitespace-normal text-xs text-destructive">
-          Cancel this request?{!pending ? ' The days go back to the person\'s balance.' : ''} This cannot be undone.
+          Cancel this request?{kind === 'leave' && !pending ? ' The days go back to the person\'s balance.' : ''} This cannot be undone.
         </p>
       ) : null}
       {rejecting ? (
