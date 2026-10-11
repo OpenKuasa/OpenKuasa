@@ -289,9 +289,17 @@ stands. An accepted quotation stays `accepted` after its date; a sent one can
 still be accepted after it expired.
 
 `finance_convert_quotation` makes a draft invoice from an accepted quotation:
-the same customer, notes and lines, dated with the database's date (UTC, so
-before 8 in the morning in Malaysia it is the day before), due after the customer's
-payment terms, with `quotation_id` set. A quotation has one invoice at a time
+the same customer, notes and lines, dated with the date it is given
+(`invoice_date`), due after the customer's payment terms counted from that
+date, with `quotation_id` set. "Make invoice" sends the date on the person's
+own calendar (`localIsoDate`, as the forms' default dates are), so the invoice
+is dated today for the person who made it, at any hour. The database's own
+date is UTC, which before 08:00 in Malaysia is the day before; the function
+uses it only when it is given no date, which the app never does. The function
+puts no limit on the date: the invoice is a draft and its date can be changed
+on the invoice form before it is posted, and `finance_save_invoice` puts no
+limit on a date either. The app's schema (`convertQuotationInput`) takes only
+a real calendar date. A quotation has one invoice at a time
 (a unique index on `finance_invoices`); a void invoice does not count, so a
 quotation whose invoice was voided, or deleted as a draft, can be converted
 again. The invoice is an ordinary draft afterwards, and it stays tied to the
@@ -309,10 +317,11 @@ accepted or declined; an accepted one is made into an invoice or marked
 declined; a declined one can be marked accepted; and once an invoice stands
 for the quotation the menu offers nothing. The form is the card bills and
 invoices use, with "Valid until" as its second date and "Save and mark as
-sent" as its second button. After "Make invoice" the screen stays on
-Quotations and a note at the top says a draft invoice was made, with a link to
-Invoices, where it is checked and posted; the row's Invoice column links there
-too.
+sent" as its second button. The question asked before "Make invoice" says the
+draft will be dated today. After "Make invoice" the screen stays on
+Quotations and a note at the top says a draft invoice was made and gives its
+date, with a link to Invoices, where it is checked and posted; the row's
+Invoice column links there too.
 
 ## Credit notes
 
@@ -447,7 +456,7 @@ All run as the caller, so RLS decides who may write.
 | `finance_record_payment_in(target_org, payment, allocations)` | Records money received from one customer, split across that customer's posted invoices, and posts it at once. `payment` has `account_id`, `txn_date`, `method`, `reference`, `notes`; `allocations` is a list of `{ invoice_id, amount }`. The payment's amount is the sum of the allocation amounts, each rounded to the sen first, as each is when stored. Returns the id. |
 | `finance_save_quotation(target_org, quotation, lines)` | Creates a draft quotation or replaces a draft's header and lines, keeping the lines in the order given. `quotation` has `id` (to change a draft), `customer_id`, `quote_date`, `valid_until`, `notes`. Returns the id. |
 | `finance_send_quotation(target_org, target_quotation)` | Marks a draft as sent and returns its number. |
-| `finance_convert_quotation(target_org, target_quotation)` | Makes a draft invoice from an accepted quotation. Returns the invoice's id. |
+| `finance_convert_quotation(target_org, target_quotation, invoice_date)` | Makes a draft invoice from an accepted quotation, dated `invoice_date` and due after the customer's payment terms counted from it. `invoice_date` may be left out or null, and the database's UTC date is then used. It is one function with a default, not two: a second function of the same name would make the two-argument call ambiguous. Returns the invoice's id. |
 | `finance_save_credit_note(target_org, note)` | Creates a draft credit note or replaces a draft. `note` has `id` (to change a draft), `invoice_id`, `credit_date`, `reason`, `amount`, `notes`. Returns the id. |
 | `finance_issue_credit_note(target_org, target_note)` | Issues a draft and returns its number. |
 | `finance_record_refund(target_org, refund)` | Records one refund against one invoice or one credit note. `refund` has `invoice_id` or `credit_note_id`, `account_id`, `txn_date`, `method`, `reason`, `amount`, `reference`, `notes`, and `status`: `posted` (the default) or `scheduled`. Returns the id. |
@@ -646,10 +655,6 @@ instead."; see Known limits.
 - `voidPaymentIn` is kept to `direction = 'in'` and reads no view first: every
   movement of money in is a payment in. When cash receipts arrive (stage 5),
   money in gains a second kind and this must be looked at again.
-- "Make invoice" dates the new invoice with the database's date (UTC), which
-  before 08:00 in Malaysia is the day before; credit notes and refunds take
-  their dates from the form and do not have this. Closing it needs
-  `finance_convert_quotation` to take a date, which is a migration of its own.
 - A sent quotation cannot be edited: mark it declined and write a new one.
   "Mark as sent" is offered on a draft whatever its total, and refused with
   the reason when its lines total nothing, as Post is on an invoice.
@@ -657,7 +662,12 @@ instead."; see Known limits.
   the thirty is not a setting.
 - Making an invoice from a quotation does not open that invoice: the screen
   says a draft was made and links to Invoices, where the draft carries the
-  database's date (UTC) and so is among the newest rows. The link does not single the draft out.
+  person's own date of that day and so is among the newest rows. The link does
+  not single the draft out.
+- "Make invoice" takes the date from the browser's clock, as every form's
+  default date does. A device whose clock or time zone is wrong dates the
+  draft wrongly; the note says which date it was given, and the date can be
+  changed on the invoice form before the invoice is posted.
 - A credit note is one amount with a reason. It has no lines and does not say
   how much of it is SST.
 - A quotation has no void. One that was sent by mistake is marked declined,
@@ -709,7 +719,9 @@ instead."; see Known limits.
   the day they were seeded, so its Sent quotations turn Expired as time passes
   and its month-to-date figures empty out.
 - The database tests for this stage, `tests/bendahara-followons.test.ts`, run
-  against the hosted database. They create their users and workspaces through
+  against the hosted database. The one that converts a quotation passes a date,
+  so it needs `20261027100000_bendahara_convert_quotation_date.sql` applied
+  there first. They create their users and workspaces through
   `tests/helpers/live-workspaces.ts` and delete them when the file finishes.
 - The demo workspace's invoices were dated from the day they were seeded, so
   its Sent examples turn Overdue as time passes, as its bills do.
