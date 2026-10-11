@@ -81,6 +81,9 @@ const ONE_APPLICATION_CHANGE = 'One application change at a time. One is already
 const CANDIDATE_CHANGES = new Set(['addCandidate', 'updateCandidate']);
 const ONE_CANDIDATE_CHANGE = 'One candidate change at a time. One is already prepared for approval.';
 
+/** HR changes decide leave, pay and staff records: one person's decision per card, so only one is prepared a turn. */
+const ONE_PEOPLE_CHANGE = 'One HR change at a time. One is already prepared for approval.';
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Every id a change refers to, wherever it sits in the input. */
@@ -131,6 +134,9 @@ function specialistTools(
         }
         if (CANDIDATE_CHANGES.has(name) && prepared.length > 0) {
           return { prepared: false, error: ONE_CANDIDATE_CHANGE };
+        }
+        if (product.key === 'people' && prepared.length > 0) {
+          return { prepared: false, error: ONE_PEOPLE_CHANGE };
         }
         // An id must have come from somewhere: a lookup just now, an earlier
         // turn, or the task. One that appears nowhere was made up, and a
@@ -296,7 +302,7 @@ const AREA: Record<ProductToolkit['key'], string> = {
   reach: 'marketing (ads, campaigns, creatives, leads, lead forms, appointments, ad settings)',
   crm: 'the CRM (contacts, deals, pipelines and their stages)',
   hire: 'hiring (jobs, candidates, applications, the hiring funnel, interviews, the talent pool; it can read one candidate\'s uploaded CV and give a verdict on it; it can prepare moving, rejecting, reopening or rating one application at a time; it can prepare adding or editing one candidate at a time)',
-  people: 'HR (existing staff, leave, claims, overtime, attendance, payroll, performance)',
+  people: 'HR (existing staff, leave, time-off, claims, overtime, attendance, payroll, performance; it can prepare deciding leave, claims and overtime, correcting attendance, and editing staff and departments, one change at a time)',
 };
 
 /** Runs a prepared change through the product's own change tool, after checking its input again. */

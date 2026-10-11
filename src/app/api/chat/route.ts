@@ -16,13 +16,18 @@
 import { readUIMessageStream, type UIMessage } from 'ai';
 import { modelErrorCode } from '@/lib/ai/call-log';
 import { prepareChat } from '@/lib/ai/chat-request';
-import { runTuah, type HireAccess } from '@/lib/ai/agents/orchestrator';
+import { runTuah, type HireAccess, type PeopleAccess } from '@/lib/ai/agents/orchestrator';
+import { receiptFromMessages, type PeopleWrite } from '@/lib/ai/people-tools';
 import { getCurrentOrg } from '@/lib/auth/current-org';
+import { can } from '@/lib/auth/permissions';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
 import { answersWithTeam, namesIn, proposalsIn, transcriptOf } from '@/lib/chat/delegation';
+import { touchedPeople, withoutPeopleTurns } from '@/lib/chat/hr-privacy';
 import { saveAnswer, saveQuestion } from '@/lib/chat/store';
 import { createCvReader } from '@/lib/hire/cv-read';
 import { getHireData } from '@/lib/hire/supabase';
+import { createSupabasePeopleData } from '@/lib/people/supabase';
+import { getPeopleViewer } from '@/lib/people/viewer';
 import { originFromHeaders } from '@/lib/reach/form-submissions';
 import { getReachData } from '@/lib/reach/supabase';
 
@@ -36,14 +41,6 @@ export async function POST(request: Request) {
   if (!chat.ok) return chat.response;
 
   const { supabase, threadId, lastMessage } = chat;
-  // Saved alongside the answer rather than before it, so history never
-  // delays the first words. A turn that resumes after an approval has no new
-  // question: its thread already exists, and only the answer is added.
-  const questionSaved = !threadId
-    ? Promise.resolve(false)
-    : lastMessage.role === 'user'
-      ? saveQuestion(supabase, chat.userId, threadId, lastMessage.parts)
-      : Promise.resolve(true);
 
   const org = hasSupabaseEnv() ? await getCurrentOrg(supabase) : null;
   const data = await getReachData(supabase);
@@ -77,10 +74,41 @@ export async function POST(request: Request) {
       }
     : null;
 
+  // HR is workspace-only, like the CRM: no workspace, no HR this turn (never the
+  // sample data, and never a crash — a failed viewer load just drops HR).
+  // Rows are the caller's own session's, so the database decides who sees what;
+  // the change tier (`hr` for an owner or admin, `self` for a linked member,
+  // none in the demo) and the employee id come from the viewer, never the model.
+  let people: PeopleAccess | null = null;
+  if (org) {
+    try {
+      const viewer = await getPeopleViewer(supabase, org);
+      const data = createSupabasePeopleData(supabase, org.orgId);
+      const receipt = receiptFromMessages(chat.uiMessages);
+      let write: PeopleWrite | undefined;
+      if (viewer.isDemo) {
+        write = undefined;
+      } else if (can(org.role, 'approve')) {
+        write = { ctx: { client: supabase, orgId: org.orgId }, tier: 'hr', employeeId: viewer.employeeId, receipt, userId: chat.userId };
+      } else if (viewer.employeeId !== null) {
+        write = { ctx: { client: supabase, orgId: org.orgId }, tier: 'self', employeeId: viewer.employeeId, receipt, userId: chat.userId };
+      }
+      people = { data, viewer, write };
+    } catch (error) {
+      console.error('[tuah] HR unavailable this turn:', error instanceof Error ? error.message : error);
+      people = null;
+    }
+  }
+
+  // Prepared changes so far, by id: both the team context and the HR-privacy
+  // check need them (the latter to spot an applyChange on an HR proposal).
+  const conversationProposals = proposalsIn(chat.uiMessages);
   const team = withTeam
     ? {
-        transcript: transcriptOf(chat.uiMessages.slice(-8)),
-        proposals: proposalsIn(chat.uiMessages),
+        // HR turns are kept out of the shared transcript: an HR answer must not
+        // reach the other specialists' models (see hr-privacy).
+        transcript: transcriptOf(withoutPeopleTurns(chat.uiMessages.slice(-8), conversationProposals)),
+        proposals: conversationProposals,
         names: namesIn(chat.uiMessages),
       }
     : null;
@@ -97,6 +125,7 @@ export async function POST(request: Request) {
     crm,
     team,
     hire,
+    people,
   );
   void result.consumeStream();
 
@@ -114,7 +143,17 @@ export async function POST(request: Request) {
       })) {
         answer = message;
       }
-      if (!answer || !(await questionSaved)) return;
+      if (!answer) return;
+      // HR privacy: a turn that consulted HR is never written to history. Ask-Lekiu
+      // saves nothing, and Tuah matches that for any turn that touched HR data.
+      // The check runs on the finished answer, so the question is saved only now
+      // (after the answer), and an HR turn leaves no trace of question or answer.
+      if (touchedPeople(answer.parts, conversationProposals)) return;
+      const questionSaved =
+        lastMessage.role === 'user'
+          ? await saveQuestion(supabase, chat.userId, threadId, lastMessage.parts)
+          : true;
+      if (!questionSaved) return;
       await saveAnswer(supabase, threadId, answer.parts);
     })().catch((error) => {
       console.error(

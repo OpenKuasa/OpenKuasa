@@ -157,14 +157,15 @@ const TEAM_AREA = {
     'marketing: ads and campaigns, spend, leads (finding, adding and editing them, and promoting a lead to a CRM contact), lead forms, creatives, appointments and ad settings',
   crm: 'the CRM: contacts, deals, pipelines and their stages, follow-ups (reminders to get back to a contact) and the calendar. A lead is not a contact yet: anything about a lead goes to Jebat',
   hire: 'hiring: job openings, candidates and their applications, the hiring funnel, interviews, the talent pool and time to hire. Job openings can be created, edited, opened, paused, closed and deleted. Applications can be moved, rejected, reopened and rated, one at a time. Candidates can be added by hand and edited, one at a time. Existing staff, leave and payroll are not hiring. It can read one candidate\'s uploaded CV and give a verdict on it',
-  people: 'HR: existing staff, leave, claims, overtime, attendance, payroll and performance. Lookups only for now. Hiring new people is not HR',
+  people: 'HR: existing staff, leave, time-off, claims, overtime, attendance, payroll and performance. It looks these up (an owner or admin sees everyone; others see their own) and can prepare changes that wait for approval — deciding leave, claims and overtime, correcting attendance, and editing staff and departments, one change at a time. Hiring new people is not HR',
 } as const;
 
 /**
  * Tuah, the cross-app assistant on the Command page and the floating button.
- * It has the marketing tools Jebat has, Kasturi's CRM tools (lookups, and
- * changes behind an approval) and Lekir's hiring tools (lookups, and job and application changes behind an approval), runs on the model those rules were tuned on,
- * and says so rather than inventing data from the products it cannot see yet.
+ * It has the marketing tools Jebat has, Kasturi's CRM tools, Lekir's hiring
+ * tools and Lekiu's HR tools (lookups, and changes behind an approval), runs on
+ * the model those rules were tuned on, and says so rather than inventing data
+ * from the products it cannot see yet (finance).
  */
 export function runTuah(
   messages: ModelMessage[],
@@ -186,12 +187,19 @@ export function runTuah(
    * waits for the user's approval.
    */
   hire?: HireAccess | null,
+  /**
+   * The workspace's HR data. The caller's own session decides which rows the
+   * lookups return; the change tools are added per the HR tier (`hr` or `self`)
+   * the route resolved, and each waits for the user's approval.
+   */
+  people?: PeopleAccess | null,
 ) {
-  // Every product the user can reach: marketing always, the CRM in a workspace, hiring when passed.
+  // Every product the user can reach: marketing always, the CRM in a workspace, hiring when passed, HR when passed.
   const products = [
     reachProduct(reach),
     ...(crm ? [crmProduct(crm)] : []),
     ...(hire ? [hireProduct(hire)] : []),
+    ...(people ? [peopleProduct(people)] : []),
   ];
   const teamTools = team ? createTeamTools(products, { ...team, apiKey }) : null;
   const { tools, toolApproval } = teamTools ?? combineToolkits(products);
