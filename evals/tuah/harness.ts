@@ -95,6 +95,8 @@ export type Turn = {
   steps: string[];
   /** The changes now waiting for a yes or no. */
   pending: Proposal[];
+  /** The line each waiting card carries from the server for the person deciding (which of two same-named people it is), where it has one. */
+  notes: string[];
   /** What each change that ran this turn returned. */
   applied: { proposal: Proposal; output: unknown }[];
 };
@@ -104,6 +106,10 @@ type Approval = { approvalId: string; proposal: Proposal | undefined };
 type ContentPart = {
   type: string;
   approvalId?: string;
+  /** Set on a request the server answered itself: that one is not waiting for anybody. */
+  isAutomatic?: boolean;
+  /** A line the server put on the request for the person deciding. */
+  reason?: string;
   toolCall?: { toolName?: string; input?: unknown };
 };
 
@@ -173,6 +179,8 @@ export class Conversation {
         data: extra
           ? {
               ...realHire,
+              // The made-up rows are in no database: the same-name check before a deletion must read these lists, not the database.
+              namesakes: undefined,
               listJobs: async () => [...(extra.jobs ?? []), ...(await realHire.listJobs())],
               listApplications: async () => [...extraApplications, ...(await realHire.listApplications())],
               // An application has a candidate behind it: a lookup by name must find the person too.
@@ -214,7 +222,7 @@ export class Conversation {
       .join('\n');
     if (text) this.lines.push(`Tuah: ${text.replace(/\s+/g, ' ')}`);
 
-    const turn: Turn = { text, asked: [], steps: [], pending: [], applied: [] };
+    const turn: Turn = { text, asked: [], steps: [], pending: [], notes: [], applied: [] };
     this.approvals = [];
     for (const step of steps) {
       for (const result of step.toolResults as { toolName: string; input: unknown; output: unknown }[]) {
@@ -241,7 +249,8 @@ export class Conversation {
         }
       }
       for (const part of step.content as ContentPart[]) {
-        if (part.type !== 'tool-approval-request' || !part.approvalId) continue;
+        if (part.type !== 'tool-approval-request' || !part.approvalId || part.isAutomatic) continue;
+        if (part.reason) turn.notes.push(part.reason);
         const id = (part.toolCall?.input as { proposalId?: string } | null)?.proposalId;
         const proposal = id ? this.proposals.get(id) : undefined;
         this.approvals.push({ approvalId: part.approvalId, proposal });
