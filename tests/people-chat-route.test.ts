@@ -315,6 +315,11 @@ describe('POST /api/people/chat happy path', () => {
     for (const name of ['decideLeave', 'decideTimeOff', 'setLeaveEntitlement', 'createEmployee', 'deleteDepartment', 'decideClaim', 'decideOvertime', 'markClaimPaid', 'unmarkClaimPaid']) {
       expect(ctl.calls[0].tools).not.toContain(name);
     }
+    // Linked, so the clock tools are theirs; never the owner tools for corrections, holidays and settings.
+    for (const name of CLOCK_TOOLS) expect(ctl.calls[0].tools).toContain(name);
+    for (const name of ['correctAttendance', 'saveHoliday', 'removeHoliday', 'saveAttendanceSettings', 'getAttendanceSettings']) {
+      expect(ctl.calls[0].tools).not.toContain(name);
+    }
   });
 
   it('gives a member in the demo workspace the lookups only, even with a linked record', async () => {

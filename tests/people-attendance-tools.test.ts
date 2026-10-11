@@ -165,7 +165,7 @@ describe('the clock tools', () => {
     const result = await run('clockOut', {}, MEMBER_VIEWER, self());
     expect(result).toMatchObject({
       ok: true,
-      data: { clocked_in_at: '8:52 am', clocked_out_at: '6:03 pm', worked: '9 h 11 min', message: 'Clocked out at 6:03 pm. 9 h 11 min today, from 8:52 am.' },
+      data: { clocked_in_at: '8:52 am', clocked_out_at: '6:03 pm', worked: '9 h 11 min', message: 'Clocked out at 6:03 pm. You worked 9 h 11 min.' },
     });
     expect(JSON.stringify(result)).not.toMatch(/\d{4}-\d{2}-\d{2}T/);
   });
@@ -244,6 +244,91 @@ describe('getMyAttendanceToday', () => {
   });
 });
 
+/** What the SDK does with a model's call before `execute`: validate against the tool's own input schema. */
+const parsed = async (name: string, value: unknown, viewer: PeopleViewer = HR_VIEWER, write: Write = hr()) => {
+  const { asSchema } = await import('ai');
+  const schema = asSchema((tools(viewer, write)[name] as unknown as { inputSchema: never }).inputSchema);
+  return schema.validate!(value) as Promise<{ success: true; value: Record<string, unknown> } | { success: false; error: Error }>;
+};
+const throughSdk = async (name: string, value: unknown, viewer: PeopleViewer = HR_VIEWER, write: Write = hr()) => {
+  const result = await parsed(name, value, viewer, write);
+  if (!result.success) throw new Error(`invalid: ${result.error.message}`);
+  return run(name, result.value, viewer, write);
+};
+
+describe('what a model sends is accepted, then turned into what the write path takes', () => {
+  const base = { employee_id: OTHER, work_date: '2026-10-08', status: 'present' };
+
+  it.each([
+    ['', null],
+    ['   ', null],
+    [null, null],
+    [undefined, null],
+    ['9:00', '09:00'],
+    ['09:00', '09:00'],
+    ['09:00:00', '09:00'],
+  ])('a clock-in of %j passes the SDK parse and reaches the write path as %j', async (sent, expected) => {
+    const value = { ...base, clock_in: sent, ...(expected === null ? { status: 'absent' } : {}) };
+    const result = await throughSdk('correctAttendance', value);
+    expect(result.ok).toBe(true);
+    expect(ctl.ran[0].input).toMatchObject({ clock_in: expected });
+  });
+
+  it('an empty string for the clock-out, the note and the holiday id means none', async () => {
+    await throughSdk('correctAttendance', { ...base, clock_in: '9:00', clock_out: '', note: '  ' });
+    expect(ctl.ran[0].input).toMatchObject({ clock_in: '09:00', clock_out: null, note: null });
+    await throughSdk('saveHoliday', { id: '', name: 'Deepavali', holiday_date: '2026-11-08' });
+    await throughSdk('saveHoliday', { id: '  ', name: 'Deepavali', holiday_date: '2026-11-08' });
+    expect(ctl.ran.slice(1).map((r) => r.input)).toEqual([
+      { id: null, name: 'Deepavali', holiday_date: '2026-11-08' },
+      { id: null, name: 'Deepavali', holiday_date: '2026-11-08' },
+    ]);
+  });
+
+  it('a time that is not a time (9am, 24:00) is refused by the parse as invalid input, before execute, with a sentence for the model', async () => {
+    for (const bad of ['9am', '24:00', '25:00', '9:5']) {
+      const result = await parsed('correctAttendance', { ...base, clock_in: bad });
+      expect(result.success, bad).toBe(false);
+      expect(String((result as { error: Error }).error.message), bad).toContain('must be a time of day like 09:00');
+    }
+  });
+
+  it('a holiday id that is not an id is refused by the parse', async () => {
+    expect((await parsed('saveHoliday', { id: 'not-an-id', name: 'X', holiday_date: '2026-11-08' })).success).toBe(false);
+    expect((await parsed('saveHoliday', { id: HOLIDAY, name: 'X', holiday_date: '2026-11-08' })).success).toBe(true);
+  });
+
+  it('the schemas still describe themselves to the model', async () => {
+    const { asSchema } = await import('ai');
+    for (const name of ['correctAttendance', 'saveHoliday']) {
+      const json = await asSchema((tools(HR_VIEWER, hr())[name] as unknown as { inputSchema: never }).inputSchema).jsonSchema;
+      expect(json, name).toHaveProperty('properties');
+    }
+  });
+
+  it('a time later than now today is refused in a sentence the person can act on, without asking the database', async () => {
+    // 12:00 in Kuala Lumpur on Friday 9 Oct.
+    const result = await throughSdk('correctAttendance', { employee_id: OTHER, work_date: '2026-10-09', status: 'present', clock_in: '09:00', clock_out: '18:00' });
+    expect(result).toEqual({
+      ok: false,
+      error: 'That time has not happened yet today (it is 12:00 in Malaysia). Use a time up to now, or leave the clock-out empty if the person is still at work.',
+    });
+    expect(ctl.ran).toEqual([]);
+    // Up to now, and a clock-out left empty, go through.
+    expect((await throughSdk('correctAttendance', { employee_id: OTHER, work_date: '2026-10-09', status: 'present', clock_in: '09:00', clock_out: '' })).ok).toBe(true);
+    expect((await throughSdk('correctAttendance', { employee_id: OTHER, work_date: '2026-10-09', status: 'present', clock_in: '09:00', clock_out: '12:00' })).ok).toBe(true);
+    // An earlier day is not bound by the clock.
+    expect((await throughSdk('correctAttendance', { employee_id: OTHER, work_date: '2026-10-08', status: 'present', clock_in: '09:00', clock_out: '18:00' })).ok).toBe(true);
+  });
+
+  it('the correction description tells the model about its own day and about times not yet happened', () => {
+    const description = (tools(HR_VIEWER, hr()).correctAttendance as unknown as { description: string }).description;
+    expect(description).toContain('even for the person\'s own day');
+    expect(description).toContain('never send a time that has not happened yet');
+    expect(description).toContain('leave the clock-out empty if the person is still at work');
+  });
+});
+
 describe('the owner tools', () => {
   it('a correction goes to the write path with the times as HH:MM and the note', async () => {
     const result = await run(
@@ -265,7 +350,6 @@ describe('the owner tools', () => {
   it.each([
     [{ status: 'present' }, 'Enter the time they clocked in.'],
     [{ status: 'present', clock_in: '18:00', clock_out: '09:00' }, 'The clock-out must be after the clock-in.'],
-    [{ status: 'present', clock_in: '9am' }, 'Enter the clock-in as a time, like 09:00.'],
     [{ status: 'absent', work_date: '2026-10-10' }, 'The date cannot be in the future.'],
   ])('a correction that cannot be read is refused in a sentence before the database is asked: %j', async (extra, sentence) => {
     const result = await run('correctAttendance', { employee_id: OTHER, work_date: '2026-10-08', ...extra }, HR_VIEWER, hr());
@@ -310,6 +394,28 @@ describe('the owner tools', () => {
   it('the settings lookup gives the current three, and the start time worded', async () => {
     const result = await run('getAttendanceSettings', {}, HR_VIEWER, hr(), dataWith({ getSettings: async () => settings({ work_start_time: '08:30', late_grace_minutes: 10 }) }));
     expect(result).toMatchObject({ work_week: ['mon', 'tue', 'wed', 'thu', 'fri'], work_start_time: '08:30', work_start_label: '8:30 am', late_grace_minutes: 10 });
+  });
+
+  it('a saved settings result carries the lookup\'s id and the values now set', async () => {
+    const result = await run('saveAttendanceSettings', { work_week: ['mon'], work_start_time: '08:30', late_grace_minutes: 10 }, HR_VIEWER, hr());
+    expect(result).toEqual({ ok: true, data: { id: 'attendance-settings', work_week: ['mon'], work_start_time: '08:30', late_grace_minutes: 10 } });
+  });
+
+  it('a member is told the work week is unknown to them; an owner is not', async () => {
+    const member = await run('getMyAttendanceToday', {}, MEMBER_VIEWER, self(), dataWith(noRows));
+    expect(member.working_day).toBe('unknown');
+    const owner = await run('getMyAttendanceToday', {}, HR_LINKED, hr(ME), dataWith(noRows));
+    expect(owner).not.toHaveProperty('working_day');
+  });
+
+  it('the holiday and flagged-day lists say how many there are beside the rows shown', async () => {
+    const holidays = await run('listPublicHolidays', {}, HR_VIEWER, hr(), dataWith({ listPublicHolidays: async () => [holiday(), holiday({ id: OTHER, holiday_date: '2027-01-01' })] }));
+    expect(holidays.total).toBe(2);
+    const summary = await run('getAttendanceSummary', {}, HR_VIEWER, hr(), dataWith({ listAttendance: async () => [day({ corrected: true })] }));
+    expect(summary.flagged_days_total).toBe(1);
+    const description = (tools(HR_VIEWER, hr()).listPublicHolidays as unknown as { description: string }).description;
+    expect(description).toContain('whatever the year');
+    expect(description).not.toContain('this year');
   });
 
   it('a refusal comes back as the sentence', async () => {

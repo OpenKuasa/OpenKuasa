@@ -4,7 +4,7 @@ const executed = vi.hoisted(() => ({
   counts: {} as Record<string, number>,
   last: null as unknown,
   tool: 'clockIn',
-  input: {} as object,
+  input: {} as object | string,
 }));
 
 const bump = (name: string, input: unknown) => {
@@ -51,7 +51,7 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
                 { type: 'finish', finishReason: { unified: 'stop', raw: 'stop' }, usage },
               ]
             : [
-                { type: 'tool-call', toolCallId: 't1', toolName: executed.tool, input: JSON.stringify(executed.input) },
+                { type: 'tool-call', toolCallId: 't1', toolName: executed.tool, input: typeof executed.input === 'string' ? executed.input : JSON.stringify(executed.input) },
                 { type: 'finish', finishReason: { unified: 'tool-calls', raw: 'tool_calls' }, usage },
               ];
           return { stream: simulateReadableStream({ initialDelayInMs: 0, chunkDelayInMs: 0, chunks }) };
@@ -81,7 +81,7 @@ const asOwner = {
 };
 const ask = [{ role: 'user' as const, content: 'Clock saya masuk' }];
 
-const reset = (tool: string, input: object) => {
+const reset = (tool: string, input: object | string) => {
   Object.assign(executed, { counts: {}, last: null, tool, input });
 };
 const ran = (name: string) => executed.counts[name] ?? 0;
@@ -147,12 +147,38 @@ describe('Lekiu’s attendance changes require approval', () => {
     expect(executed.last).toEqual({ employee_id: ME });
   });
 
-  it('approve: a history that names another employee or a time never clocks anyone else, or at another time', async () => {
-    reset('clockIn', { employee_id: OTHER, time: '2026-10-01T03:00:00Z' });
-    const result = resume(asMember, true);
-    await result.consumeStream();
-    // Whatever the history holds, a clock-in only ever reaches the write path as the caller's own id.
-    if (ran('clockIn') > 0) expect(executed.last).toEqual({ employee_id: ME });
+  // The model's first turn, parsed by the SDK against the tool's own schema; the card the person sees; then their tap.
+  it.each([
+    ['clockIn', { employee_id: OTHER, time: '08:00' }, asMember],
+    ['clockOut', { employee_id: OTHER, time: '08:00' }, asMember],
+    ['clockIn', '', asMember],
+    ['clockOut', '', asMember],
+    ['clockIn', { employee_id: OTHER, time: '08:00' }, asOwner],
+    ['clockOut', '', asOwner],
+  ] as const)('%s sent as %j: a card appears, and once approved only the caller\'s own employee reaches the write path', async (tool, sent, people) => {
+    reset(tool, sent);
+    const first = runLekiu(ask, people);
+    await first.consumeStream();
+    expect(ran(tool)).toBe(0);
+    const parts = (await first.content) as { type: string; toolCallId?: string; toolName?: string; input?: unknown; approvalId?: string }[];
+    const call = parts.find((p) => p.type === 'tool-call');
+    const request = parts.find((p) => p.type === 'tool-approval-request');
+    expect(call?.toolName).toBe(tool);
+    expect(request).toBeDefined();
+    // The card carries nothing the model sent.
+    expect(call?.input).toEqual({});
+
+    const second = runLekiu(
+      [
+        ...ask,
+        { role: 'assistant', content: [{ type: 'tool-call', toolCallId: call!.toolCallId!, toolName: tool, input: call!.input }, { type: 'tool-approval-request', approvalId: request!.approvalId!, toolCallId: call!.toolCallId! }] },
+        { role: 'tool', content: [{ type: 'tool-approval-response', approvalId: request!.approvalId!, approved: true }] },
+      ],
+      people,
+    );
+    await second.consumeStream();
+    expect(ran(tool)).toBe(1);
+    expect(executed.last).toEqual({ employee_id: ME });
   });
 
   it('approve: each owner change runs once', async () => {

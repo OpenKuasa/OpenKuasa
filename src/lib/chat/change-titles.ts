@@ -7,6 +7,7 @@
 import { describeFormChange } from '@/lib/hire/application-form';
 import { REASON_LABEL } from '@/lib/hire/application-changes';
 import { STAGE_LABEL } from '@/lib/hire/applications-view';
+import { isRealDate, monthLabel, weekdayName } from '@/lib/people/dates';
 import type { ReceiptState } from '@/lib/people/receipts';
 
 const APPOINTMENT_STATUS_LABELS: Record<string, string> = {
@@ -169,7 +170,9 @@ const KIND_OF_TOOL: Record<string, ItemKind> = {
   listOvertime: 'overtime',
   listPublicHolidays: 'holiday',
   saveHoliday: 'holiday',
+  // A save's result carries the values now set, so the newest of lookup or save is "current".
   getAttendanceSettings: 'settings',
+  saveAttendanceSettings: 'settings',
   listDepartments: 'department',
   createDepartment: 'department',
   updateDepartment: 'department',
@@ -293,7 +296,27 @@ function settingsTitle(i: Record<string, unknown>, find: NameFinder): string {
     parts.push(`the grace period to ${minutesWord(grace)}`);
   }
   if (weekChanged && week) parts.push(`the work week to ${week.words}`);
-  return parts.length > 0 ? `Change ${parts.join(' and ')}?` : 'Keep the attendance settings as they are?';
+  // Never "keep as they are": what is asked equals what the conversation last saw, but the screen may have moved since.
+  return parts.length > 0 ? `Change ${parts.join(' and ')}?` : 'Save the attendance settings?';
+}
+
+/** All three values that will be saved, whatever the title shows, so a card can never hide one. */
+function settingsDetail(i: Record<string, unknown>): string {
+  const week = weekWords(i.work_week);
+  const start = clockWords(i.work_start_time);
+  const grace = typeof i.late_grace_minutes === 'number' && Number.isInteger(i.late_grace_minutes) ? minutesWord(i.late_grace_minutes) : null;
+  const values = [
+    week && `Work week: ${week.words}`,
+    start && `Start time: ${start}`,
+    grace && `Grace period: ${grace}`,
+  ].filter(Boolean);
+  return [...values, 'Applies from the next clock-in.'].join(' · ');
+}
+
+/** "Fri, 9 Oct 2026"; null unless a real date. */
+function longDay(value: unknown): string | null {
+  if (typeof value !== 'string' || !isRealDate(value)) return null;
+  return `${weekdayName(value).slice(0, 3)}, ${Number(value.slice(8, 10))} ${monthLabel(value)} ${value.slice(0, 4)}`;
 }
 
 /** How a claim's category reads inside a sentence: "RM 85.00 travel claim". */
@@ -543,7 +566,7 @@ export function approvalTitle(
     case 'clockOut': return 'Clock out now?';
     case 'correctAttendance': {
       const who = find(i.employee_id, 'employee');
-      const when = dayRangeText(i.work_date, i.work_date);
+      const when = longDay(i.work_date);
       const status = typeof i.status === 'string' ? STATUS_WORDS[i.status] : undefined;
       // Times belong to a worked day only: an absence or a day of leave takes none.
       const worked = i.status === 'present' || i.status === 'late';
@@ -746,7 +769,7 @@ export function approvalDetail(toolName: string, input?: unknown, receipt?: Rece
     const note = text(i.note);
     return note ? `Note: “${note}”` : null;
   }
-  if (toolName === 'saveAttendanceSettings') return 'Applies from the next clock-in.';
+  if (toolName === 'saveAttendanceSettings') return settingsDetail(i);
   if (toolName === 'removeHoliday' || (toolName === 'saveHoliday' && i.id != null)) {
     return 'Leave and overtime already recorded are not changed.';
   }
