@@ -193,6 +193,7 @@ export function createHireTools(
                 phone: people.get(a.candidate_id)?.phone ?? null,
                 cover_letter: letterExcerpt(a.cover_letter),
                 cv_url: a.cv_url,
+                has_cv_file: a.cv_path !== null,
                 portfolio_url: a.portfolio_url,
                 expected_salary_cents: a.expected_salary_cents,
               }),

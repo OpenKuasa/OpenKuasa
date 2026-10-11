@@ -1,8 +1,9 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useId, useState, useTransition } from 'react';
 import { ChevronDown } from 'lucide-react';
 import type { ApplicationDetails, SafeLink } from '@/lib/hire/lists';
+import { viewCvAction } from '@/app/(app)/hire/actions';
 import { cn } from '@/lib/utils';
 import { LiveDot } from '@/components/ui/live-dot';
 import { Badge } from '@/components/ui/badge';
@@ -41,6 +42,64 @@ function DetailLink({ label, link }: { label: string; link: SafeLink }) {
         >
           {link.host}
         </a>
+      </dd>
+    </div>
+  );
+}
+
+/** The uploaded CV: opened through a short-lived link made on the server, in a tab opened at once so a popup blocker allows it. */
+function ViewCv({ applicationId }: { applicationId: string }) {
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  const open = () => {
+    if (pending) return;
+    setError(null);
+    const tab = window.open('about:blank', '_blank');
+    startTransition(async () => {
+      try {
+        const result = await viewCvAction(applicationId);
+        if (result.ok) {
+          if (tab) {
+            tab.opener = null;
+            tab.location.replace(result.url);
+          } else {
+            // The link is a download, so this page stays.
+            window.location.assign(result.url);
+          }
+          return;
+        }
+        tab?.close();
+        setError(result.error);
+      } catch {
+        tab?.close();
+        setError("Couldn't open the CV. Try again.");
+      }
+    });
+  };
+
+  return (
+    <div>
+      <dt className="text-xs font-medium text-muted-foreground">CV file</dt>
+      <dd>
+        <button
+          type="button"
+          aria-disabled={pending || undefined}
+          onClick={open}
+          className={cn(
+            'inline-flex items-center rounded-md border px-3 text-sm font-medium hover:bg-muted',
+            'aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-transparent',
+            TARGET,
+            FOCUS,
+          )}
+        >
+          {pending ? 'Opening…' : 'View CV'}
+        </button>
+        {error ? (
+          <p role="alert" className="mt-1 text-sm text-destructive">
+            {error}
+          </p>
+        ) : null}
       </dd>
     </div>
   );
@@ -102,6 +161,7 @@ export function ApplicationRow({ row }: { row: ApplicationRowData }) {
                   <dd className="max-w-prose whitespace-pre-line break-words text-sm">{details.coverLetter}</dd>
                 </div>
               ) : null}
+              {details.hasCvFile ? <ViewCv applicationId={row.id} /> : null}
               {details.cv ? <DetailLink label="CV" link={details.cv} /> : null}
               {details.portfolio ? <DetailLink label="Portfolio" link={details.portfolio} /> : null}
               {details.expectedSalary ? (

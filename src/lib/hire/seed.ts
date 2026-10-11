@@ -200,6 +200,7 @@ export function createSeedHireData(now: Date = new Date()): HireData {
       created_at: iso(applied),
       cover_letter: null,
       cv_url: null,
+      cv_path: null,
       portfolio_url: null,
       expected_salary_cents: null,
       consented_at: null,

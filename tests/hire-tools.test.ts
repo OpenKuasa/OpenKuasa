@@ -111,8 +111,8 @@ describe('hire tools', () => {
       const custom: HireData = {
         ...data,
         listApplications: async () => [
-          { ...apps[0], cover_letter: long, cv_url: 'https://drive.example.com/cv', portfolio_url: 'https://me.example.com', expected_salary_cents: 350000 },
-          { ...apps[1], cover_letter: 'Short and sweet.', cv_url: null, portfolio_url: null, expected_salary_cents: null },
+          { ...apps[0], cover_letter: long, cv_url: 'https://drive.example.com/cv', cv_path: null, portfolio_url: 'https://me.example.com', expected_salary_cents: 350000 },
+          { ...apps[1], cover_letter: 'Short and sweet.', cv_url: null, cv_path: null, portfolio_url: null, expected_salary_cents: null },
         ],
       };
       const t = createHireTools(custom, NOW);
@@ -135,6 +135,26 @@ describe('hire tools', () => {
       expect(applications[0]).toMatchObject({ cv_url: 'https://drive.example.com/cv', portfolio_url: 'https://me.example.com', expected_salary_cents: 350000 });
       expect(applications[1]).toMatchObject({ cover_letter: 'Short and sweet.', cv_url: null, expected_salary_cents: null });
     });
+  });
+
+  it('says whether a file is held with includeContact, and never the path', async () => {
+    const path = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/cccccccc-cccc-4ccc-8ccc-cccccccccccc.pdf';
+    const apps = (await data.listApplications()).slice(0, 2);
+    const custom: HireData = {
+      ...data,
+      listApplications: async () => [{ ...apps[0], cv_path: path }, { ...apps[1], cv_path: null }],
+    };
+    const t = createHireTools(custom, NOW);
+    const exec = (input: Record<string, unknown>) =>
+      (t.listApplications as unknown as { execute: (i: unknown, o: unknown) => Promise<Loose> }).execute(input, { toolCallId: 't', messages: [] });
+    const withContact = await exec({ includeContact: true });
+    expect(withContact.applications.map((r: { has_cv_file: boolean }) => r.has_cv_file)).toEqual([true, false]);
+    const without = await exec({});
+    for (const row of without.applications) expect('has_cv_file' in row).toBe(false);
+    for (const result of [withContact, without]) {
+      expect(JSON.stringify(result)).not.toContain('cccccccc');
+      for (const row of result.applications) expect('cv_path' in row).toBe(false);
+    }
   });
 
   it('orders past interviews latest first whatever order the provider returns', async () => {

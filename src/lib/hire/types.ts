@@ -86,6 +86,8 @@ export type Application = {
   cover_letter: string | null;
   /** A link to the applicant's CV, as typed. Shown only through `safeLink`. */
   cv_url: string | null;
+  /** Where the uploaded CV is held. Server-side only: it never goes to the browser or the model. */
+  cv_path: string | null;
   /** A link to the applicant's portfolio, as typed. Shown only through `safeLink`. */
   portfolio_url: string | null;
   /** The monthly salary the applicant expects, in sen. */

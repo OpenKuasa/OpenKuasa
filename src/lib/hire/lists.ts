@@ -239,6 +239,8 @@ export function safeLink(url: string | null): SafeLink | null {
 export type ApplicationDetails = {
   coverLetter: string | null;
   cv: SafeLink | null;
+  /** True when a PDF was uploaded. The path to it stays on the server. */
+  hasCvFile: boolean;
   portfolio: SafeLink | null;
   expectedSalary: string | null;
 };
@@ -247,10 +249,11 @@ function applicationDetails(a: Application): ApplicationDetails | null {
   const details: ApplicationDetails = {
     coverLetter: a.cover_letter?.trim() ? a.cover_letter : null,
     cv: safeLink(a.cv_url),
+    hasCvFile: a.cv_path !== null,
     portfolio: safeLink(a.portfolio_url),
     expectedSalary: a.expected_salary_cents === null ? null : `${ringgit(a.expected_salary_cents)} a month`,
   };
-  return details.coverLetter || details.cv || details.portfolio || details.expectedSalary ? details : null;
+  return details.coverLetter || details.cv || details.hasCvFile || details.portfolio || details.expectedSalary ? details : null;
 }
 
 export type ApplicationsModel = {

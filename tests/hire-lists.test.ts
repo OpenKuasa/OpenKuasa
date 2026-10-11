@@ -51,7 +51,7 @@ describe('jobs', () => {
       id: 'a1', candidate_id: 'c1', job_id: 'j1', candidate_name: 'Aina', job_title: 'Role', stage: 'applied',
       outcome: 'active', rating: null, source: null, applied_at: '2026-10-01T00:00:00Z', offered_at: null,
       hired_at: null, created_at: '2026-10-01T00:00:00Z',
-      cover_letter: null, cv_url: null, portfolio_url: null, expected_salary_cents: null, consented_at: null,
+      cover_letter: null, cv_url: null, cv_path: null, portfolio_url: null, expected_salary_cents: null, consented_at: null,
     };
     const board = await buildBoardModel(
       { ...EMPTY, listApplications: async () => [base, { ...base, id: 'a2', rating: 4 }] },
@@ -110,7 +110,7 @@ describe('careers page: what the public board lists', () => {
       id, candidate_id: id, job_id: 'Older', candidate_name: 'Aina', job_title: 'Older', stage: 'applied',
       outcome: 'active', rating: null, source: null, applied_at: '2026-10-01T00:00:00Z', offered_at: null,
       hired_at: null, created_at: '2026-10-01T00:00:00Z',
-      cover_letter: null, cv_url: null, portfolio_url: null, expected_salary_cents: null, consented_at: null,
+      cover_letter: null, cv_url: null, cv_path: null, portfolio_url: null, expected_salary_cents: null, consented_at: null,
     });
     const model = await buildCareersModel({
       ...EMPTY, listJobs: async () => jobs, listApplications: async () => [app('a1'), app('a2')],
@@ -220,9 +220,24 @@ describe('application details', () => {
     expect(row.details).toEqual({
       coverLetter: 'Dear team,\nI would love to join.',
       cv: { href: 'https://drive.google.com/file/d/abc', host: 'drive.google.com' },
+      hasCvFile: false,
       portfolio: { href: 'https://aina.example.com/work', host: 'aina.example.com' },
       expectedSalary: 'RM 3,500 a month',
     });
+  });
+  it('has a file and nothing else when only cv_path is set, and never carries the path', async () => {
+    const path = '11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/33333333-3333-4333-8333-333333333333.pdf';
+    const row = await withDetails({ cv_path: path });
+    expect(row.details).toEqual({ coverLetter: null, cv: null, hasCvFile: true, portfolio: null, expectedSalary: null });
+    for (const [key, value] of Object.entries(row.details!)) {
+      expect(key.includes(path)).toBe(false);
+      expect(String(value).includes(path)).toBe(false);
+    }
+    expect(JSON.stringify(row)).not.toContain(path);
+    expect('cv_path' in row).toBe(false);
+  });
+  it('gives null when none of the five was given', async () => {
+    expect((await withDetails({ cv_path: null })).details).toBeNull();
   });
   it('gives null when none of the four was given', async () => {
     expect((await withDetails({})).details).toBeNull();
@@ -282,7 +297,7 @@ describe('talent pool', () => {
     id, candidate_id, job_id: 'j1', candidate_name: candidate_id, job_title: 'Role', stage: 'applied', outcome: 'active',
     rating: null, source: null, applied_at: '2026-10-01T00:00:00Z', offered_at: null, hired_at: null,
     created_at: '2026-10-01T00:00:00Z',
-    cover_letter: null, cv_url: null, portfolio_url: null, expected_salary_cents: null, consented_at: null, ...over,
+    cover_letter: null, cv_url: null, cv_path: null, portfolio_url: null, expected_salary_cents: null, consented_at: null, ...over,
   });
   const small: HireData = {
     ...EMPTY,

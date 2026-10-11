@@ -13,6 +13,7 @@ import {
   updateCareersPage,
   updateJob,
 } from '@/lib/hire/capabilities';
+import { signedCvUrl } from '@/lib/hire/cv-store';
 import { careersPath } from '@/lib/hire/public-careers';
 import { createClient } from '@/lib/supabase/server';
 
@@ -83,4 +84,28 @@ export async function updateApplicationFormAction(input: unknown) {
     revalidatePath(careersPath(ctx.orgId));
   }
   return result;
+}
+
+const CV_GONE = 'This file is no longer available.';
+const CV_FAILED = "Couldn't open the CV. Try again.";
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A five-minute link to an applicant's uploaded CV. Any member may open it; the path never leaves the server. */
+export async function viewCvAction(applicationId: unknown): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  const viewer = await getViewer();
+  // The demo workspace holds no files.
+  if (viewer.isDemo) return { ok: false, error: CV_GONE };
+  if (typeof applicationId !== 'string' || !UUID.test(applicationId)) return { ok: false, error: CV_GONE };
+  const client = await createClient();
+  const { data, error } = await client
+    .from('hire_applications')
+    .select('cv_path')
+    .eq('id', applicationId)
+    .eq('org_id', viewer.orgId)
+    .maybeSingle();
+  if (error) return { ok: false, error: CV_FAILED };
+  const path = (data as { cv_path: string | null } | null)?.cv_path;
+  if (!path) return { ok: false, error: CV_GONE };
+  const url = await signedCvUrl(client, path);
+  return url ? { ok: true, url } : { ok: false, error: CV_FAILED };
 }
