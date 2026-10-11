@@ -72,7 +72,6 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   // Bendahara
   'finance/customers-suppliers',
   'finance/products',
-  // Read-only so far: their forms and row actions join in the next slice.
   'finance/invoices',
   'finance/payments-in',
   'finance/supplier-bills',
