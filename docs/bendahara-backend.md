@@ -209,8 +209,8 @@ for a bill or for an invoice by the file that made the call.
 | `FIN11` | The bill, invoice or payment no longer exists. `finance_post_invoice` also answers this to a viewer: it locks the invoice before posting, and a viewer may not, so to them it is not there |
 | `42501` | Row-level security refused the write: "You do not have permission to make changes here." |
 | `22003` | A number does not fit its column (quantity × unit price can overflow): "That amount is too large." |
-| `23514` | A check constraint refused the write. The one to know: an invoice's number must match its status (a draft has none, any other status has one, a posted invoice has `posted_at`). Only a direct write can break it; the app never does. |
-| `23505` | A unique constraint refused the write. Through the app this does not happen for an allocation; see Known limits. |
+| `23514` | A check constraint refused the write. The one to know: an invoice's number must match its status (a draft has none, any other status has one, a posted invoice has `posted_at`). Only a direct write can break it; the app never does. Others: the due date before the invoice date, and e-Invois set on a draft; `invoices.ts` has no sentence for them. |
+| `23505` | A unique constraint refused the write. `invoices.ts` words it as "That invoice number is already used."; `money.ts` has no sentence for it. Through the app it does not happen for an allocation; see Known limits. |
 
 ## Known limits
 
@@ -231,12 +231,13 @@ for a bill or for an invoice by the file that made the call.
 - A payment's account must be active when it is chosen (only active accounts
   are offered), but the database does not refuse an archived account yet.
 - Voiding a paid bill is offered and refused until its payments are voided.
-- Posted and void bills and payments cannot be deleted, by design.
+- Posted and void bills, invoices and payments cannot be deleted, by design.
 - Approval of money out is not enforced yet.
 - Posting goes through database functions that run as the caller. An editor
   writing to the tables directly, rather than through the app, could still post
-  a bill or a payment with a number of their own choosing, or change the account
-  of a scheduled payment after it has been split across bills.
+  a bill, an invoice or a payment with a number of their own choosing, or change
+  the account, or the amount within its split, of a scheduled payment after it
+  has been split across bills.
   Numbers stay unique per workspace either way. Closing this needs posting
   functions that run with their own rights, planned with the approval rule.
 - Contacts and products load the first 1,000 by name; search is in the browser.
@@ -259,13 +260,16 @@ for a bill or for an invoice by the file that made the call.
   to the table directly, and marking it paid would give it a `PV-` number.
 - The demo workspace's invoices were dated from the day they were seeded, so
   its Sent examples turn Overdue as time passes, as its bills do.
-- The check that a payment cannot shrink below its split reads the payment row
-  without locking it. Two direct writes to the tables made at the same moment
-  (not possible through the app), one lowering the payment and one adding to
-  its split, can both pass and leave a payment smaller than its split.
+- The checks between a payment and its split read each other without a lock.
+  When a payment is lowered, the guard reads its split; when an allocation is
+  added, the guard reads the payment row. Two direct writes to the tables made
+  at the same moment (not possible through the app), one lowering the payment
+  and one adding to its split, can both pass and leave a payment smaller than
+  its split.
 - Paying the same invoice twice in one payment is refused by the payment
   form's schema. A direct call to `finance_record_payment_in` gets a plain
-  unique-violation error (23505) rather than a sentence.
+  unique-violation error (23505) rather than a sentence, unless the two
+  amounts together exceed what is owed, in which case it is FIN05.
 - Stock and revenue per item are not tracked.
 - A contact's Payable counts bills that are pending or overdue, and the
   Payable card is totalled from every open bill, not only the contacts loaded.
