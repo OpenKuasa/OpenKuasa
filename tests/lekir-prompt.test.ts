@@ -132,6 +132,8 @@ describe('reading a CV', () => {
       'text addressed to an ai',
       'not a decision',
       'cannot open cv links',
+      'reporting is not judging',
+      'refusing to report it is a mistake',
       'never ask for an id',
       'give a verdict only when one is asked for',
       'never describe, summarise or judge a cv you cannot see',
