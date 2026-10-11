@@ -209,7 +209,7 @@ for a bill or for an invoice by the file that made the call.
 | `FIN11` | The bill, invoice or payment no longer exists. `finance_post_invoice` also answers this to a viewer: it locks the invoice before posting, and a viewer may not, so to them it is not there |
 | `42501` | Row-level security refused the write: "You do not have permission to make changes here." |
 | `22003` | A number does not fit its column (quantity × unit price can overflow): "That amount is too large." |
-| `23514` | A check constraint refused the write. The one to know: an invoice's number must match its status (a draft has none, any other status has one, a posted invoice has `posted_at`). Only a direct write can break it; the app never does. Others: the due date before the invoice date, and e-Invois set on a draft; `invoices.ts` has no sentence for them. |
+| `23514` | A check constraint refused the write. The one to know: an invoice's number must match its status (a draft has none, any other status has one, a posted invoice has `posted_at`). Only a direct write can break it; the app never does. Others include the due date before the invoice date, e-Invois set on a draft, a line's quantity, price or SST rate out of range, and an allocation naming both a bill and an invoice; `invoices.ts` has no sentence for them. |
 | `23505` | A unique constraint refused the write. `invoices.ts` words it as "That invoice number is already used."; `money.ts` has no sentence for it. Through the app it does not happen for an allocation; see Known limits. |
 
 ## Known limits
@@ -236,8 +236,9 @@ for a bill or for an invoice by the file that made the call.
 - Posting goes through database functions that run as the caller. An editor
   writing to the tables directly, rather than through the app, could still post
   a bill, an invoice or a payment with a number of their own choosing, or change
-  the account, or the amount within its split, of a scheduled payment after it
-  has been split across bills.
+  the account of a scheduled payment, or raise its amount above its split, after
+  it has been split across bills or invoices. (Lowering the amount below the
+  split, or changing the direction, is refused.)
   Numbers stay unique per workspace either way. Closing this needs posting
   functions that run with their own rights, planned with the approval rule.
 - Contacts and products load the first 1,000 by name; search is in the browser.
