@@ -20,7 +20,7 @@ import {
 } from './document-form';
 import type { FinanceProduct } from './products';
 
-// Defined in document-form.ts, which the invoice form shares; kept exported from here because the purchase-side tests and views import them from this module.
+// Defined in document-form.ts, which the invoice form shares; kept exported from here because the purchase-side tests import them from this module.
 export { type LineDraft, defaultDueDate, emptyLine, lineNumbers, withDueDate } from './document-form';
 
 export type BillForm = {
