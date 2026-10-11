@@ -17,6 +17,8 @@ import { z } from 'zod';
 import {
   type CapResult,
   type HireWriteContext,
+  addCandidate,
+  addCandidateInput,
   closeApplication,
   closeApplicationInput,
   createJob,
@@ -33,6 +35,8 @@ import {
   setJobStatusInput,
   updateApplicationForm,
   updateApplicationFormInput,
+  updateCandidate,
+  updateCandidateInput,
   updateCareersPage,
   updateCareersPageInput,
   updateJob,
@@ -55,6 +59,7 @@ export const HIRE_TOOL_NAMES = [
   'listApplications',
   'getHiringFunnel',
   'listTalentPool',
+  'listCandidates',
   'listInterviews',
   'getTimeToHire',
   'getSourceBreakdown',
@@ -403,6 +408,45 @@ export function createHireTools(
         }),
     }),
 
+    listCandidates: tool({
+      description:
+        'List candidates on file, newest first, by name, skill or location. ' +
+        "Each row has the candidate's id, which updateCandidate takes. " +
+        'Email and phone are returned only when includeContact is set.',
+      inputSchema: z.object({
+        name: z.string().optional().describe('Only candidates whose name contains this, in any letter case.'),
+        skill: z.string().optional().describe('Only candidates with this skill. Part of the skill is enough.'),
+        location: z.string().optional().describe('Only candidates in this place.'),
+        includeContact,
+        limit,
+      }),
+      execute: async ({ name, skill, location, includeContact: withContact, limit: requested }) =>
+        safe('listCandidates', async () => {
+          const [people, apps] = await Promise.all([data.listCandidates(), data.listApplications()]);
+          const counts = new Map<string, number>();
+          for (const a of apps) counts.set(a.candidate_id, (counts.get(a.candidate_id) ?? 0) + 1);
+          const rows = people.filter(
+            (c) =>
+              matchesText(c.name, name) &&
+              matchesText(c.location, location) &&
+              (!skill?.trim() || c.skills.some((s) => matchesText(s, skill))),
+          );
+          return {
+            total: rows.length,
+            candidates: rows.slice(0, rowLimit(requested, 20)).map((c) => ({
+              id: c.id,
+              name: c.name,
+              headline: c.headline,
+              location: c.location,
+              skills: c.skills,
+              source: c.source,
+              applications: counts.get(c.id) ?? 0,
+              ...(withContact && { email: c.email, phone: c.phone }),
+            })),
+          };
+        }),
+    }),
+
     listInterviews: tool({
       description:
         'List interviews with the candidate, the job, the time, how it is held (video, onsite, phone), ' +
@@ -612,6 +656,22 @@ export function createHireTools(
         ' When the rating is your own reading (for example from a CV), put the grounds in basis.',
       inputSchema: rateApplicationInput,
       execute: async (input) => rateApplication(ctx, input),
+    }),
+    // The result carries the candidate's `id` and `name`, which is how the approval cards learn who it was.
+    addCandidate: tool({
+      description:
+        'Add ONE candidate by hand, with an application to a job when job_id is given (from listJobs; the job must be open or paused). ' +
+        'If the email is already on file the existing candidate is used and left unchanged. ' +
+        "Fill a field only from what the user said or from that candidate's own CV. A CV file cannot be attached here.",
+      inputSchema: addCandidateInput,
+      execute: async (input) => addCandidate(ctx, input),
+    }),
+    updateCandidate: tool({
+      description:
+        "Change ONE candidate's details: name, email, phone, headline, location, skills or source. " +
+        "Use the candidate's id from listCandidates. Send only what changes.",
+      inputSchema: updateCandidateInput,
+      execute: async (input) => updateCandidate(ctx, input),
     }),
   };
 }

@@ -77,6 +77,10 @@ export function delegationForModel(output: Delegation): string {
 const APPLICATION_CHANGES = new Set(['moveApplication', 'rejectApplication', 'reopenApplication', 'rateApplication']);
 const ONE_APPLICATION_CHANGE = 'One application change at a time. One is already prepared for approval.';
 
+/** The two candidate changes: one person per delegation, and the ids they carry must have been looked up as what they are. */
+const CANDIDATE_CHANGES = new Set(['addCandidate', 'updateCandidate']);
+const ONE_CANDIDATE_CHANGE = 'One candidate change at a time. One is already prepared for approval.';
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Every id a change refers to, wherever it sits in the input. */
@@ -125,6 +129,9 @@ function specialistTools(
         if (APPLICATION_CHANGES.has(name) && prepared.length > 0) {
           return { prepared: false, error: ONE_APPLICATION_CHANGE };
         }
+        if (CANDIDATE_CHANGES.has(name) && prepared.length > 0) {
+          return { prepared: false, error: ONE_CANDIDATE_CHANGE };
+        }
         // An id must have come from somewhere: a lookup just now, an earlier
         // turn, or the task. One that appears nowhere was made up, and a
         // change prepared with it would fail after the user approved it.
@@ -154,20 +161,44 @@ function specialistTools(
             };
           }
         }
+        if (name === 'updateCandidate') {
+          const id = (input as { id?: unknown } | null)?.id;
+          const asCandidate =
+            typeof id === 'string' && (team.names?.[`candidate:${id}`] || nameIn(results)(id, 'candidate'));
+          if (!asCandidate) {
+            return {
+              prepared: false,
+              error:
+                `You have not looked up ${String(id)} as a candidate. Never guess an id: use listCandidates ` +
+                'to find the candidate and get its real id, then prepare the change again.',
+            };
+          }
+        }
+        if (name === 'addCandidate') {
+          // A person added on their own has no job; one added to a job must name a job that was looked up.
+          const jobId = (input as { job_id?: unknown } | null)?.job_id;
+          const asJob =
+            typeof jobId === 'string' && (team.names?.[`job:${jobId}`] || nameIn(results)(jobId, 'job'));
+          if (typeof jobId === 'string' && !asJob) {
+            return {
+              prepared: false,
+              error:
+                `You have not looked up ${jobId} as a job. Never guess an id: use listJobs ` +
+                'to find the job and get its real id, then prepare the change again.',
+            };
+          }
+        }
+        // Named from what this specialist just looked up, else from earlier turns.
+        const find = (id: unknown, kind?: ItemKind) =>
+          nameIn(results)(id, kind) ??
+          (kind && typeof id === 'string' ? (team.names?.[`${kind}:${id}`] ?? null) : null);
         const proposal: Proposal = {
           id: crypto.randomUUID().slice(0, 8),
           product: product.key,
           action: name,
           input,
-          // Named from what this specialist just looked up, else from earlier turns.
-          title: approvalTitle(
-            name,
-            input,
-            (id: unknown, kind?: ItemKind) =>
-              nameIn(results)(id, kind) ??
-              (kind && typeof id === 'string' ? (team.names?.[`${kind}:${id}`] ?? null) : null),
-          ),
-          detail: approvalDetail(name, input),
+          title: approvalTitle(name, input, find),
+          detail: approvalDetail(name, input, undefined, find),
         };
         team.proposals.set(proposal.id, proposal);
         prepared.push(proposal);
@@ -264,7 +295,7 @@ function askTool(product: ProductToolkit, team: TeamContext): Tool {
 const AREA: Record<ProductToolkit['key'], string> = {
   reach: 'marketing (ads, campaigns, creatives, leads, lead forms, appointments, ad settings)',
   crm: 'the CRM (contacts, deals, pipelines and their stages)',
-  hire: 'hiring (jobs, candidates, applications, the hiring funnel, interviews, the talent pool; it can read one candidate\'s uploaded CV and give a verdict on it; it can prepare moving, rejecting, reopening or rating one application at a time)',
+  hire: 'hiring (jobs, candidates, applications, the hiring funnel, interviews, the talent pool; it can read one candidate\'s uploaded CV and give a verdict on it; it can prepare moving, rejecting, reopening or rating one application at a time; it can prepare adding or editing one candidate at a time)',
   people: 'HR (existing staff, leave, claims, overtime, attendance, payroll, performance)',
 };
 

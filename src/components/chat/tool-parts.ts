@@ -88,6 +88,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   listApplications: { label: 'Applications', Icon: ClipboardList },
   getHiringFunnel: { label: 'Hiring funnel', Icon: Filter },
   listTalentPool: { label: 'Talent pool', Icon: UserSearch },
+  listCandidates: { label: 'Candidates', Icon: Users },
   listInterviews: { label: 'Interviews', Icon: CalendarDays },
   getTimeToHire: { label: 'Time to hire', Icon: Timer },
   getSourceBreakdown: { label: 'Candidate sources', Icon: Waypoints },

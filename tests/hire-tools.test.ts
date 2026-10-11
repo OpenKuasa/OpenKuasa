@@ -3,8 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ModelMessage } from 'ai';
 import { HIRE_TOOL_NAMES, createHireTools, withHeldCvs, type HeldCv } from '@/lib/ai/hire-tools';
 import { CRM_WRITE_TOOL_NAMES } from '@/lib/ai/crm-tools';
-import { HIRE_WRITE_TOOL_NAMES, REACH_WRITE_TOOL_NAMES } from '@/lib/ai/products';
+import { HIRE_WRITE_TOOL_NAMES, PEOPLE_WRITE_TOOL_NAMES, REACH_WRITE_TOOL_NAMES } from '@/lib/ai/products';
 import {
+  addCandidateInput, updateCandidateInput,
   closeApplicationInput, createJobInput, deleteJobInput, moveApplicationInput, rateApplicationInput, reopenApplicationInput,
   setJobStatusInput, updateApplicationFormInput, updateCareersPageInput, updateJobInput,
 } from '@/lib/hire/capabilities';
@@ -19,13 +20,15 @@ import type { CvRead, CvReader } from '@/lib/hire/cv-read';
 import type { HireData } from '@/lib/hire/types';
 
 // The real schemas; only the four application changes are recorded instead of run.
-const applied = vi.hoisted(() => ({ move: vi.fn(), close: vi.fn(), reopen: vi.fn(), rate: vi.fn() }));
+const applied = vi.hoisted(() => ({ move: vi.fn(), close: vi.fn(), reopen: vi.fn(), rate: vi.fn(), addCandidate: vi.fn(), updateCandidate: vi.fn() }));
 vi.mock('@/lib/hire/capabilities', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/hire/capabilities')>()),
   moveApplication: applied.move,
   closeApplication: applied.close,
   reopenApplication: applied.reopen,
   rateApplication: applied.rate,
+  addCandidate: applied.addCandidate,
+  updateCandidate: applied.updateCandidate,
 }));
 
 const NOW = new Date('2026-10-10T04:00:00Z');
@@ -43,21 +46,22 @@ const run = (name: string): Run => (input) =>
   });
 
 describe('hire tools', () => {
-  it('is exactly the nine lookups plus the CV reader, none sharing a name with another product', () => {
+  it('is exactly the ten lookups plus the CV reader, none sharing a name with another product', () => {
     // The CV reader exists only for a caller given a way to read files.
     expect(Object.keys(tools)).toEqual(DATA_LOOKUPS);
     expect(HIRE_TOOL_NAMES).toEqual([
       'getHiringOverview', 'listJobs', 'listApplications', 'getHiringFunnel',
-      'listTalentPool', 'listInterviews', 'getTimeToHire', 'getSourceBreakdown', 'getCareersPage',
+      'listTalentPool', 'listCandidates', 'listInterviews', 'getTimeToHire', 'getSourceBreakdown', 'getCareersPage',
       'readCandidateCv',
     ]);
     const others = new Set([
       ...Object.keys(createReachTools(createSeedReachData())),
       ...REACH_WRITE_TOOL_NAMES,
       ...CRM_WRITE_TOOL_NAMES,
+      ...PEOPLE_WRITE_TOOL_NAMES,
       'listCrmContacts', 'listDeals', 'listPipelines', 'getDealStats',
     ]);
-    for (const name of HIRE_TOOL_NAMES) expect(others.has(name), name).toBe(false);
+    for (const name of [...HIRE_TOOL_NAMES, ...HIRE_WRITE_TOOL_NAMES]) expect(others.has(name), name).toBe(false);
   });
 
   it('has a named card for every tool', () => {
@@ -294,6 +298,66 @@ describe('hire tools', () => {
   });
 });
 
+describe('listCandidates', () => {
+  const rows = async (input: Record<string, unknown> = {}) => (await run('listCandidates')(input)) as Loose;
+
+  it('lists candidates newest first with an id, the application count and no contact details', async () => {
+    const { total, candidates } = await rows({ limit: 5 });
+    expect(total).toBe((await data.listCandidates()).length);
+    expect(candidates).toHaveLength(5);
+    const stored = await data.listCandidates();
+    expect(candidates[0].id).toBe(stored[0].id);
+    for (const row of candidates) {
+      expect(Object.keys(row).sort()).toEqual(['applications', 'headline', 'id', 'location', 'name', 'skills', 'source']);
+    }
+    const apps = await data.listApplications();
+    const counted = apps.filter((a) => a.candidate_id === candidates[0].id).length;
+    expect(candidates[0].applications).toBe(counted);
+  });
+  it('adds email and phone only with includeContact', async () => {
+    const [one] = (await rows({ limit: 1, includeContact: true })).candidates;
+    const stored = (await data.listCandidates())[0];
+    expect(one).toMatchObject({ email: stored.email, phone: stored.phone });
+    const [plain] = (await rows({ limit: 1 })).candidates;
+    expect(plain).not.toHaveProperty('email');
+    expect(plain).not.toHaveProperty('phone');
+  });
+  it('filters by name, skill and location, in any letter case', async () => {
+    const stored = await data.listCandidates();
+    const target = stored[3];
+    const byName = await rows({ name: target.name.toUpperCase() });
+    expect(byName.candidates.map((c: { id: string }) => c.id)).toContain(target.id);
+    for (const c of byName.candidates) expect(c.name.toLowerCase()).toContain(target.name.toLowerCase());
+    const bySkill = await rows({ skill: target.skills[0].toLowerCase() });
+    expect(bySkill.total).toBeGreaterThan(0);
+    for (const c of bySkill.candidates) expect(c.skills.some((s: string) => s.toLowerCase().includes(target.skills[0].toLowerCase()))).toBe(true);
+    const byPlace = await rows({ location: target.location ?? '', limit: 50 });
+    for (const c of byPlace.candidates) expect(c.location).toBe(target.location);
+    expect((await rows({ name: 'zzzz-nobody' })).total).toBe(0);
+  });
+  it('does not drop the people who are not in the talent pool, and never shows a pool status or a path', async () => {
+    const stored = await data.listCandidates();
+    const outside = stored.find((c) => c.pool_status === 'none');
+    expect(outside).toBeDefined();
+    const found = await rows({ name: outside!.name, limit: 50 });
+    expect(found.candidates.map((c: { id: string }) => c.id)).toContain(outside!.id);
+    expect(JSON.stringify(await rows({ limit: 50, includeContact: true }))).not.toMatch(/pool_status|cv_path|\.pdf/);
+  });
+  it('says the lookup failed rather than listing nothing', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const broken: HireData = { ...createSeedHireData(NOW), listCandidates: async () => { throw new Error('x'); } };
+    const t = createHireTools(broken, NOW);
+    const out = await (t.listCandidates as unknown as { execute: (i: unknown, o: unknown) => Promise<unknown> }).execute({}, { toolCallId: 't', messages: [] });
+    expect(out).toEqual({ ok: false, error: 'Could not read hiring data.' });
+    log.mockRestore();
+  });
+  it('says what it returns, and that contact details need includeContact', () => {
+    expect((tools.listCandidates as unknown as { description: string }).description).toBe(
+      'List candidates on file, newest first, by name, skill or location. Each row has the candidate\'s id, which updateCandidate takes. Email and phone are returned only when includeContact is set.',
+    );
+  });
+});
+
 describe('hire change tools', () => {
   const ctx = { client: {} as never, orgId: 'org1' };
   it('are offered only to someone who may write', () => {
@@ -308,6 +372,7 @@ describe('hire change tools', () => {
     expect(HIRE_WRITE_TOOL_NAMES).toEqual([
       'createJob', 'updateJob', 'setJobStatus', 'deleteJob', 'updateCareersPage', 'updateApplicationForm',
       'moveApplication', 'rejectApplication', 'reopenApplication', 'rateApplication',
+      'addCandidate', 'updateCandidate',
     ]);
   });
   it('gives a writer nothing beyond the lookups except the listed change tools, so each one needs approval', () => {
@@ -343,6 +408,33 @@ describe('hire change tools', () => {
     expect(t.rejectApplication.inputSchema).toBe(closeApplicationInput);
     expect(t.reopenApplication.inputSchema).toBe(reopenApplicationInput);
     expect(t.rateApplication.inputSchema).toBe(rateApplicationInput);
+    expect(t.addCandidate.inputSchema).toBe(addCandidateInput);
+    expect(t.updateCandidate.inputSchema).toBe(updateCandidateInput);
+  });
+  it('describes the two candidate changes as agreed', () => {
+    const t = createHireTools(data, NOW, { ctx, canWrite: true }) as Record<string, { description: string }>;
+    expect(t.addCandidate.description).toBe('Add ONE candidate by hand, with an application to a job when job_id is given (from listJobs; the job must be open or paused). If the email is already on file the existing candidate is used and left unchanged. Fill a field only from what the user said or from that candidate\'s own CV. A CV file cannot be attached here.');
+    expect(t.updateCandidate.description).toBe('Change ONE candidate\'s details: name, email, phone, headline, location, skills or source. Use the candidate\'s id from listCandidates. Send only what changes.');
+  });
+  it('runs each candidate change through its capability with the input unchanged', async () => {
+    const t = createHireTools(data, NOW, { ctx, canWrite: true }) as Record<
+      string,
+      { execute: (i: unknown, o: unknown) => Promise<unknown> }
+    >;
+    const id = '33333333-3333-4333-8333-333333333333';
+    const out = { ok: true, data: { id, name: 'Aina Rahman' } };
+    const cases: [string, ReturnType<typeof vi.fn>, Record<string, unknown>][] = [
+      ['addCandidate', applied.addCandidate, { name: 'Aina Rahman', email: 'aina@example.com' }],
+      ['updateCandidate', applied.updateCandidate, { id, headline: null }],
+    ];
+    for (const [name, fn, input] of cases) {
+      fn.mockReset();
+      fn.mockResolvedValue(out);
+      expect(await t[name].execute(input, { toolCallId: 't', messages: [] }), name).toBe(out);
+      expect(fn, name).toHaveBeenCalledTimes(1);
+      expect(fn.mock.calls[0][0], name).toBe(ctx);
+      expect(fn.mock.calls[0][1], name).toBe(input);
+    }
   });
   it('describes the four application changes as agreed', () => {
     const t = createHireTools(data, NOW, { ctx, canWrite: true }) as Record<string, { description: string }>;

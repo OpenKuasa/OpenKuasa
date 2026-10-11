@@ -107,6 +107,7 @@ export type ItemKind =
   | 'schedule'
   | 'job'
   | 'application'
+  | 'candidate'
   | 'employee'
   | 'department'
   | 'leave'
@@ -158,6 +159,10 @@ const KIND_OF_TOOL: Record<string, ItemKind> = {
   rejectApplication: 'application',
   reopenApplication: 'application',
   rateApplication: 'application',
+  // Rows and results of all three carry the candidate's `id` and `name`.
+  listCandidates: 'candidate',
+  addCandidate: 'candidate',
+  updateCandidate: 'candidate',
   listEmployees: 'employee',
   getEmployee: 'employee',
   createEmployee: 'employee',
@@ -234,6 +239,7 @@ export function nameIn(results: ToolResult[]): NameFinder {
 }
 
 const UNLISTED_APPLICATION = 'an application that was not in the list above';
+const UNLISTED_CANDIDATE = 'a candidate that was not in the list above';
 const UNLISTED_LEAVE = 'a leave request that was not in the list above';
 const UNLISTED_TIME_OFF = 'a time-off request that was not in the list above';
 const UNLISTED_CLAIM = 'a claim that was not in the list above';
@@ -498,6 +504,11 @@ export function approvalTitle(
       return typeof i.rating === 'number' && Number.isInteger(i.rating)
         ? `Rate ${who()} ${i.rating} out of 5?`
         : `Clear the rating of ${who()}?`;
+    case 'addCandidate': return `Add candidate “${text(i.name) ?? ''}”?`;
+    case 'updateCandidate': {
+      const name = find(i.id, 'candidate');
+      return `Save changes to ${name ? `candidate “${name}”` : UNLISTED_CANDIDATE}?`;
+    }
     case 'createEmployee': return `Add employee “${i.name ?? ''}”?`;
     case 'updateEmployee': return `Save changes to ${the('employee', 'employee')}?`;
     case 'setEmployeeStatus':
@@ -717,12 +728,60 @@ function employeeFieldWords(i: Record<string, unknown>, includeName: boolean): s
   return words;
 }
 
+/** Skills as they read on a card: "Latte art, POS"; null for anything that is not a non-empty list of words. */
+function skillsText(value: unknown): string | null {
+  if (!Array.isArray(value)) return null;
+  const skills = value.map(text).filter((skill): skill is string => skill !== null);
+  return skills.length > 0 ? skills.join(', ') : null;
+}
+
+// What a candidate change sends, in plain words. An email is shown; a phone number is only named, like the
+// employee cards' private details. The job is looked up by its id, so it is handled where the words are made.
+const CANDIDATE_FIELDS: EmployeeField[] = [
+  { key: 'name', word: 'name' },
+  { key: 'email', word: 'email', show: shownText },
+  { key: 'phone', word: 'phone' },
+  { key: 'headline', word: 'headline' },
+  { key: 'location', word: 'location' },
+  { key: 'skills', word: 'skills', show: skillsText },
+  { key: 'source', word: 'source' },
+  { key: 'cover_letter', word: 'cover note' },
+  { key: 'cv_url', word: 'CV link' },
+];
+
+/** The fields a candidate change sends, in plain words; a null, blank or empty value reads "cleared". */
+function candidateFieldWords(i: Record<string, unknown>, includeName: boolean, find?: NameFinder): string[] {
+  const words: string[] = [];
+  if (typeof i.job_id === 'string' && i.job_id) {
+    const job = find?.(i.job_id, 'job');
+    words.push(job ? `job (${job})` : 'job');
+  }
+  for (const { key, word, show } of CANDIDATE_FIELDS) {
+    if (key === 'name' && !includeName) continue;
+    const value = i[key];
+    if (value === undefined) continue;
+    if (value === null || (typeof value === 'string' && value.trim() === '') || (Array.isArray(value) && value.length === 0)) {
+      words.push(`${word} (cleared)`);
+      continue;
+    }
+    const shown = show?.(value);
+    words.push(shown ? `${word} (${shown})` : word);
+  }
+  return words;
+}
+
 /**
  * The second line of an approval card. For a job it shows the values the
  * user is approving that the question itself does not: the salary and the
  * closing date above all.
  */
-export function approvalDetail(toolName: string, input?: unknown, receipt?: ReceiptState): string | null {
+export function approvalDetail(
+  toolName: string,
+  input?: unknown,
+  receipt?: ReceiptState,
+  /** Looks up a name by id (a job's title on an add-candidate card); without it a job is named but not titled. */
+  named?: NameFinder,
+): string | null {
   const i = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
   if (toolName === 'deleteEmployee') {
     return 'Their leave, claims, payslips and every other HR record are deleted too. This cannot be undone.';
@@ -735,6 +794,15 @@ export function approvalDetail(toolName: string, input?: unknown, receipt?: Rece
     // A new employee has nothing to clear: a null or blank field simply sets nothing.
     const words = employeeFieldWords(i, false).filter((w) => !w.endsWith('(cleared)'));
     return words.length > 0 ? `Sets: ${words.join(', ')}` : null;
+  }
+  if (toolName === 'addCandidate') {
+    // A new person has nothing to clear: a null or blank field simply sets nothing.
+    const words = candidateFieldWords(i, false, named).filter((w) => !w.endsWith('(cleared)'));
+    return words.length > 0 ? `Sets: ${words.join(', ')}` : null;
+  }
+  if (toolName === 'updateCandidate') {
+    const words = candidateFieldWords(i, true);
+    return words.length > 0 ? `Changes: ${words.join(', ')}` : null;
   }
   if (toolName === 'submitClaim') {
     // What will be saved under the person's name. The receipt line comes from the conversation (the file on the

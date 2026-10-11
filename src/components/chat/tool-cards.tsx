@@ -87,7 +87,7 @@ export function ApprovalCard({
   receipt?: ReceiptState;
   onDecide: (approved: boolean) => void;
 }) {
-  const detail = proposal ? proposal.detail : approvalDetail(approval.toolName, approval.input, receipt);
+  const detail = proposal ? proposal.detail : approvalDetail(approval.toolName, approval.input, receipt, named);
   const title = proposal?.title ?? approvalTitle(approval.toolName, approval.input, named);
   return (
     <div

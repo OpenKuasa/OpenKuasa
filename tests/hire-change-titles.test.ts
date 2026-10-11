@@ -171,3 +171,66 @@ describe('approval cards for an application', () => {
     expect(approvalTitle('reopenApplication', { id: APP }, nameIn(results))).toBe('Reopen Aina Rahman (Barista)?');
   });
 });
+
+describe('approval cards for a candidate', () => {
+  const CAND = '77777777-7777-4777-8777-777777777777';
+  const JOB = '88888888-8888-4888-8888-888888888888';
+  const STRANGER = '99999999-9999-4999-8999-999999999999';
+  const listed = { tool: 'listCandidates', output: { total: 1, candidates: [{ id: CAND, name: 'Aina Rahman', applications: 2 }] } };
+  const jobs = { tool: 'listJobs', output: { total: 1, jobs: [{ id: JOB, name: 'Barista', title: 'Barista' }] } };
+  const found = nameIn([listed, jobs]);
+  const nothing = nameIn([]);
+
+  it('names a candidate from a listCandidates row, and from what addCandidate and updateCandidate returned', () => {
+    expect(collectNames([listed])[`candidate:${CAND}`]).toBe('Aina Rahman');
+    const added = [{ tool: 'addCandidate', output: { ok: true, data: { id: CAND, name: 'Aina Rahman', job_id: JOB, job: 'Barista', message: 'Added Aina Rahman.' } } }];
+    const known = collectNames(added);
+    expect(known[`candidate:${CAND}`]).toBe('Aina Rahman');
+    expect(Object.keys(known)).toEqual([`candidate:${CAND}`]);
+    const saved = [{ tool: 'updateCandidate', output: { ok: true, data: { id: CAND, name: 'Aina R.' } } }];
+    expect(collectNames(saved)[`candidate:${CAND}`]).toBe('Aina R.');
+  });
+  it('does not take a job or an application row for a candidate', () => {
+    expect(collectNames([jobs])[`candidate:${JOB}`]).toBeUndefined();
+    expect(found(JOB, 'candidate')).toBeNull();
+    expect(found(CAND, 'job')).toBeNull();
+    expect(found(CAND, 'candidate')).toBe('Aina Rahman');
+  });
+  it('words an add and an edit', () => {
+    expect(approvalTitle('addCandidate', { name: 'Aina Rahman' }, found)).toBe('Add candidate “Aina Rahman”?');
+    expect(approvalTitle('updateCandidate', { id: CAND, headline: 'x' }, found)).toBe('Save changes to candidate “Aina Rahman”?');
+  });
+  it('says so when the conversation never listed the candidate', () => {
+    expect(approvalTitle('updateCandidate', { id: STRANGER, headline: 'x' }, found)).toBe('Save changes to a candidate that was not in the list above?');
+    expect(approvalTitle('updateCandidate', { id: STRANGER, headline: 'x' }, nothing)).toBe('Save changes to a candidate that was not in the list above?');
+    expect(approvalTitle('updateCandidate', { id: STRANGER, headline: 'x' })).toBe('Save changes to a candidate that was not in the list above?');
+  });
+  it('lists what an add sets, the job by its title, the email shown and the phone only named', () => {
+    expect(approvalDetail('addCandidate', {
+      name: 'Aina Rahman', job_id: JOB, email: ' aina@example.com ', phone: '+60 12-345 6789', headline: 'Barista', location: 'Shah Alam',
+      skills: ['Latte art', 'POS'], source: 'Referral', cover_letter: 'Hello', cv_url: 'https://example.com/cv',
+    }, undefined, found)).toBe(
+      'Sets: job (Barista), email (aina@example.com), phone, headline, location, skills (Latte art, POS), source, cover note, CV link',
+    );
+    expect(approvalDetail('addCandidate', { name: 'Aina Rahman', phone: '+60 12-345 6789' }, undefined, found)).toBe('Sets: phone');
+  });
+  it('names a job that was not looked up without a title, and says nothing for an add with only a name', () => {
+    expect(approvalDetail('addCandidate', { name: 'Aina Rahman', job_id: STRANGER }, undefined, found)).toBe('Sets: job');
+    expect(approvalDetail('addCandidate', { name: 'Aina Rahman', job_id: JOB })).toBe('Sets: job');
+    expect(approvalDetail('addCandidate', { name: 'Aina Rahman' }, undefined, found)).toBeNull();
+    // A new person has nothing to clear: a null or blank field sets nothing.
+    expect(approvalDetail('addCandidate', { name: 'Aina Rahman', job_id: null, email: '', headline: null, skills: [] }, undefined, found)).toBeNull();
+  });
+  it('lists what an edit changes, and says "(cleared)" for a field sent null or blank', () => {
+    expect(approvalDetail('updateCandidate', { id: CAND, name: 'Aina R.', email: 'a@example.com', phone: '012', headline: 'Lead barista', location: 'Klang', skills: ['POS'], source: 'Walk-in' }, undefined, found))
+      .toBe('Changes: name, email (a@example.com), phone, headline, location, skills (POS), source');
+    expect(approvalDetail('updateCandidate', { id: CAND, email: null, phone: '', headline: '  ', skills: [], source: null }, undefined, found))
+      .toBe('Changes: email (cleared), phone (cleared), headline (cleared), skills (cleared), source (cleared)');
+    expect(approvalDetail('updateCandidate', { id: CAND, phone: '+60 12-345 6789' }, undefined, found)).toBe('Changes: phone');
+  });
+  it('has no second line for an edit that sends nothing, or without a usable input', () => {
+    expect(approvalDetail('updateCandidate', { id: CAND }, undefined, found)).toBeNull();
+    expect(approvalDetail('updateCandidate')).toBeNull();
+    expect(approvalDetail('updateCandidate', 'text')).toBeNull();
+  });
+});

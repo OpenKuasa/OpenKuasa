@@ -374,7 +374,7 @@ function Thread({
                 }
                 const pending = toPendingApproval(part);
                 if (pending) {
-                  const detail = approvalDetail(pending.toolName, pending.input, receiptStateFor(messages, pending.approvalId));
+                  const detail = approvalDetail(pending.toolName, pending.input, receiptStateFor(messages, pending.approvalId), named);
                   return (
                     <div
                       key={`appr-${pending.approvalId}`}
