@@ -25,7 +25,7 @@ import { csvFileName } from '@/lib/finance/csv';
 import { rm } from '@/lib/finance/format';
 import type { InvoiceListRow } from '@/lib/finance/invoices';
 import type { FinanceAccount } from '@/lib/finance/money';
-import { noteTargetKey, refundTargets } from '@/lib/finance/refund-form';
+import { type RefundSaved, noteTargetKey, refundSavedNote, refundTargets } from '@/lib/finance/refund-form';
 import type { RefundRow } from '@/lib/finance/refunds';
 import type { FinResult } from '@/lib/finance/result';
 import {
@@ -79,8 +79,8 @@ type Open =
   | { kind: 'new'; today: string; nonce: number }
   | { kind: 'edit'; note: CreditNoteRow; today: string }
   | { kind: 'refund'; note: CreditNoteRow; today: string }
-  /** A refund has just been recorded against this credit note. */
-  | { kind: 'refunded'; note: CreditNoteRow }
+  /** A refund has just been recorded from a credit note's row: what the form recorded, not the row. */
+  | { kind: 'refunded'; saved: RefundSaved }
   | { kind: Question; note: CreditNoteRow }
   | null;
 
@@ -239,21 +239,16 @@ export function CreditNotesView({
           record={actions.recordRefund}
           onClose={close}
           // The refund is on Refunds; this row's Refunded figure moves only once it is paid out.
-          onSaved={() => ask({ kind: 'refunded', note })}
+          // The note says what the form recorded: the person may have picked something other than this row.
+          onSaved={(saved) => ask({ kind: 'refunded', saved })}
         />
       );
     }
     if (open.kind === 'refunded') {
+      const said = refundSavedNote(open.saved);
       return (
-        <SavedNoteCard
-          title="Refund recorded"
-          subtitle={`For ${open.note.customer_name}`}
-          href="/finance/refunds"
-          linkLabel="Refunds"
-          onClose={close}
-        >
-          It was put against {open.note.credit_note_no ?? 'the credit note'}. A refund left pending is marked as paid or
-          deleted, and one that was paid out can be voided, on
+        <SavedNoteCard title="Refund recorded" subtitle={said.subtitle} href="/finance/refunds" linkLabel="Refunds" onClose={close}>
+          {said.lead}
         </SavedNoteCard>
       );
     }

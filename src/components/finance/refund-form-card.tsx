@@ -11,12 +11,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { rm } from '@/lib/finance/format';
 import { type FinanceAccount, PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentMethod } from '@/lib/finance/money';
 import {
+  type RefundSaved,
   type RefundTarget,
   chooseRefundTarget,
   keepRefundTarget,
   newRefundForm,
   refundFormError,
   refundPayload,
+  refundSaved,
   refundTargetLabel,
 } from '@/lib/finance/refund-form';
 import { REFUND_REASONS, REFUND_REASON_LABELS, type RefundReason } from '@/lib/finance/refunds';
@@ -52,8 +54,11 @@ export function RefundFormCard({
   preselect?: string;
   record: RecordRefund;
   onClose: () => void;
-  /** Called instead of `onClose` once the refund is recorded, where the page has something to say about it. */
-  onSaved?: () => void;
+  /**
+   * Called instead of `onClose` once the refund is recorded, where the page has something to say about it.
+   * It is handed what was recorded: the picker is open, so that need not be the row the card was opened from.
+   */
+  onSaved?: (saved: RefundSaved) => void;
 }) {
   const id = useId();
   const [typed, setForm] = useState(() => newRefundForm(targets, accounts, today, preselect));
@@ -76,7 +81,12 @@ export function RefundFormCard({
       save.fail(problem);
       return;
     }
-    save.run(() => record(refundPayload(form, targets)), onSaved ?? onClose);
+    // Taken now, from the form that is sent: after the refresh this target may no longer be offered.
+    const saved = refundSaved(form, targets);
+    save.run(
+      () => record(refundPayload(form, targets)),
+      () => (onSaved && saved ? onSaved(saved) : onClose()),
+    );
   };
 
   if (targets.length === 0) {

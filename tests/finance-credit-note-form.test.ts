@@ -4,6 +4,8 @@ import {
   creditNoteFormError,
   creditNoteFormFromRow,
   creditNotePayload,
+  creditNoteSaved,
+  creditNoteSavedNote,
   creditNoteSavedNotIssued,
   creditableInvoices,
   creditableLabel,
@@ -188,6 +190,45 @@ describe('creditNoteFormError', () => {
     expect(creditNoteFormError(form({ amount: '0.01' }), full)).toBe('That is more than this invoice has left to credit.');
     const voided = creditableInvoices([invoice({ display_status: 'void' })], SENT);
     expect(creditNoteFormError(form(), voided)).toBe('A credit note can only go against a posted invoice.');
+  });
+});
+
+describe('the note that a credit note was saved', () => {
+  // Aisyah's invoice, and one of another customer.
+  const offered = creditableInvoices([
+    invoice(),
+    invoice({ id: PAID, invoice_no: 'INV-0009', customer_id: 'bakar', customer_name: 'Bakar Enterprise', display_status: 'paid', paid: 100, balance: 0 }),
+  ]);
+
+  it('names the invoice the form saved against when the person picked another than the row the card was opened from', () => {
+    // Opened from INV-0007's row on Invoices, then "Against invoice" changed to another customer's invoice.
+    const opened = newCreditNoteForm(offered, '2026-10-06', SENT);
+    expect(opened.invoiceId).toBe(SENT);
+    const changed: CreditNoteForm = { ...opened, invoiceId: PAID, reason: 'returns', amount: '25' };
+    expect(creditNoteFormError(changed, offered)).toBeNull();
+
+    const saved = creditNoteSaved(changed, offered, false);
+    expect(saved).toEqual({ invoice_no: 'INV-0009', customer_name: 'Bakar Enterprise', amount: 25, issued: false });
+    // What the note says is what was sent.
+    expect(creditNotePayload(changed)).toMatchObject({ invoice_id: PAID, amount: 25 });
+    const said = creditNoteSavedNote(saved!);
+    expect(said).toEqual({
+      title: 'Credit note saved',
+      subtitle: 'INV-0009 to Bakar Enterprise',
+      lead: 'A draft credit note of RM 25.00 was saved against INV-0009. It is issued, changed or deleted on',
+    });
+    expect(`${said.subtitle} ${said.lead}`).not.toMatch(/INV-0007|Aisyah/);
+  });
+  it('says so when the credit note was issued as well', () => {
+    expect(creditNoteSavedNote(creditNoteSaved(form(), offered, true)!)).toEqual({
+      title: 'Credit note issued',
+      subtitle: 'INV-0007 to Aisyah Trading',
+      lead: 'A credit note of RM 30.00 was issued against INV-0007. It can be voided or refunded on',
+    });
+  });
+  it('has nothing to say of a form whose invoice is not offered, or with no amount', () => {
+    expect(creditNoteSaved(form({ invoiceId: DRAFT_NOTE }), offered, false)).toBeNull();
+    expect(creditNoteSaved(form({ amount: '' }), offered, false)).toBeNull();
   });
 });
 

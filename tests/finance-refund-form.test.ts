@@ -11,6 +11,8 @@ import {
   noteTargetKey,
   refundFormError,
   refundPayload,
+  refundSaved,
+  refundSavedNote,
   refundTargetLabel,
   refundTargets,
 } from '@/lib/finance/refund-form';
@@ -332,5 +334,61 @@ describe('refundFormError', () => {
       'That is more than the customer is in credit, or more than is left of the credit note.',
     );
     expect(refundFormError(form({ amount: '20.004' }), targets)).toBeNull();
+  });
+});
+
+describe('the note that a refund was recorded', () => {
+  const OTHER = '66666666-6666-4666-8666-666666666666';
+  // Aisyah's invoice and its credit note, and an invoice of another customer who is RM 45 in credit.
+  const offered = refundTargets(
+    [invoice(), invoice({ id: OTHER, invoice_no: 'INV-0009', customer_id: 'bakar', customer_name: 'Bakar Enterprise', credited: 45, balance: -45 })],
+    [note()],
+    [],
+  );
+  const other = offered.find((t) => t.key === invoiceTargetKey(OTHER))!;
+  /** The card as it opens from CN-0003's row on Credit Notes, with a reason chosen. */
+  const form = (f: Partial<RefundForm> = {}): RefundForm => ({
+    ...newRefundForm(offered, accounts, '2026-10-07', noteTargetKey(NOTE)),
+    reason: 'overpayment',
+    ...f,
+  });
+
+  it('names what the form recorded when the person picked something other than the row the card was opened from', () => {
+    // Opened from CN-0003's row on Credit Notes, then "Refund for" changed to another customer's invoice.
+    const opened = form();
+    expect(opened.target).toBe(noteTargetKey(NOTE));
+    const changed = chooseRefundTarget(opened, other);
+    expect(refundFormError(changed, offered)).toBeNull();
+
+    const saved = refundSaved(changed, offered);
+    expect(saved).toEqual({ target: other, amount: 45, scheduled: false });
+    // What the note says is what was sent.
+    expect(refundPayload(changed, offered)).toMatchObject({ invoice_id: OTHER, credit_note_id: null, amount: 45 });
+    const said = refundSavedNote(saved!);
+    expect(said).toEqual({
+      subtitle: 'For Bakar Enterprise',
+      lead: 'RM 45.00 was paid out against INV-0009. It can be voided on',
+    });
+    expect(`${said.subtitle} ${said.lead}`).not.toMatch(/CN-0003|INV-0007|Aisyah/);
+  });
+  it('names the credit note with its invoice, and says when the refund was left pending', () => {
+    const pending = form({ amount: '12.5', scheduled: true });
+    expect(refundSavedNote(refundSaved(pending, offered)!)).toEqual({
+      subtitle: 'For Aisyah Trading',
+      lead: 'RM 12.50 was left pending against CN-0003 on INV-0007. It is marked as paid or deleted on',
+    });
+  });
+  it('has nothing to say of a form with no target or no amount', () => {
+    expect(refundSaved(form({ target: '' }), offered)).toBeNull();
+    expect(refundSaved(form({ amount: '1,200.50' }), offered)).toBeNull();
+  });
+  it('describes a document that has no number, never a dash', () => {
+    const unnumbered = { ...other, number: '—', invoice_no: '—' };
+    expect(refundSavedNote({ target: unnumbered, amount: 5, scheduled: false }).lead).toBe(
+      'RM 5.00 was paid out against the invoice. It can be voided on',
+    );
+    expect(refundSavedNote({ target: { ...unnumbered, kind: 'credit_note' }, amount: 5, scheduled: false }).lead).toBe(
+      'RM 5.00 was paid out against the credit note on its invoice. It can be voided on',
+    );
   });
 });

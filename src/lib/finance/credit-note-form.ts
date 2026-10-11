@@ -124,6 +124,46 @@ export function creditNoteFormError(form: CreditNoteForm, creditable: Creditable
   return sen(parsed.data.amount) > sen(invoice.creditable) ? M.tooMuch : null;
 }
 
+/** What a credit note that was just saved is: what the form held when it was sent, not the row it was opened from. */
+export type CreditNoteSaved = {
+  /** The number of the invoice chosen in the form. */
+  invoice_no: string;
+  customer_name: string;
+  amount: number;
+  /** True when it was saved and issued, false when it was saved as a draft. */
+  issued: boolean;
+};
+
+/**
+ * What the form is about to save, for the note a page shows afterwards. Null
+ * while the form has no offered invoice or no amount; a form that
+ * `creditNoteFormError` passes always has both.
+ */
+export function creditNoteSaved(form: CreditNoteForm, creditable: CreditableInvoice[], issued: boolean): CreditNoteSaved | null {
+  const invoice = creditable.find((i) => i.id === form.invoiceId);
+  const amount = typedNumber(form.amount);
+  if (!invoice || amount === null) return null;
+  return { invoice_no: invoice.invoice_no, customer_name: invoice.customer_name, amount, issued };
+}
+
+/**
+ * The note a page shows once a credit note is saved from an invoice's row:
+ * its title, the invoice and customer it is for, and a sentence that leads
+ * up to the link to Credit Notes. It names the invoice the credit note went
+ * against, which the person may have changed in the form.
+ */
+export function creditNoteSavedNote(saved: CreditNoteSaved): { title: string; subtitle: string; lead: string } {
+  const numbered = saved.invoice_no !== '—';
+  const invoice = numbered ? saved.invoice_no : 'the invoice';
+  return {
+    title: saved.issued ? 'Credit note issued' : 'Credit note saved',
+    subtitle: `${numbered ? saved.invoice_no : 'The invoice'} to ${saved.customer_name}`,
+    lead: saved.issued
+      ? `A credit note of ${rm(saved.amount)} was issued against ${invoice}. It can be voided or refunded on`
+      : `A draft credit note of ${rm(saved.amount)} was saved against ${invoice}. It is issued, changed or deleted on`,
+  };
+}
+
 /** What the form says when the credit note was saved as a draft but issuing it was refused. */
 export function creditNoteSavedNotIssued(error: string): string {
   if (error === WRITE_FAILED) return 'The credit note was saved as a draft, but issuing it failed. Please try again.';

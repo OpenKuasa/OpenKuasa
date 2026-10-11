@@ -9,9 +9,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
+  type CreditNoteSaved,
   creditNoteFormError,
   creditNoteFormFromRow,
   creditNotePayload,
+  creditNoteSaved,
   creditNoteSavedNotIssued,
   creditableInvoices,
   creditableLabel,
@@ -61,8 +63,11 @@ export function CreditNoteFormCard({
   invoiceId?: string;
   actions: CreditNoteFormActions;
   onClose: () => void;
-  /** Called instead of `onClose` once the credit note is saved, where the page has something to say about it. */
-  onSaved?: () => void;
+  /**
+   * Called instead of `onClose` once the credit note is saved, where the page has something to say about it.
+   * It is handed what was saved: the picker is open, so that need not be the invoice the card was opened from.
+   */
+  onSaved?: (saved: CreditNoteSaved) => void;
 }) {
   const id = useId();
   const [form, setForm] = useState(() =>
@@ -79,7 +84,6 @@ export function CreditNoteFormCard({
   // The form's own invoice stays offered with nothing left, so the form can say that is why.
   const offered = creditableInvoices(invoices, form.invoiceId);
   const chosen = offered.find((i) => i.id === form.invoiceId);
-  const saved = onSaved ?? onClose;
 
   const send = (issue: boolean) => {
     const problem = creditNoteFormError(form, offered);
@@ -88,6 +92,9 @@ export function CreditNoteFormCard({
       return;
     }
     const payload = creditNotePayload(form);
+    // Taken now, from the form that is sent: after the refresh this invoice may no longer be offered.
+    const what = creditNoteSaved(form, offered, issue);
+    const saved = () => (onSaved && what ? onSaved(what) : onClose());
     setIssuing(issue);
     if (!issue) {
       save.run(() => actions.save(payload), saved);

@@ -181,6 +181,48 @@ export function refundPayload(form: RefundForm, targets: RefundTarget[]) {
   };
 }
 
+/** What a refund that was just recorded is: what the form held when it was sent, not the row it was opened from. */
+export type RefundSaved = {
+  /** What it was put against: the target chosen in the form. */
+  target: RefundTarget;
+  amount: number;
+  /** True when it was left pending, false when it was paid out. */
+  scheduled: boolean;
+};
+
+/**
+ * What the form is about to record, for the note a page shows afterwards.
+ * Null while the form has no target or no amount; a form that
+ * `refundFormError` passes always has both.
+ */
+export function refundSaved(form: RefundForm, targets: RefundTarget[]): RefundSaved | null {
+  const target = targets.find((t) => t.key === form.target);
+  const amount = typedNumber(form.amount);
+  return target && amount !== null ? { target, amount, scheduled: form.scheduled } : null;
+}
+
+/**
+ * The note a page shows once a refund is recorded from a row: who it is for,
+ * and a sentence that leads up to the link to Refunds. It names what the
+ * refund was put against, which the person may have changed in the form.
+ */
+export function refundSavedNote(saved: RefundSaved): { subtitle: string; lead: string } {
+  const { target } = saved;
+  const numbered = target.number !== '—';
+  const against =
+    target.kind === 'invoice'
+      ? numbered
+        ? target.number
+        : 'the invoice'
+      : `${numbered ? target.number : 'the credit note'} on ${target.invoice_no === '—' ? 'its invoice' : target.invoice_no}`;
+  return {
+    subtitle: `For ${target.customer_name}`,
+    lead: saved.scheduled
+      ? `${rm(saved.amount)} was left pending against ${against}. It is marked as paid or deleted on`
+      : `${rm(saved.amount)} was paid out against ${against}. It can be voided on`,
+  };
+}
+
 /**
  * The first thing wrong with the form, in the sentence the schema or the
  * database would use, or null when it can be sent. What is being refunded
