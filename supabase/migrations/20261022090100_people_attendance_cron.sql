@@ -5,6 +5,7 @@
 -- time, skips the demo workspace, records nothing before the day the
 -- attendance migration was applied, and leaves a workspace alone until the day
 -- it first uses attendance, so this job is safe to schedule before anyone can
--- clock in.
+-- clock in. An employee is closed only from the night after the job first
+-- finds them active and linked to an account.
 create extension if not exists pg_cron;
 select cron.schedule('close-attendance', '5 16 * * *', $$select private.hr_attendance_close()$$);

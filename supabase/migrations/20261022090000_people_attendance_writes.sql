@@ -71,6 +71,24 @@ create table private.hr_attendance_started (
 alter table private.hr_attendance_started enable row level security;
 revoke all on private.hr_attendance_started from public, anon, authenticated, service_role;
 
+-- ---- the day the close first saw an employee linked and active --------------
+-- One row an employee, written and removed only by the nightly close. An
+-- employee is "eligible" while they are active and linked to an account (only
+-- then can they clock in). The close notes the Malaysia date of the first run
+-- that finds them eligible, and writes absences for them only from that date:
+-- someone who accepts their invite on the 20th is not marked absent for the
+-- 1st to the 19th. When they stop being eligible the row is dropped, so on
+-- coming back they start over, with nothing written for the gap.
+-- The row goes when the employee is deleted. No grant to anyone; row level
+-- security on with no policy.
+
+create table private.hr_attendance_covered (
+  employee_id uuid primary key references public.hr_employees(id) on delete cascade,
+  covered_from date not null
+);
+alter table private.hr_attendance_covered enable row level security;
+revoke all on private.hr_attendance_covered from public, anon, authenticated, service_role;
+
 -- ---- helpers (private; only the functions in this file call them) ------
 
 -- Is this date a working day for the workspace? Its weekday is in the work
@@ -227,7 +245,10 @@ grant execute on function public.hr_clock_in(uuid) to authenticated;
 
 -- ---- clock out ---------------------------------------------------------------
 -- Today only, for the caller's own employee record only. Needs today's
--- clock-in and no clock-out yet.
+-- clock-in and no clock-out yet. Two taps can cross: a clock-out that began
+-- before the clock-in was stamped finds a clock-in later than its own time,
+-- and is told there is none yet rather than tripping the table's own rule
+-- that a clock-out is not before its clock-in.
 
 create or replace function public.hr_clock_out(p_employee uuid)
 returns jsonb language plpgsql security definer set search_path = public as $$
@@ -241,7 +262,7 @@ begin
   perform 1 from public.hr_employees e where e.id = p_employee for no key update;
   select a.* into saved from public.hr_attendance_days a
   where a.employee_id = p_employee and a.work_date = today;
-  if saved.clock_in is null then raise exception 'ATT_NOT_IN'; end if;
+  if saved.clock_in is null or saved.clock_in > now() then raise exception 'ATT_NOT_IN'; end if;
   if saved.clock_out is not null then raise exception 'ATT_ALREADY_OUT'; end if;
 
   update public.hr_attendance_days a set clock_out = now()
@@ -439,23 +460,32 @@ grant execute on function public.hr_save_attendance_settings(uuid, jsonb, time, 
 --
 -- A workspace is closed only once it has started using attendance, and only
 -- from its start day in private.hr_attendance_started. A workspace with no
--- row there is not looked at.
+-- row there is not looked at. The demo is left out.
 --
--- For every such workspace but the demo, in a fixed order, over the days from
--- the latest of (the epoch, 31 days ago) up to yesterday:
---   1. system rows on days that are no longer working days (a holiday was
---      added, or the work week changed) are removed, whoever they are for;
---   2. every active employee who is linked to an account gets a row for each
---      working day from the workspace's start day, the day they joined
---      and the day their record was made (in Malaysia): on leave when their
---      approved leave covers it (a half day counts), else absent. A system
---      row already there is set to what that rule gives now, so leave
---      approved or cancelled late is reflected.
--- An employee linked to nobody cannot clock in, so they are never marked
--- absent; an owner or admin records their days by correcting them.
+-- For every other started workspace, in a fixed order, over the days from the
+-- latest of (the epoch, 31 days ago) up to yesterday:
+--   1. employees who are no longer active and linked to an account are
+--      forgotten (their row in private.hr_attendance_covered goes; the days
+--      already written for them stay as they are);
+--   2. system rows on days that are no longer working days (a holiday was
+--      added, or the work week changed) are removed, whoever they are for,
+--      from the workspace's start day on;
+--   3. every active, linked employee the close already knows gets a row for
+--      each working day from the latest of: the workspace's start day, the
+--      day they joined, the day their record was made (in Malaysia), and the
+--      day the close first saw them. On leave when their approved leave
+--      covers the day (a half day counts), else absent. A system row already
+--      there is set to what that rule gives now, so leave approved or
+--      cancelled late is reflected;
+--   4. active, linked employees the close did not know yet are noted, from
+--      today. Nothing is written for them tonight: their first day closed is
+--      today, tomorrow night.
+-- An employee linked to nobody cannot clock in, so they are never noted and
+-- never marked absent; an owner or admin records their days by correcting
+-- them.
 -- A day with a clock-in, or one an owner or admin corrected, is never touched
--- by either step. Today is never closed. Running it twice changes nothing the
--- second time, and a night that was missed is filled in by the next run.
+-- by steps 2 and 3. Today is never closed. Running it twice changes nothing
+-- the second time, and a night that was missed is filled in by the next run.
 -- With no epoch row it does nothing.
 
 create or replace function private.hr_attendance_close()
@@ -470,19 +500,23 @@ begin
   select x.started_on into epoch from private.hr_attendance_epoch x;
   if epoch is null then return; end if;
   first_day := greatest(epoch, today - 31);
-  if first_day > today - 1 then return; end if;
 
   for o in
     select s.org_id, s.started_on from private.hr_attendance_started s
     where not private.is_demo_org(s.org_id)
     order by s.org_id
   loop
+    delete from private.hr_attendance_covered c
+    using public.hr_employees e
+    where e.id = c.employee_id and e.org_id = o.org_id
+      and (e.status is distinct from 'active' or e.user_id is null);
+
     select coalesce(array_agg(first_day + g.i order by g.i), '{}') into working
     from generate_series(0, today - 1 - first_day) as g(i)
     where private.hr_is_working_day(o.org_id, first_day + g.i);
 
     delete from public.hr_attendance_days a
-    where a.org_id = o.org_id and a.work_date between first_day and today - 1
+    where a.org_id = o.org_id and a.work_date between greatest(first_day, o.started_on) and today - 1
       and a.clock_in is null and a.corrected_at is null
       and a.work_date <> all (working);
 
@@ -490,12 +524,19 @@ begin
     select e.org_id, e.id, d.day,
       case when private.hr_on_approved_leave(e.id, d.day, true) then 'on_leave' else 'absent' end
     from public.hr_employees e
+    join private.hr_attendance_covered c on c.employee_id = e.id
     cross join unnest(working) as d(day)
     where e.org_id = o.org_id and e.status = 'active' and e.user_id is not null
-      and d.day >= greatest(o.started_on, e.join_date, (e.created_at at time zone 'Asia/Kuala_Lumpur')::date)
+      and d.day >= greatest(o.started_on, e.join_date, (e.created_at at time zone 'Asia/Kuala_Lumpur')::date, c.covered_from)
     order by e.id, d.day
     on conflict (employee_id, work_date) do update set status = excluded.status
     where a.clock_in is null and a.corrected_at is null and a.status is distinct from excluded.status;
+
+    insert into private.hr_attendance_covered (employee_id, covered_from)
+    select e.id, today from public.hr_employees e
+    where e.org_id = o.org_id and e.status = 'active' and e.user_id is not null
+    order by e.id
+    on conflict (employee_id) do nothing;
   end loop;
 end; $$;
 revoke all on function private.hr_attendance_close() from public, anon, authenticated, service_role;

@@ -122,7 +122,7 @@ describe('Lekiu attendance migrations', () => {
         + 'on conflict (id) do nothing;',
     );
     expect(text.match(/(insert into|update|delete from) private\.hr_attendance_epoch/g)).toHaveLength(1);
-    expect(text.match(/create table/g)).toHaveLength(2);
+    expect(text.match(/create table/g)).toHaveLength(3);
   });
 
   test('the day a workspace first used attendance is kept in a table nobody may touch', () => {
@@ -155,6 +155,49 @@ describe('Lekiu attendance migrations', () => {
   test('creates the six functions, and no other in the public schema', () => {
     const made = allFunctions(writes()).filter((name) => name.startsWith('public.'));
     expect(made.sort()).toEqual(FUNCTIONS.map((f) => `public.${f.name}`).sort());
+  });
+
+  test('the day the close first saw an employee linked and active is kept in a table nobody may touch', () => {
+    const text = writes();
+    expect(text).toContain(
+      'create table private.hr_attendance_covered (\n'
+        + '  employee_id uuid primary key references public.hr_employees(id) on delete cascade,\n'
+        + '  covered_from date not null\n'
+        + ');',
+    );
+    expect(text).toContain('alter table private.hr_attendance_covered enable row level security;');
+    expect(text).toContain('revoke all on private.hr_attendance_covered from public, anon, authenticated, service_role;');
+    // Written by the nightly close and by nothing else.
+    for (const name of allFunctions(text).filter((f) => f !== 'private.hr_attendance_close')) {
+      expect(fn(text, name).body, name).not.toContain('hr_attendance_covered');
+    }
+    expect(text.match(/hr_attendance_covered/g)).toHaveLength(
+      3 + (fn(text, 'private.hr_attendance_close').body.match(/hr_attendance_covered/g) ?? []).length,
+    );
+    const { body } = fn(text, 'private.hr_attendance_close');
+    // 1. Whoever is no longer linked and active is forgotten, so coming back starts them over.
+    const forget = body.indexOf(
+      'delete from private.hr_attendance_covered c\n'
+        + '    using public.hr_employees e\n'
+        + '    where e.id = c.employee_id and e.org_id = o.org_id\n'
+        + "      and (e.status is distinct from 'active' or e.user_id is null);",
+    );
+    // 2. Days are written only for employees already noted, from the day they were.
+    const close = body.indexOf('insert into public.hr_attendance_days');
+    expect(body).toContain('join private.hr_attendance_covered c on c.employee_id = e.id');
+    expect(body).not.toMatch(/left join/);
+    // 3. Only then are tonight's newly eligible employees noted, from today, once.
+    const note = body.indexOf(
+      'insert into private.hr_attendance_covered (employee_id, covered_from)\n'
+        + '    select e.id, today from public.hr_employees e\n'
+        + "    where e.org_id = o.org_id and e.status = 'active' and e.user_id is not null\n"
+        + '    order by e.id\n'
+        + '    on conflict (employee_id) do nothing;',
+    );
+    expect(forget).toBeGreaterThan(-1);
+    expect(close).toBeGreaterThan(forget);
+    expect(note).toBeGreaterThan(close);
+    expect(body).not.toMatch(/update private\.hr_attendance_covered/);
   });
 
   test.each(FUNCTIONS)('$name runs as the owner on a fixed search path and returns jsonb', ({ name }) => {
@@ -257,9 +300,10 @@ describe('Lekiu attendance migrations', () => {
     expect(body).toContain('corrected_by = null, corrected_at = null, correction_note = null');
   });
 
-  test('clocking out needs a clock-in and no clock-out yet', () => {
+  test('clocking out needs a clock-in that has happened and no clock-out yet', () => {
     const { body } = fn(writes(), 'public.hr_clock_out');
-    const notIn = body.indexOf("if saved.clock_in is null then raise exception 'ATT_NOT_IN'; end if;");
+    // A clock-in stamped after this clock-out began (two taps that crossed) is no clock-in yet.
+    const notIn = body.indexOf("if saved.clock_in is null or saved.clock_in > now() then raise exception 'ATT_NOT_IN'; end if;");
     const already = body.indexOf("if saved.clock_out is not null then raise exception 'ATT_ALREADY_OUT'; end if;");
     expect(notIn).toBeGreaterThan(-1);
     expect(already).toBeGreaterThan(notIn);
@@ -424,7 +468,9 @@ describe('Lekiu attendance migrations', () => {
     expect(body).not.toMatch(/min\(|from public\.hr_employees e\s+where not/);
     // Active employees with a linked account, from that day, the day they joined and the day their record was made, up to yesterday.
     expect(body).toContain("where e.org_id = o.org_id and e.status = 'active' and e.user_id is not null");
-    expect(body).toContain("greatest(o.started_on, e.join_date, (e.created_at at time zone 'Asia/Kuala_Lumpur')::date)");
+    expect(body).toContain(
+      "greatest(o.started_on, e.join_date, (e.created_at at time zone 'Asia/Kuala_Lumpur')::date, c.covered_from)",
+    );
     expect(body).toContain('generate_series(0, today - 1 - first_day)');
     // Both statements leave alone any day with a clock-in or a correction.
     const guard = 'clock_in is null and a.corrected_at is null';
@@ -432,15 +478,18 @@ describe('Lekiu attendance migrations', () => {
     expect(body).toContain(guard);
     const remove = body.slice(body.indexOf('delete from public.hr_attendance_days'), body.indexOf('insert into public.hr_attendance_days'));
     expect(remove).toContain('a.clock_in is null and a.corrected_at is null');
-    expect(remove).toContain('a.work_date between first_day and today - 1');
+    // From the workspace's start day on, as the insert is.
+    expect(remove).toContain('a.work_date between greatest(first_day, o.started_on) and today - 1');
     const upsert = body.slice(body.indexOf('insert into public.hr_attendance_days'));
     expect(upsert).toContain('on conflict (employee_id, work_date) do update set status = excluded.status');
     expect(upsert).toContain('where a.clock_in is null and a.corrected_at is null and a.status is distinct from excluded.status;');
     expect(upsert).toContain('order by e.id, d.day');
     // It changes nothing else, and says nothing.
     expect(body.match(/\b(insert into|update|delete from) (public|private)\.\w+/g)).toEqual([
+      'delete from private.hr_attendance_covered',
       'delete from public.hr_attendance_days',
       'insert into public.hr_attendance_days',
+      'insert into private.hr_attendance_covered',
     ]);
     expect(body).not.toContain('raise');
     // The migration does not run it: the first night's run does.
