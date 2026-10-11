@@ -5,6 +5,11 @@ import dynamic from 'next/dynamic';
 import { usePathname } from 'next/navigation';
 import { Sparkles } from 'lucide-react';
 import { ASSISTANT } from '@/config/nav';
+import {
+  ASSISTANT_FAB_HEIGHT_REM,
+  ASSISTANT_FAB_OFFSET_REM,
+  showsAssistantFab,
+} from './assistant-fab-layout';
 
 // The conversation carries the chat engine and the charts its replies draw.
 // It is fetched when the panel is first wanted, not with every screen.
@@ -38,7 +43,7 @@ export function AssistantFab() {
   const wasOpen = useRef(false);
   // The Command page is this same assistant at full size; a second door to
   // it there only covers the composer.
-  const onCommandPage = pathname === '/command';
+  const onCommandPage = !showsAssistantFab(pathname);
   if (onCommandPage && open) setOpen(false);
 
   useEffect(() => {
@@ -69,7 +74,11 @@ export function AssistantFab() {
           // Start the download on intent, so the panel opens ready.
           onPointerEnter={() => void loadConversation()}
           onFocus={() => void loadConversation()}
-          className="brand-scope fixed bottom-5 right-5 z-30 inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground shadow-lg transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          style={{
+            bottom: `${ASSISTANT_FAB_OFFSET_REM}rem`,
+            minHeight: `${ASSISTANT_FAB_HEIGHT_REM}rem`,
+          }}
+          className="brand-scope fixed right-5 z-30 inline-flex cursor-pointer items-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground shadow-lg transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           aria-label={`Ask ${ASSISTANT.name}`}
         >
           <Sparkles className="size-4" />
