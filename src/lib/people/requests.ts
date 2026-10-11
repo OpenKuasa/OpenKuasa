@@ -34,6 +34,9 @@ const dayOrDash = (instant: string) => {
   return date === '' ? '—' : formatDay(date);
 };
 /** Newest first by one date, then by when the request was made. */
+/** A rejected request's note for the person who asked, or null. */
+const rejectionNote = (status: RequestStatus, note: string | null): string | null =>
+  status === 'rejected' && note !== null && note.trim() !== '' ? note.trim() : null;
 const newestFirst = <T extends { created_at: string }>(rows: T[], dateOf: (row: T) => string): T[] =>
   [...rows].sort((a, b) => dateOf(b).localeCompare(dateOf(a)) || b.created_at.localeCompare(a.created_at));
 
@@ -57,6 +60,8 @@ export type LeaveRow = {
   to: string;
   days: number;
   status: RequestStatus;
+  /** The note the decider left, for a rejected request. */
+  note: string | null;
   applied: string;
 };
 
@@ -118,6 +123,7 @@ export function buildLeaveModel(
       to: formatDate(r.end_date),
       days: r.days,
       status: r.status,
+      note: rejectionNote(r.status, r.decision_note),
       applied: dayOrDash(r.created_at),
     })),
   };
@@ -135,6 +141,8 @@ export type TimeOffRow = {
   duration: string;
   reason: string;
   status: RequestStatus;
+  /** The note the decider left, for a rejected request. */
+  note: string | null;
 };
 
 export type TimeOffModel = {
@@ -176,6 +184,7 @@ export function buildTimeOffModel(
       duration: `${trimmed(hoursOf(r))}h`,
       reason: r.reason ?? '—',
       status: r.status,
+      note: rejectionNote(r.status, r.decision_note),
     })),
   };
 }

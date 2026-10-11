@@ -199,7 +199,7 @@ const balance = (employee_id: string): LeaveBalance => ({
   entitled_days: 14,
   used_days: 10,
 });
-const timeOffRow = (id: string, employee_id: string): TimeOffRequest => ({
+const timeOffRow = (id: string, employee_id: string, over: Partial<TimeOffRequest> = {}): TimeOffRequest => ({
   id,
   employee_id,
   employee_name: employee_id === ME ? 'Faiz Hakim' : 'Amirul Hakim',
@@ -210,6 +210,7 @@ const timeOffRow = (id: string, employee_id: string): TimeOffRequest => ({
   status: 'pending',
   decision_note: null,
   created_at: '2026-10-01T00:00:00Z',
+  ...over,
 });
 
 const lookupData: PeopleData = {
@@ -248,6 +249,26 @@ describe('leave lookups carry what a change needs', () => {
         expect(r).not.toHaveProperty('over_balance');
       }
     }
+  });
+
+  it('return a decision note only when there is one', async () => {
+    const noted: PeopleData = {
+      ...lookupData,
+      listLeaveRequests: async () => [
+        leaveRow('55555555-5555-4555-8555-555555555555', ME, { status: 'rejected', decision_note: 'Team is short that week' }),
+        leaveRow('66666666-6666-4666-8666-666666666666', ME),
+      ],
+      listTimeOffRequests: async () => [
+        timeOffRow('77777777-7777-4777-8777-777777777777', ME, { status: 'rejected', decision_note: 'Audit day' }),
+        timeOffRow('88888888-8888-4888-8888-888888888888', ME),
+      ],
+    };
+    const leave = (await runWith(noted, 'listLeaveRequests', MEMBER_VIEWER, self())).requests;
+    expect(leave[0].decision_note).toBe('Team is short that week');
+    expect(leave[1]).not.toHaveProperty('decision_note');
+    const off = (await runWith(noted, 'listTimeOffRequests', MEMBER_VIEWER, self())).requests;
+    expect(off[0].decision_note).toBe('Audit day');
+    expect(off[1]).not.toHaveProperty('decision_note');
   });
 
   it('list time-off requests with the same rule for ids, and times as HH:MM', async () => {

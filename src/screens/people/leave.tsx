@@ -109,7 +109,7 @@ export default async function LeaveScreen() {
       columns={['Type', 'From', 'To', 'Days', 'Status', 'Applied', 'Actions']}
       rows={(leave?.rows ?? []).map((r) => ({
         key: r.id,
-        cells: [r.type, r.from, r.to, <span key="d" className="tabular-nums">{r.days}</span>, <StatusCell key="s" status={r.status} />, <span key="a" className="text-muted-foreground">{r.applied}</span>, <span key="c">{requestCancelCell({ cancellable: r.cancellable, isDemo: viewer.isDemo, kind: 'leave', id: r.id })}</span>],
+        cells: [r.type, r.from, r.to, <span key="d" className="tabular-nums">{r.days}</span>, <StatusCell key="s" status={r.status} note={r.note} />, <span key="a" className="text-muted-foreground">{r.applied}</span>, <span key="c">{requestCancelCell({ cancellable: r.cancellable, isDemo: viewer.isDemo, kind: 'leave', id: r.id })}</span>],
       }))}
       emptyText="You haven't applied for any leave yet"
     />

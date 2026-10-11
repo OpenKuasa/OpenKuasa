@@ -39,7 +39,7 @@ export default async function TimeOffScreen() {
       columns={['Date', 'From', 'To', 'Duration', 'Reason', 'Status', 'Actions']}
       rows={(timeOff?.rows ?? []).map((r) => ({
         key: r.id,
-        cells: [r.date, r.from, r.to, r.duration, <span key="r" className="text-muted-foreground">{r.reason}</span>, <StatusCell key="s" status={r.status} />, <span key="c">{requestCancelCell({ cancellable: r.cancellable, isDemo: viewer.isDemo, kind: 'time-off', id: r.id })}</span>],
+        cells: [r.date, r.from, r.to, r.duration, <span key="r" className="text-muted-foreground">{r.reason}</span>, <StatusCell key="s" status={r.status} note={r.note} />, <span key="c">{requestCancelCell({ cancellable: r.cancellable, isDemo: viewer.isDemo, kind: 'time-off', id: r.id })}</span>],
       }))}
       emptyText="You haven't asked for any time-off yet"
     />

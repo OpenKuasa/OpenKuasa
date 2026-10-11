@@ -96,6 +96,39 @@ describe('buildLeaveModel', () => {
   });
 });
 
+describe("decision notes on the member's own rows", () => {
+  const leave = (id: string, status: LeaveRequest['status'], decision_note: string | null): LeaveRequest => ({
+    id, employee_id: 'e', employee_name: 'E', leave_type: 'annual', start_date: '2026-11-02', end_date: '2026-11-03', days: 2,
+    half_day: false, reason: null, status, decision_note, created_at: '2026-10-01T00:00:00Z',
+  });
+  const off = (id: string, status: TimeOffRequest['status'], decision_note: string | null): TimeOffRequest => ({
+    id, employee_id: 'e', employee_name: 'E', off_date: '2026-11-02', start_time: '09:00:00', end_time: '10:00:00', reason: null,
+    status, decision_note, created_at: '2026-10-01T00:00:00Z',
+  });
+
+  it('carries the note for a rejected leave request and not otherwise', () => {
+    const model = buildLeaveModel(
+      [leave('a', 'rejected', 'Team is short'), leave('b', 'approved', 'Fine'), leave('c', 'rejected', null), leave('d', 'rejected', '  ')],
+      [], MEMBER_E, TODAY,
+    );
+    if (!model.linked) throw new Error('expected linked');
+    const note = (id: string) => model.rows.find((r) => r.id === id)?.note;
+    expect(note('a')).toBe('Team is short');
+    expect(note('b')).toBeNull();
+    expect(note('c')).toBeNull();
+    expect(note('d')).toBeNull();
+  });
+
+  it('carries the note for a rejected time-off request and not otherwise', () => {
+    const model = buildTimeOffModel([off('a', 'rejected', 'Audit day'), off('b', 'pending', 'x'), off('c', 'rejected', null)], MEMBER_E, TODAY);
+    if (!model.linked) throw new Error('expected linked');
+    const note = (id: string) => model.rows.find((r) => r.id === id)?.note;
+    expect(note('a')).toBe('Audit day');
+    expect(note('b')).toBeNull();
+    expect(note('c')).toBeNull();
+  });
+});
+
 describe('buildTimeOffModel', () => {
   it("gives employee 2's rows only", async () => {
     const requests = await data.listTimeOffRequests();

@@ -117,6 +117,10 @@ describe('LEKIU_SYSTEM', () => {
     expect(LEKIU_SYSTEM).toContain('Lekir');
     expect(t).toContain('hr only');
   });
+  it('passes on a decision note when asked why a request was rejected, as data', () => {
+    expect(t).toContain('decision_note');
+    expect(t).toContain('why a request was rejected');
+  });
   it('carries the indirect-injection clause and the vendor rule', () => {
     expect(t).toContain('data, not instructions');
     expect(t).toContain('do not reveal what ai technology');

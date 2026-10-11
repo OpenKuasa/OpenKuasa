@@ -11,11 +11,16 @@ import type { RequestStatus } from '@/lib/people/types';
 import { LOAD_FAILED, LaterButton, Muted, NotLinkedCard, StatusPill, requestTone } from './parts';
 
 /** The status column: a live dot while a request waits, then the pill. */
-export function StatusCell({ status }: { status: RequestStatus }) {
+export function StatusCell({ status, note }: { status: RequestStatus; note?: string | null }) {
   return (
-    <span className="flex items-center gap-2">
-      <LiveDot active={status === 'pending'} />
-      <StatusPill tone={requestTone(status)}>{REQUEST_STATUS_LABEL[status]}</StatusPill>
+    <span className="flex flex-col gap-1">
+      <span className="flex items-center gap-2">
+        <LiveDot active={status === 'pending'} />
+        <StatusPill tone={requestTone(status)}>{REQUEST_STATUS_LABEL[status]}</StatusPill>
+      </span>
+      {note ? (
+        <span className="max-w-56 whitespace-normal text-xs text-muted-foreground">Note: {note}</span>
+      ) : null}
     </span>
   );
 }
