@@ -123,13 +123,13 @@ marked paid by `finance_mark_payment_paid` or deleted; a refund that was paid
 out can only be voided. When a pending refund is paid out, the cap on the
 invoice's credit and the credit note's amount are both looked at again,
 counting the refund itself, and it is refused with `FIN05` if it no longer
-fits. These are the function, the delete and the update a
+fits, or with `FIN04` if its credit note is no longer issued. These are the function, the delete and the update a
 payment to a supplier uses, but `markRefundPaid`, `voidRefund` and
 `deleteRefund` in `refunds.ts` first read the view `finance_refunds` for the
 workspace and the transaction, and refuse with "That refund no longer exists."
-anything it does not show. A payment to a supplier can therefore never be
+anything it does not show. A payment to a supplier can therefore not be
 marked paid, voided or deleted through them. The view `finance_refunds` has one
-row per refund, with `invoice_id` set whichever way it was recorded and
+row per allocation, which for a refund the app records is one row per refund, with `invoice_id` set whichever way it was recorded and
 `credit_note_id` when it was put against a credit note.
 
 A refund is not on Payments Out: `finance_payments_out` joins each allocation

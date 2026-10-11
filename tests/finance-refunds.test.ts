@@ -175,6 +175,7 @@ describe('refund writes', () => {
     }
     const { ctx } = fakeFinance(refundOr(true, { data: null, error: { code: 'FIN05' } }));
     const over = await recordRefund(ctx, valid);
+    expect(over).toMatchObject({ ok: false });
     if (!over.ok) expect(over.error).toContain('left of the credit note');
   });
   it('says the refund is gone when void or delete touches no row', async () => {
