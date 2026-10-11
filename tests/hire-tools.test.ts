@@ -325,6 +325,27 @@ describe('listCandidates', () => {
     expect(result.note).toMatch(/newest/i);
     expect(await rows({ limit: 5 })).not.toHaveProperty('read_capped');
   });
+  it('says so in the result when a name matches more than one candidate, and only then', async () => {
+    const base = (await data.listCandidates())[0];
+    const two = [
+      { ...base, id: 'c1', name: 'Aisyah binti Karim' },
+      { ...base, id: 'c2', name: 'Aisyah Lim' },
+      { ...base, id: 'c3', name: 'Tan Mei Ling' },
+    ];
+    const tools = createHireTools({ ...data, listCandidates: async () => two }, NOW);
+    const find = (input: unknown) =>
+      (tools.listCandidates as unknown as { execute: (i: unknown, o: unknown) => Promise<Loose> })
+        .execute(input, { toolCallId: 't', messages: [] });
+    const several = await find({ name: 'aisyah' });
+    expect(several.several_match).toBe(
+      'More than one candidate matches this name: Aisyah Lim, Aisyah binti Karim. Do not choose one. ' +
+        'Prepare no change: name them and ask the user which one they mean.',
+    );
+    // One match, or no name asked for: there is nothing to choose between.
+    expect(await find({ name: 'Aisyah Lim' })).not.toHaveProperty('several_match');
+    expect(await find({})).not.toHaveProperty('several_match');
+    expect(tools.listCandidates.description).toContain('several_match');
+  });
   it('adds email and phone only with includeContact', async () => {
     const [one] = (await rows({ limit: 1, includeContact: true })).candidates;
     const stored = (await data.listCandidates())[0];
@@ -364,7 +385,7 @@ describe('listCandidates', () => {
   });
   it('says what it returns, and that contact details need includeContact', () => {
     expect((tools.listCandidates as unknown as { description: string }).description).toBe(
-      'List candidates on file, newest first, by name, skill or location. Each row has the candidate\'s id, which updateCandidate takes. Email and phone are returned only when includeContact is set.',
+      'List candidates on file, newest first, by name, skill or location. Each row has the candidate\'s id, which updateCandidate takes. Email and phone are returned only when includeContact is set. If the result has "several_match", the name fits more than one person: prepare no change and ask the user which one.',
     );
   });
 });

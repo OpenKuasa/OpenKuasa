@@ -412,7 +412,8 @@ export function createHireTools(
       description:
         'List candidates on file, newest first, by name, skill or location. ' +
         "Each row has the candidate's id, which updateCandidate takes. " +
-        'Email and phone are returned only when includeContact is set.',
+        'Email and phone are returned only when includeContact is set. ' +
+        'If the result has "several_match", the name fits more than one person: prepare no change and ask the user which one.',
       inputSchema: z.object({
         name: z.string().optional().describe('Only candidates whose name contains this, in any letter case.'),
         skill: z.string().optional().describe('Only candidates with this skill. Part of the skill is enough.'),
@@ -435,6 +436,12 @@ export function createHireTools(
           const readCapped = people.length >= HIRE_READ_CAP || apps.length >= HIRE_READ_CAP;
           return {
             total: rows.length,
+            // A rule in the prompt alone was not enough: the worker picked the first match. So the result says it.
+            ...(name?.trim() && rows.length > 1 && {
+              several_match:
+                `More than one candidate matches this name: ${rows.map((c) => c.name).sort().slice(0, 10).join(', ')}. ` +
+                'Do not choose one. Prepare no change: name them and ask the user which one they mean.',
+            }),
             ...(readCapped && {
               read_capped: true,
               note:

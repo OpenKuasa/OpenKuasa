@@ -441,4 +441,20 @@ describe('adding and editing a candidate', () => {
     expect(single).toContain('prepare at most one change in a turn');
     expect(tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], true, null).toLowerCase()).toContain('lekir can also prepare adding one candidate by hand or editing one candidate');
   });
+
+  it('Tuah looks for a named person in every product that could hold them, hiring included', () => {
+    // A question-set run: "Change Nurul Aisyah's phone number" went to marketing and the CRM only, and she was a candidate.
+    expect(tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], true, null)).toContain(
+      '- When the user names a person without saying what they are, that person may be a lead, a contact or a candidate. ' +
+        'Ask every specialist who could hold them, and never say the person cannot be found until each has looked.',
+    );
+  });
+
+  it('Lekir names each match when more than one candidate fits a name', () => {
+    for (const prompt of [LEKIR_SYSTEM, subAgentSystem('hire', true)]) {
+      expect(prompt).toContain(
+        'If more than one candidate matches the name, ask which before preparing anything, and give each one\'s full name so the user can choose.',
+      );
+    }
+  });
 });
