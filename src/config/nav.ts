@@ -51,7 +51,7 @@ import type { OrgRole } from '@/lib/auth/current-org';
 import { type Capability, canSee } from '@/lib/auth/permissions';
 
 /** A live count pill on a nav item, resolved client-side from the nav-badges context. */
-export type NavBadgeKey = 'pendingProposals';
+export type NavBadgeKey = 'pendingProposals' | 'unreadAnnouncements';
 
 export type NavItem = {
   label: string;
@@ -190,7 +190,7 @@ export const PRODUCTS: Product[] = [
           { label: 'Overview', slug: 'assistant', icon: LayoutDashboard },
           { label: 'Dashboard', slug: 'dashboard', icon: TrendingUp },
           { label: 'Calendar', slug: 'calendar', icon: Calendar },
-          { label: 'Announcements', slug: 'announcements', icon: Megaphone },
+          { label: 'Announcements', slug: 'announcements', icon: Megaphone, badge: 'unreadAnnouncements' },
           { label: 'My Attendance', slug: 'my-attendance', icon: Clock },
           { label: 'My Goals', slug: 'my-goals', icon: Target },
           { label: 'My Documents', slug: 'my-documents', icon: FileText },

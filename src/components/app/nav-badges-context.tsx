@@ -6,7 +6,7 @@ import type { NavBadgeKey } from '@/config/nav';
 /** Live counts for nav-item badges, keyed by NavBadgeKey. Computed server-side per request. */
 export type NavBadges = Record<NavBadgeKey, number>;
 
-const EMPTY: NavBadges = { pendingProposals: 0 };
+const EMPTY: NavBadges = { pendingProposals: 0, unreadAnnouncements: 0 };
 
 const NavBadgesContext = createContext<NavBadges>(EMPTY);
 

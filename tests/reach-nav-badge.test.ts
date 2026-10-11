@@ -8,10 +8,11 @@ describe('AI Agents nav badge', () => {
     expect(agents?.badge).toBe('pendingProposals');
   });
 
-  it('is the only badged nav item across every product', () => {
+  it('is one of exactly two badged nav items across every product (the other is Lekiu Announcements)', () => {
     const badged = PRODUCTS.flatMap((p) => p.sections.flatMap((s) => s.items)).filter((i) => i.badge);
-    expect(badged).toHaveLength(1);
-    expect(badged[0].slug).toBe('agents');
-    expect(badged[0].badge).toBe('pendingProposals');
+    expect(badged.map((i) => [i.slug, i.badge]).sort()).toEqual([
+      ['agents', 'pendingProposals'],
+      ['announcements', 'unreadAnnouncements'],
+    ]);
   });
 });
