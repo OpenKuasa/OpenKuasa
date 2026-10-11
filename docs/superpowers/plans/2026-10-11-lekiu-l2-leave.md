@@ -31,7 +31,7 @@
 ## Review Focus
 
 1. **A member calling a function directly for someone else's request or employee** (the API, not the UI): refused, every function. Task 1's access check.
-2. **Two decisions racing** (approve and cancel at the same moment, or two approvals): one wins, the other gets `LEAVE_NOT_PENDING`; `used_days` ends correct. Task 1 (row lock), with a check.
+2. **Two decisions racing** (approve and cancel at the same moment, or two approvals): one wins, the other gets `LEAVE_NOT_PENDING`; `used_days` ends correct. Task 1 takes the row `for update`; a single check script cannot race two sessions, so this is verified by the schema test finding `for update` in each cancel and decide function, and by review.
 3. **Leave across New Year, over a public holiday, on a weekend only, a half day**: counted as §4.3 says, and charged to the right year. Task 1.
 4. **An over-balance request**: allowed, and visible to the applicant before submitting and to the decider in the queue and on Lekiu's card. Tasks 3, 4, 5.
 5. **A member's Lekiu**: holds apply and cancel only, with no employee field, and nothing a lookup returns (a reason, a name) can make it decide a request. Task 5.
@@ -80,8 +80,9 @@ Columns added: exactly those in spec §4.1.
 - "Today" for the already-started rule is `(now() at time zone 'Asia/Kuala_Lumpur')::date`.
 - Overlap for leave: another request of the same employee with status pending or approved whose date range intersects. Overlap for time-off: same employee, same date, pending or approved, time ranges intersecting.
 - `used_days` is recomputed with one `update … set used_days = (recount)` per (employee, type, year) touched, on approval and on cancelling an approved request. The recount uses the same day-counting helper, clipped to the year.
+- `hr_leave_preview` writes nothing, ever: when a balance row is missing it computes against the workspace's default entitlement with 0 used. Only `hr_apply_leave` and `hr_set_leave_entitlement` ensure the rows (for the years they touch).
 - The insert trigger on `hr_employees`, the backfill in the migration and the yearly job all skip the demo workspace. The trigger must not fail an employee insert if the workspace has no settings row (use the table defaults).
-- The cron file is separate, named like the demo cron, and schedules `0 16 31 12 *` UTC (midnight on 1 January in Malaysia) to ensure the new year's rows for every non-demo workspace.
+- The cron file is separate, named like the demo cron, and schedules `0 16 31 12 *` UTC (midnight on 1 January in Malaysia) to ensure the new year's rows for every non-demo workspace. The job works out the year from `now() at time zone 'Asia/Kuala_Lumpur'` (at 16:00 UTC on 31 December, UTC's year is still the old one).
 - `decision_note` and `reason` are trimmed and limited (note 500, reason 500); an over-length value is `LEAVE_BAD_INPUT`.
 
 - [ ] **Step 1: Write the access check first.** `supabase/tests/people_leave_check.sql`, built like `supabase/tests/people_rls_check.sql` (one `do` block; create a workspace, an admin, two linked members, an unlinked member and an outsider; switch sessions with `set local role authenticated` and `request.jwt.claims`; collect failures in an array with `array_append`; always end with `raise exception 'PEOPLE_LEAVE_CHECK PASSED'` or `'… FAILED: <first failures>'` so it rolls back). It must assert, each both ways:
@@ -95,7 +96,7 @@ Columns added: exactly those in spec §4.1.
   - balances: three rows appear for a newly inserted employee; `used_days` rises on approval and returns on cancelling the approved request; an entitlement change shows in the next preview; `over_by` is positive when the request exceeds what is left and the request is still accepted.
   - an inactive employee: `LEAVE_INACTIVE_EMPLOYEE`.
   - time-off: the same apply, cancel and decide rules.
-- [ ] **Step 2: Run it on a local Postgres and watch it fail.** Use the dry-run method plan A used (see "dry-run" in `docs/superpowers/plans/2026-10-10-lekiu-a-database.md`): a scratch local database with the earlier migrations applied. Never the live project.
+- [ ] **Step 2: Run it on a local Postgres and watch it fail.** Never the live project. Plan A was verified on a throwaway local Postgres with stubbed `auth` and tenancy objects, and this task does the same: `initdb` a scratch cluster under the session's scratch directory and start it with `pg_ctl` on a spare port (`psql`, `initdb`, `pg_ctl` are in `/opt/homebrew/bin`); create an `authenticated` and an `anon` role; stub the `auth` schema (`auth.users` with the columns the migrations read, `auth.uid()` and `auth.jwt()` reading `request.jwt.claims`); apply the repo's migrations in order as far as they are needed for `orgs`, `org_members`, the `private` helpers (`is_org_member`, `is_org_admin`, `mfa_ok`) and the nine `20261014…_people_*` files, stubbing only what cannot run locally and saying exactly what was stubbed. `pg_cron` does not exist locally: skip every `*_cron.sql` file, and check the new cron file by its text only (the schema test). Stop the cluster and delete it when done.
 - [ ] **Step 3: Write the two migrations** until the check ends with `PEOPLE_LEAVE_CHECK PASSED`. Also run `supabase/tests/people_rls_check.sql` on the same local database: it must still pass.
 - [ ] **Step 4: `tests/people-leave-schema.test.ts`**, reading the migration text as `tests/people-schema.test.ts` does: the columns of §4.1; the eight function names; each is `security definer` with `set search_path = public`; execute is revoked from `public` and `anon`; **no** `grant insert`, `grant update` or `grant delete` on the three leave tables; the cron file schedules exactly one job.
 - [ ] **Step 5: Report** the local results (the check's final line, the row counts left behind: none), and commit.
@@ -110,9 +111,10 @@ git commit -m "feat(people): leave and time-off rules in the database — functi
 ### Task 2: The app's write path
 
 **Files:**
-- Create: `src/lib/people/leave.ts`, `src/app/(app)/people/leave-actions.ts`
+- Create: `src/lib/people/leave.ts`, `src/app/(app)/people/leave-actions.ts`, `src/lib/people/leave-forms.ts`, `src/components/people/leave-form.tsx`
+- Create, but do not run: `tests/people-leave.rls.test.ts` (it needs the migration applied to the live database, which happens in Task 6; write it in the style of `tests/people-capabilities.rls.test.ts`: an owner applies, approves and cancels through `src/lib/people/leave.ts` and the balance follows; a demo guest changes nothing)
 - Modify: `src/lib/people/types.ts`, `supabase.ts`, `seed.ts` (the new columns on `LeaveRequest` and `TimeOffRequest`: `half_day`, `decision_note`; the two new defaults on `PeopleSettings`), `src/lib/people/own.ts` only if a label is needed
-- Test: `tests/people-leave.test.ts`, `tests/people-leave-actions.test.ts`; extend `tests/people-provider.test.ts`, `tests/people-seed.test.ts`; fix every hand-built `PeopleData`/row fixture the type change breaks
+- Test: `tests/people-leave.test.ts`, `tests/people-leave-actions.test.ts`, `tests/people-leave-forms.test.ts`; extend `tests/people-provider.test.ts`, `tests/people-seed.test.ts`; fix every hand-built `PeopleData`/row fixture the type change breaks
 
 **Interfaces (produced; Tasks 3 to 5 rely on these):**
 
@@ -134,6 +136,19 @@ export function decideLeave(ctx, input): Promise<CapResult<{ id: string; status:
 export function decideTimeOff(ctx, input): Promise<CapResult<{ id: string; status: string }>>;
 export function setLeaveEntitlement(ctx, input): Promise<CapResult<{ employee_id: string; leave_type: string; year: number; entitled_days: number }>>;
 export const LEAVE_REFUSALS: Record<string, string>;   // code -> sentence, spec §5.1
+/**
+ * By how many days a request exceeds what is left, 0 when within balance or when the type has no balance.
+ * left = entitled - used - (other PENDING requests of the same employee, type and year, excluding this one).
+ * The one formula for the approvals queue and for Lekiu's lookups; the database's preview uses the same rule.
+ */
+export function overBalanceBy(request: { id: string; employee_id: string; leave_type: LeaveType; start_date: string; days: number; status: RequestStatus }, balances: LeaveBalance[], requests: LeaveRequest[]): number;
+
+// src/lib/people/leave-forms.ts (pure) and src/components/people/leave-form.tsx (client, controlled)
+export type LeaveFormValues = { leave_type: LeaveType; start_date: string; end_date: string; half_day: boolean; reason: string };
+export function toLeaveInput(values): { ok: true; input: {...} } | { ok: false; error: string };   // half_day forced false unless start = end
+export function previewLines(preview: LeavePreview): { days: string; balance: string[]; warning: string | null };
+export function LeaveForm(props: { disabled: boolean; error: string | null; onPreview: (input) => Promise<CapResult<LeavePreview>>; onSubmit: (input) => void; onCancel: () => void });
+// The form knows nothing about whose leave it is: Task 3 wraps it for the viewer, Task 4 adds an employee picker around it.
 
 // src/app/(app)/people/leave-actions.ts  ('use server'; async functions only)
 previewOwnLeaveAction(input)   applyOwnLeaveAction(input)   applyOwnTimeOffAction(input)
@@ -147,7 +162,7 @@ loadLeaveEntitlementsAction({ employee_id })   // -> CapResult<{ leave_type, yea
 
 The "own" actions take no employee id: they resolve the viewer's linked employee on the server (`getPeopleViewer`) and refuse with "Your account isn't linked to an employee record yet." when there is none. They are open to any signed-in member who is not a demo visitor. The "for" and decide actions require `can(role, 'approve')`. Every successful change revalidates `PEOPLE_PATHS`.
 
-**Tests must cover:** each function's `rpc` name and argument keys; every code in `LEAVE_REFUSALS` reaching the caller as its sentence; an unknown database error giving the generic sentence with nothing typed in the logs; times sent as `HH:MM`; a member's own action ignoring an `employee_id` smuggled into the input; a plain member refused on every owner-only action before any call; a demo visitor refused on all; revalidation only on success.
+**Tests must cover:** `overBalanceBy` (within balance, over, other pending counted, a type with no balance, no balance row); the leave form's pure logic (what is sent, the half-day rule, the preview's sentences); each function's `rpc` name and argument keys; every code in `LEAVE_REFUSALS` reaching the caller as its sentence; an unknown database error giving the generic sentence with nothing typed in the logs; times sent as `HH:MM`; a member's own action ignoring an `employee_id` smuggled into the input; a plain member refused on every owner-only action before any call; a demo visitor refused on all; revalidation only on success.
 
 - [ ] Tests first, then code, then `pnpm tsc --noEmit`, `pnpm lint`, the test files touched. Commit: `feat(people): the app's write path for leave and time-off`.
 
@@ -159,21 +174,21 @@ Each owns the files it lists. As in plan C: do not run `pnpm tsc`, `pnpm lint`, 
 
 ### Task 3: Applying and cancelling — Leave and Time-Off screens
 
-**Files:** modify `src/screens/people/leave.tsx`, `time-off.tsx`, `my-requests.tsx`, `src/lib/people/requests.ts`; create `src/components/people/leave-form.tsx`, `time-off-form.tsx`, `cancel-request-button.tsx`, `src/lib/people/leave-forms.ts`; test `tests/people-leave-forms.test.ts`, extend `tests/people-requests.test.ts`.
+**Files:** modify `src/screens/people/leave.tsx`, `time-off.tsx`, `my-requests.tsx`, `src/lib/people/requests.ts`; create `src/components/people/time-off-form.tsx`, `cancel-request-button.tsx`, `apply-leave-dialog.tsx`, `src/lib/people/time-off-forms.ts`; test `tests/people-time-off-forms.test.ts`, extend `tests/people-requests.test.ts`. `LeaveForm` and `leave-forms.ts` come from Task 2 and are not yours to edit.
 
 - The header's `LaterButton` becomes a real button opening a dialog form (follow `src/components/people/employees-table.tsx` for the dialog, transition and error pattern). Leave: type, start, end, a half-day tick shown only when start equals end, reason. Time-off: date, from, to, reason.
 - The leave form calls `previewOwnLeaveAction` when type and dates are complete and shows "N working days", per year "N days left after this", and in a warning tone "N days more than your remaining leave" when `over_by > 0`. If the preview fails it says the count could not be worked out and still lets the person submit.
 - Each row of "My requests" shows Cancel when the model says it may be cancelled (`pending`, or `approved` with a start date after today); the rule is a pure function in `requests.ts`, tested.
 - A demo visitor keeps disabled controls (`LaterButton`) with the line "Sign up to try this with your own team." An unlinked account still gets the not-linked card and no button.
-- Pure logic lives in `src/lib/people/leave-forms.ts` (what the forms send, when the half-day tick shows, the preview's sentences) and is what the tests exercise.
+- The time-off form's pure logic lives in `src/lib/people/time-off-forms.ts` and is what its test exercises.
 
 ### Task 4: Deciding — approvals, entitlements, settings
 
 **Files:** modify `src/screens/people/approvals-screen.tsx`, `approve-leave.tsx`, `approve-time-off.tsx`, `src/lib/people/approvals.ts`, `src/screens/people/settings.tsx`, `src/lib/people/documents.ts` (settings model only), `src/components/people/employee-form.tsx`, `src/components/people/employees-table.tsx`; create `src/components/people/decide-buttons.tsx`, `add-leave-for.tsx`, `entitlements-fields.tsx`; test: extend `tests/people-approvals.test.ts`, `tests/people-documents.test.ts`, `tests/people-employees.test.ts`.
 
 - Approve and Reject on leave and time-off rows become real (client buttons calling the decide actions; Reject opens a small note field, optional). The claims and overtime queues keep their disabled buttons: the shared layout takes a flag for which queues can decide.
-- Leave rows carry `over_by` for the request's year when it exceeds the balance (computed in `approvals.ts` from the balances and the requests, pure and tested) and "yours" when the request belongs to the viewer's own employee.
-- "Add leave for…" on Leave Approvals: pick an active employee, then the same fields as the leave form, with `previewLeaveForAction`.
+- Leave rows carry `over_by` for the request's year when it exceeds the balance (from `overBalanceBy` in `src/lib/people/leave.ts`; do not write a second formula) and "yours" when the request belongs to the viewer's own employee.
+- "Add leave for…" on Leave Approvals: pick an active employee, then Task 2's `LeaveForm` with `previewLeaveForAction` and `applyLeaveForAction`.
 - Cancel on any leave or time-off row for an owner or admin.
 - The Employees edit form shows this year's annual, medical and emergency entitlement (loaded with the private details when the form opens, through `loadLeaveEntitlementsAction`) and saves a changed one with `setLeaveEntitlementAction`.
 - Settings shows the three default entitlements, read-only.
@@ -181,12 +196,12 @@ Each owns the files it lists. As in plan C: do not run `pnpm tsc`, `pnpm lint`, 
 
 ### Task 5: Lekiu
 
-**Files:** modify `src/lib/ai/people-tools.ts`, `src/lib/ai/products.ts`, `src/lib/ai/agents/prompts.ts` (`LEKIU_SYSTEM` only), `src/app/api/people/chat/route.ts`, `src/lib/chat/change-titles.ts`, `src/components/chat/tool-parts.ts`; test `tests/people-leave-tools.test.ts`, `tests/people-leave-approval.test.ts`, extend `tests/lekiu-prompt.test.ts`, `tests/people-chat-route.test.ts`, `tests/people-change-titles.test.ts`.
+**Files:** modify `src/lib/ai/people-tools.ts`, `src/lib/ai/products.ts`, `src/lib/ai/agents/prompts.ts` (`LEKIU_SYSTEM` only), `src/app/api/people/chat/route.ts`, `src/lib/chat/change-titles.ts`, `src/components/chat/tool-parts.ts`; test `tests/people-leave-tools.test.ts`, `tests/people-leave-approval.test.ts`, extend `tests/lekiu-prompt.test.ts`, `tests/people-chat-route.test.ts`, `tests/people-change-titles.test.ts`; update every test that builds `{ ctx, canWrite }` (`tests/people-change-tools.test.ts`, `tests/people-approval.test.ts`, `tests/people-tools.test.ts`, `tests/people-chat-logging.test.ts`; grep for `canWrite` under `tests/` among the people files).
 
 - `PeopleWrite` becomes `{ ctx, tier: 'hr' | 'self', employeeId: string | null }` (replacing `canWrite`); the route passes `tier: 'hr'` for an owner or admin, `tier: 'self'` with the linked employee id for a linked member who is not in the demo, and nothing otherwise. Existing employee and department tools stay `hr`-only.
 - Tools as spec §5.3. For `tier: 'self'` the apply and preview tools' schemas have **no** employee field and the tool fills in `employeeId`; for `hr` they require an employee id from a lookup.
-- `listLeaveRequests` and the time-off lookup return `id` for rows the caller may act on, and `over_balance` for `hr`.
-- Approval cards as spec §5.3, with the detail line (days, balance after, over-balance figure) taken from the most recent `previewLeave` result in the conversation whose employee, type and dates match the change's input, the way the card already finds a name for an id in earlier results; never from the model's own arithmetic. With no matching preview the card shows the type and dates only. A member's card never names another employee.
+- `listLeaveRequests` and the time-off lookup return `id` for rows the caller may act on, and `over_balance` for `hr` (from `overBalanceBy`).
+- Approval cards: title only, from the change's own input ("Apply for annual leave, 20–22 Oct?", "Cancel …", "Approve Amirul's annual leave, 16 Oct?", "Reject …", "Set Farah's annual leave for 2026 to 18 days?"), plus the rejection note as the detail on a reject. The day count and balance are **not** on the card: `approvalDetail` sees only the input and must not do arithmetic; the prompt makes Lekiu state the previewed days and balance in its lead-in line instead. (The spec's §5.3 card wording with a day count is narrowed by this.) A member's card never names another employee.
 - Prompt rules as spec §5.3. Keep every existing rule; the line that says leave cannot be applied for or approved is replaced.
 - **Tests must cover:** the tool set for owner, admin, linked member, unlinked member, viewer and demo; a member's `applyLeave` schema has no employee key and calls the write path with the member's own id whatever the model sends; every change tool is `user-approval`; a member holds no decide or entitlement tool; the prompt phrases; card wording, including that an employee id of the wrong kind never names someone.
 
@@ -194,7 +209,7 @@ Each owns the files it lists. As in plan C: do not run `pnpm tsc`, `pnpm lint`, 
 
 ### Task 6: Bring it together (coordinator)
 
-- [ ] **Step 1.** Land Tasks 3 to 5 as plan C did: commit each by path, review each, then `pnpm tsc --noEmit`, `pnpm lint`, `pnpm build` once all three are in.
+- [ ] **Step 1.** Land Tasks 3 to 5 as plan C did: commit each by path, review each, then `pnpm tsc --noEmit`, `pnpm lint`, `pnpm build` once all three are in. Run `pnpm test` before applying anything: exactly one file is expected red, `tests/people-leave.rls.test.ts` (its functions are not in the live database yet).
 - [ ] **Step 2.** Whole-branch review on the most capable model, pointed at the Review Focus, with the migration and the access check read in full.
 - [ ] **Step 3. Stop for the owner's go-ahead to apply the migrations.** Say exactly which two files, that they add columns and functions only, and that the access check was run locally. Do not apply without a yes.
 - [ ] **Step 4 (after a yes).** Apply the two files through the `openkuasa-supabase` MCP, one call at a time. Run `supabase/tests/people_leave_check.sql` and `people_rls_check.sql` with `execute_sql`: both must end with `PASSED`. Then `pnpm test` (the live tests, including a new `tests/people-leave.rls.test.ts`: an owner applies, approves and cancels through `src/lib/people/leave.ts`; a demo guest changes nothing).
