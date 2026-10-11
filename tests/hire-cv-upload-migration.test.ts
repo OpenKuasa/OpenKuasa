@@ -66,7 +66,7 @@ describe('hire cv upload migration', () => {
     expect(gate).toBeGreaterThan(-1);
     expect(gate).toBeLessThan(body.indexOf('from public.hire_jobs j'));
     // The path shape is built from the route's workspace and job.
-    expect(body).toContain("v_cv_path !~ ('^' || p_org_id::text || '/' || p_job_id::text");
+    expect(body).toContain("(v_cv_path ~ ('^' || p_org_id::text || '/' || p_job_id::text");
     expect(body).toContain('[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.pdf$');
     // A CV is missing only when both the link and the path are missing.
     expect(body).toContain("if v_require_cv and v_cv = '' and v_cv_path is null then return 'cv_required'; end if;");
@@ -158,5 +158,35 @@ describe('hire cv upload migration', () => {
     expect(start).toBeGreaterThan(-1);
     const trigger = sql.slice(start, sql.indexOf('$$;', start));
     expect(trigger).toContain("security definer set search_path = ''");
+  });
+
+  test('the read policy is for members of the workspace in the path, and guards its cast', () => {
+    const select = policies().find((p) => p.includes('hire_cvs_select'))!;
+    expect(select).toContain('to authenticated');
+    expect(select).toContain("case when bucket_id = 'hire-cvs' and name ~ '^[0-9a-f-]{36}/'");
+    expect(select).toContain('then private.is_org_member(((storage.foldername(name))[1])::uuid)');
+    expect(select).toContain('else false end');
+  });
+
+  test('the second-factor policy leaves every other bucket alone', () => {
+    const mfa = policies().find((p) => p.includes('hire_cvs_mfa_required'))!;
+    expect(mfa).toContain("using (bucket_id <> 'hire-cvs' or (select private.mfa_ok()))");
+    expect(mfa).toContain("with check (bucket_id <> 'hire-cvs' or (select private.mfa_ok()))");
+  });
+
+  test('no server-only function is ever granted to a visitor or a member', () => {
+    for (const name of ['hire_apply_throttled', 'hire_cv_deletions_due', 'hire_cv_deletions_done', 'hire_cv_attached']) {
+      const grants = [...sql.matchAll(new RegExp(`grant execute on function public\\.${name}\\([^)]*\\) to ([^;]+);`, 'g'))];
+      expect(grants.map((g) => g[1]), name).toEqual(['service_role']);
+      expect(sql, name).toMatch(new RegExp(`revoke execute on function public\\.${name}\\([^)]*\\) from public, anon, authenticated;`));
+    }
+  });
+
+  test('a path is refused unless it matches, even when an id is missing', () => {
+    expect(fn('submit_public_application')).toContain("\\.pdf$')) is not true then");
+  });
+
+  test('the server can ask whether a file is held by an application', () => {
+    expect(fn('hire_cv_attached')).toContain('select exists (select 1 from public.hire_applications a where a.cv_path = p_path)');
   });
 });

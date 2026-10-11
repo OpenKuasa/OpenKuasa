@@ -19,7 +19,7 @@ on conflict (id) do update
 -- folder of the path is the workspace. The case keeps the cast from ever
 -- running on another bucket's names. No write policy: the server writes.
 create policy hire_cvs_select on storage.objects for select to authenticated
-  using (case when bucket_id = 'hire-cvs'
+  using (case when bucket_id = 'hire-cvs' and name ~ '^[0-9a-f-]{36}/'
               then private.is_org_member(((storage.foldername(name))[1])::uuid)
               else false end);
 create policy hire_cvs_mfa_required on storage.objects as restrictive
@@ -73,6 +73,14 @@ create or replace function public.hire_apply_throttled(p_job_id uuid)
 returns boolean language sql security definer stable set search_path = '' as $$
   select count(*) >= 30 from private.hire_apply_ticks t
    where t.job_id = p_job_id and t.at > now() - interval '1 minute';
+$$;
+
+-- True when an application holds this file. Asked by the server when a submit
+-- call gave no clear answer, before it removes the file it stored: the call may
+-- have been kept all the same, and a kept application must not lose its CV.
+create or replace function public.hire_cv_attached(p_path text)
+returns boolean language sql security definer stable set search_path = '' as $$
+  select exists (select 1 from public.hire_applications a where a.cv_path = p_path);
 $$;
 
 -- ---------------------------------------------------------------------------
@@ -152,8 +160,8 @@ begin
   if v_salary is not null and (v_salary < 0 or v_salary > 100000000) then return 'invalid_salary'; end if;
 
   -- 2e: the file must sit under this workspace and this job, with a random name.
-  if v_cv_path is not null and v_cv_path !~ ('^' || p_org_id::text || '/' || p_job_id::text
-       || '/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.pdf$') then
+  if v_cv_path is not null and (v_cv_path ~ ('^' || p_org_id::text || '/' || p_job_id::text
+       || '/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.pdf$')) is not true then
     return 'invalid_cv_path';
   end if;
 
@@ -257,6 +265,8 @@ grant execute on function public.submit_public_application(uuid, uuid, text, tex
 revoke execute on function public.hire_apply_throttled(uuid) from public, anon, authenticated;
 revoke execute on function public.hire_cv_deletions_due(integer) from public, anon, authenticated;
 revoke execute on function public.hire_cv_deletions_done(text[]) from public, anon, authenticated;
+revoke execute on function public.hire_cv_attached(text) from public, anon, authenticated;
 grant execute on function public.hire_apply_throttled(uuid) to service_role;
 grant execute on function public.hire_cv_deletions_due(integer) to service_role;
 grant execute on function public.hire_cv_deletions_done(text[]) to service_role;
+grant execute on function public.hire_cv_attached(text) to service_role;

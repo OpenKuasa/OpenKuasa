@@ -25,6 +25,9 @@ describe('cvPath', () => {
     expect(cvPath(ORG, JOB)).toMatch(new RegExp(`^${ORG}/${JOB}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.pdf$`));
     expect(cvPath(ORG, JOB)).not.toBe(cvPath(ORG, JOB));
   });
+  it('writes the ids in lowercase, as the database does', () => {
+    expect(cvPath(ORG.toUpperCase().replace(/1/g, 'A'), JOB)).toMatch(/^aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\//);
+  });
 });
 
 describe('storeCv', () => {

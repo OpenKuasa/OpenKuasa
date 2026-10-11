@@ -22,7 +22,8 @@ export function isPdf(bytes: Uint8Array): boolean {
 
 /** A fresh, random place for one CV. The upload's own file name is never used. */
 export function cvPath(orgId: string, jobId: string): string {
-  return `${orgId}/${jobId}/${randomUUID()}.pdf`;
+  // Lowercase, as the database writes an id: the path is checked there against the ids as text.
+  return `${orgId.toLowerCase()}/${jobId.toLowerCase()}/${randomUUID()}.pdf`;
 }
 
 /** The code of a storage failure, and nothing else about it. */
