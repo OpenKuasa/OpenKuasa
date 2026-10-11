@@ -303,7 +303,10 @@ Triggers enforce it, so no caller can get round it:
   the note's amount (`FIN05`). The refund's own amount is counted whatever
   status it comes from, so a refund that was rejected, and so held no credit
   while another refund took it, cannot be paid out on top of that one. The
-  credit notes and then the invoices are locked while this is read.
+  credit notes and then the invoices are locked while this is read, and what
+  the refund itself amounts to on a credit note or an invoice is read after
+  that row is locked, so a split added to the payment while it is being paid
+  out is counted too.
 - The guards on allocations, credit notes and payments read what an invoice
   owes from `finance_invoice_totals`. If the view gives them no row for the
   invoice, they refuse the write with `FIN04` instead of letting it through
@@ -493,6 +496,21 @@ instead."; see Known limits.
   in the app sets or leaves `rejected`. For a refund, that update is checked in
   full as above. For a payment to a supplier or a payment in, it is not looked
   at again.
+- A rejected refund moved straight to `scheduled` (or back to `draft`) by a
+  direct update is not looked at again until it is paid out. Until then the
+  refunds waiting on an invoice can add up to more than the credit; none of
+  them can be paid out past it.
+- `finance_mark_payment_paid` locks the payment and then, for a refund, its
+  credit note and invoice. A direct insert of an allocation on that same
+  payment at that moment locks the invoice first and then waits for the
+  payment, so the two can deadlock; Postgres ends one of them with an error
+  and the other goes through. The app never adds an allocation to a payment
+  that already exists.
+- A split added by a direct write to a refund at the very moment it is paid
+  out is counted when it names an invoice or a credit note the refund already
+  named. One that names a different invoice was checked against that
+  invoice's credit when it was inserted, but that invoice is not locked or
+  looked at again by the payment being paid out.
 - A refund is to one customer against one invoice or one credit note. One
   payment out that refunds several invoices is not recorded as one refund.
 - The reason of a refund is one of five words; anything more is in the
