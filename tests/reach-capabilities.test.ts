@@ -39,19 +39,17 @@ describe('ad settings schema', () => {
   });
 });
 
-import { createClient as createSb, type SupabaseClient as Sb } from '@supabase/supabase-js';
 import { hasSupabaseEnv } from './setup/supabase';
+import { createOrg, signInAnon, liveClient } from './helpers/live-workspaces';
 import { createCampaign, deleteCampaign, type ReachWriteContext } from '@/lib/reach/capabilities';
 import { test as vtest } from 'vitest';
 const itSb = hasSupabaseEnv ? vtest : vtest.skip;
 
 itSb('createCampaign writes to the caller org and ignores an input org_id', async () => {
-  const c: Sb = createSb(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const signIn = await c.auth.signInAnonymously();
+  const c = liveClient();
+  const signIn = await signInAnon(c);
   expect(signIn.error).toBeNull();
-  const { data: orgId, error: orgError } = await c.rpc('create_org_for_current_user', { org_name: 'Cap IT Sdn Bhd' });
+  const { data: orgId, error: orgError } = await createOrg(c, 'Cap IT Sdn Bhd');
   expect(orgError).toBeNull();
   expect(orgId).toBeTruthy();
   const ctx: ReachWriteContext = { client: c, orgId: orgId as string };
@@ -106,12 +104,10 @@ describe('lead capability schemas', () => {
 import { createLead, deleteLead, setLeadStage } from '@/lib/reach/capabilities';
 
 itSb('createLead writes to the caller org, ignores an input org_id, and round-trips', async () => {
-  const c: Sb = createSb(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const signIn = await c.auth.signInAnonymously();
+  const c = liveClient();
+  const signIn = await signInAnon(c);
   expect(signIn.error).toBeNull();
-  const { data: orgId, error: orgError } = await c.rpc('create_org_for_current_user', { org_name: 'Lead Cap IT Sdn Bhd' });
+  const { data: orgId, error: orgError } = await createOrg(c, 'Lead Cap IT Sdn Bhd');
   expect(orgError).toBeNull();
   expect(orgId).toBeTruthy();
   const ctx: ReachWriteContext = { client: c, orgId: orgId as string };

@@ -1,15 +1,14 @@
 import { expect, test } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 
 testWithSupabase('demo org has creatives and an ad_settings row; campaign CPL is generated', async () => {
-  const c: SupabaseClient = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  await c.auth.signInAnonymously();
-  const { data: demoId } = await c.rpc('join_demo_org');
+  const c: SupabaseClient = liveClient();
+  await signInAnon(c);
+  const { data: demoId } = await joinDemo(c);
   const creatives = await c.from('creatives').select('id, campaign_id').eq('org_id', demoId);
   expect((creatives.data ?? []).length).toBeGreaterThanOrEqual(8);
   const settings = await c.from('ad_settings').select('currency').eq('org_id', demoId).single();

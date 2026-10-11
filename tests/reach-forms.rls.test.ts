@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test, type TestContext } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { createOrg, joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
 import { formsTableMissing, formsTableSkipReason } from './helpers/forms-table';
 import { createSupabaseReachData } from '@/lib/reach/supabase';
 import { createForm, deleteForm, setFormStatus } from '@/lib/reach/capabilities';
@@ -8,20 +9,17 @@ import { createForm, deleteForm, setFormStatus } from '@/lib/reach/capabilities'
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const client = (): SupabaseClient =>
-  createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
+const client = liveClient;
 
 async function signedIn() {
   const c = client();
-  const { error } = await c.auth.signInAnonymously();
+  const { error } = await signInAnon(c);
   expect(error, error?.message).toBeNull();
   return c;
 }
 
 async function ownedOrg(c: SupabaseClient, name: string) {
-  const { data: orgId, error } = await c.rpc('create_org_for_current_user', { org_name: name });
+  const { data: orgId, error } = await createOrg(c, name);
   expect(error, error?.message).toBeNull();
   return { c, orgId: orgId as string };
 }
@@ -45,8 +43,6 @@ beforeAll(async () => {
   other = await ownedOrg(await signedIn(), 'Forms Other Sdn Bhd');
 });
 afterAll(async () => {
-  if (owner) await owner.c.from('forms').delete().eq('org_id', owner.orgId);
-  if (other) await other.c.from('forms').delete().eq('org_id', other.orgId);
   await owner?.c.auth.signOut();
   await other?.c.auth.signOut();
 });
@@ -169,7 +165,7 @@ testWithSupabase('another workspace sees nothing and can change nothing', async 
 testWithSupabase('a viewer (demo member) reads the six demo forms and cannot write', async (ctx) => {
   needsFormsTable(ctx);
   const v = await signedIn();
-  const { data: demoId, error: joinError } = await v.rpc('join_demo_org');
+  const { data: demoId, error: joinError } = await joinDemo(v);
   expect(joinError, joinError?.message).toBeNull();
 
   // Through the same seam the page and the chat read.

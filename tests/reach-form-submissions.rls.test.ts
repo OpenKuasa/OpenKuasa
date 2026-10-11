@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test, type TestContext } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { createOrg, joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
 import {
   formSubmissionsMissing,
   formSubmissionsSkipReason,
@@ -12,20 +13,17 @@ import { getPublicForm, recordFormView, submitPublicForm } from '@/lib/reach/pub
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const client = (): SupabaseClient =>
-  createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
+const client = liveClient;
 
 async function signedIn() {
   const c = client();
-  const { error } = await c.auth.signInAnonymously();
+  const { error } = await signInAnon(c);
   expect(error, error?.message).toBeNull();
   return c;
 }
 
 async function ownedOrg(c: SupabaseClient, name: string) {
-  const { data: orgId, error } = await c.rpc('create_org_for_current_user', { org_name: name });
+  const { data: orgId, error } = await createOrg(c, name);
   expect(error, error?.message).toBeNull();
   return { c, orgId: orgId as string };
 }
@@ -56,9 +54,6 @@ beforeAll(async () => {
 afterAll(async () => {
   for (const org of [owner, other]) {
     if (!org) continue;
-    // Deleting a form deletes its submissions; the contacts they made go separately.
-    await org.c.from('forms').delete().eq('org_id', org.orgId);
-    await org.c.from('crm_contacts').delete().eq('org_id', org.orgId);
     await org.c.auth.signOut();
   }
 });
@@ -412,7 +407,7 @@ testWithSupabase('deleting a form deletes its submissions but not their contacts
 testWithSupabase('the demo workspace takes no public submissions, and a demo guest (a viewer) can delete nothing', async (ctx) => {
   needsMigration(ctx);
   const v = await signedIn();
-  const { data: demoId, error: joinError } = await v.rpc('join_demo_org');
+  const { data: demoId, error: joinError } = await joinDemo(v);
   expect(joinError, joinError?.message).toBeNull();
   const forms = await v.from('forms').select('id, status, views_count, submissions_count').eq('org_id', demoId).eq('status', 'active');
   expect(forms.error, forms.error?.message).toBeNull();

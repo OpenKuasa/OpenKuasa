@@ -1,20 +1,17 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { createOrg, joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const client = (): SupabaseClient =>
-  createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
+const client = liveClient;
 
 async function ownedOrg(name: string) {
   const c = client();
-  const { error: e1 } = await c.auth.signInAnonymously();
+  const { error: e1 } = await signInAnon(c);
   expect(e1, e1?.message).toBeNull();
-  const { data: orgId, error } = await c.rpc('create_org_for_current_user', { org_name: name });
+  const { data: orgId, error } = await createOrg(c, name);
   expect(error, error?.message).toBeNull();
   return { c, orgId: orgId as string };
 }
@@ -86,8 +83,8 @@ testWithSupabase('a different org cannot write to the owner’s campaigns', asyn
 
 testWithSupabase('a viewer (demo member) cannot write', async () => {
   const v = client();
-  await v.auth.signInAnonymously();
-  const { data: demoId, error: joinError } = await v.rpc('join_demo_org');
+  await signInAnon(v);
+  const { data: demoId, error: joinError } = await joinDemo(v);
   expect(joinError, joinError?.message).toBeNull();
   expect(demoId).toBeTruthy();
   const { error } = await v.from('campaigns').insert({ org_id: demoId, name: 'nope', channel: 'whatsapp' });

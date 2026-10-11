@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
   type ReachWriteContext,
   createLead,
@@ -7,20 +6,18 @@ import {
   promoteLeadToContact,
 } from '@/lib/reach/capabilities';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { createOrg, signInAnon, liveClient } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const client = (): SupabaseClient =>
-  createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
+const client = liveClient;
 
 async function ownedCtx(name: string): Promise<ReachWriteContext> {
   const c = client();
-  const { error: e1 } = await c.auth.signInAnonymously();
+  const { error: e1 } = await signInAnon(c);
   expect(e1, e1?.message).toBeNull();
-  const { data: orgId, error } = await c.rpc('create_org_for_current_user', { org_name: name });
+  const { data: orgId, error } = await createOrg(c, name);
   expect(error, error?.message).toBeNull();
   return { client: c, orgId: orgId as string };
 }
