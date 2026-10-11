@@ -9,8 +9,8 @@ import { ScreenContainer } from '@/components/screen/screen-container';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { todayInMalaysia } from '@/lib/people/dates';
-import { DRAFT_BANNER, NO_MONTH_TO_RUN, paidLine, readPayroll, runControls, runIdFromParam } from '@/lib/people/payroll';
-import { centsToRinggit, nextRunMonth } from '@/lib/people/payroll-forms';
+import { DRAFT_BANNER, NO_MONTH_TO_RUN, paidLine, readPayroll, runControls, runIdFromParam, runMonthChoice } from '@/lib/people/payroll';
+import { centsToRinggit } from '@/lib/people/payroll-forms';
 import type { StatutoryField } from '@/lib/people/types';
 import { HrOnlyScreen, LOAD_FAILED, LaterButton, Muted, StatusPill, loadPeople } from './parts';
 
@@ -63,8 +63,7 @@ export default async function PayrollScreen({
     color: DEDUCTION_COLORS[index % DEDUCTION_COLORS.length],
   }));
   const noRun = <Muted>No payroll run yet</Muted>;
-  const thisMonth = todayInMalaysia(new Date()).slice(0, 7);
-  const firstMonth = nextRunMonth(model?.runs ?? [], thisMonth + '-01');
+  const monthChoice = runMonthChoice(model?.runs ?? [], todayInMalaysia(new Date()));
 
   return (
     <ScreenContainer>
@@ -77,7 +76,7 @@ export default async function PayrollScreen({
             <LaterButton variant="outline" size="sm" compact>Export</LaterButton>
             {viewer.isDemo || !model ? (
               <LaterButton size="sm">Run payroll</LaterButton>
-            ) : firstMonth === null ? (
+            ) : monthChoice === null ? (
               <span className="inline-flex items-center gap-2">
                 <Button type="button" size="sm" disabled>
                   Run payroll
@@ -85,7 +84,7 @@ export default async function PayrollScreen({
                 <span className="text-xs text-muted-foreground">{NO_MONTH_TO_RUN}</span>
               </span>
             ) : (
-              <RunPayrollDialog firstMonth={firstMonth} lastMonth={thisMonth} />
+              <RunPayrollDialog choice={monthChoice} />
             )}
           </>
         }

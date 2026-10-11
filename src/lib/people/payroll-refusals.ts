@@ -10,6 +10,7 @@ export const PAYROLL_REFUSALS: Record<string, string> = {
   PAYROLL_RUN_EXISTS: 'Payroll for that month has already been run.',
   PAYROLL_MONTH_NOT_STARTED: 'That month has not started yet.',
   PAYROLL_EARLIER_DRAFT: 'An earlier month is still a draft. Mark it as paid or delete it first.',
+  PAYROLL_SKIPS_MONTH: 'Run payroll for the month after the latest run first.',
   PAYROLL_NOBODY: 'Nobody can be paid yet: no active employee has a base salary.',
   PAYROLL_NOT_DRAFT: 'That run is already paid. Undo paid first to change it.',
   PAYROLL_NOT_PAID: 'That run is not marked as paid.',

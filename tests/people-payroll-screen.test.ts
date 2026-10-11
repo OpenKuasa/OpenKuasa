@@ -15,6 +15,7 @@ import {
   removePayslipSentence,
   runControls,
   runIdFromParam,
+  runMonthChoice,
   runPayrollSentence,
   skippedRows,
   undoPaidSentence,
@@ -190,6 +191,34 @@ describe('payslipDetailModel', () => {
   it('handles a payslip with no lines', () => {
     const m = payslipDetailModel(slip({ lines: [], set_by_hr: [] }));
     expect([m.pay_lines, m.deduction_lines]).toEqual([[], []]);
+  });
+});
+
+describe('runMonthChoice', () => {
+  const run = (period_month: string) => ({ period_month });
+  it('lets a workspace with no run choose any month up to this one, starting on this one', () => {
+    expect(runMonthChoice([], '2026-10-09')).toEqual({
+      kind: 'choose',
+      first: '2000-01',
+      last: '2026-10',
+      default: '2026-10',
+    });
+  });
+  it('fixes the month after the latest run once there is one', () => {
+    expect(runMonthChoice([run('2026-08-01'), run('2026-09-01')], '2026-10-09')).toEqual({
+      kind: 'fixed',
+      month: '2026-10',
+    });
+  });
+  it('fixes a month in the past when the workspace has fallen behind', () => {
+    expect(runMonthChoice([run('2026-06-01')], '2026-10-09')).toEqual({ kind: 'fixed', month: '2026-07' });
+  });
+  it('crosses a year boundary', () => {
+    expect(runMonthChoice([run('2026-12-01')], '2027-01-05')).toEqual({ kind: 'fixed', month: '2027-01' });
+  });
+  it('has nothing to run when the latest run is this month or later', () => {
+    expect(runMonthChoice([run('2026-10-01')], '2026-10-09')).toBeNull();
+    expect(runMonthChoice([run('2026-11-01')], '2026-10-09')).toBeNull();
   });
 });
 

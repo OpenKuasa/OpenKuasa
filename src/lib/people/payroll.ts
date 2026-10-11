@@ -10,6 +10,7 @@
 
 import { formatDate, malaysiaDate, monthLabel, monthYearLabel } from './dates';
 import { isTeamView } from './own';
+import { nextRunMonth } from './payroll-forms';
 import { bucketByMonth, sumBy } from './series';
 import type { Bucket } from './series';
 import { payrollSummary } from './summaries';
@@ -267,6 +268,28 @@ export function runIdFromParam(raw: string | string[] | undefined): string | nul
 export function centsToField(cents: number): string {
   const abs = Math.abs(Math.trunc(cents));
   return `${cents < 0 ? '-' : ''}${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, '0')}`;
+}
+
+/** Shown in the Run payroll dialog when the workspace has no run yet. */
+export const FIRST_RUN_NOTE =
+  'The first run can be any month up to this one. After that, months follow one another.';
+
+export type RunMonthChoice =
+  | { kind: 'fixed'; month: string }
+  | { kind: 'choose'; first: string; last: string; default: string };
+
+/**
+ * What the Run payroll dialog asks. With a run on record the database accepts exactly one month, the one after
+ * the latest, so it is shown as fixed. With none, any month up to this one (`today` is `YYYY-MM-DD`, Malaysia
+ * time) and this month to start with. Null when nothing can be run (the latest run is this month or later).
+ */
+export function runMonthChoice(runs: Pick<PayrollRun, 'period_month'>[], today: string): RunMonthChoice | null {
+  const current = today.slice(0, 7);
+  const next = nextRunMonth(runs, today);
+  if (next === null) return null;
+  return runs.length === 0
+    ? { kind: 'choose', first: '2000-01', last: current, default: current }
+    : { kind: 'fixed', month: next };
 }
 
 /** The note under a run or recalculation about overtime for work before the run's month; null for none. */

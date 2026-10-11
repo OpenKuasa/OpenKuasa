@@ -318,6 +318,11 @@ testWithSupabase('an owner undoes paid, the member loses sight of it, and the dr
       ok: false,
       error: PAYROLL_REFUSALS.PAYROLL_LATER_RUN,
     });
+    // Skipping a month ahead of the latest run is refused too (March is the latest; May skips April).
+    expect(await runPayroll(ctx, { month: '2026-05' })).toEqual({
+      ok: false,
+      error: PAYROLL_REFUSALS.PAYROLL_SKIPS_MONTH,
+    });
     expect(await deletePayrollRun(ctx, { run_id: again.data.run_id })).toEqual({ ok: true, data: { id: again.data.run_id } });
   }
 });

@@ -17,6 +17,8 @@ import { type CapResult, WRITE_FAILED } from '@/lib/people/capabilities';
 import {
   type RunControls,
   deleteDraftSentence,
+  FIRST_RUN_NOTE,
+  type RunMonthChoice,
   earlierOvertimeLine,
   markPaidSentence,
   monthInRange,
@@ -65,8 +67,11 @@ function Skipped({ skipped, earlierOvertime }: { skipped: RunResult['skipped']; 
  * server accepts, it opens the new draft and lists anyone left out. In the demo the screen shows the later-button
  * instead of this.
  */
-export function RunPayrollDialog({ firstMonth, lastMonth }: { firstMonth: string; lastMonth: string }) {
-  const defaultMonth = firstMonth;
+export function RunPayrollDialog({ choice }: { choice: RunMonthChoice }) {
+  const fixed = choice.kind === 'fixed';
+  const defaultMonth = fixed ? choice.month : choice.default;
+  const firstMonth = fixed ? choice.month : choice.first;
+  const lastMonth = fixed ? choice.month : choice.last;
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
@@ -133,22 +138,29 @@ export function RunPayrollDialog({ firstMonth, lastMonth }: { firstMonth: string
                 submit();
               }}
             >
-              <label className="flex flex-col gap-1 text-sm" htmlFor={`${id}-month`}>
-                Month
-                <Input
-                  id={`${id}-month`}
-                  type="month"
-                  required
-                  min={firstMonth}
-                  max={lastMonth}
-                  disabled={pending}
-                  value={month}
-                  onChange={(event) => {
-                    setMonth(event.target.value);
-                    setError(null);
-                  }}
-                />
-              </label>
+              {fixed ? (
+                <p className="text-sm font-medium">Payroll for {monthLabel(choice.month)}</p>
+              ) : (
+                <>
+                  <label className="flex flex-col gap-1 text-sm" htmlFor={`${id}-month`}>
+                    Month
+                    <Input
+                      id={`${id}-month`}
+                      type="month"
+                      required
+                      min={firstMonth}
+                      max={lastMonth}
+                      disabled={pending}
+                      value={month}
+                      onChange={(event) => {
+                        setMonth(event.target.value);
+                        setError(null);
+                      }}
+                    />
+                  </label>
+                  <p className="text-xs text-muted-foreground">{FIRST_RUN_NOTE}</p>
+                </>
+              )}
               <Dialog.Description className="text-sm text-muted-foreground">
                 {valid ? runPayrollSentence(monthLabel(month)) : 'Choose the month to run.'}
               </Dialog.Description>

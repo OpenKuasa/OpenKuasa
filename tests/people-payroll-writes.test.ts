@@ -48,6 +48,7 @@ describe('PAYROLL_REFUSALS', () => {
       PAYROLL_RUN_EXISTS: 'Payroll for that month has already been run.',
       PAYROLL_MONTH_NOT_STARTED: 'That month has not started yet.',
       PAYROLL_EARLIER_DRAFT: 'An earlier month is still a draft. Mark it as paid or delete it first.',
+      PAYROLL_SKIPS_MONTH: 'Run payroll for the month after the latest run first.',
       PAYROLL_NOBODY: 'Nobody can be paid yet: no active employee has a base salary.',
       PAYROLL_NOT_DRAFT: 'That run is already paid. Undo paid first to change it.',
       PAYROLL_NOT_PAID: 'That run is not marked as paid.',
@@ -323,6 +324,14 @@ describe('a run reply', () => {
   it('carries earlier_overtime through', async () => {
     const { client } = fakeSupabase({ 'rpc.hr_run_payroll': { data: reply({ earlier_overtime: 4 }) } });
     expect(await runPayroll(ctxOf(client), { month: '2026-10' })).toMatchObject({ ok: true, data: { earlier_overtime: 4 } });
+  });
+
+  it('reads PAYROLL_SKIPS_MONTH as its sentence', async () => {
+    const { client } = fakeSupabase({ 'rpc.hr_run_payroll': { error: { code: 'P0001', message: 'PAYROLL_SKIPS_MONTH' } } });
+    expect(await runPayroll(ctxOf(client), { month: '2026-05' })).toEqual({
+      ok: false,
+      error: 'Run payroll for the month after the latest run first.',
+    });
   });
 
   it('reads PAYROLL_LATER_RUN with the one sentence for creating and reopening', async () => {
