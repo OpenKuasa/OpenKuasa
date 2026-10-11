@@ -489,6 +489,7 @@ export const CASES: Case[] = [
         askedLekir(turn.asked),
         // Words a guess from the job title would not produce: they are only in the file.
         check('says what is in the CV', FROM_THE_CV.test(turn.text), turn.text),
+        check('gives no verdict nobody asked for', !RATING.test(turn.text), turn.text),
         check('proposed no change', turn.pending.length === 0),
       ];
     },
@@ -502,7 +503,9 @@ export const CASES: Case[] = [
         askedLekir(turn.asked),
         check('gives interview, hold or pass', RECOMMENDS.test(turn.text), turn.text),
         check('rates out of 5', RATING.test(turn.text), turn.text),
-        check('gives a reason from the CV', FROM_THE_CV.test(turn.text) || /packaging|northern region/i.test(turn.text), turn.text),
+        // The summary case is the one that proves the file was read; here any true detail of the CV will do.
+        check('gives a reason from the CV', FROM_THE_CV.test(turn.text)
+          || /packaging|northern region|(six|6) years|salesforce|cold call|key account|tender|b2b/i.test(turn.text), turn.text),
         check('does not claim the CV addresses an AI', !FALSE_FLAG.test(turn.text), turn.text),
       ];
     },

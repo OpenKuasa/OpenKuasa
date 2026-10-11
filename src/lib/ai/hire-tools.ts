@@ -487,7 +487,7 @@ export function createHireTools(
           "Call it only when the user asks about a specific candidate's CV, experience or background, or asks for a verdict on them. " +
           'Never call it to browse CVs or for several candidates in one go. It cannot open CV links.',
         inputSchema: z.object({
-          applicationId: z.string().describe('The id of one application, from listApplications.'),
+          applicationId: z.string().describe('The id of one application. Look it up yourself with listApplications and the candidate name; never ask the user for it.'),
         }),
         // What this returns is shown in the chat, saved with it and sent back on later turns: never the file.
         execute: async ({ applicationId }, { toolCallId }) => {
