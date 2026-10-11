@@ -315,7 +315,42 @@ themselves, so no caller gets round it.
   `pending_approval`, whatever was asked.
 - A scheduled payment that was approved is paid as it was approved: only its
   status, number and date change when it is marked paid, by anyone who may
-  write, and its split is locked.
+  write. Its amount, its direction, its account, its category, who is paid
+  and every other column are frozen, and so is its split (`FIN09`): what is
+  paid is what was approved. It can still be deleted.
+- A scheduled payment out that nobody had to approve stays covered by its
+  split. Raising its amount above its split where it stands, or turning
+  scheduled money in into money out, needs an owner or admin exactly as
+  scheduling it would have, and an owner or admin who does it is written down
+  as approving it. An allocation of such a payment cannot be deleted, or
+  lowered so that the payment is more than its split (`FIN14`): the payment
+  is deleted and recorded again. So a scheduled payment out is always one of
+  two things: approved, or settling documents for its whole amount.
+
+**Who writes `approved_by` and `approved_at`.** The guards do, and nobody
+else. On a payment they are written in three cases: when an owner or admin
+approves a waiting payment, when one of them rejects a payment, and when one
+of them schedules, pays or raises money out that is above its split. On an
+expense they are written when an owner or admin approves or rejects it. In
+each case the guard writes the caller's own id and the time of the update. An
+update from a signed-in person that changes either column by hand is refused
+with `FIN14`, whoever sends it and whatever else it changes: an editor cannot
+fill them in on a draft, an owner cannot back-date an approval, and nobody
+approves in another person's name. An INSERT that carries them has them
+cleared, on a payment and on an expense. This matters because the rules above
+ask "was this approved" by reading `approved_at`; if a caller could write it,
+the payment's own maker could approve it.
+
+The two columns are cleared in one other way. `approved_by`, like
+`created_by`, points at a user, and its foreign key sets it to null when that
+user is deleted. The guards let that update through whatever the status of
+the row, but only when it comes from the foreign key's own trigger (the guard
+then runs one trigger level down, which is what it tests) or from a session
+with no signed-in user. A signed-in person who blanks `approved_by` or
+`created_by` by hand meets the ordinary rules: `FIN09` on a posted or void
+payment, `FIN14` on an approved or waiting one, `FIN01` on an approved or
+rejected expense. `approved_at` is never cleared this way, so a row keeps the
+fact and the time of its approval after its approver is gone.
 
 **What approval does not reach yet.** A payment to a supplier recorded on
 Payments Out and a refund recorded on Refunds are exactly their split, so the
@@ -328,9 +363,15 @@ own part of stage 5.
 A session with no signed-in user is not asked for a role
 (`private.finance_may_decide`). That is a migration or the SQL editor, which
 could disable the guards anyway, and it is how the demo seed approves its
-rows, with `approved_by` left empty. Neither API role can be in that state
-and still write: `authenticated` always carries a user, and `anon` and
-`service_role` have no rights on these tables.
+rows, with `approved_by` left empty and `approved_at` given a date of the
+seed's choosing. Three roles can reach the database through the API with no
+user: `anon`, which has no rights on any finance table; `authenticated` with
+a token that names no user, which passes no row-level policy and so reaches
+no row; and `service_role`, which this project gives no rights on these
+tables (it has no default privileges here, and no migration grants it any).
+If `service_role` were ever granted them, whoever holds the service key could
+approve, as they could already read and write every table past row-level
+security; nothing in the app writes finance tables with that key.
 
 ## Invoices
 
@@ -511,7 +552,9 @@ Triggers enforce it, so no caller can get round it:
   checked, so two payments at
   the same moment are checked one after the other.
 - Clearing a deleted user from a payment's `created_by` or `approved_by` is
-  allowed on a posted payment.
+  allowed on a posted payment, when the foreign key does it. The same update
+  made by hand by a signed-in person is refused as any other change to a
+  posted payment is (`FIN09`); see Approval.
 - An invoice follows the same rules as a bill: created as a draft, edited
   and deleted only as a draft, posted only once its lines add up to more than
   zero, voided only when posted and only while no payment or refund that is
@@ -582,8 +625,29 @@ Triggers enforce it, so no caller can get round it:
   names another kind than the payment's first is refused.
 - A payment starts as a draft (`FIN09`), and the approval rules above hold
   whichever way a status is changed.
+- Changing a payment's split locks the payment. The guard on allocations
+  reads the payment's row with a share lock before it looks at anything else,
+  on insert, update and delete, and keeps it until the transaction ends. The
+  guard on payments runs with the payment's row already locked by its own
+  update, and reads the split. So a change to a payment (paid, scheduled,
+  submitted, approved, lowered) and a change to its split cannot both go
+  through at the same moment, each having seen the other as it was: one waits
+  for the other and then sees what it did. Without it, a voucher could be
+  paid while its split was taken away, leaving a paid payment that settles
+  nothing and that nobody approved.
+- Locks are always taken in the same order: the payment first, then the
+  document. The guard on allocations locks the payment, then the credit note
+  and the invoice, or the expense, or the bill. `finance_mark_payment_paid`
+  and the guard on payments lock the payment, then for a refund its credit
+  notes and its invoices. Two writes to the same payment therefore queue and
+  do not deadlock. The functions the app records payments with insert the
+  payment and its split in one transaction, so the row they lock is one no
+  other session can see yet, and they wait for nothing. Deleting a payment
+  deletes its split with it; the guard on allocations finds no payment row by
+  then and locks nothing.
 - Clearing a deleted user from the `created_by` or `approved_by` of an
-  expense is allowed whatever its status.
+  expense is allowed whatever its status, when the foreign key does it. By
+  hand, on an approved or rejected expense, it is `FIN01`.
 - Each guard steps aside when the workspace itself is being deleted.
 
 ## Database functions
@@ -661,7 +725,7 @@ quotation, a credit note or a refund by the file that made the call.
 | `FIN11` | The bill, invoice, quotation, credit note or payment no longer exists. `finance_post_invoice`, `finance_send_quotation`, `finance_convert_quotation` and `finance_issue_credit_note` also answer this to a viewer: each locks its row first, and a viewer may not, so to them it is not there |
 | `FIN12` | The invoice has a credit note that is a draft or issued, so it cannot be voided. `invoices.ts` words it: "This invoice has credit notes. Void them on Credit Notes, or delete the drafts, before voiding it." |
 | `FIN13` | The quotation already has an invoice that is not void: it cannot be converted again, and its answer can no longer change. `quotations.ts` words it |
-| `FIN14` | Approval. Only an owner or admin approves or rejects an expense or a payment; a payment is submitted for approval only from a draft and rejected only before it is approved; money out that settles no document needs one of them before it is scheduled or paid; a payment waiting for approval, or rejected, cannot be changed; a rejected payment is final; an approved payment is paid as it was approved. Nothing in the app meets it yet |
+| `FIN14` | Approval. Only an owner or admin approves or rejects an expense or a payment; a payment is submitted for approval only from a draft and rejected only before it is approved; money out that settles no document needs one of them before it is scheduled or paid; a payment waiting for approval, or rejected, cannot be changed; a rejected payment is final; an approved payment is paid as it was approved, with nothing but its status, number and date changing. Also: `approved_by` and `approved_at` on a payment or an expense are written by the database, and an update from a signed-in person that changes either by hand is this code; a scheduled payment out that nobody approved cannot be raised above its split, or made from scheduled money in, by someone who is not an owner or admin, and its split cannot be deleted or lowered below the payment by anyone. Nothing in the app meets it yet |
 | `FIN15` | A receipt, a voucher or an expense names the wrong thing: a receipt is for invoices or for an income category, a voucher for expenses or for an expense category, never both and never neither; an expense needs an expense category of its own workspace. Nothing in the app meets it yet |
 | `42501` | Row-level security refused the write: "You do not have permission to make changes here." |
 | `22003` | A number does not fit its column (quantity × unit price can overflow): "That amount is too large." |
@@ -714,7 +778,8 @@ instead."; see Known limits.
 
 The cash book reuses the codes above where the meaning is the same. `FIN01`:
 an expense is created pending, an approved or rejected one is locked, it is
-decided as it stands, and an approved one is not deleted. `FIN02`: an
+decided as it stands, an approved one is not deleted, and who approved or
+entered an approved or rejected one is not blanked by hand. `FIN02`: an
 approved expense with payments cannot be rejected. `FIN04`: a payment only
 goes against an approved expense, and only money out does. `FIN05`: more than
 is left of the expense, or a draft receipt for more than its invoice owes.
@@ -779,10 +844,11 @@ the codes has a sentence yet: the files that word them arrive with the forms.
   a bill, an invoice, or a payment that is exactly its split, with a number of
   their own choosing, or change the account of a scheduled payment that nobody
   had to approve. (Lowering the amount below the split, or changing the
-  direction, is refused. Raising the amount above the split is allowed while
-  the payment is a draft or scheduled, but an editor cannot then schedule it
-  or pay it: the part above the split needs an owner or admin.) A payment can
-  no longer be created already posted. Numbers stay unique per workspace
+  direction of a payment that is split, is refused. Raising the amount above
+  the split is allowed while the payment is a draft, but an editor cannot
+  then schedule it or pay it, and cannot raise a scheduled one: the part
+  above the split needs an owner or admin.) A payment can no longer be
+  created already posted. Numbers stay unique per workspace
   either way. Closing the rest needs posting functions that run with their
   own rights.
 - Contacts and products load the first 1,000 by name; search is in the browser.
@@ -877,15 +943,29 @@ the codes has a sentence yet: the files that word them arrive with the forms.
   by this rule (`FIN14`).
 - `finance_mark_payment_paid` locks the payment and then, for a refund, its
   credit note and invoice. A direct insert of an allocation on that same
-  payment at that moment locks the invoice first and then waits for the
-  payment, so the two can deadlock; Postgres ends one of them with an error
-  and the other goes through. The app never adds an allocation to a payment
-  that already exists.
-- A split added by a direct write to a refund at the very moment it is paid
-  out is counted when it names an invoice or a credit note the refund already
-  named. One that names a different invoice was checked against that
-  invoice's credit when it was inserted, but that invoice is not locked or
-  looked at again by the payment being paid out.
+  payment at that moment used to lock the invoice first and then wait for the
+  payment, so the two could deadlock. The guard on allocations now locks the
+  payment first, so the insert waits for the payment and is then refused,
+  because the payment is paid (`FIN09`). The app never adds an allocation to
+  a payment that already exists.
+- Two direct writes that each add an allocation to the same existing payment
+  at the same moment both hold a share lock on it and do not wait for each
+  other. Each is checked against its own document under that document's lock,
+  but the two together can exceed the payment (the check that a split is no
+  more than its payment reads the other allocations without a lock). The
+  payment is then less than its split, never more, so no money leaves that
+  was not approved. Not possible through the app, which splits a payment only
+  in the transaction that inserts it.
+- A waiting payment is approved by its id. Someone who may write can delete a
+  waiting payment and record another under the same id, so an approval sent
+  for the first would approve the second. The part that adds the Approve
+  button should send what the approver saw (the amount at least) with the
+  update, and approve only if it still matches.
+- A split can no longer be added by a direct write to a refund at the very
+  moment it is paid out: the insert waits for the payment's row and is then
+  refused, because the refund is paid (`FIN09`). Added just before, it is
+  committed by the time the refund is paid out and is counted, whichever
+  invoice or credit note it names.
 - A refund is to one customer against one invoice or one credit note. One
   payment out that refunds several invoices is not recorded as one refund.
 - The reason of a refund is one of five words; anything more is in the
@@ -907,12 +987,11 @@ the codes has a sentence yet: the files that word them arrive with the forms.
   `tests/helpers/live-workspaces.ts` and delete them when the file finishes.
 - The demo workspace's invoices were dated from the day they were seeded, so
   its Sent examples turn Overdue as time passes, as its bills do.
-- The checks between a payment and its split read each other without a lock.
-  When a payment is lowered, the guard reads its split; when an allocation is
-  added, the guard reads the payment row. Two direct writes to the tables made
-  at the same moment (not possible through the app), one lowering the payment
-  and one adding to its split, can both pass and leave a payment smaller than
-  its split.
+- The checks between a payment and its split used to read each other without
+  a lock, so two direct writes at the same moment, one lowering the payment
+  and one adding to its split, could both pass and leave a payment smaller
+  than its split. The guard on allocations now locks the payment's row (see
+  Posted is locked), so one of the two waits and is refused with `FIN03`.
 - Paying the same invoice twice in one payment is refused by the payment
   form's schema, whatever the capitals of the two ids. A direct call to
   `finance_record_payment_in` gets a unique violation (23505), which the data
