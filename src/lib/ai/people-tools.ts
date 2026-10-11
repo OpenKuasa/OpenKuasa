@@ -894,7 +894,14 @@ export function createPeopleTools(
         'within). Call it before applyLeave and say the days and balance in your lead-in line. ' +
         (hr ? 'Give the employee by their id from listEmployees.' : 'It is for the person you are talking to.'),
       inputSchema: previewSchema,
-      execute: async (input) => change('previewLeave', () => capPreviewLeave(ctx, forEmployee(input as never))),
+      execute: async (input) => {
+        try {
+          return await capPreviewLeave(ctx, forEmployee(input as never));
+        } catch (error) {
+          console.error('[lekiu] previewLeave failed:', error instanceof Error ? error.name : 'error');
+          return { ok: false as const, error: 'Could not work out the days just now.' };
+        }
+      },
     }),
   };
 

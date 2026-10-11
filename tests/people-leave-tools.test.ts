@@ -268,6 +268,15 @@ describe('a change that fails', () => {
     expect(await run('cancelLeaveRequest', { id: REQ }, MEMBER_VIEWER, self())).toEqual({ ok: false, error: ctl.fail });
   });
 
+  it('a crashing preview says it could not work out the days, not that a change failed', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    ctl.fail = 'throw';
+    const result = await run('previewLeave', { leave_type: 'annual', start_date: '2026-10-20', end_date: '2026-10-22' }, MEMBER_VIEWER, self());
+    expect(result).toEqual({ ok: false, error: 'Could not work out the days just now.' });
+    expect(JSON.stringify(log.mock.calls)).not.toContain('mother');
+    log.mockRestore();
+  });
+
   it('turns a crash into a plain refusal and logs only the error’s name, never what it carried', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     ctl.fail = 'throw';

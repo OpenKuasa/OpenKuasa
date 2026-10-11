@@ -174,6 +174,18 @@ export function nameIn(results: ToolResult[]): NameFinder {
   };
 }
 
+const UNLISTED_LEAVE = 'a leave request that was not in the list above';
+const UNLISTED_TIME_OFF = 'a time-off request that was not in the list above';
+
+/**
+ * Who a leave application is for. No employee in the input is the caller's own; one that no lookup named
+ * must never read like that, so it says "this employee".
+ */
+function forWhom(employeeId: unknown, find: NameFinder): string | null {
+  if (employeeId === undefined || employeeId === null) return null;
+  return find(employeeId, 'employee') ?? 'this employee';
+}
+
 const LEAVE_WORDS: Record<string, string> = {
   annual: 'annual leave',
   medical: 'medical leave',
@@ -318,13 +330,13 @@ export function approvalTitle(
     case 'updateDepartment': return `Rename ${the('department', 'department')} to “${i.name ?? ''}”?`;
     case 'deleteDepartment': return `Delete ${the('department', 'department')}?`;
     case 'applyLeave': {
-      const who = find(i.employee_id, 'employee');
+      const who = forWhom(i.employee_id, find);
       const when = dayRangeText(i.start_date, i.end_date);
       const half = i.half_day === true ? ' (half day)' : '';
       return `Apply for ${leaveWord(i.leave_type)}${who ? ` for ${who}` : ''}${when ? `, ${when}${half}` : ''}?`;
     }
     case 'applyTimeOff': {
-      const who = find(i.employee_id, 'employee');
+      const who = forWhom(i.employee_id, find);
       const when = dayRangeText(i.off_date, i.off_date);
       const from = timeText(i.start_time);
       const to = timeText(i.end_time);
@@ -332,19 +344,19 @@ export function approvalTitle(
     }
     case 'cancelLeaveRequest': {
       const what = find(i.id, 'leave');
-      return what ? `Cancel ${what}?` : 'Cancel this leave request?';
+      return what ? `Cancel ${what}?` : `Cancel ${UNLISTED_LEAVE}?`;
     }
     case 'cancelTimeOffRequest': {
       const what = find(i.id, 'time-off');
-      return what ? `Cancel ${what}?` : 'Cancel this time-off request?';
+      return what ? `Cancel ${what}?` : `Cancel ${UNLISTED_TIME_OFF}?`;
     }
     case 'decideLeave': {
       const what = find(i.id, 'leave');
-      return `${i.approve === true ? 'Approve' : 'Reject'} ${what ?? 'this leave request'}?`;
+      return `${i.approve === true ? 'Approve' : 'Reject'} ${what ?? UNLISTED_LEAVE}?`;
     }
     case 'decideTimeOff': {
       const what = find(i.id, 'time-off');
-      return `${i.approve === true ? 'Approve' : 'Reject'} ${what ?? 'this time-off request'}?`;
+      return `${i.approve === true ? 'Approve' : 'Reject'} ${what ?? UNLISTED_TIME_OFF}?`;
     }
     case 'setLeaveEntitlement': {
       const who = find(i.employee_id, 'employee');
@@ -492,8 +504,15 @@ export function approvalDetail(toolName: string, input?: unknown): string | null
     return words.length > 0 ? `Sets: ${words.join(', ')}` : null;
   }
   if (toolName === 'decideLeave' || toolName === 'decideTimeOff') {
-    // The note is only ever said on a rejection; an approval carries none.
-    return i.approve === false ? text(i.note) : null;
+    // The note is only ever said on a rejection; an approval carries none. It is quoted and labelled:
+    // it is written by the model and will be saved as the decision note.
+    const note = i.approve === false ? text(i.note) : null;
+    return note ? `Note: “${note}”` : null;
+  }
+  if (toolName === 'applyLeave' || toolName === 'applyTimeOff') {
+    // What will be saved under the person's name.
+    const why = text(i.reason);
+    return why ? `Reason: “${why}”` : null;
   }
   if (toolName === 'updateApplicationForm') {
     const changes = describeFormChange(i);

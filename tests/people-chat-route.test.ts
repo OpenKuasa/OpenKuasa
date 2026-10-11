@@ -295,6 +295,14 @@ describe('POST /api/people/chat happy path', () => {
     expect(ctl.calls[0].tools.sort()).toEqual([...PEOPLE_TOOL_NAMES].sort());
   });
 
+  it.each(['owner', 'admin', 'member'])('gives a %s in the demo workspace the lookups only, which the database keeps read-only', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    ctl.slug = DEMO_ORG_SLUG;
+    await (await POST(post(validBody))).text();
+    expect(ctl.captured!.write).toBeUndefined();
+    expect(ctl.calls[0].tools.sort()).toEqual([...PEOPLE_TOOL_NAMES].sort());
+  });
+
   it('gives an owner who is also an employee the hr tier, and their own employee id', async () => {
     ctl.org = { orgId: 'org1', role: 'owner' };
     ctl.linkedEmployee = { id: 'emp-3' };

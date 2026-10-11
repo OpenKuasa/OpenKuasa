@@ -59,13 +59,16 @@ export async function POST(request: Request) {
   // Nothing is revalidated here, as in the other chat routes: every /people page is rendered per request,
   // and only a server action can refresh the page the person is already looking at.
   let write: PeopleWrite | undefined;
-  if (org && can(org.role, 'approve')) {
+  // The demo workspace is read-only: the database refuses every change there, so no change tool is offered.
+  if (!org || viewer.isDemo) {
+    write = undefined;
+  } else if (can(org.role, 'approve')) {
     write = {
       ctx: { client: chat.supabase, orgId: org.orgId },
       tier: 'hr',
-      employeeId: viewer.isDemo ? null : viewer.employeeId,
+      employeeId: viewer.employeeId,
     };
-  } else if (org && !viewer.isDemo && viewer.employeeId !== null) {
+  } else if (viewer.employeeId !== null) {
     write = { ctx: { client: chat.supabase, orgId: org.orgId }, tier: 'self', employeeId: viewer.employeeId };
   }
   const result = runLekiu(chat.messages, { data, viewer, write }, request.signal, chat.apiKey);

@@ -141,7 +141,11 @@ describe('approval cards for leave and time-off', () => {
     expect(approvalTitle('applyTimeOff', { off_date: '2026-10-20', start_time: '14:00', end_time: '16:00' })).toBe(
       'Request time-off, 20 Oct, 14:00–16:00?',
     );
-    expect(approvalDetail('applyLeave', { ...input, reason: 'Family trip' })).toBeNull();
+    expect(approvalDetail('applyLeave', input)).toBeNull();
+    // What will be saved under the person's name is quoted and labelled.
+    expect(approvalDetail('applyLeave', { ...input, reason: ' Family trip ' })).toBe('Reason: “Family trip”');
+    expect(approvalDetail('applyTimeOff', { off_date: '2026-10-20', reason: 'Clinic' })).toBe('Reason: “Clinic”');
+    expect(approvalDetail('applyTimeOff', { off_date: '2026-10-20' })).toBeNull();
   });
 
   it('a member’s card, which has no employee, names no one; an owner’s names who it is for', () => {
@@ -153,15 +157,21 @@ describe('approval cards for leave and time-off', () => {
   it('an employee id of the wrong kind never names someone', () => {
     const input = { leave_type: 'annual', start_date: '2026-10-20', end_date: '2026-10-22' };
     // A request's id, a department's id and an unknown id are not employees.
+    // It must not read like a member's own card, which has no employee at all.
     for (const id of [REQ, DEPT, 'nobody']) {
-      expect(approvalTitle('applyLeave', { ...input, employee_id: id }, find)).toBe('Apply for annual leave, 20–22 Oct?');
+      expect(approvalTitle('applyLeave', { ...input, employee_id: id }, find)).toBe(
+        'Apply for annual leave for this employee, 20–22 Oct?',
+      );
+      expect(approvalTitle('applyTimeOff', { employee_id: id, off_date: '2026-10-20', start_time: '14:00', end_time: '16:00' }, find)).toBe(
+        'Request time-off for this employee, 20 Oct, 14:00–16:00?',
+      );
     }
     expect(approvalTitle('setLeaveEntitlement', { employee_id: REQ, leave_type: 'annual', year: 2026, days: 18 }, find)).toBe(
       "Set this employee's annual leave for 2026 to 18 days?",
     );
     // And an employee's id never labels a request.
-    expect(approvalTitle('decideLeave', { id: EMP, approve: true }, find)).toBe('Approve this leave request?');
-    expect(approvalTitle('cancelLeaveRequest', { id: EMP }, find)).toBe('Cancel this leave request?');
+    expect(approvalTitle('decideLeave', { id: EMP, approve: true }, find)).toBe('Approve a leave request that was not in the list above?');
+    expect(approvalTitle('cancelLeaveRequest', { id: EMP }, find)).toBe('Cancel a leave request that was not in the list above?');
   });
 
   it('names the request being cancelled, approved or rejected', () => {
@@ -170,12 +180,17 @@ describe('approval cards for leave and time-off', () => {
     expect(approvalTitle('decideLeave', { id: REQ, approve: true }, find)).toBe("Approve Amirul Hakim's annual leave, 16 Oct?");
     expect(approvalTitle('decideLeave', { id: REQ, approve: false }, find)).toBe("Reject Amirul Hakim's annual leave, 16 Oct?");
     expect(approvalTitle('decideTimeOff', { id: TOREQ, approve: true }, find)).toBe("Approve Amirul Hakim's time-off, 16 Oct?");
-    expect(approvalTitle('decideLeave', { id: REQ, approve: true })).toBe('Approve this leave request?');
+    // A request no lookup named says so, rather than reading like a known one.
+    expect(approvalTitle('decideLeave', { id: REQ, approve: true })).toBe('Approve a leave request that was not in the list above?');
+    expect(approvalTitle('decideLeave', { id: REQ, approve: false })).toBe('Reject a leave request that was not in the list above?');
+    expect(approvalTitle('decideTimeOff', { id: TOREQ, approve: true })).toBe('Approve a time-off request that was not in the list above?');
+    expect(approvalTitle('decideTimeOff', { id: TOREQ, approve: false })).toBe('Reject a time-off request that was not in the list above?');
+    expect(approvalTitle('cancelTimeOffRequest', { id: TOREQ })).toBe('Cancel a time-off request that was not in the list above?');
   });
 
   it('shows the rejection note as the detail, and nothing for an approval', () => {
-    expect(approvalDetail('decideLeave', { id: REQ, approve: false, note: ' Busy week ' })).toBe('Busy week');
-    expect(approvalDetail('decideTimeOff', { id: TOREQ, approve: false, note: 'Clash' })).toBe('Clash');
+    expect(approvalDetail('decideLeave', { id: REQ, approve: false, note: ' Busy week ' })).toBe('Note: “Busy week”');
+    expect(approvalDetail('decideTimeOff', { id: TOREQ, approve: false, note: 'Clash' })).toBe('Note: “Clash”');
     expect(approvalDetail('decideLeave', { id: REQ, approve: false })).toBeNull();
     expect(approvalDetail('decideLeave', { id: REQ, approve: true, note: 'ignored' })).toBeNull();
   });
