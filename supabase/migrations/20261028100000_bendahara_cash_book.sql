@@ -23,35 +23,64 @@
 -- same order, same codes. None of those three functions is touched, and no
 -- payment they record waits for approval.
 --
--- What differs, for writes only a direct call can make:
---   * A payment is created as a draft. A direct INSERT with another status is
---     FIN09 where it was allowed.
---   * A rejected payment can no longer be moved to any other status (FIN14).
---     A rejected refund that is paid out is still refused first by the refund
---     checks (FIN04, FIN05), as before.
---   * A payment out whose amount is more than its split is, for that part,
---     money that settles no document: someone who is not an owner or admin
---     can no longer schedule or pay it (FIN14).
---   * One payment pays one kind of document: bills, or invoices and credit
---     notes, or expenses. A second kind on the same payment is FIN06.
---   * finance_mark_payment_paid refuses money in (FIN09) where it would have
---     given it a PV- number.
---   * approved_by and approved_at on a payment are written by the guard and
---     by nobody else: an UPDATE from a signed-in person that changes either
---     is FIN14 where it was stored.
---   * created_by on a payment is cleared by its foreign key when that user is
---     deleted. A signed-in person blanking it by hand on a posted or void
---     payment is FIN09 where it was allowed.
---   * A scheduled payment out stays covered by its split. Raising its amount
---     above its split, or turning scheduled money in into money out, by
---     someone who is not an owner or admin is FIN14 where it was allowed
---     (and was then refused only when it was paid); from an owner or admin
---     it is an approval, and is written down as one.
---   * Deleting an allocation of a scheduled payment out, or lowering it, so
---     that the payment is more than its split, is FIN14 where it was allowed.
---   * Changing a payment's split locks the payment's row for the length of
---     the transaction. The app only ever splits a payment it has just
---     inserted in the same transaction, so nothing it does waits on this.
+-- What differs from the guards that were live, for writes only a direct call
+-- can make. This list is complete; the plan and the backend notes point here.
+--  Creating a payment
+--   1. A payment is created as a draft. A direct INSERT with another status
+--      is FIN09 where it was allowed.
+--   2. approved_by and approved_at on an INSERT are cleared where they were
+--      stored.
+--  Waiting and rejected
+--   3. A rejected payment can no longer be moved to any other status (FIN14).
+--      A rejected refund that is paid out is still refused first by the
+--      refund checks (FIN04, FIN05), as before.
+--   4. A payment that is waiting for approval, or rejected, cannot be changed
+--      while its status stays as it is (FIN14) where it could be.
+--   5. Into and out of waiting: only a draft is submitted; a waiting payment
+--      only becomes scheduled or rejected; only a draft or a waiting payment
+--      is rejected (FIN14). All were plain updates.
+--   6. Approving or rejecting by someone who is not an owner or admin is
+--      FIN14 where it was a plain update.
+--  Money out above its split
+--   7. A payment out whose amount is more than its split is, for that part,
+--      money that settles no document: someone who is not an owner or admin
+--      can no longer schedule or pay it (FIN14).
+--   8. An owner or admin who schedules or pays such a payment is written down
+--      as approving it, and the payment is then locked as an approved one
+--      is. Before, the two columns stayed empty and the row could be edited.
+--   9. A scheduled payment that was approved: any edit, and any move but to
+--      posted, is FIN14 where it was allowed.
+--  10. A scheduled payment out that nobody approved stays covered by its
+--      split. Raising its amount above its split, or turning scheduled money
+--      in into money out, by someone who is not an owner or admin is FIN14
+--      where it was allowed; from an owner or admin it is an approval.
+--  The split
+--  11. One payment pays one kind of document: bills, or invoices and credit
+--      notes, or expenses. A second kind on the same payment is FIN06 where
+--      it was allowed, or was FIN04 from the document's own check.
+--  12. Inserting, changing or deleting an allocation of a payment that is
+--      waiting, rejected or approved is FIN09 where it was allowed.
+--  13. Deleting an allocation of a scheduled payment out, or lowering it, so
+--      that the payment is more than its split, is FIN14 where it was
+--      allowed. (A session with no signed-in user is not held to this one.)
+--  14. Changing a payment's split locks the payment's row for the length of
+--      the transaction. No answer changes. The app only ever splits a payment
+--      it has just inserted in the same transaction, so nothing it does waits.
+--  Who approved, who recorded, and which workspace
+--  15. approved_by and approved_at on a payment are written by the guard and
+--      by nobody else: an UPDATE from a signed-in person that changes either
+--      is FIN14 where it was stored.
+--  16. created_by on a payment is cleared by its foreign key when that user
+--      is deleted. A signed-in person blanking it by hand on a posted or
+--      void payment is FIN09 where it was allowed.
+--  17. A payment and an allocation never change workspace: an UPDATE that
+--      changes org_id is FIN09 where it was allowed whenever the row's own
+--      references could be re-pointed in the same statement.
+--  Other
+--  18. finance_mark_payment_paid refuses money in (FIN09) where it would have
+--      given it a PV- number.
+--  19. A payment with both contact_id and party_name is 23514 (a new check
+--      constraint) where it was allowed.
 --
 -- Nothing here is granted to service_role: every write is made by a signed-in
 -- person through the authenticated role, and no worker touches these tables.
@@ -341,6 +370,13 @@ begin
     return new;
   end if;
 
+  -- An expense stays in the workspace it was entered in. Asked first, before
+  -- anything below can let an update through: who may approve is a question
+  -- about one workspace, and it must be the one the expense is in.
+  if new.org_id is distinct from old.org_id then
+    raise exception 'an expense does not move to another workspace' using errcode = 'FIN01';
+  end if;
+
   -- A deleted user is cleared from these two columns by their foreign keys,
   -- whatever the expense's status. Nothing else may change with it. That
   -- update is made by the foreign key's own trigger, so this guard runs one
@@ -392,7 +428,9 @@ begin
   if old.status = 'rejected' then
     raise exception 'a rejected expense is edited before it is decided again' using errcode = 'FIN01';
   end if;
-  if not private.finance_may_decide(old.org_id) then
+  -- Asked of the workspace the expense is in before the write and after it.
+  -- They are the same (see the top of this guard); the rule does not lean on that.
+  if not (private.finance_may_decide(old.org_id) and private.finance_may_decide(new.org_id)) then
     raise exception 'only an owner or admin approves or rejects an expense' using errcode = 'FIN14';
   end if;
   if old.status = 'approved' and exists (
@@ -489,6 +527,16 @@ begin
       raise exception 'a posted payment cannot be deleted' using errcode = 'FIN09';
     end if;
     return old;
+  end if;
+
+  -- A payment stays in the workspace it was recorded in. Asked first, before
+  -- anything below can let an update through. org_id is an ordinary column,
+  -- and the row's own references (account, contact, category) can be
+  -- re-pointed in the same statement, so nothing else stops a payment made
+  -- in a workspace its maker owns from being moved into one where they are
+  -- only a member, and approved on the way by the rules of the first.
+  if new.org_id is distinct from old.org_id then
+    raise exception 'a payment does not move to another workspace' using errcode = 'FIN09';
   end if;
 
   -- A deleted user is cleared from these two columns by their foreign keys.
@@ -664,7 +712,10 @@ begin
 
     if new.status = 'rejected' or old.status = 'pending_approval' then
       -- A decision: approved (scheduled) or rejected.
-      if not private.finance_may_decide(old.org_id) then
+      -- Asked of the workspace the payment is in before the write and after
+      -- it, here and at the two places below. They are the same (see the top
+      -- of this guard); the rule does not lean on that.
+      if not (private.finance_may_decide(old.org_id) and private.finance_may_decide(new.org_id)) then
         raise exception 'only an owner or admin approves or rejects a payment' using errcode = 'FIN14';
       end if;
       if old.status = 'pending_approval'
@@ -687,7 +738,7 @@ begin
       from public.finance_allocations a
       where a.org_id = old.org_id and a.transaction_id = old.id;
       if new.amount > allocated then
-        if not private.finance_may_decide(old.org_id) then
+        if not (private.finance_may_decide(old.org_id) and private.finance_may_decide(new.org_id)) then
           raise exception 'money out that settles no document needs an owner or admin' using errcode = 'FIN14';
         end if;
         if auth.uid() is not null then
@@ -713,7 +764,7 @@ begin
     from public.finance_allocations a
     where a.org_id = old.org_id and a.transaction_id = old.id;
     if new.amount > allocated then
-      if not private.finance_may_decide(old.org_id) then
+      if not (private.finance_may_decide(old.org_id) and private.finance_may_decide(new.org_id)) then
         raise exception 'money out that settles no document needs an owner or admin' using errcode = 'FIN14';
       end if;
       if auth.uid() is not null then
@@ -773,6 +824,10 @@ begin
   if tg_op = 'DELETE' and not exists (select 1 from public.orgs where id = old.org_id) then
     return old;
   end if;
+  -- An allocation stays in the workspace of its payment.
+  if tg_op = 'UPDATE' and new.org_id is distinct from old.org_id then
+    raise exception 'the split of a payment does not move to another workspace' using errcode = 'FIN09';
+  end if;
   if tg_op <> 'INSERT' then
     -- Locked, so the payment cannot be marked paid, approved or submitted
     -- while its split is being changed, nor the other way round.
@@ -784,8 +839,11 @@ begin
     end if;
     -- A scheduled payment out that nobody had to approve is exactly what it
     -- settles. Taking its split away, or lowering it, would leave money out
-    -- that settles no document among the payments waiting to be paid.
-    if found and t.status = 'scheduled' and t.direction = 'out' then
+    -- that settles no document among the payments waiting to be paid. A
+    -- session with no signed-in user (a migration, a seed) is not held to
+    -- this; a payment it leaves above its split is still measured when it
+    -- is paid.
+    if found and t.status = 'scheduled' and t.direction = 'out' and auth.uid() is not null then
       select coalesce(sum(a.amount), 0) into taken
       from public.finance_allocations a
       where a.org_id = old.org_id and a.transaction_id = old.transaction_id and a.id <> old.id;

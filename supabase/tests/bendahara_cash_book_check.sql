@@ -2,7 +2,8 @@
 -- 20261028100000_bendahara_cash_book.sql, in the same transaction for a dry
 -- run, or by itself once the migration is applied. It goes through expenses,
 -- payment vouchers, cash receipts and the approval rules as an owner, an
--- admin, an editor, a viewer and an outsider, and checks that the two cash book views
+-- admin, an editor, a viewer, an outsider and an editor who owns another
+-- workspace, and checks that the two cash book views
 -- list every movement of money once. The invoice, bill, quotation, credit
 -- note and refund flows are the business of bendahara_followons_check.sql and
 -- bendahara_invoices_check.sql, which must still pass beside this one. It
@@ -20,6 +21,10 @@ declare
   editor_id uuid := gen_random_uuid();
   viewer_id uuid := gen_random_uuid();
   outsider uuid := gen_random_uuid();
+  mover_id uuid := gen_random_uuid();
+  mover_claims text;
+  their_bank uuid;
+  their_rent uuid;
   owner_claims text;
   admin_claims text;
   editor_claims text;
@@ -176,13 +181,15 @@ begin
     email_confirmed_at, created_at, updated_at, raw_app_meta_data, raw_user_meta_data, is_anonymous)
   select u.id, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
     u.id || '@cash-book-check.openkuasa-test.dev', '', now(), now(), now(), '{}'::jsonb, '{}'::jsonb, false
-  from unnest(array[owner_id, admin_id, editor_id, viewer_id, outsider]) as u(id);
+  from unnest(array[owner_id, admin_id, editor_id, viewer_id, outsider, mover_id]) as u(id);
 
   -- The trigger on orgs gives each workspace its accounts and categories.
   insert into public.orgs (id, name) values (org, 'Cash Book Check Sdn Bhd'), (other_org, 'Cash Book Other Sdn Bhd');
   insert into public.org_members (org_id, user_id, role)
   values (org, owner_id, 'owner'), (org, admin_id, 'admin'), (org, editor_id, 'member'), (org, viewer_id, 'viewer'),
-         (other_org, outsider, 'owner');
+         (other_org, outsider, 'owner'),
+         -- An editor here who owns the other workspace: what they may decide there, they may not decide here.
+         (other_org, mover_id, 'owner'), (org, mover_id, 'member');
   select id into bank from public.finance_accounts where org_id = org and kind = 'bank' order by created_at limit 1;
   select id into till from public.finance_accounts where org_id = org and kind = 'cash' order by created_at limit 1;
   select id into rent from public.finance_categories where org_id = org and kind = 'expense' and name = 'Rent';
@@ -194,6 +201,9 @@ begin
   owner_claims := json_build_object('sub', owner_id, 'role', 'authenticated', 'aal', 'aal2')::text;
   admin_claims := json_build_object('sub', admin_id, 'role', 'authenticated', 'aal', 'aal2')::text;
   editor_claims := json_build_object('sub', editor_id, 'role', 'authenticated', 'aal', 'aal2')::text;
+  mover_claims := json_build_object('sub', mover_id, 'role', 'authenticated', 'aal', 'aal2')::text;
+  select id into their_bank from public.finance_accounts where org_id = other_org and kind = 'bank' order by created_at limit 1;
+  select id into their_rent from public.finance_categories where org_id = other_org and kind = 'expense' and name = 'Rent';
 
   -- ==== as the owner: what the cash book stands beside =========================
   perform set_config('request.jwt.claims', owner_claims, true);
@@ -715,6 +725,44 @@ begin
   fails := fails || public.bendahara_check_try('a rejected voucher is deleted', 'ok',
     format('delete from public.finance_transactions where id = %L', v4));
 
+  -- ==== a payment, a split and an expense never change workspace ================
+  -- Someone who is an editor here and owns another workspace. There they may
+  -- approve anything; a row made there is not brought here with that approval.
+  perform set_config('request.jwt.claims', mover_claims, true);
+  -- A draft that settles nothing, moved here and paid in the same update.
+  insert into public.finance_transactions (org_id, direction, account_id, amount, method)
+  values (other_org, 'out', their_bank, 50000, 'cash') returning id into v6;
+  fails := fails || public.bendahara_check_try('an editor who owns another workspace moves a draft from it and pays it here in one update', 'FIN09',
+    format('update public.finance_transactions set org_id = %L, account_id = %L, status = %L, number = %L where id = %L',
+      org, bank, 'posted', 'PV-SNEAKY', v6));
+  -- Scheduled money in, which nobody is asked about, moved here as money out, and then marked paid.
+  insert into public.finance_transactions (org_id, direction, account_id, amount, method)
+  values (other_org, 'in', their_bank, 40000, 'cash') returning id into v7;
+  update public.finance_transactions set status = 'scheduled' where id = v7;
+  fails := fails || public.bendahara_check_try('an editor who owns another workspace moves scheduled money in from it here as money out', 'FIN09',
+    format('update public.finance_transactions set org_id = %L, account_id = %L, direction = %L where id = %L', org, bank, 'out', v7));
+  fails := fails || public.bendahara_check_try('the payment that was not moved here is marked paid here', 'FIN11',
+    format('select public.finance_mark_payment_paid(%L, %L, current_date)', org, v7));
+  -- A pending expense entered there is not moved here.
+  insert into public.finance_expenses (id, org_id, category_id, vendor_name, amount) values (ex5, other_org, their_rent, 'Theirs', 10);
+  fails := fails || public.bendahara_check_try('a pending expense is moved to another workspace', 'FIN01',
+    format('update public.finance_expenses set org_id = %L, category_id = %L where id = %L', org, rent, ex5));
+  -- Nor is a split, re-pointed at a payment and an approved expense here.
+  theirs := public.finance_save_expense(other_org, jsonb_build_object('category_id', their_rent, 'vendor_name', 'Theirs', 'amount', 20));
+  insert into public.finance_transactions (org_id, direction, account_id, amount, method)
+  values (other_org, 'out', their_bank, 20, 'cash') returning id into stray;
+  insert into public.finance_allocations (org_id, transaction_id, expense_id, amount) values (other_org, stray, theirs, 5);
+  insert into public.finance_transactions (org_id, direction, account_id, amount, method)
+  values (org, 'out', bank, 20, 'cash') returning id into pay;
+  fails := fails || public.bendahara_check_try('the split of a payment is moved to another workspace', 'FIN09',
+    format('update public.finance_allocations set org_id = %L, transaction_id = %L, expense_id = %L where transaction_id = %L', org, pay, ex2, stray));
+  select (select count(*) from public.finance_transactions where org_id = org and id in (v6, v7))
+       + (select count(*) from public.finance_expenses where org_id = org and id = ex5)
+       + (select count(*) from public.finance_allocations where org_id = org and transaction_id = pay) into n;
+  if n <> 0 then fails := fails || format('%s rows were moved here from another workspace', n); end if;
+  delete from public.finance_transactions where id in (v6, v7, stray, pay) and status in ('draft','scheduled');
+  delete from public.finance_expenses where id = ex5 and status = 'pending';
+
   -- ==== cash receipts, as the editor ===========================================
   perform set_config('request.jwt.claims', editor_claims, true);
 
@@ -986,6 +1034,28 @@ begin
   select status || '/' || coalesce(approved_by::text, 'nobody') || '/' || (approved_at < now() - interval '2 days') into t
     from public.finance_expenses where id = ex4;
   if t is distinct from 'approved/nobody/true' then fails := fails || format('an expense approved by a migration reads %s', t); end if;
+
+  -- ==== a scheduled payment is measured again when it is paid ==================
+  -- No signed-in person can leave a scheduled payment out above its split any
+  -- more, so one is made the way a migration could: with no user, its split is
+  -- taken away. It is then money out that settles nothing and that nobody
+  -- approved, and an editor cannot pay it.
+  perform set_config('request.jwt.claims', owner_claims, true);
+  set local role authenticated;
+  stray := public.finance_record_payment_out(org,
+    jsonb_build_object('account_id', bank, 'method', 'fpx', 'status', 'scheduled'),
+    jsonb_build_array(jsonb_build_object('bill_id', bill2, 'amount', 1)));
+  reset role;
+  perform set_config('request.jwt.claims', '{}', true);
+  fails := fails || public.bendahara_check_try('a session with no user takes the split of a scheduled payment away', 'ok',
+    format('delete from public.finance_allocations where transaction_id = %L', stray));
+  perform set_config('request.jwt.claims', editor_claims, true);
+  set local role authenticated;
+  fails := fails || public.bendahara_check_try('an editor marks paid a scheduled payment that has lost its split', 'FIN14',
+    format('select public.finance_mark_payment_paid(%L, %L, current_date)', org, stray));
+  reset role;
+  perform set_config('request.jwt.claims', '{}', true);
+  delete from public.finance_transactions where id = stray and status = 'scheduled';
 
   -- ==== a user is deleted: who made it and who decided it are cleared ==========
   -- If the delete is stopped by something outside finance, the clearing its
