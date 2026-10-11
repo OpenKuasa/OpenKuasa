@@ -23,7 +23,10 @@ the data layer, with unit tests; the client components only draw them.
 | File | Holds |
 |---|---|
 | `purchase-views.ts` | KPI figures, chart data, table filters and CSV rows for Supplier Bills and Payments Out |
-| `bill-math.ts` | Line amounts and bill totals, rounded exactly as the generated columns `amount` and `sst_amount` round them; the SST rate keeps two decimals, as its column does (`roundRate` in `bills.ts`) |
+| `sales-views.ts` | KPI figures, chart data, table filters, status words and CSV rows for Invoices and Payments In |
+| `view-helpers.ts` | What those two share: dates, sums to the sen, the eight-month window of a trend chart, how payment methods are grouped and coloured |
+| `document-lines.ts` | What a bill and an invoice share: the line schema, the real-date and SST-rate rules (`isIsoDate`, `roundRate`), and reading a saved line |
+| `bill-math.ts` | Line amounts and bill totals, rounded exactly as the generated columns `amount` and `sst_amount` round them; the SST rate keeps two decimals, as its column does (`roundRate` in `document-lines.ts`) |
 | `bill-form.ts` | The bill form: defaults, the due date following the supplier's terms, validation, what is sent. `savedNotPosted` words a bill that was saved as a draft but not posted |
 | `payment-form.ts` | The payment form: which bills can take a payment and how much, defaults, validation, what is sent. `heldByBill` adds up what unpaid payments already hold of each bill; `keepPayable` drops a ticked bill that was paid off while the form was open |
 | `csv.ts` | CSV text for Export: RFC 4180, a UTF-8 byte-order mark, and a guard against spreadsheet formulas |
@@ -54,8 +57,9 @@ policy.
 | `finance_categories` | Expense and income categories. Every workspace starts with nine. No screen yet. |
 | `finance_sequences` | The next document number per type. |
 | `supplier_bills`, `supplier_bill_lines` | Supplier bills and their lines. A draft has no `bill_no`. |
+| `finance_invoices`, `finance_invoice_lines` | Sales invoices and their lines. A draft has no `invoice_no`. Lines keep the order they were entered in (`position`). |
 | `finance_transactions` | One row per movement of money: direction, account, date, amount, method, status. |
-| `finance_allocations` | How a movement is split across the documents it pays. Only bills so far. |
+| `finance_allocations` | How a movement is split across the documents it pays. Each row names exactly one document: a bill (`bill_id`) or an invoice (`invoice_id`). |
 
 ## Document numbers
 
@@ -73,6 +77,20 @@ direction `out`, split across one supplier's bills by `finance_allocations`.
 The view `finance_payments_out` has one row per bill a payment pays;
 `supplier_bill_totals` counts only posted money out as paid.
 
+A payment in is the mirror: one row with direction `in`, split across one
+customer's posted invoices. It is posted the moment it is recorded, with an
+`RC-` number: money received is never scheduled and needs no approval. The
+view `finance_payments_in` has one row per invoice a payment pays, with the
+same columns as `finance_payments_out` (`invoice_id`, `invoice_no` and
+`customer_name` where that view has the bill and the supplier);
+`finance_invoice_totals` counts only posted money in as paid. In both views
+`allocation_id` is the row's key: a payment split across documents is several
+rows with one `transaction_id`, whose `amount`s add up to
+`transaction_amount`.
+
+A bill takes only money out and an invoice only money in. Money out against an
+invoice (a refund) arrives with the sales follow-ons.
+
 A bill's `balance` is its total less paid money. What a new payment may take is
 less than that when payments are waiting: the allocation guard counts
 scheduled, draft and pending-approval payments too, as they hold a bill's
@@ -81,9 +99,33 @@ bill that such payments already cover; Supplier Bills shows what is held under
 the bill's balance (`heldByBill`), for viewers too.
 
 Statuses of a transaction: `draft` (being written by a database function),
-`scheduled` (not yet money out), `posted` (paid; numbered `PV-0001`), `void`.
+`scheduled` (not yet money out), `posted` (paid or received; numbered
+`PV-0001` for money out and `RC-0001` for money in), `void`.
 `pending_approval` and `rejected` exist for the approval rule that arrives
 with Payment Vouchers and Expenses; nothing sets them yet.
+
+## Invoices
+
+A sales invoice is a `finance_invoices` row with its lines in
+`finance_invoice_lines`, which has the columns of `supplier_bill_lines` plus
+`position`, the order the lines were entered in. `status` is what a person
+sets: `draft`, `posted` or `void`. A draft has no `invoice_no`; posting gives
+it the next `INV-` number. The database checks this: a draft has no number,
+any other status has one, and a posted invoice has `posted_at`. A write that
+breaks it is refused with a plain check-constraint error (23514).
+
+The view `finance_invoice_totals` adds the customer's name, `subtotal`, `sst`,
+`total`, `paid` (posted money in allocated to the invoice), `balance` and
+`display_status`: `draft`, `void`, `paid` (the total is above zero and nothing
+is left to pay), `overdue` (posted and past `due_date` by the database's UTC
+date), otherwise `sent`. "Sent" means posted; no email goes out. A part-paid
+invoice stays `sent` or `overdue` with a lower balance. Credit notes and
+refunds will change the balance when they exist.
+
+`einvoice_status` (`none`, `pending`, `validated`, `rejected`) and
+`einvoice_uuid` hold what a person has noted about the invoice's e-Invois at
+LHDN. Nothing is submitted from here. A draft has neither; they can be changed
+only while the invoice is posted. No function or action sets them yet.
 
 ## Posted is locked
 
@@ -103,6 +145,27 @@ Triggers enforce it, so no caller can get round it:
   the same moment are checked one after the other.
 - Clearing a deleted user from a payment's `created_by` or `approved_by` is
   allowed on a posted payment.
+- An invoice follows the same rules as a bill: created as a draft, edited
+  and deleted only as a draft, posted only once its lines add up to more than
+  zero, voided only when posted and only while no payment that is posted,
+  scheduled or in progress is allocated to it. Its lines are locked with it.
+- On a posted invoice two columns may still change, `einvoice_status` and
+  `einvoice_uuid` (with `updated_at`), and nothing else in the same update.
+- A payment in cannot exceed what is still owed on an invoice. The invoice row
+  is locked while this is checked, so two payments at the same moment are
+  checked one after the other. A payment in is posted at once, so it can only
+  be voided, never deleted; voiding it frees the invoices it paid.
+- The guard on payments is replaced by the same migration that adds invoices.
+  It refuses everything it refused before, in the same order, and still does
+  not look at direction for posted, void or deleted payments. It adds one rule,
+  for money out as much as money in: once a payment that is not yet posted has
+  been split across documents, its direction cannot change and its amount
+  cannot go below the sum of its split. Otherwise a split could be left larger
+  than its payment, or pointed at the wrong kind of document, and then posted.
+- A contact with invoices cannot have Customer unticked, as one with bills
+  cannot have Supplier unticked.
+- Clearing a deleted user from an invoice's `created_by` is allowed whatever
+  the invoice's status.
 - Each guard steps aside when the workspace itself is being deleted.
 
 ## Database functions
@@ -115,30 +178,39 @@ All run as the caller, so RLS decides who may write.
 | `finance_post_bill(target_org, target_bill)` | Posts a draft and returns its number. |
 | `finance_record_payment_out(target_org, payment, allocations)` | Records a payment; `payment.status` is `posted` (the default) or `scheduled`. Returns the id. |
 | `finance_mark_payment_paid(target_org, target_txn, paid_on)` | Scheduled to paid. Returns the number. |
+| `finance_save_invoice(target_org, invoice, lines)` | Creates a draft invoice or replaces a draft's header and lines, keeping the lines in the order given. `invoice` has `id` (to change a draft), `customer_id`, `invoice_date`, `due_date`, `notes`. Returns the id. |
+| `finance_post_invoice(target_org, target_invoice)` | Posts a draft and returns its number. |
+| `finance_record_payment_in(target_org, payment, allocations)` | Records money received from one customer, split across that customer's posted invoices, and posts it at once. `payment` has `account_id`, `txn_date`, `method`, `reference`, `notes`; `allocations` is a list of `{ invoice_id, amount }`. The payment's amount is the sum of the allocation amounts, each rounded to the sen first, as each is when stored. Returns the id. |
 | `finance_next_number(target_org, doc)` | The next document number. |
 
-Voiding a bill or a payment, and deleting a draft bill or a scheduled payment,
-are plain updates and deletes; the guards decide whether they are allowed.
+Voiding a bill, an invoice or a payment, and deleting a draft bill, a draft
+invoice or a scheduled payment, are plain updates and deletes; the guards
+decide whether they are allowed. A payment in is voided by the same update as
+a payment out (`voidPayment` in `money.ts`).
 
 ## Error codes
 
-The guards and functions raise these SQLSTATEs; `bills.ts`, `money.ts` and
-`contacts.ts` turn them into sentences.
+The guards and functions raise these SQLSTATEs. `bills.ts`, `invoices.ts`,
+`money.ts` and `contacts.ts` turn them into sentences; the same code is worded
+for a bill or for an invoice by the file that made the call.
 
 | Code | Meaning |
 |---|---|
-| `FIN01` | The bill is posted or void and cannot be changed or deleted. Also: a bill must be created as a draft, a draft cannot be voided (delete it), and only a draft can be posted; the lines of a posted bill are locked with it. |
-| `FIN02` | The bill has payments (paid, scheduled or in progress), so it cannot be voided |
-| `FIN03` | The allocations add up to more than the payment |
-| `FIN04` | A payment can only go against a posted bill, and only money out pays a bill |
-| `FIN05` | The amount is more than is still owed on the bill |
-| `FIN06` | No bill was chosen or found, or the bills belong to different suppliers |
+| `FIN01` | The bill or invoice is posted or void and cannot be changed or deleted. Also: a bill or an invoice must be created as a draft, a draft cannot be voided (delete it), and only a draft can be posted; the lines of a posted or void bill or invoice are locked with it. On a posted invoice only `einvoice_status` and `einvoice_uuid` may change; changing anything else, alone or with them, is this code. |
+| `FIN02` | The bill or invoice has payments (posted, scheduled or in progress), so it cannot be voided |
+| `FIN03` | The allocations add up to more than the payment. Also: a payment that has been split across documents cannot be changed to an amount below the sum of its split (money out or money in, while it is not yet posted) |
+| `FIN04` | A payment can only go against a posted bill or a posted invoice; only money out pays a bill, and only money in pays an invoice. Also: a payment that has been split across documents cannot change direction (money out or money in, while it is not yet posted) |
+| `FIN05` | The amount is more than is still owed on the bill or the invoice, counting payments that are posted, scheduled, draft or pending approval |
+| `FIN06` | No bill was chosen or found, or the bills belong to different suppliers; for money in, no invoice was chosen or found, or the invoices belong to different customers |
 | `FIN07` | The contact has bills, so Supplier cannot be unticked |
-| `FIN09` | The payment is posted or void and cannot be changed or deleted, its split cannot be changed, or it is not scheduled and so cannot be marked paid; a payment that was never paid cannot be voided (delete it) |
-| `FIN10` | The bill has no lines, or its lines total nothing; it cannot be saved without a line or posted without an amount |
-| `FIN11` | The bill or payment no longer exists |
+| `FIN08` | The contact has invoices, so Customer cannot be unticked |
+| `FIN09` | The payment, money out or money in, is posted or void and cannot be changed or deleted, its split cannot be changed, or it is not scheduled and so cannot be marked paid; a payment that was never posted cannot be voided (delete it) |
+| `FIN10` | The bill or invoice has no lines, or its lines total nothing; it cannot be saved without a line or posted without an amount |
+| `FIN11` | The bill, invoice or payment no longer exists. `finance_post_invoice` also answers this to a viewer: it locks the invoice before posting, and a viewer may not, so to them it is not there |
 | `42501` | Row-level security refused the write: "You do not have permission to make changes here." |
 | `22003` | A number does not fit its column (quantity × unit price can overflow): "That amount is too large." |
+| `23514` | A check constraint refused the write. The one to know: an invoice's number must match its status (a draft has none, any other status has one, a posted invoice has `posted_at`). Only a direct write can break it; the app never does. |
+| `23505` | A unique constraint refused the write. Through the app this does not happen for an allocation; see Known limits. |
 
 ## Known limits
 
@@ -163,14 +235,37 @@ The guards and functions raise these SQLSTATEs; `bills.ts`, `money.ts` and
 - Approval of money out is not enforced yet.
 - Posting goes through database functions that run as the caller. An editor
   writing to the tables directly, rather than through the app, could still post
-  a bill or a payment with a number of their own choosing, or change the amount
-  or account of a scheduled payment after it has been split across bills.
+  a bill or a payment with a number of their own choosing, or change the account
+  of a scheduled payment after it has been split across bills.
   Numbers stay unique per workspace either way. Closing this needs posting
   functions that run with their own rights, planned with the approval rule.
 - Contacts and products load the first 1,000 by name; search is in the browser.
   Only the contact list is capped this way: a contact's Payable is read by
   paging through every open bill, 1,000 at a time, so it is never cut short.
-- Receivable is 0 until invoices exist.
+- Invoices and Payments In are read-only so far: search, filters, "View all"
+  and Export, but no forms and no row actions. The data layer for them is in
+  `invoices.ts` and `money.ts`.
+- Receivable on Customers & Suppliers is still 0: that screen does not read
+  invoices yet.
+- Nothing sets an invoice's e-Invois status yet; the columns, and the rule
+  that lets them change on a posted invoice, are in place.
+- Saving an invoice does not check that its customer is ticked as a customer,
+  as saving a bill does not check its supplier; the forms offer only the right
+  contacts.
+- A bill's lines are read back by `created_at` then `id`, which for lines
+  saved together is no particular order. Invoice lines store their `position`.
+- Money in is never scheduled, but `finance_mark_payment_paid` does not check
+  the direction: a scheduled movement of money in could only come from writing
+  to the table directly, and marking it paid would give it a `PV-` number.
+- The demo workspace's invoices were dated from the day they were seeded, so
+  its Sent examples turn Overdue as time passes, as its bills do.
+- The check that a payment cannot shrink below its split reads the payment row
+  without locking it. Two direct writes to the tables made at the same moment
+  (not possible through the app), one lowering the payment and one adding to
+  its split, can both pass and leave a payment smaller than its split.
+- Paying the same invoice twice in one payment is refused by the payment
+  form's schema. A direct call to `finance_record_payment_in` gets a plain
+  unique-violation error (23505) rather than a sentence.
 - Stock and revenue per item are not tracked.
 - A contact's Payable counts bills that are pending or overdue, and the
   Payable card is totalled from every open bill, not only the contacts loaded.
