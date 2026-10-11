@@ -448,7 +448,7 @@ describe('people tools', () => {
 
   it('holds no change tool without write access, or as a member with no employee record of their own', () => {
     const none = Object.keys(createPeopleTools(data, HR, NOW));
-    const refused = Object.keys(createPeopleTools(data, HR, NOW, { ctx: { client: {} as never, orgId: 'o' }, tier: 'self', employeeId: null }));
+    const refused = Object.keys(createPeopleTools(data, HR, NOW, { ctx: { client: {} as never, orgId: 'o' }, tier: 'self', employeeId: null, receipt: null, userId: 'u1' }));
     expect(none).toEqual([...PEOPLE_TOOL_NAMES]);
     expect(refused).toEqual([...PEOPLE_TOOL_NAMES]);
   });
@@ -481,18 +481,23 @@ describe('claim and overtime lookups', () => {
     expect((await runner(source)('listClaims')({ status: 'paid' })).claims).toMatchObject([{ status: 'paid', paid_on: '2026-10-08' }]);
   });
 
-  it('gives a plain lookup (no change tools) no ids and no hourly rate, to HR or a member', async () => {
-    for (const result of [
-      await run('listOvertime')({}),
-      await runner(asMember(data, 'seed-emp-2'), MEMBER)('listOvertime')({}),
-    ]) {
-      for (const o of result.overtime) {
-        expect(o).not.toHaveProperty('id');
-        expect(o).not.toHaveProperty('hourly_rate');
-        expect(o).toHaveProperty('amount_calculated');
-      }
+  it('gives a plain lookup (no change tools) no ids; HR sees the figures on every row, a member only on their own', async () => {
+    const hrRows = (await run('listOvertime')({})).overtime;
+    expect(hrRows.length).toBeGreaterThan(0);
+    for (const o of hrRows) {
+      expect(o).not.toHaveProperty('id');
+      expect(o).toHaveProperty('amount_calculated');
+      expect(o).toHaveProperty('hourly_rate');
     }
-    expect((await run('listOvertime')({})).overtime.length).toBeGreaterThan(0);
+    // The member's own record carries figures; every other row, were the provider to return one, carries none.
+    const everyone = (await runner(data, MEMBER)('listOvertime')({})).overtime;
+    for (const o of everyone) {
+      expect(o).not.toHaveProperty('id');
+      const own = data.listOvertime().then((rows) => rows.find((r) => r.employee_name === o.employee)?.employee_id === 'seed-emp-2');
+      if (await own) expect(o).toHaveProperty('hourly_rate');
+      else for (const key of ['hourly_rate', 'amount', 'amount_calculated']) expect(o, key).not.toHaveProperty(key);
+    }
+    expect(everyone.some((o: Loose) => !('hourly_rate' in o))).toBe(true);
     for (const c of (await run('listClaims')({})).claims) {
       expect(c).not.toHaveProperty('id');
       expect(c).not.toHaveProperty('approved_this_year');

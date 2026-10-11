@@ -6,6 +6,8 @@
 import type { ComponentType } from 'react';
 import type { UIMessage } from 'ai';
 import { nameIn, type ItemKind, type NameFinder, type ToolResult } from '@/lib/chat/change-titles';
+import { pickReceipt, userMessageBefore, type ReceiptState } from '@/lib/people/receipts';
+import { isFilePart } from '@/lib/chat/attachments';
 import {
   APPLY_TOOL,
   ASK_PREFIX,
@@ -141,6 +143,22 @@ export function toToolStep(part: AnyPart, messageId: string, index: number): Too
   const key =
     ('toolCallId' in part ? (part.toolCallId as string) : undefined) ?? `${messageId}-${index}`;
   return { key, name, running, denied, output };
+}
+
+/**
+ * What the question behind a pending claim carried, for its card: the file on the user message before the assistant
+ * message holding the approval, judged by the same rule the server uses to pick the receipt. Undefined when the
+ * approval is not found. (In a reopened chat the browser may hold a stored link where the server has bytes only if the
+ * stored file resolved; the tool's result note covers a miss.)
+ */
+export function receiptStateFor(messages: { role: string; parts: AnyPart[] }[], approvalId: string): ReceiptState | undefined {
+  const at = messages.findIndex(
+    (m) => m.role === 'assistant' && m.parts.some((p) => (p as { approval?: { id?: string } }).approval?.id === approvalId),
+  );
+  if (at < 0) return undefined;
+  const question = userMessageBefore(messages, at);
+  const pick = pickReceipt((question?.parts ?? []).filter(isFilePart));
+  return pick.state === 'attached' ? { state: 'attached' } : pick;
 }
 
 export type PendingApproval = { approvalId: string; toolName: string; input: unknown };

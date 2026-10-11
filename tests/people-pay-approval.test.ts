@@ -119,7 +119,7 @@ const resume = (people: typeof asMember | typeof asOwner, approved: boolean) =>
     people,
   );
 
-const CLAIM = { category: 'travel', amount_cents: 8500, claim_date: '2026-10-09', description: 'Teksi', receipt_attached: true };
+const CLAIM = { category: 'travel', amount_cents: 8500, claim_date: '2026-10-09', description: 'Teksi' };
 const OT = { work_date: '2026-10-08', hours: 3, reason: 'Stocktake' };
 
 describe('Lekiu’s claim and overtime changes require approval', () => {
@@ -162,12 +162,14 @@ describe('Lekiu’s claim and overtime changes require approval', () => {
   });
 
   it('approve: a history that names another employee or a path never submits for them or with it', async () => {
-    reset('submitClaim', { ...CLAIM, employee_id: OTHER, receipt_path: 'someone-else/receipt.png', receipt_attached: false });
+    reset('submitClaim', { ...CLAIM, employee_id: OTHER, receipt_path: 'someone-else/receipt.png' });
     const result = resume(asMember, true);
     await result.consumeStream();
-    // Either the stray fields are refused or they are ignored: they never reach the write.
-    expect(executed.last === null || (executed.last as { employee_id: string }).employee_id === ME).toBe(true);
-    expect(JSON.stringify(executed.last)).not.toContain('someone-else');
+    // A member's schema has no employee or path field, so a history carrying either is not a valid call for it:
+    // the SDK refuses it and the write path is never reached, so nothing can be filed for another employee or
+    // under another person's path. (The valid-input case above is the one that runs, once, for the member's own id.)
+    expect(ran('submitClaim')).toBe(0);
+    expect(executed.last).toBeNull();
     expect(executed.uploads).toBe(0);
   });
 

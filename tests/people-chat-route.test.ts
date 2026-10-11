@@ -417,7 +417,7 @@ describe('POST /api/people/chat claims and overtime', () => {
   it('still has the receipt when the approval is answered in a later request, and attaches it', async () => {
     ctl.org = { orgId: 'org1', role: 'member' };
     ctl.linkedEmployee = { id: 'emp-7' };
-    const input = { category: 'travel', amount_cents: 8500, claim_date: '2026-10-09', description: 'Teksi', receipt_attached: true };
+    const input = { category: 'travel', amount_cents: 8500, claim_date: '2026-10-09', description: 'Teksi' };
     const card = (state: 'approval-requested' | 'approval-responded') => ({
       id: 'a1',
       role: 'assistant',
@@ -443,5 +443,35 @@ describe('POST /api/people/chat claims and overtime', () => {
     expect(ctl.submitted).toEqual([
       expect.objectContaining({ employee_id: 'emp-7', amount_cents: 8500, receipt_path: 'u1/uploaded.png' }),
     ]);
+  });
+
+  it('keeps a claim’s receipt as the file on ITS question: a newer question with another file, or none, is not picked up', async () => {
+    ctl.org = { orgId: 'org1', role: 'member' };
+    ctl.linkedEmployee = { id: 'emp-7' };
+    const input = { category: 'travel', amount_cents: 8500, claim_date: '2026-10-09' };
+    const waiting = {
+      id: 'a1',
+      role: 'assistant',
+      parts: [{ type: 'tool-submitClaim', toolCallId: 't1', state: 'approval-requested', input, approval: { id: 'ap1' } }],
+    };
+    const newerWithFile = {
+      id: 'm2',
+      role: 'user',
+      parts: [
+        { type: 'text', text: 'dan satu lagi' },
+        { type: 'file', mediaType: 'application/pdf', url: 'data:application/pdf;base64,' + Buffer.from('newer file').toString('base64') },
+      ],
+    };
+    await (await POST(post({ messages: [question, waiting, newerWithFile] }))).text();
+    expect(ctl.captured!.write!.receipt?.bytes.toString()).toBe('the photo');
+    expect(ctl.captured!.write!.receipt?.mediaType).toBe('image/png');
+    ctl.captured = null;
+    await (await POST(post({ messages: [question, waiting, { id: 'm3', role: 'user', parts: [{ type: 'text', text: 'hello' }] }] }))).text();
+    expect(ctl.captured!.write!.receipt?.bytes.toString()).toBe('the photo');
+    // And a claim whose own question had no file never takes a newer question's file.
+    ctl.captured = null;
+    const plain = { id: 'm0', role: 'user', parts: [{ type: 'text', text: 'tuntut teksi' }] };
+    await (await POST(post({ messages: [plain, waiting, newerWithFile] }))).text();
+    expect(ctl.captured!.write!.receipt).toBeNull();
   });
 });

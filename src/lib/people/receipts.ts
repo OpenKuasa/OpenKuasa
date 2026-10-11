@@ -64,3 +64,53 @@ export async function uploadReceipt(
   console.error('[people/receipts] a receipt could not be uploaded.');
   return refuse(UPLOAD_FAILED);
 }
+
+// ---- Which file is the receipt -----------------------------------------------------
+//
+// ONE rule, used by the server (which file the claim tool uploads) and by the approval card (what it says about
+// the receipt), so the two can never disagree about the same message. Client-safe: no storage, no Buffer.
+
+/** What a claim's question carried: a usable receipt, nothing that could be one, or a file that was refused (and why). */
+export type ReceiptState = { state: 'attached' } | { state: 'none' } | { state: 'unusable'; problem: string };
+
+export type ReceiptPick = { state: 'attached'; index: number } | { state: 'none' } | { state: 'unusable'; problem: string };
+
+const mediaTypeOf = (value: string): string => value.split(';')[0].trim().toLowerCase();
+const couldBeReceipt = (mediaType: string): boolean => mediaType.startsWith('image/') || mediaType === 'application/pdf';
+
+/**
+ * The decoded size of a base64 data URL, 0 for any other data URL (unreadable here), and null for a link (a stored
+ * file: its size is not known until the server fetches it).
+ */
+export function dataUrlSize(url: string): number | null {
+  if (!url.startsWith('data:')) return null;
+  const match = /^data:[^,]*;base64,([\s\S]*)$/.exec(url);
+  if (!match) return 0;
+  const body = match[1];
+  const padding = body.endsWith('==') ? 2 : body.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((body.length * 3) / 4) - padding);
+}
+
+/**
+ * Among a question's file parts, the first USABLE image or PDF (type and size through {@link receiptProblem}), not
+ * merely the first. A link's size is unknown here, so it is judged on its type alone. If there are images or PDFs
+ * and none is usable, the first one's reason is returned.
+ */
+export function pickReceipt(parts: { mediaType: string; url: string }[]): ReceiptPick {
+  let first: string | null = null;
+  for (let index = 0; index < parts.length; index += 1) {
+    const type = mediaTypeOf(parts[index].mediaType);
+    if (!couldBeReceipt(type)) continue;
+    const size = dataUrlSize(parts[index].url);
+    const problem = receiptProblem({ type, size: size ?? 1 });
+    if (!problem) return { state: 'attached', index };
+    first ??= problem;
+  }
+  return first === null ? { state: 'none' } : { state: 'unusable', problem: first };
+}
+
+/** The nearest user message before `index`: the question a claim proposed at `index` was answering. */
+export function userMessageBefore<T extends { role: string }>(messages: T[], index: number): T | null {
+  for (let i = index - 1; i >= 0; i -= 1) if (messages[i].role === 'user') return messages[i];
+  return null;
+}

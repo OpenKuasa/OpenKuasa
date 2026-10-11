@@ -260,12 +260,22 @@ describe('approval cards for claims and overtime', () => {
     );
   });
 
-  it('says whether a receipt goes with the claim, and quotes the description', () => {
-    expect(approvalDetail('submitClaim', { ...claim, receipt_attached: true })).toBe('Sent with the attached receipt');
-    expect(approvalDetail('submitClaim', claim)).toBe('Sent with no receipt');
-    expect(approvalDetail('submitClaim', { ...claim, receipt_attached: true, description: ' Taxi to the client ' })).toBe(
+  it('says whether a receipt goes with the claim, from the conversation and not from the input', () => {
+    expect(approvalDetail('submitClaim', claim, { state: 'attached' })).toBe('Sent with the attached receipt');
+    expect(approvalDetail('submitClaim', claim, { state: 'none' })).toBe('Sent with no receipt');
+    // The model cannot make a card say a receipt goes with the claim.
+    expect(approvalDetail('submitClaim', { ...claim, receipt_attached: true }, { state: 'none' })).toBe('Sent with no receipt');
+    expect(approvalDetail('submitClaim', { ...claim, receipt_attached: true }, { state: 'unusable', problem: 'Keep the file to 5 MB or less.' })).toBe(
+      'The attached file cannot be used as a receipt (Keep the file to 5 MB or less.): sent with no receipt',
+    );
+  });
+
+  it('says nothing about a receipt where the conversation is not known, and quotes the description', () => {
+    expect(approvalDetail('submitClaim', claim)).toBeNull();
+    expect(approvalDetail('submitClaim', { ...claim, description: ' Taxi to the client ' }, { state: 'attached' })).toBe(
       'Sent with the attached receipt · Description: “Taxi to the client”',
     );
+    expect(approvalDetail('submitClaim', { ...claim, description: 'Taxi' })).toBe('Description: “Taxi”');
   });
 
   it('carries no amount on an overtime card, and quotes the reason', () => {

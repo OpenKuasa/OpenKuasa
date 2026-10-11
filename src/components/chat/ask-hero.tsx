@@ -46,6 +46,7 @@ import {
   hasVisibleContent,
   isText,
   nameFinder,
+  receiptStateFor,
   toPendingApproval,
   toToolStep,
   toolMeta,
@@ -373,7 +374,7 @@ function Thread({
                 }
                 const pending = toPendingApproval(part);
                 if (pending) {
-                  const detail = approvalDetail(pending.toolName, pending.input);
+                  const detail = approvalDetail(pending.toolName, pending.input, receiptStateFor(messages, pending.approvalId));
                   return (
                     <div
                       key={`appr-${pending.approvalId}`}

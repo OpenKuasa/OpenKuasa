@@ -52,7 +52,7 @@ const { createSeedPeopleData } = await import('@/lib/people/seed');
 const people = {
   data: createSeedPeopleData(new Date('2026-10-09T04:00:00Z')),
   viewer: { employeeId: null, isHr: true, isDemo: false },
-  write: { ctx: { client: {} as never, orgId: 'org1' }, tier: 'hr' as const, employeeId: null },
+  write: { ctx: { client: {} as never, orgId: 'org1' }, tier: 'hr' as const, employeeId: null, receipt: null, userId: 'u1' },
 };
 const ask = [{ role: 'user' as const, content: 'Tambah department Legal' }];
 

@@ -37,7 +37,7 @@ const HR = { employeeId: null, isHr: true, isDemo: false };
 const MEMBER = { employeeId: 'seed-emp-2', isHr: false, isDemo: false };
 const data = createSeedPeopleData(NOW);
 const EMP = '22222222-2222-4222-8222-222222222222';
-const write = () => ({ ctx: { client: {} as never, orgId: 'org-1' }, tier: 'hr' as const, employeeId: null });
+const write = () => ({ ctx: { client: {} as never, orgId: 'org-1' }, tier: 'hr' as const, employeeId: null, receipt: null, userId: 'u1' });
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Loose = any;

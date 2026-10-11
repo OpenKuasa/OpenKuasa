@@ -60,8 +60,8 @@ const OTHER = '33333333-3333-4333-8333-333333333333';
 const REQ = '44444444-4444-4444-8444-444444444444';
 const data = createSeedPeopleData(new Date('2026-10-09T04:00:00Z'));
 const ctx = { client: {} as never, orgId: 'org1' };
-const asMember = { data, viewer: { employeeId: ME, isHr: false, isDemo: false }, write: { ctx, tier: 'self' as const, employeeId: ME } };
-const asOwner = { data, viewer: { employeeId: null, isHr: true, isDemo: false }, write: { ctx, tier: 'hr' as const, employeeId: null } };
+const asMember = { data, viewer: { employeeId: ME, isHr: false, isDemo: false }, write: { ctx, tier: 'self' as const, employeeId: ME, receipt: null, userId: 'u1' } };
+const asOwner = { data, viewer: { employeeId: null, isHr: true, isDemo: false }, write: { ctx, tier: 'hr' as const, employeeId: null, receipt: null, userId: 'u1' } };
 const ask = [{ role: 'user' as const, content: 'Mohon cuti' }];
 
 const reset = (tool: string, input: object) => {

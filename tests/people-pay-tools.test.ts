@@ -7,6 +7,9 @@ const ctl = vi.hoisted(() => ({
   uploads: [] as { userId: string; size: number; mediaType: string }[],
   fail: null as string | null,
   uploadFails: false,
+  removed: [] as string[],
+  decidedStatus: 'approved',
+  decidedAmount: 15000,
   overtimeRate: 2500 as number | null,
 }));
 
@@ -41,7 +44,7 @@ vi.mock('@/lib/people/pay-requests', async (orig) => {
       hourly_rate_cents: ctl.overtimeRate,
     })),
     cancelOvertime: record('cancelOvertime', () => ({ id: 'o1', status: 'cancelled' })),
-    decideOvertime: record('decideOvertime', () => ({ id: 'o1', status: 'approved', amount_cents: 15000 })),
+    decideOvertime: record('decideOvertime', () => ({ id: 'o1', status: ctl.decidedStatus, amount_cents: ctl.decidedAmount })),
   };
 });
 
@@ -57,6 +60,12 @@ vi.mock('@/lib/people/receipts', async (orig) => {
     },
   };
 });
+
+vi.mock('@/lib/people/receipts-server', () => ({
+  removeReceipt: async (path: string) => {
+    ctl.removed.push(path);
+  },
+}));
 
 const { PEOPLE_TOOL_NAMES, createPeopleTools, receiptFromMessages } = await import('@/lib/ai/people-tools');
 const { PEOPLE_WRITE_TOOL_NAMES, combineToolkits, peopleProduct } = await import('@/lib/ai/products');
@@ -115,6 +124,9 @@ beforeEach(() => {
   ctl.uploads = [];
   ctl.fail = null;
   ctl.uploadFails = false;
+  ctl.removed = [];
+  ctl.decidedStatus = 'approved';
+  ctl.decidedAmount = 15000;
   ctl.overtimeRate = 2500;
 });
 
@@ -165,7 +177,7 @@ describe('a member’s tools act for themselves only', () => {
       expect(keysOf(name, self()), name).not.toContain('employee_id');
       expect(keysOf(name, hr()), name).toContain('employee_id');
     }
-    expect(keysOf('submitClaim', self())).toEqual(['amount_cents', 'category', 'claim_date', 'description', 'receipt_attached']);
+    expect(keysOf('submitClaim', self())).toEqual(['amount_cents', 'category', 'claim_date', 'description']);
     expect(keysOf('submitOvertime', self())).toEqual(['hours', 'reason', 'work_date']);
     expect(keysOf('previewOvertime', self())).toEqual(['hours', 'work_date']);
   });
@@ -229,7 +241,7 @@ describe('an owner or admin’s decisions', () => {
 
 describe('the receipt comes from the question, never from the model', () => {
   it('uploads the attached file as the signed-in user and passes its path on', async () => {
-    const out = await call('submitClaim', { ...CLAIM, receipt_attached: true }, MEMBER_VIEWER, self(ME, PNG));
+    const out = await call('submitClaim', { ...CLAIM }, MEMBER_VIEWER, self(ME, PNG));
     expect(ctl.uploads).toEqual([{ userId: USER, size: PNG.bytes.byteLength, mediaType: 'image/png' }]);
     expect(ctl.ran[0].input).toMatchObject({ employee_id: ME, receipt_path: `${USER}/uploaded-receipt.png` });
     expect(out).toMatchObject({ ok: true, data: { id: 'c1', has_receipt: true } });
@@ -237,32 +249,41 @@ describe('the receipt comes from the question, never from the model', () => {
   });
 
   it('uploads nothing and sends no path when no file came with the question', async () => {
-    const out = await call('submitClaim', { ...CLAIM, receipt_attached: true }, MEMBER_VIEWER, self(ME, null));
+    const out = await call('submitClaim', { ...CLAIM }, MEMBER_VIEWER, self(ME, null));
     expect(ctl.uploads).toEqual([]);
     expect(ctl.ran[0].input).toMatchObject({ receipt_path: null });
     expect(out.data.receipt_note).toMatch(/without a receipt/);
+    expect(out.data.receipt_note).not.toMatch(/No receipt was attached/);
   });
 
   it('ignores a path the model smuggles in, with a file or without', async () => {
     const smuggled = { ...CLAIM, receipt_path: 'someone-else/their-receipt.png', receipt_attached: false };
     await call('submitClaim', smuggled, MEMBER_VIEWER, self(ME, null));
     expect(ctl.ran[0].input).toMatchObject({ receipt_path: null });
-    await call('submitClaim', { ...smuggled, receipt_attached: true }, MEMBER_VIEWER, self(ME, PNG));
+    await call('submitClaim', { ...smuggled }, MEMBER_VIEWER, self(ME, PNG));
     expect(ctl.ran[1].input).toMatchObject({ receipt_path: `${USER}/uploaded-receipt.png` });
     expect(JSON.stringify(ctl.ran)).not.toContain('their-receipt');
   });
 
-  it('does not attach the file when the model did not say one was attached', async () => {
-    await call('submitClaim', CLAIM, MEMBER_VIEWER, self(ME, PNG));
-    expect(ctl.uploads).toEqual([]);
-    expect(ctl.ran[0].input).toMatchObject({ receipt_path: null });
+  it('gives the model no say: a field claiming no receipt changes nothing', async () => {
+    await call('submitClaim', { ...CLAIM, receipt_attached: false }, MEMBER_VIEWER, self(ME, PNG));
+    expect(ctl.uploads).toHaveLength(1);
+    expect(ctl.ran[0].input).toMatchObject({ receipt_path: `${USER}/uploaded-receipt.png` });
+    expect(Object.keys(ctl.ran[0].input as object).sort()).toEqual(
+      ['amount_cents', 'category', 'claim_date', 'description', 'employee_id', 'receipt_path'],
+    );
+  });
+
+  it('says no photo came, and not that an unusable file was missing, when there is none', async () => {
+    const none = await call('submitClaim', CLAIM, MEMBER_VIEWER, self(ME, null));
+    expect(none.data.receipt_note).toMatch(/No photo or PDF came/);
   });
 
   it('submits without a receipt, and says why, for a file that is not a receipt type or is too big', async () => {
-    const gif = await call('submitClaim', { ...CLAIM, receipt_attached: true }, MEMBER_VIEWER, self(ME, { bytes: Buffer.from('gif'), mediaType: 'image/gif' }));
+    const gif = await call('submitClaim', { ...CLAIM }, MEMBER_VIEWER, self(ME, { bytes: Buffer.from('gif'), mediaType: 'image/gif' }));
     const big = await call(
       'submitClaim',
-      { ...CLAIM, receipt_attached: true },
+      { ...CLAIM },
       MEMBER_VIEWER,
       self(ME, { bytes: Buffer.alloc(5 * 1024 * 1024 + 1), mediaType: 'application/pdf' }),
     );
@@ -270,21 +291,25 @@ describe('the receipt comes from the question, never from the model', () => {
     expect(ctl.ran.map((r) => (r.input as { receipt_path: unknown }).receipt_path)).toEqual([null, null]);
     expect(gif.data.receipt_note).toContain('Attach a photo (JPEG, PNG, WebP or HEIC) or a PDF.');
     expect(big.data.receipt_note).toContain('5 MB');
+    expect(gif.data.receipt_note).not.toMatch(/No receipt was attached/);
   });
 
   it('submits without a receipt when the upload fails, and says so', async () => {
     ctl.uploadFails = true;
-    const out = await call('submitClaim', { ...CLAIM, receipt_attached: true }, MEMBER_VIEWER, self(ME, PNG));
+    const out = await call('submitClaim', { ...CLAIM }, MEMBER_VIEWER, self(ME, PNG));
     expect(ctl.ran[0].input).toMatchObject({ receipt_path: null });
-    expect(out.data.receipt_note).toMatch(/could not be used as a receipt/);
+    expect(out.data.receipt_note).toMatch(/could not be uploaded/);
+    expect(out.data.receipt_note).not.toMatch(/No receipt was attached|No photo/);
   });
 
   it('never puts a storage path in what the model is told', async () => {
-    const out = await call('submitClaim', { ...CLAIM, receipt_attached: true }, MEMBER_VIEWER, self(ME, PNG));
+    const out = await call('submitClaim', { ...CLAIM }, MEMBER_VIEWER, self(ME, PNG));
     expect(JSON.stringify(out)).not.toContain('uploaded-receipt');
     const cancelled = await call('cancelClaim', { id: REQ }, MEMBER_VIEWER, self());
     expect(JSON.stringify(cancelled)).not.toContain('secret-file');
     expect(cancelled).toEqual({ ok: true, data: { id: 'c1', status: 'cancelled' } });
+    // The file the cancel let go of is removed, from the path the database returned.
+    expect(ctl.removed).toEqual(['u1/secret-file.png']);
   });
 });
 
@@ -300,7 +325,7 @@ const proposed = (state: 'approval-requested' | 'approval-responded'): UIMessage
       type: 'tool-submitClaim',
       toolCallId: 't1',
       state,
-      input: { ...CLAIM, receipt_attached: true },
+      input: { ...CLAIM },
       approval: state === 'approval-responded' ? { id: 'ap1', approved: true } : { id: 'ap1' },
     } as unknown as UIMessage['parts'][number],
   ],
@@ -312,6 +337,10 @@ describe('finding the receipt in the request', () => {
     expect(found?.mediaType).toBe('image/png');
     expect(found?.bytes.toString()).toBe('hello');
     expect(receiptFromMessages([user('u1', file('application/pdf'), file('image/png'))])?.mediaType).toBe('application/pdf');
+  });
+
+  it('skips a refused file and takes the next usable one', () => {
+    expect(receiptFromMessages([user('u1', file('image/gif'), file('image/jpeg'))])?.mediaType).toBe('image/jpeg');
   });
 
   it('skips text files and takes the next image', () => {
@@ -448,24 +477,36 @@ describe('lookups carry what a change needs, and no one else’s pay', () => {
     expect(overtime.find((o: Loose) => o.id === 'o-me').hourly_rate).toBe('RM 25.00');
   });
 
-  it('give a member the rate on their own record and on no other row', async () => {
+  it('give a member the figures on their own record and none on any other row', async () => {
     const { overtime } = await lookup('listOvertime', MEMBER_VIEWER, self());
-    expect(overtime.find((o: Loose) => o.id === 'o-me').hourly_rate).toBe('RM 25.00');
+    expect(overtime.find((o: Loose) => o.id === 'o-me')).toMatchObject({ hourly_rate: 'RM 25.00', amount: 'RM 150.00', amount_calculated: true });
     const others = overtime.filter((o: Loose) => o.employee !== 'Faiz Hakim');
     expect(others.length).toBeGreaterThan(0);
     for (const o of others) {
-      expect(o).not.toHaveProperty('hourly_rate');
-      expect(o).not.toHaveProperty('hourly_rate_cents');
-      expect(o).not.toHaveProperty('id');
+      for (const key of ['hourly_rate', 'hourly_rate_cents', 'amount', 'amount_calculated', 'id']) expect(o, key).not.toHaveProperty(key);
+      // What is left is the fact of the record, not pay.
+      expect(o).toHaveProperty('hours');
+      expect(o).toHaveProperty('day_kind');
     }
-    expect(JSON.stringify(others)).not.toContain('25.00');
   });
 
-  it('give the rate to no one without write access, and to no one in the demo', async () => {
-    for (const result of [await lookup('listOvertime', MEMBER_VIEWER), await lookup('listOvertime', DEMO_VIEWER, self()), await lookup('listOvertime', HR_VIEWER)]) {
+  it('gate on who the viewer is, not on holding change tools: a read-only owner sees the figures, a read-only member only their own', async () => {
+    const owner = (await lookup('listOvertime', HR_VIEWER)).overtime;
+    for (const o of owner) expect(o).toHaveProperty('amount_calculated');
+    expect(owner.find((o: Loose) => o.employee === 'Amirul Hakim' && o.amount_calculated)).toMatchObject({ amount: 'RM 150.00', hourly_rate: 'RM 25.00' });
+    for (const o of owner) expect(o).not.toHaveProperty('id');
+    const member = (await lookup('listOvertime', MEMBER_VIEWER)).overtime;
+    expect(member.find((o: Loose) => o.employee === 'Faiz Hakim')).toMatchObject({ amount_calculated: true, hourly_rate: 'RM 25.00' });
+    for (const o of member.filter((r: Loose) => r.employee !== 'Faiz Hakim')) {
+      for (const key of ['hourly_rate', 'amount', 'amount_calculated']) expect(o, key).not.toHaveProperty(key);
+    }
+  });
+
+  it('give no id to a read-only caller, and no figures to a demo visitor’s view of other people’s rows', async () => {
+    for (const result of [await lookup('listOvertime', MEMBER_VIEWER), await lookup('listOvertime', DEMO_VIEWER, self())]) {
       for (const o of result.overtime) {
-        expect(o).not.toHaveProperty('hourly_rate');
-        expect(o).not.toHaveProperty('hourly_rate_cents');
+        expect(o).not.toHaveProperty('id');
+        if (o.employee !== 'Faiz Hakim') expect(o).not.toHaveProperty('hourly_rate');
       }
     }
   });
@@ -503,7 +544,18 @@ describe('what the model is told after a change', () => {
     const unset = await call('submitOvertime', { work_date: '2026-10-04', hours: 3 }, MEMBER_VIEWER, self());
     expect(unset.data).toMatchObject({ amount_calculated: false, amount: null });
     const decided = await call('decideOvertime', { id: REQ, approve: true }, HR_VIEWER, hr());
-    expect(decided.data).toEqual({ id: 'o1', status: 'approved', amount: 'RM 150.00' });
+    expect(decided.data).toEqual({ id: 'o1', status: 'approved', amount_calculated: true, amount: 'RM 150.00' });
+  });
+
+  it('never says RM 0.00 for an overtime decision that has no amount', async () => {
+    ctl.decidedStatus = 'rejected';
+    ctl.decidedAmount = 0;
+    const rejected = await call('decideOvertime', { id: REQ, approve: false }, HR_VIEWER, hr());
+    expect(rejected.data).toEqual({ id: 'o1', status: 'rejected', amount_calculated: false, amount: null });
+    ctl.decidedStatus = 'approved';
+    const unset = await call('decideOvertime', { id: REQ, approve: true }, HR_VIEWER, hr());
+    expect(unset.data).toMatchObject({ amount_calculated: false, amount: null });
+    expect(JSON.stringify([rejected, unset])).not.toContain('0.00');
   });
 
   it('passes a refusal on as it is', async () => {

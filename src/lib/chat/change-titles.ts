@@ -5,6 +5,7 @@
  */
 // Itself pure and import-free: the words for the application form switches live with the switches.
 import { describeFormChange } from '@/lib/hire/application-form';
+import type { ReceiptState } from '@/lib/people/receipts';
 
 const APPOINTMENT_STATUS_LABELS: Record<string, string> = {
   scheduled: 'scheduled',
@@ -559,7 +560,7 @@ function employeeFieldWords(i: Record<string, unknown>, includeName: boolean): s
  * user is approving that the question itself does not: the salary and the
  * closing date above all.
  */
-export function approvalDetail(toolName: string, input?: unknown): string | null {
+export function approvalDetail(toolName: string, input?: unknown, receipt?: ReceiptState): string | null {
   const i = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
   if (toolName === 'deleteEmployee') {
     return 'Their leave, claims, payslips and every other HR record are deleted too. This cannot be undone.';
@@ -574,10 +575,19 @@ export function approvalDetail(toolName: string, input?: unknown): string | null
     return words.length > 0 ? `Sets: ${words.join(', ')}` : null;
   }
   if (toolName === 'submitClaim') {
-    // What will be saved under the person's name: whether a file goes with it, and what they described.
+    // What will be saved under the person's name. The receipt line comes from the conversation (the file on the
+    // question that led to the claim), never from anything the assistant put in the input; unknown, it says nothing.
     const why = text(i.description);
-    const receipt = i.receipt_attached === true ? 'Sent with the attached receipt' : 'Sent with no receipt';
-    return why ? `${receipt} · Description: “${why}”` : receipt;
+    const line =
+      receipt?.state === 'attached'
+        ? 'Sent with the attached receipt'
+        : receipt?.state === 'none'
+          ? 'Sent with no receipt'
+          : receipt?.state === 'unusable'
+            ? `The attached file cannot be used as a receipt (${receipt.problem}): sent with no receipt`
+            : null;
+    const parts = [line, why && `Description: “${why}”`].filter(Boolean);
+    return parts.length > 0 ? parts.join(' · ') : null;
   }
   if (toolName === 'submitOvertime') {
     const why = text(i.reason);
