@@ -219,3 +219,18 @@ Each owns the files it lists. As in plan C: do not run `pnpm tsc`, `pnpm lint`, 
 ## Not in this plan
 
 Everything in the spec's "Out" list (§3).
+
+## Execution Notes (2026-10-11)
+
+The plan above is as written. The branch is the reference. What changed or was decided along the way:
+
+- **Who may apply.** A linked member of any workspace role, `viewer` included, may apply for and cancel their own leave and time-off. "Own" depends on having a linked employee record and not being in the demo, not on the role.
+- **Used days.** `used_days` is recounted from the `days` stored on each approved request, not from a fresh working-day count, so a holiday added later never changes what a request cost. Only a request crossing New Year is split, and its parts always add up to its stored days.
+- **Balance rows.** Apply and set-entitlement create rows for the one employee concerned; the trigger, the migration and the yearly job cover whole workspaces. The spec (§4.4) was corrected to say so.
+- **Refusals.** A request the caller has no business with answers `LEAVE_NOT_FOUND`, the same as an id that is not a request. The cancel actions take a request id only; the database decides whose request a member may cancel.
+- **Approval cards** carry no day count or balance (a narrowing of spec §5.3): Lekiu states them in its own line from the preview. A card for an owner or admin applying for an unnamed employee says "for this employee". A rejection note is shown as `Note: “…”`.
+- **Demo.** Nobody in the demo workspace holds a change tool, owner or admin included, and the actions refuse the demo workspace as well as the database.
+- **Final review.** Cancel in the approvals queues now asks first; the rejection note is shown to the employee and to Lekiu.
+- **Rollout, done 2026-10-11.** Both migration files applied to the live database, in order. All eight functions and the three tables are owned by `postgres`; signed-in users hold no write grant on the leave tables. `people_leave_check.sql` and `people_rls_check.sql` both ended `PASSED` on the live database and left nothing behind. `pnpm test`: 2,415 passed, 1 skipped, none failed. Demo guest on a local server: Leave, Time-Off and Leave Approvals load with every control disabled and the sign-up line, no console errors.
+- **Left for later:** a request applied for earlier in the same chat is not named on a later card ("a leave request that was not in the list above"); `overBalanceBy` returns 0 when there is no balance row and charges a cross-year request to its starting year; a malformed `work_week` is not defended against; the approvals tables are not capped; a failed action's message stays beside its row until the next click; a disabled demo button's hover note reads "Available in a later update"; a quoted note on a card does not escape a closing quote; `as never` casts in `people-tools.ts`; stale Lekiu text in `orchestrator.ts` `TEAM_AREA`.
+- **Not done, needs the owner:** signed in as a real owner and a real linked member, apply → approve → cancel on the screens; one real question to Lekiu; and a look at whether an approval card is built from the parsed or the raw tool input.
