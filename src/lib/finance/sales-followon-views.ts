@@ -143,6 +143,37 @@ export function quotationInvoice(row: QuotationListRow): string | null {
   return row.invoice_no ?? 'Draft invoice';
 }
 
+export type QuotationAction = 'edit' | 'send' | 'delete' | 'accept' | 'decline' | 'convert';
+
+/**
+ * What a quotation's row menu offers, in order: only what the database allows
+ * for its status. A draft is edited, marked as sent or deleted. Once sent it
+ * is locked, and only the customer's answer is recorded: accepted or
+ * declined, on an expired quotation too, since accepting late is the seller's
+ * call. An accepted quotation is made into an invoice, or its answer is
+ * corrected; a declined one can be corrected to accepted. Once an invoice
+ * stands for the quotation the answer is frozen and it cannot be converted
+ * again, so nothing is offered.
+ */
+export function quotationActions(row: QuotationListRow): QuotationAction[] {
+  if (row.display_status === 'draft') return ['edit', 'send', 'delete'];
+  if (row.invoice_id !== null) return [];
+  switch (row.display_status) {
+    case 'sent':
+    case 'expired':
+      return ['accept', 'decline'];
+    case 'accepted':
+      return ['convert', 'decline'];
+    case 'declined':
+      return ['accept'];
+  }
+}
+
+/** How a question or a menu names one quotation: its number, or "the draft quotation", and its customer. */
+export function quotationName(row: QuotationListRow): string {
+  return `${row.quotation_no ?? 'the draft quotation'} to ${row.customer_name}`;
+}
+
 /** The quotations table as a CSV file, its columns in the table's order. The total is a number, so a spreadsheet can add it up. */
 export function quotationsCsv(rows: QuotationListRow[]): string {
   return toCsv(
