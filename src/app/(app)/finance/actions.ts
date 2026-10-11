@@ -62,6 +62,20 @@ import {
   updateProduct,
   updateProductInput,
 } from '@/lib/finance/products';
+import {
+  QUOTATION_MESSAGES,
+  type QuotationDetail,
+  type SaveAndSendQuotationResult,
+  acceptQuotation,
+  convertQuotation,
+  declineQuotation,
+  deleteQuotation,
+  getQuotation,
+  quotationIdInput,
+  saveQuotation,
+  saveQuotationInput,
+  sendQuotation,
+} from '@/lib/finance/quotations';
 import { type FinResult, type FinanceWriteContext, NOT_ALLOWED, READ_FAILED } from '@/lib/finance/result';
 import { createClient } from '@/lib/supabase/server';
 
@@ -129,6 +143,12 @@ const SALES_PATHS = [
   '/finance/credit-notes',
   '/finance/refunds',
 ];
+// A quotation is on its own screen and moves no figure anywhere else: it is not money owed, and no other
+// screen counts or names it. So saving, sending, answering and deleting one refresh Quotations only.
+const QUOTATION_PATHS = ['/finance/quotations'];
+// Making an invoice from a quotation adds a draft to Invoices (its table and its "by status" chart) and puts
+// that invoice in the quotation's Invoice column. A draft is not receivable, so nothing else moves.
+const CONVERT_PATHS = ['/finance/quotations', '/finance/invoices'];
 
 /**
  * Saves a document as a draft, then posts it. When the save works and the
@@ -167,7 +187,7 @@ async function draftForEditing<D extends { display_status: string }>(
   input: unknown,
   get: (ctx: FinanceWriteContext, id: string) => Promise<D | null>,
   messages: { gone: string; locked: string },
-  label: 'bill' | 'invoice',
+  label: 'bill' | 'invoice' | 'quotation',
 ): Promise<FinResult<D>> {
   const ctx = await writeCtx();
   if (!ctx) return FORBIDDEN;
@@ -285,6 +305,40 @@ export async function saveAndPostInvoiceAction(input: unknown): Promise<SaveAndP
 /** One draft invoice with its lines, for the Edit form; see `draftForEditing`. */
 export async function getInvoiceAction(input: unknown): Promise<FinResult<InvoiceDetail>> {
   return draftForEditing(SALES_PATHS, invoiceIdInput, input, getInvoice, INVOICE_MESSAGES, 'invoice');
+}
+
+/* ---- quotations -------------------------------------------------------- */
+
+export async function saveQuotationAction(input: unknown) {
+  return run(QUOTATION_PATHS, saveQuotationInput, input, saveQuotation);
+}
+/** Marks a draft as sent: it gets its number and is locked. Nothing is emailed. */
+export async function sendQuotationAction(input: unknown) {
+  return run(QUOTATION_PATHS, quotationIdInput, input, sendQuotation);
+}
+/** The customer's answer. It can be corrected from one to the other until an invoice is made. */
+export async function acceptQuotationAction(input: unknown) {
+  return run(QUOTATION_PATHS, quotationIdInput, input, acceptQuotation);
+}
+export async function declineQuotationAction(input: unknown) {
+  return run(QUOTATION_PATHS, quotationIdInput, input, declineQuotation);
+}
+export async function deleteQuotationAction(input: unknown) {
+  return run(QUOTATION_PATHS, quotationIdInput, input, deleteQuotation);
+}
+/** Makes a draft invoice from an accepted quotation, and refreshes Invoices as well. */
+export async function convertQuotationAction(input: unknown) {
+  return run(CONVERT_PATHS, quotationIdInput, input, convertQuotation);
+}
+
+/** Saves the quotation as a draft, then marks it as sent; see `saveThenPost`. */
+export async function saveAndSendQuotationAction(input: unknown): Promise<SaveAndSendQuotationResult> {
+  return saveThenPost(QUOTATION_PATHS, saveQuotationInput, input, saveQuotation, sendQuotation);
+}
+
+/** One draft quotation with its lines, for the Edit form; see `draftForEditing`. */
+export async function getQuotationAction(input: unknown): Promise<FinResult<QuotationDetail>> {
+  return draftForEditing(QUOTATION_PATHS, quotationIdInput, input, getQuotation, QUOTATION_MESSAGES, 'quotation');
 }
 
 /* ---- payments in ------------------------------------------------------- */
