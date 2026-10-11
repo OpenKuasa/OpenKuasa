@@ -208,6 +208,18 @@ describe('owner and admin actions', () => {
   });
 });
 
+describe('loadLeaveEntitlementsAction, who may read', () => {
+  it.each(['member', 'viewer', 'demo'])('reads nothing for a %s', async (who) => {
+    const { client, calls } = fakeSupabase({ 'hr_leave_balances.select': { data: [] } });
+    ctl.client = client;
+    if (who === 'demo') ctl.viewer.isDemo = true;
+    else as(who as Role);
+    const result = (await actions.loadLeaveEntitlementsAction({ employee_id: EMP })) as { ok: boolean };
+    expect(result.ok).toBe(false);
+    expect(calls).toEqual([]);
+  });
+});
+
 describe('loadLeaveEntitlementsAction', () => {
   it("reads this year's balances for the employee in the session's workspace, as numbers", async () => {
     const { client, calls } = fakeSupabase({

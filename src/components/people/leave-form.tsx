@@ -70,8 +70,10 @@ export function LeaveForm({
     };
   }, [key]);
 
-  const set = <K extends keyof LeaveFormValues>(field: K, value: LeaveFormValues[K]) =>
+  const set = <K extends keyof LeaveFormValues>(field: K, value: LeaveFormValues[K]) => {
+    setInvalid(null);
     setValues((state) => ({ ...state, [field]: value }));
+  };
 
   const shown = key !== null && settled?.key === key ? settled.result : null;
   const lines = shown?.ok ? previewLines(shown.data) : null;
@@ -89,7 +91,7 @@ export function LeaveForm({
     >
       <div className="grid gap-3 sm:grid-cols-3">
         <Field label="Type of leave">
-          <Select value={values.leave_type} onValueChange={(value) => set('leave_type', value as LeaveType)}>
+          <Select value={values.leave_type} disabled={disabled} onValueChange={(value) => set('leave_type', value as LeaveType)}>
             <SelectTrigger aria-label="Type of leave" className="w-full">
               <SelectValue />
             </SelectTrigger>
@@ -107,9 +109,11 @@ export function LeaveForm({
             aria-label="First day"
             type="date"
             required
+            disabled={disabled}
             value={values.start_date}
             onChange={(event) => {
               const start = event.target.value;
+              setInvalid(null);
               // A later last day than the first is the common case; keep the last day from falling behind.
               setValues((state) => ({ ...state, start_date: start, end_date: state.end_date < start ? start : state.end_date }));
             }}
@@ -120,6 +124,7 @@ export function LeaveForm({
             aria-label="Last day"
             type="date"
             required
+            disabled={disabled}
             min={values.start_date || undefined}
             value={values.end_date}
             onChange={(event) => set('end_date', event.target.value)}
@@ -132,6 +137,7 @@ export function LeaveForm({
           <input
             type="checkbox"
             className="size-4 accent-primary"
+            disabled={disabled}
             checked={values.half_day}
             onChange={(event) => set('half_day', event.target.checked)}
           />
@@ -144,6 +150,7 @@ export function LeaveForm({
           aria-label="Reason"
           type="text"
           maxLength={500}
+          disabled={disabled}
           value={values.reason}
           onChange={(event) => set('reason', event.target.value)}
         />

@@ -16,6 +16,7 @@ import {
   refuse,
   writeFailed,
 } from './capabilities';
+import { isRealDate } from './dates';
 import type { LeaveBalance, LeaveRequest, LeaveType, RequestStatus } from './types';
 
 // ---- Sentences ---------------------------------------------------------------
@@ -46,21 +47,13 @@ function failed(fn: string, error: DbError): CapResult<never> {
 
 // ---- Inputs --------------------------------------------------------------------
 
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
-
-/** True for a date that exists: 2026-02-31 matches the pattern but is not a day. */
-function isRealDay(value: string): boolean {
-  if (!DAY.test(value)) return false;
-  const date = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
-}
 
 // Any Postgres uuid: `.uuid()` would refuse ids that are valid but not RFC-versioned.
 const employee = z.guid().describe('The employee, by their id from listEmployees.');
 const requestId = z.guid().describe('The request, by its id.');
 const date = (what: string) =>
-  z.string().refine(isRealDay, `${what} must be a real date, as YYYY-MM-DD.`);
+  z.string().refine(isRealDate, `${what} must be a real date, as YYYY-MM-DD.`);
 const time = (what: string) => z.string().regex(TIME, `${what} must be a time, as HH:MM.`);
 const reason = z.string().trim().max(500, 'Keep the reason to 500 characters.').nullable().optional();
 const note = z.string().trim().max(500, 'Keep the note to 500 characters.').nullable().optional();

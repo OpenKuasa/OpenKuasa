@@ -3,6 +3,7 @@
  * sends, and the sentences that describe a preview. The form knows nothing
  * about whose leave it is; the screen around it adds that.
  */
+import { isRealDate } from './dates';
 import type { LeavePreview } from './leave';
 import type { LeaveType } from './types';
 
@@ -35,22 +36,13 @@ export const LEAVE_FORM_DEFAULTS: LeaveFormValues = {
 };
 
 const REASON_MAX = 500;
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
-
-/** True for a date that exists: 2026-02-31 matches the pattern but is not a day. */
-function isRealDay(value: string): boolean {
-  if (!DAY.test(value)) return false;
-  const date = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
-}
-
 /** A half day makes sense for one date only, so it is dropped (not refused) when the dates differ. */
 const halfDayFor = (values: LeaveFormValues): boolean => values.half_day && values.start_date === values.end_date;
 
 /** The dates are set and make a range the server could count; the text says what is wrong, if anything. */
 function datesProblem(values: LeaveFormValues): string | null {
   if (!values.start_date || !values.end_date) return 'Choose the first and last day.';
-  if (!isRealDay(values.start_date) || !isRealDay(values.end_date)) return 'Choose real dates.';
+  if (!isRealDate(values.start_date) || !isRealDate(values.end_date)) return 'Choose real dates.';
   if (values.end_date < values.start_date) return 'The last day cannot be before the first day.';
   return null;
 }

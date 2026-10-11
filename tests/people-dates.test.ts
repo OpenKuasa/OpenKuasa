@@ -8,6 +8,7 @@ import {
   formatDay,
   hoursBetween,
   hoursBetweenTimes,
+  isRealDate,
   isWeekday,
   malaysiaDate,
   monthLabel,
@@ -105,5 +106,22 @@ describe('people dates', () => {
     expect(relativeTime(before(15 * 86_400), now)).toBe('2 weeks ago');
     expect(relativeTime(before(60 * 86_400), now)).toBe('10 Aug 2026');
     expect(relativeTime(before(-60), now)).toBe('just now');
+  });
+});
+
+describe('isRealDate', () => {
+  it('accepts a date that exists, including 29 February in a leap year', () => {
+    expect(isRealDate('2026-10-11')).toBe(true);
+    expect(isRealDate('2028-02-29')).toBe(true);
+  });
+  it('refuses a date that matches the pattern but does not exist', () => {
+    expect(isRealDate('2026-02-31')).toBe(false);
+    expect(isRealDate('2027-02-29')).toBe(false);
+    expect(isRealDate('2026-13-01')).toBe(false);
+  });
+  it('refuses anything not shaped YYYY-MM-DD', () => {
+    for (const value of ['', '2026-1-1', '26-10-11', '2026-10-11T00:00:00Z', 'tomorrow']) {
+      expect(isRealDate(value)).toBe(false);
+    }
   });
 });
