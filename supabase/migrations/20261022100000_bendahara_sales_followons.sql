@@ -16,6 +16,9 @@
 -- The code deployed while this is applied writes no quotation, no credit note
 -- and no money out against an invoice. For everything it does write, every
 -- guard below answers as it did before: same checks, same order, same codes.
+-- One answer differs, for a write only a direct call can make: money out
+-- against an invoice with a split larger than the payment is now FIN03 (the
+-- split is checked before the invoice is read) where it was FIN04.
 -- With no credit note and no refund in the database, finance_invoice_totals
 -- reads the same, row for row.
 --
@@ -532,6 +535,10 @@ begin
       perform 1 from public.finance_invoices where org_id = old.org_id and id = old.invoice_id for update;
       select total, paid, credited, refunded into pos
       from public.finance_invoice_totals where org_id = old.org_id and id = old.invoice_id;
+      -- No figures, no answer: without them the test below would let anything through.
+      if not found then
+        raise exception 'a credit note can only go against a posted invoice' using errcode = 'FIN04';
+      end if;
       -- Refunds against the invoice itself lean on this credit too: without
       -- the note, they must still fit in what the customer is in credit.
       if pos.refunded + private.finance_refunds_held(old.org_id, old.invoice_id, null)
@@ -563,6 +570,10 @@ begin
   end if;
   select total, credited into pos
   from public.finance_invoice_totals where org_id = new.org_id and id = new.invoice_id;
+  -- No figures, no answer: without them the cap below would let anything through.
+  if not found then
+    raise exception 'a credit note can only go against a posted invoice' using errcode = 'FIN04';
+  end if;
   if new.amount > pos.total - pos.credited then
     raise exception 'more than the invoice has left to credit' using errcode = 'FIN05';
   end if;
@@ -577,7 +588,10 @@ create trigger finance_credit_note_guard
 -- same way, in the same order. Two rules are new, and neither can be met by a
 -- row that exists today: quotation_id may only name an accepted quotation of
 -- the same customer (FIN04), and an invoice with a credit note that is a draft
--- or issued cannot be voided (FIN12).
+-- or issued cannot be voided (FIN12). And one thing it now does by itself: a
+-- draft made from a quotation is untied from it when its customer changes, so
+-- one customer's quotation never shows another customer's invoice. The invoice
+-- becomes an ordinary draft and the quotation can be converted again.
 create or replace function private.finance_invoice_guard()
 returns trigger
 language plpgsql
@@ -622,6 +636,14 @@ begin
       where org_id = new.org_id and invoice_id = new.id
     ), 0) <= 0 then
       raise exception 'an invoice needs an amount before it is posted' using errcode = 'FIN10';
+    end if;
+    -- The customer changed and the tie was left as it was (finance_save_invoice
+    -- writes the customer and never the tie): the quotation is the old
+    -- customer's, so the invoice lets go of it.
+    if new.customer_id is distinct from old.customer_id
+       and new.quotation_id is not null
+       and new.quotation_id is not distinct from old.quotation_id then
+      new.quotation_id := null;
     end if;
     -- A draft may be tied to a quotation, or untied; it is checked when the tie is made.
     if new.quotation_id is not null and new.quotation_id is distinct from old.quotation_id and not exists (
@@ -758,6 +780,10 @@ begin
     -- total, less posted money in, less issued credit notes, plus posted refunds.
     select balance into pos from public.finance_invoice_totals
     where org_id = new.org_id and id = target_invoice;
+    -- No figures, no answer: without them the caps below would let anything through.
+    if not found then
+      raise exception 'a payment can only go against a posted invoice' using errcode = 'FIN04';
+    end if;
 
     if has_txn and t.direction = 'out' then
       if pos.balance >= 0 then
@@ -815,12 +841,18 @@ end $$;
 -- Replaces the guard on payments. Everything it refused before it refuses the
 -- same way, in the same order. One rule is new and concerns only money out
 -- that is split across invoices or credit notes, which is to say a refund: at
--- the moment it is paid out, the refunds waiting on each of its invoices must
--- still fit in what the customer is in credit there (FIN05). A refund is
--- checked when it is recorded; this second look is for a refund that was
--- scheduled and then lost its footing, because the payment it refunds was
--- voided in between. A payment out against bills has no such rows, so for it
--- the loop does nothing.
+-- the moment it is paid out it is checked in full again, as it was when it
+-- was recorded. Each credit note it names must still be issued (FIN04) and
+-- must cover it together with the other refunds standing against that note
+-- (FIN05); and on each invoice it names, this refund plus the refunds of
+-- other payments that are waiting must still fit in what the customer is in
+-- credit there (FIN05). The refund's own amount is counted whatever status it
+-- is coming from: a scheduled refund holds its part of the credit, a rejected
+-- one holds nothing, and another refund may have taken the credit meanwhile.
+-- The credit can also simply have gone, because the payment it refunds was
+-- voided in between. The credit notes and then the invoices are locked while
+-- this is read, in the order the guard on allocations locks them. A payment
+-- out against bills has no such rows, so for it the loops do nothing.
 create or replace function private.finance_transaction_guard()
 returns trigger
 language plpgsql
@@ -830,6 +862,8 @@ declare
   allocated numeric;
   r record;
   owing numeric;
+  note record;
+  others numeric;
 begin
   if tg_op = 'DELETE' then
     if old.status in ('posted','void') and exists (select 1 from public.orgs where id = old.org_id) then
@@ -872,19 +906,72 @@ begin
     end if;
   end if;
 
-  -- A refund being paid out: look again at each invoice it refunds.
+  -- A refund being paid out: look again at each credit note and each invoice
+  -- it refunds. What this payment itself refunds is added by hand (mine),
+  -- and every other sum leaves this payment out, so the answer does not
+  -- depend on the status it is coming from.
   if new.status = 'posted' and new.direction = 'out' then
     for r in
-      select coalesce(a.invoice_id, n.invoice_id) as invoice_id
+      select a.credit_note_id, sum(a.amount) as mine
+      from public.finance_allocations a
+      where a.org_id = old.org_id and a.transaction_id = old.id and a.credit_note_id is not null
+      group by 1
+      order by 1
+    loop
+      -- Lock the credit note, so it cannot be voided while this is checked.
+      select status, amount into note from public.finance_credit_notes
+      where org_id = old.org_id and id = r.credit_note_id for update;
+      if not found or note.status <> 'issued' then
+        raise exception 'a refund can only go against an issued credit note' using errcode = 'FIN04';
+      end if;
+      -- Never more than the credit note itself, counting every other refund against it that stands.
+      select coalesce(sum(a.amount), 0) into others
+      from public.finance_allocations a
+      join public.finance_transactions x on x.org_id = a.org_id and x.id = a.transaction_id
+      where a.org_id = old.org_id and a.credit_note_id = r.credit_note_id and a.transaction_id <> old.id
+        and x.status in ('draft','pending_approval','scheduled','posted');
+      if others + r.mine > note.amount then
+        raise exception 'more than the credit note' using errcode = 'FIN05';
+      end if;
+    end loop;
+
+    for r in
+      select coalesce(a.invoice_id, n.invoice_id) as invoice_id, sum(a.amount) as mine
       from public.finance_allocations a
       left join public.finance_credit_notes n on n.org_id = a.org_id and n.id = a.credit_note_id
       where a.org_id = old.org_id and a.transaction_id = old.id and a.bill_id is null
       group by 1
+      order by 1
     loop
+      -- Lock the invoice, so two refunds paid out at the same moment are checked one after the other.
+      perform 1 from public.finance_invoices where org_id = old.org_id and id = r.invoice_id for update;
+      -- The balance already has every posted refund in it.
       select balance into owing from public.finance_invoice_totals
       where org_id = old.org_id and id = r.invoice_id;
-      -- This payment is not posted yet, so it is still among the refunds held.
-      if private.finance_refunds_held(old.org_id, r.invoice_id, null) > greatest(-owing, 0) then
+      -- No figures, no answer: without them the cap below would let anything through.
+      if not found then
+        raise exception 'a payment can only go against a posted invoice' using errcode = 'FIN04';
+      end if;
+      -- Refunds of other payments that are waiting to be paid out, against the
+      -- invoice itself or against one of its credit notes.
+      select
+        coalesce((
+          select sum(a.amount)
+          from public.finance_allocations a
+          join public.finance_transactions x on x.org_id = a.org_id and x.id = a.transaction_id
+          where a.org_id = old.org_id and a.invoice_id = r.invoice_id and a.transaction_id <> old.id
+            and x.direction = 'out' and x.status in ('draft','pending_approval','scheduled')
+        ), 0)
+        + coalesce((
+          select sum(a.amount)
+          from public.finance_credit_notes n
+          join public.finance_allocations a on a.org_id = n.org_id and a.credit_note_id = n.id
+          join public.finance_transactions x on x.org_id = a.org_id and x.id = a.transaction_id
+          where n.org_id = old.org_id and n.invoice_id = r.invoice_id and a.transaction_id <> old.id
+            and x.direction = 'out' and x.status in ('draft','pending_approval','scheduled')
+        ), 0)
+      into others;
+      if others + r.mine > greatest(-owing, 0) then
         raise exception 'more than the customer is in credit' using errcode = 'FIN05';
       end if;
     end loop;

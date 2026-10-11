@@ -50,6 +50,14 @@ declare
   rf2 uuid;
   rf3 uuid;
   rf4 uuid;
+  ci3 uuid;
+  cnc uuid;
+  cnd uuid;
+  cne uuid;
+  rj1 uuid;
+  rj2 uuid;
+  rf5 uuid;
+  rf6 uuid;
   eq uuid;
   ecn uuid;
   no text;
@@ -551,6 +559,23 @@ begin
   get diagnostics n = row_count;
   if n <> 1 then fails := fails || format('converting again left %s draft invoices', n); end if;
 
+  -- ---- a changed customer unties the invoice from the quotation ---------------
+  -- The invoice form can give a draft another customer. The quotation is the
+  -- first customer's, so the invoice lets go of it and the quotation is free again.
+  qinv := public.finance_convert_quotation(org, qt);
+  perform public.finance_save_invoice(org,
+    jsonb_build_object('id', qinv, 'customer_id', cust2, 'invoice_date', current_date, 'due_date', current_date + 14), one_line);
+  select customer_id, quotation_id into r from public.finance_invoices where id = qinv;
+  if (r.customer_id, r.quotation_id) is distinct from (cust2, null::uuid) then
+    fails := fails || format('a draft invoice given another customer kept its quotation: %s', row_to_json(r));
+  end if;
+  select invoice_id into r from public.finance_quotation_totals where id = qt;
+  if r.invoice_id is not null then fails := array_append(fails, 'a quotation shows an invoice that went to another customer'); end if;
+  fails := fails || public.bendahara_check_try('a quotation whose invoice went to another customer is converted again', 'ok',
+    format('select public.finance_convert_quotation(%L, %L)', org, qt));
+  delete from public.finance_invoices where id = qinv;
+  delete from public.finance_invoices where org_id = org and quotation_id = qt and status = 'draft';
+
   -- ---- expired is worked out from the date; a late yes is still a yes --------
   insert into public.finance_contacts (org_id, name, is_customer) values (org, 'Check Customer Three', true) returning id into cust3;
   qt2 := public.finance_save_quotation(org,
@@ -846,6 +871,57 @@ begin
   fails := fails || public.bendahara_check_try('a void credit note is changed', 'FIN01',
     format('update public.finance_credit_notes set status = %L where id = %L', 'issued', cnb));
 
+  -- ---- a rejected refund is checked in full when it is paid out ---------------
+  -- A rejected refund holds no credit, so another refund can take what it was
+  -- recorded against. Paying the rejected one out afterwards must count it again.
+  -- A third invoice, paid in full, with a credit note of RM 30: RM 30 in credit.
+  ci3 := public.finance_save_invoice(org,
+    jsonb_build_object('customer_id', cust, 'invoice_date', current_date, 'due_date', current_date + 30), one_line);
+  perform public.finance_post_invoice(org, ci3);
+  perform public.finance_record_payment_in(org,
+    jsonb_build_object('account_id', bank, 'method', 'fpx'),
+    jsonb_build_array(jsonb_build_object('invoice_id', ci3, 'amount', 132.5)));
+  cnc := public.finance_save_credit_note(org, jsonb_build_object('invoice_id', ci3, 'reason', 'returns', 'amount', 30));
+  perform public.finance_issue_credit_note(org, cnc);
+  -- A draft refund of all the credit, written straight to the tables, then rejected.
+  insert into public.finance_transactions (org_id, direction, account_id, amount, method)
+  values (org, 'out', bank, 30, 'cash') returning id into rj1;
+  insert into public.finance_allocations (org_id, transaction_id, invoice_id, amount) values (org, rj1, ci3, 30);
+  update public.finance_transactions set status = 'rejected', updated_at = now() where id = rj1;
+  -- Another refund takes the credit, and then the rejected one is paid out.
+  rf5 := public.finance_record_refund(org,
+    jsonb_build_object('invoice_id', ci3, 'account_id', bank, 'method', 'fpx', 'reason', 'other', 'amount', 30));
+  fails := fails || public.bendahara_check_try('a rejected refund is paid out after another refund took the credit', 'FIN05',
+    format('update public.finance_transactions set status = %L, number = %L, updated_at = now() where id = %L', 'posted', 'PV-CHECK-R1', rj1));
+  select * into r from public.finance_invoice_totals where id = ci3;
+  if (r.paid, r.credited, r.refunded, r.balance) is distinct from (132.50, 30.00, 30.00, 0.00) then
+    fails := fails || format('with a rejected refund refused, the invoice reads %s', row_to_json(r));
+  end if;
+
+  -- The same against a credit note. Two more credit notes, RM 10 and RM 40, so
+  -- the customer is in credit for more than the first of them: only the credit
+  -- note itself stands in the way of a second RM 10 against it.
+  cnd := public.finance_save_credit_note(org, jsonb_build_object('invoice_id', ci3, 'reason', 'goodwill', 'amount', 10));
+  perform public.finance_issue_credit_note(org, cnd);
+  cne := public.finance_save_credit_note(org, jsonb_build_object('invoice_id', ci3, 'reason', 'overbilling', 'amount', 40));
+  perform public.finance_issue_credit_note(org, cne);
+  insert into public.finance_transactions (org_id, direction, account_id, amount, method)
+  values (org, 'out', bank, 10, 'cash') returning id into rj2;
+  insert into public.finance_allocations (org_id, transaction_id, credit_note_id, amount) values (org, rj2, cnd, 10);
+  update public.finance_transactions set status = 'rejected', updated_at = now() where id = rj2;
+  rf6 := public.finance_record_refund(org,
+    jsonb_build_object('credit_note_id', cnd, 'account_id', bank, 'method', 'fpx', 'reason', 'other', 'amount', 10));
+  fails := fails || public.bendahara_check_try('a rejected refund is paid out after another refund used up its credit note', 'FIN05',
+    format('update public.finance_transactions set status = %L, number = %L, updated_at = now() where id = %L', 'posted', 'PV-CHECK-R2', rj2));
+  select refunded into r from public.finance_credit_note_totals where id = cnd;
+  if r.refunded is distinct from 10.00 then fails := fails || format('a credit note of RM 10 shows %s refunded against it', r.refunded); end if;
+  select * into r from public.finance_invoice_totals where id = ci3;
+  if (r.credited, r.refunded, r.balance) is distinct from (80.00, 40.00, -40.00) then
+    fails := fails || format('with both rejected refunds refused, the invoice reads %s', row_to_json(r));
+  end if;
+  -- A rejected refund was never paid out, so it can be deleted.
+  delete from public.finance_transactions where id in (rj1, rj2) and status = 'rejected';
+
   -- ---- an invoice with a credit note cannot be voided -------------------------
   -- "theirs" has no money on it. A draft credit note is enough to hold it.
   cnt := public.finance_save_credit_note(org, jsonb_build_object('invoice_id', theirs, 'amount', 32.5));
@@ -887,15 +963,15 @@ begin
   perform set_config('request.jwt.claims', json_build_object('sub', viewer_id, 'role', 'authenticated', 'aal', 'aal2')::text, true);
   set local role authenticated;
   select count(*) into n from public.finance_invoice_totals where org_id = org;
-  if n <> 8 then fails := fails || format('a viewer reads %s of 8 invoices', n); end if;
+  if n <> 9 then fails := fails || format('a viewer reads %s of 9 invoices', n); end if;
   select count(*) into n from public.finance_payments_in where org_id = org;
-  if n <> 8 then fails := fails || format('a viewer reads %s of 8 payment-in rows', n); end if;
+  if n <> 9 then fails := fails || format('a viewer reads %s of 9 payment-in rows', n); end if;
   select count(*) into n from public.finance_quotation_totals where org_id = org;
   if n <> 3 then fails := fails || format('a viewer reads %s of 3 quotations', n); end if;
   select count(*) into n from public.finance_credit_note_totals where org_id = org;
-  if n <> 6 then fails := fails || format('a viewer reads %s of 6 credit notes', n); end if;
+  if n <> 9 then fails := fails || format('a viewer reads %s of 9 credit notes', n); end if;
   select count(*) into n from public.finance_refunds where org_id = org;
-  if n <> 3 then fails := fails || format('a viewer reads %s of 3 refunds', n); end if;
+  if n <> 5 then fails := fails || format('a viewer reads %s of 5 refunds', n); end if;
   fails := fails || public.bendahara_check_try('a viewer saves a quotation', '42501',
     format('select public.finance_save_quotation(%L, %L, %L)', org,
       jsonb_build_object('customer_id', cust, 'quote_date', current_date, 'valid_until', current_date), one_line));

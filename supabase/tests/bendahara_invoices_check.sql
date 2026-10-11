@@ -74,7 +74,7 @@ begin
   if n <> 2 then fails := fails || format('expected 2 security_invoker views, found %s', n); end if;
   select string_agg(conname, ',' order by conname) into t from pg_constraint
    where conrelid = 'public.finance_allocations'::regclass and contype = 'c';
-  -- The sales follow-ons migration adds the third; without it the list is the first two.
+  -- The sales follow-ons migration adds the third, so this check needs that migration applied.
   if t is distinct from 'finance_allocations_amount_check,finance_allocations_one_document_check,finance_allocations_reason_check' then
     fails := fails || format('check constraints on finance_allocations are: %s', t);
   end if;
