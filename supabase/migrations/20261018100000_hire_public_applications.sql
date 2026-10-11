@@ -1,4 +1,4 @@
--- supabase/migrations/20261018090000_hire_public_applications.sql
+-- supabase/migrations/20261018100000_hire_public_applications.sql
 -- Lekir slice 2d: a visitor can apply to an open job. One function is the only
 -- thing a stranger can write through; no table is opened to them.
 

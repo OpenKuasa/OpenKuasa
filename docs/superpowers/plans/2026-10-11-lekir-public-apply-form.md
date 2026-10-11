@@ -36,7 +36,7 @@
 
 | File | Responsibility |
 |---|---|
-| `supabase/migrations/20261018090000_hire_public_applications.sql` | New columns, the unique index, `submit_public_application`, `get_public_job` with the form's requirements |
+| `supabase/migrations/20261018100000_hire_public_applications.sql` | New columns, the unique index, `submit_public_application`, `get_public_job` with the form's requirements |
 | `src/lib/hire/application-fields.ts` | Pure: the apply form's fields, limits, messages and per-field checks. No imports. |
 | `src/lib/hire/public-applications.ts` | The Zod schema, RM to sen, calling the function, mapping its word to a message |
 | `src/lib/hire/public-careers.ts` | `PublicJob` gains `form` (the four requirements) |
@@ -51,7 +51,7 @@
 ### Task 1: Migration
 
 **Files:**
-- Create: `supabase/migrations/20261018090000_hire_public_applications.sql`
+- Create: `supabase/migrations/20261018100000_hire_public_applications.sql`
 - Test: `tests/hire-public-applications-migration.test.ts`
 
 **Interfaces:**
@@ -67,7 +67,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 const sql = readFileSync(
-  join(process.cwd(), 'supabase/migrations', '20261018090000_hire_public_applications.sql'), 'utf8',
+  join(process.cwd(), 'supabase/migrations', '20261018100000_hire_public_applications.sql'), 'utf8',
 );
 const fn = (name: string) => {
   const start = sql.indexOf(`create or replace function public.${name}(`);
@@ -171,7 +171,7 @@ Expected: FAIL, the migration file does not exist.
 - [ ] **Step 3: Write the migration**
 
 ```sql
--- supabase/migrations/20261018090000_hire_public_applications.sql
+-- supabase/migrations/20261018100000_hire_public_applications.sql
 -- Lekir slice 2d: a visitor can apply to an open job. One function is the only
 -- thing a stranger can write through; no table is opened to them.
 
@@ -381,7 +381,7 @@ Expected: PASS. If a test's text match fails on whitespace or wording, the test 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add supabase/migrations/20261018090000_hire_public_applications.sql tests/hire-public-applications-migration.test.ts
+git add supabase/migrations/20261018100000_hire_public_applications.sql tests/hire-public-applications-migration.test.ts
 git commit -m "feat(hire): submit_public_application and the application fields"
 ```
 

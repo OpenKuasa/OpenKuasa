@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 const sql = readFileSync(
-  join(process.cwd(), 'supabase/migrations', '20261018090000_hire_public_applications.sql'), 'utf8',
+  join(process.cwd(), 'supabase/migrations', '20261018100000_hire_public_applications.sql'), 'utf8',
 );
 const fn = (name: string) => {
   const start = sql.indexOf(`create or replace function public.${name}(`);
