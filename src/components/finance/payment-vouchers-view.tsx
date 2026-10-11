@@ -75,7 +75,7 @@ export function PaymentVouchersView({
   const span = CASH_BOOK_PERIOD_LABELS[period];
 
   return (
-    <ScreenContainer>
+    <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader
         title="Payment Vouchers"
         subtitle="Money paid out to suppliers, customers and expenses, Saudara."
@@ -216,6 +216,7 @@ export function PaymentVouchersView({
                           <Link
                             href={home.href}
                             title={`Managed on ${home.label}`}
+                            aria-label={`${PAYMENT_VOUCHER_KIND_LABELS[v.kind]}: open ${home.label}`}
                             className="font-medium text-primary underline-offset-4 hover:underline"
                           >
                             {PAYMENT_VOUCHER_KIND_LABELS[v.kind]}

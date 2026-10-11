@@ -72,7 +72,7 @@ export function CashReceiptsView({
   const span = CASH_BOOK_PERIOD_LABELS[period];
 
   return (
-    <ScreenContainer>
+    <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader
         title="Cash Receipts"
         subtitle="Money received into cash and bank, Saudara."
@@ -191,7 +191,7 @@ export function CashReceiptsView({
                     <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(r.txn_date)}</TableCell>
                     <TableCell className="whitespace-nowrap font-medium">{r.number ?? '—'}</TableCell>
                     <TableCell className="whitespace-nowrap">{r.party_name ?? '—'}</TableCell>
-                    <TableCell className="max-w-64 truncate text-muted-foreground">{receiptFor(r)}</TableCell>
+                    <TableCell className="max-w-64 truncate text-muted-foreground" title={receiptFor(r)}>{receiptFor(r)}</TableCell>
                     <TableCell className="whitespace-nowrap">
                       <span className="inline-flex items-center gap-1.5 text-muted-foreground">
                         {r.account_kind === 'cash' ? <Banknote className="size-3.5" /> : <Landmark className="size-3.5" />}

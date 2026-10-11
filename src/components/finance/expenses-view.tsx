@@ -66,7 +66,7 @@ export function ExpensesView({
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
 
   return (
-    <ScreenContainer>
+    <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader title="Expenses" subtitle="Business expenses and spending, Saudara." />
 
       <BentoGrid>
