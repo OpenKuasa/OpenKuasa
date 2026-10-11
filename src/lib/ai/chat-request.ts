@@ -14,6 +14,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { resolveChatAccess } from '@/lib/ai/gate';
+import { consumeDailyQuota } from '@/lib/ai/rate-limit';
 import { resolveStoredFiles } from '@/lib/chat/attachment-store';
 import { inlineTextFiles } from '@/lib/chat/attachments';
 import { screenFromPath, type Screen } from '@/lib/chat/screen';
@@ -64,8 +65,8 @@ export type PreparedChat =
 
 /**
  * Gate order: signed in → body within size and well-formed → not a demo guest
- * → workspace key, else a free question. The body is checked before the
- * allowance so a malformed request never spends a free question.
+ * → workspace key (within the caller's daily limit), else a free question. The
+ * body is checked before either allowance so a malformed request never spends one.
  */
 export async function prepareChat(request: Request): Promise<PreparedChat> {
   const fail = (status: number, body: Record<string, unknown>): PreparedChat => ({
@@ -115,6 +116,24 @@ export async function prepareChat(request: Request): Promise<PreparedChat> {
     // `code` lets the client react (e.g. show the add-your-key prompt)
     // without parsing prose.
     return fail(access.status, { error: access.error, code: access.code });
+  }
+
+  // A turn on the workspace's own key has no platform allowance, so each user
+  // gets a daily limit instead. Free questions keep their weekly one (consumed
+  // in resolveChatAccess). Refused, not waved through, if the counter is down.
+  if (access.kind === 'byok') {
+    const quota = await consumeDailyQuota(supabase);
+    if (!quota.allowed) {
+      return quota.reason === 'limit'
+        ? fail(429, {
+            error: 'You have reached today\u2019s chat limit. It resets at midnight UTC.',
+            code: 'daily_limit',
+          })
+        : fail(503, {
+            error: 'Chat is unavailable right now. Please try again.',
+            code: 'limit_unavailable',
+          });
+    }
   }
 
   return {

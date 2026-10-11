@@ -15,6 +15,9 @@ const ctl = vi.hoisted(() => ({
   /** The system prompt and tool names each model call was given. */
   calls: [] as { system: string; tools: string[] }[],
   freeConsumed: 0,
+  /** What consume_ai_quota answers on a workspace key: turns left today, or -1 when used up. */
+  dailyRemaining: 100 as number,
+  dailyConsumed: 0,
 }));
 
 vi.mock('@/lib/supabase/server', () => ({
@@ -27,6 +30,10 @@ vi.mock('@/lib/supabase/server', () => ({
       if (name === 'consume_free_question') {
         ctl.freeConsumed += 1;
         return { data: ctl.freeRemaining, error: null };
+      }
+      if (name === 'consume_ai_quota') {
+        ctl.dailyConsumed += 1;
+        return { data: ctl.dailyRemaining, error: null };
       }
       return { data: null, error: { message: `unexpected rpc ${name}` } };
     },
@@ -130,6 +137,8 @@ beforeEach(() => {
   ctl.usedKeys = [];
   ctl.calls = [];
   ctl.freeConsumed = 0;
+  ctl.dailyRemaining = 100;
+  ctl.dailyConsumed = 0;
   process.env.AI_KEYS_ENCRYPTION_SECRET = SECRET;
 });
 
@@ -225,6 +234,7 @@ describe('POST /api/crm/chat happy path', () => {
     expect(res.status).toBe(200);
     await res.text();
     expect(ctl.freeConsumed).toBe(0);
+    expect(ctl.dailyConsumed).toBe(1);
     expect(ctl.usedKeys).toEqual(['sk-or-v1-workspace-key-aaaaaaaaaaaa']);
   });
 });

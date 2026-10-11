@@ -10,6 +10,9 @@ const ctl = vi.hoisted(() => ({
   usedKeys: [] as (string | undefined)[],
   calls: [] as { system: string; tools: string[] }[],
   freeConsumed: 0,
+  /** What consume_ai_quota answers on a workspace key: turns left today, or -1 when used up. */
+  dailyRemaining: 100 as number,
+  dailyConsumed: 0,
   /** Tables the provider read, to prove which data the tools were given. */
   tablesRead: [] as string[],
   /** The HireAccess the route handed to the runner. */
@@ -80,6 +83,10 @@ vi.mock('@/lib/supabase/server', () => ({
       if (name === 'consume_free_question') {
         ctl.freeConsumed += 1;
         return { data: ctl.freeRemaining, error: null };
+      }
+      if (name === 'consume_ai_quota') {
+        ctl.dailyConsumed += 1;
+        return { data: ctl.dailyRemaining, error: null };
       }
       return { data: null, error: { message: `unexpected rpc ${name}` } };
     },
@@ -183,6 +190,8 @@ beforeEach(() => {
   ctl.usedKeys = [];
   ctl.calls = [];
   ctl.freeConsumed = 0;
+  ctl.dailyRemaining = 100;
+  ctl.dailyConsumed = 0;
   ctl.tablesRead = [];
   ctl.captured = null;
   ctl.tuah = null;
@@ -355,6 +364,7 @@ describe('POST /api/hire/chat happy path', () => {
     expect(res.status).toBe(200);
     await res.text();
     expect(ctl.freeConsumed).toBe(0);
+    expect(ctl.dailyConsumed).toBe(1);
     expect(ctl.usedKeys).toEqual(['sk-or-v1-workspace-key-aaaaaaaaaaaa']);
   });
 });

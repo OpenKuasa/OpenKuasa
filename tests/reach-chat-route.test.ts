@@ -13,6 +13,9 @@ const ctl = vi.hoisted(() => ({
   /** The key each model was built with: undefined means the platform key. */
   usedKeys: [] as (string | undefined)[],
   freeConsumed: 0,
+  /** What consume_ai_quota answers on a workspace key: turns left today, or -1 when used up. */
+  dailyRemaining: 100 as number,
+  dailyConsumed: 0,
 }));
 
 vi.mock('@/lib/supabase/server', () => ({
@@ -25,6 +28,10 @@ vi.mock('@/lib/supabase/server', () => ({
       if (name === 'consume_free_question') {
         ctl.freeConsumed += 1;
         return { data: ctl.freeRemaining, error: null };
+      }
+      if (name === 'consume_ai_quota') {
+        ctl.dailyConsumed += 1;
+        return { data: ctl.dailyRemaining, error: null };
       }
       return { data: null, error: { message: `unexpected rpc ${name}` } };
     },
@@ -119,6 +126,8 @@ beforeEach(() => {
   ctl.providerKey = true;
   ctl.usedKeys = [];
   ctl.freeConsumed = 0;
+  ctl.dailyRemaining = 100;
+  ctl.dailyConsumed = 0;
   process.env.AI_KEYS_ENCRYPTION_SECRET = SECRET;
 });
 
@@ -179,6 +188,23 @@ describe('POST /api/reach/chat happy path', () => {
     expect(ctl.usedKeys).toEqual([undefined]);
   });
 
+  it('refuses a workspace-key turn once the caller has used up the day, without calling a model', async () => {
+    ctl.sealedKey = encryptApiKey('sk-or-v1-workspace-key-aaaaaaaaaaaa');
+    ctl.dailyRemaining = -1;
+    const res = await POST(post(validBody));
+    expect(res.status).toBe(429);
+    expect(await res.json()).toMatchObject({ code: 'daily_limit' });
+    expect(ctl.usedKeys).toEqual([]);
+  });
+
+  it('a free question is not counted against the workspace-key daily limit', async () => {
+    const res = await POST(post(validBody));
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(ctl.freeConsumed).toBe(1);
+    expect(ctl.dailyConsumed).toBe(0);
+  });
+
   it('runs on the workspace key without touching the free allowance', async () => {
     ctl.sealedKey = sealForWorkspace();
     // Even with the free questions used up and no platform key at all.
@@ -188,6 +214,7 @@ describe('POST /api/reach/chat happy path', () => {
     expect(res.status).toBe(200);
     await res.text();
     expect(ctl.freeConsumed).toBe(0);
+    expect(ctl.dailyConsumed).toBe(1);
     expect(ctl.usedKeys).toEqual(['sk-or-v1-workspace-key-aaaaaaaaaaaa']);
   });
 });

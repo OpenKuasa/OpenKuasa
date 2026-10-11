@@ -53,6 +53,10 @@ export function isChatLocked(status: ChatStatusForViewer | null): boolean {
   );
 }
 
+/** Shown when a turn is refused with code `daily_limit` (the per-user limit on a workspace key). */
+export const DAILY_LIMIT_NOTICE =
+  'That question was not sent: you have reached today\u2019s chat limit. It resets at midnight UTC (8 am Malaysia time).';
+
 /** The chat endpoints answer `{ error, code }`; the SDK surfaces that body as the error message. */
 export function chatErrorCode(error: Error | undefined): string | null {
   if (!error) return null;
