@@ -8,12 +8,20 @@
  * rows up and order them.
  */
 
-import { monthLabel, monthYearLabel } from './dates';
+import { formatDate, malaysiaDate, monthLabel, monthYearLabel } from './dates';
 import { isTeamView } from './own';
 import { bucketByMonth, sumBy } from './series';
 import type { Bucket } from './series';
 import { payrollSummary } from './summaries';
-import type { PaymentVoucher, PayrollRun, PeopleData, PeopleViewer, Payslip } from './types';
+import type {
+  PaymentVoucher,
+  PayrollRun,
+  PeopleData,
+  PeopleViewer,
+  Payslip,
+  PayslipLine,
+  StatutoryField,
+} from './types';
 
 /** How many runs the cost chart shows. */
 const RUN_MONTHS = 12;
@@ -169,6 +177,158 @@ export async function readPayroll(
   if (!isTeamView(viewer)) return null;
   const [runs, payslips] = await Promise.all([data.listPayrollRuns(), data.listPayslips()]);
   return payrollModel(runs, payslips, runId);
+}
+
+// ---- The Payroll screen and the payslip detail: what each control offers and says ----------------
+
+/** Shown on a draft run. */
+export const DRAFT_BANNER = "Draft: employees can't see this yet";
+/** Under "Proposed deductions" wherever the four figures are listed. */
+export const PROPOSED_NOTE = 'Proposed figures. Check them before marking the run as paid.';
+
+export type RunControls = {
+  runPayroll: boolean;
+  recalculate: boolean;
+  markPaid: boolean;
+  deleteDraft: boolean;
+  undoPaid: boolean;
+};
+
+/**
+ * Which controls the Payroll screen offers for the chosen run. In the demo, none. A paid run offers Undo paid
+ * only; a draft offers Recalculate and Delete, and Mark as paid when it has payslips (an empty one cannot be paid).
+ */
+export function runControls(
+  run: { status: PayrollRun['status']; headcount: number } | null,
+  viewer: { isDemo: boolean },
+): RunControls {
+  if (viewer.isDemo) {
+    return { runPayroll: false, recalculate: false, markPaid: false, deleteDraft: false, undoPaid: false };
+  }
+  const draft = run !== null && run.status === 'draft';
+  return {
+    runPayroll: true,
+    recalculate: draft,
+    markPaid: run !== null && draft && run.headcount > 0,
+    deleteDraft: draft,
+    undoPaid: run !== null && run.status === 'paid',
+  };
+}
+
+const payslipCount = (n: number) => `${n} ${n === 1 ? 'payslip' : 'payslips'}`;
+
+/** `monthText` is `October 2026`. */
+export const runPayrollSentence = (monthText: string) =>
+  `Creates a draft for ${monthText}. Nobody is paid and employees can't see it yet.`;
+
+export const markPaidSentence = (count: number) =>
+  `Marks ${payslipCount(count)} as paid. ${count === 1 ? 'The employee will see it.' : 'Employees will see them.'}`;
+
+export const undoPaidSentence = (count: number) =>
+  `Puts ${payslipCount(count)} back to draft. ${
+    count === 1 ? 'The employee will no longer see it.' : 'Employees will no longer see them.'
+  }`;
+
+export const deleteDraftSentence = (monthText: string, count: number) =>
+  count === 0
+    ? `Deletes the empty ${monthText} draft.`
+    : `Deletes the ${monthText} draft and its ${payslipCount(count)}, with any lines and figures set by hand.`;
+
+export const removePayslipSentence = (employeeName: string, monthText: string) =>
+  `Removes ${employeeName}'s payslip from the ${monthText} draft. Recalculate would bring it back.`;
+
+/** "Marked as paid on 09 Oct 2026", with " by <name>" only when the name is known; empty with no date. */
+export function paidLine(run: { paid_at: string | null; paid_by_name: string | null }): string {
+  const day = run.paid_at ? malaysiaDate(run.paid_at) : '';
+  if (!day) return '';
+  return `Marked as paid on ${formatDate(day)}${run.paid_by_name ? ` by ${run.paid_by_name}` : ''}`;
+}
+
+/** The people a run left out, each with why. */
+export function skippedRows(
+  skipped: { employee_id: string; name: string; reason: 'no_salary' }[],
+): { id: string; name: string; reason: string }[] {
+  return skipped.map((s) => ({ id: s.employee_id, name: s.name, reason: 'No base salary recorded' }));
+}
+
+/** `?run=` as a single trimmed id, or null. Whether it names a real run is `payrollModel`'s call. */
+export function runIdFromParam(raw: string | string[] | undefined): string | null {
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  const trimmed = value?.trim() ?? '';
+  return trimmed === '' ? null : trimmed;
+}
+
+/** Cents as the text a form field holds: `1200.50`. Integer arithmetic only. */
+export function centsToField(cents: number): string {
+  const abs = Math.abs(Math.trunc(cents));
+  return `${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, '0')}`;
+}
+
+const FIGURES: {
+  field: StatutoryField;
+  label: string;
+  key: 'epf_cents' | 'socso_cents' | 'eis_cents' | 'pcb_cents';
+}[] = [
+  { field: 'epf', label: 'EPF', key: 'epf_cents' },
+  { field: 'socso', label: 'SOCSO', key: 'socso_cents' },
+  { field: 'eis', label: 'EIS', key: 'eis_cents' },
+  { field: 'pcb', label: 'PCB', key: 'pcb_cents' },
+];
+
+export type DetailLine = {
+  id: string;
+  label: string;
+  kind: PayslipLine['kind'];
+  /** Earnings positive; unpaid and deduction lines negative, for display. */
+  signed_cents: number;
+  amount_cents: number;
+  /** Only a line an owner or admin added can be changed. */
+  editable: boolean;
+  system_note: string | null;
+};
+
+export type PayslipDetailModel = {
+  basic_cents: number;
+  /** Earnings and unpaid lines: what moves basic to gross. */
+  pay_lines: DetailLine[];
+  gross_cents: number;
+  figures: { field: StatutoryField; label: string; amount_cents: number; set_by_hr: boolean }[];
+  /** The deduction lines: they come off net, after the four figures. */
+  deduction_lines: DetailLine[];
+  /** The deduction lines, as the payslip records them. */
+  other_cents: number;
+  /** Everything between gross and net. */
+  deductions_cents: number;
+  net_cents: number;
+};
+
+const detailLine = (l: PayslipLine): DetailLine => ({
+  id: l.id,
+  label: l.label,
+  kind: l.kind,
+  signed_cents: l.kind === 'earning' ? l.amount_cents : -l.amount_cents,
+  amount_cents: l.amount_cents,
+  editable: l.source === 'hr',
+  system_note: l.source === 'hr' ? null : 'Worked out by the system',
+});
+
+/** The rows the payslip detail shows. Every figure is the payslip's own; nothing is worked out here. */
+export function payslipDetailModel(p: Payslip): PayslipDetailModel {
+  return {
+    basic_cents: p.basic_cents,
+    pay_lines: p.lines.filter((l) => l.kind !== 'deduction').map(detailLine),
+    deduction_lines: p.lines.filter((l) => l.kind === 'deduction').map(detailLine),
+    gross_cents: p.gross_cents,
+    figures: FIGURES.map((f) => ({
+      field: f.field,
+      label: f.label,
+      amount_cents: p[f.key],
+      set_by_hr: p.set_by_hr.includes(f.field),
+    })),
+    other_cents: p.other_deductions_cents,
+    deductions_cents: p.gross_cents - p.net_cents,
+    net_cents: p.net_cents,
+  };
 }
 
 export type VouchersModel = {
