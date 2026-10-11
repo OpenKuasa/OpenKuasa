@@ -101,7 +101,7 @@ A restrictive policy requires the second factor for this bucket, as the other bu
 - **Path.** `<uploader's user id>/<random uuid>.<ext>`. `hr_submit_claim` checks the first segment is the caller's own id and that the object exists in the bucket. So an owner entering a claim for someone uploads into their own folder, and the employee can still read it through the claim.
 - **Opening.** The app makes a 60-second signed link as the signed-in user; storage's select policy is the check.
 - **Removing.** After `hr_cancel_claim` succeeds, the server action removes the returned path with the service client. If that fails, or no service key is configured, it logs the fact (never the path's owner or the claim) and the cancel still stands; the file is then an unreachable leftover, since no claim points at it.
-- **Unused uploads.** A file uploaded and never attached (the form was abandoned, or submit was refused) stays in the uploader's folder. Clearing those out is out of scope; the form removes its own upload when submit is refused.
+- **Unused uploads.** A file uploaded and never attached (the form was abandoned, or submit was refused) stays in the uploader's folder. Nobody but the service client can delete from the bucket, so the form cannot remove it; clearing those out is out of scope.
 
 ### 4.5 Access check
 
@@ -158,7 +158,7 @@ After a change the pages in `PEOPLE_PATHS` are refreshed.
 | Linked member (not in the demo) | `previewOvertime`, `submitClaim`, `submitOvertime`, `cancelClaim`, `cancelOvertime`, for themselves: these variants have **no** employee field |
 | Unlinked member, demo visitor, anyone in the demo | None |
 
-**A receipt from the chat.** `submitClaim` takes no file or path from the model. When the question that led to it has an image or PDF attached, the route hands the tool that file's stored reference; on approval the tool copies the file from the chat's attachment area into the caller's receipts folder and passes that path to the write path. With no attachment, or one of another type or over 5 MB, the claim is submitted without a receipt and the result says so. Lekiu does not read the receipt for the amount.
+**A receipt from the chat.** `submitClaim` takes no file or path from the model. When the question that led to it has an image or PDF attached, the route hands the tool that file; on approval the tool uploads it into the caller's receipts folder and passes that path to the write path. With no attachment, or one of another type or over 5 MB, the claim is submitted without a receipt and the result says so. Lekiu does not read the receipt for the amount.
 
 **Lookups:** `listClaims` and `listOvertime` return each row's `id` to someone who may act on it, the decision note, `has_receipt`, the paid date, and for overtime the kind of day and whether the amount is calculated. For owners and admins a pending claim also carries the employee's approved-or-paid total this year in that category.
 
