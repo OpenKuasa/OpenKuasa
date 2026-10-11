@@ -8,6 +8,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { REJECT_REASONS, changeMessage, type RejectReason } from './application-changes';
+import { CANDIDATE_LIMITS, addedMessage, candidateMessage } from './candidate-fields';
 import {
   APPLICATION_STAGES, DEFAULT_HIRE_SETTINGS, JOB_COLUMNS, SETTINGS_COLUMNS,
   type ApplicationOutcome, type ApplicationStage, type HireSettings, type Job, type JobStatus,
@@ -517,4 +518,165 @@ export async function rateApplication(
   // `basis` is left behind here: it is for the Approve card, not for the database.
   const { id, rating } = parsed.data;
   return applicationChange(ctx, 'rateApplication', 'hire_rate_application', { p_application_id: id, p_rating: rating }, id, { rating });
+}
+
+// ─── adding and editing a candidate by hand (database functions, called by rpc) ──
+
+const text = (max: number, what: string) => optionalText(max).describe(what);
+
+const candidateFields = {
+  email: text(CANDIDATE_LIMITS.email, 'The candidate\'s email address. Blank clears it.'),
+  phone: text(CANDIDATE_LIMITS.phone, 'The candidate\'s phone number. Blank clears it.'),
+  headline: text(CANDIDATE_LIMITS.headline, 'A short line about the candidate, for example "Barista with 3 years in cafes". Blank clears it.'),
+  location: text(CANDIDATE_LIMITS.location, 'Where the candidate is based. Blank clears it.'),
+  skills: z.array(z.string().trim().min(1).max(CANDIDATE_LIMITS.skill)).max(CANDIDATE_LIMITS.skills).optional()
+    .describe('Up to 20 skills, each up to 40 characters, as stated by the user or in the CV. An empty list clears them.'),
+  source: text(CANDIDATE_LIMITS.source, 'Where the candidate came from, for example "Referral". Blank clears it.'),
+};
+
+export const addCandidateInput = z.object({
+  name: z.string().trim().min(1, 'Enter the candidate\'s name.').max(CANDIDATE_LIMITS.name, 'Keep the name to 120 characters or fewer.')
+    .describe('The candidate\'s full name.'),
+  ...candidateFields,
+  job_id: z.string().uuid().nullable().optional()
+    .describe('The job to add an application for, from listJobs. Leave out to add the person without an application.'),
+  cover_letter: text(CANDIDATE_LIMITS.coverLetter, 'A cover note for the application. Only kept when a job is given.'),
+  cv_url: text(CANDIDATE_LIMITS.url, 'A link to the candidate\'s CV, starting with https://. Only kept when a job is given.'),
+});
+
+export const updateCandidateInput = z.object({
+  id: z.string().uuid().describe('The candidate\'s id, from listCandidates.'),
+  name: z.string().trim().min(1, 'Enter the candidate\'s name.').max(CANDIDATE_LIMITS.name, 'Keep the name to 120 characters or fewer.')
+    .optional().describe('The candidate\'s full name. Cannot be cleared.'),
+  ...candidateFields,
+});
+
+export type CandidateAdded = {
+  id: string;
+  name: string;
+  application_id: string | null;
+  job_id: string | null;
+  job: string | null;
+  candidate: 'created' | 'existing';
+  application: 'created' | 'existing' | 'none';
+  message: string;
+};
+
+/** The word a jsonb answer carries as `word`, or the answer itself when it is a bare string. */
+function wordOf(data: unknown): unknown {
+  if (data && typeof data === 'object') return (data as { word?: unknown }).word;
+  return data;
+}
+
+/** One text column of a row of this workspace, or null when it cannot be read. */
+async function readColumn(ctx: HireWriteContext, table: string, column: string, id: string): Promise<string | null> {
+  try {
+    const { data } = await ctx.client.from(table).select(column).eq('id', id).eq('org_id', ctx.orgId).maybeSingle();
+    const value = (data as unknown as Record<string, unknown> | null)?.[column];
+    return typeof value === 'string' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function addCandidate(
+  ctx: HireWriteContext,
+  input: z.input<typeof addCandidateInput>,
+): Promise<CapResult<CandidateAdded>> {
+  const parsed = addCandidateInput.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+  const d = parsed.data;
+  const jobId = d.job_id ?? null;
+  let answer: unknown;
+  try {
+    const { data, error } = await ctx.client.rpc('hire_add_candidate', {
+      p_org_id: ctx.orgId,
+      p_name: d.name,
+      p_email: blankToNull(d.email) ?? null,
+      p_phone: blankToNull(d.phone) ?? null,
+      p_headline: blankToNull(d.headline) ?? null,
+      p_location: blankToNull(d.location) ?? null,
+      p_skills: d.skills ?? [],
+      p_source: blankToNull(d.source) ?? null,
+      p_job_id: jobId,
+      p_cover_letter: blankToNull(d.cover_letter) ?? null,
+      p_cv_url: blankToNull(d.cv_url) ?? null,
+    });
+    if (error) return changeFailed('addCandidate', error);
+    answer = data;
+  } catch (error) {
+    return changeFailed('addCandidate', error);
+  }
+  const word = wordOf(answer);
+  if (word !== 'ok') return { ok: false, error: candidateMessage(word) };
+
+  const result = answer as { candidate_id?: unknown; application_id?: unknown; candidate?: unknown; application?: unknown };
+  if (typeof result.candidate_id !== 'string') return changeFailed('addCandidate', null);
+  const candidate = result.candidate === 'existing' ? 'existing' : 'created';
+  const application = result.application === 'created' || result.application === 'existing' ? result.application : 'none';
+  const name = (await readColumn(ctx, 'hire_candidates', 'name', result.candidate_id)) ?? d.name;
+  const job = jobId ? await readColumn(ctx, 'hire_jobs', 'title', jobId) : null;
+  return {
+    ok: true,
+    data: {
+      id: result.candidate_id,
+      name,
+      application_id: typeof result.application_id === 'string' ? result.application_id : null,
+      job_id: application === 'none' ? null : jobId,
+      job: application === 'none' ? null : job,
+      candidate,
+      application,
+      message: addedMessage({ name, job, candidate, application }),
+    },
+  };
+}
+
+export async function updateCandidate(
+  ctx: HireWriteContext,
+  input: z.input<typeof updateCandidateInput>,
+): Promise<CapResult<{ id: string; name: string }>> {
+  const parsed = updateCandidateInput.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+  const { id, name, skills, ...rest } = parsed.data;
+  // Only what was sent: undefined is left out; '' and null are sent as null (a cleared field).
+  const given: Record<string, unknown> = {
+    name,
+    email: blankToNull(rest.email),
+    phone: blankToNull(rest.phone),
+    headline: blankToNull(rest.headline),
+    location: blankToNull(rest.location),
+    skills,
+    source: blankToNull(rest.source),
+  };
+  const changes = Object.fromEntries(Object.entries(given).filter(([, v]) => v !== undefined));
+  if (Object.keys(changes).length === 0) return { ok: false, error: 'Nothing to change.' };
+
+  let word: unknown;
+  try {
+    const { data, error } = await ctx.client.rpc('hire_update_candidate', { p_candidate_id: id, p_changes: changes });
+    if (error) return changeFailed('updateCandidate', error);
+    word = wordOf(data);
+  } catch (error) {
+    return changeFailed('updateCandidate', error);
+  }
+  if (word !== 'ok') return { ok: false, error: candidateMessage(word) };
+  return { ok: true, data: { id, name: (await readColumn(ctx, 'hire_candidates', 'name', id)) ?? '' } };
+}
+
+/**
+ * Attaches a stored CV to an application. `service` is a service-role client the
+ * caller passes in. Answers the function's word, or `failed` on an error or a throw.
+ */
+export async function attachCandidateCv(service: SupabaseClient, applicationId: string, path: string): Promise<string> {
+  try {
+    const { data, error } = await service.rpc('hire_attach_cv', { p_application_id: applicationId, p_cv_path: path });
+    if (error || typeof data !== 'string') {
+      changeFailed('attachCandidateCv', error);
+      return 'failed';
+    }
+    return data;
+  } catch (error) {
+    changeFailed('attachCandidateCv', error);
+    return 'failed';
+  }
 }

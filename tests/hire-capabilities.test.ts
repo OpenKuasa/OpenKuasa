@@ -27,6 +27,11 @@ import {
   reopenApplicationInput,
   rateApplication,
   rateApplicationInput,
+  addCandidate,
+  addCandidateInput,
+  updateCandidate,
+  updateCandidateInput,
+  attachCandidateCv,
   type HireWriteContext,
 } from '@/lib/hire/capabilities';
 import type { Job } from '@/lib/hire/types';
@@ -696,5 +701,227 @@ describe('application change capabilities', () => {
     const result = await moveApplication(rpcFake().ctx, { id: ID, stage: 'offer' });
     expect(result.ok && result.data.confirmed).toBe(true);
     expect(result.ok && result.data).not.toHaveProperty('note');
+  });
+});
+
+// ─── hand-entered candidates ─────────────────────────────────────────────────
+
+const JOB_ID = '44444444-4444-4444-8444-444444444444';
+const CAND_ID = '55555555-5555-4555-8555-555555555555';
+const APP_ID = '66666666-6666-4666-8666-666666666666';
+const GENERIC_SENTENCE = 'That change could not be saved. Please try again.';
+
+/** A client whose rpc answers `answer` and whose reads answer by table. */
+function candFake(opts: { answer?: unknown; error?: unknown; throws?: unknown; name?: string | null; title?: string | null; readThrows?: boolean } = {}) {
+  const calls: { fn: string; args: Record<string, unknown> }[] = [];
+  const reads: { table: string; filters: Record<string, unknown> }[] = [];
+  const client = {
+    rpc: async (fn: string, args: Record<string, unknown>) => {
+      calls.push({ fn, args });
+      if (opts.throws) throw opts.throws;
+      return { data: 'answer' in opts ? opts.answer : { word: 'ok' }, error: opts.error ?? null };
+    },
+    from: (table: string) => {
+      const entry = { table, filters: {} as Record<string, unknown> };
+      reads.push(entry);
+      const chain = {
+        select: () => chain,
+        eq: (k: string, v: unknown) => { entry.filters[k] = v; return chain; },
+        maybeSingle: async () => {
+          if (opts.readThrows) throw new Error('read failed');
+          if (table === 'hire_candidates') return { data: opts.name === null ? null : { name: opts.name ?? 'Aina' }, error: null };
+          return { data: opts.title === null ? null : { title: opts.title ?? 'Barista' }, error: null };
+        },
+      };
+      return chain;
+    },
+  };
+  return { ctx: { client: client as never, orgId: ORG } satisfies HireWriteContext, calls, reads };
+}
+
+const ADDED = { word: 'ok', candidate_id: CAND_ID, application_id: null, candidate: 'created', application: 'none' };
+
+describe('candidate schemas', () => {
+  it('refuse a blank name, a 121-character name, a non-UUID job and 21 skills', () => {
+    expect(addCandidateInput.safeParse({ name: '   ' }).success).toBe(false);
+    expect(addCandidateInput.safeParse({ name: 'x'.repeat(120) }).success).toBe(true);
+    expect(addCandidateInput.safeParse({ name: 'x'.repeat(121) }).success).toBe(false);
+    expect(addCandidateInput.safeParse({ name: 'A', job_id: 'nope' }).success).toBe(false);
+    expect(addCandidateInput.safeParse({ name: 'A', job_id: null }).success).toBe(true);
+    const skills = (n: number) => Array.from({ length: n }, (_, i) => `s${i}`);
+    expect(addCandidateInput.safeParse({ name: 'A', skills: skills(20) }).success).toBe(true);
+    expect(addCandidateInput.safeParse({ name: 'A', skills: skills(21) }).success).toBe(false);
+    expect(addCandidateInput.safeParse({ name: 'A', skills: ['x'.repeat(41)] }).success).toBe(false);
+    expect(addCandidateInput.safeParse({ name: 'A', cover_letter: 'x'.repeat(4001) }).success).toBe(false);
+    expect(addCandidateInput.safeParse({ name: 'A', cv_url: 'x'.repeat(501) }).success).toBe(false);
+    expect(updateCandidateInput.safeParse({ id: 'nope' }).success).toBe(false);
+    expect(updateCandidateInput.safeParse({ id: CAND_ID, name: null }).success).toBe(false);
+    expect(updateCandidateInput.safeParse({ id: CAND_ID, name: '  ' }).success).toBe(false);
+    expect(updateCandidateInput.safeParse({ id: CAND_ID, email: null }).success).toBe(true);
+  });
+  it('convert to JSON Schema, describe every field and carry no workspace key', () => {
+    for (const schema of [addCandidateInput, updateCandidateInput]) {
+      expect(() => z.toJSONSchema(schema)).not.toThrow();
+      for (const [key, field] of Object.entries(schema.shape)) {
+        expect(key).not.toMatch(/org|tenant|workspace/i);
+        expect((field as z.ZodType).description, key).toBeTruthy();
+      }
+    }
+  });
+});
+
+describe('addCandidate', () => {
+  it('sends the workspace from the context and exactly the SQL argument names', async () => {
+    const f = candFake({ answer: ADDED });
+    await addCandidate(f.ctx, { name: 'Aina', email: 'a@b.co', skills: ['Sales'], job_id: JOB_ID, cover_letter: 'Hi', cv_url: 'https://a.co/cv.pdf' });
+    expect(f.calls).toEqual([{
+      fn: 'hire_add_candidate',
+      args: {
+        p_org_id: ORG, p_name: 'Aina', p_email: 'a@b.co', p_phone: null, p_headline: null, p_location: null,
+        p_skills: ['Sales'], p_source: null, p_job_id: JOB_ID, p_cover_letter: 'Hi', p_cv_url: 'https://a.co/cv.pdf',
+      },
+    }]);
+  });
+  it('sends nulls and an empty skills list for what was not given, and blanks as null', async () => {
+    const f = candFake({ answer: ADDED });
+    await addCandidate(f.ctx, { name: 'Aina', email: '', phone: '  ' });
+    expect(f.calls[0].args).toEqual({
+      p_org_id: ORG, p_name: 'Aina', p_email: null, p_phone: null, p_headline: null, p_location: null,
+      p_skills: [], p_source: null, p_job_id: null, p_cover_letter: null, p_cv_url: null,
+    });
+  });
+  it('refuses a bad input without calling the database', async () => {
+    const f = candFake();
+    expect((await addCandidate(f.ctx, { name: '' })).ok).toBe(false);
+    expect(f.calls).toEqual([]);
+  });
+  it('maps each refusal word to its sentence', async () => {
+    const words: Record<string, string> = {
+      not_found: 'That candidate could not be found.',
+      forbidden: 'You do not have permission to make changes here.',
+      invalid_name: 'Enter the candidate\'s name.',
+      too_long: 'One of the details is too long.',
+      invalid_email: 'Enter an email address like name@example.com.',
+      invalid_url: 'Enter a link that starts with https://',
+      job_not_found: 'That job could not be found.',
+      job_not_open: 'Only an open or paused job can take a new application.',
+      surprise: GENERIC_SENTENCE,
+    };
+    for (const [word, sentence] of Object.entries(words)) {
+      expect(await addCandidate(candFake({ answer: { word } }).ctx, { name: 'Aina' })).toEqual({ ok: false, error: sentence });
+    }
+    expect(await addCandidate(candFake({ answer: null }).ctx, { name: 'Aina' })).toEqual({ ok: false, error: GENERIC_SENTENCE });
+  });
+  it('logs only a code on an rpc error and on a throw', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const e = await addCandidate(candFake({ error: { code: '42501', message: 'Aina secret', details: 'a@b.co' } }).ctx, { name: 'Aina' });
+    expect(e).toEqual({ ok: false, error: GENERIC_SENTENCE });
+    expect(spy).toHaveBeenCalledWith('[hire-capability] addCandidate failed:', { code: '42501' });
+    await addCandidate(candFake({ throws: new TypeError('Aina fetch failed') }).ctx, { name: 'Aina' });
+    expect(spy).toHaveBeenLastCalledWith('[hire-capability] addCandidate failed:', { code: 'TypeError' });
+    spy.mockRestore();
+  });
+  it('names the stored name in the message, reading the candidate by id and workspace', async () => {
+    const f = candFake({ answer: { ...ADDED, candidate: 'existing' }, name: 'Farid bin Osman' });
+    const result = await addCandidate(f.ctx, { name: 'Farid' });
+    expect(result).toEqual({
+      ok: true,
+      data: {
+        id: CAND_ID, name: 'Farid bin Osman', application_id: null, job_id: null, job: null,
+        candidate: 'existing', application: 'none', message: 'Farid bin Osman is already on file. Nothing was changed.',
+      },
+    });
+    expect(f.reads).toEqual([{ table: 'hire_candidates', filters: { id: CAND_ID, org_id: ORG } }]);
+  });
+  it('reads the job title when a job was given, scoped by workspace', async () => {
+    const answer = { ...ADDED, application_id: APP_ID, application: 'created' };
+    const f = candFake({ answer, title: 'Barista' });
+    const result = await addCandidate(f.ctx, { name: 'Aina', job_id: JOB_ID });
+    expect(result).toMatchObject({
+      ok: true, data: { application_id: APP_ID, job_id: JOB_ID, job: 'Barista', message: 'Added Aina and an application for Barista.' },
+    });
+    expect(f.reads).toContainEqual({ table: 'hire_jobs', filters: { id: JOB_ID, org_id: ORG } });
+  });
+  it('still answers ok with the typed name when a read-back fails or finds nothing', async () => {
+    expect(await addCandidate(candFake({ answer: ADDED, name: null }).ctx, { name: 'Aina' })).toMatchObject({
+      ok: true, data: { name: 'Aina', message: 'Added Aina.' },
+    });
+    expect(await addCandidate(candFake({ answer: ADDED, readThrows: true }).ctx, { name: 'Aina' })).toMatchObject({
+      ok: true, data: { name: 'Aina' },
+    });
+  });
+});
+
+describe('updateCandidate', () => {
+  it('sends only the fields that were sent, nulls for cleared ones, and [] for no skills', async () => {
+    const f = candFake({ answer: { word: 'ok' }, name: 'Aina' });
+    const result = await updateCandidate(f.ctx, { id: CAND_ID, headline: 'Barista', phone: '', email: null, skills: [] });
+    expect(result).toEqual({ ok: true, data: { id: CAND_ID, name: 'Aina' } });
+    expect(f.calls).toEqual([{
+      fn: 'hire_update_candidate',
+      args: { p_candidate_id: CAND_ID, p_changes: { headline: 'Barista', phone: null, email: null, skills: [] } },
+    }]);
+    expect(f.reads).toEqual([{ table: 'hire_candidates', filters: { id: CAND_ID, org_id: ORG } }]);
+  });
+  it('leaves a field that was not sent out of p_changes', async () => {
+    const f = candFake({ answer: { word: 'ok' } });
+    await updateCandidate(f.ctx, { id: CAND_ID, name: 'Aina binti Ali', location: undefined });
+    expect(f.calls[0].args.p_changes).toEqual({ name: 'Aina binti Ali' });
+    expect(Object.keys(f.calls[0].args.p_changes as object)).toEqual(['name']);
+  });
+  it('refuses an empty change without calling the database', async () => {
+    const f = candFake();
+    expect(await updateCandidate(f.ctx, { id: CAND_ID })).toEqual({ ok: false, error: 'Nothing to change.' });
+    expect(f.calls).toEqual([]);
+  });
+  it('maps each word to its sentence', async () => {
+    const words: Record<string, string> = {
+      not_found: 'That candidate could not be found.',
+      forbidden: 'You do not have permission to make changes here.',
+      invalid_changes: GENERIC_SENTENCE,
+      too_long: 'One of the details is too long.',
+      invalid_email: 'Enter an email address like name@example.com.',
+      email_taken: 'Another candidate already has this email.',
+      invalid_name: 'Enter the candidate\'s name.',
+    };
+    for (const [word, sentence] of Object.entries(words)) {
+      const f = candFake({ answer: { word } });
+      expect(await updateCandidate(f.ctx, { id: CAND_ID, headline: 'x' })).toEqual({ ok: false, error: sentence });
+    }
+  });
+  it('logs only a code on failure', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const r = await updateCandidate(candFake({ error: { code: 'PGRST301', message: 'a@b.co' } }).ctx, { id: CAND_ID, headline: 'x' });
+    expect(r).toEqual({ ok: false, error: GENERIC_SENTENCE });
+    expect(spy).toHaveBeenCalledWith('[hire-capability] updateCandidate failed:', { code: 'PGRST301' });
+    spy.mockRestore();
+  });
+  it('still answers ok with an empty name when the read-back fails', async () => {
+    expect(await updateCandidate(candFake({ answer: { word: 'ok' }, name: null }).ctx, { id: CAND_ID, headline: 'x' }))
+      .toEqual({ ok: true, data: { id: CAND_ID, name: '' } });
+  });
+});
+
+describe('attachCandidateCv', () => {
+  const answering = (result: unknown, throws = false) => ({
+    rpc: async () => {
+      if (throws) throw new TypeError('network');
+      return result;
+    },
+  }) as never;
+  it('returns the function\'s word, calling it with the application and path', async () => {
+    const seen: unknown[] = [];
+    const client = { rpc: async (fn: string, args: unknown) => { seen.push([fn, args]); return { data: 'ok', error: null }; } } as never;
+    expect(await attachCandidateCv(client, APP_ID, 'org/job/cv.pdf')).toBe('ok');
+    expect(seen).toEqual([['hire_attach_cv', { p_application_id: APP_ID, p_cv_path: 'org/job/cv.pdf' }]]);
+    expect(await attachCandidateCv(answering({ data: 'already_attached', error: null }), APP_ID, 'p')).toBe('already_attached');
+  });
+  it('returns failed on an error, a throw or an odd answer, logging only a code', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await attachCandidateCv(answering({ data: null, error: { code: '42501', message: 'x' } }), APP_ID, 'p')).toBe('failed');
+    expect(spy).toHaveBeenCalledWith('[hire-capability] attachCandidateCv failed:', { code: '42501' });
+    expect(await attachCandidateCv(answering({}, true), APP_ID, 'p')).toBe('failed');
+    expect(await attachCandidateCv(answering({ data: 7, error: null }), APP_ID, 'p')).toBe('failed');
+    spy.mockRestore();
   });
 });
