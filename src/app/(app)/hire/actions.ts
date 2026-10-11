@@ -3,9 +3,14 @@
 import { revalidatePath } from 'next/cache';
 import { can } from '@/lib/auth/permissions';
 import { getViewer } from '@/lib/auth/viewer';
+import { APPLY_MESSAGES, CV_FILE_FIELD, CV_MAX_BYTES, chosenFile, cvFileProblem, fileSizeLabel } from '@/lib/hire/application-fields';
+import { type CandidateFormValues, addedMessage, candidateMessage, candidateProblems, parseSkills } from '@/lib/hire/candidate-fields';
 import {
+  type CandidateAdded,
   type CapResult,
   type HireWriteContext,
+  addCandidate,
+  attachCandidateCv,
   closeApplication,
   createJob,
   deleteJob,
@@ -14,12 +19,14 @@ import {
   reopenApplication,
   setJobStatus,
   updateApplicationForm,
+  updateCandidate,
   updateCareersPage,
   updateJob,
 } from '@/lib/hire/capabilities';
-import { signedCvUrl } from '@/lib/hire/cv-store';
+import { isPdf, removeCv, signedCvUrl, storeCv } from '@/lib/hire/cv-store';
 import { careersPath } from '@/lib/hire/public-careers';
 import { createClient } from '@/lib/supabase/server';
+import { serviceClient } from '@/lib/supabase/service';
 
 const FORBIDDEN: CapResult<never> = { ok: false, error: 'You do not have permission to make changes here.' };
 /** Every screen that shows jobs, applications, or numbers worked out from them. */
@@ -129,4 +136,241 @@ export async function viewCvAction(applicationId: unknown): Promise<{ ok: true; 
   if (!path) return { ok: false, error: CV_GONE };
   const url = await signedCvUrl(client, path);
   return url ? { ok: true, url } : { ok: false, error: CV_FAILED };
+}
+
+// ─── adding and editing a candidate by hand ─────────────────────────────────
+
+/** Every screen that shows a candidate's name or details: the job screens, and the talent pool. */
+const CANDIDATE_PATHS = [...JOB_PATHS, '/hire/talent-pool'];
+const NOT_SAVED = candidateMessage(null);
+const CANDIDATE_NOT_FOUND = candidateMessage('not_found');
+const CANDIDATE_NOT_LOADED = "This candidate's details could not be loaded. Please try again.";
+const PICK_A_JOB = 'Pick a job to attach a CV.';
+/**
+ * Longer than any field may be, so an absurd value is cut before it is checked.
+ * The cut counts UTF-16 units; the longest cover note allowed must arrive whole.
+ */
+const READ_LIMIT = 9000;
+/** The form's text fields, in the order the form shows them: the first one that is wrong is the one reported. */
+const CANDIDATE_FIELDS = [
+  'name', 'email', 'phone', 'headline', 'location', 'skills', 'source', 'job_id', 'cover_letter', 'cv_url',
+] as const satisfies readonly (keyof CandidateFormValues)[];
+
+/** A posted form, told by what it can do and not by its class (see the public apply action). */
+const isForm = (value: unknown): value is FormData =>
+  typeof value === 'object' && value !== null && typeof (value as { get?: unknown }).get === 'function';
+
+/** A posted file, told the same way: by the two things this file needs of it. */
+type Readable = { size: number; arrayBuffer: () => Promise<ArrayBuffer> };
+const isReadable = (value: unknown): value is Readable =>
+  typeof value === 'object' && value !== null
+  && typeof (value as { size?: unknown }).size === 'number'
+  && typeof (value as { arrayBuffer?: unknown }).arrayBuffer === 'function';
+
+/** One field as text: anything that is not text is empty, NUL is dropped, a text area's line break is one character. */
+function readText(formData: FormData, key: string): string {
+  const value = formData.get(key);
+  return typeof value === 'string' ? value.replace(/\u0000/g, '').replace(/\r\n?/g, '\n').slice(0, READ_LIMIT) : '';
+}
+
+/** The code of something that went wrong, and nothing else about it: a message can quote what it choked on. */
+const codeOf = (error: unknown) => {
+  const { code, name } = (error ?? {}) as { code?: unknown; name?: unknown };
+  return { code: code ?? name };
+};
+
+/**
+ * One yes-or-no question asked as the server itself. Only a plain `false` lets
+ * a file through: a yes, an error, a throw or anything else is a no.
+ */
+async function serviceSaysNo(service: ReturnType<typeof serviceClient>, fn: string, args: Record<string, string>): Promise<boolean> {
+  try {
+    const { data, error } = await service.rpc(fn, args);
+    if (error) console.error(`[hire/add-candidate] ${fn} failed:`, { code: error.code });
+    return !(!error && data === false);
+  } catch (error) {
+    console.error(`[hire/add-candidate] ${fn} failed:`, codeOf(error));
+    return true;
+  }
+}
+
+/**
+ * Stores a checked PDF and attaches it to an application that was just made.
+ * True only when the application now holds the file. Everything here is done
+ * as the server itself: the database lets no member write a file or its path.
+ * A file that was stored and then not attached is removed again.
+ */
+async function attachCv(orgId: string, jobId: string, applicationId: string, bytes: Uint8Array): Promise<boolean> {
+  let service: ReturnType<typeof serviceClient>;
+  try {
+    service = serviceClient();
+  } catch {
+    console.error('[hire/add-candidate] a CV was posted but the service role is not configured');
+    return false;
+  }
+  // A workspace that may not be sent files, then a job being flooded: both asked before the upload.
+  if (await serviceSaysNo(service, 'hire_cv_files_refused', { p_org_id: orgId })) return false;
+  if (await serviceSaysNo(service, 'hire_apply_throttled', { p_job_id: jobId })) return false;
+
+  let path: string | null = null;
+  try {
+    path = await storeCv(service, orgId, jobId, bytes);
+  } catch (error) {
+    console.error('[hire/add-candidate] storing a CV failed:', codeOf(error));
+  }
+  if (!path) return false;
+
+  const word = await attachCandidateCv(service, applicationId, path);
+  if (word === 'ok') return true;
+  try {
+    await removeCv(service, path);
+  } catch (error) {
+    console.error('[hire/add-candidate] removing a CV failed:', codeOf(error));
+  }
+  return false;
+}
+
+/**
+ * Adds a candidate by hand, with an application when a job is picked and a PDF
+ * CV when one is posted. The person is added as the member (their session, the
+ * database's own checks); only the file is handled as the server itself, and
+ * only once a new application exists to hold it. A file that could not be
+ * attached never undoes the add: the message says so.
+ *
+ * The values and the file are personal data. Nothing here logs them, the file's
+ * name or where it is stored.
+ */
+export async function addCandidateAction(formData: FormData): Promise<CapResult<CandidateAdded>> {
+  // 1. The guard, before anything is read.
+  const ctx = await writeCtx();
+  if (!ctx) return FORBIDDEN;
+  if (!isForm(formData)) return { ok: false, error: NOT_SAVED };
+
+  // 2. The fields, as text. What is known of the file without opening it.
+  const jobId = readText(formData, 'job_id').trim();
+  const values: CandidateFormValues = {
+    name: readText(formData, 'name'),
+    email: readText(formData, 'email'),
+    phone: readText(formData, 'phone'),
+    headline: readText(formData, 'headline'),
+    location: readText(formData, 'location'),
+    skills: readText(formData, 'skills'),
+    source: readText(formData, 'source'),
+    job_id: jobId,
+    // With no job there is no application to hold these: they are dropped, not refused.
+    cover_letter: jobId ? readText(formData, 'cover_letter') : '',
+    cv_url: jobId ? readText(formData, 'cv_url') : '',
+  };
+  const posted = formData.get(CV_FILE_FIELD);
+  const file = chosenFile(posted);
+
+  // 3. The fields first, then what the file says of itself.
+  const problems = candidateProblems(values, false);
+  if (jobId && !UUID.test(jobId)) problems.job_id = candidateMessage('job_not_found');
+  const wrong = CANDIDATE_FIELDS.find((field) => problems[field]);
+  if (wrong) return { ok: false, error: problems[wrong] ?? NOT_SAVED };
+  if (file && !jobId) return { ok: false, error: PICK_A_JOB };
+  const fileProblem = cvFileProblem(file);
+  if (fileProblem) return { ok: false, error: fileProblem };
+
+  // 4. The bytes, read once. They decide what the file is and how big, whatever it said of itself. Nothing is saved yet.
+  let bytes: Uint8Array | null = null;
+  if (file) {
+    if (!isReadable(posted)) return { ok: false, error: APPLY_MESSAGES.cvFileType };
+    try {
+      bytes = new Uint8Array(await posted.arrayBuffer());
+    } catch (error) {
+      console.error('[hire/add-candidate] the posted file could not be read:', codeOf(error));
+      return { ok: false, error: NOT_SAVED };
+    }
+    if (bytes.length > CV_MAX_BYTES) return { ok: false, error: APPLY_MESSAGES.cvFileTooBig(fileSizeLabel(bytes.length)) };
+    if (!isPdf(bytes)) return { ok: false, error: APPLY_MESSAGES.cvFileType };
+  }
+
+  // 5. The add, as the member. A refusal goes back as it is.
+  const result = await addCandidate(ctx, {
+    name: values.name,
+    email: values.email,
+    phone: values.phone,
+    headline: values.headline,
+    location: values.location,
+    skills: parseSkills(values.skills),
+    source: values.source,
+    job_id: jobId || null,
+    cover_letter: values.cover_letter,
+    cv_url: values.cv_url,
+  });
+  if (!result.ok) return result;
+  const { data } = result;
+
+  // 6. The file, only for an application this call made. One that already existed is never given a file here.
+  let cvNotAttached = false;
+  if (bytes) {
+    const attached = data.application === 'created' && data.application_id !== null && jobId !== ''
+      ? await attachCv(ctx.orgId, jobId, data.application_id, bytes)
+      : false;
+    cvNotAttached = !attached;
+  }
+
+  // 7. What happened, in one sentence, and the screens that show it.
+  for (const path of CANDIDATE_PATHS) revalidatePath(path);
+  return { ok: true, data: { ...data, message: addedMessage(data, cvNotAttached) } };
+}
+
+/** What the Edit form is filled with: text for every field, blank for none. */
+export type CandidateForEdit = {
+  id: string; name: string; email: string; phone: string; headline: string; location: string; skills: string; source: string;
+};
+
+/**
+ * One candidate's details for the Edit form, contact details included. Only for
+ * someone who may edit, and only from their own workspace: this is the one place
+ * an email or a phone number leaves the server for a hiring screen.
+ */
+export async function getCandidateAction(id: unknown): Promise<CapResult<CandidateForEdit>> {
+  const ctx = await writeCtx();
+  if (!ctx) return FORBIDDEN;
+  if (typeof id !== 'string' || !UUID.test(id)) return { ok: false, error: CANDIDATE_NOT_FOUND };
+  let row: Record<string, unknown> | null;
+  try {
+    const { data, error } = await ctx.client
+      .from('hire_candidates')
+      .select('id,name,email,phone,headline,location,skills,source')
+      .eq('id', id)
+      .eq('org_id', ctx.orgId)
+      .maybeSingle();
+    if (error) {
+      console.error('[hire/get-candidate] the read failed:', { code: error.code });
+      return { ok: false, error: CANDIDATE_NOT_LOADED };
+    }
+    row = data as Record<string, unknown> | null;
+  } catch (error) {
+    console.error('[hire/get-candidate] the read failed:', codeOf(error));
+    return { ok: false, error: CANDIDATE_NOT_LOADED };
+  }
+  if (!row) return { ok: false, error: CANDIDATE_NOT_FOUND };
+  const text = (value: unknown) => (typeof value === 'string' ? value : '');
+  const skills = Array.isArray(row.skills) ? row.skills.filter((skill): skill is string => typeof skill === 'string') : [];
+  return {
+    ok: true,
+    data: {
+      id,
+      name: text(row.name),
+      email: text(row.email),
+      phone: text(row.phone),
+      headline: text(row.headline),
+      location: text(row.location),
+      skills: skills.join(', '),
+      source: text(row.source),
+    },
+  };
+}
+
+/** Editing a candidate's details. The input is the candidate's id and the fields that changed. */
+export async function updateCandidateAction(input: unknown): Promise<CapResult<{ id: string; name: string }>> {
+  const ctx = await writeCtx();
+  if (!ctx) return FORBIDDEN;
+  const result = await updateCandidate(ctx, input as never);
+  if (result.ok) for (const path of CANDIDATE_PATHS) revalidatePath(path);
+  return result;
 }
