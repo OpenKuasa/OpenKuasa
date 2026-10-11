@@ -5,9 +5,10 @@ const PATHS = ['o/j/a.pdf', 'o/j/b.pdf', 'o/j/c.pdf'];
 
 type Result = { data?: unknown; error: { code?: string } | null };
 
-function fake(opts: { due?: Result; remove?: Result; done?: Result; there?: string[] }) {
+function fake(opts: { due?: Result; remove?: Result; done?: Result; there?: string[]; queue?: Result }) {
   const rpc = vi.fn(async (name: string) => {
     if (name === 'hire_cv_deletions_due') return opts.due ?? { data: [], error: null };
+    if (name === 'hire_cv_queue_orphans') return opts.queue ?? { data: 0, error: null };
     return opts.done ?? { data: null, error: null };
   });
   const remove = vi.fn<(paths: string[]) => Promise<Result>>(
@@ -59,6 +60,24 @@ describe('cleanCvFiles', () => {
     const f = fake({ due: { data: PATHS, error: null }, remove: { data: [], error: null }, there: PATHS });
     expect(await cleanCvFiles(f.service)).toEqual({ removed: 0, failed: true });
     expect(f.rpc).not.toHaveBeenCalledWith('hire_cv_deletions_done', expect.anything());
+  });
+
+  it('first queues the files no application holds, then reads what is due', async () => {
+    const f = fake({ due: { data: PATHS, error: null } });
+    await cleanCvFiles(f.service);
+    expect(f.rpc.mock.calls[0][0]).toBe('hire_cv_queue_orphans');
+    expect(f.rpc.mock.calls[1][0]).toBe('hire_cv_deletions_due');
+  });
+
+  it('still removes what is due when the queueing fails, and says the run failed', async () => {
+    const f = fake({ due: { data: PATHS, error: null }, queue: { data: null, error: { code: '42501' } } });
+    expect(await cleanCvFiles(f.service)).toEqual({ removed: 3, failed: true });
+    expect(f.rpc).toHaveBeenCalledWith('hire_cv_deletions_done', { p_paths: PATHS });
+  });
+
+  it('says the run failed when queueing fails and nothing is due', async () => {
+    const f = fake({ queue: { data: null, error: { code: '42501' } } });
+    expect(await cleanCvFiles(f.service)).toEqual({ removed: 0, failed: true });
   });
 
   it('fails when the due read errors', async () => {

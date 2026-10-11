@@ -10,6 +10,12 @@ export async function cleanCvFiles(
   service: SupabaseClient,
   limit = 100,
 ): Promise<{ removed: number; failed: boolean }> {
+  // A file stored for an application that was never recorded (the server stopped between the two, or
+  // could not tell) is held by nothing: after an hour it is queued like the file of a deleted application.
+  const queued = await service.rpc('hire_cv_queue_orphans');
+  const queueFailed = Boolean(queued.error);
+  if (queued.error) console.error('cv cleanup: queueing unheld files failed', queued.error.code);
+
   const due = await service.rpc('hire_cv_deletions_due', { p_limit: limit });
   if (due.error) {
     console.error('cv cleanup: read failed', due.error.code);
@@ -18,7 +24,7 @@ export async function cleanCvFiles(
   const paths = Array.isArray(due.data)
     ? due.data.filter((p): p is string => typeof p === 'string')
     : [];
-  if (paths.length === 0) return { removed: 0, failed: false };
+  if (paths.length === 0) return { removed: 0, failed: queueFailed };
 
   const gone = await removeCvs(service, paths);
   if (gone.length === 0) return { removed: 0, failed: true };
@@ -28,5 +34,5 @@ export async function cleanCvFiles(
     console.error('cv cleanup: mark done failed', done.error.code);
     return { removed: 0, failed: true };
   }
-  return { removed: gone.length, failed: gone.length < paths.length };
+  return { removed: gone.length, failed: queueFailed || gone.length < paths.length };
 }
