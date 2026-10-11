@@ -6,8 +6,12 @@ import { getViewer } from '@/lib/auth/viewer';
 import {
   type CapResult,
   type HireWriteContext,
+  closeApplication,
   createJob,
   deleteJob,
+  moveApplication,
+  rateApplication,
+  reopenApplication,
   setJobStatus,
   updateApplicationForm,
   updateCareersPage,
@@ -18,7 +22,7 @@ import { careersPath } from '@/lib/hire/public-careers';
 import { createClient } from '@/lib/supabase/server';
 
 const FORBIDDEN: CapResult<never> = { ok: false, error: 'You do not have permission to make changes here.' };
-/** Every screen that shows jobs, job titles or numbers worked out from them. */
+/** Every screen that shows jobs, applications, or numbers worked out from them. */
 const JOB_PATHS = [
   '/hire/jobs',
   '/hire/careers-page',
@@ -56,6 +60,23 @@ export async function setJobStatusAction(input: unknown) {
 }
 export async function deleteJobAction(input: unknown) {
   return run((ctx) => deleteJob(ctx, input as never));
+}
+
+/**
+ * Changing an application: a stage move, a rejection or withdrawal, a reopening, a rating.
+ * The input is an application id and the change, nothing else; the workspace is the session's.
+ */
+export async function moveApplicationAction(input: unknown) {
+  return run((ctx) => moveApplication(ctx, input as never));
+}
+export async function closeApplicationAction(input: unknown) {
+  return run((ctx) => closeApplication(ctx, input as never));
+}
+export async function reopenApplicationAction(input: unknown) {
+  return run((ctx) => reopenApplication(ctx, input as never));
+}
+export async function rateApplicationAction(input: unknown) {
+  return run((ctx) => rateApplication(ctx, input as never));
 }
 
 /** The careers page is its own thing: it does not change what the job screens show. */
