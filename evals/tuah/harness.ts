@@ -17,7 +17,7 @@ import { getCurrentOrg } from '@/lib/auth/current-org';
 import { collectNames, type KnownNames } from '@/lib/chat/change-titles';
 import { APPLY_TOOL, ASK_PREFIX, isDelegation, type Proposal } from '@/lib/chat/delegation';
 import { createSupabaseHireData } from '@/lib/hire/supabase';
-import type { Application } from '@/lib/hire/types';
+import type { Application, Candidate, Job } from '@/lib/hire/types';
 import { createSupabaseReachData } from '@/lib/reach/supabase';
 
 /** Marks every row an eval creates, so cleanup never touches anything else. */
@@ -120,10 +120,10 @@ export class Conversation {
     /** Run as someone who can look but not change, whatever the account's role. */
     private viewer = false,
     /**
-     * Extra applications and one CV a case supplies, so no row or file is
-     * written anywhere. Without it, Lekir gets no CV reader, as before.
+     * Extra applications, candidates, jobs and one CV a case supplies, so no
+     * row or file is written anywhere. Without a CV, Lekir gets no CV reader.
      */
-    private hire?: { applications: Application[]; cv: Uint8Array },
+    private hire?: { applications?: Application[]; cv?: Uint8Array; candidates?: Candidate[]; jobs?: Job[] },
   ) {}
 
   async ask(text: string): Promise<Turn> {
@@ -152,6 +152,8 @@ export class Conversation {
     const canWrite = !this.viewer && this.workspace.role !== 'viewer';
     const realHire = createSupabaseHireData(client, orgId);
     const extra = this.hire;
+    const extraApplications = extra?.applications ?? [];
+    const extraCv = extra?.cv;
     const result = runTuah(
       this.messages,
       {
@@ -171,10 +173,12 @@ export class Conversation {
         data: extra
           ? {
               ...realHire,
-              listApplications: async () => [...extra.applications, ...(await realHire.listApplications())],
+              listJobs: async () => [...(extra.jobs ?? []), ...(await realHire.listJobs())],
+              listApplications: async () => [...extraApplications, ...(await realHire.listApplications())],
               // An application has a candidate behind it: a lookup by name must find the person too.
               listCandidates: async () => [
-                ...extra.applications.map((a) => ({
+                ...(extra.candidates ?? []),
+                ...extraApplications.map((a) => ({
                   id: a.candidate_id, name: a.candidate_name, email: null, phone: null, headline: null, location: null,
                   skills: [], source: a.source, pool_status: 'none' as const, created_at: a.created_at,
                 })),
@@ -182,12 +186,12 @@ export class Conversation {
               ],
             }
           : realHire,
-        files: extra
+        files: extraCv
           ? {
               readCv: async (id) => {
-                const found = extra.applications.find((a) => a.id === id);
+                const found = extraApplications.find((a) => a.id === id);
                 return found
-                  ? { state: 'ok', bytes: extra.cv, candidate: found.candidate_name, job: found.job_title }
+                  ? { state: 'ok', bytes: extraCv, candidate: found.candidate_name, job: found.job_title }
                   : { state: 'missing' };
               },
             }
