@@ -1,7 +1,9 @@
 -- Lekiu member-tier access check. Leaves nothing behind: the block always ends
 -- with RAISE, so every insert below is rolled back. Since the payroll slice a
 -- member reads their own payslip (and its lines) only once it is paid, and
--- their own letter only once it is issued. Read the message:
+-- their own letter only once it is issued. Since the performance slice a
+-- member reads their own review only once it is released, an announcement
+-- only once it is published, and no read mark but their own. Read the message:
 --   PEOPLE_RLS_CHECK PASSED ...   or   PEOPLE_RLS_CHECK FAILED: <what went wrong>
 -- When not to run it. It rebuilds the demo HR rows inside its transaction and
 -- holds them until the rollback, and the scheduled demo reseed commits the
@@ -11,8 +13,8 @@
 --     leave it a few minutes);
 --   * do not run it at the same time as another people check
 --     (people_leave_check, people_claims_overtime_check,
---     people_attendance_check, people_payroll_check): each of them rebuilds
---     the demo too;
+--     people_attendance_check, people_payroll_check,
+--     people_performance_check): each of them rebuilds the demo too;
 --   * do not run it while a migration is being applied.
 do $$
 declare
@@ -30,6 +32,8 @@ declare
   last_month date := (date_trunc('month', current_date) - interval '1 month')::date;
   demo uuid;
   linked uuid;
+  a_pub uuid;
+  a_draft uuid;
   n int;
   n2 int;
   t text;
@@ -51,8 +55,8 @@ begin
       ('hr_claims','personal'), ('hr_overtime_records','personal'),
       ('hr_attendance_days','personal'), ('hr_timesheet_entries','personal'), ('hr_shifts','personal'), ('hr_public_holidays','shared'),
       ('hr_payroll_runs','hr'), ('hr_payslips','paid'), ('hr_payslip_lines','lines'), ('hr_payment_vouchers','hr'),
-      ('hr_goals','personal'), ('hr_scorecards','personal'), ('hr_reviews','personal'), ('hr_trainings','shared'), ('hr_training_enrolments','personal'),
-      ('hr_announcements','shared'), ('hr_documents','personal'), ('hr_letters','issued'), ('hr_settings','hr')
+      ('hr_goals','personal'), ('hr_scorecards','personal'), ('hr_reviews','released'), ('hr_trainings','shared'), ('hr_training_enrolments','personal'),
+      ('hr_announcements','published'), ('hr_documents','personal'), ('hr_letters','issued'), ('hr_settings','hr')
     ) as x(t, k)
   loop
     select p.qual into q from pg_policies p
@@ -61,13 +65,16 @@ begin
       fails := array_append(fails, format('%s has no read policy', t));
     elsif k = 'shared' and (q not like '%is_org_member(org_id)%' or q like '%is_org_admin%' or q like '%is_own_employee%') then
       fails := array_append(fails, format('%s should be readable by every member, its rule is: %s', t, q));
-    elsif k in ('personal', 'paid', 'issued') and not (q like '%is_org_admin(org_id)%' and q like '%is_own_employee(employee_id)%'
+    elsif k in ('personal', 'paid', 'issued', 'released') and not (q like '%is_org_admin(org_id)%' and q like '%is_own_employee(employee_id)%'
         and q like '%is_demo_org(org_id)%' and q like '%is_org_member(org_id)%') then
       fails := array_append(fails, format('%s should be HR-or-own, its rule is: %s', t, q));
     elsif k = 'lines' and not (q like '%hr_payslips%' and q like '%is_org_admin(p.org_id)%'
         and q like '%is_own_employee(p.employee_id)%'
         and q like '%is_demo_org(p.org_id)%' and q like '%is_org_member(p.org_id)%') then
       fails := array_append(fails, format('%s should be read through its payslip, its rule is: %s', t, q));
+    elsif k = 'published' and not (q like '%is_org_admin(org_id)%' and q like '%is_org_member(org_id)%'
+        and q like '%is_demo_org(org_id)%' and q like '%published%' and q not like '%is_own_employee%') then
+      fails := array_append(fails, format('%s should be for owners and admins, and for members once published, its rule is: %s', t, q));
     elsif k = 'hr' and (q not like '%is_org_admin(org_id)%' or q not like '%is_demo_org(org_id)%' or q like '%is_own_employee%') then
       fails := array_append(fails, format('%s should be HR only, its rule is: %s', t, q));
     end if;
@@ -80,7 +87,11 @@ begin
     -- are not compared as text (how a condition is printed is the database's
     -- business); they are proven by what a member reads further down, where
     -- member one has a paid and a draft payslip, a line on each, and an issued
-    -- and a draft letter, and by people_payroll_check.sql.
+    -- and a draft letter, and by people_payroll_check.sql. A review (the
+    -- employee reads their own only once it is released) and an announcement
+    -- (a member reads it only once it is published) likewise: member one has
+    -- a released and a draft review, the workspace a published and a draft
+    -- announcement, and people_performance_check.sql proves the rest.
     if k in ('personal', 'hr', 'shared') then
       ref := case k when 'hr' then 'hr_payroll_runs' when 'shared' then 'hr_departments' else 'hr_employee_private' end;
       select p.qual into ref_rule from pg_policies p
@@ -143,6 +154,26 @@ begin
     fails := array_append(fails, 'signed-in users should read hr_statutory_rules and nothing more');
   end if;
 
+  -- ---- read marks: one's own rows, never written directly -----------------
+  select count(*) into n from pg_policies p
+  where p.schemaname = 'public' and p.tablename = 'hr_announcement_reads';
+  select count(*) into n2 from pg_policies p
+  where p.schemaname = 'public' and p.tablename = 'hr_announcement_reads' and p.roles = array['authenticated']::name[]
+    and ((p.policyname = 'hr_announcement_reads_select' and p.cmd = 'SELECT' and p.permissive = 'PERMISSIVE'
+          and p.qual like '%user_id = %auth.uid()%' and p.qual not like '% or %')
+      or (p.policyname = 'mfa_required' and p.cmd = 'ALL' and p.permissive = 'RESTRICTIVE' and p.qual like '%mfa_ok()%'));
+  if n <> 2 or n2 <> 2 then fails := array_append(fails, 'hr_announcement_reads does not have exactly its own-rows read policy and the second-factor one'); end if;
+  if not (select c.relrowsecurity from pg_class c where c.oid = 'public.hr_announcement_reads'::regclass) then
+    fails := array_append(fails, 'hr_announcement_reads does not have row level security on');
+  end if;
+  if has_table_privilege('anon', 'public.hr_announcement_reads', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE')
+     or has_any_column_privilege('anon', 'public.hr_announcement_reads', 'SELECT, INSERT, UPDATE')
+     or not has_table_privilege('authenticated', 'public.hr_announcement_reads', 'SELECT')
+     or has_table_privilege('authenticated', 'public.hr_announcement_reads', 'INSERT, UPDATE, DELETE, TRUNCATE')
+     or has_any_column_privilege('authenticated', 'public.hr_announcement_reads', 'INSERT, UPDATE') then
+    fails := array_append(fails, 'signed-in users should read hr_announcement_reads and nothing more');
+  end if;
+
   -- ---- people and a workspace ----------------------------------------
   insert into auth.users (id, instance_id, aud, role, email, encrypted_password,
     email_confirmed_at, created_at, updated_at, raw_app_meta_data, raw_user_meta_data, is_anonymous)
@@ -200,8 +231,11 @@ begin
   values (org, e1, 'Confirmation', 'Confirmation of employment', 'issued', current_date),
          (org, e1, 'Warning', 'Not sent yet', 'draft', null),
          (org, e2, 'Confirmation', 'Confirmation of employment', 'issued', current_date);
-  insert into public.hr_reviews (org_id, employee_id, period, rating, score)
-  values (org, e1, 'H1', 'meets', 3.5), (org, e2, 'H1', 'exceeds', 4.5);
+  -- Reviews: one released and one still a draft for member one, one released for member two.
+  insert into public.hr_reviews (org_id, employee_id, period, rating, score, status, released_at)
+  values (org, e1, 'H1 2025', 'meets', 3.5, 'released', now()),
+         (org, e1, 'H2 2025', 'below', 2.5, 'draft', null),
+         (org, e2, 'H1 2025', 'exceeds', 4.5, 'released', now());
   insert into public.hr_documents (org_id, employee_id, title, doc_type)
   values (org, e1, 'Contract', 'contract'), (org, e2, 'Contract', 'contract');
   insert into public.hr_payment_vouchers (org_id, voucher_no, payee, voucher_type, amount_cents, issued_date)
@@ -210,7 +244,10 @@ begin
   insert into public.hr_departments (org_id, name) values (org, 'Sales');
   insert into public.hr_public_holidays (org_id, name, holiday_date) values (org, 'Labour Day', current_date);
   insert into public.hr_trainings (org_id, title) values (org, 'Safety refresher');
-  insert into public.hr_announcements (org_id, title) values (org, 'Welcome');
+  -- Announcements: one published and one still a draft. Each member has read the published one.
+  insert into public.hr_announcements (org_id, title) values (org, 'Welcome') returning id into a_pub;
+  insert into public.hr_announcements (org_id, title, status, published_at) values (org, 'Not posted yet', 'draft', null) returning id into a_draft;
+  insert into public.hr_announcement_reads (announcement_id, user_id) values (a_pub, m1), (a_pub, m2), (a_pub, admin_id);
 
   -- ---- as member one ---------------------------------------------------
   perform set_config('request.jwt.claims', json_build_object('sub', m1, 'role', 'authenticated', 'aal', 'aal1')::text, true);
@@ -229,6 +266,17 @@ begin
   if n <> 0 then fails := array_append(fails, 'a member reads a line of a payslip that is not their own paid one'); end if;
   execute format('select count(*) from public.hr_letters where org_id = %L and (status <> ''issued'' or employee_id <> %L)', org, e1) into n;
   if n <> 0 then fails := array_append(fails, 'a member reads a letter that is not their own issued one'); end if;
+  execute format('select count(*) from public.hr_reviews where org_id = %L and (status <> ''released'' or employee_id <> %L)', org, e1) into n;
+  if n <> 0 then fails := array_append(fails, 'a member reads a review that is not their own released one'); end if;
+  execute format('select count(*) from public.hr_announcements where org_id = %L and (status <> ''published'' or id <> %L)', org, a_pub) into n;
+  if n <> 0 then fails := array_append(fails, 'a member reads an announcement that is not published'); end if;
+  execute format('select count(*), count(*) filter (where user_id = %L) from public.hr_announcement_reads', m1) into n, n2;
+  if n <> 1 or n2 <> 1 then fails := array_append(fails, format('a member reads %s read marks, %s of them their own, expected only their own 1', n, n2)); end if;
+  begin
+    execute format('insert into public.hr_announcement_reads (announcement_id, user_id) values (%L, %L)', a_draft, m1);
+    fails := array_append(fails, 'a member wrote a read mark directly');
+  exception when insufficient_privilege then null;
+  end;
   select count(*) into n from public.hr_statutory_rules;
   if n <> 3 then fails := array_append(fails, format('a member reads %s statutory rules, expected 3', n)); end if;
   foreach t in array hr_only loop
@@ -261,8 +309,8 @@ begin
   set local role authenticated;
   foreach t in array personal loop
     execute format('select count(*) from public.%I where org_id = %L', t, org) into n;
-    -- Two of everything, but four payslips with a line each (paid and draft), and three letters.
-    n2 := case t when 'hr_payslips' then 4 when 'hr_payslip_lines' then 4 when 'hr_letters' then 3 else 2 end;
+    -- Two of everything, but four payslips with a line each (paid and draft), three letters and three reviews.
+    n2 := case t when 'hr_payslips' then 4 when 'hr_payslip_lines' then 4 when 'hr_letters' then 3 when 'hr_reviews' then 3 else 2 end;
     if n <> n2 then fails := array_append(fails, format('the admin reads %s rows of %s, expected %s', n, t, n2)); end if;
   end loop;
   foreach t in array hr_only loop
@@ -271,6 +319,10 @@ begin
     n2 := case t when 'hr_payroll_runs' then 2 else 1 end;
     if n <> n2 then fails := array_append(fails, format('the admin reads %s rows of %s, expected %s', n, t, n2)); end if;
   end loop;
+  -- Both announcements, the draft included; and of the read marks only their own.
+  execute format('select count(*) from public.hr_announcements where org_id = %L', org) into n;
+  select count(*) into n2 from public.hr_announcement_reads;
+  if n <> 2 or n2 <> 1 then fails := array_append(fails, format('the admin reads %s announcements and %s read marks, expected 2 and their own 1', n, n2)); end if;
   reset role;
 
   -- ---- as the owner of another workspace -------------------------------
@@ -280,6 +332,8 @@ begin
     execute format('select count(*) from public.%I where org_id = %L', t, org) into n;
     if n <> 0 then fails := array_append(fails, format('another workspace reads %s rows of %s', n, t)); end if;
   end loop;
+  select count(*) into n from public.hr_announcement_reads;
+  if n <> 0 then fails := array_append(fails, format('another workspace reads %s read marks', n)); end if;
   reset role;
 
   -- ---- a member who is removed loses their own rows at once -------------
@@ -294,6 +348,8 @@ begin
   if n <> 0 then fails := array_append(fails, 'a removed member still reads the lines of their payslip'); end if;
   execute format('select count(*) from public.hr_letters where org_id = %L', org) into n;
   if n <> 0 then fails := array_append(fails, 'a removed member still reads their letter'); end if;
+  execute format('select (select count(*) from public.hr_reviews where org_id = %L) + (select count(*) from public.hr_announcements where org_id = %L)', org, org) into n;
+  if n <> 0 then fails := array_append(fails, 'a removed member still reads a review or an announcement'); end if;
   reset role;
 
   -- ---- the demo reseed keeps its shape when it runs again ---------------
