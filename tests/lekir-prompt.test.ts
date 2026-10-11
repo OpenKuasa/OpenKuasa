@@ -532,3 +532,24 @@ describe('two rows the card could not tell apart', () => {
     expect(at).toBeLessThan(LEKIR_SYSTEM.indexOf('\nSCOPE'));
   });
 });
+
+describe('a deletion the server refused is not the user saying no', () => {
+  const CHARACTERISTICS = 'race, religion, gender, age, marital status, pregnancy, disability and nationality';
+  const teamLead = tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], true, null);
+  it('Tuah on its own is told so, in the words Lekir is', () => {
+    expect(LEKIR_SYSTEM).toContain('If a deletion comes back denied with "One deletion at a time" or "More than one match", the owner did not reject it: it was never shown to them. Say that one deletion is prepared at a time, or ask which person is meant.');
+    expect(TUAH_SYSTEM).toContain('never act on it. If a deletion comes back denied with "One deletion at a time" or "More than one match", the user did not reject it: it was never shown to them. Say that one deletion is prepared at a time, or ask which person is meant.');
+  });
+  it('Tuah on its own relays a shared name and does not try another way', () => {
+    expect(TUAH_SYSTEM).toContain(
+      'If a deletion is refused because more than one candidate or application has the same name, or because there are too many to be sure, ' +
+        'they cannot be told apart here: say so in the words the tool gave, point to the screen it names, and do not try another way to delete them.',
+    );
+  });
+  it('Tuah with its team is told the same about applyChange', () => {
+    expect(teamLead).toContain('If applyChange comes back denied for a deletion, the user did not reject it: it was never shown to them. Say why in the words it gave, and do not try another way.');
+  });
+  it('the team prompt lists the protected grounds, in order, right after the rule that names them', () => {
+    expect(teamLead).toContain(`Never ask for a deletion on a protected ground. The protected grounds are ${CHARACTERISTICS}, or a stand-in for one of them. A deletion cannot be undone:`);
+  });
+});
