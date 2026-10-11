@@ -598,6 +598,26 @@ export function AddCandidateForm({
 
 const NO_JOBS: { id: string; title: string }[] = [];
 
+/**
+ * What an edit sends: the candidate's id and only the fields that differ from what the form opened with.
+ *
+ * Skills are compared as lists, so a line that reads the same is not a change and no skills are sent.
+ * A skill saved with a comma inside it (possible before a skill was refused one) is therefore left
+ * whole by an edit of anything else. Once the line itself is changed it is sent as it reads, every
+ * comma separating, as the field's help says: "Sales, B2B" becomes two skills. The form shows it as
+ * two already, and cannot tell which comma was once part of a skill.
+ */
+export function candidateChanges(id: string, initial: CandidateFormValues, values: CandidateFormValues): CandidateChanges {
+  const changes: CandidateChanges = { id };
+  for (const field of ['name', 'email', 'phone', 'headline', 'location', 'source'] as const) {
+    // A blank value clears the field (the name cannot be blank: the form's own check stops that).
+    if (values[field].trim() !== initial[field].trim()) changes[field] = values[field].trim();
+  }
+  const skills = parseSkills(values.skills);
+  if (JSON.stringify(skills) !== JSON.stringify(parseSkills(initial.skills))) changes.skills = skills;
+  return changes;
+}
+
 /** The Edit form on its own. `onSubmit` is given the candidate's id and only the fields that changed. */
 export function EditCandidateForm({
   initial: stored,
@@ -613,18 +633,15 @@ export function EditCandidateForm({
     location: stored.location, skills: stored.skills, source: stored.source,
   }));
 
-  function send(values: CandidateFormValues) {
-    const changes: CandidateChanges = { id: stored.id };
-    for (const field of ['name', 'email', 'phone', 'headline', 'location', 'source'] as const) {
-      // A blank value clears the field (the name cannot be blank: the form's own check stops that).
-      if (values[field].trim() !== initial[field].trim()) changes[field] = values[field].trim();
-    }
-    const skills = parseSkills(values.skills);
-    if (JSON.stringify(skills) !== JSON.stringify(parseSkills(initial.skills))) changes.skills = skills;
-    onSubmit(changes);
-  }
-
-  return <CandidateForm mode="edit" jobs={NO_JOBS} initial={initial} onSend={send} {...shell} />;
+  return (
+    <CandidateForm
+      mode="edit"
+      jobs={NO_JOBS}
+      initial={initial}
+      onSend={(values) => onSubmit(candidateChanges(stored.id, initial, values))}
+      {...shell}
+    />
+  );
 }
 
 /**

@@ -53,7 +53,8 @@ vi.mock('@/components/ui/dropdown-menu', () => {
 
 import { ApplicationActions, ApplicationMenu, type ApplicationSubject } from '@/screens/hire/application-actions';
 import { ApplicationRow, type ApplicationRowData } from '@/screens/hire/application-details';
-import { AddCandidate, AddCandidateForm, EditCandidateForm } from '@/screens/hire/candidate-forms';
+import { AddCandidate, AddCandidateForm, EditCandidateForm, candidateChanges } from '@/screens/hire/candidate-forms';
+import { EMPTY_CANDIDATE_FORM } from '@/lib/hire/candidate-fields';
 import CandidatesScreen from '@/screens/hire/candidates';
 
 const ID = '44444444-4444-4444-8444-444444444444';
@@ -351,6 +352,31 @@ describe('the Edit candidate form', () => {
   it('asks the server for nothing just by being drawn', () => {
     editForm();
     expect(mocks.action).not.toHaveBeenCalled();
+  });
+});
+
+/** What the Edit form holds for a stored candidate, and what it holds after some fields were retyped. */
+const held = (over: Partial<typeof STORED> = {}) => {
+  const { id: _id, ...fields } = { ...STORED, ...over };
+  return { ...EMPTY_CANDIDATE_FORM, ...fields };
+};
+
+describe('what an edit sends when a stored skill has a comma in it', () => {
+  // Possible for a candidate saved before a skill was refused a comma. The form shows "Sales, B2B, Excel".
+  const stored = held({ skills: ['Sales, B2B', 'Excel'].join(', ') });
+
+  it('sends no skills when the skills line was not touched, so the stored skill is left whole', () => {
+    expect(candidateChanges(CANDIDATE, stored, { ...stored })).toEqual({ id: CANDIDATE });
+    expect(candidateChanges(CANDIDATE, stored, { ...stored, phone: '+60198887766' })).toEqual({ id: CANDIDATE, phone: '+60198887766' });
+    // Retyped to the same line, or with other spacing: still not a change.
+    expect(candidateChanges(CANDIDATE, stored, { ...stored, skills: ' Sales,B2B ,Excel, ' })).toEqual({ id: CANDIDATE });
+  });
+
+  it('sends the line as it reads once it was edited: every comma separates, as the form says', () => {
+    expect(candidateChanges(CANDIDATE, stored, { ...stored, skills: 'Sales, B2B, Excel, Negotiation' })).toEqual({
+      id: CANDIDATE, skills: ['Sales', 'B2B', 'Excel', 'Negotiation'],
+    });
+    for (const skill of candidateChanges(CANDIDATE, stored, { ...stored, skills: 'Sales, B2B' }).skills ?? ['a,b']) expect(skill).not.toContain(',');
   });
 });
 

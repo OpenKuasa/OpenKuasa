@@ -533,7 +533,11 @@ const candidateFields = (forEdit: boolean) => {
     phone: text(CANDIDATE_LIMITS.phone, `The candidate's phone number. ${one}`),
     headline: text(CANDIDATE_LIMITS.headline, `A short line about the candidate, for example "Barista with 3 years in cafes". ${one}`),
     location: text(CANDIDATE_LIMITS.location, `Where the candidate is based. ${one}`),
-    skills: z.array(z.string().trim().min(1).max(CANDIDATE_LIMITS.skill)).max(CANDIDATE_LIMITS.skills).optional()
+    // One skill to an entry. The forms hold skills as one comma-separated line, so a comma inside a skill
+    // would be read back as two. A refine and not a pattern: the JSON Schema a model is given stays as it was.
+    skills: z.array(
+      z.string().trim().min(1).max(CANDIDATE_LIMITS.skill).refine((skill) => !skill.includes(','), 'A skill cannot contain a comma.'),
+    ).max(CANDIDATE_LIMITS.skills).optional()
       .describe(`Up to 20 skills, each up to 40 characters, as stated by the user or in the CV. ${many}`),
     source: text(CANDIDATE_LIMITS.source, `Where the candidate came from, for example "Referral". ${one}`),
   };

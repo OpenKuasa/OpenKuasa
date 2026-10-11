@@ -759,6 +759,24 @@ describe('candidate schemas', () => {
     expect(updateCandidateInput.safeParse({ id: CAND_ID, name: '  ' }).success).toBe(false);
     expect(updateCandidateInput.safeParse({ id: CAND_ID, email: null }).success).toBe(true);
   });
+  it('refuse a skill that contains a comma, on an add and on an edit: the forms hold skills as one comma-separated line', () => {
+    const NO_COMMA = 'A skill cannot contain a comma.';
+    const add = addCandidateInput.safeParse({ name: 'A', skills: ['Excel', 'Sales, B2B'] });
+    expect(add.success).toBe(false);
+    expect(add.error?.issues[0]?.message).toBe(NO_COMMA);
+    const edit = updateCandidateInput.safeParse({ id: CAND_ID, skills: ['Office (Word, Excel)'] });
+    expect(edit.success).toBe(false);
+    expect(edit.error?.issues[0]?.message).toBe(NO_COMMA);
+    // The same skills, one to an entry, are taken.
+    expect(addCandidateInput.safeParse({ name: 'A', skills: ['Excel', 'Sales', 'B2B'] }).success).toBe(true);
+    expect(updateCandidateInput.safeParse({ id: CAND_ID, skills: ['Office (Word; Excel)'] }).success).toBe(true);
+  });
+  it('say nothing new about skills in the JSON Schema a model is given: the comma rule is not a pattern', () => {
+    for (const schema of [addCandidateInput, updateCandidateInput]) {
+      const { properties } = z.toJSONSchema(schema) as { properties: Record<string, { items?: unknown }> };
+      expect(properties.skills.items).toEqual({ type: 'string', minLength: 1, maxLength: 40 });
+    }
+  });
   it('convert to JSON Schema, describe every field and carry no workspace key', () => {
     for (const schema of [addCandidateInput, updateCandidateInput]) {
       expect(() => z.toJSONSchema(schema)).not.toThrow();
