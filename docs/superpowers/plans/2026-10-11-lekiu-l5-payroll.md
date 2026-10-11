@@ -33,7 +33,7 @@
 - No model call in any automated test. No change to Tuah. No Kuasa names in `src/`. No purple or violet.
 - A live test creates its users and workspaces through `tests/helpers/live-workspaces.ts`, and nothing else.
 - 2-space indent, single quotes, semicolons, named exports (screens keep `export default`).
-- The migration is `supabase/migrations/20261025090000_people_payroll_writes.sql`; re-check just before the PR that it still sorts after everything on `main` and shares a 14-digit version with nothing (L4 had to renumber twice).
+- The migration is `supabase/migrations/20261025100000_people_payroll_writes.sql`; re-check just before the PR that it still sorts after everything on `main` and shares a 14-digit version with nothing (L4 had to renumber twice).
 
 ## Review Focus
 
@@ -48,7 +48,7 @@
 ### Task 1: The database (most capable model)
 
 **Files:**
-- Create: `supabase/migrations/20261025090000_people_payroll_writes.sql`
+- Create: `supabase/migrations/20261025100000_people_payroll_writes.sql`
 - Create: `supabase/tests/people_payroll_check.sql`
 - Create: `tests/people-payroll-schema.test.ts`
 - Modify: `supabase/tests/people_rls_check.sql` (a member reads their own payslip only when paid, their own letter only when issued)
