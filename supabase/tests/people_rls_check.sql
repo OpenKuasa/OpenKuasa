@@ -1,3 +1,10 @@
+-- NOTE (20261030121500_people_release_gating): this script was written before
+-- that migration and has not been brought up to date with it. Once it is
+-- applied, hr_announcements no longer carries the plain "shared" read rule
+-- (a member reads an announcement once its published_at has come), and a
+-- review or scorecard planted below with no released_at is not read by its
+-- employee. Revise the rule table and plant released_at before reading a
+-- failure on those three tables as a regression.
 -- Lekiu member-tier access check. Leaves nothing behind: the block always ends
 -- with RAISE, so every insert below is rolled back. Since the payroll slice a
 -- member reads their own payslip (and its lines) only once it is paid, and
