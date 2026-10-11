@@ -112,11 +112,37 @@ describe('Lekiu receipt release migration', () => {
     expect(lock).toBeGreaterThan(-1);
     expect(attached).toBeGreaterThan(lock);
     expect(record).toBeGreaterThan(attached);
-    expect(body.indexOf('return true;')).toBeGreaterThan(record);
+    expect(body.lastIndexOf('return true;')).toBeGreaterThan(record);
     // Every workspace, no row rules, no cap: nothing narrows the lookup.
     expect(body).not.toMatch(/org_id|is_org_|is_own_employee|limit\s+\d/);
-    // It deletes nothing itself, and never touches storage.
-    expect(body).not.toMatch(/\b(delete from|update public|storage\.)/);
+    // It deletes nothing itself, and only reads storage.
+    expect(body).not.toMatch(/\b(delete from|update public|update storage|insert into storage)/);
+  });
+
+  test('hr_release_receipt records only a file that was really uploaded, and stays true for one already released', () => {
+    const { body } = fn(release(), 'public.hr_release_receipt');
+    const lock = body.indexOf(`${LOCK}p_path, 0));`);
+    const attached = body.indexOf('from public.hr_claims c where c.receipt_path = p_path');
+    const again = body.indexOf(
+      'if exists (select 1 from private.hr_released_receipts x where x.path = p_path) then return true; end if;',
+    );
+    const uploaded = body.indexOf(
+      'if not exists (\n'
+        + '    select 1 from storage.objects o\n'
+        + "    where o.bucket_id = 'hr-receipts' and o.name = p_path\n"
+        + '  ) then\n'
+        + '    return false;\n'
+        + '  end if;',
+    );
+    const record = body.indexOf('insert into private.hr_released_receipts (path) values (p_path)');
+    expect(lock).toBeGreaterThan(-1);
+    // A path on a claim is refused first; a path released before is true whether or not the file is still
+    // there (a retried delete); only then is the file looked for, and only then is anything recorded.
+    expect(attached).toBeGreaterThan(lock);
+    expect(again).toBeGreaterThan(attached);
+    expect(uploaded).toBeGreaterThan(again);
+    expect(record).toBeGreaterThan(uploaded);
+    expect(body.match(/return true;/g)).toHaveLength(2);
   });
 
   test.each(REPLACED)('$name keeps its signature, owner rights and grants', ({ name, args }) => {

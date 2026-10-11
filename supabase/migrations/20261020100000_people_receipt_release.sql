@@ -26,8 +26,9 @@ revoke all on private.hr_released_receipts from public, anon, authenticated, ser
 -- True means: this file is in your own folder, is on no claim anywhere, and
 -- never will be, so the app may delete it. Anything else is false, with no
 -- reason given: no user, a session that owes a second factor, no path, a path
--- in someone else's folder, a path that is not shaped like a receipt's, or a
--- path some claim carries.
+-- in someone else's folder, a path that is not shaped like a receipt's, a
+-- path some claim carries, or a path with no uploaded file behind it (unless
+-- it was released before).
 
 create or replace function public.hr_release_receipt(p_path text)
 returns boolean language plpgsql security definer set search_path = public as $$
@@ -46,6 +47,21 @@ begin
   -- Held to the end of the transaction; hr_submit_claim takes the same one.
   perform pg_advisory_xact_lock(hashtextextended(p_path, 0));
   if exists (select 1 from public.hr_claims c where c.receipt_path = p_path) then return false; end if;
+
+  -- Already released: still true, whether or not the file is still there. The
+  -- app may be trying again after a delete that failed, or after one that
+  -- worked but whose answer was lost.
+  if exists (select 1 from private.hr_released_receipts x where x.path = p_path) then return true; end if;
+
+  -- Otherwise only a file that was really uploaded can be released, so the
+  -- list holds no more rows than there were uploads, and an account that
+  -- cannot upload (an anonymous demo guest) can add none.
+  if not exists (
+    select 1 from storage.objects o
+    where o.bucket_id = 'hr-receipts' and o.name = p_path
+  ) then
+    return false;
+  end if;
 
   insert into private.hr_released_receipts (path) values (p_path) on conflict do nothing;
   return true;

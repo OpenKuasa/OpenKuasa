@@ -50,6 +50,7 @@ declare
   eo uuid;                             -- member A's employee record in the other workspace
   cby uuid;
   got boolean;
+  f_gone text;                         -- a released path whose file is no longer in the bucket
   ca1 uuid; ca2 uuid; ca3 uuid; ca4 uuid; cb1 uuid; cb2 uuid; cv1 uuid; cbx uuid; cadm uuid;
   oa1 uuid; oa2 uuid; oa3 uuid; oa4 uuid; oa5 uuid; oa6 uuid; ob1 uuid; ob2 uuid; ov1 uuid; oadm uuid;
   stage int;
@@ -966,6 +967,10 @@ begin
         (1, ma, 'member A, an upper-case extension', ma || '/' || gen_random_uuid() || '.JPG', false),
         (1, ma, 'member A, a receipt path with something after it', f_a2 || E'\n', false),
         (1, ma, 'member A, their own folder and nothing else', ma::text, false),
+        -- Only a file that was really uploaded.
+        (1, ma, 'member A, a well-shaped path in their own folder with no file behind it', ma || '/' || gen_random_uuid() || '.jpg', false),
+        (1, guest, 'an anonymous account, a well-shaped path in its own folder (it cannot upload)', guest || '/' || gen_random_uuid() || '.jpg', false),
+        (1, ma, 'member A, a file in their own folder but in another bucket', f_chat, false),
         (1, null, 'a session with no user, member A''s file on no claim', f_a2, false),
         -- 5: the file once planted on a demo claim is on nothing now
         (5, mb, 'member B, own file once it is on no claim', f_b, true),
@@ -1092,6 +1097,33 @@ begin
   end;
   reset role;
   delete from auth.mfa_factors where user_id in (ma, admin_id);
+
+  -- ---- a released file that is gone can be released again ----------------
+  -- The app may retry a delete that failed, or one whose answer was lost: a
+  -- path already released answers true whether or not the file is still there.
+  -- Real storage may refuse a direct delete; then the same state is made
+  -- another way, by listing as released a path that has no file.
+  f_gone := f_a4;
+  begin
+    delete from storage.objects o where o.bucket_id = 'hr-receipts' and o.name = f_a4;
+  exception when others then
+    f_gone := ma || '/' || gen_random_uuid() || '.jpg';
+    insert into private.hr_released_receipts (path) values (f_gone);
+  end;
+  select count(*) into n from storage.objects o where o.bucket_id = 'hr-receipts' and o.name = f_gone;
+  select count(*) into n2 from private.hr_released_receipts x where x.path = f_gone;
+  if n <> 0 or n2 <> 1 then fails := array_append(fails, 'could not set up a released path whose file is gone'); end if;
+  perform set_config('request.jwt.claims', json_build_object('sub', ma, 'role', 'authenticated', 'aal', 'aal1')::text, true);
+  set local role authenticated;
+  got := public.hr_release_receipt(f_gone);
+  reset role;
+  if got is distinct from true then fails := array_append(fails, 'a released file that is gone could not be released again'); end if;
+  -- Someone else still cannot, and it still cannot go on a claim.
+  perform set_config('request.jwt.claims', json_build_object('sub', mb, 'role', 'authenticated', 'aal', 'aal1')::text, true);
+  set local role authenticated;
+  got := public.hr_release_receipt(f_gone);
+  reset role;
+  if got is distinct from false then fails := array_append(fails, 'member B released member A''s released file'); end if;
 
   -- ---- no direct writes, for a member or the admin ----------------------
   for who, label in select * from (values (ma, 'a member'), (admin_id, 'the admin')) as w(who, label) loop
