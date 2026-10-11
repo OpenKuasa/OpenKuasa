@@ -11,6 +11,7 @@ export type FinanceCall = {
   filters: Record<string, unknown>;
   order: string[];
   range?: [number, number];
+  limit?: number;
 };
 
 export type FinanceAnswer = { data: unknown; error: unknown };
@@ -57,6 +58,10 @@ export function fakeFinance(answer: FinanceAnswer | ((call: FinanceCall) => Fina
         },
         range(from: number, to: number) {
           call.range = [from, to];
+          return builder;
+        },
+        limit(count: number) {
+          call.limit = count;
           return builder;
         },
         maybeSingle: async () => reply(call),

@@ -160,6 +160,28 @@ export async function listRefunds(ctx: FinanceWriteContext): Promise<RefundRow[]
   }
 }
 
+/**
+ * The transaction must be a refund: money out to a customer, which the refunds
+ * view shows. The writes below are kept to money out, but a payment to a
+ * supplier is money out too, so they ask the view first and refuse anything it
+ * does not show, without writing.
+ */
+async function refusalUnlessRefund(
+  ctx: FinanceWriteContext,
+  fnName: string,
+  id: string,
+): Promise<{ ok: false; error: string } | null> {
+  const { data, error } = await ctx.client
+    .from('finance_refunds')
+    .select('transaction_id')
+    .eq('org_id', ctx.orgId)
+    .eq('transaction_id', id)
+    .limit(1);
+  if (error) return refundWriteFailed(fnName, error);
+  if (!data || data.length === 0) return { ok: false, error: M.gone };
+  return null;
+}
+
 /* ---- writes ----------------------------------------------------------- */
 
 /** Records a refund, paid out now or pending, against one invoice or one credit note. */
@@ -186,6 +208,8 @@ export async function markRefundPaid(
   input: z.input<typeof markPaymentPaidInput>,
 ): Promise<FinResult<{ id: string; number: string }>> {
   const { id, paid_on } = markPaymentPaidInput.parse(input);
+  const refusal = await refusalUnlessRefund(ctx, 'markRefundPaid', id);
+  if (refusal) return refusal;
   const { data, error } = await ctx.client.rpc('finance_mark_payment_paid', {
     target_org: ctx.orgId,
     target_txn: id,
@@ -201,6 +225,8 @@ export async function voidRefund(
   input: z.input<typeof paymentIdInput>,
 ): Promise<FinResult<{ id: string }>> {
   const { id } = paymentIdInput.parse(input);
+  const refusal = await refusalUnlessRefund(ctx, 'voidRefund', id);
+  if (refusal) return refusal;
   const { data, error } = await ctx.client
     .from('finance_transactions')
     .update({ status: 'void', updated_at: new Date().toISOString() })
@@ -220,6 +246,8 @@ export async function deleteRefund(
   input: z.input<typeof paymentIdInput>,
 ): Promise<FinResult<{ id: string }>> {
   const { id } = paymentIdInput.parse(input);
+  const refusal = await refusalUnlessRefund(ctx, 'deleteRefund', id);
+  if (refusal) return refusal;
   const { data, error } = await ctx.client
     .from('finance_transactions')
     .delete()

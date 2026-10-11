@@ -97,6 +97,10 @@ describe('refund reads', () => {
 });
 
 describe('refund writes', () => {
+  /** Answers the refunds-view check with a row (a real refund) or none (a payment to a supplier), and everything else with `other`. */
+  const refundOr = (isRefund: boolean, other: { data: unknown; error: unknown }) => (call: { name: string }) =>
+    call.name === 'finance_refunds' ? { data: isRefund ? [{ transaction_id: TXN }] : [], error: null } : other;
+
   it('records a refund paid out now through the database function, in the caller’s workspace', async () => {
     const { ctx, calls } = fakeFinance({ data: TXN, error: null });
     expect(await recordRefund(ctx, { ...valid, reference: ' TT 88 ' })).toEqual({ ok: true, data: { id: TXN } });
@@ -116,22 +120,25 @@ describe('refund writes', () => {
     expect(calls[0].args!.refund).not.toHaveProperty('scheduled');
   });
   it('marks a pending refund paid with the function a payment out uses, and returns the number', async () => {
-    const { ctx, calls } = fakeFinance({ data: 'PV-0007', error: null });
+    const { ctx, calls } = fakeFinance(refundOr(true, { data: 'PV-0007', error: null }));
     expect(await markRefundPaid(ctx, { id: TXN, paid_on: '2026-10-09' })).toEqual({ ok: true, data: { id: TXN, number: 'PV-0007' } });
-    expect(calls[0]).toMatchObject({ kind: 'rpc', name: 'finance_mark_payment_paid' });
-    expect(calls[0].args).toEqual({ target_org: 'org-1', target_txn: TXN, paid_on: '2026-10-09' });
+    expect(calls[0]).toMatchObject({ name: 'finance_refunds', op: 'select', filters: { org_id: 'org-1', transaction_id: TXN }, limit: 1 });
+    expect(calls[0].columns).toBe('transaction_id');
+    expect(calls[1]).toMatchObject({ kind: 'rpc', name: 'finance_mark_payment_paid' });
+    expect(calls[1].args).toEqual({ target_org: 'org-1', target_txn: TXN, paid_on: '2026-10-09' });
   });
   it('voids and deletes money out only, scoped to the workspace', async () => {
-    const voided = fakeFinance({ data: { id: TXN }, error: null });
+    const voided = fakeFinance(refundOr(true, { data: { id: TXN }, error: null }));
     expect(await voidRefund(voided.ctx, { id: TXN })).toEqual({ ok: true, data: { id: TXN } });
-    expect(voided.calls[0]).toMatchObject({
+    expect(voided.calls[0]).toMatchObject({ name: 'finance_refunds', filters: { org_id: 'org-1', transaction_id: TXN } });
+    expect(voided.calls[1]).toMatchObject({
       name: 'finance_transactions', op: 'update', filters: { id: TXN, org_id: 'org-1', direction: 'out' },
     });
-    expect(Object.keys(voided.calls[0].values!).sort()).toEqual(['status', 'updated_at']);
+    expect(Object.keys(voided.calls[1].values!).sort()).toEqual(['status', 'updated_at']);
 
-    const removed = fakeFinance({ data: { id: TXN }, error: null });
+    const removed = fakeFinance(refundOr(true, { data: { id: TXN }, error: null }));
     expect(await deleteRefund(removed.ctx, { id: TXN })).toEqual({ ok: true, data: { id: TXN } });
-    expect(removed.calls[0]).toMatchObject({
+    expect(removed.calls[1]).toMatchObject({
       name: 'finance_transactions', op: 'delete', filters: { id: TXN, org_id: 'org-1', direction: 'out' },
     });
   });
@@ -147,7 +154,7 @@ describe('refund writes', () => {
       ['22003', 'That amount is too large.'],
     ];
     for (const [code, message] of cases) {
-      const { ctx } = fakeFinance({ data: null, error: { code } });
+      const { ctx } = fakeFinance(refundOr(true, { data: null, error: { code } }));
       expect(await recordRefund(ctx, valid), code).toEqual({ ok: false, error: message });
       expect(await markRefundPaid(ctx, { id: TXN, paid_on: '2026-10-09' }), code).toEqual({ ok: false, error: message });
       expect(await voidRefund(ctx, { id: TXN }), code).toEqual({ ok: false, error: message });
@@ -156,13 +163,38 @@ describe('refund writes', () => {
     expect(logged).not.toHaveBeenCalled();
   });
   it('says the refund is gone when void or delete touches no row', async () => {
-    const { ctx } = fakeFinance({ data: null, error: null });
+    const { ctx } = fakeFinance(refundOr(true, { data: null, error: null }));
     expect(await voidRefund(ctx, { id: TXN })).toEqual({ ok: false, error: 'That refund no longer exists.' });
     expect(await deleteRefund(ctx, { id: TXN })).toEqual({ ok: false, error: 'That refund no longer exists.' });
   });
   it('hides any other database error behind the general message and logs it', async () => {
     const { ctx } = fakeFinance({ data: null, error: { code: 'XX000' } });
     expect(await recordRefund(ctx, valid)).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
+    expect(logged).toHaveBeenCalled();
+  });
+  it('refuses a payment to a supplier: no write is issued unless the refunds view has the transaction', async () => {
+    const gone = { ok: false, error: 'That refund no longer exists.' };
+    const marked = fakeFinance(refundOr(false, { data: 'PV-0007', error: null }));
+    expect(await markRefundPaid(marked.ctx, { id: TXN, paid_on: '2026-10-09' })).toEqual(gone);
+    expect(marked.calls.map((c) => c.kind)).toEqual(['table']);
+
+    const voided = fakeFinance(refundOr(false, { data: { id: TXN }, error: null }));
+    expect(await voidRefund(voided.ctx, { id: TXN })).toEqual(gone);
+    expect(voided.calls.map((c) => c.name)).toEqual(['finance_refunds']);
+
+    const removed = fakeFinance(refundOr(false, { data: { id: TXN }, error: null }));
+    expect(await deleteRefund(removed.ctx, { id: TXN })).toEqual(gone);
+    expect(removed.calls.map((c) => c.name)).toEqual(['finance_refunds']);
+  });
+  it('logs and gives the general message when the refunds check cannot be read', async () => {
+    const failing = (call: { name: string }) =>
+      call.name === 'finance_refunds' ? { data: null, error: { code: 'XX000' } } : { data: { id: TXN }, error: null };
+    const general = { ok: false, error: 'That change could not be saved. Please try again.' };
+    const { ctx, calls } = fakeFinance(failing);
+    expect(await markRefundPaid(ctx, { id: TXN, paid_on: '2026-10-09' })).toEqual(general);
+    expect(await voidRefund(ctx, { id: TXN })).toEqual(general);
+    expect(await deleteRefund(ctx, { id: TXN })).toEqual(general);
+    expect(calls.every((c) => c.name === 'finance_refunds')).toBe(true);
     expect(logged).toHaveBeenCalled();
   });
 });
