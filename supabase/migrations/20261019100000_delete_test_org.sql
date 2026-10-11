@@ -5,7 +5,8 @@
 -- granting it DELETE/SELECT on public.orgs would let a leaked service key wipe any
 -- workspace. Instead this one function deletes a single workspace by id, and only when
 -- it is clearly test debris:
---   * slug is null (the shared demo and any public workspace have a slug);
+--   * slug is null (this only shields the shared demo; the member check below is the
+--     real guard, since ordinary user workspaces also have no slug);
 --   * it was created in the last 2 hours (a test run's own workspace);
 --   * none of its members is a real account. "Real" = not anonymous AND the email does
 --     not match the test sign-up pattern. A memberless workspace passes this check.
