@@ -28,8 +28,8 @@ declare
 begin
   select a.org_id into v_org from public.hire_applications a where a.id = p_application_id;
   -- An id that is not there and one in a workspace the caller is not in read the same.
-  if v_org is null or not private.is_org_member(v_org) then return 'not_found'; end if;
-  if not private.is_org_writer(v_org) then return 'forbidden'; end if;
+  if v_org is null or private.is_org_member(v_org) is not true then return 'not_found'; end if;
+  if private.is_org_writer(v_org) is not true then return 'forbidden'; end if;
 
   select a.stage, a.outcome, a.offered_at, a.hired_at
     into v_stage, v_outcome, v_offered, v_hired
@@ -66,8 +66,8 @@ declare
   v_outcome text;
 begin
   select a.org_id into v_org from public.hire_applications a where a.id = p_application_id;
-  if v_org is null or not private.is_org_member(v_org) then return 'not_found'; end if;
-  if not private.is_org_writer(v_org) then return 'forbidden'; end if;
+  if v_org is null or private.is_org_member(v_org) is not true then return 'not_found'; end if;
+  if private.is_org_writer(v_org) is not true then return 'forbidden'; end if;
 
   select a.outcome into v_outcome
     from public.hire_applications a
@@ -98,8 +98,8 @@ declare
   v_outcome text;
 begin
   select a.org_id into v_org from public.hire_applications a where a.id = p_application_id;
-  if v_org is null or not private.is_org_member(v_org) then return 'not_found'; end if;
-  if not private.is_org_writer(v_org) then return 'forbidden'; end if;
+  if v_org is null or private.is_org_member(v_org) is not true then return 'not_found'; end if;
+  if private.is_org_writer(v_org) is not true then return 'forbidden'; end if;
 
   select a.outcome into v_outcome
     from public.hire_applications a
@@ -123,8 +123,8 @@ declare
   v_org uuid;
 begin
   select a.org_id into v_org from public.hire_applications a where a.id = p_application_id;
-  if v_org is null or not private.is_org_member(v_org) then return 'not_found'; end if;
-  if not private.is_org_writer(v_org) then return 'forbidden'; end if;
+  if v_org is null or private.is_org_member(v_org) is not true then return 'not_found'; end if;
+  if private.is_org_writer(v_org) is not true then return 'forbidden'; end if;
 
   perform 1 from public.hire_applications a where a.id = p_application_id for update;
   if not found then return 'not_found'; end if;
@@ -134,10 +134,10 @@ begin
   return 'ok';
 end $$;
 
-revoke execute on function public.hire_move_application(uuid, text) from public, anon;
-revoke execute on function public.hire_close_application(uuid, text, text) from public, anon;
-revoke execute on function public.hire_reopen_application(uuid) from public, anon;
-revoke execute on function public.hire_rate_application(uuid, smallint) from public, anon;
+revoke execute on function public.hire_move_application(uuid, text) from public, anon, service_role;
+revoke execute on function public.hire_close_application(uuid, text, text) from public, anon, service_role;
+revoke execute on function public.hire_reopen_application(uuid) from public, anon, service_role;
+revoke execute on function public.hire_rate_application(uuid, smallint) from public, anon, service_role;
 grant execute on function public.hire_move_application(uuid, text) to authenticated;
 grant execute on function public.hire_close_application(uuid, text, text) to authenticated;
 grant execute on function public.hire_reopen_application(uuid) to authenticated;

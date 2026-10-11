@@ -45,8 +45,8 @@ describe('hire application changes migration', () => {
     expect(body).toContain('security definer');
     expect(body).toContain("set search_path = ''");
     const readOrg = body.indexOf('select a.org_id into v_org');
-    const member = body.indexOf('if v_org is null or not private.is_org_member(v_org) then return \'not_found\'; end if;');
-    const writer = body.indexOf('if not private.is_org_writer(v_org) then return \'forbidden\'; end if;');
+    const member = body.indexOf('if v_org is null or private.is_org_member(v_org) is not true then return \'not_found\'; end if;');
+    const writer = body.indexOf('if private.is_org_writer(v_org) is not true then return \'forbidden\'; end if;');
     const lock = body.indexOf('for update');
     expect(readOrg).toBeGreaterThan(-1);
     expect(member).toBeGreaterThan(readOrg);
@@ -73,9 +73,31 @@ describe('hire application changes migration', () => {
 
   test('only a signed-in caller may run them', () => {
     for (const { name, args } of FUNCTIONS) {
-      expect(sql).toContain(`revoke execute on function public.${name}(${args}) from public, anon;`);
+      expect(sql).toContain(`revoke execute on function public.${name}(${args}) from public, anon, service_role;`);
       expect(sql).toContain(`grant execute on function public.${name}(${args}) to authenticated;`);
     }
     expect(sql).not.toMatch(/grant execute[^;]*\banon\b/);
+  });
+
+  test('each rule that refuses is there, and every write comes after the row is locked', () => {
+    const live = sql.split('\n').filter((line) => !line.trim().startsWith('--')).join('\n');
+    const body = (name: string) => {
+      const start = live.indexOf(`create or replace function public.${name}(`);
+      return live.slice(start, live.indexOf('end $$;', start));
+    };
+    expect(body('hire_move_application')).toContain("if v_outcome <> 'active' then return 'not_active'; end if;");
+    expect(body('hire_close_application')).toContain("if v_outcome <> 'active' then return 'not_active'; end if;");
+    expect(body('hire_reopen_application')).toContain("if v_outcome = 'active' then return 'not_closed'; end if;");
+    expect(body('hire_reopen_application')).toContain("set outcome = 'active', reject_reason = null");
+    for (const name of ['hire_move_application', 'hire_close_application', 'hire_reopen_application', 'hire_rate_application']) {
+      const b = body(name);
+      expect(b.indexOf('for update'), name).toBeGreaterThan(-1);
+      expect(b.indexOf('update public.hire_applications'), name).toBeGreaterThan(b.indexOf('for update'));
+      expect(b.indexOf('is_org_writer'), name).toBeLessThan(b.indexOf('for update'));
+    }
+  });
+
+  test('nothing is granted to a visitor, to everyone, or to the server role, in any form', () => {
+    expect(sql).not.toMatch(/grant\s+(execute|all)[^;]*\bto\b[^;]*\b(anon|public|service_role)\b/i);
   });
 });
