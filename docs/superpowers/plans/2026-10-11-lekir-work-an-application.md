@@ -53,7 +53,7 @@
 ### Task 1: The migration
 
 **Files:**
-- Create: `supabase/migrations/20261022090000_hire_application_changes.sql`
+- Create: `supabase/migrations/20261023090000_hire_application_changes.sql`
 - Test: `tests/hire-application-changes-migration.test.ts`
 
 **Interfaces:**
@@ -70,7 +70,7 @@
 - [ ] **Step 3: Write the migration, exactly:**
 
 ```sql
--- supabase/migrations/20261022090000_hire_application_changes.sql
+-- supabase/migrations/20261023090000_hire_application_changes.sql
 -- Lekir slice 3a: a recruiter can move, close, reopen and rate an application.
 -- Four functions are the only way: members get no write on the table, so the
 -- rules below hold for the screens, for Lekir and for a direct call alike.

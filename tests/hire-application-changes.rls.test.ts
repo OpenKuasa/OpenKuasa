@@ -3,7 +3,7 @@
 // Live checks of the four functions that move, close, reopen and rate a job application (Lekir slice 3a):
 // public.hire_move_application, hire_close_application, hire_reopen_application and hire_rate_application.
 // Needs NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY; without both every case is skipped.
-// WRITTEN, NOT YET RUN: it runs only after the migration 20261022090000_hire_application_changes.sql is applied.
+// WRITTEN, NOT YET RUN: it runs only after the migration 20261023090000_hire_application_changes.sql is applied.
 //
 // Who calls what. The functions are granted to `authenticated` only, so the service client cannot call them
 // (it has no user). Every call here is made by a signed-in client (the owner, the owner of another

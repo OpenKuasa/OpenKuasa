@@ -1,4 +1,4 @@
--- supabase/migrations/20261022090000_hire_application_changes.sql
+-- supabase/migrations/20261023090000_hire_application_changes.sql
 -- Lekir slice 3a: a recruiter can move, close, reopen and rate an application.
 -- Four functions are the only way: members get no write on the table, so the
 -- rules below hold for the screens, for Lekir and for a direct call alike.
