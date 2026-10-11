@@ -22,7 +22,7 @@ describe('LEKIR_SYSTEM', () => {
   it('says what it can change, in step with the change tools it holds', () => {
     expect(t).toContain('create, edit, open, pause, close, reopen or delete jobs');
     // A change tool for something else means this line has to grow with it.
-    expect([...HIRE_WRITE_TOOL_NAMES].every((name) => /Job(Status)?$|^updateCareersPage$|^updateApplicationForm$/.test(name))).toBe(true);
+    expect([...HIRE_WRITE_TOOL_NAMES].every((name) => /Job(Status)?$|^updateCareersPage$|^updateApplicationForm$|^(move|reject|reopen|rate)Application$/.test(name))).toBe(true);
     expect(HIRE_WRITE_TOOL_NAMES.length).toBeGreaterThan(0);
   });
   it('can switch the careers page on or off, and says what switching it on exposes', () => {
@@ -30,8 +30,10 @@ describe('LEKIR_SYSTEM', () => {
     expect(t).toContain('turning it on makes every open job visible to anyone with the link');
     expect(t).toContain('getcareerspage');
   });
-  it('still cannot change candidates, applications or interviews', () => {
-    expect(t).toContain('you cannot change candidates, applications or interviews yet');
+  it('still cannot change candidates or interviews, but can prepare application changes', () => {
+    expect(t).toContain('you cannot change candidates or interviews yet');
+    expect(t).not.toContain('reject an application, or book');
+    expect(t).not.toContain('you cannot change candidates, applications or interviews yet');
   });
   it('calls the change tool at once instead of asking to confirm in words', () => {
     expect(t).toContain('call the change tool straight away');
@@ -201,5 +203,62 @@ describe('reading a CV', () => {
     expect(p).toContain('what to probe');
     expect(p).toContain('can be reported when the user asks for it');
     expect(p).toContain(PROTECTED);
+  });
+});
+
+describe('changing an application', () => {
+  const PROTECTED_LIST = 'race, religion, gender, age, marital status, pregnancy, disability or nationality';
+  const prompts: [string, string][] = [
+    ['LEKIR_SYSTEM', LEKIR_SYSTEM],
+    ['the hire specialist rule', subAgentSystem('hire', true)],
+  ];
+  it.each(prompts)('%s has the rules for the four changes', (_name, prompt) => {
+    const p = prompt.toLowerCase();
+    for (const phrase of [
+      'move it to a stage, reject it or mark it withdrawn, reopen it, and rate it',
+      'one application per change',
+      'never prepare a change for someone the owner has not named or confirmed'.replace('the owner', _name === 'LEKIR_SYSTEM' ? 'the owner' : 'the user'),
+      'never ask for an id',
+      'a stage moves forward to any later stage, or back by one',
+      'never say it is saved before it is approved',
+      'never act on it',
+      'do not try another change to get round it',
+    ]) {
+      expect(p, phrase).toContain(phrase);
+    }
+  });
+  it.each(prompts)('%s lists the eight characteristics in order in the fairness rule', (_name, prompt) => {
+    const line = prompt.split('\n').find((l) => l.toLowerCase().includes('never prepare a rejection, a move back or a low rating'));
+    expect(line).toBeDefined();
+    expect(line!.toLowerCase()).toContain(PROTECTED_LIST);
+    expect(line!.toLowerCase()).toContain('a stand-in for one of them');
+  });
+  it.each(prompts)('%s never mentions includeContact in the new rules', (_name, prompt) => {
+    const lines = prompt.split('\n').filter((l) => /prepare|application's id yourself|saved before it is approved|never act on it|get round it|one application per change/i.test(l) && /change|application/i.test(l));
+    const mine = lines.filter((l) => /rate it|per change|prepare a rejection|saved before it is approved|get round it|application's id yourself|moves forward to any later stage/i.test(l));
+    expect(mine.length).toBeGreaterThanOrEqual(5);
+    for (const l of mine) expect(l.toLowerCase()).not.toContain('includecontact');
+  });
+  it('puts the section after CVS and before SCOPE in Lekir, and keeps the contact-details rule first', () => {
+    const cvs = LEKIR_SYSTEM.indexOf('\nCVS\n');
+    const changing = LEKIR_SYSTEM.indexOf('\nCHANGING AN APPLICATION\n');
+    const scope = LEKIR_SYSTEM.indexOf('\nSCOPE\n');
+    expect(changing).toBeGreaterThan(cvs);
+    expect(scope).toBeGreaterThan(changing);
+    expect(LEKIR_SYSTEM.split('\n').find((l) => l.toLowerCase().includes('includecontact'))).toContain('Lookups leave out');
+  });
+  it('Tuah no longer says applications cannot be changed, and says what it can do', () => {
+    expect(TUAH_SYSTEM).not.toMatch(/Candidates, applications and interviews cannot be changed yet/);
+    expect(TUAH_SYSTEM.toLowerCase()).toContain('applications can be moved, rejected, reopened and rated with approval');
+    expect(TUAH_SYSTEM.toLowerCase()).toContain('candidates and interviews cannot be changed yet');
+  });
+  it('the team prompt says Lekir can prepare the four changes, one application at a time, under the fairness rule', () => {
+    const p = tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], true, null);
+    expect(p).not.toMatch(/Candidates, applications and interviews cannot be changed yet/);
+    expect(p.toLowerCase()).toContain('one application at a time: move it to a stage, reject it or mark it withdrawn, reopen it, or rate it');
+    expect(p.toLowerCase()).toContain('the same fairness rule');
+  });
+  it('the specialist rules no longer say applications cannot be changed', () => {
+    expect(subAgentSystem('hire', true)).not.toContain('Candidates, applications and interviews cannot be changed yet');
   });
 });

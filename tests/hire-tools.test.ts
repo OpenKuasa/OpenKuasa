@@ -5,7 +5,8 @@ import { HIRE_TOOL_NAMES, createHireTools, withHeldCvs, type HeldCv } from '@/li
 import { CRM_WRITE_TOOL_NAMES } from '@/lib/ai/crm-tools';
 import { HIRE_WRITE_TOOL_NAMES, REACH_WRITE_TOOL_NAMES } from '@/lib/ai/products';
 import {
-  createJobInput, deleteJobInput, setJobStatusInput, updateApplicationFormInput, updateCareersPageInput, updateJobInput,
+  closeApplicationInput, createJobInput, deleteJobInput, moveApplicationInput, rateApplicationInput, reopenApplicationInput,
+  setJobStatusInput, updateApplicationFormInput, updateCareersPageInput, updateJobInput,
 } from '@/lib/hire/capabilities';
 import { createReachTools } from '@/lib/ai/tools';
 import { liveStepStatus, toolMeta } from '@/components/chat/tool-parts';
@@ -16,6 +17,16 @@ import { createSeedHireData } from '@/lib/hire/seed';
 import { createSeedReachData } from '@/lib/reach/seed';
 import type { CvRead, CvReader } from '@/lib/hire/cv-read';
 import type { HireData } from '@/lib/hire/types';
+
+// The real schemas; only the four application changes are recorded instead of run.
+const applied = vi.hoisted(() => ({ move: vi.fn(), close: vi.fn(), reopen: vi.fn(), rate: vi.fn() }));
+vi.mock('@/lib/hire/capabilities', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/hire/capabilities')>()),
+  moveApplication: applied.move,
+  closeApplication: applied.close,
+  reopenApplication: applied.reopen,
+  rateApplication: applied.rate,
+}));
 
 const NOW = new Date('2026-10-10T04:00:00Z');
 /** The lookups that read hiring data: every tool but the CV reader. */
@@ -294,7 +305,10 @@ describe('hire change tools', () => {
       expect(viewer).not.toContain(name);
       expect(member).toContain(name);
     }
-    expect(HIRE_WRITE_TOOL_NAMES).toEqual(['createJob', 'updateJob', 'setJobStatus', 'deleteJob', 'updateCareersPage', 'updateApplicationForm']);
+    expect(HIRE_WRITE_TOOL_NAMES).toEqual([
+      'createJob', 'updateJob', 'setJobStatus', 'deleteJob', 'updateCareersPage', 'updateApplicationForm',
+      'moveApplication', 'rejectApplication', 'reopenApplication', 'rateApplication',
+    ]);
   });
   it('gives a writer nothing beyond the lookups except the listed change tools, so each one needs approval', () => {
     const writerTools = createHireTools(data, NOW, { ctx, canWrite: true });
@@ -325,6 +339,44 @@ describe('hire change tools', () => {
     expect(t.deleteJob.inputSchema).toBe(deleteJobInput);
     expect(t.updateCareersPage.inputSchema).toBe(updateCareersPageInput);
     expect(t.updateApplicationForm.inputSchema).toBe(updateApplicationFormInput);
+    expect(t.moveApplication.inputSchema).toBe(moveApplicationInput);
+    expect(t.rejectApplication.inputSchema).toBe(closeApplicationInput);
+    expect(t.reopenApplication.inputSchema).toBe(reopenApplicationInput);
+    expect(t.rateApplication.inputSchema).toBe(rateApplicationInput);
+  });
+  it('describes the four application changes as agreed', () => {
+    const t = createHireTools(data, NOW, { ctx, canWrite: true }) as Record<string, { description: string }>;
+    expect(t.moveApplication.description).toBe('Move ONE application to another stage: forward to any later stage, or back by one. Use the application\'s id from listApplications. Only an active application can be moved.');
+    expect(t.rejectApplication.description).toBe('Reject ONE application, or mark it withdrawn when the candidate pulled out. A reason from the list is optional. Use the application\'s id from listApplications.');
+    expect(t.reopenApplication.description).toBe('Reopen ONE rejected or withdrawn application at the stage it was in.');
+    expect(t.rateApplication.description).toBe('Set ONE application\'s rating from 1 to 5, or clear it with null.');
+  });
+  it('runs each application change through its capability with the input unchanged', async () => {
+    const t = createHireTools(data, NOW, { ctx, canWrite: true }) as Record<
+      string,
+      { execute: (i: unknown, o: unknown) => Promise<unknown> }
+    >;
+    const id = '33333333-3333-4333-8333-333333333333';
+    const out = { ok: true, data: { id } };
+    const cases: [string, ReturnType<typeof vi.fn>, Record<string, unknown>][] = [
+      ['moveApplication', applied.move, { id, stage: 'interview' }],
+      ['rejectApplication', applied.close, { id, outcome: 'rejected', reason: 'skills' }],
+      ['reopenApplication', applied.reopen, { id }],
+      ['rateApplication', applied.rate, { id, rating: null }],
+    ];
+    for (const [name, fn, input] of cases) {
+      fn.mockReset();
+      fn.mockResolvedValue(out);
+      expect(await t[name].execute(input, { toolCallId: 't', messages: [] }), name).toBe(out);
+      expect(fn, name).toHaveBeenCalledTimes(1);
+      expect(fn.mock.calls[0][0], name).toBe(ctx);
+      expect(fn.mock.calls[0][1], name).toBe(input);
+    }
+  });
+  it('gives each listApplications row its reject_reason', async () => {
+    const { applications } = await run('listApplications')({ limit: 5 });
+    expect(applications.length).toBeGreaterThan(0);
+    for (const row of applications) expect(row).toHaveProperty('reject_reason');
   });
   it('lets listJobs hand the model an id and the new fields', async () => {
     const { jobs } = await run('listJobs')({ status: 'open' });

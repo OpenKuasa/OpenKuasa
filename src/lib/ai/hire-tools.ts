@@ -17,10 +17,18 @@ import { z } from 'zod';
 import {
   type CapResult,
   type HireWriteContext,
+  closeApplication,
+  closeApplicationInput,
   createJob,
   createJobInput,
   deleteJob,
   deleteJobInput,
+  moveApplication,
+  moveApplicationInput,
+  rateApplication,
+  rateApplicationInput,
+  reopenApplication,
+  reopenApplicationInput,
   setJobStatus,
   setJobStatusInput,
   updateApplicationForm,
@@ -318,6 +326,7 @@ export function createHireTools(
               outcome: a.outcome,
               label: applicationLabel(a.stage, a.outcome),
               rating: a.rating,
+              reject_reason: a.reject_reason,
               source: a.source,
               applied_at: a.applied_at,
               ...(people && {
@@ -578,6 +587,29 @@ export function createHireTools(
         'Use getCareersPage to see the current switches.',
       inputSchema: updateApplicationFormInput,
       execute: async (input) => updateApplicationForm(ctx, input, now()),
+    }),
+    moveApplication: tool({
+      description:
+        "Move ONE application to another stage: forward to any later stage, or back by one. Use the application's id from listApplications. Only an active application can be moved.",
+      inputSchema: moveApplicationInput,
+      execute: async (input) => moveApplication(ctx, input),
+    }),
+    // Covers both outcomes, rejected and withdrawn, so it takes the close input.
+    rejectApplication: tool({
+      description:
+        "Reject ONE application, or mark it withdrawn when the candidate pulled out. A reason from the list is optional. Use the application's id from listApplications.",
+      inputSchema: closeApplicationInput,
+      execute: async (input) => closeApplication(ctx, input),
+    }),
+    reopenApplication: tool({
+      description: 'Reopen ONE rejected or withdrawn application at the stage it was in.',
+      inputSchema: reopenApplicationInput,
+      execute: async (input) => reopenApplication(ctx, input),
+    }),
+    rateApplication: tool({
+      description: "Set ONE application's rating from 1 to 5, or clear it with null.",
+      inputSchema: rateApplicationInput,
+      execute: async (input) => rateApplication(ctx, input),
     }),
   };
 }

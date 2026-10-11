@@ -103,7 +103,7 @@ describe('Tuah as a single agent with hiring changes', () => {
     for (const name of HIRE_TOOL_NAMES.filter((n) => n !== 'readCandidateCv')) expect(seen.calls[0].tools).toContain(name);
     for (const name of HIRE_WRITE_TOOL_NAMES) expect(seen.calls[0].tools).not.toContain(name);
   });
-  it('a writer gets all four change tools', async () => {
+  it('a writer gets all the change tools', async () => {
     seen.calls = [];
     const writer = { ...hire(), write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true } };
     await runTuah(ask, reach(), undefined, undefined, null, null, null, writer).consumeStream();
@@ -199,11 +199,12 @@ describe('Tuah prompts and hiring', () => {
     const teamPrompt = tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], true, null);
     expect(teamPrompt).not.toMatch(/payroll, staff or hiring/);
   });
-  it('says jobs can be changed and the rest of hiring cannot yet', () => {
+  it('says jobs and applications can be changed and candidates and interviews cannot yet', () => {
     for (const prompt of [TUAH_SYSTEM, tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], true, null)]) {
       const p = prompt.toLowerCase();
       expect(p).not.toContain('hiring cannot be changed yet');
-      expect(p).toContain('candidates, applications and interviews cannot be changed yet');
+      expect(p).not.toContain('candidates, applications and interviews cannot be changed yet');
+      expect(p).toContain('candidates and interviews cannot be changed yet');
     }
     expect(TUAH_SYSTEM.toLowerCase()).toContain('create, edit, open, pause, close, reopen or delete jobs');
   });

@@ -5,6 +5,8 @@
  */
 // Itself pure and import-free: the words for the application form switches live with the switches.
 import { describeFormChange } from '@/lib/hire/application-form';
+import { REASON_LABEL } from '@/lib/hire/application-changes';
+import { STAGE_LABEL } from '@/lib/hire/applications-view';
 import type { ReceiptState } from '@/lib/people/receipts';
 
 const APPOINTMENT_STATUS_LABELS: Record<string, string> = {
@@ -20,6 +22,13 @@ const APPOINTMENT_STATUS_LABELS: Record<string, string> = {
  * no name of its own, so it is only labelled when the caller asks for that kind.
  */
 function labelOf(row: Record<string, unknown>, kind?: ItemKind): string | null {
+  if (kind === 'application') {
+    // A listApplications row has `candidate` and `job`, not `name`.
+    const who = text(row.candidate);
+    if (!who) return null;
+    const job = text(row.job);
+    return job ? `${who} (${job})` : who;
+  }
   if (kind === 'claim') {
     const who = text(row.employee);
     if (!who) return null;
@@ -81,6 +90,7 @@ export type ItemKind =
   | 'follow-up'
   | 'schedule'
   | 'job'
+  | 'application'
   | 'employee'
   | 'department'
   | 'leave'
@@ -125,6 +135,11 @@ const KIND_OF_TOOL: Record<string, ItemKind> = {
   updateJob: 'job',
   setJobStatus: 'job',
   deleteJob: 'job',
+  listApplications: 'application',
+  moveApplication: 'application',
+  rejectApplication: 'application',
+  reopenApplication: 'application',
+  rateApplication: 'application',
   listEmployees: 'employee',
   getEmployee: 'employee',
   createEmployee: 'employee',
@@ -298,6 +313,8 @@ export function approvalTitle(
     const subject = typeof named === 'function' ? named(i.id, kind) : named;
     return subject ? `${label} “${subject}”` : `this ${label}`;
   };
+  // "Aina Rahman (Barista)" when a listing in the conversation showed this application, else "this application".
+  const who = () => find(i.id, 'application') ?? 'this application';
   const person = [i.firstName, i.lastName].filter((v) => typeof v === 'string' && v).join(' ');
   switch (toolName) {
     case 'createCampaign': return `Create campaign “${i.name ?? ''}”?`;
@@ -365,6 +382,17 @@ export function approvalTitle(
           ? `Pause ${the('job', 'job')}?`
           : `Close ${the('job', 'job')}?`;
     case 'deleteJob': return `Delete ${the('job', 'job')}?`;
+    case 'moveApplication': {
+      const stage = typeof i.stage === 'string' && Object.hasOwn(STAGE_LABEL, i.stage) ? STAGE_LABEL[i.stage as keyof typeof STAGE_LABEL] : null;
+      return stage ? `Move ${who()} to ${stage}?` : `Move ${who()} to another stage?`;
+    }
+    case 'rejectApplication':
+      return i.outcome === 'withdrawn' ? `Mark ${who()} as withdrawn?` : `Reject ${who()}?`;
+    case 'reopenApplication': return `Reopen ${who()}?`;
+    case 'rateApplication':
+      return typeof i.rating === 'number' && Number.isInteger(i.rating)
+        ? `Rate ${who()} ${i.rating} out of 5?`
+        : `Clear the rating of ${who()}?`;
     case 'createEmployee': return `Add employee “${i.name ?? ''}”?`;
     case 'updateEmployee': return `Save changes to ${the('employee', 'employee')}?`;
     case 'setEmployeeStatus':
@@ -655,6 +683,10 @@ export function approvalDetail(toolName: string, input?: unknown, receipt?: Rece
       return word;
     });
     return words.length > 0 ? `Changes: ${words.join(', ')}` : null;
+  }
+  if (toolName === 'rejectApplication') {
+    const reason = typeof i.reason === 'string' && Object.hasOwn(REASON_LABEL, i.reason) ? REASON_LABEL[i.reason as keyof typeof REASON_LABEL] : null;
+    return reason ? `Reason: ${reason}` : null;
   }
   if (toolName === 'deleteContact') return 'Their deals are deleted too. This cannot be undone.';
   if (
