@@ -38,6 +38,7 @@ export function DecideButtons({
   const [rejecting, setRejecting] = useState(false);
   const [note, setNote] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
   const off = disabled || busy;
 
   function run(call: () => Promise<CapResult<unknown>>, done?: () => void) {
@@ -65,7 +66,10 @@ export function DecideButtons({
       },
     );
   };
-  const cancel = () => run(() => (kind === 'leave' ? cancelLeaveAction({ id }) : cancelTimeOffAction({ id })));
+  const cancel = () => {
+    setConfirmingCancel(false);
+    run(() => (kind === 'leave' ? cancelLeaveAction({ id }) : cancelTimeOffAction({ id })));
+  };
   const closeNote = () => {
     setRejecting(false);
     setNote('');
@@ -79,7 +83,12 @@ export function DecideButtons({
       <div className="flex flex-wrap gap-2">
         {pending ? (
           <>
-            <Button type="button" size="sm" className="h-7 px-2.5 text-xs" disabled={off} onClick={() => decide(true)}>
+            <Button type="button" size="sm" className="h-7 px-2.5 text-xs" disabled={off}
+              onClick={() => {
+                setConfirmingCancel(false);
+                decide(true);
+              }}
+            >
               Approve
             </Button>
             <Button
@@ -88,18 +97,55 @@ export function DecideButtons({
               size="sm"
               className="h-7 px-2.5 text-xs"
               disabled={off}
-              onClick={() => (rejecting ? closeNote() : setRejecting(true))}
+              onClick={() => {
+                setError(null);
+                setConfirmingCancel(false);
+                if (rejecting) closeNote();
+                else setRejecting(true);
+              }}
             >
               Reject
             </Button>
           </>
         ) : null}
-        {cancellable ? (
-          <Button type="button" variant="ghost" size="sm" className="h-7 px-2.5 text-xs" disabled={off} onClick={cancel}>
+        {cancellable && !confirmingCancel ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2.5 text-xs"
+            disabled={off}
+            onClick={() => {
+              setError(null);
+              setConfirmingCancel(true);
+            }}
+          >
             Cancel
           </Button>
         ) : null}
+        {cancellable && confirmingCancel ? (
+          <>
+            <Button type="button" variant="destructive" size="sm" className="h-7 px-2.5 text-xs" disabled={off} onClick={cancel}>
+              Confirm
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2.5 text-xs"
+              disabled={off}
+              onClick={() => setConfirmingCancel(false)}
+            >
+              Keep
+            </Button>
+          </>
+        ) : null}
       </div>
+      {cancellable && confirmingCancel ? (
+        <p role="alert" className="max-w-64 whitespace-normal text-xs text-destructive">
+          Cancel this request?{!pending ? ' The days go back to the person\'s balance.' : ''} This cannot be undone.
+        </p>
+      ) : null}
       {rejecting ? (
         <form
           className="flex items-center gap-2"

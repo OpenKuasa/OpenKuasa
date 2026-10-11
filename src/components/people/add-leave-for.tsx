@@ -67,7 +67,14 @@ export function AddLeaveFor({ employees, disabled }: { employees: LeaveEmployee[
             </Dialog.Description>
             <div className="mb-4 space-y-1.5">
               <span className="text-xs font-medium text-muted-foreground">Employee</span>
-              <Select value={employeeId} onValueChange={setEmployeeId}>
+              <Select
+                value={employeeId}
+                disabled={busy}
+                onValueChange={(next) => {
+                  setEmployeeId(next);
+                  setError(null);
+                }}
+              >
                 <SelectTrigger aria-label="Employee" className="w-full">
                   <SelectValue placeholder="Choose an employee" />
                 </SelectTrigger>
