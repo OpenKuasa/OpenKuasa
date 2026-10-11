@@ -524,31 +524,36 @@ export async function rateApplication(
 
 const text = (max: number, what: string) => optionalText(max).describe(what);
 
-const candidateFields = {
-  email: text(CANDIDATE_LIMITS.email, 'The candidate\'s email address. Blank clears it.'),
-  phone: text(CANDIDATE_LIMITS.phone, 'The candidate\'s phone number. Blank clears it.'),
-  headline: text(CANDIDATE_LIMITS.headline, 'A short line about the candidate, for example "Barista with 3 years in cafes". Blank clears it.'),
-  location: text(CANDIDATE_LIMITS.location, 'Where the candidate is based. Blank clears it.'),
-  skills: z.array(z.string().trim().min(1).max(CANDIDATE_LIMITS.skill)).max(CANDIDATE_LIMITS.skills).optional()
-    .describe('Up to 20 skills, each up to 40 characters, as stated by the user or in the CV. An empty list clears them.'),
-  source: text(CANDIDATE_LIMITS.source, 'Where the candidate came from, for example "Referral". Blank clears it.'),
+/** The optional details. A new candidate has nothing to clear, so only an edit is told that a blank clears. */
+const candidateFields = (forEdit: boolean) => {
+  const one = forEdit ? 'Leave out to keep it as it is. Blank clears it.' : 'Leave out when not known.';
+  const many = forEdit ? 'Leave out to keep them as they are. An empty list clears them.' : 'Leave out when not known.';
+  return {
+    email: text(CANDIDATE_LIMITS.email, `The candidate's email address. ${one}`),
+    phone: text(CANDIDATE_LIMITS.phone, `The candidate's phone number. ${one}`),
+    headline: text(CANDIDATE_LIMITS.headline, `A short line about the candidate, for example "Barista with 3 years in cafes". ${one}`),
+    location: text(CANDIDATE_LIMITS.location, `Where the candidate is based. ${one}`),
+    skills: z.array(z.string().trim().min(1).max(CANDIDATE_LIMITS.skill)).max(CANDIDATE_LIMITS.skills).optional()
+      .describe(`Up to 20 skills, each up to 40 characters, as stated by the user or in the CV. ${many}`),
+    source: text(CANDIDATE_LIMITS.source, `Where the candidate came from, for example "Referral". ${one}`),
+  };
 };
 
 export const addCandidateInput = z.object({
   name: z.string().trim().min(1, 'Enter the candidate\'s name.').max(CANDIDATE_LIMITS.name, 'Keep the name to 120 characters or fewer.')
     .describe('The candidate\'s full name.'),
-  ...candidateFields,
+  ...candidateFields(false),
   job_id: z.string().uuid().nullable().optional()
     .describe('The job to add an application for, from listJobs. Leave out to add the person without an application.'),
-  cover_letter: text(CANDIDATE_LIMITS.coverLetter, 'A cover note for the application. Only kept when a job is given.'),
-  cv_url: text(CANDIDATE_LIMITS.url, 'A link to the candidate\'s CV, starting with https://. Only kept when a job is given.'),
+  cover_letter: text(CANDIDATE_LIMITS.coverLetter, 'A cover note for the application. Only kept when a job is given. Leave out when there is none.'),
+  cv_url: text(CANDIDATE_LIMITS.url, 'A link to the candidate\'s CV, starting with https://. Only kept when a job is given. Leave out when there is none.'),
 });
 
 export const updateCandidateInput = z.object({
   id: z.string().uuid().describe('The candidate\'s id, from listCandidates.'),
   name: z.string().trim().min(1, 'Enter the candidate\'s name.').max(CANDIDATE_LIMITS.name, 'Keep the name to 120 characters or fewer.')
     .optional().describe('The candidate\'s full name. Cannot be cleared.'),
-  ...candidateFields,
+  ...candidateFields(true),
 });
 
 export type CandidateAdded = {

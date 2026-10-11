@@ -768,6 +768,20 @@ describe('candidate schemas', () => {
       }
     }
   });
+  it('tell an add to leave an unknown detail out, and only an edit that a blank clears it', () => {
+    const optional = ['email', 'phone', 'headline', 'location', 'skills', 'source'] as const;
+    for (const key of optional) {
+      const onAdd = addCandidateInput.shape[key].description ?? '';
+      const onEdit = updateCandidateInput.shape[key].description ?? '';
+      expect(onAdd, key).toContain('Leave out when not known.');
+      expect(onAdd, key).not.toMatch(/clears/);
+      expect(onEdit, key).toMatch(/clears (it|them)\.$/);
+      expect(onEdit, key).toContain('Leave out to keep');
+    }
+    for (const key of ['cover_letter', 'cv_url'] as const) {
+      expect(addCandidateInput.shape[key].description, key).toContain('Leave out when there is none.');
+    }
+  });
 });
 
 describe('addCandidate', () => {
