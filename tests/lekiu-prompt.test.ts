@@ -501,11 +501,27 @@ describe('performance, training and announcements', () => {
     expect(section).toContain('say it at once');
     expect(section).toContain('do not look anything up for it and do not ask for a name or any details as if you could then do it');
   });
-  it('says the same for a member asking to release a review, mark a completion or run a course', () => {
-    expect(section).toContain('if you hold no review tool, no course tool or no settrainingcompleted');
-    expect(section).toContain('writing and releasing reviews, running the courses and marking someone as completed are for an owner or admin of the workspace');
-    expect(section).toContain('do not look anyone up for it');
-    expect(section).toContain('do not ask for a name, a period, a score or a course as if you could then do it');
+  it('has a line of its own for releasing a review, for the courses, for a completion and for a colleague’s goal', () => {
+    const lines = section.split('\n').filter((l) => l.startsWith('- if you hold no'));
+    const find = (text: string) => lines.filter((l) => l.includes(text));
+    for (const [tool, words] of [
+      ['savereview or releasereview', 'writing and releasing reviews are for an owner or admin of the workspace'],
+      ['savetraining or removetraining', 'adding, changing or removing a course is for an owner or admin of the workspace'],
+      ['settrainingcompleted', 'marking someone as completed on a course is for an owner or admin of the workspace'],
+      ['employee field on savegoal', "changing a colleague's goal is for an owner or admin of the workspace"],
+    ] as const) {
+      const [line, ...more] = find(tool);
+      expect(line, tool).toBeDefined();
+      expect(more, tool).toEqual([]);
+      expect(line, tool).toContain(words);
+      expect(line, tool).toContain('say so at once and make no change');
+      expect(line, tool).toMatch(/do not look (anyone|anything|the goal) up/);
+      expect(line, tool).toContain('as if you could then do it');
+    }
+  });
+  it('tells the model to say unread_total, not a count of the rows it was shown', () => {
+    expect(section).toContain('unread_total');
+    expect(section).toContain('never a count of the rows you were shown');
   });
   it('says pulling a review back to draft is on the Review Scores screen, at once, with no offer and no questions', () => {
     expect(section).toContain('pulling a released review back to a draft is done on the review scores screen by an owner or admin');

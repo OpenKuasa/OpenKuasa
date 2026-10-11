@@ -928,10 +928,10 @@ describe('approval cards for goals', () => {
     expect(approvalTitle('removeGoal', { goal_id: GOAL }, find)).toBe('Remove the goal “Learn SQL well” of Faiz Hakim (70% done, no due date, on track)?');
   });
 
-  it('a goal removed earlier in the chat is not named again, and the detail says it will be refused', () => {
+  it('a goal removed earlier in the chat is not named again, and the detail says it is likely to be refused', () => {
     const find = nameIn([employees, goals(), ok('removeGoal', { id: GOAL, employee_id: EMP, removed: true })]);
     expect(approvalTitle('removeGoal', { goal_id: GOAL }, find)).toBe('Remove a goal that was not in the list above?');
-    expect(approvalDetail('removeGoal', { goal_id: GOAL }, undefined, find)).toContain('was deleted earlier in this chat, so this will be refused.');
+    expect(approvalDetail('removeGoal', { goal_id: GOAL }, undefined, find)).toContain('was deleted earlier in this chat, so this is likely to be refused.');
   });
 
   it('a value that cannot be read is said so, not hidden', () => {

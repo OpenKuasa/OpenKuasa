@@ -7,6 +7,8 @@ const executed = vi.hoisted(() => ({
   last: null as unknown,
   tool: 'saveGoal',
   input: {} as object | string,
+  /** What the model was shown after the approval: the tool messages of its last prompt. */
+  shown: [] as unknown[],
 }));
 
 const bump = (name: string, input: unknown) => {
@@ -82,6 +84,7 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
       new MockLanguageModelV4({
         doStream: async (options: { prompt: { role: string }[] }) => {
           const resumed = options.prompt.some((m) => m.role === 'tool');
+          if (resumed) executed.shown = options.prompt.filter((m) => m.role === 'tool');
           const chunks: Record<string, unknown>[] = resumed
             ? [
                 { type: 'text-start', id: 'a' },
@@ -133,7 +136,7 @@ const ask = [{ role: 'user' as const, content: 'Please' }];
 vi.spyOn(console, 'log').mockImplementation(() => {});
 
 const reset = (tool: string, input: object | string) => {
-  Object.assign(executed, { counts: {}, last: null, tool, input });
+  Object.assign(executed, { counts: {}, last: null, shown: [], tool, input });
 };
 const ran = (name: string) => executed.counts[name] ?? 0;
 const total = () => Object.values(executed.counts).reduce((sum, n) => sum + n, 0);
@@ -340,7 +343,7 @@ describe('Lekiu’s performance, training and announcement changes require appro
     expect(owner.call?.input).toMatchObject({ employee_id: OTHER });
   });
 
-  it('every tool has at least one row, and at least one row per tool is built with a finder from an earlier lookup', () => {
+  it('every tool has at least one row', () => {
     const tools = [...new Set(CASES.map((c) => c.tool))];
     expect(tools.sort()).toEqual([
       'deleteReview', 'enrolInTraining', 'publishAnnouncement', 'releaseReview', 'removeAnnouncement', 'removeGoal', 'removeTraining',
@@ -473,6 +476,21 @@ describe('Lekiu’s performance, training and announcement changes require appro
     const second = runLekiu(history(call!, request!, true), asOwner);
     await second.consumeStream();
     expect(total()).toBe(0);
+    // The model is told why, in the sentence the tool gives, and not that anything was saved.
+    const results = executed.shown;
+    expect(JSON.stringify(results)).toContain('Say which employee this is for. Your own account is not linked to an employee record.');
+  });
+
+  it.each([
+    ['saveGoal', { title: 'Learn SQL', progress: 40 }],
+    ['enrolInTraining', { training_id: COURSE }],
+    ['withdrawFromTraining', { training_id: COURSE }],
+  ])('%s with an employee_id that is not an id, or not text, is refused before any card, for an owner', async (tool, base) => {
+    for (const employee_id of ['Aisyah', 'not-an-id', 5, true, {}, ['x']]) {
+      const { request } = await firstTurn({ tool, sent: { ...base, employee_id } }, asOwner);
+      expect(total(), String(employee_id)).toBe(0);
+      expect(request, String(employee_id)).toBeUndefined();
+    }
   });
 
   it.each(CASES.filter((c, i, all) => all.findIndex((d) => d.tool === c.tool) === i && c.who === asOwner).map((c) => [c.tool, c] as const))(

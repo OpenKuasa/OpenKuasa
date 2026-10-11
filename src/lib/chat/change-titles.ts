@@ -240,12 +240,48 @@ function gather(value: unknown, kind: ItemKind, into: KnownNames, depth = 0): vo
   for (const inner of Object.values(row)) gather(inner, kind, into, depth + 1);
 }
 
+/**
+ * Tools whose results name an employee beside their `employee_id` (a goal, a review, an enrolment): the person is
+ * known from them as well as from listEmployees, because these are the lookups the change tools point the model to.
+ */
+const EMPLOYEE_SOURCES = new Set([
+  'listGoals',
+  'listReviews',
+  'listTrainings',
+  'saveGoal',
+  'saveReview',
+  'releaseReview',
+  'enrolInTraining',
+  'withdrawFromTraining',
+  'setTrainingCompleted',
+]);
+
+/** Calls `each` for every `employee_id` with a name beside it, anywhere in a result (a course's people sit four deep). */
+function eachNamedEmployee(value: unknown, each: (id: string, name: string) => void, depth = 0): void {
+  if (!value || typeof value !== 'object' || depth > 5) return;
+  if (Array.isArray(value)) {
+    for (const item of value) eachNamedEmployee(item, each, depth + 1);
+    return;
+  }
+  const row = value as Record<string, unknown>;
+  const name = text(row.employee) ?? text(row.name);
+  if (typeof row.employee_id === 'string' && row.employee_id && name) each(row.employee_id, name);
+  for (const inner of Object.values(row)) eachNamedEmployee(inner, each, depth + 1);
+}
+
 /** Every named row in a set of tool results, by the kind of thing its tool is about. */
 export function collectNames(results: ToolResult[], into: KnownNames = {}): KnownNames {
   for (const result of results) {
     const kind = KIND_OF_TOOL[result.tool];
     // Payslips and their lines are read in order below, so the newest word on each one wins.
     if (kind && kind !== 'payslip') gather(result.output, kind, into);
+  }
+  for (const result of results) {
+    if (!EMPLOYEE_SOURCES.has(result.tool)) continue;
+    eachNamedEmployee(result.output, (id, name) => {
+      const key = `employee:${id}`;
+      if (!(key in into) && Object.keys(into).length < NAMES_MAX) into[key] = name;
+    });
   }
   if (results.some((r) => PAYSLIP_TOOLS.has(r.tool))) {
     const state = payslipState(results);
@@ -288,6 +324,17 @@ export function nameIn(results: ToolResult[]): NameFinder {
       if (kind && KIND_OF_TOOL[results[r].tool] !== kind) continue;
       const found = nameOf(results[r].output, id, kind);
       if (found) return found;
+    }
+    if (kind === 'employee') {
+      // Not in a directory result: a goal, review or enrolment lookup names the person beside their id.
+      for (let r = results.length - 1; r >= 0; r -= 1) {
+        if (!EMPLOYEE_SOURCES.has(results[r].tool)) continue;
+        const hit: { name: string | null } = { name: null };
+        eachNamedEmployee(results[r].output, (employeeId, name) => {
+          if (employeeId === id && hit.name === null) hit.name = name;
+        });
+        if (hit.name) return hit.name;
+      }
     }
     return null;
   };
@@ -881,7 +928,7 @@ function performanceTitle(toolName: string, i: Record<string, unknown>, find: Na
 
 /** What the conversation suggests will make the database refuse a change. A hedge in the detail, never a change to the question. */
 function performanceCaveat(toolName: string, i: Record<string, unknown>, find: NameFinder): string | null {
-  const gone = (what: string) => `This ${what} was deleted earlier in this chat, so this will be refused.`;
+  const gone = (what: string) => `This ${what} was deleted earlier in this chat, so this is likely to be refused.`;
   switch (toolName) {
     case 'saveGoal':
     case 'removeGoal': {
