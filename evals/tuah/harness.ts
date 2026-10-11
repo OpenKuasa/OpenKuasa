@@ -169,7 +169,7 @@ export class Conversation {
       },
       {
         data: extra
-          ? { ...realHire, listApplications: async () => [...(await realHire.listApplications()), ...extra.applications] }
+          ? { ...realHire, listApplications: async () => [...extra.applications, ...(await realHire.listApplications())] }
           : realHire,
         files: extra
           ? {
