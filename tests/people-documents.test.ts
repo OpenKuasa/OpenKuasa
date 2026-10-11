@@ -187,6 +187,11 @@ describe('Settings', () => {
     const model = await loadSettingsModel(data, HR_5);
     if (model.hr_only) throw new Error('expected settings');
     expect(model.working_days).toBe('Mon–Fri');
+    expect(model.attendance).toEqual({
+      work_week: ['mon', 'tue', 'wed', 'thu', 'fri'],
+      work_start_time: '09:00',
+      late_grace_minutes: 15,
+    });
     expect(model.annual_leave_days).toBe('14');
     expect(model.medical_leave_days).toBe('14');
     expect(model.emergency_leave_days).toBe('3');
@@ -214,6 +219,8 @@ describe('Settings', () => {
     expect(model.annual_leave_days).toBe('14.5');
     expect(model.medical_leave_days).toBe('14');
     expect(model.emergency_leave_days).toBe('3');
+    expect(model.attendance.work_week).toEqual(SETTINGS.work_week);
+    expect(model.attendance.work_week).not.toBe(SETTINGS.work_week);
     expect(workWeekLabel(['mon', 'tue', 'wed', 'thu', 'fri', 'sat'])).toBe('Mon–Sat');
     expect(workWeekLabel(['mon', 'wed'])).toBe('Mon, Wed');
     expect(workWeekLabel([])).toBe('—');

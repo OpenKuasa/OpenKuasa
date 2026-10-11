@@ -49,6 +49,7 @@ import TimeOffScreen from '@/screens/people/time-off';
 import ClaimsScreen from '@/screens/people/claims';
 import OtClaimsScreen from '@/screens/people/ot-claims';
 import EmployeesScreen from '@/screens/people/employees';
+import TeamAttendanceScreen from '@/screens/people/attendance';
 import ApproveLeaveScreen from '@/screens/people/approve-leave';
 import ApproveClaimsScreen from '@/screens/people/approve-claims';
 import ApproveOvertimeScreen from '@/screens/people/approve-overtime';
@@ -151,6 +152,7 @@ export const SCREENS: Record<string, ComponentType> = {
   'people/claims': ClaimsScreen,
   'people/ot-claims': OtClaimsScreen,
   'people/employees': EmployeesScreen,
+  'people/attendance': TeamAttendanceScreen,
   'people/approve-leave': ApproveLeaveScreen,
   'people/approve-claims': ApproveClaimsScreen,
   'people/approve-overtime': ApproveOvertimeScreen,

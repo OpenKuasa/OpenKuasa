@@ -53,6 +53,7 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'people/claims',
   'people/ot-claims',
   'people/employees',
+  'people/attendance',
   'people/approve-leave',
   'people/approve-claims',
   'people/approve-overtime',

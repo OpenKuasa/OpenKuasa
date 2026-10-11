@@ -208,7 +208,10 @@ export const PRODUCTS: Product[] = [
       },
       {
         label: 'Management',
-        items: [{ label: 'Employees', slug: 'employees', icon: Users }],
+        items: [
+          { label: 'Employees', slug: 'employees', icon: Users },
+          { label: 'Attendance', slug: 'attendance', icon: ClipboardList, needs: 'approve' },
+        ],
       },
       {
         label: 'Approvals',

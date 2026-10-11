@@ -20,6 +20,7 @@ import type {
   PeopleData,
   PeopleSettings,
   PeopleViewer,
+  Weekday,
 } from './types';
 
 export const NOT_RECORDED = 'Not recorded';
@@ -360,6 +361,8 @@ export type SettingsModel =
   | {
       hr_only: false;
       working_days: string;
+      /** The attendance settings as the form edits them. */
+      attendance: { work_week: Weekday[]; work_start_time: string; late_grace_minutes: number };
       annual_leave_days: string;
       medical_leave_days: string;
       emergency_leave_days: string;
@@ -371,6 +374,11 @@ export function buildSettingsModel(settings: PeopleSettings): SettingsModel {
   return {
     hr_only: false,
     working_days: workWeekLabel(settings.work_week),
+    attendance: {
+      work_week: [...settings.work_week],
+      work_start_time: settings.work_start_time,
+      late_grace_minutes: settings.late_grace_minutes,
+    },
     annual_leave_days: String(settings.default_annual_leave_days),
     medical_leave_days: String(settings.default_medical_leave_days),
     emergency_leave_days: String(settings.default_emergency_leave_days),

@@ -1,6 +1,8 @@
-import { CalendarDays, PieChart, Plus, Sparkles } from 'lucide-react';
+import { CalendarDays, PieChart, Sparkles } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { DonutStat, type Slice } from '@/components/charts';
+import { HolidayDialog, RemoveHoliday } from '@/components/people/holiday-form';
+import { RequestRow } from '@/components/people/request-row';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
 import { Badge } from '@/components/ui/badge';
@@ -8,14 +10,18 @@ import { LiveDot } from '@/components/ui/live-dot';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { buildHolidaysModel } from '@/lib/people/company';
 import { formatDate, formatDay, todayInMalaysia } from '@/lib/people/dates';
-import { LOAD_FAILED, LaterButton, Muted, loadPeople } from './parts';
+import { isTeamView } from '@/lib/people/own';
+import { LOAD_FAILED, Muted, loadPeople } from './parts';
 
-/** The workspace's holiday calendar. Every member reads the same rows. */
+/** The workspace's holiday calendar. Every member reads the same rows; owners and admins also keep it. */
 export default async function PublicHolidaysScreen() {
-  const { model } = await loadPeople('public-holidays', async (data, now) =>
+  const { model, viewer } = await loadPeople('public-holidays', async (data, now) =>
     buildHolidaysModel(await data.listPublicHolidays(), todayInMalaysia(now)),
   );
   const dash = '—';
+  // Owners and admins (and a demo visitor, who sees the controls disabled) get the editing controls.
+  const canEdit = isTeamView(viewer);
+  const demo = viewer.isDemo;
   const typeMix: Slice[] = model
     ? [
         { key: 'national', label: 'National', value: model.national, color: 'var(--chart-1)' },
@@ -29,11 +35,7 @@ export default async function PublicHolidaysScreen() {
         className="mb-3"
         title="Public Holidays"
         subtitle={model ? `Your workspace's holiday calendar for ${model.year}.` : 'Your workspace’s holiday calendar.'}
-        actions={
-          <LaterButton size="sm" icon={Plus}>
-            Add Holiday
-          </LaterButton>
-        }
+        actions={canEdit ? <HolidayDialog disabled={demo || !model} /> : undefined}
       />
 
       <BentoGrid>
@@ -115,20 +117,45 @@ export default async function PublicHolidaysScreen() {
                     <TableHead>Day</TableHead>
                     <TableHead>Scope</TableHead>
                     <TableHead>State</TableHead>
+                    {canEdit ? (
+                      <TableHead>
+                        <span className="sr-only">Actions</span>
+                      </TableHead>
+                    ) : null}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {model.rows.map((h) => (
-                    <TableRow key={h.id} className={h.past ? 'text-muted-foreground' : undefined}>
-                      <TableCell className="whitespace-nowrap font-medium">{h.name}</TableCell>
-                      <TableCell className="whitespace-nowrap tabular-nums">{formatDate(h.date)}</TableCell>
-                      <TableCell className="whitespace-nowrap">{h.weekday}</TableCell>
-                      <TableCell>
-                        <Badge variant="secondary">{h.scope}</Badge>
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-sm">{h.state}</TableCell>
-                    </TableRow>
-                  ))}
+                  {model.rows.map((h) => {
+                    const cells = (
+                      <>
+                        <TableCell className="whitespace-nowrap font-medium">{h.name}</TableCell>
+                        <TableCell className="whitespace-nowrap tabular-nums">{formatDate(h.date)}</TableCell>
+                        <TableCell className="whitespace-nowrap">{h.weekday}</TableCell>
+                        <TableCell>
+                          <Badge variant="secondary">{h.scope}</Badge>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-sm">{h.state}</TableCell>
+                      </>
+                    );
+                    if (!canEdit) {
+                      return (
+                        <TableRow key={h.id} className={h.past ? 'text-muted-foreground' : undefined}>
+                          {cells}
+                        </TableRow>
+                      );
+                    }
+                    return (
+                      <RequestRow key={h.id} columns={6}>
+                        {cells}
+                        <TableCell className="whitespace-nowrap">
+                          <span className="flex items-center gap-1.5">
+                            <HolidayDialog holiday={{ id: h.id, name: h.name, date: h.date }} disabled={demo} />
+                            <RemoveHoliday id={h.id} name={h.name} disabled={demo} />
+                          </span>
+                        </TableCell>
+                      </RequestRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
