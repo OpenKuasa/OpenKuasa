@@ -44,6 +44,7 @@ const HELPERS = [
   'private.hr_payroll_refresh_payslip',
   'private.hr_payroll_fill',
   'private.hr_payroll_skipped',
+  'private.hr_payroll_earlier_overtime',
   'private.hr_payroll_run_json',
   'private.hr_payslip_json',
   'private.hr_employee_delete_guard',
@@ -120,7 +121,9 @@ describe('Lekiu payroll migration', () => {
   test('sorts after the migrations it builds on, alone on its timestamp', () => {
     const files = readdirSync(DIR).sort();
     expect(files.filter((f) => f.startsWith(VERSION))).toEqual([WRITES]);
-    expect(WRITES > '20261025090000_agent_proposals_guard_v3.sql').toBe(true);
+    // After the attendance slice it builds on, and sharing its 14-digit version with no other file.
+    expect(VERSION > '20261024090100').toBe(true);
+    expect(files.filter((f) => f.slice(0, 14) === VERSION)).toHaveLength(1);
     // It edits no applied migration: the functions it changes are replaced in this file.
     expect(files).toContain('20261014090700_people_demo_seed.sql');
     expect(files).toContain('20261020090000_people_claims_overtime_writes.sql');
@@ -398,6 +401,7 @@ describe('Lekiu payroll migration', () => {
       "raise exception 'PAYROLL_RUN_EXISTS'",
       "if p_month > today then raise exception 'PAYROLL_MONTH_NOT_STARTED'; end if;",
       "raise exception 'PAYROLL_EARLIER_DRAFT'",
+      "raise exception 'PAYROLL_LATER_RUN'",
       'insert into public.hr_payroll_runs (org_id, period_month, status, created_by)',
       "raise exception 'PAYROLL_NOBODY'",
     ].map((line) => body.indexOf(line));
@@ -408,6 +412,9 @@ describe('Lekiu payroll migration', () => {
     expect(body).toContain('extract(day from p_month) <> 1');
     expect(body).toContain("values (p_org, p_month, 'draft', auth.uid())");
     expect(body).toContain("r.period_month < p_month and r.status = 'draft'");
+    // Runs are made in order of month: a later run, whatever its status, stops an earlier month.
+    expect(body).toContain('where r.org_id = p_org and r.period_month > p_month\n');
+    expect(body).toContain("'earlier_overtime', private.hr_payroll_earlier_overtime(run)");
   });
 
   test('today is today in Malaysia, and nothing reads another clock', () => {
@@ -428,6 +435,8 @@ describe('Lekiu payroll migration', () => {
     const skipped = fn(statements(), 'private.hr_payroll_skipped').body;
     expect(skipped).toContain("'reason', 'no_salary'");
     expect(skipped).toContain("e.status = 'active' and coalesce(x.base_salary_cents, 0) = 0");
+    // Someone who joins after the month is not "skipped for want of a salary".
+    expect(skipped).toContain("and (e.join_date is null or e.join_date <= (p_run.period_month + interval '1 month')::date - 1)");
   });
 
   test('a payslip is built from the salary now, the joiner rule, unpaid leave and overtime', () => {
@@ -438,6 +447,17 @@ describe('Lekiu payroll migration', () => {
     const clear = body.indexOf("delete from public.hr_payslip_lines l where l.payslip_id = slip.id and l.source <> 'hr';");
     expect(release).toBeGreaterThan(-1);
     expect(clear).toBeGreaterThan(release);
+    // The records it lets go or takes are held first, in order of id, as paying a run holds them.
+    const hold = body.indexOf(
+      'perform 1 from public.hr_overtime_records r\n'
+        + '  where r.employee_id = slip.employee_id and r.org_id = slip.org_id\n'
+        + "    and (r.payslip_id = slip.id or (r.status = 'approved' and r.payslip_id is null))\n"
+        + '  order by r.id\n'
+        + '  for update;',
+    );
+    expect(hold).toBeGreaterThan(-1);
+    expect(release).toBeGreaterThan(hold);
+    expect(fn(text, 'public.hr_mark_payroll_paid').body).toContain('order by r.id\n  for update;');
     expect(body.match(/delete from/g)).toHaveLength(1);
     // Joiner: only inside the month after its first day, by working days, and only with a working day in the month.
     expect(body).toContain('if joined > slip.period_month and joined <= month_end then');
@@ -502,6 +522,17 @@ describe('Lekiu payroll migration', () => {
     // A line being changed must be a line of the payslip named.
     expect(save).toContain('where l.id = p_line and l.payslip_id = slip.id;');
     expect(save).toContain("values (slip.org_id, slip.id, p_kind, 'hr', title, p_amount_cents)");
+  });
+
+  test('a run says how many of its overtime lines are for work done before its month', () => {
+    const text = statements();
+    const { header, body } = fn(text, 'private.hr_payroll_earlier_overtime');
+    expect(header).toContain('returns int language sql stable set search_path = public');
+    expect(body).toContain('join public.hr_overtime_records r on r.id = l.overtime_record_id');
+    expect(body).toContain('where p.payroll_run_id = p_run.id and r.work_date < p_run.period_month;');
+    for (const name of ['hr_run_payroll', 'hr_recalculate_payroll']) {
+      expect(fn(text, `public.${name}`).body, name).toContain("'earlier_overtime', private.hr_payroll_earlier_overtime(run)");
+    }
   });
 
   test('a statutory figure is one of four, never below zero, and remembers that HR set it', () => {
@@ -586,6 +617,10 @@ describe('Lekiu payroll migration', () => {
     const { header, body } = fn(text, 'private.hr_employee_delete_guard');
     expect(header).toContain('returns trigger language plpgsql security definer set search_path = public');
     expect(body).toContain("where p.employee_id = old.id and p.status = 'paid'");
+    // The payslips are held before they are looked at, so paying a run cannot slip in between.
+    const hold = body.indexOf('perform 1 from public.hr_payslips p where p.employee_id = old.id order by p.id for update;');
+    expect(hold).toBeGreaterThan(-1);
+    expect(body.indexOf('if exists (')).toBeGreaterThan(hold);
     expect(body).toContain("raise exception 'HR_EMPLOYEE_HAS_PAID_PAYSLIPS';");
     expect(body).toContain('return old;');
     // A delete that cascades from the workspace runs inside another trigger, and is let through.
@@ -646,6 +681,11 @@ describe('Lekiu payroll migration', () => {
     expect(body).toContain('insert into public.hr_payslip_lines');
     // Every figure comes from the same place a real payslip's does.
     expect(body).toContain('perform private.hr_payroll_refresh_payslip(p.id) from public.hr_payslips p where p.org_id = demo;');
+    // The settings row is there before the joiner lines count working days from it.
+    const settings = body.indexOf('insert into public.hr_settings (org_id, notifications)');
+    expect(settings).toBeGreaterThan(body.indexOf('-- Payroll:'));
+    expect(settings).toBeLessThan(body.indexOf('insert into public.hr_payroll_runs ('));
+    expect(body.match(/insert into public\.hr_settings/g)).toHaveLength(1);
     // Its one message is the one it always had.
     expect(raised(body)).toEqual(["'demo org missing'"]);
     // The rest of the demo is still built: one insert for every table the first seed filled.
@@ -674,9 +714,19 @@ describe('Lekiu payroll migration', () => {
     const head = (lines: string[]) => cut(lines, 'delete from public.hr_payment_vouchers', '-- Payroll:');
     expect(head(after)).toEqual(head(before));
     expect(head(after).length).toBeGreaterThan(200);
-    // After it, from the payment vouchers to the end, nothing differs.
-    const tail = (lines: string[]) => lines.slice(lines.findIndex((l) => l.includes('insert into public.hr_payment_vouchers')));
+    // After it, from the payment vouchers to the end, nothing differs but the
+    // settings row, which moved up to before the payroll part, unchanged.
+    const settings = (lines: string[]) => {
+      const at = lines.findIndex((l) => l.includes('insert into public.hr_settings (org_id, notifications)'));
+      return lines.slice(at, at + 2);
+    };
+    expect(settings(after)).toEqual(settings(before));
+    expect(settings(after)).toHaveLength(2);
+    const tail = (lines: string[]) =>
+      lines
+        .slice(lines.findIndex((l) => l.includes('insert into public.hr_payment_vouchers')))
+        .filter((l) => l.trim() !== '' && !settings(lines).includes(l));
     expect(tail(after)).toEqual(tail(before));
-    expect(tail(after).length).toBeGreaterThan(90);
+    expect(tail(after).length).toBeGreaterThan(80);
   });
 });

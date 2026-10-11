@@ -4,10 +4,18 @@
 -- message:
 --   PEOPLE_PAYROLL_CHECK PASSED ...   or   PEOPLE_PAYROLL_CHECK FAILED (n): <what went wrong>
 --
--- When not to run it: it rebuilds the demo HR rows inside its transaction and
--- holds them until the rollback, so do not start it at minute 1 of the hour,
--- when the scheduled demo reseed runs. Nothing else in it depends on the time:
--- it gives the same answer on any day of the week and any day of the month.
+-- When not to run it. It rebuilds the demo HR rows inside its transaction and
+-- holds them until the rollback, and the scheduled demo reseed commits the
+-- same rows at minute 1 of every hour. So:
+--   * do not start it in minutes :00 to :02 of an hour, and do not start it so
+--     late that it could still be running at the next :01 (it takes seconds;
+--     leave it a few minutes);
+--   * do not run it at the same time as another people check
+--     (people_rls_check, people_leave_check, people_claims_overtime_check,
+--     people_attendance_check): each of them rebuilds the demo too;
+--   * do not run it while a migration is being applied.
+-- Nothing else in it depends on the time: it gives the same answer on any day
+-- of the week and any day of the month.
 --   * Every payroll month it works out is a fixed month of 2025, with the
 --     work week, the public holiday, the leave and the overtime of that month
 --     planted here, so no figure depends on today.
@@ -37,7 +45,7 @@ declare
   dv uuid := gen_random_uuid();           -- demo visitor (viewer)
   da uuid := gen_random_uuid();           -- an admin planted in the demo
   -- org
-  ea uuid; eb uuid; ev uuid; en uuid; ex uuid;
+  ea uuid; eb uuid; ev uuid; en uuid; ex uuid; cal uuid;
   pa uuid; pb uuid; pv uuid; px uuid;
   run_id uuid; feb_run uuid;
   line_id uuid; line2 uuid; ot_line uuid; b_line uuid;
@@ -122,7 +130,7 @@ begin
   -- No hr_ helper in the private schema can be called directly, and the payroll ones exist.
   select count(*) into n from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
   where ns.nspname = 'private' and (p.proname like 'hr\_payroll\_%' or p.proname in ('hr_payslip_json', 'hr_employee_delete_guard'));
-  if n <> 12 then fails := array_append(fails, format('%s private payroll helpers exist, expected 12', n)); end if;
+  if n <> 13 then fails := array_append(fails, format('%s private payroll helpers exist, expected 13', n)); end if;
   for rec in
     select p.oid::regprocedure::text as sig from pg_proc p
     join pg_namespace ns on ns.oid = p.pronamespace
@@ -310,9 +318,9 @@ begin
     if r ? 'refused' then raise exception '% could not run payroll: %', t, r->>'refused'; end if;
     run_id := (r #>> '{run,id}')::uuid;
     if r -> 'run' is distinct from jsonb_build_object('id', run_id, 'period_month', '2025-01-01', 'status', 'draft')
-       or r -> 'payslips' is distinct from '3'::jsonb
+       or r -> 'payslips' is distinct from '3'::jsonb or r -> 'earlier_overtime' is distinct from '0'::jsonb
        or r -> 'skipped' is distinct from jsonb_build_array(jsonb_build_object('employee_id', en, 'name', 'No Salary Yet', 'reason', 'no_salary'))
-       or (select array_agg(k order by k) from jsonb_object_keys(r) k) <> array['payslips','run','skipped'] then
+       or (select array_agg(k order by k) from jsonb_object_keys(r) k) <> array['earlier_overtime','payslips','run','skipped'] then
       fails := array_append(fails, format('%s ran payroll and was handed back: %s', t, r));
     end if;
     select count(*) into n from public.hr_payroll_runs x
@@ -398,7 +406,7 @@ begin
 
     r := pg_temp.pay_try(who, format('select public.hr_recalculate_payroll(%L)', run_id));
     if r is distinct from jsonb_build_object('run', jsonb_build_object('id', run_id, 'period_month', '2025-01-01', 'status', 'draft'),
-         'payslips', 3, 'added', 0,
+         'payslips', 3, 'added', 0, 'earlier_overtime', 0,
          'skipped', jsonb_build_array(jsonb_build_object('employee_id', en, 'name', 'No Salary Yet', 'reason', 'no_salary'))) then
       fails := array_append(fails, format('%s recalculated and was handed back: %s', t, r));
     end if;
@@ -493,20 +501,15 @@ begin
     || pg_temp.pay_expect(admin_id, 'January a second time', format('select public.hr_run_payroll(%L, %L)', org, jan), 'PAYROLL_RUN_EXISTS')
     || pg_temp.pay_expect(admin_id, 'February while January is a draft', format('select public.hr_run_payroll(%L, %L)', org, feb), 'PAYROLL_EARLIER_DRAFT')
     || pg_temp.pay_expect(admin_id, 'this month while January is a draft', format('select public.hr_run_payroll(%L, %L)', org, this_month), 'PAYROLL_EARLIER_DRAFT')
-    -- An earlier month is not held up by a later draft.
-    || pg_temp.pay_expect(admin_id, 'December 2024 while January is a draft', format('select public.hr_run_payroll(%L, ''2024-12-01'')', org), null)
+    -- Runs are made in order of month: an earlier month cannot be filled in behind a later run.
+    || pg_temp.pay_expect(admin_id, 'December 2024 while January is a draft', format('select public.hr_run_payroll(%L, ''2024-12-01'')', org), 'PAYROLL_LATER_RUN')
+    || pg_temp.pay_expect(owner_id, 'a month years before the draft', format('select public.hr_run_payroll(%L, ''2001-06-01'')', org), 'PAYROLL_LATER_RUN')
     -- Nobody to pay: the only active employee has no salary, the only salary belongs to someone inactive.
     || pg_temp.pay_expect(outsider, 'a workspace with nobody to pay', format('select public.hr_run_payroll(%L, ''2025-05-01'')', other_org), 'PAYROLL_NOBODY');
   select count(*) into n from public.hr_payroll_runs x where x.org_id = other_org;
   if n <> 0 then fails := array_append(fails, 'a run with nobody to pay was left behind'); end if;
   select count(*) into n from public.hr_payroll_runs x where x.org_id = org;
-  if n <> 2 then fails := array_append(fails, format('the workspace has %s runs after the refusals, expected January and December', n)); end if;
-  -- December came after the overtime was taken by January: it holds none of it.
-  select count(*) into n from public.hr_payslip_lines l join public.hr_payslips p on p.id = l.payslip_id
-  where p.org_id = org and p.period_month = date '2024-12-01';
-  if n <> 0 then fails := array_append(fails, 'December 2024 took overtime worked in January 2025'); end if;
-  select x.id into t from public.hr_payroll_runs x where x.org_id = org and x.period_month = date '2024-12-01';
-  fails := fails || pg_temp.pay_expect(admin_id, 'the admin deletes December', format('select public.hr_delete_payroll_run(%L)', t), null);
+  if n <> 1 then fails := array_append(fails, format('the workspace has %s runs after the refusals, expected January alone', n)); end if;
 
   -- This month has started, so it can be run; with one salary on file, one payslip.
   update public.hr_employee_private set base_salary_cents = 100000 where employee_id = ep;
@@ -627,10 +630,25 @@ begin
     fails := array_append(fails, format('A after a recalculation with EPF set: %s / %s', pg_temp.pay_slip(pa), pg_temp.pay_lines(pa)));
   end if;
   -- The marks are kept in one order, whatever order they were made in. Zero is an amount.
-  fails := fails
-    || pg_temp.pay_expect(owner_id, 'PCB is typed over', format('select public.hr_set_statutory(%L, ''pcb'', 1500)', pa), null)
-    || pg_temp.pay_expect(owner_id, 'SOCSO is set to zero', format('select public.hr_set_statutory(%L, ''socso'', 0)', pa), null)
-    || pg_temp.pay_expect(owner_id, 'EPF is typed over again', format('select public.hr_set_statutory(%L, ''epf'', 40001)', pa), null);
+  -- Each call is looked at on its own: setting one figure leaves the others,
+  -- typed or proposed, exactly as they were.
+  fails := fails || pg_temp.pay_expect(owner_id, 'PCB is typed over', format('select public.hr_set_statutory(%L, ''pcb'', 1500)', pa), null);
+  if pg_temp.pay_slip(pa) is distinct from 'basic 300000 gross 365000 epf 40000 socso 1825 eis 730 pcb 1500 other 25000 net 295945 set [epf,pcb] pending' then
+    fails := array_append(fails, 'A after PCB was set, with EPF already typed: ' || pg_temp.pay_slip(pa));
+  end if;
+  fails := fails || pg_temp.pay_expect(owner_id, 'SOCSO is set to zero', format('select public.hr_set_statutory(%L, ''socso'', 0)', pa), null);
+  if pg_temp.pay_slip(pa) is distinct from 'basic 300000 gross 365000 epf 40000 socso 0 eis 730 pcb 1500 other 25000 net 297770 set [epf,socso,pcb] pending' then
+    fails := array_append(fails, 'A after SOCSO was set to zero, with EPF and PCB already typed: ' || pg_temp.pay_slip(pa));
+  end if;
+  fails := fails || pg_temp.pay_expect(owner_id, 'EIS is typed over', format('select public.hr_set_statutory(%L, ''eis'', 700)', pa), null);
+  if pg_temp.pay_slip(pa) is distinct from 'basic 300000 gross 365000 epf 40000 socso 0 eis 700 pcb 1500 other 25000 net 297800 set [epf,socso,eis,pcb] pending' then
+    fails := array_append(fails, 'A after EIS was set, with the other three already typed: ' || pg_temp.pay_slip(pa));
+  end if;
+  fails := fails || pg_temp.pay_expect(owner_id, 'EIS is reset', format('select public.hr_set_statutory(%L, ''eis'', null)', pa), null);
+  if pg_temp.pay_slip(pa) is distinct from 'basic 300000 gross 365000 epf 40000 socso 0 eis 730 pcb 1500 other 25000 net 297770 set [epf,socso,pcb] pending' then
+    fails := array_append(fails, 'A after EIS was reset, with three figures still typed: ' || pg_temp.pay_slip(pa));
+  end if;
+  fails := fails || pg_temp.pay_expect(owner_id, 'EPF is typed over again', format('select public.hr_set_statutory(%L, ''epf'', 40001)', pa), null);
   if pg_temp.pay_slip(pa) is distinct from 'basic 300000 gross 365000 epf 40001 socso 0 eis 730 pcb 1500 other 25000 net 297769 set [epf,socso,pcb] pending' then
     fails := array_append(fails, 'A with EPF, SOCSO and PCB set: ' || pg_temp.pay_slip(pa));
   end if;
@@ -779,6 +797,8 @@ begin
       || pg_temp.pay_expect(who, label || ' deletes a paid run', format('select public.hr_delete_payroll_run(%L)', run_id), 'PAYROLL_NOT_DRAFT')
       || pg_temp.pay_expect(who, label || ' marks a paid run as paid', format('select public.hr_mark_payroll_paid(%L)', run_id), 'PAYROLL_NOT_DRAFT')
       || pg_temp.pay_expect(who, label || ' runs the paid month again', format('select public.hr_run_payroll(%L, %L)', org, jan), 'PAYROLL_RUN_EXISTS')
+      -- A paid later run stops an earlier month being made just as a draft one does.
+      || pg_temp.pay_expect(who, label || ' runs the month before the paid one', format('select public.hr_run_payroll(%L, ''2024-12-01'')', org), 'PAYROLL_LATER_RUN')
       -- Overtime paid in the run cannot be cancelled or decided again.
       || pg_temp.pay_expect(who, label || ' cancels overtime that was paid', format('select public.hr_cancel_overtime(%L)', o2), 'PAY_IN_PAID_RUN')
       || pg_temp.pay_expect(who, label || ' approves a record held by a paid payslip', format('select public.hr_decide_overtime(%L, true, null)', o3), 'PAY_IN_PAID_RUN')
@@ -803,7 +823,14 @@ begin
   -- Overtime approved since, worked back in January: February pays it.
   insert into public.hr_overtime_records (org_id, employee_id, work_date, hours, amount_cents, status)
   values (org, ea, '2025-01-20', 1.5, 4000, 'approved') returning id into o4;
+  insert into public.hr_overtime_records (org_id, employee_id, work_date, hours, amount_cents, status)
+  values (org, ev, '2025-01-22', 1.0, 3000, 'approved');
+  -- January is paid, so the month after it can be made.
   r := pg_temp.pay_try(owner_id, format('select public.hr_run_payroll(%L, %L)', org, feb));
+  -- Both records were worked before February: the run says so.
+  if r -> 'earlier_overtime' is distinct from '2'::jsonb then
+    fails := array_append(fails, format('February, with two records worked in January, says: %s', r));
+  end if;
   feb_run := (r #>> '{run,id}')::uuid;
   select p.id into px from public.hr_payslips p where p.payroll_run_id = feb_run and p.employee_id = ex;
   if r -> 'payslips' is distinct from '4'::jsonb or px is null then fails := array_append(fails, format('running February: %s', r)); end if;
@@ -813,7 +840,7 @@ begin
   select count(*) into n2 from public.hr_overtime_records o
   where (o.id = o2 and o.payslip_id = pb)
      or (o.id = o4 and o.payslip_id = (select p.id from public.hr_payslips p where p.payroll_run_id = feb_run and p.employee_id = ea));
-  if n <> 1 or n2 <> 2 then fails := array_append(fails, 'February took overtime January had paid, or did not take the record approved since'); end if;
+  if n <> 2 or n2 <> 2 then fails := array_append(fails, 'February took overtime January had paid, or did not take the two records approved since'); end if;
   select count(*) into n from public.hr_payslip_lines l where l.overtime_record_id in (o1, o2, o4);
   if n <> 2 then fails := array_append(fails, format('%s lines carry the three records, expected one each for the two that stand', n)); end if;
 
@@ -838,7 +865,7 @@ begin
   if r is distinct from '0'::jsonb then fails := array_append(fails, format('an admin who owes a second factor reads %s payslips and lines', r)); end if;
   for who, label in select * from (values (owner_id, 'the owner'), (admin_id, 'the admin')) as c(who, label) loop
     r := pg_temp.pay_try(who, format('select jsonb_build_array((select count(*) from public.hr_payslips where org_id = %L), (select count(*) from public.hr_payslip_lines where org_id = %L), (select count(*) from public.hr_payroll_runs where org_id = %L))', org, org, org));
-    if r is distinct from '[7, 3, 2]'::jsonb then fails := array_append(fails, format('%s reads %s payslips, lines and runs, expected [7, 3, 2]', label, r)); end if;
+    if r is distinct from '[7, 4, 2]'::jsonb then fails := array_append(fails, format('%s reads %s payslips, lines and runs, expected [7, 4, 2]', label, r)); end if;
   end loop;
   -- Letters: a member reads their own once issued, never a draft, never a colleague's.
   r := pg_temp.pay_try(ma, format('select jsonb_build_array((select count(*) from public.hr_letters where org_id = %L), (select count(*) from public.hr_letters where employee_id = %L and status = ''issued''))', org, ea));
@@ -1011,6 +1038,8 @@ begin
   insert into public.hr_employees (org_id, employee_no, name) values (corg, 'N1', 'Zed No Salary') returning id into ns1;
   insert into public.hr_employees (org_id, employee_no, name) values (corg, 'N2', 'Amy No Record') returning id into ns2;
   insert into public.hr_employees (org_id, employee_no, name) values (corg, 'N0', 'Bob Zero Salary') returning id into ns0;
+  -- No salary, and not there yet in March: left out of March altogether, listed in April.
+  insert into public.hr_employees (org_id, employee_no, name, join_date) values (corg, 'NC', 'Cal Joins Later', '2025-04-20') returning id into cal;
   insert into public.hr_employee_private (employee_id, org_id, base_salary_cents)
   values (b1, corg, 300000), (ej, corg, 311111), (u2, corg, 400000), (uh, corg, 400000), (us, corg, 260000),
          (jc, corg, 311111), (ot, corg, 300000), (hi, corg, 800000), (lo, corg, 594000),
@@ -1055,7 +1084,8 @@ begin
   mar_run := (r #>> '{run,id}')::uuid;
   -- Nine payslips. The inactive employee and the one who joins in April have
   -- none; the three with no salary are listed, by name.
-  if r -> 'payslips' is distinct from '9'::jsonb
+  -- One of its three overtime lines is for work done in February.
+  if r -> 'payslips' is distinct from '9'::jsonb or r -> 'earlier_overtime' is distinct from '1'::jsonb
      or r -> 'skipped' is distinct from jsonb_build_array(
           jsonb_build_object('employee_id', ns2, 'name', 'Amy No Record', 'reason', 'no_salary'),
           jsonb_build_object('employee_id', ns0, 'name', 'Bob Zero Salary', 'reason', 'no_salary'),
@@ -1063,7 +1093,7 @@ begin
     fails := array_append(fails, format('running March 2025: %s', r));
   end if;
   select count(*) into n from public.hr_payslips p where p.payroll_run_id = mar_run;
-  select count(*) into n2 from public.hr_payslips p where p.employee_id in (inact, fj, ns1, ns2, ns0);
+  select count(*) into n2 from public.hr_payslips p where p.employee_id in (inact, fj, ns1, ns2, ns0, cal);
   if n <> 9 or n2 <> 0 then fails := array_append(fails, format('March has %s payslips, and %s for people who should have none', n, n2)); end if;
   for label, who, want, t in
     select * from (values
@@ -1132,7 +1162,7 @@ begin
   insert into public.hr_employees (org_id, employee_no, name) values (corg, 'LT', 'Added Late') returning id into late;
   insert into public.hr_employee_private (employee_id, org_id, base_salary_cents) values (late, corg, 200000);
   r := pg_temp.pay_try(owner_id, format('select public.hr_recalculate_payroll(%L)', mar_run));
-  if r -> 'payslips' is distinct from '11'::jsonb or r -> 'added' is distinct from '2'::jsonb
+  if r -> 'payslips' is distinct from '11'::jsonb or r -> 'added' is distinct from '2'::jsonb or r -> 'earlier_overtime' is distinct from '1'::jsonb
      or r -> 'skipped' is distinct from jsonb_build_array(
           jsonb_build_object('employee_id', ns2, 'name', 'Amy No Record', 'reason', 'no_salary'),
           jsonb_build_object('employee_id', ns0, 'name', 'Bob Zero Salary', 'reason', 'no_salary')) then
@@ -1176,7 +1206,14 @@ begin
   fails := fails || pg_temp.pay_expect(owner_id, 'March is marked as paid', format('select public.hr_mark_payroll_paid(%L)', mar_run), null);
   r := pg_temp.pay_try(owner_id, format('select public.hr_run_payroll(%L, %L)', corg, apr));
   apr_run := (r #>> '{run,id}')::uuid;
-  if r -> 'payslips' is distinct from '12'::jsonb then fails := array_append(fails, format('running April 2025: %s', r)); end if;
+  -- March is paid, so April can be made. Its one overtime line is April's own.
+  if r -> 'payslips' is distinct from '12'::jsonb or r -> 'earlier_overtime' is distinct from '0'::jsonb
+     or r -> 'skipped' is distinct from jsonb_build_array(
+          jsonb_build_object('employee_id', ns2, 'name', 'Amy No Record', 'reason', 'no_salary'),
+          jsonb_build_object('employee_id', ns0, 'name', 'Bob Zero Salary', 'reason', 'no_salary'),
+          jsonb_build_object('employee_id', cal, 'name', 'Cal Joins Later', 'reason', 'no_salary')) then
+    fails := array_append(fails, format('running April 2025: %s', r));
+  end if;
   for label, who, want, t in
     select * from (values
       -- PCB is copied from March, where it was typed; in April nobody typed it. The line of March is not carried over.

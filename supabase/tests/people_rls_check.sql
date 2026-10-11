@@ -3,9 +3,17 @@
 -- member reads their own payslip (and its lines) only once it is paid, and
 -- their own letter only once it is issued. Read the message:
 --   PEOPLE_RLS_CHECK PASSED ...   or   PEOPLE_RLS_CHECK FAILED: <what went wrong>
--- It rebuilds the demo HR rows inside its transaction and holds them until the
--- rollback, so do not start it at minute 1 of the hour, when the scheduled
--- demo reseed runs.
+-- When not to run it. It rebuilds the demo HR rows inside its transaction and
+-- holds them until the rollback, and the scheduled demo reseed commits the
+-- same rows at minute 1 of every hour. So:
+--   * do not start it in minutes :00 to :02 of an hour, and do not start it so
+--     late that it could still be running at the next :01 (it takes seconds;
+--     leave it a few minutes);
+--   * do not run it at the same time as another people check
+--     (people_leave_check, people_claims_overtime_check,
+--     people_attendance_check, people_payroll_check): each of them rebuilds
+--     the demo too;
+--   * do not run it while a migration is being applied.
 do $$
 declare
   org uuid := gen_random_uuid();
@@ -20,7 +28,6 @@ declare
   draft_run uuid := gen_random_uuid();    -- this month's run, still a draft
   this_month date := date_trunc('month', current_date)::date;
   last_month date := (date_trunc('month', current_date) - interval '1 month')::date;
-  own_term text := 'private.is_own_employee(employee_id)';
   demo uuid;
   linked uuid;
   n int;
@@ -58,7 +65,7 @@ begin
         and q like '%is_demo_org(org_id)%' and q like '%is_org_member(org_id)%') then
       fails := array_append(fails, format('%s should be HR-or-own, its rule is: %s', t, q));
     elsif k = 'lines' and not (q like '%hr_payslips%' and q like '%is_org_admin(p.org_id)%'
-        and q like '%status = ''paid''%' and q like '%is_own_employee(p.employee_id)%'
+        and q like '%is_own_employee(p.employee_id)%'
         and q like '%is_demo_org(p.org_id)%' and q like '%is_org_member(p.org_id)%') then
       fails := array_append(fails, format('%s should be read through its payslip, its rule is: %s', t, q));
     elsif k = 'hr' and (q not like '%is_org_admin(org_id)%' or q not like '%is_demo_org(org_id)%' or q like '%is_own_employee%') then
@@ -68,28 +75,19 @@ begin
     -- The rule must be word for word the rule of the table of its kind whose
     -- reads are tested as a member further down, so a rule that keeps every
     -- expected term but adds a wider one cannot pass.
-    -- A payslip and a letter have the personal rule with one change: the
-    -- employee reads their own only once it is paid, or issued. The rule
-    -- expected of them is built from the personal one, so it cannot keep a
-    -- plain "their own" beside the new term. A payslip's lines go through the
-    -- payslip: their rule is the payslip's, asked of the payslip row, and it
-    -- names "their own" once only, behind the paid test.
-    ref := case k when 'hr' then 'hr_payroll_runs' when 'shared' then 'hr_departments' else 'hr_employee_private' end;
-    select p.qual into ref_rule from pg_policies p
-    where p.schemaname = 'public' and p.tablename = ref and p.policyname = ref || '_select';
-    if k in ('paid', 'issued') then
-      if ref_rule not like '%' || own_term || '%' then
-        fails := array_append(fails, format('the personal rule no longer names the employee as expected: %s', ref_rule));
+    -- A payslip, its lines and a letter have a rule of their own: the
+    -- employee reads their own only once it is paid, or issued. Their rules
+    -- are not compared as text (how a condition is printed is the database's
+    -- business); they are proven by what a member reads further down, where
+    -- member one has a paid and a draft payslip, a line on each, and an issued
+    -- and a draft letter, and by people_payroll_check.sql.
+    if k in ('personal', 'hr', 'shared') then
+      ref := case k when 'hr' then 'hr_payroll_runs' when 'shared' then 'hr_departments' else 'hr_employee_private' end;
+      select p.qual into ref_rule from pg_policies p
+      where p.schemaname = 'public' and p.tablename = ref and p.policyname = ref || '_select';
+      if q is distinct from ref_rule then
+        fails := array_append(fails, format('%s does not have the same read rule as %s: %s', t, ref, q));
       end if;
-      ref_rule := replace(ref_rule, own_term, format('((status = %L::text) AND %s)', k, own_term));
-    end if;
-    if k = 'lines' then
-      if (length(q) - length(replace(q, 'is_own_employee', ''))) / length('is_own_employee') <> 1
-         or replace(q, ' ', '') not like '%(p.status=''paid''::text)ANDprivate.is_own_employee(p.employee_id)%' then
-        fails := array_append(fails, format('%s lets an employee read lines of a payslip that is not paid: %s', t, q));
-      end if;
-    elsif q is distinct from ref_rule then
-      fails := array_append(fails, format('%s does not have the read rule expected of it (%s, from %s): %s', t, k, ref, q));
     end if;
 
     select count(*) into n from pg_policies p

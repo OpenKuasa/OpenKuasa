@@ -272,6 +272,15 @@ begin
   salary := coalesce(salary, 0);
   select e.join_date into joined from public.hr_employees e where e.id = slip.employee_id;
 
+  -- Every overtime record this is about to let go or to take is held first,
+  -- in order of id: the order hr_mark_payroll_paid holds them in, so two
+  -- drafts being worked on at once cannot each wait for the other.
+  perform 1 from public.hr_overtime_records r
+  where r.employee_id = slip.employee_id and r.org_id = slip.org_id
+    and (r.payslip_id = slip.id or (r.status = 'approved' and r.payslip_id is null))
+  order by r.id
+  for update;
+
   update public.hr_overtime_records r set payslip_id = null where r.payslip_id = slip.id;
   delete from public.hr_payslip_lines l where l.payslip_id = slip.id and l.source <> 'hr';
   update public.hr_payslips p set basic_cents = salary where p.id = slip.id;
@@ -394,8 +403,11 @@ begin
 end; $$;
 revoke all on function private.hr_payroll_fill(public.hr_payroll_runs) from public, anon, authenticated;
 
--- Who a run left out: every active employee of the workspace with no salary
--- on file (none, or zero) and no payslip in the run, by name.
+-- Who a run left out for want of a salary: every active employee of the
+-- workspace who joined on or before the last day of the month (or has no join
+-- date), has no salary on file (none, or zero) and has no payslip in the run,
+-- by name. Someone who joins after the month is not listed: they would not be
+-- paid for it with a salary either.
 create or replace function private.hr_payroll_skipped(p_run public.hr_payroll_runs)
 returns jsonb language sql stable set search_path = public as $$
   select coalesce(jsonb_agg(
@@ -404,12 +416,27 @@ returns jsonb language sql stable set search_path = public as $$
   from public.hr_employees e
   left join public.hr_employee_private x on x.employee_id = e.id
   where e.org_id = p_run.org_id and e.status = 'active' and coalesce(x.base_salary_cents, 0) = 0
+    and (e.join_date is null or e.join_date <= (p_run.period_month + interval '1 month')::date - 1)
     and not exists (
       select 1 from public.hr_payslips p
       where p.employee_id = e.id and p.payroll_run_id = p_run.id
     );
 $$;
 revoke all on function private.hr_payroll_skipped(public.hr_payroll_runs) from public, anon, authenticated;
+
+-- How many overtime lines of a run are for a record worked before the run's
+-- month. A run takes every approved record not yet paid, however old, so the
+-- first run of a workspace can carry months of it; this is what lets the
+-- screen say so.
+create or replace function private.hr_payroll_earlier_overtime(p_run public.hr_payroll_runs)
+returns int language sql stable set search_path = public as $$
+  select count(*)::int
+  from public.hr_payslip_lines l
+  join public.hr_payslips p on p.id = l.payslip_id
+  join public.hr_overtime_records r on r.id = l.overtime_record_id
+  where p.payroll_run_id = p_run.id and r.work_date < p_run.period_month;
+$$;
+revoke all on function private.hr_payroll_earlier_overtime(public.hr_payroll_runs) from public, anon, authenticated;
 
 -- A run and a payslip as the functions hand them back.
 create or replace function private.hr_payroll_run_json(p_run public.hr_payroll_runs)
@@ -433,9 +460,13 @@ revoke all on function private.hr_payslip_json(public.hr_payslips) from public, 
 -- A draft run for one month of one workspace, with its payslips. The month is
 -- the first day of a month, from 2000 on. Refused, in this order: a run
 -- already exists for the month; the month has not started (its first day is
--- after today in Malaysia); an earlier month is still a draft; nobody can be
--- paid. The workspace's row is held, so two callers cannot both start a run.
--- Returns the run, how many payslips it has, and who was left out.
+-- after today in Malaysia); an earlier month is still a draft; a later month
+-- already has a run, whatever its status; nobody can be paid. So runs are
+-- always made in order of month, and only the latest can ever be a draft.
+-- The workspace's row is held, so two callers cannot both start a run.
+-- Returns the run, how many payslips it has, how many of its overtime lines
+-- are for work done before the month, and who was left out for want of a
+-- salary.
 
 create or replace function public.hr_run_payroll(p_org uuid, p_month date)
 returns jsonb language plpgsql security definer set search_path = public as $$
@@ -464,6 +495,12 @@ begin
   ) then
     raise exception 'PAYROLL_EARLIER_DRAFT';
   end if;
+  if exists (
+    select 1 from public.hr_payroll_runs r
+    where r.org_id = p_org and r.period_month > p_month
+  ) then
+    raise exception 'PAYROLL_LATER_RUN';
+  end if;
 
   insert into public.hr_payroll_runs (org_id, period_month, status, created_by)
   values (p_org, p_month, 'draft', auth.uid())
@@ -473,7 +510,8 @@ begin
   if made = 0 then raise exception 'PAYROLL_NOBODY'; end if;
 
   return jsonb_build_object(
-    'run', private.hr_payroll_run_json(run), 'payslips', made, 'skipped', private.hr_payroll_skipped(run));
+    'run', private.hr_payroll_run_json(run), 'payslips', made,
+    'earlier_overtime', private.hr_payroll_earlier_overtime(run), 'skipped', private.hr_payroll_skipped(run));
 end; $$;
 revoke all on function public.hr_run_payroll(uuid, date) from public, anon;
 grant execute on function public.hr_run_payroll(uuid, date) to authenticated;
@@ -498,7 +536,8 @@ begin
   return jsonb_build_object(
     'run', private.hr_payroll_run_json(run),
     'payslips', (select count(*) from public.hr_payslips p where p.payroll_run_id = run.id),
-    'added', added, 'skipped', private.hr_payroll_skipped(run));
+    'added', added, 'earlier_overtime', private.hr_payroll_earlier_overtime(run),
+    'skipped', private.hr_payroll_skipped(run));
 end; $$;
 revoke all on function public.hr_recalculate_payroll(uuid) from public, anon;
 grant execute on function public.hr_recalculate_payroll(uuid) to authenticated;
@@ -851,6 +890,10 @@ grant execute on function public.hr_decide_overtime(uuid, boolean, text) to auth
 create or replace function private.hr_employee_delete_guard()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
+  -- The employee's payslips are held before they are looked at, so a run being
+  -- marked as paid at this moment is either seen as paid or waits for the
+  -- delete.
+  perform 1 from public.hr_payslips p where p.employee_id = old.id order by p.id for update;
   if exists (
     select 1 from public.hr_payslips p
     where p.employee_id = old.id and p.status = 'paid'
@@ -864,9 +907,10 @@ create trigger hr_employees_paid_payslips_guard before delete on public.hr_emplo
   for each row when (pg_trigger_depth() = 0) execute function private.hr_employee_delete_guard();
 
 -- ---- the demo re-seed (replaces the function of the first people slice) --------
--- Word for word what it was, but for two things. The payroll runs are deleted
--- before the employees, because the guard above refuses to delete an employee
--- who has a paid payslip. And the payroll part: every payslip carries its
+-- Word for word what it was, but for three things. The payroll runs are
+-- deleted before the employees, because the guard above refuses to delete an
+-- employee who has a paid payslip. The settings row, the same row as before,
+-- is written before the payroll part instead of last. And the payroll part: every payslip carries its
 -- basic pay, some carry lines (a joiner, the demo's approved overtime, a few
 -- an owner or admin would add), and all of their figures are worked out by
 -- private.hr_payroll_refresh_payslip, so they add up as a real payslip does.
@@ -1101,6 +1145,11 @@ begin
   -- Payroll: this month in draft, the seven before it paid. A payslip starts
   -- from the salary; its lines follow; then every figure is worked out by the
   -- function a real payslip is worked out by. PCB is an illustrative figure.
+  -- The settings row comes first: the joiner line counts working days, which
+  -- reads the work week from it.
+  insert into public.hr_settings (org_id, notifications)
+  values (demo, '{"leave_requests":true,"payslip_ready":true,"document_expiry":true,"birthdays":false}'::jsonb);
+
   insert into public.hr_payroll_runs (id, org_id, period_month, status, paid_at)
   select md5('rimba-run-' || g.m)::uuid, demo, (month_start - make_interval(months => g.m))::date,
     case when g.m = 0 then 'draft' else 'paid' end,
@@ -1262,9 +1311,6 @@ begin
     (9, 'Promotion', 'Promotion to Content Lead', 'issued', -120),
     (16, 'Contract renewal', 'Contract renewal', 'draft', 0)
   ) as v(n, letter_type, title, status, day);
-
-  insert into public.hr_settings (org_id, notifications)
-  values (demo, '{"leave_requests":true,"payslip_ready":true,"document_expiry":true,"birthdays":false}'::jsonb);
 end; $$;
 revoke all on function private.reseed_demo_people() from public, anon, authenticated;
 
