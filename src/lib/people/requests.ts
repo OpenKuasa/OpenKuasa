@@ -14,6 +14,7 @@ import { percent, sumBy } from './series';
 import { leaveBalanceRows } from './summaries';
 import type {
   Claim,
+  ClaimStatus,
   LeaveBalance,
   LeaveRequest,
   LeaveType,
@@ -197,7 +198,7 @@ export type ClaimRow = {
   amount: string;
   date: string;
   receipt: boolean;
-  status: RequestStatus;
+  status: ClaimStatus;
 };
 
 export type ClaimsModel = {
@@ -225,7 +226,7 @@ export function buildClaimsModel(claims: Claim[], viewer: PeopleViewer, today: s
   return {
     linked: true,
     claimed_cents: total,
-    approved_cents: claimed.filter((c) => c.status === 'approved').reduce((t, c) => t + c.amount_cents, 0),
+    approved_cents: claimed.filter((c) => c.status === 'approved' || c.status === 'paid').reduce((t, c) => t + c.amount_cents, 0),
     pending_cents: pending.reduce((t, c) => t + c.amount_cents, 0),
     pending_count: pending.length,
     by_category: sumBy(claimed, (c) => c.category, (c) => c.amount_cents).map(({ key, value }) => ({

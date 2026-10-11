@@ -44,11 +44,12 @@ const leave = (over: Partial<LeaveRequest>): LeaveRequest => ({
 const claim = (over: Partial<Claim>): Claim => ({
   id: 'c', employee_id: 'e1', employee_name: 'E One', category: 'travel', amount_cents: 1000,
   claim_date: '2026-10-02', description: null, has_receipt: true, status: 'pending',
+  decision_note: null, receipt_path: null, paid_on: null, paid_reference: null,
   created_at: '2026-10-02T02:00:00Z', ...over,
 });
 const overtime = (over: Partial<OvertimeRecord>): OvertimeRecord => ({
   id: 'o', employee_id: 'e1', employee_name: 'E One', work_date: '2026-10-02', hours: 2, rate_multiplier: 1.5,
-  amount_cents: 7500, status: 'pending', created_at: '2026-10-03T02:00:00Z', ...over,
+  amount_cents: 7500, hourly_rate_cents: 2500, day_kind: null, reason: null, decision_note: null, status: 'pending', created_at: '2026-10-03T02:00:00Z', ...over,
 });
 const timeOff = (over: Partial<TimeOffRequest>): TimeOffRequest => ({
   id: 't', employee_id: 'e1', employee_name: 'E One', off_date: '2026-10-05', start_time: '09:00:00',
@@ -174,6 +175,25 @@ describe('the queue rules', () => {
     ))!;
     expect(model.trend.at(-1)).toMatchObject({ submitted: 125.5, approved: 125.5 });
     expect(model.rows).toHaveLength(2);
+  });
+
+  it('counts a paid claim wherever an approved one counts, and keeps it from being cancelled', async () => {
+    const model = (await claimApprovals(
+      withRows({
+        listClaims: [
+          claim({ id: 'a', status: 'approved', amount_cents: 1000 }),
+          claim({ id: 'p', status: 'paid', amount_cents: 2500, created_at: '2026-10-06T02:00:00Z' }),
+          claim({ id: 'r', status: 'rejected' }),
+        ],
+      }),
+      HR,
+      NOW,
+    ))!;
+    expect(model.approved).toEqual({ count: 2, caption: 'RM 35.00' });
+    expect(model.trend.at(-1)).toMatchObject({ approved: 25 });
+    const paid = model.rows.find((r) => r.id === 'p')!;
+    expect(paid).toMatchObject({ status: 'paid', status_label: 'Paid', pending: false, cancellable: false });
+    expect(model.rows.find((r) => r.id === 'a')!.cancellable).toBe(true);
   });
 
   it('formats the middle cells for each queue', async () => {

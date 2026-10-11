@@ -12,7 +12,7 @@ import { overBalanceBy } from './leave';
 import { overtimeModel } from './overtime';
 import { leaveLabel } from './overview';
 import { bucketByWeek, sumBy } from './series';
-import type { PeopleData, PeopleViewer, RequestStatus } from './types';
+import type { ClaimStatus, PeopleData, PeopleViewer } from './types';
 
 export type ApprovalQueue = 'leave' | 'claims' | 'overtime' | 'time_off';
 
@@ -21,7 +21,7 @@ export type ApprovalRow = {
   employee_name: string;
   /** The queue's own middle columns, already formatted. */
   cells: string[];
-  status: RequestStatus;
+  status: ClaimStatus;
   status_label: string;
   pending: boolean;
   created_at: string;
@@ -124,7 +124,7 @@ type Item = {
   employee_name: string;
   /** Days over balance, for a pending leave request. */
   over_by?: number;
-  status: RequestStatus;
+  status: ClaimStatus;
   created_at: string;
   /** The request's own date: start, claim, work or off date. */
   date: string;
@@ -147,15 +147,16 @@ function buildQueue(
   const month = monthStart(today);
   const total = (list: Item[]) => list.reduce((sum, item) => sum + item.measure, 0);
   const pending = items.filter((item) => item.status === 'pending');
-  const inMonth = (status: RequestStatus) =>
-    items.filter((item) => item.status === status && monthStart(item.date) === month);
-  const approved = inMonth('approved');
-  const rejected = inMonth('rejected');
+  const inMonth = (counts: (status: ClaimStatus) => boolean) =>
+    items.filter((item) => counts(item.status) && monthStart(item.date) === month);
+  // A paid claim was approved first, so it counts wherever an approved one does.
+  const approved = inMonth((status) => status === 'approved' || status === 'paid');
+  const rejected = inMonth((status) => status === 'rejected');
 
   const submittedOn = (item: Item) => malaysiaDate(item.created_at) || null;
   const submitted = bucketByWeek(items, submittedOn, (item) => item.trend, today, WEEKS);
   const approvedSince = bucketByWeek(
-    items.filter((item) => item.status === 'approved'),
+    items.filter((item) => item.status === 'approved' || item.status === 'paid'),
     submittedOn,
     (item) => item.trend,
     today,
@@ -184,7 +185,8 @@ function buildQueue(
         created_at: item.created_at,
         over_by: item.over_by ?? 0,
         yours: viewer.employeeId !== null && item.employee_id === viewer.employeeId,
-        cancellable: item.status !== 'cancelled',
+        // A paid claim is not cancelled until its paid mark is undone.
+        cancellable: item.status !== 'cancelled' && item.status !== 'paid',
       })),
   };
 }

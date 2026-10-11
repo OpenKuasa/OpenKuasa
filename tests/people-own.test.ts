@@ -97,7 +97,7 @@ describe('departmentAverages', () => {
 
 describe('labels', () => {
   it('cover every value the database allows', () => {
-    expect(Object.keys(REQUEST_STATUS_LABEL)).toEqual(['pending', 'approved', 'rejected', 'cancelled']);
+    expect(Object.keys(REQUEST_STATUS_LABEL)).toEqual(['pending', 'approved', 'paid', 'rejected', 'cancelled']);
     expect(Object.values(CLAIM_CATEGORY_LABEL)).toEqual(['Medical', 'Travel', 'Meals', 'Equipment', 'Other']);
     expect(Object.values(DOCUMENT_TYPE_LABEL)).toEqual(['Payslip', 'Contract', 'Letter', 'Tax form', 'Benefits']);
     expect(Object.values(DOCUMENT_STATUS_LABEL)).toEqual(['Signed', 'Pending signature', 'Available', 'Expiring']);

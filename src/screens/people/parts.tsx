@@ -10,7 +10,7 @@ import { isLiveChatAllowed } from '@/lib/ai/access';
 import { getCurrentOrg } from '@/lib/auth/current-org';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
 import { createSupabasePeopleData, getPeopleData } from '@/lib/people/supabase';
-import type { PeopleData, PeopleViewer, RequestStatus } from '@/lib/people/types';
+import type { ClaimStatus, PeopleData, PeopleViewer } from '@/lib/people/types';
 import { NO_WORKSPACE_VIEWER, getPeopleViewer } from '@/lib/people/viewer';
 import { createClient } from '@/lib/supabase/server';
 import { cn } from '@/lib/utils';
@@ -90,9 +90,10 @@ export function StatusPill({ tone, children }: { tone: Tone; children: ReactNode
 }
 
 /** The pill tone for a request's status. */
-export function requestTone(status: RequestStatus): Tone {
+export function requestTone(status: ClaimStatus): Tone {
   switch (status) {
     case 'approved':
+    case 'paid':
       return 'good';
     case 'pending':
       return 'pending';

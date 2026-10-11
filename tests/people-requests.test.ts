@@ -183,8 +183,25 @@ describe('buildClaimsModel', () => {
     expect(model.rows).toHaveLength(claims.filter((c) => c.employee_id === 'seed-emp-2').length);
   });
 
+  it('counts a paid claim as approved', () => {
+    const base = { employee_id: 'e', employee_name: 'E', description: null, has_receipt: true, decision_note: null, receipt_path: null, paid_on: null, paid_reference: null, created_at: '2026-10-01T00:00:00Z' };
+    const model = buildClaimsModel(
+      [
+        { ...base, id: '1', category: 'travel', amount_cents: 10000, claim_date: '2026-10-02', status: 'approved' },
+        { ...base, id: '2', category: 'travel', amount_cents: 4000, claim_date: '2026-10-03', status: 'paid', paid_on: '2026-10-05' },
+        { ...base, id: '3', category: 'meals', amount_cents: 999, claim_date: '2026-10-04', status: 'rejected' },
+      ],
+      MEMBER_E,
+      TODAY,
+    );
+    if (!model.linked) throw new Error('expected linked');
+    expect(model.approved_cents).toBe(14000);
+    expect(model.claimed_cents).toBe(14999);
+    expect(model.rows.find((r) => r.id === '2')?.status).toBe('paid');
+  });
+
   it('adds up this month, leaving out cancelled claims, and splits by category', () => {
-    const base = { employee_id: 'e', employee_name: 'E', description: null, has_receipt: true, created_at: '2026-10-01T00:00:00Z' };
+    const base = { employee_id: 'e', employee_name: 'E', description: null, has_receipt: true, decision_note: null, receipt_path: null, paid_on: null, paid_reference: null, created_at: '2026-10-01T00:00:00Z' };
     const model = buildClaimsModel(
       [
         { ...base, id: '1', category: 'travel', amount_cents: 10000, claim_date: '2026-10-02', status: 'approved' },
@@ -225,7 +242,7 @@ describe('buildOtModel', () => {
   });
 
   it('shows rate labels, a status per row, and the newest first', () => {
-    const base = { employee_id: 'e', employee_name: 'E', created_at: '2026-10-01T00:00:00Z' };
+    const base = { employee_id: 'e', employee_name: 'E', hourly_rate_cents: 2500, day_kind: null, reason: null, decision_note: null, created_at: '2026-10-01T00:00:00Z' };
     const model = buildOtModel(
       [
         { ...base, id: '1', work_date: '2026-10-01', hours: 2, rate_multiplier: 1.5, amount_cents: 7500, status: 'approved' },

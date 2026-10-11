@@ -330,6 +330,10 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
     description,
     has_receipt: receipt,
     status,
+    decision_note: null,
+    receipt_path: null,
+    paid_on: null,
+    paid_reference: null,
     created_at: ago(-day),
   }));
 
@@ -341,6 +345,10 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
     hours,
     rate_multiplier: rate,
     amount_cents: Math.round(hours * rate * 2500),
+    hourly_rate_cents: 2500,
+    day_kind: null,
+    reason: null,
+    decision_note: null,
     status,
     created_at: ago(-day),
   }));

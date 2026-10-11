@@ -45,8 +45,8 @@ const PRIVATE_COLUMNS =
   'emergency_contact_name,emergency_contact_phone';
 const LEAVE_COLUMNS = `id,employee_id,leave_type,start_date,end_date,days,half_day,reason,status,decision_note,created_at,${NAME}`;
 const TIME_OFF_COLUMNS = `id,employee_id,off_date,start_time,end_time,reason,status,decision_note,created_at,${NAME}`;
-const CLAIM_COLUMNS = `id,employee_id,category,amount_cents,claim_date,description,has_receipt,status,created_at,${NAME}`;
-const OVERTIME_COLUMNS = `id,employee_id,work_date,hours,rate_multiplier,amount_cents,status,created_at,${NAME}`;
+const CLAIM_COLUMNS = `id,employee_id,category,amount_cents,claim_date,description,has_receipt,status,decision_note,receipt_path,paid_on,paid_reference,created_at,${NAME}`;
+const OVERTIME_COLUMNS = `id,employee_id,work_date,hours,rate_multiplier,amount_cents,hourly_rate_cents,day_kind,reason,decision_note,status,created_at,${NAME}`;
 const PAYSLIP_COLUMNS =
   `id,employee_id,payroll_run_id,period_month,gross_cents,epf_cents,socso_cents,eis_cents,pcb_cents,net_cents,status,${NAME}`;
 const GOAL_COLUMNS = `id,employee_id,title,progress,due_date,status,${NAME}`;

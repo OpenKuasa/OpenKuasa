@@ -31,6 +31,16 @@ describe('people seed', () => {
     expect(onLeave.map((r) => r.employee_name).sort()).toEqual(['Lim Wei Jie', 'Nurul Huda', 'Siti Lestari']);
   });
 
+  it('gives every claim and overtime record the new columns, with no file and no decision yet', async () => {
+    for (const c of await data.listClaims()) {
+      expect(c).toMatchObject({ decision_note: null, receipt_path: null, paid_on: null, paid_reference: null });
+    }
+    for (const o of await data.listOvertime()) {
+      expect(o).toMatchObject({ decision_note: null, reason: null });
+      expect(o.hourly_rate_cents).toBe(2500);
+    }
+  });
+
   it('always has six approvals waiting: 3 leave, 2 claims, 1 overtime, no time-off', async () => {
     const pending = <T extends { status: string }>(rows: T[]) => rows.filter((r) => r.status === 'pending').length;
     expect(pending(await data.listLeaveRequests())).toBe(3);

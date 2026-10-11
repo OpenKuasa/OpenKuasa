@@ -15,6 +15,9 @@ export const DEMO_ORG_SLUG = 'rimba-ventures-demo';
 export type EmploymentType = 'full_time' | 'part_time' | 'contract' | 'intern';
 export type EmployeeStatus = 'active' | 'inactive';
 export type RequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
+/** A claim can also be paid once approved; no other request has that step. */
+export type ClaimStatus = RequestStatus | 'paid';
+export type OvertimeDayKind = 'weekday' | 'rest_day' | 'public_holiday';
 export type LeaveType = 'annual' | 'medical' | 'emergency' | 'unpaid' | 'maternity' | 'paternity';
 export type ClaimCategory = 'medical' | 'travel' | 'meals' | 'equipment' | 'other';
 export type AttendanceStatus = 'present' | 'late' | 'absent' | 'on_leave';
@@ -108,8 +111,16 @@ export type Claim = {
   amount_cents: number;
   claim_date: string;
   description: string | null;
+  /** True when a receipt was attached, as a file or (in the sample company) just ticked. */
   has_receipt: boolean;
-  status: RequestStatus;
+  status: ClaimStatus;
+  /** Why an owner or admin rejected it, when they said. */
+  decision_note: string | null;
+  /** The receipt file in the private bucket; null when there is none. Never shown, never logged. */
+  receipt_path: string | null;
+  /** The date it was paid, when the status is paid. */
+  paid_on: string | null;
+  paid_reference: string | null;
   created_at: string;
 };
 
@@ -120,7 +131,13 @@ export type OvertimeRecord = {
   work_date: string;
   hours: number;
   rate_multiplier: number;
+  /** Fixed when the record was made; 0 while `hourly_rate_cents` is null. */
   amount_cents: number;
+  /** Null when no salary was on file: the amount is then not calculated. */
+  hourly_rate_cents: number | null;
+  day_kind: OvertimeDayKind | null;
+  reason: string | null;
+  decision_note: string | null;
   status: RequestStatus;
   created_at: string;
 };
