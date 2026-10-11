@@ -60,6 +60,18 @@ export const optionalText = z
   .transform((v) => (v === '' ? null : v))
   .nullable();
 
+/**
+ * An amount of money typed by a person: rounded to the sen first, then it must
+ * be above zero and fit the column numeric(14,2). `message` is the sentence
+ * for anything else.
+ */
+export function ringgitAmount(message: string) {
+  return z
+    .number({ error: message })
+    .transform(round(2))
+    .pipe(z.number().gt(0, message).max(999_999_999_999.99, message));
+}
+
 /** An id, or nothing chosen (an empty string from a select). */
 const optionalId = z
   .union([z.string().uuid(M.product), z.literal(''), z.null()], { error: M.product })

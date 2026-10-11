@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { billIdInput, saveBillInput } from '@/lib/finance/bills';
 import { createContactInput, updateContactInput } from '@/lib/finance/contacts';
+import { creditNoteIdInput, saveCreditNoteInput } from '@/lib/finance/credit-notes';
 import { invoiceIdInput, saveInvoiceInput, setEInvoiceInput } from '@/lib/finance/invoices';
 import { markPaymentPaidInput, paymentIdInput, recordPaymentInInput, recordPaymentOutInput } from '@/lib/finance/money';
 import { createProductInput, updateProductInput } from '@/lib/finance/products';
@@ -86,6 +87,11 @@ const cases: [string, { parse: (v: unknown) => unknown }, unknown][] = [
     lines: [{ product_id: ID, description: 'Ink', quantity: 0.0005, uom: ' box ', unit_price: 14.5, sst_rate: 1.005 }],
   }],
   ['quotationIdInput', quotationIdInput, { id: ID }],
+  ['saveCreditNoteInput', saveCreditNoteInput, { invoice_id: ID, credit_date: '2026-10-06', reason: 'returns', amount: 240.005, notes: ' ' }],
+  ['saveCreditNoteInput (a draft being changed, the smallest amount)', saveCreditNoteInput, {
+    id: ID, invoice_id: ID, credit_date: '2026-10-06', reason: 'other', amount: 0.005, notes: ' Two returned ',
+  }],
+  ['creditNoteIdInput', creditNoteIdInput, { id: ID }],
 ];
 
 describe('finance schemas parse their own output unchanged', () => {
