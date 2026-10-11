@@ -158,7 +158,8 @@ export function createHireTools(
       description:
         'List job applications, newest first: the candidate, the job, the stage reached ' +
         '(applied, screening, interview, offer, hired), whether it is still live, the rating out of 5, ' +
-        'the source. Email, phone, cover letter, CV link, portfolio link and expected salary are returned only when includeContact is set. Filter by job, stage or outcome.',
+        'the source. Email, phone, cover letter, CV link, portfolio link and expected salary are returned only when includeContact is set. Filter by job, stage or outcome. ' +
+        "Each row has the application's id, which readCandidateCv takes.",
       inputSchema: z.object({
         jobTitle,
         stage: z.enum(['applied', 'screening', 'interview', 'offer', 'hired']).optional()
@@ -180,6 +181,7 @@ export function createHireTools(
           return {
             total: rows.length,
             applications: rows.slice(0, rowLimit(requested, 20)).map((a) => ({
+              id: a.id,
               candidate: a.candidate_name,
               job: a.job_title,
               stage: a.stage,

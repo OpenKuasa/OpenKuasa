@@ -103,6 +103,21 @@ describe('hire tools', () => {
     expect(pool.candidates.some((r: { email: string | null }) => r.email)).toBe(true);
   });
 
+  it('gives every application row its id, with and without contact details, and never a CV path', async () => {
+    const apps = await data.listApplications();
+    const ids = new Set(apps.map((a) => a.id));
+    for (const includeContact of [false, true]) {
+      const { applications } = await run('listApplications')({ includeContact, limit: 5 });
+      expect(applications.length).toBeGreaterThan(0);
+      for (const row of applications) {
+        expect(ids.has(row.id), 'id is an application id').toBe(true);
+        expect('cv_path' in row).toBe(false);
+      }
+    }
+    const first = (await run('listApplications')({ limit: 1 })).applications[0];
+    expect(first.id).toBe(apps.find((a) => a.candidate_name === first.candidate && a.job_title === first.job)?.id);
+  });
+
   describe('application details', () => {
     const FIELDS = ['cover_letter', 'cv_url', 'portfolio_url', 'expected_salary_cents'];
     const long = 'x'.repeat(3000);
