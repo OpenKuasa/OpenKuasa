@@ -1,6 +1,6 @@
 /**
  * Live test of the attendance write path against the real database. It needs
- * 20261023090000_people_attendance_writes.sql applied; until then it fails at
+ * 20261024090000_people_attendance_writes.sql applied; until then it fails at
  * the first call (the functions do not exist). Skipped without Supabase env vars.
  *
  * It does not clock in or out: whether today is a working day, and whether a
