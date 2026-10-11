@@ -536,6 +536,10 @@ describe('performance, training and announcements', () => {
     expect(section).toContain('never say a review exists that the result did not return');
     expect(section).toContain('a member never hears of a draft announcement');
   });
+  it('says a period that was not recognised is not "no review": period_not_matched means say so and give every review on record', () => {
+    expect(section).toContain('period_not_matched');
+    expect(section).toContain('say you did not recognise that period and that what follows is every review on record');
+  });
   it('never compares colleagues’ reviews for a member', () => {
     expect(section).toContain("never tell a member how a colleague was rated, and never compare named colleagues' reviews for a member");
   });

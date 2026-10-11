@@ -4,6 +4,7 @@
  * The database enforces the same rules; these save a refused round trip and keep the order the plan requires:
  * the demo and the role are settled from the session before anything is read.
  */
+import 'server-only';
 import { revalidatePath } from 'next/cache';
 import { can } from '@/lib/auth/permissions';
 import { getViewer } from '@/lib/auth/viewer';

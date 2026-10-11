@@ -291,16 +291,15 @@ describe('refusals and failures', () => {
     expect(await setTrainingCompleted(c, { training_id: COURSE, employee_id: EMP, completed: false })).toEqual(sentence);
   });
 
-  it('answers an unknown error generically and logs only the code and message, never what was typed', async () => {
+  it('answers an unknown error generically and logs only the code, never the message (it can quote what was typed)', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { client } = fakeSupabase({ 'rpc.hr_save_goal': { error: { code: '57014', message: 'canceling statement' } } });
+    const { client } = fakeSupabase({
+      'rpc.hr_save_goal': { error: { code: '57014', message: 'invalid input syntax for type date: "SECRET GOAL TITLE"' } },
+    });
     const result = await saveGoal(ctxOf(client), { employee_id: EMP, title: 'SECRET GOAL TITLE', progress: 77 });
     expect(result).toEqual({ ok: false, error: GENERIC });
-    const logged = JSON.stringify(log.mock.calls);
-    expect(logged).toContain('saveGoal');
-    expect(logged).toContain('57014');
-    expect(logged).not.toContain('SECRET GOAL TITLE');
-    expect(logged).not.toContain('77');
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls[0]).toEqual(['[people-capability] saveGoal failed:', '57014', 'no row came back']);
   });
 
   it('does not take a message that merely mentions a code as that refusal', async () => {

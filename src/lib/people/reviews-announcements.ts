@@ -12,7 +12,7 @@
 import { formatScore } from './performance';
 import type { AnnouncementItem, AnnouncementsModel } from './company';
 import type { ReviewRow, ReviewsModel, ScorecardModel, ScorecardRow } from './performance';
-import { COMPETENCIES, type Competency, type PeopleViewer } from './types';
+import { COMPETENCIES, type Competency } from './types';
 
 const DASH = '—';
 
@@ -28,7 +28,7 @@ export const RATING_OPTIONS: { value: 'exceeds' | 'meets' | 'below'; label: stri
 ];
 
 /** Owners and admins outside the demo: the only people who are shown a control that changes a review or a post. */
-export const showsWriteControls = (viewer: PeopleViewer): boolean => viewer.isHr && !viewer.isDemo;
+export const showsWriteControls = (viewer: { isHr: boolean; isDemo: boolean }): boolean => viewer.isHr && !viewer.isDemo;
 
 // ---- Second steps ----------------------------------------------------------------
 
@@ -209,11 +209,11 @@ type ViewerKind = { isHr: boolean; isDemo: boolean };
 
 /** Review Scores: the write controls only for an owner or admin outside the demo, with the data loaded. */
 export const reviewScreenControls = (viewer: ViewerKind, loaded: boolean) => ({
-  write: loaded && viewer.isHr && !viewer.isDemo,
+  write: loaded && showsWriteControls(viewer),
 });
 
 /** Announcements: write controls as above; mark-read only outside the demo with something unread. */
 export const announcementsScreenControls = (viewer: ViewerKind, loaded: boolean, unread: number) => ({
-  write: loaded && viewer.isHr && !viewer.isDemo,
+  write: loaded && showsWriteControls(viewer),
   markRead: loaded && shouldMarkRead({ isDemo: viewer.isDemo, unread }),
 });

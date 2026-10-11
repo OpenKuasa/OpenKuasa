@@ -5,6 +5,7 @@
  * Malaysia date the caller passes in. The database re-checks everything; these say it in words first.
  */
 import { canSelfEnrol, canSelfWithdraw, courseStarted, toGoalInput } from './performance-forms';
+import { showsWriteControls } from './reviews-announcements';
 import type { Employee, Goal } from './types';
 
 type CourseDates = { starts_on: string | null; ends_on: string | null };
@@ -118,7 +119,7 @@ type ViewerKind = { isHr: boolean; isDemo: boolean; employeeId: string | null };
  */
 export function trainingScreenControls(viewer: ViewerKind, loaded: boolean) {
   return {
-    owner: loaded && viewer.isHr && !viewer.isDemo,
+    owner: loaded && showsWriteControls(viewer),
     demoPlaceholders: viewer.isDemo,
     memberEnrol: loaded && !viewer.isHr && !viewer.isDemo && viewer.employeeId !== null,
   };

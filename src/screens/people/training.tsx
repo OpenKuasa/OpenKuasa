@@ -11,6 +11,7 @@ import { LiveDot } from '@/components/ui/live-dot';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { todayInMalaysia } from '@/lib/people/dates';
 import { enrolCandidates, memberCourseControl, trainingScreenControls } from '@/lib/people/goals-training';
+import { showsWriteControls } from '@/lib/people/reviews-announcements';
 import { TRAINING_STATUS_LABEL, type TrainingRow, buildTrainingModel } from '@/lib/people/performance';
 import { HR_ONLY, LOAD_FAILED, LaterButton, Muted, StatusPill, loadPeople } from './parts';
 
@@ -24,7 +25,7 @@ const STATUS_TONE = { completed: 'good', in_progress: 'pending', upcoming: 'neut
 export default async function TrainingScreen() {
   const { model: loaded, viewer } = await loadPeople('training', async (data, now, ctx) => {
     // Names are used only to list who is enrolled and who can be enrolled: an owner's or admin's controls.
-    const names = ctx.viewer.isHr && !ctx.viewer.isDemo;
+    const names = showsWriteControls(ctx.viewer);
     const [trainings, enrolments, employees] = await Promise.all([
       data.listTrainings(),
       data.listTrainingEnrolments(),

@@ -1270,6 +1270,8 @@ export function createPeopleTools(
             ...matchedNames(name, rows.map((r) => r.employee_name)),
             reviews: rows.slice(0, rowLimit(requested, 20)).map(reviewRow),
             scope,
+            // The period was dropped (it neither parses nor matches as text): say so, so it is not answered as if it matched.
+            ...(asked && exact === null && partial.length === 0 ? { period_not_matched: asked } : {}),
             ...notLinked, ...askedBy,
           };
         }),

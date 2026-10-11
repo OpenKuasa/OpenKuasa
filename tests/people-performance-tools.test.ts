@@ -737,6 +737,17 @@ describe('listReviews', () => {
     expect(some.reviews.map((r: Loose) => r.id)).toEqual(['r-draft']);
   });
 
+  it('says so when the period neither parses nor matches, and still lists what is on record; a period that matched says nothing', async () => {
+    const lost = await run('listReviews', { period: ' Q3 2026 ' }, MEMBER, self(), fixture);
+    expect(lost.period_not_matched).toBe('Q3 2026');
+    expect(lost.reviews.length).toBeGreaterThan(0);
+    const ownerLost = await run('listReviews', { period: 'Q3 2026' }, HR_VIEWER, hr(), fixture);
+    expect(ownerLost.period_not_matched).toBe('Q3 2026');
+    for (const period of ['', 'H1 2026', 'fy 2025', '2026']) {
+      expect(await run('listReviews', period ? { period } : {}, MEMBER, self(), fixture), period).not.toHaveProperty('period_not_matched');
+    }
+  });
+
   it('in the demo it lists as the screens do, drafts included, with no id', async () => {
     const result = await run('listReviews', {}, DEMO, null, fixture);
     expect(result.reviews.some((r: Loose) => r.status === 'draft')).toBe(true);

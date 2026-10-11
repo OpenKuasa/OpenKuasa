@@ -62,7 +62,8 @@ const ANN_NOT_FOUND = { ok: false, error: PERFORMANCE_REFUSALS.ANN_NOT_FOUND };
 
 let owner: { c: SupabaseClient; orgId: string };
 let member: { c: SupabaseClient; userId: string };
-let guest: { c: SupabaseClient; demoId: string };
+// Signed in inside the demo test, after its minute guard: the demo is not joined at any other time.
+let guest: { c: SupabaseClient; demoId: string } | undefined;
 
 // Filled in by the first test, used by the rest.
 const mine = { employeeId: '' };
@@ -90,12 +91,6 @@ beforeAll(async () => {
   const accepted = await m.rpc('accept_invite', { p_token: invite.data });
   expect(accepted.error, accepted.error?.message).toBeNull();
   member = { c: m, userId: signUp.userId as string };
-
-  const g = client();
-  expect((await signInAnon(g)).error).toBeNull();
-  const demo = await joinDemo(g);
-  expect(demo.error, demo.error?.message).toBeNull();
-  guest = { c: g, demoId: demo.data as string };
 });
 afterAll(async () => {
   await owner?.c.auth.signOut();
@@ -320,6 +315,11 @@ testWithSupabase('a demo guest changes nothing, and has no unread', async () => 
     console.warn('Skipped the demo part of the performance live test: the demo is being re-seeded (minutes :00 to :02).');
     return;
   }
+  const g = client();
+  expect((await signInAnon(g)).error).toBeNull();
+  const demo = await joinDemo(g);
+  expect(demo.error, demo.error?.message).toBeNull();
+  guest = { c: g, demoId: demo.data as string };
   const ctx = { client: guest.c, orgId: guest.demoId };
   const data = createSupabasePeopleData(guest.c, guest.demoId);
   const [goals, reviews, trainings, announcements] = await Promise.all([

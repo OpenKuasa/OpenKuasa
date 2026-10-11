@@ -13,46 +13,18 @@ import { z } from 'zod';
 import {
   type CapResult,
   type PeopleWriteContext,
-  refuse,
-  writeFailed,
 } from './capabilities';
 import { isRealDate } from './dates';
 import { blank } from './loose-input';
 import { PERFORMANCE_REFUSALS } from './performance-refusals';
+import { type Row, call, guid, isRow, optionalGuid, parse, text } from './performance-rpc';
 import { COMPETENCIES, type Competency, type ReviewStatus } from './types';
 
 // ---- Sentences ---------------------------------------------------------------
 
 export { PERFORMANCE_REFUSALS };
 
-type DbError = { code?: string; message?: string } | null | undefined;
-
-/** The whole message when it is one bare upper-case code, else null. A message that merely mentions a code is not a refusal. */
-const bareCode = (message: string | undefined): string | null => /^[A-Z][A-Z_]+$/.exec(message ?? '')?.[0] ?? null;
-
-/** A known code is answered with its sentence; anything else is logged, code and message only, and answered generically. */
-export function failed(fn: string, error: DbError): CapResult<never> {
-  const code = bareCode(error?.message);
-  if (code && Object.hasOwn(PERFORMANCE_REFUSALS, code)) return refuse(PERFORMANCE_REFUSALS[code]);
-  return writeFailed(fn, error);
-}
-
 // ---- Inputs --------------------------------------------------------------------
-
-// Any Postgres uuid: `.uuid()` would refuse ids that are valid but not RFC-versioned.
-export const guid = (what: string) => z.guid().describe(what);
-
-/**
- * An id that may be left out to mean "add". An empty string (from a model) is none; anything else that is not text
- * (a number, an object) is refused, never read as "add".
- */
-export const optionalGuid = (what: string) =>
-  z
-    .preprocess(
-      (value) => (value === undefined || value === null || typeof value === 'string' ? blank(value) : value),
-      guid(what).nullable(),
-    )
-    .optional();
 
 /** An optional text that is empty (or blank) when none: sent to the database as null. */
 const optionalText = (max: number, message: string) =>
@@ -131,37 +103,10 @@ export const completionInput = z.object({
   completed: z.boolean('Say whether they completed it.'),
 });
 
-export function parse<S extends z.ZodType>(schema: S, input: unknown): CapResult<z.infer<S>> {
-  const parsed = schema.safeParse(input);
-  if (parsed.success) return { ok: true, data: parsed.data };
-  return refuse(parsed.error.issues[0]?.message ?? 'That input was not valid.');
-}
-
 // ---- Replies ---------------------------------------------------------------------
 
-export type Row = Record<string, unknown>;
-export const isRow = (value: unknown): value is Row => typeof value === 'object' && value !== null && !Array.isArray(value);
-export const text = (value: unknown): string | null => (typeof value === 'string' && value !== '' ? value : null);
 const textOrNull = (value: unknown): string | null | undefined =>
   value === null ? null : typeof value === 'string' ? value : undefined;
-export const count = (value: unknown): number | null =>
-  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
-
-/** One database function. `pick` shapes its reply, or returns null for a reply that is not what was promised. */
-export async function call<T>(
-  ctx: PeopleWriteContext,
-  fn: string,
-  rpc: string,
-  args: Row,
-  pick: (row: Row) => T | null,
-): Promise<CapResult<T>> {
-  const { data, error } = await ctx.client.rpc(rpc, args);
-  if (error) return failed(fn, error);
-  const picked = isRow(data) ? pick(data) : null;
-  if (picked === null) return writeFailed(fn, { message: 'unexpected reply' });
-  return { ok: true, data: picked };
-}
-
 export type SavedGoal = {
   id: string;
   employee_id: string;
@@ -431,7 +376,7 @@ export async function unenrol(
   });
 }
 
-/** Marks an enrolled employee completed, or undoes it, once the course has started. */
+/** Marks an enrolled employee completed once the course has started; undoing it is always allowed. */
 export async function setTrainingCompleted(
   ctx: PeopleWriteContext,
   input: z.infer<typeof completionInput>,

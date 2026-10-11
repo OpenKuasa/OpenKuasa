@@ -95,7 +95,7 @@ Every public function is `security definer`, `set search_path = public`, executa
 - The status shown is worked out from the Malaysia date: `upcoming` before `starts_on`, `in_progress` from `starts_on` to `ends_on`, `completed` after `ends_on`. A course with no dates (older data) is `upcoming`.
 - A linked, active employee may enrol themselves while the course has not ended, and withdraw themselves while it has not started and they are not marked completed.
 - An owner or admin may enrol or remove any employee of the workspace at any time, except that someone marked completed must be un-marked first.
-- An owner or admin may mark an enrolled employee completed, or undo it, once the course has started.
+- An owner or admin may mark an enrolled employee completed once the course has started; undoing it is always allowed.
 - A course cannot be deleted while anyone is marked completed on it.
 
 **Announcements**
@@ -120,7 +120,7 @@ Every public function is `security definer`, `set search_path = public`, executa
 | `hr_delete_training(p_training)` | Admin | Deletes the course and its enrolments | Someone is marked completed |
 | `hr_enrol(p_training, p_employee)` | Own; admin | Enrols the employee | Already enrolled; for own: the course has ended, or the employee is inactive |
 | `hr_unenrol(p_training, p_employee)` | Own; admin | Removes the enrolment | Not enrolled; marked completed; for own: the course has started |
-| `hr_set_training_completed(p_training, p_employee, p_completed)` | Admin | Marks or un-marks completion | Not enrolled; the course has not started |
+| `hr_set_training_completed(p_training, p_employee, p_completed)` | Admin | Marks or un-marks completion | Not enrolled; marking when the course has not started (undoing is always allowed) |
 | `hr_save_announcement(p_org, p_announcement, p_title, p_body, p_category, p_publish)` | Admin | Adds or changes one; with `p_publish` true a new one or a draft is published | Bad input |
 | `hr_publish_announcement(p_announcement)` | Admin | Draft to published | Not a draft |
 | `hr_unpublish_announcement(p_announcement)` | Admin | Published to draft | Not published |

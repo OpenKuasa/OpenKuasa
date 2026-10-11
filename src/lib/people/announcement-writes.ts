@@ -14,7 +14,7 @@ import {
   optionalGuid,
   parse,
   text,
-} from './performance-writes';
+} from './performance-rpc';
 
 export type SavedAnnouncement = {
   id: string;
