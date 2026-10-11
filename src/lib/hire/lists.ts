@@ -12,12 +12,14 @@ import {
   groupByStage,
   type ApplicationLabel,
 } from './applications-view';
+import type { RejectReason } from './application-changes';
 import { ago } from './dashboard';
 import { applicantsByJob, applicationsPerWeek } from './overview';
 import { ringgit } from './public-careers';
 import {
   APPLICATION_STAGES,
   type Application,
+  type ApplicationOutcome,
   type ApplicationStage,
   type EmploymentType,
   type HireData,
@@ -167,6 +169,23 @@ export async function buildCareersModel(data: HireData): Promise<CareersModel> {
   };
 }
 
+/**
+ * What the controls that change an application need to know about it. Plain
+ * values only: this goes to the browser, so no storage path and no contact details.
+ */
+export type ApplicationState = {
+  stage: ApplicationStage;
+  outcome: ApplicationOutcome;
+  /** 1 to 5, or null when not rated. */
+  rating: number | null;
+  /** Why it was rejected or withdrawn, when a reason was given. */
+  rejectReason: RejectReason | null;
+};
+
+const applicationState = (a: Application): ApplicationState => ({
+  stage: a.stage, outcome: a.outcome, rating: a.rating, rejectReason: a.reject_reason,
+});
+
 export type BoardModel = {
   isEmpty: boolean;
   stages: {
@@ -174,7 +193,7 @@ export type BoardModel = {
     name: string;
     /** Live applications in this stage, over all applications (the list below is cut at ROWS_SHOWN). */
     count: number;
-    candidates: { id: string; name: string; role: string; source: string; rating: number | null; lastTouch: string; active: boolean }[];
+    candidates: ({ id: string; name: string; role: string; source: string; lastTouch: string; active: boolean } & ApplicationState)[];
   }[];
   total: number;
   hired: number;
@@ -202,7 +221,7 @@ export async function buildBoardModel(data: HireData, now: Date): Promise<BoardM
         name: a.candidate_name,
         role: a.job_title,
         source: a.source ?? 'Unknown',
-        rating: a.rating,
+        ...applicationState(a),
         lastTouch: `${ago(a.hired_at ?? a.offered_at ?? a.applied_at, now)} ago`,
         active: now.getTime() - Date.parse(a.applied_at) < 7 * DAY,
       })),
@@ -259,7 +278,10 @@ function applicationDetails(a: Application): ApplicationDetails | null {
 export type ApplicationsModel = {
   isEmpty: boolean;
   total: number;
-  rows: { id: string; name: string; job: string; source: string; status: ApplicationLabel; applied: string; details: ApplicationDetails | null }[];
+  rows: ({
+    id: string; name: string; job: string; source: string; status: ApplicationLabel; applied: string;
+    details: ApplicationDetails | null;
+  } & ApplicationState)[];
   statusMix: { key: ApplicationLabel; value: number }[];
   byJob: { label: string; applications: number }[];
 };
@@ -276,6 +298,7 @@ export async function buildApplicationsModel(data: HireData): Promise<Applicatio
       job: a.job_title,
       source: a.source ?? 'Unknown',
       status,
+      ...applicationState(a),
       applied: fullDate(a.applied_at),
       details: applicationDetails(a),
     })),

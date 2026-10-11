@@ -13,8 +13,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { can } from '@/lib/auth/permissions';
+import { getViewer } from '@/lib/auth/viewer';
 import { cn } from '@/lib/utils';
 import { buildBoardModel, type BoardModel } from '@/lib/hire/lists';
+import { ApplicationMenu } from '@/screens/hire/application-actions';
 import { FUNNEL_COLOR, LOAD_FAILED, Muted, loadHire } from '@/screens/hire/parts';
 
 type Candidate = BoardModel['stages'][number]['candidates'][number];
@@ -34,7 +37,8 @@ const APPLICATIONS_SERIES: Series[] = [
 
 function Stars({ rating }: { rating: number }) {
   return (
-    <div className="flex items-center gap-0.5" title={`Rating ${rating}/5`}>
+    // The rating in words for a screen reader: the stars are not the only signal.
+    <div className="flex items-center gap-0.5" role="img" aria-label={`Rated ${rating} out of 5`} title={`Rated ${rating} out of 5`}>
       {Array.from({ length: 5 }, (_, i) => (
         <Star
           key={i}
@@ -50,10 +54,11 @@ function Stars({ rating }: { rating: number }) {
   );
 }
 
-function CandidateCard({ candidate }: { candidate: Candidate }) {
+function CandidateCard({ candidate, canEdit }: { candidate: Candidate; canEdit: boolean }) {
   return (
     <div className="space-y-2 rounded-xl border bg-card p-3 shadow-sm transition-colors hover:border-primary/40">
-      <div className="flex items-center gap-2">
+      {/* Wraps, so the menu's "Moving…" line and any refusal take a line of their own inside the card. */}
+      <div className="flex flex-wrap items-center gap-2">
         <span className="grid size-7 shrink-0 place-items-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary">
           {candidate.name.charAt(0)}
         </span>
@@ -66,6 +71,14 @@ function CandidateCard({ candidate }: { candidate: Candidate }) {
           </p>
         </div>
         <LiveDot active={candidate.active} />
+        {/* Ids, names and where the application stands: nothing else goes to the browser. */}
+        <ApplicationMenu
+          application={{
+            id: candidate.id, name: candidate.name, job: candidate.role,
+            stage: candidate.stage, outcome: candidate.outcome, rating: candidate.rating, rejectReason: candidate.rejectReason,
+          }}
+          canEdit={canEdit}
+        />
       </div>
       <div className="flex items-center justify-between gap-2">
         {candidate.rating === null ? (
@@ -85,7 +98,9 @@ function CandidateCard({ candidate }: { candidate: Candidate }) {
 }
 
 export default async function CandidatesScreen() {
-  const { model } = await loadHire('candidates', buildBoardModel);
+  const [{ model }, viewer] = await Promise.all([loadHire('candidates', buildBoardModel), getViewer()]);
+  // Worked out once for the screen. The actions check again on the server, so this only decides what is drawn.
+  const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
   const funnel: Slice[] = (model?.funnel ?? []).map((f) => ({
     key: f.key,
     label: f.label,
@@ -214,7 +229,7 @@ export default async function CandidatesScreen() {
                   <Muted>None</Muted>
                 ) : (
                   stage.candidates.map((candidate) => (
-                    <CandidateCard key={candidate.id} candidate={candidate} />
+                    <CandidateCard key={candidate.id} candidate={candidate} canEdit={canEdit} />
                   ))
                 )}
               </div>

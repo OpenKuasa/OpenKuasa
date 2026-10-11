@@ -183,6 +183,61 @@ describe('applications list', () => {
   });
 });
 
+describe('what a row carries for the controls that change an application', () => {
+  const PATH = '11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/33333333-3333-4333-8333-333333333333.pdf';
+  const app = (over: Partial<Application>): Application => ({
+    id: 'a1', candidate_id: 'c1', job_id: 'j1', candidate_name: 'Aina Rahman', job_title: 'Barista', stage: 'interview',
+    outcome: 'active', rating: 4, source: null, applied_at: '2026-10-01T00:00:00Z', offered_at: null,
+    hired_at: null, created_at: '2026-10-01T00:00:00Z', cover_letter: 'Hello', cv_url: null, cv_path: PATH,
+    portfolio_url: null, expected_salary_cents: null, consented_at: null, reject_reason: null,
+    ...over,
+  });
+  const apps = [
+    app({}),
+    app({ id: 'a2', stage: 'screening', outcome: 'rejected', rating: null, reject_reason: 'experience' }),
+    app({ id: 'a3', stage: 'hired', outcome: 'withdrawn', rating: 2 }),
+  ];
+  const source: HireData = { ...EMPTY, listApplications: async () => apps };
+  /** Every key anywhere inside a value. */
+  const keysOf = (value: unknown): string[] =>
+    value && typeof value === 'object'
+      ? Object.entries(value).flatMap(([key, inner]) => [key, ...keysOf(inner)])
+      : [];
+
+  it('gives each row of the list its stage, outcome, rating and reason', async () => {
+    const { rows } = await buildApplicationsModel(source);
+    expect(rows.map((r) => [r.id, r.stage, r.outcome, r.rating, r.rejectReason])).toEqual([
+      ['a1', 'interview', 'active', 4, null],
+      ['a2', 'screening', 'rejected', null, 'experience'],
+      ['a3', 'hired', 'withdrawn', 2, null],
+    ]);
+    // The pill still follows the label.
+    expect(rows.map((r) => r.status)).toEqual(['Shortlisted', 'Rejected', 'Rejected']);
+  });
+
+  it('gives each card of the board its stage, outcome, rating and reason', async () => {
+    const board = await buildBoardModel(source, NOW);
+    const cards = board.stages.flatMap((s) => s.candidates);
+    // The board lists live applications only.
+    expect(cards.map((c) => [c.id, c.stage, c.outcome, c.rating, c.rejectReason])).toEqual([
+      ['a1', 'interview', 'active', 4, null],
+    ]);
+    for (const stage of board.stages) for (const card of stage.candidates) expect(card.stage).toBe(stage.key);
+  });
+
+  it('carries no storage path and no contact details on either screen', async () => {
+    const list = (await buildApplicationsModel(source)).rows;
+    const board = (await buildBoardModel(source, NOW)).stages.flatMap((s) => s.candidates);
+    for (const rows of [list, board]) {
+      expect(JSON.stringify(rows)).not.toContain(PATH);
+      const keys = keysOf(rows).map((key) => key.toLowerCase());
+      for (const word of ['cv_path', 'cvpath', 'path', 'email', 'phone']) {
+        expect(keys.filter((key) => key.includes(word))).toEqual([]);
+      }
+    }
+  });
+});
+
 describe('safeLink', () => {
   it('gives the address and its host for an http or https link', () => {
     expect(safeLink('https://drive.google.com/file/d/abc')).toEqual({ href: 'https://drive.google.com/file/d/abc', host: 'drive.google.com' });

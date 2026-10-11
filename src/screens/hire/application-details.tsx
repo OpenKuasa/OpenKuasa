@@ -2,12 +2,13 @@
 
 import { useId, useState, useTransition } from 'react';
 import { ChevronDown } from 'lucide-react';
-import type { ApplicationDetails, SafeLink } from '@/lib/hire/lists';
+import type { ApplicationDetails, ApplicationState, SafeLink } from '@/lib/hire/lists';
 import { viewCvAction } from '@/app/(app)/hire/actions';
 import { cn } from '@/lib/utils';
 import { LiveDot } from '@/components/ui/live-dot';
 import { Badge } from '@/components/ui/badge';
 import { TableCell, TableRow } from '@/components/ui/table';
+import { ApplicationActions } from '@/screens/hire/application-actions';
 
 /** 44 pixels of hit area on every button and link. */
 const TARGET = 'min-h-11 min-w-11';
@@ -25,7 +26,7 @@ export type ApplicationRowData = {
   live: boolean;
   applied: string;
   details: ApplicationDetails | null;
-};
+} & ApplicationState;
 
 /** A link is drawn only from a SafeLink, never from a raw string. */
 function DetailLink({ label, link }: { label: string; link: SafeLink }) {
@@ -105,11 +106,16 @@ function ViewCv({ applicationId }: { applicationId: string }) {
   );
 }
 
-/** The table row of an application and, under it, the row of its details (hidden until opened). */
-export function ApplicationRow({ row }: { row: ApplicationRowData }) {
+/**
+ * The table row of an application and, under it, the row of its details (hidden until opened):
+ * what the applicant gave on the form, then the controls that change the application.
+ * Someone who may not edit gets the details alone, and no button where there are none.
+ */
+export function ApplicationRow({ row, canEdit }: { row: ApplicationRowData; canEdit: boolean }) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
   const { details } = row;
+  const hasPanel = details !== null || canEdit;
 
   return (
     <>
@@ -132,7 +138,7 @@ export function ApplicationRow({ row }: { row: ApplicationRowData }) {
         </TableCell>
         <TableCell className="whitespace-nowrap text-muted-foreground">{row.applied}</TableCell>
         <TableCell>
-          {details ? (
+          {hasPanel ? (
             <button
               type="button"
               aria-expanded={open}
@@ -151,10 +157,13 @@ export function ApplicationRow({ row }: { row: ApplicationRowData }) {
           ) : null}
         </TableCell>
       </TableRow>
-      {details ? (
+      {hasPanel ? (
         <TableRow id={panelId} hidden={!open} className="bg-muted/30 hover:bg-muted/30">
           <TableCell colSpan={6} className="whitespace-normal">
-            <dl className="flex flex-col gap-3 py-1">
+            {/* Held to the width of the screen, and kept in view when a narrow table is scrolled sideways. */}
+            <div className="sticky left-4 flex w-[min(100%,calc(100vw-4rem))] flex-col gap-4 py-1">
+            {details ? (
+            <dl className="flex flex-col gap-3">
               {details.coverLetter ? (
                 <div>
                   <dt className="text-xs font-medium text-muted-foreground">Cover letter</dt>
@@ -171,6 +180,15 @@ export function ApplicationRow({ row }: { row: ApplicationRowData }) {
                 </div>
               ) : null}
             </dl>
+            ) : null}
+            <ApplicationActions
+              application={{
+                id: row.id, name: row.name, job: row.job,
+                stage: row.stage, outcome: row.outcome, rating: row.rating, rejectReason: row.rejectReason,
+              }}
+              canEdit={canEdit}
+            />
+            </div>
           </TableCell>
         </TableRow>
       ) : null}

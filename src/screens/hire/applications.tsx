@@ -10,6 +10,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { can } from '@/lib/auth/permissions';
+import { getViewer } from '@/lib/auth/viewer';
 import { buildApplicationsModel } from '@/lib/hire/lists';
 import { ApplicationRow } from '@/screens/hire/application-details';
 import { LOAD_FAILED, Muted, loadHire } from '@/screens/hire/parts';
@@ -37,7 +39,12 @@ const BY_JOB_SERIES: Series[] = [
 ];
 
 export default async function ApplicationsScreen() {
-  const { model } = await loadHire('applications', (data) => buildApplicationsModel(data));
+  const [{ model }, viewer] = await Promise.all([
+    loadHire('applications', (data) => buildApplicationsModel(data)),
+    getViewer(),
+  ]);
+  // Worked out once for the screen. The actions check again on the server, so this only decides what is drawn.
+  const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
   const countOf = (key: Status) => model?.statusMix.find((s) => s.key === key)?.value;
   const stat = (key: Status) => {
     const value = countOf(key);
@@ -143,6 +150,7 @@ export default async function ApplicationsScreen() {
                     <ApplicationRow
                       key={r.id}
                       row={{ ...r, statusClass: STATUS_STYLES[r.status], live: r.status !== 'Rejected' }}
+                      canEdit={canEdit}
                     />
                   ))}
                 </TableBody>
