@@ -1,10 +1,24 @@
 import { afterAll, beforeAll, expect, test, type TestContext } from 'vitest';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import { proposalsTableMissing, proposalsTableSkipReason } from './helpers/agent-proposals-table';
 import { createOrg, signInAnon, liveClient } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
+
+// A service-role client (bypasses RLS) to SEED a pending proposal — authenticated users
+// cannot INSERT. Only available when the key is set; the update asserts skip without it.
+const serviceUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const service: SupabaseClient | null =
+  serviceUrl && serviceKey
+    ? createClient(serviceUrl, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } })
+    : null;
+const testWithSeed = hasSupabaseEnv && service ? test : test.skip;
+if (hasSupabaseEnv && !service) {
+  console.warn('SUPABASE_SERVICE_ROLE_KEY not set — skipping the proposal update-RLS asserts.');
+}
 
 async function ownedCtx(name: string) {
   const c = liveClient();
@@ -27,6 +41,17 @@ const proposalFields = (orgId: string) => ({
 });
 function needsTable(ctx: TestContext) {
   if (tableMissing) ctx.skip();
+}
+
+/** Seed a fresh pending proposal for an org via the service role; returns its id. */
+async function seedPending(orgId: string): Promise<string> {
+  const { data, error } = await service!
+    .from('agent_proposals')
+    .insert(proposalFields(orgId))
+    .select('id')
+    .single();
+  expect(error, error?.message).toBeNull();
+  return (data as { id: string }).id;
 }
 
 beforeAll(async () => {
@@ -60,4 +85,46 @@ testWithSupabase('another workspace sees nothing and cannot update', async (ctx)
   const seen = await other.c.from('agent_proposals').select('id').eq('org_id', owner.orgId);
   expect(seen.error).toBeNull();
   expect(seen.data ?? []).toHaveLength(0);
+});
+
+testWithSeed('the owner may decide (update) a pending proposal', async (ctx) => {
+  needsTable(ctx);
+  const id = await seedPending(owner.orgId);
+  const res = await owner.c
+    .from('agent_proposals')
+    .update({ status: 'rejected', decided_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('org_id', owner.orgId)
+    .select('id')
+    .maybeSingle();
+  expect(res.error, res.error?.message).toBeNull();
+  expect(res.data?.id).toBe(id);
+});
+
+testWithSeed('another workspace cannot update the owner’s proposal (RLS)', async (ctx) => {
+  needsTable(ctx);
+  const id = await seedPending(owner.orgId);
+  // Only granted columns, so it is RLS (not the column grant) that blocks: 0 rows matched.
+  const res = await other.c
+    .from('agent_proposals')
+    .update({ status: 'rejected', decided_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('id');
+  expect(res.error).toBeNull();
+  expect(res.data ?? []).toHaveLength(0);
+  // The row is untouched: still pending.
+  const check = await service!.from('agent_proposals').select('status').eq('id', id).single();
+  expect(check.data?.status).toBe('pending');
+});
+
+testWithSeed('the owner cannot update a non-granted column', async (ctx) => {
+  needsTable(ctx);
+  const id = await seedPending(owner.orgId);
+  // `title` is outside the (status, result, decided_at, decided_by) column grant → 42501.
+  const res = await owner.c
+    .from('agent_proposals')
+    .update({ title: 'tampered' })
+    .eq('id', id)
+    .eq('org_id', owner.orgId);
+  expect(res.error?.code).toBe('42501');
 });
