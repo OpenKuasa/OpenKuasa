@@ -1,4 +1,6 @@
 import { BookOpen, ChartColumn, GraduationCap, PieChart, Plus } from 'lucide-react';
+import { EnrolButtons } from '@/components/people/enrol-buttons';
+import { RequestRow } from '@/components/people/request-row';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { BarGroup, DonutStat, type Series, type Slice } from '@/components/charts';
 import { PageHeader } from '@/components/screen/page-header';
@@ -6,6 +8,7 @@ import { ScreenContainer } from '@/components/screen/screen-container';
 import { LiveDot } from '@/components/ui/live-dot';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { todayInMalaysia } from '@/lib/people/dates';
+import { enrolCandidates, memberCourseControl } from '@/lib/people/goals-training';
 import { TRAINING_STATUS_LABEL, type TrainingRow, buildTrainingModel } from '@/lib/people/performance';
 import { HR_ONLY, LOAD_FAILED, LaterButton, Muted, StatusPill, loadPeople } from './parts';
 
@@ -15,13 +18,27 @@ const COMPLETION_SERIES: Series[] = [
 ];
 const CATEGORY_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--muted-foreground)'];
 const STATUS_TONE = { completed: 'good', in_progress: 'pending', upcoming: 'neutral' } as const;
-const MINE_LABEL = { enrolled: 'You are enrolled', completed: 'Completed' } as const;
 
 export default async function TrainingScreen() {
-  const { model } = await loadPeople('training', async (data, now, ctx) => {
+  const { model: loaded, viewer } = await loadPeople('training', async (data, now, ctx) => {
     const [trainings, enrolments, employees] = await Promise.all([data.listTrainings(), data.listTrainingEnrolments(), data.listEmployees()]);
-    return buildTrainingModel(trainings, enrolments, ctx.viewer, todayInMalaysia(now), employees);
+    const today = todayInMalaysia(now);
+    return { model: buildTrainingModel(trainings, enrolments, ctx.viewer, today, employees), employees, today };
   });
+  const model = loaded?.model ?? null;
+  const today = loaded?.today ?? '';
+  const employees = loaded?.employees ?? [];
+  // Owners and admins (not the demo) manage courses; the demo keeps the disabled placeholders; everyone else is a member.
+  const admin = viewer.isHr && !viewer.isDemo && model !== null;
+  const linked = viewer.employeeId !== null;
+  const memberControls = !viewer.isHr && !viewer.isDemo && linked;
+  // The owner-only controls are loaded only for an owner or admin, so a member's page never imports them.
+  const owner = admin
+    ? {
+        ...(await import('@/components/people/course-form')),
+        ...(await import('@/components/people/course-enrolments')),
+      }
+    : null;
   const dash = '—';
   const team = model?.team ?? true;
   const stats = model?.team_stats ?? null;
@@ -47,9 +64,13 @@ export default async function TrainingScreen() {
         title="Training"
         subtitle={team ? 'Courses and sessions for your team' : 'Courses and sessions you can join'}
         actions={
-          <LaterButton icon={Plus} size="sm">
-            Add course
-          </LaterButton>
+          viewer.isDemo ? (
+            <LaterButton icon={Plus} size="sm">
+              Add course
+            </LaterButton>
+          ) : owner ? (
+            <owner.AddCourse />
+          ) : null
         }
       />
 
@@ -103,9 +124,11 @@ export default async function TrainingScreen() {
         <BentoCard
           title="All training"
           subtitle={
-            team
+            viewer.isDemo
               ? 'Courses and enrolment · enrolling is available in a later update'
-              : 'All courses, with your own enrolment status in the You column · enrolling is available in a later update'
+              : team
+                ? 'Courses and enrolment'
+                : 'All courses, with your own enrolment'
           }
           icon={BookOpen}
           flush
@@ -129,49 +152,86 @@ export default async function TrainingScreen() {
                         <TableHead className="text-right">Enrolled</TableHead>
                         <TableHead className="text-right">Completed</TableHead>
                       </>
-                    ) : (
-                      <TableHead>You</TableHead>
-                    )}
+                    ) : null}
                     <TableHead>Status</TableHead>
-                    <TableHead>Enrol</TableHead>
+                    {owner ? <TableHead>Manage</TableHead> : null}
+                    {viewer.isDemo ? <TableHead>Enrol</TableHead> : null}
+                    {memberControls ? <TableHead>Your enrolment</TableHead> : null}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {model.rows.map((row) => (
-                    <TableRow key={row.id}>
-                      <TableCell className="whitespace-nowrap font-medium">
-                        <div className="flex items-center gap-3">
-                          <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
-                            <GraduationCap className="size-4" />
-                          </span>
-                          {row.title}
-                        </div>
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-muted-foreground">{row.category}</TableCell>
-                      <TableCell className="whitespace-nowrap text-muted-foreground">{row.provider ?? dash}</TableCell>
-                      <TableCell className="whitespace-nowrap text-muted-foreground">{row.dates}</TableCell>
-                      {model.team ? (
-                        <>
-                          <TableCell className="text-right tabular-nums">{row.enrolled ?? 0}</TableCell>
-                          <TableCell className="text-right tabular-nums">
-                            {row.completed ?? 0} / {row.enrolled ?? 0}
-                          </TableCell>
-                        </>
-                      ) : (
-                        <TableCell className="whitespace-nowrap text-muted-foreground">
-                          {row.mine ? MINE_LABEL[row.mine] : dash}
+                  {model.rows.map((row) => {
+                    const cells = (
+                      <>
+                        <TableCell className="whitespace-nowrap font-medium">
+                          <div className="flex items-center gap-3">
+                            <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+                              <GraduationCap className="size-4" />
+                            </span>
+                            {row.title}
+                          </div>
                         </TableCell>
-                      )}
-                      <TableCell>{statusCell(row)}</TableCell>
-                      <TableCell>
-                        {row.status !== 'completed' && row.mine === null ? (
-                          <LaterButton variant="outline" size="sm" compact>
-                            Enrol
-                          </LaterButton>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">{row.category}</TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">{row.provider ?? dash}</TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">{row.dates}</TableCell>
+                        {model.team ? (
+                          <>
+                            <TableCell className="text-right tabular-nums">{row.enrolled ?? 0}</TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {row.completed ?? 0} / {row.enrolled ?? 0}
+                            </TableCell>
+                          </>
                         ) : null}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                        <TableCell>{statusCell(row)}</TableCell>
+                        {owner ? (
+                          <TableCell className="whitespace-nowrap align-top">
+                            <owner.CourseAdmin
+                              course={{
+                                id: row.id,
+                                title: row.title,
+                                category_value: row.category_value,
+                                provider: row.provider,
+                                starts_on: row.starts_on,
+                                ends_on: row.ends_on,
+                              }}
+                              people={row.people ?? []}
+                              candidates={enrolCandidates(employees, row.people ?? [])}
+                              today={today}
+                            />
+                          </TableCell>
+                        ) : null}
+                        {viewer.isDemo ? (
+                          <TableCell>
+                            {row.status !== 'completed' ? (
+                              <LaterButton variant="outline" size="sm" compact>
+                                Enrol
+                              </LaterButton>
+                            ) : null}
+                          </TableCell>
+                        ) : null}
+                        {memberControls ? (
+                          <TableCell>
+                            {(() => {
+                              const control = memberCourseControl(
+                                row,
+                                row.mine === null ? null : { completed: row.mine === 'completed' },
+                                today,
+                                { linked, isDemo: viewer.isDemo },
+                              );
+                              return <EnrolButtons key={`${row.id}-${control}`} trainingId={row.id} control={control} title={row.title} />;
+                            })()}
+                          </TableCell>
+                        ) : null}
+                      </>
+                    );
+                    return owner ? (
+                      <RequestRow key={row.id} columns={8}>
+                        {cells}
+                      </RequestRow>
+                    ) : (
+                      <TableRow key={row.id}>{cells}</TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>

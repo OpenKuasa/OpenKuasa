@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
 import { todayInMalaysia } from '@/lib/people/dates';
 import { buildEmployeesModel } from '@/lib/people/employees';
+import { type GoalLike, goalsByEmployee } from '@/lib/people/goals-training';
 import { type WorkspaceMember, listWorkspaceMembers } from '@/lib/people/members';
 import { DEPARTMENT_COLORS, LOAD_FAILED, Muted, loadPeople } from './parts';
 
@@ -30,7 +31,16 @@ export default async function EmployeesScreen() {
         console.error('[people/employees] could not list members:', error instanceof Error ? error.message : 'error');
       }
     }
-    return { ...buildEmployeesModel(employees, departments, todayInMalaysia(now)), members };
+    // Each employee's goals, only for someone who can open them from the "Goals" action. A failed read hides the action.
+    let goals: Record<string, GoalLike[]> | null = null;
+    if (ctx.viewer.isHr && !ctx.viewer.isDemo) {
+      try {
+        goals = goalsByEmployee(await data.listGoals());
+      } catch (error) {
+        console.error('[people/employees] could not list goals:', error instanceof Error ? error.message : 'error');
+      }
+    }
+    return { ...buildEmployeesModel(employees, departments, todayInMalaysia(now)), members, goals };
   });
 
   // Owner or admin, and not the demo workspace (the server refuses changes there). The actions and the database both check again.
@@ -143,6 +153,7 @@ export default async function EmployeesScreen() {
               employees={model.employees}
               departments={model.departments}
               members={model.members}
+              goals={model.goals}
               canEdit={canEdit}
             />
           )}
