@@ -12,29 +12,22 @@ vi.mock('@/lib/auth/viewer', () => ({ getViewer: vi.fn() }));
 vi.mock('@/lib/auth/permissions', () => ({ can: (role: string, _p: string) => role !== 'viewer' }));
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 
-// A session client whose agent_proposals row + update we control.
-const proposalRow = {
-  id: 'p1',
-  action: 'promoteLeadToContact',
-  input: { id: '33333333-3333-4333-8333-333333333333' },
-  status: 'pending',
-  expires_at: new Date(Date.now() + 86_400_000).toISOString(),
-};
-let loaded: Record<string, unknown> | null = proposalRow;
-const updates: unknown[] = [];
+// A session client whose update() chains we control.
+type Update = { patch: Record<string, unknown>; chain: string[] };
+let claimResult: Record<string, unknown> | null = null;
+let rejectResult: Record<string, unknown> | null = null;
+const updates: Update[] = [];
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({
     from: () => ({
-      select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: async () => ({ data: loaded }) }) }) }),
-      update: (patch: unknown) => {
-        updates.push(patch);
-        return {
-          eq: () => ({
-            eq: () => ({
-              eq: async () => ({ error: null }),
-            }),
-          }),
-        };
+      update: (patch: Record<string, unknown>) => {
+        const u: Update = { patch, chain: [] };
+        updates.push(u);
+        const q: Record<string, unknown> = {};
+        for (const m of ['eq', 'gt', 'select']) q[m] = () => { u.chain.push(m); return q; };
+        q.maybeSingle = async () => ({ data: patch.status === 'rejected' ? rejectResult : claimResult });
+        q.then = (res: (v: unknown) => unknown) => res({ error: null });
+        return q;
       },
     }),
   }),
@@ -88,48 +81,76 @@ describe('runProposalAction', () => {
   });
 });
 
+const ID = '44444444-4444-4444-8444-444444444444';
+const claimRow = { action: 'promoteLeadToContact', input: { id: '33333333-3333-4333-8333-333333333333' } };
+
 describe('applyProposalAction', () => {
   beforeEach(() => {
-    loaded = { ...proposalRow };
+    vi.clearAllMocks();
+    claimResult = { ...claimRow };
+    rejectResult = null;
     updates.length = 0;
     (getViewer as ReturnType<typeof vi.fn>).mockResolvedValue({ orgId: 'org-1', role: 'owner', isDemo: false });
   });
 
-  it('applies a pending proposal and marks it approved', async () => {
-    const res = await applyProposalAction({ id: '44444444-4444-4444-8444-444444444444' });
-    expect(res.ok).toBe(true);
-    expect(updates[0]).toMatchObject({ status: 'approved' });
+  it('claims then applies under the owner session, with no failure flip', async () => {
+    const res = await applyProposalAction({ id: ID });
+    expect(res).toEqual({ ok: true });
+    expect(updates).toHaveLength(1);
+    expect(updates[0].patch).toMatchObject({ status: 'approved' });
+    expect(updates[0].chain).toEqual(['eq', 'eq', 'eq', 'gt', 'select']);
+    expect(promoteLeadToContact).toHaveBeenCalledTimes(1);
+    const [calledCtx, calledInput] = (promoteLeadToContact as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(calledCtx.orgId).toBe('org-1');
+    expect(calledInput).toEqual(claimRow.input);
   });
-  it('apply denied without edit permission', async () => {
+  it('denied without edit permission', async () => {
     (getViewer as ReturnType<typeof vi.fn>).mockResolvedValue({ orgId: 'org-1', role: 'viewer', isDemo: false });
-    const res = await applyProposalAction({ id: '44444444-4444-4444-8444-444444444444' });
+    const res = await applyProposalAction({ id: ID });
     expect(res.ok).toBe(false);
     expect(updates).toHaveLength(0);
+    expect(promoteLeadToContact).not.toHaveBeenCalled();
   });
-  it('apply is a no-op when not pending', async () => {
-    loaded = { ...proposalRow, status: 'approved' };
-    const res = await applyProposalAction({ id: '44444444-4444-4444-8444-444444444444' });
+  it('is a no-op when the claim loses (already handled or expired)', async () => {
+    claimResult = null;
+    const res = await applyProposalAction({ id: ID });
     expect(res.ok).toBe(false);
-    expect(updates).toHaveLength(0);
+    expect(promoteLeadToContact).not.toHaveBeenCalled();
+    expect(updates).toHaveLength(1);
   });
-  it('apply is a no-op when expired', async () => {
-    loaded = { ...proposalRow, expires_at: new Date(Date.now() - 1000).toISOString() };
-    const res = await applyProposalAction({ id: '44444444-4444-4444-8444-444444444444' });
-    expect(res.ok).toBe(false);
-    expect(updates).toHaveLength(0);
-  });
-  it('apply of a missing target records failed', async () => {
+  it('flips approved to failed when the capability fails after the claim', async () => {
     (promoteLeadToContact as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, error: 'That lead was not found.' });
-    const res = await applyProposalAction({ id: '44444444-4444-4444-8444-444444444444' });
+    const res = await applyProposalAction({ id: ID });
     expect(res.ok).toBe(false);
-    expect(updates[0]).toMatchObject({ status: 'failed' });
+    expect(updates).toHaveLength(2);
+    expect(updates[0].patch).toMatchObject({ status: 'approved' });
+    expect(updates[1].patch).toMatchObject({ status: 'failed', result: { error: 'That lead was not found.' } });
+    expect(updates[1].chain).toEqual(['eq', 'eq']);
   });
 });
 
 describe('rejectProposalAction', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    updates.length = 0;
+    (getViewer as ReturnType<typeof vi.fn>).mockResolvedValue({ orgId: 'org-1', role: 'owner', isDemo: false });
+  });
   it('is denied for a viewer', async () => {
     (getViewer as ReturnType<typeof vi.fn>).mockResolvedValue({ orgId: 'org-1', role: 'viewer', isDemo: false });
-    const res = await rejectProposalAction({ id: '44444444-4444-4444-8444-444444444444' });
+    const res = await rejectProposalAction({ id: ID });
+    expect(res.ok).toBe(false);
+    expect(updates).toHaveLength(0);
+  });
+  it('rejects a pending proposal', async () => {
+    rejectResult = { id: 'p1' };
+    const res = await rejectProposalAction({ id: ID });
+    expect(res).toEqual({ ok: true });
+    expect(updates[0].patch).toMatchObject({ status: 'rejected' });
+    expect(promoteLeadToContact).not.toHaveBeenCalled();
+  });
+  it('reports already handled when nothing matched', async () => {
+    rejectResult = null;
+    const res = await rejectProposalAction({ id: ID });
     expect(res.ok).toBe(false);
   });
 });

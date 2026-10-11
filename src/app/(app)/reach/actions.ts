@@ -412,36 +412,39 @@ export async function exportLeadsCsv(
 const proposalIdInput = z.object({ id: z.string().uuid() });
 
 /**
- * Approve a queued proposal: re-validate it and run the reach capability under the
- * OWNER's session (never the service-role worker). Only a pending, unexpired row is
- * applied; the DB guard trigger makes a concurrent second apply a no-op.
+ * Approve a queued proposal, claim-first: atomically flip pending -> approved (pending and
+ * unexpired only), and only the caller that wins the claim runs the reach capability, under
+ * the OWNER's session (never the service-role worker). Postgres serializes concurrent
+ * approvals on the row, so the change is applied exactly once. If the capability fails
+ * after the claim, the row is corrected approved -> failed with the error.
  */
 export async function applyProposalAction(input: unknown): Promise<{ ok: boolean; error?: string }> {
   const parsed = proposalIdInput.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'That input was not valid.' };
   const ctx = await writeCtx();
   if (!ctx) return { ok: false, error: 'You do not have permission to make changes here.' };
-  const { data: p } = await ctx.client
+  const { data: claimed } = await ctx.client
     .from('agent_proposals')
-    .select('action, input, status, expires_at')
+    .update({ status: 'approved', decided_at: new Date().toISOString() })
     .eq('id', parsed.data.id)
     .eq('org_id', ctx.orgId)
+    .eq('status', 'pending')
+    .gt('expires_at', new Date().toISOString())
+    .select('action, input')
     .maybeSingle();
-  if (!p || p.status !== 'pending' || new Date(p.expires_at as string) <= new Date()) {
-    return { ok: false, error: 'That suggestion has already been handled.' };
+  if (!claimed) return { ok: false, error: 'That suggestion has already been handled.' };
+  const applied = await runProposalAction(ctx, claimed.action as string, claimed.input);
+  if (!applied.ok) {
+    await ctx.client
+      .from('agent_proposals')
+      .update({ status: 'failed', result: { error: applied.error } as never })
+      .eq('id', parsed.data.id)
+      .eq('org_id', ctx.orgId);
+    for (const path of AGENTS_PATHS) revalidatePath(path);
+    return { ok: false, error: 'The change could not be applied.' };
   }
-  const applied = await runProposalAction(ctx, p.action as string, p.input);
-  const patch = applied.ok
-    ? { status: 'approved', result: (applied.result ?? null) as never, decided_at: new Date().toISOString() }
-    : { status: 'failed', result: { error: applied.error } as never, decided_at: new Date().toISOString() };
-  await ctx.client
-    .from('agent_proposals')
-    .update(patch)
-    .eq('id', parsed.data.id)
-    .eq('org_id', ctx.orgId)
-    .eq('status', 'pending');
   for (const path of AGENTS_PATHS) revalidatePath(path);
-  return applied.ok ? { ok: true } : { ok: false, error: 'The change could not be applied.' };
+  return { ok: true };
 }
 
 /** Reject a queued proposal: mark it rejected, apply nothing. */
