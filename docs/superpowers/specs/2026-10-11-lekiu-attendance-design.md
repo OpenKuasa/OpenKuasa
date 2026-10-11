@@ -78,13 +78,15 @@ Clock in and clock out take the employee's row `for no key update`, so two taps 
 
 `private.hr_attendance_close()`, run by `pg_cron` at 00:05 Malaysia time (`5 16 * * *` UTC). For every workspace but the demo, for every **active** employee, for every date `d` that is a working day with
 
-`greatest(epoch, the workspace's first real attendance day, today − 31 days, the employee's join date, the Malaysia date the employee record was created) ≤ d ≤ yesterday`:
+`greatest(epoch, the workspace's first real attendance day, today − 31 days, the employee's join date, the Malaysia date the employee record was created, the employee's covered-from date) ≤ d ≤ yesterday`:
 
 - no row for `d`: insert `on_leave` when the employee's approved leave covers `d` (a half day counts), else `absent`;
 - a **system row** for `d` (no clock-in and `corrected_at` null): set its status to what the rule above gives now, so leave approved or cancelled late is reflected;
 - a row with a clock-in, or a corrected row: untouched.
 
 A workspace's **first real attendance day** is the Malaysia date on which its first clock-in or correction was made (recorded once in `private.hr_attendance_started` and never moved; it is the day attendance was first used, not the date that first record is about, so correcting an older day does not reach back). A workspace with none is skipped, so nothing is recorded until someone there starts using attendance. An employee with no linked account cannot clock in and is skipped too (an owner or admin can still correct their days). A day counts as corrected when `corrected_at` is set (`corrected_by` empties if the corrector's account is deleted).
+
+An employee's **covered-from date** is the Malaysia date on which the nightly close first saw them linked to an account and active (kept in `private.hr_attendance_covered`, written only by the close). An employee with none gets no automatic rows that night and is registered at the end of the run, so someone linked or reactivated later is never given absences for the days before; losing the link or being made inactive removes the date, and it starts over. So on the night after a workspace's first use nothing is recorded, and automatic leave and absence begin with the following day.
 
 It also deletes system rows on dates that are no longer working days (a holiday added, or the work week changed), within the same window. It is idempotent: running it twice changes nothing the second time. Today is never closed.
 
