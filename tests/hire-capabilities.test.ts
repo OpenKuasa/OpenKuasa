@@ -634,7 +634,7 @@ describe('application change capabilities', () => {
     const f = rpcFake();
     expect(await moveApplication(f.ctx, { id: ID, stage: 'offer' })).toEqual({
       ok: true,
-      data: { id: ID, candidate: 'Aina', job: 'Barista', stage: 'offer', outcome: 'active', rating: 4, reject_reason: null },
+      data: { id: ID, candidate: 'Aina', job: 'Barista', stage: 'offer', outcome: 'active', rating: 4, reject_reason: null, confirmed: true },
     });
     expect(f.reads).toEqual([{ id: ID }, { org_id: ORG }]);
   });
@@ -645,5 +645,23 @@ describe('application change capabilities', () => {
     });
     expect(await rateApplication(rpcFake({ row: null }).ctx, { id: ID, rating: 2 })).toMatchObject({ ok: true, data: { rating: 2 } });
     expect(await moveApplication(rpcFake({ row: null }).ctx, { id: ID, stage: 'hired' })).toMatchObject({ ok: true, data: { stage: 'hired' } });
+  });
+
+  it('says what it does not know when the read-back fails, and never guesses a stage, an outcome or a rating', async () => {
+    const closed = await closeApplication(rpcFake({ row: null }).ctx, { id: ID, outcome: 'withdrawn' });
+    expect(closed).toEqual({ ok: true, data: {
+      id: ID, candidate: '', job: '', stage: null, outcome: 'withdrawn', rating: null, reject_reason: null, confirmed: false,
+    } });
+    const moved = await moveApplication(rpcFake({ row: null }).ctx, { id: ID, stage: 'offer' });
+    expect(moved).toMatchObject({ ok: true, data: { stage: 'offer', outcome: 'active', confirmed: false } });
+    const rated = await rateApplication(rpcFake({ row: null }).ctx, { id: ID, rating: 3 });
+    expect(rated).toMatchObject({ ok: true, data: { stage: null, outcome: null, rating: 3, confirmed: false } });
+    const reopened = await reopenApplication(rpcFake({ row: null }).ctx, { id: ID });
+    expect(reopened).toMatchObject({ ok: true, data: { stage: null, outcome: 'active', reject_reason: null, confirmed: false } });
+  });
+
+  it('marks a read-back row as confirmed', async () => {
+    const f = rpcFake({ row: { id: ID, stage: 'offer', outcome: 'active', rating: 4, reject_reason: null, candidate: { name: 'Aina' }, job: { title: 'Barista' } } });
+    expect(await rateApplication(f.ctx, { id: ID, rating: 4 })).toMatchObject({ ok: true, data: { stage: 'offer', confirmed: true } });
   });
 });

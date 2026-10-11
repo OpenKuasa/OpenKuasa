@@ -399,10 +399,13 @@ export type ApplicationChange = {
   id: string;
   candidate: string;
   job: string;
-  stage: ApplicationStage;
-  outcome: ApplicationOutcome;
+  /** Null when the change was saved but the row could not be read back and the change does not say. */
+  stage: ApplicationStage | null;
+  outcome: ApplicationOutcome | null;
   rating: number | null;
   reject_reason: RejectReason | null;
+  /** True when these values were read back after the change; false when they are only what the change implies. */
+  confirmed: boolean;
 };
 
 /** Logs the error's code only (never the error, an id or a name) and answers with the generic sentence. */
@@ -428,7 +431,7 @@ async function applicationChange(
   fn: string,
   args: Record<string, unknown>,
   id: string,
-  implied: Partial<ApplicationChange>,
+  implied: Partial<Omit<ApplicationChange, 'confirmed'>>,
 ): Promise<CapResult<ApplicationChange>> {
   let word: unknown;
   try {
@@ -440,7 +443,8 @@ async function applicationChange(
   }
   if (word !== 'ok') return { ok: false, error: changeMessage(word) };
   const fallback: ApplicationChange = {
-    id, candidate: '', job: '', stage: 'applied', outcome: 'active', rating: null, reject_reason: null, ...implied,
+    // Only what the change itself implies: a guessed stage or outcome would be told to the user as fact.
+    id, candidate: '', job: '', stage: null, outcome: null, rating: null, reject_reason: null, ...implied, confirmed: false,
   };
   try {
     const { data } = await ctx.client
@@ -455,7 +459,7 @@ async function applicationChange(
       ok: true,
       data: {
         id: row.id, candidate: row.candidate?.name ?? '', job: row.job?.title ?? '', stage: row.stage,
-        outcome: row.outcome, rating: row.rating, reject_reason: row.reject_reason,
+        outcome: row.outcome, rating: row.rating, reject_reason: row.reject_reason, confirmed: true,
       },
     };
   } catch {
@@ -470,7 +474,7 @@ export async function moveApplication(
   const parsed = moveApplicationInput.safeParse(input);
   if (!parsed.success) return invalid(parsed.error);
   const { id, stage } = parsed.data;
-  return applicationChange(ctx, 'moveApplication', 'hire_move_application', { p_application_id: id, p_stage: stage }, id, { stage });
+  return applicationChange(ctx, 'moveApplication', 'hire_move_application', { p_application_id: id, p_stage: stage }, id, { stage, outcome: 'active' });
 }
 
 export async function closeApplication(
