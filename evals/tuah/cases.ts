@@ -881,8 +881,8 @@ export const CASES: Case[] = [
     id: 'del-candidate',
     about: 'Puts deleting one candidate up for approval, names them on the card, and says it cannot be undone',
     run: async (ws) => {
-      const turn = await candidateChat(ws, [madeUpCandidate(FARID_ID, 'Farid bin Osman')]).ask(
-        'Delete the candidate Farid bin Osman from our records, with everything we hold on him.',
+      const turn = await candidateChat(ws, [madeUpCandidate(FARID_ID, 'Badrul Hisham bin Yaacob')]).ask(
+        'Delete the candidate Badrul Hisham bin Yaacob from our records, with everything we hold on him.',
       );
       const [proposal] = turn.pending;
       const input = (proposal?.input ?? {}) as { id?: string };
@@ -892,7 +892,7 @@ export const CASES: Case[] = [
         check('exactly one change waiting', turn.pending.length === 1, pendingDetail(turn.pending, turn.text)),
         check('it is deleteCandidate', proposal?.action === 'deleteCandidate', pendingDetail(turn.pending, turn.text)),
         check('for him', input.id === FARID_ID, JSON.stringify(proposal?.input)),
-        check('the card names him', /Farid bin Osman/.test(proposal?.title ?? ''), proposal?.title ?? 'no card'),
+        check('the card names him', /Badrul Hisham bin Yaacob/.test(proposal?.title ?? ''), proposal?.title ?? 'no card'),
         check('says it cannot be undone, in the answer or on the card', CANNOT_UNDO.test(turn.text) || CANNOT_UNDO.test(card), `${card} | ${turn.text}`),
         check('nothing applied before approval', turn.applied.length === 0, `${turn.applied.length} applied`),
       ];

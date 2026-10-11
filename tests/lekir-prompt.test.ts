@@ -448,6 +448,14 @@ describe('adding and editing a candidate', () => {
     expect(tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], true, null).toLowerCase()).toContain('lekir can also prepare adding one candidate by hand or editing one candidate');
   });
 
+  it('Tuah passes on every name a specialist gives when more than one person matches', () => {
+    // A question-set run: Lekir named both people, and Tuah told the user only "two candidates named Rosnah".
+    expect(tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], true, null)).toContain(
+      '- When a specialist reports that more than one person or record matches, give the user every full name it gave, ' +
+        'with any detail it gave to tell them apart, and ask which one. Never shorten them to the part they share.',
+    );
+  });
+
   it('Tuah looks for a named person in every product that could hold them, hiring included', () => {
     // A question-set run: "Change Nurul Aisyah's phone number" went to marketing and the CRM only, and she was a candidate.
     expect(tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], true, null)).toContain(
