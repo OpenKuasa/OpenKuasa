@@ -35,6 +35,12 @@ describe('delete_test_org migration', () => {
     expect(sql).toMatch(/is_anonymous/);
   });
 
+  test('keeps the not-exists member clause and the negated email match', () => {
+    expect(sql).toMatch(/and not exists \(/);
+    expect(sql).toMatch(/coalesce\(u.is_anonymous, false\) = false/);
+    expect(sql).toContain("coalesce(u.email, '') !~ '");
+  });
+
   test('uses the same test sign-up pattern as the helper', () => {
     expect(TEST_EMAIL_SQL_PATTERN).toBeTruthy();
     expect(sql).toContain(`'${TEST_EMAIL_SQL_PATTERN}'`);

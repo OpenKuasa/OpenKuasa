@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { createRegistry, type ServiceLike } from './helpers/live-workspaces';
+import { createRegistry, TEST_EMAIL_SQL_PATTERN, type ServiceLike } from './helpers/live-workspaces';
 
 type Failure = { message: string; code?: string; status?: number } | null;
 type FakeUser = { is_anonymous?: boolean; email?: string; created_at?: string } | null;
@@ -117,8 +117,9 @@ describe('recording', () => {
     const r = make();
     r.recordUser('x', { kind: 'signup', email: 'qa-abcdef012345-1@example.com' });
     r.recordUser('x', { kind: 'anonymous' });
-    // a non-anonymous user with a mismatched email must still be refused
-    const { service, calls } = fake({ users: { x: { is_anonymous: false, email: 'real@corp.com', created_at: FRESH } } });
+    // the fetched user is a fresh anonymous one: an overwrite to 'anonymous' would delete it,
+    // but the original sign-up guard (email must match) refuses it
+    const { service, calls } = fake({ users: { x: { is_anonymous: true, email: 'real@corp.com', created_at: FRESH } } });
     await expect(r.cleanup(() => service, () => {})).rejects.toThrow();
     expect(calls).not.toContain('delete-user:x');
   });
@@ -192,6 +193,40 @@ describe('missing key', () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatch(/SUPABASE_SERVICE_ROLE_KEY/);
     expect(lines[0]).toMatch(/LEFT BEHIND 1 workspace\(s\) and 1 user\(s\)/);
+  });
+});
+
+describe('more cases', () => {
+  it('does not delete any user when the first workspace deleted but a later one failed', async () => {
+    const r = make();
+    r.recordOrg('o1');
+    r.recordOrg('o2');
+    r.recordUser('u1');
+    const { service, calls } = fake({ orgs: { o2: false } });
+    await expect(r.cleanup(() => service, () => {})).rejects.toThrow();
+    expect(calls).toContain('rpc:delete_test_org:o1');
+    expect(calls.some((c) => c.startsWith('delete-user:'))).toBe(false);
+  });
+
+  it('generates sign-up addresses that match the SQL pattern', async () => {
+    const r = createRegistry();
+    const res = await r.signUpTestUser(fakeClient({ signUpUser: 's1' }), 'pw');
+    expect(res.email).toMatch(new RegExp(TEST_EMAIL_SQL_PATTERN));
+  });
+
+  it('allows a user created just inside 60s before process start and refuses one just outside', async () => {
+    const r = make();
+    r.recordUser('inside');
+    r.recordUser('outside');
+    const { service, calls } = fake({
+      users: {
+        inside: { is_anonymous: true, created_at: new Date(NOW - 59_000).toISOString() },
+        outside: { is_anonymous: true, created_at: new Date(NOW - 61_000).toISOString() },
+      },
+    });
+    await expect(r.cleanup(() => service, () => {})).rejects.toThrow(/1 user/);
+    expect(calls).toContain('delete-user:inside');
+    expect(calls).not.toContain('delete-user:outside');
   });
 });
 
