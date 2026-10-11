@@ -210,6 +210,7 @@ export function nameIn(results: ToolResult[]): NameFinder {
   };
 }
 
+const UNLISTED_APPLICATION = 'an application that was not in the list above';
 const UNLISTED_LEAVE = 'a leave request that was not in the list above';
 const UNLISTED_TIME_OFF = 'a time-off request that was not in the list above';
 const UNLISTED_CLAIM = 'a claim that was not in the list above';
@@ -313,8 +314,8 @@ export function approvalTitle(
     const subject = typeof named === 'function' ? named(i.id, kind) : named;
     return subject ? `${label} “${subject}”` : `this ${label}`;
   };
-  // "Aina Rahman (Barista)" when a listing in the conversation showed this application, else "this application".
-  const who = () => find(i.id, 'application') ?? 'this application';
+  // "Aina Rahman (Barista)" when a listing in the conversation showed this application, else "an application that was not in the list above".
+  const who = () => find(i.id, 'application') ?? UNLISTED_APPLICATION;
   const person = [i.firstName, i.lastName].filter((v) => typeof v === 'string' && v).join(' ');
   switch (toolName) {
     case 'createCampaign': return `Create campaign “${i.name ?? ''}”?`;

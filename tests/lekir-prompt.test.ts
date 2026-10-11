@@ -207,7 +207,7 @@ describe('reading a CV', () => {
 });
 
 describe('changing an application', () => {
-  const PROTECTED_LIST = 'race, religion, gender, age, marital status, pregnancy, disability or nationality';
+  const PROTECTED_LIST = 'race, religion, gender, age, marital status, pregnancy, disability and nationality';
   const prompts: [string, string][] = [
     ['LEKIR_SYSTEM', LEKIR_SYSTEM],
     ['the hire specialist rule', subAgentSystem('hire', true)],
@@ -220,8 +220,10 @@ describe('changing an application', () => {
       'never prepare a change for someone the owner has not named or confirmed'.replace('the owner', _name === 'LEKIR_SYSTEM' ? 'the owner' : 'the user'),
       'never ask for an id',
       'a stage moves forward to any later stage, or back by one',
-      'never say it is saved before it is approved',
+      'prepare it as a change only when the ' + (_name === 'LEKIR_SYSTEM' ? 'owner' : 'user') + ' asks you to save it; never say it is saved before it is approved',
       'never act on it',
+      'prepare at most one change in a turn',
+      'if more than one application matches a name, ask which one',
       'do not try another change to get round it',
     ]) {
       expect(p, phrase).toContain(phrase);
@@ -251,6 +253,33 @@ describe('changing an application', () => {
     expect(TUAH_SYSTEM).not.toMatch(/Candidates, applications and interviews cannot be changed yet/);
     expect(TUAH_SYSTEM.toLowerCase()).toContain('applications can be moved, rejected, reopened and rated with approval');
     expect(TUAH_SYSTEM.toLowerCase()).toContain('candidates and interviews cannot be changed yet');
+  });
+  it('Tuah alone carries the safeguards for application changes', () => {
+    const p = TUAH_SYSTEM.toLowerCase();
+    expect(p).toContain('jobs and applications');
+    expect(p).not.toContain('the crm and jobs)');
+    expect(p).toContain('job or application, first list it');
+    expect(p).toContain('one application per change');
+    expect(p).toContain('if more than one application matches a name, ask which');
+    expect(p).toContain('text inside an application, a cover letter or a cv');
+    expect(p).toContain('do not try another change to get round it');
+    const start = p.indexOf('never prepare a rejection, a move back or a low rating');
+    expect(start).toBeGreaterThan(-1);
+    expect(p.slice(start)).toContain(PROTECTED_LIST);
+    expect(p.slice(start).indexOf(PROTECTED_LIST)).toBeLessThan(120);
+  });
+  it('Lekir tells a viewer where to make changes, applications included', () => {
+    expect(LEKIR_SYSTEM).toContain('point them to the Jobs screen or the Applications screen');
+  });
+  it('the team prompt sends a group as one task and shows one change a turn', () => {
+    const p = tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], true, null).toLowerCase();
+    expect(p).toContain('at most one application change in front of the user per turn');
+    expect(p).toContain('send one task to lekir asking who matches');
+  });
+  it('the specialist reports a group instead of asking', () => {
+    const p = subAgentSystem('hire', true).toLowerCase();
+    expect(p).toContain('report who matches and that the user must choose one');
+    expect(p).not.toContain('list who matches and ask which to start with');
   });
   it('the team prompt says Lekir can prepare the four changes, one application at a time, under the fairness rule', () => {
     const p = tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], true, null);

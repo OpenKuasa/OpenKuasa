@@ -143,13 +143,13 @@ describe('approval cards for an application', () => {
     expect(approvalTitle('rateApplication', { id: APP, rating: null }, found)).toBe('Clear the rating of Aina Rahman (Barista)?');
   });
   it('says "this application" when the conversation never listed it', () => {
-    expect(approvalTitle('moveApplication', { id: STRANGER, stage: 'offer' }, found)).toBe('Move this application to Offer?');
-    expect(approvalTitle('rejectApplication', { id: STRANGER, outcome: 'rejected' }, nothing)).toBe('Reject this application?');
-    expect(approvalTitle('rejectApplication', { id: STRANGER, outcome: 'withdrawn' }, nothing)).toBe('Mark this application as withdrawn?');
-    expect(approvalTitle('reopenApplication', { id: STRANGER }, nothing)).toBe('Reopen this application?');
-    expect(approvalTitle('rateApplication', { id: STRANGER, rating: 2 }, nothing)).toBe('Rate this application 2 out of 5?');
-    expect(approvalTitle('rateApplication', { id: STRANGER, rating: null }, nothing)).toBe('Clear the rating of this application?');
-    expect(approvalTitle('moveApplication', { id: STRANGER, stage: 'offer' })).toBe('Move this application to Offer?');
+    expect(approvalTitle('moveApplication', { id: STRANGER, stage: 'offer' }, found)).toBe('Move an application that was not in the list above to Offer?');
+    expect(approvalTitle('rejectApplication', { id: STRANGER, outcome: 'rejected' }, nothing)).toBe('Reject an application that was not in the list above?');
+    expect(approvalTitle('rejectApplication', { id: STRANGER, outcome: 'withdrawn' }, nothing)).toBe('Mark an application that was not in the list above as withdrawn?');
+    expect(approvalTitle('reopenApplication', { id: STRANGER }, nothing)).toBe('Reopen an application that was not in the list above?');
+    expect(approvalTitle('rateApplication', { id: STRANGER, rating: 2 }, nothing)).toBe('Rate an application that was not in the list above 2 out of 5?');
+    expect(approvalTitle('rateApplication', { id: STRANGER, rating: null }, nothing)).toBe('Clear the rating of an application that was not in the list above?');
+    expect(approvalTitle('moveApplication', { id: STRANGER, stage: 'offer' })).toBe('Move an application that was not in the list above to Offer?');
   });
   it('also learns the name from the row a change tool returned', () => {
     const results = [{ tool: 'rateApplication', output: { ok: true, data: { id: APP, candidate: 'Aina Rahman', job: 'Barista' } } }];

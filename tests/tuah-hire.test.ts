@@ -8,13 +8,18 @@ const seen = vi.hoisted(() => ({
   calls: [] as { layer: string; system: string; tools: string[] }[],
   /** Set by the one test that needs a change prepared: Tuah asks Lekir, and Lekir calls createJob. */
   prepareJob: false,
+  /** Set by a test that scripts what Lekir calls, step by step (the last one repeats); Tuah then asks Lekir once. */
+  workerScript: null as null | { tool: string; input: unknown }[],
+  workerStep: 0,
 }));
 const created = vi.hoisted(() => vi.fn());
+const closed = vi.hoisted(() => vi.fn());
 
 // The real schemas, so the prepared input is checked as it is in the app; only the write is recorded.
 vi.mock('@/lib/hire/capabilities', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/hire/capabilities')>()),
   createJob: created,
+  closeApplication: closed,
 }));
 
 vi.mock('@/lib/ai/provider', async (importOriginal) => {
@@ -48,7 +53,11 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
             stream: simulateReadableStream({
               initialDelayInMs: 0,
               chunkDelayInMs: 0,
-              chunks: !seen.prepareJob
+              chunks: seen.workerScript
+                ? layer === 'worker'
+                  ? call(...(({ tool, input }) => [tool, input] as const)(seen.workerScript[Math.min(seen.workerStep++, seen.workerScript.length - 1)]))
+                  : call('askLekir', { task: 'Reject the first applicant' })
+                : !seen.prepareJob
                 ? answer
                 : layer === 'worker'
                   ? call('createJob', { title: 'Barista' })
@@ -62,7 +71,7 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
 
 const { runTuah } = await import('@/lib/ai/agents/orchestrator');
 const { createTeamTools } = await import('@/lib/ai/agents/specialists');
-const { hireProduct, reachProduct } = await import('@/lib/ai/products');
+const { combineToolkits, hireProduct, reachProduct } = await import('@/lib/ai/products');
 const { TUAH_SYSTEM, tuahTeamSystem, subAgentSystem } = await import('@/lib/ai/agents/prompts');
 
 const ask = [{ role: 'user' as const, content: 'how many jobs are open?' }];
@@ -211,7 +220,7 @@ describe('Tuah prompts and hiring', () => {
   it('does not contradict itself about jobs', () => {
     expect(TUAH_SYSTEM).not.toContain('job posts');
     expect(tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], true, null)).not.toContain('job posts');
-    expect(TUAH_SYSTEM).toContain('outside marketing, the CRM and jobs');
+    expect(TUAH_SYSTEM).toContain('outside marketing, the CRM, jobs and applications');
     const sentence = TUAH_SYSTEM.toLowerCase().split('\n').find((l) => l.startsWith('- to change a specific campaign, creative'));
     expect(sentence).toContain('job');
   });
@@ -247,5 +256,101 @@ describe('Tuah prompts and hiring', () => {
     const lekir = subAgentSystem('hire', false);
     expect(lekir).toMatch(/^You are Lekir/);
     expect(lekir.toLowerCase()).toContain('never infer or weigh race');
+  });
+});
+
+const APPLICATION_TOOLS = ['moveApplication', 'rejectApplication', 'reopenApplication', 'rateApplication'];
+
+describe('the four application changes need approval', () => {
+  const writer = () => ({ ...hire(), write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true } });
+  it('a writer’s toolkit asks for approval on all four, and a viewer’s holds none', () => {
+    const { tools, toolApproval } = combineToolkits([hireProduct(writer())]);
+    for (const name of APPLICATION_TOOLS) {
+      expect(Object.keys(tools), name).toContain(name);
+      expect(toolApproval?.[name], name).toBe('user-approval');
+    }
+    const viewer = combineToolkits([hireProduct({ ...hire(), write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: false } })]);
+    for (const name of APPLICATION_TOOLS) {
+      expect(Object.keys(viewer.tools), name).not.toContain(name);
+      expect(viewer.toolApproval?.[name], name).toBeUndefined();
+    }
+  });
+  it('the single agent Tuah holds the four tools for a writer only', async () => {
+    seen.calls = [];
+    await runTuah(ask, reach(), undefined, undefined, null, null, null, writer()).consumeStream();
+    for (const name of APPLICATION_TOOLS) expect(seen.calls[0].tools).toContain(name);
+    seen.calls = [];
+    await runTuah(ask, reach(), undefined, undefined, null, null, null, hire()).consumeStream();
+    for (const name of APPLICATION_TOOLS) expect(seen.calls[0].tools).not.toContain(name);
+  });
+});
+
+describe('Tuah’s team rejecting an application', () => {
+  const APP_ID = '44444444-4444-4444-8444-444444444444';
+  const JOB_ID = '55555555-5555-4555-8555-555555555555';
+  /** The seed's ids are not UUIDs, which the change tools require: give the first listed application and the first job real ones. */
+  const withUuids = async () => {
+    const base = hire().data;
+    const lookup = hireProduct(hire()).read.listApplications as unknown as { execute: (i: unknown, o: unknown) => Promise<unknown> };
+    const listed = (await lookup.execute({}, { toolCallId: 't', messages: [] })) as { applications: { id: string; candidate: string; job: string }[] };
+    const first = listed.applications[0];
+    const [firstJob] = await base.listJobs();
+    const data = {
+      ...base,
+      listApplications: async () => (await base.listApplications()).map((a) => (a.id === first.id ? { ...a, id: APP_ID } : a)),
+      listJobs: async () => (await base.listJobs()).map((j) => (j.id === firstJob.id ? { ...j, id: JOB_ID } : j)),
+    };
+    return { first, access: { data, write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true } } };
+  };
+  const prepare = async (script: { tool: string; input: unknown }[], access: Awaited<ReturnType<typeof withUuids>>['access']) => {
+    closed.mockReset();
+    const context = team();
+    seen.calls = [];
+    seen.workerScript = script;
+    seen.workerStep = 0;
+    try {
+      await runTuah(
+        [{ role: 'user' as const, content: 'Reject the first applicant' }],
+        reach(), undefined, undefined, null, null, context, access,
+      ).consumeStream();
+    } finally {
+      seen.workerScript = null;
+    }
+    return context;
+  };
+
+  it('prepares one card for an application it listed, and does not save anything', async () => {
+    const { first, access } = await withUuids();
+    const context = await prepare([
+      { tool: 'listApplications', input: {} },
+      { tool: 'rejectApplication', input: { id: APP_ID, outcome: 'rejected', reason: 'salary' } },
+    ], access);
+    expect(closed).not.toHaveBeenCalled();
+    expect(context.proposals.size).toBe(1);
+    const [proposal] = [...context.proposals.values()];
+    expect(proposal).toMatchObject({
+      product: 'hire',
+      action: 'rejectApplication',
+      title: `Reject ${first.candidate} (${first.job})?`,
+      detail: 'Reason: Salary expectations',
+    });
+  });
+  it('refuses a job’s id, even one it listed', async () => {
+    const { access } = await withUuids();
+    const context = await prepare([
+      { tool: 'listJobs', input: {} },
+      { tool: 'rejectApplication', input: { id: JOB_ID, outcome: 'rejected' } },
+    ], access);
+    expect(context.proposals.size).toBe(0);
+    expect(closed).not.toHaveBeenCalled();
+  });
+  it('refuses an id nobody looked up', async () => {
+    const { access } = await withUuids();
+    const context = await prepare([
+      { tool: 'listApplications', input: {} },
+      { tool: 'rejectApplication', input: { id: '99999999-9999-4999-8999-999999999999', outcome: 'rejected' } },
+    ], access);
+    expect(context.proposals.size).toBe(0);
+    expect(closed).not.toHaveBeenCalled();
   });
 });

@@ -73,6 +73,9 @@ export function delegationForModel(output: Delegation): string {
   return lines.join('\n');
 }
 
+/** The four application changes: the id must have been seen as an application, not just anywhere. */
+const APPLICATION_CHANGES = new Set(['moveApplication', 'rejectApplication', 'reopenApplication', 'rateApplication']);
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Every id a change refers to, wherever it sits in the input. */
@@ -131,6 +134,19 @@ function specialistTools(
               `You have not looked up ${invented.join(', ')}. Never guess an id: use a lookup tool ` +
               'to list the item and get its real id, then prepare the change again.',
           };
+        }
+        if (APPLICATION_CHANGES.has(name)) {
+          const id = (input as { id?: unknown } | null)?.id;
+          const asApplication =
+            typeof id === 'string' && (team.names?.[`application:${id}`] || nameIn(results)(id, 'application'));
+          if (!asApplication) {
+            return {
+              prepared: false,
+              error:
+                `You have not looked up ${String(id)} as an application. Never guess an id: use listApplications ` +
+                'to find the application and get its real id, then prepare the change again.',
+            };
+          }
         }
         const proposal: Proposal = {
           id: crypto.randomUUID().slice(0, 8),

@@ -93,7 +93,7 @@ export function runKasturi(
 
 /**
  * "Lekir, your hiring lead": the same single agent as Jebat, holding the
- * hiring lookups, plus (for someone who may write) job changes that each
+ * hiring lookups, plus (for someone who may write) job, careers page, application form and application changes that each
  * wait for the user's approval.
  */
 export function runLekir(
@@ -163,7 +163,7 @@ const TEAM_AREA = {
 /**
  * Tuah, the cross-app assistant on the Command page and the floating button.
  * It has the marketing tools Jebat has, Kasturi's CRM tools (lookups, and
- * changes behind an approval) and Lekir's hiring tools (lookups, and job changes behind an approval), runs on the model those rules were tuned on,
+ * changes behind an approval) and Lekir's hiring tools (lookups, and job and application changes behind an approval), runs on the model those rules were tuned on,
  * and says so rather than inventing data from the products it cannot see yet.
  */
 export function runTuah(
@@ -181,8 +181,8 @@ export function runTuah(
    */
   team?: Omit<TeamContext, 'apiKey'> | null,
   /**
-   * The workspace's hiring data. The lookups need no workspace role; the job
-   * change tools are added only when `hire.write.canWrite` is set, and each
+   * The workspace's hiring data. The lookups need no workspace role; the change
+   * tools (jobs, careers page, application form, applications) are added only when `hire.write.canWrite` is set, and each
    * waits for the user's approval.
    */
   hire?: HireAccess | null,
