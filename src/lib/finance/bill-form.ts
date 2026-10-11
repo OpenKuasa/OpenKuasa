@@ -17,6 +17,7 @@ import {
   lineNumbers,
   linePayload,
   savedAsDraft,
+  withDueDate,
 } from './document-form';
 import type { FinanceProduct } from './products';
 
@@ -133,6 +134,7 @@ export const BILL_FORM_KIND: DocumentFormKind<BillForm> = {
   date: (form) => form.bill_date,
   withParty: withSupplier,
   withDate: withBillDate,
+  secondDate: { label: 'Due date', get: (form) => form.due_date, set: withDueDate },
   reference: {
     label: 'Supplier’s reference',
     placeholder: 'Their invoice no.',

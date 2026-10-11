@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { type DocumentFormKind, type DocumentFormState, type DocumentParty, withDueDate } from '@/lib/finance/document-form';
+import { type DocumentFormKind, type DocumentFormState, type DocumentParty, documentFormWords } from '@/lib/finance/document-form';
 import type { FinanceProduct } from '@/lib/finance/products';
 import type { FinResult } from '@/lib/finance/result';
 
@@ -23,9 +23,10 @@ export type DocumentFormActions = {
 const capital = (word: string) => word.charAt(0).toUpperCase() + word.slice(1);
 
 /**
- * A new bill or invoice, or a draft being changed. Saved as a draft, or saved
- * and posted in one go. `kind` says which document it is and carries its
- * rules, which are in src/lib/finance/bill-form.ts and invoice-form.ts.
+ * A new bill, invoice or quotation, or a draft being changed. Saved as a
+ * draft, or saved and posted (a quotation: marked as sent) in one go. `kind`
+ * says which document it is and carries its words and its rules, which are in
+ * src/lib/finance/bill-form.ts, invoice-form.ts and quotation-form.ts.
  */
 export function DocumentFormCard<F extends DocumentFormState>({
   kind,
@@ -55,7 +56,8 @@ export function DocumentFormCard<F extends DocumentFormState>({
     setForm(next);
   };
 
-  const { noun, party, reference } = kind;
+  const { noun, party, reference, secondDate } = kind;
+  const words = documentFormWords(kind);
   const terms = parties.find((p) => p.id === kind.partyId(form))?.payment_terms_days;
 
   const send = (post: boolean) => {
@@ -89,7 +91,7 @@ export function DocumentFormCard<F extends DocumentFormState>({
   };
 
   const title = form.id ? `Edit ${noun}` : `New ${noun}`;
-  const subtitle = form.id ? 'A draft: it gets its number when it is posted' : 'Saved as a draft until it is posted';
+  const subtitle = form.id ? words.draftSubtitle : words.newSubtitle;
 
   if (parties.length === 0) {
     return (
@@ -158,14 +160,14 @@ export function DocumentFormCard<F extends DocumentFormState>({
           />
         </div>
         <div className="space-y-1.5 md:col-span-3">
-          <Label htmlFor={`${id}-due`}>Due date</Label>
+          <Label htmlFor={`${id}-due`}>{secondDate.label}</Label>
           <Input
             id={`${id}-due`}
             type="date"
-            value={form.due_date}
+            value={secondDate.get(form)}
             min={kind.date(form) || undefined}
             required
-            onChange={(e) => edit((f) => withDueDate(f, e.target.value))}
+            onChange={(e) => edit((f) => secondDate.set(f, e.target.value))}
           />
         </div>
 
@@ -201,7 +203,7 @@ export function DocumentFormCard<F extends DocumentFormState>({
             {save.pending && !posting ? 'Saving…' : 'Save draft'}
           </Button>
           <Button type="button" size="sm" disabled={save.pending} onClick={() => send(true)}>
-            {save.pending && posting ? 'Posting…' : 'Save and post'}
+            {save.pending && posting ? words.posting : words.post}
           </Button>
           <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={save.pending}>
             Cancel

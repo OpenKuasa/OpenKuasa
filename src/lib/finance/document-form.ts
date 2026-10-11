@@ -114,33 +114,63 @@ export function savedAsDraft(noun: 'bill' | 'invoice', error: string): string {
   return `The ${noun} was saved as a draft, but it was not posted. ${error}`;
 }
 
-/** What every document form holds, whatever it calls its party and its date. */
+/**
+ * What every document form holds, whatever it calls its party and its dates.
+ * The second date (a due date, or a quotation's valid-until date) is not
+ * named here: the card reads and sets it through the kind's `secondDate`.
+ */
 export type DocumentFormState = {
   /** Present when a saved draft is being changed. */
   id?: string;
-  due_date: string;
-  /** Once the person sets the due date by hand, it is no longer recalculated. */
-  dueEdited: boolean;
   notes: string;
   lines: LineDraft[];
 };
+
+/** The words of the card that differ between a document that is posted and one that is marked as sent. */
+export type DocumentFormWords = {
+  /** Under the title of a new document. */
+  newSubtitle: string;
+  /** Under the title of a draft being changed. */
+  draftSubtitle: string;
+  /** The second button: save the draft and take the next step in one go. */
+  post: string;
+  /** That button while it is working. */
+  posting: string;
+};
+
+/** What the card says for a bill or an invoice. */
+export const POSTING_WORDS: DocumentFormWords = {
+  newSubtitle: 'Saved as a draft until it is posted',
+  draftSubtitle: 'A draft: it gets its number when it is posted',
+  post: 'Save and post',
+  posting: 'Posting…',
+};
+
+/** A kind's own words, or the posting words when it has none. */
+export function documentFormWords(kind: { words?: DocumentFormWords }): DocumentFormWords {
+  return kind.words ?? POSTING_WORDS;
+}
 
 /** The customer or supplier a document is for, as its picker lists it. */
 export type DocumentParty = { id: string; name: string; payment_terms_days: number };
 
 /**
  * One kind of document form, for the shared card: its words, and its rules as
- * the functions of its own module (`bill-form.ts`, `invoice-form.ts`), which
- * are what the tests pin.
+ * the functions of its own module (`bill-form.ts`, `invoice-form.ts`,
+ * `quotation-form.ts`), which are what the tests pin.
  */
 export type DocumentFormKind<F extends DocumentFormState> = {
-  noun: 'bill' | 'invoice';
+  noun: 'bill' | 'invoice' | 'quotation';
   party: 'supplier' | 'customer';
   dateLabel: string;
   partyId: (form: F) => string;
   date: (form: F) => string;
   withParty: (form: F, party: { id: string; payment_terms_days: number }) => F;
   withDate: (form: F, date: string, termsDays: number | undefined) => F;
+  /** The second date box: when a bill or an invoice is due, or until when a quotation is valid. */
+  secondDate: { label: string; get: (form: F) => string; set: (form: F, value: string) => F };
+  /** Present when the document is not posted but marked as sent. Absent, the card uses `POSTING_WORDS`. */
+  words?: DocumentFormWords;
   /** A second text box beside the party: the supplier's own reference on a bill. An invoice has none. */
   reference?: { label: string; placeholder: string; get: (form: F) => string; set: (form: F, value: string) => F };
   withProduct: (line: LineDraft, product: FinanceProduct | null) => LineDraft;

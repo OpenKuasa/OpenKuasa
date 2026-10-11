@@ -16,6 +16,7 @@ import {
   lineNumbers,
   linePayload,
   savedAsDraft,
+  withDueDate,
 } from './document-form';
 import {
   type EInvoiceStatus,
@@ -129,6 +130,7 @@ export const INVOICE_FORM_KIND: DocumentFormKind<InvoiceForm> = {
   date: (form) => form.invoice_date,
   withParty: withCustomer,
   withDate: withInvoiceDate,
+  secondDate: { label: 'Due date', get: (form) => form.due_date, set: withDueDate },
   withProduct: withSoldProduct,
   error: invoiceFormError,
   payload: invoicePayload,
