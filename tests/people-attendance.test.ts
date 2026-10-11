@@ -4,6 +4,7 @@ import {
   buildOvertimeView,
   buildShiftCalendar,
   buildTimesheet,
+  clockResultMessage,
 } from '@/lib/people/attendance';
 import { createSeedPeopleData } from '@/lib/people/seed';
 import {
@@ -272,5 +273,63 @@ describe('buildOvertimeView', () => {
     const view = buildOvertimeView({ records: many, employees: [], viewer: HR3, today: TODAY });
     expect(view.records).toHaveLength(25);
     expect(view.truncated).toBe(true);
+  });
+});
+
+describe('My Attendance history: corrected days and missing clock-outs', () => {
+  const viewer: PeopleViewer = { employeeId: 'e1', isHr: false, isDemo: false };
+  const build = (days: AttendanceDay[]) => buildMyAttendance({ days, leave: [], balances: [], viewer, today: TODAY });
+
+  it('carries the correction and its note onto the row', () => {
+    const model = build([
+      day({ work_date: '2026-10-06', corrected: true, correction_note: 'Forgot to clock in' }),
+      day({ id: 'b', work_date: '2026-10-07' }),
+    ]);
+    const byDate = Object.fromEntries(model.recent.map((r) => [r.work_date, r]));
+    expect(byDate['2026-10-06'].corrected).toBe(true);
+    expect(byDate['2026-10-06'].correction_note).toBe('Forgot to clock in');
+    expect(byDate['2026-10-07'].corrected).toBe(false);
+    expect(byDate['2026-10-07'].correction_note).toBeNull();
+  });
+
+  it('marks a past day with a clock-in and no clock-out as having no clock-out', () => {
+    const model = build([day({ work_date: '2026-10-08', clock_in: '2026-10-08T01:00:00Z', clock_out: null })]);
+    expect(model.recent[0].no_clock_out).toBe(true);
+  });
+
+  it('never marks today as having no clock-out, however late it is', () => {
+    const model = build([day({ work_date: TODAY, clock_in: '2026-10-09T01:00:00Z', clock_out: null })]);
+    expect(model.recent[0].is_today).toBe(true);
+    expect(model.recent[0].no_clock_out).toBe(false);
+  });
+
+  it('does not mark a day with no clock-in, or a complete day', () => {
+    const model = build([
+      day({ work_date: '2026-10-06', clock_in: null, clock_out: null, status: 'absent' }),
+      day({ id: 'b', work_date: '2026-10-07' }),
+    ]);
+    expect(model.recent.every((r) => r.no_clock_out === false)).toBe(true);
+  });
+});
+
+describe('clockResultMessage', () => {
+  it('says a clock-in was on time, from the status the database returned', () => {
+    const row = { work_date: TODAY, clock_in: '2026-10-09T00:52:00Z', clock_out: null, status: 'present' as const };
+    expect(clockResultMessage('in', row)).toBe('Clocked in at 8:52 am, on time.');
+  });
+
+  it('says a clock-in was late', () => {
+    const row = { work_date: TODAY, clock_in: '2026-10-09T02:30:00Z', clock_out: null, status: 'late' as const };
+    expect(clockResultMessage('in', row)).toBe('Clocked in at 10:30 am, late.');
+  });
+
+  it('says when a clock-out happened and how long the day was', () => {
+    const row = {
+      work_date: TODAY,
+      clock_in: '2026-10-09T00:52:00Z',
+      clock_out: '2026-10-09T10:03:00Z',
+      status: 'present' as const,
+    };
+    expect(clockResultMessage('out', row)).toBe('Clocked out at 6:03 pm. You worked 9 h 11 min.');
   });
 });

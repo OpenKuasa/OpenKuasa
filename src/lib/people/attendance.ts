@@ -4,6 +4,7 @@
  * these functions only turn rows into what a screen draws.
  */
 
+import { todayState } from './attendance-forms';
 import { addDays, clockTime, formatDate, formatDay, hoursBetween, monthStart, weekStart } from './dates';
 import { isTeamView, leaveDaysByTypeInYear, ownRows } from './own';
 import { overtimeModel, type OvertimeModel } from './overtime';
@@ -22,6 +23,7 @@ import type {
   ShiftKind,
   TimesheetEntry,
 } from './types';
+import { WEEKDAYS as ALL_WEEKDAYS } from './types';
 
 const round1 = (value: number) => Math.round(value * 10) / 10;
 const round2 = (value: number) => Math.round(value * 100) / 100;
@@ -76,6 +78,11 @@ export type RecentClockIn = {
   status_label: string;
   tone: Tone;
   is_today: boolean;
+  /** An owner or admin set this day by hand. */
+  corrected: boolean;
+  correction_note: string | null;
+  /** A past day with a clock-in and no clock-out. Never today: today may still be open. */
+  no_clock_out: boolean;
 };
 
 export type MyAttendanceModel = {
@@ -166,6 +173,9 @@ export function buildMyAttendance(input: {
       status_label: ATTENDANCE_STATUS_LABEL[d.status],
       tone: ATTENDANCE_TONE[d.status],
       is_today: d.work_date === today,
+      corrected: d.corrected,
+      correction_note: d.correction_note,
+      no_clock_out: d.clock_in !== null && d.clock_out === null && d.work_date < today,
     }));
 
   return {
@@ -192,8 +202,33 @@ export function buildMyAttendance(input: {
   };
 }
 
+/**
+ * What to tell the employee after a clock-in or clock-out succeeded, from the row the database returned.
+ * The status is the database's ("present" is on time); the times are worded in Malaysia time by `todayState`.
+ */
+export function clockResultMessage(
+  action: 'in' | 'out',
+  row: Pick<AttendanceDay, 'work_date' | 'clock_in' | 'clock_out' | 'status'>,
+): string {
+  const state = todayState({
+    today: row.work_date,
+    day: { id: '', employee_id: '', corrected: false, correction_note: null, ...row },
+    workWeek: [...ALL_WEEKDAYS],
+    holidays: [],
+    leave: [],
+    employeeId: 'self',
+  });
+  if (action === 'in') {
+    if (state.kind !== 'in' && state.kind !== 'done') return 'Clocked in.';
+    const since = state.kind === 'in' ? state.since : state.from;
+    return `Clocked in at ${since}, ${row.status === 'late' ? 'late' : 'on time'}.`;
+  }
+  if (state.kind !== 'done') return 'Clocked out.';
+  return `Clocked out at ${state.to}. You worked ${state.worked}.`;
+}
+
 /* ---------------------------------------------------------------- */
-/* Timesheet                                                         */
+/* Timesheet                                                       */
 /* ---------------------------------------------------------------- */
 
 export type TimesheetRow = {
