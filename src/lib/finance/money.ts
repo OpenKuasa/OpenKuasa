@@ -15,6 +15,7 @@ import {
   PG_FORBIDDEN,
   PG_FOREIGN_KEY,
   PG_OUT_OF_RANGE,
+  PG_UNIQUE,
   TOO_LARGE,
   pgCode,
   writeFailed,
@@ -72,7 +73,9 @@ export const RECEIPT_MESSAGES = {
   notPosted: 'A payment can only go against a posted invoice.',
   tooMuch: 'That is more than is still owed on an invoice.',
   oneCustomer: 'One payment can only pay invoices from one customer.',
-  locked: M.locked,
+  // FIN09. Money in is posted at once and has no edit or delete, so through the app this is only ever
+  // a second attempt to void a payment someone has already voided.
+  locked: 'This payment has already been voided.',
   missing: 'The account or an invoice on this payment no longer exists.',
 } as const;
 
@@ -91,6 +94,11 @@ const amount = z
   .pipe(z.number().gt(0, M.amount).max(999_999_999_999.99, M.amount));
 const id = z.string({ error: M.gone }).uuid(M.gone);
 
+/** True when no id is there twice. The database reads an id whatever its capitals, so they are compared without them. */
+function eachOnce(ids: string[]): boolean {
+  return new Set(ids.map((value) => value.toLowerCase())).size === ids.length;
+}
+
 export const recordPaymentOutInput = z.object({
   account_id: z.string({ error: M.account }).uuid(M.account),
   txn_date: date,
@@ -103,7 +111,7 @@ export const recordPaymentOutInput = z.object({
     .array(z.object({ bill_id: z.string({ error: M.bills }).uuid(M.bills), amount }), { error: M.bills })
     .min(1, M.bills)
     .max(PAYMENT_BILLS_MAX, M.tooManyBills)
-    .refine((rows) => new Set(rows.map((r) => r.bill_id)).size === rows.length, M.duplicate),
+    .refine((rows) => eachOnce(rows.map((r) => r.bill_id)), M.duplicate),
 });
 
 /** Money received from one customer, split across that customer's posted invoices. It is posted at once. */
@@ -117,7 +125,7 @@ export const recordPaymentInInput = z.object({
     .array(z.object({ invoice_id: z.string({ error: R.invoices }).uuid(R.invoices), amount }), { error: R.invoices })
     .min(1, R.invoices)
     .max(PAYMENT_INVOICES_MAX, R.tooManyInvoices)
-    .refine((rows) => new Set(rows.map((r) => r.invoice_id)).size === rows.length, R.duplicate),
+    .refine((rows) => eachOnce(rows.map((r) => r.invoice_id)), R.duplicate),
 });
 
 export const markPaymentPaidInput = z.object({ id, paid_on: date });
@@ -135,6 +143,13 @@ const REFUSALS: Record<string, string> = {
   [PG_OUT_OF_RANGE]: TOO_LARGE,
 };
 
+/**
+ * Recording a payment out. A unique violation here can only be the same bill
+ * twice on one payment: the number comes from finance_next_number under a
+ * lock. Marking a payment paid or voiding it keeps the plain map.
+ */
+const RECORD_OUT_REFUSALS: Record<string, string> = { ...REFUSALS, [PG_UNIQUE]: M.duplicate };
+
 /** The same database codes, worded for money in: the documents are invoices and the party is a customer. */
 const RECEIPT_REFUSALS: Record<string, string> = {
   ...REFUSALS,
@@ -142,7 +157,10 @@ const RECEIPT_REFUSALS: Record<string, string> = {
   FIN04: R.notPosted,
   FIN05: R.tooMuch,
   FIN06: R.oneCustomer,
+  FIN09: R.locked,
   [PG_FOREIGN_KEY]: R.missing,
+  // The same invoice twice on one payment; see RECORD_OUT_REFUSALS.
+  [PG_UNIQUE]: R.duplicate,
 };
 
 function moneyWriteFailed(
@@ -268,7 +286,7 @@ export async function recordPaymentOut(
     payment: { ...payment, status: scheduled ? 'scheduled' : 'posted' },
     allocations,
   });
-  if (error || !data) return moneyWriteFailed('recordPaymentOut', error);
+  if (error || !data) return moneyWriteFailed('recordPaymentOut', error, RECORD_OUT_REFUSALS);
   return { ok: true, data: { id: data as string } };
 }
 
@@ -303,9 +321,8 @@ export async function markPaymentPaid(
 }
 
 /**
- * Voids a posted payment, money out or money in: it is one status change on
- * finance_transactions whichever way the money went. The bills or invoices it
- * paid owe that amount again.
+ * Voids a posted payment out: one status change on finance_transactions. The
+ * bills it paid owe that amount again.
  */
 export async function voidPayment(
   ctx: FinanceWriteContext,
@@ -321,6 +338,29 @@ export async function voidPayment(
     .maybeSingle();
   if (error) return moneyWriteFailed('voidPayment', error);
   if (!data) return { ok: false, error: M.gone };
+  return { ok: true, data: { id: data.id } };
+}
+
+/**
+ * Voids a payment in: the same status change, kept to money in and worded
+ * for it. The invoices it paid owe that amount again. There is no delete and
+ * no edit: money in is posted the moment it is recorded.
+ */
+export async function voidPaymentIn(
+  ctx: FinanceWriteContext,
+  input: z.input<typeof paymentIdInput>,
+): Promise<FinResult<{ id: string }>> {
+  const { id: txnId } = paymentIdInput.parse(input);
+  const { data, error } = await ctx.client
+    .from('finance_transactions')
+    .update({ status: 'void', updated_at: new Date().toISOString() })
+    .eq('id', txnId)
+    .eq('org_id', ctx.orgId)
+    .eq('direction', 'in')
+    .select('id')
+    .maybeSingle();
+  if (error) return moneyWriteFailed('voidPaymentIn', error, RECEIPT_REFUSALS);
+  if (!data) return { ok: false, error: R.gone };
   return { ok: true, data: { id: data.id } };
 }
 

@@ -19,6 +19,7 @@ import {
   type FinResult,
   type FinanceWriteContext,
   NOT_ALLOWED,
+  PG_CHECK,
   PG_FORBIDDEN,
   PG_FOREIGN_KEY,
   PG_OUT_OF_RANGE,
@@ -31,6 +32,10 @@ import {
 export const INVOICE_LINES_MAX = DOCUMENT_LINES_MAX;
 /** Invoices loaded for a screen, a page at a time. */
 export const INVOICE_PAGE_SIZE = 1000;
+/** What a person can record about an invoice's e-Invois at LHDN. Nothing is submitted by this app. */
+export const EINVOICE_STATUSES = ['none', 'pending', 'validated', 'rejected'] as const;
+/** LHDN's own UUIDs are 26 characters; the column is plain text, so this is only a sane ceiling. */
+export const EINVOICE_UUID_MAX = 100;
 
 export const INVOICE_MESSAGES = {
   customer: 'Choose a customer.',
@@ -45,11 +50,18 @@ export const INVOICE_MESSAGES = {
   tooLong: LINE_MESSAGES.tooLong,
   product: LINE_MESSAGES.product,
   gone: 'That invoice no longer exists.',
-  locked: 'This invoice is posted and can no longer be changed. Void it instead.',
-  hasPayments: 'This invoice has payments. Void them before voiding it.',
+  // FIN01. The menus offer only what an invoice's status allows, so this reaches a person only when the
+  // invoice changed under them: a draft posted or a posted invoice voided in another tab. True of each.
+  locked: 'This invoice has been posted or voided, so that can no longer be done.',
+  // A receipt is posted the moment it is recorded, so it can only be voided, never deleted.
+  hasPayments: 'This invoice has payments. Void them on Payments In before voiding it.',
   empty: 'An invoice needs at least one line with an amount.',
   numberTaken: 'That invoice number is already used.',
   missing: 'The customer or a product on this invoice no longer exists.',
+  einvoiceStatus: 'Choose an e-Invois status.',
+  einvoiceUuid: `Keep the UUID to ${EINVOICE_UUID_MAX} characters or fewer.`,
+  einvoiceNone: 'An invoice with no e-Invois status has no UUID. Clear the UUID, or choose a status.',
+  einvoiceDraft: 'e-Invois details can be recorded once the invoice is posted.',
 } as const;
 
 const M = INVOICE_MESSAGES;
@@ -67,6 +79,25 @@ export const saveInvoiceInput = z
   .refine((v) => v.due_date >= v.invoice_date, { message: M.dates, path: ['due_date'] });
 
 export const invoiceIdInput = z.object({ id: z.string({ error: M.gone }).uuid(M.gone) });
+
+/** What a person has recorded about a posted invoice's e-Invois: its status at LHDN and the UUID LHDN gave it. */
+export const setEInvoiceInput = z
+  .object({
+    id: z.string({ error: M.gone }).uuid(M.gone),
+    einvoice_status: z.enum(EINVOICE_STATUSES, { error: M.einvoiceStatus }),
+    /** Trimmed; an empty box is stored as null. */
+    einvoice_uuid: z
+      .string({ error: M.einvoiceUuid })
+      .trim()
+      .max(EINVOICE_UUID_MAX, M.einvoiceUuid)
+      .transform((v) => (v === '' ? null : v))
+      .nullable()
+      .default(null),
+  })
+  .refine((v) => v.einvoice_status !== 'none' || v.einvoice_uuid === null, {
+    message: M.einvoiceNone,
+    path: ['einvoice_uuid'],
+  });
 
 const REFUSALS: Record<string, string> = {
   FIN01: M.locked,
@@ -90,7 +121,7 @@ function invoiceWriteFailed(fnName: string, error: unknown): { ok: false; error:
 export type InvoiceDisplayStatus = 'draft' | 'sent' | 'overdue' | 'paid' | 'void';
 
 /** What a person has recorded about the invoice's e-Invois at LHDN. Nothing is submitted by this app. */
-export type EInvoiceStatus = 'none' | 'pending' | 'validated' | 'rejected';
+export type EInvoiceStatus = (typeof EINVOICE_STATUSES)[number];
 
 export type InvoiceListRow = {
   id: string;
@@ -105,6 +136,8 @@ export type InvoiceListRow = {
   balance: number;
   display_status: InvoiceDisplayStatus;
   einvoice_status: EInvoiceStatus;
+  /** The UUID LHDN gave the e-Invois, as a person typed it in; null when none was recorded. */
+  einvoice_uuid: string | null;
 };
 
 export type InvoiceLine = DocumentLineRow;
@@ -113,12 +146,18 @@ export type InvoiceDetail = InvoiceListRow & {
   subtotal: number;
   sst: number;
   notes: string | null;
-  einvoice_uuid: string | null;
   lines: InvoiceLine[];
 };
 
+/**
+ * The answer to "Save and post". When the draft was saved but posting it was
+ * refused, `draftId` is that draft, so the form goes on editing it instead of
+ * saving a second copy.
+ */
+export type SaveAndPostInvoiceResult = FinResult<{ id: string; invoice_no: string }> & { draftId?: string };
+
 const LIST_COLUMNS =
-  'id,invoice_no,customer_id,customer_name,invoice_date,due_date,total,paid,balance,display_status,einvoice_status';
+  'id,invoice_no,customer_id,customer_name,invoice_date,due_date,total,paid,balance,display_status,einvoice_status,einvoice_uuid';
 
 function toListRow(row: Record<string, unknown>): InvoiceListRow {
   return {
@@ -126,6 +165,7 @@ function toListRow(row: Record<string, unknown>): InvoiceListRow {
     total: Number(row.total),
     paid: Number(row.paid),
     balance: Number(row.balance),
+    einvoice_uuid: (row.einvoice_uuid as string | null) ?? null,
   };
 }
 
@@ -153,7 +193,7 @@ export async function getInvoice(ctx: FinanceWriteContext, id: string): Promise<
   if (!invoiceIdInput.safeParse({ id }).success) return null;
   const { data: invoice, error } = await ctx.client
     .from('finance_invoice_totals')
-    .select(`${LIST_COLUMNS},subtotal,sst,notes,einvoice_uuid`)
+    .select(`${LIST_COLUMNS},subtotal,sst,notes`)
     .eq('org_id', ctx.orgId)
     .eq('id', id)
     .maybeSingle();
@@ -173,7 +213,6 @@ export async function getInvoice(ctx: FinanceWriteContext, id: string): Promise<
     subtotal: Number(header.subtotal),
     sst: Number(header.sst),
     notes: (header.notes as string | null) ?? null,
-    einvoice_uuid: (header.einvoice_uuid as string | null) ?? null,
     lines: ((lines ?? []) as unknown as Record<string, unknown>[]).map(toDocumentLine),
   };
 }
@@ -241,6 +280,30 @@ export async function deleteInvoice(
     .select('id')
     .maybeSingle();
   if (error) return invoiceWriteFailed('deleteInvoice', error);
+  if (!data) return { ok: false, error: M.gone };
+  return { ok: true, data: { id: data.id } };
+}
+
+/**
+ * Records what a person knows of a posted invoice's e-Invois. These two
+ * columns, with updated_at, are all the database lets change on a posted
+ * invoice. Nothing is sent to LHDN.
+ */
+export async function setEInvoice(
+  ctx: FinanceWriteContext,
+  input: z.input<typeof setEInvoiceInput>,
+): Promise<FinResult<{ id: string }>> {
+  const { id, einvoice_status, einvoice_uuid } = setEInvoiceInput.parse(input);
+  const { data, error } = await ctx.client
+    .from('finance_invoices')
+    .update({ einvoice_status, einvoice_uuid, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('org_id', ctx.orgId)
+    .select('id')
+    .maybeSingle();
+  // A draft has not gone anywhere, so the table's check constraint refuses an e-Invois on it.
+  if (pgCode(error) === PG_CHECK) return { ok: false, error: M.einvoiceDraft };
+  if (error) return invoiceWriteFailed('setEInvoice', error);
   if (!data) return { ok: false, error: M.gone };
   return { ok: true, data: { id: data.id } };
 }

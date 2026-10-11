@@ -68,7 +68,7 @@ export function ContactsView({ view, actions }: { view: ContactsViewData; action
       matches(c, filter) &&
       `${c.name} ${c.email ?? ''} ${c.ssm_no ?? ''} ${c.tin ?? ''}`.toLowerCase().includes(q),
   );
-  const columns = actions ? 8 : 7;
+  const columns = actions ? 9 : 8;
   const exposure: Slice[] = [
     { key: 'receivable', label: 'Receivable', value: view.stats.receivable, color: 'var(--chart-1)' },
     { key: 'payable', label: 'Payable', value: view.stats.payable, color: 'var(--chart-4)' },
@@ -204,6 +204,7 @@ export function ContactsView({ view, actions }: { view: ContactsViewData; action
                   <TableHead>Email</TableHead>
                   <TableHead>SSM No.</TableHead>
                   <TableHead>Phone</TableHead>
+                  <TableHead className="text-right">Receivable</TableHead>
                   <TableHead className="text-right">Payable</TableHead>
                   <TableHead>Status</TableHead>
                   {actions ? <TableHead className="w-10"><span className="sr-only">Actions</span></TableHead> : null}
@@ -254,6 +255,9 @@ export function ContactsView({ view, actions }: { view: ContactsViewData; action
                         {c.ssm_no ?? '—'}
                       </TableCell>
                       <TableCell className="whitespace-nowrap tabular-nums">{c.phone ?? '—'}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums">
+                        {c.is_customer ? rm(c.receivable) : '—'}
+                      </TableCell>
                       <TableCell className="whitespace-nowrap text-right tabular-nums">
                         {c.is_supplier ? rm(c.payable) : '—'}
                       </TableCell>

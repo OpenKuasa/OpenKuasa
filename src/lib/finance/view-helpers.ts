@@ -84,6 +84,18 @@ export function lastMonths(today: string, months: number = TREND_MONTHS): { key:
   });
 }
 
+/**
+ * "This payment also covers BILL-0007 and BILL-0008." for a payment split
+ * across documents, given the numbers of the other ones; empty when there are
+ * none. Voiding from any row of a split payment acts on the whole payment, so
+ * the question names the others.
+ */
+export function alsoCoversSentence(others: string[]): string {
+  if (others.length === 0) return '';
+  const list = others.length === 1 ? others[0] : `${others.slice(0, -1).join(', ')} and ${others[others.length - 1]}`;
+  return `This payment also covers ${list}.`;
+}
+
 /** How many payments the rows belong to: a payment split across documents is one payment. */
 export function paymentCount(rows: { transaction_id: string }[]): number {
   return new Set(rows.map((row) => row.transaction_id)).size;

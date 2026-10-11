@@ -2,26 +2,26 @@
  * The bill form's rules, kept out of the components so they can be tested:
  * what a new form holds, what choosing a supplier, a date or a product
  * changes, what is wrong with the form, and what is sent to saveBillAction.
- * Pure. Every box is held as the text the person typed.
+ * Pure. What an invoice form shares is in document-form.ts.
  */
-import { addDaysIso, billTotals, type LineNumbers } from './bill-math';
-import { type BillDetail, BILL_MESSAGES, isIsoDate, roundRate, saveBillInput } from './bills';
-import { typedNumber } from './format';
+import { billTotals } from './bill-math';
+import { type BillDetail, BILL_MESSAGES, saveBillInput } from './bills';
+import {
+  type DocumentFormKind,
+  type LineDraft,
+  defaultDueDate,
+  emptyLine,
+  filledFromProduct,
+  followedDueDate,
+  lineDraft,
+  lineNumbers,
+  linePayload,
+  savedAsDraft,
+} from './document-form';
 import type { FinanceProduct } from './products';
-import { WRITE_FAILED } from './result';
 
-export type LineDraft = {
-  /** Stable for React while the form is open; never sent. */
-  key: string;
-  product_id: string;
-  description: string;
-  quantity: string;
-  uom: string;
-  /** Not shown in the editor; carried so editing a draft does not drop it. */
-  pack_size: string;
-  unit_price: string;
-  sst_rate: string;
-};
+// Defined in document-form.ts, which the invoice form shares; kept exported from here because the purchase-side tests import them from this module.
+export { type LineDraft, defaultDueDate, emptyLine, lineNumbers, withDueDate } from './document-form';
 
 export type BillForm = {
   /** Present when a saved draft is being changed. */
@@ -35,10 +35,6 @@ export type BillForm = {
   notes: string;
   lines: LineDraft[];
 };
-
-export function emptyLine(key: string): LineDraft {
-  return { key, product_id: '', description: '', quantity: '1', uom: '', pack_size: '', unit_price: '', sst_rate: '0' };
-}
 
 /** A new bill dated today with one empty line. The due date follows once a supplier is chosen. */
 export function newBillForm(today: string, lineKey: string): BillForm {
@@ -63,25 +59,16 @@ export function billFormFromDetail(bill: BillDetail): BillForm {
     due_date: bill.due_date,
     dueEdited: true,
     notes: bill.notes ?? '',
-    lines: bill.lines.map((l) => ({
-      key: l.id,
-      product_id: l.product_id ?? '',
-      description: l.description,
-      quantity: String(l.quantity),
-      uom: l.uom ?? '',
-      pack_size: l.pack_size ?? '',
-      unit_price: String(l.unit_price),
-      sst_rate: String(l.sst_rate),
-    })),
+    lines: bill.lines.map(lineDraft),
   };
 }
 
-/** Bill date plus the supplier's payment terms; with no supplier yet, the bill date itself. */
-export function defaultDueDate(billDate: string, termsDays: number | undefined): string {
-  return addDaysIso(billDate, termsDays ?? 0);
-}
-
-/** Choosing a supplier moves the due date to their terms, unless it was set by hand. */
+/**
+ * Choosing a supplier moves the due date to their terms, unless it was set by hand.
+ * The due-date rule is deliberately its own: it blanks the due date when the bill
+ * date is empty, which the invoice form's `withCustomer` does not do. Do not
+ * "tidy" it onto `followedDueDate`.
+ */
 export function withSupplier(form: BillForm, supplier: { id: string; payment_terms_days: number }): BillForm {
   return {
     ...form,
@@ -95,12 +82,7 @@ export function withSupplier(form: BillForm, supplier: { id: string; payment_ter
  * hand. While the bill date is half typed the due date stays where it was.
  */
 export function withBillDate(form: BillForm, billDate: string, termsDays: number | undefined): BillForm {
-  const follow = !form.dueEdited && isIsoDate(billDate);
-  return { ...form, bill_date: billDate, due_date: follow ? defaultDueDate(billDate, termsDays) : form.due_date };
-}
-
-export function withDueDate(form: BillForm, dueDate: string): BillForm {
-  return { ...form, due_date: dueDate, dueEdited: true };
+  return { ...form, bill_date: billDate, due_date: followedDueDate(form, billDate, termsDays) };
 }
 
 /**
@@ -109,29 +91,7 @@ export function withDueDate(form: BillForm, dueDate: string): BillForm {
  * them. Choosing "no product" only clears the link.
  */
 export function withProduct(line: LineDraft, product: FinanceProduct | null): LineDraft {
-  if (!product) return { ...line, product_id: '' };
-  return {
-    ...line,
-    product_id: product.id,
-    description: product.name,
-    uom: product.uom,
-    unit_price: String(product.cost),
-    sst_rate: String(product.sst_rate),
-  };
-}
-
-/** An empty SST box means no SST. The rate keeps two decimals, as it is stored. */
-function sstRate(text: string): number {
-  return text.trim() === '' ? 0 : roundRate(typedNumber(text) ?? Number.NaN);
-}
-
-/** The line's figures for the live total; a box that is not a number is NaN, which counts as nothing. */
-export function lineNumbers(line: LineDraft): LineNumbers {
-  return {
-    quantity: typedNumber(line.quantity) ?? Number.NaN,
-    unit_price: typedNumber(line.unit_price) ?? Number.NaN,
-    sst_rate: sstRate(line.sst_rate),
-  };
+  return filledFromProduct(line, product, product?.cost ?? 0);
 }
 
 /** What is sent to saveBillAction. Figures are numbers; a box that is not a number goes as NaN and is refused. */
@@ -143,13 +103,7 @@ export function billPayload(form: BillForm) {
     bill_date: form.bill_date,
     due_date: form.due_date,
     notes: form.notes,
-    lines: form.lines.map((line) => ({
-      product_id: line.product_id,
-      description: line.description,
-      uom: line.uom,
-      pack_size: line.pack_size,
-      ...lineNumbers(line),
-    })),
+    lines: form.lines.map(linePayload),
   };
 }
 
@@ -167,6 +121,26 @@ export function billFormError(form: BillForm, posting = false): string | null {
 
 /** What the form says when the bill was saved as a draft but posting it was refused. */
 export function savedNotPosted(error: string): string {
-  if (error === WRITE_FAILED) return 'The bill was saved as a draft, but posting it failed. Please try again.';
-  return `The bill was saved as a draft, but it was not posted. ${error}`;
+  return savedAsDraft('bill', error);
 }
+
+/** The bill form, as the shared card draws it. */
+export const BILL_FORM_KIND: DocumentFormKind<BillForm> = {
+  noun: 'bill',
+  party: 'supplier',
+  dateLabel: 'Bill date',
+  partyId: (form) => form.supplier_id,
+  date: (form) => form.bill_date,
+  withParty: withSupplier,
+  withDate: withBillDate,
+  reference: {
+    label: 'Supplier’s reference',
+    placeholder: 'Their invoice no.',
+    get: (form) => form.supplier_ref,
+    set: (form, value) => ({ ...form, supplier_ref: value }),
+  },
+  withProduct,
+  error: billFormError,
+  payload: billPayload,
+  savedNotPosted,
+};

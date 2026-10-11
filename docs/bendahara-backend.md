@@ -23,24 +23,41 @@ the data layer, with unit tests; the client components only draw them.
 | File | Holds |
 |---|---|
 | `purchase-views.ts` | KPI figures, chart data, table filters and CSV rows for Supplier Bills and Payments Out |
-| `sales-views.ts` | KPI figures, chart data, table filters, status words and CSV rows for Invoices and Payments In |
-| `view-helpers.ts` | What those two share: dates, sums to the sen, the eight-month window of a trend chart, how payment methods are grouped and coloured |
+| `sales-views.ts` | KPI figures, chart data, table filters, status words and CSV rows for Invoices and Payments In; what each row's menu offers (`invoiceActions`, `paymentInActions`); which customer the filter is on after a refresh (`customerChoice`) |
+| `view-helpers.ts` | What those two share: dates, sums to the sen, the eight-month window of a trend chart, how payment methods are grouped and coloured, and the "This payment also covers …" sentence of a split payment |
 | `document-lines.ts` | What a bill and an invoice share: the line schema, the real-date and SST-rate rules (`isIsoDate`, `roundRate`), and reading a saved line |
 | `bill-math.ts` | Line amounts and bill totals, rounded exactly as the generated columns `amount` and `sst_amount` round them; the SST rate keeps two decimals, as its column does (`roundRate` in `document-lines.ts`) |
-| `bill-form.ts` | The bill form: defaults, the due date following the supplier's terms, validation, what is sent. `savedNotPosted` words a bill that was saved as a draft but not posted |
-| `payment-form.ts` | The payment form: which bills can take a payment and how much, defaults, validation, what is sent. `heldByBill` adds up what unpaid payments already hold of each bill; `keepPayable` drops a ticked bill that was paid off while the form was open |
+| `document-form.ts` | What the bill form and the invoice form share: a line as it was typed, the due date following the other party's payment terms, the sentence for a document that was saved as a draft but not posted, and `DocumentFormKind`, the description of one form that the shared card draws |
+| `bill-form.ts` | The bill form: defaults, the due date following the supplier's terms, validation, what is sent. A product fills a line at its cost. `savedNotPosted` words a bill that was saved as a draft but not posted |
+| `invoice-form.ts` | The invoice form: the same rules with a customer and no supplier's reference. A product fills a line at its price. Also the small e-Invois form (status and UUID) |
+| `allocation-form.ts` | What the two payment forms share: ticking documents, amounts added in whole sen, what payments not yet posted hold of a document, and `AllocationFormKind`, the description of one form that the shared card draws |
+| `payment-form.ts` | The payment-out form: which bills can take a payment and how much, defaults, validation, what is sent. `heldByBill` adds up what unpaid payments already hold of each bill; `keepPayable` drops a ticked bill that was paid off while the form was open |
+| `receipt-form.ts` | The payment-in form: which invoices can take a payment and how much (`receivableInvoices`), defaults, validation, what is sent. It has no scheduling |
 | `csv.ts` | CSV text for Export: RFC 4180, a UTF-8 byte-order mark, and a guard against spreadsheet formulas |
 
 The forms validate by running the write's own Zod schema on what they are about
 to send, so the browser and the server say the same sentences.
+
+One card draws both document forms (`document-form-card.tsx`) and one draws
+both payment forms (`allocation-form-card.tsx`). `BillFormCard`,
+`InvoiceFormCard`, `PaymentFormCard` and `ReceiptFormCard` are thin wrappers
+that hand the card their kind (`BILL_FORM_KIND`, `INVOICE_FORM_KIND`,
+`PAYMENT_OUT_KIND`, `PAYMENT_IN_KIND`). A rule that differs between a bill and
+an invoice, or between money out and money in, belongs in the kind, not in the
+card.
 
 A server action refreshes the screens after every attempt that reached the
 database, refused or not, so a record someone else changed or removed shows as
 it now is. `saveAndPostBillAction` saves a draft and posts it; when only the
 post is refused it answers with the draft's id (`draftId`) and the form goes on
 editing that draft. `getBillAction` reads one draft with its lines for the Edit
-form. `src/app/(app)/finance/error.tsx` is shown when a finance screen's data
-cannot be read.
+form. `saveAndPostInvoiceAction` and `getInvoiceAction` do the same for an
+invoice, through the same two helpers. `src/app/(app)/finance/error.tsx` is
+shown when a finance screen's data cannot be read.
+
+Every action refuses a viewer and the demo workspace before the data layer is
+reached. Without that, a viewer's void or delete would come back from the
+database as "no row", which reads as "That invoice no longer exists.".
 
 ## Tables
 
@@ -91,6 +108,12 @@ rows with one `transaction_id`, whose `amount`s add up to
 A bill takes only money out and an invoice only money in. Money out against an
 invoice (a refund) arrives with the sales follow-ons.
 
+The payment-in form is opened from Payments In, or from "Record payment" on a
+posted invoice's row with that customer chosen and that invoice ticked. It
+offers a customer's invoices that are Sent or Overdue, each for its balance
+less anything a payment not yet posted holds (`receivableInvoices`); through
+the app nothing is ever held, as money in is posted at once.
+
 A bill's `balance` is its total less paid money. What a new payment may take is
 less than that when payments are waiting: the allocation guard counts
 scheduled, draft and pending-approval payments too, as they hold a bill's
@@ -125,7 +148,15 @@ refunds will change the balance when they exist.
 `einvoice_status` (`none`, `pending`, `validated`, `rejected`) and
 `einvoice_uuid` hold what a person has noted about the invoice's e-Invois at
 LHDN. Nothing is submitted from here. A draft has neither; they can be changed
-only while the invoice is posted. No function or action sets them yet.
+only while the invoice is posted. `setEInvoice` (`setEInvoiceAction`) writes
+them, from "Set e-Invois" on a posted invoice's row. The UUID is free text of
+up to 100 characters; with no status there is no UUID.
+
+What a row's menu offers follows its status (`invoiceActions`): a draft is
+edited, posted or deleted; a posted invoice takes a payment while something is
+still owed, has its e-Invois set, and can be voided; a void invoice offers
+nothing. Voiding an invoice that has payments is offered and refused with the
+reason, as on a paid bill.
 
 ## Posted is locked
 
@@ -186,7 +217,9 @@ All run as the caller, so RLS decides who may write.
 Voiding a bill, an invoice or a payment, and deleting a draft bill, a draft
 invoice or a scheduled payment, are plain updates and deletes; the guards
 decide whether they are allowed. A payment in is voided by the same update as
-a payment out (`voidPayment` in `money.ts`).
+a payment out, through its own function (`voidPaymentIn` in `money.ts`): it is
+kept to money in, answers in the sentences of a payment in, and its action
+refreshes the sales screens. A payment in has no edit and no delete.
 
 ## Error codes
 
@@ -209,8 +242,16 @@ for a bill or for an invoice by the file that made the call.
 | `FIN11` | The bill, invoice or payment no longer exists. `finance_post_invoice` also answers this to a viewer: it locks the invoice before posting, and a viewer may not, so to them it is not there |
 | `42501` | Row-level security refused the write: "You do not have permission to make changes here." |
 | `22003` | A number does not fit its column (quantity × unit price can overflow): "That amount is too large." |
-| `23514` | A check constraint refused the write. The one to know: an invoice's number must match its status (a draft has none, any other status has one, a posted invoice has `posted_at`). Only a direct write can break it; the app never does. Others include the due date before the invoice date, e-Invois set on a draft, a line's quantity, price or SST rate out of range, and an allocation naming both a bill and an invoice; `invoices.ts` has no sentence for them. |
-| `23505` | A unique constraint refused the write. `invoices.ts` words it as "That invoice number is already used."; `money.ts` has no sentence for it. Through the app it does not happen for an allocation; see Known limits. |
+| `23514` | A check constraint refused the write. The one to know: an invoice's number must match its status (a draft has none, any other status has one, a posted invoice has `posted_at`). Only a direct write can break it; the app never does. Others include the due date before the invoice date, a line's quantity, price or SST rate out of range, and an allocation naming both a bill and an invoice; `invoices.ts` has no sentence for them. One has a sentence: e-Invois set on a draft, which `setEInvoice` words as "e-Invois details can be recorded once the invoice is posted." |
+| `23505` | A unique constraint refused the write. `invoices.ts` words it as "That invoice number is already used.". When a payment is recorded it can only be the same bill or invoice twice on one payment (numbers are taken under a lock), so `recordPaymentOut` and `recordPaymentIn` word it as "Each bill can appear once on a payment." and "Each invoice can appear once on a payment."; the schemas refuse it first, comparing ids without regard to capitals. |
+
+The sentence for `FIN01` on an invoice is "This invoice has been posted or
+voided, so that can no longer be done.". The row menus offer only what a
+status allows, so the code reaches a person only when the invoice changed under
+them, and the sentence is true of every such case, voiding an invoice that was
+just voided included. `FIN09` on a payment in is "This payment has already been
+voided." for the same reason. Bills and payments out still say "Void it
+instead."; see Known limits.
 
 ## Known limits
 
@@ -224,14 +265,25 @@ for a bill or for an invoice by the file that made the call.
 - A lost response cannot be told from a failed save. The screen says it could
   not confirm the change and asks the person to reload the page and check the
   list; it does not refresh by itself, which could reload the tab and lose the
-  form. A retry after a save that did land can create a second bill or a second
-  part-payment, until writes carry a client-generated id.
+  form. A retry after a save that did land can create a second bill, a second
+  invoice, a second part-payment or a second receipt, until writes carry a
+  client-generated id (which needs a migration).
 - Payment dates are not restricted: "pay now" accepts a future date and
   "schedule for later" a past one.
 - A payment's account must be active when it is chosen (only active accounts
   are offered), but the database does not refuse an archived account yet.
 - Voiding a paid bill is offered and refused until its payments are voided.
+  The same goes for an invoice that has payments.
 - Posted and void bills, invoices and payments cannot be deleted, by design.
+- A bill's `FIN01` sentence and a payment out's `FIN09` sentence end "Void it
+  instead.", which is wrong when the thing just tried was a void of something
+  already void. Invoices and payments in have sentences that are true in that
+  case too; the purchase side was left as it shipped.
+- A unique-violation (23505) while recording a payment is worded "Each
+  bill/invoice can appear once on a payment." That is true while document
+  numbers only ever come from the counter. Once a later stage lets a person
+  change a prefix or reset a counter, a number collision would get that
+  sentence wrongly and needs its own.
 - Approval of money out is not enforced yet.
 - Posting goes through database functions that run as the caller. An editor
   writing to the tables directly, rather than through the app, could still post
@@ -243,14 +295,17 @@ for a bill or for an invoice by the file that made the call.
   functions that run with their own rights, planned with the approval rule.
 - Contacts and products load the first 1,000 by name; search is in the browser.
   Only the contact list is capped this way: a contact's Payable is read by
-  paging through every open bill, 1,000 at a time, so it is never cut short.
-- Invoices and Payments In are read-only so far: search, filters, "View all"
-  and Export, but no forms and no row actions. The data layer for them is in
-  `invoices.ts` and `money.ts`.
-- Receivable on Customers & Suppliers is still 0: that screen does not read
-  invoices yet.
-- Nothing sets an invoice's e-Invois status yet; the columns, and the rule
-  that lets them change on a posted invoice, are in place.
+  paging through every open bill, and its Receivable through every open
+  invoice, 1,000 at a time, so neither is cut short.
+- A payment in cannot be edited or deleted, only voided, and a posted invoice
+  only voided. To correct one, void it and record it again.
+- Invoices and Payments In load every invoice and payment and filter in the
+  browser, as the purchase screens do.
+- "Largest open balances" on Customers & Suppliers charts what is owed to
+  suppliers only; Receivable is in the card, the donut and the table.
+- An invoice's e-Invois status and UUID are what a person typed. Nothing checks
+  them against LHDN, and the UUID's format is not checked. "Validated" does not
+  require a UUID.
 - Saving an invoice does not check that its customer is ticked as a customer,
   as saving a bill does not check its supplier; the forms offer only the right
   contacts.
@@ -268,9 +323,11 @@ for a bill or for an invoice by the file that made the call.
   and one adding to its split, can both pass and leave a payment smaller than
   its split.
 - Paying the same invoice twice in one payment is refused by the payment
-  form's schema. A direct call to `finance_record_payment_in` gets a plain
-  unique-violation error (23505) rather than a sentence, unless the two
-  amounts together exceed what is owed, in which case it is FIN05.
+  form's schema, whatever the capitals of the two ids. A direct call to
+  `finance_record_payment_in` gets a unique violation (23505), which the data
+  layer words the same way, unless the two amounts together exceed what is
+  owed, in which case it is FIN05.
 - Stock and revenue per item are not tracked.
 - A contact's Payable counts bills that are pending or overdue, and the
   Payable card is totalled from every open bill, not only the contacts loaded.
+  Receivable is the same for invoices that are sent or overdue.

@@ -125,29 +125,48 @@ export async function listContacts(ctx: FinanceWriteContext): Promise<FinanceCon
 }
 
 export type BillBalance = { supplier_id: string; balance: number; display_status: string };
+export type InvoiceBalance = { customer_id: string; balance: number; display_status: string };
 
-/** Bills read per request; the database caps one response, so we page. */
+/** Bills or invoices read per request; the database caps one response, so we page. */
 export const BILL_PAGE_SIZE = 1000;
+
+/** Every open document of one totals view with its balance as a number, read a page at a time so no figure is cut short. */
+async function listOpenBalances<T extends { balance: number }>(
+  ctx: FinanceWriteContext,
+  view: 'supplier_bill_totals' | 'finance_invoice_totals',
+  columns: string,
+  open: string[],
+): Promise<T[]> {
+  const balances: T[] = [];
+  for (let from = 0; ; from += BILL_PAGE_SIZE) {
+    const { data, error } = await ctx.client
+      .from(view)
+      .select(columns)
+      .eq('org_id', ctx.orgId)
+      .in('display_status', open)
+      .order('id', { ascending: true })
+      .range(from, from + BILL_PAGE_SIZE - 1);
+    if (error) throw error;
+    const page = (data ?? []) as unknown as Record<string, unknown>[];
+    for (const row of page) balances.push({ ...row, balance: Number(row.balance) } as unknown as T);
+    if (page.length < BILL_PAGE_SIZE) return balances;
+  }
+}
 
 /**
  * What is still owed on each supplier bill, for the Payable figures. Reads
  * every open bill, a page at a time, so the money figures are never cut short.
  */
 export async function listBillBalances(ctx: FinanceWriteContext): Promise<BillBalance[]> {
-  const bills: BillBalance[] = [];
-  for (let from = 0; ; from += BILL_PAGE_SIZE) {
-    const { data, error } = await ctx.client
-      .from('supplier_bill_totals')
-      .select('supplier_id, balance, display_status')
-      .eq('org_id', ctx.orgId)
-      .in('display_status', ['pending', 'overdue'])
-      .order('id', { ascending: true })
-      .range(from, from + BILL_PAGE_SIZE - 1);
-    if (error) throw error;
-    const page = data ?? [];
-    for (const row of page) bills.push({ ...row, balance: Number(row.balance) } as BillBalance);
-    if (page.length < BILL_PAGE_SIZE) return bills;
-  }
+  return listOpenBalances<BillBalance>(ctx, 'supplier_bill_totals', 'supplier_id, balance, display_status', ['pending', 'overdue']);
+}
+
+/**
+ * What customers still owe on each posted invoice, for the Receivable
+ * figures: the invoices that are "Sent" or "Overdue", read the same way.
+ */
+export async function listInvoiceBalances(ctx: FinanceWriteContext): Promise<InvoiceBalance[]> {
+  return listOpenBalances<InvoiceBalance>(ctx, 'finance_invoice_totals', 'customer_id, balance, display_status', ['sent', 'overdue']);
 }
 
 export async function createContact(
@@ -221,7 +240,7 @@ export async function deleteContact(
 
 /* ---- what the screen shows ------------------------------------------- */
 
-export type ContactRow = FinanceContact & { payable: number };
+export type ContactRow = FinanceContact & { payable: number; receivable: number };
 
 export type ContactsViewData = {
   stats: { customers: number; suppliers: number; receivable: number; payable: number };
@@ -232,24 +251,35 @@ export type ContactsViewData = {
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /**
- * Receivable stays 0 until invoices exist (the sales stage). Payable counts
- * bills that are pending or overdue; an archived supplier still owes what it owes.
+ * Payable counts bills that are pending or overdue; Receivable counts
+ * invoices that are sent or overdue. An archived contact still owes, and is
+ * still owed, what it was. Both cards are totalled from every open document,
+ * not only the contacts loaded.
  */
-export function contactsView(contacts: FinanceContact[], bills: BillBalance[]): ContactsViewData {
+export function contactsView(
+  contacts: FinanceContact[],
+  bills: BillBalance[],
+  invoices: InvoiceBalance[] = [],
+): ContactsViewData {
   const owed = new Map<string, number>();
   for (const bill of bills) {
     if (bill.display_status !== 'pending' && bill.display_status !== 'overdue') continue;
     owed.set(bill.supplier_id, (owed.get(bill.supplier_id) ?? 0) + bill.balance);
   }
+  const due = new Map<string, number>();
+  for (const invoice of invoices) {
+    if (invoice.display_status !== 'sent' && invoice.display_status !== 'overdue') continue;
+    due.set(invoice.customer_id, (due.get(invoice.customer_id) ?? 0) + invoice.balance);
+  }
   const rows = [...contacts]
     .sort((x, y) => x.name.localeCompare(y.name))
-    .map((c) => ({ ...c, payable: round2(owed.get(c.id) ?? 0) }));
+    .map((c) => ({ ...c, payable: round2(owed.get(c.id) ?? 0), receivable: round2(due.get(c.id) ?? 0) }));
   const active = rows.filter((c) => c.active);
   return {
     stats: {
       customers: active.filter((c) => c.is_customer).length,
       suppliers: active.filter((c) => c.is_supplier).length,
-      receivable: 0,
+      receivable: round2([...due.values()].reduce((sum, v) => sum + v, 0)),
       payable: round2([...owed.values()].reduce((sum, v) => sum + v, 0)),
     },
     topBalances: rows

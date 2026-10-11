@@ -68,7 +68,7 @@ describe('invoice reads', () => {
   const row = (n: number) => ({
     id: `inv-${n}`, invoice_no: `INV-${n}`, customer_id: 'c1', customer_name: 'Aisyah Trading',
     invoice_date: '2026-10-01', due_date: '2026-10-31', total: '132.50', paid: '100.00', balance: '32.50',
-    display_status: 'sent', einvoice_status: 'none',
+    display_status: 'sent', einvoice_status: 'none', einvoice_uuid: null,
   });
 
   it('lists from the totals view, in the caller’s workspace, newest first, with amounts as numbers', async () => {
@@ -83,6 +83,7 @@ describe('invoice reads', () => {
       range: [0, INVOICE_PAGE_SIZE - 1],
     });
     expect(calls[0].columns).toContain('einvoice_status');
+    expect(calls[0].columns).toContain('einvoice_uuid');
   });
   it('reads on past a full page, so a long book is never cut short', async () => {
     const full = Array.from({ length: INVOICE_PAGE_SIZE }, (_, n) => row(n));
@@ -148,8 +149,8 @@ describe('invoice writes', () => {
   });
   it('turns each database refusal into a sentence', async () => {
     const cases: [string, string][] = [
-      ['FIN01', 'This invoice is posted and can no longer be changed. Void it instead.'],
-      ['FIN02', 'This invoice has payments. Void them before voiding it.'],
+      ['FIN01', 'This invoice has been posted or voided, so that can no longer be done.'],
+      ['FIN02', 'This invoice has payments. Void them on Payments In before voiding it.'],
       ['FIN10', 'An invoice needs at least one line with an amount.'],
       ['FIN11', 'That invoice no longer exists.'],
       ['23505', 'That invoice number is already used.'],

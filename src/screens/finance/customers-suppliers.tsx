@@ -10,9 +10,11 @@ import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import {
   type BillBalance,
   type FinanceContact,
+  type InvoiceBalance,
   contactsView,
   listBillBalances,
   listContacts,
+  listInvoiceBalances,
 } from '@/lib/finance/contacts';
 import { createClient } from '@/lib/supabase/server';
 
@@ -47,12 +49,25 @@ const SAMPLE_CONTACTS: FinanceContact[] = [
   sample('5', 'Nurul Boutique', 'customer', 'hello@nurulboutique.my', '+60 11-2345 6781', '202201054321'),
   sample('6', 'Langkawi Fresh', 'supplier', 'billing@langkawifresh.my', '+60 4-966 5566', '201801033221'),
   sample('7', 'Seri Mutiara Enterprise', 'customer', 'admin@serimutiara.my', '+60 19-887 6543', '201701011223', false),
+  // Customers of the Invoices sample that the contacts above did not include.
+  sample('8', 'Nusantara Logistics', 'customer', 'finance@nusantara.my', '+60 3-5121 8801', '201501076544'),
+  sample('9', 'Lim Hardware Sdn Bhd', 'customer', 'accounts@limhardware.com.my', '+60 3-7956 1235', '198701004568'),
 ];
 
 const SAMPLE_BILLS: BillBalance[] = [
   { supplier_id: '2', balance: 2300, display_status: 'pending' },
   { supplier_id: '4', balance: 540, display_status: 'pending' },
   { supplier_id: '6', balance: 95, display_status: 'overdue' },
+];
+
+// The open (sent and overdue) invoices of the Invoices sample, in
+// sales-sample.ts, customer by customer and amount by amount, so both sample
+// screens show the same total receivable.
+const SAMPLE_INVOICES: InvoiceBalance[] = [
+  { customer_id: '3', balance: 2500, display_status: 'sent' }, // Zaki Enterprise, INV-1041 less RM 1,000 paid
+  { customer_id: '5', balance: 8900, display_status: 'overdue' }, // Nurul Boutique, INV-1040
+  { customer_id: '8', balance: 6400, display_status: 'sent' }, // Nusantara Logistics, INV-1037
+  { customer_id: '9', balance: 3180, display_status: 'overdue' }, // Lim Hardware Sdn Bhd, INV-1035
 ];
 
 const ACTIONS: ContactActions = {
@@ -64,11 +79,15 @@ const ACTIONS: ContactActions = {
 
 export default async function CustomersSuppliersScreen() {
   if (!hasSupabaseEnv()) {
-    return <ContactsView view={contactsView(SAMPLE_CONTACTS, SAMPLE_BILLS)} />;
+    return <ContactsView view={contactsView(SAMPLE_CONTACTS, SAMPLE_BILLS, SAMPLE_INVOICES)} />;
   }
   const viewer = await getViewer();
   const ctx = { client: await createClient(), orgId: viewer.orgId };
-  const [contacts, bills] = await Promise.all([listContacts(ctx), listBillBalances(ctx)]);
+  const [contacts, bills, invoices] = await Promise.all([
+    listContacts(ctx),
+    listBillBalances(ctx),
+    listInvoiceBalances(ctx),
+  ]);
   const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
-  return <ContactsView view={contactsView(contacts, bills)} actions={canEdit ? ACTIONS : undefined} />;
+  return <ContactsView view={contactsView(contacts, bills, invoices)} actions={canEdit ? ACTIONS : undefined} />;
 }

@@ -1,10 +1,15 @@
 'use client';
 
 import { useState } from 'react';
-import { Banknote, Download, PieChart, Search, TrendingUp } from 'lucide-react';
+import { Ban, Banknote, Download, PieChart, Plus, Search, TrendingUp } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { AreaTrend, DonutStat, type Series } from '@/components/charts';
+import type { RecordPayment } from '@/components/finance/allocation-form-card';
+import { ConfirmRow } from '@/components/finance/confirm-row';
 import { downloadCsv } from '@/components/finance/download-csv';
+import { ReceiptFormCard } from '@/components/finance/receipt-form-card';
+import { RowMenu, type RowMenuItem } from '@/components/finance/row-menu';
+import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
 import { NoMatchesRow } from '@/components/screen/table-filter';
@@ -17,17 +22,35 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { localIsoDate } from '@/lib/finance/bill-math';
 import { csvFileName } from '@/lib/finance/csv';
 import { rm } from '@/lib/finance/format';
-import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentInRow } from '@/lib/finance/money';
+import type { InvoiceListRow } from '@/lib/finance/invoices';
+import { type FinanceAccount, PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentInRow } from '@/lib/finance/money';
+import { receivableInvoices } from '@/lib/finance/receipt-form';
+import type { FinResult } from '@/lib/finance/result';
 import {
   PAYMENT_IN_STATUS_LABELS,
   type PaymentInMethodFilter,
   type PaymentInStatusFilter,
   type PaymentsInViewData,
+  alsoCoversInvoices,
   filterPaymentsIn,
+  paymentInActions,
   paymentsInCsv,
 } from '@/lib/finance/sales-views';
 import { LATEST_ROWS, displayDate } from '@/lib/finance/view-helpers';
 import { cn } from '@/lib/utils';
+
+export type PaymentInActions = {
+  record: RecordPayment;
+  voidPayment: (input: unknown) => Promise<FinResult<{ id: string }>>;
+};
+
+/** What only a person who may edit is given: the actions, and what the payment form offers. */
+export type PaymentsInWriter = {
+  actions: PaymentInActions;
+  /** Every invoice, to find the ones that can still take a payment. */
+  invoices: InvoiceListRow[];
+  accounts: FinanceAccount[];
+};
 
 const RECEIVED_SERIES: Series[] = [{ key: 'received', label: 'Received (RM k)', color: 'var(--chart-2)' }];
 
@@ -40,34 +63,117 @@ const STATUS_STYLES: Record<PaymentInRow['status'], string> = {
   void: 'bg-muted text-muted-foreground line-through',
 };
 
-const COLUMNS = 8;
+/** One thing open at a time: the payment form, or the void question in one row. */
+type Open = { kind: 'form'; today: string } | { kind: 'void'; row: PaymentInRow } | null;
 
 /**
- * Payments In, read-only: figures, charts and the table, with search,
- * filters, "View all" and Export. Nothing here writes; recording and voiding
- * a payment come with the next stage.
+ * Payments In: figures, charts and the table, with search, filters, "View
+ * all" and Export for everybody. A person who may edit (`writer`) also gets
+ * Record Payment and, on a received payment, Void. There is no edit and no
+ * delete: money in is posted the moment it is recorded.
  */
 export function PaymentsInView({
   rows,
   view,
+  writer,
 }: {
   /** One row per invoice a payment pays, newest first; void ones included. */
   rows: PaymentInRow[];
   view: PaymentsInViewData;
+  writer?: PaymentsInWriter;
 }) {
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<PaymentInStatusFilter>('posted');
   const [method, setMethod] = useState<PaymentInMethodFilter>('all');
   const [showAll, setShowAll] = useState(false);
+  const [open, setOpen] = useState<Open>(null);
+  const confirm = useFinanceAction();
 
   const matching = filterPaymentsIn(rows, query, status, method);
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
+  const columns = writer ? 9 : 8;
+  const asking = open?.kind === 'void' ? open : null;
+  // The form holds what was typed, so nothing else opens over it: it is closed with its own Cancel first.
+  const locked = confirm.pending || open?.kind === 'form';
+  // A row that is gone after a refresh takes its question with it; the message still has to be seen.
+  const askingInView = asking ? shown.some((r) => r.allocation_id === asking.row.allocation_id) : false;
+
+  /** Opens one thing, dropping whatever message the last question left behind. */
+  const ask = (next: Exclude<Open, null>) => {
+    confirm.clear();
+    setOpen(next);
+  };
+  /** Closes whatever is open, and the message that went with it. */
+  const close = () => {
+    confirm.clear();
+    setOpen(null);
+  };
+
+  const menu = (row: PaymentInRow): RowMenuItem[] =>
+    paymentInActions(row).map(() => ({
+      label: 'Void',
+      icon: Ban,
+      destructive: true,
+      opens: true,
+      onSelect: () => ask({ kind: 'void', row }),
+    }));
+
+  const question = (row: PaymentInRow) => {
+    if (!writer || !asking || asking.row.allocation_id !== row.allocation_id) return null;
+    const { actions } = writer;
+    return (
+      <ConfirmRow
+        key={row.allocation_id}
+        colSpan={columns}
+        icon={Ban}
+        label={`Void payment ${row.number ?? ''} from ${row.customer_name}`}
+        confirmLabel="Void payment"
+        pendingLabel="Voiding…"
+        pending={confirm.pending}
+        error={confirm.error}
+        // Sent the payment's own id, so the whole payment is voided whichever of its rows was used.
+        onConfirm={() => confirm.run(() => actions.voidPayment({ id: row.transaction_id }), close)}
+        onCancel={close}
+      >
+        Void payment <span className="font-medium">{row.number}</span> of{' '}
+        <span className="font-medium">{rm(row.transaction_amount)}</span> from{' '}
+        <span className="font-medium">{row.customer_name}</span>? The invoices it paid will owe that amount again. This
+        cannot be undone. {alsoCoversInvoices(rows, row)}
+      </ConfirmRow>
+    );
+  };
 
   return (
     <ScreenContainer className="pb-24 sm:pb-24">
-      <PageHeader title="Payments In" subtitle="Payments received from your customers, Saudara." />
+      <PageHeader
+        title="Payments In"
+        subtitle="Payments received from your customers, Saudara."
+        actions={
+          writer ? (
+            <Button
+              size="sm"
+              aria-expanded={open?.kind === 'form'}
+              disabled={locked}
+              onClick={() => ask({ kind: 'form', today: localIsoDate(new Date()) })}
+            >
+              <Plus className="size-4" />
+              Record Payment
+            </Button>
+          ) : undefined
+        }
+      />
 
       <BentoGrid>
+        {writer && open?.kind === 'form' ? (
+          <ReceiptFormCard
+            receivable={receivableInvoices(writer.invoices, rows)}
+            accounts={writer.accounts}
+            today={open.today}
+            record={writer.actions.record}
+            onClose={close}
+          />
+        ) : null}
+
         {view.stats.map((s, i) => (
           <BentoCard key={s.label} tone={i === 0 ? 'primary' : 'default'} className="col-span-1 md:col-span-3">
             <BentoStat label={s.label} value={s.value} delta={s.delta} deltaTone={s.deltaTone} onPrimary={i === 0} />
@@ -147,6 +253,12 @@ export function PaymentsInView({
               <Download className="size-4" />
               Export
             </Button>
+            {/* The question's own message shows in its row; here only while its row is out of view. */}
+            {confirm.error && asking && !askingInView ? (
+              <p role="alert" className="text-sm text-destructive">
+                {confirm.error}
+              </p>
+            ) : null}
           </div>
           <div className="mt-3 overflow-x-auto">
             <Table>
@@ -160,48 +272,68 @@ export function PaymentsInView({
                   <TableHead>Method</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
                   <TableHead>Status</TableHead>
+                  {writer ? (
+                    <TableHead className="w-10">
+                      <span className="sr-only">Actions</span>
+                    </TableHead>
+                  ) : null}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {shown.length === 0 &&
                   (rows.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={COLUMNS} className="py-8 text-center text-muted-foreground">
-                        No payments yet.
+                      <TableCell colSpan={columns} className="py-8 text-center text-muted-foreground">
+                        No payments yet.{writer ? ' Record one against a posted invoice.' : ''}
                       </TableCell>
                     </TableRow>
                   ) : (
-                    <NoMatchesRow colSpan={COLUMNS} />
+                    <NoMatchesRow colSpan={columns} />
                   ))}
-                {shown.map((p) => (
-                  // A payment split across invoices is several rows; the allocation is what each row is.
-                  <TableRow key={p.allocation_id} className={cn(p.status === 'void' && 'opacity-60')}>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(p.txn_date)}</TableCell>
-                    <TableCell className="whitespace-nowrap font-mono text-xs">{p.number ?? '—'}</TableCell>
-                    <TableCell className="whitespace-nowrap font-medium">{p.customer_name}</TableCell>
-                    <TableCell className="whitespace-nowrap">{p.invoice_no ?? '—'}</TableCell>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">{p.account_name}</TableCell>
-                    <TableCell>
-                      <Badge variant="secondary" className="whitespace-nowrap">
-                        {PAYMENT_METHOD_LABELS[p.method]}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-right tabular-nums">{rm(p.amount)}</TableCell>
-                    <TableCell>
-                      <span className="flex items-center gap-2">
-                        <LiveDot active={p.status === 'posted'} />
-                        <span
-                          className={cn(
-                            'inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold',
-                            STATUS_STYLES[p.status],
-                          )}
-                        >
-                          {PAYMENT_IN_STATUS_LABELS[p.status]}
+                {shown.map((p) => {
+                  const asked = question(p);
+                  if (asked) return asked;
+                  const items = writer ? menu(p) : [];
+                  return (
+                    // A payment split across invoices is several rows; the allocation is what each row is.
+                    <TableRow key={p.allocation_id} className={cn(p.status === 'void' && 'opacity-60')}>
+                      <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(p.txn_date)}</TableCell>
+                      <TableCell className="whitespace-nowrap font-mono text-xs">{p.number ?? '—'}</TableCell>
+                      <TableCell className="whitespace-nowrap font-medium">{p.customer_name}</TableCell>
+                      <TableCell className="whitespace-nowrap">{p.invoice_no ?? '—'}</TableCell>
+                      <TableCell className="whitespace-nowrap text-muted-foreground">{p.account_name}</TableCell>
+                      <TableCell>
+                        <Badge variant="secondary" className="whitespace-nowrap">
+                          {PAYMENT_METHOD_LABELS[p.method]}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums">{rm(p.amount)}</TableCell>
+                      <TableCell>
+                        <span className="flex items-center gap-2">
+                          <LiveDot active={p.status === 'posted'} />
+                          <span
+                            className={cn(
+                              'inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold',
+                              STATUS_STYLES[p.status],
+                            )}
+                          >
+                            {PAYMENT_IN_STATUS_LABELS[p.status]}
+                          </span>
                         </span>
-                      </span>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                      </TableCell>
+                      {writer ? (
+                        <TableCell>
+                          {items.length ? (
+                            // RowMenu has no disabled prop; an inert wrapper keeps its button from being used while an action runs or the form is open.
+                            <span inert={locked} className={cn(locked && 'opacity-50')}>
+                              <RowMenu label={`${p.number ?? 'the payment'} from ${p.customer_name}`} items={items} />
+                            </span>
+                          ) : null}
+                        </TableCell>
+                      ) : null}
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>

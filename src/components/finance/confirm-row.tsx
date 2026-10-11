@@ -50,12 +50,15 @@ export function ConfirmRow({
             onCancel();
           }}
         >
-          <div className="min-w-48 flex-1 text-sm">{children}</div>
-          {error ? (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          ) : null}
+          {/* The refusal sits under the question, so a long sentence cannot squeeze the question into a narrow column. */}
+          <div className="min-w-48 flex-1 space-y-1 text-sm">
+            <div>{children}</div>
+            {error ? (
+              <p role="alert" className="text-destructive">
+                {error}
+              </p>
+            ) : null}
+          </div>
           {/* aria-disabled rather than disabled: a disabled button drops focus to the page, and Escape then no longer reaches this row. */}
           <Button
             type="button"

@@ -13,6 +13,7 @@ import {
   METHOD_COLORS,
   type Stat,
   addDays,
+  alsoCoversSentence,
   count,
   lastMonths,
   monthOf,
@@ -160,6 +161,33 @@ export function invoiceCustomers(invoices: InvoiceListRow[]): { id: string; name
     .sort((x, y) => x.name.localeCompare(y.name) || x.id.localeCompare(y.id));
 }
 
+/**
+ * The customer the filter is on. A refresh can remove the chosen customer
+ * (their last invoice was deleted): the answer is then `all`, and the view
+ * stores that, so the old choice does not come back by itself when that
+ * customer has an invoice again.
+ */
+export function customerChoice(chosen: string, customers: { id: string }[]): string {
+  return chosen === 'all' || customers.some((c) => c.id === chosen) ? chosen : 'all';
+}
+
+export type InvoiceAction = 'edit' | 'post' | 'delete' | 'pay' | 'einvoice' | 'void';
+
+/**
+ * What an invoice's row menu offers, in order: only what the database allows
+ * for its status. A draft is edited, posted or deleted, never voided. A
+ * posted invoice ("Sent", "Overdue", "Paid") has its e-Invois details set and
+ * can be voided, and takes a payment while `canTakePayment`. Voiding one that
+ * has payments is offered and refused with the reason, as on a paid bill. A
+ * void invoice offers nothing.
+ */
+export function invoiceActions(invoice: InvoiceListRow, canTakePayment: boolean): InvoiceAction[] {
+  if (invoice.display_status === 'draft') return ['edit', 'post', 'delete'];
+  if (invoice.display_status === 'void') return [];
+  const pay: InvoiceAction[] = canTakePayment && invoice.display_status !== 'paid' ? ['pay'] : [];
+  return [...pay, 'einvoice', 'void'];
+}
+
 /** The invoices table as a CSV file. Amounts are numbers, so a spreadsheet can add them up. */
 export function invoicesCsv(invoices: InvoiceListRow[]): string {
   return toCsv(
@@ -242,6 +270,24 @@ export function filterPaymentsIn(
       (method === 'all' || p.method === method) &&
       `${p.customer_name} ${p.invoice_no ?? ''} ${p.number ?? ''} ${p.reference ?? ''}`.toLowerCase().includes(q),
   );
+}
+
+/** What a payment-in row's menu offers: a received payment can be voided, and that is all. There is no edit and no delete. */
+export function paymentInActions(row: PaymentInRow): 'void'[] {
+  return row.status === 'posted' ? ['void'] : [];
+}
+
+/** The other invoices the same payment pays, by number. A payment split across invoices shows one row per invoice. */
+export function siblingInvoices(rows: PaymentInRow[], row: PaymentInRow): string[] {
+  return rows
+    .filter((other) => other.transaction_id === row.transaction_id && other.allocation_id !== row.allocation_id)
+    .map((other) => other.invoice_no ?? 'a draft invoice')
+    .sort();
+}
+
+/** "This payment also covers INV-0007 and INV-0008." for a split payment; empty for a payment against one invoice. */
+export function alsoCoversInvoices(rows: PaymentInRow[], row: PaymentInRow): string {
+  return alsoCoversSentence(siblingInvoices(rows, row));
 }
 
 /** The payments table as a CSV file: one line per invoice a payment pays. Amounts are numbers. */

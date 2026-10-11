@@ -13,6 +13,7 @@ import {
   METHOD_COLORS,
   type Stat,
   addDays,
+  alsoCoversSentence,
   count,
   lastMonths,
   monthOf,
@@ -210,10 +211,7 @@ export function siblingBills(rows: PaymentOutRow[], row: PaymentOutRow): string[
 
 /** "This payment also covers BILL-0007 and BILL-0008." for a split payment; empty for a payment against one bill. */
 export function alsoCovers(rows: PaymentOutRow[], row: PaymentOutRow): string {
-  const others = siblingBills(rows, row);
-  if (others.length === 0) return '';
-  const list = others.length === 1 ? others[0] : `${others.slice(0, -1).join(', ')} and ${others[others.length - 1]}`;
-  return `This payment also covers ${list}.`;
+  return alsoCoversSentence(siblingBills(rows, row));
 }
 
 /** The payments table as a CSV file. Amounts are numbers, so a spreadsheet can add them up. */

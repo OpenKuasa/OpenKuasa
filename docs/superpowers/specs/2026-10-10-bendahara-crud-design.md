@@ -195,7 +195,7 @@ with its allocations, and a transfer between accounts each run as one
 | Quotations | New, edit draft, send, mark accepted or declined, convert to invoice, delete draft | Draft, Sent, Accepted, Declined, Expired |
 | Invoices | New with line items, edit draft, post, record payment, issue credit note, set e-Invois status, void, delete draft | Draft, Sent, Paid, Overdue, Void |
 | Credit Notes | New against an invoice, edit draft, issue, refund, void | Draft, Issued, Void |
-| Payments In | Record payment against one or more open invoices, edit, delete | Received |
+| Payments In | Record payment against one or more open invoices; a payment in can only be voided (a posted document is locked: owner's decision, applied in stages 3a and 3b) | Received |
 | Refunds | New against an invoice or credit note with a reason, mark paid out, delete | Pending, Refunded |
 
 - "Sent" means posted. No email is sent.

@@ -33,6 +33,7 @@ const invoice = (i: Partial<InvoiceListRow>): InvoiceListRow => {
     balance: 100,
     display_status: 'sent',
     einvoice_status: 'none',
+    einvoice_uuid: null,
     ...i,
   };
 };

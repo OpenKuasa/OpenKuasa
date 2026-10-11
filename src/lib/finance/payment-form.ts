@@ -1,10 +1,25 @@
 /**
- * The payment form's rules, kept out of the component so they can be tested:
- * which bills can still take a payment, what each defaults to, what is wrong
- * with the form, and what is sent to recordPaymentOutAction. Pure.
+ * The payment-out form's rules, kept out of the component so they can be
+ * tested: which bills can still take a payment, what each defaults to, what
+ * is wrong with the form, and what is sent to recordPaymentOutAction. Pure.
+ * What a payment in shares is in allocation-form.ts.
  */
+import {
+  type AllocationFormKind,
+  amountText,
+  amountsError,
+  amountsTotal,
+  defaultAccount,
+  heldBy,
+  keptOffered,
+  partiesOf,
+  round2,
+  ticked,
+  tickedAll,
+  typedAmounts,
+} from './allocation-form';
 import { BILL_MESSAGES, type BillListRow } from './bills';
-import { typedNumber } from './format';
+import { rm } from './format';
 import {
   type FinanceAccount,
   MONEY_MESSAGES,
@@ -12,6 +27,9 @@ import {
   type PaymentOutRow,
   recordPaymentOutInput,
 } from './money';
+
+// Defined in allocation-form.ts, which the payment-in form shares; kept exported from here because the purchase-side tests import it from this module.
+export { amountText } from './allocation-form';
 
 export type PayableBill = {
   id: string;
@@ -41,23 +59,13 @@ export type PaymentForm = {
   scheduled: boolean;
 };
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
-const sen = (n: number) => Math.round(n * 100);
-
-/** A payment in one of these states has not paid the bill yet, but the database already counts it against the bill. */
-const HOLDING: ReadonlySet<PaymentOutRow['status']> = new Set(['draft', 'pending_approval', 'scheduled']);
-
 /**
  * What payments that have not been paid yet already hold of each bill, to the
  * sen, by bill id. A bill with nothing held is not in the answer. Supplier
  * Bills shows it under a balance, so a bill with no Pay choice says why.
  */
 export function heldByBill(payments: PaymentOutRow[]): Record<string, number> {
-  const held = new Map<string, number>();
-  for (const p of payments) {
-    if (HOLDING.has(p.status)) held.set(p.bill_id, (held.get(p.bill_id) ?? 0) + sen(p.amount));
-  }
-  return Object.fromEntries([...held].filter(([, total]) => total > 0).map(([id, total]) => [id, total / 100]));
+  return heldBy(payments, (p) => p.bill_id);
 }
 
 /**
@@ -94,23 +102,16 @@ export function payableBills(bills: BillListRow[], payments: PaymentOutRow[]): P
 
 /** The suppliers that have at least one bill to pay, by name. */
 export function paymentSuppliers(payable: PayableBill[]): { id: string; name: string; bills: number }[] {
-  const suppliers = new Map<string, { id: string; name: string; bills: number }>();
-  for (const b of payable) {
-    const entry = suppliers.get(b.supplier_id) ?? { id: b.supplier_id, name: b.supplier_name, bills: 0 };
-    entry.bills += 1;
-    suppliers.set(b.supplier_id, entry);
-  }
-  return [...suppliers.values()].sort((x, y) => x.name.localeCompare(y.name));
+  return partiesOf(
+    payable,
+    (b) => b.supplier_id,
+    (b) => b.supplier_name,
+  ).map(({ id, name, open }) => ({ id, name, bills: open }));
 }
 
 /** One supplier's payable bills, the earliest due first. */
 export function billsOf(payable: PayableBill[], supplierId: string): PayableBill[] {
   return payable.filter((b) => b.supplier_id === supplierId);
-}
-
-/** 1200.5 → "1200.50", the way an amount box shows it. */
-export function amountText(amount: number): string {
-  return amount.toFixed(2);
 }
 
 /**
@@ -129,7 +130,7 @@ export function newPaymentForm(
   return {
     supplierId: preselect?.supplierId ?? (suppliers.length === 1 ? suppliers[0].id : ''),
     amounts: bill ? { [bill.id]: amountText(bill.payable) } : {},
-    accountId: (accounts.find((a) => a.kind === 'bank') ?? accounts[0])?.id ?? '',
+    accountId: defaultAccount(accounts),
     date: today,
     method: 'bank_transfer',
     reference: '',
@@ -144,16 +145,13 @@ export function chooseSupplier(form: PaymentForm, supplierId: string): PaymentFo
 }
 
 /** Ticks a bill for all it can still take, or unticks it. */
-export function toggleBill(form: PaymentForm, bill: PayableBill, ticked: boolean): PaymentForm {
-  const amounts = { ...form.amounts };
-  if (ticked) amounts[bill.id] = amountText(bill.payable);
-  else delete amounts[bill.id];
-  return { ...form, amounts };
+export function toggleBill(form: PaymentForm, bill: PayableBill, on: boolean): PaymentForm {
+  return ticked(form, bill, on);
 }
 
 /** Ticks every bill of the chosen supplier, or clears them all. */
-export function toggleAll(form: PaymentForm, bills: PayableBill[], ticked: boolean): PaymentForm {
-  return { ...form, amounts: ticked ? Object.fromEntries(bills.map((b) => [b.id, amountText(b.payable)])) : {} };
+export function toggleAll(form: PaymentForm, bills: PayableBill[], on: boolean): PaymentForm {
+  return tickedAll(form, bills, on);
 }
 
 /**
@@ -162,20 +160,12 @@ export function toggleAll(form: PaymentForm, bills: PayableBill[], ticked: boole
  * stay true to what the person can see. The same form when nothing goes.
  */
 export function keepPayable(form: PaymentForm, bills: PayableBill[]): PaymentForm {
-  const ids = new Set(bills.map((b) => b.id));
-  const entries = Object.entries(form.amounts);
-  const kept = entries.filter(([id]) => ids.has(id));
-  return kept.length === entries.length ? form : { ...form, amounts: Object.fromEntries(kept) };
+  return keptOffered(form, bills);
 }
 
 /** The running total: every ticked amount that is a number above 0. */
 export function paymentTotal(form: PaymentForm): number {
-  let total = 0;
-  for (const text of Object.values(form.amounts)) {
-    const amount = typedNumber(text);
-    if (amount !== null && amount > 0) total += sen(amount);
-  }
-  return total / 100;
+  return amountsTotal(form.amounts);
 }
 
 /** What is sent to recordPaymentOutAction. Amounts are numbers; a box that is not a number goes as NaN and is refused. */
@@ -187,10 +177,7 @@ export function paymentPayload(form: PaymentForm) {
     reference: form.reference,
     notes: form.notes,
     scheduled: form.scheduled,
-    allocations: Object.entries(form.amounts).map(([bill_id, text]) => ({
-      bill_id,
-      amount: typedNumber(text) ?? Number.NaN,
-    })),
+    allocations: typedAmounts(form.amounts).map(({ id, amount }) => ({ bill_id: id, amount })),
   };
 }
 
@@ -200,15 +187,46 @@ export function paymentPayload(form: PaymentForm) {
  */
 export function paymentFormError(form: PaymentForm, payable: PayableBill[]): string | null {
   if (!form.supplierId) return BILL_MESSAGES.supplier;
-  const ticked = Object.entries(form.amounts);
-  if (ticked.length === 0) return MONEY_MESSAGES.bills;
-  for (const [billId, text] of ticked) {
-    const amount = typedNumber(text);
-    if (amount === null || sen(amount) <= 0) return MONEY_MESSAGES.amount;
-    const bill = payable.find((b) => b.id === billId && b.supplier_id === form.supplierId);
-    // A bill that is no longer payable was paid or voided since the form opened.
-    if (!bill || sen(amount) > sen(bill.payable)) return MONEY_MESSAGES.tooMuch;
-  }
+  if (Object.keys(form.amounts).length === 0) return MONEY_MESSAGES.bills;
+  // A bill that is no longer payable was paid or voided since the form opened.
+  const problem = amountsError(form.amounts, billsOf(payable, form.supplierId), MONEY_MESSAGES);
+  if (problem) return problem;
   const parsed = recordPaymentOutInput.safeParse(paymentPayload(form));
   return parsed.success ? null : (parsed.error.issues[0]?.message ?? MONEY_MESSAGES.amount);
 }
+
+/** The payment-out form, as the shared card draws it. */
+export const PAYMENT_OUT_KIND: AllocationFormKind<PaymentForm, PayableBill> = {
+  words: {
+    subtitle: 'Pay a supplier\'s bills, now or later',
+    party: 'supplier',
+    document: 'bill',
+    documents: 'Bills to pay',
+    nothing: 'There is no bill to pay. A bill can be paid once it is posted, and until payments cover it in full.',
+    account: 'Paid from',
+    date: 'Date paid',
+    submit: 'Record payment',
+  },
+  newForm: (payable, accounts, today, preselect) =>
+    newPaymentForm(
+      payable,
+      accounts,
+      today,
+      preselect ? { supplierId: preselect.partyId, billId: preselect.documentId } : undefined,
+    ),
+  partyId: (form) => form.supplierId,
+  chooseParty: chooseSupplier,
+  parties: (payable) => paymentSuppliers(payable).map(({ id, name, bills }) => ({ id, name, open: bills })),
+  documentsOf: billsOf,
+  number: (bill) => bill.bill_no,
+  owed: (bill) =>
+    `${rm(bill.payable)} to pay${bill.scheduled > 0 ? ` · ${rm(bill.scheduled)} of ${rm(bill.balance)} already scheduled` : ''}`,
+  amountLabel: (bill) => `Amount to pay on ${bill.bill_no}`,
+  toggle: toggleBill,
+  toggleAll,
+  keep: keepPayable,
+  total: paymentTotal,
+  error: paymentFormError,
+  payload: paymentPayload,
+  schedule: { is: (form) => form.scheduled, set: (form, scheduled) => ({ ...form, scheduled }) },
+};
