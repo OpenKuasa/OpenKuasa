@@ -37,14 +37,15 @@ async function asMember(needsEmployee: boolean): Promise<Guarded | CapResult<nev
   if (viewer.isDemo) return DEMO;
   const client = await createClient();
   const ctx: PeopleWriteContext = { client, orgId: viewer.orgId };
-  if (!needsEmployee) return { ctx, employeeId: null };
   try {
+    // A real account whose current workspace is the demo is refused too.
     const people = await getPeopleViewer(client, { orgId: viewer.orgId, role: viewer.role });
     if (people.isDemo) return DEMO;
+    if (!needsEmployee) return { ctx, employeeId: null };
     if (!people.employeeId) return NOT_LINKED;
     return { ctx, employeeId: people.employeeId };
   } catch (error) {
-    console.error('[people/leave-actions] could not look up the linked employee:', error instanceof Error ? error.name : 'error');
+    console.error('[people/leave-actions] could not look up the viewer:', error instanceof Error ? error.name : 'error');
     return { ok: false, error: WRITE_FAILED };
   }
 }
@@ -53,8 +54,16 @@ async function asMember(needsEmployee: boolean): Promise<Guarded | CapResult<nev
 async function asAdmin(): Promise<Guarded | CapResult<never>> {
   const viewer = await getViewer();
   if (viewer.isDemo) return DEMO;
+  const client = await createClient();
+  try {
+    const people = await getPeopleViewer(client, { orgId: viewer.orgId, role: viewer.role });
+    if (people.isDemo) return DEMO;
+  } catch (error) {
+    console.error('[people/leave-actions] could not look up the viewer:', error instanceof Error ? error.name : 'error');
+    return { ok: false, error: WRITE_FAILED };
+  }
   if (!can(viewer.role, 'approve')) return FORBIDDEN;
-  return { ctx: { client: await createClient(), orgId: viewer.orgId }, employeeId: null };
+  return { ctx: { client, orgId: viewer.orgId }, employeeId: null };
 }
 
 const refused = (guard: Guarded | CapResult<never>): guard is CapResult<never> => 'ok' in guard;

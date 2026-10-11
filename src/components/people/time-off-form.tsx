@@ -48,6 +48,7 @@ export function TimeOffForm({
             aria-label="Day"
             type="date"
             required
+            disabled={disabled}
             value={values.off_date}
             onChange={(event) => set('off_date', event.target.value)}
           />
@@ -57,6 +58,7 @@ export function TimeOffForm({
             aria-label="From"
             type="time"
             required
+            disabled={disabled}
             value={values.start_time}
             onChange={(event) => set('start_time', event.target.value)}
           />
@@ -66,6 +68,7 @@ export function TimeOffForm({
             aria-label="To"
             type="time"
             required
+            disabled={disabled}
             value={values.end_time}
             onChange={(event) => set('end_time', event.target.value)}
           />
@@ -77,6 +80,7 @@ export function TimeOffForm({
           aria-label="Reason"
           type="text"
           maxLength={500}
+          disabled={disabled}
           value={values.reason}
           onChange={(event) => set('reason', event.target.value)}
         />

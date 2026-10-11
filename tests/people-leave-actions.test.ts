@@ -162,6 +162,12 @@ describe('cancelling', () => {
     expect(ctl.ran).toEqual([]);
   });
 
+  it('refuses a real account whose current workspace is the demo', async () => {
+    ctl.people = { employeeId: null, isHr: true, isDemo: true };
+    for (const [name, action, input] of CANCEL) expect(await action(input), name).toEqual(DEMO);
+    expect(ctl.ran).toEqual([]);
+  });
+
   it('refreshes only on success', async () => {
     await actions.cancelLeaveAction({ id: REQ });
     expect(ctl.revalidated).toEqual(PEOPLE_PATHS);
@@ -191,6 +197,12 @@ describe('owner and admin actions', () => {
     ctl.viewer.isDemo = true;
     for (const [name, action, input] of ADMIN) expect(await action(input), name).toEqual(DEMO);
     ctl.viewer.role = 'viewer';
+    for (const [name, action, input] of ADMIN) expect(await action(input), name).toEqual(DEMO);
+    expect(ctl.ran).toEqual([]);
+  });
+
+  it('refuse a real account whose current workspace is the demo, before any call', async () => {
+    ctl.people = { employeeId: 'emp-own', isHr: true, isDemo: true };
     for (const [name, action, input] of ADMIN) expect(await action(input), name).toEqual(DEMO);
     expect(ctl.ran).toEqual([]);
   });

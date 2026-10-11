@@ -31,6 +31,7 @@ const TUE = `${YEAR}-03-04`;
 
 let owner: { c: SupabaseClient; orgId: string };
 let guest: { c: SupabaseClient; demoId: string };
+let createdEmployeeId: string | null = null;
 
 beforeAll(async () => {
   if (!hasSupabaseEnv) return;
@@ -48,6 +49,8 @@ beforeAll(async () => {
   guest = { c: g, demoId: demo.data as string };
 });
 afterAll(async () => {
+  // Delete the employee (and with it their leave) so only the throwaway workspace is left.
+  if (owner && createdEmployeeId) await owner.c.from('hr_employees').delete().eq('id', createdEmployeeId);
   await owner?.c.auth.signOut();
   await guest?.c.auth.signOut();
 });
@@ -70,6 +73,7 @@ testWithSupabase('an owner applies, approves and cancels leave, and the balance 
   expect(farah.ok, JSON.stringify(farah)).toBe(true);
   if (!farah.ok) return;
   const employee_id = farah.data.id;
+  createdEmployeeId = employee_id;
 
   const preview = await previewLeave(ctx, { employee_id, leave_type: 'annual', start_date: MON, end_date: TUE });
   expect(preview.ok, JSON.stringify(preview)).toBe(true);
@@ -79,7 +83,7 @@ testWithSupabase('an owner applies, approves and cancels leave, and the balance 
   expect(applied.ok, JSON.stringify(applied)).toBe(true);
   if (!applied.ok) return;
   expect(applied.data).toMatchObject({ days: 2, status: 'pending' });
-  expect((await balance(employee_id))?.used_days).toBe(0);
+  expect(Number((await balance(employee_id))?.used_days)).toBe(0);
 
   // The same dates again overlap.
   expect(await applyLeave(ctx, { employee_id, leave_type: 'annual', start_date: TUE, end_date: TUE })).toEqual({

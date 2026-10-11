@@ -4,6 +4,8 @@
  * the employee from the session.
  */
 
+import { isRealDate } from './dates';
+
 export type TimeOffFormValues = {
   off_date: string;
   /** `HH:MM`, as a time input gives it. */
@@ -28,21 +30,13 @@ export const TIME_OFF_FORM_DEFAULTS: TimeOffFormValues = {
 };
 
 const REASON_MAX = 500;
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
-
-/** True for a date that exists: 2026-02-31 matches the pattern but is not a day. */
-function isRealDay(value: string): boolean {
-  if (!DAY.test(value)) return false;
-  const date = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
-}
 
 export function toTimeOffInput(
   values: TimeOffFormValues,
 ): { ok: true; input: TimeOffFormInput } | { ok: false; error: string } {
   if (!values.off_date) return { ok: false, error: 'Choose the day.' };
-  if (!isRealDay(values.off_date)) return { ok: false, error: 'Choose a real date.' };
+  if (!isRealDate(values.off_date)) return { ok: false, error: 'Choose a real date.' };
   if (!values.start_time || !values.end_time) return { ok: false, error: 'Choose the start and end times.' };
   if (!TIME.test(values.start_time) || !TIME.test(values.end_time)) {
     return { ok: false, error: 'Use times like 09:00.' };
