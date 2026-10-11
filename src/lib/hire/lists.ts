@@ -193,8 +193,11 @@ export type BoardModel = {
     name: string;
     /** Live applications in this stage, over all applications (the list below is cut at ROWS_SHOWN). */
     count: number;
-    candidates: ({ id: string; name: string; role: string; source: string; lastTouch: string; active: boolean } & ApplicationState)[];
+    /** `id` is the application's; `candidateId` the person's, for the Edit candidate form. No contact details. */
+    candidates: ({ id: string; candidateId: string; name: string; role: string; source: string; lastTouch: string; active: boolean } & ApplicationState)[];
   }[];
+  /** The jobs a new application can be for (open and paused), by title: the Add Candidate form's picker. */
+  jobs: { id: string; title: string }[];
   total: number;
   hired: number;
   inPipeline: number;
@@ -205,7 +208,7 @@ export type BoardModel = {
 };
 
 export async function buildBoardModel(data: HireData, now: Date): Promise<BoardModel> {
-  const apps = await data.listApplications();
+  const [jobs, apps] = await Promise.all([data.listJobs(), data.listApplications()]);
   const groups = groupByStage(apps);
   const board = boardCounts(apps);
   const funnel = funnelCounts(apps);
@@ -218,6 +221,7 @@ export async function buildBoardModel(data: HireData, now: Date): Promise<BoardM
       count: board[key],
       candidates: groups[key].slice(0, ROWS_SHOWN).map((a) => ({
         id: a.id,
+        candidateId: a.candidate_id,
         name: a.candidate_name,
         role: a.job_title,
         source: a.source ?? 'Unknown',
@@ -226,6 +230,10 @@ export async function buildBoardModel(data: HireData, now: Date): Promise<BoardM
         active: now.getTime() - Date.parse(a.applied_at) < 7 * DAY,
       })),
     })),
+    jobs: jobs
+      .filter((job) => job.status === 'open' || job.status === 'paused')
+      .map((job) => ({ id: job.id, title: job.title }))
+      .sort((a, b) => a.title.localeCompare(b.title)),
     total,
     hired: board.hired,
     inPipeline: total - board.hired,
@@ -279,7 +287,8 @@ export type ApplicationsModel = {
   isEmpty: boolean;
   total: number;
   rows: ({
-    id: string; name: string; job: string; source: string; status: ApplicationLabel; applied: string;
+    /** `id` is the application's; `candidateId` the person's, for the Edit candidate form. */
+    id: string; candidateId: string; name: string; job: string; source: string; status: ApplicationLabel; applied: string;
     details: ApplicationDetails | null;
   } & ApplicationState)[];
   statusMix: { key: ApplicationLabel; value: number }[];
@@ -294,6 +303,7 @@ export async function buildApplicationsModel(data: HireData): Promise<Applicatio
     total: apps.length,
     rows: labelled.slice(0, ROWS_SHOWN).map(({ a, status }) => ({
       id: a.id,
+      candidateId: a.candidate_id,
       name: a.candidate_name,
       job: a.job_title,
       source: a.source ?? 'Unknown',

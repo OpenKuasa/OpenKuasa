@@ -17,6 +17,8 @@ const FOCUS = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:rin
 /** One application, as plain data from the server. */
 export type ApplicationRowData = {
   id: string;
+  /** The person's id, for the Edit candidate form. Their contact details are not here. */
+  candidateId: string;
   name: string;
   job: string;
   source: string;
@@ -183,7 +185,7 @@ export function ApplicationRow({ row, canEdit }: { row: ApplicationRowData; canE
             ) : null}
             <ApplicationActions
               application={{
-                id: row.id, name: row.name, job: row.job,
+                id: row.id, candidateId: row.candidateId, name: row.name, job: row.job,
                 stage: row.stage, outcome: row.outcome, rating: row.rating, rejectReason: row.rejectReason,
               }}
               canEdit={canEdit}

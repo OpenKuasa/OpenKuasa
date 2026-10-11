@@ -25,6 +25,9 @@ vi.mock('@/app/(app)/hire/actions', () => ({
   reopenApplicationAction: mocks.action,
   rateApplicationAction: mocks.action,
   viewCvAction: mocks.action,
+  addCandidateAction: mocks.action,
+  getCandidateAction: mocks.action,
+  updateCandidateAction: mocks.action,
 }));
 // No app router is mounted in a string render: the controls only need one to ask for a refresh after a refusal.
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: mocks.refresh }) }));
@@ -47,8 +50,9 @@ import ApplicationsScreen from '@/screens/hire/applications';
 import CandidatesScreen from '@/screens/hire/candidates';
 
 const ID = '44444444-4444-4444-8444-444444444444';
+const CANDIDATE = '33333333-3333-4333-8333-333333333333';
 const subject = (over: Partial<ApplicationSubject> = {}): ApplicationSubject => ({
-  id: ID, name: 'Aina Rahman', job: 'Barista', stage: 'interview', outcome: 'active', rating: null, rejectReason: null,
+  id: ID, candidateId: CANDIDATE, name: 'Aina Rahman', job: 'Barista', stage: 'interview', outcome: 'active', rating: null, rejectReason: null,
   ...over,
 });
 
@@ -77,7 +81,7 @@ describe('the controls for one application', () => {
   it('offers, at interview: back one stage, every later stage, reject, withdraw and five ratings', () => {
     const html = controls();
     expect(buttons(html)).toEqual([
-      'Back to Screening', 'Move to Offer', 'Move to Hired', 'Mark withdrawn', 'Reject', ...STARS,
+      'Back to Screening', 'Move to Offer', 'Move to Hired', 'Mark withdrawn', 'Reject', ...STARS, 'Edit candidate',
     ]);
     // The stage it is at, in words.
     expect(text(html)).toContain('Stage: Interview');
@@ -98,7 +102,7 @@ describe('the controls for one application', () => {
     expect(text(html)).toContain('Rejected');
     expect(text(html)).toContain('Not enough experience');
     expect(moves(html)).toEqual([]);
-    expect(buttons(html)).toEqual(['Reopen', ...STARS]);
+    expect(buttons(html)).toEqual(['Reopen', ...STARS, 'Edit candidate']);
     expect(buttons(html)).not.toContain('Reject');
     expect(buttons(html)).not.toContain('Mark withdrawn');
   });
@@ -175,12 +179,13 @@ describe('the controls for one application', () => {
   it('states the stage or the outcome in one polite live region, and announces nothing twice', () => {
     const live = (html: string) => [...html.matchAll(/<p\b[^>]*aria-live="polite"[^>]*>([\s\S]*?)<\/p>/g)].map(([, inner]) => text(inner));
     // The same element in both states, so a rejection or a reopen changes its text instead of replacing it.
-    expect(live(controls())).toEqual(['Stage: Interview', 'Not rated']);
+    // The third is where "Changes saved." is said after the candidate was edited: empty until then.
+    expect(live(controls())).toEqual(['Stage: Interview', 'Not rated', '']);
     expect(live(controls({ stage: 'screening', outcome: 'rejected', rejectReason: 'experience', rating: 2 })))
-      .toEqual(['Rejected · Not enough experience', 'Rated 2 out of 5']);
-    expect(live(controls({ outcome: 'withdrawn' }))).toEqual(['Withdrawn · No reason given', 'Not rated']);
+      .toEqual(['Rejected · Not enough experience', 'Rated 2 out of 5', '']);
+    expect(live(controls({ outcome: 'withdrawn' }))).toEqual(['Withdrawn · No reason given', 'Not rated', '']);
     for (const html of [controls(), controls({ outcome: 'rejected' })]) {
-      expect(html.match(/aria-live=/g)).toHaveLength(2);
+      expect(html.match(/aria-live=/g)).toHaveLength(3);
       expect(html).not.toContain('aria-live="assertive"');
     }
   });
@@ -209,7 +214,7 @@ describe('the menu on a board card', () => {
 
 describe('a row of the Applications list', () => {
   const row = (over: Partial<ApplicationRowData> = {}): ApplicationRowData => ({
-    id: ID, name: 'Aina Rahman', job: 'Barista', source: 'LinkedIn', status: 'Shortlisted', statusClass: 'pill', live: true,
+    id: ID, candidateId: CANDIDATE, name: 'Aina Rahman', job: 'Barista', source: 'LinkedIn', status: 'Shortlisted', statusClass: 'pill', live: true,
     applied: '08 Oct 2026', details: null, stage: 'interview', outcome: 'active', rating: null, rejectReason: null,
     ...over,
   });
@@ -254,15 +259,15 @@ describe('the two screens', () => {
   const applications: ApplicationsModel = {
     isEmpty: false, total: 2,
     rows: [
-      { id: ID, name: 'Aina Rahman', job: 'Barista', source: 'LinkedIn', status: 'Shortlisted', applied: '08 Oct 2026', details: null, stage: 'interview', outcome: 'active', rating: 4, rejectReason: null },
-      { id: '55555555-5555-4555-8555-555555555555', name: 'Ben Tan', job: 'Cashier', source: 'Referral', status: 'Rejected', applied: '07 Oct 2026', details: null, stage: 'applied', outcome: 'rejected', rating: null, rejectReason: 'role_filled' },
+      { id: ID, candidateId: CANDIDATE, name: 'Aina Rahman', job: 'Barista', source: 'LinkedIn', status: 'Shortlisted', applied: '08 Oct 2026', details: null, stage: 'interview', outcome: 'active', rating: 4, rejectReason: null },
+      { id: '55555555-5555-4555-8555-555555555555', candidateId: '66666666-6666-4666-8666-666666666666', name: 'Ben Tan', job: 'Cashier', source: 'Referral', status: 'Rejected', applied: '07 Oct 2026', details: null, stage: 'applied', outcome: 'rejected', rating: null, rejectReason: 'role_filled' },
     ],
     statusMix: [{ key: 'New', value: 0 }, { key: 'In review', value: 0 }, { key: 'Shortlisted', value: 1 }, { key: 'Rejected', value: 1 }],
     byJob: [],
   };
-  const card = { id: ID, name: 'Aina Rahman', role: 'Barista', source: 'LinkedIn', lastTouch: '2d ago', active: true, stage: 'interview' as const, outcome: 'active' as const, rating: 4, rejectReason: null };
+  const card = { id: ID, candidateId: CANDIDATE, name: 'Aina Rahman', role: 'Barista', source: 'LinkedIn', lastTouch: '2d ago', active: true, stage: 'interview' as const, outcome: 'active' as const, rating: 4, rejectReason: null };
   const board: BoardModel = {
-    isEmpty: false, total: 1, hired: 0, inPipeline: 1, interviewing: 1, offers: 0, trend: [], funnel: [],
+    isEmpty: false, total: 1, hired: 0, inPipeline: 1, interviewing: 1, offers: 0, trend: [], funnel: [], jobs: [{ id: '22222222-2222-4222-8222-222222222222', title: 'Barista' }],
     stages: (['applied', 'screening', 'interview', 'offer', 'hired'] as const).map((key) => ({
       key, name: key, count: key === 'interview' ? 1 : 0, candidates: key === 'interview' ? [card] : [],
     })),

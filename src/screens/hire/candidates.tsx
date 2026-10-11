@@ -1,4 +1,4 @@
-import { Filter, Plus, Search, Star, TrendingUp, Users } from 'lucide-react';
+import { Filter, Search, Star, TrendingUp, Users } from 'lucide-react';
 import { ScreenContainer } from '@/components/screen/screen-container';
 import { PageHeader } from '@/components/screen/page-header';
 import { BentoGrid, BentoCard, BentoStat } from '@/components/bento/bento';
@@ -18,6 +18,7 @@ import { getViewer } from '@/lib/auth/viewer';
 import { cn } from '@/lib/utils';
 import { buildBoardModel, type BoardModel } from '@/lib/hire/lists';
 import { ApplicationMenu } from '@/screens/hire/application-actions';
+import { AddCandidate } from '@/screens/hire/candidate-forms';
 import { FUNNEL_COLOR, LOAD_FAILED, Muted, loadHire } from '@/screens/hire/parts';
 
 type Candidate = BoardModel['stages'][number]['candidates'][number];
@@ -77,7 +78,7 @@ function CandidateCard({ candidate, canEdit }: { candidate: Candidate; canEdit: 
         {/* Ids, names and where the application stands: nothing else goes to the browser. */}
         <ApplicationMenu
           application={{
-            id: candidate.id, name: candidate.name, job: candidate.role,
+            id: candidate.id, candidateId: candidate.candidateId, name: candidate.name, job: candidate.role,
             stage: candidate.stage, outcome: candidate.outcome, rating: candidate.rating, rejectReason: candidate.rejectReason,
           }}
           canEdit={canEdit}
@@ -122,10 +123,8 @@ export default async function CandidatesScreen() {
             <Button variant="outline" size="sm" disabled title="Coming soon">
               Export
             </Button>
-            <Button size="sm" disabled title="Coming soon">
-              <Plus className="size-4" />
-              Add Candidate
-            </Button>
+            {/* Only for someone who may edit; the action checks again. The jobs it can pick: ids and titles, nothing else. */}
+            {canEdit ? <AddCandidate jobs={model?.jobs ?? []} /> : null}
           </>
         }
       />

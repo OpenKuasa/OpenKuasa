@@ -236,6 +236,43 @@ describe('what a row carries for the controls that change an application', () =>
       }
     }
   });
+
+  it('gives each row and each card the id of its candidate, for the Edit candidate form', async () => {
+    const mixed: HireData = { ...EMPTY, listApplications: async () => [app({}), app({ id: 'a4', candidate_id: 'c2', stage: 'offer' })] };
+    expect((await buildApplicationsModel(mixed)).rows.map((r) => [r.id, r.candidateId])).toEqual([['a1', 'c1'], ['a4', 'c2']]);
+    const cards = (await buildBoardModel(mixed, NOW)).stages.flatMap((s) => s.candidates);
+    expect(cards.map((c) => [c.id, c.candidateId])).toEqual([['a1', 'c1'], ['a4', 'c2']]);
+  });
+});
+
+describe('the jobs the Add Candidate form can pick from', () => {
+  const job = (title: string, status: Job['status']): Job => ({
+    id: `id-${title}`, title, department: null, location: null, employment_type: 'full_time', status,
+    description: null, salary_min_cents: null, salary_max_cents: null, show_salary: false, closes_on: null,
+    work_arrangement: null, headcount: 1,
+    opened_at: '2026-09-01T00:00:00Z', closed_at: null, created_at: '2026-09-01T00:00:00Z',
+  });
+
+  it('lists open and paused jobs only, by title, as an id and a title and nothing else', async () => {
+    const board = await buildBoardModel({
+      ...EMPTY,
+      listJobs: async () => [job('Cashier', 'paused'), job('Writer', 'closed'), job('Lead', 'draft'), job('Barista', 'open')],
+    }, NOW);
+    expect(board.jobs).toEqual([{ id: 'id-Barista', title: 'Barista' }, { id: 'id-Cashier', title: 'Cashier' }]);
+  });
+
+  it('is there for a workspace with no applications, and empty for one with no jobs', async () => {
+    const board = await buildBoardModel({ ...EMPTY, listJobs: async () => [job('Barista', 'open')] }, NOW);
+    expect(board.isEmpty).toBe(true);
+    expect(board.jobs).toEqual([{ id: 'id-Barista', title: 'Barista' }]);
+    expect((await buildBoardModel(EMPTY, NOW)).jobs).toEqual([]);
+  });
+
+  it('counts seven for the sample data: six open and one paused', async () => {
+    const board = await buildBoardModel(data, NOW);
+    expect(board.jobs).toHaveLength(7);
+    expect(board.jobs.map((j) => j.title)).toEqual([...board.jobs.map((j) => j.title)].sort((a, b) => a.localeCompare(b)));
+  });
 });
 
 describe('safeLink', () => {

@@ -15,6 +15,7 @@ import { STAGE_LABEL, stageRank } from '@/lib/hire/applications-view';
 import type { ApplicationState } from '@/lib/hire/lists';
 import type { ApplicationStage } from '@/lib/hire/types';
 import { cn } from '@/lib/utils';
+import { EditCandidateDialog } from '@/screens/hire/candidate-forms';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -28,10 +29,12 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 /**
- * One application, as plain values from the server: its id, the two names the
- * controls say aloud, and where it stands. No storage path, no contact details.
+ * One application, as plain values from the server: its id, its candidate's id
+ * (for the Edit candidate form, which fetches the rest itself when it opens),
+ * the two names the controls say aloud, and where it stands. No storage path,
+ * no contact details.
  */
-export type ApplicationSubject = { id: string; name: string; job: string } & ApplicationState;
+export type ApplicationSubject = { id: string; candidateId: string; name: string; job: string } & ApplicationState;
 
 type CloseOutcome = 'rejected' | 'withdrawn';
 type ActionResult = { ok: true } | { ok: false; error: string };
@@ -303,6 +306,10 @@ export function ApplicationActions({ application, canEdit }: { application: Appl
   const group = useRef<HTMLDivElement>(null);
   /** The button that opened the confirm dialog: focus goes back to it when the dialog closes. */
   const opener = useRef<HTMLElement | null>(null);
+  /** The Edit candidate form: whether it is open, and what it said when it was saved. */
+  const [editing, setEditing] = useState(false);
+  const [edited, setEdited] = useState<string | null>(null);
+  const editButton = useRef<HTMLButtonElement>(null);
   const focusLeft = useKeepFocus(change, application, group);
   if (!canEdit) return null;
 
@@ -441,6 +448,30 @@ export function ApplicationActions({ application, canEdit }: { application: Appl
         )}
       </div>
 
+      {/* The person, not the application: their name and details, behind a form that fetches them when it opens. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t pt-3">
+        <Button
+          ref={editButton}
+          type="button"
+          variant="outline"
+          size="sm"
+          className={cn(TARGET, WAITING)}
+          aria-disabled={waiting}
+          onClick={() => {
+            if (pending) return;
+            // Cleared first, so the same sentence twice in a row is announced twice.
+            setEdited(null);
+            setEditing(true);
+          }}
+        >
+          Edit candidate
+        </Button>
+        {/* Always in the page, so "Changes saved." is announced when it appears. */}
+        <p aria-live="polite" className="text-sm text-muted-foreground">
+          {edited}
+        </p>
+      </div>
+
       {/* While the confirm dialog is open the refusal is shown inside it. */}
       {change.error && change.confirming === null && (
         <p role="alert" className={ALERT_CLASS}>
@@ -452,6 +483,13 @@ export function ApplicationActions({ application, canEdit }: { application: Appl
         application={application}
         change={change}
         returnFocus={() => (opener.current?.isConnected ? opener.current : group.current)?.focus()}
+      />
+      <EditCandidateDialog
+        candidate={{ id: application.candidateId, name: application.name }}
+        open={editing}
+        onClose={() => setEditing(false)}
+        onSaved={setEdited}
+        returnFocus={() => (editButton.current ?? group.current)?.focus()}
       />
     </div>
   );
@@ -492,6 +530,11 @@ export function ApplicationMenu({
   const trigger = useRef<HTMLButtonElement>(null);
   /** Reject or withdraw was chosen: the confirm dialog opens once the menu has closed. */
   const thenAsk = useRef<CloseOutcome | null>(null);
+  /** Edit candidate was chosen: its form opens once the menu has closed. */
+  const thenEdit = useRef(false);
+  const [editing, setEditing] = useState(false);
+  /** What the Edit candidate form said when it was saved. */
+  const [edited, setEdited] = useState<string | null>(null);
   useKeepFocus(change, application, trigger);
   const { id } = application;
   const { pending } = change;
@@ -542,6 +585,14 @@ export function ApplicationMenu({
           align="end"
           className="w-60"
           onCloseAutoFocus={(event) => {
+            if (thenEdit.current) {
+              // The form takes focus now, and gives it back to the menu button when it closes.
+              thenEdit.current = false;
+              event.preventDefault();
+              setEdited(null);
+              setEditing(true);
+              return;
+            }
             const ask = thenAsk.current;
             if (!ask) return;
             // The dialog takes focus now, and gives it back to the menu button when it closes.
@@ -592,6 +643,16 @@ export function ApplicationMenu({
               Clear rating
             </DropdownMenuItem>
           )}
+          <DropdownMenuSeparator />
+          {/* The person, not the application. Nothing is sent by choosing it: the form asks for the details when it opens. */}
+          <DropdownMenuItem
+            className={item}
+            onSelect={() => {
+              thenEdit.current = true;
+            }}
+          >
+            Edit candidate
+          </DropdownMenuItem>
           {outcome === 'active' && (
             <>
               <DropdownMenuSeparator />
@@ -618,8 +679,8 @@ export function ApplicationMenu({
       </DropdownMenu>
 
       {/* Always in the page, so its text is announced when it changes. It takes a line of the card only while there is something to say. */}
-      <p aria-live="polite" className={cn('basis-full text-xs text-muted-foreground', !change.busy && 'sr-only')}>
-        {busyWord(change.busy)}
+      <p aria-live="polite" className={cn('basis-full text-xs text-muted-foreground', !change.busy && !edited && 'sr-only')}>
+        {busyWord(change.busy) || edited}
       </p>
       {change.error && change.confirming === null && (
         <p role="alert" className={cn(ALERT_CLASS, 'basis-full')}>
@@ -635,6 +696,13 @@ export function ApplicationMenu({
           const heading = change.closed.current && columnHeadingId ? document.getElementById(columnHeadingId) : null;
           (heading ?? trigger.current)?.focus();
         }}
+      />
+      <EditCandidateDialog
+        candidate={{ id: application.candidateId, name: application.name }}
+        open={editing}
+        onClose={() => setEditing(false)}
+        onSaved={setEdited}
+        returnFocus={() => trigger.current?.focus()}
       />
     </>
   );
