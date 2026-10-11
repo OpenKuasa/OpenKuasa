@@ -129,6 +129,7 @@ describe('credit note writes', () => {
       ['FIN04', 'A credit note can only go against a posted invoice.'],
       ['FIN05', 'That is more than this invoice has left to credit.'],
       ['FIN11', 'That credit note no longer exists.'],
+      ['FIN14', 'Only an owner or admin can post, pay or void. Ask one of them to do this.'],
       ['23505', 'That credit note number is already used.'],
       ['23503', 'The invoice on this credit note no longer exists.'],
       ['42501', 'You do not have permission to make changes here.'],

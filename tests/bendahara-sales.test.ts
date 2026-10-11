@@ -435,14 +435,17 @@ testWithSupabase('a draft payment that is split cannot be made smaller than its 
     .from('finance_transactions')
     .update({ amount: 1, status: 'posted', number: 'RC-SNEAKY' })
     .eq('id', moneyIn);
-  expect(shrunkAndPosted.error?.code).toBe('FIN03');
+  // Since 20261030123000 a payment's number is not a column a client may write: the update is refused
+  // before any guard looks at it. (It was FIN03.)
+  expect(shrunkAndPosted.error?.code).toBe('42501');
   const turned = await a.c.from('finance_transactions').update({ direction: 'out' }).eq('id', moneyIn);
   expect(turned.error?.code).toBe('FIN04');
   const turnedAndPosted = await a.c
     .from('finance_transactions')
     .update({ direction: 'out', status: 'posted', number: 'RC-SNEAKY' })
     .eq('id', moneyIn);
-  expect(turnedAndPosted.error?.code).toBe('FIN04');
+  // The same: refused for naming the number. (It was FIN04.)
+  expect(turnedAndPosted.error?.code).toBe('42501');
   // Making it larger is fine, and so is bringing it back down to exactly its split.
   const larger = await a.c.from('finance_transactions').update({ amount: 120 }).eq('id', moneyIn);
   expect(larger.error, larger.error?.message).toBeNull();

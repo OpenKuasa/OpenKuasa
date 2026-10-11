@@ -8,7 +8,7 @@ const ACCOUNT = '66666666-6666-4666-8666-666666666666';
 type Answer = { ok: true; data: unknown } | { ok: false; error: string };
 
 const ctl = vi.hoisted(() => ({
-  viewer: { userId: 'u1', orgId: 'org1', role: 'member', isDemo: false } as {
+  viewer: { userId: 'u1', orgId: 'org1', role: 'admin', isDemo: false } as {
     userId: string; orgId: string; role: string; isDemo: boolean;
   },
   /** Every data-layer call, in order: the function, the workspace it was given, and its input. */
@@ -94,7 +94,8 @@ const writes: [string, (input: unknown) => Promise<Answer>, unknown, string][] =
 ];
 
 beforeEach(() => {
-  ctl.viewer = { userId: 'u1', orgId: 'org1', role: 'member', isDemo: false };
+  // An admin: posting, paying and voiding need an owner or admin. What a member may do is at the end.
+  ctl.viewer = { userId: 'u1', orgId: 'org1', role: 'admin', isDemo: false };
   ctl.calls = [];
   ctl.revalidated = [];
   ctl.answers = {};
@@ -230,5 +231,47 @@ describe('getBillAction', () => {
     expect(await actions.getBillAction({ id: BILL })).toEqual({ ok: false, error: 'That could not be loaded. Please try again.' });
     expect(logged).toHaveBeenCalled();
     logged.mockRestore();
+  });
+});
+
+describe('a member, who may write but not sign off', () => {
+  const NEEDS = { ok: false, error: 'Only an owner or admin can post, pay or void. Ask one of them to do this.' };
+  beforeEach(() => {
+    ctl.viewer = { userId: 'u1', orgId: 'org1', role: 'member', isDemo: false };
+  });
+
+  it('saves and deletes drafts, and schedules a payment or deletes a scheduled one', async () => {
+    expect((await actions.saveBillAction(bill)).ok).toBe(true);
+    expect((await actions.deleteBillAction({ id: BILL })).ok).toBe(true);
+    expect((await actions.recordPaymentOutAction({ ...payment, scheduled: true })).ok).toBe(true);
+    expect((await actions.deleteScheduledPaymentAction({ id: TXN })).ok).toBe(true);
+    expect(ctl.calls.map((c) => c.fn)).toEqual(['saveBill', 'deleteBill', 'recordPaymentOut', 'deleteScheduledPayment']);
+  });
+
+  it('is told who can post, pay or void, before anything is read or written', async () => {
+    expect(await actions.postBillAction({ id: BILL })).toEqual(NEEDS);
+    expect(await actions.voidBillAction({ id: BILL })).toEqual(NEEDS);
+    expect(await actions.markPaymentPaidAction({ id: TXN, paid_on: '2026-10-09' })).toEqual(NEEDS);
+    expect(await actions.voidPaymentAction({ id: TXN })).toEqual(NEEDS);
+    expect(ctl.calls).toEqual([]);
+    expect(ctl.revalidated).toEqual([]);
+  });
+
+  it('cannot record a payment as paid now, and is told to schedule it', async () => {
+    expect(await actions.recordPaymentOutAction(payment)).toEqual({
+      ok: false,
+      error: 'Only an owner or admin can record this as paid. Save it as scheduled or pending instead.',
+    });
+    expect(ctl.calls).toEqual([]);
+  });
+
+  it('keeps the draft from "save and post", without trying the post', async () => {
+    expect(await actions.saveAndPostBillAction(bill)).toEqual({
+      ok: false,
+      error: 'Saved as a draft. Only an owner or admin can post or issue it.',
+      draftId: BILL,
+    });
+    expect(ctl.calls.map((c) => c.fn)).toEqual(['saveBill']);
+    expect(ctl.revalidated).toEqual(PATHS);
   });
 });

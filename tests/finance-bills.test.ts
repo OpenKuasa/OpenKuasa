@@ -109,6 +109,7 @@ describe('bill writes', () => {
       ['FIN02', 'This bill has payments. Void or delete them before voiding it.'],
       ['FIN10', 'A bill needs at least one line with an amount.'],
       ['FIN11', 'That bill no longer exists.'],
+      ['FIN14', 'Only an owner or admin can post, pay or void. Ask one of them to do this.'],
       ['23505', 'That bill number is already used.'],
       ['23503', 'The supplier or a product on this bill no longer exists.'],
     ];

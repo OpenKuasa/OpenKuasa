@@ -8,7 +8,7 @@ const ACCOUNT = '77777777-7777-4777-8777-777777777777';
 type Answer = { ok: true; data: unknown } | { ok: false; error: string };
 
 const ctl = vi.hoisted(() => ({
-  viewer: { userId: 'u1', orgId: 'org1', role: 'member', isDemo: false } as {
+  viewer: { userId: 'u1', orgId: 'org1', role: 'admin', isDemo: false } as {
     userId: string; orgId: string; role: string; isDemo: boolean;
   },
   /** Every data-layer call, in order: the function, the workspace it was given, and its input. */
@@ -100,7 +100,8 @@ const writes: [string, (input: unknown) => Promise<Answer>, unknown, string, str
 ];
 
 beforeEach(() => {
-  ctl.viewer = { userId: 'u1', orgId: 'org1', role: 'member', isDemo: false };
+  // An admin: posting, paying and voiding need an owner or admin. What a member may do is at the end.
+  ctl.viewer = { userId: 'u1', orgId: 'org1', role: 'admin', isDemo: false };
   ctl.calls = [];
   ctl.revalidated = [];
   ctl.answers = {};
@@ -298,5 +299,47 @@ describe('saveAndIssueCreditNoteAction', () => {
     expect(await actions.saveAndIssueCreditNoteAction({ ...note, reason: 'because' })).toEqual({ ok: false, error: 'Choose a reason.' });
     expect(ctl.calls).toEqual([]);
     expect(ctl.revalidated).toEqual([]);
+  });
+});
+
+describe('a member, who may write but not sign off', () => {
+  const NEEDS = { ok: false, error: 'Only an owner or admin can post, pay or void. Ask one of them to do this.' };
+  beforeEach(() => {
+    ctl.viewer = { userId: 'u1', orgId: 'org1', role: 'member', isDemo: false };
+  });
+
+  it('saves and deletes a draft credit note, and records or deletes a pending refund', async () => {
+    expect((await actions.saveCreditNoteAction(note)).ok).toBe(true);
+    expect((await actions.deleteCreditNoteAction({ id: NOTE })).ok).toBe(true);
+    expect((await actions.recordRefundAction({ ...refund, scheduled: true })).ok).toBe(true);
+    expect((await actions.deleteRefundAction({ id: TXN })).ok).toBe(true);
+    expect(ctl.calls.map((c) => c.fn)).toEqual(['saveCreditNote', 'deleteCreditNote', 'recordRefund', 'deleteRefund']);
+  });
+
+  it('is told who can issue, pay out or void, before anything is read or written', async () => {
+    expect(await actions.issueCreditNoteAction({ id: NOTE })).toEqual(NEEDS);
+    expect(await actions.voidCreditNoteAction({ id: NOTE })).toEqual(NEEDS);
+    expect(await actions.markRefundPaidAction({ id: TXN, paid_on: '2026-10-09' })).toEqual(NEEDS);
+    expect(await actions.voidRefundAction({ id: TXN })).toEqual(NEEDS);
+    expect(ctl.calls).toEqual([]);
+    expect(ctl.revalidated).toEqual([]);
+  });
+
+  it('cannot record a refund as paid now, and is told to leave it pending', async () => {
+    expect(await actions.recordRefundAction(refund)).toEqual({
+      ok: false,
+      error: 'Only an owner or admin can record this as paid. Save it as scheduled or pending instead.',
+    });
+    expect(ctl.calls).toEqual([]);
+  });
+
+  it('keeps the draft from "save and issue", without trying to issue it', async () => {
+    expect(await actions.saveAndIssueCreditNoteAction(note)).toEqual({
+      ok: false,
+      error: 'Saved as a draft. Only an owner or admin can post or issue it.',
+      draftId: NOTE,
+    });
+    expect(ctl.calls.map((c) => c.fn)).toEqual(['saveCreditNote']);
+    expect(ctl.revalidated).toEqual(CREDIT);
   });
 });

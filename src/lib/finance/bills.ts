@@ -17,6 +17,8 @@ import {
 import {
   type FinResult,
   type FinanceWriteContext,
+  FIN_SIGN_OFF,
+  NEEDS_SIGN_OFF,
   NOT_ALLOWED,
   PG_FORBIDDEN,
   PG_FOREIGN_KEY,
@@ -79,6 +81,7 @@ const REFUSALS: Record<string, string> = {
   [PG_UNIQUE]: M.numberTaken,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_FORBIDDEN]: NOT_ALLOWED,
+  [FIN_SIGN_OFF]: NEEDS_SIGN_OFF,
   [PG_OUT_OF_RANGE]: TOO_LARGE,
 };
 

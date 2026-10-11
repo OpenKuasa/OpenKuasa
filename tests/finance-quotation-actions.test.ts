@@ -310,6 +310,8 @@ describe('getQuotationAction', () => {
 
 describe('the Payments Out actions, now that refunds are money out too', () => {
   it('still refresh the purchase screens only: a refund cannot be reached through them', async () => {
+    // Marking a payment paid and voiding one need an owner or admin.
+    ctl.viewer = { userId: 'u1', orgId: 'org1', role: 'admin', isDemo: false };
     for (const [action, input] of [
       [actions.markPaymentPaidAction, { id: TXN, paid_on: '2026-10-09' }],
       [actions.voidPaymentAction, { id: TXN }],

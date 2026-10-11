@@ -161,6 +161,7 @@ describe('invoice writes', () => {
       ['FIN12', 'This invoice has credit notes. Void them on Credit Notes, or delete the drafts, before voiding it.'],
       ['FIN10', 'An invoice needs at least one line with an amount.'],
       ['FIN11', 'That invoice no longer exists.'],
+      ['FIN14', 'Only an owner or admin can post, pay or void. Ask one of them to do this.'],
       ['23505', 'That invoice number is already used.'],
       ['23503', 'The customer or a product on this invoice no longer exists.'],
       ['42501', 'You do not have permission to make changes here.'],

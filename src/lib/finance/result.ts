@@ -18,6 +18,18 @@ export const READ_FAILED = 'That could not be loaded. Please try again.';
 export const NOT_ALLOWED = 'You do not have permission to make changes here.';
 export const TOO_LARGE = 'That amount is too large.';
 
+/**
+ * The database refused a sign-off: posting a bill or an invoice, issuing a credit note, paying a payment or
+ * a refund, or voiding any of them, by someone who is not an owner or admin (`private.finance_may_sign_off`).
+ */
+export const FIN_SIGN_OFF = 'FIN14';
+export const NEEDS_SIGN_OFF = 'Only an owner or admin can post, pay or void. Ask one of them to do this.';
+/** A form that saves and then posts, sent by someone who may only save. */
+export const DRAFT_NEEDS_SIGN_OFF = 'Saved as a draft. Only an owner or admin can post or issue it.';
+/** A payment or refund recorded as paid now by someone who may only schedule one. */
+export const PAID_NOW_NEEDS_SIGN_OFF =
+  'Only an owner or admin can record this as paid. Save it as scheduled or pending instead.';
+
 export function pgCode(error: unknown): string | undefined {
   return (error as { code?: string } | null)?.code;
 }

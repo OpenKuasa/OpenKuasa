@@ -87,17 +87,40 @@ import {
   sendQuotation,
 } from '@/lib/finance/quotations';
 import { deleteRefund, markRefundPaid, recordRefund, recordRefundInput, voidRefund } from '@/lib/finance/refunds';
-import { type FinResult, type FinanceWriteContext, NOT_ALLOWED, READ_FAILED } from '@/lib/finance/result';
+import {
+  DRAFT_NEEDS_SIGN_OFF,
+  type FinResult,
+  type FinanceWriteContext,
+  NEEDS_SIGN_OFF,
+  NOT_ALLOWED,
+  PAID_NOW_NEEDS_SIGN_OFF,
+  READ_FAILED,
+} from '@/lib/finance/result';
 import { createClient } from '@/lib/supabase/server';
 
 const FORBIDDEN: FinResult<never> = { ok: false, error: NOT_ALLOWED };
 
-/** A write context, or null when the viewer may not change this workspace's data. */
-async function writeCtx(): Promise<FinanceWriteContext | null> {
+/**
+ * Who is writing, or null when the viewer may not change this workspace's data. `signOff` says whether they may
+ * also post, pay and void (an owner or admin). The database asks the same question again, in a trigger, and
+ * its answer is the one that counts; asking here first gives a sentence without a round trip.
+ */
+async function writeAccess(): Promise<{ ctx: FinanceWriteContext; signOff: boolean } | null> {
   const viewer = await getViewer();
   if (viewer.isDemo || !can(viewer.role, 'edit-data')) return null;
-  return { client: await createClient(), orgId: viewer.orgId };
+  return {
+    ctx: { client: await createClient(), orgId: viewer.orgId },
+    signOff: can(viewer.role, 'sign-off-finance'),
+  };
 }
+
+/** A write context, or null when the viewer may not change this workspace's data. */
+async function writeCtx(): Promise<FinanceWriteContext | null> {
+  return (await writeAccess())?.ctx ?? null;
+}
+
+/** An action that posts, pays or voids: an owner or admin only. */
+const SIGN_OFF = { signOff: true } as const;
 
 function refresh(paths: string[]) {
   for (const path of paths) revalidatePath(path);
@@ -113,18 +136,25 @@ function firstMessage(error: { issues: { message: string }[] }): string {
  * screens are refreshed after every attempt that reached the database, refused
  * or not: when someone else changed or removed the record, the page behind the
  * message shows it as it now is.
+ *
+ * `needs.signOff` marks an action that posts, pays or voids. Someone who may write but not sign off is told
+ * so before anything is read or written. `needs.paidNow` is for the two forms that either pay now or
+ * schedule: it is asked of the parsed input, and only paying now needs the sign-off.
  */
 async function run<I, O>(
   paths: string[],
   schema: ZodType<I>,
   input: unknown,
   fn: (ctx: FinanceWriteContext, parsed: I) => Promise<FinResult<O>>,
+  needs: { signOff?: boolean; paidNow?: (parsed: I) => boolean } = {},
 ): Promise<FinResult<O>> {
-  const ctx = await writeCtx();
-  if (!ctx) return FORBIDDEN;
+  const access = await writeAccess();
+  if (!access) return FORBIDDEN;
+  if (needs.signOff && !access.signOff) return { ok: false, error: NEEDS_SIGN_OFF };
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { ok: false, error: firstMessage(parsed.error) };
-  const result = await fn(ctx, parsed.data);
+  if (needs.paidNow?.(parsed.data) && !access.signOff) return { ok: false, error: PAID_NOW_NEEDS_SIGN_OFF };
+  const result = await fn(access.ctx, parsed.data);
   refresh(paths);
   return result;
 }
@@ -195,6 +225,10 @@ const CREDIT_NOTE_DRAFT_PATHS = ['/finance/credit-notes'];
  * Saves a document as a draft, then posts it. When the save works and the
  * post is refused, the draft stays: the answer carries the post's message and
  * the draft's id, so the form goes on editing that draft.
+ *
+ * With `postNeedsSignOff`, someone who may write but not sign off gets the same
+ * outcome without the post being tried: the draft is saved, and the answer
+ * says who can post it.
  */
 async function saveThenPost<I, O>(
   paths: string[],
@@ -202,15 +236,21 @@ async function saveThenPost<I, O>(
   input: unknown,
   save: (ctx: FinanceWriteContext, parsed: I) => Promise<FinResult<{ id: string }>>,
   post: (ctx: FinanceWriteContext, saved: { id: string }) => Promise<FinResult<O>>,
+  postNeedsSignOff = false,
 ): Promise<FinResult<O> & { draftId?: string }> {
-  const ctx = await writeCtx();
-  if (!ctx) return FORBIDDEN;
+  const access = await writeAccess();
+  if (!access) return FORBIDDEN;
+  const { ctx } = access;
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { ok: false, error: firstMessage(parsed.error) };
   const saved = await save(ctx, parsed.data);
   if (!saved.ok) {
     refresh(paths);
     return saved;
+  }
+  if (postNeedsSignOff && !access.signOff) {
+    refresh(paths);
+    return { ok: false, error: DRAFT_NEEDS_SIGN_OFF, draftId: saved.data.id };
   }
   const posted = await post(ctx, { id: saved.data.id });
   refresh(paths);
@@ -277,10 +317,10 @@ export async function saveBillAction(input: unknown) {
   return run(PURCHASE_PATHS, saveBillInput, input, saveBill);
 }
 export async function postBillAction(input: unknown) {
-  return run(PURCHASE_PATHS, billIdInput, input, postBill);
+  return run(PURCHASE_PATHS, billIdInput, input, postBill, SIGN_OFF);
 }
 export async function voidBillAction(input: unknown) {
-  return run(PURCHASE_PATHS, billIdInput, input, voidBill);
+  return run(PURCHASE_PATHS, billIdInput, input, voidBill, SIGN_OFF);
 }
 export async function deleteBillAction(input: unknown) {
   return run(PURCHASE_PATHS, billIdInput, input, deleteBill);
@@ -292,7 +332,7 @@ export async function deleteBillAction(input: unknown) {
  * draft's id, so the form goes on editing that draft.
  */
 export async function saveAndPostBillAction(input: unknown): Promise<SaveAndPostResult> {
-  return saveThenPost(PURCHASE_PATHS, saveBillInput, input, saveBill, postBill);
+  return saveThenPost(PURCHASE_PATHS, saveBillInput, input, saveBill, postBill, true);
 }
 
 /**
@@ -307,13 +347,13 @@ export async function getBillAction(input: unknown): Promise<FinResult<BillDetai
 /* ---- payments out ------------------------------------------------------ */
 
 export async function recordPaymentOutAction(input: unknown) {
-  return run(PURCHASE_PATHS, recordPaymentOutInput, input, recordPaymentOut);
+  return run(PURCHASE_PATHS, recordPaymentOutInput, input, recordPaymentOut, { paidNow: (payment) => !payment.scheduled });
 }
 export async function markPaymentPaidAction(input: unknown) {
-  return run(PURCHASE_PATHS, markPaymentPaidInput, input, markPaymentPaid);
+  return run(PURCHASE_PATHS, markPaymentPaidInput, input, markPaymentPaid, SIGN_OFF);
 }
 export async function voidPaymentAction(input: unknown) {
-  return run(PURCHASE_PATHS, paymentIdInput, input, voidPayment);
+  return run(PURCHASE_PATHS, paymentIdInput, input, voidPayment, SIGN_OFF);
 }
 export async function deleteScheduledPaymentAction(input: unknown) {
   return run(PURCHASE_PATHS, paymentIdInput, input, deleteScheduledPayment);
@@ -325,10 +365,10 @@ export async function saveInvoiceAction(input: unknown) {
   return run(SALES_PATHS, saveInvoiceInput, input, saveInvoice);
 }
 export async function postInvoiceAction(input: unknown) {
-  return run(SALES_PATHS, invoiceIdInput, input, postInvoice);
+  return run(SALES_PATHS, invoiceIdInput, input, postInvoice, SIGN_OFF);
 }
 export async function voidInvoiceAction(input: unknown) {
-  return run(SALES_PATHS, invoiceIdInput, input, voidInvoice);
+  return run(SALES_PATHS, invoiceIdInput, input, voidInvoice, SIGN_OFF);
 }
 export async function deleteInvoiceAction(input: unknown) {
   return run(SALES_PATHS, invoiceIdInput, input, deleteInvoice);
@@ -340,7 +380,7 @@ export async function setEInvoiceAction(input: unknown) {
 
 /** Saves the invoice as a draft, then posts it; see `saveThenPost`. */
 export async function saveAndPostInvoiceAction(input: unknown): Promise<SaveAndPostInvoiceResult> {
-  return saveThenPost(SALES_PATHS, saveInvoiceInput, input, saveInvoice, postInvoice);
+  return saveThenPost(SALES_PATHS, saveInvoiceInput, input, saveInvoice, postInvoice, true);
 }
 
 /** One draft invoice with its lines, for the Edit form; see `draftForEditing`. */
@@ -390,11 +430,11 @@ export async function saveCreditNoteAction(input: unknown) {
 }
 /** Issues a draft: it gets its number and is locked, and its invoice owes that much less. */
 export async function issueCreditNoteAction(input: unknown) {
-  return run(CREDIT_PATHS, creditNoteIdInput, input, issueCreditNote);
+  return run(CREDIT_PATHS, creditNoteIdInput, input, issueCreditNote, SIGN_OFF);
 }
 /** Voids an issued credit note: its invoice owes the amount again. Refused while a refund depends on it. */
 export async function voidCreditNoteAction(input: unknown) {
-  return run(CREDIT_PATHS, creditNoteIdInput, input, voidCreditNote);
+  return run(CREDIT_PATHS, creditNoteIdInput, input, voidCreditNote, SIGN_OFF);
 }
 export async function deleteCreditNoteAction(input: unknown) {
   return run(CREDIT_NOTE_DRAFT_PATHS, creditNoteIdInput, input, deleteCreditNote);
@@ -402,22 +442,22 @@ export async function deleteCreditNoteAction(input: unknown) {
 
 /** Saves the credit note as a draft, then issues it; see `saveThenPost`. */
 export async function saveAndIssueCreditNoteAction(input: unknown): Promise<SaveAndIssueCreditNoteResult> {
-  return saveThenPost(CREDIT_PATHS, saveCreditNoteInput, input, saveCreditNote, issueCreditNote);
+  return saveThenPost(CREDIT_PATHS, saveCreditNoteInput, input, saveCreditNote, issueCreditNote, true);
 }
 
 /* ---- refunds ----------------------------------------------------------- */
 
 /** Records a refund against one invoice or one credit note, paid out now or left pending. */
 export async function recordRefundAction(input: unknown) {
-  return run(CREDIT_PATHS, recordRefundInput, input, recordRefund);
+  return run(CREDIT_PATHS, recordRefundInput, input, recordRefund, { paidNow: (refund) => !refund.scheduled });
 }
 /** A pending refund has been paid out. The database looks at the customer's credit again and may refuse. */
 export async function markRefundPaidAction(input: unknown) {
-  return run(CREDIT_PATHS, markPaymentPaidInput, input, markRefundPaid);
+  return run(CREDIT_PATHS, markPaymentPaidInput, input, markRefundPaid, SIGN_OFF);
 }
 /** Voids a refund that was paid out: the customer is in credit by that amount again. */
 export async function voidRefundAction(input: unknown) {
-  return run(CREDIT_PATHS, paymentIdInput, input, voidRefund);
+  return run(CREDIT_PATHS, paymentIdInput, input, voidRefund, SIGN_OFF);
 }
 export async function deleteRefundAction(input: unknown) {
   return run(CREDIT_PATHS, paymentIdInput, input, deleteRefund);
@@ -426,9 +466,9 @@ export async function deleteRefundAction(input: unknown) {
 /* ---- payments in ------------------------------------------------------- */
 
 export async function recordPaymentInAction(input: unknown) {
-  return run(SALES_PATHS, recordPaymentInInput, input, recordPaymentIn);
+  return run(SALES_PATHS, recordPaymentInInput, input, recordPaymentIn, SIGN_OFF);
 }
 /** Voiding money in refreshes the sales screens, and answers in the sentences of a payment in. */
 export async function voidPaymentInAction(input: unknown) {
-  return run(SALES_PATHS, paymentIdInput, input, voidPaymentIn);
+  return run(SALES_PATHS, paymentIdInput, input, voidPaymentIn, SIGN_OFF);
 }

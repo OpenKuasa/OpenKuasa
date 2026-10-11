@@ -118,6 +118,7 @@ describe('payment writes', () => {
       ['FIN06', 'One payment can only pay bills from one supplier.'],
       ['FIN09', 'This payment is posted and can no longer be changed. Void it instead.'],
       ['FIN11', 'That payment no longer exists.'],
+      ['FIN14', 'Only an owner or admin can post, pay or void. Ask one of them to do this.'],
       ['23503', 'The account or a bill on this payment no longer exists.'],
     ];
     for (const [code, message] of cases) {

@@ -1,3 +1,10 @@
+-- NOTE (20261030123000_finance_write_guards): this script was written before
+-- that migration and has not been brought up to date with it. Once it is
+-- applied, every statement here that writes a payment's `number` straight to
+-- finance_transactions as a signed-in person answers 42501 (the column is no
+-- longer writable) in place of the code expected below, and anything the
+-- editor (role `member`) posts, pays or voids answers FIN14. Revise those
+-- expectations before reading a failure here as a regression.
 -- Bendahara sales follow-ons check. Run it after
 -- 20261022100000_bendahara_sales_followons.sql and
 -- 20261027100000_bendahara_convert_quotation_date.sql, in the same transaction

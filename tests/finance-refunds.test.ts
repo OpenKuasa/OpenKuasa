@@ -149,6 +149,7 @@ describe('refund writes', () => {
       ['FIN06', 'The invoice or credit note for this refund no longer exists.'],
       ['FIN09', 'That cannot be done to this refund as it now stands. It may have been paid out or voided since this page was loaded.'],
       ['FIN11', 'That refund no longer exists.'],
+      ['FIN14', 'Only an owner or admin can post, pay or void. Ask one of them to do this.'],
       ['23503', 'The account on this refund no longer exists.'],
       ['42501', 'You do not have permission to make changes here.'],
       ['22003', 'That amount is too large.'],
