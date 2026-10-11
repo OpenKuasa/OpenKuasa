@@ -180,6 +180,9 @@ describe('Lekiu attendance migrations', () => {
     const correct = fn(text, 'public.hr_correct_attendance').body;
     expect(correct).toContain("(p_work_date + p_clock_in) at time zone 'Asia/Kuala_Lumpur'");
     expect(correct).toContain("(p_work_date + p_clock_out) at time zone 'Asia/Kuala_Lumpur'");
+    // Neither time may be 24:00, nor a moment that has not happened yet.
+    expect(correct).toContain("p_clock_in >= time '24:00' or p_clock_out >= time '24:00'");
+    expect(correct).toContain("if time_in > now() or time_out > now() then raise exception 'ATT_BAD_INPUT'; end if;");
   });
 
   test.each([...CLOCK, 'hr_correct_attendance'])(
@@ -227,9 +230,9 @@ describe('Lekiu attendance migrations', () => {
     expect(body).toContain('corrected_by = null, corrected_at = null, correction_note = null');
   });
 
-  test('clocking out needs a clock-in that has happened and no clock-out yet', () => {
+  test('clocking out needs a clock-in and no clock-out yet', () => {
     const { body } = fn(writes(), 'public.hr_clock_out');
-    const notIn = body.indexOf("if saved.clock_in is null or saved.clock_in > now() then raise exception 'ATT_NOT_IN'; end if;");
+    const notIn = body.indexOf("if saved.clock_in is null then raise exception 'ATT_NOT_IN'; end if;");
     const already = body.indexOf("if saved.clock_out is not null then raise exception 'ATT_ALREADY_OUT'; end if;");
     expect(notIn).toBeGreaterThan(-1);
     expect(already).toBeGreaterThan(notIn);
@@ -289,6 +292,9 @@ describe('Lekiu attendance migrations', () => {
     expect(taken).toBeGreaterThan(lock);
     expect(firstWrite(body)).toBeGreaterThan(taken);
     expect(body).toContain('where h.org_id = p_org and h.holiday_date = p_holiday_date and h.id is distinct from p_id');
+    // An edit that finds its holiday gone (removed in the meantime) says so.
+    const edit = body.indexOf('update public.hr_public_holidays h');
+    expect(body.indexOf("if not found then raise exception 'ATT_NOT_FOUND'; end if;")).toBeGreaterThan(edit);
     // An edit must be of a holiday of that workspace.
     expect(body).toContain('where h.id = p_id and h.org_id = p_org');
     // Editing changes the name and the date; scope and state stay as they are.
@@ -297,17 +303,17 @@ describe('Lekiu attendance migrations', () => {
     expect(body).not.toMatch(/\b(scope|state)\b/);
   });
 
-  test('saving the settings touches three columns and nothing else', () => {
+  test('saving the settings touches the three columns and when the row was updated, nothing else', () => {
     const { body } = fn(writes(), 'public.hr_save_attendance_settings');
     expect(body).toContain(
       'insert into public.hr_settings (org_id, work_week, work_start_time, late_grace_minutes)\n'
         + '  values (p_org, week, p_work_start_time, p_late_grace_minutes)\n'
         + '  on conflict (org_id) do update\n'
         + '    set work_week = excluded.work_week, work_start_time = excluded.work_start_time,\n'
-        + '        late_grace_minutes = excluded.late_grace_minutes\n'
+        + '        late_grace_minutes = excluded.late_grace_minutes, updated_at = now()\n'
         + '  returning * into saved;',
     );
-    expect(body).not.toMatch(/overtime_rates|notifications|default_\w+_leave_days|updated_at/);
+    expect(body).not.toMatch(/overtime_rates|notifications|default_\w+_leave_days|created_at/);
     expect(body).toContain('p_late_grace_minutes not between 0 and 240');
   });
 
@@ -359,14 +365,15 @@ describe('Lekiu attendance migrations', () => {
   test('present or late is decided in one place, on the clock in Malaysia', () => {
     const text = writes();
     const { body } = fn(text, 'private.hr_attendance_status');
-    expect(body).toContain("(p_at at time zone 'Asia/Kuala_Lumpur')::time");
+    // Judged to the minute: the seconds of the clock-in are dropped before the comparison.
+    expect(body).toContain("clock time := date_trunc('minute', p_at at time zone 'Asia/Kuala_Lumpur')::time;");
+    expect(body.match(/p_at/g)).toHaveLength(1);
     expect(body).toContain("coalesce(start_time, time '09:00')");
     expect(body).toContain('coalesce(grace, 15)');
     expect(body).toContain('extract(epoch from clock) <= extract(epoch from start_time) + grace * 60');
     // Defined once, called once: by clock-in.
     expect(text.match(/private\.hr_attendance_status\(/g)).toHaveLength(3);
     expect(fn(text, 'public.hr_clock_in').body).toContain('private.hr_attendance_status(org, now())');
-    expect(text.match(/late_grace_minutes/g)?.length).toBeGreaterThan(0);
     expect(text.match(/grace \* 60/g)).toHaveLength(1);
   });
 
@@ -382,8 +389,17 @@ describe('Lekiu attendance migrations', () => {
     expect(body).toContain('where not private.is_demo_org(e.org_id)');
     expect(body).toContain('order by e.org_id');
     // Active employees, from the day they joined and the day their record was made, up to yesterday.
-    expect(body).toContain("where e.org_id = o.org_id and e.status = 'active'");
-    expect(body).toContain("greatest(e.join_date, (e.created_at at time zone 'Asia/Kuala_Lumpur')::date)");
+    // A workspace is closed only from its first clocked or corrected day, found
+    // with one lookup per workspace; one with no such day is skipped.
+    expect(body).toContain(
+      'select min(a.work_date) into started from public.hr_attendance_days a\n'
+        + '    where a.org_id = o.org_id and (a.clock_in is not null or a.corrected_at is not null);\n'
+        + '    continue when started is null;',
+    );
+    expect(body.indexOf('continue when started is null;')).toBeLessThan(body.indexOf('delete from public.hr_attendance_days'));
+    // Active employees with a linked account, from that day, the day they joined and the day their record was made, up to yesterday.
+    expect(body).toContain("where e.org_id = o.org_id and e.status = 'active' and e.user_id is not null");
+    expect(body).toContain("greatest(started, e.join_date, (e.created_at at time zone 'Asia/Kuala_Lumpur')::date)");
     expect(body).toContain('generate_series(0, today - 1 - first_day)');
     // Both statements leave alone any day with a clock-in or a correction.
     const guard = 'clock_in is null and a.corrected_at is null';

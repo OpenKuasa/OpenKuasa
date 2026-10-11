@@ -95,16 +95,19 @@ returns boolean language sql stable set search_path = public as $$
 $$;
 revoke all on function private.hr_on_approved_leave(uuid, date, boolean) from public, anon, authenticated;
 
--- Present or late, decided in this one place: present when the clock in
--- Malaysia at that moment is at or before the workspace's start time plus its
--- grace period, to the second; late after that. 09:00 and 15 minutes when the
--- workspace has no settings row. The two sides are compared as seconds since
--- midnight, so a start time late in the evening plus a long grace does not
--- wrap round to the small hours.
+-- Present or late, decided in this one place, to the minute: present when
+-- the clock in Malaysia at that moment, with its seconds dropped, is at or
+-- before the workspace's start time plus its grace period; late after that.
+-- With 09:00 and 15 minutes, 09:15:59 is present and 09:16:00 is late, so the
+-- answer always agrees with the time a screen shows. (The clock-in that is
+-- saved keeps its seconds.) 09:00 and 15 minutes when the workspace has no
+-- settings row. The two sides are compared as seconds since midnight, so a
+-- start time late in the evening plus a long grace does not wrap round to the
+-- small hours.
 create or replace function private.hr_attendance_status(p_org uuid, p_at timestamptz)
 returns text language plpgsql stable set search_path = public as $$
 declare
-  clock time := (p_at at time zone 'Asia/Kuala_Lumpur')::time;
+  clock time := date_trunc('minute', p_at at time zone 'Asia/Kuala_Lumpur')::time;
   start_time time;
   grace int;
 begin
@@ -202,8 +205,7 @@ grant execute on function public.hr_clock_in(uuid) to authenticated;
 
 -- ---- clock out ---------------------------------------------------------------
 -- Today only, for the caller's own employee record only. Needs today's
--- clock-in and no clock-out yet. A clock-in an owner or admin recorded for
--- later today has not happened yet, so it is no clock-in to clock out of.
+-- clock-in and no clock-out yet.
 
 create or replace function public.hr_clock_out(p_employee uuid)
 returns jsonb language plpgsql security definer set search_path = public as $$
@@ -217,7 +219,7 @@ begin
   perform 1 from public.hr_employees e where e.id = p_employee for no key update;
   select a.* into saved from public.hr_attendance_days a
   where a.employee_id = p_employee and a.work_date = today;
-  if saved.clock_in is null or saved.clock_in > now() then raise exception 'ATT_NOT_IN'; end if;
+  if saved.clock_in is null then raise exception 'ATT_NOT_IN'; end if;
   if saved.clock_out is not null then raise exception 'ATT_ALREADY_OUT'; end if;
 
   update public.hr_attendance_days a set clock_out = now()
@@ -233,8 +235,10 @@ grant execute on function public.hr_clock_out(uuid) to authenticated;
 -- Any date from 2000 up to today in Malaysia, a working day or not, for an
 -- active or an inactive employee. Present and late need a clock-in time and
 -- may have a clock-out after it; absent and on leave take no times. The times
--- are read as Malaysia time on that date. Whatever row the day had (system,
--- clocked or corrected) is replaced.
+-- are read as Malaysia time on that date; neither may be 24:00, and for today
+-- neither may be later than now, so a day is never left clocked in or out at
+-- a time that has not happened. Whatever row the day had (system, clocked or
+-- corrected) is replaced.
 
 create or replace function public.hr_correct_attendance(
   p_employee uuid, p_work_date date, p_status text, p_clock_in time, p_clock_out time, p_note text)
@@ -258,9 +262,13 @@ begin
     raise exception 'ATT_BAD_INPUT';
   end if;
   if p_status in ('present','late') then
-    if p_clock_in is null or p_clock_out <= p_clock_in then raise exception 'ATT_BAD_INPUT'; end if;
+    if p_clock_in is null or p_clock_in >= time '24:00' or p_clock_out >= time '24:00'
+       or p_clock_out <= p_clock_in then
+      raise exception 'ATT_BAD_INPUT';
+    end if;
     time_in := (p_work_date + p_clock_in) at time zone 'Asia/Kuala_Lumpur';
     time_out := (p_work_date + p_clock_out) at time zone 'Asia/Kuala_Lumpur';
+    if time_in > now() or time_out > now() then raise exception 'ATT_BAD_INPUT'; end if;
   elsif p_clock_in is not null or p_clock_out is not null then
     raise exception 'ATT_BAD_INPUT';
   end if;
@@ -325,6 +333,7 @@ begin
     set name = title, holiday_date = p_holiday_date
     where h.id = p_id and h.org_id = p_org
     returning h.* into saved;
+    if not found then raise exception 'ATT_NOT_FOUND'; end if;
   end if;
 
   return jsonb_build_object('id', saved.id, 'name', saved.name, 'holiday_date', saved.holiday_date);
@@ -358,7 +367,8 @@ grant execute on function public.hr_delete_holiday(uuid) to authenticated;
 -- Owners and admins only. The work week is a list of one to seven different
 -- days, each one of mon tue wed thu fri sat sun; it is stored in that order.
 -- A workspace with no settings row gets one, with the table's defaults for
--- everything else; an existing row keeps everything else it has.
+-- everything else; an existing row keeps everything else it has, and says
+-- when it was last updated (the table has no trigger for that).
 
 create or replace function public.hr_save_attendance_settings(
   p_org uuid, p_work_week jsonb, p_work_start_time time, p_late_grace_minutes int)
@@ -386,7 +396,7 @@ begin
   values (p_org, week, p_work_start_time, p_late_grace_minutes)
   on conflict (org_id) do update
     set work_week = excluded.work_week, work_start_time = excluded.work_start_time,
-        late_grace_minutes = excluded.late_grace_minutes
+        late_grace_minutes = excluded.late_grace_minutes, updated_at = now()
   returning * into saved;
 
   return jsonb_build_object(
@@ -398,15 +408,29 @@ grant execute on function public.hr_save_attendance_settings(uuid, jsonb, time, 
 
 -- ---- the nightly close ------------------------------------------------------------
 -- Run by the job in the next migration at 00:05 in Malaysia, as the owner;
--- nobody else may call it. For every workspace but the demo, in a fixed order,
--- over the days from the latest of (the epoch, 31 days ago) up to yesterday:
+-- nobody else may call it.
+--
+-- A workspace is closed only once it has started using attendance, and only
+-- from its first real attendance day: the earliest date of a row of its own
+-- that has a clock-in or a correction. A workspace with no such row is left
+-- alone entirely, so one that never clocks in is never marked absent, and the
+-- job can go live before anyone has a clock-in button. That day is found with
+-- one lookup per workspace on the (org_id, work_date) index: the earliest
+-- rows of a workspace are its real ones, since the close writes nothing
+-- before them.
+--
+-- For every such workspace but the demo, in a fixed order, over the days from
+-- the latest of (the epoch, 31 days ago) up to yesterday:
 --   1. system rows on days that are no longer working days (a holiday was
---      added, or the work week changed) are removed;
---   2. every active employee gets a row for each working day from the day
---      they joined and the day their record was made (in Malaysia): on leave
---      when their approved leave covers it (a half day counts), else absent.
---      A system row already there is set to what that rule gives now, so
---      leave approved or cancelled late is reflected.
+--      added, or the work week changed) are removed, whoever they are for;
+--   2. every active employee who is linked to an account gets a row for each
+--      working day from the workspace's first real day, the day they joined
+--      and the day their record was made (in Malaysia): on leave when their
+--      approved leave covers it (a half day counts), else absent. A system
+--      row already there is set to what that rule gives now, so leave
+--      approved or cancelled late is reflected.
+-- An employee linked to nobody cannot clock in, so they are never marked
+-- absent; an owner or admin records their days by correcting them.
 -- A day with a clock-in, or one an owner or admin corrected, is never touched
 -- by either step. Today is never closed. Running it twice changes nothing the
 -- second time, and a night that was missed is filled in by the next run.
@@ -418,6 +442,7 @@ declare
   today date := (now() at time zone 'Asia/Kuala_Lumpur')::date;
   epoch date;
   first_day date;
+  started date;
   working date[];
   o record;
 begin
@@ -431,6 +456,10 @@ begin
     where not private.is_demo_org(e.org_id)
     order by e.org_id
   loop
+    select min(a.work_date) into started from public.hr_attendance_days a
+    where a.org_id = o.org_id and (a.clock_in is not null or a.corrected_at is not null);
+    continue when started is null;
+
     select coalesce(array_agg(first_day + g.i order by g.i), '{}') into working
     from generate_series(0, today - 1 - first_day) as g(i)
     where private.hr_is_working_day(o.org_id, first_day + g.i);
@@ -445,8 +474,8 @@ begin
       case when private.hr_on_approved_leave(e.id, d.day, true) then 'on_leave' else 'absent' end
     from public.hr_employees e
     cross join unnest(working) as d(day)
-    where e.org_id = o.org_id and e.status = 'active'
-      and d.day >= greatest(e.join_date, (e.created_at at time zone 'Asia/Kuala_Lumpur')::date)
+    where e.org_id = o.org_id and e.status = 'active' and e.user_id is not null
+      and d.day >= greatest(started, e.join_date, (e.created_at at time zone 'Asia/Kuala_Lumpur')::date)
     order by e.id, d.day
     on conflict (employee_id, work_date) do update set status = excluded.status
     where a.clock_in is null and a.corrected_at is null and a.status is distinct from excluded.status;
