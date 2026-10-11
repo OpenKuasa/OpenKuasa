@@ -243,12 +243,13 @@ for a bill or for an invoice by the file that made the call.
   functions that run with their own rights, planned with the approval rule.
 - Contacts and products load the first 1,000 by name; search is in the browser.
   Only the contact list is capped this way: a contact's Payable is read by
-  paging through every open bill, 1,000 at a time, so it is never cut short.
+  paging through every open bill, and its Receivable through every open
+  invoice, 1,000 at a time, so neither is cut short.
 - Invoices and Payments In are read-only so far: search, filters, "View all"
   and Export, but no forms and no row actions. The data layer for them is in
   `invoices.ts` and `money.ts`.
-- Receivable on Customers & Suppliers is still 0: that screen does not read
-  invoices yet.
+- "Largest open balances" on Customers & Suppliers charts what is owed to
+  suppliers only; Receivable is in the card, the donut and the table.
 - Nothing sets an invoice's e-Invois status yet; the columns, and the rule
   that lets them change on a posted invoice, are in place.
 - Saving an invoice does not check that its customer is ticked as a customer,
@@ -274,3 +275,4 @@ for a bill or for an invoice by the file that made the call.
 - Stock and revenue per item are not tracked.
 - A contact's Payable counts bills that are pending or overdue, and the
   Payable card is totalled from every open bill, not only the contacts loaded.
+  Receivable is the same for invoices that are sent or overdue.

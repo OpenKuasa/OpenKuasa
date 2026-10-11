@@ -10,9 +10,11 @@ import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import {
   type BillBalance,
   type FinanceContact,
+  type InvoiceBalance,
   contactsView,
   listBillBalances,
   listContacts,
+  listInvoiceBalances,
 } from '@/lib/finance/contacts';
 import { createClient } from '@/lib/supabase/server';
 
@@ -55,6 +57,12 @@ const SAMPLE_BILLS: BillBalance[] = [
   { supplier_id: '6', balance: 95, display_status: 'overdue' },
 ];
 
+const SAMPLE_INVOICES: InvoiceBalance[] = [
+  { customer_id: '1', balance: 1240, display_status: 'sent' },
+  { customer_id: '3', balance: 2500, display_status: 'sent' },
+  { customer_id: '5', balance: 8900, display_status: 'overdue' },
+];
+
 const ACTIONS: ContactActions = {
   create: createContactAction,
   update: updateContactAction,
@@ -64,11 +72,15 @@ const ACTIONS: ContactActions = {
 
 export default async function CustomersSuppliersScreen() {
   if (!hasSupabaseEnv()) {
-    return <ContactsView view={contactsView(SAMPLE_CONTACTS, SAMPLE_BILLS)} />;
+    return <ContactsView view={contactsView(SAMPLE_CONTACTS, SAMPLE_BILLS, SAMPLE_INVOICES)} />;
   }
   const viewer = await getViewer();
   const ctx = { client: await createClient(), orgId: viewer.orgId };
-  const [contacts, bills] = await Promise.all([listContacts(ctx), listBillBalances(ctx)]);
+  const [contacts, bills, invoices] = await Promise.all([
+    listContacts(ctx),
+    listBillBalances(ctx),
+    listInvoiceBalances(ctx),
+  ]);
   const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
-  return <ContactsView view={contactsView(contacts, bills)} actions={canEdit ? ACTIONS : undefined} />;
+  return <ContactsView view={contactsView(contacts, bills, invoices)} actions={canEdit ? ACTIONS : undefined} />;
 }
