@@ -1,10 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { CV_BUCKET } from '@/lib/hire/cv-store';
+import { removeCvs } from '@/lib/hire/cv-store';
 
 /**
  * Removes stored CV files whose applications were deleted. Service-role client
  * only. Paths are personal data: never logged; only an error's code is.
- * On any failure the queued rows stay, so the next run retries.
+ * A row is cleared only when its file is certainly gone; the rest stay for the next run.
  */
 export async function cleanCvFiles(
   service: SupabaseClient,
@@ -20,16 +20,13 @@ export async function cleanCvFiles(
     : [];
   if (paths.length === 0) return { removed: 0, failed: false };
 
-  const removal = await service.storage.from(CV_BUCKET).remove(paths);
-  if (removal.error) {
-    console.error('cv cleanup: remove failed', (removal.error as { code?: string }).code);
-    return { removed: 0, failed: true };
-  }
+  const gone = await removeCvs(service, paths);
+  if (gone.length === 0) return { removed: 0, failed: true };
 
-  const done = await service.rpc('hire_cv_deletions_done', { p_paths: paths });
+  const done = await service.rpc('hire_cv_deletions_done', { p_paths: gone });
   if (done.error) {
     console.error('cv cleanup: mark done failed', done.error.code);
     return { removed: 0, failed: true };
   }
-  return { removed: paths.length, failed: false };
+  return { removed: gone.length, failed: gone.length < paths.length };
 }

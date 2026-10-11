@@ -632,10 +632,11 @@ describe('the CV group', () => {
       expect(byId(html, 'apply-cv_file-again')).toBeNull();
     });
 
-    it('keeps the upload failure above the button, as the one alert', () => {
+    it('says the upload failure above the button, and by the file that it must be chosen again', () => {
       const html = render(ALL, { error: APPLY_MESSAGES.cvUploadFailed, values, fileDropped: true });
       const alerts = [...html.matchAll(/<p[^>]*\srole="alert"[^>]*>([\s\S]*?)<\/p>/g)].map((match) => text(match[1]));
-      expect(alerts).toEqual(["We couldn't upload your CV, so your application wasn't sent. Please try again."]);
+      // Two things are said: what to do about the file, by the file, and what happened, above the button.
+      expect(alerts).toEqual(['Choose your CV file again before sending.', "We couldn't upload your CV, so your application wasn't sent. Please try again."]);
     });
   });
 

@@ -7,10 +7,11 @@ const pdf = (extra = 20) => new Uint8Array([...new TextEncoder().encode('%PDF-1.
 
 function fakeService(result: { error: { statusCode?: string } | null } = { error: null }) {
   const upload = vi.fn(async () => ({ data: result.error ? null : {}, ...result }));
-  const remove = vi.fn(async () => ({ data: [], error: null }));
+  const remove = vi.fn(async (paths: string[]) => ({ data: paths.map((name) => ({ name })) as { name: string }[], error: null }));
+  const list = vi.fn(async () => ({ data: [] as { name: string }[], error: null as { statusCode?: string } | null }));
   const createSignedUrl = vi.fn(async () => ({ data: { signedUrl: 'https://x/signed' }, error: null }));
-  const from = vi.fn(() => ({ upload, remove, createSignedUrl }));
-  return { client: { storage: { from } } as never, from, upload, remove, createSignedUrl };
+  const from = vi.fn(() => ({ upload, remove, list, createSignedUrl }));
+  return { client: { storage: { from } } as never, from, upload, remove, list, createSignedUrl };
 }
 
 describe('isPdf', () => {
@@ -64,6 +65,21 @@ describe('removeCv and signedCvUrl', () => {
     const s = fakeService();
     expect(await removeCv(s.client, `${ORG}/${JOB}/x.pdf`)).toBe(true);
     expect(s.remove).toHaveBeenCalledWith([`${ORG}/${JOB}/x.pdf`]);
+  });
+  it('counts a file storage did not name as removed only when it is not there', async () => {
+    const s = fakeService();
+    s.remove.mockResolvedValue({ data: [], error: null });
+    expect(await removeCv(s.client, `${ORG}/${JOB}/x.pdf`)).toBe(true);
+    expect(s.list).toHaveBeenCalledWith(`${ORG}/${JOB}`, { limit: 1, search: 'x.pdf' });
+    s.list.mockResolvedValue({ data: [{ name: 'x.pdf' }], error: null });
+    expect(await removeCv(s.client, `${ORG}/${JOB}/x.pdf`)).toBe(false);
+    s.list.mockResolvedValue({ data: [], error: { statusCode: '500' } });
+    expect(await removeCv(s.client, `${ORG}/${JOB}/x.pdf`)).toBe(false);
+  });
+  it('answers false when storage refuses the removal', async () => {
+    const s = fakeService();
+    s.remove.mockResolvedValue({ data: null, error: { statusCode: '403' } } as never);
+    expect(await removeCv(s.client, `${ORG}/${JOB}/x.pdf`)).toBe(false);
   });
   it('signs for five minutes as a download', async () => {
     const s = fakeService();

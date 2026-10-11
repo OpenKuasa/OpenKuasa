@@ -168,7 +168,9 @@ describe('what is wrong with a chosen CV file', () => {
     expect(cvFileProblem({
       name: 'cv.docx', size: 10, type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     })).toBe('Choose a PDF file.');
-    expect(cvFileProblem({ name: 'cv.pdf', size: 10, type: 'text/plain' })).toBe('Choose a PDF file.');
+    expect(cvFileProblem({ name: 'cv.pdf', size: 10, type: 'application/octet-stream' })).toBeNull();
+    expect(cvFileProblem({ name: 'cv.txt', size: 10, type: 'text/plain' })).toBe('Choose a PDF file.');
+    expect(cvFileProblem({ name: 'scan', size: 10, type: 'application/pdf' })).toBeNull();
   });
   it('names the size when the file is over 5 MB', () => {
     expect(cvFileProblem({ name: 'cv.pdf', size: 7.2 * MB, type: PDF_TYPE })).toBe('This file is 7.2 MB. Choose one under 5 MB.');

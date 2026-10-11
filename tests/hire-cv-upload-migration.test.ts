@@ -163,7 +163,7 @@ describe('hire cv upload migration', () => {
   test('the read policy is for members of the workspace in the path, and guards its cast', () => {
     const select = policies().find((p) => p.includes('hire_cvs_select'))!;
     expect(select).toContain('to authenticated');
-    expect(select).toContain("case when bucket_id = 'hire-cvs' and name ~ '^[0-9a-f-]{36}/'");
+    expect(select).toContain("case when bucket_id = 'hire-cvs' and name ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/'");
     expect(select).toContain('then private.is_org_member(((storage.foldername(name))[1])::uuid)');
     expect(select).toContain('else false end');
   });
@@ -188,5 +188,14 @@ describe('hire cv upload migration', () => {
 
   test('the server can ask whether a file is held by an application', () => {
     expect(fn('hire_cv_attached')).toContain('select exists (select 1 from public.hire_applications a where a.cv_path = p_path)');
+  });
+
+  test('a workspace takes at most 200 CV files a day, asked before any upload', () => {
+    const body = fn('hire_apply_throttled');
+    expect(body).toContain("t.at > now() - interval '1 minute'");
+    expect(body).toContain('a.cv_path is not null');
+    expect(body).toContain("a.created_at > now() - interval '1 day'");
+    expect(body).toContain('>= 200');
+    expect(body).toContain('j.id = p_job_id');
   });
 });

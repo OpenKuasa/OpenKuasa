@@ -441,7 +441,7 @@ describe('a file that is not a CV we take', () => {
   it.each([
     ['a picture', 'me.png', 'image/png'],
     ['a document', 'cv.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
-    ['a PDF by name with another type', 'cv.pdf', 'text/plain'],
+    ['a text file by name and type', 'cv.txt', 'text/plain'],
   ])('refuses %s, even one that begins like a PDF', async (_what, name, type) => {
     const state = await applyAction(ORG, JOB, undefined, withFile({}, PDF, name, type));
     expect(state).toEqual({ errors: { cv_file: APPLY_MESSAGES.cvFileType }, values: VALUES, fileDropped: true });

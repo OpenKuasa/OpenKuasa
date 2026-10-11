@@ -5,15 +5,20 @@ const PATHS = ['o/j/a.pdf', 'o/j/b.pdf', 'o/j/c.pdf'];
 
 type Result = { data?: unknown; error: { code?: string } | null };
 
-function fake(opts: { due?: Result; remove?: Result; done?: Result }) {
+function fake(opts: { due?: Result; remove?: Result; done?: Result; there?: string[] }) {
   const rpc = vi.fn(async (name: string) => {
     if (name === 'hire_cv_deletions_due') return opts.due ?? { data: [], error: null };
     return opts.done ?? { data: null, error: null };
   });
   const remove = vi.fn<(paths: string[]) => Promise<Result>>(
-    async () => opts.remove ?? { data: [], error: null },
+    async (paths) => opts.remove ?? { data: paths.map((name) => ({ name })), error: null },
   );
-  const from = vi.fn<(bucket: string) => { remove: typeof remove }>(() => ({ remove }));
+  // What a look in the bucket finds: by default nothing, so a file storage did not name is gone.
+  const list = vi.fn(async (folder: string, options: { search: string }) => ({
+    data: (opts.there ?? []).includes(`${folder}/${options.search}`) ? [{ name: options.search }] : [],
+    error: null,
+  }));
+  const from = vi.fn<(bucket: string) => { remove: typeof remove; list: typeof list }>(() => ({ remove, list }));
   const service = { rpc, storage: { from } };
   return { service: service as never, rpc, remove, from };
 }
@@ -42,6 +47,18 @@ describe('cleanCvFiles', () => {
     expect(f.remove).toHaveBeenCalledTimes(1);
     expect(f.remove).toHaveBeenCalledWith(PATHS);
     expect(f.rpc).toHaveBeenCalledWith('hire_cv_deletions_done', { p_paths: PATHS });
+  });
+
+  it('keeps the row of a file that storage said nothing about and that is still there', async () => {
+    const f = fake({ due: { data: PATHS, error: null }, remove: { data: [{ name: PATHS[0] }], error: null }, there: [PATHS[1]] });
+    expect(await cleanCvFiles(f.service)).toEqual({ removed: 2, failed: true });
+    expect(f.rpc).toHaveBeenCalledWith('hire_cv_deletions_done', { p_paths: [PATHS[0], PATHS[2]] });
+  });
+
+  it('marks nothing done when no file is certainly gone', async () => {
+    const f = fake({ due: { data: PATHS, error: null }, remove: { data: [], error: null }, there: PATHS });
+    expect(await cleanCvFiles(f.service)).toEqual({ removed: 0, failed: true });
+    expect(f.rpc).not.toHaveBeenCalledWith('hire_cv_deletions_done', expect.anything());
   });
 
   it('fails when the due read errors', async () => {

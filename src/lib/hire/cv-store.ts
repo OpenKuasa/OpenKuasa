@@ -54,16 +54,51 @@ export async function storeCv(
   return null;
 }
 
-/** Removes one stored CV. True when storage accepted the removal. */
-export async function removeCv(service: SupabaseClient, path: string): Promise<boolean> {
+/** Whether a file is in the bucket: true, false, or null when storage could not say. */
+async function cvThere(service: SupabaseClient, path: string): Promise<boolean | null> {
+  const cut = path.lastIndexOf('/');
+  const name = path.slice(cut + 1);
   try {
-    const { error } = await service.storage.from(CV_BUCKET).remove([path]);
-    if (!error) return true;
-    console.error('[cv-store] remove failed:', failureCode(error));
+    const { data, error } = await service.storage.from(CV_BUCKET).list(path.slice(0, cut), { limit: 1, search: name });
+    if (!error && Array.isArray(data)) return data.some((object) => object.name === name);
+    console.error('[cv-store] look failed:', failureCode(error));
+  } catch (error) {
+    console.error('[cv-store] look failed:', failureCode(error));
+  }
+  return null;
+}
+
+/**
+ * Removes stored CVs and answers the paths that are certainly gone. Storage
+ * answers without an error when it removed nothing, so a path it did not name
+ * counts only when a look in the bucket finds no such file.
+ */
+export async function removeCvs(service: SupabaseClient, paths: string[]): Promise<string[]> {
+  if (paths.length === 0) return [];
+  const named = new Set<string>();
+  try {
+    const { data, error } = await service.storage.from(CV_BUCKET).remove(paths);
+    if (error) {
+      console.error('[cv-store] remove failed:', failureCode(error));
+      return [];
+    }
+    for (const object of Array.isArray(data) ? data : []) {
+      if (typeof object?.name === 'string') named.add(object.name);
+    }
   } catch (error) {
     console.error('[cv-store] remove failed:', failureCode(error));
+    return [];
   }
-  return false;
+  const gone: string[] = [];
+  for (const path of paths) {
+    if (named.has(path) || (await cvThere(service, path)) === false) gone.push(path);
+  }
+  return gone;
+}
+
+/** Removes one stored CV. True when it is certainly gone. */
+export async function removeCv(service: SupabaseClient, path: string): Promise<boolean> {
+  return (await removeCvs(service, [path])).length === 1;
 }
 
 /** A link that downloads the CV for five minutes, or null when it cannot be signed. */

@@ -45,9 +45,8 @@ export function chosenFile(value: unknown): CvFileInfo | null {
 export function cvFileProblem(file: CvFileInfo | null): string | null {
   if (!file) return null;
   if (file.size === 0) return APPLY_MESSAGES.cvFileType;
-  const declaredPdf = file.type === 'application/pdf';
-  if (!declaredPdf && !file.name.toLowerCase().endsWith('.pdf')) return APPLY_MESSAGES.cvFileType;
-  if (file.type !== '' && !declaredPdf) return APPLY_MESSAGES.cvFileType;
+  // A PDF by its name or by its declared type: browsers disagree on the type, and the server reads the bytes.
+  if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) return APPLY_MESSAGES.cvFileType;
   if (file.size > CV_MAX_BYTES) return APPLY_MESSAGES.cvFileTooBig(fileSizeLabel(file.size));
   return null;
 }

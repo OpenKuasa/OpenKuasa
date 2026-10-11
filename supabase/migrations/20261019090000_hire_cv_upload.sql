@@ -19,7 +19,7 @@ on conflict (id) do update
 -- folder of the path is the workspace. The case keeps the cast from ever
 -- running on another bucket's names. No write policy: the server writes.
 create policy hire_cvs_select on storage.objects for select to authenticated
-  using (case when bucket_id = 'hire-cvs' and name ~ '^[0-9a-f-]{36}/'
+  using (case when bucket_id = 'hire-cvs' and name ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/'
               then private.is_org_member(((storage.foldername(name))[1])::uuid)
               else false end);
 create policy hire_cvs_mfa_required on storage.objects as restrictive
@@ -67,12 +67,18 @@ begin
   return v_count;
 end $$;
 
--- True when the job has taken its 30 applications this minute. Asked by the
--- server before it uploads a file, so the limit also bounds storage writes.
+-- True when the job has taken its 30 applications this minute, or its
+-- workspace has taken 200 CV files in the last day. Asked by the server before
+-- it uploads a file, so both limits bound storage writes. An applicant turned
+-- away by the daily limit can still apply with a link.
 create or replace function public.hire_apply_throttled(p_job_id uuid)
 returns boolean language sql security definer stable set search_path = '' as $$
-  select count(*) >= 30 from private.hire_apply_ticks t
-   where t.job_id = p_job_id and t.at > now() - interval '1 minute';
+  select (select count(*) >= 30 from private.hire_apply_ticks t
+           where t.job_id = p_job_id and t.at > now() - interval '1 minute')
+      or (select count(*) >= 200 from public.hire_applications a
+            join public.hire_jobs j on j.org_id = a.org_id
+           where j.id = p_job_id and a.cv_path is not null
+             and a.created_at > now() - interval '1 day');
 $$;
 
 -- True when an application holds this file. Asked by the server when a submit

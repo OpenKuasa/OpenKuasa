@@ -572,7 +572,7 @@ export function ApplyForm({
           <p id={fileHintId} className="text-sm text-muted-foreground">PDF, up to 5 MB</p>
           <Problem field={CV_FILE_FIELD}>{errors[CV_FILE_FIELD]}</Problem>
           {chooseAgain ? (
-            <p id={fileAgainId} className="text-sm font-medium break-words text-destructive">
+            <p id={fileAgainId} role="alert" className="text-sm font-medium break-words text-destructive">
               {APPLY_MESSAGES.cvFileAgain}
             </p>
           ) : null}
