@@ -1,16 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { APPLY_HONEYPOT, APPLY_MESSAGES } from '@/lib/hire/application-fields';
+import { APPLY_HONEYPOT, APPLY_MESSAGES, CV_FILE_FIELD, CV_MAX_BYTES } from '@/lib/hire/application-fields';
 import type { PublicJob } from '@/lib/hire/public-careers';
 
 /**
  * The action a visitor's application goes through, called as the function it
- * is. The job reader and the sender are replaced; the field rules are real.
+ * is. The job reader, the sender, the CV store's two writes and the service
+ * client are replaced; the field rules and the PDF check are real.
  */
 
 const mocks = vi.hoisted(() => ({
   readPublicJob: vi.fn(),
   submitPublicApplication: vi.fn(),
   hasSupabaseEnv: vi.fn(),
+  storeCv: vi.fn(),
+  removeCv: vi.fn(),
+  serviceClient: vi.fn(),
+  /** The service client's one call here: has this job had too many applications just now? */
+  rpc: vi.fn(),
 }));
 
 vi.mock('@/lib/hire/public-careers', async (importOriginal) => ({
@@ -21,6 +27,13 @@ vi.mock('@/lib/hire/public-applications', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/hire/public-applications')>()),
   submitPublicApplication: mocks.submitPublicApplication,
 }));
+// `isPdf` stays real: the bytes decide what is a PDF, and the tests below rely on it.
+vi.mock('@/lib/hire/cv-store', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/hire/cv-store')>()),
+  storeCv: mocks.storeCv,
+  removeCv: mocks.removeCv,
+}));
+vi.mock('@/lib/supabase/service', () => ({ serviceClient: mocks.serviceClient }));
 vi.mock('@/lib/auth/viewer', () => ({ hasSupabaseEnv: mocks.hasSupabaseEnv }));
 vi.mock('@/lib/supabase/anonymous', () => ({ createAnonymousClient: () => ({ anonymous: true }) }));
 
@@ -62,11 +75,39 @@ const VALUES = {
   portfolio_url: '', expected_salary: '', consent: true,
 };
 
+/** The service client the action is handed. */
+const SERVICE = { service: true, rpc: mocks.rpc };
+/** Where the store says it put the file. */
+const PATH = `${ORG}/${JOB}/33333333-3333-4333-8333-333333333333.pdf`;
+const PDF = new TextEncoder().encode('%PDF-1.7\n1 0 obj\n<<>>\nendobj\n');
+
+/** A post with a file in the CV input, as a browser sends one. */
+function withFile(
+  fields: Record<string, string | null>,
+  bytes: Uint8Array,
+  name = 'cv.pdf',
+  type = 'application/pdf',
+): FormData {
+  const formData = post(fields);
+  formData.set(CV_FILE_FIELD, new File([bytes as BlobPart], name, { type }));
+  return formData;
+}
+
+/** Something posted without a browser, with `odd` where the file would be. */
+const withOdd = (odd: unknown) => {
+  const formData = post();
+  return { get: (key: string) => (key === CV_FILE_FIELD ? odd : formData.get(key)) } as never;
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.hasSupabaseEnv.mockReturnValue(true);
   mocks.readPublicJob.mockResolvedValue(found());
   mocks.submitPublicApplication.mockResolvedValue({ kind: 'ok' });
+  mocks.serviceClient.mockReturnValue(SERVICE);
+  mocks.rpc.mockResolvedValue({ data: false, error: null });
+  mocks.storeCv.mockResolvedValue(PATH);
+  mocks.removeCv.mockResolvedValue(true);
 });
 
 describe('what the file offers', () => {
@@ -296,5 +337,364 @@ describe('what never leaves the action', () => {
       errors: { email: APPLY_MESSAGES.emailInvalid },
       values: { ...VALUES, email: 'nope' },
     });
+  });
+});
+
+describe('a post with no file in it', () => {
+  it('takes the path it always took when the file input was left untouched', async () => {
+    // What a browser posts for a file input nobody touched: an empty file with no name.
+    const formData = withFile({}, new Uint8Array(0), '', 'application/octet-stream');
+    expect(await applyAction(ORG, JOB, undefined, formData)).toEqual({ done: { firstName: 'Aisyah' } });
+    expect(mocks.submitPublicApplication).toHaveBeenCalledTimes(1);
+    expect(mocks.submitPublicApplication.mock.calls[0]).toEqual([{ anonymous: true }, ORG, JOB, VALUES, NO_EXTRAS]);
+    expect(mocks.serviceClient).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.storeCv).not.toHaveBeenCalled();
+    expect(mocks.removeCv).not.toHaveBeenCalled();
+  });
+
+  it('does not say a file was lost when a form with problems carried none', async () => {
+    const state = await applyAction(ORG, JOB, undefined, withFile({ email: 'nope' }, new Uint8Array(0), ''));
+    expect(state).toEqual({ errors: { email: APPLY_MESSAGES.emailInvalid }, values: { ...VALUES, email: 'nope' } });
+    expect(state && 'fileDropped' in state).toBe(false);
+  });
+
+  it('thanks a repeat application like a new one', async () => {
+    mocks.submitPublicApplication.mockResolvedValue({ kind: 'duplicate' });
+    expect(await applyAction(ORG, JOB, undefined, post())).toEqual({ done: { firstName: 'Aisyah' } });
+    expect(mocks.removeCv).not.toHaveBeenCalled();
+  });
+
+  it('asks for a CV when one is required and there is neither a link nor a file', async () => {
+    mocks.readPublicJob.mockResolvedValue(found({ form: { ...NO_EXTRAS, require_cv: true } }));
+    const state = await applyAction(ORG, JOB, undefined, withFile({}, new Uint8Array(0), ''));
+    expect(state?.errors).toEqual({ cv_url: 'Upload a PDF or paste a link to your CV.' });
+    expect(mocks.submitPublicApplication).not.toHaveBeenCalled();
+    expect(mocks.storeCv).not.toHaveBeenCalled();
+  });
+});
+
+describe('a post with a PDF', () => {
+  it('asks whether the job is throttled, stores the file, sends with the service client and the path, and thanks', async () => {
+    const state = await applyAction(ORG, JOB, undefined, withFile({ phone: '012-345 6789' }, PDF));
+    expect(state).toEqual({ done: { firstName: 'Aisyah' } });
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+    expect(mocks.rpc).toHaveBeenCalledWith('hire_apply_throttled', { p_job_id: JOB });
+    expect(mocks.storeCv).toHaveBeenCalledTimes(1);
+    const [service, orgId, jobId, bytes] = mocks.storeCv.mock.calls[0];
+    expect(service).toBe(SERVICE);
+    expect([orgId, jobId]).toEqual([ORG, JOB]);
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect([...bytes]).toEqual([...PDF]);
+    expect(mocks.submitPublicApplication).toHaveBeenCalledTimes(1);
+    const sent = mocks.submitPublicApplication.mock.calls[0];
+    expect(sent[0]).toBe(SERVICE);
+    expect(sent.slice(1)).toEqual([ORG, JOB, { ...VALUES, phone: '012-345 6789' }, NO_EXTRAS, null, PATH]);
+    expect(mocks.removeCv).not.toHaveBeenCalled();
+    // In this order: nothing is stored for a job that is throttled, and nothing is sent before the file is stored.
+    const order = [mocks.rpc, mocks.storeCv, mocks.submitPublicApplication].map((mock) => mock.mock.invocationCallOrder[0]);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  it('takes the workspace and the job from the route, whatever the post claims', async () => {
+    const other = '99999999-9999-4999-8999-999999999999';
+    await applyAction(ORG, JOB, undefined, withFile({ org_id: other, job_id: other, p_cv_path: `${other}/${other}/x.pdf`, cv_path: 'x' }, PDF));
+    expect(mocks.storeCv.mock.calls[0].slice(1, 3)).toEqual([ORG, JOB]);
+    expect(mocks.submitPublicApplication.mock.calls[0].slice(1, 3)).toEqual([ORG, JOB]);
+    expect(mocks.submitPublicApplication.mock.calls[0][6]).toBe(PATH);
+  });
+
+  it('meets a required CV without a link', async () => {
+    mocks.readPublicJob.mockResolvedValue(found({ form: { ...NO_EXTRAS, require_cv: true } }));
+    expect(await applyAction(ORG, JOB, undefined, withFile({}, PDF))).toEqual({ done: { firstName: 'Aisyah' } });
+    expect(mocks.submitPublicApplication.mock.calls[0][6]).toBe(PATH);
+  });
+
+  it('is taken with a link beside it', async () => {
+    const state = await applyAction(ORG, JOB, undefined, withFile({ cv_url: 'https://example.com/cv' }, PDF));
+    expect(state).toEqual({ done: { firstName: 'Aisyah' } });
+    expect(mocks.submitPublicApplication.mock.calls[0][3].cv_url).toBe('https://example.com/cv');
+  });
+
+  it('is a PDF by its bytes when the browser declared no type', async () => {
+    expect(await applyAction(ORG, JOB, undefined, withFile({}, PDF, 'cv.PDF', ''))).toEqual({ done: { firstName: 'Aisyah' } });
+    expect(mocks.storeCv).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a file that is not a CV we take', () => {
+  const nothingStored = () => {
+    expect(mocks.serviceClient).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.storeCv).not.toHaveBeenCalled();
+    expect(mocks.submitPublicApplication).not.toHaveBeenCalled();
+  };
+
+  it('refuses a text file named cv.pdf and declared a PDF: the bytes decide', async () => {
+    const text = new TextEncoder().encode('Curriculum vitae of Aisyah. %PDF- is not how this begins.');
+    expect(await applyAction(ORG, JOB, undefined, withFile({}, text))).toEqual({
+      errors: { cv_file: 'Choose a PDF file.' }, values: VALUES, fileDropped: true,
+    });
+    nothingStored();
+  });
+
+  it.each([
+    ['a picture', 'me.png', 'image/png'],
+    ['a document', 'cv.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+    ['a PDF by name with another type', 'cv.pdf', 'text/plain'],
+  ])('refuses %s, even one that begins like a PDF', async (_what, name, type) => {
+    const state = await applyAction(ORG, JOB, undefined, withFile({}, PDF, name, type));
+    expect(state).toEqual({ errors: { cv_file: APPLY_MESSAGES.cvFileType }, values: VALUES, fileDropped: true });
+    nothingStored();
+  });
+
+  it('refuses an empty file that has a name', async () => {
+    const state = await applyAction(ORG, JOB, undefined, withFile({}, new Uint8Array(0)));
+    expect(state).toEqual({ errors: { cv_file: APPLY_MESSAGES.cvFileType }, values: VALUES, fileDropped: true });
+    nothingStored();
+  });
+
+  it('refuses a file one byte over 5 MB, and says how big it is', async () => {
+    const big = new Uint8Array(CV_MAX_BYTES + 1);
+    big.set(PDF);
+    const state = await applyAction(ORG, JOB, undefined, withFile({}, big));
+    expect(state?.errors?.cv_file).toMatch(/^This file is 5\.0 MB\. Choose one under 5 MB\.$/);
+    expect(Object.keys(state?.errors ?? {})).toEqual(['cv_file']);
+    expect(state?.fileDropped).toBe(true);
+    expect(state?.values).toEqual(VALUES);
+    nothingStored();
+  });
+
+  it('takes a PDF of exactly 5 MB', async () => {
+    const most = new Uint8Array(CV_MAX_BYTES);
+    most.set(PDF);
+    expect(await applyAction(ORG, JOB, undefined, withFile({}, most))).toEqual({ done: { firstName: 'Aisyah' } });
+    expect(mocks.storeCv.mock.calls[0][3]).toHaveLength(CV_MAX_BYTES);
+  });
+
+  it('does not trust the size a file declares: the bytes are counted', async () => {
+    const big = new Uint8Array(CV_MAX_BYTES + 1);
+    big.set(PDF);
+    // Something posted directly, claiming to be small.
+    const liar = { name: 'cv.pdf', type: 'application/pdf', size: 10, arrayBuffer: async () => big.buffer };
+    expect(await applyAction(ORG, JOB, undefined, withOdd(liar))).toEqual({
+      errors: { cv_file: APPLY_MESSAGES.cvFileTooBig('5.0 MB') }, values: VALUES, fileDropped: true,
+    });
+    nothingStored();
+  });
+
+  it.each([
+    ['cannot be read', { name: 'cv.pdf', type: 'application/pdf', size: 10 }, { errors: { cv_file: APPLY_MESSAGES.cvFileType } }],
+    ['fails while it is read', {
+      name: 'cv.pdf', type: 'application/pdf', size: 10, arrayBuffer: async () => { throw new Error('cv.pdf broke'); },
+    }, { error: APPLY_MESSAGES.cvUploadFailed }],
+  ])('answers plainly, without throwing, when what stands for the file %s', async (_what, odd, answer) => {
+    expect(await applyAction(ORG, JOB, undefined, withOdd(odd))).toEqual({ ...answer, values: VALUES, fileDropped: true });
+    nothingStored();
+  });
+
+  it('is not read at all while the fields have problems, and the visitor is told the file must be chosen again', async () => {
+    const formData = withFile({ name: ' ' }, PDF);
+    const read = vi.spyOn(formData.get(CV_FILE_FIELD) as File, 'arrayBuffer');
+    expect(await applyAction(ORG, JOB, undefined, formData)).toEqual({
+      errors: { name: APPLY_MESSAGES.name }, values: { ...VALUES, name: ' ' }, fileDropped: true,
+    });
+    expect(read).not.toHaveBeenCalled();
+    nothingStored();
+  });
+
+  it('is reported beside the fields\' own problems, in one answer', async () => {
+    const state = await applyAction(ORG, JOB, undefined, withFile({ email: 'nope', cv_url: 'ftp://x' }, PDF, 'me.png', 'image/png'));
+    expect(state).toEqual({
+      errors: { email: APPLY_MESSAGES.emailInvalid, cv_url: APPLY_MESSAGES.urlInvalid, cv_file: APPLY_MESSAGES.cvFileType },
+      values: { ...VALUES, email: 'nope', cv_url: 'ftp://x' },
+      fileDropped: true,
+    });
+  });
+});
+
+describe('a PDF that is not stored', () => {
+  it('says the job could not be read, and that the file is gone, when the read failed', async () => {
+    mocks.readPublicJob.mockResolvedValue({ state: 'failed' });
+    expect(await applyAction(ORG, JOB, undefined, withFile({}, PDF))).toEqual({
+      error: APPLY_MESSAGES.failed, values: VALUES, fileDropped: true,
+    });
+    expect(mocks.storeCv).not.toHaveBeenCalled();
+  });
+
+  it('is closed, with nothing stored, when the job has stopped taking applications', async () => {
+    mocks.readPublicJob.mockResolvedValue(found({ accepting: false }));
+    expect(await applyAction(ORG, JOB, undefined, withFile({}, PDF))).toEqual({ closed: true });
+    expect(mocks.serviceClient).not.toHaveBeenCalled();
+    expect(mocks.storeCv).not.toHaveBeenCalled();
+  });
+
+  it('throttled before upload: the try-again message, and nothing stored or sent', async () => {
+    mocks.rpc.mockResolvedValue({ data: true, error: null });
+    expect(await applyAction(ORG, JOB, undefined, withFile({}, PDF))).toEqual({
+      error: APPLY_MESSAGES.throttled, values: VALUES, fileDropped: true,
+    });
+    expect(mocks.storeCv).not.toHaveBeenCalled();
+    expect(mocks.submitPublicApplication).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['answers with an error', () => mocks.rpc.mockResolvedValue({ data: null, error: { code: '42501', message: 'denied for cv.pdf' } })],
+    ['throws', () => mocks.rpc.mockRejectedValue(new Error('network'))],
+  ])('fails, with nothing stored or sent, when the throttle read %s', async (_what, arrange) => {
+    arrange();
+    expect(await applyAction(ORG, JOB, undefined, withFile({}, PDF))).toEqual({
+      error: APPLY_MESSAGES.failed, values: VALUES, fileDropped: true,
+    });
+    expect(mocks.storeCv).not.toHaveBeenCalled();
+    expect(mocks.submitPublicApplication).not.toHaveBeenCalled();
+  });
+
+  it('fails, with nothing stored or sent, on a site with no service key', async () => {
+    mocks.serviceClient.mockImplementation(() => {
+      throw new Error('Service role is not configured.');
+    });
+    expect(await applyAction(ORG, JOB, undefined, withFile({}, PDF))).toEqual({
+      error: APPLY_MESSAGES.failed, values: VALUES, fileDropped: true,
+    });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.storeCv).not.toHaveBeenCalled();
+    expect(mocks.submitPublicApplication).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['answers nothing', () => mocks.storeCv.mockResolvedValue(null)],
+    ['throws', () => mocks.storeCv.mockRejectedValue(new Error('storage'))],
+  ])('says the upload failed and sends nothing when the store %s', async (_what, arrange) => {
+    arrange();
+    expect(await applyAction(ORG, JOB, undefined, withFile({}, PDF))).toEqual({
+      error: "We couldn't upload your CV, so your application wasn't sent. Please try again.",
+      values: VALUES,
+      fileDropped: true,
+    });
+    expect(mocks.submitPublicApplication).not.toHaveBeenCalled();
+    expect(mocks.removeCv).not.toHaveBeenCalled();
+  });
+
+  it('a honeypot post is thanked with nothing read from storage, nothing read from the file and nothing stored', async () => {
+    const formData = withFile({ [APPLY_HONEYPOT]: 'x' }, PDF);
+    const read = vi.spyOn(formData.get(CV_FILE_FIELD) as File, 'arrayBuffer');
+    expect(await applyAction(ORG, JOB, undefined, formData)).toEqual({ done: { firstName: 'Aisyah' } });
+    expect(read).not.toHaveBeenCalled();
+    expect(mocks.readPublicJob).not.toHaveBeenCalled();
+    expect(mocks.serviceClient).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.storeCv).not.toHaveBeenCalled();
+    expect(mocks.submitPublicApplication).not.toHaveBeenCalled();
+  });
+});
+
+describe('a stored PDF whose application is not taken', () => {
+  const removedOnce = () => {
+    expect(mocks.removeCv).toHaveBeenCalledTimes(1);
+    expect(mocks.removeCv.mock.calls[0][0]).toBe(SERVICE);
+    expect(mocks.removeCv.mock.calls[0][1]).toBe(PATH);
+  };
+
+  it('a duplicate leaves no object: the same thank-you, and the file is removed', async () => {
+    mocks.submitPublicApplication.mockResolvedValue({ kind: 'duplicate' });
+    expect(await applyAction(ORG, JOB, undefined, withFile({}, PDF))).toEqual({ done: { firstName: 'Aisyah' } });
+    removedOnce();
+  });
+
+  it.each([
+    ['closed', { kind: 'closed' }, { closed: true }],
+    ['throttled', { kind: 'throttled' }, { error: APPLY_MESSAGES.throttled, values: VALUES, fileDropped: true }],
+    ['invalid', { kind: 'invalid', errors: { email: APPLY_MESSAGES.emailInvalid } },
+      { errors: { email: APPLY_MESSAGES.emailInvalid }, values: VALUES, fileDropped: true }],
+    ['failed', { kind: 'failed' }, { error: APPLY_MESSAGES.failed, values: VALUES, fileDropped: true }],
+    ['something it does not know', { kind: 'something_new' }, { error: APPLY_MESSAGES.failed, values: VALUES, fileDropped: true }],
+  ])('%s: the answer it always gave, and the file is removed', async (_what, outcome, answer) => {
+    mocks.submitPublicApplication.mockResolvedValue(outcome);
+    expect(await applyAction(ORG, JOB, undefined, withFile({}, PDF))).toEqual(answer);
+    removedOnce();
+  });
+
+  it('the sender throws: the file is removed, and the action fails plainly with what was typed', async () => {
+    mocks.submitPublicApplication.mockRejectedValue(new Error('boom cv.pdf'));
+    expect(await applyAction(ORG, JOB, undefined, withFile({}, PDF))).toEqual({
+      error: APPLY_MESSAGES.failed, values: VALUES, fileDropped: true,
+    });
+    removedOnce();
+  });
+
+  it('is removed before the action answers', async () => {
+    mocks.submitPublicApplication.mockResolvedValue({ kind: 'failed' });
+    let removed = false;
+    mocks.removeCv.mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      removed = true;
+      return true;
+    });
+    await applyAction(ORG, JOB, undefined, withFile({}, PDF));
+    expect(removed).toBe(true);
+  });
+
+  it.each([
+    ['answers that it could not', () => mocks.removeCv.mockResolvedValue(false)],
+    ['throws', () => mocks.removeCv.mockRejectedValue(new Error('storage'))],
+  ])('gives the same answer when the removal %s', async (_what, arrange) => {
+    arrange();
+    mocks.submitPublicApplication.mockResolvedValue({ kind: 'duplicate' });
+    expect(await applyAction(ORG, JOB, undefined, withFile({}, PDF))).toEqual({ done: { firstName: 'Aisyah' } });
+    mocks.submitPublicApplication.mockResolvedValue({ kind: 'throttled' });
+    expect(await applyAction(ORG, JOB, undefined, withFile({}, PDF))).toEqual({
+      error: APPLY_MESSAGES.throttled, values: VALUES, fileDropped: true,
+    });
+  });
+});
+
+describe('what a post with a file never puts in a log or an answer', () => {
+  it('no call logs the file\'s name, a value or the path, and no answer carries the name or the path', async () => {
+    const spies = (['log', 'info', 'warn', 'error', 'debug'] as const).map((method) =>
+      vi.spyOn(console, method).mockImplementation(() => {}));
+    const answers: unknown[] = [];
+    const run = async (formData: FormData) => {
+      answers.push(await applyAction(ORG, JOB, undefined, formData));
+    };
+    const text = new TextEncoder().encode('not a pdf');
+
+    await run(withFile({}, PDF));
+    await run(withFile({}, text));
+    await run(withFile({ name: ' ' }, PDF));
+    await run(withFile({ [APPLY_HONEYPOT]: 'x' }, PDF));
+    mocks.rpc.mockResolvedValueOnce({ data: true, error: null });
+    await run(withFile({}, PDF));
+    mocks.rpc.mockResolvedValueOnce({ data: null, error: { code: '42501', message: 'cv.pdf aisyah@example.com' } });
+    await run(withFile({}, PDF));
+    mocks.rpc.mockRejectedValueOnce(new Error('cv.pdf'));
+    await run(withFile({}, PDF));
+    mocks.storeCv.mockResolvedValueOnce(null);
+    await run(withFile({}, PDF));
+    for (const kind of ['duplicate', 'closed', 'throttled', 'failed']) {
+      mocks.submitPublicApplication.mockResolvedValueOnce({ kind });
+      await run(withFile({}, PDF));
+    }
+    mocks.submitPublicApplication.mockRejectedValueOnce(new Error(`cv.pdf ${PATH}`));
+    await run(withFile({}, PDF));
+    mocks.removeCv.mockRejectedValueOnce(new Error(PATH));
+    mocks.submitPublicApplication.mockResolvedValueOnce({ kind: 'failed' });
+    await run(withFile({}, PDF));
+    mocks.serviceClient.mockImplementationOnce(() => {
+      throw new Error('Service role is not configured.');
+    });
+    await run(withFile({}, PDF));
+    expect(answers).toHaveLength(15);
+
+    const logged = JSON.stringify(spies.flatMap((spy) => spy.mock.calls).map((call) =>
+      call.map((part) => (part instanceof Error ? `${part.name} ${part.message} ${part.stack}` : part))));
+    for (const secret of ['cv.pdf', PATH, 'Aisyah', 'aisyah@example.com', '33333333']) {
+      expect(logged).not.toContain(secret);
+    }
+    const answered = JSON.stringify(answers);
+    expect(answered).not.toContain('cv.pdf');
+    expect(answered).not.toContain(PATH);
+    expect(answered).not.toContain('33333333');
+    for (const spy of spies) spy.mockRestore();
   });
 });
