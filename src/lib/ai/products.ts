@@ -14,6 +14,7 @@ import { createHireTools } from '@/lib/ai/hire-tools';
 import { createPeopleTools, type PeopleWrite } from '@/lib/ai/people-tools';
 import { createReachTools } from '@/lib/ai/tools';
 import type { HireWriteContext } from '@/lib/hire/capabilities';
+import type { CvReader } from '@/lib/hire/cv-read';
 import type { ReachWriteContext } from '@/lib/reach/capabilities';
 import type { HireData } from '@/lib/hire/types';
 import type { PeopleData, PeopleViewer } from '@/lib/people/types';
@@ -57,6 +58,8 @@ export type HireAccess = {
   write?: { ctx: HireWriteContext; canWrite: boolean };
   /** The site's own address, for the careers page link. */
   origin?: string | null;
+  /** Reads one application's CV as the signed-in member. Lekir can read a CV only when this is given. */
+  files?: CvReader;
 };
 
 /** Hiring tools that change data. */
@@ -119,7 +122,7 @@ export function crmProduct(crm: CrmAccess): ProductToolkit {
 
 /** Lekir: jobs, candidates, applications and interviews. */
 export function hireProduct(hire: HireAccess): ProductToolkit {
-  const all = createHireTools(hire.data, () => new Date(), hire.write, { origin: hire.origin ?? null });
+  const all = createHireTools(hire.data, () => new Date(), hire.write, { origin: hire.origin ?? null }, hire.files);
   return { key: 'hire', name: 'Lekir', ...split(all, HIRE_WRITE_TOOL_NAMES) };
 }
 

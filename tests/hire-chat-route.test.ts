@@ -13,7 +13,13 @@ const ctl = vi.hoisted(() => ({
   /** Tables the provider read, to prove which data the tools were given. */
   tablesRead: [] as string[],
   /** The HireAccess the route handed to the runner. */
-  captured: null as null | { data: import('@/lib/hire/types').HireData; origin?: string | null },
+  captured: null as null | {
+    data: import('@/lib/hire/types').HireData;
+    origin?: string | null;
+    files?: import('@/lib/hire/cv-read').CvReader;
+  },
+  /** What the Tuah route handed its runner: whether it ran with the team, and the HireAccess. */
+  tuah: null as null | { team: boolean; hire: { files?: import('@/lib/hire/cv-read').CvReader } | null },
 }));
 
 vi.mock('@/lib/ai/agents/orchestrator', async (importOriginal) => {
@@ -24,8 +30,20 @@ vi.mock('@/lib/ai/agents/orchestrator', async (importOriginal) => {
       ctl.captured = hire;
       return actual.runLekir(messages, hire, ...rest);
     }) as typeof actual.runLekir,
+    runTuah: ((...args) => {
+      ctl.tuah = { team: Boolean(args[6]), hire: args[7] ?? null };
+      return actual.runTuah(...args);
+    }) as typeof actual.runTuah,
   };
 });
+
+// The Tuah route also reads marketing data; the fake client has no such tables.
+vi.mock('@/lib/reach/supabase', () => ({
+  getReachData: async () => {
+    const { createSeedReachData } = await import('@/lib/reach/seed');
+    return createSeedReachData();
+  },
+}));
 
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({
@@ -115,6 +133,7 @@ beforeEach(() => {
   ctl.freeConsumed = 0;
   ctl.tablesRead = [];
   ctl.captured = null;
+  ctl.tuah = null;
   process.env.AI_KEYS_ENCRYPTION_SECRET = SECRET;
 });
 
@@ -205,6 +224,20 @@ describe('POST /api/hire/chat happy path', () => {
     for (const name of HIRE_WRITE_TOOL_NAMES) expect(tools).not.toContain(name);
   });
 
+  it('hands Lekir a way to read a CV, through the member’s own data, for a viewer too', async () => {
+    ctl.org = { orgId: 'org1', role: 'viewer' };
+    const res = await POST(post(validBody));
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(ctl.calls[0].tools).toContain('readCandidateCv');
+    const files = ctl.captured!.files!;
+    expect(typeof files.readCv).toBe('function');
+    // It looks the application up through the same workspace-scoped data the lookups use.
+    ctl.tablesRead = [];
+    expect(await files.readCv('11111111-1111-4111-8111-111111111111')).toEqual({ state: 'missing' });
+    expect(ctl.tablesRead).toContain('hire_applications');
+  });
+
   it('runs on the workspace key without touching the free allowance', async () => {
     ctl.sealedKey = encryptApiKey('sk-or-v1-workspace-key-aaaaaaaaaaaa');
     ctl.freeRemaining = -1;
@@ -214,5 +247,38 @@ describe('POST /api/hire/chat happy path', () => {
     await res.text();
     expect(ctl.freeConsumed).toBe(0);
     expect(ctl.usedKeys).toEqual(['sk-or-v1-workspace-key-aaaaaaaaaaaa']);
+  });
+});
+
+describe('POST /api/chat (Tuah) and reading a CV', () => {
+  const tuahPost = (body: unknown) =>
+    new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+  it('gives Lekir a way to read a CV when Tuah answers with its team', async () => {
+    const { POST: tuah } = await import('@/app/api/chat/route');
+    const res = await tuah(tuahPost(validBody));
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(ctl.tuah!.team).toBe(true);
+    expect(typeof ctl.tuah!.hire!.files?.readCv).toBe('function');
+    // Tuah itself never holds the tool: only the specialist it asks does.
+    expect(ctl.calls[0].tools).toContain('askLekir');
+    expect(ctl.calls[0].tools).not.toContain('readCandidateCv');
+  });
+
+  it('gives the single agent no way to read a CV', async () => {
+    const { POST: tuah } = await import('@/app/api/chat/route');
+    const res = await tuah(tuahPost({ ...validBody, team: false }));
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(ctl.tuah!.team).toBe(false);
+    expect(ctl.tuah!.hire).not.toBeNull();
+    expect(ctl.tuah!.hire!.files).toBeUndefined();
+    expect(ctl.calls[0].tools).toContain('listApplications');
+    expect(ctl.calls[0].tools).not.toContain('readCandidateCv');
   });
 });

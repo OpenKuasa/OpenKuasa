@@ -22,7 +22,8 @@ export function ToolStepCard({
   as?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const { label, Icon } = toolMeta(as ?? step.name);
+  const { label, Icon, detail } = toolMeta(as ?? step.name);
+  const about = detail?.(step.output) ?? null;
   const canExpand = !step.running && step.output != null;
 
   return (
@@ -41,6 +42,7 @@ export function ToolStepCard({
           <Icon className="size-3.5" />
         </span>
         <span className="font-medium">{label}</span>
+        {about ? <span className="min-w-0 truncate">{about}</span> : null}
         <span className="min-w-0 flex-1 truncate text-muted-foreground">
           {step.running ? 'Working…' : step.denied ? 'Not approved' : 'Done'}
         </span>

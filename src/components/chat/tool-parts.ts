@@ -19,6 +19,7 @@ import {
   CalendarDays,
   ClipboardList,
   Coins,
+  FileText,
   Filter,
   Globe,
   Images,
@@ -46,7 +47,22 @@ export type AnyPart = UIMessage['parts'][number];
 export { approvalDetail, approvalTitle } from '@/lib/chat/change-titles';
 export type { ItemKind } from '@/lib/chat/change-titles';
 
-const TOOL_META: Record<string, { label: string; Icon: Icon }> = {
+type ToolMeta = {
+  label: string;
+  Icon: Icon;
+  /** A few plain words to show beside the label, read from the tool's result. */
+  detail?: (output: unknown) => string | null;
+};
+
+/** Whose CV was read: the candidate's name, once the read has succeeded. */
+function cvCandidate(output: unknown): string | null {
+  const result = output as { ok?: unknown; candidate?: unknown } | null | undefined;
+  return result?.ok === true && typeof result.candidate === 'string' && result.candidate.trim()
+    ? result.candidate
+    : null;
+}
+
+const TOOL_META: Record<string, ToolMeta> = {
   getAdsOverview: { label: 'Ads overview', Icon: PieChart },
   getCampaigns: { label: 'Campaigns', Icon: Megaphone },
   getLeadSummary: { label: 'Lead summary', Icon: TrendingUp },
@@ -94,6 +110,7 @@ const TOOL_META: Record<string, { label: string; Icon: Icon }> = {
   listTrainings: { label: 'Trainings', Icon: Briefcase },
   listAnnouncements: { label: 'Announcements', Icon: Megaphone },
   getCareersPage: { label: 'Careers page', Icon: Globe },
+  readCandidateCv: { label: 'Reading CV', Icon: FileText, detail: cvCandidate },
   listContacts: { label: 'Leads', Icon: Users },
 };
 
@@ -102,7 +119,7 @@ function humanize(name: string): string {
   return (spaced.charAt(0).toUpperCase() + spaced.slice(1).toLowerCase()).trim();
 }
 
-export function toolMeta(name: string): { label: string; Icon: Icon; isFallback: boolean } {
+export function toolMeta(name: string): ToolMeta & { isFallback: boolean } {
   const known = TOOL_META[name];
   // Tools with no entry are the change tools, named for what they do.
   return known

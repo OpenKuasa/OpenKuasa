@@ -442,7 +442,8 @@ function ToolCard({
   open: boolean;
   onToggle: () => void;
 }) {
-  const { label, Icon } = toolMeta(step.name);
+  const { label, Icon, detail } = toolMeta(step.name);
+  const about = detail?.(step.output) ?? null;
   const canExpand = !step.running && step.output != null;
   return (
     <div
@@ -464,6 +465,7 @@ function ToolCard({
           <Icon className="size-3" />
         </span>
         <span className="font-medium text-primary-foreground">{label}</span>
+        {about ? <span className="min-w-0 truncate text-primary-foreground">{about}</span> : null}
         <span className="min-w-0 flex-1 truncate text-primary-foreground/60">
           {step.running ? 'running…' : 'done'}
         </span>
