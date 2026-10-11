@@ -256,8 +256,11 @@ would offer the invoice (`receivableInvoices`, `creditableInvoices`,
 `refundTargets`, put together by `invoiceCan`), so a writer's Invoices page
 also reads the credit notes and the refunds. If either of those two reads
 fails, the failure is logged and the page still shows, with no row offering
-"Credit note" or "Refund": the lists are not taken as empty, which would offer
-a refund that no pending refund had been counted against. Any other read that
+"Refund": the lists are not taken as empty, which would offer a refund that no
+pending refund had been counted against. "Credit note" is still offered, since
+it is decided from the invoice rows and its card needs neither list. A refund
+card that was open on Invoices when a refresh lost the two reads is closed,
+not drawn with nothing to refund. Any other read that
 fails is the page's failure, as before, and a viewer's page reads neither.
 Voiding an invoice that has payments, credit notes or refunds is offered and
 refused with the reason, as on a paid bill. "Credit note" and "Refund" open

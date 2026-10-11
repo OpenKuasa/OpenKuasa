@@ -93,8 +93,8 @@ export type InvoicesWriter = {
   /** Every payment-in row, to know what an invoice can still take. */
   payments: PaymentInRow[];
   /**
-   * What "Credit note" and "Refund" on a row are decided by. Null when either could not be read: the page
-   * still shows, and no row offers the two.
+   * What "Refund" on a row is decided by, and what its card offers. Null when either could not be read:
+   * the page still shows, and no row offers a refund. "Credit note" needs neither and is still offered.
    */
   followOn: {
     /** Every credit note, so a refund can also be put against an issued one. */
@@ -174,11 +174,13 @@ export function InvoicesView({
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
   const columns = writer ? 9 : 8;
   const receivable = writer ? receivableInvoices(rows, writer.payments) : [];
-  // Null when the credit notes or the refunds could not be read: no row then offers a credit note or a refund.
-  const followOn = writer?.followOn
-    ? { creditable: creditableInvoices(rows), refundable: refundTargets(rows, writer.followOn.creditNotes, writer.followOn.refunds) }
-    : null;
-  const targets = followOn?.refundable ?? [];
+  // A credit note is decided from the invoice rows alone, so it does not wait on the follow-on reads.
+  const creditable = writer ? creditableInvoices(rows) : [];
+  // Null when the credit notes or the refunds could not be read: no row then offers a refund.
+  const targets = writer?.followOn ? refundTargets(rows, writer.followOn.creditNotes, writer.followOn.refunds) : null;
+  // A refund card left open when a refresh lost those reads is closed: with no lists it would say
+  // "There is nothing to refund", which nobody knows. The choice is dropped, as the customer filter's is above.
+  if (open?.kind === 'refund' && targets === null) setOpen(null);
   const asking = open && (open.kind === 'post' || open.kind === 'void' || open.kind === 'delete') ? open : null;
   // A form holds what was typed, so nothing else opens over it: it is closed with its own Cancel first.
   // The note that something was saved holds nothing, and locks nothing.
@@ -235,7 +237,7 @@ export function InvoicesView({
 
   // Each choice is offered exactly when the form it opens would offer this invoice.
   const menu = (invoice: InvoiceListRow, actions: InvoiceActions): RowMenuItem[] =>
-    invoiceActions(invoice, invoiceCan(invoice, { receivable, followOn })).map((action) => menuItem(invoice, action, actions));
+    invoiceActions(invoice, invoiceCan(invoice, { receivable, creditable, refundable: targets })).map((action) => menuItem(invoice, action, actions));
 
   const question = (invoice: InvoiceListRow) => {
     if (!writer || !asking || asking.invoice.id !== invoice.id) return null;
@@ -384,6 +386,8 @@ export function InvoicesView({
       );
     }
     if (open.kind === 'refund') {
+      // Without the lists there is no card to draw; it is being closed above.
+      if (!targets) return null;
       const { invoice } = open;
       return (
         <RefundFormCard

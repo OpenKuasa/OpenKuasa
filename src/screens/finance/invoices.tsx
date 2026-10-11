@@ -39,9 +39,10 @@ const ACTIONS: InvoiceActions = {
 };
 
 /**
- * The credit notes and the refunds, which only decide whether a row offers "Credit note" and "Refund".
- * Null when either cannot be read: the invoices themselves were read, so the page shows without the two
- * choices. Empty lists would not do: the menu would offer a refund that no pending refund is counted against.
+ * The credit notes and the refunds, which only decide whether a row offers "Refund" and feed its card.
+ * Null when either cannot be read: the invoices themselves were read, so the page shows without that
+ * choice. Empty lists would not do: the menu would offer a refund that no pending refund is counted against.
+ * "Credit note" is decided from the invoice rows and stays.
  */
 async function readFollowOn(ctx: Parameters<typeof listCreditNotes>[0]): Promise<InvoicesWriter['followOn']> {
   try {
@@ -63,7 +64,7 @@ export default async function InvoicesScreen() {
   // The payments feed "Received (MTD)" and the trend for everyone. The forms offer customers, products
   // and accounts, and a row offers a refund by what credit notes and pending refunds leave of a customer's
   // credit; a viewer has no form and no menu, so none of them is read for them. A failure of the last
-  // read costs a writer the two choices it decides, not the page; any other failure is the page's.
+  // read costs a writer the "Refund" choice it decides, not the page; any other failure is the page's.
   const [rows, payments, contacts, products, accounts, followOn] = await Promise.all([
     listInvoices(ctx),
     listPaymentsIn(ctx),

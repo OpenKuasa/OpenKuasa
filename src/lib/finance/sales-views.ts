@@ -212,30 +212,29 @@ export type InvoiceCan = {
 
 /**
  * What one invoice can still take, by what the three forms offer.
- * `followOn` is null when the credit notes or the refunds could not be read:
- * nothing can then say whether a credit note or a refund would be accepted,
- * so neither is offered. Empty lists would not do instead: with no pending
- * refund known, every customer in credit would be offered a refund the form
- * cannot check. A payment in depends on neither read and is still offered.
+ * `refundable` is null when the credit notes or the refunds could not be
+ * read: nothing can then say what a refund may be for, so none is offered.
+ * Empty lists would not do instead: with no pending refund known, every
+ * customer in credit would be offered a refund the form cannot check. A
+ * payment in and a credit note depend on neither read: both are decided from
+ * the invoice rows, which were read, and are still offered.
  */
 export function invoiceCan(
   invoice: InvoiceListRow,
   offers: {
     /** `receivableInvoices`. */
     receivable: { id: string }[];
-    followOn: {
-      /** `creditableInvoices`. */
-      creditable: { id: string }[];
-      /** `refundTargets`: invoices and credit notes. */
-      refundable: { kind: 'invoice' | 'credit_note'; id: string }[];
-    } | null;
+    /** `creditableInvoices`. */
+    creditable: { id: string }[];
+    /** `refundTargets`: invoices and credit notes. Null when they could not be worked out. */
+    refundable: { kind: 'invoice' | 'credit_note'; id: string }[] | null;
   },
 ): InvoiceCan {
-  const { receivable, followOn } = offers;
+  const { receivable, creditable, refundable } = offers;
   return {
     pay: receivable.some((r) => r.id === invoice.id),
-    credit: followOn !== null && followOn.creditable.some((c) => c.id === invoice.id),
-    refund: followOn !== null && followOn.refundable.some((t) => t.kind === 'invoice' && t.id === invoice.id),
+    credit: creditable.some((c) => c.id === invoice.id),
+    refund: refundable !== null && refundable.some((t) => t.kind === 'invoice' && t.id === invoice.id),
   };
 }
 

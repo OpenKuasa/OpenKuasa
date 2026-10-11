@@ -77,26 +77,30 @@ describe('invoiceCan: what the forms offer an invoice', () => {
   const inCredit = invoice('paid', { paid: 100, credited: 30, balance: -30 });
   const owing = invoice('sent');
   const receivable = [{ id: owing.id }];
-  const followOn = {
-    creditable: [{ id: owing.id }, { id: inCredit.id }],
-    refundable: [
-      { kind: 'invoice' as const, id: inCredit.id },
-      { kind: 'credit_note' as const, id: 'note-1' },
-    ],
-  };
+  const creditable = [{ id: owing.id }, { id: inCredit.id }];
+  const refundable = [
+    { kind: 'invoice' as const, id: inCredit.id },
+    { kind: 'credit_note' as const, id: 'note-1' },
+  ];
 
   it('offers each of the three exactly when its form offers the invoice', () => {
-    expect(invoiceCan(owing, { receivable, followOn })).toEqual({ pay: true, credit: true, refund: false });
-    expect(invoiceCan(inCredit, { receivable, followOn })).toEqual({ pay: false, credit: true, refund: true });
+    expect(invoiceCan(owing, { receivable, creditable, refundable })).toEqual({ pay: true, credit: true, refund: false });
+    expect(invoiceCan(inCredit, { receivable, creditable, refundable })).toEqual({ pay: false, credit: true, refund: true });
     // A credit note that can be refunded is not its invoice: an id is matched by kind.
-    expect(invoiceCan(invoice('paid', { id: 'note-1' }), { receivable, followOn })).toEqual({ pay: false, credit: false, refund: false });
+    expect(invoiceCan(invoice('paid', { id: 'note-1' }), { receivable, creditable, refundable })).toEqual({
+      pay: false,
+      credit: false,
+      refund: false,
+    });
   });
-  it('offers neither a credit note nor a refund when the credit notes or the refunds could not be read', () => {
-    expect(invoiceCan(owing, { receivable, followOn: null })).toEqual({ pay: true, credit: false, refund: false });
-    expect(invoiceCan(inCredit, { receivable, followOn: null })).toEqual({ pay: false, credit: false, refund: false });
+  it('offers no refund when the credit notes or the refunds could not be read, and still a credit note', () => {
+    // A credit note is decided from the invoice rows, which were read; only the refund needs the two lists.
+    const unread = { receivable, creditable, refundable: null };
+    expect(invoiceCan(owing, unread)).toEqual({ pay: true, credit: true, refund: false });
+    expect(invoiceCan(inCredit, unread)).toEqual({ pay: false, credit: true, refund: false });
     // The rest of each row's menu is as it was.
-    expect(invoiceActions(owing, invoiceCan(owing, { receivable, followOn: null }))).toEqual(['pay', 'einvoice', 'void']);
-    expect(invoiceActions(inCredit, invoiceCan(inCredit, { receivable, followOn: null }))).toEqual(['einvoice', 'void']);
+    expect(invoiceActions(owing, invoiceCan(owing, unread))).toEqual(['pay', 'credit', 'einvoice', 'void']);
+    expect(invoiceActions(inCredit, invoiceCan(inCredit, unread))).toEqual(['credit', 'einvoice', 'void']);
   });
 });
 
