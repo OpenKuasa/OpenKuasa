@@ -2,6 +2,7 @@
 
 import { DocumentFormCard } from '@/components/finance/document-form-card';
 import type { FinanceContact } from '@/lib/finance/contacts';
+import { withCurrentParty } from '@/lib/finance/document-form';
 import { INVOICE_FORM_KIND, invoiceFormFromDetail, newInvoiceForm } from '@/lib/finance/invoice-form';
 import type { InvoiceDetail, SaveAndPostInvoiceResult } from '@/lib/finance/invoices';
 import type { FinanceProduct } from '@/lib/finance/products';
@@ -40,11 +41,7 @@ export function InvoiceFormCard({
       kind={INVOICE_FORM_KIND}
       initial={() => (editing ? invoiceFormFromDetail(editing) : newInvoiceForm(today, 'new-0'))}
       // A customer archived since the draft was saved is still this invoice's customer.
-      parties={
-        editing && !customers.some((c) => c.id === editing.customer_id)
-          ? [{ id: editing.customer_id, name: editing.customer_name, payment_terms_days: 0 }, ...customers]
-          : customers
-      }
+      parties={withCurrentParty(customers, editing && { id: editing.customer_id, name: editing.customer_name })}
       products={products}
       actions={actions}
       onClose={onClose}

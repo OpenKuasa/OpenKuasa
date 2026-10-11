@@ -155,6 +155,19 @@ export function documentFormWords(kind: { words?: DocumentFormWords }): Document
 export type DocumentParty = { id: string; name: string; payment_terms_days: number };
 
 /**
+ * The parties a form's picker offers. `parties` are the active ones; a draft
+ * being changed may be for one that was archived since it was saved, and that
+ * party (`current`) is still the draft's: it goes first, so the picker can
+ * show it. Its payment terms are not known here and count as none, which only
+ * matters if the person changes the date and has not set the second date by
+ * hand. The same list when `current` is absent or already offered.
+ */
+export function withCurrentParty(parties: DocumentParty[], current?: { id: string; name: string }): DocumentParty[] {
+  if (!current || parties.some((p) => p.id === current.id)) return parties;
+  return [{ id: current.id, name: current.name, payment_terms_days: 0 }, ...parties];
+}
+
+/**
  * One kind of document form, for the shared card: its words, and its rules as
  * the functions of its own module (`bill-form.ts`, `invoice-form.ts`,
  * `quotation-form.ts`), which are what the tests pin.

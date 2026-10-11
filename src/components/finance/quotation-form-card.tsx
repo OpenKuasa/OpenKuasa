@@ -2,6 +2,7 @@
 
 import { DocumentFormCard } from '@/components/finance/document-form-card';
 import type { FinanceContact } from '@/lib/finance/contacts';
+import { withCurrentParty } from '@/lib/finance/document-form';
 import type { FinanceProduct } from '@/lib/finance/products';
 import { QUOTATION_FORM_KIND, newQuotationForm, quotationFormFromDetail } from '@/lib/finance/quotation-form';
 import type { QuotationDetail, SaveAndSendQuotationResult } from '@/lib/finance/quotations';
@@ -42,11 +43,7 @@ export function QuotationFormCard({
       kind={QUOTATION_FORM_KIND}
       initial={() => (editing ? quotationFormFromDetail(editing) : newQuotationForm(today, 'new-0'))}
       // A customer archived since the draft was saved is still this quotation's customer.
-      parties={
-        editing && !customers.some((c) => c.id === editing.customer_id)
-          ? [{ id: editing.customer_id, name: editing.customer_name, payment_terms_days: 0 }, ...customers]
-          : customers
-      }
+      parties={withCurrentParty(customers, editing && { id: editing.customer_id, name: editing.customer_name })}
       products={products}
       actions={actions}
       onClose={onClose}
