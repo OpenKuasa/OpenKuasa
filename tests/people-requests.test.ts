@@ -4,6 +4,7 @@ import {
   buildLeaveModel,
   buildOtModel,
   buildTimeOffModel,
+  canCancelPayRequest,
   canCancelRequest,
 } from '@/lib/people/requests';
 import { createSeedPeopleData } from '@/lib/people/seed';
@@ -326,5 +327,102 @@ describe('canCancelRequest', () => {
       't-pending-2026-10-20': true,
       [`t-approved-${TODAY}`]: false,
     });
+  });
+});
+
+describe('canCancelPayRequest', () => {
+  it('allows a claim or overtime request only while it is pending', () => {
+    expect(canCancelPayRequest('pending')).toBe(true);
+    for (const status of ['approved', 'rejected', 'cancelled', 'paid'] as const) {
+      expect(canCancelPayRequest(status)).toBe(false);
+    }
+  });
+});
+
+describe('claim rows for the member', () => {
+  const base = { employee_id: 'e', employee_name: 'E', description: null, has_receipt: false, decision_note: null, receipt_path: null, paid_on: null, paid_reference: null, created_at: '2026-10-01T00:00:00Z', category: 'travel' as const, amount_cents: 1000, claim_date: '2026-10-02' };
+
+  it('marks only pending rows cancellable, never a paid one', () => {
+    const model = buildClaimsModel(
+      (['pending', 'approved', 'rejected', 'cancelled', 'paid'] as const).map((status) => ({ ...base, id: status, status })),
+      MEMBER_E,
+      TODAY,
+    );
+    if (!model.linked) throw new Error('expected linked');
+    expect(model.rows.filter((r) => r.cancellable).map((r) => r.id)).toEqual(['pending']);
+  });
+
+  it('carries the rejection note only for a rejected claim', () => {
+    const model = buildClaimsModel(
+      [
+        { ...base, id: 'a', status: 'rejected', decision_note: ' No receipt ' },
+        { ...base, id: 'b', status: 'approved', decision_note: 'Fine' },
+        { ...base, id: 'c', status: 'rejected', decision_note: '  ' },
+      ],
+      MEMBER_E,
+      TODAY,
+    );
+    if (!model.linked) throw new Error('expected linked');
+    const note = (id: string) => model.rows.find((r) => r.id === id)?.note;
+    expect(note('a')).toBe('No receipt');
+    expect(note('b')).toBeNull();
+    expect(note('c')).toBeNull();
+  });
+
+  it('says whether there is a file, and the date paid on a paid claim only', () => {
+    const model = buildClaimsModel(
+      [
+        { ...base, id: 'f', status: 'approved', has_receipt: true, receipt_path: 'u/f.pdf' },
+        { ...base, id: 't', status: 'approved', has_receipt: true },
+        { ...base, id: 'p', status: 'paid', paid_on: '2026-10-08' },
+        { ...base, id: 'q', status: 'approved', paid_on: '2026-10-08' },
+      ],
+      MEMBER_E,
+      TODAY,
+    );
+    if (!model.linked) throw new Error('expected linked');
+    const row = (id: string) => model.rows.find((r) => r.id === id)!;
+    expect([row('f').hasFile, row('f').receipt]).toEqual([true, true]);
+    expect([row('t').hasFile, row('t').receipt]).toEqual([false, true]);
+    expect([row('p').hasFile, row('p').receipt]).toEqual([false, false]);
+    expect(row('p').paidOn).toBe('08 Oct 2026');
+    expect(row('q').paidOn).toBeNull();
+    expect(JSON.stringify(model)).not.toContain('u/f.pdf');
+  });
+});
+
+describe('overtime rows for the member', () => {
+  const base = { employee_id: 'e', employee_name: 'E', reason: null, decision_note: null, created_at: '2026-10-01T00:00:00Z', work_date: '2026-10-05', hours: 2, rate_multiplier: 1.5 };
+
+  it('shows the kind of day, and "Not calculated" when there is no rate', () => {
+    const model = buildOtModel(
+      [
+        { ...base, id: 'a', status: 'pending', day_kind: 'rest_day', hourly_rate_cents: 2500, amount_cents: 15000 },
+        { ...base, id: 'b', status: 'pending', day_kind: null, hourly_rate_cents: null, amount_cents: 0 },
+      ],
+      MEMBER_E,
+      TODAY,
+    );
+    if (!model.linked) throw new Error('expected linked');
+    const row = (id: string) => model.rows.find((r) => r.id === id)!;
+    expect(row('a')).toMatchObject({ dayKind: 'Rest day', amount: 'RM 150.00' });
+    expect(row('b')).toMatchObject({ dayKind: '—', amount: 'Not calculated' });
+  });
+
+  it('marks only pending rows cancellable and carries the rejection note', () => {
+    const rate = { hourly_rate_cents: 2500, amount_cents: 7500, day_kind: 'weekday' as const };
+    const model = buildOtModel(
+      [
+        { ...base, ...rate, id: 'p', status: 'pending' },
+        { ...base, ...rate, id: 'x', status: 'rejected', decision_note: 'Not authorised' },
+        { ...base, ...rate, id: 'o', status: 'approved', decision_note: 'ok' },
+      ],
+      MEMBER_E,
+      TODAY,
+    );
+    if (!model.linked) throw new Error('expected linked');
+    expect(model.rows.filter((r) => r.cancellable).map((r) => r.id)).toEqual(['p']);
+    expect(model.rows.find((r) => r.id === 'x')?.note).toBe('Not authorised');
+    expect(model.rows.find((r) => r.id === 'o')?.note).toBeNull();
   });
 });

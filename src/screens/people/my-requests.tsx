@@ -66,7 +66,7 @@ export function requestCancelCell({
 }: {
   cancellable: boolean;
   isDemo: boolean;
-  kind: 'leave' | 'time-off';
+  kind: 'leave' | 'time-off' | 'claim' | 'overtime';
   id: string;
 }): ReactNode {
   if (!cancellable) return null;
