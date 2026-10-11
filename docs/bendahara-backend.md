@@ -120,7 +120,10 @@ credit note, with a `reason` on the allocation (`order_cancelled`,
 `damaged_goods`, `wrong_item`, `overpayment`, `other`). It is paid out at once
 (`posted`, numbered `PV-`) or left pending (`scheduled`). A pending refund is
 marked paid by `finance_mark_payment_paid` or deleted; a refund that was paid
-out can only be voided. These are the function, the delete and the update a
+out can only be voided. When a pending refund is paid out, the cap on the
+invoice's credit and the credit note's amount are both looked at again,
+counting the refund itself, and it is refused with `FIN05` if it no longer
+fits. These are the function, the delete and the update a
 payment to a supplier uses, but `markRefundPaid`, `voidRefund` and
 `deleteRefund` in `refunds.ts` first read the view `finance_refunds` for the
 workspace and the transaction, and refuse with "That refund no longer exists."
@@ -228,7 +231,12 @@ the same customer, notes and lines, dated today, due after the customer's
 payment terms, with `quotation_id` set. A quotation has one invoice at a time
 (a unique index on `finance_invoices`); a void invoice does not count, so a
 quotation whose invoice was voided, or deleted as a draft, can be converted
-again. The invoice is an ordinary draft afterwards. The funnel on the screen
+again. The invoice is an ordinary draft afterwards, and it stays tied to the
+quotation while its customer stays the same. Changing the invoice's customer
+removes the tie: the database clears `quotation_id` in the same update, the
+invoice carries on as a draft with no quotation behind it, the quotation shows
+no invoice, and it can be converted again. A quotation therefore never shows
+an invoice that belongs to another customer. The funnel on the screen
 has three steps, created, sent and accepted: nothing tracks a customer opening
 a quotation.
 
@@ -272,6 +280,9 @@ Triggers enforce it, so no caller can get round it:
   voided either.
 - `quotation_id` on an invoice may only name an accepted quotation of the
   same customer, checked when the tie is made; a draft invoice can be untied.
+  When a draft's customer is changed and the tie is left as it was, the guard
+  on invoices clears `quotation_id` itself, so the tie never outlives the
+  customer it was checked for.
 - A quotation is created as a draft, edited and deleted only as a draft, and
   sent only once its lines add up to more than zero. Sent, accepted or
   declined, nothing on it changes but the answer; once an invoice stands for
@@ -283,7 +294,20 @@ Triggers enforce it, so no caller can get round it:
 - A refund needs the customer to be in credit on the invoice and can be no
   more than that credit, counting refunds that are pending; against a credit
   note it is also never more than the note. The invoice row is locked while
-  this is checked. It is checked again when a pending refund is paid out.
+  this is checked. When a refund that was not yet paid out becomes `posted`,
+  the cap and the credit note's amount are both looked at again, counting the
+  refund itself: the refund, plus the refunds of other payments that are still
+  waiting, must fit in what the customer is in credit on the invoice (`FIN05`);
+  a refund against a credit note needs the note to be issued still (`FIN04`)
+  and, with every other refund standing against that note, must not exceed
+  the note's amount (`FIN05`). The refund's own amount is counted whatever
+  status it comes from, so a refund that was rejected, and so held no credit
+  while another refund took it, cannot be paid out on top of that one. The
+  credit notes and then the invoices are locked while this is read.
+- The guards on allocations, credit notes and payments read what an invoice
+  owes from `finance_invoice_totals`. If the view gives them no row for the
+  invoice, they refuse the write with `FIN04` instead of letting it through
+  unchecked.
 - On a posted invoice two columns may still change, `einvoice_status` and
   `einvoice_uuid` (with `updated_at`), and nothing else in the same update.
 - A payment in cannot exceed what is still owed on an invoice. The invoice row
@@ -350,7 +374,7 @@ quotation, a credit note or a refund by the file that made the call.
 | `FIN02` | The bill or invoice has payments (posted, scheduled or in progress), so it cannot be voided; for an invoice a refund put against it counts as one. Also: a credit note cannot be voided while a refund is allocated to it, or while the refunds on its invoice would not fit in the customer's credit without it |
 | `FIN03` | The allocations add up to more than the payment. Also: a payment that has been split across documents cannot be changed to an amount below the sum of its split (money out or money in, while it is not yet posted) |
 | `FIN04` | A payment can only go against a posted bill or a posted invoice; only money out pays a bill, and only money in pays an invoice. Money out against an invoice is a refund, and is this code unless the customer is in credit on that invoice; a refund against a credit note needs the note to be issued, and money in never goes against a credit note. Also: a payment that has been split across documents cannot change direction (money out or money in, while it is not yet posted); a credit note can only go against a posted invoice; only an accepted quotation becomes an invoice, and an invoice can only be tied to an accepted quotation of the same customer |
-| `FIN05` | The amount is more than is still owed on the bill or the invoice, counting payments that are posted, scheduled, draft or pending approval. For a refund: more than the customer is in credit on the invoice, counting pending refunds, or more than is left of the credit note; also when a pending refund is paid out after that credit has gone. For a credit note: more than the invoice's total less what is already credited |
+| `FIN05` | The amount is more than is still owed on the bill or the invoice, counting payments that are posted, scheduled, draft or pending approval. For a refund: more than the customer is in credit on the invoice, counting pending refunds, or more than is left of the credit note; also when a refund is paid out later and no longer fits in that credit or in its credit note, the refund itself counted. For a credit note: more than the invoice's total less what is already credited |
 | `FIN06` | No bill was chosen or found, or the bills belong to different suppliers; for money in, no invoice was chosen or found, or the invoices belong to different customers; for a refund, it names no document, or an invoice and a credit note at once, or one that is not in the workspace |
 | `FIN07` | The contact has bills, so Supplier cannot be unticked |
 | `FIN08` | The contact has invoices or quotations, so Customer cannot be unticked |
@@ -460,9 +484,15 @@ instead."; see Known limits.
   the invoice then shows the customer owing again, the refund included, which
   is what is true. A refund that was still pending at that moment can no
   longer be marked paid (`FIN05`); delete it.
-- That second look at a pending refund reads the invoice without locking it. A
-  payment in voided at the very moment a pending refund on the same invoice is
-  marked paid can slip past it; the invoice then shows the customer owing.
+- That second look at a pending refund locks the invoice, so two refunds paid
+  out at the same moment are checked one after the other. Voiding a payment in
+  does not take that lock, so a payment in voided at the very moment a pending
+  refund on the same invoice is marked paid can slip past it; the invoice then
+  shows the customer owing.
+- A payment that was rejected can still be posted by a direct update; nothing
+  in the app sets or leaves `rejected`. For a refund, that update is checked in
+  full as above. For a payment to a supplier or a payment in, it is not looked
+  at again.
 - A refund is to one customer against one invoice or one credit note. One
   payment out that refunds several invoices is not recorded as one refund.
 - The reason of a refund is one of five words; anything more is in the
@@ -470,8 +500,9 @@ instead."; see Known limits.
 - A void invoice does not hold its quotation: the quotation can be converted
   again, and the void invoice keeps `quotation_id` as a record of where it
   came from.
-- Editing the draft invoice made from a quotation can change its customer; the
-  tie to the quotation is checked only when it is made.
+- Editing the draft invoice made from a quotation can change its customer.
+  The invoice is then untied from the quotation without a word to the person
+  editing it; the quotation shows no invoice and can be converted again.
 - The demo workspace's quotations, credit notes and refunds were dated from
   the day they were seeded, so its Sent quotations turn Expired as time passes
   and its month-to-date figures empty out.
