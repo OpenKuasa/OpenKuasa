@@ -118,6 +118,14 @@ describe('contact writes', () => {
       error: 'This contact has supplier bills, so it has to stay a supplier.',
     });
   });
+  it('explains that a customer with invoices cannot stop being a customer', async () => {
+    const { ctx } = fakeClient({ data: null, error: { code: 'FIN08' } });
+    expect(await updateContact(ctx, { id: ID, is_customer: false, is_supplier: true })).toEqual({
+      ok: false,
+      error: 'This contact has invoices, so it has to stay a customer.',
+    });
+    expect(logged).not.toHaveBeenCalled();
+  });
   it('hides any other database error behind a general message and logs it', async () => {
     const { ctx } = fakeClient({ data: null, error: { code: 'XX000', message: 'boom' } });
     expect(await createContact(ctx, { name: 'A', is_customer: true, is_supplier: false })).toEqual({

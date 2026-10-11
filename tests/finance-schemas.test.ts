@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { billIdInput, saveBillInput } from '@/lib/finance/bills';
 import { createContactInput, updateContactInput } from '@/lib/finance/contacts';
-import { markPaymentPaidInput, paymentIdInput, recordPaymentOutInput } from '@/lib/finance/money';
+import { invoiceIdInput, saveInvoiceInput } from '@/lib/finance/invoices';
+import { markPaymentPaidInput, paymentIdInput, recordPaymentInInput, recordPaymentOutInput } from '@/lib/finance/money';
 import { createProductInput, updateProductInput } from '@/lib/finance/products';
 
 const ID = '11111111-1111-4111-8111-111111111111';
@@ -46,6 +47,31 @@ const cases: [string, { parse: (v: unknown) => unknown }, unknown][] = [
   ['saveBillInput (an SST rate with three decimals)', saveBillInput, {
     supplier_id: ID, bill_date: '2026-10-01', due_date: '2026-10-31',
     lines: [{ description: 'Gloves', quantity: 1, unit_price: 10, sst_rate: 1.005 }, { description: 'Ink', quantity: 1, unit_price: 10, sst_rate: 0.145 }],
+  }],
+  ['saveInvoiceInput', saveInvoiceInput, {
+    customer_id: ID, invoice_date: '2026-10-01', due_date: '2026-10-31', notes: '',
+    lines: [{ description: ' Design work ', quantity: 1.23456, unit_price: 0.123456, uom: '', product_id: '' }],
+  }],
+  ['saveInvoiceInput (smallest quantity, an SST rate with three decimals)', saveInvoiceInput, {
+    customer_id: ID, invoice_date: '2026-10-01', due_date: '2026-10-31',
+    lines: [{ description: 'Design work', quantity: 0.0005, unit_price: 10, sst_rate: 1.005 }, { description: 'Hosting', quantity: 1, unit_price: 10, sst_rate: 0.145 }],
+  }],
+  ['saveInvoiceInput (a draft being changed, with a product)', saveInvoiceInput, {
+    id: ID, customer_id: ID, invoice_date: '2026-10-01', due_date: '2026-10-01', notes: ' Net 30 ',
+    lines: [{ product_id: ID, description: 'Ink', quantity: 2, uom: ' box ', pack_size: ' box of 4 ', unit_price: 14.5, sst_rate: 6 }],
+  }],
+  ['invoiceIdInput', invoiceIdInput, { id: ID }],
+  ['recordPaymentInInput', recordPaymentInInput, {
+    account_id: ID, txn_date: '2026-10-05', method: 'fpx', reference: ' ',
+    allocations: [{ invoice_id: ID, amount: 32.506 }],
+  }],
+  ['recordPaymentInInput (smallest amount)', recordPaymentInInput, {
+    account_id: ID, txn_date: '2026-10-05', method: 'fpx',
+    allocations: [{ invoice_id: ID, amount: 0.005 }],
+  }],
+  ['recordPaymentInInput (two invoices, a reference and a note)', recordPaymentInInput, {
+    account_id: ID, txn_date: '2026-10-20', method: 'cheque', reference: ' CHQ 001 ', notes: ' banked ',
+    allocations: [{ invoice_id: ID, amount: 10.005 }, { invoice_id: '22222222-2222-4222-8222-222222222222', amount: 5 }],
   }],
 ];
 

@@ -43,6 +43,7 @@ export const CONTACT_MESSAGES = {
   gone: 'That contact no longer exists.',
   inUse: 'This contact is used on bills or other documents. Archive it instead.',
   hasBills: 'This contact has supplier bills, so it has to stay a supplier.',
+  hasInvoices: 'This contact has invoices, so it has to stay a customer.',
 } as const;
 
 const M = CONTACT_MESSAGES;
@@ -107,6 +108,7 @@ function contactWriteFailed(fnName: string, error: unknown): { ok: false; error:
   const code = pgCode(error);
   if (code === PG_FOREIGN_KEY) return { ok: false, error: M.inUse };
   if (code === 'FIN07') return { ok: false, error: M.hasBills };
+  if (code === 'FIN08') return { ok: false, error: M.hasInvoices };
   if (code === PG_CHECK) return { ok: false, error: M.role };
   return writeFailed(fnName, error);
 }

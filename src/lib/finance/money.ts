@@ -1,8 +1,10 @@
 /**
  * Money moving in and out. Each movement is one finance_transactions row,
- * split across the documents it pays by finance_allocations. So far the only
- * movement is a payment out against supplier bills. A paid payment is locked
- * and can only be voided; a scheduled one can be changed or deleted.
+ * split across the documents it pays by finance_allocations: a payment out
+ * against one supplier's bills, or a payment in against one customer's
+ * invoices. A posted payment is locked and can only be voided; a scheduled
+ * payment out can be deleted. Money in is never scheduled: it is recorded
+ * once it has arrived.
  */
 import { z } from 'zod';
 import { isIsoDate } from './bills';
@@ -32,6 +34,7 @@ export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
 };
 
 export const PAYMENT_BILLS_MAX = 50;
+export const PAYMENT_INVOICES_MAX = 50;
 export const PAYMENT_PAGE_SIZE = 1000;
 
 export const MONEY_MESSAGES = {
@@ -53,6 +56,27 @@ export const MONEY_MESSAGES = {
 } as const;
 
 const M = MONEY_MESSAGES;
+
+/** The sentences of a payment in. Where a payment out says the same thing, it is the same sentence. */
+export const RECEIPT_MESSAGES = {
+  account: 'Choose the account the money went into.',
+  date: M.date,
+  method: M.method,
+  invoices: 'Choose at least one invoice this payment is for.',
+  tooManyInvoices: `One payment can cover at most ${PAYMENT_INVOICES_MAX} invoices.`,
+  amount: M.amount,
+  duplicate: 'Each invoice can appear once on a payment.',
+  tooLong: M.tooLong,
+  gone: M.gone,
+  overSplit: 'The amounts against the invoices add up to more than the payment.',
+  notPosted: 'A payment can only go against a posted invoice.',
+  tooMuch: 'That is more than is still owed on an invoice.',
+  oneCustomer: 'One payment can only pay invoices from one customer.',
+  locked: M.locked,
+  missing: 'The account or an invoice on this payment no longer exists.',
+} as const;
+
+const R = RECEIPT_MESSAGES;
 
 const date = z.string({ error: M.date }).refine(isIsoDate, M.date);
 const text = z
@@ -82,6 +106,20 @@ export const recordPaymentOutInput = z.object({
     .refine((rows) => new Set(rows.map((r) => r.bill_id)).size === rows.length, M.duplicate),
 });
 
+/** Money received from one customer, split across that customer's posted invoices. It is posted at once. */
+export const recordPaymentInInput = z.object({
+  account_id: z.string({ error: R.account }).uuid(R.account),
+  txn_date: date,
+  method: z.enum(PAYMENT_METHODS, { error: R.method }),
+  reference: text.default(null),
+  notes: text.default(null),
+  allocations: z
+    .array(z.object({ invoice_id: z.string({ error: R.invoices }).uuid(R.invoices), amount }), { error: R.invoices })
+    .min(1, R.invoices)
+    .max(PAYMENT_INVOICES_MAX, R.tooManyInvoices)
+    .refine((rows) => new Set(rows.map((r) => r.invoice_id)).size === rows.length, R.duplicate),
+});
+
 export const markPaymentPaidInput = z.object({ id, paid_on: date });
 export const paymentIdInput = z.object({ id });
 
@@ -97,8 +135,22 @@ const REFUSALS: Record<string, string> = {
   [PG_OUT_OF_RANGE]: TOO_LARGE,
 };
 
-function moneyWriteFailed(fnName: string, error: unknown): { ok: false; error: string } {
-  const refusal = REFUSALS[pgCode(error) ?? ''];
+/** The same database codes, worded for money in: the documents are invoices and the party is a customer. */
+const RECEIPT_REFUSALS: Record<string, string> = {
+  ...REFUSALS,
+  FIN03: R.overSplit,
+  FIN04: R.notPosted,
+  FIN05: R.tooMuch,
+  FIN06: R.oneCustomer,
+  [PG_FOREIGN_KEY]: R.missing,
+};
+
+function moneyWriteFailed(
+  fnName: string,
+  error: unknown,
+  refusals: Record<string, string> = REFUSALS,
+): { ok: false; error: string } {
+  const refusal = refusals[pgCode(error) ?? ''];
   return refusal ? { ok: false, error: refusal } : writeFailed(fnName, error);
 }
 
@@ -119,6 +171,8 @@ export async function listAccounts(ctx: FinanceWriteContext): Promise<FinanceAcc
   return (data ?? []) as unknown as FinanceAccount[];
 }
 
+type TransactionStatus = 'draft' | 'pending_approval' | 'scheduled' | 'posted' | 'rejected' | 'void';
+
 /** One row per bill a payment out pays. A voided payment is included; callers filter. */
 export type PaymentOutRow = {
   allocation_id: string;
@@ -128,7 +182,7 @@ export type PaymentOutRow = {
   method: PaymentMethod;
   amount: number;
   transaction_amount: number;
-  status: 'draft' | 'pending_approval' | 'scheduled' | 'posted' | 'rejected' | 'void';
+  status: TransactionStatus;
   reference: string | null;
   account_id: string;
   account_name: string;
@@ -137,15 +191,45 @@ export type PaymentOutRow = {
   supplier_name: string;
 };
 
-const PAYMENT_COLUMNS =
-  'allocation_id,transaction_id,number,txn_date,method,amount,transaction_amount,status,reference,account_id,account_name,bill_id,bill_no,supplier_name';
+/**
+ * One row per invoice a payment in pays. `allocation_id` is the row's key: a
+ * payment split across invoices is several rows with one `transaction_id`,
+ * whose amounts add up to `transaction_amount`. A voided payment is included;
+ * callers filter.
+ */
+export type PaymentInRow = {
+  allocation_id: string;
+  transaction_id: string;
+  number: string | null;
+  txn_date: string;
+  method: PaymentMethod;
+  amount: number;
+  transaction_amount: number;
+  status: TransactionStatus;
+  reference: string | null;
+  account_id: string;
+  account_name: string;
+  invoice_id: string;
+  invoice_no: string | null;
+  customer_name: string;
+};
 
-export async function listPaymentsOut(ctx: FinanceWriteContext): Promise<PaymentOutRow[]> {
-  const rows: PaymentOutRow[] = [];
+const PAYMENT_COLUMNS =
+  'allocation_id,transaction_id,number,txn_date,method,amount,transaction_amount,status,reference,account_id,account_name';
+const PAYMENT_OUT_COLUMNS = `${PAYMENT_COLUMNS},bill_id,bill_no,supplier_name`;
+const PAYMENT_IN_COLUMNS = `${PAYMENT_COLUMNS},invoice_id,invoice_no,customer_name`;
+
+/** Every row of one of the two payment views, newest first, read a page at a time. */
+async function listPaymentRows<T extends { amount: number; transaction_amount: number }>(
+  ctx: FinanceWriteContext,
+  view: 'finance_payments_out' | 'finance_payments_in',
+  columns: string,
+): Promise<T[]> {
+  const rows: T[] = [];
   for (let from = 0; ; from += PAYMENT_PAGE_SIZE) {
     const { data, error } = await ctx.client
-      .from('finance_payments_out')
-      .select(PAYMENT_COLUMNS)
+      .from(view)
+      .select(columns)
       .eq('org_id', ctx.orgId)
       .order('txn_date', { ascending: false })
       .order('allocation_id', { ascending: true })
@@ -154,13 +238,21 @@ export async function listPaymentsOut(ctx: FinanceWriteContext): Promise<Payment
     const page = (data ?? []) as unknown as Record<string, unknown>[];
     rows.push(
       ...page.map((r) => ({
-        ...(r as unknown as PaymentOutRow),
+        ...(r as unknown as T),
         amount: Number(r.amount),
         transaction_amount: Number(r.transaction_amount),
       })),
     );
     if (page.length < PAYMENT_PAGE_SIZE) return rows;
   }
+}
+
+export async function listPaymentsOut(ctx: FinanceWriteContext): Promise<PaymentOutRow[]> {
+  return listPaymentRows<PaymentOutRow>(ctx, 'finance_payments_out', PAYMENT_OUT_COLUMNS);
+}
+
+export async function listPaymentsIn(ctx: FinanceWriteContext): Promise<PaymentInRow[]> {
+  return listPaymentRows<PaymentInRow>(ctx, 'finance_payments_in', PAYMENT_IN_COLUMNS);
 }
 
 /* ---- writes ----------------------------------------------------------- */
@@ -180,6 +272,21 @@ export async function recordPaymentOut(
   return { ok: true, data: { id: data as string } };
 }
 
+/** Records money received from one customer, split across that customer's posted invoices. It is posted at once. */
+export async function recordPaymentIn(
+  ctx: FinanceWriteContext,
+  input: z.input<typeof recordPaymentInInput>,
+): Promise<FinResult<{ id: string }>> {
+  const { allocations, ...payment } = recordPaymentInInput.parse(input);
+  const { data, error } = await ctx.client.rpc('finance_record_payment_in', {
+    target_org: ctx.orgId,
+    payment,
+    allocations,
+  });
+  if (error || !data) return moneyWriteFailed('recordPaymentIn', error, RECEIPT_REFUSALS);
+  return { ok: true, data: { id: data as string } };
+}
+
 /** A scheduled payment has now been made: it gets its number and reduces the bill. */
 export async function markPaymentPaid(
   ctx: FinanceWriteContext,
@@ -195,7 +302,11 @@ export async function markPaymentPaid(
   return { ok: true, data: { id: txnId, number: data as string } };
 }
 
-/** Voids a paid payment. The bills it paid owe that amount again. */
+/**
+ * Voids a posted payment, money out or money in: it is one status change on
+ * finance_transactions whichever way the money went. The bills or invoices it
+ * paid owe that amount again.
+ */
 export async function voidPayment(
   ctx: FinanceWriteContext,
   input: z.input<typeof paymentIdInput>,
