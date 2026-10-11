@@ -69,28 +69,37 @@ export async function suggestProposals(
   apiKey: string,
   context: string,
   candidates: { index: number; title: string }[],
-): Promise<{ keep: { index: number; rationale: string }[]; cost_cents: number }> {
+  trend?: string,
+): Promise<{ keep: { index: number; rationale: string; name?: string }[]; cost_cents: number }> {
   const list = candidates.map((c) => `${c.index}. ${c.title}`).join('\n');
   const prompt = [
     'You help a small business owner decide which suggested CRM changes are worth queueing for their approval.',
     'Choose ONLY from the numbered candidates below. Do not invent new items or change them.',
-    'Reply with JSON only: an array of {"index": number, "rationale": string} objects, where rationale is one short sentence. Reply [] if none are worthwhile.',
+    'Reply with JSON only: an array of {"index": number, "rationale": string} objects, where rationale is one short sentence.',
+    'If a candidate is about creating a lead-capture form, also include a short "name" (max 60 characters) for the draft form, inspired by this week\'s market angles.',
+    'Reply [] if none are worthwhile.',
     '',
     `Business snapshot:\n${context}`,
+    ...(trend ? ['', `This week's market angles:\n${trend}`] : []),
     '',
     `Candidates:\n${list}`,
   ].join('\n');
   const { text, cost_cents } = await complete(apiKey, DIGEST_MODEL(), prompt);
-  const keep: { index: number; rationale: string }[] = [];
+  const keep: { index: number; rationale: string; name?: string }[] = [];
   const match = text.match(/\[[\s\S]*\]/);
   if (match) {
     try {
       const parsed: unknown = JSON.parse(match[0]);
       if (Array.isArray(parsed)) {
         for (const item of parsed) {
-          const { index, rationale } = (item ?? {}) as { index?: unknown; rationale?: unknown };
+          const { index, rationale, name } = (item ?? {}) as {
+            index?: unknown;
+            rationale?: unknown;
+            name?: unknown;
+          };
           if (typeof index === 'number' && Number.isInteger(index) && typeof rationale === 'string') {
-            keep.push({ index, rationale: rationale.trim() });
+            const named = typeof name === 'string' && name.trim() ? { name: name.trim() } : {};
+            keep.push({ index, rationale: rationale.trim(), ...named });
           }
         }
       }

@@ -186,7 +186,7 @@ export async function runWeeklyStudio(
         orgId,
         runId,
         apiKey,
-        { leads, appts, context },
+        { leads, appts, context, trend: search.text },
         maxCost,
         cost,
       );

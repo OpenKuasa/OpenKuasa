@@ -22,17 +22,28 @@ const lead = (over: Partial<Record<string, unknown>> = {}) =>
 function fakeService(
   pending: { action: string; input: unknown }[] = [],
   selectError: { message: string; code?: string } | null = null,
+  // The recent-form gate (`select('id')`) is a distinct query; control it separately.
+  recentForms: { id: string }[] = [],
+  recentError: { message: string; code?: string } | null = null,
 ) {
   const inserts: Record<string, unknown>[] = [];
   const client = {
     from() {
-      // Chainable select: any number of .eq() calls, awaitable at the end.
-      const chain: Record<string, unknown> = {
-        eq: () => chain,
-        then: (resolve: (v: unknown) => void) => resolve({ data: pending, error: selectError }),
+      // `select('id')` is the recent-form gate; anything else is the dedupe fetch.
+      const select = (cols: string) => {
+        const isRecentFormGate = cols === 'id';
+        const data = isRecentFormGate ? recentForms : pending;
+        const error = isRecentFormGate ? recentError : selectError;
+        const chain: Record<string, unknown> = {
+          eq: () => chain,
+          gte: () => chain,
+          limit: () => chain,
+          then: (resolve: (v: unknown) => void) => resolve({ data, error }),
+        };
+        return chain;
       };
       return {
-        select: () => chain,
+        select,
         insert: async (row: Record<string, unknown>) => {
           inserts.push(row);
           return { error: null };
@@ -193,5 +204,89 @@ describe('proposeChanges gate', () => {
     expect(arg[1]).toBe('ctx');
     expect(arg[2]).toEqual([{ index: 0, title: expect.any(String) }]);
     expect(Object.keys(arg[2][0]).sort()).toEqual(['index', 'title']);
+  });
+
+  it('offers a draft form for the trend and queues it with the model-supplied name (rule 4)', async () => {
+    vi.mocked(suggestProposals).mockResolvedValue({
+      keep: [{ index: 0, rationale: 'Capture interest in the seasonal angle.', name: 'Raya Promo Leads' }],
+      cost_cents: 2,
+    });
+    const { client, inserts } = fakeService();
+    const res = await proposeChanges(
+      client,
+      'org-1',
+      'run-1',
+      'key',
+      { leads: [], appts: [], context: 'ctx', trend: 'Raya season gifting' },
+      200,
+      10,
+    );
+    // The trend reaches the seam as the 4th arg; channel/status are server-forced.
+    expect(vi.mocked(suggestProposals).mock.calls[0][3]).toBe('Raya season gifting');
+    expect(res.proposed).toBe(1);
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0]).toMatchObject({
+      action: 'createForm',
+      status: 'pending',
+      input: { name: 'Raya Promo Leads', channel: null, status: 'draft', category: null },
+    });
+    expect(inserts[0].title).toContain('Raya Promo Leads');
+  });
+
+  it('does not offer a form, or call the LLM, when there is no trend', async () => {
+    const { client, inserts } = fakeService();
+    const res = await proposeChanges(client, 'org-1', 'run-1', 'key', { leads: [], appts: [], context: 'ctx' }, 200, 10);
+    expect(suggestProposals).not.toHaveBeenCalled();
+    expect(res).toEqual({ proposed: 0, cost_cents: 0 });
+    expect(inserts).toHaveLength(0);
+  });
+
+  it('does not offer a form when one was proposed recently (any status)', async () => {
+    // recent-form gate finds a prior proposal within the cooldown → suppressed.
+    const { client, inserts } = fakeService([], null, [{ id: 'f1' }]);
+    const res = await proposeChanges(
+      client,
+      'org-1',
+      'run-1',
+      'key',
+      { leads: [], appts: [], context: 'ctx', trend: 'Raya season gifting' },
+      200,
+      10,
+    );
+    expect(suggestProposals).not.toHaveBeenCalled();
+    expect(res.proposed).toBe(0);
+    expect(inserts).toHaveLength(0);
+  });
+
+  it('fails closed (does not offer a form) when the recent-form gate errors', async () => {
+    const { client, inserts } = fakeService([], null, [], { message: 'boom' });
+    const res = await proposeChanges(
+      client,
+      'org-1',
+      'run-1',
+      'key',
+      { leads: [], appts: [], context: 'ctx', trend: 'Raya season gifting' },
+      200,
+      10,
+    );
+    expect(suggestProposals).not.toHaveBeenCalled();
+    expect(res.proposed).toBe(0);
+    expect(inserts).toHaveLength(0);
+  });
+
+  it('drops the form when the model returns no name', async () => {
+    vi.mocked(suggestProposals).mockResolvedValue({ keep: [{ index: 0, rationale: 'x' }], cost_cents: 1 });
+    const { client, inserts } = fakeService();
+    const res = await proposeChanges(
+      client,
+      'org-1',
+      'run-1',
+      'key',
+      { leads: [], appts: [], context: 'ctx', trend: 'Raya season gifting' },
+      200,
+      10,
+    );
+    expect(res.proposed).toBe(0);
+    expect(inserts).toHaveLength(0);
   });
 });
