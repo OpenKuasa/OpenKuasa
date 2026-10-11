@@ -62,8 +62,19 @@ export type PaymentVoucherRow = {
   /** Who was paid: the contact's name, or the name that was typed. */
   party_name: string | null;
   kind: PaymentVoucherKind;
+  /**
+   * The payment's own category. A voucher of kind `other` carries one. A
+   * payment to a supplier and a refund are recorded without one, and so is a
+   * voucher that pays expenses (`finance_record_voucher` refuses one there),
+   * so for kind `expense` this is null: the view gives the name of the
+   * expenses' category and no id for it.
+   */
   category_id: string | null;
-  /** The voucher's own category, or the one its expenses share; nothing for a bill, a refund, or expenses of several categories. */
+  /**
+   * `expense`: the name of the category its expenses share, or nothing when
+   * they are of several. Every other kind: the name of the payment's own
+   * category, which a bill and a refund do not have.
+   */
   category_name: string | null;
   /** The numbers of the bills, invoices or credit notes it pays; an expense has no number. */
   documents: string | null;

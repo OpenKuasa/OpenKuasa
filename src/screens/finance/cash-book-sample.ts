@@ -106,7 +106,8 @@ const voucher = (
   contact_id: null,
   party_name,
   kind,
-  category_id: category_name,
+  // As the view gives it: a voucher that pays expenses has no category of its own, only the name its expenses share.
+  category_id: kind === 'expense' ? null : category_name,
   category_name,
   documents,
   approved_at: kind === 'other' && status !== 'pending_approval' ? `${txn_date}T02:00:00Z` : null,

@@ -78,10 +78,17 @@ function totalsBy<T>(
   return totals;
 }
 
-/** What a voucher is grouped by: a supplier payment or a refund by its kind, the rest by their category's id (a missing category by its kind). */
+/**
+ * What a voucher is grouped by: a supplier payment or a refund by its kind,
+ * a voucher with a category of its own by that category's id, and a voucher
+ * that pays expenses by the name of the category those expenses share, within
+ * its kind. A voucher with no category to name is grouped by its kind.
+ */
 function voucherCategoryKey(row: PaymentVoucherRow): string {
   if (row.kind === 'bill' || row.kind === 'refund') return `kind:${row.kind}`;
-  return row.category_id && row.category_name ? `category:${row.category_id}` : `none:${row.kind}`;
+  if (row.category_id && row.category_name) return `category:${row.category_id}`;
+  // A voucher for expenses has no category of its own: the view names the one its expenses share, and gives no id for it.
+  return row.category_name ? `name:${row.kind}:${row.category_name}` : `none:${row.kind}`;
 }
 
 /* ---- Cash Receipts -------------------------------------------------- */
@@ -294,9 +301,10 @@ export function paymentVouchersView(rows: PaymentVoucherRow[], today: string, pe
 export type PaymentVoucherFilter = 'open' | 'waiting' | 'scheduled' | 'posted' | 'rejected' | 'void';
 
 /**
- * Vouchers matching the status and kind filters whose number, payee,
- * documents, category or reference contains the search text. A voucher still
- * being written (`draft`) shows under `open` only.
+ * Vouchers matching the status and kind filters whose number, payee, kind
+ * (in the words the Kind column shows), category, documents or reference
+ * contains the search text. A voucher still being written (`draft`) shows
+ * under `open` only.
  */
 export function filterPaymentVouchers(
   rows: PaymentVoucherRow[],
@@ -314,7 +322,7 @@ export function filterPaymentVouchers(
     (v) =>
       matches(v) &&
       (kind === 'all' || v.kind === kind) &&
-      `${v.number ?? ''} ${v.party_name ?? ''} ${v.documents ?? ''} ${voucherCategory(v)} ${v.reference ?? ''}`
+      `${v.number ?? ''} ${v.party_name ?? ''} ${PAYMENT_VOUCHER_KIND_LABELS[v.kind]} ${voucherCategory(v)} ${v.documents ?? ''} ${v.reference ?? ''}`
         .toLowerCase()
         .includes(q),
   );

@@ -61,8 +61,10 @@ const receipt = (r: Partial<CashReceiptRow> = {}): CashReceiptRow => {
 const cash = (r: Partial<CashReceiptRow> = {}) =>
   receipt({ account_id: 'cash', account_name: 'Cash in hand', account_kind: 'cash', method: 'cash', kind: 'income', documents: null, category_name: 'Sales', ...r });
 
+/** A voucher as the view gives it: one that pays expenses has no category of its own, only the name its expenses share. */
 const voucher = (v: Partial<PaymentVoucherRow> = {}): PaymentVoucherRow => {
   seq += 1;
+  const kind = v.kind ?? 'other';
   return {
     transaction_id: `voucher-${seq}`,
     number: `PV-${String(seq).padStart(4, '0')}`,
@@ -77,8 +79,8 @@ const voucher = (v: Partial<PaymentVoucherRow> = {}): PaymentVoucherRow => {
     account_kind: 'bank',
     contact_id: null,
     party_name: 'Syabas',
-    kind: 'other',
-    category_id: 'utilities',
+    kind,
+    category_id: kind === 'other' ? 'utilities' : null,
     category_name: 'Utilities',
     documents: null,
     approved_at: null,
@@ -170,6 +172,23 @@ describe('donut slices are told apart by what they are, not by their name', () =
     const view = paymentVouchersView(rows, today, 'month');
     expect(view.byCategory.map((s) => [s.label, s.value])).toEqual([['Rent', 400], ['Rent', 200]]);
     expect(new Set(view.byCategory.map((s) => s.key)).size).toBe(2);
+  });
+  it('gives vouchers that pay expenses a slice per category of those expenses', () => {
+    // As the view gives them: a voucher for expenses has no category of its own, only the name its expenses share.
+    const rows = [
+      voucher({ amount: 4500, kind: 'expense', category_id: null, category_name: 'Rent' }),
+      voucher({ amount: 8900, kind: 'expense', category_id: null, category_name: 'Salaries' }),
+      voucher({ amount: 1280, kind: 'expense', category_id: null, category_name: 'Utilities' }),
+      voucher({ amount: 94, kind: 'expense', category_id: null, category_name: 'Utilities' }),
+      voucher({ amount: 420, kind: 'other', category_id: 'utilities', category_name: 'Utilities' }),
+    ];
+    const view = paymentVouchersView(rows, today, 'month');
+    // The two Utilities slices stay apart: one is the expenses' category, known here by name only, and the other the
+    // voucher's own, known by its id. Making them one needs the view to give the id of the expenses' category.
+    expect(view.byCategory.map((s) => [s.label, s.value])).toEqual([
+      ['Salaries', 8900], ['Rent', 4500], ['Utilities', 1374], ['Utilities', 420],
+    ]);
+    expect(sum(view.byCategory, (s) => s.value)).toBe(15194);
   });
   it('keeps two categories of one name as two slices on Expenses', () => {
     const rows = [
@@ -301,8 +320,9 @@ describe('paymentVouchersView', () => {
     ];
     expect(rows.map(voucherCategory)).toEqual(['Supplier bills', 'Refunds', 'Rent', 'Rent', 'Several categories', 'No category']);
     const view = paymentVouchersView(rows, today, 'month');
+    // Rent is two slices: the expenses' category, which the view names without an id, and the other voucher's own.
     expect(view.byCategory.map((s) => [s.label, s.value])).toEqual([
-      ['Supplier bills', 500], ['Rent', 400], ['Refunds', 200], ['Several categories', 50], ['Other categories', 25],
+      ['Supplier bills', 500], ['Rent', 300], ['Refunds', 200], ['Rent', 100], ['Other categories', 75],
     ]);
     // The slices add up to what was paid: nothing is counted twice and nothing dropped.
     expect(sum(view.byCategory, (s) => s.value)).toBe(1175);
@@ -358,6 +378,20 @@ describe('a voucher in the table', () => {
     expect(filterPaymentVouchers(rows, 'bill-0221', 'open').map((v) => v.number)).toEqual(['PV-0002']);
     expect(filterPaymentVouchers(rows, 'supplier bills', 'open').map((v) => v.number)).toEqual(['PV-0002']);
     expect(filterPaymentVouchers(rows, 'oct rent', 'open').map((v) => v.party_name)).toEqual(['Ramli']);
+  });
+  it('is found by the words in its Kind column', () => {
+    const rows = [
+      voucher({ number: 'PV-0001', kind: 'other', category_name: 'Utilities' }),
+      voucher({ number: 'PV-0002', kind: 'bill', category_id: null, category_name: null, documents: 'BILL-0221' }),
+      voucher({ number: 'PV-0003', kind: 'refund', category_id: null, category_name: null, documents: 'CN-0004' }),
+      voucher({ number: 'PV-0004', kind: 'expense', category_id: null, category_name: 'Rent' }),
+    ];
+    expect(filterPaymentVouchers(rows, 'supplier payment', 'open').map((v) => v.number)).toEqual(['PV-0002']);
+    expect(filterPaymentVouchers(rows, ' Other Payment ', 'open').map((v) => v.number)).toEqual(['PV-0001']);
+    expect(filterPaymentVouchers(rows, 'expense', 'open').map((v) => v.number)).toEqual(['PV-0004']);
+    expect(filterPaymentVouchers(rows, 'refund', 'open').map((v) => v.number)).toEqual(['PV-0003']);
+    // The words of one kind do not find another.
+    expect(filterPaymentVouchers(rows, 'supplier payment', 'open', 'other')).toEqual([]);
   });
   it('exports with its kind, category and documents, and amounts as numbers', () => {
     const csv = paymentVouchersCsv([
@@ -491,6 +525,12 @@ describe('the sample shown when there is no database', () => {
     expect(expenseVouchers).toHaveLength(paid.length);
     expect(sum(expenseVouchers, (v) => v.amount)).toBe(sum(paid, (e) => e.paid));
     expect(expenseVouchers.every((v) => v.status === 'posted' && v.category_name !== null)).toBe(true);
+    // The view's shape: the expenses' category by name, and no category of the voucher's own.
+    expect(expenseVouchers.every((v) => v.category_id === null)).toBe(true);
+    const paidThisMonth = paymentVouchersView(expenseVouchers, SAMPLE_TODAY, 'month').byCategory;
+    expect(paidThisMonth.map((s) => [s.label, s.value])).toEqual([
+      ['Rent', 4500], ['Utilities', 1374], ['Supplies', 640], ['Travel', 186],
+    ]);
     const numbers = SAMPLE_PAYMENT_VOUCHERS.map((v) => v.number).filter((n) => n !== null);
     expect(new Set(numbers).size).toBe(numbers.length);
     const receiptNumbers = SAMPLE_CASH_RECEIPTS.map((r) => r.number).filter((n) => n !== null);
