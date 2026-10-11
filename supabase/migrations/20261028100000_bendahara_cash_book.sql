@@ -36,6 +36,22 @@
 --     notes, or expenses. A second kind on the same payment is FIN06.
 --   * finance_mark_payment_paid refuses money in (FIN09) where it would have
 --     given it a PV- number.
+--   * approved_by and approved_at on a payment are written by the guard and
+--     by nobody else: an UPDATE from a signed-in person that changes either
+--     is FIN14 where it was stored.
+--   * created_by on a payment is cleared by its foreign key when that user is
+--     deleted. A signed-in person blanking it by hand on a posted or void
+--     payment is FIN09 where it was allowed.
+--   * A scheduled payment out stays covered by its split. Raising its amount
+--     above its split, or turning scheduled money in into money out, by
+--     someone who is not an owner or admin is FIN14 where it was allowed
+--     (and was then refused only when it was paid); from an owner or admin
+--     it is an approval, and is written down as one.
+--   * Deleting an allocation of a scheduled payment out, or lowering it, so
+--     that the payment is more than its split, is FIN14 where it was allowed.
+--   * Changing a payment's split locks the payment's row for the length of
+--     the transaction. The app only ever splits a payment it has just
+--     inserted in the same transaction, so nothing it does waits on this.
 --
 -- Nothing here is granted to service_role: every write is made by a signed-in
 -- person through the authenticated role, and no worker touches these tables.
@@ -299,6 +315,10 @@ grant execute on function private.finance_may_decide(uuid) to authenticated;
 -- An approved expense is locked; an owner or admin can still reject it while
 -- no payment stands against it. A rejected expense can be deleted, or edited,
 -- which puts it back to pending.
+-- approved_by and approved_at are the guard's to write. An update from a
+-- signed-in person that changes either by hand is refused (FIN14), whoever
+-- they are; only a session with no signed-in user, which is a migration or
+-- the demo seed, may give approved_at a date of its own.
 create or replace function private.finance_expense_guard()
 returns trigger
 language plpgsql
@@ -317,23 +337,40 @@ begin
       raise exception 'an expense starts as pending' using errcode = 'FIN01';
     end if;
     new.approved_by := null;
+    new.approved_at := null;
     return new;
   end if;
 
   -- A deleted user is cleared from these two columns by their foreign keys,
-  -- whatever the expense's status. Nothing else may change with it.
+  -- whatever the expense's status. Nothing else may change with it. That
+  -- update is made by the foreign key's own trigger, so this guard runs one
+  -- level down (pg_trigger_depth() > 1); a signed-in person's own update,
+  -- which runs at the first level, is not let through here, or anyone who may
+  -- write could erase who approved an expense. A session with no signed-in
+  -- user (a migration, the SQL editor) may clear them by hand, and an update
+  -- that changes nothing is let through as it always was.
   if new.status = old.status
      and (to_jsonb(new) - 'created_by' - 'approved_by') = (to_jsonb(old) - 'created_by' - 'approved_by')
      and (new.created_by is null or new.created_by = old.created_by)
-     and (new.approved_by is null or new.approved_by = old.approved_by) then
+     and (new.approved_by is null or new.approved_by = old.approved_by)
+     and (pg_trigger_depth() > 1 or auth.uid() is null or to_jsonb(new) = to_jsonb(old)) then
     return new;
   end if;
 
+  if new.status = old.status and old.status <> 'pending' then
+    raise exception 'an expense that has been approved or rejected cannot be changed' using errcode = 'FIN01';
+  end if;
+
+  -- Who approved and when is written below, by this guard, and by nobody else.
+  if auth.uid() is not null
+     and (new.approved_at is distinct from old.approved_at or new.approved_by is distinct from old.approved_by) then
+    raise exception 'only the database records who approved an expense' using errcode = 'FIN14';
+  end if;
+
   if new.status = old.status then
-    if old.status <> 'pending' then
-      raise exception 'an expense that has been approved or rejected cannot be changed' using errcode = 'FIN01';
-    end if;
+    -- Pending, and edited: nobody has decided it.
     new.approved_by := null;
+    new.approved_at := null;
     return new;
   end if;
 
@@ -355,7 +392,7 @@ begin
   if old.status = 'rejected' then
     raise exception 'a rejected expense is edited before it is decided again' using errcode = 'FIN01';
   end if;
-  if not private.finance_may_decide(new.org_id) then
+  if not private.finance_may_decide(old.org_id) then
     raise exception 'only an owner or admin approves or rejects an expense' using errcode = 'FIN14';
   end if;
   if old.status = 'approved' and exists (
@@ -420,6 +457,20 @@ create trigger finance_transaction_insert_guard
 --     for them.
 --   * A scheduled payment that was approved is paid as it was approved: only
 --     its status, number and date change, when it is marked paid.
+--   * A scheduled payment out that nobody had to approve stays covered by its
+--     split: raised above it where it stands, or turned from money in into
+--     money out, it needs an owner or admin just as it would have when it was
+--     scheduled. (The guard on allocations keeps its split from being taken
+--     away.) So a scheduled payment out is always one that was approved or
+--     one that settles documents for its whole amount.
+--   * approved_by and approved_at are written by this guard, when an owner's
+--     or admin's own change of status is an approval or a rejection, and by
+--     nobody else. An update from a signed-in person that changes either by
+--     hand is refused, whoever they are and whatever else it changes. Every
+--     rule above that asks "was this approved" reads approved_at, so it must
+--     not be a column a caller can fill in. The foreign keys clear a deleted
+--     user from approved_by and created_by, and that is let through only
+--     when it comes from the foreign key's own trigger.
 create or replace function private.finance_transaction_guard()
 returns trigger
 language plpgsql
@@ -441,10 +492,17 @@ begin
   end if;
 
   -- A deleted user is cleared from these two columns by their foreign keys.
+  -- That update is made by the foreign key's own trigger, so this guard runs
+  -- one level down (pg_trigger_depth() > 1); a signed-in person's own update,
+  -- which runs at the first level, is not let through here, or anyone who may
+  -- write could erase who approved a payment. A session with no signed-in
+  -- user (a migration, the SQL editor) may clear them by hand, and an update
+  -- that changes nothing is let through as it always was.
   if new.status = old.status
      and (to_jsonb(new) - 'created_by' - 'approved_by') = (to_jsonb(old) - 'created_by' - 'approved_by')
      and (new.created_by is null or new.created_by = old.created_by)
-     and (new.approved_by is null or new.approved_by = old.approved_by) then
+     and (new.approved_by is null or new.approved_by = old.approved_by)
+     and (pg_trigger_depth() > 1 or auth.uid() is null or to_jsonb(new) = to_jsonb(old)) then
     return new;
   end if;
 
@@ -569,6 +627,18 @@ begin
   end if;
 
   -- ---- approval ---------------------------------------------------------------
+  -- Who approved and when is written below, by this guard, and by nobody
+  -- else. Without this a payment's own maker could fill in approved_at on a
+  -- draft, or on a scheduled payment nobody had to approve, and every rule
+  -- below that reads it would take the payment for an approved one. It comes
+  -- after the checks above, so a posted or void payment still answers FIN09.
+  -- A session with no signed-in user is not held to it: the demo seed gives
+  -- approved_at a date of its own.
+  if auth.uid() is not null
+     and (new.approved_at is distinct from old.approved_at or new.approved_by is distinct from old.approved_by) then
+    raise exception 'only the database records who approved a payment' using errcode = 'FIN14';
+  end if;
+
   if new.status is distinct from old.status then
     if old.status = 'rejected' then
       raise exception 'a rejected payment is deleted, not brought back' using errcode = 'FIN14';
@@ -594,7 +664,7 @@ begin
 
     if new.status = 'rejected' or old.status = 'pending_approval' then
       -- A decision: approved (scheduled) or rejected.
-      if not private.finance_may_decide(new.org_id) then
+      if not private.finance_may_decide(old.org_id) then
         raise exception 'only an owner or admin approves or rejects a payment' using errcode = 'FIN14';
       end if;
       if old.status = 'pending_approval'
@@ -617,7 +687,7 @@ begin
       from public.finance_allocations a
       where a.org_id = old.org_id and a.transaction_id = old.id;
       if new.amount > allocated then
-        if not private.finance_may_decide(new.org_id) then
+        if not private.finance_may_decide(old.org_id) then
           raise exception 'money out that settles no document needs an owner or admin' using errcode = 'FIN14';
         end if;
         if auth.uid() is not null then
@@ -633,6 +703,26 @@ begin
   elsif old.status = 'scheduled' and old.approved_at is not null
         and (to_jsonb(new) - 'updated_at') is distinct from (to_jsonb(old) - 'updated_at') then
     raise exception 'an approved payment is paid as it was approved' using errcode = 'FIN14';
+  elsif old.status = 'scheduled' and old.approved_at is null and new.direction = 'out' then
+    -- A scheduled payment nobody had to approve, changed where it stands: its
+    -- amount raised above its split, or money in turned into money out. It
+    -- would then be money out that settles no document, sitting among the
+    -- payments that are only waiting to be paid. The same rule as when it
+    -- was scheduled: an owner or admin, who is written down as approving it.
+    select coalesce(sum(a.amount), 0) into allocated
+    from public.finance_allocations a
+    where a.org_id = old.org_id and a.transaction_id = old.id;
+    if new.amount > allocated then
+      if not private.finance_may_decide(old.org_id) then
+        raise exception 'money out that settles no document needs an owner or admin' using errcode = 'FIN14';
+      end if;
+      if auth.uid() is not null then
+        new.approved_by := auth.uid();
+        new.approved_at := now();
+      else
+        new.approved_at := coalesce(new.approved_at, now());
+      end if;
+    end if;
   end if;
   return new;
 end $$;
@@ -641,11 +731,28 @@ end $$;
 -- handled by the same checks in the same order as before. New:
 --   * The split of a payment that is waiting for approval, was rejected, or
 --     was approved, is locked with it (FIN09), as a posted payment's is.
+--   * The split of a scheduled payment out is not taken away or lowered
+--     below the payment (FIN14): the payment is deleted and recorded again.
 --   * One payment pays one kind of document: bills, or invoices and credit
 --     notes, or expenses (FIN06).
 --   * Money out against an expense. The expense must be approved (FIN04), and
 --     everything standing against it never exceeds its amount (FIN05). The
 --     expense row is locked while this is checked.
+--   * The payment's own row is locked (for share) while its split is changed.
+--     The guard on payments runs with the payment row locked by its update
+--     and reads the split; this guard read the payment with no lock, so
+--     "mark paid" and "take the split away" at the same moment could each
+--     see the other's row as it was and both go through, leaving a paid
+--     payment that settles nothing and that nobody approved. With the lock
+--     one of the two waits for the other and then sees what it did.
+--     Lock order: the payment first, then the document (credit note, then
+--     invoice; or expense; or bill). finance_mark_payment_paid and the guard
+--     on payments take them in that order too: the payment, then for a refund
+--     its credit notes and its invoices. The three functions the app records
+--     payments with insert the payment and its split in one transaction, so
+--     the row this locks is one no other session can see yet, and nothing
+--     waits. When a payment is deleted its split goes with it and this guard
+--     finds no payment row, so nothing is locked there either.
 create or replace function private.finance_allocation_guard()
 returns trigger
 language plpgsql
@@ -667,15 +774,33 @@ begin
     return old;
   end if;
   if tg_op <> 'INSERT' then
-    select status, approved_at into t from public.finance_transactions where org_id = old.org_id and id = old.transaction_id;
+    -- Locked, so the payment cannot be marked paid, approved or submitted
+    -- while its split is being changed, nor the other way round.
+    select amount, status, direction, approved_at into t from public.finance_transactions
+    where org_id = old.org_id and id = old.transaction_id for share;
     -- No parent row: the payment itself is being deleted.
     if found and (t.status in ('posted','void','pending_approval','rejected') or t.approved_at is not null) then
       raise exception 'the split of a posted payment cannot be changed' using errcode = 'FIN09';
     end if;
+    -- A scheduled payment out that nobody had to approve is exactly what it
+    -- settles. Taking its split away, or lowering it, would leave money out
+    -- that settles no document among the payments waiting to be paid.
+    if found and t.status = 'scheduled' and t.direction = 'out' then
+      select coalesce(sum(a.amount), 0) into taken
+      from public.finance_allocations a
+      where a.org_id = old.org_id and a.transaction_id = old.transaction_id and a.id <> old.id;
+      if tg_op = 'UPDATE' and new.org_id = old.org_id and new.transaction_id = old.transaction_id then
+        taken := taken + new.amount;
+      end if;
+      if t.amount > taken then
+        raise exception 'the split of a scheduled payment is not taken away; delete the payment' using errcode = 'FIN14';
+      end if;
+    end if;
     if tg_op = 'DELETE' then return old; end if;
   end if;
 
-  select amount, status, direction, approved_at into t from public.finance_transactions where org_id = new.org_id and id = new.transaction_id;
+  select amount, status, direction, approved_at into t from public.finance_transactions
+  where org_id = new.org_id and id = new.transaction_id for share;
   has_txn := found;
   if has_txn and (t.status in ('posted','void','pending_approval','rejected') or t.approved_at is not null) then
     raise exception 'the split of a posted payment cannot be changed' using errcode = 'FIN09';
