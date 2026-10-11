@@ -27,7 +27,7 @@ the data layer, with unit tests; the client components only draw them.
 | `view-helpers.ts` | What those two share: dates, sums to the sen, the eight-month window of a trend chart, how payment methods are grouped and coloured, and the "This payment also covers …" sentence of a split payment |
 | `document-lines.ts` | What a bill and an invoice share: the line schema, the real-date and SST-rate rules (`isIsoDate`, `roundRate`), and reading a saved line |
 | `bill-math.ts` | Line amounts and bill totals, rounded exactly as the generated columns `amount` and `sst_amount` round them; the SST rate keeps two decimals, as its column does (`roundRate` in `document-lines.ts`) |
-| `document-form.ts` | What the bill form and the invoice form share: a line as it was typed, the due date following the other party's payment terms, the "saved as a draft, but not posted" sentence, and `DocumentFormKind`, the description of one form that the shared card draws |
+| `document-form.ts` | What the bill form and the invoice form share: a line as it was typed, the due date following the other party's payment terms, the sentence for a document that was saved as a draft but not posted, and `DocumentFormKind`, the description of one form that the shared card draws |
 | `bill-form.ts` | The bill form: defaults, the due date following the supplier's terms, validation, what is sent. A product fills a line at its cost. `savedNotPosted` words a bill that was saved as a draft but not posted |
 | `invoice-form.ts` | The invoice form: the same rules with a customer and no supplier's reference. A product fills a line at its price. Also the small e-Invois form (status and UUID) |
 | `allocation-form.ts` | What the two payment forms share: ticking documents, amounts added in whole sen, what payments not yet posted hold of a document, and `AllocationFormKind`, the description of one form that the shared card draws |
@@ -279,6 +279,11 @@ instead."; see Known limits.
   instead.", which is wrong when the thing just tried was a void of something
   already void. Invoices and payments in have sentences that are true in that
   case too; the purchase side was left as it shipped.
+- A unique-violation (23505) while recording a payment is worded "Each
+  bill/invoice can appear once on a payment." That is true while document
+  numbers only ever come from the counter. Once a later stage lets a person
+  change a prefix or reset a counter, a number collision would get that
+  sentence wrongly and needs its own.
 - Approval of money out is not enforced yet.
 - Posting goes through database functions that run as the caller. An editor
   writing to the tables directly, rather than through the app, could still post

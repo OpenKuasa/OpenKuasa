@@ -20,7 +20,7 @@ import {
 } from './document-form';
 import type { FinanceProduct } from './products';
 
-// Defined in document-form.ts, which the invoice form shares; exported from here for this module's existing importers.
+// Defined in document-form.ts, which the invoice form shares; kept exported from here because the purchase-side tests and views import them from this module.
 export { type LineDraft, defaultDueDate, emptyLine, lineNumbers, withDueDate } from './document-form';
 
 export type BillForm = {
@@ -63,7 +63,12 @@ export function billFormFromDetail(bill: BillDetail): BillForm {
   };
 }
 
-/** Choosing a supplier moves the due date to their terms, unless it was set by hand. */
+/**
+ * Choosing a supplier moves the due date to their terms, unless it was set by hand.
+ * The due-date rule is deliberately its own: it blanks the due date when the bill
+ * date is empty, which the invoice form's `withCustomer` does not do. Do not
+ * "tidy" it onto `followedDueDate`.
+ */
 export function withSupplier(form: BillForm, supplier: { id: string; payment_terms_days: number }): BillForm {
   return {
     ...form,

@@ -28,7 +28,7 @@ import {
   recordPaymentOutInput,
 } from './money';
 
-// Defined in allocation-form.ts, which the payment-in form shares; exported from here for this module's existing importers.
+// Defined in allocation-form.ts, which the payment-in form shares; kept exported from here because the purchase-side tests and views import it from this module.
 export { amountText } from './allocation-form';
 
 export type PayableBill = {
