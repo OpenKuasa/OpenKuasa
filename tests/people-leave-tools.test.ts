@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { LeaveBalance, LeaveRequest, PeopleData, TimeOffRequest } from '@/lib/people/types';
+import type { LeaveBalance, LeaveRequest, PeopleData, PeopleViewer, TimeOffRequest } from '@/lib/people/types';
 
 const ctl = vi.hoisted(() => ({
   ran: [] as { fn: string; orgId: string; input: unknown }[],
@@ -36,9 +36,9 @@ const NOW = new Date('2026-10-09T04:00:00Z');
 const ME = '22222222-2222-4222-8222-222222222222';
 const OTHER = '33333333-3333-4333-8333-333333333333';
 const REQ = '44444444-4444-4444-8444-444444444444';
-const HR_VIEWER = { employeeId: null, isHr: true, isDemo: false };
-const MEMBER_VIEWER = { employeeId: ME, employeeName: 'Faiz Hakim', isHr: false, isDemo: false };
-const DEMO_VIEWER = { employeeId: ME, isHr: false, isDemo: true };
+const HR_VIEWER: PeopleViewer = { employeeId: null, isHr: true, isDemo: false };
+const MEMBER_VIEWER: PeopleViewer = { employeeId: ME, employeeName: 'Faiz Hakim', isHr: false, isDemo: false };
+const DEMO_VIEWER: PeopleViewer = { employeeId: ME, isHr: false, isDemo: true };
 const base = createSeedPeopleData(NOW);
 
 const hr = () => ({ ctx: { client: {} as never, orgId: 'org-1' }, tier: 'hr' as const, employeeId: null });
@@ -169,7 +169,7 @@ describe('an owner or admin’s decisions', () => {
 async function runWith(
   data: PeopleData,
   name: string,
-  viewer: typeof HR_VIEWER | typeof MEMBER_VIEWER,
+  viewer: PeopleViewer,
   write?: ReturnType<typeof hr> | ReturnType<typeof self>,
 ): Promise<Loose> {
   const tool = tools(viewer, write, data)[name] as unknown as { execute: (i: unknown, o: unknown) => Promise<unknown> };
@@ -241,7 +241,7 @@ describe('leave lookups carry what a change needs', () => {
   it('give an id to no one who holds no change tool, and to no one in the demo', async () => {
     for (const result of [
       await runWith(lookupData, 'listLeaveRequests', MEMBER_VIEWER),
-      await runWith(lookupData, 'listLeaveRequests', DEMO_VIEWER as never, self()),
+      await runWith(lookupData, 'listLeaveRequests', DEMO_VIEWER, self()),
     ]) {
       for (const r of result.requests) {
         expect(r).not.toHaveProperty('id');
