@@ -14,10 +14,18 @@ describe('TUAH_SYSTEM', () => {
     expect(t).toContain('never invent');
   });
 
-  it('stays honest about the products it cannot see yet', () => {
-    expect(t).toContain('cannot see the rest of the workspace yet');
+  it('names HR among the products it can now look up', () => {
+    // Lekiu is wired into Tuah, so the prompt must say HR is reachable or Tuah
+    // would wrongly deny it.
+    expect(t).toContain('look up hr in lekiu');
+  });
+
+  it('keeps only finance in the blind spot now that HR is wired', () => {
+    expect(t).toContain("cannot see the workspace's finance yet");
     expect(t).toContain('invoices');
-    expect(t).toContain('payroll');
+    // HR is no longer unseen: the old "payroll and staff" blind spot is gone.
+    expect(t).not.toContain('cannot see the rest of the workspace yet');
+    expect(t).not.toContain('payroll and staff');
   });
 
   it('states changes need approval, and are reported as done once made', () => {

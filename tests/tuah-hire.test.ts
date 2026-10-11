@@ -257,7 +257,7 @@ describe('Tuah prompts and hiring', () => {
   it('does not contradict itself about jobs', () => {
     expect(TUAH_SYSTEM).not.toContain('job posts');
     expect(tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], true, null)).not.toContain('job posts');
-    expect(TUAH_SYSTEM).toContain('outside marketing, the CRM, jobs and applications');
+    expect(TUAH_SYSTEM).toContain('outside marketing, the CRM, hiring and HR');
     const sentence = TUAH_SYSTEM.toLowerCase().split('\n').find((l) => l.startsWith('- to change a specific campaign, creative'));
     expect(sentence).toContain('job');
   });
@@ -277,9 +277,12 @@ describe('Tuah prompts and hiring', () => {
     expect(lekir).toContain('a job with applications cannot be deleted');
     expect(lekir).not.toContain('you can only look things up');
   });
-  it('still says finance, payroll and staff cannot be looked up', () => {
-    expect(TUAH_SYSTEM).toContain('cannot see the rest of the workspace yet');
-    expect(TUAH_SYSTEM).toMatch(/invoices and other finance records, payroll and staff/);
+  it('keeps only finance in the blind spot now that HR is wired', () => {
+    expect(TUAH_SYSTEM).toContain("cannot see the workspace's finance yet");
+    expect(TUAH_SYSTEM).toMatch(/invoices and other finance records/);
+    // HR is reachable via Lekiu now, so payroll and staff left the blind spot.
+    expect(TUAH_SYSTEM).not.toContain('cannot see the rest of the workspace yet');
+    expect(TUAH_SYSTEM).not.toContain('payroll and staff');
   });
   it('offers a skills-based alternative when declining to rank by protected traits', () => {
     const offer = 'offer to do it on skills and experience instead';

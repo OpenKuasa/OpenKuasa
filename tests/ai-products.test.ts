@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import type { Tool } from 'ai';
-import { combineToolkits, crmProduct, reachProduct, type ProductToolkit } from '@/lib/ai/products';
+import {
+  combineToolkits,
+  crmProduct,
+  hireProduct,
+  peopleProduct,
+  reachProduct,
+  type ProductToolkit,
+} from '@/lib/ai/products';
 import { createSeedReachData } from '@/lib/reach/seed';
+import { createSeedHireData } from '@/lib/hire/seed';
+import { createSeedPeopleData } from '@/lib/people/seed';
 
 const reach = (canWrite: boolean) =>
   reachProduct({
@@ -10,6 +19,19 @@ const reach = (canWrite: boolean) =>
   });
 const crm = (canWrite: boolean) =>
   crmProduct({ client: {} as never, orgId: 'org1', userId: 'user1', canWrite });
+const hire = (canWrite: boolean) =>
+  hireProduct({
+    data: createSeedHireData(),
+    write: canWrite ? { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true } : undefined,
+  });
+const people = (canWrite: boolean) =>
+  peopleProduct({
+    data: createSeedPeopleData(),
+    viewer: { employeeId: null, isHr: canWrite, isDemo: false },
+    write: canWrite
+      ? { ctx: { client: {} as never, orgId: 'org1' }, tier: 'hr', employeeId: null, receipt: null, userId: 'u1' }
+      : undefined,
+  });
 
 const describes = (tool: Tool) => String(tool.description ?? '').toLowerCase();
 
@@ -50,14 +72,25 @@ describe('product toolkits', () => {
       }
     }
   });
+
+  it('gives Lekiu its HR lookups, and HR changes only to someone who may make them', () => {
+    const lekiu = people(true);
+    expect(Object.keys(lekiu.read)).toContain('listEmployees');
+    expect(Object.keys(lekiu.read)).toContain('getPayrollSummary');
+    expect(Object.keys(lekiu.write)).toContain('decideLeave');
+    expect(Object.keys(lekiu.read)).not.toContain('decideLeave');
+    expect(Object.keys(people(false).write)).toEqual([]);
+  });
 });
 
 describe('combineToolkits', () => {
   it('asks for approval on every change, from every product, and on nothing else', () => {
-    const products = [reach(true), crm(true)];
+    const products = [reach(true), crm(true), hire(true), people(true)];
     const { tools, toolApproval } = combineToolkits(products);
     const changes = products.flatMap((p) => Object.keys(p.write)).sort();
     expect(Object.keys(toolApproval ?? {}).sort()).toEqual(changes);
+    // Every HR change is gated too (its description does not need the word, the map does the gating).
+    expect(Object.keys(toolApproval ?? {})).toContain('decideLeave');
     expect(Object.keys(tools).length).toBe(
       products.reduce((n, p) => n + Object.keys(p.read).length + Object.keys(p.write).length, 0),
     );
@@ -65,6 +98,17 @@ describe('combineToolkits', () => {
 
   it('asks for nothing when there is nothing to change', () => {
     expect(combineToolkits([reach(false), crm(false)]).toolApproval).toBeUndefined();
+  });
+
+  it('combines all four products (Tuah single-agent) without a tool-name clash', () => {
+    const products = [reach(true), crm(true), hire(true), people(true)];
+    const total = products.reduce(
+      (n, p) => n + Object.keys(p.read).length + Object.keys(p.write).length,
+      0,
+    );
+    const { tools } = combineToolkits(products);
+    // No throw, and nothing silently dropped: every tool survives the merge.
+    expect(Object.keys(tools).length).toBe(total);
   });
 
   it('refuses two products with the same tool name', () => {

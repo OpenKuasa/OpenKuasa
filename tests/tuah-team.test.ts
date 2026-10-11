@@ -91,10 +91,16 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
 const { runTuah } = await import('@/lib/ai/agents/orchestrator');
 const { createTeamTools, delegationForModel } = await import('@/lib/ai/agents/specialists');
 const { crmProduct, reachProduct } = await import('@/lib/ai/products');
+const { createSeedPeopleData } = await import('@/lib/people/seed');
 const { proposalsIn, transcriptOf, usesSpecialists } = await import('@/lib/chat/delegation');
 
 const reach = () => ({ data: createSeedReachData() });
 const crm = (canWrite = true) => ({ client: {} as never, orgId: 'org1', userId: 'u1', canWrite });
+const people = () => ({
+  data: createSeedPeopleData(),
+  viewer: { employeeId: null, isHr: true, isDemo: false },
+  write: { ctx: { client: {} as never, orgId: 'org1' }, tier: 'hr' as const, employeeId: null, receipt: null, userId: 'u1' },
+});
 const ask = [{ role: 'user' as const, content: 'Add Ali Hassan, ali@example.com, as a contact' }];
 const team = () => ({ transcript: 'User: Add Ali Hassan', proposals: new Map<string, Proposal>() });
 
@@ -166,6 +172,16 @@ describe('Tuah with its team', () => {
     await runTuah(ask, reach(), undefined, undefined, null, crm(false), team()).consumeStream();
     expect(seen.tuahTools[0]).not.toContain('applyChange');
     expect(seen.workerTools[0] ?? []).not.toContain('createContact');
+  });
+
+  it('adds Lekiu to the roster when HR is passed, and not otherwise', async () => {
+    seen.tuahTools = [];
+    await runTuah(ask, reach(), undefined, undefined, null, crm(), team(), null, people()).consumeStream();
+    expect(seen.tuahTools[0]).toContain('askLekiu');
+
+    seen.tuahTools = [];
+    await runTuah(ask, reach(), undefined, undefined, null, crm(), team()).consumeStream();
+    expect(seen.tuahTools[0]).not.toContain('askLekiu');
   });
 });
 
