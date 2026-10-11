@@ -64,3 +64,26 @@ export type AgentSchedule = {
   created_at: string;
   updated_at: string;
 };
+
+export const PROPOSAL_STATUSES = ['pending', 'approved', 'rejected', 'expired', 'failed'] as const;
+export type ProposalStatus = (typeof PROPOSAL_STATUSES)[number];
+
+/** One queued, owner-approvable change an autonomous run proposed. */
+export type AgentProposal = {
+  id: string;
+  org_id: string;
+  run_id: string | null;
+  agent_key: string;
+  product: string;
+  action: string;
+  input: unknown;
+  title: string;
+  detail: string | null;
+  rationale: string | null;
+  status: ProposalStatus;
+  result: unknown;
+  created_at: string;
+  decided_at: string | null;
+  decided_by: string | null;
+  expires_at: string;
+};
