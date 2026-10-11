@@ -43,7 +43,7 @@ Each part ships something whole and is smoke-tested on its own. After part 1, Cr
 - Every task leaves `pnpm exec tsc --noEmit`, `pnpm lint` and the unit tests green. (In a checkout that has never been built, `tsc` reports `Cannot find name 'LayoutProps'` in `src/app/layout.tsx` until `pnpm exec next typegen` has been run once. That is the checkout, not this plan.)
 - **Unit tests are run with `pnpm exec vitest run --exclude 'tests/*.rls.test.ts' --exclude 'tests/bendahara-*.test.ts'`, or with the files named. Never bare `pnpm test`.** The Supabase variables are set in the shell, so `tests/bendahara-*.test.ts` and `tests/*.rls.test.ts` run against the hosted production database and leave a user and a workspace behind on every run. No implementer step runs them. One of them is edited in Task 1 and only type-checked.
 - **Implementers never call a database tool, never change the schema, and never start a dev server or a browser.** The production build in Tasks 5 and 6 is run with the Supabase variables emptied on its own command line.
-- Branch `feat-116-bendahara-sales-followon-forms` (already cut from main and checked out; work on it, do not create another). PR title equals the branch name. Do not push or merge until the owner says so.
+- Branch `feat-119-bendahara-sales-followon-forms` (already cut from main and checked out; work on it, do not create another). PR title equals the branch name. Do not push or merge until the owner says so.
 
 ## Not in this stage
 
@@ -3485,7 +3485,7 @@ git commit -m "docs: quotations are writable; payments-out writes keep to suppli
 
 - [ ] **Step 6: Hand back**
 
-Do not push. Report what was built, the result of the four commands in Step 3, and anything that had to differ from this plan. The controller pushes and opens the PR (title `feat-116-bendahara-sales-followon-forms`; the body has no close keyword unless `gh issue list` shows an issue that is exactly this stage: issue #41, the one open when stage 3b was written, is broader than it, and no issue is opened for the purpose) when the owner says so.
+Do not push. Report what was built, the result of the four commands in Step 3, and anything that had to differ from this plan. The controller pushes and opens the PR (title `feat-119-bendahara-sales-followon-forms`; the body has no close keyword unless `gh issue list` shows an issue that is exactly this stage: issue #41, the one open when stage 3b was written, is broader than it, and no issue is opened for the purpose) when the owner says so.
 
 ---
 
