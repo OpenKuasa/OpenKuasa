@@ -30,6 +30,14 @@ describe('live screens', () => {
     expect(isSampleScreen('/hire/settings')).toBe(true);
   });
 
+  it('counts Invoices and Payments In as live, and the sales screens not yet connected as sample', () => {
+    expect(isSampleScreen('/finance/invoices')).toBe(false);
+    expect(isSampleScreen('/finance/payments-in')).toBe(false);
+    for (const slug of ['quotations', 'credit-notes', 'refunds', 'cash-receipts']) {
+      expect(isSampleScreen(`/finance/${slug}`), slug).toBe(true);
+    }
+  });
+
   it('ignores paths that are not a screen', () => {
     expect(isSampleScreen('/reach')).toBe(false);
     expect(isSampleScreen('/nope/nothing')).toBe(false);

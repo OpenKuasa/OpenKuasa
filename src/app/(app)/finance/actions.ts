@@ -87,8 +87,14 @@ async function run<I, O>(
   return result;
 }
 
-// Supplier names and balances show on the bills and payments screens too.
-const CONTACT_PATHS = ['/finance/customers-suppliers', '/finance/supplier-bills', '/finance/payments-out'];
+// A contact's name shows on the bills, invoices and payments screens too.
+const CONTACT_PATHS = [
+  '/finance/customers-suppliers',
+  '/finance/supplier-bills',
+  '/finance/payments-out',
+  '/finance/invoices',
+  '/finance/payments-in',
+];
 const PRODUCT_PATHS = ['/finance/products'];
 // A bill or a payment changes what is owed, which Customers & Suppliers shows as Payable.
 const PURCHASE_PATHS = ['/finance/supplier-bills', '/finance/payments-out', '/finance/customers-suppliers'];
