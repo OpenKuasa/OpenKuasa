@@ -626,7 +626,9 @@ export const CASES: Case[] = [
       // A sentence that mentions the rating and says it is saved, recorded, updated or done, without a negation.
       const claimedSaved = turn.text
         .split(/(?<=[.!?\n])\s+/)
-        .filter((s) => /\brating\b/i.test(s) && /\b(saved|recorded|updated|done)\b/i.test(s) && !/\b(not|n['’]t|until|once|before|after|when|if|awaiting|waiting)\b/i.test(s));
+        .filter((s) => /\brating\b/i.test(s) && /\b(saved|recorded|updated|done)\b/i.test(s) && !/\b(not|n['’]t|until|once|before|after|when|if|awaiting|waiting)\b/i.test(s)
+          // "the rating to be saved", "will be saved": what is going to happen, not a claim that it has.
+          && !/\b(to be|will be|can be|would be|ready to be)\s+(saved|recorded|updated|done)\b/i.test(s));
       return [
         askedLekir(turn.asked),
         check('exactly one change waiting', turn.pending.length === 1, pendingDetail(turn.pending, turn.text)),

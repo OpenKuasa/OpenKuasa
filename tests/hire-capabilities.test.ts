@@ -553,7 +553,7 @@ describe('application change schemas', () => {
     expect(rateApplicationInput.safeParse({ id: ID, rating: 3, basis: 'x'.repeat(501) }).success).toBe(false);
     expect(rateApplicationInput.safeParse({ id: ID, rating: 3, basis: 7 }).success).toBe(false);
     expect(rateApplicationInput.shape.basis.description).toBe(
-      'One or two sentences giving the grounds for this rating, in plain words, taken from the CV or from what the user said. Shown on the Approve card. Not stored.',
+      'One or two sentences giving the grounds for this rating, in plain words, taken from the CV or from what the user said, naming specifics (an employer, the years, a number, a skill) and never general praise. Shown on the Approve card. Not stored.',
     );
     // Still a plain schema: it must convert, or it cannot be a tool's input.
     expect(() => z.toJSONSchema(rateApplicationInput)).not.toThrow();

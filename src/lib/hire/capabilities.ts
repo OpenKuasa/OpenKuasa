@@ -394,7 +394,7 @@ export const rateApplicationInput = z.object({
   id: applicationId(),
   rating: z.number().int().min(1).max(5).nullable().describe('A whole number from 1 to 5, or null to clear the rating.'),
   // For the person who approves: the capability does not read it, and it is never sent to the database.
-  basis: z.string().trim().max(500).optional().describe('One or two sentences giving the grounds for this rating, in plain words, taken from the CV or from what the user said. Shown on the Approve card. Not stored.'),
+  basis: z.string().trim().max(500).optional().describe('One or two sentences giving the grounds for this rating, in plain words, taken from the CV or from what the user said, naming specifics (an employer, the years, a number, a skill) and never general praise. Shown on the Approve card. Not stored.'),
 });
 
 export type ApplicationChange = {
