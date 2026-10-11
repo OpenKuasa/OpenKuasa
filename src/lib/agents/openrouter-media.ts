@@ -59,6 +59,48 @@ export async function writeDigest(apiKey: string, context: string): Promise<Dige
   return complete(apiKey, DIGEST_MODEL(), context);
 }
 
+/**
+ * Asks the model WHICH of the given candidate changes to queue for owner approval,
+ * with a one-line rationale each. It only sees `{ index, title }` (never raw ids) and
+ * can only select indexes; it cannot invent actions or inputs. The caller re-validates
+ * every selection server-side, so malformed or hostile output is simply dropped.
+ */
+export async function suggestProposals(
+  apiKey: string,
+  context: string,
+  candidates: { index: number; title: string }[],
+): Promise<{ keep: { index: number; rationale: string }[]; cost_cents: number }> {
+  const list = candidates.map((c) => `${c.index}. ${c.title}`).join('\n');
+  const prompt = [
+    'You help a small business owner decide which suggested CRM changes are worth queueing for their approval.',
+    'Choose ONLY from the numbered candidates below. Do not invent new items or change them.',
+    'Reply with JSON only: an array of {"index": number, "rationale": string} objects, where rationale is one short sentence. Reply [] if none are worthwhile.',
+    '',
+    `Business snapshot:\n${context}`,
+    '',
+    `Candidates:\n${list}`,
+  ].join('\n');
+  const { text, cost_cents } = await complete(apiKey, DIGEST_MODEL(), prompt);
+  const keep: { index: number; rationale: string }[] = [];
+  const match = text.match(/\[[\s\S]*\]/);
+  if (match) {
+    try {
+      const parsed: unknown = JSON.parse(match[0]);
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          const { index, rationale } = (item ?? {}) as { index?: unknown; rationale?: unknown };
+          if (typeof index === 'number' && Number.isInteger(index) && typeof rationale === 'string') {
+            keep.push({ index, rationale: rationale.trim() });
+          }
+        }
+      }
+    } catch {
+      // Unparseable model output: select nothing.
+    }
+  }
+  return { keep, cost_cents };
+}
+
 export async function generateImage(apiKey: string, prompt: string): Promise<ImageResult> {
   // Task: verify at smoke — image model slug + that providerMetadata carries cost.
   const result = await aiGenerateImage({

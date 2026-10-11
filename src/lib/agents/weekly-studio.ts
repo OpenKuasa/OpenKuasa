@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { generateImage, startVideo, webSearch, writeDigest } from '@/lib/agents/openrouter-media';
+import { proposeChanges } from '@/lib/agents/proposer';
 import {
   WEEKLY_STUDIO,
   type AgentRunStatus,
@@ -176,6 +177,22 @@ export async function runWeeklyStudio(
       } catch {
         // Deliberately drop the exception: it may carry request details or a key.
       }
+    }
+
+    // Autonomous proposals (5b/5c): suggest non-destructive changes for the owner to approve.
+    try {
+      const prop = await proposeChanges(
+        service,
+        orgId,
+        runId,
+        apiKey,
+        { leads, appts, context },
+        maxCost,
+        cost,
+      );
+      cost += prop.cost_cents;
+    } catch {
+      // Deliberately drop the exception: it may carry request details or a key.
     }
 
     return await finish('done', { digest_md: digest.text, cost_cents: cost });

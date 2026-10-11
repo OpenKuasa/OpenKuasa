@@ -5,6 +5,7 @@ vi.mock('@/lib/agents/openrouter-media', () => ({
   writeDigest: vi.fn(),
   generateImage: vi.fn(),
   startVideo: vi.fn(),
+  suggestProposals: vi.fn(),
 }));
 vi.mock('@/lib/ai/key-crypto', () => ({
   hasKeySecret: () => true,
@@ -13,13 +14,29 @@ vi.mock('@/lib/ai/key-crypto', () => ({
 vi.mock('@/lib/reach/supabase', () => ({
   createSupabaseReachData: () => ({
     listCampaigns: async () => [],
-    listLeads: async () => [],
+    listLeads: async () => [
+      {
+        id: '11111111-1111-4111-8111-111111111111',
+        name: 'Aina Rahman',
+        channel: 'whatsapp',
+        stage: 'won',
+        source: 'Free Catering Quote',
+        promoted_contact_id: null,
+        created_at: '2026-10-01T00:00:00Z',
+      },
+    ],
     listAppointments: async () => [],
   }),
 }));
 
 import { runWeeklyStudio } from '@/lib/agents/weekly-studio';
-import { generateImage, startVideo, webSearch, writeDigest } from '@/lib/agents/openrouter-media';
+import {
+  generateImage,
+  startVideo,
+  suggestProposals,
+  webSearch,
+  writeDigest,
+} from '@/lib/agents/openrouter-media';
 
 const ORG = 'org-123';
 
@@ -44,6 +61,7 @@ function fakeService(
               call.eqs.push([col, val]);
               return b;
             },
+            then: (resolve: (v: { data: never[] }) => void) => resolve({ data: [] }),
             maybeSingle: async () => ({ data: table === 'agent_configs' ? cap : keyRow, error: null }),
           };
           return b;
@@ -51,6 +69,7 @@ function fakeService(
         insert(payload: Record<string, unknown>) {
           const call: Call = { table, op: 'insert', payload, eqs: [] };
           calls.push(call);
+          if (table === 'agent_proposals') return Promise.resolve({ error: null });
           if (table === 'agent_run_assets') {
             assets.push(payload);
             return Promise.resolve({ error: null });
@@ -93,6 +112,11 @@ beforeEach(() => {
   vi.mocked(writeDigest).mockReset();
   vi.mocked(generateImage).mockReset();
   vi.mocked(startVideo).mockReset();
+  vi.mocked(suggestProposals).mockReset();
+  vi.mocked(suggestProposals).mockResolvedValue({
+    keep: [{ index: 0, rationale: 'A won lead ready for sales.' }],
+    cost_cents: 0,
+  });
   vi.mocked(startVideo).mockResolvedValue({ jobId: 'job-9', cost_cents: 20 });
   vi.mocked(generateImage).mockResolvedValue({
     bytes: new Uint8Array([1, 2, 3]),
@@ -251,5 +275,31 @@ describe('runWeeklyStudio', () => {
     expect(runs[0].digest_md).toBe('d');
     expect(assets.filter((a) => a.kind !== 'video').map((a) => a.status)).toEqual(['failed', 'failed']);
     expect(JSON.stringify(assets)).not.toContain('secret');
+  });
+
+  it('queues an agent_proposals row for an opportunity and still finishes done', async () => {
+    vi.mocked(webSearch).mockResolvedValue({ text: 'a', cost_cents: 1 });
+    vi.mocked(writeDigest).mockResolvedValue({ text: '# D', cost_cents: 1 });
+    const { service, runs, calls } = fakeService({ ciphertext: 'abc' });
+    const res = await runWeeklyStudio(service, ORG, 'manual');
+    expect(res.status).toBe('done');
+    expect(runs[0]).toMatchObject({ status: 'done', digest_md: '# D' });
+    const proposal = calls.find((c) => c.table === 'agent_proposals' && c.op === 'insert');
+    expect(proposal?.payload).toMatchObject({
+      org_id: ORG,
+      run_id: 'run-1',
+      action: 'promoteLeadToContact',
+      status: 'pending',
+    });
+  });
+
+  it('keeps the digest and a done run when the proposer throws', async () => {
+    vi.mocked(webSearch).mockResolvedValue({ text: 'a', cost_cents: 1 });
+    vi.mocked(writeDigest).mockResolvedValue({ text: '# D', cost_cents: 1 });
+    vi.mocked(suggestProposals).mockRejectedValue(new Error('boom sk-or-secret'));
+    const { service, runs } = fakeService({ ciphertext: 'abc' });
+    const res = await runWeeklyStudio(service, ORG, 'manual');
+    expect(res.status).toBe('done');
+    expect(runs[0].digest_md).toBe('# D');
   });
 });
