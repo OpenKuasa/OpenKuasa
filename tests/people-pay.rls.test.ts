@@ -2,8 +2,7 @@
  * Live test of the claims and overtime write path against the real database.
  * It needs 20261020090000_people_claims_overtime_writes.sql applied; until then
  * it fails at the first call (the functions do not exist). Skipped without
- * Supabase env vars. It has NOT been run: the migration is not on the live
- * database yet.
+ * Supabase env vars.
  *
  * Why no receipt file: the receipts bucket takes uploads only from a signed-up
  * (non-anonymous) account, and this suite signs in anonymously like the leave
@@ -14,7 +13,7 @@
  * `uploadReceipt` and a `removeReceipt` of what it made.
  */
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { type SupabaseClient } from '@supabase/supabase-js';
 import { createEmployee } from '@/lib/people/capabilities';
 import { todayInMalaysia, addDays } from '@/lib/people/dates';
 import {
@@ -30,14 +29,12 @@ import {
 } from '@/lib/people/pay-requests';
 import { DEMO_EMPLOYEE_ID } from '@/lib/people/types';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { createOrg, joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 
-const client = (): SupabaseClient =>
-  createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+const client = liveClient;
 
 const TODAY = todayInMalaysia(new Date());
 const CLAIM_DATE = addDays(TODAY, -3);
@@ -51,21 +48,19 @@ let createdEmployeeId: string | null = null;
 beforeAll(async () => {
   if (!hasSupabaseEnv) return;
   const c = client();
-  const signedIn = await c.auth.signInAnonymously();
+  const signedIn = await signInAnon(c);
   expect(signedIn.error, signedIn.error?.message).toBeNull();
-  const org = await c.rpc('create_org_for_current_user', { org_name: 'People Pay Sdn Bhd' });
+  const org = await createOrg(c, 'People Pay Sdn Bhd');
   expect(org.error, org.error?.message).toBeNull();
   owner = { c, orgId: org.data as string };
 
   const g = client();
-  expect((await g.auth.signInAnonymously()).error).toBeNull();
-  const demo = await g.rpc('join_demo_org');
+  expect((await signInAnon(g)).error).toBeNull();
+  const demo = await joinDemo(g);
   expect(demo.error, demo.error?.message).toBeNull();
   guest = { c: g, demoId: demo.data as string };
 });
 afterAll(async () => {
-  // Deleting the employee deletes their claims and overtime with it, so only the throwaway workspace is left.
-  if (owner && createdEmployeeId) await owner.c.from('hr_employees').delete().eq('id', createdEmployeeId);
   await owner?.c.auth.signOut();
   await guest?.c.auth.signOut();
 });
