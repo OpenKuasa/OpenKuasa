@@ -14,6 +14,8 @@ const seen = vi.hoisted(() => ({
    */
   workerScript: null as null | ({ tool: string; input: unknown } | { tool: string; input: unknown }[])[],
   workerStep: 0,
+  /** Set by a test of one agent holding the tools itself: its first model call makes all of these calls in one step. */
+  singleScript: null as null | { tool: string; input: unknown }[],
   /** Every refusal a tool answered with (`prepared: false`), in order. */
   refusals: [] as string[],
 }));
@@ -21,6 +23,8 @@ const created = vi.hoisted(() => vi.fn());
 const closed = vi.hoisted(() => vi.fn());
 const candidateAdded = vi.hoisted(() => vi.fn());
 const candidateSaved = vi.hoisted(() => vi.fn());
+const applicationDeleted = vi.hoisted(() => vi.fn());
+const candidateDeleted = vi.hoisted(() => vi.fn());
 
 // The real schemas, so the prepared input is checked as it is in the app; only the write is recorded.
 vi.mock('@/lib/hire/capabilities', async (importOriginal) => ({
@@ -29,6 +33,8 @@ vi.mock('@/lib/hire/capabilities', async (importOriginal) => ({
   closeApplication: closed,
   addCandidate: candidateAdded,
   updateCandidate: candidateSaved,
+  deleteApplication: applicationDeleted,
+  deleteCandidate: candidateDeleted,
 }));
 
 // The real `tool`, but a refusal any tool answers with is noted: a specialist stops after the step in which
@@ -88,7 +94,7 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
             stream: simulateReadableStream({
               initialDelayInMs: 0,
               chunkDelayInMs: 0,
-              chunks: seen.workerScript
+              chunks: seen.singleScript ? (seen.calls.length === 1 ? callAll(seen.singleScript) : answer) : seen.workerScript
                 ? layer === 'worker'
                   ? callAll([seen.workerScript[Math.min(seen.workerStep++, seen.workerScript.length - 1)]].flat())
                   : call('askLekir', { task: 'Reject the first applicant' })
@@ -104,7 +110,7 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
   };
 });
 
-const { runTuah } = await import('@/lib/ai/agents/orchestrator');
+const { runLekir, runTuah } = await import('@/lib/ai/agents/orchestrator');
 const { createTeamTools } = await import('@/lib/ai/agents/specialists');
 const { combineToolkits, hireProduct, reachProduct } = await import('@/lib/ai/products');
 const { TUAH_SYSTEM, tuahTeamSystem, subAgentSystem } = await import('@/lib/ai/agents/prompts');
@@ -655,6 +661,7 @@ describe('Tuah’s team adding and editing a candidate', () => {
     await runTuah(ask, reach(), undefined, undefined, null, null, team(), hire()).consumeStream();
     const line = seen.calls[0].system.split('\n').find((l) => l.startsWith('- askLekir:'));
     expect(line).toContain('Applications can be moved, rejected, reopened and rated, one at a time. Candidates can be added by hand and edited, one at a time. ');
+    expect(line).toContain('Candidates can be added by hand and edited, one at a time. An application or a candidate can be deleted, one at a time. ');
     // The roster line stays one sentence-ending line.
     expect(line!.endsWith('.')).toBe(true);
     expect(line).not.toContain('..');
@@ -663,5 +670,319 @@ describe('Tuah’s team adding and editing a candidate', () => {
     const asks = createTeamTools([hireProduct(writer())], team()).tools.askLekir as unknown as { description: string };
     expect(asks.description).toContain('it can prepare adding or editing one candidate at a time');
     expect(asks.description).toMatch(/to look things up or to prepare a change\. Give Lekir/);
+  });
+});
+
+describe('Tuah’s team deleting an application or a candidate', () => {
+  const CAND_ID = '44444444-4444-4444-8444-444444444442';
+  const OTHER_CAND = '44444444-4444-4444-8444-444444444443';
+  const APP_ID = '66666666-6666-4666-8666-666666666662';
+  const MADE_UP = '99999999-9999-4999-8999-999999999999';
+  const ONE_DELETION = 'One deletion at a time. One is already prepared for approval.';
+  const AMBIGUOUS =
+    'More than one match was found for that name, so no deletion was prepared. Say who matches and ask the user which one they mean. ' +
+    'If the user has already said which, look it up again by the full name (and the job, for an application).';
+  /**
+   * The seed's ids are not UUIDs, which the change tools require. Two candidates share a first name, to be ambiguous.
+   * The seed has people called Aisyah of its own (one of them an Aisyah Lim): they are left out, so that the full
+   * name fits one person and the first name fits exactly these two.
+   */
+  const withUuids = async () => {
+    const base = hire().data;
+    const [c1, c2] = await base.listCandidates();
+    const [a1] = await base.listApplications();
+    const data = {
+      ...base,
+      listCandidates: async () =>
+        (await base.listCandidates())
+          .filter((c) => c.id === c1.id || c.id === c2.id || !c.name.includes('Aisyah'))
+          .map((c) =>
+            c.id === c1.id ? { ...c, id: CAND_ID, name: 'Aisyah Lim' } : c.id === c2.id ? { ...c, id: OTHER_CAND, name: 'Aisyah binti Karim' } : c),
+      listApplications: async () => (await base.listApplications()).map((a) => (a.id === a1.id ? { ...a, id: APP_ID } : a)),
+    };
+    return { application: a1, access: { data, write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true } } };
+  };
+  const prepare = async (
+    script: NonNullable<typeof seen.workerScript>,
+    access: Awaited<ReturnType<typeof withUuids>>['access'],
+    names: Record<string, string> = {},
+  ) => {
+    applicationDeleted.mockReset();
+    candidateDeleted.mockReset();
+    const context = { ...team(), names };
+    seen.calls = [];
+    seen.workerScript = script;
+    seen.workerStep = 0;
+    seen.refusals = [];
+    try {
+      await runTuah(
+        [{ role: 'user' as const, content: 'Delete the candidate Aisyah Lim' }],
+        reach(), undefined, undefined, null, null, context, access,
+      ).consumeStream();
+    } finally {
+      seen.workerScript = null;
+    }
+    return context;
+  };
+  const nothingDeleted = () => {
+    expect(applicationDeleted).not.toHaveBeenCalled();
+    expect(candidateDeleted).not.toHaveBeenCalled();
+  };
+
+  it('both tools ask for approval for a writer, and a viewer holds neither', () => {
+    const writer = { ...hire(), write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true } };
+    const { tools, toolApproval } = combineToolkits([hireProduct(writer)]);
+    for (const name of ['deleteApplication', 'deleteCandidate']) {
+      expect(HIRE_WRITE_TOOL_NAMES, name).toContain(name);
+      expect(Object.keys(tools), name).toContain(name);
+      expect(toolApproval?.[name], name).toBe('user-approval');
+    }
+    const viewer = combineToolkits([hireProduct({ ...hire(), write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: false } })]);
+    for (const name of ['deleteApplication', 'deleteCandidate']) expect(Object.keys(viewer.tools), name).not.toContain(name);
+  });
+  it('prepares one card for a candidate it looked up by full name, and deletes nothing', async () => {
+    const { access } = await withUuids();
+    const context = await prepare([
+      { tool: 'listCandidates', input: { name: 'Aisyah Lim' } },
+      { tool: 'deleteCandidate', input: { id: CAND_ID } },
+    ], access);
+    expect(seen.refusals).toEqual([]);
+    expect(context.proposals.size).toBe(1);
+    expect([...context.proposals.values()][0]).toMatchObject({
+      action: 'deleteCandidate',
+      input: { id: CAND_ID },
+      title: 'Delete candidate “Aisyah Lim”?',
+      detail: 'Every application, interview and CV file of theirs is deleted too. This cannot be undone.',
+    });
+    nothingDeleted();
+  });
+  it('prepares one card for an application it listed', async () => {
+    const { application, access } = await withUuids();
+    const context = await prepare([
+      { tool: 'listApplications', input: {} },
+      { tool: 'deleteApplication', input: { id: APP_ID } },
+    ], access);
+    expect(seen.refusals).toEqual([]);
+    expect([...context.proposals.values()][0]).toMatchObject({
+      action: 'deleteApplication',
+      title: `Delete the application of ${application.candidate_name} (${application.job_title})?`,
+      detail: 'Its interviews and its CV file are deleted too. The candidate stays on file. This cannot be undone.',
+    });
+    nothingDeleted();
+  });
+  it('refuses a made-up id', async () => {
+    const { access } = await withUuids();
+    const context = await prepare([
+      { tool: 'listCandidates', input: { name: 'Aisyah Lim' } },
+      { tool: 'deleteCandidate', input: { id: MADE_UP } },
+    ], access);
+    expect(context.proposals.size).toBe(0);
+    expect(seen.refusals[0]).toContain(`You have not looked up ${MADE_UP}`);
+    nothingDeleted();
+  });
+  it('refuses an id of the other kind, even one it listed', async () => {
+    const { access } = await withUuids();
+    const asCandidate = await prepare([
+      { tool: 'listApplications', input: {} },
+      { tool: 'deleteCandidate', input: { id: APP_ID } },
+    ], access);
+    expect(asCandidate.proposals.size).toBe(0);
+    expect(seen.refusals[0]).toBe(
+      `You have not looked up ${APP_ID} as a candidate. Never guess an id: use listCandidates ` +
+        'to find the candidate and get its real id, then prepare the change again.',
+    );
+    const asApplication = await prepare([
+      { tool: 'listCandidates', input: { name: 'Aisyah Lim' } },
+      { tool: 'deleteApplication', input: { id: CAND_ID } },
+    ], access);
+    expect(asApplication.proposals.size).toBe(0);
+    expect(seen.refusals[0]).toBe(
+      `You have not looked up ${CAND_ID} as an application. Never guess an id: use listApplications ` +
+        'to find the application and get its real id, then prepare the change again.',
+    );
+    nothingDeleted();
+  });
+  it('makes one card when two deletions are called in one step', async () => {
+    const { access } = await withUuids();
+    const context = await prepare([
+      { tool: 'listCandidates', input: {} },
+      [
+        { tool: 'deleteCandidate', input: { id: CAND_ID } },
+        { tool: 'deleteCandidate', input: { id: OTHER_CAND } },
+      ],
+    ], access);
+    expect(context.proposals.size).toBe(1);
+    expect([...context.proposals.values()][0]).toMatchObject({ action: 'deleteCandidate', input: { id: CAND_ID } });
+    expect(seen.refusals).toEqual([ONE_DELETION]);
+    nothingDeleted();
+  });
+  it('refuses a deletion when another change is already prepared in the same step', async () => {
+    const { access } = await withUuids();
+    const context = await prepare([
+      { tool: 'listCandidates', input: {} },
+      [
+        { tool: 'updateCandidate', input: { id: CAND_ID, location: 'Klang' } },
+        { tool: 'deleteCandidate', input: { id: CAND_ID } },
+      ],
+    ], access);
+    expect(context.proposals.size).toBe(1);
+    expect([...context.proposals.values()][0]).toMatchObject({ action: 'updateCandidate' });
+    expect(seen.refusals).toEqual([ONE_DELETION]);
+  });
+  it('refuses a deletion from a lookup that said several people match, and nothing is prepared however often it is tried', async () => {
+    const { access } = await withUuids();
+    const context = await prepare([
+      { tool: 'listCandidates', input: { name: 'Aisyah' } },
+      { tool: 'deleteCandidate', input: { id: CAND_ID } },
+    ], access);
+    // Tuah asks again until its step limit; a later delegation has not looked the id up at all, which is refused too.
+    expect(context.proposals.size).toBe(0);
+    expect(seen.refusals[0]).toBe(AMBIGUOUS);
+    for (const refusal of seen.refusals) expect(refusal === AMBIGUOUS || refusal.startsWith('You have not looked up')).toBe(true);
+    nothingDeleted();
+  });
+  it('accepts an id an earlier turn knew as a candidate, with no new lookup', async () => {
+    const { access } = await withUuids();
+    const context = await prepare(
+      [{ tool: 'deleteCandidate', input: { id: CAND_ID } }],
+      access,
+      { [`candidate:${CAND_ID}`]: 'Aisyah Lim' },
+    );
+    expect(seen.refusals).toEqual([]);
+    expect([...context.proposals.values()][0]).toMatchObject({ title: 'Delete candidate “Aisyah Lim”?' });
+  });
+  it('tells Tuah, in what the specialist is asked, that Lekir can prepare a deletion', () => {
+    const writer = { ...hire(), write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true } };
+    const asks = createTeamTools([hireProduct(writer)], team()).tools.askLekir as unknown as { description: string };
+    expect(asks.description).toContain('it can prepare deleting one application or one candidate at a time');
+    expect(asks.description).toContain('it can prepare adding or editing one candidate at a time');
+  });
+});
+
+describe('one agent holding the delete tools', () => {
+  const A = '11111111-1111-4111-8111-111111111111';
+  const B = '22222222-2222-4222-8222-222222222222';
+  const writer = () => ({ ...hire(), write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true } });
+  type Part = { type: string; isAutomatic?: boolean; toolCall?: { toolName?: string } };
+  const ONE_DELETION = 'One deletion at a time. One is already prepared for approval.';
+
+  // Tuah without a team holds the hiring tools itself, as Lekir does in its own chat: both go through the same gate.
+  // The model here calls deleteCandidate twice in its first step (the script's list), as the worker would.
+  it('shows the user one card when the model asks for two deletions at once, and deletes nothing', async () => {
+    candidateDeleted.mockReset();
+    seen.calls = [];
+    seen.refusals = [];
+    seen.singleScript = [
+      { tool: 'deleteCandidate', input: { id: A } },
+      { tool: 'deleteCandidate', input: { id: B } },
+    ];
+    let steps: { content: Part[] }[] = [];
+    try {
+      const result = runTuah(
+        [{ role: 'user' as const, content: 'Delete both candidates' }],
+        reach(), undefined, undefined, null, null, null, writer(),
+      );
+      await result.consumeStream();
+      steps = (await result.steps) as unknown as { content: Part[] }[];
+    } finally {
+      seen.singleScript = null;
+    }
+    const requests = steps.flatMap((s) => s.content).filter((p) => p.type === 'tool-approval-request');
+    const forTheUser = requests.filter((p) => !p.isAutomatic);
+    expect(forTheUser).toHaveLength(1);
+    expect(forTheUser[0].toolCall?.toolName).toBe('deleteCandidate');
+    expect(candidateDeleted).not.toHaveBeenCalled();
+  });
+
+  // The rest drive the SDK through the whole exchange: the request that shows the card, then the one the browser
+  // sends with the user's answer. The SDK asks the gate about an approved call a second time in that later request.
+  type Message = import('ai').ModelMessage;
+  type Run = { cards: { approvalId: string; toolCall: { toolName: string; input: unknown } }[]; denials: (string | undefined)[]; messages: Message[] };
+  /** One request: the model's first step makes every call in `script`; any later step answers in words. */
+  const request = async (
+    messages: Message[],
+    script: { tool: string; input: unknown }[],
+    agent: 'tuah' | 'lekir' = 'tuah',
+  ): Promise<Run> => {
+    seen.calls = [];
+    seen.singleScript = script;
+    try {
+      const result = agent === 'lekir'
+        ? runLekir(messages, writer())
+        : runTuah(messages, reach(), undefined, undefined, null, null, null, writer());
+      await result.consumeStream();
+      const content = ((await result.steps) as unknown as { content: (Part & Record<string, unknown>)[] }[]).flatMap((s) => s.content);
+      return {
+        cards: content.filter((p) => p.type === 'tool-approval-request' && !p.isAutomatic) as unknown as Run['cards'],
+        denials: content.filter((p) => p.type === 'tool-approval-response' && p.approved === false).map((p) => p.reason as string | undefined),
+        messages: [...messages, ...(await result.response).messages],
+      };
+    } finally {
+      seen.singleScript = null;
+    }
+  };
+  const answer = (approvalId: string, approved: boolean): Message =>
+    ({ role: 'tool', content: [{ type: 'tool-approval-response', approvalId, approved }] }) as Message;
+  const both = [
+    { tool: 'deleteCandidate', input: { id: A } },
+    { tool: 'deleteCandidate', input: { id: B } },
+  ];
+  const asked: Message[] = [{ role: 'user', content: 'Delete both candidates' }];
+  const removed = { ok: true, data: { id: A, name: 'Aina Rahman', job: null, applications: 0, interviews: 0, cv_files: 0, message: 'Deleted Aina Rahman.' } };
+
+  it.each(['tuah', 'lekir'] as const)('%s: the second of two deletions is denied with the reason, and never becomes a card', async (agent) => {
+    candidateDeleted.mockReset();
+    const first = await request(asked, both, agent);
+    expect(first.cards).toHaveLength(1);
+    expect(first.cards[0].toolCall).toMatchObject({ toolName: 'deleteCandidate', input: { id: A } });
+    expect(first.denials).toEqual([ONE_DELETION]);
+    expect(candidateDeleted).not.toHaveBeenCalled();
+  });
+  it.each(['tuah', 'lekir'] as const)('%s: approving that one card deletes that one row, and a further deletion in the same turn gets no card', async (agent) => {
+    candidateDeleted.mockReset();
+    candidateDeleted.mockResolvedValue(removed);
+    const first = await request(asked, both, agent);
+    // The model, told the row is gone, asks for two more deletions in the same turn.
+    const second = await request([...first.messages, answer(first.cards[0].approvalId, true)], both, agent);
+    expect(candidateDeleted).toHaveBeenCalledTimes(1);
+    expect(candidateDeleted.mock.calls[0][1]).toEqual({ id: A });
+    expect(second.cards).toEqual([]);
+    expect(second.denials).toEqual([ONE_DELETION, ONE_DELETION]);
+  });
+  it('a rejected card still counts as the turn\'s one deletion', async () => {
+    candidateDeleted.mockReset();
+    const first = await request(asked, both);
+    const second = await request([...first.messages, answer(first.cards[0].approvalId, false)], [{ tool: 'deleteCandidate', input: { id: B } }]);
+    expect(second.cards).toEqual([]);
+    expect(second.denials).toEqual([ONE_DELETION]);
+    expect(candidateDeleted).not.toHaveBeenCalled();
+  });
+  it('the next thing the user says is a new turn, with one deletion of its own', async () => {
+    candidateDeleted.mockReset();
+    candidateDeleted.mockResolvedValue(removed);
+    const first = await request(asked, both);
+    const second = await request([...first.messages, answer(first.cards[0].approvalId, true)], []);
+    const third = await request([...second.messages, { role: 'user', content: 'Now the other one' }], [{ tool: 'deleteCandidate', input: { id: B } }]);
+    expect(third.cards).toHaveLength(1);
+    expect(third.cards[0].toolCall).toMatchObject({ toolName: 'deleteCandidate', input: { id: B } });
+    expect(third.denials).toEqual([]);
+    expect(candidateDeleted).toHaveBeenCalledTimes(1);
+  });
+  it('another kind of change beside a deletion keeps its own card', async () => {
+    candidateDeleted.mockReset();
+    candidateSaved.mockReset();
+    const run = await request(asked, [
+      { tool: 'updateCandidate', input: { id: A, location: 'Klang' } },
+      { tool: 'deleteCandidate', input: { id: B } },
+      { tool: 'updateCandidate', input: { id: B, location: 'Klang' } },
+    ]);
+    expect(run.cards.map((c) => c.toolCall.toolName)).toEqual(['updateCandidate', 'deleteCandidate', 'updateCandidate']);
+    expect(run.denials).toEqual([]);
+  });
+  it('a viewer holds no delete tool, so there is nothing to gate', async () => {
+    seen.calls = [];
+    await runLekir(asked, { ...hire(), write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: false } }).consumeStream();
+    expect(seen.calls[0].tools).not.toContain('deleteCandidate');
+    expect(seen.calls[0].tools).not.toContain('deleteApplication');
   });
 });

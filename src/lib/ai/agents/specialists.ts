@@ -21,6 +21,7 @@ import {
 import { z } from 'zod';
 import { subAgentSystem } from '@/lib/ai/agents/prompts';
 import { prepareCvStep } from '@/lib/ai/hire-tools';
+import { AMBIGUOUS_DELETION, HIRE_DELETE_TOOL_NAMES, ambiguousLookup, oneDeletionRefusal } from '@/lib/ai/hire-deletions';
 import type { ProductToolkit } from '@/lib/ai/products';
 import { logModelCall, logModelError, modelErrorCode } from '@/lib/ai/call-log';
 import { getModel, pickModelId } from '@/lib/ai/provider';
@@ -81,6 +82,11 @@ const ONE_APPLICATION_CHANGE = 'One application change at a time. One is already
 const CANDIDATE_CHANGES = new Set(['addCandidate', 'updateCandidate']);
 const ONE_CANDIDATE_CHANGE = 'One candidate change at a time. One is already prepared for approval.';
 
+/** The two deletions: one a turn, across every delegation in it, and never from a lookup that said several rows match. */
+const DELETIONS = new Set<string>(HIRE_DELETE_TOOL_NAMES);
+/** What one request (one turn of the conversation) has prepared so far. Made once per request by createTeamTools. */
+type TurnState = { deletions: number };
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Every id a change refers to, wherever it sits in the input. */
@@ -101,6 +107,7 @@ function specialistTools(
   results: ToolResult[],
   prepared: Proposal[],
   given: string,
+  turn: TurnState,
 ): ToolSet {
   const tools: ToolSet = {};
 
@@ -132,6 +139,10 @@ function specialistTools(
         if (CANDIDATE_CHANGES.has(name) && prepared.length > 0) {
           return { prepared: false, error: ONE_CANDIDATE_CHANGE };
         }
+        if (DELETIONS.has(name)) {
+          const refusal = oneDeletionRefusal(prepared.length, turn.deletions);
+          if (refusal) return { prepared: false, error: refusal };
+        }
         // An id must have come from somewhere: a lookup just now, an earlier
         // turn, or the task. One that appears nowhere was made up, and a
         // change prepared with it would fail after the user approved it.
@@ -148,7 +159,7 @@ function specialistTools(
               'to list the item and get its real id, then prepare the change again.',
           };
         }
-        if (APPLICATION_CHANGES.has(name)) {
+        if (APPLICATION_CHANGES.has(name) || name === 'deleteApplication') {
           const id = (input as { id?: unknown } | null)?.id;
           const asApplication =
             typeof id === 'string' && (team.names?.[`application:${id}`] || nameIn(results)(id, 'application'));
@@ -161,7 +172,7 @@ function specialistTools(
             };
           }
         }
-        if (name === 'updateCandidate') {
+        if (name === 'updateCandidate' || name === 'deleteCandidate') {
           const id = (input as { id?: unknown } | null)?.id;
           const asCandidate =
             typeof id === 'string' && (team.names?.[`candidate:${id}`] || nameIn(results)(id, 'candidate'));
@@ -188,6 +199,10 @@ function specialistTools(
             };
           }
         }
+        // A lookup in this delegation that holds the id and says several rows match: the model must ask, not choose.
+        if (DELETIONS.has(name) && ambiguousLookup(results.map((r) => r.output), (input as { id?: unknown } | null)?.id)) {
+          return { prepared: false, error: AMBIGUOUS_DELETION };
+        }
         // Named from what this specialist just looked up, else from earlier turns.
         const find = (id: unknown, kind?: ItemKind) =>
           nameIn(results)(id, kind) ??
@@ -202,6 +217,7 @@ function specialistTools(
         };
         team.proposals.set(proposal.id, proposal);
         prepared.push(proposal);
+        if (DELETIONS.has(name)) turn.deletions += 1;
         return { prepared: true, proposalId: proposal.id, card: proposal.title };
       },
     });
@@ -210,7 +226,7 @@ function specialistTools(
 }
 
 /** The tool Tuah uses to hand a task to one specialist. */
-function askTool(product: ProductToolkit, team: TeamContext): Tool {
+function askTool(product: ProductToolkit, team: TeamContext, turn: TurnState): Tool {
   const canChange = Object.keys(product.write).length > 0;
   return tool({
     description:
@@ -248,7 +264,7 @@ function askTool(product: ProductToolkit, team: TeamContext): Tool {
           model: getModel('worker', team.apiKey),
           system: subAgentSystem(product.key, canChange),
           prompt: given,
-          tools: specialistTools(product, team, results, prepared, given),
+          tools: specialistTools(product, team, results, prepared, given, turn),
           // A CV this specialist reads reaches its own model as a user file in the next step:
           // only a run whose messages hold the read is given the file, so never Tuah, never another delegation.
           prepareStep: prepareCvStep(product.cvShelf),
@@ -295,7 +311,7 @@ function askTool(product: ProductToolkit, team: TeamContext): Tool {
 const AREA: Record<ProductToolkit['key'], string> = {
   reach: 'marketing (ads, campaigns, creatives, leads, lead forms, appointments, ad settings)',
   crm: 'the CRM (contacts, deals, pipelines and their stages)',
-  hire: 'hiring (jobs, candidates, applications, the hiring funnel, interviews, the talent pool; it can read one candidate\'s uploaded CV and give a verdict on it; it can prepare moving, rejecting, reopening or rating one application at a time; it can prepare adding or editing one candidate at a time)',
+  hire: 'hiring (jobs, candidates, applications, the hiring funnel, interviews, the talent pool; it can read one candidate\'s uploaded CV and give a verdict on it; it can prepare moving, rejecting, reopening or rating one application at a time; it can prepare adding or editing one candidate at a time; it can prepare deleting one application or one candidate at a time)',
   people: 'HR (existing staff, leave, claims, overtime, attendance, payroll, performance)',
 };
 
@@ -401,8 +417,10 @@ export function createTeamTools(
   prepareStep?: (options: { steps: StepLike[] }) => { model: LanguageModel } | undefined;
 } {
   const tools: ToolSet = {};
+  // One request is one turn: every specialist asked in it shares this count.
+  const turn: TurnState = { deletions: 0 };
   for (const product of products) {
-    tools[`${ASK_PREFIX}${product.name}`] = askTool(product, team);
+    tools[`${ASK_PREFIX}${product.name}`] = askTool(product, team, turn);
   }
 
   const anyChanges = products.some((p) => Object.keys(p.write).length > 0);

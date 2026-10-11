@@ -5,7 +5,7 @@ import { HIRE_TOOL_NAMES, createHireTools, withHeldCvs, type HeldCv } from '@/li
 import { CRM_WRITE_TOOL_NAMES } from '@/lib/ai/crm-tools';
 import { HIRE_WRITE_TOOL_NAMES, PEOPLE_WRITE_TOOL_NAMES, REACH_WRITE_TOOL_NAMES } from '@/lib/ai/products';
 import {
-  addCandidateInput, updateCandidateInput,
+  addCandidateInput, updateCandidateInput, deleteApplicationInput, deleteCandidateInput,
   closeApplicationInput, createJobInput, deleteJobInput, moveApplicationInput, rateApplicationInput, reopenApplicationInput,
   setJobStatusInput, updateApplicationFormInput, updateCareersPageInput, updateJobInput,
 } from '@/lib/hire/capabilities';
@@ -20,7 +20,7 @@ import type { CvRead, CvReader } from '@/lib/hire/cv-read';
 import { HIRE_READ_CAP, type HireData } from '@/lib/hire/types';
 
 // The real schemas; only the four application changes are recorded instead of run.
-const applied = vi.hoisted(() => ({ move: vi.fn(), close: vi.fn(), reopen: vi.fn(), rate: vi.fn(), addCandidate: vi.fn(), updateCandidate: vi.fn() }));
+const applied = vi.hoisted(() => ({ move: vi.fn(), close: vi.fn(), reopen: vi.fn(), rate: vi.fn(), addCandidate: vi.fn(), updateCandidate: vi.fn(), deleteApplication: vi.fn(), deleteCandidate: vi.fn() }));
 vi.mock('@/lib/hire/capabilities', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/hire/capabilities')>()),
   moveApplication: applied.move,
@@ -29,6 +29,8 @@ vi.mock('@/lib/hire/capabilities', async (importOriginal) => ({
   rateApplication: applied.rate,
   addCandidate: applied.addCandidate,
   updateCandidate: applied.updateCandidate,
+  deleteApplication: applied.deleteApplication,
+  deleteCandidate: applied.deleteCandidate,
 }));
 
 const NOW = new Date('2026-10-10T04:00:00Z');
@@ -346,6 +348,32 @@ describe('listCandidates', () => {
     expect(await find({})).not.toHaveProperty('several_match');
     expect(tools.listCandidates.description).toContain('several_match');
   });
+  it('says so in the result when a candidate name matches more than one application, and only then', async () => {
+    const [base] = await data.listApplications();
+    const three = [
+      { ...base, id: 'a1', candidate_id: 'c1', candidate_name: 'Aisyah Lim', job_title: 'Barista', stage: 'applied' as const, outcome: 'active' as const },
+      { ...base, id: 'a2', candidate_id: 'c1', candidate_name: 'Aisyah Lim', job_title: 'Cashier', stage: 'screening' as const, outcome: 'rejected' as const },
+      { ...base, id: 'a3', candidate_id: 'c3', candidate_name: 'Tan Mei Ling', job_title: 'Barista', stage: 'applied' as const, outcome: 'active' as const },
+    ];
+    const tools = createHireTools({ ...data, listApplications: async () => three }, NOW);
+    const find = (input: unknown) =>
+      (tools.listApplications as unknown as { execute: (i: unknown, o: unknown) => Promise<Loose> })
+        .execute(input, { toolCallId: 't', messages: [] });
+    const several = await find({ candidate: 'aisyah' });
+    expect(several.several_match).toBe(
+      'More than one application matches this name: Aisyah Lim (Barista, applied); Aisyah Lim (Cashier, screening, rejected). ' +
+        'If the user named the job, look again with jobTitle as well. Otherwise do not choose one: prepare no change, ' +
+        'say which applications match and ask the user which one they mean.',
+    );
+    // Narrowed to one, or no name asked for: there is nothing to choose between.
+    expect(await find({ candidate: 'aisyah', jobTitle: 'Cashier' })).not.toHaveProperty('several_match');
+    expect(await find({ candidate: 'Tan' })).not.toHaveProperty('several_match');
+    expect(await find({})).not.toHaveProperty('several_match');
+    expect(await find({ jobTitle: 'Barista' })).not.toHaveProperty('several_match');
+    const description = (tools.listApplications as unknown as { description: string }).description;
+    expect(description).toContain('which readCandidateCv and deleteApplication take');
+    expect(description).toContain('several_match');
+  });
   it('adds email and phone only with includeContact', async () => {
     const [one] = (await rows({ limit: 1, includeContact: true })).candidates;
     const stored = (await data.listCandidates())[0];
@@ -385,7 +413,7 @@ describe('listCandidates', () => {
   });
   it('says what it returns, and that contact details need includeContact', () => {
     expect((tools.listCandidates as unknown as { description: string }).description).toBe(
-      'List candidates on file, newest first, by name, skill or location. Each row has the candidate\'s id, which updateCandidate takes. Email and phone are returned only when includeContact is set. If the result has "several_match", the name fits more than one person: prepare no change and ask the user which one.',
+      'List candidates on file, newest first, by name, skill or location. Each row has the candidate\'s id, which updateCandidate and deleteCandidate take. Email and phone are returned only when includeContact is set. If the result has "several_match", the name fits more than one person: prepare no change and ask the user which one.',
     );
   });
 });
@@ -404,7 +432,7 @@ describe('hire change tools', () => {
     expect(HIRE_WRITE_TOOL_NAMES).toEqual([
       'createJob', 'updateJob', 'setJobStatus', 'deleteJob', 'updateCareersPage', 'updateApplicationForm',
       'moveApplication', 'rejectApplication', 'reopenApplication', 'rateApplication',
-      'addCandidate', 'updateCandidate',
+      'addCandidate', 'updateCandidate', 'deleteApplication', 'deleteCandidate',
     ]);
   });
   it('gives a writer nothing beyond the lookups except the listed change tools, so each one needs approval', () => {
@@ -442,6 +470,8 @@ describe('hire change tools', () => {
     expect(t.rateApplication.inputSchema).toBe(rateApplicationInput);
     expect(t.addCandidate.inputSchema).toBe(addCandidateInput);
     expect(t.updateCandidate.inputSchema).toBe(updateCandidateInput);
+    expect(t.deleteApplication.inputSchema).toBe(deleteApplicationInput);
+    expect(t.deleteCandidate.inputSchema).toBe(deleteCandidateInput);
   });
   it('describes the two candidate changes as agreed', () => {
     const t = createHireTools(data, NOW, { ctx, canWrite: true }) as Record<string, { description: string }>;
@@ -462,6 +492,28 @@ describe('hire change tools', () => {
     for (const [name, fn, input] of cases) {
       fn.mockReset();
       fn.mockResolvedValue(out);
+      expect(await t[name].execute(input, { toolCallId: 't', messages: [] }), name).toBe(out);
+      expect(fn, name).toHaveBeenCalledTimes(1);
+      expect(fn.mock.calls[0][0], name).toBe(ctx);
+      expect(fn.mock.calls[0][1], name).toBe(input);
+    }
+  });
+  it('describes the two deletions as agreed', () => {
+    const t = createHireTools(data, NOW, { ctx, canWrite: true }) as Record<string, { description: string }>;
+    expect(t.deleteApplication.description).toBe('Delete ONE application for good, with its interviews and its CV file. The candidate stays on file. Use the application\'s id from listApplications.');
+    expect(t.deleteCandidate.description).toBe('Delete ONE candidate for good, with every application, interview and CV file of theirs. Use the candidate\'s id from listCandidates.');
+  });
+  it('runs each deletion through its capability with the input unchanged, and hands back what it removed', async () => {
+    const t = createHireTools(data, NOW, { ctx, canWrite: true }) as Record<
+      string,
+      { execute: (i: unknown, o: unknown) => Promise<unknown> }
+    >;
+    const id = '33333333-3333-4333-8333-333333333333';
+    const out = { ok: true, data: { id, name: 'Aina Rahman', job: null, applications: 2, interviews: 0, cv_files: 1, message: 'Deleted Aina Rahman, with 2 applications and 1 CV file.' } };
+    for (const [name, fn] of [['deleteApplication', applied.deleteApplication], ['deleteCandidate', applied.deleteCandidate]] as const) {
+      fn.mockReset();
+      fn.mockResolvedValue(out);
+      const input = { id };
       expect(await t[name].execute(input, { toolCallId: 't', messages: [] }), name).toBe(out);
       expect(fn, name).toHaveBeenCalledTimes(1);
       expect(fn.mock.calls[0][0], name).toBe(ctx);

@@ -159,10 +159,12 @@ const KIND_OF_TOOL: Record<string, ItemKind> = {
   rejectApplication: 'application',
   reopenApplication: 'application',
   rateApplication: 'application',
+  deleteApplication: 'application',
   // Rows and results of all three carry the candidate's `id` and `name`.
   listCandidates: 'candidate',
   addCandidate: 'candidate',
   updateCandidate: 'candidate',
+  deleteCandidate: 'candidate',
   listEmployees: 'employee',
   getEmployee: 'employee',
   createEmployee: 'employee',
@@ -509,6 +511,14 @@ export function approvalTitle(
       const name = find(i.id, 'candidate');
       return `Save changes to ${name ? `candidate “${name}”` : UNLISTED_CANDIDATE}?`;
     }
+    case 'deleteApplication': {
+      const which = find(i.id, 'application');
+      return which ? `Delete the application of ${which}?` : `Delete ${UNLISTED_APPLICATION}?`;
+    }
+    case 'deleteCandidate': {
+      const name = find(i.id, 'candidate');
+      return `Delete ${name ? `candidate “${name}”` : UNLISTED_CANDIDATE}?`;
+    }
     case 'createEmployee': return `Add employee “${i.name ?? ''}”?`;
     case 'updateEmployee': return `Save changes to ${the('employee', 'employee')}?`;
     case 'setEmployeeStatus':
@@ -803,6 +813,13 @@ export function approvalDetail(
   if (toolName === 'updateCandidate') {
     const words = candidateFieldWords(i, true);
     return words.length > 0 ? `Changes: ${words.join(', ')}` : null;
+  }
+  // Fixed sentences, no counts: a number here would be the model's, not the database's. The result carries the real ones.
+  if (toolName === 'deleteApplication') {
+    return 'Its interviews and its CV file are deleted too. The candidate stays on file. This cannot be undone.';
+  }
+  if (toolName === 'deleteCandidate') {
+    return 'Every application, interview and CV file of theirs is deleted too. This cannot be undone.';
   }
   if (toolName === 'submitClaim') {
     // What will be saved under the person's name. The receipt line comes from the conversation (the file on the

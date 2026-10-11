@@ -234,3 +234,42 @@ describe('approval cards for a candidate', () => {
     expect(approvalDetail('updateCandidate', 'text')).toBeNull();
   });
 });
+
+describe('approval cards for a deletion', () => {
+  const APP = '77777777-7777-4777-8777-777777777777';
+  const PERSON = '88888888-8888-4888-8888-888888888888';
+  const STRANGER = '99999999-9999-4999-8999-999999999999';
+  const applications = { tool: 'listApplications', output: { total: 1, applications: [{ id: APP, candidate: 'Aina Rahman', job: 'Sales Executive' }] } };
+  const candidates = { tool: 'listCandidates', output: { total: 1, candidates: [{ id: PERSON, name: 'Aina Rahman', applications: 2 }] } };
+  const found = nameIn([applications, candidates]);
+
+  it('names the person and the job on an application\'s card, and says what else goes', () => {
+    expect(approvalTitle('deleteApplication', { id: APP }, found)).toBe('Delete the application of Aina Rahman (Sales Executive)?');
+    expect(approvalDetail('deleteApplication', { id: APP }, undefined, found))
+      .toBe('Its interviews and its CV file are deleted too. The candidate stays on file. This cannot be undone.');
+  });
+  it('names the person on a candidate\'s card, and says what else goes', () => {
+    expect(approvalTitle('deleteCandidate', { id: PERSON }, found)).toBe('Delete candidate “Aina Rahman”?');
+    expect(approvalDetail('deleteCandidate', { id: PERSON }, undefined, found))
+      .toBe('Every application, interview and CV file of theirs is deleted too. This cannot be undone.');
+  });
+  it('never names someone from an id of the other kind, or one that was not looked up', () => {
+    expect(approvalTitle('deleteApplication', { id: PERSON }, found)).toBe('Delete an application that was not in the list above?');
+    expect(approvalTitle('deleteApplication', { id: STRANGER }, found)).toBe('Delete an application that was not in the list above?');
+    expect(approvalTitle('deleteApplication', { id: APP })).toBe('Delete an application that was not in the list above?');
+    expect(approvalTitle('deleteCandidate', { id: APP }, found)).toBe('Delete a candidate that was not in the list above?');
+    expect(approvalTitle('deleteCandidate', { id: STRANGER }, found)).toBe('Delete a candidate that was not in the list above?');
+    expect(approvalTitle('deleteCandidate', {})).toBe('Delete a candidate that was not in the list above?');
+  });
+  it('carries the warning whatever the input, and no number the model could have made up', () => {
+    for (const input of [undefined, null, 'text', { id: APP, applications: 99 }]) {
+      expect(approvalDetail('deleteApplication', input)).toMatch(/This cannot be undone\.$/);
+      expect(approvalDetail('deleteCandidate', input)).toMatch(/This cannot be undone\.$/);
+      expect(approvalDetail('deleteCandidate', input)).not.toMatch(/\d/);
+    }
+  });
+  it('remembers a deleted candidate\'s name, so a later sentence can still say who it was', () => {
+    const done = [{ tool: 'deleteCandidate', output: { ok: true, data: { id: PERSON, name: 'Aina Rahman', job: null, applications: 2, interviews: 0, cv_files: 0, message: 'Deleted Aina Rahman, with 2 applications.' } } }];
+    expect(collectNames(done)[`candidate:${PERSON}`]).toBe('Aina Rahman');
+  });
+});
