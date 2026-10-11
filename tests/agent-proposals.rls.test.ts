@@ -1,28 +1,20 @@
 import { afterAll, beforeAll, expect, test, type TestContext } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import { proposalsTableMissing, proposalsTableSkipReason } from './helpers/agent-proposals-table';
+import { createOrg, signInAnon, liveClient } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const client = (): SupabaseClient =>
-  createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
-
-async function signedIn() {
-  const c = client();
-  const { error } = await c.auth.signInAnonymously();
-  expect(error, error?.message).toBeNull();
-  return c;
-}
-async function ownedOrg(c: SupabaseClient, name: string) {
-  const { data: orgId, error } = await c.rpc('create_org_for_current_user', { org_name: name });
+async function ownedCtx(name: string) {
+  const c = liveClient();
+  const { error: e1 } = await signInAnon(c);
+  expect(e1, e1?.message).toBeNull();
+  const { data: orgId, error } = await createOrg(c, name);
   expect(error, error?.message).toBeNull();
   return { c, orgId: orgId as string };
 }
-type Owned = Awaited<ReturnType<typeof ownedOrg>>;
+type Owned = Awaited<ReturnType<typeof ownedCtx>>;
 
 let owner: Owned;
 let other: Owned;
@@ -39,18 +31,19 @@ function needsTable(ctx: TestContext) {
 
 beforeAll(async () => {
   if (!hasSupabaseEnv) return;
-  const first = await signedIn();
-  tableMissing = await proposalsTableMissing(first);
+  const probe = liveClient();
+  const { error } = await signInAnon(probe);
+  expect(error, error?.message).toBeNull();
+  tableMissing = await proposalsTableMissing(probe);
   if (tableMissing) {
     console.warn(proposalsTableSkipReason);
-    await first.auth.signOut();
+    await probe.auth.signOut();
     return;
   }
-  owner = await ownedOrg(first, 'Proposals Owner Sdn Bhd');
-  other = await ownedOrg(await signedIn(), 'Proposals Other Sdn Bhd');
+  owner = await ownedCtx('Proposals Owner Sdn Bhd');
+  other = await ownedCtx('Proposals Other Sdn Bhd');
 });
 afterAll(async () => {
-  if (owner) await owner.c.from('agent_proposals').delete().eq('org_id', owner.orgId);
   await owner?.c.auth.signOut();
   await other?.c.auth.signOut();
 });
