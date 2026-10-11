@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Lead, Appointment } from '@/lib/reach/types';
+import { type Lead, type Appointment, LEAD_STAGES } from '@/lib/reach/types';
 import { approvalDetail, approvalTitle, type ItemKind } from '@/lib/chat/change-titles';
 import { isAllowedAction, ALLOWED_ACTIONS } from '@/lib/agents/apply-proposal';
 import { suggestProposals } from '@/lib/agents/openrouter-media';
@@ -41,10 +41,18 @@ export function opportunityScan(leads: Lead[], appts: Appointment[], now: Date):
   const upcomingByName = new Set(
     appts.filter((a) => new Date(a.scheduled_at) > now).map((a) => a.contact_name),
   );
+  const metByName = new Set(
+    appts.filter((a) => a.status === 'completed').map((a) => a.contact_name),
+  );
+  const bookedIndex = LEAD_STAGES.indexOf('booked');
   const out: Candidate[] = [];
   for (const l of leads) {
     if (l.stage === 'won' && !l.promoted_contact_id) {
       out.push(make('promoteLeadToContact', { id: l.id }));
+    }
+    // A lead that has met (a completed appointment) but is still short of 'booked' → advance it.
+    if (LEAD_STAGES.indexOf(l.stage) < bookedIndex && metByName.has(l.name)) {
+      out.push(make('setLeadStage', { id: l.id, stage: 'booked' }));
     }
     if ((l.stage === 'qualified' || l.stage === 'booked') && !upcomingByName.has(l.name)) {
       const when = new Date(now.getTime() + 3 * 24 * 3600_000);
