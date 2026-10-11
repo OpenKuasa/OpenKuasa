@@ -292,7 +292,8 @@ describe('POST /api/people/chat happy path', () => {
 
   it('tells the tools an owner is HR', async () => {
     await (await POST(post(validBody))).text();
-    expect(ctl.captured!.viewer).toEqual({ employeeId: null, isHr: true, isDemo: false });
+    // An owner, and marked as one: the owner alone may decide their own request.
+    expect(ctl.captured!.viewer).toEqual({ employeeId: null, isHr: true, isDemo: false, isOwner: true });
   });
 
   it('tells the tools a member is not HR, and which employee they are', async () => {

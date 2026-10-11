@@ -412,6 +412,11 @@ export type PeopleViewer = {
   employeeName?: string;
   /** Owner or admin of the workspace. */
   isHr: boolean;
+  /**
+   * The workspace's owner, who may decide and pay their own requests; an admin may not. Left out for everyone
+   * else, and when unknown, which reads as "not the owner".
+   */
+  isOwner?: boolean;
   /** The current workspace is the demo workspace. */
   isDemo: boolean;
 };

@@ -13,6 +13,7 @@ import { PaidButtons } from '@/components/people/paid-buttons';
 import { ReceiptLink } from '@/components/people/receipt-link';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { APPROVAL_QUEUES, type ApprovalQueue, type ApprovalRow, type ApprovalsModel } from '@/lib/people/approvals';
+import { OWN_REQUEST_REFUSAL } from '@/lib/people/leave';
 import { isTeamView } from '@/lib/people/own';
 import type { PeopleViewer } from '@/lib/people/types';
 import { cn } from '@/lib/utils';
@@ -82,7 +83,9 @@ function RowDetails({ row }: { row: ApprovalRow }) {
 /**
  * The layout the four approval queues share. Approve, Reject and Cancel work
  * on all of them; claims also have Mark paid and Undo paid. Export stays
- * disabled. A demo visitor sees the working controls disabled.
+ * disabled. A demo visitor sees the working controls disabled. On their own
+ * request an admin gets Cancel only: Approve, Reject and Mark paid are for the
+ * workspace's owner or another admin (`row.decidable`).
  */
 export function ApprovalsScreen({
   queue,
@@ -247,6 +250,12 @@ export function ApprovalsScreen({
                           <LiveDot active={row.pending} />
                           <StatusPill tone={requestTone(row.status)}>{row.status_label}</StatusPill>
                           {row.yours ? <StatusPill tone="neutral">Yours</StatusPill> : null}
+                          {/* Their own request, waiting on a decision or a payment they may not make themselves. */}
+                          {!row.decidable && (row.pending || row.claim?.markable) ? (
+                            <span title={OWN_REQUEST_REFUSAL}>
+                              <StatusPill tone="neutral">Needs the owner or another admin</StatusPill>
+                            </span>
+                          ) : null}
                           {row.over_by > 0 ? (
                             <StatusPill tone="pending">
                               Over balance by {row.over_by} {row.over_by === 1 ? 'day' : 'days'}
@@ -261,12 +270,12 @@ export function ApprovalsScreen({
                             <DecideButtons
                               kind={DECIDE_KIND[queue]}
                               id={row.id}
-                              pending={row.pending}
+                              pending={row.pending && row.decidable}
                               cancellable={row.cancellable}
                               disabled={viewer.isDemo}
                             />
                           ) : null}
-                          {row.claim && (row.claim.markable || row.status === 'paid') ? (
+                          {row.claim && ((row.claim.markable && row.decidable) || row.status === 'paid') ? (
                             <PaidButtons
                               id={row.id}
                               paid={row.status === 'paid'}

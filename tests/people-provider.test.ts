@@ -378,7 +378,10 @@ describe('getPeopleViewer', () => {
     SINGLE.orgs = { slug: 'acme' };
     SINGLE.hr_employees = { id: 'e7' };
     expect(await getPeopleViewer(client, { orgId: 'o1', role: 'admin' })).toEqual({ employeeId: 'e7', isHr: true, isDemo: false });
-    expect((await getPeopleViewer(client, { orgId: 'o1', role: 'owner' })).isHr).toBe(true);
+    // Only the owner is marked as one: an admin may not decide or pay their own request, an owner may.
+    expect(await getPeopleViewer(client, { orgId: 'o1', role: 'owner' })).toEqual({
+      employeeId: 'e7', isHr: true, isDemo: false, isOwner: true,
+    });
     const lookup = calls.find((c) => c.table === 'hr_employees')!;
     expect(lookup.filters).toContainEqual(['eq', 'org_id', 'o1']);
     expect(lookup.filters).toContainEqual(['eq', 'user_id', 'u1']);

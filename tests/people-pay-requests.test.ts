@@ -37,6 +37,7 @@ describe('PAY_REFUSALS', () => {
   it('has the spec sentence for every code the database raises', () => {
     expect(PAY_REFUSALS).toEqual({
       PAY_NOT_ALLOWED: "You can't make that change.",
+      PAY_OWN_REQUEST: "You can't approve, reject or pay your own request. Ask the workspace owner or another admin.",
       PAY_NOT_FOUND: 'That request was not found.',
       PAY_NOT_PENDING: 'That request has already been decided or cancelled.',
       PAY_NOT_APPROVED: 'Only an approved claim can be marked as paid.',
