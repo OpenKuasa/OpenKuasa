@@ -15,11 +15,13 @@ import {
   WEEKLY_STUDIO,
   type AgentCadence,
   type AgentConfig,
+  type AgentProposal,
   type AgentRun,
   type AgentRunAsset,
   type AgentSchedule,
   type ScheduleStatus,
 } from '@/lib/agents/types';
+import { PendingApprovals } from '@/components/reach/pending-approvals';
 import {
   cancelScheduleAction,
   createScheduleAction,
@@ -580,6 +582,7 @@ export function AgentsPanel({
   assetUrls,
   canEdit,
   schedules,
+  proposals,
   dailyCapCents,
   weeklyCapCents,
   spentTodayCents,
@@ -592,6 +595,7 @@ export function AgentsPanel({
   assetUrls: Record<string, string>;
   canEdit: boolean;
   schedules: AgentSchedule[];
+  proposals: AgentProposal[];
   dailyCapCents: number;
   weeklyCapCents: number;
   spentTodayCents: number;
@@ -701,6 +705,8 @@ export function AgentsPanel({
           {error}
         </p>
       )}
+
+      <PendingApprovals proposals={proposals} canEdit={canEdit} />
 
       <div className="space-y-2">
         <h3 className="text-sm font-medium">Run history</h3>
