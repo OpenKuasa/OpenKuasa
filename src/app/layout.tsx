@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { Lexend, Geist_Mono } from "next/font/google";
 import { ThemeSync } from "@/components/theme/theme-sync";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
@@ -36,7 +37,12 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  // This request's script nonce, set by src/proxy.ts. Reading it also makes every
+  // page render per request, which the content policy needs: Next.js can only put
+  // the nonce on its own scripts in a page it renders for the request.
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
+
   return (
     <html
       lang="en"
@@ -50,7 +56,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           check that element's children on hydration, and hosts that inject
           markup there (Netlify adds a comment) then fail the whole page.
         */}
-        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <ThemeSync />
         {children}
       </body>
