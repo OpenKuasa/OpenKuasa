@@ -5,7 +5,7 @@ import { RECEIPT_BUCKET, RECEIPT_TYPES } from './receipts';
 
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 /** Exactly what `receiptPath` makes: `<user uuid>/<uuid>.<known extension>`, nothing else. */
-const RECEIPT_PATH = new RegExp(`^${UUID}/${UUID}\\.(${[...new Set(Object.values(RECEIPT_TYPES))].join('|')})$`, 'i');
+const RECEIPT_PATH = new RegExp(`^${UUID}/${UUID}\\.(${[...new Set(Object.values(RECEIPT_TYPES))].join('|')})$`);
 
 /** True for a path of exactly the shape `receiptPath` makes. */
 export const isReceiptPath = (path: string): boolean => RECEIPT_PATH.test(path);
