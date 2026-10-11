@@ -198,11 +198,11 @@ describe('people tools', () => {
   it('totals payroll and lists payslips in Ringgit', async () => {
     const payroll = await run('getPayrollSummary')({});
     expect(payroll.runs).toHaveLength(3);
-    expect(payroll.runs[0]).toMatchObject({ month: '2026-10', status: 'draft', headcount: 20, gross: 'RM 105,200.00' });
+    expect(payroll.runs[0]).toMatchObject({ month: '2026-10', status: 'draft', headcount: 20, gross: 'RM 107,387.50' });
     expect((await run('getPayrollSummary')({ months: 50 })).runs).toHaveLength(8);
     const slips = await run('listPayslips')({ employee: 'aisyah', month: '2026-09' });
     expect(slips.total).toBe(1);
-    expect(slips.payslips[0]).toMatchObject({ employee: 'Aisyah Rahim', month: '2026-09', gross: 'RM 5,600.00', status: 'paid' });
+    expect(slips.payslips[0]).toMatchObject({ employee: 'Aisyah Rahim', month: '2026-09', gross: 'RM 6,287.50', status: 'paid' });
   });
 
   it('summarises performance, trainings and announcements', async () => {

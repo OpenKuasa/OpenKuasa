@@ -456,6 +456,7 @@ describe('lookups carry what a change needs, and no one else’s pay', () => {
     decision_note: null,
     status: 'pending',
     created_at: '2026-10-06T00:00:00Z',
+    paid_month: null,
     ...over,
   });
   const data: PeopleData = {

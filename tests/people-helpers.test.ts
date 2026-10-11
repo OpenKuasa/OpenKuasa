@@ -185,7 +185,7 @@ describe('summaries', () => {
   it('totals each payroll run, newest first', async () => {
     const runs = payrollSummary(await data.listPayrollRuns(), await data.listPayslips());
     expect(runs).toHaveLength(8);
-    expect(runs[0]).toMatchObject({ period_month: '2026-10-01', status: 'draft', headcount: 20, gross_cents: 10520000 });
+    expect(runs[0]).toMatchObject({ period_month: '2026-10-01', status: 'draft', headcount: 20, gross_cents: 10738750 });
     expect(runs[0].net_cents).toBe(runs[0].gross_cents - runs[0].deductions_cents);
     expect(runs[1]).toMatchObject({ period_month: '2026-09-01', status: 'paid' });
     expect(payrollSummary([], [])).toEqual([]);

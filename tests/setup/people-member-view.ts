@@ -3,7 +3,7 @@ import { DEFAULT_PEOPLE_SETTINGS, type PeopleData } from '@/lib/people/types';
 /**
  * The sample data as the database would hand it to a member who is not an HR
  * admin and is linked to `employeeId`: the directory and other shared tables in
- * full, personal rows only when they are their own, and no payroll runs.
+ * full, personal rows only when they are their own, no payroll runs, and no payslip that is still a draft.
  */
 export function asMember(data: PeopleData, employeeId: string): PeopleData {
   const mine = <T extends { employee_id: string }>(rows: T[]) => rows.filter((row) => row.employee_id === employeeId);
@@ -19,7 +19,8 @@ export function asMember(data: PeopleData, employeeId: string): PeopleData {
     listTimesheet: async (from, to) => mine(await data.listTimesheet(from, to)),
     listShifts: async (from, to) => mine(await data.listShifts(from, to)),
     listPayrollRuns: async () => [],
-    listPayslips: async () => mine(await data.listPayslips()),
+    // The database gives a member their own payslip only once it is paid.
+    listPayslips: async () => mine(await data.listPayslips()).filter((slip) => slip.status === 'paid'),
     listGoals: async () => mine(await data.listGoals()),
     listScorecards: async () => mine(await data.listScorecards()),
     listReviews: async () => mine(await data.listReviews()),

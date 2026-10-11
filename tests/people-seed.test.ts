@@ -56,7 +56,9 @@ describe('people seed', () => {
     const payslips = await data.listPayslips();
     expect(payslips).toHaveLength(160);
     for (const slip of payslips) {
-      expect(slip.net_cents).toBe(slip.gross_cents - slip.epf_cents - slip.socso_cents - slip.eis_cents - slip.pcb_cents);
+      expect(slip.net_cents).toBe(
+        slip.gross_cents - slip.epf_cents - slip.socso_cents - slip.eis_cents - slip.pcb_cents - slip.other_deductions_cents,
+      );
       expect(slip.net_cents).toBeGreaterThan(0);
     }
   });
