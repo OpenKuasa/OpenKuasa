@@ -14,13 +14,15 @@ export type TimeToHire = {
   hires: number;
 };
 
+/** A hire counts only while the application is live: a hired application later withdrawn is not a hire. */
+const isLiveHire = (a: Application) => a.hired_at !== null && a.outcome === 'active';
 const days = (from: string, to: string) => (Date.parse(to) - Date.parse(from)) / DAY;
 const average = (values: number[]): number | null =>
   values.length === 0 ? null : Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10;
 
 export function timeToHire(apps: Application[]): TimeToHire {
   const offers = apps.filter((a) => a.offered_at !== null).map((a) => days(a.applied_at, a.offered_at!));
-  const hires = apps.filter((a) => a.hired_at !== null).map((a) => days(a.applied_at, a.hired_at!));
+  const hires = apps.filter(isLiveHire).map((a) => days(a.applied_at, a.hired_at!));
   return {
     days_to_offer: average(offers),
     days_to_hire: average(hires),
@@ -42,7 +44,7 @@ export function timeToHireByMonth(apps: Application[], now: Date, months = 8) {
     const d = new Date(Date.UTC(year, month - 1 - (months - 1 - i), 15));
     const key = monthKey(d);
     const offered = apps.filter((a) => a.offered_at !== null && monthKey(new Date(a.offered_at)) === key);
-    const hired = apps.filter((a) => a.hired_at !== null && monthKey(new Date(a.hired_at)) === key);
+    const hired = apps.filter((a) => isLiveHire(a) && monthKey(new Date(a.hired_at!)) === key);
     return {
       label: monthLabel(d),
       hire: average(hired.map((a) => days(a.applied_at, a.hired_at!))),
@@ -67,7 +69,7 @@ export function recentActivity(apps: Application[], interviews: Interview[], now
   for (const a of apps) {
     events.push({ at: a.applied_at, text: `${a.candidate_name} applied${a.source ? ` via ${a.source}` : ''} — ${a.job_title}` });
     if (a.offered_at) events.push({ at: a.offered_at, text: `Offer sent to ${a.candidate_name} — ${a.job_title}` });
-    if (a.hired_at) events.push({ at: a.hired_at, text: `${a.candidate_name} hired — ${a.job_title}` });
+    if (a.hired_at && a.outcome === 'active') events.push({ at: a.hired_at, text: `${a.candidate_name} hired — ${a.job_title}` });
   }
   for (const i of interviews) {
     if (i.status === 'completed') events.push({ at: i.scheduled_at, text: `${i.candidate_name} completed an interview — ${i.job_title}` });

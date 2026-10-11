@@ -95,6 +95,7 @@ function cvApplication(): Application {
     portfolio_url: null,
     expected_salary_cents: null,
     consented_at: null,
+    reject_reason: null,
   };
 }
 

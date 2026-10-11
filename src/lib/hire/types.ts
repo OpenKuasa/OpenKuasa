@@ -3,6 +3,7 @@
  * one, so the Supabase provider maps rows directly and the seed provider can
  * stand in for it in dev and tests.
  */
+import type { RejectReason } from './application-changes';
 
 export type EmploymentType = 'full_time' | 'part_time' | 'contract' | 'internship';
 export type JobStatus = 'draft' | 'open' | 'paused' | 'closed';
@@ -75,6 +76,8 @@ export type Application = {
   job_title: string;
   stage: ApplicationStage;
   outcome: ApplicationOutcome;
+  /** Why it was rejected, when a reason was given. */
+  reject_reason: RejectReason | null;
   /** 1 to 5, or null when not rated yet. */
   rating: number | null;
   source: string | null;

@@ -32,7 +32,7 @@ export function overviewTotals(jobs: Job[], apps: Application[], interviews: Int
       return i.status === 'scheduled' && at >= t && at < t + 7 * DAY;
     }).length,
     offers_out: apps.filter((a) => a.outcome === 'active' && a.stage === 'offer').length,
-    hires_last_30_days: apps.filter((a) => a.hired_at !== null && Date.parse(a.hired_at) <= t && t - Date.parse(a.hired_at) <= 30 * DAY).length,
+    hires_last_30_days: apps.filter((a) => a.hired_at !== null && a.outcome === 'active' && Date.parse(a.hired_at) <= t && t - Date.parse(a.hired_at) <= 30 * DAY).length,
   };
 }
 
@@ -58,7 +58,7 @@ export function sourceBreakdown(apps: Application[]): SourceRow[] {
     const source = a.source?.trim() || 'Unknown';
     const row = bySource.get(source) ?? { source, applications: 0, hires: 0 };
     row.applications += 1;
-    if (a.stage === 'hired') row.hires += 1;
+    if (a.stage === 'hired' && a.outcome === 'active') row.hires += 1;
     bySource.set(source, row);
   }
   return [...bySource.values()].sort(

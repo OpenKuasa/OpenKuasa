@@ -19,6 +19,14 @@ import {
   setJobStatusInput,
   updateJob,
   updateJobInput,
+  moveApplication,
+  moveApplicationInput,
+  closeApplication,
+  closeApplicationInput,
+  reopenApplication,
+  reopenApplicationInput,
+  rateApplication,
+  rateApplicationInput,
   type HireWriteContext,
 } from '@/lib/hire/capabilities';
 import type { Job } from '@/lib/hire/types';
@@ -507,5 +515,135 @@ describe('database failures', () => {
     expect(result).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
     expect(log).toHaveBeenCalled();
     log.mockRestore();
+  });
+});
+
+// ─── changing an application (four rpc capabilities) ─────────────────────────
+
+describe('application change schemas', () => {
+  it('refuse a non-UUID id', () => {
+    for (const id of ['nope', '', 42]) {
+      expect(moveApplicationInput.safeParse({ id, stage: 'offer' }).success).toBe(false);
+      expect(closeApplicationInput.safeParse({ id, outcome: 'rejected' }).success).toBe(false);
+      expect(reopenApplicationInput.safeParse({ id }).success).toBe(false);
+      expect(rateApplicationInput.safeParse({ id, rating: 3 }).success).toBe(false);
+    }
+  });
+  it('refuse an unknown stage, outcome or reason', () => {
+    expect(moveApplicationInput.safeParse({ id: ID, stage: 'lunch' }).success).toBe(false);
+    expect(closeApplicationInput.safeParse({ id: ID, outcome: 'active' }).success).toBe(false);
+    expect(closeApplicationInput.safeParse({ id: ID, outcome: 'rejected', reason: 'vibes' }).success).toBe(false);
+    expect(closeApplicationInput.safeParse({ id: ID, outcome: 'withdrawn' }).success).toBe(true);
+    expect(closeApplicationInput.safeParse({ id: ID, outcome: 'rejected', reason: null }).success).toBe(true);
+  });
+  it('refuse a rating of 0, 6 or 2.5 but take null and 1 to 5', () => {
+    for (const rating of [0, 6, 2.5]) expect(rateApplicationInput.safeParse({ id: ID, rating }).success).toBe(false);
+    for (const rating of [null, 1, 5]) expect(rateApplicationInput.safeParse({ id: ID, rating }).success).toBe(true);
+  });
+  it('describe every field', () => {
+    for (const schema of [moveApplicationInput, closeApplicationInput, reopenApplicationInput, rateApplicationInput]) {
+      for (const field of Object.values(schema.shape)) expect((field as z.ZodType).description).toBeTruthy();
+    }
+  });
+});
+
+const ROW = {
+  id: ID, stage: 'offer', outcome: 'active', rating: 4, reject_reason: null,
+  candidate: { name: 'Aina' }, job: { title: 'Barista' },
+};
+/** A client whose rpc answers `word` and whose read-back answers `row`. */
+function rpcFake(opts: { word?: unknown; error?: unknown; throws?: unknown; row?: unknown } = {}) {
+  const calls: { fn: string; args: Record<string, unknown> }[] = [];
+  const reads: Record<string, unknown>[] = [];
+  const client = {
+    rpc: async (fn: string, args: Record<string, unknown>) => {
+      calls.push({ fn, args });
+      if (opts.throws) throw opts.throws;
+      return { data: opts.word ?? 'ok', error: opts.error ?? null };
+    },
+    from: () => {
+      const chain = {
+        select: () => chain,
+        eq: (k: string, v: unknown) => { reads.push({ [k]: v }); return chain; },
+        maybeSingle: async () => ('row' in opts ? { data: opts.row, error: null } : { data: ROW, error: null }),
+      };
+      return chain;
+    },
+  };
+  return { ctx: { client: client as never, orgId: ORG } satisfies HireWriteContext, calls, reads };
+}
+
+describe('application change capabilities', () => {
+  it('call the right function with the right arguments and no org_id', async () => {
+    const a = rpcFake();
+    await moveApplication(a.ctx, { id: ID, stage: 'offer' });
+    expect(a.calls).toEqual([{ fn: 'hire_move_application', args: { p_application_id: ID, p_stage: 'offer' } }]);
+    const b = rpcFake();
+    await closeApplication(b.ctx, { id: ID, outcome: 'rejected', reason: 'skills' });
+    expect(b.calls).toEqual([{ fn: 'hire_close_application', args: { p_application_id: ID, p_outcome: 'rejected', p_reason: 'skills' } }]);
+    const b2 = rpcFake();
+    await closeApplication(b2.ctx, { id: ID, outcome: 'withdrawn' });
+    expect(b2.calls[0].args).toEqual({ p_application_id: ID, p_outcome: 'withdrawn', p_reason: null });
+    const c = rpcFake();
+    await reopenApplication(c.ctx, { id: ID });
+    expect(c.calls).toEqual([{ fn: 'hire_reopen_application', args: { p_application_id: ID } }]);
+    const d = rpcFake();
+    await rateApplication(d.ctx, { id: ID, rating: null });
+    expect(d.calls).toEqual([{ fn: 'hire_rate_application', args: { p_application_id: ID, p_rating: null } }]);
+    for (const x of [a, b, c, d]) expect(JSON.stringify(x.calls)).not.toContain('org_id');
+  });
+  it('do not call the database for invalid input', async () => {
+    const f = rpcFake();
+    expect((await moveApplication(f.ctx, { id: 'x', stage: 'offer' } as never)).ok).toBe(false);
+    expect(f.calls).toEqual([]);
+  });
+  it('map each word to its sentence', async () => {
+    const generic = 'That change could not be saved. Please try again.';
+    const sentences: Record<string, string> = {
+      not_found: 'That application could not be found.',
+      forbidden: 'You do not have permission to make changes here.',
+      not_active: 'This application is no longer active. Reopen it first.',
+      not_closed: 'This application is already active.',
+      same_stage: 'This application is already at that stage.',
+      too_far_back: 'An application can move back one stage at a time.',
+      invalid_stage: generic,
+      invalid_outcome: generic,
+      invalid_reason: generic,
+      invalid_rating: generic,
+      mystery: generic,
+    };
+    for (const [word, error] of Object.entries(sentences)) {
+      expect(await moveApplication(rpcFake({ word }).ctx, { id: ID, stage: 'offer' })).toEqual({ ok: false, error });
+    }
+  });
+  it('give the generic sentence and log only a code on an rpc error', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const f = rpcFake({ error: { code: '42501', message: 'Aina secret', details: ID } });
+    expect(await rateApplication(f.ctx, { id: ID, rating: 3 })).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
+    expect(spy).toHaveBeenCalledWith('[hire-capability] rateApplication failed:', { code: '42501' });
+    spy.mockRestore();
+  });
+  it('give the generic sentence and log only the name of a thrown value', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const err = new TypeError('Aina fetch failed');
+    expect((await reopenApplication(rpcFake({ throws: err }).ctx, { id: ID })).ok).toBe(false);
+    expect(spy).toHaveBeenCalledWith('[hire-capability] reopenApplication failed:', { code: 'TypeError' });
+    spy.mockRestore();
+  });
+  it('return the read-back row on ok, looked up by id and workspace', async () => {
+    const f = rpcFake();
+    expect(await moveApplication(f.ctx, { id: ID, stage: 'offer' })).toEqual({
+      ok: true,
+      data: { id: ID, candidate: 'Aina', job: 'Barista', stage: 'offer', outcome: 'active', rating: 4, reject_reason: null },
+    });
+    expect(f.reads).toEqual([{ id: ID }, { org_id: ORG }]);
+  });
+  it('still answer ok when the read-back fails', async () => {
+    const f = rpcFake({ row: null });
+    expect(await closeApplication(f.ctx, { id: ID, outcome: 'rejected', reason: 'salary' })).toMatchObject({
+      ok: true, data: { id: ID, candidate: '', job: '', outcome: 'rejected', reject_reason: 'salary' },
+    });
+    expect(await rateApplication(rpcFake({ row: null }).ctx, { id: ID, rating: 2 })).toMatchObject({ ok: true, data: { rating: 2 } });
+    expect(await moveApplication(rpcFake({ row: null }).ctx, { id: ID, stage: 'hired' })).toMatchObject({ ok: true, data: { stage: 'hired' } });
   });
 });

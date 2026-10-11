@@ -204,6 +204,7 @@ export function createSeedHireData(now: Date = new Date()): HireData {
       portfolio_url: null,
       expected_salary_cents: null,
       consented_at: null,
+      reject_reason: null,
     };
   });
 

@@ -33,7 +33,7 @@ const app = (over: Partial<Application>): Application => ({
   id: 'a', candidate_id: 'c', job_id: 'j', candidate_name: 'A', job_title: 'J', stage: 'applied',
   outcome: 'active', rating: null, source: null, applied_at: '2026-10-01T00:00:00Z',
   offered_at: null, hired_at: null, created_at: '2026-10-01T00:00:00Z',
-  cover_letter: null, cv_url: null, cv_path: null, portfolio_url: null, expected_salary_cents: null, consented_at: null, ...over,
+  cover_letter: null, cv_url: null, cv_path: null, portfolio_url: null, expected_salary_cents: null, consented_at: null, reject_reason: null, ...over,
 });
 
 // JSON.stringify turns NaN and Infinity into null, so walk the value instead.
@@ -184,5 +184,34 @@ describe('models', () => {
     expect(numbersIn(dashboard).every(Number.isFinite)).toBe(true);
     expect(dashboard.time).toEqual({ days_to_offer: null, days_to_hire: null, offers: 0, hires: 0 });
     expect(dashboard.timeByMonth.every((m) => m.hire === null && m.offer === null)).toBe(true);
+  });
+});
+
+describe('hires count only while the application is live', () => {
+  const hired = (over: Partial<Application>) =>
+    app({ stage: 'hired', applied_at: '2026-10-01T00:00:00Z', offered_at: '2026-10-05T00:00:00Z', hired_at: '2026-10-08T00:00:00Z', ...over });
+  const live = hired({ id: 'live', candidate_name: 'Live One' });
+  const withdrawn = hired({ id: 'gone', candidate_name: 'Gone One', outcome: 'withdrawn' });
+  it('timeToHire and the monthly series count one hire, not two', () => {
+    expect(timeToHire([live, withdrawn]).hires).toBe(1);
+    expect(timeToHireByMonth([live, withdrawn], NOW, 1)[0].hire).toBe(7);
+    const other = hired({ id: 'other', hired_at: '2026-10-10T00:00:00Z', outcome: 'rejected' });
+    expect(timeToHireByMonth([live, other], NOW, 1)[0].hire).toBe(7);
+  });
+  it('still counts an offer that was later rejected', () => {
+    const rejected = app({ stage: 'offer', outcome: 'rejected', offered_at: '2026-10-05T00:00:00Z' });
+    expect(timeToHire([rejected]).offers).toBe(1);
+    expect(timeToHireByMonth([rejected], NOW, 1)[0].offer).toBe(4);
+  });
+  it('hires_last_30_days counts the live one only', () => {
+    expect(overviewTotals([], [live, withdrawn], [], NOW).hires_last_30_days).toBe(1);
+  });
+  it('has no hired line in recent activity for the withdrawn one', () => {
+    const lines = recentActivity([live, withdrawn], [], NOW, 10).map((e) => e.text);
+    expect(lines).toContain('Live One hired — J');
+    expect(lines).not.toContain('Gone One hired — J');
+  });
+  it('hires by source skip the withdrawn one', () => {
+    expect(sourceBreakdown([{ ...live, source: 'X' }, { ...withdrawn, source: 'X' }])[0]).toMatchObject({ applications: 2, hires: 1 });
   });
 });

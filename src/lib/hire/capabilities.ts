@@ -7,7 +7,11 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { DEFAULT_HIRE_SETTINGS, JOB_COLUMNS, SETTINGS_COLUMNS, type HireSettings, type Job, type JobStatus } from './types';
+import { REJECT_REASONS, changeMessage, type RejectReason } from './application-changes';
+import {
+  APPLICATION_STAGES, DEFAULT_HIRE_SETTINGS, JOB_COLUMNS, SETTINGS_COLUMNS,
+  type ApplicationOutcome, type ApplicationStage, type HireSettings, type Job, type JobStatus,
+} from './types';
 
 export type HireWriteContext = { client: SupabaseClient; orgId: string };
 export type CapResult<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -370,4 +374,135 @@ export async function updateApplicationForm(
   const patch = Object.fromEntries(Object.entries(parsed.data).filter(([, v]) => v !== undefined));
   if (Object.keys(patch).length === 0) return readSettings(ctx, 'updateApplicationForm');
   return saveSettings(ctx, patch, now, 'updateApplicationForm');
+}
+
+// ─── changing an application (four database functions, called by rpc) ────────
+
+const applicationId = () => z.string().uuid().describe('The application\'s id, from listApplications.');
+
+export const moveApplicationInput = z.object({
+  id: applicationId(),
+  stage: z.enum(APPLICATION_STAGES).describe('The stage to move to: applied, screening, interview, offer or hired. Forward to any later stage, or back one stage.'),
+});
+export const closeApplicationInput = z.object({
+  id: applicationId(),
+  outcome: z.enum(['rejected', 'withdrawn']).describe('rejected when the company turns the candidate down; withdrawn when the candidate pulls out.'),
+  reason: z.enum(REJECT_REASONS).nullable().optional().describe('Why, when known: skills, experience, salary, role_filled, not_reachable or other. Leave out when not known.'),
+});
+export const reopenApplicationInput = z.object({ id: applicationId() });
+export const rateApplicationInput = z.object({
+  id: applicationId(),
+  rating: z.number().int().min(1).max(5).nullable().describe('A whole number from 1 to 5, or null to clear the rating.'),
+});
+
+export type ApplicationChange = {
+  id: string;
+  candidate: string;
+  job: string;
+  stage: ApplicationStage;
+  outcome: ApplicationOutcome;
+  rating: number | null;
+  reject_reason: RejectReason | null;
+};
+
+/** Logs the error's code only (never the error, an id or a name) and answers with the generic sentence. */
+function changeFailed(fnName: string, error: unknown): { ok: false; error: string } {
+  const code = (error as { code?: unknown } | null)?.code ?? (error as { name?: unknown } | null)?.name;
+  console.error(`[hire-capability] ${fnName} failed:`, { code: typeof code === 'string' ? code : undefined });
+  return { ok: false, error: WRITE_FAILED };
+}
+
+type ChangeRow = {
+  id: string; stage: ApplicationStage; outcome: ApplicationOutcome; rating: number | null;
+  reject_reason: RejectReason | null; candidate: { name: string } | null; job: { title: string } | null;
+};
+
+/**
+ * Calls one database function, then reads the row back. The change is saved
+ * once the function says ok, so a failed read-back still answers ok with what
+ * the input implies (the stage is only known for a move) and empty names.
+ */
+async function applicationChange(
+  ctx: HireWriteContext,
+  fnName: string,
+  fn: string,
+  args: Record<string, unknown>,
+  id: string,
+  implied: Partial<ApplicationChange>,
+): Promise<CapResult<ApplicationChange>> {
+  let word: unknown;
+  try {
+    const { data, error } = await ctx.client.rpc(fn, args);
+    if (error) return changeFailed(fnName, error);
+    word = data;
+  } catch (error) {
+    return changeFailed(fnName, error);
+  }
+  if (word !== 'ok') return { ok: false, error: changeMessage(word) };
+  const fallback: ApplicationChange = {
+    id, candidate: '', job: '', stage: 'applied', outcome: 'active', rating: null, reject_reason: null, ...implied,
+  };
+  try {
+    const { data } = await ctx.client
+      .from('hire_applications')
+      .select('id,stage,outcome,rating,reject_reason,candidate:hire_candidates(name),job:hire_jobs(title)')
+      .eq('id', id)
+      .eq('org_id', ctx.orgId)
+      .maybeSingle();
+    const row = data as unknown as ChangeRow | null;
+    if (!row) return { ok: true, data: fallback };
+    return {
+      ok: true,
+      data: {
+        id: row.id, candidate: row.candidate?.name ?? '', job: row.job?.title ?? '', stage: row.stage,
+        outcome: row.outcome, rating: row.rating, reject_reason: row.reject_reason,
+      },
+    };
+  } catch {
+    return { ok: true, data: fallback };
+  }
+}
+
+export async function moveApplication(
+  ctx: HireWriteContext,
+  input: z.input<typeof moveApplicationInput>,
+): Promise<CapResult<ApplicationChange>> {
+  const parsed = moveApplicationInput.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+  const { id, stage } = parsed.data;
+  return applicationChange(ctx, 'moveApplication', 'hire_move_application', { p_application_id: id, p_stage: stage }, id, { stage });
+}
+
+export async function closeApplication(
+  ctx: HireWriteContext,
+  input: z.input<typeof closeApplicationInput>,
+): Promise<CapResult<ApplicationChange>> {
+  const parsed = closeApplicationInput.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+  const { id, outcome } = parsed.data;
+  const reason = parsed.data.reason ?? null;
+  return applicationChange(
+    ctx, 'closeApplication', 'hire_close_application',
+    { p_application_id: id, p_outcome: outcome, p_reason: reason }, id, { outcome, reject_reason: reason },
+  );
+}
+
+export async function reopenApplication(
+  ctx: HireWriteContext,
+  input: z.input<typeof reopenApplicationInput>,
+): Promise<CapResult<ApplicationChange>> {
+  const parsed = reopenApplicationInput.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+  const { id } = parsed.data;
+  return applicationChange(ctx, 'reopenApplication', 'hire_reopen_application', { p_application_id: id }, id, { outcome: 'active' });
+}
+
+export async function rateApplication(
+  ctx: HireWriteContext,
+  input: z.input<typeof rateApplicationInput>,
+): Promise<CapResult<ApplicationChange>> {
+  const parsed = rateApplicationInput.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+  const { id, rating } = parsed.data;
+  return applicationChange(ctx, 'rateApplication', 'hire_rate_application', { p_application_id: id, p_rating: rating }, id, { rating });
 }

@@ -10,7 +10,7 @@ const PAGE_SIZE = 1000;
 
 const CANDIDATE_COLUMNS = 'id,name,email,phone,headline,location,skills,source,pool_status,created_at';
 const APPLICATION_COLUMNS =
-  'id,candidate_id,job_id,stage,outcome,rating,source,applied_at,offered_at,hired_at,created_at,' +
+  'id,candidate_id,job_id,stage,outcome,reject_reason,rating,source,applied_at,offered_at,hired_at,created_at,' +
   'cover_letter,cv_url,cv_path,portfolio_url,expected_salary_cents,consented_at,' +
   'candidate:hire_candidates(name),job:hire_jobs(title)';
 const INTERVIEW_COLUMNS =

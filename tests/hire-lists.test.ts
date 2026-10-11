@@ -51,7 +51,7 @@ describe('jobs', () => {
       id: 'a1', candidate_id: 'c1', job_id: 'j1', candidate_name: 'Aina', job_title: 'Role', stage: 'applied',
       outcome: 'active', rating: null, source: null, applied_at: '2026-10-01T00:00:00Z', offered_at: null,
       hired_at: null, created_at: '2026-10-01T00:00:00Z',
-      cover_letter: null, cv_url: null, cv_path: null, portfolio_url: null, expected_salary_cents: null, consented_at: null,
+      cover_letter: null, cv_url: null, cv_path: null, portfolio_url: null, expected_salary_cents: null, consented_at: null, reject_reason: null,
     };
     const board = await buildBoardModel(
       { ...EMPTY, listApplications: async () => [base, { ...base, id: 'a2', rating: 4 }] },
@@ -110,7 +110,7 @@ describe('careers page: what the public board lists', () => {
       id, candidate_id: id, job_id: 'Older', candidate_name: 'Aina', job_title: 'Older', stage: 'applied',
       outcome: 'active', rating: null, source: null, applied_at: '2026-10-01T00:00:00Z', offered_at: null,
       hired_at: null, created_at: '2026-10-01T00:00:00Z',
-      cover_letter: null, cv_url: null, cv_path: null, portfolio_url: null, expected_salary_cents: null, consented_at: null,
+      cover_letter: null, cv_url: null, cv_path: null, portfolio_url: null, expected_salary_cents: null, consented_at: null, reject_reason: null,
     });
     const model = await buildCareersModel({
       ...EMPTY, listJobs: async () => jobs, listApplications: async () => [app('a1'), app('a2')],
@@ -297,7 +297,7 @@ describe('talent pool', () => {
     id, candidate_id, job_id: 'j1', candidate_name: candidate_id, job_title: 'Role', stage: 'applied', outcome: 'active',
     rating: null, source: null, applied_at: '2026-10-01T00:00:00Z', offered_at: null, hired_at: null,
     created_at: '2026-10-01T00:00:00Z',
-    cover_letter: null, cv_url: null, cv_path: null, portfolio_url: null, expected_salary_cents: null, consented_at: null, ...over,
+    cover_letter: null, cv_url: null, cv_path: null, portfolio_url: null, expected_salary_cents: null, consented_at: null, reject_reason: null, ...over,
   });
   const small: HireData = {
     ...EMPTY,
