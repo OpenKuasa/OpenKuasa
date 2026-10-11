@@ -28,6 +28,16 @@ export type CorrectionPrefill = {
   note: string;
 };
 
+/**
+ * The clock-out the correction form opens with. The row's own is kept, so saving does not silently erase a real
+ * one; it is blank only when the row has none, or on today when the time held is later than now (the database
+ * would refuse it). `nowHm` is the time now in Malaysia as `HH:MM`.
+ */
+export function prefillClockOut(prefill: CorrectionPrefill, workDate: string, today: string, nowHm: string): string {
+  if (prefill.clock_out === '') return '';
+  return workDate === today && prefill.clock_out > nowHm ? '' : prefill.clock_out;
+}
+
 export type TeamAttendanceRow = {
   employeeId: string;
   name: string;
@@ -48,6 +58,8 @@ export type TeamAttendanceRow = {
   stillIn: boolean;
   /** An inactive employee listed only because the day has a row for them. */
   inactive: boolean;
+  /** Whether the employee has an account to clock in with. Only the fact: the account's id never leaves the server. */
+  linked: boolean;
   corrected: boolean;
   note: string | null;
   prefill: CorrectionPrefill;
@@ -156,6 +168,7 @@ export function buildTeamAttendanceModel(input: TeamAttendanceInput): TeamAttend
         name: employee.name,
         department: employee.department_name,
         inactive: employee.status !== 'active',
+        linked: employee.user_id !== null,
       };
 
       if (day) {
@@ -201,11 +214,12 @@ export function buildTeamAttendanceModel(input: TeamAttendanceInput): TeamAttend
           r.end_date >= date,
       );
       if (away) return { ...base, ...empty, status: 'on_leave', label: 'On leave', tone: 'neutral', prefill };
+      // Today, a person with no account cannot clock in, so "not yet" would promise something that cannot happen.
       return {
         ...base,
         ...empty,
         status: null,
-        label: isToday ? 'Not clocked in yet' : 'No record',
+        label: isToday ? (base.linked ? 'Not clocked in yet' : 'Not linked to an account') : 'No record',
         tone: 'neutral',
         prefill,
       };

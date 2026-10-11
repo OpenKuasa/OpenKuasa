@@ -147,15 +147,18 @@ describe('overview helpers', () => {
 
   it('counts attendance on a day and the share at work', async () => {
     const days = await data.listAttendance(TODAY, TODAY);
-    expect(attendanceOn(days, TODAY)).toEqual({ present: 16, late: 1, absent: 0, on_leave: 3, at_work: 17, rate_pct: 100 });
-    expect(attendanceOn([], TODAY)).toEqual({ present: 0, late: 0, absent: 0, on_leave: 0, at_work: 0, rate_pct: null });
+    expect(attendanceOn(days, TODAY)).toEqual({ present: 16, late: 1, absent: 0, on_leave: 3, clocked_in: 17 });
+    // Clocked in means present or late with a clock-in; a row of today without one is not counted.
+    const row = (status: 'present' | 'late' | 'absent', clock_in: string | null) => ({ ...days[0], work_date: TODAY, status, clock_in });
+    expect(attendanceOn([row('present', '2026-10-09T01:00:00Z'), row('late', '2026-10-09T02:00:00Z'), row('absent', null), row('present', null)], TODAY).clocked_in).toBe(2);
+    expect(attendanceOn([], TODAY)).toEqual({ present: 0, late: 0, absent: 0, on_leave: 0, clocked_in: 0 });
   });
 
   it('builds the Overview from the same helpers', async () => {
     const model = await buildPeopleOverviewModel(data, NOW);
     expect(model.today).toBe(TODAY);
     expect(model.totals).toEqual({
-      headcount: 20, departments: 5, at_work_today: 17, attendance_rate_pct: 100, on_leave_today: 3, pending_approvals: 6,
+      headcount: 20, departments: 5, clocked_in_so_far: 17, on_leave_today: 3, pending_approvals: 6,
     });
     expect(model.onLeave).toEqual([
       { name: 'Lim Wei Jie', kind: 'Medical leave', when: '09 Oct' },
@@ -171,7 +174,7 @@ describe('overview helpers', () => {
   it('builds an empty Overview without NaN', async () => {
     const model = await buildPeopleOverviewModel(EMPTY, NOW);
     expect(model.totals).toEqual({
-      headcount: 0, departments: 0, at_work_today: 0, attendance_rate_pct: null, on_leave_today: 0, pending_approvals: 0,
+      headcount: 0, departments: 0, clocked_in_so_far: 0, on_leave_today: 0, pending_approvals: 0,
     });
     expect(model.trend.every((t) => t.headcount === 0)).toBe(true);
     expect(JSON.stringify(model)).not.toContain('NaN');

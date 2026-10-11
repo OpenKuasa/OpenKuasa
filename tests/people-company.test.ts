@@ -61,7 +61,8 @@ describe('buildDashboardModel', () => {
     expect(model.headcount).toBe(20);
     expect(model.trend).toHaveLength(8);
     expect(model.departments[0]).toEqual({ department: 'Sales', headcount: 6 });
-    expect(model.attendanceToday?.at_work).toBeGreaterThan(0);
+    expect(model.attendanceToday?.clocked_in).toBeGreaterThan(0);
+    expect(model.attendanceToday).not.toHaveProperty('rate_pct');
     expect(model.weeklyAttendance).toHaveLength(8);
     expect(model.leaveByType?.length).toBeGreaterThan(0);
     expect(model.joiners).toHaveLength(6);
@@ -99,7 +100,7 @@ describe('buildDashboardModel', () => {
     const model = buildDashboardModel(empty, TODAY, true);
     expect(model.headcount).toBe(0);
     expect(model.departments).toEqual([]);
-    expect(model.attendanceToday?.rate_pct).toBeNull();
+    expect(model.attendanceToday?.clocked_in).toBe(0);
     expect(model.weeklyAttendance?.every((w) => w.value === null)).toBe(true);
     expect(model.leaveByType).toEqual([]);
     expect(model.payroll?.latest).toBeNull();

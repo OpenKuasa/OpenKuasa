@@ -9,7 +9,7 @@ import { isTeamView } from '@/lib/people/own';
 import { rm } from '@/lib/reach/format';
 import { HR_ONLY, LOAD_FAILED, LaterButton, Muted, loadPeople } from './parts';
 
-const ATTENDANCE_SERIES: Series[] = [{ key: 'rate', label: 'Present or late', color: 'var(--chart-1)' }];
+const ATTENDANCE_SERIES: Series[] = [{ key: 'rate', label: 'Present or late, of recorded days', color: 'var(--chart-1)' }];
 const DEPT_SERIES: Series[] = [{ key: 'headcount', label: 'Headcount', color: 'var(--chart-1)' }];
 const JOINER_SERIES: Series[] = [{ key: 'joiners', label: 'Joiners', color: 'var(--chart-2)' }];
 const PAYROLL_SERIES: Series[] = [{ key: 'payroll', label: 'Gross pay (RM)', color: 'var(--chart-3)' }];
@@ -38,7 +38,7 @@ export default async function DashboardScreen() {
   });
 
   const dash = '—';
-  const rate = model?.attendanceToday?.rate_pct;
+  const clockedIn = model?.attendanceToday?.clocked_in;
   const latest = model?.payroll?.latest ?? null;
   const leaveSlices: Slice[] = (model?.leaveByType ?? []).map((entry, index) => ({
     key: entry.label,
@@ -82,8 +82,8 @@ export default async function DashboardScreen() {
         </BentoCard>
         <BentoCard className="col-span-1 md:col-span-4">
           <BentoStat
-            label="Attendance rate today"
-            value={!model || !model.team || rate == null ? dash : `${rate}%`}
+            label="Clocked in so far today"
+            value={!model || !model.team || clockedIn == null ? dash : String(clockedIn)}
           />
           {model && !model.team ? <p className="mt-1 text-xs text-muted-foreground">Shown to HR admins</p> : null}
         </BentoCard>
@@ -101,7 +101,7 @@ export default async function DashboardScreen() {
 
         <BentoCard
           title="Attendance trend"
-          subtitle="Present or late, share of expected attendances per week"
+          subtitle="Present or late, share of recorded days per week"
           icon={TrendingUp}
           className="col-span-2 md:col-span-8"
         >

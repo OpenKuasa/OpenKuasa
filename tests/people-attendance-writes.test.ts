@@ -43,7 +43,7 @@ describe('ATT_REFUSALS', () => {
       ATT_ALREADY_OUT: 'You have already clocked out today.',
       ATT_NOT_WORKING_DAY: 'Today is not a working day. Ask an owner or admin to record it if you worked.',
       ATT_ON_LEAVE: 'You are on approved leave today.',
-      ATT_INACTIVE_EMPLOYEE: 'That employee is inactive.',
+      ATT_INACTIVE_EMPLOYEE: 'This employee record is inactive, so attendance cannot be clocked.',
       ATT_HOLIDAY_EXISTS: 'There is already a public holiday on that date.',
       ATT_BAD_INPUT:
         'Some of that was not accepted. A date or time may be in the future, a time may not be a time of day, a clock-out may not be after the clock-in, or a name or note may be too long or empty. Check it and try again.',

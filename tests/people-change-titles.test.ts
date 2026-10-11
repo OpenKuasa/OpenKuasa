@@ -386,6 +386,18 @@ describe('approval cards for attendance, holidays and attendance settings', () =
     );
   });
 
+  it('shows the times the tool will save: one-digit hours and seconds are read as the tool reads them', () => {
+    expect(approvalTitle('correctAttendance', { employee_id: EMP, ...day, status: 'present', clock_in: '9:00', clock_out: '18:00' }, find)).toBe(
+      "Correct Amirul Hakim's attendance on Fri, 9 Oct 2026 to present, 9:00 am to 6:00 pm?",
+    );
+    expect(approvalTitle('correctAttendance', { employee_id: EMP, ...day, status: 'late', clock_in: '09:00:00', clock_out: ' 18:30:00 ' }, find)).toBe(
+      "Correct Amirul Hakim's attendance on Fri, 9 Oct 2026 to late, 9:00 am to 6:30 pm?",
+    );
+    expect(approvalTitle('correctAttendance', { employee_id: EMP, ...day, status: 'present', clock_in: '9:05', clock_out: '' }, find)).toBe(
+      "Correct Amirul Hakim's attendance on Fri, 9 Oct 2026 to present, from 9:05 am?",
+    );
+  });
+
   it('shows no times for an absence, even when the input holds some', () => {
     expect(approvalTitle('correctAttendance', { employee_id: EMP, ...day, status: 'absent', clock_in: '09:00', clock_out: '18:00' }, find)).toBe(
       "Correct Amirul Hakim's attendance on Fri, 9 Oct 2026 to absent?",
@@ -424,6 +436,16 @@ describe('approval cards for attendance, holidays and attendance settings', () =
     expect(approvalTitle('removeHoliday', { id: HOLIDAY })).toBe('Remove a public holiday that was not in the list above?');
     expect(approvalDetail('removeHoliday', { id: HOLIDAY })).toBe('Leave and overtime already recorded are not changed.');
     expect(approvalDetail('saveHoliday', { name: 'Deepavali', holiday_date: '2026-11-08' })).toBeNull();
+  });
+
+  it('a holiday whose id is empty or only spaces is an add, as the tool treats it', () => {
+    for (const id of ['', '  ']) {
+      expect(approvalTitle('saveHoliday', { id, name: 'Deepavali', holiday_date: '2026-11-08' }, find)).toBe('Add public holiday: Deepavali, 8 Nov 2026?');
+      expect(approvalDetail('saveHoliday', { id, name: 'Deepavali', holiday_date: '2026-11-08' })).toBeNull();
+    }
+    expect(approvalDetail('saveHoliday', { id: HOLIDAY, name: 'Deepavali', holiday_date: '2026-11-08' })).toBe(
+      'Leave and overtime already recorded are not changed.',
+    );
   });
 
   it('with the earlier lookup, the settings card shows only what changes', () => {

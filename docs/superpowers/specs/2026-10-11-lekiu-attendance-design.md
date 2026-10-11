@@ -13,7 +13,7 @@ A linked employee clocks in and out for themselves; the system decides present o
 - A member can clock **themselves** in and out, for today, and nothing else: not a colleague, not another day, not a time of their choosing, not a correction, a holiday or a setting. This holds for the screens, for Lekiu and for a direct call to the database.
 - The time of a clock-in or clock-out is the database's clock. Nobody can supply one.
 - Whether a clock-in is late is decided in one place and is the same on the screen, in Lekiu and in the saved row.
-- A working day with approved leave reads "on leave", and one with neither a clock-in nor leave reads "absent", without anyone entering it; weekends and public holidays are never counted; nobody is marked absent for a day before attendance existed or before they joined.
+- A working day with approved leave reads "on leave", and one with neither a clock-in nor leave reads "absent", without anyone entering it, with three exceptions: the workspace's first day of using attendance, a person's first eligible day (the day the nightly job first sees them linked and active), and employees with no linked account, who are never marked. Today is never closed, so a day with no row is not an absence. Weekends and public holidays are never counted; nobody is marked absent for a day before attendance existed or before they joined.
 - A day someone clocked in on, or that an owner or admin corrected, is never overwritten by the system.
 - The demo workspace stays read-only.
 - Nothing is billed to the OpenRouter key by any automated test.
@@ -111,9 +111,9 @@ One Zod schema and one function per action, taking `PeopleWriteContext` and retu
 | `ATT_ALREADY_OUT` | "You have already clocked out today." |
 | `ATT_NOT_WORKING_DAY` | "Today is not a working day. Ask an owner or admin to record it if you worked." |
 | `ATT_ON_LEAVE` | "You are on approved leave today." |
-| `ATT_INACTIVE_EMPLOYEE` | "That employee is inactive." |
+| `ATT_INACTIVE_EMPLOYEE` | "This employee record is inactive, so attendance cannot be clocked." |
 | `ATT_HOLIDAY_EXISTS` | "There is already a public holiday on that date." |
-| `ATT_BAD_INPUT` | "Some of that could not be read. Check it and try again." |
+| `ATT_BAD_INPUT` | "Some of that was not accepted. A date or time may be in the future, a time may not be a time of day, a clock-out may not be after the clock-in, or a name or note may be too long or empty. Check it and try again." |
 
 Anything else is logged (code and message only) and reported as "That change could not be saved. Please try again."
 
@@ -124,10 +124,10 @@ Server actions in `src/app/(app)/people/attendance-actions.ts` follow `pay-actio
 | Screen | Change |
 |---|---|
 | My Attendance | A "Clock in" button, then "Clock out", then neither. Today's line: "Not clocked in yet", "In since 8:52 am", or "8:52 am to 6:03 pm, 9 h 11 min". On a non-working day, or a day of approved leave, a line says why there is nothing to clock. History rows show "Corrected" with the note, and "No clock-out". |
-| Team Attendance (**new**, `/people/attendance`, under Management) | For owners and admins: one day at a time, chosen with a date picker (today by default, not after today); a row per active employee with status, times and hours; tiles for present, late, absent, on leave and no clock-out; a "Correct" action that opens in its own row (status, clock-in, clock-out, note), as "Mark paid" does. A member sees the existing owners-and-admins notice. |
+| Team Attendance (**new**, `/people/attendance`, under Management) | For owners and admins: one day at a time, chosen with a date picker (today by default, not after today); a row per active employee with status, times and hours; tiles for present, late, absent, on leave and no clock-out; for today, an employee with no linked account reads "Not linked to an account" rather than "Not clocked in yet"; a "Correct" action that opens in its own row (status, clock-in, clock-out, note), as "Mark paid" does. A member sees the existing owners-and-admins notice. |
 | Public Holidays | Owners and admins get "Add holiday" (name, date), and Edit and Remove on each row; Remove asks first. Everyone else sees the list as now. |
 | Settings | The work week, start time and grace period become editable for owners and admins, with Save and the line "Applies from the next clock-in." The rest stays read-only. |
-| Overview, Dashboard | Unchanged code: their attendance figures now come from real rows. |
+| Overview, Dashboard, Lekiu's `getPeopleOverview` | Their attendance figures now come from real rows. For today they show a count, "Clocked in so far today" (present or late with a clock-in), never a percentage: today is not closed, so a share of today's rows would read 100% by construction. Past-period rates (the weekly trend, `getAttendanceSummary`) are shares of recorded days, and say so. |
 
 A demo visitor sees every new control disabled with the sign-up line. An unlinked account keeps the not-linked card on My Attendance. The new screen is added to the nav, to `src/config/live-screens.ts` and to `PEOPLE_PATHS`.
 
@@ -188,7 +188,7 @@ The live test does not clock in: whether today is a working day and whether it i
 | Risk | Handling |
 |---|---|
 | Someone clocks a colleague in, or backdates their own | Clock functions take no time and act only for the caller's own employee, today; the access check asserts each case |
-| False absences in a workspace that is not using attendance, or before the clock-in button ships | The job covers a workspace only from its first clocked or corrected day, and never before the migration was applied; unlinked employees are skipped |
+| False absences in a workspace that is not using attendance, or before the clock-in button ships | The job covers a workspace only from the day it first used attendance (never that day itself), and per employee from the day the nightly job first saw them linked and active (never that day itself), and never before the migration was applied; unlinked employees are skipped |
 | The nightly job fails for a few nights | It closes the last 31 days each run, so missed nights are filled in when it next runs |
 | The job overwrites a real record | It only ever touches rows with no clock-in and no correction |
 | A holiday or work-week change makes past days wrong | The job removes system rows on days that stopped being working days and re-decides the rest, within 31 days; clocked and corrected days are left as they were |

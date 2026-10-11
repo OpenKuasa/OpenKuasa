@@ -57,7 +57,10 @@ export function attendanceCounts(days: AttendanceDay[]) {
     late,
     absent,
     on_leave: count('on_leave'),
-    /** Share of expected attendances (not on leave) that happened. Null when there were none. */
+    /**
+     * Share of recorded days that were present or late (on leave not counted). A day with no row is not an absence,
+     * so this is a share of recorded days, not of days expected. Null when there were none. Not for today.
+     */
     rate_pct: expected === 0 ? null : Math.round(((present + late) / expected) * 100),
   };
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { toCorrectionInput } from '@/lib/people/attendance-forms';
 import { PEOPLE_PATHS } from '@/lib/people/paths';
-import { buildTeamAttendanceModel, loadTeamAttendance, parseDay } from '@/lib/people/team-attendance';
+import { buildTeamAttendanceModel, loadTeamAttendance, parseDay, prefillClockOut } from '@/lib/people/team-attendance';
 import type { AttendanceDay, Employee, LeaveRequest, PeopleData, PeopleViewer, PublicHoliday } from '@/lib/people/types';
 
 const TODAY = '2026-10-09'; // Friday
@@ -9,7 +9,7 @@ const WEEK = ['mon', 'tue', 'wed', 'thu', 'fri'] as const;
 
 const emp = (id: string, name: string, over: Partial<Employee> = {}): Employee => ({
   id,
-  user_id: null,
+  user_id: `user-${id}`, // linked, unless a test says otherwise
   employee_no: id,
   name,
   work_email: null,
@@ -125,6 +125,18 @@ describe('buildTeamAttendanceModel', () => {
   it('says "No record" for a past working day with no row, and "Not clocked in yet" for today', () => {
     expect(build().rows[0]).toMatchObject({ status: null, label: 'No record' });
     expect(build({ date: TODAY }).rows[0]).toMatchObject({ status: null, label: 'Not clocked in yet' });
+  });
+
+  it('says an employee with no linked account is not linked today (they cannot clock in), and carries no id to the client', () => {
+    const rows = build({ date: TODAY, employees: [emp('e1', 'Amirul'), emp('e2', 'Bee', { user_id: null })] }).rows;
+    expect(rows.find((r) => r.employeeId === 'e1')).toMatchObject({ label: 'Not clocked in yet', linked: true });
+    expect(rows.find((r) => r.employeeId === 'e2')).toMatchObject({ status: null, label: 'Not linked to an account', linked: false });
+    expect(JSON.stringify(rows)).not.toContain('user-e1');
+    // A past day is "No record" whether or not the person is linked.
+    const past = build({ employees: [emp('e2', 'Bee', { user_id: null })] }).rows[0];
+    expect(past.label).toBe('No record');
+    // A row, if there is one, is shown as it is.
+    expect(build({ date: TODAY, employees: [emp('e2', 'Bee', { user_id: null })], attendance: [day({ employee_id: 'e2', work_date: TODAY, clock_out: null })] }).rows[0].label).toBe('Present');
   });
 
   it('shows approved leave with no row on a past day as leave (half day too), but not pending or other days', () => {
@@ -251,5 +263,21 @@ describe('the new page and its form', () => {
     const values = { employee_id: 'e1', work_date: '2026-10-10', status: 'absent' as const, clock_in: '', clock_out: '', note: '' };
     expect(toCorrectionInput(values, TODAY)).toEqual({ ok: false, error: 'The date cannot be in the future.' });
     expect(toCorrectionInput({ ...values, work_date: TODAY }, TODAY).ok).toBe(true);
+  });
+});
+
+describe('prefillClockOut: what the clock-out field opens with', () => {
+  const prefill = (clock_out: string) => ({ status: 'present' as const, clock_in: '09:00', clock_out, note: '' });
+  it('keeps the clock-out the row has, today or not', () => {
+    expect(prefillClockOut(prefill('17:30'), '2026-10-09', TODAY, '18:00')).toBe('17:30');
+    expect(prefillClockOut(prefill('17:30'), '2026-10-09', TODAY, '17:30')).toBe('17:30');
+    expect(prefillClockOut(prefill('17:30'), '2026-10-08', TODAY, '08:00')).toBe('17:30');
+  });
+  it('blanks it on today when the row has none, or the time is later than now', () => {
+    expect(prefillClockOut(prefill(''), TODAY, TODAY, '15:00')).toBe('');
+    expect(prefillClockOut(prefill('18:00'), TODAY, TODAY, '15:00')).toBe('');
+  });
+  it('leaves a past day alone, even with none', () => {
+    expect(prefillClockOut(prefill(''), '2026-10-08', TODAY, '15:00')).toBe('');
   });
 });

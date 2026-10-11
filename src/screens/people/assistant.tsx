@@ -16,7 +16,6 @@ import {
   AreaTrend,
   BarGroup,
   DonutStat,
-  RadialGauge,
   Sparkline,
   type Series,
   type Slice,
@@ -74,7 +73,7 @@ export default async function OverviewScreen() {
     value: d.headcount,
     color: DEPARTMENT_COLORS[index % DEPARTMENT_COLORS.length],
   }));
-  const rate = model?.totals.attendance_rate_pct ?? null;
+  const clockedIn = model?.totals.clocked_in_so_far ?? 0;
 
   return (
     <ScreenContainer>
@@ -133,10 +132,8 @@ export default async function OverviewScreen() {
         </BentoCard>
         <BentoCard className="col-span-1 md:col-span-3">
           <BentoStat
-            label="At work today"
-            value={model && teamView && rate !== null ? String(model.totals.at_work_today) : '—'}
-            delta={teamView && rate !== null ? `${rate}%` : undefined}
-            deltaTone="flat"
+            label="Clocked in so far today"
+            value={model && teamView ? String(clockedIn) : '—'}
           />
           {model && !teamView ? <p className="mt-1 text-xs text-muted-foreground">Shown to HR admins</p> : null}
         </BentoCard>
@@ -186,15 +183,15 @@ export default async function OverviewScreen() {
           )}
         </BentoCard>
         <BentoCard
-          title="Attendance rate"
-          subtitle="At work vs expected today"
+          title="Clocked in so far"
+          subtitle="Present or late today, not yet a rate"
           icon={Gauge}
           className="col-span-2 md:col-span-4"
         >
-          {!model ? LOAD_FAILED : !teamView ? HR_ONLY : rate === null ? (
-            <Muted>No attendance recorded today</Muted>
+          {!model ? LOAD_FAILED : !teamView ? HR_ONLY : clockedIn === 0 ? (
+            <Muted>Nobody has clocked in yet today</Muted>
           ) : (
-            <RadialGauge value={rate} label="at work" valueLabel={`${rate}%`} color="var(--chart-2)" height={200} />
+            <p className="text-5xl font-semibold tabular-nums">{clockedIn}</p>
           )}
         </BentoCard>
         <BentoCard

@@ -219,6 +219,11 @@ describe('LEKIU_SYSTEM', () => {
       expect(t).toContain('never send a time that has not happened yet');
       expect(t).toContain('leave the clock-out empty if the person is still at work');
     });
+    it('counts recorded days only, and never reads an empty count as nobody absent', () => {
+      expect(t).toContain('cover recorded days only');
+      expect(t).toContain('is not an absence');
+      expect(t).toContain('never say "nobody was absent" from an empty count');
+    });
     it('does not say whether today is a working day when the week is unknown, and relays a refusal', () => {
       expect(t).toContain('working_day is unknown, do not say whether today is a working day');
       expect(t).toContain('if a clock-in is refused, relay the refusal');

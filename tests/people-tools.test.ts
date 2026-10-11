@@ -77,7 +77,7 @@ describe('people tools', () => {
     const model = await buildPeopleOverviewModel(data, NOW);
     const overview = await run('getPeopleOverview')({});
     expect(overview).toMatchObject({
-      date: '2026-10-09', headcount: 20, departments: 5, on_leave_today: 3, at_work_today: 17, attendance_rate_pct: 100,
+      date: '2026-10-09', headcount: 20, departments: 5, on_leave_today: 3, clocked_in_so_far: 17,
       pending_approvals: { leave: 3, claims: 2, overtime: 1, time_off: 0, total: 6 },
     });
     expect(overview.headcount).toBe(model.totals.headcount);
@@ -241,7 +241,10 @@ describe('people tools', () => {
       expect(badNumbers(result), name).toEqual([]);
       expect(result.ok, name).not.toBe(false);
     }
-    expect((await empty('getPeopleOverview')({})).attendance_rate_pct).toBeNull();
+    const overview = await empty('getPeopleOverview')({});
+    expect(overview.clocked_in_so_far).toBe(0);
+    // Today is never a rate: a rate over today's rows alone reads 100% by construction.
+    expect(overview).not.toHaveProperty('attendance_rate_pct');
   });
 
   it('reports a failed read as an error, without the database message', async () => {
@@ -266,7 +269,7 @@ describe('people tools', () => {
       team_figures: 'On-leave, attendance and approval figures for the whole team are visible to HR admins only.',
     });
     expect(member).toHaveProperty('your_pending_requests');
-    for (const key of ['on_leave_today', 'at_work_today', 'attendance_rate_pct', 'pending_approvals']) {
+    for (const key of ['on_leave_today', 'clocked_in_so_far', 'attendance_rate_pct', 'pending_approvals']) {
       expect(member, key).not.toHaveProperty(key);
     }
     const hr = await run('getPeopleOverview')({});
@@ -388,7 +391,7 @@ describe('people tools', () => {
 
   it('explains a null attendance rate in the overview description', () => {
     const description = (createPeopleTools(data, HR, NOW).getPeopleOverview as unknown as { description: string }).description;
-    expect(description).toContain('A null attendance rate means nobody was expected at work today');
+    expect(description).toContain('clocked_in_so_far counts only people who have clocked in so far today');
     expect(description.endsWith('their own records only, so never present it as the whole team.')).toBe(true);
   });
 

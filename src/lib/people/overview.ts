@@ -223,10 +223,11 @@ export type AttendanceCounts = {
   late: number;
   absent: number;
   on_leave: number;
-  /** Present or late. */
-  at_work: number;
-  /** Share of those expected (not on leave) who came in. Null when nobody was expected. */
-  rate_pct: number | null;
+  /**
+   * Present or late with a clock-in. There is no rate for a day that is still going: the nightly job does not close
+   * today, so the rows of today are only the people who have clocked in, and a share of those would read 100%.
+   */
+  clocked_in: number;
 };
 
 export function attendanceOn(days: AttendanceDay[], date: string): AttendanceCounts {
@@ -236,8 +237,7 @@ export function attendanceOn(days: AttendanceDay[], date: string): AttendanceCou
     late: counts.late,
     absent: counts.absent,
     on_leave: counts.on_leave,
-    at_work: counts.present + counts.late,
-    rate_pct: counts.rate_pct,
+    clocked_in: days.filter((d) => d.work_date === date && (d.status === 'present' || d.status === 'late') && d.clock_in !== null).length,
   };
 }
 
@@ -246,8 +246,8 @@ export type PeopleOverviewModel = {
   totals: {
     headcount: number;
     departments: number;
-    at_work_today: number;
-    attendance_rate_pct: number | null;
+    /** Present or late with a clock-in today. Never a rate: see {@link AttendanceCounts}. */
+    clocked_in_so_far: number;
     on_leave_today: number;
     pending_approvals: number;
   };
@@ -278,8 +278,7 @@ export async function buildPeopleOverviewModel(data: PeopleData, now: Date): Pro
     totals: {
       headcount: employees.filter((e) => e.status === 'active').length,
       departments: departments.length,
-      at_work_today: counts.at_work,
-      attendance_rate_pct: counts.rate_pct,
+      clocked_in_so_far: counts.clocked_in,
       on_leave_today: away.length,
       pending_approvals: approvals.length,
     },

@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { type CapResult, WRITE_FAILED } from '@/lib/people/capabilities';
 import { toCorrectionInput } from '@/lib/people/attendance-forms';
 import { timeInMalaysia, todayInMalaysia } from '@/lib/people/dates';
-import type { CorrectionPrefill } from '@/lib/people/team-attendance';
+import { type CorrectionPrefill, prefillClockOut } from '@/lib/people/team-attendance';
 import type { AttendanceStatus } from '@/lib/people/types';
 import { RowPrompt, usePromptId } from './request-row';
 
@@ -44,8 +44,8 @@ export function CorrectAttendance({
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<AttendanceStatus>(prefill.status);
   const [clockIn, setClockIn] = useState(prefill.clock_in);
-  // Today's clock-out is not pre-filled: a person may still be at work, and a time that has not happened is refused.
-  const prefillOut = () => (workDate === todayInMalaysia(new Date()) ? '' : prefill.clock_out);
+  // The row's clock-out is kept, so saving does not erase a real one; blank only when it has none or is still to come.
+  const prefillOut = () => prefillClockOut(prefill, workDate, todayInMalaysia(new Date()), timeInMalaysia(new Date()));
   const [clockOut, setClockOut] = useState(prefillOut);
   const [note, setNote] = useState(prefill.note);
   const [error, setError] = useState<string | null>(null);

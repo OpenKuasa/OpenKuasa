@@ -12,6 +12,7 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { type SupabaseClient } from '@supabase/supabase-js';
 import {
+  ATT_REFUSALS,
   correctAttendance,
   deleteHoliday,
   saveAttendanceSettings,
@@ -86,7 +87,7 @@ testWithSupabase('an owner corrects a day, and corrects it again', async () => {
   if (absent.ok) expect(absent.data).toMatchObject({ id: present.data.id, status: 'absent', clock_in: null, clock_out: null });
 
   // The database refuses what is not a day: times on an absence, a clock-out before the clock-in.
-  const bad = { ok: false, error: 'Some of that could not be read. Check it and try again.' };
+  const bad = { ok: false, error: ATT_REFUSALS.ATT_BAD_INPUT };
   expect(await correctAttendance(ctx, { employee_id: made.data.id, work_date: MONDAY, status: 'absent', clock_in: '09:00' })).toEqual(bad);
   expect(
     await correctAttendance(ctx, { employee_id: made.data.id, work_date: MONDAY, status: 'present', clock_in: '18:00', clock_out: '09:00' }),

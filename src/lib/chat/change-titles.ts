@@ -8,6 +8,7 @@ import { describeFormChange } from '@/lib/hire/application-form';
 import { REASON_LABEL } from '@/lib/hire/application-changes';
 import { STAGE_LABEL } from '@/lib/hire/applications-view';
 import { isRealDate, monthLabel, weekdayName } from '@/lib/people/dates';
+import { blank, hhmm } from '@/lib/people/loose-input';
 import type { ReceiptState } from '@/lib/people/receipts';
 
 const APPOINTMENT_STATUS_LABELS: Record<string, string> = {
@@ -570,8 +571,8 @@ export function approvalTitle(
       const status = typeof i.status === 'string' ? STATUS_WORDS[i.status] : undefined;
       // Times belong to a worked day only: an absence or a day of leave takes none.
       const worked = i.status === 'present' || i.status === 'late';
-      const from = worked ? clockWords(i.clock_in) : null;
-      const to = worked ? clockWords(i.clock_out) : null;
+      const from = worked ? clockWords(hhmm(i.clock_in)) : null;
+      const to = worked ? clockWords(hhmm(i.clock_out)) : null;
       const times = from && to ? `, ${from} to ${to}` : from ? `, from ${from}` : '';
       return `Correct ${who ? `${who}'s` : "this employee's"} attendance${when ? ` on ${when}` : ''} to ${status ?? 'a new status'}${times}?`;
     }
@@ -579,8 +580,10 @@ export function approvalTitle(
       const name = text(i.name) ?? '';
       const when = dateText(i.holiday_date);
       const what = `${name}${when ? `, ${when}` : ''}`;
-      if (i.id === undefined || i.id === null) return `Add public holiday: ${what}?`;
-      const old = find(i.id, 'holiday');
+      // An empty or blank id is an add, exactly as the tool reads it.
+      const id = blank(i.id);
+      if (id === null) return `Add public holiday: ${what}?`;
+      const old = find(id, 'holiday');
       return `Change ${old ? `public holiday ${old}` : UNLISTED_HOLIDAY} to ${what}?`;
     }
     case 'removeHoliday': {
@@ -770,7 +773,7 @@ export function approvalDetail(toolName: string, input?: unknown, receipt?: Rece
     return note ? `Note: “${note}”` : null;
   }
   if (toolName === 'saveAttendanceSettings') return settingsDetail(i);
-  if (toolName === 'removeHoliday' || (toolName === 'saveHoliday' && i.id != null)) {
+  if (toolName === 'removeHoliday' || (toolName === 'saveHoliday' && blank(i.id) !== null)) {
     return 'Leave and overtime already recorded are not changed.';
   }
   if (toolName === 'applyLeave' || toolName === 'applyTimeOff') {

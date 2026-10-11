@@ -311,7 +311,7 @@ describe('what a model sends is accepted, then turned into what the write path t
     const result = await throughSdk('correctAttendance', { employee_id: OTHER, work_date: '2026-10-09', status: 'present', clock_in: '09:00', clock_out: '18:00' });
     expect(result).toEqual({
       ok: false,
-      error: 'That time has not happened yet today (it is 12:00 in Malaysia). Use a time up to now, or leave the clock-out empty if the person is still at work.',
+      error: 'That time has not happened yet. For today, leave clock-out empty if they are still at work.',
     });
     expect(ctl.ran).toEqual([]);
     // Up to now, and a clock-out left empty, go through.
