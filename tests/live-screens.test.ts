@@ -30,17 +30,22 @@ describe('live screens', () => {
     expect(isSampleScreen('/hire/settings')).toBe(true);
   });
 
-  it('counts Invoices and Payments In as live, and the sales screens not yet connected as sample', () => {
+  it('counts Invoices and Payments In as live', () => {
     expect(isSampleScreen('/finance/invoices')).toBe(false);
     expect(isSampleScreen('/finance/payments-in')).toBe(false);
-    expect(isSampleScreen('/finance/cash-receipts')).toBe(true);
   });
 
-  it('counts Quotations, Credit Notes and Refunds as live, and the Cash Book screens as sample', () => {
+  it('counts Quotations, Credit Notes and Refunds as live', () => {
     for (const slug of ['quotations', 'credit-notes', 'refunds']) {
       expect(isSampleScreen(`/finance/${slug}`), slug).toBe(false);
     }
+  });
+
+  it('counts Cash Receipts, Payment Vouchers and Expenses as live, and Banking and Receipts Inbox as sample', () => {
     for (const slug of ['cash-receipts', 'payment-vouchers', 'expenses']) {
+      expect(isSampleScreen(`/finance/${slug}`), slug).toBe(false);
+    }
+    for (const slug of ['banking', 'receipts-inbox']) {
       expect(isSampleScreen(`/finance/${slug}`), slug).toBe(true);
     }
   });

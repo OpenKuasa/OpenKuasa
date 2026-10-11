@@ -46,6 +46,10 @@ describe('a change to a contact', () => {
         '/finance/quotations',
         '/finance/credit-notes',
         '/finance/refunds',
+        // The payer on a receipt, the payee on a voucher and the vendor on an expense.
+        '/finance/cash-receipts',
+        '/finance/payment-vouchers',
+        '/finance/expenses',
       ]);
     }
   });

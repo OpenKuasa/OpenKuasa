@@ -129,7 +129,8 @@ async function run<I, O>(
   return result;
 }
 
-// A contact's name shows on every purchase and sales screen too.
+// A contact's name shows on every purchase and sales screen too, and on the cash book: the payer on a
+// receipt, the payee on a voucher and the vendor on an expense.
 const CONTACT_PATHS = [
   '/finance/customers-suppliers',
   '/finance/supplier-bills',
@@ -139,10 +140,19 @@ const CONTACT_PATHS = [
   '/finance/quotations',
   '/finance/credit-notes',
   '/finance/refunds',
+  '/finance/cash-receipts',
+  '/finance/payment-vouchers',
+  '/finance/expenses',
 ];
 const PRODUCT_PATHS = ['/finance/products'];
-// A bill or a payment changes what is owed, which Customers & Suppliers shows as Payable.
-const PURCHASE_PATHS = ['/finance/supplier-bills', '/finance/payments-out', '/finance/customers-suppliers'];
+// A bill or a payment changes what is owed, which Customers & Suppliers shows as Payable. A payment to a
+// supplier is also a voucher: Payment Vouchers lists every movement of money out.
+const PURCHASE_PATHS = [
+  '/finance/supplier-bills',
+  '/finance/payments-out',
+  '/finance/customers-suppliers',
+  '/finance/payment-vouchers',
+];
 // An invoice or a payment in changes what customers owe, which Customers & Suppliers shows as Receivable.
 // It also shows on the three follow-on screens: Quotations names the invoice made from a quotation, Credit
 // Notes names each note's invoice, and Refunds adds up what customers are in credit from the invoices.
@@ -153,6 +163,8 @@ const SALES_PATHS = [
   '/finance/quotations',
   '/finance/credit-notes',
   '/finance/refunds',
+  // A payment in is a receipt: Cash Receipts lists every movement of money in.
+  '/finance/cash-receipts',
 ];
 // A quotation is on its own screen and moves no figure anywhere else: it is not money owed, and no other
 // screen counts or names it. So saving, sending, answering and deleting one refresh Quotations only.
@@ -172,6 +184,8 @@ const CREDIT_PATHS = [
   '/finance/customers-suppliers',
   '/finance/credit-notes',
   '/finance/refunds',
+  // A refund is a voucher: Payment Vouchers lists every movement of money out. (Payments Out still never shows one.)
+  '/finance/payment-vouchers',
 ];
 // A draft credit note takes nothing off its invoice and nothing can be refunded against it: saving or
 // deleting one moves no figure and no menu anywhere but on Credit Notes.
