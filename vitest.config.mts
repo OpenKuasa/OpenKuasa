@@ -11,6 +11,10 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    // Per-file cleanup of live-test users and workspaces (tests/helpers/live-workspaces.ts)
+    // relies on `isolate: true` (the default: each file gets its own module registry) and on
+    // nothing setting `sequence.hooks` to 'list' or 'parallel' (the helper's afterAll must run
+    // after the file's own). Do not change either without revisiting that helper.
     exclude: [...configDefaults.exclude, '**/.claude/**'],
     testTimeout: 30_000,
     hookTimeout: 30_000,
