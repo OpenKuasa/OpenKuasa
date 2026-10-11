@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { pollVideos, reapStaleRuns } from '@/lib/agents/runner';
+import { expireProposals, pollVideos, reapStaleRuns } from '@/lib/agents/runner';
 import { isTriggerAuthorized } from '@/lib/agents/trigger-auth';
 import { serviceClient } from '@/lib/supabase/service';
 
@@ -17,5 +17,6 @@ export async function POST(req: Request) {
   const service = serviceClient();
   await reapStaleRuns(service);
   await pollVideos(service);
+  await expireProposals(service);
   return NextResponse.json({ ok: true });
 }

@@ -253,6 +253,21 @@ export async function reapStaleRuns(client: SupabaseClient): Promise<void> {
   void error; // supabase-js returns { error }; a failed sweep simply retries next poll.
 }
 
+/**
+ * Marks pending proposals past their expires_at as 'expired'. `client` MUST be the
+ * service-role client. A bulk cross-org update is correct here — a global background
+ * sweep scoped by status + time, not by org. Idempotent: only pending+past rows move.
+ */
+export async function expireProposals(client: SupabaseClient): Promise<void> {
+  const now = new Date().toISOString();
+  const { error } = await client
+    .from('agent_proposals')
+    .update({ status: 'expired', decided_at: now })
+    .eq('status', 'pending')
+    .lte('expires_at', now);
+  void error; // supabase-js returns { error }; a failed sweep simply retries next poll.
+}
+
 /** A video still pending after this long is given up on. */
 const VIDEO_MAX_AGE_MS = 30 * 60 * 1000;
 
