@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getCurrentOrg } from '@/lib/auth/current-org';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
+import { readNamesakes } from './namesakes';
 import { createSeedHireData } from './seed';
 import { DEFAULT_HIRE_SETTINGS, HIRE_READ_CAP, JOB_COLUMNS, SETTINGS_COLUMNS } from './types';
 import type { Application, Candidate, HireData, HireSettings, Interview, Job } from './types';
@@ -73,6 +74,7 @@ export function createSupabaseHireData(client: SupabaseClient, orgId: string): H
       if (error) throw error;
       return { org_id: orgId, ...DEFAULT_HIRE_SETTINGS, ...((data ?? {}) as Partial<HireSettings>) };
     },
+    namesakes: (kind, id) => readNamesakes(client, orgId, kind, id),
   };
 }
 

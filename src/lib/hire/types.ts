@@ -124,7 +124,30 @@ export type HireData = {
   listApplications(): Promise<Application[]>;
   listInterviews(): Promise<Interview[]>;
   getSettings(): Promise<HireSettings>;
+  /**
+   * One row and the rows that share its name (for an application: the same candidate name and the same job title),
+   * read by id and by name so that no page size can hide one. A provider over a database must have it. One that
+   * holds every row in memory (the sample data) may leave it out: the lists are then used.
+   */
+  namesakes?(kind: 'application' | 'candidate', id: unknown): Promise<Namesakes>;
 };
+
+/** A candidate or an application as an approval card may need to describe it, to tell it from another of the same name. */
+export type Namesake = {
+  id: string;
+  /** The candidate's name. */
+  name: string;
+  /** The job's title, for an application; null for a candidate. */
+  job: string | null;
+  email: string | null;
+  location: string | null;
+  headline: string | null;
+  /** When the candidate was added, or the application made. */
+  added_at: string;
+};
+
+/** `target` is null when the row is not there. `cut` when there were more same-named rows than were read. */
+export type Namesakes = { target: Namesake | null; others: Namesake[]; cut: boolean };
 
 /** A workspace's hiring settings. `org_id` is null only for the sample data. */
 export type HireSettings = {

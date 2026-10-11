@@ -1,7 +1,7 @@
 // tests/chat-denied-step.test.tsx
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { ToolStepCard } from '@/components/chat/tool-cards';
+import { ApprovalCard, ToolStepCard } from '@/components/chat/tool-cards';
 import { toPendingApproval, toToolStep } from '@/components/chat/tool-parts';
 
 /**
@@ -48,5 +48,33 @@ describe('a card waiting for the user', () => {
   it('is not made for a request the server answered itself', () => {
     expect(toPendingApproval(part({ id: 'r1' }, 'approval-requested'))).toMatchObject({ approvalId: 'r1', toolName: 'deleteCandidate' });
     expect(toPendingApproval(part({ id: 'r1', isAutomatic: true }, 'approval-requested'))).toBeNull();
+  });
+});
+
+describe('a card for a deletion when two people share the name', () => {
+  const LINE = 'More than one candidate is called Aisyah Lim. This one: aina.r@example.com · added 03 Oct 2026.';
+  const ID = '11111111-1111-4111-8111-111111111111';
+  const named = () => 'Aisyah Lim';
+  it('takes the line from the request the server made, never from the change\'s input', () => {
+    expect(toPendingApproval(part({ id: 'r1', requestReason: LINE }, 'approval-requested'))).toMatchObject({ note: LINE });
+    expect(toPendingApproval(part({ id: 'r1' }, 'approval-requested'))).not.toHaveProperty('note');
+    expect(toPendingApproval(part({ id: 'r1', requestReason: '  ' }, 'approval-requested'))).not.toHaveProperty('note');
+  });
+  it('shows the line between the title and the warning', () => {
+    const html = renderToStaticMarkup(
+      <ApprovalCard approval={{ approvalId: 'r1', toolName: 'deleteCandidate', input: { id: ID }, note: LINE }} named={named} onDecide={() => {}} />,
+    );
+    const [title, line, warning] = ['Delete candidate “Aisyah Lim”?', LINE, 'Every application, interview and CV file of theirs is deleted too. This cannot be undone.'].map((s) => html.indexOf(s));
+    expect(title).toBeGreaterThan(-1);
+    expect(line).toBeGreaterThan(title);
+    expect(warning).toBeGreaterThan(line);
+  });
+  it('is the card it always was when nobody shares the name', () => {
+    const html = renderToStaticMarkup(
+      <ApprovalCard approval={{ approvalId: 'r1', toolName: 'deleteCandidate', input: { id: ID } }} named={named} onDecide={() => {}} />,
+    );
+    expect(html).toContain('Delete candidate “Aisyah Lim”?');
+    expect(html).toContain('Every application, interview and CV file of theirs is deleted too. This cannot be undone.');
+    expect(html).not.toContain('More than one');
   });
 });

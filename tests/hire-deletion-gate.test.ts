@@ -2,11 +2,10 @@
 import type { ModelMessage } from 'ai';
 import { describe, expect, it, vi } from 'vitest';
 import {
-  AMBIGUOUS_DELETION, DELETION_CHECK_FAILED, HIRE_DELETE_TOOL_NAMES, ONE_DELETION, TOO_MANY_APPLICATIONS, TOO_MANY_CANDIDATES,
-  ambiguousLookup, applicationNameProblem, candidateNameProblem, deletionCheckFor, deletionProblem, guardDeletions,
-  oneDeletionRefusal, sameNameApplication, sameNameCandidate,
+  AMBIGUOUS_DELETION, DELETION_CHECK_FAILED, HIRE_DELETE_TOOL_NAMES, NAMESAKE_APPEARED, ONE_DELETION,
+  ambiguousLookup, cardCheck, deletionCheckFor, deletionProblem, guardDeletions, identifyingLine, oneDeletionRefusal,
 } from '@/lib/ai/hire-deletions';
-import { HIRE_READ_CAP } from '@/lib/hire/types';
+import { HIRE_READ_CAP, type Namesake, type Namesakes } from '@/lib/hire/types';
 
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
@@ -262,65 +261,90 @@ describe('deletionProblem, as the turn reads once the SDK has written it down', 
   });
 });
 
-// A card names a person, and two people can have one name: then an id the model got wrong cannot be seen on the
-// card. So the rows are read on the server when the deletion is asked for, and a shared name is refused.
-describe('two rows the card could not tell apart', () => {
+// A card names a person, and two people can have one name: then an id the model got wrong cannot be seen in the
+// name. So the row and its namesakes are read on the server when the deletion is asked for, and the card is given
+// a line that says which one it is. Only two rows that would get the same line are refused.
+describe('two rows with one name', () => {
   const C = '33333333-3333-4333-8333-333333333333';
-  const people = (...names: string[]) => names.map((name, n) => ({ id: [A, B, C][n], name }));
-  const SAME = 'More than one candidate is called Aisyah Lim, so I cannot tell them apart here. Delete the right one from the Candidates screen.';
+  const person = (id: string, over: Partial<Namesake> = {}): Namesake =>
+    ({ id, name: 'Aisyah Lim', job: null, email: null, location: null, headline: null, added_at: '2026-10-03T02:00:00Z', ...over });
+  const found = (target: Namesake | null, others: Namesake[] = [], cut = false): Namesakes => ({ target, others, cut });
 
-  it('the sentences are as agreed', () => {
-    expect(sameNameCandidate('Aisyah Lim')).toBe(SAME);
-    expect(sameNameApplication('Aisyah Lim', 'Barista')).toBe(
-      'More than one application is from someone called Aisyah Lim for Barista, so I cannot tell them apart here. Delete the right one from the Applications screen.',
-    );
-    expect(TOO_MANY_CANDIDATES).toBe('There are too many candidates here to be sure which one this is. Delete them from the Candidates screen.');
+  it('the identifying line is the email, else the place and the headline, and always the day in Kuala Lumpur', () => {
+    expect(identifyingLine(person(A, { email: 'aina.r@example.com', location: 'Shah Alam' }))).toBe('aina.r@example.com · added 03 Oct 2026');
+    expect(identifyingLine(person(A, { location: 'Shah Alam', headline: 'Barista with 3 years in cafes' }))).toBe('Shah Alam · Barista with 3 years in cafes · added 03 Oct 2026');
+    expect(identifyingLine(person(A, { headline: 'Barista' }))).toBe('Barista · added 03 Oct 2026');
+    expect(identifyingLine(person(A))).toBe('Added 03 Oct 2026');
+    expect(identifyingLine(person(A, { email: '  ', location: ' ' }))).toBe('Added 03 Oct 2026');
+    // 17:30 UTC on the 3rd is already the 4th in Kuala Lumpur.
+    expect(identifyingLine(person(A, { added_at: '2026-10-03T17:30:00Z' }))).toBe('Added 04 Oct 2026');
+    // An application says when it was made.
+    expect(identifyingLine(person(A, { job: 'Barista', email: 'a@example.com' }))).toBe('a@example.com · applied 03 Oct 2026');
+    expect(identifyingLine(person(A, { job: 'Barista' }))).toBe('Applied 03 Oct 2026');
   });
-  it('refuses a candidate whose name another candidate has, whatever the letter case and spacing', () => {
-    expect(candidateNameProblem(people('Aisyah Lim', 'Farid Osman'), A)).toBeNull();
-    expect(candidateNameProblem(people('Aisyah Lim', 'Aisyah Lim'), A)).toBe(SAME);
-    expect(candidateNameProblem(people('Aisyah Lim', '  aisyah   LIM '), A)).toBe(SAME);
-    expect(candidateNameProblem(people('Aisyah Lim', 'Aisyah Lim', 'Farid Osman'), C)).toBeNull();
-    // A longer name is another name.
-    expect(candidateNameProblem(people('Aisyah Lim', 'Aisyah Lim Abdullah'), A)).toBeNull();
+  it('nobody shares the name: no line, and nothing refused', () => {
+    expect(cardCheck(found(person(A)))).toEqual({ ok: true, note: null, namesakes: [] });
+    // A row that is not there is left to the database, which says so.
+    expect(cardCheck(found(null))).toEqual({ ok: true, note: null, namesakes: [] });
   });
-  it('lets a row that is no longer there go on to the database, which says so', () => {
-    expect(candidateNameProblem(people('Aisyah Lim'), C)).toBeNull();
-    expect(candidateNameProblem([], undefined)).toBeNull();
+  it('a shared name: the card is given the line of the row that will go, and the namesakes are handed on', () => {
+    const other = person(B, { email: 'other@example.com' });
+    expect(cardCheck(found(person(A, { email: 'aina.r@example.com' }), [other]))).toEqual({
+      ok: true,
+      note: 'More than one candidate is called Aisyah Lim. This one: aina.r@example.com · added 03 Oct 2026.',
+      namesakes: [other],
+    });
+    expect(cardCheck(found(person(A, { job: 'Barista', email: 'aina.r@example.com' }), [person(B, { job: 'Barista' })]))).toMatchObject({
+      note: 'More than one application is from someone called Aisyah Lim for Barista. This one: aina.r@example.com · applied 03 Oct 2026.',
+    });
+    // The day alone is enough when it differs.
+    expect(cardCheck(found(person(A), [person(B, { added_at: '2026-09-01T02:00:00Z' })]))).toMatchObject({
+      ok: true, note: 'More than one candidate is called Aisyah Lim. This one: Added 03 Oct 2026.',
+    });
   });
-  it('refuses every candidate when the read was cut at the cap: a namesake may be among the rows left out', () => {
-    const full = Array.from({ length: HIRE_READ_CAP }, (_, n) => ({ id: `id-${n}`, name: `Person ${n}` }));
-    expect(candidateNameProblem(full, 'id-3')).toBe(TOO_MANY_CANDIDATES);
-    expect(candidateNameProblem(full, C)).toBe(TOO_MANY_CANDIDATES);
-    expect(candidateNameProblem(full.slice(1), 'id-3')).toBeNull();
-  });
-  it('refuses an application only when another has the same candidate name and the same job', () => {
-    const row = (id: string, candidate_name: string, job_title: string) => ({ id, candidate_name, job_title });
-    const SAME_APPLICATION = sameNameApplication('Aisyah Lim', 'Barista');
-    expect(applicationNameProblem([row(A, 'Aisyah Lim', 'Barista'), row(B, 'Aisyah Lim', 'Cashier')], A)).toBeNull();
-    expect(applicationNameProblem([row(A, 'Aisyah Lim', 'Barista'), row(B, 'Farid Osman', 'Barista')], A)).toBeNull();
-    expect(applicationNameProblem([row(A, 'Aisyah Lim', 'Barista'), row(B, 'aisyah lim ', ' BARISTA')], A)).toBe(SAME_APPLICATION);
-    expect(applicationNameProblem([row(A, 'Aisyah Lim', 'Barista')], C)).toBeNull();
-    const full = Array.from({ length: HIRE_READ_CAP }, (_, n) => row(`id-${n}`, `Person ${n}`, 'Barista'));
-    expect(applicationNameProblem(full, 'id-3')).toBe(TOO_MANY_APPLICATIONS);
+  it('two rows that would get the same line are refused, and only then', () => {
+    const same = { ok: false, refusal: 'Two candidates called Aisyah Lim look the same from here, so I cannot tell them apart. Nothing was deleted.' };
+    expect(cardCheck(found(person(A), [person(B)]))).toEqual(same);
+    expect(cardCheck(found(person(A, { location: 'Klang' }), [person(B, { location: ' klang ' }), person(C, { email: 'c@example.com' })]))).toEqual(same);
+    expect(cardCheck(found(person(A, { job: 'Barista' }), [person(B, { job: 'Barista' })]))).toEqual({
+      ok: false, refusal: 'Two applications from someone called Aisyah Lim for Barista look the same from here, so I cannot tell them apart. Nothing was deleted.',
+    });
+    // More namesakes than were read: one of the unread could look the same.
+    expect(cardCheck(found(person(A, { email: 'a@example.com' }), [person(B, { email: 'b@example.com' })], true))).toEqual(same);
   });
 
   describe('the read behind it', () => {
-    const data = (candidates: { id: string; name: string }[], applications: { id: string; candidate_name: string; job_title: string }[] = []) => ({
-      listCandidates: async () => candidates as never,
-      listApplications: async () => applications as never,
+    const row = (id: string, name: string, over: Record<string, unknown> = {}) =>
+      ({ id, name, email: null, phone: null, headline: null, location: null, skills: [], source: null, pool_status: 'none', created_at: '2026-10-03T02:00:00Z', ...over });
+    it('uses the provider\'s own read by id and name when it has one, and never its lists', async () => {
+      const lists = vi.fn(async () => { throw new Error('the lists must not be read'); });
+      const namesakes = vi.fn(async () => found(person(A, { email: 'a@example.com' }), [person(B, { email: 'b@example.com' })]));
+      const check = deletionCheckFor({ listCandidates: lists, listApplications: lists, namesakes } as never);
+      expect(await check('deleteCandidate', A)).toMatchObject({ ok: true, note: 'More than one candidate is called Aisyah Lim. This one: a@example.com · added 03 Oct 2026.' });
+      expect(namesakes).toHaveBeenCalledWith('candidate', A);
+      await check('deleteApplication', C);
+      expect(namesakes).toHaveBeenLastCalledWith('application', C);
     });
-    it('reads the candidates for a candidate and the applications for an application', async () => {
-      const check = deletionCheckFor(data(people('Aisyah Lim', 'Aisyah Lim'), [{ id: C, candidate_name: 'Farid Osman', job_title: 'Barista' }]));
-      expect(await check('deleteCandidate', A)).toBe(SAME);
-      expect(await check('deleteApplication', C)).toBeNull();
+    it('falls back to the lists of a provider that holds every row, by the same rule for names', async () => {
+      const data = {
+        listCandidates: async () => [row(A, 'Aisyah Lim', { email: 'a@example.com' }), row(B, '  aisyah  LIM', { email: 'b@example.com' }), row(C, 'Aisyah Lim Abdullah')],
+        listApplications: async () => [],
+      };
+      const got = await deletionCheckFor(data as never)('deleteCandidate', A);
+      expect(got).toMatchObject({ ok: true, note: 'More than one candidate is called Aisyah Lim. This one: a@example.com · added 03 Oct 2026.' });
+      expect((got as { namesakes: Namesake[] }).namesakes.map((n) => n.id)).toEqual([B]);
+      expect(await deletionCheckFor(data as never)('deleteCandidate', C)).toEqual({ ok: true, note: null, namesakes: [] });
     });
-    it('refuses when the read fails, and does not throw', async () => {
-      const broken = { listCandidates: async () => { throw new Error('Aisyah Lim could not be read'); }, listApplications: async () => [] as never };
+    it('no number of rows makes it refuse', async () => {
+      const many = Array.from({ length: HIRE_READ_CAP + 5 }, (_, n) => row(`id-${n}`, `Person ${n}`));
+      expect(await deletionCheckFor({ listCandidates: async () => many, listApplications: async () => [] } as never)('deleteCandidate', 'id-3'))
+        .toEqual({ ok: true, note: null, namesakes: [] });
+    });
+    it('refuses when the read fails, does not throw, and logs nothing of the error', async () => {
+      const broken = { listCandidates: async () => [], listApplications: async () => [], namesakes: async () => { throw new Error('aina.r@example.com could not be read'); } };
       const said = vi.spyOn(console, 'error').mockImplementation(() => {});
-      expect(await deletionCheckFor(broken)('deleteCandidate', A)).toBe(DELETION_CHECK_FAILED);
-      // A name is personal data: the error's own words are never logged.
-      expect(JSON.stringify(said.mock.calls)).not.toContain('Aisyah');
+      expect(await deletionCheckFor(broken as never)('deleteCandidate', A)).toEqual({ ok: false, refusal: DELETION_CHECK_FAILED });
+      expect(JSON.stringify(said.mock.calls)).not.toContain('aina');
       said.mockRestore();
     });
   });
@@ -328,25 +352,54 @@ describe('two rows the card could not tell apart', () => {
   describe('in the gate', () => {
     const approval = { deleteApplication: 'user-approval', deleteCandidate: 'user-approval' } as const;
     type Gate = (input: unknown, options: { toolCallId: string; messages: ModelMessage[] }) => unknown;
+    const NOTE = 'More than one candidate is called Aisyah Lim. This one: a@example.com · added 03 Oct 2026.';
+    const SAME = 'Two candidates called Aisyah Lim look the same from here, so I cannot tell them apart. Nothing was deleted.';
     const listed = [user('Who is called Aisyah Lim?'), called('listCandidates', 'l1', A), answered('listCandidates', 'l1', { total: 2, candidates: [{ id: A, name: 'Aisyah Lim' }, { id: B, name: 'Aisyah Lim' }] }), user('Delete the one in Klang')];
-    it('denies before any card, and the denial is not the request\'s one deletion', async () => {
-      const asked: unknown[][] = [];
-      const guarded = guardDeletions(approval, async (tool, id) => {
-        asked.push([tool, id]);
-        return id === A ? SAME : null;
-      })!;
+    const clear = { ok: true as const, note: null, namesakes: [] };
+    const shared = { ok: true as const, note: NOTE, namesakes: [] };
+    /** The turn once a card for call c1 has been shown and approved, as the SDK is given it. */
+    const approved = (note?: string) => [
+      ...listed,
+      { role: 'assistant', content: [
+        { type: 'tool-call', toolCallId: 'c1', toolName: 'deleteCandidate', input: { id: A } },
+        { type: 'tool-approval-request', approvalId: 'r1', toolCallId: 'c1', ...(note && { reason: note }) },
+      ] } as ModelMessage,
+      { role: 'tool', content: [{ type: 'tool-approval-response', approvalId: 'r1', approved: true }] } as ModelMessage,
+    ];
+
+    it('asks the user with the line on the request when the name is shared, and plainly when it is not', async () => {
+      expect(await (guardDeletions(approval, async () => shared)!.deleteCandidate as Gate)({ id: A }, { toolCallId: 'c1', messages: listed }))
+        .toEqual({ type: 'user-approval', reason: NOTE });
+      expect(await (guardDeletions(approval, async () => clear)!.deleteCandidate as Gate)({ id: A }, { toolCallId: 'c1', messages: listed }))
+        .toBe('user-approval');
+    });
+    it('denies two rows that look the same before any card, and that is not the request\'s one deletion', async () => {
+      const guarded = guardDeletions(approval, async (_tool, id) => (id === A ? { ok: false, refusal: SAME } : clear))!;
       expect(await (guarded.deleteCandidate as Gate)({ id: A }, { toolCallId: 'c1', messages: listed })).toEqual({ type: 'denied', reason: SAME });
       expect(await (guarded.deleteCandidate as Gate)({ id: B }, { toolCallId: 'c2', messages: listed })).toBe('user-approval');
-      expect(asked).toEqual([['deleteCandidate', A], ['deleteCandidate', B]]);
     });
     it('does not read the rows for a call that is refused anyway', async () => {
-      const check = vi.fn(async () => null);
-      const guarded = guardDeletions(approval, check)!;
-      await (guarded.deleteCandidate as Gate)({ id: C }, { toolCallId: 'c1', messages: listed });
+      const check = vi.fn(async () => clear);
+      await (guardDeletions(approval, check)!.deleteCandidate as Gate)({ id: C }, { toolCallId: 'c1', messages: listed });
       expect(check).not.toHaveBeenCalled();
     });
-    it('a call denied for a shared name, or at the cap, or by a failed read, is not the turn\'s one deletion', () => {
-      for (const reason of [SAME, sameNameApplication('Aisyah Lim', 'Barista'), TOO_MANY_CANDIDATES, TOO_MANY_APPLICATIONS, DELETION_CHECK_FAILED]) {
+    it('asked again after the user approved: the card that carried the line goes through', async () => {
+      expect(await (guardDeletions(approval, async () => shared)!.deleteCandidate as Gate)({ id: A }, { toolCallId: 'c1', messages: approved(NOTE) }))
+        .toEqual({ type: 'user-approval', reason: NOTE });
+      expect(await (guardDeletions(approval, async () => clear)!.deleteCandidate as Gate)({ id: A }, { toolCallId: 'c1', messages: approved() }))
+        .toBe('user-approval');
+      // The namesake has gone since: the card said more than it needed to, which is no reason to stop.
+      expect(await (guardDeletions(approval, async () => clear)!.deleteCandidate as Gate)({ id: A }, { toolCallId: 'c1', messages: approved(NOTE) }))
+        .toBe('user-approval');
+    });
+    it('asked again after the user approved a card with no line, when a namesake has appeared since: stopped', async () => {
+      expect(await (guardDeletions(approval, async () => shared)!.deleteCandidate as Gate)({ id: A }, { toolCallId: 'c1', messages: approved() }))
+        .toEqual({ type: 'denied', reason: NAMESAKE_APPEARED });
+      expect(await (guardDeletions(approval, async () => ({ ok: false as const, refusal: DELETION_CHECK_FAILED }))!.deleteCandidate as Gate)({ id: A }, { toolCallId: 'c1', messages: approved(NOTE) }))
+        .toEqual({ type: 'denied', reason: DELETION_CHECK_FAILED });
+    });
+    it('a call stopped for any of these reasons is not the turn\'s one deletion', () => {
+      for (const reason of [SAME, 'Two applications from someone called Aisyah Lim for Barista look the same from here, so I cannot tell them apart. Nothing was deleted.', DELETION_CHECK_FAILED, NAMESAKE_APPEARED]) {
         const turn = [
           user('Delete both'),
           { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'c1', toolName: 'deleteCandidate', input: { id: A } }] } as ModelMessage,

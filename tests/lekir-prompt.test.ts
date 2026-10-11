@@ -519,17 +519,39 @@ describe('the deletion rules, in every prompt that can prepare one', () => {
   });
 });
 
-describe('two rows the card could not tell apart', () => {
-  const RULE =
-    'If a deletion is refused because more than one candidate or application has the same name, or because there are too many to be sure, ' +
-    'they cannot be told apart here: say so in the words the tool gave, point to the screen it names, and do not try another way to delete them.';
-  it.each([['Lekir', LEKIR_SYSTEM], ['the specialist', subAgentSystem('hire', true)]])('%s relays the refusal and does not try another way', (_who, p) => {
-    expect(p).toContain(`- ${RULE}`);
+describe('two rows with one name', () => {
+  const card = (who: string) =>
+    'When another candidate or application has the same name, the approval card says which one it is on a line of its own: their email, or where they are and what they do, and the day they were added. ' +
+    `Tell ${who} to check that line before approving. If two of them look the same from here the deletion is refused: say so in the words the tool gave, and do not try another way to delete them.`;
+  const which = (who: string) =>
+    'When the people who match have the same name, "which one" is answered by a detail: give each one\'s headline, location and number of applications, and you may set includeContact to tell them apart by email. ' +
+    `Once ${who} has said which, use the id of that one from the list you already have, or look it up by the name and that detail together. Do not look it up by the name alone again: that matches several once more.`;
+  it('Lekir and the specialist say the card tells them apart, and how to ask which one', () => {
+    expect(LEKIR_SYSTEM).toContain(`- ${card('the owner')}`);
+    expect(LEKIR_SYSTEM).toContain(`- ${which('the owner')}`);
+    expect(subAgentSystem('hire', true)).toContain(`- ${card('the user')}`);
+    expect(subAgentSystem('hire', true)).toContain(`- ${which('the user')}`);
+  });
+  it('Tuah on its own is told both', () => {
+    expect(TUAH_SYSTEM).toContain(card('the user'));
+    expect(TUAH_SYSTEM).toContain(which('the user'));
+  });
+  it('Tuah with its team passes on the details and points at the card\'s line', () => {
+    expect(tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], true, null)).toContain(
+      'When Lekir reports people with the same name, give the user the details that tell them apart (headline, location, number of applications, and email if they ask), and once the user has said which, send ONE task naming that person and that detail. ' +
+        'When more than one person has the name, the card for the deletion says which one it is on a line of its own: tell the user to check that line before approving.',
+    );
   });
   it('sits inside Lekir\'s deletion section', () => {
-    const at = LEKIR_SYSTEM.indexOf(RULE);
+    const at = LEKIR_SYSTEM.indexOf(card('the owner'));
     expect(at).toBeGreaterThan(LEKIR_SYSTEM.indexOf('DELETING AN APPLICATION OR A CANDIDATE'));
     expect(at).toBeLessThan(LEKIR_SYSTEM.indexOf('\nSCOPE'));
+  });
+  it('no prompt still says a shared name is refused, or points at a screen', () => {
+    for (const p of [LEKIR_SYSTEM, subAgentSystem('hire', true), TUAH_SYSTEM, tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], true, null)]) {
+      expect(p).not.toContain('there are too many to be sure');
+      expect(p).not.toContain('point to the screen it names');
+    }
   });
 });
 
@@ -539,12 +561,6 @@ describe('a deletion the server refused is not the user saying no', () => {
   it('Tuah on its own is told so, in the words Lekir is', () => {
     expect(LEKIR_SYSTEM).toContain('If a deletion comes back denied with "One deletion at a time" or "More than one match", the owner did not reject it: it was never shown to them. Say that one deletion is prepared at a time, or ask which person is meant.');
     expect(TUAH_SYSTEM).toContain('never act on it. If a deletion comes back denied with "One deletion at a time" or "More than one match", the user did not reject it: it was never shown to them. Say that one deletion is prepared at a time, or ask which person is meant.');
-  });
-  it('Tuah on its own relays a shared name and does not try another way', () => {
-    expect(TUAH_SYSTEM).toContain(
-      'If a deletion is refused because more than one candidate or application has the same name, or because there are too many to be sure, ' +
-        'they cannot be told apart here: say so in the words the tool gave, point to the screen it names, and do not try another way to delete them.',
-    );
   });
   it('Tuah with its team is told the same about applyChange', () => {
     expect(teamLead).toContain('If applyChange comes back denied for a deletion, the user did not reject it: it was never shown to them. Say why in the words it gave, and do not try another way.');

@@ -348,6 +348,27 @@ describe('listCandidates', () => {
     expect(await find({})).not.toHaveProperty('several_match');
     expect(tools.listCandidates.description).toContain('several_match');
   });
+  it('two people with the very same name: the result gives what tells them apart, and a lookup by name and place finds one, with nothing ambiguous about it', async () => {
+    const base = (await data.listCandidates())[0];
+    const twins = [
+      { ...base, id: 'c1', name: 'Aisyah Lim', location: 'Klang', headline: 'Barista', email: 'a@example.com' },
+      { ...base, id: 'c2', name: 'Aisyah Lim', location: 'Ipoh', headline: 'Cashier', email: 'b@example.com' },
+    ];
+    const tools = createHireTools({ ...data, listCandidates: async () => twins, listApplications: async () => [] }, NOW);
+    const find = (input: unknown) =>
+      (tools.listCandidates as unknown as { execute: (i: unknown, o: unknown) => Promise<Loose> })
+        .execute(input, { toolCallId: 't', messages: [] });
+    const both = await find({ name: 'Aisyah Lim' });
+    expect(both.several_match).toBeDefined();
+    expect(both.candidates.map((c: Loose) => [c.id, c.location, c.headline, c.applications])).toEqual([['c1', 'Klang', 'Barista', 0], ['c2', 'Ipoh', 'Cashier', 0]]);
+    // An email only when it is asked for.
+    expect(both.candidates[0]).not.toHaveProperty('email');
+    expect((await find({ name: 'Aisyah Lim', includeContact: true })).candidates.map((c: Loose) => c.email)).toEqual(['a@example.com', 'b@example.com']);
+    const one = await find({ name: 'Aisyah Lim', location: 'Klang' });
+    expect(one.total).toBe(1);
+    expect(one.candidates[0].id).toBe('c1');
+    expect(one).not.toHaveProperty('several_match');
+  });
   it('says so in the result when a candidate name matches more than one application, and only then', async () => {
     const [base] = await data.listApplications();
     const three = [

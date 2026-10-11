@@ -194,19 +194,26 @@ export function receiptStateFor(messages: { role: string; parts: AnyPart[] }[], 
   return pick.state === 'attached' ? { state: 'attached' } : pick;
 }
 
-export type PendingApproval = { approvalId: string; toolName: string; input: unknown };
+export type PendingApproval = {
+  approvalId: string;
+  toolName: string;
+  input: unknown;
+  /** A line the server put on the request for the person deciding (which of two same-named people this is). Never from the model. */
+  note?: string;
+};
 
 export function toPendingApproval(part: AnyPart): PendingApproval | null {
   const type = part.type;
   if (typeof type !== 'string' || !type.startsWith('tool-')) return null;
   if (!('state' in part) || (part as { state?: string }).state !== 'approval-requested') return null;
-  const approval = (part as { approval?: { id?: string; isAutomatic?: boolean } }).approval;
+  const approval = (part as { approval?: { id?: string; isAutomatic?: boolean; requestReason?: unknown } }).approval;
   // A request the server answered itself is never the user's to decide.
   if (!approval?.id || approval.isAutomatic) return null;
   return {
     approvalId: approval.id,
     toolName: type.slice('tool-'.length),
     input: (part as { input?: unknown }).input,
+    ...(typeof approval.requestReason === 'string' && approval.requestReason.trim() && { note: approval.requestReason }),
   };
 }
 

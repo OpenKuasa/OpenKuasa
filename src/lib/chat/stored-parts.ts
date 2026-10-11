@@ -15,7 +15,7 @@ export type StoredToolPart = {
   input?: unknown;
   output?: unknown;
   errorText?: string;
-  approval?: { id: string; approved?: boolean; reason?: string };
+  approval?: { id: string; approved?: boolean; reason?: string; requestReason?: string };
 };
 
 /** A file kept in storage, by its path there. Never sent to the browser as is. */
@@ -66,6 +66,9 @@ function toolPart(raw: Record<string, unknown>): StoredToolPart | null {
     part.approval = { id: approval.id };
     if (typeof approval.approved === 'boolean') part.approval.approved = approval.approved;
     if (typeof approval.reason === 'string') part.approval.reason = approval.reason.slice(0, 500);
+    // The line a card carried for the person deciding: a chat opened again must show the same card, and the server
+    // checks on approval that a card which needed the line had it.
+    if (typeof approval.requestReason === 'string') part.approval.requestReason = approval.requestReason.slice(0, 500);
   }
   // A change waiting for a yes or no is useless without the id to answer it.
   if ((part.state === 'approval-requested' || part.state === 'approval-responded') && !part.approval) {

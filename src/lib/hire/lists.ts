@@ -61,7 +61,7 @@ function klDate(iso: string): { day: string; month: string; year: string } {
   return { day, month: MONTHS[Number(month) - 1], year };
 }
 /** "08 Oct 2026", in Kuala Lumpur. */
-const fullDate = (iso: string) => {
+export const fullDate = (iso: string) => {
   const d = klDate(iso);
   return `${d.day} ${d.month} ${d.year}`;
 };

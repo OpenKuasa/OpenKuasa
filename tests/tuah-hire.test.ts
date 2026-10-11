@@ -5,7 +5,9 @@ import { HIRE_TOOL_NAMES } from '@/lib/ai/hire-tools';
 import { HIRE_WRITE_TOOL_NAMES } from '@/lib/ai/products';
 
 const seen = vi.hoisted(() => ({
-  calls: [] as { layer: string; system: string; tools: string[] }[],
+  calls: [] as { layer: string; system: string; tools: string[]; prompt: string }[],
+  /** Everything any model was sent, in every request since a test last emptied it. */
+  sent: [] as string[],
   /** Set by the one test that needs a change prepared: Tuah asks Lekir, and Lekir calls createJob. */
   prepareJob: false,
   /**
@@ -75,7 +77,9 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
             layer,
             system: String(options.prompt.find((m) => m.role === 'system')?.content ?? ''),
             tools: (options.tools ?? []).map((t) => t.name),
+            prompt: JSON.stringify(options.prompt),
           });
+          seen.sent.push(JSON.stringify(options.prompt));
           const call = (toolName: string, input: unknown): Record<string, unknown>[] => [
             { type: 'tool-call', toolCallId: `call-${toolName}`, toolName, input: JSON.stringify(input) },
             { type: 'finish', finishReason: { unified: 'tool-calls', raw: 'tool_calls' }, usage },
@@ -114,6 +118,8 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
 const { runLekir, runTuah } = await import('@/lib/ai/agents/orchestrator');
 const { createTeamTools } = await import('@/lib/ai/agents/specialists');
 const { namesIn, proposalsIn } = await import('@/lib/chat/delegation');
+const { toPendingApproval } = await import('@/components/chat/tool-parts');
+const { storedParts } = await import('@/lib/chat/stored-parts');
 const { combineToolkits, hireProduct, reachProduct } = await import('@/lib/ai/products');
 const { TUAH_SYSTEM, tuahTeamSystem, subAgentSystem } = await import('@/lib/ai/agents/prompts');
 
@@ -863,39 +869,66 @@ describe('Tuah’s team deleting an application or a candidate', () => {
     for (const refusal of seen.refusals) expect(refusal === AMBIGUOUS || refusal.startsWith('You have not looked up')).toBe(true);
     nothingDeleted();
   });
-  it('refuses a candidate whose name another candidate has, read from the workspace and not from what was looked up', async () => {
+  it('prepares the deletion of a candidate whose name another has when the two can be told apart, and keeps the telling line out of what it reports', async () => {
     const { access } = await withUuids();
-    const same = {
+    const shared = {
       ...access,
       data: {
         ...access.data,
-        listCandidates: async () => (await access.data.listCandidates()).map((c) => (c.id === OTHER_CAND ? { ...c, name: ' aisyah  LIM' } : c)),
+        listCandidates: async () =>
+          (await access.data.listCandidates()).map((c) =>
+            c.id === CAND_ID ? { ...c, email: 'aina.r@example.com' } : c.id === OTHER_CAND ? { ...c, name: ' aisyah  LIM', email: 'other@example.com' } : c),
+      },
+    };
+    const context = await prepare([{ tool: 'deleteCandidate', input: { id: CAND_ID } }], shared, { [`candidate:${CAND_ID}`]: 'Aisyah Lim' });
+    expect(seen.refusals).toEqual([]);
+    expect(context.proposals.size).toBe(1);
+    // The proposal travels in the conversation, which Tuah's model reads: it holds no email.
+    expect(JSON.stringify([...context.proposals.values()])).not.toContain('example.com');
+    nothingDeleted();
+  });
+  it('refuses two candidates of one name that look the same, read from the workspace and not from what was looked up', async () => {
+    const { access } = await withUuids();
+    const alike = {
+      ...access,
+      data: {
+        ...access.data,
+        listCandidates: async () => {
+          const rows = await access.data.listCandidates();
+          const first = rows.find((c) => c.id === CAND_ID)!;
+          return rows.map((c) => (c.id === CAND_ID || c.id === OTHER_CAND ? { ...first, id: c.id, name: c.id === CAND_ID ? 'Aisyah Lim' : ' aisyah  LIM', email: null } : c));
+        },
       },
     };
     // The id comes from an earlier turn: this delegation looks nobody up, so no lookup of its own shows the shared name.
-    const context = await prepare([{ tool: 'deleteCandidate', input: { id: CAND_ID } }], same, { [`candidate:${CAND_ID}`]: 'Aisyah Lim' });
+    const context = await prepare([{ tool: 'deleteCandidate', input: { id: CAND_ID } }], alike, { [`candidate:${CAND_ID}`]: 'Aisyah Lim' });
     expect(context.proposals.size).toBe(0);
-    expect(seen.refusals[0]).toBe('More than one candidate is called Aisyah Lim, so I cannot tell them apart here. Delete the right one from the Candidates screen.');
+    expect(seen.refusals[0]).toBe('Two candidates called Aisyah Lim look the same from here, so I cannot tell them apart. Nothing was deleted.');
     nothingDeleted();
   });
-  it('refuses an application when another is from someone of the same name for the same job', async () => {
+  it('for an application: refused when another from the same name for the same job looks the same, prepared when it does not', async () => {
     const { application, access } = await withUuids();
     const TWIN = '66666666-6666-4666-8666-666666666663';
-    const same = {
+    const withTwin = (applied_at?: string) => ({
       ...access,
       data: {
         ...access.data,
         listApplications: async () => {
           const rows = await access.data.listApplications();
-          return [...rows, { ...rows.find((a) => a.id === APP_ID)!, id: TWIN, candidate_id: 'someone-else' }];
+          const first = rows.find((a) => a.id === APP_ID)!;
+          return [...rows, { ...first, id: TWIN, applied_at: applied_at ?? first.applied_at }];
         },
       },
-    };
-    const context = await prepare([{ tool: 'listApplications', input: {} }, { tool: 'deleteApplication', input: { id: APP_ID } }], same);
-    expect(context.proposals.size).toBe(0);
+    });
+    const script = [{ tool: 'listApplications', input: {} }, { tool: 'deleteApplication', input: { id: APP_ID } }];
+    const refused = await prepare(script, withTwin());
+    expect(refused.proposals.size).toBe(0);
     expect(seen.refusals[0]).toBe(
-      `More than one application is from someone called ${application.candidate_name} for ${application.job_title}, so I cannot tell them apart here. Delete the right one from the Applications screen.`,
+      `Two applications from someone called ${application.candidate_name} for ${application.job_title} look the same from here, so I cannot tell them apart. Nothing was deleted.`,
     );
+    const prepared = await prepare(script, withTwin('2020-01-01T02:00:00Z'));
+    expect(seen.refusals).toEqual([]);
+    expect(prepared.proposals.size).toBe(1);
     nothingDeleted();
   });
   it('accepts an id an earlier turn knew as a candidate, with no new lookup', async () => {
@@ -959,7 +992,7 @@ describe('one agent holding the delete tools', () => {
 
   // The rest drive the SDK through the whole exchange: the request that shows the card, then the one the browser
   // sends with the user's answer. The SDK asks the gate about an approved call a second time in that later request.
-  type Run = { cards: { approvalId: string; toolCall: { toolName: string; input: unknown } }[]; denials: (string | undefined)[]; messages: Message[] };
+  type Run = { cards: { approvalId: string; reason?: string; toolCall: { toolName: string; input: unknown } }[]; denials: (string | undefined)[]; messages: Message[] };
   type Call = { tool: string; input: unknown };
   /**
    * One request: the model's first step makes every call in `script`, and any later step answers in words.
@@ -1093,23 +1126,89 @@ describe('one agent holding the delete tools', () => {
     expect(AMBIGUOUS).not.toMatch(/look it up again/);
     expect(candidateDeleted).not.toHaveBeenCalled();
   });
-  it.each(['tuah', 'lekir'] as const)('%s: two people with one name get no card, even when the model has an id from an earlier turn', async (agent) => {
-    candidateDeleted.mockReset();
-    const base = hire().data;
-    const listCandidates = async () =>
-      (await base.listCandidates()).map((c, n) => (n === 0 ? { ...c, id: A, name: 'Aisyah Lim' } : n === 1 ? { ...c, id: B, name: 'aisyah  lim' } : c));
+  describe('two people with one name', () => {
+    type Row = Awaited<ReturnType<ReturnType<typeof hire>['data']['listCandidates']>>[number];
+    /** The first two candidates, as the test wants them; nobody else in the seed is called Aisyah. */
+    const people = (first: Partial<Row>, second: Partial<Row>, namesake = { on: true }) => {
+      const base = hire().data;
+      const listCandidates = async () =>
+        (await base.listCandidates())
+          .filter((c, n) => n < 2 || !c.name.includes('Aisyah'))
+          .filter((_, n) => n !== 1 || namesake.on)
+          .map((c, n) => (n === 0 ? { ...c, id: A, name: 'Aisyah Lim', ...first } : n === 1 && namesake.on ? { ...c, id: B, name: 'aisyah  lim', ...second } : c));
+      return { ...writer(), data: { ...base, listCandidates } };
+    };
+    // An earlier turn listed both and the user has said which: the model has the id and makes no new lookup, so
+    // nothing in this turn says the name is shared. The server's own rows do. No email was ever shown to the model.
     const earlier = [
       { role: 'user', content: 'Delete Aisyah Lim' },
       { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'l1', toolName: 'listCandidates', input: { name: 'Aisyah Lim' } }] },
       { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'l1', toolName: 'listCandidates', output: { type: 'json', value: { total: 2, candidates: [{ id: A, name: 'Aisyah Lim', location: 'Klang' }, { id: B, name: 'aisyah  lim', location: 'Ipoh' }] } } }] },
-      { role: 'assistant', content: 'Two people are called Aisyah Lim. Which one?' },
+      { role: 'assistant', content: 'Two people are called Aisyah Lim, one in Klang and one in Ipoh. Which one?' },
       { role: 'user', content: 'The one in Klang' },
     ] as Message[];
-    // No new lookup in this turn: nothing in the turn says the name is shared. The server's own rows do.
-    const run = await request(earlier, [{ tool: 'deleteCandidate', input: { id: A } }], agent, { ...writer(), data: { ...base, listCandidates } });
-    expect(run.cards).toEqual([]);
-    expect(run.denials).toEqual(['More than one candidate is called Aisyah Lim, so I cannot tell them apart here. Delete the right one from the Candidates screen.']);
-    expect(candidateDeleted).not.toHaveBeenCalled();
+    const deleteA = [{ tool: 'deleteCandidate', input: { id: A } }];
+    const created = { created_at: '2026-10-03T02:00:00Z' };
+    const LINE = 'More than one candidate is called Aisyah Lim. This one: aina.r@example.com · added 03 Oct 2026.';
+
+    it.each(['tuah', 'lekir'] as const)('%s: the card says which one it is, by the email of the row that will go, and no model is sent that email', async (agent) => {
+      candidateDeleted.mockReset();
+      candidateDeleted.mockResolvedValue(removed);
+      seen.sent = [];
+      const access = people({ email: 'aina.r@example.com', ...created }, { email: 'the.other@example.com', ...created });
+      const first = await request(earlier, deleteA, agent, access);
+      expect(first.cards).toHaveLength(1);
+      expect(first.cards[0].toolCall).toMatchObject({ toolName: 'deleteCandidate', input: { id: A } });
+      expect(first.cards[0].reason).toBe(LINE);
+      expect(candidateDeleted).not.toHaveBeenCalled();
+      // Approved: the same card is asked about again, still carries its line, and that one row goes.
+      await request([...first.messages, answer(first.cards[0].approvalId, true)], [], agent, access);
+      expect(candidateDeleted).toHaveBeenCalledTimes(1);
+      expect(candidateDeleted.mock.calls[0][1]).toEqual({ id: A });
+      // The model was called after the card, with the whole turn behind it, and was never sent either address.
+      expect(seen.sent.length).toBeGreaterThan(1);
+      for (const sent of seen.sent) expect(sent).not.toContain('example.com');
+    });
+    it('nobody shares the name: the card is as it always was, with no line', async () => {
+      candidateDeleted.mockReset();
+      const access = people({ email: 'aina.r@example.com' }, {}, { on: false });
+      const run = await request(earlier, deleteA, 'lekir', access);
+      expect(run.cards).toHaveLength(1);
+      expect(run.cards[0].reason).toBeUndefined();
+    });
+    it.each(['tuah', 'lekir'] as const)('%s: two who look the same get no card', async (agent) => {
+      candidateDeleted.mockReset();
+      const alike = { email: null, location: 'Klang', headline: 'Barista', ...created };
+      const run = await request(earlier, deleteA, agent, people(alike, { ...alike, location: ' klang' }));
+      expect(run.cards).toEqual([]);
+      expect(run.denials).toEqual(['Two candidates called Aisyah Lim look the same from here, so I cannot tell them apart. Nothing was deleted.']);
+      expect(candidateDeleted).not.toHaveBeenCalled();
+    });
+    it('a namesake who appears between the card and the yes stops a card that did not say which one it was', async () => {
+      candidateDeleted.mockReset();
+      const namesake = { on: false };
+      const access = people({ email: 'aina.r@example.com', ...created }, { email: 'the.other@example.com', ...created }, namesake);
+      const first = await request(earlier, deleteA, 'lekir', access);
+      expect(first.cards[0].reason).toBeUndefined();
+      namesake.on = true;
+      seen.sent = [];
+      const second = await request([...first.messages, answer(first.cards[0].approvalId, true)], [], 'lekir', access);
+      expect(candidateDeleted).not.toHaveBeenCalled();
+      expect(second.cards).toEqual([]);
+      // The model is told why, and that it may prepare it again: nothing here is the user's no.
+      expect(seen.sent[0]).toContain('Someone else with the same name appeared after this was shown for approval');
+    });
+    it('after that stop, the deletion can be prepared again in the same turn, and the new card says which one', async () => {
+      candidateDeleted.mockReset();
+      const namesake = { on: false };
+      const access = people({ email: 'aina.r@example.com', ...created }, { email: 'the.other@example.com', ...created }, namesake);
+      const first = await request(earlier, deleteA, 'lekir', access);
+      namesake.on = true;
+      const second = await request([...first.messages, answer(first.cards[0].approvalId, true)], [[{ tool: 'deleteCandidate', input: { id: A } }]], 'lekir', access);
+      expect(second.cards).toHaveLength(1);
+      expect(second.cards[0].reason).toBe(LINE);
+      expect(candidateDeleted).not.toHaveBeenCalled();
+    });
   });
   it('a viewer holds no delete tool, so there is nothing to gate', async () => {
     seen.calls = [];
@@ -1125,24 +1224,25 @@ describe('one agent holding the delete tools', () => {
 describe('one deletion a turn, as the browser carries the turn between requests', () => {
   type UI = import('ai').UIMessage;
   type Model = import('ai').ModelMessage;
-  type ToolPart = { type: string; state?: string; toolCallId?: string; input?: unknown; approval?: { id: string; approved?: boolean; reason?: string; isAutomatic?: boolean } };
+  type ToolPart = { type: string; state?: string; toolCallId?: string; input?: unknown; approval?: { id: string; approved?: boolean; reason?: string; requestReason?: string; isAutomatic?: boolean } };
   const A = '11111111-1111-4111-8111-111111111111';
   const B = '22222222-2222-4222-8222-222222222222';
   const ONE_DELETION = 'One deletion at a time. One is already prepared for approval.';
   const removed = { ok: true, data: { id: A, name: 'Aisyah Lim', job: null, applications: 0, interviews: 0, cv_files: 0, message: 'Deleted Aisyah Lim.' } };
   const say = (id: string, text: string): UI => ({ id, role: 'user', parts: [{ type: 'text', text }] });
   /** Two candidates with real ids and names nobody else in the seed has. */
-  const access = () => {
+  const access = (first: Record<string, unknown> = {}, second: Record<string, unknown> = {}) => {
     const base = hire().data;
     const listCandidates = async () =>
       (await base.listCandidates())
         .filter((c, n) => n < 2 || !c.name.includes('Aisyah'))
-        .map((c, n) => (n === 0 ? { ...c, id: A, name: 'Aisyah Lim' } : n === 1 ? { ...c, id: B, name: 'Aisyah binti Karim' } : c));
+        .map((c, n) => (n === 0 ? { ...c, id: A, name: 'Aisyah Lim', ...first } : n === 1 ? { ...c, id: B, name: 'Aisyah binti Karim', ...second } : c));
     return { data: { ...base, listCandidates }, write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true } };
   };
   type Runner = (messages: Model[], chat: UI[]) => { toUIMessageStream: () => ReadableStream<unknown> };
-  const asTeam: Runner = (messages, chat) =>
-    runTuah(messages, reach(), undefined, undefined, null, null, { transcript: '', proposals: proposalsIn(chat), names: namesIn(chat) }, access());
+  const teamWith = (hiring: ReturnType<typeof access>): Runner => (messages, chat) =>
+    runTuah(messages, reach(), undefined, undefined, null, null, { transcript: '', proposals: proposalsIn(chat), names: namesIn(chat) }, hiring);
+  const asTeam = teamWith(access());
   const alone: Runner = (messages) => runTuah(messages, reach(), undefined, undefined, null, null, null, access());
   /** One request, and the chat as the browser holds it afterwards. */
   const exchange = async (chat: UI[], run: Runner): Promise<UI[]> => {
@@ -1232,6 +1332,41 @@ describe('one deletion a turn, as the browser carries the turn between requests'
       const proposalId = (waiting(next)[0].input as { proposalId: string }).proposalId;
       expect(proposalsIn(next).get(proposalId)).toMatchObject({ action: 'deleteCandidate', input: { id: B } });
       expect(candidateDeleted).toHaveBeenCalledTimes(1);
+    } finally {
+      seen.workerScript = null;
+    }
+  });
+
+  it('team: a shared name puts the telling line on the card the browser shows, and in nothing a model is sent', async () => {
+    candidateDeleted.mockReset();
+    candidateDeleted.mockResolvedValue(removed);
+    seen.refusals = [];
+    seen.sent = [];
+    seen.workerStep = 0;
+    // A listing with no name asked for: nothing calls it ambiguous, and it shows no email.
+    seen.workerScript = [{ tool: 'listCandidates', input: {} }, { tool: 'deleteCandidate', input: { id: A } }];
+    const run = teamWith(access(
+      { email: 'aina.r@example.com', created_at: '2026-10-03T02:00:00Z' },
+      { name: 'aisyah  LIM', email: 'the.other@example.com', created_at: '2026-10-03T02:00:00Z' },
+    ));
+    const LINE = 'More than one candidate is called Aisyah Lim. This one: aina.r@example.com · added 03 Oct 2026.';
+    try {
+      const shown = await exchange([say('u1', 'Delete the first candidate on the list')], run);
+      expect(seen.refusals).toEqual([]);
+      const [card] = waiting(shown);
+      expect(card.type).toBe('tool-applyChange');
+      expect(card.approval?.requestReason).toBe(LINE);
+      // What the chat makes of that part: the note is there for the card to show.
+      expect(toPendingApproval(card as never)).toMatchObject({ toolName: 'applyChange', note: LINE });
+      // A chat saved and opened again keeps it, so the same card is shown and the approval still passes the last check.
+      expect((storedParts([card])[0] as { approval?: { requestReason?: string } }).approval?.requestReason).toBe(LINE);
+
+      await exchange(decide(shown, true), run);
+      expect(candidateDeleted).toHaveBeenCalledTimes(1);
+      expect(candidateDeleted.mock.calls[0][1]).toEqual({ id: A });
+      // Tuah's model and Lekir's were each called, before the card and after it, and neither was sent an address.
+      expect(seen.sent.length).toBeGreaterThan(2);
+      for (const sent of seen.sent) expect(sent).not.toContain('example.com');
     } finally {
       seen.workerScript = null;
     }

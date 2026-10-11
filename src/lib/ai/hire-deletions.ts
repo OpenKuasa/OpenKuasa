@@ -4,12 +4,14 @@
  * turn, and never from a lookup that said its name fits more than one row. A
  * prompt rule alone was not enough for either, so both are checked in code:
  * here for an agent that holds the tools itself, and in specialists.ts for
- * Tuah's team. No model, no database.
+ * Tuah's team. A third thing is decided here too: what an approval card must say when two rows share a name.
  */
 import type { ModelMessage } from 'ai';
 import { isHeldCvMessage } from '@/lib/ai/hire-tools';
 import { nameIn } from '@/lib/chat/change-titles';
-import { HIRE_READ_CAP, type HireData } from '@/lib/hire/types';
+import { fullDate } from '@/lib/hire/lists';
+import { namesakesFromLists, sameText } from '@/lib/hire/namesakes';
+import type { HireData, Namesake, Namesakes } from '@/lib/hire/types';
 
 export const HIRE_DELETE_TOOL_NAMES = ['deleteApplication', 'deleteCandidate'] as const;
 
@@ -42,10 +44,10 @@ const GATE_REASON_STARTS = [
   'One deletion at a time.',
   'More than one match was found',
   'You have not looked up ',
-  'More than one candidate is called ',
-  'More than one application is from someone called ',
-  'There are too many ',
+  'Two candidates called ',
+  'Two applications from someone called ',
   'I could not check ',
+  'Someone else with the same name appeared ',
 ];
 export function isGateReason(reason: unknown): boolean {
   return typeof reason === 'string' && GATE_REASON_STARTS.some((start) => reason.startsWith(start));
@@ -166,67 +168,115 @@ export function lookedUp(messages: readonly ModelMessage[], kind: DeletionKind, 
 }
 
 /*
- * Two rows the card could not tell apart. A card names a person (and, for an application, the job); when two rows
- * share that, a wrong id cannot be seen on the card, and approving it would delete the wrong one for good. So the
- * workspace's rows are read on the server when a deletion is asked for, and a shared name is refused before any
- * card. The read is the session's own (the one the lookups use), never what the model looked up or passed in.
+ * Two rows with one name. A card names a person (and, for an application, the job); when another row shares that,
+ * the card alone could not show a wrong id. So when a deletion is asked for, the row and its namesakes are read on
+ * the server by the row's id (never from what the model looked up or passed in), and the card is given one more
+ * line that says which of them this is. Only when that line would be the same for two of them is the deletion
+ * refused. The line can hold an email: it travels on the approval request, which goes to the browser and is left
+ * out of what any model is sent, and it is never logged or put in a tool's result.
  */
-export const sameNameCandidate = (name: string) =>
-  `More than one candidate is called ${name}, so I cannot tell them apart here. Delete the right one from the Candidates screen.`;
-export const sameNameApplication = (name: string, job: string) =>
-  `More than one application is from someone called ${name} for ${job}, so I cannot tell them apart here. Delete the right one from the Applications screen.`;
-/** The read keeps the newest HIRE_READ_CAP rows: at the cap a namesake may be among those left out, so nothing can be said. */
-export const TOO_MANY_CANDIDATES =
-  'There are too many candidates here to be sure which one this is. Delete them from the Candidates screen.';
-export const TOO_MANY_APPLICATIONS =
-  'There are too many applications here to be sure which one this is. Delete it from the Applications screen.';
+export const sharedNameCandidate = (name: string, line: string) =>
+  `More than one candidate is called ${name}. This one: ${line}.`;
+export const sharedNameApplication = (name: string, job: string, line: string) =>
+  `More than one application is from someone called ${name} for ${job}. This one: ${line}.`;
+export const lookTheSameCandidates = (name: string) =>
+  `Two candidates called ${name} look the same from here, so I cannot tell them apart. Nothing was deleted.`;
+export const lookTheSameApplications = (name: string, job: string) =>
+  `Two applications from someone called ${name} for ${job} look the same from here, so I cannot tell them apart. Nothing was deleted.`;
 export const DELETION_CHECK_FAILED =
   'I could not check whether someone else has the same name just now, so no deletion was prepared. Try again in a moment.';
+/** A namesake turned up between the card and the user's yes, and the card they saw did not say which one it was. */
+export const NAMESAKE_APPEARED =
+  'Someone else with the same name appeared after this was shown for approval, so a last check stopped it. Nothing was deleted. ' +
+  'Prepare it again: the card will then say which one it is.';
 
-/** Two names are one when they differ only in letter case and in spacing. */
-const sameText = (value: string) => value.trim().replace(/\s+/g, ' ').toLowerCase();
-
-/** Why this candidate cannot be told apart from another, or null. A row that is not there is left to the database to report. */
-export function candidateNameProblem(rows: readonly { id: string; name: string }[], id: unknown): string | null {
-  if (rows.length >= HIRE_READ_CAP) return TOO_MANY_CANDIDATES;
-  const row = rows.find((r) => r.id === id);
-  if (!row) return null;
-  const name = sameText(row.name);
-  return rows.some((r) => r.id !== row.id && sameText(r.name) === name) ? sameNameCandidate(row.name.trim()) : null;
+/**
+ * What tells one row from its namesakes: the email when there is one, else the location and the headline that
+ * exist, and always the day it was added (for an application, made), in Kuala Lumpur.
+ */
+export function identifyingLine(row: Namesake): string {
+  const details = row.email?.trim() ? [row.email.trim()] : [row.location, row.headline].map((v) => v?.trim()).filter(Boolean);
+  const when = `${row.job === null ? 'added' : 'applied'} ${fullDate(row.added_at)}`;
+  return details.length > 0 ? `${details.join(' · ')} · ${when}` : when.charAt(0).toUpperCase() + when.slice(1);
 }
 
-/** The same for an application: another one from someone of the same name for the same job. */
-export function applicationNameProblem(
-  rows: readonly { id: string; candidate_name: string; job_title: string }[],
-  id: unknown,
-): string | null {
-  if (rows.length >= HIRE_READ_CAP) return TOO_MANY_APPLICATIONS;
-  const row = rows.find((r) => r.id === id);
-  if (!row) return null;
-  const [name, job] = [sameText(row.candidate_name), sameText(row.job_title)];
-  return rows.some((r) => r.id !== row.id && sameText(r.candidate_name) === name && sameText(r.job_title) === job)
-    ? sameNameApplication(row.candidate_name.trim(), row.job_title.trim())
-    : null;
+/** What the server found about a deletion's row, for whatever shows its card. */
+export type CardCheck =
+  | { ok: false; refusal: string }
+  /** `note` is the line the card must carry, or null when nobody shares the name. `namesakes` are the rows that do. */
+  | { ok: true; note: string | null; namesakes: Namesake[] };
+
+/** Decides from the row and its namesakes. A row that is not there is left to the database to report. */
+export function cardCheck(found: Namesakes): CardCheck {
+  const { target, others, cut } = found;
+  if (!target || (others.length === 0 && !cut)) return { ok: true, note: null, namesakes: [] };
+  const name = target.name.trim();
+  const line = identifyingLine(target);
+  // More namesakes than were read: one of the unread could look the same, so nothing can be promised.
+  const alike = cut || others.some((other) => sameText(identifyingLine(other)) === sameText(line));
+  if (alike) {
+    return { ok: false, refusal: target.job === null ? lookTheSameCandidates(name) : lookTheSameApplications(name, target.job.trim()) };
+  }
+  return {
+    ok: true,
+    note: target.job === null ? sharedNameCandidate(name, line) : sharedNameApplication(name, target.job.trim(), line),
+    namesakes: others,
+  };
 }
 
-/** Asks the server whether a deletion's row can be told apart: the refusal, or null. Never throws. */
-export type DeletionCheck = (tool: string, id: unknown) => Promise<string | null>;
+/** Asks the server about a deletion's row. Never throws. */
+export type DeletionCheck = (tool: string, id: unknown) => Promise<CardCheck>;
 
-export function deletionCheckFor(data: Pick<HireData, 'listCandidates' | 'listApplications'>): DeletionCheck {
+export function deletionCheckFor(data: Pick<HireData, 'listCandidates' | 'listApplications' | 'namesakes'>): DeletionCheck {
   return async (tool, id) => {
+    const kind = kindOfDeletion(tool);
     try {
-      return kindOfDeletion(tool) === 'application'
-        ? applicationNameProblem(await data.listApplications(), id)
-        : candidateNameProblem(await data.listCandidates(), id);
+      // A provider over a database reads by id and by name. One that holds every row (the sample data) is asked for its lists.
+      const found = data.namesakes
+        ? await data.namesakes(kind, id)
+        : namesakesFromLists(kind, id, await data.listCandidates(), await data.listApplications());
+      return cardCheck(found);
     } catch {
       // Nothing of the error is logged: its words can hold a name.
       console.error('[lekir] the same-name check before a deletion could not read the rows');
-      return DELETION_CHECK_FAILED;
+      return { ok: false, refusal: DELETION_CHECK_FAILED };
     }
   };
 }
 
-type Decision = 'user-approval' | { type: 'denied'; reason: string };
+/**
+ * The approval request already made for this call in this turn, if any: the SDK is then asking a second time,
+ * because the user approved. `note` is the line that card carried.
+ */
+export function cardShown(messages: readonly ModelMessage[], toolCallId: string): { note: string | null } | null {
+  const turn = thisTurn(messages);
+  // A call that already has its result is over: a new call under the same id is a new call, with no card yet.
+  const answered = turn.some(
+    (message) => message.role === 'tool' && partsOf(message).some((part) => part.type === 'tool-result' && part.toolCallId === toolCallId),
+  );
+  if (answered) return null;
+  for (const message of turn) {
+    if (message.role !== 'assistant') continue;
+    for (const part of partsOf(message) as (Part & { reason?: unknown; isAutomatic?: unknown })[]) {
+      if (part.type === 'tool-approval-request' && part.toolCallId === toolCallId && part.isAutomatic !== true) {
+        return { note: typeof part.reason === 'string' && part.reason ? part.reason : null };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * The gate's answer once nothing else refused the call: a card, with the identifying line when the name is shared.
+ * When the user has already approved a card that had no such line and a namesake has turned up since, it is stopped.
+ */
+export function cardDecision(check: CardCheck, shown: { note: string | null } | null): Decision {
+  if (!check.ok) return { type: 'denied', reason: check.refusal };
+  if (shown && check.note && !shown.note) return { type: 'denied', reason: NAMESAKE_APPEARED };
+  return check.note ? { type: 'user-approval', reason: check.note } : 'user-approval';
+}
+
+export type Decision = 'user-approval' | { type: 'user-approval'; reason: string } | { type: 'denied'; reason: string };
 /** The approval function both delete tools share (the SDK's per-tool approval function). */
 export type DeletionGate = (
   input: unknown,
@@ -247,7 +297,7 @@ export type DeletionGate = (
  */
 export function guardDeletions(
   approval: Record<string, 'user-approval' | DeletionGate> | undefined,
-  /** The server read that says whether the row can be told apart from another. Asked last, and only for a call nothing else refused. */
+  /** The server read that says whether another row shares the name. Asked last, and only for a call nothing else refused. */
   check?: DeletionCheck,
 ): Record<string, 'user-approval' | DeletionGate> | undefined {
   if (!approval) return undefined;
@@ -264,10 +314,10 @@ export function guardDeletions(
       inTurn === ONE_DELETION ? inTurn : ((lookedUp(messages, kind, id) ? null : notLookedUp(kind, id)) ?? inTurn);
     if (problem) return { type: 'denied', reason: problem };
     // The SDK waits for each call's answer before asking about the next, so the count is safe across this read.
-    const unclear = check ? await check(tool, id) : null;
-    if (unclear) return { type: 'denied', reason: unclear };
+    const decision = check ? cardDecision(await check(tool, id), cardShown(messages, toolCallId)) : 'user-approval';
+    if (typeof decision === 'object' && decision.type === 'denied') return decision;
     asked += 1;
-    return 'user-approval';
+    return decision;
   };
   return { ...approval, ...Object.fromEntries(names.map((name) => [name, gateFor(name)])) };
 }
