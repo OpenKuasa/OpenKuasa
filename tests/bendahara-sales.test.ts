@@ -166,10 +166,11 @@ testWithSupabase('an invoice needs a line before it can be saved, and an amount 
 testWithSupabase('posting gives the invoice the next number and it shows as sent', async () => {
   const first = await postedInvoice(a);
   const second = await postedInvoice(a);
-  expect(first.invoiceNo).toBe('INV-0001');
-  expect(second.invoiceNo).toBe('INV-0002');
+  expect(first.invoiceNo).toMatch(/^INV-\d+$/);
+  expect(second.invoiceNo).toMatch(/^INV-\d+$/);
+  expect(Number(second.invoiceNo.slice(4))).toBe(Number(first.invoiceNo.slice(4)) + 1);
   expect(await totals(a.c, first.id)).toEqual({
-    invoice_no: 'INV-0001', subtotal: 125, sst: 7.5, total: 132.5, paid: 0, balance: 132.5, display_status: 'sent',
+    invoice_no: first.invoiceNo, subtotal: 125, sst: 7.5, total: 132.5, paid: 0, balance: 132.5, display_status: 'sent',
   });
 });
 
@@ -393,7 +394,8 @@ testWithSupabase('an invoice takes only money in and a bill only money out; an a
     .insert({ org_id: a.orgId, transaction_id: out, bill_id: billId, invoice_id: invoice.id, amount: 10 });
   expect(both.error?.code).toBe('23514');
   const neither = await a.c.from('finance_allocations').insert({ org_id: a.orgId, transaction_id: out, amount: 10 });
-  expect(neither.error).not.toBeNull();
+  // With no invoice named it is read as a bill payment, and no bill is found.
+  expect(neither.error?.code).toBe('FIN04');
   const tooMuch = await a.c
     .from('finance_allocations')
     .insert({ org_id: a.orgId, transaction_id: out, bill_id: billId, amount: 20.01 });
@@ -416,6 +418,60 @@ testWithSupabase('an invoice takes only money in and a bill only money out; an a
     const removed = await a.c.from('finance_transactions').delete().eq('id', id);
     expect(removed.error, removed.error?.message).toBeNull();
   }
+});
+
+testWithSupabase('a draft payment that is split cannot be made smaller than its split or change direction', async () => {
+  const invoice = await postedInvoice(a);
+  const billId = await postedBill(a);
+
+  // Money in, split in full across a posted invoice, then shrunk or turned round before posting.
+  const moneyIn = await strayTransaction(a, 'in', 100);
+  const onInvoice = await a.c
+    .from('finance_allocations')
+    .insert({ org_id: a.orgId, transaction_id: moneyIn, invoice_id: invoice.id, amount: 100 });
+  expect(onInvoice.error, onInvoice.error?.message).toBeNull();
+  const shrunk = await a.c.from('finance_transactions').update({ amount: 1 }).eq('id', moneyIn);
+  expect(shrunk.error?.code).toBe('FIN03');
+  const shrunkAndPosted = await a.c
+    .from('finance_transactions')
+    .update({ amount: 1, status: 'posted', number: 'RC-SNEAKY' })
+    .eq('id', moneyIn);
+  expect(shrunkAndPosted.error?.code).toBe('FIN03');
+  const turned = await a.c.from('finance_transactions').update({ direction: 'out' }).eq('id', moneyIn);
+  expect(turned.error?.code).toBe('FIN04');
+  const turnedAndPosted = await a.c
+    .from('finance_transactions')
+    .update({ direction: 'out', status: 'posted', number: 'RC-SNEAKY' })
+    .eq('id', moneyIn);
+  expect(turnedAndPosted.error?.code).toBe('FIN04');
+  // Making it larger is fine, and so is bringing it back down to exactly its split.
+  const larger = await a.c.from('finance_transactions').update({ amount: 120 }).eq('id', moneyIn);
+  expect(larger.error, larger.error?.message).toBeNull();
+  const exact = await a.c.from('finance_transactions').update({ amount: 100 }).eq('id', moneyIn);
+  expect(exact.error, exact.error?.message).toBeNull();
+  const { data: txn } = await a.c.from('finance_transactions').select('amount, direction, status').eq('id', moneyIn).single();
+  expect(txn).toEqual({ amount: 100, direction: 'in', status: 'draft' });
+  // A draft is not money received: the invoice owes what it owed.
+  expect(await totals(a.c, invoice.id)).toMatchObject({ paid: 0, balance: 132.5, display_status: 'sent' });
+
+  // The same for money out against a bill.
+  const out = await strayTransaction(a, 'out', 100);
+  const onBill = await a.c
+    .from('finance_allocations')
+    .insert({ org_id: a.orgId, transaction_id: out, bill_id: billId, amount: 100 });
+  expect(onBill.error, onBill.error?.message).toBeNull();
+  const shrunkOut = await a.c.from('finance_transactions').update({ amount: 99.99 }).eq('id', out);
+  expect(shrunkOut.error?.code).toBe('FIN03');
+  const turnedOut = await a.c.from('finance_transactions').update({ direction: 'in' }).eq('id', out);
+  expect(turnedOut.error?.code).toBe('FIN04');
+
+  // Deleting a draft takes its split with it.
+  for (const id of [moneyIn, out]) {
+    const removed = await a.c.from('finance_transactions').delete().eq('id', id);
+    expect(removed.error, removed.error?.message).toBeNull();
+  }
+  const { data: left } = await a.c.from('finance_allocations').select('id').in('transaction_id', [moneyIn, out]);
+  expect(left).toEqual([]);
 });
 
 testWithSupabase('a bill is still paid, held, over-paid and voided as before, beside an invoice that is not touched', async () => {
@@ -469,7 +525,8 @@ testWithSupabase('another workspace cannot see or touch invoices, their lines or
   });
   expect(save.error?.code).toBe('42501');
   const post = await b.c.rpc('finance_post_invoice', { target_org: a.orgId, target_invoice: invoice.id });
-  expect(post.error).not.toBeNull();
+  // The invoice is not there for them to lock.
+  expect(post.error?.code).toBe('FIN11');
   // B's own workspace, A's invoice: the invoice is not found there.
   const theirs = await receive(b, [{ invoice_id: invoice.id, amount: 10 }]);
   expect(theirs.error?.code).toBe('FIN06');
@@ -541,7 +598,8 @@ testWithSupabase('a demo viewer reads the seeded invoices and payments in', asyn
   expect(open, 'an invoice that is still owed').toBeTruthy();
   expect(Number(open.balance)).toBeGreaterThan(0);
   const post = await c.rpc('finance_post_invoice', { target_org: demoId, target_invoice: open.id });
-  expect(post.error).not.toBeNull();
+  // The function locks the invoice for update, which a viewer may not do, so to them it is not there.
+  expect(post.error?.code).toBe('FIN11');
   const pay = await c.rpc('finance_record_payment_in', {
     target_org: demoId,
     payment: { account_id: crypto.randomUUID(), txn_date: daysFromToday(0), method: 'fpx' },

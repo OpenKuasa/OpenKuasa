@@ -139,6 +139,11 @@ begin
     format('update public.finance_invoices set status = %L where id = %L', 'void', inv));
   fails := fails || public.bendahara_check_try('a draft carries an e-Invois status', '23514',
     format('update public.finance_invoices set einvoice_status = %L where id = %L', 'validated', inv));
+  fails := fails || public.bendahara_check_try('a draft is given a number', '23514',
+    format('update public.finance_invoices set invoice_no = %L where id = %L', 'INV-SNEAKY', inv));
+  fails := fails || public.bendahara_check_try('an invoice is created as a draft with a number', '23514',
+    format('insert into public.finance_invoices (org_id, customer_id, invoice_no, due_date) values (%L, %L, %L, current_date)',
+      org, cust, 'INV-SNEAKY'));
   fails := fails || public.bendahara_check_try('a payment goes against a draft invoice', 'FIN04',
     format('select public.finance_record_payment_in(%L, %L, %L)', org,
       jsonb_build_object('account_id', bank, 'method', 'fpx'), jsonb_build_array(jsonb_build_object('invoice_id', inv, 'amount', 10))));
@@ -285,14 +290,56 @@ begin
     format('insert into public.finance_allocations (org_id, transaction_id, amount) values (%L, %L, 10)', org, stray));
   fails := fails || public.bendahara_check_try('the split is more than the payment', 'FIN03',
     format('insert into public.finance_allocations (org_id, transaction_id, bill_id, amount) values (%L, %L, %L, 20.01)', org, stray, bill));
+  -- A draft payment out that is split across a bill cannot be changed
+  -- underneath its split. Before it is split it may be changed freely.
+  fails := fails || public.bendahara_check_try('an unsplit draft payment out is made smaller', 'ok',
+    format('update public.finance_transactions set amount = 15, updated_at = now() where id = %L', stray));
+  fails := fails || public.bendahara_check_try('an unsplit draft payment out is made larger again', 'ok',
+    format('update public.finance_transactions set amount = 20, updated_at = now() where id = %L', stray));
+  fails := fails || public.bendahara_check_try('a draft payment out is split across a bill', 'ok',
+    format('insert into public.finance_allocations (org_id, transaction_id, bill_id, amount) values (%L, %L, %L, 10)', org, stray, bill));
+  fails := fails || public.bendahara_check_try('a split draft payment out is made smaller than its split', 'FIN03',
+    format('update public.finance_transactions set amount = 9.99 where id = %L', stray));
+  fails := fails || public.bendahara_check_try('a split draft payment out is shrunk and posted at once', 'FIN03',
+    format('update public.finance_transactions set amount = 1, status = %L, number = %L where id = %L', 'posted', 'PV-SNEAKY', stray));
+  fails := fails || public.bendahara_check_try('a split draft payment out is turned into money in', 'FIN04',
+    format('update public.finance_transactions set direction = %L where id = %L', 'in', stray));
+  fails := fails || public.bendahara_check_try('a split draft payment out is brought down to its split', 'ok',
+    format('update public.finance_transactions set amount = 10, updated_at = now() where id = %L', stray));
+  select amount || ' ' || direction || ' ' || status into t from public.finance_transactions where id = stray;
+  if t is distinct from '10.00 out draft' then fails := fails || format('a split draft payment out reads %s', t); end if;
+  -- Deleting the draft takes its split with it, so the bill flow below starts clean.
   delete from public.finance_transactions where id = stray;
+  select count(*) into n from public.finance_allocations where org_id = org and bill_id = bill;
+  if n <> 0 then fails := fails || format('deleting a draft payment out left %s rows of its split', n); end if;
   insert into public.finance_transactions (org_id, direction, account_id, amount, method)
   values (org, 'in', bank, 20, 'cash') returning id into stray;
   fails := fails || public.bendahara_check_try('money in is put against a bill', 'FIN04',
     format('insert into public.finance_allocations (org_id, transaction_id, bill_id, amount) values (%L, %L, %L, 10)', org, stray, bill));
   fails := fails || public.bendahara_check_try('an unposted payment in is voided', 'FIN09',
     format('update public.finance_transactions set status = %L where id = %L', 'void', stray));
+  -- The same for money in: split it across a posted invoice, then try to
+  -- shrink it or turn it round before posting.
+  fails := fails || public.bendahara_check_try('a draft payment in is split across an invoice', 'ok',
+    format('insert into public.finance_allocations (org_id, transaction_id, invoice_id, amount) values (%L, %L, %L, 20)', org, stray, theirs));
+  fails := fails || public.bendahara_check_try('a split draft payment in is made smaller than its split', 'FIN03',
+    format('update public.finance_transactions set amount = 1 where id = %L', stray));
+  fails := fails || public.bendahara_check_try('a split draft payment in is shrunk and posted at once', 'FIN03',
+    format('update public.finance_transactions set amount = 1, status = %L, number = %L where id = %L', 'posted', 'RC-SNEAKY', stray));
+  fails := fails || public.bendahara_check_try('a split draft payment in is turned into money out', 'FIN04',
+    format('update public.finance_transactions set direction = %L where id = %L', 'out', stray));
+  fails := fails || public.bendahara_check_try('a split draft payment in is turned round and posted at once', 'FIN04',
+    format('update public.finance_transactions set direction = %L, status = %L, number = %L where id = %L', 'out', 'posted', 'RC-SNEAKY', stray));
+  fails := fails || public.bendahara_check_try('a split draft payment in is made larger', 'ok',
+    format('update public.finance_transactions set amount = 25, updated_at = now() where id = %L', stray));
+  select amount || ' ' || direction || ' ' || status into t from public.finance_transactions where id = stray;
+  if t is distinct from '25.00 in draft' then fails := fails || format('a split draft payment in reads %s', t); end if;
+  -- A draft payment is not money received: the invoice owes what it owed.
+  select display_status || ' ' || balance into t from public.finance_invoice_totals where id = theirs;
+  if t is distinct from 'sent 132.50' then fails := fails || format('an invoice with only a draft payment on it reads %s', t); end if;
   delete from public.finance_transactions where id = stray;
+  select count(*) into n from public.finance_allocations where org_id = org and invoice_id = theirs;
+  if n <> 0 then fails := fails || format('deleting a draft payment in left %s rows of its split', n); end if;
 
   -- ---- the bill flow, through the rewritten allocation guard ----------------
   pv1 := public.finance_record_payment_out(org,

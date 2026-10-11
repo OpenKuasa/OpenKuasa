@@ -5,7 +5,8 @@
 --   * Views: finance_invoice_totals (balance and display status) and
 --     finance_payments_in (one row per invoice a payment in pays).
 --   * Guards: a posted invoice is locked and can only be voided; a bill takes
---     only money out, an invoice only money in.
+--     only money out, an invoice only money in; a payment that is split
+--     cannot be made smaller than its split or change direction.
 --   * Functions that save, post and receive payment in one transaction.
 --
 -- The code deployed while this is applied only ever inserts allocations with
@@ -38,7 +39,10 @@ create table public.finance_invoices (
   unique (org_id, id),
   unique (org_id, invoice_no),
   constraint finance_invoices_dates_check check (due_date >= invoice_date),
-  constraint finance_invoices_number_check check (status = 'draft' or invoice_no is not null),
+  -- A draft has no number; a posted or void invoice has one, and a posted
+  -- invoice says when it was posted.
+  constraint finance_invoices_number_check
+    check ((status = 'draft') = (invoice_no is null) and (status <> 'posted' or posted_at is not null)),
   -- A draft has not gone anywhere, so it has no e-Invois yet.
   constraint finance_invoices_draft_einvoice_check
     check (status <> 'draft' or (einvoice_status = 'none' and einvoice_uuid is null)),
@@ -431,10 +435,69 @@ begin
   return new;
 end $$;
 
--- finance_transaction_guard is not touched: it fires on update and delete
--- only and never reads direction, so money in is drafted, posted and voided
--- under the rules money out already has.
+-- Replaces the guard on payments. Everything it refused before it refuses the
+-- same way, in the same order, and it still never asks which way the money
+-- goes: money in is drafted, posted and voided under the rules money out
+-- already has. One rule is new, for bills as much as for invoices. A payment
+-- that is not yet posted could be split across documents and then changed
+-- underneath its split: made smaller than the split, or turned from money in
+-- into money out, and then posted. Once it has a split it can no longer change
+-- direction (FIN04, the wrong kind of money for the document) or be less than
+-- its split (FIN03, the split is more than the payment). The functions never
+-- do either: they insert the full amount, split it, and then change only
+-- status, number, txn_date and updated_at.
+create or replace function private.finance_transaction_guard()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  allocated numeric;
+begin
+  if tg_op = 'DELETE' then
+    if old.status in ('posted','void') and exists (select 1 from public.orgs where id = old.org_id) then
+      raise exception 'a posted payment cannot be deleted' using errcode = 'FIN09';
+    end if;
+    return old;
+  end if;
 
+  -- A deleted user is cleared from these two columns by their foreign keys.
+  if new.status = old.status
+     and (to_jsonb(new) - 'created_by' - 'approved_by') = (to_jsonb(old) - 'created_by' - 'approved_by')
+     and (new.created_by is null or new.created_by = old.created_by)
+     and (new.approved_by is null or new.approved_by = old.approved_by) then
+    return new;
+  end if;
+
+  if old.status = 'posted' and new.status = 'void'
+     and (to_jsonb(new) - 'status' - 'updated_at') is not distinct from (to_jsonb(old) - 'status' - 'updated_at') then
+    return new;
+  end if;
+  if old.status in ('posted','void') then
+    raise exception 'a posted payment cannot be changed' using errcode = 'FIN09';
+  end if;
+  if new.status = 'void' then
+    raise exception 'only a paid payment is voided; delete this one' using errcode = 'FIN09';
+  end if;
+
+  -- Not posted yet, so it may still be edited, but not out from under its split.
+  if new.direction is distinct from old.direction or new.amount < old.amount then
+    select coalesce(sum(a.amount), 0) into allocated
+    from public.finance_allocations a
+    where a.org_id = old.org_id and a.transaction_id = old.id;
+    if allocated > 0 then
+      if new.direction is distinct from old.direction then
+        raise exception 'a payment that is split cannot change direction' using errcode = 'FIN04';
+      end if;
+      if new.amount < allocated then
+        raise exception 'the split is more than the payment' using errcode = 'FIN03';
+      end if;
+    end if;
+  end if;
+  return new;
+end $$;
+
+revoke all on function private.finance_transaction_guard() from public, anon, authenticated;
 revoke all on function private.finance_invoice_guard() from public, anon, authenticated;
 revoke all on function private.finance_invoice_line_guard() from public, anon, authenticated;
 revoke all on function private.finance_allocation_guard() from public, anon, authenticated;
@@ -554,7 +617,9 @@ begin
     raise exception 'no invoice was chosen' using errcode = 'FIN06';
   end if;
 
-  select coalesce(sum((a->>'amount')::numeric), 0) into total from jsonb_array_elements(allocations) as a;
+  -- Each amount is rounded to the sen before it is added, as each allocation
+  -- is when it is stored, so the payment is exactly the sum of its split.
+  select coalesce(sum(round((a->>'amount')::numeric, 2)), 0) into total from jsonb_array_elements(allocations) as a;
   select array_agg(distinct i.customer_id) into customers
   from jsonb_array_elements(allocations) as a
   join public.finance_invoices i on i.org_id = target_org and i.id = (a->>'invoice_id')::uuid;
