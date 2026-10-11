@@ -187,7 +187,19 @@ pnpm dev      # start the dev server
 pnpm build    # production build
 pnpm start    # run the production build
 pnpm lint     # eslint
+pnpm test     # vitest
 ```
+
+### Testing against a live Supabase project
+
+Some tests (`tests/*.rls.test.ts` and a few others) run against the Supabase
+project in your `.env.local` and create anonymous users and workspaces. They now
+remove what they create when each file finishes (workspaces first, then users),
+using `SUPABASE_SERVICE_ROLE_KEY` from `.env.local`. Without that key the tests
+still run, but cleanup is skipped and a loud line says rows were left behind.
+The service role also needs the grants in
+`supabase/migrations/*_service_role_deletes_orgs.sql` applied. Never commit the
+key.
 
 ## License
 
