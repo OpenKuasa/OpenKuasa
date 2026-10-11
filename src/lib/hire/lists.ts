@@ -227,6 +227,8 @@ export function safeLink(url: string | null): SafeLink | null {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    // "https://good.com@evil.com" goes to evil.com with good.com as a login name: never shown as a link.
+    if (parsed.username || parsed.password) return null;
     return { href: parsed.href, host: parsed.host };
   } catch {
     return null;

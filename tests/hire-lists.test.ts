@@ -189,9 +189,18 @@ describe('safeLink', () => {
     expect(safeLink('http://example.com')).toEqual({ href: 'http://example.com/', host: 'example.com' });
   });
   it('gives nothing for anything else, so it can never become a link', () => {
-    for (const bad of [null, '', 'javascript:alert(1)', 'data:text/html,x', 'ftp://x.y', 'not a url', '//example.com', ' https://example.com']) {
+    for (const bad of [null, '', 'javascript:alert(1)', 'JaVaScRiPt:alert(1)', 'vbscript:x', 'data:text/html,x', 'ftp://x.y', 'not a url', '//example.com', ' https://example.com']) {
       expect(safeLink(bad as string | null), String(bad)).toBeNull();
     }
+  });
+  it('refuses a link that carries a username or password, where the name shown would not be the whole story', () => {
+    // What looks like good.com is really a login name for evil.com.
+    expect(safeLink('https://good.com@evil.com/cv')).toBeNull();
+    expect(safeLink('https://user:secret@example.com/cv')).toBeNull();
+  });
+  it('shows the host a loosely written link really goes to', () => {
+    expect(safeLink('http:example.com')).toEqual({ href: 'http://example.com/', host: 'example.com' });
+    expect(safeLink('https:/example.com/cv')).toEqual({ href: 'https://example.com/cv', host: 'example.com' });
   });
 });
 

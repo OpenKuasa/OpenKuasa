@@ -65,7 +65,10 @@ const jobTitle = z
 const includeContact = z
   .boolean()
   .optional()
-  .describe('Set true only when the user asked for contact details (email or phone). Leave it out otherwise.');
+  .describe(
+    'Set true only when the user asked for contact details (email or phone) or, for applications, for what an applicant ' +
+      'wrote on the form (cover letter, CV link, portfolio link, expected salary). Leave it out otherwise.',
+  );
 /** A cover letter cut to 600 characters, or null when there is none. */
 function letterExcerpt(text: string | null): string | null {
   return text && text.length > 600 ? `${text.slice(0, 600)}…` : text;

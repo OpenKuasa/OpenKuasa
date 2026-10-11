@@ -36,7 +36,8 @@ function DetailLink({ label, link }: { label: string; link: SafeLink }) {
           href={link.href}
           target="_blank"
           rel="noopener noreferrer"
-          className={cn('inline-flex items-center rounded-md text-primary underline underline-offset-2', TARGET, FOCUS)}
+          // A long host wraps inside the panel instead of widening the table.
+          className={cn('inline-flex max-w-full items-center rounded-md break-all text-primary underline underline-offset-2', TARGET, FOCUS)}
         >
           {link.host}
         </a>
