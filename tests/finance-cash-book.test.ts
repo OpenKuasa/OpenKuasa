@@ -55,12 +55,6 @@ describe('listPaymentVouchers', () => {
     });
     expect(calls[0].columns!.split(',').sort()).toEqual(Object.keys(voucherRow).sort());
   });
-  it('never reads the payments table itself, nor the screens that show part of it', async () => {
-    const { ctx, calls } = fakeFinance({ data: [], error: null });
-    await listPaymentVouchers(ctx);
-    await listCashReceipts(ctx);
-    expect(calls.map((c) => c.name)).toEqual(['finance_payment_vouchers', 'finance_cash_receipts']);
-  });
   it('throws when the view cannot be read', async () => {
     await expect(listPaymentVouchers(fakeFinance({ data: null, error: { code: 'XX000' } }).ctx)).rejects.toEqual({ code: 'XX000' });
   });

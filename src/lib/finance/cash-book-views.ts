@@ -44,25 +44,44 @@ const SLICE_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-5)', 'var
 export const DONUT_SLICES = 4;
 
 /**
- * Amounts per label as donut slices, largest first. Past `DONUT_SLICES` the
- * rest are one slice, so a workspace with twenty categories still gets a
- * chart that can be read. Labels with nothing against them are left out.
+ * Amounts per account or category as donut slices, largest first. They are
+ * grouped by what the thing is (its id), not by its name, so two categories
+ * called the same stay two slices. Past `DONUT_SLICES` the rest are one
+ * slice, so a workspace with twenty categories still gets a chart that can
+ * be read. Entries with nothing against them are left out.
  */
-function slices(totals: Map<string, number>, restLabel: string): Slice[] {
+function slices(totals: Map<string, { label: string; value: number }>, restLabel: string): Slice[] {
   const ranked = [...totals.entries()]
-    .map(([label, value]) => ({ label, value: Math.round(value * 100) / 100 }))
+    .map(([key, entry]) => ({ key, label: entry.label, value: Math.round(entry.value * 100) / 100 }))
     .filter((entry) => entry.value > 0)
-    .sort((x, y) => y.value - x.value || x.label.localeCompare(y.label));
+    .sort((x, y) => y.value - x.value || x.label.localeCompare(y.label) || x.key.localeCompare(y.key));
   const named = ranked.slice(0, DONUT_SLICES);
   const rest = ranked.slice(DONUT_SLICES);
   const shown = rest.length ? [...named, { label: restLabel, value: sum(rest, (entry) => entry.value) }] : named;
   return shown.map((entry, i) => ({ key: `slice-${i}`, label: entry.label, value: entry.value, color: SLICE_COLORS[i] }));
 }
 
-function totalsBy<T>(rows: T[], label: (row: T) => string, amount: (row: T) => number): Map<string, number> {
-  const totals = new Map<string, number>();
-  for (const row of rows) totals.set(label(row), (totals.get(label(row)) ?? 0) + amount(row));
+/** Amounts added up per key (an id), each key carrying the label it is shown under. */
+function totalsBy<T>(
+  rows: T[],
+  key: (row: T) => string,
+  label: (row: T) => string,
+  amount: (row: T) => number,
+): Map<string, { label: string; value: number }> {
+  const totals = new Map<string, { label: string; value: number }>();
+  for (const row of rows) {
+    const k = key(row);
+    const entry = totals.get(k) ?? { label: label(row), value: 0 };
+    entry.value += amount(row);
+    totals.set(k, entry);
+  }
   return totals;
+}
+
+/** What a voucher is grouped by: a supplier payment or a refund by its kind, the rest by their category's id (a missing category by its kind). */
+function voucherCategoryKey(row: PaymentVoucherRow): string {
+  if (row.kind === 'bill' || row.kind === 'refund') return `kind:${row.kind}`;
+  return row.category_id && row.category_name ? `category:${row.category_id}` : `none:${row.kind}`;
 }
 
 /* ---- Cash Receipts -------------------------------------------------- */
@@ -135,7 +154,7 @@ export function cashReceiptsView(rows: CashReceiptRow[], today: string, period: 
     ],
     trend,
     hasTrend,
-    byAccount: slices(totalsBy(inRange, (r) => r.account_name, (r) => r.amount), 'Other accounts'),
+    byAccount: slices(totalsBy(inRange, (r) => r.account_id, (r) => r.account_name, (r) => r.amount), 'Other accounts'),
     hasReceived: inRange.length > 0,
     received: rmShort(total),
   };
@@ -265,7 +284,7 @@ export function paymentVouchersView(rows: PaymentVoucherRow[], today: string, pe
     ],
     trend,
     hasTrend,
-    byCategory: slices(totalsBy(inRange, voucherCategory, (v) => v.amount), 'Other categories'),
+    byCategory: slices(totalsBy(inRange, voucherCategoryKey, voucherCategory, (v) => v.amount), 'Other categories'),
     hasPaid: inRange.length > 0,
     paid: rmShort(total),
   };
@@ -354,8 +373,8 @@ export function expensesView(rows: ExpenseRow[], today: string): ExpensesViewDat
   const ytd = approved.filter((e) => yearOf(e.expense_date) === yearOf(today));
   const mtd = approved.filter((e) => monthOf(e.expense_date) === monthOf(today));
   const ytdTotal = sum(ytd, (e) => e.amount);
-  const perCategory = totalsBy(ytd, (e) => e.category_name, (e) => e.amount);
-  const top = [...perCategory.entries()].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]))[0];
+  const perCategory = totalsBy(ytd, (e) => e.category_id, (e) => e.category_name, (e) => e.amount);
+  const top = [...perCategory.values()].sort((x, y) => y.value - x.value || x.label.localeCompare(y.label))[0];
 
   let hasTrend = false;
   const trend = lastMonths(today).map(({ key, label }) => {
@@ -374,8 +393,8 @@ export function expensesView(rows: ExpenseRow[], today: string): ExpensesViewDat
       { label: 'This month', value: rmShort(sum(mtd, (e) => e.amount)), delta: count(mtd.length, 'approved expense'), deltaTone: 'flat' },
       {
         label: 'Top category',
-        value: top ? top[0] : '—',
-        delta: top && ytdTotal ? `${Math.round((top[1] / ytdTotal) * 100)}% of spend this year` : 'this year',
+        value: top ? top.label : '—',
+        delta: top && ytdTotal ? `${Math.round((top.value / ytdTotal) * 100)}% of spend this year` : 'this year',
         deltaTone: 'flat',
       },
       {

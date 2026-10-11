@@ -128,6 +128,64 @@ describe('the period selector', () => {
   });
 });
 
+describe('the edges of a period', () => {
+  const received = (date: string, today: string, period: 'month' | 'quarter' | 'year') =>
+    stat(cashReceiptsView([cash({ amount: 250, txn_date: date })], today, period).stats, 'Received').value;
+
+  it('puts the last day of a month in that month and the first of the next out of it', () => {
+    expect(received('2026-09-30', '2026-09-30', 'month')).toBe('RM 250');
+    expect(received('2026-10-01', '2026-09-30', 'month')).toBe('RM 0');
+    expect(received('2026-09-30', '2026-10-01', 'month')).toBe('RM 0');
+    expect(received('2026-10-01', '2026-10-01', 'month')).toBe('RM 250');
+  });
+  it('puts 30 September in the third quarter and 1 October in the fourth', () => {
+    expect(received('2026-09-30', '2026-09-30', 'quarter')).toBe('RM 250');
+    expect(received('2026-10-01', '2026-09-30', 'quarter')).toBe('RM 0');
+    expect(received('2026-09-30', '2026-10-01', 'quarter')).toBe('RM 0');
+    expect(received('2026-10-01', '2026-10-01', 'quarter')).toBe('RM 250');
+  });
+  it('keeps the previous quarter, dated in the previous year, out of January’s quarter', () => {
+    expect(received('2025-12-31', '2026-01-15', 'quarter')).toBe('RM 0');
+    expect(received('2025-10-01', '2026-01-15', 'quarter')).toBe('RM 0');
+    expect(received('2026-03-31', '2026-01-15', 'quarter')).toBe('RM 250');
+    expect(received('2026-04-01', '2026-01-15', 'quarter')).toBe('RM 0');
+    expect(received('2025-12-31', '2026-01-15', 'year')).toBe('RM 0');
+    expect(received('2026-01-01', '2026-01-15', 'year')).toBe('RM 250');
+  });
+  it('counts a leap day in February and in the first quarter of that year', () => {
+    expect(received('2028-02-29', '2028-02-15', 'month')).toBe('RM 250');
+    expect(received('2028-02-29', '2028-03-01', 'month')).toBe('RM 0');
+    expect(received('2028-02-29', '2028-01-10', 'quarter')).toBe('RM 250');
+    expect(received('2028-02-29', '2028-04-01', 'quarter')).toBe('RM 0');
+  });
+});
+
+describe('donut slices are told apart by what they are, not by their name', () => {
+  it('keeps two categories of one name as two slices on Payment Vouchers', () => {
+    const rows = [
+      voucher({ amount: 300, category_id: 'rent-a', category_name: 'Rent' }),
+      voucher({ amount: 200, category_id: 'rent-b', category_name: 'Rent' }),
+      voucher({ amount: 100, category_id: 'rent-a', category_name: 'Rent' }),
+    ];
+    const view = paymentVouchersView(rows, today, 'month');
+    expect(view.byCategory.map((s) => [s.label, s.value])).toEqual([['Rent', 400], ['Rent', 200]]);
+    expect(new Set(view.byCategory.map((s) => s.key)).size).toBe(2);
+  });
+  it('keeps two categories of one name as two slices on Expenses', () => {
+    const rows = [
+      expense({ category_id: 'travel-a', category_name: 'Travel', amount: 500 }),
+      expense({ category_id: 'travel-b', category_name: 'Travel', amount: 300 }),
+    ];
+    const view = expensesView(rows, today);
+    expect(view.byCategory.map((s) => [s.label, s.value])).toEqual([['Travel', 500], ['Travel', 300]]);
+    expect(stat(view.stats, 'Top category')).toMatchObject({ value: 'Travel', delta: '63% of spend this year' });
+  });
+  it('keeps two accounts of one name as two slices on Cash Receipts', () => {
+    const rows = [receipt({ account_id: 'a1', account_name: 'Bank', amount: 700 }), receipt({ account_id: 'a2', account_name: 'Bank', amount: 100 })];
+    expect(cashReceiptsView(rows, today, 'month').byAccount.map((s) => [s.label, s.value])).toEqual([['Bank', 700], ['Bank', 100]]);
+  });
+});
+
 describe('cashReceiptsView', () => {
   it('counts only posted receipts dated in the period: not a draft, not a void one', () => {
     const rows = [
