@@ -12,7 +12,8 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import type { ApplicationFormValues } from '@/lib/hire/application-form';
 import {
-  APPLY_HONEYPOT, APPLY_LIMITS, APPLY_MESSAGES, applyProblems, fieldProblem, isRequired, isStaleForm, shownFields,
+  APPLY_HONEYPOT, APPLY_LIMITS, APPLY_MESSAGES, applyProblems, countCharacters, fieldProblem, isRequired, isStaleForm,
+  shownFields,
   type ApplyErrors, type ApplyField, type ApplyValues,
 } from '@/lib/hire/application-fields';
 import type { ApplyState } from './actions';
@@ -58,10 +59,12 @@ const errorId = (field: ApplyField) => `${fieldId(field)}-error`;
 const CONTROL = 'h-11 text-base md:text-base motion-reduce:transition-none';
 
 const withCommas = (value: number) => value.toLocaleString('en-US');
-/** Counted as the check counts a cover letter: trimmed, one per character. */
-const letterLength = (letter: string) => [...letter.trim()].length;
+/** Counted as the check counts a cover letter: trimmed, and by the check's own counter. */
+const letterLength = (letter: string) => countCharacters(letter.trim());
 /** A text area's line breaks can arrive as two characters; the server counts them as one. */
 const oneLineBreak = (value: string) => value.replace(/\r\n?/g, '\n');
+/** How long after the finger lifts a press on the send button still counts: until the tap's own events have run. */
+const PRESS_LINGER_MS = 400;
 
 /* ---- layer 2: the script --------------------------------------------- */
 
@@ -156,6 +159,9 @@ function useLiveChecks(
   const sending = useRef(false);
   /** The field to move to once the page has been redrawn with its problems. */
   const wanted = useRef<ApplyField | null>(null);
+  /** True while the send button is being pressed, which a phone does not always show by moving focus to it. */
+  const pressing = useRef(false);
+  const letGo = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // The server answered: sending is over, and its first problem takes focus.
   useEffect(() => {
@@ -191,7 +197,31 @@ function useLiveChecks(
     // Going to the button: it checks every field itself, and a message drawn now could move it from under the tap.
     const next = event.relatedTarget;
     if (next instanceof HTMLButtonElement && next.type === 'submit') return;
+    // The same, where the tapped button took no focus and so cannot be seen above. One check is skipped, no more.
+    if (pressing.current) {
+      pressing.current = false;
+      return;
+    }
     check(field, event.currentTarget);
+  };
+
+  const released = () => {
+    clearTimeout(letGo.current);
+    pressing.current = false;
+  };
+  /** For the send button: lets `onBlur` know a press on it is under way. */
+  const press = {
+    onPointerDown: () => {
+      clearTimeout(letGo.current);
+      pressing.current = true;
+    },
+    // A touch screen moves focus only after the finger has lifted, so the press outlives the lift by a moment.
+    onPointerUp: () => {
+      clearTimeout(letGo.current);
+      letGo.current = setTimeout(released, PRESS_LINGER_MS);
+    },
+    onPointerCancel: released,
+    onClick: released,
   };
 
   /** Ticking the box answers its message at once: there is nothing more to leave it for. */
@@ -234,7 +264,7 @@ function useLiveChecks(
     summarised: live.summarised,
     /** The server's message about the whole application, until the visitor tries again. */
     notice: live.retried ? undefined : state?.error,
-    onBlur, onConsentChange, onSubmit, goTo,
+    onBlur, onConsentChange, onSubmit, goTo, press,
   };
 }
 
@@ -314,7 +344,9 @@ export function ApplyForm({
   const state = sent.answer ?? posted;
   const pending = posting || sent.pending;
   const values = state?.values;
-  const { errors, summarised, notice, onBlur, onConsentChange, onSubmit, goTo } = useLiveChecks(state, form, sent.send);
+  const {
+    errors, summarised, notice, onBlur, onConsentChange, onSubmit, goTo, press,
+  } = useLiveChecks(state, form, sent.send);
   /** Null until the visitor types in the cover letter; until then the count is of what the server sent back. */
   const [letterCount, setLetterCount] = useState<number | null>(null);
 
@@ -400,8 +432,8 @@ export function ApplyForm({
           className="min-h-32 text-base md:text-base motion-reduce:transition-none"
         />
         <p
+          // Tied to the field, so it is read with it. Not a live region: that would speak at every pause in typing.
           id={`${fieldId('cover_letter')}-count`}
-          aria-live="polite"
           className={`text-sm tabular-nums ${counted > APPLY_LIMITS.cover_letter ? 'font-medium text-destructive' : 'text-muted-foreground'}`}
         >
           {`${withCommas(counted)} / ${withCommas(APPLY_LIMITS.cover_letter)}`}
@@ -528,6 +560,7 @@ export function ApplyForm({
       ) : null}
 
       <Button
+        {...press}
         type="submit"
         size="lg"
         disabled={pending}

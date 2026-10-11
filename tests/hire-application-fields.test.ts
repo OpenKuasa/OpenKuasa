@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  APPLY_FIELDS, APPLY_HONEYPOT, APPLY_LIMITS, APPLY_MESSAGES, EMPTY_APPLY_VALUES, applyProblems, fieldProblem,
+  APPLY_FIELDS, APPLY_HONEYPOT, APPLY_LIMITS, APPLY_MESSAGES, EMPTY_APPLY_VALUES, applyProblems, countCharacters, fieldProblem,
   firstName, isRequired, isStaleForm, ringgitToSen, shownFields,
 } from '@/lib/hire/application-fields';
 
@@ -85,6 +85,24 @@ describe('the name on the thank-you', () => {
   it('is the first word of the name, and never empty', () => {
     expect(firstName('  Aina   Rahman ')).toBe('Aina');
     expect(firstName('')).toBe('');
+  });
+  it('is never longer than 60 characters, however long the first word', () => {
+    expect(firstName('Aina Rahman')).toBe('Aina');
+    expect(firstName(`${'a'.repeat(60)} Rahman`)).toBe('a'.repeat(60));
+    expect(firstName('a'.repeat(61))).toBe('a'.repeat(60));
+    expect(firstName('a'.repeat(5000))).toHaveLength(60);
+    // Counted in characters: an emoji is one, and is never cut in half.
+    expect(firstName('😀'.repeat(100))).toBe('😀'.repeat(60));
+  });
+});
+
+describe('counting characters', () => {
+  it('counts one per character, as the database does, not one per unit', () => {
+    expect(countCharacters('')).toBe(0);
+    expect(countCharacters('abc')).toBe(3);
+    expect(countCharacters('😀a')).toBe(2);
+    expect(countCharacters('😀'.repeat(APPLY_LIMITS.cover_letter))).toBe(APPLY_LIMITS.cover_letter);
+    expect(countCharacters('a\nb')).toBe(3);
   });
 });
 

@@ -199,12 +199,14 @@ describe('the form before anything is typed', () => {
     expect(html.indexOf(described[1][0])).toBeGreaterThan(at);
   });
 
-  it('counts the cover letter under it, politely', () => {
+  it('counts the cover letter under it, tied to the field and not read out on every pause', () => {
     const { tag, attrs } = control(html, 'cover_letter');
     expect(tag).toBe('textarea');
-    const counter = attr(attrs, 'aria-describedby')!.split(' ').map((id) => byId(html, id)!).find((found) => /aria-live/.test(found[2]))!;
-    expect(attr(counter[2], 'aria-live')).toBe('polite');
+    expect(attr(attrs, 'aria-describedby')!.split(' ')).toEqual(['apply-cover_letter-count']);
+    const counter = byId(html, 'apply-cover_letter-count')!;
     expect(text(counter[3])).toBe('0 / 4,000');
+    expect(html.indexOf(counter[0])).toBeGreaterThan(html.indexOf('name="cover_letter"'));
+    expect(html).not.toContain('aria-live');
   });
 
   it('makes every input and the button at least 44px tall with 16px text', () => {
@@ -312,6 +314,11 @@ describe('the form after the server found problems (no script needed)', () => {
 
   it('counts the cover letter that came back', () => {
     expect(html).toContain(`${[...values.cover_letter].length} / 4,000`);
+  });
+
+  it('counts a cover letter of emoji one each, and without the space around it, as the check does', () => {
+    const emoji = render(ALL, { errors, values: { ...values, cover_letter: `  ${'😀'.repeat(1234)}\n` } });
+    expect(text(byId(emoji, 'apply-cover_letter-count')![3])).toBe('1,234 / 4,000');
   });
 
   it('leaves the consent box unticked, because the visitor had not ticked it', () => {

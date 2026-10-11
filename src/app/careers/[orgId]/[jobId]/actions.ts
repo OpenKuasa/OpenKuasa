@@ -30,8 +30,13 @@ export type ApplyState =
     }
   | undefined;
 
-/** Longer than any field may be, so an absurd value is cut before it is checked. */
-const READ_LIMIT = 5000;
+/**
+ * Longer than any field may be, so an absurd value is cut before it is
+ * checked. The cut counts UTF-16 units, the checks count characters, and a
+ * character can be two units: the longest cover letter allowed is 4,000
+ * characters, which can be 8,000 units, and must arrive whole.
+ */
+const READ_LIMIT = 9000;
 
 /**
  * One field as text, cut before anything looks at it. Anything that is not
@@ -45,6 +50,14 @@ function read(formData: FormData, key: string): string {
 }
 
 const isUuid = (value: unknown) => z.uuid().safeParse(value).success;
+
+/**
+ * A posted form, told by what it can do and not by its class: the framework
+ * builds the form it hands over, and a real application must never be turned
+ * away because that was built somewhere this file's `FormData` is not.
+ */
+const isForm = (value: unknown): value is FormData =>
+  typeof value === 'object' && value !== null && typeof (value as { get?: unknown }).get === 'function';
 
 /**
  * Takes a visitor's application to one job. Runs for anyone, signed in or not,
@@ -61,6 +74,9 @@ export async function applyAction(
   _prev: ApplyState,
   formData: FormData,
 ): Promise<ApplyState> {
+  // Called as a function with something that is not a form: there is nothing to read, and nothing to send back.
+  if (!isForm(formData)) return { error: APPLY_MESSAGES.failed };
+
   const values: ApplyValues = {
     name: read(formData, 'name'),
     email: read(formData, 'email'),

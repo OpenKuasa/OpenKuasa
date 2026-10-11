@@ -87,7 +87,7 @@ export function isStaleForm(errors: ApplyErrors, shown: readonly ApplyField[]): 
 }
 
 /** Counted the way the database counts: one per character, not per UTF-16 unit. */
-const length = (value: string) => [...value].length;
+export const countCharacters = (value: string) => [...value].length;
 /** One line of text, as the database keeps a name or a phone: runs of spaces, tabs and line breaks become one space. */
 export const oneLine = (value: string) => value.trim().replace(/\s+/g, ' ');
 const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -107,7 +107,7 @@ export function ringgitToSen(text: string): number | null | 'invalid' {
 function linkProblem(value: string, required: boolean, missing: string): string | null {
   const link = value.trim();
   if (link === '') return required ? missing : null;
-  if (length(link) > APPLY_LIMITS.url) return APPLY_MESSAGES.urlTooLong;
+  if (countCharacters(link) > APPLY_LIMITS.url) return APPLY_MESSAGES.urlTooLong;
   return URL_SHAPE.test(link) ? null : APPLY_MESSAGES.urlInvalid;
 }
 
@@ -118,22 +118,22 @@ export function fieldProblem(field: ApplyField, values: ApplyValues, form: Appli
     case 'name': {
       const name = oneLine(values.name);
       if (name === '') return APPLY_MESSAGES.name;
-      return length(name) > APPLY_LIMITS.name ? APPLY_MESSAGES.nameTooLong : null;
+      return countCharacters(name) > APPLY_LIMITS.name ? APPLY_MESSAGES.nameTooLong : null;
     }
     case 'email': {
       const email = values.email.trim();
       if (email === '') return APPLY_MESSAGES.email;
-      if (length(email) > APPLY_LIMITS.email) return APPLY_MESSAGES.emailTooLong;
+      if (countCharacters(email) > APPLY_LIMITS.email) return APPLY_MESSAGES.emailTooLong;
       return EMAIL_SHAPE.test(email) ? null : APPLY_MESSAGES.emailInvalid;
     }
     case 'phone':
-      return length(oneLine(values.phone)) > APPLY_LIMITS.phone ? APPLY_MESSAGES.phoneTooLong : null;
+      return countCharacters(oneLine(values.phone)) > APPLY_LIMITS.phone ? APPLY_MESSAGES.phoneTooLong : null;
     case 'cv_url':
       return linkProblem(values.cv_url, form.require_cv, APPLY_MESSAGES.cvRequired);
     case 'cover_letter': {
       const letter = values.cover_letter.trim();
       if (letter === '') return form.require_cover_letter ? APPLY_MESSAGES.coverLetterRequired : null;
-      return length(letter) > APPLY_LIMITS.cover_letter ? APPLY_MESSAGES.coverLetterTooLong : null;
+      return countCharacters(letter) > APPLY_LIMITS.cover_letter ? APPLY_MESSAGES.coverLetterTooLong : null;
     }
     case 'portfolio_url':
       return linkProblem(values.portfolio_url, false, '');
@@ -154,7 +154,14 @@ export function applyProblems(values: ApplyValues, form: ApplicationFormValues):
   return errors;
 }
 
-/** The first word of a name, for the thank-you. */
+/** The most of a first name the thank-you will carry. */
+const FIRST_NAME_LIMIT = 60;
+
+/**
+ * The first word of a name, for the thank-you, cut at 60 characters: it can be
+ * a word nothing has checked (a script's), and the thank-you must stay short.
+ */
 export function firstName(name: string): string {
-  return oneLine(name).split(' ')[0] ?? '';
+  const first = oneLine(name).split(' ')[0] ?? '';
+  return [...first].slice(0, FIRST_NAME_LIMIT).join('');
 }

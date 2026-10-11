@@ -78,12 +78,30 @@ describe('what the file offers', () => {
   });
 });
 
+describe('a call that carries no form', () => {
+  it.each([
+    ['nothing', undefined],
+    ['null', null],
+    ['a plain object', { name: 'Aisyah', consent: 'on' }],
+    ['text', 'name=Aisyah'],
+  ])('fails plainly, without throwing, reading or sending, when the last argument is %s', async (_what, last) => {
+    expect(await applyAction(ORG, JOB, undefined, last as never)).toEqual({ error: APPLY_MESSAGES.failed });
+    expect(mocks.readPublicJob).not.toHaveBeenCalled();
+    expect(mocks.submitPublicApplication).not.toHaveBeenCalled();
+  });
+});
+
 describe('a filled honeypot', () => {
   it('is thanked by first name, with nothing read and nothing sent', async () => {
     const state = await applyAction(ORG, JOB, undefined, post({ [APPLY_HONEYPOT]: 'https://spam.example' }));
     expect(state).toEqual({ done: { firstName: 'Aisyah' } });
     expect(mocks.readPublicJob).not.toHaveBeenCalled();
     expect(mocks.submitPublicApplication).not.toHaveBeenCalled();
+  });
+
+  it('is thanked with no more than 60 characters of whatever it posted as a name', async () => {
+    const state = await applyAction(ORG, JOB, undefined, post({ name: 'x'.repeat(4000), [APPLY_HONEYPOT]: 'x' }));
+    expect(state).toEqual({ done: { firstName: 'x'.repeat(60) } });
   });
 
   it('is thanked even when the rest of the form is wrong', async () => {
@@ -183,10 +201,21 @@ describe('a form with problems', () => {
     expect(mocks.submitPublicApplication).not.toHaveBeenCalled();
   });
 
-  it('cuts a 6,000-character name at 5,000 before it is checked', async () => {
-    const state = await applyAction(ORG, JOB, undefined, post({ name: 'a'.repeat(6000) }));
+  it('cuts a 10,000-character name at 9,000 before it is checked', async () => {
+    const state = await applyAction(ORG, JOB, undefined, post({ name: 'a'.repeat(10000) }));
     expect(state?.errors).toEqual({ name: APPLY_MESSAGES.nameTooLong });
-    expect(state?.values?.name).toHaveLength(5000);
+    expect(state?.values?.name).toHaveLength(9000);
+  });
+
+  it('does not cut a 4,000-character cover letter written in emoji, each of which is two units long', async () => {
+    mocks.readPublicJob.mockResolvedValue(found({ form: { ...NO_EXTRAS, require_cover_letter: true } }));
+    const letter = '😀'.repeat(4000);
+    expect(letter).toHaveLength(8000);
+    expect(await applyAction(ORG, JOB, undefined, post({ cover_letter: letter }))).toEqual({ done: { firstName: 'Aisyah' } });
+    expect(mocks.submitPublicApplication.mock.calls[0][3].cover_letter).toBe(letter);
+    // One more is one too many, and is said so: it is not cut down to fit.
+    const state = await applyAction(ORG, JOB, undefined, post({ cover_letter: `${letter}😀` }));
+    expect(state?.errors).toEqual({ cover_letter: APPLY_MESSAGES.coverLetterTooLong });
   });
 
   it('counts a line break of a posted cover letter once, as the browser counted it', async () => {
