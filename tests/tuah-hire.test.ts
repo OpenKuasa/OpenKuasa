@@ -10,9 +10,10 @@ const seen = vi.hoisted(() => ({
   prepareJob: false,
   /**
    * Set by a test that scripts what Lekir calls, step by step (the last one repeats); Tuah then asks Lekir once.
-   * A step that is a list makes all of its calls at once, in that one step.
+   * A step that is a list makes all of its calls at once, in that one step. The step 'answer' has Lekir report in words,
+   * which ends that delegation: Tuah then asks Lekir again, and the script goes on in the new delegation.
    */
-  workerScript: null as null | ({ tool: string; input: unknown } | { tool: string; input: unknown }[])[],
+  workerScript: null as null | ({ tool: string; input: unknown } | { tool: string; input: unknown }[] | 'answer')[],
   workerStep: 0,
   /** Set by a test of one agent holding the tools itself: its nth model call makes all the calls of the nth list in one step, and answers in words after the last. */
   singleScript: null as null | { tool: string; input: unknown }[][],
@@ -96,7 +97,7 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
               chunkDelayInMs: 0,
               chunks: seen.singleScript ? (seen.singleScript[seen.calls.length - 1]?.length ? callAll(seen.singleScript[seen.calls.length - 1]) : answer) : seen.workerScript
                 ? layer === 'worker'
-                  ? callAll([seen.workerScript[Math.min(seen.workerStep++, seen.workerScript.length - 1)]].flat())
+                  ? ((step) => (step === 'answer' ? answer : callAll([step].flat())))(seen.workerScript[Math.min(seen.workerStep++, seen.workerScript.length - 1)])
                   : call('askLekir', { task: 'Reject the first applicant' })
                 : !seen.prepareJob
                 ? answer
@@ -838,6 +839,23 @@ describe('Tuah’s team deleting an application or a candidate', () => {
     // Tuah asks again until its step limit; a later delegation has not looked the id up at all, which is refused too.
     expect(context.proposals.size).toBe(0);
     expect(seen.refusals[0]).toBe(AMBIGUOUS);
+    for (const refusal of seen.refusals) expect(refusal === AMBIGUOUS || refusal.startsWith('You have not looked up')).toBe(true);
+    nothingDeleted();
+  });
+  it('keeps refusing in a later delegation of the same turn, when Tuah asks again with the full name', async () => {
+    const { access } = await withUuids();
+    const context = await prepare([
+      { tool: 'listCandidates', input: { name: 'Aisyah' } },
+      { tool: 'deleteCandidate', input: { id: CAND_ID } },
+      'answer',
+      // A new delegation: its own lookup fits one person, and says nothing of several.
+      { tool: 'listCandidates', input: { name: 'Aisyah Lim' } },
+      { tool: 'deleteCandidate', input: { id: CAND_ID } },
+    ], access);
+    expect(context.proposals.size).toBe(0);
+    // The first refusal is the first delegation's; the second is the new delegation's, after its own clean lookup.
+    expect(seen.refusals.slice(0, 2)).toEqual([AMBIGUOUS, AMBIGUOUS]);
+    // The script's last call repeats in delegations that looked nothing up, until Tuah's step limit: refused as well.
     for (const refusal of seen.refusals) expect(refusal === AMBIGUOUS || refusal.startsWith('You have not looked up')).toBe(true);
     nothingDeleted();
   });

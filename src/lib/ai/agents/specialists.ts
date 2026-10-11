@@ -91,7 +91,14 @@ const ONE_CANDIDATE_CHANGE = 'One candidate change at a time. One is already pre
 /** The two deletions: one a turn, across every delegation in it, and never from a lookup that said several rows match. */
 const DELETIONS = new Set<string>(HIRE_DELETE_TOOL_NAMES);
 /** What one request (one turn of the conversation) has prepared so far. Made once per request by createTeamTools. */
-type TurnState = { deletions: number };
+type TurnState = {
+  deletions: number;
+  /**
+   * Every id a lookup returned while saying its name fits several rows, whichever delegation ran it. A later
+   * delegation that looks the same person up by a fuller name must not get past the question the user was owed.
+   */
+  ambiguous: Set<string>;
+};
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -125,6 +132,7 @@ function specialistTools(
       execute: async (input: unknown, options: unknown) => {
         const output = await run?.(input, options);
         results.push({ tool: name, output });
+        for (const id of idsIn(output)) if (ambiguousLookup([output], id)) turn.ambiguous.add(id);
         return output;
       },
     } as Tool;
@@ -195,8 +203,12 @@ function specialistTools(
             };
           }
         }
-        // A lookup in this delegation that holds the id and says several rows match: the model must ask, not choose.
-        if (DELETIONS.has(name) && ambiguousLookup(results.map((r) => r.output), (input as { id?: unknown } | null)?.id)) {
+        // A lookup in this turn that holds the id and says several rows match: the model must ask, not choose.
+        const target = (input as { id?: unknown } | null)?.id;
+        if (
+          DELETIONS.has(name) &&
+          ((typeof target === 'string' && turn.ambiguous.has(target)) || ambiguousLookup(results.map((r) => r.output), target))
+        ) {
           return { prepared: false, error: AMBIGUOUS_DELETION };
         }
         // Named from what this specialist just looked up, else from earlier turns.
@@ -414,7 +426,7 @@ export function createTeamTools(
 } {
   const tools: ToolSet = {};
   // One request is one turn: every specialist asked in it shares this count.
-  const turn: TurnState = { deletions: 0 };
+  const turn: TurnState = { deletions: 0, ambiguous: new Set() };
   for (const product of products) {
     tools[`${ASK_PREFIX}${product.name}`] = askTool(product, team, turn);
   }
