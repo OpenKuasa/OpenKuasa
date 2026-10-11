@@ -13,8 +13,9 @@ export const HIRE_DELETE_TOOL_NAMES = ['deleteApplication', 'deleteCandidate'] a
 
 export const ONE_DELETION = 'One deletion at a time. One is already prepared for approval.';
 export const AMBIGUOUS_DELETION =
-  'More than one match was found for that name, so no deletion was prepared. Say who matches and ask the user which one they mean. ' +
-  'If the user has already said which, look it up again by the full name (and the job, for an application).';
+  // No "look it up again": a later lookup cannot clear this in the same turn, and a model told to try would loop.
+  'More than one match was found for that name, so no deletion was prepared. Stop here: say who matches and ask the user which one they mean. ' +
+  'Once the user has said who, they can ask for the deletion again.';
 
 const isDeletion = (name: unknown): boolean =>
   typeof name === 'string' && (HIRE_DELETE_TOOL_NAMES as readonly string[]).includes(name);

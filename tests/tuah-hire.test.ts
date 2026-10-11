@@ -14,8 +14,8 @@ const seen = vi.hoisted(() => ({
    */
   workerScript: null as null | ({ tool: string; input: unknown } | { tool: string; input: unknown }[])[],
   workerStep: 0,
-  /** Set by a test of one agent holding the tools itself: its first model call makes all of these calls in one step. */
-  singleScript: null as null | { tool: string; input: unknown }[],
+  /** Set by a test of one agent holding the tools itself: its nth model call makes all the calls of the nth list in one step, and answers in words after the last. */
+  singleScript: null as null | { tool: string; input: unknown }[][],
   /** Every refusal a tool answered with (`prepared: false`), in order. */
   refusals: [] as string[],
 }));
@@ -94,7 +94,7 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
             stream: simulateReadableStream({
               initialDelayInMs: 0,
               chunkDelayInMs: 0,
-              chunks: seen.singleScript ? (seen.calls.length === 1 ? callAll(seen.singleScript) : answer) : seen.workerScript
+              chunks: seen.singleScript ? (seen.singleScript[seen.calls.length - 1]?.length ? callAll(seen.singleScript[seen.calls.length - 1]) : answer) : seen.workerScript
                 ? layer === 'worker'
                   ? callAll([seen.workerScript[Math.min(seen.workerStep++, seen.workerScript.length - 1)]].flat())
                   : call('askLekir', { task: 'Reject the first applicant' })
@@ -680,8 +680,8 @@ describe('Tuah’s team deleting an application or a candidate', () => {
   const MADE_UP = '99999999-9999-4999-8999-999999999999';
   const ONE_DELETION = 'One deletion at a time. One is already prepared for approval.';
   const AMBIGUOUS =
-    'More than one match was found for that name, so no deletion was prepared. Say who matches and ask the user which one they mean. ' +
-    'If the user has already said which, look it up again by the full name (and the job, for an application).';
+    'More than one match was found for that name, so no deletion was prepared. Stop here: say who matches and ask the user which one they mean. ' +
+    'Once the user has said who, they can ask for the deletion again.';
   /**
    * The seed's ids are not UUIDs, which the change tools require. Two candidates share a first name, to be ambiguous.
    * The seed has people called Aisyah of its own (one of them an Aisyah Lim): they are left out, so that the full
@@ -872,10 +872,10 @@ describe('one agent holding the delete tools', () => {
     candidateDeleted.mockReset();
     seen.calls = [];
     seen.refusals = [];
-    seen.singleScript = [
+    seen.singleScript = [[
       { tool: 'deleteCandidate', input: { id: A } },
       { tool: 'deleteCandidate', input: { id: B } },
-    ];
+    ]];
     let steps: { content: Part[] }[] = [];
     try {
       const result = runTuah(
@@ -898,18 +898,23 @@ describe('one agent holding the delete tools', () => {
   // sends with the user's answer. The SDK asks the gate about an approved call a second time in that later request.
   type Message = import('ai').ModelMessage;
   type Run = { cards: { approvalId: string; toolCall: { toolName: string; input: unknown } }[]; denials: (string | undefined)[]; messages: Message[] };
-  /** One request: the model's first step makes every call in `script`; any later step answers in words. */
+  type Call = { tool: string; input: unknown };
+  /**
+   * One request: the model's first step makes every call in `script`, and any later step answers in words.
+   * A script that is a list of lists is one list per step.
+   */
   const request = async (
     messages: Message[],
-    script: { tool: string; input: unknown }[],
+    script: Call[] | Call[][],
     agent: 'tuah' | 'lekir' = 'tuah',
+    access: ReturnType<typeof writer> = writer(),
   ): Promise<Run> => {
     seen.calls = [];
-    seen.singleScript = script;
+    seen.singleScript = (Array.isArray(script[0]) ? script : [script]) as Call[][];
     try {
       const result = agent === 'lekir'
-        ? runLekir(messages, writer())
-        : runTuah(messages, reach(), undefined, undefined, null, null, null, writer());
+        ? runLekir(messages, access)
+        : runTuah(messages, reach(), undefined, undefined, null, null, null, access);
       await result.consumeStream();
       const content = ((await result.steps) as unknown as { content: (Part & Record<string, unknown>)[] }[]).flatMap((s) => s.content);
       return {
@@ -978,6 +983,34 @@ describe('one agent holding the delete tools', () => {
     ]);
     expect(run.cards.map((c) => c.toolCall.toolName)).toEqual(['updateCandidate', 'deleteCandidate', 'updateCandidate']);
     expect(run.denials).toEqual([]);
+  });
+  const AMBIGUOUS =
+    'More than one match was found for that name, so no deletion was prepared. Stop here: say who matches and ask the user which one they mean. ' +
+    'Once the user has said who, they can ask for the deletion again.';
+  /** Two candidates who share a first name, with real ids. The seed's own Aisyahs are left out, so exactly these two match. */
+  const twoAisyahs = () => {
+    const base = hire().data;
+    const listCandidates = async () => {
+      const all = await base.listCandidates();
+      return all
+        .filter((c, n) => n < 2 || !c.name.includes('Aisyah'))
+        .map((c, n) => (n === 0 ? { ...c, id: A, name: 'Aisyah Lim' } : n === 1 ? { ...c, id: B, name: 'Aisyah binti Karim' } : c));
+    };
+    return { ...writer(), data: { ...base, listCandidates } };
+  };
+  it.each(['tuah', 'lekir'] as const)('%s: a deletion after a lookup that said several people match is denied with words that stop the model, and there is no card', async (agent) => {
+    candidateDeleted.mockReset();
+    const run = await request(
+      [{ role: 'user', content: 'Delete the candidate Aisyah' }],
+      [[{ tool: 'listCandidates', input: { name: 'Aisyah' } }], [{ tool: 'deleteCandidate', input: { id: A } }]],
+      agent,
+      twoAisyahs(),
+    );
+    expect(run.cards).toEqual([]);
+    expect(run.denials).toEqual([AMBIGUOUS]);
+    // The sentence must not send the model back to a lookup, which cannot clear the refusal in the same turn.
+    expect(AMBIGUOUS).not.toMatch(/look it up again/);
+    expect(candidateDeleted).not.toHaveBeenCalled();
   });
   it('a viewer holds no delete tool, so there is nothing to gate', async () => {
     seen.calls = [];
