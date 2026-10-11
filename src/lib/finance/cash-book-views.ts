@@ -1,0 +1,440 @@
+/**
+ * What the Cash Receipts, Payment Vouchers and Expenses screens show, worked
+ * out from the rows the data layer reads. Pure, with no server imports, so
+ * the client views and the tests both use it. `today` is always a YYYY-MM-DD
+ * date. Cash Receipts and Payment Vouchers have a period selector, so their
+ * figures are worked out again in the browser when it changes.
+ */
+import type { Slice } from '@/components/charts';
+import type { CashBookStatus, CashReceiptRow, PaymentVoucherKind, PaymentVoucherRow } from './cash-book';
+import { toCsv } from './csv';
+import type { ExpenseDisplayStatus, ExpenseRow } from './expenses';
+import { rmShort } from './format';
+import { PAYMENT_METHOD_LABELS } from './money';
+import { type Stat, count, lastMonths, monthOf, sum, thousands } from './view-helpers';
+
+/* ---- the period selector ------------------------------------------- */
+
+export const CASH_BOOK_PERIODS = ['month', 'quarter', 'year'] as const;
+export type CashBookPeriod = (typeof CASH_BOOK_PERIODS)[number];
+
+/** There is no financial-year setting, so the longest period is the calendar year. */
+export const CASH_BOOK_PERIOD_LABELS: Record<CashBookPeriod, string> = {
+  month: 'This month',
+  quarter: 'This quarter',
+  year: 'This year',
+};
+
+/** The calendar year a date falls in. */
+const yearOf = (iso: string) => iso.slice(0, 4);
+
+/** 2026-10-09 → 2026-Q4 */
+const quarterOf = (iso: string) => `${yearOf(iso)}-Q${Math.ceil(Number(iso.slice(5, 7)) / 3)}`;
+
+/** Whether a date falls in the calendar month, quarter or year that today is in. A later date in that period counts too. */
+export function inPeriod(iso: string, today: string, period: CashBookPeriod): boolean {
+  if (period === 'month') return monthOf(iso) === monthOf(today);
+  if (period === 'quarter') return quarterOf(iso) === quarterOf(today);
+  return yearOf(iso) === yearOf(today);
+}
+
+const SLICE_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-5)', 'var(--chart-3)', 'var(--chart-4)'];
+
+/** How many named slices a donut shows before the rest are added up as one. */
+export const DONUT_SLICES = 4;
+
+/**
+ * Amounts per label as donut slices, largest first. Past `DONUT_SLICES` the
+ * rest are one slice, so a workspace with twenty categories still gets a
+ * chart that can be read. Labels with nothing against them are left out.
+ */
+function slices(totals: Map<string, number>, restLabel: string): Slice[] {
+  const ranked = [...totals.entries()]
+    .map(([label, value]) => ({ label, value: Math.round(value * 100) / 100 }))
+    .filter((entry) => entry.value > 0)
+    .sort((x, y) => y.value - x.value || x.label.localeCompare(y.label));
+  const named = ranked.slice(0, DONUT_SLICES);
+  const rest = ranked.slice(DONUT_SLICES);
+  const shown = rest.length ? [...named, { label: restLabel, value: sum(rest, (entry) => entry.value) }] : named;
+  return shown.map((entry, i) => ({ key: `slice-${i}`, label: entry.label, value: entry.value, color: SLICE_COLORS[i] }));
+}
+
+function totalsBy<T>(rows: T[], label: (row: T) => string, amount: (row: T) => number): Map<string, number> {
+  const totals = new Map<string, number>();
+  for (const row of rows) totals.set(label(row), (totals.get(label(row)) ?? 0) + amount(row));
+  return totals;
+}
+
+/* ---- Cash Receipts -------------------------------------------------- */
+
+export type CashReceiptsViewData = {
+  stats: Stat[];
+  /** The last eight months, oldest first, in RM thousands: what was received into bank accounts and into cash. */
+  trend: { label: string; bank: number; cash: number }[];
+  /** Whether anything was received in those eight months, however little: a small receipt rounds to 0 in `trend`. */
+  hasTrend: boolean;
+  /** Received in the period per account, in RM. */
+  byAccount: Slice[];
+  /** Whether anything was received in the period. */
+  hasReceived: boolean;
+  received: string;
+};
+
+/** A receipt is posted the moment money in is recorded on Payments In; one made here can wait as a draft. */
+export const CASH_RECEIPT_STATUS_LABELS: Record<CashBookStatus, string> = {
+  draft: 'Draft',
+  pending_approval: 'Pending approval',
+  scheduled: 'Scheduled',
+  posted: 'Posted',
+  rejected: 'Rejected',
+  void: 'Void',
+};
+
+/** What a receipt is for: the invoices it pays, or its income category. */
+export function receiptFor(row: CashReceiptRow): string {
+  if (row.kind === 'invoice') return row.documents ?? 'Invoices';
+  return row.category_name ?? '—';
+}
+
+export function cashReceiptsView(rows: CashReceiptRow[], today: string, period: CashBookPeriod): CashReceiptsViewData {
+  // Only money that has actually arrived counts: not a draft, not voided.
+  const posted = rows.filter((r) => r.status === 'posted');
+  const inRange = posted.filter((r) => inPeriod(r.txn_date, today, period));
+  const total = sum(inRange, (r) => r.amount);
+  const intoBank = sum(inRange.filter((r) => r.account_kind === 'bank'), (r) => r.amount);
+  const drafts = rows.filter((r) => r.status === 'draft');
+  const span = CASH_BOOK_PERIOD_LABELS[period].toLowerCase();
+
+  let hasTrend = false;
+  const trend = lastMonths(today).map(({ key, label }) => {
+    const inMonth = posted.filter((r) => monthOf(r.txn_date) === key);
+    if (inMonth.length > 0) hasTrend = true;
+    return {
+      label,
+      bank: thousands(sum(inMonth.filter((r) => r.account_kind === 'bank'), (r) => r.amount)),
+      cash: thousands(sum(inMonth.filter((r) => r.account_kind === 'cash'), (r) => r.amount)),
+    };
+  });
+
+  return {
+    stats: [
+      { label: 'Received', value: rmShort(total), delta: span, deltaTone: 'flat' },
+      {
+        label: 'Receipts',
+        value: String(inRange.length),
+        delta: drafts.length ? `${count(drafts.length, 'draft')} not yet posted` : span,
+        deltaTone: 'flat',
+      },
+      { label: 'Average receipt', value: inRange.length ? rmShort(total / inRange.length) : '—', delta: span, deltaTone: 'flat' },
+      {
+        label: 'Into the bank',
+        value: total ? `${Math.round((intoBank / total) * 100)}%` : '—',
+        delta: 'the rest is cash in hand',
+        deltaTone: 'flat',
+      },
+    ],
+    trend,
+    hasTrend,
+    byAccount: slices(totalsBy(inRange, (r) => r.account_name, (r) => r.amount), 'Other accounts'),
+    hasReceived: inRange.length > 0,
+    received: rmShort(total),
+  };
+}
+
+/** `open` is every receipt that is not void: what the table shows until a status is chosen. */
+export type CashReceiptFilter = 'open' | 'draft' | 'posted' | 'void';
+
+/** Receipts matching the status filter whose number, payer, invoices, category or reference contains the search text. */
+export function filterCashReceipts(rows: CashReceiptRow[], query: string, filter: CashReceiptFilter): CashReceiptRow[] {
+  const q = query.trim().toLowerCase();
+  return rows.filter(
+    (r) =>
+      (filter === 'open' ? r.status !== 'void' : r.status === filter) &&
+      `${r.number ?? ''} ${r.party_name ?? ''} ${r.documents ?? ''} ${r.category_name ?? ''} ${r.reference ?? ''}`
+        .toLowerCase()
+        .includes(q),
+  );
+}
+
+/** The receipts table as a CSV file, its columns in the table's order. Amounts are numbers, so a spreadsheet can add them up. */
+export function cashReceiptsCsv(rows: CashReceiptRow[]): string {
+  return toCsv(
+    ['Date', 'No.', 'Received from', 'For', 'Account', 'Method', 'Reference', 'Amount', 'Status'],
+    rows.map((r) => [
+      r.txn_date,
+      r.number,
+      r.party_name,
+      r.kind === 'invoice' ? r.documents : r.category_name,
+      r.account_name,
+      PAYMENT_METHOD_LABELS[r.method],
+      r.reference,
+      r.amount,
+      CASH_RECEIPT_STATUS_LABELS[r.status],
+    ]),
+  );
+}
+
+/* ---- Payment Vouchers ----------------------------------------------- */
+
+export type PaymentVouchersViewData = {
+  stats: Stat[];
+  /** The last eight months, oldest first, in RM thousands: what was paid out. */
+  trend: { label: string; paid: number }[];
+  /** Whether anything was paid out in those eight months, however little. */
+  hasTrend: boolean;
+  /** Paid out in the period per category, in RM. */
+  byCategory: Slice[];
+  /** Whether anything was paid out in the period. */
+  hasPaid: boolean;
+  paid: string;
+};
+
+/** Money out is a voucher: `scheduled` is one that may be paid and has not been, `posted` one that was. */
+export const PAYMENT_VOUCHER_STATUS_LABELS: Record<CashBookStatus, string> = {
+  draft: 'Draft',
+  pending_approval: 'Pending approval',
+  scheduled: 'To be paid',
+  posted: 'Paid',
+  rejected: 'Rejected',
+  void: 'Void',
+};
+
+export const PAYMENT_VOUCHER_KIND_LABELS: Record<PaymentVoucherKind, string> = {
+  bill: 'Supplier payment',
+  refund: 'Refund',
+  expense: 'Expense',
+  other: 'Other payment',
+};
+
+/**
+ * The screen a voucher is changed on, when that is not this one: a payment
+ * to a supplier is marked paid, voided or deleted on Payments Out, and a
+ * refund on Refunds. Nothing (null) for the two kinds that belong here.
+ */
+export function voucherHome(kind: PaymentVoucherKind): { label: string; href: string } | null {
+  if (kind === 'bill') return { label: 'Payments Out', href: '/finance/payments-out' };
+  if (kind === 'refund') return { label: 'Refunds', href: '/finance/refunds' };
+  return null;
+}
+
+/** The category a voucher counts under: bills and refunds are a category each, the rest carry their own. */
+export function voucherCategory(row: PaymentVoucherRow): string {
+  if (row.kind === 'bill') return 'Supplier bills';
+  if (row.kind === 'refund') return 'Refunds';
+  return row.category_name ?? (row.kind === 'expense' ? 'Several categories' : 'No category');
+}
+
+/** Waiting for an owner or admin: recorded, and not yet allowed to be paid. */
+export function isWaitingVoucher(row: PaymentVoucherRow): boolean {
+  return row.status === 'pending_approval';
+}
+
+export function paymentVouchersView(rows: PaymentVoucherRow[], today: string, period: CashBookPeriod): PaymentVouchersViewData {
+  // Only money that has actually gone out counts: not waiting, not scheduled, not voided.
+  const posted = rows.filter((v) => v.status === 'posted');
+  const inRange = posted.filter((v) => inPeriod(v.txn_date, today, period));
+  const total = sum(inRange, (v) => v.amount);
+  // What is waiting is waiting now, whatever date it carries.
+  const waiting = rows.filter(isWaitingVoucher);
+  const toPay = rows.filter((v) => v.status === 'scheduled');
+  const span = CASH_BOOK_PERIOD_LABELS[period].toLowerCase();
+
+  let hasTrend = false;
+  const trend = lastMonths(today).map(({ key, label }) => {
+    const inMonth = posted.filter((v) => monthOf(v.txn_date) === key);
+    if (inMonth.length > 0) hasTrend = true;
+    return { label, paid: thousands(sum(inMonth, (v) => v.amount)) };
+  });
+
+  return {
+    stats: [
+      { label: 'Paid', value: rmShort(total), delta: span, deltaTone: 'flat' },
+      {
+        label: 'Vouchers',
+        value: String(inRange.length),
+        delta: toPay.length ? `${toPay.length} more to be paid` : span,
+        deltaTone: 'flat',
+      },
+      {
+        label: 'Pending approval',
+        value: rmShort(sum(waiting, (v) => v.amount)),
+        delta: count(waiting.length, 'voucher'),
+        deltaTone: waiting.length ? 'down' : 'flat',
+      },
+      { label: 'Average voucher', value: inRange.length ? rmShort(total / inRange.length) : '—', delta: span, deltaTone: 'flat' },
+    ],
+    trend,
+    hasTrend,
+    byCategory: slices(totalsBy(inRange, voucherCategory, (v) => v.amount), 'Other categories'),
+    hasPaid: inRange.length > 0,
+    paid: rmShort(total),
+  };
+}
+
+/** `open` is every voucher that is neither void nor rejected: what the table shows until a status is chosen. */
+export type PaymentVoucherFilter = 'open' | 'waiting' | 'scheduled' | 'posted' | 'rejected' | 'void';
+
+/**
+ * Vouchers matching the status and kind filters whose number, payee,
+ * documents, category or reference contains the search text. A voucher still
+ * being written (`draft`) shows under `open` only.
+ */
+export function filterPaymentVouchers(
+  rows: PaymentVoucherRow[],
+  query: string,
+  filter: PaymentVoucherFilter,
+  kind: 'all' | PaymentVoucherKind = 'all',
+): PaymentVoucherRow[] {
+  const q = query.trim().toLowerCase();
+  const matches = (v: PaymentVoucherRow) => {
+    if (filter === 'open') return v.status !== 'void' && v.status !== 'rejected';
+    if (filter === 'waiting') return isWaitingVoucher(v);
+    return v.status === filter;
+  };
+  return rows.filter(
+    (v) =>
+      matches(v) &&
+      (kind === 'all' || v.kind === kind) &&
+      `${v.number ?? ''} ${v.party_name ?? ''} ${v.documents ?? ''} ${voucherCategory(v)} ${v.reference ?? ''}`
+        .toLowerCase()
+        .includes(q),
+  );
+}
+
+/** The vouchers table as a CSV file. Amounts are numbers. */
+export function paymentVouchersCsv(rows: PaymentVoucherRow[]): string {
+  return toCsv(
+    ['Date', 'No.', 'Paid to', 'Kind', 'Category', 'For', 'Account', 'Method', 'Reference', 'Amount', 'Status'],
+    rows.map((v) => [
+      v.txn_date,
+      v.number,
+      v.party_name,
+      PAYMENT_VOUCHER_KIND_LABELS[v.kind],
+      voucherCategory(v),
+      v.documents,
+      v.account_name,
+      PAYMENT_METHOD_LABELS[v.method],
+      v.reference,
+      v.amount,
+      PAYMENT_VOUCHER_STATUS_LABELS[v.status],
+    ]),
+  );
+}
+
+/* ---- Expenses ------------------------------------------------------- */
+
+export type ExpensesViewData = {
+  stats: Stat[];
+  /** The last eight months, oldest first, in RM thousands: what was entered (rejected left out) and what of it is approved. */
+  trend: { label: string; entered: number; approved: number }[];
+  /** Whether any expense that was not rejected is dated in those eight months. */
+  hasTrend: boolean;
+  /** Approved expenses dated this calendar year, in RM, per category. */
+  byCategory: Slice[];
+  /** Whether any approved expense is dated this year. */
+  hasSpend: boolean;
+  spendYtd: string;
+};
+
+export const EXPENSE_STATUS_LABELS: Record<ExpenseDisplayStatus, string> = {
+  pending: 'Pending approval',
+  approved: 'Approved',
+  rejected: 'Rejected',
+  paid: 'Paid',
+};
+
+/** Approved, paid or not: what the workspace has agreed to spend. A pending or rejected expense is not spend yet. */
+export function isApprovedExpense(row: ExpenseRow): boolean {
+  return row.display_status === 'approved' || row.display_status === 'paid';
+}
+
+export function expensesView(rows: ExpenseRow[], today: string): ExpensesViewData {
+  const approved = rows.filter(isApprovedExpense);
+  const pending = rows.filter((e) => e.display_status === 'pending');
+  const ytd = approved.filter((e) => yearOf(e.expense_date) === yearOf(today));
+  const mtd = approved.filter((e) => monthOf(e.expense_date) === monthOf(today));
+  const ytdTotal = sum(ytd, (e) => e.amount);
+  const perCategory = totalsBy(ytd, (e) => e.category_name, (e) => e.amount);
+  const top = [...perCategory.entries()].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]))[0];
+
+  let hasTrend = false;
+  const trend = lastMonths(today).map(({ key, label }) => {
+    const entered = rows.filter((e) => e.display_status !== 'rejected' && monthOf(e.expense_date) === key);
+    if (entered.length > 0) hasTrend = true;
+    return {
+      label,
+      entered: thousands(sum(entered, (e) => e.amount)),
+      approved: thousands(sum(entered.filter(isApprovedExpense), (e) => e.amount)),
+    };
+  });
+
+  return {
+    stats: [
+      { label: 'Total expenses (YTD)', value: rmShort(ytdTotal), delta: count(ytd.length, 'approved expense'), deltaTone: 'flat' },
+      { label: 'This month', value: rmShort(sum(mtd, (e) => e.amount)), delta: count(mtd.length, 'approved expense'), deltaTone: 'flat' },
+      {
+        label: 'Top category',
+        value: top ? top[0] : '—',
+        delta: top && ytdTotal ? `${Math.round((top[1] / ytdTotal) * 100)}% of spend this year` : 'this year',
+        deltaTone: 'flat',
+      },
+      {
+        label: 'Pending approval',
+        value: rmShort(sum(pending, (e) => e.amount)),
+        delta: count(pending.length, 'expense'),
+        deltaTone: pending.length ? 'down' : 'flat',
+      },
+    ],
+    trend,
+    hasTrend,
+    byCategory: slices(perCategory, 'Other categories'),
+    hasSpend: ytd.length > 0,
+    spendYtd: rmShort(ytdTotal),
+  };
+}
+
+/** The categories the rows name, by name, for the category filter. Two categories with one name stay two choices. */
+export function expenseCategories(rows: ExpenseRow[]): { id: string; name: string }[] {
+  const byId = new Map<string, string>();
+  for (const row of rows) byId.set(row.category_id, row.category_name);
+  return [...byId.entries()]
+    .map(([id, name]) => ({ id, name }))
+    .sort((x, y) => x.name.localeCompare(y.name) || x.id.localeCompare(y.id));
+}
+
+/** `open` is every expense that was not rejected: what the table shows until a status is chosen. */
+export type ExpenseFilter = 'open' | ExpenseDisplayStatus;
+
+/** Expenses matching the status and category filters whose vendor, category or notes contains the search text. */
+export function filterExpenses(rows: ExpenseRow[], query: string, filter: ExpenseFilter, categoryId: string = 'all'): ExpenseRow[] {
+  const q = query.trim().toLowerCase();
+  return rows.filter(
+    (e) =>
+      (filter === 'open' ? e.display_status !== 'rejected' : e.display_status === filter) &&
+      (categoryId === 'all' || e.category_id === categoryId) &&
+      `${e.vendor_name} ${e.category_name} ${e.notes ?? ''}`.toLowerCase().includes(q),
+  );
+}
+
+/** How an expense was paid, as the table shows it: a dash while nothing has been paid. */
+export function expenseMethod(row: ExpenseRow): string {
+  return row.method ? PAYMENT_METHOD_LABELS[row.method] : '—';
+}
+
+/** The expenses table as a CSV file. Amounts are numbers; Method is empty while nothing has been paid. */
+export function expensesCsv(rows: ExpenseRow[]): string {
+  return toCsv(
+    ['Date', 'Category', 'Vendor', 'Amount', 'SST', 'Paid', 'Method', 'Status', 'Notes'],
+    rows.map((e) => [
+      e.expense_date,
+      e.category_name,
+      e.vendor_name,
+      e.amount,
+      e.sst_amount,
+      e.paid,
+      e.method ? PAYMENT_METHOD_LABELS[e.method] : null,
+      EXPENSE_STATUS_LABELS[e.display_status],
+      e.notes,
+    ]),
+  );
+}
