@@ -216,6 +216,16 @@ describe('filtering and exporting quotations', () => {
   it('does not match a draft on the word null', () => {
     expect(filterQuotations(rows, 'null', 'all')).toEqual([]);
   });
+  it('searches the Invoice column too: the number of the invoice made from a quotation', () => {
+    const converted = [...rows, quotation({ quotation_no: 'QT-0230', display_status: 'accepted', invoice_id: 'i1', invoice_no: 'INV-0044' })];
+    expect(filterQuotations(converted, 'inv-0044', 'all').map((q) => q.quotation_no)).toEqual(['QT-0230']);
+    expect(filterQuotations(converted, ' INV ', 'all')).toHaveLength(1);
+    expect(filterQuotations(converted, 'inv-0044', 'sent')).toEqual([]);
+    // A draft invoice has no number yet: its quotation is not matched on "draft", nor on the word null.
+    const drafted = [quotation({ quotation_no: 'QT-0231', display_status: 'accepted', invoice_id: 'i2', invoice_no: null })];
+    expect(filterQuotations(drafted, 'draft', 'all')).toEqual([]);
+    expect(filterQuotations(drafted, 'null', 'all')).toEqual([]);
+  });
   it('lists each customer once, by name, and keeps two customers with one name apart', () => {
     expect(customersOf(rows)).toEqual([
       { id: 'aisyah', name: 'Aisyah Trading' },
@@ -236,10 +246,11 @@ describe('filtering and exporting quotations', () => {
       quotation({ quotation_no: 'QT-0007', customer_name: '=cmd|calc', total: 1250.5, display_status: 'accepted', invoice_id: 'i1', invoice_no: 'INV-0044' }),
       quotation({ quotation_no: null, customer_name: 'Lim, Tan & Co', total: 80, display_status: 'draft' }),
     ]);
+    // The columns are in the order the table shows them: Total before Valid until.
     expect(csv).toBe(
-      '﻿No.,Date,Customer,Valid until,Total,Status,Invoice\r\n' +
-        "QT-0007,2026-10-01,'=cmd|calc,2026-10-31,1250.5,Accepted,INV-0044\r\n" +
-        ',2026-10-01,"Lim, Tan & Co",2026-10-31,80,Draft,\r\n',
+      '﻿No.,Date,Customer,Total,Valid until,Status,Invoice\r\n' +
+        "QT-0007,2026-10-01,'=cmd|calc,1250.5,2026-10-31,Accepted,INV-0044\r\n" +
+        ',2026-10-01,"Lim, Tan & Co",80,2026-10-31,Draft,\r\n',
     );
   });
   it('has a label for every status', () => {
@@ -424,6 +435,13 @@ describe('filtering and exporting refunds', () => {
   });
   it('words scheduled as Pending and posted as Refunded', () => {
     expect(REFUND_STATUS_LABELS).toMatchObject({ scheduled: 'Pending', posted: 'Refunded', void: 'Void' });
+  });
+  it('words a refund that is still being written as Pending, since the Pending filter and the Pending card count it', () => {
+    const draft = refund({ status: 'draft', number: null });
+    expect(isPendingRefund(draft)).toBe(true);
+    expect(filterRefunds([draft], '', 'pending')).toHaveLength(1);
+    expect(REFUND_STATUS_LABELS.draft).toBe('Pending');
+    expect(refundsCsv([draft])).toContain(',Pending\r\n');
   });
 });
 

@@ -23,6 +23,8 @@ function fakeClient(answer: { data: unknown; error: unknown }) {
     delete: () => builder,
     eq: () => builder,
     order: () => builder,
+    // The payment writes ask the payments-out view for one row before they write.
+    limit: () => builder,
     maybeSingle: async () => answer,
     then: (resolve: (value: typeof answer) => void) => resolve(answer),
   };

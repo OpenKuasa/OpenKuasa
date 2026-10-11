@@ -273,6 +273,31 @@ export async function listPaymentsIn(ctx: FinanceWriteContext): Promise<PaymentI
   return listPaymentRows<PaymentInRow>(ctx, 'finance_payments_in', PAYMENT_IN_COLUMNS);
 }
 
+/**
+ * The transaction must be a payment to a supplier: money out against a bill,
+ * which the payments-out view shows. A refund is money out too, and it is
+ * never in that view, which joins each allocation to its bill. The three
+ * writes below ask the view first and refuse anything it does not show,
+ * without writing. A refund has its own writes, in refunds.ts, which ask the
+ * refunds view the same way. One row is asked for: a payment split across
+ * bills is several rows there.
+ */
+async function refusalUnlessPaymentOut(
+  ctx: FinanceWriteContext,
+  fnName: string,
+  txnId: string,
+): Promise<{ ok: false; error: string } | null> {
+  const { data, error } = await ctx.client
+    .from('finance_payments_out')
+    .select('transaction_id')
+    .eq('org_id', ctx.orgId)
+    .eq('transaction_id', txnId)
+    .limit(1);
+  if (error) return moneyWriteFailed(fnName, error);
+  if (!data || data.length === 0) return { ok: false, error: M.gone };
+  return null;
+}
+
 /* ---- writes ----------------------------------------------------------- */
 
 /** Records a payment out, paid now or scheduled, split across one supplier's bills. */
@@ -311,6 +336,8 @@ export async function markPaymentPaid(
   input: z.input<typeof markPaymentPaidInput>,
 ): Promise<FinResult<{ id: string; number: string }>> {
   const { id: txnId, paid_on } = markPaymentPaidInput.parse(input);
+  const refusal = await refusalUnlessPaymentOut(ctx, 'markPaymentPaid', txnId);
+  if (refusal) return refusal;
   const { data, error } = await ctx.client.rpc('finance_mark_payment_paid', {
     target_org: ctx.orgId,
     target_txn: txnId,
@@ -321,19 +348,23 @@ export async function markPaymentPaid(
 }
 
 /**
- * Voids a posted payment out: one status change on finance_transactions. The
- * bills it paid owe that amount again.
+ * Voids a posted payment to a supplier: one status change on
+ * finance_transactions, kept to money out. The bills it paid owe that amount
+ * again. Anything the payments-out view does not show is refused first.
  */
 export async function voidPayment(
   ctx: FinanceWriteContext,
   input: z.input<typeof paymentIdInput>,
 ): Promise<FinResult<{ id: string }>> {
   const { id: txnId } = paymentIdInput.parse(input);
+  const refusal = await refusalUnlessPaymentOut(ctx, 'voidPayment', txnId);
+  if (refusal) return refusal;
   const { data, error } = await ctx.client
     .from('finance_transactions')
     .update({ status: 'void', updated_at: new Date().toISOString() })
     .eq('id', txnId)
     .eq('org_id', ctx.orgId)
+    .eq('direction', 'out')
     .select('id')
     .maybeSingle();
   if (error) return moneyWriteFailed('voidPayment', error);
@@ -364,17 +395,24 @@ export async function voidPaymentIn(
   return { ok: true, data: { id: data.id } };
 }
 
-/** Deletes a payment that has not been made yet. A paid one is refused: void it. */
+/**
+ * Deletes a payment to a supplier that has not been made yet. A paid one is
+ * refused: void it. Anything the payments-out view does not show is refused
+ * first.
+ */
 export async function deleteScheduledPayment(
   ctx: FinanceWriteContext,
   input: z.input<typeof paymentIdInput>,
 ): Promise<FinResult<{ id: string }>> {
   const { id: txnId } = paymentIdInput.parse(input);
+  const refusal = await refusalUnlessPaymentOut(ctx, 'deleteScheduledPayment', txnId);
+  if (refusal) return refusal;
   const { data, error } = await ctx.client
     .from('finance_transactions')
     .delete()
     .eq('id', txnId)
     .eq('org_id', ctx.orgId)
+    .eq('direction', 'out')
     .select('id')
     .maybeSingle();
   if (error) return moneyWriteFailed('deleteScheduledPayment', error);

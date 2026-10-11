@@ -47,10 +47,12 @@ export const QUOTATION_MESSAGES = {
   product: LINE_MESSAGES.product,
   gone: 'That quotation no longer exists.',
   // FIN01. A menu offers only what a quotation's status allows, so this reaches a person only when the
-  // quotation changed under them in another tab. True of both cases: a draft accepted or declined, and a
-  // quotation already sent, accepted or declined being edited or deleted.
+  // quotation changed under them in another tab: a draft that was sent meanwhile being saved, sent or
+  // deleted, or an answer being recorded that is already the answer. It says what may have happened, not
+  // what did, so it is not false of a draft answered by a direct call either; the list behind the message
+  // has been refreshed and shows the quotation as it is.
   locked:
-    'That cannot be done to this quotation as it stands. Send a draft before it is accepted or declined; a quotation that has been sent can no longer be edited or deleted.',
+    'That cannot be done to this quotation as it now stands. It may have been sent, accepted or declined since this page was loaded.',
   // FIN04
   notAccepted: 'Only an accepted quotation can be made into an invoice.',
   // FIN13
@@ -138,6 +140,13 @@ export type QuotationDetail = QuotationListRow & {
   notes: string | null;
   lines: QuotationLine[];
 };
+
+/**
+ * The answer to "Save and mark as sent". When the draft was saved but sending
+ * it was refused, `draftId` is that draft, so the form goes on editing it
+ * instead of saving a second copy.
+ */
+export type SaveAndSendQuotationResult = FinResult<{ id: string; quotation_no: string }> & { draftId?: string };
 
 const LIST_COLUMNS =
   'id,quotation_no,customer_id,customer_name,quote_date,valid_until,total,display_status,accepted_at,invoice_id,invoice_no';

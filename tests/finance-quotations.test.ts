@@ -160,19 +160,31 @@ describe('quotation writes', () => {
     expect(calls[0]).toMatchObject({ kind: 'rpc', name: 'finance_convert_quotation' });
     expect(calls[0].args).toEqual({ target_org: 'org-1', target_quotation: ID });
   });
-  it('does not say a quotation was sent or answered when a draft is accepted or declined (FIN01)', async () => {
+  it('words FIN01 so that it reads sensibly from every button that can meet it, and claims nothing false (FIN01)', async () => {
     const { ctx } = fakeFinance({ data: null, error: { code: 'FIN01' } });
-    for (const result of [await acceptQuotation(ctx, { id: ID }), await declineQuotation(ctx, { id: ID })]) {
-      expect(result).toMatchObject({ ok: false });
-      if (!result.ok) {
-        expect(result.error).toContain('Send a draft before it is accepted or declined');
-        expect(result.error).not.toContain('already been sent or answered');
-      }
+    const sentence =
+      'That cannot be done to this quotation as it now stands. It may have been sent, accepted or declined since this page was loaded.';
+    // Through the app it is met only when the quotation changed in another tab: Save, Mark as sent or Delete
+    // on a draft that has been sent meanwhile; Mark accepted on one already accepted; Mark declined on one
+    // already declined. Only a direct call can answer a draft, and the sentence is not false of that either.
+    for (const result of [
+      await saveQuotation(ctx, { ...valid, id: ID }),
+      await sendQuotation(ctx, { id: ID }),
+      await acceptQuotation(ctx, { id: ID }),
+      await declineQuotation(ctx, { id: ID }),
+      await deleteQuotation(ctx, { id: ID }),
+    ]) {
+      expect(result).toEqual({ ok: false, error: sentence });
     }
+    // It does not say what happened, only what may have: a draft answered by a direct call was never sent.
+    expect(sentence).not.toContain('already been sent or answered');
+    expect(sentence).not.toContain('has been sent');
+    // It does not tell a person looking at an accepted quotation to send a draft.
+    expect(sentence).not.toContain('Send a draft');
   });
   it('turns each database refusal into a sentence', async () => {
     const cases: [string, string][] = [
-      ['FIN01', 'That cannot be done to this quotation as it stands. Send a draft before it is accepted or declined; a quotation that has been sent can no longer be edited or deleted.'],
+      ['FIN01', 'That cannot be done to this quotation as it now stands. It may have been sent, accepted or declined since this page was loaded.'],
       ['FIN04', 'Only an accepted quotation can be made into an invoice.'],
       ['FIN10', 'A quotation needs at least one line with an amount.'],
       ['FIN11', 'That quotation no longer exists.'],

@@ -36,6 +36,13 @@ function daysFromToday(days: number) {
   return d.toISOString().slice(0, 10);
 }
 
+/** The YYYY-MM-DD date `days` after another. */
+function daysAfter(iso: string, days: number) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 const DESIGN = { description: 'Design work', quantity: 10, unit_price: 12.5, sst_rate: 6 }; // 125.00 + 7.50 SST = 132.50
 
 /** A posted invoice of RM 132.50. */
@@ -181,17 +188,22 @@ testWithSupabase('an accepted quotation becomes one draft invoice with the same 
   expect(early.error?.code).toBe('FIN04');
   expect((await answer(a, quotation.id, 'accepted')).error).toBeNull();
 
+  const dayBefore = daysFromToday(0);
   const converted = await a.c.rpc('finance_convert_quotation', { target_org: a.orgId, target_quotation: quotation.id });
   expect(converted.error, converted.error?.message).toBeNull();
+  const dayAfter = daysFromToday(0);
   const { data: invoice } = await a.c
     .from('finance_invoices')
     .select('status, customer_id, quotation_id, invoice_no, invoice_date, due_date')
     .eq('id', converted.data)
     .single();
-  // The customer's payment terms are 14 days.
+  // The invoice is dated by the database's UTC date at the moment it converted. Across midnight UTC that
+  // is one of the two days this machine saw either side of the call, so neither is assumed.
+  expect([dayBefore, dayAfter]).toContain(invoice!.invoice_date);
+  // The customer's payment terms are 14 days, counted from the invoice's own date.
   expect(invoice).toEqual({
     status: 'draft', customer_id: a.customer, quotation_id: quotation.id, invoice_no: null,
-    invoice_date: daysFromToday(0), due_date: daysFromToday(14),
+    invoice_date: invoice!.invoice_date, due_date: daysAfter(invoice!.invoice_date, 14),
   });
   const { data: lines } = await a.c.from('finance_invoice_lines').select('description, amount, sst_amount').eq('invoice_id', converted.data);
   expect(lines).toEqual([{ description: 'Design work', amount: 125, sst_amount: 7.5 }]);

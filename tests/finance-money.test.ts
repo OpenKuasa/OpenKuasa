@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { FinanceWriteContext } from '@/lib/finance/result';
 import {
   deleteScheduledPayment,
   markPaymentPaid,
@@ -7,36 +6,22 @@ import {
   recordPaymentOutInput,
   voidPayment,
 } from '@/lib/finance/money';
+import { type FinanceAnswer, type FinanceCall, fakeFinance } from './setup/fake-finance';
 
 const TXN = '55555555-5555-4555-8555-555555555555';
 const ACCOUNT = '66666666-6666-4666-8666-666666666666';
 const BILL_1 = '77777777-7777-4777-8777-777777777777';
 const BILL_2 = '88888888-8888-4888-8888-888888888888';
 
-type Call = { kind: 'rpc' | 'table'; name: string; op?: string; args?: Record<string, unknown>; values?: Record<string, unknown>; filters: Record<string, unknown> };
+/** The shared stand-in for the Supabase client. One canned answer is given to every request, the payments-out check included. */
+const fakeClient = (answer: FinanceAnswer) => fakeFinance(answer);
 
-function fakeClient(answer: { data: unknown; error: unknown }) {
-  const calls: Call[] = [];
-  const client = {
-    rpc: async (name: string, args: Record<string, unknown>) => {
-      calls.push({ kind: 'rpc', name, args, filters: {} });
-      return answer;
-    },
-    from(name: string) {
-      const call: Call = { kind: 'table', name, filters: {} };
-      calls.push(call);
-      const builder = {
-        update(values: Record<string, unknown>) { call.op = 'update'; call.values = values; return builder; },
-        delete() { call.op = 'delete'; return builder; },
-        eq(column: string, value: unknown) { call.filters[column] = value; return builder; },
-        select() { return builder; },
-        maybeSingle: async () => answer,
-      };
-      return builder;
-    },
-  };
-  return { ctx: { client: client as never, orgId: 'org-1' } satisfies FinanceWriteContext, calls };
-}
+/**
+ * Answers the payments-out check with a row (a payment to a supplier) or none
+ * (a refund, or any other money out), and everything else with `other`.
+ */
+const paymentOr = (isPaymentOut: boolean, other: FinanceAnswer) => (call: FinanceCall) =>
+  call.name === 'finance_payments_out' ? { data: isPaymentOut ? [{ transaction_id: TXN }] : [], error: null } : other;
 
 const valid = {
   account_id: ACCOUNT,
@@ -86,6 +71,7 @@ describe('payment writes', () => {
       allocations: [{ bill_id: BILL_1, amount: 100 }, { bill_id: BILL_2, amount: 32.5 }],
     });
     expect(result).toEqual({ ok: true, data: { id: TXN } });
+    expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ kind: 'rpc', name: 'finance_record_payment_out' });
     expect(calls[0].args).toEqual({
       target_org: 'org-1',
@@ -98,22 +84,31 @@ describe('payment writes', () => {
     await recordPaymentOut(ctx, { ...valid, scheduled: true });
     expect((calls[0].args!.payment as { status: string }).status).toBe('scheduled');
   });
-  it('marks a scheduled payment paid and returns its number', async () => {
-    const { ctx, calls } = fakeClient({ data: 'PV-0003', error: null });
+  it('marks a scheduled payment paid and returns its number, once the payments-out view has shown it', async () => {
+    const { ctx, calls } = fakeFinance(paymentOr(true, { data: 'PV-0003', error: null }));
     expect(await markPaymentPaid(ctx, { id: TXN, paid_on: '2026-10-09' })).toEqual({ ok: true, data: { id: TXN, number: 'PV-0003' } });
-    expect(calls[0].args).toEqual({ target_org: 'org-1', target_txn: TXN, paid_on: '2026-10-09' });
+    expect(calls[0]).toMatchObject({
+      name: 'finance_payments_out', op: 'select', filters: { org_id: 'org-1', transaction_id: TXN }, limit: 1,
+    });
+    expect(calls[0].columns).toBe('transaction_id');
+    expect(calls[1]).toMatchObject({ kind: 'rpc', name: 'finance_mark_payment_paid' });
+    expect(calls[1].args).toEqual({ target_org: 'org-1', target_txn: TXN, paid_on: '2026-10-09' });
+    expect(calls).toHaveLength(2);
   });
-  it('voids by setting the status and deletes a scheduled payment, both scoped to the workspace', async () => {
-    const voided = fakeClient({ data: { id: TXN }, error: null });
+  it('voids by setting the status and deletes a scheduled payment, both kept to money out and to the workspace', async () => {
+    const voided = fakeFinance(paymentOr(true, { data: { id: TXN }, error: null }));
     expect(await voidPayment(voided.ctx, { id: TXN })).toEqual({ ok: true, data: { id: TXN } });
-    expect(voided.calls[0]).toMatchObject({ name: 'finance_transactions', op: 'update' });
-    expect(voided.calls[0].values).toMatchObject({ status: 'void' });
-    expect(voided.calls[0].filters).toEqual({ id: TXN, org_id: 'org-1' });
+    expect(voided.calls[0]).toMatchObject({ name: 'finance_payments_out', filters: { org_id: 'org-1', transaction_id: TXN } });
+    expect(voided.calls[1]).toMatchObject({ name: 'finance_transactions', op: 'update' });
+    expect(Object.keys(voided.calls[1].values!).sort()).toEqual(['status', 'updated_at']);
+    expect(voided.calls[1].values).toMatchObject({ status: 'void' });
+    expect(voided.calls[1].filters).toEqual({ id: TXN, org_id: 'org-1', direction: 'out' });
 
-    const removed = fakeClient({ data: { id: TXN }, error: null });
+    const removed = fakeFinance(paymentOr(true, { data: { id: TXN }, error: null }));
     expect(await deleteScheduledPayment(removed.ctx, { id: TXN })).toEqual({ ok: true, data: { id: TXN } });
-    expect(removed.calls[0]).toMatchObject({ name: 'finance_transactions', op: 'delete' });
-    expect(removed.calls[0].filters).toEqual({ id: TXN, org_id: 'org-1' });
+    expect(removed.calls[0]).toMatchObject({ name: 'finance_payments_out', filters: { org_id: 'org-1', transaction_id: TXN } });
+    expect(removed.calls[1]).toMatchObject({ name: 'finance_transactions', op: 'delete' });
+    expect(removed.calls[1].filters).toEqual({ id: TXN, org_id: 'org-1', direction: 'out' });
   });
   it('turns each database refusal into a sentence', async () => {
     const cases: [string, string][] = [
@@ -126,7 +121,8 @@ describe('payment writes', () => {
       ['23503', 'The account or a bill on this payment no longer exists.'],
     ];
     for (const [code, message] of cases) {
-      const { ctx } = fakeClient({ data: null, error: { code } });
+      // The view has shown the payment; the write itself is what the database refuses.
+      const { ctx } = fakeFinance(paymentOr(true, { data: null, error: { code } }));
       expect(await recordPaymentOut(ctx, valid), code).toEqual({ ok: false, error: message });
       expect(await markPaymentPaid(ctx, { id: TXN, paid_on: '2026-10-09' }), code).toEqual({ ok: false, error: message });
       expect(await voidPayment(ctx, { id: TXN }), code).toEqual({ ok: false, error: message });
@@ -135,8 +131,65 @@ describe('payment writes', () => {
     expect(logged).not.toHaveBeenCalled();
   });
   it('says the payment is gone when void or delete touches no row', async () => {
-    const { ctx } = fakeClient({ data: null, error: null });
+    const { ctx } = fakeFinance(paymentOr(true, { data: null, error: null }));
     expect(await voidPayment(ctx, { id: TXN })).toEqual({ ok: false, error: 'That payment no longer exists.' });
     expect(await deleteScheduledPayment(ctx, { id: TXN })).toEqual({ ok: false, error: 'That payment no longer exists.' });
+  });
+});
+
+describe('money out that is not a payment to a supplier', () => {
+  const gone = { ok: false, error: 'That payment no longer exists.' };
+
+  it('is refused without a write: a refund’s id marks nothing paid, voids nothing and deletes nothing', async () => {
+    // The payments-out view joins each allocation to its bill, so a refund is never in it.
+    const marked = fakeFinance(paymentOr(false, { data: 'PV-0007', error: null }));
+    expect(await markPaymentPaid(marked.ctx, { id: TXN, paid_on: '2026-10-09' })).toEqual(gone);
+    expect(marked.calls.map((c) => c.kind)).toEqual(['table']);
+    expect(marked.calls.map((c) => c.name)).toEqual(['finance_payments_out']);
+
+    const voided = fakeFinance(paymentOr(false, { data: { id: TXN }, error: null }));
+    expect(await voidPayment(voided.ctx, { id: TXN })).toEqual(gone);
+    expect(voided.calls.map((c) => c.name)).toEqual(['finance_payments_out']);
+    expect(voided.calls.map((c) => c.op)).toEqual(['select']);
+
+    const removed = fakeFinance(paymentOr(false, { data: { id: TXN }, error: null }));
+    expect(await deleteScheduledPayment(removed.ctx, { id: TXN })).toEqual(gone);
+    expect(removed.calls.map((c) => c.name)).toEqual(['finance_payments_out']);
+    expect(removed.calls.map((c) => c.op)).toEqual(['select']);
+  });
+  it('is refused the same way when the view answers with nothing at all', async () => {
+    const empty = (call: FinanceCall) => (call.name === 'finance_payments_out' ? { data: null, error: null } : { data: { id: TXN }, error: null });
+    const { ctx, calls } = fakeFinance(empty);
+    expect(await voidPayment(ctx, { id: TXN })).toEqual(gone);
+    expect(calls).toHaveLength(1);
+  });
+  it('asks the view for one row only: a payment split across bills is several rows there', async () => {
+    const split = (call: FinanceCall) =>
+      call.name === 'finance_payments_out' ? { data: [{ transaction_id: TXN }], error: null } : { data: { id: TXN }, error: null };
+    const { ctx, calls } = fakeFinance(split);
+    expect(await voidPayment(ctx, { id: TXN })).toEqual({ ok: true, data: { id: TXN } });
+    expect(calls[0].limit).toBe(1);
+  });
+  it('logs and gives the general message when the check cannot be read, and writes nothing', async () => {
+    const failing = (call: FinanceCall) =>
+      call.name === 'finance_payments_out' ? { data: null, error: { code: 'XX000' } } : { data: { id: TXN }, error: null };
+    const general = { ok: false, error: 'That change could not be saved. Please try again.' };
+    const { ctx, calls } = fakeFinance(failing);
+    expect(await markPaymentPaid(ctx, { id: TXN, paid_on: '2026-10-09' })).toEqual(general);
+    expect(await voidPayment(ctx, { id: TXN })).toEqual(general);
+    expect(await deleteScheduledPayment(ctx, { id: TXN })).toEqual(general);
+    expect(calls.every((c) => c.name === 'finance_payments_out')).toBe(true);
+    expect(logged).toHaveBeenCalled();
+  });
+  it('tells a viewer they may not when row-level security refuses the check itself', async () => {
+    const { ctx } = fakeFinance({ data: null, error: { code: '42501' } });
+    expect(await voidPayment(ctx, { id: TXN })).toEqual({ ok: false, error: 'You do not have permission to make changes here.' });
+  });
+  it('still refuses an id that is not an id before anything is asked', async () => {
+    const { ctx, calls } = fakeFinance(paymentOr(true, { data: { id: TXN }, error: null }));
+    await expect(voidPayment(ctx, { id: 'nope' })).rejects.toThrow();
+    await expect(deleteScheduledPayment(ctx, { id: 'nope' })).rejects.toThrow();
+    await expect(markPaymentPaid(ctx, { id: 'nope', paid_on: '2026-10-09' })).rejects.toThrow();
+    expect(calls).toEqual([]);
   });
 });
