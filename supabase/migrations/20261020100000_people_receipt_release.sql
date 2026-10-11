@@ -26,13 +26,22 @@ revoke all on private.hr_released_receipts from public, anon, authenticated, ser
 -- True means: this file is in your own folder, is on no claim anywhere, and
 -- never will be, so the app may delete it. Anything else is false, with no
 -- reason given: no user, a session that owes a second factor, no path, a path
--- in someone else's folder, or a path some claim carries.
+-- in someone else's folder, a path that is not shaped like a receipt's, or a
+-- path some claim carries.
 
 create or replace function public.hr_release_receipt(p_path text)
 returns boolean language plpgsql security definer set search_path = public as $$
 begin
   if auth.uid() is null or not private.mfa_ok() or p_path is null then return false; end if;
   if split_part(p_path, '/', 1) <> auth.uid()::text then return false; end if;
+  -- Only a path of the shape the app makes for a receipt:
+  -- <user id>/<uuid>.<jpg|png|webp|heic|pdf>, lower case, nothing else. This
+  -- must stay in step with `isReceiptPath` in src/lib/people/receipts-server.ts
+  -- (and `receiptPath` in receipts.ts, which makes the paths). It also keeps
+  -- each row of the released list small.
+  if p_path !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png|webp|heic|pdf)$' then
+    return false;
+  end if;
 
   -- Held to the end of the transaction; hr_submit_claim takes the same one.
   perform pg_advisory_xact_lock(hashtextextended(p_path, 0));

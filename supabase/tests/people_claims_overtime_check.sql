@@ -957,6 +957,15 @@ begin
         (1, ma, 'member A, member B''s file', f_b, false),
         (1, ma, 'member A, no path at all', null, false),
         (1, ma, 'member A, their own folder with a slash in front', '/' || f_a2, false),
+        -- Only a path shaped like a receipt: <user id>/<uuid>.<known extension>, lower case.
+        (1, ma, 'member A, an over-long path in their own folder', ma || '/' || repeat('a', 2000) || '.jpg', false),
+        (1, ma, 'member A, a path with a third segment', ma || '/' || gen_random_uuid() || '/' || gen_random_uuid() || '.jpg', false),
+        (1, ma, 'member A, an unknown extension', ma || '/' || gen_random_uuid() || '.gif', false),
+        (1, ma, 'member A, no extension', ma || '/' || gen_random_uuid(), false),
+        (1, ma, 'member A, upper-case hex in the file name', ma || '/' || upper(gen_random_uuid()::text) || '.jpg', false),
+        (1, ma, 'member A, an upper-case extension', ma || '/' || gen_random_uuid() || '.JPG', false),
+        (1, ma, 'member A, a receipt path with something after it', f_a2 || E'\n', false),
+        (1, ma, 'member A, their own folder and nothing else', ma::text, false),
         (1, null, 'a session with no user, member A''s file on no claim', f_a2, false),
         -- 5: the file once planted on a demo claim is on nothing now
         (5, mb, 'member B, own file once it is on no claim', f_b, true),
@@ -982,6 +991,9 @@ begin
       select count(*), count(*) filter (where x.path = f_a4) into n, n2
       from private.hr_released_receipts x where x.path in (f_a1, f_a2, f_a4, f_a5, f_b, f_admin, f_admin2, '/' || f_a2);
       if n <> 1 or n2 <> 1 then fails := array_append(fails, format('%s paths recorded as released after stage 1, expected only member A''s unused file', n)); end if;
+      -- And nothing that is not shaped like a receipt was recorded under member A's id.
+      select count(*) into n from private.hr_released_receipts x where split_part(x.path, '/', 1) = ma::text or x.path like '%' || ma || '%';
+      if n <> 1 then fails := array_append(fails, format('%s paths under member A''s id recorded as released, expected 1', n)); end if;
 
       -- Nobody reads or writes the released list directly.
       for t, q in

@@ -91,8 +91,13 @@ describe('Lekiu receipt release migration', () => {
     const lock = body.indexOf(`${LOCK}p_path, 0));`);
     expect(gate).toBeGreaterThan(-1);
     expect(folder).toBeGreaterThan(gate);
-    // Nothing is locked or looked up for a caller who fails those.
-    expect(lock).toBeGreaterThan(folder);
+    // Only a path shaped like a receipt: one anchored pattern, lower case, the five extensions.
+    const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+    const shape = body.indexOf(`if p_path !~ '^${uuid}/${uuid}\\.(jpg|png|webp|heic|pdf)$' then\n    return false;\n  end if;`);
+    expect(shape).toBeGreaterThan(folder);
+    expect(body).not.toContain('~*');
+    // Nothing is locked, looked up or recorded for a caller who fails those.
+    expect(lock).toBeGreaterThan(shape);
     // It never raises, so the answer says little.
     expect(body).not.toContain('raise');
   });
