@@ -213,6 +213,47 @@ testWithSupabase('an accepted quotation becomes one draft invoice with the same 
   expect(again.error, again.error?.message).toBeNull();
 });
 
+testWithSupabase('changing the customer of an invoice made from a quotation unties it, and the quotation converts again', async () => {
+  const quotation = await sentQuotation(a);
+  expect((await answer(a, quotation.id, 'accepted')).error).toBeNull();
+  const converted = await a.c.rpc('finance_convert_quotation', { target_org: a.orgId, target_quotation: quotation.id });
+  expect(converted.error, converted.error?.message).toBeNull();
+  const { data: other, error: otherErr } = await a.c
+    .from('finance_contacts')
+    .insert({ org_id: a.orgId, name: 'Another customer of Follow-ons A', is_customer: true })
+    .select('id')
+    .single();
+  expect(otherErr, otherErr?.message).toBeNull();
+
+  // Saved again for the same customer, the invoice keeps its quotation.
+  const same = await a.c.rpc('finance_save_invoice', {
+    target_org: a.orgId,
+    invoice: { id: converted.data, customer_id: a.customer, invoice_date: daysFromToday(0), due_date: daysFromToday(14) },
+    lines: [DESIGN],
+  });
+  expect(same.error, same.error?.message).toBeNull();
+  const tie = async () =>
+    (await a.c.from('finance_invoices').select('customer_id, quotation_id').eq('id', converted.data).single()).data;
+  expect(await tie()).toEqual({ customer_id: a.customer, quotation_id: quotation.id });
+
+  // Saved for another customer, it lets go of the quotation, which is free again.
+  const moved = await a.c.rpc('finance_save_invoice', {
+    target_org: a.orgId,
+    invoice: { id: converted.data, customer_id: other!.id, invoice_date: daysFromToday(0), due_date: daysFromToday(14) },
+    lines: [DESIGN],
+  });
+  expect(moved.error, moved.error?.message).toBeNull();
+  expect(await tie()).toEqual({ customer_id: other!.id, quotation_id: null });
+  const { data: linked } = await a.c.from('finance_quotation_totals').select('invoice_id, invoice_no').eq('id', quotation.id).single();
+  expect(linked).toEqual({ invoice_id: null, invoice_no: null });
+
+  const again = await a.c.rpc('finance_convert_quotation', { target_org: a.orgId, target_quotation: quotation.id });
+  expect(again.error, again.error?.message).toBeNull();
+  expect(again.data).not.toBe(converted.data);
+  const { data: second } = await a.c.from('finance_invoices').select('customer_id, quotation_id').eq('id', again.data).single();
+  expect(second).toEqual({ customer_id: a.customer, quotation_id: quotation.id });
+});
+
 testWithSupabase('two conversions of one quotation at the same moment: only one invoice is made', async () => {
   const quotation = await sentQuotation(a);
   expect((await answer(a, quotation.id, 'accepted')).error).toBeNull();
