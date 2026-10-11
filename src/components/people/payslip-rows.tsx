@@ -60,6 +60,8 @@ function Line({ line, controls }: { line: DetailLine; controls: ReactNode }) {
  */
 export function PayslipLayout({ payslip, slots = {} }: { payslip: Payslip; slots?: PayslipSlots }) {
   const m = payslipDetailModel(payslip);
+  // A paid payslip is settled: its figures are no longer proposals, and who set them is HR's business.
+  const paid = payslip.status === 'paid';
   const controlsFor = (line: DetailLine) => (line.editable ? (slots.lineControls?.(line) ?? null) : null);
   return (
     <div className="space-y-5 text-sm">
@@ -80,9 +82,9 @@ export function PayslipLayout({ payslip, slots = {} }: { payslip: Payslip; slots
         {slots.addLine ? <div>{slots.addLine}</div> : null}
       </section>
 
-      <section aria-label="Proposed deductions" className="space-y-2">
-        <h3 className="font-semibold">Proposed deductions</h3>
-        <p className="text-xs text-muted-foreground">{PROPOSED_NOTE}</p>
+      <section aria-label={paid ? 'Deductions' : 'Proposed deductions'} className="space-y-2">
+        <h3 className="font-semibold">{paid ? 'Deductions' : 'Proposed deductions'}</h3>
+        {paid ? null : <p className="text-xs text-muted-foreground">{PROPOSED_NOTE}</p>}
         <div className="space-y-1">
           {m.figures.map((f) =>
             slots.figure ? (
@@ -93,7 +95,7 @@ export function PayslipLayout({ payslip, slots = {} }: { payslip: Payslip; slots
                 label={
                   <>
                     {f.label}
-                    {f.set_by_hr ? (
+                    {f.set_by_hr && !paid ? (
                       <span className="ml-2">
                         <SetByHrMark />
                       </span>

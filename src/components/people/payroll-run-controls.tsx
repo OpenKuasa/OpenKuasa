@@ -213,6 +213,8 @@ export function RunActions({
   // The Recalculate refusal sits beside that button; the others sit under their prompt.
   const [recalcError, setRecalcError] = useState<string | null>(null);
   const [recalculated, setRecalculated] = useState<RunResult | null>(null);
+  // Which action is in flight, so only the button that was pressed says it is working.
+  const [recalculating, setRecalculating] = useState(false);
   // The run's payslip count when the recalculation was sent. The note comes from the recalculation's own result, so
   // it shows at once; the first change of the count to what the result says is the page catching up (keep it),
   // and any other change means a payslip was added or removed since (drop it).
@@ -256,8 +258,10 @@ export function RunActions({
     setRecalcError(null);
     setRecalculated(null);
     setStep('idle');
+    setRecalculating(true);
     start(async () => {
       const result = await settle(() => recalculatePayrollAction({ run_id: runId }));
+      setRecalculating(false);
       if (result.ok) {
         setSeenHeadcount(headcount);
         setRecalculated(result.data);
@@ -316,7 +320,7 @@ export function RunActions({
         {controls.recalculate ? (
           <Button type="button" variant="outline" size="sm" disabled={pending} onClick={recalculate}>
             <RefreshCw aria-hidden />
-            {pending && step === 'idle' ? 'Working…' : 'Recalculate'}
+            {pending && recalculating ? 'Working…' : 'Recalculate'}
           </Button>
         ) : null}
         {recalcError ? (
