@@ -10,12 +10,16 @@ import {
 import {
   type CandidateAdded,
   type CapResult,
+  type Deleted,
   type HireWriteContext,
   addCandidate,
   attachCandidateCv,
   closeApplication,
   createJob,
   deleteJob,
+  deleteApplication,
+  deleteCandidate,
+  deletionSummary,
   moveApplication,
   rateApplication,
   reopenApplication,
@@ -26,6 +30,7 @@ import {
   updateJob,
 } from '@/lib/hire/capabilities';
 import { isPdf, removeCv, signedCvUrl, storeCv } from '@/lib/hire/cv-store';
+import type { Removal } from '@/lib/hire/deletion';
 import { careersPath } from '@/lib/hire/public-careers';
 import { createClient } from '@/lib/supabase/server';
 import { serviceClient } from '@/lib/supabase/service';
@@ -415,4 +420,40 @@ export async function updateCandidateAction(input: unknown): Promise<CapResult<{
   const result = await updateCandidate(ctx, input as never);
   if (result.ok) for (const path of CANDIDATE_PATHS) revalidatePath(path);
   return result;
+}
+
+// ─── deleting an application or a candidate ─────────────────────────────────
+
+/**
+ * Deleting one application: its interviews and its CV file go with it, the
+ * candidate stays. The input is the application's id and nothing else. Every
+ * screen that shows an application, a candidate or a number worked out from
+ * them is fetched again: a pool row's rating and label can change too.
+ */
+export async function deleteApplicationAction(input: unknown): Promise<CapResult<Deleted>> {
+  const ctx = await writeCtx();
+  if (!ctx) return FORBIDDEN;
+  const result = await deleteApplication(ctx, input as never);
+  if (result.ok) for (const path of CANDIDATE_PATHS) revalidatePath(path);
+  return result;
+}
+
+/** Deleting one candidate with every application, interview and CV file of theirs. The input is the candidate's id. */
+export async function deleteCandidateAction(input: unknown): Promise<CapResult<Deleted>> {
+  const ctx = await writeCtx();
+  if (!ctx) return FORBIDDEN;
+  const result = await deleteCandidate(ctx, input as never);
+  if (result.ok) for (const path of CANDIDATE_PATHS) revalidatePath(path);
+  return result;
+}
+
+/**
+ * What a deletion would remove right now, for the confirm dialog. Only for
+ * someone who may edit, and only from their own workspace: counts and names,
+ * never a storage path or a contact detail. Nothing is changed.
+ */
+export async function getDeletionSummaryAction(input: unknown): Promise<CapResult<Removal>> {
+  const ctx = await writeCtx();
+  if (!ctx) return FORBIDDEN;
+  return deletionSummary(ctx, input as never);
 }
