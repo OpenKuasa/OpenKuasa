@@ -243,6 +243,56 @@ testWithSupabase('a voucher that settles no document is approved in the owner\'s
   expect((await a.c.from('finance_transactions').delete().eq('id', draft!.id)).error).toBeNull();
 });
 
+// Every user this file can make owns its workspace (see the note at the top), so the member's own attempt is
+// in the check script. What is proved here is the rule that stops a member: approved_at and approved_by are
+// written by the database and by nobody's update, not even an owner's, so nobody approves by writing them.
+testWithSupabase('nobody approves a payment or an expense by writing approved_at: the database records it, or refuses', async () => {
+  const { data: draft } = await a.c
+    .from('finance_transactions')
+    .insert({ org_id: a.orgId, direction: 'out', account_id: a.bank, amount: 500, method: 'cash', category_id: a.rent })
+    .select('id')
+    .single();
+  const now = new Date().toISOString();
+  const byHand = await a.c.from('finance_transactions').update({ approved_at: now, approved_by: a.userId }).eq('id', draft!.id);
+  expect(byHand.error?.code).toBe('FIN14');
+  const timeOnly = await a.c.from('finance_transactions').update({ approved_at: now }).eq('id', draft!.id);
+  expect(timeOnly.error?.code).toBe('FIN14');
+  const withStatus = await a.c
+    .from('finance_transactions')
+    .update({ status: 'scheduled', approved_at: '2020-01-01T00:00:00Z' })
+    .eq('id', draft!.id);
+  expect(withStatus.error?.code).toBe('FIN14');
+  expect(await txn(a.c, draft!.id)).toMatchObject({ status: 'draft', approved_by: null, approved_at: null });
+
+  // Scheduled by its owner with nothing written by hand, the database names them and the time, and the two then stay as they are.
+  expect((await a.c.from('finance_transactions').update({ status: 'scheduled' }).eq('id', draft!.id)).error).toBeNull();
+  const approved = await txn(a.c, draft!.id);
+  expect(approved).toMatchObject({ status: 'scheduled', approved_by: a.userId });
+  expect(approved.approved_at).not.toBeNull();
+  const blanked = await a.c.from('finance_transactions').update({ approved_by: null }).eq('id', draft!.id);
+  expect(blanked.error?.code).toBe('FIN14');
+  expect((await txn(a.c, draft!.id)).approved_by).toBe(a.userId);
+  expect((await a.c.from('finance_transactions').delete().eq('id', draft!.id)).error).toBeNull();
+
+  // The same for an expense: saved by its owner it is approved in their name, and that name is not blanked by hand.
+  const saved = await saveExpense(a, 30);
+  expect(saved.error, saved.error?.message).toBeNull();
+  const erased = await a.c.from('finance_expenses').update({ approved_by: null }).eq('id', saved.data);
+  expect(erased.error?.code).toBe('FIN01');
+  expect((await expense(a.c, saved.data)).approved_by).toBe(a.userId);
+  // Created pending with an approver written in, it is stored as nobody's decision.
+  const { data: pending, error: pendingErr } = await a.c
+    .from('finance_expenses')
+    .insert({ org_id: a.orgId, category_id: a.rent, vendor_name: 'Sneaky', amount: 1, approved_by: a.userId, approved_at: now })
+    .select('id, status, approved_by, approved_at')
+    .single();
+  expect(pendingErr, pendingErr?.message).toBeNull();
+  expect(pending).toMatchObject({ status: 'pending', approved_by: null, approved_at: null });
+  const written = await a.c.from('finance_expenses').update({ approved_at: now }).eq('id', pending!.id);
+  expect(written.error?.code).toBe('FIN14');
+  expect((await a.c.from('finance_expenses').delete().eq('id', pending!.id)).error).toBeNull();
+});
+
 testWithSupabase('a cash receipt is a draft until it is posted, and a draft holds what it is split across', async () => {
   const income = await saveReceipt(a, { party_name: 'Walk-in', category_id: a.sales, amount: 80, account_id: a.till });
   expect(income.error, income.error?.message).toBeNull();
