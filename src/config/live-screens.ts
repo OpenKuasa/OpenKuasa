@@ -47,6 +47,7 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'people/my-attendance',
   'people/my-goals',
   'people/my-documents',
+  'people/my-payslips',
   'people/records',
   'people/leave',
   'people/time-off',

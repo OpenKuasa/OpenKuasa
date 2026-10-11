@@ -15,7 +15,7 @@ describe('Lekiu navigation by role', () => {
   });
 
   it.each(['owner', 'admin'] as const)('shows an %s every page', (role) => {
-    expect(slugs(role)).toHaveLength(29);
+    expect(slugs(role)).toHaveLength(30);
   });
 
   it.each(['member', 'viewer'] as const)('hides the HR pages from a %s, and the sections left empty', (role) => {
@@ -23,7 +23,7 @@ describe('Lekiu navigation by role', () => {
     for (const slug of HR_ONLY) expect(seen).not.toContain(slug);
     expect(seen).toContain('employees');
     expect(seen).toContain('public-holidays');
-    expect(seen).toHaveLength(21);
+    expect(seen).toHaveLength(22);
     const labels = visibleSections(people, { role, isDemo: false }).map((s) => s.label);
     expect(labels).not.toContain('Payroll');
     expect(labels).not.toContain('Configuration');
@@ -38,7 +38,7 @@ describe('Lekiu navigation by role', () => {
   });
 
   it('shows a demo visitor every page, whatever their role', () => {
-    expect(slugs('viewer', true)).toHaveLength(29);
+    expect(slugs('viewer', true)).toHaveLength(30);
   });
 
   it('changes nothing for the other products', () => {

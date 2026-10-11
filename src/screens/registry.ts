@@ -43,6 +43,7 @@ import AnnouncementsScreen from '@/screens/people/announcements';
 import MyAttendanceScreen from '@/screens/people/my-attendance';
 import MyGoalsScreen from '@/screens/people/my-goals';
 import MyDocumentsScreen from '@/screens/people/my-documents';
+import MyPayslipsScreen from '@/screens/people/my-payslips';
 import RecordsScreen from '@/screens/people/records';
 import LeaveScreen from '@/screens/people/leave';
 import TimeOffScreen from '@/screens/people/time-off';
@@ -146,6 +147,7 @@ export const SCREENS: Record<string, ComponentType> = {
   'people/my-attendance': MyAttendanceScreen,
   'people/my-goals': MyGoalsScreen,
   'people/my-documents': MyDocumentsScreen,
+  'people/my-payslips': MyPayslipsScreen,
   'people/records': RecordsScreen,
   'people/leave': LeaveScreen,
   'people/time-off': TimeOffScreen,

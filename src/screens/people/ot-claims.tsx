@@ -3,9 +3,10 @@ import { BentoCard } from '@/components/bento/bento';
 import { BarGroup, type Series } from '@/components/charts';
 import { NewOvertimeDialog } from '@/components/people/new-overtime-dialog';
 import { todayInMalaysia } from '@/lib/people/dates';
+import { overtimeCancelOffered, paidOvertimeById } from '@/lib/people/overtime';
 import { buildOtModel } from '@/lib/people/requests';
 import { rm } from '@/lib/reach/format';
-import { Muted, loadPeople } from './parts';
+import { Muted, StatusPill, loadPeople } from './parts';
 import { MyRequestsScreen, StatusCell, requestCancelCell, requestHeaderAction } from './my-requests';
 
 const dash = '—';
@@ -13,12 +14,15 @@ const OT_SERIES: Series[] = [{ key: 'hours', label: 'OT hours', color: 'var(--ch
 
 /** Your own overtime claims. */
 export default async function OtClaimsScreen() {
-  const { model, viewer } = await loadPeople('ot-claims', async (data, now, ctx) => {
+  const { model: loaded, viewer } = await loadPeople('ot-claims', async (data, now, ctx) => {
     const today = todayInMalaysia(now);
     // Not linked to an employee: nothing to read, the builder answers "not linked".
-    if (ctx.viewer.employeeId === null) return buildOtModel([], ctx.viewer, today);
-    return buildOtModel(await data.listOvertime(), ctx.viewer, today);
+    if (ctx.viewer.employeeId === null) return { model: buildOtModel([], ctx.viewer, today), paid: new Map<string, string>() };
+    const records = await data.listOvertime();
+    return { model: buildOtModel(records, ctx.viewer, today), paid: paidOvertimeById(records) };
   });
+  const model = loaded?.model ?? null;
+  const paid = loaded?.paid ?? new Map<string, string>();
   const ot = model?.linked ? model : null;
   const month = ot?.overtime.month;
   const hasHistory = (ot?.overtime.by_month ?? []).some((b) => b.value > 0);
@@ -86,8 +90,11 @@ export default async function OtClaimsScreen() {
           r.dayKind,
           r.rate,
           <span key="a" className="tabular-nums">{r.amount}</span>,
-          <StatusCell key="s" status={r.status} note={r.note} />,
-          <span key="c">{requestCancelCell({ cancellable: r.cancellable, isDemo: viewer.isDemo, kind: 'overtime', id: r.id })}</span>,
+          <span key="s" className="flex flex-col items-start gap-1">
+            <StatusCell status={r.status} note={r.note} />
+            {paid.has(r.id) ? <StatusPill tone="good">{paid.get(r.id)}</StatusPill> : null}
+          </span>,
+          <span key="c">{requestCancelCell({ cancellable: overtimeCancelOffered(r.cancellable, paid.get(r.id)), isDemo: viewer.isDemo, kind: 'overtime', id: r.id })}</span>,
         ],
       }))}
       emptyText="You haven't claimed any overtime yet"

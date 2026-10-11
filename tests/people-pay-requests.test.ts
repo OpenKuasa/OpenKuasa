@@ -310,6 +310,19 @@ describe('what a refusal looks like to the caller', () => {
     }
   });
 
+  it('turns PAY_IN_PAID_RUN into the payroll sentence from cancel and decide overtime', async () => {
+    for (const [rpc, run] of [
+      ['hr_cancel_overtime', (c: never) => cancelOvertime(ctxOf(c), { id: REQ })],
+      ['hr_decide_overtime', (c: never) => decideOvertime(ctxOf(c), { id: REQ, approve: false })],
+    ] as const) {
+      const { client } = fakeSupabase({ [`rpc.${rpc}`]: { error: { code: 'P0001', message: 'PAY_IN_PAID_RUN' } } });
+      expect(await run(client as never), rpc).toEqual({
+        ok: false,
+        error: 'This overtime was paid in a payroll run. Undo paid on that run first.',
+      });
+    }
+  });
+
   it('matches on the leading code, so text after it does not matter', async () => {
     const { client } = fakeSupabase({ 'rpc.hr_submit_claim': { error: { code: 'P0001', message: 'PAY_BAD_RECEIPT: anything' } } });
     expect(await submitClaim(ctxOf(client), CLAIM)).toEqual({ ok: false, error: PAY_REFUSALS.PAY_BAD_RECEIPT });
