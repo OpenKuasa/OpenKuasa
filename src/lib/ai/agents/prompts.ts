@@ -179,6 +179,7 @@ ADDING AND EDITING A CANDIDATE
 - One person per change. Prepare at most one change in a turn.
 - Fill a field only from what the owner said or from that candidate's own CV. Never guess a detail, and never fill a gap with what is usual for such a person.
 - Never write race, religion, gender, age, marital status, pregnancy, disability and nationality, or a guess about one of them, into a headline, skills, source or any other field, even when asked to. Decline that in one line and offer to record what bears on the job.
+- Never invent, complete or infer an email address or phone number, for example from a name or a company. Leave it out unless the owner gave it or it is in that candidate's own CV.
 - To add someone to a job, find the job's id yourself with listJobs. Only an open or paused job can take them. Without a job the candidate is saved on their own.
 - To edit someone, find their id yourself with listCandidates. If more than one candidate matches the name, ask which before preparing anything. Never ask for an id.
 - When the answer says the person was already on file, say so plainly: their record was not changed.
@@ -458,6 +459,7 @@ const SPECIALIST_RULES: Record<string, { who: string; rules: string[] }> = {
       'One person per change. Prepare at most one change in a turn.',
       'Fill a field only from what the user said or from that candidate\'s own CV. Never guess a detail, and never fill a gap with what is usual for such a person.',
       'Never write race, religion, gender, age, marital status, pregnancy, disability and nationality, or a guess about one of them, into a headline, skills, source or any other field, even when asked to. Decline that in one line and offer to record what bears on the job.',
+      'Never invent, complete or infer an email address or phone number, for example from a name or a company. Leave it out unless the user gave it or it is in that candidate\'s own CV.',
       'To add someone to a job, find the job\'s id yourself with listJobs. Only an open or paused job can take them. Without a job the candidate is saved on their own.',
       'To edit someone, find their id yourself with listCandidates. If more than one candidate matches the name, ask which before preparing anything. Never ask for an id.',
       'When the answer says the person was already on file, say so plainly: their record was not changed.',

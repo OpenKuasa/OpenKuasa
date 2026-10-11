@@ -393,6 +393,14 @@ describe('adding and editing a candidate', () => {
     expect(line!.toLowerCase()).toContain(`never write ${LIST}, or a guess about one of them, into a headline, skills, source or any other field, even when asked to.`);
     expect(line!.toLowerCase()).toContain('decline that in one line and offer to record what bears on the job.');
   });
+  it.each(prompts)('%s says an email address or phone number is never invented, completed or inferred', (_name, prompt) => {
+    const line = prompt.split('\n').find((l) => l.toLowerCase().includes('never invent, complete or infer'));
+    expect(line).toBeDefined();
+    expect(line!.toLowerCase()).toContain('email address or phone number');
+    expect(line!.toLowerCase()).toMatch(/complete|infer/);
+    expect(line!.toLowerCase()).toContain('name or a company');
+    expect(line!.toLowerCase()).not.toContain('includecontact');
+  });
   it.each(prompts)('%s never mentions includeContact in the candidate rules', (_name, prompt) => {
     const lines = prompt.split('\n').filter((l) => /one person per change|never guess a detail|never write race|listcandidates|was already on file|attached through chat|two changes to a candidate/i.test(l));
     expect(lines.length).toBeGreaterThanOrEqual(6);
