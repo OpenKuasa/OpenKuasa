@@ -4,9 +4,10 @@ import {
   buildLeaveModel,
   buildOtModel,
   buildTimeOffModel,
+  canCancelRequest,
 } from '@/lib/people/requests';
 import { createSeedPeopleData } from '@/lib/people/seed';
-import { DEMO_EMPLOYEE_ID, type PeopleViewer } from '@/lib/people/types';
+import { DEMO_EMPLOYEE_ID, type LeaveRequest, type PeopleViewer, type TimeOffRequest } from '@/lib/people/types';
 
 const NOW = new Date('2026-10-09T04:00:00Z');
 const TODAY = '2026-10-09';
@@ -215,5 +216,65 @@ describe('buildOtModel', () => {
     expect(model.overtime.by_rate).toEqual([]);
     expect(model.rows).toEqual([]);
     noNaN(model);
+  });
+});
+
+describe('canCancelRequest', () => {
+  it('allows a pending request, whatever its date', () => {
+    expect(canCancelRequest('pending', '2026-10-01', TODAY)).toBe(true);
+    expect(canCancelRequest('pending', '2026-12-01', TODAY)).toBe(true);
+  });
+
+  it('allows an approved request only when it starts after today', () => {
+    expect(canCancelRequest('approved', '2026-10-10', TODAY)).toBe(true);
+    expect(canCancelRequest('approved', TODAY, TODAY)).toBe(false);
+    expect(canCancelRequest('approved', '2026-10-01', TODAY)).toBe(false);
+  });
+
+  it('never allows a rejected or cancelled request', () => {
+    expect(canCancelRequest('rejected', '2026-12-01', TODAY)).toBe(false);
+    expect(canCancelRequest('cancelled', '2026-12-01', TODAY)).toBe(false);
+  });
+
+  it('marks each leave and time-off row with the rule', () => {
+    const leave = (start: string, status: 'pending' | 'approved'): LeaveRequest => ({
+      id: `l-${status}-${start}`,
+      employee_id: 'e',
+      employee_name: 'E',
+      leave_type: 'annual',
+      start_date: start,
+      end_date: start,
+      days: 1,
+      half_day: false,
+      reason: null,
+      status,
+      decision_note: null,
+      created_at: '2026-10-01T00:00:00Z',
+    });
+    const model = buildLeaveModel([leave('2026-10-20', 'approved'), leave('2026-10-05', 'approved')], [], MEMBER_E, TODAY);
+    if (!model.linked) throw new Error('expected linked');
+    expect(Object.fromEntries(model.rows.map((r) => [r.id, r.cancellable]))).toEqual({
+      'l-approved-2026-10-20': true,
+      'l-approved-2026-10-05': false,
+    });
+
+    const off = (date: string, status: 'pending' | 'approved'): TimeOffRequest => ({
+      id: `t-${status}-${date}`,
+      employee_id: 'e',
+      employee_name: 'E',
+      off_date: date,
+      start_time: '09:00:00',
+      end_time: '11:00:00',
+      reason: null,
+      status,
+      decision_note: null,
+      created_at: '2026-10-01T00:00:00Z',
+    });
+    const timeOff = buildTimeOffModel([off('2026-10-20', 'pending'), off(TODAY, 'approved')], MEMBER_E, TODAY);
+    if (!timeOff.linked) throw new Error('expected linked');
+    expect(Object.fromEntries(timeOff.rows.map((r) => [r.id, r.cancellable]))).toEqual({
+      't-pending-2026-10-20': true,
+      [`t-approved-${TODAY}`]: false,
+    });
   });
 });

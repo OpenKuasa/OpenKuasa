@@ -37,10 +37,21 @@ const dayOrDash = (instant: string) => {
 const newestFirst = <T extends { created_at: string }>(rows: T[], dateOf: (row: T) => string): T[] =>
   [...rows].sort((a, b) => dateOf(b).localeCompare(dateOf(a)) || b.created_at.localeCompare(a.created_at));
 
+/**
+ * Whether the person may cancel their own request: while it waits, or once
+ * approved and not yet started (its first day is after today). The database
+ * makes the same call; this only decides whether to show the button.
+ */
+export function canCancelRequest(status: RequestStatus, startDate: string, today: string): boolean {
+  return status === 'pending' || (status === 'approved' && startDate > today);
+}
+
 /* ---- Leave ---------------------------------------------------------- */
 
 export type LeaveRow = {
   id: string;
+  /** Whether the Cancel button shows. */
+  cancellable: boolean;
   type: string;
   from: string;
   to: string;
@@ -101,6 +112,7 @@ export function buildLeaveModel(
     unpaid_days: byType.find((t) => t.leave_type === 'unpaid')?.days ?? 0,
     rows: newestFirst(mine, (r) => r.start_date).map((r) => ({
       id: r.id,
+      cancellable: canCancelRequest(r.status, r.start_date, today),
       type: leaveLabel(r.leave_type),
       from: formatDate(r.start_date),
       to: formatDate(r.end_date),
@@ -115,6 +127,8 @@ export function buildLeaveModel(
 
 export type TimeOffRow = {
   id: string;
+  /** Whether the Cancel button shows. */
+  cancellable: boolean;
   date: string;
   from: string;
   to: string;
@@ -155,6 +169,7 @@ export function buildTimeOffModel(
     hours: sum(inMonth.filter((r) => r.status === 'approved' || r.status === 'pending').map(hoursOf)),
     rows: newestFirst(mine, (r) => r.off_date).map((r) => ({
       id: r.id,
+      cancellable: canCancelRequest(r.status, r.off_date, today),
       date: formatDate(r.off_date),
       from: r.start_time.slice(0, 5),
       to: r.end_time.slice(0, 5),

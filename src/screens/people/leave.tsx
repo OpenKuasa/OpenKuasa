@@ -1,17 +1,18 @@
 import { PieChart, Scale } from 'lucide-react';
 import { BentoCard } from '@/components/bento/bento';
 import { DonutStat, type Slice } from '@/components/charts';
+import { ApplyLeaveDialog } from '@/components/people/apply-leave-dialog';
 import { Progress } from '@/components/ui/progress';
 import { todayInMalaysia } from '@/lib/people/dates';
 import { buildLeaveModel } from '@/lib/people/requests';
 import { DEPARTMENT_COLORS, Muted, loadPeople } from './parts';
-import { MyRequestsScreen, StatusCell } from './my-requests';
+import { MyRequestsScreen, StatusCell, requestCancelCell, requestHeaderAction } from './my-requests';
 
 const dash = '—';
 
 /** Your own leave: balances, what you have taken and every request you made. */
 export default async function LeaveScreen() {
-  const { model } = await loadPeople('leave', async (data, now, ctx) => {
+  const { model, viewer } = await loadPeople('leave', async (data, now, ctx) => {
     const today = todayInMalaysia(now);
     // Not linked to an employee: nothing to read, the builder answers "not linked".
     if (ctx.viewer.employeeId === null) return buildLeaveModel([], [], ctx.viewer, today);
@@ -35,6 +36,12 @@ export default async function LeaveScreen() {
       title="Leave"
       subtitle="Your leave balance and requests"
       laterLabel="Apply Leave"
+      headerAction={requestHeaderAction({
+        model,
+        isDemo: viewer.isDemo,
+        label: 'Apply Leave',
+        apply: <ApplyLeaveDialog />,
+      })}
       model={model}
       kpis={[
         {
@@ -99,10 +106,10 @@ export default async function LeaveScreen() {
         </>
       }
       tableSubtitle="Leave applications and their status"
-      columns={['Type', 'From', 'To', 'Days', 'Status', 'Applied']}
+      columns={['Type', 'From', 'To', 'Days', 'Status', 'Applied', 'Actions']}
       rows={(leave?.rows ?? []).map((r) => ({
         key: r.id,
-        cells: [r.type, r.from, r.to, <span key="d" className="tabular-nums">{r.days}</span>, <StatusCell key="s" status={r.status} />, <span key="a" className="text-muted-foreground">{r.applied}</span>],
+        cells: [r.type, r.from, r.to, <span key="d" className="tabular-nums">{r.days}</span>, <StatusCell key="s" status={r.status} />, <span key="a" className="text-muted-foreground">{r.applied}</span>, <span key="c">{requestCancelCell({ cancellable: r.cancellable, isDemo: viewer.isDemo, kind: 'leave', id: r.id })}</span>],
       }))}
       emptyText="You haven't applied for any leave yet"
     />
