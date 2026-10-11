@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { RunResult } from '@/lib/people/payroll-writes';
 
 const executed = vi.hoisted(() => ({
   counts: {} as Record<string, number>,
@@ -36,8 +37,8 @@ vi.mock('@/lib/people/payroll-writes', async (importOriginal) => {
   };
   return {
     ...actual,
-    runPayroll: record('runPayroll', { run_id: 'r1', month: '2026-10', payslips: 3, skipped: [] }),
-    recalculatePayroll: record('recalculatePayroll', { run_id: 'r1', month: '2026-10', payslips: 3, added: 0, skipped: [] }),
+    runPayroll: record('runPayroll', { run_id: 'r1', month: '2026-10', payslips: 3, earlier_overtime: 0, skipped: [] } satisfies RunResult),
+    recalculatePayroll: record('recalculatePayroll', { run_id: 'r1', month: '2026-10', payslips: 3, added: 0, earlier_overtime: 0, skipped: [] } satisfies RunResult),
     savePayslipLine: record('savePayslipLine', { ...saved, line: { id: 'l1', kind: 'earning', source: 'hr', label: 'x', amount_cents: 1 } }),
     deletePayslipLine: record('deletePayslipLine', saved),
     setPayslipStatutory: record('setPayslipStatutory', saved),
@@ -77,7 +78,7 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
 
 const { runLekiu } = await import('@/lib/ai/agents/orchestrator');
 const { createSeedPeopleData } = await import('@/lib/people/seed');
-const { approvalTitle } = await import('@/lib/chat/change-titles');
+const { approvalTitle, nameIn } = await import('@/lib/chat/change-titles');
 
 const ME = '22222222-2222-4222-8222-222222222222';
 const OTHER = '33333333-3333-4333-8333-333333333333';
@@ -236,6 +237,57 @@ describe('Lekiu’s payroll changes require approval', () => {
     await second.consumeStream();
     expect(ran(c.write)).toBe(0);
     expect(await second.text).toBe('Done.');
+  });
+
+  it.each(['', '2026-13', 'bulan ni'])('runPayroll sent a month of %j is refused by the schema: no card, no write', async (month) => {
+    for (const tool of ['runPayroll', 'recalculatePayroll']) {
+      reset(tool, { month });
+      const result = runLekiu(ask, asOwner);
+      await result.consumeStream();
+      const parts = (await result.content) as Part[];
+      expect(Object.values(executed.counts).reduce((sum, n) => sum + n, 0), tool).toBe(0);
+      expect(parts.some((p) => p.type === 'tool-approval-request'), tool).toBe(false);
+    }
+  });
+
+  it.each([
+    ['savePayslipLine', { payslip_id: SLIP, kind: 'earning', label: 'Bonus', amount: 'a lot' }],
+    ['savePayslipLine', { payslip_id: SLIP, kind: 'earning', label: '   ', amount: '5' }],
+    ['setPayslipStatutory', { payslip_id: SLIP, field: 'epf', amount: '12.345' }],
+  ])('%s with %j is refused by the schema before any card', async (tool, sent) => {
+    reset(tool, sent);
+    const result = runLekiu(ask, asOwner);
+    await result.consumeStream();
+    const parts = (await result.content) as Part[];
+    expect(Object.values(executed.counts).reduce((sum, n) => sum + n, 0)).toBe(0);
+    expect(parts.some((p) => p.type === 'tool-approval-request')).toBe(false);
+  });
+
+  it('the card read with a finder built from an earlier listPayslips result names the employee, the line and the old figure', async () => {
+    const lookup = {
+      tool: 'listPayslips',
+      output: {
+        payslips: [
+          {
+            id: SLIP, employee: 'Aisyah Rahim', month: '2026-10', status: 'pending', epf: 'RM 605.00', socso: 'RM 80.00', eis: 'RM 11.00', pcb: 'RM 120.00',
+            lines: [{ id: LINE, kind: 'earning', source: 'hr', label: 'Sales commission', amount: 'RM 850.00' }],
+          },
+        ],
+      },
+    };
+    const find = nameIn([lookup]);
+    const cases: [Case, string][] = [
+      [CASES[9], "Change SOCSO on Aisyah Rahim's October 2026 payslip from RM 80.00 to RM 0.00?"],
+      [CASES[3], "Add the earning “Sales commission”, RM 200.00 to Aisyah Rahim's October 2026 payslip?"],
+      [CASES[4], "Change the earning “Sales commission”, RM 850.00 on Aisyah Rahim's October 2026 payslip to the deduction “Uniform”, RM 1,200.50?"],
+      [CASES[6], "Remove the earning “Sales commission”, RM 850.00 from Aisyah Rahim's October 2026 payslip?"],
+      [CASES[10], "Change EIS on Aisyah Rahim's October 2026 payslip from RM 11.00 to RM 110.50?"],
+      [CASES[11], "Remove Aisyah Rahim's October 2026 payslip from the draft?"],
+    ];
+    for (const [c, title] of cases) {
+      const { call } = await firstTurn(c);
+      expect(approvalTitle(c.tool, call?.input, find), c.tool).toBe(title);
+    }
   });
 
   it('a call the schema refuses (no payslip id, an empty payslip id, a missing statutory amount) never reaches a card or a write', async () => {

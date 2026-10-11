@@ -57,7 +57,7 @@ describe('approval cards for HR changes', () => {
 
   it('warns what goes with a deleted employee', () => {
     expect(approvalDetail('deleteEmployee')).toBe(
-      'Their leave, claims, payslips and every other HR record are deleted too. This cannot be undone.',
+      'Their leave, claims, draft payslips and every other HR record are deleted too. This cannot be undone. Someone with a paid payslip cannot be deleted: make them inactive instead.',
     );
     expect(approvalDetail('deleteDepartment')).toBe('This cannot be undone.');
     expect(approvalDetail('updateEmployee')).toBeNull();
@@ -652,7 +652,7 @@ describe('approval cards for payroll', () => {
   it('collects payslip and line names so a later turn can still say what an id refers to', () => {
     const names = collectNames(lookups);
     expect(Object.keys(names)).toEqual(expect.arrayContaining([`payslip:${SLIP}`, `payslip-line:${LINE}`, `payslip-line:${SYSTEM}`]));
-    expect(JSON.parse(names[`payslip-line:${LINE}`])).toEqual({ employee: 'Aisyah Rahim', month: '2026-10', kind: 'earning', label: 'Sales commission', amount: 'RM 850.00' });
+    expect(JSON.parse(names[`payslip-line:${LINE}`])).toMatchObject({ employee: 'Aisyah Rahim', month: '2026-10', kind: 'earning', label: 'Sales commission', amount: 'RM 850.00', source: 'hr' });
   });
 
   it('what someone typed in a line name stays inside the quotes and never changes the question', () => {
@@ -668,5 +668,147 @@ describe('approval cards for payroll', () => {
     expect(approvalDetail('setPayslipStatutory', { payslip_id: SLIP, field: 'epf', amount: '1' })).toContain('proposals for you to confirm, not official amounts');
     expect(approvalDetail('runPayroll', { month: '2026-10' })).toBeNull();
     expect(approvalDetail('recalculatePayroll', { month: '2026-10' })).toBeNull();
+  });
+});
+
+describe('payroll cards keep up with changes made in the same conversation', () => {
+  const SLIP = '77777777-7777-4777-8777-777777777777';
+  const OTHER_SLIP = '77777777-7777-4777-8777-777777777778';
+  const LINE = '88888888-8888-4888-8888-888888888888';
+  const NEW_LINE = '88888888-8888-4888-8888-888888888890';
+  const SYSTEM = '88888888-8888-4888-8888-888888888889';
+  const OTHERS_LINE = '88888888-8888-4888-8888-888888888891';
+  const row = (over: Record<string, unknown> = {}) => ({
+    id: SLIP,
+    employee_id: EMP,
+    employee: 'Aisyah Rahim',
+    month: '2026-10',
+    run_status: 'draft',
+    status: 'pending',
+    epf: 'RM 605.00',
+    socso: 'RM 80.00',
+    eis: 'RM 11.00',
+    pcb: 'RM 120.00',
+    lines: [
+      { id: LINE, kind: 'earning', source: 'hr', label: 'Sales commission', amount: 'RM 850.00' },
+      { id: SYSTEM, kind: 'earning', source: 'overtime', label: 'Overtime, 5 Oct 2026, 2 h', amount: 'RM 90.00' },
+    ],
+    ...over,
+  });
+  const lookup = (rows = [row()]) => ({ tool: 'listPayslips', output: { total: rows.length, payslips: rows } });
+  const slip = (over: Record<string, unknown> = {}) => ({
+    payslip_id: SLIP,
+    employee_id: EMP,
+    employee: 'Aisyah Rahim',
+    month: 'October 2026',
+    period: '2026-10',
+    epf: 'RM 605.00',
+    socso: 'RM 80.00',
+    eis: 'RM 11.00',
+    pcb: 'RM 120.00',
+    status: 'pending',
+    ...over,
+  });
+  const done = (tool: string, data: Record<string, unknown>) => ({ tool, output: { ok: true, data } });
+  const setEpf = (amount: string) => ({ payslip_id: SLIP, field: 'epf', amount });
+
+  it('after an approved change the next card compares with what was just set, not with the lookup', () => {
+    const find = nameIn([lookup(), done('setPayslipStatutory', slip({ epf: 'RM 620.00' }))]);
+    expect(approvalTitle('setPayslipStatutory', setEpf('630'), find)).toBe(
+      "Change EPF on Aisyah Rahim's October 2026 payslip from RM 620.00 to RM 630.00?",
+    );
+    // Setting it to what it already is says what that does.
+    expect(approvalTitle('setPayslipStatutory', setEpf('620'), find)).toBe(
+      "Keep EPF on Aisyah Rahim's October 2026 payslip at RM 620.00, fixed by hand?",
+    );
+    // A newer lookup wins over an older change, too.
+    const later = nameIn([lookup(), done('setPayslipStatutory', slip({ epf: 'RM 620.00' })), lookup([row({ epf: 'RM 700.00' })])]);
+    expect(approvalTitle('setPayslipStatutory', setEpf('630'), later)).toContain('from RM 700.00 to RM 630.00');
+  });
+
+  it('an amount equal to the current figure reads as keeping it, fixed by hand', () => {
+    expect(approvalTitle('setPayslipStatutory', setEpf('RM 605'), nameIn([lookup()]))).toBe(
+      "Keep EPF on Aisyah Rahim's October 2026 payslip at RM 605.00, fixed by hand?",
+    );
+  });
+
+  it('a line just added can be changed and removed by name', () => {
+    const added = done('savePayslipLine', slip({ line: { id: NEW_LINE, kind: 'earning', source: 'hr', label: 'Project bonus', amount: 'RM 300.00' } }));
+    const find = nameIn([lookup(), added]);
+    expect(approvalTitle('savePayslipLine', { payslip_id: SLIP, line_id: NEW_LINE, kind: 'earning', label: 'Project bonus', amount: '400' }, find)).toBe(
+      "Change the earning “Project bonus”, RM 300.00 on Aisyah Rahim's October 2026 payslip to the earning “Project bonus”, RM 400.00?",
+    );
+    expect(approvalTitle('removePayslipLine', { line_id: NEW_LINE }, find)).toBe(
+      "Remove the earning “Project bonus”, RM 300.00 from Aisyah Rahim's October 2026 payslip?",
+    );
+  });
+
+  it('a line that was removed is no longer offered as existing', () => {
+    const removed = done('removePayslipLine', slip({ removed_line_id: LINE }));
+    const find = nameIn([lookup(), removed]);
+    expect(approvalTitle('removePayslipLine', { line_id: LINE }, find)).toBe('Remove a payslip line that was not in the list above?');
+    expect(approvalTitle('savePayslipLine', { payslip_id: SLIP, line_id: LINE, kind: 'earning', label: 'x', amount: '5' }, find)).toContain(
+      'a payslip line that was not in the list above',
+    );
+    // A lookup after the removal that lists it again puts it back.
+    expect(approvalTitle('removePayslipLine', { line_id: LINE }, nameIn([lookup(), removed, lookup()]))).toContain('Sales commission');
+  });
+
+  it('a payslip that was removed is no longer offered, nor are its lines', () => {
+    const find = nameIn([lookup(), done('removePayslip', { removed: true, payslip_id: SLIP, run_id: 'r1', employee_id: EMP })]);
+    expect(approvalTitle('removePayslip', { payslip_id: SLIP }, find)).toBe('Remove a payslip that was not in the list above from the draft?');
+    expect(approvalTitle('removePayslipLine', { line_id: LINE }, find)).toBe('Remove a payslip line that was not in the list above?');
+  });
+
+  it('after a recalculation the old figures and system lines are not trusted: the new value only, no invented "from"', () => {
+    const find = nameIn([lookup(), done('recalculatePayroll', { run_id: 'r1', month: 'October 2026', period: '2026-10', payslips: 1, skipped: [] })]);
+    expect(approvalTitle('setPayslipStatutory', setEpf('630'), find)).toBe("Set EPF on Aisyah Rahim's October 2026 payslip to RM 630.00?");
+    expect(approvalTitle('removePayslipLine', { line_id: SYSTEM }, find)).toBe('Remove a payslip line that was not in the list above?');
+  });
+
+  it('a paid payslip or run is said to be paid, and the change will be refused', () => {
+    const paid = nameIn([lookup([row({ status: 'paid', run_status: 'paid', month: '2026-09' })])]);
+    const refused = "Aisyah Rahim's September 2026 payslip is already paid; this will be refused.";
+    expect(approvalTitle('savePayslipLine', { payslip_id: SLIP, kind: 'earning', label: 'x', amount: '5' }, paid)).toBe(refused);
+    expect(approvalTitle('removePayslipLine', { line_id: LINE }, paid)).toBe(refused);
+    expect(approvalTitle('setPayslipStatutory', setEpf('1'), paid)).toBe(refused);
+    expect(approvalTitle('removePayslip', { payslip_id: SLIP }, paid)).toBe(refused);
+    expect(approvalTitle('recalculatePayroll', { month: '2026-09' }, paid)).toBe('The September 2026 run is already paid; this will be refused.');
+    // The run's own status from getPayrollSummary says the same.
+    const summary = nameIn([{ tool: 'getPayrollSummary', output: { runs: [{ month: '2026-09', status: 'paid' }, { month: '2026-10', status: 'draft' }] } }]);
+    expect(approvalTitle('recalculatePayroll', { month: '2026-09' }, summary)).toBe('The September 2026 run is already paid; this will be refused.');
+    expect(approvalTitle('recalculatePayroll', { month: '2026-10' }, summary)).toBe('Recalculate the October 2026 draft? Your own lines and figures are kept.');
+    // Nothing known: a normal card.
+    expect(approvalTitle('recalculatePayroll', { month: '2026-09' }, nameIn([]))).toBe('Recalculate the September 2026 draft? Your own lines and figures are kept.');
+  });
+
+  it('a line the system works out is said so, whether it is edited or removed', () => {
+    const find = nameIn([lookup()]);
+    const said = 'the earning “Overtime, 5 Oct 2026, 2 h”, RM 90.00 is worked out by the system and can\'t be changed; this will be refused.';
+    expect(approvalTitle('removePayslipLine', { line_id: SYSTEM }, find)).toBe(`Remove ${said}`);
+    expect(approvalTitle('savePayslipLine', { payslip_id: SLIP, line_id: SYSTEM, kind: 'earning', label: 'x', amount: '5' }, find)).toBe(`Change ${said}`);
+    // Its own line is a normal card.
+    expect(approvalTitle('removePayslipLine', { line_id: LINE }, find)).not.toContain('refused');
+  });
+
+  it('a line known to belong to a different payslip reads "not on this payslip" and names nobody', () => {
+    const other = row({ id: OTHER_SLIP, employee: 'Farid Hamzah', lines: [{ id: OTHERS_LINE, kind: 'earning', source: 'hr', label: 'Bonus', amount: 'RM 10.00' }] });
+    const find = nameIn([lookup([row(), other])]);
+    const title = approvalTitle('savePayslipLine', { payslip_id: SLIP, line_id: OTHERS_LINE, kind: 'earning', label: 'x', amount: '5' }, find);
+    expect(title).toBe('Change a line that is not on this payslip? This will be refused.');
+    expect(title).not.toContain('Farid');
+    expect(title).not.toContain('Aisyah');
+  });
+
+  it('collects the newest facts for a later turn', () => {
+    const names = collectNames([lookup(), done('setPayslipStatutory', slip({ epf: 'RM 620.00' })), done('removePayslipLine', slip({ epf: 'RM 620.00', removed_line_id: LINE }))]);
+    expect(JSON.parse(names[`payslip:${SLIP}`]).figures.epf).toBe('RM 620.00');
+    expect(names[`payslip-line:${LINE}`]).toBeUndefined();
+    expect(names[`payslip-line:${SYSTEM}`]).toBeDefined();
+  });
+
+  it('a failed change changes nothing the card believes', () => {
+    const find = nameIn([lookup(), { tool: 'setPayslipStatutory', output: { ok: false, error: 'That run is already paid. Undo paid first to change it.' } }]);
+    expect(approvalTitle('setPayslipStatutory', setEpf('630'), find)).toContain('from RM 605.00');
   });
 });

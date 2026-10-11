@@ -77,7 +77,8 @@ import {
   savePayslipLine as capSavePayslipLine,
   setPayslipStatutory as capSetPayslipStatutory,
 } from '@/lib/people/payroll-writes';
-import { monthLabel as payrollMonthLabel, toLineInput, toStatutoryInput } from '@/lib/people/payroll-forms';
+import { monthLabel as payrollMonthLabel, ringgitToCents, toLineInput, toStatutoryInput } from '@/lib/people/payroll-forms';
+import { earlierOvertimeLine } from '@/lib/people/payroll';
 import { listWorkspaceMembers } from '@/lib/people/members';
 import { overtimeCalculated } from '@/lib/people/overtime';
 import {
@@ -290,21 +291,39 @@ const saveHolidayToolInput = saveHolidayInput.extend({
  * (payrollMonth, looseAmount, toLineInput, toStatutoryInput), so a card shows exactly what is saved. Extra keys are dropped.
  */
 const amountField = z.union([z.string(), z.number()]);
+/** Refused at the schema, before any card is shown: a call that can only fail never asks for approval. */
+const readableMonth = z
+  .string()
+  .trim()
+  .refine((value) => payrollMonth(value) !== null, 'The month must be a real month, as YYYY-MM (for example 2026-10).');
+const readableAmount = amountField.refine(
+  (value) => ringgitToCents(looseAmount(value)) !== null,
+  'The amount must be Ringgit above zero, like "200" or "1,200.50".',
+);
 const runPayrollToolInput = z.object({
-  month: z.string().trim().describe('The month to run, as YYYY-MM. Work "this month", "last month" or "bulan ni" out from the TODAY block.'),
+  month: readableMonth.describe('The month to run, as YYYY-MM. Work "this month", "last month" or "bulan ni" out from the TODAY block.'),
 });
 const savePayslipLineToolInput = z.object({
   payslip_id: z.guid().describe('The payslip, by its id from listPayslips.'),
   line_id: looseId('The line').describe('The line to change, by its id from listPayslips. Leave out (or empty) to add a new line.'),
   kind: z.enum(['earning', 'deduction']).describe('earning adds to the pay; deduction takes away from it.'),
-  label: z.string().describe('What the line is called, up to 80 characters, in the person\'s words (for example "Sales commission").'),
-  amount: amountField.describe('The amount in Ringgit as text, above zero, for example "200", "1,200.50" or "RM 200". Never cents.'),
+  label: z
+    .string()
+    .trim()
+    .min(1, 'Give the line a name.')
+    .max(80, 'Keep the name to 80 characters.')
+    .describe('What the line is called, 1 to 80 characters, in the person\'s words (for example "Sales commission").'),
+  amount: readableAmount.describe('The amount in Ringgit as text, above zero, for example "200", "1,200.50" or "RM 200". Never cents.'),
 });
 const setPayslipStatutoryToolInput = z.object({
   payslip_id: z.guid().describe('The payslip, by its id from listPayslips.'),
   field: z.enum(['epf', 'socso', 'eis', 'pcb']).describe('Which figure, in lower case: epf, socso, eis or pcb.'),
   amount: amountField
     .nullable()
+    .refine(
+      (value) => toStatutoryInput({ field: 'epf', amount: looseAmount(value) }).ok,
+      'The amount must be Ringgit like "110.50", or empty to go back to the proposed amount.',
+    )
     .describe('The amount in Ringgit as text, zero allowed, for example "110" or "RM 110.50". Send an empty string to put the figure back to the proposed amount.'),
 });
 
@@ -318,22 +337,30 @@ function runWords(run: RunResult, recalculated: boolean) {
   const skipped = run.skipped.map((s) => ({ employee: s.name, reason: SKIPPED_WORDS[s.reason] ?? 'could not be included' }));
   const left = skipped.length > 0 ? ` Left out: ${skipped.map((s) => `${s.employee} (${s.reason})`).join(', ')}.` : '';
   const added = recalculated && typeof run.added === 'number' ? ` ${run.added} added.` : '';
+  const earlierLine = earlierOvertimeLine(run.earlier_overtime);
+  const earlier = earlierLine ? ` ${earlierLine}` : '';
   return {
     run_id: run.run_id,
     month,
+    // The month as the next approval card reads it.
+    period: run.month,
     payslips: run.payslips,
+    earlier_overtime: run.earlier_overtime,
     ...(recalculated ? { added: run.added ?? 0 } : {}),
     skipped,
     message: recalculated
-      ? `The ${month} draft now has ${count}.${added}${left}`
-      : `Payroll for ${month} is a draft with ${count}. Nobody is paid and employees can't see it yet.${left}`,
+      ? `The ${month} draft now has ${count}.${added}${earlier}${left}`
+      : `Payroll for ${month} is a draft with ${count}. Nobody is paid and employees can't see it yet.${earlier}${left}`,
   };
 }
 
 /** A payslip after a change, in worded Ringgit: whatever the database worked out, repeated as it is. */
-const payslipWords = (p: SavedPayslip) => ({
+const payslipWords = (p: SavedPayslip, employee: string | null) => ({
   payslip_id: p.id,
   employee_id: p.employee_id,
+  // The next approval card names the payslip from this, so it stays right after a change made in the same chat.
+  ...(employee ? { employee } : {}),
+  period: p.period_month.slice(0, 7),
   month: payrollMonthLabel(p.period_month.slice(0, 7)),
   basic: rm(p.basic_cents),
   gross: rm(p.gross_cents),
@@ -965,8 +992,8 @@ export function createPeopleTools(
           );
           // Ids are what a payroll change tool is given: only a caller who holds those tools gets them.
           const withIds = !viewer.isDemo && write?.tier === 'hr';
-          // A run's status is read where a run may be read; a member cannot read runs at all.
-          const runStatus = ownOnly ? null : new Map((await data.listPayrollRuns()).map((r) => [r.id, r.status] as const));
+          // A run is a draft while its payslips are pending and paid once they are, so a payslip's own status says it.
+          const showRun = !ownOnly;
           return {
             total: rows.length,
             ...matchedNames(name, rows.map((p) => p.employee_name)),
@@ -974,7 +1001,7 @@ export function createPeopleTools(
               ...(withIds ? { id: p.id, employee_id: p.employee_id } : {}),
               employee: p.employee_name,
               month: p.period_month.slice(0, 7),
-              ...(runStatus ? { run_status: runStatus.get(p.payroll_run_id) ?? null, set_by_hr: p.set_by_hr } : {}),
+              ...(showRun ? { run_status: p.status === 'paid' ? 'paid' : 'draft', set_by_hr: p.set_by_hr } : {}),
               basic: rm(p.basic_cents),
               gross: rm(p.gross_cents),
               epf: rm(p.epf_cents),
@@ -1108,8 +1135,9 @@ export function createPeopleTools(
 
     deleteEmployee: tool({
       description:
-        'Delete an employee by id. Their leave, claims, payslips and every other HR record are deleted too, and it ' +
-        'cannot be undone. To keep the records of someone who left, use setEmployeeStatus instead. Needs approval.',
+        'Delete an employee by id. Refused when they have a paid payslip: make them inactive with setEmployeeStatus ' +
+        'instead. Otherwise their leave, claims, draft payslips and every other HR record are deleted too, and it ' +
+        'cannot be undone. Needs approval.',
       inputSchema: deleteEmployeeInput,
       execute: async (input) => change('deleteEmployee', () => capDeleteEmployee(ctx, input)),
     }),
@@ -1400,6 +1428,14 @@ export function createPeopleTools(
    * Running payroll and changing a draft: owners and admins only. Marking a run paid, undoing paid and deleting a draft
    * are deliberately not here: they exist on the Payroll screen only.
    */
+  /** The employee's name for a payslip result, or null: never worth failing a change that was made. */
+  const nameOfEmployee = async (employeeId: string): Promise<string | null> => {
+    try {
+      return (await data.listEmployees()).find((e) => e.id === employeeId)?.name ?? null;
+    } catch {
+      return null;
+    }
+  };
   const payrollTools: ToolSet = {
     runPayroll: tool({
       description:
@@ -1450,7 +1486,10 @@ export function createPeopleTools(
           const { line: saved, ...slip } = result.data;
           return {
             ok: true as const,
-            data: { ...payslipWords(slip), line: { id: saved.id, kind: saved.kind, label: saved.label, amount: rm(saved.amount_cents) } },
+            data: {
+              ...payslipWords(slip, await nameOfEmployee(slip.employee_id)),
+              line: { id: saved.id, kind: saved.kind, source: saved.source, label: saved.label, amount: rm(saved.amount_cents) },
+            },
           };
         }),
     }),
@@ -1463,7 +1502,11 @@ export function createPeopleTools(
       execute: async (input) =>
         change('removePayslipLine', async () => {
           const result = await capDeletePayslipLine(ctx, { line_id: input.line_id });
-          return result.ok ? { ok: true as const, data: payslipWords(result.data) } : result;
+          if (!result.ok) return result;
+          return {
+            ok: true as const,
+            data: { ...payslipWords(result.data, await nameOfEmployee(result.data.employee_id)), removed_line_id: input.line_id },
+          };
         }),
     }),
 
@@ -1478,7 +1521,8 @@ export function createPeopleTools(
           const figure = toStatutoryInput({ field: input.field, amount: looseAmount(input.amount) });
           if (!figure.ok) return { ok: false as const, error: figure.error };
           const result = await capSetPayslipStatutory(ctx, { payslip_id: input.payslip_id, ...figure.input });
-          return result.ok ? { ok: true as const, data: payslipWords(result.data) } : result;
+          if (!result.ok) return result;
+          return { ok: true as const, data: payslipWords(result.data, await nameOfEmployee(result.data.employee_id)) };
         }),
     }),
 
@@ -1490,7 +1534,7 @@ export function createPeopleTools(
       execute: async (input) =>
         change('removePayslip', async () => {
           const result = await capRemovePayslip(ctx, { payslip_id: input.payslip_id });
-          return result.ok ? { ok: true as const, data: { removed: true, run_id: result.data.run_id, employee_id: result.data.employee_id } } : result;
+          return result.ok ? { ok: true as const, data: { removed: true, payslip_id: input.payslip_id, run_id: result.data.run_id, employee_id: result.data.employee_id } } : result;
         }),
     }),
   };

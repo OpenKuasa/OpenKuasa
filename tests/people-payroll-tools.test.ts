@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PeopleData, PeopleViewer } from '@/lib/people/types';
+import type { RunResult } from '@/lib/people/payroll-writes';
 
 const ctl = vi.hoisted(() => ({
   ran: [] as { fn: string; orgId: string; input: unknown }[],
   fail: null as string | null,
+  earlier: 0,
 }));
 
 const SLIP = '77777777-7777-4777-8777-777777777777';
@@ -38,13 +40,22 @@ vi.mock('@/lib/people/payroll-writes', async (orig) => {
   };
   return {
     ...actual,
-    runPayroll: record('runPayroll', () => ({
+    // Typed, so a field the write path adds to a run's result and the tool drops fails to compile here.
+    runPayroll: record('runPayroll', (): RunResult => ({
       run_id: RUN,
       month: '2026-10',
       payslips: 19,
+      earlier_overtime: ctl.earlier,
       skipped: [{ employee_id: 'e9', name: 'Siti Aminah', reason: 'no_salary' }],
     })),
-    recalculatePayroll: record('recalculatePayroll', () => ({ run_id: RUN, month: '2026-10', payslips: 20, added: 1, skipped: [] })),
+    recalculatePayroll: record('recalculatePayroll', (): RunResult => ({
+      run_id: RUN,
+      month: '2026-10',
+      payslips: 20,
+      added: 1,
+      earlier_overtime: ctl.earlier,
+      skipped: [],
+    })),
     savePayslipLine: record('savePayslipLine', (input) => ({
       ...saved,
       line: { id: LINE, kind: input.kind, source: 'hr', label: input.label, amount_cents: input.amount_cents },
@@ -60,6 +71,7 @@ const { PEOPLE_WRITE_TOOL_NAMES, combineToolkits, peopleProduct } = await import
 const { createSeedPeopleData } = await import('@/lib/people/seed');
 const { asMember } = await import('./setup/people-member-view');
 const { toolMeta } = await import('@/components/chat/tool-parts');
+const { rm } = await import('@/lib/reach/format');
 
 // A Friday in Kuala Lumpur, 12:00.
 const NOW = new Date('2026-10-09T04:00:00Z');
@@ -90,6 +102,7 @@ const schemaOf = (name: string) =>
 beforeEach(() => {
   ctl.ran = [];
   ctl.fail = null;
+  ctl.earlier = 0;
 });
 
 describe('who holds the payroll tools', () => {
@@ -154,6 +167,7 @@ describe('who holds the payroll tools', () => {
       ['recalculatePayroll', 'Recalculate payroll'],
       ['savePayslipLine', 'Save payslip line'],
       ['removePayslipLine', 'Remove payslip line'],
+      ['setPayslipStatutory', 'Set payslip statutory'],
       ['removePayslip', 'Remove payslip'],
     ] as const) {
       expect(toolMeta(name).isFallback, name).toBe(true);
@@ -163,7 +177,6 @@ describe('who holds the payroll tools', () => {
 });
 
 describe('listPayslips', () => {
-  const october = (rows: Loose[], name: string) => rows.find((p) => p.employee === name && p.month === '2026-10');
 
   it('for an owner or admin: each payslip’s id, run status, figures, who set them and its lines with ids', async () => {
     const result = await run('listPayslips', { month: '2026-10', limit: 50 });
@@ -191,10 +204,29 @@ describe('listPayslips', () => {
     }
   });
 
-  it('money in a lookup is worded Ringgit and never cents', async () => {
+  it('money in a lookup is the provider\'s cents, worded as Ringgit, never cents', async () => {
     const result = await run('listPayslips', { month: '2026-10', limit: 50 });
     expect(JSON.stringify(result)).not.toMatch(/_cents/);
-    expect(october(result.payslips, result.payslips[0].employee)).toBeDefined();
+    const rows = await base.listPayslips();
+    expect(result.payslips.length).toBeGreaterThan(5);
+    for (const slip of result.payslips) {
+      const source = rows.find((p) => p.id === slip.id)!;
+      expect(slip.gross).toBe(rm(source.gross_cents));
+      expect(slip.net).toBe(rm(source.net_cents));
+      expect(slip.basic).toBe(rm(source.basic_cents));
+      expect(slip.lines.map((l: Loose) => l.amount)).toEqual(source.lines.map((l) => rm(l.amount_cents)));
+    }
+  });
+
+  it('an owner\'s run status comes from each payslip\'s own status: no read of the runs', async () => {
+    const rows = await base.listPayslips();
+    const noRuns = { ...base, listPayrollRuns: async () => { throw new Error('the runs must not be read'); } };
+    const result = await run('listPayslips', { limit: 50 }, HR_VIEWER, hr(), noRuns);
+    expect(result.payslips.length).toBeGreaterThan(5);
+    for (const slip of result.payslips) {
+      expect(slip.run_status).toBe(rows.find((p) => p.id === slip.id)!.status === 'paid' ? 'paid' : 'draft');
+    }
+    expect(new Set(result.payslips.map((s: Loose) => s.run_status))).toEqual(new Set(['draft', 'paid']));
   });
 
   it('for a member: their own paid payslips with their lines, and no id, no run status and no who-set-it', async () => {
@@ -205,9 +237,11 @@ describe('listPayslips', () => {
     const viewer: PeopleViewer = { employeeId, isHr: false, isDemo: false };
     const result = await run('listPayslips', {}, viewer, self(employeeId), asMember(base, employeeId));
     expect(result.scope).toBe('your own records only');
+    // Exactly the provider's rows for them, line for line.
+    const theirs = (await asMember(base, employeeId).listPayslips()).length;
+    expect(result.payslips.length).toBe(Math.min(theirs, 20));
     expect(result.payslips.length).toBeGreaterThan(0);
     for (const slip of result.payslips) {
-      expect(slip.status).toBe('paid');
       for (const key of ['id', 'employee_id', 'run_status', 'set_by_hr']) expect(slip, key).not.toHaveProperty(key);
       for (const line of slip.lines) {
         expect(Object.keys(line).sort()).toEqual(['amount', 'kind', 'label']);
@@ -341,6 +375,7 @@ describe('savePayslipLine', () => {
     expect(result.data).toEqual({
       payslip_id: SLIP,
       employee_id: EMP,
+      period: '2026-10',
       month: 'October 2026',
       basic: 'RM 5,000.00',
       gross: 'RM 5,500.00',
@@ -352,7 +387,7 @@ describe('savePayslipLine', () => {
       net: 'RM 4,654.00',
       set_by_hr: ['epf'],
       status: 'pending',
-      line: { id: LINE, kind: 'earning', label: 'Sales commission', amount: 'RM 1,200.50' },
+      line: { id: LINE, kind: 'earning', source: 'hr', label: 'Sales commission', amount: 'RM 1,200.50' },
     });
   });
 
@@ -375,7 +410,7 @@ describe('removePayslipLine and removePayslip', () => {
     expect(line.data).toMatchObject({ payslip_id: SLIP, month: 'October 2026', net: 'RM 4,654.00' });
     const slip = await run('removePayslip', { payslip_id: SLIP });
     expect(ctl.ran[1]).toEqual({ fn: 'removePayslip', orgId: 'org-1', input: { payslip_id: SLIP } });
-    expect(slip.data).toEqual({ removed: true, run_id: RUN, employee_id: EMP });
+    expect(slip.data).toEqual({ removed: true, payslip_id: SLIP, run_id: RUN, employee_id: EMP });
   });
 
   it('their schemas take one id and drop anything else', () => {
@@ -453,5 +488,90 @@ describe('failures', () => {
     expect(logged).not.toContain('salary');
     expect(logged).toContain('savePayslipLine');
     spy.mockRestore();
+  });
+});
+
+describe('earlier overtime in a run', () => {
+  it.each([
+    [1, 'Includes 1 overtime claim from an earlier month.'],
+    [3, 'Includes 3 overtime claims from earlier months.'],
+  ])('a run with %i says so, in the result and in the message', async (count, sentence) => {
+    ctl.earlier = count;
+    const result = await run('runPayroll', { month: '2026-10' });
+    expect(result.data.earlier_overtime).toBe(count);
+    expect(result.data.message).toContain(sentence);
+    ctl.ran = [];
+    const again = await run('recalculatePayroll', { month: '2026-10' });
+    expect(again.data.earlier_overtime).toBe(count);
+    expect(again.data.message).toContain(sentence);
+  });
+
+  it('none says nothing about it', async () => {
+    const result = await run('runPayroll', { month: '2026-10' });
+    expect(result.data.earlier_overtime).toBe(0);
+    expect(result.data.message).not.toContain('earlier');
+  });
+});
+
+describe('what a change hands back for the next card', () => {
+  const named = { ...base, listEmployees: async () => [{ ...(await base.listEmployees())[0], id: EMP, name: 'Aisyah Rahim' }] };
+  const send = (name: string, input: Record<string, unknown>) => run(name, input, HR_VIEWER, hr(), named);
+
+  it('a payslip result names the employee and the month as YYYY-MM, with the four figures and the status', async () => {
+    const result = await send('setPayslipStatutory', { payslip_id: SLIP, field: 'epf', amount: '605' });
+    expect(result.data).toMatchObject({ payslip_id: SLIP, employee: 'Aisyah Rahim', period: '2026-10', month: 'October 2026', epf: 'RM 605.00', status: 'pending' });
+  });
+
+  it('a line save carries the line; a line removal says which line went; a payslip removal says which payslip', async () => {
+    const add = await send('savePayslipLine', { payslip_id: SLIP, kind: 'earning', label: 'Bonus', amount: '300' });
+    expect(add.data.line).toEqual({ id: LINE, kind: 'earning', source: 'hr', label: 'Bonus', amount: 'RM 300.00' });
+    expect(add.data.employee).toBe('Aisyah Rahim');
+    expect((await send('removePayslipLine', { line_id: LINE })).data.removed_line_id).toBe(LINE);
+    expect((await send('removePayslip', { payslip_id: SLIP })).data).toMatchObject({ removed: true, payslip_id: SLIP });
+  });
+
+  it('a run or recalculation carries its month as YYYY-MM', async () => {
+    expect((await send('runPayroll', { month: '2026-10' })).data.period).toBe('2026-10');
+    expect((await send('recalculatePayroll', { month: '2026-10' })).data.period).toBe('2026-10');
+  });
+
+  it('an employee who cannot be looked up leaves the name out rather than failing the change', async () => {
+    const broken = { ...base, listEmployees: async () => { throw new Error('read failed'); } };
+    const result = await run('setPayslipStatutory', { payslip_id: SLIP, field: 'epf', amount: '1' }, HR_VIEWER, hr(), broken);
+    expect(result.ok).toBe(true);
+    expect(result.data).not.toHaveProperty('employee');
+  });
+});
+
+describe('what the schema refuses before any card is shown', () => {
+  const add = { payslip_id: SLIP, kind: 'earning', label: 'Bonus', amount: '5' };
+
+  it.each(['', '2026-13', '2026-00', '1999-12', 'October', '2026-10-15', 'bulan ni'])('a month of %j is refused', (month) => {
+    expect(schemaOf('runPayroll').safeParse({ month }).success).toBe(false);
+    expect(schemaOf('recalculatePayroll').safeParse({ month }).success).toBe(false);
+  });
+
+  it.each([['2026-10', '2026-10'], [' 2026-10 ', '2026-10'], ['2026-10-01', '2026-10']])('a month of %j is accepted', (month) => {
+    expect(schemaOf('runPayroll').safeParse({ month }).success).toBe(true);
+  });
+
+  it.each(['', '   ', 'x'.repeat(81)])('a line name of %j is refused', (label) => {
+    expect(schemaOf('savePayslipLine').safeParse({ ...add, label }).success).toBe(false);
+  });
+
+  it('a line name is trimmed and 80 characters is fine', () => {
+    expect(schemaOf('savePayslipLine').safeParse({ ...add, label: ` ${'x'.repeat(80)} ` }).data?.label).toBe('x'.repeat(80));
+  });
+
+  it.each(['', '0', '-5', '12.345', 'abc', 'RM', '1,20'])('a line amount of %j is refused', (amount) => {
+    expect(schemaOf('savePayslipLine').safeParse({ ...add, amount }).success).toBe(false);
+  });
+
+  it.each(['abc', '-5', '12.345', '1,20', 'RM'])('a statutory amount of %j is refused', (amount) => {
+    expect(schemaOf('setPayslipStatutory').safeParse({ payslip_id: SLIP, field: 'epf', amount }).success).toBe(false);
+  });
+
+  it.each(['', '0', 'RM 0.00', '110', null])('a statutory amount of %j is accepted', (amount) => {
+    expect(schemaOf('setPayslipStatutory').safeParse({ payslip_id: SLIP, field: 'epf', amount }).success).toBe(true);
   });
 });

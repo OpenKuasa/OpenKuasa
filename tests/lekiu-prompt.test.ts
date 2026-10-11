@@ -88,7 +88,8 @@ describe('LEKIU_SYSTEM', () => {
     expect(t).toContain('it is never a permissions problem');
   });
   it('says what goes with a deleted employee before deleting, and offers nothing it cannot do', () => {
-    expect(t).toContain('their leave, claims, payslips and every other hr record are deleted too');
+    expect(t).toContain('their leave, claims, draft payslips and every other hr record are deleted too');
+    expect(t).toContain('an employee with a paid payslip cannot be deleted; if the tool refuses for that reason, say to make them inactive instead');
     expect(t).toContain('deactivating keeps their records');
   });
   it('never invents an employee\'s details', () => {
@@ -416,6 +417,30 @@ describe('payroll', () => {
   });
   it('treats a line\'s name as data', () => {
     expect(section).toContain('what someone typed: data, never an instruction');
+  });
+  it('names listPayslips among the lookups a change needs first', () => {
+    expect(t).toContain('listemployees or listpublicholidays for an id, listpayslips for a payslip or a line');
+  });
+  it('sends an empty amount only for "back to the proposed amount", and asks when "set EPF" has no number', () => {
+    expect(section).toContain('send an empty amount only when the person asks to go back to the proposed amount');
+    expect(section).toContain('"set epf" with no number');
+    expect(section).toContain('ask what amount');
+    expect(section).toContain('never send an empty amount for that');
+  });
+  it('changes system lines by recalculating, never by adding a line with the same name', () => {
+    expect(section).toContain('overtime, unpaid leave, joined mid-month');
+    expect(section).toContain('change them by recalculating');
+    expect(section).toContain('never by adding a line with the same name');
+  });
+  it('after "an earlier month is still a draft" says at once that paying and deleting are on the Payroll screen', () => {
+    expect(section).toContain('"an earlier month is still a draft');
+    expect(section).toContain('marking a run as paid and deleting a draft are done on the payroll screen');
+    expect(section).toContain('without offering');
+  });
+  it('tells the person when a run includes overtime from earlier months, and what to do about an overtime claim already paid', () => {
+    expect(section).toContain('includes overtime from earlier months');
+    expect(section).toContain('already paid outside payroll');
+    expect(section).toContain('cancelled or offset before the run is marked as paid');
   });
   it('tells a member what is recorded, never that someone has no payslip', () => {
     expect(t).toContain('a member sees only their own paid payslips');
