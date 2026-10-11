@@ -685,7 +685,8 @@ export function ApplyForm({
           />
           <span className="min-w-0 break-words">
             I agree that {orgName} may store and use the details I&apos;ve given to consider me for this role,
-            that they are processed through OpenKuasa, and that they may be reviewed with the help of an AI assistant. <Mark required />
+            that they are processed through OpenKuasa, and that they may be reviewed with the help of an AI assistant, which sends
+            them to an AI service provider and may give the employer a recommendation. <Mark required />
           </span>
         </label>
         <Problem field="consent">{errors.consent}</Problem>
