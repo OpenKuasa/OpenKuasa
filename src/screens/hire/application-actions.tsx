@@ -16,6 +16,9 @@ import type { ApplicationState } from '@/lib/hire/lists';
 import type { ApplicationStage } from '@/lib/hire/types';
 import { cn } from '@/lib/utils';
 import { EditCandidateDialog } from '@/screens/hire/candidate-forms';
+import { deleteTargetFor } from '@/lib/hire/delete-dialog-state';
+import type { DeletionKind } from '@/lib/hire/deletion';
+import { DeleteDialog } from '@/screens/hire/delete-dialog';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -310,6 +313,9 @@ export function ApplicationActions({ application, canEdit }: { application: Appl
   const [editing, setEditing] = useState(false);
   const [edited, setEdited] = useState<string | null>(null);
   const editButton = useRef<HTMLButtonElement>(null);
+  /** Which deletion the confirm dialog is asking about, and the button that opened it. */
+  const [deleting, setDeleting] = useState<DeletionKind | null>(null);
+  const deleteOpener = useRef<HTMLElement | null>(null);
   const focusLeft = useKeepFocus(change, application, group);
   if (!canEdit) return null;
 
@@ -472,6 +478,27 @@ export function ApplicationActions({ application, canEdit }: { application: Appl
         </p>
       </div>
 
+      {/* Removing for good: last, under a rule of its own, and there whatever the outcome. */}
+      <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+        {(['application', 'candidate'] as const).map((kind) => (
+          <Button
+            key={kind}
+            type="button"
+            variant="outline"
+            size="sm"
+            className={cn(TARGET, WAITING, 'text-destructive hover:text-destructive')}
+            aria-disabled={waiting}
+            onClick={(event) => {
+              if (pending) return;
+              deleteOpener.current = event.currentTarget;
+              setDeleting(kind);
+            }}
+          >
+            {kind === 'application' ? 'Delete application' : 'Delete candidate'}
+          </Button>
+        ))}
+      </div>
+
       {/* While the confirm dialog is open the refusal is shown inside it. */}
       {change.error && change.confirming === null && (
         <p role="alert" className={ALERT_CLASS}>
@@ -490,6 +517,11 @@ export function ApplicationActions({ application, canEdit }: { application: Appl
         onClose={() => setEditing(false)}
         onSaved={setEdited}
         returnFocus={() => (editButton.current ?? group.current)?.focus()}
+      />
+      <DeleteDialog
+        target={deleting ? deleteTargetFor(deleting, application) : null}
+        onClose={() => setDeleting(null)}
+        returnFocus={() => (deleteOpener.current?.isConnected ? deleteOpener.current : group.current)?.focus()}
       />
     </div>
   );
@@ -535,6 +567,9 @@ export function ApplicationMenu({
   const [editing, setEditing] = useState(false);
   /** What the Edit candidate form said when it was saved. */
   const [edited, setEdited] = useState<string | null>(null);
+  /** A deletion was chosen: its confirm dialog opens once the menu has closed. */
+  const thenDelete = useRef<DeletionKind | null>(null);
+  const [deleting, setDeleting] = useState<DeletionKind | null>(null);
   useKeepFocus(change, application, trigger);
   const { id } = application;
   const { pending } = change;
@@ -591,6 +626,14 @@ export function ApplicationMenu({
               event.preventDefault();
               setEdited(null);
               setEditing(true);
+              return;
+            }
+            const remove = thenDelete.current;
+            if (remove) {
+              // The dialog takes focus now, and gives it back to the menu button if it is cancelled.
+              thenDelete.current = null;
+              event.preventDefault();
+              setDeleting(remove);
               return;
             }
             const ask = thenAsk.current;
@@ -675,6 +718,25 @@ export function ApplicationMenu({
               </DropdownMenuItem>
             </>
           )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            variant="destructive"
+            className={item}
+            onSelect={() => {
+              thenDelete.current = 'application';
+            }}
+          >
+            Delete application
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            variant="destructive"
+            className={item}
+            onSelect={() => {
+              thenDelete.current = 'candidate';
+            }}
+          >
+            Delete candidate
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -703,6 +765,12 @@ export function ApplicationMenu({
         onClose={() => setEditing(false)}
         onSaved={setEdited}
         returnFocus={() => trigger.current?.focus()}
+      />
+      <DeleteDialog
+        target={deleting ? deleteTargetFor(deleting, application) : null}
+        onClose={() => setDeleting(null)}
+        returnFocus={() => trigger.current?.focus()}
+        focusAfterId={columnHeadingId}
       />
     </>
   );

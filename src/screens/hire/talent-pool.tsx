@@ -33,6 +33,9 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
+import { can } from '@/lib/auth/permissions';
+import { getViewer } from '@/lib/auth/viewer';
+import { CandidateRowMenu, DeletionNotice } from '@/screens/hire/delete-dialog';
 import { buildPoolModel, type PoolModel } from '@/lib/hire/lists';
 import { LOAD_FAILED, Muted, loadHire, topSlices } from '@/screens/hire/parts';
 
@@ -92,7 +95,9 @@ function Rating({ value }: { value: number | null }) {
 }
 
 export default async function TalentPoolScreen() {
-  const { model } = await loadHire('talent-pool', (data) => buildPoolModel(data));
+  const [{ model }, viewer] = await Promise.all([loadHire('talent-pool', (data) => buildPoolModel(data)), getViewer()]);
+  // Worked out once for the screen. The action checks again on the server, so this only decides what is drawn.
+  const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
   const capped = model ? model.size > model.rows.length : false;
   const roleSlices: Slice[] = topSlices(
     model?.byTitle ?? [],
@@ -179,6 +184,8 @@ export default async function TalentPoolScreen() {
           flush
           className="col-span-2 md:col-span-12"
         >
+          {/* Where "Deleted …" is said: the row it was said about has gone. Only for someone who may edit. */}
+          {canEdit ? <DeletionNotice className="px-4 pb-2" /> : null}
           <div className="flex flex-wrap items-center gap-2 px-4">
             <div className="relative w-full sm:max-w-xs">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -264,9 +271,13 @@ export default async function TalentPoolScreen() {
                         <StatusPill status={c.status} />
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button variant="outline" size="sm" disabled title="Coming soon">
-                          Move to pipeline
-                        </Button>
+                        <div className="flex items-center justify-end gap-2">
+                          <Button variant="outline" size="sm" disabled title="Coming soon">
+                            Move to pipeline
+                          </Button>
+                          {/* The candidate's id and name, nothing else. Only for someone who may edit; the action checks again. */}
+                          {canEdit ? <CandidateRowMenu candidate={{ id: c.id, name: c.name }} /> : null}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}

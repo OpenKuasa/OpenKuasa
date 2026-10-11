@@ -37,6 +37,9 @@ vi.mock('@/app/(app)/hire/actions', () => ({
   addCandidateAction: mocks.action,
   getCandidateAction: mocks.action,
   updateCandidateAction: mocks.action,
+  deleteApplicationAction: mocks.action,
+  deleteCandidateAction: mocks.action,
+  getDeletionSummaryAction: mocks.action,
 }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: mocks.refresh }) }));
 vi.mock('@/lib/auth/viewer', () => ({ getViewer: async () => mocks.viewer }));

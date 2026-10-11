@@ -14,6 +14,7 @@ import { can } from '@/lib/auth/permissions';
 import { getViewer } from '@/lib/auth/viewer';
 import { buildApplicationsModel } from '@/lib/hire/lists';
 import { ApplicationRow } from '@/screens/hire/application-details';
+import { DeletionNotice } from '@/screens/hire/delete-dialog';
 import { LOAD_FAILED, Muted, loadHire } from '@/screens/hire/parts';
 
 /* ---- static config ------------------------------------------------ */
@@ -127,6 +128,8 @@ export default async function ApplicationsScreen() {
           flush
           className="col-span-2 md:col-span-12"
         >
+          {/* Where "Deleted …" is said: the row it was said about has gone. Only for someone who may edit. */}
+          {canEdit ? <DeletionNotice className="px-4 pt-3" /> : null}
           {!model ? LOAD_FAILED : model.rows.length === 0 ? (
             <Muted>No applications yet</Muted>
           ) : (

@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils';
 import { buildBoardModel, type BoardModel } from '@/lib/hire/lists';
 import { ApplicationMenu } from '@/screens/hire/application-actions';
 import { AddCandidate } from '@/screens/hire/candidate-forms';
+import { DeletionNotice } from '@/screens/hire/delete-dialog';
 import { FUNNEL_COLOR, LOAD_FAILED, Muted, loadHire } from '@/screens/hire/parts';
 
 type Candidate = BoardModel['stages'][number]['candidates'][number];
@@ -129,6 +130,8 @@ export default async function CandidatesScreen() {
         }
       />
 
+      {/* Where "Deleted …" is said: the card it was said about has gone. Only for someone who may edit. */}
+      {canEdit ? <DeletionNotice className="mb-3" /> : null}
       <BentoGrid className="mb-6">
         {/* KPI row: headline figures only, the tables hold no history to chart */}
         <BentoCard tone="primary" className="col-span-1 md:col-span-3">

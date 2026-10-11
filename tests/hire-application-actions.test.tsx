@@ -28,6 +28,9 @@ vi.mock('@/app/(app)/hire/actions', () => ({
   addCandidateAction: mocks.action,
   getCandidateAction: mocks.action,
   updateCandidateAction: mocks.action,
+  deleteApplicationAction: mocks.action,
+  deleteCandidateAction: mocks.action,
+  getDeletionSummaryAction: mocks.action,
 }));
 // No app router is mounted in a string render: the controls only need one to ask for a refresh after a refusal.
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: mocks.refresh }) }));
@@ -81,7 +84,7 @@ describe('the controls for one application', () => {
   it('offers, at interview: back one stage, every later stage, reject, withdraw and five ratings', () => {
     const html = controls();
     expect(buttons(html)).toEqual([
-      'Back to Screening', 'Move to Offer', 'Move to Hired', 'Mark withdrawn', 'Reject', ...STARS, 'Edit candidate',
+      'Back to Screening', 'Move to Offer', 'Move to Hired', 'Mark withdrawn', 'Reject', ...STARS, 'Edit candidate', 'Delete application', 'Delete candidate',
     ]);
     // The stage it is at, in words.
     expect(text(html)).toContain('Stage: Interview');
@@ -102,7 +105,7 @@ describe('the controls for one application', () => {
     expect(text(html)).toContain('Rejected');
     expect(text(html)).toContain('Not enough experience');
     expect(moves(html)).toEqual([]);
-    expect(buttons(html)).toEqual(['Reopen', ...STARS, 'Edit candidate']);
+    expect(buttons(html)).toEqual(['Reopen', ...STARS, 'Edit candidate', 'Delete application', 'Delete candidate']);
     expect(buttons(html)).not.toContain('Reject');
     expect(buttons(html)).not.toContain('Mark withdrawn');
   });
@@ -159,12 +162,16 @@ describe('the controls for one application', () => {
     expect(html).not.toContain('role="alert"');
   });
 
-  it('uses the danger colour for Reject only, and no purple or violet', () => {
+  it('uses the danger colour for Reject and the two deletes only, and no purple or violet', () => {
     const html = controls();
-    const reject = [...html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)].find(([, , inner]) => text(inner) === 'Reject');
-    expect(reject?.[1]).toContain('text-destructive');
-    const others = [...html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)].filter(([, , inner]) => text(inner) !== 'Reject');
-    for (const [, attrs] of others) expect(attrs).not.toMatch(/(^|[\s"])text-destructive/);
+    const DANGER = ['Reject', 'Delete application', 'Delete candidate'];
+    const all = [...html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)];
+    for (const name of DANGER) {
+      expect(all.find(([, , inner]) => text(inner) === name)?.[1], name).toContain('text-destructive');
+    }
+    for (const [, attrs, inner] of all.filter(([, , inner]) => !DANGER.includes(text(inner)))) {
+      expect(attrs, text(inner)).not.toMatch(/(^|[\s"])text-destructive/);
+    }
     expect(html).not.toMatch(/purple|violet|chart-5|#[0-9a-f]{3,8}\b/i);
   });
 
