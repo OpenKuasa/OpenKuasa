@@ -16,6 +16,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { CapResult } from '@/lib/people/capabilities';
+import { RowPrompt } from './request-row';
 
 export type DecideKind = 'leave' | 'time_off' | 'claim' | 'overtime';
 
@@ -100,9 +101,11 @@ export function DecideButtons({
 
   if (!pending && !cancellable) return <span className="text-muted-foreground">—</span>;
 
+  // The buttons stay in the Action column; every question and form they open goes to the row's prompt area
+  // (`RowPrompt`), which is as wide as the table.
   return (
-    <div className="space-y-1.5">
-      <div className="flex flex-wrap gap-2">
+    <>
+      <div className="flex items-center gap-1.5 whitespace-nowrap">
         {pending ? (
           <>
             <Button type="button" size="sm" className="h-7 px-2.5 text-xs" disabled={off}
@@ -145,55 +148,57 @@ export function DecideButtons({
             Cancel
           </Button>
         ) : null}
-        {cancellable && confirmingCancel ? (
-          <>
-            <Button type="button" variant="destructive" size="sm" className="h-7 px-2.5 text-xs" disabled={off} onClick={cancel}>
-              Confirm
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-7 px-2.5 text-xs"
-              disabled={off}
-              onClick={() => setConfirmingCancel(false)}
-            >
-              Keep
-            </Button>
-          </>
-        ) : null}
       </div>
-      {cancellable && confirmingCancel ? (
-        <p role="alert" className="max-w-64 whitespace-normal text-xs text-destructive">
-          Cancel this request?{kind === 'leave' && !pending ? ' The days go back to the person\'s balance.' : ''} This cannot be undone.
-        </p>
+      {(cancellable && confirmingCancel) || rejecting || error ? (
+        <RowPrompt>
+          {cancellable && confirmingCancel ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <p role="alert" className="text-xs text-destructive">
+                Cancel this request?{kind === 'leave' && !pending ? ' The days go back to the person\'s balance.' : ''} This cannot be undone.
+              </p>
+              <Button type="button" variant="destructive" size="sm" className="h-7 px-2.5 text-xs" disabled={off} onClick={cancel}>
+                Confirm
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2.5 text-xs"
+                disabled={off}
+                onClick={() => setConfirmingCancel(false)}
+              >
+                Keep
+              </Button>
+            </div>
+          ) : null}
+          {rejecting ? (
+            <form
+              className="flex flex-wrap items-center gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                decide(false);
+              }}
+            >
+              <Input
+                aria-label="Note for the rejection (optional)"
+                placeholder="Note (optional)"
+                maxLength={500}
+                className="h-7 w-64 text-xs"
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
+              />
+              <Button type="submit" variant="destructive" size="sm" className="h-7 px-2.5 text-xs" disabled={off}>
+                Confirm reject
+              </Button>
+            </form>
+          ) : null}
+          {error ? (
+            <p role="alert" className="text-xs text-destructive">
+              {error}
+            </p>
+          ) : null}
+        </RowPrompt>
       ) : null}
-      {rejecting ? (
-        <form
-          className="flex items-center gap-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            decide(false);
-          }}
-        >
-          <Input
-            aria-label="Note for the rejection (optional)"
-            placeholder="Note (optional)"
-            maxLength={500}
-            className="h-7 w-48 text-xs"
-            value={note}
-            onChange={(event) => setNote(event.target.value)}
-          />
-          <Button type="submit" variant="destructive" size="sm" className="h-7 px-2.5 text-xs" disabled={off}>
-            Confirm reject
-          </Button>
-        </form>
-      ) : null}
-      {error ? (
-        <p role="alert" className="max-w-64 whitespace-normal text-xs text-destructive">
-          {error}
-        </p>
-      ) : null}
-    </div>
+    </>
   );
 }

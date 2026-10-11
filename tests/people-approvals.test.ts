@@ -356,7 +356,13 @@ describe('claim rows', () => {
     // The 2025 claim is paid: no total, and its year is its own.
     expect(detail('y').year).toBe(2025);
     for (const id of ['p', 'x', 'y']) expect(detail(id).year_total, id).toBeNull();
-    for (const id of ['n', 'a', 'o']) expect(detail(id).year_total, id).not.toBeNull();
+    for (const id of ['n', 'a']) expect(detail(id).year_total, id).not.toBeNull();
+  });
+
+  it('has no total at all when nothing else was approved or paid that year', async () => {
+    const model = await build();
+    // e2's only claim: the total would be RM 0.00, which is not worth a line.
+    expect(model.rows.find((r) => r.id === 'o')!.claim!.year_total).toBeNull();
   });
 
   it('knows the receipt, which rows can be marked paid, and the paid date and reference', async () => {

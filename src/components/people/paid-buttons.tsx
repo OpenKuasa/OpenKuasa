@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { type CapResult, WRITE_FAILED } from '@/lib/people/capabilities';
 import { todayInMalaysia } from '@/lib/people/dates';
+import { RowPrompt } from './request-row';
 
 /**
  * "Mark paid" on an approved claim and "Undo paid" on a paid one. Each needs a
@@ -53,8 +54,10 @@ export function PaidButtons({
 
   const today = todayInMalaysia(new Date());
 
+  // The button stays in the Action column; the form, the question and any error go to the row's prompt area
+  // (`RowPrompt`), which is as wide as the table.
   return (
-    <div className="space-y-1.5">
+    <>
       {step === 'idle' ? (
         <Button
           type="button"
@@ -76,70 +79,72 @@ export function PaidButtons({
           {paid ? 'Undo paid' : 'Mark paid'}
         </Button>
       ) : null}
-      {step === 'marking' ? (
-        <form
-          className="flex flex-wrap items-center gap-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const trimmed = reference.trim();
-            run(() => markClaimPaidAction({ id, paid_on: paidOn, reference: trimmed === '' ? null : trimmed }));
-          }}
-        >
-          <Input
-            aria-label="Date paid"
-            type="date"
-            required
-            min={claimDate}
-            max={today}
-            className="h-7 w-36 text-xs"
-            disabled={off}
-            value={paidOn}
-            onChange={(event) => setPaidOn(event.target.value)}
-          />
-          <Input
-            aria-label="Payment reference (optional)"
-            placeholder="Reference (optional)"
-            maxLength={100}
-            className="h-7 w-40 text-xs"
-            disabled={off}
-            value={reference}
-            onChange={(event) => setReference(event.target.value)}
-          />
-          <Button type="submit" size="sm" className="h-7 px-2.5 text-xs" disabled={off || paidOn === ''}>
-            Confirm paid
-          </Button>
-          <Button type="button" variant="ghost" size="sm" className="h-7 px-2.5 text-xs" disabled={off} onClick={close}>
-            Keep
-          </Button>
-        </form>
-      ) : null}
-      {step === 'undoing' ? (
-        <>
-          <p role="alert" className="max-w-64 whitespace-normal text-xs text-destructive">
-            Undo the paid mark? The claim goes back to approved.
-          </p>
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              className="h-7 px-2.5 text-xs"
-              disabled={off}
-              onClick={() => run(() => unmarkClaimPaidAction({ id }))}
+      {step !== 'idle' || error ? (
+        <RowPrompt>
+          {step === 'marking' ? (
+            <form
+              className="flex flex-wrap items-center gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const trimmed = reference.trim();
+                run(() => markClaimPaidAction({ id, paid_on: paidOn, reference: trimmed === '' ? null : trimmed }));
+              }}
             >
-              Confirm
-            </Button>
-            <Button type="button" variant="ghost" size="sm" className="h-7 px-2.5 text-xs" disabled={off} onClick={close}>
-              Keep
-            </Button>
-          </div>
-        </>
+              <Input
+                aria-label="Date paid"
+                type="date"
+                required
+                min={claimDate}
+                max={today}
+                className="h-7 w-36 text-xs"
+                disabled={off}
+                value={paidOn}
+                onChange={(event) => setPaidOn(event.target.value)}
+              />
+              <Input
+                aria-label="Payment reference (optional)"
+                placeholder="Reference (optional)"
+                maxLength={100}
+                className="h-7 w-40 text-xs"
+                disabled={off}
+                value={reference}
+                onChange={(event) => setReference(event.target.value)}
+              />
+              <Button type="submit" size="sm" className="h-7 px-2.5 text-xs" disabled={off || paidOn === ''}>
+                Confirm paid
+              </Button>
+              <Button type="button" variant="ghost" size="sm" className="h-7 px-2.5 text-xs" disabled={off} onClick={close}>
+                Keep
+              </Button>
+            </form>
+          ) : null}
+          {step === 'undoing' ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <p role="alert" className="text-xs text-destructive">
+                Undo the paid mark? The claim goes back to approved.
+              </p>
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                className="h-7 px-2.5 text-xs"
+                disabled={off}
+                onClick={() => run(() => unmarkClaimPaidAction({ id }))}
+              >
+                Confirm
+              </Button>
+              <Button type="button" variant="ghost" size="sm" className="h-7 px-2.5 text-xs" disabled={off} onClick={close}>
+                Keep
+              </Button>
+            </div>
+          ) : null}
+          {error ? (
+            <p role="alert" className="text-xs text-destructive">
+              {error}
+            </p>
+          ) : null}
+        </RowPrompt>
       ) : null}
-      {error ? (
-        <p role="alert" className="max-w-64 whitespace-normal text-xs text-destructive">
-          {error}
-        </p>
-      ) : null}
-    </div>
+    </>
   );
 }

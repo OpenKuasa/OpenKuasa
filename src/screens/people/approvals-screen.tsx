@@ -7,6 +7,7 @@ import { LiveDot } from '@/components/ui/live-dot';
 import { AddClaimFor } from '@/components/people/add-claim-for';
 import { AddLeaveFor, type LeaveEmployee } from '@/components/people/add-leave-for';
 import { AddOvertimeFor } from '@/components/people/add-overtime-for';
+import { RequestRow } from '@/components/people/request-row';
 import { DecideButtons, type DecideKind } from '@/components/people/decide-buttons';
 import { PaidButtons } from '@/components/people/paid-buttons';
 import { ReceiptLink } from '@/components/people/receipt-link';
@@ -224,7 +225,7 @@ export function ApprovalsScreen({
                 </TableHeader>
                 <TableBody>
                   {model.rows.map((row) => (
-                    <TableRow key={row.id}>
+                    <RequestRow key={row.id} columns={config.columns.length + (hasDetails ? 4 : 3)}>
                       <TableCell>
                         <EmployeeCell name={row.employee_name} />
                       </TableCell>
@@ -241,8 +242,8 @@ export function ApprovalsScreen({
                           <RowDetails row={row} />
                         </TableCell>
                       ) : null}
-                      <TableCell>
-                        <span className="flex flex-wrap items-center gap-2">
+                      <TableCell className="whitespace-nowrap px-1.5">
+                        <span className="flex items-center gap-1.5">
                           <LiveDot active={row.pending} />
                           <StatusPill tone={requestTone(row.status)}>{row.status_label}</StatusPill>
                           {row.yours ? <StatusPill tone="neutral">Yours</StatusPill> : null}
@@ -253,8 +254,9 @@ export function ApprovalsScreen({
                           ) : null}
                         </span>
                       </TableCell>
-                      <TableCell>
-                        <div className="space-y-1.5">
+                      <TableCell className="whitespace-nowrap px-1.5">
+                        {/* Side by side, not stacked; whatever a button opens appears in the row below. */}
+                        <div className="flex items-center gap-1.5">
                           {row.pending || row.cancellable ? (
                             <DecideButtons
                               kind={DECIDE_KIND[queue]}
@@ -277,7 +279,7 @@ export function ApprovalsScreen({
                           ) : null}
                         </div>
                       </TableCell>
-                    </TableRow>
+                    </RequestRow>
                   ))}
                 </TableBody>
               </Table>

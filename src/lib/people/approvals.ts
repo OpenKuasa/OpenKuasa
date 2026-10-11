@@ -49,7 +49,7 @@ export type ClaimDetail = {
   year: number;
   /**
    * Approved or paid in this category in `year`, not counting this claim, already formatted. Null on a claim
-   * that is no longer being weighed (paid, rejected, cancelled).
+   * that is no longer being weighed (paid, rejected, cancelled), and when the total is nothing.
    */
   year_total: string | null;
   /** An approved claim can be marked paid. */
@@ -266,13 +266,15 @@ function requestNotes(decisionNote: string | null, paidReference: string | null)
 }
 
 function claimDetail(claim: Claim, claims: Claim[]): ClaimDetail {
+  // A total of nothing is not worth a line, so it is left out.
+  const yearCents = claim.status === 'pending' || claim.status === 'approved' ? approvedThisYear(claim, claims) : 0;
   return {
     has_file: claim.receipt_path !== null,
     ticked: claim.has_receipt,
     claim_date: claim.claim_date,
     // The one formula, shared with Lekiu's lookups.
     year: Number(claim.claim_date.slice(0, 4)),
-    year_total: claim.status === 'pending' || claim.status === 'approved' ? rm(approvedThisYear(claim, claims)) : null,
+    year_total: yearCents > 0 ? rm(yearCents) : null,
     markable: claim.status === 'approved',
     paid_on: claim.status === 'paid' ? claim.paid_on : null,
     paid_on_text: claim.status === 'paid' && claim.paid_on ? formatDate(claim.paid_on) : null,
