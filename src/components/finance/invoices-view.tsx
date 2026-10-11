@@ -25,6 +25,7 @@ import {
   filterInvoices,
   invoiceCustomers,
   invoicesCsv,
+  owed,
 } from '@/lib/finance/sales-views';
 import { LATEST_ROWS, displayDate } from '@/lib/finance/view-helpers';
 import { cn } from '@/lib/utils';
@@ -48,6 +49,9 @@ const EINVOICE_STYLES: Record<Exclude<EInvoiceStatus, 'none'>, string> = {
   rejected: 'bg-red-500/15 text-red-600',
 };
 
+/** A draft or void invoice owes nothing: a dash, as a draft's number is. */
+const formatOwed = (balance: number | null) => (balance === null ? '—' : rm(balance));
+
 const COLUMNS = 8;
 
 /**
@@ -65,10 +69,12 @@ export function InvoicesView({
 }) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<InvoiceFilter>('open');
-  const [customer, setCustomer] = useState('all');
+  const [chosenCustomer, setCustomer] = useState('all');
   const [showAll, setShowAll] = useState(false);
 
   const customers = invoiceCustomers(rows);
+  // A refresh can remove the chosen customer; fall back to everyone rather than show a blank select.
+  const customer = customers.some((c) => c.id === chosenCustomer) ? chosenCustomer : 'all';
   const matching = filterInvoices(rows, query, filter, customer);
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
 
@@ -99,7 +105,9 @@ export function InvoicesView({
         </BentoCard>
         <BentoCard title="Invoices by status" subtitle="Current book" icon={PieChart} className="col-span-2 md:col-span-4">
           {view.invoiceCount === 0 ? (
-            <p className="grid h-60 place-items-center text-sm text-muted-foreground">No invoices yet.</p>
+            <p className="grid h-60 place-items-center text-sm text-muted-foreground">
+              {rows.length === 0 ? 'No invoices yet.' : 'No open invoices.'}
+            </p>
           ) : (
             <DonutStat data={view.byStatus} height={240} centerValue={String(view.invoiceCount)} centerLabel="invoices" />
           )}
@@ -199,7 +207,7 @@ export function InvoicesView({
                     <TableCell className="whitespace-nowrap">{i.customer_name}</TableCell>
                     <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(i.due_date)}</TableCell>
                     <TableCell className="whitespace-nowrap text-right tabular-nums">{rm(i.total)}</TableCell>
-                    <TableCell className="whitespace-nowrap text-right tabular-nums">{rm(i.balance)}</TableCell>
+                    <TableCell className="whitespace-nowrap text-right tabular-nums">{formatOwed(owed(i))}</TableCell>
                     <TableCell>
                       <span className="flex items-center gap-2">
                         <LiveDot active={i.display_status === 'paid'} />

@@ -56,9 +56,10 @@ export const SAMPLE_INVOICES: InvoiceListRow[] = [
   invoice(1033, '2026-09-05', 'Nurul Boutique', '2026-10-05', 850, 'paid', 'validated'),
   invoice(1032, '2026-09-03', 'Seri Mutiara Enterprise', '2026-10-03', 3180, 'paid', 'validated'),
   invoice(1030, '2026-08-30', 'Nusantara Logistics', '2026-09-29', 6800, 'paid', 'validated'),
+  // Newest first, as the real list is: the history is stored oldest first.
   ...SAMPLE_HISTORY.map(([month, total], i) =>
     invoice(1006 - i, `${month}-12`, 'Aisyah Trading', `${month}-26`, total, 'paid', 'validated'),
-  ),
+  ).reverse(),
 ];
 
 const invoiceNumbered = (n: number): InvoiceListRow => {
@@ -96,5 +97,6 @@ export const SAMPLE_PAYMENTS_IN: PaymentInRow[] = [
   receipt(103, '2026-10-03', 1032, 'duitnow'),
   receipt(102, '2026-10-02', 1033, 'cash'),
   receipt(101, '2026-09-30', 1030, 'bank_transfer'),
-  ...SAMPLE_HISTORY.map(([month], i) => receipt(96 - i, `${month}-24`, 1006 - i, 'bank_transfer')),
+  // Newest first, as the real list is: the history is stored oldest first.
+  ...SAMPLE_HISTORY.map(([month], i) => receipt(96 - i, `${month}-24`, 1006 - i, 'bank_transfer')).reverse(),
 ];
