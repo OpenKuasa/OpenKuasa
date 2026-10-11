@@ -249,7 +249,7 @@ export function QuotationsView({
             }
           >
             Make a draft invoice from {number} to {who} ({rm(quotation.total)})? It gets the same customer, notes and
-            lines, is dated today, and stays a draft on Invoices until it is posted.
+            lines, and stays a draft on Invoices until it is posted.
           </ConfirmRow>
         );
       case 'delete':
@@ -329,7 +329,7 @@ export function QuotationsView({
         >
           <div className="flex flex-wrap items-center gap-3">
             <p id="converted-note" role="status" className="text-sm text-muted-foreground">
-              It has the quotation’s customer, notes and lines, and is dated today. It is a draft: check it, then post
+              It has the quotation’s customer, notes and lines. It is a draft: check its date and lines, then post
               it, on{' '}
               <Link
                 ref={invoicesLink}
@@ -529,7 +529,7 @@ export function QuotationsView({
                       <TableCell className="whitespace-nowrap text-muted-foreground">
                         {invoice ? (
                           // The invoice made from this quotation is on Invoices; this only goes there.
-                          <Link href="/finance/invoices" className="underline underline-offset-4 hover:underline">
+                          <Link href="/finance/invoices" className="underline underline-offset-4">
                             {invoice}
                           </Link>
                         ) : (

@@ -28,7 +28,7 @@ the data layer, with unit tests; the client components only draw them.
 | `view-helpers.ts` | What those two share: dates, sums to the sen, the eight-month window of a trend chart, how payment methods are grouped and coloured, and the "This payment also covers …" sentence of a split payment |
 | `document-lines.ts` | What a bill and an invoice share: the line schema, the real-date and SST-rate rules (`isIsoDate`, `roundRate`), and reading a saved line |
 | `bill-math.ts` | Line amounts and bill totals, rounded exactly as the generated columns `amount` and `sst_amount` round them; the SST rate keeps two decimals, as its column does (`roundRate` in `document-lines.ts`) |
-| `document-form.ts` | What the bill, invoice and quotation forms share: a line as it was typed, the due date following the other party's payment terms, the sentence for a document that was saved as a draft but not posted, and `DocumentFormKind`, the description of one form that the shared card draws: its nouns, its rules, its second date (`secondDate`: "Due date" or "Valid until") and, for a document that is marked as sent rather than posted, its own words (`words`; otherwise `POSTING_WORDS`) |
+| `document-form.ts` | What the bill, invoice and quotation forms share: a line as it was typed and `DocumentFormKind`; and what only the bill and invoice forms use: the due date following the other party's payment terms and the sentence for a document that was saved as a draft but not posted. `DocumentFormKind` is the description of one form that the shared card draws: its nouns, its rules, its second date (`secondDate`: "Due date" or "Valid until") and, for a document that is marked as sent rather than posted, its own words (`words`; otherwise `POSTING_WORDS`) |
 | `quotation-form.ts` | The quotation form: defaults, the valid-until date following the quotation date (thirty days, `QUOTATION_VALID_DAYS`, whatever the customer's payment terms), validation, what is sent. A product fills a line at its price. `quotationSavedNotSent` words a quotation that was saved as a draft but not marked as sent |
 | `bill-form.ts` | The bill form: defaults, the due date following the supplier's terms, validation, what is sent. A product fills a line at its cost. `savedNotPosted` words a bill that was saved as a draft but not posted |
 | `invoice-form.ts` | The invoice form: the same rules with a customer and no supplier's reference. A product fills a line at its price. Also the small e-Invois form (status and UUID) |
@@ -59,10 +59,11 @@ invoice, and `saveAndSendQuotationAction` and `getQuotationAction` for a
 quotation, through the same two helpers. `src/app/(app)/finance/error.tsx` is
 shown when a finance screen's data cannot be read.
 
-Which screens an action refreshes is every screen whose figures it can move,
-and no more. A bill or a payment out: Supplier Bills, Payments Out, Customers
+Which screens an action refreshes is every screen whose figures it can move;
+some refresh more than they need to. A bill or a payment out: Supplier Bills, Payments Out, Customers
 & Suppliers. An invoice or a payment in: Invoices, Payments In, Customers &
-Suppliers, Quotations, Credit Notes, Refunds. A contact: all eight. A
+Suppliers, Quotations, Credit Notes, Refunds. A contact: the eight
+screens that show a contact's name. A
 quotation saved, sent, answered or deleted: Quotations only, as nothing else
 counts or names a quotation. A quotation made into an invoice: Quotations and
 Invoices, as a draft invoice is not yet owed.
@@ -246,7 +247,8 @@ stands. An accepted quotation stays `accepted` after its date; a sent one can
 still be accepted after it expired.
 
 `finance_convert_quotation` makes a draft invoice from an accepted quotation:
-the same customer, notes and lines, dated today, due after the customer's
+the same customer, notes and lines, dated with the database's date (UTC, so
+before 8 in the morning in Malaysia it is the day before), due after the customer's
 payment terms, with `quotation_id` set. A quotation has one invoice at a time
 (a unique index on `finance_invoices`); a void invoice does not count, so a
 quotation whose invoice was voided, or deleted as a draft, can be converted
@@ -532,8 +534,8 @@ instead."; see Known limits.
 - A new quotation is valid for thirty days until the person changes the date;
   the thirty is not a setting.
 - Making an invoice from a quotation does not open that invoice: the screen
-  says a draft was made and links to Invoices, where the draft is dated today
-  and so is among the newest rows. The link does not single the draft out.
+  says a draft was made and links to Invoices, where the draft carries the
+  database's date (UTC) and so is among the newest rows. The link does not single the draft out.
 - A credit note is one amount with a reason. It has no lines and does not say
   how much of it is SST.
 - A quotation has no void. One that was sent by mistake is marked declined,
