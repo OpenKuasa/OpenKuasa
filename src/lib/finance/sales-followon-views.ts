@@ -166,6 +166,8 @@ export function quotationActions(row: QuotationListRow): QuotationAction[] {
       return ['convert', 'decline'];
     case 'declined':
       return ['accept'];
+    default:
+      return [];
   }
 }
 

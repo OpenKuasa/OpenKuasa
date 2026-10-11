@@ -48,6 +48,10 @@ describe('a new quotation form', () => {
     });
     expect(defaultValidUntil('2026-01-31')).toBe('2026-03-02');
   });
+  it('rolls over a year end and counts a leap February', () => {
+    expect(defaultValidUntil('2026-12-15')).toBe('2027-01-14');
+    expect(defaultValidUntil('2028-02-01')).toBe('2028-03-02');
+  });
   it('does not move the valid-until date when a customer is chosen, whatever their payment terms', () => {
     const form = newQuotationForm(today, 'k1');
     const chosen = QUOTATION_FORM_KIND.withParty(form, { id: CUSTOMER, payment_terms_days: 90 });
@@ -74,12 +78,18 @@ describe('the valid-until date', () => {
       id: '33333333-3333-4333-8333-333333333333', quotation_no: null, customer_id: CUSTOMER, customer_name: 'Aisyah Trading',
       quote_date: '2026-10-01', valid_until: '2026-10-08', total: 132.5, display_status: 'draft', accepted_on: null,
       invoice_id: null, invoice_no: null, subtotal: 125, sst: 7.5, notes: null,
-      lines: [{ id: 'line-1', product_id: null, description: 'Design work', quantity: 10, uom: null, pack_size: 'box of 4', unit_price: 12.5, sst_rate: 6, amount: 125, sst_amount: 7.5 }],
+      lines: [
+        { id: 'line-1', product_id: PRODUCT, description: 'Gloves', quantity: 5, uom: 'box', pack_size: 'box of 4', unit_price: 24.9, sst_rate: 6, amount: 124.5, sst_amount: 7.47 },
+        { id: 'line-2', product_id: null, description: 'Design work', quantity: 10, uom: null, pack_size: null, unit_price: 12.5, sst_rate: 0, amount: 125, sst_amount: 0 },
+      ],
     };
     const form = quotationFormFromDetail(detail);
     expect(form).toEqual({
       id: detail.id, customer_id: CUSTOMER, quote_date: '2026-10-01', valid_until: '2026-10-08', validEdited: true, notes: '',
-      lines: [{ key: 'line-1', product_id: '', description: 'Design work', quantity: '10', uom: '', pack_size: 'box of 4', unit_price: '12.5', sst_rate: '6' }],
+      lines: [
+        { key: 'line-1', product_id: PRODUCT, description: 'Gloves', quantity: '5', uom: 'box', pack_size: 'box of 4', unit_price: '24.9', sst_rate: '6' },
+        { key: 'line-2', product_id: '', description: 'Design work', quantity: '10', uom: '', pack_size: '', unit_price: '12.5', sst_rate: '0' },
+      ],
     });
     expect(withQuoteDate(form, '2026-10-05').valid_until).toBe('2026-10-08');
   });

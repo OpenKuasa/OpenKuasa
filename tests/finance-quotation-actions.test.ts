@@ -113,6 +113,8 @@ describe('who may write', () => {
       // Not even a malformed input gets a schema's sentence: the refusal comes first.
       expect(await actions.saveQuotationAction({ lines: [] })).toEqual(FORBIDDEN);
       expect(await actions.convertQuotationAction(null)).toEqual(FORBIDDEN);
+      expect(await actions.saveAndSendQuotationAction({ lines: [] })).toEqual(FORBIDDEN);
+      expect(await actions.getQuotationAction({ id: 'nope' })).toEqual(FORBIDDEN);
     }
     expect(ctl.calls).toEqual([]);
     expect(ctl.revalidated).toEqual([]);

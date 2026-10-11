@@ -18,6 +18,9 @@ const quotation = (display_status: QuotationDisplayStatus, q: Partial<QuotationL
 });
 
 describe('quotationActions', () => {
+  it('gives a status it does not know no actions', () => {
+    expect(quotationActions(quotation('bogus' as QuotationDisplayStatus))).toEqual([]);
+  });
   it('lets a draft be edited, marked as sent or deleted, and never answered or made into an invoice', () => {
     expect(quotationActions(quotation('draft'))).toEqual(['edit', 'send', 'delete']);
   });

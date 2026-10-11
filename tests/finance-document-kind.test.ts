@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { BILL_FORM_KIND, newBillForm, withSupplier } from '@/lib/finance/bill-form';
 import { POSTING_WORDS, documentFormWords, withDueDate } from '@/lib/finance/document-form';
@@ -44,5 +46,12 @@ describe('the words of a document form', () => {
     const words = { newSubtitle: 'a', draftSubtitle: 'b', post: 'c', posting: 'd' };
     expect(documentFormWords({ words })).toBe(words);
     expect(documentFormWords({})).toBe(POSTING_WORDS);
+  });
+});
+
+describe('the shared form card', () => {
+  it('has none of the words that belong to a kind, so they can only come from the kind', () => {
+    const source = readFileSync(join(process.cwd(), 'src/components/finance/document-form-card.tsx'), 'utf8');
+    for (const word of ['Due date', 'Save and post', 'Posting…', 'it is posted']) expect(source, word).not.toContain(word);
   });
 });
