@@ -11,6 +11,9 @@ import {
   earlierOvertimeCount,
   earlierOvertimeLine,
   emptyRunNote,
+  runOptionLabel,
+  runCreatedSentence,
+  recalculateNote,
   headcountNote,
   monthInRange,
   notOnRun,
@@ -103,7 +106,7 @@ describe('confirmation sentences', () => {
     expect(markPaidSentence(1, 'October 2026')).toBe('Marks 1 payslip as paid. The employee will see it.');
   });
   it('says what Mark as paid does on a run with nobody on it', () => {
-    expect(markPaidSentence(0, 'October 2026')).toBe('Marks October 2026 as paid with no payslips.');
+    expect(markPaidSentence(0, 'October 2026')).toBe('Marks October 2026 as paid with no payslips. The next month can then be run.');
     expect(undoPaidSentence(0, 'October 2026')).toBe('Puts October 2026 back to draft.');
   });
   it('says what Undo paid, Delete draft and Remove payslip do', () => {
@@ -370,5 +373,33 @@ describe('PayslipDetail is safe to import into a member page', () => {
       expect(source, file).not.toMatch(/payroll-actions/);
       expect(source, file).not.toMatch(/['"]use server['"]/);
     }
+  });
+});
+
+describe('runCreatedSentence', () => {
+  it('says what a run with payslips and a run with nobody on it created', () => {
+    expect(runCreatedSentence('October 2026', 3)).toBe('Draft created for October 2026 with 3 payslips. Check it, then mark it as paid.');
+    expect(runCreatedSentence('October 2026', 1)).toBe('Draft created for October 2026 with 1 payslip. Check it, then mark it as paid.');
+    expect(runCreatedSentence('October 2026', 0)).toBe(
+      'Draft created for October 2026 with no payslips: nobody active has a base salary recorded. Mark it as paid to record that nothing was paid, or add salaries and recalculate.',
+    );
+  });
+});
+
+describe('recalculateNote', () => {
+  it('says how many payslips were added', () => {
+    expect(recalculateNote(0)).toBe('Recalculated. No new payslips.');
+    expect(recalculateNote(1)).toBe('Recalculated. 1 payslip added.');
+    expect(recalculateNote(4)).toBe('Recalculated. 4 payslips added.');
+    expect(recalculateNote(undefined)).toBe('Recalculated. No new payslips.');
+  });
+});
+
+describe('runOptionLabel', () => {
+  it('labels a run for the picker, saying so when it has no payslips', () => {
+    expect(runOptionLabel({ label: 'October 2026', status: 'draft', headcount: 0 })).toBe('October 2026 · Draft · no payslips');
+    expect(runOptionLabel({ label: 'September 2026', status: 'paid', headcount: 0 })).toBe('September 2026 · Paid · no payslips');
+    expect(runOptionLabel({ label: 'August 2026', status: 'paid', headcount: 4 })).toBe('August 2026 · Paid');
+    expect(runOptionLabel({ label: 'October 2026', status: 'draft', headcount: 4 })).toBe('October 2026 · Draft');
   });
 });

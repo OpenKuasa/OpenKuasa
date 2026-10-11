@@ -60,23 +60,39 @@ describe('payrollModel edge cases', () => {
     expect(model.deductions).toEqual([]);
   });
 
-  it('skips a newest run with no payslips and uses the previous month', () => {
+  it('opens on the newest run even when it has no payslips', () => {
     const runs: PayrollRun[] = [
       { id: 'a', period_month: '2026-09-01', status: 'paid', paid_at: null, paid_by_name: null },
       { id: 'b', period_month: '2026-10-01', status: 'draft', paid_at: null, paid_by_name: null },
     ];
     const model = payrollModel(runs, [slipFor('1', 'a', 'Amy')]);
-    expect(model.latest!.period_month).toBe('2026-09-01');
-    expect(model.latest!.headcount).toBe(1);
+    expect(model.latest).toMatchObject({ run_id: 'b', status: 'draft', headcount: 0, slips: [], gross_cents: 0 });
+    // The chart still shows only months that have payslips.
     expect(model.by_month.map((b) => b.start)).toEqual(['2026-09-01']);
   });
 
-  it('gives no latest run when every run is empty', () => {
+  it("opens on a workspace's only run when it is an empty draft", () => {
     const run: PayrollRun = { id: 'r', period_month: '2026-10-01', status: 'draft', paid_at: null, paid_by_name: null };
     const model = payrollModel([run], []);
-    expect(model.latest).toBeNull();
+    expect(model.latest).toMatchObject({ run_id: 'r', status: 'draft', headcount: 0 });
     expect(model.by_month).toEqual([]);
-    expect(model.deductions).toEqual([]);
+  });
+
+  it('opens on an empty paid latest run, not the month before', () => {
+    const runs: PayrollRun[] = [
+      { id: 'a', period_month: '2026-09-01', status: 'paid', paid_at: null, paid_by_name: null },
+      { id: 'b', period_month: '2026-10-01', status: 'paid', paid_at: '2026-10-28T02:00:00Z', paid_by_name: null },
+    ];
+    expect(payrollModel(runs, [slipFor('1', 'a', 'Amy')]).latest).toMatchObject({ run_id: 'b', status: 'paid', headcount: 0 });
+  });
+
+  it('opens on an empty draft after a paid month, so Undo paid is not offered on the earlier one', () => {
+    const runs: PayrollRun[] = [
+      { id: 'mar', period_month: '2026-03-01', status: 'paid', paid_at: '2026-03-28T02:00:00Z', paid_by_name: null },
+      { id: 'apr', period_month: '2026-04-01', status: 'draft', paid_at: null, paid_by_name: null },
+    ];
+    const model = payrollModel(runs, [slipFor('1', 'mar', 'Amy')]);
+    expect(model.latest!.run_id).toBe('apr');
   });
 
   it('agrees with the Dashboard on the latest run gross', () => {
@@ -133,10 +149,11 @@ describe('payrollModel with a chosen run', () => {
     expect(model.latest).toMatchObject({ run_id: 'd', status: 'draft', headcount: 0, slips: [], gross_cents: 0 });
   });
 
-  it('defaults to the newest run with payslips, and ignores an id that names no run', () => {
-    expect(payrollModel(runs, slips).latest!.run_id).toBe('c');
-    expect(payrollModel(runs, slips, 'nope').latest!.run_id).toBe('c');
-    expect(payrollModel(runs, slips, null).latest!.run_id).toBe('c');
+  it('defaults to the newest run whatever its payslip count, and ignores an id that names no run', () => {
+    expect(payrollModel(runs, slips).latest!.run_id).toBe('d');
+    expect(payrollModel(runs, slips, 'nope').latest!.run_id).toBe('d');
+    expect(payrollModel(runs, slips, null).latest!.run_id).toBe('d');
+    expect(payrollModel(runs, slips, 'c').latest!.run_id).toBe('c');
   });
 
   it('still charts every run with payslips, whichever is chosen', () => {

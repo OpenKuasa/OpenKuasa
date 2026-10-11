@@ -45,8 +45,9 @@ export type PayrollModel = {
   /** Every run on record, newest first, for the picker. Includes a run with no payslips, so it can still be deleted. */
   runs: PayrollRunOption[];
   /**
-   * The chosen run: the one asked for, else the newest with payslips. Null when the workspace has no run (or
-   * every run is empty and none was asked for). The name is historical: it is not always the newest.
+   * The chosen run: the one asked for, else the NEWEST run, whatever its payslip count (an empty draft or an
+   * empty paid month is a real record and must be what the screen opens on). Null only when the workspace has no
+   * run. The name is historical: it is not always the newest.
    */
   latest: {
     run_id: string;
@@ -88,10 +89,11 @@ export const deductionsOf = (p: Payslip): number => p.gross_cents - p.net_cents;
 const rowOf = (p: Payslip): PayslipRow => ({ ...p, deductions_cents: deductionsOf(p) });
 
 /**
- * `runId` picks a run; an id that names no run falls back to the newest with payslips.
+ * `runId` picks a run; an id that names no run falls back to the newest run, empty or not. Only the chart
+ * (`by_month`) is about payslips: it leaves out a run that has none.
  */
 export function payrollModel(runs: PayrollRun[], payslips: Payslip[], runId?: string | null): PayrollModel {
-  // Newest first. A run with no payslips has nothing to chart, so it is left out of the totals (the Dashboard does the same).
+  // Newest first. A run with no payslips has nothing to chart, so the chart leaves it out (the Dashboard's chart does the same).
   const totals = payrollSummary(runs, payslips).filter((t) => t.headcount > 0);
   const options: PayrollRunOption[] = [...runs]
     .sort((a, b) => b.period_month.localeCompare(a.period_month))
@@ -103,7 +105,8 @@ export function payrollModel(runs: PayrollRun[], payslips: Payslip[], runId?: st
       headcount: payslips.filter((p) => p.payroll_run_id === r.id).length,
     }));
   const asked = runId ? runs.find((r) => r.id === runId) : undefined;
-  const chosen = asked ?? runs.find((r) => r.period_month === totals[0]?.period_month);
+  const newest = [...runs].sort((a, b) => b.period_month.localeCompare(a.period_month))[0];
+  const chosen = asked ?? newest;
   if (!chosen) return { runs: options, latest: null, by_month: [], deductions: [] };
 
   const slips = payslips
@@ -232,7 +235,7 @@ export const runPayrollSentence = (monthText: string) =>
 /** `monthText` is `October 2026`; it is used only for a run with no payslips. */
 export const markPaidSentence = (count: number, monthText: string) =>
   count === 0
-    ? `Marks ${monthText} as paid with no payslips.`
+    ? `Marks ${monthText} as paid with no payslips. The next month can then be run.`
     : `Marks ${payslipCount(count)} as paid. ${count === 1 ? 'The employee will see it.' : 'Employees will see them.'}`;
 
 export const undoPaidSentence = (count: number, monthText: string) =>
@@ -241,6 +244,23 @@ export const undoPaidSentence = (count: number, monthText: string) =>
     : `Puts ${payslipCount(count)} back to draft. ${
         count === 1 ? 'The employee will no longer see it.' : 'Employees will no longer see them.'
       }`;
+
+/** A run's line in the month picker: "October 2026 · Draft · no payslips". */
+export function runOptionLabel(run: { label: string; status: PayrollRun['status']; headcount: number }): string {
+  return `${run.label} · ${run.status === 'draft' ? 'Draft' : 'Paid'}${run.headcount === 0 ? ' · no payslips' : ''}`;
+}
+
+/** The Run payroll dialog's success text. */
+export function runCreatedSentence(monthText: string, payslips: number): string {
+  return payslips === 0
+    ? `Draft created for ${monthText} with no payslips: nobody active has a base salary recorded. Mark it as paid to record that nothing was paid, or add salaries and recalculate.`
+    : `Draft created for ${monthText} with ${payslipCount(payslips)}. Check it, then mark it as paid.`;
+}
+
+/** The note after Recalculate; `added` is how many payslips are new. */
+export function recalculateNote(added: number | undefined): string {
+  return added ? `Recalculated. ${payslipCount(added)} added.` : 'Recalculated. No new payslips.';
+}
 
 /** What a run with nobody on it means; null when it has payslips. */
 export function emptyRunNote(run: { status: PayrollRun['status']; headcount: number; label: string }): string | null {

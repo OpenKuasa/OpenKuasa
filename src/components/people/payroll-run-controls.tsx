@@ -22,6 +22,9 @@ import {
   earlierOvertimeLine,
   markPaidSentence,
   monthInRange,
+  recalculateNote,
+  runCreatedSentence,
+  runOptionLabel,
   runPayrollSentence,
   skippedRows,
   undoPaidSentence,
@@ -119,9 +122,7 @@ export function RunPayrollDialog({ choice }: { choice: RunMonthChoice }) {
           {done ? (
             <div className="mt-3 space-y-3">
               <Dialog.Description className="text-sm text-muted-foreground">
-                {`Draft created for ${monthLabel(done.month)} with ${done.payslips} ${
-                  done.payslips === 1 ? 'payslip' : 'payslips'
-                }. Check it, then mark it as paid.`}
+                {runCreatedSentence(monthLabel(done.month), done.payslips)}
               </Dialog.Description>
               <Skipped skipped={done.skipped} earlierOvertime={done.earlier_overtime} />
               <div className="flex justify-end">
@@ -212,6 +213,14 @@ export function RunActions({
   // The Recalculate refusal sits beside that button; the others sit under their prompt.
   const [recalcError, setRecalcError] = useState<string | null>(null);
   const [recalculated, setRecalculated] = useState<RunResult | null>(null);
+  // The run's payslip count when the recalculation was sent. The note comes from the recalculation's own result, so
+  // it shows at once; the first change of the count to what the result says is the page catching up (keep it),
+  // and any other change means a payslip was added or removed since (drop it).
+  const [seenHeadcount, setSeenHeadcount] = useState(headcount);
+  if (recalculated && headcount !== seenHeadcount) {
+    if (headcount === recalculated.payslips && seenHeadcount !== recalculated.payslips) setSeenHeadcount(headcount);
+    else setRecalculated(null);
+  }
   const refocus = useRef<HTMLButtonElement | null>(null);
   const triggers = useRef<Partial<Record<Step, HTMLButtonElement | null>>>({});
   // Another run was chosen (or this one changed state): a stale prompt, refusal or result goes.
@@ -249,7 +258,10 @@ export function RunActions({
     setStep('idle');
     start(async () => {
       const result = await settle(() => recalculatePayrollAction({ run_id: runId }));
-      if (result.ok) setRecalculated(result.data);
+      if (result.ok) {
+        setSeenHeadcount(headcount);
+        setRecalculated(result.data);
+      }
       else setRecalcError(result.error);
     });
   }
@@ -342,12 +354,10 @@ export function RunActions({
           ) : null}
         </RowPrompt>
       ) : null}
-      {recalculated && recalculated.payslips === headcount ? (
+      {recalculated ? (
         <div role="status" className="space-y-2">
           <p className="text-sm text-muted-foreground">
-            {recalculated.added
-              ? `Recalculated. ${recalculated.added} ${recalculated.added === 1 ? 'payslip' : 'payslips'} added.`
-              : 'Recalculated. No new payslips.'}
+            {recalculateNote(recalculated.added)}
           </p>
           <Skipped skipped={recalculated.skipped} earlierOvertime={recalculated.earlier_overtime} />
         </div>
@@ -361,7 +371,7 @@ export function RunPicker({
   runs,
   currentId,
 }: {
-  runs: { id: string; label: string; status: 'draft' | 'paid' }[];
+  runs: { id: string; label: string; status: 'draft' | 'paid'; headcount: number }[];
   currentId: string | null;
 }) {
   const router = useRouter();
@@ -380,7 +390,7 @@ export function RunPicker({
       >
         {runs.map((r) => (
           <option key={r.id} value={r.id}>
-            {r.label} ({r.status === 'draft' ? 'draft' : 'paid'})
+            {runOptionLabel(r)}
           </option>
         ))}
       </select>
