@@ -153,7 +153,7 @@ export function CreditNotesView({
                   (rows.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={COLUMNS} className="py-8 text-center text-muted-foreground">
-                        No credit notes yet.
+                        No credit notes yet. Issuing credit notes comes in the next update.
                       </TableCell>
                     </TableRow>
                   ) : (

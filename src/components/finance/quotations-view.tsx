@@ -183,7 +183,7 @@ export function QuotationsView({
                   (rows.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={COLUMNS} className="py-8 text-center text-muted-foreground">
-                        No quotations yet.
+                        No quotations yet. Creating quotations comes in the next update.
                       </TableCell>
                     </TableRow>
                   ) : (
