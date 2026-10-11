@@ -69,7 +69,7 @@ describe('leaveDaysByTypeInYear', () => {
   it('puts a request in the year it starts', () => {
     const request = (start: string, status: LeaveRequest['status']): LeaveRequest => ({
       id: start, employee_id: 'e', employee_name: 'E', leave_type: 'annual', start_date: start,
-      end_date: start, days: 2, reason: null, status, created_at: start,
+      end_date: start, days: 2, half_day: false, reason: null, status, decision_note: null, created_at: start,
     });
     const rows = [request('2025-12-31', 'approved'), request('2026-01-01', 'approved'), request('2026-02-01', 'pending')];
     expect(leaveDaysByTypeInYear(rows, 2026)).toEqual([{ leave_type: 'annual', label: 'Annual leave', days: 2 }]);

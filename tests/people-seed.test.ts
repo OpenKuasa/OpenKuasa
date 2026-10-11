@@ -124,6 +124,11 @@ describe('people seed', () => {
     expect(vouchers.reduce((total, v) => total + v.amount_cents, 0)).toBe(2746500);
     expect(vouchers[0].issued_date).toBe(TODAY);
 
+    const settings = await data.getSettings();
+    expect([settings.default_medical_leave_days, settings.default_emergency_leave_days]).toEqual([14, 3]);
+    const requests = await data.listLeaveRequests();
+    expect(requests.every((r) => r.half_day === false && r.decision_note === null)).toBe(true);
+    expect((await data.listTimeOffRequests()).every((r) => r.decision_note === null)).toBe(true);
     expect((await data.getSettings()).notifications).toEqual({
       leave_requests: true, payslip_ready: true, document_expiry: true, birthdays: false,
     });

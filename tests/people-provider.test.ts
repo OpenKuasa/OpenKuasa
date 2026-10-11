@@ -118,6 +118,16 @@ describe('getPeopleData', () => {
     expect(orphan.employee_name).toBe('Unknown');
   });
 
+  it('reads the half-day flag and the decision note with each leave and time-off request', async () => {
+    const data = await getPeopleData(client);
+    await data.listLeaveRequests();
+    await data.listTimeOffRequests();
+    const leaveColumns = calls.find((c) => c.table === 'hr_leave_requests')!.columns;
+    expect(leaveColumns).toContain('half_day');
+    expect(leaveColumns).toContain('decision_note');
+    expect(calls.find((c) => c.table === 'hr_time_off_requests')!.columns).toContain('decision_note');
+  });
+
   it('asks for a date window with both ends', async () => {
     await (await getPeopleData(client)).listShifts('2026-10-05', '2026-10-11');
     const { filters } = calls.find((c) => c.table === 'hr_shifts')!;
@@ -167,8 +177,16 @@ describe('getPeopleData', () => {
     expect(await data.getSettings()).toEqual({
       work_week: ['mon', 'tue', 'wed', 'thu', 'fri'],
       default_annual_leave_days: 16,
+      default_medical_leave_days: 14,
+      default_emergency_leave_days: 3,
       overtime_rates: { weekday: 1.25, rest_day: 2, public_holiday: 3 },
       notifications: { birthdays: false },
+    });
+    SINGLE.hr_settings = { default_medical_leave_days: '10.5', default_emergency_leave_days: 2 };
+    expect(await data.getSettings()).toMatchObject({
+      default_annual_leave_days: 14,
+      default_medical_leave_days: 10.5,
+      default_emergency_leave_days: 2,
     });
   });
 

@@ -1,12 +1,15 @@
 /**
  * A stand-in for the Supabase query builder: records each statement and
- * answers it from a queue keyed by `<table>.<op>`. The last reply for a key is
+ * answers it from a queue keyed by `<table>.<op>` (`rpc.<function>` for an rpc call). The last reply for a key is
  * reused, so one reply serves any number of identical statements.
  */
 export type FakeCall = {
   table: string;
-  op: 'select' | 'insert' | 'update' | 'delete';
+  op: 'select' | 'insert' | 'update' | 'delete' | 'rpc';
   values?: unknown;
+  /** For an `rpc` call: the function's name, and the arguments it was given. */
+  fn?: string;
+  args?: Record<string, unknown>;
   columns?: string;
   filters: Record<string, unknown>;
 };
@@ -78,5 +81,11 @@ export function fakeSupabase(replies: Record<string, FakeReply | FakeReply[]> = 
     return builder;
   };
 
-  return { client: { from } as never, calls };
+  const rpc = async (fn: string, args: Record<string, unknown> = {}) => {
+    calls.push({ table: 'rpc', op: 'rpc', fn, args, filters: {} });
+    const reply = next(`rpc.${fn}`);
+    return { data: reply.data ?? null, error: reply.error ?? null };
+  };
+
+  return { client: { from, rpc } as never, calls };
 }

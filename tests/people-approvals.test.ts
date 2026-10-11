@@ -37,7 +37,8 @@ const withRows = (rows: Partial<Record<keyof PeopleData, unknown>>): PeopleData 
 
 const leave = (over: Partial<LeaveRequest>): LeaveRequest => ({
   id: 'l', employee_id: 'e1', employee_name: 'E One', leave_type: 'annual', start_date: '2026-10-05',
-  end_date: '2026-10-06', days: 2, reason: null, status: 'pending', created_at: '2026-10-01T02:00:00Z', ...over,
+  end_date: '2026-10-06', days: 2, half_day: false, reason: null, status: 'pending', decision_note: null,
+  created_at: '2026-10-01T02:00:00Z', ...over,
 });
 const claim = (over: Partial<Claim>): Claim => ({
   id: 'c', employee_id: 'e1', employee_name: 'E One', category: 'travel', amount_cents: 1000,
@@ -50,7 +51,8 @@ const overtime = (over: Partial<OvertimeRecord>): OvertimeRecord => ({
 });
 const timeOff = (over: Partial<TimeOffRequest>): TimeOffRequest => ({
   id: 't', employee_id: 'e1', employee_name: 'E One', off_date: '2026-10-05', start_time: '09:00:00',
-  end_time: '10:30:00', reason: 'Bank', status: 'pending', created_at: '2026-10-04T02:00:00Z', ...over,
+  end_time: '10:30:00', reason: 'Bank', status: 'pending', decision_note: null,
+  created_at: '2026-10-04T02:00:00Z', ...over,
 });
 
 describe('the sample data queues', () => {

@@ -61,8 +61,8 @@ describe('buildLeaveModel', () => {
   it('counts approved unpaid days this year and shows a dash for an unreadable applied date', () => {
     const model = buildLeaveModel(
       [
-        { id: 'a', employee_id: 'e', employee_name: 'E', leave_type: 'unpaid', start_date: '2026-03-02', end_date: '2026-03-03', days: 2, reason: null, status: 'approved', created_at: 'bad' },
-        { id: 'b', employee_id: 'e', employee_name: 'E', leave_type: 'annual', start_date: '2025-12-30', end_date: '2025-12-31', days: 2, reason: null, status: 'approved', created_at: '2025-12-01T00:00:00Z' },
+        { id: 'a', employee_id: 'e', employee_name: 'E', leave_type: 'unpaid', start_date: '2026-03-02', end_date: '2026-03-03', days: 2, half_day: false, reason: null, status: 'approved', decision_note: null, created_at: 'bad' },
+        { id: 'b', employee_id: 'e', employee_name: 'E', leave_type: 'annual', start_date: '2025-12-30', end_date: '2025-12-31', days: 2, half_day: false, reason: null, status: 'approved', decision_note: null, created_at: '2025-12-01T00:00:00Z' },
       ],
       [],
       MEMBER_E,
@@ -113,7 +113,7 @@ describe('buildTimeOffModel', () => {
   });
 
   it('measures hours and durations from the times', () => {
-    const base = { employee_id: 'e', employee_name: 'E', reason: null, created_at: '2026-10-01T00:00:00Z' };
+    const base = { employee_id: 'e', employee_name: 'E', reason: null, decision_note: null, created_at: '2026-10-01T00:00:00Z' };
     const model = buildTimeOffModel(
       [
         { ...base, id: '1', off_date: '2026-10-03', start_time: '14:00:00', end_time: '16:30:00', status: 'approved' },

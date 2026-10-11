@@ -67,8 +67,12 @@ export type LeaveRequest = {
   start_date: string;
   end_date: string;
   days: number;
+  /** A single date counted as half a day. */
+  half_day: boolean;
   reason: string | null;
   status: RequestStatus;
+  /** Why an owner or admin rejected it, when they said. */
+  decision_note: string | null;
   created_at: string;
 };
 
@@ -91,6 +95,8 @@ export type TimeOffRequest = {
   end_time: string;
   reason: string | null;
   status: RequestStatus;
+  /** Why an owner or admin rejected it, when they said. */
+  decision_note: string | null;
   created_at: string;
 };
 
@@ -263,6 +269,8 @@ export type PaymentVoucher = {
 export type PeopleSettings = {
   work_week: string[];
   default_annual_leave_days: number;
+  default_medical_leave_days: number;
+  default_emergency_leave_days: number;
   overtime_rates: { weekday: number; rest_day: number; public_holiday: number };
   notifications: Record<string, boolean>;
 };
@@ -271,6 +279,8 @@ export type PeopleSettings = {
 export const DEFAULT_PEOPLE_SETTINGS: PeopleSettings = {
   work_week: ['mon', 'tue', 'wed', 'thu', 'fri'],
   default_annual_leave_days: 14,
+  default_medical_leave_days: 14,
+  default_emergency_leave_days: 3,
   overtime_rates: { weekday: 1.5, rest_day: 2, public_holiday: 3 },
   notifications: {},
 };

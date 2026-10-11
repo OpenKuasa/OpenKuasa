@@ -43,8 +43,8 @@ const EMPLOYEE_COLUMNS =
 const PRIVATE_COLUMNS =
   'employee_id,nric,date_of_birth,phone,address,base_salary_cents,bank_name,bank_account,epf_no,socso_no,tax_no,' +
   'emergency_contact_name,emergency_contact_phone';
-const LEAVE_COLUMNS = `id,employee_id,leave_type,start_date,end_date,days,reason,status,created_at,${NAME}`;
-const TIME_OFF_COLUMNS = `id,employee_id,off_date,start_time,end_time,reason,status,created_at,${NAME}`;
+const LEAVE_COLUMNS = `id,employee_id,leave_type,start_date,end_date,days,half_day,reason,status,decision_note,created_at,${NAME}`;
+const TIME_OFF_COLUMNS = `id,employee_id,off_date,start_time,end_time,reason,status,decision_note,created_at,${NAME}`;
 const CLAIM_COLUMNS = `id,employee_id,category,amount_cents,claim_date,description,has_receipt,status,created_at,${NAME}`;
 const OVERTIME_COLUMNS = `id,employee_id,work_date,hours,rate_multiplier,amount_cents,status,created_at,${NAME}`;
 const PAYSLIP_COLUMNS =
@@ -54,7 +54,7 @@ const SCORECARD_COLUMNS = `id,employee_id,period,score,competencies,${NAME}`;
 const DOCUMENT_COLUMNS = `id,employee_id,title,doc_type,status,issued_on,expires_on,${NAME}`;
 const LETTER_COLUMNS = `id,employee_id,letter_type,title,status,issued_on,created_at,${NAME}`;
 const VOUCHER_COLUMNS = 'id,voucher_no,payee,voucher_type,amount_cents,issued_date,status';
-const SETTINGS_COLUMNS = 'work_week,default_annual_leave_days,overtime_rates,notifications';
+const SETTINGS_COLUMNS = 'work_week,default_annual_leave_days,default_medical_leave_days,default_emergency_leave_days,overtime_rates,notifications';
 const REVIEW_COLUMNS = `id,employee_id,period,rating,score,reviewer_name,reviewed_at,${NAME}`;
 
 type Named = { name?: string | null } | null | undefined;
@@ -70,16 +70,18 @@ function named<T extends { employee: Named }>(row: T): Omit<T, 'employee'> & { e
   return { ...rest, employee_name: employee?.name ?? UNKNOWN };
 }
 
+const days = (value: number | null | undefined, fallback: number): number =>
+  value === null || value === undefined ? fallback : Number(value);
+
 /** A settings row with every missing key filled from the table's own defaults. */
 function withDefaults(row: Partial<PeopleSettings> | null | undefined): PeopleSettings {
   const d = DEFAULT_PEOPLE_SETTINGS;
   if (!row) return { ...d, work_week: [...d.work_week], overtime_rates: { ...d.overtime_rates }, notifications: {} };
   return {
     work_week: Array.isArray(row.work_week) ? row.work_week : [...d.work_week],
-    default_annual_leave_days:
-      row.default_annual_leave_days === null || row.default_annual_leave_days === undefined
-        ? d.default_annual_leave_days
-        : Number(row.default_annual_leave_days),
+    default_annual_leave_days: days(row.default_annual_leave_days, d.default_annual_leave_days),
+    default_medical_leave_days: days(row.default_medical_leave_days, d.default_medical_leave_days),
+    default_emergency_leave_days: days(row.default_emergency_leave_days, d.default_emergency_leave_days),
     overtime_rates: { ...d.overtime_rates, ...(row.overtime_rates ?? {}) },
     notifications: row.notifications ?? {},
   };

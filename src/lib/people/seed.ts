@@ -196,6 +196,8 @@ const VOUCHERS: [number, string, string, number, number, PaymentVoucher['status'
 const SETTINGS: PeopleSettings = {
   work_week: ['mon', 'tue', 'wed', 'thu', 'fri'],
   default_annual_leave_days: 14,
+  default_medical_leave_days: 14,
+  default_emergency_leave_days: 3,
   overtime_rates: { weekday: 1.5, rest_day: 2, public_holiday: 3 },
   notifications: { leave_requests: true, payslip_ready: true, document_expiry: true, birthdays: false },
 };
@@ -279,8 +281,10 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
     start_date: addDays(today, from),
     end_date: addDays(today, to),
     days,
+    half_day: false,
     reason,
     status,
+    decision_note: null,
     created_at: ago(applied),
   }));
 
@@ -312,6 +316,7 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
     end_time: `${end}:00`,
     reason,
     status,
+    decision_note: null,
     created_at: ago(Math.max(0, 3 - day)),
   }));
 
