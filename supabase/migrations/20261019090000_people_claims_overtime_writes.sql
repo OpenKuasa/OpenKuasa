@@ -32,9 +32,12 @@ alter table public.hr_overtime_records
   add column day_kind text check (day_kind is null or day_kind in ('weekday','rest_day','public_holiday'));
 
 -- A claim's status gains `paid`. The check it replaces is found by what it
--- says, not by a name it might not have.
+-- says, not by a name it might not have. Finding none stops the migration, so
+-- the old four-value check can never be left in place unnoticed.
 do $$
-declare c record;
+declare
+  c record;
+  dropped int := 0;
 begin
   for c in
     select con.conname from pg_constraint con
@@ -42,7 +45,9 @@ begin
       and pg_get_constraintdef(con.oid) like '%status%' and pg_get_constraintdef(con.oid) like '%cancelled%'
   loop
     execute format('alter table public.hr_claims drop constraint %I', c.conname);
+    dropped := dropped + 1;
   end loop;
+  if dropped = 0 then raise exception 'the status check on hr_claims was not found'; end if;
 end $$;
 
 alter table public.hr_claims
@@ -85,9 +90,10 @@ revoke all on function private.hr_pay_may_act(uuid) from public, anon, authentic
 --     row); else a weekday.
 --   multiplier: the workspace's overtime_rates under that key, kept to the one
 --     decimal place a record stores; 1.5, 2.0 and 3.0 when there is no
---     settings row, or the key is missing or is not a number from 1 to 99.9.
+--     settings row, or the key is missing or is not a number from 1 to 99.9
+--     (the floor is tested before rounding, so 0.97 is not taken as 1.0).
 --   hourly_rate_cents: the monthly salary over 26 days of 8 hours, or null
---     when no salary is on file.
+--     when no salary is on file or the salary is 0.
 --   amount_cents: rate x hours x multiplier, or 0 when the rate is null.
 -- It also checks the date (2000 up to today in Malaysia) and the hours (above
 -- zero, in halves, at most 24).
@@ -124,14 +130,14 @@ begin
   multiplier := case day_kind when 'weekday' then 1.5 when 'rest_day' then 2.0 else 3.0 end;
   custom := rates -> day_kind;
   if jsonb_typeof(custom) = 'number' then
-    if round((custom #>> '{}')::numeric, 1) between 1 and 99.9 then
+    if (custom #>> '{}')::numeric >= 1 and round((custom #>> '{}')::numeric, 1) <= 99.9 then
       multiplier := round((custom #>> '{}')::numeric, 1);
     end if;
   end if;
 
   select p.base_salary_cents into salary from public.hr_employee_private p
   where p.employee_id = p_employee and p.org_id = p_org;
-  hourly_rate_cents := round(salary / 208.0)::bigint;
+  hourly_rate_cents := round(nullif(salary, 0) / 208.0)::bigint;
   amount_cents := coalesce(round(hourly_rate_cents * p_hours * multiplier), 0)::bigint;
 end; $$;
 revoke all on function private.hr_overtime_figures(uuid, uuid, date, numeric) from public, anon, authenticated;

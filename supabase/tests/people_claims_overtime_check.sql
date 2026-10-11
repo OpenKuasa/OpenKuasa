@@ -28,7 +28,8 @@ declare
   eb uuid;
   ei uuid;                             -- inactive employee
   ev uuid;
-  ec uuid;                             -- active employee linked to nobody
+  ec uuid;                             -- active employee linked to nobody, with a salary of 0 on file until stage 3
+  oc uuid;
   demo_emp uuid := md5('rimba-emp-1')::uuid;
   demo_claim uuid;
   demo_paid uuid;
@@ -197,7 +198,7 @@ begin
 
   -- 520208 / 208 = 2501 exactly; 500000 / 208 = 2403.85, so 2404.
   insert into public.hr_employee_private (employee_id, org_id, base_salary_cents)
-  values (ea, org, 520208), (ev, org, 500000);
+  values (ea, org, 520208), (ev, org, 500000), (ec, org, 0);
   insert into public.hr_public_holidays (org_id, name, holiday_date)
   values (org, 'Midweek Day', date '2024-03-06'), (org, 'Sunday Day', date '2024-03-10');
 
@@ -258,8 +259,11 @@ begin
 
   -- ---- the overtime figures, before anything is submitted ----------------
   -- Settings change between the numbered groups; every preview is run as `who`.
-  for stage in 1..5 loop
-    if stage = 2 then
+  for stage in 1..6 loop
+    if stage = 6 then
+      -- Just under 1 is below 1 (not rounded up to it); exactly 1 is taken.
+      update public.hr_settings set overtime_rates = '{"weekday": 0.97, "rest_day": 0.95, "public_holiday": 1}'::jsonb where org_id = org;
+    elsif stage = 2 then
       -- A Sunday-to-Thursday week; one multiplier set, one not a number, one below 1.
       insert into public.hr_settings (org_id, work_week, overtime_rates)
       values (org, '["sun","mon","tue","wed","thu"]'::jsonb, '{"weekday": 2.5, "rest_day": "lots", "public_holiday": 0.5}'::jsonb);
@@ -281,7 +285,10 @@ begin
         (1, admin_id, ea, date '2024-03-04', 24, 'weekday', 1.5, 2501, 90036, 'the admin previews 24 hours for member A'),
         (1, mv, ev, date '2024-03-04', 1.5, 'weekday', 1.5, 2404, 5409, 'a linked viewer, whose hourly rate rounds up'),
         (1, mb, eb, date '2024-03-04', 2, 'weekday', 1.5, null, null, 'an employee with no salary on file'),
-        (1, admin_id, ec, date '2024-03-09', 2, 'rest_day', 2.0, null, null, 'the admin previews for an employee with no salary on file'),
+        (1, admin_id, ec, date '2024-03-09', 2, 'rest_day', 2.0, null, null, 'the admin previews for an employee whose salary on file is 0'),
+        (6, ma, ea, date '2024-03-04', 1, 'weekday', 1.5, 2501, 3752, 'a multiplier of 0.97 is below 1, so the default is used'),
+        (6, ma, ea, date '2024-03-09', 1, 'rest_day', 2.0, 2501, 5002, 'a multiplier of 0.95 is below 1, so the default is used'),
+        (6, ma, ea, date '2024-03-06', 1, 'public_holiday', 1.0, 2501, 2501, 'a multiplier of exactly 1 is taken'),
         (2, ma, ea, date '2024-03-04', 1, 'weekday', 2.5, 2501, 6253, 'a Monday on a custom weekday multiplier'),
         (2, ma, ea, date '2024-03-03', 1, 'weekday', 2.5, 2501, 6253, 'a Sunday in a Sunday-to-Thursday week'),
         (2, ma, ea, date '2024-03-08', 1, 'rest_day', 2.0, 2501, 5002, 'a Friday in a Sunday-to-Thursday week, the multiplier not a number'),
@@ -388,6 +395,7 @@ begin
         (1, null, 'a session with no user previews overtime', format('select public.hr_overtime_preview(%L, ''2024-03-05'', 1)', ea), 'PAY_NOT_ALLOWED'),
         (1, admin_id, 'the admin submits a claim for an inactive employee', format('select public.hr_submit_claim(%L, ''travel'', 8500, %L, null, null)', ei, today), 'PAY_INACTIVE_EMPLOYEE'),
         (1, admin_id, 'the admin submits overtime for an inactive employee', format('select public.hr_submit_overtime(%L, ''2024-03-05'', 1, null)', ei), 'PAY_INACTIVE_EMPLOYEE'),
+        (1, admin_id, 'the admin submits overtime for an employee whose salary on file is 0', format('select public.hr_submit_overtime(%L, ''2024-03-05'', 2, null)', ec), null),
         (1, admin_id, 'the admin submits a claim for an employee that does not exist', format('select public.hr_submit_claim(%L, ''travel'', 8500, %L, null, null)', gen_random_uuid(), today), 'PAY_NOT_ALLOWED'),
         (1, admin_id, 'the admin submits overtime for an employee that does not exist', format('select public.hr_submit_overtime(%L, ''2024-03-05'', 1, null)', gen_random_uuid()), 'PAY_NOT_ALLOWED'),
         (1, admin_id, 'the admin previews for an employee that does not exist', format('select public.hr_overtime_preview(%L, ''2024-03-05'', 1)', gen_random_uuid()), 'PAY_NOT_ALLOWED'),
@@ -586,7 +594,11 @@ begin
       select count(*) into n from public.hr_claims where org_id = org;
       if n <> 6 then fails := array_append(fails, format('%s claims after submitting, expected 6', n)); end if;
       select count(*) into n from public.hr_overtime_records where org_id = org;
-      if n <> 8 then fails := array_append(fails, format('%s overtime records after submitting, expected 8', n)); end if;
+      if n <> 9 then fails := array_append(fails, format('%s overtime records after submitting, expected 9', n)); end if;
+      select id into oc from public.hr_overtime_records where employee_id = ec;
+      select count(*) into n from public.hr_overtime_records
+      where id = oc and hourly_rate_cents is null and amount_cents = 0 and day_kind = 'weekday';
+      if n <> 1 then fails := array_append(fails, 'overtime with a salary of 0 on file was not saved as not calculated (no rate, amount 0)'); end if;
 
       select count(*) into n from public.hr_claims
       where id = ca1 and org_id = org and amount_cents = 8500 and claim_date = today - 2 and status = 'pending'
@@ -699,8 +711,14 @@ begin
       -- A salary is now on file for member B (RM 4,160: RM 20.00 an hour).
       -- Approving works the figures out, on the settings as they are now.
       insert into public.hr_employee_private (employee_id, org_id, base_salary_cents) values (eb, org, 416000);
+      -- And the salary of 0 becomes a real one: the same happens for that record.
+      update public.hr_employee_private set base_salary_cents = 416000 where employee_id = ec;
       perform set_config('request.jwt.claims', json_build_object('sub', admin_id, 'role', 'authenticated', 'aal', 'aal1')::text, true);
       set local role authenticated;
+      r := public.hr_decide_overtime(oc, true, null);
+      if r->>'status' <> 'approved' or (r->>'amount_cents')::bigint is distinct from 6000 then
+        fails := array_append(fails, 'approving overtime made on a salary of 0, after a real salary was set, did not return the worked-out amount (6000): ' || r::text);
+      end if;
       r := public.hr_decide_overtime(ob2, true, null);
       if r->>'id' <> ob2::text or r->>'status' <> 'approved' or (r->>'amount_cents')::bigint is distinct from 6000 then
         fails := array_append(fails, 'approving overtime after a salary was set did not return the worked-out amount (2 h x 1.5 x 2000 = 6000): ' || r::text);
@@ -732,6 +750,9 @@ begin
       where id = ob2 and status = 'approved' and day_kind = 'weekday' and rate_multiplier = 1.5
         and hourly_rate_cents = 2000 and amount_cents = 6000;
       if n <> 1 then fails := array_append(fails, 'approving overtime after a salary was set did not save the worked-out figures'); end if;
+      select count(*) into n from public.hr_overtime_records
+      where id = oc and status = 'approved' and hourly_rate_cents = 2000 and amount_cents = 6000 and rate_multiplier = 1.5;
+      if n <> 1 then fails := array_append(fails, 'approving overtime made on a salary of 0 did not save the worked-out figures once a real salary was set'); end if;
       select count(*) into n from public.hr_overtime_records where id = ob1 and hourly_rate_cents is null and amount_cents = 0;
       if n <> 1 then fails := array_append(fails, 'setting a salary changed overtime that was already approved'); end if;
       select count(*) into n from public.hr_claims

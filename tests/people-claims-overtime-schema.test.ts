@@ -118,6 +118,8 @@ describe('Lekiu claims and overtime migration', () => {
     expect(text).toContain("pg_get_constraintdef(con.oid) like '%status%'");
     expect(text).toContain("execute format('alter table public.hr_claims drop constraint %I', c.conname);");
     expect(text).not.toMatch(/drop constraint (if exists )?hr_claims/);
+    // And finding nothing to drop stops the migration.
+    expect(text).toContain("if dropped = 0 then raise exception 'the status check on hr_claims was not found'; end if;");
     expect(text).toContain("check (status in ('pending','approved','rejected','cancelled','paid')),");
     expect(text).toContain("check ((status = 'paid') = (paid_on is not null)");
     expect(text).toContain("and (status = 'paid' or (paid_reference is null and paid_by is null)));");
@@ -186,8 +188,13 @@ describe('Lekiu claims and overtime migration', () => {
 
   test('a refusal is one of the ten codes and carries nothing else', () => {
     const text = writes();
-    const raised = [...text.matchAll(/raise exception ([^;]*);/g)].map((m) => m[1]);
+    // Every function's text; the one other raise is the migration's own guard, outside any function.
+    const inFunctions = allFunctions(text)
+      .map((name) => fn(text, name).body)
+      .join('\n');
+    const raised = [...inFunctions.matchAll(/raise exception ([^;]*);/g)].map((m) => m[1]);
     expect(raised.length).toBeGreaterThan(40);
+    expect(text.match(/raise exception/g)).toHaveLength(raised.length + 1);
     for (const message of raised) expect(message).toMatch(/^'PAY_[A-Z_]+'$/);
     expect([...new Set(raised.map((m) => m.slice(1, -1)))].sort()).toEqual([...CODES].sort());
     expect(text).not.toMatch(/raise (notice|warning|log|info)/i);
@@ -326,7 +333,12 @@ describe('Lekiu claims and overtime migration', () => {
     expect(rest).toBeGreaterThan(holiday);
     expect(body).toContain("multiplier := case day_kind when 'weekday' then 1.5 when 'rest_day' then 2.0 else 3.0 end;");
     expect(body).toContain("if jsonb_typeof(custom) = 'number' then");
-    expect(body).toContain('hourly_rate_cents := round(salary / 208.0)::bigint;');
+    // The floor of 1 is tested on the configured value, before it is rounded.
+    expect(body).toContain(
+      "if (custom #>> '{}')::numeric >= 1 and round((custom #>> '{}')::numeric, 1) <= 99.9 then",
+    );
+    // A salary of 0 is no salary.
+    expect(body).toContain('hourly_rate_cents := round(nullif(salary, 0) / 208.0)::bigint;');
     expect(body).toContain('amount_cents := coalesce(round(hourly_rate_cents * p_hours * multiplier), 0)::bigint;');
     // No second copy of the arithmetic: the three callers use the helper.
     expect(text.match(/208/g)).toHaveLength(1);
