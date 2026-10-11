@@ -2,7 +2,10 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ApprovalCard, ToolStepCard } from '@/components/chat/tool-cards';
-import { toPendingApproval, toToolStep } from '@/components/chat/tool-parts';
+import { refusalForUser, toPendingApproval, toToolStep } from '@/components/chat/tool-parts';
+import {
+  AMBIGUOUS_DELETION, DELETION_CHECK_FAILED, NAMESAKE_APPEARED, ONE_DELETION, lookTheSameApplications, lookTheSameCandidates, notLookedUp,
+} from '@/lib/ai/hire-deletions';
 
 /**
  * A change can be stopped in two ways: the user says no on its card, or the
@@ -11,14 +14,15 @@ import { toPendingApproval, toToolStep } from '@/components/chat/tool-parts';
  * otherwise. As the server sends it: no DOM here, so nothing is pressed.
  */
 const REASON = 'One deletion at a time. One is already prepared for approval.';
+const SHOWN = 'Only one deletion is prepared at a time, and one was already prepared. Ask for this one again afterwards.';
 const part = (approval: Record<string, unknown>, state = 'output-denied') =>
   ({ type: 'tool-deleteCandidate', toolCallId: 'c1', state, input: { id: 'x' }, approval }) as never;
 
 describe('a change that did not run', () => {
   it('keeps the server\'s reason when it refused the change itself', () => {
-    expect(toToolStep(part({ id: 'r1', approved: false, reason: REASON, isAutomatic: true }), 'm', 0)).toMatchObject({ denied: true, reason: REASON });
+    expect(toToolStep(part({ id: 'r1', approved: false, reason: REASON, isAutomatic: true }), 'm', 0)).toMatchObject({ denied: true, reason: SHOWN });
     // A chat opened again keeps the reason and not the automatic mark.
-    expect(toToolStep(part({ id: 'r1', approved: false, reason: REASON }), 'm', 0)).toMatchObject({ denied: true, reason: REASON });
+    expect(toToolStep(part({ id: 'r1', approved: false, reason: REASON }), 'm', 0)).toMatchObject({ denied: true, reason: SHOWN });
   });
   it('has no reason when the user said no', () => {
     const step = toToolStep(part({ id: 'r1', approved: false }), 'm', 0)!;
@@ -33,7 +37,8 @@ describe('a change that did not run', () => {
   });
   it('shows the reason, and does not say "Not approved", for a change the server refused', () => {
     const html = renderToStaticMarkup(<ToolStepCard step={toToolStep(part({ id: 'r1', approved: false, reason: REASON, isAutomatic: true }), 'm', 0)!} />);
-    expect(html).toContain(REASON);
+    expect(html).toContain(SHOWN);
+    expect(html).not.toContain(REASON);
     expect(html).toContain('Not shown for approval');
     expect(html).not.toContain('Not approved');
   });
@@ -95,5 +100,41 @@ describe('a change the user approved that a last check stopped', () => {
     expect(html).toContain('This was approved, but a last check stopped it. Nothing was changed.');
     expect(html).not.toContain('Not approved');
     expect(html).not.toContain('Not shown for approval');
+  });
+});
+
+// The reason on a refused change was written for the model: it can name tools and carry a row's id. What the
+// person reads is a line written for them, chosen by how the reason begins. The reasons are the server's own
+// constants, so this fails if one of them is reworded without its line here.
+describe('the line a person reads on a change the server refused', () => {
+  const ID = '3f2a9c1e-5b7d-4e8f-9a0b-1c2d3e4f5a6b';
+  const each: [string, string][] = [
+    [ONE_DELETION, SHOWN],
+    [AMBIGUOUS_DELETION, 'More than one record matches that name, so nothing was prepared. Say which one you mean, then ask again.'],
+    [notLookedUp('candidate', ID), 'The assistant had not looked this record up, so nothing was prepared. Ask again and it will look it up first.'],
+    [notLookedUp('application', ID), 'The assistant had not looked this record up, so nothing was prepared. Ask again and it will look it up first.'],
+    [NAMESAKE_APPEARED, 'A last check stopped this, because someone else with the same name had appeared. Nothing was deleted. Ask for it again.'],
+    // These three were written for a person already, and say whose name it is.
+    [lookTheSameCandidates('Aisyah Lim'), lookTheSameCandidates('Aisyah Lim')],
+    [lookTheSameApplications('Aisyah Lim', 'Barista'), lookTheSameApplications('Aisyah Lim', 'Barista')],
+    [DELETION_CHECK_FAILED, DELETION_CHECK_FAILED],
+  ];
+  it.each(each)('%s', (reason, line) => {
+    expect(refusalForUser(reason)).toBe(line);
+  });
+  it('never shows an id, a tool\'s name or words meant for the model', () => {
+    for (const [reason] of each) {
+      const line = refusalForUser(reason);
+      expect(line).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/);
+      expect(line).not.toMatch(/list[A-Z]|Never guess|Stop here|ask the user|Prepare it again/);
+    }
+  });
+  it('shows nothing of a reason it does not know', () => {
+    expect(refusalForUser(`Some new refusal about ${ID} and listCandidates`)).toBe('This was stopped before it was shown for approval. Nothing was changed.');
+  });
+  it('is what the step carries', () => {
+    const step = toToolStep(part({ id: 'r1', approved: false, reason: notLookedUp('candidate', ID), isAutomatic: true }), 'm', 0)!;
+    expect(step.reason).toBe('The assistant had not looked this record up, so nothing was prepared. Ask again and it will look it up first.');
+    expect(renderToStaticMarkup(<ToolStepCard step={step} />)).not.toContain(ID);
   });
 });

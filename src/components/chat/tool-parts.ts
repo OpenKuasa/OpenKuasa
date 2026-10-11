@@ -165,6 +165,27 @@ export type ToolStep = {
   output: unknown;
 };
 
+/**
+ * The line a person reads on a change the server refused before asking them. The server's reason is written for
+ * the model: it can name tools and carry a row's id. So it is not shown; a line written for a person is chosen by
+ * how the reason begins (the beginnings are fixed in lib/ai/hire-deletions.ts, and a test holds the two together).
+ * A reason that is already a sentence for a person passes as it is. One that is not known shows nothing of itself.
+ */
+const REFUSAL_LINES: [start: string, line: string | null][] = [
+  ['One deletion at a time.', 'Only one deletion is prepared at a time, and one was already prepared. Ask for this one again afterwards.'],
+  ['More than one match was found', 'More than one record matches that name, so nothing was prepared. Say which one you mean, then ask again.'],
+  ['You have not looked up ', 'The assistant had not looked this record up, so nothing was prepared. Ask again and it will look it up first.'],
+  ['Someone else with the same name appeared ', 'A last check stopped this, because someone else with the same name had appeared. Nothing was deleted. Ask for it again.'],
+  ['Two candidates called ', null],
+  ['Two applications from someone called ', null],
+  ['I could not check ', null],
+];
+export function refusalForUser(reason: string): string {
+  const known = REFUSAL_LINES.find(([start]) => reason.startsWith(start));
+  if (!known) return 'This was stopped before it was shown for approval. Nothing was changed.';
+  return known[1] ?? reason;
+}
+
 export function toToolStep(part: AnyPart, messageId: string, index: number): ToolStep | null {
   const name = toolName(part);
   if (!name) return null;
@@ -176,7 +197,7 @@ export function toToolStep(part: AnyPart, messageId: string, index: number): Too
     ('toolCallId' in part ? (part.toolCallId as string) : undefined) ?? `${messageId}-${index}`;
   // A refusal of the server's own carries its reason; the chat's Reject button sends none.
   const approval = denied ? (part as { approval?: { approved?: unknown; reason?: unknown } }).approval : undefined;
-  const reason = typeof approval?.reason === 'string' && approval.reason.trim() ? approval.reason : undefined;
+  const reason = typeof approval?.reason === 'string' && approval.reason.trim() ? refusalForUser(approval.reason) : undefined;
   // Denied although the part says approved: the server checks an approved change once more before running it, and
   // tells the browser only that it was denied. The user's yes stays on the part; the server's reason goes to the model.
   const afterApproval = approval?.approved === true;
