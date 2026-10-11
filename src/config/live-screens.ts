@@ -75,8 +75,8 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'finance/products',
   'finance/invoices',
   'finance/payments-in',
-  // Read-only so far: their forms and row actions join in the next slice.
   'finance/quotations',
+  // Read-only so far: their forms and row actions join in the next slice.
   'finance/credit-notes',
   'finance/refunds',
   'finance/supplier-bills',
