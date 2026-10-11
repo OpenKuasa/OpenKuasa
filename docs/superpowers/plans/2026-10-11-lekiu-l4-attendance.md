@@ -194,3 +194,13 @@ Each owns the files it lists. As in L2 and L3: do not run `pnpm tsc`, `pnpm lint
 ## Not in this plan
 
 Everything in the spec's "Out" list (§3).
+
+## Execution Notes (2026-10-11)
+
+- Built by subagents per task; every task reviewed, then a whole-branch review and one fix wave with a scoped re-review. No critical finding left open.
+- Rulings made during execution, all written into the spec: present or late is judged to the minute; the nightly close covers a workspace only from the day it first used attendance (`private.hr_attendance_started`) and an employee only from the day the close first saw them linked and active (`private.hr_attendance_covered`), so a day with no row is not an absence; a correction refuses 24:00 and, for today, a time still to come; today's attendance tile is a count "clocked in so far", and past rates read "of recorded days".
+- Both migrations applied to the live database on 2026-10-11 at 19:04 Malaysia time, before merge. The 13 functions on live are byte-identical to the file (md5 of each body), owned by `postgres`, with the six public ones executable by `authenticated` only; epoch 2026-10-11; job `close-attendance` at `5 16 * * *`.
+- `supabase/tests/people_attendance_check.sql` passed on a scratch Postgres (run on a Sunday only). It was NOT run on the live database: the identical function bodies and the live test `tests/people-attendance.rls.test.ts` stand in for it.
+- `pnpm test` after applying: 237 files, 3,929 tests, all passing, and no test workspace left behind. `pnpm build` passes.
+- Signed-in owner pass in the browser: clock in (button), "have I clocked in?" and clock out (Lekiu, with approval card), a correction of today (Lekiu, card showed the day, times and note), the correction form keeping a real clock-out, add and remove a public holiday, save and restore the work week. The demo-visitor browser pass and the plain-member pass were not done (both need a different sign-in); the live test covers the demo refusals.
+- Deferred, accepted: the close has no per-workspace error handler; `hr_delete_holiday` locks the row before checking the caller; `corrected_by` is readable by the employee through a direct API call; the first migration is not re-runnable.
