@@ -28,13 +28,13 @@ A linked employee clocks in and out for themselves; the system decides present o
 | Absent and on leave | Automatic: approved leave marks the day; a working day with no clock-in and no leave becomes absent once it is over. Owners and admins can correct any day. A forgotten clock-out stays open and is flagged |
 | Lekiu | Does what the screens can, for whoever is asking, each change behind a confirmation card |
 | Enforcement | Database functions, one per action. No direct write access to the tables |
-| First run | The nightly job counts from the day the migration is applied, never earlier |
+| When the nightly job starts | Per workspace, from the first day anyone in it clocks in or an owner or admin corrects a day; never before the migration is applied. A workspace that does not use attendance is never marked. An employee with no linked account is never marked absent automatically |
 
 ## 3. Scope
 
 **In:** daily attendance (clock in, clock out, corrections, the nightly close); public holidays (add, edit, remove); three settings (work week, start time, grace period); the My Attendance, Public Holidays and Settings screens; a new Team Attendance screen; Lekiu's attendance tools and prompt rules; two migrations.
 
-**Out:** timesheets; shift rosters; a start time per employee; clocking in with a location; clocking out after midnight (a shift that crosses midnight is corrected by an owner or admin); employees asking for a correction; loading a year of Malaysian public holidays automatically; overtime worked out from clock times; reminders and notifications; the rest of Settings; Lekiu inside Tuah; the draft-letters policy raised in plan C.
+**Out:** timesheets; shift rosters; a start time per employee; clocking in with a location; clocking out after midnight (a shift that crosses midnight stays open; an owner or admin can correct the day, but a clock-out can be recorded no later than 23:59 of the same date); employees asking for a correction; loading a year of Malaysian public holidays automatically; overtime worked out from clock times; reminders and notifications; the rest of Settings; Lekiu inside Tuah; the draft-letters policy raised in plan C.
 
 ## 4. Database
 
@@ -61,7 +61,7 @@ All in `public`, `security definer`, `set search_path = public`, `execute` grant
 |---|---|---|
 | `hr_clock_in(employee)` returns the day | Only the member linked to that employee (`private.is_own_employee`). An owner or admin cannot clock in for someone else; they correct. | Today only. Refuses an inactive employee, a day that is not a working day (`ATT_NOT_WORKING_DAY`), a day covered by the employee's approved full-day leave (`ATT_ON_LEAVE`), and a second clock-in (`ATT_ALREADY_IN`). Saves `clock_in = now()` and the status from §4.3. "Already clocked in" means today's row has a clock-in; a correction for today with no clock-in (an owner marked the day absent early) is replaced by the clock-in and stops being a correction. |
 | `hr_clock_out(employee)` returns the day | The same | Today only. Needs today's clock-in (`ATT_NOT_IN`) and no clock-out yet (`ATT_ALREADY_OUT`). Saves `clock_out = now()`. |
-| `hr_correct_attendance(employee, work_date, status, clock_in time, clock_out time, note)` returns the day | Owner or admin of the employee's workspace | A date from 2000 up to today. `present` and `late` need a clock-in time and may have a clock-out after it; `absent` and `on_leave` take no times. Creates or replaces the day's row, sets `corrected_by`, `corrected_at` and the trimmed note. The times are read as Malaysia time on that date. |
+| `hr_correct_attendance(employee, work_date, status, clock_in time, clock_out time, note)` returns the day | Owner or admin of the employee's workspace | A date from 2000 up to today. `present` and `late` need a clock-in time and may have a clock-out after it, both before 24:00 and, for today, not later than now; `absent` and `on_leave` take no times. Creates or replaces the day's row, sets `corrected_by`, `corrected_at` and the trimmed note. The times are read as Malaysia time on that date. |
 | `hr_save_holiday(org, id, name, holiday_date)` returns the holiday | Owner or admin of `org` | `id` null adds, otherwise edits that holiday (it must belong to `org`, else `ATT_NOT_FOUND`). Name 1 to 120 characters, date from 2000 to 2100. One holiday per date per workspace (`ATT_HOLIDAY_EXISTS`). |
 | `hr_delete_holiday(id)` | Owner or admin of the holiday's workspace; anyone else `ATT_NOT_FOUND` | Deletes it. |
 | `hr_save_attendance_settings(org, work_week, work_start_time, late_grace_minutes)` returns the three | Owner or admin of `org` | `work_week` a non-empty array of distinct weekday keys from `mon` to `sun`; grace 0 to 240. Creates the settings row if there is none, with the table defaults for everything else. |
@@ -72,17 +72,19 @@ Clock in and clock out take the employee's row `for no key update`, so two taps 
 
 ### 4.3 Present or late
 
-`private.hr_attendance_status(org, at timestamptz)`: `present` when the Malaysia clock time of `at` is at or before `work_start_time` plus `late_grace_minutes`, else `late`. With no settings row: 09:00 and 15 minutes. Used by clock-in only; a correction states its status.
+`private.hr_attendance_status(org, at timestamptz)`: `present` when the Malaysia clock time of `at`, taken to the minute, is at or before `work_start_time` plus `late_grace_minutes`, else `late` (09:15:59 with 09:00 and 15 minutes is present; 09:16 is late). With no settings row: 09:00 and 15 minutes. Used by clock-in only; a correction states its status.
 
 ### 4.4 The nightly close
 
 `private.hr_attendance_close()`, run by `pg_cron` at 00:05 Malaysia time (`5 16 * * *` UTC). For every workspace but the demo, for every **active** employee, for every date `d` that is a working day with
 
-`greatest(epoch, today − 31 days, the employee's join date, the Malaysia date the employee record was created) ≤ d ≤ yesterday`:
+`greatest(epoch, the workspace's first real attendance day, today − 31 days, the employee's join date, the Malaysia date the employee record was created) ≤ d ≤ yesterday`:
 
 - no row for `d`: insert `on_leave` when the employee's approved leave covers `d` (a half day counts), else `absent`;
-- a **system row** for `d` (no clock-in and `corrected_by` null): set its status to what the rule above gives now, so leave approved or cancelled late is reflected;
+- a **system row** for `d` (no clock-in and `corrected_at` null): set its status to what the rule above gives now, so leave approved or cancelled late is reflected;
 - a row with a clock-in, or a corrected row: untouched.
+
+A workspace's **first real attendance day** is the earliest date of a row in it that has a clock-in or a correction; a workspace with none is skipped, so nothing is recorded until someone there starts using attendance. An employee with no linked account cannot clock in and is skipped too (an owner or admin can still correct their days). A day counts as corrected when `corrected_at` is set (`corrected_by` empties if the corrector's account is deleted).
 
 It also deletes system rows on dates that are no longer working days (a holiday added, or the work week changed), within the same window. It is idempotent: running it twice changes nothing the second time. Today is never closed.
 
@@ -184,7 +186,7 @@ The live test does not clock in: whether today is a working day and whether it i
 | Risk | Handling |
 |---|---|
 | Someone clocks a colleague in, or backdates their own | Clock functions take no time and act only for the caller's own employee, today; the access check asserts each case |
-| A month of false absences on the first night | The epoch: nothing is closed for a date before the migration was applied |
+| False absences in a workspace that is not using attendance, or before the clock-in button ships | The job covers a workspace only from its first clocked or corrected day, and never before the migration was applied; unlinked employees are skipped |
 | The nightly job fails for a few nights | It closes the last 31 days each run, so missed nights are filled in when it next runs |
 | The job overwrites a real record | It only ever touches rows with no clock-in and no correction |
 | A holiday or work-week change makes past days wrong | The job removes system rows on days that stopped being working days and re-decides the rest, within 31 days; clocked and corrected days are left as they were |
