@@ -33,7 +33,7 @@
 - No model call in any automated test. No change to Tuah. No Kuasa names in `src/`. No purple or violet.
 - A live test creates its users and workspaces through `tests/helpers/live-workspaces.ts`, and nothing else.
 - 2-space indent, single quotes, semicolons, named exports (screens keep `export default`).
-- The migration is `supabase/migrations/20261025100000_people_payroll_writes.sql`; re-check just before the PR that it still sorts after everything on `main` and shares a 14-digit version with nothing (L4 had to renumber twice).
+- The migration is `supabase/migrations/20261027090000_people_payroll_writes.sql`; re-check just before the PR that it still sorts after everything on `main` and shares a 14-digit version with nothing (L4 had to renumber twice).
 
 ## Review Focus
 
@@ -48,7 +48,7 @@
 ### Task 1: The database (most capable model)
 
 **Files:**
-- Create: `supabase/migrations/20261025100000_people_payroll_writes.sql`
+- Create: `supabase/migrations/20261027090000_people_payroll_writes.sql`
 - Create: `supabase/tests/people_payroll_check.sql`
 - Create: `tests/people-payroll-schema.test.ts`
 - Modify: `supabase/tests/people_rls_check.sql` (a member reads their own payslip only when paid, their own letter only when issued)
@@ -216,3 +216,13 @@ Spec §5.3. Rules:
 ## Not in this plan
 
 Everything in the spec's "Out" list. Also: Jebat, Kasturi and Lekir's reply-language wording (the same "Bahasa Malaysia by default" line Lekiu had); Timesheet and Shift Calendar; slice L6.
+
+## Execution Notes (2026-10-12)
+
+- Built by subagents per task. The database was reviewed three times on the most capable model (the task, and two rounds of fixes), every other task once, then the whole branch, one fix wave and a scoped re-review. No Critical finding at any stage. The last residual (the Payroll screen never opening on an empty run) was fixed and unit-tested, and checked in the browser, but not independently re-reviewed.
+- Rulings made during execution, all written into the spec and told to the owner: the first run in a workspace takes every approved, unpaid overtime record up to the month's end and reports how many are from earlier months; runs are created in month order and, after a workspace's first run, with no gaps; a month with nobody to pay is run as an empty draft and marked paid as a record (the owner said yes to this as built); the employee-delete guard is a trigger with `when (pg_trigger_depth() = 0)` that locks the runs before testing; a paid payslip reads "Deductions", not proposals, to everyone.
+- The migration was applied to the live database on 2026-10-12 at about 00:45 to 00:50 Malaysia time, before merge, in two transactions because the file is too long for one call to the database tool: first the columns, tables, read rules and every function; then the guard's trigger with the new demo re-seed, which ran once. All 25 functions on live are byte-identical to the file (md5 of each body), owned by `postgres`; the public ones are executable by `authenticated` only; the read rules, the generated `net_cents`, the trigger and the three rule rows were confirmed from the catalogue. The file was renumbered from `20261025090000` to `20261025100000` and then `20261027090000` as `main` took those versions; the live database is unaffected by the file's name.
+- `pnpm test` after applying: 266 files, 4,845 tests, all passing, including the live payroll test (its member is created already confirmed through the test helper, because the live project requires email confirmation). Nothing left behind on live. `pnpm build` passes.
+- The SQL checks pass on a scratch Postgres 14, on two calendar days. See the PR for their result on the live database.
+- Browser passes on a dev server: the owner (run October, read a payslip, add a line, type over PCB, recalculate, mark paid, undo, delete the draft; the workspace was left with no run and its overtime released), and the non-admin test account (nothing visible while a draft; its own payslip and "Paid, October 2026" on OT Claims once paid; no control anywhere; no Payroll page). Real Lekiu questions: as owner in English (add a bonus line, then "mark it as paid": declined, pointed to the Payroll screen) and in Bahasa Malaysia (remove the line just added and set EPF: two accurate cards); as the member (no payslip visible yet; setting EPF is for an owner or admin; no card). Not done: a demo-visitor browser pass (the live test and the unit rules cover the demo).
+- Known and accepted: the SQL checks have not run on Postgres 17 except as recorded in the PR; "who marked it paid" has no name; an employee deleted while a run is creating their first payslip gets a raw database error; the Payroll header wraps its subtitle when the month picker and the "run the next month" note are both shown; a confirmation prompt's trigger closes it on a second click; Jebat, Kasturi and Lekir still carry the "Bahasa Malaysia by default" wording Lekiu had.

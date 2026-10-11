@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 const DIR = join(process.cwd(), 'supabase/migrations');
-const WRITES = '20261025100000_people_payroll_writes.sql';
+const WRITES = '20261027090000_people_payroll_writes.sql';
 const VERSION = WRITES.slice(0, 14);
 
 /** The migration's statements, without its comment lines (they describe the rules in words the checks would trip on). */

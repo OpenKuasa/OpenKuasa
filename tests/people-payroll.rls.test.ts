@@ -1,6 +1,6 @@
 /**
  * Live test of the payroll write path against the real database. It needs
- * 20261025100000_people_payroll_writes.sql applied; until then it fails at the
+ * 20261027090000_people_payroll_writes.sql applied; until then it fails at the
  * first call (the functions do not exist). Skipped without Supabase env vars.
  * First run: Task 6 of the L5 plan, after the owner's go-ahead.
  *

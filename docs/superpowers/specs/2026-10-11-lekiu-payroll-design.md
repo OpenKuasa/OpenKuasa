@@ -48,7 +48,7 @@ An owner or admin runs payroll for a month: the system drafts a payslip for each
 
 ## 4. Database
 
-One migration, `20261025100000_people_payroll_writes.sql`. Every function is `security definer`, `set search_path = public`, executable by `authenticated` only, and begins by working out the caller: signed in, an owner or admin of the run's workspace (`private.is_org_admin`, which also requires the second factor), and not the demo (`private.is_demo_org`). The workspace comes from the run or payslip named, and from an argument only for a new run, where it is checked against the caller's role.
+One migration, `20261027090000_people_payroll_writes.sql`. Every function is `security definer`, `set search_path = public`, executable by `authenticated` only, and begins by working out the caller: signed in, an owner or admin of the run's workspace (`private.is_org_admin`, which also requires the second factor), and not the demo (`private.is_demo_org`). The workspace comes from the run or payslip named, and from an argument only for a new run, where it is checked against the caller's role.
 
 ### 4.1 Columns and tables
 
@@ -212,7 +212,7 @@ The migration is applied to the live database before merge, on the owner's go-ah
 
 ## 9. Files
 
-- `supabase/migrations/20261025100000_people_payroll_writes.sql`, `supabase/tests/people_payroll_check.sql`
+- `supabase/migrations/20261027090000_people_payroll_writes.sql`, `supabase/tests/people_payroll_check.sql`
 - `src/lib/people/payroll-writes.ts`, `payroll-refusals.ts`, `payroll.ts`, `payroll-forms.ts`, `my-payslips.ts`, `overtime.ts`, `types.ts`, `supabase.ts`, `seed.ts`
 - `src/app/(app)/people/payroll-actions.ts`, `src/app/(app)/people/my-payslips/page.tsx`
 - `src/screens/people/payroll.tsx`, `my-payslips.tsx`, `ot-claims.tsx`; `src/components/people/` (run controls, payslip detail, line form, statutory field, `payslip-rows.tsx`, `payslip-editor.tsx`)
