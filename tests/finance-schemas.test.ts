@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { billIdInput, saveBillInput } from '@/lib/finance/bills';
 import { createContactInput, updateContactInput } from '@/lib/finance/contacts';
-import { invoiceIdInput, saveInvoiceInput } from '@/lib/finance/invoices';
+import { invoiceIdInput, saveInvoiceInput, setEInvoiceInput } from '@/lib/finance/invoices';
 import { markPaymentPaidInput, paymentIdInput, recordPaymentInInput, recordPaymentOutInput } from '@/lib/finance/money';
 import { createProductInput, updateProductInput } from '@/lib/finance/products';
 
@@ -73,6 +73,9 @@ const cases: [string, { parse: (v: unknown) => unknown }, unknown][] = [
     account_id: ID, txn_date: '2026-10-20', method: 'cheque', reference: ' CHQ 001 ', notes: ' banked ',
     allocations: [{ invoice_id: ID, amount: 10.005 }, { invoice_id: '22222222-2222-4222-8222-222222222222', amount: 5 }],
   }],
+  ['setEInvoiceInput', setEInvoiceInput, { id: ID, einvoice_status: 'validated', einvoice_uuid: ' F9D425P6DS7D8IU ' }],
+  ['setEInvoiceInput (no status, an empty UUID box)', setEInvoiceInput, { id: ID, einvoice_status: 'none', einvoice_uuid: '  ' }],
+  ['setEInvoiceInput (a status and no UUID yet)', setEInvoiceInput, { id: ID, einvoice_status: 'pending' }],
 ];
 
 describe('finance schemas parse their own output unchanged', () => {

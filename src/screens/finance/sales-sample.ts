@@ -31,6 +31,7 @@ const invoice = (
   balance: total - paid,
   display_status,
   einvoice_status,
+  einvoice_uuid: null,
 });
 
 /** Earlier months, so the trend has a shape: [month, invoiced and since paid in full]. */
