@@ -307,9 +307,11 @@ revoke all on function public.hr_unenrol(uuid, uuid) from public, anon;
 grant execute on function public.hr_unenrol(uuid, uuid) to authenticated;
 
 -- ---- completion: mark, or undo -----------------------------------------------------------
--- For someone enrolled, once the course has started. Marking stamps when and
--- by whom; undoing clears both. Refused, in this order: neither true nor
--- false; not enrolled; the course has not started (or has no start date).
+-- For someone enrolled. Marking needs the course to have started, and stamps
+-- when and by whom. Undoing clears both and is never refused for the dates,
+-- so a completion cannot be left stuck on a course whose dates were moved.
+-- Refused, in this order: neither true nor false; not enrolled; (marking)
+-- the course has not started, or has no start date.
 
 create or replace function public.hr_set_training_completed(p_training uuid, p_employee uuid, p_completed boolean)
 returns jsonb language plpgsql security definer set search_path = public as $$
@@ -325,7 +327,7 @@ begin
   select n.completed into done from public.hr_training_enrolments n
   where n.training_id = course.id and n.employee_id = emp.id;
   if not found then raise exception 'PERF_NOT_ENROLLED'; end if;
-  if course.starts_on is null or today < course.starts_on then raise exception 'PERF_COURSE_NOT_STARTED'; end if;
+  if p_completed and (course.starts_on is null or today < course.starts_on) then raise exception 'PERF_COURSE_NOT_STARTED'; end if;
 
   if done <> p_completed then
     update public.hr_training_enrolments n

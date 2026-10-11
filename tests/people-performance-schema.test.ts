@@ -279,6 +279,10 @@ describe('Lekiu performance, training and announcements migrations', () => {
     expect(fn(all, 'public.hr_save_review').body).toContain(
       'select r.* into rev from public.hr_reviews r where r.id = p_review and r.employee_id = emp.id for update;',
     );
+    // Only marking needs the course to have started: a completion can always be undone.
+    expect(fn(all, 'public.hr_set_training_completed').body).toContain(
+      "if p_completed and (course.starts_on is null or today < course.starts_on) then raise exception 'PERF_COURSE_NOT_STARTED'; end if;",
+    );
     // Only the employee gate ever lets someone in on the row being their own, and only when asked to.
     expect(all.match(/is_own_employee/g)).toHaveLength(2);
     expect(fn(all, 'private.hr_perf_held_employee').body).toContain('(p_own and private.is_own_employee(emp.id))');

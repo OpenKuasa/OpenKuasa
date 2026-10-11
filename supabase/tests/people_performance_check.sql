@@ -91,7 +91,7 @@ begin
       select md5(coalesce(string_agg(s.x, ',' order by s.x), '')) from (
         select a::text as x from public.hr_goals a where a.org_id = o union all select a::text from public.hr_reviews a where a.org_id = o
         union all select a::text from public.hr_trainings a where a.org_id = o union all select a::text from public.hr_training_enrolments a where a.org_id = o
-        union all select a::text from public.hr_announcements a where a.org_id = o union all select a::text from public.hr_announcement_reads a) s
+        union all select a::text from public.hr_announcements a where a.org_id = o union all select x::text from public.hr_announcement_reads x join public.hr_announcements a on a.id = x.announcement_id where a.org_id = o) s
     $b$
   $f$;
 
@@ -122,6 +122,8 @@ begin
   insert into public.hr_employees (org_id, employee_no, name, user_id) values (org, 'D', 'Adam Admin', adm), (oth, 'O', 'Other Hat', own);
   insert into public.hr_trainings (org_id, title, starts_on, ends_on) values (oth, 'Elsewhere', d, d) returning id into co;
   insert into public.hr_announcements (org_id, title) values (oth, 'Elsewhere') returning id into ao;
+  -- A read mark that is none of this workspace's business: nothing below may count it.
+  insert into public.hr_announcement_reads (announcement_id, user_id) values (ao, outs);
   perform private.reseed_demo_people();
   perform private.reseed_demo_people();
   de := md5('rimba-emp-1')::uuid;
@@ -263,7 +265,7 @@ begin
       || pg_temp.x(who, lbl || 'marks read', format('hr_mark_announcements_read(%L)', org), '={"marked":1}')
       || pg_temp.v(lbl || 'has a mark', format('select count(*) from public.hr_announcement_reads where announcement_id = %L and user_id = %L', g2, who), '1')
       || pg_temp.x(who, lbl || 'deletes an announcement', format('hr_delete_announcement(%L)', g2), format('={"id":"%s"}', g2))
-      || pg_temp.v(lbl || 'deleted its marks', 'select count(*) from public.hr_announcement_reads', '0');
+      || pg_temp.v(lbl || 'deleted its marks', format('select count(*) from public.hr_announcement_reads where user_id = %L', who), '0');
   end loop;
   if cardinality(fails) > 0 then raise exception 'who may call what is not as expected, so the rules were not tried'; end if;
 
@@ -305,6 +307,8 @@ begin
     ('a score of 5.5', '''FY 2031'',''{"Delivery":4,"Teamwork":4,"Ownership":4,"Communication":5.5}'',''meets'',null'),
     ('a score of 3.25', '''FY 2031'',''{"Delivery":4,"Teamwork":3.25,"Ownership":4,"Communication":4}'',''meets'',null'),
     ('a score in words', '''FY 2031'',''{"Delivery":4,"Teamwork":4,"Ownership":"4","Communication":4}'',''meets'',null'),
+    ('a score that is null', '''FY 2031'',''{"Delivery":null,"Teamwork":4,"Ownership":4,"Communication":4}'',''meets'',null'),
+    ('a score that is true', '''FY 2031'',''{"Delivery":4,"Teamwork":true,"Ownership":4,"Communication":4}'',''meets'',null'),
     ('scores that are a list', '''FY 2031'',''[4,4,4,4]'',''meets'',null'), ('no scores', '''FY 2031'',null,''meets'',null'),
     ('a quarter', format('''Q1 2031'',%L,''meets'',null', sc)), ('a period with no year', format('''H1'',%L,''meets'',null', sc)),
     ('a period in small letters', format('''h1 2031'',%L,''meets'',null', sc)), ('a period with more after it', format('''H1 2031 '',%L,''meets'',null', sc)),
@@ -380,7 +384,7 @@ begin
     || pg_temp.x(adm, 'and undone', format('hr_set_training_completed(%L,%L,false)', c2, ea), null)
     || pg_temp.x(adm, 'the admin removes someone after the start', format('hr_unenrol(%L,%L)', c2, ea), null)
     || pg_temp.x(adm, 'completed before the start', format('hr_set_training_completed(%L,%L,true)', c1, ea), 'PERF_COURSE_NOT_STARTED')
-    || pg_temp.x(adm, 'completion undone before the start', format('hr_set_training_completed(%L,%L,false)', c1, ea), 'PERF_COURSE_NOT_STARTED')
+    || pg_temp.x(adm, 'not completed, undone before the start', format('hr_set_training_completed(%L,%L,false)', c1, ea), null)
     || pg_temp.x(adm, 'completed on a course with no dates', format('hr_set_training_completed(%L,%L,true)', g2, ea), 'PERF_COURSE_NOT_STARTED')
     || pg_temp.x(adm, 'completed for someone not enrolled', format('hr_set_training_completed(%L,%L,true)', c0, ev), 'PERF_NOT_ENROLLED')
     || pg_temp.x(adm, 'completed, neither yes nor no', format('hr_set_training_completed(%L,%L,null)', c0, ea), 'PERF_BAD_INPUT')
@@ -392,10 +396,12 @@ begin
     -- Moved to start tomorrow, the course A completed has not started: the completion still holds A on it.
     || pg_temp.x(adm, 'the course is moved to tomorrow', format('hr_save_training(%L,%L,''Running'',null,null,%L,%L)', org, c0, d + 1, d + 2), null)
     || pg_temp.x(ma, 'A, completed, withdraws before the start', format('hr_unenrol(%L,%L)', c0, ea), 'PERF_COMPLETED')
+    || pg_temp.x(adm, 'the completion is undone though the course has yet to start', format('hr_set_training_completed(%L,%L,false)', c0, ea), format('={"training_id":"%s","employee_id":"%s","completed":false}', c0, ea))
+    || pg_temp.x(adm, 'and cannot be marked again before the start', format('hr_set_training_completed(%L,%L,true)', c0, ea), 'PERF_COURSE_NOT_STARTED')
     || pg_temp.x(ma, 'A withdraws from a course with no dates', format('hr_unenrol(%L,%L)', g2, ea), null)
     || pg_temp.x(adm, 'the completion is undone', format('hr_set_training_completed(%L,%L,false)', c3, ea), null)
     || pg_temp.x(adm, 'the course is deleted once it is undone', format('hr_delete_training(%L)', c3), null)
-    || pg_temp.v('A''s enrolments, completed ones', format('select count(*) || ''/'' || count(*) filter (where completed and completed_at is not null) from public.hr_training_enrolments where employee_id = %L', ea), '2/1')
+    || pg_temp.v('A''s enrolments, completed ones', format('select count(*) || ''/'' || count(*) filter (where completed and completed_at is not null) from public.hr_training_enrolments where employee_id = %L', ea), '2/0')
     || pg_temp.x(mb, 'B reads their own enrolment only', format('(select count(*) || ''/'' || count(*) filter (where employee_id = %L) from hr_training_enrolments where org_id = %L)', eb, org), '="1/1"');
 
   -- 5. announcements and unread marks
@@ -425,7 +431,7 @@ begin
     || pg_temp.x(ma, 'A marks read twice', format('hr_mark_announcements_read(%L)', org), '={"marked":0}')
     || pg_temp.x(ma, 'none unread for A', format('hr_unread_announcements(%L)', org), '=0')
     || pg_temp.x(mb, 'still one for B', format('hr_unread_announcements(%L)', org), '=1')
-    || pg_temp.v('the one mark is A''s, on the one just published', 'select string_agg(announcement_id || ''/'' || user_id, '','') from public.hr_announcement_reads', ad || '/' || ma)
+    || pg_temp.v('the one mark is A''s, on the one just published', format('select string_agg(announcement_id || ''/'' || user_id, '','') from public.hr_announcement_reads where announcement_id in (select id from public.hr_announcements where org_id = %L)', org), ad || '/' || ma)
     || pg_temp.x(ma, 'A reads their own mark', '(select count(*) from hr_announcement_reads)', '=1')
     || pg_temp.x(mb, 'B reads no mark of A''s', '(select count(*) from hr_announcement_reads)', '=0')
     || pg_temp.x(adm, 'nor does the admin', '(select count(*) from hr_announcement_reads)', '=0');
@@ -449,7 +455,7 @@ begin
     || pg_temp.x(mv, 'the viewer marks both', format('hr_mark_announcements_read(%L)', org), '={"marked":2}')
     || pg_temp.x(mb, 'still two for B', format('hr_unread_announcements(%L)', org), '=2')
     || pg_temp.x(adm, 'the announcement is deleted', format('hr_delete_announcement(%L)', ad), null)
-    || pg_temp.v('its marks went with it', 'select count(*) || ''/'' || count(*) filter (where user_id = ''' || mv || ''') from public.hr_announcement_reads', '1/1');
+    || pg_temp.v('its marks went with it', format('select count(*) || ''/'' || count(*) filter (where user_id = %L) from public.hr_announcement_reads where announcement_id in (select id from public.hr_announcements where org_id = %L)', mv, org), '1/1');
 
   -- 6. no direct writes, for anyone
   foreach t in array tabs loop
@@ -519,12 +525,14 @@ begin
   exception when others then
     fails := fails || ('deleting a workspace failed: ' || sqlerrm);
   end;
-  fails := fails || pg_temp.v('rows left behind by a deleted workspace', format('select (select count(*) from public.hr_announcement_reads) + (select count(*) from public.hr_goals where org_id = %1$L)'
-    || ' + (select count(*) from public.hr_reviews where org_id = %1$L) + (select count(*) from public.hr_training_enrolments where org_id = %1$L) + (select count(*) from public.hr_announcements where org_id = %1$L)', org), '0');
+  fails := fails || pg_temp.v('rows left behind by a deleted workspace', format('select (select count(*) from public.hr_announcement_reads where user_id = any(%2$L)) + (select count(*) from public.hr_goals where org_id = %1$L)'
+    || ' + (select count(*) from public.hr_reviews where org_id = %1$L) + (select count(*) from public.hr_training_enrolments where org_id = %1$L) + (select count(*) from public.hr_announcements where org_id = %1$L)', org, array[own, adm, mfa, ma, mb, mv, late, outs]), '0');
   exception when others then
     get stacked diagnostics ctx = pg_exception_context;
     fails := fails || format('the check stopped early: %s (%s)', sqlerrm, split_part(ctx, E'\n', 1));
   end;
   raise exception 'PEOPLE_PERFORMANCE_CHECK %', case when cardinality(fails) > 0
-    then format('FAILED (%s): %s', cardinality(fails), array_to_string(fails[1:15], '; ')) else 'PASSED (everything rolled back)' end;
+    then format('FAILED (%s): %s%s', cardinality(fails), array_to_string(fails[1:15], '; '),
+      case when cardinality(fails) > 15 then format('; ... and %s more', cardinality(fails) - 15) else '' end)
+    else 'PASSED (everything rolled back)' end;
 end $$;
