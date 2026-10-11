@@ -4,9 +4,9 @@
  * every comparison starts from {@link todayInMalaysia} and stays in strings.
  */
 
-/** Malaysia is UTC+8 all year, with no daylight saving, so no locale data is needed. */
 import type { Weekday } from './types';
 
+/** Malaysia is UTC+8 all year, with no daylight saving, so no locale data is needed. */
 const MALAYSIA_OFFSET = 8 * 3_600_000;
 const DAY = 86_400_000;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -29,6 +29,11 @@ export function isRealDate(value: string): boolean {
 /** Today's date in Kuala Lumpur. */
 export function todayInMalaysia(now: Date): string {
   return iso(now.getTime() + MALAYSIA_OFFSET);
+}
+
+/** The time now in Kuala Lumpur, as `HH:MM`. */
+export function timeInMalaysia(now: Date): string {
+  return clockTime(now.toISOString());
 }
 
 /** The `YYYY-MM-DD` an instant falls on in Malaysia. */

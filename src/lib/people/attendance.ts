@@ -22,6 +22,7 @@ import type {
   Shift,
   ShiftKind,
   TimesheetEntry,
+  Weekday,
 } from './types';
 import { WEEKDAYS as ALL_WEEKDAYS } from './types';
 
@@ -81,7 +82,7 @@ export type RecentClockIn = {
   /** An owner or admin set this day by hand. */
   corrected: boolean;
   correction_note: string | null;
-  /** A past day with a clock-in and no clock-out. Never today: today may still be open. */
+  /** A past day with a clock-in and no clock-out. Never today (it may still be open), nor a corrected day (it was set by hand). */
   no_clock_out: boolean;
 };
 
@@ -175,7 +176,7 @@ export function buildMyAttendance(input: {
       is_today: d.work_date === today,
       corrected: d.corrected,
       correction_note: d.correction_note,
-      no_clock_out: d.clock_in !== null && d.clock_out === null && d.work_date < today,
+      no_clock_out: !d.corrected && d.clock_in !== null && d.clock_out === null && d.work_date < today,
     }));
 
   return {
@@ -221,10 +222,28 @@ export function clockResultMessage(
   if (action === 'in') {
     if (state.kind !== 'in' && state.kind !== 'done') return 'Clocked in.';
     const since = state.kind === 'in' ? state.since : state.from;
-    return `Clocked in at ${since}, ${row.status === 'late' ? 'late' : 'on time'}.`;
+    const how = row.status === 'present' ? ', on time' : row.status === 'late' ? ', late' : '';
+    return `Clocked in at ${since}${how}.`;
   }
   if (state.kind !== 'done') return 'Clocked out.';
   return `Clocked out at ${state.to}. You worked ${state.worked}.`;
+}
+
+/** The work week for the Today card. Someone who cannot read the settings gets all seven days: a guess would be wrong, and the database's own sentence explains a refusal. */
+export function workWeekFor(settings: { work_week: Weekday[] } | null): Weekday[] {
+  return settings ? settings.work_week : [...ALL_WEEKDAYS];
+}
+
+/** The viewer's own attendance row for today, if there is one. */
+export function ownDayToday(days: AttendanceDay[], viewer: PeopleViewer, today: string): AttendanceDay | null {
+  if (viewer.employeeId === null) return null;
+  return days.find((d) => d.employee_id === viewer.employeeId && d.work_date === today) ?? null;
+}
+
+/** The clock button's words; `pending` is a call in flight. */
+export function clockButtonLabel(action: 'in' | 'out', pending: boolean): string {
+  if (pending) return action === 'in' ? 'Clocking in…' : 'Clocking out…';
+  return action === 'in' ? 'Clock in' : 'Clock out';
 }
 
 /* ---------------------------------------------------------------- */

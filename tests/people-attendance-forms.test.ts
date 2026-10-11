@@ -3,7 +3,7 @@ import {
   clockAction,
   todayLine,
   todayState,
-  toCorrectionInput,
+  toCorrectionInput as convertCorrection,
   toHolidayInput,
   toSettingsInput,
 } from '@/lib/people/attendance-forms';
@@ -184,7 +184,19 @@ describe('clockAction', () => {
   });
 });
 
+describe('todayState: a clock-in later than now', () => {
+  it('is not_in, not "in since", for a row from older data whose clock-in is still to come', () => {
+    // IN is 08:52 in Kuala Lumpur.
+    expect(todayState({ ...base, nowHm: '08:00', day: day({ clock_in: IN, status: 'present' }) })).toEqual({ kind: 'not_in' });
+    expect(todayState({ ...base, nowHm: '08:52', day: day({ clock_in: IN, status: 'present' }) })).toEqual({ kind: 'in', since: '8:52 am' });
+    expect(todayState({ ...base, nowHm: '09:30', day: day({ clock_in: IN, status: 'present' }) })).toEqual({ kind: 'in', since: '8:52 am' });
+  });
+});
+
 describe('toCorrectionInput', () => {
+  // Today is Monday 12 Oct; the form's `values` are for a past day unless a test says otherwise.
+  const toCorrectionInput = (v: Parameters<typeof convertCorrection>[0], today = '2026-10-12', nowHm?: string) =>
+    convertCorrection(v, today, nowHm);
   const values = {
     employee_id: 'e1',
     work_date: '2026-10-09',
@@ -311,5 +323,35 @@ describe('toSettingsInput', () => {
     for (const grace of ['-1', '241', '1.5', '', 'ten', ' ', '1e2']) {
       expect(toSettingsInput({ ...values, late_grace_minutes: grace }), grace).toEqual({ ok: false, error });
     }
+  });
+});
+
+describe('toCorrectionInput: a time that has not happened yet today', () => {
+  const values = {
+    employee_id: 'e1',
+    work_date: '2026-10-12',
+    status: 'present' as const,
+    clock_in: '09:00',
+    clock_out: '18:00',
+    note: '',
+  };
+  const REFUSAL = 'That time has not happened yet. For today, leave clock-out empty if they are still at work.';
+
+  it('refuses a clock-out later than now, before asking the database', () => {
+    expect(convertCorrection(values, '2026-10-12', '10:00')).toEqual({ ok: false, error: REFUSAL });
+  });
+
+  it('refuses a clock-in later than now', () => {
+    expect(convertCorrection({ ...values, clock_in: '11:00', clock_out: '' }, '2026-10-12', '10:00')).toEqual({ ok: false, error: REFUSAL });
+  });
+
+  it('accepts times up to and including now, and a clock-out left empty', () => {
+    expect(convertCorrection({ ...values, clock_out: '10:00' }, '2026-10-12', '10:00').ok).toBe(true);
+    expect(convertCorrection({ ...values, clock_out: '' }, '2026-10-12', '10:00').ok).toBe(true);
+  });
+
+  it('does not apply to a past day, or to a status without times', () => {
+    expect(convertCorrection({ ...values, work_date: '2026-10-09' }, '2026-10-12', '10:00').ok).toBe(true);
+    expect(convertCorrection({ ...values, status: 'absent', clock_in: '23:00', clock_out: '23:30' }, '2026-10-12', '10:00').ok).toBe(true);
   });
 });

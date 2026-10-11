@@ -57,7 +57,7 @@ const DEFAULT_WEEK: Weekday[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
  * ahead of a weekend), then approved full-day leave, else the employee has not clocked in. A half-day leave
  * is not "on leave": the database lets that person clock in. A work week naming no known day counts as
  * Monday to Friday, as the database reads it. A row that is only a correction with no clock-in does not
- * count as clocked in.
+ * count as clocked in, nor does a clock-in later than `nowHm`.
  */
 export function todayState(input: {
   today: string;
@@ -66,11 +66,14 @@ export function todayState(input: {
   holidays: PublicHoliday[];
   leave: LeaveRequest[];
   employeeId: string | null;
+  /** The time now in Malaysia as `HH:MM`. Given, a clock-in later than it (older data only) does not count as clocked in. */
+  nowHm?: string;
 }): TodayState {
-  const { today, day, holidays, leave, employeeId } = input;
+  const { today, day, holidays, leave, employeeId, nowHm } = input;
   if (!employeeId) return { kind: 'not_linked' };
 
-  if (day && day.work_date === today && day.clock_in) {
+  const started = day && day.work_date === today && day.clock_in && !(nowHm && clockTime(day.clock_in) > nowHm);
+  if (day && started && day.clock_in) {
     if (!day.clock_out) return { kind: 'in', since: clockLabel(day.clock_in) };
     return {
       kind: 'done',
@@ -151,17 +154,22 @@ export type CorrectionFormInput = {
 
 const NOTE_MAX = 500;
 
+/** The sentence for a clock-in or clock-out later than now, on today. */
+export const NOT_YET = 'That time has not happened yet. For today, leave clock-out empty if they are still at work.';
+
 /**
  * Absent and on-leave days take no times, so any in the fields (left from choosing another status) are dropped,
- * not refused. A clock-out is optional, and must come after the clock-in. `today`, when known, refuses a future
- * day before asking the server.
+ * not refused. A clock-out is optional, and must come after the clock-in. A future day is refused before asking
+ * the server. For today, a clock-in or clock-out later than `nowHm` (the time now in Malaysia, `HH:MM`) is
+ * refused too: the database would refuse it with a sentence too vague to act on. Without `nowHm` that check
+ * is skipped and the database is the only judge.
  */
-export function toCorrectionInput(values: CorrectionFormValues, today?: string): Converted<CorrectionFormInput> {
+export function toCorrectionInput(values: CorrectionFormValues, today: string, nowHm?: string): Converted<CorrectionFormInput> {
   if (!values.employee_id) return bad('Choose an employee.');
   if (!values.work_date) return bad('Choose the day to correct.');
   if (!isRealDate(values.work_date)) return bad('Choose a real date.');
   if (values.work_date < '2000-01-01') return bad('The date cannot be before the year 2000.');
-  if (today && values.work_date > today) return bad('The date cannot be in the future.');
+  if (values.work_date > today) return bad('The date cannot be in the future.');
   const note = values.note.trim();
   if (note.length > NOTE_MAX) return bad(`Keep the note to ${NOTE_MAX} characters.`);
 
@@ -175,6 +183,9 @@ export function toCorrectionInput(values: CorrectionFormValues, today?: string):
       clockOut = toHourMinute(values.clock_out);
       if (!clockOut) return bad('Enter the clock-out as a time, like 18:00.');
       if (clockOut <= clockIn) return bad('The clock-out must be after the clock-in.');
+    }
+    if (nowHm && values.work_date === today && (clockIn > nowHm || (clockOut !== null && clockOut > nowHm))) {
+      return bad(NOT_YET);
     }
   }
   return {

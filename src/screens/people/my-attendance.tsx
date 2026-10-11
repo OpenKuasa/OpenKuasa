@@ -7,10 +7,9 @@ import { ScreenContainer } from '@/components/screen/screen-container';
 import { Button } from '@/components/ui/button';
 import { LiveDot } from '@/components/ui/live-dot';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { attendanceWindowStart, buildMyAttendance } from '@/lib/people/attendance';
+import { attendanceWindowStart, buildMyAttendance, clockButtonLabel, ownDayToday, workWeekFor } from '@/lib/people/attendance';
 import { clockAction, todayLine, todayState, type TodayState } from '@/lib/people/attendance-forms';
-import { todayInMalaysia } from '@/lib/people/dates';
-import { WEEKDAYS } from '@/lib/people/types';
+import { timeInMalaysia, todayInMalaysia } from '@/lib/people/dates';
 import { LOAD_FAILED, Muted, NotLinkedCard, StatusPill, loadPeople } from './parts';
 import { DEMO_SIGN_UP_NOTE } from './my-requests';
 
@@ -26,9 +25,7 @@ export default async function MyAttendanceScreen() {
       const model = buildMyAttendance({ days: [], leave: [], balances: [], viewer: ctx.viewer, today });
       return { model, state: { kind: 'not_linked' } as TodayState };
     }
-    // Only HR (and the sample company) may read the work week. For anyone else the settings read would
-    // return the defaults, which is a guess, so every day counts as a possible working day and the
-    // database's own sentence explains a refusal.
+    // Only HR (and the sample company) may read the work week; `workWeekFor` says what anyone else gets.
     const knowsWeek = ctx.viewer.isHr || ctx.viewer.isDemo;
     const [days, leave, balances, holidays, settings] = await Promise.all([
       data.listAttendance(attendanceWindowStart(today), today),
@@ -40,11 +37,12 @@ export default async function MyAttendanceScreen() {
     const model = buildMyAttendance({ days, leave, balances, viewer: ctx.viewer, today });
     const state = todayState({
       today,
-      day: days.find((d) => d.employee_id === ctx.viewer.employeeId && d.work_date === today) ?? null,
-      workWeek: settings ? settings.work_week : [...WEEKDAYS],
+      day: ownDayToday(days, ctx.viewer, today),
+      workWeek: workWeekFor(settings),
       holidays,
       leave,
       employeeId: ctx.viewer.employeeId,
+      nowHm: timeInMalaysia(now),
     });
     return { model, state };
   });
@@ -83,7 +81,7 @@ export default async function MyAttendanceScreen() {
                       {action ? (
                         <Button type="button" size="sm" disabled>
                           {action === 'in' ? <LogIn aria-hidden /> : <LogOut aria-hidden />}
-                          {action === 'in' ? 'Clock in' : 'Clock out'}
+                          {clockButtonLabel(action, false)}
                         </Button>
                       ) : null}
                       <span className="text-xs text-muted-foreground">{DEMO_SIGN_UP_NOTE}</span>

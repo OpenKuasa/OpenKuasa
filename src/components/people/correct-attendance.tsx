@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { type CapResult, WRITE_FAILED } from '@/lib/people/capabilities';
 import { toCorrectionInput } from '@/lib/people/attendance-forms';
-import { todayInMalaysia } from '@/lib/people/dates';
+import { timeInMalaysia, todayInMalaysia } from '@/lib/people/dates';
 import type { CorrectionPrefill } from '@/lib/people/team-attendance';
 import type { AttendanceStatus } from '@/lib/people/types';
 import { RowPrompt, usePromptId } from './request-row';
@@ -44,7 +44,9 @@ export function CorrectAttendance({
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<AttendanceStatus>(prefill.status);
   const [clockIn, setClockIn] = useState(prefill.clock_in);
-  const [clockOut, setClockOut] = useState(prefill.clock_out);
+  // Today's clock-out is not pre-filled: a person may still be at work, and a time that has not happened is refused.
+  const prefillOut = () => (workDate === todayInMalaysia(new Date()) ? '' : prefill.clock_out);
+  const [clockOut, setClockOut] = useState(prefillOut);
   const [note, setNote] = useState(prefill.note);
   const [error, setError] = useState<string | null>(null);
   const off = disabled || busy;
@@ -69,8 +71,9 @@ export function CorrectAttendance({
   function submit() {
     const converted = toCorrectionInput(
       { employee_id: employeeId, work_date: workDate, status, clock_in: clockIn, clock_out: clockOut, note },
-      // The browser's date only to refuse a future day with its own sentence; the database is the judge.
+      // The browser's date and time only to refuse a future day or time with its own sentence; the database is the judge.
       todayInMalaysia(new Date()),
+      timeInMalaysia(new Date()),
     );
     if (!converted.ok) {
       setError(converted.error);
@@ -111,7 +114,7 @@ export function CorrectAttendance({
           // Open on what the row holds now, not on what an earlier, abandoned edit left behind.
           setStatus(prefill.status);
           setClockIn(prefill.clock_in);
-          setClockOut(prefill.clock_out);
+          setClockOut(prefillOut());
           setNote(prefill.note);
           setError(null);
           setOpen(true);

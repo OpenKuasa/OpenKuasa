@@ -4,7 +4,10 @@ import {
   buildOvertimeView,
   buildShiftCalendar,
   buildTimesheet,
+  clockButtonLabel,
   clockResultMessage,
+  ownDayToday,
+  workWeekFor,
 } from '@/lib/people/attendance';
 import { createSeedPeopleData } from '@/lib/people/seed';
 import {
@@ -303,6 +306,14 @@ describe('My Attendance history: corrected days and missing clock-outs', () => {
     expect(model.recent[0].no_clock_out).toBe(false);
   });
 
+  it('shows a corrected past day with a clock-in and no clock-out as Corrected only', () => {
+    const model = build([
+      day({ work_date: '2026-10-08', clock_in: '2026-10-08T01:00:00Z', clock_out: null, corrected: true, correction_note: 'Left early' }),
+    ]);
+    expect(model.recent[0].corrected).toBe(true);
+    expect(model.recent[0].no_clock_out).toBe(false);
+  });
+
   it('does not mark a day with no clock-in, or a complete day', () => {
     const model = build([
       day({ work_date: '2026-10-06', clock_in: null, clock_out: null, status: 'absent' }),
@@ -323,6 +334,13 @@ describe('clockResultMessage', () => {
     expect(clockResultMessage('in', row)).toBe('Clocked in at 10:30 am, late.');
   });
 
+  it('words a clock-in with a status that is neither on time nor late neutrally', () => {
+    for (const status of ['absent', 'on_leave'] as const) {
+      const row = { work_date: TODAY, clock_in: '2026-10-09T00:52:00Z', clock_out: null, status };
+      expect(clockResultMessage('in', row)).toBe('Clocked in at 8:52 am.');
+    }
+  });
+
   it('says when a clock-out happened and how long the day was', () => {
     const row = {
       work_date: TODAY,
@@ -331,5 +349,33 @@ describe('clockResultMessage', () => {
       status: 'present' as const,
     };
     expect(clockResultMessage('out', row)).toBe('Clocked out at 6:03 pm. You worked 9 h 11 min.');
+  });
+});
+
+describe('the My Attendance screen rules', () => {
+  const SELF: PeopleViewer = { employeeId: 'e1', isHr: false, isDemo: false };
+
+  it('counts every day as a working day for someone who cannot read the settings', () => {
+    expect(workWeekFor(null)).toEqual(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
+    expect(workWeekFor({ work_week: ['mon', 'tue'] })).toEqual(['mon', 'tue']);
+  });
+
+  it("picks the viewer's own row for today, and no one else's or another day's", () => {
+    const mine = day({ id: 'mine', employee_id: 'e1', work_date: TODAY });
+    const days = [
+      day({ id: 'other', employee_id: 'e2', work_date: TODAY }),
+      day({ id: 'old', employee_id: 'e1', work_date: '2026-10-08' }),
+      mine,
+    ];
+    expect(ownDayToday(days, SELF, TODAY)).toBe(mine);
+    expect(ownDayToday(days.slice(0, 2), SELF, TODAY)).toBeNull();
+    expect(ownDayToday(days, { ...SELF, employeeId: null }, TODAY)).toBeNull();
+  });
+
+  it('words the clock button once, for resting and for a call in flight', () => {
+    expect(clockButtonLabel('in', false)).toBe('Clock in');
+    expect(clockButtonLabel('out', false)).toBe('Clock out');
+    expect(clockButtonLabel('in', true)).toBe('Clocking in…');
+    expect(clockButtonLabel('out', true)).toBe('Clocking out…');
   });
 });
