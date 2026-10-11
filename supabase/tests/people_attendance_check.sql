@@ -23,7 +23,8 @@
 --     run on a work week widened to include it, and the last line says so.
 -- The nightly close is run by calling private.hr_attendance_close() after the
 -- epoch is moved back, on a second workspace whose leave, holidays and
--- attendance are planted at dates counted back from today. While it runs, the
+-- attendance are planted at dates counted back from today, and whose start
+-- (the day a workspace first used attendance) is planted too. While it runs, the
 -- close also works through every real workspace inside this transaction; all
 -- of that is rolled back with the rest.
 do $$
@@ -38,6 +39,8 @@ declare
   ku uuid;                              -- an active employee of the close workspace linked to nobody
   ku_id uuid;                           -- a day an admin corrected for them, before the epoch
   stray_id uuid;                        -- a row in the not-started workspace that nobody clocked or corrected
+  el uuid;                              -- a linked employee of the other workspace
+  o_days date[];                        -- the days the other workspace must be closed for
   demo uuid;
   admin_id uuid := gen_random_uuid();   -- admin of org, linked to employee AD
   ma uuid := gen_random_uuid();         -- member linked to employee A
@@ -223,6 +226,26 @@ begin
     exception when others then null;
     end;
   end if;
+  -- The day each workspace first used attendance: a table nobody may touch,
+  -- one row a workspace, gone with the workspace.
+  if to_regclass('private.hr_attendance_started') is null then
+    fails := array_append(fails, 'private.hr_attendance_started does not exist');
+  else
+    foreach t in array array['anon', 'authenticated', 'service_role', 'public'] loop
+      if has_table_privilege(t, 'private.hr_attendance_started', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE')
+         or has_any_column_privilege(t, 'private.hr_attendance_started', 'SELECT, INSERT, UPDATE') then
+        fails := array_append(fails, format('%s holds a privilege on the table of workspace start days', t));
+      end if;
+    end loop;
+    select count(*) into n from pg_class c where c.oid = 'private.hr_attendance_started'::regclass and c.relrowsecurity;
+    select count(*) into n2 from pg_policies p where p.schemaname = 'private' and p.tablename = 'hr_attendance_started';
+    if n <> 1 or n2 <> 0 then fails := array_append(fails, 'the table of workspace start days does not have row level security on with no policy'); end if;
+    select count(*) into n from pg_constraint con
+    where con.conrelid = 'private.hr_attendance_started'::regclass
+      and ((con.contype = 'p' and pg_get_constraintdef(con.oid) = 'PRIMARY KEY (org_id)')
+        or (con.contype = 'f' and con.confrelid = 'public.orgs'::regclass and con.confdeltype = 'c'));
+    if n <> 2 then fails := array_append(fails, 'the table of workspace start days is not keyed by workspace, or does not go with its workspace'); end if;
+  end if;
   -- Where pg_cron is installed, the nightly job is there, once, at 00:05 in Malaysia.
   if to_regclass('cron.job') is not null then
     execute 'select count(*), count(*) filter (where schedule = ''5 16 * * *'' and command like ''%private.hr_attendance_close()%'')'
@@ -255,7 +278,7 @@ begin
   insert into public.org_members (org_id, user_id, role)
   values (org, admin_id, 'admin'), (org, ma, 'member'), (org, mb, 'member'), (org, mv, 'viewer'), (org, mu, 'member'),
          (org, mi, 'member'), (org, m3, 'member'), (org, m4, 'member'), (org, m5, 'member'),
-         (other_org, outsider, 'owner'), (demo, dv, 'viewer'), (demo, da, 'admin');
+         (other_org, outsider, 'owner'), (other_org, ma, 'member'), (demo, dv, 'viewer'), (demo, da, 'admin');
 
   insert into public.hr_employees (org_id, employee_no, name, work_email)
   values (org, 'AD', 'Admin Own Record', admin_id || '@att-check.openkuasa-test.dev') returning id into ead;
@@ -277,6 +300,8 @@ begin
   values (org, 'C', 'Linked To Nobody') returning id into ec;
   insert into public.hr_employees (org_id, employee_no, name)
   values (other_org, 'O', 'Someone Elsewhere') returning id into eo;
+  insert into public.hr_employees (org_id, employee_no, name, user_id)
+  values (other_org, 'L', 'Member A Elsewhere', ma) returning id into el;
   select count(*) into n from public.hr_employees
   where (id, user_id) in ((ead, admin_id), (ea, ma), (eb, mb), (ev, mv), (ei, mi), (e3, m3), (e4, m4), (e5, m5));
   if n <> 8 then fails := array_append(fails, format('%s of 8 members were linked to their employee records', n)); end if;
@@ -515,6 +540,9 @@ begin
         (1, admin_id, 'the admin runs the nightly close', 'select private.hr_attendance_close()', 'permission denied'),
         (1, admin_id, 'the admin reads the epoch', 'select started_on from private.hr_attendance_epoch', 'permission denied'),
         (1, admin_id, 'the admin moves the epoch', 'update private.hr_attendance_epoch set started_on = date ''2020-01-01''', 'permission denied'),
+        (1, admin_id, 'the admin reads the workspace start days', 'select started_on from private.hr_attendance_started', 'permission denied'),
+        (1, admin_id, 'the admin moves a workspace''s start day', 'update private.hr_attendance_started set started_on = date ''2020-01-01''', 'permission denied'),
+        (1, ma, 'a member gives a workspace a start day', format('insert into private.hr_attendance_started (org_id, started_on) values (%L, ''2020-01-01'')', other_org), 'permission denied'),
 
         (1, ma, 'member A corrects their own day', format('select public.hr_correct_attendance(%L, %L, ''present'', ''09:00'', ''18:00'', null)', ea, today - 1), 'ATT_NOT_ALLOWED'),
         (1, ma, 'member A corrects member B''s day', format('select public.hr_correct_attendance(%L, %L, ''absent'', null, null, null)', eb, today - 1), 'ATT_NOT_ALLOWED'),
@@ -609,6 +637,11 @@ begin
     end loop;
 
     if stage = 1 then
+      -- The first clock-in is the workspace's first use of attendance: it starts today.
+      select count(*), count(*) filter (where x.started_on = today) into n, n2 from private.hr_attendance_started x where x.org_id = org;
+      if n <> 1 or n2 <> 1 then fails := array_append(fails, format('after its first clock-in the workspace has %s start rows (%s for today), expected one', n, n2)); end if;
+      select count(*) into n from private.hr_attendance_started x where x.org_id in (demo, other_org, corg);
+      if n <> 0 then fails := array_append(fails, 'a workspace nobody clocked or corrected in has a start day, or the demo has one'); end if;
       -- The settings row was made by the function, with the table's defaults for the rest.
       select count(*) into n from public.hr_settings s
       where s.org_id = org and s.work_week = week_with_today and s.work_start_time = ahead and s.late_grace_minutes = 0
@@ -822,16 +855,18 @@ begin
     end loop;
   end loop;
   foreach t in array array['authenticated', 'anon', 'service_role'] loop
-    foreach q in array array['select count(*) from private.hr_attendance_epoch', 'update private.hr_attendance_epoch set started_on = date ''2020-01-01''', 'delete from private.hr_attendance_epoch'] loop
+    foreach q in array array['select count(*) from private.hr_attendance_epoch', 'update private.hr_attendance_epoch set started_on = date ''2020-01-01''', 'delete from private.hr_attendance_epoch',
+      'select count(*) from private.hr_attendance_started', 'update private.hr_attendance_started set started_on = date ''2020-01-01''', 'delete from private.hr_attendance_started',
+      format('insert into private.hr_attendance_started (org_id, started_on) values (%L, ''2020-01-01'')', other_org)] loop
       perform set_config('request.jwt.claims', json_build_object('sub', admin_id, 'role', t, 'aal', 'aal1')::text, true);
       execute format('set local role %I', t);
       begin
         execute q;
-        fails := array_append(fails, format('%s touched the epoch directly: %s', t, split_part(q, ' ', 1)));
+        fails := array_append(fails, format('%s touched a private attendance table directly: %s', t, q));
       exception
         when insufficient_privilege then null;
         when others then
-          fails := array_append(fails, format('%s touching the epoch was refused for another reason: %s', t, sqlerrm));
+          fails := array_append(fails, format('%s touching a private attendance table was refused for another reason: %s', t, sqlerrm));
       end;
       reset role;
     end loop;
@@ -850,6 +885,37 @@ begin
   reset role;
   select count(*) into n2 from public.hr_attendance_days a where a.org_id = org;
   if n <> n2 or n < 15 then fails := array_append(fails, format('the admin reads %s of the workspace''s %s days', n, n2)); end if;
+
+  -- ---- the day a workspace first uses attendance -----------------------------
+  -- The clocking workspace started today, with its first clock-in, and the
+  -- corrections of earlier dates since (one of them for the year 2000) did not
+  -- move that. Nothing in the demo gave it a start.
+  select count(*), count(*) filter (where x.started_on = today) into n, n2 from private.hr_attendance_started x where x.org_id = org;
+  if n <> 1 or n2 <> 1 then fails := array_append(fails, 'correcting earlier dates moved the clocking workspace''s start day'); end if;
+  select count(*) into n from private.hr_attendance_started x where x.org_id in (demo, other_org);
+  if n <> 0 then fails := array_append(fails, 'the demo, or a workspace nobody has clocked or corrected in, has a start day'); end if;
+  -- The other workspace's first use is a correction, for a date three weeks back: it starts today, not then.
+  perform set_config('request.jwt.claims', json_build_object('sub', outsider, 'role', 'authenticated', 'aal', 'aal1')::text, true);
+  set local role authenticated;
+  perform public.hr_correct_attendance(eo, today - 21, 'absent', null, null, null);
+  reset role;
+  select count(*), count(*) filter (where x.started_on = today) into n, n2 from private.hr_attendance_started x where x.org_id = other_org;
+  if n <> 1 or n2 <> 1 then fails := array_append(fails, format('a first correction, for a date three weeks back, left the workspace with %s start rows (%s for today), expected one for today', n, n2)); end if;
+  -- Say that was five days ago. A later correction of an even older date does not move it.
+  update private.hr_attendance_started set started_on = today - 5 where org_id = other_org;
+  perform set_config('request.jwt.claims', json_build_object('sub', outsider, 'role', 'authenticated', 'aal', 'aal1')::text, true);
+  set local role authenticated;
+  perform public.hr_correct_attendance(eo, today - 40, 'absent', null, null, 'Found in the old book');
+  perform public.hr_correct_attendance(eo, today - 21, 'on_leave', null, null, null);
+  reset role;
+  select count(*), count(*) filter (where x.started_on = today - 5) into n, n2 from private.hr_attendance_started x where x.org_id = other_org;
+  if n <> 1 or n2 <> 1 then fails := array_append(fails, 'a later correction moved a workspace''s start day'); end if;
+  -- So the close gives its linked employee the working days of the last five
+  -- (its week is Sunday to Thursday), nothing earlier, and nothing to the
+  -- employee linked to nobody.
+  update public.hr_employees set created_at = now() - interval '90 days' where org_id = other_org;
+  o_days := array(select today - g.i from generate_series(1, 5) as g(i)
+                  where to_char(today - g.i, 'dy') in ('sun', 'mon', 'tue', 'wed', 'thu') order by 1);
 
   -- ---- the nightly close ----------------------------------------------------
   -- A workspace of its own, on the default week (it has no settings row).
@@ -883,8 +949,9 @@ begin
   update public.hr_employees set created_at = now() - interval '90 days' where org_id = corg;
   select count(*) into n from public.hr_employees e where e.org_id = corg and e.user_id is not null;
   if n <> 8 then fails := array_append(fails, format('%s of 8 employees of the close workspace were linked', n)); end if;
-  -- An admin corrected a day for the unlinked employee twenty days ago: the
-  -- workspace has used attendance since then, which is before the epoch.
+  -- The workspace first used attendance twenty days ago, which is before the
+  -- epoch: an admin corrected a day for the unlinked employee.
+  insert into private.hr_attendance_started (org_id, started_on) values (corg, today - 20);
   insert into public.hr_attendance_days (org_id, employee_id, work_date, status, corrected_by, corrected_at)
   values (corg, ku, today - 20, 'absent', admin_id, now()) returning id into ku_id;
 
@@ -894,8 +961,7 @@ begin
   insert into public.hr_employees (org_id, employee_no, name, user_id) values (sorg, 'S1', 'First To Clock', ma) returning id into s1;
   insert into public.hr_employees (org_id, employee_no, name, user_id) values (sorg, 'S2', 'Colleague', mb) returning id into s2;
   update public.hr_employees set created_at = now() - interval '90 days' where org_id = sorg;
-  -- A row there with no clock-in and no correction is not a start: only a
-  -- clocked or corrected day is.
+  -- It has no start day; a row there that nobody clocked or corrected changes nothing.
   insert into public.hr_attendance_days (org_id, employee_id, work_date, status)
   values (sorg, s2, wd[1], 'absent') returning id into stray_id;
   k4_from := wd[6];
@@ -939,8 +1005,10 @@ begin
   select md5(string_agg(a.ctid::text || a::text, ',' order by a.work_date, a.id)) into own_snap
   from public.hr_attendance_days a where (a.employee_id = k6 and a.work_date = any (k6_own)) or a.id = ku_id;
 
-  -- The demo, made tempting: an employee whose record is old, with a weekday
-  -- missing and a Sunday the system seems to have recorded.
+  -- The demo, made tempting: a start day (no function can give it one), an
+  -- employee whose record is old, with a weekday missing and a Sunday the
+  -- system seems to have recorded.
+  insert into private.hr_attendance_started (org_id, started_on) values (demo, today - 30);
   update public.hr_employees set created_at = now() - interval '90 days' where id = demo_emp;
   delete from public.hr_attendance_days where employee_id = demo_emp and work_date = wd[cardinality(wd)];
   delete from public.hr_attendance_days where employee_id = demo_emp and work_date = last_sun;
@@ -961,7 +1029,8 @@ begin
       insert into public.hr_public_holidays (org_id, name, holiday_date) values (corg, 'Added Late', wd[8]);
       hol := hol || wd[8];
       days := array(select d from unnest(wd) as d where d <> all (hol));
-      -- And the third workspace starts using attendance: one clock-in, on the fourth weekday.
+      -- And the third workspace started using attendance on the fourth weekday, with one clock-in.
+      insert into private.hr_attendance_started (org_id, started_on) values (sorg, wd[4]);
       insert into public.hr_attendance_days (org_id, employee_id, work_date, clock_in, status)
       values (sorg, s1, wd[4], (wd[4]::text || ' 08:55:00+08')::timestamptz, 'present');
       s_from := wd[4];
@@ -979,21 +1048,18 @@ begin
       -- A work week that is not a list falls back to Monday to Friday.
       update public.hr_settings set work_week = '{"sat": true, "sun": true}'::jsonb where org_id = corg;
       days := array(select d from unnest(wd) as d where d <> all (hol));
-      -- In the third workspace an admin records an earlier day, the second
-      -- weekday, for the colleague: that is now its first attendance day.
+      -- In the third workspace an admin has recorded an earlier day, the second
+      -- weekday, for the colleague. Its start day stays where it was.
       insert into public.hr_attendance_days (org_id, employee_id, work_date, status, corrected_by, corrected_at)
       values (sorg, s2, wd[2], 'absent', admin_id, now());
-      s_from := wd[2];
       s2_own := array[wd[2]];
     elsif run = 6 then
       -- And so does a list with no day in it.
       update public.hr_settings set work_week = '[7, "someday"]'::jsonb where org_id = corg;
     elsif run = 7 then
-      -- The epoch far back, and a day corrected 45 days ago, so the workspace
-      -- has used attendance since then: the close still reaches only 31 days.
+      -- The epoch far back, and the workspace's start day too: the close still reaches only 31 days.
       update private.hr_attendance_epoch set started_on = today - 60;
-      insert into public.hr_attendance_days (org_id, employee_id, work_date, status, corrected_by, corrected_at)
-      values (corg, ku, today - 45, 'absent', admin_id, now());
+      update private.hr_attendance_started set started_on = today - 45 where org_id = corg;
     elsif run = 8 then
       -- The epoch is today, as on the night after the migration: a new
       -- employee, with an old record, gets nothing.
@@ -1081,8 +1147,8 @@ begin
     if t is distinct from demo_att then fails := array_append(fails, format('close, run %s: the demo workspace''s attendance was changed', run)); end if;
     select count(*) into n from public.hr_attendance_days a where a.employee_id = ku and a.corrected_at is null;
     if n <> 0 then fails := array_append(fails, format('close, run %s: %s days recorded for an employee linked to nobody', run, n)); end if;
-    -- The third workspace: nothing until it has a clocked or corrected day,
-    -- then every linked employee from that day on, and nothing before it.
+    -- The third workspace: nothing until it has a start day, then every
+    -- linked employee from that day on, and nothing before it.
     exp := array(
       select format('%s %s absent', x.k, x.d) from (
         select 's1' as k, d from unnest(wd) as d where d >= s_from and d <> all (s1_own)
@@ -1101,6 +1167,22 @@ begin
     end if;
     select count(*) into n from public.hr_attendance_days a where a.org_id = sorg and (a.clock_in is not null or a.corrected_at is not null);
     if n <> cardinality(s1_own) + cardinality(s2_own) then fails := array_append(fails, format('close, run %s: a clocked or corrected day of the third workspace is gone', run)); end if;
+    -- The other workspace, whose first use was a correction: its linked
+    -- employee is closed from its start day, five days ago, and never before;
+    -- the days corrected for dates long before that are as they were.
+    exp := array(select format('el %s absent', d) from unnest(o_days) as d order by 1);
+    act := array(
+      select format('%s %s %s', case a.employee_id when el then 'el' else 'eo' end, a.work_date, a.status)
+      from public.hr_attendance_days a
+      where a.org_id = other_org and a.clock_in is null and a.corrected_at is null order by 1);
+    if act is distinct from exp then
+      fails := array_append(fails, format('close, run %s: the workspace that started five days ago has system rows [%s], expected [%s]',
+        run, array_to_string(act[1:8], ', '), array_to_string(exp, ', ')));
+    end if;
+    select count(*) into n from public.hr_attendance_days a
+    where a.employee_id = eo and a.corrected_by = outsider
+      and (a.work_date, a.status) in ((today - 21, 'on_leave'), (today - 40, 'absent'));
+    if n <> 2 then fails := array_append(fails, format('close, run %s: a day corrected for a date before the workspace started was changed or removed', run)); end if;
     if run >= 8 then
       select count(*) into n from public.hr_attendance_days a where a.employee_id = k9;
       if n <> 0 then fails := array_append(fails, format('close, run %s: with the epoch at today, or with none, a day was recorded', run)); end if;
@@ -1132,11 +1214,15 @@ begin
   -- ---- workspaces with attendance in them can still be deleted -------------
   select count(*) into n from public.hr_attendance_days a where a.org_id in (org, corg);
   if n < 100 then fails := array_append(fails, format('the two workspaces hold %s days, too few to prove deleting them', n)); end if;
+  select count(*) into n from private.hr_attendance_started x where x.org_id in (org, corg, sorg, other_org);
+  if n <> 4 then fails := array_append(fails, format('%s of the 4 workspaces have a start day before they are deleted', n)); end if;
   begin
-    delete from public.orgs where id in (org, corg, sorg);
+    delete from public.orgs where id in (org, corg, sorg, other_org);
   exception when others then
     fails := array_append(fails, 'deleting a workspace with attendance in it failed: ' || sqlerrm);
   end;
+  select count(*) into n from private.hr_attendance_started x where x.org_id in (org, corg, sorg, other_org);
+  if n <> 0 then fails := array_append(fails, format('%s start days were left behind by deleted workspaces', n)); end if;
 
   exception when others then
     get stacked diagnostics ctx = pg_exception_context;

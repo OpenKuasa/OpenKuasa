@@ -122,7 +122,34 @@ describe('Lekiu attendance migrations', () => {
         + 'on conflict (id) do nothing;',
     );
     expect(text.match(/(insert into|update|delete from) private\.hr_attendance_epoch/g)).toHaveLength(1);
-    expect(text.match(/create table/g)).toHaveLength(1);
+    expect(text.match(/create table/g)).toHaveLength(2);
+  });
+
+  test('the day a workspace first used attendance is kept in a table nobody may touch', () => {
+    const text = writes();
+    expect(text).toContain(
+      'create table private.hr_attendance_started (\n'
+        + '  org_id uuid primary key references public.orgs(id) on delete cascade,\n'
+        + '  started_on date not null\n'
+        + ');',
+    );
+    expect(text).toContain('alter table private.hr_attendance_started enable row level security;');
+    expect(text).toContain('revoke all on private.hr_attendance_started from public, anon, authenticated, service_role;');
+    // Written by clock-in and by a correction, with today in Malaysia, once: a later use never moves it.
+    const first =
+      'insert into private.hr_attendance_started (org_id, started_on) values (org, today)\n'
+      + '  on conflict (org_id) do nothing;';
+    for (const name of ['hr_clock_in', 'hr_correct_attendance']) {
+      const { body } = fn(text, `public.${name}`);
+      const at = body.indexOf(first);
+      expect(at, name).toBeGreaterThan(-1);
+      // After every refusal, so a refused call starts nothing.
+      expect(at, name).toBeGreaterThan(body.lastIndexOf('raise exception'));
+      expect(at, name).toBeGreaterThan(body.search(EMPLOYEE_LOCK));
+    }
+    expect(text.match(/insert into private\.hr_attendance_started/g)).toHaveLength(2);
+    expect(text).not.toMatch(/(update|delete from|truncate) private\.hr_attendance_started/);
+    expect(text).not.toMatch(/on conflict \(org_id\) do update[^;]*started_on/);
   });
 
   test('creates the six functions, and no other in the public schema', () => {
@@ -386,20 +413,18 @@ describe('Lekiu attendance migrations', () => {
     expect(body).toContain('if epoch is null then return; end if;');
     expect(body).toContain('first_day := greatest(epoch, today - 31);');
     // Workspaces in a fixed order, the demo left out.
-    expect(body).toContain('where not private.is_demo_org(e.org_id)');
-    expect(body).toContain('order by e.org_id');
-    // Active employees, from the day they joined and the day their record was made, up to yesterday.
-    // A workspace is closed only from its first clocked or corrected day, found
-    // with one lookup per workspace; one with no such day is skipped.
     expect(body).toContain(
-      'select min(a.work_date) into started from public.hr_attendance_days a\n'
-        + '    where a.org_id = o.org_id and (a.clock_in is not null or a.corrected_at is not null);\n'
-        + '    continue when started is null;',
+      'select s.org_id, s.started_on from private.hr_attendance_started s\n'
+        + '    where not private.is_demo_org(s.org_id)\n'
+        + '    order by s.org_id',
     );
-    expect(body.indexOf('continue when started is null;')).toBeLessThan(body.indexOf('delete from public.hr_attendance_days'));
+    // Active employees, from the day they joined and the day their record was made, up to yesterday.
+    // A workspace is closed only from the day it first used attendance; one with
+    // no start day is not in the loop at all. The date a row is about plays no part.
+    expect(body).not.toMatch(/min\(|from public\.hr_employees e\s+where not/);
     // Active employees with a linked account, from that day, the day they joined and the day their record was made, up to yesterday.
     expect(body).toContain("where e.org_id = o.org_id and e.status = 'active' and e.user_id is not null");
-    expect(body).toContain("greatest(started, e.join_date, (e.created_at at time zone 'Asia/Kuala_Lumpur')::date)");
+    expect(body).toContain("greatest(o.started_on, e.join_date, (e.created_at at time zone 'Asia/Kuala_Lumpur')::date)");
     expect(body).toContain('generate_series(0, today - 1 - first_day)');
     // Both statements leave alone any day with a clock-in or a correction.
     const guard = 'clock_in is null and a.corrected_at is null';

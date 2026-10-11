@@ -53,6 +53,24 @@ insert into private.hr_attendance_epoch (id, started_on)
 values (true, (now() at time zone 'Asia/Kuala_Lumpur')::date)
 on conflict (id) do nothing;
 
+-- ---- the day a workspace first used attendance ----------------------------
+-- One row a workspace: the Malaysia date of its first clock-in or its first
+-- correction, written by those two functions and never changed afterwards.
+-- It is the day the entry was made, not the date the entry is about, so
+-- recording an old day later cannot drag the start back. The nightly close
+-- leaves a workspace alone until it has a row here, and closes nothing before
+-- that date; so a workspace that never uses attendance is never marked
+-- absent, and the job can go live before anyone has a clock-in button.
+-- The row goes when the workspace is deleted. No grant to anyone; row level
+-- security on with no policy.
+
+create table private.hr_attendance_started (
+  org_id uuid primary key references public.orgs(id) on delete cascade,
+  started_on date not null
+);
+alter table private.hr_attendance_started enable row level security;
+revoke all on private.hr_attendance_started from public, anon, authenticated, service_role;
+
 -- ---- helpers (private; only the functions in this file call them) ------
 
 -- Is this date a working day for the workspace? Its weekday is in the work
@@ -191,6 +209,10 @@ begin
   where a.employee_id = p_employee and a.work_date = today;
   if saved.clock_in is not null then raise exception 'ATT_ALREADY_IN'; end if;
 
+  -- The workspace's first use of attendance, if this is it.
+  insert into private.hr_attendance_started (org_id, started_on) values (org, today)
+  on conflict (org_id) do nothing;
+
   insert into public.hr_attendance_days (org_id, employee_id, work_date, clock_in, status)
   values (org, p_employee, today, now(), private.hr_attendance_status(org, now()))
   on conflict (employee_id, work_date) do update
@@ -275,6 +297,11 @@ begin
 
   -- The same lock clock in and clock out take.
   perform 1 from public.hr_employees e where e.id = p_employee for no key update;
+
+  -- The workspace's first use of attendance, if this is it: it starts today,
+  -- whatever date is being corrected.
+  insert into private.hr_attendance_started (org_id, started_on) values (org, today)
+  on conflict (org_id) do nothing;
 
   insert into public.hr_attendance_days
     (org_id, employee_id, work_date, clock_in, clock_out, status, corrected_by, corrected_at, correction_note)
@@ -411,20 +438,15 @@ grant execute on function public.hr_save_attendance_settings(uuid, jsonb, time, 
 -- nobody else may call it.
 --
 -- A workspace is closed only once it has started using attendance, and only
--- from its first real attendance day: the earliest date of a row of its own
--- that has a clock-in or a correction. A workspace with no such row is left
--- alone entirely, so one that never clocks in is never marked absent, and the
--- job can go live before anyone has a clock-in button. That day is found with
--- one lookup per workspace on the (org_id, work_date) index: the earliest
--- rows of a workspace are its real ones, since the close writes nothing
--- before them.
+-- from its start day in private.hr_attendance_started. A workspace with no
+-- row there is not looked at.
 --
 -- For every such workspace but the demo, in a fixed order, over the days from
 -- the latest of (the epoch, 31 days ago) up to yesterday:
 --   1. system rows on days that are no longer working days (a holiday was
 --      added, or the work week changed) are removed, whoever they are for;
 --   2. every active employee who is linked to an account gets a row for each
---      working day from the workspace's first real day, the day they joined
+--      working day from the workspace's start day, the day they joined
 --      and the day their record was made (in Malaysia): on leave when their
 --      approved leave covers it (a half day counts), else absent. A system
 --      row already there is set to what that rule gives now, so leave
@@ -442,7 +464,6 @@ declare
   today date := (now() at time zone 'Asia/Kuala_Lumpur')::date;
   epoch date;
   first_day date;
-  started date;
   working date[];
   o record;
 begin
@@ -452,14 +473,10 @@ begin
   if first_day > today - 1 then return; end if;
 
   for o in
-    select distinct e.org_id from public.hr_employees e
-    where not private.is_demo_org(e.org_id)
-    order by e.org_id
+    select s.org_id, s.started_on from private.hr_attendance_started s
+    where not private.is_demo_org(s.org_id)
+    order by s.org_id
   loop
-    select min(a.work_date) into started from public.hr_attendance_days a
-    where a.org_id = o.org_id and (a.clock_in is not null or a.corrected_at is not null);
-    continue when started is null;
-
     select coalesce(array_agg(first_day + g.i order by g.i), '{}') into working
     from generate_series(0, today - 1 - first_day) as g(i)
     where private.hr_is_working_day(o.org_id, first_day + g.i);
@@ -475,7 +492,7 @@ begin
     from public.hr_employees e
     cross join unnest(working) as d(day)
     where e.org_id = o.org_id and e.status = 'active' and e.user_id is not null
-      and d.day >= greatest(started, e.join_date, (e.created_at at time zone 'Asia/Kuala_Lumpur')::date)
+      and d.day >= greatest(o.started_on, e.join_date, (e.created_at at time zone 'Asia/Kuala_Lumpur')::date)
     order by e.id, d.day
     on conflict (employee_id, work_date) do update set status = excluded.status
     where a.clock_in is null and a.corrected_at is null and a.status is distinct from excluded.status;

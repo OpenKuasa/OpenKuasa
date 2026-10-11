@@ -3,8 +3,8 @@
 -- 00:05 in Malaysia: just after the day ends, the days up to yesterday are
 -- closed (absent, or on leave). The function works "today" out in Malaysia
 -- time, skips the demo workspace, records nothing before the day the
--- attendance migration was applied, and leaves a workspace alone until it has
--- its first clocked or corrected day, so this job is safe to schedule before
--- anyone can clock in.
+-- attendance migration was applied, and leaves a workspace alone until the day
+-- it first uses attendance, so this job is safe to schedule before anyone can
+-- clock in.
 create extension if not exists pg_cron;
 select cron.schedule('close-attendance', '5 16 * * *', $$select private.hr_attendance_close()$$);
