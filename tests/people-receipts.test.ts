@@ -27,7 +27,7 @@ vi.mock('@/lib/supabase/service', () => ({
     };
   },
 }));
-const { removeReceipt } = await import('@/lib/people/receipts-server');
+const { releaseReceipt, removeReceipt } = await import('@/lib/people/receipts-server');
 
 const USER = '11111111-1111-4111-8111-111111111111';
 const PATH = `${USER}/44444444-4444-4444-8444-444444444444.pdf`;
@@ -204,6 +204,47 @@ describe('removeReceipt', () => {
   });
 });
 
+describe('releaseReceipt', () => {
+  const ctxOf = (reply: unknown | (() => never)) => {
+    const calls: unknown[][] = [];
+    const rpc = async (...args: unknown[]) => {
+      calls.push(args);
+      return typeof reply === 'function' ? (reply as () => never)() : reply;
+    };
+    return { ctx: { client: { rpc } as never }, calls };
+  };
+
+  it('asks hr_release_receipt for the path and is true only for an exact true', async () => {
+    const { ctx, calls } = ctxOf({ data: true, error: null });
+    expect(await releaseReceipt(ctx, PATH)).toBe(true);
+    expect(calls).toEqual([['hr_release_receipt', { p_path: PATH }]]);
+  });
+
+  it.each([{ data: false, error: null }, { data: null, error: null }, { data: 'true', error: null }, { data: 1, error: null }])(
+    'is false for %j',
+    async (reply) => {
+      expect(await releaseReceipt(ctxOf(reply).ctx, PATH)).toBe(false);
+    },
+  );
+
+  it('is false, logging one fixed sentence without the path, on an error or a throw', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await releaseReceipt(ctxOf({ data: true, error: { message: `bad ${PATH}` } }).ctx, PATH)).toBe(false);
+    expect(
+      await releaseReceipt(
+        ctxOf(() => {
+          throw new Error(`down ${PATH}`);
+        }).ctx,
+        PATH,
+      ),
+    ).toBe(false);
+    expect(log.mock.calls).toEqual([
+      ['[people/receipts] a receipt could not be released.'],
+      ['[people/receipts] a receipt could not be released.'],
+    ]);
+  });
+});
+
 describe('a type worked out from the file name', () => {
   const gate = 'Attach a photo (JPEG, PNG, WebP or HEIC) or a PDF.';
 
@@ -225,6 +266,11 @@ describe('a type worked out from the file name', () => {
     expect(receiptProblem({ type: '', name: 'notes.txt', size: 10 })).toBe(gate);
     expect(receiptProblem({ type: '', name: 'noextension', size: 10 })).toBe(gate);
     expect(receiptProblem({ type: '', size: 10 })).toBe(gate);
+  });
+
+  it('maps a real image/heif to image/heic, the one HEIF type the bucket takes', () => {
+    expect(receiptMediaType({ type: 'image/heif', name: 'a.heif' })).toBe('image/heic');
+    expect(receiptProblem({ type: 'image/heif', size: 10 })).toBeNull();
   });
 
   it('never lets an extension override a real, different type', () => {

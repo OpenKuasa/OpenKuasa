@@ -1,4 +1,5 @@
 import 'server-only';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { serviceClient } from '@/lib/supabase/service';
 import { RECEIPT_BUCKET, RECEIPT_TYPES } from './receipts';
 
@@ -8,6 +9,23 @@ const RECEIPT_PATH = new RegExp(`^${UUID}/${UUID}\\.(${[...new Set(Object.values
 
 /** True for a path of exactly the shape `receiptPath` makes. */
 export const isReceiptPath = (path: string): boolean => RECEIPT_PATH.test(path);
+
+/**
+ * Asks the database whether an upload can go: `hr_release_receipt` answers true only when the file is in the
+ * caller's own folder, is attached to no claim in any workspace, and has been marked so it can never be attached
+ * again. The app does not decide that. Anything but exactly `true` (false, an error, a throw) means keep the file.
+ * Logs a fixed sentence, never the path.
+ */
+export async function releaseReceipt(ctx: { client: SupabaseClient }, path: string): Promise<boolean> {
+  try {
+    const { data, error } = await ctx.client.rpc('hr_release_receipt', { p_path: path });
+    if (!error) return data === true;
+  } catch {
+    // Reported the same way as a refused call.
+  }
+  console.error('[people/receipts] a receipt could not be released.');
+  return false;
+}
 
 /**
  * Removes a receipt file with the service client (the bucket lets no signed-in

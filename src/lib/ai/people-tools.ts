@@ -66,7 +66,7 @@ import {
   unmarkClaimPaid as capUnmarkClaimPaid,
 } from '@/lib/people/pay-requests';
 import { pickReceipt, receiptProblem, resolvedTypeOf, uploadReceipt, userMessageBefore } from '@/lib/people/receipts';
-import { removeReceipt } from '@/lib/people/receipts-server';
+import { releaseReceipt, removeReceipt } from '@/lib/people/receipts-server';
 import { isFilePart } from '@/lib/chat/attachments';
 import { LOOKUP_MAX, limitSchema, rowLimit } from '@/lib/ai/limits';
 import { matchesText } from '@/lib/hire/applications-view';
@@ -166,7 +166,7 @@ export function receiptFromMessages(messages: UIMessage[]): ReceiptFile | null {
   const pick = pickReceipt(files);
   if (pick.state === 'none') return null;
   const chosen =
-    pick.state === 'attached' ? files[pick.index] : files.find((f) => /^(image\/|application\/pdf)/i.test(f.mediaType.trim()));
+    pick.state === 'attached' ? files[pick.index] : files.find((f) => /^(image\/|application\/pdf)/.test(resolvedTypeOf(f)));
   if (!chosen) return null;
   const bytes = dataUrlBytes(chosen.url);
   return bytes ? { bytes, mediaType: resolvedTypeOf(chosen) } : null;
@@ -1149,12 +1149,12 @@ export function createPeopleTools(
           try {
             result = await capSubmitClaim(ctx, { ...claim, receipt_path: receiptPath });
           } catch (error) {
-            // The claim was not saved, so the file is unused (removeReceipt never throws).
-            if (receiptPath) await removeReceipt(receiptPath);
+            // The claim may or may not have been saved: the database decides whether the file can go (it stays if attached).
+            if (receiptPath && (await releaseReceipt(ctx, receiptPath))) await removeReceipt(receiptPath);
             throw error;
           }
-          // The database refused the claim: nothing points at the upload, so it goes too.
-          if (!result.ok && receiptPath) await removeReceipt(receiptPath);
+          // The database refused the claim: ask it to release the upload, and remove the file only if it says yes.
+          if (!result.ok && receiptPath && (await releaseReceipt(ctx, receiptPath))) await removeReceipt(receiptPath);
           return result.ok ? { ok: true as const, data: { ...result.data, receipt_note: note } } : result;
         }),
     }),

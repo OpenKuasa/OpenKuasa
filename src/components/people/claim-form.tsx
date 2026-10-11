@@ -18,7 +18,13 @@ import { RECEIPT_TYPES, receiptProblem } from '@/lib/people/receipts';
 import type { ClaimCategory } from '@/lib/people/types';
 
 const CATEGORIES = Object.keys(CLAIM_CATEGORY_LABEL) as ClaimCategory[];
-const ACCEPT = [...Object.keys(RECEIPT_TYPES), ...Object.values(RECEIPT_TYPES).map((ext) => `.${ext}`)].join(',');
+const ACCEPT = [
+  ...Object.keys(RECEIPT_TYPES),
+  ...Object.values(RECEIPT_TYPES).map((ext) => `.${ext}`),
+  '.jpeg',
+  '.heif',
+  'image/heif',
+].join(',');
 
 type Receipt =
   | { state: 'none' }
@@ -34,7 +40,7 @@ type Receipt =
  * carries): when it is replaced or removed, when the form goes away without having submitted it, and when a submit
  * is refused (the claim can only take a file that is still there, so the person attaches it again).
  * A browser closed mid-form never gets to discard, so that one upload stays in the uploader's folder: accepted.
- * `onSubmit` may answer whether the claim was saved; without an answer the file is kept as the claim's.
+ * `onSubmit` answers whether the claim was saved; only a definite refusal discards the file.
  */
 export function ClaimForm({
   disabled,
@@ -49,7 +55,8 @@ export function ClaimForm({
   error: string | null;
   onUpload: (file: File) => Promise<CapResult<{ path: string }>>;
   onDiscard: (path: string) => void;
-  onSubmit: (input: ClaimFormInput) => void | Promise<boolean>;
+  /** True: saved. False: definitely refused. Rejects when the call threw or was lost (it may have been saved). */
+  onSubmit: (input: ClaimFormInput) => Promise<boolean>;
   onCancel: () => void;
 }) {
   const [today] = useState(() => todayInMalaysia(new Date()));
@@ -141,18 +148,22 @@ export function ClaimForm({
         setNotice(null);
         const path = uploaded.current;
         submitting.current = path;
-        const outcome = onSubmit(result.input);
-        if (outcome instanceof Promise) {
-          void outcome.then((saved) => {
+        onSubmit(result.input).then(
+          (saved) => {
             if (saved || !path || !mounted.current) return;
-            // Refused: the claim can only take a file that is still there, so it goes and the person attaches it again.
+            // Definitely refused: the claim can only take a file that is still there, so it goes (the server
+            // still checks that no claim carries it) and the person attaches it again.
             submitting.current = null;
             drop();
             setValues((state) => ({ ...state, receipt_path: null }));
             setReceipt({ state: 'none' });
             setNotice('The claim was not saved, so its receipt was removed. Attach the receipt again.');
-          });
-        }
+          },
+          () => {
+            // The call threw or was lost: the claim may have been saved with this file. Keep the file, say
+            // nothing about it, and leave the parent's "could not be saved, please try again" showing.
+          },
+        );
       }}
     >
       <div className="grid gap-3 sm:grid-cols-3">

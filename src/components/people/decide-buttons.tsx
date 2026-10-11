@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useRef, useState, useTransition } from 'react';
 import {
   cancelClaimAction,
   cancelOvertimeAction,
@@ -16,7 +16,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { CapResult } from '@/lib/people/capabilities';
-import { RowPrompt } from './request-row';
+import { RowPrompt, usePromptId } from './request-row';
 
 export type DecideKind = 'leave' | 'time_off' | 'claim' | 'overtime';
 
@@ -63,6 +63,9 @@ export function DecideButtons({
   const [error, setError] = useState<string | null>(null);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const off = disabled || busy;
+  const rejectButton = useRef<HTMLButtonElement>(null);
+  const cancelButton = useRef<HTMLButtonElement>(null);
+  const promptId = usePromptId();
 
   function run(call: () => Promise<CapResult<unknown>>, done?: () => void) {
     setError(null);
@@ -93,11 +96,19 @@ export function DecideButtons({
     setConfirmingCancel(false);
     run(() => CANCEL[kind]({ id }));
   };
+  // Keep and Escape: the prompt goes and focus returns to the button that opened it.
   const closeNote = () => {
     setRejecting(false);
     setNote('');
     setError(null);
+    rejectButton.current?.focus();
   };
+  const closeCancel = () => {
+    setConfirmingCancel(false);
+    setError(null);
+    cancelButton.current?.focus();
+  };
+  const closePrompt = () => (confirmingCancel ? closeCancel() : rejecting ? closeNote() : setError(null));
 
   if (!pending && !cancellable) return <span className="text-muted-foreground">—</span>;
 
@@ -117,11 +128,14 @@ export function DecideButtons({
               Approve
             </Button>
             <Button
+              ref={rejectButton}
               type="button"
               variant="outline"
               size="sm"
               className="h-7 px-2.5 text-xs"
               disabled={off}
+              aria-expanded={rejecting}
+              aria-controls={promptId}
               onClick={() => {
                 setError(null);
                 setConfirmingCancel(false);
@@ -133,15 +147,23 @@ export function DecideButtons({
             </Button>
           </>
         ) : null}
-        {cancellable && !confirmingCancel ? (
+        {cancellable ? (
           <Button
+            ref={cancelButton}
             type="button"
             variant="ghost"
             size="sm"
             className="h-7 px-2.5 text-xs"
             disabled={off}
+            aria-expanded={confirmingCancel}
+            aria-controls={promptId}
             onClick={() => {
               setError(null);
+              if (confirmingCancel) {
+                closeCancel();
+                return;
+              }
+              setRejecting(false);
               setConfirmingCancel(true);
             }}
           >
@@ -150,7 +172,7 @@ export function DecideButtons({
         ) : null}
       </div>
       {(cancellable && confirmingCancel) || rejecting || error ? (
-        <RowPrompt>
+        <RowPrompt focusKey={confirmingCancel && cancellable ? 'cancel' : rejecting ? 'reject' : ''} onEscape={closePrompt}>
           {cancellable && confirmingCancel ? (
             <div className="flex flex-wrap items-center gap-2">
               <p role="alert" className="text-xs text-destructive">
@@ -164,8 +186,9 @@ export function DecideButtons({
                 variant="ghost"
                 size="sm"
                 className="h-7 px-2.5 text-xs"
+                data-autofocus
                 disabled={off}
-                onClick={() => setConfirmingCancel(false)}
+                onClick={closeCancel}
               >
                 Keep
               </Button>

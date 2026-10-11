@@ -33,21 +33,27 @@ export function RequestDialog<I>({
     setError(null);
   };
 
+  /**
+   * Resolves true when the server accepted and false when it definitely refused. A call that threw or was lost
+   * may have been saved, so the promise rejects: a form must not assume the request failed.
+   */
   function send(input: I): Promise<boolean> {
-    return new Promise((resolve) => {
+    const outcome = new Promise<boolean>((resolve, reject) => {
       start(async () => {
-        let saved = false;
         try {
           const result = await submit(input);
-          saved = result.ok;
           if (result.ok) close();
           else setError(result.error);
-        } catch {
+          resolve(result.ok);
+        } catch (error) {
           setError(WRITE_FAILED);
+          reject(error);
         }
-        resolve(saved);
       });
     });
+    // A form that ignores the outcome is not left with an unhandled rejection.
+    outcome.catch(() => {});
+    return outcome;
   }
 
   return (

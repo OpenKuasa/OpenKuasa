@@ -242,8 +242,8 @@ export function ApprovalsScreen({
                           <RowDetails row={row} />
                         </TableCell>
                       ) : null}
-                      <TableCell className="whitespace-nowrap px-1.5">
-                        <span className="flex items-center gap-1.5">
+                      <TableCell className="px-1.5">
+                        <span className="flex max-w-48 flex-wrap items-center gap-1.5">
                           <LiveDot active={row.pending} />
                           <StatusPill tone={requestTone(row.status)}>{row.status_label}</StatusPill>
                           {row.yours ? <StatusPill tone="neutral">Yours</StatusPill> : null}

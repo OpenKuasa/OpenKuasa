@@ -8,6 +8,8 @@ const ctl = vi.hoisted(() => ({
   fail: null as string | null,
   uploadFails: false,
   removed: [] as string[],
+  released: [] as string[],
+  release: true as unknown,
   decidedStatus: 'approved',
   decidedAmount: 15000,
   overtimeRate: 2500 as number | null,
@@ -62,6 +64,11 @@ vi.mock('@/lib/people/receipts', async (orig) => {
 });
 
 vi.mock('@/lib/people/receipts-server', () => ({
+  // The database decides whether an upload can go; what it answers is set per test.
+  releaseReceipt: async (_ctx: unknown, path: string) => {
+    ctl.released.push(path);
+    return ctl.release === true;
+  },
   removeReceipt: async (path: string) => {
     ctl.removed.push(path);
   },
@@ -125,6 +132,8 @@ beforeEach(() => {
   ctl.fail = null;
   ctl.uploadFails = false;
   ctl.removed = [];
+  ctl.released = [];
+  ctl.release = true;
   ctl.decidedStatus = 'approved';
   ctl.decidedAmount = 15000;
   ctl.overtimeRate = 2500;
@@ -251,6 +260,7 @@ describe('the receipt comes from the question, never from the model', () => {
   it('removes the uploaded file when the database refuses the claim, and keeps it when the claim goes in', async () => {
     ctl.fail = 'You can only claim for yourself.';
     await call('submitClaim', { ...CLAIM }, MEMBER_VIEWER, self(ME, PNG));
+    expect(ctl.released).toEqual([`${USER}/uploaded-receipt.png`]);
     expect(ctl.removed).toEqual([`${USER}/uploaded-receipt.png`]);
     ctl.fail = null;
     ctl.removed = [];
@@ -262,7 +272,24 @@ describe('the receipt comes from the question, never from the model', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     ctl.fail = 'throw';
     await call('submitClaim', { ...CLAIM }, MEMBER_VIEWER, self(ME, PNG));
+    expect(ctl.released).toEqual([`${USER}/uploaded-receipt.png`]);
     expect(ctl.removed).toEqual([`${USER}/uploaded-receipt.png`]);
+  });
+
+  it.each([false, null, 'true', 1, undefined])('keeps the file when the database answers %j to the release', async (answer) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    ctl.release = answer;
+    ctl.fail = 'You can only claim for yourself.';
+    await call('submitClaim', { ...CLAIM }, MEMBER_VIEWER, self(ME, PNG));
+    ctl.fail = 'throw';
+    await call('submitClaim', { ...CLAIM }, MEMBER_VIEWER, self(ME, PNG));
+    expect(ctl.released).toHaveLength(2);
+    expect(ctl.removed).toEqual([]);
+  });
+
+  it('never asks to release anything when the claim was saved', async () => {
+    await call('submitClaim', { ...CLAIM }, MEMBER_VIEWER, self(ME, PNG));
+    expect(ctl.released).toEqual([]);
   });
 
   it('uploads nothing and sends no path when no file came with the question', async () => {

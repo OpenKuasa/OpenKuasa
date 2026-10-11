@@ -20,6 +20,9 @@ const ctl = vi.hoisted(() => ({
   revalidated: [] as string[],
   removed: [] as string[],
   removeFails: false,
+  rpcs: [] as { fn: string; args: unknown }[],
+  rpcReply: { data: true, error: null } as { data: unknown; error: unknown },
+  rpcThrows: false,
   claims: [] as { id: string; receipt_path: string | null }[],
   claimsFail: false,
   signed: [] as { bucket: string; path: string; seconds: number }[],
@@ -123,6 +126,11 @@ beforeEach(() => {
         },
       }),
     },
+    rpc: async (fn: string, args: unknown) => {
+      ctl.rpcs.push({ fn, args });
+      if (ctl.rpcThrows) throw new Error('network');
+      return ctl.rpcReply;
+    },
   };
   ctl.reply = null;
   ctl.cancelData = { id: 'r1', status: 'cancelled', removed_receipt_path: 'u9/file.pdf' };
@@ -130,6 +138,9 @@ beforeEach(() => {
   ctl.revalidated = [];
   ctl.removed = [];
   ctl.removeFails = false;
+  ctl.rpcs = [];
+  ctl.rpcReply = { data: true, error: null };
+  ctl.rpcThrows = false;
   ctl.claims = [{ id: REQ, receipt_path: 'u9/file.pdf' }];
   ctl.claimsFail = false;
   ctl.signed = [];
@@ -199,7 +210,6 @@ describe('discardReceiptAction', () => {
 
   beforeEach(() => {
     ctl.viewer.userId = ME_ID;
-    ctl.claims = [{ id: REQ, receipt_path: `${ME_ID}/77777777-7777-4777-8777-777777777777.pdf` }];
   });
 
   it('removes an unused file in the caller\'s own folder, and reports nothing about it', async () => {
@@ -239,26 +249,40 @@ describe('discardReceiptAction', () => {
   ])('removes nothing for %s', async (_label, input) => {
     await actions.discardReceiptAction(input);
     expect(ctl.removed).toEqual([]);
+    expect(ctl.rpcs).toEqual([]);
   });
 
-  it('never removes a file that a claim the caller can read carries', async () => {
-    ctl.claims = [{ id: REQ, receipt_path: FILE }];
+  it('asks the database with the signed-in user\'s client, passing only the path, and removes the file on a true', async () => {
     await actions.discardReceiptAction({ path: FILE });
-    expect(ctl.removed).toEqual([]);
+    expect(ctl.rpcs).toEqual([{ fn: 'hr_release_receipt', args: { p_path: FILE } }]);
+    expect(ctl.removed).toEqual([FILE]);
   });
 
-  it('removes nothing when the claims cannot be read', async () => {
-    ctl.claimsFail = true;
+  it.each([
+    ['false', { data: false, error: null }],
+    ['null', { data: null, error: null }],
+    ['the text "true"', { data: 'true', error: null }],
+    ['1', { data: 1, error: null }],
+    ['an error', { data: true, error: { message: `boom ${FILE}` } }],
+  ])('keeps the file when the database answers %s', async (_label, reply) => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    await actions.discardReceiptAction({ path: FILE });
+    ctl.rpcReply = reply;
+    expect(await actions.discardReceiptAction({ path: FILE })).toEqual({ ok: false });
     expect(ctl.removed).toEqual([]);
   });
 
-  it('logs neither the path nor the user id', async () => {
+  it('keeps the file when the call throws, and logs neither the path nor the user id', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    ctl.rpcThrows = true;
+    expect(await actions.discardReceiptAction({ path: FILE })).toEqual({ ok: false });
+    expect(ctl.removed).toEqual([]);
+    expect(JSON.stringify(log.mock.calls)).not.toContain(ME_ID);
+  });
+
+  it('does not read any claims to decide', async () => {
     ctl.claimsFail = true;
     await actions.discardReceiptAction({ path: FILE });
-    expect(JSON.stringify(log.mock.calls)).not.toContain(ME_ID);
+    expect(ctl.removed).toEqual([FILE]);
   });
 });
 

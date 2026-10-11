@@ -32,18 +32,18 @@ export function AddClaimFor({ employees, disabled }: { employees: LeaveEmployee[
 
   function onSubmit(input: ClaimFormInput): Promise<boolean> {
     setError(null);
-    return new Promise((resolve) => {
+    // True: saved. False: definitely refused. Rejects when the call threw or was lost (it may have been saved).
+    return new Promise<boolean>((resolve, reject) => {
       start(async () => {
-        let saved = false;
         try {
           const result = await submitClaimForAction({ ...input, employee_id: employeeId });
-          saved = result.ok;
           if (result.ok) close();
           else setError(result.error);
-        } catch {
+          resolve(result.ok);
+        } catch (error) {
           setError(WRITE_FAILED);
+          reject(error);
         }
-        resolve(saved);
       });
     });
   }

@@ -94,6 +94,16 @@ describe('pickReceipt with an empty type', () => {
     expect(pickReceipt([{ mediaType: 'application/octet-stream', filename: 'a.pdf', url: url('x') }])).toEqual({ state: 'attached', index: 0 });
   });
 
+  it('treats a real image/heif like HEIC, which the bucket takes', () => {
+    expect(pickReceipt([{ mediaType: 'image/heif', url: url('x') }])).toEqual({ state: 'attached', index: 0 });
+  });
+
+  it('hands an oversized file with an empty type to the tool too, so the card and the tool agree', () => {
+    const big = { type: 'file' as const, mediaType: '', filename: 'big.heic', url: `data:application/octet-stream;base64,${'A'.repeat(7 * 1024 * 1024)}` };
+    expect(pickReceipt([big])).toMatchObject({ state: 'unusable' });
+    expect(receiptFromMessages([user('u1', big)])).not.toBeNull();
+  });
+
   it('still ignores a file with no usable name or type', () => {
     expect(pickReceipt([{ mediaType: '', filename: 'a.txt', url: url('x') }])).toEqual({ state: 'none' });
     expect(pickReceipt([{ mediaType: '', url: url('x') }])).toEqual({ state: 'none' });

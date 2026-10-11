@@ -35,7 +35,7 @@ A linked employee submits and cancels their own expense claims and overtime; an 
 
 **In:** claims and overtime records; receipt files; the Financial Claims, OT Claims, Financial Claims Approvals and Overtime Approvals screens; Lekiu's claim and overtime tools and prompt rules; one migration.
 
-**Out:** claim limits per category; reading a receipt to fill in the amount; more than one receipt per claim; editing a claim or overtime record; paying claims or overtime through payroll; a paid mark on overtime; changing the overtime multipliers (Settings stays read-only); clearing out receipt files that were uploaded and never attached; line managers approving their own team; notifications; Lekiu inside Tuah; the draft-letters policy raised in plan C.
+**Out:** claim limits per category; reading a receipt to fill in the amount; more than one receipt per claim; editing a claim or overtime record; paying claims or overtime through payroll; a paid mark on overtime; changing the overtime multipliers (Settings stays read-only); line managers approving their own team; notifications; Lekiu inside Tuah; the draft-letters policy raised in plan C.
 
 ## 4. Database
 
@@ -68,6 +68,7 @@ All in `public`, `security definer`, `set search_path = public`, `execute` grant
 | `hr_decide_claim(request, approve boolean, note)` | Owner or admin | Only a `pending` claim. Sets `approved` or `rejected`, `decided_by`, `decided_at`, and the note on a rejection. |
 | `hr_mark_claim_paid(request, paid_on, reference)` | Owner or admin | Only an `approved` claim (`PAY_NOT_APPROVED`). `paid_on` not after today and not before the claim date. Sets `paid`, `paid_on`, `paid_reference`, `paid_by`. |
 | `hr_unmark_claim_paid(request)` | Owner or admin | Only a `paid` claim (`PAY_NOT_PAID`). Back to `approved`; the three paid columns cleared. |
+| `hr_release_receipt(path)` | Any signed-in user | Returns a boolean, never an error for these cases. True: the path is in the caller's own folder, no claim in any workspace carries it, and it is now marked so it can never be attached. False: do not delete. |
 | `hr_overtime_preview(employee, work_date, hours)` returns one row | May act for E | `stable`; writes nothing. Refuses a bad date or hours (`PAY_BAD_INPUT`) but not an inactive employee. Returns `day_kind`, `multiplier`, `hourly_rate_cents` (null with no salary on file) and `amount_cents` (null likewise). |
 | `hr_submit_overtime(employee, work_date, hours, reason)` returns the record | May act for E | Refuses an inactive employee, hours not above zero, not in halves or above 24, a date after today or before 2000, and a total above 24 hours for that employee on that date across `pending` and `approved` records (`PAY_TOO_MANY_HOURS`). Saves `pending` with the worked-out figures (§4.3) and `requested_by`. |
 | `hr_cancel_overtime(request)` | The linked member: own record while `pending`. Owner or admin: any record not `cancelled`. | Sets `cancelled`. |
@@ -101,7 +102,7 @@ A restrictive policy requires the second factor for this bucket, as the other bu
 - **Path.** `<uploader's user id>/<random uuid>.<ext>`. `hr_submit_claim` checks the first segment is the caller's own id and that the object exists in the bucket. A file can back one claim only (a unique index on `receipt_path`): attaching it to a second is `PAY_BAD_RECEIPT`, so cancelling one claim can never remove another's receipt. So an owner entering a claim for someone uploads into their own folder, and the employee can still read it through the claim.
 - **Opening.** The app makes a 60-second signed link as the signed-in user; storage's select policy is the check.
 - **Removing.** After `hr_cancel_claim` succeeds, the server action removes the returned path with the service client. If that fails, or no service key is configured, it logs the fact (never the path's owner or the claim) and the cancel still stands; the file is then an unreachable leftover, since no claim points at it.
-- **Unused uploads.** A file uploaded and never attached (the form was abandoned, or submit was refused) stays in the uploader's folder. Nobody but the service client can delete from the bucket, so the form cannot remove it; clearing those out is out of scope.
+- **Unused uploads.** The browser discards an upload that ends up unused (the file is replaced or removed, the dialog is closed, the employee is changed, or a submit is refused) by asking `hr_release_receipt`. The database decides, atomically and across workspaces: it answers true only when the file is in the caller's own folder and attached to no claim, and it marks the path so it can never be attached afterwards (a released or cancelled file cannot be attached again). Only on an exact true does the server delete the file with the service client; false or an error leaves it. A browser closed mid-form never asks, so that file stays in the uploader's folder.
 
 ### 4.5 Access check
 

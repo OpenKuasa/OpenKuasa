@@ -19,7 +19,7 @@ import {
 } from '@/lib/people/pay-requests';
 import { PEOPLE_PATHS } from '@/lib/people/paths';
 import { RECEIPT_BUCKET } from '@/lib/people/receipts';
-import { isReceiptPath, removeReceipt } from '@/lib/people/receipts-server';
+import { isReceiptPath, releaseReceipt, removeReceipt } from '@/lib/people/receipts-server';
 import { createSupabasePeopleData } from '@/lib/people/supabase';
 import { getPeopleViewer } from '@/lib/people/viewer';
 import { createClient } from '@/lib/supabase/server';
@@ -165,8 +165,8 @@ export async function claimReceiptUrlAction(input: unknown): Promise<CapResult<{
 
 /**
  * Removes a receipt file the caller uploaded and no longer wants (replaced, removed, dialog closed, claim refused).
- * Only the caller's own folder, only a path of the exact shape we make, and never a file a claim they can read
- * carries. It answers the same way whatever happened, never says anything about the path, and never logs it.
+ * Cheap guards here (own folder, exact path shape); whether the file is really unused is the database's call
+ * (`hr_release_receipt`), and the file is deleted only when it says yes. It answers the same way whatever happened, never says anything about the path, and never logs it.
  * (A browser closed mid-form never calls this, so that upload stays: accepted.)
  */
 export async function discardReceiptAction(input: unknown): Promise<{ ok: boolean }> {
@@ -177,13 +177,8 @@ export async function discardReceiptAction(input: unknown): Promise<{ ok: boolea
   const { path } = parsed.data;
   const viewer = await getViewer();
   if (path.split('/')[0] !== viewer.userId || !isReceiptPath(path)) return { ok: false };
-  try {
-    const claims = await createSupabasePeopleData(guard.ctx.client, guard.ctx.orgId).listClaims();
-    if (claims.some((claim) => claim.receipt_path === path)) return { ok: false };
-  } catch (error) {
-    console.error('[people/pay-actions] could not read the claims:', error instanceof Error ? error.name : 'error');
-    return { ok: false };
-  }
+  // The database decides, atomically and across workspaces; the file goes only on an exact `true`.
+  if (!(await releaseReceipt(guard.ctx, path))) return { ok: false };
   await removeReceipt(path);
   return { ok: true };
 }

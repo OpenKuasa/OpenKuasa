@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useRef, useState, useTransition } from 'react';
 import { markClaimPaidAction, unmarkClaimPaidAction } from '@/app/(app)/people/pay-actions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { type CapResult, WRITE_FAILED } from '@/lib/people/capabilities';
 import { todayInMalaysia } from '@/lib/people/dates';
-import { RowPrompt } from './request-row';
+import { RowPrompt, usePromptId } from './request-row';
 
 /**
  * "Mark paid" on an approved claim and "Undo paid" on a paid one. Each needs a
@@ -32,6 +32,8 @@ export function PaidButtons({
   const [reference, setReference] = useState('');
   const [error, setError] = useState<string | null>(null);
   const off = disabled || busy;
+  const trigger = useRef<HTMLButtonElement>(null);
+  const promptId = usePromptId();
 
   function run(call: () => Promise<CapResult<unknown>>) {
     setError(null);
@@ -42,14 +44,18 @@ export function PaidButtons({
       } catch {
         result = { ok: false, error: WRITE_FAILED };
       }
-      if (result.ok) setStep('idle');
-      else setError(result.error);
+      if (result.ok) {
+        setStep('idle');
+        trigger.current?.focus();
+      } else setError(result.error);
     });
   }
 
+  // Keep and Escape: the prompt goes and focus returns to the button that opened it.
   const close = () => {
     setStep('idle');
     setError(null);
+    trigger.current?.focus();
   };
 
   const today = todayInMalaysia(new Date());
@@ -58,29 +64,34 @@ export function PaidButtons({
   // (`RowPrompt`), which is as wide as the table.
   return (
     <>
-      {step === 'idle' ? (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-7 px-2.5 text-xs"
-          disabled={off}
-          onClick={() => {
-            setError(null);
-            if (paid) {
-              setStep('undoing');
-            } else {
-              setPaidOn(today);
-              setReference('');
-              setStep('marking');
-            }
-          }}
-        >
-          {paid ? 'Undo paid' : 'Mark paid'}
-        </Button>
-      ) : null}
+      <Button
+        ref={trigger}
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-7 px-2.5 text-xs"
+        disabled={off}
+        aria-expanded={step !== 'idle'}
+        aria-controls={promptId}
+        onClick={() => {
+          if (step !== 'idle') {
+            close();
+            return;
+          }
+          setError(null);
+          if (paid) {
+            setStep('undoing');
+          } else {
+            setPaidOn(today);
+            setReference('');
+            setStep('marking');
+          }
+        }}
+      >
+        {paid ? 'Undo paid' : 'Mark paid'}
+      </Button>
       {step !== 'idle' || error ? (
-        <RowPrompt>
+        <RowPrompt focusKey={step === 'idle' ? '' : step} onEscape={close}>
           {step === 'marking' ? (
             <form
               className="flex flex-wrap items-center gap-2"
@@ -133,7 +144,15 @@ export function PaidButtons({
               >
                 Confirm
               </Button>
-              <Button type="button" variant="ghost" size="sm" className="h-7 px-2.5 text-xs" disabled={off} onClick={close}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                data-autofocus
+                className="h-7 px-2.5 text-xs"
+                disabled={off}
+                onClick={close}
+              >
                 Keep
               </Button>
             </div>

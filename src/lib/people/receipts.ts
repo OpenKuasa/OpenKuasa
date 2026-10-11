@@ -44,6 +44,8 @@ const EXTENSION_TYPES: Record<string, string> = {
  * unknown extension leaves the type as it was, which then fails the check.
  */
 export function receiptMediaType(file: { type: string; name?: string }): string {
+  // HEIF is HEIC for our purposes (and for the bucket, which has no image/heif); the `.heif` extension agrees.
+  if (file.type.trim().toLowerCase() === 'image/heif') return 'image/heic';
   if (file.type !== '' && file.type !== 'application/octet-stream') return file.type;
   const dot = file.name ? file.name.lastIndexOf('.') : -1;
   if (!file.name || dot < 0) return file.type;
