@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { createOrg, signInAnon, liveClient } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 
@@ -10,23 +11,16 @@ if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 // Test identities use anonymous sign-ins: distinct authenticated users for RLS,
 // with no email-confirmation step.
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 function client(): SupabaseClient {
-  return createClient(url, anon, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  return liveClient();
 }
 
 async function anonUserWithOrg(orgName: string) {
   const c = client();
-  const { error: authErr } = await c.auth.signInAnonymously();
+  const { error: authErr } = await signInAnon(c);
   expect(authErr, authErr?.message).toBeNull();
-  const { data: orgId, error: rpcErr } = await c.rpc(
-    'create_org_for_current_user',
-    { org_name: orgName },
-  );
+  const { data: orgId, error: rpcErr } = await createOrg(c, orgName);
   expect(rpcErr, rpcErr?.message).toBeNull();
   return { c, orgId: orgId as string };
 }

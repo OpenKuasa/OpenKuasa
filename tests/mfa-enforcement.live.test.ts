@@ -1,19 +1,14 @@
 import { expect, test } from 'vitest';
-import { createClient } from '@supabase/supabase-js';
 import { generateRecoveryCodes, hashRecoveryCode } from '@/lib/auth/mfa';
 import './setup/supabase';
 import { totp } from './helpers/totp';
+import { createOrg, liveClient, recordSignedUpUser } from './helpers/live-workspaces';
 
 // Live check that a password-only session of a 2FA user gets nothing from the
 // data API until it passes the second factor. Opt-in (RUN_MFA_LIVE=1): each
-// run signs up a real email user that only an admin can delete afterwards.
+// run signs up a real email user, which the shared live-workspaces helper deletes afterwards.
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const client = () =>
-  createClient(url, anon, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+const client = liveClient;
 const nextWindow = () =>
   new Promise((r) => setTimeout(r, 30_000 - (Date.now() % 30_000) + 1_500));
 
@@ -27,9 +22,8 @@ liveTest('aal1 session of a 2FA user is locked out of the data API', async () =>
   const signUp = await a.auth.signUp({ email, password });
   expect(signUp.error, signUp.error?.message).toBeNull();
   const uid = signUp.data.user!.id;
-  const org = await a.rpc('create_org_for_current_user', {
-    org_name: 'QA Enforce Sdn Bhd',
-  });
+  recordSignedUpUser(uid);
+  const org = await createOrg(a, 'QA Enforce Sdn Bhd');
   expect(org.error, org.error?.message).toBeNull();
 
   // Before 2FA: normal access.
@@ -98,9 +92,7 @@ liveTest('aal1 session of a 2FA user is locked out of the data API', async () =>
     .upload(`${uid}/x.png`, new Blob(['x'], { type: 'image/png' }));
   expect(upload.error).not.toBeNull();
   await b.rpc('log_event', { p_action: 'forged', p_category: 'auth' });
-  const badOrg = await b.rpc('create_org_for_current_user', {
-    org_name: 'Forged Sdn Bhd',
-  });
+  const badOrg = await createOrg(b, 'Forged Sdn Bhd');
   expect(badOrg.error?.message).toContain('second factor required');
   const badDemo = await b.rpc('join_demo_org');
   expect(badDemo.error?.message).toContain('second factor required');

@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { createOrg, signInAnon, liveClient } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 
@@ -10,13 +11,9 @@ if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 // only its hint, and nobody outside the workspace learns anything. Identities
 // are anonymous sign-ins; an anonymous user who creates an org is its owner.
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 function client(): SupabaseClient {
-  return createClient(url, anon, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  return liveClient();
 }
 
 const SEALED = 'v1.aaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbb.cccccccccccccccccccccccc';
@@ -27,15 +24,13 @@ let stranger: SupabaseClient;
 beforeAll(async () => {
   if (!hasSupabaseEnv) return;
   owner = client();
-  const a = await owner.auth.signInAnonymously();
+  const a = await signInAnon(owner);
   expect(a.error, a.error?.message).toBeNull();
-  const org = await owner.rpc('create_org_for_current_user', {
-    org_name: 'BYOK Test Sdn Bhd',
-  });
+  const org = await createOrg(owner, 'BYOK Test Sdn Bhd');
   expect(org.error, org.error?.message).toBeNull();
 
   stranger = client();
-  const b = await stranger.auth.signInAnonymously();
+  const b = await signInAnon(stranger);
   expect(b.error, b.error?.message).toBeNull();
 });
 

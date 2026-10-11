@@ -1,26 +1,19 @@
 import { expect, test } from 'vitest';
-import { createClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { createOrg, joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
-const client = () =>
-  createClient(url, anon, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+const client = liveClient;
 
 testWithSupabase('a new user can create an org and becomes its owner', async () => {
   const c = client();
-  const { data: auth, error: authErr } = await c.auth.signInAnonymously();
+  const { data: auth, error: authErr } = await signInAnon(c);
   expect(authErr, authErr?.message).toBeNull();
   const uid = auth.user?.id;
 
-  const { data: orgId, error } = await c.rpc('create_org_for_current_user', {
-    org_name: 'Fn Test Sdn Bhd',
-  });
+  const { data: orgId, error } = await createOrg(c, 'Fn Test Sdn Bhd');
   expect(error, error?.message).toBeNull();
 
   const { data: mem, error: memErr } = await c
@@ -35,11 +28,11 @@ testWithSupabase('a new user can create an org and becomes its owner', async () 
 
 testWithSupabase('a demo visitor joins the demo org as a read-only viewer and cannot write', async () => {
   const c = client();
-  const { data: auth, error: anonErr } = await c.auth.signInAnonymously();
+  const { data: auth, error: anonErr } = await signInAnon(c);
   expect(anonErr, anonErr?.message).toBeNull();
   const uid = auth.user?.id;
 
-  const { data: demoId, error } = await c.rpc('join_demo_org');
+  const { data: demoId, error } = await joinDemo(c);
   expect(error, error?.message).toBeNull();
 
   // The demo org is shared, so filter to THIS visitor's own membership row.
