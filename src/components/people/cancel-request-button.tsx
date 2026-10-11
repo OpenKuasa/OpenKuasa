@@ -2,8 +2,8 @@
 
 import { useState, useTransition } from 'react';
 import { cancelLeaveAction, cancelTimeOffAction } from '@/app/(app)/people/leave-actions';
-import { Button } from '@/components/ui/button';
 import { cancelClaimAction, cancelOvertimeAction } from '@/app/(app)/people/pay-actions';
+import { Button } from '@/components/ui/button';
 import { WRITE_FAILED } from '@/lib/people/capabilities';
 
 const CANCEL = {
