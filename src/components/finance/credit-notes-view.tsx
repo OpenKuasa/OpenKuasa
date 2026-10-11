@@ -173,7 +173,7 @@ export function CreditNotesView({
                         <LiveDot active={n.status === 'issued'} />
                         <span
                           className={cn(
-                            'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold',
+                            'inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold',
                             STATUS_STYLES[n.status],
                           )}
                         >

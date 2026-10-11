@@ -239,8 +239,9 @@ export function InvoicesView({
         >
           Void <span className="font-medium">{invoice.invoice_no}</span> to{' '}
           <span className="font-medium">{invoice.customer_name}</span> ({rm(invoice.total)})? It stays in the list as
-          Void and nothing more is owed on it. This cannot be undone. An invoice that has payments, refunds or credit
-          notes cannot be voided until they are voided.
+          Void and nothing more is owed on it. This cannot be undone. An invoice cannot be voided while it has payments,
+          refunds or credit notes: void payments on Payments In, and void or delete refunds and credit notes on their
+          own screens.
         </ConfirmRow>
       );
     }

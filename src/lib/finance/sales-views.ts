@@ -138,6 +138,7 @@ export function invoicesView(invoices: InvoiceListRow[], payments: PaymentInRow[
 
   return {
     stats: [
+      // Relies on the database: an invoice that reads Sent or Overdue always has a balance above zero (one in credit reads Paid).
       { label: 'Total receivable', value: rmShort(sum(open, (i) => i.balance)), delta: count(open.length, 'open invoice'), deltaTone: 'flat' },
       { label: 'Due this week', value: rmShort(sum(dueThisWeek, (i) => i.balance)), delta: count(dueThisWeek.length, 'invoice'), deltaTone: 'flat' },
       { label: 'Overdue', value: rmShort(sum(overdue, (i) => i.balance)), delta: count(overdue.length, 'invoice'), deltaTone: overdue.length ? 'down' : 'flat' },
