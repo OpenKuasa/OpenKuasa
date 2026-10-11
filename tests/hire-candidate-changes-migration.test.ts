@@ -133,4 +133,37 @@ describe('hire candidate changes migration', () => {
     expect(sql).not.toMatch(/grant\s+(execute|all)[^;]*\bto\b[^;]*\b(anon|public)\b/i);
     expect(sql).not.toMatch(/grant[^;]*\bto\b[^;]*\b(anon|public)\b/i);
   });
+
+  test('the review hardening holds', () => {
+    const live = sql.split('\n').filter((line) => !line.trim().startsWith('--')).join('\n');
+    const body = (name: string) => {
+      const start = live.indexOf(`create or replace function public.${name}(`);
+      return live.slice(start, live.indexOf('end $$;', start));
+    };
+    const add = body('hire_add_candidate');
+    // The candidate is inserted only after the lock and after the lookup under it.
+    const lock = add.indexOf('pg_advisory_xact_lock');
+    const lookup = add.indexOf('c.org_id = p_org_id and lower(c.email) = v_email');
+    const insert = add.indexOf('insert into public.hire_candidates');
+    expect(lock).toBeGreaterThan(-1);
+    expect(lookup).toBeGreaterThan(lock);
+    expect(insert).toBeGreaterThan(lookup);
+    // The job is held while the application is made, and only an open or paused one takes it.
+    expect(add).toContain('for share;');
+    expect(add).toContain("if v_status not in ('open', 'paused') then return jsonb_build_object('word', 'job_not_open'); end if;");
+    expect(add.indexOf('for share;')).toBeLessThan(lock);
+    // Without a job the cover note and the CV link are dropped before anything is judged.
+    expect(add.indexOf('if p_job_id is null then')).toBeLessThan(add.indexOf("'too_long'"));
+
+    const update = body('hire_update_candidate');
+    expect(update.indexOf("jsonb_typeof(p_changes) <> 'object' then")).toBeLessThan(update.indexOf('jsonb_object_keys(p_changes)'));
+
+    const attach = body('hire_attach_cv');
+    expect(attach).toContain("\\.pdf$')) is not true then");
+    expect(attach).toContain('exception when unique_violation then');
+    expect(attach).toContain("if v_consented is not null then return 'not_by_hand'; end if;");
+
+    expect(sql).not.toMatch(/grant[^;]*hire_attach_cv[^;]*\b(authenticated|anon|public)\b/i);
+    expect(sql).not.toMatch(/grant[^;]*hire_(add|update)_candidate[^;]*\b(service_role|anon|public)\b/i);
+  });
 });

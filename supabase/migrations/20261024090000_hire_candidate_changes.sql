@@ -46,6 +46,12 @@ declare
   v_candidate text := 'created';
   v_application text := 'none';
 begin
+  -- Without a job there is no application to hold a cover note or a CV link: they are dropped.
+  if p_job_id is null then
+    v_cover := null;
+    v_cv := null;
+  end if;
+
   if p_org_id is null or private.is_org_member(p_org_id) is not true then
     return jsonb_build_object('word', 'not_found');
   end if;
@@ -81,7 +87,8 @@ begin
   if p_job_id is not null then
     select j.status into v_status
       from public.hire_jobs j
-     where j.id = p_job_id and j.org_id = p_org_id;
+     where j.id = p_job_id and j.org_id = p_org_id
+       for share;
     if v_status is null then return jsonb_build_object('word', 'job_not_found'); end if;
     if v_status not in ('open', 'paused') then return jsonb_build_object('word', 'job_not_open'); end if;
   end if;
@@ -151,8 +158,10 @@ begin
     return jsonb_build_object('word', 'forbidden');
   end if;
 
-  if p_changes is null or jsonb_typeof(p_changes) <> 'object'
-     or exists (select 1 from jsonb_object_keys(p_changes) as k(key) where k.key <> all (c_fields)) then
+  if p_changes is null or jsonb_typeof(p_changes) <> 'object' then
+    return jsonb_build_object('word', 'invalid_changes');
+  end if;
+  if exists (select 1 from jsonb_object_keys(p_changes) as k(key) where k.key <> all (c_fields)) then
     return jsonb_build_object('word', 'invalid_changes');
   end if;
 
@@ -228,21 +237,29 @@ declare
   v_org uuid;
   v_job uuid;
   v_path text;
+  v_consented timestamptz;
 begin
   if coalesce((select auth.role()), '') <> 'service_role' then return 'forbidden'; end if;
 
-  select a.org_id, a.job_id, a.cv_path into v_org, v_job, v_path
+  select a.org_id, a.job_id, a.cv_path, a.consented_at into v_org, v_job, v_path, v_consented
     from public.hire_applications a
    where a.id = p_application_id
      for update;
   if not found then return 'not_found'; end if;
   if v_path is not null then return 'already_attached'; end if;
+  -- Only an application added by hand: one an applicant sent themselves carries their consent date.
+  if v_consented is not null then return 'not_by_hand'; end if;
   if (p_cv_path ~ ('^' || v_org::text || '/' || v_job::text
        || '/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.pdf$')) is not true then
     return 'invalid_path';
   end if;
 
-  update public.hire_applications set cv_path = p_cv_path where id = p_application_id;
+  begin
+    update public.hire_applications set cv_path = p_cv_path where id = p_application_id;
+  exception when unique_violation then
+    -- Another application already holds this file.
+    return 'invalid_path';
+  end;
   return 'ok';
 end $$;
 
