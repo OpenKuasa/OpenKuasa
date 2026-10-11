@@ -333,9 +333,14 @@ describe('Tuah’s team rejecting an application', () => {
     };
     return { first, access: { data, write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true } } };
   };
-  const prepare = async (script: NonNullable<typeof seen.workerScript>, access: Awaited<ReturnType<typeof withUuids>>['access']) => {
+  const prepare = async (
+    script: NonNullable<typeof seen.workerScript>,
+    access: Awaited<ReturnType<typeof withUuids>>['access'],
+    /** Names the conversation came across in earlier turns, by `kind:id`. */
+    names: Record<string, string> = {},
+  ) => {
     closed.mockReset();
-    const context = team();
+    const context = { ...team(), names };
     seen.calls = [];
     seen.workerScript = script;
     seen.workerStep = 0;
@@ -400,6 +405,34 @@ describe('Tuah’s team rejecting an application', () => {
     });
     // The second was answered with the refusal, in the report the specialist's tools gave back.
     expect(seen.refusals).toEqual(['One application change at a time. One is already prepared for approval.']);
+  });
+  it('accepts an application id seen in an earlier turn, without listing it again', async () => {
+    const { access } = await withUuids();
+    // Nothing is looked up this turn: the id is only known from the names kept from an earlier one.
+    const context = await prepare(
+      [{ tool: 'rejectApplication', input: { id: APP_ID, outcome: 'rejected' } }],
+      access,
+      { [`application:${APP_ID}`]: 'Aina Rahman (Barista)' },
+    );
+    expect(seen.refusals).toEqual([]);
+    expect(closed).not.toHaveBeenCalled();
+    expect(context.proposals.size).toBe(1);
+    expect([...context.proposals.values()][0]).toMatchObject({
+      action: 'rejectApplication',
+      input: { id: APP_ID, outcome: 'rejected' },
+      // Named from the earlier turn too.
+      title: 'Reject Aina Rahman (Barista)?',
+    });
+  });
+  it('does not take the same id for an application when the earlier turn knew it as something else', async () => {
+    const { access } = await withUuids();
+    const context = await prepare(
+      [{ tool: 'rejectApplication', input: { id: APP_ID, outcome: 'rejected' } }],
+      access,
+      { [`job:${APP_ID}`]: 'Barista' },
+    );
+    expect(context.proposals.size).toBe(0);
+    expect(seen.refusals[0]).toContain(`You have not looked up ${APP_ID} as an application.`);
   });
   it('refuses a job’s id, even one it listed', async () => {
     const { access } = await withUuids();

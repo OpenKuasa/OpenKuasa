@@ -137,9 +137,13 @@ function expectWord(res: Res, word: string) {
   expect(res.data).toBe(word);
 }
 
-/** A signed-out caller is refused by the database before the function runs: an error, and no answer. */
+/**
+ * A signed-out caller is refused by the database before the function runs: the permission error
+ * (42501, execute is not granted), and no answer. Any other error would be a different failure.
+ */
 function expectRefusedOutright(res: Res, label: string) {
   expect(res.error, `${label}: expected a permission error`).not.toBeNull();
+  expect(res.error?.code, `${label}: ${res.error?.message}`).toBe('42501');
   expect(res.data ?? null, `${label}: no answer`).toBeNull();
 }
 
@@ -275,6 +279,27 @@ testWithSupabase('3. the owner moves an application and the offer and hire dates
   expectWord(await move(owner.c, id, 'interview'), 'same_stage');
   expectWord(await move(owner.c, id, 'bogus'), 'invalid_stage');
   expect(await readRow(owner.c, id)).toEqual(held);
+}, 60_000);
+
+testWithSupabase('3b. a hired application marked withdrawn keeps its hire date, and reopens as hired', async () => {
+  const id = await newApplication();
+  expectWord(await move(owner.c, id, 'hired'), 'ok');
+  const hired = await readRow(owner.c, id);
+  expect(hired.stage).toBe('hired');
+  expect(hired.hired_at).not.toBeNull();
+
+  // The person pulled out after being hired: the hire happened, so its date stays.
+  expectWord(await close(owner.c, id, 'withdrawn'), 'ok');
+  const withdrawn = await readRow(owner.c, id);
+  expect(withdrawn).toMatchObject({ stage: 'hired', outcome: 'withdrawn' });
+  expect(withdrawn.hired_at).toBe(hired.hired_at);
+  expect(withdrawn.offered_at).toBe(hired.offered_at);
+
+  expectWord(await reopen(owner.c, id), 'ok');
+  const reopened = await readRow(owner.c, id);
+  expect(reopened).toMatchObject({ stage: 'hired', outcome: 'active', reject_reason: null });
+  expect(reopened.hired_at).toBe(hired.hired_at);
+  expect(reopened.offered_at).toBe(hired.offered_at);
 }, 60_000);
 
 let closedId: string; // left rejected at the offer stage for case 5
