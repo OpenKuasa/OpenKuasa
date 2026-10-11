@@ -445,7 +445,7 @@ testWithSupabase('7. the service client attaches a file on a job that requires a
   }
 }, 60_000);
 
-testWithSupabase('7b. a member reads that CV with their own client; another workspace and a visitor get missing', async () => {
+testWithSupabase('7b. a member reads that CV with their own client; another workspace gets missing and a visitor is refused', async () => {
   const applicationId = (await applicationsOf((await candidatesByEmail(cvEmail))[0].id))[0].id as string;
   const readAs = (who: SupabaseClient, orgId: string) =>
     createCvReader(who, createSupabaseHireData(who, orgId)).readCv(applicationId);
@@ -457,7 +457,8 @@ testWithSupabase('7b. a member reads that CV with their own client; another work
     expect(own.job).toBe(cvJob.title);
   }
   expect(await readAs(other.c, other.orgId)).toEqual({ state: 'missing' });
-  expect(await readAs(visitor, owner.orgId)).toEqual({ state: 'missing' });
+  // A signed-out visitor may not read the table at all, so the lookup itself is refused: no file either way.
+  expect(await readAs(visitor, owner.orgId)).toEqual({ state: 'failed' });
 }, 60_000);
 
 testWithSupabase('8. the same email and job again with a second path answers ok_duplicate and keeps the first path', async () => {
