@@ -63,6 +63,12 @@ more than one screen: the credit note card on Credit Notes and from an
 invoice's row, the refund card on Refunds and from an invoice's or a credit
 note's row. Where the thing saved shows on another screen than the one the
 person is on, a note at the top says so and links there (`saved-note-card.tsx`).
+The card hands back what it saved, and the note is worded from that
+(`refundSavedNote`, `creditNoteSavedNote`): the amount, the invoice or credit
+note it went against, the customer, and whether a refund was paid out or left
+pending and a credit note issued or kept as a draft. A card opened from a row
+has that row chosen but its picker is not locked, so the note never names the
+row that was clicked.
 
 A server action refreshes the screens after every attempt that reached the
 database, refused or not, so a record someone else changed or removed shows as
@@ -246,11 +252,16 @@ refund while its customer is in credit and pending refunds do not already hold
 all of that credit; it has its e-Invois set, and can be voided; a void invoice
 offers nothing. Each of the three is offered exactly when the form it opens
 would offer the invoice (`receivableInvoices`, `creditableInvoices`,
-`refundTargets`), so a writer's Invoices page also reads the credit notes and
-the refunds. Voiding an invoice that has payments, credit notes or refunds is
-offered and refused with the reason, as on a paid bill. "Credit note" and
-"Refund" open their cards on Invoices with that invoice chosen; what is saved
-shows on Credit Notes or Refunds, and a note at the top links there.
+`refundTargets`, put together by `invoiceCan`), so a writer's Invoices page
+also reads the credit notes and the refunds. If either of those two reads
+fails, the failure is logged and the page still shows, with no row offering
+"Credit note" or "Refund": the lists are not taken as empty, which would offer
+a refund that no pending refund had been counted against. Any other read that
+fails is the page's failure, as before, and a viewer's page reads neither.
+Voiding an invoice that has payments, credit notes or refunds is offered and
+refused with the reason, as on a paid bill. "Credit note" and "Refund" open
+their cards on Invoices with that invoice chosen; what is saved shows on
+Credit Notes or Refunds, and a note at the top links there.
 
 ## Quotations
 
@@ -516,8 +527,9 @@ more than is left of the credit note.". Paying a pending one out
 it was recorded: "This refund can no longer be paid out: its invoice is no
 longer posted, or its credit note is no longer issued. Delete it." and "This
 refund no longer fits in what the customer is in credit, or in what is left of
-its credit note, so it cannot be paid out. Delete it, and record a new one for
-what is left.".
+its credit note, so it cannot be paid out. Delete it. If the customer is still
+in credit, a new refund can be recorded for no more than that.". The second
+does not promise a new refund, because nothing may be left of the credit.
 
 The sentence for `FIN01` on an invoice is "This invoice has been posted or
 voided, so that can no longer be done.". The row menus offer only what a

@@ -167,6 +167,18 @@ describe('refundTargets: what can be refunded, and how much', () => {
     const inv = invoice({ paid: 60, credited: 50, balance: -10 });
     expect(refundable([inv], [note({ amount: 50 })], [])).toEqual({ [invoiceTargetKey(INVOICE)]: 10, [noteTargetKey(NOTE)]: 10 });
   });
+  it('offers what is left of a credit note that was partly paid out, when that is less than the customer’s credit', () => {
+    // RM 80 credited in all and RM 20 already paid out against the RM 50 note: the customer is RM 60 in credit,
+    // and the note has RM 30 left, which is the smaller of the two.
+    const inv = invoice({ credited: 80, refunded: 20, balance: -60 });
+    expect(refundable([inv], [note({ amount: 50, refunded: 20 })], [])).toEqual({
+      [invoiceTargetKey(INVOICE)]: 60,
+      [noteTargetKey(NOTE)]: 30,
+    });
+    expect(refundTargetLabel(refundTargets([inv], [note({ amount: 50, refunded: 20 })], [])[1])).toBe(
+      'CN-0003 on INV-0007 · Aisyah Trading · RM 30.00 can be refunded',
+    );
+  });
   it('leaves out a credit note that is a draft, void, or already refunded in full', () => {
     const inv = invoice({ credited: 80, balance: -50, refunded: 30 });
     const notes = [
@@ -192,6 +204,19 @@ describe('refundTargets: what can be refunded, and how much', () => {
       [],
     );
     expect(targets.map((t) => t.number)).toEqual(['INV-0007', 'CN-0003', 'INV-0002', 'CN-0001']);
+  });
+  it('orders numbers as numbers once they pass four digits: 9999 before 10000, for invoices and for credit notes', () => {
+    const late = invoice({ id: 'late', invoice_no: 'INV-10000', credited: 80, balance: -80 });
+    const early = invoice({ id: 'early', invoice_no: 'INV-9999' });
+    const targets = refundTargets(
+      [late, early],
+      [
+        note({ id: 'n-late', credit_note_no: 'CN-10000', invoice_id: 'late', invoice_no: 'INV-10000' }),
+        note({ id: 'n-early', credit_note_no: 'CN-9999', invoice_id: 'late', invoice_no: 'INV-10000' }),
+      ],
+      [],
+    );
+    expect(targets.map((t) => t.number)).toEqual(['INV-9999', 'INV-10000', 'CN-9999', 'CN-10000']);
   });
   it('names a target in the picker: a credit note with its invoice', () => {
     const [onInvoice, onNote] = refundTargets([invoice({ credited: 1240, balance: -1240 })], [note({ amount: 1240 })], []);

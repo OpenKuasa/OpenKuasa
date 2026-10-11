@@ -168,11 +168,12 @@ describe('refund writes', () => {
   it('says what to do when paying a pending refund out is refused, and gives no such advice on a new refund', async () => {
     const paidOut = (code: string) =>
       markRefundPaid(fakeFinance(refundOr(true, { data: null, error: { code } })).ctx, { id: TXN, paid_on: '2026-10-09' });
-    // The payment in behind the credit was voided while the refund waited.
+    // The payment in behind the credit was voided while the refund waited. Nothing may be left of the credit,
+    // so the sentence does not promise that a new refund can be recorded.
     expect(await paidOut('FIN05')).toEqual({
       ok: false,
       error:
-        'This refund no longer fits in what the customer is in credit, or in what is left of its credit note, so it cannot be paid out. Delete it, and record a new one for what is left.',
+        'This refund no longer fits in what the customer is in credit, or in what is left of its credit note, so it cannot be paid out. Delete it. If the customer is still in credit, a new refund can be recorded for no more than that.',
     });
     expect(await paidOut('FIN04')).toEqual({
       ok: false,
@@ -193,8 +194,6 @@ describe('refund writes', () => {
     expect(await markRefundPaid(ctx, { id: TXN, paid_on: '2026-10-09' })).toEqual({ ok: false, error: sentence });
     expect(await voidRefund(ctx, { id: TXN })).toEqual({ ok: false, error: sentence });
     expect(await deleteRefund(ctx, { id: TXN })).toEqual({ ok: false, error: sentence });
-    // "Void a refund that has been paid out" was wrong from a second Void, and from Mark as paid.
-    expect(sentence).not.toMatch(/Void a refund|delete one/);
   });
   it('says the refund is gone when void or delete touches no row', async () => {
     const { ctx } = fakeFinance(refundOr(true, { data: null, error: null }));

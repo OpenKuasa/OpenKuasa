@@ -84,8 +84,10 @@ export function refundTargets(invoices: InvoiceListRow[], creditNotes: CreditNot
   const pendingOnInvoice = pendingSen(refunds, (r) => r.invoice_id);
   const pendingOnNote = pendingSen(refunds, (r) => r.credit_note_id);
   const targets: RefundTarget[] = [];
+  // By number as a number: INV-9999 comes before INV-10000.
+  const byNumber = (x: string | null, y: string | null) => (x ?? '').localeCompare(y ?? '', undefined, { numeric: true });
   const ordered = [...invoices].sort(
-    (x, y) => x.customer_name.localeCompare(y.customer_name) || (x.invoice_no ?? '').localeCompare(y.invoice_no ?? ''),
+    (x, y) => x.customer_name.localeCompare(y.customer_name) || byNumber(x.invoice_no, y.invoice_no),
   );
   for (const invoice of ordered) {
     const free = sen(inCredit(invoice)) - (pendingOnInvoice.get(invoice.id) ?? 0);
@@ -101,7 +103,7 @@ export function refundTargets(invoices: InvoiceListRow[], creditNotes: CreditNot
     });
     const notes = creditNotes
       .filter((n) => n.invoice_id === invoice.id && n.status === 'issued')
-      .sort((x, y) => (x.credit_note_no ?? '').localeCompare(y.credit_note_no ?? ''));
+      .sort((x, y) => byNumber(x.credit_note_no, y.credit_note_no));
     for (const note of notes) {
       const left = sen(note.amount) - sen(note.refunded) - (pendingOnNote.get(note.id) ?? 0);
       const refundable = Math.min(free, left);

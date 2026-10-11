@@ -142,7 +142,8 @@ export function CreditNoteFormCard({
       <form onSubmit={submit} noValidate className="grid gap-3 md:grid-cols-12">
         <div className="space-y-1.5 md:col-span-6">
           <Label htmlFor={`${id}-invoice`}>Against invoice</Label>
-          <Select value={form.invoiceId} onValueChange={(v) => edit((f) => ({ ...f, invoiceId: v }))}>
+          {/* A draft whose invoice is no longer posted is not in the list: the box shows its placeholder, not a blank. */}
+          <Select value={chosen ? form.invoiceId : ''} onValueChange={(v) => edit((f) => ({ ...f, invoiceId: v }))}>
             <SelectTrigger id={`${id}-invoice`} className="w-full" autoFocus data-finance-focus>
               <SelectValue placeholder="Choose an invoice" />
             </SelectTrigger>

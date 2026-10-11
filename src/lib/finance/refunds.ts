@@ -60,9 +60,10 @@ export const REFUND_MESSAGES = {
   // FIN04, when a pending refund is paid out. Only markRefundPaid answers with it.
   cannotPayOut: 'This refund can no longer be paid out: its invoice is no longer posted, or its credit note is no longer issued. Delete it.',
   // FIN05, when a pending refund is paid out: the credit it was recorded against has gone since, most
-  // often because the payment in behind it was voided. Only markRefundPaid answers with it.
+  // often because the payment in behind it was voided. Only markRefundPaid answers with it. Nothing may be
+  // left of the credit, so it does not say a new refund can be recorded, only when one can.
   creditGone:
-    'This refund no longer fits in what the customer is in credit, or in what is left of its credit note, so it cannot be paid out. Delete it, and record a new one for what is left.',
+    'This refund no longer fits in what the customer is in credit, or in what is left of its credit note, so it cannot be paid out. Delete it. If the customer is still in credit, a new refund can be recorded for no more than that.',
   // FIN06
   notFound: 'The invoice or credit note for this refund no longer exists.',
   // FIN09. A menu offers only what a refund's status allows, so this reaches a person only when the refund

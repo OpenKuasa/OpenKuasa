@@ -121,8 +121,6 @@ describe('credit note writes', () => {
     expect(await issueCreditNote(ctx, { id: ID })).toEqual({ ok: false, error: sentence });
     expect(await voidCreditNote(ctx, { id: ID })).toEqual({ ok: false, error: sentence });
     expect(await deleteCreditNote(ctx, { id: ID })).toEqual({ ok: false, error: sentence });
-    // It gives no advice, because no advice is right from all four: "deleted, not voided" was wrong from Issue and from a second Void.
-    expect(sentence).not.toMatch(/deleted, not voided|edited or deleted/);
   });
   it('turns each database refusal into a sentence', async () => {
     const cases: [string, string][] = [

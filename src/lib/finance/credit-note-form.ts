@@ -61,7 +61,10 @@ export function creditableInvoices(invoices: InvoiceListRow[], keepId?: string):
       creditable: Math.max(round2(i.total - i.credited), 0),
     }))
     .filter((i) => i.creditable > 0 || i.id === keepId)
-    .sort((x, y) => x.customer_name.localeCompare(y.customer_name) || x.invoice_no.localeCompare(y.invoice_no));
+    // By number as a number: INV-9999 comes before INV-10000.
+    .sort(
+      (x, y) => x.customer_name.localeCompare(y.customer_name) || x.invoice_no.localeCompare(y.invoice_no, undefined, { numeric: true }),
+    );
 }
 
 /** How the form's picker lists an invoice: its number, its customer, and what it has left to credit. */

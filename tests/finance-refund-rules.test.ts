@@ -38,9 +38,11 @@ describe('refundActions', () => {
       expect(refundActions(refund(status)), status).toEqual([]);
     }
   });
-  it('has no edit on any refund: a pending one is deleted and recorded again', () => {
+  it('offers nothing but mark as paid, void and delete on any refund: there is no edit, a pending one is deleted and recorded again', () => {
+    const known: string[] = ['markPaid', 'void', 'delete'];
     for (const status of ['scheduled', 'posted', 'void', 'draft', 'pending_approval', 'rejected'] as const) {
-      expect(refundActions(refund(status)) as string[], status).not.toContain('edit');
+      const offered: string[] = refundActions(refund(status));
+      expect(offered.filter((action) => !known.includes(action)), status).toEqual([]);
     }
   });
 });

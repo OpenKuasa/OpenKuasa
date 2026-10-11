@@ -83,6 +83,14 @@ describe('creditableInvoices', () => {
     ]);
     expect(offered.map((i) => i.id)).toEqual(['a1', 'a2', 'z2']);
   });
+  it('orders numbers as numbers once they pass four digits: INV-9999 before INV-10000', () => {
+    const offered = creditableInvoices([
+      invoice({ id: 'late', invoice_no: 'INV-10000' }),
+      invoice({ id: 'early', invoice_no: 'INV-9999' }),
+      invoice({ id: 'first', invoice_no: 'INV-0002' }),
+    ]);
+    expect(offered.map((i) => i.invoice_no)).toEqual(['INV-0002', 'INV-9999', 'INV-10000']);
+  });
   it('names an invoice in the picker with what it has left', () => {
     expect(creditableLabel(creditableInvoices([invoice({ total: 1240, credited: 240 })])[0])).toBe(
       'INV-0007 · Aisyah Trading · RM 1,000.00 left to credit',

@@ -115,6 +115,12 @@ describe('who may write', () => {
       expect(await actions.saveCreditNoteAction({ amount: 'lots' })).toEqual(FORBIDDEN);
       expect(await actions.recordRefundAction(null)).toEqual(FORBIDDEN);
       expect(await actions.markRefundPaidAction({ id: 'nope' })).toEqual(FORBIDDEN);
+      expect(await actions.saveAndIssueCreditNoteAction({ amount: 'lots' })).toEqual(FORBIDDEN);
+      expect(await actions.issueCreditNoteAction({ id: 'nope' })).toEqual(FORBIDDEN);
+      expect(await actions.voidCreditNoteAction(null)).toEqual(FORBIDDEN);
+      expect(await actions.deleteCreditNoteAction({ id: 'nope' })).toEqual(FORBIDDEN);
+      expect(await actions.voidRefundAction({ id: 'nope' })).toEqual(FORBIDDEN);
+      expect(await actions.deleteRefundAction(null)).toEqual(FORBIDDEN);
     }
     expect(ctl.calls).toEqual([]);
     expect(ctl.revalidated).toEqual([]);

@@ -187,8 +187,8 @@ export function CreditNotesView({
             pendingLabel="Voiding…"
             onConfirm={() => confirm.run(() => actions.voidNote(id), close)}
           >
-            Void <span className="font-medium">{note.credit_note_no}</span> of {amount} to {who}? {invoice} owes that
-            amount again. It stays in the list as Void, and this cannot be undone. A credit note cannot be voided
+            Void <span className="font-medium">{note.credit_note_no}</span> of {amount} to {who}? After this, {invoice}{' '}
+            owes that amount again. It stays in the list as Void, and this cannot be undone. A credit note cannot be voided
             while a refund depends on it: void or delete that refund on Refunds first.
           </ConfirmRow>
         );
