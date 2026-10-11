@@ -15,7 +15,8 @@
 // member of a throwaway workspace, so against the OWNER's workspace that viewer is a stranger and the right word
 // is `not_found`. The word `forbidden` is only true for a viewer who is a member of the workspace, so it is
 // tested against the DEMO workspace, where the same viewer is a member without write access. Nothing is written
-// to the demo workspace: the refusals are checked by reading it again.
+// to the demo workspace, and the case does not compare the shared workspace before and after (another run or a
+// reseed changes it): the answer word is the assertion, plus checks that no other row can break.
 //
 // What stays behind. Every candidate and application this file creates cannot be removed by a user, so they go
 // with the throwaway workspaces when the shared live-workspaces helper deletes them (and the anonymous users) at
@@ -293,8 +294,8 @@ testWithSupabase('1. a visitor is refused outright on add and update, and a memb
 testWithSupabase('2. another workspace gets not_found, a demo viewer gets forbidden, and nothing is written', async () => {
   const email = uniqueEmail();
   const ownerBefore = await candidates(owner.c, owner.orgId);
-  const demoBefore = await candidates(viewer, demoId);
-  expect(demoBefore.length, 'the demo workspace should hold seeded candidates').toBeGreaterThan(0);
+  const demoSeeded = await candidates(viewer, demoId);
+  expect(demoSeeded.length, 'the demo workspace should hold seeded candidates').toBeGreaterThan(0);
 
   // The owner of another workspace names this workspace's id: it reads as missing.
   expectWord(await add(other.c, owner.orgId, { name: 'Outsider Added', email }), 'not_found');
@@ -304,13 +305,19 @@ testWithSupabase('2. another workspace gets not_found, a demo viewer gets forbid
   expectWord(await add(viewer, demoId, { name: 'Viewer Added', email }), 'forbidden');
 
   expect(await candidates(owner.c, owner.orgId)).toEqual(ownerBefore);
-  expect(await candidates(viewer, demoId)).toEqual(demoBefore);
+  // Only this run's own unique email is looked for in the shared workspace: no other row can make this fail.
   expect(await candidatesByEmail(viewer, demoId, email)).toHaveLength(0);
 
   // The same three on update, against a seeded demo candidate.
-  const demoTarget = demoBefore[0];
-  expectWord(await update(viewer, demoTarget.id, { phone: '012-000 0000' }), 'forbidden');
-  expect(await readCandidate(viewer, demoTarget.id)).toEqual(demoTarget);
+  // `forbidden` is the real assertion: a viewer is a member without write access, and the function refuses
+  // before it reads the changes. The row is not compared before and after (a reseed could rewrite it mid-test);
+  // instead the viewer sends a value no seed holds and the row must not carry it. A reseed cannot break that.
+  const demoTarget = demoSeeded[0];
+  const sentPhone = `rls-viewer-${RUN}`;
+  expectWord(await update(viewer, demoTarget.id, { phone: sentPhone }), 'forbidden');
+  const after = await viewer.from('hire_candidates').select('id, phone').eq('id', demoTarget.id).maybeSingle();
+  expect(after.error, after.error?.message).toBeNull();
+  expect(after.data?.phone ?? null, 'the viewer\'s phone was not written').not.toBe(sentPhone);
 }, 60_000);
 
 testWithSupabase('3. the owner adds a person with no job and no email: created, no application, added by hand', async () => {
