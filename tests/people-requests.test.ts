@@ -399,6 +399,7 @@ describe('overtime rows for the member', () => {
       [
         { ...base, id: 'a', status: 'pending', day_kind: 'rest_day', hourly_rate_cents: 2500, amount_cents: 15000 },
         { ...base, id: 'b', status: 'pending', day_kind: null, hourly_rate_cents: null, amount_cents: 0 },
+        { ...base, id: 'c', status: 'approved', day_kind: null, hourly_rate_cents: null, amount_cents: 7500 },
       ],
       MEMBER_E,
       TODAY,
@@ -407,6 +408,8 @@ describe('overtime rows for the member', () => {
     const row = (id: string) => model.rows.find((r) => r.id === id)!;
     expect(row('a')).toMatchObject({ dayKind: 'Rest day', amount: 'RM 150.00' });
     expect(row('b')).toMatchObject({ dayKind: '—', amount: 'Not calculated' });
+    // Made before the rate was stored: it has an amount and no rate, so it shows the amount.
+    expect(row('c').amount).toBe('RM 75.00');
   });
 
   it('marks only pending rows cancellable and carries the rejection note', () => {

@@ -8,7 +8,7 @@
 import { rm } from '@/lib/reach/format';
 import { formatDate, formatDay, hoursBetweenTimes, malaysiaDate, monthStart } from './dates';
 import { CLAIM_CATEGORY_LABEL, leaveDaysByTypeInYear, ownRows } from './own';
-import { overtimeModel, type OvertimeModel } from './overtime';
+import { overtimeAmountText, overtimeModel, type OvertimeModel } from './overtime';
 import { leaveLabel } from './overview';
 import { percent, sumBy } from './series';
 import { leaveBalanceRows } from './summaries';
@@ -312,7 +312,7 @@ export function buildOtModel(records: OvertimeRecord[], viewer: PeopleViewer, to
       hours: r.hours,
       rate: `${r.rate_multiplier}x`,
       dayKind: r.day_kind ? DAY_KIND_LABEL[r.day_kind] : '—',
-      amount: r.hourly_rate_cents === null ? 'Not calculated' : rm(r.amount_cents),
+      amount: overtimeAmountText(r),
       status: r.status,
       note: rejectionNote(r.status, r.decision_note),
     })),

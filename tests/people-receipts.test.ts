@@ -188,4 +188,17 @@ describe('removeReceipt', () => {
     expect(svc.remove).not.toHaveBeenCalled();
     expect(log.mock.calls).toEqual([['[people/receipts] a receipt file could not be removed.']]);
   });
+
+  it.each([
+    ['a path climbing out of the folder', `${USER}/../${USER}/44444444-4444-4444-8444-444444444444.pdf`],
+    ['a path with an extra segment', `${USER}/x/44444444-4444-4444-8444-444444444444.pdf`],
+    ['an unknown extension', `${USER}/44444444-4444-4444-8444-444444444444.exe`],
+    ['a name that is not a uuid', `${USER}/secret-file.pdf`],
+    ['a path with no folder', '44444444-4444-4444-8444-444444444444.pdf'],
+  ])('deletes nothing for %s, and logs the same fixed sentence', async (_label, path) => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(removeReceipt(path)).resolves.toBeUndefined();
+    expect(svc.remove).not.toHaveBeenCalled();
+    expect(log.mock.calls).toEqual([['[people/receipts] a receipt file could not be removed.']]);
+  });
 });

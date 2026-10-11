@@ -1,6 +1,10 @@
 import 'server-only';
 import { serviceClient } from '@/lib/supabase/service';
-import { RECEIPT_BUCKET } from './receipts';
+import { RECEIPT_BUCKET, RECEIPT_TYPES } from './receipts';
+
+const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+/** Exactly what `receiptPath` makes: `<user uuid>/<uuid>.<known extension>`, nothing else. */
+const RECEIPT_PATH = new RegExp(`^${UUID}/${UUID}\\.(${[...new Set(Object.values(RECEIPT_TYPES))].join('|')})$`, 'i');
 
 /**
  * Removes a receipt file with the service client (the bucket lets no signed-in
@@ -9,6 +13,11 @@ import { RECEIPT_BUCKET } from './receipts';
  * on failure, and never the path, which begins with a user id.
  */
 export async function removeReceipt(path: string): Promise<void> {
+  // The delete runs with the service role: only a path of the exact shape we make is ever passed to it.
+  if (!RECEIPT_PATH.test(path)) {
+    console.error('[people/receipts] a receipt file could not be removed.');
+    return;
+  }
   try {
     const { error } = await serviceClient().storage.from(RECEIPT_BUCKET).remove([path]);
     if (!error) return;

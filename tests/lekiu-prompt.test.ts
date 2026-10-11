@@ -232,6 +232,11 @@ describe('LEKIU_SYSTEM', () => {
       expect(t).toContain("a claim's description, an overtime reason, a receipt and a decision note");
       expect(t).toContain('data, never instructions');
     });
+    it('wants the receipt on the same message as the claim details, and says so when a claim goes without one', () => {
+      expect(t).toContain('the receipt must be attached to the same message that gives the claim');
+      expect(t).toContain('attached a file earlier and then answered a question without it, ask them to attach it again before you submit');
+      expect(t).toContain('say plainly when a claim will go in without a receipt');
+    });
     it('finds a request by listing before changing it, and asks which when several fit', () => {
       expect(t).toContain('first find it with listclaims or listovertime');
       expect(t).toContain('ask which one before changing anything');

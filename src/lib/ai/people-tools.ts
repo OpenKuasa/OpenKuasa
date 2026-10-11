@@ -48,6 +48,7 @@ import {
   setLeaveEntitlementInput,
 } from '@/lib/people/leave';
 import { listWorkspaceMembers } from '@/lib/people/members';
+import { overtimeCalculated } from '@/lib/people/overtime';
 import {
   approvedThisYear,
   cancelClaim as capCancelClaim,
@@ -122,8 +123,8 @@ export type ReceiptFile = { bytes: Buffer; mediaType: string };
  * `self` (a workspace member linked to an employee record, outside the demo) holds
  * the leave, time-off, claim and overtime tools for that one employee only. No write access, no `write`.
  * `employeeId` is the caller's own employee record, from the viewer and never from the model.
- * `receipt` is the file attached to the newest question, found by the route and never supplied by the
- * model; `userId` is the signed-in user, whose own receipts folder it is uploaded into.
+ * `receipt` is the file on the user message just before the message that proposed the claim (see
+ * `receiptFromMessages`), found by the route and never supplied by the model; `userId` is the signed-in user, whose own receipts folder it is uploaded into.
  */
 export type PeopleWrite = {
   ctx: PeopleWriteContext;
@@ -639,7 +640,7 @@ export function createPeopleTools(
               // Pay: gated here on who the viewer is, not left to row security. An owner or admin sees every row's
               // figures; anyone else sees them on their own record only. Elsewhere the keys are absent.
               const mayPay = viewer.isHr || (viewer.employeeId !== null && viewer.employeeId === o.employee_id);
-              const calculated = o.hourly_rate_cents !== null;
+              const calculated = overtimeCalculated(o);
               return {
                 ...(mayAct(o.employee_id) ? { id: o.id } : {}),
                 employee: o.employee_name,
@@ -651,7 +652,7 @@ export function createPeopleTools(
                   ? {
                       amount: calculated ? rm(o.amount_cents) : null,
                       amount_calculated: calculated,
-                      ...(calculated ? { hourly_rate: rm(o.hourly_rate_cents as number) } : {}),
+                      ...(o.hourly_rate_cents !== null ? { hourly_rate: rm(o.hourly_rate_cents) } : {}),
                     }
                   : {}),
                 reason: o.reason,
@@ -1099,10 +1100,10 @@ export function createPeopleTools(
   };
 
   /** What the model is told about an overtime figure: Ringgit, and whether it could be worked out. */
-  const overtimeFigures = (amountCents: number, rateCents: number | null) => ({
-    amount_calculated: rateCents !== null,
-    amount: rateCents !== null ? rm(amountCents) : null,
-  });
+  const overtimeFigures = (amountCents: number, rateCents: number | null) => {
+    const calculated = overtimeCalculated({ hourly_rate_cents: rateCents, amount_cents: amountCents });
+    return { amount_calculated: calculated, amount: calculated ? rm(amountCents) : null };
+  };
 
   /** A rejected record, or one with no rate, has no amount: say so rather than RM 0.00. */
   const decidedFigures = (status: string, amountCents: number) =>
@@ -1130,7 +1131,7 @@ export function createPeopleTools(
             description: given.description,
           };
           let receiptPath: string | null = null;
-          let note = 'No photo or PDF came with the question, so the claim was submitted without a receipt.';
+          let note = 'No file was attached to the message this claim was made from, so the claim was saved without a receipt.';
           if (receipt) {
             const problem = receiptProblem({ type: receipt.mediaType, size: receipt.bytes.byteLength });
             if (problem) {

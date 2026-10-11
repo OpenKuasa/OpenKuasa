@@ -274,9 +274,9 @@ describe('the receipt comes from the question, never from the model', () => {
     );
   });
 
-  it('says no photo came, and not that an unusable file was missing, when there is none', async () => {
+  it('says no file was attached to the message, and not that an unusable file was missing, when there is none', async () => {
     const none = await call('submitClaim', CLAIM, MEMBER_VIEWER, self(ME, null));
-    expect(none.data.receipt_note).toMatch(/No photo or PDF came/);
+    expect(none.data.receipt_note).toMatch(/No file was attached to the message this claim was made from/);
   });
 
   it('submits without a receipt, and says why, for a file that is not a receipt type or is too big', async () => {
@@ -427,6 +427,7 @@ describe('lookups carry what a change needs, and no one else’s pay', () => {
       ot('o-me', ME),
       ot('o-other', OTHER),
       ot('o-unset', OTHER, { hourly_rate_cents: null, amount_cents: 0, day_kind: null }),
+      ot('o-legacy', OTHER, { hourly_rate_cents: null, amount_cents: 7500, day_kind: null }),
     ],
   };
   const lookup = (name: string, viewer: PeopleViewer, write?: Write, input: Record<string, unknown> = {}): Promise<Loose> =>
@@ -469,6 +470,13 @@ describe('lookups carry what a change needs, and no one else’s pay', () => {
     for (const result of [await lookup('listOvertime', MEMBER_VIEWER), await lookup('listOvertime', DEMO_VIEWER, self())]) {
       for (const o of result.overtime) expect(o).not.toHaveProperty('id');
     }
+  });
+
+  it('keep the amount of a record made before the rate was stored, and say not calculated only when there is none', async () => {
+    const { overtime } = await lookup('listOvertime', HR_VIEWER, hr());
+    expect(overtime.find((o: Loose) => o.id === 'o-legacy')).toMatchObject({ amount: 'RM 75.00', amount_calculated: true });
+    expect(overtime.find((o: Loose) => o.id === 'o-legacy')).not.toHaveProperty('hourly_rate');
+    expect(overtime.find((o: Loose) => o.id === 'o-unset')).toMatchObject({ amount: null, amount_calculated: false });
   });
 
   it('give the hourly rate to an owner or admin', async () => {

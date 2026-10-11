@@ -348,6 +348,17 @@ describe('claim rows', () => {
     expect(model.rows.find((r) => r.id === 'a')!.claim!.year_total).toBe('RM 25.00');
   });
 
+  it("labels the total with the claim's own year, and shows it only on pending and approved rows", async () => {
+    const model = await build();
+    const detail = (id: string) => model.rows.find((r) => r.id === id)!.claim!;
+    expect(detail('n').year).toBe(2026);
+    expect(detail('a').year).toBe(2026);
+    // The 2025 claim is paid: no total, and its year is its own.
+    expect(detail('y').year).toBe(2025);
+    for (const id of ['p', 'x', 'y']) expect(detail(id).year_total, id).toBeNull();
+    for (const id of ['n', 'a', 'o']) expect(detail(id).year_total, id).not.toBeNull();
+  });
+
   it('knows the receipt, which rows can be marked paid, and the paid date and reference', async () => {
     const model = await build();
     const row = (id: string) => model.rows.find((r) => r.id === id)!;
@@ -376,6 +387,7 @@ describe('overtime rows', () => {
           overtime({ id: 'a', day_kind: 'rest_day', rate_multiplier: 2 }),
           overtime({ id: 'b', day_kind: 'weekday', hourly_rate_cents: null, amount_cents: 0, decision_note: 'Too late' }),
           overtime({ id: 'c', day_kind: null }),
+          overtime({ id: 'd', hourly_rate_cents: null, amount_cents: 7500 }),
         ],
       }),
       HR,
@@ -388,6 +400,9 @@ describe('overtime rows', () => {
     expect(row('b').cells[2]).toBe('Not calculated');
     expect(row('b').notes).toEqual(['Note: Too late']);
     expect(row('c').overtime!.kind).toBe('Paid at 1.5 times');
+    // Made before the rate was stored: the amount is real, so it is shown.
+    expect(row('d').cells[2]).toBe('RM 75.00');
+    expect(row('d').overtime!.calculated).toBe(true);
     expect(model.unpaid).toBeNull();
   });
 });

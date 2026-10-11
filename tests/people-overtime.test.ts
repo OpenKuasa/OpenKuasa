@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { overtimeModel } from '@/lib/people/overtime';
+import { overtimeAmountText, overtimeCalculated, overtimeModel } from '@/lib/people/overtime';
 import { createSeedPeopleData } from '@/lib/people/seed';
 import type { OvertimeRecord } from '@/lib/people/types';
 
@@ -77,5 +77,19 @@ describe('overtimeModel on other rows', () => {
     const model = overtimeModel([record({ status: 'pending', work_date: '2026-08-14', hours: 3 })], [], TODAY);
     expect(model.month).toMatchObject({ hours: 0, pending_hours: 3, pending_count: 1 });
     expect(model.by_month.find((b) => b.label === 'Aug')!.value).toBe(3);
+  });
+});
+
+describe('overtimeCalculated', () => {
+  it('is false only when there is no rate and no amount', () => {
+    expect(overtimeCalculated({ hourly_rate_cents: null, amount_cents: 0 })).toBe(false);
+    expect(overtimeCalculated({ hourly_rate_cents: null, amount_cents: 7500 })).toBe(true);
+    expect(overtimeCalculated({ hourly_rate_cents: 2500, amount_cents: 7500 })).toBe(true);
+    expect(overtimeCalculated({ hourly_rate_cents: 0, amount_cents: 0 })).toBe(true);
+  });
+
+  it('words the amount: a row made before the rate was stored keeps its amount', () => {
+    expect(overtimeAmountText(record({ hourly_rate_cents: null, amount_cents: 7500 }))).toBe('RM 75.00');
+    expect(overtimeAmountText(record({ hourly_rate_cents: null, amount_cents: 0 }))).toBe('Not calculated');
   });
 });

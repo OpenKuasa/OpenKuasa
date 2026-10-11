@@ -165,9 +165,12 @@ describe('Lekiu’s claim and overtime changes require approval', () => {
     reset('submitClaim', { ...CLAIM, employee_id: OTHER, receipt_path: 'someone-else/receipt.png' });
     const result = resume(asMember, true);
     await result.consumeStream();
-    // A member's schema has no employee or path field, so a history carrying either is not a valid call for it:
-    // the SDK refuses it and the write path is never reached, so nothing can be filed for another employee or
-    // under another person's path. (The valid-input case above is the one that runs, once, for the member's own id.)
+    // Two different paths. When the model makes a call, the member's schema strips an employee or path field before
+    // the tool runs (tests/people-pay-tools.test.ts). Here the history comes from the client and the person has
+    // already approved it: the SDK re-validates the approved input and refuses it when the schema's output differs
+    // from it ("Approved tool input does not match the validated schema output"), so the stripped call is not run
+    // either. Either way nothing is filed for another employee or under another person's path. (The valid-input
+    // case above is the one that runs, once, for the member's own id.)
     expect(ran('submitClaim')).toBe(0);
     expect(executed.last).toBeNull();
     expect(executed.uploads).toBe(0);

@@ -59,8 +59,10 @@ export async function POST(request: Request) {
   // Nothing is revalidated here, as in the other chat routes: every /people page is rendered per request,
   // and only a server action can refresh the page the person is already looking at.
   let write: PeopleWrite | undefined;
-  // A receipt is the file on the newest question, found here from the request itself and never from the model.
-  // An approval is answered in a later request, whose newest user message is still the question that carried the file.
+  // A receipt is the file on the user message just before the message that proposed the claim (the first request:
+  // the newest user message), found here from the request itself and never from the model. An approval is answered
+  // in a later request, but the claim's proposal is still in the history, so it still takes the file that
+  // message carried and never a newer message's.
   const receipt = receiptFromMessages(chat.uiMessages);
   // The demo workspace is read-only: the database refuses every change there, so no change tool is offered.
   if (!org || viewer.isDemo) {

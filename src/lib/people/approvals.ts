@@ -9,7 +9,7 @@ import { rm } from '@/lib/reach/format';
 import { formatDate, formatDay, hoursBetweenTimes, malaysiaDate, monthStart, todayInMalaysia } from './dates';
 import { CLAIM_CATEGORY_LABEL, REQUEST_STATUS_LABEL, isTeamView } from './own';
 import { overBalanceBy } from './leave';
-import { overtimeModel } from './overtime';
+import { overtimeAmountText, overtimeCalculated, overtimeModel } from './overtime';
 import { leaveLabel } from './overview';
 import { approvedThisYear } from './pay-requests';
 import { bucketByWeek, sumBy } from './series';
@@ -45,8 +45,13 @@ export type ClaimDetail = {
   ticked: boolean;
   /** The claim's own date, which a paid date cannot precede. */
   claim_date: string;
-  /** Approved or paid in this category in the claim's year, not counting this claim, already formatted. */
-  year_total: string;
+  /** The calendar year of the claim's own date, which the total below counts. */
+  year: number;
+  /**
+   * Approved or paid in this category in `year`, not counting this claim, already formatted. Null on a claim
+   * that is no longer being weighed (paid, rejected, cancelled).
+   */
+  year_total: string | null;
   /** An approved claim can be marked paid. */
   markable: boolean;
   /** Set once paid. */
@@ -266,7 +271,8 @@ function claimDetail(claim: Claim, claims: Claim[]): ClaimDetail {
     ticked: claim.has_receipt,
     claim_date: claim.claim_date,
     // The one formula, shared with Lekiu's lookups.
-    year_total: rm(approvedThisYear(claim, claims)),
+    year: Number(claim.claim_date.slice(0, 4)),
+    year_total: claim.status === 'pending' || claim.status === 'approved' ? rm(approvedThisYear(claim, claims)) : null,
     markable: claim.status === 'approved',
     paid_on: claim.status === 'paid' ? claim.paid_on : null,
     paid_on_text: claim.status === 'paid' && claim.paid_on ? formatDate(claim.paid_on) : null,
@@ -331,12 +337,12 @@ export async function overtimeApprovals(data: PeopleData, viewer: PeopleViewer, 
     trend: r.hours,
     group: '',
     // No salary on file: the database stored no rate, so there is no amount to show.
-    cells: [formatDate(r.work_date), hoursText(r.hours), r.hourly_rate_cents === null ? 'Not calculated' : rm(r.amount_cents)],
+    cells: [formatDate(r.work_date), hoursText(r.hours), overtimeAmountText(r)],
     overtime: {
       kind: r.day_kind
         ? `${OVERTIME_KIND[r.day_kind]}, paid at ${multiplierText(r.rate_multiplier)}`
         : `Paid at ${multiplierText(r.rate_multiplier)}`,
-      calculated: r.hourly_rate_cents !== null,
+      calculated: overtimeCalculated(r),
     },
     notes: requestNotes(r.decision_note, null),
   }));

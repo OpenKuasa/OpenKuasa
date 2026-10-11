@@ -55,7 +55,11 @@ function RowDetails({ row }: { row: ApprovalRow }) {
           <div>
             <ReceiptLink claimId={row.id} hasFile={row.claim.has_file} ticked={row.claim.ticked} />
           </div>
-          <div>{row.claim.year_total} approved or paid this year in this category</div>
+          {row.claim.year_total ? (
+            <div>
+              {row.claim.year_total} approved or paid in {row.claim.year} in this category
+            </div>
+          ) : null}
           {row.claim.paid_on_text ? <div>Paid {row.claim.paid_on_text}</div> : null}
         </>
       ) : null}
