@@ -350,6 +350,29 @@ export function isPendingRefund(row: RefundRow): boolean {
   return row.status === 'scheduled' || row.status === 'draft' || row.status === 'pending_approval';
 }
 
+export type RefundAction = 'markPaid' | 'delete' | 'void';
+
+/**
+ * What a refund's row menu offers, in order: only what the database allows
+ * for its status. A pending refund (`scheduled`) is marked as paid or
+ * deleted, never voided. One that was paid out is locked and can only be
+ * voided. There is no edit: a pending refund is deleted and recorded again,
+ * as a scheduled payment to a supplier is. A void refund offers nothing, and
+ * neither does one in a state the app never makes (`draft`,
+ * `pending_approval`, `rejected`): the database marks only a scheduled
+ * payment as paid.
+ */
+export function refundActions(row: RefundRow): RefundAction[] {
+  if (row.status === 'scheduled') return ['markPaid', 'delete'];
+  if (row.status === 'posted') return ['void'];
+  return [];
+}
+
+/** How a question or a menu names one refund: its voucher number, or "the pending refund", and its customer. */
+export function refundName(row: RefundRow): string {
+  return `${row.number ?? 'the pending refund'} to ${row.customer_name}`;
+}
+
 /**
  * `invoices` is every invoice of the workspace: the "In credit" card adds up
  * what customers are in credit across them, pending refunds included, since a
