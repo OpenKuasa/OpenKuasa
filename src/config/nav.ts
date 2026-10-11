@@ -50,12 +50,17 @@ import {
 import type { OrgRole } from '@/lib/auth/current-org';
 import { type Capability, canSee } from '@/lib/auth/permissions';
 
+/** A live count pill on a nav item, resolved client-side from the nav-badges context. */
+export type NavBadgeKey = 'pendingProposals';
+
 export type NavItem = {
   label: string;
   slug: string;
   icon: LucideIcon;
   /** Shown only to someone with this capability. Left out: shown to everyone. */
   needs?: Capability;
+  /** Shows a live count pill from the nav-badges context (e.g. pending agent proposals). */
+  badge?: NavBadgeKey;
 };
 export type NavSection = { label: string; items: NavItem[] };
 
@@ -88,7 +93,7 @@ export const PRODUCTS: Product[] = [
         label: 'Overview',
         items: [
           { label: 'Overview', slug: 'assistant', icon: LayoutDashboard },
-          { label: 'AI Agents', slug: 'agents', icon: Bot },
+          { label: 'AI Agents', slug: 'agents', icon: Bot, badge: 'pendingProposals' },
         ],
       },
       {

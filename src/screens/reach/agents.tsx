@@ -8,7 +8,7 @@ import { getViewer } from '@/lib/auth/viewer';
 import { can } from '@/lib/auth/permissions';
 import { listAgentConfigs } from '@/lib/agents/config';
 import { listSchedules } from '@/lib/reach/schedule-capabilities';
-import { listPendingProposals } from '@/lib/agents/proposals';
+import { listPendingProposals, listRecentlyDecided } from '@/lib/agents/proposals';
 import {
   WEEKLY_STUDIO,
   type AgentConfig,
@@ -52,15 +52,17 @@ export default async function AgentsScreen() {
   let spentTodayCents = 0;
   let spentWeekCents = 0;
   let proposals: AgentProposal[] = [];
+  let decided: AgentProposal[] = [];
 
   if (!viewer.isDemo && viewer.orgId) {
     const supabase = await createClient();
     const sumCost = (rows: { cost_cents: number | null }[] | null) =>
       (rows ?? []).reduce((n, r) => n + (r.cost_cents ?? 0), 0);
-    const [configs, scheduleRows, proposalRows, dayRes, weekRes, runsRes] = await Promise.all([
+    const [configs, scheduleRows, proposalRows, decidedRows, dayRes, weekRes, runsRes] = await Promise.all([
       listAgentConfigs(supabase, viewer.orgId),
       listSchedules(supabase, viewer.orgId),
       listPendingProposals(supabase, viewer.orgId),
+      listRecentlyDecided(supabase, viewer.orgId),
       // Same basis as the runner's ceiling: only runs that actually cost something.
       supabase
         .from('agent_runs')
@@ -84,6 +86,7 @@ export default async function AgentsScreen() {
     config = configs.find((c) => c.agent_key === WEEKLY_STUDIO) ?? config;
     schedules = scheduleRows;
     proposals = proposalRows;
+    decided = decidedRows;
     spentTodayCents = sumCost(dayRes.data);
     spentWeekCents = sumCost(weekRes.data);
     runs = (runsRes.data ?? []) as AgentRun[];
@@ -132,6 +135,7 @@ export default async function AgentsScreen() {
             canEdit={canEdit}
             schedules={schedules}
             proposals={proposals}
+            decided={decided}
             dailyCapCents={config.daily_cap_cents}
             weeklyCapCents={config.weekly_cap_cents}
             spentTodayCents={spentTodayCents}

@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { Settings, LogOut, PanelLeftClose } from 'lucide-react';
 import { type Product, firstItem, visibleSections } from '@/config/nav';
 import { useViewer } from '@/components/app/viewer-context';
+import { useNavBadges } from '@/components/app/nav-badges-context';
 import { useIconHover } from '@animateicons/react';
 import { AnimatedIcon } from '@/components/ui/animated-icon';
 import { SignOutButton } from '@/components/auth/sign-out-button';
@@ -16,11 +17,13 @@ function NavItemLink({
   active,
   name,
   label,
+  badgeCount = 0,
 }: {
   href: string;
   active: boolean;
   name?: string;
   label: string;
+  badgeCount?: number;
 }) {
   const { ref, triggerProps } = useIconHover();
   return (
@@ -35,6 +38,14 @@ function NavItemLink({
     >
       <AnimatedIcon ref={ref} name={name} size={16} className="shrink-0" />
       <span className="truncate">{label}</span>
+      {badgeCount > 0 && (
+        <span
+          className="ml-auto inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1.5 py-0.5 text-[11px] font-semibold leading-none text-primary-foreground tabular-nums"
+          aria-label={`${badgeCount} waiting`}
+        >
+          {badgeCount > 99 ? '99+' : badgeCount}
+        </span>
+      )}
     </Link>
   );
 }
@@ -48,6 +59,7 @@ export function SecondaryNav({
 }) {
   const pathname = usePathname();
   const viewer = useViewer();
+  const badges = useNavBadges();
   const activeSlug = pathname.split('/')[2] ?? firstItem(product)?.slug;
 
   return (
@@ -77,6 +89,7 @@ export function SecondaryNav({
                       active={active}
                       name={(Icon as unknown as { displayName?: string }).displayName}
                       label={item.label}
+                      badgeCount={item.badge ? badges[item.badge] : 0}
                     />
                   </li>
                 );

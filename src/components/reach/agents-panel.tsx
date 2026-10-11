@@ -22,6 +22,7 @@ import {
   type ScheduleStatus,
 } from '@/lib/agents/types';
 import { PendingApprovals } from '@/components/reach/pending-approvals';
+import { RecentlyDecided } from '@/components/reach/recently-decided';
 import {
   cancelScheduleAction,
   createScheduleAction,
@@ -583,6 +584,7 @@ export function AgentsPanel({
   canEdit,
   schedules,
   proposals,
+  decided,
   dailyCapCents,
   weeklyCapCents,
   spentTodayCents,
@@ -596,6 +598,7 @@ export function AgentsPanel({
   canEdit: boolean;
   schedules: AgentSchedule[];
   proposals: AgentProposal[];
+  decided: AgentProposal[];
   dailyCapCents: number;
   weeklyCapCents: number;
   spentTodayCents: number;
@@ -707,6 +710,8 @@ export function AgentsPanel({
       )}
 
       <PendingApprovals proposals={proposals} canEdit={canEdit} />
+
+      <RecentlyDecided decided={decided} />
 
       <div className="space-y-2">
         <h3 className="text-sm font-medium">Run history</h3>
