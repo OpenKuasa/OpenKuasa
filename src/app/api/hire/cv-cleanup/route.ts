@@ -8,7 +8,8 @@ export const dynamic = 'force-dynamic';
 
 /**
  * Removes stored CV files of deleted applications (operator cron).
- * Authed by the service-role key header.
+ * Authed by `Authorization: Bearer <CRON_SECRET>` (see `isTriggerAuthorized`).
+ * Reads nothing else from the request.
  */
 export async function POST(req: Request) {
   if (!isTriggerAuthorized(req)) {
