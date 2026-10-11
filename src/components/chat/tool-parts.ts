@@ -160,6 +160,8 @@ export type ToolStep = {
   denied: boolean;
   /** Why the server refused the change itself. Absent when the user said no. */
   reason?: string;
+  /** The user approved it and the server's last check then stopped it. Nothing ran. */
+  afterApproval?: true;
   output: unknown;
 };
 
@@ -173,9 +175,12 @@ export function toToolStep(part: AnyPart, messageId: string, index: number): Too
   const key =
     ('toolCallId' in part ? (part.toolCallId as string) : undefined) ?? `${messageId}-${index}`;
   // A refusal of the server's own carries its reason; the chat's Reject button sends none.
-  const said = denied ? (part as { approval?: { reason?: unknown } }).approval?.reason : undefined;
-  const reason = typeof said === 'string' && said.trim() ? said : undefined;
-  return { key, name, running, denied, ...(reason && { reason }), output };
+  const approval = denied ? (part as { approval?: { approved?: unknown; reason?: unknown } }).approval : undefined;
+  const reason = typeof approval?.reason === 'string' && approval.reason.trim() ? approval.reason : undefined;
+  // Denied although the part says approved: the server checks an approved change once more before running it, and
+  // tells the browser only that it was denied. The user's yes stays on the part; the server's reason goes to the model.
+  const afterApproval = approval?.approved === true;
+  return { key, name, running, denied, ...(reason && { reason }), ...(afterApproval && { afterApproval }), output };
 }
 
 /**

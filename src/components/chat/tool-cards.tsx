@@ -45,7 +45,15 @@ export function ToolStepCard({
         <span className="font-medium">{label}</span>
         {about ? <span className="min-w-0 truncate">{about}</span> : null}
         <span className="min-w-0 flex-1 truncate text-muted-foreground">
-          {step.running ? 'Working…' : step.reason ? 'Not shown for approval' : step.denied ? 'Not approved' : 'Done'}
+          {step.running
+            ? 'Working…'
+            : step.afterApproval
+              ? 'Not done'
+              : step.reason
+                ? 'Not shown for approval'
+                : step.denied
+                  ? 'Not approved'
+                  : 'Done'}
         </span>
         {step.running ? (
           <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />
@@ -61,7 +69,11 @@ export function ToolStepCard({
           <Check className="size-4 shrink-0 text-muted-foreground" aria-hidden />
         )}
       </button>
-      {step.reason ? (
+      {step.afterApproval ? (
+        <p className="border-t px-3 py-2 leading-relaxed text-muted-foreground">
+          This was approved, but a last check stopped it. Nothing was changed.
+        </p>
+      ) : step.reason ? (
         <p className="border-t px-3 py-2 leading-relaxed text-muted-foreground">{step.reason}</p>
       ) : null}
       {canExpand && open ? (

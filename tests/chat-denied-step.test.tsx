@@ -78,3 +78,22 @@ describe('a card for a deletion when two people share the name', () => {
     expect(html).not.toContain('More than one');
   });
 });
+
+// When the user approves and the server's last check then stops the change, the browser is told only that the
+// call was denied (the SDK sends `tool-output-denied` and nothing else): the part still says `approved: true`.
+describe('a change the user approved that a last check stopped', () => {
+  const stopped = part({ id: 'r1', approved: true });
+  it('is told apart from a rejection and from a change that was never shown', () => {
+    expect(toToolStep(stopped, 'm', 0)).toMatchObject({ denied: true, afterApproval: true });
+    expect(toToolStep(part({ id: 'r1', approved: false }), 'm', 0)).not.toHaveProperty('afterApproval');
+    expect(toToolStep(part({ id: 'r1', approved: false, reason: REASON, isAutomatic: true }), 'm', 0)).not.toHaveProperty('afterApproval');
+    expect(toToolStep(part({ id: 'r1', approved: true }, 'output-available'), 'm', 0)).not.toHaveProperty('afterApproval');
+  });
+  it('reads "Not done" with a line that says the approval was theirs and nothing changed', () => {
+    const html = renderToStaticMarkup(<ToolStepCard step={toToolStep(stopped, 'm', 0)!} />);
+    expect(html).toContain('Not done');
+    expect(html).toContain('This was approved, but a last check stopped it. Nothing was changed.');
+    expect(html).not.toContain('Not approved');
+    expect(html).not.toContain('Not shown for approval');
+  });
+});
