@@ -75,6 +75,7 @@ export function delegationForModel(output: Delegation): string {
 
 /** The four application changes: the id must have been seen as an application, not just anywhere. */
 const APPLICATION_CHANGES = new Set(['moveApplication', 'rejectApplication', 'reopenApplication', 'rateApplication']);
+const ONE_APPLICATION_CHANGE = 'One application change at a time. One is already prepared for approval.';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -119,6 +120,11 @@ function specialistTools(
         'Calling this only PREPARES the change: the user is shown an Approve card and nothing is saved until they approve.',
       inputSchema: change.inputSchema as z.ZodType,
       execute: async (input: unknown) => {
+        // A specialist stops after the step in which it prepared a change, but one step can hold
+        // several calls. Each card is a decision about one person: only the first is prepared.
+        if (APPLICATION_CHANGES.has(name) && prepared.length > 0) {
+          return { prepared: false, error: ONE_APPLICATION_CHANGE };
+        }
         // An id must have come from somewhere: a lookup just now, an earlier
         // turn, or the task. One that appears nowhere was made up, and a
         // change prepared with it would fail after the user approved it.

@@ -349,7 +349,7 @@ describe('hire change tools', () => {
     expect(t.moveApplication.description).toBe('Move ONE application to another stage: forward to any later stage, or back by one. Use the application\'s id from listApplications. Only an active application can be moved.');
     expect(t.rejectApplication.description).toBe('Reject ONE application, or mark it withdrawn when the candidate pulled out. A reason from the list is optional. Use the application\'s id from listApplications.');
     expect(t.reopenApplication.description).toBe('Reopen ONE rejected or withdrawn application at the stage it was in.');
-    expect(t.rateApplication.description).toBe('Set ONE application\'s rating from 1 to 5, or clear it with null.');
+    expect(t.rateApplication.description).toBe('Set ONE application\'s rating from 1 to 5, or clear it with null. When the rating is your own reading (for example from a CV), put the grounds in basis.');
   });
   it('runs each application change through its capability with the input unchanged', async () => {
     const t = createHireTools(data, NOW, { ctx, canWrite: true }) as Record<

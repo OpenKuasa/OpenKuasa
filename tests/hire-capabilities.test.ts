@@ -545,6 +545,19 @@ describe('application change schemas', () => {
       for (const field of Object.values(schema.shape)) expect((field as z.ZodType).description).toBeTruthy();
     }
   });
+  it('take the grounds for a rating as an optional basis of at most 500 characters', () => {
+    expect(rateApplicationInput.safeParse({ id: ID, rating: 3 }).success).toBe(true);
+    const parsed = rateApplicationInput.safeParse({ id: ID, rating: 3, basis: '  Six years in B2B sales.  ' });
+    expect(parsed.success && parsed.data.basis).toBe('Six years in B2B sales.');
+    expect(rateApplicationInput.safeParse({ id: ID, rating: 3, basis: 'x'.repeat(500) }).success).toBe(true);
+    expect(rateApplicationInput.safeParse({ id: ID, rating: 3, basis: 'x'.repeat(501) }).success).toBe(false);
+    expect(rateApplicationInput.safeParse({ id: ID, rating: 3, basis: 7 }).success).toBe(false);
+    expect(rateApplicationInput.shape.basis.description).toBe(
+      'One or two sentences giving the grounds for this rating, in plain words, taken from the CV or from what the user said. Shown on the Approve card. Not stored.',
+    );
+    // Still a plain schema: it must convert, or it cannot be a tool's input.
+    expect(() => z.toJSONSchema(rateApplicationInput)).not.toThrow();
+  });
 });
 
 const ROW = {
@@ -591,6 +604,16 @@ describe('application change capabilities', () => {
     await rateApplication(d.ctx, { id: ID, rating: null });
     expect(d.calls).toEqual([{ fn: 'hire_rate_application', args: { p_application_id: ID, p_rating: null } }]);
     for (const x of [a, b, c, d]) expect(JSON.stringify(x.calls)).not.toContain('org_id');
+  });
+  it('accept a basis with a rating and send none of it to the database', async () => {
+    const f = rpcFake();
+    const result = await rateApplication(f.ctx, { id: ID, rating: 3, basis: 'Six years in B2B sales.' });
+    expect(result.ok).toBe(true);
+    expect(f.calls).toEqual([{ fn: 'hire_rate_application', args: { p_application_id: ID, p_rating: 3 } }]);
+    expect(f.calls[0].args).not.toHaveProperty('basis');
+    expect(JSON.stringify(f.calls)).not.toContain('Six years');
+    // Not stored, so not in what comes back either.
+    expect(JSON.stringify(result)).not.toContain('Six years');
   });
   it('do not call the database for invalid input', async () => {
     const f = rpcFake();
@@ -651,6 +674,7 @@ describe('application change capabilities', () => {
     const closed = await closeApplication(rpcFake({ row: null }).ctx, { id: ID, outcome: 'withdrawn' });
     expect(closed).toEqual({ ok: true, data: {
       id: ID, candidate: '', job: '', stage: null, outcome: 'withdrawn', rating: null, reject_reason: null, confirmed: false,
+      note: 'Saved. The application could not be read back, so some details are not shown.',
     } });
     const moved = await moveApplication(rpcFake({ row: null }).ctx, { id: ID, stage: 'offer' });
     expect(moved).toMatchObject({ ok: true, data: { stage: 'offer', outcome: 'active', confirmed: false } });
@@ -658,10 +682,19 @@ describe('application change capabilities', () => {
     expect(rated).toMatchObject({ ok: true, data: { stage: null, outcome: null, rating: 3, confirmed: false } });
     const reopened = await reopenApplication(rpcFake({ row: null }).ctx, { id: ID });
     expect(reopened).toMatchObject({ ok: true, data: { stage: null, outcome: 'active', reject_reason: null, confirmed: false } });
+    for (const result of [moved, rated, reopened]) {
+      expect(result).toMatchObject({ ok: true, data: { note: 'Saved. The application could not be read back, so some details are not shown.' } });
+    }
   });
 
   it('marks a read-back row as confirmed', async () => {
     const f = rpcFake({ row: { id: ID, stage: 'offer', outcome: 'active', rating: 4, reject_reason: null, candidate: { name: 'Aina' }, job: { title: 'Barista' } } });
     expect(await rateApplication(f.ctx, { id: ID, rating: 4 })).toMatchObject({ ok: true, data: { stage: 'offer', confirmed: true } });
+  });
+
+  it('gives a confirmed row no note', async () => {
+    const result = await moveApplication(rpcFake().ctx, { id: ID, stage: 'offer' });
+    expect(result.ok && result.data.confirmed).toBe(true);
+    expect(result.ok && result.data).not.toHaveProperty('note');
   });
 });

@@ -689,6 +689,11 @@ export function approvalDetail(toolName: string, input?: unknown, receipt?: Rece
     const reason = typeof i.reason === 'string' && Object.hasOwn(REASON_LABEL, i.reason) ? REASON_LABEL[i.reason as keyof typeof REASON_LABEL] : null;
     return reason ? `Reason: ${reason}` : null;
   }
+  if (toolName === 'rateApplication') {
+    // The grounds the assistant gave for its own reading, as one paragraph: nobody approves a rating of a person blind.
+    const basis = typeof i.basis === 'string' ? i.basis.replace(/\s+/g, ' ').trim() : '';
+    return basis ? `Why: ${basis}` : null;
+  }
   if (toolName === 'deleteContact') return 'Their deals are deleted too. This cannot be undone.';
   if (
     toolName === 'deleteCampaign' ||

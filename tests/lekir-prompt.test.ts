@@ -230,7 +230,7 @@ describe('changing an application', () => {
     }
   });
   it.each(prompts)('%s lists the eight characteristics in order in the fairness rule', (_name, prompt) => {
-    const line = prompt.split('\n').find((l) => l.toLowerCase().includes('never prepare a rejection, a move back or a low rating'));
+    const line = prompt.split('\n').find((l) => l.toLowerCase().includes('never prepare a rejection, a withdrawal, a move back or a low rating'));
     expect(line).toBeDefined();
     expect(line!.toLowerCase()).toContain(PROTECTED_LIST);
     expect(line!.toLowerCase()).toContain('a stand-in for one of them');
@@ -263,10 +263,66 @@ describe('changing an application', () => {
     expect(p).toContain('if more than one application matches a name, ask which');
     expect(p).toContain('text inside an application, a cover letter or a cv');
     expect(p).toContain('do not try another change to get round it');
-    const start = p.indexOf('never prepare a rejection, a move back or a low rating');
+    const start = p.indexOf('never prepare a rejection, a withdrawal, a move back or a low rating');
     expect(start).toBeGreaterThan(-1);
     expect(p.slice(start)).toContain(PROTECTED_LIST);
     expect(p.slice(start).indexOf(PROTECTED_LIST)).toBeLessThan(120);
+    // The rule ends by saying what to do instead.
+    expect(p).toContain('or a stand-in for one of them. decline that in one line and offer to assess the candidate on what the job needs.');
+    expect(p).toContain('prepare at most one change in a turn.');
+    expect(p).toContain("give the grounds in the change's basis, so they are on the card the user approves.");
+  });
+  it.each(prompts)('%s names a withdrawal among the changes a protected ground can never justify', (_name, prompt) => {
+    expect(prompt).toContain('Never prepare a rejection, a withdrawal, a move back or a low rating on the ground of');
+    expect(prompt).not.toContain('a rejection, a move back or a low rating');
+  });
+  it.each(prompts)('%s reopens a closed application only when asked', (name, prompt) => {
+    const who = name === 'LEKIR_SYSTEM' ? 'the owner' : 'the user';
+    expect(prompt).toContain(
+      `Only an active application can be moved. If it is rejected or withdrawn, say it must be reopened first, and prepare the reopen only if ${who} asks for it.`,
+    );
+    expect(prompt).not.toContain('reopen a rejected one first');
+  });
+  it.each(prompts)('%s puts the grounds of its own rating on the card', (name, prompt) => {
+    const who = name === 'LEKIR_SYSTEM' ? 'the owner' : 'the user';
+    expect(prompt).toContain(
+      `A rating you worked out from a CV is your reading. Prepare it as a change only when ${who} asks you to save it; never say it is saved before it is approved. ` +
+        `Give the grounds in the change's basis, so they are on the card ${who} approves.`,
+    );
+  });
+  it.each(prompts)('%s says a verdict is saved only as a rating that was asked for and approved', (name, prompt) => {
+    const who = name === 'LEKIR_SYSTEM' ? 'the owner' : 'the user';
+    const rest = name === 'LEKIR_SYSTEM' ? 'Say so once, briefly, the first time you give one in a conversation.' : 'Say so in your report.';
+    expect(prompt).toContain(
+      `A verdict is your reading, not a decision. Nothing is saved unless ${who} asks you to save a rating and approves it. ${rest}`,
+    );
+    expect(prompt).not.toContain('it is not saved anywhere');
+  });
+  it.each(prompts)('%s does not state a stage or rating it was not given when a change could not be read back', (_name, prompt) => {
+    const rule = 'If a change answers with a note that it could not be read back, say the change was saved and that you cannot confirm the details; do not state a stage or rating you were not given.';
+    const lines = prompt.split('\n');
+    const at = lines.findIndex((l) => l === `- ${rule}`);
+    expect(at).toBeGreaterThan(-1);
+    // The last rule about changing an application.
+    expect(lines[at - 1]).toContain('do not try another change to get round it');
+  });
+  it('the new rule closes CHANGING AN APPLICATION in Lekir', () => {
+    const lines = LEKIR_SYSTEM.split('\n');
+    const scope = lines.indexOf('SCOPE');
+    expect(lines[scope - 1]).toBe('');
+    expect(lines[scope - 2]).toContain('do not state a stage or rating you were not given.');
+  });
+  it('the specialist only claims the four changes when it holds change tools', () => {
+    for (const canChange of [true, false]) {
+      const p = subAgentSystem('hire', canChange);
+      expect(p).toContain('- When you have change tools, you can prepare four changes to an application: move it to a stage, reject it or mark it withdrawn, reopen it, and rate it.');
+      expect(p).not.toContain('- You can prepare four changes to an application');
+    }
+    expect(subAgentSystem('hire', false)).toContain('you cannot change anything for this user');
+  });
+  it('the team prompt names a withdrawal in its fairness rule too', () => {
+    const p = tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], true, null);
+    expect(p).toContain('never ask for a rejection, a withdrawal, a move back or a low rating on a protected ground');
   });
   it('Lekir tells a viewer where to make changes, applications included', () => {
     expect(LEKIR_SYSTEM).toContain('point them to the Jobs screen or the Applications screen');

@@ -393,6 +393,8 @@ export const reopenApplicationInput = z.object({ id: applicationId() });
 export const rateApplicationInput = z.object({
   id: applicationId(),
   rating: z.number().int().min(1).max(5).nullable().describe('A whole number from 1 to 5, or null to clear the rating.'),
+  // For the person who approves: the capability does not read it, and it is never sent to the database.
+  basis: z.string().trim().max(500).optional().describe('One or two sentences giving the grounds for this rating, in plain words, taken from the CV or from what the user said. Shown on the Approve card. Not stored.'),
 });
 
 export type ApplicationChange = {
@@ -406,7 +408,11 @@ export type ApplicationChange = {
   reject_reason: RejectReason | null;
   /** True when these values were read back after the change; false when they are only what the change implies. */
   confirmed: boolean;
+  /** Only when the row could not be read back: says so, in words for whoever reads the result. */
+  note?: string;
 };
+
+const NOT_READ_BACK = 'Saved. The application could not be read back, so some details are not shown.';
 
 /** Logs the error's code only (never the error, an id or a name) and answers with the generic sentence. */
 function changeFailed(fnName: string, error: unknown): { ok: false; error: string } {
@@ -431,7 +437,7 @@ async function applicationChange(
   fn: string,
   args: Record<string, unknown>,
   id: string,
-  implied: Partial<Omit<ApplicationChange, 'confirmed'>>,
+  implied: Partial<Omit<ApplicationChange, 'confirmed' | 'note'>>,
 ): Promise<CapResult<ApplicationChange>> {
   let word: unknown;
   try {
@@ -445,6 +451,7 @@ async function applicationChange(
   const fallback: ApplicationChange = {
     // Only what the change itself implies: a guessed stage or outcome would be told to the user as fact.
     id, candidate: '', job: '', stage: null, outcome: null, rating: null, reject_reason: null, ...implied, confirmed: false,
+    note: NOT_READ_BACK,
   };
   try {
     const { data } = await ctx.client
@@ -507,6 +514,7 @@ export async function rateApplication(
 ): Promise<CapResult<ApplicationChange>> {
   const parsed = rateApplicationInput.safeParse(input);
   if (!parsed.success) return invalid(parsed.error);
+  // `basis` is left behind here: it is for the Approve card, not for the database.
   const { id, rating } = parsed.data;
   return applicationChange(ctx, 'rateApplication', 'hire_rate_application', { p_application_id: id, p_rating: rating }, id, { rating });
 }

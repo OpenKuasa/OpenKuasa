@@ -142,6 +142,20 @@ describe('approval cards for an application', () => {
     expect(approvalTitle('rateApplication', { id: APP, rating: 4 }, found)).toBe('Rate Aina Rahman (Barista) 4 out of 5?');
     expect(approvalTitle('rateApplication', { id: APP, rating: null }, found)).toBe('Clear the rating of Aina Rahman (Barista)?');
   });
+  it('puts the grounds for a rating on the detail line, and nothing when there are none', () => {
+    expect(approvalDetail('rateApplication', { id: APP, rating: 3, basis: 'Six years in B2B sales, but no key account work.' }))
+      .toBe('Why: Six years in B2B sales, but no key account work.');
+    // Trimmed, and one paragraph whatever the line breaks.
+    expect(approvalDetail('rateApplication', { id: APP, rating: 3, basis: '  Six years in sales.\n\n  No tender work.  ' }))
+      .toBe('Why: Six years in sales. No tender work.');
+    expect(approvalDetail('rateApplication', { id: APP, rating: 3 })).toBeNull();
+    expect(approvalDetail('rateApplication', { id: APP, rating: 3, basis: '   ' })).toBeNull();
+    expect(approvalDetail('rateApplication', { id: APP, rating: 3, basis: null })).toBeNull();
+    expect(approvalDetail('rateApplication', { id: APP, rating: 3, basis: 7 })).toBeNull();
+    // Only a rating carries one.
+    expect(approvalDetail('moveApplication', { id: APP, stage: 'offer', basis: 'x' })).toBeNull();
+    expect(approvalDetail('reopenApplication', { id: APP, basis: 'x' })).toBeNull();
+  });
   it('says "this application" when the conversation never listed it', () => {
     expect(approvalTitle('moveApplication', { id: STRANGER, stage: 'offer' }, found)).toBe('Move an application that was not in the list above to Offer?');
     expect(approvalTitle('rejectApplication', { id: STRANGER, outcome: 'rejected' }, nothing)).toBe('Reject an application that was not in the list above?');

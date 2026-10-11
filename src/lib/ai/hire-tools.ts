@@ -607,7 +607,9 @@ export function createHireTools(
       execute: async (input) => reopenApplication(ctx, input),
     }),
     rateApplication: tool({
-      description: "Set ONE application's rating from 1 to 5, or clear it with null.",
+      description:
+        "Set ONE application's rating from 1 to 5, or clear it with null." +
+        ' When the rating is your own reading (for example from a CV), put the grounds in basis.',
       inputSchema: rateApplicationInput,
       execute: async (input) => rateApplication(ctx, input),
     }),
