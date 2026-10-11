@@ -27,6 +27,15 @@ import {
   updateContactInput,
 } from '@/lib/finance/contacts';
 import {
+  type SaveAndIssueCreditNoteResult,
+  creditNoteIdInput,
+  deleteCreditNote,
+  issueCreditNote,
+  saveCreditNote,
+  saveCreditNoteInput,
+  voidCreditNote,
+} from '@/lib/finance/credit-notes';
+import {
   INVOICE_MESSAGES,
   type InvoiceDetail,
   type SaveAndPostInvoiceResult,
@@ -76,6 +85,7 @@ import {
   saveQuotationInput,
   sendQuotation,
 } from '@/lib/finance/quotations';
+import { deleteRefund, markRefundPaid, recordRefund, recordRefundInput, voidRefund } from '@/lib/finance/refunds';
 import { type FinResult, type FinanceWriteContext, NOT_ALLOWED, READ_FAILED } from '@/lib/finance/result';
 import { createClient } from '@/lib/supabase/server';
 
@@ -149,6 +159,22 @@ const QUOTATION_PATHS = ['/finance/quotations'];
 // Making an invoice from a quotation adds a draft to Invoices (its table and its "by status" chart) and puts
 // that invoice in the quotation's Invoice column. A draft is not receivable, so nothing else moves.
 const CONVERT_PATHS = ['/finance/quotations', '/finance/invoices'];
+// A credit note that is issued or voided, and a refund at any step, change what an invoice owes or what its
+// customer is in credit. That shows on Invoices (Balance, status, Total receivable, and whether a row offers
+// a payment, a credit note or a refund), in the payment form on Payments In (which invoices can be paid, and
+// for how much), on Customers & Suppliers (Receivable), on Credit Notes (Refunded, and whether a row offers
+// a refund) and on Refunds. Quotations names an invoice by its number only, and Payments Out never shows a
+// refund: neither is here.
+const CREDIT_PATHS = [
+  '/finance/invoices',
+  '/finance/payments-in',
+  '/finance/customers-suppliers',
+  '/finance/credit-notes',
+  '/finance/refunds',
+];
+// A draft credit note takes nothing off its invoice and nothing can be refunded against it: saving or
+// deleting one moves no figure and no menu anywhere but on Credit Notes.
+const CREDIT_NOTE_DRAFT_PATHS = ['/finance/credit-notes'];
 
 /**
  * Saves a document as a draft, then posts it. When the save works and the
@@ -339,6 +365,47 @@ export async function saveAndSendQuotationAction(input: unknown): Promise<SaveAn
 /** One draft quotation with its lines, for the Edit form; see `draftForEditing`. */
 export async function getQuotationAction(input: unknown): Promise<FinResult<QuotationDetail>> {
   return draftForEditing(QUOTATION_PATHS, quotationIdInput, input, getQuotation, QUOTATION_MESSAGES, 'quotation');
+}
+
+/* ---- credit notes ------------------------------------------------------ */
+
+/** Creates a draft credit note, or changes one. A draft moves nothing but its own list. */
+export async function saveCreditNoteAction(input: unknown) {
+  return run(CREDIT_NOTE_DRAFT_PATHS, saveCreditNoteInput, input, saveCreditNote);
+}
+/** Issues a draft: it gets its number and is locked, and its invoice owes that much less. */
+export async function issueCreditNoteAction(input: unknown) {
+  return run(CREDIT_PATHS, creditNoteIdInput, input, issueCreditNote);
+}
+/** Voids an issued credit note: its invoice owes the amount again. Refused while a refund depends on it. */
+export async function voidCreditNoteAction(input: unknown) {
+  return run(CREDIT_PATHS, creditNoteIdInput, input, voidCreditNote);
+}
+export async function deleteCreditNoteAction(input: unknown) {
+  return run(CREDIT_NOTE_DRAFT_PATHS, creditNoteIdInput, input, deleteCreditNote);
+}
+
+/** Saves the credit note as a draft, then issues it; see `saveThenPost`. */
+export async function saveAndIssueCreditNoteAction(input: unknown): Promise<SaveAndIssueCreditNoteResult> {
+  return saveThenPost(CREDIT_PATHS, saveCreditNoteInput, input, saveCreditNote, issueCreditNote);
+}
+
+/* ---- refunds ----------------------------------------------------------- */
+
+/** Records a refund against one invoice or one credit note, paid out now or left pending. */
+export async function recordRefundAction(input: unknown) {
+  return run(CREDIT_PATHS, recordRefundInput, input, recordRefund);
+}
+/** A pending refund has been paid out. The database looks at the customer's credit again and may refuse. */
+export async function markRefundPaidAction(input: unknown) {
+  return run(CREDIT_PATHS, markPaymentPaidInput, input, markRefundPaid);
+}
+/** Voids a refund that was paid out: the customer is in credit by that amount again. */
+export async function voidRefundAction(input: unknown) {
+  return run(CREDIT_PATHS, paymentIdInput, input, voidRefund);
+}
+export async function deleteRefundAction(input: unknown) {
+  return run(CREDIT_PATHS, paymentIdInput, input, deleteRefund);
 }
 
 /* ---- payments in ------------------------------------------------------- */
