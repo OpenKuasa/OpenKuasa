@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 const DIR = join(process.cwd(), 'supabase/migrations');
-const WRITES = '20261019090000_people_claims_overtime_writes.sql';
+const WRITES = '20261020090000_people_claims_overtime_writes.sql';
 
 /** The migration's statements, without its comment lines (they describe the rules in words the checks would trip on). */
 const writes = () =>
@@ -76,7 +76,7 @@ describe('Lekiu claims and overtime migration', () => {
     expect(WRITES > '20261018100000_hire_public_applications.sql').toBe(true);
     const files = readdirSync(DIR);
     expect(files).toContain(WRITES);
-    expect(files.filter((f) => f.startsWith('20261019090000'))).toEqual([WRITES]);
+    expect(files.filter((f) => f.startsWith('20261020090000'))).toEqual([WRITES]);
   });
 
   test('adds exactly the columns in the spec', () => {

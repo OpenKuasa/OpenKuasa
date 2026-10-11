@@ -1,6 +1,6 @@
 /**
  * Live test of the claims and overtime write path against the real database.
- * It needs 20261019090000_people_claims_overtime_writes.sql applied; until then
+ * It needs 20261020090000_people_claims_overtime_writes.sql applied; until then
  * it fails at the first call (the functions do not exist). Skipped without
  * Supabase env vars. It has NOT been run: the migration is not on the live
  * database yet.

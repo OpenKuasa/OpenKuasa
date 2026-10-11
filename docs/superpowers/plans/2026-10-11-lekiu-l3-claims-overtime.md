@@ -28,7 +28,7 @@
 - A chat route's `onError` logs only the error's name.
 - No model call in any test. No change to Tuah. No Kuasa names in `src/`. No purple or violet.
 - 2-space indent, single quotes, semicolons, named exports (screens keep `export default`).
-- The migration is `supabase/migrations/20261019090000_people_claims_overtime_writes.sql`; re-check just before the PR that it still sorts after everything on `main`.
+- The migration is `supabase/migrations/20261020090000_people_claims_overtime_writes.sql`; re-check just before the PR that it still sorts after everything on `main`.
 
 ## Review Focus
 
@@ -43,7 +43,7 @@
 ### Task 1: The database (most capable model)
 
 **Files:**
-- Create: `supabase/migrations/20261019090000_people_claims_overtime_writes.sql`
+- Create: `supabase/migrations/20261020090000_people_claims_overtime_writes.sql`
 - Create: `supabase/tests/people_claims_overtime_check.sql`
 - Create: `tests/people-claims-overtime-schema.test.ts`
 - Do not modify the demo seed: every new column is nullable or defaulted.
