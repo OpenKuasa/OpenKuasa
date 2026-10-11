@@ -205,6 +205,21 @@ describe('people tools', () => {
     expect(slips.payslips[0]).toMatchObject({ employee: 'Aisyah Rahim', month: '2026-09', gross: 'RM 6,287.50', status: 'paid' });
   });
 
+  it('lists a payslip’s basic pay, other deductions and lines in Ringgit; a lookup holding no change tool gets no ids', async () => {
+    const slips = await run('listPayslips')({ month: '2026-10', limit: 50 });
+    const withLine = slips.payslips.find((p: Loose) => p.lines.length > 0);
+    expect(withLine).toBeDefined();
+    expect(withLine.basic).toMatch(/^RM [\d,]+\.\d{2}$/);
+    expect(withLine.other_deductions).toMatch(/^RM [\d,]+\.\d{2}$/);
+    expect(withLine.run_status).toBe('draft');
+    for (const slip of slips.payslips) {
+      // createPeopleTools was given no write access here, so no payroll change tool could use an id.
+      expect(slip).not.toHaveProperty('id');
+      for (const line of slip.lines) expect(line).toMatchObject({ label: expect.any(String), kind: expect.any(String), amount: expect.stringMatching(/^RM / ) });
+    }
+    expect(JSON.stringify(slips)).not.toMatch(/_cents/);
+  });
+
   it('summarises performance, trainings and announcements', async () => {
     expect((await run('getPerformanceSummary')({})).goals.total).toBe(40);
     const trainings = await run('listTrainings')({});

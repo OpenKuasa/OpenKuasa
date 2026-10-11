@@ -499,3 +499,67 @@ describe('POST /api/people/chat claims and overtime', () => {
     expect(ctl.captured!.write!.receipt).toBeNull();
   });
 });
+
+describe('POST /api/people/chat payroll tools', () => {
+  const PAYROLL_TOOLS = ['runPayroll', 'recalculatePayroll', 'savePayslipLine', 'removePayslipLine', 'setPayslipStatutory', 'removePayslip'];
+  const held = async () => {
+    const res = await POST(post(validBody));
+    expect(res.status).toBe(200);
+    await res.text();
+    return ctl.calls[0].tools;
+  };
+
+  it.each(['owner', 'admin'])('gives an %s all six, linked to an employee record or not', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    for (const linked of [null, { id: 'emp-3' }]) {
+      ctl.calls = [];
+      ctl.linkedEmployee = linked;
+      const tools = await held();
+      for (const name of PAYROLL_TOOLS) expect(tools, name).toContain(name);
+    }
+  });
+
+  it.each(['member', 'viewer'])('gives a %s none, linked to an employee record or not: absent, not disabled', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    for (const linked of [null, { id: 'emp-7' }]) {
+      ctl.calls = [];
+      ctl.linkedEmployee = linked;
+      const tools = await held();
+      for (const name of PAYROLL_TOOLS) expect(tools, name).not.toContain(name);
+    }
+  });
+
+  it.each(['owner', 'admin', 'member', 'viewer'])('gives a %s in the demo workspace none, linked or not', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    ctl.slug = DEMO_ORG_SLUG;
+    for (const linked of [null, { id: 'emp-7' }]) {
+      ctl.calls = [];
+      ctl.linkedEmployee = linked;
+      const tools = await held();
+      for (const name of PAYROLL_TOOLS) expect(tools, name).not.toContain(name);
+    }
+  });
+
+  it('gives nobody a tool for marking a run paid, undoing paid, reopening or deleting a draft', async () => {
+    ctl.org = { orgId: 'org1', role: 'owner' };
+    ctl.linkedEmployee = { id: 'emp-3' };
+    const tools = await held();
+    for (const name of tools) {
+      if (/payroll|payslip|run/i.test(name)) expect(name, name).not.toMatch(/paid|reopen|undo|delete/i);
+    }
+    expect(tools.filter((name: string) => /payroll|payslip/i.test(name)).sort()).toEqual(
+      [...PAYROLL_TOOLS, 'getPayrollSummary', 'listPayslips'].sort(),
+    );
+  });
+
+  it('every payroll change tool is on the list of tools that wait for approval', () => {
+    for (const name of PAYROLL_TOOLS) expect(PEOPLE_WRITE_TOOL_NAMES).toContain(name);
+  });
+
+  it('sends the model the payroll rules and no longer says payroll cannot be run', async () => {
+    ctl.org = { orgId: 'org1', role: 'owner' };
+    await held();
+    expect(ctl.calls[0].system).toContain('\nPAYROLL\n');
+    expect(ctl.calls[0].system).not.toContain('You cannot run payroll');
+  });
+});

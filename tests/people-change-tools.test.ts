@@ -63,6 +63,7 @@ describe('Lekiu change tools', () => {
       'submitClaim', 'cancelClaim', 'submitOvertime', 'cancelOvertime',
       'decideClaim', 'markClaimPaid', 'unmarkClaimPaid', 'decideOvertime',
       'clockIn', 'clockOut', 'correctAttendance', 'saveHoliday', 'removeHoliday', 'saveAttendanceSettings',
+      'runPayroll', 'recalculatePayroll', 'savePayslipLine', 'removePayslipLine', 'setPayslipStatutory', 'removePayslip',
     ]);
     // An owner with no linked employee record holds no clock tool; one with a record holds every one.
     const unlinked = Object.keys(createPeopleTools(data, HR, NOW, write())).sort();

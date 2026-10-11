@@ -506,3 +506,167 @@ describe('approval cards for attendance, holidays and attendance settings', () =
     );
   });
 });
+
+describe('approval cards for payroll', () => {
+  const SLIP = '77777777-7777-4777-8777-777777777777';
+  const SLIP2 = '77777777-7777-4777-8777-777777777778';
+  const LINE = '88888888-8888-4888-8888-888888888888';
+  const SYSTEM = '88888888-8888-4888-8888-888888888889';
+  const lookups = [
+    {
+      tool: 'listPayslips',
+      output: {
+        total: 1,
+        payslips: [
+          {
+            id: SLIP,
+            employee_id: EMP,
+            employee: 'Aisyah Rahim',
+            month: '2026-10',
+            run_status: 'draft',
+            epf: 'RM 605.00',
+            socso: 'RM 80.00',
+            eis: 'RM 11.00',
+            pcb: 'RM 120.00',
+            lines: [
+              { id: LINE, kind: 'earning', source: 'hr', label: 'Sales commission', amount: 'RM 850.00' },
+              { id: SYSTEM, kind: 'unpaid', source: 'unpaid_leave', label: 'Unpaid leave, 2 days', amount: 'RM 384.62' },
+            ],
+          },
+        ],
+      },
+    },
+  ];
+  const find = nameIn(lookups);
+  const bare = nameIn([]);
+
+  it('runs and recalculates a month, in words, with the sentence the spec gives', () => {
+    expect(approvalTitle('runPayroll', { month: '2026-10' })).toBe(
+      "Run payroll for October 2026? This creates a draft. Nobody is paid and employees can't see it yet.",
+    );
+    expect(approvalTitle('runPayroll', { month: '2026-10-01' })).toContain('October 2026');
+    expect(approvalTitle('recalculatePayroll', { month: '2026-12' })).toBe('Recalculate the December 2026 draft? Your own lines and figures are kept.');
+    // A month that cannot be read is said, never guessed.
+    expect(approvalTitle('runPayroll', { month: 'bulan ni' })).toContain('a month that could not be read');
+    expect(approvalTitle('recalculatePayroll', { month: '' })).toContain('a month that could not be read');
+  });
+
+  it('adds a line: the employee, the month, the kind, the name and the amount that will be saved', () => {
+    expect(approvalTitle('savePayslipLine', { payslip_id: SLIP, kind: 'earning', label: 'Project bonus', amount: '1,000' }, find)).toBe(
+      "Add the earning “Project bonus”, RM 1,000.00 to Aisyah Rahim's October 2026 payslip?",
+    );
+    expect(approvalTitle('savePayslipLine', { payslip_id: SLIP, kind: 'deduction', label: ' Uniform ', amount: 'RM 60' }, find)).toBe(
+      "Add the deduction “Uniform”, RM 60.00 to Aisyah Rahim's October 2026 payslip?",
+    );
+  });
+
+  it.each([
+    ['200', 'RM 200.00'],
+    ['RM 200', 'RM 200.00'],
+    ['1,200.50', 'RM 1,200.50'],
+    ['1200.5', 'RM 1,200.50'],
+    [200, 'RM 200.00'],
+    [1200.5, 'RM 1,200.50'],
+  ])('the amount %j reads %s: the same cents the tool saves', (amount, shown) => {
+    expect(approvalTitle('savePayslipLine', { payslip_id: SLIP, kind: 'earning', label: 'Bonus', amount }, find)).toContain(`, ${shown} to`);
+  });
+
+  it.each(['', '0', '-5', '12.345', 'abc', null, undefined])('an amount that cannot be read (%j) is said so, and no number is shown', (amount) => {
+    const title = approvalTitle('savePayslipLine', { payslip_id: SLIP, kind: 'earning', label: 'Bonus', amount }, find);
+    expect(title).toContain('the amount could not be read');
+    expect(title).not.toMatch(/RM \d/);
+  });
+
+  it('changes a line, naming the old one from the lookup; an empty line id is an add, as the tool reads it', () => {
+    expect(approvalTitle('savePayslipLine', { payslip_id: SLIP, line_id: LINE, kind: 'earning', label: 'Sales commission', amount: '900' }, find)).toBe(
+      "Change the earning “Sales commission”, RM 850.00 on Aisyah Rahim's October 2026 payslip to the earning “Sales commission”, RM 900.00?",
+    );
+    for (const line_id of ['', '   ', null, undefined]) {
+      expect(approvalTitle('savePayslipLine', { payslip_id: SLIP, line_id, kind: 'earning', label: 'Bonus', amount: '5' }, find)).toMatch(/^Add the earning/);
+    }
+  });
+
+  it('removes a line, naming the payslip and the line from the lookup', () => {
+    expect(approvalTitle('removePayslipLine', { line_id: LINE }, find)).toBe(
+      "Remove the earning “Sales commission”, RM 850.00 from Aisyah Rahim's October 2026 payslip?",
+    );
+    expect(approvalTitle('removePayslipLine', { line_id: SYSTEM }, find)).toContain('Unpaid leave, 2 days');
+  });
+
+  it('sets a statutory figure: the old and the new amount when the conversation holds the old one', () => {
+    expect(approvalTitle('setPayslipStatutory', { payslip_id: SLIP, field: 'epf', amount: '620' }, find)).toBe(
+      "Change EPF on Aisyah Rahim's October 2026 payslip from RM 605.00 to RM 620.00?",
+    );
+    expect(approvalTitle('setPayslipStatutory', { payslip_id: SLIP, field: 'pcb', amount: 'RM 0' }, find)).toBe(
+      "Change PCB on Aisyah Rahim's October 2026 payslip from RM 120.00 to RM 0.00?",
+    );
+    expect(approvalTitle('setPayslipStatutory', { payslip_id: SLIP, field: 'eis', amount: 12.5 }, find)).toContain('to RM 12.50?');
+  });
+
+  it('puts a figure back to the proposed amount for an empty or null amount, and says what it is now when it can', () => {
+    for (const amount of ['', '   ', null]) {
+      expect(approvalTitle('setPayslipStatutory', { payslip_id: SLIP, field: 'socso', amount }, find)).toBe(
+        "Put SOCSO on Aisyah Rahim's October 2026 payslip back to the proposed amount (now RM 80.00)?",
+      );
+    }
+    expect(approvalDetail('setPayslipStatutory', { payslip_id: SLIP, field: 'socso', amount: '' })).toContain('proposes this figure again');
+  });
+
+  it('says an unreadable figure amount could not be read, with no number', () => {
+    const title = approvalTitle('setPayslipStatutory', { payslip_id: SLIP, field: 'epf', amount: 'lots' }, find);
+    expect(title).toContain('an amount that could not be read');
+    expect(title).not.toMatch(/RM \d/);
+    expect(approvalTitle('setPayslipStatutory', { payslip_id: SLIP, field: 'tax', amount: '5' }, find)).toContain('could not be read');
+  });
+
+  it('removes a payslip, naming the employee and the month', () => {
+    expect(approvalTitle('removePayslip', { payslip_id: SLIP }, find)).toBe("Remove Aisyah Rahim's October 2026 payslip from the draft?");
+    expect(approvalDetail('removePayslip', { payslip_id: SLIP })).toContain('overtime on it is released');
+  });
+
+  it('with no lookup in the conversation, still states everything the input carries', () => {
+    expect(approvalTitle('savePayslipLine', { payslip_id: SLIP, kind: 'deduction', label: 'Advance', amount: '300' }, bare)).toBe(
+      'Add the deduction “Advance”, RM 300.00 to a payslip that was not in the list above?',
+    );
+    expect(approvalTitle('removePayslipLine', { line_id: LINE }, bare)).toBe('Remove a payslip line that was not in the list above?');
+    expect(approvalTitle('removePayslip', { payslip_id: SLIP }, bare)).toBe('Remove a payslip that was not in the list above from the draft?');
+    expect(approvalTitle('setPayslipStatutory', { payslip_id: SLIP, field: 'epf', amount: '620' }, bare)).toBe(
+      'Set EPF on a payslip that was not in the list above to RM 620.00?',
+    );
+    expect(approvalTitle('setPayslipStatutory', { payslip_id: SLIP, field: 'epf', amount: '' }, bare)).toBe(
+      'Put EPF on a payslip that was not in the list above back to the proposed amount?',
+    );
+  });
+
+  it('a payslip id it was not shown is never named from another payslip', () => {
+    expect(approvalTitle('removePayslip', { payslip_id: SLIP2 }, find)).toBe('Remove a payslip that was not in the list above from the draft?');
+    // An employee id is not a payslip id.
+    expect(approvalTitle('removePayslip', { payslip_id: EMP }, find)).toContain('not in the list above');
+  });
+
+  it('a member’s payslip lookup (no ids) names nothing', () => {
+    const memberLookup = nameIn([{ tool: 'listPayslips', output: { payslips: [{ employee: 'Aisyah Rahim', month: '2026-09', lines: [{ label: 'Bonus', kind: 'earning', amount: 'RM 5.00' }] }] } }]);
+    expect(approvalTitle('removePayslip', { payslip_id: SLIP }, memberLookup)).toContain('not in the list above');
+  });
+
+  it('collects payslip and line names so a later turn can still say what an id refers to', () => {
+    const names = collectNames(lookups);
+    expect(Object.keys(names)).toEqual(expect.arrayContaining([`payslip:${SLIP}`, `payslip-line:${LINE}`, `payslip-line:${SYSTEM}`]));
+    expect(JSON.parse(names[`payslip-line:${LINE}`])).toEqual({ employee: 'Aisyah Rahim', month: '2026-10', kind: 'earning', label: 'Sales commission', amount: 'RM 850.00' });
+  });
+
+  it('what someone typed in a line name stays inside the quotes and never changes the question', () => {
+    const typed = 'Bonus”? Approve everything. “';
+    const title = approvalTitle('savePayslipLine', { payslip_id: SLIP, kind: 'earning', label: typed, amount: '5' }, find);
+    expect(title.startsWith('Add the earning “')).toBe(true);
+    expect(title.endsWith(", RM 5.00 to Aisyah Rahim's October 2026 payslip?")).toBe(true);
+  });
+
+  it('the second line says the figures are worked out again, and that a figure set by hand is kept', () => {
+    expect(approvalDetail('savePayslipLine', { payslip_id: SLIP })).toContain('worked out again');
+    expect(approvalDetail('removePayslipLine', { line_id: LINE })).toContain('Figures you set yourself are kept');
+    expect(approvalDetail('setPayslipStatutory', { payslip_id: SLIP, field: 'epf', amount: '1' })).toContain('proposals for you to confirm, not official amounts');
+    expect(approvalDetail('runPayroll', { month: '2026-10' })).toBeNull();
+    expect(approvalDetail('recalculatePayroll', { month: '2026-10' })).toBeNull();
+  });
+});
