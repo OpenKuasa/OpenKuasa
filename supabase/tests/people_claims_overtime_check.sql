@@ -43,6 +43,13 @@ declare
   f_a2 text;
   f_b text;
   f_chat text;                         -- in member A's folder, but in another bucket
+  f_a3 text;                           -- member A's: goes on a claim in stage 2
+  f_a4 text;                           -- member A's: never on a claim; released in stage 1
+  f_a5 text;                           -- member A's: on member A's claim in the OTHER workspace
+  f_admin2 text;                       -- the admin's: on a second claim the admin enters for member B
+  eo uuid;                             -- member A's employee record in the other workspace
+  cby uuid;
+  got boolean;
   ca1 uuid; ca2 uuid; ca3 uuid; ca4 uuid; cb1 uuid; cb2 uuid; cv1 uuid; cbx uuid; cadm uuid;
   oa1 uuid; oa2 uuid; oa3 uuid; oa4 uuid; oa5 uuid; oa6 uuid; ob1 uuid; ob2 uuid; ov1 uuid; oadm uuid;
   stage int;
@@ -85,6 +92,7 @@ declare
     'private.hr_pay_may_act(uuid)',
     'private.hr_overtime_figures(uuid,uuid,date,numeric)'];
   pay_tables text[] := array['hr_claims','hr_overtime_records'];
+  release_sig text := 'public.hr_release_receipt(text)';
 begin
   begin  -- one sub-block, so a step that stops the script is reported, not lost
 
@@ -167,6 +175,32 @@ begin
   if n <> 3 or n2 <> 3 then
     fails := array_append(fails, format('the receipts bucket has %s policies (%s as expected), expected select, insert and the second-factor one', n, n2));
   end if;
+  -- Releasing a receipt: one more function, and a table nobody may touch.
+  if to_regprocedure(release_sig) is null then
+    fails := array_append(fails, format('%s does not exist', release_sig));
+  else
+    if has_function_privilege('anon', release_sig, 'execute') or has_function_privilege('public', release_sig, 'execute')
+       or not has_function_privilege('authenticated', release_sig, 'execute') then
+      fails := array_append(fails, format('%s is not callable by signed-in users only', release_sig));
+    end if;
+    select count(*) into n from pg_proc p
+    where p.oid = to_regprocedure(release_sig) and p.prosecdef
+      and p.proconfig @> array['search_path=public'] and p.prorettype = 'boolean'::regtype;
+    if n <> 1 then fails := array_append(fails, format('%s is not security definer with a fixed search path, returning boolean', release_sig)); end if;
+  end if;
+  if to_regclass('private.hr_released_receipts') is null then
+    fails := array_append(fails, 'private.hr_released_receipts does not exist');
+  else
+    foreach t in array array['anon', 'authenticated', 'service_role', 'public'] loop
+      if has_table_privilege(t, 'private.hr_released_receipts', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE')
+         or has_any_column_privilege(t, 'private.hr_released_receipts', 'SELECT, INSERT, UPDATE') then
+        fails := array_append(fails, format('%s holds a privilege on the released-receipts table', t));
+      end if;
+    end loop;
+    select count(*) into n from pg_class c where c.oid = 'private.hr_released_receipts'::regclass and c.relrowsecurity;
+    select count(*) into n2 from pg_policies p where p.schemaname = 'private' and p.tablename = 'hr_released_receipts';
+    if n <> 1 or n2 <> 0 then fails := array_append(fails, 'the released-receipts table does not have row level security on with no policy'); end if;
+  end if;
   if cardinality(fails) > 0 then raise exception 'the functions, grants and bucket are not as expected, so nothing else was tried'; end if;
 
   -- ---- people and a workspace ------------------------------------------
@@ -180,7 +214,7 @@ begin
   insert into public.orgs (id, name) values (org, 'Pay Check Sdn Bhd'), (other_org, 'Pay Other Sdn Bhd');
   insert into public.org_members (org_id, user_id, role)
   values (org, admin_id, 'admin'), (org, ma, 'member'), (org, mb, 'member'), (org, mu, 'member'), (org, mv, 'viewer'),
-         (other_org, outsider, 'owner'), (demo, dv, 'viewer'), (demo, da, 'admin');
+         (other_org, outsider, 'owner'), (other_org, ma, 'member'), (demo, dv, 'viewer'), (demo, da, 'admin');
 
   -- No settings row yet: the figures must work on the table defaults.
   insert into public.hr_employees (org_id, employee_no, name, work_email)
@@ -193,6 +227,11 @@ begin
   values (org, 'V', 'Viewer V', mv || '@pay-check.openkuasa-test.dev') returning id into ev;
   insert into public.hr_employees (org_id, employee_no, name)
   values (org, 'C', 'Linked To Nobody') returning id into ec;
+  -- Member A also belongs to the other workspace, with an employee record there.
+  insert into public.hr_employees (org_id, employee_no, name, work_email)
+  values (other_org, 'O', 'Member A Elsewhere', ma || '@pay-check.openkuasa-test.dev') returning id into eo;
+  select count(*) into n from public.hr_employees where id = eo and user_id = ma;
+  if n <> 1 then fails := array_append(fails, 'member A was not linked to their employee record in the other workspace'); end if;
   select count(*) into n from public.hr_employees where id in (ea, eb, ev) and user_id in (ma, mb, mv);
   if n <> 3 then fails := array_append(fails, 'the members were not linked to their employee records'); end if;
 
@@ -215,11 +254,19 @@ begin
   f_a2 := ma || '/' || gen_random_uuid() || '.png';
   f_b := mb || '/' || gen_random_uuid() || '.jpg';
   f_chat := ma || '/' || gen_random_uuid() || '.jpg';
+  f_a3 := ma || '/' || gen_random_uuid() || '.jpg';
+  f_a4 := ma || '/' || gen_random_uuid() || '.jpg';
+  f_a5 := ma || '/' || gen_random_uuid() || '.jpg';
+  f_admin2 := admin_id || '/' || gen_random_uuid() || '.pdf';
   for who, anon_claim, label, f, ok in
     select * from (values
       (admin_id, false, 'the admin uploads into their own folder', f_admin, true),
       (ma, false, 'member A uploads into their own folder', f_a1, true),
       (ma, false, 'member A uploads a second file', f_a2, true),
+      (ma, false, 'member A uploads a third file', f_a3, true),
+      (ma, false, 'member A uploads a fourth file', f_a4, true),
+      (ma, false, 'member A uploads a fifth file', f_a5, true),
+      (admin_id, false, 'the admin uploads a second file', f_admin2, true),
       (mb, false, 'member B uploads into their own folder', f_b, true),
       (mv, false, 'a linked viewer uploads into their own folder', mv || '/' || gen_random_uuid() || '.jpg', true),
       (ma, false, 'member A uploads into member B''s folder', mb || '/' || gen_random_uuid() || '.jpg', false),
@@ -401,6 +448,8 @@ begin
         (1, admin_id, 'the admin previews for an employee that does not exist', format('select public.hr_overtime_preview(%L, ''2024-03-05'', 1)', gen_random_uuid()), 'PAY_NOT_ALLOWED'),
         (1, admin_id, 'the admin attaches a file from member A''s folder', format('select public.hr_submit_claim(%L, ''travel'', 8500, %L, null, %L)', ea, today, f_a2), 'PAY_BAD_RECEIPT'),
         (1, admin_id, 'the admin submits a claim for member B with the admin''s own file', format('select public.hr_submit_claim(%L, ''travel'', 31000, %L, null, %L)', eb, today - 3, f_admin), null),
+        (1, admin_id, 'the admin submits a second claim for member B with another of the admin''s files', format('select public.hr_submit_claim(%L, ''medical'', 7700, %L, null, %L)', eb, today - 1, f_admin2), null),
+        (1, ma, 'member A submits a claim in the other workspace they belong to, with their own file', format('select public.hr_submit_claim(%L, ''travel'', 5000, %L, null, %L)', eo, today, f_a5), null),
         (1, dv, 'a demo visitor submits a claim for a demo employee', format('select public.hr_submit_claim(%L, ''travel'', 8500, %L, null, null)', demo_emp, today), 'PAY_NOT_ALLOWED'),
         (1, dv, 'a demo visitor submits overtime for a demo employee', format('select public.hr_submit_overtime(%L, ''2024-03-05'', 1, null)', demo_emp), 'PAY_NOT_ALLOWED'),
         (1, dv, 'a demo visitor previews overtime', format('select public.hr_overtime_preview(%L, ''2024-03-05'', 1)', demo_emp), 'PAY_NOT_ALLOWED'),
@@ -423,9 +472,11 @@ begin
         (1, outsider, 'someone outside the demo marks a demo claim paid', format('select public.hr_mark_claim_paid(%L, %L, null)', demo_paid, today), 'PAY_NOT_FOUND'),
         (1, outsider, 'someone outside the demo approves demo overtime', format('select public.hr_decide_overtime(%L, true, null)', demo_ot), 'PAY_NOT_FOUND'),
 
-        -- 2: a cancelled request frees its receipt and its hours
+        -- 2: a cancelled request frees its hours; its receipt, and a released file, can never be attached again
         (2, ma, 'member A cancels own pending claim, the one with a receipt', format('select public.hr_cancel_claim(%L)', ca2), null),
-        (2, ma, 'member A attaches the freed receipt to a new claim', format('select public.hr_submit_claim(%L, ''medical'', 12000, %L, ''Second try'', %L)', ea, today, f_a1), null),
+        (2, ma, 'member A attaches the cancelled claim''s receipt to a new claim', format('select public.hr_submit_claim(%L, ''medical'', 12000, %L, null, %L)', ea, today, f_a1), 'PAY_BAD_RECEIPT'),
+        (2, ma, 'member A attaches a file they released', format('select public.hr_submit_claim(%L, ''medical'', 12000, %L, null, %L)', ea, today, f_a4), 'PAY_BAD_RECEIPT'),
+        (2, ma, 'member A submits again with a fresh file', format('select public.hr_submit_claim(%L, ''medical'', 12000, %L, ''Second try'', %L)', ea, today, f_a3), null),
         (2, ma, 'member A cancels the first ten hours', format('select public.hr_cancel_overtime(%L)', oa2), null),
         (2, ma, 'member A submits ten hours again that Saturday', format('select public.hr_submit_overtime(%L, ''2024-03-09'', 10, ''third ten'')', ea), null),
         (2, ma, 'member A submits half an hour on top of 24 again', format('select public.hr_submit_overtime(%L, ''2024-03-09'', 0.5, null)', ea), 'PAY_TOO_MANY_HOURS'),
@@ -533,6 +584,7 @@ begin
         (5, admin_id, 'the admin cancels an approved claim', format('select public.hr_cancel_claim(%L)', cb1), null),
         (5, admin_id, 'the admin cancels a rejected claim', format('select public.hr_cancel_claim(%L)', cb2), null),
         (5, admin_id, 'the admin cancels a pending claim', format('select public.hr_cancel_claim(%L)', cadm), null),
+        (5, admin_id, 'the admin cancels the second claim entered for member B', format('select public.hr_cancel_claim(%L)', cby), null),
         (5, admin_id, 'the admin cancels approved overtime', format('select public.hr_cancel_overtime(%L)', oa1), null),
         (5, admin_id, 'the admin cancels it a second time', format('select public.hr_cancel_overtime(%L)', oa1), 'PAY_NOT_PENDING'),
         (5, admin_id, 'the admin cancels rejected overtime', format('select public.hr_cancel_overtime(%L)', oa3), null),
@@ -582,6 +634,9 @@ begin
       select id into cb2 from public.hr_claims where employee_id = eb and category = 'other';
       select id into cv1 from public.hr_claims where employee_id = ev;
       select id into cbx from public.hr_claims where employee_id = eb and receipt_path = f_admin;
+      select id into cby from public.hr_claims where employee_id = eb and receipt_path = f_admin2;
+      select count(*) into n from public.hr_claims where org_id = other_org and employee_id = eo and receipt_path = f_a5;
+      if cby is null or n <> 1 then fails := array_append(fails, 'the second claim for member B, or member A''s claim in the other workspace, was not saved'); end if;
       select id into oa1 from public.hr_overtime_records where employee_id = ea and work_date = '2024-03-04';
       select id into oa2 from public.hr_overtime_records where employee_id = ea and reason = 'first ten';
       select id into oa3 from public.hr_overtime_records where employee_id = ea and reason = 'second ten';
@@ -592,7 +647,7 @@ begin
       if cv1 is null or ov1 is null then fails := array_append(fails, 'a linked viewer''s own claim and overtime were not saved'); end if;
 
       select count(*) into n from public.hr_claims where org_id = org;
-      if n <> 6 then fails := array_append(fails, format('%s claims after submitting, expected 6', n)); end if;
+      if n <> 7 then fails := array_append(fails, format('%s claims after submitting, expected 7', n)); end if;
       select count(*) into n from public.hr_overtime_records where org_id = org;
       if n <> 9 then fails := array_append(fails, format('%s overtime records after submitting, expected 9', n)); end if;
       select id into oc from public.hr_overtime_records where employee_id = ec;
@@ -656,11 +711,28 @@ begin
       -- read every demo claim: the file must still be closed to them.
       update public.hr_claims set receipt_path = f_b where id = demo_claim;
 
+      -- The admin entered a claim for member B with a file from the admin's own
+      -- folder. Demoted to member, the admin no longer reads that claim, and
+      -- still may not have its receipt thrown away.
+      update public.org_members set role = 'member' where org_id = org and user_id = admin_id;
+      perform set_config('request.jwt.claims', json_build_object('sub', admin_id, 'role', 'authenticated', 'aal', 'aal1')::text, true);
+      set local role authenticated;
+      select count(*) into n from public.hr_claims where id = cby;
+      got := public.hr_release_receipt(f_admin2);
+      reset role;
+      update public.org_members set role = 'admin' where org_id = org and user_id = admin_id;
+      if n <> 0 then fails := array_append(fails, 'a demoted admin still reads a claim they entered for someone else'); end if;
+      if got is distinct from false then
+        fails := array_append(fails, 'a demoted admin released the receipt of a claim they entered for someone else');
+      end if;
+
     elsif stage = 2 then
       select count(*) into n from public.hr_claims where id = ca2 and status = 'cancelled' and receipt_path is null and not has_receipt;
       if n <> 1 then fails := array_append(fails, 'a cancelled claim kept its receipt'); end if;
-      select id into ca3 from public.hr_claims where employee_id = ea and description = 'Second try' and receipt_path = f_a1 and has_receipt;
-      if ca3 is null then fails := array_append(fails, 'a receipt freed by a cancelled claim could not be attached again'); end if;
+      select id into ca3 from public.hr_claims where employee_id = ea and description = 'Second try' and receipt_path = f_a3 and has_receipt;
+      if ca3 is null then fails := array_append(fails, 'a claim with a fresh file was not saved after another was cancelled'); end if;
+      select count(*) into n from public.hr_claims where receipt_path in (f_a1, f_a4);
+      if n <> 0 then fails := array_append(fails, 'a cancelled claim''s receipt, or a released file, is on a claim'); end if;
       select count(*) into n from public.hr_overtime_records where id = oa2 and status = 'cancelled';
       if n <> 1 then fails := array_append(fails, 'member A''s pending overtime was not cancelled'); end if;
       select id into oa5 from public.hr_overtime_records where employee_id = ea and reason = 'third ten';
@@ -672,7 +744,7 @@ begin
         and paid_on = today - 2 and paid_reference = 'TT-123' and paid_by = admin_id;
       if n <> 1 then fails := array_append(fails, 'approving then marking paid did not record who, when, the date paid and the trimmed reference'); end if;
       select count(*) into n from public.hr_claims
-      where id = ca3 and status = 'paid' and paid_on = today and paid_reference is null and paid_by = admin_id and receipt_path = f_a1;
+      where id = ca3 and status = 'paid' and paid_on = today and paid_reference is null and paid_by = admin_id and receipt_path = f_a3;
       if n <> 1 then fails := array_append(fails, 'a paid mark with no reference was not saved, or it lost the receipt'); end if;
       select count(*) into n from public.hr_claims
       where id = cb2 and status = 'rejected' and decided_by = admin_id and decision_note = 'No receipt' and paid_on is null;
@@ -795,7 +867,18 @@ begin
         fails := array_append(fails, 'cancelling a claim with a receipt did not return the path it cleared: ' || r::text);
       end if;
       r := public.hr_cancel_claim(ca1);
+      -- The path cancel handed back for removal cannot go on another claim.
+      begin
+        perform public.hr_submit_claim(eb, 'travel', 31000, today - 3, null, f_admin);
+        fails := array_append(fails, 'the path a cancel returned was attached to a new claim');
+      exception when others then
+        if sqlerrm <> 'PAY_BAD_RECEIPT' then
+          fails := array_append(fails, 'attaching the path a cancel returned: expected PAY_BAD_RECEIPT, got ' || sqlerrm);
+        end if;
+      end;
       reset role;
+      select count(*) into n from private.hr_released_receipts x where x.path in (f_admin, f_admin2, f_a1, f_a3);
+      if n <> 4 then fails := array_append(fails, format('%s of the 4 receipts of cancelled claims are recorded as released', n)); end if;
       select count(*) into n from public.hr_claims where org_id = org and status <> 'cancelled' and id <> ca4;
       if n <> 0 then fails := array_append(fails, format('%s claims the admin could not cancel', n)); end if;
       select count(*) into n from public.hr_claims where org_id = org and (receipt_path is not null or has_receipt);
@@ -836,7 +919,7 @@ begin
         (1, dv, 'a demo visitor, a file planted on a demo claim they can read', f_b, 0),
         (1, outsider, 'another workspace, a file planted on a demo claim', f_b, 0),
         -- 2: member A's first file moved from a cancelled claim to a new one
-        (2, admin_id, 'the admin, the receipt on member A''s new claim', f_a1, 1),
+        (2, admin_id, 'the admin, the receipt on member A''s new claim', f_a3, 1),
         -- 5: every claim is cancelled, so no file is anyone's receipt
         (5, mb, 'member B, the file once on their cancelled claim', f_admin, 0),
         (5, admin_id, 'the admin, their own upload after the cancel', f_admin, 1),
@@ -855,6 +938,76 @@ begin
       reset role;
       if n <> seen then fails := array_append(fails, format('reading a receipt (%s): saw %s, expected %s', label, n, seen)); end if;
     end loop;
+
+    -- ---- who may have which file thrown away, at this point ----------------
+    -- True only for a file in the caller's own folder that no claim, in any
+    -- workspace, carries.
+    for who, label, f, ok in
+      select c.who, c.label, c.f, c.ok from (values
+        (1, ma, 'member A, own file on no claim', f_a4, true),
+        (1, ma, 'member A, the same file a second time', f_a4, true),
+        (1, ma, 'member A, the receipt on their own claim', f_a1, false),
+        (1, ma, 'member A, the receipt on their claim in the other workspace', f_a5, false),
+        (1, outsider, 'the other workspace''s owner, the receipt on member A''s claim there', f_a5, false),
+        (1, mb, 'member B, member A''s file on no claim', f_a2, false),
+        (1, admin_id, 'the admin, member A''s file on no claim', f_a2, false),
+        (1, mb, 'member B, the receipt on their claim, which is in the admin''s folder', f_admin, false),
+        (1, admin_id, 'the admin, their own file on the claim they entered for member B', f_admin, false),
+        (1, mb, 'member B, own file while it sits on a claim in a workspace they do not belong to', f_b, false),
+        (1, ma, 'member A, member B''s file', f_b, false),
+        (1, ma, 'member A, no path at all', null, false),
+        (1, ma, 'member A, their own folder with a slash in front', '/' || f_a2, false),
+        (1, null, 'a session with no user, member A''s file on no claim', f_a2, false),
+        -- 5: the file once planted on a demo claim is on nothing now
+        (5, mb, 'member B, own file once it is on no claim', f_b, true),
+        -- 6: a session that owes a second factor
+        (6, ma, 'member A without the second factor, own file on no claim', f_a2, false)
+      ) as c(s, who, label, f, ok)
+      where c.s = stage
+    loop
+      perform set_config('request.jwt.claims', json_build_object('sub', who, 'role', 'authenticated', 'aal', 'aal1')::text, true);
+      set local role authenticated;
+      begin
+        got := public.hr_release_receipt(f);
+        if got is distinct from ok then
+          fails := array_append(fails, format('releasing a file (%s): got %s, expected %s', label, got, ok));
+        end if;
+      exception when others then
+        fails := array_append(fails, format('releasing a file (%s): raised %s', label, sqlerrm));
+      end;
+      reset role;
+    end loop;
+    if stage = 1 then
+      -- Only the one file that was let go is recorded; a refusal records nothing.
+      select count(*), count(*) filter (where x.path = f_a4) into n, n2
+      from private.hr_released_receipts x where x.path in (f_a1, f_a2, f_a4, f_a5, f_b, f_admin, f_admin2, '/' || f_a2);
+      if n <> 1 or n2 <> 1 then fails := array_append(fails, format('%s paths recorded as released after stage 1, expected only member A''s unused file', n)); end if;
+
+      -- Nobody reads or writes the released list directly.
+      for t, q in
+        select x.t, x.q from (values
+          ('authenticated', 'select count(*) from private.hr_released_receipts'),
+          ('authenticated', format('insert into private.hr_released_receipts (path) values (%L)', f_admin)),
+          ('authenticated', 'delete from private.hr_released_receipts'),
+          ('authenticated', 'update private.hr_released_receipts set path = path || ''x'''),
+          ('anon', 'select count(*) from private.hr_released_receipts'),
+          ('anon', format('insert into private.hr_released_receipts (path) values (%L)', f_admin)),
+          ('anon', 'delete from private.hr_released_receipts')
+        ) as x(t, q)
+      loop
+        perform set_config('request.jwt.claims', json_build_object('sub', ma, 'role', t, 'aal', 'aal1')::text, true);
+        execute format('set local role %I', t);
+        begin
+          execute q;
+          fails := array_append(fails, format('%s touched the released list directly: %s', t, split_part(q, ' ', 1)));
+        exception
+          when insufficient_privilege then null;
+          when others then
+            fails := array_append(fails, format('%s touching the released list was refused for another reason: %s', t, sqlerrm));
+        end;
+        reset role;
+      end loop;
+    end if;
 
     if stage = 1 then
       update public.hr_claims set receipt_path = null where id = demo_claim;
@@ -964,9 +1117,9 @@ begin
   select (select count(*) from public.hr_claims where org_id = org and employee_id = eb)
        + (select count(*) from public.hr_overtime_records where org_id = org and employee_id = eb) into n2;
   reset role;
-  -- Member B's own: 4 claims (two submitted, two entered by the admin) and 4 overtime records.
-  if n <> 0 or n2 <> 8 then
-    fails := array_append(fails, format('member B reads %s of a colleague''s claims and overtime and %s of their own 8', n, n2));
+  -- Member B's own: 5 claims (two submitted, three entered by the admin) and 4 overtime records.
+  if n <> 0 or n2 <> 9 then
+    fails := array_append(fails, format('member B reads %s of a colleague''s claims and overtime and %s of their own 9', n, n2));
   end if;
 
   -- ---- the demo -----------------------------------------------------------
