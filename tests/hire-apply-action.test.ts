@@ -378,7 +378,8 @@ describe('a post with a PDF', () => {
   it('asks whether the job is throttled, stores the file, sends with the service client and the path, and thanks', async () => {
     const state = await applyAction(ORG, JOB, undefined, withFile({ phone: '012-345 6789' }, PDF));
     expect(state).toEqual({ done: { firstName: 'Aisyah' } });
-    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+    expect(mocks.rpc).toHaveBeenCalledTimes(2);
+    expect(mocks.rpc).toHaveBeenNthCalledWith(1, 'hire_cv_files_refused', { p_org_id: ORG });
     expect(mocks.rpc).toHaveBeenCalledWith('hire_apply_throttled', { p_job_id: JOB });
     expect(mocks.storeCv).toHaveBeenCalledTimes(1);
     const [service, orgId, jobId, bytes] = mocks.storeCv.mock.calls[0];
@@ -530,7 +531,7 @@ describe('a PDF that is not stored', () => {
   });
 
   it('throttled before upload: the try-again message, and nothing stored or sent', async () => {
-    mocks.rpc.mockResolvedValue({ data: true, error: null });
+    mocks.rpc.mockImplementation(async (name: string) => ({ data: name === 'hire_apply_throttled', error: null }));
     expect(await applyAction(ORG, JOB, undefined, withFile({}, PDF))).toEqual({
       error: APPLY_MESSAGES.throttled, values: VALUES, fileDropped: true,
     });
@@ -621,6 +622,27 @@ describe('a stored PDF whose application is not taken', () => {
       error: APPLY_MESSAGES.failed, values: VALUES, fileDropped: true,
     });
     removedOnce();
+  });
+
+  it('a workspace that may not be sent files: said by the file, with the way out, and nothing is stored', async () => {
+    mocks.rpc.mockImplementation(async (name: string) =>
+      ({ data: name === 'hire_cv_files_refused', error: null }));
+    expect(await applyAction(ORG, JOB, undefined, withFile({}, PDF))).toEqual({
+      errors: { cv_file: "This employer can't take uploaded files yet. Paste a link to your CV instead." },
+      values: VALUES, fileDropped: true,
+    });
+    expect(mocks.rpc).toHaveBeenCalledWith('hire_cv_files_refused', { p_org_id: ORG });
+    expect(mocks.storeCv).not.toHaveBeenCalled();
+    expect(mocks.submitPublicApplication).not.toHaveBeenCalled();
+  });
+
+  it('the question whether files may be sent fails: the action fails plainly, and nothing is stored', async () => {
+    mocks.rpc.mockImplementation(async (name: string) =>
+      name === 'hire_cv_files_refused' ? { data: null, error: { code: '42501' } } : { data: false, error: null });
+    expect(await applyAction(ORG, JOB, undefined, withFile({}, PDF))).toEqual({
+      error: APPLY_MESSAGES.failed, values: VALUES, fileDropped: true,
+    });
+    expect(mocks.storeCv).not.toHaveBeenCalled();
   });
 
   const attached = (answer: unknown) =>

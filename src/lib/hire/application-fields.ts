@@ -79,6 +79,8 @@ export const APPLY_MESSAGES = {
   cvFileType: 'Choose a PDF file.',
   cvFileTooBig: (sizeLabel: string) => `This file is ${sizeLabel}. Choose one under 5 MB.`,
   cvUploadFailed: "We couldn't upload your CV, so your application wasn't sent. Please try again.",
+  /** The workspace may not be sent files (nobody with a real sign-in owns it). A link still works. */
+  cvFilesOff: "This employer can't take uploaded files yet. Paste a link to your CV instead.",
   cvFileAgain: 'Choose your CV file again before sending.',
   coverLetterRequired: 'Write a short cover letter.',
   coverLetterTooLong: 'Keep the cover letter to 4,000 characters or fewer.',

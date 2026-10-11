@@ -175,7 +175,7 @@ describe('hire cv upload migration', () => {
   });
 
   test('no server-only function is ever granted to a visitor or a member', () => {
-    for (const name of ['hire_apply_throttled', 'hire_cv_deletions_due', 'hire_cv_deletions_done', 'hire_cv_attached']) {
+    for (const name of ['hire_apply_throttled', 'hire_cv_deletions_due', 'hire_cv_deletions_done', 'hire_cv_attached', 'hire_cv_files_refused']) {
       const grants = [...sql.matchAll(new RegExp(`grant execute on function public\\.${name}\\([^)]*\\) to ([^;]+);`, 'g'))];
       expect(grants.map((g) => g[1]), name).toEqual(['service_role']);
       expect(sql, name).toMatch(new RegExp(`revoke execute on function public\\.${name}\\([^)]*\\) from public, anon, authenticated;`));
@@ -188,6 +188,12 @@ describe('hire cv upload migration', () => {
 
   test('the server can ask whether a file is held by an application', () => {
     expect(fn('hire_cv_attached')).toContain('select exists (select 1 from public.hire_applications a where a.cv_path = p_path)');
+  });
+
+  test('a workspace nobody with a real sign-in owns is not sent files', () => {
+    const body = fn('hire_cv_files_refused');
+    expect(body).toContain('select not exists (');
+    expect(body).toContain("m.org_id = p_org_id and m.role = 'owner' and u.is_anonymous is not true");
   });
 
   test('a workspace takes at most 200 CV files a day, asked before any upload', () => {

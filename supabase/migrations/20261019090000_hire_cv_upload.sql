@@ -89,6 +89,18 @@ returns boolean language sql security definer stable set search_path = '' as $$
   select exists (select 1 from public.hire_applications a where a.cv_path = p_path);
 $$;
 
+-- True when this workspace may not be sent files: nobody with a real sign-in
+-- owns it. A workspace costs nothing to make through an anonymous sign-in, and
+-- its members can read its files, so without this the bucket is free hosting.
+-- Asked by the server before it uploads; such a workspace still takes links.
+create or replace function public.hire_cv_files_refused(p_org_id uuid)
+returns boolean language sql security definer stable set search_path = '' as $$
+  select not exists (
+    select 1 from public.org_members m
+      join auth.users u on u.id = m.user_id
+     where m.org_id = p_org_id and m.role = 'owner' and u.is_anonymous is not true);
+$$;
+
 -- ---------------------------------------------------------------------------
 -- The submit function gains the file's path. The argument list changes, so
 -- the old function is dropped and made again in this one transaction.
@@ -272,7 +284,9 @@ revoke execute on function public.hire_apply_throttled(uuid) from public, anon, 
 revoke execute on function public.hire_cv_deletions_due(integer) from public, anon, authenticated;
 revoke execute on function public.hire_cv_deletions_done(text[]) from public, anon, authenticated;
 revoke execute on function public.hire_cv_attached(text) from public, anon, authenticated;
+revoke execute on function public.hire_cv_files_refused(uuid) from public, anon, authenticated;
 grant execute on function public.hire_apply_throttled(uuid) to service_role;
 grant execute on function public.hire_cv_deletions_due(integer) to service_role;
 grant execute on function public.hire_cv_deletions_done(text[]) to service_role;
 grant execute on function public.hire_cv_attached(text) to service_role;
+grant execute on function public.hire_cv_files_refused(uuid) to service_role;

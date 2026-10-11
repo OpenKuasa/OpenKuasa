@@ -205,6 +205,19 @@ export async function applyAction(
     return { error: APPLY_MESSAGES.failed, values, ...dropped };
   }
 
+  // A workspace nobody with a real sign-in owns is not sent files: it can still be given a link.
+  try {
+    const { data, error } = await service.rpc('hire_cv_files_refused', { p_org_id: orgId });
+    if (error) {
+      console.error('[careers/apply] hire_cv_files_refused failed:', { code: error.code });
+      return { error: APPLY_MESSAGES.failed, values, ...dropped };
+    }
+    if (data === true) return { errors: { [CV_FILE_FIELD]: APPLY_MESSAGES.cvFilesOff }, values, ...dropped };
+  } catch (error) {
+    console.error('[careers/apply] hire_cv_files_refused failed:', codeOf(error));
+    return { error: APPLY_MESSAGES.failed, values, ...dropped };
+  }
+
   // Asked before the upload, so that a job being flooded is not also sent a file per post.
   try {
     const { data, error } = await service.rpc('hire_apply_throttled', { p_job_id: jobId });
