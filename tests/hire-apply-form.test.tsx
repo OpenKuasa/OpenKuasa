@@ -371,8 +371,8 @@ describe('the form after the server found problems (no script needed)', () => {
   });
 
   it('shows no message for a field this form does not have', () => {
-    const none = render(FORMS['all off'], { errors: { cv_url: APPLY_MESSAGES.cvRequired }, values });
-    expect(none).not.toContain(APPLY_MESSAGES.cvRequired);
+    const none = render(FORMS['all off'], { errors: { cover_letter: APPLY_MESSAGES.coverLetterRequired }, values });
+    expect(none).not.toContain(APPLY_MESSAGES.coverLetterRequired);
     expect(none).not.toMatch(/needs? fixing/);
   });
 });
@@ -399,7 +399,7 @@ describe('the form after its requirements changed while it was open', () => {
   const state = { error: APPLY_MESSAGES.formChanged, errors: { cv_url: APPLY_MESSAGES.cvRequired }, values };
 
   it('says the form changed above the button while the new field is still on its way', () => {
-    const html = render(FORMS['all off'], state);
+    const html = render(FORMS['all off'], { ...state, errors: { cover_letter: APPLY_MESSAGES.coverLetterRequired } });
     const alerts = [...html.matchAll(/<p[^>]*\srole="alert"[^>]*>([\s\S]*?)<\/p>/g)].map((match) => text(match[1]));
     expect(alerts).toEqual([APPLY_MESSAGES.formChanged]);
     expect(attr(control(html, 'name').attrs, 'value')).toBe('Aisyah Rahman');
