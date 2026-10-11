@@ -6,6 +6,7 @@ import { invoiceIdInput, saveInvoiceInput, setEInvoiceInput } from '@/lib/financ
 import { markPaymentPaidInput, paymentIdInput, recordPaymentInInput, recordPaymentOutInput } from '@/lib/finance/money';
 import { createProductInput, updateProductInput } from '@/lib/finance/products';
 import { quotationIdInput, saveQuotationInput } from '@/lib/finance/quotations';
+import { recordRefundInput } from '@/lib/finance/refunds';
 
 const ID = '11111111-1111-4111-8111-111111111111';
 
@@ -92,6 +93,13 @@ const cases: [string, { parse: (v: unknown) => unknown }, unknown][] = [
     id: ID, invoice_id: ID, credit_date: '2026-10-06', reason: 'other', amount: 0.005, notes: ' Two returned ',
   }],
   ['creditNoteIdInput', creditNoteIdInput, { id: ID }],
+  ['recordRefundInput (against an invoice)', recordRefundInput, {
+    invoice_id: ID, account_id: ID, txn_date: '2026-10-06', method: 'fpx', reason: 'damaged_goods', amount: 240.005, reference: ' ',
+  }],
+  ['recordRefundInput (pending, against a credit note, the invoice box left empty)', recordRefundInput, {
+    invoice_id: '', credit_note_id: ID, account_id: ID, txn_date: '2026-10-06', method: 'cheque', reason: 'other', amount: 0.005,
+    reference: ' CHQ 001 ', notes: ' Collected in person ', scheduled: true,
+  }],
 ];
 
 describe('finance schemas parse their own output unchanged', () => {
