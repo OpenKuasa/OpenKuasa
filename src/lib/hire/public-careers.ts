@@ -125,7 +125,8 @@ export function formatLongDate(iso: string): string | null {
   return m && month ? `${Number(m[3])} ${month} ${m[1]}` : null;
 }
 
-function ringgit(cents: number): string {
+/** Whole ringgit with thousands commas; sen only when not zero. */
+export function ringgit(cents: number): string {
   const whole = Math.floor(cents / 100).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   const sen = cents % 100;
   return `RM ${whole}${sen ? `.${String(sen).padStart(2, '0')}` : ''}`;

@@ -82,6 +82,16 @@ export type Application = {
   offered_at: string | null;
   hired_at: string | null;
   created_at: string;
+  /** The applicant's cover letter, as plain text. */
+  cover_letter: string | null;
+  /** A link to the applicant's CV, as typed. Shown only through `safeLink`. */
+  cv_url: string | null;
+  /** A link to the applicant's portfolio, as typed. Shown only through `safeLink`. */
+  portfolio_url: string | null;
+  /** The monthly salary the applicant expects, in sen. */
+  expected_salary_cents: number | null;
+  /** When the applicant agreed to the privacy notice; null for applications added by hand. */
+  consented_at: string | null;
 };
 
 export type InterviewKind = 'video' | 'onsite' | 'phone';

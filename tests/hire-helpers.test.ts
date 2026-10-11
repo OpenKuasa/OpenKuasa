@@ -32,7 +32,8 @@ const EMPTY: HireData = {
 const app = (over: Partial<Application>): Application => ({
   id: 'a', candidate_id: 'c', job_id: 'j', candidate_name: 'A', job_title: 'J', stage: 'applied',
   outcome: 'active', rating: null, source: null, applied_at: '2026-10-01T00:00:00Z',
-  offered_at: null, hired_at: null, created_at: '2026-10-01T00:00:00Z', ...over,
+  offered_at: null, hired_at: null, created_at: '2026-10-01T00:00:00Z',
+  cover_letter: null, cv_url: null, portfolio_url: null, expected_salary_cents: null, consented_at: null, ...over,
 });
 
 // JSON.stringify turns NaN and Infinity into null, so walk the value instead.

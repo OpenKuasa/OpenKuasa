@@ -3,18 +3,15 @@ import { ScreenContainer } from '@/components/screen/screen-container';
 import { PageHeader } from '@/components/screen/page-header';
 import { BentoGrid, BentoCard, BentoStat } from '@/components/bento/bento';
 import { BarGroup, DonutStat, type Series, type Slice } from '@/components/charts';
-import { LiveDot } from '@/components/ui/live-dot';
-import { Badge } from '@/components/ui/badge';
 import {
   Table,
   TableBody,
-  TableCell,
   TableHead,
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { cn } from '@/lib/utils';
 import { buildApplicationsModel } from '@/lib/hire/lists';
+import { ApplicationRow } from '@/screens/hire/application-details';
 import { LOAD_FAILED, Muted, loadHire } from '@/screens/hire/parts';
 
 /* ---- static config ------------------------------------------------ */
@@ -136,40 +133,17 @@ export default async function ApplicationsScreen() {
                     <TableHead>Source</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Applied</TableHead>
+                    <TableHead>
+                      <span className="sr-only">Details</span>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {model.rows.map((r) => (
-                    <TableRow key={r.id}>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <LiveDot active={r.status !== 'Rejected'} />
-                          <span className="grid size-6 shrink-0 place-items-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">
-                            {r.name.charAt(0)}
-                          </span>
-                          <span className="whitespace-nowrap font-medium">
-                            {r.name}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap">{r.job}</TableCell>
-                      <TableCell>
-                        <Badge variant="secondary">{r.source}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <span
-                          className={cn(
-                            'rounded-full px-2 py-0.5 text-xs font-medium',
-                            STATUS_STYLES[r.status],
-                          )}
-                        >
-                          {r.status}
-                        </span>
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-muted-foreground">
-                        {r.applied}
-                      </TableCell>
-                    </TableRow>
+                    <ApplicationRow
+                      key={r.id}
+                      row={{ ...r, statusClass: STATUS_STYLES[r.status], live: r.status !== 'Rejected' }}
+                    />
                   ))}
                 </TableBody>
               </Table>

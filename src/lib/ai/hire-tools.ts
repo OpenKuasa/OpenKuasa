@@ -66,6 +66,11 @@ const includeContact = z
   .boolean()
   .optional()
   .describe('Set true only when the user asked for contact details (email or phone). Leave it out otherwise.');
+/** A cover letter cut to 600 characters, or null when there is none. */
+function letterExcerpt(text: string | null): string | null {
+  return text && text.length > 600 ? `${text.slice(0, 600)}…` : text;
+}
+
 /** The first 160 characters of a description, or null when there is none. */
 function excerpt(text: string | null | undefined): string | null {
   const t = text?.trim();
@@ -150,7 +155,7 @@ export function createHireTools(
       description:
         'List job applications, newest first: the candidate, the job, the stage reached ' +
         '(applied, screening, interview, offer, hired), whether it is still live, the rating out of 5, ' +
-        'the source. Email and phone are returned only when includeContact is set. Filter by job, stage or outcome.',
+        'the source. Email, phone, cover letter, CV link, portfolio link and expected salary are returned only when includeContact is set. Filter by job, stage or outcome.',
       inputSchema: z.object({
         jobTitle,
         stage: z.enum(['applied', 'screening', 'interview', 'offer', 'hired']).optional()
@@ -183,6 +188,10 @@ export function createHireTools(
               ...(people && {
                 email: people.get(a.candidate_id)?.email ?? null,
                 phone: people.get(a.candidate_id)?.phone ?? null,
+                cover_letter: letterExcerpt(a.cover_letter),
+                cv_url: a.cv_url,
+                portfolio_url: a.portfolio_url,
+                expected_salary_cents: a.expected_salary_cents,
               }),
             })),
           };

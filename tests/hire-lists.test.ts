@@ -7,6 +7,7 @@ import {
   buildInterviewsModel,
   buildJobsModel,
   buildPoolModel,
+  safeLink,
 } from '@/lib/hire/lists';
 import { createSeedHireData } from '@/lib/hire/seed';
 import type { Application, Candidate, HireData, Job } from '@/lib/hire/types';
@@ -50,6 +51,7 @@ describe('jobs', () => {
       id: 'a1', candidate_id: 'c1', job_id: 'j1', candidate_name: 'Aina', job_title: 'Role', stage: 'applied',
       outcome: 'active', rating: null, source: null, applied_at: '2026-10-01T00:00:00Z', offered_at: null,
       hired_at: null, created_at: '2026-10-01T00:00:00Z',
+      cover_letter: null, cv_url: null, portfolio_url: null, expected_salary_cents: null, consented_at: null,
     };
     const board = await buildBoardModel(
       { ...EMPTY, listApplications: async () => [base, { ...base, id: 'a2', rating: 4 }] },
@@ -108,6 +110,7 @@ describe('careers page: what the public board lists', () => {
       id, candidate_id: id, job_id: 'Older', candidate_name: 'Aina', job_title: 'Older', stage: 'applied',
       outcome: 'active', rating: null, source: null, applied_at: '2026-10-01T00:00:00Z', offered_at: null,
       hired_at: null, created_at: '2026-10-01T00:00:00Z',
+      cover_letter: null, cv_url: null, portfolio_url: null, expected_salary_cents: null, consented_at: null,
     });
     const model = await buildCareersModel({
       ...EMPTY, listJobs: async () => jobs, listApplications: async () => [app('a1'), app('a2')],
@@ -180,6 +183,51 @@ describe('applications list', () => {
   });
 });
 
+describe('safeLink', () => {
+  it('gives the address and its host for an http or https link', () => {
+    expect(safeLink('https://drive.google.com/file/d/abc')).toEqual({ href: 'https://drive.google.com/file/d/abc', host: 'drive.google.com' });
+    expect(safeLink('http://example.com')).toEqual({ href: 'http://example.com/', host: 'example.com' });
+  });
+  it('gives nothing for anything else, so it can never become a link', () => {
+    for (const bad of [null, '', 'javascript:alert(1)', 'data:text/html,x', 'ftp://x.y', 'not a url', '//example.com', ' https://example.com']) {
+      expect(safeLink(bad as string | null), String(bad)).toBeNull();
+    }
+  });
+});
+
+describe('application details', () => {
+  const withDetails = async (over: Partial<Application>) => {
+    const [seeded] = await data.listApplications();
+    const model = await buildApplicationsModel({ ...EMPTY, listApplications: async () => [{ ...seeded, ...over }] });
+    return model.rows[0];
+  };
+  it('gives the letter, both links and the salary', async () => {
+    const row = await withDetails({
+      cover_letter: 'Dear team,\nI would love to join.',
+      cv_url: 'https://drive.google.com/file/d/abc',
+      portfolio_url: 'https://aina.example.com/work',
+      expected_salary_cents: 350000,
+    });
+    expect(row.details).toEqual({
+      coverLetter: 'Dear team,\nI would love to join.',
+      cv: { href: 'https://drive.google.com/file/d/abc', host: 'drive.google.com' },
+      portfolio: { href: 'https://aina.example.com/work', host: 'aina.example.com' },
+      expectedSalary: 'RM 3,500 a month',
+    });
+  });
+  it('gives null when none of the four was given', async () => {
+    expect((await withDetails({})).details).toBeNull();
+  });
+  it('never turns a stored value that is not http(s) into a link', async () => {
+    const row = await withDetails({ cv_url: 'javascript:alert(1)', cover_letter: 'Hello' });
+    expect(row.details?.cv).toBeNull();
+    expect(row.details?.coverLetter).toBe('Hello');
+  });
+  it('gives null when the only thing stored is a link that is not safe', async () => {
+    expect((await withDetails({ cv_url: 'javascript:alert(1)' })).details).toBeNull();
+  });
+});
+
 describe('interviews', () => {
   it('lists interviews with the counts by status', async () => {
     const model = await buildInterviewsModel(data, NOW);
@@ -224,7 +272,8 @@ describe('talent pool', () => {
   const app = (id: string, candidate_id: string, over: Partial<Application>): Application => ({
     id, candidate_id, job_id: 'j1', candidate_name: candidate_id, job_title: 'Role', stage: 'applied', outcome: 'active',
     rating: null, source: null, applied_at: '2026-10-01T00:00:00Z', offered_at: null, hired_at: null,
-    created_at: '2026-10-01T00:00:00Z', ...over,
+    created_at: '2026-10-01T00:00:00Z',
+    cover_letter: null, cv_url: null, portfolio_url: null, expected_salary_cents: null, consented_at: null, ...over,
   });
   const small: HireData = {
     ...EMPTY,

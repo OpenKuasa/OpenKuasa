@@ -198,6 +198,11 @@ export function createSeedHireData(now: Date = new Date()): HireData {
       offered_at: row.offeredDaysAfter === null ? null : iso(applied + row.offeredDaysAfter * DAY),
       hired_at: row.hiredDaysAfter === null ? null : iso(applied + row.hiredDaysAfter * DAY),
       created_at: iso(applied),
+      cover_letter: null,
+      cv_url: null,
+      portfolio_url: null,
+      expected_salary_cents: null,
+      consented_at: null,
     };
   });
 

@@ -103,6 +103,40 @@ describe('hire tools', () => {
     expect(pool.candidates.some((r: { email: string | null }) => r.email)).toBe(true);
   });
 
+  describe('application details', () => {
+    const FIELDS = ['cover_letter', 'cv_url', 'portfolio_url', 'expected_salary_cents'];
+    const long = 'x'.repeat(3000);
+    const withDetails = async () => {
+      const apps = (await data.listApplications()).slice(0, 2);
+      const custom: HireData = {
+        ...data,
+        listApplications: async () => [
+          { ...apps[0], cover_letter: long, cv_url: 'https://drive.example.com/cv', portfolio_url: 'https://me.example.com', expected_salary_cents: 350000 },
+          { ...apps[1], cover_letter: 'Short and sweet.', cv_url: null, portfolio_url: null, expected_salary_cents: null },
+        ],
+      };
+      const t = createHireTools(custom, NOW);
+      const exec = (input: Record<string, unknown>) =>
+        (t.listApplications as unknown as { execute: (i: unknown, o: unknown) => Promise<Loose> }).execute(input, { toolCallId: 't', messages: [] });
+      return exec;
+    };
+    it('returns none of the four without includeContact', async () => {
+      const exec = await withDetails();
+      const { applications } = await exec({});
+      expect(applications).toHaveLength(2);
+      for (const row of applications) for (const f of FIELDS) expect(f in row, f).toBe(false);
+    });
+    it('returns all four with includeContact, the letter cut at 600 characters', async () => {
+      const exec = await withDetails();
+      const { applications } = await exec({ includeContact: true });
+      for (const row of applications) for (const f of FIELDS) expect(f in row, f).toBe(true);
+      expect(applications[0].cover_letter).toHaveLength(601);
+      expect(applications[0].cover_letter.endsWith('…')).toBe(true);
+      expect(applications[0]).toMatchObject({ cv_url: 'https://drive.example.com/cv', portfolio_url: 'https://me.example.com', expected_salary_cents: 350000 });
+      expect(applications[1]).toMatchObject({ cover_letter: 'Short and sweet.', cv_url: null, expected_salary_cents: null });
+    });
+  });
+
   it('orders past interviews latest first whatever order the provider returns', async () => {
     const all = await data.listInterviews();
     const shuffled: HireData = { ...data, listInterviews: async () => [...all].reverse() };

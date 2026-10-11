@@ -14,8 +14,10 @@ import {
 } from './applications-view';
 import { ago } from './dashboard';
 import { applicantsByJob, applicationsPerWeek } from './overview';
+import { ringgit } from './public-careers';
 import {
   APPLICATION_STAGES,
+  type Application,
   type ApplicationStage,
   type EmploymentType,
   type HireData,
@@ -217,10 +219,42 @@ export async function buildBoardModel(data: HireData, now: Date): Promise<BoardM
 
 const LABELS: ApplicationLabel[] = ['New', 'In review', 'Shortlisted', 'Rejected'];
 
+export type SafeLink = { href: string; host: string };
+
+/** A stored link as something safe to render: http or https only, or nothing. */
+export function safeLink(url: string | null): SafeLink | null {
+  if (!url || url !== url.trim()) return null;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return { href: parsed.href, host: parsed.host };
+  } catch {
+    return null;
+  }
+}
+
+/** What an applicant gave on the form, ready to show. Every link has been through `safeLink`. */
+export type ApplicationDetails = {
+  coverLetter: string | null;
+  cv: SafeLink | null;
+  portfolio: SafeLink | null;
+  expectedSalary: string | null;
+};
+
+function applicationDetails(a: Application): ApplicationDetails | null {
+  const details: ApplicationDetails = {
+    coverLetter: a.cover_letter?.trim() ? a.cover_letter : null,
+    cv: safeLink(a.cv_url),
+    portfolio: safeLink(a.portfolio_url),
+    expectedSalary: a.expected_salary_cents === null ? null : `${ringgit(a.expected_salary_cents)} a month`,
+  };
+  return details.coverLetter || details.cv || details.portfolio || details.expectedSalary ? details : null;
+}
+
 export type ApplicationsModel = {
   isEmpty: boolean;
   total: number;
-  rows: { id: string; name: string; job: string; source: string; status: ApplicationLabel; applied: string }[];
+  rows: { id: string; name: string; job: string; source: string; status: ApplicationLabel; applied: string; details: ApplicationDetails | null }[];
   statusMix: { key: ApplicationLabel; value: number }[];
   byJob: { label: string; applications: number }[];
 };
@@ -238,6 +272,7 @@ export async function buildApplicationsModel(data: HireData): Promise<Applicatio
       source: a.source ?? 'Unknown',
       status,
       applied: fullDate(a.applied_at),
+      details: applicationDetails(a),
     })),
     statusMix: LABELS.map((key) => ({ key, value: labelled.filter((row) => row.status === key).length })),
     byJob: applicantsByJob(jobs, apps)

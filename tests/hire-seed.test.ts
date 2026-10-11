@@ -60,6 +60,12 @@ describe('hire seed', () => {
     expect(await createSeedHireData(NOW).listApplications()).toEqual(await data.listApplications());
   });
 
+  it('leaves the five application detail fields null on every seeded application', async () => {
+    for (const a of await data.listApplications()) {
+      expect([a.cover_letter, a.cv_url, a.portfolio_url, a.expected_salary_cents, a.consented_at], a.id).toEqual([null, null, null, null, null]);
+    }
+  });
+
   it('seedRow is a pure rule: application 1', () => {
     expect(seedRow(1)).toMatchObject({ k: 37, jobIndex: 0, stage: 'interview', outcome: 'active' });
   });

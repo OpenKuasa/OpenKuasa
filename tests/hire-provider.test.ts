@@ -94,6 +94,15 @@ describe('getHireData', () => {
     await expect((await getHireData(failing)).listJobs()).rejects.toThrow('boom');
   });
 
+  it('asks for the application detail columns', async () => {
+    const data = await getHireData(fakeClient);
+    await data.listApplications();
+    const columns = asked.filter((a) => a.table === 'hire_applications').at(-1)!.columns.split(',');
+    for (const column of ['cover_letter', 'cv_url', 'portfolio_url', 'expected_salary_cents', 'consented_at']) {
+      expect(columns, column).toContain(column);
+    }
+  });
+
   it('asks for the slice 2a job columns', async () => {
     const data = await getHireData(fakeClient);
     await data.listJobs();

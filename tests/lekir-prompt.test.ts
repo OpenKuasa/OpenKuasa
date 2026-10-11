@@ -72,6 +72,10 @@ describe('LEKIR_SYSTEM', () => {
     expect(t).toContain('includecontact');
     expect(t).toContain('never say a candidate has no email or phone');
   });
+  it('counts the cover letter, CV link, portfolio link and expected salary as contact details', () => {
+    const sentence = t.split('\n').find((line) => line.includes('includecontact'))!;
+    for (const word of ['cover letter', 'cv link', 'portfolio link', 'expected salary']) expect(sentence, word).toContain(word);
+  });
   it('tells the specialist how contact details are fetched', () => {
     expect(subAgentSystem('hire', false)).toContain('includeContact');
   });
