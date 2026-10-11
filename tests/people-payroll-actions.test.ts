@@ -16,13 +16,19 @@ const ctl = vi.hoisted(() => ({
   ran: [] as { fn: string; orgId: string; client: unknown; input: unknown }[],
   revalidated: [] as string[],
   lookupFails: false,
+  lookups: 0,
+  clients: 0,
 }));
 
 vi.mock('@/lib/auth/viewer', () => ({ getViewer: async () => ctl.viewer }));
-vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ctl.client }));
+vi.mock('@/lib/supabase/server', () => ({ createClient: async () => {
+    ctl.clients += 1;
+    return ctl.client;
+  } }));
 vi.mock('next/cache', () => ({ revalidatePath: (path: string) => ctl.revalidated.push(path) }));
 vi.mock('@/lib/people/viewer', () => ({
   getPeopleViewer: async () => {
+    ctl.lookups += 1;
     if (ctl.lookupFails) throw new Error('SECRET lookup failure');
     return ctl.people;
   },
@@ -91,6 +97,8 @@ beforeEach(() => {
   ctl.ran = [];
   ctl.revalidated = [];
   ctl.lookupFails = false;
+  ctl.lookups = 0;
+  ctl.clients = 0;
 });
 
 describe('the payroll actions', () => {
@@ -129,6 +137,9 @@ describe('the payroll actions', () => {
     }
     expect(ctl.ran).toEqual([]);
     expect(ctl.revalidated).toEqual([]);
+    // Not even the viewer lookup: the role alone settles it.
+    expect(ctl.lookups).toBe(0);
+    expect(ctl.clients).toBe(0);
   });
 
   it('refuse the demo first, whatever the role, before any call', async () => {

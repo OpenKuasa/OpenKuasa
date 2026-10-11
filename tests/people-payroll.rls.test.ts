@@ -121,7 +121,7 @@ testWithSupabase('an owner runs payroll for a past month and sees who was left o
   expect(run.ok, JSON.stringify(run)).toBe(true);
   if (!run.ok) return;
   runId = run.data.run_id;
-  expect(run.data).toMatchObject({ month: MONTH, payslips: 2 });
+  expect(run.data).toMatchObject({ month: MONTH, payslips: 2, earlier_overtime: 0 });
   expect(run.data.skipped).toEqual([{ employee_id: noSalaryId, name: 'Nadia Salleh', reason: 'no_salary' }]);
 
   // A second run for the same month is refused, with its sentence.
@@ -194,10 +194,19 @@ testWithSupabase('an owner adds a line, types over a figure and puts it back', a
     error: PAYROLL_REFUSALS.PAYROLL_SYSTEM_LINE,
   });
 
-  // Bad input is the database's call too.
-  expect(await savePayslipLine(ctx, { payslip_id: linked.slipId, kind: 'earning', label: ' ', amount_cents: 100 })).toMatchObject({
-    ok: false,
-  });
+  // Something only the database can judge: a line that belongs to another payslip is not found on this one.
+  const parking = await savePayslipLine(ctx, { payslip_id: other.slipId, kind: 'earning', label: 'Parking', amount_cents: 1_000 });
+  expect(parking.ok, JSON.stringify(parking)).toBe(true);
+  if (!parking.ok) return;
+  expect(
+    await savePayslipLine(ctx, {
+      payslip_id: linked.slipId,
+      line_id: parking.data.line.id,
+      kind: 'earning',
+      label: 'Parking',
+      amount_cents: 2_000,
+    }),
+  ).toEqual({ ok: false, error: PAYROLL_REFUSALS.PAYROLL_NOT_FOUND });
 
   // A figure typed over is marked, survives a recalculation, and goes back to the proposal on null.
   const set = await setPayslipStatutory(ctx, { payslip_id: linked.slipId, field: 'epf', amount_cents: 12_345 });
@@ -205,7 +214,7 @@ testWithSupabase('an owner adds a line, types over a figure and puts it back', a
   if (set.ok) expect(set.data).toMatchObject({ epf_cents: 12_345, set_by_hr: ['epf'] });
   const recalculated = await recalculatePayroll(ctx, { run_id: runId });
   expect(recalculated.ok, JSON.stringify(recalculated)).toBe(true);
-  if (recalculated.ok) expect(recalculated.data).toMatchObject({ payslips: 2, added: 0 });
+  if (recalculated.ok) expect(recalculated.data).toMatchObject({ payslips: 2, added: 0, earlier_overtime: 0 });
   const kept = (await ownerData().listPayslips()).find((s) => s.id === linked.slipId)!;
   expect(kept).toMatchObject({ epf_cents: 12_345, set_by_hr: ['epf'] });
   expect(kept.lines.filter((l) => l.source === 'hr')).toHaveLength(2);
@@ -304,6 +313,11 @@ testWithSupabase('an owner undoes paid, the member loses sight of it, and the dr
   if (again.ok) {
     const slip = (await ownerData().listPayslips()).find((s) => s.employee_id === linked.employeeId)!;
     expect(slip.lines.filter((l) => l.source === 'overtime')).toHaveLength(1);
+    // An earlier month is refused while a later month has a run.
+    expect(await runPayroll(ctx, { month: '2026-02' })).toEqual({
+      ok: false,
+      error: PAYROLL_REFUSALS.PAYROLL_LATER_RUN,
+    });
     expect(await deletePayrollRun(ctx, { run_id: again.data.run_id })).toEqual({ ok: true, data: { id: again.data.run_id } });
   }
 });
@@ -318,11 +332,15 @@ testWithSupabase('a demo guest changes nothing', async () => {
   expect(draft && paid && slip, 'the demo has a draft run, a paid run and a payslip to try').toBeTruthy();
   if (!draft || !paid || !slip) return;
 
+  const demoLine = slips.flatMap((s) => s.lines)[0];
+  expect(demoLine, 'the demo has a payslip line to try').toBeDefined();
+  if (!demoLine) return;
+
   const refused = [
     await runPayroll(ctx, { month: '2025-01' }),
     await recalculatePayroll(ctx, { run_id: draft.id }),
     await savePayslipLine(ctx, { payslip_id: slip.id, kind: 'earning', label: 'Gift', amount_cents: 100 }),
-    await deletePayslipLine(ctx, { line_id: slips.flatMap((s) => s.lines)[0]?.id ?? draft.id }),
+    await deletePayslipLine(ctx, { line_id: demoLine.id }),
     await setPayslipStatutory(ctx, { payslip_id: slip.id, field: 'epf', amount_cents: 1 }),
     await removePayslip(ctx, { payslip_id: slip.id }),
     await deletePayrollRun(ctx, { run_id: draft.id }),

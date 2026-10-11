@@ -48,6 +48,9 @@ const EMPLOYEE_COLUMNS =
 const PRIVATE_COLUMNS =
   'employee_id,nric,date_of_birth,phone,address,base_salary_cents,bank_name,bank_account,epf_no,socso_no,tax_no,' +
   'emergency_contact_name,emergency_contact_phone';
+// A payslip reaches an employee by a composite foreign key (employee_id, org_id), which Postgres named by its
+// columns. The hint keeps the embed unambiguous if another path between the tables ever appears.
+const PAYSLIP_NAME = 'employee:hr_employees!hr_payslips_employee_id_org_id_fkey(name)';
 const LEAVE_COLUMNS = `id,employee_id,leave_type,start_date,end_date,days,half_day,reason,status,decision_note,created_at,${NAME}`;
 const TIME_OFF_COLUMNS = `id,employee_id,off_date,start_time,end_time,reason,status,decision_note,created_at,${NAME}`;
 const CLAIM_COLUMNS = `id,employee_id,category,amount_cents,claim_date,description,has_receipt,status,decision_note,receipt_path,paid_on,paid_reference,created_at,${NAME}`;
@@ -58,7 +61,7 @@ const OVERTIME_COLUMNS =
   `payslip:hr_payslips!hr_overtime_records_payslip_id_fkey(period_month,status),${NAME}`;
 const PAYSLIP_COLUMNS =
   'id,employee_id,payroll_run_id,period_month,basic_cents,gross_cents,epf_cents,socso_cents,eis_cents,pcb_cents,' +
-  `other_deductions_cents,net_cents,set_by_hr,status,lines:hr_payslip_lines(id,payslip_id,kind,source,label,amount_cents,created_at),${NAME}`;
+  `other_deductions_cents,net_cents,set_by_hr,status,lines:hr_payslip_lines(id,payslip_id,kind,source,label,amount_cents,created_at),${PAYSLIP_NAME}`;
 const GOAL_COLUMNS = `id,employee_id,title,progress,due_date,status,${NAME}`;
 const SCORECARD_COLUMNS = `id,employee_id,period,score,competencies,${NAME}`;
 const DOCUMENT_COLUMNS = `id,employee_id,title,doc_type,status,issued_on,expires_on,${NAME}`;
@@ -80,6 +83,21 @@ type Options = { window?: { column: string; from: string; to: string }; eq?: [st
 
 const UNKNOWN = 'Unknown';
 
+/** A timestamp as [whole seconds in milliseconds, microseconds of fraction]; text compares wrongly (`:00+00` against `:00.000002+00`). */
+function instant(value: string): [number, number] {
+  const fraction = /\.(\d+)/.exec(value)?.[1] ?? '';
+  const ms = Date.parse(fraction ? value.replace(/\.\d+/, '') : value);
+  const micros = Number(fraction.padEnd(6, '0').slice(0, 6));
+  return [Number.isNaN(ms) ? 0 : ms, micros];
+}
+
+function byMade(a: string, b: string): number {
+  const [ams, amicro] = instant(a);
+  const [bms, bmicro] = instant(b);
+  // Whole seconds, then the fraction as microseconds; the raw text is the last resort.
+  return ams - bms || amicro - bmicro || (a < b ? -1 : a > b ? 1 : 0);
+}
+
 const SOURCE_ORDER: Record<string, number> = { joiner: 0, unpaid_leave: 1, overtime: 2, hr: 3 };
 
 /**
@@ -90,7 +108,7 @@ function payslipOf({ lines, ...row }: PayslipRow): Payslip {
   const ordered = [...(lines ?? [])].sort(
     (a, b) =>
       (SOURCE_ORDER[a.source] ?? 9) - (SOURCE_ORDER[b.source] ?? 9) ||
-      a.created_at.localeCompare(b.created_at) ||
+      byMade(a.created_at, b.created_at) ||
       a.id.localeCompare(b.id),
   );
   return {

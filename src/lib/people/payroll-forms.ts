@@ -15,9 +15,9 @@ const MAX_CENTS = 999_999_999;
 
 /**
  * Digits with optional thousands commas (in groups of three) and at most two decimals, after an optional `RM`.
- * `1,200`, `1200.5`, `RM 1200` and ` 1200.50 ` are all fine; `1,20`, `.5`, `1.`, `1e3` and `-5` are not.
+ * A grouped number starts with 1 to 9 (`0,500` is not an amount). `1,200`, `1200.5`, `RM 1200` and ` 1200.50 ` are all fine; `1,20`, `.5`, `1.`, `1e3` and `-5` are not.
  */
-const AMOUNT = /^(?:rm\s*)?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?$/i;
+const AMOUNT = /^(?:rm\s*)?([1-9]\d{0,2}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?$/i;
 
 /** Cents for the text, zero included, or null when it is not an amount of money or is above the app's limit. */
 function parseCents(text: string): number | null {
@@ -39,6 +39,7 @@ export function ringgitToCents(text: string): number | null {
 
 /** `RM 1,200.50`. Integer arithmetic only. */
 export function centsToRinggit(cents: number): string {
+  if (!Number.isFinite(cents) || !Number.isInteger(cents)) return 'RM —';
   const sign = cents < 0 ? '-' : '';
   const abs = Math.abs(Math.trunc(cents));
   const whole = Math.floor(abs / 100)
@@ -55,9 +56,9 @@ export function monthLabel(month: string): string {
 /**
  * The month "Run payroll" starts on: the month after the latest run on record, never after this month, and this
  * month when there are no runs. A gap behind the latest run is not filled in; the month is still free to choose.
- * `YYYY-MM`.
+ * `YYYY-MM`, or null when the latest run is already this month or later: there is nothing the database would accept.
  */
-export function nextRunMonth(runs: PayrollRun[], today: string): string {
+export function nextRunMonth(runs: PayrollRun[], today: string): string | null {
   const current = today.slice(0, 7);
   const latest = runs.reduce<string | null>(
     (best, run) => (best === null || run.period_month > best ? run.period_month : best),
@@ -67,7 +68,7 @@ export function nextRunMonth(runs: PayrollRun[], today: string): string {
   const year = Number(latest.slice(0, 4));
   const monthIndex = Number(latest.slice(5, 7)); // the month after, counted from 1 below
   const next = monthIndex === 12 ? `${year + 1}-01` : `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
-  return next > current ? current : next;
+  return next > current ? null : next;
 }
 
 const LABEL_MAX = 80;

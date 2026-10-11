@@ -54,6 +54,12 @@ describe('ringgitToCents', () => {
     ['10,000,000'],
     ['9,999,999.995'],
     ['Infinity'],
+    ['0,500'],
+    ['1,2,3'],
+    ['١٢٠٠'],
+    ['99999999.99'],
+    ['9'.repeat(10_000)],
+    ['1'.repeat(5_000) + ',000'],
     ['NaN'],
   ])('refuses %j', (text) => {
     expect(ringgitToCents(text)).toBeNull();
@@ -69,6 +75,10 @@ describe('centsToRinggit', () => {
     [100, 'RM 1.00'],
   ])('shows %i as %s', (cents, text) => {
     expect(centsToRinggit(cents)).toBe(text);
+  });
+
+  it.each([[Number.NaN], [Number.POSITIVE_INFINITY], [12.5]])('shows %s as a dash, never RMNaN', (value) => {
+    expect(centsToRinggit(value)).toBe('RM —');
   });
 
   it('puts the minus sign first on a negative figure', () => {
@@ -96,9 +106,10 @@ describe('nextRunMonth', () => {
     expect(nextRunMonth([run('2026-11-01'), run('2026-12-01')], '2027-03-15')).toBe('2027-01');
   });
 
-  it('never goes past this month', () => {
-    expect(nextRunMonth([run('2026-10-01')], '2026-10-09')).toBe('2026-10');
-    expect(nextRunMonth([run('2026-11-01')], '2026-10-09')).toBe('2026-10');
+  it('is null when every month up to this one already has a run, since there is nothing to run', () => {
+    expect(nextRunMonth([run('2026-10-01')], '2026-10-09')).toBeNull();
+    expect(nextRunMonth([run('2026-11-01')], '2026-10-09')).toBeNull();
+    expect(nextRunMonth([run('2026-09-01')], '2026-10-09')).toBe('2026-10');
   });
 
   it('starts from the month after the latest run even with a gap behind it', () => {

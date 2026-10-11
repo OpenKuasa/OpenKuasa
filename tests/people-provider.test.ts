@@ -137,6 +137,38 @@ describe('getPeopleData', () => {
     expect(slips[1]).toMatchObject({ employee_name: 'Unknown', lines: [] });
   });
 
+  it('names the key the employee embed of a payslip follows', async () => {
+    await (await getPeopleData(client)).listPayslips();
+    const columns = calls.find((c) => c.table === 'hr_payslips')!.columns;
+    expect(columns).toContain('employee:hr_employees!hr_payslips_employee_id_org_id_fkey(name)');
+    expect(columns).toContain('lines:hr_payslip_lines(');
+  });
+
+  it('orders lines by the moment they were made, not by the text of the timestamp', async () => {
+    const line = (id: string, created_at: string) => ({
+      id, payslip_id: 'p1', kind: 'earning', source: 'hr', label: id, amount_cents: 1, created_at,
+    });
+    const saved = ROWS.hr_payslips;
+    ROWS.hr_payslips = [
+      {
+        id: 'p1', employee_id: 'e1', payroll_run_id: 'r1', period_month: '2026-10-01', status: 'pending', set_by_hr: [],
+        employee: { name: 'A' },
+        lines: [
+          line('a-late-fraction', '2026-10-11T00:00:00.000002+00:00'),
+          line('z-exact', '2026-10-11T00:00:00+00:00'),
+          line('b-next-second', '2026-10-11T00:00:01+00:00'),
+          line('c-before-next', '2026-10-11T00:00:00.999999+00:00'),
+        ],
+      },
+    ];
+    try {
+      const [slip] = await (await getPeopleData(client)).listPayslips();
+      expect(slip.lines.map((l) => l.id)).toEqual(['z-exact', 'a-late-fraction', 'c-before-next', 'b-next-second']);
+    } finally {
+      ROWS.hr_payslips = saved;
+    }
+  });
+
   it('reads the month an overtime record was paid in only when its payslip is paid', async () => {
     const records = await (await getPeopleData(client)).listOvertime();
     const columns = calls.find((c) => c.table === 'hr_overtime_records')!.columns;

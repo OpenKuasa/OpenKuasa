@@ -12,8 +12,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-// payroll-writes imports this file too; the sentence is read only when a delete is refused, never while loading.
-import { PAYROLL_REFUSALS } from './payroll-writes';
+import { PAYROLL_REFUSALS } from './payroll-refusals';
 import type { Department } from './types';
 
 export type PeopleWriteContext = { client: SupabaseClient; orgId: string };

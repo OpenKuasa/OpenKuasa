@@ -139,7 +139,7 @@ A caller who may not act, and a run, payslip or line that does not exist, both g
 | `PAYROLL_NOBODY` | Nobody can be paid yet: no active employee has a base salary. |
 | `PAYROLL_NOT_DRAFT` | That run is already paid. Undo paid first to change it. |
 | `PAYROLL_NOT_PAID` | That run is not marked as paid. |
-| `PAYROLL_LATER_RUN` | A later month has a payroll run. Delete it first to reopen this one. |
+| `PAYROLL_LATER_RUN` | A later month already has a payroll run. Delete that run first. |
 | `PAYROLL_NO_PAYSLIPS` | This run has no payslips. |
 | `PAYROLL_NEGATIVE_NET` | A payslip's net pay is below zero. Fix it before marking the run as paid. |
 | `PAYROLL_STALE` | An overtime claim on this run has changed. Recalculate first. |

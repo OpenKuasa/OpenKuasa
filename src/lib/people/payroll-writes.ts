@@ -20,29 +20,12 @@ import {
   writeFailed,
 } from './capabilities';
 import { blank } from './loose-input';
+import { PAYROLL_REFUSALS } from './payroll-refusals';
 import type { StatutoryField } from './types';
 
 // ---- Sentences ---------------------------------------------------------------
 
-/** Each refusal code the payroll functions raise, and what the person is told. */
-export const PAYROLL_REFUSALS: Record<string, string> = {
-  PAYROLL_NOT_ALLOWED: "You can't make that change.",
-  PAYROLL_NOT_FOUND: 'That payroll record could not be found.',
-  PAYROLL_RUN_EXISTS: 'Payroll for that month has already been run.',
-  PAYROLL_MONTH_NOT_STARTED: 'That month has not started yet.',
-  PAYROLL_EARLIER_DRAFT: 'An earlier month is still a draft. Mark it as paid or delete it first.',
-  PAYROLL_NOBODY: 'Nobody can be paid yet: no active employee has a base salary.',
-  PAYROLL_NOT_DRAFT: 'That run is already paid. Undo paid first to change it.',
-  PAYROLL_NOT_PAID: 'That run is not marked as paid.',
-  PAYROLL_LATER_RUN: 'A later month has a payroll run. Delete it first to reopen this one.',
-  PAYROLL_NO_PAYSLIPS: 'This run has no payslips.',
-  PAYROLL_NEGATIVE_NET: "A payslip's net pay is below zero. Fix it before marking the run as paid.",
-  PAYROLL_STALE: 'An overtime claim on this run has changed. Recalculate first.',
-  PAYROLL_SYSTEM_LINE: "That line is worked out by the system and can't be changed.",
-  PAYROLL_BAD_INPUT: 'Some of that was not accepted. Check the name and the amount, and try again.',
-  PAY_IN_PAID_RUN: 'This overtime was paid in a payroll run. Undo paid on that run first.',
-  HR_EMPLOYEE_HAS_PAID_PAYSLIPS: 'This employee has paid payslips. Make them inactive instead.',
-};
+export { PAYROLL_REFUSALS };
 
 type DbError = { code?: string; message?: string } | null | undefined;
 
@@ -72,8 +55,12 @@ const month = z
 const STATUTORY: readonly StatutoryField[] = ['epf', 'socso', 'eis', 'pcb'];
 
 // An empty string from a model means "no line": the same helper reads it for the card and for the save.
+// Anything else that is not text (a number, an object) is refused, never read as "add a line".
 const lineId = z
-  .preprocess(blank, guid('The line to change, by its id. Leave out to add one.').nullable())
+  .preprocess(
+    (value) => (value === undefined || value === null || typeof value === 'string' ? blank(value) : value),
+    guid('The line to change, by its id. Leave out to add one.').nullable(),
+  )
   .optional();
 
 export const runPayrollInput = z.object({ month });
@@ -117,6 +104,8 @@ export type RunResult = {
   month: string;
   /** The run's payslips after the call. */
   payslips: number;
+  /** Overtime lines in the run for work dated before the run's month (paid late). */
+  earlier_overtime: number;
   /** Recalculating only: how many of them are new. */
   added?: number;
   skipped: { employee_id: string; name: string; reason: 'no_salary' }[];
@@ -185,7 +174,9 @@ function pickRunResult(row: Row): RunResult | null {
     if (!employeeId || !name || entry.reason !== 'no_salary') return null;
     skipped.push({ employee_id: employeeId, name, reason: 'no_salary' });
   }
-  const result: RunResult = { run_id: runId, month: periodMonth.slice(0, 7), payslips, skipped };
+  const earlier = count(row.earlier_overtime);
+  if (earlier === null) return null;
+  const result: RunResult = { run_id: runId, month: periodMonth.slice(0, 7), payslips, earlier_overtime: earlier, skipped };
   if (row.added !== undefined) {
     const added = count(row.added);
     if (added === null) return null;

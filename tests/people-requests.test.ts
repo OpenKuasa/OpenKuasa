@@ -148,7 +148,7 @@ describe('buildTimeOffModel', () => {
   });
 
   it('measures hours and durations from the times', () => {
-    const base = { employee_id: 'e', employee_name: 'E', reason: null, decision_note: null, created_at: '2026-10-01T00:00:00Z', paid_month: null };
+    const base = { employee_id: 'e', employee_name: 'E', reason: null, decision_note: null, created_at: '2026-10-01T00:00:00Z' };
     const model = buildTimeOffModel(
       [
         { ...base, id: '1', off_date: '2026-10-03', start_time: '14:00:00', end_time: '16:30:00', status: 'approved' },

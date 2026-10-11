@@ -19,7 +19,7 @@ import {
   writeFailed,
 } from './capabilities';
 import { isRealDate } from './dates';
-import { PAYROLL_REFUSALS } from './payroll-writes';
+import { PAYROLL_REFUSALS } from './payroll-refusals';
 import type { Claim, OvertimeDayKind } from './types';
 
 import { decideInput, requestIdInput } from './leave';

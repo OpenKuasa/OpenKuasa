@@ -51,7 +51,7 @@ describe('PAYROLL_REFUSALS', () => {
       PAYROLL_NOBODY: 'Nobody can be paid yet: no active employee has a base salary.',
       PAYROLL_NOT_DRAFT: 'That run is already paid. Undo paid first to change it.',
       PAYROLL_NOT_PAID: 'That run is not marked as paid.',
-      PAYROLL_LATER_RUN: 'A later month has a payroll run. Delete it first to reopen this one.',
+      PAYROLL_LATER_RUN: 'A later month already has a payroll run. Delete that run first.',
       PAYROLL_NO_PAYSLIPS: 'This run has no payslips.',
       PAYROLL_NEGATIVE_NET: "A payslip's net pay is below zero. Fix it before marking the run as paid.",
       PAYROLL_STALE: 'An overtime claim on this run has changed. Recalculate first.',
@@ -70,6 +70,7 @@ describe('the calls each function makes', () => {
         data: {
           run: { id: RUN, period_month: '2026-10-01', status: 'draft' },
           payslips: 3,
+          earlier_overtime: 2,
           skipped: [{ employee_id: EMP, name: 'Aisyah', reason: 'no_salary' }],
         },
       },
@@ -81,6 +82,7 @@ describe('the calls each function makes', () => {
         run_id: RUN,
         month: '2026-10',
         payslips: 3,
+        earlier_overtime: 2,
         skipped: [{ employee_id: EMP, name: 'Aisyah', reason: 'no_salary' }],
       },
     });
@@ -92,12 +94,12 @@ describe('the calls each function makes', () => {
   it('recalculates a run by its id and reports how many payslips were added', async () => {
     const { client, calls } = fakeSupabase({
       'rpc.hr_recalculate_payroll': {
-        data: { run: { id: RUN, period_month: '2026-09-01', status: 'draft' }, payslips: 5, added: 2, skipped: [] },
+        data: { run: { id: RUN, period_month: '2026-09-01', status: 'draft' }, payslips: 5, added: 2, earlier_overtime: 0, skipped: [] },
       },
     });
     expect(await recalculatePayroll(ctxOf(client), { run_id: RUN })).toEqual({
       ok: true,
-      data: { run_id: RUN, month: '2026-09', payslips: 5, added: 2, skipped: [] },
+      data: { run_id: RUN, month: '2026-09', payslips: 5, added: 2, earlier_overtime: 0, skipped: [] },
     });
     expect(calls[0].fn).toBe('hr_recalculate_payroll');
     expect(calls[0].args).toEqual({ p_run: RUN });
@@ -288,6 +290,60 @@ describe('what is refused before the database is asked', () => {
   ])('refuses a statutory figure with %s', async (_what, over) => {
     const { client, calls } = never();
     const result = await setPayslipStatutory(ctxOf(client), { payslip_id: SLIP, ...over } as never);
+    expect(result.ok).toBe(false);
+    expect(calls).toEqual([]);
+  });
+});
+
+describe('a run reply', () => {
+  const reply = (over: Record<string, unknown>) => ({
+    run: { id: RUN, period_month: '2026-10-01', status: 'draft' },
+    payslips: 1,
+    earlier_overtime: 0,
+    skipped: [],
+    ...over,
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['a fraction', 1.5],
+    ['negative', -1],
+    ['text', '2'],
+    ['null', null],
+  ])('is invalid when earlier_overtime is %s', async (_what, value) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { client } = fakeSupabase({
+      'rpc.hr_run_payroll': { data: reply({ earlier_overtime: value }) },
+      'rpc.hr_recalculate_payroll': { data: reply({ earlier_overtime: value, added: 0 }) },
+    });
+    expect(await runPayroll(ctxOf(client), { month: '2026-10' })).toEqual({ ok: false, error: GENERIC });
+    expect(await recalculatePayroll(ctxOf(client), { run_id: RUN })).toEqual({ ok: false, error: GENERIC });
+  });
+
+  it('carries earlier_overtime through', async () => {
+    const { client } = fakeSupabase({ 'rpc.hr_run_payroll': { data: reply({ earlier_overtime: 4 }) } });
+    expect(await runPayroll(ctxOf(client), { month: '2026-10' })).toMatchObject({ ok: true, data: { earlier_overtime: 4 } });
+  });
+
+  it('reads PAYROLL_LATER_RUN with the one sentence for creating and reopening', async () => {
+    const { client } = fakeSupabase({ 'rpc.hr_run_payroll': { error: { code: 'P0001', message: 'PAYROLL_LATER_RUN' } } });
+    expect(await runPayroll(ctxOf(client), { month: '2026-01' })).toEqual({
+      ok: false,
+      error: 'A later month already has a payroll run. Delete that run first.',
+    });
+  });
+});
+
+describe('the line id', () => {
+  it.each([[5], [{ id: LINE }], [true], [[LINE]]])('refuses %j instead of adding a line', async (value) => {
+    const { client, calls } = fakeSupabase();
+    const result = await savePayslipLine(ctxOf(client), {
+      payslip_id: SLIP,
+      line_id: value,
+      kind: 'earning',
+      label: 'x',
+      amount_cents: 1,
+    } as never);
     expect(result.ok).toBe(false);
     expect(calls).toEqual([]);
   });

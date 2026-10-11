@@ -36,11 +36,14 @@ function lookupFailed(error: unknown): CapResult<never> {
 
 /**
  * An owner or admin who is not in the demo. The database enforces the same; this saves a refused round trip.
+ * The role is checked before anything is read.
  * The workspace is the session's, never one from the input.
  */
 async function asAdmin(): Promise<{ ctx: PeopleWriteContext } | CapResult<never>> {
   const viewer = await getViewer();
   if (viewer.isDemo) return DEMO;
+  // The role is known from the session: a member or viewer is refused here with no database read at all.
+  if (!can(viewer.role, 'approve')) return FORBIDDEN;
   const client = await createClient();
   try {
     // A real account whose current workspace is the demo is refused too.
@@ -49,7 +52,6 @@ async function asAdmin(): Promise<{ ctx: PeopleWriteContext } | CapResult<never>
   } catch (error) {
     return lookupFailed(error);
   }
-  if (!can(viewer.role, 'approve')) return FORBIDDEN;
   return { ctx: { client, orgId: viewer.orgId } };
 }
 
