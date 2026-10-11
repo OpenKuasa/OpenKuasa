@@ -383,9 +383,10 @@ describe('listCandidates', () => {
     const several = await find({ candidate: 'aisyah' });
     expect(several.several_match).toBe(
       'More than one application matches this name: Aisyah Lim (Barista, applied); Aisyah Lim (Cashier, screening, rejected). ' +
-        'If the user named the job, look again with jobTitle as well. Otherwise do not choose one: prepare no change, ' +
-        'say which applications match and ask the user which one they mean.',
+        'Do not choose one. Prepare no change: say which applications match and ask the user which one they mean.',
     );
+    // A second lookup cannot clear this in the same turn (a deletion is then refused), so the hint must not send the model to one.
+    expect(several.several_match).not.toMatch(/look again/);
     // Narrowed to one, or no name asked for: there is nothing to choose between.
     expect(await find({ candidate: 'aisyah', jobTitle: 'Cashier' })).not.toHaveProperty('several_match');
     expect(await find({ candidate: 'Tan' })).not.toHaveProperty('several_match');

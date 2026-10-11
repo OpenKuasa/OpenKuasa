@@ -353,8 +353,8 @@ export function createHireTools(
                   .slice(0, 10)
                   .map((a) => `${a.candidate_name} (${a.job_title}, ${a.stage}${a.outcome === 'active' ? '' : `, ${a.outcome}`})`)
                   .join('; ')}. ` +
-                'If the user named the job, look again with jobTitle as well. Otherwise do not choose one: prepare no change, ' +
-                'say which applications match and ask the user which one they mean.',
+                // No "look again": a deletion from a second lookup in the same turn is refused, so the model must ask.
+                'Do not choose one. Prepare no change: say which applications match and ask the user which one they mean.',
             }),
             applications: rows.slice(0, rowLimit(requested, 20)).map((a) => ({
               id: a.id,
