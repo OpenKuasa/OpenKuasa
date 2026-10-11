@@ -136,6 +136,7 @@ const SELF_TOOLS = [
   'previewLeave', 'previewOvertime', 'applyLeave', 'applyTimeOff', 'cancelLeaveRequest', 'cancelTimeOffRequest',
   'submitClaim', 'cancelClaim', 'submitOvertime', 'cancelOvertime',
   'clockIn', 'clockOut', 'getMyAttendanceToday',
+  'saveGoal', 'removeGoal', 'enrolInTraining', 'withdrawFromTraining',
 ];
 /** Anyone linked to an employee record holds these, an owner or admin included. */
 const CLOCK_TOOLS = ['clockIn', 'clockOut', 'getMyAttendanceToday'];
@@ -561,5 +562,81 @@ describe('POST /api/people/chat payroll tools', () => {
     await held();
     expect(ctl.calls[0].system).toContain('\nPAYROLL\n');
     expect(ctl.calls[0].system).not.toContain('You cannot run payroll');
+  });
+});
+
+describe('POST /api/people/chat performance, training and announcement tools', () => {
+  const OWN_TOOLS = ['saveGoal', 'removeGoal', 'enrolInTraining', 'withdrawFromTraining'];
+  const HR_TOOLS = [
+    'saveReview', 'deleteReview', 'releaseReview', 'saveTraining', 'removeTraining', 'setTrainingCompleted',
+    'saveAnnouncement', 'removeAnnouncement', 'publishAnnouncement', 'unpublishAnnouncement',
+  ];
+  const LOOKUPS = ['listGoals', 'listReviews', 'listTrainings', 'listAnnouncements', 'getPerformanceSummary'];
+  const held = async () => {
+    const res = await POST(post(validBody));
+    expect(res.status).toBe(200);
+    await res.text();
+    return ctl.calls[0].tools;
+  };
+
+  it.each(['owner', 'admin'])('gives an %s all fourteen, linked to an employee record or not', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    for (const linked of [null, { id: 'emp-3' }]) {
+      ctl.calls = [];
+      ctl.linkedEmployee = linked;
+      const tools = await held();
+      for (const name of [...OWN_TOOLS, ...HR_TOOLS]) expect(tools, name).toContain(name);
+    }
+  });
+
+  it.each(['member', 'viewer'])('gives a linked %s the four own-record tools and none of the rest', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    ctl.linkedEmployee = { id: 'emp-7' };
+    const tools = await held();
+    for (const name of OWN_TOOLS) expect(tools, name).toContain(name);
+    for (const name of HR_TOOLS) expect(tools, name).not.toContain(name);
+    expect(ctl.captured!.write).toMatchObject({ tier: 'self', employeeId: 'emp-7' });
+  });
+
+  it.each(['member', 'viewer'])('gives an unlinked %s none: absent, not disabled', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    ctl.linkedEmployee = null;
+    const tools = await held();
+    for (const name of [...OWN_TOOLS, ...HR_TOOLS]) expect(tools, name).not.toContain(name);
+  });
+
+  it.each(['owner', 'admin', 'member', 'viewer'])('gives a %s in the demo workspace none, linked or not', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    ctl.slug = DEMO_ORG_SLUG;
+    for (const linked of [null, { id: 'emp-7' }]) {
+      ctl.calls = [];
+      ctl.linkedEmployee = linked;
+      const tools = await held();
+      for (const name of [...OWN_TOOLS, ...HR_TOOLS]) expect(tools, name).not.toContain(name);
+    }
+  });
+
+  it('gives everyone the lookups, and nobody a tool for pulling a review back to draft', async () => {
+    for (const role of ['owner', 'member']) {
+      ctl.calls = [];
+      ctl.org = { orgId: 'org1', role };
+      ctl.linkedEmployee = { id: 'emp-3' };
+      const tools = await held();
+      for (const name of LOOKUPS) expect(tools, name).toContain(name);
+      expect(tools.filter((name: string) => /Review/.test(name)).sort()).toEqual(role === 'owner' ? ['deleteReview', 'listReviews', 'releaseReview', 'saveReview'] : ['listReviews']);
+    }
+  });
+
+  it('every one of them is on the list of tools that wait for approval', () => {
+    for (const name of [...OWN_TOOLS, ...HR_TOOLS]) expect(PEOPLE_WRITE_TOOL_NAMES).toContain(name);
+  });
+
+  it('sends the model the performance rules in a section of their own, ahead of payroll', async () => {
+    ctl.org = { orgId: 'org1', role: 'owner' };
+    await held();
+    const system = ctl.calls[0].system;
+    expect(system).toContain('\nPERFORMANCE, TRAINING AND ANNOUNCEMENTS\n');
+    expect(system.indexOf('\nPERFORMANCE, TRAINING AND ANNOUNCEMENTS\n')).toBeLessThan(system.indexOf('\nPAYROLL\n'));
+    expect(system).not.toContain('You cannot post an announcement');
   });
 });

@@ -54,7 +54,7 @@ beforeEach(() => {
 });
 
 describe('Lekiu change tools', () => {
-  it('are the eight employee and department changes, then leave, then claims and overtime, after the lookups', () => {
+  it('are the eight employee and department changes, then leave, claims and overtime, attendance, payroll, goals, reviews, training and announcements, after the lookups', () => {
     expect([...PEOPLE_WRITE_TOOL_NAMES]).toEqual([
       'createEmployee', 'updateEmployee', 'setEmployeeStatus', 'deleteEmployee', 'linkEmployeeToMember',
       'createDepartment', 'updateDepartment', 'deleteDepartment',
@@ -64,6 +64,9 @@ describe('Lekiu change tools', () => {
       'decideClaim', 'markClaimPaid', 'unmarkClaimPaid', 'decideOvertime',
       'clockIn', 'clockOut', 'correctAttendance', 'saveHoliday', 'removeHoliday', 'saveAttendanceSettings',
       'runPayroll', 'recalculatePayroll', 'savePayslipLine', 'removePayslipLine', 'setPayslipStatutory', 'removePayslip',
+      'saveGoal', 'removeGoal', 'enrolInTraining', 'withdrawFromTraining',
+      'saveReview', 'deleteReview', 'releaseReview', 'saveTraining', 'removeTraining', 'setTrainingCompleted',
+      'saveAnnouncement', 'removeAnnouncement', 'publishAnnouncement', 'unpublishAnnouncement',
     ]);
     // An owner with no linked employee record holds no clock tool; one with a record holds every one.
     const unlinked = Object.keys(createPeopleTools(data, HR, NOW, write())).sort();
@@ -151,5 +154,51 @@ describe('Lekiu change tools', () => {
     });
     expect((await call('linkEmployeeToMember', { id: EMP, memberEmail: '  ' })).ok).toBe(false);
     expect(ctl.ran).toEqual([]);
+  });
+});
+
+describe('Lekiu change tools for goals, reviews, training and announcements', () => {
+  const OWN = ['saveGoal', 'removeGoal', 'enrolInTraining', 'withdrawFromTraining'];
+  const HR_ONLY = [
+    'saveReview', 'deleteReview', 'releaseReview', 'saveTraining', 'removeTraining', 'setTrainingCompleted',
+    'saveAnnouncement', 'removeAnnouncement', 'publishAnnouncement', 'unpublishAnnouncement',
+  ];
+
+  it('are all in the list of tools that wait for approval, once each, after the payroll tools', () => {
+    const names = [...PEOPLE_WRITE_TOOL_NAMES];
+    expect(new Set(names).size).toBe(names.length);
+    expect(names.slice(-14)).toEqual([...OWN, 'saveReview', 'deleteReview', 'releaseReview', 'saveTraining', 'removeTraining', 'setTrainingCompleted', 'saveAnnouncement', 'removeAnnouncement', 'publishAnnouncement', 'unpublishAnnouncement']);
+    const kit = peopleProduct({ data, viewer: { ...HR, employeeId: EMP }, write: { ...write(), employeeId: EMP } });
+    const { toolApproval } = combineToolkits([kit]);
+    for (const name of [...OWN, ...HR_ONLY]) {
+      expect(kit.write, name).toHaveProperty(name);
+      expect(kit.read, name).not.toHaveProperty(name);
+      expect(toolApproval?.[name], name).toBe('user-approval');
+    }
+  });
+
+  it('a linked member’s changes are exactly their own: leave, claims, overtime, the clock, their goals and their training', () => {
+    const kit = peopleProduct({ data, viewer: { ...MEMBER, employeeId: EMP }, write: { ...write(), tier: 'self' as const, employeeId: EMP } });
+    expect(Object.keys(kit.write).sort()).toEqual(
+      [
+        'applyLeave', 'applyTimeOff', 'cancelLeaveRequest', 'cancelTimeOffRequest', 'submitClaim', 'cancelClaim', 'submitOvertime', 'cancelOvertime',
+        'clockIn', 'clockOut', ...OWN,
+      ].sort(),
+    );
+    const { toolApproval } = combineToolkits([kit]);
+    for (const name of OWN) expect(toolApproval?.[name], name).toBe('user-approval');
+  });
+
+  it('an owner who is not linked to an employee record still holds all fourteen, and names the employee', () => {
+    const kit = peopleProduct({ data, viewer: HR, write: write() });
+    for (const name of [...OWN, ...HR_ONLY]) expect(kit.write, name).toHaveProperty(name);
+  });
+
+  it('nothing here is in the lookups, and every lookup is outside the write list', () => {
+    for (const name of [...OWN, ...HR_ONLY]) expect(PEOPLE_TOOL_NAMES as readonly string[], name).not.toContain(name);
+    for (const name of ['listGoals', 'listReviews', 'listTrainings', 'listAnnouncements']) {
+      expect(PEOPLE_TOOL_NAMES as readonly string[], name).toContain(name);
+      expect(PEOPLE_WRITE_TOOL_NAMES as readonly string[], name).not.toContain(name);
+    }
   });
 });

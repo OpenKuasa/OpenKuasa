@@ -49,6 +49,8 @@ const SELF_TOOLS = [
   'submitClaim', 'cancelClaim', 'submitOvertime', 'cancelOvertime',
   // Anyone linked to an employee record can clock in and out for themselves, and ask whether they have.
   'clockIn', 'clockOut', 'getMyAttendanceToday',
+  // ... and keep their own goals and enrol in training.
+  'saveGoal', 'removeGoal', 'enrolInTraining', 'withdrawFromTraining',
 ];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -111,7 +113,7 @@ describe('who holds which leave tools', () => {
     const member = peopleProduct({ data: base, viewer: MEMBER_VIEWER, write: self() });
     expect(Object.keys(member.write).sort()).toEqual([
       'applyLeave', 'applyTimeOff', 'cancelClaim', 'cancelLeaveRequest', 'cancelOvertime', 'cancelTimeOffRequest',
-      'clockIn', 'clockOut', 'submitClaim', 'submitOvertime',
+      'clockIn', 'clockOut', 'enrolInTraining', 'removeGoal', 'saveGoal', 'submitClaim', 'submitOvertime', 'withdrawFromTraining',
     ]);
   });
 });

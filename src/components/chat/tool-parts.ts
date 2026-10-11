@@ -115,6 +115,8 @@ const TOOL_META: Record<string, ToolMeta> = {
   getPayrollSummary: { label: 'Payroll', Icon: Coins },
   listPayslips: { label: 'Payslips', Icon: Coins },
   getPerformanceSummary: { label: 'Performance', Icon: TrendingUp },
+  listGoals: { label: 'Goals', Icon: TrendingUp },
+  listReviews: { label: 'Reviews', Icon: ClipboardList },
   listTrainings: { label: 'Trainings', Icon: Briefcase },
   listAnnouncements: { label: 'Announcements', Icon: Megaphone },
   getCareersPage: { label: 'Careers page', Icon: Globe },

@@ -43,13 +43,13 @@ const EMPTY: PeopleData = {
 };
 
 describe('people tools', () => {
-  it('is exactly the twenty-one lookups, none sharing a name with another product', () => {
+  it('is exactly the twenty-three lookups, none sharing a name with another product', () => {
     expect(Object.keys(createPeopleTools(data, HR, NOW))).toEqual([...PEOPLE_TOOL_NAMES]);
     expect(PEOPLE_TOOL_NAMES).toEqual([
       'getPeopleOverview', 'listEmployees', 'getEmployee', 'listDepartments', 'getHeadcountByDepartment',
       'listWhoIsOnLeave', 'listLeaveRequests', 'listTimeOffRequests', 'getLeaveBalances', 'listPendingApprovals', 'listClaims',
       'listOvertime', 'getAttendanceSummary', 'getTimesheet', 'listShifts', 'listPublicHolidays',
-      'getPayrollSummary', 'listPayslips', 'getPerformanceSummary', 'listTrainings', 'listAnnouncements',
+      'getPayrollSummary', 'listPayslips', 'getPerformanceSummary', 'listGoals', 'listReviews', 'listTrainings', 'listAnnouncements',
     ]);
     const others = new Set<string>([
       ...Object.keys(createReachTools(createSeedReachData())),
@@ -576,5 +576,67 @@ describe('the lookups after the performance slice', () => {
     const later = runner(data, HR, new Date('2026-10-25T04:00:00Z'));
     expect((await later('listTrainings')({ status: 'completed' })).trainings).toHaveLength(4);
     expect((await later('listTrainings')({ status: 'in_progress' })).trainings).toHaveLength(0);
+  });
+});
+
+describe('the goal and review lookups', () => {
+  const NOT_LINKED_TEXT =
+    'This account is not linked to an employee record yet, so none of this person\'s own records can be shown. It does not mean they have none.';
+  it('list goals for an owner and only the asker’s own for a member, who is told whose they are', async () => {
+    const all = await run('listGoals')({ limit: 50 });
+    expect(all.scope).toBe('everyone in the workspace');
+    expect(all.total).toBe(40);
+    const own = await runner(asMember(data, 'seed-emp-2'), MEMBER)('listGoals')({ limit: 50 });
+    expect(own.scope).toBe('your own records only');
+    expect(own.total).toBeGreaterThan(0);
+    expect(own.total).toBeLessThan(all.total);
+    expect(own.goals.every((g: Loose) => g.employee === own.goals[0].employee)).toBe(true);
+    // Nobody here holds a change tool, so no goal carries an id.
+    for (const g of [...all.goals, ...own.goals]) expect(g).not.toHaveProperty('id');
+  });
+
+  it('list reviews for an owner with every status, and for a member their own released reviews only', async () => {
+    const all = await run('listReviews')({ limit: 50 });
+    expect(all.total).toBe(20);
+    expect(all.drafts).toBe(2);
+    const member = await runner(asMember(data, 'seed-emp-5'), { ...MEMBER, employeeId: 'seed-emp-5' })('listReviews')({ limit: 50 });
+    expect(member.total).toBe(1);
+    expect(member.reviews[0]).not.toHaveProperty('status');
+    expect(member.reviews[0]).not.toHaveProperty('id');
+    expect(member).not.toHaveProperty('drafts');
+  });
+
+  it('a member linked to no employee record gets nothing and is told why, never "no reviews"', async () => {
+    const unlinked = runner(asMember(data, 'seed-emp-5'), { employeeId: null, isHr: false, isDemo: false });
+    for (const name of ['listGoals', 'listReviews']) {
+      const result = await unlinked(name)({});
+      expect(result.not_linked, name).toBe(NOT_LINKED_TEXT);
+      expect(result.total, name).toBe(0);
+    }
+  });
+
+  it('say whose records they cover in their descriptions', () => {
+    const tools = createPeopleTools(data, HR, NOW);
+    for (const name of ['listGoals', 'listReviews']) {
+      expect((tools[name] as unknown as { description: string }).description, name).toContain('whose records it covers');
+    }
+  });
+});
+
+describe('listTrainings and listAnnouncements for an owner', () => {
+  it('says who is enrolled and how many are marked completed, for each course', async () => {
+    const trainings = await run('listTrainings')({});
+    for (const t of trainings.trainings) {
+      expect(t.people.length).toBe(t.enrolled);
+      expect(t.completed_count).toBe(t.people.filter((p: { completed: boolean }) => p.completed).length);
+    }
+    expect(trainings.trainings.some((t: { completed_count: number }) => t.completed_count > 0)).toBe(true);
+  });
+
+  it('marks drafts, and counts unread only for published ones', async () => {
+    const result = await run('listAnnouncements')({ limit: 20 });
+    const draft = result.announcements.find((a: { title: string }) => a.title === 'Year-end dinner');
+    expect(draft).toMatchObject({ status: 'draft', unread: false });
+    expect(result.announcements.filter((a: { status: string }) => a.status === 'published').length).toBe(5);
   });
 });

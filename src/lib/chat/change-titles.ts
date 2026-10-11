@@ -9,6 +9,7 @@ import { REASON_LABEL } from '@/lib/hire/application-changes';
 import { STAGE_LABEL } from '@/lib/hire/applications-view';
 import { isRealDate, monthLabel, weekdayName } from '@/lib/people/dates';
 import { blank, hhmm } from '@/lib/people/loose-input';
+import { toPeriod, toScore } from '@/lib/people/performance-forms';
 import { STATUTORY_FIELDS } from '@/lib/people/statutory-fields';
 import { centsToRinggit, monthLabel as payrollMonthLabel, ringgitToCents, toStatutoryInput } from '@/lib/people/payroll-forms';
 import type { ReceiptState } from '@/lib/people/receipts';
@@ -26,6 +27,7 @@ const APPOINTMENT_STATUS_LABELS: Record<string, string> = {
  * no name of its own, so it is only labelled when the caller asks for that kind.
  */
 function labelOf(row: Record<string, unknown>, kind?: ItemKind): string | null {
+  if (kind === 'goal' || kind === 'review' || kind === 'training' || kind === 'announcement') return performanceFact(row, kind);
   if (kind === 'application') {
     // A listApplications row has `candidate` and `job`, not `name`.
     const who = text(row.candidate);
@@ -120,7 +122,11 @@ export type ItemKind =
   | 'settings'
   | 'payslip'
   | 'payslip-line'
-  | 'payroll-run';
+  | 'payroll-run'
+  | 'goal'
+  | 'review'
+  | 'training'
+  | 'announcement';
 const KIND_OF_TOOL: Record<string, ItemKind> = {
   getCampaigns: 'campaign',
   createCampaign: 'campaign',
@@ -191,6 +197,23 @@ const KIND_OF_TOOL: Record<string, ItemKind> = {
   removePayslipLine: 'payslip',
   setPayslipStatutory: 'payslip',
   removePayslip: 'payslip',
+  // Goals, reviews, courses and announcements: a lookup row and a change's result carry the same fields, so the
+  // newest of the two is what a later card believes.
+  listGoals: 'goal',
+  saveGoal: 'goal',
+  removeGoal: 'goal',
+  listReviews: 'review',
+  saveReview: 'review',
+  releaseReview: 'review',
+  deleteReview: 'review',
+  listTrainings: 'training',
+  saveTraining: 'training',
+  removeTraining: 'training',
+  listAnnouncements: 'announcement',
+  saveAnnouncement: 'announcement',
+  publishAnnouncement: 'announcement',
+  unpublishAnnouncement: 'announcement',
+  removeAnnouncement: 'announcement',
   listDepartments: 'department',
   createDepartment: 'department',
   updateDepartment: 'department',
@@ -560,6 +583,438 @@ function payrollDetail(toolName: string, i: Record<string, unknown>): string | n
   }
 }
 
+// ---- Goals, reviews, courses and announcements -------------------------------------------
+//
+// A lookup row and a change's result carry the same fields, so one reader turns either into a fact, and
+// `nameIn` (newest result first) makes the newest of the two what a later card believes. A fact is JSON text in the
+// name finder, as for payslips. Every card states exactly what will be saved, in full; what the conversation
+// suggests about the row's state is a hedged second sentence in the detail, never a change to the question.
+
+const UNLISTED_GOAL = 'a goal that was not in the list above';
+const UNLISTED_REVIEW = 'a review that was not in the list above';
+const UNLISTED_COURSE = 'a course that was not in the list above';
+const UNLISTED_ANNOUNCEMENT = 'an announcement that was not in the list above';
+
+/** The four competencies in the order a card says them, with the key a tool takes them under. */
+const COMPETENCY_ORDER: [string, string][] = [
+  ['delivery', 'Delivery'],
+  ['teamwork', 'Teamwork'],
+  ['ownership', 'Ownership'],
+  ['communication', 'Communication'],
+];
+const RATING_WORDS: Record<string, string> = {
+  exceeds: 'exceeds expectations',
+  meets: 'meets expectations',
+  below: 'below expectations',
+};
+const GOAL_STATUS_WORDS: Record<string, string> = { on_track: 'on track', at_risk: 'at risk', done: 'done' };
+const COURSE_STATES = ['upcoming', 'in_progress', 'completed'];
+
+type GoalFact = { employee: string | null; title: string; progress: number | null; due_date: string | null; status: string | null };
+type ReviewFact = {
+  employee: string | null;
+  period: string;
+  scores: Record<string, number> | null;
+  rating: string | null;
+  score: number | null;
+  comment: string | null;
+  status: 'draft' | 'released' | null;
+};
+type CourseFact = {
+  title: string;
+  category: string | null;
+  provider: string | null;
+  starts_on: string | null;
+  ends_on: string | null;
+  status: string | null;
+  completed_count: number | null;
+};
+type AnnouncementFact = { title: string; body: string; category: string | null; status: 'draft' | 'published' | null };
+
+const finite = (value: unknown): number | null => (typeof value === 'number' && Number.isFinite(value) ? value : null);
+const realDay = (value: unknown): string | null => (typeof value === 'string' && isRealDate(value) ? value : null);
+
+/** The scores a lookup row or a result carries, by competency name; null when none is a number (an older review has `{}`). */
+function scoresOf(value: unknown): Record<string, number> | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const scores: Record<string, number> = {};
+  for (const [, name] of COMPETENCY_ORDER) {
+    const score = finite(record[name]);
+    if (score !== null) scores[name] = score;
+  }
+  return Object.keys(scores).length > 0 ? scores : null;
+}
+
+/**
+ * What the conversation knows about one goal, review, course or announcement, as JSON text, from a lookup row or a
+ * change's result. A removal's result says only that the row is gone.
+ */
+function performanceFact(row: Record<string, unknown>, kind: 'goal' | 'review' | 'training' | 'announcement'): string | null {
+  if (row.removed === true) return JSON.stringify({ removed: true });
+  if (kind === 'goal') {
+    const title = text(row.title);
+    if (!title) return null;
+    const fact: GoalFact = {
+      employee: text(row.employee),
+      title,
+      progress: finite(row.progress),
+      due_date: realDay(row.due_date),
+      status: typeof row.status === 'string' && Object.hasOwn(GOAL_STATUS_WORDS, row.status) ? row.status : null,
+    };
+    return JSON.stringify(fact);
+  }
+  if (kind === 'review') {
+    const period = text(row.period);
+    if (!period) return null;
+    const fact: ReviewFact = {
+      employee: text(row.employee),
+      period,
+      scores: scoresOf(row.scores),
+      rating: typeof row.rating === 'string' && Object.hasOwn(RATING_WORDS, row.rating) ? row.rating : null,
+      score: finite(row.score),
+      comment: text(row.comment),
+      status: row.status === 'draft' || row.status === 'released' ? row.status : null,
+    };
+    return JSON.stringify(fact);
+  }
+  if (kind === 'training') {
+    const title = text(row.title);
+    if (!title) return null;
+    const fact: CourseFact = {
+      title,
+      category: text(row.category),
+      provider: text(row.provider),
+      starts_on: realDay(row.starts_on),
+      ends_on: realDay(row.ends_on),
+      status: typeof row.status === 'string' && COURSE_STATES.includes(row.status) ? row.status : null,
+      completed_count: finite(row.completed_count),
+    };
+    return JSON.stringify(fact);
+  }
+  const title = text(row.title);
+  if (!title || typeof row.body !== 'string') return null;
+  const fact: AnnouncementFact = {
+    title,
+    body: row.body,
+    category: text(row.category),
+    status: row.status === 'draft' || row.status === 'published' ? row.status : null,
+  };
+  return JSON.stringify(fact);
+}
+
+/** The fact for an id, or why there is none: `removed` when a change earlier in the chat deleted it. */
+function factOf<T>(find: NameFinder, id: unknown, kind: ItemKind): { fact: T | null; removed: boolean } {
+  const parsed = factsOf<Record<string, unknown>>(find(id, kind));
+  if (!parsed) return { fact: null, removed: false };
+  if (parsed.removed === true) return { fact: null, removed: true };
+  return { fact: parsed as T, removed: false };
+}
+
+const numberWords = (n: number): string => String(n);
+
+/** "5 Oct 2026 to 7 Oct 2026", "on 5 Oct 2026", or `missing` when a date is not there. */
+function courseDates(from: unknown, to: unknown, missing = 'dates that could not be read'): string {
+  const a = dateText(from);
+  const b = dateText(to);
+  if (!a || !b) return missing;
+  return a === b ? `on ${a}` : `${a} to ${b}`;
+}
+
+/** Who a goal or an enrolment is for: nobody named is the caller; a named one is looked up, else "this employee". */
+function personWords(find: NameFinder, employeeId: unknown): string {
+  const id = blank(employeeId);
+  return id === null ? 'yourself' : (find(id, 'employee') ?? 'this employee');
+}
+
+function goalStatusOf(progress: number | null, atRisk: unknown): string | null {
+  if (progress === null) return null;
+  if (progress === 100) return 'done';
+  return atRisk === true ? 'at risk' : 'on track';
+}
+
+/** What a goal change will save: the title, the progress, the due date and the status the database will work out. */
+function goalSentence(i: Record<string, unknown>): string {
+  const progress = typeof i.progress === 'number' && Number.isInteger(i.progress) && i.progress >= 0 && i.progress <= 100 ? i.progress : null;
+  const due = blank(i.due_date);
+  const dueWords = due === null ? 'no due date' : dateText(due) ? `due ${dateText(due)}` : 'a due date that could not be read';
+  const status = goalStatusOf(progress, i.at_risk);
+  return [
+    `“${text(i.title) ?? ''}”`,
+    progress === null ? 'a progress that could not be read' : `${progress}% done`,
+    dueWords,
+    status,
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
+function goalFactWords(fact: GoalFact): string {
+  const progress = fact.progress;
+  const parts = [
+    progress === null ? null : `${progress}% done`,
+    fact.due_date ? `due ${dateText(fact.due_date)}` : 'no due date',
+    fact.status ? GOAL_STATUS_WORDS[fact.status] : null,
+  ].filter(Boolean);
+  return `the goal “${fact.title}”${fact.employee ? ` of ${fact.employee}` : ''} (${parts.join(', ')})`;
+}
+
+function scoresText(scores: Record<string, number> | null): string {
+  if (!scores) return 'no scores on record';
+  return COMPETENCY_ORDER.filter(([, name]) => name in scores)
+    .map(([, name]) => `${name} ${numberWords(scores[name])}`)
+    .join(', ');
+}
+
+function inputScores(i: Record<string, unknown>): string {
+  return COMPETENCY_ORDER.map(([key, name]) => {
+    const score = typeof i[key] === 'string' || typeof i[key] === 'number' ? toScore(i[key] as string | number) : null;
+    return score === null ? `${name} (could not be read)` : `${name} ${numberWords(score)}`;
+  }).join(', ');
+}
+
+const ratingWords = (rating: unknown): string =>
+  typeof rating === 'string' && Object.hasOwn(RATING_WORDS, rating) ? RATING_WORDS[rating] : 'a rating that could not be read';
+
+const commentWords = (comment: string | null): string => (comment ? `comment “${comment}”` : 'no comment');
+
+/** Everything a review holds that its owner will see, in full, from the conversation. */
+function reviewFactWords(fact: ReviewFact): string {
+  const overall = fact.score === null ? '' : `, overall ${numberWords(fact.score)}`;
+  return `${scoresText(fact.scores)}${overall}, rated ${ratingWords(fact.rating)}, ${commentWords(fact.comment)}`;
+}
+
+function courseFactWords(fact: CourseFact): string {
+  return `“${fact.title}” (${courseDates(fact.starts_on, fact.ends_on, 'no dates')})`;
+}
+
+function announcementFactWords(fact: AnnouncementFact): string {
+  return `“${fact.title}”${fact.category ? ` (${fact.category})` : ''}: “${fact.body}”`;
+}
+
+/** The question on a card for one of the goal, review, course and announcement tools. */
+function performanceTitle(toolName: string, i: Record<string, unknown>, find: NameFinder): string {
+  switch (toolName) {
+    case 'saveGoal': {
+      const who = personWords(find, i.employee_id);
+      const goalId = blank(i.goal_id);
+      if (goalId === null) return `Add a goal for ${who}: ${goalSentence(i)}?`;
+      const { fact } = factOf<GoalFact>(find, goalId, 'goal');
+      return `Change ${fact ? `the goal “${fact.title}”` : UNLISTED_GOAL} for ${who} to ${goalSentence(i)}?`;
+    }
+    case 'removeGoal': {
+      const { fact } = factOf<GoalFact>(find, i.goal_id, 'goal');
+      return `Remove ${fact ? goalFactWords(fact) : UNLISTED_GOAL}?`;
+    }
+    case 'saveReview': {
+      const who = find(i.employee_id, 'employee') ?? 'this employee';
+      const period = typeof i.period === 'string' ? toPeriod(i.period) : null;
+      const verb = blank(i.review_id) === null ? 'Save a draft review for' : 'Change the draft review for';
+      return `${verb} ${who}, ${period ?? 'a period that could not be read'}: ${inputScores(i)}, rated ${ratingWords(i.rating)}, ${commentWords(blank(i.comment))}?`;
+    }
+    case 'releaseReview': {
+      const { fact } = factOf<ReviewFact>(find, i.review_id, 'review');
+      if (!fact) return `Release ${UNLISTED_REVIEW}?`;
+      return `Release the review for ${fact.employee ?? 'this employee'}, ${fact.period}: ${reviewFactWords(fact)}?`;
+    }
+    case 'deleteReview': {
+      const { fact } = factOf<ReviewFact>(find, i.review_id, 'review');
+      if (!fact) return `Delete ${UNLISTED_REVIEW}?`;
+      return `Delete the review for ${fact.employee ?? 'this employee'}, ${fact.period}: ${reviewFactWords(fact)}?`;
+    }
+    case 'saveTraining': {
+      const category = blank(i.category);
+      const provider = blank(i.provider);
+      const what = [
+        courseDates(i.starts_on, i.ends_on),
+        category ? `category “${category}”` : 'no category',
+        provider ? `provider “${provider}”` : 'no provider',
+      ].join(', ');
+      const name = `“${text(i.title) ?? ''}” (${what})`;
+      const trainingId = blank(i.training_id);
+      if (trainingId === null) return `Add the course ${name}?`;
+      const { fact } = factOf<CourseFact>(find, trainingId, 'training');
+      return `Change ${fact ? `the course “${fact.title}”` : UNLISTED_COURSE} to ${name}?`;
+    }
+    case 'removeTraining': {
+      const { fact } = factOf<CourseFact>(find, i.training_id, 'training');
+      return fact ? `Remove the course ${courseFactWords(fact)} and everyone's enrolment in it?` : `Remove ${UNLISTED_COURSE}?`;
+    }
+    case 'enrolInTraining':
+    case 'withdrawFromTraining': {
+      const who = personWords(find, i.employee_id);
+      const { fact } = factOf<CourseFact>(find, i.training_id, 'training');
+      const course = fact ? `the course ${courseFactWords(fact)}` : UNLISTED_COURSE;
+      return toolName === 'enrolInTraining' ? `Enrol ${who} in ${course}?` : `Withdraw ${who} from ${course}?`;
+    }
+    case 'setTrainingCompleted': {
+      const who = find(i.employee_id, 'employee') ?? 'this employee';
+      const { fact } = factOf<CourseFact>(find, i.training_id, 'training');
+      const course = fact ? `the course ${courseFactWords(fact)}` : UNLISTED_COURSE;
+      if (i.completed === true) return `Mark ${who} as having completed ${course}?`;
+      if (i.completed === false) return `Undo ${who}'s completion of ${course}?`;
+      return `Change whether ${who} completed ${course}?`;
+    }
+    case 'saveAnnouncement': {
+      const title = text(i.title) ?? '';
+      const category = typeof i.category === 'string' && i.category ? ` (${i.category})` : '';
+      const body = typeof i.body === 'string' && i.body.trim() ? `“${i.body}”` : 'no text';
+      const shown = `“${title}”${category}: ${body}`;
+      const publish = i.publish === true;
+      const announcementId = blank(i.announcement_id);
+      if (announcementId === null) return publish ? `Publish the new announcement ${shown}?` : `Save the new announcement ${shown} as a draft?`;
+      const { fact } = factOf<AnnouncementFact>(find, announcementId, 'announcement');
+      const old = fact ? `the announcement “${fact.title}”` : UNLISTED_ANNOUNCEMENT;
+      return publish ? `Save changes to ${old} and publish it, as ${shown}?` : `Save changes to ${old}, as ${shown}?`;
+    }
+    case 'publishAnnouncement':
+    case 'unpublishAnnouncement':
+    case 'removeAnnouncement': {
+      const { fact } = factOf<AnnouncementFact>(find, i.announcement_id, 'announcement');
+      const verb = toolName === 'publishAnnouncement' ? 'Publish' : toolName === 'unpublishAnnouncement' ? 'Pull back to a draft' : 'Delete';
+      return fact ? `${verb} the announcement ${announcementFactWords(fact)}?` : `${verb} ${UNLISTED_ANNOUNCEMENT}?`;
+    }
+    default:
+      return 'Approve this change?';
+  }
+}
+
+/** What the conversation suggests will make the database refuse a change. A hedge in the detail, never a change to the question. */
+function performanceCaveat(toolName: string, i: Record<string, unknown>, find: NameFinder): string | null {
+  const gone = (what: string) => `This ${what} was deleted earlier in this chat, so this will be refused.`;
+  switch (toolName) {
+    case 'saveGoal':
+    case 'removeGoal': {
+      const goalId = toolName === 'saveGoal' ? blank(i.goal_id) : i.goal_id;
+      return goalId !== null && factOf<GoalFact>(find, goalId, 'goal').removed ? gone('goal') : null;
+    }
+    case 'saveReview':
+    case 'releaseReview':
+    case 'deleteReview': {
+      const reviewId = toolName === 'saveReview' ? blank(i.review_id) : i.review_id;
+      if (reviewId === null) return null;
+      const { fact, removed } = factOf<ReviewFact>(find, reviewId, 'review');
+      if (removed) return gone('review');
+      return fact?.status === 'released' ? 'This review was released when last checked, so this may be refused.' : null;
+    }
+    case 'saveTraining':
+    case 'removeTraining':
+    case 'enrolInTraining':
+    case 'withdrawFromTraining':
+    case 'setTrainingCompleted': {
+      const trainingId = toolName === 'saveTraining' ? blank(i.training_id) : i.training_id;
+      if (trainingId === null) return null;
+      const { fact, removed } = factOf<CourseFact>(find, trainingId, 'training');
+      if (removed) return gone('course');
+      if (!fact) return null;
+      const own = blank(i.employee_id) === null;
+      if (toolName === 'enrolInTraining' && own && fact.status === 'completed') {
+        return 'This course had ended when last checked, so this may be refused.';
+      }
+      if (toolName === 'withdrawFromTraining' && own && (fact.status === 'in_progress' || fact.status === 'completed')) {
+        return 'This course had already started when last checked, so this may be refused. Ask an owner or admin to remove you.';
+      }
+      if (toolName === 'setTrainingCompleted' && i.completed === true && fact.status === 'upcoming') {
+        return 'This course had not started when last checked, so this may be refused.';
+      }
+      if (toolName === 'removeTraining' && fact.completed_count !== null && fact.completed_count > 0) {
+        return 'Someone was marked as completed on it when last checked, so this may be refused. Undo that first.';
+      }
+      return null;
+    }
+    case 'saveAnnouncement':
+    case 'publishAnnouncement':
+    case 'unpublishAnnouncement':
+    case 'removeAnnouncement': {
+      const announcementId = toolName === 'saveAnnouncement' ? blank(i.announcement_id) : i.announcement_id;
+      if (announcementId === null) return null;
+      const { fact, removed } = factOf<AnnouncementFact>(find, announcementId, 'announcement');
+      if (removed) return gone('announcement');
+      if (toolName === 'publishAnnouncement' && fact?.status === 'published') {
+        return 'This announcement was published when last checked, so this may be refused.';
+      }
+      if (toolName === 'unpublishAnnouncement' && fact?.status === 'draft') {
+        return 'This announcement was a draft when last checked, so this may be refused.';
+      }
+      if (toolName === 'saveAnnouncement' && fact?.status === 'published') {
+        return i.publish === true
+          ? 'It was already published when last checked, so this saves the changes and it stays published.'
+          : 'It was published when last checked, so everyone in the workspace sees the changes.';
+      }
+      return null;
+    }
+    default:
+      return null;
+  }
+}
+
+/** The second line of a card for one of these tools: what else the change does, then what the conversation suggests. */
+function performanceDetail(toolName: string, i: Record<string, unknown>, find?: NameFinder): string | null {
+  let base: string | null = null;
+  switch (toolName) {
+    case 'removeGoal':
+      base = 'This cannot be undone.';
+      break;
+    case 'saveReview':
+    case 'deleteReview': {
+      // A claim that it is a draft is dropped when the conversation shows it released: the hedge below says so instead.
+      const released = find ? factOf<ReviewFact>(find, toolName === 'saveReview' ? blank(i.review_id) : i.review_id, 'review').fact?.status === 'released' : false;
+      const draftWords = released ? null : 'A draft: the employee cannot see it yet.';
+      base = toolName === 'saveReview' ? draftWords : [draftWords, 'This cannot be undone.'].filter(Boolean).join(' ');
+      break;
+    }
+    case 'releaseReview':
+      base = 'The employee will be able to see it.';
+      break;
+    case 'removeTraining':
+      base = 'Everyone enrolled is removed from it too. This cannot be undone.';
+      break;
+    case 'setTrainingCompleted':
+      base = i.completed === true ? 'A course with someone marked as completed cannot be removed until this is undone.' : null;
+      break;
+    case 'saveAnnouncement':
+      // Saving an existing announcement without publishing leaves it as it is: a draft stays a draft and a published
+      // one stays published (and shows the changes), so a flat "A draft" would be wrong for it.
+      base =
+        i.publish === true
+          ? 'Everyone in the workspace will see it.'
+          : blank(i.announcement_id) === null
+            ? 'A draft: only owners and admins can see it.'
+            : 'Saved without publishing: a draft stays a draft, and a published announcement stays published and shows the changes.';
+      break;
+    case 'publishAnnouncement':
+      base = 'Everyone in the workspace will see it.';
+      break;
+    case 'unpublishAnnouncement':
+      base = 'Members will no longer see it.';
+      break;
+    case 'removeAnnouncement':
+      base = 'This cannot be undone. Everyone\'s read marks for it are deleted too.';
+      break;
+    default:
+      break;
+  }
+  const caveat = find ? performanceCaveat(toolName, i, find) : null;
+  return [base, caveat].filter(Boolean).join(' ') || null;
+}
+
+const PERFORMANCE_TOOLS = new Set([
+  'saveGoal',
+  'removeGoal',
+  'enrolInTraining',
+  'withdrawFromTraining',
+  'saveReview',
+  'deleteReview',
+  'releaseReview',
+  'saveTraining',
+  'removeTraining',
+  'setTrainingCompleted',
+  'saveAnnouncement',
+  'removeAnnouncement',
+  'publishAnnouncement',
+  'unpublishAnnouncement',
+]);
+
 const UNLISTED_APPLICATION = 'an application that was not in the list above';
 const UNLISTED_CANDIDATE = 'a candidate that was not in the list above';
 const UNLISTED_LEAVE = 'a leave request that was not in the list above';
@@ -924,6 +1379,21 @@ export function approvalTitle(
       return `Remove ${old ? `public holiday: ${old}` : UNLISTED_HOLIDAY}?`;
     }
     case 'saveAttendanceSettings': return settingsTitle(i, find);
+    case 'saveGoal':
+    case 'removeGoal':
+    case 'enrolInTraining':
+    case 'withdrawFromTraining':
+    case 'saveReview':
+    case 'deleteReview':
+    case 'releaseReview':
+    case 'saveTraining':
+    case 'removeTraining':
+    case 'setTrainingCompleted':
+    case 'saveAnnouncement':
+    case 'removeAnnouncement':
+    case 'publishAnnouncement':
+    case 'unpublishAnnouncement':
+      return performanceTitle(toolName, i, find);
     case 'runPayroll':
     case 'recalculatePayroll':
     case 'savePayslipLine':
@@ -1174,6 +1644,7 @@ export function approvalDetail(
     const caveat = named ? payrollCaveat(toolName, i, named) : null;
     return [payrollDetail(toolName, i), caveat].filter(Boolean).join(' ') || null;
   }
+  if (PERFORMANCE_TOOLS.has(toolName)) return performanceDetail(toolName, i, named);
   if (toolName === 'removeHoliday' || (toolName === 'saveHoliday' && blank(i.id) !== null)) {
     return 'Leave and overtime already recorded are not changed.';
   }
