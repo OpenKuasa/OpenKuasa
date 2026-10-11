@@ -36,6 +36,12 @@ export function parseSkills(line: string): string[] {
 
 const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const GENERIC = 'That change could not be saved. Please try again.';
+/**
+ * An add with a CV file, refused before anyone was saved: the server cannot take a file just now (the
+ * workspace's files are refused or its day's worth is used, the job is being flooded, or storage is not
+ * set up). Not one of the database's words, so it is not in CANDIDATE_MESSAGES.
+ */
+export const CV_UPLOADS_REFUSED = 'CV files cannot be uploaded right now. Add the candidate without the file, or try again later.';
 
 const tooLong = (label: string, max: number) => `Keep the ${label} to ${max} characters or fewer.`;
 

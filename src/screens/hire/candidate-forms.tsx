@@ -19,6 +19,7 @@ import {
 } from '@/lib/hire/application-fields';
 import {
   CANDIDATE_LIMITS,
+  CV_UPLOADS_REFUSED,
   EMPTY_CANDIDATE_FORM,
   candidateMessage,
   candidateProblems,
@@ -73,6 +74,8 @@ const SERVER_ERROR_FIELD: Record<string, ProblemKey> = {
   [candidateMessage('job_not_open')]: 'job_id',
   [candidateMessage('invalid_url')]: 'cv_url',
   [APPLY_MESSAGES.cvFileType]: CV_FILE_FIELD,
+  // Said at the file, where it can be removed and the form sent again.
+  [CV_UPLOADS_REFUSED]: CV_FILE_FIELD,
 };
 /** "This file is 7.2 MB. Choose one under 5 MB.": the size is the server's to say. */
 const TOO_BIG = /^This file is .+\. Choose one under 5 MB\.$/;

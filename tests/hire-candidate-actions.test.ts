@@ -126,6 +126,8 @@ const added = (over: Record<string, unknown> = {}) => ({
 });
 const WITH_APPLICATION = `Added ${NAME} and an application for Barista.`;
 const NOT_ATTACHED = ' The CV could not be attached.';
+const NO_UPLOADS = 'CV files cannot be uploaded right now. Add the candidate without the file, or try again later.';
+const ASKED = ['rpc:hire_cv_files_refused', 'rpc:hire_apply_throttled'];
 
 let consoles: ReturnType<typeof vi.spyOn>[] = [];
 
@@ -192,6 +194,8 @@ describe('addCandidateAction', () => {
   it('sends the job, the cover note and the CV link when a job is picked, and drops the last two when none is', async () => {
     await addCandidateAction(form({ job_id: JOB, cover_letter: 'Line one\r\nLine two', cv_url: 'https://example.com/cv' }));
     expect(ctl.added[0].input).toMatchObject({ job_id: JOB, cover_letter: 'Line one\nLine two', cv_url: 'https://example.com/cv' });
+    // A job and no file: the upload questions are not asked.
+    expect(ctl.order).toEqual(['addCandidate']);
     await addCandidateAction(form({ cover_letter: 'Kept for nobody', cv_url: 'not a link' }));
     expect(ctl.added[1].input).toMatchObject({ job_id: null, cover_letter: '', cv_url: '' });
   });
@@ -219,7 +223,7 @@ describe('addCandidateAction', () => {
     expect(ctl.revalidated).toEqual([]);
   });
 
-  it('refuses a file with no job picked', async () => {
+  it('refuses a file with no job picked, without asking whether files may be uploaded', async () => {
     expect(await addCandidateAction(form({}, pdf()))).toEqual({ ok: false, error: 'Pick a job to attach a CV.' });
     expect(ctl.order).toEqual([]);
   });
@@ -270,13 +274,13 @@ describe('addCandidateAction', () => {
   it('returns the capability\'s refusal as it is, stores nothing and refreshes nothing', async () => {
     ctl.addResult = { ok: false, error: 'Only an open or paused job can take a new application.' };
     expect(await addCandidateAction(form({ job_id: JOB }, pdf()))).toEqual({ ok: false, error: 'Only an open or paused job can take a new application.' });
-    expect(ctl.order).toEqual(['addCandidate']);
+    expect(ctl.order).toEqual([...ASKED, 'addCandidate']);
     expect(ctl.revalidated).toEqual([]);
   });
 
-  it('with a file and a new application: asks the two questions, stores, attaches, in that order', async () => {
+  it('with a file and a job: asks the two questions before the add, then adds, stores, attaches, in that order', async () => {
     const result = await addCandidateAction(form({ job_id: JOB }, pdf()));
-    expect(ctl.order).toEqual(['addCandidate', 'rpc:hire_cv_files_refused', 'rpc:hire_apply_throttled', 'storeCv', 'attach']);
+    expect(ctl.order).toEqual(['rpc:hire_cv_files_refused', 'rpc:hire_apply_throttled', 'addCandidate', 'storeCv', 'attach']);
     expect(ctl.rpcArgs).toEqual([
       { fn: 'hire_cv_files_refused', args: { p_org_id: 'org1' } },
       { fn: 'hire_apply_throttled', args: { p_job_id: JOB } },
@@ -293,7 +297,7 @@ describe('addCandidateAction', () => {
   it('removes the stored file and says so when the attach answers already_attached', async () => {
     ctl.attachWord = 'already_attached';
     const result = await addCandidateAction(form({ job_id: JOB }, pdf()));
-    expect(ctl.order).toEqual(['addCandidate', 'rpc:hire_cv_files_refused', 'rpc:hire_apply_throttled', 'storeCv', 'attach', 'removeCv']);
+    expect(ctl.order).toEqual([...ASKED, 'addCandidate', 'storeCv', 'attach', 'removeCv']);
     expect(ctl.removed).toEqual(['org1/job/file.pdf']);
     expect(result).toMatchObject({ ok: true, data: { message: WITH_APPLICATION + NOT_ATTACHED } });
   });
@@ -342,45 +346,58 @@ describe('addCandidateAction', () => {
     ['errors', { data: null, error: { code: '42501' } }],
     ['answers something that is not a boolean', { data: null, error: null }],
     ['throws', 'throw' as const],
-  ])('stores nothing and says so when hire_cv_files_refused %s', async (_label, answer) => {
+  ])('refuses the whole add, and saves nobody, when hire_cv_files_refused %s', async (_label, answer) => {
     ctl.rpc.hire_cv_files_refused = answer;
     const result = await addCandidateAction(form({ job_id: JOB }, pdf()));
-    expect(ctl.order).toEqual(['addCandidate', 'rpc:hire_cv_files_refused']);
-    expect(result).toMatchObject({ ok: true, data: { id: CANDIDATE, message: WITH_APPLICATION + NOT_ATTACHED } });
-    expect([...ctl.revalidated].sort()).toEqual(SCREENS);
+    // Asked before the add: an application made now could never be given its CV.
+    expect(ctl.order).toEqual(['rpc:hire_cv_files_refused']);
+    expect(ctl.added).toEqual([]);
+    expect(result).toEqual({ ok: false, error: NO_UPLOADS });
+    expect(ctl.revalidated).toEqual([]);
   });
 
   it.each([
     ['says the job is flooded', { data: true, error: null }],
     ['errors', { data: null, error: { code: '500' } }],
     ['throws', 'throw' as const],
-  ])('stores nothing and says so when hire_apply_throttled %s', async (_label, answer) => {
+  ])('refuses the whole add, and saves nobody, when hire_apply_throttled %s', async (_label, answer) => {
     ctl.rpc.hire_apply_throttled = answer;
     const result = await addCandidateAction(form({ job_id: JOB }, pdf()));
-    expect(ctl.order).toEqual(['addCandidate', 'rpc:hire_cv_files_refused', 'rpc:hire_apply_throttled']);
-    expect(result).toMatchObject({ ok: true, data: { message: WITH_APPLICATION + NOT_ATTACHED } });
+    expect(ctl.order).toEqual(ASKED);
+    expect(ctl.added).toEqual([]);
+    expect(result).toEqual({ ok: false, error: NO_UPLOADS });
+    expect(ctl.revalidated).toEqual([]);
+  });
+
+  it('the same form without the file is then added, with nothing asked', async () => {
+    ctl.rpc.hire_cv_files_refused = { data: true, error: null };
+    expect(await addCandidateAction(form({ job_id: JOB }, pdf()))).toEqual({ ok: false, error: NO_UPLOADS });
+    ctl.order = [];
+    expect(await addCandidateAction(form({ job_id: JOB }))).toMatchObject({ ok: true, data: { message: WITH_APPLICATION } });
+    expect(ctl.order).toEqual(['addCandidate']);
   });
 
   it('says so, and attaches nothing, when storage refuses the file', async () => {
     ctl.storePath = null;
     const result = await addCandidateAction(form({ job_id: JOB }, pdf()));
-    expect(ctl.order).toEqual(['addCandidate', 'rpc:hire_cv_files_refused', 'rpc:hire_apply_throttled', 'storeCv']);
+    expect(ctl.order).toEqual([...ASKED, 'addCandidate', 'storeCv']);
     expect(result).toMatchObject({ ok: true, data: { message: WITH_APPLICATION + NOT_ATTACHED } });
   });
 
-  it('is still a successful add when the service role is not configured: only the CV is missing', async () => {
+  it('refuses an add with a file, and saves nobody, when the service role is not configured; without the file it is added', async () => {
     ctl.serviceThrows = true;
-    const result = await addCandidateAction(form({ job_id: JOB }, pdf()));
+    expect(await addCandidateAction(form({ job_id: JOB }, pdf()))).toEqual({ ok: false, error: NO_UPLOADS });
+    expect(ctl.order).toEqual([]);
+    expect(ctl.revalidated).toEqual([]);
+    expect(await addCandidateAction(form({ job_id: JOB }))).toMatchObject({ ok: true, data: { message: WITH_APPLICATION } });
     expect(ctl.order).toEqual(['addCandidate']);
-    expect(result).toMatchObject({ ok: true, data: { id: CANDIDATE, message: WITH_APPLICATION + NOT_ATTACHED } });
-    expect([...ctl.revalidated].sort()).toEqual(SCREENS);
   });
 
   it('never stores a file for an application that already existed, and says the CV was not attached', async () => {
     const message = `${NAME} has already applied for Barista. Nothing was changed.`;
     ctl.addResult = added({ candidate: 'existing', application: 'existing', message });
     const result = await addCandidateAction(form({ job_id: JOB }, pdf()));
-    expect(ctl.order).toEqual(['addCandidate']);
+    expect(ctl.order).toEqual([...ASKED, 'addCandidate']);
     expect(result).toMatchObject({ ok: true, data: { message: message + NOT_ATTACHED } });
   });
 

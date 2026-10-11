@@ -4,7 +4,9 @@ import { revalidatePath } from 'next/cache';
 import { can } from '@/lib/auth/permissions';
 import { getViewer } from '@/lib/auth/viewer';
 import { APPLY_MESSAGES, CV_FILE_FIELD, CV_MAX_BYTES, chosenFile, cvFileProblem, fileSizeLabel } from '@/lib/hire/application-fields';
-import { type CandidateFormValues, addedMessage, candidateMessage, candidateProblems, parseSkills } from '@/lib/hire/candidate-fields';
+import {
+  type CandidateFormValues, CV_UPLOADS_REFUSED, addedMessage, candidateMessage, candidateProblems, parseSkills,
+} from '@/lib/hire/candidate-fields';
 import {
   type CandidateAdded,
   type CapResult,
@@ -207,24 +209,35 @@ async function cvKept(service: ReturnType<typeof serviceClient>, path: string): 
 }
 
 /**
+ * Whether a CV file can be taken for this job right now, asked before anyone
+ * is saved: an application made while the answer is no could never be given
+ * its file. Answers the server's own client when it can, null when it cannot:
+ * the server is not set up to store files, the workspace may not be sent
+ * files (or has had its day's worth), or the job is being flooded.
+ */
+async function cvUploadService(orgId: string, jobId: string): Promise<ReturnType<typeof serviceClient> | null> {
+  let service: ReturnType<typeof serviceClient>;
+  try {
+    service = serviceClient();
+  } catch {
+    console.error('[hire/add-candidate] a CV was posted but the service role is not configured');
+    return null;
+  }
+  if (await serviceSaysNo(service, 'hire_cv_files_refused', { p_org_id: orgId })) return null;
+  if (await serviceSaysNo(service, 'hire_apply_throttled', { p_job_id: jobId })) return null;
+  return service;
+}
+
+/**
  * Stores a checked PDF and attaches it to an application that was just made.
  * True only when the application now holds the file. Everything here is done
  * as the server itself: the database lets no member write a file or its path.
  * A file the database refused is removed again; one whose attach answer was
  * lost is removed only once the database says no application holds it.
  */
-async function attachCv(orgId: string, jobId: string, applicationId: string, bytes: Uint8Array): Promise<boolean> {
-  let service: ReturnType<typeof serviceClient>;
-  try {
-    service = serviceClient();
-  } catch {
-    console.error('[hire/add-candidate] a CV was posted but the service role is not configured');
-    return false;
-  }
-  // A workspace that may not be sent files, then a job being flooded: both asked before the upload.
-  if (await serviceSaysNo(service, 'hire_cv_files_refused', { p_org_id: orgId })) return false;
-  if (await serviceSaysNo(service, 'hire_apply_throttled', { p_job_id: jobId })) return false;
-
+async function attachCv(
+  service: ReturnType<typeof serviceClient>, orgId: string, jobId: string, applicationId: string, bytes: Uint8Array,
+): Promise<boolean> {
   let path: string | null = null;
   try {
     path = await storeCv(service, orgId, jobId, bytes);
@@ -253,9 +266,11 @@ async function attachCv(orgId: string, jobId: string, applicationId: string, byt
 /**
  * Adds a candidate by hand, with an application when a job is picked and a PDF
  * CV when one is posted. The person is added as the member (their session, the
- * database's own checks); only the file is handled as the server itself, and
- * only once a new application exists to hold it. A file that could not be
- * attached never undoes the add: the message says so.
+ * database's own checks); only the file is handled as the server itself.
+ * Whether a file can be taken at all is asked before the add, and a no refuses
+ * the whole add with nothing saved, so it can be sent again without the file.
+ * The file is stored only once a new application exists to hold it; one that
+ * could not be attached after that never undoes the add: the message says so.
  *
  * The values and the file are personal data. Nothing here logs them, the file's
  * name or where it is stored.
@@ -307,7 +322,14 @@ export async function addCandidateAction(formData: FormData): Promise<CapResult<
     if (!isPdf(bytes)) return { ok: false, error: APPLY_MESSAGES.cvFileType };
   }
 
-  // 5. The add, as the member. A refusal goes back as it is.
+  // 5. With a file (so with a job): may one be uploaded right now? Asked before anyone is saved, and never without a file.
+  let service: ReturnType<typeof serviceClient> | null = null;
+  if (bytes) {
+    service = await cvUploadService(ctx.orgId, jobId);
+    if (!service) return { ok: false, error: CV_UPLOADS_REFUSED };
+  }
+
+  // 6. The add, as the member. A refusal goes back as it is.
   const result = await addCandidate(ctx, {
     name: values.name,
     email: values.email,
@@ -323,16 +345,16 @@ export async function addCandidateAction(formData: FormData): Promise<CapResult<
   if (!result.ok) return result;
   const { data } = result;
 
-  // 6. The file, only for an application this call made. One that already existed is never given a file here.
+  // 7. The file, only for an application this call made. One that already existed is never given a file here.
   let cvNotAttached = false;
-  if (bytes) {
+  if (bytes && service) {
     const attached = data.application === 'created' && data.application_id !== null && jobId !== ''
-      ? await attachCv(ctx.orgId, jobId, data.application_id, bytes)
+      ? await attachCv(service, ctx.orgId, jobId, data.application_id, bytes)
       : false;
     cvNotAttached = !attached;
   }
 
-  // 7. What happened, in one sentence, and the screens that show it.
+  // 8. What happened, in one sentence, and the screens that show it.
   for (const path of CANDIDATE_PATHS) revalidatePath(path);
   return { ok: true, data: { ...data, message: addedMessage(data, cvNotAttached) } };
 }

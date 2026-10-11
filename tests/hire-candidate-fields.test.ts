@@ -1,7 +1,7 @@
 // tests/hire-candidate-fields.test.ts
 import { describe, expect, it } from 'vitest';
 import {
-  CANDIDATE_LIMITS, CANDIDATE_MESSAGES, EMPTY_CANDIDATE_FORM, addedMessage, candidateMessage, candidateProblems,
+  CANDIDATE_LIMITS, CANDIDATE_MESSAGES, CV_UPLOADS_REFUSED, EMPTY_CANDIDATE_FORM, addedMessage, candidateMessage, candidateProblems,
   parseSkills, type CandidateFormValues,
 } from '@/lib/hire/candidate-fields';
 
@@ -97,6 +97,13 @@ describe('candidateMessage', () => {
   it('falls back for anything else', () => {
     for (const w of [undefined, null, 5, 'invalid_changes', 'whatever', 'toString', '__proto__']) expect(candidateMessage(w)).toBe(GENERIC);
     expect(CANDIDATE_MESSAGES.invalid_changes).toBeUndefined();
+  });
+});
+
+describe('CV_UPLOADS_REFUSED', () => {
+  it('says what to do, and is not one of the database\'s words', () => {
+    expect(CV_UPLOADS_REFUSED).toBe('CV files cannot be uploaded right now. Add the candidate without the file, or try again later.');
+    expect(Object.values(CANDIDATE_MESSAGES)).not.toContain(CV_UPLOADS_REFUSED);
   });
 });
 

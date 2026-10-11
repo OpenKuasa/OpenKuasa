@@ -289,6 +289,10 @@ describe('the Add Candidate form', () => {
     expect(control(render('Enter a link that starts with https://'), 'CV link')).toContain('aria-invalid="true"');
     expect(control(render('Choose a PDF file.'), 'CV file')).toContain('aria-invalid="true"');
     expect(control(render('This file is 7.2 MB. Choose one under 5 MB.'), 'CV file')).toContain('aria-invalid="true"');
+    // Refused because files cannot be taken just now: said at the file, where it can be removed and the form sent again.
+    const noUploads = render('CV files cannot be uploaded right now. Add the candidate without the file, or try again later.');
+    expect(control(noUploads, 'CV file')).toContain('aria-invalid="true"');
+    expect(noUploads.match(/role="alert"/g)).toHaveLength(1);
   });
 
   it('shows any other refusal in one alert box above the buttons, with no field marked wrong', () => {
