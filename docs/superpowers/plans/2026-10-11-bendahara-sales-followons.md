@@ -72,7 +72,7 @@ Each is a place where the plan decides something the spec left open, goes beyond
 19. **Task order differs from the brief's.** The changes to already-live code (Task 5) come before the view rules of the three screens (Task 6), not after the screens, because the sample's agreement test needs `credited` and `refunded` on invoice rows.
 20. **The stage 3a check script gets a one-line change** (the list of check constraints on `finance_allocations` has one more), so it still passes after this migration and can be run beside the new one as a second proof that nothing it covers moved.
 21. **The seed is applied after the deploy, not before** (see Global Constraints). In 3a it could go in at any time, because nothing live showed the seeded rows.
-22. **Migration file names.** `20261020100000` and `20261020100100`: after every file in the folder, which ends at `20261019090000`.
+22. **Migration file names.** `20261022100000` and `20261022100100`: after every file in the folder, which ends at `20261021090000`. (Restamped by the controller after main gained `20261020100000_people_receipt_release.sql`.)
 
 ## Review Focus
 
@@ -90,8 +90,8 @@ The cases most likely to hurt, each pinned by a test or by the controller's chec
 
 | File | Responsibility |
 |---|---|
-| `supabase/migrations/20261020100000_bendahara_sales_followons.sql` | Quotations, credit notes, allocations to credit notes, four views, guards, six functions |
-| `supabase/migrations/20261020100100_bendahara_sales_followons_seed.sql` | Demo quotations, credit notes and refunds; data only |
+| `supabase/migrations/20261022100000_bendahara_sales_followons.sql` | Quotations, credit notes, allocations to credit notes, four views, guards, six functions |
+| `supabase/migrations/20261022100100_bendahara_sales_followons_seed.sql` | Demo quotations, credit notes and refunds; data only |
 | `supabase/tests/bendahara_followons_check.sql` | The controller's check: the invoice flow, the bill flow and the three new documents, as owner, editor, viewer and outsider; always rolls back |
 | `supabase/tests/bendahara_invoices_check.sql` | (one line changed) the 3a check, kept passing |
 | `tests/bendahara-followons.test.ts` | The three new documents against the hosted database; run by the controller only |
@@ -167,8 +167,8 @@ Raised by the guards and functions with these SQLSTATEs. Existing codes are reus
 
 **Files:**
 - Create: `tests/bendahara-followons.test.ts`
-- Create: `supabase/migrations/20261020100000_bendahara_sales_followons.sql`
-- Create: `supabase/migrations/20261020100100_bendahara_sales_followons_seed.sql`
+- Create: `supabase/migrations/20261022100000_bendahara_sales_followons.sql`
+- Create: `supabase/migrations/20261022100100_bendahara_sales_followons_seed.sql`
 - Create: `supabase/tests/bendahara_followons_check.sql`
 - Modify: `supabase/tests/bendahara_invoices_check.sql` (one line)
 
@@ -623,7 +623,7 @@ testWithSupabase('a customer with quotations cannot stop being a customer', asyn
   expect(untick.error?.code).toBe('FIN08');
 });
 
-// Needs 20261020100100_bendahara_sales_followons_seed.sql: until the controller has applied it, this one test fails.
+// Needs 20261022100100_bendahara_sales_followons_seed.sql: until the controller has applied it, this one test fails.
 testWithSupabase('a demo viewer reads the seeded quotations, credit notes and refunds, and can write none', async () => {
   const c = client();
   const { error: authErr } = await c.auth.signInAnonymously();
@@ -675,7 +675,7 @@ This file talks to the hosted production database and leaves a user and two work
 
 - [ ] **Step 4: Write the schema migration**
 
-Create `supabase/migrations/20261020100000_bendahara_sales_followons.sql`:
+Create `supabase/migrations/20261022100000_bendahara_sales_followons.sql`:
 
 ```sql
 -- Bendahara sales follow-ons, database half (additive; safe to apply while the
@@ -1896,7 +1896,7 @@ end $$;
 
 - [ ] **Step 5: Write the seed migration**
 
-Create `supabase/migrations/20261020100100_bendahara_sales_followons_seed.sql`:
+Create `supabase/migrations/20261022100100_bendahara_sales_followons_seed.sql`:
 
 ```sql
 -- Demo data for Bendahara Quotations, Credit Notes and Refunds in the shared
@@ -2124,7 +2124,7 @@ Create `supabase/tests/bendahara_followons_check.sql`:
 
 ```sql
 -- Bendahara sales follow-ons check. Run it after
--- 20261020100000_bendahara_sales_followons.sql, in the same transaction for a
+-- 20261022100000_bendahara_sales_followons.sql, in the same transaction for a
 -- dry run, or by itself once the migration is applied. It goes through the
 -- whole invoice flow and the whole bill flow again, because that migration
 -- replaces the guards they run under, and then through quotations, credit
@@ -3171,13 +3171,13 @@ with:
 Run: `pnpm exec tsc --noEmit` then `pnpm lint`
 Expected: no errors and no warnings. (Only the test file is TypeScript; the SQL is checked by the controller.)
 
-Run: `grep -c "errcode = 'FIN1[23]'" supabase/migrations/20261020100000_bendahara_sales_followons.sql`
+Run: `grep -c "errcode = 'FIN1[23]'" supabase/migrations/20261022100000_bendahara_sales_followons.sql`
 Expected: `3` (one `FIN12`, two `FIN13`).
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add supabase/migrations/20261020100000_bendahara_sales_followons.sql supabase/migrations/20261020100100_bendahara_sales_followons_seed.sql supabase/tests/bendahara_followons_check.sql supabase/tests/bendahara_invoices_check.sql tests/bendahara-followons.test.ts
+git add supabase/migrations/20261022100000_bendahara_sales_followons.sql supabase/migrations/20261022100100_bendahara_sales_followons_seed.sql supabase/tests/bendahara_followons_check.sql supabase/tests/bendahara_invoices_check.sql tests/bendahara-followons.test.ts
 git commit -m "feat: quotations, credit notes and refunds for finance, with one definition of what an invoice owes"
 ```
 
@@ -3193,7 +3193,7 @@ do $$ begin set local role authenticated; reset role; raise exception 'ROLE_SWIT
 
 Expected: an error whose message is `ROLE_SWITCH_OK`. A permission error instead means the check cannot run this way: stop and tell the owner.
 
-Then send, in one `execute_sql` call: `begin;`, the "before" block, the whole of `supabase/migrations/20261020100000_bendahara_sales_followons.sql`, the "after" block, the whole of `supabase/tests/bendahara_followons_check.sql`, and `rollback;`.
+Then send, in one `execute_sql` call: `begin;`, the "before" block, the whole of `supabase/migrations/20261022100000_bendahara_sales_followons.sql`, the "after" block, the whole of `supabase/tests/bendahara_followons_check.sql`, and `rollback;`.
 
 Before the migration:
 
@@ -3257,7 +3257,7 @@ What the check covers, for the record. The 3a flows through the new guards: save
 
 - [ ] **Step 11 (controller): Dry-run the seed**
 
-Send, in one `execute_sql` call: `begin;`, the whole schema migration, the whole of `supabase/migrations/20261020100100_bendahara_sales_followons_seed.sql` **twice**, this block, and `rollback;`.
+Send, in one `execute_sql` call: `begin;`, the whole schema migration, the whole of `supabase/migrations/20261022100100_bendahara_sales_followons_seed.sql` **twice**, this block, and `rollback;`.
 
 ```sql
 do $$
@@ -3310,7 +3310,7 @@ The receivable was `20980.00` after stage 3a. It is `20460.00` here because one 
 
 - [ ] **Step 12 (controller): Apply the schema migration, on the owner's explicit go-ahead**
 
-Stop and ask the owner first. Apply `20261020100000_bendahara_sales_followons.sql` with `apply_migration`, name `bendahara_sales_followons`. One `apply_migration` call at a time. Do not apply the seed yet: it goes in after the deploy (Step 14).
+Stop and ask the owner first. Apply `20261022100000_bendahara_sales_followons.sql` with `apply_migration`, name `bendahara_sales_followons`. One `apply_migration` call at a time. Do not apply the seed yet: it goes in after the deploy (Step 14).
 
 - [ ] **Step 13 (controller): Check the applied schema**
 
@@ -3329,7 +3329,7 @@ If a test fails for a reason in the SQL: the migration is applied now, so the fi
 
 - [ ] **Step 14 (controller): Apply the seed, after the new code is deployed**
 
-Once the branch is merged and production serves the new code (Task 8, the hand-back step), with the owner's go-ahead: apply `20261020100100_bendahara_sales_followons_seed.sql` with `apply_migration`, name `bendahara_sales_followons_seed`.
+Once the branch is merged and production serves the new code (Task 8, the hand-back step), with the owner's go-ahead: apply `20261022100100_bendahara_sales_followons_seed.sql` with `apply_migration`, name `bendahara_sales_followons_seed`.
 
 Run: `pnpm exec vitest run tests/bendahara-followons.test.ts tests/bendahara-sales.test.ts`
 Expected: PASS, every test, in both files.
@@ -7880,7 +7880,7 @@ No browser check and no dev server: the controller checks the screens on product
 **Files:**
 - Modify: `docs/bendahara-backend.md`
 
-Every function is written with its real argument names and every code with its full meaning. After editing, read the note beside `supabase/migrations/20261020100000_bendahara_sales_followons.sql` once: each `raise exception … using errcode` in the migration must be covered by the meaning the note gives that code, and each function's arguments in the note must be the names in its `create or replace function` line.
+Every function is written with its real argument names and every code with its full meaning. After editing, read the note beside `supabase/migrations/20261022100000_bendahara_sales_followons.sql` once: each `raise exception … using errcode` in the migration must be covered by the meaning the note gives that code, and each function's arguments in the note must be the names in its `create or replace function` line.
 
 - [ ] **Step 1: The table of pure files**
 
@@ -8327,10 +8327,10 @@ with:
 
 - [ ] **Step 11: Review the note against the SQL**
 
-Run: `grep -o "errcode = '[A-Z0-9]*'" supabase/migrations/20261020100000_bendahara_sales_followons.sql | sort | uniq -c`
+Run: `grep -o "errcode = '[A-Z0-9]*'" supabase/migrations/20261022100000_bendahara_sales_followons.sql | sort | uniq -c`
 Expected: `22023` 1, `FIN01` 20, `FIN02` 3, `FIN03` 2, `FIN04` 11, `FIN05` 6, `FIN06` 2, `FIN07` 1, `FIN08` 1, `FIN09` 5, `FIN10` 4, `FIN11` 5, `FIN12` 1, `FIN13` 2. Every `FIN` code there has a row in the note's table, and the note's rows for `FIN12` and `FIN13` exist.
 
-Run: `grep -n "^create or replace function public" supabase/migrations/20261020100000_bendahara_sales_followons.sql`
+Run: `grep -n "^create or replace function public" supabase/migrations/20261022100000_bendahara_sales_followons.sql`
 Expected: six lines, with the argument names `target_org, quotation, lines`; `target_org, target_quotation` (twice); `target_org, note`; `target_org, target_note`; `target_org, refund`. The note's function table uses the same names.
 
 Run: `grep -c "FIN12" src/lib/finance/invoices.ts` and `grep -c "FIN13" src/lib/finance/quotations.ts`

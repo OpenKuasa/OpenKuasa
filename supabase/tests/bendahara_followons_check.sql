@@ -1,5 +1,5 @@
 -- Bendahara sales follow-ons check. Run it after
--- 20261020100000_bendahara_sales_followons.sql, in the same transaction for a
+-- 20261022100000_bendahara_sales_followons.sql, in the same transaction for a
 -- dry run, or by itself once the migration is applied. It goes through the
 -- whole invoice flow and the whole bill flow again, because that migration
 -- replaces the guards they run under, and then through quotations, credit
