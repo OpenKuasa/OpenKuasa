@@ -92,6 +92,9 @@ export const CANDIDATE_MESSAGES: Record<string, string> = {
   job_not_open: 'Only an open or paused job can take a new application.',
   invalid_url: 'Enter a link that starts with https://',
   too_long: 'One of the details is too long.',
+  // Four words are left to the generic sentence on purpose: nobody could act on a sentence of their own.
+  // invalid_changes: a malformed request (an unknown field, skills that are not a list); the app's own schema never sends one.
+  // already_attached, not_by_hand, invalid_path: answers about a CV file, which reach a person only as "The CV could not be attached."
 };
 
 export function candidateMessage(word: unknown): string {

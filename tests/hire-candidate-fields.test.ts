@@ -95,8 +95,23 @@ describe('candidateMessage', () => {
     expect(candidateMessage('too_long')).toBe('One of the details is too long.');
   });
   it('falls back for anything else', () => {
-    for (const w of [undefined, null, 5, 'invalid_changes', 'whatever', 'toString', '__proto__']) expect(candidateMessage(w)).toBe(GENERIC);
-    expect(CANDIDATE_MESSAGES.invalid_changes).toBeUndefined();
+    for (const w of [undefined, null, 5, 'whatever', 'toString', '__proto__']) expect(candidateMessage(w)).toBe(GENERIC);
+  });
+  // The database can answer these four, and none is given a sentence of its own: there is nothing a person could do about it.
+  it.each([
+    // A malformed request (an unknown field, or skills that are not a list). The app's schema strips or refuses both first.
+    ['invalid_changes'],
+    // The three below are about a CV file. They never come this way: an add answers them as "The CV could not be attached."
+    ['already_attached'],
+    ['not_by_hand'],
+    ['invalid_path'],
+  ])('leaves %s to the generic sentence, on purpose', (word) => {
+    expect(Object.hasOwn(CANDIDATE_MESSAGES, word)).toBe(false);
+    expect(candidateMessage(word)).toBe(GENERIC);
+  });
+  it('says the CV sentence, and not a word\'s own, for a file the database would not attach', () => {
+    const base = { name: 'Aina', job: 'Barista', candidate: 'created', application: 'created' } as const;
+    expect(addedMessage(base, true)).toBe('Added Aina and an application for Barista. The CV could not be attached.');
   });
 });
 
