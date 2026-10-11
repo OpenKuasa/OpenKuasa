@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { checkVideo } from '@/lib/agents/openrouter-media';
-import { decryptApiKey, hasKeySecret } from '@/lib/ai/key-crypto';
+import { readWorkspaceKey } from '@/lib/ai/workspace-key';
 import { runWeeklyStudio } from '@/lib/agents/weekly-studio';
 import { WEEKLY_STUDIO } from '@/lib/agents/types';
 
@@ -296,13 +296,9 @@ export async function pollVideos(client: SupabaseClient): Promise<void> {
   const keys = new Map<string, string | null>();
   const keyFor = async (orgId: string): Promise<string | null> => {
     if (keys.has(orgId)) return keys.get(orgId) ?? null;
-    const { data: row, error: keyErr } = await client
-      .from('org_ai_keys')
-      .select('ciphertext')
-      .eq('org_id', orgId)
-      .maybeSingle();
-    const key =
-      !keyErr && row?.ciphertext && hasKeySecret() ? decryptApiKey(row.ciphertext as string) : null;
+    // `orgId` is the asset row's own workspace; the key opens only for it.
+    const stored = await readWorkspaceKey(client, orgId);
+    const key = stored.status === 'ok' ? stored.apiKey : null;
     keys.set(orgId, key);
     return key;
   };

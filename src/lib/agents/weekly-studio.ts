@@ -6,7 +6,7 @@ import {
   type AgentRunStatus,
   type AgentRunTrigger,
 } from '@/lib/agents/types';
-import { decryptApiKey, hasKeySecret } from '@/lib/ai/key-crypto';
+import { readWorkspaceKey } from '@/lib/ai/workspace-key';
 import { createSupabaseReachData } from '@/lib/reach/supabase';
 import { deriveReportsModel, type ReportsModel } from '@/lib/reach/reports';
 
@@ -87,15 +87,9 @@ export async function runWeeklyStudio(
   };
 
   try {
-    const { data: keyRow, error: keyErr } = await service
-      .from('org_ai_keys')
-      .select('ciphertext')
-      .eq('org_id', orgId)
-      .maybeSingle();
-    const apiKey =
-      !keyErr && keyRow?.ciphertext && hasKeySecret()
-        ? decryptApiKey(keyRow.ciphertext as string)
-        : null;
+    // The key opens only for the workspace this run belongs to.
+    const stored = await readWorkspaceKey(service, orgId);
+    const apiKey = stored.status === 'ok' ? stored.apiKey : null;
     if (!apiKey) return await finish('failed', { error: 'no AI key' });
 
     const { data: capRow } = await service
