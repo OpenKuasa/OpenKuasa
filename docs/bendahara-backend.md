@@ -37,6 +37,7 @@ the data layer, with unit tests; the client components only draw them.
 | `receipt-form.ts` | The payment-in form: which invoices can take a payment and how much (`receivableInvoices`), defaults, validation, what is sent. It has no scheduling |
 | `credit-note-form.ts` | The credit note form: which invoices can take a credit note and how much (`creditableInvoices`: posted, for the total less what is already credited), defaults, validation, what is sent. `creditNoteSavedNotIssued` words a credit note that was saved as a draft but not issued |
 | `refund-form.ts` | The refund form: what can be refunded and how much (`refundTargets`: an invoice whose customer is in credit, or one of its issued credit notes, less refunds that are pending), defaults, validation, what is sent |
+| `cash-book-views.ts` | KPI figures, chart data, table filters, status words and CSV rows for Cash Receipts, Payment Vouchers and Expenses; the period selector of the first two (`inPeriod`); which category a voucher counts under (`voucherCategory`) and which screen changes it (`voucherHome`) |
 | `csv.ts` | CSV text for Export: RFC 4180, a UTF-8 byte-order mark, and a guard against spreadsheet formulas |
 
 The forms validate by running the write's own Zod schema on what they are about
@@ -95,6 +96,14 @@ Invoices, Payments In, Customers & Suppliers, Credit Notes and Refunds, as
 each can move what an invoice owes; never Payments Out, which shows no refund,
 and not Quotations.
 
+The cash book lists every movement of money, so the actions that record one
+refresh it as well: an invoice or a payment in also refreshes Cash Receipts; a
+bill or a payment out, and a credit note issued or voided or a refund at any
+step, also refresh Payment Vouchers; a contact also refreshes Cash Receipts,
+Payment Vouchers and Expenses, where it can be the payer, the payee or the
+vendor. Cash Receipts, Payment Vouchers and Expenses have no action of their
+own yet: they are read-only for everyone.
+
 Every action refuses a viewer and the demo workspace before the data layer is
 reached. Without that, a viewer's void or delete would come back from the
 database as "no row", which reads as "That invoice no longer exists.".
@@ -118,7 +127,8 @@ policy.
 | `finance_quotations`, `finance_quotation_lines` | Quotations and their lines, shaped like invoices. A draft has no `quotation_no`. |
 | `finance_credit_notes` | A credit against one posted invoice: one amount and a reason, no lines. A draft has no `credit_note_no`. |
 | `finance_transactions` | One row per movement of money: direction, account, date, amount, method, status. |
-| `finance_allocations` | How a movement is split across the documents it pays. Each row names exactly one document: a bill (`bill_id`), an invoice (`invoice_id`) or a credit note (`credit_note_id`). `reason` is what a refund is for. |
+| `finance_allocations` | How a movement is split across the documents it pays. Each row names exactly one document: a bill (`bill_id`), an invoice (`invoice_id`), a credit note (`credit_note_id`) or an expense (`expense_id`). `reason` is what a refund is for. One payment pays one kind of document: bills, or invoices and credit notes, or expenses. |
+| `finance_expenses` | An expense: a date, a category, a vendor who is a contact (`vendor_id`) or a typed name (`vendor_name`), never both, and `amount`, which has its SST inside it (`sst_amount` is that part). `status` is `pending`, `approved` or `rejected`; `approved_by` and `approved_at` say who decided and when, whichever way. It has no number. |
 
 ## Document numbers
 
@@ -131,7 +141,10 @@ number.
 
 A quotation takes its `QT-` number when it is sent and a credit note its `CN-`
 number when it is issued. A refund is money out and takes a `PV-` number when
-it is paid out, from the same counter as a payment to a supplier.
+it is paid out, from the same counter as a payment to a supplier. A payment
+voucher of any other kind takes its `PV-` number from that counter too, when
+it is paid, and a cash receipt its `RC-` number when it is posted, from the
+counter payments in use. An expense has no number.
 
 ## Money
 
@@ -181,8 +194,10 @@ The reverse holds too. `markPaymentPaid`, `voidPayment` and
 `finance_payments_out` for the workspace and the transaction and refuse with
 "That payment no longer exists." anything it does not show, without writing.
 A refund can therefore not be marked paid, voided or deleted through them.
-`voidPaymentIn` needs no such read: it is kept to `direction = 'in'`, and a
-refund and a payment to a supplier are both money out.
+`voidPaymentIn` is kept to `direction = 'in'`, so a refund and a payment to a
+supplier, both money out, are out of its reach; it reads `finance_payments_in`
+first as well, because money in can also be a receipt for income (see The cash
+book).
 
 The payment-in form is opened from Payments In, or from "Record payment" on a
 posted invoice's row with that customer chosen and that invoice ticked. It
@@ -197,11 +212,125 @@ balance. The payment form works this out (`payableBills`) and does not offer a
 bill that such payments already cover; Supplier Bills shows what is held under
 the bill's balance (`heldByBill`), for viewers too.
 
-Statuses of a transaction: `draft` (being written by a database function),
-`scheduled` (not yet money out), `posted` (paid or received; numbered
-`PV-0001` for money out and `RC-0001` for money in), `void`.
-`pending_approval` and `rejected` exist for the approval rule that arrives
-with Payment Vouchers and Expenses; nothing sets them yet.
+Statuses of a transaction: `draft` (being written by a database function, or
+a cash receipt not yet posted), `pending_approval` (money out waiting for an
+owner or admin), `scheduled` (allowed to be paid, not yet money out), `posted`
+(paid or received; numbered `PV-0001` for money out and `RC-0001` for money
+in), `rejected` (refused by an owner or admin; final), `void`. A payment is
+always created as a draft: a direct INSERT with any other status is refused
+(`FIN09`).
+
+Who paid or was paid is a contact (`contact_id`) or a typed name
+(`party_name`), never both; nobody need be named. `category_id` is for money
+that settles no document: an income category on money in, an expense category
+on money out.
+
+## The cash book
+
+Cash Receipts and Payment Vouchers list every movement of money, one row
+each, whatever it is for. The views are `finance_cash_receipts` (direction
+`in`) and `finance_payment_vouchers` (direction `out`); each row is one
+`finance_transactions` row, keyed by `transaction_id`, with the account, who
+paid or was paid (`party_name`: the contact's name or the typed one), the
+category and `documents`, the numbers of what it pays. The two sides of a
+transfer between accounts (`transfer_id`) are in neither.
+
+`kind` says what a row is, and therefore which screen changes it:
+
+| View | `kind` | What it is | Also shown on | Changed on |
+|---|---|---|---|---|
+| `finance_cash_receipts` | `invoice` | Money in against invoices | Payments In, one row per invoice | Payments In |
+| `finance_cash_receipts` | `income` | Money in that settles no invoice, with an income category | nowhere else | Cash Receipts (no form yet) |
+| `finance_payment_vouchers` | `bill` | A payment to a supplier | Payments Out, one row per bill | Payments Out |
+| `finance_payment_vouchers` | `refund` | Money back to a customer | Refunds | Refunds |
+| `finance_payment_vouchers` | `expense` | A payment of approved expenses | Expenses, as Paid | Payment Vouchers, Expenses (no form yet) |
+| `finance_payment_vouchers` | `other` | Money out that settles no document, with an expense category | nowhere else | Payment Vouchers (no form yet) |
+
+Nothing is counted twice. Payments In, Payments Out and Refunds are views of
+allocations joined to their documents, so each shows only its own kind, one
+row per document. The cash book views are views of the transactions, so each
+shows every kind once. No screen adds one of these up with another. A payment
+across two bills is two rows on Payments Out whose amounts come to the one
+row's amount on Payment Vouchers.
+
+`voidPaymentIn`, which Payments In calls, reads `finance_payments_in` first
+and refuses anything it does not show, so a receipt of kind `income` cannot
+be voided through it; `markPaymentPaid`, `voidPayment` and
+`deleteScheduledPayment` read `finance_payments_out`, and the refund writes
+`finance_refunds`, as before. A voucher of kind `expense` or `other` is in
+none of those three views and is reached through none of those functions.
+
+A cash receipt can wait as a draft. `finance_save_cash_receipt` creates one or
+replaces a draft's details and split; `finance_post_cash_receipt` gives it its
+`RC-` number. It is for one customer's posted invoices, in which case its
+amount is the sum of its split and the customer is the payer, or for an
+income category, with an amount of its own. While it is a draft, what it is
+split across is held: the guard on allocations counts a draft against each
+invoice, so nobody else can receive that part. Money in needs nobody's
+approval. A payment recorded on Payments In is still
+`finance_record_payment_in`, posted at once.
+
+`finance_record_voucher` records money out that pays approved expenses, or
+money out that settles no document and carries an expense category. A payment
+to a supplier and a refund are not recorded through it.
+
+## Expenses
+
+An expense is one `finance_expenses` row. It is created pending. While it is
+pending anyone who may write can edit or delete it. An owner or admin
+approves or rejects it: a change of status and nothing else, and the database
+writes down who and when. Saved by an owner or admin
+(`finance_save_expense`), it is approved in the same call. An approved
+expense is locked; an owner or admin can still reject it while no payment
+stands against it. A rejected expense can be deleted, or edited, which puts
+it back to pending.
+
+The view `finance_expense_totals` adds the category's and the vendor's name,
+`paid` (posted money out allocated to the expense), `held` (what payments not
+yet posted hold of it), `method` and `paid_on` (of the latest posted payment)
+and `display_status`: `pending`, `rejected`, `approved`, or `paid` once
+`paid` covers `amount`. Paid is never stored.
+
+Money out pays an approved expense, and everything standing against it never
+exceeds its amount; the expense row is locked while that is checked. Paying
+an approved expense needs no second approval: the expense was the approval.
+
+## Approval
+
+Decided by the owner: owners and admins approve expenses and payment
+vouchers. In the database that is `private.is_org_admin`, asked by the guards
+themselves, so no caller gets round it.
+
+- An expense is approved or rejected by an owner or admin only (`FIN14`).
+- A payment that is `pending_approval` cannot be changed, and neither can its
+  split. An owner or admin approves it, which makes it `scheduled`, or
+  rejects it; nothing else changes in that update, and the guard writes
+  `approved_by` and `approved_at`. Anyone who may write can delete it.
+- A rejected payment is final: it can be deleted, and nothing else.
+- Money out that settles no document, which is the part of a payment out
+  above its split, needs an owner or admin when the payment becomes scheduled
+  or posted, unless one of them approved it already. Recorded by an owner or
+  admin it is approved in that step.
+  Recorded by anyone else through `finance_record_voucher` it waits as
+  `pending_approval`, whatever was asked.
+- A scheduled payment that was approved is paid as it was approved: only its
+  status, number and date change when it is marked paid, by anyone who may
+  write, and its split is locked.
+
+**What approval does not reach yet.** A payment to a supplier recorded on
+Payments Out and a refund recorded on Refunds are exactly their split, so the
+rule above does not touch them: `finance_record_payment_out` and
+`finance_record_refund` are unchanged, and an editor's payment or refund is
+posted or scheduled at once, as before. Whether those two should wait for
+approval too is the owner's decision; it changes two live screens and has its
+own part of stage 5.
+
+A session with no signed-in user is not asked for a role
+(`private.finance_may_decide`). That is a migration or the SQL editor, which
+could disable the guards anyway, and it is how the demo seed approves its
+rows, with `approved_by` left empty. Neither API role can be in that state
+and still write: `authenticated` always carries a user, and `anon` and
+`service_role` have no rights on these tables.
 
 ## Invoices
 
@@ -439,6 +568,22 @@ Triggers enforce it, so no caller can get round it:
   with bills cannot have Supplier unticked.
 - Clearing a deleted user from the `created_by` of an invoice, a quotation or
   a credit note is allowed whatever its status.
+- An expense is created pending. It is edited and deleted while pending, and
+  deleted or edited back to pending once rejected; approved, it is locked, and
+  can only be rejected, by an owner or admin, while no payment that is
+  posted, scheduled, waiting or in progress is allocated to it (`FIN02`).
+  Nothing else changes in the update that approves or rejects it.
+- A payment only goes against an approved expense (`FIN04`), only money out
+  does, and never for more than is left of it, counting payments that are
+  posted, scheduled, waiting or in progress (`FIN05`). The expense row is
+  locked while this is checked, so two payments at the same moment are
+  checked one after the other, and it cannot be rejected in between.
+- One payment pays one kind of document (`FIN06`): a second allocation that
+  names another kind than the payment's first is refused.
+- A payment starts as a draft (`FIN09`), and the approval rules above hold
+  whichever way a status is changed.
+- Clearing a deleted user from the `created_by` or `approved_by` of an
+  expense is allowed whatever its status.
 - Each guard steps aside when the workspace itself is being deleted.
 
 ## Database functions
@@ -450,7 +595,7 @@ All run as the caller, so RLS decides who may write.
 | `finance_save_bill(target_org, bill, lines)` | Creates a draft bill or replaces a draft's header and lines. Returns the id. |
 | `finance_post_bill(target_org, target_bill)` | Posts a draft and returns its number. |
 | `finance_record_payment_out(target_org, payment, allocations)` | Records a payment; `payment.status` is `posted` (the default) or `scheduled`. Returns the id. |
-| `finance_mark_payment_paid(target_org, target_txn, paid_on)` | Scheduled to paid. Returns the number. |
+| `finance_mark_payment_paid(target_org, target_txn, paid_on)` | Scheduled money out to paid. Returns the number. Refuses money in (`FIN09`). |
 | `finance_save_invoice(target_org, invoice, lines)` | Creates a draft invoice or replaces a draft's header and lines, keeping the lines in the order given. `invoice` has `id` (to change a draft), `customer_id`, `invoice_date`, `due_date`, `notes`. Returns the id. |
 | `finance_post_invoice(target_org, target_invoice)` | Posts a draft and returns its number. |
 | `finance_record_payment_in(target_org, payment, allocations)` | Records money received from one customer, split across that customer's posted invoices, and posts it at once. `payment` has `account_id`, `txn_date`, `method`, `reference`, `notes`; `allocations` is a list of `{ invoice_id, amount }`. The payment's amount is the sum of the allocation amounts, each rounded to the sen first, as each is when stored. Returns the id. |
@@ -460,6 +605,10 @@ All run as the caller, so RLS decides who may write.
 | `finance_save_credit_note(target_org, note)` | Creates a draft credit note or replaces a draft. `note` has `id` (to change a draft), `invoice_id`, `credit_date`, `reason`, `amount`, `notes`. Returns the id. |
 | `finance_issue_credit_note(target_org, target_note)` | Issues a draft and returns its number. |
 | `finance_record_refund(target_org, refund)` | Records one refund against one invoice or one credit note. `refund` has `invoice_id` or `credit_note_id`, `account_id`, `txn_date`, `method`, `reason`, `amount`, `reference`, `notes`, and `status`: `posted` (the default) or `scheduled`. Returns the id. |
+| `finance_save_cash_receipt(target_org, receipt, allocations)` | Creates a draft cash receipt or replaces a draft's details and split. `receipt` has `id` (to change a draft), `account_id`, `txn_date`, `method`, `reference`, `notes`, and either nothing more, with `allocations` a list of `{ invoice_id, amount }` for one customer's posted invoices, or `category_id` (an income category), `amount`, and `contact_id` or `party_name`, with no allocations. Returns the id. |
+| `finance_post_cash_receipt(target_org, target_txn)` | Posts a draft cash receipt and returns its `RC-` number. |
+| `finance_record_voucher(target_org, voucher, allocations)` | Records money out for approved expenses or for an expense category. `voucher` has `account_id`, `txn_date`, `method`, `reference`, `notes`, `contact_id` or `party_name`, `status` (`posted`, the default, or `scheduled`), and either nothing more, with `allocations` a list of `{ expense_id, amount }`, or `category_id` and `amount`, with no allocations. A voucher with no allocations recorded by someone who is not an owner or admin is left `pending_approval`. Returns the id. |
+| `finance_save_expense(target_org, expense)` | Creates an expense or changes one that is pending or rejected. `expense` has `id` (to change one), `expense_date`, `category_id`, `vendor_id` or `vendor_name`, `amount`, `sst_amount`, `notes`. Saved by an owner or admin it is approved in the same call. Returns the id. |
 | `finance_next_number(target_org, doc)` | The next document number. |
 
 Accepting or declining a quotation, voiding a credit note or a refund, and
@@ -473,6 +622,15 @@ updates and deletes too. The data layer for all of it is in `quotations.ts`,
 `voidCreditNoteAction` and `deleteCreditNoteAction`; the refund writes by
 `recordRefundAction`, `markRefundPaidAction`, `voidRefundAction` and
 `deleteRefundAction`.
+
+Approving or rejecting an expense or a payment, voiding a posted receipt or
+voucher, and deleting a draft receipt, a pending or rejected expense, or a
+payment that was never paid, are plain updates and deletes as well. No
+function of `src/lib/finance/` calls the four functions above, approves or
+rejects an expense or a payment, or touches an expense or a draft receipt:
+`cash-book.ts` and `expenses.ts` only read, and each write arrives with its
+form. The voids and deletes that exist are those of Payments In, Payments Out
+and Refunds, and reach only what those screens show.
 
 Voiding a bill, an invoice or a payment, and deleting a draft bill, a draft
 invoice or a scheduled payment, are plain updates and deletes; the guards
@@ -503,6 +661,8 @@ quotation, a credit note or a refund by the file that made the call.
 | `FIN11` | The bill, invoice, quotation, credit note or payment no longer exists. `finance_post_invoice`, `finance_send_quotation`, `finance_convert_quotation` and `finance_issue_credit_note` also answer this to a viewer: each locks its row first, and a viewer may not, so to them it is not there |
 | `FIN12` | The invoice has a credit note that is a draft or issued, so it cannot be voided. `invoices.ts` words it: "This invoice has credit notes. Void them on Credit Notes, or delete the drafts, before voiding it." |
 | `FIN13` | The quotation already has an invoice that is not void: it cannot be converted again, and its answer can no longer change. `quotations.ts` words it |
+| `FIN14` | Approval. Only an owner or admin approves or rejects an expense or a payment; a payment is submitted for approval only from a draft and rejected only before it is approved; money out that settles no document needs one of them before it is scheduled or paid; a payment waiting for approval, or rejected, cannot be changed; a rejected payment is final; an approved payment is paid as it was approved. Nothing in the app meets it yet |
+| `FIN15` | A receipt, a voucher or an expense names the wrong thing: a receipt is for invoices or for an income category, a voucher for expenses or for an expense category, never both and never neither; an expense needs an expense category of its own workspace. Nothing in the app meets it yet |
 | `42501` | Row-level security refused the write: "You do not have permission to make changes here." |
 | `22003` | A number does not fit its column (quantity × unit price can overflow): "That amount is too large." |
 | `22023` | `finance_record_refund` was given a status other than `posted` or `scheduled`. The app always sends one of the two, so only a direct call reaches it; `refunds.ts` has no sentence for it. |
@@ -552,6 +712,25 @@ just voided included. `FIN09` on a payment in is "This payment has already been
 voided." for the same reason. Bills and payments out still say "Void it
 instead."; see Known limits.
 
+The cash book reuses the codes above where the meaning is the same. `FIN01`:
+an expense is created pending, an approved or rejected one is locked, it is
+decided as it stands, and an approved one is not deleted. `FIN02`: an
+approved expense with payments cannot be rejected. `FIN04`: a payment only
+goes against an approved expense, and only money out does. `FIN05`: more than
+is left of the expense, or a draft receipt for more than its invoice owes.
+`FIN06`: a voucher names an expense that is not there, a receipt names no
+invoice that is there or is for two customers, or one payment names two kinds
+of document. `FIN09`: a payment is
+created as a draft; a posted receipt cannot be saved or posted again; the
+split of a payment that is waiting, rejected or approved is locked; money in
+is not marked paid. `FIN11`: the receipt or the expense no longer exists, or
+is not the caller's to change. `22023`: `finance_record_voucher` was given a
+status other than `posted` or `scheduled`. `23514`: an expense with both a
+contact and a typed vendor or neither, with more SST than its amount, or of
+nothing; a payment with both a contact and a typed name. `23503`: an expense
+that a voided payment still names cannot be deleted. For these cases none of
+the codes has a sentence yet: the files that word them arrive with the forms.
+
 ## Known limits
 
 - A scheduled payment cannot be edited: delete it and schedule it again.
@@ -592,15 +771,20 @@ instead."; see Known limits.
   numbers only ever come from the counter. Once a later stage lets a person
   change a prefix or reset a counter, a number collision would get that
   sentence wrongly and needs its own.
-- Approval of money out is not enforced yet.
+- Approval is enforced for expenses and for money out that settles no
+  document. A payment to a supplier and a refund are not held for approval;
+  see Approval.
 - Posting goes through database functions that run as the caller. An editor
   writing to the tables directly, rather than through the app, could still post
-  a bill, an invoice or a payment with a number of their own choosing, or change
-  the account of a scheduled payment, or raise its amount above its split, after
-  it has been split across bills or invoices. (Lowering the amount below the
-  split, or changing the direction, is refused.)
-  Numbers stay unique per workspace either way. Closing this needs posting
-  functions that run with their own rights, planned with the approval rule.
+  a bill, an invoice, or a payment that is exactly its split, with a number of
+  their own choosing, or change the account of a scheduled payment that nobody
+  had to approve. (Lowering the amount below the split, or changing the
+  direction, is refused. Raising the amount above the split is allowed while
+  the payment is a draft or scheduled, but an editor cannot then schedule it
+  or pay it: the part above the split needs an owner or admin.) A payment can
+  no longer be created already posted. Numbers stay unique per workspace
+  either way. Closing the rest needs posting functions that run with their
+  own rights.
 - Contacts and products load the first 1,000 by name; search is in the browser.
   Only the contact list is capped this way: a contact's Payable is read by
   paging through every open bill, and its Receivable through every open
@@ -619,19 +803,17 @@ instead."; see Known limits.
   contacts.
 - A bill's lines are read back by `created_at` then `id`, which for lines
   saved together is no particular order. Invoice lines store their `position`.
-- Money in is never scheduled, but `finance_mark_payment_paid` does not check
-  the direction: a scheduled movement of money in could only come from writing
-  to the table directly, and marking it paid would give it a `PV-` number. For
-  money out the function is used as it is, for a pending refund as much as for
-  a scheduled payment to a supplier: both are payment vouchers. The refund
-  functions do not rely on the missing check: `markRefundPaid`, `voidRefund`
-  and `deleteRefund` read `finance_refunds` first and refuse anything it does
-  not show, so a payment to a supplier is never marked paid, voided or deleted
-  through them. The Payments Out functions read `finance_payments_out` first
-  in the same way, so a refund is never reached through them. Each is two
-  requests, a read and then a write, not one statement: a transaction that
-  stopped being a payment to a supplier between the two would still be
-  written, and nothing in the app can make one do that.
+- `finance_mark_payment_paid` refuses money in. It is used as it is for every
+  kind of money out: a pending refund, a scheduled payment to a supplier and
+  an approved voucher are all payment vouchers. The functions of each screen
+  do not rely on that: `markRefundPaid`, `voidRefund` and `deleteRefund` read
+  `finance_refunds` first and refuse anything it does not show, the Payments
+  Out functions read `finance_payments_out` first in the same way, and
+  `voidPaymentIn` reads `finance_payments_in`. Each is two requests, a read
+  and then a write, not one statement: a transaction that stopped being what
+  the view showed between the two would still be written. One payment pays
+  one kind of document, and nothing in the app can make a payment stop being
+  what the view showed.
 - A refund cannot be edited, pending or paid: delete a pending one and record
   it again; void a paid one.
 - An issued credit note cannot be edited: void it and write a new one. It
@@ -652,9 +834,12 @@ instead."; see Known limits.
 - An id that is not an id sent to `markRefundPaidAction`, `voidRefundAction`
   or `deleteRefundAction` is answered "That payment no longer exists.": a refund's id is parsed by the
   schema a payment's is. Only a direct call can send one.
-- `voidPaymentIn` is kept to `direction = 'in'` and reads no view first: every
-  movement of money in is a payment in. When cash receipts arrive (stage 5),
-  money in gains a second kind and this must be looked at again.
+- A draft cash receipt against invoices is on Payments In with the status
+  Draft, and holds its part of each invoice until it is posted or deleted.
+  Nothing in the app makes one yet. Payments In offers nothing on such a row;
+  sent to `voidPaymentIn` by a direct call it is answered "This payment has
+  already been voided.", which is not true of a draft. The part that adds the
+  receipt form rewords it.
 - A sent quotation cannot be edited: mark it declined and write a new one.
   "Mark as sent" is offered on a draft whatever its total, and refused with
   the reason when its lines total nothing, as Post is on an invoice.
@@ -685,14 +870,11 @@ instead."; see Known limits.
   does not take that lock, so a payment in voided at the very moment a pending
   refund on the same invoice is marked paid can slip past it; the invoice then
   shows the customer owing.
-- A payment that was rejected can still be posted by a direct update; nothing
-  in the app sets or leaves `rejected`. For a refund, that update is checked in
-  full as above. For a payment to a supplier or a payment in, it is not looked
-  at again.
-- A rejected refund moved straight to `scheduled` (or back to `draft`) by a
-  direct update is not looked at again until it is paid out. Until then the
-  refunds waiting on an invoice can add up to more than the credit; none of
-  them can be paid out past it.
+- A rejected payment is final: no update moves it to another status, so one
+  that held nothing while another payment took its place cannot be brought
+  back on top of that one. A rejected refund that is paid out by a direct
+  update is still refused by the refund checks first (`FIN04`, `FIN05`), then
+  by this rule (`FIN14`).
 - `finance_mark_payment_paid` locks the payment and then, for a refund, its
   credit note and invoice. A direct insert of an allocation on that same
   payment at that moment locks the invoice first and then waits for the
@@ -740,3 +922,52 @@ instead."; see Known limits.
 - A contact's Payable counts bills that are pending or overdue, and the
   Payable card is totalled from every open bill, not only the contacts loaded.
   Receivable is the same for invoices that are sent or overdue.
+- Cash Receipts, Payment Vouchers and Expenses are read-only. A receipt for
+  income, a voucher that is not a supplier payment or a refund, and an
+  expense exist only in the demo workspace until their forms are built; the
+  database functions for them are there and nothing calls them.
+- A payment to a supplier or a refund recorded by someone who is not an owner
+  or admin is not held for approval. The owner decides whether it should be.
+- A voucher that settles no document, recorded by someone who is not an owner
+  or admin, waits for approval even when it was asked to be paid now. Once
+  approved it is scheduled, and is then marked paid with its date.
+- A payment waiting for approval cannot be edited: it is approved, rejected
+  or deleted, and a deleted one is recorded again. A rejected one cannot be
+  reopened: delete it.
+- An expense's amount has its SST inside it, where a bill line has its SST on
+  top. An expense has one category and no lines.
+- An approved expense cannot be edited. An owner or admin rejects it, while
+  nothing has been paid against it, and it is then edited back to pending.
+- An expense that a voided payment still names cannot be deleted: the voided
+  payment keeps its split as a record.
+- An expense can be paid in parts; it reads Approved until posted money out
+  covers it. One voucher can pay several expenses, and they need not share a
+  vendor: who is paid is what the voucher says.
+- A cash receipt for income and a voucher that settles no document need not
+  name who paid or was paid.
+- A draft cash receipt is not looked at again when it is posted. If its
+  invoice was credited in the meantime, which a credit note's cap allows
+  whatever a draft holds, posting it leaves the customer in credit by the
+  overlap, as paying first and crediting afterwards does. A refund pays that
+  out.
+- Whether a receipt names invoices or a category, and whether a category is
+  an income or an expense one, is checked by the database functions, not by
+  the guards. A direct write to the tables can give money out an income
+  category, or post a receipt that is partly split and partly not. The guards
+  enforce what protects money and approval; the shape of a document is the
+  functions' business.
+- "This year" on Cash Receipts and Payment Vouchers is the calendar year:
+  there is no financial-year setting.
+- Cash Receipts, Payment Vouchers and Expenses load every row and filter in
+  the browser, as the other finance screens do. A chart names its four
+  largest slices and adds the rest up as one.
+- On Payment Vouchers the Kind of a supplier payment or a refund links to the
+  screen that changes it; the link does not single the row out there.
+- The sample shown with no database has its own four supplier payments on
+  Payment Vouchers; they are not the rows of the Payments Out sample.
+- The demo workspace's cash book was dated from the day it was seeded, so its
+  month-to-date figures empty out as time passes. Its seeded approvals name
+  nobody: `approved_by` is empty on them.
+- The database tests for this stage, `tests/bendahara-cash-book.test.ts`, run
+  against the hosted database as owners only. What an editor and a viewer may
+  not do is proved by `supabase/tests/bendahara_cash_book_check.sql`.
