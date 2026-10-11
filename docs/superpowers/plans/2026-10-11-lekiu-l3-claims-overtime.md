@@ -206,3 +206,23 @@ Each owns the files it lists. As in L2: do not run `pnpm tsc`, `pnpm lint`, `pnp
 ## Not in this plan
 
 Everything in the spec's "Out" list (§3).
+
+## Execution Notes (2026-10-11)
+
+The plan above is as written, except the migration's file name. The branch is the reference. What changed or was decided along the way:
+
+- **Migration renumbered.** `main` gained a file with the same version, so this one is `20261020090000_people_claims_overtime_writes.sql`.
+- **One file, one claim.** A unique index on `receipt_path`: attaching a file to a second claim is `PAY_BAD_RECEIPT`, so cancelling one claim can never remove another's receipt.
+- **Overtime figures.** The multiplier is rounded to one decimal (the column holds one) and the floor of 1 is tested before rounding. A salary of 0 counts as no salary. The preview refuses a bad date or hours but not an inactive employee.
+- **"Not calculated"** means the rate is null and the amount is 0, decided by one helper in `src/lib/people/overtime.ts`. Rows made before this slice, and every demo row, have an amount and no stored rate, and keep showing their amount.
+- **Cancelling.** A member cancelling their own paid claim is told it has already been decided; an owner or admin is told to undo the paid mark first. `removeReceipt` lives in `receipts-server.ts` (service client, server only) and deletes only a path shaped `<uuid>/<uuid>.<known extension>`.
+- **A refused claim leaves its upload behind.** Nobody but the service client can delete from the bucket, so the form cannot remove it.
+- **Chat receipts.** The model has no say: `submitClaim` has no file, path or flag. The receipt is the first usable image or PDF on the user message immediately before the assistant message that proposes the claim, picked by one rule (`pickReceipt`, `userMessageBefore` in `receipts.ts`) that the server and the approval card both use. A file sent before a clarifying question is not picked up: Lekiu is told to ask for it to be attached again. A chat cancel removes the file as the screens do.
+- **Salary in tool code.** `listOvertime` returns the amount and rate only to an owner or admin or for the caller's own record, without relying on row security.
+- **Shared dialog shell.** `src/components/people/request-dialog.tsx` now serves the leave, claim and overtime dialogs.
+- **The hourly rate is not shown on the employee's own OT Claims page** (kind of day, multiplier and amount are). The spec limits who may see it; it does not require showing it.
+- **The live test submits claims without a receipt**, because the suite signs in anonymously and anonymous accounts cannot upload.
+- **Rollout, done 2026-10-11.** `pnpm test` after applying: 3,248 passed, 1 skipped, none failed. Migration applied to the live database with the owner's go-ahead. The nine functions and both tables are owned by `postgres`; signed-in users hold no write grant on either table; the bucket is private. `people_claims_overtime_check.sql`, `people_leave_check.sql` and `people_rls_check.sql` each ended `PASSED` on the live database and left nothing behind (each was sent whole through the MCP by a helper that retyped the file, not by a mechanical copy). Demo guest on a local server: Financial Claims, OT Claims, both approval pages and the team Overtime page load with every control disabled and the sign-up line, no console errors.
+- **Left for later:** the claim form submits without a receipt after a failed upload (the message stays visible); a HEIC file whose browser type is empty is refused; a refused chat claim leaves its upload behind; deleting an employee or workspace leaves its receipt files unreachable in storage; unused uploads are never cleared; the approvals row shows "RM 0.00 approved or paid in <year>" when there is nothing else that year; no component tests for the dialogs, `PaidButtons` or the kind-to-action maps; the Tuah card site does not pass the receipt state (unreachable today); duplicate constants and one cast noted in review.
+- **Owner's call, open:** let a chat claim pick up the nearest earlier photo in the conversation instead of asking for it again.
+- **Not done, needs the owner:** signed in, a claim with a real receipt file (open it, approve, mark paid, undo, cancel), overtime with and without a salary on file, and one real question to Lekiu with a receipt attached; the same as a plain member, which needs a second account.
