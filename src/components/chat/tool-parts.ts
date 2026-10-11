@@ -6,6 +6,8 @@
 import type { ComponentType } from 'react';
 import type { UIMessage } from 'ai';
 import { nameIn, type ItemKind, type NameFinder, type ToolResult } from '@/lib/chat/change-titles';
+import { pickReceipt, userMessageBefore, type ReceiptState } from '@/lib/people/receipts';
+import { isFilePart } from '@/lib/chat/attachments';
 import {
   APPLY_TOOL,
   ASK_PREFIX,
@@ -19,6 +21,7 @@ import {
   CalendarDays,
   ClipboardList,
   Coins,
+  FileText,
   Filter,
   Globe,
   Images,
@@ -46,7 +49,24 @@ export type AnyPart = UIMessage['parts'][number];
 export { approvalDetail, approvalTitle } from '@/lib/chat/change-titles';
 export type { ItemKind } from '@/lib/chat/change-titles';
 
-const TOOL_META: Record<string, { label: string; Icon: Icon }> = {
+type ToolMeta = {
+  label: string;
+  Icon: Icon;
+  /** A few plain words to show beside the label, read from the tool's result. */
+  detail?: (output: unknown) => string | null;
+  /** How the tool reads while it runs, where "Looking up <label>…" would not read well. */
+  running?: string;
+};
+
+/** Whose CV was read: the candidate's name, once the read has succeeded. */
+function cvCandidate(output: unknown): string | null {
+  const result = output as { ok?: unknown; candidate?: unknown } | null | undefined;
+  return result?.ok === true && typeof result.candidate === 'string' && result.candidate.trim()
+    ? result.candidate
+    : null;
+}
+
+const TOOL_META: Record<string, ToolMeta> = {
   getAdsOverview: { label: 'Ads overview', Icon: PieChart },
   getCampaigns: { label: 'Campaigns', Icon: Megaphone },
   getLeadSummary: { label: 'Lead summary', Icon: TrendingUp },
@@ -80,6 +100,7 @@ const TOOL_META: Record<string, { label: string; Icon: Icon }> = {
   listLeaveRequests: { label: 'Leave requests', Icon: ClipboardList },
   listTimeOffRequests: { label: 'Time-off requests', Icon: ClipboardList },
   previewLeave: { label: 'Leave preview', Icon: CalendarDays },
+  previewOvertime: { label: 'Overtime preview', Icon: Timer },
   getLeaveBalances: { label: 'Leave balances', Icon: SlidersHorizontal },
   listPendingApprovals: { label: 'Pending approvals', Icon: ClipboardList },
   listClaims: { label: 'Claims', Icon: Coins },
@@ -94,6 +115,7 @@ const TOOL_META: Record<string, { label: string; Icon: Icon }> = {
   listTrainings: { label: 'Trainings', Icon: Briefcase },
   listAnnouncements: { label: 'Announcements', Icon: Megaphone },
   getCareersPage: { label: 'Careers page', Icon: Globe },
+  readCandidateCv: { label: 'Reading CV', Icon: FileText, detail: cvCandidate, running: 'Reading a CV…' },
   listContacts: { label: 'Leads', Icon: Users },
 };
 
@@ -102,12 +124,18 @@ function humanize(name: string): string {
   return (spaced.charAt(0).toUpperCase() + spaced.slice(1).toLowerCase()).trim();
 }
 
-export function toolMeta(name: string): { label: string; Icon: Icon; isFallback: boolean } {
+export function toolMeta(name: string): ToolMeta & { isFallback: boolean } {
   const known = TOOL_META[name];
   // Tools with no entry are the change tools, named for what they do.
   return known
     ? { ...known, isFallback: false }
     : { label: humanize(name) || 'Tool', Icon: Wrench, isFallback: true };
+}
+
+/** What a specialist is doing while one of its lookups runs, in a few words. */
+export function liveStepStatus(name: string): string {
+  const { label, running } = toolMeta(name);
+  return running ?? `Looking up ${label.toLowerCase()}…`;
 }
 
 export function isText(p: AnyPart): p is Extract<AnyPart, { type: 'text' }> {
@@ -140,6 +168,22 @@ export function toToolStep(part: AnyPart, messageId: string, index: number): Too
   const key =
     ('toolCallId' in part ? (part.toolCallId as string) : undefined) ?? `${messageId}-${index}`;
   return { key, name, running, denied, output };
+}
+
+/**
+ * What the question behind a pending claim carried, for its card: the file on the user message before the assistant
+ * message holding the approval, judged by the same rule the server uses to pick the receipt. Undefined when the
+ * approval is not found. (In a reopened chat the browser may hold a stored link where the server has bytes only if the
+ * stored file resolved; the tool's result note covers a miss.)
+ */
+export function receiptStateFor(messages: { role: string; parts: AnyPart[] }[], approvalId: string): ReceiptState | undefined {
+  const at = messages.findIndex(
+    (m) => m.role === 'assistant' && m.parts.some((p) => (p as { approval?: { id?: string } }).approval?.id === approvalId),
+  );
+  if (at < 0) return undefined;
+  const question = userMessageBefore(messages, at);
+  const pick = pickReceipt((question?.parts ?? []).filter(isFilePart));
+  return pick.state === 'attached' ? { state: 'attached' } : pick;
 }
 
 export type PendingApproval = { approvalId: string; toolName: string; input: unknown };

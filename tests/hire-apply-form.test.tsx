@@ -46,7 +46,8 @@ const LABELS: Record<ApplyField, string> = {
   name: 'Full name', email: 'Email', phone: 'Phone', cv_url: 'Link to your CV', cover_letter: 'Cover letter',
   portfolio_url: 'Portfolio link', expected_salary: 'Expected monthly salary',
   consent: "I agree that Tanjung Trading may store and use the details I've given to consider me for this role, "
-    + 'and that they are processed through OpenKuasa.',
+    + 'that they are processed through OpenKuasa, and that they may be reviewed with the help of an AI assistant, which sends '
+    + 'them to an AI service provider and may give the employer a recommendation.',
 };
 
 const action = async (): Promise<ApplyState> => undefined;

@@ -7,11 +7,11 @@ import { ScreenContainer } from '@/components/screen/screen-container';
 import { LiveDot } from '@/components/ui/live-dot';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { REQUEST_STATUS_LABEL } from '@/lib/people/own';
-import type { RequestStatus } from '@/lib/people/types';
+import type { ClaimStatus } from '@/lib/people/types';
 import { LOAD_FAILED, LaterButton, Muted, NotLinkedCard, StatusPill, requestTone } from './parts';
 
 /** The status column: a live dot while a request waits, then the pill. */
-export function StatusCell({ status, note }: { status: RequestStatus; note?: string | null }) {
+export function StatusCell({ status, note }: { status: ClaimStatus; note?: string | null }) {
   return (
     <span className="flex flex-col gap-1">
       <span className="flex items-center gap-2">
@@ -66,7 +66,7 @@ export function requestCancelCell({
 }: {
   cancellable: boolean;
   isDemo: boolean;
-  kind: 'leave' | 'time-off';
+  kind: 'leave' | 'time-off' | 'claim' | 'overtime';
   id: string;
 }): ReactNode {
   if (!cancellable) return null;

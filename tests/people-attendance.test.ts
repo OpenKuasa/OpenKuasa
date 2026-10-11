@@ -235,7 +235,7 @@ describe('buildShiftCalendar', () => {
 describe('buildOvertimeView', () => {
   const record = (over: Partial<OvertimeRecord>): OvertimeRecord => ({
     id: 'r', employee_id: 'e1', employee_name: 'E', work_date: '2026-10-02', hours: 1, rate_multiplier: 1.5,
-    amount_cents: 3750, status: 'approved', created_at: '2026-10-02T00:00:00Z', ...over,
+    amount_cents: 3750, hourly_rate_cents: 2500, day_kind: null, reason: null, decision_note: null, status: 'approved', created_at: '2026-10-02T00:00:00Z', ...over,
   });
 
   it('reproduces the overtime model for the team and lists records newest first', async () => {

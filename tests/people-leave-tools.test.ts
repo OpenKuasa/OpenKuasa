@@ -41,10 +41,13 @@ const MEMBER_VIEWER: PeopleViewer = { employeeId: ME, employeeName: 'Faiz Hakim'
 const DEMO_VIEWER: PeopleViewer = { employeeId: ME, isHr: false, isDemo: true };
 const base = createSeedPeopleData(NOW);
 
-const hr = () => ({ ctx: { client: {} as never, orgId: 'org-1' }, tier: 'hr' as const, employeeId: null });
-const self = (employeeId: string | null = ME) => ({ ctx: { client: {} as never, orgId: 'org-1' }, tier: 'self' as const, employeeId });
+const hr = () => ({ ctx: { client: {} as never, orgId: 'org-1' }, tier: 'hr' as const, employeeId: null, receipt: null, userId: 'u1' });
+const self = (employeeId: string | null = ME) => ({ ctx: { client: {} as never, orgId: 'org-1' }, tier: 'self' as const, employeeId, receipt: null, userId: 'u1' });
 
-const SELF_TOOLS = ['previewLeave', 'applyLeave', 'applyTimeOff', 'cancelLeaveRequest', 'cancelTimeOffRequest'];
+const SELF_TOOLS = [
+  'previewLeave', 'previewOvertime', 'applyLeave', 'applyTimeOff', 'cancelLeaveRequest', 'cancelTimeOffRequest',
+  'submitClaim', 'cancelClaim', 'submitOvertime', 'cancelOvertime',
+];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Loose = any;
@@ -68,7 +71,7 @@ beforeEach(() => {
 
 describe('who holds which leave tools', () => {
   it('an owner or admin holds every change tool, and the preview', () => {
-    expect(Object.keys(tools(HR_VIEWER, hr()))).toEqual([...PEOPLE_TOOL_NAMES, 'previewLeave', ...PEOPLE_WRITE_TOOL_NAMES]);
+    expect(Object.keys(tools(HR_VIEWER, hr()))).toEqual([...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', ...PEOPLE_WRITE_TOOL_NAMES]);
     for (const name of ['decideLeave', 'decideTimeOff', 'setLeaveEntitlement']) expect(PEOPLE_WRITE_TOOL_NAMES).toContain(name);
   });
 
@@ -93,10 +96,15 @@ describe('who holds which leave tools', () => {
       expect(Object.keys(kit.write).sort()).toEqual(Object.keys(toolApproval ?? {}).sort());
       for (const name of Object.keys(kit.write)) expect(toolApproval?.[name], name).toBe('user-approval');
       expect(kit.read).toHaveProperty('previewLeave');
+      expect(kit.read).toHaveProperty('previewOvertime');
       expect(toolApproval).not.toHaveProperty('previewLeave');
+      expect(toolApproval).not.toHaveProperty('previewOvertime');
     }
     const member = peopleProduct({ data: base, viewer: MEMBER_VIEWER, write: self() });
-    expect(Object.keys(member.write).sort()).toEqual(['applyLeave', 'applyTimeOff', 'cancelLeaveRequest', 'cancelTimeOffRequest']);
+    expect(Object.keys(member.write).sort()).toEqual([
+      'applyLeave', 'applyTimeOff', 'cancelClaim', 'cancelLeaveRequest', 'cancelOvertime', 'cancelTimeOffRequest',
+      'submitClaim', 'submitOvertime',
+    ]);
   });
 });
 

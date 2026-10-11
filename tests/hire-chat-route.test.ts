@@ -13,7 +13,16 @@ const ctl = vi.hoisted(() => ({
   /** Tables the provider read, to prove which data the tools were given. */
   tablesRead: [] as string[],
   /** The HireAccess the route handed to the runner. */
-  captured: null as null | { data: import('@/lib/hire/types').HireData; origin?: string | null },
+  captured: null as null | {
+    data: import('@/lib/hire/types').HireData;
+    origin?: string | null;
+    files?: import('@/lib/hire/cv-read').CvReader;
+    cvShelf?: unknown[];
+  },
+  /** What the Tuah route handed its runner: whether it ran with the team, and the HireAccess. */
+  tuah: null as null | { team: boolean; hire: { files?: import('@/lib/hire/cv-read').CvReader; cvShelf?: unknown[] } | null },
+  /** When set, the model call throws this instead of answering. */
+  fails: null as unknown,
 }));
 
 vi.mock('@/lib/ai/agents/orchestrator', async (importOriginal) => {
@@ -24,8 +33,20 @@ vi.mock('@/lib/ai/agents/orchestrator', async (importOriginal) => {
       ctl.captured = hire;
       return actual.runLekir(messages, hire, ...rest);
     }) as typeof actual.runLekir,
+    runTuah: ((...args) => {
+      ctl.tuah = { team: Boolean(args[6]), hire: args[7] ?? null };
+      return actual.runTuah(...args);
+    }) as typeof actual.runTuah,
   };
 });
+
+// The Tuah route also reads marketing data; the fake client has no such tables.
+vi.mock('@/lib/reach/supabase', () => ({
+  getReachData: async () => {
+    const { createSeedReachData } = await import('@/lib/reach/seed');
+    return createSeedReachData();
+  },
+}));
 
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({
@@ -68,6 +89,7 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
             system: String(options.prompt.find((m) => m.role === 'system')?.content ?? ''),
             tools: (options.tools ?? []).map((tool) => tool.name),
           });
+          if (ctl.fails) throw ctl.fails;
           return {
             stream: simulateReadableStream({
               initialDelayInMs: 0,
@@ -115,8 +137,59 @@ beforeEach(() => {
   ctl.freeConsumed = 0;
   ctl.tablesRead = [];
   ctl.captured = null;
+  ctl.tuah = null;
+  ctl.fails = null;
   process.env.AI_KEYS_ENCRYPTION_SECRET = SECRET;
 });
+
+/**
+ * A provider failure as the SDK reports it: the request it failed on rides
+ * along, and after a CV read that request holds the file as a data URL.
+ */
+const providerFailure = () =>
+  Object.assign(new Error('The provider could not process the CV of Aisyah Rahman at org/job/secret-file-name.pdf.'), {
+    name: 'AI_APICallError',
+    statusCode: 500,
+    requestBodyValues: {
+      messages: [{ content: [{ file: { file_data: 'data:application/pdf;base64,JVBERi0=' } }] }],
+    },
+  });
+
+/** Everything of the logged values a log drain could serialise: an error's message and stack too. */
+function serialise(value: unknown): string {
+  const met = new WeakSet<object>();
+  return JSON.stringify(value, (_key, inner: unknown) => {
+    if (!inner || typeof inner !== 'object') return inner;
+    if (met.has(inner)) return '[seen]';
+    met.add(inner);
+    if (inner instanceof Error) return { ...inner, name: inner.name, message: inner.message, stack: inner.stack };
+    return inner;
+  });
+}
+
+/** Runs a request whose model call fails, and gives back what was sent and what was logged. */
+async function failing(run: () => Promise<Response>): Promise<{ status: number; body: string; logged: string }> {
+  ctl.fails = providerFailure();
+  const spies = (['error', 'warn', 'info', 'log', 'debug'] as const).map((method) =>
+    vi.spyOn(console, method).mockImplementation(() => {}),
+  );
+  try {
+    const res = await run();
+    const body = await res.text();
+    return { status: res.status, body, logged: serialise(spies.flatMap((spy) => spy.mock.calls)) };
+  } finally {
+    spies.forEach((spy) => spy.mockRestore());
+    ctl.fails = null;
+  }
+}
+
+function expectOnlyACode(logged: string) {
+  expect(logged).toContain('"code":500');
+  expect(logged).not.toContain('JVBERi0');
+  expect(logged).not.toContain('requestBodyValues');
+  expect(logged).not.toContain('Aisyah');
+  expect(logged).not.toContain('secret-file-name');
+}
 
 describe('POST /api/hire/chat gating', () => {
   it('401 when not signed in', async () => {
@@ -205,6 +278,26 @@ describe('POST /api/hire/chat happy path', () => {
     for (const name of HIRE_WRITE_TOOL_NAMES) expect(tools).not.toContain(name);
   });
 
+  it('hands Lekir a way to read a CV, through the member’s own data, for a viewer too', async () => {
+    ctl.org = { orgId: 'org1', role: 'viewer' };
+    const res = await POST(post(validBody));
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(ctl.calls[0].tools).toContain('readCandidateCv');
+    const files = ctl.captured!.files!;
+    expect(typeof files.readCv).toBe('function');
+    // It looks the application up through the same workspace-scoped data the lookups use.
+    ctl.tablesRead = [];
+    expect(await files.readCv('11111111-1111-4111-8111-111111111111')).toEqual({ state: 'missing' });
+    // With it goes an empty shelf for the files it reads: this request's own, not one shared with the next.
+    const shelf = ctl.captured!.cvShelf;
+    expect(shelf).toEqual([]);
+    await (await POST(post(validBody))).text();
+    expect(ctl.captured!.cvShelf).toEqual([]);
+    expect(ctl.captured!.cvShelf).not.toBe(shelf);
+    expect(ctl.tablesRead).toContain('hire_applications');
+  });
+
   it('runs on the workspace key without touching the free allowance', async () => {
     ctl.sealedKey = encryptApiKey('sk-or-v1-workspace-key-aaaaaaaaaaaa');
     ctl.freeRemaining = -1;
@@ -214,5 +307,67 @@ describe('POST /api/hire/chat happy path', () => {
     await res.text();
     expect(ctl.freeConsumed).toBe(0);
     expect(ctl.usedKeys).toEqual(['sk-or-v1-workspace-key-aaaaaaaaaaaa']);
+  });
+});
+
+describe('POST /api/hire/chat when the model call fails', () => {
+  it('tells the user Lekir ran into a problem, and logs only a code', async () => {
+    const { status, body, logged } = await failing(() => POST(post(validBody)));
+    expect(status).toBe(200);
+    expect(body).toContain('Lekir ran into a problem. Please try again in a moment.');
+    expect(body).not.toContain('Aisyah');
+    expect(logged).toContain('[ask-lekir] stream error:');
+    expect(logged).toContain('[ai] lekir model call failed:');
+    expectOnlyACode(logged);
+  });
+});
+
+describe('POST /api/chat (Tuah) and reading a CV', () => {
+  const tuahPost = (body: unknown) =>
+    new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+  it('gives Lekir a way to read a CV when Tuah answers with its team', async () => {
+    const { POST: tuah } = await import('@/app/api/chat/route');
+    const res = await tuah(tuahPost(validBody));
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(ctl.tuah!.team).toBe(true);
+    expect(typeof ctl.tuah!.hire!.files?.readCv).toBe('function');
+    // ...and an empty shelf of this request's own for what it reads.
+    const shelf = ctl.tuah!.hire!.cvShelf;
+    expect(shelf).toEqual([]);
+    await (await tuah(tuahPost(validBody))).text();
+    expect(ctl.tuah!.hire!.cvShelf).toEqual([]);
+    expect(ctl.tuah!.hire!.cvShelf).not.toBe(shelf);
+    // Tuah itself never holds the tool: only the specialist it asks does.
+    expect(ctl.calls[0].tools).toContain('askLekir');
+    expect(ctl.calls[0].tools).not.toContain('readCandidateCv');
+  });
+
+  it('tells the user Tuah ran into a problem when the model call fails, and logs only a code', async () => {
+    const { POST: tuah } = await import('@/app/api/chat/route');
+    const { status, body, logged } = await failing(() => tuah(tuahPost({ ...validBody, team: false })));
+    expect(status).toBe(200);
+    expect(body).toContain('Tuah ran into a problem. Please try again in a moment.');
+    expect(body).not.toContain('Aisyah');
+    expect(logged).toContain('[tuah] stream error:');
+    expectOnlyACode(logged);
+  });
+
+  it('gives the single agent no way to read a CV', async () => {
+    const { POST: tuah } = await import('@/app/api/chat/route');
+    const res = await tuah(tuahPost({ ...validBody, team: false }));
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(ctl.tuah!.team).toBe(false);
+    expect(ctl.tuah!.hire).not.toBeNull();
+    expect(ctl.tuah!.hire!.files).toBeUndefined();
+    expect(ctl.tuah!.hire!.cvShelf).toBeUndefined();
+    expect(ctl.calls[0].tools).toContain('listApplications');
+    expect(ctl.calls[0].tools).not.toContain('readCandidateCv');
   });
 });

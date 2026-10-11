@@ -12,6 +12,8 @@ import { randomUUID } from 'node:crypto';
 import { beforeAll, expect, test } from 'vitest';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { createAnonymousClient } from '@/lib/supabase/anonymous';
+import { createCvReader } from '@/lib/hire/cv-read';
+import { createSupabaseHireData } from '@/lib/hire/supabase';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import { createOrg, joinDemo, liveClient, signInAnon, beforeCleanup } from './helpers/live-workspaces';
 
@@ -416,6 +418,22 @@ testWithSupabase('7. the service client attaches a file on a job that requires a
       error: null,
     });
   }
+}, 60_000);
+
+testWithSupabase('7b. a member reads that CV with their own client; another workspace gets missing and a visitor is refused', async () => {
+  const applicationId = (await applicationsOf((await candidatesByEmail(cvEmail))[0].id))[0].id as string;
+  const readAs = (who: SupabaseClient, orgId: string) =>
+    createCvReader(who, createSupabaseHireData(who, orgId)).readCv(applicationId);
+
+  const own = await readAs(owner.c, owner.orgId);
+  expect(own.state).toBe('ok');
+  if (own.state === 'ok') {
+    expect(new TextDecoder().decode(own.bytes.slice(0, 5))).toBe('%PDF-');
+    expect(own.job).toBe(cvJob.title);
+  }
+  expect(await readAs(other.c, other.orgId)).toEqual({ state: 'missing' });
+  // A signed-out visitor may not read the table at all, so the lookup itself is refused: no file either way.
+  expect(await readAs(visitor, owner.orgId)).toEqual({ state: 'failed' });
 }, 60_000);
 
 testWithSupabase('8. the same email and job again with a second path answers ok_duplicate and keeps the first path', async () => {

@@ -98,6 +98,15 @@ describe('getPeopleData', () => {
     for (const call of calls) expect(call.filters, call.table).toContainEqual(['eq', 'org_id', 'o1']);
   });
 
+  it('reads the claim and overtime columns the write path adds, and no one else\'s private ones', async () => {
+    const data = await getPeopleData(client);
+    await Promise.all([data.listClaims(), data.listOvertime()]);
+    const claims = calls.find((c) => c.table === 'hr_claims')!.columns!;
+    for (const column of ['decision_note', 'receipt_path', 'paid_on', 'paid_reference', 'has_receipt']) expect(claims).toContain(column);
+    const overtime = calls.find((c) => c.table === 'hr_overtime_records')!.columns!;
+    for (const column of ['hourly_rate_cents', 'day_kind', 'reason', 'decision_note']) expect(overtime).toContain(column);
+  });
+
   it('never asks the directory for a private column', async () => {
     await (await getPeopleData(client)).listEmployees();
     const { columns } = calls.find((c) => c.table === 'hr_employees')!;

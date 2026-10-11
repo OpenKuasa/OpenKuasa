@@ -8,13 +8,13 @@ import { leaveLabel } from './overview';
 import { average } from './series';
 import type {
   ClaimCategory,
+  ClaimStatus,
   DocumentStatus,
   DocumentType,
   Employee,
   LeaveRequest,
   LeaveType,
   PeopleViewer,
-  RequestStatus,
 } from './types';
 
 /** HR, or anyone in the demo workspace: the people for whom the database returns the whole team. */
@@ -60,9 +60,10 @@ export function departmentAverages(
     .sort((a, b) => b.average - a.average || a.department.localeCompare(b.department));
 }
 
-export const REQUEST_STATUS_LABEL: Record<RequestStatus, string> = {
+export const REQUEST_STATUS_LABEL: Record<ClaimStatus, string> = {
   pending: 'Pending',
   approved: 'Approved',
+  paid: 'Paid',
   rejected: 'Rejected',
   cancelled: 'Cancelled',
 };

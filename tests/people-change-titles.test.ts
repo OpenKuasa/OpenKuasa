@@ -217,3 +217,114 @@ describe('approval cards for leave and time-off', () => {
     });
   });
 });
+
+describe('approval cards for claims and overtime', () => {
+  const CLAIM_ID = '66666666-6666-4666-8666-666666666666';
+  const OT_ID = '77777777-7777-4777-8777-777777777777';
+  const EMPLOYEE = '88888888-8888-4888-8888-888888888888';
+  const UNLISTED = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const lookups = [
+    { tool: 'listEmployees', output: { employees: [{ id: EMPLOYEE, name: 'Amirul Hakim' }] } },
+    {
+      tool: 'listClaims',
+      output: {
+        claims: [
+          { id: CLAIM_ID, employee: 'Amirul Hakim', category: 'Travel claim', category_code: 'travel', amount: 'RM 85.00', status: 'pending' },
+          { id: '99999999-9999-4999-8999-999999999999', employee: 'Farah Idris', category: 'Medical claim', category_code: 'medical', amount: 'RM 1,120.00' },
+        ],
+      },
+    },
+    {
+      tool: 'listOvertime',
+      output: { overtime: [{ id: OT_ID, employee: 'Amirul Hakim', work_date: '2026-10-10', hours: 3, status: 'pending' }] },
+    },
+  ];
+  const find = nameIn(lookups);
+  const claim = { category: 'travel', amount_cents: 8500, claim_date: '2026-10-09' };
+
+  it('words a claim from its own input, in Ringgit from the sen, with the date', () => {
+    expect(approvalTitle('submitClaim', claim)).toBe('Claim RM 85.00 for travel, 9 Oct?');
+    expect(approvalTitle('submitClaim', { ...claim, amount_cents: 112050, category: 'medical' })).toBe('Claim RM 1,120.50 for medical, 9 Oct?');
+    expect(approvalTitle('submitClaim', { ...claim, amount_cents: 5, category: 'other' })).toBe('Claim RM 0.05 for other expenses, 9 Oct?');
+  });
+
+  it('names the employee only when an owner or admin gave one, and never on a member’s card', () => {
+    // A member's input has no employee at all: the card names nobody, whatever the lookups hold.
+    expect(approvalTitle('submitClaim', claim, find)).not.toContain('Amirul');
+    expect(approvalTitle('submitOvertime', { work_date: '2026-10-10', hours: 3 }, find)).toBe('Claim 3 hours of overtime on 10 Oct?');
+    expect(approvalTitle('submitClaim', { ...claim, employee_id: EMPLOYEE }, find)).toBe('Claim RM 85.00 for travel, 9 Oct, for Amirul Hakim?');
+    // An employee no lookup named is never taken for the caller.
+    expect(approvalTitle('submitClaim', { ...claim, employee_id: EMP }, find)).toBe('Claim RM 85.00 for travel, 9 Oct, for this employee?');
+    expect(approvalTitle('submitOvertime', { employee_id: EMP, work_date: '2026-10-10', hours: 1 }, find)).toBe(
+      'Claim 1 hour of overtime on 10 Oct for this employee?',
+    );
+  });
+
+  it('says whether a receipt goes with the claim, from the conversation and not from the input', () => {
+    expect(approvalDetail('submitClaim', claim, { state: 'attached' })).toBe('Sent with the attached receipt');
+    expect(approvalDetail('submitClaim', claim, { state: 'none' })).toBe('Sent with no receipt');
+    // The model cannot make a card say a receipt goes with the claim.
+    expect(approvalDetail('submitClaim', { ...claim, receipt_attached: true }, { state: 'none' })).toBe('Sent with no receipt');
+    expect(approvalDetail('submitClaim', { ...claim, receipt_attached: true }, { state: 'unusable', problem: 'Keep the file to 5 MB or less.' })).toBe(
+      'The attached file cannot be used as a receipt (Keep the file to 5 MB or less.): sent with no receipt',
+    );
+  });
+
+  it('says nothing about a receipt where the conversation is not known, and quotes the description', () => {
+    expect(approvalDetail('submitClaim', claim)).toBeNull();
+    expect(approvalDetail('submitClaim', { ...claim, description: ' Taxi to the client ' }, { state: 'attached' })).toBe(
+      'Sent with the attached receipt · Description: “Taxi to the client”',
+    );
+    expect(approvalDetail('submitClaim', { ...claim, description: 'Taxi' })).toBe('Description: “Taxi”');
+  });
+
+  it('carries no amount on an overtime card, and quotes the reason', () => {
+    const input = { work_date: '2026-10-10', hours: 2.5, reason: 'Stocktake' };
+    expect(approvalTitle('submitOvertime', input)).toBe('Claim 2.5 hours of overtime on 10 Oct?');
+    expect(approvalTitle('submitOvertime', input)).not.toMatch(/RM/);
+    expect(approvalDetail('submitOvertime', input)).toBe('Reason: “Stocktake”');
+    expect(approvalDetail('submitOvertime', { work_date: '2026-10-10', hours: 2 })).toBeNull();
+  });
+
+  it('names a claim or overtime record from the lookup that listed it', () => {
+    expect(approvalTitle('cancelClaim', { id: CLAIM_ID }, find)).toBe("Cancel Amirul Hakim's RM 85.00 travel claim?");
+    expect(approvalTitle('decideClaim', { id: CLAIM_ID, approve: true }, find)).toBe("Approve Amirul Hakim's RM 85.00 travel claim?");
+    expect(approvalTitle('decideClaim', { id: CLAIM_ID, approve: false }, find)).toBe("Reject Amirul Hakim's RM 85.00 travel claim?");
+    expect(approvalTitle('markClaimPaid', { id: CLAIM_ID, paid_on: '2026-10-10' }, find)).toBe("Mark Amirul Hakim's RM 85.00 travel claim as paid?");
+    expect(approvalTitle('unmarkClaimPaid', { id: CLAIM_ID }, find)).toBe("Undo the paid mark on Amirul Hakim's RM 85.00 travel claim?");
+    expect(approvalTitle('cancelOvertime', { id: OT_ID }, find)).toBe("Cancel Amirul Hakim's 3 hours of overtime on 10 Oct?");
+    expect(approvalTitle('decideOvertime', { id: OT_ID, approve: true }, find)).toBe("Approve Amirul Hakim's 3 hours of overtime on 10 Oct?");
+  });
+
+  it('reads as a request not in the lists above when no lookup named it, and never borrows another kind’s name', () => {
+    expect(approvalTitle('cancelClaim', { id: UNLISTED }, find)).toBe('Cancel a claim that was not in the list above?');
+    expect(approvalTitle('decideOvertime', { id: UNLISTED, approve: true }, find)).toBe('Approve an overtime record that was not in the list above?');
+    // A claim's id on an overtime card, and the other way round.
+    expect(approvalTitle('cancelOvertime', { id: CLAIM_ID }, find)).toBe('Cancel an overtime record that was not in the list above?');
+    expect(approvalTitle('cancelClaim', { id: OT_ID }, find)).toBe('Cancel a claim that was not in the list above?');
+    expect(approvalTitle('cancelClaim', { id: EMPLOYEE }, find)).toBe('Cancel a claim that was not in the list above?');
+  });
+
+  it('shows the rejection note, and the paid date and reference', () => {
+    expect(approvalDetail('decideClaim', { id: CLAIM_ID, approve: false, note: ' Receipt unreadable ' })).toBe('Note: “Receipt unreadable”');
+    expect(approvalDetail('decideOvertime', { id: OT_ID, approve: false, note: 'Not agreed' })).toBe('Note: “Not agreed”');
+    expect(approvalDetail('decideClaim', { id: CLAIM_ID, approve: true, note: 'ignored' })).toBeNull();
+    expect(approvalDetail('markClaimPaid', { id: CLAIM_ID, paid_on: '2026-10-10' })).toBe('Paid on 10 Oct 2026');
+    expect(approvalDetail('markClaimPaid', { id: CLAIM_ID, paid_on: '2026-10-10', reference: 'TRX-9' })).toBe(
+      'Paid on 10 Oct 2026 · Reference: “TRX-9”',
+    );
+  });
+
+  it('falls back to plain words for an amount or date that is not one, and does no arithmetic', () => {
+    expect(approvalTitle('submitClaim', { category: 'travel', amount_cents: 85.5, claim_date: 'soon' })).toBe('Claim for travel?');
+    expect(approvalTitle('submitClaim', {})).toBe('Claim?');
+    expect(approvalTitle('submitOvertime', { work_date: '2026-13-40', hours: 'lots' })).toBe('Claim overtime?');
+  });
+
+  it('remembers a claim and an overtime record by kind for later turns', () => {
+    expect(collectNames(lookups)).toMatchObject({
+      [`claim:${CLAIM_ID}`]: "Amirul Hakim's RM 85.00 travel claim",
+      [`overtime:${OT_ID}`]: "Amirul Hakim's 3 hours of overtime on 10 Oct",
+    });
+  });
+});

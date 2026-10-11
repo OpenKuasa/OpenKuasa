@@ -8,15 +8,17 @@
 import { rm } from '@/lib/reach/format';
 import { formatDate, formatDay, hoursBetweenTimes, malaysiaDate, monthStart } from './dates';
 import { CLAIM_CATEGORY_LABEL, leaveDaysByTypeInYear, ownRows } from './own';
-import { overtimeModel, type OvertimeModel } from './overtime';
+import { overtimeAmountText, overtimeModel, type OvertimeModel } from './overtime';
 import { leaveLabel } from './overview';
 import { percent, sumBy } from './series';
 import { leaveBalanceRows } from './summaries';
 import type {
   Claim,
+  ClaimStatus,
   LeaveBalance,
   LeaveRequest,
   LeaveType,
+  OvertimeDayKind,
   OvertimeRecord,
   PeopleViewer,
   RequestStatus,
@@ -35,7 +37,7 @@ const dayOrDash = (instant: string) => {
 };
 /** Newest first by one date, then by when the request was made. */
 /** A rejected request's note for the person who asked, or null. */
-const rejectionNote = (status: RequestStatus, note: string | null): string | null =>
+const rejectionNote = (status: ClaimStatus, note: string | null): string | null =>
   status === 'rejected' && note !== null && note.trim() !== '' ? note.trim() : null;
 const newestFirst = <T extends { created_at: string }>(rows: T[], dateOf: (row: T) => string): T[] =>
   [...rows].sort((a, b) => dateOf(b).localeCompare(dateOf(a)) || b.created_at.localeCompare(a.created_at));
@@ -48,6 +50,21 @@ const newestFirst = <T extends { created_at: string }>(rows: T[], dateOf: (row: 
 export function canCancelRequest(status: RequestStatus, startDate: string, today: string): boolean {
   return status === 'pending' || (status === 'approved' && startDate > today);
 }
+
+/**
+ * Whether the person may cancel their own claim or overtime: only while it
+ * waits. A decided one (a paid claim too) is for an owner or admin to undo.
+ * The database makes the same call; this only decides whether to show the button.
+ */
+export function canCancelPayRequest(status: ClaimStatus): boolean {
+  return status === 'pending';
+}
+
+const DAY_KIND_LABEL: Record<OvertimeDayKind, string> = {
+  weekday: 'Weekday',
+  rest_day: 'Rest day',
+  public_holiday: 'Public holiday',
+};
 
 /* ---- Leave ---------------------------------------------------------- */
 
@@ -193,11 +210,20 @@ export function buildTimeOffModel(
 
 export type ClaimRow = {
   id: string;
+  /** Whether the Cancel button shows. */
+  cancellable: boolean;
   category: string;
   amount: string;
   date: string;
+  /** A receipt was attached: a file, or (in the sample company) just ticked. */
   receipt: boolean;
-  status: RequestStatus;
+  /** There is a file to open. The path itself never leaves the data layer. */
+  hasFile: boolean;
+  status: ClaimStatus;
+  /** The note the decider left, for a rejected claim. */
+  note: string | null;
+  /** The date it was paid, on a paid claim. */
+  paidOn: string | null;
 };
 
 export type ClaimsModel = {
@@ -225,7 +251,7 @@ export function buildClaimsModel(claims: Claim[], viewer: PeopleViewer, today: s
   return {
     linked: true,
     claimed_cents: total,
-    approved_cents: claimed.filter((c) => c.status === 'approved').reduce((t, c) => t + c.amount_cents, 0),
+    approved_cents: claimed.filter((c) => c.status === 'approved' || c.status === 'paid').reduce((t, c) => t + c.amount_cents, 0),
     pending_cents: pending.reduce((t, c) => t + c.amount_cents, 0),
     pending_count: pending.length,
     by_category: sumBy(claimed, (c) => c.category, (c) => c.amount_cents).map(({ key, value }) => ({
@@ -236,11 +262,15 @@ export function buildClaimsModel(claims: Claim[], viewer: PeopleViewer, today: s
     })),
     rows: newestFirst(mine, (c) => c.claim_date).map((c) => ({
       id: c.id,
+      cancellable: canCancelPayRequest(c.status),
       category: CLAIM_CATEGORY_LABEL[c.category],
       amount: rm(c.amount_cents),
       date: formatDate(c.claim_date),
       receipt: c.has_receipt,
+      hasFile: c.receipt_path !== null,
       status: c.status,
+      note: rejectionNote(c.status, c.decision_note),
+      paidOn: c.status === 'paid' && c.paid_on ? formatDate(c.paid_on) : null,
     })),
   };
 }
@@ -249,11 +279,18 @@ export function buildClaimsModel(claims: Claim[], viewer: PeopleViewer, today: s
 
 export type OtRow = {
   id: string;
+  /** Whether the Cancel button shows. */
+  cancellable: boolean;
   date: string;
   hours: number;
   rate: string;
+  /** Weekday, Rest day, Public holiday, or a dash when it was never worked out. */
+  dayKind: string;
+  /** The amount the database fixed, or "Not calculated" with no salary on file. */
   amount: string;
   status: RequestStatus;
+  /** The note the decider left, for a rejected record. */
+  note: string | null;
 };
 
 export type OtModel = {
@@ -270,11 +307,14 @@ export function buildOtModel(records: OvertimeRecord[], viewer: PeopleViewer, to
     overtime: overtimeModel(mine, [], today),
     rows: newestFirst(mine, (r) => r.work_date).map((r) => ({
       id: r.id,
+      cancellable: canCancelPayRequest(r.status),
       date: formatDate(r.work_date),
       hours: r.hours,
       rate: `${r.rate_multiplier}x`,
-      amount: rm(r.amount_cents),
+      dayKind: r.day_kind ? DAY_KIND_LABEL[r.day_kind] : '—',
+      amount: overtimeAmountText(r),
       status: r.status,
+      note: rejectionNote(r.status, r.decision_note),
     })),
   };
 }

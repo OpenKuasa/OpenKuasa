@@ -1,18 +1,19 @@
 /**
  * The four approval queues (leave, financial claims, overtime, time-off) as
  * plain models. Owners and admins only: a builder returns null, having read
- * nothing, for anyone else. Nothing here changes data; the leave and time-off
- * queues' buttons do, through the actions in `leave-actions.ts`.
+ * nothing, for anyone else. Nothing here changes data; the buttons do, through
+ * the actions in `leave-actions.ts` and `pay-actions.ts`.
  */
 
 import { rm } from '@/lib/reach/format';
 import { formatDate, formatDay, hoursBetweenTimes, malaysiaDate, monthStart, todayInMalaysia } from './dates';
 import { CLAIM_CATEGORY_LABEL, REQUEST_STATUS_LABEL, isTeamView } from './own';
 import { overBalanceBy } from './leave';
-import { overtimeModel } from './overtime';
+import { overtimeAmountText, overtimeCalculated, overtimeModel } from './overtime';
 import { leaveLabel } from './overview';
+import { approvedThisYear } from './pay-requests';
 import { bucketByWeek, sumBy } from './series';
-import type { PeopleData, PeopleViewer, RequestStatus } from './types';
+import type { Claim, ClaimStatus, OvertimeDayKind, PeopleData, PeopleViewer } from './types';
 
 export type ApprovalQueue = 'leave' | 'claims' | 'overtime' | 'time_off';
 
@@ -21,7 +22,7 @@ export type ApprovalRow = {
   employee_name: string;
   /** The queue's own middle columns, already formatted. */
   cells: string[];
-  status: RequestStatus;
+  status: ClaimStatus;
   status_label: string;
   pending: boolean;
   created_at: string;
@@ -31,6 +32,39 @@ export type ApprovalRow = {
   yours: boolean;
   /** An owner or admin may cancel it: anything not already cancelled. */
   cancellable: boolean;
+  /** Claims only: the receipt, the year's total, the paid mark. Null on the other queues. */
+  claim: ClaimDetail | null;
+  /** Overtime only: what the multiplier was worked out from. Null on the other queues. */
+  overtime: OvertimeDetail | null;
+  /** Short lines shown under the row: a rejection note, the paid reference. Free text, never logged. */
+  notes: string[];
+};
+
+export type ClaimDetail = {
+  has_file: boolean;
+  ticked: boolean;
+  /** The claim's own date, which a paid date cannot precede. */
+  claim_date: string;
+  /** The calendar year of the claim's own date, which the total below counts. */
+  year: number;
+  /**
+   * Approved or paid in this category in `year`, not counting this claim, already formatted. Null on a claim
+   * that is no longer being weighed (paid, rejected, cancelled), and when the total is nothing.
+   */
+  year_total: string | null;
+  /** An approved claim can be marked paid. */
+  markable: boolean;
+  /** Set once paid. */
+  paid_on: string | null;
+  paid_on_text: string | null;
+  paid_reference: string | null;
+};
+
+export type OvertimeDetail = {
+  /** "Weekday, paid at 1.5 times"; the multiplier alone when the kind of day was not recorded. */
+  kind: string;
+  /** False when no salary was on file: the amount is not calculated. */
+  calculated: boolean;
 };
 
 export type ApprovalsModel = {
@@ -43,6 +77,8 @@ export type ApprovalsModel = {
   /** The pending queue by kind, largest first; null where the queue has no categories. */
   breakdown: { label: string; value: number; text: string }[] | null;
   rows: ApprovalRow[];
+  /** Claims only: approved claims not yet marked paid. Null on the other queues. */
+  unpaid: { count: number; caption: string } | null;
 };
 
 type QueueConfig = {
@@ -59,6 +95,13 @@ type QueueConfig = {
   /** Approve, Reject and Cancel work on this queue; false keeps the disabled buttons. */
   decides: boolean;
 };
+
+const OVERTIME_KIND: Record<OvertimeDayKind, string> = {
+  weekday: 'Weekday',
+  rest_day: 'Rest day',
+  public_holiday: 'Public holiday',
+};
+const multiplierText = (multiplier: number) => `${Math.round(multiplier * 10) / 10} times`;
 
 export const APPROVAL_QUEUES: Record<ApprovalQueue, QueueConfig> = {
   leave: {
@@ -83,7 +126,7 @@ export const APPROVAL_QUEUES: Record<ApprovalQueue, QueueConfig> = {
     tableTitle: 'Expense claims',
     columns: [{ label: 'Category' }, { label: 'Amount', right: true }, { label: 'Date' }],
     emptyText: 'No claims yet',
-    decides: false,
+    decides: true,
   },
   overtime: {
     title: 'Overtime Approvals',
@@ -95,7 +138,7 @@ export const APPROVAL_QUEUES: Record<ApprovalQueue, QueueConfig> = {
     tableTitle: 'Overtime claims',
     columns: [{ label: 'Date' }, { label: 'Hours', right: true }, { label: 'Amount', right: true }],
     emptyText: 'No overtime claims yet',
-    decides: false,
+    decides: true,
   },
   time_off: {
     title: 'Time-Off Approvals',
@@ -124,7 +167,7 @@ type Item = {
   employee_name: string;
   /** Days over balance, for a pending leave request. */
   over_by?: number;
-  status: RequestStatus;
+  status: ClaimStatus;
   created_at: string;
   /** The request's own date: start, claim, work or off date. */
   date: string;
@@ -135,6 +178,9 @@ type Item = {
   /** What the pending breakdown groups by; '' where the queue has none. */
   group: string;
   cells: string[];
+  claim?: ClaimDetail;
+  overtime?: OvertimeDetail;
+  notes?: string[];
 };
 
 function buildQueue(
@@ -143,19 +189,21 @@ function buildQueue(
   today: string,
   format: (measure: number) => string,
   breakdown: ApprovalsModel['breakdown'],
+  unpaidClaims = false,
 ): ApprovalsModel {
   const month = monthStart(today);
   const total = (list: Item[]) => list.reduce((sum, item) => sum + item.measure, 0);
   const pending = items.filter((item) => item.status === 'pending');
-  const inMonth = (status: RequestStatus) =>
-    items.filter((item) => item.status === status && monthStart(item.date) === month);
-  const approved = inMonth('approved');
-  const rejected = inMonth('rejected');
+  const inMonth = (counts: (status: ClaimStatus) => boolean) =>
+    items.filter((item) => counts(item.status) && monthStart(item.date) === month);
+  // A paid claim was approved first, so it counts wherever an approved one does.
+  const approved = inMonth((status) => status === 'approved' || status === 'paid');
+  const rejected = inMonth((status) => status === 'rejected');
 
   const submittedOn = (item: Item) => malaysiaDate(item.created_at) || null;
   const submitted = bucketByWeek(items, submittedOn, (item) => item.trend, today, WEEKS);
   const approvedSince = bucketByWeek(
-    items.filter((item) => item.status === 'approved'),
+    items.filter((item) => item.status === 'approved' || item.status === 'paid'),
     submittedOn,
     (item) => item.trend,
     today,
@@ -172,6 +220,12 @@ function buildQueue(
       approved: approvedSince[index].value,
     })),
     breakdown,
+    unpaid: unpaidClaims
+      ? (() => {
+          const unpaid = items.filter((item) => item.status === 'approved');
+          return { count: unpaid.length, caption: format(total(unpaid)) };
+        })()
+      : null,
     rows: [...items]
       .sort((a, b) => b.created_at.localeCompare(a.created_at) || a.id.localeCompare(b.id))
       .map((item) => ({
@@ -184,7 +238,11 @@ function buildQueue(
         created_at: item.created_at,
         over_by: item.over_by ?? 0,
         yours: viewer.employeeId !== null && item.employee_id === viewer.employeeId,
-        cancellable: item.status !== 'cancelled',
+        // A paid claim is not cancelled until its paid mark is undone.
+        cancellable: item.status !== 'cancelled' && item.status !== 'paid',
+        claim: item.claim ?? null,
+        overtime: item.overtime ?? null,
+        notes: item.notes ?? [],
       })),
   };
 }
@@ -198,6 +256,31 @@ const grouped = (
     (item) => item.group,
     (item) => item.measure,
   ).map(({ key, value }) => ({ label: key, value, text: format(value) }));
+
+/** A rejection note, then the payment reference: the lines that sit under a row. */
+function requestNotes(decisionNote: string | null, paidReference: string | null): string[] {
+  const lines: string[] = [];
+  if (decisionNote?.trim()) lines.push(`Note: ${decisionNote.trim()}`);
+  if (paidReference?.trim()) lines.push(`Reference: ${paidReference.trim()}`);
+  return lines;
+}
+
+function claimDetail(claim: Claim, claims: Claim[]): ClaimDetail {
+  // A total of nothing is not worth a line, so it is left out.
+  const yearCents = claim.status === 'pending' || claim.status === 'approved' ? approvedThisYear(claim, claims) : 0;
+  return {
+    has_file: claim.receipt_path !== null,
+    ticked: claim.has_receipt,
+    claim_date: claim.claim_date,
+    // The one formula, shared with Lekiu's lookups.
+    year: Number(claim.claim_date.slice(0, 4)),
+    year_total: yearCents > 0 ? rm(yearCents) : null,
+    markable: claim.status === 'approved',
+    paid_on: claim.status === 'paid' ? claim.paid_on : null,
+    paid_on_text: claim.status === 'paid' && claim.paid_on ? formatDate(claim.paid_on) : null,
+    paid_reference: claim.status === 'paid' ? claim.paid_reference : null,
+  };
+}
 
 export async function leaveApprovals(data: PeopleData, viewer: PeopleViewer, now: Date): Promise<ApprovalsModel | null> {
   if (!isTeamView(viewer)) return null;
@@ -225,6 +308,8 @@ export async function claimApprovals(data: PeopleData, viewer: PeopleViewer, now
   if (!isTeamView(viewer)) return null;
   const claims = await data.listClaims();
   const items: Item[] = claims.map((c) => ({
+    claim: claimDetail(c, claims),
+    notes: requestNotes(c.decision_note, c.paid_reference),
     id: c.id,
     employee_id: c.employee_id,
     employee_name: c.employee_name,
@@ -236,7 +321,7 @@ export async function claimApprovals(data: PeopleData, viewer: PeopleViewer, now
     group: CLAIM_CATEGORY_LABEL[c.category] ?? 'Other',
     cells: [CLAIM_CATEGORY_LABEL[c.category] ?? 'Other', rm(c.amount_cents), formatDate(c.claim_date)],
   }));
-  return buildQueue(items, viewer, todayInMalaysia(now), rm, grouped(items, rm));
+  return buildQueue(items, viewer, todayInMalaysia(now), rm, grouped(items, rm), true);
 }
 
 export async function overtimeApprovals(data: PeopleData, viewer: PeopleViewer, now: Date): Promise<ApprovalsModel | null> {
@@ -253,7 +338,15 @@ export async function overtimeApprovals(data: PeopleData, viewer: PeopleViewer, 
     measure: r.hours,
     trend: r.hours,
     group: '',
-    cells: [formatDate(r.work_date), hoursText(r.hours), rm(r.amount_cents)],
+    // No salary on file: the database stored no rate, so there is no amount to show.
+    cells: [formatDate(r.work_date), hoursText(r.hours), overtimeAmountText(r)],
+    overtime: {
+      kind: r.day_kind
+        ? `${OVERTIME_KIND[r.day_kind]}, paid at ${multiplierText(r.rate_multiplier)}`
+        : `Paid at ${multiplierText(r.rate_multiplier)}`,
+      calculated: overtimeCalculated(r),
+    },
+    notes: requestNotes(r.decision_note, null),
   }));
   const breakdown = overtimeModel(records, employees, today).by_department.map(({ department, hours }) => ({
     label: department,

@@ -65,6 +65,34 @@ describe('storedParts', () => {
     ).toEqual([{ type: 'file', mediaType: 'image/png', filename: 'a.png', path: 'u/t/f' }]);
   });
 
+  it('saves a CV read as the small answer it is: no file, no data, no path', async () => {
+    // What the tool really returns, so this fails if the bytes ever ride in its result.
+    const { createHireTools } = await import('@/lib/ai/hire-tools');
+    const { createSeedHireData } = await import('@/lib/hire/seed');
+    const bytes = new TextEncoder().encode('%PDF-1.4\nSENTINEL-CV-BODY\n');
+    const cvPath = 'org-folder/job-folder/secret-file-name.pdf';
+    const tools = createHireTools(createSeedHireData(), new Date(), undefined, undefined, {
+      readCv: async () => ({ state: 'ok', bytes, candidate: 'Aisyah Rahman', job: 'Sales Executive' }),
+    });
+    const input = { applicationId: '11111111-1111-4111-8111-111111111111' };
+    const output = await (
+      tools.readCandidateCv as unknown as { execute: (i: unknown, o: unknown) => Promise<unknown> }
+    ).execute(input, { toolCallId: 'cv1', messages: [] });
+
+    const part = { type: 'tool-readCandidateCv', toolCallId: 'cv1', state: 'output-available', input, output };
+    const kept = storedParts([part]);
+    expect(kept).toEqual([part]);
+    expect(kept[0]).toMatchObject({ output: { ok: true, candidate: 'Aisyah Rahman', job: 'Sales Executive' } });
+    const json = JSON.stringify(kept);
+    expect(json).not.toContain('%PDF');
+    expect(json).not.toContain('SENTINEL');
+    expect(json).not.toContain(Buffer.from(bytes).toString('base64'));
+    expect(json).not.toContain('data:');
+    expect(json).not.toContain(cvPath);
+    expect(json).not.toContain('"path"');
+    expect(kept.some((p) => p.type === 'file')).toBe(false);
+  });
+
   it('does not keep a very long result', () => {
     const [part] = storedParts([
       {

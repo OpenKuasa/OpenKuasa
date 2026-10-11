@@ -10,10 +10,11 @@
 
 import type { ToolSet } from 'ai';
 import { CRM_WRITE_TOOL_NAMES, createCrmTools, type CrmAccess } from '@/lib/ai/crm-tools';
-import { createHireTools } from '@/lib/ai/hire-tools';
+import { createHireTools, type HeldCv } from '@/lib/ai/hire-tools';
 import { createPeopleTools, type PeopleWrite } from '@/lib/ai/people-tools';
 import { createReachTools } from '@/lib/ai/tools';
 import type { HireWriteContext } from '@/lib/hire/capabilities';
+import type { CvReader } from '@/lib/hire/cv-read';
 import type { ReachWriteContext } from '@/lib/reach/capabilities';
 import type { HireData } from '@/lib/hire/types';
 import type { PeopleData, PeopleViewer } from '@/lib/people/types';
@@ -57,6 +58,14 @@ export type HireAccess = {
   write?: { ctx: HireWriteContext; canWrite: boolean };
   /** The site's own address, for the careers page link. */
   origin?: string | null;
+  /** Reads one application's CV as the signed-in member. Lekir can read a CV only when this is given. */
+  files?: CvReader;
+  /**
+   * Where this request's read CVs wait to be shown to the model that asked: a new, empty array
+   * per request, given with `files`. A caller that gives `files` alone is made one by
+   * `hireProduct`, so a read CV always has a way to its model.
+   */
+  cvShelf?: HeldCv[];
 };
 
 /** Hiring tools that change data. */
@@ -65,7 +74,7 @@ export const HIRE_WRITE_TOOL_NAMES = ['createJob', 'updateJob', 'setJobStatus', 
 /** The HR data an agent reads, who is asking, and whether they may change it. */
 export type PeopleAccess = { data: PeopleData; viewer: PeopleViewer; write?: PeopleWrite };
 
-/** HR tools that change data: employees, departments, leave and time-off. */
+/** HR tools that change data: employees, departments, leave, time-off, claims and overtime. */
 export const PEOPLE_WRITE_TOOL_NAMES = [
   'createEmployee',
   'updateEmployee',
@@ -82,6 +91,14 @@ export const PEOPLE_WRITE_TOOL_NAMES = [
   'decideLeave',
   'decideTimeOff',
   'setLeaveEntitlement',
+  'submitClaim',
+  'cancelClaim',
+  'submitOvertime',
+  'cancelOvertime',
+  'decideClaim',
+  'markClaimPaid',
+  'unmarkClaimPaid',
+  'decideOvertime',
 ] as const;
 
 export type ProductKey = 'reach' | 'crm' | 'hire' | 'people';
@@ -95,6 +112,8 @@ export type ProductToolkit = {
   read: ToolSet;
   /** Changes: each waits for the user's approval. Empty for someone who may not change anything. */
   write: ToolSet;
+  /** Hiring only: the CVs this request has read, for whichever agent runs these tools to hand to its model. */
+  cvShelf?: HeldCv[];
 };
 
 function split(all: ToolSet, writeNames: readonly string[]): Pick<ProductToolkit, 'read' | 'write'> {
@@ -119,8 +138,13 @@ export function crmProduct(crm: CrmAccess): ProductToolkit {
 
 /** Lekir: jobs, candidates, applications and interviews. */
 export function hireProduct(hire: HireAccess): ProductToolkit {
-  const all = createHireTools(hire.data, () => new Date(), hire.write, { origin: hire.origin ?? null });
-  return { key: 'hire', name: 'Lekir', ...split(all, HIRE_WRITE_TOOL_NAMES) };
+  // One shelf per call of this function, which is once per request: the caller's, or one made here.
+  // Either way it is the one the tools fill and the one the agent reads from, so a read CV cannot be stranded.
+  const cvShelf = hire.files ? (hire.cvShelf ?? []) : undefined;
+  const all = createHireTools(
+    hire.data, () => new Date(), hire.write, { origin: hire.origin ?? null }, hire.files, cvShelf,
+  );
+  return { key: 'hire', name: 'Lekir', ...split(all, HIRE_WRITE_TOOL_NAMES), cvShelf };
 }
 
 /** Lekiu: staff, leave, claims, overtime, attendance, payroll and performance. */

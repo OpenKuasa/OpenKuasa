@@ -1,18 +1,19 @@
 import { BarChart3, Clock } from 'lucide-react';
 import { BentoCard } from '@/components/bento/bento';
 import { BarGroup, type Series } from '@/components/charts';
+import { NewOvertimeDialog } from '@/components/people/new-overtime-dialog';
 import { todayInMalaysia } from '@/lib/people/dates';
 import { buildOtModel } from '@/lib/people/requests';
 import { rm } from '@/lib/reach/format';
 import { Muted, loadPeople } from './parts';
-import { MyRequestsScreen, StatusCell } from './my-requests';
+import { MyRequestsScreen, StatusCell, requestCancelCell, requestHeaderAction } from './my-requests';
 
 const dash = '—';
 const OT_SERIES: Series[] = [{ key: 'hours', label: 'OT hours', color: 'var(--chart-1)' }];
 
 /** Your own overtime claims. */
 export default async function OtClaimsScreen() {
-  const { model } = await loadPeople('ot-claims', async (data, now, ctx) => {
+  const { model, viewer } = await loadPeople('ot-claims', async (data, now, ctx) => {
     const today = todayInMalaysia(now);
     // Not linked to an employee: nothing to read, the builder answers "not linked".
     if (ctx.viewer.employeeId === null) return buildOtModel([], ctx.viewer, today);
@@ -27,6 +28,12 @@ export default async function OtClaimsScreen() {
       title="OT Claims"
       subtitle="Your overtime claims and their status"
       laterLabel="Claim OT"
+      headerAction={requestHeaderAction({
+        model,
+        isDemo: viewer.isDemo,
+        label: 'Claim OT',
+        apply: <NewOvertimeDialog />,
+      })}
       model={model}
       kpis={[
         { label: 'OT hours this month', value: month ? month.hours : dash, caption: 'hours' },
@@ -70,15 +77,17 @@ export default async function OtClaimsScreen() {
         </>
       }
       tableSubtitle="Overtime claims and their status"
-      columns={['Date', 'Hours', 'Rate', 'Amount', 'Status']}
+      columns={['Date', 'Hours', 'Day', 'Rate', 'Amount', 'Status', 'Actions']}
       rows={(ot?.rows ?? []).map((r) => ({
         key: r.id,
         cells: [
           r.date,
           <span key="h" className="tabular-nums">{r.hours}</span>,
+          r.dayKind,
           r.rate,
           <span key="a" className="tabular-nums">{r.amount}</span>,
-          <StatusCell key="s" status={r.status} />,
+          <StatusCell key="s" status={r.status} note={r.note} />,
+          <span key="c">{requestCancelCell({ cancellable: r.cancellable, isDemo: viewer.isDemo, kind: 'overtime', id: r.id })}</span>,
         ],
       }))}
       emptyText="You haven't claimed any overtime yet"

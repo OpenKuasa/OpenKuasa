@@ -6,9 +6,10 @@
  */
 
 import { type ModelMessage, stepCountIs, streamText } from 'ai';
-import { logModelCall } from '@/lib/ai/call-log';
+import { logModelCall, logModelError } from '@/lib/ai/call-log';
 import { getModel, pickModelId } from '@/lib/ai/provider';
 import type { CrmAccess } from '@/lib/ai/crm-tools';
+import { prepareCvStep } from '@/lib/ai/hire-tools';
 import {
   REACH_WRITE_TOOL_NAMES,
   combineToolkits,
@@ -52,6 +53,7 @@ export function runJebat(
     tools,
     toolApproval,
     onLanguageModelCallEnd: logModelCall('jebat', pickModelId('orchestrator')),
+    onError: logModelError('jebat'),
     stopWhen: stepCountIs(8),
     maxOutputTokens: 1000,
     // Stop in-flight model/tool work if the client disconnects.
@@ -81,6 +83,7 @@ export function runKasturi(
     tools,
     toolApproval,
     onLanguageModelCallEnd: logModelCall('kasturi', pickModelId('orchestrator')),
+    onError: logModelError('kasturi'),
     // A CRM change often needs two lookups first (the contact, then the stage).
     stopWhen: stepCountIs(10),
     maxOutputTokens: 1000,
@@ -100,14 +103,19 @@ export function runLekir(
   /** A workspace's own OpenRouter key; omitted for platform-paid turns. */
   apiKey?: string,
 ) {
-  const { tools, toolApproval } = combineToolkits([hireProduct(hire)]);
+  const product = hireProduct(hire);
+  const { tools, toolApproval } = combineToolkits([product]);
   return streamText({
     model: getModel('orchestrator', apiKey),
     system: LEKIR_SYSTEM,
     messages,
     tools,
     toolApproval,
+    // A CV Lekir has read reaches its model as a user file in the next step, never inside the tool result.
+    prepareStep: prepareCvStep(product.cvShelf),
     onLanguageModelCallEnd: logModelCall('lekir', pickModelId('orchestrator')),
+    // After a CV read the request holds the file: a failure is logged by its code, never whole.
+    onError: logModelError('lekir'),
     stopWhen: stepCountIs(8),
     // A drafted job description runs longer than a data answer.
     maxOutputTokens: 1400,
@@ -134,6 +142,7 @@ export function runLekiu(
     tools,
     toolApproval,
     onLanguageModelCallEnd: logModelCall('lekiu', pickModelId('orchestrator')),
+    onError: logModelError('lekiu'),
     // A change often needs two lookups first (the employee, then the department).
     stopWhen: stepCountIs(10),
     // A drafted notice or letter runs longer than a data answer.
@@ -147,7 +156,7 @@ const TEAM_AREA = {
   reach:
     'marketing: ads and campaigns, spend, leads (finding, adding and editing them, and promoting a lead to a CRM contact), lead forms, creatives, appointments and ad settings',
   crm: 'the CRM: contacts, deals, pipelines and their stages, follow-ups (reminders to get back to a contact) and the calendar. A lead is not a contact yet: anything about a lead goes to Jebat',
-  hire: 'hiring: job openings, candidates and their applications, the hiring funnel, interviews, the talent pool and time to hire. Job openings can be created, edited, opened, paused, closed and deleted. Existing staff, leave and payroll are not hiring',
+  hire: 'hiring: job openings, candidates and their applications, the hiring funnel, interviews, the talent pool and time to hire. Job openings can be created, edited, opened, paused, closed and deleted. Existing staff, leave and payroll are not hiring. It can read one candidate\'s uploaded CV and give a verdict on it',
   people: 'HR: existing staff, leave, claims, overtime, attendance, payroll and performance. Lookups only for now. Hiring new people is not HR',
 } as const;
 
@@ -201,6 +210,7 @@ export function runTuah(
     toolApproval,
     prepareStep: teamTools?.prepareStep as never,
     onLanguageModelCallEnd: logModelCall(team ? 'tuah-team' : 'tuah', pickModelId('orchestrator')),
+    onError: logModelError(team ? 'tuah-team' : 'tuah'),
     // A CRM change often needs two lookups first (the contact, then the stage).
     stopWhen: stepCountIs(10),
     maxOutputTokens: 1000,

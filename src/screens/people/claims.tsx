@@ -1,18 +1,20 @@
 import { PieChart, Wallet } from 'lucide-react';
 import { BentoCard } from '@/components/bento/bento';
 import { DonutStat, type Slice } from '@/components/charts';
+import { NewClaimDialog } from '@/components/people/new-claim-dialog';
+import { ReceiptLink } from '@/components/people/receipt-link';
 import { Progress } from '@/components/ui/progress';
 import { todayInMalaysia } from '@/lib/people/dates';
 import { buildClaimsModel } from '@/lib/people/requests';
 import { rm } from '@/lib/reach/format';
 import { DEPARTMENT_COLORS, Muted, loadPeople } from './parts';
-import { MyRequestsScreen, StatusCell } from './my-requests';
+import { MyRequestsScreen, StatusCell, requestCancelCell, requestHeaderAction } from './my-requests';
 
 const dash = '—';
 
 /** Your own expense claims. */
 export default async function ClaimsScreen() {
-  const { model } = await loadPeople('claims', async (data, now, ctx) => {
+  const { model, viewer } = await loadPeople('claims', async (data, now, ctx) => {
     const today = todayInMalaysia(now);
     // Not linked to an employee: nothing to read, the builder answers "not linked".
     if (ctx.viewer.employeeId === null) return buildClaimsModel([], ctx.viewer, today);
@@ -32,6 +34,12 @@ export default async function ClaimsScreen() {
       title="Financial Claims"
       subtitle="Your expense claims and their status"
       laterLabel="New Claim"
+      headerAction={requestHeaderAction({
+        model,
+        isDemo: viewer.isDemo,
+        label: 'New Claim',
+        apply: <NewClaimDialog />,
+      })}
       model={model}
       kpis={[
         { label: 'Claimed this month', value: claims ? rm(claims.claimed_cents) : dash },
@@ -86,15 +94,19 @@ export default async function ClaimsScreen() {
         </>
       }
       tableSubtitle="Expense claims and their status"
-      columns={['Category', 'Amount', 'Date', 'Receipt', 'Status']}
+      columns={['Category', 'Amount', 'Date', 'Receipt', 'Status', 'Actions']}
       rows={(claims?.rows ?? []).map((r) => ({
         key: r.id,
         cells: [
           r.category,
           <span key="a" className="tabular-nums">{r.amount}</span>,
           r.date,
-          r.receipt ? 'Attached' : dash,
-          <StatusCell key="s" status={r.status} />,
+          <ReceiptLink key="r" claimId={r.id} hasFile={r.hasFile && !viewer.isDemo} ticked={r.receipt} />,
+          <span key="s" className="flex flex-col gap-1">
+            <StatusCell status={r.status} note={r.note} />
+            {r.paidOn ? <span className="text-xs text-muted-foreground">Paid on {r.paidOn}</span> : null}
+          </span>,
+          <span key="c">{requestCancelCell({ cancellable: r.cancellable, isDemo: viewer.isDemo, kind: 'claim', id: r.id })}</span>,
         ],
       }))}
       emptyText="You haven't made any claims yet"

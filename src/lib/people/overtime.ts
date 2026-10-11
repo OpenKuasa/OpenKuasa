@@ -3,9 +3,24 @@
  * the approvals queue). Rejected and cancelled records feed nothing.
  */
 
+import { rm } from '@/lib/reach/format';
 import { monthStart } from './dates';
 import { bucketByMonth, sumBy, type Bucket } from './series';
 import type { Employee, OvertimeRecord } from './types';
+
+/**
+ * Whether a record's amount is worked out. Records made before the hourly rate
+ * was stored have an amount and no rate; only a record with neither has no
+ * salary behind it. One rule for every screen, model and tool.
+ */
+export function overtimeCalculated(r: { hourly_rate_cents: number | null; amount_cents: number }): boolean {
+  return !(r.hourly_rate_cents === null && r.amount_cents === 0);
+}
+
+/** The amount as shown: Ringgit, or "Not calculated" when no salary was on file. */
+export function overtimeAmountText(r: { hourly_rate_cents: number | null; amount_cents: number }): string {
+  return overtimeCalculated(r) ? rm(r.amount_cents) : 'Not calculated';
+}
 
 export type OvertimeModel = {
   month: { hours: number; amount_cents: number; approved_hours: number; pending_hours: number; pending_count: number };

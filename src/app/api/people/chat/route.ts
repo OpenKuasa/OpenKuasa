@@ -6,11 +6,11 @@
  * lookups, which read a request-scoped provider built from the one workspace
  * resolved here (`createSupabasePeopleData`; the sample data when no project is
  * configured) through the caller's own session, so the database decides which rows they see: all
- * of them for an owner or admin, only their own for anyone else. An owner or admin also gets the change tools; a linked member gets leave and time-off tools for themselves. Each change waits for approval.
+ * of them for an owner or admin, only their own for anyone else. An owner or admin also gets the change tools; a linked member gets leave, time-off, claim and overtime tools for themselves. Each change waits for approval.
  */
 
 import { chatJson, prepareChat } from '@/lib/ai/chat-request';
-import type { PeopleWrite } from '@/lib/ai/people-tools';
+import { receiptFromMessages, type PeopleWrite } from '@/lib/ai/people-tools';
 import { runLekiu } from '@/lib/ai/agents/orchestrator';
 import { getCurrentOrg } from '@/lib/auth/current-org';
 import { can } from '@/lib/auth/permissions';
@@ -54,11 +54,16 @@ export async function POST(request: Request) {
     });
   }
   // Change tools: an owner or admin holds all of them (`hr`); a member linked to an employee record, outside the
-  // demo, holds leave and time-off tools for that employee alone (`self`), whatever their role. The member's
+  // demo, holds leave, time-off, claim and overtime tools for that employee alone (`self`), whatever their role. The member's
   // employee id comes from the viewer, never from the request. The database enforces the same rules. Each change needs approval.
   // Nothing is revalidated here, as in the other chat routes: every /people page is rendered per request,
   // and only a server action can refresh the page the person is already looking at.
   let write: PeopleWrite | undefined;
+  // A receipt is the file on the user message just before the message that proposed the claim (the first request:
+  // the newest user message), found here from the request itself and never from the model. An approval is answered
+  // in a later request, but the claim's proposal is still in the history, so it still takes the file that
+  // message carried and never a newer message's.
+  const receipt = receiptFromMessages(chat.uiMessages);
   // The demo workspace is read-only: the database refuses every change there, so no change tool is offered.
   if (!org || viewer.isDemo) {
     write = undefined;
@@ -67,9 +72,17 @@ export async function POST(request: Request) {
       ctx: { client: chat.supabase, orgId: org.orgId },
       tier: 'hr',
       employeeId: viewer.employeeId,
+      receipt,
+      userId: chat.userId,
     };
   } else if (viewer.employeeId !== null) {
-    write = { ctx: { client: chat.supabase, orgId: org.orgId }, tier: 'self', employeeId: viewer.employeeId };
+    write = {
+      ctx: { client: chat.supabase, orgId: org.orgId },
+      tier: 'self',
+      employeeId: viewer.employeeId,
+      receipt,
+      userId: chat.userId,
+    };
   }
   const result = runLekiu(chat.messages, { data, viewer, write }, request.signal, chat.apiKey);
 

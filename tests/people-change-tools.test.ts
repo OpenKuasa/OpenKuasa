@@ -37,7 +37,7 @@ const HR = { employeeId: null, isHr: true, isDemo: false };
 const MEMBER = { employeeId: 'seed-emp-2', isHr: false, isDemo: false };
 const data = createSeedPeopleData(NOW);
 const EMP = '22222222-2222-4222-8222-222222222222';
-const write = () => ({ ctx: { client: {} as never, orgId: 'org-1' }, tier: 'hr' as const, employeeId: null });
+const write = () => ({ ctx: { client: {} as never, orgId: 'org-1' }, tier: 'hr' as const, employeeId: null, receipt: null, userId: 'u1' });
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Loose = any;
@@ -54,16 +54,19 @@ beforeEach(() => {
 });
 
 describe('Lekiu change tools', () => {
-  it('are the eight employee and department changes then the leave ones, after the lookups', () => {
+  it('are the eight employee and department changes, then leave, then claims and overtime, after the lookups', () => {
     expect([...PEOPLE_WRITE_TOOL_NAMES]).toEqual([
       'createEmployee', 'updateEmployee', 'setEmployeeStatus', 'deleteEmployee', 'linkEmployeeToMember',
       'createDepartment', 'updateDepartment', 'deleteDepartment',
       'applyLeave', 'applyTimeOff', 'cancelLeaveRequest', 'cancelTimeOffRequest',
       'decideLeave', 'decideTimeOff', 'setLeaveEntitlement',
+      'submitClaim', 'cancelClaim', 'submitOvertime', 'cancelOvertime',
+      'decideClaim', 'markClaimPaid', 'unmarkClaimPaid', 'decideOvertime',
     ]);
     expect(Object.keys(createPeopleTools(data, HR, NOW, write()))).toEqual([
       ...PEOPLE_TOOL_NAMES,
       'previewLeave',
+      'previewOvertime',
       ...PEOPLE_WRITE_TOOL_NAMES,
     ]);
   });
@@ -71,7 +74,7 @@ describe('Lekiu change tools', () => {
   it('every one of them waits for approval, and none is a lookup', () => {
     const kit = peopleProduct({ data, viewer: HR, write: write() });
     expect(Object.keys(kit.write).sort()).toEqual([...PEOPLE_WRITE_TOOL_NAMES].sort());
-    expect(Object.keys(kit.read).sort()).toEqual([...PEOPLE_TOOL_NAMES, 'previewLeave'].sort());
+    expect(Object.keys(kit.read).sort()).toEqual([...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime'].sort());
     const { toolApproval } = combineToolkits([kit]);
     for (const name of PEOPLE_WRITE_TOOL_NAMES) expect(toolApproval?.[name]).toBe('user-approval');
   });

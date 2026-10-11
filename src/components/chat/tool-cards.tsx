@@ -10,6 +10,7 @@ import {
   type PendingApproval,
   type ToolStep,
 } from '@/components/chat/tool-parts';
+import type { ReceiptState } from '@/lib/people/receipts';
 import { cn } from '@/lib/utils';
 
 /** One lookup the assistant ran: what it was, and its result on request. */
@@ -22,7 +23,8 @@ export function ToolStepCard({
   as?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const { label, Icon } = toolMeta(as ?? step.name);
+  const { label, Icon, detail } = toolMeta(as ?? step.name);
+  const about = detail?.(step.output) ?? null;
   const canExpand = !step.running && step.output != null;
 
   return (
@@ -41,6 +43,7 @@ export function ToolStepCard({
           <Icon className="size-3.5" />
         </span>
         <span className="font-medium">{label}</span>
+        {about ? <span className="min-w-0 truncate">{about}</span> : null}
         <span className="min-w-0 flex-1 truncate text-muted-foreground">
           {step.running ? 'Working…' : step.denied ? 'Not approved' : 'Done'}
         </span>
@@ -72,6 +75,7 @@ export function ApprovalCard({
   approval,
   named,
   proposal,
+  receipt,
   onDecide,
 }: {
   approval: PendingApproval;
@@ -79,9 +83,11 @@ export function ApprovalCard({
   proposal?: { title: string; detail: string | null } | null;
   /** Looks up the name of a row the change mentions by id. */
   named?: (id: unknown, kind?: ItemKind) => string | null;
+  /** What the claim's question carried (from `receiptStateFor`), for a claim's card. */
+  receipt?: ReceiptState;
   onDecide: (approved: boolean) => void;
 }) {
-  const detail = proposal ? proposal.detail : approvalDetail(approval.toolName, approval.input);
+  const detail = proposal ? proposal.detail : approvalDetail(approval.toolName, approval.input, receipt);
   const title = proposal?.title ?? approvalTitle(approval.toolName, approval.input, named);
   return (
     <div

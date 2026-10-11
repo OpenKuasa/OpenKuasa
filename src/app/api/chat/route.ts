@@ -14,12 +14,14 @@
  */
 
 import { readUIMessageStream, type UIMessage } from 'ai';
+import { modelErrorCode } from '@/lib/ai/call-log';
 import { prepareChat } from '@/lib/ai/chat-request';
-import { runTuah } from '@/lib/ai/agents/orchestrator';
+import { runTuah, type HireAccess } from '@/lib/ai/agents/orchestrator';
 import { getCurrentOrg } from '@/lib/auth/current-org';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
 import { answersWithTeam, namesIn, proposalsIn, transcriptOf } from '@/lib/chat/delegation';
 import { saveAnswer, saveQuestion } from '@/lib/chat/store';
+import { createCvReader } from '@/lib/hire/cv-read';
 import { getHireData } from '@/lib/hire/supabase';
 import { originFromHeaders } from '@/lib/reach/form-submissions';
 import { getReachData } from '@/lib/reach/supabase';
@@ -50,12 +52,22 @@ export async function POST(request: Request) {
     org && org.role !== 'viewer'
       ? { ctx: { client: supabase, orgId: org.orgId }, canWrite: true }
       : undefined;
+  // Tuah answers with its team unless the chat asked for the single agent.
+  // A turn resuming after an approval stays with whichever one started it.
+  const withTeam = answersWithTeam(chat.team, lastMessage);
+  const hireData = await getHireData(supabase);
   // Lekir's change tools need the same write access as Jebat's.
-  const hire = {
-    data: await getHireData(supabase),
+  const hireBase = {
+    data: hireData,
     write,
     origin: originFromHeaders((name) => request.headers.get(name)),
   };
+  // Only Lekir, asked as a specialist, reads a CV: the single agent is given no way to.
+  // The file is read with the member's own client, never the service role, and waits on a
+  // shelf that belongs to this request alone until Lekir's model is shown it.
+  const hire: HireAccess = withTeam
+    ? { ...hireBase, files: createCvReader(hasSupabaseEnv() ? supabase : null, hireData), cvShelf: [] }
+    : hireBase;
   const crm = org
     ? {
         client: supabase,
@@ -65,9 +77,6 @@ export async function POST(request: Request) {
       }
     : null;
 
-  // Tuah answers with its team unless the chat asked for the single agent.
-  // A turn resuming after an approval stays with whichever one started it.
-  const withTeam = answersWithTeam(chat.team, lastMessage);
   const team = withTeam
     ? {
         transcript: transcriptOf(chat.uiMessages.slice(-8)),
@@ -117,7 +126,8 @@ export async function POST(request: Request) {
 
   return result.toUIMessageStreamResponse({
     onError: (error) => {
-      console.error('[tuah] stream error:', error);
+      // The code only: after a CV read, a provider's error holds the request, file and all.
+      console.error('[tuah] stream error:', modelErrorCode(error));
       return 'Tuah ran into a problem. Please try again in a moment.';
     },
   });

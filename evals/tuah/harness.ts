@@ -17,6 +17,7 @@ import { getCurrentOrg } from '@/lib/auth/current-org';
 import { collectNames, type KnownNames } from '@/lib/chat/change-titles';
 import { APPLY_TOOL, ASK_PREFIX, isDelegation, type Proposal } from '@/lib/chat/delegation';
 import { createSupabaseHireData } from '@/lib/hire/supabase';
+import type { Application } from '@/lib/hire/types';
 import { createSupabaseReachData } from '@/lib/reach/supabase';
 
 /** Marks every row an eval creates, so cleanup never touches anything else. */
@@ -118,6 +119,11 @@ export class Conversation {
     private workspace: Workspace,
     /** Run as someone who can look but not change, whatever the account's role. */
     private viewer = false,
+    /**
+     * Extra applications and one CV a case supplies, so no row or file is
+     * written anywhere. Without it, Lekir gets no CV reader, as before.
+     */
+    private hire?: { applications: Application[]; cv: Uint8Array },
   ) {}
 
   async ask(text: string): Promise<Turn> {
@@ -144,6 +150,8 @@ export class Conversation {
     await turnSlot();
     const { client, orgId, userId } = this.workspace;
     const canWrite = !this.viewer && this.workspace.role !== 'viewer';
+    const realHire = createSupabaseHireData(client, orgId);
+    const extra = this.hire;
     const result = runTuah(
       this.messages,
       {
@@ -160,7 +168,30 @@ export class Conversation {
         names: this.names,
       },
       {
-        data: createSupabaseHireData(client, orgId),
+        data: extra
+          ? {
+              ...realHire,
+              listApplications: async () => [...extra.applications, ...(await realHire.listApplications())],
+              // An application has a candidate behind it: a lookup by name must find the person too.
+              listCandidates: async () => [
+                ...extra.applications.map((a) => ({
+                  id: a.candidate_id, name: a.candidate_name, email: null, phone: null, headline: null, location: null,
+                  skills: [], source: a.source, pool_status: 'none' as const, created_at: a.created_at,
+                })),
+                ...(await realHire.listCandidates()),
+              ],
+            }
+          : realHire,
+        files: extra
+          ? {
+              readCv: async (id) => {
+                const found = extra.applications.find((a) => a.id === id);
+                return found
+                  ? { state: 'ok', bytes: extra.cv, candidate: found.candidate_name, job: found.job_title }
+                  : { state: 'missing' };
+              },
+            }
+          : undefined,
         origin: 'https://example.test',
         write: canWrite ? { ctx: { client, orgId }, canWrite: true } : undefined,
       },

@@ -2,15 +2,23 @@
 
 import { useState, useTransition } from 'react';
 import { cancelLeaveAction, cancelTimeOffAction } from '@/app/(app)/people/leave-actions';
+import { cancelClaimAction, cancelOvertimeAction } from '@/app/(app)/people/pay-actions';
 import { Button } from '@/components/ui/button';
 import { WRITE_FAILED } from '@/lib/people/capabilities';
+
+const CANCEL = {
+  leave: cancelLeaveAction,
+  'time-off': cancelTimeOffAction,
+  claim: cancelClaimAction,
+  overtime: cancelOvertimeAction,
+};
 
 /**
  * Cancels one of the signed-in member's own requests, after they confirm. It
  * sends the request id only; the database decides whether this member may
  * cancel it.
  */
-export function CancelRequestButton({ kind, id }: { kind: 'leave' | 'time-off'; id: string }) {
+export function CancelRequestButton({ kind, id }: { kind: 'leave' | 'time-off' | 'claim' | 'overtime'; id: string }) {
   const [pending, start] = useTransition();
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -20,7 +28,7 @@ export function CancelRequestButton({ kind, id }: { kind: 'leave' | 'time-off'; 
     setError(null);
     start(async () => {
       try {
-        const result = await (kind === 'leave' ? cancelLeaveAction({ id }) : cancelTimeOffAction({ id }));
+        const result = await CANCEL[kind]({ id });
         if (!result.ok) setError(result.error);
       } catch {
         setError(WRITE_FAILED);

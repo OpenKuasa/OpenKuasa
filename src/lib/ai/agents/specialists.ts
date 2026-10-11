@@ -20,8 +20,9 @@ import {
 } from 'ai';
 import { z } from 'zod';
 import { subAgentSystem } from '@/lib/ai/agents/prompts';
+import { prepareCvStep } from '@/lib/ai/hire-tools';
 import type { ProductToolkit } from '@/lib/ai/products';
-import { logModelCall } from '@/lib/ai/call-log';
+import { logModelCall, logModelError, modelErrorCode } from '@/lib/ai/call-log';
 import { getModel, pickModelId } from '@/lib/ai/provider';
 import {
   approvalDetail,
@@ -195,12 +196,17 @@ function askTool(product: ProductToolkit, team: TeamContext): Tool {
           system: subAgentSystem(product.key, canChange),
           prompt: given,
           tools: specialistTools(product, team, results, prepared, given),
+          // A CV this specialist reads reaches its own model as a user file in the next step:
+          // only a run whose messages hold the read is given the file, so never Tuah, never another delegation.
+          prepareStep: prepareCvStep(product.cvShelf),
           // A prepared change is the whole report: stop there rather than
           // spend another call having the specialist describe it.
           stopWhen: [stepCountIs(8), () => prepared.length > 0],
           maxOutputTokens: 900,
           abortSignal,
           onLanguageModelCallEnd: logModelCall(product.name.toLowerCase(), pickModelId('worker')),
+          // After a CV read the request holds the file: a failure is logged by its code, never whole.
+          onError: logModelError(product.name.toLowerCase()),
         });
         for await (const part of result.fullStream) {
           if (part.type === 'tool-call') {
@@ -220,10 +226,8 @@ function askTool(product: ProductToolkit, team: TeamContext): Tool {
         }
         yield snapshot('done');
       } catch (error) {
-        console.error(
-          `[tuah] ${product.name} could not finish:`,
-          error instanceof Error ? error.message : error,
-        );
+        // The code only: a provider's message can quote the request, and a non-Error can be anything.
+        console.error(`[tuah] ${product.name} could not finish:`, modelErrorCode(error));
         answer = 'Something went wrong while working on this. Try again in a moment.';
         yield snapshot('failed');
       }
@@ -238,7 +242,7 @@ function askTool(product: ProductToolkit, team: TeamContext): Tool {
 const AREA: Record<ProductToolkit['key'], string> = {
   reach: 'marketing (ads, campaigns, creatives, leads, lead forms, appointments, ad settings)',
   crm: 'the CRM (contacts, deals, pipelines and their stages)',
-  hire: 'hiring (jobs, candidates, applications, the hiring funnel, interviews, the talent pool)',
+  hire: 'hiring (jobs, candidates, applications, the hiring funnel, interviews, the talent pool; it can read one candidate\'s uploaded CV and give a verdict on it)',
   people: 'HR (existing staff, leave, claims, overtime, attendance, payroll, performance)',
 };
 

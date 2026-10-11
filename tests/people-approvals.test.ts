@@ -44,11 +44,12 @@ const leave = (over: Partial<LeaveRequest>): LeaveRequest => ({
 const claim = (over: Partial<Claim>): Claim => ({
   id: 'c', employee_id: 'e1', employee_name: 'E One', category: 'travel', amount_cents: 1000,
   claim_date: '2026-10-02', description: null, has_receipt: true, status: 'pending',
+  decision_note: null, receipt_path: null, paid_on: null, paid_reference: null,
   created_at: '2026-10-02T02:00:00Z', ...over,
 });
 const overtime = (over: Partial<OvertimeRecord>): OvertimeRecord => ({
   id: 'o', employee_id: 'e1', employee_name: 'E One', work_date: '2026-10-02', hours: 2, rate_multiplier: 1.5,
-  amount_cents: 7500, status: 'pending', created_at: '2026-10-03T02:00:00Z', ...over,
+  amount_cents: 7500, hourly_rate_cents: 2500, day_kind: null, reason: null, decision_note: null, status: 'pending', created_at: '2026-10-03T02:00:00Z', ...over,
 });
 const timeOff = (over: Partial<TimeOffRequest>): TimeOffRequest => ({
   id: 't', employee_id: 'e1', employee_name: 'E One', off_date: '2026-10-05', start_time: '09:00:00',
@@ -176,6 +177,25 @@ describe('the queue rules', () => {
     expect(model.rows).toHaveLength(2);
   });
 
+  it('counts a paid claim wherever an approved one counts, and keeps it from being cancelled', async () => {
+    const model = (await claimApprovals(
+      withRows({
+        listClaims: [
+          claim({ id: 'a', status: 'approved', amount_cents: 1000 }),
+          claim({ id: 'p', status: 'paid', amount_cents: 2500, created_at: '2026-10-06T02:00:00Z' }),
+          claim({ id: 'r', status: 'rejected' }),
+        ],
+      }),
+      HR,
+      NOW,
+    ))!;
+    expect(model.approved).toEqual({ count: 2, caption: 'RM 35.00' });
+    expect(model.trend.at(-1)).toMatchObject({ approved: 25 });
+    const paid = model.rows.find((r) => r.id === 'p')!;
+    expect(paid).toMatchObject({ status: 'paid', status_label: 'Paid', pending: false, cancellable: false });
+    expect(model.rows.find((r) => r.id === 'a')!.cancellable).toBe(true);
+  });
+
   it('formats the middle cells for each queue', async () => {
     const l = (await leaveApprovals(withRows({ listLeaveRequests: [leave({})] }), HR, NOW))!;
     expect(l.rows[0].cells).toEqual(['Annual leave', '05 Oct–06 Oct', '2']);
@@ -300,12 +320,95 @@ describe('over balance, yours and cancel on the leave queue', () => {
     expect(t.rows.find((r) => r.id === 'y')!.cancellable).toBe(false);
   });
 
-  it('only the leave and time-off queues decide; claims and overtime keep disabled buttons', () => {
+  it('every queue decides', () => {
     expect(Object.fromEntries(Object.entries(APPROVAL_QUEUES).map(([k, v]) => [k, v.decides]))).toEqual({
       leave: true,
-      claims: false,
-      overtime: false,
+      claims: true,
+      overtime: true,
       time_off: true,
     });
+  });
+});
+
+describe('claim rows', () => {
+  const claims = [
+    claim({ id: 'a', status: 'approved', amount_cents: 1000, receipt_path: 'u/f.pdf' }),
+    claim({ id: 'p', status: 'paid', amount_cents: 2500, paid_on: '2026-10-05', paid_reference: 'TRX-9' }),
+    claim({ id: 'n', status: 'pending', amount_cents: 400, has_receipt: false, claim_date: '2026-10-03' }),
+    claim({ id: 'x', status: 'rejected', decision_note: 'No receipt' }),
+    claim({ id: 'o', status: 'approved', employee_id: 'e2', amount_cents: 9900 }),
+    claim({ id: 'y', status: 'paid', amount_cents: 700, claim_date: '2025-10-02' }),
+  ];
+  const build = async () => (await claimApprovals(withRows({ listClaims: claims }), HR, NOW))!;
+
+  it("shows the year's approved-or-paid total from the one shared formula, not counting the claim itself", async () => {
+    const model = await build();
+    // approved 1000 + paid 2500 of e1 / travel in 2026; the 2025 one and e2's are out
+    expect(model.rows.find((r) => r.id === 'n')!.claim!.year_total).toBe('RM 35.00');
+    expect(model.rows.find((r) => r.id === 'a')!.claim!.year_total).toBe('RM 25.00');
+  });
+
+  it("labels the total with the claim's own year, and shows it only on pending and approved rows", async () => {
+    const model = await build();
+    const detail = (id: string) => model.rows.find((r) => r.id === id)!.claim!;
+    expect(detail('n').year).toBe(2026);
+    expect(detail('a').year).toBe(2026);
+    // The 2025 claim is paid: no total, and its year is its own.
+    expect(detail('y').year).toBe(2025);
+    for (const id of ['p', 'x', 'y']) expect(detail(id).year_total, id).toBeNull();
+    for (const id of ['n', 'a']) expect(detail(id).year_total, id).not.toBeNull();
+  });
+
+  it('has no total at all when nothing else was approved or paid that year', async () => {
+    const model = await build();
+    // e2's only claim: the total would be RM 0.00, which is not worth a line.
+    expect(model.rows.find((r) => r.id === 'o')!.claim!.year_total).toBeNull();
+  });
+
+  it('knows the receipt, which rows can be marked paid, and the paid date and reference', async () => {
+    const model = await build();
+    const row = (id: string) => model.rows.find((r) => r.id === id)!;
+    expect(row('a').claim).toMatchObject({ has_file: true, ticked: true, markable: true, paid_on: null });
+    expect(row('n').claim).toMatchObject({ has_file: false, ticked: false, markable: false });
+    expect(row('p').claim).toMatchObject({ markable: false, paid_on: '2026-10-05', paid_on_text: '05 Oct 2026' });
+    expect(row('p').notes).toEqual(['Reference: TRX-9']);
+    expect(row('x').notes).toEqual(['Note: No receipt']);
+    expect(row('p').cancellable).toBe(false);
+  });
+
+  it('adds the tile of approved claims not yet paid, only on the claims queue', async () => {
+    const model = await build();
+    expect(model.unpaid).toEqual({ count: 2, caption: 'RM 109.00' });
+    const other = (await overtimeApprovals(withRows({}), HR, NOW))!;
+    expect(other.unpaid).toBeNull();
+    expect(other.rows.every((r) => r.claim === null)).toBe(true);
+  });
+});
+
+describe('overtime rows', () => {
+  it('shows the kind of day and multiplier, and "Not calculated" when no salary was on file', async () => {
+    const model = (await overtimeApprovals(
+      withRows({
+        listOvertime: [
+          overtime({ id: 'a', day_kind: 'rest_day', rate_multiplier: 2 }),
+          overtime({ id: 'b', day_kind: 'weekday', hourly_rate_cents: null, amount_cents: 0, decision_note: 'Too late' }),
+          overtime({ id: 'c', day_kind: null }),
+          overtime({ id: 'd', hourly_rate_cents: null, amount_cents: 7500 }),
+        ],
+      }),
+      HR,
+      NOW,
+    ))!;
+    const row = (id: string) => model.rows.find((r) => r.id === id)!;
+    expect(row('a').overtime).toEqual({ kind: 'Rest day, paid at 2 times', calculated: true });
+    expect(row('a').cells[2]).toBe('RM 75.00');
+    expect(row('b').overtime).toEqual({ kind: 'Weekday, paid at 1.5 times', calculated: false });
+    expect(row('b').cells[2]).toBe('Not calculated');
+    expect(row('b').notes).toEqual(['Note: Too late']);
+    expect(row('c').overtime!.kind).toBe('Paid at 1.5 times');
+    // Made before the rate was stored: the amount is real, so it is shown.
+    expect(row('d').cells[2]).toBe('RM 75.00');
+    expect(row('d').overtime!.calculated).toBe(true);
+    expect(model.unpaid).toBeNull();
   });
 });

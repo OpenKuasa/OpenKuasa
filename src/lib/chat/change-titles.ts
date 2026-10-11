@@ -5,6 +5,7 @@
  */
 // Itself pure and import-free: the words for the application form switches live with the switches.
 import { describeFormChange } from '@/lib/hire/application-form';
+import type { ReceiptState } from '@/lib/people/receipts';
 
 const APPOINTMENT_STATUS_LABELS: Record<string, string> = {
   scheduled: 'scheduled',
@@ -19,6 +20,22 @@ const APPOINTMENT_STATUS_LABELS: Record<string, string> = {
  * no name of its own, so it is only labelled when the caller asks for that kind.
  */
 function labelOf(row: Record<string, unknown>, kind?: ItemKind): string | null {
+  if (kind === 'claim') {
+    const who = text(row.employee);
+    if (!who) return null;
+    // The lookup formatted the amount already; only a well-formed one is repeated.
+    const amount = typeof row.amount === 'string' && /^RM [\d,]+\.\d{2}$/.test(row.amount) ? row.amount : null;
+    const category = typeof row.category_code === 'string' ? CLAIM_WORDS[row.category_code] : undefined;
+    const what = [amount, category].filter(Boolean).join(' ');
+    return `${who}'s ${what ? `${what} claim` : 'claim'}`;
+  }
+  if (kind === 'overtime') {
+    const who = text(row.employee);
+    const when = dayRangeText(row.work_date, row.work_date);
+    if (!who || !when) return null;
+    const hours = hoursText(row.hours);
+    return `${who}'s ${hours ? `${hours} of overtime` : 'overtime'} on ${when}`;
+  }
   if (kind === 'leave' || kind === 'time-off') {
     const who = text(row.employee);
     const when = kind === 'leave' ? dayRangeText(row.start_date, row.end_date) : dayRangeText(row.off_date, row.off_date);
@@ -67,7 +84,9 @@ export type ItemKind =
   | 'employee'
   | 'department'
   | 'leave'
-  | 'time-off';
+  | 'time-off'
+  | 'claim'
+  | 'overtime';
 const KIND_OF_TOOL: Record<string, ItemKind> = {
   getCampaigns: 'campaign',
   createCampaign: 'campaign',
@@ -115,6 +134,8 @@ const KIND_OF_TOOL: Record<string, ItemKind> = {
   linkEmployeeToMember: 'employee',
   listLeaveRequests: 'leave',
   listTimeOffRequests: 'time-off',
+  listClaims: 'claim',
+  listOvertime: 'overtime',
   listDepartments: 'department',
   createDepartment: 'department',
   updateDepartment: 'department',
@@ -176,6 +197,36 @@ export function nameIn(results: ToolResult[]): NameFinder {
 
 const UNLISTED_LEAVE = 'a leave request that was not in the list above';
 const UNLISTED_TIME_OFF = 'a time-off request that was not in the list above';
+const UNLISTED_CLAIM = 'a claim that was not in the list above';
+const UNLISTED_OVERTIME = 'an overtime record that was not in the list above';
+
+/** How a claim's category reads inside a sentence: "RM 85.00 travel claim". */
+const CLAIM_WORDS: Record<string, string> = {
+  medical: 'medical',
+  travel: 'travel',
+  meals: 'meals',
+  equipment: 'equipment',
+  other: 'other',
+};
+/** "for travel", "for other expenses". */
+const claimFor = (category: unknown): string | null => {
+  if (typeof category !== 'string' || !Object.hasOwn(CLAIM_WORDS, category)) return null;
+  return category === 'other' ? 'other expenses' : CLAIM_WORDS[category];
+};
+
+/** "3 hours", "1 hour", "0.5 hours", as given; null unless a positive number. */
+function hoursText(value: unknown): string | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null;
+  return `${value} ${value === 1 ? 'hour' : 'hours'}`;
+}
+
+/** Sen as "RM 85.00", from whole sen, without arithmetic on the figure; null for anything but a positive whole number. */
+function senText(value: unknown): string | null {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) return null;
+  const digits = String(value).padStart(3, '0');
+  const whole = digits.slice(0, -2).replace(/\B(?=(\d{3})+$)/g, ',');
+  return `RM ${whole}.${digits.slice(-2)}`;
+}
 
 /**
  * Who a leave application is for. No employee in the input is the caller's own; one that no lookup named
@@ -358,6 +409,26 @@ export function approvalTitle(
       const what = find(i.id, 'time-off');
       return `${i.approve === true ? 'Approve' : 'Reject'} ${what ?? UNLISTED_TIME_OFF}?`;
     }
+    case 'submitClaim': {
+      const who = forWhom(i.employee_id, find);
+      const amount = senText(i.amount_cents);
+      const category = claimFor(i.category);
+      const when = dayRangeText(i.claim_date, i.claim_date);
+      const parts = [`Claim${amount ? ` ${amount}` : ''}${category ? ` for ${category}` : ''}`, when].filter(Boolean);
+      return `${parts.join(', ')}${who ? `, for ${who}` : ''}?`;
+    }
+    case 'cancelClaim': return `Cancel ${find(i.id, 'claim') ?? UNLISTED_CLAIM}?`;
+    case 'decideClaim': return `${i.approve === true ? 'Approve' : 'Reject'} ${find(i.id, 'claim') ?? UNLISTED_CLAIM}?`;
+    case 'markClaimPaid': return `Mark ${find(i.id, 'claim') ?? UNLISTED_CLAIM} as paid?`;
+    case 'unmarkClaimPaid': return `Undo the paid mark on ${find(i.id, 'claim') ?? UNLISTED_CLAIM}?`;
+    case 'submitOvertime': {
+      const who = forWhom(i.employee_id, find);
+      const hours = hoursText(i.hours);
+      const when = dayRangeText(i.work_date, i.work_date);
+      return `Claim ${hours ? `${hours} of overtime` : 'overtime'}${when ? ` on ${when}` : ''}${who ? ` for ${who}` : ''}?`;
+    }
+    case 'cancelOvertime': return `Cancel ${find(i.id, 'overtime') ?? UNLISTED_OVERTIME}?`;
+    case 'decideOvertime': return `${i.approve === true ? 'Approve' : 'Reject'} ${find(i.id, 'overtime') ?? UNLISTED_OVERTIME}?`;
     case 'setLeaveEntitlement': {
       const who = find(i.employee_id, 'employee');
       const days =
@@ -489,7 +560,7 @@ function employeeFieldWords(i: Record<string, unknown>, includeName: boolean): s
  * user is approving that the question itself does not: the salary and the
  * closing date above all.
  */
-export function approvalDetail(toolName: string, input?: unknown): string | null {
+export function approvalDetail(toolName: string, input?: unknown, receipt?: ReceiptState): string | null {
   const i = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
   if (toolName === 'deleteEmployee') {
     return 'Their leave, claims, payslips and every other HR record are deleted too. This cannot be undone.';
@@ -503,7 +574,32 @@ export function approvalDetail(toolName: string, input?: unknown): string | null
     const words = employeeFieldWords(i, false).filter((w) => !w.endsWith('(cleared)'));
     return words.length > 0 ? `Sets: ${words.join(', ')}` : null;
   }
-  if (toolName === 'decideLeave' || toolName === 'decideTimeOff') {
+  if (toolName === 'submitClaim') {
+    // What will be saved under the person's name. The receipt line comes from the conversation (the file on the
+    // question that led to the claim), never from anything the assistant put in the input; unknown, it says nothing.
+    const why = text(i.description);
+    const line =
+      receipt?.state === 'attached'
+        ? 'Sent with the attached receipt'
+        : receipt?.state === 'none'
+          ? 'Sent with no receipt'
+          : receipt?.state === 'unusable'
+            ? `The attached file cannot be used as a receipt (${receipt.problem}): sent with no receipt`
+            : null;
+    const parts = [line, why && `Description: “${why}”`].filter(Boolean);
+    return parts.length > 0 ? parts.join(' · ') : null;
+  }
+  if (toolName === 'submitOvertime') {
+    const why = text(i.reason);
+    return why ? `Reason: “${why}”` : null;
+  }
+  if (toolName === 'markClaimPaid') {
+    const paid = dateText(i.paid_on);
+    const reference = text(i.reference);
+    const parts = [paid && `Paid on ${paid}`, reference && `Reference: “${reference}”`].filter(Boolean);
+    return parts.length > 0 ? parts.join(' · ') : null;
+  }
+  if (toolName === 'decideLeave' || toolName === 'decideTimeOff' || toolName === 'decideClaim' || toolName === 'decideOvertime') {
     // The note is only ever said on a rejection; an approval carries none. It is quoted and labelled:
     // it is written by the model and will be saved as the decision note.
     const note = i.approve === false ? text(i.note) : null;

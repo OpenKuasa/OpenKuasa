@@ -684,8 +684,9 @@ export function ApplyForm({
             className={`mt-0.5 size-5 shrink-0 rounded-sm accent-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background ${CAREERS_LINK_FOCUS}`}
           />
           <span className="min-w-0 break-words">
-            I agree that {orgName} may store and use the details I&apos;ve given to consider me for this role, and
-            that they are processed through OpenKuasa. <Mark required />
+            I agree that {orgName} may store and use the details I&apos;ve given to consider me for this role,
+            that they are processed through OpenKuasa, and that they may be reviewed with the help of an AI assistant, which sends
+            them to an AI service provider and may give the employer a recommendation. <Mark required />
           </span>
         </label>
         <Problem field="consent">{errors.consent}</Problem>

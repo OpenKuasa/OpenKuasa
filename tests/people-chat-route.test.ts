@@ -17,6 +17,24 @@ const ctl = vi.hoisted(() => ({
   captured: null as null | import('@/lib/ai/products').PeopleAccess,
   orgFails: false,
   orgLookups: 0,
+  /** What the claim write path was given, and what the receipt upload was given. */
+  submitted: [] as unknown[],
+  uploaded: [] as { userId: string; bytes: string; mediaType: string }[],
+}));
+
+vi.mock('@/lib/people/pay-requests', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/people/pay-requests')>()),
+  submitClaim: async (_ctx: unknown, input: unknown) => {
+    ctl.submitted.push(input);
+    return { ok: true as const, data: { id: 'c1', status: 'pending', has_receipt: true } };
+  },
+}));
+vi.mock('@/lib/people/receipts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/people/receipts')>()),
+  uploadReceipt: async (_client: unknown, userId: string, body: Buffer, mediaType: string) => {
+    ctl.uploaded.push({ userId, bytes: body.toString(), mediaType });
+    return { ok: true as const, data: { path: `${userId}/uploaded.png` } };
+  },
 }));
 
 vi.mock('@/lib/ai/agents/orchestrator', async (importOriginal) => {
@@ -114,7 +132,10 @@ const { POST } = await import('@/app/api/people/chat/route');
 const { DEMO_ORG_SLUG } = await import('@/lib/people/types');
 
 /** What a linked member holds besides the lookups: their own leave, and nothing that decides. */
-const SELF_TOOLS = ['previewLeave', 'applyLeave', 'applyTimeOff', 'cancelLeaveRequest', 'cancelTimeOffRequest'];
+const SELF_TOOLS = [
+  'previewLeave', 'previewOvertime', 'applyLeave', 'applyTimeOff', 'cancelLeaveRequest', 'cancelTimeOffRequest',
+  'submitClaim', 'cancelClaim', 'submitOvertime', 'cancelOvertime',
+];
 
 function post(body: unknown): Request {
   return new Request('http://localhost/api/people/chat', {
@@ -143,6 +164,8 @@ beforeEach(() => {
   ctl.captured = null;
   ctl.orgFails = false;
   ctl.orgLookups = 0;
+  ctl.submitted = [];
+  ctl.uploaded = [];
   process.env.AI_KEYS_ENCRYPTION_SECRET = SECRET;
 });
 
@@ -212,7 +235,7 @@ describe('POST /api/people/chat happy path', () => {
 
     const [call] = ctl.calls;
     expect(call.system).toMatch(/^You are Lekiu/);
-    expect(call.tools.sort()).toEqual([...PEOPLE_TOOL_NAMES, 'previewLeave', ...PEOPLE_WRITE_TOOL_NAMES].sort());
+    expect(call.tools.sort()).toEqual([...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', ...PEOPLE_WRITE_TOOL_NAMES].sort());
     expect(call.tools).not.toContain('getCampaigns');
     expect(call.tools).not.toContain('listDeals');
     expect(call.tools).not.toContain('listJobs');
@@ -281,7 +304,7 @@ describe('POST /api/people/chat happy path', () => {
     expect(ctl.captured!.write).toMatchObject({ tier: 'self', employeeId: 'emp-7' });
     expect(ctl.captured!.write?.ctx.orgId).toBe('org1');
     expect(ctl.calls[0].tools.sort()).toEqual([...PEOPLE_TOOL_NAMES, ...SELF_TOOLS].sort());
-    for (const name of ['decideLeave', 'decideTimeOff', 'setLeaveEntitlement', 'createEmployee', 'deleteDepartment']) {
+    for (const name of ['decideLeave', 'decideTimeOff', 'setLeaveEntitlement', 'createEmployee', 'deleteDepartment', 'decideClaim', 'decideOvertime', 'markClaimPaid', 'unmarkClaimPaid']) {
       expect(ctl.calls[0].tools).not.toContain(name);
     }
   });
@@ -326,5 +349,129 @@ describe('POST /api/people/chat happy path', () => {
     await res.text();
     expect(ctl.freeConsumed).toBe(0);
     expect(ctl.usedKeys).toEqual(['sk-or-v1-workspace-key-aaaaaaaaaaaa']);
+  });
+});
+
+describe('POST /api/people/chat claims and overtime', () => {
+  const MEMBER_PAY = ['previewOvertime', 'submitClaim', 'submitOvertime', 'cancelClaim', 'cancelOvertime'];
+  const DECIDING = ['decideClaim', 'decideOvertime', 'markClaimPaid', 'unmarkClaimPaid'];
+  const toolsOf = async (body: unknown = validBody) => {
+    await (await POST(post(body))).text();
+    return ctl.calls[0].tools;
+  };
+
+  it.each(['owner', 'admin'])('gives an %s every claim and overtime tool, deciding and paid marks included', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    const held = await toolsOf();
+    for (const name of [...MEMBER_PAY, ...DECIDING]) expect(held, name).toContain(name);
+  });
+
+  it.each(['member', 'viewer'])('gives a linked %s the submit and cancel tools for themselves, and nothing that decides', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    ctl.linkedEmployee = { id: 'emp-7' };
+    const held = await toolsOf();
+    for (const name of MEMBER_PAY) expect(held, name).toContain(name);
+    for (const name of DECIDING) expect(held, name).not.toContain(name);
+  });
+
+  it('gives an unlinked member none of them', async () => {
+    ctl.org = { orgId: 'org1', role: 'member' };
+    const held = await toolsOf();
+    for (const name of [...MEMBER_PAY, ...DECIDING]) expect(held, name).not.toContain(name);
+  });
+
+  it.each(['owner', 'member'])('gives a %s in the demo workspace none of them', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    ctl.slug = DEMO_ORG_SLUG;
+    ctl.linkedEmployee = { id: 'emp-7' };
+    const held = await toolsOf();
+    for (const name of [...MEMBER_PAY, ...DECIDING]) expect(held, name).not.toContain(name);
+  });
+
+  const PHOTO = 'data:image/png;base64,' + Buffer.from('the photo').toString('base64');
+  const question = {
+    id: 'm1',
+    role: 'user',
+    parts: [
+      { type: 'text', text: 'tuntut teksi RM 85' },
+      { type: 'file', mediaType: 'image/png', url: PHOTO, filename: 'receipt.png' },
+    ],
+  };
+
+  it('hands the tools the photo on the newest question, bound to the signed-in user', async () => {
+    ctl.org = { orgId: 'org1', role: 'member' };
+    ctl.linkedEmployee = { id: 'emp-7' };
+    await (await POST(post({ messages: [question] }))).text();
+    const write = ctl.captured!.write!;
+    expect(write.userId).toBe('u1');
+    expect(write.receipt?.mediaType).toBe('image/png');
+    expect(write.receipt?.bytes.toString()).toBe('the photo');
+  });
+
+  it('hands the tools no receipt when the newest question has no file, and none from the request body', async () => {
+    ctl.org = { orgId: 'org1', role: 'owner' };
+    await (await POST(post({ ...validBody, receipt: { bytes: 'x', mediaType: 'image/png' }, receipt_path: 'u/x.png' }))).text();
+    expect(ctl.captured!.write!.receipt).toBeNull();
+  });
+
+  it('still has the receipt when the approval is answered in a later request, and attaches it', async () => {
+    ctl.org = { orgId: 'org1', role: 'member' };
+    ctl.linkedEmployee = { id: 'emp-7' };
+    const input = { category: 'travel', amount_cents: 8500, claim_date: '2026-10-09', description: 'Teksi' };
+    const card = (state: 'approval-requested' | 'approval-responded') => ({
+      id: 'a1',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-submitClaim',
+          toolCallId: 't1',
+          state,
+          input,
+          approval: state === 'approval-responded' ? { id: 'ap1', approved: true } : { id: 'ap1' },
+        },
+      ],
+    });
+    // The first request proposes the claim: nothing is saved while the card waits.
+    await (await POST(post({ messages: [question, card('approval-requested')] }))).text();
+    expect(ctl.captured!.write!.receipt?.bytes.toString()).toBe('the photo');
+    expect(ctl.submitted).toEqual([]);
+    // The second request carries the answer. The newest user message is still the question with the photo.
+    ctl.captured = null;
+    await (await POST(post({ messages: [question, card('approval-responded')] }))).text();
+    expect(ctl.captured!.write!.receipt?.bytes.toString()).toBe('the photo');
+    expect(ctl.uploaded).toEqual([{ userId: 'u1', bytes: 'the photo', mediaType: 'image/png' }]);
+    expect(ctl.submitted).toEqual([
+      expect.objectContaining({ employee_id: 'emp-7', amount_cents: 8500, receipt_path: 'u1/uploaded.png' }),
+    ]);
+  });
+
+  it('keeps a claim’s receipt as the file on ITS question: a newer question with another file, or none, is not picked up', async () => {
+    ctl.org = { orgId: 'org1', role: 'member' };
+    ctl.linkedEmployee = { id: 'emp-7' };
+    const input = { category: 'travel', amount_cents: 8500, claim_date: '2026-10-09' };
+    const waiting = {
+      id: 'a1',
+      role: 'assistant',
+      parts: [{ type: 'tool-submitClaim', toolCallId: 't1', state: 'approval-requested', input, approval: { id: 'ap1' } }],
+    };
+    const newerWithFile = {
+      id: 'm2',
+      role: 'user',
+      parts: [
+        { type: 'text', text: 'dan satu lagi' },
+        { type: 'file', mediaType: 'application/pdf', url: 'data:application/pdf;base64,' + Buffer.from('newer file').toString('base64') },
+      ],
+    };
+    await (await POST(post({ messages: [question, waiting, newerWithFile] }))).text();
+    expect(ctl.captured!.write!.receipt?.bytes.toString()).toBe('the photo');
+    expect(ctl.captured!.write!.receipt?.mediaType).toBe('image/png');
+    ctl.captured = null;
+    await (await POST(post({ messages: [question, waiting, { id: 'm3', role: 'user', parts: [{ type: 'text', text: 'hello' }] }] }))).text();
+    expect(ctl.captured!.write!.receipt?.bytes.toString()).toBe('the photo');
+    // And a claim whose own question had no file never takes a newer question's file.
+    ctl.captured = null;
+    const plain = { id: 'm0', role: 'user', parts: [{ type: 'text', text: 'tuntut teksi' }] };
+    await (await POST(post({ messages: [plain, waiting, newerWithFile] }))).text();
+    expect(ctl.captured!.write!.receipt).toBeNull();
   });
 });

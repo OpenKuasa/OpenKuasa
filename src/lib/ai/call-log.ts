@@ -24,3 +24,29 @@ export function logModelCall(agent: string, model: string) {
     );
   };
 }
+
+/**
+ * What may be logged of a failed model call: its status or code, else the
+ * error's class name, and nothing more. A provider's error carries the request
+ * it failed on (`requestBodyValues`), and a request can hold a file the model
+ * was given to read, so the error itself and its message are never logged.
+ */
+export function modelErrorCode(error: unknown): { code: unknown } {
+  const { statusCode, code, name } = (
+    error && typeof error === 'object' ? error : {}
+  ) as { statusCode?: unknown; code?: unknown; name?: unknown };
+  const first = statusCode ?? code ?? name;
+  // A status or a short label only: an object here could be anything, and a string is cut.
+  if (typeof first === 'number') return { code: first };
+  return { code: typeof first === 'string' ? first.slice(0, 64) : undefined };
+}
+
+/**
+ * The `onError` for every model call. Without one the AI SDK logs the whole
+ * error object, request body included.
+ */
+export function logModelError(agent: string) {
+  return ({ error }: { error: unknown }) => {
+    console.error(`[ai] ${agent} model call failed:`, modelErrorCode(error));
+  };
+}
