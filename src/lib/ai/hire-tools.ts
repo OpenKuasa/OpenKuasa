@@ -61,6 +61,7 @@ const CV_NOTE =
   'The CV was given to you to read for this answer only. It is not kept: call readCandidateCv again if asked about it later.';
 const cvRefusal = (error: string) => ({ ok: false as const, error });
 const CV_ONE_AT_A_TIME = 'Ask about one candidate at a time.';
+const CV_THREE_READ = 'Three CVs have been read for this question. Answer with what you have.';
 const CV_UNREADABLE = 'Could not read the CV.';
 
 const PDF_START = [0x25, 0x50, 0x44, 0x46, 0x2d]; // %PDF-
@@ -398,7 +399,8 @@ export function createHireTools(
         // What this returns is shown in the chat, saved with it and sent back on later turns: never the file.
         execute: async ({ applicationId }, { toolCallId }) => {
           // Checked and set before anything is awaited, so two calls made in one step cannot both pass.
-          if (cvReading || cvReads >= CV_READS_MAX) return cvRefusal(CV_ONE_AT_A_TIME);
+          if (cvReading) return cvRefusal(CV_ONE_AT_A_TIME);
+          if (cvReads >= CV_READS_MAX) return cvRefusal(CV_THREE_READ);
           cvReading = true;
           // A read uses up one of the three unless it turns out there was no file to fetch.
           let counts = true;

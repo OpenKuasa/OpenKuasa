@@ -36,8 +36,9 @@ export function modelErrorCode(error: unknown): { code: unknown } {
     error && typeof error === 'object' ? error : {}
   ) as { statusCode?: unknown; code?: unknown; name?: unknown };
   const first = statusCode ?? code ?? name;
-  // A status or a short label only: an object here could be anything.
-  return { code: typeof first === 'number' || typeof first === 'string' ? first : undefined };
+  // A status or a short label only: an object here could be anything, and a string is cut.
+  if (typeof first === 'number') return { code: first };
+  return { code: typeof first === 'string' ? first.slice(0, 64) : undefined };
 }
 
 /**

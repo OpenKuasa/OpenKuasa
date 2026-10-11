@@ -9,6 +9,7 @@ import 'server-only';
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
+import { modelErrorCode } from '@/lib/ai/call-log';
 import { CV_MAX_BYTES } from './application-fields';
 import { CV_BUCKET, isPdf } from './cv-store';
 import type { HireData } from './types';
@@ -23,11 +24,8 @@ export type CvReader = { readCv(applicationId: string): Promise<CvRead> };
 
 const isUuid = (value: string) => z.uuid().safeParse(value).success;
 
-/** The code of a failure, and nothing else about it. */
-function failureCode(error: unknown): unknown {
-  const { statusCode, code, name } = (error ?? {}) as { statusCode?: unknown; code?: unknown; name?: unknown };
-  return statusCode ?? code ?? name;
-}
+/** The code of a failure, and nothing else about it: a number, or a string cut to 64 characters. */
+const failureCode = (error: unknown): unknown => modelErrorCode(error).code;
 
 /** `client` is the member's own client; null where there is no database (the seeded demo). */
 export function createCvReader(client: SupabaseClient | null, data: HireData): CvReader {

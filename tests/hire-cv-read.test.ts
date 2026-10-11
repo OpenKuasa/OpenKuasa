@@ -86,6 +86,15 @@ describe('createCvReader', () => {
     expect(spy).toHaveBeenCalledWith('[cv-read] download failed:', { code: 'FetchError' });
   });
 
+  it('cuts a long string code to 64 characters in the log', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const long = 'y'.repeat(200);
+    const failing = async () => ({ data: null, error: { name: 'StorageApiError', statusCode: long, message: PATH } });
+    const data = dataWith(async () => [app()]);
+    expect(await createCvReader(clientWith(failing).client, data).readCv(ID)).toEqual({ state: 'failed' });
+    expect(spy).toHaveBeenCalledWith('[cv-read] download failed:', { code: 'y'.repeat(64) });
+  });
+
   it('answers none for a file when there is no client', async () => {
     const got = await createCvReader(null, dataWith(async () => [app()])).readCv(ID);
     expect(got).toEqual({ state: 'none', hasLink: false, candidate: NAME, job: JOB });

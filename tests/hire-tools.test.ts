@@ -383,6 +383,7 @@ describe('readCandidateCv', () => {
   const NOTE =
     'The CV was given to you to read for this answer only. It is not kept: call readCandidateCv again if asked about it later.';
   const ONE_AT_A_TIME = { ok: false, error: 'Ask about one candidate at a time.' };
+  const THREE_READ = { ok: false, error: 'Three CVs have been read for this question. Answer with what you have.' };
 
   type CvTool = {
     description: string;
@@ -470,8 +471,8 @@ describe('readCandidateCv', () => {
   it('reads three at most per request, and a new request starts again', async () => {
     const { read, readCv } = fresh();
     for (const id of ['c1', 'c2', 'c3']) expect((await read(id)).ok).toBe(true);
-    expect(await read('c4')).toEqual(ONE_AT_A_TIME);
-    expect(await read('c5')).toEqual(ONE_AT_A_TIME);
+    expect(await read('c4')).toEqual(THREE_READ);
+    expect(await read('c5')).toEqual(THREE_READ);
     expect(readCv).toHaveBeenCalledTimes(3);
     const next = fresh();
     expect((await next.read('c1')).ok).toBe(true);
@@ -489,7 +490,7 @@ describe('readCandidateCv', () => {
     for (const id of ['n1', 'n2', 'n3', 'n4']) expect((await read(id)).ok).toBe(false);
     // Four answers with no file used up nothing: three real reads still go through, and a fourth does not.
     for (const id of ['c1', 'c2', 'c3']) expect((await read(id)).ok).toBe(true);
-    expect(await read('c4')).toEqual(ONE_AT_A_TIME);
+    expect(await read('c4')).toEqual(THREE_READ);
     expect(readCv).toHaveBeenCalledTimes(7);
   });
 
@@ -497,11 +498,11 @@ describe('readCandidateCv', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const failed = fresh({ state: 'failed' });
     for (const id of ['c1', 'c2', 'c3']) expect(await failed.read(id)).toEqual({ ok: false, error: 'Could not read the CV.' });
-    expect(await failed.read('c4')).toEqual(ONE_AT_A_TIME);
+    expect(await failed.read('c4')).toEqual(THREE_READ);
     expect(failed.readCv).toHaveBeenCalledTimes(3);
     const threw = fresh(async () => { throw new Error('boom'); });
     for (const id of ['c1', 'c2', 'c3']) expect(await threw.read(id)).toEqual({ ok: false, error: 'Could not read the CV.' });
-    expect(await threw.read('c4')).toEqual(ONE_AT_A_TIME);
+    expect(await threw.read('c4')).toEqual(THREE_READ);
     expect(threw.readCv).toHaveBeenCalledTimes(3);
     log.mockRestore();
   });

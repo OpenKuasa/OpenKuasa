@@ -34,6 +34,13 @@ describe('modelErrorCode', () => {
     expect(modelErrorCode(new TypeError('bad'))).toEqual({ code: 'TypeError' });
   });
 
+  it('cuts a string code to 64 characters', () => {
+    const long = 'x'.repeat(200);
+    const got = modelErrorCode(Object.assign(new Error('boom'), { code: long }));
+    expect(got).toEqual({ code: 'x'.repeat(64) });
+    expect((got.code as string).length).toBe(64);
+  });
+
   it('answers for a value that is no error at all', () => {
     expect(modelErrorCode(null)).toEqual({ code: undefined });
     expect(modelErrorCode(undefined)).toEqual({ code: undefined });
