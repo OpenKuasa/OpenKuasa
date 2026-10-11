@@ -77,6 +77,7 @@ import {
 } from '@/lib/reach/schedule-capabilities';
 import { serviceClient } from '@/lib/supabase/service';
 import { runWeeklyStudio } from '@/lib/agents/weekly-studio';
+import { runProposalAction } from '@/lib/agents/apply-proposal';
 import { RUN_MAX_AGE_MS } from '@/lib/agents/runner';
 import { createSupabaseReachData, getReachData } from '@/lib/reach/supabase';
 import { FORM_MESSAGES } from '@/lib/reach/forms';
@@ -406,4 +407,57 @@ export async function exportLeadsCsv(
   const inRange = leads.filter((l) => new Date(l.created_at).getTime() >= cutoff);
   const stamp = new Date().toISOString().slice(0, 10);
   return { ok: true, filename: `leads-${range}-${stamp}.csv`, csv: leadsToCsv(inRange) };
+}
+
+const proposalIdInput = z.object({ id: z.string().uuid() });
+
+/**
+ * Approve a queued proposal: re-validate it and run the reach capability under the
+ * OWNER's session (never the service-role worker). Only a pending, unexpired row is
+ * applied; the DB guard trigger makes a concurrent second apply a no-op.
+ */
+export async function applyProposalAction(input: unknown): Promise<{ ok: boolean; error?: string }> {
+  const parsed = proposalIdInput.safeParse(input);
+  if (!parsed.success) return { ok: false, error: 'That input was not valid.' };
+  const ctx = await writeCtx();
+  if (!ctx) return { ok: false, error: 'You do not have permission to make changes here.' };
+  const { data: p } = await ctx.client
+    .from('agent_proposals')
+    .select('action, input, status, expires_at')
+    .eq('id', parsed.data.id)
+    .eq('org_id', ctx.orgId)
+    .maybeSingle();
+  if (!p || p.status !== 'pending' || new Date(p.expires_at as string) <= new Date()) {
+    return { ok: false, error: 'That suggestion has already been handled.' };
+  }
+  const applied = await runProposalAction(ctx, p.action as string, p.input);
+  const patch = applied.ok
+    ? { status: 'approved', result: (applied.result ?? null) as never, decided_at: new Date().toISOString() }
+    : { status: 'failed', result: { error: applied.error } as never, decided_at: new Date().toISOString() };
+  await ctx.client
+    .from('agent_proposals')
+    .update(patch)
+    .eq('id', parsed.data.id)
+    .eq('org_id', ctx.orgId)
+    .eq('status', 'pending');
+  for (const path of AGENTS_PATHS) revalidatePath(path);
+  return applied.ok ? { ok: true } : { ok: false, error: 'The change could not be applied.' };
+}
+
+/** Reject a queued proposal: mark it rejected, apply nothing. */
+export async function rejectProposalAction(input: unknown): Promise<{ ok: boolean; error?: string }> {
+  const parsed = proposalIdInput.safeParse(input);
+  if (!parsed.success) return { ok: false, error: 'That input was not valid.' };
+  const ctx = await writeCtx();
+  if (!ctx) return { ok: false, error: 'You do not have permission to make changes here.' };
+  const { data } = await ctx.client
+    .from('agent_proposals')
+    .update({ status: 'rejected', decided_at: new Date().toISOString() })
+    .eq('id', parsed.data.id)
+    .eq('org_id', ctx.orgId)
+    .eq('status', 'pending')
+    .select('id')
+    .maybeSingle();
+  for (const path of AGENTS_PATHS) revalidatePath(path);
+  return data ? { ok: true } : { ok: false, error: 'That suggestion has already been handled.' };
 }
