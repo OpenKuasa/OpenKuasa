@@ -50,5 +50,23 @@ describe('reapStaleRuns', () => {
     const cutoff = new Date(c.lts[0][1] as string).getTime();
     expect(Date.now() - cutoff).toBeGreaterThanOrEqual(RUN_MAX_AGE_MS - 5_000);
     expect(Date.now() - cutoff).toBeLessThanOrEqual(RUN_MAX_AGE_MS + 5_000);
+    // the global sweep is not scoped to one workspace
+    expect(c.eqs.map(([col]) => col)).not.toContain('org_id');
+  });
+
+  it('given a workspace, sweeps only that workspace', async () => {
+    const { client, calls } = fakeClient();
+    await reapStaleRuns(client as never, 'org-7');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].eqs).toContainEqual(['status', 'running']);
+    expect(calls[0].eqs).toContainEqual(['org_id', 'org-7']);
+    expect(calls[0].lts.map(([col]) => col)).toEqual(['started_at']);
+  });
+
+  it('keeps the cost a stuck run had already recorded', async () => {
+    const { client, calls } = fakeClient();
+    await reapStaleRuns(client as never);
+    // A run writes its known-or-estimated spend before each paid step; reaping must not zero it.
+    expect(calls[0].patch).not.toHaveProperty('cost_cents');
   });
 });

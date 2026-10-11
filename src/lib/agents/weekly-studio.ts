@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { generateImage, startVideo, webSearch, writeDigest } from '@/lib/agents/openrouter-media';
 import { proposeChanges } from '@/lib/agents/proposer';
 import {
+  RunInProgressError,
   WEEKLY_STUDIO,
   type AgentRunStatus,
   type AgentRunTrigger,
@@ -48,7 +49,9 @@ function summarize(model: ReportsModel): string {
 /**
  * Runs one org's weekly digest and persists it as an agent_runs row.
  * `service` MUST be the service-role client; `orgId` is a TRUSTED argument the
- * caller has already authorized. Never logs or returns the key or ciphertext.
+ * caller has already authorized, and the caller has already passed the start gate
+ * (`startRefusal` in runner.ts). Throws {@link RunInProgressError} when the
+ * workspace already has a run in progress. Never logs or returns the key or ciphertext.
  */
 export async function runWeeklyStudio(
   service: SupabaseClient,
@@ -60,6 +63,10 @@ export async function runWeeklyStudio(
     .insert({ org_id: orgId, agent_key: WEEKLY_STUDIO, status: 'running', trigger })
     .select()
     .single();
+  // This insert is also the claim. The database keeps at most one 'running' row per
+  // workspace (agent_runs_one_running_uniq), so of any number of concurrent starts
+  // exactly one gets a row; the rest are refused here, before anything is spent.
+  if (insertErr?.code === '23505') throw new RunInProgressError();
   if (insertErr || !run) {
     // The insert is a DB write (no API key involved), so its SQLSTATE and message
     // are safe to log and are the only trace of why a run never started -- e.g. a

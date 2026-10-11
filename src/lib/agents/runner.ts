@@ -263,24 +263,31 @@ export async function runSchedules(client: SupabaseClient): Promise<RunSchedules
  * A run still in 'running' after this long is treated as dead and failed. "Run now"
  * executes the whole pipeline synchronously in a server action, so a platform/proxy
  * request timeout can kill the process between the run insert and finish(), stranding
- * the row at 'running'. This also bounds the in-flight guard on manual runs
- * (runAgentNowAction): a stuck run stops blocking new ones once it is reaped.
+ * the row at 'running'. A workspace has one run slot (a single 'running' row), so
+ * this also bounds how long a dead run can hold it: it is freed once reaped.
  */
 export const RUN_MAX_AGE_MS = 15 * 60 * 1000;
 
 /**
  * Fails runs stuck in 'running' past {@link RUN_MAX_AGE_MS}. `client` MUST be the
  * service-role client. Idempotent: only status='running' rows older than the cutoff
- * are touched, so repeated sweeps are a no-op. A bulk update across orgs is correct
- * here — it is a global background sweep, scoped by status + age, not by org.
+ * are touched, so repeated sweeps are a no-op. Without `orgId` it is the global
+ * background sweep (a bulk update across orgs is correct there: it is scoped by
+ * status + age); with it, only that workspace's runs, so "Run now" can free a slot
+ * a dead run still holds without waiting for the next poll.
+ *
+ * The cost is deliberately left as it is: a run writes what it has spent, plus the
+ * estimate of the step it is on, before each paid step, so the reaped row already
+ * holds its known-or-estimated spend.
  */
-export async function reapStaleRuns(client: SupabaseClient): Promise<void> {
+export async function reapStaleRuns(client: SupabaseClient, orgId?: string): Promise<void> {
   const cutoff = new Date(Date.now() - RUN_MAX_AGE_MS).toISOString();
-  const { error } = await client
+  const sweep = client
     .from('agent_runs')
     .update({ status: 'failed', error: 'timed out', finished_at: new Date().toISOString() })
     .eq('status', 'running')
     .lt('started_at', cutoff);
+  const { error } = await (orgId ? sweep.eq('org_id', orgId) : sweep);
   void error; // supabase-js returns { error }; a failed sweep simply retries next poll.
 }
 

@@ -30,6 +30,7 @@ vi.mock('@/lib/reach/supabase', () => ({
 }));
 
 import { runWeeklyStudio } from '@/lib/agents/weekly-studio';
+import { RunInProgressError } from '@/lib/agents/types';
 import {
   generateImage,
   startVideo,
@@ -45,6 +46,7 @@ type Call = { table: string; op: string; payload?: unknown; eqs: [string, unknow
 function fakeService(
   keyRow: { ciphertext: string } | null,
   cap: { max_cost_cents: number } | null = { max_cost_cents: 200 },
+  opts: { runInsertError?: { code: string; message: string } } = {},
 ) {
   const calls: Call[] = [];
   const runs: Record<string, unknown>[] = [];
@@ -79,6 +81,10 @@ function fakeService(
           if (table === 'agent_run_assets') {
             assets.push(payload);
             return Promise.resolve({ error: null });
+          }
+          if (opts.runInsertError) {
+            const refused = { data: null, error: opts.runInsertError };
+            return { select: () => ({ single: async () => refused }) };
           }
           const row = { id: 'run-1', ...payload };
           runs.push(row);
@@ -141,6 +147,27 @@ describe('runWeeklyStudio', () => {
     expect(runs[0].trigger).toBe('manual');
     expect(webSearch).not.toHaveBeenCalled();
     expect(writeDigest).not.toHaveBeenCalled();
+  });
+
+  it('starting a run while the workspace has one in progress is refused before any paid call', async () => {
+    // 23505: the one-running-run-per-workspace index rejected the insert.
+    const { service, runs } = fakeService({ ciphertext: 'abc' }, undefined, {
+      runInsertError: { code: '23505', message: 'duplicate key value' },
+    });
+    await expect(runWeeklyStudio(service, ORG, 'manual')).rejects.toBeInstanceOf(RunInProgressError);
+    expect(runs).toHaveLength(0);
+    expect(webSearch).not.toHaveBeenCalled();
+    expect(generateImage).not.toHaveBeenCalled();
+    expect(startVideo).not.toHaveBeenCalled();
+  });
+
+  it('any other failure to start is still the generic error', async () => {
+    const { service } = fakeService({ ciphertext: 'abc' }, undefined, {
+      runInsertError: { code: '42501', message: 'permission denied' },
+    });
+    const err = await runWeeklyStudio(service, ORG, 'manual').catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(RunInProgressError);
+    expect((err as Error).message).toBe('Could not start the agent run.');
   });
 
   it('runs search + digest + images and finishes done with summed cost', async () => {

@@ -78,7 +78,8 @@ import {
 import { serviceClient } from '@/lib/supabase/service';
 import { runWeeklyStudio } from '@/lib/agents/weekly-studio';
 import { runProposalAction } from '@/lib/agents/apply-proposal';
-import { RUN_MAX_AGE_MS } from '@/lib/agents/runner';
+import { reapStaleRuns, startRefusal, type StartRefusal } from '@/lib/agents/runner';
+import { RunInProgressError } from '@/lib/agents/types';
 import { createSupabaseReachData, getReachData } from '@/lib/reach/supabase';
 import { FORM_MESSAGES } from '@/lib/reach/forms';
 import { leadsToCsv } from '@/lib/reach/csv';
@@ -369,11 +370,23 @@ export async function setWorkspaceCapsAction(input: unknown) {
   return runSchedule(setWorkspaceCapsInput, input, setWorkspaceCaps);
 }
 
+/** What the person who pressed "Run now" is told when the start gate refuses. */
+const RUN_REFUSED: Record<StartRefusal, string> = {
+  disabled: 'Weekly Studio is turned off. An owner or admin can turn it on.',
+  'daily budget reached':
+    'The workspace daily spend cap has been reached. Try again tomorrow, or ask an owner or admin to raise it.',
+  'weekly budget reached':
+    'The workspace weekly spend cap has been reached. Ask an owner or admin to raise it.',
+};
+
 /**
- * Manual "Run now". The viewer gate (writer only) is the authorization; the
- * org comes from the authenticated viewer, never from input. agent_runs and
- * agent_run_assets have no authenticated write grant, so the service client
- * is the writer.
+ * Manual "Run now". Anyone who may edit data can press it, because it cannot spend
+ * more than an owner or admin has allowed: it passes the same gate as a scheduled
+ * run (the off switch, then the workspace daily and weekly caps), the run itself
+ * stops at the per-run cap, and a workspace has one run in progress at a time.
+ * The org comes from the authenticated viewer, never from input. agent_runs and
+ * agent_run_assets have no authenticated write grant, so the service client is
+ * the writer.
  */
 export async function runAgentNowAction(
   input?: unknown,
@@ -383,25 +396,20 @@ export async function runAgentNowAction(
   if (!ctx) return { ok: false, error: 'You do not have permission to make changes here.' };
   const service = serviceClient();
   try {
-    // Throttle: one manual run at a time per org. A run older than RUN_MAX_AGE_MS
-    // is treated as dead (reaped by the poll cron), so a stuck run never blocks
-    // forever. The window keeps a stale row from permanently locking Run now.
-    const since = new Date(Date.now() - RUN_MAX_AGE_MS).toISOString();
-    const { data: inflight } = await service
-      .from('agent_runs')
-      .select('id')
-      .eq('org_id', ctx.orgId)
-      .eq('status', 'running')
-      .gte('started_at', since)
-      .limit(1)
-      .maybeSingle();
-    if (inflight) {
-      return { ok: false, error: 'A run is already in progress. Please wait for it to finish.' };
-    }
+    // A run that died mid-flight still holds the workspace's one slot until it is
+    // reaped; do that for this workspace now rather than wait for the poll cron.
+    await reapStaleRuns(service, ctx.orgId);
+    const refusal = await startRefusal(service, ctx.orgId);
+    if (refusal) return { ok: false, error: RUN_REFUSED[refusal] };
+    // Starting the run claims the slot atomically: concurrent presses cannot all start.
     const result = await runWeeklyStudio(service, ctx.orgId, 'manual');
     for (const path of AGENTS_PATHS) revalidatePath(path);
     return { ok: true, runId: result.runId };
-  } catch {
+  } catch (e) {
+    if (e instanceof RunInProgressError) {
+      return { ok: false, error: 'A run is already in progress. Please wait for it to finish.' };
+    }
+    // Deliberately drop the exception: it may carry request details or a key.
     return { ok: false, error: 'The run could not be started.' };
   }
 }
