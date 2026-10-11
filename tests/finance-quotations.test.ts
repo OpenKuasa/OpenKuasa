@@ -160,9 +160,19 @@ describe('quotation writes', () => {
     expect(calls[0]).toMatchObject({ kind: 'rpc', name: 'finance_convert_quotation' });
     expect(calls[0].args).toEqual({ target_org: 'org-1', target_quotation: ID });
   });
+  it('does not say a quotation was sent or answered when a draft is accepted or declined (FIN01)', async () => {
+    const { ctx } = fakeFinance({ data: null, error: { code: 'FIN01' } });
+    for (const result of [await acceptQuotation(ctx, { id: ID }), await declineQuotation(ctx, { id: ID })]) {
+      expect(result).toMatchObject({ ok: false });
+      if (!result.ok) {
+        expect(result.error).toContain('Send a draft before it is accepted or declined');
+        expect(result.error).not.toContain('already been sent or answered');
+      }
+    }
+  });
   it('turns each database refusal into a sentence', async () => {
     const cases: [string, string][] = [
-      ['FIN01', 'This quotation has already been sent or answered, so that can no longer be done.'],
+      ['FIN01', 'That cannot be done to this quotation as it stands. Send a draft before it is accepted or declined; a quotation that has been sent can no longer be edited or deleted.'],
       ['FIN04', 'Only an accepted quotation can be made into an invoice.'],
       ['FIN10', 'A quotation needs at least one line with an amount.'],
       ['FIN11', 'That quotation no longer exists.'],

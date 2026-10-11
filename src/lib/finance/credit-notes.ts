@@ -42,8 +42,10 @@ export const CREDIT_NOTE_MESSAGES = {
   tooLong: LINE_MESSAGES.tooLong,
   gone: 'That credit note no longer exists.',
   // FIN01. A menu offers only what a credit note's status allows, so this reaches a person only when it
-  // changed under them: issued or voided in another tab. True of each.
-  locked: 'This credit note has been issued or voided, so that can no longer be done.',
+  // changed under them in another tab. True of both cases: a draft voided, and a credit note already
+  // issued or voided being edited or deleted.
+  locked:
+    'That cannot be done to this credit note as it stands. A draft credit note is deleted, not voided; one that has been issued or voided can no longer be edited or deleted.',
   // FIN02
   hasRefunds: 'A refund depends on this credit note. Void or delete that refund on Refunds before voiding it.',
   // FIN04

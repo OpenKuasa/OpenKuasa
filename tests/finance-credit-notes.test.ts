@@ -112,9 +112,18 @@ describe('credit note writes', () => {
     expect(await deleteCreditNote(removed.ctx, { id: ID })).toEqual({ ok: true, data: { id: ID } });
     expect(removed.calls[0]).toMatchObject({ name: 'finance_credit_notes', op: 'delete', filters: { id: ID, org_id: 'org-1' } });
   });
+  it('tells a person a draft credit note is deleted, not voided (FIN01)', async () => {
+    const { ctx } = fakeFinance({ data: null, error: { code: 'FIN01' } });
+    const result = await voidCreditNote(ctx, { id: ID });
+    expect(result).toMatchObject({ ok: false });
+    if (!result.ok) {
+      expect(result.error).toContain('A draft credit note is deleted, not voided');
+      expect(result.error).not.toContain('has been issued or voided, so');
+    }
+  });
   it('turns each database refusal into a sentence', async () => {
     const cases: [string, string][] = [
-      ['FIN01', 'This credit note has been issued or voided, so that can no longer be done.'],
+      ['FIN01', 'That cannot be done to this credit note as it stands. A draft credit note is deleted, not voided; one that has been issued or voided can no longer be edited or deleted.'],
       ['FIN02', 'A refund depends on this credit note. Void or delete that refund on Refunds before voiding it.'],
       ['FIN04', 'A credit note can only go against a posted invoice.'],
       ['FIN05', 'That is more than this invoice has left to credit.'],

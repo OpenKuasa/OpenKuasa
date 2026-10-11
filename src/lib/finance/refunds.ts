@@ -50,15 +50,20 @@ export const REFUND_MESSAGES = {
   amount: 'Enter an amount above 0.',
   tooLong: LINE_MESSAGES.tooLong,
   gone: 'That refund no longer exists.',
-  // FIN04
-  notInCredit: 'A refund needs a posted invoice, or an issued credit note, whose customer is in credit.',
-  // FIN05
-  tooMuch: 'That is more than the customer is in credit.',
+  // FIN04. Also raised when a pending refund is paid out and its credit note is no longer issued.
+  notInCredit:
+    'A refund needs a posted invoice, or an issued credit note, whose customer is in credit. If this refund is waiting to be paid out, delete it.',
+  // FIN05. Raised when the amount is more than the customer's credit on the invoice, or more than is left
+  // of the credit note; also when a pending refund is paid out and that credit has gone or been used up.
+  tooMuch:
+    'That is more than the customer is in credit, or more than is left of the credit note. If this refund is waiting to be paid out, delete it.',
   // FIN06
   notFound: 'The invoice or credit note for this refund no longer exists.',
   // FIN09. A menu offers only what a refund's status allows, so this reaches a person only when the
-  // refund changed under them: paid out or voided in another tab. True of each.
-  locked: 'This refund has already been paid out or voided, so that can no longer be done.',
+  // refund changed under them in another tab, or when a refund that was never paid out is voided. True of
+  // each: only a paid refund is voided, a waiting one is deleted, and a paid or voided one is not edited.
+  locked:
+    'That cannot be done to this refund as it stands. Void a refund that has been paid out, or delete one that is still waiting to be paid out.',
   missing: 'The account on this refund no longer exists.',
 } as const;
 

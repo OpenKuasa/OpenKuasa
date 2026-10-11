@@ -47,8 +47,10 @@ export const QUOTATION_MESSAGES = {
   product: LINE_MESSAGES.product,
   gone: 'That quotation no longer exists.',
   // FIN01. A menu offers only what a quotation's status allows, so this reaches a person only when the
-  // quotation changed under them: sent, accepted or declined in another tab. True of each.
-  locked: 'This quotation has already been sent or answered, so that can no longer be done.',
+  // quotation changed under them in another tab. True of both cases: a draft accepted or declined, and a
+  // quotation already sent, accepted or declined being edited or deleted.
+  locked:
+    'That cannot be done to this quotation as it stands. Send a draft before it is accepted or declined; a quotation that has been sent can no longer be edited or deleted.',
   // FIN04
   notAccepted: 'Only an accepted quotation can be made into an invoice.',
   // FIN13
