@@ -120,3 +120,42 @@ describe('submitPublicApplication', () => {
     spy.mockRestore();
   });
 });
+
+describe('what reaches the database is what the page counted', () => {
+  it('sends the name and phone as one line, so runs of spaces cannot push them over the limit', async () => {
+    // 119 characters once collapsed, 177 as typed: fine on the page, too long if sent as typed.
+    const name = Array.from({ length: 30 }, () => 'abc').join('   ');
+    expect(name.length).toBeGreaterThan(120);
+    expect(applyProblems({ ...good, name }, OFF)).toEqual({});
+    const c = client();
+    expect(await submitPublicApplication(c.asClient, ORG, JOB, { ...good, name, phone: ' 012   345\t6789 ' }, OFF)).toEqual({ kind: 'ok' });
+    const sent = c.rpc.mock.calls[0][1] as { p_name: string; p_phone: string };
+    expect(sent.p_name).toBe(name.trim().replace(/\s+/g, ' '));
+    expect(sent.p_name.length).toBeLessThanOrEqual(120);
+    expect(sent.p_phone).toBe('012 345 6789');
+  });
+  it('answers a post with the wrong kinds of value as a failure, without throwing and without calling the database', async () => {
+    const c = client();
+    for (const broken of [
+      { ...good, phone: null }, { ...good, name: 42 }, { ...good, consent: 'on' }, { name: 'A', email: 'a@b.co' }, null,
+    ]) {
+      expect(await submitPublicApplication(c.asClient, ORG, JOB, broken as never, ALL)).toEqual({ kind: 'failed' });
+    }
+    expect(c.rpc).not.toHaveBeenCalled();
+  });
+  it('logs only a code when the database call fails', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      // An error whose message echoes what was sent must not carry it into the log.
+      const errored = client({ data: null, error: { code: '22P02', message: `invalid input: ${full.email} ${full.name}`, details: full.name } });
+      expect(await submitPublicApplication(errored.asClient, ORG, JOB, full, ALL)).toEqual({ kind: 'failed' });
+      const logged = JSON.stringify(spy.mock.calls);
+      expect(logged).toContain('22P02');
+      expect(logged).not.toContain('Aina');
+      expect(logged.toLowerCase()).not.toContain('example.com');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+

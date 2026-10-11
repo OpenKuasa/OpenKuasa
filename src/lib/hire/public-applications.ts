@@ -9,18 +9,20 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import type { ApplicationFormValues } from './application-form';
 import {
-  APPLY_MESSAGES, applyProblems, ringgitToSen, shownFields,
+  APPLY_MESSAGES, applyProblems, oneLine, ringgitToSen, shownFields,
   type ApplyErrors, type ApplyField, type ApplyValues,
 } from './application-fields';
 
+/** The kinds of value a form holds: seven strings and a tick. Anything else did not come from the form. */
+const applyShape = z.object({
+  name: z.string(), email: z.string(), phone: z.string(), cv_url: z.string(),
+  cover_letter: z.string(), portfolio_url: z.string(), expected_salary: z.string(),
+  consent: z.boolean(),
+});
+
 /** The same checks as `applyProblems`, as a schema: one issue per wrong field, on that field's path. */
 export const applicationInput = (form: ApplicationFormValues) =>
-  z
-    .object({
-      name: z.string(), email: z.string(), phone: z.string(), cv_url: z.string(),
-      cover_letter: z.string(), portfolio_url: z.string(), expected_salary: z.string(),
-      consent: z.boolean(),
-    })
+  applyShape
     .superRefine((values, ctx) => {
       for (const [field, message] of Object.entries(applyProblems(values, form))) {
         ctx.addIssue({ code: 'custom', path: [field], message });
@@ -64,7 +66,7 @@ const isUuid = (value: string) => z.uuid().safeParse(value).success;
 
 /**
  * Validates, then calls the function. Only the function's name and the error's
- * code and message are logged on a failure: never the arguments.
+ * code are logged on a failure: never the arguments, and never a message.
  */
 export async function submitPublicApplication(
   client: SupabaseClient,
@@ -75,8 +77,12 @@ export async function submitPublicApplication(
   honeypot?: string | null,
 ): Promise<ApplyOutcome> {
   if (!isUuid(orgId) || !isUuid(jobId)) return { kind: 'closed' };
-  const parsed = applicationInput(form).safeParse(values);
-  if (!parsed.success) return { kind: 'invalid', errors: applyProblems(values, form) };
+  // A post that is not the form's shape (a missing field, a number for a name) is not checked field by
+  // field: the checks below read strings.
+  const shaped = applyShape.safeParse(values);
+  if (!shaped.success) return { kind: 'failed' };
+  const parsed = applicationInput(form).safeParse(shaped.data);
+  if (!parsed.success) return { kind: 'invalid', errors: applyProblems(shaped.data, form) };
 
   const shown = new Set(shownFields(form));
   const text = (field: Exclude<ApplyField, 'consent'>) => {
@@ -87,9 +93,10 @@ export async function submitPublicApplication(
   const args = {
     p_org_id: orgId,
     p_job_id: jobId,
-    p_name: parsed.data.name.trim(),
+    // One line, exactly as the page counted it: the database measures before it collapses.
+    p_name: oneLine(parsed.data.name),
     p_email: parsed.data.email.trim(),
-    p_phone: text('phone'),
+    p_phone: shown.has('phone') && oneLine(parsed.data.phone) !== '' ? oneLine(parsed.data.phone) : null,
     p_cover_letter: text('cover_letter'),
     p_cv_url: text('cv_url'),
     p_portfolio_url: text('portfolio_url'),
@@ -101,10 +108,11 @@ export async function submitPublicApplication(
   try {
     const { data, error } = await client.rpc('submit_public_application', args);
     if (!error) return applyOutcome(data);
-    console.error('[public-applications] submit_public_application failed:', { code: error.code, message: error.message });
+    // The code only: a database message can quote the value it choked on.
+    console.error('[public-applications] submit_public_application failed:', { code: error.code });
   } catch (error) {
-    const { code, message } = (error ?? {}) as { code?: unknown; message?: unknown };
-    console.error('[public-applications] submit_public_application failed:', { code, message });
+    const { code, name } = (error ?? {}) as { code?: unknown; name?: unknown };
+    console.error('[public-applications] submit_public_application failed:', { code, name });
   }
   return { kind: 'failed' };
 }

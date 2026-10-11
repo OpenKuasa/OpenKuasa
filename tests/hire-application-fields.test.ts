@@ -50,8 +50,8 @@ describe('checking what was typed', () => {
     expect(fieldProblem('portfolio_url', { ...good, portfolio_url: 'http://example.com/work' }, ALL)).toBeNull();
   });
   it('counts a cover letter the way the database does and stops at 4,000', () => {
-    expect(fieldProblem('cover_letter', { ...good, cover_letter: 'é'.repeat(APPLY_LIMITS.cover_letter) }, ALL)).toBeNull();
-    expect(fieldProblem('cover_letter', { ...good, cover_letter: 'é'.repeat(APPLY_LIMITS.cover_letter + 1) }, ALL)).toBe(APPLY_MESSAGES.coverLetterTooLong);
+    expect(fieldProblem('cover_letter', { ...good, cover_letter: '😀'.repeat(APPLY_LIMITS.cover_letter) }, ALL)).toBeNull();
+    expect(fieldProblem('cover_letter', { ...good, cover_letter: '😀'.repeat(APPLY_LIMITS.cover_letter + 1) }, ALL)).toBe(APPLY_MESSAGES.coverLetterTooLong);
   });
   it('ignores a field the form does not show', () => {
     expect(applyProblems({ ...good, portfolio_url: 'nonsense', expected_salary: 'lots' }, OFF)).toEqual({});
@@ -64,6 +64,14 @@ describe('expected salary', () => {
     expect(ringgitToSen(' RM 3,500.50 ')).toBe(350050);
     expect(ringgitToSen('')).toBeNull();
     expect(ringgitToSen('   ')).toBeNull();
+    // Two decimals at most, so the rounding is exact.
+    expect(ringgitToSen('1234.56')).toBe(123456);
+    expect(ringgitToSen('0.29')).toBe(29);
+    expect(ringgitToSen('999999.99')).toBe(99999999);
+    expect(ringgitToSen('007')).toBe(700);
+    expect(ringgitToSen('0')).toBe(0);
+    expect(ringgitToSen('0.00')).toBe(0);
+    for (const bad of ['5.', '+5', '３５００', '9'.repeat(400)]) expect(ringgitToSen(bad), bad).toBe('invalid');
   });
   it('refuses what is not an amount, a negative, or an absurd one', () => {
     for (const bad of ['lots', '-5', '3.5.0', '1e9', '3,5', '12.345']) expect(ringgitToSen(bad), bad).toBe('invalid');

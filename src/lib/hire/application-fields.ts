@@ -72,7 +72,8 @@ export function isRequired(field: ApplyField, form: ApplicationFormValues): bool
 
 /** Counted the way the database counts: one per character, not per UTF-16 unit. */
 const length = (value: string) => [...value].length;
-const oneLine = (value: string) => value.trim().replace(/\s+/g, ' ');
+/** One line of text, as the database keeps a name or a phone: runs of spaces, tabs and line breaks become one space. */
+export const oneLine = (value: string) => value.trim().replace(/\s+/g, ' ');
 const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const URL_SHAPE = /^https?:\/\/\S+$/;
 
