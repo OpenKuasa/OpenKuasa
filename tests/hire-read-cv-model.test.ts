@@ -6,7 +6,7 @@
  * specialist) carries any of it.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { stepCountIs, streamText, type Tool, type ToolSet } from 'ai';
+import { APICallError, stepCountIs, streamText, type Tool, type ToolSet } from 'ai';
 import { MockLanguageModelV4, simulateReadableStream } from 'ai/test';
 import { createHireTools } from '@/lib/ai/hire-tools';
 import type { CvRead } from '@/lib/hire/cv-read';
@@ -50,6 +50,12 @@ const streamOf = (chunks: Chunk[]) => ({
 /** The prompts each scripted model was sent, in order, by who was asking. */
 const seen = vi.hoisted(() => ({
   prompts: { orchestrator: [] as unknown[], worker: [] as unknown[] } as Record<string, unknown[]>,
+  /**
+   * Who is being scripted. `team`: Tuah asks Lekir, Lekir reads the CV. `lekir`: the orchestrator
+   * is Lekir itself and reads the CV. `fails`, when set, is thrown on the step after the read.
+   */
+  mode: 'team' as 'team' | 'lekir',
+  fails: null as unknown,
 }));
 
 // Only the team test goes through `getModel`: Tuah asks Lekir, Lekir reads the CV, both then answer.
@@ -61,12 +67,14 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
       new MockLanguageModelV4({
         doStream: async (options: { prompt: unknown }) => {
           const turn = seen.prompts[layer].push(options.prompt);
-          if (layer === 'worker') {
-            return streamOf(
-              turn === 1
-                ? calls({ id: 'cv-call-1', toolName: 'readCandidateCv', input: { applicationId: APP } })
-                : says('Aisyah has five years in sales. A good match.'),
-            );
+          const reads = layer === 'worker' || seen.mode === 'lekir';
+          if (reads) {
+            if (turn === 1) {
+              return streamOf(calls({ id: 'cv-call-1', toolName: 'readCandidateCv', input: { applicationId: APP } }));
+            }
+            // The call that carries the file is the one that fails.
+            if (seen.fails) throw seen.fails;
+            return streamOf(says('Aisyah has five years in sales. A good match.'));
           }
           return streamOf(
             turn === 1
@@ -78,7 +86,7 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
   };
 });
 
-const { runTuah } = await import('@/lib/ai/agents/orchestrator');
+const { runLekir, runTuah } = await import('@/lib/ai/agents/orchestrator');
 
 /** Every value inside `value`, however deep, typed arrays included as one value. */
 function* walk(value: unknown): Generator<unknown> {
@@ -250,10 +258,140 @@ describe('readCandidateCv in the step loop', () => {
   });
 });
 
+describe('a model call that fails after a CV was read', () => {
+  const CV_PATH = 'org-folder/job-folder/secret-file-name.pdf';
+  /**
+   * What a provider failure looks like: the SDK's own error, holding the request it failed on.
+   * By then the request holds the CV, as a data URL inside the tool result.
+   */
+  const providerFailure = () =>
+    new APICallError({
+      message: `The provider could not process the CV of Aisyah Rahman at ${CV_PATH}.`,
+      url: 'https://provider.example/v1/chat/completions',
+      statusCode: 500,
+      isRetryable: false,
+      requestBodyValues: {
+        messages: [{ role: 'tool', content: [{ type: 'file', file: { file_data: `data:application/pdf;base64,${BASE64}` } }] }],
+      },
+      responseBody: '{"error":"internal"}',
+    });
+
+  /** Everything of a value a log drain could serialise: an error's message and stack too, loops cut. */
+  function serialise(value: unknown): string {
+    const met = new WeakSet<object>();
+    return JSON.stringify(value, (_key, inner: unknown) => {
+      if (!inner || typeof inner !== 'object') return inner;
+      if (met.has(inner)) return '[seen]';
+      met.add(inner);
+      if (inner instanceof Error) {
+        return { ...inner, name: inner.name, message: inner.message, stack: inner.stack, cause: inner.cause };
+      }
+      return inner;
+    });
+  }
+  const METHODS = ['error', 'warn', 'info', 'log', 'debug'] as const;
+  function spyOnConsole() {
+    const spies = METHODS.map((method) => vi.spyOn(console, method).mockImplementation(() => {}));
+    return {
+      logged: () => serialise(spies.flatMap((spy) => spy.mock.calls)),
+      restore: () => spies.forEach((spy) => spy.mockRestore()),
+    };
+  }
+  function expectNothingOfTheCv(logged: string) {
+    expect(logged).not.toContain('JVBERi0');
+    expect(logged).not.toContain(BASE64);
+    expect(logged).not.toContain('%PDF');
+    expect(logged).not.toContain('SENTINEL');
+    expect(logged).not.toContain('Aisyah');
+    expect(logged).not.toContain('secret-file-name');
+    expect(logged).not.toContain('requestBodyValues');
+  }
+  const reset = (mode: 'team' | 'lekir') => {
+    seen.prompts.orchestrator = [];
+    seen.prompts.worker = [];
+    seen.mode = mode;
+    seen.fails = providerFailure();
+  };
+  const reader = () => ({
+    readCv: vi.fn(async (id: string) => {
+      void id;
+      return OK;
+    }),
+  });
+
+  it('logs a code for Lekir, never the request that held the file', async () => {
+    reset('lekir');
+    const files = reader();
+    const console_ = spyOnConsole();
+    let chunks: unknown[] = [];
+    let logged = '';
+    try {
+      const result = runLekir(
+        [{ role: 'user', content: 'What is the verdict on Aisyah?' }],
+        { data: createSeedHireData(NOW), files },
+      );
+      chunks = await uiChunks(result);
+      logged = console_.logged();
+    } finally {
+      console_.restore();
+      seen.fails = null;
+      seen.mode = 'team';
+    }
+    // The read happened and the failing call did carry the file: this is the case that matters.
+    expect(files.readCv).toHaveBeenCalledTimes(1);
+    expect(seen.prompts.orchestrator).toHaveLength(2);
+    expect(pdfParts(seen.prompts.orchestrator[1])).toHaveLength(1);
+    expectNothingOfTheCv(logged);
+    expect(logged).toContain('[ai] lekir model call failed:');
+    expect(logged).toContain('"code":500');
+    // Nor does the browser get any of it with the error.
+    expect(chunks.some((chunk) => (chunk as Part).type === 'error')).toBe(true);
+    for (const chunk of chunks) expect(carriesCv(chunk)).toBe(false);
+    expect(serialise(chunks)).not.toContain('secret-file-name');
+  });
+
+  it('logs a code for Lekir as Tuah’s specialist too, and Tuah is told only that it failed', async () => {
+    reset('team');
+    const files = reader();
+    const console_ = spyOnConsole();
+    let chunks: unknown[] = [];
+    let logged = '';
+    try {
+      const result = runTuah(
+        [{ role: 'user', content: 'What is the verdict on Aisyah?' }],
+        { data: createSeedReachData() },
+        undefined, undefined, null, null,
+        { transcript: '', proposals: new Map(), names: {} },
+        { data: createSeedHireData(NOW), files },
+      );
+      chunks = await uiChunks(result);
+      logged = console_.logged();
+    } finally {
+      console_.restore();
+      seen.fails = null;
+    }
+    expect(files.readCv).toHaveBeenCalledTimes(1);
+    expect(seen.prompts.worker).toHaveLength(2);
+    expect(pdfParts(seen.prompts.worker[1])).toHaveLength(1);
+    expectNothingOfTheCv(logged);
+    expect(logged).toContain('"code":500');
+    // Tuah's model and the browser hear that Lekir could not finish, and nothing of why.
+    for (const prompt of seen.prompts.orchestrator) {
+      expect(carriesCv(prompt)).toBe(false);
+      expect(serialise(prompt)).not.toContain('secret-file-name');
+    }
+    expect(serialise(seen.prompts.orchestrator[1])).toContain('Lekir could not finish.');
+    for (const chunk of chunks) expect(carriesCv(chunk)).toBe(false);
+    expect(serialise(chunks)).not.toContain('secret-file-name');
+  });
+});
+
 describe('readCandidateCv when Tuah asks Lekir', () => {
   it('gives the PDF to the specialist’s next step only: not to Tuah, not to the browser', async () => {
     seen.prompts.orchestrator = [];
     seen.prompts.worker = [];
+    seen.mode = 'team';
+    seen.fails = null;
     const readCv = vi.fn(async (id: string) => {
       void id;
       return OK;

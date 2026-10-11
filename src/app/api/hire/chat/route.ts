@@ -9,6 +9,7 @@
  * Supabase in prod, sample data in dev, nothing for someone in no workspace).
  */
 
+import { modelErrorCode } from '@/lib/ai/call-log';
 import { prepareChat } from '@/lib/ai/chat-request';
 import { runLekir } from '@/lib/ai/agents/orchestrator';
 import { getCurrentOrg } from '@/lib/auth/current-org';
@@ -43,7 +44,8 @@ export async function POST(request: Request) {
 
   return result.toUIMessageStreamResponse({
     onError: (error) => {
-      console.error('[ask-lekir] stream error:', error);
+      // The code only: after a CV read, a provider's error holds the request, file and all.
+      console.error('[ask-lekir] stream error:', modelErrorCode(error));
       return 'Lekir ran into a problem. Please try again in a moment.';
     },
   });

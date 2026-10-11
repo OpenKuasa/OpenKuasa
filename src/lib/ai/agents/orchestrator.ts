@@ -6,7 +6,7 @@
  */
 
 import { type ModelMessage, stepCountIs, streamText } from 'ai';
-import { logModelCall } from '@/lib/ai/call-log';
+import { logModelCall, logModelError } from '@/lib/ai/call-log';
 import { getModel, pickModelId } from '@/lib/ai/provider';
 import type { CrmAccess } from '@/lib/ai/crm-tools';
 import {
@@ -52,6 +52,7 @@ export function runJebat(
     tools,
     toolApproval,
     onLanguageModelCallEnd: logModelCall('jebat', pickModelId('orchestrator')),
+    onError: logModelError('jebat'),
     stopWhen: stepCountIs(8),
     maxOutputTokens: 1000,
     // Stop in-flight model/tool work if the client disconnects.
@@ -81,6 +82,7 @@ export function runKasturi(
     tools,
     toolApproval,
     onLanguageModelCallEnd: logModelCall('kasturi', pickModelId('orchestrator')),
+    onError: logModelError('kasturi'),
     // A CRM change often needs two lookups first (the contact, then the stage).
     stopWhen: stepCountIs(10),
     maxOutputTokens: 1000,
@@ -108,6 +110,8 @@ export function runLekir(
     tools,
     toolApproval,
     onLanguageModelCallEnd: logModelCall('lekir', pickModelId('orchestrator')),
+    // After a CV read the request holds the file: a failure is logged by its code, never whole.
+    onError: logModelError('lekir'),
     stopWhen: stepCountIs(8),
     // A drafted job description runs longer than a data answer.
     maxOutputTokens: 1400,
@@ -134,6 +138,7 @@ export function runLekiu(
     tools,
     toolApproval,
     onLanguageModelCallEnd: logModelCall('lekiu', pickModelId('orchestrator')),
+    onError: logModelError('lekiu'),
     // A change often needs two lookups first (the employee, then the department).
     stopWhen: stepCountIs(10),
     // A drafted notice or letter runs longer than a data answer.
@@ -201,6 +206,7 @@ export function runTuah(
     toolApproval,
     prepareStep: teamTools?.prepareStep as never,
     onLanguageModelCallEnd: logModelCall(team ? 'tuah-team' : 'tuah', pickModelId('orchestrator')),
+    onError: logModelError(team ? 'tuah-team' : 'tuah'),
     // A CRM change often needs two lookups first (the contact, then the stage).
     stopWhen: stepCountIs(10),
     maxOutputTokens: 1000,

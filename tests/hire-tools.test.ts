@@ -7,7 +7,7 @@ import {
   createJobInput, deleteJobInput, setJobStatusInput, updateApplicationFormInput, updateCareersPageInput, updateJobInput,
 } from '@/lib/hire/capabilities';
 import { createReachTools } from '@/lib/ai/tools';
-import { toolMeta } from '@/components/chat/tool-parts';
+import { liveStepStatus, toolMeta } from '@/components/chat/tool-parts';
 import { formatWhen } from '@/lib/reach/overview';
 import { funnelCounts } from '@/lib/hire/applications-view';
 import { timeToHire } from '@/lib/hire/dashboard';
@@ -478,11 +478,45 @@ describe('readCandidateCv', () => {
     expect(next.readCv).toHaveBeenCalledTimes(1);
   });
 
-  it('counts a read that found nothing towards the three', async () => {
-    const { read, readCv } = fresh({ state: 'missing' });
-    for (const id of ['c1', 'c2', 'c3']) expect(await read(id)).toEqual({ ok: false, error: 'No such application.' });
+  it('does not count an answer that never reached a file: no CV, a link only, no such application', async () => {
+    const answers: CvRead[] = [
+      { state: 'none', hasLink: false, candidate: 'A', job: 'B' },
+      { state: 'none', hasLink: true, candidate: 'A', job: 'B' },
+      { state: 'missing' },
+      { state: 'none', hasLink: false, candidate: 'A', job: 'B' },
+    ];
+    const { read, readCv } = fresh(async () => answers.shift() ?? OK);
+    for (const id of ['n1', 'n2', 'n3', 'n4']) expect((await read(id)).ok).toBe(false);
+    // Four answers with no file used up nothing: three real reads still go through, and a fourth does not.
+    for (const id of ['c1', 'c2', 'c3']) expect((await read(id)).ok).toBe(true);
     expect(await read('c4')).toEqual(ONE_AT_A_TIME);
-    expect(readCv).toHaveBeenCalledTimes(3);
+    expect(readCv).toHaveBeenCalledTimes(7);
+  });
+
+  it('counts a read that reached storage and failed, or threw, towards the three', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const failed = fresh({ state: 'failed' });
+    for (const id of ['c1', 'c2', 'c3']) expect(await failed.read(id)).toEqual({ ok: false, error: 'Could not read the CV.' });
+    expect(await failed.read('c4')).toEqual(ONE_AT_A_TIME);
+    expect(failed.readCv).toHaveBeenCalledTimes(3);
+    const threw = fresh(async () => { throw new Error('boom'); });
+    for (const id of ['c1', 'c2', 'c3']) expect(await threw.read(id)).toEqual({ ok: false, error: 'Could not read the CV.' });
+    expect(await threw.read('c4')).toEqual(ONE_AT_A_TIME);
+    expect(threw.readCv).toHaveBeenCalledTimes(3);
+    log.mockRestore();
+  });
+
+  it('hands a held file only to the call that asked for that application', async () => {
+    const OTHER = '22222222-2222-4222-8222-222222222222';
+    const { cv, read } = fresh();
+    const output = await read('c1');
+    // The same call id turning up for another application gets the few words, and the file is let go.
+    expect(cv.toModelOutput({ toolCallId: 'c1', input: { applicationId: OTHER }, output })).toEqual({ type: 'json', value: output });
+    expect(cv.toModelOutput({ toolCallId: 'c1', input: { applicationId: APP }, output })).toEqual({ type: 'json', value: output });
+    // No input at all is not a match either.
+    await read('c2');
+    expect(cv.toModelOutput({ toolCallId: 'c2', input: undefined, output })).toEqual({ type: 'json', value: output });
+    expect(cv.toModelOutput({ toolCallId: 'c2', input: { applicationId: APP }, output })).toEqual({ type: 'json', value: output });
   });
 
   it('refuses a second read started while one is under way', async () => {
@@ -553,5 +587,8 @@ describe('readCandidateCv', () => {
     expect(meta.detail?.({ ok: true, candidate: 42 })).toBeNull();
     // Other cards have no detail line.
     expect(toolMeta('listApplications').detail).toBeUndefined();
+    // While it runs for a specialist it reads as what it is doing, not as "Looking up reading cv…".
+    expect(liveStepStatus('readCandidateCv')).toBe('Reading a CV…');
+    expect(liveStepStatus('listApplications')).toBe('Looking up applications…');
   });
 });

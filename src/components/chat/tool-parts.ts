@@ -52,6 +52,8 @@ type ToolMeta = {
   Icon: Icon;
   /** A few plain words to show beside the label, read from the tool's result. */
   detail?: (output: unknown) => string | null;
+  /** How the tool reads while it runs, where "Looking up <label>…" would not read well. */
+  running?: string;
 };
 
 /** Whose CV was read: the candidate's name, once the read has succeeded. */
@@ -110,7 +112,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   listTrainings: { label: 'Trainings', Icon: Briefcase },
   listAnnouncements: { label: 'Announcements', Icon: Megaphone },
   getCareersPage: { label: 'Careers page', Icon: Globe },
-  readCandidateCv: { label: 'Reading CV', Icon: FileText, detail: cvCandidate },
+  readCandidateCv: { label: 'Reading CV', Icon: FileText, detail: cvCandidate, running: 'Reading a CV…' },
   listContacts: { label: 'Leads', Icon: Users },
 };
 
@@ -125,6 +127,12 @@ export function toolMeta(name: string): ToolMeta & { isFallback: boolean } {
   return known
     ? { ...known, isFallback: false }
     : { label: humanize(name) || 'Tool', Icon: Wrench, isFallback: true };
+}
+
+/** What a specialist is doing while one of its lookups runs, in a few words. */
+export function liveStepStatus(name: string): string {
+  const { label, running } = toolMeta(name);
+  return running ?? `Looking up ${label.toLowerCase()}…`;
 }
 
 export function isText(p: AnyPart): p is Extract<AnyPart, { type: 'text' }> {

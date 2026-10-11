@@ -20,6 +20,8 @@ const ctl = vi.hoisted(() => ({
   },
   /** What the Tuah route handed its runner: whether it ran with the team, and the HireAccess. */
   tuah: null as null | { team: boolean; hire: { files?: import('@/lib/hire/cv-read').CvReader } | null },
+  /** When set, the model call throws this instead of answering. */
+  fails: null as unknown,
 }));
 
 vi.mock('@/lib/ai/agents/orchestrator', async (importOriginal) => {
@@ -86,6 +88,7 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
             system: String(options.prompt.find((m) => m.role === 'system')?.content ?? ''),
             tools: (options.tools ?? []).map((tool) => tool.name),
           });
+          if (ctl.fails) throw ctl.fails;
           return {
             stream: simulateReadableStream({
               initialDelayInMs: 0,
@@ -134,8 +137,58 @@ beforeEach(() => {
   ctl.tablesRead = [];
   ctl.captured = null;
   ctl.tuah = null;
+  ctl.fails = null;
   process.env.AI_KEYS_ENCRYPTION_SECRET = SECRET;
 });
+
+/**
+ * A provider failure as the SDK reports it: the request it failed on rides
+ * along, and after a CV read that request holds the file as a data URL.
+ */
+const providerFailure = () =>
+  Object.assign(new Error('The provider could not process the CV of Aisyah Rahman at org/job/secret-file-name.pdf.'), {
+    name: 'AI_APICallError',
+    statusCode: 500,
+    requestBodyValues: {
+      messages: [{ content: [{ file: { file_data: 'data:application/pdf;base64,JVBERi0=' } }] }],
+    },
+  });
+
+/** Everything of the logged values a log drain could serialise: an error's message and stack too. */
+function serialise(value: unknown): string {
+  const met = new WeakSet<object>();
+  return JSON.stringify(value, (_key, inner: unknown) => {
+    if (!inner || typeof inner !== 'object') return inner;
+    if (met.has(inner)) return '[seen]';
+    met.add(inner);
+    if (inner instanceof Error) return { ...inner, name: inner.name, message: inner.message, stack: inner.stack };
+    return inner;
+  });
+}
+
+/** Runs a request whose model call fails, and gives back what was sent and what was logged. */
+async function failing(run: () => Promise<Response>): Promise<{ status: number; body: string; logged: string }> {
+  ctl.fails = providerFailure();
+  const spies = (['error', 'warn', 'info', 'log', 'debug'] as const).map((method) =>
+    vi.spyOn(console, method).mockImplementation(() => {}),
+  );
+  try {
+    const res = await run();
+    const body = await res.text();
+    return { status: res.status, body, logged: serialise(spies.flatMap((spy) => spy.mock.calls)) };
+  } finally {
+    spies.forEach((spy) => spy.mockRestore());
+    ctl.fails = null;
+  }
+}
+
+function expectOnlyACode(logged: string) {
+  expect(logged).toContain('"code":500');
+  expect(logged).not.toContain('JVBERi0');
+  expect(logged).not.toContain('requestBodyValues');
+  expect(logged).not.toContain('Aisyah');
+  expect(logged).not.toContain('secret-file-name');
+}
 
 describe('POST /api/hire/chat gating', () => {
   it('401 when not signed in', async () => {
@@ -250,6 +303,18 @@ describe('POST /api/hire/chat happy path', () => {
   });
 });
 
+describe('POST /api/hire/chat when the model call fails', () => {
+  it('tells the user Lekir ran into a problem, and logs only a code', async () => {
+    const { status, body, logged } = await failing(() => POST(post(validBody)));
+    expect(status).toBe(200);
+    expect(body).toContain('Lekir ran into a problem. Please try again in a moment.');
+    expect(body).not.toContain('Aisyah');
+    expect(logged).toContain('[ask-lekir] stream error:');
+    expect(logged).toContain('[ai] lekir model call failed:');
+    expectOnlyACode(logged);
+  });
+});
+
 describe('POST /api/chat (Tuah) and reading a CV', () => {
   const tuahPost = (body: unknown) =>
     new Request('http://localhost/api/chat', {
@@ -268,6 +333,16 @@ describe('POST /api/chat (Tuah) and reading a CV', () => {
     // Tuah itself never holds the tool: only the specialist it asks does.
     expect(ctl.calls[0].tools).toContain('askLekir');
     expect(ctl.calls[0].tools).not.toContain('readCandidateCv');
+  });
+
+  it('tells the user Tuah ran into a problem when the model call fails, and logs only a code', async () => {
+    const { POST: tuah } = await import('@/app/api/chat/route');
+    const { status, body, logged } = await failing(() => tuah(tuahPost({ ...validBody, team: false })));
+    expect(status).toBe(200);
+    expect(body).toContain('Tuah ran into a problem. Please try again in a moment.');
+    expect(body).not.toContain('Aisyah');
+    expect(logged).toContain('[tuah] stream error:');
+    expectOnlyACode(logged);
   });
 
   it('gives the single agent no way to read a CV', async () => {

@@ -55,7 +55,7 @@ export const HIRE_TOOL_NAMES = [
 
 const READ_ERROR = { ok: false as const, error: 'Could not read hiring data.' };
 
-/** How many CVs one request may read. */
+/** How many CVs one request may fetch. An answer that there is no file to fetch is not counted. */
 const CV_READS_MAX = 3;
 const CV_NOTE =
   'The CV was given to you to read for this answer only. It is not kept: call readCandidateCv again if asked about it later.';
@@ -128,7 +128,7 @@ export function createHireTools(
    * (the request was cut off after the read), the entry goes when this
    * request's tools are dropped: at most three files of 5 MB, for one request.
    */
-  const heldCvs = new Map<string, { bytes: Uint8Array; candidate: string; job: string }>();
+  const heldCvs = new Map<string, { applicationId: string; bytes: Uint8Array; candidate: string; job: string }>();
 
   const read: ToolSet = {
     getHiringOverview: tool({
@@ -400,11 +400,16 @@ export function createHireTools(
           // Checked and set before anything is awaited, so two calls made in one step cannot both pass.
           if (cvReading || cvReads >= CV_READS_MAX) return cvRefusal(CV_ONE_AT_A_TIME);
           cvReading = true;
-          cvReads += 1;
+          // A read uses up one of the three unless it turns out there was no file to fetch.
+          let counts = true;
           try {
             const cv = await files.readCv(applicationId);
-            if (cv.state === 'missing') return cvRefusal('No such application.');
+            if (cv.state === 'missing') {
+              counts = false;
+              return cvRefusal('No such application.');
+            }
             if (cv.state === 'none') {
+              counts = false;
               return cvRefusal(
                 cv.hasLink
                   ? 'This application has no uploaded CV. There is a CV link the recruiter can open.'
@@ -412,22 +417,28 @@ export function createHireTools(
               );
             }
             if (cv.state !== 'ok' || !isReadablePdf(cv.bytes)) return cvRefusal(CV_UNREADABLE);
-            heldCvs.set(toolCallId, { bytes: cv.bytes, candidate: cv.candidate, job: cv.job });
+            heldCvs.set(toolCallId, { applicationId, bytes: cv.bytes, candidate: cv.candidate, job: cv.job });
             return { ok: true as const, candidate: cv.candidate, job: cv.job, note: CV_NOTE };
           } catch {
             // The error may name a path or a person: only the tool is logged.
             console.error('[lekir] readCandidateCv failed');
             return cvRefusal(CV_UNREADABLE);
           } finally {
+            // Safe to count here, after the wait: no other read can start while this one is under way.
+            if (counts) cvReads += 1;
             cvReading = false;
           }
         },
         // The model's copy of the result. Only here does the file join it, once, for the next step.
-        toModelOutput: ({ toolCallId, output }) => {
+        toModelOutput: ({ toolCallId, input, output }) => {
           const cv = heldCvs.get(toolCallId);
           // A refusal, or a turn read back from the conversation: the few words and nothing more.
           if (!cv) return { type: 'json', value: output };
           heldCvs.delete(toolCallId);
+          // Every specialist asked in one request shares this map. Should a call id ever repeat,
+          // a file goes only to the call that asked for that application; otherwise it is let go.
+          const asked = (input as { applicationId?: unknown } | null | undefined)?.applicationId;
+          if (asked !== cv.applicationId) return { type: 'json', value: output };
           return {
             type: 'content',
             value: [

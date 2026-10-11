@@ -21,7 +21,7 @@ import {
 import { z } from 'zod';
 import { subAgentSystem } from '@/lib/ai/agents/prompts';
 import type { ProductToolkit } from '@/lib/ai/products';
-import { logModelCall } from '@/lib/ai/call-log';
+import { logModelCall, logModelError, modelErrorCode } from '@/lib/ai/call-log';
 import { getModel, pickModelId } from '@/lib/ai/provider';
 import {
   approvalDetail,
@@ -201,6 +201,8 @@ function askTool(product: ProductToolkit, team: TeamContext): Tool {
           maxOutputTokens: 900,
           abortSignal,
           onLanguageModelCallEnd: logModelCall(product.name.toLowerCase(), pickModelId('worker')),
+          // After a CV read the request holds the file: a failure is logged by its code, never whole.
+          onError: logModelError(product.name.toLowerCase()),
         });
         for await (const part of result.fullStream) {
           if (part.type === 'tool-call') {
@@ -220,10 +222,8 @@ function askTool(product: ProductToolkit, team: TeamContext): Tool {
         }
         yield snapshot('done');
       } catch (error) {
-        console.error(
-          `[tuah] ${product.name} could not finish:`,
-          error instanceof Error ? error.message : error,
-        );
+        // The code only: a provider's message can quote the request, and a non-Error can be anything.
+        console.error(`[tuah] ${product.name} could not finish:`, modelErrorCode(error));
         answer = 'Something went wrong while working on this. Try again in a moment.';
         yield snapshot('failed');
       }

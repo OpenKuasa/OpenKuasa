@@ -14,6 +14,7 @@
  */
 
 import { readUIMessageStream, type UIMessage } from 'ai';
+import { modelErrorCode } from '@/lib/ai/call-log';
 import { prepareChat } from '@/lib/ai/chat-request';
 import { runTuah } from '@/lib/ai/agents/orchestrator';
 import { getCurrentOrg } from '@/lib/auth/current-org';
@@ -122,7 +123,8 @@ export async function POST(request: Request) {
 
   return result.toUIMessageStreamResponse({
     onError: (error) => {
-      console.error('[tuah] stream error:', error);
+      // The code only: after a CV read, a provider's error holds the request, file and all.
+      console.error('[tuah] stream error:', modelErrorCode(error));
       return 'Tuah ran into a problem. Please try again in a moment.';
     },
   });

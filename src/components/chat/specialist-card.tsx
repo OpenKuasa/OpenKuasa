@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Check, ChevronDown, Loader2, TriangleAlert } from 'lucide-react';
 import { PRODUCTS, getProduct } from '@/config/nav';
-import { toolMeta } from '@/components/chat/tool-parts';
+import { liveStepStatus, toolMeta } from '@/components/chat/tool-parts';
 import type { AgentStep, Delegation } from '@/lib/chat/delegation';
 import { cn } from '@/lib/utils';
 
@@ -20,7 +20,7 @@ function liveStatus(work: Delegation, changes: Set<string>): string {
   if (current) {
     return changes.has(current.tool)
       ? 'Preparing a change…'
-      : `Looking up ${toolMeta(current.tool).label.toLowerCase()}…`;
+      : liveStepStatus(current.tool);
   }
   return work.steps.length === 0 ? 'Thinking…' : 'Writing up what it found…';
 }
