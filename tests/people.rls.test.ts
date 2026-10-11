@@ -1,14 +1,12 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { createOrg, joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const client = (): SupabaseClient =>
-  createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
+const client = liveClient;
 
 const DEMO_EMPLOYEE_ID = 'dea97d89-a5b6-f264-bd42-c6df73f664a7';
 const PERSONAL = [
@@ -21,18 +19,18 @@ const SHARED = ['hr_departments', 'hr_employees', 'hr_public_holidays', 'hr_trai
 
 async function ownedOrg(name: string) {
   const c = client();
-  const { error: e1 } = await c.auth.signInAnonymously();
+  const { error: e1 } = await signInAnon(c);
   expect(e1, e1?.message).toBeNull();
-  const { data: orgId, error } = await c.rpc('create_org_for_current_user', { org_name: name });
+  const { data: orgId, error } = await createOrg(c, name);
   expect(error, error?.message).toBeNull();
   return { c, orgId: orgId as string };
 }
 
 async function demoGuest() {
   const c = client();
-  const { error: e1 } = await c.auth.signInAnonymously();
+  const { error: e1 } = await signInAnon(c);
   expect(e1, e1?.message).toBeNull();
-  const { data: demoId, error } = await c.rpc('join_demo_org');
+  const { data: demoId, error } = await joinDemo(c);
   expect(error, error?.message).toBeNull();
   return { c, demoId: demoId as string };
 }

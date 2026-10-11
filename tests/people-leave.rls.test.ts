@@ -4,7 +4,7 @@
  * first call (the functions do not exist). Skipped without Supabase env vars.
  */
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { type SupabaseClient } from '@supabase/supabase-js';
 import { createEmployee } from '@/lib/people/capabilities';
 import {
   applyLeave,
@@ -15,14 +15,12 @@ import {
 } from '@/lib/people/leave';
 import { DEMO_EMPLOYEE_ID } from '@/lib/people/types';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { createOrg, joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 
-const client = (): SupabaseClient =>
-  createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+const client = liveClient;
 
 // A Monday and Tuesday far enough ahead that nothing is "already started", in a year with no row yet.
 const YEAR = 2031;
@@ -31,26 +29,23 @@ const TUE = `${YEAR}-03-04`;
 
 let owner: { c: SupabaseClient; orgId: string };
 let guest: { c: SupabaseClient; demoId: string };
-let createdEmployeeId: string | null = null;
 
 beforeAll(async () => {
   if (!hasSupabaseEnv) return;
   const c = client();
-  const signedIn = await c.auth.signInAnonymously();
+  const signedIn = await signInAnon(c);
   expect(signedIn.error, signedIn.error?.message).toBeNull();
-  const org = await c.rpc('create_org_for_current_user', { org_name: 'People Leave Sdn Bhd' });
+  const org = await createOrg(c, 'People Leave Sdn Bhd');
   expect(org.error, org.error?.message).toBeNull();
   owner = { c, orgId: org.data as string };
 
   const g = client();
-  expect((await g.auth.signInAnonymously()).error).toBeNull();
-  const demo = await g.rpc('join_demo_org');
+  expect((await signInAnon(g)).error).toBeNull();
+  const demo = await joinDemo(g);
   expect(demo.error, demo.error?.message).toBeNull();
   guest = { c: g, demoId: demo.data as string };
 });
 afterAll(async () => {
-  // Delete the employee (and with it their leave) so only the throwaway workspace is left.
-  if (owner && createdEmployeeId) await owner.c.from('hr_employees').delete().eq('id', createdEmployeeId);
   await owner?.c.auth.signOut();
   await guest?.c.auth.signOut();
 });
@@ -73,7 +68,6 @@ testWithSupabase('an owner applies, approves and cancels leave, and the balance 
   expect(farah.ok, JSON.stringify(farah)).toBe(true);
   if (!farah.ok) return;
   const employee_id = farah.data.id;
-  createdEmployeeId = employee_id;
 
   const preview = await previewLeave(ctx, { employee_id, leave_type: 'annual', start_date: MON, end_date: TUE });
   expect(preview.ok, JSON.stringify(preview)).toBe(true);

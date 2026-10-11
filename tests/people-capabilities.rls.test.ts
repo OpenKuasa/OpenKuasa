@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { type SupabaseClient } from '@supabase/supabase-js';
 import {
   createDepartment,
   createEmployee,
@@ -10,14 +10,12 @@ import {
   updateEmployee,
 } from '@/lib/people/capabilities';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { createOrg, joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 
-const client = (): SupabaseClient =>
-  createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+const client = liveClient;
 
 let owner: { c: SupabaseClient; orgId: string; userId: string };
 let guest: { c: SupabaseClient; demoId: string };
@@ -25,15 +23,15 @@ let guest: { c: SupabaseClient; demoId: string };
 beforeAll(async () => {
   if (!hasSupabaseEnv) return;
   const c = client();
-  const signedIn = await c.auth.signInAnonymously();
+  const signedIn = await signInAnon(c);
   expect(signedIn.error, signedIn.error?.message).toBeNull();
-  const org = await c.rpc('create_org_for_current_user', { org_name: 'People Capabilities Sdn Bhd' });
+  const org = await createOrg(c, 'People Capabilities Sdn Bhd');
   expect(org.error, org.error?.message).toBeNull();
   owner = { c, orgId: org.data as string, userId: signedIn.data.user!.id };
 
   const g = client();
-  expect((await g.auth.signInAnonymously()).error).toBeNull();
-  const demo = await g.rpc('join_demo_org');
+  expect((await signInAnon(g)).error).toBeNull();
+  const demo = await joinDemo(g);
   expect(demo.error, demo.error?.message).toBeNull();
   guest = { c: g, demoId: demo.data as string };
 });
