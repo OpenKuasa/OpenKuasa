@@ -36,6 +36,8 @@ An owner or admin runs payroll for a month: the system drafts a payslip for each
 | SOCSO and EIS | A rate and a maximum contribution per scheme, kept in one table. Not the official wage-band tables |
 | Lekiu | Prepares and adjusts a draft behind confirmation cards. It never marks a run paid, reopens one or deletes a draft |
 | Enforcement | Database functions, one per action. No direct write access to the payroll tables |
+| Order of months | Runs are created in month order with no gaps after a workspace's first run |
+| Earlier overtime | The first run takes every approved, unpaid overtime record up to the month's end; the run reports how many are from earlier months |
 
 ## 3. Scope
 
@@ -55,7 +57,7 @@ One migration, `20261025100000_people_payroll_writes.sql`. Every function is `se
   - add `other_deductions_cents bigint not null default 0 check (other_deductions_cents >= 0)`: the sum of the payslip's deduction lines, kept by the functions;
   - add `set_by_hr text[] not null default '{}'`: which of `epf`, `socso`, `eis`, `pcb` an owner or admin typed over;
   - redefine `net_cents` as `gross_cents - epf_cents - socso_cents - eis_cents - pcb_cents - other_deductions_cents` (still generated and stored).
-- New `hr_payslip_lines`: `id`, `org_id`, `payslip_id` (cascade), `kind` in (`earning`, `unpaid`, `deduction`), `source` in (`hr`, `overtime`, `unpaid_leave`, `joiner`), `label text` (1 to 80 characters, trimmed), `amount_cents bigint` (above zero), `overtime_record_id uuid` (unique when set; `on delete cascade`), `created_at`. A check ties source to kind: `overtime` is an `earning`; `unpaid_leave` and `joiner` are `unpaid`; `hr` is an `earning` or a `deduction`.
+- New `hr_payslip_lines`: `id`, `org_id`, `payslip_id` (cascade), `kind` in (`earning`, `unpaid`, `deduction`), `source` in (`hr`, `overtime`, `unpaid_leave`, `joiner`), `label text` (1 to 80 characters, trimmed), `amount_cents bigint` (above zero; the functions take at most 100,000,000,000 cents for a line or a statutory figure), `overtime_record_id uuid` (unique when set; `on delete cascade`), `created_at`. A check ties source to kind: `overtime` is an `earning`; `unpaid_leave` and `joiner` are `unpaid`; `hr` is an `earning` or a `deduction`.
 - `hr_overtime_records`: add `payslip_id uuid references hr_payslips(id) on delete set null`. Set means "included in that payslip's run".
 - New `hr_statutory_rules`, one row per scheme, the same for every workspace: `scheme` (`epf`, `socso`, `eis`) primary key, `rate numeric(6,5)`, `max_cents bigint` (null for none), `note text`. Readable by `authenticated`; no write grant. Seeded with:
 
@@ -78,7 +80,7 @@ These were checked on 2026-10-11 against published summaries of the KWSP and PER
 
 For a month M (always the first of the month) in a workspace, "today" being the Malaysia date:
 
-1. **Who.** Every employee whose status is `active`, whose `base_salary_cents` is above zero, and whose `join_date` is null or on or before the last day of M. Anyone active without a salary is returned as skipped, with the reason `no_salary`.
+1. **Who.** Every employee whose status is `active`, whose `base_salary_cents` is above zero, and whose `join_date` is null or on or before the last day of M. Anyone active without a salary who joined on or before the last day of M (or has no join date) is returned as skipped, with the reason `no_salary`; a no-salary employee who joins after M is not listed.
 2. **Basic.** `basic_cents` = the employee's `base_salary_cents` now.
 3. **Joiner.** If `join_date` falls inside M after its first day: an `unpaid` line "Joined <date>" of `basic − round(basic × W_after ÷ W_month)`, where `W_month` is the workspace's working days in M (`private.hr_is_working_day`) and `W_after` those on or after the join date. No line when the amount is zero or `W_month` is zero.
 4. **Unpaid leave.** For each approved `unpaid` leave request overlapping M: its working days inside M (half a day when `half_day`), summed across requests. One `unpaid` line "Unpaid leave, <n> days" of `round(basic ÷ 26) × days`, capped so the unpaid lines never exceed basic.
@@ -93,8 +95,8 @@ Recalculating repeats steps 2 to 8 for every payslip in the draft: it deletes an
 
 | Function | Does | Refuses |
 |---|---|---|
-| `hr_run_payroll(p_org, p_month)` | Creates the draft run and its payslips (4.3). Returns the run, the count, and the skipped employees | A run already exists for M; M's first day is after today; an earlier month is still a draft; nobody is eligible |
-| `hr_recalculate_payroll(p_run)` | Rebuilds the draft (4.3) | Run not a draft |
+| `hr_run_payroll(p_org, p_month)` | Creates the draft run and its payslips (4.3). A workspace's first run may be any month that has started; after that, only the month right after its latest run. Returns the run, the count, `earlier_overtime` (how many of its overtime lines are for work before M) and the skipped employees | In this order: M is not the first of a month; M's first day is after today; a run already exists for M; a later month has a run; an earlier month is still a draft; M is not the month right after the latest run; nobody is eligible |
+| `hr_recalculate_payroll(p_run)` | Rebuilds the draft (4.3). Returns the run, the count, how many payslips were added, `earlier_overtime` and the skipped employees | Run not a draft |
 | `hr_save_payslip_line(p_payslip, p_line, p_kind, p_label, p_amount_cents)` | Adds (`p_line` null) or changes an `hr` line; refreshes gross, the proposals and the deductions total | Run not a draft; a system line; kind not `earning` or `deduction`; bad label or amount |
 | `hr_delete_payslip_line(p_line)` | Removes an `hr` line; refreshes the same | Run not a draft; a system line |
 | `hr_set_statutory(p_payslip, p_field, p_amount_cents)` | Sets one of the four figures and marks it set by HR; a null amount resets it to the proposal | Run not a draft; unknown field; amount below zero |
@@ -108,14 +110,14 @@ Every function takes a lock on the run's row first (`for no key update`), and `h
 Changes to existing behaviour:
 
 - `hr_cancel_overtime` and `hr_decide_overtime` (L3) refuse with `PAY_IN_PAID_RUN` when the record's `payslip_id` points at a paid payslip. In a draft they proceed as now; the run then cannot be paid until it is recalculated.
-- A `before delete` trigger on `hr_employees` raises `HR_EMPLOYEE_HAS_PAID_PAYSLIPS` when the employee has a paid payslip. It does not fire for a delete that cascades from the workspace being deleted (`pg_trigger_depth() > 0`).
-- `private.reseed_demo_people()` fills `basic_cents` and produces lines for the demo's payslips.
+- A `before delete` trigger on `hr_employees` raises `HR_EMPLOYEE_HAS_PAID_PAYSLIPS` when the employee has a paid payslip. It is declared `when (pg_trigger_depth() = 0)`, so it does not fire for a delete that cascades from the workspace being deleted. It first takes the rows of the runs the employee has a payslip in (`for no key update`, in order of id), then tests.
+- `private.reseed_demo_people()` fills `basic_cents` and produces lines for the demo's payslips. It deletes the demo's payroll runs before its employees (the trigger above would otherwise stop it) and writes the settings row before the payroll part. The migration runs it once as it applies.
 
 ### 4.5 Refusal codes
 
 A refusal is `raise exception '<CODE>'` and nothing else, so nothing a person typed reaches an error or a log.
 
-`PAYROLL_NOT_ALLOWED`, `PAYROLL_NOT_FOUND`, `PAYROLL_RUN_EXISTS`, `PAYROLL_MONTH_NOT_STARTED`, `PAYROLL_EARLIER_DRAFT`, `PAYROLL_NOBODY`, `PAYROLL_NOT_DRAFT`, `PAYROLL_NOT_PAID`, `PAYROLL_LATER_RUN`, `PAYROLL_NO_PAYSLIPS`, `PAYROLL_NEGATIVE_NET`, `PAYROLL_STALE`, `PAYROLL_SYSTEM_LINE`, `PAYROLL_BAD_INPUT`; plus `PAY_IN_PAID_RUN` and `HR_EMPLOYEE_HAS_PAID_PAYSLIPS`.
+`PAYROLL_NOT_ALLOWED`, `PAYROLL_NOT_FOUND`, `PAYROLL_RUN_EXISTS`, `PAYROLL_MONTH_NOT_STARTED`, `PAYROLL_EARLIER_DRAFT`, `PAYROLL_NOBODY`, `PAYROLL_NOT_DRAFT`, `PAYROLL_NOT_PAID`, `PAYROLL_LATER_RUN`, `PAYROLL_SKIPS_MONTH`, `PAYROLL_NO_PAYSLIPS`, `PAYROLL_NEGATIVE_NET`, `PAYROLL_STALE`, `PAYROLL_SYSTEM_LINE`, `PAYROLL_BAD_INPUT`; plus `PAY_IN_PAID_RUN` and `HR_EMPLOYEE_HAS_PAID_PAYSLIPS`.
 
 A caller who may not act, and a run, payslip or line that does not exist, both get `PAYROLL_NOT_FOUND` where naming an id is involved, so the answer does not say which ids are real.
 
@@ -140,6 +142,7 @@ A caller who may not act, and a run, payslip or line that does not exist, both g
 | `PAYROLL_NOT_DRAFT` | That run is already paid. Undo paid first to change it. |
 | `PAYROLL_NOT_PAID` | That run is not marked as paid. |
 | `PAYROLL_LATER_RUN` | A later month already has a payroll run. Delete that run first. |
+| `PAYROLL_SKIPS_MONTH` | Run payroll for the month after the latest run first. |
 | `PAYROLL_NO_PAYSLIPS` | This run has no payslips. |
 | `PAYROLL_NEGATIVE_NET` | A payslip's net pay is below zero. Fix it before marking the run as paid. |
 | `PAYROLL_STALE` | An overtime claim on this run has changed. Recalculate first. |

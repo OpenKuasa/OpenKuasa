@@ -512,6 +512,8 @@ begin
   if n <> 1 then fails := array_append(fails, format('the workspace has %s runs after the refusals, expected January alone', n)); end if;
 
   -- This month has started, so it can be run; with one salary on file, one payslip.
+  -- It is this workspace's first run, so it may be any month: the January run
+  -- of the other workspace has no say in it.
   update public.hr_employee_private set base_salary_cents = 100000 where employee_id = ep;
   r := pg_temp.pay_try(outsider, format('select public.hr_run_payroll(%L, %L)', other_org, this_month));
   other_run := (r #>> '{run,id}')::uuid;
@@ -799,6 +801,9 @@ begin
       || pg_temp.pay_expect(who, label || ' runs the paid month again', format('select public.hr_run_payroll(%L, %L)', org, jan), 'PAYROLL_RUN_EXISTS')
       -- A paid later run stops an earlier month being made just as a draft one does.
       || pg_temp.pay_expect(who, label || ' runs the month before the paid one', format('select public.hr_run_payroll(%L, ''2024-12-01'')', org), 'PAYROLL_LATER_RUN')
+      -- The latest run is January and it is paid: March would leave February out.
+      || pg_temp.pay_expect(who, label || ' runs two months after the latest run', format('select public.hr_run_payroll(%L, ''2025-03-01'')', org), 'PAYROLL_SKIPS_MONTH')
+      || pg_temp.pay_expect(who, label || ' runs this month, long after the latest run', format('select public.hr_run_payroll(%L, %L)', org, this_month), 'PAYROLL_SKIPS_MONTH')
       -- Overtime paid in the run cannot be cancelled or decided again.
       || pg_temp.pay_expect(who, label || ' cancels overtime that was paid', format('select public.hr_cancel_overtime(%L)', o2), 'PAY_IN_PAID_RUN')
       || pg_temp.pay_expect(who, label || ' approves a record held by a paid payslip', format('select public.hr_decide_overtime(%L, true, null)', o3), 'PAY_IN_PAID_RUN')
@@ -984,9 +989,20 @@ begin
   select count(*) into n2 from public.hr_payslips p where p.id = px or p.employee_id = ex;
   if n <> 2 or n2 <> 0 then fails := array_append(fails, format('%s of A, B and X are left (expected A and B), and X has %s payslips', n, n2)); end if;
 
+  -- Months are consecutive. With February a draft, March is held up by the
+  -- draft; with February deleted, January is the latest again, so March would
+  -- skip a month and February is the one month that can be made.
+  fails := fails
+    || pg_temp.pay_expect(owner_id, 'March while February is a draft', format('select public.hr_run_payroll(%L, ''2025-03-01'')', org), 'PAYROLL_EARLIER_DRAFT')
+    || pg_temp.pay_expect(admin_id, 'the later draft is deleted', format('select public.hr_delete_payroll_run(%L)', feb_run), null)
+    || pg_temp.pay_expect(owner_id, 'March after February was deleted', format('select public.hr_run_payroll(%L, ''2025-03-01'')', org), 'PAYROLL_SKIPS_MONTH')
+    || pg_temp.pay_expect(owner_id, 'February again, the month after the latest run', format('select public.hr_run_payroll(%L, %L)', org, feb), null);
+  select x.id into feb_run from public.hr_payroll_runs x where x.org_id = org and x.period_month = feb;
+  select count(*) into n from public.hr_payroll_runs x where x.org_id = org;
+  if feb_run is null or n <> 2 then fails := array_append(fails, format('the workspace has %s runs after February was made again, expected 2', n)); end if;
   -- Deleting the later draft lets its overtime go, and paid can then be undone.
   fails := fails
-    || pg_temp.pay_expect(admin_id, 'the later draft is deleted', format('select public.hr_delete_payroll_run(%L)', feb_run), null)
+    || pg_temp.pay_expect(admin_id, 'the later draft is deleted again', format('select public.hr_delete_payroll_run(%L)', feb_run), null)
     || pg_temp.pay_expect(admin_id, 'paid is undone', format('select public.hr_unmark_payroll_paid(%L)', run_id), null);
   select count(*) into n from public.hr_overtime_records o where o.id = o4 and o.payslip_id is null;
   if n <> 1 then fails := array_append(fails, 'deleting February did not let its overtime go'); end if;

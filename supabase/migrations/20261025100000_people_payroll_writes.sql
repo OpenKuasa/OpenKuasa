@@ -20,8 +20,8 @@
 -- nothing a person typed can reach an error or a log:
 --   PAYROLL_NOT_ALLOWED  PAYROLL_NOT_FOUND  PAYROLL_RUN_EXISTS  PAYROLL_MONTH_NOT_STARTED
 --   PAYROLL_EARLIER_DRAFT  PAYROLL_NOBODY  PAYROLL_NOT_DRAFT  PAYROLL_NOT_PAID
---   PAYROLL_LATER_RUN  PAYROLL_NO_PAYSLIPS  PAYROLL_NEGATIVE_NET  PAYROLL_STALE
---   PAYROLL_SYSTEM_LINE  PAYROLL_BAD_INPUT
+--   PAYROLL_LATER_RUN  PAYROLL_SKIPS_MONTH  PAYROLL_NO_PAYSLIPS  PAYROLL_NEGATIVE_NET
+--   PAYROLL_STALE  PAYROLL_SYSTEM_LINE  PAYROLL_BAD_INPUT
 -- plus PAY_IN_PAID_RUN (overtime) and HR_EMPLOYEE_HAS_PAID_PAYSLIPS (deleting
 -- an employee).
 
@@ -458,11 +458,14 @@ revoke all on function private.hr_payslip_json(public.hr_payslips) from public, 
 
 -- ---- run payroll ---------------------------------------------------------------
 -- A draft run for one month of one workspace, with its payslips. The month is
--- the first day of a month, from 2000 on. Refused, in this order: a run
--- already exists for the month; the month has not started (its first day is
--- after today in Malaysia); an earlier month is still a draft; a later month
--- already has a run, whatever its status; nobody can be paid. So runs are
--- always made in order of month, and only the latest can ever be a draft.
+-- the first day of a month, from 2000 on. A workspace's first run may be for
+-- any month that has started. After that, only the month right after its
+-- latest run is taken, so the runs of a workspace are consecutive months with
+-- no gap, and only the latest can ever be a draft. Refused, in this order:
+-- the month has not started (its first day is after today in Malaysia); a run
+-- already exists for the month; a later month already has a run, whatever its
+-- status; an earlier month is still a draft; the month is not the one right
+-- after the latest run; nobody can be paid.
 -- The workspace's row is held, so two callers cannot both start a run.
 -- Returns the run, how many payslips it has, how many of its overtime lines
 -- are for work done before the month, and who was left out for want of a
@@ -472,6 +475,7 @@ create or replace function public.hr_run_payroll(p_org uuid, p_month date)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   today date := (now() at time zone 'Asia/Kuala_Lumpur')::date;
+  latest date;
   run public.hr_payroll_runs;
   made int;
 begin
@@ -483,23 +487,28 @@ begin
   if p_month is null or extract(day from p_month) <> 1 or p_month < date '2000-01-01' then
     raise exception 'PAYROLL_BAD_INPUT';
   end if;
+  if p_month > today then raise exception 'PAYROLL_MONTH_NOT_STARTED'; end if;
   if exists (
     select 1 from public.hr_payroll_runs r where r.org_id = p_org and r.period_month = p_month
   ) then
     raise exception 'PAYROLL_RUN_EXISTS';
-  end if;
-  if p_month > today then raise exception 'PAYROLL_MONTH_NOT_STARTED'; end if;
-  if exists (
-    select 1 from public.hr_payroll_runs r
-    where r.org_id = p_org and r.period_month < p_month and r.status = 'draft'
-  ) then
-    raise exception 'PAYROLL_EARLIER_DRAFT';
   end if;
   if exists (
     select 1 from public.hr_payroll_runs r
     where r.org_id = p_org and r.period_month > p_month
   ) then
     raise exception 'PAYROLL_LATER_RUN';
+  end if;
+  if exists (
+    select 1 from public.hr_payroll_runs r
+    where r.org_id = p_org and r.period_month < p_month and r.status = 'draft'
+  ) then
+    raise exception 'PAYROLL_EARLIER_DRAFT';
+  end if;
+  -- Not the first run: it must be the month right after the latest one.
+  select max(r.period_month) into latest from public.hr_payroll_runs r where r.org_id = p_org;
+  if latest is not null and p_month <> (latest + interval '1 month')::date then
+    raise exception 'PAYROLL_SKIPS_MONTH';
   end if;
 
   insert into public.hr_payroll_runs (org_id, period_month, status, created_by)
@@ -890,10 +899,15 @@ grant execute on function public.hr_decide_overtime(uuid, boolean, text) to auth
 create or replace function private.hr_employee_delete_guard()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
-  -- The employee's payslips are held before they are looked at, so a run being
-  -- marked as paid at this moment is either seen as paid or waits for the
-  -- delete.
-  perform 1 from public.hr_payslips p where p.employee_id = old.id order by p.id for update;
+  -- The runs the employee has a payslip in are held before the payslips are
+  -- looked at, in order of id, so a run being marked as paid at this moment is
+  -- either seen as paid or waits for the delete. It is the run's row, the lock
+  -- every payroll function takes first, and not the payslips: taking those
+  -- here could cross with a function that already holds overtime rows.
+  perform 1 from public.hr_payroll_runs r
+  where r.id in (select p.payroll_run_id from public.hr_payslips p where p.employee_id = old.id)
+  order by r.id
+  for no key update;
   if exists (
     select 1 from public.hr_payslips p
     where p.employee_id = old.id and p.status = 'paid'

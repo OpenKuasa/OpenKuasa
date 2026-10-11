@@ -60,6 +60,7 @@ const PAYROLL_CODES = [
   'PAYROLL_NOT_DRAFT',
   'PAYROLL_NOT_PAID',
   'PAYROLL_LATER_RUN',
+  'PAYROLL_SKIPS_MONTH',
   'PAYROLL_NO_PAYSLIPS',
   'PAYROLL_NEGATIVE_NET',
   'PAYROLL_STALE',
@@ -398,10 +399,13 @@ describe('Lekiu payroll migration', () => {
       'perform private.hr_payroll_admin_only(p_org);',
       'perform 1 from public.orgs o where o.id = p_org for no key update;',
       "raise exception 'PAYROLL_BAD_INPUT'",
-      "raise exception 'PAYROLL_RUN_EXISTS'",
       "if p_month > today then raise exception 'PAYROLL_MONTH_NOT_STARTED'; end if;",
-      "raise exception 'PAYROLL_EARLIER_DRAFT'",
+      "raise exception 'PAYROLL_RUN_EXISTS'",
       "raise exception 'PAYROLL_LATER_RUN'",
+      "raise exception 'PAYROLL_EARLIER_DRAFT'",
+      'select max(r.period_month) into latest from public.hr_payroll_runs r where r.org_id = p_org;',
+      "if latest is not null and p_month <> (latest + interval '1 month')::date then",
+      "raise exception 'PAYROLL_SKIPS_MONTH'",
       'insert into public.hr_payroll_runs (org_id, period_month, status, created_by)',
       "raise exception 'PAYROLL_NOBODY'",
     ].map((line) => body.indexOf(line));
@@ -617,8 +621,17 @@ describe('Lekiu payroll migration', () => {
     const { header, body } = fn(text, 'private.hr_employee_delete_guard');
     expect(header).toContain('returns trigger language plpgsql security definer set search_path = public');
     expect(body).toContain("where p.employee_id = old.id and p.status = 'paid'");
-    // The payslips are held before they are looked at, so paying a run cannot slip in between.
-    const hold = body.indexOf('perform 1 from public.hr_payslips p where p.employee_id = old.id order by p.id for update;');
+    // The runs of the employee's payslips are held before the payslips are looked at, so paying a run
+    // cannot slip in between: the run's row, in order of id, which every payroll function takes first.
+    const hold = body.indexOf(
+      'perform 1 from public.hr_payroll_runs r\n'
+        + '  where r.id in (select p.payroll_run_id from public.hr_payslips p where p.employee_id = old.id)\n'
+        + '  order by r.id\n'
+        + '  for no key update;',
+    );
+    // It does not hold the payslips themselves, which could cross with a function holding overtime rows.
+    expect(body).not.toMatch(/perform 1 from public\.hr_payslips/);
+    expect(body.match(/for (no key )?update/g)).toHaveLength(1);
     expect(hold).toBeGreaterThan(-1);
     expect(body.indexOf('if exists (')).toBeGreaterThan(hold);
     expect(body).toContain("raise exception 'HR_EMPLOYEE_HAS_PAID_PAYSLIPS';");
