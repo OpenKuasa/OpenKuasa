@@ -58,6 +58,13 @@ describe('getPublicJob', () => {
     });
     expect(c.rpc).toHaveBeenCalledWith('get_public_job', { p_org_id: ORG, p_job_id: JOB });
   });
+  it('maps the four form requirements, and reads their absence as all false', async () => {
+    const asked = { require_cv: true, require_cover_letter: false, ask_portfolio: true, ask_expected_salary: false };
+    expect((await getPublicJob(client([{ ...jobRow, ...asked }]).asClient, ORG, JOB))?.form).toEqual(asked);
+    expect((await getPublicJob(client([jobRow]).asClient, ORG, JOB))?.form).toEqual({
+      require_cv: false, require_cover_letter: false, ask_portfolio: false, ask_expected_salary: false,
+    });
+  });
   it('is null for no row, a failed call, or a bad id (without calling)', async () => {
     expect(await getPublicJob(client([]).asClient, ORG, JOB)).toBeNull();
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});

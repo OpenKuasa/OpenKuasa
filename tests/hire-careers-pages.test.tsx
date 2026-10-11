@@ -51,6 +51,7 @@ const job = (over: Partial<PublicJob> = {}): PublicJob => ({
   ...summary(), orgName: 'Tanjung Trading', headline: null, tagline: null,
   description: 'Keep the books.\n\nClose each month on time.',
   salaryMinCents: 400000, salaryMaxCents: 600000,
+  form: { require_cv: false, require_cover_letter: false, ask_portfolio: false, ask_expected_salary: false },
   ...over,
 });
 

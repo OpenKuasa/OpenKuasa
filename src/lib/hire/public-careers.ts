@@ -5,6 +5,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
+import type { ApplicationFormValues } from './application-form';
 import type { EmploymentType, WorkArrangement } from './types';
 
 export const DEFAULT_HEADLINE = 'Join our team';
@@ -28,6 +29,8 @@ export type PublicJob = PublicJobSummary & {
   /** Monthly, in sen. Null when the workspace does not show the salary. */
   salaryMinCents: number | null;
   salaryMaxCents: number | null;
+  /** What the apply form asks for. */
+  form: ApplicationFormValues;
 };
 
 type Row = {
@@ -36,6 +39,8 @@ type Row = {
   work_arrangement: WorkArrangement | null; employment_type: EmploymentType | null;
   closes_on: string | null; accepting: boolean | null;
   description?: string | null; salary_min_cents?: number | null; salary_max_cents?: number | null;
+  require_cv?: boolean | null; require_cover_letter?: boolean | null;
+  ask_portfolio?: boolean | null; ask_expected_salary?: boolean | null;
 };
 
 const isUuid = (value: string) => z.uuid().safeParse(value).success;
@@ -89,6 +94,10 @@ export async function getPublicJob(client: SupabaseClient, orgId: string, jobId:
     ...base, orgName: row.org_name, headline: row.headline, tagline: row.tagline,
     description: row.description ?? '',
     salaryMinCents: row.salary_min_cents ?? null, salaryMaxCents: row.salary_max_cents ?? null,
+    form: {
+      require_cv: row.require_cv === true, require_cover_letter: row.require_cover_letter === true,
+      ask_portfolio: row.ask_portfolio === true, ask_expected_salary: row.ask_expected_salary === true,
+    },
   };
 }
 
