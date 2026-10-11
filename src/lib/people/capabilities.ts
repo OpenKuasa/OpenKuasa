@@ -20,6 +20,17 @@ export type Refusal = { ok: false; error: string };
 
 export const WRITE_FAILED = 'That change could not be saved. Please try again.';
 
+/**
+ * What a write answered. `unknown` is the generic {@link WRITE_FAILED} sentence: the database error, a lost
+ * network call or an unmapped failure, so the change may or may not have been saved. Any other refusal is a
+ * sentence the rules produced and is definite. A form with something to undo on refusal (a receipt upload)
+ * must undo only on `refused`.
+ */
+export function writeOutcome(result: CapResult<unknown>): 'saved' | 'refused' | 'unknown' {
+  if (result.ok) return 'saved';
+  return result.error === WRITE_FAILED ? 'unknown' : 'refused';
+}
+
 type DbError = { code?: string; message?: string } | null | undefined;
 
 export const refuse = (error: string): Refusal => ({ ok: false, error });

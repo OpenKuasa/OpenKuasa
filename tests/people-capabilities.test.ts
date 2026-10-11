@@ -12,6 +12,8 @@ import {
   updateDepartment,
   updateEmployee,
   updateEmployeeInput,
+  WRITE_FAILED,
+  writeOutcome,
 } from '@/lib/people/capabilities';
 import { fakeSupabase } from './setup/fake-supabase';
 
@@ -20,6 +22,21 @@ const DEPT = '11111111-1111-4111-8111-111111111111';
 const ctxOf = (client: never) => ({ client, orgId: ORG });
 
 afterEach(() => vi.restoreAllMocks());
+
+describe('writeOutcome', () => {
+  it('is saved for an ok result', () => {
+    expect(writeOutcome({ ok: true, data: null })).toBe('saved');
+  });
+
+  it('is unknown for the generic failure (a lost call may have been saved), so a form keeps its file', () => {
+    expect(writeOutcome({ ok: false, error: WRITE_FAILED })).toBe('unknown');
+  });
+
+  it('is refused for any sentence the rules produced', () => {
+    expect(writeOutcome({ ok: false, error: 'That receipt cannot be used.' })).toBe('refused');
+    expect(writeOutcome({ ok: false, error: '' })).toBe('refused');
+  });
+});
 
 describe('department schemas', () => {
   it('refuses a blank name with a message for the person typing', () => {

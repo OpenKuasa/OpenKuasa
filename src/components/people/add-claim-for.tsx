@@ -6,7 +6,7 @@ import { Plus } from 'lucide-react';
 import { submitClaimForAction } from '@/app/(app)/people/pay-actions';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { WRITE_FAILED } from '@/lib/people/capabilities';
+import { WRITE_FAILED, writeOutcome } from '@/lib/people/capabilities';
 import type { ClaimFormInput } from '@/lib/people/claim-forms';
 import type { LeaveEmployee } from './add-leave-for';
 import { ClaimForm } from './claim-form';
@@ -39,7 +39,10 @@ export function AddClaimFor({ employees, disabled }: { employees: LeaveEmployee[
           const result = await submitClaimForAction({ ...input, employee_id: employeeId });
           if (result.ok) close();
           else setError(result.error);
-          resolve(result.ok);
+          const outcome = writeOutcome(result);
+          // An unknown outcome (the generic failure) may have been saved: reject, so the form keeps its file.
+          if (outcome === 'unknown') reject(new Error('unknown outcome'));
+          else resolve(outcome === 'saved');
         } catch (error) {
           setError(WRITE_FAILED);
           reject(error);

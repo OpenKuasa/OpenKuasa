@@ -4,7 +4,7 @@ import { Plus } from 'lucide-react';
 import { Dialog } from 'radix-ui';
 import { type ReactNode, useState, useTransition } from 'react';
 import { Button } from '@/components/ui/button';
-import { type CapResult, WRITE_FAILED } from '@/lib/people/capabilities';
+import { type CapResult, WRITE_FAILED, writeOutcome } from '@/lib/people/capabilities';
 
 /**
  * The header button and the dialog around a form. The error clears when the
@@ -44,7 +44,10 @@ export function RequestDialog<I>({
           const result = await submit(input);
           if (result.ok) close();
           else setError(result.error);
-          resolve(result.ok);
+          const outcome = writeOutcome(result);
+          // An unknown outcome (the generic failure) may have been saved: reject, so a form keeps what it holds.
+          if (outcome === 'unknown') reject(new Error('unknown outcome'));
+          else resolve(outcome === 'saved');
         } catch (error) {
           setError(WRITE_FAILED);
           reject(error);

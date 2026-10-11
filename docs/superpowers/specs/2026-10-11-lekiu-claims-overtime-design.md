@@ -39,7 +39,7 @@ A linked employee submits and cancels their own expense claims and overtime; an 
 
 ## 4. Database
 
-One migration, `…_people_claims_overtime_writes.sql`, timestamped after the latest on `main`. It adds columns, functions, one storage bucket and its policies. Every screen already live keeps working before and after it is applied.
+Two migrations, both timestamped after the latest on `main`. `…_people_claims_overtime_writes.sql` (already applied) adds columns, functions, one storage bucket and its policies. `…_people_receipt_release.sql` adds the released-paths list and `hr_release_receipt`, and changes `hr_submit_claim` and `hr_cancel_claim` as §4.2 says. Every screen already live keeps working before and after it is applied.
 
 ### 4.1 Columns
 
@@ -63,12 +63,12 @@ All in `public`, `security definer`, `set search_path = public`, `execute` grant
 
 | Function | May call | Behaviour |
 |---|---|---|
-| `hr_submit_claim(employee, category, amount_cents, claim_date, description, receipt_path)` returns the claim | May act for E | Refuses an inactive employee, an amount not above zero or above RM 1,000,000, a date after today or before 2000, an unknown category, a description over 500 characters, and a receipt path that is not in the caller's own folder (`PAY_BAD_RECEIPT`). Saves `pending` with `requested_by`. |
-| `hr_cancel_claim(request)` | The linked member: own claim while `pending`. Owner or admin: any claim not `cancelled` and not `paid` (`PAY_ALREADY_PAID`; undo the mark first). | Sets `cancelled`, clears `receipt_path` and `has_receipt`, and returns the path it cleared so the app can remove the file. |
+| `hr_submit_claim(employee, category, amount_cents, claim_date, description, receipt_path)` returns the claim | May act for E | Refuses an inactive employee, an amount not above zero or above RM 1,000,000, a date after today or before 2000, an unknown category, a description over 500 characters, and a receipt path that is not in the caller's own folder (`PAY_BAD_RECEIPT`). Saves `pending` with `requested_by`. Takes a lock on the receipt path; a released path is `PAY_BAD_RECEIPT`. |
+| `hr_cancel_claim(request)` | The linked member: own claim while `pending`. Owner or admin: any claim not `cancelled` and not `paid` (`PAY_ALREADY_PAID`; undo the mark first). | Sets `cancelled`, clears `receipt_path` and `has_receipt`, and returns the path it cleared so the app can remove the file. Records that path as released, so it can never be attached again. |
 | `hr_decide_claim(request, approve boolean, note)` | Owner or admin | Only a `pending` claim. Sets `approved` or `rejected`, `decided_by`, `decided_at`, and the note on a rejection. |
 | `hr_mark_claim_paid(request, paid_on, reference)` | Owner or admin | Only an `approved` claim (`PAY_NOT_APPROVED`). `paid_on` not after today and not before the claim date. Sets `paid`, `paid_on`, `paid_reference`, `paid_by`. |
 | `hr_unmark_claim_paid(request)` | Owner or admin | Only a `paid` claim (`PAY_NOT_PAID`). Back to `approved`; the three paid columns cleared. |
-| `hr_release_receipt(path)` | Any signed-in user | Returns a boolean, never an error for these cases. True: the path is in the caller's own folder, no claim in any workspace carries it, and it is now marked so it can never be attached. False: do not delete. |
+| `hr_release_receipt(path)` | Any signed-in user | Returns a boolean, never an error for these cases. True only when: the caller is signed in and holds the second factor; the path is in the caller's own folder and has exactly the receipt shape (`<uuid>/<uuid>.<jpg\|png\|webp\|heic\|pdf>`); the file exists in the bucket (or the path was already released); and no claim in any workspace carries it. It then records the path as released (same lock as `hr_submit_claim`). True means the app may delete the file; anything else means do not. |
 | `hr_overtime_preview(employee, work_date, hours)` returns one row | May act for E | `stable`; writes nothing. Refuses a bad date or hours (`PAY_BAD_INPUT`) but not an inactive employee. Returns `day_kind`, `multiplier`, `hourly_rate_cents` (null with no salary on file) and `amount_cents` (null likewise). |
 | `hr_submit_overtime(employee, work_date, hours, reason)` returns the record | May act for E | Refuses an inactive employee, hours not above zero, not in halves or above 24, a date after today or before 2000, and a total above 24 hours for that employee on that date across `pending` and `approved` records (`PAY_TOO_MANY_HOURS`). Saves `pending` with the worked-out figures (§4.3) and `requested_by`. |
 | `hr_cancel_overtime(request)` | The linked member: own record while `pending`. Owner or admin: any record not `cancelled`. | Sets `cancelled`. |
@@ -102,11 +102,11 @@ A restrictive policy requires the second factor for this bucket, as the other bu
 - **Path.** `<uploader's user id>/<random uuid>.<ext>`. `hr_submit_claim` checks the first segment is the caller's own id and that the object exists in the bucket. A file can back one claim only (a unique index on `receipt_path`): attaching it to a second is `PAY_BAD_RECEIPT`, so cancelling one claim can never remove another's receipt. So an owner entering a claim for someone uploads into their own folder, and the employee can still read it through the claim.
 - **Opening.** The app makes a 60-second signed link as the signed-in user; storage's select policy is the check.
 - **Removing.** After `hr_cancel_claim` succeeds, the server action removes the returned path with the service client. If that fails, or no service key is configured, it logs the fact (never the path's owner or the claim) and the cancel still stands; the file is then an unreachable leftover, since no claim points at it.
-- **Unused uploads.** The browser discards an upload that ends up unused (the file is replaced or removed, the dialog is closed, the employee is changed, or a submit is refused) by asking `hr_release_receipt`. The database decides, atomically and across workspaces: it answers true only when the file is in the caller's own folder and attached to no claim, and it marks the path so it can never be attached afterwards (a released or cancelled file cannot be attached again). Only on an exact true does the server delete the file with the service client; false or an error leaves it. A browser closed mid-form never asks, so that file stays in the uploader's folder.
+- **Unused uploads.** The browser discards an upload that ends up unused (the file is replaced or removed, the dialog is closed, the employee is changed, or a submit is refused) by asking `hr_release_receipt`. The database decides, atomically and across workspaces: it answers true only when the file is in the caller's own folder and attached to no claim, and it marks the path so it can never be attached afterwards (a released or cancelled file cannot be attached again). Only on an exact true does the server delete the file with the service client; false or an error leaves it. The chat tool asks the same function when a claim it submitted is refused, and deletes only on true. Because cancelling a claim releases its file, cancelling and then re-submitting needs a fresh upload. A browser closed mid-form never asks, so that file stays in the uploader's folder.
 
 ### 4.5 Access check
 
-`supabase/tests/people_claims_overtime_check.sql`, built like `people_leave_check.sql` (one `do` block, staged calls per caller, always ends by raising): an admin, two linked members, a linked viewer, an unlinked member, an outsider, a demo visitor, an admin planted in the demo, and sessions owing a second factor. It asserts every row of §4.2's "May call" column both ways, the overtime figures (each kind of day, a custom multiplier, no salary then approval after a salary is set, the 24-hour cap), the paid transitions, that both tables refuse direct writes, and the storage policies (own folder only; a member reads their own claim's receipt and not a colleague's; an admin reads any in the workspace; an outsider and a demo visitor read none).
+`supabase/tests/people_claims_overtime_check.sql`, built like `people_leave_check.sql` (one `do` block, staged calls per caller, always ends by raising): an admin, two linked members, a linked viewer, an unlinked member, an outsider, a demo visitor, an admin planted in the demo, and sessions owing a second factor. It asserts every row of §4.2's "May call" column both ways, the overtime figures (each kind of day, a custom multiplier, no salary then approval after a salary is set, the 24-hour cap), the paid transitions, that both tables refuse direct writes, the release cases (true for the caller's own unused upload, again on a repeat, and after a cancel; false for a file on a claim in any workspace, someone else's folder, a malformed path, a missing file, no user or no second factor; a released path refused by submit), and the storage policies (own folder only; a member reads their own claim's receipt and not a colleague's; an admin reads any in the workspace; an outsider and a demo visitor read none).
 
 ## 5. App
 
@@ -196,11 +196,11 @@ Tuah is unchanged.
 
 ## 8. Rollout
 
-1. Dry-run the migration and the access check on a local Postgres.
+1. Dry-run both migrations and the access check on a local Postgres.
 2. Whole-branch review.
-3. **Stop for the owner's go-ahead**, then apply the migration to the live project through the `openkuasa-supabase` MCP.
+3. **Stop for the owner's go-ahead**, then apply both migrations, in order, to the live project through the `openkuasa-supabase` MCP.
 4. Run the three access checks and the full suite against it.
-5. Demo-guest browser pass, then open the PR. **The migration is applied before the merge**: the provider selects the new columns, so merging first would break the claims, overtime and approval screens, the Overview and Lekiu's lookups for everyone.
+5. Demo-guest browser pass, then open the PR. **Both migrations are applied before the merge**: the provider selects the new columns, so merging first would break the claims, overtime and approval screens, the Overview and Lekiu's lookups for everyone.
 6. Signed-in pass with the owner, then merge on their say.
 
 **Risks**

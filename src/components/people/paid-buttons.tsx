@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import { markClaimPaidAction, unmarkClaimPaidAction } from '@/app/(app)/people/pay-actions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -34,6 +34,14 @@ export function PaidButtons({
   const off = disabled || busy;
   const trigger = useRef<HTMLButtonElement>(null);
   const promptId = usePromptId();
+  // Set when a prompt has just been closed; focus goes back to the button once it is enabled again (it is
+  // disabled while the action runs, and a disabled button cannot take focus). Never set on first render.
+  const refocus = useRef(false);
+  useEffect(() => {
+    if (!refocus.current || busy || step !== 'idle') return;
+    refocus.current = false;
+    trigger.current?.focus();
+  }, [busy, step]);
 
   function run(call: () => Promise<CapResult<unknown>>) {
     setError(null);
@@ -46,7 +54,7 @@ export function PaidButtons({
       }
       if (result.ok) {
         setStep('idle');
-        trigger.current?.focus();
+        refocus.current = true;
       } else setError(result.error);
     });
   }
@@ -55,7 +63,7 @@ export function PaidButtons({
   const close = () => {
     setStep('idle');
     setError(null);
-    trigger.current?.focus();
+    refocus.current = true;
   };
 
   const today = todayInMalaysia(new Date());
