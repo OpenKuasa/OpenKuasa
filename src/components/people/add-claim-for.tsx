@@ -6,12 +6,11 @@ import { Plus } from 'lucide-react';
 import { submitClaimForAction } from '@/app/(app)/people/pay-actions';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { type CapResult, WRITE_FAILED } from '@/lib/people/capabilities';
+import { WRITE_FAILED } from '@/lib/people/capabilities';
 import type { ClaimFormInput } from '@/lib/people/claim-forms';
-import { uploadReceipt } from '@/lib/people/receipts';
-import { createClient } from '@/lib/supabase/client';
 import type { LeaveEmployee } from './add-leave-for';
 import { ClaimForm } from './claim-form';
+import { discardUploadedReceipt, uploadOwnReceipt } from './receipt-client';
 
 /**
  * "Add claim for…": an owner or admin picks an active employee, then fills the
@@ -31,23 +30,21 @@ export function AddClaimFor({ employees, disabled }: { employees: LeaveEmployee[
     setError(null);
   };
 
-  async function onUpload(file: File): Promise<CapResult<{ path: string }>> {
-    const client = createClient();
-    const { data } = await client.auth.getUser();
-    if (!data.user) return { ok: false, error: 'That file could not be uploaded.' };
-    return uploadReceipt(client, data.user.id, file, file.type);
-  }
-
-  function onSubmit(input: ClaimFormInput) {
+  function onSubmit(input: ClaimFormInput): Promise<boolean> {
     setError(null);
-    start(async () => {
-      try {
-        const result = await submitClaimForAction({ ...input, employee_id: employeeId });
-        if (result.ok) close();
-        else setError(result.error);
-      } catch {
-        setError(WRITE_FAILED);
-      }
+    return new Promise((resolve) => {
+      start(async () => {
+        let saved = false;
+        try {
+          const result = await submitClaimForAction({ ...input, employee_id: employeeId });
+          saved = result.ok;
+          if (result.ok) close();
+          else setError(result.error);
+        } catch {
+          setError(WRITE_FAILED);
+        }
+        resolve(saved);
+      });
     });
   }
 
@@ -101,7 +98,8 @@ export function AddClaimFor({ employees, disabled }: { employees: LeaveEmployee[
                 key={employeeId}
                 disabled={busy}
                 error={error}
-                onUpload={onUpload}
+                onUpload={uploadOwnReceipt}
+                onDiscard={discardUploadedReceipt}
                 onSubmit={onSubmit}
                 onCancel={close}
               />

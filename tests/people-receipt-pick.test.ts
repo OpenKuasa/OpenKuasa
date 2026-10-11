@@ -87,3 +87,15 @@ describe('which question a claim belongs to', () => {
     expect(receiptStateFor([user('u1'), card('a1', 'ap1')], 'nope')).toBeUndefined();
   });
 });
+
+describe('pickReceipt with an empty type', () => {
+  it("works the type out from the part's file name", () => {
+    expect(pickReceipt([{ mediaType: '', filename: 'IMG_1.HEIC', url: url('x') }])).toEqual({ state: 'attached', index: 0 });
+    expect(pickReceipt([{ mediaType: 'application/octet-stream', filename: 'a.pdf', url: url('x') }])).toEqual({ state: 'attached', index: 0 });
+  });
+
+  it('still ignores a file with no usable name or type', () => {
+    expect(pickReceipt([{ mediaType: '', filename: 'a.txt', url: url('x') }])).toEqual({ state: 'none' });
+    expect(pickReceipt([{ mediaType: '', url: url('x') }])).toEqual({ state: 'none' });
+  });
+});

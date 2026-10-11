@@ -27,9 +27,33 @@ const EMPTY = 'That file is empty.';
 const TOO_BIG = 'Keep the file to 5 MB or less.';
 const UPLOAD_FAILED = 'That file could not be uploaded.';
 
+/** What a file name's extension says the type is, for a browser that reports none (HEIC is the usual case). */
+const EXTENSION_TYPES: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  heic: 'image/heic',
+  heif: 'image/heic',
+  pdf: 'application/pdf',
+};
+
+/**
+ * The type to judge and to send to storage. A real type is kept as it is (an extension never overrides it);
+ * only an empty type or `application/octet-stream` is worked out from the file name's extension, and an
+ * unknown extension leaves the type as it was, which then fails the check.
+ */
+export function receiptMediaType(file: { type: string; name?: string }): string {
+  if (file.type !== '' && file.type !== 'application/octet-stream') return file.type;
+  const dot = file.name ? file.name.lastIndexOf('.') : -1;
+  if (!file.name || dot < 0) return file.type;
+  const extension = file.name.slice(dot + 1).trim().toLowerCase();
+  return Object.hasOwn(EXTENSION_TYPES, extension) ? EXTENSION_TYPES[extension] : file.type;
+}
+
 /** Why a file cannot be a receipt, as a sentence, or null when it can. Checked in the browser and again on the server. */
-export function receiptProblem(file: { type: string; size: number }): string | null {
-  if (!Object.hasOwn(RECEIPT_TYPES, file.type)) return WRONG_TYPE;
+export function receiptProblem(file: { type: string; size: number; name?: string }): string | null {
+  if (!Object.hasOwn(RECEIPT_TYPES, receiptMediaType(file))) return WRONG_TYPE;
   if (!(file.size > 0)) return EMPTY;
   if (file.size > RECEIPT_MAX_BYTES) return TOO_BIG;
   return null;
@@ -44,19 +68,23 @@ export function receiptPath(userId: string, mediaType: string): string {
 /**
  * Uploads a receipt into the signed-in user's own folder and returns its path, to be passed to the claim.
  * The type and size are checked first, so the server leg of the rule holds even if a browser skipped it.
- * A file that is uploaded and never attached stays where it is: nobody but the service client can delete from the bucket.
+ * `fileName` is only used to work out the type when the browser gave none.
+ * A file that is uploaded and never attached is removed by the caller (`discardReceiptAction`, or `removeReceipt`
+ * in the chat tool): nobody but the service client can delete from the bucket.
  */
 export async function uploadReceipt(
   client: SupabaseClient,
   userId: string,
   body: Blob | ArrayBuffer | Buffer,
   mediaType: string,
+  fileName?: string,
 ): Promise<CapResult<{ path: string }>> {
-  const problem = receiptProblem({ type: mediaType, size: 'size' in body ? body.size : body.byteLength });
+  const type = receiptMediaType({ type: mediaType, name: fileName });
+  const problem = receiptProblem({ type, size: 'size' in body ? body.size : body.byteLength });
   if (problem) return refuse(problem);
-  const path = receiptPath(userId, mediaType);
+  const path = receiptPath(userId, type);
   try {
-    const { error } = await client.storage.from(RECEIPT_BUCKET).upload(path, body, { contentType: mediaType, upsert: false });
+    const { error } = await client.storage.from(RECEIPT_BUCKET).upload(path, body, { contentType: type, upsert: false });
     if (!error) return { ok: true, data: { path } };
   } catch {
     // Reported the same way as a refused upload.
@@ -76,6 +104,9 @@ export type ReceiptState = { state: 'attached' } | { state: 'none' } | { state: 
 export type ReceiptPick = { state: 'attached'; index: number } | { state: 'none' } | { state: 'unusable'; problem: string };
 
 const mediaTypeOf = (value: string): string => value.split(';')[0].trim().toLowerCase();
+/** A part's media type, lowercased and without parameters; an empty or generic one is worked out from its file name. */
+export const resolvedTypeOf = (part: { mediaType: string; filename?: string }): string =>
+  receiptMediaType({ type: mediaTypeOf(part.mediaType), name: part.filename });
 const couldBeReceipt = (mediaType: string): boolean => mediaType.startsWith('image/') || mediaType === 'application/pdf';
 
 /**
@@ -96,10 +127,10 @@ export function dataUrlSize(url: string): number | null {
  * merely the first. A link's size is unknown here, so it is judged on its type alone. If there are images or PDFs
  * and none is usable, the first one's reason is returned.
  */
-export function pickReceipt(parts: { mediaType: string; url: string }[]): ReceiptPick {
+export function pickReceipt(parts: { mediaType: string; url: string; filename?: string }[]): ReceiptPick {
   let first: string | null = null;
   for (let index = 0; index < parts.length; index += 1) {
-    const type = mediaTypeOf(parts[index].mediaType);
+    const type = resolvedTypeOf(parts[index]);
     if (!couldBeReceipt(type)) continue;
     const size = dataUrlSize(parts[index].url);
     const problem = receiptProblem({ type, size: size ?? 1 });

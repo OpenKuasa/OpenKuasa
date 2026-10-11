@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { claimFormDefaults, toClaimInput } from '@/lib/people/claim-forms';
+import { claimFormDefaults, receiptSubmitProblem, toClaimInput } from '@/lib/people/claim-forms';
+
+describe('receiptSubmitProblem', () => {
+  it('blocks a submit after a failed upload, and says how to go on', () => {
+    expect(receiptSubmitProblem('failed')).toBe('The receipt did not upload. Remove the file, or choose it again, before you submit.');
+  });
+
+  it.each(['none', 'attached', 'uploading'] as const)('does not block a form whose receipt is %s', (state) => {
+    expect(receiptSubmitProblem(state)).toBeNull();
+  });
+});
 
 const TODAY = '2026-10-11';
 const filled = { ...claimFormDefaults(TODAY), amount: '85.50', claim_date: '2026-10-09' };

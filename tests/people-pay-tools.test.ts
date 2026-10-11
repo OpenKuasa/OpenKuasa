@@ -248,6 +248,23 @@ describe('the receipt comes from the question, never from the model', () => {
     expect(out.data.receipt_note).toMatch(/attached receipt was sent/);
   });
 
+  it('removes the uploaded file when the database refuses the claim, and keeps it when the claim goes in', async () => {
+    ctl.fail = 'You can only claim for yourself.';
+    await call('submitClaim', { ...CLAIM }, MEMBER_VIEWER, self(ME, PNG));
+    expect(ctl.removed).toEqual([`${USER}/uploaded-receipt.png`]);
+    ctl.fail = null;
+    ctl.removed = [];
+    await call('submitClaim', { ...CLAIM }, MEMBER_VIEWER, self(ME, PNG));
+    expect(ctl.removed).toEqual([]);
+  });
+
+  it('removes the uploaded file when the claim call itself throws', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    ctl.fail = 'throw';
+    await call('submitClaim', { ...CLAIM }, MEMBER_VIEWER, self(ME, PNG));
+    expect(ctl.removed).toEqual([`${USER}/uploaded-receipt.png`]);
+  });
+
   it('uploads nothing and sends no path when no file came with the question', async () => {
     const out = await call('submitClaim', { ...CLAIM }, MEMBER_VIEWER, self(ME, null));
     expect(ctl.uploads).toEqual([]);

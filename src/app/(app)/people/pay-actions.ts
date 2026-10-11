@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { z } from 'zod';
 import { can } from '@/lib/auth/permissions';
 import { getViewer } from '@/lib/auth/viewer';
 import { type CapResult, type PeopleWriteContext, WRITE_FAILED } from '@/lib/people/capabilities';
@@ -18,7 +19,7 @@ import {
 } from '@/lib/people/pay-requests';
 import { PEOPLE_PATHS } from '@/lib/people/paths';
 import { RECEIPT_BUCKET } from '@/lib/people/receipts';
-import { removeReceipt } from '@/lib/people/receipts-server';
+import { isReceiptPath, removeReceipt } from '@/lib/people/receipts-server';
 import { createSupabasePeopleData } from '@/lib/people/supabase';
 import { getPeopleViewer } from '@/lib/people/viewer';
 import { createClient } from '@/lib/supabase/server';
@@ -160,6 +161,31 @@ export async function claimReceiptUrlAction(input: unknown): Promise<CapResult<{
   }
   console.error('[people/pay-actions] a receipt link could not be made.');
   return RECEIPT_UNAVAILABLE;
+}
+
+/**
+ * Removes a receipt file the caller uploaded and no longer wants (replaced, removed, dialog closed, claim refused).
+ * Only the caller's own folder, only a path of the exact shape we make, and never a file a claim they can read
+ * carries. It answers the same way whatever happened, never says anything about the path, and never logs it.
+ * (A browser closed mid-form never calls this, so that upload stays: accepted.)
+ */
+export async function discardReceiptAction(input: unknown): Promise<{ ok: boolean }> {
+  const guard = await asMember(false);
+  if (refused(guard)) return { ok: false };
+  const parsed = z.object({ path: z.string().max(200) }).safeParse(input);
+  if (!parsed.success) return { ok: false };
+  const { path } = parsed.data;
+  const viewer = await getViewer();
+  if (path.split('/')[0] !== viewer.userId || !isReceiptPath(path)) return { ok: false };
+  try {
+    const claims = await createSupabasePeopleData(guard.ctx.client, guard.ctx.orgId).listClaims();
+    if (claims.some((claim) => claim.receipt_path === path)) return { ok: false };
+  } catch (error) {
+    console.error('[people/pay-actions] could not read the claims:', error instanceof Error ? error.name : 'error');
+    return { ok: false };
+  }
+  await removeReceipt(path);
+  return { ok: true };
 }
 
 // ---- Owner or admin ---------------------------------------------------------------------

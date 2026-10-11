@@ -41,7 +41,9 @@ vi.mock('@/lib/people/supabase', () => ({
     },
   }),
 }));
-vi.mock('@/lib/people/receipts-server', () => ({
+vi.mock('@/lib/people/receipts-server', async (orig) => ({
+  // The path-shape guard stays real; only the deletion is recorded.
+  ...(await orig<typeof import('@/lib/people/receipts-server')>()),
   removeReceipt: async (path: string) => {
     ctl.removed.push(path);
     // The real one never throws; a failed removal must change nothing the caller sees.
@@ -187,6 +189,76 @@ describe("a member's own claims and overtime", () => {
     expect(await actions.submitOwnClaimAction(CLAIM)).toEqual({ ok: false, error: 'No.' });
     expect(await actions.submitOwnOvertimeAction(OT)).toEqual({ ok: false, error: 'No.' });
     expect(ctl.revalidated).toEqual([]);
+  });
+});
+
+describe('discardReceiptAction', () => {
+  const ME_ID = '55555555-5555-4555-8555-555555555555';
+  const OTHER_ID = '66666666-6666-4666-8666-666666666666';
+  const FILE = `${ME_ID}/44444444-4444-4444-8444-444444444444.pdf`;
+
+  beforeEach(() => {
+    ctl.viewer.userId = ME_ID;
+    ctl.claims = [{ id: REQ, receipt_path: `${ME_ID}/77777777-7777-4777-8777-777777777777.pdf` }];
+  });
+
+  it('removes an unused file in the caller\'s own folder, and reports nothing about it', async () => {
+    const result = await actions.discardReceiptAction({ path: FILE });
+    expect(result).toEqual({ ok: true });
+    expect(ctl.removed).toEqual([FILE]);
+  });
+
+  it.each(['owner', 'admin', 'member', 'viewer'] as Role[])('is open to a %s', async (role) => {
+    as(role);
+    ctl.viewer.userId = ME_ID;
+    await actions.discardReceiptAction({ path: FILE });
+    expect(ctl.removed).toEqual([FILE]);
+  });
+
+  it('refuses a demo visitor and a real account in the demo', async () => {
+    ctl.viewer.isDemo = true;
+    await actions.discardReceiptAction({ path: FILE });
+    ctl.viewer.isDemo = false;
+    ctl.people = { employeeId: null, isHr: true, isDemo: true };
+    await actions.discardReceiptAction({ path: FILE });
+    expect(ctl.removed).toEqual([]);
+  });
+
+  it('never removes a file in someone else\'s folder', async () => {
+    await actions.discardReceiptAction({ path: `${OTHER_ID}/44444444-4444-4444-8444-444444444444.pdf` });
+    expect(ctl.removed).toEqual([]);
+  });
+
+  it.each([
+    ['no path', {}],
+    ['a path of the wrong shape', { path: `${ME_ID}/../x.pdf` }],
+    ['an extra segment', { path: `${ME_ID}/a/44444444-4444-4444-8444-444444444444.pdf` }],
+    ['an unknown extension', { path: `${ME_ID}/44444444-4444-4444-8444-444444444444.exe` }],
+    ['a path that is not text', { path: 5 }],
+    ['not an object', 'nonsense'],
+  ])('removes nothing for %s', async (_label, input) => {
+    await actions.discardReceiptAction(input);
+    expect(ctl.removed).toEqual([]);
+  });
+
+  it('never removes a file that a claim the caller can read carries', async () => {
+    ctl.claims = [{ id: REQ, receipt_path: FILE }];
+    await actions.discardReceiptAction({ path: FILE });
+    expect(ctl.removed).toEqual([]);
+  });
+
+  it('removes nothing when the claims cannot be read', async () => {
+    ctl.claimsFail = true;
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await actions.discardReceiptAction({ path: FILE });
+    expect(ctl.removed).toEqual([]);
+  });
+
+  it('logs neither the path nor the user id', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    ctl.claimsFail = true;
+    await actions.discardReceiptAction({ path: FILE });
+    expect(JSON.stringify(log.mock.calls)).not.toContain(ME_ID);
   });
 });
 

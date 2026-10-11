@@ -3,6 +3,7 @@ import {
   RECEIPT_BUCKET,
   RECEIPT_MAX_BYTES,
   RECEIPT_TYPES,
+  receiptMediaType,
   receiptPath,
   receiptProblem,
   uploadReceipt,
@@ -200,5 +201,44 @@ describe('removeReceipt', () => {
     await expect(removeReceipt(path)).resolves.toBeUndefined();
     expect(svc.remove).not.toHaveBeenCalled();
     expect(log.mock.calls).toEqual([['[people/receipts] a receipt file could not be removed.']]);
+  });
+});
+
+describe('a type worked out from the file name', () => {
+  const gate = 'Attach a photo (JPEG, PNG, WebP or HEIC) or a PDF.';
+
+  it.each([
+    ['photo.HEIC', 'image/heic'],
+    ['photo.heif', 'image/heic'],
+    ['a.jpg', 'image/jpeg'],
+    ['a.JPEG', 'image/jpeg'],
+    ['a.png', 'image/png'],
+    ['a.webp', 'image/webp'],
+    ['scan.pdf', 'application/pdf'],
+  ])('reads %s as %s when the browser gives no type', (name, type) => {
+    expect(receiptMediaType({ type: '', name })).toBe(type);
+    expect(receiptMediaType({ type: 'application/octet-stream', name })).toBe(type);
+    expect(receiptProblem({ type: '', name, size: 10 })).toBeNull();
+  });
+
+  it('refuses an empty type with an unknown or missing extension', () => {
+    expect(receiptProblem({ type: '', name: 'notes.txt', size: 10 })).toBe(gate);
+    expect(receiptProblem({ type: '', name: 'noextension', size: 10 })).toBe(gate);
+    expect(receiptProblem({ type: '', size: 10 })).toBe(gate);
+  });
+
+  it('never lets an extension override a real, different type', () => {
+    expect(receiptProblem({ type: 'text/plain', name: 'receipt.pdf', size: 10 })).toBe(gate);
+    expect(receiptMediaType({ type: 'image/png', name: 'x.pdf' })).toBe('image/png');
+  });
+
+  it('sends the worked-out type to storage and uses its extension in the path', async () => {
+    const upload = vi.fn(async () => ({ error: null }));
+    const client = { storage: { from: () => ({ upload }) } } as never;
+    const result = await uploadReceipt(client, USER, Buffer.from('abc'), '', 'IMG_1.HEIC');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.path.endsWith('.heic')).toBe(true);
+    expect(upload).toHaveBeenCalledWith(result.data.path, expect.anything(), { contentType: 'image/heic', upsert: false });
   });
 });

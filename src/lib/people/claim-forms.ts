@@ -26,6 +26,17 @@ export type ClaimFormInput = {
   receipt_path: string | null;
 };
 
+/** Where the receipt is in its upload. */
+export type ReceiptUploadState = 'none' | 'uploading' | 'attached' | 'failed';
+
+/**
+ * A claim is not submitted past a failed upload: the person removes the file (and submits with no receipt on
+ * purpose) or chooses it again until it goes up.
+ */
+export function receiptSubmitProblem(state: ReceiptUploadState): string | null {
+  return state === 'failed' ? 'The receipt did not upload. Remove the file, or choose it again, before you submit.' : null;
+}
+
 /** A fresh form, dated today by default. */
 export const claimFormDefaults = (today: string): ClaimFormValues => ({
   category: 'travel',

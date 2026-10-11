@@ -6,6 +6,9 @@ const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 /** Exactly what `receiptPath` makes: `<user uuid>/<uuid>.<known extension>`, nothing else. */
 const RECEIPT_PATH = new RegExp(`^${UUID}/${UUID}\\.(${[...new Set(Object.values(RECEIPT_TYPES))].join('|')})$`, 'i');
 
+/** True for a path of exactly the shape `receiptPath` makes. */
+export const isReceiptPath = (path: string): boolean => RECEIPT_PATH.test(path);
+
 /**
  * Removes a receipt file with the service client (the bucket lets no signed-in
  * user delete). Never throws: a cancelled claim no longer points at the file,

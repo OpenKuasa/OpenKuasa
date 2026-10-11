@@ -20,7 +20,8 @@ export function RequestDialog<I>({
   label: string;
   title: string;
   description: string;
-  render: (props: { disabled: boolean; error: string | null; onCancel: () => void; onSubmit: (input: I) => void }) => ReactNode;
+  /** `onSubmit` answers whether the server accepted, for a form that has something to undo when it did not. */
+  render: (props: { disabled: boolean; error: string | null; onCancel: () => void; onSubmit: (input: I) => Promise<boolean> }) => ReactNode;
   submit: (input: I) => Promise<CapResult<unknown>>;
 }) {
   const [open, setOpen] = useState(false);
@@ -32,15 +33,20 @@ export function RequestDialog<I>({
     setError(null);
   };
 
-  function send(input: I) {
-    start(async () => {
-      try {
-        const result = await submit(input);
-        if (result.ok) close();
-        else setError(result.error);
-      } catch {
-        setError(WRITE_FAILED);
-      }
+  function send(input: I): Promise<boolean> {
+    return new Promise((resolve) => {
+      start(async () => {
+        let saved = false;
+        try {
+          const result = await submit(input);
+          saved = result.ok;
+          if (result.ok) close();
+          else setError(result.error);
+        } catch {
+          setError(WRITE_FAILED);
+        }
+        resolve(saved);
+      });
     });
   }
 

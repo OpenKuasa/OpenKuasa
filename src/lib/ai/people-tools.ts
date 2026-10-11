@@ -65,7 +65,7 @@ import {
   submitOvertimeInput,
   unmarkClaimPaid as capUnmarkClaimPaid,
 } from '@/lib/people/pay-requests';
-import { pickReceipt, receiptProblem, uploadReceipt, userMessageBefore } from '@/lib/people/receipts';
+import { pickReceipt, receiptProblem, resolvedTypeOf, uploadReceipt, userMessageBefore } from '@/lib/people/receipts';
 import { removeReceipt } from '@/lib/people/receipts-server';
 import { isFilePart } from '@/lib/chat/attachments';
 import { LOOKUP_MAX, limitSchema, rowLimit } from '@/lib/ai/limits';
@@ -169,7 +169,7 @@ export function receiptFromMessages(messages: UIMessage[]): ReceiptFile | null {
     pick.state === 'attached' ? files[pick.index] : files.find((f) => /^(image\/|application\/pdf)/i.test(f.mediaType.trim()));
   if (!chosen) return null;
   const bytes = dataUrlBytes(chosen.url);
-  return bytes ? { bytes, mediaType: chosen.mediaType.split(';')[0].trim().toLowerCase() } : null;
+  return bytes ? { bytes, mediaType: resolvedTypeOf(chosen) } : null;
 }
 
 const READ_ERROR = { ok: false as const, error: 'Could not read HR data.' };
@@ -1145,7 +1145,16 @@ export function createPeopleTools(
               }
             }
           }
-          const result = await capSubmitClaim(ctx, { ...claim, receipt_path: receiptPath });
+          let result: Awaited<ReturnType<typeof capSubmitClaim>>;
+          try {
+            result = await capSubmitClaim(ctx, { ...claim, receipt_path: receiptPath });
+          } catch (error) {
+            // The claim was not saved, so the file is unused (removeReceipt never throws).
+            if (receiptPath) await removeReceipt(receiptPath);
+            throw error;
+          }
+          // The database refused the claim: nothing points at the upload, so it goes too.
+          if (!result.ok && receiptPath) await removeReceipt(receiptPath);
           return result.ok ? { ok: true as const, data: { ...result.data, receipt_note: note } } : result;
         }),
     }),
