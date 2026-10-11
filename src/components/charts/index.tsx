@@ -43,28 +43,27 @@ import {
   ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
-  type ChartConfig,
 } from '@/components/ui/chart';
 import { cn } from '@/lib/utils';
+import {
+  X_KEY,
+  keyedRows,
+  keyedSlices,
+  safeKey,
+  seriesConfig,
+  sliceConfig,
+  token,
+  type Series,
+  type Slice,
+} from './keys';
 
-/** A metric line/series drawn across a shared x-axis. */
-export type Series = { key: string; label: string; color?: string };
-/** A single categorical slice (donut / funnel). */
-export type Slice = { key: string; label: string; value: number; color?: string };
+export type { Series, Slice };
 
-const token = (i: number) => `var(--chart-${(i % 5) + 1})`;
-
-function toConfig(series: Series[]): ChartConfig {
-  return Object.fromEntries(
-    series.map((s, i) => [s.key, { label: s.label, color: s.color ?? token(i) }]),
-  );
-}
-
-function sliceConfig(slices: Slice[]): ChartConfig {
-  return Object.fromEntries(
-    slices.map((s, i) => [s.key, { label: s.label, color: s.color ?? token(i) }]),
-  );
-}
+/*
+ * Every chart below draws from positional keys (`s0`, `s1`, …), never from the
+ * `key` a caller passes: see ./keys. The caller's key only says which field of
+ * a row a series reads; the label is what people see.
+ */
 
 /** Fixed-height wrapper props shared by the Recharts-backed charts. */
 const fill = (height: number): CSSProperties => ({ height, aspectRatio: 'auto' });
@@ -90,37 +89,43 @@ export function AreaTrend({
   showLegend?: boolean;
   className?: string;
 }) {
+  // Each chart's gradients get ids of their own: two charts on a page both have an `s0`.
+  const id = useId().replace(/:/g, '');
+  const keys = series.map((_, i) => safeKey(i));
   return (
     <ChartContainer
-      config={toConfig(series)}
+      config={seriesConfig(series)}
       style={fill(height)}
       className={cn('w-full', className)}
     >
-      <AreaChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
+      <AreaChart
+        data={keyedRows(data, series, xKey)}
+        margin={{ left: 4, right: 8, top: 8, bottom: 0 }}
+      >
         <defs>
-          {series.map((s) => (
-            <linearGradient key={s.key} id={`at-${s.key}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor={`var(--color-${s.key})`} stopOpacity={0.35} />
-              <stop offset="95%" stopColor={`var(--color-${s.key})`} stopOpacity={0.04} />
+          {keys.map((key) => (
+            <linearGradient key={key} id={`at-${id}-${key}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor={`var(--color-${key})`} stopOpacity={0.35} />
+              <stop offset="95%" stopColor={`var(--color-${key})`} stopOpacity={0.04} />
             </linearGradient>
           ))}
         </defs>
         <CartesianGrid vertical={false} strokeDasharray="3 3" />
         <XAxis
-          dataKey={xKey}
+          dataKey={X_KEY}
           tickLine={false}
           axisLine={false}
           tickMargin={8}
           minTickGap={16}
         />
         <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
-        {series.map((s) => (
+        {keys.map((key) => (
           <Area
-            key={s.key}
-            dataKey={s.key}
+            key={key}
+            dataKey={key}
             type="monotone"
-            stroke={`var(--color-${s.key})`}
-            fill={`url(#at-${s.key})`}
+            stroke={`var(--color-${key})`}
+            fill={`url(#at-${id}-${key})`}
             strokeWidth={2}
             stackId={stacked ? 'a' : undefined}
           />
@@ -154,14 +159,15 @@ export function BarGroup({
   showLegend?: boolean;
   className?: string;
 }) {
+  const keys = series.map((_, i) => safeKey(i));
   return (
     <ChartContainer
-      config={toConfig(series)}
+      config={seriesConfig(series)}
       style={fill(height)}
       className={cn('w-full', className)}
     >
       <BarChart
-        data={data}
+        data={keyedRows(data, series, xKey)}
         layout={horizontal ? 'vertical' : 'horizontal'}
         margin={{ left: 4, right: 8, top: 8, bottom: 0 }}
       >
@@ -175,21 +181,21 @@ export function BarGroup({
             <XAxis type="number" hide />
             <YAxis
               type="category"
-              dataKey={xKey}
+              dataKey={X_KEY}
               tickLine={false}
               axisLine={false}
               width={84}
             />
           </>
         ) : (
-          <XAxis dataKey={xKey} tickLine={false} axisLine={false} tickMargin={8} />
+          <XAxis dataKey={X_KEY} tickLine={false} axisLine={false} tickMargin={8} />
         )}
         <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
-        {series.map((s) => (
+        {keys.map((key) => (
           <Bar
-            key={s.key}
-            dataKey={s.key}
-            fill={`var(--color-${s.key})`}
+            key={key}
+            dataKey={key}
+            fill={`var(--color-${key})`}
             radius={horizontal ? [0, 4, 4, 0] : [4, 4, 0, 0]}
             stackId={stacked ? 'a' : undefined}
           />
@@ -219,6 +225,7 @@ export function DonutStat({
   showLegend?: boolean;
   className?: string;
 }) {
+  const slices = keyedSlices(data);
   return (
     <ChartContainer
       config={sliceConfig(data)}
@@ -228,7 +235,7 @@ export function DonutStat({
       <PieChart>
         <ChartTooltip cursor={false} content={<ChartTooltipContent nameKey="key" />} />
         <Pie
-          data={data}
+          data={slices}
           dataKey="value"
           nameKey="key"
           innerRadius="58%"
@@ -236,7 +243,7 @@ export function DonutStat({
           paddingAngle={2}
           strokeWidth={2}
         >
-          {data.map((d) => (
+          {slices.map((d) => (
             <Cell key={d.key} fill={`var(--color-${d.key})`} />
           ))}
           {centerValue ? (
@@ -373,22 +380,26 @@ export function RadarSpread({
   height?: number;
   className?: string;
 }) {
+  const keys = series.map((_, i) => safeKey(i));
   return (
     <ChartContainer
-      config={toConfig(series)}
+      config={seriesConfig(series)}
       style={fill(height)}
       className={cn('mx-auto w-full', className)}
     >
-      <RadarChart data={data} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+      <RadarChart
+        data={keyedRows(data, series, 'label')}
+        margin={{ top: 8, right: 8, bottom: 8, left: 8 }}
+      >
         <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
         <PolarGrid className="stroke-border" />
-        <PolarAngleAxis dataKey="label" className="fill-muted-foreground text-xs" />
-        {series.map((s) => (
+        <PolarAngleAxis dataKey={X_KEY} className="fill-muted-foreground text-xs" />
+        {keys.map((key) => (
           <Radar
-            key={s.key}
-            dataKey={s.key}
-            stroke={`var(--color-${s.key})`}
-            fill={`var(--color-${s.key})`}
+            key={key}
+            dataKey={key}
+            stroke={`var(--color-${key})`}
+            fill={`var(--color-${key})`}
             fillOpacity={0.2}
             strokeWidth={2}
           />
@@ -422,7 +433,7 @@ export function FunnelFlow({
         const width = Math.max(10, (d.value / top) * 100);
         const conv = Math.round((d.value / top) * 100);
         return (
-          <div key={d.key} className="flex items-center gap-2">
+          <div key={safeKey(i)} className="flex items-center gap-2">
             <span className="w-20 shrink-0 truncate text-right text-xs text-muted-foreground">
               {d.label}
             </span>
