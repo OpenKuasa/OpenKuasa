@@ -31,6 +31,8 @@ const day = (work_date: string, status: AttendanceDay['status']): AttendanceDay 
   clock_in: null,
   clock_out: null,
   status,
+  corrected: false,
+  correction_note: null,
 });
 
 describe('weeklyAttendanceRate', () => {

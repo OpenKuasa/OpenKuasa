@@ -21,6 +21,10 @@ export type OvertimeDayKind = 'weekday' | 'rest_day' | 'public_holiday';
 export type LeaveType = 'annual' | 'medical' | 'emergency' | 'unpaid' | 'maternity' | 'paternity';
 export type ClaimCategory = 'medical' | 'travel' | 'meals' | 'equipment' | 'other';
 export type AttendanceStatus = 'present' | 'late' | 'absent' | 'on_leave';
+/** A day of the work week, as `hr_settings.work_week` stores it. */
+export type Weekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+/** Monday first, the order the database stores a work week in. */
+export const WEEKDAYS: readonly Weekday[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 export type ShiftKind = 'morning' | 'night' | 'off';
 
 export type Department = { id: string; name: string; created_at: string };
@@ -149,6 +153,10 @@ export type AttendanceDay = {
   clock_in: string | null;
   clock_out: string | null;
   status: AttendanceStatus;
+  /** An owner or admin set this day (told by `corrected_at`, which outlives the corrector's account). */
+  corrected: boolean;
+  /** Why it was corrected, when they said. */
+  correction_note: string | null;
 };
 
 export type TimesheetEntry = {
@@ -284,7 +292,12 @@ export type PaymentVoucher = {
 };
 
 export type PeopleSettings = {
-  work_week: string[];
+  /** Monday first. */
+  work_week: Weekday[];
+  /** `HH:MM`, Malaysia time. */
+  work_start_time: string;
+  /** Minutes after the start time that still count as on time. */
+  late_grace_minutes: number;
   default_annual_leave_days: number;
   default_medical_leave_days: number;
   default_emergency_leave_days: number;
@@ -295,6 +308,8 @@ export type PeopleSettings = {
 /** What a workspace with no settings row has: the table's own defaults. */
 export const DEFAULT_PEOPLE_SETTINGS: PeopleSettings = {
   work_week: ['mon', 'tue', 'wed', 'thu', 'fri'],
+  work_start_time: '09:00',
+  late_grace_minutes: 15,
   default_annual_leave_days: 14,
   default_medical_leave_days: 14,
   default_emergency_leave_days: 3,

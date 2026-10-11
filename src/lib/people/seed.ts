@@ -195,6 +195,8 @@ const VOUCHERS: [number, string, string, number, number, PaymentVoucher['status'
 /** The demo workspace's one settings row: only the notifications are set. */
 const SETTINGS: PeopleSettings = {
   work_week: ['mon', 'tue', 'wed', 'thu', 'fri'],
+  work_start_time: '09:00',
+  late_grace_minutes: 15,
   default_annual_leave_days: 14,
   default_medical_leave_days: 14,
   default_emergency_leave_days: 3,
@@ -379,6 +381,8 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
           : null,
         clock_out: worked && date !== today ? new Date(nine + (9 * 60 + (h % 30)) * 60_000).toISOString() : null,
         status,
+        corrected: false,
+        correction_note: null,
       });
       if (worked) {
         const hours = 7.5 + ((n + back) % 3) * 0.5;

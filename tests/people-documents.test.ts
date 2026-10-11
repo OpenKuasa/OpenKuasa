@@ -34,6 +34,8 @@ const doc = (over: Partial<HrDocument>): HrDocument => ({
 
 const SETTINGS: PeopleSettings = {
   work_week: ['mon', 'tue', 'wed', 'thu', 'fri'],
+  work_start_time: '09:00',
+  late_grace_minutes: 15,
   default_annual_leave_days: 14.5,
   default_medical_leave_days: 14,
   default_emergency_leave_days: 3,

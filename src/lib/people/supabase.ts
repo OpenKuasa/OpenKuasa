@@ -28,8 +28,9 @@ import type {
   TimesheetEntry,
   Training,
   TrainingEnrolment,
+  Weekday,
 } from './types';
-import { DEFAULT_PEOPLE_SETTINGS } from './types';
+import { DEFAULT_PEOPLE_SETTINGS, WEEKDAYS } from './types';
 
 /** The API answers with at most this many rows per request. */
 const PAGE_SIZE = 1000;
@@ -54,7 +55,8 @@ const SCORECARD_COLUMNS = `id,employee_id,period,score,competencies,${NAME}`;
 const DOCUMENT_COLUMNS = `id,employee_id,title,doc_type,status,issued_on,expires_on,${NAME}`;
 const LETTER_COLUMNS = `id,employee_id,letter_type,title,status,issued_on,created_at,${NAME}`;
 const VOUCHER_COLUMNS = 'id,voucher_no,payee,voucher_type,amount_cents,issued_date,status';
-const SETTINGS_COLUMNS = 'work_week,default_annual_leave_days,default_medical_leave_days,default_emergency_leave_days,overtime_rates,notifications';
+const SETTINGS_COLUMNS = 'work_week,work_start_time,late_grace_minutes,default_annual_leave_days,default_medical_leave_days,default_emergency_leave_days,overtime_rates,notifications';
+const ATTENDANCE_COLUMNS = 'id,employee_id,work_date,clock_in,clock_out,status,corrected_at,correction_note';
 const REVIEW_COLUMNS = `id,employee_id,period,rating,score,reviewer_name,reviewed_at,${NAME}`;
 
 type Named = { name?: string | null } | null | undefined;
@@ -73,12 +75,31 @@ function named<T extends { employee: Named }>(row: T): Omit<T, 'employee'> & { e
 const days = (value: number | null | undefined, fallback: number): number =>
   value === null || value === undefined ? fallback : Number(value);
 
+/**
+ * The stored work week as a Monday-first list of known days. A list naming no known day is no list at all: the
+ * database treats it as Monday to Friday, and so does this.
+ */
+function weekOf(value: unknown, fallback: Weekday[]): Weekday[] {
+  if (!Array.isArray(value)) return [...fallback];
+  const week = WEEKDAYS.filter((day) => value.includes(day));
+  return week.length > 0 ? week : [...fallback];
+}
+
+/** `HH:MM:SS` from the database as `HH:MM`. */
+function timeOf(value: unknown, fallback: string): string {
+  return typeof value === 'string' && /^\d{2}:\d{2}/.test(value) ? value.slice(0, 5) : fallback;
+}
+
+type AttendanceRow = Omit<AttendanceDay, 'corrected'> & { corrected_at: string | null };
+
 /** A settings row with every missing key filled from the table's own defaults. */
 function withDefaults(row: Partial<PeopleSettings> | null | undefined): PeopleSettings {
   const d = DEFAULT_PEOPLE_SETTINGS;
   if (!row) return { ...d, work_week: [...d.work_week], overtime_rates: { ...d.overtime_rates }, notifications: {} };
   return {
-    work_week: Array.isArray(row.work_week) ? row.work_week : [...d.work_week],
+    work_week: weekOf(row.work_week, d.work_week),
+    work_start_time: timeOf(row.work_start_time, d.work_start_time),
+    late_grace_minutes: days(row.late_grace_minutes, d.late_grace_minutes),
     default_annual_leave_days: days(row.default_annual_leave_days, d.default_annual_leave_days),
     default_medical_leave_days: days(row.default_medical_leave_days, d.default_medical_leave_days),
     default_emergency_leave_days: days(row.default_emergency_leave_days, d.default_emergency_leave_days),
@@ -145,8 +166,14 @@ export function createSupabasePeopleData(client: SupabaseClient, orgId: string):
     listOvertime: async () =>
       (await rows<WithEmployee<OvertimeRecord>>('hr_overtime_records', OVERTIME_COLUMNS, { col: 'created_at', asc: false })).map(named),
     listAttendance: (from, to) =>
-      rows<AttendanceDay>('hr_attendance_days', 'id,employee_id,work_date,clock_in,clock_out,status',
-        { col: 'work_date', asc: false }, byWorkDate(from, to)),
+      rows<AttendanceRow>('hr_attendance_days', ATTENDANCE_COLUMNS, { col: 'work_date', asc: false }, byWorkDate(from, to)).then(
+        (list) =>
+          list.map(({ corrected_at, correction_note, ...day }) => ({
+            ...day,
+            corrected: corrected_at !== null && corrected_at !== undefined,
+            correction_note: correction_note ?? null,
+          })),
+      ),
     listTimesheet: (from, to) =>
       rows<TimesheetEntry>('hr_timesheet_entries', 'id,employee_id,work_date,hours,billable_hours',
         { col: 'work_date', asc: false }, byWorkDate(from, to)),

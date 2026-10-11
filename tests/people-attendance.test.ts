@@ -30,6 +30,8 @@ const day = (over: Partial<AttendanceDay>): AttendanceDay => ({
   clock_in: '2026-10-05T01:00:00Z', // 09:00 in Kuala Lumpur
   clock_out: '2026-10-05T10:00:00Z', // 18:00
   status: 'present',
+  corrected: false,
+  correction_note: null,
   ...over,
 });
 

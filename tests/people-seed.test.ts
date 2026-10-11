@@ -70,6 +70,26 @@ describe('people seed', () => {
     expect(await data.listAttendance('2026-10-10', '2026-10-11')).toEqual([]); // a weekend
   });
 
+  it('gives every attendance day the correction fields, none corrected', async () => {
+    const all = await data.listAttendance(addDays(TODAY, -55), TODAY);
+    expect(all.every((d) => d.corrected === false && d.correction_note === null)).toBe(true);
+  });
+
+  it('has settings with the work week, start time and grace period the attendance rules read', async () => {
+    expect(await data.getSettings()).toMatchObject({
+      work_week: ['mon', 'tue', 'wed', 'thu', 'fri'],
+      work_start_time: '09:00',
+      late_grace_minutes: 15,
+    });
+  });
+
+  it('gives every public holiday an id, so the list can be edited', async () => {
+    const holidays = await data.listPublicHolidays();
+    expect(holidays.length).toBeGreaterThan(0);
+    expect(new Set(holidays.map((h) => h.id)).size).toBe(holidays.length);
+    expect(holidays.every((h) => h.id !== '')).toBe(true);
+  });
+
   it('marks people on approved leave as on leave in attendance', async () => {
     const day = await data.listAttendance('2026-10-09', '2026-10-09');
     const lestari = (await data.listEmployees()).find((e) => e.name === 'Siti Lestari')!;

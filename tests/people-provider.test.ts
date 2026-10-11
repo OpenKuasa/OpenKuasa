@@ -29,7 +29,7 @@ const ROWS: Record<string, unknown[]> = {
   hr_documents: [{ id: 'd1', employee_id: 'e1', title: 'Payslip', doc_type: 'payslip', employee: { name: 'Aisyah Rahim' } }],
   hr_letters: [{ id: 'lt1', employee_id: 'e1', title: 'Offer', employee: { name: 'Aisyah Rahim' } }],
   hr_payment_vouchers: [{ id: 'v1', voucher_no: 'PV-1041', payee: 'KWSP', amount_cents: 100 }],
-  hr_attendance_days: Array.from({ length: 1500 }, (_, i) => ({ id: `a${i}`, employee_id: 'e1', work_date: '2026-10-09', status: 'present' })),
+  hr_attendance_days: Array.from({ length: 1500 }, (_, i) => ({ id: `a${i}`, employee_id: 'e1', work_date: '2026-10-09', status: 'present', corrected_at: i === 0 ? '2026-10-10T01:00:00Z' : null, correction_note: i === 0 ? 'Forgot to clock in' : null })),
 };
 /** What `.maybeSingle()` answers, by table. */
 const SINGLE: Record<string, unknown> = {};
@@ -156,6 +156,17 @@ describe('getPeopleData', () => {
     expect(pages).toEqual([[0, 999], [1000, 1999]]);
   });
 
+  it('reads the correction columns of a day, and tells a corrected one by corrected_at alone', async () => {
+    const days = await (await getPeopleData(client)).listAttendance('2026-10-01', '2026-10-09');
+    const columns = calls.find((c) => c.table === 'hr_attendance_days')!.columns;
+    expect(columns).toContain('corrected_at');
+    expect(columns).toContain('correction_note');
+    expect(columns).not.toContain('corrected_by');
+    expect(days[0]).toMatchObject({ id: 'a0', corrected: true, correction_note: 'Forgot to clock in' });
+    expect(days[1]).toMatchObject({ id: 'a1', corrected: false, correction_note: null });
+    expect(days[0]).not.toHaveProperty('corrected_at');
+  });
+
   it('reads one employee private row, and answers null when there is none to see', async () => {
     const data = await getPeopleData(client);
     expect(await data.getEmployeePrivate('e1')).toBeNull();
@@ -185,6 +196,8 @@ describe('getPeopleData', () => {
     SINGLE.hr_settings = { notifications: { birthdays: false }, default_annual_leave_days: 16, overtime_rates: { weekday: 1.25 } };
     expect(await data.getSettings()).toEqual({
       work_week: ['mon', 'tue', 'wed', 'thu', 'fri'],
+      work_start_time: '09:00',
+      late_grace_minutes: 15,
       default_annual_leave_days: 16,
       default_medical_leave_days: 14,
       default_emergency_leave_days: 3,
@@ -197,6 +210,24 @@ describe('getPeopleData', () => {
       default_medical_leave_days: 10.5,
       default_emergency_leave_days: 2,
     });
+  });
+
+  it('reads the work week, start time and grace period, with the time cut to HH:MM and the week Monday first', async () => {
+    const data = await getPeopleData(client);
+    SINGLE.hr_settings = { work_week: ['sat', 'mon', 'tue'], work_start_time: '08:30:00', late_grace_minutes: 10 };
+    expect(await data.getSettings()).toMatchObject({ work_week: ['mon', 'tue', 'sat'], work_start_time: '08:30', late_grace_minutes: 10 });
+    expect(calls.at(-1)!.columns).toContain('work_start_time');
+    expect(calls.at(-1)!.columns).toContain('late_grace_minutes');
+    SINGLE.hr_settings = { work_week: ['mon', 'mon', 'bogus', 'fri'], work_start_time: '00:00:00', late_grace_minutes: 0 };
+    expect(await data.getSettings()).toMatchObject({ work_week: ['mon', 'fri'], work_start_time: '00:00', late_grace_minutes: 0 });
+  });
+
+  it('reads a work week naming no known day as Monday to Friday, as the database does', async () => {
+    const data = await getPeopleData(client);
+    for (const work_week of [[], ['bogus'], 'mon', null]) {
+      SINGLE.hr_settings = { work_week };
+      expect((await data.getSettings()).work_week, JSON.stringify(work_week)).toEqual(['mon', 'tue', 'wed', 'thu', 'fri']);
+    }
   });
 
   it('gives the default settings to a signed-in user with no workspace', async () => {

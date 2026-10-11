@@ -5,6 +5,8 @@
  */
 
 /** Malaysia is UTC+8 all year, with no daylight saving, so no locale data is needed. */
+import type { Weekday } from './types';
+
 const MALAYSIA_OFFSET = 8 * 3_600_000;
 const DAY = 86_400_000;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -83,6 +85,13 @@ export function formatDate(date: string): string {
 /** `October 2026`. */
 export function monthYearLabel(date: string): string {
   return `${MONTH_NAMES[Number(date.slice(5, 7)) - 1]} ${date.slice(0, 4)}`;
+}
+
+const WEEKDAY_KEYS: Weekday[] = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+
+/** `fri`: the key `hr_settings.work_week` uses for the date's weekday. */
+export function weekdayKey(date: string): Weekday {
+  return WEEKDAY_KEYS[new Date(ms(date)).getUTCDay()];
 }
 
 /** `Friday`. */
