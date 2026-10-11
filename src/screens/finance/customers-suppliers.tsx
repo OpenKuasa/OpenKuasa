@@ -62,11 +62,12 @@ const SAMPLE_BILLS: BillBalance[] = [
 
 // The open (sent and overdue) invoices of the Invoices sample, in
 // sales-sample.ts, customer by customer and amount by amount, so both sample
-// screens show the same total receivable.
+// screens show the same total receivable. An invoice in credit is not open
+// and is not here: a customer's credit is not taken off what they owe elsewhere.
 const SAMPLE_INVOICES: InvoiceBalance[] = [
   { customer_id: '3', balance: 2500, display_status: 'sent' }, // Zaki Enterprise, INV-1041 less RM 1,000 paid
   { customer_id: '5', balance: 8900, display_status: 'overdue' }, // Nurul Boutique, INV-1040
-  { customer_id: '8', balance: 6400, display_status: 'sent' }, // Nusantara Logistics, INV-1037
+  { customer_id: '8', balance: 5880, display_status: 'sent' }, // Nusantara Logistics, INV-1037 less a credit note of RM 520
   { customer_id: '9', balance: 3180, display_status: 'overdue' }, // Lim Hardware Sdn Bhd, INV-1035
 ];
 

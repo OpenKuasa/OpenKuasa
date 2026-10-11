@@ -122,7 +122,7 @@ describe('contact writes', () => {
     const { ctx } = fakeClient({ data: null, error: { code: 'FIN08' } });
     expect(await updateContact(ctx, { id: ID, is_customer: false, is_supplier: true })).toEqual({
       ok: false,
-      error: 'This contact has invoices, so it has to stay a customer.',
+      error: 'This contact has invoices or quotations, so it has to stay a customer.',
     });
     expect(logged).not.toHaveBeenCalled();
   });

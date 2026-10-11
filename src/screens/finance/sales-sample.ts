@@ -2,7 +2,9 @@
  * Sample invoices and payments in (Rimba Ventures Sdn Bhd), shown on Invoices
  * and Payments In when there is no database. Raw rows in the shape the data
  * layer reads, so both screens run them through the same builders as live
- * data and their figures agree with each other.
+ * data and their figures agree with each other. What is credited and refunded
+ * on an invoice here is what the sample credit notes and refunds come to;
+ * those rows join this file with the screens that show them.
  */
 import type { EInvoiceStatus, InvoiceDisplayStatus, InvoiceListRow } from '@/lib/finance/invoices';
 import type { PaymentInRow, PaymentMethod } from '@/lib/finance/money';
@@ -10,6 +12,9 @@ import type { PaymentInRow, PaymentMethod } from '@/lib/finance/money';
 /** The sample is a fixed month, so its figures do not drain away as the calendar moves on. */
 export const SAMPLE_TODAY = '2026-10-10';
 
+const numbered = (prefix: string, n: number) => `${prefix}-${String(n).padStart(4, '0')}`;
+
+/** `credited` is what the sample's issued credit notes on the invoice come to; `refunded` its refunds that were paid out. */
 const invoice = (
   n: number,
   invoice_date: string,
@@ -19,16 +24,20 @@ const invoice = (
   display_status: InvoiceDisplayStatus,
   einvoice_status: EInvoiceStatus,
   paid: number = display_status === 'paid' ? total : 0,
+  credited: number = 0,
+  refunded: number = 0,
 ): InvoiceListRow => ({
   id: `sample-invoice-${n}`,
-  invoice_no: display_status === 'draft' ? null : `INV-${String(n).padStart(4, '0')}`,
+  invoice_no: display_status === 'draft' ? null : numbered('INV', n),
   customer_id: customer_name,
   customer_name,
   invoice_date,
   due_date,
   total,
   paid,
-  balance: total - paid,
+  credited,
+  refunded,
+  balance: total - paid - credited + refunded,
   display_status,
   einvoice_status,
   einvoice_uuid: null,
@@ -46,17 +55,21 @@ const SAMPLE_HISTORY: [string, number][] = [
 
 export const SAMPLE_INVOICES: InvoiceListRow[] = [
   invoice(1043, '2026-10-08', 'Seri Mutiara Enterprise', '2026-11-07', 2750, 'draft', 'none'),
-  invoice(1042, '2026-10-07', 'Aisyah Trading', '2026-11-06', 1240, 'paid', 'validated'),
+  // Credited RM 240 and refunded in full.
+  invoice(1042, '2026-10-07', 'Aisyah Trading', '2026-11-06', 1240, 'paid', 'validated', 1240, 240, 240),
   invoice(1041, '2026-10-05', 'Zaki Enterprise', '2026-11-04', 3500, 'sent', 'pending', 1000),
   invoice(1040, '2026-10-01', 'Nurul Boutique', '2026-10-08', 8900, 'overdue', 'validated'),
-  invoice(1039, '2026-09-28', 'Lim Hardware Sdn Bhd', '2026-10-28', 2100, 'paid', 'validated'),
-  invoice(1038, '2026-09-25', 'Siti Decor', '2026-10-25', 4200, 'paid', 'validated'),
-  invoice(1037, '2026-09-20', 'Nusantara Logistics', '2026-10-15', 6400, 'sent', 'pending'),
-  invoice(1036, '2026-09-14', 'Langkawi Fresh', '2026-10-14', 5600, 'paid', 'validated'),
+  invoice(1039, '2026-09-28', 'Lim Hardware Sdn Bhd', '2026-10-28', 2100, 'paid', 'validated', 2100, 450, 450),
+  // Credited RM 600 and not refunded: the customer is in credit.
+  invoice(1038, '2026-09-25', 'Siti Decor', '2026-10-25', 4200, 'paid', 'validated', 4200, 600),
+  // Not paid yet: the credit note of RM 520 lowers what is owed.
+  invoice(1037, '2026-09-20', 'Nusantara Logistics', '2026-10-15', 6400, 'sent', 'pending', 0, 520),
+  invoice(1036, '2026-09-14', 'Langkawi Fresh', '2026-10-14', 5600, 'paid', 'validated', 5600, 180, 180),
   invoice(1035, '2026-09-10', 'Lim Hardware Sdn Bhd', '2026-09-24', 3180, 'overdue', 'validated'),
-  invoice(1033, '2026-09-05', 'Nurul Boutique', '2026-10-05', 850, 'paid', 'validated'),
-  invoice(1032, '2026-09-03', 'Seri Mutiara Enterprise', '2026-10-03', 3180, 'paid', 'validated'),
-  invoice(1030, '2026-08-30', 'Nusantara Logistics', '2026-09-29', 6800, 'paid', 'validated'),
+  // In credit while their refunds are pending.
+  invoice(1033, '2026-09-05', 'Nurul Boutique', '2026-10-05', 850, 'paid', 'validated', 850, 680),
+  invoice(1032, '2026-09-03', 'Seri Mutiara Enterprise', '2026-10-03', 3180, 'paid', 'validated', 3180, 900, 900),
+  invoice(1030, '2026-08-30', 'Nusantara Logistics', '2026-09-29', 6800, 'paid', 'validated', 6800, 320),
   // Newest first, as the real list is: the history is stored oldest first.
   ...SAMPLE_HISTORY.map(([month, total], i) =>
     invoice(1006 - i, `${month}-12`, 'Aisyah Trading', `${month}-26`, total, 'paid', 'validated'),
@@ -74,7 +87,7 @@ const receipt = (n: number, txn_date: string, invoiceNo: number, method: Payment
   return {
     allocation_id: `sample-receipt-${n}`,
     transaction_id: `sample-receipt-${n}`,
-    number: `RC-${String(n).padStart(4, '0')}`,
+    number: numbered('RC', n),
     txn_date,
     method,
     amount: amount ?? paid.total,

@@ -92,10 +92,19 @@ describe('the sentence for an invoice that can no longer be changed', () => {
     expect(result).toEqual({ ok: false, error: INVOICE_MESSAGES.locked });
     expect(INVOICE_MESSAGES.locked).not.toMatch(/void it/i);
   });
-  it('says where the payments of an invoice are voided', () => {
-    expect(INVOICE_MESSAGES.hasPayments).toBe('This invoice has payments. Void them on Payments In before voiding it.');
-    // A receipt cannot be deleted, so the sentence must not offer that.
-    expect(INVOICE_MESSAGES.hasPayments).not.toMatch(/delete/i);
+  it('says where the payments and the refunds of an invoice are voided', () => {
+    // A receipt cannot be deleted, so deleting is offered for refunds only: a pending refund has no void.
+    expect(INVOICE_MESSAGES.hasPayments).toBe(
+      'This invoice has payments or refunds. Void the payments on Payments In, and void or delete the refunds on Refunds, before voiding it.',
+    );
+    expect(INVOICE_MESSAGES.hasPayments).not.toMatch(/delete the payments/i);
+  });
+  it('has its own sentence for an invoice that credit notes hold', async () => {
+    const { ctx } = fakeFinance({ data: null, error: { code: 'FIN12' } });
+    expect(await voidInvoice(ctx, { id: ID })).toEqual({
+      ok: false,
+      error: 'This invoice has credit notes. Void them on Credit Notes, or delete the drafts, before voiding it.',
+    });
   });
 });
 

@@ -42,6 +42,22 @@ const contact = (c: Partial<FinanceContact>): FinanceContact => ({
   ...c,
 });
 
+describe('Receivable and a customer in credit', () => {
+  it('does not take a customer’s credit on one invoice off what they owe on another', () => {
+    const view = contactsView(
+      [contact({ id: 'c1' })],
+      [],
+      [
+        { customer_id: 'c1', balance: 500, display_status: 'sent' },
+        // Only open invoices are read; if a paid one in credit arrived anyway it would not be counted.
+        { customer_id: 'c1', balance: -200, display_status: 'paid' },
+      ],
+    );
+    expect(view.stats.receivable).toBe(500);
+    expect(view.rows[0].receivable).toBe(500);
+  });
+});
+
 describe('listInvoiceBalances', () => {
   const invoice = (n: number) => ({ customer_id: 'c1', balance: String(n), display_status: 'sent' });
 

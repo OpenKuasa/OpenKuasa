@@ -21,6 +21,8 @@ const invoice = (display_status: InvoiceDisplayStatus, i: Partial<InvoiceListRow
   due_date: '2026-10-31',
   total: 100,
   paid: 0,
+  credited: 0,
+  refunded: 0,
   balance: 100,
   display_status,
   einvoice_status: 'none',
@@ -44,6 +46,13 @@ const row = (allocation: string, p: Partial<PaymentInRow> = {}): PaymentInRow =>
   invoice_no: 'INV-0007',
   customer_name: 'Aisyah Trading',
   ...p,
+});
+
+describe('invoiceActions, for a customer in credit', () => {
+  it('offers no payment on a paid invoice whose balance is below zero', () => {
+    const inCredit = invoice('paid', { paid: 100, credited: 30, balance: -30 });
+    expect(invoiceActions(inCredit, true)).toEqual(['einvoice', 'void']);
+  });
 });
 
 describe('invoiceActions', () => {

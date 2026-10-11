@@ -43,7 +43,7 @@ export const CONTACT_MESSAGES = {
   gone: 'That contact no longer exists.',
   inUse: 'This contact is used on bills or other documents. Archive it instead.',
   hasBills: 'This contact has supplier bills, so it has to stay a supplier.',
-  hasInvoices: 'This contact has invoices, so it has to stay a customer.',
+  hasInvoices: 'This contact has invoices or quotations, so it has to stay a customer.',
 } as const;
 
 const M = CONTACT_MESSAGES;

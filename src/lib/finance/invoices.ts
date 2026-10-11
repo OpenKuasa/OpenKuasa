@@ -53,8 +53,10 @@ export const INVOICE_MESSAGES = {
   // FIN01. The menus offer only what an invoice's status allows, so this reaches a person only when the
   // invoice changed under them: a draft posted or a posted invoice voided in another tab. True of each.
   locked: 'This invoice has been posted or voided, so that can no longer be done.',
-  // A receipt is posted the moment it is recorded, so it can only be voided, never deleted.
-  hasPayments: 'This invoice has payments. Void them on Payments In before voiding it.',
+  // FIN02. Money in against the invoice, or a refund put against the invoice itself.
+  hasPayments: 'This invoice has payments or refunds. Void the payments on Payments In, and void or delete the refunds on Refunds, before voiding it.',
+  // FIN12. A draft credit note holds the invoice as much as an issued one does.
+  hasCreditNotes: 'This invoice has credit notes. Void them on Credit Notes, or delete the drafts, before voiding it.',
   empty: 'An invoice needs at least one line with an amount.',
   numberTaken: 'That invoice number is already used.',
   missing: 'The customer or a product on this invoice no longer exists.',
@@ -104,6 +106,7 @@ const REFUSALS: Record<string, string> = {
   FIN02: M.hasPayments,
   FIN10: M.empty,
   FIN11: M.gone,
+  FIN12: M.hasCreditNotes,
   [PG_UNIQUE]: M.numberTaken,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_FORBIDDEN]: NOT_ALLOWED,
@@ -117,7 +120,12 @@ function invoiceWriteFailed(fnName: string, error: unknown): { ok: false; error:
 
 /* ---- reads ------------------------------------------------------------ */
 
-/** `sent` is a posted invoice that is not yet paid in full and not past its due date. */
+/**
+ * `sent` is a posted invoice that is still owed and not past its due date.
+ * `paid` is a posted invoice with nothing left to pay: settled by money in,
+ * by credit notes, or both. Its balance is zero, or below zero when the
+ * customer is in credit.
+ */
 export type InvoiceDisplayStatus = 'draft' | 'sent' | 'overdue' | 'paid' | 'void';
 
 /** What a person has recorded about the invoice's e-Invois at LHDN. Nothing is submitted by this app. */
@@ -132,7 +140,13 @@ export type InvoiceListRow = {
   invoice_date: string;
   due_date: string;
   total: number;
+  /** Posted money in. */
   paid: number;
+  /** Issued credit notes. */
+  credited: number;
+  /** Posted refunds, put against the invoice itself or against one of its credit notes. */
+  refunded: number;
+  /** total − paid − credited + refunded. Below zero, the customer is in credit by that much. */
   balance: number;
   display_status: InvoiceDisplayStatus;
   einvoice_status: EInvoiceStatus;
@@ -157,13 +171,15 @@ export type InvoiceDetail = InvoiceListRow & {
 export type SaveAndPostInvoiceResult = FinResult<{ id: string; invoice_no: string }> & { draftId?: string };
 
 const LIST_COLUMNS =
-  'id,invoice_no,customer_id,customer_name,invoice_date,due_date,total,paid,balance,display_status,einvoice_status,einvoice_uuid';
+  'id,invoice_no,customer_id,customer_name,invoice_date,due_date,total,paid,credited,refunded,balance,display_status,einvoice_status,einvoice_uuid';
 
 function toListRow(row: Record<string, unknown>): InvoiceListRow {
   return {
     ...(row as unknown as InvoiceListRow),
     total: Number(row.total),
     paid: Number(row.paid),
+    credited: Number(row.credited),
+    refunded: Number(row.refunded),
     balance: Number(row.balance),
     einvoice_uuid: (row.einvoice_uuid as string | null) ?? null,
   };

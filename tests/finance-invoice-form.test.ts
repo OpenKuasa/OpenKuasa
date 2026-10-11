@@ -186,6 +186,8 @@ describe('invoiceFormFromDetail', () => {
     due_date: '2026-10-15',
     total: 263.94,
     paid: 0,
+    credited: 0,
+    refunded: 0,
     balance: 263.94,
     display_status: 'draft',
     einvoice_status: 'none',

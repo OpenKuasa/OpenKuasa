@@ -67,13 +67,13 @@ describe('saveInvoiceInput', () => {
 describe('invoice reads', () => {
   const row = (n: number) => ({
     id: `inv-${n}`, invoice_no: `INV-${n}`, customer_id: 'c1', customer_name: 'Aisyah Trading',
-    invoice_date: '2026-10-01', due_date: '2026-10-31', total: '132.50', paid: '100.00', balance: '32.50',
-    display_status: 'sent', einvoice_status: 'none', einvoice_uuid: null,
+    invoice_date: '2026-10-01', due_date: '2026-10-31', total: '132.50', paid: '100.00', credited: '20.00', refunded: '0.00',
+    balance: '12.50', display_status: 'sent', einvoice_status: 'none', einvoice_uuid: null,
   });
 
   it('lists from the totals view, in the caller’s workspace, newest first, with amounts as numbers', async () => {
     const { ctx, calls } = fakeFinance({ data: [row(1)], error: null });
-    expect(await listInvoices(ctx)).toEqual([{ ...row(1), total: 132.5, paid: 100, balance: 32.5 }]);
+    expect(await listInvoices(ctx)).toEqual([{ ...row(1), total: 132.5, paid: 100, credited: 20, refunded: 0, balance: 12.5 }]);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
       name: 'finance_invoice_totals',
@@ -84,6 +84,13 @@ describe('invoice reads', () => {
     });
     expect(calls[0].columns).toContain('einvoice_status');
     expect(calls[0].columns).toContain('einvoice_uuid');
+    expect(calls[0].columns).toContain('credited');
+    expect(calls[0].columns).toContain('refunded');
+  });
+  it('reads a customer in credit as a balance below zero', async () => {
+    const inCredit = { ...row(2), paid: '132.50', credited: '30.00', refunded: '10.00', balance: '-20.00', display_status: 'paid' };
+    const { ctx } = fakeFinance({ data: [inCredit], error: null });
+    expect(await listInvoices(ctx)).toMatchObject([{ paid: 132.5, credited: 30, refunded: 10, balance: -20, display_status: 'paid' }]);
   });
   it('reads on past a full page, so a long book is never cut short', async () => {
     const full = Array.from({ length: INVOICE_PAGE_SIZE }, (_, n) => row(n));
@@ -150,7 +157,8 @@ describe('invoice writes', () => {
   it('turns each database refusal into a sentence', async () => {
     const cases: [string, string][] = [
       ['FIN01', 'This invoice has been posted or voided, so that can no longer be done.'],
-      ['FIN02', 'This invoice has payments. Void them on Payments In before voiding it.'],
+      ['FIN02', 'This invoice has payments or refunds. Void the payments on Payments In, and void or delete the refunds on Refunds, before voiding it.'],
+      ['FIN12', 'This invoice has credit notes. Void them on Credit Notes, or delete the drafts, before voiding it.'],
       ['FIN10', 'An invoice needs at least one line with an amount.'],
       ['FIN11', 'That invoice no longer exists.'],
       ['23505', 'That invoice number is already used.'],

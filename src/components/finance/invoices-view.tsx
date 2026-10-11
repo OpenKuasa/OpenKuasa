@@ -48,12 +48,12 @@ import {
   type InvoiceAction,
   type InvoiceFilter,
   type InvoicesViewData,
+  balanceText,
   customerChoice,
   filterInvoices,
   invoiceActions,
   invoiceCustomers,
   invoicesCsv,
-  owed,
 } from '@/lib/finance/sales-views';
 import { LATEST_ROWS, displayDate } from '@/lib/finance/view-helpers';
 import { cn } from '@/lib/utils';
@@ -98,9 +98,6 @@ const EINVOICE_STYLES: Record<Exclude<EInvoiceStatus, 'none'>, string> = {
   pending: 'bg-amber-500/15 text-amber-600',
   rejected: 'bg-red-500/15 text-red-600',
 };
-
-/** A draft or void invoice owes nothing: a dash, as a draft's number is. */
-const formatOwed = (balance: number | null) => (balance === null ? '—' : rm(balance));
 
 /** One thing open at a time: a form card, or a question in one row. */
 type Open =
@@ -242,8 +239,8 @@ export function InvoicesView({
         >
           Void <span className="font-medium">{invoice.invoice_no}</span> to{' '}
           <span className="font-medium">{invoice.customer_name}</span> ({rm(invoice.total)})? It stays in the list as
-          Void and nothing more is owed on it. This cannot be undone. An invoice that has payments cannot be voided
-          until they are voided on Payments In.
+          Void and nothing more is owed on it. This cannot be undone. An invoice that has payments, refunds or credit
+          notes cannot be voided until they are voided.
         </ConfirmRow>
       );
     }
@@ -499,7 +496,7 @@ export function InvoicesView({
                       <TableCell className="whitespace-nowrap">{i.customer_name}</TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(i.due_date)}</TableCell>
                       <TableCell className="whitespace-nowrap text-right tabular-nums">{rm(i.total)}</TableCell>
-                      <TableCell className="whitespace-nowrap text-right tabular-nums">{formatOwed(owed(i))}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums">{balanceText(i)}</TableCell>
                       <TableCell>
                         <span className="flex items-center gap-2">
                           <LiveDot active={i.display_status === 'paid'} />

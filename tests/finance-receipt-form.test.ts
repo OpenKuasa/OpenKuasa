@@ -37,6 +37,8 @@ const invoice = (n: number, i: Partial<InvoiceListRow> = {}): InvoiceListRow => 
   due_date: '2026-10-31',
   total: 100,
   paid: 0,
+  credited: 0,
+  refunded: 0,
   balance: 100,
   display_status: 'sent',
   einvoice_status: 'none',
@@ -71,6 +73,18 @@ const form = (receivable: ReceivableInvoice[], f: Partial<ReceiptForm> = {}): Re
   ...newReceiptForm(receivable, accounts, today),
   customerId: AISYAH,
   ...f,
+});
+
+describe('receivableInvoices, with credit notes', () => {
+  it('offers a part-credited invoice for what it still owes, which is its balance', () => {
+    const offered = receivableInvoices([invoice(1, { total: 100, credited: 30, balance: 70 })], []);
+    expect(offered).toMatchObject([{ balance: 70, held: 0, payable: 70 }]);
+  });
+  it('does not offer an invoice whose customer is in credit, or one that credit notes settled', () => {
+    const inCredit = invoice(2, { total: 100, paid: 100, credited: 30, balance: -30, display_status: 'paid' });
+    const settled = invoice(3, { total: 100, credited: 100, balance: 0, display_status: 'paid' });
+    expect(receivableInvoices([inCredit, settled], [])).toEqual([]);
+  });
 });
 
 describe('receivableInvoices', () => {

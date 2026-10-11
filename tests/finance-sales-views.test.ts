@@ -5,8 +5,10 @@ import {
   EINVOICE_STATUS_LABELS,
   INVOICE_STATUS_LABELS,
   PAYMENT_IN_STATUS_LABELS,
+  balanceText,
   filterInvoices,
   filterPaymentsIn,
+  inCredit,
   invoiceCustomers,
   invoicesCsv,
   owed,
@@ -30,6 +32,8 @@ const invoice = (i: Partial<InvoiceListRow>): InvoiceListRow => {
     due_date: '2026-10-31',
     total: 100,
     paid: 0,
+    credited: 0,
+    refunded: 0,
     balance: 100,
     display_status: 'sent',
     einvoice_status: 'none',
@@ -366,6 +370,52 @@ describe('owed', () => {
   });
 });
 
+describe('an invoice whose customer is in credit', () => {
+  // RM 100 invoiced and paid, then RM 30 credited: the customer is RM 30 in credit until it is refunded.
+  const credit = () => invoice({ total: 100, paid: 100, credited: 30, balance: -30, display_status: 'paid' });
+
+  it('keeps its balance below zero, and says how much the customer is in credit', () => {
+    expect(owed(credit())).toBe(-30);
+    expect(inCredit(credit())).toBe(30);
+    expect(balanceText(credit())).toBe('RM 30.00 in credit');
+  });
+  it('is in credit by nothing when it is owed, settled, a draft or void', () => {
+    expect(inCredit(invoice({ balance: 40 }))).toBe(0);
+    expect(inCredit(invoice({ total: 100, paid: 70, credited: 30, balance: 0, display_status: 'paid' }))).toBe(0);
+    // A draft or a void invoice has no balance to speak of, whatever the row says.
+    expect(inCredit(invoice({ balance: -30, display_status: 'draft' }))).toBe(0);
+    expect(inCredit(invoice({ balance: -30, display_status: 'void' }))).toBe(0);
+    expect(inCredit(invoice({ balance: -0.1 - 0.2, display_status: 'paid' }))).toBe(0.3);
+  });
+  it('words every other balance as before: an amount, or a dash on a draft and a void invoice', () => {
+    expect(balanceText(invoice({ balance: 1250.5 }))).toBe('RM 1,250.50');
+    expect(balanceText(invoice({ balance: 0, display_status: 'paid' }))).toBe('RM 0.00');
+    expect(balanceText(invoice({ balance: 80, display_status: 'draft' }))).toBe('—');
+    expect(balanceText(invoice({ balance: 80, display_status: 'void' }))).toBe('—');
+    expect(balanceText(invoice({ balance: -0.01, display_status: 'paid' }))).toBe('RM 0.01 in credit');
+  });
+  it('counts as paid, and never lowers what the other invoices are owed', () => {
+    const view = invoicesView([credit(), invoice({ balance: 100 }), invoice({ balance: 50, display_status: 'overdue' })], [], today);
+    expect(view.stats.map((s) => [s.label, s.value, s.delta])).toEqual([
+      ['Total receivable', 'RM 150', '2 open invoices'],
+      ['Due this week', 'RM 0', '0 invoices'],
+      ['Overdue', 'RM 50', '1 invoice'],
+      ['Received (MTD)', 'RM 0', '0 payments'],
+    ]);
+    expect(view.byStatus.find((s) => s.key === 'paid')?.value).toBe(1);
+  });
+  it('owes less, and stays open, when it is credited before it is paid', () => {
+    const partCredited = invoice({ total: 100, credited: 30, balance: 70 });
+    expect(balanceText(partCredited)).toBe('RM 70.00');
+    expect(invoicesView([partCredited], [], today).stats[0]).toMatchObject({ value: 'RM 70', delta: '1 open invoice' });
+  });
+  it('is found by the Paid filter like any other paid invoice', () => {
+    const rows = [credit(), invoice({ balance: 100 })];
+    expect(filterInvoices(rows, '', 'paid')).toHaveLength(1);
+    expect(filterInvoices(rows, '', 'open')).toHaveLength(2);
+  });
+});
+
 describe('CSV export', () => {
   it('writes the invoices table, with a formula-looking customer name made harmless', () => {
     const csv = invoicesCsv([
@@ -373,10 +423,21 @@ describe('CSV export', () => {
       invoice({ invoice_no: null, customer_name: 'Lim, Tan & Co', total: 80, balance: 80, display_status: 'draft' }),
     ]);
     expect(csv).toBe(
-      '\uFEFFNo.,Date,Customer,Due,Total,Paid,Balance,Status,e-Invois\r\n' +
-        "INV-0007,2026-10-01,'=cmd|calc,2026-10-31,1250.5,1000,250.5,Sent,Validated\r\n" +
-        ',2026-10-01,"Lim, Tan & Co",2026-10-31,80,0,,Draft,\r\n',
+      '\uFEFFNo.,Date,Customer,Due,Total,Paid,Credited,Refunded,Balance,Status,e-Invois\r\n' +
+        "INV-0007,2026-10-01,'=cmd|calc,2026-10-31,1250.5,1000,0,0,250.5,Sent,Validated\r\n" +
+        ',2026-10-01,"Lim, Tan & Co",2026-10-31,80,0,0,0,,Draft,\r\n',
     );
+  });
+
+  it('writes what was credited and refunded, and a balance below zero for a customer in credit, so the columns add up', () => {
+    const csv = invoicesCsv([
+      invoice({ invoice_no: 'INV-0008', total: 100, paid: 100, credited: 30, refunded: 10, balance: -20, display_status: 'paid' }),
+      invoice({ invoice_no: 'INV-0009', total: 100, credited: 30, balance: 70 }),
+    ]);
+    expect(csv.split('\r\n').slice(1, 3)).toEqual([
+      'INV-0008,2026-10-01,Aisyah Trading,2026-10-31,100,100,30,10,-20,Paid,',
+      'INV-0009,2026-10-01,Aisyah Trading,2026-10-31,100,0,30,0,70,Sent,',
+    ]);
   });
 
   it('leaves the balance empty for a draft and a void invoice, and fills it for the rest', () => {
@@ -387,10 +448,10 @@ describe('CSV export', () => {
       invoice({ invoice_no: 'INV-0004', total: 60, paid: 60, balance: 0, display_status: 'paid' }),
     ]);
     expect(csv.split('\r\n').slice(1, 5)).toEqual([
-      ',2026-10-01,Aisyah Trading,2026-10-31,80,0,,Draft,',
-      'INV-0002,2026-10-01,Aisyah Trading,2026-10-31,90,0,,Void,',
-      'INV-0003,2026-10-01,Aisyah Trading,2026-10-31,70,20,50,Overdue,',
-      'INV-0004,2026-10-01,Aisyah Trading,2026-10-31,60,60,0,Paid,',
+      ',2026-10-01,Aisyah Trading,2026-10-31,80,0,0,0,,Draft,',
+      'INV-0002,2026-10-01,Aisyah Trading,2026-10-31,90,0,0,0,,Void,',
+      'INV-0003,2026-10-01,Aisyah Trading,2026-10-31,70,20,0,0,50,Overdue,',
+      'INV-0004,2026-10-01,Aisyah Trading,2026-10-31,60,60,0,0,0,Paid,',
     ]);
   });
 
@@ -418,14 +479,18 @@ describe('the sample shown when there is no database', () => {
     for (const i of SAMPLE_INVOICES) {
       const paid = SAMPLE_PAYMENTS_IN.filter((p) => p.invoice_id === i.id).reduce((total, p) => total + p.amount, 0);
       expect(paid, i.invoice_no ?? 'draft').toBe(i.paid);
-      expect(i.balance, i.invoice_no ?? 'draft').toBe(i.total - i.paid);
+      expect(i.balance, i.invoice_no ?? 'draft').toBe(i.total - i.paid - i.credited + i.refunded);
+      // An open invoice is owed something; one with nothing left to pay reads Paid, in credit or not.
+      if (i.display_status === 'sent' || i.display_status === 'overdue') expect(i.balance, i.invoice_no ?? '').toBeGreaterThan(0);
+      if (i.display_status === 'paid') expect(i.balance, i.invoice_no ?? '').toBeLessThanOrEqual(0);
     }
   });
   it('fills every card and chart on both screens', () => {
     const invoices = invoicesView(SAMPLE_INVOICES, SAMPLE_PAYMENTS_IN, SAMPLE_TODAY);
     expect(invoices.stats.map((s) => [s.label, s.value, s.delta])).toEqual([
-      ['Total receivable', 'RM 21.0k', '4 open invoices'],
-      ['Due this week', 'RM 6,400', '1 invoice'],
+      // INV-1037 is owed RM 5,880: its RM 6,400 less a credit note of RM 520.
+      ['Total receivable', 'RM 20.5k', '4 open invoices'],
+      ['Due this week', 'RM 5,880', '1 invoice'],
       ['Overdue', 'RM 12.1k', '2 invoices'],
       ['Received (MTD)', 'RM 18.2k', '7 payments'],
     ]);
