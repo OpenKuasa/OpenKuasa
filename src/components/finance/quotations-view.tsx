@@ -328,12 +328,13 @@ export function QuotationsView({
           className="col-span-2 md:col-span-12"
         >
           <div className="flex flex-wrap items-center gap-3">
-            <p role="status" className="text-sm text-muted-foreground">
+            <p id="converted-note" role="status" className="text-sm text-muted-foreground">
               It has the quotation’s customer, notes and lines, and is dated today. It is a draft: check it, then post
               it, on{' '}
               <Link
                 ref={invoicesLink}
                 href="/finance/invoices"
+                aria-describedby="converted-note"
                 className="font-medium text-primary underline-offset-4 hover:underline"
               >
                 Invoices
@@ -528,7 +529,7 @@ export function QuotationsView({
                       <TableCell className="whitespace-nowrap text-muted-foreground">
                         {invoice ? (
                           // The invoice made from this quotation is on Invoices; this only goes there.
-                          <Link href="/finance/invoices" className="underline-offset-4 hover:underline">
+                          <Link href="/finance/invoices" className="underline underline-offset-4 hover:underline">
                             {invoice}
                           </Link>
                         ) : (
