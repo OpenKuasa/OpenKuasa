@@ -58,6 +58,10 @@ describe('invoiceActions', () => {
     expect(invoiceActions(invoice('sent'), false)).toEqual(['einvoice', 'void']);
     expect(invoiceActions(invoice('paid', { paid: 100, balance: 0 }), false)).toEqual(['einvoice', 'void']);
   });
+  it('never offers a payment on a paid invoice, whatever the flag says', () => {
+    expect(invoiceActions(invoice('paid', { paid: 100, balance: 0 }), true)).toEqual(['einvoice', 'void']);
+    expect(invoiceActions(invoice('sent'), true)).toContain('pay');
+  });
   it('offers nothing on a void invoice', () => {
     expect(invoiceActions(invoice('void'), false)).toEqual([]);
     expect(invoiceActions(invoice('void'), true)).toEqual([]);

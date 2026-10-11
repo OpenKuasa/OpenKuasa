@@ -233,6 +233,23 @@ describe('receiptFormError', () => {
     expect(typed('250.50')).toBeNull();
     expect(typed('0.01')).toBeNull();
   });
+  it('counts in sen on float-tricky figures: 10.05 owed, and 0.3 less 0.1 held', () => {
+    const owed = receivableInvoices([invoice(1, { total: 10.05, balance: 10.05 })], []);
+    const owedForm = toggleInvoice(form(owed), owed[0], true);
+    const typedOwed = (text: string) => receiptFormError({ ...owedForm, amounts: { [invoiceId(1)]: text } }, owed);
+    expect(typedOwed('10.05')).toBeNull();
+    expect(typedOwed('10.06')).toBe('That is more than is still owed on an invoice.');
+
+    const held = receivableInvoices(
+      [invoice(1, { total: 0.3, balance: 0.3 })],
+      [received(1, { status: 'draft', amount: 0.1 })],
+    );
+    expect(held[0].payable).toBe(0.2);
+    const heldForm = toggleInvoice(form(held), held[0], true);
+    const typedHeld = (text: string) => receiptFormError({ ...heldForm, amounts: { [invoiceId(1)]: text } }, held);
+    expect(typedHeld('0.2')).toBeNull();
+    expect(typedHeld('0.21')).toBe('That is more than is still owed on an invoice.');
+  });
   it('refuses an invoice that is no longer receivable, or that belongs to another customer', () => {
     expect(receiptFormError(ready, invoicesOf(receivable, 'nobody'))).toBe('That is more than is still owed on an invoice.');
     expect(receiptFormError({ ...ready, amounts: { [invoiceId(3)]: '1' } }, receivable)).toBe('That is more than is still owed on an invoice.');

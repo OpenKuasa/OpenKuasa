@@ -79,6 +79,11 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
           <Button type="button" variant="outline" size="sm" onClick={onClose} autoFocus data-finance-focus>
             Close
           </Button>
+          {save.error ? (
+            <p role="alert" className="text-sm text-destructive">
+              {save.error}
+            </p>
+          ) : null}
         </div>
       </BentoCard>
     );

@@ -155,6 +155,7 @@ async function draftForEditing<D extends { display_status: string }>(
   input: unknown,
   get: (ctx: FinanceWriteContext, id: string) => Promise<D | null>,
   messages: { gone: string; locked: string },
+  label: 'bill' | 'invoice',
 ): Promise<FinResult<D>> {
   const ctx = await writeCtx();
   if (!ctx) return FORBIDDEN;
@@ -166,7 +167,7 @@ async function draftForEditing<D extends { display_status: string }>(
     refresh(paths);
     return { ok: false, error: document ? messages.locked : messages.gone };
   } catch (error) {
-    console.error('[finance] a draft could not be read:', error);
+    console.error(`[finance] a draft ${label} could not be read:`, error);
     return { ok: false, error: READ_FAILED };
   }
 }
@@ -227,7 +228,7 @@ export async function saveAndPostBillAction(input: unknown): Promise<SaveAndPost
  * the list was loaded, answers with that sentence and refreshes the list.
  */
 export async function getBillAction(input: unknown): Promise<FinResult<BillDetail>> {
-  return draftForEditing(PURCHASE_PATHS, billIdInput, input, getBill, BILL_MESSAGES);
+  return draftForEditing(PURCHASE_PATHS, billIdInput, input, getBill, BILL_MESSAGES, 'bill');
 }
 
 /* ---- payments out ------------------------------------------------------ */
@@ -271,7 +272,7 @@ export async function saveAndPostInvoiceAction(input: unknown): Promise<SaveAndP
 
 /** One draft invoice with its lines, for the Edit form; see `draftForEditing`. */
 export async function getInvoiceAction(input: unknown): Promise<FinResult<InvoiceDetail>> {
-  return draftForEditing(SALES_PATHS, invoiceIdInput, input, getInvoice, INVOICE_MESSAGES);
+  return draftForEditing(SALES_PATHS, invoiceIdInput, input, getInvoice, INVOICE_MESSAGES, 'invoice');
 }
 
 /* ---- payments in ------------------------------------------------------- */

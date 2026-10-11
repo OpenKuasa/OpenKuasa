@@ -184,7 +184,7 @@ export type InvoiceAction = 'edit' | 'post' | 'delete' | 'pay' | 'einvoice' | 'v
 export function invoiceActions(invoice: InvoiceListRow, canTakePayment: boolean): InvoiceAction[] {
   if (invoice.display_status === 'draft') return ['edit', 'post', 'delete'];
   if (invoice.display_status === 'void') return [];
-  const pay: InvoiceAction[] = canTakePayment ? ['pay'] : [];
+  const pay: InvoiceAction[] = canTakePayment && invoice.display_status !== 'paid' ? ['pay'] : [];
   return [...pay, 'einvoice', 'void'];
 }
 
