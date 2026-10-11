@@ -1001,7 +1001,8 @@ export function createPeopleTools(
   // An owner or admin may name an employee, or leave it out for a request of their own.
   const HR_EMPLOYEE_NOTE =
     "the employee's id from listEmployees; leave it out when the request is for the person you are talking to";
-  const optionalEmployee = { employee_id: z.guid().optional().describe(HR_EMPLOYEE_NOTE) };
+  // Nullish, not just optional: a model often sends null for a field it means to leave out.
+  const optionalEmployee = { employee_id: z.guid().nullish().describe(HR_EMPLOYEE_NOTE) };
   const previewSchema = hr ? previewLeaveInput.extend(optionalEmployee) : previewLeaveInput.omit({ employee_id: true });
   const applyLeaveSchema = hr ? applyLeaveInput.extend(optionalEmployee) : applyLeaveInput.omit({ employee_id: true });
   const applyTimeOffSchema = hr ? applyTimeOffInput.extend(optionalEmployee) : applyTimeOffInput.omit({ employee_id: true });
@@ -1016,8 +1017,9 @@ export function createPeopleTools(
   const forEmployee = <T extends object>(input: T): CapResult<T & { employee_id: string }> => {
     const given = (input as { employee_id?: string | null }).employee_id;
     if (hr && given) return { ok: true, data: input as T & { employee_id: string } };
-    if (hr && ownId === null) return { ok: false, error: NO_EMPLOYEE_GIVEN };
-    return { ok: true, data: { ...input, employee_id: ownId as string } };
+    // `== null` on purpose: neither null nor undefined may ever be written as an employee id.
+    if (ownId == null) return { ok: false, error: NO_EMPLOYEE_GIVEN };
+    return { ok: true, data: { ...input, employee_id: ownId } };
   };
 
   const previewTools: ToolSet = {

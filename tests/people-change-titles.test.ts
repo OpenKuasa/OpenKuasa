@@ -130,16 +130,16 @@ describe('approval cards for leave and time-off', () => {
 
   it('words an application from its own input, with no day count or balance', () => {
     const input = { leave_type: 'annual', start_date: '2026-10-20', end_date: '2026-10-22' };
-    expect(approvalTitle('applyLeave', input)).toBe('Apply for annual leave, 20–22 Oct?');
-    expect(approvalTitle('applyLeave', { ...input, leave_type: 'medical', end_date: '2026-10-20' })).toBe('Apply for medical leave, 20 Oct?');
+    expect(approvalTitle('applyLeave', input)).toBe('Apply for annual leave for yourself, 20–22 Oct?');
+    expect(approvalTitle('applyLeave', { ...input, leave_type: 'medical', end_date: '2026-10-20' })).toBe('Apply for medical leave for yourself, 20 Oct?');
     expect(approvalTitle('applyLeave', { ...input, start_date: '2026-10-30', end_date: '2026-11-02' })).toBe(
-      'Apply for annual leave, 30 Oct–2 Nov?',
+      'Apply for annual leave for yourself, 30 Oct–2 Nov?',
     );
     expect(approvalTitle('applyLeave', { ...input, end_date: '2026-10-20', half_day: true })).toBe(
-      'Apply for annual leave, 20 Oct (half day)?',
+      'Apply for annual leave for yourself, 20 Oct (half day)?',
     );
     expect(approvalTitle('applyTimeOff', { off_date: '2026-10-20', start_time: '14:00', end_time: '16:00' })).toBe(
-      'Request time-off, 20 Oct, 14:00–16:00?',
+      'Request time-off for yourself, 20 Oct, 14:00–16:00?',
     );
     expect(approvalDetail('applyLeave', input)).toBeNull();
     // What will be saved under the person's name is quoted and labelled.
@@ -150,7 +150,7 @@ describe('approval cards for leave and time-off', () => {
 
   it('a member’s card, which has no employee, names no one; an owner’s names who it is for', () => {
     const input = { leave_type: 'annual', start_date: '2026-10-20', end_date: '2026-10-22' };
-    expect(approvalTitle('applyLeave', input, find)).toBe('Apply for annual leave, 20–22 Oct?');
+    expect(approvalTitle('applyLeave', input, find)).toBe('Apply for annual leave for yourself, 20–22 Oct?');
     expect(approvalTitle('applyLeave', { ...input, employee_id: EMP }, find)).toBe('Apply for annual leave for Farah Idris, 20–22 Oct?');
   });
 
@@ -205,8 +205,8 @@ describe('approval cards for leave and time-off', () => {
   });
 
   it('falls back to plain words for dates that are not dates, and does no arithmetic', () => {
-    expect(approvalTitle('applyLeave', { leave_type: 'annual', start_date: 'soon', end_date: '2026-13-40' })).toBe('Apply for annual leave?');
-    expect(approvalTitle('applyLeave', {})).toBe('Apply for leave?');
+    expect(approvalTitle('applyLeave', { leave_type: 'annual', start_date: 'soon', end_date: '2026-13-40' })).toBe('Apply for annual leave for yourself?');
+    expect(approvalTitle('applyLeave', {})).toBe('Apply for leave for yourself?');
   });
 
   it('remembers a request by kind for later turns', () => {
@@ -243,15 +243,15 @@ describe('approval cards for claims and overtime', () => {
   const claim = { category: 'travel', amount_cents: 8500, claim_date: '2026-10-09' };
 
   it('words a claim from its own input, in Ringgit from the sen, with the date', () => {
-    expect(approvalTitle('submitClaim', claim)).toBe('Claim RM 85.00 for travel, 9 Oct?');
-    expect(approvalTitle('submitClaim', { ...claim, amount_cents: 112050, category: 'medical' })).toBe('Claim RM 1,120.50 for medical, 9 Oct?');
-    expect(approvalTitle('submitClaim', { ...claim, amount_cents: 5, category: 'other' })).toBe('Claim RM 0.05 for other expenses, 9 Oct?');
+    expect(approvalTitle('submitClaim', claim)).toBe('Claim RM 85.00 for travel, 9 Oct, for yourself?');
+    expect(approvalTitle('submitClaim', { ...claim, amount_cents: 112050, category: 'medical' })).toBe('Claim RM 1,120.50 for medical, 9 Oct, for yourself?');
+    expect(approvalTitle('submitClaim', { ...claim, amount_cents: 5, category: 'other' })).toBe('Claim RM 0.05 for other expenses, 9 Oct, for yourself?');
   });
 
   it('names the employee only when an owner or admin gave one, and never on a member’s card', () => {
     // A member's input has no employee at all: the card names nobody, whatever the lookups hold.
     expect(approvalTitle('submitClaim', claim, find)).not.toContain('Amirul');
-    expect(approvalTitle('submitOvertime', { work_date: '2026-10-10', hours: 3 }, find)).toBe('Claim 3 hours of overtime on 10 Oct?');
+    expect(approvalTitle('submitOvertime', { work_date: '2026-10-10', hours: 3 }, find)).toBe('Claim 3 hours of overtime on 10 Oct for yourself?');
     expect(approvalTitle('submitClaim', { ...claim, employee_id: EMPLOYEE }, find)).toBe('Claim RM 85.00 for travel, 9 Oct, for Amirul Hakim?');
     // An employee no lookup named is never taken for the caller.
     expect(approvalTitle('submitClaim', { ...claim, employee_id: EMP }, find)).toBe('Claim RM 85.00 for travel, 9 Oct, for this employee?');
@@ -280,7 +280,7 @@ describe('approval cards for claims and overtime', () => {
 
   it('carries no amount on an overtime card, and quotes the reason', () => {
     const input = { work_date: '2026-10-10', hours: 2.5, reason: 'Stocktake' };
-    expect(approvalTitle('submitOvertime', input)).toBe('Claim 2.5 hours of overtime on 10 Oct?');
+    expect(approvalTitle('submitOvertime', input)).toBe('Claim 2.5 hours of overtime on 10 Oct for yourself?');
     expect(approvalTitle('submitOvertime', input)).not.toMatch(/RM/);
     expect(approvalDetail('submitOvertime', input)).toBe('Reason: “Stocktake”');
     expect(approvalDetail('submitOvertime', { work_date: '2026-10-10', hours: 2 })).toBeNull();
@@ -316,9 +316,9 @@ describe('approval cards for claims and overtime', () => {
   });
 
   it('falls back to plain words for an amount or date that is not one, and does no arithmetic', () => {
-    expect(approvalTitle('submitClaim', { category: 'travel', amount_cents: 85.5, claim_date: 'soon' })).toBe('Claim for travel?');
-    expect(approvalTitle('submitClaim', {})).toBe('Claim?');
-    expect(approvalTitle('submitOvertime', { work_date: '2026-13-40', hours: 'lots' })).toBe('Claim overtime?');
+    expect(approvalTitle('submitClaim', { category: 'travel', amount_cents: 85.5, claim_date: 'soon' })).toBe('Claim for travel, for yourself?');
+    expect(approvalTitle('submitClaim', {})).toBe('Claim, for yourself?');
+    expect(approvalTitle('submitOvertime', { work_date: '2026-13-40', hours: 'lots' })).toBe('Claim overtime for yourself?');
   });
 
   it('remembers a claim and an overtime record by kind for later turns', () => {
@@ -344,7 +344,7 @@ describe('approval cards for an owner or admin’s own request', () => {
       expect(title).not.toContain(' for this employee');
       expect(title).not.toContain('Faiz');
     }
-    expect(approvalTitle('submitClaim', claim, find)).toBe('Claim RM 23.40 for meals, 11 Oct?');
+    expect(approvalTitle('submitClaim', claim, find)).toBe('Claim RM 23.40 for meals, 11 Oct, for yourself?');
   });
 
   it('still names the employee when one is given, and never names a wrong-kind id', () => {

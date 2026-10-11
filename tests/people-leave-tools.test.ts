@@ -361,6 +361,20 @@ describe('an owner or admin’s own requests', () => {
     expect(ctl.ran).toHaveLength(3);
   });
 
+  it('treat an employee sent as null like one left out', async () => {
+    for (const [name, input] of CALLS) await run(name, { ...input, employee_id: null }, HR_VIEWER, linked(ME));
+    expect(ctl.ran).toHaveLength(3);
+    for (const r of ctl.ran) expect(r.input).toMatchObject({ employee_id: ME });
+  });
+
+  it('refuse when their own employee is undefined, never writing it as an id', async () => {
+    const unset = { ...hr(), employeeId: undefined as unknown as null };
+    for (const [name, input] of CALLS) {
+      expect(await run(name, input, HR_VIEWER, unset), name).toEqual({ ok: false, error: NO_ONE });
+    }
+    expect(ctl.ran).toEqual([]);
+  });
+
   it('leave a member’s tools as they were: no employee field, always their own', async () => {
     for (const [name] of CALLS) expect(shapeOf(name, self()), name).not.toContain('employee_id');
     await run('applyLeave', { ...LEAVE, employee_id: OTHER }, MEMBER_VIEWER, self());

@@ -229,11 +229,12 @@ function senText(value: unknown): string | null {
 }
 
 /**
- * Who a leave application is for. No employee in the input is the caller's own; one that no lookup named
- * must never read like that, so it says "this employee".
+ * Who a request is for. No employee in the input is the caller's own, and the card says so ("yourself"), so a
+ * request meant for someone else that lost its employee on the way is noticed before it is approved. One that
+ * no lookup named must never read like the caller's own, so it says "this employee".
  */
-function forWhom(employeeId: unknown, find: NameFinder): string | null {
-  if (employeeId === undefined || employeeId === null) return null;
+function forWhom(employeeId: unknown, find: NameFinder): string {
+  if (employeeId === undefined || employeeId === null) return 'yourself';
   return find(employeeId, 'employee') ?? 'this employee';
 }
 
@@ -384,14 +385,14 @@ export function approvalTitle(
       const who = forWhom(i.employee_id, find);
       const when = dayRangeText(i.start_date, i.end_date);
       const half = i.half_day === true ? ' (half day)' : '';
-      return `Apply for ${leaveWord(i.leave_type)}${who ? ` for ${who}` : ''}${when ? `, ${when}${half}` : ''}?`;
+      return `Apply for ${leaveWord(i.leave_type)} for ${who}${when ? `, ${when}${half}` : ''}?`;
     }
     case 'applyTimeOff': {
       const who = forWhom(i.employee_id, find);
       const when = dayRangeText(i.off_date, i.off_date);
       const from = timeText(i.start_time);
       const to = timeText(i.end_time);
-      return `Request time-off${who ? ` for ${who}` : ''}${when ? `, ${when}` : ''}${from && to ? `, ${from}–${to}` : ''}?`;
+      return `Request time-off for ${who}${when ? `, ${when}` : ''}${from && to ? `, ${from}–${to}` : ''}?`;
     }
     case 'cancelLeaveRequest': {
       const what = find(i.id, 'leave');
@@ -415,7 +416,7 @@ export function approvalTitle(
       const category = claimFor(i.category);
       const when = dayRangeText(i.claim_date, i.claim_date);
       const parts = [`Claim${amount ? ` ${amount}` : ''}${category ? ` for ${category}` : ''}`, when].filter(Boolean);
-      return `${parts.join(', ')}${who ? `, for ${who}` : ''}?`;
+      return `${parts.join(', ')}, for ${who}?`;
     }
     case 'cancelClaim': return `Cancel ${find(i.id, 'claim') ?? UNLISTED_CLAIM}?`;
     case 'decideClaim': return `${i.approve === true ? 'Approve' : 'Reject'} ${find(i.id, 'claim') ?? UNLISTED_CLAIM}?`;
@@ -425,7 +426,7 @@ export function approvalTitle(
       const who = forWhom(i.employee_id, find);
       const hours = hoursText(i.hours);
       const when = dayRangeText(i.work_date, i.work_date);
-      return `Claim ${hours ? `${hours} of overtime` : 'overtime'}${when ? ` on ${when}` : ''}${who ? ` for ${who}` : ''}?`;
+      return `Claim ${hours ? `${hours} of overtime` : 'overtime'}${when ? ` on ${when}` : ''} for ${who}?`;
     }
     case 'cancelOvertime': return `Cancel ${find(i.id, 'overtime') ?? UNLISTED_OVERTIME}?`;
     case 'decideOvertime': return `${i.approve === true ? 'Approve' : 'Reject'} ${find(i.id, 'overtime') ?? UNLISTED_OVERTIME}?`;

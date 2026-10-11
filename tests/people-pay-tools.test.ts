@@ -667,6 +667,23 @@ describe('an owner or admin’s own claims and overtime', () => {
     expect(ctl.ran).toHaveLength(3);
   });
 
+  it('treat an employee sent as null like one left out', async () => {
+    for (const [name, input] of CALLS) {
+      expect(schemaOf(name, hr()).safeParse({ ...input, employee_id: null }).success, name).toBe(true);
+      await call(name, { ...input, employee_id: null }, HR_VIEWER, linked(ME));
+    }
+    expect(ctl.ran).toHaveLength(3);
+    for (const r of ctl.ran) expect(r.input).toMatchObject({ employee_id: ME });
+  });
+
+  it('refuse when their own employee is undefined, never writing it as an id', async () => {
+    const unset = { ...hr(), employeeId: undefined as unknown as null };
+    for (const [name, input] of CALLS) {
+      expect(await call(name, input, HR_VIEWER, unset), name).toEqual({ ok: false, error: NO_ONE });
+    }
+    expect(ctl.ran).toEqual([]);
+  });
+
   it('upload no receipt when the claim is refused', async () => {
     await call('submitClaim', CLAIM, HR_VIEWER, { ...hr(PNG), employeeId: null });
     expect(ctl.uploads).toEqual([]);
