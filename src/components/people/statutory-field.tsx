@@ -11,7 +11,8 @@ import type { StatutoryField as Field } from '@/lib/people/types';
 
 /**
  * One of EPF, SOCSO, EIS or PCB on a draft payslip, as a field the owner can type over. Saving an empty field
- * (or pressing Reset) puts the figure back to the proposed amount. The figure shown is the payslip's own; this
+ * (or pressing Reset) puts the figure back to the proposed amount. Saving the figure as it stands pins it
+ * (marks it set by HR) when it is not already. The figure shown is the payslip's own; this
  * component works nothing out. A refusal shows under the field and clears as soon as the field changes.
  */
 export function StatutoryFigure({
@@ -83,7 +84,7 @@ export function StatutoryFigure({
             setError(null);
           }}
         />
-        <Button type="submit" variant="outline" size="sm" className="h-7 px-2.5 text-xs" disabled={pending || unchanged}>
+        <Button type="submit" variant="outline" size="sm" className="h-7 px-2.5 text-xs" disabled={pending || (unchanged && setByHr)}>
           Save
         </Button>
         {setByHr ? (

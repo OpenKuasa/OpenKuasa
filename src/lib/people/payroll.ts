@@ -80,7 +80,10 @@ type DeductionField = 'epf_cents' | 'socso_cents' | 'eis_cents' | 'pcb_cents' | 
 
 const sum = (rows: Payslip[], field: DeductionField) => rows.reduce((total, row) => total + row[field], 0);
 
-const rowOf = (p: Payslip): PayslipRow => ({ ...p, deductions_cents: p.gross_cents - p.net_cents });
+/** Everything between a payslip's gross and net, as the row records them. The one place it is derived. */
+export const deductionsOf = (p: Payslip): number => p.gross_cents - p.net_cents;
+
+const rowOf = (p: Payslip): PayslipRow => ({ ...p, deductions_cents: deductionsOf(p) });
 
 /**
  * `runId` picks a run; an id that names no run falls back to the newest with payslips.
@@ -183,6 +186,8 @@ export async function readPayroll(
 
 /** Shown on a draft run. */
 export const DRAFT_BANNER = "Draft: employees can't see this yet";
+/** Shown in place of the Run payroll dialog when no month is left to run. */
+export const NO_MONTH_TO_RUN = 'Every month up to now already has a payroll run.';
 /** Under "Proposed deductions" wherever the four figures are listed. */
 export const PROPOSED_NOTE = 'Proposed figures. Check them before marking the run as paid.';
 
@@ -261,7 +266,20 @@ export function runIdFromParam(raw: string | string[] | undefined): string | nul
 /** Cents as the text a form field holds: `1200.50`. Integer arithmetic only. */
 export function centsToField(cents: number): string {
   const abs = Math.abs(Math.trunc(cents));
-  return `${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, '0')}`;
+  return `${cents < 0 ? '-' : ''}${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, '0')}`;
+}
+
+/** The note under a run or recalculation about overtime for work before the run's month; null for none. */
+export function earlierOvertimeLine(count: number): string | null {
+  if (count <= 0) return null;
+  return count === 1
+    ? 'Includes 1 overtime claim from an earlier month.'
+    : `Includes ${count} overtime claims from earlier months.`;
+}
+
+/** Whether `month` (`YYYY-MM`) is a real month from `first` through `last`, both inclusive. */
+export function monthInRange(month: string, first: string, last: string): boolean {
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(month) && month >= first && month <= last;
 }
 
 const FIGURES: {
@@ -326,7 +344,7 @@ export function payslipDetailModel(p: Payslip): PayslipDetailModel {
       set_by_hr: p.set_by_hr.includes(f.field),
     })),
     other_cents: p.other_deductions_cents,
-    deductions_cents: p.gross_cents - p.net_cents,
+    deductions_cents: deductionsOf(p),
     net_cents: p.net_cents,
   };
 }

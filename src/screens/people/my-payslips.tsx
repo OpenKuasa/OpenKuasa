@@ -1,25 +1,11 @@
 import { Receipt } from 'lucide-react';
 import { BentoCard, BentoGrid } from '@/components/bento/bento';
+import { PayslipDetail } from '@/components/people/payslip-detail';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
-import { NO_PAYSLIPS_TEXT, payslipBreakdown, readOwnPayslips } from '@/lib/people/my-payslips';
+import { NO_PAYSLIPS_TEXT, readOwnPayslips } from '@/lib/people/my-payslips';
 import { centsToRinggit } from '@/lib/people/payroll-forms';
-import type { Payslip } from '@/lib/people/types';
 import { LOAD_FAILED, Muted, NotLinkedCard, loadPeople } from './parts';
-
-// Replaced by PayslipDetail from payslip-detail.tsx when Task 3 lands (coordinator)
-function PayslipDetail({ payslip }: { payslip: Payslip; editable: boolean }) {
-  return (
-    <dl className="divide-y text-sm">
-      {payslipBreakdown(payslip).map((row) => (
-        <div key={row.key} className="flex items-center justify-between gap-3 py-2">
-          <dt className={row.key === 'gross' || row.key === 'net' ? 'font-semibold' : 'text-muted-foreground'}>{row.label}</dt>
-          <dd className="tabular-nums">{row.value}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
 
 /** The signed-in employee's own paid payslips, newest first. A draft is never read, so never shown. */
 export default async function MyPayslipsScreen() {

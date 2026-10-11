@@ -1,9 +1,14 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   DRAFT_BANNER,
   PROPOSED_NOTE,
   centsToField,
   deleteDraftSentence,
+  deductionsOf,
+  earlierOvertimeLine,
+  monthInRange,
   markPaidSentence,
   paidLine,
   payslipDetailModel,
@@ -185,5 +190,73 @@ describe('payslipDetailModel', () => {
   it('handles a payslip with no lines', () => {
     const m = payslipDetailModel(slip({ lines: [], set_by_hr: [] }));
     expect([m.pay_lines, m.deduction_lines]).toEqual([[], []]);
+  });
+});
+
+describe('earlierOvertimeLine', () => {
+  it('says nothing for none, and counts claims otherwise', () => {
+    expect(earlierOvertimeLine(0)).toBeNull();
+    expect(earlierOvertimeLine(1)).toBe('Includes 1 overtime claim from an earlier month.');
+    expect(earlierOvertimeLine(3)).toBe('Includes 3 overtime claims from earlier months.');
+  });
+});
+
+describe('centsToField with a negative', () => {
+  it('keeps the minus sign', () => {
+    expect(centsToField(-120_050)).toBe('-1200.50');
+    expect(centsToField(-5)).toBe('-0.05');
+  });
+});
+
+describe('deductionsOf', () => {
+  it('is the one place a payslip row gets its deductions, and the detail uses it', () => {
+    const p = slip();
+    expect(deductionsOf(p)).toBe(99_000);
+    expect(payslipDetailModel(p).deductions_cents).toBe(deductionsOf(p));
+  });
+});
+
+describe('monthInRange', () => {
+  it('accepts the offered month through this month only', () => {
+    expect(monthInRange('2026-08', '2026-08', '2026-10')).toBe(true);
+    expect(monthInRange('2026-10', '2026-08', '2026-10')).toBe(true);
+    expect(monthInRange('2026-07', '2026-08', '2026-10')).toBe(false);
+    expect(monthInRange('2026-11', '2026-08', '2026-10')).toBe(false);
+    expect(monthInRange('', '2026-08', '2026-10')).toBe(false);
+    expect(monthInRange('2026-13', '2026-08', '2026-12')).toBe(false);
+  });
+});
+
+/** Every local module `payslip-detail.tsx` reaches, transitively. */
+function reachable(entry: string): Map<string, string> {
+  const seen = new Map<string, string>();
+  const queue = [entry];
+  while (queue.length > 0) {
+    const file = queue.pop()!;
+    if (seen.has(file)) continue;
+    const source = readFileSync(file, 'utf8');
+    seen.set(file, source);
+    for (const m of source.matchAll(/(?:import|export)\s[^;]*?from\s+'([^']+)'|import\s+'([^']+)'/g)) {
+      const spec = m[1] ?? m[2];
+      const base = spec.startsWith('@/') ? join(resolve('src'), spec.slice(2)) : spec.startsWith('.') ? resolve(dirname(file), spec) : null;
+      if (!base) continue;
+      const found = ['.ts', '.tsx', '/index.ts', '/index.tsx'].map((e) => base + e).find((p) => existsSync(p));
+      if (found) queue.push(found);
+    }
+  }
+  return seen;
+}
+
+describe('PayslipDetail is safe to import into a member page', () => {
+  const graph = reachable(resolve('src/components/people/payslip-detail.tsx'));
+  it('reaches a real set of modules', () => {
+    expect(graph.size).toBeGreaterThan(2);
+  });
+  it('reaches no server action and no editing module', () => {
+    for (const [file, source] of graph) {
+      expect(file, file).not.toMatch(/payroll-actions|payslip-editor|payslip-line-form|statutory-field/);
+      expect(source, file).not.toMatch(/payroll-actions/);
+      expect(source, file).not.toMatch(/['"]use server['"]/);
+    }
   });
 });

@@ -2,12 +2,14 @@ import { PieChart, ReceiptText, TrendingUp, Users } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { AreaTrend, DonutStat, type Series, type Slice } from '@/components/charts';
 import { PayslipDetail } from '@/components/people/payslip-detail';
+import { PayslipEditor } from '@/components/people/payslip-editor';
 import { PayslipDialog, RunActions, RunPayrollDialog, RunPicker } from '@/components/people/payroll-run-controls';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
+import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { todayInMalaysia } from '@/lib/people/dates';
-import { DRAFT_BANNER, paidLine, readPayroll, runControls, runIdFromParam } from '@/lib/people/payroll';
+import { DRAFT_BANNER, NO_MONTH_TO_RUN, paidLine, readPayroll, runControls, runIdFromParam } from '@/lib/people/payroll';
 import { centsToRinggit, nextRunMonth } from '@/lib/people/payroll-forms';
 import type { StatutoryField } from '@/lib/people/types';
 import { HrOnlyScreen, LOAD_FAILED, LaterButton, Muted, StatusPill, loadPeople } from './parts';
@@ -53,17 +55,16 @@ export default async function PayrollScreen({
   const latest = model?.latest ?? null;
   const controls = runControls(latest, viewer);
   const dash = '—';
-  const slices: Slice[] = (model?.deductions ?? []).map((d, index) => ({
+  // "Other" is left out of the donut and its legend when it is nothing.
+  const slices: Slice[] = (model?.deductions ?? []).filter((d) => d.key !== 'other' || d.value > 0).map((d, index) => ({
     key: d.key,
     label: d.label,
     value: d.value / 100,
     color: DEDUCTION_COLORS[index % DEDUCTION_COLORS.length],
   }));
   const noRun = <Muted>No payroll run yet</Muted>;
-  const defaultMonth = nextRunMonth(
-    (model?.runs ?? []).map((r) => ({ ...r, paid_at: null, paid_by_name: null })),
-    todayInMalaysia(new Date()),
-  );
+  const thisMonth = todayInMalaysia(new Date()).slice(0, 7);
+  const firstMonth = nextRunMonth(model?.runs ?? [], thisMonth + '-01');
 
   return (
     <ScreenContainer>
@@ -76,8 +77,15 @@ export default async function PayrollScreen({
             <LaterButton variant="outline" size="sm" compact>Export</LaterButton>
             {viewer.isDemo || !model ? (
               <LaterButton size="sm">Run payroll</LaterButton>
+            ) : firstMonth === null ? (
+              <span className="inline-flex items-center gap-2">
+                <Button type="button" size="sm" disabled>
+                  Run payroll
+                </Button>
+                <span className="text-xs text-muted-foreground">{NO_MONTH_TO_RUN}</span>
+              </span>
             ) : (
-              <RunPayrollDialog defaultMonth={defaultMonth} />
+              <RunPayrollDialog firstMonth={firstMonth} lastMonth={thisMonth} />
             )}
           </>
         }
@@ -196,7 +204,11 @@ export default async function PayrollScreen({
                       <TableRow key={s.id}>
                         <TableCell className="whitespace-nowrap font-medium">
                           <PayslipDialog name={s.employee_name} monthText={latest.label}>
-                            <PayslipDetail payslip={s} editable={controls.recalculate} />
+                            {controls.recalculate ? (
+                              <PayslipEditor payslip={s} />
+                            ) : (
+                              <PayslipDetail payslip={s} editable={false} />
+                            )}
                           </PayslipDialog>
                         </TableCell>
                         <TableCell className="whitespace-nowrap text-right tabular-nums">

@@ -17,7 +17,9 @@ import { type CapResult, WRITE_FAILED } from '@/lib/people/capabilities';
 import {
   type RunControls,
   deleteDraftSentence,
+  earlierOvertimeLine,
   markPaidSentence,
+  monthInRange,
   runPayrollSentence,
   skippedRows,
   undoPaidSentence,
@@ -25,8 +27,6 @@ import {
 import { monthLabel } from '@/lib/people/payroll-forms';
 import type { RunResult } from '@/lib/people/payroll-writes';
 import { RowPrompt } from './request-row';
-
-const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 async function settle<T>(call: () => Promise<CapResult<T>>): Promise<CapResult<T>> {
   try {
@@ -36,20 +36,26 @@ async function settle<T>(call: () => Promise<CapResult<T>>): Promise<CapResult<T
   }
 }
 
-/** People a run or recalculation left out, each with the reason. */
-function Skipped({ skipped }: { skipped: RunResult['skipped'] }) {
+/** What a run or recalculation noted: overtime paid late, and the people left out with the reason. */
+function Skipped({ skipped, earlierOvertime }: { skipped: RunResult['skipped']; earlierOvertime: number }) {
   const rows = skippedRows(skipped);
-  if (rows.length === 0) return null;
+  const earlier = earlierOvertimeLine(earlierOvertime);
+  if (rows.length === 0 && !earlier) return null;
   return (
-    <div className="space-y-1 text-sm">
-      <p className="font-medium">Left out ({rows.length})</p>
-      <ul className="space-y-0.5 text-muted-foreground">
-        {rows.map((r) => (
-          <li key={r.id}>
-            {r.name}: {r.reason}
-          </li>
-        ))}
-      </ul>
+    <div className="space-y-2 text-sm">
+      {earlier ? <p className="text-muted-foreground">{earlier}</p> : null}
+      {rows.length > 0 ? (
+        <div className="space-y-1">
+          <p className="font-medium">Left out ({rows.length})</p>
+          <ul className="space-y-0.5 text-muted-foreground">
+            {rows.map((r) => (
+              <li key={r.id}>
+                {r.name}: {r.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -59,7 +65,8 @@ function Skipped({ skipped }: { skipped: RunResult['skipped'] }) {
  * server accepts, it opens the new draft and lists anyone left out. In the demo the screen shows the later-button
  * instead of this.
  */
-export function RunPayrollDialog({ defaultMonth }: { defaultMonth: string }) {
+export function RunPayrollDialog({ firstMonth, lastMonth }: { firstMonth: string; lastMonth: string }) {
+  const defaultMonth = firstMonth;
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
@@ -67,7 +74,7 @@ export function RunPayrollDialog({ defaultMonth }: { defaultMonth: string }) {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<RunResult | null>(null);
   const id = useId();
-  const valid = MONTH.test(month);
+  const valid = monthInRange(month, firstMonth, lastMonth);
 
   function show(next: boolean) {
     if (next) {
@@ -111,7 +118,7 @@ export function RunPayrollDialog({ defaultMonth }: { defaultMonth: string }) {
                   done.payslips === 1 ? 'payslip' : 'payslips'
                 }. Check it, then mark it as paid.`}
               </Dialog.Description>
-              <Skipped skipped={done.skipped} />
+              <Skipped skipped={done.skipped} earlierOvertime={done.earlier_overtime} />
               <div className="flex justify-end">
                 <Button type="button" onClick={() => setOpen(false)}>
                   Done
@@ -132,7 +139,8 @@ export function RunPayrollDialog({ defaultMonth }: { defaultMonth: string }) {
                   id={`${id}-month`}
                   type="month"
                   required
-                  min="2000-01"
+                  min={firstMonth}
+                  max={lastMonth}
                   disabled={pending}
                   value={month}
                   onChange={(event) => {
@@ -189,6 +197,8 @@ export function RunActions({
   const [pending, start] = useTransition();
   const [step, setStep] = useState<Step>('idle');
   const [error, setError] = useState<string | null>(null);
+  // The Recalculate refusal sits beside that button; the others sit under their prompt.
+  const [recalcError, setRecalcError] = useState<string | null>(null);
   const [recalculated, setRecalculated] = useState<RunResult | null>(null);
   const refocus = useRef<HTMLButtonElement | null>(null);
   const triggers = useRef<Partial<Record<Step, HTMLButtonElement | null>>>({});
@@ -199,6 +209,7 @@ export function RunActions({
     setShownFor(key);
     setStep('idle');
     setError(null);
+    setRecalcError(null);
     setRecalculated(null);
   }
   useEffect(() => {
@@ -214,18 +225,20 @@ export function RunActions({
   };
   const open = (next: Step) => {
     setError(null);
+    setRecalcError(null);
     setRecalculated(null);
     setStep(step === next ? 'idle' : next);
   };
 
   function recalculate() {
     setError(null);
+    setRecalcError(null);
     setRecalculated(null);
     setStep('idle');
     start(async () => {
       const result = await settle(() => recalculatePayrollAction({ run_id: runId }));
-      if (result.ok) setRecalculated(result.data as RunResult);
-      else setError(result.error);
+      if (result.ok) setRecalculated(result.data);
+      else setRecalcError(result.error);
     });
   }
 
@@ -282,6 +295,11 @@ export function RunActions({
             {pending && step === 'idle' ? 'Working…' : 'Recalculate'}
           </Button>
         ) : null}
+        {recalcError ? (
+          <p role="alert" className="text-sm text-destructive">
+            {recalcError}
+          </p>
+        ) : null}
         {controls.markPaid ? trigger('paying', 'Mark as paid') : null}
         {controls.deleteDraft ? trigger('deleting', 'Delete draft') : null}
         {controls.undoPaid ? trigger('undoing', 'Undo paid') : null}
@@ -305,6 +323,11 @@ export function RunActions({
               Keep
             </Button>
           </div>
+          {error ? (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          ) : null}
         </RowPrompt>
       ) : null}
       {recalculated ? (
@@ -314,13 +337,8 @@ export function RunActions({
               ? `Recalculated. ${recalculated.added} ${recalculated.added === 1 ? 'payslip' : 'payslips'} added.`
               : 'Recalculated. No new payslips.'}
           </p>
-          <Skipped skipped={recalculated.skipped} />
+          <Skipped skipped={recalculated.skipped} earlierOvertime={recalculated.earlier_overtime} />
         </div>
-      ) : null}
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
       ) : null}
     </div>
   );

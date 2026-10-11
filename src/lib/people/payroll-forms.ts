@@ -58,7 +58,7 @@ export function monthLabel(month: string): string {
  * month when there are no runs. A gap behind the latest run is not filled in; the month is still free to choose.
  * `YYYY-MM`, or null when the latest run is already this month or later: there is nothing the database would accept.
  */
-export function nextRunMonth(runs: PayrollRun[], today: string): string | null {
+export function nextRunMonth(runs: Pick<PayrollRun, 'period_month'>[], today: string): string | null {
   const current = today.slice(0, 7);
   const latest = runs.reduce<string | null>(
     (best, run) => (best === null || run.period_month > best ? run.period_month : best),
