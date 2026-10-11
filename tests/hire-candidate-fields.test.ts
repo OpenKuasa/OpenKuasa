@@ -65,6 +65,11 @@ describe('candidateProblems', () => {
     expect(link('https://a.co/cv.pdf')).toBeUndefined();
     expect(link('http://a.co/cv.pdf')).toBeUndefined();
     expect(link('ftp://a.co')).toBe('Enter a link that starts with https://');
+    // As the database reads it: something after the scheme, no space inside, and the scheme in lower case.
+    expect(link('https://')).toBe('Enter a link that starts with https://');
+    expect(link('https://a b')).toBe('Enter a link that starts with https://');
+    expect(link('HTTPS://a.co')).toBe('Enter a link that starts with https://');
+    expect(link('http://a.co')).toBeUndefined();
     expect(link('javascript:alert(1)')).toBe('Enter a link that starts with https://');
     expect(link(`https://${x(492)}`)).toBeUndefined();
     expect(link(`https://${x(493)}`)).toBe('Keep the CV link to 500 characters or fewer.');

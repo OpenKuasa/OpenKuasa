@@ -69,7 +69,8 @@ export function candidateProblems(
     }
     const url = values.cv_url.trim();
     if (url.length > CANDIDATE_LIMITS.url) problems.cv_url = tooLong('CV link', CANDIDATE_LIMITS.url);
-    else if (url && !/^https?:\/\//i.test(url)) problems.cv_url = CANDIDATE_MESSAGES.invalid_url;
+    // The database's own shape: a lower-case scheme, something after it, and no space inside.
+    else if (url && !/^https?:\/\/\S+$/.test(url)) problems.cv_url = CANDIDATE_MESSAGES.invalid_url;
   }
   return problems;
 }
