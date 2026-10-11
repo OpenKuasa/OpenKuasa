@@ -97,15 +97,17 @@ describe('applyProposalAction', () => {
     claimResult = { ...claimRow };
     rejectResult = null;
     updates.length = 0;
-    (getViewer as ReturnType<typeof vi.fn>).mockResolvedValue({ orgId: 'org-1', role: 'owner', isDemo: false });
+    (getViewer as ReturnType<typeof vi.fn>).mockResolvedValue({ userId: 'user-1', orgId: 'org-1', role: 'owner', isDemo: false });
   });
 
-  it('claims then applies under the owner session, with no failure flip', async () => {
+  it('claims (stamping decided_by) then applies and records the result, no failure flip', async () => {
     const res = await applyProposalAction({ id: ID });
     expect(res).toEqual({ ok: true });
-    expect(updates).toHaveLength(1);
-    expect(updates[0].patch).toMatchObject({ status: 'approved' });
+    expect(updates).toHaveLength(2);
+    expect(updates[0].patch).toMatchObject({ status: 'approved', decided_by: 'user-1' });
     expect(updates[0].chain).toEqual(['eq', 'eq', 'eq', 'gt', 'select']);
+    expect(updates[1].patch).toMatchObject({ result: { contact_id: 'c1' } });
+    expect(updates[1].chain).toEqual(['eq', 'eq']);
     expect(promoteLeadToContact).toHaveBeenCalledTimes(1);
     const [calledCtx, calledInput] = (promoteLeadToContact as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(calledCtx.orgId).toBe('org-1');
@@ -147,19 +149,19 @@ describe('rejectProposalAction', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     updates.length = 0;
-    (getViewer as ReturnType<typeof vi.fn>).mockResolvedValue({ orgId: 'org-1', role: 'owner', isDemo: false });
+    (getViewer as ReturnType<typeof vi.fn>).mockResolvedValue({ userId: 'user-1', orgId: 'org-1', role: 'owner', isDemo: false });
   });
   it('is denied for a viewer', async () => {
-    (getViewer as ReturnType<typeof vi.fn>).mockResolvedValue({ orgId: 'org-1', role: 'viewer', isDemo: false });
+    (getViewer as ReturnType<typeof vi.fn>).mockResolvedValue({ userId: 'user-1', orgId: 'org-1', role: 'viewer', isDemo: false });
     const res = await rejectProposalAction({ id: ID });
     expect(res.ok).toBe(false);
     expect(updates).toHaveLength(0);
   });
-  it('rejects a pending proposal', async () => {
+  it('rejects a pending proposal, stamping decided_by', async () => {
     rejectResult = { id: 'p1' };
     const res = await rejectProposalAction({ id: ID });
     expect(res).toEqual({ ok: true });
-    expect(updates[0].patch).toMatchObject({ status: 'rejected' });
+    expect(updates[0].patch).toMatchObject({ status: 'rejected', decided_by: 'user-1' });
     expect(promoteLeadToContact).not.toHaveBeenCalled();
   });
   it('reports already handled when nothing matched', async () => {

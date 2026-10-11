@@ -91,11 +91,11 @@ const FORBIDDEN: CapResult<never> = { ok: false, error: 'You do not have permiss
 const INVALID: CapResult<never> = { ok: false, error: 'That input was not valid.' };
 
 /** Resolve a write context after checking the viewer may edit data. */
-async function writeCtx(): Promise<ReachWriteContext | null> {
+async function writeCtx(): Promise<(ReachWriteContext & { userId: string }) | null> {
   const viewer = await getViewer();
   if (viewer.isDemo || !can(viewer.role, 'edit-data')) return null;
   const client = await createClient();
-  return { client, orgId: viewer.orgId };
+  return { client, orgId: viewer.orgId, userId: viewer.userId };
 }
 
 /** Parse → guard → capability → revalidate. The screens pass a typed object. */
@@ -425,7 +425,7 @@ export async function applyProposalAction(input: unknown): Promise<{ ok: boolean
   if (!ctx) return { ok: false, error: 'You do not have permission to make changes here.' };
   const { data: claimed } = await ctx.client
     .from('agent_proposals')
-    .update({ status: 'approved', decided_at: new Date().toISOString() })
+    .update({ status: 'approved', decided_at: new Date().toISOString(), decided_by: ctx.userId })
     .eq('id', parsed.data.id)
     .eq('org_id', ctx.orgId)
     .eq('status', 'pending')
@@ -443,6 +443,17 @@ export async function applyProposalAction(input: unknown): Promise<{ ok: boolean
     for (const path of AGENTS_PATHS) revalidatePath(path);
     return { ok: false, error: 'The change could not be applied.' };
   }
+  // Record what the apply produced on the now-approved row (informational, best-effort:
+  // the change already landed, so a failed stamp must not fail the action).
+  try {
+    await ctx.client
+      .from('agent_proposals')
+      .update({ result: applied.result as never })
+      .eq('id', parsed.data.id)
+      .eq('org_id', ctx.orgId);
+  } catch {
+    // the apply succeeded; the result column is informational
+  }
   for (const path of AGENTS_PATHS) revalidatePath(path);
   return { ok: true };
 }
@@ -455,7 +466,7 @@ export async function rejectProposalAction(input: unknown): Promise<{ ok: boolea
   if (!ctx) return { ok: false, error: 'You do not have permission to make changes here.' };
   const { data } = await ctx.client
     .from('agent_proposals')
-    .update({ status: 'rejected', decided_at: new Date().toISOString() })
+    .update({ status: 'rejected', decided_at: new Date().toISOString(), decided_by: ctx.userId })
     .eq('id', parsed.data.id)
     .eq('org_id', ctx.orgId)
     .eq('status', 'pending')
