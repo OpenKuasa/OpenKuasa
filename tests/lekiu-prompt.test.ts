@@ -13,6 +13,16 @@ describe('LEKIU_SYSTEM', () => {
     expect(t).toContain('bahasa malaysia by default');
     expect(t).toContain('not indonesian');
   });
+  it('answers in the language of the latest message, the line before a tool call included', () => {
+    expect(t).toContain("reply in the language of the user's latest message");
+    expect(t).toContain('a message in english gets english');
+    expect(t).toContain('show wording, not which language to use');
+    expect(t).toContain('"one moment, let me check..." for english');
+    expect(t).not.toContain('switch fully to english only if');
+    // It leads the block: with "Bahasa Malaysia by default" first, a real model answered English in Bahasa Malaysia.
+    expect(t).toMatch(/language\n- reply in the language of the user's latest message/);
+    expect(t).not.toMatch(/- reply in bahasa malaysia by default/);
+  });
   it('uses the HR words Malaysians use', () => {
     for (const word of ['cuti', 'tuntutan', 'gaji', 'kwsp', 'perkeso', 'pcb']) expect(t, word).toContain(word);
   });
