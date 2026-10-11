@@ -127,12 +127,26 @@ describe('buildTeamAttendanceModel', () => {
     expect(build({ date: TODAY }).rows[0]).toMatchObject({ status: null, label: 'Not clocked in yet' });
   });
 
-  it('shows approved full-day leave with no row as leave, but not half-day, pending or other days', () => {
+  it('shows approved leave with no row on a past day as leave (half day too), but not pending or other days', () => {
     const rows = (l: LeaveRequest) => build({ leave: [l] }).rows.find((r) => r.employeeId === 'e2')!;
     expect(rows(leave({}))).toMatchObject({ status: 'on_leave', label: 'On leave' });
-    expect(rows(leave({ half_day: true })).label).toBe('No record');
+    expect(rows(leave({ half_day: true })).label).toBe('On leave');
     expect(rows(leave({ status: 'pending' })).label).toBe('No record');
     expect(rows(leave({ start_date: '2026-10-09', end_date: '2026-10-09' })).label).toBe('No record');
+  });
+
+  it('on today, reads only full-day leave as leave: a half day can still clock in', () => {
+    const today = (l: Partial<LeaveRequest>) =>
+      build({ date: TODAY, leave: [leave({ start_date: TODAY, end_date: TODAY, ...l })] }).rows.find((r) => r.employeeId === 'e2')!;
+    expect(today({}).label).toBe('On leave');
+    expect(today({ half_day: true }).label).toBe('Not clocked in yet');
+  });
+
+  it('lists an inactive employee only on a day that has a row for them, marked inactive', () => {
+    const gone = emp('e9', 'Gone', { status: 'inactive' });
+    const withRow = build({ employees: [emp('e1', 'Amirul'), gone], attendance: [day({ employee_id: 'e9' })] });
+    expect(withRow.rows.map((r) => [r.name, r.inactive])).toEqual([['Amirul', false], ['Gone', true]]);
+    expect(build({ employees: [emp('e1', 'Amirul'), gone] }).rows.map((r) => r.name)).toEqual(['Amirul']);
   });
 
   it('shows nothing for an employee with no row on a weekend or a holiday, but still gives the prefill', () => {

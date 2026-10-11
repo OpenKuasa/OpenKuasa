@@ -7,7 +7,7 @@ import { AttendanceSettingsForm } from '@/components/people/attendance-settings-
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { loadSettingsModel } from '@/lib/people/documents';
-import { HrOnlyScreen, LOAD_FAILED, LaterButton, loadPeople } from './parts';
+import { HrOnlyScreen, LOAD_FAILED, loadPeople } from './parts';
 
 function ValueRow({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -107,10 +107,6 @@ export default async function SettingsScreen() {
           )}
         </BentoCard>
       </BentoGrid>
-
-      <div className="mt-4 flex justify-end">
-        <LaterButton>Save changes</LaterButton>
-      </div>
     </ScreenContainer>
   );
 }

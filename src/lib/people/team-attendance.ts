@@ -46,6 +46,8 @@ export type TeamAttendanceRow = {
   noClockOut: boolean;
   /** Today, clocked in, not out yet: not a missing clock-out. */
   stillIn: boolean;
+  /** An inactive employee listed only because the day has a row for them. */
+  inactive: boolean;
   corrected: boolean;
   note: string | null;
   prefill: CorrectionPrefill;
@@ -60,7 +62,7 @@ export type TeamAttendanceModel = {
   /** "Friday, 09 Oct 2026". */
   heading: string;
   workingDay: boolean;
-  /** Why it is not a working day ("Public holiday: Deepavali", "Weekend"); null on a working day. */
+  /** Why it is not a working day ("Public holiday: Deepavali", "Not a working day"); null on a working day. */
   nonWorkingReason: string | null;
   previous: string;
   /** Null when the day shown is today. */
@@ -145,10 +147,16 @@ export function buildTeamAttendanceModel(input: TeamAttendanceInput): TeamAttend
   for (const day of input.attendance) if (day.work_date === date) byEmployee.set(day.employee_id, day);
 
   const rows = input.employees
-    .filter((e) => e.status === 'active')
+    // An inactive employee stays listed on a day that has a row for them, so a recorded day does not vanish.
+    .filter((e) => e.status === 'active' || byEmployee.has(e.id))
     .map((employee): TeamAttendanceRow => {
       const day = byEmployee.get(employee.id) ?? null;
-      const base = { employeeId: employee.id, name: employee.name, department: employee.department_name };
+      const base = {
+        employeeId: employee.id,
+        name: employee.name,
+        department: employee.department_name,
+        inactive: employee.status !== 'active',
+      };
 
       if (day) {
         const times = day.status === 'present' || day.status === 'late';
@@ -180,10 +188,17 @@ export function buildTeamAttendanceModel(input: TeamAttendanceInput): TeamAttend
       const prefill: CorrectionPrefill = { status: 'present', clock_in: '', clock_out: '', note: '' };
       if (!kind.working) return { ...base, ...empty, status: null, label: '', tone: 'neutral', prefill };
 
-      // The nightly close writes leave days; until it runs, approved full-day leave still shows as leave.
+      // A preview from the leave records, not from a row: the nightly close may never write one for this person
+      // (it skips workspaces not yet using attendance, employees with no linked account, and days before someone
+      // joined), and the leave is still true. A past day reads as the close will write it, a half day included;
+      // today only full-day leave is "On leave", since a half-day leave can still clock in.
       const away = input.leave.some(
         (r) =>
-          r.employee_id === employee.id && r.status === 'approved' && !r.half_day && r.start_date <= date && r.end_date >= date,
+          r.employee_id === employee.id &&
+          r.status === 'approved' &&
+          (isToday ? !r.half_day : true) &&
+          r.start_date <= date &&
+          r.end_date >= date,
       );
       if (away) return { ...base, ...empty, status: 'on_leave', label: 'On leave', tone: 'neutral', prefill };
       return {

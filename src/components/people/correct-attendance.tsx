@@ -133,6 +133,7 @@ export function CorrectAttendance({
                 Status
                 <select
                   id={`${ids}-status`}
+                  data-autofocus
                   className={SELECT_CLASS}
                   disabled={off}
                   value={status}

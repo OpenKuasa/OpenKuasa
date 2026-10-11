@@ -19,9 +19,9 @@ const dash = '—';
 export default async function TeamAttendanceScreen({
   searchParams,
 }: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const raw = (await searchParams).date;
+  const raw = ((await searchParams) ?? {}).date;
   const { model, viewer } = await loadPeople('attendance', (data, now, ctx) =>
     loadTeamAttendance(data, ctx.viewer, raw, todayInMalaysia(now)),
   );
@@ -132,6 +132,7 @@ export default async function TeamAttendanceScreen({
                     <RequestRow key={row.employeeId} columns={COLUMNS}>
                       <TableCell>
                         <EmployeeCell name={row.name} sub={row.department} />
+                        {row.inactive ? <span className="mt-0.5 block text-xs text-muted-foreground">Inactive</span> : null}
                       </TableCell>
                       <TableCell>
                         {row.label ? <StatusPill tone={row.tone}>{row.label}</StatusPill> : <span className="text-muted-foreground">{dash}</span>}
