@@ -7,6 +7,7 @@ import {
   Banknote,
   Download,
   FileCheck,
+  FileMinus,
   FileText,
   Pencil,
   PieChart,
@@ -14,16 +15,20 @@ import {
   Search,
   Trash2,
   TrendingUp,
+  Undo2,
 } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { AreaTrend, DonutStat, type Series } from '@/components/charts';
 import type { RecordPayment } from '@/components/finance/allocation-form-card';
 import { ConfirmRow } from '@/components/finance/confirm-row';
+import { CreditNoteFormCard, type CreditNoteFormActions } from '@/components/finance/credit-note-form-card';
 import { downloadCsv } from '@/components/finance/download-csv';
 import { EInvoiceCard } from '@/components/finance/einvoice-card';
 import { InvoiceFormCard, type InvoiceFormActions } from '@/components/finance/invoice-form-card';
 import { ReceiptFormCard } from '@/components/finance/receipt-form-card';
+import { RefundFormCard, type RecordRefund } from '@/components/finance/refund-form-card';
 import { RowMenu, type RowMenuItem } from '@/components/finance/row-menu';
+import { SavedNoteCard } from '@/components/finance/saved-note-card';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
@@ -35,12 +40,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { localIsoDate } from '@/lib/finance/bill-math';
 import type { FinanceContact } from '@/lib/finance/contacts';
+import { creditableInvoices } from '@/lib/finance/credit-note-form';
+import type { CreditNoteRow } from '@/lib/finance/credit-notes';
 import { csvFileName } from '@/lib/finance/csv';
 import { rm } from '@/lib/finance/format';
 import type { EInvoiceStatus, InvoiceDetail, InvoiceDisplayStatus, InvoiceListRow } from '@/lib/finance/invoices';
 import type { FinanceAccount, PaymentInRow } from '@/lib/finance/money';
 import type { FinanceProduct } from '@/lib/finance/products';
 import { receivableInvoices } from '@/lib/finance/receipt-form';
+import { invoiceTargetKey, refundTargets } from '@/lib/finance/refund-form';
+import type { RefundRow } from '@/lib/finance/refunds';
 import type { FinResult } from '@/lib/finance/result';
 import {
   EINVOICE_STATUS_LABELS,
@@ -66,6 +75,10 @@ export type InvoiceActions = InvoiceFormActions & {
   get: (input: unknown) => Promise<FinResult<InvoiceDetail>>;
   recordPayment: RecordPayment;
   setEInvoice: (input: unknown) => Promise<FinResult<{ id: string }>>;
+  /** A credit note against an invoice, from its row: saved as a draft, or saved and issued. */
+  creditNote: CreditNoteFormActions;
+  /** A refund of what a customer is in credit on an invoice, from its row. */
+  recordRefund: RecordRefund;
 };
 
 /** What only a person who may edit is given: the actions, and what the forms offer. */
@@ -78,6 +91,10 @@ export type InvoicesWriter = {
   accounts: FinanceAccount[];
   /** Every payment-in row, to know what an invoice can still take. */
   payments: PaymentInRow[];
+  /** Every credit note, so a refund can also be put against an issued one. */
+  creditNotes: CreditNoteRow[];
+  /** Every refund, to know what refunds that are pending already hold of a customer's credit. */
+  refunds: RefundRow[];
 };
 
 const TREND_SERIES: Series[] = [
@@ -99,12 +116,16 @@ const EINVOICE_STYLES: Record<Exclude<EInvoiceStatus, 'none'>, string> = {
   rejected: 'bg-red-500/15 text-red-600',
 };
 
-/** One thing open at a time: a form card, or a question in one row. */
+/** One thing open at a time: a form card, the note that something was saved, or a question in one row. */
 type Open =
   | { kind: 'new'; today: string; nonce: number }
   /** `detail` is null while the draft's lines are being read. */
   | { kind: 'edit'; invoice: InvoiceListRow; detail: InvoiceDetail | null; today: string }
   | { kind: 'pay'; invoice: InvoiceListRow; today: string }
+  | { kind: 'credit'; invoice: InvoiceListRow; today: string }
+  | { kind: 'refund'; invoice: InvoiceListRow; today: string }
+  /** A credit note or a refund has just been saved from this invoice's row. It shows on its own screen. */
+  | { kind: 'saved'; what: 'credit' | 'refund'; invoice: InvoiceListRow }
   | { kind: 'einvoice'; invoice: InvoiceListRow }
   | { kind: 'post'; invoice: InvoiceListRow }
   | { kind: 'void'; invoice: InvoiceListRow }
@@ -145,9 +166,12 @@ export function InvoicesView({
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
   const columns = writer ? 9 : 8;
   const receivable = writer ? receivableInvoices(rows, writer.payments) : [];
+  const creditable = writer ? creditableInvoices(rows) : [];
+  const targets = writer ? refundTargets(rows, writer.creditNotes, writer.refunds) : [];
   const asking = open && (open.kind === 'post' || open.kind === 'void' || open.kind === 'delete') ? open : null;
   // A form holds what was typed, so nothing else opens over it: it is closed with its own Cancel first.
-  const formOpen = open !== null && !asking;
+  // The note that something was saved holds nothing, and locks nothing.
+  const formOpen = open !== null && !asking && open.kind !== 'saved';
   // A row that is gone after a refresh takes its question with it; the message still has to be seen.
   const askingInView = asking ? shown.some((i) => i.id === asking.invoice.id) : false;
   const locked = confirm.pending || formOpen;
@@ -187,6 +211,10 @@ export function InvoicesView({
         return { label: 'Delete', icon: Trash2, destructive: true, opens: true, onSelect: () => ask({ kind: 'delete', invoice }) };
       case 'pay':
         return { label: 'Record payment', icon: Banknote, opens: true, onSelect: () => ask({ kind: 'pay', invoice, today: now() }) };
+      case 'credit':
+        return { label: 'Credit note', icon: FileMinus, opens: true, onSelect: () => ask({ kind: 'credit', invoice, today: now() }) };
+      case 'refund':
+        return { label: 'Refund', icon: Undo2, opens: true, onSelect: () => ask({ kind: 'refund', invoice, today: now() }) };
       case 'einvoice':
         return { label: 'Set e-Invois', icon: BadgeCheck, opens: true, onSelect: () => ask({ kind: 'einvoice', invoice }) };
       case 'void':
@@ -194,11 +222,13 @@ export function InvoicesView({
     }
   };
 
+  // Each choice is offered exactly when the form it opens would offer this invoice.
   const menu = (invoice: InvoiceListRow, actions: InvoiceActions): RowMenuItem[] =>
-    invoiceActions(
-      invoice,
-      receivable.some((r) => r.id === invoice.id),
-    ).map((action) => menuItem(invoice, action, actions));
+    invoiceActions(invoice, {
+      pay: receivable.some((r) => r.id === invoice.id),
+      credit: creditable.some((c) => c.id === invoice.id),
+      refund: targets.some((t) => t.key === invoiceTargetKey(invoice.id)),
+    }).map((action) => menuItem(invoice, action, actions));
 
   const question = (invoice: InvoiceListRow) => {
     if (!writer || !asking || asking.invoice.id !== invoice.id) return null;
@@ -329,6 +359,63 @@ export function InvoicesView({
     }
     if (open.kind === 'einvoice') {
       return <EInvoiceCard key={open.invoice.id} invoice={open.invoice} save={actions.setEInvoice} onClose={close} />;
+    }
+    if (open.kind === 'credit') {
+      const { invoice } = open;
+      return (
+        <CreditNoteFormCard
+          key={invoice.id}
+          invoices={rows}
+          today={open.today}
+          invoiceId={invoice.id}
+          actions={actions.creditNote}
+          onClose={close}
+          // The credit note is on Credit Notes; as a draft it changes nothing on this screen.
+          onSaved={() => ask({ kind: 'saved', what: 'credit', invoice })}
+        />
+      );
+    }
+    if (open.kind === 'refund') {
+      const { invoice } = open;
+      return (
+        <RefundFormCard
+          key={invoice.id}
+          targets={targets}
+          accounts={writer.accounts}
+          today={open.today}
+          preselect={invoiceTargetKey(invoice.id)}
+          record={actions.recordRefund}
+          onClose={close}
+          // The refund is on Refunds; left pending it changes no figure on this screen.
+          onSaved={() => ask({ kind: 'saved', what: 'refund', invoice })}
+        />
+      );
+    }
+    if (open.kind === 'saved') {
+      const subtitle = `${open.invoice.invoice_no ?? 'The invoice'} to ${open.invoice.customer_name}`;
+      return open.what === 'credit' ? (
+        <SavedNoteCard
+          key={`credit-${open.invoice.id}`}
+          title="Credit note saved"
+          subtitle={subtitle}
+          href="/finance/credit-notes"
+          linkLabel="Credit Notes"
+          onClose={close}
+        >
+          A draft is issued, changed or deleted, and an issued credit note can be voided or refunded, on
+        </SavedNoteCard>
+      ) : (
+        <SavedNoteCard
+          key={`refund-${open.invoice.id}`}
+          title="Refund recorded"
+          subtitle={subtitle}
+          href="/finance/refunds"
+          linkLabel="Refunds"
+          onClose={close}
+        >
+          A refund left pending is marked as paid or deleted, and one that was paid out can be voided, on
+        </SavedNoteCard>
+      );
     }
     return null;
   };

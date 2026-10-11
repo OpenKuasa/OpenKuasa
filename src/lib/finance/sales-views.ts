@@ -194,21 +194,40 @@ export function customerChoice(chosen: string, customers: { id: string }[]): str
   return chosen === 'all' || customers.some((c) => c.id === chosen) ? chosen : 'all';
 }
 
-export type InvoiceAction = 'edit' | 'post' | 'delete' | 'pay' | 'einvoice' | 'void';
+export type InvoiceAction = 'edit' | 'post' | 'delete' | 'pay' | 'credit' | 'refund' | 'einvoice' | 'void';
+
+/**
+ * What a posted invoice can still take. Each is worked out by the rule of the
+ * form it opens, from rows this file does not see: payments not yet posted,
+ * credit notes, and refunds that are pending.
+ */
+export type InvoiceCan = {
+  /** A payment in: `receivableInvoices` offers the invoice. */
+  pay: boolean;
+  /** A credit note: `creditableInvoices` offers the invoice. */
+  credit: boolean;
+  /** A refund: `refundTargets` offers the invoice. */
+  refund: boolean;
+};
 
 /**
  * What an invoice's row menu offers, in order: only what the database allows
  * for its status. A draft is edited, posted or deleted, never voided. A
  * posted invoice ("Sent", "Overdue", "Paid") has its e-Invois details set and
- * can be voided, and takes a payment while `canTakePayment`. Voiding one that
- * has payments is offered and refused with the reason, as on a paid bill. A
- * void invoice offers nothing.
+ * can be voided; it takes a payment while `can.pay` and it is not paid, a
+ * credit note while `can.credit`, paid or not, and a refund while
+ * `can.refund` and its customer is in credit, which only a paid invoice is.
+ * Voiding one that has payments, credit notes or refunds is offered and
+ * refused with the reason, as on a paid bill. A void invoice offers nothing.
  */
-export function invoiceActions(invoice: InvoiceListRow, canTakePayment: boolean): InvoiceAction[] {
+export function invoiceActions(invoice: InvoiceListRow, can: InvoiceCan): InvoiceAction[] {
   if (invoice.display_status === 'draft') return ['edit', 'post', 'delete'];
   if (invoice.display_status === 'void') return [];
-  const pay: InvoiceAction[] = canTakePayment && invoice.display_status !== 'paid' ? ['pay'] : [];
-  return [...pay, 'einvoice', 'void'];
+  const offered: InvoiceAction[] = [];
+  if (can.pay && invoice.display_status !== 'paid') offered.push('pay');
+  if (can.credit) offered.push('credit');
+  if (can.refund && inCredit(invoice) > 0) offered.push('refund');
+  return [...offered, 'einvoice', 'void'];
 }
 
 /**
