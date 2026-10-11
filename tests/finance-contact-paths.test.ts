@@ -33,7 +33,7 @@ describe('a change to a contact', () => {
     ['deleteContactAction', actions.deleteContactAction, { id: ID }],
   ];
 
-  it('refreshes every screen that shows a contact’s name, Invoices and Payments In included', async () => {
+  it('refreshes every screen that shows a contact’s name, the five sales screens included', async () => {
     for (const [name, action, input] of writes) {
       ctl.revalidated = [];
       expect(await action(input), name).toMatchObject({ ok: true });
@@ -43,6 +43,9 @@ describe('a change to a contact', () => {
         '/finance/payments-out',
         '/finance/invoices',
         '/finance/payments-in',
+        '/finance/quotations',
+        '/finance/credit-notes',
+        '/finance/refunds',
       ]);
     }
   });

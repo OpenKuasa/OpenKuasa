@@ -104,19 +104,31 @@ async function run<I, O>(
   return result;
 }
 
-// A contact's name shows on the bills, invoices and payments screens too.
+// A contact's name shows on every purchase and sales screen too.
 const CONTACT_PATHS = [
   '/finance/customers-suppliers',
   '/finance/supplier-bills',
   '/finance/payments-out',
   '/finance/invoices',
   '/finance/payments-in',
+  '/finance/quotations',
+  '/finance/credit-notes',
+  '/finance/refunds',
 ];
 const PRODUCT_PATHS = ['/finance/products'];
 // A bill or a payment changes what is owed, which Customers & Suppliers shows as Payable.
 const PURCHASE_PATHS = ['/finance/supplier-bills', '/finance/payments-out', '/finance/customers-suppliers'];
 // An invoice or a payment in changes what customers owe, which Customers & Suppliers shows as Receivable.
-const SALES_PATHS = ['/finance/invoices', '/finance/payments-in', '/finance/customers-suppliers'];
+// It also shows on the three follow-on screens: Quotations names the invoice made from a quotation, Credit
+// Notes names each note's invoice, and Refunds adds up what customers are in credit from the invoices.
+const SALES_PATHS = [
+  '/finance/invoices',
+  '/finance/payments-in',
+  '/finance/customers-suppliers',
+  '/finance/quotations',
+  '/finance/credit-notes',
+  '/finance/refunds',
+];
 
 /**
  * Saves a document as a draft, then posts it. When the save works and the

@@ -64,7 +64,15 @@ vi.mock('@/lib/finance/money', async (orig) => {
 
 const actions = await import('@/app/(app)/finance/actions');
 
-const PATHS = ['/finance/invoices', '/finance/payments-in', '/finance/customers-suppliers'];
+// A change to an invoice or a payment in shows on the three follow-on screens too.
+const PATHS = [
+  '/finance/invoices',
+  '/finance/payments-in',
+  '/finance/customers-suppliers',
+  '/finance/quotations',
+  '/finance/credit-notes',
+  '/finance/refunds',
+];
 const FORBIDDEN = { ok: false, error: 'You do not have permission to make changes here.' };
 
 const invoice = {
