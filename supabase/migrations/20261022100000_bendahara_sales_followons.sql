@@ -850,9 +850,15 @@ end $$;
 -- is coming from: a scheduled refund holds its part of the credit, a rejected
 -- one holds nothing, and another refund may have taken the credit meanwhile.
 -- The credit can also simply have gone, because the payment it refunds was
--- voided in between. The credit notes and then the invoices are locked while
--- this is read, in the order the guard on allocations locks them. A payment
--- out against bills has no such rows, so for it the loops do nothing.
+-- voided in between. Every credit note the refund names is locked first, then
+-- every invoice, and what the refund itself amounts to is read after each
+-- lock. For a refund with one allocation, which is every refund the app
+-- records, that is the order the guard on allocations locks in (the credit
+-- note, then its invoice). A payment split by hand across several credit
+-- notes is locked here as all notes, then all invoices, while the guard on
+-- allocations goes note, invoice, row by row; two such direct writes can
+-- deadlock, and Postgres ends one of them. A payment out against bills has
+-- no such rows, so for it the loops do nothing and no lock is taken.
 create or replace function private.finance_transaction_guard()
 returns trigger
 language plpgsql
@@ -864,6 +870,7 @@ declare
   owing numeric;
   note record;
   others numeric;
+  mine numeric;
 begin
   if tg_op = 'DELETE' then
     if old.status in ('posted','void') and exists (select 1 from public.orgs where id = old.org_id) then
@@ -909,10 +916,11 @@ begin
   -- A refund being paid out: look again at each credit note and each invoice
   -- it refunds. What this payment itself refunds is added by hand (mine),
   -- and every other sum leaves this payment out, so the answer does not
-  -- depend on the status it is coming from.
+  -- depend on the status it is coming from. mine is read after the row it is
+  -- measured against is locked, never carried over from the loop's query.
   if new.status = 'posted' and new.direction = 'out' then
     for r in
-      select a.credit_note_id, sum(a.amount) as mine
+      select a.credit_note_id
       from public.finance_allocations a
       where a.org_id = old.org_id and a.transaction_id = old.id and a.credit_note_id is not null
       group by 1
@@ -924,19 +932,23 @@ begin
       if not found or note.status <> 'issued' then
         raise exception 'a refund can only go against an issued credit note' using errcode = 'FIN04';
       end if;
+      -- What this payment refunds against the note, read now that the note is locked.
+      select coalesce(sum(a.amount), 0) into mine
+      from public.finance_allocations a
+      where a.org_id = old.org_id and a.transaction_id = old.id and a.credit_note_id = r.credit_note_id;
       -- Never more than the credit note itself, counting every other refund against it that stands.
       select coalesce(sum(a.amount), 0) into others
       from public.finance_allocations a
       join public.finance_transactions x on x.org_id = a.org_id and x.id = a.transaction_id
       where a.org_id = old.org_id and a.credit_note_id = r.credit_note_id and a.transaction_id <> old.id
         and x.status in ('draft','pending_approval','scheduled','posted');
-      if others + r.mine > note.amount then
+      if others + mine > note.amount then
         raise exception 'more than the credit note' using errcode = 'FIN05';
       end if;
     end loop;
 
     for r in
-      select coalesce(a.invoice_id, n.invoice_id) as invoice_id, sum(a.amount) as mine
+      select coalesce(a.invoice_id, n.invoice_id) as invoice_id
       from public.finance_allocations a
       left join public.finance_credit_notes n on n.org_id = a.org_id and n.id = a.credit_note_id
       where a.org_id = old.org_id and a.transaction_id = old.id and a.bill_id is null
@@ -971,7 +983,24 @@ begin
             and x.direction = 'out' and x.status in ('draft','pending_approval','scheduled')
         ), 0)
       into others;
-      if others + r.mine > greatest(-owing, 0) then
+      -- What this payment refunds on the invoice, against the invoice itself or
+      -- against one of its credit notes, read now that the invoice is locked.
+      -- The figure the loop started from was read before the lock, and a split
+      -- added to this payment in between would be in neither sum.
+      select
+        coalesce((
+          select sum(a.amount)
+          from public.finance_allocations a
+          where a.org_id = old.org_id and a.transaction_id = old.id and a.invoice_id = r.invoice_id
+        ), 0)
+        + coalesce((
+          select sum(a.amount)
+          from public.finance_credit_notes n
+          join public.finance_allocations a on a.org_id = n.org_id and a.credit_note_id = n.id
+          where n.org_id = old.org_id and n.invoice_id = r.invoice_id and a.transaction_id = old.id
+        ), 0)
+      into mine;
+      if others + mine > greatest(-owing, 0) then
         raise exception 'more than the customer is in credit' using errcode = 'FIN05';
       end if;
     end loop;

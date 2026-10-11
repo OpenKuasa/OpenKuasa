@@ -54,6 +54,8 @@ declare
   cnc uuid;
   cnd uuid;
   cne uuid;
+  cnf uuid;
+  rj3 uuid;
   rj1 uuid;
   rj2 uuid;
   rf5 uuid;
@@ -919,8 +921,21 @@ begin
   if (r.credited, r.refunded, r.balance) is distinct from (80.00, 40.00, -40.00) then
     fails := fails || format('with both rejected refunds refused, the invoice reads %s', row_to_json(r));
   end if;
+  -- A credit note whose only refund was rejected can be voided: nothing stands
+  -- against it. The rejected refund cannot then be paid out against the void
+  -- note, though the customer is still RM 40 in credit on the invoice. (A refund
+  -- that is waiting holds its credit note, so only a rejected one gets here.)
+  cnf := public.finance_save_credit_note(org, jsonb_build_object('invoice_id', ci3, 'reason', 'other', 'amount', 5));
+  perform public.finance_issue_credit_note(org, cnf);
+  insert into public.finance_transactions (org_id, direction, account_id, amount, method)
+  values (org, 'out', bank, 5, 'cash') returning id into rj3;
+  insert into public.finance_allocations (org_id, transaction_id, credit_note_id, amount) values (org, rj3, cnf, 5);
+  update public.finance_transactions set status = 'rejected', updated_at = now() where id = rj3;
+  update public.finance_credit_notes set status = 'void', updated_at = now() where id = cnf;
+  fails := fails || public.bendahara_check_try('a rejected refund is paid out after its credit note was voided', 'FIN04',
+    format('update public.finance_transactions set status = %L, number = %L, updated_at = now() where id = %L', 'posted', 'PV-CHECK-R3', rj3));
   -- A rejected refund was never paid out, so it can be deleted.
-  delete from public.finance_transactions where id in (rj1, rj2) and status = 'rejected';
+  delete from public.finance_transactions where id in (rj1, rj2, rj3) and status = 'rejected';
 
   -- ---- an invoice with a credit note cannot be voided -------------------------
   -- "theirs" has no money on it. A draft credit note is enough to hold it.
@@ -969,7 +984,7 @@ begin
   select count(*) into n from public.finance_quotation_totals where org_id = org;
   if n <> 3 then fails := fails || format('a viewer reads %s of 3 quotations', n); end if;
   select count(*) into n from public.finance_credit_note_totals where org_id = org;
-  if n <> 9 then fails := fails || format('a viewer reads %s of 9 credit notes', n); end if;
+  if n <> 10 then fails := fails || format('a viewer reads %s of 10 credit notes', n); end if;
   select count(*) into n from public.finance_refunds where org_id = org;
   if n <> 5 then fails := fails || format('a viewer reads %s of 5 refunds', n); end if;
   fails := fails || public.bendahara_check_try('a viewer saves a quotation', '42501',
