@@ -19,9 +19,9 @@
 -- A refusal is `raise exception '<CODE>'` with nothing else in the message, so
 -- nothing a person typed can reach an error or a log:
 --   PAYROLL_NOT_ALLOWED  PAYROLL_NOT_FOUND  PAYROLL_RUN_EXISTS  PAYROLL_MONTH_NOT_STARTED
---   PAYROLL_EARLIER_DRAFT  PAYROLL_NOBODY  PAYROLL_NOT_DRAFT  PAYROLL_NOT_PAID
---   PAYROLL_LATER_RUN  PAYROLL_SKIPS_MONTH  PAYROLL_NO_PAYSLIPS  PAYROLL_NEGATIVE_NET
---   PAYROLL_STALE  PAYROLL_SYSTEM_LINE  PAYROLL_BAD_INPUT
+--   PAYROLL_EARLIER_DRAFT  PAYROLL_NOT_DRAFT  PAYROLL_NOT_PAID  PAYROLL_LATER_RUN
+--   PAYROLL_SKIPS_MONTH  PAYROLL_NEGATIVE_NET  PAYROLL_STALE  PAYROLL_SYSTEM_LINE
+--   PAYROLL_BAD_INPUT
 -- plus PAY_IN_PAID_RUN (overtime) and HR_EMPLOYEE_HAS_PAID_PAYSLIPS (deleting
 -- an employee).
 
@@ -465,7 +465,10 @@ revoke all on function private.hr_payslip_json(public.hr_payslips) from public, 
 -- the month has not started (its first day is after today in Malaysia); a run
 -- already exists for the month; a later month already has a run, whatever its
 -- status; an earlier month is still a draft; the month is not the one right
--- after the latest run; nobody can be paid.
+-- after the latest run.
+-- A month in which nobody can be paid is still run: the draft has no
+-- payslips, and marking it as paid records that nothing was paid. Months are
+-- never skipped, so there has to be a way through an empty one.
 -- The workspace's row is held, so two callers cannot both start a run.
 -- Returns the run, how many payslips it has, how many of its overtime lines
 -- are for work done before the month, and who was left out for want of a
@@ -515,8 +518,6 @@ begin
   values (p_org, p_month, 'draft', auth.uid())
   returning * into run;
   made := private.hr_payroll_fill(run);
-  -- Raising undoes the run just made.
-  if made = 0 then raise exception 'PAYROLL_NOBODY'; end if;
 
   return jsonb_build_object(
     'run', private.hr_payroll_run_json(run), 'payslips', made,
@@ -716,11 +717,13 @@ revoke all on function public.hr_delete_payroll_run(uuid) from public, anon;
 grant execute on function public.hr_delete_payroll_run(uuid) to authenticated;
 
 -- ---- mark a run as paid ---------------------------------------------------------------
--- Refused, in this order: the run is not a draft; it has no payslips; a
--- payslip's net pay is below zero; an overtime line's record is no longer
--- approved, or no longer points at the line's payslip (it was cancelled while
--- in the draft: recalculate first). The overtime records of the run are held
--- while that is tested, so one cannot be cancelled in the same moment.
+-- Refused, in this order: the run is not a draft; a payslip's net pay is
+-- below zero; an overtime line's record is no longer approved, or no longer
+-- points at the line's payslip (it was cancelled while in the draft:
+-- recalculate first). The overtime records of the run are held while that is
+-- tested, so one cannot be cancelled in the same moment.
+-- A draft with no payslips can be marked as paid: it becomes the record that
+-- nobody was paid that month, and lets the next month be run.
 
 create or replace function public.hr_mark_payroll_paid(p_run uuid)
 returns jsonb language plpgsql security definer set search_path = public as $$
@@ -729,9 +732,6 @@ declare
 begin
   run := private.hr_payroll_held_run(p_run, null, null);
   if run.status <> 'draft' then raise exception 'PAYROLL_NOT_DRAFT'; end if;
-  if not exists (select 1 from public.hr_payslips p where p.payroll_run_id = run.id) then
-    raise exception 'PAYROLL_NO_PAYSLIPS';
-  end if;
   if exists (select 1 from public.hr_payslips p where p.payroll_run_id = run.id and p.net_cents < 0) then
     raise exception 'PAYROLL_NEGATIVE_NET';
   end if;

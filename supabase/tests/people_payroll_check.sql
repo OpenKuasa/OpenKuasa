@@ -33,7 +33,8 @@ do $$
 declare
   org uuid := gen_random_uuid();          -- who may do what; lines; overtime; paying; reading
   corg uuid := gen_random_uuid();         -- the calculation, with fixed inputs
-  other_org uuid := gen_random_uuid();    -- another workspace: nobody to pay, and no payslips
+  other_org uuid := gen_random_uuid();    -- another workspace: months with nobody to pay
+  first_org uuid := gen_random_uuid();    -- a workspace whose first run is this month
   demo uuid;
   owner_id uuid := gen_random_uuid();     -- owner of org and of corg
   admin_id uuid := gen_random_uuid();     -- admin of org
@@ -60,7 +61,7 @@ declare
   apr date := date '2025-04-01';
   mar_run uuid; apr_run uuid;
   -- other_org
-  ep uuid; eq uuid; other_run uuid;
+  ep uuid; eq uuid; ef uuid; other_run uuid; june_run uuid;
   -- the demo
   demo_draft uuid := md5('rimba-run-0')::uuid;
   demo_paid uuid := md5('rimba-run-1')::uuid;
@@ -267,11 +268,12 @@ begin
   values (gen_random_uuid(), mfa_admin, 'totp', 'verified', now(), now());
 
   insert into public.orgs (id, name)
-  values (org, 'Payroll Check Sdn Bhd'), (corg, 'Payroll Sums Sdn Bhd'), (other_org, 'Payroll Other Sdn Bhd');
+  values (org, 'Payroll Check Sdn Bhd'), (corg, 'Payroll Sums Sdn Bhd'), (other_org, 'Payroll Other Sdn Bhd'),
+         (first_org, 'Payroll First Run Sdn Bhd');
   insert into public.org_members (org_id, user_id, role)
   values (org, owner_id, 'owner'), (org, admin_id, 'admin'), (org, mfa_admin, 'admin'),
          (org, ma, 'member'), (org, mb, 'member'), (org, mv, 'viewer'),
-         (corg, owner_id, 'owner'), (other_org, outsider, 'owner'), (demo, dv, 'viewer'), (demo, da, 'admin');
+         (corg, owner_id, 'owner'), (other_org, outsider, 'owner'), (first_org, outsider, 'owner'), (demo, dv, 'viewer'), (demo, da, 'admin');
 
   -- org: A, B and V are linked to a member each; N is active with no salary on file.
   insert into public.hr_employees (org_id, employee_no, name, user_id) values (org, 'A', 'Member A', ma) returning id into ea;
@@ -297,6 +299,9 @@ begin
   insert into public.hr_employees (org_id, employee_no, name) values (other_org, 'P', 'Nothing On File') returning id into ep;
   insert into public.hr_employees (org_id, employee_no, name, status) values (other_org, 'Q', 'Left Already', 'inactive') returning id into eq;
   insert into public.hr_employee_private (employee_id, org_id, base_salary_cents) values (ep, other_org, null), (eq, other_org, 300000);
+  -- first_org: one employee with a salary.
+  insert into public.hr_employees (org_id, employee_no, name) values (first_org, 'F', 'First Run') returning id into ef;
+  insert into public.hr_employee_private (employee_id, org_id, base_salary_cents) values (ef, first_org, 100000);
 
   -- The demo: a draft run for this month and paid runs before it, from the reseed.
   perform private.reseed_demo_people();
@@ -504,35 +509,91 @@ begin
     -- Runs are made in order of month: an earlier month cannot be filled in behind a later run.
     || pg_temp.pay_expect(admin_id, 'December 2024 while January is a draft', format('select public.hr_run_payroll(%L, ''2024-12-01'')', org), 'PAYROLL_LATER_RUN')
     || pg_temp.pay_expect(owner_id, 'a month years before the draft', format('select public.hr_run_payroll(%L, ''2001-06-01'')', org), 'PAYROLL_LATER_RUN')
-    -- Nobody to pay: the only active employee has no salary, the only salary belongs to someone inactive.
-    || pg_temp.pay_expect(outsider, 'a workspace with nobody to pay', format('select public.hr_run_payroll(%L, ''2025-05-01'')', other_org), 'PAYROLL_NOBODY');
-  select count(*) into n from public.hr_payroll_runs x where x.org_id = other_org;
-  if n <> 0 then fails := array_append(fails, 'a run with nobody to pay was left behind'); end if;
+    ;
   select count(*) into n from public.hr_payroll_runs x where x.org_id = org;
   if n <> 1 then fails := array_append(fails, format('the workspace has %s runs after the refusals, expected January alone', n)); end if;
 
-  -- This month has started, so it can be run; with one salary on file, one payslip.
-  -- It is this workspace's first run, so it may be any month: the January run
-  -- of the other workspace has no say in it.
-  update public.hr_employee_private set base_salary_cents = 100000 where employee_id = ep;
-  r := pg_temp.pay_try(outsider, format('select public.hr_run_payroll(%L, %L)', other_org, this_month));
+  -- This month has started, so it can be run. It is this workspace's first
+  -- run, so it may be any month: the runs of the other workspaces have no say.
+  r := pg_temp.pay_try(outsider, format('select public.hr_run_payroll(%L, %L)', first_org, this_month));
+  if r ? 'refused' or r -> 'payslips' is distinct from '1'::jsonb or r -> 'skipped' is distinct from '[]'::jsonb
+     or r #>> '{run,period_month}' is distinct from this_month::text then
+    fails := array_append(fails, format('a first run for this month, which has started, gave: %s', r));
+  end if;
+  fails := fails || pg_temp.pay_expect(outsider, 'next month, after this month''s draft', format('select public.hr_run_payroll(%L, %L)', first_org, next_month), 'PAYROLL_MONTH_NOT_STARTED');
+
+  -- ---- a month with nobody to pay is still a month -------------------------------
+  -- The only active employee has no salary; the only salary belongs to someone
+  -- inactive. May 2025 is run all the same: a draft with no payslips.
+  r := pg_temp.pay_try(outsider, format('select public.hr_run_payroll(%L, ''2025-05-01'')', other_org));
   other_run := (r #>> '{run,id}')::uuid;
-  if other_run is null or r -> 'payslips' is distinct from '1'::jsonb or r -> 'skipped' is distinct from '[]'::jsonb then
-    fails := array_append(fails, format('running this month, which has started, gave: %s', r));
+  if other_run is null
+     or r is distinct from jsonb_build_object('run', jsonb_build_object('id', other_run, 'period_month', '2025-05-01', 'status', 'draft'),
+          'payslips', 0, 'earlier_overtime', 0,
+          'skipped', jsonb_build_array(jsonb_build_object('employee_id', ep, 'name', 'Nothing On File', 'reason', 'no_salary'))) then
+    fails := array_append(fails, format('running a month with nobody to pay gave: %s', r));
+  end if;
+  select count(*) into n from public.hr_payroll_runs x where x.org_id = other_org and x.status = 'draft' and x.created_by = outsider;
+  select count(*) into n2 from public.hr_payslips p where p.org_id = other_org;
+  if n <> 1 or n2 <> 0 then fails := array_append(fails, format('a month with nobody to pay left %s draft runs and %s payslips, expected 1 and 0', n, n2)); end if;
+  -- An empty draft is a draft: it holds up the next month until it is paid.
+  fails := fails || pg_temp.pay_expect(outsider, 'June while the empty May is a draft', format('select public.hr_run_payroll(%L, ''2025-06-01'')', other_org), 'PAYROLL_EARLIER_DRAFT');
+  -- Recalculating it finds nobody, and says so.
+  r := pg_temp.pay_try(outsider, format('select public.hr_recalculate_payroll(%L)', other_run));
+  if r -> 'payslips' is distinct from '0'::jsonb or r -> 'added' is distinct from '0'::jsonb or r -> 'earlier_overtime' is distinct from '0'::jsonb
+     or jsonb_array_length(r -> 'skipped') is distinct from 1 then
+    fails := array_append(fails, format('recalculating an empty draft with nobody to add gave: %s', r));
+  end if;
+  -- It can be marked as paid: the record that nobody was paid that month.
+  r := pg_temp.pay_try(outsider, format('select public.hr_mark_payroll_paid(%L)', other_run));
+  select count(*) into n from public.hr_payroll_runs x
+  where x.id = other_run and x.status = 'paid' and x.paid_at = now() and x.paid_by = outsider;
+  if n <> 1 or r - 'paid_at' is distinct from jsonb_build_object('id', other_run, 'period_month', '2025-05-01', 'status', 'paid') then
+    fails := array_append(fails, format('marking an empty run as paid gave: %s', r));
+  end if;
+  -- It is the workspace's latest run like any other: July would skip June.
+  fails := fails || pg_temp.pay_expect(outsider, 'July after the empty May was paid', format('select public.hr_run_payroll(%L, ''2025-07-01'')', other_org), 'PAYROLL_SKIPS_MONTH');
+  -- And then the next month runs, empty again.
+  r := pg_temp.pay_try(outsider, format('select public.hr_run_payroll(%L, ''2025-06-01'')', other_org));
+  june_run := (r #>> '{run,id}')::uuid;
+  if june_run is null or r -> 'payslips' is distinct from '0'::jsonb then
+    fails := array_append(fails, format('the month after an empty paid month gave: %s', r));
+  end if;
+  -- Undoing paid works on an empty run as on any other: not while a later run exists, then yes.
+  fails := fails
+    || pg_temp.pay_expect(outsider, 'paid is undone on the empty May while June exists', format('select public.hr_unmark_payroll_paid(%L)', other_run), 'PAYROLL_LATER_RUN')
+    || pg_temp.pay_expect(outsider, 'the empty June draft is deleted', format('select public.hr_delete_payroll_run(%L)', june_run), null);
+  r := pg_temp.pay_try(outsider, format('select public.hr_unmark_payroll_paid(%L)', other_run));
+  select count(*) into n from public.hr_payroll_runs x
+  where x.id = other_run and x.status = 'draft' and x.paid_at is null and x.paid_by is null;
+  if n <> 1 or r is distinct from jsonb_build_object('id', other_run, 'period_month', '2025-05-01', 'status', 'draft') then
+    fails := array_append(fails, format('undoing paid on an empty run gave: %s', r));
+  end if;
+  -- A salary is put on file. Recalculating the empty draft gives that employee a payslip.
+  update public.hr_employee_private set base_salary_cents = 100000 where employee_id = ep;
+  r := pg_temp.pay_try(outsider, format('select public.hr_recalculate_payroll(%L)', other_run));
+  if r -> 'added' is distinct from '1'::jsonb or r -> 'payslips' is distinct from '1'::jsonb or r -> 'skipped' is distinct from '[]'::jsonb then
+    fails := array_append(fails, format('recalculating an empty draft once someone is eligible gave: %s', r));
   end if;
   -- An inactive employee with a salary gets no payslip and is not listed as skipped.
   select count(*) into n from public.hr_payslips p where p.employee_id = eq;
   if n <> 0 then fails := array_append(fails, 'an inactive employee got a payslip'); end if;
-  -- With its only payslip removed, the run cannot be paid.
+  -- Removing its only payslip leaves the draft there, empty; it can still be paid, and June then runs.
   select p.id into t from public.hr_payslips p where p.payroll_run_id = other_run;
-  fails := fails
-    || pg_temp.pay_expect(outsider, 'the only payslip is removed', format('select public.hr_remove_payslip(%L)', t), null)
-    || pg_temp.pay_expect(outsider, 'a run with no payslips is marked as paid', format('select public.hr_mark_payroll_paid(%L)', other_run), 'PAYROLL_NO_PAYSLIPS');
-  -- Recalculating gives a payslip back to whoever is eligible and has none.
-  r := pg_temp.pay_try(outsider, format('select public.hr_recalculate_payroll(%L)', other_run));
-  if r -> 'added' is distinct from '1'::jsonb or r -> 'payslips' is distinct from '1'::jsonb then
-    fails := array_append(fails, format('recalculating after removing the only payslip gave: %s', r));
+  r := pg_temp.pay_try(outsider, format('select public.hr_remove_payslip(%L)', t));
+  select count(*) into n from public.hr_payroll_runs x where x.id = other_run and x.status = 'draft';
+  select count(*) into n2 from public.hr_payslips p where p.payroll_run_id = other_run;
+  if r is distinct from jsonb_build_object('run_id', other_run, 'employee_id', ep) or n <> 1 or n2 <> 0 then
+    fails := array_append(fails, format('removing the last payslip of a draft did not leave an empty draft: %s', r));
   end if;
+  fails := fails
+    || pg_temp.pay_expect(outsider, 'a draft emptied by removing its payslips is marked as paid', format('select public.hr_mark_payroll_paid(%L)', other_run), null);
+  r := pg_temp.pay_try(outsider, format('select public.hr_run_payroll(%L, ''2025-06-01'')', other_org));
+  if r -> 'payslips' is distinct from '1'::jsonb or r -> 'earlier_overtime' is distinct from '0'::jsonb then
+    fails := array_append(fails, format('the month after an emptied, paid month gave: %s', r));
+  end if;
+  select count(*) filter (where x.status = 'paid'), count(*) into n, n2 from public.hr_payroll_runs x where x.org_id = other_org;
+  if n <> 1 or n2 <> 2 then fails := array_append(fails, format('the workspace has %s paid of %s runs, expected the empty May paid and June a draft', n, n2)); end if;
 
   -- ==== 3. lines ================================================================
   select x.id into run_id from public.hr_payroll_runs x where x.org_id = org and x.period_month = jan;
@@ -1343,7 +1404,7 @@ begin
   select count(*) into n2 from public.hr_payslip_lines l where l.org_id in (org, corg);
   if n < 10 or n2 < 10 then fails := array_append(fails, format('the workspaces hold %s paid payslips and %s lines, too few to prove deleting them', n, n2)); end if;
   begin
-    delete from public.orgs where id in (org, corg, other_org);
+    delete from public.orgs where id in (org, corg, other_org, first_org);
   exception when others then
     fails := array_append(fails, 'deleting a workspace with paid payslips failed: ' || sqlerrm);
   end;

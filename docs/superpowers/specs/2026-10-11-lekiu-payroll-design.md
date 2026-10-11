@@ -38,6 +38,7 @@ An owner or admin runs payroll for a month: the system drafts a payslip for each
 | Enforcement | Database functions, one per action. No direct write access to the payroll tables |
 | Order of months | Runs are created in month order with no gaps after a workspace's first run |
 | Earlier overtime | The first run takes every approved, unpaid overtime record up to the month's end; the run reports how many are from earlier months |
+| Empty months | A month with nobody to pay is still run and marked paid, as a record that nothing was paid; months are never skipped |
 
 ## 3. Scope
 
@@ -95,14 +96,14 @@ Recalculating repeats steps 2 to 8 for every payslip in the draft: it deletes an
 
 | Function | Does | Refuses |
 |---|---|---|
-| `hr_run_payroll(p_org, p_month)` | Creates the draft run and its payslips (4.3). A workspace's first run may be any month that has started; after that, only the month right after its latest run. Returns the run, the count, `earlier_overtime` (how many of its overtime lines are for work before M) and the skipped employees | In this order: M is not the first of a month; M's first day is after today; a run already exists for M; a later month has a run; an earlier month is still a draft; M is not the month right after the latest run; nobody is eligible |
+| `hr_run_payroll(p_org, p_month)` | Creates the draft run and its payslips (4.3). A workspace's first run may be any month that has started; after that, only the month right after its latest run. When nobody is eligible it still creates the draft, with no payslips. Returns the run, the count (0 for an empty draft), `earlier_overtime` (how many of its overtime lines are for work before M) and the skipped employees | In this order: M is not the first of a month; M's first day is after today; a run already exists for M; a later month has a run; an earlier month is still a draft; M is not the month right after the latest run |
 | `hr_recalculate_payroll(p_run)` | Rebuilds the draft (4.3). Returns the run, the count, how many payslips were added, `earlier_overtime` and the skipped employees | Run not a draft |
 | `hr_save_payslip_line(p_payslip, p_line, p_kind, p_label, p_amount_cents)` | Adds (`p_line` null) or changes an `hr` line; refreshes gross, the proposals and the deductions total | Run not a draft; a system line; kind not `earning` or `deduction`; bad label or amount |
 | `hr_delete_payslip_line(p_line)` | Removes an `hr` line; refreshes the same | Run not a draft; a system line |
 | `hr_set_statutory(p_payslip, p_field, p_amount_cents)` | Sets one of the four figures and marks it set by HR; a null amount resets it to the proposal | Run not a draft; unknown field; amount below zero |
-| `hr_remove_payslip(p_payslip)` | Deletes a payslip from a draft; its overtime is released | Run not a draft |
+| `hr_remove_payslip(p_payslip)` | Deletes a payslip from a draft; its overtime is released. Removing the last one leaves an empty draft | Run not a draft |
 | `hr_delete_payroll_run(p_run)` | Deletes a draft and its payslips; overtime is released | Run not a draft |
-| `hr_mark_payroll_paid(p_run)` | Run and payslips become `paid`; `paid_at` and `paid_by` are set | Run not a draft; no payslips; a payslip's net is below zero; an overtime line whose record is no longer `approved` or no longer points at this payslip |
+| `hr_mark_payroll_paid(p_run)` | Run and payslips become `paid`; `paid_at` and `paid_by` are set. A draft with no payslips is accepted: it becomes a paid run that paid nobody | Run not a draft; a payslip's net is below zero; an overtime line whose record is no longer `approved` or no longer points at this payslip |
 | `hr_unmark_payroll_paid(p_run)` | Run and payslips go back to `draft` and `pending`; `paid_at` and `paid_by` are cleared | Run not paid; a later month has a run |
 
 Every function takes a lock on the run's row first (`for no key update`), and `hr_run_payroll` on the workspace's row, so two callers take turns.
@@ -117,7 +118,7 @@ Changes to existing behaviour:
 
 A refusal is `raise exception '<CODE>'` and nothing else, so nothing a person typed reaches an error or a log.
 
-`PAYROLL_NOT_ALLOWED`, `PAYROLL_NOT_FOUND`, `PAYROLL_RUN_EXISTS`, `PAYROLL_MONTH_NOT_STARTED`, `PAYROLL_EARLIER_DRAFT`, `PAYROLL_NOBODY`, `PAYROLL_NOT_DRAFT`, `PAYROLL_NOT_PAID`, `PAYROLL_LATER_RUN`, `PAYROLL_SKIPS_MONTH`, `PAYROLL_NO_PAYSLIPS`, `PAYROLL_NEGATIVE_NET`, `PAYROLL_STALE`, `PAYROLL_SYSTEM_LINE`, `PAYROLL_BAD_INPUT`; plus `PAY_IN_PAID_RUN` and `HR_EMPLOYEE_HAS_PAID_PAYSLIPS`.
+`PAYROLL_NOT_ALLOWED`, `PAYROLL_NOT_FOUND`, `PAYROLL_RUN_EXISTS`, `PAYROLL_MONTH_NOT_STARTED`, `PAYROLL_EARLIER_DRAFT`, `PAYROLL_NOT_DRAFT`, `PAYROLL_NOT_PAID`, `PAYROLL_LATER_RUN`, `PAYROLL_SKIPS_MONTH`, `PAYROLL_NEGATIVE_NET`, `PAYROLL_STALE`, `PAYROLL_SYSTEM_LINE`, `PAYROLL_BAD_INPUT`; plus `PAY_IN_PAID_RUN` and `HR_EMPLOYEE_HAS_PAID_PAYSLIPS`.
 
 A caller who may not act, and a run, payslip or line that does not exist, both get `PAYROLL_NOT_FOUND` where naming an id is involved, so the answer does not say which ids are real.
 
@@ -138,12 +139,10 @@ A caller who may not act, and a run, payslip or line that does not exist, both g
 | `PAYROLL_RUN_EXISTS` | Payroll for that month has already been run. |
 | `PAYROLL_MONTH_NOT_STARTED` | That month has not started yet. |
 | `PAYROLL_EARLIER_DRAFT` | An earlier month is still a draft. Mark it as paid or delete it first. |
-| `PAYROLL_NOBODY` | Nobody can be paid yet: no active employee has a base salary. |
 | `PAYROLL_NOT_DRAFT` | That run is already paid. Undo paid first to change it. |
 | `PAYROLL_NOT_PAID` | That run is not marked as paid. |
 | `PAYROLL_LATER_RUN` | A later month already has a payroll run. Delete that run first. |
 | `PAYROLL_SKIPS_MONTH` | Run payroll for the month after the latest run first. |
-| `PAYROLL_NO_PAYSLIPS` | This run has no payslips. |
 | `PAYROLL_NEGATIVE_NET` | A payslip's net pay is below zero. Fix it before marking the run as paid. |
 | `PAYROLL_STALE` | An overtime claim on this run has changed. Recalculate first. |
 | `PAYROLL_SYSTEM_LINE` | That line is worked out by the system and can't be changed. |
@@ -157,10 +156,10 @@ Server actions in `src/app/(app)/people/payroll-actions.ts`, owner and admin onl
 
 | Screen | Change |
 |---|---|
-| Payroll | A month picker over the runs on record; "Run payroll" (asks the month, defaulting to the earliest month with no run, and confirms; then lists anyone skipped); a draft banner ("Draft: employees can't see this yet") with Recalculate, Mark as paid and Delete draft, the last two behind a second step; a paid run shows who paid it and when, with Undo paid behind a second step; the payslip table gains an "Other" column and a "set by HR" mark; "Export" stays disabled |
+| Payroll | A month picker over the runs on record; "Run payroll": the first run may be any month up to the current one (default the current month); after that the dialog shows the one month that can be run, and the control is disabled with "Every month up to now already has a payroll run." when there is none. After a run and on the draft: who was left out ("No base salary recorded") and "Includes N overtime claims from earlier months". A draft banner ("Draft: employees can't see this yet") with Recalculate, Mark as paid and Delete draft, the last two behind a second step; an empty draft says nobody is on it and can be marked paid to record that nothing was paid; a paid run shows when it was marked paid (no name), with Undo paid behind a second step; the payslip table gains an "Other" column and a "set by HR" mark; "Export" stays disabled |
 | Payslip detail (new, opened from a row) | Basic, each line with its label and amount, gross, the four figures, the deductions and net. On a draft: add, edit and remove an HR line; type over or reset a statutory figure; remove the payslip. Read-only on a paid run |
-| My Payslips (new, `/people/my-payslips`, under General) | The viewer's own paid payslips, newest first, opening the same detail, read-only. The "not linked" card for an unlinked account. The demo shows the sample employee's |
-| OT Claims | An overtime record whose payslip is paid reads "Paid" with the month |
+| My Payslips (new, `/people/my-payslips`, under General) | The viewer's own paid payslips, newest first: one card per paid payslip, shown inline with the read-only detail. The "not linked" card for an unlinked account. The demo shows the sample employee's |
+| OT Claims | An overtime record whose payslip is paid reads "Paid, <Month Year>", and has no Cancel once paid |
 | Employees | Deleting someone with a paid payslip shows the refusal sentence |
 | Letters | Nothing to change on the screen: a member no longer receives drafts |
 
@@ -168,17 +167,19 @@ Payment Vouchers, the Dashboard, the Overview and My Documents are unchanged.
 
 ### 5.3 Lekiu
 
-For an owner or admin, five tools, each needing approval:
+For an owner or admin, six tools (`runPayroll`, `recalculatePayroll`, `savePayslipLine`, `removePayslipLine`, `setPayslipStatutory`, `removePayslip`), each needing approval:
 
 | Tool | Card |
 |---|---|
 | `runPayroll` | "Run payroll for October 2026? This creates a draft. Nobody is paid and employees can't see it yet." |
-| `recalculatePayroll` | "Recalculate the October 2026 draft? Your own lines and figures are kept." |
+| `recalculatePayroll` (takes a month) | "Recalculate the October 2026 draft? Your own lines and figures are kept." |
 | `savePayslipLine`, `removePayslipLine` | The employee, the month, the line's kind, name and amount |
-| `setPayslipStatutory` | The employee, the month, the figure, the old and the new amount (or "back to the proposed amount") |
+| `setPayslipStatutory` | The employee, the month, the figure, the old and the new amount (or "back to the proposed amount"); "Keep <figure> … fixed by hand?" when the amount equals the current one |
 | `removePayslip` | The employee and the month |
 
-Lookups: `getPayrollSummary` and `listPayslips` stay; `listPayslips` gains the lines, the run's status for owners and admins, and each payslip's id for them.
+Amounts are Ringgit text. An unreadable month, name or amount is refused before any card. A card for something the conversation shows as paid, or as a system line, states the change and adds that it may be refused. Results and the prompt carry earlier overtime.
+
+Lookups: `getPayrollSummary` and `listPayslips` stay; `listPayslips` gains the lines and also returns `basic`, `other_deductions`, `set_by_hr` and `run_status`, with ids only for owners and admins outside the demo.
 
 Marking a run paid, undoing paid and deleting a draft are not tools. The prompt says: these are done on the Payroll screen by an owner or admin; never offer to do them.
 
@@ -206,15 +207,15 @@ The migration is applied to the live database before merge, on the owner's go-ah
 | The seeded rates were checked against secondary sources | Stated in 4.1; one table, three rows, corrected by a one-line migration |
 | Overtime paid twice, or not at all | `payslip_id` on the record, unique line per record, released by every path that removes a payslip, proven in the check |
 | A paid payslip changed behind the run | Every write function refuses unless the run is a draft; overtime in a paid run cannot be cancelled or re-decided |
-| The read-rule change breaks existing tests | `tests/people.rls.test.ts`, `tests/setup/people-member-view.ts` and `supabase/tests/people_rls_check.sql` are updated in this slice |
+| The read-rule change breaks existing tests | `tests/people.rls.test.ts` and `supabase/tests/people_rls_check.sql` are updated in this slice |
 | The employee-delete guard blocks deleting a workspace or a test's clean-up | The trigger ignores cascaded deletes; the check and the live test both delete a workspace that has paid payslips |
 
 ## 9. Files
 
 - `supabase/migrations/20261025100000_people_payroll_writes.sql`, `supabase/tests/people_payroll_check.sql`
-- `src/lib/people/payroll-writes.ts`, `payroll.ts`, `payroll-forms.ts`, `types.ts`, `supabase.ts`, `seed.ts`
+- `src/lib/people/payroll-writes.ts`, `payroll-refusals.ts`, `payroll.ts`, `payroll-forms.ts`, `my-payslips.ts`, `overtime.ts`, `types.ts`, `supabase.ts`, `seed.ts`
 - `src/app/(app)/people/payroll-actions.ts`, `src/app/(app)/people/my-payslips/page.tsx`
-- `src/screens/people/payroll.tsx`, `my-payslips.tsx`, `ot-claims.tsx`; `src/components/people/` (run controls, payslip detail, line form, statutory field)
+- `src/screens/people/payroll.tsx`, `my-payslips.tsx`, `ot-claims.tsx`; `src/components/people/` (run controls, payslip detail, line form, statutory field, `payslip-rows.tsx`, `payslip-editor.tsx`)
 - `src/config/nav.ts`, `src/config/live-screens.ts`
-- `src/lib/ai/people-tools.ts`, `src/lib/ai/agents/prompts.ts`, `src/lib/chat/change-titles.ts`, `src/components/chat/tool-parts.ts`
-- Tests as listed in section 7
+- `src/lib/ai/people-tools.ts`, `src/lib/ai/products.ts`, `src/lib/ai/agents/prompts.ts`, `src/lib/chat/change-titles.ts`
+- Tests as listed in section 7; `tests/helpers/live-workspaces.ts`

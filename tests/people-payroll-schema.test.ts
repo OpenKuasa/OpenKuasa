@@ -56,12 +56,10 @@ const PAYROLL_CODES = [
   'PAYROLL_RUN_EXISTS',
   'PAYROLL_MONTH_NOT_STARTED',
   'PAYROLL_EARLIER_DRAFT',
-  'PAYROLL_NOBODY',
   'PAYROLL_NOT_DRAFT',
   'PAYROLL_NOT_PAID',
   'PAYROLL_LATER_RUN',
   'PAYROLL_SKIPS_MONTH',
-  'PAYROLL_NO_PAYSLIPS',
   'PAYROLL_NEGATIVE_NET',
   'PAYROLL_STALE',
   'PAYROLL_SYSTEM_LINE',
@@ -407,10 +405,12 @@ describe('Lekiu payroll migration', () => {
       "if latest is not null and p_month <> (latest + interval '1 month')::date then",
       "raise exception 'PAYROLL_SKIPS_MONTH'",
       'insert into public.hr_payroll_runs (org_id, period_month, status, created_by)',
-      "raise exception 'PAYROLL_NOBODY'",
     ].map((line) => body.indexOf(line));
     expect(order.every((at) => at > -1)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
+    // A month with nobody to pay is still run: nothing is refused once the run is made.
+    expect(body.lastIndexOf('raise exception')).toBeLessThan(body.indexOf('insert into public.hr_payroll_runs'));
+    expect(body).not.toMatch(/made = 0|made < 1/);
     expect(body).toContain("today date := (now() at time zone 'Asia/Kuala_Lumpur')::date;");
     // The month is the first of a month, as given: it is not rounded to one.
     expect(body).toContain('extract(day from p_month) <> 1');
@@ -559,11 +559,10 @@ describe('Lekiu payroll migration', () => {
     expect(del).toContain('delete from public.hr_payroll_runs r where r.id = run.id;');
   });
 
-  test('a run is paid only when it has payslips, none is negative, and its overtime still stands', () => {
+  test('a run is paid only when no payslip is negative and its overtime still stands; an empty one can be paid', () => {
     const { body } = fn(statements(), 'public.hr_mark_payroll_paid');
     const order = [
       NOT_DRAFT,
-      "raise exception 'PAYROLL_NO_PAYSLIPS'",
       "raise exception 'PAYROLL_NEGATIVE_NET'",
       'for update;',
       "raise exception 'PAYROLL_STALE'",
@@ -573,6 +572,9 @@ describe('Lekiu payroll migration', () => {
     expect(order.every((at) => at > -1)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(body).toContain('p.net_cents < 0');
+    // Three refusals and no more: a draft with no payslips is paid as a record that nothing was paid.
+    expect(raised(body)).toEqual(["'PAYROLL_NOT_DRAFT'", "'PAYROLL_NEGATIVE_NET'", "'PAYROLL_STALE'"]);
+    expect(body).not.toMatch(/not exists/);
     expect(body).toContain("(r.status <> 'approved' or r.payslip_id is distinct from l.payslip_id)");
   });
 
@@ -660,6 +662,8 @@ describe('Lekiu payroll migration', () => {
 
   test('a refusal is one of the codes and carries nothing else', () => {
     const text = statements();
+    // The two codes for "nobody to pay" are gone: such a month is run and paid like any other.
+    expect(readFileSync(join(DIR, WRITES), 'utf8')).not.toMatch(/PAYROLL_NOBODY|PAYROLL_NO_PAYSLIPS/);
     const payroll = withoutReseed(text);
     const messages = raised(payroll);
     expect(messages.length).toBeGreaterThan(30);
