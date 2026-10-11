@@ -67,10 +67,12 @@ export function opportunityScan(leads: Lead[], appts: Appointment[], now: Date):
 }
 
 /**
- * Proposes changes for one run. The LLM only SELECTS from the deterministic
+ * Proposes changes for one run. The deterministic candidates are de-duped against
+ * the current pending proposals BEFORE the paid LLM call (spec §6) — if nothing new
+ * remains, the model is never called. The LLM then only SELECTS from the fresh
  * candidates; the server re-validates every kept candidate's input against the
- * capability schema + the allow-list, de-dupes against pending proposals, caps the
- * count, and inserts. Returns how many were queued and the LLM cost.
+ * capability schema + the allow-list, caps the count, and inserts. Returns how many
+ * were queued and the LLM cost.
  */
 export async function proposeChanges(
   service: SupabaseClient,
@@ -86,34 +88,37 @@ export async function proposeChanges(
   const candidates = scan(reach.leads, reach.appts, new Date());
   if (candidates.length === 0) return { proposed: 0, cost_cents: 0 };
 
+  // De-dupe BEFORE the paid LLM call: drop candidates already queued as pending, and
+  // if nothing new remains, skip the model call entirely.
+  const { data: existing, error: dErr } = await service
+    .from('agent_proposals')
+    .select('action, input')
+    .eq('org_id', orgId)
+    .eq('status', 'pending');
+  if (dErr) return { proposed: 0, cost_cents: 0 }; // fail closed: never propose without a dedupe set
+  const pendingKeys = new Set(
+    (existing ?? []).map((r) =>
+      dedupeKeyOf((r as { action: string }).action, (r as { input: unknown }).input),
+    ),
+  );
+  const fresh = candidates.filter((c) => !pendingKeys.has(dedupeKeyOf(c.action, c.input)));
+  if (fresh.length === 0) return { proposed: 0, cost_cents: 0 }; // all already pending → no LLM call
+
   const { keep, cost_cents } = await suggestProposals(
     apiKey,
     reach.context,
-    candidates.map((c, index) => ({ index, title: c.title })),
+    fresh.map((c, index) => ({ index, title: c.title })),
   );
 
   let proposed = 0;
   try {
-    // Existing pending proposals for this org, to de-dupe against.
-    const { data: existing, error: dErr } = await service
-      .from('agent_proposals')
-      .select('action, input')
-      .eq('org_id', orgId)
-      .eq('status', 'pending');
-    if (dErr) return { proposed: 0, cost_cents }; // fail closed: never queue without dedupe
-    const pendingKeys = new Set(
-      (existing ?? []).map((r) =>
-        dedupeKeyOf((r as { action: string }).action, (r as { input: unknown }).input),
-      ),
-    );
-
     for (const sel of keep) {
       if (proposed >= MAX_PROPOSALS) break;
-      const c = candidates[sel.index];
+      const c = fresh[sel.index];
       if (!c || !isAllowedAction(c.action)) continue; // tampered / off-list selection
       if (!ALLOWED_ACTIONS[c.action].schema.safeParse(c.input).success) continue; // re-validate input
       const key = dedupeKeyOf(c.action, c.input);
-      if (pendingKeys.has(key)) continue; // dedupe
+      if (pendingKeys.has(key)) continue; // intra-run duplicate selection
       const { error } = await service.from('agent_proposals').insert({
         org_id: orgId,
         run_id: runId,
@@ -133,6 +138,6 @@ export async function proposeChanges(
     }
     return { proposed, cost_cents };
   } catch {
-    return { proposed, cost_cents }; // keep the LLM spend even if a query/insert throws
+    return { proposed, cost_cents }; // keep the LLM spend even if an insert throws
   }
 }

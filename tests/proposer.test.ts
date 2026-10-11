@@ -19,14 +19,17 @@ const lead = (over: Partial<Record<string, unknown>> = {}) =>
     ...over,
   }) as never;
 
-function fakeService(pending: { action: string; input: unknown }[] = []) {
+function fakeService(
+  pending: { action: string; input: unknown }[] = [],
+  selectError: { message: string; code?: string } | null = null,
+) {
   const inserts: Record<string, unknown>[] = [];
   const client = {
     from() {
       // Chainable select: any number of .eq() calls, awaitable at the end.
       const chain: Record<string, unknown> = {
         eq: () => chain,
-        then: (resolve: (v: unknown) => void) => resolve({ data: pending }),
+        then: (resolve: (v: unknown) => void) => resolve({ data: pending, error: selectError }),
       };
       return {
         select: () => chain,
@@ -81,11 +84,19 @@ describe('proposeChanges gate', () => {
     expect(inserts).toHaveLength(0);
   });
 
-  it('does not re-propose a pending opportunity (dedupe)', async () => {
-    vi.mocked(suggestProposals).mockResolvedValue({ keep: [{ index: 0, rationale: 'x' }], cost_cents: 1 });
+  it('does not re-propose a pending opportunity, without paying for an LLM call (dedupe before the model)', async () => {
     const { client, inserts } = fakeService([{ action: 'promoteLeadToContact', input: { id: LEAD_ID } }]);
     const res = await proposeChanges(client, 'org-1', 'run-1', 'key', { leads: [lead()], appts: [], context: 'ctx' }, 200, 10);
-    expect(res.proposed).toBe(0);
+    expect(suggestProposals).not.toHaveBeenCalled();
+    expect(res).toEqual({ proposed: 0, cost_cents: 0 });
+    expect(inserts).toHaveLength(0);
+  });
+
+  it('fails closed without calling the LLM when the dedupe query errors', async () => {
+    const { client, inserts } = fakeService([], { message: 'boom', code: '500' });
+    const res = await proposeChanges(client, 'org-1', 'run-1', 'key', { leads: [lead()], appts: [], context: 'ctx' }, 200, 10);
+    expect(suggestProposals).not.toHaveBeenCalled();
+    expect(res).toEqual({ proposed: 0, cost_cents: 0 });
     expect(inserts).toHaveLength(0);
   });
 
@@ -131,7 +142,6 @@ describe('proposeChanges gate', () => {
   });
 
   it('dedupes a multi-key pending appointment regardless of key order / scheduled_at', async () => {
-    vi.mocked(suggestProposals).mockResolvedValue({ keep: [{ index: 0, rationale: 'x' }], cost_cents: 1 });
     const { client, inserts } = fakeService([
       {
         action: 'createAppointment',
@@ -139,6 +149,7 @@ describe('proposeChanges gate', () => {
       },
     ]);
     const res = await proposeChanges(client, 'org-1', 'run-1', 'key', { leads: [lead({ stage: 'qualified' })], appts: [], context: 'ctx' }, 200, 10);
+    expect(suggestProposals).not.toHaveBeenCalled();
     expect(res.proposed).toBe(0);
     expect(inserts).toHaveLength(0);
   });
