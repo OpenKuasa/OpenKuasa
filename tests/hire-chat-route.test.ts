@@ -17,9 +17,10 @@ const ctl = vi.hoisted(() => ({
     data: import('@/lib/hire/types').HireData;
     origin?: string | null;
     files?: import('@/lib/hire/cv-read').CvReader;
+    cvShelf?: unknown[];
   },
   /** What the Tuah route handed its runner: whether it ran with the team, and the HireAccess. */
-  tuah: null as null | { team: boolean; hire: { files?: import('@/lib/hire/cv-read').CvReader } | null },
+  tuah: null as null | { team: boolean; hire: { files?: import('@/lib/hire/cv-read').CvReader; cvShelf?: unknown[] } | null },
   /** When set, the model call throws this instead of answering. */
   fails: null as unknown,
 }));
@@ -288,6 +289,12 @@ describe('POST /api/hire/chat happy path', () => {
     // It looks the application up through the same workspace-scoped data the lookups use.
     ctl.tablesRead = [];
     expect(await files.readCv('11111111-1111-4111-8111-111111111111')).toEqual({ state: 'missing' });
+    // With it goes an empty shelf for the files it reads: this request's own, not one shared with the next.
+    const shelf = ctl.captured!.cvShelf;
+    expect(shelf).toEqual([]);
+    await (await POST(post(validBody))).text();
+    expect(ctl.captured!.cvShelf).toEqual([]);
+    expect(ctl.captured!.cvShelf).not.toBe(shelf);
     expect(ctl.tablesRead).toContain('hire_applications');
   });
 
@@ -330,6 +337,12 @@ describe('POST /api/chat (Tuah) and reading a CV', () => {
     await res.text();
     expect(ctl.tuah!.team).toBe(true);
     expect(typeof ctl.tuah!.hire!.files?.readCv).toBe('function');
+    // ...and an empty shelf of this request's own for what it reads.
+    const shelf = ctl.tuah!.hire!.cvShelf;
+    expect(shelf).toEqual([]);
+    await (await tuah(tuahPost(validBody))).text();
+    expect(ctl.tuah!.hire!.cvShelf).toEqual([]);
+    expect(ctl.tuah!.hire!.cvShelf).not.toBe(shelf);
     // Tuah itself never holds the tool: only the specialist it asks does.
     expect(ctl.calls[0].tools).toContain('askLekir');
     expect(ctl.calls[0].tools).not.toContain('readCandidateCv');
@@ -353,6 +366,7 @@ describe('POST /api/chat (Tuah) and reading a CV', () => {
     expect(ctl.tuah!.team).toBe(false);
     expect(ctl.tuah!.hire).not.toBeNull();
     expect(ctl.tuah!.hire!.files).toBeUndefined();
+    expect(ctl.tuah!.hire!.cvShelf).toBeUndefined();
     expect(ctl.calls[0].tools).toContain('listApplications');
     expect(ctl.calls[0].tools).not.toContain('readCandidateCv');
   });

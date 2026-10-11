@@ -9,6 +9,7 @@ import { type ModelMessage, stepCountIs, streamText } from 'ai';
 import { logModelCall, logModelError } from '@/lib/ai/call-log';
 import { getModel, pickModelId } from '@/lib/ai/provider';
 import type { CrmAccess } from '@/lib/ai/crm-tools';
+import { prepareCvStep } from '@/lib/ai/hire-tools';
 import {
   REACH_WRITE_TOOL_NAMES,
   combineToolkits,
@@ -102,13 +103,16 @@ export function runLekir(
   /** A workspace's own OpenRouter key; omitted for platform-paid turns. */
   apiKey?: string,
 ) {
-  const { tools, toolApproval } = combineToolkits([hireProduct(hire)]);
+  const product = hireProduct(hire);
+  const { tools, toolApproval } = combineToolkits([product]);
   return streamText({
     model: getModel('orchestrator', apiKey),
     system: LEKIR_SYSTEM,
     messages,
     tools,
     toolApproval,
+    // A CV Lekir has read reaches its model as a user file in the next step, never inside the tool result.
+    prepareStep: prepareCvStep(product.cvShelf),
     onLanguageModelCallEnd: logModelCall('lekir', pickModelId('orchestrator')),
     // After a CV read the request holds the file: a failure is logged by its code, never whole.
     onError: logModelError('lekir'),

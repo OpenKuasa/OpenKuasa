@@ -37,7 +37,8 @@ export async function POST(request: Request) {
   const files = createCvReader(hasSupabaseEnv() ? chat.supabase : null, data);
   const result = runLekir(
     chat.messages,
-    { data, write, origin: originFromHeaders((name) => request.headers.get(name)), files },
+    // `cvShelf`: where a read CV waits until Lekir's model is shown it. This request's own, gone with it.
+    { data, write, origin: originFromHeaders((name) => request.headers.get(name)), files, cvShelf: [] },
     request.signal,
     chat.apiKey,
   );

@@ -20,6 +20,7 @@ import {
 } from 'ai';
 import { z } from 'zod';
 import { subAgentSystem } from '@/lib/ai/agents/prompts';
+import { prepareCvStep } from '@/lib/ai/hire-tools';
 import type { ProductToolkit } from '@/lib/ai/products';
 import { logModelCall, logModelError, modelErrorCode } from '@/lib/ai/call-log';
 import { getModel, pickModelId } from '@/lib/ai/provider';
@@ -195,6 +196,9 @@ function askTool(product: ProductToolkit, team: TeamContext): Tool {
           system: subAgentSystem(product.key, canChange),
           prompt: given,
           tools: specialistTools(product, team, results, prepared, given),
+          // A CV this specialist reads reaches its own model as a user file in the next step:
+          // only a run whose messages hold the read is given the file, so never Tuah, never another delegation.
+          prepareStep: prepareCvStep(product.cvShelf),
           // A prepared change is the whole report: stop there rather than
           // spend another call having the specialist describe it.
           stopWhen: [stepCountIs(8), () => prepared.length > 0],

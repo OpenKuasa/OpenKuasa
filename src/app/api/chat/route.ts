@@ -16,7 +16,7 @@
 import { readUIMessageStream, type UIMessage } from 'ai';
 import { modelErrorCode } from '@/lib/ai/call-log';
 import { prepareChat } from '@/lib/ai/chat-request';
-import { runTuah } from '@/lib/ai/agents/orchestrator';
+import { runTuah, type HireAccess } from '@/lib/ai/agents/orchestrator';
 import { getCurrentOrg } from '@/lib/auth/current-org';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
 import { answersWithTeam, namesIn, proposalsIn, transcriptOf } from '@/lib/chat/delegation';
@@ -57,14 +57,17 @@ export async function POST(request: Request) {
   const withTeam = answersWithTeam(chat.team, lastMessage);
   const hireData = await getHireData(supabase);
   // Lekir's change tools need the same write access as Jebat's.
-  const hire = {
+  const hireBase = {
     data: hireData,
     write,
     origin: originFromHeaders((name) => request.headers.get(name)),
-    // Only Lekir, asked as a specialist, reads a CV: the single agent is given no way to.
-    // The file is read with the member's own client, never the service role.
-    files: withTeam ? createCvReader(hasSupabaseEnv() ? supabase : null, hireData) : undefined,
   };
+  // Only Lekir, asked as a specialist, reads a CV: the single agent is given no way to.
+  // The file is read with the member's own client, never the service role, and waits on a
+  // shelf that belongs to this request alone until Lekir's model is shown it.
+  const hire: HireAccess = withTeam
+    ? { ...hireBase, files: createCvReader(hasSupabaseEnv() ? supabase : null, hireData), cvShelf: [] }
+    : hireBase;
   const crm = org
     ? {
         client: supabase,
