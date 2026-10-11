@@ -32,6 +32,7 @@ import {
   updateCandidate,
   updateCandidateInput,
   attachCandidateCv,
+  deleteApplication, deleteApplicationInput, deleteCandidate, deleteCandidateInput, deletionSummary, deletionSummaryInput,
   type HireWriteContext,
 } from '@/lib/hire/capabilities';
 import type { Job } from '@/lib/hire/types';
@@ -954,6 +955,228 @@ describe('attachCandidateCv', () => {
     expect(spy).toHaveBeenCalledWith('[hire-capability] attachCandidateCv failed:', { code: '42501' });
     expect(await attachCandidateCv(answering({}, true), APP_ID, 'p')).toBe('failed');
     expect(await attachCandidateCv(answering({ data: 7, error: null }), APP_ID, 'p')).toBe('failed');
+    spy.mockRestore();
+  });
+});
+
+// ─── deleting an application or a candidate ──────────────────────────────────
+
+const DELETE_SENTENCE = 'That could not be deleted. Please try again.';
+
+/** A client whose rpc answers `answer`. */
+function delFake(opts: { answer?: unknown; error?: unknown; throws?: unknown } = {}) {
+  const calls: { fn: string; args: Record<string, unknown> }[] = [];
+  const client = {
+    rpc: async (fn: string, args: Record<string, unknown>) => {
+      calls.push({ fn, args });
+      if (opts.throws) throw opts.throws;
+      return { data: 'answer' in opts ? opts.answer : { word: 'ok' }, error: opts.error ?? null };
+    },
+  };
+  return { ctx: { client: client as never, orgId: ORG } satisfies HireWriteContext, calls };
+}
+
+type TableAnswer = { row?: unknown; rows?: unknown[]; count?: number | null; error?: unknown };
+
+/** A client whose reads answer by table: `row` for maybeSingle, `rows` and `count` when the query itself is awaited. */
+function summaryFake(tables: Record<string, TableAnswer>, throws = false) {
+  const reads: { table: string; columns: string; filters: Record<string, unknown> }[] = [];
+  const client = {
+    from: (table: string) => {
+      const entry = { table, columns: '', filters: {} as Record<string, unknown> };
+      reads.push(entry);
+      const t = tables[table] ?? {};
+      const chain = {
+        select: (columns: string) => { entry.columns = columns; return chain; },
+        eq: (k: string, v: unknown) => { entry.filters[k] = v; return chain; },
+        in: (k: string, v: unknown) => { entry.filters[k] = v; return chain; },
+        maybeSingle: async () => {
+          if (throws) throw new TypeError('read failed');
+          return { data: t.row ?? null, error: t.error ?? null };
+        },
+        then: (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) =>
+          (throws
+            ? Promise.reject(new TypeError('read failed'))
+            : Promise.resolve({ data: t.rows ?? [], count: t.count ?? 0, error: t.error ?? null })
+          ).then(resolve, reject),
+      };
+      return chain;
+    },
+  };
+  return { ctx: { client: client as never, orgId: ORG } satisfies HireWriteContext, reads };
+}
+
+describe('deletion schemas', () => {
+  it('take one id and nothing else, described, with no workspace key', () => {
+    for (const schema of [deleteApplicationInput, deleteCandidateInput]) {
+      expect(Object.keys(schema.shape)).toEqual(['id']);
+      expect(schema.safeParse({ id: 'nope' }).success).toBe(false);
+      expect(schema.safeParse({}).success).toBe(false);
+      expect(schema.safeParse({ id: APP_ID }).success).toBe(true);
+    }
+    for (const schema of [deleteApplicationInput, deleteCandidateInput, deletionSummaryInput]) {
+      expect(() => z.toJSONSchema(schema)).not.toThrow();
+      for (const [key, field] of Object.entries(schema.shape)) {
+        expect(key).not.toMatch(/org|tenant|workspace/i);
+        expect((field as z.ZodType).description, key).toBeTruthy();
+      }
+    }
+    expect(deleteApplicationInput.shape.id.description).toBe('The application\'s id, from listApplications.');
+    expect(deleteCandidateInput.shape.id.description).toBe('The candidate\'s id, from listCandidates.');
+    expect(deletionSummaryInput.safeParse({ kind: 'job', id: APP_ID }).success).toBe(false);
+  });
+});
+
+describe('deleteApplication', () => {
+  const ANSWER = { word: 'ok', name: 'Aina Rahman', job: 'Sales Executive', applications: 1, interviews: 2, cv_files: 1 };
+  it('sends only the id to its function, and reports what the function says it removed', async () => {
+    const f = delFake({ answer: ANSWER });
+    const result = await deleteApplication(f.ctx, { id: APP_ID });
+    expect(f.calls).toEqual([{ fn: 'hire_delete_application', args: { p_application_id: APP_ID } }]);
+    expect(result).toEqual({
+      ok: true,
+      data: {
+        id: APP_ID, name: 'Aina Rahman', job: 'Sales Executive', applications: 1, interviews: 2, cv_files: 1,
+        message: 'Deleted Aina Rahman\'s application for Sales Executive, with 2 interviews and 1 CV file. Aina Rahman is still on file.',
+      },
+    });
+  });
+  it('refuses a bad id before any call', async () => {
+    const f = delFake();
+    expect((await deleteApplication(f.ctx, { id: 'nope' })).ok).toBe(false);
+    expect(f.calls).toEqual([]);
+  });
+  it('maps each refusal to its sentence', async () => {
+    const cases: [unknown, string][] = [
+      [{ word: 'not_found' }, 'That application could not be found. It may already have been deleted.'],
+      [{ word: 'forbidden' }, 'You do not have permission to make changes here.'],
+      [{ word: 'changed' }, DELETE_SENTENCE],
+      [{ word: 'surprise' }, DELETE_SENTENCE],
+      [null, DELETE_SENTENCE],
+    ];
+    for (const [answer, sentence] of cases) {
+      expect(await deleteApplication(delFake({ answer }).ctx, { id: APP_ID })).toEqual({ ok: false, error: sentence });
+    }
+  });
+  it('gives the delete sentence and logs only a code on an rpc error and on a throw', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const e = await deleteApplication(delFake({ error: { code: '42501', message: 'Aina secret' } }).ctx, { id: APP_ID });
+    expect(e).toEqual({ ok: false, error: DELETE_SENTENCE });
+    expect(spy).toHaveBeenCalledWith('[hire-capability] deleteApplication failed:', { code: '42501' });
+    const t = await deleteApplication(delFake({ throws: new TypeError('Aina fetch failed') }).ctx, { id: APP_ID });
+    expect(t).toEqual({ ok: false, error: DELETE_SENTENCE });
+    expect(spy).toHaveBeenLastCalledWith('[hire-capability] deleteApplication failed:', { code: 'TypeError' });
+    expect(JSON.stringify(spy.mock.calls)).not.toMatch(/Aina|66666666/);
+    spy.mockRestore();
+  });
+  it('still answers ok when the answer has no name or odd counts: the deletion has happened', async () => {
+    const result = await deleteApplication(delFake({ answer: { word: 'ok', interviews: '3', cv_files: -1 } }).ctx, { id: APP_ID });
+    expect(result).toEqual({
+      ok: true,
+      data: { id: APP_ID, name: '', job: null, applications: 0, interviews: 0, cv_files: 0, message: 'Deleted the application.' },
+    });
+  });
+});
+
+describe('deleteCandidate', () => {
+  it('sends only the id to its function, and reports what the function says it removed', async () => {
+    const f = delFake({ answer: { word: 'ok', name: 'Aina Rahman', applications: 2, interviews: 1, cv_files: 1 } });
+    const result = await deleteCandidate(f.ctx, { id: CAND_ID });
+    expect(f.calls).toEqual([{ fn: 'hire_delete_candidate', args: { p_candidate_id: CAND_ID } }]);
+    expect(result).toEqual({
+      ok: true,
+      data: {
+        id: CAND_ID, name: 'Aina Rahman', job: null, applications: 2, interviews: 1, cv_files: 1,
+        message: 'Deleted Aina Rahman, with 2 applications, 1 interview and 1 CV file.',
+      },
+    });
+  });
+  it('never reports a job, even if the answer carried one', async () => {
+    const result = await deleteCandidate(delFake({ answer: { word: 'ok', name: 'Aina', job: 'Barista', applications: 0 } }).ctx, { id: CAND_ID });
+    expect(result.ok && result.data.job).toBeNull();
+    expect(result.ok && result.data.message).toBe('Deleted Aina.');
+  });
+  it('maps each refusal to its sentence', async () => {
+    const cases: [unknown, string][] = [
+      [{ word: 'not_found' }, 'That candidate could not be found. They may already have been deleted.'],
+      [{ word: 'forbidden' }, 'You do not have permission to make changes here.'],
+      [{ word: 'changed' }, 'This candidate was changed a moment ago. Nothing was deleted. Try again.'],
+      ['not_found', 'That candidate could not be found. They may already have been deleted.'],
+      [undefined, DELETE_SENTENCE],
+    ];
+    for (const [answer, sentence] of cases) {
+      expect(await deleteCandidate(delFake({ answer }).ctx, { id: CAND_ID })).toEqual({ ok: false, error: sentence });
+    }
+  });
+  it('refuses a bad id before any call, and logs only a code on a throw', async () => {
+    const f = delFake();
+    expect((await deleteCandidate(f.ctx, { id: '' })).ok).toBe(false);
+    expect(f.calls).toEqual([]);
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await deleteCandidate(delFake({ throws: new TypeError('x') }).ctx, { id: CAND_ID })).toEqual({ ok: false, error: DELETE_SENTENCE });
+    expect(spy).toHaveBeenCalledWith('[hire-capability] deleteCandidate failed:', { code: 'TypeError' });
+    spy.mockRestore();
+  });
+});
+
+describe('deletionSummary', () => {
+  const FAILED = 'Couldn\'t check what this removes. Close this and try again.';
+  it('counts what deleting an application would remove, reading within the workspace', async () => {
+    const f = summaryFake({
+      hire_applications: { row: { id: APP_ID, cv_path: 'o/j/f.pdf', candidate: { name: 'Aina Rahman' }, job: { title: 'Sales Executive' } } },
+      hire_interviews: { count: 2 },
+    });
+    expect(await deletionSummary(f.ctx, { kind: 'application', id: APP_ID })).toEqual({
+      ok: true, data: { name: 'Aina Rahman', job: 'Sales Executive', applications: 1, interviews: 2, cvFiles: 1 },
+    });
+    expect(f.reads.map((r) => r.table)).toEqual(['hire_applications', 'hire_interviews']);
+    expect(f.reads[0].filters).toEqual({ id: APP_ID, org_id: ORG });
+    expect(f.reads[1].filters).toEqual({ org_id: ORG, application_id: APP_ID });
+    // No contact detail is ever asked for.
+    for (const read of f.reads) expect(read.columns).not.toMatch(/email|phone/);
+  });
+  it('counts what deleting a candidate would remove', async () => {
+    const f = summaryFake({
+      hire_candidates: { row: { name: 'Aina Rahman' } },
+      hire_applications: { rows: [{ id: 'a1', cv_path: 'o/j/f.pdf' }, { id: 'a2', cv_path: null }, { id: 'a3', cv_path: 'o/k/g.pdf' }] },
+      hire_interviews: { count: 4 },
+    });
+    expect(await deletionSummary(f.ctx, { kind: 'candidate', id: CAND_ID })).toEqual({
+      ok: true, data: { name: 'Aina Rahman', job: null, applications: 3, interviews: 4, cvFiles: 2 },
+    });
+    expect(f.reads[0].filters).toEqual({ id: CAND_ID, org_id: ORG });
+    expect(f.reads[1].filters).toEqual({ org_id: ORG, candidate_id: CAND_ID });
+    expect(f.reads[2].filters).toEqual({ org_id: ORG, application_id: ['a1', 'a2', 'a3'] });
+    expect(f.reads[0].columns).toBe('name');
+  });
+  it('does not ask about interviews for a candidate with no applications', async () => {
+    const f = summaryFake({ hire_candidates: { row: { name: 'Aina' } }, hire_applications: { rows: [] } });
+    expect(await deletionSummary(f.ctx, { kind: 'candidate', id: CAND_ID })).toEqual({
+      ok: true, data: { name: 'Aina', job: null, applications: 0, interviews: 0, cvFiles: 0 },
+    });
+    expect(f.reads.map((r) => r.table)).toEqual(['hire_candidates', 'hire_applications']);
+  });
+  it('never puts a storage path in what it returns', async () => {
+    const f = summaryFake({
+      hire_applications: { row: { id: APP_ID, cv_path: 'o/j/secret.pdf', candidate: { name: 'Aina' }, job: { title: 'Barista' } } },
+    });
+    expect(JSON.stringify(await deletionSummary(f.ctx, { kind: 'application', id: APP_ID }))).not.toMatch(/secret|\.pdf|cv_path/);
+  });
+  it('says the row could not be found when it is not there', async () => {
+    expect(await deletionSummary(summaryFake({}).ctx, { kind: 'application', id: APP_ID }))
+      .toEqual({ ok: false, error: 'That application could not be found. It may already have been deleted.' });
+    expect(await deletionSummary(summaryFake({}).ctx, { kind: 'candidate', id: CAND_ID }))
+      .toEqual({ ok: false, error: 'That candidate could not be found. They may already have been deleted.' });
+  });
+  it('gives its own sentence for a bad input, a read error and a throw, logging only a code', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await deletionSummary(summaryFake({}).ctx, { kind: 'candidate', id: 'nope' })).toEqual({ ok: false, error: FAILED });
+    expect(await deletionSummary(summaryFake({}).ctx, { kind: 'job', id: CAND_ID } as never)).toEqual({ ok: false, error: FAILED });
+    const failing = summaryFake({ hire_candidates: { row: { name: 'Aina' } }, hire_applications: { error: { code: 'PGRST301', message: 'Aina' } } });
+    expect(await deletionSummary(failing.ctx, { kind: 'candidate', id: CAND_ID })).toEqual({ ok: false, error: FAILED });
+    expect(spy).toHaveBeenLastCalledWith('[hire-capability] deletionSummary failed:', { code: 'PGRST301' });
+    expect(await deletionSummary(summaryFake({}, true).ctx, { kind: 'application', id: APP_ID })).toEqual({ ok: false, error: FAILED });
+    expect(spy).toHaveBeenLastCalledWith('[hire-capability] deletionSummary failed:', { code: 'TypeError' });
     spy.mockRestore();
   });
 });

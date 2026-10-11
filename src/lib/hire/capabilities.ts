@@ -10,6 +10,9 @@ import { z } from 'zod';
 import { REJECT_REASONS, changeMessage, type RejectReason } from './application-changes';
 import { CANDIDATE_LIMITS, addedMessage, candidateMessage } from './candidate-fields';
 import {
+  DELETE_FAILED, SUMMARY_FAILED, deletedMessage, deletionMessage, type DeletionKind, type Removal,
+} from './deletion';
+import {
   APPLICATION_STAGES, DEFAULT_HIRE_SETTINGS, JOB_COLUMNS, SETTINGS_COLUMNS,
   type ApplicationOutcome, type ApplicationStage, type HireSettings, type Job, type JobStatus,
 } from './types';
@@ -687,5 +690,198 @@ export async function attachCandidateCv(service: SupabaseClient, applicationId: 
   } catch (error) {
     changeFailed('attachCandidateCv', error);
     return 'failed';
+  }
+}
+
+// ─── deleting an application or a candidate (two database functions, called by rpc) ──
+
+export const deleteApplicationInput = z.object({ id: applicationId() });
+export const deleteCandidateInput = z.object({
+  id: z.string().uuid().describe('The candidate\'s id, from listCandidates.'),
+});
+export const deletionSummaryInput = z.object({
+  kind: z.enum(['application', 'candidate'])
+    .describe('What would be deleted: one application, or one candidate with everything of theirs.'),
+  id: z.string().uuid().describe('The id of that application or candidate.'),
+});
+
+/** What a deletion removed, as the database function said, and the sentence for it. */
+export type Deleted = {
+  id: string;
+  name: string;
+  /** The job's title, for a deleted application; null for a candidate. */
+  job: string | null;
+  applications: number;
+  interviews: number;
+  cv_files: number;
+  message: string;
+};
+
+const wholeNumber = (value: unknown) =>
+  typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : 0;
+
+/** Logs the error's code only, and answers with the delete sentence. */
+function deleteFailed(fnName: string, error: unknown): { ok: false; error: string } {
+  changeFailed(fnName, error);
+  return { ok: false, error: DELETE_FAILED };
+}
+
+/**
+ * Calls one delete function. There is no row to read back afterwards, so the
+ * name and the counts are the function's own answer. An `ok` whose details are
+ * missing is still a success: the deletion has happened.
+ */
+async function deletion(
+  ctx: HireWriteContext,
+  fnName: string,
+  fn: string,
+  args: Record<string, unknown>,
+  kind: DeletionKind,
+  id: string,
+): Promise<CapResult<Deleted>> {
+  let answer: unknown;
+  try {
+    const { data, error } = await ctx.client.rpc(fn, args);
+    if (error) return deleteFailed(fnName, error);
+    answer = data;
+  } catch (error) {
+    return deleteFailed(fnName, error);
+  }
+  const word = wordOf(answer);
+  if (word !== 'ok') return { ok: false, error: deletionMessage(kind, word) };
+
+  const got = answer as { name?: unknown; job?: unknown; applications?: unknown; interviews?: unknown; cv_files?: unknown };
+  const name = typeof got.name === 'string' ? got.name : '';
+  const job = kind === 'application' && typeof got.job === 'string' && got.job ? got.job : null;
+  const removal: Removal = {
+    name,
+    job,
+    applications: wholeNumber(got.applications),
+    interviews: wholeNumber(got.interviews),
+    cvFiles: wholeNumber(got.cv_files),
+  };
+  return {
+    ok: true,
+    data: {
+      id,
+      name,
+      job,
+      applications: removal.applications,
+      interviews: removal.interviews,
+      cv_files: removal.cvFiles,
+      message: deletedMessage(kind, removal),
+    },
+  };
+}
+
+export async function deleteApplication(
+  ctx: HireWriteContext,
+  input: z.input<typeof deleteApplicationInput>,
+): Promise<CapResult<Deleted>> {
+  const parsed = deleteApplicationInput.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+  const { id } = parsed.data;
+  return deletion(ctx, 'deleteApplication', 'hire_delete_application', { p_application_id: id }, 'application', id);
+}
+
+export async function deleteCandidate(
+  ctx: HireWriteContext,
+  input: z.input<typeof deleteCandidateInput>,
+): Promise<CapResult<Deleted>> {
+  const parsed = deleteCandidateInput.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+  const { id } = parsed.data;
+  return deletion(ctx, 'deleteCandidate', 'hire_delete_candidate', { p_candidate_id: id }, 'candidate', id);
+}
+
+function summaryFailed(error: unknown): { ok: false; error: string } {
+  changeFailed('deletionSummary', error);
+  return { ok: false, error: SUMMARY_FAILED };
+}
+
+/**
+ * What a deletion would remove right now, for the confirm dialog: the name,
+ * the job for an application, and three counts. Read with the member's own
+ * client, inside their workspace. A storage path is only counted, never
+ * returned, and no contact detail is read. A preview: the delete function's
+ * own answer is what the success message reports.
+ */
+export async function deletionSummary(
+  ctx: HireWriteContext,
+  input: z.input<typeof deletionSummaryInput>,
+): Promise<CapResult<Removal>> {
+  const parsed = deletionSummaryInput.safeParse(input);
+  if (!parsed.success) return { ok: false, error: SUMMARY_FAILED };
+  const { kind, id } = parsed.data;
+  const missing = { ok: false as const, error: deletionMessage(kind, 'not_found') };
+  try {
+    if (kind === 'application') {
+      const found = await ctx.client
+        .from('hire_applications')
+        .select('id,cv_path,candidate:hire_candidates(name),job:hire_jobs(title)')
+        .eq('id', id)
+        .eq('org_id', ctx.orgId)
+        .maybeSingle();
+      if (found.error) return summaryFailed(found.error);
+      const row = found.data as unknown as {
+        cv_path: string | null; candidate: { name: string } | null; job: { title: string } | null;
+      } | null;
+      if (!row) return missing;
+      const interviews = await ctx.client
+        .from('hire_interviews')
+        .select('id', { count: 'exact', head: true })
+        .eq('org_id', ctx.orgId)
+        .eq('application_id', id);
+      if (interviews.error) return summaryFailed(interviews.error);
+      return {
+        ok: true,
+        data: {
+          name: row.candidate?.name ?? '',
+          job: row.job?.title ?? null,
+          applications: 1,
+          interviews: interviews.count ?? 0,
+          cvFiles: row.cv_path ? 1 : 0,
+        },
+      };
+    }
+
+    const person = await ctx.client
+      .from('hire_candidates')
+      .select('name')
+      .eq('id', id)
+      .eq('org_id', ctx.orgId)
+      .maybeSingle();
+    if (person.error) return summaryFailed(person.error);
+    const who = person.data as unknown as { name: string } | null;
+    if (!who) return missing;
+    const applications = await ctx.client
+      .from('hire_applications')
+      .select('id,cv_path')
+      .eq('org_id', ctx.orgId)
+      .eq('candidate_id', id);
+    if (applications.error) return summaryFailed(applications.error);
+    const rows = (applications.data ?? []) as unknown as { id: string; cv_path: string | null }[];
+    let interviews = 0;
+    if (rows.length > 0) {
+      const counted = await ctx.client
+        .from('hire_interviews')
+        .select('id', { count: 'exact', head: true })
+        .eq('org_id', ctx.orgId)
+        .in('application_id', rows.map((row) => row.id));
+      if (counted.error) return summaryFailed(counted.error);
+      interviews = counted.count ?? 0;
+    }
+    return {
+      ok: true,
+      data: {
+        name: who.name,
+        job: null,
+        applications: rows.length,
+        interviews,
+        cvFiles: rows.filter((row) => row.cv_path).length,
+      },
+    };
+  } catch (error) {
+    return summaryFailed(error);
   }
 }
