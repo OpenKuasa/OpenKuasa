@@ -5,11 +5,11 @@
 // The rows this file creates through the function (candidates, applications, notifications, rate-limit
 // ticks) cannot be removed by a user, so they go with their throwaway workspaces: the shared
 // live-workspaces helper deletes those (and the anonymous users) when the file finishes.
-import { afterAll, beforeAll, expect, test } from 'vitest';
+import { beforeAll, expect, test } from 'vitest';
 import { type SupabaseClient } from '@supabase/supabase-js';
 import { createAnonymousClient } from '@/lib/supabase/anonymous';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { createOrg, joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
+import { createOrg, joinDemo, signInAnon, liveClient , beforeCleanup } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
@@ -54,9 +54,6 @@ let draftJob: { id: string; title: string };
 let pastJob: { id: string; title: string };
 let otherJob: { id: string; title: string };
 
-// Every job this run makes, so afterAll can delete or close it.
-const made: Array<{ who: Owned; id: string }> = [];
-
 async function newJob(who: Owned, title: string, fields: Record<string, unknown> = {}) {
   const full = `${PREFIX} ${title}`;
   const ins = await who.c
@@ -66,7 +63,6 @@ async function newJob(who: Owned, title: string, fields: Record<string, unknown>
     .single();
   expect(ins.error, ins.error?.message).toBeNull();
   const created = { id: (ins.data as { id: string }).id, title: full };
-  made.push({ who, id: created.id });
   return created;
 }
 
@@ -209,12 +205,14 @@ beforeAll(async () => {
   otherJob = await newJob(other, 'other open', openFields());
 }, 30_000);
 
-afterAll(async () => {
-  if (!hasSupabaseEnv || !owner) return;
-  // The workspaces (and their boards, forms, jobs and applications) are deleted by the live-workspaces helper.
-  for (const who of [owner, other]) await who?.c.auth.signOut();
-  await viewer?.auth.signOut();
-}, 120_000);
+// If the cleanup cannot delete the workspaces (no key, migration not applied), they must not
+// keep a public board or an open application form, so this runs first inside the helper's cleanup.
+beforeCleanup(async () => {
+  for (const who of [owner, other]) {
+    if (!who) continue;
+    await who.c.from('hire_settings').update({ careers_enabled: false, ...ALL_OFF }).eq('org_id', who.orgId);
+  }
+});
 
 // The cases run in file order: later ones read what earlier ones wrote.
 

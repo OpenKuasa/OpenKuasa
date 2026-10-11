@@ -4,16 +4,16 @@
 // (Lekir slice 2e). Needs NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY and
 // SUPABASE_SERVICE_ROLE_KEY; without all three every case is skipped.
 //
-// Cleanup: afterAll removes every stored object this run uploaded (with the service client, so an
+// Cleanup: a beforeCleanup step removes every stored object this run uploaded (with the service client, so an
 // application row may keep a cv_path whose file is gone). That has to happen while the workspaces still
 // exist; the shared live-workspaces helper then deletes the workspaces (and with them the jobs,
 // applications, candidates, notifications and settings this file made) and the anonymous users. The deletion trigger is not exercised here: Task 7 proves it by hand.
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, expect, test } from 'vitest';
+import { beforeAll, expect, test } from 'vitest';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { createAnonymousClient } from '@/lib/supabase/anonymous';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { createOrg, joinDemo, liveClient, signInAnon } from './helpers/live-workspaces';
+import { createOrg, joinDemo, liveClient, signInAnon , beforeCleanup } from './helpers/live-workspaces';
 
 const hasService = hasSupabaseEnv && Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
 const testWithSupabase = hasService ? test : test.skip;
@@ -259,15 +259,20 @@ beforeAll(async () => {
   await storeFile(demoFile);
 }, 60_000);
 
-afterAll(async () => {
-  if (!hasService || !owner) return;
-  // Remove every object this run stored, while the workspaces they belong to still exist (the
-  // live-workspaces helper deletes those afterwards). A failed removal fails this hook.
+// Runs first inside the helper's cleanup (before the workspaces go, and even if the delete is
+// skipped): remove every stored object this run uploaded, and switch the boards and forms back off
+// so a leaked workspace does not keep a public careers board. A failed removal fails the cleanup.
+beforeCleanup(async () => {
+  if (!hasService || !svc) return;
+  for (const who of [owner, other]) {
+    if (!who) continue;
+    await who.c.from('hire_settings').update({ careers_enabled: false, ...ALL_OFF }).eq('org_id', who.orgId);
+  }
   for (let i = 0; i < stored.length; i += 50) {
     const removed = await svc.storage.from(BUCKET).remove(stored.slice(i, i + 50));
-    expect(removed.error, removed.error?.message).toBeNull();
+    if (removed.error) throw new Error(`storage removal failed: ${removed.error.message}`);
   }
-}, 120_000);
+});
 
 // The cases run in file order: later ones read what earlier ones wrote.
 

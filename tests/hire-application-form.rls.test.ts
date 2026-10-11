@@ -3,7 +3,7 @@ import { beforeAll, expect, test } from 'vitest';
 import { type SupabaseClient } from '@supabase/supabase-js';
 import { createAnonymousClient } from '@/lib/supabase/anonymous';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { createOrg, joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
+import { createOrg, joinDemo, signInAnon, liveClient , beforeCleanup } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
@@ -52,6 +52,13 @@ beforeAll(async () => {
   demoId = data as string;
   visitor = createAnonymousClient();
 }, 30_000);
+
+// If the cleanup cannot delete the workspaces (no key, migration not applied), they must not
+// keep a public board or an open application form, so this runs first inside the helper's cleanup.
+beforeCleanup(async () => {
+  if (!owner) return;
+  await owner.c.from('hire_settings').update({ careers_enabled: false, ...ALL_OFF }).eq('org_id', owner.orgId);
+});
 
 // The cases run in file order: each builds on the row the one before left.
 

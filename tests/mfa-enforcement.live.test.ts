@@ -2,7 +2,7 @@ import { expect, test } from 'vitest';
 import { generateRecoveryCodes, hashRecoveryCode } from '@/lib/auth/mfa';
 import './setup/supabase';
 import { totp } from './helpers/totp';
-import { createOrg, liveClient, recordSignedUpUser } from './helpers/live-workspaces';
+import { createOrg, liveClient, signUpTestUser } from './helpers/live-workspaces';
 
 // Live check that a password-only session of a 2FA user gets nothing from the
 // data API until it passes the second factor. Opt-in (RUN_MFA_LIVE=1): each
@@ -15,14 +15,12 @@ const nextWindow = () =>
 const liveTest = process.env.RUN_MFA_LIVE === '1' ? test : test.skip;
 
 liveTest('aal1 session of a 2FA user is locked out of the data API', async () => {
-  const email = `qa-enforce-${Date.now()}@example.com`;
   const password = 'enforce-pass-123';
 
   const a = client();
-  const signUp = await a.auth.signUp({ email, password });
+  const { email, ...signUp } = await signUpTestUser(a, password);
   expect(signUp.error, signUp.error?.message).toBeNull();
   const uid = signUp.data.user!.id;
-  recordSignedUpUser(uid);
   const org = await createOrg(a, 'QA Enforce Sdn Bhd');
   expect(org.error, org.error?.message).toBeNull();
 

@@ -1,9 +1,9 @@
 // tests/hire-careers.rls.test.ts
-import { afterAll, beforeAll, expect, test } from 'vitest';
+import { beforeAll, expect, test } from 'vitest';
 import { type SupabaseClient } from '@supabase/supabase-js';
 import { createAnonymousClient } from '@/lib/supabase/anonymous';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { createOrg, joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
+import { createOrg, joinDemo, signInAnon, liveClient , beforeCleanup } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
@@ -112,12 +112,13 @@ beforeAll(async () => {
   await newJob(empty, 'empty draft', { status: 'draft', description: 'Not open.' });
 });
 
-afterAll(async () => {
-  // The workspaces (and their boards and jobs) are deleted by the live-workspaces helper.
+// If the cleanup cannot delete the workspaces (no key, migration not applied), they must not
+// keep a public board switched on, so this runs first inside the helper's cleanup.
+beforeCleanup(async () => {
   for (const who of [owner, other, empty]) {
-    await who?.c.auth.signOut();
+    if (!who) continue;
+    await who.c.from('hire_settings').update({ careers_enabled: false }).eq('org_id', who.orgId);
   }
-  await viewer?.auth.signOut();
 });
 
 // The cases run in file order: case 1 needs the owner's board still off, case 2 switches it on.
