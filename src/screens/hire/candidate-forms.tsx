@@ -86,6 +86,27 @@ const SERVER_ERROR_FIELD: Record<string, ProblemKey> = {
 /** "This file is 7.2 MB. Choose one under 5 MB.": the size is the server's to say. */
 const TOO_BIG = /^This file is .+\. Choose one under 5 MB\.$/;
 
+/**
+ * The field a refused save takes focus to: the first wrong one in the order the form shows its
+ * fields, whatever order the checks found them in. Null when nothing the form shows is wrong.
+ */
+export function firstWrongField(mode: 'add' | 'edit', problems: Problems): ProblemKey | null {
+  const order: readonly ProblemKey[] = mode === 'add' ? ADD_ORDER : PERSON_FIELDS;
+  return order.find((key) => problems[key]) ?? null;
+}
+
+/**
+ * The CV file in a form's own post, as the form is about to send it: what the file says of itself,
+ * or null when there is none. The post is the truth about the file, and it is sent as it stands, so
+ * the file travels in it. An untouched file input stands in a form as an empty, nameless file, and
+ * with no job there is no application to hold one: both are no file, and are taken out of the post.
+ */
+export function postedCv(post: FormData, hasJob: boolean): CvFileInfo | null {
+  const file = hasJob ? chosenFile(post.get(CV_FILE_FIELD)) : null;
+  if (!file) post.delete(CV_FILE_FIELD);
+  return file;
+}
+
 function fieldForServerError(message: string, shown: readonly ProblemKey[]): ProblemKey | null {
   const field = Object.hasOwn(SERVER_ERROR_FIELD, message) ? SERVER_ERROR_FIELD[message] : TOO_BIG.test(message) ? CV_FILE_FIELD : null;
   return field && shown.includes(field) ? field : null;
@@ -344,13 +365,11 @@ function CandidateForm({
     if (pending) return;
     // The form's own post, so the file travels. The input is the truth about the file.
     const post = new FormData(event.currentTarget);
-    const file = hasJob ? chosenFile(post.get(CV_FILE_FIELD)) : null;
-    // An untouched file input stands in the form as an empty, nameless file. It is no file, so it is not sent.
-    if (!file) post.delete(CV_FILE_FIELD);
+    const file = postedCv(post, hasJob);
     if (file?.name !== picked?.name || file?.size !== picked?.size) setPicked(file);
     const found = problemsOf(values, file);
     setErrors(found);
-    const firstWrong = order.find((key) => found[key]);
+    const firstWrong = firstWrongField(mode, found);
     if (firstWrong) {
       setTouched(new Set(order));
       controlOf(firstWrong)?.focus();
@@ -624,6 +643,9 @@ export function candidateChanges(id: string, initial: CandidateFormValues, value
   return changes;
 }
 
+/** Whether an edit has nothing to send: the id is all there is. The dialog then sends nothing and says so. */
+export const nothingChanged = (changes: CandidateChanges) => Object.keys(changes).length === 1;
+
 /** The Edit form on its own. `onSubmit` is given the candidate's id and only the fields that changed. */
 export function EditCandidateForm({
   initial: stored,
@@ -851,7 +873,7 @@ export function EditCandidateDialog({
   function save(changes: CandidateChanges) {
     if (pending || inFlight.current) return;
     // Nothing differs from what is stored: nothing is sent, and nothing is said to have been saved.
-    if (Object.keys(changes).length === 1) {
+    if (nothingChanged(changes)) {
       close();
       onSaved(NOTHING_CHANGED);
       return;

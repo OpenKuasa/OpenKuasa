@@ -7,9 +7,17 @@ import type { BoardModel } from '@/lib/hire/lists';
  * The Add Candidate and Edit candidate forms, and where they are offered, as
  * the server sends them: rendered to a string and read as markup. A dialog is
  * drawn in a portal, which a string render leaves out, so the forms inside the
- * two dialogs are rendered on their own. What a press does (opening, the file
- * control, the checks on leaving a field, saving, focus) needs a browser: see
- * the task report's checklist.
+ * two dialogs are rendered on their own.
+ *
+ * There is no DOM here (the tests run in node, and no jsdom, happy-dom or
+ * testing library is installed), so nothing can be pressed, typed or focused.
+ * What a save decides is therefore held in plain functions the forms call
+ * (`candidateChanges`, `nothingChanged`, `firstWrongField`, `postedCv`) and
+ * tested as such at the end of this file. What still needs a browser: that a
+ * second press while a save is pending is ignored, that focus really lands on
+ * the field `firstWrongField` names, that the dialog closes and announces
+ * "Nothing was changed.", and that the browser puts the chosen file in the
+ * form's own post.
  */
 
 const mocks = vi.hoisted(() => ({
@@ -53,7 +61,9 @@ vi.mock('@/components/ui/dropdown-menu', () => {
 
 import { ApplicationActions, ApplicationMenu, type ApplicationSubject } from '@/screens/hire/application-actions';
 import { ApplicationRow, type ApplicationRowData } from '@/screens/hire/application-details';
-import { AddCandidate, AddCandidateForm, EditCandidateForm, candidateChanges } from '@/screens/hire/candidate-forms';
+import {
+  AddCandidate, AddCandidateForm, EditCandidateForm, candidateChanges, firstWrongField, nothingChanged, postedCv,
+} from '@/screens/hire/candidate-forms';
 import { EMPTY_CANDIDATE_FORM } from '@/lib/hire/candidate-fields';
 import CandidatesScreen from '@/screens/hire/candidates';
 
@@ -371,8 +381,8 @@ describe('the Edit candidate form', () => {
 
 /** What the Edit form holds for a stored candidate, and what it holds after some fields were retyped. */
 const held = (over: Partial<typeof STORED> = {}) => {
-  const { id: _id, ...fields } = { ...STORED, ...over };
-  return { ...EMPTY_CANDIDATE_FORM, ...fields };
+  const { name, email, phone, headline, location, skills, source } = { ...STORED, ...over };
+  return { ...EMPTY_CANDIDATE_FORM, name, email, phone, headline, location, skills, source };
 };
 
 describe('what an edit sends when a stored skill has a comma in it', () => {
@@ -391,6 +401,103 @@ describe('what an edit sends when a stored skill has a comma in it', () => {
       id: CANDIDATE, skills: ['Sales', 'B2B', 'Excel', 'Negotiation'],
     });
     for (const skill of candidateChanges(CANDIDATE, stored, { ...stored, skills: 'Sales, B2B' }).skills ?? ['a,b']) expect(skill).not.toContain(',');
+  });
+});
+
+describe('what an edit sends', () => {
+  const opened = held();
+
+  it('sends the id and only the fields that were changed, trimmed', () => {
+    expect(candidateChanges(CANDIDATE, opened, { ...opened, phone: ' +60198887766 ' })).toEqual({ id: CANDIDATE, phone: '+60198887766' });
+    expect(candidateChanges(CANDIDATE, opened, { ...opened, name: 'Aina Abdul Rahman', skills: 'Latte art, Cashier, Stock take' })).toEqual({
+      id: CANDIDATE, name: 'Aina Abdul Rahman', skills: ['Latte art', 'Cashier', 'Stock take'],
+    });
+    // Every field, each on its own: nothing else rides along.
+    const next = { name: 'A', email: 'a@b.co', phone: '1', headline: 'H', location: 'L', source: 'S' };
+    for (const [field, value] of Object.entries(next)) {
+      expect(candidateChanges(CANDIDATE, opened, { ...opened, [field]: value })).toEqual({ id: CANDIDATE, [field]: value });
+    }
+  });
+
+  it('sends a blank for a field that was emptied, and an empty list for skills that were', () => {
+    expect(candidateChanges(CANDIDATE, opened, { ...opened, email: '  ', skills: ' , ' })).toEqual({ id: CANDIDATE, email: '', skills: [] });
+  });
+
+  it('never sends the job, the cover note or the CV link: an edit is of the person', () => {
+    const changes = candidateChanges(CANDIDATE, opened, { ...opened, job_id: JOBS[0].id, cover_letter: 'x', cv_url: 'https://a.co' });
+    expect(changes).toEqual({ id: CANDIDATE });
+  });
+
+  it('sends nothing but the id when nothing differs, and that is what the dialog reads as nothing changed', () => {
+    const same = candidateChanges(CANDIDATE, opened, { ...opened });
+    expect(same).toEqual({ id: CANDIDATE });
+    expect(nothingChanged(same)).toBe(true);
+    // Only spacing differs: still nothing.
+    expect(nothingChanged(candidateChanges(CANDIDATE, opened, { ...opened, name: ' Aina Rahman ', skills: 'Latte art,Cashier' }))).toBe(true);
+    expect(nothingChanged(candidateChanges(CANDIDATE, opened, { ...opened, source: '' }))).toBe(false);
+    expect(nothingChanged({ id: CANDIDATE, skills: [] })).toBe(false);
+  });
+});
+
+describe('the field a refused save goes to', () => {
+  it('is the first wrong one in the order the form shows them, not the order they were found', () => {
+    expect(firstWrongField('add', { cv_file: 'x', cv_url: 'x', email: 'x', name: 'x' })).toBe('name');
+    expect(firstWrongField('add', { cv_file: 'x', cv_url: 'x', email: 'x' })).toBe('email');
+    expect(firstWrongField('add', { cv_file: 'x', cover_letter: 'x', job_id: 'x' })).toBe('job_id');
+    expect(firstWrongField('add', { cv_file: 'x', cv_url: 'x' })).toBe('cv_url');
+    expect(firstWrongField('add', { cv_file: 'x' })).toBe('cv_file');
+    expect(firstWrongField('edit', { source: 'x', skills: 'x' })).toBe('skills');
+  });
+
+  it('is none when nothing is wrong, and on an edit never one the Edit form does not show', () => {
+    expect(firstWrongField('add', {})).toBeNull();
+    expect(firstWrongField('edit', {})).toBeNull();
+    expect(firstWrongField('edit', { job_id: 'x', cover_letter: 'x', cv_url: 'x', cv_file: 'x' })).toBeNull();
+  });
+
+  it('names a control the drawn form really has, by the id focus is sent to', () => {
+    const html = addForm(JOBS[0].id);
+    const ids = [...tags(html, 'input'), ...tags(html, 'select'), ...tags(html, 'textarea')].map((tag) => attr(tag, 'id') ?? '');
+    for (const field of ['name', 'email', 'phone', 'headline', 'location', 'skills', 'source', 'job_id', 'cover_letter', 'cv_url', 'cv_file'] as const) {
+      expect(firstWrongField('add', { [field]: 'x' })).toBe(field);
+      expect(ids.filter((id) => id.endsWith(`-${field}`)), field).toHaveLength(1);
+    }
+  });
+});
+
+describe('the CV in the form\'s post', () => {
+  const PDF_BYTES = new TextEncoder().encode('%PDF-1.7 a small file');
+  const post = (file?: File) => {
+    const data = new FormData();
+    data.set('name', 'Aina Rahman');
+    data.set('job_id', JOBS[0].id);
+    if (file) data.set('cv_file', file);
+    return data;
+  };
+
+  it('travels as the file itself, bytes and name, when a job is picked', async () => {
+    const data = post(new File([PDF_BYTES], 'aina-cv.pdf', { type: 'application/pdf' }));
+    expect(postedCv(data, true)).toEqual({ name: 'aina-cv.pdf', size: PDF_BYTES.length, type: 'application/pdf' });
+    const sent = data.get('cv_file');
+    expect(sent).toBeInstanceOf(File);
+    expect((sent as File).name).toBe('aina-cv.pdf');
+    expect(new Uint8Array(await (sent as File).arrayBuffer())).toEqual(PDF_BYTES);
+    // The rest of the post is as it was.
+    expect(data.get('name')).toBe('Aina Rahman');
+    expect(data.get('job_id')).toBe(JOBS[0].id);
+  });
+
+  it('is left out when the file input was not touched: an empty, nameless file is no file', () => {
+    const data = post(new File([], ''));
+    expect(postedCv(data, true)).toBeNull();
+    expect(data.has('cv_file')).toBe(false);
+    expect(postedCv(post(), true)).toBeNull();
+  });
+
+  it('is left out when no job is picked, whatever the post holds', () => {
+    const data = post(new File([PDF_BYTES], 'aina-cv.pdf', { type: 'application/pdf' }));
+    expect(postedCv(data, false)).toBeNull();
+    expect(data.has('cv_file')).toBe(false);
   });
 });
 
