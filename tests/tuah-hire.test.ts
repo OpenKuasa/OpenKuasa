@@ -1372,6 +1372,47 @@ describe('one deletion a turn, as the browser carries the turn between requests'
     }
   });
 
+  it('team: a lookup that said several match still holds the deletion back in the turn\'s second request', async () => {
+    const AMBIGUOUS =
+      'More than one match was found for that name, so no deletion was prepared. Stop here: say who matches and ask the user which one they mean. ' +
+      'Once the user has said who, they can ask for the deletion again.';
+    candidateDeleted.mockReset();
+    candidateSaved.mockReset();
+    candidateSaved.mockResolvedValue({ ok: true, data: { id: B, name: 'Aisyah binti Karim' } });
+    seen.refusals = [];
+    seen.workerStep = 0;
+    seen.workerScript = [
+      // First delegation: the name fits two people, and the deletion is refused.
+      { tool: 'listCandidates', input: { name: 'Aisyah' } },
+      { tool: 'deleteCandidate', input: { id: A } },
+      'answer',
+      // Second delegation, same request: another kind of change, which gets a card. The request ends there.
+      { tool: 'listCandidates', input: {} },
+      { tool: 'updateCandidate', input: { id: B, location: 'Klang' } },
+      // The request that carries the user's yes: a clean lookup by full name, then the deletion again.
+      { tool: 'listCandidates', input: { name: 'Aisyah Lim' } },
+      { tool: 'deleteCandidate', input: { id: A } },
+    ];
+    try {
+      const shown = await exchange([say('u1', 'Delete Aisyah, and move the other one to Klang')], asTeam);
+      expect(seen.refusals).toEqual([AMBIGUOUS]);
+      expect(waiting(shown)).toHaveLength(1);
+      // The first specialist's report, as the browser keeps it, names both ids as ambiguous: that is what the next request reads.
+      const reports = toolParts(shown).filter((p) => p.type === 'tool-askLekir').map((p) => (p as { output?: { ambiguous?: string[] } }).output?.ambiguous);
+      expect(reports[0]?.slice().sort()).toEqual([A, B]);
+
+      seen.refusals = [];
+      const after = await exchange(decide(shown, true), asTeam);
+      expect(candidateSaved).toHaveBeenCalledTimes(1);
+      expect(seen.refusals.length).toBeGreaterThan(0);
+      for (const refusal of seen.refusals) expect(refusal).toBe(AMBIGUOUS);
+      expect(waiting(after)).toEqual([]);
+      expect(candidateDeleted).not.toHaveBeenCalled();
+    } finally {
+      seen.workerScript = null;
+    }
+  });
+
   it('team: a rejected deletion still counts as the turn\'s one', async () => {
     candidateDeleted.mockReset();
     seen.refusals = [];
