@@ -298,6 +298,30 @@ async function refusalUnlessPaymentOut(
   return null;
 }
 
+/**
+ * The transaction must be a payment against invoices, which the payments-in
+ * view shows. Money in can also be a receipt for income that settles no
+ * invoice; that is on Cash Receipts and never in this view, which joins each
+ * allocation to its invoice. Voiding a payment in asks the view first and
+ * refuses anything it does not show, without writing. One row is asked for: a
+ * payment split across invoices is several rows there.
+ */
+async function refusalUnlessPaymentIn(
+  ctx: FinanceWriteContext,
+  fnName: string,
+  txnId: string,
+): Promise<{ ok: false; error: string } | null> {
+  const { data, error } = await ctx.client
+    .from('finance_payments_in')
+    .select('transaction_id')
+    .eq('org_id', ctx.orgId)
+    .eq('transaction_id', txnId)
+    .limit(1);
+  if (error) return moneyWriteFailed(fnName, error, RECEIPT_REFUSALS);
+  if (!data || data.length === 0) return { ok: false, error: R.gone };
+  return null;
+}
+
 /* ---- writes ----------------------------------------------------------- */
 
 /** Records a payment out, paid now or scheduled, split across one supplier's bills. */
@@ -375,13 +399,16 @@ export async function voidPayment(
 /**
  * Voids a payment in: the same status change, kept to money in and worded
  * for it. The invoices it paid owe that amount again. There is no delete and
- * no edit: money in is posted the moment it is recorded.
+ * no edit: money in is posted the moment it is recorded. Anything the
+ * payments-in view does not show is refused first.
  */
 export async function voidPaymentIn(
   ctx: FinanceWriteContext,
   input: z.input<typeof paymentIdInput>,
 ): Promise<FinResult<{ id: string }>> {
   const { id: txnId } = paymentIdInput.parse(input);
+  const refusal = await refusalUnlessPaymentIn(ctx, 'voidPaymentIn', txnId);
+  if (refusal) return refusal;
   const { data, error } = await ctx.client
     .from('finance_transactions')
     .update({ status: 'void', updated_at: new Date().toISOString() })

@@ -8,7 +8,7 @@ import {
   recordPaymentOut,
   voidPaymentIn,
 } from '@/lib/finance/money';
-import { fakeFinance } from './setup/fake-finance';
+import { type FinanceAnswer, type FinanceCall, fakeFinance } from './setup/fake-finance';
 
 const TXN = '55555555-5555-4555-8555-555555555555';
 const ACCOUNT = '66666666-6666-4666-8666-666666666666';
@@ -99,25 +99,64 @@ describe('payments in', () => {
     expect(await refused('FIN04')).toEqual({ ok: false, error: 'A payment can only go against a posted bill.' });
     expect(await refused('FIN06')).toEqual({ ok: false, error: 'One payment can only pay bills from one supplier.' });
   });
-  it('is voided by one status change, kept to money in and to the workspace', async () => {
-    const { ctx, calls } = fakeFinance({ data: { id: TXN }, error: null });
+  /** Answers the payments-in check with a row (a payment against invoices) or none (any other money in), and the update with `other`. */
+  const paymentInOr = (isPaymentIn: boolean, other: FinanceAnswer) => (call: FinanceCall) =>
+    call.name === 'finance_payments_in' ? { data: isPaymentIn ? [{ transaction_id: TXN }] : [], error: null } : other;
+
+  it('is voided by one status change, kept to money in and to the workspace, once Payments In shows it', async () => {
+    const { ctx, calls } = fakeFinance(paymentInOr(true, { data: { id: TXN }, error: null }));
     expect(await voidPaymentIn(ctx, { id: TXN })).toEqual({ ok: true, data: { id: TXN } });
-    expect(calls[0]).toMatchObject({ name: 'finance_transactions', op: 'update' });
-    expect(calls[0].filters).toEqual({ id: TXN, org_id: 'org-1', direction: 'in' });
-    expect(Object.keys(calls[0].values!).sort()).toEqual(['status', 'updated_at']);
-    expect(calls[0].values).toMatchObject({ status: 'void' });
+    expect(calls.map((c) => [c.name, c.op])).toEqual([['finance_payments_in', 'select'], ['finance_transactions', 'update']]);
+    // One row is asked for: a payment split across invoices is several rows there.
+    expect(calls[0]).toMatchObject({ filters: { org_id: 'org-1', transaction_id: TXN }, limit: 1 });
+    expect(calls[1].filters).toEqual({ id: TXN, org_id: 'org-1', direction: 'in' });
+    expect(Object.keys(calls[1].values!).sort()).toEqual(['status', 'updated_at']);
+    expect(calls[1].values).toMatchObject({ status: 'void' });
+  });
+  it('refuses money in that is not a payment against an invoice, without writing', async () => {
+    // A receipt for income that settles no invoice is money in too, and Payments In never shows it.
+    const { ctx, calls } = fakeFinance(paymentInOr(false, { data: { id: TXN }, error: null }));
+    expect(await voidPaymentIn(ctx, { id: TXN })).toEqual({ ok: false, error: 'That payment no longer exists.' });
+    expect(calls.map((c) => [c.name, c.op])).toEqual([['finance_payments_in', 'select']]);
+    // The same when the view answers with nothing at all.
+    const empty = fakeFinance((call: FinanceCall) =>
+      call.name === 'finance_payments_in' ? { data: null, error: null } : { data: { id: TXN }, error: null },
+    );
+    expect(await voidPaymentIn(empty.ctx, { id: TXN })).toEqual({ ok: false, error: 'That payment no longer exists.' });
+    expect(empty.calls).toHaveLength(1);
+  });
+  it('writes nothing when the check cannot be read: a viewer is told they may not, anything else is logged', async () => {
+    const refused = fakeFinance((call: FinanceCall) =>
+      call.name === 'finance_payments_in' ? { data: null, error: { code: '42501' } } : { data: { id: TXN }, error: null },
+    );
+    expect(await voidPaymentIn(refused.ctx, { id: TXN })).toEqual({
+      ok: false, error: 'You do not have permission to make changes here.',
+    });
+    expect(refused.calls).toHaveLength(1);
+    expect(logged).not.toHaveBeenCalled();
+    const broken = fakeFinance((call: FinanceCall) =>
+      call.name === 'finance_payments_in' ? { data: null, error: { code: 'XX000' } } : { data: { id: TXN }, error: null },
+    );
+    expect(await voidPaymentIn(broken.ctx, { id: TXN })).toEqual({
+      ok: false, error: 'That change could not be saved. Please try again.',
+    });
+    expect(broken.calls).toHaveLength(1);
+    expect(logged).toHaveBeenCalled();
   });
   it('says a payment that is already void is already void, and never to void it', async () => {
-    const { ctx } = fakeFinance({ data: null, error: { code: 'FIN09' } });
+    const { ctx, calls } = fakeFinance(paymentInOr(true, { data: null, error: { code: 'FIN09' } }));
     const result = await voidPaymentIn(ctx, { id: TXN });
     expect(result).toEqual({ ok: false, error: 'This payment has already been voided.' });
     expect(JSON.stringify(result)).not.toContain('Void it');
+    expect(calls).toHaveLength(2);
   });
   it('says the payment is gone when voiding touches no row, and refuses an id that is not an id', async () => {
-    const { ctx, calls } = fakeFinance({ data: null, error: null });
+    const { ctx, calls } = fakeFinance(paymentInOr(true, { data: null, error: null }));
     expect(await voidPaymentIn(ctx, { id: TXN })).toEqual({ ok: false, error: 'That payment no longer exists.' });
+    expect(calls).toHaveLength(2);
     await expect(voidPaymentIn(ctx, { id: 'nope' })).rejects.toThrow();
-    expect(calls).toHaveLength(1);
+    // The id is refused before anything is read.
+    expect(calls).toHaveLength(2);
   });
   it('hides any other database error behind the general message and logs it', async () => {
     const { ctx } = fakeFinance({ data: null, error: { code: 'XX000' } });
