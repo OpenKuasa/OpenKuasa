@@ -194,11 +194,24 @@ async function serviceSaysNo(service: ReturnType<typeof serviceClient>, fn: stri
   }
 }
 
+/** Whether an application holds this file: true, false, or null when the question could not be answered. */
+async function cvKept(service: ReturnType<typeof serviceClient>, path: string): Promise<boolean | null> {
+  try {
+    const { data, error } = await service.rpc('hire_cv_attached', { p_path: path });
+    if (!error && typeof data === 'boolean') return data;
+    console.error('[hire/add-candidate] hire_cv_attached failed:', { code: error?.code });
+  } catch (error) {
+    console.error('[hire/add-candidate] hire_cv_attached failed:', codeOf(error));
+  }
+  return null;
+}
+
 /**
  * Stores a checked PDF and attaches it to an application that was just made.
  * True only when the application now holds the file. Everything here is done
  * as the server itself: the database lets no member write a file or its path.
- * A file that was stored and then not attached is removed again.
+ * A file the database refused is removed again; one whose attach answer was
+ * lost is removed only once the database says no application holds it.
  */
 async function attachCv(orgId: string, jobId: string, applicationId: string, bytes: Uint8Array): Promise<boolean> {
   let service: ReturnType<typeof serviceClient>;
@@ -222,6 +235,13 @@ async function attachCv(orgId: string, jobId: string, applicationId: string, byt
 
   const word = await attachCandidateCv(service, applicationId, path);
   if (word === 'ok') return true;
+  if (word === 'failed') {
+    // No answer came back, so the database may have kept the path. Ask before removing anything.
+    const kept = await cvKept(service, path);
+    if (kept === true) return true;
+    // Not known: the file stays, and the sweep takes it if no application holds it.
+    if (kept === null) return false;
+  }
   try {
     await removeCv(service, path);
   } catch (error) {

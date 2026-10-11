@@ -298,10 +298,42 @@ describe('addCandidateAction', () => {
     expect(result).toMatchObject({ ok: true, data: { message: WITH_APPLICATION + NOT_ATTACHED } });
   });
 
-  it.each(['failed', 'forbidden', 'not_found', 'invalid_path'])('removes the stored file when the attach answers %s', async (word) => {
+  it.each(['forbidden', 'not_found', 'invalid_path', 'not_by_hand'])('removes the stored file when the attach answers %s', async (word) => {
     ctl.attachWord = word;
     const result = await addCandidateAction(form({ job_id: JOB }, pdf()));
     expect(ctl.removed).toEqual(['org1/job/file.pdf']);
+    // The database said no: there is nothing to ask about.
+    expect(ctl.order).not.toContain('rpc:hire_cv_attached');
+    expect(result).toMatchObject({ ok: true, data: { message: WITH_APPLICATION + NOT_ATTACHED } });
+  });
+
+  it('keeps the file when the attach answer was lost but the application holds it', async () => {
+    ctl.attachWord = 'failed';
+    ctl.rpc.hire_cv_attached = { data: true, error: null };
+    const result = await addCandidateAction(form({ job_id: JOB }, pdf()));
+    expect(ctl.rpcArgs.at(-1)).toEqual({ fn: 'hire_cv_attached', args: { p_path: 'org1/job/file.pdf' } });
+    expect(ctl.removed).toEqual([]);
+    expect(result).toMatchObject({ ok: true, data: { message: WITH_APPLICATION } });
+  });
+
+  it('removes the file when the attach failed and no application holds it', async () => {
+    ctl.attachWord = 'failed';
+    ctl.rpc.hire_cv_attached = { data: false, error: null };
+    const result = await addCandidateAction(form({ job_id: JOB }, pdf()));
+    expect(ctl.removed).toEqual(['org1/job/file.pdf']);
+    expect(result).toMatchObject({ ok: true, data: { message: WITH_APPLICATION + NOT_ATTACHED } });
+  });
+
+  it.each([
+    ['errors', { data: null, error: { code: '42501' } }],
+    ['answers something that is not a boolean', { data: null, error: null }],
+    ['throws', 'throw' as const],
+  ])('leaves the file where it is when the attach failed and hire_cv_attached %s', async (_label, answer) => {
+    ctl.attachWord = 'failed';
+    ctl.rpc.hire_cv_attached = answer;
+    const result = await addCandidateAction(form({ job_id: JOB }, pdf()));
+    // Not known: removing it could leave an application pointing at nothing. The sweep takes a file no application holds.
+    expect(ctl.removed).toEqual([]);
     expect(result).toMatchObject({ ok: true, data: { message: WITH_APPLICATION + NOT_ATTACHED } });
   });
 
