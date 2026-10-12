@@ -62,6 +62,14 @@ describe('a failed team lookup never makes a report\'s rows "yours"', () => {
   });
 });
 
+describe('getPeopleOverview description', () => {
+  it('says what waiting_unknown means', () => {
+    const tools = createPeopleTools(seed, { employeeId: MANAGER, isHr: false, isDemo: false, managesTeam: true }, NOW);
+    const description = (tools.getPeopleOverview as unknown as { description: string }).description;
+    expect(description).toMatch(/waiting_unknown: true.*could not be read/);
+  });
+});
+
 describe('"away today" counts active reports only', () => {
   it('leaves an inactive report on approved leave today out of team.on_leave_today', async () => {
     const viewer: PeopleViewer = { employeeId: MANAGER, employeeName: 'Farid Ismail', isHr: false, isDemo: false, managesTeam: true };

@@ -691,7 +691,7 @@ export function createPeopleTools(
         'The team at a glance today: headcount, number of departments, how many are on leave today, how many have ' +
         'clocked in so far, and how many requests are waiting for approval (leave, claims, overtime, time-off). ' +
         'Someone who is not an HR admin gets the team\'s headcount and their own pending requests only; a manager also gets "team": ' +
-        'how many people report to them, how many of those are on leave today and how many requests wait for them to decide.' +
+        'how many people report to them, how many of those are on leave today and how many requests wait for them to decide; "waiting_unknown: true" there means that count could not be read, so say so and never say nothing is waiting.' +
         ' clocked_in_so_far counts only people who have clocked in so far today (present or late with a clock-in); today is not closed, so there is no rate and nobody is counted absent. Never say how many are absent or what the attendance rate is from it.' +
         SCOPE_NOTE,
       inputSchema: z.object({}),
