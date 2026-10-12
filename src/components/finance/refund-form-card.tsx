@@ -256,14 +256,14 @@ export function RefundFormCard({
                 checked={form.scheduled}
                 onChange={() => edit((f) => ({ ...f, scheduled: true }))}
               />
-              Leave to be paid
+              Pay later
             </label>
           </div>
         </fieldset>
 
         <div className="flex flex-wrap items-center gap-3 md:col-span-12">
           <Button type="submit" size="sm" disabled={save.pending}>
-            {save.pending ? 'Saving…' : form.scheduled ? 'Save as to be paid' : 'Record refund'}
+            {save.pending ? 'Saving…' : form.scheduled ? 'Save to pay later' : 'Record refund'}
           </Button>
           <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={save.pending}>
             Cancel
