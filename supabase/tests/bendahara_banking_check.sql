@@ -202,11 +202,11 @@ begin
   if t is distinct from 'finance_transactions_amount_number_check,finance_transactions_transfer_number_check' then
     fails := fails || format('the two new check constraints on finance_transactions are: %s', t);
   end if;
-  -- The triggers on payments: the cash book's two, the write guards' sign-off, and the five banking adds.
+  -- The triggers on payments: the cash book's two, the write guards' sign-off, and the five banking adds, and the ledger's stamp of when a payment was voided (20261111090000).
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where not tgisinternal and tgrelid = 'public.finance_transactions'::regclass;
   if t is distinct from 'finance_transaction_guard,finance_transaction_insert_guard,finance_transaction_sign_off,finance_transaction_unmatch,'
-       || 'finance_transfer_id_guard,finance_transfer_pair_delete,finance_transfer_pair_insert,finance_transfer_pair_update' then
+       || 'finance_transfer_id_guard,finance_transfer_pair_delete,finance_transfer_pair_insert,finance_transfer_pair_update,finance_void_stamp' then
     fails := fails || format('triggers on finance_transactions are: %s', t);
   end if;
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
