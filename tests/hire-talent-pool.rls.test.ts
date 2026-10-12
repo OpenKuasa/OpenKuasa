@@ -10,8 +10,10 @@
 //
 // Who calls what. Both pool functions and hire_add_candidate are granted to `authenticated` only, so every call is
 // made by a signed-in client (the owner, the owner of another workspace, a demo viewer) or by the signed-out
-// visitor client, which must be refused outright (42501). The service client is not used to change anything: it
-// is only passed to the shared helper's cleanup.
+// visitor client, which must be refused outright (42501). The service client changes one thing only: it sends
+// the public applications of cases 16 and 22, as the careers page does through the server (since
+// 20261101091500_rate_limits.sql only `service_role` may run submit_public_application; case 20b pins that a
+// visitor may not). Otherwise it is only passed to the shared helper's cleanup.
 //
 // The viewer case. A viewer made the way the other live files make one (joining the demo workspace) is not a
 // member of a throwaway workspace, so against the OWNER's workspace that viewer is a stranger and the right word
@@ -38,6 +40,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createAnonymousClient } from '@/lib/supabase/anonymous';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import { beforeCleanup, createOrg, joinDemo, liveClient, signInAnon, signInOwner } from './helpers/live-workspaces';
+import { publicWriter } from './helpers/public-writer';
 
 const hasService = hasSupabaseEnv && Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
 const testWithSupabase = hasService ? test : test.skip;
@@ -98,6 +101,7 @@ let owner: Owned;
 let other: Owned;
 let viewer: SupabaseClient; // a viewer of the DEMO workspace
 let visitor: SupabaseClient; // no session
+let writer: SupabaseClient; // who sends a public application: the server, or the visitor on an older database
 let demoId: string;
 
 let openJob: { id: string; title: string };
@@ -281,6 +285,7 @@ beforeAll(async () => {
   expect(joined.error, joined.error?.message).toBeNull();
   demoId = joined.data as string;
   visitor = createAnonymousClient();
+  ({ writer } = await publicWriter(visitor));
 
   await switchBoardOn(owner);
   const set = await owner.c.from('hire_settings').update(ALL_OFF).eq('org_id', owner.orgId).select('org_id').single();
@@ -480,7 +485,7 @@ testWithSupabase('16. a move racing the public form for one email and one job: o
     const id = await person(owner, { email });
     const [moveRes, sent] = (await Promise.all([
       move(owner.c, id, openJob.id),
-      sendPublicApplication(visitor, owner.orgId, openJob.id, { email, consent: true }),
+      sendPublicApplication(writer, owner.orgId, openJob.id, { email, consent: true }),
     ])) as [Res, Res];
     expect(moveRes.error, moveRes.error?.message).toBeNull();
     expect(sent.error, sent.error?.message).toBeNull();
@@ -548,6 +553,15 @@ testWithSupabase('20. a signed-out caller is refused outright on both functions'
   expectRefusedOutright(await move(visitor, NONE, NONE), 'visitor move');
 }, 30_000);
 
+testWithSupabase('20b. a signed-out caller cannot send a public application directly: only the server may', async () => {
+  // The grant moved to the service role in 20261101091500_rate_limits.sql, so the per-client limit and the
+  // honeypot in the server action cannot be stepped around by calling the function from a browser.
+  const email = uniqueEmail();
+  const direct = await sendPublicApplication(visitor, owner.orgId, openJob.id, { email, consent: true });
+  expectRefusedOutright(direct, 'visitor submit_public_application');
+  expect(await candidatesByEmail(owner.c, owner.orgId, email), 'nothing was kept').toHaveLength(0);
+}, 30_000);
+
 testWithSupabase('21. a direct update of pool_status is refused for the owner', async () => {
   const before = await poolStatusOf(owner.c, moved.id);
   const updated = await owner.c.from('hire_candidates').update({ pool_status: 'passive' }).eq('id', moved.id).select('id');
@@ -557,7 +571,7 @@ testWithSupabase('21. a direct update of pool_status is refused for the owner', 
 
 testWithSupabase('22. deleting a careers-page applicant\'s last application does not put them in the pool', async () => {
   const email = uniqueEmail();
-  const sent = await sendPublicApplication(visitor, owner.orgId, openJob.id, { email, consent: true });
+  const sent = await sendPublicApplication(writer, owner.orgId, openJob.id, { email, consent: true });
   expect(sent.error, sent.error?.message).toBeNull();
   expect(sent.data).toBe('ok');
   const [applicant] = await candidatesByEmail(owner.c, owner.orgId, email);
