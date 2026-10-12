@@ -112,7 +112,9 @@ export default async function MyDocumentsScreen() {
               </div>
               <div className="flex items-center justify-between border-t px-4 py-3 text-sm text-muted-foreground">
                 <span>
-                  {loaded.documents} documents · {loaded.letters} letters · {loaded.payslips} payslips
+                  {loaded.documents} {loaded.documents === 1 ? 'document' : 'documents'} · {loaded.letters}{' '}
+                  {loaded.letters === 1 ? 'letter' : 'letters'} · {loaded.payslips}{' '}
+                  {loaded.payslips === 1 ? 'payslip' : 'payslips'}
                 </span>
                 <span className="flex items-center gap-1.5">
                   <CalendarClock className="size-4" aria-hidden />
