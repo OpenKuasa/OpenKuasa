@@ -175,11 +175,11 @@ describe('addCandidateAction', () => {
   });
 
   it('adds a person with no job: the capability once, with the session\'s workspace and the skills as a list', async () => {
-    ctl.addResult = added({ application_id: null, job_id: null, job: null, application: 'none', message: `Added ${NAME}.` });
+    ctl.addResult = added({ application_id: null, job_id: null, job: null, application: 'none', message: `Added ${NAME} to the talent pool as Available.` });
     const result = await addCandidateAction(form({
       email: EMAIL, phone: PHONE, headline: 'Barista', location: 'Shah Alam', skills: 'Latte art, , Cashier,Latte art', source: 'Referral', org_id: 'someone-else',
     }));
-    expect(result).toEqual({ ok: true, data: { id: CANDIDATE, name: NAME, application_id: null, job_id: null, job: null, candidate: 'created', application: 'none', message: `Added ${NAME}.` } });
+    expect(result).toEqual({ ok: true, data: { id: CANDIDATE, name: NAME, application_id: null, job_id: null, job: null, candidate: 'created', application: 'none', message: `Added ${NAME} to the talent pool as Available.` } });
     expect(ctl.added).toHaveLength(1);
     expect(ctl.added[0].ctx).toMatchObject({ orgId: 'org1', client: { marker: 'session' } });
     expect(ctl.added[0].input).toEqual({
@@ -265,9 +265,9 @@ describe('addCandidateAction', () => {
   });
 
   it('treats an untouched file input (an empty, nameless file) as no file', async () => {
-    ctl.addResult = added({ application_id: null, job_id: null, job: null, application: 'none', message: `Added ${NAME}.` });
+    ctl.addResult = added({ application_id: null, job_id: null, job: null, application: 'none', message: `Added ${NAME} to the talent pool as Available.` });
     const result = await addCandidateAction(form({}, new File([], '')));
-    expect(result).toMatchObject({ ok: true, data: { message: `Added ${NAME}.` } });
+    expect(result).toMatchObject({ ok: true, data: { message: `Added ${NAME} to the talent pool as Available.` } });
     expect(ctl.order).toEqual(['addCandidate']);
   });
 
