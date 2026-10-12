@@ -22,7 +22,7 @@ describe('LEKIR_SYSTEM', () => {
   it('says what it can change, in step with the change tools it holds', () => {
     expect(t).toContain('create, edit, open, pause, close, reopen or delete jobs');
     // A change tool for something else means this line has to grow with it.
-    expect([...HIRE_WRITE_TOOL_NAMES].every((name) => /Job(Status)?$|^updateCareersPage$|^updateApplicationForm$|^(move|reject|reopen|rate|delete)Application$|^(add|update|delete)Candidate$|^setPoolStatus$|^moveToPipeline$|^(schedule|reschedule|cancel|reopen)Interview$|^recordPastInterview$|^setInterviewOutcome$/.test(name))).toBe(true);
+    expect([...HIRE_WRITE_TOOL_NAMES].every((name) => /Job(Status)?$|^updateCareersPage$|^updateApplicationForm$|^(move|reject|reopen|rate|delete)Application$|^(add|update|delete)Candidate$|^setPoolStatus$|^moveToPipeline$|^(schedule|reschedule|cancel|reopen)Interview$|^recordPastInterview$|^setInterviewOutcome$|^(save|clear)InterviewFeedback$/.test(name))).toBe(true);
     expect(t).toContain('you can prepare two changes to the talent pool');
     expect(t).toContain('you can prepare six changes to an interview');
     expect(t).toContain('you can prepare two deletions');
@@ -345,10 +345,15 @@ describe('changing an application', () => {
     expect(interviews).toBeGreaterThan(pool);
     expect(lines[interviews - 1]).toBe('');
     expect(lines[interviews - 2]).toContain('which name the screens where it can be done, and do not try another way.');
+    // The interview section still ends on the same rule; the interview feedback section now sits between it and the scope.
+    const feedback = lines.indexOf('INTERVIEW FEEDBACK');
+    expect(feedback).toBeGreaterThan(interviews);
+    expect(lines[feedback - 1]).toBe('');
+    expect(lines[feedback - 2]).toBe('- After a past interview is approved, say it was recorded and that no invitation was made.');
     const scope = lines.indexOf('SCOPE');
-    expect(scope).toBeGreaterThan(interviews);
+    expect(scope).toBeGreaterThan(feedback);
     expect(lines[scope - 1]).toBe('');
-    expect(lines[scope - 2]).toBe('- After a past interview is approved, say it was recorded and that no invitation was made.');
+    expect(lines[scope - 2]).toContain('and do not try another change to get round it.');
   });
   it('the specialist only claims the four changes when it holds change tools', () => {
     for (const canChange of [true, false]) {
@@ -787,8 +792,8 @@ describe('the interview rules, in every prompt that can prepare an interview cha
     const at = lekir.indexOf('\nINTERVIEWS\n');
     expect(at).toBeGreaterThan(lekir.indexOf('\nTHE TALENT POOL\n'));
     expect(at).toBeLessThan(lekir.indexOf('\nSCOPE\n'));
-    // Nothing stands between its last rule and the scope.
-    expect(lekir).toContain('After a past interview is approved, say it was recorded and that no invitation was made.\n\nSCOPE\n');
+    // Nothing stands between its last rule and the next section.
+    expect(lekir).toContain('After a past interview is approved, say it was recorded and that no invitation was made.\n\nINTERVIEW FEEDBACK\n');
   });
   it('Lekir: every rule, word for word', () => {
     for (const rule of [
@@ -856,7 +861,8 @@ describe('the interview rules, in every prompt that can prepare an interview cha
     const first = lines.indexOf(`- ${rules[0]}`);
     expect(lines.slice(first, first + rules.length)).toEqual(rules.map((rule) => `- ${rule}`));
     expect(lines[first - 1].startsWith('- When another candidate has the same name, the approval card says which one it is on a line of its own, as it does for a deletion.')).toBe(true);
-    expect(lines[first + rules.length].startsWith('- If a tool call fails or is refused')).toBe(true);
+    // The feedback rules follow the interview rules; the rules every specialist ends with follow those (tests/lekir-feedback-prompt.test.ts).
+    expect(lines[first + rules.length].startsWith('- You can also prepare two changes to an interview\'s feedback')).toBe(true);
     // A specialist that reports to Tuah never asks the user itself, here either.
     expect(specialist).not.toContain('list who matches and ask which to start with');
   });
