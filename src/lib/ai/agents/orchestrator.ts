@@ -18,17 +18,20 @@ import {
   combineToolkits,
   requestOnlyBinding,
   crmProduct,
+  financeProduct,
   hireProduct,
   kasturiSharedProduct,
   peopleProduct,
   reachProduct,
   type ApprovalBinding,
+  type FinanceAccess,
   type HireAccess,
   type PeopleAccess,
   type ProductToolkit,
   type ReachAccess,
 } from '@/lib/ai/products';
 import {
+  bendaharaSystem,
   JEBAT_SYSTEM,
   LEKIR_SYSTEM,
   lekiuSystem,
@@ -42,7 +45,7 @@ import type { Screen } from '@/lib/chat/screen';
 /** Tools that change data: each one pauses for the owner's approval before running. */
 export const WRITE_TOOL_NAMES = REACH_WRITE_TOOL_NAMES;
 
-export type { ApprovalBinding, HireAccess, PeopleAccess, ReachAccess };
+export type { ApprovalBinding, FinanceAccess, HireAccess, PeopleAccess, ReachAccess };
 
 /**
  * One agent's tools from its products, with every change tool bound to the record the server keeps of what it
@@ -178,6 +181,36 @@ export function runLekiu(
     stopWhen: stepCountIs(10),
     // A drafted notice or letter runs longer than a data answer.
     maxOutputTokens: 1400,
+    abortSignal,
+  });
+}
+
+/**
+ * "Bendahara, your CFO": the same single agent as Jebat, holding the finance
+ * lookups and, for someone who may write, the full invoice/quotation/bill/
+ * payment lifecycle behind the owner's approval.
+ */
+export function runBendahara(
+  messages: ModelMessage[],
+  finance: FinanceAccess,
+  abortSignal?: AbortSignal,
+  /** A workspace's own OpenRouter key; omitted for platform-paid turns. */
+  apiKey?: string,
+  /** Where proposed changes are kept; a chat route passes its own. */
+  approvals?: ApprovalBinding,
+) {
+  const { tools, toolApproval } = boundToolkit([financeProduct(finance)], messages, approvals);
+  return streamText({
+    model: getModel('orchestrator', apiKey),
+    system: bendaharaSystem(new Date()),
+    messages,
+    tools,
+    toolApproval,
+    onLanguageModelCallEnd: logModelCall('bendahara', pickModelId('orchestrator')),
+    onError: logModelError('bendahara'),
+    // Posting an invoice often needs a lookup first (the draft), then the post.
+    stopWhen: stepCountIs(10),
+    maxOutputTokens: 1200,
     abortSignal,
   });
 }
