@@ -77,7 +77,7 @@ create table public.finance_ledger_accounts (
   -- account is 'income' for an income category and 'expense' for an expense
   -- category is seen to by the function that makes it (a check cannot read
   -- another table), and the category's kind is then held still.
-  constraint finance_ledger_accounts_type_check check (
+  constraint finance_ledger_accounts_stands_for_check check (
     case
       when system_key = 'receivable' then type = 'asset'
       when system_key in ('payable','sst_payable') then type = 'liability'
