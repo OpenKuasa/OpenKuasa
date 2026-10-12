@@ -24,7 +24,7 @@ export async function runAgent(
   service: SupabaseClient,
   orgId: string,
   trigger: AgentRunTrigger,
-  def: AgentDefinition<any, any>,
+  def: AgentDefinition,
 ): Promise<AgentRunResult> {
   const { data: run, error: insertErr } = await service
     .from('agent_runs')

@@ -86,7 +86,7 @@ export async function proposeChanges(
   built: { context: string; raw: unknown; trend?: string },
   maxCost: number,
   costSoFar: number,
-  def: AgentDefinition<any, any>,
+  def: AgentDefinition,
 ): Promise<{ proposed: number; cost_cents: number }> {
   if (costSoFar >= maxCost) return { proposed: 0, cost_cents: 0 };
   const now = new Date();

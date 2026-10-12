@@ -132,7 +132,7 @@ describe('proposeChanges gate', () => {
   });
 
   it('inserts proposals carrying the definition agentKey/product, from def.scan + def.actions', async () => {
-    const qa: AgentDefinition<unknown, unknown> = {
+    const qa: AgentDefinition = {
       agentKey: 'qa-agent',
       product: 'qa',
       buildContext: async () => ({ context: 'c', raw: {} }),

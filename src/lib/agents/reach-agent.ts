@@ -1,7 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { entry, type AgentDefinition, type Candidate, type MediaContext } from '@/lib/agents/definition';
 import {
-  type ReachWriteContext,
   createAppointment,
   createAppointmentInput,
   createForm,
@@ -80,7 +79,7 @@ async function noRecentFormProposal(service: SupabaseClient, orgId: string): Pro
  * This is the behavior-preserving home for what used to live inline in weekly-studio.ts +
  * proposer.ts. Registered in the static {@link import('@/lib/agents/registry').AGENTS} map.
  */
-export const reachAgent: AgentDefinition<ReachRaw, ReachWriteContext> = {
+export const reachAgent: AgentDefinition = {
   agentKey: WEEKLY_STUDIO,
   product: 'reach',
 
@@ -92,11 +91,13 @@ export const reachAgent: AgentDefinition<ReachRaw, ReachWriteContext> = {
       data.listAppointments(),
     ]);
     const context = summarize(deriveReportsModel(leads, campaigns, appts, '7d', new Date()));
-    return { context, raw: { leads, appts, campaigns } };
+    const raw: ReachRaw = { leads, appts, campaigns };
+    return { context, raw };
   },
 
   scan(raw, now) {
-    return opportunityScan(raw.leads, raw.appts, now);
+    const { leads, appts } = raw as ReachRaw;
+    return opportunityScan(leads, appts, now);
   },
 
   // Rule 4: offer ONE draft lead-capture form for the model to NAME after the week's trend,

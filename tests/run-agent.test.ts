@@ -69,7 +69,7 @@ function fakeService(keyRow: { ciphertext: string } | null = { ciphertext: 'abc'
   return { service: service as never, runs };
 }
 
-const qa: AgentDefinition<unknown, unknown> = {
+const qa: AgentDefinition = {
   agentKey: 'qa-agent',
   product: 'qa',
   buildContext: async () => ({ context: 'ctx', raw: {} }),

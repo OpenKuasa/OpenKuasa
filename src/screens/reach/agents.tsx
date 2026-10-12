@@ -69,8 +69,8 @@ export default async function AgentsScreen() {
     const [configs, scheduleRows, proposalRows, decidedRows, daySpent, weekSpent, runsRes] = await Promise.all([
       listAgentConfigs(supabase, viewer.orgId),
       listSchedules(supabase, viewer.orgId),
-      listPendingProposals(supabase, viewer.orgId),
-      listRecentlyDecided(supabase, viewer.orgId),
+      listPendingProposals(supabase, viewer.orgId, 'reach'),
+      listRecentlyDecided(supabase, viewer.orgId, 5, 'reach'),
       spentSince(24 * 3600_000),
       spentSince(7 * 24 * 3600_000),
       supabase

@@ -9,7 +9,7 @@ import {
   type AgentRegistry,
 } from '@/lib/agents/definition';
 
-const qa: AgentDefinition<{ n: number }, { tag: string }> = {
+const qa: AgentDefinition = {
   agentKey: 'qa-agent',
   product: 'qa',
   buildContext: async () => ({ context: 'ctx', raw: { n: 1 } }),

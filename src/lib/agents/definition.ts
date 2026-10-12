@@ -16,22 +16,29 @@ export type Candidate = {
   fillName?: boolean;
 };
 
-/** One allow-listed action: its input schema + the capability to run under the write-context. */
-export type Entry<Ctx> = {
+/**
+ * One allow-listed action, type-erased for the registry: its input schema + a run that
+ * takes the owner-session write-context. {@link entry} binds a typed capability into it.
+ */
+export type Entry = {
   schema: ZodType;
-  run: (ctx: Ctx, input: unknown) => Promise<CapResult<unknown>>;
+  run: (ctx: unknown, input: unknown) => Promise<CapResult<unknown>>;
 };
 
-/** Erase the per-capability input type: parse with the schema, hand the parsed value on. */
+/**
+ * Bind a typed capability into an {@link Entry}: the caller keeps full type-safety on the
+ * input (`I`, from the schema) and the write-context (`Ctx`, from the capability); the stored
+ * entry erases both, parsing the input with the schema and handing the context on.
+ */
 export function entry<I, Ctx>(
   schema: ZodType<I>,
   cap: (ctx: Ctx, input: I) => Promise<CapResult<unknown>>,
-): Entry<Ctx> {
-  return { schema, run: (ctx, input) => cap(ctx, schema.parse(input) as I) };
+): Entry {
+  return { schema, run: (ctx, input) => cap(ctx as Ctx, schema.parse(input) as I) };
 }
 
 /** The model-ready snapshot a run builds once and threads to digest + proposer. */
-export type BuiltContext<Raw> = { context: string; raw: Raw; trend?: string };
+export type BuiltContext = { context: string; raw: unknown; trend?: string };
 
 /**
  * Everything the generic worker hands a definition's media step: the open key, the
@@ -52,31 +59,32 @@ export type MediaContext = {
 };
 
 /**
- * One product's autonomous agent, keyed by `agent_key` and carrying its `product`.
- * The generic spine (worker/proposer/scheduler/apply/UI) reads a definition instead
- * of hardwiring reach. Ctx is the owner-session write-context the apply path runs
- * capabilities under (reach: {@link import('@/lib/reach/capabilities').ReachWriteContext}).
+ * One product's autonomous agent, keyed by `agent_key` and carrying its `product`. The
+ * generic spine (worker/proposer/scheduler/apply/UI) reads a definition instead of
+ * hardwiring reach. It is type-erased (`raw`/write-context are `unknown`) so a registry can
+ * hold agents of different products; each definition narrows `raw` internally. The
+ * write-context the apply path runs capabilities under is reach's `ReachWriteContext` today.
  */
-export type AgentDefinition<Raw, Ctx> = {
+export type AgentDefinition = {
   agentKey: string;
   product: string;
   /** Service-role read of the workspace + a model-ready snapshot string. */
-  buildContext(service: SupabaseClient, orgId: string): Promise<{ context: string; raw: Raw }>;
+  buildContext(service: SupabaseClient, orgId: string): Promise<{ context: string; raw: unknown }>;
   /** Deterministic, pure candidate changes from this run's data. */
-  scan(raw: Raw, now: Date): Candidate[];
+  scan(raw: unknown, now: Date): Candidate[];
   /** DB-touching candidates (reach: the trend-gated createForm cooldown). Awaited after scan. */
   extraCandidates?(
     service: SupabaseClient,
     orgId: string,
-    built: BuiltContext<Raw>,
+    built: BuiltContext,
     now: Date,
   ): Promise<Candidate[]>;
   /** What a schedule's monitor-skip counts as new data since `since`. */
   hasNewData(service: SupabaseClient, orgId: string, since: string): Promise<boolean>;
   /** The owner-approved allow-list: action name -> { input schema, capability run }. */
-  actions: Record<string, Entry<Ctx>>;
+  actions: Record<string, Entry>;
   /** Builds the owner-session write-context the apply path runs the capability under. */
-  buildWriteContext(client: SupabaseClient, orgId: string, userId: string): Ctx;
+  buildWriteContext(client: SupabaseClient, orgId: string, userId: string): unknown;
   /** Optional web-search step; its text feeds the digest and the proposer's `trend`. */
   research?: { prompt(context: string): string };
   digest: { prompt(context: string, research: string | null): string };
@@ -85,20 +93,17 @@ export type AgentDefinition<Raw, Ctx> = {
   ui: { title: string; subtitle: string; screenPath: string; assetKinds: readonly string[] };
 };
 
-export type AgentRegistry = ReadonlyMap<string, AgentDefinition<any, any>>;
+export type AgentRegistry = ReadonlyMap<string, AgentDefinition>;
 
-export function agentFor(agentKey: string, reg: AgentRegistry): AgentDefinition<any, any> | undefined {
+export function agentFor(agentKey: string, reg: AgentRegistry): AgentDefinition | undefined {
   return reg.get(agentKey);
 }
 
-export function agentForProduct(
-  product: string,
-  reg: AgentRegistry,
-): AgentDefinition<any, any> | undefined {
+export function agentForProduct(product: string, reg: AgentRegistry): AgentDefinition | undefined {
   for (const def of reg.values()) if (def.product === product) return def;
   return undefined;
 }
 
-export function actionsFor(product: string, reg: AgentRegistry): Record<string, Entry<any>> {
+export function actionsFor(product: string, reg: AgentRegistry): Record<string, Entry> {
   return agentForProduct(product, reg)?.actions ?? {};
 }
