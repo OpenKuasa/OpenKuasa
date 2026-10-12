@@ -39,6 +39,10 @@ describe('labels', () => {
     expect(fileSizeLabel(512)).toBe('512 B');
     expect(fileSizeLabel(1023)).toBe('1023 B');
     expect(fileSizeLabel(1024)).toBe('1 KB');
+    // Never "1024 KB": the last bytes below a megabyte already read as one.
+    expect(fileSizeLabel(1024 * 1024 - 1)).toBe('1 MB');
+    expect(fileSizeLabel(1024 * 1024 - 1)).not.toContain('1024');
+    expect(fileSizeLabel(1024 * 1023)).toBe('1023 KB');
     expect(fileSizeLabel(184320)).toBe('180 KB');
     expect(fileSizeLabel(1024 * 1024)).toBe('1 MB');
     expect(fileSizeLabel(1572864)).toBe('1.5 MB');
@@ -181,11 +185,15 @@ describe('inboxReceiptsCsv', () => {
     const csv = inboxReceiptsCsv([
       onExpense({ file_name: 'IMG_0042.JPG', vendor: 'Shell, Bangsar', receipt_date: '2026-10-03', amount: 142.5, sst_amount: 8.07 }),
       row({ file_name: 'scan.pdf', mime_type: 'application/pdf', created_at: '2026-10-02T23:59:00+00:00' }),
+      row({ file_name: 'a.jpg', vendor: 'Shell', amount: 10, extracted_at: '2026-10-03T09:12:05+00:00' }),
+      row({ file_name: 'b.jpg', extraction_failed: true }),
     ]);
     expect(csv).toBe(
-      `${CSV_BOM}Uploaded,File,Type,Vendor,Receipt date,Amount,SST,Status,Matched to\r\n` +
-        '2026-10-03,IMG_0042.JPG,JPG,"Shell, Bangsar",2026-10-03,142.5,8.07,Matched,Expense · Travel\r\n' +
-        '2026-10-02,scan.pdf,PDF,,,,,To review,\r\n',
+      `${CSV_BOM}Uploaded,File,Type,Vendor,Receipt date,Amount,SST,Status,Matched to,Read by AI\r\n` +
+        '2026-10-03,IMG_0042.JPG,JPG,"Shell, Bangsar",2026-10-03,142.5,8.07,Matched,Expense · Travel,\r\n' +
+        '2026-10-02,scan.pdf,PDF,,,,,To review,,\r\n' +
+        '2026-10-03,a.jpg,JPG,Shell,,10,,To review,,yes\r\n' +
+        '2026-10-03,b.jpg,JPG,,,,,To review,,could not be read\r\n',
     );
   });
   it('does not let a file name start a spreadsheet formula', () => {

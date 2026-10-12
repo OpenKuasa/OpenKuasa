@@ -36,7 +36,9 @@ export const INBOX_TYPE_LABELS: Record<InboxReceiptType, string> = {
 export function fileSizeLabel(bytes: number | null): string {
   if (bytes === null || !(bytes > 0)) return '—';
   if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  const kb = Math.round(bytes / 1024);
+  // 1048575 bytes rounds to 1024 KB: that is a megabyte, so it is written as one.
+  if (kb < 1024) return `${kb} KB`;
   return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`;
 }
 
@@ -121,10 +123,13 @@ export function filterInboxReceipts(rows: InboxReceiptRow[], query: string, filt
   );
 }
 
+/** What the CSV's "Read by AI" column says for each reading note, as the screen's sentence means it. */
+const CSV_READING_NOTES = { read: 'yes', failed: 'could not be read', none: null } as const;
+
 /** The inbox table as a CSV file. Amounts are numbers; a receipt nobody has read has empty cells. */
 export function inboxReceiptsCsv(rows: InboxReceiptRow[]): string {
   return toCsv(
-    ['Uploaded', 'File', 'Type', 'Vendor', 'Receipt date', 'Amount', 'SST', 'Status', 'Matched to'],
+    ['Uploaded', 'File', 'Type', 'Vendor', 'Receipt date', 'Amount', 'SST', 'Status', 'Matched to', 'Read by AI'],
     rows.map((r) => [
       r.created_at.slice(0, 10),
       r.file_name,
@@ -135,6 +140,7 @@ export function inboxReceiptsCsv(rows: InboxReceiptRow[]): string {
       r.sst_amount,
       INBOX_STATUS_LABELS[r.status],
       r.document_kind ? inboxDocument(r) : null,
+      CSV_READING_NOTES[inboxReadingNote(r) ?? 'none'],
     ]),
   );
 }
