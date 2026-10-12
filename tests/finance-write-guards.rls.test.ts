@@ -24,7 +24,8 @@ import {
   saveCashReceipt,
   voidCashReceipt,
 } from '@/lib/finance/cash-receipts';
-import { approveExpense, deleteExpense, listExpenseCategories, rejectExpense, saveExpense } from '@/lib/finance/expenses';
+import { expenseDecisionPayload } from '@/lib/finance/expense-form';
+import { approveExpense, deleteExpense, listExpenseCategories, listExpenses, rejectExpense, saveExpense } from '@/lib/finance/expenses';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import { createConfirmedTestUser, createOrg, liveClient, signInOwner } from './helpers/live-workspaces';
 
@@ -452,11 +453,11 @@ const expenseRow = async (id: string) => {
   return data;
 };
 
-/** The expense as the screen shows it: its id and `updated_at`, as the view returns them. */
+/** The expense as the screen shows it, read the way the screen reads it, and what a decision sends of it. */
 const shown = async (id: string) => {
-  const { data, error } = await owner.c.from('finance_expense_totals').select('updated_at').eq('id', id).maybeSingle();
-  expect(error, error?.message).toBeNull();
-  return { id, updated_at: (data as { updated_at: string }).updated_at };
+  const row = (await listExpenses({ client: owner.c, orgId })).find((e) => e.id === id);
+  expect(row).toBeTruthy();
+  return expenseDecisionPayload(row!);
 };
 
 testWithSupabase('an expense: a member saves, changes and cannot decide it; the owner approves, rejects, and approves by saving', async () => {
@@ -543,6 +544,22 @@ testWithSupabase('an expense changed after the owner opened it is not approved o
   // Shown again, it is decided.
   done(await approveExpense(asOwner, await shown(saved.id)));
   expect((await expenseRow(saved.id))?.status).toBe('approved');
+});
+
+testWithSupabase('a direct update that leaves updated_at alone is still not approved as it now stands', async () => {
+  const asMember = { client: member.c, orgId };
+  const asOwner = { client: owner.c, orgId };
+  const rent = await category('Rent');
+  const saved = done(await saveExpense(asMember, { expense_date: daysFromToday(0), category_id: rent, vendor_name: 'Kedai Ali', amount: 120 }));
+  const opened = await shown(saved.id);
+  // The member goes round the app: a plain update of the amount, nothing else, so updated_at does not move.
+  const direct = await member.c.from('finance_expenses').update({ amount: 9999 }).eq('id', saved.id).select('id').maybeSingle();
+  expect(direct.error, direct.error?.message).toBeNull();
+  expect((await shown(saved.id)).updated_at).toBe(opened.updated_at);
+  const changed = 'This expense was changed after you opened it. Check it again, then approve or reject it.';
+  expect(await approveExpense(asOwner, opened)).toEqual({ ok: false, error: changed });
+  expect(await rejectExpense(asOwner, opened)).toEqual({ ok: false, error: changed });
+  expect(await expenseRow(saved.id)).toMatchObject({ status: 'pending', amount: 9999, approved_by: null });
 });
 
 testWithSupabase('an expense of NaN is refused by the database, whoever sends it', async () => {

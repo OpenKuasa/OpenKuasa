@@ -57,6 +57,11 @@ export function fakeFinance(answer: FinanceAnswer | ((call: FinanceCall) => Fina
           call.filters[column] = value;
           return builder;
         },
+        // Recorded under "<column> is", so a test can tell `is(null)` from `eq`.
+        is(column: string, value: unknown) {
+          call.filters[`${column} is`] = value;
+          return builder;
+        },
         order(column: string, options?: { ascending?: boolean }) {
           call.order.push(`${column} ${options?.ascending === false ? 'desc' : 'asc'}`);
           return builder;

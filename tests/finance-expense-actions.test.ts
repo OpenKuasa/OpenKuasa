@@ -53,6 +53,19 @@ const PATHS = [
   '/finance/journals',
 ];
 const SEEN = '2026-10-12T09:15:22.123456+00:00';
+/** What the row showed when the owner pressed Approve or Reject. */
+const DECIDE = {
+  id: EXPENSE,
+  updated_at: SEEN,
+  status: 'pending',
+  amount: 120,
+  sst_amount: 6,
+  expense_date: '2026-10-05',
+  category_id: CATEGORY,
+  vendor_id: null,
+  vendor_name: 'Kedai Ali',
+  notes: null,
+};
 const FORBIDDEN = { ok: false, error: 'You do not have permission to make changes here.' };
 const NEEDS = { ok: false, error: 'Only an owner or admin can approve or reject an expense. Ask one of them to do this.' };
 
@@ -67,8 +80,8 @@ const expense = {
 /** Every expense action with an input its schema accepts, and the data-layer function it must call. */
 const writes: [string, (input: unknown) => Promise<Answer>, unknown, string][] = [
   ['saveExpenseAction', actions.saveExpenseAction, expense, 'saveExpense'],
-  ['approveExpenseAction', actions.approveExpenseAction, { id: EXPENSE, updated_at: SEEN }, 'approveExpense'],
-  ['rejectExpenseAction', actions.rejectExpenseAction, { id: EXPENSE, updated_at: SEEN }, 'rejectExpense'],
+  ['approveExpenseAction', actions.approveExpenseAction, DECIDE, 'approveExpense'],
+  ['rejectExpenseAction', actions.rejectExpenseAction, DECIDE, 'rejectExpense'],
   ['deleteExpenseAction', actions.deleteExpenseAction, { id: EXPENSE }, 'deleteExpense'],
 ];
 
@@ -112,8 +125,8 @@ describe('who may write', () => {
     expect(ctl.calls.map((c) => c.fn)).toEqual(['saveExpense', 'deleteExpense']);
     ctl.calls = [];
     ctl.revalidated = [];
-    expect(await actions.approveExpenseAction({ id: EXPENSE, updated_at: SEEN })).toEqual(NEEDS);
-    expect(await actions.rejectExpenseAction({ id: EXPENSE, updated_at: SEEN })).toEqual(NEEDS);
+    expect(await actions.approveExpenseAction(DECIDE)).toEqual(NEEDS);
+    expect(await actions.rejectExpenseAction(DECIDE)).toEqual(NEEDS);
     // Not even with an input the schema would refuse: the role is asked first.
     expect(await actions.approveExpenseAction({ id: 'nope' })).toEqual(NEEDS);
     expect(ctl.calls).toEqual([]);
@@ -128,7 +141,7 @@ describe('what is sent and what is refreshed', () => {
       ok: false,
       error: 'Say who was paid: choose a contact or type a name.',
     });
-    expect(await actions.approveExpenseAction({ id: 'nope', updated_at: SEEN })).toEqual({ ok: false, error: 'That expense no longer exists.' });
+    expect(await actions.approveExpenseAction({ ...DECIDE, id: 'nope' })).toEqual({ ok: false, error: 'That expense no longer exists.' });
     expect(await actions.rejectExpenseAction({ id: EXPENSE })).toEqual({
       ok: false,
       error: 'This expense was changed after you opened it. Check it again, then approve or reject it.',

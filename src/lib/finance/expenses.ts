@@ -74,6 +74,9 @@ export const EXPENSE_MESSAGES = {
   amountFormat: 'Enter the amount as a number, without commas or RM: 1200.50.',
   // Typed into a money box: more than a sen.
   amountDecimals: 'Enter the amount to two decimal places.',
+  // The same for the SST box, so it does not send a person to look at an amount that is fine.
+  sstFormat: 'Enter the SST as a number, without commas or RM: 72.00.',
+  sstDecimals: 'Enter the SST to two decimal places.',
   sst: 'Enter the SST that is inside the amount: 0 or more.',
   sstTooMuch: 'The SST cannot be more than the amount.',
   tooLong: LINE_MESSAGES.tooLong,
@@ -92,6 +95,10 @@ export const EXPENSE_MESSAGES = {
   hasPayments: 'This expense has a payment against it, paid or still to be paid, so it cannot be rejected.',
   // An approval or rejection found the expense changed (or decided) since the person's screen was drawn.
   changed: 'This expense was changed after you opened it. Check it again, then approve or reject it.',
+  // The same, when the expense now holds a status of its own: someone else decided it, or sent it back.
+  alreadyApproved: 'This expense has already been approved.',
+  alreadyRejected: 'This expense has already been rejected.',
+  pendingAgain: 'This expense is pending again.',
   // FIN14 from the expense's own guard.
   needsDecider: 'Only an owner or admin can approve or reject an expense. Ask one of them to do this.',
   // FIN15: no category, or one that is not an expense category of the workspace any more.
@@ -155,11 +162,24 @@ export const saveExpenseInput = z
 export const expenseIdInput = z.object({ id }, { error: M.gone });
 
 /**
- * Approving or rejecting an expense: which one, and when it was last changed as the screen showed it. The time is
- * kept as the text the database gave (microseconds and offset included), so it can be compared to the stored value.
+ * Approving or rejecting an expense: which one, and what the screen showed of it. `updated_at` is kept as the text
+ * the database gave (microseconds and offset included). The database does not move `updated_at` on every direct
+ * update, so the fields a person decides on go with it: the decision matches the expense only if it still holds
+ * all of them. `vendor_name` is the view's, which is the contact's name when there is a contact.
  */
 export const expenseDecisionInput = z.object(
-  { id, updated_at: z.iso.datetime({ offset: true, error: M.changed }) },
+  {
+    id,
+    updated_at: z.iso.datetime({ offset: true, error: M.changed }),
+    status: z.enum(['pending', 'approved', 'rejected'], { error: M.changed }),
+    amount: z.number({ error: M.changed }).finite(M.changed),
+    sst_amount: z.number({ error: M.changed }).finite(M.changed),
+    expense_date: z.string({ error: M.changed }).regex(/^\d{4}-\d{2}-\d{2}$/, M.changed),
+    category_id: z.string({ error: M.changed }).uuid(M.changed),
+    vendor_id: z.string({ error: M.changed }).uuid(M.changed).nullable(),
+    vendor_name: z.string({ error: M.changed }).nullable(),
+    notes: z.string({ error: M.changed }).nullable(),
+  },
   { error: M.gone },
 );
 
@@ -272,31 +292,43 @@ export async function saveExpense(
 }
 
 /**
- * One change of status on the expense the person was shown (`seen` is the `updated_at` they saw), kept to the
- * workspace. When no row matches, the expense is either gone or was changed since: one more read tells which.
+ * One change of status on the expense the person was shown (`seen`: its `updated_at` and the fields the row
+ * showed), kept to the workspace. The update matches the expense only while it still holds all of them. When no row
+ * matches, the expense is gone, or it was changed since, or it was decided meanwhile: one more read tells which.
  */
 async function decide(
   ctx: FinanceWriteContext,
   fnName: string,
-  expenseId: string,
-  seen: string,
+  seen: z.output<typeof expenseDecisionInput>,
   status: 'approved' | 'rejected',
   refusals: Record<string, string>,
 ): Promise<FinResult<{ id: string }>> {
-  const { data, error } = await ctx.client
+  let update = ctx.client
     .from('finance_expenses')
     // Status and nothing else: the guard refuses a decision that changes anything with it, and signs it itself.
     .update({ status, updated_at: new Date().toISOString() })
-    .eq('id', expenseId)
+    .eq('id', seen.id)
     .eq('org_id', ctx.orgId)
-    .eq('updated_at', seen)
-    .select('id')
-    .maybeSingle();
+    .eq('updated_at', seen.updated_at)
+    .eq('status', seen.status)
+    .eq('amount', seen.amount)
+    .eq('sst_amount', seen.sst_amount)
+    .eq('expense_date', seen.expense_date)
+    .eq('category_id', seen.category_id);
+  // A contact is matched by its id, and the table's own vendor_name is empty then (the view's is the contact's name).
+  update = seen.vendor_id === null ? update.is('vendor_id', null).eq('vendor_name', seen.vendor_name ?? '') : update.eq('vendor_id', seen.vendor_id).is('vendor_name', null);
+  update = seen.notes === null ? update.is('notes', null) : update.eq('notes', seen.notes);
+  const { data, error } = await update.select('id').maybeSingle();
   if (error) return expenseWriteFailed(fnName, error, refusals);
   if (data) return { ok: true, data: { id: (data as { id: string }).id } };
-  const still = await ctx.client.from('finance_expenses').select('id').eq('id', expenseId).eq('org_id', ctx.orgId).maybeSingle();
+  const still = await ctx.client.from('finance_expenses').select('id,status').eq('id', seen.id).eq('org_id', ctx.orgId).maybeSingle();
   if (still.error) return expenseWriteFailed(fnName, still.error, refusals);
-  return { ok: false, error: still.data ? M.changed : M.gone };
+  if (!still.data) return { ok: false, error: M.gone };
+  const now = (still.data as { status?: ExpenseStatus }).status;
+  if (now === 'approved' && seen.status !== 'approved') return { ok: false, error: M.alreadyApproved };
+  if (now === 'rejected' && seen.status !== 'rejected') return { ok: false, error: M.alreadyRejected };
+  if (now === 'pending' && seen.status !== 'pending') return { ok: false, error: M.pendingAgain };
+  return { ok: false, error: M.changed };
 }
 
 /** Approves a pending expense as it stands. An owner or admin only (FIN14 for anyone else). */
@@ -304,8 +336,7 @@ export async function approveExpense(
   ctx: FinanceWriteContext,
   input: z.input<typeof expenseDecisionInput>,
 ): Promise<FinResult<{ id: string }>> {
-  const { id: expenseId, updated_at } = expenseDecisionInput.parse(input);
-  return decide(ctx, 'approveExpense', expenseId, updated_at, 'approved', APPROVE_REFUSALS);
+  return decide(ctx, 'approveExpense', expenseDecisionInput.parse(input), 'approved', APPROVE_REFUSALS);
 }
 
 /**
@@ -316,8 +347,7 @@ export async function rejectExpense(
   ctx: FinanceWriteContext,
   input: z.input<typeof expenseDecisionInput>,
 ): Promise<FinResult<{ id: string }>> {
-  const { id: expenseId, updated_at } = expenseDecisionInput.parse(input);
-  return decide(ctx, 'rejectExpense', expenseId, updated_at, 'rejected', REJECT_REFUSALS);
+  return decide(ctx, 'rejectExpense', expenseDecisionInput.parse(input), 'rejected', REJECT_REFUSALS);
 }
 
 /** Deletes a pending or rejected expense. An approved one is refused (FIN01): it is rejected first. */
