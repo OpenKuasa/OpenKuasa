@@ -765,6 +765,18 @@ describe('LEKIU_SYSTEM, the three kinds of asker', () => {
     expect(t).toContain('needs approval, and the database refuses a loop');
     expect(t).toContain('sits with the owners and admins');
   });
+  it('keeps the owner-only sentences and adds the manager exception after each', () => {
+    expect(t).toContain('are for owners and admins only. the one exception is a manager, who decides the leave and time-off of their direct reports; when you hold no decide tool, say the employee\'s manager or an owner or admin decides it.');
+    expect(t).toContain('are for owners and admins only. the one exception is a manager, who decides the claims and overtime of their direct reports and never marks a claim paid; when you hold no decide tool, say the employee\'s manager or an owner or admin decides it.');
+  });
+  it('does not say the overtime lookups give a manager nothing at all', () => {
+    expect(t).not.toContain('the overtime lookups give a manager none;');
+    expect(t).toContain('the overtime lookups give a manager no figure on a report\'s row');
+  });
+  it('tells that a manager gets over_balance and approved_this_year on direct reports\' pending requests', () => {
+    expect(t).toContain('a manager gets the same on their direct reports\' pending requests.');
+    expect(t).toContain('a manager gets the same on their direct reports\' pending claims.');
+  });
   it('never mentions the old manager flag', () => {
     expect(LEKIU_SYSTEM).not.toContain('is_manager');
   });
