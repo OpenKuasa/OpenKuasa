@@ -59,8 +59,8 @@ export const CASH_RECEIPT_MESSAGES = {
   locked: 'This receipt has been posted or voided, so that can no longer be done.',
   // FIN09 from voiding: the receipt is a draft, or it was voided in another tab.
   cannotVoid: 'This receipt cannot be voided as it now stands: it has already been voided, or it is still a draft.',
-  // FIN09 from deleting: it was posted in another tab.
-  cannotDelete: 'This receipt has been posted, so it cannot be deleted. Void it instead.',
+  // FIN09 from deleting: it was posted, or posted and then voided, in another tab.
+  cannotDelete: 'This receipt has been posted or voided, so it cannot be deleted.',
   // FIN15. The form sends invoices or a category, never both and never neither, so through the app this is a
   // category that is no longer an income category of the workspace, or a draft made elsewhere that is not
   // exactly its split when it is posted.
@@ -72,6 +72,9 @@ export const CASH_RECEIPT_MESSAGES = {
 } as const;
 
 const M = CASH_RECEIPT_MESSAGES;
+
+/** A required column was left empty. */
+const PG_NOT_NULL = '23502';
 
 const id = z.string({ error: M.gone }).uuid(M.gone);
 
@@ -110,7 +113,10 @@ export const saveCashReceiptInput = z.discriminatedUnion(
       ...shared,
       allocations: z
         .array(
-          z.object({ invoice_id: z.string({ error: M.invoices }).uuid(M.invoices), amount: ringgitAmount(M.amount) }),
+          z.object(
+            { invoice_id: z.string({ error: M.invoices }).uuid(M.invoices), amount: ringgitAmount(M.amount) },
+            { error: M.invoices },
+          ),
           { error: M.invoices },
         )
         .min(1, M.invoices)
@@ -131,7 +137,7 @@ export const saveCashReceiptInput = z.discriminatedUnion(
   { error: M.kind },
 );
 
-export const cashReceiptIdInput = z.object({ id });
+export const cashReceiptIdInput = z.object({ id }, { error: M.gone });
 
 export type SaveAndPostCashReceiptResult = FinResult<{ id: string; number: string }> & { draftId?: string };
 
@@ -146,11 +152,15 @@ const REFUSALS: Record<string, string> = {
   [FIN_SIGN_OFF]: NEEDS_SIGN_OFF,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_CHECK]: M.invalid,
+  // A required column was left out: the schema asks for every one, so only a direct call meets it.
+  [PG_NOT_NULL]: M.invalid,
   // The same invoice twice on one receipt: the number comes from finance_next_number under a lock.
   [PG_UNIQUE]: M.duplicate,
   [PG_FORBIDDEN]: NOT_ALLOWED,
   [PG_OUT_OF_RANGE]: TOO_LARGE,
 };
+// A clash from posting could only be on the receipt's number, never on an invoice appearing twice.
+const POST_REFUSALS: Record<string, string> = Object.fromEntries(Object.entries(REFUSALS).filter(([code]) => code !== PG_UNIQUE));
 const VOID_REFUSALS: Record<string, string> = { ...REFUSALS, FIN09: M.cannotVoid };
 const DELETE_REFUSALS: Record<string, string> = { ...REFUSALS, FIN09: M.cannotDelete };
 
@@ -248,7 +258,7 @@ export async function postCashReceipt(
     target_org: ctx.orgId,
     target_txn: txnId,
   });
-  if (error || !data) return receiptWriteFailed('postCashReceipt', error);
+  if (error || !data) return receiptWriteFailed('postCashReceipt', error, POST_REFUSALS);
   return { ok: true, data: { id: txnId, number: data as string } };
 }
 

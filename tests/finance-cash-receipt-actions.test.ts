@@ -161,8 +161,13 @@ describe('each write action, for an owner or admin', () => {
       error: 'Choose what this receipt is for: a customer’s invoices, or other income.',
     });
     expect(await actions.postCashReceiptAction({ id: 'nope' })).toEqual({ ok: false, error: 'That receipt no longer exists.' });
-    expect(await actions.voidCashReceiptAction(null)).toMatchObject({ ok: false });
-    expect(await actions.deleteCashReceiptAction(undefined)).toMatchObject({ ok: false });
+    expect(await actions.voidCashReceiptAction(null)).toEqual({ ok: false, error: 'That receipt no longer exists.' });
+    expect(await actions.deleteCashReceiptAction(undefined)).toEqual({ ok: false, error: 'That receipt no longer exists.' });
+    expect(await actions.postCashReceiptAction(null)).toEqual({ ok: false, error: 'That receipt no longer exists.' });
+    expect(await actions.saveCashReceiptAction({ ...forInvoices, allocations: [null] })).toEqual({
+      ok: false,
+      error: 'Choose at least one invoice this receipt is for.',
+    });
     expect(ctl.calls).toEqual([]);
     expect(ctl.revalidated).toEqual([]);
   });

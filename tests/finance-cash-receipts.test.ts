@@ -114,6 +114,9 @@ describe('saveCashReceiptInput', () => {
     expect(cashReceiptIdInput.parse({ id: TXN })).toEqual({ id: TXN });
     expect(cashReceiptIdInput.safeParse({ id: 'nope' }).error?.issues[0]?.message).toBe('That receipt no longer exists.');
     expect(cashReceiptIdInput.safeParse({}).error?.issues[0]?.message).toBe('That receipt no longer exists.');
+    expect(cashReceiptIdInput.safeParse(null).error?.issues[0]?.message).toBe('That receipt no longer exists.');
+    const malformed = saveCashReceiptInput.safeParse({ ...forInvoices, allocations: [null] });
+    expect(malformed.error?.issues[0]?.message).toBe('Choose at least one invoice this receipt is for.');
   });
 });
 
@@ -155,6 +158,17 @@ describe('saving a draft', () => {
     expect(calls[0]).toMatchObject({ filters: { org_id: 'org-1', transaction_id: TXN }, limit: 1 });
     expect((calls[1].args!.receipt as { id: string }).id).toBe(TXN);
   });
+  it('changes a draft for invoices by sending its id and its whole split in one call', async () => {
+    const { ctx, calls } = fakeFinance(receiptOr(true, { data: TXN, error: null }));
+    const allocations = [{ invoice_id: INVOICE_1, amount: 60 }, { invoice_id: INVOICE_2, amount: 40 }];
+    expect(await saveCashReceipt(ctx, { ...forInvoices, id: TXN, allocations })).toEqual({ ok: true, data: { id: TXN } });
+    expect(calls.map((c) => c.name)).toEqual(['finance_cash_receipts', 'finance_save_cash_receipt']);
+    expect(calls[1].args).toEqual({
+      target_org: 'org-1',
+      receipt: { id: TXN, account_id: ACCOUNT, txn_date: '2026-10-05', method: 'fpx', reference: null, notes: null },
+      allocations,
+    });
+  });
   it('refuses to change money in that is not a receipt, without writing', async () => {
     // One side of a transfer between accounts is money in too, and Cash Receipts never shows it.
     const { ctx, calls } = fakeFinance(receiptOr(false, { data: TXN, error: null }));
@@ -173,6 +187,7 @@ describe('saving a draft', () => {
       ['FIN15', 'A receipt needs either invoices that add up to its amount, or an income category that still exists. Edit it and try again.'],
       ['23503', 'The account, the contact or an invoice on this receipt no longer exists.'],
       ['23505', 'Each invoice can appear once on a receipt.'],
+      ['23502', 'Check the amount, the method and who it is from, then try again.'],
       ['23514', 'Check the amount, the method and who it is from, then try again.'],
       ['42501', 'You do not have permission to make changes here.'],
       ['22003', 'That amount is too large.'],
@@ -203,6 +218,11 @@ describe('posting', () => {
     expect(await refused('FIN09')).toEqual({ ok: false, error: 'This receipt has been posted or voided, so that can no longer be done.' });
     expect(await refused('FIN15')).toMatchObject({ ok: false, error: expect.stringContaining('Edit it and try again.') });
     expect(await refused('42501')).toEqual({ ok: false, error: 'You do not have permission to make changes here.' });
+  });
+  it('does not blame a clash on posting on an invoice appearing twice', async () => {
+    const { ctx } = fakeFinance(receiptOr(true, { data: null, error: { code: '23505' } }));
+    expect(await postCashReceipt(ctx, { id: TXN })).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
+    expect(logged).toHaveBeenCalledTimes(1);
   });
   it('refuses money in that is not a receipt, without calling the function', async () => {
     const { ctx, calls } = fakeFinance(receiptOr(false, { data: 'RC-0007', error: null }));
@@ -237,11 +257,19 @@ describe('voiding and deleting', () => {
     expect(calls.map((c) => [c.name, c.op])).toEqual([['finance_cash_receipts', 'select'], ['finance_transactions', 'delete']]);
     expect(calls[1].filters).toEqual({ id: TXN, org_id: 'org-1', direction: 'in' });
   });
-  it('says a posted receipt is voided, not deleted', async () => {
+  it('says a posted or voided receipt cannot be deleted', async () => {
+    // The database answers FIN09 for a posted receipt and for a void one alike.
     const { ctx } = fakeFinance(receiptOr(true, { data: null, error: { code: 'FIN09' } }));
     expect(await deleteCashReceipt(ctx, { id: TXN })).toEqual({
-      ok: false, error: 'This receipt has been posted, so it cannot be deleted. Void it instead.',
+      ok: false, error: 'This receipt has been posted or voided, so it cannot be deleted.',
     });
+  });
+  it('answers FIN09 on a void receipt with a sentence that is true of it', async () => {
+    const { ctx, calls } = fakeFinance(receiptOr(true, { data: null, error: { code: 'FIN09' } }));
+    const result = await deleteCashReceipt(ctx, { id: TXN });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).not.toMatch(/Void it instead/);
+    expect(calls.map((c) => c.op)).toEqual(['select', 'delete']);
   });
   it('refuses money in that is not a receipt, without writing', async () => {
     for (const write of [voidCashReceipt, deleteCashReceipt]) {
