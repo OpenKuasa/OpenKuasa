@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 const DIR = join(process.cwd(), 'supabase/migrations');
-const PERFORMANCE = '20261028090000_people_performance_writes.sql';
+const PERFORMANCE = '20261028090050_people_performance_writes.sql';
 const TRAINING = '20261028090100_people_training_announcements_writes.sql';
 const SEED = '20261028090200_people_performance_demo_seed.sql';
 const FILES = [PERFORMANCE, TRAINING, SEED];
@@ -85,7 +85,7 @@ describe('Lekiu performance, training and announcements migrations', () => {
     expect(at).toEqual([at[0], at[0] + 1, at[0] + 2]);
     expect(at[0]).toBeGreaterThan(files.indexOf(PAYROLL));
     for (const f of FILES) expect(files.filter((x) => x.slice(0, 14) === f.slice(0, 14)), f).toEqual([f]);
-    expect(FILES.map((f) => f.slice(0, 14))).toEqual(['20261028090000', '20261028090100', '20261028090200']);
+    expect(FILES.map((f) => f.slice(0, 14))).toEqual(['20261028090050', '20261028090100', '20261028090200']);
   });
 
   test('reviews: the columns and checks of the spec, and a score to two decimals', () => {
