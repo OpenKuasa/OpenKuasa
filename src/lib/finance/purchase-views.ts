@@ -8,6 +8,7 @@ import type { BillDisplayStatus, BillListRow } from './bills';
 import { toCsv } from './csv';
 import { rmShort } from './format';
 import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentMethod, type PaymentOutRow } from './money';
+import type { RfqDisplayStatus, RfqListRow } from './rfqs';
 import {
   ELECTRONIC,
   METHOD_COLORS,
@@ -227,6 +228,94 @@ export function paymentsCsv(rows: PaymentOutRow[]): string {
       PAYMENT_METHOD_LABELS[p.method],
       p.amount,
       PAYMENT_STATUS_LABELS[p.status],
+    ]),
+  );
+}
+
+/* ---- RFQs ----------------------------------------------------------- */
+
+export const RFQ_STATUS_LABELS: Record<RfqDisplayStatus, string> = {
+  draft: 'Draft',
+  sent: 'Sent',
+  quoted: 'Quoted',
+  closed: 'Closed',
+  overdue: 'Reply overdue',
+};
+
+/** A sent RFQ whose reply-by date has passed reads "overdue"; one with no reply-by date never does. */
+export function rfqDisplayStatus(row: RfqListRow, today: string): RfqDisplayStatus {
+  return row.status === 'sent' && row.reply_by !== null && row.reply_by < today ? 'overdue' : row.status;
+}
+
+/** `open` is every RFQ that is not closed: what the table shows until a status is chosen. */
+export type RfqFilter = 'open' | 'all' | RfqDisplayStatus;
+
+/** RFQs matching the status filter whose number, supplier or supplier's reference contains the search text. */
+export function filterRfqs(rows: RfqListRow[], query: string, filter: RfqFilter, today: string): RfqListRow[] {
+  const q = query.trim().toLowerCase();
+  return rows.filter((row) => {
+    const status = rfqDisplayStatus(row, today);
+    return (
+      (filter === 'all' || (filter === 'open' ? status !== 'closed' : status === filter)) &&
+      `${row.rfq_no ?? ''} ${row.supplier_name} ${row.supplier_ref ?? ''}`.toLowerCase().includes(q)
+    );
+  });
+}
+
+export type RfqAction = 'edit' | 'send' | 'delete' | 'recordPrices' | 'close';
+
+/**
+ * What an RFQ's row menu offers, in order: only what the database allows for
+ * its status. A draft is edited, marked as sent or deleted. Once sent it is
+ * locked, and only the supplier's answer is recorded (an overdue RFQ too:
+ * a late reply is still a reply), or the RFQ is closed. A quoted RFQ can be
+ * closed. A closed one offers nothing.
+ */
+export function rfqActions(row: RfqListRow): RfqAction[] {
+  switch (row.status) {
+    case 'draft':
+      return ['edit', 'send', 'delete'];
+    case 'sent':
+      return ['recordPrices', 'close'];
+    case 'quoted':
+      return ['close'];
+    default:
+      return [];
+  }
+}
+
+/** How a question or a menu names one RFQ: its number, or "this draft RFQ". */
+export function rfqName(row: RfqListRow): string {
+  return row.rfq_no ?? 'this draft RFQ';
+}
+
+export type RfqsViewData = {
+  /** How many RFQs are in each status; an overdue one counts as overdue, not as sent. */
+  counts: Record<RfqDisplayStatus, number>;
+  /** Sent and not yet answered, overdue ones included. */
+  awaitingReply: number;
+  overdue: number;
+};
+
+export function rfqsView(rows: RfqListRow[], today: string): RfqsViewData {
+  const counts: Record<RfqDisplayStatus, number> = { draft: 0, sent: 0, quoted: 0, closed: 0, overdue: 0 };
+  for (const row of rows) counts[rfqDisplayStatus(row, today)] += 1;
+  return { counts, awaitingReply: counts.sent + counts.overdue, overdue: counts.overdue };
+}
+
+/** The RFQs table as a CSV file. The total is a number, for the priced lines only. */
+export function rfqsCsv(rows: RfqListRow[], today: string): string {
+  return toCsv(
+    ['No.', 'Date', 'Supplier', 'Reply by', 'Supplier ref', 'Lines', 'Total', 'Status'],
+    rows.map((r) => [
+      r.rfq_no,
+      r.rfq_date,
+      r.supplier_name,
+      r.reply_by,
+      r.supplier_ref,
+      r.line_count,
+      r.total,
+      RFQ_STATUS_LABELS[rfqDisplayStatus(r, today)],
     ]),
   );
 }

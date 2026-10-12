@@ -166,7 +166,7 @@ export function DocumentFormCard<F extends DocumentFormState>({
             type="date"
             value={secondDate.get(form)}
             min={kind.date(form) || undefined}
-            required
+            required={!secondDate.optional}
             onChange={(e) => edit((f) => secondDate.set(f, e.target.value))}
           />
         </div>

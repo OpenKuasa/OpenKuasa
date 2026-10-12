@@ -1,15 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import type { BillListRow } from '@/lib/finance/bills';
 import type { PaymentOutRow } from '@/lib/finance/money';
+import type { RfqListRow } from '@/lib/finance/rfqs';
 import {
+  RFQ_STATUS_LABELS,
   alsoCovers,
   billsCsv,
   billsView,
   displayDate,
   filterBills,
   filterPayments,
+  filterRfqs,
   paymentsCsv,
   paymentsView,
+  rfqActions,
+  rfqDisplayStatus,
+  rfqName,
+  rfqsCsv,
+  rfqsView,
   siblingBills,
 } from '@/lib/finance/purchase-views';
 
@@ -375,5 +383,118 @@ describe('displayDate', () => {
   it('writes the month as a fixed three-letter name', () => {
     expect(displayDate('2026-10-08')).toBe('08 Oct 2026');
     expect(displayDate('2026-09-30')).toBe('30 Sep 2026');
+  });
+});
+
+const rfq = (r: Partial<RfqListRow>): RfqListRow => {
+  seq += 1;
+  return {
+    id: `rfq-${seq}`,
+    rfq_no: `RFQ-${String(seq).padStart(4, '0')}`,
+    supplier_id: 'kertas',
+    supplier_name: 'Syarikat Kertas',
+    rfq_date: '2026-10-01',
+    reply_by: '2026-10-20',
+    supplier_ref: null,
+    status: 'sent',
+    line_count: 2,
+    total: 0,
+    fully_priced: false,
+    purchase_order_id: null,
+    purchase_order_no: null,
+    ...r,
+  };
+};
+
+describe('rfqDisplayStatus', () => {
+  it('is overdue only for a sent RFQ whose reply-by date has passed', () => {
+    expect(rfqDisplayStatus(rfq({ status: 'sent', reply_by: '2026-10-08' }), today)).toBe('overdue');
+    expect(rfqDisplayStatus(rfq({ status: 'sent', reply_by: today }), today)).toBe('sent');
+    expect(rfqDisplayStatus(rfq({ status: 'sent', reply_by: null }), today)).toBe('sent');
+    for (const status of ['draft', 'quoted', 'closed'] as const) {
+      expect(rfqDisplayStatus(rfq({ status, rfq_no: null, reply_by: '2026-10-08' }), today)).toBe(status);
+    }
+  });
+  it('words every status', () => {
+    expect(RFQ_STATUS_LABELS).toEqual({ draft: 'Draft', sent: 'Sent', quoted: 'Quoted', closed: 'Closed', overdue: 'Reply overdue' });
+  });
+});
+
+describe('filterRfqs', () => {
+  const rows = [
+    rfq({ rfq_no: null, status: 'draft', supplier_name: 'Lim Hardware' }),
+    rfq({ rfq_no: 'RFQ-0007', status: 'sent', reply_by: '2026-10-08' }),
+    rfq({ rfq_no: 'RFQ-0008', status: 'sent', reply_by: '2026-10-30' }),
+    rfq({ rfq_no: 'RFQ-0009', status: 'quoted', supplier_ref: 'Q-4411' }),
+    rfq({ rfq_no: 'RFQ-0010', status: 'closed' }),
+  ];
+  it('shows everything but closed by default', () => {
+    expect(filterRfqs(rows, '', 'open', today).map((r) => r.rfq_no)).toEqual([null, 'RFQ-0007', 'RFQ-0008', 'RFQ-0009']);
+    expect(filterRfqs(rows, '', 'all', today)).toHaveLength(5);
+  });
+  it('filters by display status, so an overdue RFQ is not also "sent"', () => {
+    expect(filterRfqs(rows, '', 'overdue', today).map((r) => r.rfq_no)).toEqual(['RFQ-0007']);
+    expect(filterRfqs(rows, '', 'sent', today).map((r) => r.rfq_no)).toEqual(['RFQ-0008']);
+    expect(filterRfqs(rows, '', 'closed', today).map((r) => r.rfq_no)).toEqual(['RFQ-0010']);
+  });
+  it('searches the number, the supplier and the supplier’s reference', () => {
+    expect(filterRfqs(rows, ' rfq-0008 ', 'all', today)).toHaveLength(1);
+    expect(filterRfqs(rows, 'lim', 'all', today)).toHaveLength(1);
+    expect(filterRfqs(rows, 'q-4411', 'all', today).map((r) => r.rfq_no)).toEqual(['RFQ-0009']);
+    expect(filterRfqs(rows, 'nothing', 'all', today)).toEqual([]);
+  });
+});
+
+describe('rfqActions', () => {
+  it('offers only what the status allows', () => {
+    expect(rfqActions(rfq({ status: 'draft', rfq_no: null }))).toEqual(['edit', 'send', 'delete']);
+    expect(rfqActions(rfq({ status: 'sent' }))).toEqual(['recordPrices', 'close']);
+    expect(rfqActions(rfq({ status: 'sent', reply_by: '2026-10-01' }))).toEqual(['recordPrices', 'close']);
+    expect(rfqActions(rfq({ status: 'quoted' }))).toEqual(['close']);
+    expect(rfqActions(rfq({ status: 'closed' }))).toEqual([]);
+  });
+  it('names an RFQ by its number, or as a draft', () => {
+    expect(rfqName(rfq({ rfq_no: 'RFQ-0007' }))).toBe('RFQ-0007');
+    expect(rfqName(rfq({ rfq_no: null, status: 'draft' }))).toBe('this draft RFQ');
+  });
+});
+
+describe('rfqsView', () => {
+  it('counts each status, those waiting for a reply, and those overdue', () => {
+    const rows = [
+      rfq({ status: 'draft', rfq_no: null }),
+      rfq({ status: 'sent', reply_by: '2026-10-08' }),
+      rfq({ status: 'sent', reply_by: '2026-10-30' }),
+      rfq({ status: 'sent', reply_by: null }),
+      rfq({ status: 'quoted' }),
+      rfq({ status: 'closed' }),
+    ];
+    expect(rfqsView(rows, today)).toEqual({
+      counts: { draft: 1, sent: 2, quoted: 1, closed: 1, overdue: 1 },
+      awaitingReply: 3,
+      overdue: 1,
+    });
+  });
+  it('is all zeros for no RFQs', () => {
+    expect(rfqsView([], today)).toEqual({ counts: { draft: 0, sent: 0, quoted: 0, closed: 0, overdue: 0 }, awaitingReply: 0, overdue: 0 });
+  });
+});
+
+describe('rfqsCsv', () => {
+  it('writes the RFQ table, with the status as the screen words it', () => {
+    const csv = rfqsCsv(
+      [
+        rfq({ rfq_no: 'RFQ-0007', rfq_date: '2026-10-01', reply_by: '2026-10-08', supplier_name: '=cmd|calc', status: 'sent', line_count: 3 }),
+        rfq({ rfq_no: null, status: 'draft', reply_by: null, supplier_name: 'Lim, Tan & Co', line_count: 1 }),
+        rfq({ rfq_no: 'RFQ-0009', status: 'quoted', supplier_ref: 'Q-4411', total: 132.5, fully_priced: true, line_count: 2 }),
+      ],
+      today,
+    );
+    expect(csv).toBe(
+      '\uFEFFNo.,Date,Supplier,Reply by,Supplier ref,Lines,Total,Status\r\n' +
+        "RFQ-0007,2026-10-01,'=cmd|calc,2026-10-08,,3,0,Reply overdue\r\n" +
+        ',2026-10-01,"Lim, Tan & Co",,,1,0,Draft\r\n' +
+        'RFQ-0009,2026-10-01,Syarikat Kertas,2026-10-20,Q-4411,2,132.5,Quoted\r\n',
+    );
   });
 });
