@@ -35,15 +35,17 @@ export type BuiltContext<Raw> = { context: string; raw: Raw; trend?: string };
 
 /**
  * Everything the generic worker hands a definition's media step: the open key, the
- * snapshot, the budget cap + spend-so-far, and the same `reserve` the worker uses to
- * book an estimate before each paid step. The step returns the real cost it added.
+ * snapshot, the budget cap + spend-so-far, and `reserve` — which books an ABSOLUTE
+ * running total to the run row before each paid step (the step tracks its own running
+ * cost from `costSoFar` and reserves `running + estimate`). The step returns the real
+ * cost it added, which the worker then adds to the run's spend.
  */
 export type MediaContext = {
   apiKey: string;
   context: string;
   maxCost: number;
   costSoFar: number;
-  reserve: (estimateCents: number) => Promise<void>;
+  reserve: (totalCents: number) => Promise<void>;
   service: SupabaseClient;
   orgId: string;
   runId: string;
