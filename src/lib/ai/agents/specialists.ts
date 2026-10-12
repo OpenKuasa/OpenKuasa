@@ -46,7 +46,7 @@ import {
 } from '@/lib/ai/hire-pool-gate';
 import {
   AMBIGUOUS_INTERVIEW_CHANGE,
-  HIRE_INTERVIEW_TOOL_NAMES,
+  HIRE_INTERVIEW_KIND_TOOL_NAMES,
   ONE_INTERVIEW_CHANGE,
   actsOnApplication,
   ambiguousFor,
@@ -131,8 +131,8 @@ const ONE_CANDIDATE_CHANGE = 'One candidate change at a time. One is already pre
 const DELETIONS = new Set<string>(HIRE_DELETE_TOOL_NAMES);
 /** The two talent pool changes: held to one a turn in the same way, and counted apart from deletions. */
 const POOL_CHANGES = new Set<string>(HIRE_POOL_TOOL_NAMES);
-/** The six interview changes: held to one a turn in the same way, and counted apart from the other two. */
-const INTERVIEW_CHANGES = new Set<string>(HIRE_INTERVIEW_TOOL_NAMES);
+/** The six interview changes and the two changes to an interview's feedback: held to one a turn between them, and counted apart from the other two kinds. */
+const INTERVIEW_CHANGES = new Set<string>(HIRE_INTERVIEW_KIND_TOOL_NAMES);
 
 /** The kinds of change held to one a turn. Each is counted on its own: a deletion, a pool change and an interview change may share a turn. */
 type Limited = 'deletion' | 'pool' | 'interview';
@@ -607,7 +607,7 @@ function askTool(product: ProductToolkit, team: TeamContext, turn: TurnState, me
 const AREA: Record<ProductToolkit['key'], string> = {
   reach: 'marketing (ads, campaigns, creatives, leads, lead forms, appointments, ad settings)',
   crm: 'the CRM (contacts, deals, pipelines and their stages)',
-  hire: 'hiring (jobs, candidates, applications, the hiring funnel, interviews, the talent pool; it can read one candidate\'s uploaded CV and give a verdict on it; it can prepare moving, rejecting, reopening or rating one application at a time; it can prepare adding or editing one candidate at a time; it can prepare scheduling, changing, cancelling or closing one interview at a time, or recording one that already took place; it can prepare deleting one application or one candidate at a time; it can prepare a talent pool change for one candidate at a time)',
+  hire: 'hiring (jobs, candidates, applications, the hiring funnel, interviews, the talent pool; it can read one candidate\'s uploaded CV and give a verdict on it; it can prepare moving, rejecting, reopening or rating one application at a time; it can prepare recording or clearing the feedback on one interview at a time; it can prepare adding or editing one candidate at a time; it can prepare scheduling, changing, cancelling or closing one interview at a time, or recording one that already took place; it can prepare deleting one application or one candidate at a time; it can prepare a talent pool change for one candidate at a time)',
   people: 'HR (existing staff, leave, time-off, claims, overtime, attendance, payroll, performance; it can prepare deciding leave, claims and overtime, correcting attendance, and editing staff and departments, one change at a time)',
   finance: 'finance (sales invoices and quotations, supplier bills, payments in and out, credit notes, refunds, customers and suppliers, items, bank and cash accounts; it can prepare drafting, posting and voiding invoices and bills, recording payments, issuing credit notes and refunds, and managing customers, suppliers and items, each with approval)',
 };

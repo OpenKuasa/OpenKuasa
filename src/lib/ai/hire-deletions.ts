@@ -70,6 +70,16 @@ const GATE_REASON_STARTS = [
   'The date and time sent are the ones this interview already has',
   'Nothing would change:',
   'The interviewer\'s name holds a link',
+  // Feedback's rules, in the interview gate. Each start is long enough that none of the database's own refusal
+  // sentences begins with it ("This interview already has feedback. Open it to edit it.", "This interview has no
+  // feedback to clear.", "This interview has feedback. Clear the feedback before …"): those are results, never reasons.
+  'This interview is still marked scheduled',
+  'This interview did not take place',
+  'This interview already has feedback, so nothing was prepared',
+  'This interview has no feedback yet',
+  'This interview has no feedback to clear. Nothing was changed',
+  'This interview is already marked completed',
+  'This interview has feedback, so it cannot',
   // Not a rule of this file: the change could not be recorded for approval (see proposal-store.ts). No card either.
   'Changes cannot be prepared right now',
   // The same file's other sentence, when a gate says it of a change whose record was already answered (specialists.ts).

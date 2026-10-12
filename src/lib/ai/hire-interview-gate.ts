@@ -42,11 +42,20 @@ import { isHeldCvMessage } from '@/lib/ai/hire-tools';
 import { ALSO_SCHEDULED_MAX, THIS_INTERVIEW, alsoScheduledLines, interviewFullLine, interviewLine } from '@/lib/hire/interviews';
 import { interviewCardFromLists, namesakesFromLists } from '@/lib/hire/namesakes';
 import { instantMs, klInstant } from '@/lib/hire/interview-time';
+import { feedbackNowLine } from '@/lib/hire/interview-feedback';
 import type { HireData, InterviewCardRow, Namesakes } from '@/lib/hire/types';
 
 export const HIRE_INTERVIEW_TOOL_NAMES = [
   'scheduleInterview', 'recordPastInterview', 'rescheduleInterview', 'cancelInterview', 'setInterviewOutcome', 'reopenInterview',
 ] as const;
+/**
+ * The two changes to an interview's feedback. They are interview changes: with the six above they share the turn's
+ * one allowance, the lookup rule and the server read. The six keep their own list because two of them make an
+ * interview and the rest of this file tells them apart by it.
+ */
+export const HIRE_FEEDBACK_TOOL_NAMES = ['saveInterviewFeedback', 'clearInterviewFeedback'] as const;
+/** Every tool held to one interview change a turn: the six, then the two. */
+export const HIRE_INTERVIEW_KIND_TOOL_NAMES = [...HIRE_INTERVIEW_TOOL_NAMES, ...HIRE_FEEDBACK_TOOL_NAMES] as const;
 
 // Each refusal leaves the person another way. It is said beside the sentence, and where the person reads it.
 
@@ -123,8 +132,37 @@ export const INTERVIEW_CHANGED_SINCE =
   'This interview was changed after the card was shown, so a last check stopped it. Nothing was changed. ' +
   'Prepare it again: the card will show it as it is now.';
 
+// Feedback's own rules. A card's words about a save come from the tool's input ("Replaces the feedback already
+// recorded.", "Also marks the interview completed."), so the input must be true of the interview as the server reads
+// it: a save that is not is refused before a card, with what to send instead, and is not the turn's one.
+
+/** The other way: say it took place and ask again; or "Mark completed and add feedback" on the Interviews screen. */
+export const FEEDBACK_NOT_COMPLETED =
+  'This interview is still marked scheduled, so no feedback was prepared. Feedback is for a completed interview: ask the user whether it took place. ' +
+  'If they said it did, prepare it again with mark_completed set to true.';
+/** A cancelled interview or a no-show. Written for a person as it is; the other way is in the sentence. */
+export const feedbackNotHeld = (status: 'cancelled' | 'no_show') =>
+  `This interview did not take place (it is marked ${status === 'cancelled' ? 'cancelled' : 'as a no-show'}), so it cannot have feedback. Nothing was changed. ` +
+  'If it did take place, use “Mark as scheduled again” and then “Mark completed and add feedback” on the Interviews screen.';
+/** The other way: say it should be replaced and ask again; or "Edit feedback" on the Interviews screen. */
+export const FEEDBACK_EXISTS =
+  'This interview already has feedback, so nothing was prepared. Tell the user what the feedback is and ask whether to replace it. ' +
+  'If they say yes, prepare it again with replace set to true.';
+/** The model sends it again without `replace`, in the same turn. The person need do nothing. */
+export const NO_FEEDBACK_TO_REPLACE = 'This interview has no feedback yet, so there is nothing to replace. Prepare it again without replace.';
+/** Written for a person as it is. There is nothing to do: the interview is as they asked. */
+export const NO_FEEDBACK_TO_CLEAR = 'This interview has no feedback to clear. Nothing was changed.';
+/** The model sends it again without `mark_completed`, in the same turn. The person need do nothing. */
+export const ALREADY_COMPLETED = 'This interview is already marked completed. Prepare it again without mark_completed.';
+/** Written for a person as it is; the other way is in the sentence. The database would refuse it only after the user's yes. */
+export const FEEDBACK_BLOCKS_REOPEN =
+  'This interview has feedback, so it cannot be marked as scheduled again. Nothing was changed. ' +
+  'Clear the feedback first: ask for that on its own, or use “Clear feedback” on the Interviews screen.';
+
 const isInterviewChange = (name: unknown): boolean =>
-  typeof name === 'string' && (HIRE_INTERVIEW_TOOL_NAMES as readonly string[]).includes(name);
+  typeof name === 'string' && (HIRE_INTERVIEW_KIND_TOOL_NAMES as readonly string[]).includes(name);
+const isFeedbackChange = (name: unknown): boolean =>
+  typeof name === 'string' && (HIRE_FEEDBACK_TOOL_NAMES as readonly string[]).includes(name);
 
 /** The two that make an interview: there is none yet, so they name an application. The other four name an interview. */
 const ON_APPLICATION = new Set<string>(['scheduleInterview', 'recordPastInterview']);
@@ -363,7 +401,7 @@ function placesOf(value: unknown, id: string, depth = 0): string[] {
 }
 
 /** The tools whose results hold an interview's row: the lookup, and the six changes. */
-const INTERVIEW_RESULTS = new Set<string>(['listInterviews', ...HIRE_INTERVIEW_TOOL_NAMES]);
+const INTERVIEW_RESULTS = new Set<string>(['listInterviews', ...HIRE_INTERVIEW_KIND_TOOL_NAMES]);
 type Result = { tool: string; output: unknown };
 
 /**
@@ -514,6 +552,31 @@ export function interviewLinkProblem(
 }
 
 /**
+ * Why a change must not reach a card for what the interview's feedback and status are now, or null. `target` is the
+ * server's row. A save must say `replace` exactly when feedback is there, and `mark_completed` exactly when the
+ * interview is still scheduled; an interview that was cancelled or missed takes none. A clear needs feedback to
+ * clear. And "mark as scheduled again" is refused while there is feedback: a scheduled interview cannot carry any.
+ * Asked before a card and again when the user's yes arrives, so a colleague's change in between is caught in that
+ * outcome's own words.
+ */
+export function feedbackRuleProblem(tool: string, input: unknown, target: Pick<InterviewCardRow, 'status' | 'feedback'>): string | null {
+  const sent = (input && typeof input === 'object' ? input : {}) as { mark_completed?: unknown; replace?: unknown };
+  const has = Boolean(target.feedback);
+  if (tool === 'reopenInterview') return has ? FEEDBACK_BLOCKS_REOPEN : null;
+  if (tool === 'clearInterviewFeedback') return has ? null : NO_FEEDBACK_TO_CLEAR;
+  if (tool !== 'saveInterviewFeedback') return null;
+  if (target.status === 'cancelled' || target.status === 'no_show') return feedbackNotHeld(target.status);
+  if (target.status === 'scheduled') {
+    if (sent.mark_completed !== true) return FEEDBACK_NOT_COMPLETED;
+    // A scheduled interview has no feedback (the table's own check), so there is nothing to replace.
+    return sent.replace === true ? NO_FEEDBACK_TO_REPLACE : null;
+  }
+  if (sent.mark_completed === true) return ALREADY_COMPLETED;
+  if (has) return sent.replace === true ? null : FEEDBACK_EXISTS;
+  return sent.replace === true ? NO_FEEDBACK_TO_REPLACE : null;
+}
+
+/**
  * Asks the server about an interview change's row. Given the tool's whole
  * input, not an id: two of the six tools name an application and four an
  * interview, and the check, not each of its three callers, knows which key
@@ -575,10 +638,19 @@ export function interviewCheckFor(
       if (alike) return { ok: false, refusal: lookTheSameInterviews(target.candidate.trim(), target.job.trim()) };
       // The card's lines: which interview this is; which application, when a namesake has one for the same job; and
       // what else is scheduled with the person, so "cancel Aina's" cannot be approved without seeing there is another.
+      // Feedback's own rules, in their own words, before any card.
+      const feedbackProblem = feedbackRuleProblem(tool, input, target);
+      if (feedbackProblem) return { ok: false, refusal: feedbackProblem };
       const named = application.ok && application.note ? application : null;
-      // Marking one as scheduled again is the one change to a closed interview: its card lists the other closed ones too.
-      const closed = tool === 'reopenInterview' ? alsoClosedLines(target.candidate, alsoClosed ?? []) : [];
-      const note = [THIS_INTERVIEW(interviewFullLine(target)), ...(named ? [named.note] : []), ...alsoScheduledLines(target.candidate, also ?? []), ...closed].join('\n');
+      const onFeedback = isFeedbackChange(tool);
+      // A change to a closed interview lists the person's other closed ones too: marking one as scheduled again, and
+      // feedback, which is for a completed interview. Two completed interviews of one person are easily taken for each other.
+      const closed = tool === 'reopenInterview' || onFeedback ? alsoClosedLines(target.candidate, alsoClosed ?? []) : [];
+      // A feedback card also says how the interview stands now: its status, and its feedback to the second. The line
+      // is compared again when the user's yes arrives (`sameLine`), so feedback that was added, changed or cleared
+      // since the card, or a status that moved, stops the change.
+      const now = onFeedback ? [feedbackNowLine(target.status, target.feedback)] : [];
+      const note = [THIS_INTERVIEW(interviewFullLine(target)), ...now, ...(named ? [named.note] : []), ...alsoScheduledLines(target.candidate, also ?? []), ...closed].join('\n');
       return { ok: true, note, namesakes: named ? named.namesakes : [] };
     } catch {
       // Nothing of the error is logged: its words can hold a name, an email or a link.
@@ -633,7 +705,7 @@ export function interviewCardDecision(check: CardCheck, shown: { note: string | 
 }
 
 /**
- * An agent's approval map with the six interview tools gated: the first
+ * An agent's approval map with the six interview tools and the two feedback tools gated: the first
  * interview change of a request goes to the user as a card, and any other is
  * denied before a card exists. Built once per request, so the count starts at
  * zero each time; an interview change earlier in the same turn is found in the
@@ -651,7 +723,7 @@ export function guardInterviewChanges(
   check?: InterviewCheck,
 ): Record<string, 'user-approval' | DeletionGate> | undefined {
   if (!approval) return undefined;
-  const names = HIRE_INTERVIEW_TOOL_NAMES.filter((name) => name in approval);
+  const names = HIRE_INTERVIEW_KIND_TOOL_NAMES.filter((name) => name in approval);
   if (names.length === 0) return approval;
   const passed = new Set<string>();
   // One gate per tool, because the SDK does not say which tool it is asking about; one count between them.
