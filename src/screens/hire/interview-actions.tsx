@@ -237,9 +237,15 @@ export function InterviewRowMenu({ row }: { row: InterviewRow }) {
       {/*
         The refusal is drawn in a portal, anchored to the menu button: the Actions cell is narrow and the table's scroll wrapper
         clips anything laid over it, so in the cell the sentence collapsed to one word per line. Open exactly while the error
-        shows at the row (it never takes focus and nothing here dismisses it: it clears where `change.error` always cleared).
+        shows at the row; it never takes focus. Escape and a press outside clear it through `clearError`.
       */}
-      <Popover.Root open={Boolean(change.error && panel === null)}>
+      <Popover.Root
+        open={Boolean(change.error && panel === null)}
+        // Escape or a press outside the card: the same clearing as everywhere else. The press itself is not stopped, so it still reaches what was pressed.
+        onOpenChange={(next) => {
+          if (!next) change.clearError();
+        }}
+      >
       <Popover.Anchor asChild>
       <span className="inline-flex">
       <DropdownMenu
@@ -328,10 +334,8 @@ export function InterviewRowMenu({ row }: { row: InterviewRow }) {
           className={REFUSAL_CLASS}
           onOpenAutoFocus={(event) => event.preventDefault()}
           onCloseAutoFocus={(event) => event.preventDefault()}
-          onEscapeKeyDown={(event) => event.preventDefault()}
-          onPointerDownOutside={(event) => event.preventDefault()}
+          // Focus moving elsewhere does not dismiss: closing the menu hands focus back to the "…" button just as a refusal appears, and that would clear it at once.
           onFocusOutside={(event) => event.preventDefault()}
-          onInteractOutside={(event) => event.preventDefault()}
         >
           <div className="rounded-lg bg-destructive/10 px-3 py-2">{change.error}</div>
         </Popover.Content>
