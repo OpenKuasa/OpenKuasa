@@ -47,7 +47,8 @@ function pathOf(req: Request): string {
 export function isTriggerAuthorized(req: Request): boolean {
   const bearer = /^Bearer (.+)$/i.exec(req.headers.get('authorization') ?? '')?.[1] ?? '';
 
-  const secret = process.env.CRON_SECRET ?? '';
+  // Trimmed: a pasted value can end in a newline, which a request header never carries.
+  const secret = (process.env.CRON_SECRET ?? '').trim();
   if (bearer && secret.length >= CRON_SECRET_MIN_LENGTH && sameSecret(bearer, secret)) return true;
 
   if (!legacyKeyAllowed()) return false;

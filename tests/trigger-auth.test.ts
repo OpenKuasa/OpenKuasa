@@ -30,6 +30,12 @@ describe('isTriggerAuthorized: dedicated cron secret', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  it('accepts the secret when the stored value has whitespace around it, as a pasted value can', () => {
+    // A request header never carries a trailing newline, so the stored value must not count one.
+    vi.stubEnv('CRON_SECRET', ` ${SECRET}\n`);
+    expect(isTriggerAuthorized(req({ authorization: `Bearer ${SECRET}` }))).toBe(true);
+  });
+
   it('rejects a request with no credentials', () => {
     expect(isTriggerAuthorized(req())).toBe(false);
   });
