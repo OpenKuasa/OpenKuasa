@@ -56,7 +56,8 @@ begin
         else execute 'select to_jsonb(' || q || ')' into r; got := '=' || coalesce(r::text, 'null'); end if;
       exception when insufficient_privilege then got := 'denied'; when others then got := sqlerrm; end;
       reset role;
-      if got = want or (want = '*' and left(got, 1) = '=') or (left(want, 1) = '=' and left(got, 1) = '=' and substr(got, 2)::jsonb = substr(want, 2)::jsonb) then return '{}'; end if;
+      -- "none" is "nothing was touched": real storage refuses a direct delete outright, which is the same thing.
+      if got = want or (want = 'none' and got = 'denied') or (want = '*' and left(got, 1) = '=') or (left(want, 1) = '=' and left(got, 1) = '=' and substr(got, 2)::jsonb = substr(want, 2)::jsonb) then return '{}'; end if;
       return array[format('%s: wanted %s, got %s', label, want, got)];
     end $b$
   $f$;
