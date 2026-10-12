@@ -202,3 +202,17 @@ export function quoteFormError(drafts: PriceDraft[]): string | null {
   const parsed = quoteRfqInput.shape.prices.safeParse(prices);
   return parsed.success ? null : (parsed.error.issues[0]?.message ?? RFQ_MESSAGES.unpriced);
 }
+
+/**
+ * What "Save prices" does with the boxes: the sentence to show, with nothing
+ * to send, or the payload for quoteRfqAction. The card calls this and nothing
+ * else, so an unpriced line is refused before any call is made.
+ */
+export function submitPrices(
+  rfqId: string,
+  supplierRef: string,
+  drafts: PriceDraft[],
+): { error: string } | { payload: ReturnType<typeof quotePayload> } {
+  const error = quoteFormError(drafts);
+  return error ? { error } : { payload: quotePayload(rfqId, supplierRef, drafts) };
+}

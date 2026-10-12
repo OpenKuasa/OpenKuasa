@@ -1,8 +1,5 @@
 import type { RfqListRow, RfqStatus } from '@/lib/finance/rfqs';
 
-/** The day the purchases samples are worked out for. */
-export const SAMPLE_PURCHASES_TODAY = '2026-10-10';
-
 const rfq = (
   n: number,
   supplier_name: string,

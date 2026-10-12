@@ -23,10 +23,10 @@ export type DocumentFormActions = {
 const capital = (word: string) => word.charAt(0).toUpperCase() + word.slice(1);
 
 /**
- * A new bill, invoice or quotation, or a draft being changed. Saved as a
- * draft, or saved and posted (a quotation: marked as sent) in one go. `kind`
+ * A new bill, invoice, quotation or RFQ, or a draft being changed. Saved as a
+ * draft, or saved and posted (a quotation or RFQ: marked as sent) in one go. `kind`
  * says which document it is and carries its words and its rules, which are in
- * src/lib/finance/bill-form.ts, invoice-form.ts and quotation-form.ts.
+ * src/lib/finance/bill-form.ts, invoice-form.ts, quotation-form.ts and rfq-form.ts.
  */
 export function DocumentFormCard<F extends DocumentFormState>({
   kind,

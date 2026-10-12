@@ -163,7 +163,7 @@ export function RfqsView({
       case 'send':
         return { label: 'Mark as sent', icon: Send, opens: true, onSelect: () => ask({ kind: 'send', rfq }) };
       case 'close':
-        return { label: 'Close', icon: Lock, opens: true, onSelect: () => ask({ kind: 'close', rfq }) };
+        return { label: 'Close RFQ', icon: Lock, opens: true, onSelect: () => ask({ kind: 'close', rfq }) };
       case 'delete':
         return { label: 'Delete', icon: Trash2, destructive: true, opens: true, onSelect: () => ask({ kind: 'delete', rfq }) };
     }
@@ -320,7 +320,12 @@ export function RfqsView({
         {card()}
 
         {stats.map((s, i) => (
-          <BentoCard key={s.label} tone={i === 0 ? 'primary' : 'default'} className="col-span-1 md:col-span-4">
+          <BentoCard
+            key={s.label}
+            tone={i === 0 ? 'primary' : 'default'}
+            // Three cards on a two-column phone grid: the last takes the whole row rather than sitting alone at half width.
+            className={i === stats.length - 1 ? 'col-span-2 md:col-span-4' : 'col-span-1 md:col-span-4'}
+          >
             <BentoStat label={s.label} value={String(s.value)} onPrimary={i === 0} />
           </BentoCard>
         ))}

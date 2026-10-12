@@ -7,7 +7,7 @@ import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { type PriceDraft, priceDrafts, quoteFormError, quotePayload } from '@/lib/finance/rfq-form';
+import { type PriceDraft, priceDrafts, submitPrices } from '@/lib/finance/rfq-form';
 import type { RfqDetail } from '@/lib/finance/rfqs';
 import type { FinResult } from '@/lib/finance/result';
 
@@ -33,12 +33,12 @@ export function RfqPricesCard({ rfq, quote, onClose }: { rfq: RfqDetail; quote: 
     // Handled here rather than as a form action, so a refused form keeps what was typed.
     event.preventDefault();
     // The database refuses an unpriced line too (FIN19); asking first gives the sentence without a round trip.
-    const problem = quoteFormError(drafts);
-    if (problem) {
-      save.fail(problem);
+    const result = submitPrices(rfq.id, supplierRef, drafts);
+    if ('error' in result) {
+      save.fail(result.error);
       return;
     }
-    save.run(() => quote(quotePayload(rfq.id, supplierRef, drafts)), onClose);
+    save.run(() => quote(result.payload), onClose);
   };
 
   return (
@@ -69,7 +69,7 @@ export function RfqPricesCard({ rfq, quote, onClose }: { rfq: RfqDetail; quote: 
         <fieldset className="space-y-1.5 md:col-span-12">
           <legend className="text-sm font-medium leading-none">Prices quoted</legend>
           <ul className="divide-y rounded-lg border">
-            {drafts.map((d) => (
+            {drafts.map((d, index) => (
               <li key={d.line_id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2">
                 <div className="min-w-0 flex-1 basis-56 text-sm">
                   <span className="font-medium">{d.description}</span>
@@ -88,7 +88,7 @@ export function RfqPricesCard({ rfq, quote, onClose }: { rfq: RfqDetail; quote: 
                     min={0}
                     step="0.01"
                     placeholder="Unit price"
-                    aria-label={`Unit price for ${d.description}`}
+                    aria-label={`Unit price for line ${index + 1}, ${d.description}`}
                     className="w-32 text-right tabular-nums"
                     onWheel={(e) => e.currentTarget.blur()}
                     // Enter in a price box does not save a half-priced RFQ.
@@ -106,7 +106,7 @@ export function RfqPricesCard({ rfq, quote, onClose }: { rfq: RfqDetail; quote: 
                     min={0}
                     max={100}
                     step="0.01"
-                    aria-label={`SST rate for ${d.description}`}
+                    aria-label={`SST rate for line ${index + 1}, ${d.description}`}
                     className="w-20 text-right tabular-nums"
                     onWheel={(e) => e.currentTarget.blur()}
                     onKeyDown={(e) => {

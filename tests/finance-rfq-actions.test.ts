@@ -263,12 +263,19 @@ describe('getSentRfqAction', () => {
 
   it('says the RFQ is gone, tells a viewer they may not, and answers a failed read with a sentence', async () => {
     expect(await actions.getSentRfqAction({ id: RFQ })).toEqual(GONE);
+    expect(ctl.revalidated).toEqual(RFQS);
     expect(await actions.getSentRfqAction({ id: 'nope' })).toEqual(GONE);
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     ctl.rfq = new Error('connection reset');
     expect(await actions.getSentRfqAction({ id: RFQ })).toEqual({ ok: false, error: 'That could not be loaded. Please try again.' });
     logged.mockRestore();
-    ctl.viewer = { userId: 'u1', orgId: 'org1', role: 'viewer', isDemo: false };
-    expect(await actions.getSentRfqAction({ id: RFQ })).toEqual(FORBIDDEN);
+    ctl.rfq = sent;
+    for (const viewer of [
+      { userId: 'u1', orgId: 'org1', role: 'viewer', isDemo: false },
+      { userId: 'u1', orgId: 'org1', role: 'owner', isDemo: true },
+    ]) {
+      ctl.viewer = viewer;
+      expect(await actions.getSentRfqAction({ id: RFQ }), JSON.stringify(viewer)).toEqual(FORBIDDEN);
+    }
   });
 });

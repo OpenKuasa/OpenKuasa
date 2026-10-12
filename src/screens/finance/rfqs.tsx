@@ -16,7 +16,8 @@ import { listProducts } from '@/lib/finance/products';
 import { listRfqs } from '@/lib/finance/rfqs';
 import { todayUtc } from '@/lib/finance/view-helpers';
 import { createClient } from '@/lib/supabase/server';
-import { SAMPLE_PURCHASES_TODAY, SAMPLE_RFQS } from './purchases-sample';
+import { SAMPLE_RFQS } from './purchases-sample';
+import { SAMPLE_TODAY } from './sales-sample';
 
 const ACTIONS: RfqActions = {
   save: saveRfqAction,
@@ -31,7 +32,7 @@ const ACTIONS: RfqActions = {
 
 export default async function RfqsScreen() {
   if (!hasSupabaseEnv()) {
-    return <RfqsView rows={SAMPLE_RFQS} today={SAMPLE_PURCHASES_TODAY} followClock={false} />;
+    return <RfqsView rows={SAMPLE_RFQS} today={SAMPLE_TODAY} followClock={false} />;
   }
   const viewer = await getViewer();
   const ctx = { client: await createClient(), orgId: viewer.orgId };

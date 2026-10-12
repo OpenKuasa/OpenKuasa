@@ -1,5 +1,5 @@
 /**
- * What the Supplier Bills and Payments Out screens show, worked out from the
+ * What the Supplier Bills, Payments Out and RFQs screens show, worked out from the
  * rows the data layer reads. Pure, with no server imports, so the client views
  * and the tests both use it. `today` is always a YYYY-MM-DD date.
  */
@@ -303,10 +303,10 @@ export function rfqsView(rows: RfqListRow[], today: string): RfqsViewData {
   return { counts, awaitingReply: counts.sent + counts.overdue, overdue: counts.overdue };
 }
 
-/** The RFQs table as a CSV file. The total is a number, for the priced lines only. */
+/** The RFQs table as a CSV file. The total is a number, and empty until every line is priced. */
 export function rfqsCsv(rows: RfqListRow[], today: string): string {
   return toCsv(
-    ['No.', 'Date', 'Supplier', 'Reply by', 'Supplier ref', 'Lines', 'Total', 'Status'],
+    ['No.', 'Date', 'Supplier', 'Reply by', 'Supplier ref', 'Lines', 'Total', 'Status', 'Purchase order'],
     rows.map((r) => [
       r.rfq_no,
       r.rfq_date,
@@ -314,8 +314,10 @@ export function rfqsCsv(rows: RfqListRow[], today: string): string {
       r.reply_by,
       r.supplier_ref,
       r.line_count,
-      r.total,
+      // Empty until every line is priced, like the dash on the screen: a part-priced total would read as the whole.
+      r.fully_priced ? r.total : null,
       RFQ_STATUS_LABELS[rfqDisplayStatus(r, today)],
+      r.purchase_order_no,
     ]),
   );
 }

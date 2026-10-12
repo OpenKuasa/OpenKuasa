@@ -486,15 +486,17 @@ describe('rfqsCsv', () => {
       [
         rfq({ rfq_no: 'RFQ-0007', rfq_date: '2026-10-01', reply_by: '2026-10-08', supplier_name: '=cmd|calc', status: 'sent', line_count: 3 }),
         rfq({ rfq_no: null, status: 'draft', reply_by: null, supplier_name: 'Lim, Tan & Co', line_count: 1 }),
-        rfq({ rfq_no: 'RFQ-0009', status: 'quoted', supplier_ref: 'Q-4411', total: 132.5, fully_priced: true, line_count: 2 }),
+        rfq({ rfq_no: 'RFQ-0009', status: 'quoted', supplier_ref: 'Q-4411', total: 132.5, fully_priced: true, line_count: 2, purchase_order_no: 'PO-0003' }),
+        rfq({ rfq_no: 'RFQ-0010', status: 'sent', total: 40, fully_priced: false, line_count: 2 }),
       ],
       today,
     );
     expect(csv).toBe(
-      '\uFEFFNo.,Date,Supplier,Reply by,Supplier ref,Lines,Total,Status\r\n' +
-        "RFQ-0007,2026-10-01,'=cmd|calc,2026-10-08,,3,0,Reply overdue\r\n" +
-        ',2026-10-01,"Lim, Tan & Co",,,1,0,Draft\r\n' +
-        'RFQ-0009,2026-10-01,Syarikat Kertas,2026-10-20,Q-4411,2,132.5,Quoted\r\n',
+      '\uFEFFNo.,Date,Supplier,Reply by,Supplier ref,Lines,Total,Status,Purchase order\r\n' +
+        "RFQ-0007,2026-10-01,'=cmd|calc,2026-10-08,,3,,Reply overdue,\r\n" +
+        ',2026-10-01,"Lim, Tan & Co",,,1,,Draft,\r\n' +
+        'RFQ-0009,2026-10-01,Syarikat Kertas,2026-10-20,Q-4411,2,132.5,Quoted,PO-0003\r\n' +
+        'RFQ-0010,2026-10-01,Syarikat Kertas,2026-10-20,,2,,Sent,\r\n',
     );
   });
 });

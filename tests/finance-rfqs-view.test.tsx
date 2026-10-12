@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
+import type { FinanceContact } from '@/lib/finance/contacts';
 import { RfqFormCard } from '@/components/finance/rfq-form-card';
 import { RfqPricesCard } from '@/components/finance/rfq-prices-card';
 import { type RfqActions, RfqsView } from '@/components/finance/rfqs-view';
 import { rfqActions } from '@/lib/finance/purchase-views';
-import { priceDrafts, quoteFormError } from '@/lib/finance/rfq-form';
+import { priceDrafts, quoteFormError, quotePayload, submitPrices } from '@/lib/finance/rfq-form';
 import { RFQ_MESSAGES, type RfqDetail, type RfqListRow } from '@/lib/finance/rfqs';
 
 /**
@@ -64,17 +65,18 @@ const row = (over: Partial<RfqListRow> = {}): RfqListRow => ({
   ...over,
 });
 
-const fn = () => vi.fn(async () => ({ ok: true as const, data: { id: 'x', rfq_no: 'RFQ-0001' } }));
-const actions = {
-  save: fn(),
-  saveAndPost: fn(),
-  send: fn(),
-  quote: fn(),
-  close: fn(),
-  remove: fn(),
-  get: fn(),
-} as unknown as RfqActions;
-const writer = { actions, suppliers: [{ id: 'sup-1', name: 'Kopi Hulu Supplies' }], products: [] } as never;
+const done = <T,>(data: T) => vi.fn(async () => ({ ok: true as const, data }));
+const actions: RfqActions = {
+  save: done({ id: 'x' }),
+  saveAndPost: done({ id: 'x', rfq_no: 'RFQ-0001' }),
+  send: done({ id: 'x', rfq_no: 'RFQ-0001' }),
+  quote: done({ id: 'x' }),
+  close: done({ id: 'x' }),
+  remove: done({ id: 'x' }),
+  get: vi.fn(async () => ({ ok: false as const, error: 'unused' })),
+  getSent: vi.fn(async () => ({ ok: false as const, error: 'unused' })),
+};
+const writer = { actions, suppliers: [], products: [] };
 
 const render = (rows: RfqListRow[], withWriter = true) =>
   renderToStaticMarkup(<RfqsView rows={rows} today={TODAY} followClock={false} writer={withWriter ? writer : undefined} />);
@@ -83,9 +85,9 @@ describe('the RFQs list', () => {
   it('gives a writer New RFQ, and the counts in the header', () => {
     const html = render([row({ status: 'sent' }), row({ id: 'b', rfq_no: 'RFQ-0002', reply_by: '2026-10-05' })]);
     expect(text(html)).toContain('New RFQ');
-    expect(text(html)).toContain('Awaiting reply');
-    expect(text(html)).toContain('Reply overdue');
-    expect(text(html)).toContain('Quoted');
+    expect(text(html)).toContain('Awaiting reply 2');
+    expect(text(html)).toContain('Reply overdue 1');
+    expect(text(html)).toContain('Quoted 0');
   });
 
   it('offers a draft Edit, Mark as sent and Delete', () => {
@@ -95,7 +97,7 @@ describe('the RFQs list', () => {
   });
 
   it('offers a sent RFQ Record prices and Close', () => {
-    expect(items(render([row({ status: 'sent' })]))).toEqual(['Record prices', 'Close']);
+    expect(items(render([row({ status: 'sent' })]))).toEqual(['Record prices', 'Close RFQ']);
   });
 
   it('offers a closed RFQ no menu, and shows only open ones until a status is chosen', () => {
@@ -135,7 +137,7 @@ describe('the RFQ form', () => {
     const html = renderToStaticMarkup(
       <RfqFormCard
         editing={detail}
-        suppliers={[{ id: 'sup-1', name: 'Kopi Hulu Supplies' } as never]}
+        suppliers={[{ id: 'sup-1', name: 'Kopi Hulu Supplies' } as FinanceContact]}
         products={[]}
         today={TODAY}
         actions={actions}
@@ -168,13 +170,20 @@ describe('the prices card', () => {
     expect(t).toContain('Paper cups');
     expect(t).toContain('5 kg');
     expect(t).toContain('200 pcs');
-    expect(html).toContain('Unit price for Arabica beans');
-    expect(html).toContain('SST rate for Paper cups');
+    expect(html).toContain('Unit price for line 1, Arabica beans');
+    expect(html).toContain('SST rate for line 2, Paper cups');
   });
 
-  it('refuses to save while one price is empty, in the unpriced sentence', () => {
+  it('refuses to save while one price is empty, in the unpriced sentence, with nothing to send', () => {
     const drafts = priceDrafts(sent).map((d, i) => (i === 0 ? { ...d, unit_price: '12.50' } : d));
     expect(quoteFormError(drafts)).toBe(RFQ_MESSAGES.unpriced);
-    expect(quoteFormError(drafts.map((d) => ({ ...d, unit_price: '12.50' })))).toBeNull();
+    expect(submitPrices(sent.id, 'Q-77', drafts)).toEqual({ error: RFQ_MESSAGES.unpriced });
+  });
+
+  it('gives the payload, and no error, once every price is filled', () => {
+    const drafts = priceDrafts(sent).map((d) => ({ ...d, unit_price: '12.50' }));
+    const result = submitPrices(sent.id, 'Q-77', drafts);
+    expect(result).not.toHaveProperty('error');
+    expect(result).toEqual({ payload: quotePayload(sent.id, 'Q-77', drafts) });
   });
 });
