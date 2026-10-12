@@ -277,14 +277,16 @@ describe('Tuah prompts and hiring', () => {
     const teamPrompt = tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], true, null);
     expect(teamPrompt).not.toMatch(/payroll, staff or hiring/);
   });
-  it('says jobs, applications and candidates can be changed and interviews cannot yet', () => {
+  it('says jobs, applications, candidates and interviews can be changed', () => {
     for (const prompt of [TUAH_SYSTEM, tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], true, null)]) {
       const p = prompt.toLowerCase();
       expect(p).not.toContain('hiring cannot be changed yet');
       expect(p).not.toContain('candidates, applications and interviews cannot be changed yet');
-      // Candidates can now be added and edited with approval; only interviews cannot be changed.
       expect(p).not.toContain('candidates and interviews cannot be changed yet');
-      expect(p).toContain('interviews cannot be changed yet');
+      // Interviews can now be scheduled, changed, cancelled, closed and reopened with approval, and a past one recorded.
+      expect(p).not.toContain('interviews cannot be changed yet');
+      // Tuah's own sentence is in the passive ("or recorded after it took place"); the team prompt's is active.
+      expect(p).toMatch(/or record one that already took place|or recorded after it took place/);
     }
     expect(TUAH_SYSTEM.toLowerCase()).toContain('create, edit, open, pause, close, reopen or delete jobs');
   });
