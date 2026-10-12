@@ -52,7 +52,7 @@ export const BANK_ACCOUNT_MESSAGES = {
   // 23505
   nameTaken: 'Another bank or cash account already has that name. Archived accounts keep their names.',
   // FIN14, and what the server action says before anything is written.
-  needsSignOff: 'Only an owner or admin can set or change an opening balance.',
+  needsSignOff: 'Only an owner or admin can set or change an opening balance. If you are one, sign in again with your second step.',
   // FIN30
   inUse: 'This account has payments that are still to be paid or waiting for approval. Pay, reject or delete them, then archive it.',
   // 23514: a check constraint. The schema refuses everything that could meet one, so only a direct call does.

@@ -210,6 +210,12 @@ describe('updateBankAccount', () => {
     expect(await updateBankAccount(fake(refused('23505')).ctx, { id: ID, name: 'A' })).toEqual({ ok: false, error: M.nameTaken });
     expect(await updateBankAccount(fake(refused('FIN14')).ctx, { id: ID, name: 'A' })).toEqual({ ok: false, error: M.needsSignOff });
   });
+
+  it('does not tell an owner who owes a second step that they are not an owner', () => {
+    expect(M.needsSignOff).toBe(
+      'Only an owner or admin can set or change an opening balance. If you are one, sign in again with your second step.',
+    );
+  });
 });
 
 describe('setBankAccountActive', () => {

@@ -55,7 +55,7 @@ const PATHS = [
   '/finance/journals',
 ];
 const FORBIDDEN = { ok: false, error: 'You do not have permission to make changes here.' };
-const NEEDS = { ok: false, error: 'Only an owner or admin can set or change an opening balance.' };
+const NEEDS = { ok: false, error: 'Only an owner or admin can set or change an opening balance. If you are one, sign in again with your second step.' };
 const SAVED = { ok: true, data: { id: ACCOUNT, name: 'Savings', active: true } };
 
 const as = (role: string, isDemo = false) => {
