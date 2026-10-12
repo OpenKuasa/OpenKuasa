@@ -68,18 +68,28 @@ async function removeReplaced(orgId: string, old: unknown, keep: string | null):
   await removeLogoFile(old);
 }
 
+/** True only when storage says the object is not there, by status (never by the words of the message). */
+function isNotFound(error: unknown): boolean {
+  if (!isObject(error)) return false;
+  return error.status === 404 || error.statusCode === '404' || error.statusCode === 404;
+}
+
 /**
  * Looks at the uploaded file itself, with the service client (the bucket has no read policy for signed-in users).
  * The path has already passed the shape and own-workspace guard. A file is written once and never changed (the
  * bucket has no update policy and the upload never upserts), so what is read here is what the path keeps holding.
  * Gives null when the bytes are a PNG, JPEG or WebP of at most 1 MB and of the type the path ends in; else the
- * refusal. A file that is not there is a refusal; a look that could not be made at all is an unknown outcome.
+ * refusal. A file that is not there is a refusal; a look that could not be made (a network failure, a 5xx, a throw)
+ * is an unknown outcome, so the upload is kept.
  */
 async function refusalOfUpload(service: SupabaseClient, path: string): Promise<CapResult<never> | null> {
   let stored: Blob | null = null;
   try {
     const { data, error } = await service.storage.from(LOGO_BUCKET).download(path);
-    if (error || !data) return refuse(LOGO_UPLOAD_FAILED);
+    // storage-js hands failures back as `{ error }` (it does not throw). A missing object answers status 404, or 400
+    // with statusCode '404' (storage's own code); any other failure says nothing about the file.
+    if (error) return isNotFound(error) ? refuse(LOGO_UPLOAD_FAILED) : writeFailed('setLogo', { message: 'download' });
+    if (!data) return writeFailed('setLogo', { message: 'download' });
     stored = data;
   } catch {
     return writeFailed('setLogo', { message: 'download' });

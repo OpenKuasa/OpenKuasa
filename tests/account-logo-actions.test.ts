@@ -31,7 +31,7 @@ const ctl = vi.hoisted(() => ({
   serviceBuilt: 0,
   serviceThrows: false,
   /** What storage holds at a path: the file, or how the download goes wrong. */
-  stored: null as Blob | null | 'error' | 'throws',
+  stored: null as Blob | null | 'error' | 'missing' | 'missing-400' | 'throws',
   downloads: [] as string[],
   /** What the service client's `set_org_logo` answers, and what it was asked. */
   rpc: {} as { data?: unknown; error?: { code?: string; message?: string } | null },
@@ -67,7 +67,10 @@ vi.mock('@/lib/supabase/service', () => ({
               ctl.steps.push('download');
               ctl.downloads.push(path);
               if (ctl.stored === 'throws') throw new Error('SECRET download failure');
-              if (ctl.stored === 'error' || ctl.stored === null) return { data: null, error: { message: 'SECRET not found' } };
+              // What storage-js hands back: a missing object answers 404 (or 400 with statusCode '404'); a 5xx is another thing.
+              if (ctl.stored === 'missing' || ctl.stored === null) return { data: null, error: { message: 'SECRET', status: 404, statusCode: '404' } };
+              if (ctl.stored === 'missing-400') return { data: null, error: { message: 'SECRET', status: 400, statusCode: '404' } };
+              if (ctl.stored === 'error') return { data: null, error: { message: 'SECRET not found', status: 503, statusCode: '503' } };
               return { data: ctl.stored, error: null };
             },
             remove: async (paths: string[]) => {
@@ -170,8 +173,13 @@ describe('setLogo', () => {
 
   it('refuses when there is no file to look at, and answers the generic sentence when the look itself failed', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    for (const missing of ['missing', 'missing-400'] as const) {
+      ctl.stored = missing;
+      expect(await setLogo(ctxOf(session().client), NEW)).toEqual({ ok: false, error: LOGO_UPLOAD_FAILED });
+    }
+    // A failed download that does not say the object is absent (a 5xx, the network) is a write failure, whatever its words.
     ctl.stored = 'error';
-    expect(await setLogo(ctxOf(session().client), NEW)).toEqual({ ok: false, error: LOGO_UPLOAD_FAILED });
+    expect(await setLogo(ctxOf(session().client), NEW)).toEqual({ ok: false, error: WRITE_FAILED });
     ctl.stored = 'throws';
     expect(await setLogo(ctxOf(session().client), NEW)).toEqual({ ok: false, error: WRITE_FAILED });
     ctl.serviceThrows = true;
@@ -389,6 +397,22 @@ describe('setLogoAction', () => {
     ctl.client = session({ 'orgs.select': { data: { logo_path: OLD } } }).client;
     expect(await setLogoAction(NEW)).toEqual({ ok: false, error: WRITE_FAILED });
     expect(ctl.removed).toEqual([]);
+  });
+  it('removes the upload when storage says it is not there, and keeps it when the download merely failed', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    ctl.client = session({ 'orgs.select': { data: { logo_path: OLD } } }).client;
+    ctl.stored = 'missing';
+    expect(await setLogoAction(NEW)).toEqual({ ok: false, error: LOGO_UPLOAD_FAILED });
+    expect(ctl.removed).toEqual([NEW]);
+
+    ctl.removed = [];
+    ctl.stored = 'error';
+    ctl.client = session({ 'orgs.select': { data: { logo_path: OLD } } }).client;
+    expect(await setLogoAction(NEW)).toEqual({ ok: false, error: WRITE_FAILED });
+    ctl.stored = 'throws';
+    expect(await setLogoAction(NEW)).toEqual({ ok: false, error: WRITE_FAILED });
+    expect(ctl.removed).toEqual([]);
+    expect(ctl.rpcCalls).toEqual([]);
   });
   it('never removes the current logo when a refused call names it', async () => {
     ctl.stored = new Blob(['not an image']);

@@ -324,7 +324,7 @@ describe('a template has a language', () => {
 
   test('a date is written in English as it always was, or with the twelve Bahasa Malaysia months', () => {
     const { header, body } = fn(text, 'private.hr_letter_date');
-    expect(header).toBe('create or replace function private.hr_letter_date(p_date date, p_lang text)\nreturns text language sql immutable set search_path = public');
+    expect(header).toBe('create or replace function private.hr_letter_date(p_date date, p_lang text)\nreturns text language sql stable set search_path = public');
     expect(body).toContain(`(array[${MONTHS.map((month) => `'${month}'`).join(',')}])[extract(month from p_date)::int]`);
     expect(body).toContain("else to_char(p_date, 'FMDD FMMonth YYYY') end;");
     expect(body).toContain("select case when p_lang = 'ms'");

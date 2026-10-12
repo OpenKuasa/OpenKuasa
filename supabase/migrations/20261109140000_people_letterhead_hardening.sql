@@ -82,6 +82,10 @@
 --        name is the starter's and its text is the text that file seeded,
 --        known here by its md5 (so each body is written once, in the starter
 --        function). An edited or renamed copy is left alone.
+--    Side effect: both updates (the marking and the correction) fire
+--    hr_letter_templates_touch, so updated_at of every workspace's touched
+--    Bahasa Malaysia starters becomes the time this is applied. Nothing
+--    sorts by it (the lists order by name).
 --
 -- Safe on a database with the two earlier files applied and main's app
 -- running, in one transaction:
@@ -345,7 +349,7 @@ select private.hr_correct_ms_letter_templates();
 -- "12 October 2026" (the form letters have always had), or "12 Oktober 2026"
 -- for 'ms'. No date gives nothing.
 create or replace function private.hr_letter_date(p_date date, p_lang text)
-returns text language sql immutable set search_path = public as $$
+returns text language sql stable set search_path = public as $$
   select case when p_lang = 'ms'
     then to_char(p_date, 'FMDD') || ' '
       || (array['Januari','Februari','Mac','April','Mei','Jun','Julai','Ogos','September','Oktober','November','Disember'])[extract(month from p_date)::int]

@@ -254,7 +254,7 @@ describe('both sweeps in one bounded call', () => {
       limit: 500,
       attempted: 5,
       logos: { removed: 2, failed: 0, skipped: 0, kept: 0, errors: 0 },
-      documents: { workspaces: 2, removed: 3, failed: 0, skipped: 0, errors: 0 },
+      documents: { workspaces: 2, removed: 3, failed: 0, skipped: 0, errors: 0, stoppedEarly: false },
     });
     expect(removed).toHaveLength(5);
     expect(JSON.stringify(report)).not.toMatch(/[0-9a-f]{8}-/);
@@ -280,9 +280,52 @@ describe('both sweeps in one bounded call', () => {
   it('a failed removal counts against the limit too', async () => {
     const strays = Array.from({ length: 20 }, (_, i) => logo(ORG_A, i));
     const { client, calls } = fakeClient({ strays, removeFails: () => true });
-    const report = await sweepAllFiles(client, { limit: 5 });
-    expect(calls.filter((c) => c.kind.startsWith('remove:'))).toHaveLength(5);
+    const report = await sweepAllFiles(client, { limit: 6 });
+    // Logos may take half of the limit, whatever is behind them.
+    expect(calls.filter((c) => c.kind.startsWith('remove:'))).toHaveLength(3);
+    expect(report.logos).toMatchObject({ removed: 0, failed: 3 });
+  });
+
+  it('logos that keep failing cannot starve the documents: each side has its own half', async () => {
+    const strays = Array.from({ length: 40 }, (_, i) => logo(ORG_A, i));
+    const docs = Array.from({ length: 8 }, (_, i) => doc(ORG_A, i));
+    const { client, removed } = fakeClient({ strays, folders: [ORG_A], orphans: { [ORG_A]: docs }, removeFails: (path) => path.endsWith('.png') });
+    const report = await sweepAllFiles(client, { limit: 10 });
     expect(report.logos).toMatchObject({ removed: 0, failed: 5 });
+    expect(report.documents).toMatchObject({ removed: 5 });
+    expect(removed.filter((r) => r.bucket === 'hr-documents')).toHaveLength(5);
+    expect(report.attempted).toBe(10);
+  });
+
+  it('what the logos leave unused goes to the documents', async () => {
+    const { client } = fakeClient({ strays: [logo(ORG_A, 1)], folders: [ORG_A], orphans: { [ORG_A]: Array.from({ length: 30 }, (_, i) => doc(ORG_A, i)) } });
+    const report = await sweepAllFiles(client, { limit: 10 });
+    expect(report.logos.removed).toBe(1);
+    expect(report.documents.removed).toBe(9);
+  });
+
+  it('stops going through workspace folders once the time limit has passed, and says so', async () => {
+    let clock = 0;
+    const folders = [ORG_A, ORG_B, GONE];
+    const orphans = { [ORG_A]: [doc(ORG_A, 1)], [ORG_B]: [doc(ORG_B, 2)], [GONE]: [doc(GONE, 3)] };
+    // Each removal takes 15 seconds of the fake clock.
+    const { client, calls } = fakeClient({ folders, orphans, removeFails: () => ((clock += 15_000), true) });
+    const report = await sweepAllFiles(client, { now: () => clock, timeLimitMs: 20_000 });
+    expect(report.documents.workspaces).toBe(2);
+    expect(report.documents.stoppedEarly).toBe(true);
+    expect(calls.some((c) => c.kind === 'rpc:hr_release_orphaned_document_files' && (c.args[0] as { p_org: string }).p_org === GONE)).toBe(false);
+  });
+
+  it('does not say it stopped early when every folder was reached, and defaults to 20 seconds', async () => {
+    let clock = 0;
+    const { client } = fakeClient({ folders: [ORG_A, ORG_B], orphans: { [ORG_A]: [doc(ORG_A, 1)], [ORG_B]: [doc(ORG_B, 2)] }, removeFails: () => ((clock += 10_000), false) });
+    const report = await sweepAllFiles(client, { now: () => clock });
+    expect(report.documents).toMatchObject({ workspaces: 2, stoppedEarly: false });
+    const slow = fakeClient({ folders: [ORG_A, ORG_B], orphans: { [ORG_A]: [doc(ORG_A, 1)], [ORG_B]: [doc(ORG_B, 2)] } });
+    clock = 0;
+    const jump = fakeClient({ folders: [ORG_A, ORG_B], orphans: { [ORG_A]: [doc(ORG_A, 1)], [ORG_B]: [doc(ORG_B, 2)] }, removeFails: () => ((clock += 21_000), true) });
+    expect((await sweepAllFiles(jump.client, { now: () => clock })).documents).toMatchObject({ workspaces: 1, stoppedEarly: true });
+    expect((await sweepAllFiles(slow.client)).documents.stoppedEarly).toBe(false);
   });
 
   it('reports what went wrong as codes, to the function it is given, and carries on with the other sweep', async () => {
@@ -362,7 +405,7 @@ describe('POST /api/maintenance/sweep-files', () => {
         limit: 500,
         attempted: 2,
         logos: { removed: 1, failed: 0, skipped: 0, kept: 0, errors: 0 },
-        documents: { workspaces: 1, removed: 1, failed: 0, skipped: 0, errors: 0 },
+        documents: { workspaces: 1, removed: 1, failed: 0, skipped: 0, errors: 0, stoppedEarly: false },
       });
       expect(JSON.stringify(body)).not.toMatch(/[0-9a-f]{8}-/);
       expect(fake.removed).toHaveLength(2);
@@ -371,7 +414,7 @@ describe('POST /api/maintenance/sweep-files', () => {
 
   it('reads nothing from the request: a body or a query cannot raise the limit or name a path', async () => {
     const strays = Array.from({ length: 600 }, (_, i) => logo(ORG_A, i));
-    const fake = fakeClient({ strays });
+    const fake = fakeClient({ strays, folders: [ORG_A], orphans: { [ORG_A]: Array.from({ length: 600 }, (_, i) => doc(ORG_A, i)) } });
     built.client = fake.client;
     const { POST } = await import('@/app/api/maintenance/sweep-files/route');
     const response = await POST(

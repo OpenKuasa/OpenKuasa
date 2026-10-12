@@ -46,6 +46,8 @@ const LIST_PAGE = 1000;
 const MAX_ROUNDS = 100;
 /** The most removals one call of {@link sweepAllFiles} (so one request to the route) will attempt. */
 export const SWEEP_CALL_LIMIT = 500;
+/** How long {@link sweepAllFiles} keeps starting on new workspace folders. */
+export const SWEEP_TIME_LIMIT_MS = 20_000;
 
 /**
  * @typedef {{ left: number }} Budget  How many more removals may be attempted. Shared between sweeps; none = no bound.
@@ -151,16 +153,22 @@ export async function sweepWorkspace(client, org, /** @type {SweepOptions} */ { 
 }
 
 /** Every workspace folder in the document bucket, one after another. A refusal for one does not stop the rest. */
-export async function runSweep(client, /** @type {SweepOptions} */ { remove, verbose, log = console.log, maxRounds, budget }) {
+export async function runSweep(client, /** @type {SweepOptions & { now?: () => number, deadline?: number }} */ { remove, verbose, log = console.log, maxRounds, budget, now = Date.now, deadline }) {
   log(remove ? 'Removing document files that no document carries.' : 'Dry run: nothing is changed. Use --verbose to print the paths, --remove to remove.');
   const folders = await listWorkspaceFolders(client);
   const workspaces = [];
+  let stoppedEarly = false;
   for (const org of folders) {
     if (remove && budget && budget.left <= 0) break;
+    // One call per folder whatever the budget: past the deadline no new folder is started.
+    if (deadline !== undefined && now() >= deadline) {
+      stoppedEarly = true;
+      break;
+    }
     workspaces.push(await sweepWorkspace(client, org, { remove, verbose, log, maxRounds, budget }));
   }
   if (folders.length === 0) log('The bucket has no workspace folders.');
-  return { workspaces };
+  return { workspaces, stoppedEarly };
 }
 
 /**
@@ -242,21 +250,25 @@ export async function sweepLogoFiles(client, /** @type {SweepOptions} */ { remov
 }
 
 /**
- * Both sweeps, removing, bounded: at most `limit` removals are attempted in all (a failed one counts), stray logos
- * first, then the document folders. For a caller with no shell (the route). Answers numbers only: no path, no
+ * Both sweeps, removing, bounded: at most `limit` removals are attempted in all (a failed one counts). Stray logos
+ * go first but may take only half of the limit (rounded up), and the document folders get everything the logos did
+ * not use, so neither can starve the other. No new workspace folder is started once `timeLimitMs` (20 seconds) has
+ * passed on the clock `now`; `documents.stoppedEarly` says so. For a caller with no shell (the route). Answers numbers only: no path, no
  * workspace. What went wrong is handed to `onCode(where, code)` as a code, and the other sweep still runs.
  *
  * @param {unknown} client
- * @param {{ limit?: number, onCode?: (where: string, code: string) => void }} [options]
+ * @param {{ limit?: number, onCode?: (where: string, code: string) => void, now?: () => number, timeLimitMs?: number }} [options]
  */
-export async function sweepAllFiles(client, { limit = SWEEP_CALL_LIMIT, onCode = () => {} } = {}) {
+export async function sweepAllFiles(client, { limit = SWEEP_CALL_LIMIT, onCode = () => {}, now = Date.now, timeLimitMs = SWEEP_TIME_LIMIT_MS } = {}) {
   if (!Number.isInteger(limit) || limit < 1 || limit > SWEEP_CALL_LIMIT) throw new Error('The limit must be a whole number from 1 to 500.');
+  const deadline = now() + timeLimitMs;
+  const logoBudget = { left: Math.ceil(limit / 2) };
   const budget = { left: limit };
   const quiet = () => {};
 
   const logos = { removed: 0, failed: 0, skipped: 0, kept: 0, errors: 0 };
   try {
-    const swept = await sweepLogoFiles(client, { remove: true, log: quiet, budget });
+    const swept = await sweepLogoFiles(client, { remove: true, log: quiet, budget: logoBudget });
     Object.assign(logos, { removed: swept.removed, failed: swept.failed, skipped: swept.skipped, kept: swept.kept });
     if (swept.error) {
       logos.errors = 1;
@@ -266,11 +278,14 @@ export async function sweepAllFiles(client, { limit = SWEEP_CALL_LIMIT, onCode =
     logos.errors = 1;
     onCode('logos', 'failed');
   }
+  // What the logos spent is spent, whatever they left; the documents get the rest.
+  budget.left -= Math.ceil(limit / 2) - logoBudget.left;
 
-  const documents = { workspaces: 0, removed: 0, failed: 0, skipped: 0, errors: 0 };
+  const documents = { workspaces: 0, removed: 0, failed: 0, skipped: 0, errors: 0, stoppedEarly: false };
   try {
-    const { workspaces } = await runSweep(client, { remove: true, log: quiet, budget });
+    const { workspaces, stoppedEarly } = await runSweep(client, { remove: true, log: quiet, budget, now, deadline });
     documents.workspaces = workspaces.length;
+    documents.stoppedEarly = stoppedEarly;
     for (const workspace of workspaces) {
       documents.removed += workspace.removed;
       documents.failed += workspace.failed;
