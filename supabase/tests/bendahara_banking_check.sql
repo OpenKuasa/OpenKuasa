@@ -1,17 +1,25 @@
--- Bendahara banking check. Run it after 20261031090000_bendahara_banking.sql,
--- in the same transaction for a dry run, or by itself once the migration is
--- applied. It goes through transfers between accounts, account balances,
--- statement imports and matching as an owner, an admin, an editor, a viewer
--- and an outsider, and checks that finance_bank_transactions lists every
--- movement of money once. Everything the three older scripts cover
--- (bendahara_cash_book_check.sql, bendahara_followons_check.sql,
--- bendahara_invoices_check.sql) is theirs, and they must still pass beside
--- this one, unedited. It leaves nothing behind either way: the block always
--- ends with RAISE, so every row and the helper function below are rolled
--- back. Read the message:
+-- Bendahara banking check. Run it after
+-- 20261031090300_bendahara_banking_write_guards_fit.sql, in the same
+-- transaction for a dry run, or by itself once the migration is applied. It
+-- needs every finance migration before that one too:
+-- 20261030123000_finance_write_guards (who signs off, and which columns only
+-- the database writes), 20261031090000_bendahara_banking and
+-- 20261031090200_bendahara_banking_next_number_definer. It goes through
+-- transfers between accounts, account balances, statement imports and
+-- matching as an owner, an admin, an editor, a viewer and an outsider, and
+-- checks that finance_bank_transactions lists every movement of money once.
+-- Everything the three older scripts cover (bendahara_cash_book_check.sql,
+-- bendahara_followons_check.sql, bendahara_invoices_check.sql) is theirs. It
+-- leaves nothing behind either way: the block always ends with RAISE, so
+-- every row and the helper function below are rolled back. Read the message:
 --   BENDAHARA_BANKING_CHECK PASSED ...   or   BENDAHARA_BANKING_CHECK FAILED: <what went wrong>
 -- It makes its own workspace and acts as each person the way the app does:
 -- the authenticated role with that person's id in request.jwt.claims.
+-- Two short parts, marked "by the database owner", are run as the role that
+-- runs this script, with a person's id still in the claims: since the write
+-- guards nobody signed in can write a payment's number, so two sides made by
+-- hand can only be posted by the owner of the tables, and the rule that keeps
+-- a pair whole is proved there.
 do $$
 declare
   org uuid := gen_random_uuid();
@@ -118,9 +126,13 @@ begin
   if n <> 2 then fails := fails || format('expected 2 new security_invoker views, found %s', n); end if;
   select string_agg(attname, ',' order by attnum) into t from pg_attribute
    where attrelid = 'public.finance_account_balances'::regclass and attnum > 0 and not attisdropped;
-  if t is distinct from 'id,org_id,name,kind,bank_name,account_no,opening_balance,opening_date,active,money_in,money_out,'
+  -- No account_no: nobody signed in may read that column of finance_accounts, and the view runs as its reader.
+  if t is distinct from 'id,org_id,name,kind,bank_name,opening_balance,opening_date,active,money_in,money_out,'
        || 'balance,to_be_paid,last_import_at,unmatched_lines,created_at' then
     fails := fails || format('finance_account_balances has the columns: %s', t);
+  end if;
+  if has_column_privilege('authenticated', 'public.finance_accounts', 'account_no', 'select') then
+    fails := array_append(fails, 'authenticated can read finance_accounts.account_no through the table');
   end if;
   select string_agg(attname, ',' order by attnum) into t from pg_attribute
    where attrelid = 'public.finance_bank_transactions'::regclass and attnum > 0 and not attisdropped;
@@ -162,16 +174,36 @@ begin
    where s.nspname = 'private' and p.proname = 'finance_transfer_pair_check' and p.prosecdef
      and p.proconfig::text ilike '%search_path=%';
   if n <> 1 then fails := array_append(fails, 'the pair check does not run as its owner with a fixed search_path'); end if;
+  -- The two functions that write a closed column (a payment's number, the counters) run as their owner, with
+  -- a fixed search_path, and can be called by the owner and the authenticated role only.
+  foreach t in array array['finance_record_transfer', 'finance_next_number'] loop
+    select count(*) into n from pg_proc p join pg_namespace s on s.oid = p.pronamespace
+     where s.nspname = 'public' and p.proname = t and p.prosecdef and 'search_path=""' = any(p.proconfig);
+    if n <> 1 then fails := fails || format('%s does not run as its owner with a fixed, empty search_path', t); end if;
+    select string_agg(case when a.grantee = p.proowner then 'owner' when a.grantee = 0 then 'public' else a.grantee::regrole::text end
+                      || '=' || a.privilege_type, ',' order by (a.grantee = p.proowner) desc, a.grantee::regrole::text)
+      into ctx
+      from pg_proc p join pg_namespace s on s.oid = p.pronamespace, lateral aclexplode(p.proacl) a
+     where s.nspname = 'public' and p.proname = t;
+    if ctx is distinct from 'owner=EXECUTE,authenticated=EXECUTE' then
+      fails := fails || format('%s can be executed by: %s', t, coalesce(ctx, 'everyone (no ACL)'));
+    end if;
+  end loop;
+  -- The two that write no closed column still run as the caller: row-level security decides for them.
+  select count(*) into n from pg_proc p join pg_namespace s on s.oid = p.pronamespace
+   where s.nspname = 'public' and p.proname in ('finance_void_transfer', 'finance_import_statement')
+     and not p.prosecdef and 'search_path=""' = any(p.proconfig);
+  if n <> 2 then fails := array_append(fails, 'finance_void_transfer and finance_import_statement do not both run as the caller with a fixed search_path'); end if;
   select string_agg(conname, ',' order by conname) into t from pg_constraint
    where conrelid = 'public.finance_transactions'::regclass and contype = 'c'
      and conname in ('finance_transactions_amount_number_check', 'finance_transactions_transfer_number_check');
   if t is distinct from 'finance_transactions_amount_number_check,finance_transactions_transfer_number_check' then
     fails := fails || format('the two new check constraints on finance_transactions are: %s', t);
   end if;
-  -- The triggers on payments: the two that were live, and the five this migration adds.
+  -- The triggers on payments: the cash book's two, the write guards' sign-off, and the five banking adds.
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where not tgisinternal and tgrelid = 'public.finance_transactions'::regclass;
-  if t is distinct from 'finance_transaction_guard,finance_transaction_insert_guard,finance_transaction_unmatch,'
+  if t is distinct from 'finance_transaction_guard,finance_transaction_insert_guard,finance_transaction_sign_off,finance_transaction_unmatch,'
        || 'finance_transfer_id_guard,finance_transfer_pair_delete,finance_transfer_pair_insert,finance_transfer_pair_update' then
     fails := fails || format('triggers on finance_transactions are: %s', t);
   end if;
@@ -240,6 +272,13 @@ begin
   insert into public.finance_accounts (org_id, name, kind, active)
   values (org, 'Closed account', 'bank', false) returning id into closed;
   update public.finance_accounts set opening_balance = 1000, opening_date = current_date - 30 where id = bank;
+  -- An account number is not on Banking, and not readable through the table: a writer asks for it by name.
+  fails := fails || public.bendahara_banking_try('the owner reads account_no through the table', '42501',
+    format('select account_no from public.finance_accounts where org_id = %L', org));
+  fails := fails || public.bendahara_banking_try('the owner reads account_no through the view', '42703',
+    format('select account_no from public.finance_account_balances where org_id = %L', org));
+  select string_agg(account_no, ',') into t from public.finance_account_numbers(org) where account_id = savings;
+  if t is distinct from '1234' then fails := fails || format('finance_account_numbers gives the owner: %s', t); end if;
 
   insert into public.finance_contacts (org_id, name, is_customer) values (org, 'Check Customer', true) returning id into cust;
   insert into public.finance_contacts (org_id, name, is_supplier) values (org, 'Check Supplier', true) returning id into sup;
@@ -333,29 +372,42 @@ begin
   if n <> 2 then fails := array_append(fails, 'an admin''s transfer was not posted with the admin as approver of the money out'); end if;
 
   perform set_config('request.jwt.claims', editor_claims, true);
+  -- The editor may write in the workspace, so the function hears them out: FIN16 for what is wrong with the
+  -- transfer first, as before, then FIN14 for who they are.
   fails := fails || public.bendahara_banking_try('an editor records a transfer', 'FIN14',
     format('select public.finance_record_transfer(%L, %L)', org,
       jsonb_build_object('from_account_id', bank, 'to_account_id', savings, 'amount', 10)));
-  -- By hand: two draft sides are only drafts, and posting them is the guard's question.
+  fails := fails || public.bendahara_banking_try('an editor records a transfer to the same account', 'FIN16',
+    format('select public.finance_record_transfer(%L, %L)', org,
+      jsonb_build_object('from_account_id', bank, 'to_account_id', bank, 'amount', 10)));
+  select count(*) into n from public.finance_transactions where org_id = org and created_by = editor_id;
+  if n <> 0 then fails := array_append(fails, 'an editor''s refused transfer left rows behind'); end if;
+  -- The editor reads the balances, and reads an account number where a writer does.
+  select count(*) into n from public.finance_account_balances where org_id = org;
+  if n <> 4 then fails := fails || format('an editor reads %s account balances, not 4', n); end if;
+  select string_agg(account_no, ',') into t from public.finance_account_numbers(org) where account_id = savings;
+  if t is distinct from '1234' then fails := fails || format('finance_account_numbers gives an editor: %s', t); end if;
+  -- By hand: two draft sides are only drafts. Posting them takes a number, and a payment's number is not a
+  -- column anyone signed in writes (the write guards): 42501, before any trigger is asked.
   fails := fails || public.bendahara_banking_try('an editor inserts two draft sides', 'ok',
     format('insert into public.finance_transactions (org_id, direction, account_id, amount, method, transfer_id)
             values (%L, ''out'', %L, 40, ''bank_transfer'', %L), (%L, ''in'', %L, 40, ''bank_transfer'', %L)',
       org, bank, hand, org, savings, hand));
-  fails := fails || public.bendahara_banking_try('an editor posts both sides by hand', 'FIN14',
+  select count(*) into n from public.finance_transactions where org_id = org and transfer_id = hand and created_by = editor_id;
+  if n <> 2 then fails := array_append(fails, 'two sides drafted by an editor are not recorded as made by them'); end if;
+  fails := fails || public.bendahara_banking_try('an editor posts both sides by hand', '42501',
     format('update public.finance_transactions set status = ''posted'', number = ''TR-9001'' where org_id = %L and transfer_id = %L', org, hand));
-  fails := fails || public.bendahara_banking_try('an editor posts only the money in', 'FIN16',
-    format('update public.finance_transactions set status = ''posted'', number = ''TR-9001''
-             where org_id = %L and transfer_id = %L and direction = ''in''', org, hand));
   -- Half a transfer: a lone side can be drafted, never posted.
   fails := fails || public.bendahara_banking_try('an editor drafts a lone side', 'ok',
     format('insert into public.finance_transactions (org_id, direction, account_id, amount, method, transfer_id)
             values (%L, ''in'', %L, 999, ''bank_transfer'', %L)', org, bank, lone));
-  fails := fails || public.bendahara_banking_try('an editor posts a lone side', 'FIN16',
+  fails := fails || public.bendahara_banking_try('an editor posts a lone side', '42501',
     format('update public.finance_transactions set status = ''posted'', number = ''TR-9002'' where org_id = %L and transfer_id = %L', org, lone));
   -- A draft side does not carry a number: it would sit, unseen, on the number the next transfer needs.
-  fails := fails || public.bendahara_banking_try('a draft side is given the next TR- number', '23514',
+  -- From a signed-in person the column itself is closed; the table's own rule is tried by the database owner below.
+  fails := fails || public.bendahara_banking_try('a draft side is given the next TR- number', '42501',
     format('update public.finance_transactions set number = ''TR-0004'' where org_id = %L and transfer_id = %L', org, lone));
-  fails := fails || public.bendahara_banking_try('a draft side is inserted with a number', '23514',
+  fails := fails || public.bendahara_banking_try('a draft side is inserted with a number', '42501',
     format('insert into public.finance_transactions (org_id, direction, account_id, amount, method, transfer_id, number)
             values (%L, ''out'', %L, 1, ''bank_transfer'', %L, ''TR-0004'')', org, bank, gen_random_uuid()));
   -- A payment does not join or leave a transfer.
@@ -365,11 +417,17 @@ begin
     format('update public.finance_transactions set transfer_id = %L where org_id = %L and transfer_id = %L', gen_random_uuid(), org, lone));
   fails := fails || public.bendahara_banking_try('a posted payment joins a transfer', 'FIN09',
     format('update public.finance_transactions set transfer_id = %L where id = %L', lone, p_in));
-  -- A posted transfer is changed by nobody, one side or both.
-  fails := fails || public.bendahara_banking_try('one side of a posted transfer is voided alone', 'FIN16',
+  -- A posted transfer is changed by nobody, one side or both. Voiding is a sign-off, so an editor is refused
+  -- for who they are (FIN14), by the function and by hand, before the pair is looked at.
+  fails := fails || public.bendahara_banking_try('an editor voids a transfer', 'FIN14',
+    format('select public.finance_void_transfer(%L, %L)', org, t1));
+  fails := fails || public.bendahara_banking_try('an editor voids both sides by hand', 'FIN14',
+    format('update public.finance_transactions set status = ''void'' where org_id = %L and transfer_id = %L', org, t1));
+  fails := fails || public.bendahara_banking_try('an editor voids one side alone', 'FIN14',
     format('update public.finance_transactions set status = ''void'' where org_id = %L and transfer_id = %L and direction = ''in''', org, t1));
-  fails := fails || public.bendahara_banking_try('the other side is voided alone', 'FIN16',
-    format('update public.finance_transactions set status = ''void'' where org_id = %L and transfer_id = %L and direction = ''out''', org, t1));
+  -- What is wrong with the request is still answered first, as for an owner.
+  fails := fails || public.bendahara_banking_try('an editor voids a transfer that is not there', 'FIN11',
+    format('select public.finance_void_transfer(%L, %L)', org, gen_random_uuid()));
   fails := fails || public.bendahara_banking_try('the amount of a posted transfer is changed', 'FIN09',
     format('update public.finance_transactions set amount = 1 where org_id = %L and transfer_id = %L', org, t1));
   fails := fails || public.bendahara_banking_try('a side of a posted transfer is deleted', 'FIN09',
@@ -377,13 +435,44 @@ begin
   select count(*) into n from public.finance_transactions where org_id = org and transfer_id = t1 and status = 'posted' and amount = 500;
   if n <> 2 then fails := array_append(fails, 'a refused change to a transfer left a mark'); end if;
 
-  -- ==== as the owner: a pair made by hand must match to be posted =============
+  -- ==== as the owner: half a transfer is not voided, and nothing is posted by hand =
   perform set_config('request.jwt.claims', owner_claims, true);
-  fails := fails || public.bendahara_banking_try('the owner posts a well-made pair by hand', 'ok',
+  fails := fails || public.bendahara_banking_try('one side of a posted transfer is voided alone', 'FIN16',
+    format('update public.finance_transactions set status = ''void'' where org_id = %L and transfer_id = %L and direction = ''in''', org, t1));
+  fails := fails || public.bendahara_banking_try('the other side is voided alone', 'FIN16',
+    format('update public.finance_transactions set status = ''void'' where org_id = %L and transfer_id = %L and direction = ''out''', org, t1));
+  select count(*) into n from public.finance_transactions where org_id = org and transfer_id = t1 and status = 'posted';
+  if n <> 2 then fails := array_append(fails, 'half a void of a transfer left a mark'); end if;
+  -- Even the owner: a number is the database's to write, and a payment is not posted without one.
+  fails := fails || public.bendahara_banking_try('the owner posts a well-made pair by hand', '42501',
+    format('update public.finance_transactions set status = ''posted'', number = ''TR-9001'' where org_id = %L and transfer_id = %L', org, hand));
+  fails := fails || public.bendahara_banking_try('the owner posts a well-made pair with no number', '23514',
+    format('update public.finance_transactions set status = ''posted'' where org_id = %L and transfer_id = %L', org, hand));
+
+  -- ==== by the database owner: a pair made by hand must match to be posted =====
+  -- The role that runs this script owns the tables, so the column grants do not
+  -- bind it. The workspace's owner is still the person in the claims, so the
+  -- guards and the sign-off trigger answer as they would for them.
+  reset role;
+  -- The table's own rules about a number on a side of a transfer.
+  fails := fails || public.bendahara_banking_try('a draft side is given the next TR- number, by the database owner', '23514',
+    format('update public.finance_transactions set number = ''TR-0004'' where org_id = %L and transfer_id = %L', org, lone));
+  fails := fails || public.bendahara_banking_try('a side is inserted with a number, by the database owner', 'FIN09',
+    format('insert into public.finance_transactions (org_id, direction, account_id, amount, method, transfer_id, number)
+            values (%L, ''out'', %L, 1, ''bank_transfer'', %L, ''TR-0004'')', org, bank, gen_random_uuid()));
+  fails := fails || public.bendahara_banking_try('only the money in is posted', 'FIN16',
+    format('update public.finance_transactions set status = ''posted'', number = ''TR-9001''
+             where org_id = %L and transfer_id = %L and direction = ''in''', org, hand));
+  fails := fails || public.bendahara_banking_try('a well-made pair is posted by hand', 'ok',
     format('update public.finance_transactions set status = ''posted'', number = ''TR-9001'' where org_id = %L and transfer_id = %L', org, hand));
   select count(*) into n from public.finance_transactions where org_id = org and transfer_id = hand and status = 'posted';
   if n <> 2 then fails := array_append(fails, 'a well-made pair was not posted'); end if;
-  fails := fails || public.bendahara_banking_try('the owner posts a lone side', 'FIN16',
+  select string_agg(format('%s/%s', direction, coalesce(approved_by::text, '-')), ' ' order by direction)
+    into t from public.finance_transactions where org_id = org and transfer_id = hand;
+  if t is distinct from format('in/- out/%s', owner_id) then
+    fails := fails || format('a pair posted by hand with the owner in the claims is approved by: %s', t);
+  end if;
+  fails := fails || public.bendahara_banking_try('a lone side is posted', 'FIN16',
     format('update public.finance_transactions set status = ''posted'', number = ''TR-9002'' where org_id = %L and transfer_id = %L', org, lone));
   delete from public.finance_transactions where org_id = org and transfer_id = lone;
   -- Two sides that do not match: different amounts.
@@ -439,7 +528,8 @@ begin
     format('update public.finance_transactions set status = ''posted'', number = %L where id = %L', no, stray));
   delete from public.finance_transactions where id = stray;
 
-  -- ==== voiding a transfer =====================================================
+  -- ==== voiding a transfer: the owner, signed in again ==========================
+  set local role authenticated;
   fails := fails || public.bendahara_banking_try('a transfer that is not there is voided', 'FIN11',
     format('select public.finance_void_transfer(%L, %L)', org, gen_random_uuid()));
   fails := fails || public.bendahara_banking_try('another workspace''s transfer is voided', 'FIN11',
@@ -566,12 +656,21 @@ begin
   perform set_config('request.jwt.claims', editor_claims, true);
 
   -- ==== a void takes the match with it =========================================
+  -- Voiding is a sign-off: the editor who matched the lines cannot, and their try unmatches nothing.
+  fails := fails || public.bendahara_banking_try('an editor voids a matched transfer', 'FIN14',
+    format('select public.finance_void_transfer(%L, %L)', org, t1));
+  fails := fails || public.bendahara_banking_try('an editor voids a matched payment out', 'FIN14',
+    format('update public.finance_transactions set status = ''void'', updated_at = now() where org_id = %L and id = %L', org, p_out));
+  select count(*) into n from public.finance_statement_lines where id in (l_transfer, l_out) and transaction_id is not null;
+  if n <> 2 then fails := array_append(fails, 'a refused void unmatched a statement line'); end if;
+  perform set_config('request.jwt.claims', admin_claims, true);
   perform public.finance_void_transfer(org, t1);
   select count(*) into n from public.finance_statement_lines where id = l_transfer and transaction_id is null;
   if n <> 1 then fails := array_append(fails, 'voiding a transfer left its statement line matched'); end if;
   update public.finance_transactions set status = 'void', updated_at = now() where org_id = org and id = p_out;
   select count(*) into n from public.finance_statement_lines where id = l_out and transaction_id is null;
   if n <> 1 then fails := array_append(fails, 'voiding a payment out left its statement line matched'); end if;
+  perform set_config('request.jwt.claims', editor_claims, true);
   fails := fails || public.bendahara_banking_try('a line is matched to a voided payment', 'FIN17',
     format('update public.finance_statement_lines set transaction_id = %L where id = %L', p_out, l_out));
   select string_agg(format('%s=%s', name, balance), ' ' order by name) into t from public.finance_account_balances where org_id = org;
@@ -589,19 +688,33 @@ begin
   if t is distinct from 'pending_approval' then fails := fails || format('an editor''s bank charge is %s, not waiting for approval', t); end if;
   fails := fails || public.bendahara_banking_try('a line is matched to a charge that is waiting for approval', 'FIN17',
     format('update public.finance_statement_lines set transaction_id = %L where id = %L', charge, l_charge));
-  fails := fails || public.bendahara_banking_try('an editor pays their own bank charge', 'FIN14',
+  fails := fails || public.bendahara_banking_try('an editor approves their own bank charge', 'FIN14',
+    format('update public.finance_transactions set status = ''scheduled'', updated_at = now() where id = %L', charge));
+  -- Paying it by hand takes a number, which nobody signed in writes.
+  fails := fails || public.bendahara_banking_try('an editor pays their own bank charge by hand', '42501',
     format('update public.finance_transactions set status = ''posted'', number = ''PV-9001'' where id = %L', charge));
   perform set_config('request.jwt.claims', admin_claims, true);
   update public.finance_transactions set status = 'scheduled', updated_at = now() where id = charge;
   perform set_config('request.jwt.claims', editor_claims, true);
   fails := fails || public.bendahara_banking_try('a line is matched to a charge that is still to be paid', 'FIN17',
     format('update public.finance_statement_lines set transaction_id = %L where id = %L', charge, l_charge));
+  -- Paying is a sign-off: the admin who approved it pays it, and the editor matches the line.
+  fails := fails || public.bendahara_banking_try('an editor marks the approved charge paid', 'FIN14',
+    format('select public.finance_mark_payment_paid(%L, %L, current_date)', org, charge));
+  perform set_config('request.jwt.claims', admin_claims, true);
   perform public.finance_mark_payment_paid(org, charge, current_date);
+  perform set_config('request.jwt.claims', editor_claims, true);
   update public.finance_statement_lines set transaction_id = charge where id = l_charge;
-  -- Interest is money in for an income category: an editor records and posts it.
+  -- Interest is money in for an income category: an editor records it as a draft, and posting it is a sign-off.
   interest := public.finance_save_cash_receipt(org,
     jsonb_build_object('account_id', bank, 'method', 'bank_transfer', 'amount', 1.10, 'party_name', 'Check Bank', 'category_id', sales), '[]');
+  fails := fails || public.bendahara_banking_try('an editor posts the interest they recorded', 'FIN14',
+    format('select public.finance_post_cash_receipt(%L, %L)', org, interest));
+  fails := fails || public.bendahara_banking_try('a line is matched to interest that is still a draft', 'FIN17',
+    format('update public.finance_statement_lines set transaction_id = %L where id = %L', interest, l_interest));
+  perform set_config('request.jwt.claims', admin_claims, true);
   perform public.finance_post_cash_receipt(org, interest);
+  perform set_config('request.jwt.claims', editor_claims, true);
   update public.finance_statement_lines set transaction_id = interest where id = l_interest;
   select format('%s/%s', unmatched_lines, balance) into t from public.finance_account_balances where id = bank;
   if t is distinct from '4/958.60' then fails := fails || format('the bank account after the charge and the interest reads: %s', t); end if;
@@ -632,9 +745,19 @@ begin
        + (select count(*) from public.finance_bank_transactions where org_id = org)
        + (select count(*) from public.finance_statement_lines where org_id = org) into n;
   if n <> 4 + 14 + 7 then fails := fails || format('a viewer reads %s banking rows, not 25', n); end if;
-  fails := fails || public.bendahara_banking_try('a viewer records a transfer', 'FIN14',
+  select string_agg(format('%s=%s', name, balance), ' ' order by name) into t from public.finance_account_balances where org_id = org;
+  if t is distinct from 'Cash in hand=200.00 Closed account=0.00 Main Bank=958.60 Savings=-50.00' then
+    fails := fails || format('a viewer reads the balances: %s', t);
+  end if;
+  -- A viewer is not a writer: no account number, and the transfer function does not hear them out.
+  select count(*) into n from public.finance_account_numbers(org);
+  if n <> 0 then fails := fails || format('finance_account_numbers gives a viewer %s rows', n); end if;
+  fails := fails || public.bendahara_banking_try('a viewer records a transfer', '42501',
     format('select public.finance_record_transfer(%L, %L)', org,
       jsonb_build_object('from_account_id', bank, 'to_account_id', savings, 'amount', 10)));
+  fails := fails || public.bendahara_banking_try('a viewer records a transfer to the same account', '42501',
+    format('select public.finance_record_transfer(%L, %L)', org,
+      jsonb_build_object('from_account_id', bank, 'to_account_id', bank, 'amount', 10)));
   fails := fails || public.bendahara_banking_try('a viewer imports a statement', '42501',
     format('select public.finance_import_statement(%L, %L, ''x.csv'', %L)', org, bank,
       jsonb_build_array(jsonb_build_object('line_date', current_date, 'money_in', 5))));
@@ -662,9 +785,12 @@ begin
   fails := fails || public.bendahara_banking_try('an outsider imports a statement into the workspace', '42501',
     format('select public.finance_import_statement(%L, %L, ''x.csv'', %L)', org, bank,
       jsonb_build_array(jsonb_build_object('line_date', current_date, 'money_in', 5))));
-  fails := fails || public.bendahara_banking_try('an outsider records a transfer in the workspace', 'FIN16',
+  -- The function runs as its owner and would find the accounts: its own test of the caller is what stops this.
+  fails := fails || public.bendahara_banking_try('an outsider records a transfer in the workspace', '42501',
     format('select public.finance_record_transfer(%L, %L)', org,
       jsonb_build_object('from_account_id', bank, 'to_account_id', savings, 'amount', 10)));
+  fails := fails || public.bendahara_banking_try('an outsider voids a transfer in the workspace', 'FIN11',
+    format('select public.finance_void_transfer(%L, %L)', org, t2));
   reset role;
 
   -- ==== nobody signed in =======================================================
@@ -673,8 +799,15 @@ begin
   select (select count(*) from public.finance_account_balances) + (select count(*) from public.finance_bank_transactions)
        + (select count(*) from public.finance_statement_lines) into n;
   if n <> 0 then fails := fails || format('a session that names no user reads %s banking rows', n); end if;
+  -- "Nobody is signed in" passes the approval rule (it is how a migration writes), so the test of the caller
+  -- that comes before it is what keeps such a session out.
+  fails := fails || public.bendahara_banking_try('a session that names no user records a transfer', '42501',
+    format('select public.finance_record_transfer(%L, %L)', org,
+      jsonb_build_object('from_account_id', bank, 'to_account_id', savings, 'amount', 10)));
   reset role;
   perform set_config('request.jwt.claims', '{}', true);
+  select count(*) into n from public.finance_transactions where org_id = org and transfer_id is not null;
+  if n <> 10 then fails := fails || format('refused transfers left %s sides of a transfer, not 10', n); end if;
 
   -- ==== a user is deleted by a role with no rights on public tables ============
   -- Supabase Auth deletes users as a role that can read and delete auth.users
