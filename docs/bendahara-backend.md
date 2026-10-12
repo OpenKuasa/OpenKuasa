@@ -721,8 +721,8 @@ archived ones included. `bank-accounts.ts` has one schema and one function per
 write (`createBankAccount`, `updateBankAccount`, `setBankAccountActive`) and
 `listBankAccountNumbers`; `bank-account-form.ts` has the form's rules and what the
 table shows. The three actions refresh `BANK_ACCOUNT_PATHS`: Banking, every
-screen whose forms offer an account or whose rows name one, and the two ledger
-screens (Chart of Accounts and Journals), since each account has a ledger
+screen whose forms offer an account or whose rows name one, and the three ledger
+screens (Chart of Accounts, Journals and Reports), since each account has a ledger
 account and an opening balance is an entry in the books.
 
 **The ledger account.** Every bank or cash account has an account in the Chart

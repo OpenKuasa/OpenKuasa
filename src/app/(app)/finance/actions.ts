@@ -280,9 +280,9 @@ const LEDGER_PATHS = ['/finance/chart-of-accounts', '/finance/journals', '/finan
 // A bank or cash account is on Banking, and in the account picker of every form that records money: the payment forms on
 // Supplier Bills, Payments Out, Invoices and Payments In, the refund forms on Credit Notes and Refunds, and the
 // receipt form on Cash Receipts. A new, renamed, archived or restored account must appear, change or go there.
-// Cash Receipts and Payment Vouchers also name each movement's account. The two ledger screens end the list: each
+// Cash Receipts and Payment Vouchers also name each movement's account. The three ledger screens end the list: each
 // bank or cash account has a ledger account that is renamed and archived with it, and an opening balance is an
-// entry in the books.
+// entry in the books, which Reports works its statements from.
 const BANK_ACCOUNT_PATHS = [
   '/finance/banking',
   '/finance/supplier-bills',

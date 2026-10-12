@@ -40,7 +40,7 @@ vi.mock('@/lib/finance/bank-accounts', async (orig) => {
 
 const actions = await import('@/app/(app)/finance/actions');
 
-// Banking, every screen whose forms offer an account or whose rows name one, and the two ledger screens.
+// Banking, every screen whose forms offer an account or whose rows name one, and the three ledger screens.
 const PATHS = [
   '/finance/banking',
   '/finance/supplier-bills',
@@ -53,6 +53,7 @@ const PATHS = [
   '/finance/payment-vouchers',
   '/finance/chart-of-accounts',
   '/finance/journals',
+  '/finance/reports',
 ];
 const FORBIDDEN = { ok: false, error: 'You do not have permission to make changes here.' };
 const NEEDS = { ok: false, error: 'Only an owner or admin can set or change an opening balance. If you are one, sign in again with your second step.' };
