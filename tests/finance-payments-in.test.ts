@@ -80,7 +80,7 @@ describe('payments in', () => {
       ['FIN04', 'A payment can only go against a posted invoice.'],
       ['FIN05', 'That is more than is still owed on an invoice.'],
       ['FIN06', 'One payment can only pay invoices from one customer.'],
-      ['FIN09', 'This payment has already been voided.'],
+      ['FIN09', 'This payment cannot be voided as it now stands: it has already been voided, or it is still a draft.'],
       ['FIN11', 'That payment no longer exists.'],
       ['23503', 'The account or an invoice on this payment no longer exists.'],
       ['23505', 'Each invoice can appear once on a payment.'],
@@ -143,10 +143,10 @@ describe('payments in', () => {
     expect(broken.calls).toHaveLength(1);
     expect(logged).toHaveBeenCalled();
   });
-  it('says a payment that is already void is already void, and never to void it', async () => {
+  it('says a payment that is already void, or a draft receipt, cannot be voided, and never to void it', async () => {
     const { ctx, calls } = fakeFinance(paymentInOr(true, { data: null, error: { code: 'FIN09' } }));
     const result = await voidPaymentIn(ctx, { id: TXN });
-    expect(result).toEqual({ ok: false, error: 'This payment has already been voided.' });
+    expect(result).toEqual({ ok: false, error: 'This payment cannot be voided as it now stands: it has already been voided, or it is still a draft.' });
     expect(JSON.stringify(result)).not.toContain('Void it');
     expect(calls).toHaveLength(2);
   });

@@ -75,9 +75,11 @@ export const RECEIPT_MESSAGES = {
   notPosted: 'A payment can only go against a posted invoice.',
   tooMuch: 'That is more than is still owed on an invoice.',
   oneCustomer: 'One payment can only pay invoices from one customer.',
-  // FIN09. Money in is posted at once and has no edit or delete, so through the app this is only ever
-  // a second attempt to void a payment someone has already voided.
-  locked: 'This payment has already been voided.',
+  // FIN09 from voiding. A payment recorded on Payments In is posted at once and its row offers Void only
+  // while it is posted, so through the app this is a second attempt to void a payment someone has already
+  // voided. A draft receipt against invoices (made on Cash Receipts, where it is posted or deleted) is on
+  // Payments In too, with nothing offered; sent here by a direct call it gets the same code.
+  locked: 'This payment cannot be voided as it now stands: it has already been voided, or it is still a draft.',
   missing: 'The account or an invoice on this payment no longer exists.',
 } as const;
 
