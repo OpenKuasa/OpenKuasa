@@ -8,7 +8,7 @@ import { listAccounts } from '@/lib/finance/money';
 
 // Bank and cash accounts against the hosted database, through the app's own
 // data layer with a real client. Run by the controller only, after
-// 20261112110000_bendahara_bank_account_rules is applied: until then a member's
+// 20261114110000_bendahara_bank_account_rules is applied: until then a member's
 // opening balance is taken and most of this file fails. What each role may
 // and may not do, at length, is proved by
 // supabase/tests/bendahara_bank_accounts_check.sql, which acts as each of them.

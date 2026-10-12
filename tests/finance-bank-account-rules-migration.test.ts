@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
 const DIR = join(__dirname, '..', 'supabase', 'migrations');
-const NAME = '20261112110000_bendahara_bank_account_rules.sql';
+const NAME = '20261114110000_bendahara_bank_account_rules.sql';
 /** The statements of a file, without its comments. */
 const sql = (name: string) =>
   readFileSync(join(DIR, name), 'utf8')

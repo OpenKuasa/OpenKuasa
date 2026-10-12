@@ -757,7 +757,7 @@ at `aal1` with a verified factor also gets `FIN14` on an insert with an opening
 balance, which is why the sentence for it does not say the person is not an
 owner.
 
-What the database holds an account to (`20261112110000_bendahara_bank_account_rules`):
+What the database holds an account to (`20261114110000_bendahara_bank_account_rules`):
 
 - **An opening balance is an owner's or admin's.** Adding an account with
   one, changing an account's opening balance or opening date, and deleting an

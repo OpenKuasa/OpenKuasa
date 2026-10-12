@@ -1,5 +1,5 @@
 -- Bendahara accounts check. Run it after
--- 20261112110000_bendahara_bank_account_rules.sql, in the same transaction for a
+-- 20261114110000_bendahara_bank_account_rules.sql, in the same transaction for a
 -- dry run, or by itself once the migration is applied. It needs every finance
 -- migration before that one too. It goes through adding, changing, archiving
 -- and deleting a bank or cash account as an owner, an admin, an editor (the
