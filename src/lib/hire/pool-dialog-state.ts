@@ -99,6 +99,12 @@ export function pickerView(people: PickerPerson[], query: string): { rows: Picke
 export const personLine = (person: Pick<PickerPerson, 'headline' | 'location'>) =>
   [person.headline, person.location].filter(Boolean).join(' · ');
 
+/**
+ * Whether the picker is open after something asked for `wanted` (Escape, Done and a click outside all ask for
+ * false). While an add is being saved it stays open: closed, it could not show that add's refusal.
+ */
+export const pickerOpenAfter = (wanted: boolean, adding: boolean): boolean => wanted || adding;
+
 /** After an add: the id of the next row down that is still to be added, or null (focus then goes to the search field). */
 export function nextAddFocus(rows: PickerPerson[], added: Record<string, unknown>, justAdded: string): string | null {
   const at = rows.findIndex((row) => row.id === justAdded);

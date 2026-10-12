@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CHOOSE_A_JOB, NO_JOBS, PICKER_LOADING, PICKER_ROWS, REMOVE_BODY, SHORTLISTED_NOTE, addInput, addLabel, addName, addToPoolInput,
   addedLabel, boardPoolLine, boxSent, changeResult, followAddress, fromOutside, searchBox, jobOption, moveBody, moveInput, moveLabel, moveTitle, nextAddFocus, personLine,
-  pickerFrom, pickerMatches, pickerView, removeInput, removeLabel, removeTitle, searchHref, shortlistedNote, statusChangeInput,
+  pickerFrom, pickerMatches, pickerOpenAfter, pickerView, removeInput, removeLabel, removeTitle, searchHref, shortlistedNote, statusChangeInput,
 } from '@/lib/hire/pool-dialog-state';
 
 const A = '11111111-1111-4111-8111-111111111111';
@@ -89,6 +89,14 @@ describe('the picker', () => {
     expect(personLine(people[0])).toBe('Warehouse Supervisor · Klang');
     expect(personLine(people[1])).toBe('Driver');
     expect(personLine(people[2])).toBe('');
+  });
+  it('stays open while an add is being saved, whatever asked it to close, and closes again once the add has settled', () => {
+    // Escape, Done and a click outside all ask the same thing: open = false.
+    expect(pickerOpenAfter(false, true)).toBe(true);
+    expect(pickerOpenAfter(false, false)).toBe(false);
+    // Opening is never held back.
+    expect(pickerOpenAfter(true, false)).toBe(true);
+    expect(pickerOpenAfter(true, true)).toBe(true);
   });
   it('after an add, focus goes to the next row still to be added, or to the search field (null)', () => {
     expect(nextAddFocus(people, {}, '1')).toBe('2');

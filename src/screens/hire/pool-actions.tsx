@@ -13,7 +13,7 @@ import {
 import {
   CHOOSE_A_JOB, NO_JOBS, PICKER_LOADING, REMOVE_BODY, addInput, addLabel, addName, addToPoolInput, addedLabel, boxSent,
   changeResult, followAddress, fromOutside, searchBox, jobOption, moveBody, moveInput, moveLabel, moveTitle, nextAddFocus, personLine, pickerFrom, pickerView, removeInput,
-  removeLabel, removeTitle, searchHref, shortlistedNote, statusChangeInput, type PickerState, type PoolJob,
+  pickerOpenAfter, removeLabel, removeTitle, searchHref, shortlistedNote, statusChangeInput, type PickerState, type PoolJob,
 } from '@/lib/hire/pool-dialog-state';
 import { cn } from '@/lib/utils';
 import { DeleteDialog, announceDeletion, claimResult, useNewest } from '@/screens/hire/delete-dialog';
@@ -260,7 +260,12 @@ export function PoolFooter({ line, className }: { line: string; className?: stri
  * starts by asking who can be added. One add at a time; the dialog stays open,
  * so several people can be added in a row.
  */
-function PickerBody() {
+function PickerBody({
+  onBusy,
+}: {
+  /** Told true at the press and false at the answer, so the dialog lets Escape, Done and a click outside do nothing meanwhile. */
+  onBusy: (busy: boolean) => void;
+}) {
   const [state, setState] = useState<PickerState>(PICKER_LOADING);
   const [attempt, setAttempt] = useState(0);
   const [status, setStatus] = useState<InPool>('available');
@@ -302,6 +307,7 @@ function PickerBody() {
   function add(person: PickerPerson, rows: PickerPerson[]) {
     if (inFlight.current) return;
     inFlight.current = true;
+    onBusy(true);
     setAdding(person.id);
     setRefused((map) => without(map, person.id));
     // Cleared first, so the same sentence twice in a row is announced twice.
@@ -324,6 +330,7 @@ function PickerBody() {
         setRefused((map) => ({ ...map, [person.id]: POOL_NOT_SENT }));
       } finally {
         inFlight.current = false;
+        onBusy(false);
         setAdding(null);
       }
     });
@@ -425,7 +432,8 @@ function PickerBody() {
       <p aria-live="polite" className={cn(HELP, !view?.line && 'sr-only')}>{view?.line ?? ''}</p>
       <div className="flex justify-end">
         <Dialog.Close asChild>
-          <Button type="button" size="sm" className={TARGET}>Done</Button>
+          {/* While an add is being saved it stays focusable and says it is waiting; the dialog ignores the press. */}
+          <Button type="button" size="sm" className={cn(TARGET, WAITING)} aria-disabled={adding !== null || undefined}>Done</Button>
         </Dialog.Close>
       </div>
     </div>
@@ -440,13 +448,15 @@ function PickerBody() {
 export function AddToPool() {
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
+  /** True while an add is being saved: Escape, Done and a click outside then do nothing, so a refusal is not lost. */
+  const busy = useRef(false);
   return (
     <>
       <Button ref={button} type="button" size="sm" className={TARGET} onClick={() => setOpen(true)}>
         <Plus className="size-4" aria-hidden />
         Add to Pool
       </Button>
-      <Dialog.Root open={open} onOpenChange={setOpen}>
+      <Dialog.Root open={open} onOpenChange={(next) => setOpen(pickerOpenAfter(next, busy.current))}>
         <Dialog.Portal>
           <Dialog.Overlay className={OVERLAY_CLASS} />
           <Dialog.Content
@@ -463,7 +473,13 @@ export function AddToPool() {
             <Dialog.Description className="mb-3 text-sm text-muted-foreground">
               People on file who are not in the pool yet.
             </Dialog.Description>
-            {open ? <PickerBody /> : null}
+            {open ? (
+              <PickerBody
+                onBusy={(value) => {
+                  busy.current = value;
+                }}
+              />
+            ) : null}
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
