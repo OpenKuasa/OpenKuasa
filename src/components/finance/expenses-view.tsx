@@ -32,15 +32,18 @@ import {
 import { csvFileName } from '@/lib/finance/csv';
 import {
   type ExpenseAction,
+  type QuestionPart,
   type WrittenExpense,
   expenseActions,
+  expenseControls,
   expenseHiddenNote,
   expenseName,
   expensePaymentNote,
+  expenseQuestion,
   isPartPaid,
   writtenExpenseTitle,
 } from '@/lib/finance/expense-form';
-import type { ExpenseCategory, ExpenseDisplayStatus, ExpenseRow } from '@/lib/finance/expenses';
+import { EXPENSE_MESSAGES, type ExpenseCategory, type ExpenseDisplayStatus, type ExpenseRow } from '@/lib/finance/expenses';
 import { rm } from '@/lib/finance/format';
 import type { FinResult } from '@/lib/finance/result';
 import { LATEST_ROWS, displayDate } from '@/lib/finance/view-helpers';
@@ -124,7 +127,7 @@ export function ExpensesView({
     ? expenseHiddenNote(written, matching.some((e) => e.id === written.id), shown.some((e) => e.id === written.id))
     : null;
 
-  const columns = writer ? 7 : 6;
+  const { newButton, actionsColumn, columns } = expenseControls(Boolean(writer));
   const asking = open && open.kind !== 'form' ? open : null;
   // The form holds what was typed, so nothing else opens over it: it is closed with its own Cancel first.
   const locked = confirm.pending || open?.kind === 'form';
@@ -136,6 +139,10 @@ export function ExpensesView({
     confirm.clear();
     setWritten(null);
     setOpen(next);
+  };
+  /** Forgets an earlier write when the list changes under a note that is not showing, so a note never turns up later by itself. */
+  const listChanged = () => {
+    if (!hiddenNote) setWritten(null);
   };
   /** Closes whatever is open, and the message that went with it. */
   const close = () => {
@@ -173,14 +180,31 @@ export function ExpensesView({
     }
   };
 
+  /** Runs a decision on the expense as the row shows it now. If it was changed since, the question closes and the refreshed row says what it holds. */
+  const decide = (row: ExpenseRow, call: (input: unknown) => Promise<FinResult<{ id: string }>>, status: 'approved' | 'rejected') =>
+    confirm.run(
+      async () => {
+        const result = await call({ id: row.id, updated_at: row.updated_at });
+        if (!result.ok && result.error === EXPENSE_MESSAGES.changed) setOpen(null);
+        return result;
+      },
+      () => closeSaying(decided(row, status)),
+    );
+
+  const words = (parts: QuestionPart[]) =>
+    parts.map((part, i) =>
+      part.strong ? (
+        <span key={i} className="font-medium">
+          {part.text}
+        </span>
+      ) : (
+        part.text
+      ),
+    );
+
   const question = (row: ExpenseRow) => {
     if (!writer || !asking || asking.row.id !== row.id) return null;
     const { actions } = writer;
-    const what = (
-      <>
-        <span className="font-medium">{rm(row.amount)}</span> to <span className="font-medium">{row.vendor_name}</span>
-      </>
-    );
     if (asking.kind === 'approve') {
       return (
         <ConfirmRow
@@ -193,11 +217,10 @@ export function ExpensesView({
           pendingLabel="Approving…"
           pending={confirm.pending}
           error={confirm.error}
-          onConfirm={() => confirm.run(() => actions.approve({ id: row.id }), () => closeSaying(decided(row, 'approved')))}
+          onConfirm={() => decide(row, actions.approve, 'approved')}
           onCancel={close}
         >
-          Approve the expense of {what}, dated {displayDate(row.expense_date)}? It is then locked: it can be paid, and only
-          rejected while nothing has been paid.
+          {words(expenseQuestion('approve', row))}
         </ConfirmRow>
       );
     }
@@ -212,11 +235,10 @@ export function ExpensesView({
           pendingLabel="Rejecting…"
           pending={confirm.pending}
           error={confirm.error}
-          onConfirm={() => confirm.run(() => actions.reject({ id: row.id }), () => closeSaying(decided(row, 'rejected')))}
+          onConfirm={() => decide(row, actions.reject, 'rejected')}
           onCancel={close}
         >
-          {row.status === 'approved' ? 'Reject this approved expense of ' : 'Reject the expense of '}
-          {what}? It stays in the list as Rejected. Whoever entered it can edit it and send it again, or delete it.
+          {words(expenseQuestion('reject', row))}
         </ConfirmRow>
       );
     }
@@ -232,7 +254,7 @@ export function ExpensesView({
         onConfirm={() => confirm.run(() => actions.remove({ id: row.id }), close)}
         onCancel={close}
       >
-        Delete the expense of {what}? This cannot be undone.
+        {words(expenseQuestion('delete', row))}
       </ConfirmRow>
     );
   };
@@ -243,7 +265,7 @@ export function ExpensesView({
         title="Expenses"
         subtitle="Business expenses and spending, Saudara."
         actions={
-          writer ? (
+          newButton ? (
             <Button
               size="sm"
               aria-expanded={open?.kind === 'form'}
@@ -321,10 +343,19 @@ export function ExpensesView({
                 placeholder="Search vendors or categories…"
                 className="pl-8"
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => {
+                  listChanged();
+                  setQuery(e.target.value);
+                }}
               />
             </div>
-            <Select value={chosen} onValueChange={setCategory}>
+            <Select
+              value={chosen}
+              onValueChange={(v) => {
+                listChanged();
+                setCategory(v);
+              }}
+            >
               <SelectTrigger className="w-44" aria-label="Category">
                 <SelectValue />
               </SelectTrigger>
@@ -337,7 +368,13 @@ export function ExpensesView({
                 ))}
               </SelectContent>
             </Select>
-            <Select value={filter} onValueChange={(v) => setFilter(v as ExpenseFilter)}>
+            <Select
+              value={filter}
+              onValueChange={(v) => {
+                listChanged();
+                setFilter(v as ExpenseFilter);
+              }}
+            >
               <SelectTrigger className="w-44" aria-label="Status">
                 <SelectValue />
               </SelectTrigger>
@@ -358,8 +395,8 @@ export function ExpensesView({
               <Download className="size-4" />
               Export
             </Button>
-            {/* The question's own message shows in its row; here only while its row is out of view. */}
-            {confirm.error && asking && !askingInView ? (
+            {/* The question's own message shows in its row; here when its row is out of view or the question has closed. */}
+            {confirm.error && !(asking && askingInView) ? (
               <p role="alert" className="text-sm text-destructive">
                 {confirm.error}
               </p>
@@ -375,8 +412,8 @@ export function ExpensesView({
                   <TableHead className="text-right">Amount</TableHead>
                   <TableHead>Method</TableHead>
                   <TableHead>Status</TableHead>
-                  {writer ? (
-                    <TableHead className="w-10">
+                  {actionsColumn ? (
+                    <TableHead className="sticky right-0 w-10 bg-muted">
                       <span className="sr-only">Actions</span>
                     </TableHead>
                   ) : null}
@@ -401,13 +438,13 @@ export function ExpensesView({
                   return (
                     <TableRow key={e.id} className={cn(e.display_status === 'rejected' && 'opacity-60')}>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(e.expense_date)}</TableCell>
-                      <TableCell className="min-w-28 whitespace-normal break-words font-medium">{e.category_name}</TableCell>
+                      <TableCell className="min-w-24 whitespace-normal break-words font-medium">{e.category_name}</TableCell>
                       {/* A long vendor name wraps; it is never cut off behind a tooltip. */}
-                      <TableCell className="min-w-36 max-w-72 whitespace-normal break-words">{e.vendor_name}</TableCell>
+                      <TableCell className="min-w-28 max-w-72 whitespace-normal break-words">{e.vendor_name}</TableCell>
                       <TableCell className="text-right tabular-nums">
                         <span className="whitespace-nowrap">{rm(e.amount)}</span>
                         {payments ? (
-                          <span className="ml-auto block w-48 whitespace-normal text-xs text-muted-foreground">{payments}</span>
+                          <span className="ml-auto block w-36 whitespace-normal text-xs text-muted-foreground">{payments}</span>
                         ) : null}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{expenseMethod(e)}</TableCell>
@@ -424,8 +461,8 @@ export function ExpensesView({
                           </span>
                         </span>
                       </TableCell>
-                      {writer ? (
-                        <TableCell>
+                      {actionsColumn ? (
+                        <TableCell className="sticky right-0 bg-card">
                           {items.length ? (
                             // RowMenu has no disabled prop; an inert wrapper keeps its button from being used while an action runs or the form is open.
                             <span inert={locked} className={cn(locked && 'opacity-50')}>

@@ -91,7 +91,18 @@ export function expenseFormError(form: ExpenseForm): string | null {
   if (!form.categoryId) return M.category;
   if (form.vendor === TYPED_VENDOR && form.vendorName.trim() === '') return M.vendorMissing;
   const parsed = saveExpenseInput.safeParse(expensePayload(form));
+  // A wrong date is reported before a money box, as the form reads.
+  if (!parsed.success && parsed.error.issues[0]?.path[0] === 'expense_date') return parsed.error.issues[0].message;
+  const typed = moneyBoxError(form.amount) ?? moneyBoxError(form.sst);
+  if (typed) return typed;
   return parsed.success ? null : (parsed.error.issues[0]?.message ?? M.invalid);
+}
+
+/** What is wrong with the way a money box was typed, when it is not just "not a number": a comma or RM, or more than a sen. */
+function moneyBoxError(text: string): string | null {
+  if (/[,$]|^\s*(rm|myr)/i.test(text)) return M.amountFormat;
+  if (/\.\d{3,}\s*$/.test(text)) return M.amountDecimals;
+  return null;
 }
 
 /**
@@ -112,12 +123,13 @@ export function afterRefusedExpenseSave(form: ExpenseForm, error: string): { for
  */
 export function expenseSaveHint(canDecide: boolean, editing: ExpenseRow | undefined): string {
   if (canDecide) {
-    return editing
-      ? 'Saving approves this expense as you leave it: you are an owner or admin. To leave it waiting, cancel.'
-      : 'An expense you save is approved at once: you are an owner or admin.';
+    if (!editing) return 'An expense you save is approved at once: you are an owner or admin.';
+    const leave = editing.status === 'rejected' ? 'rejected' : 'waiting';
+    return `Saving approves this expense as you leave it: you are an owner or admin. To leave it ${leave}, cancel.`;
   }
   if (editing?.status === 'rejected') return 'Saving sends this expense for approval again. An owner or admin approves or rejects it.';
-  return 'Your expense waits as Pending approval until an owner or admin approves it. Until then anyone who may edit can change or delete it.';
+  // Not "your": the form does not know who entered an expense it is changing.
+  return 'This expense waits as Pending approval until an owner or admin approves it. Until then anyone who may edit can change or delete it.';
 }
 
 /* ---- the row ---------------------------------------------------------- */
@@ -141,6 +153,41 @@ export function expenseActions(row: ExpenseRow, canDecide: boolean): ExpenseActi
   if (row.status === 'pending') return canDecide ? ['edit', 'approve', 'reject', 'delete'] : ['edit', 'delete'];
   if (row.status === 'rejected') return ['edit', 'delete'];
   return canDecide && row.paid === 0 && row.held === 0 ? ['reject'] : [];
+}
+
+/** What the Expenses screen draws for someone who may write and for someone who may not. */
+export function expenseControls(canWrite: boolean) {
+  return { newButton: canWrite, actionsColumn: canWrite, columns: canWrite ? 7 : 6 };
+}
+
+/** One run of a question's words; `strong` ones are drawn in bold. */
+export type QuestionPart = { text: string; strong?: boolean };
+
+/**
+ * The question asked in an expense's row before it is approved, rejected or deleted, in the words the owner
+ * approved. The figures are the row's, as it is now.
+ */
+export function expenseQuestion(kind: 'approve' | 'reject' | 'delete', row: ExpenseRow): QuestionPart[] {
+  const who = (before: string, after: string): QuestionPart[] => [
+    { text: before },
+    { text: rm(row.amount), strong: true },
+    { text: ' to ' },
+    { text: row.vendor_name, strong: true },
+    { text: after },
+  ];
+  if (kind === 'approve') {
+    return who(
+      'Approve the expense of ',
+      `, dated ${displayDate(row.expense_date)}? It is then locked: it can be paid, and only rejected while nothing has been paid.`,
+    );
+  }
+  if (kind === 'reject') {
+    return who(
+      row.status === 'approved' ? 'Reject this approved expense of ' : 'Reject the expense of ',
+      '? It stays in the list as Rejected. Whoever entered it can edit it and send it again, or delete it.',
+    );
+  }
+  return who('Delete the expense of ', '? This cannot be undone.');
 }
 
 /** How an expense is named in a question and to a screen reader: "the expense of RM 120.00 to Kedai Ali". */

@@ -176,14 +176,14 @@ export function ExpenseFormCard({
         ) : null}
         <div className="space-y-1.5 md:col-span-3">
           <Label htmlFor={`${id}-amount`}>Amount (RM), SST included</Label>
+          {/* A text box, like the SST: a number box hands back nothing for "1,200.50", and the form could not say why. */}
           <Input
             id={`${id}-amount`}
-            type="number"
+            type="text"
             inputMode="decimal"
-            min={0}
-            step="0.01"
             className="text-right tabular-nums"
-            onWheel={(e) => e.currentTarget.blur()}
+            placeholder="0.00"
+            autoComplete="off"
             value={form.amount}
             onChange={(e) => edit((f) => ({ ...f, amount: e.target.value }))}
           />

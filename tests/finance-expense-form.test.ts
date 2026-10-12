@@ -5,6 +5,8 @@ import {
   afterRefusedExpenseSave,
   editExpenseForm,
   expenseActions,
+  expenseControls,
+  expenseQuestion,
   expenseFormError,
   expenseHiddenNote,
   expenseName,
@@ -37,6 +39,7 @@ function row(over: Partial<ExpenseRow> = {}): ExpenseRow {
     held: 0,
     method: null,
     paid_on: null,
+    updated_at: '2026-10-05T09:00:00.123456+00:00',
     ...over,
   };
 }
@@ -72,10 +75,37 @@ describe('the form', () => {
   it('refuses an amount with a comma instead of reading it as another number', () => {
     const form = editExpenseForm(row());
     expect(Number.isNaN(expensePayload({ ...form, amount: '1,200.50' }).amount)).toBe(true);
-    expect(expenseFormError({ ...form, amount: '1,200.50' })).toBe('Enter an amount above 0.');
     expect(expenseFormError({ ...form, amount: '' })).toBe('Enter an amount above 0.');
-    expect(expenseFormError({ ...form, sst: '1,0' })).toBe('Enter the SST that is inside the amount: 0 or more.');
     expect(expenseFormError({ ...form, sst: 'six' })).toBe('Enter the SST that is inside the amount: 0 or more.');
+  });
+  it('says what is wrong with a comma or a currency in a money box, in both boxes', () => {
+    const form = editExpenseForm(row());
+    const format = 'Enter the amount as a number, without commas or RM: 1200.50.';
+    for (const typed of ['1,200.50', 'RM 1200', 'rm1200', 'RM1,200.50', '$20', 'MYR 20']) {
+      expect(expenseFormError({ ...form, amount: typed }), typed).toBe(format);
+    }
+    expect(expenseFormError({ ...form, sst: '1,0' })).toBe(format);
+    expect(expenseFormError({ ...form, sst: 'RM 6' })).toBe(format);
+    // Words that are not a number are still just not an amount.
+    expect(expenseFormError({ ...form, amount: 'lots' })).toBe('Enter an amount above 0.');
+  });
+  it('asks for two decimal places instead of rounding without a word', () => {
+    const form = editExpenseForm(row());
+    expect(expenseFormError({ ...form, amount: '12.345' })).toBe('Enter the amount to two decimal places.');
+    expect(expenseFormError({ ...form, amount: '12.3450' })).toBe('Enter the amount to two decimal places.');
+    expect(expenseFormError({ ...form, sst: '1.005' })).toBe('Enter the amount to two decimal places.');
+    expect(expenseFormError({ ...form, amount: '12.34', sst: '1.5' })).toBeNull();
+    expect(expenseFormError({ ...form, amount: '12.', sst: '.5' })).toBeNull();
+  });
+  it('refuses 0 and below for the amount, and below 0 for the SST', () => {
+    const form = editExpenseForm(row());
+    expect(expenseFormError({ ...form, amount: '0' })).toBe('Enter an amount above 0.');
+    expect(expenseFormError({ ...form, amount: '-5' })).toBe('Enter an amount above 0.');
+    expect(expenseFormError({ ...form, sst: '-1' })).toBe('Enter the SST that is inside the amount: 0 or more.');
+    expect(expenseFormError({ ...form, sst: '0' })).toBeNull();
+  });
+  it('reports a date that is wrong before a money box that is', () => {
+    expect(expenseFormError({ ...editExpenseForm(row()), date: '', amount: '1,200' })).toBe('Enter a valid date.');
   });
   it('names the first thing wrong, in the order of the form', () => {
     const form = editExpenseForm(row());
@@ -99,8 +129,14 @@ describe('the form', () => {
   it('says what saving will do for this person', () => {
     expect(expenseSaveHint(true, undefined)).toBe('An expense you save is approved at once: you are an owner or admin.');
     expect(expenseSaveHint(true, row())).toBe('Saving approves this expense as you leave it: you are an owner or admin. To leave it waiting, cancel.');
-    expect(expenseSaveHint(false, undefined)).toContain('waits as Pending approval');
-    expect(expenseSaveHint(false, row())).toContain('waits as Pending approval');
+    // A rejected expense is not waiting: cancelling leaves it rejected.
+    expect(expenseSaveHint(true, row({ status: 'rejected', display_status: 'rejected' }))).toBe(
+      'Saving approves this expense as you leave it: you are an owner or admin. To leave it rejected, cancel.',
+    );
+    // The form cannot know whose expense it is, so it never says "your".
+    const waits = 'This expense waits as Pending approval until an owner or admin approves it. Until then anyone who may edit can change or delete it.';
+    expect(expenseSaveHint(false, undefined)).toBe(waits);
+    expect(expenseSaveHint(false, row())).toBe(waits);
     expect(expenseSaveHint(false, row({ status: 'rejected', display_status: 'rejected' }))).toBe(
       'Saving sends this expense for approval again. An owner or admin approves or rejects it.',
     );
@@ -137,6 +173,39 @@ describe('what a row offers', () => {
   });
 });
 
+describe('the questions asked in a row', () => {
+  const text = (parts: { text: string }[]) => parts.map((p) => p.text).join('');
+  const strong = (parts: { text: string; strong?: boolean }[]) => parts.filter((p) => p.strong).map((p) => p.text);
+  it('asks before approving, in the owner-approved words', () => {
+    const parts = expenseQuestion('approve', row());
+    expect(text(parts)).toBe(
+      'Approve the expense of RM 120.00 to Kedai Ali, dated 05 Oct 2026? It is then locked: it can be paid, and only rejected while nothing has been paid.',
+    );
+    expect(strong(parts)).toEqual(['RM 120.00', 'Kedai Ali']);
+  });
+  it('asks before rejecting, naming an approved expense as one', () => {
+    expect(text(expenseQuestion('reject', row()))).toBe(
+      'Reject the expense of RM 120.00 to Kedai Ali? It stays in the list as Rejected. Whoever entered it can edit it and send it again, or delete it.',
+    );
+    expect(text(expenseQuestion('reject', approved()))).toBe(
+      'Reject this approved expense of RM 120.00 to Kedai Ali? It stays in the list as Rejected. Whoever entered it can edit it and send it again, or delete it.',
+    );
+    expect(strong(expenseQuestion('reject', row()))).toEqual(['RM 120.00', 'Kedai Ali']);
+  });
+  it('asks before deleting', () => {
+    const parts = expenseQuestion('delete', row());
+    expect(text(parts)).toBe('Delete the expense of RM 120.00 to Kedai Ali? This cannot be undone.');
+    expect(strong(parts)).toEqual(['RM 120.00', 'Kedai Ali']);
+  });
+});
+
+describe('what the screen draws for whom', () => {
+  it('gives a person who may write the New expense button and the Actions column, and no one else', () => {
+    expect(expenseControls(true)).toEqual({ newButton: true, actionsColumn: true, columns: 7 });
+    expect(expenseControls(false)).toEqual({ newButton: false, actionsColumn: false, columns: 6 });
+  });
+});
+
 describe('an expense that is paid in part', () => {
   it('is an approved expense with something paid', () => {
     expect(isPartPaid(approved({ paid: 30 }))).toBe(true);
@@ -149,6 +218,8 @@ describe('an expense that is paid in part', () => {
     expect(expensePaymentNote(approved({ paid: 30 }))).toBe('RM 30.00 paid · RM 90.00 with no payment yet');
     expect(expensePaymentNote(approved({ held: 120 }))).toBe('RM 120.00 to be paid');
     expect(expensePaymentNote(approved({ paid: 100.1, held: 19.9 }))).toBe('RM 100.10 paid · RM 19.90 to be paid');
+    // More against it than it is worth (the database refuses that state): no negative remainder is printed.
+    expect(expensePaymentNote(approved({ paid: 100, held: 50 }))).toBe('RM 100.00 paid · RM 50.00 to be paid');
   });
   it('says nothing for an expense with no payment, a paid one, a pending one or a rejected one', () => {
     expect(expensePaymentNote(approved())).toBeNull();
