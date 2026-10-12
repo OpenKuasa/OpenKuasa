@@ -43,7 +43,7 @@ function cardIcons(source: string): { cards: number; icons: string[] } {
 const EXPECTED: Record<string, { cards: number; withIcon: number }> = {
   'accounts-view': { cards: 4, withIcon: 2 },
   'journals-view': { cards: 6, withIcon: 3 },
-  'reports-view': { cards: 10, withIcon: 6 },
+  'reports-view': { cards: 12, withIcon: 8 },
 };
 
 describe.each(Object.keys(EXPECTED))('the icons %s gives its cards', (file) => {

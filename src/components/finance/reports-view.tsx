@@ -2,7 +2,7 @@
 
 import { Fragment, useState } from 'react';
 import Link from 'next/link';
-import { BookOpen, ChartColumn, ChartPie, CircleCheck, Download, ListChecks, Scale, ShieldAlert, TrendingUp } from 'lucide-react';
+import { BookOpen, ChartColumn, ChartPie, CircleCheck, Clock, Download, Hourglass, ListChecks, Scale, ShieldAlert, TrendingUp, Wallet } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { BarGroup, DonutStat, type Series, type Slice } from '@/components/charts';
 import { downloadCsv } from '@/components/finance/download-csv';
@@ -17,17 +17,28 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { csvFileName } from '@/lib/finance/csv';
 import { rm, rmShort } from '@/lib/finance/format';
 import {
+  AGE_BUCKETS,
+  type Aged,
   type BalanceSheet,
+  type CashFlow,
+  type CashMovement,
   type MonthlyTotals,
+  type OpenDocument,
   type Period,
   type PeriodKey,
   type ProfitAndLoss,
   type ReportAccount,
   type StatementLine,
   type TrialBalance,
+  aged,
+  agedCsv,
   balanceSheet,
   balanceSheetCsv,
+  cashFlow,
+  cashFlowCsv,
   chartState,
+  creditSummary,
+  dateLabel,
   expenseBreakdown,
   isValidPeriod,
   monthEndLabel,
@@ -314,15 +325,185 @@ function TrialBalanceCard({ tb, period, today }: { tb: TrialBalance; period: Per
   );
 }
 
+function CashFlowCard({ cf, period, today }: { cf: CashFlow; period: Period; today: string }) {
+  return (
+    <BentoCard
+      title="Cash Flow"
+      subtitle={periodLabel(period)}
+      icon={Wallet}
+      flush
+      className="col-span-2 md:col-span-12"
+      action={
+        <Button variant="outline" size="sm" onClick={() => downloadCsv(csvFileName('cash-flow', today), cashFlowCsv(cf, period))}>
+          <Download className="size-4" />
+          Export CSV
+        </Button>
+      }
+    >
+      <div className="overflow-x-auto">
+        <Table aria-label="Cash flow">
+          <TableHeader>
+            <TableRow className="bg-muted/40">
+              <TableHead>Line</TableHead>
+              <TableHead className="text-right">In</TableHead>
+              <TableHead className="text-right">Out</TableHead>
+              <TableHead className="text-right">Net</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow>
+              <TableCell className="font-semibold">Opening cash</TableCell>
+              <TableCell />
+              <TableCell />
+              <TableCell className={cn(money, 'font-semibold')}>{rm(cf.opening)}</TableCell>
+            </TableRow>
+            {cf.lines.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={4} className="py-6 text-center text-muted-foreground">
+                  No money moved in this period.
+                </TableCell>
+              </TableRow>
+            ) : null}
+            {cf.lines.map((l) => (
+              <TableRow key={l.key}>
+                <TableCell className="font-medium">{l.label}</TableCell>
+                <TableCell className={money}>{l.in > 0 ? rm(l.in) : ''}</TableCell>
+                <TableCell className={money}>{l.out > 0 ? rm(l.out) : ''}</TableCell>
+                <TableCell className={money}>{rm(l.net)}</TableCell>
+              </TableRow>
+            ))}
+            {cf.lines.length > 0 ? (
+              <TableRow className="border-t-2 hover:bg-transparent">
+                <TableCell className="font-semibold">Total</TableCell>
+                <TableCell className={cn(money, 'font-semibold')}>{rm(cf.totalIn)}</TableCell>
+                <TableCell className={cn(money, 'font-semibold')}>{rm(cf.totalOut)}</TableCell>
+                <TableCell className={cn(money, 'font-semibold')}>{rm(cf.net)}</TableCell>
+              </TableRow>
+            ) : null}
+            <TableRow className="border-t-2 hover:bg-transparent">
+              <TableCell className="font-semibold">Closing cash</TableCell>
+              <TableCell />
+              <TableCell />
+              <TableCell className={cn(money, 'font-semibold')}>{rm(cf.closing)}</TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </div>
+    </BentoCard>
+  );
+}
+
+/** An aged table for one side of the books: who owes the workspace, or whom it owes, by how late each amount is. */
+function AgedCard({
+  title,
+  receivable,
+  partyHeading,
+  href,
+  empty,
+  a,
+  today,
+  fileName,
+  note,
+}: {
+  title: string;
+  /** True for what customers owe, false for what the workspace owes. */
+  receivable: boolean;
+  partyHeading: 'Customer' | 'Supplier';
+  href: string;
+  empty: string;
+  a: Aged;
+  today: string;
+  fileName: string;
+  note?: string | null;
+}) {
+  return (
+    <BentoCard
+      title={title}
+      subtitle={`As at ${dateLabel(today)}`}
+      icon={receivable ? Clock : Hourglass}
+      flush
+      className="col-span-2 md:col-span-12"
+      action={
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={a.rows.length === 0}
+          onClick={() => downloadCsv(csvFileName(fileName, today), agedCsv(a, today, partyHeading))}
+        >
+          <Download className="size-4" />
+          Export CSV
+        </Button>
+      }
+    >
+      {a.rows.length > 0 ? <p className="px-4 pb-3 text-sm font-medium">{rm(a.overdue)} overdue of {rm(a.total)} owed</p> : null}
+      <div className="overflow-x-auto">
+        <Table aria-label={title}>
+          <TableHeader>
+            <TableRow className="bg-muted/40">
+              <TableHead>{partyHeading}</TableHead>
+              {AGE_BUCKETS.map((b) => (
+                <TableHead key={b.key} className="whitespace-nowrap text-right">
+                  {b.label}
+                </TableHead>
+              ))}
+              <TableHead className="text-right">Total</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {a.rows.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={AGE_BUCKETS.length + 2} className="py-6 text-center text-muted-foreground">
+                  {empty}
+                </TableCell>
+              </TableRow>
+            ) : null}
+            {a.rows.map((r) => (
+              <TableRow key={r.party_id}>
+                <TableCell className="whitespace-nowrap font-medium">
+                  <Link href={href} className="underline-offset-4 hover:underline">
+                    {r.party_name}
+                  </Link>
+                </TableCell>
+                {AGE_BUCKETS.map((b) => (
+                  <TableCell key={b.key} className={money}>
+                    {r.buckets[b.key] > 0 ? rm(r.buckets[b.key]) : ''}
+                  </TableCell>
+                ))}
+                <TableCell className={cn(money, 'font-semibold')}>{rm(r.total)}</TableCell>
+              </TableRow>
+            ))}
+            {a.rows.length > 0 ? (
+              <TableRow className="border-t-2 hover:bg-transparent">
+                <TableCell className="font-semibold">Total</TableCell>
+                {AGE_BUCKETS.map((b) => (
+                  <TableCell key={b.key} className={cn(money, 'font-semibold')}>
+                    {rm(a.totals[b.key])}
+                  </TableCell>
+                ))}
+                <TableCell className={cn(money, 'font-semibold')}>{rm(a.total)}</TableCell>
+              </TableRow>
+            ) : null}
+          </TableBody>
+        </Table>
+      </div>
+      {note ? <p className="border-t px-4 py-3 text-sm text-muted-foreground">{note}</p> : null}
+    </BentoCard>
+  );
+}
+
 /**
- * Reports: the profit and loss, balance sheet and trial balance worked out from the ledger for a period, with
- * the month-by-month revenue and expenses, the expense categories and a CSV file of each statement. It is read
+ * Reports: the profit and loss, balance sheet, trial balance and cash flow worked out from the ledger for a period,
+ * with the month-by-month revenue and expenses, the expense categories and a CSV file of each statement, and the
+ * aged receivables and payables as at today, which the period does not change. It is read
  * only. The server sends the accounts and the books added up by account and month, never the ledger's lines;
  * the period is chosen here, so changing it asks the server for nothing.
  */
 export function ReportsView({
   accounts,
   totals,
+  cash,
+  receivables,
+  payables,
   unassigned = 0,
   today: serverToday,
   followClock = true,
@@ -330,6 +511,12 @@ export function ReportsView({
   accounts: ReportAccount[];
   /** Every account's debits and credits by month (monthlyTotals). */
   totals: MonthlyTotals;
+  /** The money into and out of the bank and cash accounts by month and source (cashMovements). */
+  cash: CashMovement[];
+  /** What each posted invoice still owes the workspace; one in credit has a balance below zero. As at today, not the period. */
+  receivables: OpenDocument[];
+  /** What each posted supplier bill still owes. As at today, not the period. */
+  payables: OpenDocument[];
   /** Ledger lines left out because their account could not be found. */
   unassigned?: number;
   /** The date the periods are worked out from, YYYY-MM-DD. */
@@ -369,6 +556,14 @@ export function ReportsView({
     color: s.key === 'other' ? 'var(--muted-foreground)' : (SLICE_COLORS[i] ?? 'var(--muted-foreground)'),
   }));
   const chart = chartState(pl, period);
+  const cf = cashFlow(cash, period);
+  const receivable = aged(receivables, today);
+  const payable = aged(payables, today);
+  const credit = creditSummary(receivables);
+  const creditNote =
+    credit.count > 0
+      ? `${credit.count === 1 ? '1 customer is' : `${credit.count} customers are`} in credit by ${rm(credit.total)} in total, which is not counted above.`
+      : null;
 
   return (
     <ScreenContainer>
@@ -464,6 +659,29 @@ export function ReportsView({
             <Link href="/finance/journals">Open the general ledger</Link>
           </Button>
         </BentoCard>
+
+        <CashFlowCard cf={cf} period={period} today={today} />
+        <AgedCard
+          title="Aged Receivables"
+          receivable
+          partyHeading="Customer"
+          href="/finance/invoices"
+          empty="Nobody owes you anything."
+          a={receivable}
+          today={today}
+          fileName="aged-receivables"
+          note={creditNote}
+        />
+        <AgedCard
+          title="Aged Payables"
+          receivable={false}
+          partyHeading="Supplier"
+          href="/finance/supplier-bills"
+          empty="You owe nothing on supplier bills."
+          a={payable}
+          today={today}
+          fileName="aged-payables"
+        />
       </BentoGrid>
 
       {unassigned > 0 ? (
