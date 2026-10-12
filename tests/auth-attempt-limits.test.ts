@@ -39,6 +39,10 @@ vi.mock('@/lib/security/limits', () => ({
   demoLimited: mocks.demoLimited,
 }));
 vi.mock('@/lib/supabase/server', () => ({ createClient: mocks.createClient }));
+// The current-password check signs in on a client of its own, away from the session.
+vi.mock('@/lib/supabase/anonymous', () => ({
+  createAnonymousClient: () => ({ auth: mocks.auth }),
+}));
 vi.mock('next/headers', () => ({
   cookies: async () => ({ set: mocks.cookieSet }),
   headers: async () => ({ get: (name: string) => (name === 'origin' ? 'https://app.example' : null) }),
