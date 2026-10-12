@@ -2675,8 +2675,8 @@ describe('interview changes', () => {
    * that store; and Tuah's team is given the prepared changes AS THE SERVER RECORDED THEM, never as the conversation
    * describes them. The store lives as long as the conversation, as the database's does.
    */
-  const asRoute = (mode: 'lekir' | 'tuah' | 'team', access: Access): RouteRunner => {
-    const store = memoryProposalStore();
+  type Store = ReturnType<typeof memoryProposalStore>;
+  const asRoute = (mode: 'lekir' | 'tuah' | 'team', access: Access, store: Store = memoryProposalStore()): RouteRunner => {
     return async (chat) => {
       const { convertToModelMessages } = await import('ai');
       const sent = clientMessages(chat) as typeof chat;
@@ -3172,6 +3172,22 @@ describe('interview changes', () => {
         // The same row, unmoved, goes through with its line.
         expect(await gateFor(turn)({ proposalId: 'p-old' }, 'c1')).toEqual({ type: 'user-approval', reason: LINE });
       });
+      it('a change of a kind held to one a turn whose record was already answered has no arguments left: said as no longer waiting, for all three kinds', async () => {
+        const NOT_WAITING =
+          'This change is no longer waiting for approval: it was already answered, it waited more than an hour, or it is not one that was prepared here. ' +
+          'Nothing was saved. If the user still wants it, prepare it again.';
+        const answered = [older, added, deletion, pooled].map((p) => ({ ...p, input: null }));
+        const proposals = new Map(answered.map((p) => [p.id, p]));
+        const messages = [user('x'), report('t0', [older, added, deletion, pooled]), user('Do them after all')];
+        const made = createTeamTools([hireProduct(world())], { transcript: '', proposals: proposals as never, names: {}, store: storeOf() }, messages);
+        for (const p of answered) {
+          expect(await (made.toolApproval!.applyChange as Gate)({ proposalId: p.id }, { toolCallId: `c-${p.id}`, messages }), p.action).toEqual({ type: 'denied', reason: NOT_WAITING });
+        }
+        // It was never shown in this turn, so it is not the turn's one: a change of that kind can still reach a card.
+        const live = createTeamTools([hireProduct(world())], { transcript: '', proposals: new Map<string, never>([['p-old', { ...older, input: null } as never], ['p-new', newer as never]]), names: {}, store: storeOf() }, messages);
+        await (live.toolApproval!.applyChange as Gate)({ proposalId: 'p-old' }, { toolCallId: 'c1', messages });
+        expect(await (live.toolApproval!.applyChange as Gate)({ proposalId: 'p-new' }, { toolCallId: 'c2', messages })).toEqual({ type: 'user-approval', reason: LINE_LATER });
+      });
       it('refuses at the card what it would have refused when preparing: two that read the same, and a failed read', async () => {
         const turn = [user('x'), report('t0', [older]), user('Do it')];
         expect(await gateFor(turn, world({ at: AT, twin: true, fail: false }))({ proposalId: 'p-old' }, 'c1')).toEqual({ type: 'denied', reason: LOOK_THE_SAME });
@@ -3482,6 +3498,36 @@ describe('interview changes', () => {
       expect(JSON.stringify(said.mock.calls)).not.toContain('putri@');
       said.mockRestore();
     });
+    it.each(agents)('%s: a card that could not be recorded was never shown, so it is not the turn\'s one: sent again in the same request, it gets its card', async (agent) => {
+      const NOT_PREPARED = 'Changes cannot be prepared right now, so nothing was put up for approval. Tell the user, and suggest trying again in a few minutes.';
+      for (const change of [
+        { tool: 'cancelInterview', input: { id: IV } },
+        { tool: 'deleteCandidate', input: { id: PERSON } },
+        { tool: 'setPoolStatus', input: { id: PERSON, status: 'passive' } },
+      ]) {
+        for (const fn of mocks) fn.mockReset();
+        const store = memoryProposalStore();
+        let failing = true;
+        // The first recording fails, as the database's does on an error; the next works.
+        const once = { ...store, rows: store.rows, record: async (p: Parameters<typeof store.record>[0]) => (failing ? ((failing = false), null) : store.record(p)) };
+        const messages: Model[] = [...listed, { role: 'user', content: 'Do it' }];
+        seen.calls = [];
+        seen.singleScript = [[change], [{ tool: 'listJobs', input: {} }, change]];
+        try {
+          const binding = approvalBinding(once as never, messages);
+          const result = agent === 'lekir'
+            ? runLekir(messages, world(), undefined, undefined, binding)
+            : runTuah(messages, reach(), undefined, undefined, null, null, null, world(), null, binding);
+          await result.consumeStream();
+          const content = ((await result.steps) as unknown as { content: Card[] }[]).flatMap((step) => step.content);
+          expect(content.filter((p) => p.type === 'tool-approval-response' && p.approved === false).map((p) => p.reason), change.tool).toEqual([NOT_PREPARED]);
+          expect(content.filter((p) => p.type === 'tool-approval-request' && !p.isAutomatic), change.tool).toHaveLength(1);
+          expect(store.rows.map((row) => [row.action, row.status]), change.tool).toEqual([[change.tool, 'pending']]);
+        } finally {
+          seen.singleScript = null;
+        }
+      }
+    });
     it.each(agents)('%s: an interview change, a deletion and a talent pool change each keep their own card in one turn', async (agent) => {
       const run = await request([[
         { tool: 'cancelInterview', input: { id: IV } },
@@ -3507,10 +3553,27 @@ describe('interview changes', () => {
   describe('through the user\'s answer', () => {
     const say = (id: string, text: string): UI => ({ id, role: 'user', parts: [{ type: 'text', text }] });
     type Runner = RouteRunner;
-    const runners: Record<'lekir' | 'tuah' | 'team', (access: Access) => Runner> = {
-      lekir: (access) => asRoute('lekir', access),
-      tuah: (access) => asRoute('tuah', access),
-      team: (access) => asRoute('team', access),
+    const runners: Record<'lekir' | 'tuah' | 'team', (access: Access, store?: Store) => Runner> = {
+      lekir: (access, store) => asRoute('lekir', access, store),
+      tuah: (access, store) => asRoute('tuah', access, store),
+      team: (access, store) => asRoute('team', access, store),
+    };
+    const NOT_WAITING = 'This change is no longer waiting for approval';
+    const NOT_CHECKED = 'This change could not be checked just now, so nothing was changed. Ask for it again in a moment.';
+    const listPeople: Call = { tool: 'listCandidates', input: {} };
+    /** One change of each kind held to one a turn, with the lookup its id comes from, what records it, and its refusal. */
+    const KINDS = [
+      { kind: 'an interview change', look: listAll, change: { tool: 'cancelInterview', input: { id: IV } } as Call, ran: interviewCancelled, one: ONE_INTERVIEW_CHANGE,
+        result: { ok: true, data: { id: IV, application_id: APP, candidate: WHO, job: JOB, message: 'Cancelled.', confirmed: true } } },
+      { kind: 'a deletion', look: listPeople, change: { tool: 'deleteCandidate', input: { id: PERSON } } as Call, ran: candidateDeleted, one: 'One deletion at a time. One is already prepared for approval.',
+        result: { ok: true, data: { id: PERSON, name: 'Zulaikha Tan Abdullah', message: 'Deleted.' } } },
+      { kind: 'a talent pool change', look: listPeople, change: { tool: 'setPoolStatus', input: { id: PERSON, status: 'passive' } } as Call, ran: poolSet, one: 'One talent pool change at a time. One is already prepared for approval.',
+        result: { ok: true, data: { id: PERSON, name: 'Zulaikha Tan Abdullah', message: 'Marked.' } } },
+    ];
+    const start = (k: (typeof KINDS)[number]) => {
+      reset();
+      for (const other of KINDS) other.ran.mockReset();
+      k.ran.mockResolvedValue(k.result);
     };
     /** `calls` is what the one agent's model calls, one list per step. The team's specialist follows `seen.workerScript`. */
     const exchange = async (chat: UI[], run: Runner, calls: Call[][] | null): Promise<UI[]> => {
@@ -3743,6 +3806,123 @@ describe('interview changes', () => {
           expect(seen.sent.length).toBeGreaterThan(2);
           expect(sent).not.toContain('This interview: ');
           expect(sent).not.toContain('Also scheduled for');
+        } finally {
+          seen.workerScript = null;
+        }
+      });
+
+      // The deletion's and the talent pool's rules between requests, with the interview's beside them, on the path
+      // production takes: one store for the whole conversation, and the team given the server's records.
+      it.each(KINDS)('$kind, with one store for the conversation: one a turn across requests; the same yes sent twice runs it once', async (k) => {
+        start(k);
+        const store = memoryProposalStore();
+        const run = runners[mode](world(), store);
+        seen.workerScript = own ? null : [k.look, k.change, k.change, 'answer'];
+        try {
+          const shown = await exchange([say('u1', 'Do it')], run, own ? [[k.look], [k.change]] : null);
+          expect(waiting(shown)).toHaveLength(1);
+          expect(store.rows.map((row) => [row.action, row.status])).toEqual([[k.change.tool, 'pending']]);
+          const yes = decide(shown, true);
+          // The request that carries the yes: it runs, and a second change of the kind in the same turn gets no card.
+          const after = await exchange(yes, run, own ? again(k.change) : null);
+          expect(k.ran).toHaveBeenCalledTimes(1);
+          expect(waiting(after)).toEqual([]);
+          if (own) expect(toolParts(after).filter((p) => p.approval?.isAutomatic).map((p) => p.approval?.reason)).toEqual([k.one]);
+          else {
+            expect(seen.refusals.length).toBeGreaterThan(0);
+            for (const refusal of seen.refusals) expect(refusal).toBe(k.one);
+          }
+          expect(store.rows.map((row) => row.status)).toEqual(['approved']);
+          // The same yes arrives a second time (a retry, a second tab): the record was taken, so nothing runs again.
+          seen.workerStep = 0;
+          seen.workerScript = own ? null : ['answer'];
+          await exchange(yes, run, own ? [] : null);
+          expect(k.ran).toHaveBeenCalledTimes(1);
+          expect(told(NOT_WAITING)).toBe(true);
+        } finally {
+          seen.workerScript = null;
+        }
+      });
+      it.each(KINDS)('$kind, with one store for the conversation: after a no, a yes for the same card runs nothing and says it is no longer waiting', async (k) => {
+        start(k);
+        const store = memoryProposalStore();
+        const run = runners[mode](world(), store);
+        seen.workerScript = own ? null : [k.look, k.change, 'answer'];
+        try {
+          const shown = await exchange([say('u1', 'Do it')], run, own ? [[k.look], [k.change]] : null);
+          expect(waiting(shown)).toHaveLength(1);
+          seen.workerStep = 0;
+          seen.workerScript = own ? null : ['answer'];
+          await exchange(decide(shown, false), run, own ? [] : null);
+          expect(store.rows.map((row) => [row.status, row.input])).toEqual([['rejected', null]]);
+          // A browser that now says the user approved that card.
+          await exchange(decide(shown, true), run, own ? [] : null);
+          expect(k.ran).not.toHaveBeenCalled();
+          expect(told(NOT_WAITING)).toBe(true);
+          // Said as what it is: not that the interview is gone, and not that it could not be checked.
+          expect(told('This interview no longer exists')).toBe(false);
+          expect(told('I could not check')).toBe(false);
+        } finally {
+          seen.workerScript = null;
+        }
+      });
+      it.each(KINDS)('$kind: when the server cannot read its record on the request that carries the yes, nothing runs; asked for again, it does', async (k) => {
+        if (own) return; // Only Tuah's team reads the records to gate: an agent that holds the tools gates on the call itself.
+        start(k);
+        const store = memoryProposalStore();
+        let failing = false;
+        // The read fails once, as the database's does on an error (it answers nothing), and the claim after it would work.
+        const flaky = { ...store, rows: store.rows, peek: async (ids: string[]) => (failing ? ((failing = false), new Map()) : store.peek(ids)) } as Store;
+        const run = runners[mode](world(), flaky);
+        seen.workerScript = [k.look, k.change, 'answer'];
+        try {
+          const shown = await exchange([say('u1', 'Do it')], run, null);
+          expect(waiting(shown)).toHaveLength(1);
+          failing = true;
+          seen.workerStep = 0;
+          seen.workerScript = ['answer'];
+          const after = await exchange(decide(shown, true), run, null);
+          // The last check never saw the record, so the change does not run, and its record is still waiting.
+          expect(failing).toBe(false);
+          expect(k.ran).not.toHaveBeenCalled();
+          expect(store.rows.map((row) => row.status)).toEqual(['pending']);
+          expect(told(NOT_CHECKED)).toBe(true);
+          // The user asks again: prepared again, shown, approved, and it runs once.
+          seen.workerStep = 0;
+          seen.workerScript = [k.look, k.change, 'answer'];
+          const again2 = await exchange([...after, say('u2', 'Try again')], run, null);
+          expect(waiting(again2)).toHaveLength(1);
+          seen.workerStep = 0;
+          seen.workerScript = ['answer'];
+          await exchange(decide(again2, true), run, null);
+          expect(k.ran).toHaveBeenCalledTimes(1);
+        } finally {
+          seen.workerScript = null;
+        }
+      });
+      it('a card whose record is gone still closed what was given for it: its link does not pass onto the next person\'s card', async () => {
+        if (own) return; // An agent that holds the tools knows a card by the tool's name, not by a record.
+        reset();
+        interviewScheduled.mockResolvedValue({ ok: true, data: { id: MADE_UP, application_id: APP, candidate: WHO, job: JOB, message: 'Scheduled.', confirmed: true } });
+        const first: Call = { tool: 'scheduleInterview', input: { ...NEW, place: LINK } };
+        const next: Call = { tool: 'scheduleInterview', input: { ...NEW, date: '2027-01-13', place: LINK } };
+        const store = memoryProposalStore();
+        const run = runners[mode](world(), store);
+        seen.workerScript = [byName, first];
+        try {
+          const shown = await exchange([say('u1', `Schedule ${WHO} for 12 January at 3pm, video, on ${LINK}`)], run, null);
+          seen.workerStep = 0;
+          seen.workerScript = ['answer'];
+          const after = await exchange(decide(shown, true), run, null);
+          expect(interviewScheduled).toHaveBeenCalledTimes(1);
+          // A saved chat opened again after the server has cleared its old records.
+          store.rows.length = 0;
+          seen.workerStep = 0;
+          seen.refusals = [];
+          seen.workerScript = [byName, next, 'answer'];
+          const later = await exchange([...after, say('u2', 'Now one more on 13 January at 3pm, video')], run, null);
+          expect(waiting(later)).toEqual([]);
+          expect(seen.refusals[0]).toBe(LINK_NOT_GIVEN);
         } finally {
           seen.workerScript = null;
         }

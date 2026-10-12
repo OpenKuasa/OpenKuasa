@@ -463,14 +463,17 @@ function specialistTools(
         const rejected = rejectedByUser(messages);
         const wasInterviewCard = (call: { toolName?: unknown; toolCallId?: unknown; input?: unknown }) => {
           const id = call.toolName === APPLY_TOOL ? (call.input as { proposalId?: unknown } | null | undefined)?.proposalId : undefined;
-          // Whether it was an interview change is the server's record's to say.
-          const shown = typeof id === 'string' ? team.proposals.get(id) : undefined;
+          // Whether it was an interview change is the server's record's to say, when there is one. A record is not
+          // kept for ever (old ones are cleared, and a failed read answers nothing), and a missing record must
+          // never read as "no card was shown": the kind is then taken from the specialist's own report in the
+          // conversation, as it was before records were kept. That report comes back through the browser; a forged
+          // one could at most keep that user's own link, for a card that still shows it and still needs their yes.
+          const reported = typeof id === 'string' ? describedIn(messages).get(id) : undefined;
+          const shown = (typeof id === 'string' ? team.proposals.get(id) : undefined) ?? reported;
           if (!shown || !INTERVIEW_CHANGES.has(shown.action)) return false;
           if (!rejected.has(call.toolCallId)) return true;
           // A record that was answered no longer holds its arguments (proposal-store.ts). Which row the rejected
-          // card was about is then read from the specialist's own report in the conversation. That report comes
-          // back through the browser, and all it can do here is keep the user's own link for the same row.
-          const reported = describedIn(messages).get(shown.id);
+          // card was about is then read from the report too, and all it can do is keep the link for the same row.
           const was = shown.input ?? (reported?.action === shown.action ? reported.input : null);
           return !sameInterviewTarget(shown.action, was, name, input);
         };
