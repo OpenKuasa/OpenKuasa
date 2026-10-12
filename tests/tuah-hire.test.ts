@@ -2273,6 +2273,47 @@ describe('a change stopped after approval is not the turn\'s one, as the browser
     },
   ];
 
+  it('team: a lookup that said several match still holds a pool change back in the turn\'s second request', async () => {
+    const AMBIGUOUS =
+      'More than one match was found for that name, so no talent pool change was prepared. Stop here: say who matches and ask the user which one they mean. ' +
+      'Once the user has said who, they can ask for the change again.';
+    reset();
+    candidateSaved.mockReset();
+    candidateSaved.mockResolvedValue({ ok: true, data: { id: B, name: 'Kamal Ariffin' } });
+    const run = runners.team(world());
+    seen.workerScript = [
+      // First delegation: the letters fit both people (and others), and the pool change is refused.
+      { tool: 'listCandidates', input: { name: 'ari' } },
+      { tool: 'setPoolStatus', input: { id: A, status: 'passive' } },
+      'answer',
+      // Second delegation, same request: another kind of change, which gets a card. The request ends there.
+      { tool: 'listCandidates', input: {} },
+      { tool: 'updateCandidate', input: { id: B, location: 'Klang' } },
+      // The request that carries the user's yes: a clean lookup by full name, then the pool change again.
+      { tool: 'listCandidates', input: { name: 'Zarina binti Hashim' } },
+      { tool: 'setPoolStatus', input: { id: A, status: 'passive' } },
+    ];
+    try {
+      const shown = await exchange([say('u1', 'Mark Zarina passive, and move the other one to Klang')], run, null);
+      expect(seen.refusals).toEqual([AMBIGUOUS]);
+      expect(waiting(shown)).toHaveLength(1);
+      expect(asks(shown, waiting(shown)[0]).action).toBe('updateCandidate');
+      // The first specialist's report, as the browser keeps it, names both ids as ambiguous: that is what the next request reads.
+      const reports = toolParts(shown).filter((p) => p.type === 'tool-askLekir').map((p) => (p as { output?: { ambiguous?: string[] } }).output?.ambiguous);
+      expect(reports[0]).toEqual(expect.arrayContaining([A, B]));
+
+      seen.refusals = [];
+      const after = await exchange(decide(shown, true), run, null);
+      expect(candidateSaved).toHaveBeenCalledTimes(1);
+      expect(seen.refusals.length).toBeGreaterThan(0);
+      for (const refusal of seen.refusals) expect(refusal).toBe(AMBIGUOUS);
+      expect(waiting(after)).toEqual([]);
+      expect(poolSet).not.toHaveBeenCalled();
+    } finally {
+      seen.workerScript = null;
+    }
+  });
+
   describe.each(['lekir', 'tuah', 'team'] as const)('%s', (mode) => {
     it.each(cases)('$name: the second card can be approved and runs once', async ({ first, change, second, line, ran }) => {
       const { toToolStep } = await import('@/components/chat/tool-parts');

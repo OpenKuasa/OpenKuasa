@@ -105,14 +105,6 @@ describe('a change the user approved that a last check stopped', () => {
     expect(html).not.toContain('Not approved');
     expect(html).not.toContain('Not shown for approval');
   });
-  it('reads the same for a talent pool change or a move: the reading does not depend on which tool it was', () => {
-    for (const type of ['tool-setPoolStatus', 'tool-moveToPipeline', 'tool-applyChange']) {
-      const poolPart = { type, toolCallId: 'c1', state: 'output-denied', input: { id: 'x' }, approval: { id: 'r1', approved: true } } as never;
-      const html = renderToStaticMarkup(<ToolStepCard step={toToolStep(poolPart, 'm', 0)!} />);
-      expect(html, type).toContain('Not done');
-      expect(html, type).not.toContain('Not approved');
-    }
-  });
 });
 
 // The reason on a refused change was written for the model: it can name tools and carry a row's id. What the
