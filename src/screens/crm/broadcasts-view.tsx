@@ -253,7 +253,8 @@ function SendBroadcastRow({
   const busy = send.pending || test.pending;
   return (
     <TableRow className="bg-primary/5 hover:bg-primary/5">
-      <TableCell colSpan={colSpan}>
+      {/* Table cells do not wrap by default; a question this long has to. */}
+      <TableCell colSpan={colSpan} className="whitespace-normal">
         <div className="space-y-3 py-2">
           <p className="text-sm">
             Send <span className="font-medium">{broadcast.name}</span> to about{' '}
@@ -318,7 +319,8 @@ function ResumeBroadcastRow({
   const interrupted = broadcast.status === 'sending';
   return (
     <TableRow className="bg-primary/5 hover:bg-primary/5">
-      <TableCell colSpan={colSpan}>
+      {/* Table cells do not wrap by default; a question this long has to. */}
+      <TableCell colSpan={colSpan} className="whitespace-normal">
         <div className="space-y-3 py-2">
           <p className="text-sm">
             {interrupted ? (
@@ -568,7 +570,8 @@ function DeleteBroadcastRow({
   const { formAction, pending, error } = useCrmForm(action, onClose);
   return (
     <TableRow className="bg-destructive/5 hover:bg-destructive/5">
-      <TableCell colSpan={colSpan}>
+      {/* Table cells do not wrap by default; a question this long has to. */}
+      <TableCell colSpan={colSpan} className="whitespace-normal">
         <form action={formAction} className="flex flex-wrap items-center gap-3 py-1">
           <input type="hidden" name="broadcastId" value={broadcast.id} />
           <p className="min-w-0 flex-1 text-sm">
@@ -824,14 +827,21 @@ export function BroadcastsView({
                           <span
                             className={cn(
                               'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold',
-                              broadcast.status === 'sent'
+                              // Green only when it reached everyone; some or all failing is not a plain "Sent".
+                              broadcast.status === 'sent' && broadcast.failedCount === 0
                                 ? 'bg-emerald-500/15 text-emerald-600'
-                                : broadcast.status === 'sending'
-                                  ? 'bg-amber-500/15 text-amber-600'
-                                  : 'bg-muted text-muted-foreground',
+                                : broadcast.status === 'sent' && broadcast.sentCount === 0
+                                  ? 'bg-red-500/15 text-red-600'
+                                  : broadcast.status === 'draft'
+                                    ? 'bg-muted text-muted-foreground'
+                                    : 'bg-amber-500/15 text-amber-600',
                             )}
                           >
-                            {BROADCAST_STATUS_LABELS[broadcast.status]}
+                            {broadcast.status === 'sent' && broadcast.failedCount > 0
+                              ? broadcast.sentCount === 0
+                                ? 'Not sent'
+                                : 'Partly sent'
+                              : BROADCAST_STATUS_LABELS[broadcast.status]}
                           </span>
                           <p className="mt-0.5 text-xs text-muted-foreground">
                             {broadcast.status === 'sent' && broadcast.sentDay

@@ -294,7 +294,8 @@ function DeletePageRow({
   const { formAction, pending, error } = useCrmForm(action, onClose);
   return (
     <TableRow className="bg-destructive/5 hover:bg-destructive/5">
-      <TableCell colSpan={colSpan}>
+      {/* Table cells do not wrap by default; a question this long has to. */}
+      <TableCell colSpan={colSpan} className="whitespace-normal">
         <form action={formAction} className="flex flex-wrap items-center gap-3 py-1">
           <input type="hidden" name="pageId" value={page.id} />
           <p className="min-w-0 flex-1 text-sm">
