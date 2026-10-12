@@ -59,7 +59,7 @@ vi.mock('@/lib/finance/ledger', async (orig) => {
 
 const actions = await import('@/app/(app)/finance/actions');
 
-const LEDGER = ['/finance/chart-of-accounts', '/finance/journals'];
+const LEDGER = ['/finance/chart-of-accounts', '/finance/journals', '/finance/reports'];
 const FORBIDDEN = { ok: false, error: 'You do not have permission to make changes here.' };
 const NEEDS = { ok: false, error: 'Only an owner or admin can change accounts or journals.' };
 const GONE = { ok: false, error: 'That journal no longer exists.' };

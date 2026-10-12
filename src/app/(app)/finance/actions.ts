@@ -252,10 +252,10 @@ const CONTACT_PATHS = [
   '/finance/journals',
 ];
 const PRODUCT_PATHS = ['/finance/products'];
-// The two ledger screens read the books, which every document that posts, voids, pays or is deleted changes:
-// Chart of Accounts shows each account's balance and Journals lists the manual entries beside them. So every
-// list below that belongs to such an action ends with these two.
-const LEDGER_PATHS = ['/finance/chart-of-accounts', '/finance/journals'];
+// The three ledger screens read the books, which every document that posts, voids, pays or is deleted changes:
+// Chart of Accounts shows each account's balance, Journals lists the manual entries beside them and Reports
+// works the statements out of every line. So every list below that belongs to such an action ends with these three.
+const LEDGER_PATHS = ['/finance/chart-of-accounts', '/finance/journals', '/finance/reports'];
 // A bill or a payment changes what is owed, which Customers & Suppliers shows as Payable. A payment to a
 // supplier is also a voucher: Payment Vouchers lists every movement of money out.
 const PURCHASE_PATHS = [

@@ -74,7 +74,7 @@ const PURCHASES = [
   '/finance/supplier-bills', '/finance/payments-out', '/finance/customers-suppliers', '/finance/payment-vouchers',
   '/finance/banking',
   // Every document that posts, voids or pays also moves the books.
-  '/finance/chart-of-accounts', '/finance/journals',
+  '/finance/chart-of-accounts', '/finance/journals', '/finance/reports',
 ];
 const FORBIDDEN = { ok: false, error: 'You do not have permission to make changes here.' };
 const LOCKED =

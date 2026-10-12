@@ -69,7 +69,7 @@ const PATHS = [
   '/finance/supplier-bills', '/finance/payments-out', '/finance/customers-suppliers', '/finance/payment-vouchers',
   '/finance/banking',
   // Every document that posts, voids or pays also moves the books.
-  '/finance/chart-of-accounts', '/finance/journals',
+  '/finance/chart-of-accounts', '/finance/journals', '/finance/reports',
 ];
 // A bill saved, posted, voided or deleted also changes the billed total of the purchase order it is raised against.
 const BILL_PATHS = [...PATHS, '/finance/purchase-orders'];

@@ -24,7 +24,7 @@ const HELP_LINKS = [
   { label: 'Tutorials & Docs', href: '/account/docs' },
   { label: 'Contact Support', href: '/account/support' },
   { label: 'Product Changelog', href: '/account/changelog' },
-  { label: 'Feature Request', href: '/account/feedback' },
+  { label: 'Feature Requests', href: '/account/feedback' },
 ];
 
 export function AppTopbar({

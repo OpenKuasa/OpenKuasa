@@ -58,6 +58,7 @@ const PATHS = [
   '/finance/banking',
   '/finance/chart-of-accounts',
   '/finance/journals',
+  '/finance/reports',
 ];
 const FORBIDDEN = { ok: false, error: 'You do not have permission to make changes here.' };
 const NEEDS = { ok: false, error: 'Only an owner or admin can post, pay or void. Ask one of them to do this.' };
