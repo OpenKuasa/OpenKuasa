@@ -4,6 +4,11 @@ import { createClient } from '@/lib/supabase/server';
 import type { OrgRole } from './current-org';
 import { MFA_VERIFY_PATH } from './mfa';
 import { canSee, type Capability } from './permissions';
+import {
+  PREVIEW_BLOCKED_MESSAGE,
+  deploymentMode,
+  hasSupabaseEnv,
+} from './preview-mode';
 
 /** The signed-in person and their workspace, as shown in the app chrome. */
 export type Viewer = {
@@ -27,7 +32,8 @@ type ViewerUser = {
 };
 
 // Shown when no Supabase project is configured, so the app still runs
-// without credentials (see `updateSession`).
+// without credentials: in development, or in production only when preview
+// was asked for (see `preview-mode.ts` and `updateSession`).
 const PREVIEW_VIEWER: Viewer = {
   userId: 'preview',
   orgId: 'preview',
@@ -83,19 +89,19 @@ export function avatarPublicUrl(path: string | null | undefined): string | null 
   return `${base}/storage/v1/object/public/avatars/${path}`;
 }
 
-export function hasSupabaseEnv(): boolean {
-  return Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL &&
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-  );
-}
+export { hasSupabaseEnv };
 
 /**
  * Resolves the signed-in viewer for the app and account layouts. Sends
  * signed-out visitors to /login and users without a workspace to /onboarding.
  */
 export const getViewer = cache(async (): Promise<Viewer> => {
-  if (!hasSupabaseEnv()) return PREVIEW_VIEWER;
+  if (!hasSupabaseEnv()) {
+    // The proxy already answers 503 in this state; this covers any request
+    // that reaches a page without passing through it.
+    if (deploymentMode() === 'blocked') throw new Error(PREVIEW_BLOCKED_MESSAGE);
+    return PREVIEW_VIEWER;
+  }
 
   const supabase = await createClient();
   const {

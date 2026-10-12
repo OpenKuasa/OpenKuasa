@@ -89,7 +89,11 @@ async function main() {
 
   const server = spawn('pnpm', ['exec', 'next', 'start', '--hostname', host, '--port', port], {
     cwd: root,
-    env: process.env,
+    // `next start` is a production server, which refuses to serve the
+    // sample-data preview unless asked. This check is meant to run with or
+    // without a Supabase project, so ask for it; the flag does nothing when
+    // the project variables are set.
+    env: { OPENKUASA_PREVIEW: '1', ...process.env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
