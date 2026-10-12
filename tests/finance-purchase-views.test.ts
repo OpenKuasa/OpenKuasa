@@ -16,7 +16,7 @@ import {
   filterPurchaseOrders,
   filterRfqs,
   orderNotesForBills,
-  paymentsAgainstFlaggedOrders,
+  paymentRowsAgainstFlaggedOrders,
   paymentsCsv,
   paymentsView,
   purchaseOrderActions,
@@ -762,7 +762,7 @@ describe('orderNotesForBills', () => {
   });
 });
 
-describe('paymentsAgainstFlaggedOrders', () => {
+describe('paymentRowsAgainstFlaggedOrders', () => {
   const orders = [
     { id: 'po-1', po_no: 'PO-0003', total: 100, billed_total: 150, received_total: 100, over_billed: true, billed_over_received: false },
     { id: 'po-2', po_no: 'PO-0004', total: 100, billed_total: 50, received_total: 50, over_billed: false, billed_over_received: false },
@@ -772,25 +772,25 @@ describe('paymentsAgainstFlaggedOrders', () => {
     bill({ id: 'b2', purchase_order_id: 'po-2' }),
     bill({ id: 'b3' }),
   ];
-  const row = (bill_id: string, status: PaymentOutRow['status'], transaction_id: string) =>
-    payment({ bill_id, status, transaction_id });
+  const row = (bill_id: string, status: PaymentOutRow['status'], allocation_id: string, transaction_id = allocation_id) =>
+    payment({ bill_id, status, allocation_id, transaction_id });
 
-  it('marks a payment still to be paid whose bill has a flagged order', () => {
-    const rows = [row('b1', 'scheduled', 't1'), row('b1', 'pending_approval', 't2')];
-    expect([...paymentsAgainstFlaggedOrders(rows, bills, orders)].sort()).toEqual(['t1', 't2']);
+  it('marks a row still to be paid whose bill has a flagged order', () => {
+    const rows = [row('b1', 'scheduled', 'r1'), row('b1', 'pending_approval', 'r2')];
+    expect([...paymentRowsAgainstFlaggedOrders(rows, bills, orders)].sort()).toEqual(['r1', 'r2']);
   });
   it('marks nothing that is paid or void', () => {
-    expect(paymentsAgainstFlaggedOrders([row('b1', 'posted', 't1'), row('b1', 'void', 't2')], bills, orders).size).toBe(0);
+    expect(paymentRowsAgainstFlaggedOrders([row('b1', 'posted', 'r1'), row('b1', 'void', 'r2')], bills, orders).size).toBe(0);
   });
   it('marks nothing for a bill with a fine order, no order or no bill in the list', () => {
-    const rows = [row('b2', 'scheduled', 't1'), row('b3', 'scheduled', 't2'), row('b9', 'scheduled', 't3')];
-    expect(paymentsAgainstFlaggedOrders(rows, bills, orders).size).toBe(0);
+    const rows = [row('b2', 'scheduled', 'r1'), row('b3', 'scheduled', 'r2'), row('b9', 'scheduled', 'r3')];
+    expect(paymentRowsAgainstFlaggedOrders(rows, bills, orders).size).toBe(0);
   });
-  it('marks the whole payment when only one of its bills is flagged', () => {
-    const rows = [row('b2', 'scheduled', 't1'), row('b1', 'scheduled', 't1')];
-    expect([...paymentsAgainstFlaggedOrders(rows, bills, orders)]).toEqual(['t1']);
+  it('marks only the row of the bill that is over its order, in a payment over two bills', () => {
+    const rows = [row('b2', 'scheduled', 'r1', 't1'), row('b1', 'scheduled', 'r2', 't1')];
+    expect([...paymentRowsAgainstFlaggedOrders(rows, bills, orders)]).toEqual(['r2']);
   });
   it('marks nothing without orders', () => {
-    expect(paymentsAgainstFlaggedOrders([row('b1', 'scheduled', 't1')], bills, []).size).toBe(0);
+    expect(paymentRowsAgainstFlaggedOrders([row('b1', 'scheduled', 'r1')], bills, []).size).toBe(0);
   });
 });

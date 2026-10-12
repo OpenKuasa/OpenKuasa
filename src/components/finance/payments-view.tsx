@@ -42,7 +42,7 @@ import {
   displayDate,
   filterPayments,
   orderNotesForBills,
-  paymentsAgainstFlaggedOrders,
+  paymentRowsAgainstFlaggedOrders,
   paymentsCsv,
 } from '@/lib/finance/purchase-views';
 import type { FinResult } from '@/lib/finance/result';
@@ -114,7 +114,7 @@ export function PaymentsView({
   const askingInView = asking ? shown.some((r) => r.allocation_id === asking.row.allocation_id) : false;
 
   // Only a person who may pay is given the orders, so a reader sees no marks.
-  const flagged = writer ? paymentsAgainstFlaggedOrders(rows, writer.bills, writer.orders) : new Set<string>();
+  const flagged = writer ? paymentRowsAgainstFlaggedOrders(rows, writer.bills, writer.orders) : new Set<string>();
 
   const ask = (next: Exclude<Open, null>) => {
     confirm.clear();
@@ -418,10 +418,10 @@ export function PaymentsView({
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-right tabular-nums">
                         <span className="inline-flex items-center justify-end gap-1.5">
-                          {flagged.has(p.transaction_id) ? (
-                            <span title="A bill in this payment is over its purchase order" className="text-amber-600">
+                          {flagged.has(p.allocation_id) ? (
+                            <span title="This bill’s purchase order is billed over its total or for more than has arrived" className="text-amber-600">
                               <TriangleAlert className="size-4" aria-hidden />
-                              <span className="sr-only">A bill in this payment is over its purchase order</span>
+                              <span className="sr-only">This bill’s purchase order is billed over its total or for more than has arrived</span>
                             </span>
                           ) : null}
                           {rm(p.amount)}

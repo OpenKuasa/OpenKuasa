@@ -29,7 +29,7 @@ vi.mock('@/components/ui/select', () => {
 
 const TODAY = '2026-10-10';
 const SUPPLIER = '44444444-4444-4444-8444-444444444444';
-const MARK = 'A bill in this payment is over its purchase order';
+const MARK = "This bill’s purchase order is billed over its total or for more than has arrived";
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 
 const bill = (id: string, extra: Partial<BillListRow> = {}): BillListRow => ({
@@ -105,6 +105,14 @@ describe('the payments list', () => {
     expect(flaggedRow).toContain(MARK);
     const otherRow = html.split('<tr').find((r) => r.includes('BILL-b')) ?? '';
     expect(otherRow).not.toContain(MARK);
+  });
+
+  it('marks only the row of the bill that is over its order, in a payment over two bills', () => {
+    const rows = [payment(1, 'b'), { ...payment(1, 'a'), allocation_id: 'alloc-1b' }];
+    const html = render(rows, bills, [order()]);
+    expect(html.split(`title="${MARK}"`)).toHaveLength(2);
+    expect(html.split('<tr').find((r) => r.includes('BILL-a'))).toContain(MARK);
+    expect(html.split('<tr').find((r) => r.includes('BILL-b'))).not.toContain(MARK);
   });
 
   it('marks a billed-over-received order too', () => {

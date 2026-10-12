@@ -266,17 +266,17 @@ export function orderNotesForBills(
 const NOT_YET_PAID: ReadonlySet<PaymentOutRow['status']> = new Set(['scheduled', 'pending_approval']);
 
 /**
- * The payments (by transaction id) still to be paid, one of whose bills is raised against a flagged purchase
- * order. A payment is several rows, one for each bill it pays; the whole payment is marked.
+ * The rows (by allocation id) of payments still to be paid whose own bill is raised against a flagged purchase
+ * order. A payment over several bills is several rows; only the row of the bill that is flagged is marked.
  */
-export function paymentsAgainstFlaggedOrders(
+export function paymentRowsAgainstFlaggedOrders(
   rows: PaymentOutRow[],
   bills: { id: string; purchase_order_id: string | null }[],
   orders: OrderBilling[],
 ): Set<string> {
   const flagged = new Set(orders.filter((o) => o.over_billed || o.billed_over_received).map((o) => o.id));
   const flaggedBills = new Set(bills.filter((b) => b.purchase_order_id !== null && flagged.has(b.purchase_order_id)).map((b) => b.id));
-  return new Set(rows.filter((r) => NOT_YET_PAID.has(r.status) && flaggedBills.has(r.bill_id)).map((r) => r.transaction_id));
+  return new Set(rows.filter((r) => NOT_YET_PAID.has(r.status) && flaggedBills.has(r.bill_id)).map((r) => r.allocation_id));
 }
 
 /** The payments table as a CSV file. Amounts are numbers, so a spreadsheet can add them up. */
