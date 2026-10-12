@@ -68,6 +68,8 @@ declare
   charge uuid;
   interest uuid;
   stray uuid;
+  side uuid;
+  counter integer;
   no text;
   n integer;
   m numeric;
@@ -377,6 +379,16 @@ begin
   fails := fails || public.bendahara_banking_try('an editor records a transfer', 'FIN14',
     format('select public.finance_record_transfer(%L, %L)', org,
       jsonb_build_object('from_account_id', bank, 'to_account_id', savings, 'amount', 10)));
+  -- The guard on payments would answer FIN14 too, one statement later, in its own words. The message is
+  -- compared as well as the code, so the function's own refusal, said before it writes anything, is what is proved.
+  begin
+    perform public.finance_record_transfer(org, jsonb_build_object('from_account_id', bank, 'to_account_id', savings, 'amount', 10));
+    fails := array_append(fails, 'an editor recorded a transfer');
+  exception when others then
+    if sqlstate <> 'FIN14' or sqlerrm <> 'moving money between accounts needs an owner or admin' then
+      fails := fails || format('an editor''s transfer is refused with %s (%s), not by the function''s own FIN14', sqlstate, sqlerrm);
+    end if;
+  end;
   fails := fails || public.bendahara_banking_try('an editor records a transfer to the same account', 'FIN16',
     format('select public.finance_record_transfer(%L, %L)', org,
       jsonb_build_object('from_account_id', bank, 'to_account_id', bank, 'amount', 10)));
@@ -448,6 +460,25 @@ begin
     format('update public.finance_transactions set status = ''posted'', number = ''TR-9001'' where org_id = %L and transfer_id = %L', org, hand));
   fails := fails || public.bendahara_banking_try('the owner posts a well-made pair with no number', '23514',
     format('update public.finance_transactions set status = ''posted'' where org_id = %L and transfer_id = %L', org, hand));
+  -- The one function that posts money in for a person takes a payment's id and writes its number as the
+  -- owner of the table. Pointed at a side of a transfer it is stopped by the pair check and by nothing else,
+  -- and the RC- number it took is given back with the refusal.
+  select coalesce(max(next_number), 0) into counter from public.finance_sequences where org_id = org and doc_type = 'receipt';
+  insert into public.finance_transactions (org_id, direction, account_id, amount, method, transfer_id, category_id)
+  values (org, 'in', bank, 77, 'bank_transfer', gen_random_uuid(), sales) returning id into side;
+  fails := fails || public.bendahara_banking_try('the owner posts a lone side of a transfer as a receipt', 'FIN16',
+    format('select public.finance_post_cash_receipt(%L, %L)', org, side));
+  delete from public.finance_transactions where id = side;
+  select id into side from public.finance_transactions where org_id = org and transfer_id = hand and direction = 'in';
+  update public.finance_transactions set category_id = sales where id = side;
+  fails := fails || public.bendahara_banking_try('the owner posts the money-in side of a drafted pair as a receipt', 'FIN16',
+    format('select public.finance_post_cash_receipt(%L, %L)', org, side));
+  update public.finance_transactions set category_id = null where id = side;
+  select count(*) into n from public.finance_transactions
+   where org_id = org and transfer_id is not null and status = 'draft' and number is null and category_id is null;
+  if n <> 3 then fails := fails || format('after a side was refused as a receipt, %s draft sides are as they were, not 3', n); end if;
+  select coalesce(max(next_number), 0) - counter into n from public.finance_sequences where org_id = org and doc_type = 'receipt';
+  if n <> 0 then fails := fails || format('a side of a transfer refused as a receipt used up %s RC- numbers', n); end if;
 
   -- ==== by the database owner: a pair made by hand must match to be posted =====
   -- The role that runs this script owns the tables, so the column grants do not
