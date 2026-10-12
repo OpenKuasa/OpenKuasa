@@ -64,6 +64,8 @@ export type LandingPage = {
   live: boolean;
   views: number;
   leads: number;
+  /** Whether the page carries the workspace's chatbot (see `chatbot.ts`). */
+  chatEnabled: boolean;
   /** `/p/<id>`. */
   path: string;
 };
@@ -77,6 +79,7 @@ export type LandingPageFields = {
   button_label: string | null;
   form_id: string | null;
   status: LandingPageStatus;
+  chat_enabled: boolean;
 };
 
 export type LandingPageStats = {
@@ -99,9 +102,10 @@ type LandingPageRow = {
   status: string;
   views_count: number | null;
   leads_count: number | null;
+  chat_enabled: boolean | null;
 };
 
-const PAGE_COLUMNS = 'id,name,headline,subheadline,body,button_label,form_id,status,views_count,leads_count';
+const PAGE_COLUMNS = 'id,name,headline,subheadline,body,button_label,form_id,status,views_count,leads_count,chat_enabled';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Row-level security refused the write: the chosen form is not this workspace's. */
@@ -151,6 +155,7 @@ export function parseLandingPageForm(formData: FormData): LandingPageFields {
     button_label: buttonLabel || null,
     form_id: formId || null,
     status,
+    chat_enabled: formData.get('chatEnabled') === 'on',
   };
 }
 
@@ -177,6 +182,7 @@ export function mapLandingPage(row: LandingPageRow, forms: ReadonlyMap<string, L
     live: status === 'published' && form?.status === 'active',
     views: row.views_count ?? 0,
     leads: row.leads_count ?? 0,
+    chatEnabled: row.chat_enabled === true,
     path: landingPagePath(row.id),
   };
 }

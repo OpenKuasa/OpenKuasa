@@ -64,6 +64,7 @@ describe('the landing page form', () => {
           buttonLabel: ' Tempah Sekarang ',
           formId: FORM,
           status: 'published',
+          chatEnabled: 'on',
         }),
       ),
     ).toEqual({
@@ -74,6 +75,7 @@ describe('the landing page form', () => {
       button_label: 'Tempah Sekarang',
       form_id: FORM,
       status: 'published',
+      chat_enabled: true,
     });
   });
 
@@ -86,6 +88,7 @@ describe('the landing page form', () => {
       button_label: null,
       form_id: null,
       status: 'draft',
+      chat_enabled: false,
     });
   });
 
@@ -125,6 +128,7 @@ describe('a page as the screen lists it', () => {
     status: 'published',
     views_count: 40,
     leads_count: 5,
+    chat_enabled: true,
   };
 
   it('is live only when it is published and its form is active', () => {
@@ -136,6 +140,7 @@ describe('a page as the screen lists it', () => {
       path: `/p/${PAGE}`,
       subheadline: '',
       buttonLabel: '',
+      chatEnabled: true,
     });
     expect(mapLandingPage({ ...row, status: 'draft' }, forms).live).toBe(false);
     expect(mapLandingPage({ ...row, form_id: 'paused' }, forms).live).toBe(false);
@@ -172,7 +177,7 @@ describe('saving a landing page', () => {
     await updateLandingPage(client, 'org1', PAGE, fields);
     expect(seen[0].op).toBe('update');
     expect(Object.keys(seen[0].payload as object).sort()).toEqual(
-      ['body', 'button_label', 'form_id', 'headline', 'name', 'status', 'subheadline', 'updated_at'].sort(),
+      ['body', 'button_label', 'chat_enabled', 'form_id', 'headline', 'name', 'status', 'subheadline', 'updated_at'].sort(),
     );
     expect(seen[0].filters).toEqual([
       ['id', PAGE],

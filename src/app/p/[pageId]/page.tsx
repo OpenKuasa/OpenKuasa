@@ -4,9 +4,11 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { z } from 'zod';
 import { PublicFormNotice, PublicFormShell } from '@/components/reach/public-form-shell';
+import { PublicChat } from '@/components/crm/public-chat';
 import { PublicLeadForm } from '@/components/reach/public-lead-form';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
 import { DEFAULT_BUTTON_LABEL } from '@/lib/crm/landing-pages';
+import { getPublicChatbot } from '@/lib/crm/public-chatbot';
 import { countLandingPageView, getPublicLandingPage } from '@/lib/crm/public-landing-pages';
 import { createAnonymousClient } from '@/lib/reach/public-forms';
 import { createClient } from '@/lib/supabase/server';
@@ -66,6 +68,9 @@ export default async function PublicLandingPage({ params }: Props) {
   // who is only previewing their page is left out. One view per client per window.
   await countLandingPageView(await createClient(), id);
 
+  // The workspace's chatbot, when the page carries it and the bot can answer.
+  const chatbot = await getPublicChatbot(id);
+
   // Blank lines in the text separate paragraphs; single line breaks are kept.
   const paragraphs = (page.body ?? '')
     .split(/\n{2,}/)
@@ -108,6 +113,14 @@ export default async function PublicLandingPage({ params }: Props) {
           Powered by OpenKuasa
         </Link>
       </footer>
+      {chatbot ? (
+        <PublicChat
+          pageId={id}
+          botName={chatbot.botName}
+          welcome={chatbot.welcome}
+          handoffEnabled={chatbot.handoffEnabled}
+        />
+      ) : null}
     </div>
   );
 }

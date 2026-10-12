@@ -131,6 +131,7 @@ function PageFormCard({
   const [draft, setDraft] = useState<Draft>(editing ? toDraft(editing) : EMPTY);
   const set = (key: keyof Draft) => (event: { target: { value: string } }) =>
     setDraft((current) => ({ ...current, [key]: event.target.value }));
+  const [chatEnabled, setChatEnabled] = useState(editing?.chatEnabled ?? false);
 
   // A form deleted since the page was made is no longer offered.
   const chosen = forms.find((form) => form.id === draft.formId);
@@ -255,6 +256,26 @@ function PageFormCard({
               <option value="draft">Draft (only you can see it)</option>
               <option value="published">Published (anyone with the link)</option>
             </select>
+          </div>
+          <div className="space-y-1 md:col-span-12">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                name="chatEnabled"
+                checked={chatEnabled}
+                onChange={(event) => setChatEnabled(event.target.checked)}
+                className="size-4 accent-primary"
+              />
+              Show the AI chatbot on this page
+            </label>
+            <p className="text-xs text-muted-foreground">
+              Visitors can ask your bot questions. It answers on your workspace&rsquo;s own AI key, so it only
+              appears when the workspace has one.{' '}
+              <Link href="/crm/chatbot" className="font-medium text-primary underline-offset-4 hover:underline">
+                Set the bot up
+              </Link>
+              .
+            </p>
           </div>
           <div className="flex flex-wrap items-end gap-3 md:col-span-12">
             <Button type="submit" className="w-full md:w-auto" disabled={pending}>
