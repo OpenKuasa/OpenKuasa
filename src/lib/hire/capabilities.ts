@@ -15,6 +15,10 @@ import {
   DELETE_FAILED, SUMMARY_FAILED, deletedMessage, deletionMessage, type DeletionKind, type Removal,
 } from './deletion';
 import { icsFileName, interviewIcs, invitationText, type InviteSource } from './interview-invite';
+import {
+  FEEDBACK_INPUT_MESSAGES, FEEDBACK_LIMITS, FEEDBACK_NOT_LOADED, RECOMMENDATIONS, clearedFeedbackMessage, feedbackMessage, feedbackOf, savedFeedbackMessage,
+  type Feedback,
+} from './interview-feedback';
 import { instantMs, isRealDate, klDateOf, klInstant, klTimeOf, pastProblem, timeProblem } from './interview-time';
 import {
   INTERVIEW_INPUT_MESSAGES, INTERVIEW_KINDS, INTERVIEW_LIMITS, INTERVIEW_NOT_LOADED, INTERVIEW_NOT_READ_BACK, INTERVIEW_OUTCOMES,
@@ -1622,4 +1626,195 @@ export function calendarOfChange(change: InterviewChange, orgName: string | null
   const ics = interviewIcs(source, now);
   const fileName = icsFileName(source);
   return ics && fileName ? { ics, fileName } : null;
+}
+
+// ─── feedback on an interview (two database functions, called by rpc) ────────
+
+const FEEDBACK_SAID = FEEDBACK_INPUT_MESSAGES;
+
+// Every `.describe()` is the last call on its field: a description belongs to the schema it was called on.
+export const saveInterviewFeedbackInput = z.object({
+  id: interviewId(),
+  rating: z.number(FEEDBACK_SAID.rating).int(FEEDBACK_SAID.rating)
+    .min(FEEDBACK_LIMITS.ratingMin, FEEDBACK_SAID.rating).max(FEEDBACK_LIMITS.ratingMax, FEEDBACK_SAID.rating)
+    .describe('How the interview went, as a whole number from 1 to 5: 1 the lowest and 5 the highest. Never make one up: ask the user when none was given.'),
+  recommendation: z.enum(RECOMMENDATIONS, FEEDBACK_SAID.recommendation)
+    .describe('advance, hold or reject. A note for whoever decides: it does not move or reject the application. Never make one up: ask the user when none was given.'),
+  comments: limitedText(FEEDBACK_LIMITS.comments, FEEDBACK_SAID.comments)
+    .describe('What the interview showed, in the user\'s words. Only what bears on the job. Leave out when none was given.'),
+  mark_completed: z.boolean().optional()
+    .describe('True only when the interview is still marked scheduled and the user said it took place. It is then marked completed in the same step.'),
+  replace: z.boolean().optional().describe('True only when this interview already has feedback and the user asked to change it.'),
+  // For the person who approves: the capability does not read it, and it is never sent to the database.
+  basis: z.string().trim().max(FEEDBACK_LIMITS.basis).regex(NO_NUL, HAS_NUL).optional()
+    .describe('One or two sentences giving the grounds for this rating and recommendation when they are your own reading, in plain words, naming specifics from what the user said about the interview and never general praise. Shown on the Approve card. Not stored.'),
+});
+export const clearInterviewFeedbackInput = z.object({ id: interviewId() });
+
+/**
+ * An interview after its feedback changed. `replaced` and `marked_completed` are what the database answered, never
+ * what was sent. Everything but the id is empty or null when the change was saved but the row could not be read back.
+ * No notes, and no place: this is about the feedback alone.
+ */
+export type InterviewFeedbackChange = {
+  id: string;
+  candidate: string;
+  job: string;
+  status: InterviewStatus | null;
+  scheduled_at: string | null;
+  /** The feedback as stored after the change: null after a clear, and when the row could not be read back. */
+  feedback: Feedback | null;
+  /** Feedback was there before this save and was overwritten. */
+  replaced: boolean;
+  /** This save is what marked the interview completed. */
+  marked_completed: boolean;
+  /** The sentence for the screen's notice line and for the assistant's reply. */
+  message: string;
+  /** True when these values were read back after the change. */
+  confirmed: boolean;
+  /** Only when the row could not be read back: says so, in words for whoever reads the result. */
+  note?: string;
+};
+
+/** The read-back: the feedback, the status, and the two names. No notes and no contact detail. */
+const FEEDBACK_READ =
+  'id,scheduled_at,status,feedback_rating,feedback_recommendation,feedback_comments,feedback_at,' +
+  'application:hire_applications(candidate:hire_candidates(name),job:hire_jobs(title))';
+type FeedbackRead = {
+  id: string; scheduled_at: string; status: InterviewStatus;
+  feedback_rating: number | null; feedback_recommendation: string | null; feedback_comments: string | null; feedback_at: string | null;
+  application: { candidate: { name: string } | null; job: { title: string } | null } | null;
+};
+
+/**
+ * The answer after a function said ok: the row read back with the member's own client, inside their workspace. The
+ * change is saved by then, so a read that fails or finds nothing still answers ok, with a note and nothing guessed.
+ */
+async function feedbackChanged(
+  ctx: HireWriteContext, id: string, how: { replaced: boolean; marked_completed: boolean }, message: (name: string) => string,
+): Promise<CapResult<InterviewFeedbackChange>> {
+  let row: FeedbackRead | null = null;
+  try {
+    const { data } = await ctx.client
+      .from('hire_interviews')
+      .select(FEEDBACK_READ)
+      .eq('id', id)
+      .eq('org_id', ctx.orgId)
+      .maybeSingle();
+    row = (data as unknown as FeedbackRead | null) ?? null;
+  } catch {
+    row = null;
+  }
+  if (!row) {
+    // Both functions leave the interview completed: that much is known without the read.
+    return {
+      ok: true,
+      data: {
+        id, candidate: '', job: '', status: 'completed', scheduled_at: null, feedback: null, ...how, message: message(''), confirmed: false,
+        note: INTERVIEW_NOT_READ_BACK,
+      },
+    };
+  }
+  const candidate = row.application?.candidate?.name ?? '';
+  return {
+    ok: true,
+    data: {
+      id: row.id, candidate, job: row.application?.job?.title ?? '', status: row.status, scheduled_at: row.scheduled_at, feedback: feedbackOf(row), ...how,
+      message: message(candidate), confirmed: true,
+    },
+  };
+}
+
+/**
+ * Records feedback on one completed interview, or replaces it. With `mark_completed`, a scheduled interview is
+ * marked completed and given its feedback in one write. `seen` is the `recorded_at` an edit form was opened with: it
+ * is not part of the schema, so only the server action passes it, and the database then saves nothing if the
+ * feedback was changed or cleared meanwhile. It goes on as the string it arrived as: the comparison is to the
+ * microsecond. Nothing of the application is read or written, whatever the recommendation.
+ */
+export async function saveInterviewFeedback(
+  ctx: HireWriteContext,
+  input: z.input<typeof saveInterviewFeedbackInput>,
+  seen?: string,
+): Promise<CapResult<InterviewFeedbackChange>> {
+  const parsed = saveInterviewFeedbackInput.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+  // `basis` is left behind here: it is for the Approve card, not for the database.
+  const d = parsed.data;
+  const args: Record<string, unknown> = {
+    p_interview_id: d.id,
+    p_rating: d.rating,
+    p_recommendation: d.recommendation,
+    p_comments: blankToNull(d.comments) ?? null,
+    p_mark_completed: d.mark_completed === true,
+    p_replace: d.replace === true,
+  };
+  if (typeof seen === 'string' && seen) args.p_if_feedback_at = seen;
+  const called = await callInterviewFunction(ctx, 'saveInterviewFeedback', 'hire_save_interview_feedback', args);
+  if (!called.ok) return called;
+  const word = wordOf(called.answer);
+  if (word !== 'ok') return { ok: false, error: feedbackMessage(word, 'save') };
+  // Whether feedback was replaced, and whether this save completed the interview, are the database's to say: it
+  // looked at the row under its lock. What was sent proves neither, so the input is never asked. An answer that does
+  // not say, or says it with anything but true, is neither.
+  const answer = called.answer as { replaced?: unknown; completed?: unknown } | null;
+  const how = { replaced: answer?.replaced === true, marked_completed: answer?.completed === true };
+  return feedbackChanged(
+    ctx, d.id, how,
+    (name) => savedFeedbackMessage(name, { rating: d.rating, recommendation: d.recommendation }, { replaced: how.replaced, completed: how.marked_completed }),
+  );
+}
+
+/** Clears the feedback on one interview: the rating, the recommendation, the comments and the saved time. The interview stays completed. */
+export async function clearInterviewFeedback(
+  ctx: HireWriteContext,
+  input: z.input<typeof clearInterviewFeedbackInput>,
+): Promise<CapResult<InterviewFeedbackChange>> {
+  const parsed = clearInterviewFeedbackInput.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+  const { id } = parsed.data;
+  const called = await callInterviewFunction(ctx, 'clearInterviewFeedback', 'hire_clear_interview_feedback', { p_interview_id: id });
+  if (!called.ok) return called;
+  const word = wordOf(called.answer);
+  if (word !== 'ok') return { ok: false, error: feedbackMessage(word, 'clear') };
+  return feedbackChanged(ctx, id, { replaced: false, marked_completed: false }, clearedFeedbackMessage);
+}
+
+/** One interview's feedback as it is stored now, for a form that was refused as stale. `feedback` is null when there is none. */
+export type InterviewFeedbackForEdit = { id: string; status: InterviewStatus; feedback: Feedback | null };
+const FEEDBACK_EDIT_READ = 'id,status,feedback_rating,feedback_recommendation,feedback_comments,feedback_at';
+type FeedbackEditRead = Pick<FeedbackRead, 'id' | 'status' | 'feedback_rating' | 'feedback_recommendation' | 'feedback_comments' | 'feedback_at'>;
+
+/**
+ * The feedback of one interview as it is stored at this moment, by id and nothing else; the workspace is the
+ * session's. `recorded_at` goes back exactly as stored: the form sends it as `seen`. Changes nothing.
+ */
+export async function interviewFeedbackForEdit(
+  ctx: HireWriteContext,
+  input: z.input<typeof clearInterviewFeedbackInput>,
+): Promise<CapResult<InterviewFeedbackForEdit>> {
+  const parsed = clearInterviewFeedbackInput.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+  const notLoaded = (error: unknown): { ok: false; error: string } => {
+    // The code only: never the error, an id, a name or a comment.
+    const code = (error as { code?: unknown } | null)?.code ?? (error as { name?: unknown } | null)?.name;
+    console.error('[hire-capability] interviewFeedbackForEdit failed:', { code: typeof code === 'string' ? code : undefined });
+    return { ok: false, error: FEEDBACK_NOT_LOADED };
+  };
+  let row: FeedbackEditRead | null;
+  try {
+    const { data, error } = await ctx.client
+      .from('hire_interviews')
+      .select(FEEDBACK_EDIT_READ)
+      .eq('id', parsed.data.id)
+      .eq('org_id', ctx.orgId)
+      .maybeSingle();
+    if (error) return notLoaded(error);
+    row = (data as unknown as FeedbackEditRead | null) ?? null;
+  } catch (error) {
+    return notLoaded(error);
+  }
+  if (!row) return { ok: false, error: feedbackMessage('not_found', 'save') };
+  // Each field is named: nothing else the read returned rides along.
+  return { ok: true, data: { id: row.id, status: row.status, feedback: feedbackOf(row) } };
 }

@@ -80,6 +80,7 @@ describe('getHireData', () => {
     await data.listInterviews();
     expect(asked.find((a) => a.table === 'hire_interviews')!.columns).toBe(
       'id,application_id,scheduled_at,duration_minutes,kind,place,interviewer_name,notes,status,created_at,updated_at,'
+      + 'feedback_rating,feedback_recommendation,feedback_comments,feedback_at,'
       + 'application:hire_applications(stage,outcome,candidate:hire_candidates(name),job:hire_jobs(title))',
     );
   });

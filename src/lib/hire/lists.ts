@@ -14,6 +14,7 @@ import {
 } from './applications-view';
 import type { RejectReason } from './application-changes';
 import { ago } from './dashboard';
+import type { Feedback } from './interview-feedback';
 import { clock12, durationText, klDateOf } from './interview-time';
 import { needsOutcome } from './interviews';
 import { applicantsByJob, applicationsPerWeek } from './overview';
@@ -317,6 +318,8 @@ export type InterviewRow = {
   applicationOutcome: ApplicationOutcome;
   /** Scheduled, and its start has passed: tagged "Needs an outcome". */
   needsOutcome: boolean;
+  /** The interview's feedback, comments included: every member may read it. Present only when the interview has some. */
+  feedback?: Feedback;
 };
 
 const startOf = (i: Interview) => Date.parse(i.scheduled_at);
@@ -351,6 +354,7 @@ function interviewRow(i: Interview, now: Date): InterviewRow {
     applicationStage: i.application_stage,
     applicationOutcome: i.application_outcome,
     needsOutcome: needsOutcome(i.status, i.scheduled_at, now),
+    ...(i.feedback ? { feedback: i.feedback } : {}),
   };
 }
 

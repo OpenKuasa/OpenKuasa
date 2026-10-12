@@ -139,6 +139,22 @@ export function shortWhen(iso: string): string {
   return p ? `${WEEKDAYS_SHORT[p.weekday]} ${p.day} ${MONTHS_SHORT[p.month]} ${p.year}, ${clockText(p)}` : iso;
 }
 
+/** "21 Oct 2026", in Kuala Lumpur: a day with its year, where the time of day does not matter. */
+export function shortDate(iso: string): string {
+  const p = partsOf(iso);
+  return p ? `${p.day} ${MONTHS_SHORT[p.month]} ${p.year}` : iso;
+}
+
+/** "Wed 21 Oct 2026, 10:05:40 am", in Kuala Lumpur: to the second, for telling one save from the next. */
+export function shortWhenToSecond(iso: string): string {
+  const ms = instantMs(iso);
+  const p = partsAt(ms);
+  if (!p) return iso;
+  const second = new Date(ms + KL_OFFSET_MS).getUTCSeconds();
+  const hour = p.hour % 12 === 0 ? 12 : p.hour % 12;
+  return `${WEEKDAYS_SHORT[p.weekday]} ${p.day} ${MONTHS_SHORT[p.month]} ${p.year}, ${hour}:${two(p.minute)}:${two(second)} ${p.hour < 12 ? 'am' : 'pm'}`;
+}
+
 /** "3:00 pm", in Kuala Lumpur: how a time is written to a candidate. */
 export function clock12(iso: string): string {
   const p = partsOf(iso);

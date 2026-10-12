@@ -4,6 +4,7 @@
  * stand in for it in dev and tests.
  */
 import type { RejectReason } from './application-changes';
+import type { Feedback } from './interview-feedback';
 
 export type EmploymentType = 'full_time' | 'part_time' | 'contract' | 'internship';
 export type JobStatus = 'draft' | 'open' | 'paused' | 'closed';
@@ -132,6 +133,12 @@ export type Interview = {
   application_stage: ApplicationStage;
   /** Whether the interview's application is still active, joined in by the provider: a closed one cannot be rescheduled. */
   application_outcome: ApplicationOutcome;
+  /**
+   * The interview's one feedback: a rating, a recommendation and comments, with when it was last saved. Only a
+   * completed interview has any. Optional so an interview written out by hand in a test still type-checks: left
+   * out, or null, reads as none.
+   */
+  feedback?: Feedback | null;
 };
 
 /** One interview as an approval card describes it: who, which job, when and how. Nothing to contact anyone by. */
@@ -149,6 +156,8 @@ export type InterviewCardRow = {
   duration_minutes: number;
   /** Where it is held, or the meeting link. The team's own text: it goes to the browser on a card, never to a model. */
   place: string | null;
+  /** What feedback the interview has, without its comments. Present only when it has some. Read for the card's "Now: …" line. */
+  feedback?: Pick<Feedback, 'rating' | 'recommendation' | 'recorded_at'>;
 };
 
 /**

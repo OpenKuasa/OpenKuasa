@@ -67,6 +67,7 @@ const SENTENCES: Record<string, string> = {
   changed: 'This interview was changed a moment ago. Nothing was saved. Check it and try again.',
   not_past: 'That time has not passed yet in Kuala Lumpur. To plan an interview, use “Schedule interview”.',
   too_far_back: 'Choose a date within the last 12 months.',
+  has_feedback: 'This interview has feedback. Clear the feedback before marking it as scheduled again.',
 };
 
 /**

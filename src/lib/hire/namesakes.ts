@@ -5,6 +5,7 @@
  * never from a whole list, so no page size can make the answer wrong.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { feedbackOf } from './interview-feedback';
 import type {
   Application, ApplicationOutcome, Candidate, Interview, InterviewCardRead, InterviewCardRow, InterviewKind, InterviewStatus, Namesake, Namesakes,
 } from './types';
@@ -187,7 +188,7 @@ export function interviewCardFromLists(
   id: unknown,
   interviews: readonly Pick<
     Interview,
-    'id' | 'application_id' | 'candidate_name' | 'job_title' | 'scheduled_at' | 'kind' | 'status' | 'duration_minutes' | 'place' | 'application_outcome'
+    'id' | 'application_id' | 'candidate_name' | 'job_title' | 'scheduled_at' | 'kind' | 'status' | 'duration_minutes' | 'place' | 'application_outcome' | 'feedback'
   >[],
   /** Which candidate each application is of. Left out, only the interview's own application is known to be the same person's. */
   applications: readonly Pick<Application, 'id' | 'candidate_id'>[] = [],
@@ -195,6 +196,8 @@ export function interviewCardFromLists(
   const describe = (i: (typeof interviews)[number]): InterviewCardRow => ({
     id: i.id, application_id: i.application_id, candidate: i.candidate_name, job: i.job_title, scheduled_at: i.scheduled_at, kind: i.kind,
     status: i.status, duration_minutes: i.duration_minutes, place: i.place,
+    // Only when there is feedback, and never its comments: a card line says the rating, the recommendation and when it was saved.
+    ...(i.feedback ? { feedback: { rating: i.feedback.rating, recommendation: i.feedback.recommendation, recorded_at: i.feedback.recorded_at } } : {}),
   });
   const row = interviews.find((i) => i.id === id);
   if (!row) return NO_INTERVIEW;
@@ -240,6 +243,8 @@ async function idsCalled(
 
 /** What a card says of one interview. No contact detail and no notes. */
 const CARD_COLUMNS = 'id,application_id,scheduled_at,kind,status,duration_minutes,place';
+/** The target's own read also says what feedback it has: the rating, the recommendation and when it was saved. Never the comments. */
+const TARGET_COLUMNS = `${CARD_COLUMNS},feedback_rating,feedback_recommendation,feedback_at`;
 type CardColumns = {
   id: string; application_id: string; scheduled_at: string; kind: InterviewKind; status: InterviewStatus; duration_minutes: number; place: string | null;
 };
@@ -258,12 +263,13 @@ export async function readInterviewCard(client: SupabaseClient, orgId: string, i
 
   const found = await client
     .from('hire_interviews')
-    .select(`${CARD_COLUMNS},application:hire_applications(outcome,candidate_id,candidate:hire_candidates(name),job:hire_jobs(title))`)
+    .select(`${TARGET_COLUMNS},application:hire_applications(outcome,candidate_id,candidate:hire_candidates(name),job:hire_jobs(title))`)
     .eq('org_id', orgId)
     .eq('id', id)
     .maybeSingle();
   if (found.error) throw found.error;
   const row = found.data as unknown as (CardColumns & {
+    feedback_rating?: number | null; feedback_recommendation?: string | null; feedback_at?: string | null;
     application: { outcome: ApplicationOutcome | null; candidate_id: string | null; candidate: { name: string } | null; job: { title: string } | null } | null;
   }) | null;
   const name = row?.application?.candidate?.name;
@@ -329,7 +335,10 @@ export async function readInterviewCard(client: SupabaseClient, orgId: string, i
     status: i.status, duration_minutes: i.duration_minutes, place: i.place ?? null,
   });
   return {
-    target: describe(row, title),
+    target: (() => {
+      const own = feedbackOf(row);
+      return { ...describe(row, title), ...(own ? { feedback: { rating: own.rating, recommendation: own.recommendation, recorded_at: own.recorded_at } } : {}) };
+    })(),
     // The others are of the same name and title by the rule above, so they are worded as the target is.
     others: twinsRead.slice(0, NAMESAKE_LIMIT).map((i) => describe(i, title)),
     cut: people.cut || jobs.cut || applicationsRead.length > NAMESAKE_LIMIT || twinsRead.length > NAMESAKE_LIMIT,

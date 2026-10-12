@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getCurrentOrg } from '@/lib/auth/current-org';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
+import { feedbackOf } from './interview-feedback';
 import { readInterviewCard, readNamesakes } from './namesakes';
 import { createSeedHireData } from './seed';
 import { DEFAULT_HIRE_SETTINGS, HIRE_READ_CAP, JOB_COLUMNS, SETTINGS_COLUMNS } from './types';
@@ -18,13 +19,18 @@ const APPLICATION_COLUMNS =
   'candidate:hire_candidates(name,pool_status),job:hire_jobs(title)';
 const INTERVIEW_COLUMNS =
   'id,application_id,scheduled_at,duration_minutes,kind,place,interviewer_name,notes,status,created_at,updated_at,' +
+  'feedback_rating,feedback_recommendation,feedback_comments,feedback_at,' +
   'application:hire_applications(stage,outcome,candidate:hire_candidates(name),job:hire_jobs(title))';
 
 type Named = { name?: string | null } | null | undefined;
 type Titled = { title?: string | null } | null | undefined;
 type Pooled = { name?: string | null; pool_status?: PoolStatus | null } | null | undefined;
 type ApplicationRow = Omit<Application, 'candidate_name' | 'job_title' | 'candidate_pool_status'> & { candidate: Pooled; job: Titled };
-type InterviewRow = Omit<Interview, 'candidate_name' | 'job_title' | 'application_stage' | 'application_outcome'> & {
+type InterviewRow = Omit<Interview, 'candidate_name' | 'job_title' | 'application_stage' | 'application_outcome' | 'feedback'> & {
+  feedback_rating?: number | null;
+  feedback_recommendation?: string | null;
+  feedback_comments?: string | null;
+  feedback_at?: string | null;
   application: { stage?: ApplicationStage | null; outcome?: ApplicationOutcome | null; candidate: Named; job: Titled } | null;
 };
 
@@ -83,15 +89,20 @@ export function createSupabaseHireData(client: SupabaseClient, orgId: string): H
       // Read newest-first so the row ceiling drops the oldest interviews, then hand back soonest-first.
       [...(await rows<InterviewRow>('hire_interviews', INTERVIEW_COLUMNS, { col: 'scheduled_at', asc: false }))]
         .reverse()
-        .map(({ application, ...row }) => ({
-          ...row,
-          candidate_name: application?.candidate?.name ?? UNKNOWN,
-          job_title: application?.job?.title ?? UNKNOWN,
-          // The foreign key means an interview always has its application. Should one ever be unreadable, the row
-          // is treated as applied and active: every change is still checked by the database.
-          application_stage: application?.stage ?? 'applied',
-          application_outcome: application?.outcome ?? 'active',
-        })),
+        .map(({ application, feedback_rating, feedback_recommendation, feedback_comments, feedback_at, ...row }) => {
+          // The four columns become one value. A row without feedback gets no key at all.
+          const feedback = feedbackOf({ feedback_rating, feedback_recommendation, feedback_comments, feedback_at });
+          return {
+            ...row,
+            ...(feedback ? { feedback } : {}),
+            candidate_name: application?.candidate?.name ?? UNKNOWN,
+            job_title: application?.job?.title ?? UNKNOWN,
+            // The foreign key means an interview always has its application. Should one ever be unreadable, the row
+            // is treated as applied and active: every change is still checked by the database.
+            application_stage: application?.stage ?? 'applied',
+            application_outcome: application?.outcome ?? 'active',
+          };
+        }),
     getSettings: async () => {
       const { data, error } = await client
         .from('hire_settings').select(SETTINGS_COLUMNS).eq('org_id', orgId).maybeSingle();

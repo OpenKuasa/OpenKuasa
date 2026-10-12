@@ -214,7 +214,7 @@ describe('readInterviewCard', () => {
     for (const query of queries) expect(has(query, 'eq', 'org_id', 'org1'), query.table).toBe(true);
 
     expect(has(queries[0], 'eq', 'id', IV)).toBe(true);
-    expect(has(queries[0], 'select', 'id,application_id,scheduled_at,kind,status,duration_minutes,place,application:hire_applications(outcome,candidate_id,candidate:hire_candidates(name),job:hire_jobs(title))')).toBe(true);
+    expect(has(queries[0], 'select', 'id,application_id,scheduled_at,kind,status,duration_minutes,place,feedback_rating,feedback_recommendation,feedback_at,application:hire_applications(outcome,candidate_id,candidate:hire_candidates(name),job:hire_jobs(title))')).toBe(true);
 
     expect(has(queries[1], 'select', 'id,name')).toBe(true);
     expect(has(queries[1], 'filter', 'name', 'imatch', '^\\s*(Aisyah\\s+Lim)\\s*$')).toBe(true);
