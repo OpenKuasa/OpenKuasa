@@ -15,6 +15,7 @@ import {
   queueSummary,
   queueWithoutDone,
   retryPlan,
+  tooManyLeftOut,
 } from '@/lib/finance/receipt-files';
 import { RECEIPT_INBOX_MESSAGES } from '@/lib/finance/receipt-inbox';
 import { fileSizeLabel } from '@/lib/finance/receipt-views';
@@ -84,7 +85,8 @@ export function ReceiptUploadCard({
           return;
         }
         name = prepared.data.name;
-        patch(item.key, { step: 'uploading', name });
+        // The size shown from here on is the file that goes up, which is smaller than the HEIC it came from.
+        patch(item.key, { step: 'uploading', name, size: prepared.data.body.size });
         const stored = await storeReceipt(orgId, prepared.data);
         if (!stored.ok) {
           patch(item.key, { step: 'failed', error: stored.error });
@@ -134,7 +136,7 @@ export function ReceiptUploadCard({
     );
     const kept = new Set(next.items.map((i) => i.key));
     for (const e of entries) if (kept.has(e.key)) files.current.set(e.key, e.file);
-    setNotice(next.refused > 0 ? RECEIPT_FILE_MESSAGES.tooMany : null);
+    setNotice(next.refused > 0 ? tooManyLeftOut(next.refused) : null);
     update(() => next.items);
     void pump();
   };
@@ -188,7 +190,7 @@ export function ReceiptUploadCard({
       >
         <p className="text-sm text-muted-foreground">Drop receipts here, or choose them from your device.</p>
         <div className="flex flex-wrap items-center justify-center gap-2">
-          <Button type="button" size="sm" onClick={() => browse.current?.click()} data-finance-focus>
+          <Button type="button" size="sm" onClick={() => browse.current?.click()}>
             <FolderOpen className="size-4" />
             Browse files
           </Button>

@@ -29,11 +29,12 @@ function canvasBlob(canvas: HTMLCanvasElement): Promise<Blob | null> {
 async function withBrowserDecoder(file: Blob): Promise<Blob | null> {
   if (typeof createImageBitmap !== 'function') return null;
   let bitmap: ImageBitmap | null = null;
+  let canvas: HTMLCanvasElement | null = null;
   try {
     bitmap = await createImageBitmap(file);
     if (!(bitmap.width > 0 && bitmap.height > 0)) return null;
     const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height));
-    const canvas = document.createElement('canvas');
+    canvas = document.createElement('canvas');
     canvas.width = Math.round(bitmap.width * scale);
     canvas.height = Math.round(bitmap.height * scale);
     const drawing = canvas.getContext('2d');
@@ -47,6 +48,8 @@ async function withBrowserDecoder(file: Blob): Promise<Blob | null> {
     return null;
   } finally {
     bitmap?.close();
+    // Let the pixels go now: a queue of large photos would otherwise hold them until the collector runs (Safari caps canvas memory).
+    if (canvas) canvas.width = canvas.height = 0;
   }
 }
 
