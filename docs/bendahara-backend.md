@@ -597,7 +597,8 @@ is a label and takes no part in the sum); `to_be_paid` is scheduled money out;
 It has the bank's name and no account number: `finance_accounts.account_no`
 is not readable by a signed-in person through the table
 (`20261030123000_finance_write_guards`), the view runs as its reader, and
-Banking shows no account number. A screen that needs one calls
+Banking's cards show no account number; the Accounts table shows the last four
+characters, and only to someone who may write. A screen that needs one calls
 `finance_account_numbers(target_org)`, which answers only to someone who may
 write in the workspace. (The view first had the column and could be read by
 nobody; `20261031090300_bendahara_banking_write_guards_fit` made it again
@@ -615,8 +616,8 @@ column is the balance of that row's account after it. The cards show exact
 amounts, to the sen, as a bank statement does. The table's count line is left
 out when no posted movement exists at all.
 
-Banking is read-only for everyone. `banking.ts` only reads; accounts,
-transfers and statements get their forms later. Every action that records,
+`banking.ts` only reads. Accounts can be added, edited, archived and restored
+(see "Accounts" below); transfers and statements get their forms later. Every action that records,
 pays, voids or deletes money refreshes `/finance/banking`; an action added
 later must do the same.
 
@@ -1765,17 +1766,16 @@ with no date).
 - The database tests for this stage, `tests/bendahara-cash-book.test.ts`, run
   against the hosted database as owners only. What an editor and a viewer may
   not do is proved by `supabase/tests/bendahara_cash_book_check.sql`.
-- Banking is read-only. Accounts cannot be added or edited, money cannot be
-  moved between accounts and no statement can be imported until their forms
-  are built; the database functions are there and nothing calls them. A
+- Banking can add and change accounts, but money cannot be moved between
+  accounts and no statement can be imported until their forms are built; the
+  database functions are there and nothing calls them. A
   transfer and a statement exist only in the demo workspace.
 - Only an owner or admin can record a transfer between accounts, and only an
   owner or admin can void one. Nothing waits for approval: anyone else is
   refused (`FIN14`), and a member has no way to ask for either.
-- Banking shows no account number, and `finance_account_balances` does not
-  have one. A writer reads account numbers with
-  `finance_account_numbers(target_org)`; a viewer cannot read them at all.
-  Nothing in the app calls that function yet: the account form will.
+- `finance_account_balances` has no account number. A writer reads account
+  numbers with `finance_account_numbers(target_org)`; a viewer cannot read
+  them at all. The Banking loader calls that function for a writer only.
 - `finance_record_transfer` runs as its owner, so row-level security does not
   check what it does: its own first test (may the caller write in
   `target_org`) and the workspace named in each of its statements do. A
