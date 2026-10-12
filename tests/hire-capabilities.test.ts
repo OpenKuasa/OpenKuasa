@@ -1831,8 +1831,8 @@ describe('rescheduleInterview', () => {
     expect(await rescheduleInterview(far.ctx, { id: IV_ID, date: '2027-10-13', time: '11:00' }, NOW)).toEqual({ ok: false, error: 'Choose a date within the next 12 months.' });
     expect(far.calls).toHaveLength(1);
   });
-  it('says the time is new in the invitation only when the time was part of the change', async () => {
-    const moved = await rescheduleInterview(ivFake({ answer: 'ok', row: MOVED_ROW }).ctx, { id: IV_ID, date: '2026-10-22', time: '11:00' }, NOW);
+  it('says the time is new in the invitation only when the database says the stored time moved', async () => {
+    const moved = await rescheduleInterview(ivFake({ answer: { word: 'ok', moved: true }, row: MOVED_ROW }).ctx, { id: IV_ID, date: '2026-10-22', time: '11:00' }, NOW);
     expect(moved).toMatchObject({
       ok: true,
       data: {
@@ -1859,6 +1859,47 @@ describe('rescheduleInterview', () => {
     expect(edited).toMatchObject({
       ok: true,
       data: { message: 'Updated the interview with Aina Rahman. It is on Tuesday, 20 October 2026, 3:00 pm. Nothing has been sent to them.', invitation: INVITE },
+    });
+  });
+  describe('"has a new time" is the database\'s to say, never the input\'s', () => {
+    const NEW_TIME = 'Your interview for the Sales Executive role at Rimba Ventures has a new time.';
+    const INVITED = 'You are invited to an interview for the Sales Executive role at Rimba Ventures.';
+    const opening = async (answer: unknown, input: Record<string, unknown>, row: unknown = IV_ROW) => {
+      const f = ivFake({ answer, row });
+      const result = await rescheduleInterview(f.ctx, { id: IV_ID, ...input } as never, NOW);
+      expect(result.ok, JSON.stringify(answer)).toBe(true);
+      expect(f.calls).toHaveLength(1);
+      return result.ok ? result.data.invitation?.split('\n')[2] : undefined;
+    };
+    it('time sent and changed: the database says moved, and the invitation says the time is new', async () => {
+      expect(await opening({ word: 'ok', moved: true }, { date: '2026-10-22', time: '11:00' }, MOVED_ROW)).toBe(NEW_TIME);
+    });
+    it('time sent but unchanged (with a new interviewer): the database says not moved, and the invitation does not say new', async () => {
+      // The interview is already at 3:00 pm on 20 October: the model sent the same date and time along.
+      const sent = { date: '2026-10-20', time: '15:00', interviewer_name: 'Farah Lim' };
+      expect(await opening({ word: 'ok', moved: false }, sent)).toBe(INVITED);
+      const f = ivFake({ answer: { word: 'ok', moved: false } });
+      expect((await rescheduleInterview(f.ctx, { id: IV_ID, ...sent }, NOW))).toMatchObject({ ok: true, data: { invitation: INVITE } });
+      // The time was still sent as it was given: what changed is only who decides the wording.
+      expect(f.calls[0].args).toEqual({ p_interview_id: IV_ID, p_changes: { scheduled_at: '2026-10-20T15:00:00+08:00', interviewer_name: 'Farah Lim' } });
+    });
+    it('time not sent: not new, whatever the answer carries', async () => {
+      expect(await opening({ word: 'ok', moved: false }, { notes: 'Bring a portfolio' })).toBe(INVITED);
+      expect(await opening({ word: 'ok' }, { kind: 'video' })).toBe(INVITED);
+    });
+    it('an ok with no moved, or one that is not a boolean, is not moved: the plainer wording', async () => {
+      const sent = { date: '2026-10-22', time: '11:00' };
+      for (const answer of ['ok', { word: 'ok' }, { word: 'ok', moved: 'true' }, { word: 'ok', moved: 1 }, { word: 'ok', moved: null }, { word: 'ok', moved: {} }]) {
+        expect(await opening(answer, sent, MOVED_ROW), JSON.stringify(answer)).toBe(INVITED);
+      }
+    });
+    it('the success sentence is the same either way: it says when the interview is, from the row', async () => {
+      for (const moved of [true, false]) {
+        const result = await rescheduleInterview(ivFake({ answer: { word: 'ok', moved }, row: MOVED_ROW }).ctx, { id: IV_ID, date: '2026-10-22', time: '11:00' }, NOW);
+        expect(result).toMatchObject({
+          ok: true, data: { message: 'Updated the interview with Aina Rahman. It is on Thursday, 22 October 2026, 11:00 am. Nothing has been sent to them.' },
+        });
+      }
     });
   });
   it('is still a success when the row cannot be read back, saying only what was sent', async () => {

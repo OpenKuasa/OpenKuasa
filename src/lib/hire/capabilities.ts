@@ -1181,7 +1181,7 @@ type InterviewWording = {
   message: (name: string, iso: string | null) => string;
   /** Whether an interview that reads as scheduled is given an invitation. False only for one recorded as already held. */
   invite: boolean;
-  /** Whether the invitation says the time is new. */
+  /** Whether the invitation says the time is new: what the database answered, never what was sent. */
   moved: boolean;
 };
 
@@ -1402,7 +1402,12 @@ export async function rescheduleInterview(
   if (d.kind !== undefined) implied.kind = d.kind;
   if (place !== undefined) implied.place = place;
   if (interviewer !== undefined) implied.interviewer_name = interviewer;
-  return interviewChanged(ctx, d.id, implied, { message: updatedMessage, invite: true, moved: iso !== undefined });
+  // Whether the time is new is the database's to say: it compared the stored instant before and after under the
+  // row's lock. Sending a date and a time proves nothing (they are often sent along unchanged), so the input is
+  // never asked. An answer that does not say, or says it with anything but true, is not a move: the invitation
+  // then has the plainer opening, never a "new time" that is not one.
+  const moved = (called.answer as { moved?: unknown } | null)?.moved === true;
+  return interviewChanged(ctx, d.id, implied, { message: updatedMessage, invite: true, moved });
 }
 
 /** One of the three changes that take an interview's id and nothing that needs checking first. */

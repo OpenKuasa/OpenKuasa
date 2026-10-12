@@ -187,13 +187,18 @@ end $$;
 -- Locks the application's row first and the interview's row second, the order
 -- the two delete functions use, so a change and a deletion cannot deadlock.
 -- The past and far-future rules apply only when the time itself changes.
+-- Answers jsonb, as the two functions that insert do: { word } for a refusal,
+-- and { word: 'ok', moved } when saved, where moved says whether the stored
+-- time is a different instant from the one it was. A caller sends the time
+-- along unchanged with another change often enough that only this function
+-- can say; the invitation's "has a new time" rests on it.
 -- ---------------------------------------------------------------------------
 create or replace function public.hire_reschedule_interview(
   p_interview_id uuid,
   p_changes jsonb,
   p_if_updated_at timestamptz default null
 )
-returns text language plpgsql security definer set search_path = '' as $$
+returns jsonb language plpgsql security definer set search_path = '' as $$
 declare
   c_keys constant text[] := array['scheduled_at','duration_minutes','kind','place','interviewer_name','notes'];
   v_org uuid;
@@ -211,12 +216,12 @@ declare
 begin
   select i.org_id, i.application_id into v_org, v_application
     from public.hire_interviews i where i.id = p_interview_id;
-  if v_org is null or private.is_org_member(v_org) is not true then return 'not_found'; end if;
-  if private.is_org_writer(v_org) is not true then return 'forbidden'; end if;
+  if v_org is null or private.is_org_member(v_org) is not true then return jsonb_build_object('word', 'not_found'); end if;
+  if private.is_org_writer(v_org) is not true then return jsonb_build_object('word', 'forbidden'); end if;
 
-  if p_changes is null or jsonb_typeof(p_changes) <> 'object' then return 'invalid_changes'; end if;
+  if p_changes is null or jsonb_typeof(p_changes) <> 'object' then return jsonb_build_object('word', 'invalid_changes'); end if;
   if exists (select 1 from jsonb_object_keys(p_changes) as k(key) where k.key <> all (c_keys)) then
-    return 'invalid_changes';
+    return jsonb_build_object('word', 'invalid_changes');
   end if;
 
   -- The application first, always.
@@ -224,36 +229,36 @@ begin
     from public.hire_applications a
    where a.id = v_application
      for update;
-  if not found then return 'not_found'; end if;
+  if not found then return jsonb_build_object('word', 'not_found'); end if;
   -- An interview's application is in the interview's own workspace (the foundation's rule for a child and its
   -- parent). No function here can write a row that breaks it; one that did break it is not acted on.
-  if v_app_org is distinct from v_org then return 'not_found'; end if;
+  if v_app_org is distinct from v_org then return jsonb_build_object('word', 'not_found'); end if;
 
   select i.* into v_row
     from public.hire_interviews i
    where i.id = p_interview_id
      for update;
-  if not found then return 'not_found'; end if;
+  if not found then return jsonb_build_object('word', 'not_found'); end if;
 
   -- The form says when it last saw this row changed. If that is no longer so, save nothing.
-  if p_if_updated_at is not null and p_if_updated_at is distinct from v_row.updated_at then return 'changed'; end if;
-  if v_row.status <> 'scheduled' then return 'not_scheduled'; end if;
-  if v_outcome <> 'active' then return 'not_active'; end if;
+  if p_if_updated_at is not null and p_if_updated_at is distinct from v_row.updated_at then return jsonb_build_object('word', 'changed'); end if;
+  if v_row.status <> 'scheduled' then return jsonb_build_object('word', 'not_scheduled'); end if;
+  if v_outcome <> 'active' then return jsonb_build_object('word', 'not_active'); end if;
 
   -- The time: text with a zone, checked by the helper shared with the two
   -- functions that insert. Anything else is answered with a word.
   v_at := v_row.scheduled_at;
   if p_changes ? 'scheduled_at' then
-    if jsonb_typeof(p_changes -> 'scheduled_at') <> 'string' then return 'invalid_time'; end if;
+    if jsonb_typeof(p_changes -> 'scheduled_at') <> 'string' then return jsonb_build_object('word', 'invalid_time'); end if;
     v_at := private.hire_zoned_instant(p_changes ->> 'scheduled_at');
-    if v_at is null then return 'invalid_time'; end if;
+    if v_at is null then return jsonb_build_object('word', 'invalid_time'); end if;
   end if;
 
   v_duration := v_row.duration_minutes;
   if p_changes ? 'duration_minutes' then
-    if jsonb_typeof(p_changes -> 'duration_minutes') <> 'number' then return 'invalid_duration'; end if;
+    if jsonb_typeof(p_changes -> 'duration_minutes') <> 'number' then return jsonb_build_object('word', 'invalid_duration'); end if;
     v_number := (p_changes ->> 'duration_minutes')::numeric;
-    if v_number <> trunc(v_number) or v_number < 15 or v_number > 480 then return 'invalid_duration'; end if;
+    if v_number <> trunc(v_number) or v_number < 15 or v_number > 480 then return jsonb_build_object('word', 'invalid_duration'); end if;
     v_duration := v_number::integer;
   end if;
 
@@ -261,29 +266,29 @@ begin
   if p_changes ? 'kind' then
     v_kind := p_changes ->> 'kind';
     if jsonb_typeof(p_changes -> 'kind') <> 'string' or v_kind not in ('video', 'onsite', 'phone') then
-      return 'invalid_kind';
+      return jsonb_build_object('word', 'invalid_kind');
     end if;
   end if;
 
   v_place := v_row.place;
   if p_changes ? 'place' then
-    if jsonb_typeof(p_changes -> 'place') not in ('string', 'null') then return 'invalid_place'; end if;
+    if jsonb_typeof(p_changes -> 'place') not in ('string', 'null') then return jsonb_build_object('word', 'invalid_place'); end if;
     v_place := private.hire_one_line(p_changes ->> 'place');
-    if char_length(v_place) > 300 then return 'invalid_place'; end if;
+    if char_length(v_place) > 300 then return jsonb_build_object('word', 'invalid_place'); end if;
   end if;
 
   v_interviewer := v_row.interviewer_name;
   if p_changes ? 'interviewer_name' then
-    if jsonb_typeof(p_changes -> 'interviewer_name') not in ('string', 'null') then return 'invalid_interviewer'; end if;
+    if jsonb_typeof(p_changes -> 'interviewer_name') not in ('string', 'null') then return jsonb_build_object('word', 'invalid_interviewer'); end if;
     v_interviewer := private.hire_one_line(p_changes ->> 'interviewer_name');
-    if char_length(v_interviewer) > 120 then return 'invalid_interviewer'; end if;
+    if char_length(v_interviewer) > 120 then return jsonb_build_object('word', 'invalid_interviewer'); end if;
   end if;
 
   v_notes := v_row.notes;
   if p_changes ? 'notes' then
-    if jsonb_typeof(p_changes -> 'notes') not in ('string', 'null') then return 'invalid_notes'; end if;
+    if jsonb_typeof(p_changes -> 'notes') not in ('string', 'null') then return jsonb_build_object('word', 'invalid_notes'); end if;
     v_notes := nullif(regexp_replace(coalesce(p_changes ->> 'notes', ''), '^\s+|\s+$', '', 'g'), '');
-    if char_length(v_notes) > 2000 then return 'invalid_notes'; end if;
+    if char_length(v_notes) > 2000 then return jsonb_build_object('word', 'invalid_notes'); end if;
   end if;
 
   -- Nothing differs: nothing is written, and the time of the last change does not move.
@@ -291,19 +296,19 @@ begin
      and v_place is not distinct from v_row.place
      and v_interviewer is not distinct from v_row.interviewer_name
      and v_notes is not distinct from v_row.notes then
-    return 'unchanged';
+    return jsonb_build_object('word', 'unchanged');
   end if;
 
   -- Only a new time is held to the time rules: the notes of an interview that
   -- began an hour ago can still be edited.
   if v_at <> v_row.scheduled_at then
-    if v_at < now() - interval '5 minutes' then return 'in_past'; end if;
-    if v_at > now() + interval '366 days' then return 'too_far_ahead'; end if;
+    if v_at < now() - interval '5 minutes' then return jsonb_build_object('word', 'in_past'); end if;
+    if v_at > now() + interval '366 days' then return jsonb_build_object('word', 'too_far_ahead'); end if;
     if exists (
          select 1 from public.hire_interviews i
           where i.application_id = v_application and i.id <> p_interview_id
             and i.status = 'scheduled' and i.scheduled_at = v_at) then
-      return 'duplicate';
+      return jsonb_build_object('word', 'duplicate');
     end if;
   end if;
 
@@ -311,7 +316,8 @@ begin
      set scheduled_at = v_at, duration_minutes = v_duration::smallint, kind = v_kind,
          place = v_place, interviewer_name = v_interviewer, notes = v_notes, updated_at = now()
    where id = p_interview_id;
-  return 'ok';
+  -- v_row is the row as it was locked, before the update: whether the stored time is another instant now.
+  return jsonb_build_object('word', 'ok', 'moved', v_at <> v_row.scheduled_at);
 end $$;
 
 -- ---------------------------------------------------------------------------

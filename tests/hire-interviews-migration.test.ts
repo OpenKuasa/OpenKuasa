@@ -29,7 +29,7 @@ const FUNCTIONS = {
     args: 'uuid, text, integer, text, text, text, text, text',
   },
   hire_reschedule_interview: {
-    returns: 'text',
+    returns: 'jsonb',
     params: 'p_interview_id uuid, p_changes jsonb, p_if_updated_at timestamptz default null',
     args: 'uuid, jsonb, timestamptz',
   },
@@ -56,7 +56,8 @@ const fn = (name: Name) => {
   expect(end, name).toBeGreaterThan(start);
   return flat(writes.slice(start, end));
 };
-// How a function answers with a word: two answer jsonb, four answer text.
+// How a function answers with a word: three answer jsonb (the two that insert, and the one that changes, whose
+// `ok` also says whether the time moved), three answer text.
 const answer = (name: Name, word: string) =>
   FUNCTIONS[name].returns === 'jsonb' ? `return jsonb_build_object('word', '${word}');` : `return '${word}';`;
 // Each of the given pieces is there, and they come in this order. Each is looked for AFTER the one before it:
@@ -272,9 +273,9 @@ describe('hire interviews migration: the writes file', () => {
     inOrder(body, [
       'select i.org_id, i.application_id into v_org, v_application from public.hire_interviews i where i.id = p_interview_id;',
       WRITER,
-      "if p_changes is null or jsonb_typeof(p_changes) <> 'object' then return 'invalid_changes'; end if;",
+      "if p_changes is null or jsonb_typeof(p_changes) <> 'object' then return jsonb_build_object('word', 'invalid_changes'); end if;",
       'if exists (select 1 from jsonb_object_keys(p_changes) as k(key) where k.key <> all (c_keys)) then',
-      "return 'invalid_changes';",
+      "return jsonb_build_object('word', 'invalid_changes');",
       'for update',
     ]);
   });
@@ -289,41 +290,41 @@ describe('hire interviews migration: the writes file', () => {
     expect(first).toContain('select a.org_id, a.outcome into v_app_org, v_outcome from public.hire_applications a where a.id = v_application');
     expect(first).not.toContain('into v_row');
     const second = body.slice(applicationLock, interviewLock);
-    expect(second).toContain("if not found then return 'not_found'; end if;");
+    expect(second).toContain("if not found then return jsonb_build_object('word', 'not_found'); end if;");
     // The interview's application must be in the interview's own workspace, checked under the application's lock
     // and before the interview is read or locked.
     inOrder(second, [
-      "if not found then return 'not_found'; end if;",
-      "if v_app_org is distinct from v_org then return 'not_found'; end if;",
+      "if not found then return jsonb_build_object('word', 'not_found'); end if;",
+      "if v_app_org is distinct from v_org then return jsonb_build_object('word', 'not_found'); end if;",
       'select i.* into v_row from public.hire_interviews i where i.id = p_interview_id',
     ]);
     expect(second).toContain('select i.* into v_row from public.hire_interviews i where i.id = p_interview_id');
-    expect(body.slice(interviewLock, interviewLock + 80)).toContain("if not found then return 'not_found'; end if;");
+    expect(body.slice(interviewLock, interviewLock + 110)).toContain("if not found then return jsonb_build_object('word', 'not_found'); end if;");
   });
 
   test('reschedule: changed, then the two states, then each value, then unchanged, then the time rules, then one update', () => {
     const body = fn('hire_reschedule_interview');
     const interviewLock = body.lastIndexOf('for update');
     const changed = body.indexOf(
-      "if p_if_updated_at is not null and p_if_updated_at is distinct from v_row.updated_at then return 'changed'; end if;",
+      "if p_if_updated_at is not null and p_if_updated_at is distinct from v_row.updated_at then return jsonb_build_object('word', 'changed'); end if;",
     );
     expect(changed).toBeGreaterThan(interviewLock);
     inOrder(body, [
-      "return 'changed';",
-      "if v_row.status <> 'scheduled' then return 'not_scheduled'; end if;",
-      "if v_outcome <> 'active' then return 'not_active'; end if;",
-      "return 'invalid_time';",
-      "return 'invalid_duration';",
-      "return 'invalid_kind';",
-      "return 'invalid_place';",
-      "return 'invalid_interviewer';",
-      "return 'invalid_notes';",
-      "return 'unchanged';",
+      "return jsonb_build_object('word', 'changed');",
+      "if v_row.status <> 'scheduled' then return jsonb_build_object('word', 'not_scheduled'); end if;",
+      "if v_outcome <> 'active' then return jsonb_build_object('word', 'not_active'); end if;",
+      "return jsonb_build_object('word', 'invalid_time');",
+      "return jsonb_build_object('word', 'invalid_duration');",
+      "return jsonb_build_object('word', 'invalid_kind');",
+      "return jsonb_build_object('word', 'invalid_place');",
+      "return jsonb_build_object('word', 'invalid_interviewer');",
+      "return jsonb_build_object('word', 'invalid_notes');",
+      "return jsonb_build_object('word', 'unchanged');",
       'if v_at <> v_row.scheduled_at then',
-      "if v_at < now() - interval '5 minutes' then return 'in_past'; end if;",
-      "if v_at > now() + interval '366 days' then return 'too_far_ahead'; end if;",
+      "if v_at < now() - interval '5 minutes' then return jsonb_build_object('word', 'in_past'); end if;",
+      "if v_at > now() + interval '366 days' then return jsonb_build_object('word', 'too_far_ahead'); end if;",
       "where i.application_id = v_application and i.id <> p_interview_id and i.status = 'scheduled' and i.scheduled_at = v_at",
-      "return 'duplicate';",
+      "return jsonb_build_object('word', 'duplicate');",
       UPDATE,
     ]);
     // Nothing is written on changed, unchanged or duplicate: each returns before the one update.
@@ -333,7 +334,15 @@ describe('hire interviews migration: the writes file', () => {
       'update public.hire_interviews set scheduled_at = v_at, duration_minutes = v_duration::smallint, kind = v_kind, ' +
         'place = v_place, interviewer_name = v_interviewer, notes = v_notes, updated_at = now() where id = p_interview_id;',
     );
-    expect(body.slice(body.indexOf(UPDATE))).toContain("return 'ok';");
+    // The answer says whether the stored time is another instant than it was: v_row still holds the row as it was
+    // locked, before the update. The invitation's "has a new time" rests on this and on nothing the caller sent.
+    expect(body.slice(body.indexOf(UPDATE))).toContain(
+      "return jsonb_build_object('word', 'ok', 'moved', v_at <> v_row.scheduled_at);",
+    );
+    expect(body.match(/'moved'/g)).toHaveLength(1);
+    expect(body).not.toContain("return jsonb_build_object('word', 'ok');");
+    // Never a bare word: every answer of this function is jsonb.
+    expect(body).not.toMatch(/return '[a-z_]+';/);
   });
 
   test('reschedule: unchanged means none of the six values differs', () => {
@@ -342,7 +351,7 @@ describe('hire interviews migration: the writes file', () => {
       'if v_at = v_row.scheduled_at and v_duration = v_row.duration_minutes and v_kind = v_row.kind ' +
         'and v_place is not distinct from v_row.place ' +
         'and v_interviewer is not distinct from v_row.interviewer_name ' +
-        "and v_notes is not distinct from v_row.notes then return 'unchanged'; end if;",
+        "and v_notes is not distinct from v_row.notes then return jsonb_build_object('word', 'unchanged'); end if;",
     );
   });
 
@@ -363,30 +372,30 @@ describe('hire interviews migration: the writes file', () => {
     }
     // Null is refused for the three that cannot be empty.
     expect(body).toContain("if jsonb_typeof(p_changes -> 'scheduled_at') <> 'string'");
-    expect(body).toContain("if jsonb_typeof(p_changes -> 'duration_minutes') <> 'number' then return 'invalid_duration'; end if;");
+    expect(body).toContain("if jsonb_typeof(p_changes -> 'duration_minutes') <> 'number' then return jsonb_build_object('word', 'invalid_duration'); end if;");
     expect(body).toContain("if jsonb_typeof(p_changes -> 'kind') <> 'string' or v_kind not in ('video', 'onsite', 'phone') then");
     // Null clears the other three.
-    expect(body).toContain("if jsonb_typeof(p_changes -> 'place') not in ('string', 'null') then return 'invalid_place'; end if;");
+    expect(body).toContain("if jsonb_typeof(p_changes -> 'place') not in ('string', 'null') then return jsonb_build_object('word', 'invalid_place'); end if;");
     expect(body).toContain("v_place := private.hire_one_line(p_changes ->> 'place');");
     expect(body).toContain(
-      "if jsonb_typeof(p_changes -> 'interviewer_name') not in ('string', 'null') then return 'invalid_interviewer'; end if;",
+      "if jsonb_typeof(p_changes -> 'interviewer_name') not in ('string', 'null') then return jsonb_build_object('word', 'invalid_interviewer'); end if;",
     );
     expect(body).toContain("v_interviewer := private.hire_one_line(p_changes ->> 'interviewer_name');");
-    expect(body).toContain("if jsonb_typeof(p_changes -> 'notes') not in ('string', 'null') then return 'invalid_notes'; end if;");
+    expect(body).toContain("if jsonb_typeof(p_changes -> 'notes') not in ('string', 'null') then return jsonb_build_object('word', 'invalid_notes'); end if;");
     expect(body).toContain("v_notes := nullif(regexp_replace(coalesce(p_changes ->> 'notes', ''), '^\\s+|\\s+$', '', 'g'), '');");
-    expect(body).toContain("if char_length(v_place) > 300 then return 'invalid_place'; end if;");
-    expect(body).toContain("if char_length(v_interviewer) > 120 then return 'invalid_interviewer'; end if;");
-    expect(body).toContain("if char_length(v_notes) > 2000 then return 'invalid_notes'; end if;");
-    expect(body).toContain("if v_number <> trunc(v_number) or v_number < 15 or v_number > 480 then return 'invalid_duration'; end if;");
+    expect(body).toContain("if char_length(v_place) > 300 then return jsonb_build_object('word', 'invalid_place'); end if;");
+    expect(body).toContain("if char_length(v_interviewer) > 120 then return jsonb_build_object('word', 'invalid_interviewer'); end if;");
+    expect(body).toContain("if char_length(v_notes) > 2000 then return jsonb_build_object('word', 'invalid_notes'); end if;");
+    expect(body).toContain("if v_number <> trunc(v_number) or v_number < 15 or v_number > 480 then return jsonb_build_object('word', 'invalid_duration'); end if;");
   });
 
   test('reschedule: a time that is not a real instant with a zone is refused by the shared helper, before any cast here', () => {
     const body = fn('hire_reschedule_interview');
     inOrder(body, [
       "if p_changes ? 'scheduled_at' then",
-      "if jsonb_typeof(p_changes -> 'scheduled_at') <> 'string' then return 'invalid_time'; end if;",
+      "if jsonb_typeof(p_changes -> 'scheduled_at') <> 'string' then return jsonb_build_object('word', 'invalid_time'); end if;",
       "v_at := private.hire_zoned_instant(p_changes ->> 'scheduled_at');",
-      "if v_at is null then return 'invalid_time'; end if;",
+      "if v_at is null then return jsonb_build_object('word', 'invalid_time'); end if;",
     ]);
     expect(body).not.toContain('::timestamptz');
   });
