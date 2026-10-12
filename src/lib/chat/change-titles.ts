@@ -7,6 +7,7 @@
 import { describeFormChange } from '@/lib/hire/application-form';
 import { REASON_LABEL } from '@/lib/hire/application-changes';
 import { STAGE_LABEL } from '@/lib/hire/applications-view';
+import { PIPELINE_CARD_DETAIL, pipelineCardTitle, poolCardDetail, poolCardTitle } from '@/lib/hire/pool';
 import { isRealDate, monthLabel, weekdayName } from '@/lib/people/dates';
 import { blank, hhmm } from '@/lib/people/loose-input';
 import { STATUTORY_FIELDS } from '@/lib/people/statutory-fields';
@@ -170,6 +171,10 @@ const KIND_OF_TOOL: Record<string, ItemKind> = {
   addCandidate: 'candidate',
   updateCandidate: 'candidate',
   deleteCandidate: 'candidate',
+  // The pool lookup's rows, and both pool changes' results, carry the candidate's `id` and `name`.
+  listTalentPool: 'candidate',
+  setPoolStatus: 'candidate',
+  moveToPipeline: 'candidate',
   listEmployees: 'employee',
   getEmployee: 'employee',
   createEmployee: 'employee',
@@ -841,6 +846,14 @@ export function approvalTitle(
       const name = find(i.id, 'candidate');
       return `Delete ${name ? `candidate “${name}”` : UNLISTED_CANDIDATE}?`;
     }
+    case 'setPoolStatus': {
+      const name = find(i.id, 'candidate');
+      return poolCardTitle(name ? `candidate “${name}”` : UNLISTED_CANDIDATE, i.status, i.only_if_outside);
+    }
+    case 'moveToPipeline': {
+      const name = find(i.id, 'candidate');
+      return pipelineCardTitle(name ? `candidate “${name}”` : UNLISTED_CANDIDATE, find(i.job_id, 'job'));
+    }
     case 'createEmployee': return `Add employee “${i.name ?? ''}”?`;
     case 'updateEmployee': return `Save changes to ${the('employee', 'employee')}?`;
     case 'setEmployeeStatus':
@@ -1150,6 +1163,9 @@ export function approvalDetail(
   if (toolName === 'deleteCandidate') {
     return 'Every application, interview and CV file of theirs is deleted too. This cannot be undone.';
   }
+  // Fixed sentences. Which of two same-named people it is, is said on a line of its own, read on the server (hire-pool-gate.ts).
+  if (toolName === 'setPoolStatus') return poolCardDetail(i.status);
+  if (toolName === 'moveToPipeline') return PIPELINE_CARD_DETAIL;
   if (toolName === 'submitClaim') {
     // What will be saved under the person's name. The receipt line comes from the conversation (the file on the
     // question that led to the claim), never from anything the assistant put in the input; unknown, it says nothing.

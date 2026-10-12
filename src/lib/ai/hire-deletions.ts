@@ -48,6 +48,10 @@ const GATE_REASON_STARTS = [
   'Two applications from someone called ',
   'I could not check ',
   'Someone else with the same name appeared ',
+  // The talent pool's gate (hire-pool-gate.ts). Its other sentences begin as the ones above do, on purpose.
+  'One talent pool change at a time.',
+  'This candidate is not in the talent pool',
+  'A candidate with the same name appeared ',
 ];
 export function isGateReason(reason: unknown): boolean {
   return typeof reason === 'string' && GATE_REASON_STARTS.some((start) => reason.startsWith(start));

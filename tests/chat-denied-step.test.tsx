@@ -6,6 +6,10 @@ import { refusalForUser, toPendingApproval, toToolStep } from '@/components/chat
 import {
   AMBIGUOUS_DELETION, DELETION_CHECK_FAILED, NAMESAKE_APPEARED, ONE_DELETION, lookTheSameApplications, lookTheSameCandidates, notLookedUp,
 } from '@/lib/ai/hire-deletions';
+import {
+  AMBIGUOUS_POOL_CHANGE, NOT_IN_POOL_MOVE, ONE_POOL_CHANGE, POOL_CHECK_FAILED, POOL_NAMESAKE_APPEARED, jobNotLookedUp,
+  lookTheSameInPool, poolNotLookedUp,
+} from '@/lib/ai/hire-pool-gate';
 
 /**
  * A change can be stopped in two ways: the user says no on its card, or the
@@ -101,6 +105,14 @@ describe('a change the user approved that a last check stopped', () => {
     expect(html).not.toContain('Not approved');
     expect(html).not.toContain('Not shown for approval');
   });
+  it('reads the same for a talent pool change or a move: the reading does not depend on which tool it was', () => {
+    for (const type of ['tool-setPoolStatus', 'tool-moveToPipeline', 'tool-applyChange']) {
+      const poolPart = { type, toolCallId: 'c1', state: 'output-denied', input: { id: 'x' }, approval: { id: 'r1', approved: true } } as never;
+      const html = renderToStaticMarkup(<ToolStepCard step={toToolStep(poolPart, 'm', 0)!} />);
+      expect(html, type).toContain('Not done');
+      expect(html, type).not.toContain('Not approved');
+    }
+  });
 });
 
 // The reason on a refused change was written for the model: it can name tools and carry a row's id. What the
@@ -118,6 +130,15 @@ describe('the line a person reads on a change the server refused', () => {
     [lookTheSameCandidates('Aisyah Lim'), lookTheSameCandidates('Aisyah Lim')],
     [lookTheSameApplications('Aisyah Lim', 'Barista'), lookTheSameApplications('Aisyah Lim', 'Barista')],
     [DELETION_CHECK_FAILED, DELETION_CHECK_FAILED],
+    [ONE_POOL_CHANGE, 'Only one talent pool change is prepared at a time, and one was already prepared. Ask for this one again afterwards.'],
+    [AMBIGUOUS_POOL_CHANGE, 'More than one record matches that name, so nothing was prepared. Say which one you mean, then ask again.'],
+    [poolNotLookedUp(ID), 'The assistant had not looked this record up, so nothing was prepared. Ask again and it will look it up first.'],
+    [jobNotLookedUp(ID), 'The assistant had not looked this record up, so nothing was prepared. Ask again and it will look it up first.'],
+    [NOT_IN_POOL_MOVE, 'This person is not in the talent pool, so no move was prepared. Add them to the talent pool first, then ask again.'],
+    [POOL_NAMESAKE_APPEARED, 'A last check stopped this, because someone else with the same name had appeared. Nothing was changed. Ask for it again.'],
+    // Written for a person already.
+    [lookTheSameInPool('Zarina Lau'), lookTheSameInPool('Zarina Lau')],
+    [POOL_CHECK_FAILED, POOL_CHECK_FAILED],
   ];
   it.each(each)('%s', (reason, line) => {
     expect(refusalForUser(reason)).toBe(line);

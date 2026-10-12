@@ -31,12 +31,16 @@ import {
   deleteJobInput,
   moveApplication,
   moveApplicationInput,
+  moveToPipeline,
+  moveToPipelineInput,
   rateApplication,
   rateApplicationInput,
   reopenApplication,
   reopenApplicationInput,
   setJobStatus,
   setJobStatusInput,
+  setPoolStatus,
+  setPoolStatusInput,
   updateApplicationForm,
   updateApplicationFormInput,
   updateCandidate,
@@ -409,26 +413,38 @@ export function createHireTools(
     listTalentPool: tool({
       description:
         'List the saved candidates in the talent pool with their headline, skills, location, source. ' +
-        'Email and phone are returned only when includeContact is set. Filter by a skill, a location or their pool status.',
+        "Each row has the candidate's id, which setPoolStatus and moveToPipeline take. " +
+        'Email and phone are returned only when includeContact is set. Filter by a name, a skill, a location or their pool status. ' +
+        'If the result has "several_match", the name fits more than one person: prepare no change and ask the user which one.',
       inputSchema: z.object({
+        name: z.string().optional().describe('Only pool members whose name contains this, in any letter case.'),
         skill: z.string().optional().describe('Only candidates with this skill. Part of the skill is enough.'),
         location: z.string().optional().describe('Only candidates in this place.'),
         poolStatus: z.enum(['available', 'passive', 're_engaged']).optional().describe('Only this pool status.'),
         includeContact,
         limit,
       }),
-      execute: async ({ skill, location, poolStatus, includeContact: withContact, limit: requested }) =>
+      execute: async ({ name, skill, location, poolStatus, includeContact: withContact, limit: requested }) =>
         safe('listTalentPool', async () => {
           const rows = (await data.listCandidates()).filter(
             (c) =>
               c.pool_status !== 'none' &&
               (!poolStatus || c.pool_status === poolStatus) &&
+              matchesText(c.name, name) &&
               matchesText(c.location, location) &&
               (!skill?.trim() || c.skills.some((s) => matchesText(s, skill))),
           );
           return {
             total: rows.length,
+            // A rule in the prompt alone was not enough: the worker picked the first match. So the result says it.
+            // No "look again": a change from a second lookup in the same turn is refused, so the model must ask.
+            ...(name?.trim() && rows.length > 1 && {
+              several_match:
+                `More than one person in the talent pool matches this name: ${rows.map((c) => c.name).sort().slice(0, 10).join(', ')}. ` +
+                'Do not choose one. Prepare no change: name them and ask the user which one they mean.',
+            }),
             candidates: rows.slice(0, rowLimit(requested, 20)).map((c) => ({
+              id: c.id,
               name: c.name,
               headline: c.headline,
               skills: c.skills,
@@ -444,7 +460,7 @@ export function createHireTools(
     listCandidates: tool({
       description:
         'List candidates on file, newest first, by name, skill or location. ' +
-        "Each row has the candidate's id, which updateCandidate and deleteCandidate take. " +
+        "Each row has the candidate's id, which updateCandidate, deleteCandidate, setPoolStatus and moveToPipeline take, and pool_status (none means not in the talent pool). " +
         'Email and phone are returned only when includeContact is set. ' +
         'If the result has "several_match", the name fits more than one person: prepare no change and ask the user which one.',
       inputSchema: z.object({
@@ -488,6 +504,7 @@ export function createHireTools(
               location: c.location,
               skills: c.skills,
               source: c.source,
+              pool_status: c.pool_status,
               applications: counts.get(c.id) ?? 0,
               ...(withContact && { email: c.email, phone: c.phone }),
             })),
@@ -734,6 +751,21 @@ export function createHireTools(
         "Use the candidate's id from listCandidates.",
       inputSchema: deleteCandidateInput,
       execute: async (input) => deleteCandidate(ctx, input),
+    }),
+    // Both results carry the candidate's `id` and `name`, which is how the approval cards learn who it was.
+    setPoolStatus: tool({
+      description:
+        'Put ONE candidate in the talent pool, change their pool status, or remove them from the pool (status none; they stay on file). ' +
+        "Use the candidate's id from listCandidates or listTalentPool. When adding, set only_if_outside.",
+      inputSchema: setPoolStatusInput,
+      execute: async (input) => setPoolStatus(ctx, input),
+    }),
+    moveToPipeline: tool({
+      description:
+        'Give ONE talent pool member a new application at Applied for an open or paused job, and mark them Re-engaged. ' +
+        "Use the candidate's id from listCandidates or listTalentPool and the job's id from listJobs.",
+      inputSchema: moveToPipelineInput,
+      execute: async (input) => moveToPipeline(ctx, input),
     }),
   };
 }

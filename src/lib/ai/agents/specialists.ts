@@ -31,11 +31,18 @@ import {
   cardShown,
   deniedHere,
   notLookedUp,
-  oneDeletionRefusal,
   partsOf,
   thisTurn,
   type DeletionGate,
 } from '@/lib/ai/hire-deletions';
+import {
+  AMBIGUOUS_POOL_CHANGE,
+  HIRE_POOL_TOOL_NAMES,
+  ONE_POOL_CHANGE,
+  jobNotLookedUp,
+  poolCardDecision,
+  poolNotLookedUp,
+} from '@/lib/ai/hire-pool-gate';
 import type { ProductToolkit } from '@/lib/ai/products';
 import { logModelCall, logModelError, modelErrorCode } from '@/lib/ai/call-log';
 import { getModel, pickModelId } from '@/lib/ai/provider';
@@ -98,16 +105,25 @@ const ONE_CANDIDATE_CHANGE = 'One candidate change at a time. One is already pre
 
 /** The two deletions: one a turn, across every delegation in it, and never from a lookup that said several rows match. */
 const DELETIONS = new Set<string>(HIRE_DELETE_TOOL_NAMES);
+/** The two talent pool changes: held to one a turn in the same way, and counted apart from deletions. */
+const POOL_CHANGES = new Set<string>(HIRE_POOL_TOOL_NAMES);
+
+/** The kinds of change held to one a turn. Each is counted on its own: a deletion and a pool change may share a turn. */
+type Limited = 'deletion' | 'pool';
+const limitedKind = (action: string): Limited | null =>
+  DELETIONS.has(action) ? 'deletion' : POOL_CHANGES.has(action) ? 'pool' : null;
+const ONE_A_TURN: Record<Limited, string> = { deletion: ONE_DELETION, pool: ONE_POOL_CHANGE };
+
 /**
- * What the turn in progress holds, for the two rules about a deletion. A turn is everything after the last thing
- * the user said, and can span two requests (the one that shows a card, and the one with the user's answer). So
- * this is read from the conversation's messages when a request starts, and added to as the request goes.
+ * What the turn in progress holds, for the rules about a change held to one a turn. A turn is everything after the
+ * last thing the user said, and can span two requests (the one that shows a card, and the one with the user's
+ * answer). So this is read from the conversation's messages when a request starts, and added to as the request goes.
  */
 type TurnState = {
-  /** Deletions a specialist prepared in this turn, by proposal id. */
-  prepared: Set<string>;
-  /** Deletions put in front of the user in this turn, whatever they answered: proposal id, and the call that asked. */
-  shown: Map<string, unknown>;
+  /** Such changes a specialist prepared in this turn, by kind and proposal id. */
+  prepared: Record<Limited, Set<string>>;
+  /** Such changes put in front of the user in this turn, whatever they answered: by kind, proposal id, and the call that asked. */
+  shown: Record<Limited, Map<string, unknown>>;
   /**
    * Every id a lookup returned while saying its name fits several rows, whichever delegation ran it. A later
    * delegation that looks the same person up by a fuller name must not get past the question the user was owed.
@@ -132,15 +148,17 @@ function ambiguousIn(results: ToolResult[]): string[] {
   return [...new Set(results.flatMap((r) => idsIn(r.output).filter((id) => ambiguousLookup([r.output], id))))];
 }
 
-const isDeletionProposal = (proposal: Proposal | undefined): proposal is Proposal => !!proposal && DELETIONS.has(proposal.action);
-
 /**
  * The turn's state as a request finds it. The browser sends the chat back whole, so the turn's earlier request is
  * in these messages: what a specialist reported (its prepared changes and its ambiguous lookups), and each
  * `applyChange` call. A call the gate itself denied was never shown to the user and is not counted.
  */
 function turnStateFrom(messages: readonly ModelMessage[], proposals: Map<string, Proposal>): TurnState {
-  const state: TurnState = { prepared: new Set(), shown: new Map(), ambiguous: new Set() };
+  const state: TurnState = {
+    prepared: { deletion: new Set(), pool: new Set() },
+    shown: { deletion: new Map(), pool: new Map() },
+    ambiguous: new Set(),
+  };
   const turn = thisTurn(messages);
   const denied = deniedHere(turn);
   for (const message of turn) {
@@ -149,11 +167,16 @@ function turnStateFrom(messages: readonly ModelMessage[], proposals: Map<string,
         const output = part.output as { type?: unknown; value?: unknown } | null | undefined;
         const report = output?.type === 'json' ? output.value : null;
         if (!isDelegation(report)) continue;
-        for (const proposal of report.proposals) if (isDeletionProposal(proposal)) state.prepared.add(proposal.id);
+        for (const proposal of report.proposals) {
+          const kind = limitedKind(proposal.action);
+          if (kind) state.prepared[kind].add(proposal.id);
+        }
         for (const id of Array.isArray(report.ambiguous) ? report.ambiguous : []) if (typeof id === 'string') state.ambiguous.add(id);
       } else if (message.role === 'assistant' && part.type === 'tool-call' && part.toolName === APPLY_TOOL && !denied.has(part.toolCallId)) {
         const id = (part.input as { proposalId?: unknown } | null | undefined)?.proposalId;
-        if (typeof id === 'string' && isDeletionProposal(proposals.get(id))) state.shown.set(id, part.toolCallId);
+        const proposal = typeof id === 'string' ? proposals.get(id) : undefined;
+        const kind = proposal ? limitedKind(proposal.action) : null;
+        if (typeof id === 'string' && kind) state.shown[kind].set(id, part.toolCallId);
       }
     }
   }
@@ -161,28 +184,34 @@ function turnStateFrom(messages: readonly ModelMessage[], proposals: Map<string,
 }
 
 /**
- * The approval for `applyChange`: a card for the user, except a deletion beside another deletion of the same turn,
- * which is denied before a card exists. "Another" is one a specialist prepared in this turn or one already put to
- * the user in it, under a different proposal; the same proposal asked for again under a new call is another too.
- * The SDK asks again about a call the user approved, when their answer arrives: same proposal, same call, so it passes.
+ * The approval for `applyChange`: a card for the user, except a change of a kind held to one a turn (a deletion, a
+ * talent pool change) beside another of the same kind in the same turn, which is denied before a card exists.
+ * "Another" is one a specialist prepared in this turn or one already put to the user in it, under a different
+ * proposal; the same proposal asked for again under a new call is another too. The SDK asks again about a call the
+ * user approved, when their answer arrives: same proposal, same call, so it passes.
  */
 function applyGate(products: ProductToolkit[], team: TeamContext, turn: TurnState): DeletionGate {
   return async (input, { toolCallId, messages }) => {
     const id = (input as { proposalId?: unknown } | null)?.proposalId;
     const proposal = typeof id === 'string' ? team.proposals.get(id) : undefined;
-    if (!isDeletionProposal(proposal)) return 'user-approval';
+    const kind = proposal ? limitedKind(proposal.action) : null;
+    if (!proposal || !kind) return 'user-approval';
+    const [prepared, shown] = [turn.prepared[kind], turn.shown[kind]];
     const another =
-      [...turn.prepared, ...turn.shown.keys()].some((other) => other !== proposal.id) ||
-      (turn.shown.has(proposal.id) && turn.shown.get(proposal.id) !== toolCallId);
-    if (another) return { type: 'denied', reason: ONE_DELETION };
+      [...prepared, ...shown.keys()].some((other) => other !== proposal.id) ||
+      (shown.has(proposal.id) && shown.get(proposal.id) !== toolCallId);
+    if (another) return { type: 'denied', reason: ONE_A_TURN[kind] };
     // Asked again here, as it was when the change was prepared: the rows may have changed since, or the proposal may be an old one.
     // This is where the card gets its identifying line: on the approval request, which no model is sent.
-    const check = products.find((p) => p.key === proposal.product)?.checkDeletion;
-    const decision = check
-      ? cardDecision(await check(proposal.action, (proposal.input as { id?: unknown } | null)?.id), cardShown(messages, toolCallId))
-      : 'user-approval';
+    const product = products.find((p) => p.key === proposal.product);
+    const target = (proposal.input as { id?: unknown } | null)?.id;
+    const was = cardShown(messages, toolCallId);
+    const decision =
+      kind === 'deletion'
+        ? (product?.checkDeletion ? cardDecision(await product.checkDeletion(proposal.action, target), was) : 'user-approval')
+        : (product?.checkPoolChange ? poolCardDecision(await product.checkPoolChange(proposal.action, target), was) : 'user-approval');
     if (typeof decision === 'object' && decision.type === 'denied') return decision;
-    turn.shown.set(proposal.id, toolCallId);
+    shown.set(proposal.id, toolCallId);
     return decision;
   };
 }
@@ -228,6 +257,11 @@ function specialistTools(
         const checked = DELETIONS.has(name)
           ? await product.checkDeletion?.(name, (input as { id?: unknown } | null)?.id)
           : undefined;
+        // The same for a talent pool change: is a move's person in the pool, and can they be told from a namesake.
+        // Read here, with the other wait, so everything below still runs without a pause.
+        const checkedPool = POOL_CHANGES.has(name)
+          ? await product.checkPoolChange?.(name, (input as { id?: unknown } | null)?.id)
+          : undefined;
         // A specialist stops after the step in which it prepared a change, but one step can hold
         // several calls. Each card is a decision about one person: only the first is prepared.
         if (APPLICATION_CHANGES.has(name) && prepared.length > 0) {
@@ -236,9 +270,10 @@ function specialistTools(
         if (CANDIDATE_CHANGES.has(name) && prepared.length > 0) {
           return { prepared: false, error: ONE_CANDIDATE_CHANGE };
         }
-        if (DELETIONS.has(name)) {
-          const refusal = oneDeletionRefusal(prepared.length, turn.prepared.size + turn.shown.size);
-          if (refusal) return { prepared: false, error: refusal };
+        // One of its kind a turn, across every delegation in it: nothing else prepared here, and none of that kind prepared or shown earlier in the turn.
+        const limited = limitedKind(name);
+        if (limited && (prepared.length > 0 || turn.prepared[limited].size + turn.shown[limited].size > 0)) {
+          return { prepared: false, error: ONE_A_TURN[limited] };
         }
         if (product.key === 'people' && prepared.length > 0) {
           return { prepared: false, error: ONE_PEOPLE_CHANGE };
@@ -289,17 +324,35 @@ function specialistTools(
             };
           }
         }
+        if (POOL_CHANGES.has(name)) {
+          // An id from listCandidates or listTalentPool, in this delegation or an earlier turn; never one seen as something else.
+          const id = (input as { id?: unknown } | null)?.id;
+          const asCandidate =
+            typeof id === 'string' && (team.names?.[`candidate:${id}`] || nameIn(results)(id, 'candidate'));
+          if (!asCandidate) {
+            return { prepared: false, error: poolNotLookedUp(id) };
+          }
+        }
+        if (name === 'moveToPipeline') {
+          const jobId = (input as { job_id?: unknown } | null)?.job_id;
+          const asJob =
+            typeof jobId === 'string' && (team.names?.[`job:${jobId}`] || nameIn(results)(jobId, 'job'));
+          if (!asJob) {
+            return { prepared: false, error: jobNotLookedUp(jobId) };
+          }
+        }
         // A lookup in this turn that holds the id and says several rows match: the model must ask, not choose.
         const target = (input as { id?: unknown } | null)?.id;
         if (
-          DELETIONS.has(name) &&
+          limited &&
           ((typeof target === 'string' && turn.ambiguous.has(target)) || ambiguousLookup(results.map((r) => r.output), target))
         ) {
-          return { prepared: false, error: AMBIGUOUS_DELETION };
+          return { prepared: false, error: limited === 'deletion' ? AMBIGUOUS_DELETION : AMBIGUOUS_POOL_CHANGE };
         }
         // Last, the server's own rows (read above): two rows of one name that look the same cannot be told apart on a card.
         // When they can, the card says which one it is; that line is added when the card is shown, not kept here.
         if (checked && !checked.ok) return { prepared: false, error: checked.refusal };
+        if (checkedPool && !checkedPool.ok) return { prepared: false, error: checkedPool.refusal };
         // Named from what this specialist just looked up, else from earlier turns.
         const find = (id: unknown, kind?: ItemKind) =>
           nameIn(results)(id, kind) ??
@@ -314,7 +367,7 @@ function specialistTools(
         };
         team.proposals.set(proposal.id, proposal);
         prepared.push(proposal);
-        if (DELETIONS.has(name)) turn.prepared.add(proposal.id);
+        if (limited) turn.prepared[limited].add(proposal.id);
         return { prepared: true, proposalId: proposal.id, card: proposal.title };
       },
     });
@@ -409,7 +462,7 @@ function askTool(product: ProductToolkit, team: TeamContext, turn: TurnState): T
 const AREA: Record<ProductToolkit['key'], string> = {
   reach: 'marketing (ads, campaigns, creatives, leads, lead forms, appointments, ad settings)',
   crm: 'the CRM (contacts, deals, pipelines and their stages)',
-  hire: 'hiring (jobs, candidates, applications, the hiring funnel, interviews, the talent pool; it can read one candidate\'s uploaded CV and give a verdict on it; it can prepare moving, rejecting, reopening or rating one application at a time; it can prepare adding or editing one candidate at a time; it can prepare deleting one application or one candidate at a time)',
+  hire: 'hiring (jobs, candidates, applications, the hiring funnel, interviews, the talent pool; it can read one candidate\'s uploaded CV and give a verdict on it; it can prepare moving, rejecting, reopening or rating one application at a time; it can prepare adding or editing one candidate at a time; it can prepare deleting one application or one candidate at a time; it can prepare a talent pool change for one candidate at a time)',
   people: 'HR (existing staff, leave, time-off, claims, overtime, attendance, payroll, performance; it can prepare deciding leave, claims and overtime, correcting attendance, and editing staff and departments, one change at a time)',
 };
 
@@ -538,9 +591,9 @@ export function createTeamTools(
   });
   return {
     tools,
-    // Only a team that can prepare a deletion needs the gate; any other keeps the plain card.
+    // Only a team that can prepare a change held to one a turn needs the gate; any other keeps the plain card.
     toolApproval: {
-      [APPLY_TOOL]: products.some((p) => Object.keys(p.write).some((name) => DELETIONS.has(name)))
+      [APPLY_TOOL]: products.some((p) => Object.keys(p.write).some((name) => limitedKind(name) !== null))
         ? applyGate(products, team, turn)
         : 'user-approval',
     },

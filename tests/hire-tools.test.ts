@@ -6,6 +6,7 @@ import { CRM_WRITE_TOOL_NAMES } from '@/lib/ai/crm-tools';
 import { HIRE_WRITE_TOOL_NAMES, PEOPLE_WRITE_TOOL_NAMES, REACH_WRITE_TOOL_NAMES } from '@/lib/ai/products';
 import {
   addCandidateInput, updateCandidateInput, deleteApplicationInput, deleteCandidateInput,
+  setPoolStatusInput, moveToPipelineInput,
   closeApplicationInput, createJobInput, deleteJobInput, moveApplicationInput, rateApplicationInput, reopenApplicationInput,
   setJobStatusInput, updateApplicationFormInput, updateCareersPageInput, updateJobInput,
 } from '@/lib/hire/capabilities';
@@ -20,7 +21,7 @@ import type { CvRead, CvReader } from '@/lib/hire/cv-read';
 import { HIRE_READ_CAP, type HireData } from '@/lib/hire/types';
 
 // The real schemas; only the four application changes are recorded instead of run.
-const applied = vi.hoisted(() => ({ move: vi.fn(), close: vi.fn(), reopen: vi.fn(), rate: vi.fn(), addCandidate: vi.fn(), updateCandidate: vi.fn(), deleteApplication: vi.fn(), deleteCandidate: vi.fn() }));
+const applied = vi.hoisted(() => ({ move: vi.fn(), close: vi.fn(), reopen: vi.fn(), rate: vi.fn(), addCandidate: vi.fn(), updateCandidate: vi.fn(), deleteApplication: vi.fn(), deleteCandidate: vi.fn(), setPoolStatus: vi.fn(), moveToPipeline: vi.fn() }));
 vi.mock('@/lib/hire/capabilities', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/hire/capabilities')>()),
   moveApplication: applied.move,
@@ -31,6 +32,8 @@ vi.mock('@/lib/hire/capabilities', async (importOriginal) => ({
   updateCandidate: applied.updateCandidate,
   deleteApplication: applied.deleteApplication,
   deleteCandidate: applied.deleteCandidate,
+  setPoolStatus: applied.setPoolStatus,
+  moveToPipeline: applied.moveToPipeline,
 }));
 
 const NOW = new Date('2026-10-10T04:00:00Z');
@@ -310,7 +313,7 @@ describe('listCandidates', () => {
     const stored = await data.listCandidates();
     expect(candidates[0].id).toBe(stored[0].id);
     for (const row of candidates) {
-      expect(Object.keys(row).sort()).toEqual(['applications', 'headline', 'id', 'location', 'name', 'skills', 'source']);
+      expect(Object.keys(row).sort()).toEqual(['applications', 'headline', 'id', 'location', 'name', 'pool_status', 'skills', 'source']);
     }
     const apps = await data.listApplications();
     const counted = apps.filter((a) => a.candidate_id === candidates[0].id).length;
@@ -417,13 +420,20 @@ describe('listCandidates', () => {
     for (const c of byPlace.candidates) expect(c.location).toBe(target.location);
     expect((await rows({ name: 'zzzz-nobody' })).total).toBe(0);
   });
-  it('does not drop the people who are not in the talent pool, and never shows a pool status or a path', async () => {
+  it('does not drop the people who are not in the talent pool, says who is in it, and never shows a path', async () => {
     const stored = await data.listCandidates();
     const outside = stored.find((c) => c.pool_status === 'none');
+    const inside = stored.find((c) => c.pool_status !== 'none');
     expect(outside).toBeDefined();
+    expect(inside).toBeDefined();
     const found = await rows({ name: outside!.name, limit: 50 });
-    expect(found.candidates.map((c: { id: string }) => c.id)).toContain(outside!.id);
-    expect(JSON.stringify(await rows({ limit: 50, includeContact: true }))).not.toMatch(/pool_status|cv_path|\.pdf/);
+    expect(found.candidates.find((c: { id: string }) => c.id === outside!.id)).toMatchObject({ pool_status: 'none' });
+    const pooled = await rows({ name: inside!.name, limit: 50 });
+    expect(pooled.candidates.find((c: { id: string }) => c.id === inside!.id)).toMatchObject({ pool_status: inside!.pool_status });
+    const all = await rows({ limit: 50, includeContact: true });
+    for (const c of all.candidates) expect(['none', 'available', 'passive', 're_engaged']).toContain(c.pool_status);
+    // A storage path never leaves the server, with or without contact details.
+    expect(JSON.stringify(all)).not.toMatch(/cv_path|\.pdf/);
   });
   it('says the lookup failed rather than listing nothing', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -435,7 +445,7 @@ describe('listCandidates', () => {
   });
   it('says what it returns, and that contact details need includeContact', () => {
     expect((tools.listCandidates as unknown as { description: string }).description).toBe(
-      'List candidates on file, newest first, by name, skill or location. Each row has the candidate\'s id, which updateCandidate and deleteCandidate take. Email and phone are returned only when includeContact is set. If the result has "several_match", the name fits more than one person: prepare no change and ask the user which one.',
+      'List candidates on file, newest first, by name, skill or location. Each row has the candidate\'s id, which updateCandidate, deleteCandidate, setPoolStatus and moveToPipeline take, and pool_status (none means not in the talent pool). Email and phone are returned only when includeContact is set. If the result has "several_match", the name fits more than one person: prepare no change and ask the user which one.',
     );
   });
 });
@@ -455,6 +465,7 @@ describe('hire change tools', () => {
       'createJob', 'updateJob', 'setJobStatus', 'deleteJob', 'updateCareersPage', 'updateApplicationForm',
       'moveApplication', 'rejectApplication', 'reopenApplication', 'rateApplication',
       'addCandidate', 'updateCandidate', 'deleteApplication', 'deleteCandidate',
+      'setPoolStatus', 'moveToPipeline',
     ]);
   });
   it('gives a writer nothing beyond the lookups except the listed change tools, so each one needs approval', () => {
@@ -494,6 +505,8 @@ describe('hire change tools', () => {
     expect(t.updateCandidate.inputSchema).toBe(updateCandidateInput);
     expect(t.deleteApplication.inputSchema).toBe(deleteApplicationInput);
     expect(t.deleteCandidate.inputSchema).toBe(deleteCandidateInput);
+    expect(t.setPoolStatus.inputSchema).toBe(setPoolStatusInput);
+    expect(t.moveToPipeline.inputSchema).toBe(moveToPipelineInput);
   });
   it('describes the two candidate changes as agreed', () => {
     const t = createHireTools(data, NOW, { ctx, canWrite: true }) as Record<string, { description: string }>;
@@ -583,6 +596,31 @@ describe('hire change tools', () => {
     expect(jobs[0]).not.toHaveProperty('description');
     expect(jobs[0].description_excerpt.length).toBeLessThanOrEqual(161);
     expect(jobs[0]).toHaveProperty('closes_on');
+  });
+  it('describes the two pool changes as agreed', () => {
+    const t = createHireTools(data, NOW, { ctx, canWrite: true }) as Record<string, { description: string }>;
+    expect(t.setPoolStatus.description).toBe('Put ONE candidate in the talent pool, change their pool status, or remove them from the pool (status none; they stay on file). Use the candidate\'s id from listCandidates or listTalentPool. When adding, set only_if_outside.');
+    expect(t.moveToPipeline.description).toBe('Give ONE talent pool member a new application at Applied for an open or paused job, and mark them Re-engaged. Use the candidate\'s id from listCandidates or listTalentPool and the job\'s id from listJobs.');
+  });
+  it('runs each pool change through its capability with the input unchanged', async () => {
+    const t = createHireTools(data, NOW, { ctx, canWrite: true }) as Record<
+      string,
+      { execute: (i: unknown, o: unknown) => Promise<unknown> }
+    >;
+    const id = '33333333-3333-4333-8333-333333333333';
+    const out = { ok: true, data: { id, name: 'Zarina binti Hashim', from: 'none', to: 'available', message: 'Added Zarina binti Hashim to the talent pool as Available.' } };
+    const cases: [string, ReturnType<typeof vi.fn>, Record<string, unknown>][] = [
+      ['setPoolStatus', applied.setPoolStatus, { id, status: 'available', only_if_outside: true }],
+      ['moveToPipeline', applied.moveToPipeline, { id, job_id: '55555555-5555-4555-8555-555555555555' }],
+    ];
+    for (const [name, fn, input] of cases) {
+      fn.mockReset();
+      fn.mockResolvedValue(out);
+      expect(await t[name].execute(input, { toolCallId: 't', messages: [] }), name).toBe(out);
+      expect(fn, name).toHaveBeenCalledTimes(1);
+      expect(fn.mock.calls[0][0], name).toBe(ctx);
+      expect(fn.mock.calls[0][1], name).toBe(input);
+    }
   });
 });
 
@@ -967,5 +1005,49 @@ describe('listApplications by candidate', () => {
     };
     expect(description).toMatch(/candidate'?s? name/i);
     expect(inputSchema.shape.candidate.description).toBe('Only applications from candidates whose name contains this.');
+  });
+});
+
+describe('listTalentPool, for the pool changes', () => {
+  const pool = (input: Record<string, unknown>, source: HireData = data) =>
+    (createHireTools(source, NOW).listTalentPool as unknown as { execute: (i: unknown, o: unknown) => Promise<Loose> })
+      .execute(input, { toolCallId: 't', messages: [] });
+  const person = (id: string, name: string, pool_status: string) => ({
+    id, name, email: `${id}@example.com`, phone: '+60 12-345 6789', headline: 'Driver', location: 'Klang', skills: ['GDL'],
+    source: 'Referral', pool_status, created_at: '2026-10-01T00:00:00Z',
+  });
+  const three: HireData = {
+    ...createSeedHireData(NOW),
+    listCandidates: async () => [person('z1', 'Zarina binti Hashim', 'passive'), person('z2', 'Zarina Lau', 'available'), person('z3', 'Zarina Outside', 'none')] as never,
+  };
+
+  it('gives each row the candidate\'s id, which the two pool tools take, and still no contact detail or path', async () => {
+    const out = await pool({ limit: 50 });
+    expect(out.candidates.length).toBeGreaterThan(0);
+    const stored = new Map((await data.listCandidates()).map((c) => [c.id, c]));
+    for (const row of out.candidates) {
+      expect(stored.get(row.id)?.name, row.id).toBe(row.name);
+      expect(stored.get(row.id)?.pool_status).not.toBe('none');
+    }
+    expect(JSON.stringify(out)).not.toMatch(/cv_path|\.pdf|@demo\.openkuasa\.com|\+60/);
+  });
+  it('narrows by name, and says so when the name fits more than one pool member', async () => {
+    const one = await pool({ name: 'hashim' }, three);
+    expect(one.candidates.map((c: { id: string }) => c.id)).toEqual(['z1']);
+    expect(one.several_match).toBeUndefined();
+    const two = await pool({ name: 'zarina' }, three);
+    // Someone outside the pool is not a match here.
+    expect(two.candidates.map((c: { id: string }) => c.id)).toEqual(['z1', 'z2']);
+    expect(two.several_match).toBe(
+      'More than one person in the talent pool matches this name: Zarina Lau, Zarina binti Hashim. ' +
+        'Do not choose one. Prepare no change: name them and ask the user which one they mean.',
+    );
+    // With no name asked for, a long list is just a list.
+    expect((await pool({}, three)).several_match).toBeUndefined();
+  });
+  it('says what it returns', () => {
+    expect((createHireTools(data, NOW).listTalentPool as unknown as { description: string }).description).toBe(
+      'List the saved candidates in the talent pool with their headline, skills, location, source. Each row has the candidate\'s id, which setPoolStatus and moveToPipeline take. Email and phone are returned only when includeContact is set. Filter by a name, a skill, a location or their pool status. If the result has "several_match", the name fits more than one person: prepare no change and ask the user which one.',
+    );
   });
 });
