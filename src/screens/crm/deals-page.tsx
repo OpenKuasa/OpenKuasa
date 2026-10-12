@@ -16,6 +16,15 @@ import {
 } from '@/lib/crm/deals';
 import type { CrmDealActions, CrmFormState } from '@/lib/crm/form-state';
 import {
+  dealBilling,
+  dealInvoiceChoices,
+  listDealInvoiceLinks,
+  readDealInvoiceIds,
+  setDealInvoices,
+} from '@/lib/crm/invoice-links';
+import { rm } from '@/lib/finance/format';
+import { listInvoices } from '@/lib/finance/invoices';
+import {
   addCrmPipelineStage,
   createCrmPipeline,
   deleteCrmPipeline,
@@ -72,7 +81,12 @@ async function saveDealAction(_prev: CrmFormState, formData: FormData) {
 
   return runWrite(formData, 'Could not save the deal.', async () => {
     if (formData.has('dealId')) {
-      await updateCrmDeal(supabase, orgId, readDealId(formData), parseCrmDealForm(formData));
+      const dealId = readDealId(formData);
+      // Read before anything is written, so a bad choice changes nothing.
+      const invoiceIds = readDealInvoiceIds(formData);
+      await updateCrmDeal(supabase, orgId, dealId, parseCrmDealForm(formData));
+      // Undefined when the form did not show the picker: the links are left alone.
+      if (invoiceIds !== undefined) await setDealInvoices(supabase, orgId, dealId, invoiceIds, userId);
     } else {
       // Whoever adds a deal starts as its owner.
       await createCrmDeal(supabase, orgId, parseCrmDealForm(formData), userId);
@@ -252,10 +266,14 @@ export default async function CrmDealsPage() {
     pipelines: Awaited<ReturnType<typeof listCrmPipelines>>;
     deals: Awaited<ReturnType<typeof listCrmDeals>>;
     contacts: Awaited<ReturnType<typeof listCrmDealContacts>>;
+    billing: {
+      invoices: Awaited<ReturnType<typeof listInvoices>>;
+      links: Awaited<ReturnType<typeof listDealInvoiceLinks>>;
+    } | null;
   } | null = null;
   try {
     // Fetched together: each trip to the database costs about the same.
-    const [pipelines, deals, contacts] = await Promise.all([
+    const [pipelines, deals, contacts, billing] = await Promise.all([
       listCrmPipelines(supabase, orgId),
       listCrmDeals(supabase, orgId, DEALS_LOADED),
       // Only the form needs these; the board still shows if they cannot load.
@@ -265,8 +283,15 @@ export default async function CrmDealsPage() {
             return [];
           })
         : [],
+      // Linked invoices are an extra; the board still shows if they cannot load.
+      Promise.all([listInvoices({ client: supabase, orgId }), listDealInvoiceLinks(supabase, orgId)])
+        .then(([invoices, links]) => ({ invoices, links }))
+        .catch((error) => {
+          console.error('[crm/deals] could not load linked invoices', error);
+          return null;
+        }),
     ]);
-    live = { pipelines, deals, contacts };
+    live = { pipelines, deals, contacts, billing };
   } catch (error) {
     // The CRM migration is applied to a database separately from a deploy, so
     // the tables can be missing for a while. Keep the page up meanwhile.
@@ -288,10 +313,14 @@ export default async function CrmDealsPage() {
     }
   }
 
+  const { billing } = live;
+  const totals = billing ? dealBilling(billing.links, billing.invoices) : {};
+
   return (
     <DealsScreen
       pipelines={live.pipelines}
-      deals={live.deals.deals}
+      deals={live.deals.deals.map((deal) => (totals[deal.id] ? { ...deal, billing: totals[deal.id] } : deal))}
+      invoices={canWrite && billing ? dealInvoiceChoices(billing.invoices, billing.links, rm) : undefined}
       totalDeals={live.deals.total}
       contacts={live.contacts}
       actions={canWrite ? ACTIONS : undefined}

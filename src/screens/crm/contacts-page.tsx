@@ -18,6 +18,12 @@ import {
   readFollowUpId,
 } from '@/lib/crm/follow-ups';
 import { importCrmContacts, planImport, type ImportMapping } from '@/lib/crm/import';
+import {
+  listBillingCustomers,
+  readBillingCustomerId,
+  setContactBillingCustomer,
+  type BillingCustomerChoice,
+} from '@/lib/crm/invoice-links';
 import type { CrmContactActions, CrmFormState } from '@/lib/crm/form-state';
 import { runCrmWrite } from '@/lib/crm/run-write';
 import { createClient } from '@/lib/supabase/server';
@@ -71,16 +77,20 @@ async function saveContactAction(_prev: CrmFormState, formData: FormData) {
   const supabase = await createClient();
 
   return runWrite(formData, 'Could not save the contact.', async () => {
+    // Undefined when the form did not offer the picker: the link is left alone.
+    const customerId = readBillingCustomerId(formData);
     if (formData.has('contactId')) {
-      await updateCrmContact(
-        supabase,
-        orgId,
-        readContactId(formData),
-        parseCrmContactFields(formData),
-      );
+      const contactId = readContactId(formData);
+      await updateCrmContact(supabase, orgId, contactId, parseCrmContactFields(formData));
+      if (customerId !== undefined) {
+        await setContactBillingCustomer(supabase, orgId, contactId, customerId);
+      }
     } else {
       // Whoever adds a contact starts as the person in charge of it.
-      await createCrmContact(supabase, parseCrmContactForm(formData, orgId, userId));
+      await createCrmContact(supabase, {
+        ...parseCrmContactForm(formData, orgId, userId),
+        ...(customerId ? { finance_customer_id: customerId } : {}),
+      });
     }
   });
 }
@@ -155,15 +165,23 @@ export default async function CrmContactsPage() {
 
   let live: Awaited<ReturnType<typeof listCrmContacts>> | null = null;
   let followUps: Awaited<ReturnType<typeof listOpenFollowUps>> = {};
+  let billingCustomers: BillingCustomerChoice[] = [];
   try {
     // Fetched together: each trip to the database costs about the same.
-    [live, followUps] = await Promise.all([
+    [live, followUps, billingCustomers] = await Promise.all([
       listCrmContacts(supabase, orgId, CONTACTS_LOADED),
       // Follow-ups are an extra; the contacts still show if they cannot load.
       listOpenFollowUps(supabase, orgId, CONTACTS_LOADED).catch((error) => {
         console.error('[crm/contacts] could not load follow-ups', error);
         return {};
       }),
+      // Only the form needs these; the contacts still show if they cannot load.
+      role === 'viewer'
+        ? []
+        : listBillingCustomers(supabase, orgId).catch((error) => {
+            console.error('[crm/contacts] could not load billing customers', error);
+            return [];
+          }),
     ]);
   } catch (error) {
     // The CRM migration is applied to a database separately from a deploy, so
@@ -177,6 +195,7 @@ export default async function CrmContactsPage() {
       contacts={live.contacts}
       totalContacts={live.total}
       followUps={followUps}
+      billingCustomers={billingCustomers}
       // Viewers can read contacts but the database refuses their writes.
       actions={role === 'viewer' ? undefined : ACTIONS}
     />

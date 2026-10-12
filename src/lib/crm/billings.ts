@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { klDay } from '@/lib/crm/deal-stats';
+import { listDealInvoiceLinks } from '@/lib/crm/invoice-links';
 import { listInvoices, type InvoiceDisplayStatus, type InvoiceListRow } from '@/lib/finance/invoices';
 
 /** How many invoices the "Recent invoices" table shows. */
@@ -41,8 +42,8 @@ export type BillingsModel = {
   trend: { month: string; label: string; billed: number }[];
   byStatus: { status: InvoiceDisplayStatus; count: number }[];
   topCustomers: { id: string; name: string; billed: number; outstanding: number }[];
-  /** The newest invoices, drafts and void ones included. */
-  recent: InvoiceListRow[];
+  /** The newest invoices, drafts and void ones included, each with the deal it is linked to. */
+  recent: (InvoiceListRow & { dealTitle: string | null })[];
   /** Every invoice in the workspace. */
   total: number;
 };
@@ -70,7 +71,12 @@ function owed(invoice: InvoiceListRow) {
 }
 
 /** The figures on Kasturi's Billings page, from the workspace's invoices. */
-export function buildBillings(invoices: InvoiceListRow[], now: Date): BillingsModel {
+export function buildBillings(
+  invoices: InvoiceListRow[],
+  now: Date,
+  /** The title of the deal each linked invoice belongs to, by invoice id. */
+  dealTitles: ReadonlyMap<string, string> = new Map(),
+): BillingsModel {
   const month = klDay(now).slice(0, 7);
   const issued = invoices.filter((invoice) => ISSUED.has(invoice.display_status));
   const open = issued.filter((invoice) => invoice.display_status !== 'paid');
@@ -131,12 +137,40 @@ export function buildBillings(invoices: InvoiceListRow[], now: Date): BillingsMo
           (b.invoice_no ?? '').localeCompare(a.invoice_no ?? '', undefined, { numeric: true }) ||
           a.id.localeCompare(b.id),
       )
-      .slice(0, RECENT_LISTED),
+      .slice(0, RECENT_LISTED)
+      .map((invoice) => ({ ...invoice, dealTitle: dealTitles.get(invoice.id) ?? null })),
     total: invoices.length,
   };
 }
 
 /** Reads a workspace's invoices and builds the Billings page from them. */
 export async function loadCrmBillings(client: SupabaseClient, orgId: string, now: Date): Promise<BillingsModel> {
-  return buildBillings(await listInvoices({ client, orgId }), now);
+  const [invoices, dealTitles] = await Promise.all([
+    listInvoices({ client, orgId }),
+    // The deal column is an extra; the figures still show if it cannot load.
+    linkedDealTitles(client, orgId).catch((error) => {
+      console.error('[crm/billings] could not load linked deals', error);
+      return new Map<string, string>();
+    }),
+  ]);
+  return buildBillings(invoices, now, dealTitles);
+}
+
+/** The title of the deal each linked invoice belongs to, by invoice id. */
+async function linkedDealTitles(client: SupabaseClient, orgId: string): Promise<Map<string, string>> {
+  const links = await listDealInvoiceLinks(client, orgId);
+  if (links.length === 0) return new Map();
+  const { data, error } = await client
+    .from('crm_deals')
+    .select('id,title')
+    .eq('org_id', orgId)
+    .in('id', [...new Set(links.map((link) => link.dealId))]);
+  if (error) throw error;
+  const titles = new Map(((data ?? []) as { id: string; title: string }[]).map((deal) => [deal.id, deal.title] as const));
+  return new Map(
+    links.flatMap((link) => {
+      const title = titles.get(link.dealId);
+      return title ? [[link.invoiceId, title] as const] : [];
+    }),
+  );
 }

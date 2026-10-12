@@ -39,6 +39,8 @@ export type CrmContactFields = {
 export type CrmContactInsert = CrmContactFields & {
   org_id: string;
   owner_user_id?: string;
+  /** The Bendahara customer the contact is billed through; see `@/lib/crm/invoice-links`. */
+  finance_customer_id?: string;
 };
 
 /** A problem with what was typed, safe to show beside the form. */
@@ -57,6 +59,7 @@ type CrmContactRow = {
   owner_user_id: string | null;
   last_interaction_at: string | null;
   tags: string[] | null;
+  finance_customer_id?: string | null;
 };
 
 /** Columns of `crm_contacts` the Contacts screen lists. */
@@ -73,6 +76,7 @@ const CONTACT_COLUMNS = [
   'owner_user_id',
   'last_interaction_at',
   'tags',
+  'finance_customer_id',
 ].join(',');
 
 /** Database status -> the label the screen shows. */
@@ -232,6 +236,7 @@ export function mapCrmContact(row: CrmContactRow, ownerName: string | null = nul
       status: row.status,
       leadScore: String(row.lead_score),
       tags: (row.tags ?? []).join(', '),
+      billingCustomerId: row.finance_customer_id ?? '',
     },
   };
 }

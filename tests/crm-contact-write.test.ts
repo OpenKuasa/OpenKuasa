@@ -92,6 +92,8 @@ describe('edit form values on a mapped contact', () => {
       status: 'lead',
       leadScore: '72',
       tags: '',
+      // No billing customer linked.
+      billingCustomerId: '',
     });
     // A row with no tags maps to an empty list, never null.
     expect(contact.tags).toEqual([]);

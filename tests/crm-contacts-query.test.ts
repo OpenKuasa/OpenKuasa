@@ -49,7 +49,7 @@ describe('listCrmContacts', () => {
     expect(from).toHaveBeenCalledWith('crm_contacts');
     // Exactly the columns of crm_contacts in the Kasturi schema migration.
     expect(contactsQuery.select).toHaveBeenCalledWith(
-      'id,email,company,first_name,last_name,phone,country,status,lead_score,owner_user_id,last_interaction_at,tags',
+      'id,email,company,first_name,last_name,phone,country,status,lead_score,owner_user_id,last_interaction_at,tags,finance_customer_id',
       { count: 'exact' },
     );
     expect(contactsQuery.eq).toHaveBeenCalledWith('org_id', 'org-1');
@@ -84,6 +84,7 @@ describe('listCrmContacts', () => {
             status: 'qualified',
             leadScore: '92',
             tags: 'VIP, Wholesale buyer',
+            billingCustomerId: '',
           },
         },
       ],

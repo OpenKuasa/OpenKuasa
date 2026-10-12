@@ -43,6 +43,7 @@ import {
   type CrmDealContactChoice,
 } from '@/lib/crm/deals';
 import type { CrmDealActions, CrmFormAction } from '@/lib/crm/form-state';
+import type { DealInvoiceChoice } from '@/lib/crm/invoice-links';
 import type { CrmPipelineStage } from '@/lib/crm/pipelines';
 import { cn } from '@/lib/utils';
 import { SELECT_CLASS, useCrmForm } from './crm-form';
@@ -63,6 +64,7 @@ export function DealFormCard({
   editing,
   stages,
   contacts,
+  invoices,
   onSaved,
   onClose,
   firstFieldRef,
@@ -70,6 +72,8 @@ export function DealFormCard({
   action: CrmFormAction;
   /** The deal being edited; null to add a new one. */
   editing: CrmDeal | null;
+  /** Bendahara's invoices, to link to the deal being edited. Absent: the picker is not shown. */
+  invoices?: DealInvoiceChoice[];
   /** The stages of the pipeline the deal is in, or is being added to. */
   stages: CrmPipelineStage[];
   contacts: CrmDealContactChoice[];
@@ -89,6 +93,12 @@ export function DealFormCard({
     editing?.form?.contactId && !contacts.some((c) => c.id === editing.form?.contactId)
       ? [{ id: editing.form.contactId, label: editing.form.contactLabel }, ...contacts]
       : contacts;
+
+  // An invoice belongs to one deal, so those linked elsewhere are not offered.
+  const linkable =
+    editing && invoices
+      ? invoices.filter((invoice) => invoice.dealId === null || invoice.dealId === editing.id)
+      : null;
 
   const title = editing ? 'Edit deal' : 'New deal';
   const subtitle = editing ? `Changing ${editing.title}` : 'Add a deal to this pipeline';
@@ -202,6 +212,35 @@ export function DealFormCard({
             defaultValue={v.expectedCloseDate}
           />
         </div>
+        {editing && linkable ? (
+          <fieldset className="space-y-1.5 md:col-span-12">
+            <legend className="text-sm font-medium">Invoices</legend>
+            {/* Tells the save that the picker was shown, so unticking everything clears the links. */}
+            <input type="hidden" name="invoiceLinks" value="1" />
+            {linkable.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No invoices to link. Invoices are created in Bendahara.
+              </p>
+            ) : (
+              <ul className="max-h-40 space-y-1 overflow-y-auto rounded-md border p-2">
+                {linkable.map((invoice) => (
+                  <li key={invoice.id}>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        name="invoiceIds"
+                        value={invoice.id}
+                        defaultChecked={invoice.dealId === editing.id}
+                        className="size-4 accent-primary"
+                      />
+                      <span className="min-w-0 truncate">{invoice.label}</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </fieldset>
+        ) : null}
         <div className="flex flex-wrap items-end gap-3 md:col-span-12">
           <Button type="submit" className="w-full md:w-auto" disabled={pending}>
             {editing ? <Check className="size-4" /> : <Plus className="size-4" />}
@@ -277,6 +316,12 @@ export function DealCard({
       </p>
       {deal.status === 'lost' && deal.lostReason ? (
         <p className="text-[11px] text-muted-foreground">Reason · {deal.lostReason}</p>
+      ) : null}
+      {deal.billing ? (
+        <p className="text-[11px] text-muted-foreground">
+          Invoiced · {formatRM(deal.billing.billed)}
+          {deal.billing.outstanding > 0 ? ` · ${formatRM(deal.billing.outstanding)} owed` : ''}
+        </p>
       ) : null}
       {children}
     </div>
