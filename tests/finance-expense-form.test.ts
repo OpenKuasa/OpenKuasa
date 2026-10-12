@@ -6,6 +6,7 @@ import {
   editExpenseForm,
   expenseActions,
   canEditExpenses,
+  decisionIsStale,
   expenseDecisionPayload,
   expenseQuestion,
   expenseFormError,
@@ -201,6 +202,21 @@ describe('the questions asked in a row', () => {
     const parts = expenseQuestion('delete', row());
     expect(text(parts)).toBe('Delete the expense of RM 120.00 to Kedai Ali? This cannot be undone.');
     expect(strong(parts)).toEqual(['RM 120.00', 'Kedai Ali']);
+  });
+});
+
+describe('a decision that found the expense no longer as shown', () => {
+  it('closes the question for the changed sentence and the three status sentences, and for nothing else', () => {
+    for (const sentence of [
+      'This expense was changed after you opened it. Check it again, then approve or reject it.',
+      'This expense has already been approved.',
+      'This expense has already been rejected.',
+      'This expense is pending again.',
+    ]) {
+      expect(decisionIsStale(sentence), sentence).toBe(true);
+    }
+    expect(decisionIsStale('That expense no longer exists.')).toBe(false);
+    expect(decisionIsStale('This expense has a payment against it, paid or still to be paid, so it cannot be rejected.')).toBe(false);
   });
 });
 

@@ -9,8 +9,10 @@
  * to them with FIN14 and work for the owner. The columns of a payment that
  * only the database writes are refused to both. Three tests go through the
  * cash book functions (a cash receipt, two payment vouchers), which number a
- * payment and so run as the owner like the rest; the last two go through the
- * cash receipts data layer (a receipt for income, a receipt for invoices).
+ * payment and so run as the owner like the rest; two go through the
+ * cash receipts data layer (a receipt for income, a receipt for invoices), and five through
+ * the expenses data layer (the form's writes, a payment against an expense, a decision on an
+ * expense changed meanwhile, and one of NaN).
  *
  * Workspaces and users come from tests/helpers/live-workspaces.ts, which also
  * removes them.

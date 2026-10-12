@@ -765,7 +765,7 @@ const EXPENSE_DECIDE = { signOff: true, signOffError: EXPENSE_MESSAGES.needsDeci
 export async function saveExpenseAction(input: unknown) {
   return run(EXPENSE_PATHS, saveExpenseInput, input, saveExpense);
 }
-/** Approves a pending expense as the person was shown it (its `updated_at`): an owner or admin only, which the expense's own guard enforces. */
+/** Approves a pending expense as the person was shown it (every field the row showed, `updated_at` included): an owner or admin only, which the expense's own guard enforces. */
 export async function approveExpenseAction(input: unknown) {
   return run(EXPENSE_PATHS, expenseDecisionInput, input, approveExpense, EXPENSE_DECIDE);
 }

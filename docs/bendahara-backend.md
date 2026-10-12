@@ -451,7 +451,7 @@ decimal places." (the SST box: "Enter the SST to two decimal places.") instead
 of being rounded.
 
 An approved expense that is paid in part reads "Part paid", with a line
-under its amount: what was paid, what payments not yet made hold, and what
+under its status: what was paid, what payments not yet made hold, and what
 has no payment yet (`expensePaymentNote`). The view's `display_status` is
 still `approved` for it, and the status filter's Approved includes it. An
 approved expense with only a payment waiting shows the same line under an
@@ -1656,6 +1656,9 @@ with no date).
 - A rejection carries no reason: the table has no column for one.
 - Two people changing one expense at once: the later save wins without a
   warning. An expense approved meanwhile answers that it is locked.
+- A writer's direct update of a pending expense can also still change
+  `created_by` and `created_at`; the column grants do not close them. To be
+  closed with the guard change in the next part.
 - `finance_expenses.updated_at` is written only by `finance_save_expense`; no
   trigger moves it, so a direct update by a writer leaves it as it was. A
   decision is therefore also matched on the fields the row showed. The next

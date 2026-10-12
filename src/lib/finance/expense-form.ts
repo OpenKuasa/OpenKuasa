@@ -162,6 +162,11 @@ export function canEditExpenses(role: OrgRole, isDemo: boolean): boolean {
   return !isDemo && can(role, 'edit-data');
 }
 
+/** True for the answers that mean the expense is no longer as the row showed it: the question is closed and the row refreshed. */
+export function decisionIsStale(error: string): boolean {
+  return ([M.changed, M.alreadyApproved, M.alreadyRejected, M.pendingAgain] as string[]).includes(error);
+}
+
 /** What an approval or a rejection sends of the row it was asked on: the row as shown, so the database decides that very expense. */
 export function expenseDecisionPayload(row: ExpenseRow) {
   return {
@@ -225,7 +230,7 @@ export function isPartPaid(row: ExpenseRow): boolean {
 
 /**
  * What stands against an approved expense that is not simply paid or unpaid,
- * for the line under its amount: what was paid, what payments not yet made
+ * for the line under its status: what was paid, what payments not yet made
  * hold, and what is left with no payment at all. null for an expense with no
  * payment, for one paid in full, and for a pending or rejected one.
  */

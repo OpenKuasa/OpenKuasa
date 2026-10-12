@@ -36,6 +36,7 @@ import {
   type WrittenExpense,
   expenseActions,
   expenseControls,
+  decisionIsStale,
   expenseDecisionPayload,
   expenseHiddenNote,
   expenseName,
@@ -44,7 +45,7 @@ import {
   isPartPaid,
   writtenExpenseTitle,
 } from '@/lib/finance/expense-form';
-import { EXPENSE_MESSAGES, type ExpenseCategory, type ExpenseDisplayStatus, type ExpenseRow } from '@/lib/finance/expenses';
+import type { ExpenseCategory, ExpenseDisplayStatus, ExpenseRow } from '@/lib/finance/expenses';
 import { rm } from '@/lib/finance/format';
 import type { FinResult } from '@/lib/finance/result';
 import { LATEST_ROWS, displayDate } from '@/lib/finance/view-helpers';
@@ -181,12 +182,12 @@ export function ExpensesView({
     }
   };
 
-  /** Runs a decision on the expense as the row shows it now. If it was changed since, the question closes and the refreshed row says what it holds. */
+  /** Runs a decision on the expense as the row shows it now. If it was changed or decided since, the question closes and the refreshed row says what it holds. */
   const decide = (row: ExpenseRow, call: (input: unknown) => Promise<FinResult<{ id: string }>>, status: 'approved' | 'rejected') =>
     confirm.run(
       async () => {
         const result = await call(expenseDecisionPayload(row));
-        if (!result.ok && result.error === EXPENSE_MESSAGES.changed) setOpen(null);
+        if (!result.ok && decisionIsStale(result.error)) setOpen(null);
         return result;
       },
       () => closeSaying(decided(row, status)),
