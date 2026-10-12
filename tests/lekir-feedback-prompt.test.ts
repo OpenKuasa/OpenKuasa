@@ -53,7 +53,11 @@ describe('interview feedback, in all four prompts', () => {
       expect(prompt.toLowerCase(), name).toContain('you were not there');
     }
     // Tuah with its team words no change: it must not add a rating itself.
-    expect(teamLead).toContain('never add a rating or a recommendation yourself, and ask the user first when either is missing');
+    expect(teamLead).toContain('never add a rating or a recommendation yourself, and ask the user first when the rating or the recommendation is missing');
+    // Comments are optional. With "when either is missing" after a list of three, Tuah asked the user for comments
+    // and never sent the task, so nobody looked at the interview (a run against the configured models, twice).
+    expect(teamLead).toContain('Comments are optional: never ask for them, and send the task without them when none were given.');
+    expect(teamLead).not.toContain('when either is missing. If the user said a scheduled interview');
   });
   it('the three that word a change themselves say one change marks completed and records the feedback, and when to set replace', () => {
     for (const [name, prompt] of [['LEKIR_SYSTEM', lekir], ['specialist', specialist], ['TUAH_SYSTEM', TUAH_SYSTEM]] as const) {
