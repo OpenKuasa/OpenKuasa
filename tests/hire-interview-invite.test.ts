@@ -11,6 +11,14 @@ const BASE: InviteSource = {
   created_at: '2026-10-12T02:15:00+00:00', updated_at: '2026-10-12T02:15:00+00:00',
   candidate: 'Aina Rahman', job: 'Sales Executive', workspace: 'Rimba Ventures',
 };
+/** The three builders for a row that has a file and an invitation: a null here is a failed test, not a value. */
+function made(value: string | null): string {
+  if (value === null) throw new Error('nothing was made for this row');
+  return value;
+}
+const file = (i: InviteSource) => made(interviewIcs(i));
+const words = (i: InviteSource, moved: boolean) => made(invitationText(i, moved));
+const fileName = (i: InviteSource) => made(icsFileName(i));
 const text = (...lines: string[]) => lines.join('\n');
 const CRLF = '\r\n';
 /** The file's physical lines. The file ends with CRLF, so the last piece is empty and is dropped. */
@@ -22,7 +30,7 @@ const lineOf = (ics: string, name: string) => logical(ics).find((line) => line.s
 
 describe('invitationText', () => {
   it('is the agreed text, with every optional part', () => {
-    expect(invitationText(BASE, false)).toBe(text(
+    expect(words(BASE, false)).toBe(text(
       'Hi Aina Rahman,',
       '',
       'You are invited to an interview for the Sales Executive role at Rimba Ventures.',
@@ -38,7 +46,7 @@ describe('invitationText', () => {
     ));
   });
   it('writes nothing in place of a part that is not there', () => {
-    expect(invitationText({ ...BASE, place: null, interviewer_name: null }, false)).toBe(text(
+    expect(words({ ...BASE, place: null, interviewer_name: null }, false)).toBe(text(
       'Hi Aina Rahman,',
       '',
       'You are invited to an interview for the Sales Executive role at Rimba Ventures.',
@@ -51,10 +59,10 @@ describe('invitationText', () => {
       'Please reply to confirm, or tell us if you need another time.',
     ));
     // A blank is not a value.
-    expect(invitationText({ ...BASE, place: '   ', interviewer_name: '' }, false)).toBe(invitationText({ ...BASE, place: null, interviewer_name: null }, false));
+    expect(words({ ...BASE, place: '   ', interviewer_name: '' }, false)).toBe(words({ ...BASE, place: null, interviewer_name: null }, false));
   });
   it('labels the place by the type', () => {
-    expect(invitationText({ ...BASE, kind: 'onsite', place: 'Level 3, Menara Rimba', interviewer_name: null, duration_minutes: 45 }, false)).toBe(text(
+    expect(words({ ...BASE, kind: 'onsite', place: 'Level 3, Menara Rimba', interviewer_name: null, duration_minutes: 45 }, false)).toBe(text(
       'Hi Aina Rahman,',
       '',
       'You are invited to an interview for the Sales Executive role at Rimba Ventures.',
@@ -67,7 +75,7 @@ describe('invitationText', () => {
       '',
       'Please reply to confirm, or tell us if you need another time.',
     ));
-    expect(invitationText({ ...BASE, kind: 'phone', place: 'We will call you', duration_minutes: 90 }, false)).toBe(text(
+    expect(words({ ...BASE, kind: 'phone', place: 'We will call you', duration_minutes: 90 }, false)).toBe(text(
       'Hi Aina Rahman,',
       '',
       'You are invited to an interview for the Sales Executive role at Rimba Ventures.',
@@ -83,7 +91,7 @@ describe('invitationText', () => {
     ));
   });
   it('says the time is new after a move', () => {
-    expect(invitationText({ ...BASE, scheduled_at: '2026-10-22T03:00:00+00:00' }, true)).toBe(text(
+    expect(words({ ...BASE, scheduled_at: '2026-10-22T03:00:00+00:00' }, true)).toBe(text(
       'Hi Aina Rahman,',
       '',
       'Your interview for the Sales Executive role at Rimba Ventures has a new time.',
@@ -100,7 +108,7 @@ describe('invitationText', () => {
   });
   it('leaves the workspace out when it has no name', () => {
     for (const workspace of [null, '', '   ']) {
-      expect(invitationText({ ...BASE, workspace, place: null, interviewer_name: null }, false)).toBe(text(
+      expect(words({ ...BASE, workspace, place: null, interviewer_name: null }, false)).toBe(text(
         'Hi Aina Rahman,',
         '',
         'You are invited to an interview for the Sales Executive role.',
@@ -113,10 +121,10 @@ describe('invitationText', () => {
         'Please reply to confirm, or tell us if you need another time.',
       ));
     }
-    expect(invitationText({ ...BASE, workspace: null }, true).split('\n')[2]).toBe('Your interview for the Sales Executive role has a new time.');
+    expect(words({ ...BASE, workspace: null }, true).split('\n')[2]).toBe('Your interview for the Sales Executive role has a new time.');
   });
   it('says when the interview ends the next day', () => {
-    expect(invitationText({ ...BASE, scheduled_at: klInstant('2026-10-20', '23:30')!, place: null, interviewer_name: null }, false)).toBe(text(
+    expect(words({ ...BASE, scheduled_at: klInstant('2026-10-20', '23:30')!, place: null, interviewer_name: null }, false)).toBe(text(
       'Hi Aina Rahman,',
       '',
       'You are invited to an interview for the Sales Executive role at Rimba Ventures.',
@@ -131,11 +139,11 @@ describe('invitationText', () => {
   });
   it('is the same for the same row, whatever zone the process is in', () => {
     const before = process.env.TZ;
-    const here = invitationText(BASE, false);
+    const here = words(BASE, false);
     try {
       for (const zone of ['UTC', 'America/New_York', 'Asia/Tokyo']) {
         process.env.TZ = zone;
-        expect(invitationText(BASE, false), zone).toBe(here);
+        expect(words(BASE, false), zone).toBe(here);
       }
     } finally {
       if (before === undefined) delete process.env.TZ;
@@ -146,7 +154,7 @@ describe('invitationText', () => {
 
 describe('interviewIcs', () => {
   it('is exactly this file for this row', () => {
-    expect(interviewIcs(BASE)).toBe(
+    expect(file(BASE)).toBe(
       'BEGIN:VCALENDAR\r\n'
       + 'VERSION:2.0\r\n'
       + 'PRODID:-//OpenKuasa//Lekir//EN\r\n'
@@ -168,7 +176,7 @@ describe('interviewIcs', () => {
   });
   it('ends every line, and the file, with CRLF and has no bare line break', () => {
     for (const row of [BASE, { ...BASE, place: `https://meet.example.com/${'a'.repeat(175)}` }]) {
-      const ics = interviewIcs(row);
+      const ics = file(row);
       expect(ics.endsWith(CRLF)).toBe(true);
       const rest = ics.split(CRLF).join('');
       expect(rest).not.toContain('\n');
@@ -176,23 +184,23 @@ describe('interviewIcs', () => {
     }
   });
   it('writes the three times in UTC, ending in Z: 15:00 in Kuala Lumpur is 070000Z', () => {
-    const ics = interviewIcs({ ...BASE, scheduled_at: klInstant('2026-10-20', '15:00')!, duration_minutes: 90 });
+    const ics = file({ ...BASE, scheduled_at: klInstant('2026-10-20', '15:00')!, duration_minutes: 90 });
     expect(lineOf(ics, 'DTSTART')).toBe('DTSTART:20261020T070000Z');
     expect(lineOf(ics, 'DTEND')).toBe('DTEND:20261020T083000Z');
     expect(lineOf(ics, 'DTSTAMP')).toBe('DTSTAMP:20261012T021500Z');
     expect(ics).not.toContain('TZID');
     // Midnight in Kuala Lumpur is the day before in UTC, and an interview can end on the next UTC day.
-    const late = interviewIcs({ ...BASE, scheduled_at: klInstant('2026-10-20', '00:00')!, duration_minutes: 480 });
+    const late = file({ ...BASE, scheduled_at: klInstant('2026-10-20', '00:00')!, duration_minutes: 480 });
     expect(lineOf(late, 'DTSTART')).toBe('DTSTART:20261019T160000Z');
     expect(lineOf(late, 'DTEND')).toBe('DTEND:20261020T000000Z');
   });
   it('gives the same file whatever zone the process is in', () => {
     const before = process.env.TZ;
-    const here = interviewIcs(BASE);
+    const here = file(BASE);
     try {
       for (const zone of ['UTC', 'America/New_York', 'Asia/Tokyo']) {
         process.env.TZ = zone;
-        expect(interviewIcs(BASE), zone).toBe(here);
+        expect(file(BASE), zone).toBe(here);
       }
     } finally {
       if (before === undefined) delete process.env.TZ;
@@ -200,29 +208,30 @@ describe('interviewIcs', () => {
     }
   });
   it('keeps the UID when the time changes, so a calendar updates its entry instead of adding one', () => {
-    const moved = interviewIcs({ ...BASE, scheduled_at: '2026-10-22T03:00:00+00:00', updated_at: '2026-10-12T03:15:30+00:00' });
-    expect(lineOf(interviewIcs(BASE), 'UID')).toBe(`UID:${ID}@openkuasa.com`);
+    const moved = file({ ...BASE, scheduled_at: '2026-10-22T03:00:00+00:00', updated_at: '2026-10-12T03:15:30+00:00' });
+    expect(lineOf(file(BASE), 'UID')).toBe(`UID:${ID}@openkuasa.com`);
     expect(lineOf(moved, 'UID')).toBe(`UID:${ID}@openkuasa.com`);
     expect(lineOf(moved, 'DTSTART')).toBe('DTSTART:20261022T030000Z');
   });
   it('numbers a new row 0 and a changed one higher, by whole seconds since it was made', () => {
-    expect(lineOf(interviewIcs(BASE), 'SEQUENCE')).toBe('SEQUENCE:0');
-    expect(lineOf(interviewIcs({ ...BASE, updated_at: '2026-10-12T03:15:30+00:00' }), 'SEQUENCE')).toBe('SEQUENCE:3630');
-    expect(lineOf(interviewIcs({ ...BASE, updated_at: '2026-10-12T03:15:31+00:00' }), 'SEQUENCE')).toBe('SEQUENCE:3631');
+    expect(lineOf(file(BASE), 'SEQUENCE')).toBe('SEQUENCE:0');
+    expect(lineOf(file({ ...BASE, updated_at: '2026-10-12T03:15:30+00:00' }), 'SEQUENCE')).toBe('SEQUENCE:3630');
+    expect(lineOf(file({ ...BASE, updated_at: '2026-10-12T03:15:31+00:00' }), 'SEQUENCE')).toBe('SEQUENCE:3631');
     // Part of a second is not a change, and a clock that ran backwards never gives a negative number.
-    expect(lineOf(interviewIcs({ ...BASE, updated_at: '2026-10-12T02:15:00.900+00:00' }), 'SEQUENCE')).toBe('SEQUENCE:0');
-    expect(lineOf(interviewIcs({ ...BASE, updated_at: '2026-10-12T02:14:00+00:00' }), 'SEQUENCE')).toBe('SEQUENCE:0');
-    expect(lineOf(interviewIcs({ ...BASE, updated_at: 'nonsense' }), 'SEQUENCE')).toBe('SEQUENCE:0');
+    expect(lineOf(file({ ...BASE, updated_at: '2026-10-12T02:15:00.900+00:00' }), 'SEQUENCE')).toBe('SEQUENCE:0');
+    expect(lineOf(file({ ...BASE, updated_at: '2026-10-12T02:14:00+00:00' }), 'SEQUENCE')).toBe('SEQUENCE:0');
+    // A row whose creation stamp cannot be read is still number 0: the file is whole without it.
+    expect(lineOf(file({ ...BASE, created_at: 'nonsense' }), 'SEQUENCE')).toBe('SEQUENCE:0');
   });
   it('escapes a comma, a semicolon, a backslash and a line break', () => {
-    const ics = interviewIcs({ ...BASE, job: 'Sales, Marketing; R\\D\nLead', place: 'Level 3, Menara Rimba; Jalan A\\B' });
+    const ics = file({ ...BASE, job: 'Sales, Marketing; R\\D\nLead', place: 'Level 3, Menara Rimba; Jalan A\\B' });
     expect(lineOf(ics, 'SUMMARY')).toBe('SUMMARY:Interview for Sales\\, Marketing\\; R\\\\D\\nLead at Rimba Ventures');
     expect(lineOf(ics, 'LOCATION')).toBe('LOCATION:Level 3\\, Menara Rimba\\; Jalan A\\\\B');
-    expect(lineOf(interviewIcs({ ...BASE, candidate: 'Tan, Mei Ling', interviewer_name: 'Lim; Farah' }), 'DESCRIPTION'))
+    expect(lineOf(file({ ...BASE, candidate: 'Tan, Mei Ling', interviewer_name: 'Lim; Farah' }), 'DESCRIPTION'))
       .toBe('DESCRIPTION:Candidate: Tan\\, Mei Ling\\nType: Video call\\nWith: Lim\\; Farah');
   });
   it('drops a carriage return and every other control character', () => {
-    const ics = interviewIcs({ ...BASE, place: 'Level 3,\r\nMenara Rimba\u0007 Jalan\tA\u0000B\u007f' });
+    const ics = file({ ...BASE, place: 'Level 3,\r\nMenara Rimba\u0007 Jalan\tA\u0000B\u007f' });
     expect(lineOf(ics, 'LOCATION')).toBe('LOCATION:Level 3\\,\\nMenara Rimba JalanAB');
     for (const control of ['\u0007', '\t', '\u0000', '\u007f']) expect(ics).not.toContain(control);
     // The only carriage returns left are the ones that end lines.
@@ -231,7 +240,7 @@ describe('interviewIcs', () => {
   it('folds a 200-character link so that no line is over 75 octets, and unfolding gives it back', () => {
     const place = `https://meet.example.com/${'a'.repeat(175)}`;
     expect(place).toHaveLength(200);
-    const ics = interviewIcs({ ...BASE, place });
+    const ics = file({ ...BASE, place });
     for (const line of physical(ics)) expect(Buffer.byteLength(line, 'utf8'), line).toBeLessThanOrEqual(75);
     const folded = physical(ics).filter((line) => line.startsWith(' '));
     expect(folded).toHaveLength(2);
@@ -242,7 +251,7 @@ describe('interviewIcs', () => {
   it('folds a long name of several octets a character without cutting one, and unfolding gives it back', () => {
     // Four octets (outside the basic plane), three, two and one to a character, mixed.
     const name = '𠮷野家 Nguyễn Thị Ánh '.repeat(8).trim();
-    const ics = interviewIcs({ ...BASE, candidate: name, job: name });
+    const ics = file({ ...BASE, candidate: name, job: name });
     for (const line of physical(ics)) {
       expect(Buffer.byteLength(line, 'utf8'), line).toBeLessThanOrEqual(75);
       // A line cut inside a character would not survive being written out and read back.
@@ -254,22 +263,22 @@ describe('interviewIcs', () => {
   });
   it('has no LOCATION line when there is no place, and no With line when there is no interviewer', () => {
     for (const place of [null, '', '   ']) {
-      const ics = interviewIcs({ ...BASE, place, interviewer_name: null });
+      const ics = file({ ...BASE, place, interviewer_name: null });
       expect(lineOf(ics, 'LOCATION')).toBeUndefined();
       expect(lineOf(ics, 'DESCRIPTION')).toBe('DESCRIPTION:Candidate: Aina Rahman\\nType: Video call');
     }
   });
   it('leaves the workspace out of the summary when it has no name', () => {
-    expect(lineOf(interviewIcs({ ...BASE, workspace: null }), 'SUMMARY')).toBe('SUMMARY:Interview for Sales Executive');
-    expect(lineOf(interviewIcs({ ...BASE, workspace: '  ' }), 'SUMMARY')).toBe('SUMMARY:Interview for Sales Executive');
+    expect(lineOf(file({ ...BASE, workspace: null }), 'SUMMARY')).toBe('SUMMARY:Interview for Sales Executive');
+    expect(lineOf(file({ ...BASE, workspace: '  ' }), 'SUMMARY')).toBe('SUMMARY:Interview for Sales Executive');
   });
   it('never carries the notes, even when the row it was given has them', () => {
     const withNotes = { ...BASE, notes: 'Salary was the sticking point last time' } as InviteSource;
-    expect(interviewIcs(withNotes)).not.toContain('Salary');
-    expect(invitationText(withNotes, false)).not.toContain('Salary');
+    expect(file(withNotes)).not.toContain('Salary');
+    expect(words(withNotes, false)).not.toContain('Salary');
   });
   it('is a published event with no attendee and no organiser', () => {
-    const ics = interviewIcs(BASE);
+    const ics = file(BASE);
     expect(logical(ics)).toContain('METHOD:PUBLISH');
     expect(logical(ics)).toContain('STATUS:CONFIRMED');
     expect(ics).not.toContain('METHOD:REQUEST');
@@ -278,26 +287,26 @@ describe('interviewIcs', () => {
     expect(logical(ics).filter((line) => line === 'BEGIN:VEVENT')).toHaveLength(1);
   });
   it('says the type in words for each type', () => {
-    expect(lineOf(interviewIcs({ ...BASE, kind: 'onsite', interviewer_name: null }), 'DESCRIPTION')).toBe('DESCRIPTION:Candidate: Aina Rahman\\nType: In person');
-    expect(lineOf(interviewIcs({ ...BASE, kind: 'phone', interviewer_name: null }), 'DESCRIPTION')).toBe('DESCRIPTION:Candidate: Aina Rahman\\nType: Phone call');
+    expect(lineOf(file({ ...BASE, kind: 'onsite', interviewer_name: null }), 'DESCRIPTION')).toBe('DESCRIPTION:Candidate: Aina Rahman\\nType: In person');
+    expect(lineOf(file({ ...BASE, kind: 'phone', interviewer_name: null }), 'DESCRIPTION')).toBe('DESCRIPTION:Candidate: Aina Rahman\\nType: Phone call');
   });
 });
 
 describe('icsFileName', () => {
   it('is the name in lower case with hyphens, then the Kuala Lumpur date', () => {
-    expect(icsFileName(BASE)).toBe('interview-aina-rahman-2026-10-20.ics');
+    expect(fileName(BASE)).toBe('interview-aina-rahman-2026-10-20.ics');
   });
   it('turns marks, spaces and punctuation into single hyphens, with none at either end', () => {
     // The é is written as an escape so the test does not depend on how an editor saves it.
-    expect(icsFileName({ ...BASE, candidate: '  Ren\u00e9e  O\'Neil-Tan (2) ' })).toBe('interview-ren-e-o-neil-tan-2-2026-10-20.ics');
+    expect(fileName({ ...BASE, candidate: '  Ren\u00e9e  O\'Neil-Tan (2) ' })).toBe('interview-ren-e-o-neil-tan-2-2026-10-20.ics');
   });
   it('is the date alone for a name with no Latin letters or digits', () => {
-    expect(icsFileName({ ...BASE, candidate: '陳大文' })).toBe('interview-2026-10-20.ics');
-    expect(icsFileName({ ...BASE, candidate: '' })).toBe('interview-2026-10-20.ics');
+    expect(fileName({ ...BASE, candidate: '陳大文' })).toBe('interview-2026-10-20.ics');
+    expect(fileName({ ...BASE, candidate: '' })).toBe('interview-2026-10-20.ics');
   });
   it('uses the date in Kuala Lumpur, not in UTC', () => {
     // 00:30 on 21 October in Kuala Lumpur is still the 20th in UTC.
-    expect(icsFileName({ ...BASE, scheduled_at: '2026-10-20T16:30:00+00:00' })).toBe('interview-aina-rahman-2026-10-21.ics');
+    expect(fileName({ ...BASE, scheduled_at: '2026-10-20T16:30:00+00:00' })).toBe('interview-aina-rahman-2026-10-21.ics');
   });
 });
 
@@ -305,47 +314,46 @@ describe('icsFileName', () => {
 
 describe('the calendar file at the edges', () => {
   it('reads the six decimal places the database writes on its two stamps', () => {
-    const ics = interviewIcs({ ...BASE, created_at: '2026-10-12T02:15:00.250000+00:00', updated_at: '2026-10-12T03:15:30.750000+00:00' });
+    const ics = file({ ...BASE, created_at: '2026-10-12T02:15:00.250000+00:00', updated_at: '2026-10-12T03:15:30.750000+00:00' });
     expect(lineOf(ics, 'DTSTAMP')).toBe('DTSTAMP:20261012T031530Z');
     expect(lineOf(ics, 'SEQUENCE')).toBe('SEQUENCE:3630');
   });
   it('is right across a year and on 29 February: the times are UTC, the file name and the invitation Kuala Lumpur', () => {
     // 12:15 am on 1 January 2027 in Kuala Lumpur.
     const newYear = { ...BASE, scheduled_at: klInstant('2027-01-01', '00:15')!, duration_minutes: 45 };
-    expect(lineOf(interviewIcs(newYear), 'DTSTART')).toBe('DTSTART:20261231T161500Z');
-    expect(lineOf(interviewIcs(newYear), 'DTEND')).toBe('DTEND:20261231T170000Z');
-    expect(icsFileName(newYear)).toBe('interview-aina-rahman-2027-01-01.ics');
-    expect(invitationText(newYear, false).split('\n').slice(4, 6)).toEqual(['Date: Friday, 1 January 2027', 'Time: 12:15 am to 1:00 am, Kuala Lumpur time (GMT+8)']);
+    expect(lineOf(file(newYear), 'DTSTART')).toBe('DTSTART:20261231T161500Z');
+    expect(lineOf(file(newYear), 'DTEND')).toBe('DTEND:20261231T170000Z');
+    expect(fileName(newYear)).toBe('interview-aina-rahman-2027-01-01.ics');
+    expect(words(newYear, false).split('\n').slice(4, 6)).toEqual(['Date: Friday, 1 January 2027', 'Time: 12:15 am to 1:00 am, Kuala Lumpur time (GMT+8)']);
     // 11:30 pm on 31 December 2026: ends in the new year in Kuala Lumpur, all inside 31 December in UTC.
     const eve = { ...BASE, scheduled_at: klInstant('2026-12-31', '23:30')! };
-    expect(lineOf(interviewIcs(eve), 'DTSTART')).toBe('DTSTART:20261231T153000Z');
-    expect(lineOf(interviewIcs(eve), 'DTEND')).toBe('DTEND:20261231T163000Z');
-    expect(invitationText(eve, false).split('\n').slice(4, 6)).toEqual(['Date: Thursday, 31 December 2026', 'Time: 11:30 pm to 12:30 am the next day, Kuala Lumpur time (GMT+8)']);
+    expect(lineOf(file(eve), 'DTSTART')).toBe('DTSTART:20261231T153000Z');
+    expect(lineOf(file(eve), 'DTEND')).toBe('DTEND:20261231T163000Z');
+    expect(words(eve, false).split('\n').slice(4, 6)).toEqual(['Date: Thursday, 31 December 2026', 'Time: 11:30 pm to 12:30 am the next day, Kuala Lumpur time (GMT+8)']);
     const leap = { ...BASE, scheduled_at: klInstant('2028-02-29', '00:00')! };
-    expect(lineOf(interviewIcs(leap), 'DTSTART')).toBe('DTSTART:20280228T160000Z');
-    expect(lineOf(interviewIcs(leap), 'DTEND')).toBe('DTEND:20280228T170000Z');
-    expect(icsFileName(leap)).toBe('interview-aina-rahman-2028-02-29.ics');
-    expect(invitationText(leap, false).split('\n')[4]).toBe('Date: Tuesday, 29 February 2028');
+    expect(lineOf(file(leap), 'DTSTART')).toBe('DTSTART:20280228T160000Z');
+    expect(lineOf(file(leap), 'DTEND')).toBe('DTEND:20280228T170000Z');
+    expect(fileName(leap)).toBe('interview-aina-rahman-2028-02-29.ics');
+    expect(words(leap, false).split('\n')[4]).toBe('Date: Tuesday, 29 February 2028');
     const lastMinute = { ...BASE, scheduled_at: klInstant('2028-02-29', '23:59')!, duration_minutes: 15 };
-    expect(lineOf(interviewIcs(lastMinute), 'DTSTART')).toBe('DTSTART:20280229T155900Z');
-    expect(lineOf(interviewIcs(lastMinute), 'DTEND')).toBe('DTEND:20280229T161400Z');
+    expect(lineOf(file(lastMinute), 'DTSTART')).toBe('DTSTART:20280229T155900Z');
+    expect(lineOf(file(lastMinute), 'DTEND')).toBe('DTEND:20280229T161400Z');
   });
   it('gives the same instant for the same start however it is written', () => {
-    const asUtc = interviewIcs({ ...BASE, scheduled_at: '2026-10-20T07:00:00Z' });
-    const asKl = interviewIcs({ ...BASE, scheduled_at: '2026-10-20T15:00:00+08:00' });
+    const asUtc = file({ ...BASE, scheduled_at: '2026-10-20T07:00:00Z' });
+    const asKl = file({ ...BASE, scheduled_at: '2026-10-20T15:00:00+08:00' });
     expect(asKl).toBe(asUtc);
-    expect(asKl).toBe(interviewIcs(BASE));
+    expect(asKl).toBe(file(BASE));
   });
-  it('never makes up a time for a start with no zone of its own, in any zone', () => {
+  it('never makes up a time for a start with no zone of its own, in any zone: there is no file, no name and no invitation', () => {
     const before = process.env.TZ;
     try {
       for (const zone of ['UTC', 'America/New_York', 'Asia/Kuala_Lumpur']) {
         process.env.TZ = zone;
-        const ics = interviewIcs({ ...BASE, scheduled_at: '2026-10-20T15:00:00' });
-        expect(lineOf(ics, 'DTSTART'), zone).toBe('DTSTART:');
-        expect(lineOf(ics, 'DTEND'), zone).toBe('DTEND:');
-        expect(invitationText({ ...BASE, scheduled_at: '2026-10-20T15:00:00' }, false).split('\n').slice(4, 6), zone)
-          .toEqual(['Date: 2026-10-20T15:00:00', 'Time: 2026-10-20T15:00:00, Kuala Lumpur time (GMT+8)']);
+        const row = { ...BASE, scheduled_at: '2026-10-20T15:00:00' };
+        expect(interviewIcs(row), zone).toBeNull();
+        expect(icsFileName(row), zone).toBeNull();
+        expect(invitationText(row, false), zone).toBeNull();
       }
     } finally {
       if (before === undefined) delete process.env.TZ;
@@ -354,30 +362,66 @@ describe('the calendar file at the edges', () => {
   });
   it('does not fold a line of exactly 75 octets, and folds one of 76', () => {
     // "SUMMARY:Interview for " is 22 octets.
-    const exact = interviewIcs({ ...BASE, workspace: null, job: 'x'.repeat(53) });
+    const exact = file({ ...BASE, workspace: null, job: 'x'.repeat(53) });
     expect(physical(exact)).toContain(`SUMMARY:Interview for ${'x'.repeat(53)}`);
-    const over = physical(interviewIcs({ ...BASE, workspace: null, job: 'x'.repeat(54) }));
+    const over = physical(file({ ...BASE, workspace: null, job: 'x'.repeat(54) }));
     const at = over.indexOf(`SUMMARY:Interview for ${'x'.repeat(53)}`);
     expect(at).toBeGreaterThan(-1);
     expect(over[at + 1]).toBe(' x');
   });
   it('moves a two-octet character that would straddle the 75th octet whole to the next line', () => {
     // 22 + 52 = 74 octets, then a character of two.
-    const lines = physical(interviewIcs({ ...BASE, workspace: null, job: `${'x'.repeat(52)}éz` }));
+    const lines = physical(file({ ...BASE, workspace: null, job: `${'x'.repeat(52)}éz` }));
     const at = lines.indexOf(`SUMMARY:Interview for ${'x'.repeat(52)}`);
     expect(at).toBeGreaterThan(-1);
     expect(lines[at + 1]).toBe(' éz');
     expect(Buffer.byteLength(lines[at], 'utf8')).toBe(74);
   });
   it('folds a continuation line at 75 octets too, its leading space counted', () => {
-    const lines = physical(interviewIcs({ ...BASE, workspace: null, job: 'x'.repeat(53 + 74 + 1) }));
+    const lines = physical(file({ ...BASE, workspace: null, job: 'x'.repeat(53 + 74 + 1) }));
     const at = lines.indexOf(`SUMMARY:Interview for ${'x'.repeat(53)}`);
     expect(lines.slice(at + 1, at + 3)).toEqual([` ${'x'.repeat(74)}`, ' x']);
   });
   it('escapes before it folds, so an escape is never cut from what it escapes by more than a fold', () => {
     const job = `${'x'.repeat(52)},y`;
-    const ics = interviewIcs({ ...BASE, workspace: null, job });
+    const ics = file({ ...BASE, workspace: null, job });
     expect(lineOf(ics, 'SUMMARY')).toBe(`SUMMARY:Interview for ${'x'.repeat(52)}\\,y`);
     for (const line of physical(ics)) expect(Buffer.byteLength(line, 'utf8')).toBeLessThanOrEqual(75);
+  });
+});
+
+describe('nothing is made from a row that cannot give a whole file or a whole invitation', () => {
+  const all = (row: InviteSource) => [interviewIcs(row), icsFileName(row), invitationText(row, false), invitationText(row, true)];
+  const NOTHING = [null, null, null, null];
+  it('a start that is not an instant', () => {
+    for (const scheduled_at of ['', 'nonsense', 'next Tuesday', '2026-10-20', '2026-10-20T15:00', '2026-10-20 15:00:00+08:00', 'Oct 20 2026 15:00']) {
+      expect(all({ ...BASE, scheduled_at }), scheduled_at).toEqual(NOTHING);
+    }
+    expect(all({ ...BASE, scheduled_at: null as never })).toEqual(NOTHING);
+    expect(all({ ...BASE, scheduled_at: undefined as never })).toEqual(NOTHING);
+  });
+  it('a length that is not a positive whole number', () => {
+    for (const duration_minutes of [0, -60, 1.5, Number.NaN, Number.POSITIVE_INFINITY, '60' as never, null as never, undefined as never]) {
+      expect(all({ ...BASE, duration_minutes }), String(duration_minutes)).toEqual(NOTHING);
+    }
+  });
+  it('a file needs the stamp of its last change too; the name and the invitation do not use it', () => {
+    for (const updated_at of ['', 'nonsense', '2026-10-12T02:15:00']) {
+      const row = { ...BASE, updated_at };
+      expect(interviewIcs(row), updated_at).toBeNull();
+      expect(icsFileName(row), updated_at).toBe('interview-aina-rahman-2026-10-20.ics');
+      expect(invitationText(row, false), updated_at).toBe(words(BASE, false));
+    }
+  });
+  it('so no file has an empty line of its own, and no name ends in a hyphen', () => {
+    for (const row of [BASE, { ...BASE, created_at: 'nonsense' }, { ...BASE, candidate: '' }, { ...BASE, place: null, interviewer_name: null, workspace: null }]) {
+      for (const line of logical(file(row))) expect(line, line).toMatch(/^[A-Z]+:.+$/);
+      expect(fileName(row)).toMatch(/^interview-(?:[a-z0-9-]+-)?\d{4}-\d{2}-\d{2}\.ics$/);
+      expect(words(row, false)).not.toMatch(/^(Date|Time|Length): *$/m);
+    }
+  });
+  it('a whole row still gives all three', () => {
+    expect(all(BASE).every((made) => typeof made === 'string' && made.length > 0)).toBe(true);
+    expect(all({ ...BASE, duration_minutes: 1 }).every((made) => typeof made === 'string')).toBe(true);
   });
 });

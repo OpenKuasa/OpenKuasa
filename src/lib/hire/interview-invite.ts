@@ -32,12 +32,25 @@ export type InviteSource = {
 const present = (value: string | null | undefined) => (value && value.trim() ? value.trim() : null);
 
 /**
+ * Whether a row has a time that can be told to someone: its start is an
+ * instant and its length a positive whole number of minutes. Without both
+ * there is no date, no end time and no file name to write, and what is made
+ * here is handed to a candidate: so nothing is made, rather than a text or a
+ * file with a hole in it.
+ */
+function hasItsTime(i: InviteSource): boolean {
+  return !Number.isNaN(instantMs(i.scheduled_at)) && Number.isInteger(i.duration_minutes) && i.duration_minutes > 0;
+}
+
+/**
  * The invitation, in English, for the recruiter to copy into their own email
  * or message. `moved`: the interview's time was changed, so the opening line
  * says the time is new. A line whose value is missing is left out, with
- * nothing in its place.
+ * nothing in its place. Null when the row has no time to tell (see
+ * `hasItsTime`): there is then no invitation, never one with a gap.
  */
-export function invitationText(i: InviteSource, moved: boolean): string {
+export function invitationText(i: InviteSource, moved: boolean): string | null {
+  if (!hasItsTime(i)) return null;
   const workspace = present(i.workspace);
   const at = workspace ? ` at ${workspace}` : '';
   const place = present(i.place);
@@ -129,9 +142,12 @@ function fold(line: string): string {
  * `REQUEST`: there is no organiser, no attendee and no reply to collect. The
  * UID is the interview's id, which never changes, and the sequence number
  * grows with every change, so a file downloaded after a reschedule replaces
- * the entry a calendar already has.
+ * the entry a calendar already has. Null when the row has no time to tell, or
+ * no stamp of its last change: a file with an empty DTSTART, DTEND or DTSTAMP
+ * is one a calendar refuses, so no file is made and none can be offered.
  */
-export function interviewIcs(i: InviteSource): string {
+export function interviewIcs(i: InviteSource): string | null {
+  if (!hasItsTime(i) || Number.isNaN(instantMs(i.updated_at))) return null;
   const start = instantMs(i.scheduled_at);
   const changedAfter = Math.floor((instantMs(i.updated_at) - instantMs(i.created_at)) / 1000);
   const sequence = Number.isFinite(changedAfter) && changedAfter > 0 ? changedAfter : 0;
@@ -169,8 +185,10 @@ export function interviewIcs(i: InviteSource): string {
  * `interview-aina-rahman-2026-10-20.ics`: the name in lower case with
  * anything but a to z and 0 to 9 turned into single hyphens, then the Kuala
  * Lumpur date. A name with none of those characters gives the date alone.
+ * Null when the row has no time to tell: there is no date to name a file by.
  */
-export function icsFileName(i: InviteSource): string {
+export function icsFileName(i: InviteSource): string | null {
+  if (!hasItsTime(i)) return null;
   const slug = i.candidate.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   return `interview-${slug ? `${slug}-` : ''}${klDateOf(i.scheduled_at)}.ics`;
 }
