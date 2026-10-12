@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { PLACEHOLDERS, unfilledInLetter, unfilledPlaceholders } from '@/lib/people/letter-placeholders';
 
 describe('PLACEHOLDERS', () => {
-  it('is the seven names the database fills, in its order', () => {
+  it('is the eight names the database fills, in its order', () => {
     expect(PLACEHOLDERS).toEqual([
       'employee_name',
       'employee_no',
@@ -11,7 +11,14 @@ describe('PLACEHOLDERS', () => {
       'join_date',
       'company_name',
       'today',
+      'salary',
     ]);
+  });
+
+  it('finds {salary} (the eighth name) and treats its look-alikes as ordinary text', () => {
+    expect(unfilledPlaceholders('Gaji {salary} sebulan.')).toEqual(['salary']);
+    expect(unfilledPlaceholders('{Salary} { salary } {salary {SALARY} {salary_x}')).toEqual([]);
+    expect(unfilledPlaceholders('{today} {salary} {employee_name}')).toEqual(['today', 'salary', 'employee_name']);
   });
 });
 
@@ -26,7 +33,7 @@ describe('unfilledPlaceholders', () => {
   });
 
   it('leaves unknown names, other cases, spaces and unclosed braces alone', () => {
-    expect(unfilledPlaceholders('{salary} {Today} {TODAY} { today } {today {employee_name')).toEqual([]);
+    expect(unfilledPlaceholders('{Salary} {Today} {TODAY} { today } {today {employee_name')).toEqual([]);
     expect(unfilledPlaceholders('{}')).toEqual([]);
     expect(unfilledPlaceholders('{today }')).toEqual([]);
   });

@@ -72,7 +72,7 @@ const GOAL_COLUMNS = `id,employee_id,title,progress,due_date,status,${GOAL_NAME}
 // The four file columns go together in the database, so a file name means a file is attached.
 const DOCUMENT_COLUMNS = `id,employee_id,title,doc_type,expires_on,file_name,file_size,file_type,source,ack_requested,acknowledged_at,created_at,${NAME}`;
 const LETTER_COLUMNS = `id,employee_id,letter_type,title,body,status,issued_on,ack_requested,acknowledged_at,created_at,${NAME}`;
-const TEMPLATE_COLUMNS = 'id,name,letter_type,title,body';
+const TEMPLATE_COLUMNS = 'id,name,letter_type,title,body,lang';
 const VOUCHER_COLUMNS = 'id,voucher_no,payee,voucher_type,amount_cents,issued_date,status';
 const SETTINGS_COLUMNS = 'work_week,work_start_time,late_grace_minutes,default_annual_leave_days,default_medical_leave_days,default_emergency_leave_days,overtime_rates,notifications';
 const ATTENDANCE_COLUMNS = 'id,employee_id,work_date,clock_in,clock_out,status,corrected_at,correction_note';

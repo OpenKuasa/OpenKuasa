@@ -8,6 +8,9 @@
 import { type ModelMessage, stepCountIs, streamText } from 'ai';
 import { logModelCall, logModelError } from '@/lib/ai/call-log';
 import { getModel, pickModelId } from '@/lib/ai/provider';
+// Each product's own assistant is told, on each call, which language the person's latest message is in (see the
+// file). Not Tuah, and not a specialist Tuah asks: their requests are as they were.
+import { inUsersLanguage } from '@/lib/ai/reply-language';
 import type { CrmAccess } from '@/lib/ai/crm-tools';
 import { prepareCvStep } from '@/lib/ai/hire-tools';
 import { guardDeletions } from '@/lib/ai/hire-deletions';
@@ -79,7 +82,7 @@ export function runJebat(
 ) {
   const { tools, toolApproval } = boundToolkit([reachProduct(reach)], messages, approvals);
   return streamText({
-    model: getModel('orchestrator', apiKey),
+    model: inUsersLanguage(getModel('orchestrator', apiKey)),
     system: JEBAT_SYSTEM,
     messages,
     tools,
@@ -111,7 +114,7 @@ export function runKasturi(
 ) {
   const { tools, toolApproval } = boundToolkit([crmProduct(crm), kasturiSharedProduct(reach)], messages, approvals);
   return streamText({
-    model: getModel('orchestrator', apiKey),
+    model: inUsersLanguage(getModel('orchestrator', apiKey)),
     system: kasturiSystem(new Date()),
     messages,
     tools,
@@ -143,7 +146,7 @@ export function runLekir(
   // The gates for a deletion, a talent pool change and an interview change are put on in `boundToolkit`.
   const { tools, toolApproval } = boundToolkit([product], messages, approvals);
   return streamText({
-    model: getModel('orchestrator', apiKey),
+    model: inUsersLanguage(getModel('orchestrator', apiKey)),
     system: LEKIR_SYSTEM,
     messages,
     tools,
@@ -175,7 +178,7 @@ export function runLekiu(
 ) {
   const { tools, toolApproval } = boundToolkit([peopleProduct(people)], messages, approvals);
   return streamText({
-    model: getModel('orchestrator', apiKey),
+    model: inUsersLanguage(getModel('orchestrator', apiKey)),
     system: lekiuSystem(new Date()),
     messages,
     tools,
@@ -206,7 +209,7 @@ export function runBendahara(
 ) {
   const { tools, toolApproval } = boundToolkit([financeProduct(finance)], messages, approvals);
   return streamText({
-    model: getModel('orchestrator', apiKey),
+    model: inUsersLanguage(getModel('orchestrator', apiKey)),
     system: bendaharaSystem(new Date()),
     messages,
     tools,

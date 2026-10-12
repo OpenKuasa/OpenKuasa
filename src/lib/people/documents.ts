@@ -9,7 +9,7 @@ import { daysBetween, formatDate, malaysiaDate, monthYearLabel } from './dates';
 import { EXPIRY_WINDOW_DAYS, type ExpiryState, expiryState } from './document-forms';
 import { EMPLOYMENT_LABEL } from './employees';
 import { unfilledInLetter } from './letter-placeholders';
-import { DOCUMENT_TYPE_LABEL, LETTER_TYPE_LABEL, isTeamView, ownRows } from './own';
+import { DOCUMENT_TYPE_LABEL, LETTER_LANG_LABEL, LETTER_TYPE_LABEL, isTeamView, ownRows } from './own';
 import { sumBy } from './series';
 import type {
   DocumentType,
@@ -19,6 +19,7 @@ import type {
   LeaveBalance,
   Letter,
   LetterTemplate,
+  LetterLang,
   LetterType,
   Payslip,
   PeopleData,
@@ -587,7 +588,17 @@ export function buildLettersModel(letters: Letter[], viewer: PeopleViewer, today
   };
 }
 
-export type LetterTemplateRow = { id: string; name: string; letter_type: LetterType; type_label: string; title: string; body: string };
+export type LetterTemplateRow = {
+  id: string;
+  name: string;
+  letter_type: LetterType;
+  type_label: string;
+  title: string;
+  body: string;
+  lang: LetterLang;
+  /** "English" or "Bahasa Malaysia": the language a letter's dates and salary are written in. */
+  lang_label: string;
+};
 
 export type LetterTemplatesModel =
   | { allowed: false }
@@ -602,7 +613,7 @@ export function buildLetterTemplatesModel(templates: LetterTemplate[], viewer: P
     can_manage: canManageDocuments(viewer),
     rows: [...templates]
       .sort((a, b) => a.name.localeCompare(b.name))
-      .map((t) => ({ ...t, type_label: LETTER_TYPE_LABEL[t.letter_type] })),
+      .map((t) => ({ ...t, type_label: LETTER_TYPE_LABEL[t.letter_type], lang_label: LETTER_LANG_LABEL[t.lang] ?? LETTER_LANG_LABEL.en })),
   };
 }
 

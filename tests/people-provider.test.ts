@@ -31,7 +31,7 @@ const ROWS: Record<string, unknown[]> = {
     { id: 'd2', employee_id: 'e1', title: 'Sample', doc_type: 'contract', file_name: null, file_size: null, file_type: null, employee: { name: 'Aisyah Rahim' } },
   ],
   hr_letters: [{ id: 'lt1', employee_id: 'e1', title: 'Offer', employee: { name: 'Aisyah Rahim' } }],
-  hr_letter_templates: [{ id: 'tp1', name: 'Offer', letter_type: 'offer', title: 'Offer', body: 'Dear {employee_name}' }],
+  hr_letter_templates: [{ id: 'tp1', name: 'Offer', letter_type: 'offer', title: 'Offer', body: 'Dear {employee_name}', lang: 'ms' }],
   hr_payroll_runs: [{ id: 'r1', period_month: '2026-10-01', status: 'draft', paid_at: null }],
   hr_payslips: [
     {
@@ -310,7 +310,8 @@ describe('getPeopleData', () => {
     const letters = calls.find((c) => c.table === 'hr_letters')!;
     expect((letters.columns as string).split(',')).toEqual(expect.arrayContaining(['body', 'ack_requested', 'acknowledged_at', 'issued_on']));
     expect(letters.filters.map((f) => f[1])).not.toContain('status');
-    expect(await data.listLetterTemplates()).toEqual([{ id: 'tp1', name: 'Offer', letter_type: 'offer', title: 'Offer', body: 'Dear {employee_name}' }]);
+    expect(await data.listLetterTemplates()).toEqual([{ id: 'tp1', name: 'Offer', letter_type: 'offer', title: 'Offer', body: 'Dear {employee_name}', lang: 'ms' }]);
+    expect((calls.find((c) => c.table === 'hr_letter_templates')!.columns as string).split(',')).toEqual(['id', 'name', 'letter_type', 'title', 'body', 'lang']);
     expect(calls.find((c) => c.table === 'hr_letter_templates')!.order[0]).toBe('name');
   });
 

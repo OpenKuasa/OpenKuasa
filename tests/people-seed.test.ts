@@ -160,6 +160,8 @@ describe('people seed', () => {
       'Offer of employment', 'Confirmation of employment', 'Promotion', 'Warning', 'Contract renewal', 'General letter',
     ]);
     expect(new Set(templates.map((t) => t.letter_type)).size).toBe(6);
+    // The sample company's templates are the English six.
+    expect(templates.map((t) => t.lang)).toEqual(Array(templates.length).fill('en'));
 
     const vouchers = await data.listPaymentVouchers();
     expect(vouchers).toHaveLength(6);

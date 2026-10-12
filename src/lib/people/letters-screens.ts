@@ -72,7 +72,7 @@ export function issueState(title: string, body: string): IssueState {
 
 /**
  * Puts `{name}` where the cursor is, replacing any selection, and says where the cursor goes (just after it).
- * Positions are clamped and may come in either order. A name that is not one of the seven, or a result longer
+ * Positions are clamped and may come in either order. A name that is not one of the eight placeholders (`PLACEHOLDERS`), or a result longer
  * than `max`, leaves the text and the caret (at the start of the selection) as they were.
  */
 export function insertPlaceholder(

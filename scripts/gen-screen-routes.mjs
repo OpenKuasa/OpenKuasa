@@ -34,6 +34,7 @@ const SERVER_PAGES = {
   'crm/landing-page': '@/screens/crm/landing-pages-page',
   'crm/broadcast': '@/screens/crm/broadcasts-page',
   'crm/automations': '@/screens/crm/automations-page',
+  'crm/chatbot': '@/screens/crm/chatbot-page',
 };
 
 /**

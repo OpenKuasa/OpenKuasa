@@ -56,6 +56,7 @@ import {
   type AnyPart,
   type ToolStep,
 } from '@/components/chat/tool-parts';
+import { ReplyText, TypedText } from '@/components/chat/reply-text';
 import { ChangeList } from '@/components/chat/tool-cards';
 import { changeHeading, changeRows } from '@/lib/chat/change-rows';
 
@@ -356,11 +357,8 @@ function Thread({
                   )}
                 </div>
               )}
-              {textOf(m).trim() && (
-                <div className="whitespace-pre-wrap leading-relaxed text-primary-foreground">
-                  {textOf(m)}
-                </div>
-              )}
+              {/* The person's own words: as typed, never read for marks. */}
+              {textOf(m).trim() && <TypedText text={textOf(m)} />}
             </div>
           );
         }
@@ -371,10 +369,10 @@ function Thread({
             <div className="flex flex-col gap-2">
               {m.parts.map((part, i) => {
                 if (isText(part)) {
+                  // The assistant's words: a heading, bold, a list or a rule it wrote is drawn, the rest is text.
+                  // `arriving`: the last piece of the last message while the reply is still being written.
                   return part.text.trim() ? (
-                    <div key={i} className="whitespace-pre-wrap leading-relaxed text-primary-foreground">
-                      {part.text}
-                    </div>
+                    <ReplyText key={i} text={part.text} arriving={busy && m === messages[messages.length - 1] && i === m.parts.length - 1} />
                   ) : null;
                 }
                 const pending = toPendingApproval(part);

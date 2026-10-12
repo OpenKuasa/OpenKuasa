@@ -29,9 +29,11 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   // Reads Bendahara's invoices; they are created and changed on finance/invoices.
   'crm/billings',
   'crm/landing-page',
-  // Writing and audiences are live; sending is not connected yet.
+  // Sends by email through the workspace's own Resend key.
   'crm/broadcast',
   'crm/automations',
+  // Set-up and a signed-in preview; the bot does not answer customers yet.
+  'crm/chatbot',
   // Shared with Jebat's analytics (registry 'reach/reports'); /reach/reports
   // is not a nav item, so the screen is served at /crm/reports.
   'crm/reports',

@@ -6,6 +6,7 @@ import {
   deleteLetter,
   deleteLetterTemplate,
   issueLetter,
+  requestLetterAck,
   saveLetter,
   saveLetterTemplate,
   startLetterFromTemplate,
@@ -30,7 +31,7 @@ const SAVED = {
   ack_requested: false,
   acknowledged_at: null,
 };
-const TEMPLATE_ROW = { id: TEMPLATE, name: 'Offer', letter_type: 'offer', title: 'Offer', body: 'Dear {employee_name}' };
+const TEMPLATE_ROW = { id: TEMPLATE, name: 'Offer', letter_type: 'offer', title: 'Offer', body: 'Dear {employee_name}', lang: 'en' };
 const SAVE = { employee_id: EMP, letter_type: 'offer', title: 'Offer of employment', body: 'Dear Farah,\n\nWelcome.', ack_requested: false };
 
 afterEach(() => vi.restoreAllMocks());
@@ -222,6 +223,48 @@ describe('acknowledgeLetter', () => {
   });
 });
 
+describe('requestLetterAck', () => {
+  it('calls hr_request_letter_ack with exactly p_letter and p_requested, and returns the letter', async () => {
+    const asked = { ...SAVED, ack_requested: true };
+    const { client, calls } = fakeSupabase({ 'rpc.hr_request_letter_ack': { data: asked } });
+    expect(await requestLetterAck(ctxOf(client), { letter_id: LETTER, requested: true })).toEqual({ ok: true, data: asked });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ fn: 'hr_request_letter_ack', args: { p_letter: LETTER, p_requested: true } });
+    expect(Object.keys(calls[0].args!).sort()).toEqual(['p_letter', 'p_requested']);
+  });
+  it('passes false as false', async () => {
+    const { client, calls } = fakeSupabase({ 'rpc.hr_request_letter_ack': { data: SAVED } });
+    await requestLetterAck(ctxOf(client), { letter_id: LETTER, requested: false });
+    expect(calls[0].args).toEqual({ p_letter: LETTER, p_requested: false });
+  });
+  it('refuses a bad id, a missing or non-boolean requested and a smuggled employee, without a call', async () => {
+    const { client, calls } = fakeSupabase({ 'rpc.hr_request_letter_ack': { data: SAVED } });
+    expect((await requestLetterAck(ctxOf(client), { letter_id: 'x', requested: true })).ok).toBe(false);
+    expect((await requestLetterAck(ctxOf(client), { letter_id: LETTER })).ok).toBe(false);
+    expect((await requestLetterAck(ctxOf(client), { letter_id: LETTER, requested: 'yes' })).ok).toBe(false);
+    expect((await requestLetterAck(ctxOf(client), { letter_id: LETTER, requested: null })).ok).toBe(false);
+    expect(calls).toEqual([]);
+    await requestLetterAck(ctxOf(client), { letter_id: LETTER, requested: true, employee_id: 'evil' } as never);
+    expect(JSON.stringify(calls[0].args)).not.toContain('evil');
+  });
+  it.each(['LETTER_NOT_ALLOWED', 'LETTER_NOT_FOUND', 'LETTER_BAD_INPUT', 'LETTER_NOT_DRAFT'])('turns %s into its sentence', async (code) => {
+    const { client } = fakeSupabase({ 'rpc.hr_request_letter_ack': { error: { code: 'P0001', message: code } } });
+    expect(await requestLetterAck(ctxOf(client), { letter_id: LETTER, requested: true })).toEqual({ ok: false, error: DOCUMENT_REFUSALS[code] });
+  });
+  it('says what to do about an issued letter', async () => {
+    const { client } = fakeSupabase({ 'rpc.hr_request_letter_ack': { error: { message: 'LETTER_NOT_DRAFT' } } });
+    expect(await requestLetterAck(ctxOf(client), { letter_id: LETTER, requested: true })).toEqual({
+      ok: false,
+      error: 'That letter has been issued. Pull it back to draft on the Letters screen to change it.',
+    });
+  });
+  it('answers the generic sentence for a reply that is not a letter', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { client } = fakeSupabase({ 'rpc.hr_request_letter_ack': { data: { id: LETTER } } });
+    expect(await requestLetterAck(ctxOf(client), { letter_id: LETTER, requested: true })).toEqual({ ok: false, error: WRITE_FAILED });
+  });
+});
+
 describe('deleteLetter', () => {
   it('calls hr_delete_letter and returns what was deleted', async () => {
     const { client, calls } = fakeSupabase({ 'rpc.hr_delete_letter': { data: { id: LETTER, employee_id: EMP } } });
@@ -252,15 +295,35 @@ describe('saveLetterTemplate', () => {
         p_letter_type: 'offer',
         p_title: 'Offer',
         p_body: 'Dear {employee_name}',
+        // No language said: the database gives a new template English and leaves a changed one as it is.
+        p_lang: null,
       },
     });
-    expect(Object.keys(calls[0].args!).sort()).toEqual(['p_body', 'p_letter_type', 'p_name', 'p_org', 'p_template', 'p_title']);
+    expect(Object.keys(calls[0].args!).sort()).toEqual(['p_body', 'p_lang', 'p_letter_type', 'p_name', 'p_org', 'p_template', 'p_title']);
     expect(JSON.stringify(calls[0].args)).not.toContain('other');
   });
   it('changes a template when an id is given', async () => {
     const { client, calls } = fakeSupabase({ 'rpc.hr_save_letter_template': { data: TEMPLATE_ROW } });
     await saveLetterTemplate(ctxOf(client), { ...TEMPLATE_INPUT, template_id: TEMPLATE });
     expect(calls[0].args).toMatchObject({ p_template: TEMPLATE, p_org: ORG });
+  });
+  it('sends the language when one is chosen, and hands back the one the database kept', async () => {
+    for (const lang of ['en', 'ms']) {
+      const { client, calls } = fakeSupabase({ 'rpc.hr_save_letter_template': { data: { ...TEMPLATE_ROW, lang } } });
+      expect(await saveLetterTemplate(ctxOf(client), { ...TEMPLATE_INPUT, lang })).toEqual({ ok: true, data: { ...TEMPLATE_ROW, lang } });
+      expect(calls[0].args).toMatchObject({ p_lang: lang });
+    }
+    // A caller that says nothing of the language (the assistant's tool) changes a Bahasa Malaysia template and it stays one.
+    const { client, calls } = fakeSupabase({ 'rpc.hr_save_letter_template': { data: { ...TEMPLATE_ROW, lang: 'ms' } } });
+    expect(await saveLetterTemplate(ctxOf(client), { ...TEMPLATE_INPUT, template_id: TEMPLATE, lang: null })).toMatchObject({ ok: true, data: { lang: 'ms' } });
+    expect(calls[0].args).toMatchObject({ p_lang: null });
+  });
+  it('answers the generic sentence for a reply with no language or one it does not know', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    for (const lang of [undefined, 'fr', 5]) {
+      const { client } = fakeSupabase({ 'rpc.hr_save_letter_template': { data: { ...TEMPLATE_ROW, lang } } });
+      expect((await saveLetterTemplate(ctxOf(client), TEMPLATE_INPUT)).ok).toBe(false);
+    }
   });
   it.each([
     ['a blank name', { ...TEMPLATE_INPUT, name: ' ' }],
@@ -270,6 +333,9 @@ describe('saveLetterTemplate', () => {
     ['a long body', { ...TEMPLATE_INPUT, body: 'x'.repeat(10001) }],
     ['an unknown type', { ...TEMPLATE_INPUT, letter_type: 'memo' }],
     ['an id that is not text', { ...TEMPLATE_INPUT, template_id: 4 }],
+    ['a language that is neither', { ...TEMPLATE_INPUT, lang: 'fr' }],
+    ['a language in capitals', { ...TEMPLATE_INPUT, lang: 'MS' }],
+    ['a language that is not text', { ...TEMPLATE_INPUT, lang: 1 }],
   ])('refuses %s without a call', async (_label, input) => {
     const { client, calls } = fakeSupabase();
     expect((await saveLetterTemplate(ctxOf(client), input as never)).ok).toBe(false);

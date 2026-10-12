@@ -33,7 +33,7 @@ declare
     'hr_request_document_ack(uuid,boolean)','hr_acknowledge_document(uuid)','hr_delete_employee(uuid,uuid)',
     'hr_save_letter(uuid,uuid,text,text,text,boolean)','hr_start_letter_from_template(uuid,uuid)','hr_issue_letter(uuid)',
     'hr_unissue_letter(uuid)','hr_delete_letter(uuid)','hr_acknowledge_letter(uuid)',
-    'hr_save_letter_template(uuid,uuid,text,text,text,text)','hr_delete_letter_template(uuid)'];
+    'hr_save_letter_template(uuid,uuid,text,text,text,text,text)','hr_delete_letter_template(uuid)'];
 begin
   begin
   -- the catalogue: functions, grants, policies, the bucket, the service role
@@ -49,7 +49,8 @@ begin
     count(*) filter (where n.nspname = 'private' and (p.proname like 'hr\_%' or p.proname = 'reseed_demo_people')
       and (has_function_privilege('authenticated', p.oid, 'execute') or has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('public', p.oid, 'execute')))
   into i, j, ctx from pg_proc p join pg_namespace n on n.oid = p.pronamespace;
-  if i <> 16 or j <> 11 or ctx <> '0' then fails := fails || format('%s public functions (16), %s helpers (11), %s helpers callable (0)', i, j, ctx); end if;
+  -- 12 helpers: the eleven of the letters slice and hr_letter_date (20261109140000).
+  if i <> 16 or j <> 12 or ctx <> '0' then fails := fails || format('%s public functions (16), %s helpers (12), %s helpers callable (0)', i, j, ctx); end if;
   foreach t in array tabs loop
     select count(*) filter (where (p.policyname = t || '_select' and p.cmd = 'SELECT' and p.permissive = 'PERMISSIVE')
       or (p.policyname = 'mfa_required' and p.cmd = 'ALL' and p.permissive = 'RESTRICTIVE' and p.qual like '%mfa_ok()%')), count(*)
@@ -179,9 +180,9 @@ begin
   select a.id into dd from public.hr_documents a where a.employee_id = de and a.ack_requested;
   select a.id into dl from public.hr_letters a where a.org_id = demo and a.status = 'draft' limit 1;
   select a.id into di from public.hr_letters a where a.employee_id = de and a.status = 'issued' and a.ack_requested;
-  select a.id into dt from public.hr_letter_templates a where a.org_id = demo and a.letter_type = 'offer';
-  select a.id into tp from public.hr_letter_templates a where a.org_id = org and a.letter_type = 'other';
-  select a.id into tt from public.hr_letter_templates a where a.org_id = oth and a.letter_type = 'other';
+  select a.id into dt from public.hr_letter_templates a where a.org_id = demo and a.name = 'Offer of employment';
+  select a.id into tp from public.hr_letter_templates a where a.org_id = org and a.name = 'General letter';
+  select a.id into tt from public.hr_letter_templates a where a.org_id = oth and a.name = 'General letter';
   if dd is null or dl is null or di is null or dt is null or tp is null or tt is null then
     raise exception 'the demo has no document or letter to try, or a new workspace was given no starter templates';
   end if;
@@ -278,19 +279,19 @@ begin
       || pg_temp.x(who, lbl || 'writes a letter', format('hr_save_letter(%L,null,''offer'','' Hello '','' Body '',true) - ''id''', eb), '=' || format(letj, eb, 'offer', 'Hello', ' Body ', 'draft', 'null', 'true'));
     select a.id into g from public.hr_letters a where a.employee_id = eb and a.title = 'Hello';
     fails := fails || pg_temp.x(mb, 'B does not read the draft', format('(select count(*) from hr_letters where org_id = %L)', org), '=0')
-      || pg_temp.x(who, lbl || 'changes the draft', format('hr_save_letter(%L,%L,''warning'',''Hello'',''{salary} is ordinary text'',null) - ''id''', eb, g), '=' || format(letj, eb, 'warning', 'Hello', '{salary} is ordinary text', 'draft', 'null', 'false'))
-      || pg_temp.x(who, lbl || 'asks for an acknowledgement of it', format('hr_save_letter(%L,%L,''warning'',''Hello'',''{salary} is ordinary text'',true) -> ''ack_requested''', eb, g), '=true')
-      || pg_temp.x(who, lbl || 'issues it', format('hr_issue_letter(%L) - ''id''', g), '=' || format(letj, eb, 'warning', 'Hello', '{salary} is ordinary text', 'issued', '"' || d || '"', 'true'))
+      || pg_temp.x(who, lbl || 'changes the draft', format('hr_save_letter(%L,%L,''warning'',''Hello'',''{wage} is ordinary text'',null) - ''id''', eb, g), '=' || format(letj, eb, 'warning', 'Hello', '{wage} is ordinary text', 'draft', 'null', 'false'))
+      || pg_temp.x(who, lbl || 'asks for an acknowledgement of it', format('hr_save_letter(%L,%L,''warning'',''Hello'',''{wage} is ordinary text'',true) -> ''ack_requested''', eb, g), '=true')
+      || pg_temp.x(who, lbl || 'issues it', format('hr_issue_letter(%L) - ''id''', g), '=' || format(letj, eb, 'warning', 'Hello', '{wage} is ordinary text', 'issued', '"' || d || '"', 'true'))
       || pg_temp.v(lbl || 'is the issuer', format('select issued_by from public.hr_letters where id = %L', g), who::text)
       || pg_temp.x(mb, 'B reads it once issued', format('(select string_agg(id::text, '','') from hr_letters where org_id = %L)', org), format('="%s"', g))
       || pg_temp.x(mb, 'B acknowledges it', format('(hr_acknowledge_letter(%L) ->> ''acknowledged_at'')::timestamptz = now()', g), '=true')
-      || pg_temp.x(who, lbl || 'pulls it back', format('hr_unissue_letter(%L) - ''id''', g), '=' || format(letj, eb, 'warning', 'Hello', '{salary} is ordinary text', 'draft', 'null', 'true'))
+      || pg_temp.x(who, lbl || 'pulls it back', format('hr_unissue_letter(%L) - ''id''', g), '=' || format(letj, eb, 'warning', 'Hello', '{wage} is ordinary text', 'draft', 'null', 'true'))
       || pg_temp.v(lbl || 'pulled it back: no date, no issuer', format('select coalesce(issued_on::text, issued_by::text, acknowledged_at::text, ''-'') from public.hr_letters where id = %L', g), '-')
       || pg_temp.x(mb, 'B no longer reads it', format('(select count(*) from hr_letters where org_id = %L)', org), '=0')
       || pg_temp.x(who, lbl || 'deletes the draft', format('hr_delete_letter(%L)', g), format('={"id":"%s","employee_id":"%s"}', g, eb))
-      || pg_temp.x(who, lbl || 'adds a template', format('hr_save_letter_template(%L,null,'' T1 '',''other'','' Title '',''B'') - ''id''', org), '={"name":"T1","letter_type":"other","title":"Title","body":"B"}');
+      || pg_temp.x(who, lbl || 'adds a template', format('hr_save_letter_template(%L,null,'' T1 '',''other'','' Title '',''B'') - ''id''', org), '={"name":"T1","letter_type":"other","title":"Title","body":"B","lang":"en"}');
     select a.id into g from public.hr_letter_templates a where a.org_id = org and a.name = 'T1';
-    fails := fails || pg_temp.x(who, lbl || 'changes it', format('hr_save_letter_template(null,%L,''T1'',''offer'',''Title 2'',null)', g), format('={"id":"%s","name":"T1","letter_type":"offer","title":"Title 2","body":""}', g))
+    fails := fails || pg_temp.x(who, lbl || 'changes it', format('hr_save_letter_template(null,%L,''T1'',''offer'',''Title 2'',null)', g), format('={"id":"%s","name":"T1","letter_type":"offer","title":"Title 2","body":"","lang":"en"}', g))
       || pg_temp.x(who, lbl || 'starts a letter from it', format('hr_start_letter_from_template(%L,%L) #- ''{letter,id}''', eb, g), format('={"letter":%s,"unfilled":[]}', format(letj, eb, 'offer', 'Title 2', '', 'draft', 'null', 'false')))
       || pg_temp.x(who, lbl || 'deletes the template', format('hr_delete_letter_template(%L)', g), format('={"id":"%s"}', g))
       || pg_temp.v(lbl || 'left the letter started from it', format('select count(*) || ''/'' || count(template_id) from public.hr_letters where employee_id = %L', eb), '1/0')
@@ -461,7 +462,7 @@ begin
     fails := fails || pg_temp.x(adm, 'a draft with {' || t || '}', format('hr_save_letter(%L,%L,''offer'',''Draft'',%L,true)', ea, ld, 'As {' || t || '} says'), null)
       || pg_temp.x(adm, 'issued with {' || t || '} in it', format('hr_issue_letter(%L)', ld), 'LETTER_PLACEHOLDER');
   end loop;
-  fails := fails || pg_temp.x(adm, 'a body of 10,000 with other braces', format('hr_save_letter(%L,%L,''offer'',''Draft'',%L,true)', ea, ld, rpad('{salary} {Today} { today } {employee} {today {} ', 10000, 'x')), null)
+  fails := fails || pg_temp.x(adm, 'a body of 10,000 with other braces', format('hr_save_letter(%L,%L,''offer'',''Draft'',%L,true)', ea, ld, rpad('{wage} {Today} { today } {employee} {today {} ', 10000, 'x')), null)
     || pg_temp.x(ma, 'A acknowledges a draft addressed to them', format('hr_acknowledge_letter(%L)', ld), 'LETTER_NOT_FOUND')
     || pg_temp.x(adm, 'issued with braces that are no placeholder', format('hr_issue_letter(%L) ->> ''issued_on''', ld), format('="%s"', d))
     || pg_temp.x(ma, 'A reads both once it is issued', format('(select count(*) || ''/'' || count(*) filter (where status = ''issued'' and employee_id = %L) from hr_letters where org_id = %L)', ea, org), '="2/2"')
@@ -490,8 +491,8 @@ begin
       || pg_temp.x(adm, 'a template changed to ' || lbl, format('hr_save_letter_template(%L,%L,%s)', org, tp, q), 'LETTER_BAD_INPUT');
   end loop;
   insert into public.hr_letter_templates (org_id, name, letter_type, title, body) values (org, 'Fill', 'other', '{employee_name} / {today}',
-    'No {employee_no}; {designation} in {department}; joined {join_date}; at {company_name}; {salary} {Today} {employee_name}') returning id into tf;
-  q := 'No %s; %s in %s; joined %s; at Docs Check Sdn Bhd; {salary} {Today} %s';
+    'No {employee_no}; {designation} in {department}; joined {join_date}; at {company_name}; {wage} {Today} {employee_name}') returning id into tf;
+  q := 'No %s; %s in %s; joined %s; at Docs Check Sdn Bhd; {wage} {Today} %s';
   fails := fails || pg_temp.v('each new workspace was given the starter set', format('select string_agg(c::text, ''/'') from (select count(distinct letter_type) c from public.hr_letter_templates where org_id in (%L, %L) and id <> %L group by org_id) s', org, oth, tf), '6/6')
     || pg_temp.x(adm, 'a name already used, in other capitals', format('hr_save_letter_template(%L,null,'' general LETTER '',''other'',''T'',''B'')', org), 'LETTER_TEMPLATE_EXISTS')
     || pg_temp.x(adm, 'a template renamed onto another', format('hr_save_letter_template(%L,%L,''warning'',''other'',''T'',''B'')', org, tp), 'LETTER_TEMPLATE_EXISTS')
@@ -508,7 +509,7 @@ begin
   update public.hr_employees set name = '{company_name}', designation = '{today}' where id = eb;
   fails := fails || pg_temp.x(adm, 'a record that holds braces fills as plain text', format('hr_start_letter_from_template(%L,%L) #- ''{letter,id}'' #- ''{letter,title}''', eb, tf),
       format('={"letter":%s,"unfilled":["department","join_date"]}', format(letj, eb, 'other', '-', format(q, 'B', '{today}', '{department}', '{join_date}', '{company_name}'), 'draft', 'null', 'false')::jsonb - 'title'));
-  insert into public.hr_letter_templates (org_id, name, letter_type, title) select org, 'Planted ' || s, 'other', 'T' from generate_series(1, 43) s;
+  insert into public.hr_letter_templates (org_id, name, letter_type, title) select org, 'Planted ' || s, 'other', 'T' from generate_series(1, 37) s;
   fails := fails || pg_temp.x(adm, 'the 51st template', format('hr_save_letter_template(%L,null,''One more'',''other'',''T'',''B'')', org), 'LETTER_TOO_MANY_TEMPLATES')
     || pg_temp.x(adm, 'one of 50 changed', format('hr_save_letter_template(%L,%L,''Fill'',''offer'',''T'',''B'')', org, tf), null)
     || pg_temp.x(own, 'the other workspace still adds its own', format('hr_save_letter_template(%L,null,''One more'',''other'',''T'',''B'')', oth), null)
@@ -595,7 +596,7 @@ begin
   end loop;
   fails := fails || pg_temp.v('a row was changed in the demo', format('select pg_temp.snap(%L)', demo), snap)
     || pg_temp.x(dv, 'a demo visitor reads every document, letter and template, drafts too', format('(select (select count(*) || ''/'' || count(file_path) from hr_documents where org_id = %1$L)'
-      || ' || '' '' || (select count(*) || ''/'' || count(*) filter (where status = ''draft'') from hr_letters where org_id = %1$L) || '' '' || (select count(*) from hr_letter_templates where org_id = %1$L))', demo), '="24/0 5/2 6"')
+      || ' || '' '' || (select count(*) || ''/'' || count(*) filter (where status = ''draft'') from hr_letters where org_id = %1$L) || '' '' || (select count(*) from hr_letter_templates where org_id = %1$L))', demo), '="24/0 5/2 12"')
     || pg_temp.x(ma, 'someone outside the demo reads none of them', format('(select (select count(*) from hr_documents where org_id = %1$L) + (select count(*) from hr_letters where org_id = %1$L) + (select count(*) from hr_letter_templates where org_id = %1$L))', demo), '=0')
     -- What the re-seed built: no placeholder payslip or letter, types the old app can label, letters with a body and no placeholder, an issued date exactly on the issued.
     || pg_temp.v('the demo''s documents', format($q$select count(*) filter (where a.doc_type in ('contract','tax','benefits') and a.status = 'available' and a.source = 'hr' and a.issued_on is not null)

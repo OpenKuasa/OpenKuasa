@@ -2,6 +2,7 @@ import { FileText, LayoutTemplate, PieChart } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { DonutStat } from '@/components/charts';
 import { LetterDialog } from '@/components/people/letter-form';
+import { LetterheadProvider } from '@/components/people/letter-head';
 import { LetterRowControls } from '@/components/people/letter-row-controls';
 import { LetterViewDialog } from '@/components/people/letter-view';
 import { RequestRow } from '@/components/people/request-row';
@@ -14,6 +15,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
 import { todayInMalaysia } from '@/lib/people/dates';
 import { buildLetterTemplatesModel, buildLettersModel } from '@/lib/people/documents';
+import { plainPreview } from '@/lib/people/letter-marks';
+import { getLetterhead } from '@/lib/people/letterhead-data';
 import { lettersScreenControls, visibleLetterRows } from '@/lib/people/letters-screens';
 import { EmployeeCell, HR_ONLY, LOAD_FAILED, Muted, StatusPill, loadPeople } from './parts';
 
@@ -27,27 +30,29 @@ const SAMPLE_WORKSPACE = 'Sample company';
 export default async function LettersScreen() {
   const { model: loaded, viewer } = await loadPeople('letters', async (data, now, ctx) => {
     const team = ctx.viewer.isHr || ctx.viewer.isDemo;
-    const [letters, templates, employees, workspaceName] = await Promise.all([
+    const [letters, templates, employees, letterhead] = await Promise.all([
       data.listLetters(),
       team ? data.listLetterTemplates() : Promise.resolve([]),
       ctx.viewer.isHr && !ctx.viewer.isDemo ? data.listEmployees() : Promise.resolve([]),
-      (async () => {
-        if (!hasSupabaseEnv() || !ctx.orgId) return SAMPLE_WORKSPACE;
-        const { data: org } = await ctx.client.from('orgs').select('name').eq('id', ctx.orgId).maybeSingle();
-        return (org as { name?: string } | null)?.name ?? '';
-      })(),
+      // One read of the workspace's details: the name for the letters and the letterhead for the view and the previews.
+      hasSupabaseEnv() && ctx.orgId
+        ? getLetterhead({ client: ctx.client, orgId: ctx.orgId, isDemo: ctx.viewer.isDemo })
+        : Promise.resolve(null),
     ]);
+    const hasWorkspace = hasSupabaseEnv() && Boolean(ctx.orgId);
     return {
       letters: buildLettersModel(letters, ctx.viewer, todayInMalaysia(now)),
       templates: buildLetterTemplatesModel(templates, ctx.viewer),
       people: employees.filter((e) => e.status === 'active').map((e) => ({ id: e.id, name: e.name })),
-      workspaceName,
+      letterhead,
+      workspaceName: letterhead ? letterhead.name : hasWorkspace ? '' : SAMPLE_WORKSPACE,
     };
   });
 
   const model = loaded?.letters ?? null;
   const templates = loaded?.templates ?? null;
   const workspaceName = loaded?.workspaceName ?? '';
+  const letterhead = loaded?.letterhead ?? null;
   // The controls that change a letter or a template are drawn for an owner or admin outside the demo only.
   const editing = lettersScreenControls(viewer, loaded !== null).write;
   const rows = model ? visibleLetterRows(model) : [];
@@ -57,6 +62,7 @@ export default async function LettersScreen() {
     templates && templates.allowed ? templates.rows.map((t) => ({ id: t.id, name: t.name, type_label: t.type_label })) : [];
 
   return (
+    <LetterheadProvider head={letterhead} workspaceName={workspaceName}>
     <ScreenContainer>
       <PageHeader
         className="mb-3"
@@ -196,9 +202,10 @@ export default async function LettersScreen() {
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="text-sm font-semibold">{t.name}</h3>
                       <Badge variant="secondary">{t.type_label}</Badge>
+                      <Badge variant="outline">{t.lang_label}</Badge>
                     </div>
                     <p className="text-sm text-muted-foreground">{t.title}</p>
-                    <p className="line-clamp-3 whitespace-pre-line text-xs text-muted-foreground">{t.body}</p>
+                    <p className="line-clamp-3 whitespace-pre-line text-xs text-muted-foreground">{plainPreview(t.body)}</p>
                   </li>
                 ))}
               </ul>
@@ -207,5 +214,6 @@ export default async function LettersScreen() {
         ) : null}
       </BentoGrid>
     </ScreenContainer>
+    </LetterheadProvider>
   );
 }

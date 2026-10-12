@@ -1272,12 +1272,12 @@ describe('approval cards for letters and acknowledgement requests', () => {
     const find = nameIn([lookupLetter({ title: 'Letter for {employee_name}', body: 'Dear {employee_name}, from {company_name}. Keep {salary} as it is. {today}', unfilled: [] })]);
     const detail = approvalDetail('issueLetter', { letter_id: LETTER }, undefined, find);
     expect(detail).toBe(
-      'The employee will be able to see it. It still has {employee_name}, {company_name} and {today} in it, so this is likely to be refused until they are replaced. This is the text as last shown in this chat; the letter is issued as it is saved now.',
+      'The employee will be able to see it. It still has {employee_name}, {company_name}, {salary} and {today} in it, so this is likely to be refused until they are replaced. This is the text as last shown in this chat; the letter is issued as it is saved now.',
     );
     const one = nameIn([lookupLetter({ body: 'Dear {designation}.' })]);
     expect(approvalDetail('issueLetter', { letter_id: LETTER }, undefined, one)).toContain('It still has {designation} in it, so this is likely');
     // Unknown braces are ordinary text.
-    const plain = nameIn([lookupLetter({ body: 'Keep {salary} and { today } as they are.' })]);
+    const plain = nameIn([lookupLetter({ body: 'Keep {Salary} and { today } as they are.' })]);
     expect(approvalDetail('issueLetter', { letter_id: LETTER }, undefined, plain)).toBe('The employee will be able to see it. This is the text as last shown in this chat; the letter is issued as it is saved now.');
   });
 

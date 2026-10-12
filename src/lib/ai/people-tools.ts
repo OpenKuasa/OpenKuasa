@@ -34,10 +34,9 @@ import {
 } from '@/lib/people/capabilities';
 import { removeDocumentFiles } from '@/lib/people/document-files-server';
 import { type SavedDocument, requestDocumentAck as capRequestDocumentAck } from '@/lib/people/document-writes';
-import { DOCUMENT_REFUSALS } from '@/lib/people/documents-refusals';
 import { expiryState } from '@/lib/people/document-forms';
 import { documentAwaiting, letterAwaiting } from '@/lib/people/documents';
-import { type SavedLetter, issueLetter as capIssueLetter, saveLetter as capSaveLetter, startLetterFromTemplate as capStartLetter } from '@/lib/people/letter-writes';
+import { type SavedLetter, issueLetter as capIssueLetter, requestLetterAck as capRequestLetterAck, saveLetter as capSaveLetter, startLetterFromTemplate as capStartLetter } from '@/lib/people/letter-writes';
 import { unfilledInLetter } from '@/lib/people/letter-placeholders';
 import {
   applyLeave as capApplyLeave,
@@ -2410,7 +2409,9 @@ export function createPeopleTools(
         'Write a letter to an employee as a DRAFT the employee cannot see, or change a draft (its id from listLetters). The employee ' +
         'by their id from listEmployees; the type (offer, confirmation, promotion, warning, contract_renewal or other); a title; the ' +
         'WHOLE text exactly as the person gave or approved it, never shortened (up to 10,000 characters); and whether the employee is ' +
-        'asked to acknowledge it once it is issued. Never make up the text. An issued letter cannot be changed here. Needs approval.',
+        'asked to acknowledge it once it is issued. Never make up the text. The text may use "# " heading lines, **bold**, *italic*, "- " bullet lines and "1. " numbered lines, nothing else, ' +
+        'and the placeholders {employee_name}, {employee_no}, {designation}, {department}, {join_date}, {company_name}, {today} and {salary} (never invent a salary figure). ' +
+        'An issued letter cannot be changed here. Needs approval.',
       inputSchema: saveLetterToolInput,
       execute: async (input) =>
         change('saveLetter', async () => {
@@ -2437,7 +2438,7 @@ export function createPeopleTools(
       description:
         'Start a DRAFT letter for an employee from a template, by the employee\'s id from listEmployees and the template\'s id from ' +
         'listLetterTemplates. The system fills the template\'s placeholders from the employee\'s record; the result carries the draft ' +
-        'and any placeholders it could not fill. Needs approval.',
+        'and any placeholders it could not fill (the eight are {employee_name}, {employee_no}, {designation}, {department}, {join_date}, {company_name}, {today} and {salary}, the last as "RM 4,500.00 per month"). Needs approval.',
       inputSchema: startLetterToolInput,
       execute: async (input) =>
         change('startLetterFromTemplate', async () => {
@@ -2476,21 +2477,9 @@ export function createPeopleTools(
             if (!result.ok) return result;
             return { ok: true as const, data: documentWords(result.data, await nameOfEmployee(result.data.employee_id)) };
           }
-          // A letter: save the draft again with the request changed, everything else as the database has it now.
-          // Accepted: the read and the save are two steps, so a draft edit made in between by another owner or admin could be
-          // lost; nothing the employee sees is affected, and an issue in between is refused by the database.
-          // (Pages every letter to find one: fine at this size; a by-id read would be better later.)
-          const current = (await data.listLetters()).find((l) => l.id === blank(input.letter_id));
-          if (!current) return { ok: false as const, error: DOCUMENT_REFUSALS.LETTER_NOT_FOUND };
-          if (current.status !== 'draft') return { ok: false as const, error: DOCUMENT_REFUSALS.LETTER_NOT_DRAFT };
-          const result = await capSaveLetter(ctx, {
-            employee_id: current.employee_id,
-            letter_id: current.id,
-            letter_type: current.letter_type,
-            title: current.title,
-            body: current.body,
-            ack_requested: input.requested,
-          });
+          // A letter: one database call that changes the request and nothing else; an issued letter is refused by the
+          // database (LETTER_NOT_DRAFT), whose sentence reaches the model as it is.
+          const result = await capRequestLetterAck(ctx, { letter_id: blank(input.letter_id), requested: input.requested });
           if (!result.ok) return result;
           return {
             ok: true as const,

@@ -309,6 +309,9 @@ export type DocumentType = (typeof DOCUMENT_TYPES)[number];
 export const EMPLOYEE_DOCUMENT_TYPES = ['identity', 'medical', 'certificate', 'other'] as const;
 export const LETTER_TYPES = ['offer', 'confirmation', 'promotion', 'warning', 'contract_renewal', 'other'] as const;
 export type LetterType = (typeof LETTER_TYPES)[number];
+/** The languages a letter template can be in: English, or Bahasa Malaysia. */
+export const LETTER_LANGS = ['en', 'ms'] as const;
+export type LetterLang = (typeof LETTER_LANGS)[number];
 
 /**
  * A document of one employee. There is no status: "expiring" and "expired" are worked out from `expires_on` by
@@ -357,6 +360,8 @@ export type LetterTemplate = {
   letter_type: LetterType;
   title: string;
   body: string;
+  /** The language the dates and the salary are written in when a letter is started from it. */
+  lang: LetterLang;
 };
 
 export type PaymentVoucher = {

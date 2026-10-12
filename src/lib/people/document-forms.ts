@@ -4,7 +4,7 @@
  * The database re-checks everything; these only say it in words first. Nothing here logs.
  */
 import { daysBetween, isRealDate } from './dates';
-import { DOCUMENT_TYPES, LETTER_TYPES } from './types';
+import { DOCUMENT_TYPES, LETTER_LANGS, LETTER_TYPES, type LetterLang } from './types';
 
 export type Converted<T> = { ok: true; input: T } | { ok: false; error: string };
 const bad = (error: string): { ok: false; error: string } => ({ ok: false, error });
@@ -30,6 +30,7 @@ export function expiryState(expires_on: string | null, today: string): ExpirySta
 }
 
 const TYPE_PROBLEM = 'Choose a type from the list.';
+const LANG_PROBLEM = 'Choose a language from the list.';
 const expiryOk = (date: string): boolean => isRealDate(date) && date >= '2000-01-01' && date <= '2100-12-31';
 
 /** What the add and edit document forms send. `allowedTypes` is the list the person may choose from. An empty expiry is none. */
@@ -70,7 +71,8 @@ export function toTemplateInput(values: {
   letter_type: string;
   title: string;
   body: string;
-}): Converted<{ name: string; letter_type: string; title: string; body: string }> {
+  lang: string;
+}): Converted<{ name: string; letter_type: string; title: string; body: string; lang: LetterLang }> {
   const name = values.name.trim();
   if (name === '') return bad('Give the template a name.');
   if (name.length > TEMPLATE_NAME_MAX) return bad(`Keep the name to ${TEMPLATE_NAME_MAX} characters.`);
@@ -79,5 +81,7 @@ export function toTemplateInput(values: {
   if (title.length > LETTER_TITLE_MAX) return bad(`Keep the title to ${LETTER_TITLE_MAX} characters.`);
   if (values.body.length > LETTER_BODY_MAX) return bad('Keep the letter to 10,000 characters.');
   if (!(LETTER_TYPES as readonly string[]).includes(values.letter_type)) return bad(TYPE_PROBLEM);
-  return { ok: true, input: { name, letter_type: values.letter_type, title, body: values.body } };
+  const lang = LETTER_LANGS.find((known) => known === values.lang);
+  if (!lang) return bad(LANG_PROBLEM);
+  return { ok: true, input: { name, letter_type: values.letter_type, title, body: values.body, lang } };
 }

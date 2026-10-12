@@ -46,7 +46,7 @@ const letter = (over: Partial<Letter>): Letter => ({
   status: 'issued', issued_on: '2026-02-01', ack_requested: false, acknowledged_at: null, created_at: '2026-02-01T02:00:00.000Z', ...over,
 });
 const payslip = (over: Partial<Payslip>): Payslip => ({ id: 'p', employee_id: DEMO_EMPLOYEE_ID, period_month: '2026-09-01', status: 'paid', ...over }) as Payslip;
-const template = (over: Partial<LetterTemplate>): LetterTemplate => ({ id: 't', name: 'N', letter_type: 'offer', title: 'T', body: 'B', ...over });
+const template = (over: Partial<LetterTemplate>): LetterTemplate => ({ id: 't', name: 'N', letter_type: 'offer', title: 'T', body: 'B', lang: 'en', ...over });
 
 const SETTINGS: PeopleSettings = {
   work_week: ['mon', 'tue', 'wed', 'thu', 'fri'],
@@ -423,7 +423,7 @@ describe('Letters model', () => {
     const row = (id: string) => model.rows.find((r) => r.id === id)!;
     expect(row('ok')).toMatchObject({ unfilled: [], can_edit: true, can_delete: true, can_issue: true, can_unissue: false });
     expect(row('blank')).toMatchObject({ unfilled: [], can_issue: false, can_edit: true });
-    expect(row('holes')).toMatchObject({ unfilled: ['employee_name', 'designation', 'join_date'], can_issue: false, can_edit: true });
+    expect(row('holes')).toMatchObject({ unfilled: ['employee_name', 'designation', 'join_date', 'salary'], can_issue: false, can_edit: true });
     expect(row('issued')).toMatchObject({ unfilled: [], can_edit: false, can_delete: false, can_issue: false, can_unissue: true });
   });
 
@@ -448,7 +448,7 @@ describe('Letters model', () => {
 });
 
 describe('Letter templates model', () => {
-  const templates = [template({ id: 'b', name: 'B', letter_type: 'warning' }), template({ id: 'a', name: 'A' })];
+  const templates = [template({ id: 'b', name: 'B', letter_type: 'warning', lang: 'ms' }), template({ id: 'a', name: 'A' })];
 
   it('lists them by name for an owner or admin', () => {
     const model = buildLetterTemplatesModel(templates, HR_5);
@@ -456,6 +456,8 @@ describe('Letter templates model', () => {
     expect(model.can_manage).toBe(true);
     expect(model.rows.map((r) => r.name)).toEqual(['A', 'B']);
     expect(model.rows[1].type_label).toBe('Warning');
+    // Each row says the language its dates and salary are written in.
+    expect(model.rows.map((r) => [r.lang, r.lang_label])).toEqual([['en', 'English'], ['ms', 'Bahasa Malaysia']]);
   });
   it('shows the sample company read-only, and a member nothing', async () => {
     expect(buildLetterTemplatesModel(await data.listLetterTemplates(), DEMO)).toMatchObject({ allowed: true, can_manage: false });
