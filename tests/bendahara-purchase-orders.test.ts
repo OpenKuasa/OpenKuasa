@@ -3,7 +3,7 @@ import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import { createConfirmedTestUser, createOrg, liveClient, signInOwner } from './helpers/live-workspaces';
 
-// Bendahara RFQs and purchase orders (20261103090000 to 20261103100000),
+// Bendahara RFQs and purchase orders (20261103090000 to 20261103100000, and 20261105090000),
 // against the live project. Each test makes its own workspace; the helper
 // deletes what it made when the file finishes.
 
@@ -375,4 +375,84 @@ testWithSupabase('two workspaces: neither reads, writes or links to the other', 
   expect(crossSupplier.error?.code).toBe('23503');
   const crossBill = await saveBill(b, { purchase_order_id: aPo });
   expect(['FIN21', '23503']).toContain(crossBill.error?.code);
+});
+
+testWithSupabase('an order carries its own terms and address, values what has arrived, and its decisions are logged', async () => {
+  const o = await ownerWithOrg(`PO terms ${Date.now()}`);
+  const member = await join(o, 'member');
+  expect((await o.c.from('finance_contacts').update({ payment_terms_days: 45 }).eq('id', o.supplier).select('id')).error).toBeNull();
+
+  // A new order with no terms given takes the supplier's; given terms and an address are kept.
+  const plain = await savePo(member);
+  expect(await po(o, plain.data)).toMatchObject({ payment_terms_days: 45, delivery_address: null });
+  const cod = await savePo(member, [PAPER, TONER], { payment_terms_days: 0, delivery_address: '  Lot 5, Jalan Contoh  ' });
+  expect(await po(o, cod.data)).toMatchObject({ payment_terms_days: 0, delivery_address: 'Lot 5, Jalan Contoh' });
+  // Changing a draft without sending them keeps them; sending them changes them.
+  expect((await savePo(member, [PAPER, TONER], { id: cod.data })).error).toBeNull();
+  expect(await po(o, cod.data)).toMatchObject({ payment_terms_days: 0, delivery_address: 'Lot 5, Jalan Contoh' });
+  expect((await savePo(member, [PAPER, TONER], { id: cod.data, payment_terms_days: 14, delivery_address: '' })).error).toBeNull();
+  expect(await po(o, cod.data)).toMatchObject({ payment_terms_days: 14, delivery_address: null });
+  expect((await savePo(member, [PAPER], { payment_terms_days: -1 })).error?.code).toBe('23514');
+
+  // An order made from an RFQ starts with the supplier's terms.
+  const rfq = await o.c.rpc('finance_save_rfq', {
+    target_org: o.orgId,
+    rfq: { supplier_id: o.supplier, rfq_date: today() },
+    lines: [{ description: 'A4 paper', quantity: 1, unit_price: 5 }],
+  });
+  expect((await o.c.rpc('finance_send_rfq', { target_org: o.orgId, target_rfq: rfq.data })).error).toBeNull();
+  const { data: rfqLines } = await o.c.from('finance_rfq_lines').select('id').eq('rfq_id', rfq.data);
+  expect(
+    (await o.c.rpc('finance_quote_rfq', {
+      target_org: o.orgId, target_rfq: rfq.data, prices: [{ line_id: rfqLines![0].id, unit_price: 5 }], supplier_reference: null,
+    })).error,
+  ).toBeNull();
+  const converted = await o.c.rpc('finance_convert_rfq', { target_org: o.orgId, target_rfq: rfq.data });
+  expect(await po(o, converted.data)).toMatchObject({ payment_terms_days: 45, total: 5 });
+
+  // Rejected with a reason, sent again, approved: the reason leaves the order but stays in the log.
+  const id = cod.data as string;
+  const number = (await submit(member, id)).data as string;
+  expect((await decide(o, id, false, 'Wrong supplier')).error).toBeNull();
+  expect((await submit(member, id)).error).toBeNull();
+  expect((await po(o, id)).rejection_reason).toBeNull();
+  expect((await decide(o, id, true)).error).toBeNull();
+
+  // What has arrived, at the order's prices: 4 of 10 paper at 12.50 plus 6% SST, and no toner.
+  const { data: lines } = await o.c.from('finance_purchase_order_lines').select('id').eq('purchase_order_id', id).order('position');
+  expect(await po(o, id)).toMatchObject({ received_total: 0, billed_over_received: false });
+  const received = await member.c.rpc('finance_receive_purchase_order', {
+    target_org: o.orgId, target_po: id, receipts: [{ line_id: lines![0].id, received_quantity: 4 }],
+  });
+  expect(received.error, received.error?.message).toBeNull();
+  expect((await po(o, id)).received_total).toBe(53);
+  // A bill for the whole order is within the order, and more than has arrived.
+  const bill = await saveBill(o, { purchase_order_id: id }, [PAPER, TONER]);
+  expect(bill.error, bill.error?.message).toBeNull();
+  expect(await po(o, id)).toMatchObject({ billed_total: 332.5, over_billed: false, billed_over_received: true });
+  const link = await o.c.from('finance_bill_purchase_orders').select('*').eq('bill_id', bill.data).single();
+  expect(link.data).toMatchObject({ purchase_order_id: id, po_no: number, purchase_order_status: 'approved' });
+
+  expect((await o.c.rpc('finance_close_purchase_order', { target_org: o.orgId, target_po: id })).error).toBeNull();
+  const { data: log, error: logErr } = await member.c
+    .from('activity_log')
+    .select('action, target, actor_id')
+    .eq('org_id', o.orgId)
+    .like('action', '%purchase order%')
+    .order('created_at', { ascending: true });
+  expect(logErr, logErr?.message).toBeNull();
+  expect(log!.map((e) => `${e.action} | ${e.target}`)).toEqual([
+    `Submitted a purchase order for approval | ${number}`,
+    `Rejected a purchase order | ${number}: Wrong supplier`,
+    `Submitted a purchase order for approval | ${number}`,
+    `Approved a purchase order | ${number}`,
+    `Closed a purchase order | ${number}`,
+  ]);
+  expect(log![0].actor_id).toBe(member.userId);
+  // Nobody writes the log by hand.
+  const forged = await member.c
+    .from('activity_log')
+    .insert({ org_id: o.orgId, actor_name: 'x', action: 'Approved a purchase order', category: 'data' })
+    .select('id');
+  expect(forged.error).not.toBeNull();
 });
