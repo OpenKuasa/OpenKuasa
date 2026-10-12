@@ -255,9 +255,9 @@ pnpm test:watch    # run the tests again on every change
 pnpm smoke:routes  # check that every screen responds
 ```
 
-`pnpm smoke:routes` needs a production build, so run `pnpm build` first. It
-starts its own server on `127.0.0.1:3100` (do not start one yourself), requests
-the public pages, every account screen and every product screen, and fails if
+`pnpm smoke:routes` needs a production build, so run `pnpm build` first.
+Nothing else needs to be running: it starts its own server on `127.0.0.1:3100`,
+requests the public pages, every account screen and every product screen, and fails if
 any of them answers with something other than a page or a redirect. It works
 without a Supabase project. Set `SMOKE_PORT` if port 3100 is taken.
 
