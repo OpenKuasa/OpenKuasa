@@ -221,9 +221,17 @@ describe('how the code is kept safe', () => {
     expect(read('src/components/finance/receipt-upload-card.tsx')).not.toContain('data-finance-focus');
   });
 
-  it('never points the page at a signed link: a file is saved from the bytes the page fetched', () => {
-    for (const file of SOURCES) {
-      expect(read(file), file).not.toMatch(/link\.href = (url|link\.url)|location\.(href|assign)|startDownload/);
+  it('has no way left in the receipt components to point the page at a link', () => {
+    // A source check, stricter than a name: it proves these files contain no navigation of any kind and no `href`
+    // except the one temporary anchor of the saved copy. It cannot prove what that anchor is given; the run test in
+    // tests/finance-receipt-upload.test.ts does ("navigated" is only ever the page's own blob: URL).
+    const components = SOURCES.filter((f) => !f.endsWith('receipt-heic.ts'));
+    for (const file of components) {
+      const source = read(file);
+      expect(source, file).not.toMatch(/location\.(href|assign|replace)|window\.open|\.open\(|startDownload|href=\{|href=["']/);
+      for (const line of source.split('\n').filter((l) => /\.href\s*=/.test(l))) {
+        expect(line.trim(), file).toBe('link.href = copy;');
+      }
     }
   });
 

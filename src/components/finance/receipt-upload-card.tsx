@@ -85,7 +85,7 @@ export function ReceiptUploadCard({
           return;
         }
         name = prepared.data.name;
-        // The size shown from here on is the file that goes up, which is smaller than the HEIC it came from.
+        // The size shown from here on is the file that goes up: a converted JPG is usually larger than the HEIC it came from.
         patch(item.key, { step: 'uploading', name, size: prepared.data.body.size });
         const stored = await storeReceipt(orgId, prepared.data);
         if (!stored.ok) {

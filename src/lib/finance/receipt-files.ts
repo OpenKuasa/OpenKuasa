@@ -21,7 +21,6 @@ export const RECEIPT_FILE_MESSAGES = {
   network: 'The upload did not finish. Check your connection and try again.',
   // The file is in the bucket and the inbox does not have it yet.
   notSaved: 'The file was uploaded, but it could not be added to the inbox. Try again: nothing needs to be uploaded twice.',
-  tooMany: 'Twenty files can wait at once. Add the rest when these have finished.',
 } as const;
 
 /** A pick that did not all fit: how many were left out, and that they can be added once these are done. */
