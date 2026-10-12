@@ -324,14 +324,14 @@ export type RefundsViewData = {
 };
 
 /**
- * A refund is a payment out: scheduled reads "Pending" here and posted reads
+ * A refund is a payment out: scheduled reads "To be paid" here, as it does on Payments Out and Payment Vouchers, and posted reads
  * "Refunded". One still being written (`draft`) is counted as pending by the
- * filter and the Pending card, so it reads "Pending" too.
+ * filter and the To be paid card, so it reads "To be paid" too, and the screen has one word.
  */
 export const REFUND_STATUS_LABELS: Record<RefundRow['status'], string> = {
-  draft: 'Pending',
+  draft: 'To be paid',
   pending_approval: 'Pending approval',
-  scheduled: 'Pending',
+  scheduled: 'To be paid',
   posted: 'Refunded',
   rejected: 'Rejected',
   void: 'Void',
@@ -368,9 +368,9 @@ export function refundActions(row: RefundRow): RefundAction[] {
   return [];
 }
 
-/** How a question or a menu names one refund: its voucher number, or "the pending refund", and its customer. */
+/** How a question or a menu names one refund: its voucher number, or "the refund still to be paid", and its customer. */
 export function refundName(row: RefundRow): string {
-  return `${row.number ?? 'the pending refund'} to ${row.customer_name}`;
+  return `${row.number ?? 'the refund still to be paid'} to ${row.customer_name}`;
 }
 
 /**
@@ -397,7 +397,7 @@ export function refundsView(rows: RefundRow[], invoices: InvoiceListRow[], today
     stats: [
       { label: 'Refunded (MTD)', value: rmShort(sum(mtd, (r) => r.amount)), delta: count(paymentCount(mtd), 'refund'), deltaTone: 'flat' },
       {
-        label: 'Pending',
+        label: 'To be paid',
         value: rmShort(sum(pending, (r) => r.amount)),
         delta: count(paymentCount(pending), 'refund'),
         deltaTone: pending.length ? 'down' : 'flat',

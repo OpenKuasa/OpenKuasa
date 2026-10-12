@@ -58,7 +58,7 @@ export type RefundsWriter = {
 
 const REFUNDED_SERIES: Series[] = [{ key: 'refunded', label: 'Refunded (RM k)', color: 'var(--chart-3)' }];
 
-/** A refund still being written (`draft`) is worded "Pending" and counted as pending, so it is amber as one is. */
+/** A refund still being written (`draft`) is worded "To be paid" and counted as pending, so it is amber as one is. */
 const STATUS_STYLES: Record<RefundRow['status'], string> = {
   posted: 'bg-emerald-500/15 text-emerald-600',
   scheduled: 'bg-amber-500/15 text-amber-600',
@@ -213,7 +213,7 @@ export function RefundsView({
         pendingLabel="Deleting…"
         onConfirm={() => confirm.run(() => actions.remove({ id }), close)}
       >
-        Delete the pending refund of {amount} to {who}? Nothing has been paid out, so the customer stays in credit on{' '}
+        Delete the refund of {amount} to {who} that is still to be paid? Nothing has been paid out, so the customer stays in credit on{' '}
         {invoice}.
       </ConfirmRow>
     );
@@ -307,7 +307,7 @@ export function RefundsView({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="open">All except void</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="pending">To be paid</SelectItem>
                 <SelectItem value="posted">Refunded</SelectItem>
                 <SelectItem value="void">Void</SelectItem>
               </SelectContent>

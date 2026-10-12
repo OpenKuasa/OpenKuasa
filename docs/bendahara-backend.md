@@ -69,7 +69,7 @@ person is on, a note at the top says so and links there (`saved-note-card.tsx`).
 The card hands back what it saved, and the note is worded from that
 (`refundSavedNote`, `creditNoteSavedNote`): the amount as the schema rounds
 and stores it, the invoice or credit note it went against, the customer, and
-whether a refund was paid out or left pending and a credit note issued or kept
+whether a refund was paid out or saved as to be paid and a credit note issued or kept
 as a draft. A card opened from a row has that row chosen but its picker is not
 locked, so the note names what was saved, whichever row the card was opened
 from.
@@ -571,8 +571,16 @@ or left pending.
 What a row's menu offers follows its status (`refundActions`): a pending
 refund is marked as paid, with the date it was paid out, or deleted; one that
 was paid out is voided; a void one offers nothing. A refund has no edit. A
-refund still being written (`draft`) reads "Pending" and is counted as
+refund still being written (`draft`) reads "To be paid" and is counted as
 pending; the app never leaves one in that state.
+
+Money out that may be paid and has not been (`status = 'scheduled'`) reads
+"To be paid" on every screen that shows it: the status badge, the card and the
+filter on Refunds ("Pending" before) and on Payments Out ("Scheduled" before),
+and the badge and filter on Payment Vouchers, with the same words in their CSV
+status column and in the questions and menus. The names in code (`scheduled`,
+`isPendingRefund`, the `pending` filter key) are unchanged. A supplier bill's
+own "Pending" and "Pending approval" are different states and keep their words.
 
 ## Posted is locked
 
