@@ -99,6 +99,8 @@ describe('LEKIU_SYSTEM', () => {
     expect(t).toContain('already approved it');
     expect(t).toContain('past tense');
     expect(t).toContain('it is never a permissions problem');
+    // With three kinds of asker a declined card must not be explained by who they are, or by a tool's name.
+    expect(t).toContain('do not mention access, owners, admins, managers or permissions, and never name a tool');
   });
   it('says what goes with a deleted employee before deleting, and offers nothing it cannot do', () => {
     expect(t).toContain('their leave, claims, draft payslips and every other hr record are deleted too');
