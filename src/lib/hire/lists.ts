@@ -14,7 +14,7 @@ import {
 } from './applications-view';
 import type { RejectReason } from './application-changes';
 import { ago } from './dashboard';
-import { durationText, klDateOf } from './interview-time';
+import { clock12, durationText, klDateOf } from './interview-time';
 import { needsOutcome } from './interviews';
 import { applicantsByJob, applicationsPerWeek } from './overview';
 import { POOL_LABEL, matchesPoolSearch, poolSearchText, type InPool } from './pool';
@@ -67,9 +67,6 @@ export const fullDate = (iso: string) => {
   const d = klDate(iso);
   return `${d.day} ${d.month} ${d.year}`;
 };
-/** "14:00". */
-const clock = (iso: string) =>
-  new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: TZ });
 
 export type JobsModel = {
   isEmpty: boolean;
@@ -292,7 +289,7 @@ export type InterviewRow = {
   role: string;
   /** "12 Oct 2026", in Kuala Lumpur. With the year: the list runs from a year back to a year ahead. */
   date: string;
-  /** "15:00", in Kuala Lumpur. */
+  /** "3:00 pm", in Kuala Lumpur: a time reads the same in the table as in the invitation. */
   time: string;
   /** The interviewer's name, or a dash. */
   interviewer: string;
@@ -335,7 +332,7 @@ function interviewRow(i: Interview, now: Date): InterviewRow {
     // `fullDate`, already in this file ("12 Oct 2026"). `shortDate` ("12 Oct") had this one use: delete that
     // helper from the file, or lint reports it unused.
     date: fullDate(i.scheduled_at),
-    time: clock(i.scheduled_at),
+    time: clock12(i.scheduled_at),
     interviewer: i.interviewer_name ?? '—',
     type: KIND_LABEL[i.kind],
     status: INTERVIEW_STATUS_LABEL[i.status],

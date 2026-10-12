@@ -673,7 +673,7 @@ describe('interviews: rows, order and the application picker', () => {
     });
     const model = await buildInterviewsModel({ ...EMPTY, listInterviews: async () => [one] }, NOW);
     expect(model.rows).toEqual([{
-      id: 'next', name: 'Aina Rahman', role: 'Sales Executive', date: '12 Oct 2026', time: '15:00', interviewer: 'Farah Lim', type: 'Video', status: 'Scheduled',
+      id: 'next', name: 'Aina Rahman', role: 'Sales Executive', date: '12 Oct 2026', time: '3:00 pm', interviewer: 'Farah Lim', type: 'Video', status: 'Scheduled',
       applicationId: 'a1', statusKey: 'scheduled', scheduledAt: '2026-10-12T07:00:00Z', durationMinutes: 90, length: '1 hour 30 minutes', kind: 'video',
       place: 'https://meet.example.com/abc', placeLink: { href: 'https://meet.example.com/abc', host: 'meet.example.com' },
       interviewerName: 'Farah Lim', notes: 'Bring a portfolio', createdAt: '2026-10-08T02:00:00Z', updatedAt: '2026-10-09T02:00:00Z',
@@ -852,11 +852,11 @@ describe('interviews: the day and the time a row shows', () => {
     return Object.fromEntries(model.rows.map((r) => [r.id, `${r.date} ${r.time}`]));
   };
   const EXPECTED = {
-    midnight: '20 Oct 2026 00:00',
-    'last-minute': '20 Oct 2026 23:59',
-    'new-year': '01 Jan 2027 00:00',
-    'leap-day': '29 Feb 2028 00:00',
-    'as-sent': '20 Oct 2026 15:00',
+    midnight: '20 Oct 2026 12:00 am',
+    'last-minute': '20 Oct 2026 11:59 pm',
+    'new-year': '01 Jan 2027 12:00 am',
+    'leap-day': '29 Feb 2028 12:00 am',
+    'as-sent': '20 Oct 2026 3:00 pm',
   };
   it('are the Kuala Lumpur ones at midnight, at the last minute, across a year and on 29 February, with the year', async () => {
     expect(await shown()).toEqual(EXPECTED);
