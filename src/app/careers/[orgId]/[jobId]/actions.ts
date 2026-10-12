@@ -18,7 +18,9 @@ import {
 import { isPdf, removeCv, storeCv } from '@/lib/hire/cv-store';
 import { submitPublicApplication, type ApplyOutcome } from '@/lib/hire/public-applications';
 import { readPublicJob } from '@/lib/hire/public-careers';
+import { applyLimited } from '@/lib/security/limits';
 import { createAnonymousClient } from '@/lib/supabase/anonymous';
+import { serverWriteClient } from '@/lib/supabase/server-writer';
 import { serviceClient } from '@/lib/supabase/service';
 
 /** What the apply form shows after an application has been tried. */
@@ -113,10 +115,13 @@ function answerFor(outcome: ApplyOutcome, values: ApplyValues, dropped: { fileDr
  *
  * A CV may come with it, as a PDF. The file is stored only after every check
  * that can be made without storing it, and it is removed again unless the
- * application it came with is taken as a new one. Storing, and sending an
- * application that carries a file, are done as the server itself: the database
- * lets nobody else attach a file. An application without a file goes as it
- * always did, with a client that carries no session.
+ * application it came with is taken as a new one. Storing and sending are done
+ * as the server itself: the database takes an application from nobody else.
+ *
+ * One client may send only so many applications an hour, and fewer files a
+ * day (a workspace takes a fixed number of files a day in all). Both are
+ * counted once the post has passed every check that needs no writing, so a
+ * form sent back for a mistake uses up nothing.
  *
  * The values and the file are a stranger's personal data. Nothing here logs
  * them, the file's name or where it is stored, and nothing goes back but one
@@ -179,8 +184,13 @@ export async function applyAction(
   if (fileProblem) errors.cv_file = fileProblem;
   if (Object.keys(errors).length > 0) return { errors, values, ...dropped };
 
-  // No file: the application goes as it always did.
-  if (!file) return answerFor(await submitPublicApplication(client, orgId, jobId, values, job.form), values, dropped);
+  // No file. A check a visitor has to pass (a challenge token) would be verified here, and below for a file.
+  if (!file) {
+    const limited = await applyLimited(false);
+    if (limited) return { error: limited, values, ...dropped };
+    const writer = serverWriteClient(() => client);
+    return answerFor(await submitPublicApplication(writer, orgId, jobId, values, job.form), values, dropped);
+  }
 
   // The bytes, read once. What the file said of itself is not trusted: the bytes decide what it is and how big.
   if (!isReadable(posted)) return { errors: { cv_file: APPLY_MESSAGES.cvFileType }, values, ...dropped };
@@ -195,6 +205,10 @@ export async function applyAction(
     return { errors: { cv_file: APPLY_MESSAGES.cvFileTooBig(fileSizeLabel(bytes.length)) }, values, ...dropped };
   }
   if (!isPdf(bytes)) return { errors: { cv_file: APPLY_MESSAGES.cvFileType }, values, ...dropped };
+
+  // One client's applications this hour, and its files today: asked before anything is stored.
+  const limited = await applyLimited(true);
+  if (limited) return { error: limited, values, ...dropped };
 
   // From here the server acts as itself. A site without the key cannot take a file at all.
   let service: ReturnType<typeof serviceClient>;
