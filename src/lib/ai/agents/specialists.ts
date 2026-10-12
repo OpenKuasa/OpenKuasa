@@ -418,13 +418,18 @@ function specialistTools(
         ) {
           return { prepared: false, error: AMBIGUOUS[limited] };
         }
-        // A link in the place must be one somebody gave: typed by the user in the message that began this turn, or
-        // already the place of the very interview being changed, as a lookup of this specialist returned it. Not
-        // `given`: the task Tuah wrote, and Tuah's words in the transcript, are not the user typing. Not an earlier
-        // turn's link, and not another interview's. Not the rest of a lookup: a cover letter is a stranger's text.
-        // The other way for the person: give the link in the message that asks, or add it on the Interviews screen.
+        // A link in the place must be one somebody gave: typed by the user since the last interview card was shown to
+        // them, or already the place of the very interview being changed, as a lookup of this specialist returned
+        // it. Not `given`: the task Tuah wrote, and Tuah's words in the transcript, are not the user typing. Not a
+        // link typed for an earlier interview, and not another interview's. Not the rest of a lookup: a cover letter
+        // is a stranger's text. Here a card is an `applyChange` call for an interview change a specialist prepared.
+        // The other way for the person: give the link again in their next message, or add it on the Interviews screen.
+        const wasInterviewCard = (call: { toolName?: unknown; input?: unknown }) => {
+          const id = call.toolName === APPLY_TOOL ? (call.input as { proposalId?: unknown } | null | undefined)?.proposalId : undefined;
+          return typeof id === 'string' && INTERVIEW_CHANGES.has(team.proposals.get(id)?.action ?? '');
+        };
         // And the interviewer is a name: a link in it would reach the candidate unchecked, so it is refused outright.
-        const linked = INTERVIEW_CHANGES.has(name) ? interviewLinkProblem(messages, name, input, results) : null;
+        const linked = INTERVIEW_CHANGES.has(name) ? interviewLinkProblem(messages, name, input, results, wasInterviewCard) : null;
         if (linked) return { prepared: false, error: linked };
         // Last, the server's own rows (read above): two rows of one name that look the same cannot be told apart on a card.
         // When they can, the card says which one it is; that line is added when the card is shown, not kept here.

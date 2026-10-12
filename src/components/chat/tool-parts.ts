@@ -196,7 +196,7 @@ const REFUSAL_LINES: [start: string, line: string | null][] = [
   ['This candidate is not in the talent pool', 'This person is not in the talent pool, so no move was prepared. Add them to the talent pool first, then ask again.'],
   ['A candidate with the same name appeared ', 'A last check stopped this, because someone else with the same name had appeared. Nothing was changed. Ask for it again.'],
   ['One interview change at a time.', 'Only one interview change is prepared at a time, and one was already prepared. Ask for this one again afterwards.'],
-  ['That link was not given by the user', 'That link was not one you gave, so no interview change was prepared. Give the link, or ask again without one.'],
+  ['That link was not given by the user', 'That link was not one you gave since the last interview card, so nothing was prepared: give the link again in your message, or ask again without one.'],
   ['This interview was changed after the card was shown', 'A last check stopped this, because the interview had been changed since the card was shown. Nothing was changed. Ask for it again.'],
   ['Two candidates called ', null],
   ['Two applications from someone called ', null],

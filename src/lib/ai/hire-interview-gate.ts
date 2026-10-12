@@ -61,9 +61,9 @@ export const AMBIGUOUS_INTERVIEW_CHANGE =
 export const interviewNotLookedUp = (id: unknown) =>
   `You have not looked up ${String(id)} as an interview. Never guess an id: use listInterviews ` +
   'to find the interview and get its real id, then prepare the change again.';
-/** The other way: type the link, or go ahead without one and add it later with "Reschedule or edit". */
+/** The other way: give the link again in the next message, or go ahead without one and add it later with "Reschedule or edit". */
 export const LINK_NOT_GIVEN =
-  'That link was not given by the user, so no interview change was prepared. Ask the user for the link, or prepare it without one.';
+  'That link was not given by the user since the last interview card, so no interview change was prepared: ask the user to give the link again in their message, or prepare it without one.';
 /**
  * The interviewer is a typed name, and it is shown to the candidate in the invitation and the calendar file: a link
  * there would reach them unchecked. Refused whoever gave the link. The other way: give the link as the place (where
@@ -311,15 +311,30 @@ function resultsIn(messages: readonly ModelMessage[]): Result[] {
     });
 }
 
-/** The text of the message that began the turn in progress: the last thing the user said. A fetched CV is not that. */
-function saidThisTurn(messages: readonly ModelMessage[]): string[] {
-  for (let at = messages.length - 1; at >= 0; at -= 1) {
-    const message = messages[at];
-    if (message.role !== 'user' || isHeldCvMessage(message)) continue;
+/** A call in a conversation that put an interview change in front of the user, for `linkNobodyGave`. */
+export type IsInterviewCard = (call: { toolName?: unknown; toolCallId?: unknown; input?: unknown }) => boolean;
+/** For an agent that holds the tools itself: a call of one of the six. */
+const anInterviewCall: IsInterviewCard = (call) => isInterviewChange(call.toolName);
+
+/**
+ * What the user has typed since the last interview card was shown to them, or since the conversation began when
+ * none was. A card is a call (`isCard`) that reached the user, whatever they answered and whether or not they have
+ * answered yet; a call a gate denied itself never did (`deniedHere`: known by its reason, or by having been stopped
+ * after the user's yes, which its replacement must be able to follow). A CV the assistant fetched sits in a user
+ * message and is not the user typing.
+ */
+function saidSinceLastCard(messages: readonly ModelMessage[], isCard: IsInterviewCard): string[] {
+  const denied = deniedHere(messages);
+  let from = 0;
+  messages.forEach((message, index) => {
+    if (message.role !== 'assistant') return;
+    if (partsOf(message).some((part) => part.type === 'tool-call' && !denied.has(part.toolCallId) && isCard(part))) from = index + 1;
+  });
+  return messages.slice(from).flatMap((message) => {
+    if (message.role !== 'user' || isHeldCvMessage(message)) return [];
     if (typeof message.content === 'string') return [message.content];
     return (partsOf(message) as { type?: unknown; text?: unknown }[]).flatMap((part) => (part.type === 'text' && typeof part.text === 'string' ? [part.text] : []));
-  }
-  return [];
+  });
 }
 
 /**
@@ -327,28 +342,32 @@ function saidThisTurn(messages: readonly ModelMessage[]): string[] {
  * without its scheme (`linksIn`): a model whose "https://zoom.us/j/9911" was
  * refused must not get a card for "zoom.us/j/9911". A link passes only when
  * the same link (`sameLink`, and `sameAddress` for the scheme) is in what the
- * user typed in the message that began this turn, or in `extra`.
+ * user has typed since the last interview card was shown to them
+ * (`saidSinceLastCard`), or in `extra`.
  *
- * This turn's message, not the whole conversation: a link typed three turns
- * ago may have been for someone else's interview. Not counted, because none
- * of them is the user typing now: an earlier message of theirs, a CV the
- * assistant fetched (it sits in a user message, see `isHeldCvMessage`),
- * anything an assistant wrote, a tool call's input, a denial or an error, a
- * lookup's result, and a specialist's written report to Tuah.
+ * Since the last interview card, not the whole conversation and not this
+ * turn alone. A link typed for one interview must not reach the next
+ * person's card; and a question the assistant asks in between ("video or
+ * phone?") must not cost the user the link they gave. Not counted, because
+ * none of them is the user typing: a CV the assistant fetched (it sits in a
+ * user message, see `isHeldCvMessage`), anything an assistant wrote, a tool
+ * call's input, a denial or an error, a lookup's result, and a specialist's
+ * written report to Tuah.
  *
  * `extra` is more text that counts: the caller passes the stored place of the
  * very interview being changed (`interviewLinkProblem`), so that a change may
- * keep the link the interview already has.
+ * keep the link the interview already has. `isCard` says which calls were an
+ * interview card: one of the six tools by default; Tuah's team passes its
+ * own, because there the card is an `applyChange` call.
  *
- * The other way for the person, when a link is refused: give it in the same
- * message as the request (the assistant asks for it, and their answer is a
- * new turn that holds it), or go ahead without one and add it later with
- * "Reschedule or edit" on the Interviews screen, whose form takes any link.
+ * The other way for the person, when a link is refused: give it again in
+ * their next message (the refusal says so), or go ahead without one and add
+ * it later with "Reschedule or edit" on the Interviews screen.
  */
-export function linkNobodyGave(messages: readonly ModelMessage[], place: unknown, extra = ''): boolean {
+export function linkNobodyGave(messages: readonly ModelMessage[], place: unknown, extra = '', isCard: IsInterviewCard = anInterviewCall): boolean {
   const wanted = linksIn(place).map(linkParts);
   if (wanted.length === 0) return false;
-  const given = [extra, ...saidThisTurn(messages)].flatMap((text) => linksIn(text)).map(linkParts);
+  const given = [extra, ...saidSinceLastCard(messages, isCard)].flatMap((text) => linksIn(text)).map(linkParts);
   return wanted.some((link) => !given.some((one) => sameAddress(link, one)));
 }
 
@@ -356,18 +375,22 @@ export function linkNobodyGave(messages: readonly ModelMessage[], place: unknown
  * Why a change's place or interviewer must not reach a card, or null: a link in the place that nobody gave
  * (`linkNobodyGave`), or any link at all in the interviewer's name. Notes are not read: no candidate sees them.
  * For a change to an interview that exists, the place that interview already has counts as given: `results` are the
- * lookups to find it in (a specialist's own, in Tuah's team); left out, they are the conversation's.
+ * lookups to find it in (a specialist's own, in Tuah's team); left out, they are the conversation's. `card` says
+ * which earlier calls were an interview card: a call id (the call being asked about, which is not its own
+ * predecessor) for an agent that holds the tools, or Tuah's team's own rule.
  */
 export function interviewLinkProblem(
   messages: readonly ModelMessage[],
   tool: string,
   input: unknown,
   results?: readonly Result[],
+  card?: string | IsInterviewCard,
 ): string | null {
   const sent = (input && typeof input === 'object' ? input : {}) as { place?: unknown; interviewer_name?: unknown };
   // A new interview has no place yet: only what the user typed counts for it.
   const own = actsOnApplication(tool) ? [] : interviewPlacesIn(results ?? resultsIn(messages), interviewTarget(tool, input));
-  if (linkNobodyGave(messages, sent.place, own.join('\n'))) return LINK_NOT_GIVEN;
+  const isCard: IsInterviewCard = typeof card === 'function' ? card : (call) => anInterviewCall(call) && call.toolCallId !== card;
+  if (linkNobodyGave(messages, sent.place, own.join('\n'), isCard)) return LINK_NOT_GIVEN;
   return linksIn(sent.interviewer_name).length > 0 ? LINK_IN_INTERVIEWER : null;
 }
 
@@ -507,7 +530,7 @@ export function guardInterviewChanges(
             ? null
             : onApplication ? notLookedUp('application', id) : interviewNotLookedUp(id))
           ?? inTurn
-          ?? interviewLinkProblem(messages, tool, input));
+          ?? interviewLinkProblem(messages, tool, input, undefined, toolCallId));
     if (problem) return { type: 'denied', reason: problem };
     // The SDK waits for each call's answer before asking about the next, so the count is safe across this read.
     const decision = check ? interviewCardDecision(await check(tool, input), cardShown(messages, toolCallId)) : 'user-approval';

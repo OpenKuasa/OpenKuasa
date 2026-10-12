@@ -138,7 +138,7 @@ describe('the line a person reads on a change the server refused', () => {
     [ONE_INTERVIEW_CHANGE, 'Only one interview change is prepared at a time, and one was already prepared. Ask for this one again afterwards.'],
     [interviewNotLookedUp(ID), 'The assistant had not looked this record up, so nothing was prepared. Ask again and it will look it up first.'],
     [AMBIGUOUS_INTERVIEW_CHANGE, 'More than one record matches that name, so nothing was prepared. Say which one you mean, then ask again.'],
-    [LINK_NOT_GIVEN, 'That link was not one you gave, so no interview change was prepared. Give the link, or ask again without one.'],
+    [LINK_NOT_GIVEN, 'That link was not one you gave since the last interview card, so nothing was prepared: give the link again in your message, or ask again without one.'],
     [INTERVIEW_CHANGED_SINCE, 'A last check stopped this, because the interview had been changed since the card was shown. Nothing was changed. Ask for it again.'],
     // Written for a person already.
     [lookTheSameInterviews('Aina Rahman', 'Sales Executive'), lookTheSameInterviews('Aina Rahman', 'Sales Executive')],
