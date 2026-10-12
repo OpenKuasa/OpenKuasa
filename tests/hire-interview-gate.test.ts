@@ -5,7 +5,7 @@ import { deletionProblem, guardDeletions, isGateReason, notLookedUp, stoppedAfte
 import {
   AMBIGUOUS_INTERVIEW_CHANGE, APPLICATION_NOT_ACTIVE, HIRE_INTERVIEW_TOOL_NAMES, INTERVIEW_GONE, NOTHING_WOULD_CHANGE, SAME_TIME_SENT, INTERVIEW_CHANGED_SINCE, INTERVIEW_CHECK_FAILED, LINK_NOT_GIVEN, ONE_INTERVIEW_CHANGE,
   actsOnApplication, ambiguousFor, guardInterviewChanges, interviewCardDecision, interviewChangeProblem, interviewCheckFor, interviewNotLookedUp, interviewTarget,
-  interviewPlacesIn, linkNobodyGave, linksIn, lookTheSameInterviews, placesIn, sameLink, stringsIn,
+  LINK_IN_INTERVIEWER, interviewLinkProblem, interviewPlacesIn, linkNobodyGave, linksIn, lookTheSameInterviews, placesIn, sameLink, stringsIn,
 } from '@/lib/ai/hire-interview-gate';
 import { guardPoolChanges, lookedUpAs, poolChangeProblem } from '@/lib/ai/hire-pool-gate';
 import { THIS_INTERVIEW, interviewFullLine, interviewLine } from '@/lib/hire/interviews';
@@ -80,7 +80,7 @@ describe('the sentences', () => {
   it('are each known as a gate\'s own denial, so a call the gate denied is never taken for the user\'s no', () => {
     for (const reason of [
       ONE_INTERVIEW_CHANGE, interviewNotLookedUp(IV), notLookedUp('application', APP), AMBIGUOUS_INTERVIEW_CHANGE, LINK_NOT_GIVEN,
-      lookTheSameInterviews('Aina Rahman', 'Sales Executive'), INTERVIEW_CHECK_FAILED, INTERVIEW_CHANGED_SINCE, INTERVIEW_GONE, APPLICATION_NOT_ACTIVE, SAME_TIME_SENT, NOTHING_WOULD_CHANGE,
+      lookTheSameInterviews('Aina Rahman', 'Sales Executive'), INTERVIEW_CHECK_FAILED, INTERVIEW_CHANGED_SINCE, INTERVIEW_GONE, APPLICATION_NOT_ACTIVE, SAME_TIME_SENT, NOTHING_WOULD_CHANGE, LINK_IN_INTERVIEWER,
     ]) {
       expect(isGateReason(reason), reason).toBe(true);
     }
@@ -366,6 +366,80 @@ describe('linkNobodyGave', () => {
     // Text that only looks like a link is compared as it is, and never throws.
     expect(linkNobodyGave([user('Use http://[bad')], 'http://[bad')).toBe(false);
     expect(linkNobodyGave([user('Use https://meet.example.com/abc')], 'http://[bad')).toBe(true);
+  });
+  // A link is a link with or without "https://" in front of it: a model whose made-up link was refused must not get
+  // a card by sending it again without the scheme.
+  it('finds a link written without its scheme: a "www.", a known ending, or a host with a path', () => {
+    for (const [text, found] of [
+      ['zoom.us/j/9911', ['zoom.us/j/9911']],
+      ['Join at meet.google.com/abc-defg-hij.', ['meet.google.com/abc-defg-hij']],
+      ['www.example.xyz', ['www.example.xyz']],
+      ['(teams.microsoft.com/l/meetup-join/19%3a), thanks', ['teams.microsoft.com/l/meetup-join/19%3a']],
+      ['syarikat.com.my', ['syarikat.com.my']],
+      ['bit.ly/3abc and wa.me/60123456789', ['bit.ly/3abc', 'wa.me/60123456789']],
+      ['rooms.example.zone/abc', ['rooms.example.zone/abc']],
+      ['Example.COM:8443/Room', ['Example.COM:8443/Room']],
+      // Another scheme is a link too.
+      ['zoommtg://zoom.us/join?confno=123', ['zoommtg://zoom.us/join?confno=123']],
+      // One with its scheme is found once, not again as a bare host.
+      [`Use ${LINK} please`, [LINK]],
+    ] as const) {
+      expect(linksIn(text), text).toEqual(found);
+    }
+  });
+  it('ordinary text is not a link: a place, a room number, a title and initials, a phone number, a time, an email address', () => {
+    for (const text of [
+      'Level 3, Menara KL', 'Bilik Mesyuarat 2.1', 'Dr. Aina b. Rahman', 'Tingkat 12.5, Blok A/3', 'No.12, Jalan Ampang', 'Aina Sdn.Bhd', 'Mr.Lim', 'e.g. the lobby',
+      'Menara.KL', '+60 12-345 6789', '3.30pm, bilik 4', 'v2.1 of the test', 'Puan Farah (HR/Admin)', 'A.Rahman', 'Lot 5.02/5.03',
+      // An email address is left alone: it is not a link. It does not belong in a place a candidate reads either,
+      // but that is the prompt's rule and the card's to show, not this check's.
+      'farah@example.com', 'Write to farah.lim@syarikat.com.my',
+    ]) {
+      expect(linksIn(text), text).toEqual([]);
+      expect(linkNobodyGave([user('Schedule her')], text), text).toBe(false);
+    }
+  });
+  it('a link with no scheme is checked like any other: made up, it is refused; typed by the user with or without the scheme, it passes', () => {
+    expect(linkNobodyGave([user('Schedule Aina for Tuesday at 3, video')], 'zoom.us/j/9911')).toBe(true);
+    expect(linkNobodyGave([user('Schedule Aina for Tuesday at 3, video')], 'www.zoom.us/j/9911')).toBe(true);
+    for (const [typed, used] of [
+      ['zoom.us/j/9911', 'zoom.us/j/9911'],
+      ['zoom.us/j/9911', 'https://zoom.us/j/9911'],
+      ['https://zoom.us/j/9911', 'zoom.us/j/9911'],
+      ['http://zoom.us/j/9911', 'zoom.us/j/9911'],
+      ['Zoom.US/j/9911/', 'zoom.us/j/9911'],
+      ['meet.google.com/abc-defg-hij.', 'Link: meet.google.com/abc-defg-hij'],
+    ]) {
+      expect(linkNobodyGave([user(`Schedule her on ${typed}`)], used), `${typed} -> ${used}`).toBe(false);
+    }
+    // Still another link: another path, the "www." host, and a scheme that is not the one typed.
+    for (const [typed, used] of [
+      ['zoom.us/j/9911', 'zoom.us/j/9912'],
+      ['zoom.us/j/9911', 'www.zoom.us/j/9911'],
+      ['zoom.us/j/9911', 'zoom.us.evil.example/j/9911'],
+      ['http://zoom.us/j/9911', 'https://zoom.us/j/9911'],
+      ['zoom.us/j/9911', 'zoommtg://zoom.us/j/9911'],
+    ]) {
+      expect(linkNobodyGave([user(`Schedule her on ${typed}`)], used), `${typed} -> ${used}`).toBe(true);
+    }
+  });
+  it('the interviewer is a name: a link in it is refused, whoever gave it; a place that is not a link needs nobody\'s word', () => {
+    expect(LINK_IN_INTERVIEWER).toBe(
+      'The interviewer\'s name holds a link, so no interview change was prepared. Give the interviewer as a name only. ' +
+        'A link goes in the place, and only one the user gave.',
+    );
+    const typed = [user(`Schedule her with Farah on ${LINK} or zoom.us/j/9911`)];
+    for (const name of [`Farah Lim ${LINK}`, 'Farah (zoom.us/j/9911)', 'www.farah.example', LINK]) {
+      expect(interviewLinkProblem(typed, { interviewer_name: name }), name).toBe(LINK_IN_INTERVIEWER);
+    }
+    for (const name of ['Farah Lim', 'Dr. Aina b. Rahman', 'Puan Farah (HR/Admin)', null, undefined, '', 'farah@example.com']) {
+      expect(interviewLinkProblem(typed, { interviewer_name: name }), String(name)).toBeNull();
+    }
+    // The place is checked first; both are checked on one input.
+    expect(interviewLinkProblem([user('Schedule her')], { place: 'zoom.us/j/9911', interviewer_name: 'Farah Lim' })).toBe(LINK_NOT_GIVEN);
+    expect(interviewLinkProblem(typed, { place: 'zoom.us/j/9911', interviewer_name: 'Farah Lim' })).toBeNull();
+    expect(interviewLinkProblem(typed, { place: 'Bilik Mesyuarat 2.1', interviewer_name: 'Dr. Aina b. Rahman' })).toBeNull();
+    for (const odd of [undefined, null, 7, 'text']) expect(interviewLinkProblem(typed, odd)).toBeNull();
   });
   it('`extra` counts: the text of the lookups a specialist ran itself', () => {
     expect(linkNobodyGave([user('Schedule her')], LINK, `Aina Rahman\n${LINK}\nvideo`)).toBe(false);

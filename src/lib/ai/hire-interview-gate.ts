@@ -65,6 +65,14 @@ export const interviewNotLookedUp = (id: unknown) =>
 export const LINK_NOT_GIVEN =
   'That link was not given by the user, so no interview change was prepared. Ask the user for the link, or prepare it without one.';
 /**
+ * The interviewer is a typed name, and it is shown to the candidate in the invitation and the calendar file: a link
+ * there would reach them unchecked. Refused whoever gave the link. The other way: give the link as the place (where
+ * it is checked), or type it in "Place or link" on the Interviews screen.
+ */
+export const LINK_IN_INTERVIEWER =
+  'The interviewer\'s name holds a link, so no interview change was prepared. Give the interviewer as a name only. ' +
+  'A link goes in the place, and only one the user gave.';
+/**
  * The other way is in the sentence: the menu on the interview's own row acts on that row's id, whatever it looks like.
  * It is also what scheduling or recording is refused with when two applications look the same (there is no row then):
  * that person's other way is "Schedule interview" or "Record a past interview" in the application's own details on the
@@ -177,14 +185,47 @@ export function interviewChangeProblem(
   return ambiguousFor(lookups, call.id) ? AMBIGUOUS_INTERVIEW_CHANGE : null;
 }
 
-const LINK = /https?:\/\/\S+/gi;
+/** A link with its scheme: "https://…", and any other scheme ("zoommtg://…"). */
+const SCHEME_LINK = /[a-z][a-z0-9+.-]*:\/\/\S+/gi;
+const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
+/**
+ * A host written without a scheme, with what follows it: labels joined by dots, ending in letters. Not one that is
+ * part of an email address (an "@" before it, or after it), and not the middle of a longer word.
+ */
+const BARE_HOST = /(?<![a-z0-9@._\-/])((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+)([a-z]{2,24})(?![a-z0-9@-])(:\d{1,5})?([/?#]\S*)?/gi;
+/**
+ * Endings that make a dotted word a web address on their own ("zoom.us", "syarikat.com.my"). A dotted word with
+ * another ending ("Menara.KL", "Sdn.Bhd", "Mr.Lim") is taken for a link only when it begins "www." or a path follows.
+ */
+const WEB_ENDINGS = new Set([
+  'com', 'net', 'org', 'io', 'co', 'my', 'us', 'me', 'app', 'dev', 'ai', 'edu', 'gov', 'info', 'biz', 'sg', 'uk', 'id', 'ly', 'gl', 'to', 'tv', 'cc',
+  'link', 'page', 'site', 'online', 'live', 'team', 'chat', 'video', 'cloud', 'xyz', 'in', 'au', 'ca', 'de', 'fr', 'eu', 'asia',
+]);
 /** What ends a sentence or closes a bracket is not part of a link someone typed: "Use https://meet.example.com/abc." */
 const CLOSING = /[.,;:!?)\]}>'"”’]+$/;
 
-/** Every link in a text, each without the punctuation that follows it. */
+/**
+ * Every link in a text, each as it was written but without the punctuation that follows it. A link is text with a
+ * scheme ("https://meet.example.com/abc"), or a host without one: "www.…", a host with a known ending
+ * ("zoom.us", "meet.google.com/abc"), or any dotted host with a path after it ("rooms.example.zone/abc").
+ * Not a link: a place ("Level 3, Menara KL"), a room number ("Bilik Mesyuarat 2.1"), a title or an initial
+ * ("Dr. Aina b. Rahman"), a phone number, and an email address, which is left alone on purpose.
+ */
 export function linksIn(text: unknown): string[] {
   if (typeof text !== 'string') return [];
-  return (text.match(LINK) ?? []).map((link) => link.replace(CLOSING, '')).filter((link) => /^https?:\/\/./i.test(link));
+  const found: { at: number; link: string }[] = [];
+  // Those with a scheme first, each then blanked out so its host is not found a second time.
+  const rest = text.replace(SCHEME_LINK, (whole, at: number) => {
+    const link = whole.replace(CLOSING, '');
+    if (HAS_SCHEME.test(link) && link.replace(HAS_SCHEME, '')) found.push({ at, link });
+    return ' '.repeat(whole.length);
+  });
+  for (const match of rest.matchAll(BARE_HOST)) {
+    const [whole, labels, ending, , after] = match;
+    const web = labels.toLowerCase().startsWith('www.') || WEB_ENDINGS.has(ending.toLowerCase()) || (after?.startsWith('/') && after.length > 1);
+    if (web) found.push({ at: match.index ?? 0, link: whole.replace(CLOSING, '') });
+  }
+  return found.sort((a, b) => a.at - b.at).map((one) => one.link);
 }
 
 /** Every string anywhere in a value, such as a tool's result. */
@@ -208,6 +249,26 @@ export function sameLink(link: string): string {
   } catch {
     return link;
   }
+}
+
+/**
+ * A link as two things to compare: its scheme (null when it was written without one) and everything after it, in
+ * `sameLink`'s form. A link written without a scheme is read as "https://" would be.
+ */
+function linkParts(link: string): { scheme: string | null; rest: string } {
+  const written = HAS_SCHEME.test(link);
+  const whole = sameLink(written ? link : `https://${link}`);
+  return { scheme: written ? whole.slice(0, whole.indexOf('://')).toLowerCase() : null, rest: whole.replace(HAS_SCHEME, '') };
+}
+/**
+ * True when the two are the same link. With a scheme on both, the schemes must be the same. One written without a
+ * scheme is the same as that address under "http" or "https", and under no other scheme.
+ */
+function sameAddress(a: { scheme: string | null; rest: string }, b: { scheme: string | null; rest: string }): boolean {
+  if (a.rest !== b.rest) return false;
+  if (a.scheme === b.scheme) return true;
+  const web = (scheme: string | null) => scheme === null || scheme === 'http' || scheme === 'https';
+  return (a.scheme === null || b.scheme === null) && web(a.scheme) && web(b.scheme);
 }
 
 /** Every string held under a key called `place`, anywhere in a value. */
@@ -234,8 +295,10 @@ export function interviewPlacesIn(results: readonly { tool: string; output: unkn
 }
 
 /**
- * True when `place` holds a link that nobody gave. A link passes only when the
- * same link (`sameLink`) is in something the user typed in this conversation,
+ * True when `place` holds a link that nobody gave. A link is one with or
+ * without its scheme (`linksIn`): a model whose "https://zoom.us/j/9911" was
+ * refused must not get a card for "zoom.us/j/9911". A link passes only when the
+ * same link (`sameLink`, and `sameAddress` for the scheme) is in something the user typed in this conversation,
  * or is the place of an interview a tool of the app returned
  * (`interviewPlacesIn`). Not counted, because none of them is the user typing:
  * a CV the assistant fetched (it sits in a user message, see
@@ -254,11 +317,11 @@ export function interviewPlacesIn(results: readonly { tool: string; output: unkn
  * screen, whose form takes any link.
  */
 export function linkNobodyGave(messages: readonly ModelMessage[], place: unknown, extra = ''): boolean {
-  const wanted = linksIn(place);
+  const wanted = linksIn(place).map(linkParts);
   if (wanted.length === 0) return false;
-  const given = new Set<string>(linksIn(extra).map(sameLink));
+  const given = linksIn(extra).map(linkParts);
   const take = (text: unknown) => {
-    for (const link of linksIn(text)) given.add(sameLink(link));
+    for (const link of linksIn(text)) given.push(linkParts(link));
   };
   for (const message of messages) {
     if (message.role === 'user' && !isHeldCvMessage(message)) {
@@ -273,7 +336,17 @@ export function linkNobodyGave(messages: readonly ModelMessage[], place: unknown
       }
     }
   }
-  return wanted.some((link) => !given.has(sameLink(link)));
+  return wanted.some((link) => !given.some((one) => sameAddress(link, one)));
+}
+
+/**
+ * Why a change's place or interviewer must not reach a card, or null: a link in the place that nobody gave
+ * (`linkNobodyGave`), or any link at all in the interviewer's name. Notes are not read: no candidate sees them.
+ */
+export function interviewLinkProblem(messages: readonly ModelMessage[], input: unknown, extra = ''): string | null {
+  const sent = (input && typeof input === 'object' ? input : {}) as { place?: unknown; interviewer_name?: unknown };
+  if (linkNobodyGave(messages, sent.place, extra)) return LINK_NOT_GIVEN;
+  return linksIn(sent.interviewer_name).length > 0 ? LINK_IN_INTERVIEWER : null;
 }
 
 /**
@@ -412,7 +485,7 @@ export function guardInterviewChanges(
             ? null
             : onApplication ? notLookedUp('application', id) : interviewNotLookedUp(id))
           ?? inTurn
-          ?? (linkNobodyGave(messages, (input as { place?: unknown } | null)?.place) ? LINK_NOT_GIVEN : null));
+          ?? interviewLinkProblem(messages, input));
     if (problem) return { type: 'denied', reason: problem };
     // The SDK waits for each call's answer before asking about the next, so the count is safe across this read.
     const decision = check ? interviewCardDecision(await check(tool, input), cardShown(messages, toolCallId)) : 'user-approval';

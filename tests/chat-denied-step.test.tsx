@@ -11,7 +11,7 @@ import {
   lookTheSameInPool, poolNotLookedUp,
 } from '@/lib/ai/hire-pool-gate';
 import {
-  AMBIGUOUS_INTERVIEW_CHANGE, APPLICATION_NOT_ACTIVE, INTERVIEW_CHANGED_SINCE, INTERVIEW_GONE, NOTHING_WOULD_CHANGE, SAME_TIME_SENT, INTERVIEW_CHECK_FAILED, LINK_NOT_GIVEN, ONE_INTERVIEW_CHANGE, interviewNotLookedUp,
+  AMBIGUOUS_INTERVIEW_CHANGE, APPLICATION_NOT_ACTIVE, INTERVIEW_CHANGED_SINCE, INTERVIEW_GONE, LINK_IN_INTERVIEWER, NOTHING_WOULD_CHANGE, SAME_TIME_SENT, INTERVIEW_CHECK_FAILED, LINK_NOT_GIVEN, ONE_INTERVIEW_CHANGE, interviewNotLookedUp,
   lookTheSameInterviews,
 } from '@/lib/ai/hire-interview-gate';
 
@@ -147,6 +147,7 @@ describe('the line a person reads on a change the server refused', () => {
     [APPLICATION_NOT_ACTIVE, APPLICATION_NOT_ACTIVE],
     [SAME_TIME_SENT, 'The time given was the time this interview already has, so nothing was prepared. Ask again for only what should change.'],
     [NOTHING_WOULD_CHANGE, NOTHING_WOULD_CHANGE],
+    [LINK_IN_INTERVIEWER, 'The interviewer\'s name held a link, so nothing was prepared. A link goes in the Place or link field: give it as the place and ask again, or type it there on the Interviews screen.'],
   ];
   it.each(each)('%s', (reason, line) => {
     expect(refusalForUser(reason)).toBe(line);

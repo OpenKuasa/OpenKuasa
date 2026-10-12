@@ -2609,6 +2609,8 @@ describe('interview changes', () => {
     'More than one match was found for that name, so no interview change was prepared. Stop here: say which match and ask the user which one they mean. ' +
     'Once the user has said which, they can ask again.';
   const LINK_NOT_GIVEN = 'That link was not given by the user, so no interview change was prepared. Ask the user for the link, or prepare it without one.';
+  const LINK_IN_INTERVIEWER =
+    'The interviewer\'s name holds a link, so no interview change was prepared. Give the interviewer as a name only. A link goes in the place, and only one the user gave.';
   const LOOK_THE_SAME =
     `Two interviews with ${WHO} for ${JOB} look the same from here, so I cannot tell them apart. Nothing was changed. ` +
     'Use the menu on the interview\'s own row on the Interviews screen.';
@@ -2824,6 +2826,36 @@ describe('interview changes', () => {
       expect(JSON.stringify(seen.calls.map((c) => c.prompt))).toContain(LETTER_LINK);
       expect(fromLetter.context.proposals.size).toBe(0);
       expect(seen.refusals[0]).toBe(LINK_NOT_GIVEN);
+      nothingSaved();
+    });
+    it('a link written without "https://" is checked too, and a link in the interviewer\'s name is refused', async () => {
+      const at = (place: string, more: Record<string, unknown> = {}): Call => ({ tool: 'scheduleInterview', input: { ...NEW, place, ...more } });
+      const PLAIN = `Schedule ${WHO} for 12 January at 3pm, video`;
+      for (const place of ['zoom.us/j/9911', 'meet.google.com/abc-defg-hij', 'www.rooms.example']) {
+        const run = await prepare([byName, at(place), 'answer'], world(), { said: PLAIN });
+        expect(run.context.proposals.size, place).toBe(0);
+        expect(seen.refusals[0], place).toBe(LINK_NOT_GIVEN);
+      }
+      // Refused with its scheme, then prepared again without it in the same delegation: still nothing.
+      const resent = await prepare([byName, at('https://zoom.us/j/9911'), at('zoom.us/j/9911'), 'answer'], world(), { said: PLAIN });
+      expect(resent.context.proposals.size).toBe(0);
+      expect(resent.cards).toEqual([]);
+      expect(seen.refusals.slice(0, 2)).toEqual([LINK_NOT_GIVEN, LINK_NOT_GIVEN]);
+      for (const [typed, used] of [['zoom.us/j/9911', 'zoom.us/j/9911'], ['zoom.us/j/9911', 'https://zoom.us/j/9911'], ['https://zoom.us/j/9911', 'zoom.us/j/9911']]) {
+        const run = await prepare([byName, at(used)], world(), { said: `${PLAIN}, on ${typed}` });
+        expect(seen.refusals, `${typed} -> ${used}`).toEqual([]);
+        expect(run.context.proposals.size, `${typed} -> ${used}`).toBe(1);
+      }
+      for (const [place, name] of [['Level 3, Menara KL', 'Dr. Aina b. Rahman'], ['Bilik Mesyuarat 2.1', 'Farah Lim'], ['+60 12-345 6789', 'Puan Farah (HR/Admin)']]) {
+        const run = await prepare([byName, at(place, { interviewer_name: name, kind: 'onsite' })], world(), { said: PLAIN });
+        expect(seen.refusals, place).toEqual([]);
+        expect(run.context.proposals.size, place).toBe(1);
+      }
+      for (const name of [`Farah Lim ${LINK}`, 'Farah (zoom.us/j/9911)']) {
+        const run = await prepare([byName, at('Level 3', { interviewer_name: name }), 'answer'], world(), { said: `${PLAIN}, with Farah on ${LINK} or zoom.us/j/9911` });
+        expect(run.context.proposals.size, name).toBe(0);
+        expect(seen.refusals[0], name).toBe(LINK_IN_INTERVIEWER);
+      }
       nothingSaved();
     });
     it('lets through a link the user typed, and one a lookup of this delegation returned', async () => {
@@ -3164,6 +3196,41 @@ describe('interview changes', () => {
       const spelled = await request([[{ tool: 'scheduleInterview', input: { ...NEW, place: 'https://Meet.Example.com/abc/' } }]], agent, world(), `Schedule ${WHO} for 12 January at 3pm, video, link ${LINK}`);
       expect(spelled.denials).toEqual([]);
       expect(spelled.cards).toHaveLength(1);
+      nothingSaved();
+    });
+    it.each(agents)('%s: a link written without "https://" is checked too, and a link in the interviewer\'s name is refused', async (agent) => {
+      const at = (place: string, more: Record<string, unknown> = {}): Call => ({ tool: 'scheduleInterview', input: { ...NEW, place, ...more } });
+      const PLAIN = `Schedule ${WHO} for 12 January at 3pm, video`;
+      // Made up, with no scheme.
+      for (const place of ['zoom.us/j/9911', 'meet.google.com/abc-defg-hij', 'www.rooms.example']) {
+        const run = await request([[at(place)]], agent, world(), PLAIN);
+        expect(run.cards, place).toEqual([]);
+        expect(run.denials, place).toEqual([LINK_NOT_GIVEN]);
+      }
+      // Refused with its scheme, then sent again without it in the same request: still no card.
+      const resent = await request([[at('https://zoom.us/j/9911')], [{ tool: 'listJobs', input: {} }, at('zoom.us/j/9911')], [{ tool: 'listJobs', input: {} }, { tool: 'listJobs', input: {} }, at('ZOOM.us/j/9911/')]], agent, world(), PLAIN);
+      expect(resent.cards).toEqual([]);
+      expect(resent.denials).toEqual([LINK_NOT_GIVEN, LINK_NOT_GIVEN, LINK_NOT_GIVEN]);
+      // The user typed it, with the scheme or without: either spelling passes.
+      for (const [typed, used] of [['zoom.us/j/9911', 'zoom.us/j/9911'], ['zoom.us/j/9911', 'https://zoom.us/j/9911'], ['https://zoom.us/j/9911', 'zoom.us/j/9911']]) {
+        const run = await request([[at(used)]], agent, world(), `${PLAIN}, on ${typed}`);
+        expect(run.denials, `${typed} -> ${used}`).toEqual([]);
+        expect(run.cards, `${typed} -> ${used}`).toHaveLength(1);
+      }
+      // Ordinary text nobody typed is not a link, in the place or in the name.
+      for (const [place, name] of [['Level 3, Menara KL', 'Dr. Aina b. Rahman'], ['Bilik Mesyuarat 2.1', 'Farah Lim'], ['+60 12-345 6789', 'Puan Farah (HR/Admin)']]) {
+        const run = await request([[at(place, { interviewer_name: name, kind: 'onsite' })]], agent, world(), PLAIN);
+        expect(run.denials, place).toEqual([]);
+        expect(run.cards, place).toHaveLength(1);
+      }
+      // A link in the interviewer's name is refused even when the user typed that link.
+      for (const name of [`Farah Lim ${LINK}`, 'Farah (zoom.us/j/9911)']) {
+        const run = await request([[at('Level 3', { interviewer_name: name })]], agent, world(), `${PLAIN}, with Farah on ${LINK} or zoom.us/j/9911`);
+        expect(run.cards, name).toEqual([]);
+        expect(run.denials, name).toEqual([LINK_IN_INTERVIEWER]);
+      }
+      const changed = await request([[{ tool: 'rescheduleInterview', input: { id: IV, interviewer_name: 'see zoom.us/j/9911' } }]], agent);
+      expect(changed.denials).toEqual([LINK_IN_INTERVIEWER]);
       nothingSaved();
     });
     it.each(agents)('%s: two interviews that read the same are refused, and so is a change when the server cannot be read', async (agent) => {

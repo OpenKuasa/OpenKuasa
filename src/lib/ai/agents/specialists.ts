@@ -47,15 +47,14 @@ import {
 import {
   AMBIGUOUS_INTERVIEW_CHANGE,
   HIRE_INTERVIEW_TOOL_NAMES,
-  LINK_NOT_GIVEN,
   ONE_INTERVIEW_CHANGE,
   actsOnApplication,
   ambiguousFor,
   interviewCardDecision,
+  interviewLinkProblem,
   interviewNotLookedUp,
   interviewPlacesIn,
   interviewTarget,
-  linkNobodyGave,
 } from '@/lib/ai/hire-interview-gate';
 import type { ProductToolkit } from '@/lib/ai/products';
 import { logModelCall, logModelError, modelErrorCode } from '@/lib/ai/call-log';
@@ -425,12 +424,9 @@ function specialistTools(
         // interview this specialist looked up. Not `given`: the task Tuah wrote, and Tuah's words in the transcript,
         // are not the user typing. Not the rest of a lookup either: a cover letter or a CV link is a stranger's text.
         // The other way for the person: type the link, or go ahead without one and add it on the Interviews screen.
-        if (
-          INTERVIEW_CHANGES.has(name) &&
-          linkNobodyGave(messages, (input as { place?: unknown } | null)?.place, interviewPlacesIn(results).join('\n'))
-        ) {
-          return { prepared: false, error: LINK_NOT_GIVEN };
-        }
+        // And the interviewer is a name: a link in it would reach the candidate unchecked, so it is refused outright.
+        const linked = INTERVIEW_CHANGES.has(name) ? interviewLinkProblem(messages, input, interviewPlacesIn(results).join('\n')) : null;
+        if (linked) return { prepared: false, error: linked };
         // Last, the server's own rows (read above): two rows of one name that look the same cannot be told apart on a card.
         // When they can, the card says which one it is; that line is added when the card is shown, not kept here.
         if (checked && !checked.ok) return { prepared: false, error: checked.refusal };
