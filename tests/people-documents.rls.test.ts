@@ -1,6 +1,6 @@
 /**
  * Live test of the document and letter write paths and the document bucket against the real database and storage.
- * It needs the three 202610290900xx migrations applied; until then it fails at the first call (the functions and
+ * It needs the three 202611020900xx migrations applied; until then it fails at the first call (the functions and
  * the bucket do not exist). Skipped without Supabase env vars. First run: Task 6 of the L6b plan, after the owner's
  * go-ahead. NOT run by Task 2.
  *
