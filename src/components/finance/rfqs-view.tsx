@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Download, FileSearch, Lock, Pencil, Plus, Search, Send, Tag, Trash2 } from 'lucide-react';
+import { Download, Lock, MessageSquare, Pencil, Plus, Search, Send, Tag, Trash2 } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { ConfirmRow } from '@/components/finance/confirm-row';
 import { downloadCsv } from '@/components/finance/download-csv';
@@ -228,7 +228,7 @@ export function RfqsView({
 
   /** The card that stands in while a draft or a sent RFQ is read, or says it could not be. */
   const loading = (title: string, subtitle: string) => (
-    <BentoCard title={title} subtitle={subtitle} icon={FileSearch} className="col-span-2 md:col-span-12">
+    <BentoCard title={title} subtitle={subtitle} icon={MessageSquare} className="col-span-2 md:col-span-12">
       <div className="flex flex-wrap items-center gap-3">
         {loader.error ? (
           <p role="alert" className="text-sm text-destructive">
@@ -333,7 +333,7 @@ export function RfqsView({
         <BentoCard
           title="RFQs"
           subtitle="What you have asked your suppliers to quote"
-          icon={FileSearch}
+          icon={MessageSquare}
           flush
           action={
             matching.length > LATEST_ROWS ? (
