@@ -115,6 +115,9 @@ export type BillListRow = {
   paid: number;
   balance: number;
   display_status: BillDisplayStatus;
+  /** The purchase order the bill is raised against, with its number; null when it has none. */
+  purchase_order_id: string | null;
+  purchase_order_no: string | null;
 };
 
 export type BillLine = DocumentLineRow;
@@ -130,9 +133,33 @@ export type SaveAndPostResult = FinResult<{ id: string; bill_no: string }> & { d
 
 const LIST_COLUMNS = 'id,bill_no,supplier_id,supplier_name,bill_date,due_date,total,paid,balance,display_status';
 
-function toListRow(row: Record<string, unknown>): BillListRow {
+/** Who a bill's order is: bill id → the order's id and number. */
+type BillOrderLinks = Map<string, { id: string; no: string | null }>;
+
+/**
+ * The order of each linked bill, read from its own view because the totals view the list reads does not carry
+ * it. `billId` narrows the read to one bill. Like the other reads here it throws when it fails: a list that
+ * quietly showed every bill as unlinked would be wrong, not just incomplete.
+ */
+async function readOrderLinks(ctx: FinanceWriteContext, billId?: string): Promise<BillOrderLinks> {
+  const links: BillOrderLinks = new Map();
+  for (let from = 0; ; from += BILL_PAGE_SIZE) {
+    let query = ctx.client.from('finance_bill_purchase_orders').select('bill_id,purchase_order_id,po_no').eq('org_id', ctx.orgId);
+    if (billId) query = query.eq('bill_id', billId);
+    const { data, error } = await query.order('bill_id', { ascending: true }).range(from, from + BILL_PAGE_SIZE - 1);
+    if (error) throw error;
+    const page = (data ?? []) as unknown as { bill_id: string; purchase_order_id: string; po_no: string | null }[];
+    for (const l of page) links.set(l.bill_id, { id: l.purchase_order_id, no: l.po_no });
+    if (page.length < BILL_PAGE_SIZE) return links;
+  }
+}
+
+function toListRow(row: Record<string, unknown>, links: BillOrderLinks): BillListRow {
+  const order = links.get(row.id as string);
   return {
     ...(row as unknown as BillListRow),
+    purchase_order_id: order?.id ?? null,
+    purchase_order_no: order?.no ?? null,
     total: Number(row.total),
     paid: Number(row.paid),
     balance: Number(row.balance),
@@ -142,6 +169,7 @@ function toListRow(row: Record<string, unknown>): BillListRow {
 /** Every bill in the workspace, newest first, read a page at a time. */
 export async function listBills(ctx: FinanceWriteContext): Promise<BillListRow[]> {
   const rows: BillListRow[] = [];
+  const links = await readOrderLinks(ctx);
   for (let from = 0; ; from += BILL_PAGE_SIZE) {
     const { data, error } = await ctx.client
       .from('supplier_bill_totals')
@@ -152,7 +180,7 @@ export async function listBills(ctx: FinanceWriteContext): Promise<BillListRow[]
       .range(from, from + BILL_PAGE_SIZE - 1);
     if (error) throw error;
     const page = (data ?? []) as unknown as Record<string, unknown>[];
-    rows.push(...page.map(toListRow));
+    rows.push(...page.map((r) => toListRow(r, links)));
     if (page.length < BILL_PAGE_SIZE) return rows;
   }
 }
@@ -177,9 +205,10 @@ export async function getBill(ctx: FinanceWriteContext, id: string): Promise<Bil
     .order('created_at', { ascending: true })
     .order('id', { ascending: true });
   if (linesError) throw linesError;
+  const links = await readOrderLinks(ctx, id);
   const header = bill as unknown as Record<string, unknown>;
   return {
-    ...toListRow(header),
+    ...toListRow(header, links),
     supplier_ref: (header.supplier_ref as string | null) ?? null,
     notes: (header.notes as string | null) ?? null,
     lines: ((lines ?? []) as unknown as Record<string, unknown>[]).map(toDocumentLine),

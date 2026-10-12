@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FinanceWriteContext } from '@/lib/finance/result';
-import { deleteBill, postBill, saveBill, saveBillInput, voidBill } from '@/lib/finance/bills';
+import { BILL_PAGE_SIZE, deleteBill, getBill, listBills, postBill, saveBill, saveBillInput, voidBill } from '@/lib/finance/bills';
 
 const ID = '33333333-3333-4333-8333-333333333333';
 const SUPPLIER = '44444444-4444-4444-8444-444444444444';
@@ -160,5 +160,90 @@ describe('bill writes', () => {
     const { ctx } = fakeClient({ data: null, error: { code: 'XX000' } });
     expect(await saveBill(ctx, valid)).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
     expect(logged).toHaveBeenCalled();
+  });
+});
+
+/** Answers each table with its own rows; a paged read gets the slice asked for. */
+function tableClient(tables: Record<string, { rows?: Record<string, unknown>[]; error?: unknown }>) {
+  const reads: { table: string; eq: Record<string, unknown>; range?: [number, number] }[] = [];
+  const client = {
+    from(name: string) {
+      const read = { table: name, eq: {} as Record<string, unknown>, range: undefined as [number, number] | undefined };
+      reads.push(read);
+      const t = tables[name] ?? { rows: [] };
+      const rows = t.rows ?? [];
+      const builder = {
+        select() { return builder; },
+        order() { return builder; },
+        eq(column: string, value: unknown) { read.eq[column] = value; return builder; },
+        range: async (from: number, to: number) => {
+          read.range = [from, to];
+          return { data: t.error ? null : rows.slice(from, to + 1), error: t.error ?? null };
+        },
+        maybeSingle: async () => {
+          const match = rows.find((r) => Object.entries(read.eq).every(([k, v]) => k === 'org_id' || r[k] === v));
+          return { data: t.error ? null : (match ?? null), error: t.error ?? null };
+        },
+        // An unpaged read (a bill's lines) is awaited as it stands.
+        then(resolve: (v: unknown) => void) { resolve({ data: t.error ? null : rows, error: t.error ?? null }); },
+      };
+      return builder;
+    },
+  };
+  return { ctx: { client: client as never, orgId: 'org-1' } satisfies FinanceWriteContext, reads };
+}
+
+const billRow = (id: string, extra: Record<string, unknown> = {}) => ({
+  id, bill_no: null, supplier_id: SUPPLIER, supplier_name: 'Lim', bill_date: '2026-10-01', due_date: '2026-10-31',
+  total: '100', paid: '0', balance: '100', display_status: 'draft', ...extra,
+});
+const link = (bill_id: string, no: string) => ({ org_id: 'org-1', bill_id, purchase_order_id: `po-${no}`, po_no: no, purchase_order_status: 'approved' });
+
+describe('listBills with purchase orders', () => {
+  it('gives each bill the order it is linked to, and null where it has none', async () => {
+    const { ctx, reads } = tableClient({
+      supplier_bill_totals: { rows: [billRow('b1'), billRow('b2')] },
+      finance_bill_purchase_orders: { rows: [link('b2', 'PO-0003')] },
+    });
+    const rows = await listBills(ctx);
+    expect(rows.map((r) => [r.id, r.purchase_order_id, r.purchase_order_no])).toEqual([
+      ['b1', null, null],
+      ['b2', 'po-PO-0003', 'PO-0003'],
+    ]);
+    expect(rows[0].total).toBe(100);
+    expect(reads.find((r) => r.table === 'finance_bill_purchase_orders')!.eq).toEqual({ org_id: 'org-1' });
+  });
+  it('reads the links a page at a time as well', async () => {
+    const many = Array.from({ length: BILL_PAGE_SIZE + 1 }, (_, i) => link(`b${i}`, `PO-${i}`));
+    const { ctx, reads } = tableClient({ supplier_bill_totals: { rows: [billRow('b0')] }, finance_bill_purchase_orders: { rows: many } });
+    await listBills(ctx);
+    expect(reads.filter((r) => r.table === 'finance_bill_purchase_orders').map((r) => r.range)).toEqual([
+      [0, BILL_PAGE_SIZE - 1],
+      [BILL_PAGE_SIZE, 2 * BILL_PAGE_SIZE - 1],
+    ]);
+  });
+  it('fails like the other reads when the links cannot be read, rather than showing bills with the order missing', async () => {
+    const { ctx } = tableClient({ supplier_bill_totals: { rows: [billRow('b1')] }, finance_bill_purchase_orders: { error: { code: 'x' } } });
+    await expect(listBills(ctx)).rejects.toEqual({ code: 'x' });
+  });
+});
+
+describe('getBill with purchase orders', () => {
+  it('carries the order of a linked bill', async () => {
+    const { ctx } = tableClient({
+      supplier_bill_totals: { rows: [billRow(ID, { supplier_ref: null, notes: null })] },
+      supplier_bill_lines: { rows: [] },
+      finance_bill_purchase_orders: { rows: [link(ID, 'PO-0003')] },
+    });
+    const bill = await getBill(ctx, ID);
+    expect(bill).toMatchObject({ id: ID, purchase_order_id: 'po-PO-0003', purchase_order_no: 'PO-0003' });
+  });
+  it('has none for an unlinked bill', async () => {
+    const { ctx } = tableClient({
+      supplier_bill_totals: { rows: [billRow(ID, { supplier_ref: null, notes: null })] },
+      supplier_bill_lines: { rows: [] },
+      finance_bill_purchase_orders: { rows: [] },
+    });
+    expect(await getBill(ctx, ID)).toMatchObject({ purchase_order_id: null, purchase_order_no: null });
   });
 });

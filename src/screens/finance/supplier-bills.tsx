@@ -14,6 +14,7 @@ import { type BillDisplayStatus, type BillListRow, listBills } from '@/lib/finan
 import { listContacts } from '@/lib/finance/contacts';
 import { type PaymentOutRow, listAccounts, listPaymentsOut } from '@/lib/finance/money';
 import { heldByBill } from '@/lib/finance/payment-form';
+import { listPurchaseOrders } from '@/lib/finance/purchase-orders';
 import { listProducts } from '@/lib/finance/products';
 import { billsView, todayUtc } from '@/lib/finance/purchase-views';
 import { createClient } from '@/lib/supabase/server';
@@ -41,6 +42,8 @@ const sample = (
   paid: display_status === 'paid' ? total : 0,
   balance: display_status === 'paid' ? 0 : total,
   display_status,
+  purchase_order_id: null,
+  purchase_order_no: null,
 });
 
 const SAMPLE_BILLS: BillListRow[] = [
@@ -99,13 +102,16 @@ export default async function SupplierBillsScreen() {
   const ctx = { client: await createClient(), orgId: viewer.orgId };
   const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
   // The forms offer suppliers, products and accounts; a viewer has no form, so none of them is read for them.
-  const [rows, payments, contacts, products, accounts] = await Promise.all([
+  const [rows, payments, contacts, products, accounts, orders] = await Promise.all([
     listBills(ctx),
     listPaymentsOut(ctx),
     canEdit ? listContacts(ctx) : [],
     canEdit ? listProducts(ctx) : [],
     canEdit ? listAccounts(ctx) : [],
+    canEdit ? listPurchaseOrders(ctx) : [],
   ]);
+  // The picker offers approved orders, and keeps the order a draft is already linked to even once it is closed.
+  const linked = new Set(rows.flatMap((b) => (b.display_status === 'draft' && b.purchase_order_id ? [b.purchase_order_id] : [])));
   return (
     <BillsView
       rows={rows}
@@ -118,6 +124,17 @@ export default async function SupplierBillsScreen() {
               actions: ACTIONS,
               suppliers: contacts.filter((c) => c.is_supplier && c.active),
               products: products.filter((p) => p.active),
+              orders: orders
+                .filter((o) => o.status === 'approved' || linked.has(o.id))
+                .map(({ id, po_no, supplier_id, status, total, billed_total, received_total }) => ({
+                  id,
+                  po_no,
+                  supplier_id,
+                  status,
+                  total,
+                  billed_total,
+                  received_total,
+                })),
               accounts,
               payments,
             }

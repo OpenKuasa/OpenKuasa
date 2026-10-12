@@ -39,6 +39,8 @@ const bill = (n: number, b: Partial<BillListRow> = {}): BillListRow => ({
   paid: 0,
   balance: 100,
   display_status: 'pending',
+  purchase_order_id: null,
+  purchase_order_no: null,
   ...b,
 });
 

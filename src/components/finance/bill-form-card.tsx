@@ -1,7 +1,15 @@
 'use client';
 
-import { DocumentFormCard } from '@/components/finance/document-form-card';
-import { BILL_FORM_KIND, billFormFromDetail, newBillForm } from '@/lib/finance/bill-form';
+import { DocumentFormCard, type PartyChoice } from '@/components/finance/document-form-card';
+import {
+  BILL_FORM_KIND,
+  type BillForm,
+  type BillOrderOption,
+  billFormFromDetail,
+  billOrderWarnings,
+  newBillForm,
+  ordersForSupplier,
+} from '@/lib/finance/bill-form';
 import { withCurrentParty } from '@/lib/finance/document-form';
 import type { BillDetail, SaveAndPostResult } from '@/lib/finance/bills';
 import type { FinanceContact } from '@/lib/finance/contacts';
@@ -21,6 +29,7 @@ export function BillFormCard({
   editing,
   suppliers,
   products,
+  orders,
   today,
   actions,
   onClose,
@@ -31,11 +40,29 @@ export function BillFormCard({
   suppliers: FinanceContact[];
   /** Active products and services. */
   products: FinanceProduct[];
+  /**
+   * Purchase orders to choose from: the approved ones, and any the drafts are linked to. Absent, the form has
+   * no picker (and leaves a draft's link alone only if the caller sends no `purchase_order_id`).
+   */
+  orders?: BillOrderOption[];
   /** The default bill date, YYYY-MM-DD. */
   today: string;
   actions: BillFormActions;
   onClose: () => void;
 }) {
+  const partyChoice: PartyChoice<BillForm> | undefined = orders && {
+    label: 'Purchase order',
+    noneLabel: 'No purchase order',
+    options: (form) => ordersForSupplier(orders, form.supplier_id, form.purchase_order_id),
+    get: (form) => form.purchase_order_id,
+    set: (form, id) => ({ ...form, purchase_order_id: id }),
+    notes: (form) => {
+      const chosen = orders.find((o) => o.id === form.purchase_order_id && o.supplier_id === form.supplier_id) ?? null;
+      // The draft's own saved total is already in the order's billed figure.
+      const own = editing && editing.display_status === 'draft' && editing.purchase_order_id === chosen?.id ? editing.total : 0;
+      return billOrderWarnings(form.lines, chosen, own);
+    },
+  };
   return (
     <DocumentFormCard
       kind={BILL_FORM_KIND}
@@ -43,6 +70,7 @@ export function BillFormCard({
       // A supplier archived since the draft was saved is still this bill's supplier.
       parties={withCurrentParty(suppliers, editing && { id: editing.supplier_id, name: editing.supplier_name })}
       products={products}
+      partyChoice={partyChoice}
       actions={actions}
       onClose={onClose}
     />
