@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { billIdInput, saveBillInput } from '@/lib/finance/bills';
+import { cashReceiptIdInput, saveCashReceiptInput } from '@/lib/finance/cash-receipts';
 import { createContactInput, updateContactInput } from '@/lib/finance/contacts';
 import { creditNoteIdInput, saveCreditNoteInput } from '@/lib/finance/credit-notes';
 import { invoiceIdInput, saveInvoiceInput, setEInvoiceInput } from '@/lib/finance/invoices';
@@ -100,6 +101,19 @@ const cases: [string, { parse: (v: unknown) => unknown }, unknown][] = [
     invoice_id: '', credit_note_id: ID, account_id: ID, txn_date: '2026-10-06', method: 'cheque', reason: 'other', amount: 0.005,
     reference: ' CHQ 001 ', notes: ' Collected in person ', scheduled: true,
   }],
+  ['saveCashReceiptInput (income, a typed payer)', saveCashReceiptInput, {
+    kind: 'income', account_id: ID, txn_date: '2026-10-06', method: 'cash', category_id: ID, amount: 32.506,
+    party_name: ' Walk-in ', contact_id: '', reference: ' ',
+  }],
+  ['saveCashReceiptInput (income, a draft being changed, a contact, the smallest amount)', saveCashReceiptInput, {
+    kind: 'income', id: ID, account_id: ID, txn_date: '2026-10-06', method: 'cheque', category_id: ID, amount: 0.005,
+    contact_id: ID, party_name: ' ', reference: ' CHQ 001 ', notes: ' Deposit ',
+  }],
+  ['saveCashReceiptInput (two invoices)', saveCashReceiptInput, {
+    kind: 'invoice', account_id: ID, txn_date: '2026-10-20', method: 'fpx', notes: ' banked ',
+    allocations: [{ invoice_id: ID, amount: 10.005 }, { invoice_id: '22222222-2222-4222-8222-222222222222', amount: 5 }],
+  }],
+  ['cashReceiptIdInput', cashReceiptIdInput, { id: ID }],
 ];
 
 describe('finance schemas parse their own output unchanged', () => {
