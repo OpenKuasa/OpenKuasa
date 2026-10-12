@@ -508,6 +508,7 @@ const AREA: Record<ProductToolkit['key'], string> = {
   crm: 'the CRM (contacts, deals, pipelines and their stages)',
   hire: 'hiring (jobs, candidates, applications, the hiring funnel, interviews, the talent pool; it can read one candidate\'s uploaded CV and give a verdict on it; it can prepare moving, rejecting, reopening or rating one application at a time; it can prepare adding or editing one candidate at a time; it can prepare deleting one application or one candidate at a time; it can prepare a talent pool change for one candidate at a time)',
   people: 'HR (existing staff, leave, time-off, claims, overtime, attendance, payroll, performance; it can prepare deciding leave, claims and overtime, correcting attendance, and editing staff and departments, one change at a time)',
+  finance: 'finance (sales invoices and quotations, supplier bills, payments in and out, credit notes, refunds, customers and suppliers, items, bank and cash accounts; it can prepare drafting, posting and voiding invoices and bills, recording payments, issuing credit notes and refunds, and managing customers, suppliers and items, each with approval)',
 };
 
 /**

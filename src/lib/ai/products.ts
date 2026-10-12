@@ -12,6 +12,7 @@ import { deletionCheckFor, type DeletionCheck, type DeletionGate } from '@/lib/a
 import { poolCheckFor, type PoolCheck } from '@/lib/ai/hire-pool-gate';
 import type { ModelMessage, Tool, ToolSet } from 'ai';
 import { CRM_WRITE_TOOL_NAMES, createCrmTools, type CrmAccess } from '@/lib/ai/crm-tools';
+import { FINANCE_WRITE_TOOL_NAMES, createBendaharaTools, type FinanceAccess } from '@/lib/ai/finance-tools';
 import { createHireTools, type HeldCv } from '@/lib/ai/hire-tools';
 import {
   createPeopleTools,
@@ -161,7 +162,9 @@ export const ALL_PEOPLE_TOOL_NAMES: ReadonlySet<string> = new Set<string>([
   ...PEOPLE_WRITE_TOOL_NAMES,
 ]);
 
-export type ProductKey = 'reach' | 'crm' | 'hire' | 'people';
+export type ProductKey = 'reach' | 'crm' | 'hire' | 'people' | 'finance';
+
+export type { FinanceAccess };
 
 export type ProductToolkit = {
   /** The product's route segment, as in the navigation. */
@@ -217,6 +220,15 @@ export function peopleProduct(people: PeopleAccess): ProductToolkit {
     key: 'people',
     name: 'Lekiu',
     ...split(createPeopleTools(people.data, people.viewer, () => new Date(), people.write), PEOPLE_WRITE_TOOL_NAMES),
+  };
+}
+
+/** Bendahara: invoices, quotations, bills, payments, credit notes, refunds, contacts and items. */
+export function financeProduct(finance: FinanceAccess): ProductToolkit {
+  return {
+    key: 'finance',
+    name: 'Bendahara',
+    ...split(createBendaharaTools(finance), FINANCE_WRITE_TOOL_NAMES),
   };
 }
 

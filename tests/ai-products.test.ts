@@ -3,6 +3,7 @@ import type { Tool } from 'ai';
 import {
   combineToolkits,
   crmProduct,
+  financeProduct,
   hireProduct,
   peopleProduct,
   reachProduct,
@@ -32,6 +33,8 @@ const people = (canWrite: boolean) =>
       ? { ctx: { client: {} as never, orgId: 'org1' }, tier: 'hr', employeeId: null, receipt: null, userId: 'u1' }
       : undefined,
   });
+const finance = (canWrite: boolean) =>
+  financeProduct({ client: {} as never, orgId: 'org1', canWrite });
 
 const describes = (tool: Tool) => String(tool.description ?? '').toLowerCase();
 
@@ -83,6 +86,15 @@ describe('product toolkits', () => {
     expect(Object.keys(lekiu.read)).not.toContain('decideLeave');
     expect(Object.keys(people(false).write)).toEqual([]);
   });
+
+  it('gives Bendahara its finance lookups, and writes only to a writer', () => {
+    const b = finance(true);
+    expect(Object.keys(b.read)).toContain('listInvoices');
+    expect(Object.keys(b.read)).toContain('getFinanceOverview');
+    expect(Object.keys(b.write)).toContain('postInvoice');
+    expect(Object.keys(b.read)).not.toContain('postInvoice');
+    expect(Object.keys(finance(false).write)).toEqual([]);
+  });
 });
 
 describe('combineToolkits', () => {
@@ -102,8 +114,8 @@ describe('combineToolkits', () => {
     expect(combineToolkits([reach(false), crm(false)]).toolApproval).toBeUndefined();
   });
 
-  it('combines all four products (Tuah single-agent) without a tool-name clash', () => {
-    const products = [reach(true), crm(true), hire(true), people(true)];
+  it('combines all five products (Tuah single-agent) without a tool-name clash', () => {
+    const products = [reach(true), crm(true), hire(true), people(true), finance(true)];
     const total = products.reduce(
       (n, p) => n + Object.keys(p.read).length + Object.keys(p.write).length,
       0,
