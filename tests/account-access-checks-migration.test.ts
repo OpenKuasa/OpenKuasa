@@ -67,4 +67,18 @@ describe('account access checks migration', () => {
     expect(sql).toContain('revoke all on function public.redeem_recovery_code(text) from public, anon;');
     expect(sql).toContain('grant execute on function public.redeem_recovery_code(text) to authenticated;');
   });
+
+  test('sharing the demo workspace does not open another account\'s profile', () => {
+    const shares = definition('private.shares_org_with(target uuid)');
+    expect(shares).toContain('returns boolean language sql security definer stable set search_path = public as $$');
+    expectInOrder(
+      shares,
+      'select private.mfa_ok() and exists (',
+      'join public.org_members theirs on theirs.org_id = mine.org_id',
+      'where mine.user_id = auth.uid() and theirs.user_id = target',
+      'and not private.is_demo_org(mine.org_id)',
+    );
+    expect(sql).toContain('revoke execute on function private.shares_org_with(uuid) from public, anon;');
+    expect(sql).toContain('grant execute on function private.shares_org_with(uuid) to authenticated;');
+  });
 });

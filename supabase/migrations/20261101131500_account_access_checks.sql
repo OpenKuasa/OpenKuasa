@@ -113,3 +113,42 @@ end; $$;
 
 revoke all on function public.redeem_recovery_code(text) from public, anon;
 grant execute on function public.redeem_recovery_code(text) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 3. The demo workspace is shared by guests who do not know each other.
+--    profiles_select (20261010090000_profiles_and_org_details.sql, lines 51-53)
+--    lets an account read its own profile and the profiles of the people it
+--    shares a workspace with. Being in the demo workspace together no longer
+--    counts as sharing one; every other workspace is unchanged, and everyone
+--    still reads their own profile.
+--    Replaces the definition in 20261010120000_enforce_second_factor.sql
+--    (lines 44-52). The demo workspace is the one private.is_demo_org answers
+--    for (20261014090000_people_core.sql, lines 8-15: slug 'rimba-ventures-demo').
+--    The policy itself is not touched.
+--
+--    To list accounts in the demo workspace that are not guests (read-only;
+--    run it as the database owner):
+--
+--      select m.user_id, u.email, u.email_confirmed_at, u.created_at,
+--             m.role, m.created_at as joined_at
+--        from public.org_members m
+--        join public.orgs o on o.id = m.org_id and o.slug = 'rimba-ventures-demo'
+--        join auth.users u on u.id = m.user_id
+--       where u.is_anonymous is not true
+--       order by m.created_at;
+-- ---------------------------------------------------------------------------
+create or replace function private.shares_org_with(target uuid)
+returns boolean language sql security definer stable set search_path = public as $$
+  select private.mfa_ok() and exists (
+    select 1
+    from public.org_members mine
+    join public.org_members theirs on theirs.org_id = mine.org_id
+    where mine.user_id = auth.uid() and theirs.user_id = target
+      and not private.is_demo_org(mine.org_id)
+  );
+$$;
+
+-- Restated from 20261010090000_profiles_and_org_details.sql (lines 48-49); anon
+-- is added to the revoke, as the later helpers in this schema do.
+revoke execute on function private.shares_org_with(uuid) from public, anon;
+grant execute on function private.shares_org_with(uuid) to authenticated;
