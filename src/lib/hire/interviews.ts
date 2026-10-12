@@ -140,6 +140,28 @@ export function menuFor(status: InterviewStatus, applicationOutcome: Application
   return applicationOutcome === 'active' ? ['edit', ...rest] : rest;
 }
 
+// ─── when there is no invitation ─────────────────────────────────────────────
+
+/** Added to a success sentence when the interview was saved after its start: why nothing is offered to hand over. */
+export const STARTED_ALREADY = 'Its start has already passed, so there is no invitation or calendar file.';
+/** A success sentence with that explanation after it. */
+export const withNoInvitation = (message: string): string => `${message} ${STARTED_ALREADY}`;
+
+/** What is said when the invitation could not be read or built. Nothing was changed, so it does not speak of saving. */
+export const INVITATION_NOT_MADE = 'The invitation could not be made just now. Please try again.';
+
+/**
+ * What is said when an invitation is asked for and the interview's start has
+ * passed. `items` is what that row's menu offers (`menuFor`): only a way out
+ * that is really there is named, so "reschedule it" is not said for an
+ * interview whose application is rejected or withdrawn.
+ */
+export function noInvitationMessage(items: readonly InterviewMenuItem[]): string {
+  const said = 'This interview\'s start has already passed, so there is no invitation or calendar file for it.';
+  if (!items.includes('completed') && !items.includes('no_show')) return said;
+  return items.includes('edit') ? `${said} Mark what happened, or reschedule it.` : `${said} Mark what happened.`;
+}
+
 /**
  * Whether "Move to Interview" is offered after scheduling: exactly for an
  * active application at Applied or Screening, where the move is a forward one

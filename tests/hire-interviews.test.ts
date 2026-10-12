@@ -5,6 +5,7 @@ import {
   INTERVIEW_OUTCOMES, INTERVIEW_SAVE_FAILED, KIND_WORDS, PLACE_LABEL, THIS_INTERVIEW, alsoScheduledLines, cancelledMessage, interviewFullLine, interviewCardDetail,
   interviewCardTitle, interviewLine, interviewMessage, menuFor, needsOutcome, offerMoveToInterview, outcomeMessage,
   recordedPastMessage, reopenedMessage, scheduledMessage, stillScheduledMessage, updatedMessage,
+  INVITATION_NOT_MADE, STARTED_ALREADY, noInvitationMessage, withNoInvitation,
 } from '@/lib/hire/interviews';
 import { durationText } from '@/lib/hire/interview-time';
 import { APPLICATION_STAGES, type ApplicationOutcome, type InterviewStatus } from '@/lib/hire/types';
@@ -412,5 +413,30 @@ describe('the stored interview as a card says it', () => {
   it('a place of spaces is no place, and one with a line break stays on the line', () => {
     expect(interviewFullLine({ scheduled_at: AT, kind: 'video', duration_minutes: 60, place: '   ' })).toBe('Tue 20 Oct 2026, 3:00 pm · video · 1 hour · No place or link given');
     expect(interviewFullLine({ scheduled_at: AT, kind: 'onsite', duration_minutes: 60, place: ' Level 3,\n Menara  Aina ' })).toBe('Tue 20 Oct 2026, 3:00 pm · onsite · 1 hour · Place: Level 3, Menara Aina');
+  });
+});
+
+// Added in the final-review fix pass: the sentences for "there is no invitation".
+describe('when there is no invitation', () => {
+  const PASSED = 'This interview\'s start has already passed, so there is no invitation or calendar file for it.';
+  it('says only what the row\'s menu really offers', () => {
+    // An active application: its outcome can be marked, and it can be rescheduled.
+    expect(noInvitationMessage(menuFor('scheduled', 'active'))).toBe(`${PASSED} Mark what happened, or reschedule it.`);
+    // A rejected or withdrawn application: "Reschedule or edit" is not in the menu, so it is not suggested.
+    for (const outcome of ['rejected', 'withdrawn'] as const) {
+      expect(noInvitationMessage(menuFor('scheduled', outcome)), outcome).toBe(`${PASSED} Mark what happened.`);
+    }
+    // Nothing the menu offers would help: the fact alone.
+    expect(noInvitationMessage(menuFor('cancelled', 'active'))).toBe(PASSED);
+    expect(noInvitationMessage([])).toBe(PASSED);
+  });
+  it('adds one sentence to a success notice for an interview saved after its start', () => {
+    expect(STARTED_ALREADY).toBe('Its start has already passed, so there is no invitation or calendar file.');
+    expect(withNoInvitation(scheduledMessage('Aina Rahman', AT)))
+      .toBe('Scheduled an interview with Aina Rahman for Tuesday, 20 October 2026, 3:00 pm. Nothing has been sent to them. Its start has already passed, so there is no invitation or calendar file.');
+  });
+  it('has a sentence of its own for an invitation that could not be made, which says nothing about saving', () => {
+    expect(INVITATION_NOT_MADE).toBe('The invitation could not be made just now. Please try again.');
+    expect(INVITATION_NOT_MADE).not.toMatch(/saved/);
   });
 });

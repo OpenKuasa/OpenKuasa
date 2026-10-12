@@ -14,10 +14,10 @@ import {
   DELETE_FAILED, SUMMARY_FAILED, deletedMessage, deletionMessage, type DeletionKind, type Removal,
 } from './deletion';
 import { invitationText } from './interview-invite';
-import { isRealDate, klDateOf, klInstant, klTimeOf, pastProblem, timeProblem } from './interview-time';
+import { instantMs, isRealDate, klDateOf, klInstant, klTimeOf, pastProblem, timeProblem } from './interview-time';
 import {
   INTERVIEW_INPUT_MESSAGES, INTERVIEW_KINDS, INTERVIEW_LIMITS, INTERVIEW_NOT_READ_BACK, INTERVIEW_OUTCOMES, cancelledMessage,
-  interviewMessage, outcomeMessage, recordedPastMessage, reopenedMessage, scheduledMessage, updatedMessage,
+  interviewMessage, outcomeMessage, recordedPastMessage, reopenedMessage, scheduledMessage, updatedMessage, withNoInvitation,
 } from './interviews';
 import {
   APPLICATION_STAGES, DEFAULT_HIRE_SETTINGS, JOB_COLUMNS, SETTINGS_COLUMNS,
@@ -1183,6 +1183,12 @@ type InterviewWording = {
   invite: boolean;
   /** Whether the invitation says the time is new: what the database answered, never what was sent. */
   moved: boolean;
+  /**
+   * Whether the success sentence says so when a scheduled interview is given no invitation because its start has
+   * passed: for the changes after which the screen would otherwise have offered one (a new interview, an edit, a
+   * "scheduled again"). Not for a cancellation or a mark, which never offer one.
+   */
+  explains: boolean;
 };
 
 /** Calls one interview function. An error or a throw is logged by its code only: never an id, a name, a link or a note. */
@@ -1237,6 +1243,11 @@ async function interviewChanged(
       candidate, job, workspace: ctx.orgName?.trim() || null,
     }, wording.moved, now)
     : null;
+  const said = wording.message(candidate, row.scheduled_at);
+  // Saved, scheduled, with someone to invite, and still no invitation: its start has passed (a new interview may
+  // start up to five minutes ago). The sentence says so, or the missing invitation would be a puzzle.
+  const unexplained = wording.explains && wording.invite && row.status === 'scheduled' && Boolean(candidate && job) && invitation === null
+    && instantMs(row.scheduled_at) < now.getTime();
   return {
     ok: true,
     data: {
@@ -1256,7 +1267,7 @@ async function interviewChanged(
       status: row.status,
       created_at: row.created_at,
       updated_at: row.updated_at,
-      message: wording.message(candidate, row.scheduled_at),
+      message: unexplained ? withNoInvitation(said) : said,
       invitation,
       confirmed: true,
     },
@@ -1302,7 +1313,7 @@ export async function scheduleInterview(
       application_id: d.application_id, scheduled_at: iso, date: d.date, time: d.time, duration_minutes: d.duration_minutes,
       kind: d.kind, place, interviewer_name: interviewer, status: 'scheduled',
     },
-    { message: (name, at) => scheduledMessage(name, at ?? iso), invite: true, moved: false },
+    { message: (name, at) => scheduledMessage(name, at ?? iso), invite: true, moved: false, explains: true },
     now,
   );
 }
@@ -1347,7 +1358,7 @@ export async function recordPastInterview(
       application_id: d.application_id, scheduled_at: iso, date: d.date, time: d.time, duration_minutes: d.duration_minutes,
       kind: d.kind, place, interviewer_name: interviewer, status: d.outcome,
     },
-    { message: (name, at) => recordedPastMessage(name, at ?? iso, d.outcome), invite: false, moved: false },
+    { message: (name, at) => recordedPastMessage(name, at ?? iso, d.outcome), invite: false, moved: false, explains: false },
     now,
   );
 }
@@ -1410,7 +1421,7 @@ export async function rescheduleInterview(
   // then has the plainer opening, never a "new time" that is not one.
   const moved = (called.answer as { moved?: unknown } | null)?.moved === true;
   // `now` is not a rule on the new time (the database's, above): it only keeps an invitation from an interview that has begun.
-  return interviewChanged(ctx, d.id, implied, { message: updatedMessage, invite: true, moved }, now);
+  return interviewChanged(ctx, d.id, implied, { message: updatedMessage, invite: true, moved, explains: true }, now);
 }
 
 /** One of the three changes that take an interview's id and nothing that needs checking first. */
@@ -1422,7 +1433,7 @@ async function interviewStatusChange(
   if (!called.ok) return called;
   const word = wordOf(called.answer);
   if (word !== 'ok') return { ok: false, error: interviewMessage(word, 'interview') };
-  return interviewChanged(ctx, id, { status }, { message: (name) => message(name), invite: true, moved: false }, now);
+  return interviewChanged(ctx, id, { status }, { message: (name) => message(name), invite: true, moved: false, explains: status === 'scheduled' }, now);
 }
 
 /** Cancels one scheduled interview. It stays in the list as cancelled, and the candidate is not told. */

@@ -2108,19 +2108,46 @@ describe('an interview whose start has passed is given no invitation', () => {
   const AFTER = new Date('2026-10-20T07:00:00.001Z');
   const AT_START = new Date('2026-10-20T07:00:00Z');
   const A_WEEK_ON = new Date('2026-10-27T04:00:00Z');
+  /** Added to the success sentence so the missing invitation is explained (final-review fix pass). */
+  const STARTED = 'Its start has already passed, so there is no invitation or calendar file.';
   it('"mark as scheduled again" on an interview from last week: saved, said, and nothing to send', async () => {
     const result = await reopenInterview(ivFake({ answer: 'ok' }).ctx, { id: IV_ID }, A_WEEK_ON);
     expect(result).toMatchObject({
       ok: true,
-      data: { status: 'scheduled', scheduled_at: '2026-10-20T07:00:00+00:00', message: 'The interview with Aina Rahman is scheduled again.', invitation: null, confirmed: true },
+      data: { status: 'scheduled', scheduled_at: '2026-10-20T07:00:00+00:00', message: `The interview with Aina Rahman is scheduled again. ${STARTED}`, invitation: null, confirmed: true },
     });
     expect(result.ok && result.data).not.toHaveProperty('note');
+  });
+  it('a new interview saved inside the five minutes a slow form is allowed: the notice says why there is no invitation', async () => {
+    // 3:00 pm on 20 October was two minutes ago.
+    const result = await scheduleInterview(ivFake({ answer: { word: 'ok', id: IV_ID } }).ctx, SCHEDULE, new Date('2026-10-20T07:02:00Z'));
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        message: `Scheduled an interview with Aina Rahman for Tuesday, 20 October 2026, 3:00 pm. Nothing has been sent to them. ${STARTED}`,
+        invitation: null, confirmed: true,
+      },
+    });
+    // Still ahead: the sentence is not there, and the invitation is.
+    const ahead = await scheduleInterview(ivFake({ answer: { word: 'ok', id: IV_ID } }).ctx, SCHEDULE, NOW);
+    expect(ahead.ok && ahead.data.message).toBe('Scheduled an interview with Aina Rahman for Tuesday, 20 October 2026, 3:00 pm. Nothing has been sent to them.');
+    expect(ahead.ok && ahead.data.invitation).toBe(INVITE);
+  });
+  it('the sentence is only for a change that could have invited: not a cancellation, a mark, a past record or a row not read back', async () => {
+    const said = async (run: Promise<{ ok: boolean; data?: { message: string } }>) => {
+      const result = await run;
+      return result.ok ? result.data?.message ?? '' : '';
+    };
+    expect(await said(cancelInterview(ivFake({ answer: 'ok' }).ctx, { id: IV_ID }, A_WEEK_ON))).not.toContain(STARTED);
+    expect(await said(setInterviewOutcome(ivFake({ answer: 'ok', row: { ...IV_ROW, status: 'completed' } }).ctx, { id: IV_ID, outcome: 'completed' }, A_WEEK_ON)))
+      .not.toContain(STARTED);
+    expect(await said(reopenInterview(ivFake({ answer: 'ok', row: null }).ctx, { id: IV_ID }, A_WEEK_ON))).not.toContain(STARTED);
   });
   it('the same for an edit of one that has begun', async () => {
     const result = await rescheduleInterview(ivFake({ answer: { word: 'ok', moved: false } }).ctx, { id: IV_ID, notes: 'Ran late' }, A_WEEK_ON);
     expect(result).toMatchObject({
       ok: true,
-      data: { message: 'Updated the interview with Aina Rahman. It is on Tuesday, 20 October 2026, 3:00 pm. Nothing has been sent to them.', invitation: null, confirmed: true },
+      data: { message: `Updated the interview with Aina Rahman. It is on Tuesday, 20 October 2026, 3:00 pm. Nothing has been sent to them. ${STARTED}`, invitation: null, confirmed: true },
     });
   });
   it('is by the clock the capability is given, to the millisecond, for each change that can invite', async () => {
