@@ -142,12 +142,12 @@ testWithStorage('an owner uploads a receipt, records it, and reads it back with 
   expect(file.error, file.error?.message).toBeNull();
   expect(Buffer.from(await file.data!.arrayBuffer()).equals(PNG)).toBe(true);
 
-  // What the link serves, which is what keeps an uploaded file from ever running as a page: the stored type
-  // and nothing the browser may guess at; and, when asked to download, an attachment.
+  // What the link serves: the stored type, and, when asked to download, an attachment. Hosted storage sends
+  // no X-Content-Type-Options header on a signed link (seen 2026-10-12), so nothing here tells a browser not
+  // to guess: the app must open a receipt's file as a download, never inline (see Known limits in the docs).
   const shown = await fetch(link.data!.signedUrl);
   expect(shown.status).toBe(200);
   expect(shown.headers.get('content-type')).toBe('image/png');
-  expect(shown.headers.get('x-content-type-options')).toBe('nosniff');
   const saved = await a.c.storage.from(INBOX_RECEIPT_BUCKET).createSignedUrl(path, 60, { download: 'receipt.png' });
   const attachment = await fetch(saved.data!.signedUrl);
   expect(attachment.headers.get('content-disposition') ?? '').toMatch(/^attachment/);

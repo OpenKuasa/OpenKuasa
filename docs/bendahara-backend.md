@@ -1597,6 +1597,12 @@ with no date).
   upload); the storage service and the database check that the extension, that
   type and the bucket's list agree, and nothing on the server reads the bytes
   until the app opens the file.
+- A signed link to a file is served by the storage service with the stored
+  type and no `X-Content-Type-Options: nosniff` header (seen on the hosted
+  project on 2026-10-12), so nothing tells a browser not to guess at the
+  bytes. With a download name the link is served as an attachment. The part
+  that lets a person open a file must therefore always ask for the download
+  (or serve the bytes itself with `nosniff`), never link to the file inline.
 - A deleted receipt's path cannot be recorded while it is waiting to be
   removed. Once the server has removed the file and taken the path off the list,
   the same name can be uploaded and recorded again: that is a new file.
