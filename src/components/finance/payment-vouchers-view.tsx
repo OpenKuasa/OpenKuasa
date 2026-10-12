@@ -2,10 +2,17 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Download, PieChart, Search, TrendingUp, Wallet } from 'lucide-react';
+import { Ban, Check, Download, PieChart, Plus, Search, Trash2, TrendingUp, Wallet } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { AreaTrend, DonutStat, type Series } from '@/components/charts';
+import { ConfirmRow } from '@/components/finance/confirm-row';
 import { downloadCsv } from '@/components/finance/download-csv';
+import { OrderNotes } from '@/components/finance/order-notes';
+import { RowMenu, type RowMenuItem } from '@/components/finance/row-menu';
+import { SavedNoteCard } from '@/components/finance/saved-note-card';
+import { useFinanceAction } from '@/components/finance/use-finance-action';
+import { useLocalToday } from '@/components/finance/use-local-today';
+import { type VoucherFormActions, VoucherFormCard } from '@/components/finance/voucher-form-card';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
 import { NoMatchesRow } from '@/components/screen/table-filter';
@@ -14,7 +21,6 @@ import { Input } from '@/components/ui/input';
 import { LiveDot } from '@/components/ui/live-dot';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { useLocalToday } from '@/components/finance/use-local-today';
 import { localIsoDate } from '@/lib/finance/bill-math';
 import type { PaymentVoucherKind, PaymentVoucherRow } from '@/lib/finance/cash-book';
 import {
@@ -36,9 +42,47 @@ import {
   voucherHome,
 } from '@/lib/finance/cash-book-views';
 import { csvFileName } from '@/lib/finance/csv';
+import type { ExpenseCategory } from '@/lib/finance/expenses';
 import { rm } from '@/lib/finance/format';
+import type { FinanceAccount } from '@/lib/finance/money';
+import type { FinResult } from '@/lib/finance/result';
 import { LATEST_ROWS, displayDate } from '@/lib/finance/view-helpers';
+import {
+  type QuestionPart,
+  type VoucherAction,
+  type WrittenVoucher,
+  voucherActions,
+  voucherAnswerIsStale,
+  voucherControls,
+  voucherDecisionPayload,
+  voucherHiddenNote,
+  voucherName,
+  voucherQuestion,
+  writtenVoucherTitle,
+} from '@/lib/finance/voucher-form';
 import { cn } from '@/lib/utils';
+
+export type VoucherActions = VoucherFormActions & {
+  approve: (input: unknown) => Promise<FinResult<{ id: string }>>;
+  reject: (input: unknown) => Promise<FinResult<{ id: string }>>;
+  remove: (input: unknown) => Promise<FinResult<{ id: string }>>;
+};
+
+/** What only a person who may edit is given: the actions, whether they may decide, and what the voucher form offers. */
+export type VouchersWriter = {
+  actions: VoucherActions;
+  /** True for an owner or admin: they approve and reject, and what they save is approved. */
+  canDecide: boolean;
+  /** Active accounts, contacts and expense categories, for the form. */
+  accounts: FinanceAccount[];
+  contacts: { id: string; name: string }[];
+  categories: ExpenseCategory[];
+  /**
+   * By voucher id, the advice about the purchase orders behind the bills a waiting voucher pays
+   * (`orderNotesByVoucher`). Empty for someone who may not decide: they are never asked to approve.
+   */
+  orderNotes: Record<string, string[]>;
+};
 
 const PAID_SERIES: Series[] = [{ key: 'paid', label: 'Paid out (RM k)', color: 'var(--chart-1)' }];
 
@@ -53,20 +97,28 @@ const STATUS_STYLES: Record<PaymentVoucherRow['status'], string> = {
   void: 'bg-muted text-muted-foreground line-through',
 };
 
+/** One thing open at a time: the voucher form, or a question in one row. */
+type Open = { kind: 'form'; today: string } | { kind: VoucherAction; row: PaymentVoucherRow } | null;
+
 /**
  * Payment Vouchers: every movement of money out, one row each. The chosen
  * period sets the figures, the charts and the rows of the table (vouchers
  * waiting for approval or still to be paid stay in every period, as their
  * cards count them), with search, status and kind filters, "View all" and
  * Export working on top of it; Export gives what the table would show with
- * "View all". Nothing here changes data yet. A payment to a supplier is
- * changed on Payments Out and a refund on Refunds, and each such row links
- * there; the voucher form and the approve and reject buttons arrive later.
+ * "View all". A person who may edit (`writer`) also gets New voucher, and
+ * Delete on a voucher that is not yet "To be paid", or that is and is of
+ * a kind that belongs to this screen; an owner or
+ * admin also gets Approve and Reject on one that is waiting. Each row's menu
+ * holds only what the database will let that person do (`voucherActions`).
+ * From "To be paid" on, a payment to a supplier is paid, voided and deleted on Payments Out and a
+ * refund on Refunds, and each such row links there.
  */
 export function PaymentVouchersView({
   rows,
   today: serverToday,
   followClock = true,
+  writer,
 }: {
   /** Every voucher, newest first; waiting, rejected and void ones included. */
   rows: PaymentVoucherRow[];
@@ -74,6 +126,7 @@ export function PaymentVouchersView({
   today: string;
   /** False for sample data, which keeps its own fixed date. */
   followClock?: boolean;
+  writer?: VouchersWriter;
 }) {
   const today = useLocalToday(serverToday, followClock);
   const [period, setPeriod] = useState<CashBookPeriod>('month');
@@ -81,6 +134,10 @@ export function PaymentVouchersView({
   const [filter, setFilter] = useState<PaymentVoucherFilter>('open');
   const [kind, setKind] = useState<'all' | PaymentVoucherKind>('all');
   const [showAll, setShowAll] = useState(false);
+  const [open, setOpen] = useState<Open>(null);
+  // The voucher just recorded, approved or rejected; whether to say anything about it is decided at render, from the rows listed now.
+  const [written, setWritten] = useState<WrittenVoucher | null>(null);
+  const confirm = useFinanceAction();
 
   const view = paymentVouchersView(rows, today, period);
   const inPeriodRows = paymentVouchersInPeriod(rows, today, period);
@@ -100,28 +157,199 @@ export function PaymentVouchersView({
     keptLater: outside.filter((row) => row.txn_date >= today).length,
   });
 
+  const hiddenNote = written
+    ? voucherHiddenNote(
+        written,
+        today,
+        period,
+        filter,
+        matching.some((v) => v.transaction_id === written.id),
+        shown.some((v) => v.transaction_id === written.id),
+      )
+    : null;
+
+  const { newButton, actionsColumn, columns } = voucherControls(Boolean(writer));
+  const asking = open && open.kind !== 'form' ? open : null;
+  // The form holds what was typed, so nothing else opens over it: it is closed with its own Cancel first.
+  const locked = confirm.pending || open?.kind === 'form';
+  // A row that is gone after a refresh takes its question with it; the message still has to be seen.
+  const askingInView = asking ? shown.some((v) => v.transaction_id === asking.row.transaction_id) : false;
+
+  /** Opens one thing, dropping whatever message the last question left behind. */
+  const ask = (next: Exclude<Open, null>) => {
+    confirm.clear();
+    setWritten(null);
+    setOpen(next);
+  };
+  /** Closes whatever is open, and the message that went with it. */
+  const close = () => {
+    confirm.clear();
+    setOpen(null);
+  };
+  /** Closes, and keeps the voucher just written so the screen can say when it is not in the list. */
+  const closeSaying = (voucher: WrittenVoucher) => {
+    close();
+    setWritten(voucher);
+  };
+
+  const menuItem = (row: PaymentVoucherRow, action: VoucherAction): RowMenuItem => {
+    switch (action) {
+      case 'approve':
+        return { label: 'Approve', icon: Check, opens: true, onSelect: () => ask({ kind: 'approve', row }) };
+      case 'reject':
+        return { label: 'Reject', icon: Ban, destructive: true, opens: true, onSelect: () => ask({ kind: 'reject', row }) };
+      case 'delete':
+        return { label: 'Delete', icon: Trash2, destructive: true, opens: true, onSelect: () => ask({ kind: 'delete', row }) };
+    }
+  };
+
+  /**
+   * Runs a write on the voucher as the row shows it now. If it was decided, changed or deleted since, the
+   * question closes and the refreshed row (or its absence) says what it holds; the sentence stays above the table.
+   */
+  const settle = (call: () => Promise<FinResult<{ id: string }>>, done: () => void) =>
+    confirm.run(async () => {
+      const result = await call();
+      if (!result.ok && voucherAnswerIsStale(result.error)) setOpen(null);
+      return result;
+    }, done);
+
+  const decided = (row: PaymentVoucherRow, status: 'scheduled' | 'rejected'): WrittenVoucher => ({
+    id: row.transaction_id,
+    status,
+    recorded: false,
+    payee: row.party_name,
+    amount: row.amount,
+    date: row.txn_date,
+  });
+
+  const words = (parts: QuestionPart[]) =>
+    parts.map((part, i) =>
+      part.strong ? (
+        <span key={i} className="font-medium">
+          {part.text}
+        </span>
+      ) : (
+        part.text
+      ),
+    );
+
+  const question = (row: PaymentVoucherRow) => {
+    if (!writer || !asking || asking.row.transaction_id !== row.transaction_id) return null;
+    const { actions } = writer;
+    if (asking.kind === 'approve') {
+      // The same advice, in the same words, as Payments Out gives before a supplier payment is marked paid.
+      const orderNotes = writer.orderNotes[row.transaction_id] ?? [];
+      return (
+        <ConfirmRow
+          key={row.transaction_id}
+          colSpan={columns}
+          tone="default"
+          icon={Check}
+          label={`Approve ${voucherName(row)}`}
+          confirmLabel="Approve"
+          pendingLabel="Approving…"
+          pending={confirm.pending}
+          error={confirm.error}
+          onConfirm={() => settle(() => actions.approve(voucherDecisionPayload(row)), () => closeSaying(decided(row, 'scheduled')))}
+          onCancel={close}
+        >
+          {words(voucherQuestion('approve', row))}
+          {orderNotes.length ? (
+            <div className="mt-1">
+              <OrderNotes notes={orderNotes} />
+            </div>
+          ) : null}
+        </ConfirmRow>
+      );
+    }
+    if (asking.kind === 'reject') {
+      return (
+        <ConfirmRow
+          key={row.transaction_id}
+          colSpan={columns}
+          icon={Ban}
+          label={`Reject ${voucherName(row)}`}
+          confirmLabel="Reject"
+          pendingLabel="Rejecting…"
+          pending={confirm.pending}
+          error={confirm.error}
+          onConfirm={() => settle(() => actions.reject(voucherDecisionPayload(row)), () => closeSaying(decided(row, 'rejected')))}
+          onCancel={close}
+        >
+          {words(voucherQuestion('reject', row))}
+        </ConfirmRow>
+      );
+    }
+    return (
+      <ConfirmRow
+        key={row.transaction_id}
+        colSpan={columns}
+        label={`Delete ${voucherName(row)}`}
+        confirmLabel="Delete voucher"
+        pendingLabel="Deleting…"
+        pending={confirm.pending}
+        error={confirm.error}
+        onConfirm={() => settle(() => actions.remove({ id: row.transaction_id, status: row.status }), close)}
+        onCancel={close}
+      >
+        {words(voucherQuestion('delete', row))}
+      </ConfirmRow>
+    );
+  };
+
   return (
     <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader
         title="Payment Vouchers"
         subtitle="Money paid out to suppliers, customers and expenses, Saudara."
         actions={
-          <Select value={period} onValueChange={(v) => setPeriod(v as CashBookPeriod)}>
-            <SelectTrigger className="w-40" aria-label="Period">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {CASH_BOOK_PERIODS.map((p) => (
-                <SelectItem key={p} value={p}>
-                  {CASH_BOOK_PERIOD_LABELS[p]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={period} onValueChange={(v) => setPeriod(v as CashBookPeriod)}>
+              <SelectTrigger className="w-40" aria-label="Period">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CASH_BOOK_PERIODS.map((p) => (
+                  <SelectItem key={p} value={p}>
+                    {CASH_BOOK_PERIOD_LABELS[p]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {newButton ? (
+              <Button
+                size="sm"
+                aria-expanded={open?.kind === 'form'}
+                disabled={locked}
+                onClick={() => ask({ kind: 'form', today: localIsoDate(new Date()) })}
+              >
+                <Plus className="size-4" />
+                New voucher
+              </Button>
+            ) : null}
+          </div>
         }
       />
 
       <BentoGrid>
+        {writer && open?.kind === 'form' ? (
+          <VoucherFormCard
+            accounts={writer.accounts}
+            contacts={writer.contacts}
+            categories={writer.categories}
+            today={open.today}
+            canDecide={writer.canDecide}
+            actions={writer.actions}
+            onClose={(recorded) => (recorded ? closeSaying({ ...recorded, recorded: true }) : close())}
+          />
+        ) : null}
+        {written && hiddenNote ? (
+          <SavedNoteCard title={writtenVoucherTitle(written)} subtitle="It is not in the list below" onClose={() => setWritten(null)}>
+            {hiddenNote}
+          </SavedNoteCard>
+        ) : null}
+
         {view.stats.map((s, i) => (
           <BentoCard key={s.label} tone={i === 0 ? 'primary' : 'default'} className="col-span-1 md:col-span-3">
             <BentoStat label={s.label} value={s.value} delta={s.delta} deltaTone={s.deltaTone} onPrimary={i === 0} />
@@ -204,6 +432,12 @@ export function PaymentVouchersView({
               <Download className="size-4" />
               Export
             </Button>
+            {/* The question's own message shows in its row; here when its row is out of view or the question has closed. */}
+            {confirm.error && !(asking && askingInView) ? (
+              <p role="alert" className="text-sm text-destructive">
+                {confirm.error}
+              </p>
+            ) : null}
           </div>
           <div className="mt-3 overflow-x-auto">
             <Table>
@@ -217,32 +451,43 @@ export function PaymentVouchersView({
                   <TableHead>Account</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
                   <TableHead>Status</TableHead>
+                  {actionsColumn ? (
+                    <TableHead className="sticky right-0 w-10 border-l bg-[color-mix(in_oklab,var(--muted)_40%,var(--card))]">
+                      <span className="sr-only">Actions</span>
+                    </TableHead>
+                  ) : null}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {shown.length === 0 &&
                   (rows.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
-                        No vouchers yet. A payment recorded on Payments Out or Refunds shows here too.
+                      <TableCell colSpan={columns} className="py-8 text-center text-muted-foreground">
+                        {writer
+                          ? 'No vouchers yet. Record one with New voucher. A payment recorded on Payments Out or Refunds shows here too.'
+                          : 'No vouchers yet. A payment recorded on Payments Out or Refunds shows here too.'}
                       </TableCell>
                     </TableRow>
                   ) : inPeriodRows.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                      <TableCell colSpan={columns} className="py-8 text-center text-muted-foreground">
                         {emptyPeriodText('vouchers', period)}
                       </TableCell>
                     </TableRow>
                   ) : (
-                    <NoMatchesRow colSpan={8} />
+                    <NoMatchesRow colSpan={columns} />
                   ))}
                 {shown.map((v) => {
+                  const asked = question(v);
+                  if (asked) return asked;
                   const home = voucherHome(v.kind);
+                  const items = writer ? voucherActions(v, writer.canDecide).map((action) => menuItem(v, action)) : [];
                   return (
-                    <TableRow key={v.transaction_id} className={cn(v.status === 'void' && 'opacity-60')}>
+                    <TableRow key={v.transaction_id} className={cn('group/row', v.status === 'void' && 'opacity-60')}>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(v.txn_date)}</TableCell>
                       <TableCell className="whitespace-nowrap font-medium">{v.number ?? '—'}</TableCell>
-                      <TableCell className="whitespace-nowrap">{v.party_name ?? '—'}</TableCell>
+                      {/* A long typed name wraps; it is never cut off behind a tooltip. */}
+                      <TableCell className="min-w-28 max-w-72 whitespace-normal break-words">{v.party_name ?? '—'}</TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">
                         {home ? (
                           <Link
@@ -258,7 +503,7 @@ export function PaymentVouchersView({
                         )}
                         {v.documents ? <span className="ml-1.5">· {v.documents}</span> : null}
                       </TableCell>
-                      <TableCell className="whitespace-nowrap text-muted-foreground">{voucherCategory(v)}</TableCell>
+                      <TableCell className="min-w-24 whitespace-normal break-words text-muted-foreground">{voucherCategory(v)}</TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{v.account_name}</TableCell>
                       <TableCell className="whitespace-nowrap text-right tabular-nums">{rm(v.amount)}</TableCell>
                       <TableCell>
@@ -274,6 +519,16 @@ export function PaymentVouchersView({
                           </span>
                         </span>
                       </TableCell>
+                      {actionsColumn ? (
+                        <TableCell className="sticky right-0 border-l bg-card group-hover/row:bg-[color-mix(in_oklab,var(--muted)_50%,var(--card))] group-has-aria-expanded/row:bg-[color-mix(in_oklab,var(--muted)_50%,var(--card))]">
+                          {items.length ? (
+                            // RowMenu has no disabled prop; an inert wrapper keeps its button from being used while an action runs or the form is open.
+                            <span inert={locked} className={cn(locked && 'opacity-50')}>
+                              <RowMenu label={voucherName(v)} items={items} />
+                            </span>
+                          ) : null}
+                        </TableCell>
+                      ) : null}
                     </TableRow>
                   );
                 })}

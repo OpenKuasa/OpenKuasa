@@ -3,8 +3,8 @@
  * money in and Payment Vouchers money out, whatever it is for, so a payment
  * that Payments In, Payments Out or Refunds shows per document is one row
  * here. `kind` says what a row is and therefore which screen changes it.
- * This file only reads. A receipt's writes are in cash-receipts.ts; a
- * voucher's arrive with its form. org_id comes from the context.
+ * This file only reads. A receipt's writes are in cash-receipts.ts and a
+ * voucher's in vouchers.ts. org_id comes from the context.
  */
 import { PAYMENT_PAGE_SIZE, type PaymentInRow, type PaymentMethod } from './money';
 import type { FinanceWriteContext } from './result';
