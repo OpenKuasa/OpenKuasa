@@ -152,9 +152,10 @@ describe('the bucket, as the app and the migration each describe it', () => {
       expect(own.includes(name), name).toBe(false);
     }
   });
-  // A tripwire on purpose: a later migration that legitimately raises a new FIN code, or replaces one of these
-  // sixteen functions, must update this test (the list of codes, the count of functions, the FIN2[3-9] range below).
-  it('makes its bucket and never adopts one, refuses NaN by name, and uses error codes nobody else has', () => {
+  // The codes this migration raises. They are not its alone: the ledger's journals (20261108093000) raise FIN23,
+  // FIN24 and FIN25 too, with meanings of their own. A code is read by the function that made the call, so each
+  // data layer words its own; no code may be worded in one shared table for both.
+  it('makes its bucket and never adopts one, refuses NaN by name, and raises the codes its docs name', () => {
     const own = statements(MIGRATION);
     expect(own).toContain('insert into storage.buckets');
     expect(own).not.toMatch(/on conflict \(id\)/);
@@ -162,9 +163,6 @@ describe('the bucket, as the app and the migration each describe it', () => {
     expect(own).toContain("check (sst_amount >= 0 and sst_amount <> 'NaN')");
     const codes = [...new Set([...own.matchAll(/errcode = '(FIN\d+)'/g)].map((m) => m[1]))].sort();
     expect(codes).toEqual(['FIN11', 'FIN14', 'FIN23', 'FIN24', 'FIN25']);
-    // FIN23, FIN24 and FIN25 are this migration's alone: FIN16 to FIN22 belong to Banking, RFQs and purchase orders.
-    const others = readdirSync('supabase/migrations').filter((f) => f.endsWith('.sql') && f !== MIGRATION);
-    for (const file of others) expect(statements(file), file).not.toMatch(/FIN2[3-9]/);
   });
   it('lets a signed-in person write only the columns that are theirs to write', () => {
     const flat = statements(MIGRATION).replace(/\s+/g, ' ');

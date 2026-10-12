@@ -1103,6 +1103,16 @@ quotation, a credit note or a refund by the file that made the call.
 | `FIN23` | A receipt's state does not allow it: it starts in review, tied to nothing; it does not move to another workspace; its file, name, type, size, uploader and upload time do not change; a matched receipt is untied before it is deleted (the guard, for any delete), and `finance_attach_receipt`, `finance_receipt_to_expense` and `finance_receipt_to_bill` refuse a receipt that is already matched. A plain update of `expense_id` or `bill_id` by a writer is allowed by the grants, and the guard moves the receipt to the new document (with `FIN14` when it leaves an approved expense or a posted bill and the writer cannot decide). Not worded yet: no button reaches it. |
 | `FIN24` | The file of a receipt: there is none; it is not in the bucket; it was uploaded more than 30 minutes ago or is waiting to be removed; it is already a receipt; it is not the type its name says; its path names none of the five types. Not worded yet. |
 | `FIN25` | A void bill takes no receipt. Not worded yet. |
+
+`FIN23`, `FIN24` and `FIN25` are not the Receipts Inbox's alone. The ledger
+migrations (`20261108091500` to `20261108094500`) raise `FIN23` to `FIN27` with
+meanings of their own, for journals and a bill's category, and are not in this
+table yet. A code is read by the function that made the call, so each data
+layer words the codes its own functions can answer; a sentence for one of these
+codes must never go in a map that both share.
+
+| Code | Meaning (continued) |
+|---|---|
 | `42501` | Row-level security refused the write: "You do not have permission to make changes here." |
 | `22003` | A number does not fit its column (quantity × unit price can overflow): "That amount is too large." |
 | `22023` | `finance_record_refund` was given a status other than `posted` or `scheduled`. The app always sends one of the two, so only a direct call reaches it; `refunds.ts` has no sentence for it. `finance_attach_receipt` answers it when it is given neither an expense nor a bill, or both: a receipt is tied to exactly one. |
