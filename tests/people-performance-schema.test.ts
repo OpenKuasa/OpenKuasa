@@ -8,6 +8,7 @@ const TRAINING = '20261028090100_people_training_announcements_writes.sql';
 const SEED = '20261028090200_people_performance_demo_seed.sql';
 const FILES = [PERFORMANCE, TRAINING, SEED];
 const PAYROLL = '20261027090000_people_payroll_writes.sql';
+const HIRE_DELETIONS = '20261028090000_hire_deletions.sql';
 
 const raw = (file: string) => readFileSync(join(DIR, file), 'utf8');
 
@@ -84,7 +85,9 @@ describe('Lekiu performance, training and announcements migrations', () => {
     expect(at.every((i) => i > -1)).toBe(true);
     expect(at).toEqual([at[0], at[0] + 1, at[0] + 2]);
     expect(at[0]).toBeGreaterThan(files.indexOf(PAYROLL));
-    for (const f of FILES) expect(files.filter((x) => x.slice(0, 14) === f.slice(0, 14)), f).toEqual([f]);
+    // 20261028090000 is one of the known earlier pairs (tests/migration-versions.test.ts): hire_deletions shares it.
+    const sharing = (f: string) => files.filter((x) => x.slice(0, 14) === f.slice(0, 14) && x !== HIRE_DELETIONS);
+    for (const f of FILES) expect(sharing(f), f).toEqual([f]);
     expect(FILES.map((f) => f.slice(0, 14))).toEqual(['20261028090000', '20261028090100', '20261028090200']);
   });
 
