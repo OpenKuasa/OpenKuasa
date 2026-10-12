@@ -720,8 +720,42 @@ Archive and Restore in the Accounts table, which lists every account,
 archived ones included. `bank-accounts.ts` has one schema and one function per
 write (`createBankAccount`, `updateBankAccount`, `setBankAccountActive`) and
 `listBankAccountNumbers`; `bank-account-form.ts` has the form's rules and what the
-table shows. The three actions refresh `BANK_ACCOUNT_PATHS`: Banking and every
-screen whose forms offer an account or whose rows name one.
+table shows. The three actions refresh `BANK_ACCOUNT_PATHS`: Banking, every
+screen whose forms offer an account or whose rows name one, and the two ledger
+screens (Chart of Accounts and Journals), since each account has a ledger
+account and an opening balance is an entry in the books.
+
+**The ledger account.** Every bank or cash account has an account in the Chart
+of Accounts (`finance_ledger_accounts.bank_account_id`), made with it by the
+ledger's own triggers. Renaming the bank account renames the ledger account
+(unless that one was renamed in the Chart of Accounts) and the description of
+the opening entry; archiving and restoring it archives and restores the ledger
+account. An opening balance is an entry in the books dated `opening_date`
+(debit the account, credit Opening Balance Equity; reversed for an overdraft).
+The sync runs one way: archiving or renaming the ledger account in the Chart
+of Accounts does not touch the bank account. The form says so on edit ("Renaming
+it also renames its account in the Chart of Accounts, unless that one was
+renamed there.") and the archive question says it for archiving. After a save
+that set or changed an opening balance, Banking says that Total cash and the
+Chart of Accounts changed with it.
+
+What each role sees and is answered (`FIN14` is from the guard, a BEFORE
+trigger, so it answers before the row policy does):
+
+| | Owner, admin | Member | Viewer, demo |
+|---|---|---|---|
+| Header and row menu | Add account; Edit, Archive, Restore | the same | none |
+| Form | opening balance and "As at" boxes; account number whole | no opening balance boxes (it reads the balance as text on edit); account number whole | no form |
+| Insert with an opening balance | taken | `FIN14` | `FIN14` (never reached through the screen: the action refuses first) |
+| Change of balance or date, delete of an account holding one | taken | `FIN14` | refused by the row policy (`42501`, or no row changed) |
+| Insert without one, rename, archive, restore | taken | taken | refused by the row policy (`42501`, or no row changed) |
+| Account numbers | read | read | not read |
+
+An outsider, and a member who owes a second factor, are answered as a viewer:
+an insert with an opening balance is `FIN14`, anything else `42501`. An owner
+at `aal1` with a verified factor also gets `FIN14` on an insert with an opening
+balance, which is why the sentence for it does not say the person is not an
+owner.
 
 What the database holds an account to (`20261110110000_bendahara_bank_account_rules`):
 
@@ -735,17 +769,20 @@ What the database holds an account to (`20261110110000_bendahara_bank_account_ru
 - **Bank or cash is chosen once.** `kind`, `org_id`, `id` and `created_at`
   are not columns a signed-in person can update (`42501`); `id` and
   `created_at` cannot be inserted either.
-- **An account is archived, not deleted,** and not while a payment on it is
-  to be paid (`scheduled`) or waits for approval (`pending_approval`):
-  `FIN30`. Drafts and posted payments do not hold it. An archived account
+- **An account is archived, not deleted,** and not while a payment on it, money
+  out or money in, is to be paid (`scheduled`) or waits for approval
+  (`pending_approval`): `FIN30`. Drafts and posted payments do not hold it.
+  The archive question warns only about money out that is to be paid
+  (`to_be_paid`); the refusal covers the rest. An archived account
   keeps its movements and its balance, stays in Total cash, is no longer
   offered by any payment form, and cannot take or send a transfer. The screen
   offers no Delete; the database still lets an unused account be deleted, and
   refuses any other with `23503`.
 - **The account number** is written with the row and read back only through
   `finance_account_numbers`, by someone who may write. The loader reads the
-  numbers only for them; the table shows the last four characters and the
-  form the whole number. A viewer sees the bank's name.
+  numbers only for them; the table shows the last four characters of a number
+  of eight or more (spaces and dashes not counted; a shorter one shows
+  nothing), and the form the whole number. A viewer sees the bank's name.
 
 The guard steps aside when nobody is signed in (a migration, the demo seeds)
 and, on a delete, when the workspace itself is being deleted.
@@ -1313,7 +1350,7 @@ quotation, a credit note or a refund by the file that made the call.
 | `FIN23` | A receipt's state does not allow it: it starts in review, tied to nothing; it does not move to another workspace; its file, name, type, size, uploader and upload time do not change; a matched receipt is untied before it is deleted (the guard, for any delete), and `finance_attach_receipt`, `finance_receipt_to_expense` and `finance_receipt_to_bill` refuse a receipt that is already matched. A plain update of `expense_id` or `bill_id` by a writer is allowed by the grants, and the guard moves the receipt to the new document (with `FIN14` when it leaves an approved expense or a posted bill and the writer cannot decide). `receipt-inbox.ts` words it for deleting a matched receipt. |
 | `FIN24` | The file of a receipt: there is none; it is not in the bucket; it was uploaded more than 30 minutes ago or is waiting to be removed; it is already a receipt; it is not the type its name says; its path names none of the five types. `receipt-inbox.ts` words it for recording an upload. |
 | `FIN25` | A void bill takes no receipt. Not worded yet. |
-| `FIN30` | An account with payments still to be paid or waiting for approval is not archived. `bank-accounts.ts`: "This account has payments that are still to be paid or waiting for approval. Pay, reject or delete them, then archive it." (`FIN14` on an account is an opening balance from someone who is not an owner or admin: "Only an owner or admin can set or change an opening balance.") |
+| `FIN30` | An account with payments still to be paid or waiting for approval is not archived. `bank-accounts.ts`: "This account has payments that are still to be paid or waiting for approval. Pay, reject or delete them, then archive it." (`FIN14` on an account is an opening balance from someone who is not an owner or admin, or an owner who has not given their second factor: "Only an owner or admin can set or change an opening balance. If you are one, sign in again with your second step." The guard counts payments in both directions; the screen's archive question warns about money out only.) |
 
 `FIN23`, `FIN24` and `FIN25` are not the Receipts Inbox's alone. The ledger
 migrations (`20261108091500` to `20261108094500`) raise `FIN23` to `FIN27` with
@@ -1451,7 +1488,8 @@ with no date).
   account: only `finance_record_transfer` asks. So a form left open while its
   account is archived, or a direct call, can still record one, and a payment
   scheduled in the same instant as the archive can slip past the rule that an
-  account with money to be paid is not archived (`FIN30`). The balance of an
+  account with a payment to be paid or waiting for approval, in either
+  direction, is not archived (`FIN30`). The balance of an
   archived account still shows on Banking while it is not zero.
 - Voiding a paid bill is offered and refused until its payments are voided.
   The same goes for an invoice that has payments.
@@ -1813,6 +1851,12 @@ with no date).
   says what the balance was before or who changed it.
 - Any writer may rename, archive or restore any account, an owner's included,
   and two people editing one account at once: the later save wins.
+- A bank account and its ledger account are kept in step one way only: a
+  rename, archive or restore of the bank account is followed by the ledger
+  account, but a rename or archive done to the ledger account in the Chart of
+  Accounts leaves the bank account as it was. Sign-up gives the seeded
+  accounts no opening balance, and must keep doing so: the guard would refuse
+  one (`FIN14`), because the new user is not yet an owner while the seed runs.
 - An account's kind cannot be corrected once it is added. An account made as
   the wrong kind is archived (or deleted by hand if nothing used it) and
   added again.

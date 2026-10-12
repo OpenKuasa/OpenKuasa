@@ -19,10 +19,12 @@
 --      tier): FIN14 for any other writer. A member still adds an account
 --      with no opening balance, renames it, edits its bank details, and
 --      archives and restores it.
---   2. An account is not archived while money out on it is still to be paid
---      or waits for approval (a payment with status scheduled or
---      pending_approval): FIN30. Those are promises to pay from this
---      account; pay, reject or delete them first. Drafts do not hold it: a
+--   2. An account is not archived while a payment on it, in either direction
+--      (money out or money in), is still to be paid or waits for approval (a
+--      payment with status scheduled or pending_approval): FIN30. Those are
+--      promises to pay or to be paid on this account; settle, reject or
+--      delete them first. (The screen's archive question warns about money
+--      out that is to be paid; the refusal covers the rest.) Drafts do not hold it: a
 --      draft promises nothing, and the forms keep a draft's own account in
 --      its picker when that account is archived.
 --   3. An opening balance is a number: 'NaN' is a numeric, passes every
@@ -109,6 +111,11 @@ begin
   end if;
 
   if tg_op = 'INSERT' then
+    -- Sign-up relies on this: create_org_for_current_user inserts the workspace
+    -- before the membership, so while finance_seed_accounts runs the new user
+    -- is signed in and is not yet an owner. The seeded accounts pass only
+    -- because they are given no opening balance. A seed that gave one would
+    -- be refused here (FIN14) and sign-up would fail.
     if new.opening_balance <> 0 and not private.finance_may_sign_off(new.org_id) then
       raise exception 'an opening balance is set by an owner or admin' using errcode = 'FIN14';
     end if;
