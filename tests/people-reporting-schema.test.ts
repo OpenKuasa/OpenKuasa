@@ -90,6 +90,7 @@ describe('the reporting-lines migration', () => {
     ['public.hr_my_team', 'authenticated'],
     ['public.hr_set_reports_to', 'authenticated'],
     ['public.hr_waiting_counts', 'authenticated'],
+    ['public.hr_team_overtime', 'authenticated'],
     ['private.hr_notify_request_filed', null],
     ['private.hr_notify_request_decided', null],
     ['private.hr_reports_to_guard', null],
@@ -133,7 +134,7 @@ describe('the reporting-lines migration', () => {
   });
 
   test.each([
-    'hr_leave_requests', 'hr_leave_balances', 'hr_time_off_requests', 'hr_claims', 'hr_overtime_records', 'hr_attendance_days',
+    'hr_leave_requests', 'hr_leave_balances', 'hr_time_off_requests', 'hr_claims', 'hr_attendance_days',
   ])('%s keeps its read rule and gains the manager branch, and nothing else about it changes', (table) => {
     const text = flat(sql);
     expect(text).toContain(
@@ -152,10 +153,38 @@ describe('the reporting-lines migration', () => {
         'hr_claims_select on public.hr_claims',
         'hr_leave_balances_select on public.hr_leave_balances',
         'hr_leave_requests_select on public.hr_leave_requests',
-        'hr_overtime_records_select on public.hr_overtime_records',
         'hr_receipts_select on storage.objects',
         'hr_time_off_requests_select on public.hr_time_off_requests',
       ].sort(),
+    );
+  });
+
+  test('the overtime table is not opened to a manager: its read rule is not touched', () => {
+    expect(flat(sql)).not.toMatch(/policy \w+ on public\.hr_overtime_records/);
+  });
+
+  test('a manager reads team overtime through a function that returns no pay', () => {
+    const { header, body } = fn(sql, 'public.hr_team_overtime');
+    expect(flat(header)).toBe(
+      'create or replace function public.hr_team_overtime(p_org uuid) returns table (id uuid, org_id uuid, employee_id uuid, work_date date, hours numeric, ' +
+        'day_kind text, rate_multiplier numeric, reason text, status text, requested_by uuid, decided_by uuid, decided_at timestamptz, decision_note text, ' +
+        'created_at timestamptz) language sql security definer stable set search_path = public',
+    );
+    for (const word of ['cents', 'payslip', 'r.*', 'select *']) expect(header + body, word).not.toContain(word);
+    expect(flat(body)).toContain(
+      'from public.hr_overtime_records r where r.org_id = p_org and private.hr_manages_any(p_org) and private.is_manager_of(r.employee_id) order by r.created_at desc, r.id;',
+    );
+  });
+
+  test('every function is defined once, so the definition the tests read is the one the database keeps', () => {
+    const names = [...sql.matchAll(/create or replace function (\w+\.\w+)\(/g)].map((m) => m[1]);
+    expect(names).toHaveLength(18);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  test('hr_set_reports_to says not found when the employee went between its look and its write', () => {
+    expect(flat(fn(sql, 'public.hr_set_reports_to').body)).toContain(
+      "update public.hr_employees set reports_to = p_manager where id = p_employee; if not found then raise exception 'EMP_NOT_FOUND'; end if; exception when foreign_key_violation then",
     );
   });
 
@@ -179,8 +208,11 @@ describe('the reporting-lines migration', () => {
         `if not (is_admin or is_mgr) then raise exception '${prefix}_NOT_ALLOWED'; end if;`,
         `if not is_admin then raise exception '${prefix}_NOT_ALLOWED'; end if;`,
       )
-      .replace(`  perform private.hr_notify_request_decided(req.org_id, req.employee_id, '${kind}', outcome);\n`, '');
+      .replace(`  perform private.hr_notify_request_decided(req.org_id, req.employee_id, '${kind}', outcome);\n`, '')
+      // Overtime only: the reply carries the amount for an owner or admin, and null for a manager.
+      .replace("'amount_cents', case when is_admin then req.amount_cents end);", "'amount_cents', req.amount_cents);");
     expect(undone).toBe(before.body);
+    expect(now.body.includes('case when is_admin then req.amount_cents end')).toBe(kind === 'overtime');
     expect(now.body).not.toBe(before.body);
     expect(now.body.match(/is_mgr/g)).toHaveLength(4);
     // The decision is written before anyone is told.

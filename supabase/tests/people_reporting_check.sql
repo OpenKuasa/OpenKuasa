@@ -8,9 +8,11 @@
 -- statement gives ok, none (no row touched) or denied; a call gives =<json> or
 -- the refusal. t(who, what, q, want, claims) is g compared with want ('*' = it
 -- must go through, whatever it returns). sees(who, employee) is six digits:
--- how many of that employee's planted rows `who` reads in the six tables a
--- manager may read (leave request, leave balance, time-off, claim, overtime,
--- attendance day). inbox() lists, then clears, the notifications the planted
+-- how many of that employee's planted rows `who` reads in six tables (leave
+-- request, leave balance, time-off, claim, overtime, attendance day). A
+-- manager reads five of them for a report, so 111101: the overtime table is
+-- closed to a manager (its rate is the salary) and is read through
+-- hr_team_overtime, which returns no pay. inbox() lists, then clears, the notifications the planted
 -- users have been sent: "who|event|title|body|href", body ~ when there is none.
 do $$
 declare
@@ -25,6 +27,8 @@ declare
   e_oth uuid := gen_random_uuid(); e2a uuid := gen_random_uuid(); e2b uuid := gen_random_uuid(); e2c uuid := gen_random_uuid();
   de1 uuid := gen_random_uuid(); de2 uuid := gen_random_uuid(); nobody uuid := gen_random_uuid();
   team uuid[]; six text[] := array['hr_leave_requests', 'hr_leave_balances', 'hr_time_off_requests', 'hr_claims', 'hr_overtime_records', 'hr_attendance_days'];
+  five text[] := array['hr_leave_requests', 'hr_leave_balances', 'hr_time_off_requests', 'hr_claims', 'hr_attendance_days'];
+  cols text := 'id,org_id,employee_id,work_date,hours,day_kind,rate_multiplier,reason,status,requested_by,decided_by,decided_at,decision_note,created_at';
   kinds text[] := array['leave', 'time_off', 'claim', 'overtime'];
   granted text[] := array['user_id', 'employee_no', 'name', 'work_email', 'department_id', 'designation', 'employment_type', 'is_manager', 'join_date', 'status', 'date_of_birth_day', 'date_of_birth_month'];
   w uuid[]; x uuid; y uuid; z uuid; run uuid := gen_random_uuid(); slip uuid := gen_random_uuid(); trn uuid := gen_random_uuid(); dept uuid := gen_random_uuid();
@@ -51,10 +55,19 @@ begin
     fails := fails || format('signed-in users should still update the twelve columns (%s) and insert, and hold no update of the whole table and no delete', i);
   end if;
   select count(*) into i from pg_proc p where p.oid in (to_regprocedure('public.hr_my_team(uuid)'), to_regprocedure('public.hr_set_reports_to(uuid,uuid)'), to_regprocedure('public.hr_waiting_counts(uuid)'),
-      to_regprocedure('private.is_manager_of(uuid)'))
+      to_regprocedure('private.is_manager_of(uuid)'), to_regprocedure('public.hr_team_overtime(uuid)'))
     and p.prosecdef and p.proconfig @> array['search_path=public'] and has_function_privilege('authenticated', p.oid, 'execute')
     and not has_function_privilege('anon', p.oid, 'execute') and not has_function_privilege('public', p.oid, 'execute');
-  if i <> 4 then fails := fails || format('%s of 4 functions are definer functions on a fixed search path for signed-in users only', i); end if;
+  if i <> 5 then fails := fails || format('%s of 5 functions are definer functions on a fixed search path for signed-in users only', i); end if;
+  -- What hr_team_overtime returns, by the catalogue: the table's columns but the three that tell pay.
+  select string_agg(x.name, ',' order by x.ord) into ctx from pg_proc p, unnest(p.proargnames, p.proargmodes) with ordinality x(name, mode, ord)
+  where p.oid = to_regprocedure('public.hr_team_overtime(uuid)') and x.mode = 't';
+  select string_agg(a.attname::text, ',' order by a.attname::text) into k from pg_attribute a
+  where a.attrelid = 'public.hr_overtime_records'::regclass and a.attnum > 0 and not a.attisdropped and not (a.attname::text = any(string_to_array(cols, ',')));
+  if ctx is distinct from cols or k is distinct from 'amount_cents,hourly_rate_cents,payslip_id' or ctx like '%cents%' or ctx like '%payslip%'
+     or (select p.provolatile::text || p.proretset::text from pg_proc p where p.oid = to_regprocedure('public.hr_team_overtime(uuid)')) is distinct from 'strue' then
+    fails := fails || format('hr_team_overtime returns %s, leaving out %s of the table (wanted every column but amount_cents, hourly_rate_cents, payslip_id), or is not a stable set', ctx, k);
+  end if;
   select count(*) into i from pg_proc p where p.oid in (to_regprocedure('private.hr_manages_any(uuid)'), to_regprocedure('private.hr_notify_request_filed(uuid,uuid,text)'),
       to_regprocedure('private.hr_notify_request_decided(uuid,uuid,text,text)'), to_regprocedure('private.hr_reports_to_guard()'))
     and p.prosecdef and p.proconfig @> array['search_path=public'] and not has_function_privilege('authenticated', p.oid, 'execute')
@@ -73,13 +86,17 @@ begin
   select count(*) filter (where p.policyname = p.tablename || '_select' and p.cmd = 'SELECT' and p.permissive = 'PERMISSIVE' and p.roles = array['authenticated']::name[] and p.qual like '%is_manager_of(employee_id)%'),
     count(*) filter (where p.policyname = 'mfa_required' and p.permissive = 'RESTRICTIVE' and p.cmd = 'ALL'), count(*) into i, c, ctx
   from pg_policies p where p.schemaname = 'public' and p.tablename = any(six);
-  if i <> 6 or c <> 6 or ctx <> '12' then fails := fails || format('the six tables: %s read rules with the manager branch (6), %s second-factor rules (6), %s policies in all (12)', i, c, ctx); end if;
+  if i <> 5 or c <> 6 or ctx <> '12' then fails := fails || format('the six tables: %s read rules with the manager branch (5: not overtime), %s second-factor rules (6), %s policies in all (12)', i, c, ctx); end if;
+  if (select p.qual from pg_policies p where p.schemaname = 'public' and p.tablename = 'hr_overtime_records' and p.policyname = 'hr_overtime_records_select')
+     is distinct from (select p.qual from pg_policies p where p.schemaname = 'public' and p.tablename = 'hr_employee_private' and p.policyname = 'hr_employee_private_select') then
+    fails := fails || 'the overtime read rule is not the plain personal rule (owner or admin, the employee, the demo)'::text;
+  end if;
   select string_agg(p.policyname, ',' order by p.policyname), count(*) filter (where p.policyname = 'hr_receipts_select' and p.cmd = 'SELECT' and p.qual like '%is_manager_of(c.employee_id)%') into ctx, i
   from pg_policies p where p.schemaname = 'storage' and p.tablename = 'objects' and p.policyname like 'hr\_receipts%';
   if ctx is distinct from 'hr_receipts_insert_own,hr_receipts_mfa_required,hr_receipts_select' or i <> 1 then fails := fails || format('the receipt policies are %s, the read rule with the manager branch %s of 1', ctx, i); end if;
-  select count(*), string_agg(p.tablename, ',' order by p.tablename) filter (where not (p.tablename = any(six) or p.policyname = 'hr_receipts_select')) into i, ctx
+  select count(*), string_agg(p.tablename, ',' order by p.tablename) filter (where not (p.tablename = any(five) or p.policyname = 'hr_receipts_select')) into i, ctx
   from pg_policies p where coalesce(p.qual, '') || coalesce(p.with_check, '') like '%is_manager_of%';
-  if i <> 7 or ctx is not null then fails := fails || format('%s policies mention a manager (7: the six tables and the receipts); others: %s', i, coalesce(ctx, 'none')); end if;
+  if i <> 6 or ctx is not null then fails := fails || format('%s policies mention a manager (6: the five tables and the receipts); others: %s', i, coalesce(ctx, 'none')); end if;
   if cardinality(fails) > 0 then raise exception 'the catalogue is not as expected, so nothing else was tried'; end if;
 
   -- ---- helpers ----------------------------------------------------------------------------
@@ -233,7 +250,10 @@ begin
   foreach x in array team loop
     foreach k in array array['leave', 'balance', 'time_off', 'claim', 'overtime', 'attendance'] loop perform pg_temp.mk(k, org, x, true); end loop;
   end loop;
-  perform pg_temp.mk('leave', demo, de1, true);
+  foreach k in array kinds loop perform pg_temp.mk(k, demo, de1, true); end loop;
+  -- Fixed times on two overtime rows, to see the order team overtime comes in.
+  update public.hr_overtime_records set created_at = timestamptz '2026-01-06 10:00+00' where id = pg_temp.p('overtime', e_rep);
+  update public.hr_overtime_records set created_at = timestamptz '2026-01-07 10:00+00' where id = pg_temp.p('overtime', e_unl);
   -- rep and sub each attached a receipt to their claim, in their own folder.
   f_rep := rep || '/' || gen_random_uuid() || '.png'; f_sub := sub || '/' || gen_random_uuid() || '.png'; f_doc := org || '/' || e_rep || '/' || gen_random_uuid() || '.pdf';
   insert into storage.objects (bucket_id, name, owner) values ('hr-receipts', f_rep, rep), ('hr-receipts', f_sub, sub);
@@ -306,21 +326,44 @@ begin
 
   -- ---- 1. reading the six tables ----------------------------------------------------------------
   for r in select * from (values
-      (mgr, e_rep, '111111', 'a manager reads a report''s rows'), (mgr, e_unl, '111111', 'a manager reads the rows of a report with no account'),
+      (mgr, e_rep, '111101', 'a manager reads a report''s rows, but not the overtime table'), (mgr, e_unl, '111101', 'a manager reads the rows of a report with no account, but not the overtime table'),
       (mgr, e_mgr, '111111', 'a manager reads their own rows'), (mgr, e_sub, '000000', 'a manager reads nothing of a report''s report'),
       (mgr, e_peer, '000000', 'a manager reads nothing of a colleague'), (mgr, e_adm, '000000', 'a manager reads nothing of the admin'),
       (mgr, e_own, '000000', 'a manager reads nothing of the owner'), (mgr, e_peer2, '000000', 'a manager reads nothing of another manager''s report'),
-      (mgr, e_rep2, '000000', 'a manager reads nothing of the admin''s report'), (rep, e_sub, '111111', 'rep reads their own report''s rows'),
+      (mgr, e_rep2, '000000', 'a manager reads nothing of the admin''s report'), (rep, e_sub, '111101', 'rep reads their own report''s rows, but not the overtime table'),
       (rep, e_mgr, '000000', 'a report reads nothing of their manager'), (rep, e_unl, '000000', 'a report reads nothing of a fellow report'),
       (peer, e_peer, '111111', 'a member reads their own rows'), (peer, e_rep, '000000', 'a member with no report reads nothing of rep'),
       (peer, e_sub, '000000', 'a member with no report reads nothing of sub'), (mfa, e_mfarep, '000000', 'a manager who owes a second factor reads nothing of their report'),
-      (mgr2, e_peer2, '111111', 'the second manager reads their report''s rows'), (mgr2, e_rep, '000000', 'the second manager reads nothing of rep'),
+      (mgr2, e_peer2, '111101', 'the second manager reads their report''s rows, but not the overtime table'), (rep, e_rep, '111111', 'a report who is a manager reads all six of their own'), (mgr2, e_rep, '000000', 'the second manager reads nothing of rep'),
       (adm, e_rep2, '111111', 'an admin reads their report''s rows')) v(who, emp, want, label) loop
     a := pg_temp.sees(r.who, r.emp);
     if a is distinct from r.want then fails := fails || format('%s: wanted %s, got %s', r.label, r.want, a); end if;
   end loop;
   a := pg_temp.sees(mfa, e_mfarep, '{"aal":"aal2"}');
-  if a is distinct from '111111' then fails := fails || format('with the second factor given, that manager reads their report''s rows: wanted 111111, got %s', a); end if;
+  if a is distinct from '111101' then fails := fails || format('with the second factor given, that manager reads their report''s rows: wanted 111101, got %s', a); end if;
+
+  -- ---- 1b. team overtime: through the function, without its pay ---------------------------------------
+  fails := fails
+    || pg_temp.t(mgr, 'a manager''s team overtime is their two reports'' rows, the newer first', format('(select jsonb_agg(x.id) from public.hr_team_overtime(%L) x)', org),
+         format('=["%s","%s"]', pg_temp.p('overtime', e_unl), pg_temp.p('overtime', e_rep)))
+    || pg_temp.t(mgr, 'a row of team overtime has these keys and no other', format('(select string_agg(distinct (select string_agg(j.key, '','' order by j.key) from jsonb_object_keys(to_jsonb(x)) j(key)), ''|'') from public.hr_team_overtime(%L) x)', org),
+         '="created_at,day_kind,decided_at,decided_by,decision_note,employee_id,hours,id,org_id,rate_multiplier,reason,requested_by,status,work_date"')
+    || pg_temp.t(mgr, 'a row of team overtime says what was asked', format('(select x.employee_id || ''/'' || x.work_date || ''/'' || trim_scale(x.hours) || ''/'' || x.status || ''/'' || x.reason from public.hr_team_overtime(%L) x where x.id = %L)', org, pg_temp.p('overtime', e_rep)),
+         format('="%s/2026-01-06/2/pending/ZZREASONZZ"', e_rep))
+    || pg_temp.t(rep, 'rep''s team overtime is sub''s row', format('(select array_agg(x.employee_id) from public.hr_team_overtime(%L) x)', org), format('=["%s"]', e_sub))
+    || pg_temp.t(adm, 'an admin gets only the overtime of who reports to them by name', format('(select array_agg(x.employee_id) from public.hr_team_overtime(%L) x)', org), format('=["%s"]', e_rep2))
+    || pg_temp.t(own, 'an owner with no report gets no team overtime', format('(select count(*) from public.hr_team_overtime(%L) x)', org), '=0')
+    || pg_temp.t(peer, 'a member with no report gets no team overtime', format('(select count(*) from public.hr_team_overtime(%L) x)', org), '=0')
+    || pg_temp.t(outs, 'an outsider gets no team overtime', format('(select count(*) from public.hr_team_overtime(%L) x)', org), '=0')
+    || pg_temp.t(mgr, 'a manager gets none from a workspace they are not in', format('(select count(*) from public.hr_team_overtime(%L) x)', oth), '=0')
+    || pg_temp.t(mgr, 'no workspace named: no team overtime', '(select count(*) from public.hr_team_overtime(null) x)', '=0')
+    || pg_temp.t(null, 'no session: no team overtime', format('(select count(*) from public.hr_team_overtime(%L) x)', org), '=0')
+    || pg_temp.t(mfa, 'a manager who owes a second factor gets no team overtime', format('(select count(*) from public.hr_team_overtime(%L) x)', org), '=0')
+    || pg_temp.t(mfa, 'and gets their report''s with the second factor given', format('(select count(*) from public.hr_team_overtime(%L) x)', org), '=1', '{"aal":"aal2"}')
+    || pg_temp.t(da, 'nobody gets team overtime in the demo', format('(select count(*) from public.hr_team_overtime(%L) x)', demo), '=0')
+    || pg_temp.t(dm, 'a member of the demo neither', format('(select count(*) from public.hr_team_overtime(%L) x)', demo), '=0')
+    || pg_temp.t(mgr, 'the overtime table itself gives a manager their own rows only', format('(select count(*) || ''/'' || count(*) filter (where x.employee_id = %L) from public.hr_overtime_records x where x.org_id = %L)', e_mgr, org), '="1/1"')
+    || pg_temp.t(mgr, 'a manager cannot read a report''s rate or amount from the table', format('(select count(*) from public.hr_overtime_records x where x.employee_id in (%L, %L))', e_rep, e_unl), '=0');
   foreach x in array team loop
     a := pg_temp.sees(outs, x); b := pg_temp.sees(own, x) || pg_temp.sees(adm, x);
     if a is distinct from '000000' or b is distinct from '111111111111' then fails := fails || format('an outsider reads nothing (%s) and the owner and admin everything (%s) of each employee', a, b); end if;
@@ -468,7 +511,8 @@ begin
       || pg_temp.t(null, format('no session on a %s', k), pg_temp.dq(k, pg_temp.p(k, e_rep)), ctx || '_NOT_ALLOWED')
       || pg_temp.t(mgr, format('a manager says neither yes nor no to a %s', k), pg_temp.dq(k, pg_temp.p(k, e_rep), null), ctx || '_BAD_INPUT')
       || pg_temp.t(mgr, format('a manager''s note of 501 characters on a %s', k), pg_temp.dq(k, pg_temp.p(k, e_rep), false, repeat('n', 501)), ctx || '_BAD_INPUT')
-      || pg_temp.t(da, format('in the demo, the admin linked to the lead on the %s of the lead''s report', k), pg_temp.dq('leave', pg_temp.p('leave', de1)), 'LEAVE_NOT_ALLOWED');
+      || pg_temp.t(da, format('in the demo, the admin linked to the lead on the %s of the lead''s report', k), pg_temp.dq(k, pg_temp.p(k, de1)), ctx || '_NOT_ALLOWED')
+      || pg_temp.t(dm, format('in the demo, a member on that %s', k), pg_temp.dq(k, pg_temp.p(k, de1)), ctx || '_NOT_ALLOWED');
     -- What a manager may not do to a report's request: only owners and admins cancel someone else's.
     a := pg_temp.g(mgr, format('public.hr_cancel_%s(%L)', k, pg_temp.p(k, e_rep))); b := pg_temp.g(peer, format('public.hr_cancel_%s(%L)', k, pg_temp.p(k, e_rep)));
     if a is distinct from ctx || '_NOT_FOUND' or b is distinct from a then fails := fails || format('a manager cancels a report''s %s: wanted what a colleague gets (%s_NOT_FOUND), got %s and %s', k, ctx, a, b); end if;
@@ -485,9 +529,17 @@ begin
     || pg_temp.t(mgr, 'after one decision the manager''s leave count drops by one', format('public.hr_waiting_counts(%L)', org), pg_temp.wc(1, 2, 2, 2))
     || pg_temp.t(mgr, 'a manager rejects a report''s time-off with a note', pg_temp.dq('time_off', pg_temp.p('time_off', e_rep), false, ' ZZNOTEZZ '), format('={"id":"%s","status":"rejected"}', pg_temp.p('time_off', e_rep)))
     || pg_temp.t(mgr, 'a manager approves a report''s claim', pg_temp.dq('claim', pg_temp.p('claim', e_rep)), format('={"id":"%s","status":"approved"}', pg_temp.p('claim', e_rep)))
-    || pg_temp.t(mgr, 'a manager approves a report''s overtime, and the reply carries the amount', pg_temp.dq('overtime', pg_temp.p('overtime', e_rep)),
-         format('={"id":"%s","status":"approved","amount_cents":6000}', pg_temp.p('overtime', e_rep)));
-  select q.status || '/' || (q.decided_by = mgr) || '/' || coalesce(q.decision_note, '~') into a from public.hr_leave_requests q where q.id = pg_temp.p('leave', e_rep);
+    || pg_temp.t(mgr, 'a manager approves a report''s overtime, and the reply carries no amount', pg_temp.dq('overtime', pg_temp.p('overtime', e_rep)),
+         format('={"id":"%s","status":"approved","amount_cents":null}', pg_temp.p('overtime', e_rep)))
+    -- The row now holds the rate (2000) and the amount (6000). Neither reaches the manager, by any name.
+    || pg_temp.t(mgr, 'the approved overtime is in the manager''s team overtime', format('(select x.status || ''/'' || (x.decided_by = %L) from public.hr_team_overtime(%L) x where x.id = %L)', mgr, org, pg_temp.p('overtime', e_rep)), '="approved/true"')
+    || pg_temp.t(mgr, 'no value in the manager''s team overtime is the rate or the amount',
+         format('(select count(*) from public.hr_team_overtime(%L) x, jsonb_each_text(to_jsonb(x)) v where v.value in (''2000'', ''6000'', ''416000''))', org), '=0')
+    || pg_temp.t(adm, 'the admin reads both on the table', format('(select x.hourly_rate_cents || ''/'' || x.amount_cents from public.hr_overtime_records x where x.id = %L)', pg_temp.p('overtime', e_rep)), '="2000/6000"');
+  x := pg_temp.mk('overtime', org, e_rep);
+  fails := fails || pg_temp.t(adm, 'an admin approves a report''s overtime, and the reply carries the amount', pg_temp.dq('overtime', x), format('={"id":"%s","status":"approved","amount_cents":6000}', x));
+  y := pg_temp.mk('overtime', org, e_rep);
+  fails := fails || pg_temp.t(mgr, 'a manager rejects overtime: no amount in the reply either', pg_temp.dq('overtime', y, false), format('={"id":"%s","status":"rejected","amount_cents":null}', y));  select q.status || '/' || (q.decided_by = mgr) || '/' || coalesce(q.decision_note, '~') into a from public.hr_leave_requests q where q.id = pg_temp.p('leave', e_rep);
   select q.status || '/' || (q.decided_by = mgr) || '/' || coalesce(q.decision_note, '~') into b from public.hr_time_off_requests q where q.id = pg_temp.p('time_off', e_rep);
   select q.status || '/' || (q.decided_by = mgr) || '/' || coalesce(q.decision_note, '~') into ctx from public.hr_claims q where q.id = pg_temp.p('claim', e_rep);
   select q.status || '/' || (q.decided_by = mgr) || '/' || q.amount_cents || '/' || q.hourly_rate_cents into k from public.hr_overtime_records q where q.id = pg_temp.p('overtime', e_rep);
@@ -497,8 +549,9 @@ begin
   if (select q.used_days from public.hr_leave_balances q where q.id = pg_temp.p('balance', e_rep)) is distinct from 1::numeric then fails := fails || 'the approved day of leave is not on the balance'::text; end if;
   a := pg_temp.inbox();
   if a is distinct from 'rep|hr_request_decided|Your claim was approved|~|/people/claims ; rep|hr_request_decided|Your leave request was approved|~|/people/leave ; '
-      || 'rep|hr_request_decided|Your overtime request was approved|~|/people/ot-claims ; rep|hr_request_decided|Your time-off request was rejected|~|/people/time-off' then
-    fails := fails || format('the four decisions told: %s', a);
+      || 'rep|hr_request_decided|Your overtime request was approved|~|/people/ot-claims ; rep|hr_request_decided|Your overtime request was approved|~|/people/ot-claims ; '
+      || 'rep|hr_request_decided|Your overtime request was rejected|~|/people/ot-claims ; rep|hr_request_decided|Your time-off request was rejected|~|/people/time-off' then
+    fails := fails || format('the six decisions (four kinds, then overtime twice more) told: %s', a);
   end if;
   for i in 1..4 loop
     k := kinds[i]; ctx := case when i <= 2 then 'LEAVE' else 'PAY' end;
@@ -523,6 +576,11 @@ begin
   if i <> 4 or c <> 4 or ctx <> '4' or k <> '12' or (select count(*) from public.notifications n join rl_cast q on q.uid = n.user_id) <> 12 then
     fails := fails || format('after those decisions: rep %s, rep2 %s, sub %s of %s notifications (4, 4, 4 of 12), and no other', i, c, ctx, k);
   end if;
+  perform pg_temp.inbox();
+  -- An admin who is also the employee's named manager is an admin: the amount is in their reply.
+  insert into public.hr_employee_private (employee_id, org_id, base_salary_cents) values (e_rep2, org, 416000);
+  x := pg_temp.mk('overtime', org, e_rep2);
+  fails := fails || pg_temp.t(adm, 'an admin who is also the manager approves overtime, and the reply carries the amount', pg_temp.dq('overtime', x), format('={"id":"%s","status":"approved","amount_cents":6000}', x));
   perform pg_temp.inbox();
   -- Overtime already paid in a payroll run.
   x := pg_temp.mk('overtime', org, e_rep);
@@ -555,6 +613,7 @@ begin
     end loop;
     fails := fails
       || pg_temp.t(mgr, format('a manager now %s has no team', r.how), format('public.hr_my_team(%L)', org), '=[]')
+      || pg_temp.t(mgr, format('a manager now %s gets no team overtime', r.how), format('(select count(*) from public.hr_team_overtime(%L) x)', org), '=0')
       || pg_temp.t(mgr, format('a manager now %s counts nothing', r.how), format('public.hr_waiting_counts(%L)', org), zeros)
       || pg_temp.t(mgr, format('a manager now %s does not read the receipt', r.how), format('(select count(*) from storage.objects o where o.name = %L)', f_rep), '=0')
       || pg_temp.t(rep, format('rep files while their manager is %s', r.how), pg_temp.fq('leave', e_rep), '*');
@@ -572,7 +631,7 @@ begin
       update public.hr_employees set user_id = mgr where id = e_mgr;
     end if;
     a := pg_temp.sees(mgr, e_rep);
-    if a is distinct from '111111' then fails := fails || format('restored after "%s", the manager reads their report again: got %s', r.how, a); end if;
+    if a is distinct from '111101' then fails := fails || format('restored after "%s", the manager reads their report again: got %s', r.how, a); end if;
     fails := fails || pg_temp.t(mgr, format('restored after "%s", the manager decides', r.how), pg_temp.dq('time_off', w[2]) || ' ->> ''status''', '="approved"');
     update public.hr_claims set status = 'cancelled' where id = w[3];
     update public.hr_overtime_records set status = 'cancelled' where id = w[4];
@@ -587,7 +646,9 @@ begin
     || pg_temp.t(mgr, 'the old manager''s team', format('public.hr_my_team(%L)', org), format('=["%s"]', e_unl))
     || pg_temp.t(mgr2, 'the new manager''s team', format('public.hr_my_team(%L)', org), format('=["%s","%s"]', e_rep, e_peer2));
   a := pg_temp.sees(mgr, e_rep) || pg_temp.sees(mgr2, e_rep);
-  if a is distinct from '000000111111' then fails := fails || format('after the move the old manager reads nothing of rep and the new one everything: got %s', a); end if;
+  if a is distinct from '000000111101' then fails := fails || format('after the move the old manager reads nothing of rep and the new one what a manager reads: got %s', a); end if;
+  fails := fails || pg_temp.t(mgr, 'after the move the old manager''s team overtime has nothing of rep', format('(select count(*) from public.hr_team_overtime(%L) x where x.employee_id = %L)', org, e_rep), '=0')
+    || pg_temp.t(mgr2, 'and the new manager''s has rep''s', format('(select count(*) > 0 from public.hr_team_overtime(%L) x where x.employee_id = %L)', org, e_rep), '=true');
   if (select q.decided_by from public.hr_leave_requests q where q.id = pg_temp.p('leave', e_rep)) is distinct from mgr or (select q.decided_by from public.hr_claims q where q.id = x) is distinct from mgr2 then
     fails := fails || 'a past decision lost its decider when the line moved, or the new one is not stamped'::text;
   end if;

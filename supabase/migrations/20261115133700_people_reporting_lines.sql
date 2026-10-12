@@ -7,8 +7,12 @@
 -- What a manager gets, for their direct reports only (one step, never a
 -- report's report):
 --   * reads their leave requests, leave balances, time-off requests, claims
---     (and the receipt on a claim), overtime records and attendance days;
---   * approves or rejects their leave, time-off, claims and overtime;
+--     (and the receipt on a claim) and attendance days;
+--   * reads their overtime records without what they pay, through
+--     public.hr_team_overtime: the overtime table itself is NOT opened to a
+--     manager, because its hourly rate is the salary divided by 208;
+--   * approves or rejects their leave, time-off, claims and overtime (the
+--     reply to an overtime decision carries no amount for a manager);
 --   * is told in the app when one of them files a request.
 -- Nothing else opens: pay, payslips, letters, documents, reviews, goals,
 -- training, timesheets, rosters and settings are as closed to a manager as to
@@ -177,6 +181,8 @@ begin
   end if;
   begin
     update public.hr_employees set reports_to = p_manager where id = p_employee;
+    -- The employee's record was deleted between the look above and the write.
+    if not found then raise exception 'EMP_NOT_FOUND'; end if;
   exception when foreign_key_violation then
     -- The manager's record was deleted between the look above and the write.
     raise exception 'EMP_BAD_MANAGER';
@@ -295,7 +301,6 @@ alter policy hr_leave_requests_select on public.hr_leave_requests using (private
 alter policy hr_leave_balances_select on public.hr_leave_balances using (private.is_org_admin(org_id) or private.is_own_employee(employee_id) or (private.is_demo_org(org_id) and private.is_org_member(org_id)) or private.is_manager_of(employee_id));
 alter policy hr_time_off_requests_select on public.hr_time_off_requests using (private.is_org_admin(org_id) or private.is_own_employee(employee_id) or (private.is_demo_org(org_id) and private.is_org_member(org_id)) or private.is_manager_of(employee_id));
 alter policy hr_claims_select on public.hr_claims using (private.is_org_admin(org_id) or private.is_own_employee(employee_id) or (private.is_demo_org(org_id) and private.is_org_member(org_id)) or private.is_manager_of(employee_id));
-alter policy hr_overtime_records_select on public.hr_overtime_records using (private.is_org_admin(org_id) or private.is_own_employee(employee_id) or (private.is_demo_org(org_id) and private.is_org_member(org_id)) or private.is_manager_of(employee_id));
 alter policy hr_attendance_days_select on public.hr_attendance_days using (private.is_org_admin(org_id) or private.is_own_employee(employee_id) or (private.is_demo_org(org_id) and private.is_org_member(org_id)) or private.is_manager_of(employee_id));
 
 -- A receipt: the uploader in their own folder, and whoever may read the claim
@@ -313,12 +318,41 @@ alter policy hr_receipts_select on storage.objects using (
   )
 );
 
+-- Overtime is the one request table a manager does not read directly. A row
+-- of hr_overtime_records carries hourly_rate_cents (the salary divided by 208)
+-- and amount_cents (that rate times the hours and the multiplier), and a
+-- manager sees no pay. So its read rule stays as it was, and a manager reads
+-- their reports' overtime through this function, which leaves out:
+--   hourly_rate_cents  the salary, divided by 208;
+--   amount_cents       the rate again, once divided by hours and multiplier;
+--   payslip_id         a pointer into payroll: whether and when it was paid.
+-- rate_multiplier and day_kind stay: they come from the day and from the
+-- workspace's overtime rates, the same for everybody, and say nothing of
+-- anyone's pay. Newest first, as the app lists overtime.
+-- For the manager route only: the caller's own reports and nobody else's, by
+-- the same test as is_manager_of. An owner or admin gets nothing special from
+-- it (they read the table); they get rows here only for employees who report
+-- to them by name. Nothing in the demo, and nothing for anyone with no report.
+create or replace function public.hr_team_overtime(p_org uuid)
+returns table (id uuid, org_id uuid, employee_id uuid, work_date date, hours numeric, day_kind text, rate_multiplier numeric,
+  reason text, status text, requested_by uuid, decided_by uuid, decided_at timestamptz, decision_note text, created_at timestamptz)
+language sql security definer stable set search_path = public as $$
+  select r.id, r.org_id, r.employee_id, r.work_date, r.hours, r.day_kind, r.rate_multiplier,
+    r.reason, r.status, r.requested_by, r.decided_by, r.decided_at, r.decision_note, r.created_at
+  from public.hr_overtime_records r
+  where r.org_id = p_org and private.hr_manages_any(p_org) and private.is_manager_of(r.employee_id)
+  order by r.created_at desc, r.id;
+$$;
+revoke all on function public.hr_team_overtime(uuid) from public, anon;
+grant execute on function public.hr_team_overtime(uuid) to authenticated;
+
 -- ---- 7. deciding ---------------------------------------------------------------------
 -- The four decide functions, each the body it had in
 -- 20261030124500_people_no_self_approval.sql with five changes: is_mgr is
 -- declared and set; "may see it" and "may decide it" each also pass a manager
 -- of the request's employee; and the employee is told after the decision is
--- written. Everything else is as it was. A manager is never their own
+-- written. hr_decide_overtime has a sixth: its reply carries the amount for an
+-- owner or admin only, and null for a manager. Everything else is as it was. A manager is never their own
 -- manager, so a manager who is not an admin gets *_NOT_ALLOWED for their own
 -- request, as a member does; an admin who is also a manager is still an admin.
 
@@ -501,7 +535,7 @@ begin
       hourly_rate_cents = req.hourly_rate_cents, amount_cents = req.amount_cents
   where id = req.id;
   perform private.hr_notify_request_decided(req.org_id, req.employee_id, 'overtime', outcome);
-  return jsonb_build_object('id', req.id, 'status', outcome, 'amount_cents', req.amount_cents);
+  return jsonb_build_object('id', req.id, 'status', outcome, 'amount_cents', case when is_admin then req.amount_cents end);
 end; $$;
 revoke all on function public.hr_decide_overtime(uuid, boolean, text) from public, anon;
 grant execute on function public.hr_decide_overtime(uuid, boolean, text) to authenticated;
