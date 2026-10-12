@@ -33,7 +33,7 @@ const letter = (patch: Partial<Letter>): Letter => ({
   created_at: '2026-09-02T02:00:00.000Z', ...patch,
 });
 const template: LetterTemplate = {
-  id: '00000000-0000-4000-8000-0000000000b1', name: 'Offer letter', letter_type: 'offer', title: 'Offer of employment', body: 'Dear {employee_name}',
+  id: '00000000-0000-4000-8000-0000000000b1', name: 'Offer letter', letter_type: 'offer', title: 'Offer of employment', body: 'Dear {employee_name}', lang: 'en',
 };
 
 const DOCS: HrDocument[] = [

@@ -33,7 +33,7 @@ declare
     'hr_request_document_ack(uuid,boolean)','hr_acknowledge_document(uuid)','hr_delete_employee(uuid,uuid)',
     'hr_save_letter(uuid,uuid,text,text,text,boolean)','hr_start_letter_from_template(uuid,uuid)','hr_issue_letter(uuid)',
     'hr_unissue_letter(uuid)','hr_delete_letter(uuid)','hr_acknowledge_letter(uuid)',
-    'hr_save_letter_template(uuid,uuid,text,text,text,text)','hr_delete_letter_template(uuid)'];
+    'hr_save_letter_template(uuid,uuid,text,text,text,text,text)','hr_delete_letter_template(uuid)'];
 begin
   begin
   -- the catalogue: functions, grants, policies, the bucket, the service role
@@ -49,7 +49,8 @@ begin
     count(*) filter (where n.nspname = 'private' and (p.proname like 'hr\_%' or p.proname = 'reseed_demo_people')
       and (has_function_privilege('authenticated', p.oid, 'execute') or has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('public', p.oid, 'execute')))
   into i, j, ctx from pg_proc p join pg_namespace n on n.oid = p.pronamespace;
-  if i <> 16 or j <> 11 or ctx <> '0' then fails := fails || format('%s public functions (16), %s helpers (11), %s helpers callable (0)', i, j, ctx); end if;
+  -- 12 helpers: the eleven of the letters slice and hr_letter_date (20261109140000).
+  if i <> 16 or j <> 12 or ctx <> '0' then fails := fails || format('%s public functions (16), %s helpers (12), %s helpers callable (0)', i, j, ctx); end if;
   foreach t in array tabs loop
     select count(*) filter (where (p.policyname = t || '_select' and p.cmd = 'SELECT' and p.permissive = 'PERMISSIVE')
       or (p.policyname = 'mfa_required' and p.cmd = 'ALL' and p.permissive = 'RESTRICTIVE' and p.qual like '%mfa_ok()%')), count(*)
@@ -288,9 +289,9 @@ begin
       || pg_temp.v(lbl || 'pulled it back: no date, no issuer', format('select coalesce(issued_on::text, issued_by::text, acknowledged_at::text, ''-'') from public.hr_letters where id = %L', g), '-')
       || pg_temp.x(mb, 'B no longer reads it', format('(select count(*) from hr_letters where org_id = %L)', org), '=0')
       || pg_temp.x(who, lbl || 'deletes the draft', format('hr_delete_letter(%L)', g), format('={"id":"%s","employee_id":"%s"}', g, eb))
-      || pg_temp.x(who, lbl || 'adds a template', format('hr_save_letter_template(%L,null,'' T1 '',''other'','' Title '',''B'') - ''id''', org), '={"name":"T1","letter_type":"other","title":"Title","body":"B"}');
+      || pg_temp.x(who, lbl || 'adds a template', format('hr_save_letter_template(%L,null,'' T1 '',''other'','' Title '',''B'') - ''id''', org), '={"name":"T1","letter_type":"other","title":"Title","body":"B","lang":"en"}');
     select a.id into g from public.hr_letter_templates a where a.org_id = org and a.name = 'T1';
-    fails := fails || pg_temp.x(who, lbl || 'changes it', format('hr_save_letter_template(null,%L,''T1'',''offer'',''Title 2'',null)', g), format('={"id":"%s","name":"T1","letter_type":"offer","title":"Title 2","body":""}', g))
+    fails := fails || pg_temp.x(who, lbl || 'changes it', format('hr_save_letter_template(null,%L,''T1'',''offer'',''Title 2'',null)', g), format('={"id":"%s","name":"T1","letter_type":"offer","title":"Title 2","body":"","lang":"en"}', g))
       || pg_temp.x(who, lbl || 'starts a letter from it', format('hr_start_letter_from_template(%L,%L) #- ''{letter,id}''', eb, g), format('={"letter":%s,"unfilled":[]}', format(letj, eb, 'offer', 'Title 2', '', 'draft', 'null', 'false')))
       || pg_temp.x(who, lbl || 'deletes the template', format('hr_delete_letter_template(%L)', g), format('={"id":"%s"}', g))
       || pg_temp.v(lbl || 'left the letter started from it', format('select count(*) || ''/'' || count(template_id) from public.hr_letters where employee_id = %L', eb), '1/0')

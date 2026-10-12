@@ -12,6 +12,7 @@ import type {
   DocumentType,
   Employee,
   LeaveRequest,
+  LetterLang,
   LetterType,
   LeaveType,
   PeopleViewer,
@@ -94,3 +95,6 @@ export const LETTER_TYPE_LABEL: Record<LetterType, string> = {
   contract_renewal: 'Contract renewal',
   other: 'Other',
 };
+
+/** A letter template's language, as a person reads it. */
+export const LETTER_LANG_LABEL: Record<LetterLang, string> = { en: 'English', ms: 'Bahasa Malaysia' };

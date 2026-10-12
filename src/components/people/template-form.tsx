@@ -11,13 +11,16 @@ import { WRITE_FAILED } from '@/lib/people/capabilities';
 import { LETTER_BODY_MAX, LETTER_TITLE_MAX, TEMPLATE_NAME_MAX, toTemplateInput } from '@/lib/people/document-forms';
 import { PLACEHOLDERS } from '@/lib/people/letter-placeholders';
 import { insertPlaceholder, insertRefusal } from '@/lib/people/letters-screens';
-import { LETTER_TYPE_LABEL } from '@/lib/people/own';
-import { LETTER_TYPES, type LetterType } from '@/lib/people/types';
+import { LETTER_LANG_LABEL, LETTER_TYPE_LABEL } from '@/lib/people/own';
+import { LETTER_LANGS, LETTER_TYPES, type LetterLang, type LetterType } from '@/lib/people/types';
 import { LetterPreview } from './letter-body';
 import { LetterToolbar, useMarkApply } from './letter-toolbar';
 
 /** The template being edited. */
-export type EditableTemplate = { id: string; name: string; letter_type: string; title: string; body: string };
+export type EditableTemplate = { id: string; name: string; letter_type: string; title: string; body: string; lang: string };
+
+/** The one line under the Language choice. */
+export const TEMPLATE_LANG_HELP = 'Dates and the salary are written in this language when a letter is started from the template.';
 
 const SELECT_CLASS =
   'h-8 w-full rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 dark:bg-input/30';
@@ -36,6 +39,8 @@ function TemplateFormBody({
   const id = useId();
   const [name, setName] = useState(template?.name ?? '');
   const [letterType, setLetterType] = useState(template?.letter_type ?? 'offer');
+  // A new template starts in English; one being edited shows the language it has.
+  const [lang, setLang] = useState(template?.lang ?? 'en');
   const [title, setTitle] = useState(template?.title ?? '');
   const [body, setBody] = useState(template?.body ?? '');
   const [error, setError] = useState<string | null>(null);
@@ -88,7 +93,7 @@ function TemplateFormBody({
   }
 
   function save() {
-    const converted = toTemplateInput({ name, letter_type: letterType, title, body });
+    const converted = toTemplateInput({ name, letter_type: letterType, title, body, lang });
     if (!converted.ok) {
       setError(converted.error);
       return;
@@ -148,6 +153,26 @@ function TemplateFormBody({
           ))}
         </select>
       </label>
+      <div className="flex flex-col gap-1 text-sm">
+        <label htmlFor={`${id}-lang`}>Language</label>
+        <select
+          id={`${id}-lang`}
+          className={SELECT_CLASS}
+          disabled={pending}
+          value={lang}
+          aria-describedby={`${id}-lang-help`}
+          onChange={(event) => clear(setLang)(event.target.value)}
+        >
+          {LETTER_LANGS.map((l: LetterLang) => (
+            <option key={l} value={l}>
+              {LETTER_LANG_LABEL[l]}
+            </option>
+          ))}
+        </select>
+        <p id={`${id}-lang-help`} className="text-xs text-muted-foreground">
+          {TEMPLATE_LANG_HELP}
+        </p>
+      </div>
       <label className="flex flex-col gap-1 text-sm" htmlFor={`${id}-title`}>
         Letter title
         <Input

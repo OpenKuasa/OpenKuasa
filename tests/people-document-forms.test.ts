@@ -105,13 +105,17 @@ describe('toLetterInput', () => {
 });
 
 describe('toTemplateInput', () => {
-  const ok = { name: ' Offer ', letter_type: 'offer', title: ' Offer for {employee_name} ', body: 'Dear {employee_name}' };
+  const ok = { name: ' Offer ', letter_type: 'offer', title: ' Offer for {employee_name} ', body: 'Dear {employee_name}', lang: 'ms' };
 
   it('trims the name and title, keeps the body, and keeps placeholders', () => {
     expect(toTemplateInput(ok)).toEqual({
       ok: true,
-      input: { name: 'Offer', letter_type: 'offer', title: 'Offer for {employee_name}', body: 'Dear {employee_name}' },
+      input: { name: 'Offer', letter_type: 'offer', title: 'Offer for {employee_name}', body: 'Dear {employee_name}', lang: 'ms' },
     });
+    expect(toTemplateInput({ ...ok, lang: 'en' })).toMatchObject({ ok: true, input: { lang: 'en' } });
+  });
+  it('refuses a language that is not one of the two', () => {
+    for (const lang of ['', 'fr', 'MS', 'english']) expect(toTemplateInput({ ...ok, lang })).toEqual({ ok: false, error: 'Choose a language from the list.' });
   });
   it('refuses a missing or long name, a missing or long title, and a long body', () => {
     expect(toTemplateInput({ ...ok, name: '' })).toEqual({ ok: false, error: 'Give the template a name.' });

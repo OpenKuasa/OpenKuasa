@@ -5,6 +5,8 @@ import { describe, expect, test } from 'vitest';
 const DIR = join(process.cwd(), 'supabase/migrations');
 const LOGO = '20261109133700_org_logo.sql';
 const LETTERS = '20261109133800_people_letter_salary_templates.sql';
+/** The file after them: it replaces some of their functions (see its own test file). */
+const HARDENING = '20261109140000_people_letterhead_hardening.sql';
 /** The letters slice: the functions the second file redefines come from here. */
 const BEFORE = '20261102090100_people_letters_writes.sql';
 
@@ -70,11 +72,16 @@ describe('Lekiu letterhead migrations: the two files', () => {
     for (const file of [LOGO, LETTERS]) {
       expect(files.filter((other) => other.slice(0, 14) === file.slice(0, 14)), file).toEqual([file]);
     }
-    // Nothing later defines any of their functions again.
-    const later = files.slice(at[1] + 1).map((file) => statements(file)).join('\n');
-    for (const name of [...allFunctions(statements(LOGO)), ...allFunctions(statements(LETTERS))]) {
-      expect(later, name).not.toContain(`function ${name}(`);
-    }
+    // Later, only the hardening file defines any of their functions again: the logo is then set by the server alone, and a
+    // template has a language (tests/people-letterhead-hardening-schema.test.ts pins each against its text here).
+    const later = files.slice(at[1] + 1).filter((file) => file !== HARDENING).map((file) => statements(file)).join('\n');
+    const again = allFunctions(statements(HARDENING));
+    const here = [...allFunctions(statements(LOGO)), ...allFunctions(statements(LETTERS))];
+    for (const name of here) expect(later, name).not.toContain(`function ${name}(`);
+    expect(here.filter((name) => again.includes(name))).toEqual([
+      'public.set_org_logo', 'private.hr_starter_letter_templates', 'private.hr_seed_letter_templates',
+      'private.hr_backfill_ms_letter_templates', 'public.hr_start_letter_from_template',
+    ]);
   });
 
   test('add and never take away: no table, no drop but a policy of their own, no write grant, nothing for anon', () => {
@@ -150,8 +157,9 @@ describe('the workspace logo', () => {
     );
     expect([...text.matchAll(/create policy (\w+)/g)].map((m) => m[1])).toEqual(['org_logos_insert', 'org_logos_mfa_required']);
     expect(flat(text)).not.toMatch(/on storage\.objects (as restrictive )?for (select|update|delete)\b/);
-    // No other migration gives this bucket a policy.
-    for (const file of files.filter((other) => other !== LOGO)) expect(statements(file), file).not.toContain('org-logos');
+    // No other migration gives this bucket a policy: only the hardening file names it at all, and it writes no policy.
+    for (const file of files.filter((other) => other !== LOGO && other !== HARDENING)) expect(statements(file), file).not.toContain('org-logos');
+    expect(statements(HARDENING)).not.toMatch(/(create|drop|alter) policy|storage\.buckets/);
   });
 
   test('two functions, run as the owner on a fixed search path, for signed-in users only', () => {

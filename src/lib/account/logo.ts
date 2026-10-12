@@ -2,24 +2,32 @@
  * The workspace logo, client-safe half. One logo per workspace, in the public `org-logos` bucket, at
  * `<org id>/<random uuid>.<png|jpg|webp>`. This file holds what is allowed, what a path looks like, how the public
  * address is formed, and the browser's upload (as the signed-in user). Pointing the workspace at a file and removing
- * a file need the server: see `logo-server.ts`.
+ * a file need the server: see `logo-server.ts`. The byte check here is a courtesy to the person (a wrong file is
+ * refused before it is uploaded); the server makes the same check on the uploaded file, with the same function
+ * (`logo-bytes.ts`), and that one decides.
  *
  * A path is always built here from the file's TYPE, never taken from a form or from a file name, and the
  * database checks it again. Nothing here logs a file name or a path.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { type CapResult, refuse } from '@/lib/people/capabilities';
+import { LOGO_EXTENSION, LOGO_HEAD_BYTES, LOGO_MAX_BYTES, LOGO_TYPES, logoTypeOfBytes } from './logo-bytes';
 import { LOGO_NOT_IMAGE, LOGO_TOO_BIG, LOGO_UPLOAD_FAILED } from './logo-refusals';
 
 import { DEMO_LOGO_PATH, LOGO_BUCKET, LOGO_PATH, isLogoPath, logoUrl } from './logo-url';
 
 // The read-only half lives in a leaf module (`logo-url.ts`) so a member's page can import it without the upload.
 export { DEMO_LOGO_PATH, LOGO_BUCKET, LOGO_PATH, isLogoPath, logoUrl };
+// The limits and the byte check live in a leaf module too (`logo-bytes.ts`), which the server imports as well.
+export { LOGO_MAX_BYTES, LOGO_TYPES, logoTypeOfBytes };
 
-export const LOGO_MAX_BYTES = 1_048_576;
-/** The only types the bucket takes. SVG is never one of them. */
-export const LOGO_TYPES: readonly string[] = ['image/png', 'image/jpeg', 'image/webp'];
-const EXTENSION_OF: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
+const EXTENSION_OF = LOGO_EXTENSION;
+/**
+ * How long storage may cache an uploaded logo, in seconds. The storage client's own default is an hour (3600);
+ * a logo that was removed or replaced would keep answering at its old address for that long. Every logo has its
+ * own random address, so a new logo never waits on a cache: only the old one's address lingers, for this long.
+ */
+export const LOGO_CACHE_SECONDS = '60';
 
 type Converted<T> = { ok: true; input: T } | { ok: false; error: string };
 
@@ -32,22 +40,6 @@ export function pickLogoFile(file: File): Converted<File> {
   return { ok: true, input: file };
 }
 
-/** The image type a file's first bytes announce (PNG, JPEG or WebP), else null. */
-export function logoTypeOfBytes(bytes: Uint8Array): string | null {
-  const at = (i: number) => bytes[i];
-  if (bytes.length >= 8 && [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((b, i) => at(i) === b)) return 'image/png';
-  if (bytes.length >= 3 && at(0) === 0xff && at(1) === 0xd8 && at(2) === 0xff) return 'image/jpeg';
-  // "RIFF" + 4 size bytes + "WEBP".
-  if (
-    bytes.length >= 12 &&
-    [0x52, 0x49, 0x46, 0x46].every((b, i) => at(i) === b) &&
-    [0x57, 0x45, 0x42, 0x50].every((b, i) => at(8 + i) === b)
-  ) {
-    return 'image/webp';
-  }
-  return null;
-}
-
 /**
  * What a screen calls on a chosen file. The type is decided from the file's leading bytes (a browser may report an
  * empty or odd type for a valid image, or a wrong one); a file that does not begin like a PNG, JPEG or WebP is
@@ -58,7 +50,7 @@ export async function prepareLogoFile(file: File): Promise<Converted<File>> {
   if (!(file.size > 0)) return { ok: false, error: LOGO_NOT_IMAGE };
   let type: string | null = null;
   try {
-    type = logoTypeOfBytes(new Uint8Array(await file.slice(0, 12).arrayBuffer()));
+    type = logoTypeOfBytes(new Uint8Array(await file.slice(0, LOGO_HEAD_BYTES).arrayBuffer()));
   } catch {
     // Unreadable: the same as not an image.
   }
@@ -78,7 +70,9 @@ export function logoPath(orgId: string, file: File): string {
  * Uploads a file to `path` (made by {@link logoPath}) as the signed-in user. Type, size, the path's shape and that
  * the path's extension is the type's are checked first, so the rule holds even if a screen skipped it. Never
  * `upsert`: the bucket has no update policy, so a path is only ever written once. The caller then points the
- * workspace at it (`setLogoAction`); a refusal there removes the upload. Nothing is logged but a fixed sentence.
+ * workspace at it (`setLogoAction`), which reads the uploaded bytes again on the server; a refusal there removes the
+ * upload. Storage is asked to cache the file for {@link LOGO_CACHE_SECONDS} seconds. Nothing is logged but a fixed
+ * sentence.
  */
 export async function uploadLogoFile(client: SupabaseClient, path: string, file: File): Promise<CapResult<{ path: string }>> {
   const prepared = await prepareLogoFile(file);
@@ -89,7 +83,9 @@ export async function uploadLogoFile(client: SupabaseClient, path: string, file:
     // storage-js ignores `contentType` for a File body and records the body's own `.type`, which must be the very
     // type the path's extension stands for (the database compares the two).
     const body = new File([prepared.input], prepared.input.name, { type });
-    const { error } = await client.storage.from(LOGO_BUCKET).upload(path, body, { contentType: type, upsert: false });
+    const { error } = await client.storage
+      .from(LOGO_BUCKET)
+      .upload(path, body, { cacheControl: LOGO_CACHE_SECONDS, contentType: type, upsert: false });
     if (!error) return { ok: true, data: { path } };
   } catch {
     // Reported the same way as a refused upload.

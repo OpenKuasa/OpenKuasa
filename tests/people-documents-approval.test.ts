@@ -125,7 +125,7 @@ const docRow = (patch: Partial<HrDocument>): HrDocument => ({
   id: DOC_HR, employee_id: A, employee_name: 'Aisyah Rahim', title: 'Passport', doc_type: 'identity', expires_on: null, file_name: 'scan.pdf', file_size: 10,
   file_type: 'application/pdf', source: 'hr', ack_requested: false, acknowledged_at: null, created_at: '2026-09-01T02:00:00.000Z', has_file: true, ...patch,
 });
-const template: LetterTemplate = { id: TEMPLATE, name: 'Offer letter', letter_type: 'offer', title: 'Offer of employment', body: 'Dear {employee_name}' };
+const template: LetterTemplate = { id: TEMPLATE, name: 'Offer letter', letter_type: 'offer', title: 'Offer of employment', body: 'Dear {employee_name}', lang: 'en' };
 const data: PeopleData = {
   ...seed,
   listEmployees: async () => people,

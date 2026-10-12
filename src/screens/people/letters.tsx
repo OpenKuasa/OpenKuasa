@@ -202,6 +202,7 @@ export default async function LettersScreen() {
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="text-sm font-semibold">{t.name}</h3>
                       <Badge variant="secondary">{t.type_label}</Badge>
+                      <Badge variant="outline">{t.lang_label}</Badge>
                     </div>
                     <p className="text-sm text-muted-foreground">{t.title}</p>
                     <p className="line-clamp-3 whitespace-pre-line text-xs text-muted-foreground">{plainPreview(t.body)}</p>

@@ -674,6 +674,7 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
     letter_type,
     title,
     body,
+    lang: 'en',
   }));
 
   const vouchers: PaymentVoucher[] = VOUCHERS.map(([no, payee, voucher_type, amount_cents, day, status]) => ({

@@ -31,7 +31,7 @@ const SAVED = {
   ack_requested: false,
   acknowledged_at: null,
 };
-const TEMPLATE_ROW = { id: TEMPLATE, name: 'Offer', letter_type: 'offer', title: 'Offer', body: 'Dear {employee_name}' };
+const TEMPLATE_ROW = { id: TEMPLATE, name: 'Offer', letter_type: 'offer', title: 'Offer', body: 'Dear {employee_name}', lang: 'en' };
 const SAVE = { employee_id: EMP, letter_type: 'offer', title: 'Offer of employment', body: 'Dear Farah,\n\nWelcome.', ack_requested: false };
 
 afterEach(() => vi.restoreAllMocks());
@@ -295,15 +295,35 @@ describe('saveLetterTemplate', () => {
         p_letter_type: 'offer',
         p_title: 'Offer',
         p_body: 'Dear {employee_name}',
+        // No language said: the database gives a new template English and leaves a changed one as it is.
+        p_lang: null,
       },
     });
-    expect(Object.keys(calls[0].args!).sort()).toEqual(['p_body', 'p_letter_type', 'p_name', 'p_org', 'p_template', 'p_title']);
+    expect(Object.keys(calls[0].args!).sort()).toEqual(['p_body', 'p_lang', 'p_letter_type', 'p_name', 'p_org', 'p_template', 'p_title']);
     expect(JSON.stringify(calls[0].args)).not.toContain('other');
   });
   it('changes a template when an id is given', async () => {
     const { client, calls } = fakeSupabase({ 'rpc.hr_save_letter_template': { data: TEMPLATE_ROW } });
     await saveLetterTemplate(ctxOf(client), { ...TEMPLATE_INPUT, template_id: TEMPLATE });
     expect(calls[0].args).toMatchObject({ p_template: TEMPLATE, p_org: ORG });
+  });
+  it('sends the language when one is chosen, and hands back the one the database kept', async () => {
+    for (const lang of ['en', 'ms']) {
+      const { client, calls } = fakeSupabase({ 'rpc.hr_save_letter_template': { data: { ...TEMPLATE_ROW, lang } } });
+      expect(await saveLetterTemplate(ctxOf(client), { ...TEMPLATE_INPUT, lang })).toEqual({ ok: true, data: { ...TEMPLATE_ROW, lang } });
+      expect(calls[0].args).toMatchObject({ p_lang: lang });
+    }
+    // A caller that says nothing of the language (the assistant's tool) changes a Bahasa Malaysia template and it stays one.
+    const { client, calls } = fakeSupabase({ 'rpc.hr_save_letter_template': { data: { ...TEMPLATE_ROW, lang: 'ms' } } });
+    expect(await saveLetterTemplate(ctxOf(client), { ...TEMPLATE_INPUT, template_id: TEMPLATE, lang: null })).toMatchObject({ ok: true, data: { lang: 'ms' } });
+    expect(calls[0].args).toMatchObject({ p_lang: null });
+  });
+  it('answers the generic sentence for a reply with no language or one it does not know', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    for (const lang of [undefined, 'fr', 5]) {
+      const { client } = fakeSupabase({ 'rpc.hr_save_letter_template': { data: { ...TEMPLATE_ROW, lang } } });
+      expect((await saveLetterTemplate(ctxOf(client), TEMPLATE_INPUT)).ok).toBe(false);
+    }
   });
   it.each([
     ['a blank name', { ...TEMPLATE_INPUT, name: ' ' }],
@@ -313,6 +333,9 @@ describe('saveLetterTemplate', () => {
     ['a long body', { ...TEMPLATE_INPUT, body: 'x'.repeat(10001) }],
     ['an unknown type', { ...TEMPLATE_INPUT, letter_type: 'memo' }],
     ['an id that is not text', { ...TEMPLATE_INPUT, template_id: 4 }],
+    ['a language that is neither', { ...TEMPLATE_INPUT, lang: 'fr' }],
+    ['a language in capitals', { ...TEMPLATE_INPUT, lang: 'MS' }],
+    ['a language that is not text', { ...TEMPLATE_INPUT, lang: 1 }],
   ])('refuses %s without a call', async (_label, input) => {
     const { client, calls } = fakeSupabase();
     expect((await saveLetterTemplate(ctxOf(client), input as never)).ok).toBe(false);

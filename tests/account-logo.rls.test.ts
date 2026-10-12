@@ -1,8 +1,18 @@
 /**
  * Live test of the workspace logo (the `org-logos` bucket, `set_org_logo`, `clear_org_logo`) and of a letter's
- * `{salary}`, against the real database and storage. It needs the two 20261105 migrations applied; until then it
- * fails at the first call. Skipped without Supabase env vars. First run: Task 6 of the L7 plan, after the owner's
- * go-ahead. NOT run by Task 2.
+ * `{salary}`, against the real database and storage. It needs the three letterhead migrations applied
+ * (20261109133700, 20261109133800 and 20261109140000, the hardening); until then it fails at the first call.
+ * Skipped without Supabase env vars.
+ *
+ * Setting a logo is the SERVER's: `set_org_logo(p_org, p_actor, p_path)` is for the service role alone, and the
+ * server reads the uploaded bytes first. So `setLogo` here runs as the app's server does (with the service key this
+ * test already needs), naming the acting user; and one test goes through the server action itself, with the
+ * session faked to be the owner's (a server action needs a request, which a test has not).
+ *   - An owner who uploads a TEXT file named `.png`, declared `image/png`, and asks the server to set it is refused
+ *     with the not-an-image sentence, and the file is removed.
+ *   - An owner who calls `set_org_logo` themselves, with their own client, is refused: the two-argument function is
+ *     gone and the three-argument one is not theirs to call.
+ *   - A logo is served with the short cache lifetime the upload asks for.
  *
  * A fresh workspace with a CONFIRMED owner (an anonymous account may not upload), a confirmed member, and a
  * confirmed owner of a second workspace.
@@ -30,11 +40,11 @@
  * object: that is this file's job). Every sentence comes from the refusals modules, never a literal.
  */
 import { deflateSync } from 'node:zlib';
-import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
+import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { LOGO_BUCKET, logoPath, logoUrl, uploadLogoFile } from '@/lib/account/logo';
 import { clearLogo, discardLogoUpload, removeLogoFile, setLogo } from '@/lib/account/logo-server';
-import { LOGO_REFUSALS } from '@/lib/account/logo-refusals';
+import { LOGO_NOT_IMAGE, LOGO_REFUSALS } from '@/lib/account/logo-refusals';
 import { createEmployee } from '@/lib/people/capabilities';
 import { DOCUMENT_REFUSALS } from '@/lib/people/documents-refusals';
 import { issueLetter, startLetterFromTemplate } from '@/lib/people/letter-writes';
@@ -56,15 +66,21 @@ const PASSWORD = 'logo-live-pass-123';
 
 let owner: { c: SupabaseClient; userId: string; orgId: string };
 let member: { c: SupabaseClient; userId: string };
-let other: { c: SupabaseClient; orgId: string };
+let other: { c: SupabaseClient; userId: string; orgId: string };
 let guest: { c: SupabaseClient; demoId: string } | undefined;
 let service: SupabaseClient | null = null;
 
 /** Every object this file put in the bucket and has not yet seen removed. */
 const uploaded = new Set<string>();
 
-const ownerCtx = () => ({ client: owner.c, orgId: owner.orgId });
-const memberCtx = () => ({ client: member.c, orgId: owner.orgId });
+const ownerCtx = () => ({ client: owner.c, orgId: owner.orgId, actorId: owner.userId });
+const memberCtx = () => ({ client: member.c, orgId: owner.orgId, actorId: member.userId });
+
+// The server action, with the session it would read faked to be this test's owner (set in the test that uses it).
+const session = vi.hoisted(() => ({ viewer: null as unknown, client: null as unknown }));
+vi.mock('@/lib/auth/viewer', () => ({ getViewer: async () => session.viewer }));
+vi.mock('@/lib/supabase/server', () => ({ createClient: async () => session.client }));
+vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
 
 // ---- A real PNG, generated here ---------------------------------------------------------------------------------
 
@@ -147,12 +163,17 @@ const currentLogoPath = async (): Promise<string | null> => {
   return (data as { logo_path: string | null }).logo_path;
 };
 
-async function publicBytes(path: string): Promise<{ status: number; type: string | null; bytes: Uint8Array }> {
+async function publicBytes(path: string): Promise<{ status: number; type: string | null; cache: string | null; bytes: Uint8Array }> {
   const url = logoUrl(path, { isDemo: false });
   expect(url).not.toBeNull();
   // A cache-busting query string, so an earlier cached answer cannot interfere.
   const response = await fetch(`${url!}?t=${crypto.randomUUID()}`);
-  return { status: response.status, type: response.headers.get('content-type'), bytes: new Uint8Array(await response.arrayBuffer()) };
+  return {
+    status: response.status,
+    type: response.headers.get('content-type'),
+    cache: response.headers.get('cache-control'),
+    bytes: new Uint8Array(await response.arrayBuffer()),
+  };
 }
 
 /** Leaves the workspace as it found it, even when an assertion threw: no logo, nothing in the folder. */
@@ -201,10 +222,10 @@ beforeAll(async () => {
   member = { c: m, userId: memberUser.userId as string };
 
   const x = liveClient();
-  await createConfirmedTestUser(x, PASSWORD);
+  const otherUser = await createConfirmedTestUser(x, PASSWORD);
   const otherOrg = await createOrg(x, 'Other Logo Sdn Bhd');
   expect(otherOrg.error, otherOrg.error?.message).toBeNull();
-  other = { c: x, orgId: otherOrg.data as string };
+  other = { c: x, userId: otherUser.userId as string, orgId: otherOrg.data as string };
 });
 afterAll(async () => {
   await owner?.c.auth.signOut();
@@ -252,6 +273,9 @@ testWithSupabase('an owner sets, replaces and removes the logo; each old file is
   expect(served.status).toBe(200);
   expect(served.type).toContain('image/png');
   expect([...served.bytes]).toEqual([...png(10)]);
+  // The upload asks storage for a 60 second cache lifetime (the client's default is an hour): a removed logo's address
+  // stops answering that much sooner.
+  expect(served.cache ?? '', 'the cache lifetime storage serves the logo with').toMatch(/max-age=60\b/);
   // A member reads the path from the org row they can already read.
   const seen = await member.c.from('orgs').select('logo_path').eq('id', owner.orgId).single();
   expect((seen.data as { logo_path: string | null } | null)?.logo_path).toBe(first.path);
@@ -298,6 +322,63 @@ testWithSupabase('a recorded type that is not the extension\'s is refused with i
   expect(await setLogo(ownerCtx(), logoPath(other.orgId, pngFile(31)))).toEqual({ ok: false, error: LOGO_REFUSALS.LOGO_BAD_FILE });
 });
 
+testWithSupabase('a text file named .png and declared image/png is uploaded by an owner, refused by the server, and removed', async () => {
+  const path = logoPath(owner.orgId, pngFile(70));
+  // What a crafted client does: any bytes, an image name, an image type. Storage takes it (it believes the declared type).
+  const junk = new File(['This is plain text, not an image. '.repeat(40)], 'logo.png', { type: 'image/png' });
+  const up = await owner.c.storage.from(LOGO_BUCKET).upload(path, junk, { contentType: 'image/png', upsert: false });
+  expect(up.error, 'the upload itself is allowed: the upload policy cannot see bytes').toBeNull();
+  uploaded.add(path);
+  expect(await pathsUnder(owner.orgId)).toEqual([path]);
+
+  // The server action, as the owner's session would call it.
+  session.viewer = { userId: owner.userId, orgId: owner.orgId, role: 'owner', isDemo: false };
+  session.client = owner.c;
+  const { setLogoAction } = await import('@/app/account/logo-actions');
+  expect(await setLogoAction(path)).toEqual({ ok: false, error: LOGO_NOT_IMAGE });
+  expect(await currentLogoPath()).toBeNull();
+  // The refused upload is gone from storage.
+  expect(await pathsUnder(owner.orgId)).toEqual([]);
+  uploaded.delete(path);
+
+  // The same through the library function: refused before the database is asked.
+  const again = logoPath(owner.orgId, pngFile(71));
+  expect((await owner.c.storage.from(LOGO_BUCKET).upload(again, junk, { contentType: 'image/png', upsert: false })).error).toBeNull();
+  uploaded.add(again);
+  expect(await setLogo(ownerCtx(), again)).toEqual({ ok: false, error: LOGO_NOT_IMAGE });
+  expect(await currentLogoPath()).toBeNull();
+  await discard(again);
+});
+
+testWithSupabase('an owner cannot set the logo by calling the function themselves', async () => {
+  const mine = await uploadPng(owner.c, owner.orgId, 72);
+  expect(mine.result.ok).toBe(true);
+  // The function the app before the hardening called: gone.
+  const old = await owner.c.rpc('set_org_logo', { p_org: owner.orgId, p_path: mine.path });
+  expect(old.error, 'the two-argument function').not.toBeNull();
+  // The one the server calls: not for a signed-in user, even one naming themselves and a real image of their own.
+  const direct = await owner.c.rpc('set_org_logo', { p_org: owner.orgId, p_actor: owner.userId, p_path: mine.path });
+  expect(direct.error, 'the three-argument function, called by the owner').not.toBeNull();
+  expect(direct.error?.message).not.toBe('LOGO_BAD_FILE');
+  expect(await currentLogoPath()).toBeNull();
+  // Nor can they list or ask about the stray files.
+  expect((await owner.c.rpc('org_orphaned_logo_files')).error).not.toBeNull();
+  expect((await owner.c.rpc('org_logo_file_is_orphaned', { p_name: mine.path })).error).not.toBeNull();
+  // The server, naming a member or an outsider, is refused by the function; naming the owner, it goes through.
+  const refused = { ok: false, error: LOGO_REFUSALS.LOGO_NOT_ALLOWED };
+  expect(await setLogo({ client: owner.c, orgId: owner.orgId, actorId: member.userId }, mine.path)).toEqual(refused);
+  expect(await setLogo({ client: owner.c, orgId: owner.orgId, actorId: other.userId }, mine.path)).toEqual(refused);
+  expect(await currentLogoPath()).toBeNull();
+  expect(await setLogo(ownerCtx(), mine.path)).toEqual({ ok: true, data: { logo_path: mine.path } });
+  // A file just uploaded is not stray: the sweep would not list it.
+  const stray = await service!.rpc('org_logo_file_is_orphaned', { p_name: mine.path });
+  expect(stray.error).toBeNull();
+  expect(stray.data).toBe(false);
+  expect(await clearLogo(ownerCtx())).toEqual({ ok: true, data: { cleared: true } });
+  uploaded.delete(mine.path);
+  expect(await pathsUnder(owner.orgId)).toEqual([]);
+});
+
 testWithSupabase('a direct update of logo_path is refused, and the company details still save', async () => {
   const up = await uploadPng(owner.c, owner.orgId, 40);
   expect(up.result.ok).toBe(true);
@@ -326,7 +407,7 @@ testWithSupabase('a member and another workspace\'s owner are refused at upload 
   expect(mine.result.ok).toBe(true);
   const refused = { ok: false, error: LOGO_REFUSALS.LOGO_NOT_ALLOWED };
   expect(await setLogo(memberCtx(), mine.path)).toEqual(refused);
-  expect(await setLogo({ client: other.c, orgId: owner.orgId }, mine.path)).toEqual(refused);
+  expect(await setLogo({ client: other.c, orgId: owner.orgId, actorId: other.userId }, mine.path)).toEqual(refused);
   expect(await clearLogo(memberCtx())).toEqual(refused);
   expect(await clearLogo({ client: other.c, orgId: owner.orgId })).toEqual(refused);
   expect(await currentLogoPath()).toBeNull();
@@ -349,14 +430,20 @@ testWithSupabase('a demo guest is refused at upload and at the function', async 
   const path = logoPath(guest.demoId, file);
   expect((await g.storage.from(LOGO_BUCKET).upload(path, file, { contentType: 'image/png', upsert: false })).error).not.toBeNull();
   const denied = { ok: false, error: LOGO_REFUSALS.LOGO_NOT_ALLOWED };
-  expect(await setLogo({ client: g, orgId: guest.demoId }, path)).toEqual(denied);
+  const guestId = (await g.auth.getUser()).data.user?.id;
+  expect(guestId).toBeTruthy();
+  // The function itself refuses the demo, whoever the server names, before it looks at any path.
+  const asServer = await service!.rpc('set_org_logo', { p_org: guest.demoId, p_actor: guestId, p_path: path });
+  expect(asServer.error?.message).toBe('LOGO_NOT_ALLOWED');
+  // And the guest cannot call it themselves.
+  expect((await g.rpc('set_org_logo', { p_org: guest.demoId, p_actor: guestId, p_path: path })).error).not.toBeNull();
   expect(await clearLogo({ client: g, orgId: guest.demoId })).toEqual(denied);
   expect((await g.from('orgs').update({ logo_path: path }).eq('id', guest.demoId).select('id')).error).not.toBeNull();
 });
 
 // ---- {salary} -----------------------------------------------------------------------------------------------------
 
-testWithSupabase('a letter from the Bahasa Malaysia offer carries the salary sentence, or keeps {salary} and cannot be issued', async () => {
+testWithSupabase('a letter from the Bahasa Malaysia offer carries the salary and its dates in Bahasa Malaysia, or keeps {salary} and cannot be issued', async () => {
   const make = async (name: string, extra: Record<string, unknown> = {}) => {
     const made = await createEmployee(ownerCtx(), { name, join_date: '2025-01-06', designation: 'Clerk', ...extra });
     expect(made.ok, JSON.stringify(made)).toBe(true);
@@ -374,7 +461,14 @@ testWithSupabase('a letter from the Bahasa Malaysia offer carries the salary sen
   const withSalary = await startLetterFromTemplate(ownerCtx(), { employee_id: paid, template_id: offer.id });
   expect(withSalary.ok, JSON.stringify(withSalary)).toBe(true);
   if (!withSalary.ok) return;
-  expect(withSalary.data.letter.body).toContain('RM 4,500.00 per month');
+  // The template is Bahasa Malaysia, so the salary and the dates are written in it.
+  expect(offer.lang).toBe('ms');
+  expect(withSalary.data.letter.body).toContain('RM 4,500.00 sebulan');
+  expect(withSalary.data.letter.body).not.toContain('per month');
+  expect(withSalary.data.letter.body).toContain('berkuat kuasa mulai 6 Januari 2025.');
+  expect(withSalary.data.letter.body).not.toContain('January');
+  expect(withSalary.data.letter.body).toContain('di Jabatan ');
+  expect(withSalary.data.letter.body.split('\n')[0]).toMatch(/^\d{1,2} (Januari|Februari|Mac|April|Mei|Jun|Julai|Ogos|September|Oktober|November|Disember) \d{4}$/);
   expect(withSalary.data.letter.body).not.toContain('{salary}');
   expect(withSalary.data.unfilled).not.toContain('salary');
 

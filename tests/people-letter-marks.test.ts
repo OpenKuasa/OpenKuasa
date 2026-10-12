@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { type ComponentProps, createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -384,13 +384,39 @@ describe('heading sizes', () => {
   });
 });
 
-describe('the starter templates in the salary migration', () => {
-  it('pins all twelve (six English, six Bahasa Malaysia) as rendering unchanged', () => {
-    const sql = readFileSync(resolve('supabase/migrations/20261109133800_people_letter_salary_templates.sql'), 'utf8');
+describe('the starter templates, in their newest definition', () => {
+  // private.hr_starter_letter_templates() was first written by 20261109133800 and is defined again, with five Bahasa
+  // Malaysia bodies corrected ("di Jabatan {department}"), by the file read here: what a workspace is given today.
+  const NEWEST = 'supabase/migrations/20261109140000_people_letterhead_hardening.sql';
+  const startersIn = (file: string) => {
+    const sql = readFileSync(resolve(file), 'utf8');
     const bodies: string[] = [];
     for (const m of sql.matchAll(/E'((?:[^']|'')*)'/g)) {
       if (m[1].startsWith('{today}')) bodies.push(m[1].replace(/\\n/g, '\n').replace(/''/g, "'"));
     }
+    return bodies;
+  };
+
+  it('is the newest: no later migration defines the starter list again', () => {
+    const files = readdirSync(resolve('supabase/migrations')).filter((f) => f.endsWith('.sql')).sort();
+    const defining = files.filter((f) => readFileSync(resolve('supabase/migrations', f), 'utf8').includes('create or replace function private.hr_starter_letter_templates('));
+    expect(defining.at(-1)).toBe(NEWEST.split('/').at(-1));
+  });
+
+  it('no Bahasa Malaysia body keeps the lower-case "di jabatan {department}", and each keeps exactly the placeholders it had', () => {
+    const now = startersIn(NEWEST);
+    const was = startersIn('supabase/migrations/20261109133800_people_letter_salary_templates.sql');
+    expect(was).toHaveLength(12);
+    for (let i = 6; i < 12; i += 1) {
+      expect(now[i]).not.toContain('di jabatan {department}');
+      expect(now[i].match(/\{[^}]*\}/g)).toEqual(was[i].match(/\{[^}]*\}/g));
+    }
+    expect(now.filter((body) => body.includes('di Jabatan {department}'))).toHaveLength(5);
+    expect(now.slice(0, 6)).toEqual(was.slice(0, 6));
+  });
+
+  it('pins all twelve (six English, six Bahasa Malaysia) as rendering unchanged', () => {
+    const bodies = startersIn(NEWEST);
     expect(bodies).toHaveLength(12);
     for (const body of bodies) {
       const tree = parseLetter(body);

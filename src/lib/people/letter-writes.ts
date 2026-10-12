@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { type CapResult, type PeopleWriteContext } from './capabilities';
 import { callDb, id } from './document-writes';
 import { type Row, isRow, optionalGuid, parse, text } from './performance-rpc';
-import { LETTER_TYPES, type LetterType } from './types';
+import { LETTER_LANGS, LETTER_TYPES, type LetterLang, type LetterType } from './types';
 
 const TYPE_MESSAGE = 'Choose a type from the list.';
 const letterType = z.enum(LETTER_TYPES, TYPE_MESSAGE);
@@ -43,6 +43,11 @@ export const saveTemplateInput = z.object({
   letter_type: letterType,
   title: z.string().trim().min(1, 'Give the template a title.').max(200, 'Keep the title to 200 characters.'),
   body: letterBody,
+  /**
+   * The language a letter's dates and salary are written in. Left out (or null), the database decides: English for a
+   * new template, and for one being changed the language it already has.
+   */
+  lang: z.enum(LETTER_LANGS, 'Choose a language from the list.').nullish(),
 });
 export const templateIdInput = z.object({ template_id: id('template') });
 
@@ -60,7 +65,7 @@ export type SavedLetter = {
   acknowledged_at: string | null;
 };
 
-export type SavedTemplate = { id: string; name: string; letter_type: LetterType; title: string; body: string };
+export type SavedTemplate = { id: string; name: string; letter_type: LetterType; title: string; body: string; lang: LetterLang };
 
 const isLetterType = (value: unknown): value is LetterType =>
   typeof value === 'string' && (LETTER_TYPES as readonly string[]).includes(value);
@@ -87,16 +92,18 @@ export function letterOf(row: Row): SavedLetter | null {
 
 function templateOf(row: Row): SavedTemplate | null {
   const { id: templateId, name, letter_type, title, body } = row;
+  const lang = LETTER_LANGS.find((known) => known === row.lang);
   if (
     typeof templateId !== 'string' ||
     typeof name !== 'string' ||
     !isLetterType(letter_type) ||
     typeof title !== 'string' ||
-    typeof body !== 'string'
+    typeof body !== 'string' ||
+    !lang
   ) {
     return null;
   }
-  return { id: templateId, name, letter_type, title, body };
+  return { id: templateId, name, letter_type, title, body, lang };
 }
 
 /** Adds a draft (no `letter_id`) or changes one. Asking for an acknowledgement is part of this, and only while a draft. */
@@ -191,6 +198,7 @@ export async function saveLetterTemplate(ctx: PeopleWriteContext, input: unknown
     p_letter_type: v.letter_type,
     p_title: v.title,
     p_body: v.body,
+    p_lang: v.lang ?? null,
   }, templateOf);
 }
 

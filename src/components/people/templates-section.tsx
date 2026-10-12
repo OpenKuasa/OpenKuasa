@@ -9,7 +9,16 @@ import { plainPreview } from '@/lib/people/letter-marks';
 import { removeTemplateSentence } from '@/lib/people/letters-screens';
 import { TemplateDialog } from './template-form';
 
-export type TemplateListRow = { id: string; name: string; letter_type: string; type_label: string; title: string; body: string };
+export type TemplateListRow = {
+  id: string;
+  name: string;
+  letter_type: string;
+  type_label: string;
+  title: string;
+  body: string;
+  lang: string;
+  lang_label: string;
+};
 
 function TemplateItem({ template }: { template: TemplateListRow }) {
   const [pending, start] = useTransition();
@@ -33,6 +42,7 @@ function TemplateItem({ template }: { template: TemplateListRow }) {
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-sm font-semibold">{template.name}</h3>
         <Badge variant="secondary">{template.type_label}</Badge>
+        <Badge variant="outline">{template.lang_label}</Badge>
       </div>
       <p className="text-sm text-muted-foreground">{template.title}</p>
       <p className="line-clamp-3 whitespace-pre-line text-xs text-muted-foreground">{plainPreview(template.body)}</p>

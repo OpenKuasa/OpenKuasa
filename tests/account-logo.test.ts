@@ -199,7 +199,15 @@ describe('uploadLogoFile', () => {
     const [p, body, options] = upload.mock.calls[0];
     expect(p).toBe(path);
     expect((body as File).type).toBe('image/png');
-    expect(options).toEqual({ contentType: 'image/png', upsert: false });
+    expect(options).toEqual({ cacheControl: '60', contentType: 'image/png', upsert: false });
+  });
+
+  it('asks storage to cache the file for 60 seconds, not the client\'s default hour: a removed logo stops answering sooner', async () => {
+    const upload = vi.fn().mockResolvedValue({ error: null });
+    const { client } = clientOf(upload);
+    const path = `${ORG}/${NAME}.webp`;
+    await uploadLogoFile(client, path, file(WEBP, 'logo.webp', 'image/webp'));
+    expect(upload.mock.calls[0][2].cacheControl).toBe('60');
   });
 
   it("refuses before any call: a bad path, an extension that is not the type's, a wrong type, a big file", async () => {
@@ -227,7 +235,7 @@ describe('uploadLogoFile', () => {
     expect(await uploadLogoFile(client, path, file(PNG, 'a', ''))).toEqual({ ok: true, data: { path } });
     const [, body, options] = upload.mock.calls[0];
     expect((body as File).type).toBe('image/png');
-    expect(options).toEqual({ contentType: 'image/png', upsert: false });
+    expect(options).toEqual({ cacheControl: '60', contentType: 'image/png', upsert: false });
   });
 
   it('answers the upload-failed sentence for a refused or thrown upload and logs no name or path', async () => {
