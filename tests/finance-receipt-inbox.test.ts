@@ -59,6 +59,22 @@ describe('registerReceipt', () => {
     expect(await registerReceipt(ctx, { path: PATH, name: 'a.jpg' })).toEqual({ ok: false, error: M.fileGone });
   });
 
+  it('tries again with the same path when the look-up after FIN24 itself fails, and never says to upload again', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { ctx, calls } = fake((call) => (call.kind === 'rpc' ? refusal('FIN24') : { data: null, error: { code: '57014', message: PATH } }));
+    expect(await registerReceipt(ctx, { path: PATH, name: 'a.jpg' })).toEqual({ ok: false, error: M.notSaved });
+    expect(calls).toHaveLength(2);
+    expect(log.mock.calls).toEqual([['[finance] registerReceipt look-up failed:', '57014']]);
+    log.mockRestore();
+  });
+
+  it('treats a unique violation as the same file recorded twice: the first row, or not there', async () => {
+    const found = fake((call) => (call.kind === 'rpc' ? refusal('23505') : { data: [{ id: RECEIPT }], error: null }));
+    expect(await registerReceipt(found.ctx, { path: PATH, name: 'a.jpg' })).toEqual({ ok: true, data: { id: RECEIPT } });
+    const missing = fake((call) => (call.kind === 'rpc' ? refusal('23505') : { data: [], error: null }));
+    expect(await registerReceipt(missing.ctx, { path: PATH, name: 'a.jpg' })).toEqual({ ok: false, error: M.fileGone });
+  });
+
   it('words a refusal by role, and keeps everything else to one sentence', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(await registerReceipt(fake(refusal('42501')).ctx, { path: PATH, name: 'a.jpg' })).toEqual({ ok: false, error: NOT_ALLOWED });
@@ -86,6 +102,13 @@ describe('reviewReceiptInput', () => {
     expect(ok({ vendor: '  Kedai Ali  ', receipt_date: '2026-10-01', amount: 12.345, sst_amount: 0 }).data).toEqual({
       id: RECEIPT, vendor: 'Kedai Ali', receipt_date: '2026-10-01', amount: 12.35, sst_amount: 0,
     });
+  });
+
+  it('cleans the vendor of control and direction characters, as a file name is', () => {
+    expect(ok({ vendor: 'a\u0000b\u202ec' }).data?.vendor).toBe('abc');
+    expect(ok({ vendor: '  Kedai\u200b  Ali\u061c ' }).data?.vendor).toBe('Kedai Ali');
+    expect(ok({ vendor: '\u202e\u0000' }).data?.vendor).toBeNull();
+    expect(message({ vendor: `${'x'.repeat(200)}\u0000y` })).toBe(M.vendor);
   });
 
   it('refuses what the database would, in a sentence', () => {
@@ -122,6 +145,17 @@ describe('reviewReceipt and deleteInboxReceipt', () => {
     expect((await by('42501')).error).toBe(NOT_ALLOWED);
     expect((await by('22003')).error).toBe(TOO_LARGE);
     expect((await by('XX000')).error).toBe(WRITE_FAILED);
+    log.mockRestore();
+  });
+
+  it('logs only the database code of a write it cannot word, never the error object', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await reviewReceipt(fake({ data: null, error: { code: 'XX000', message: `broke at ${PATH}`, details: PATH } }).ctx, { id: RECEIPT });
+    await deleteInboxReceipt(fake({ data: null, error: { code: 'XX001', message: PATH } }).ctx, { id: RECEIPT });
+    expect(log.mock.calls).toEqual([
+      ['[finance] reviewReceipt failed:', 'XX000'],
+      ['[finance] deleteInboxReceipt failed:', 'XX001'],
+    ]);
     log.mockRestore();
   });
 

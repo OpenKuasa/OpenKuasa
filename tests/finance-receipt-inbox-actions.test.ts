@@ -15,10 +15,16 @@ const ctl = vi.hoisted(() => ({
   answers: {} as Record<string, unknown>,
   check: 'match' as 'match' | 'mismatch' | 'unreadable',
   serviceThrows: false,
+  /** How many times a client was made for the caller. */
+  clients: 0,
 }));
 
 vi.mock('@/lib/auth/viewer', () => ({ getViewer: async () => ctl.viewer }));
-vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ({ tag: 'caller' }) }));
+vi.mock('@/lib/supabase/server', () => ({ createClient: async () => {
+    ctl.clients += 1;
+    return { tag: 'caller' };
+  },
+}));
 vi.mock('@/lib/supabase/service', () => ({
   serviceClient: () => {
     if (ctl.serviceThrows) throw new Error('Service role is not configured.');
@@ -79,6 +85,7 @@ beforeEach(() => {
   ctl.answers = {};
   ctl.check = 'match';
   ctl.serviceThrows = false;
+  ctl.clients = 0;
 });
 
 const WRITES: [string, (input: unknown) => Promise<{ ok: boolean; error?: string }>, unknown][] = [
@@ -103,6 +110,8 @@ describe('who may write', () => {
     ctl.viewer = { ...ctl.viewer, role: 'member', isDemo: true };
     expect(await action(input)).toEqual({ ok: false, error: NOT_ALLOWED });
     expect(ctl.calls).toEqual([]);
+    // Not even a client is made before the guard has answered.
+    expect(ctl.clients).toBe(0);
     expect(ctl.revalidated).toEqual([]);
   });
 
@@ -187,7 +196,11 @@ describe('how the code is kept safe', () => {
 
   it('exports only async functions from the actions file', async () => {
     const actions = await import('@/app/(app)/finance/receipt-inbox-actions');
-    for (const [name, value] of Object.entries(actions)) expect(typeof value, name).toBe('function');
+    expect(Object.keys(actions).sort()).toEqual(['deleteReceiptAction', 'receiptLinkAction', 'registerReceiptAction', 'reviewReceiptAction']);
+    for (const [name, value] of Object.entries(actions)) {
+      expect(typeof value, name).toBe('function');
+      expect((value as { constructor: { name: string } }).constructor.name, name).toBe('AsyncFunction');
+    }
     expect(read('src/app/(app)/finance/receipt-inbox-actions.ts').startsWith("'use server';")).toBe(true);
   });
 

@@ -124,6 +124,7 @@ describe('size, path and name', () => {
     expect(cleanFileName('C:\\Users\\Ali\\Resit Kedai.jpg')).toBe('Resit Kedai.jpg');
     expect(cleanFileName('../../etc/passwd')).toBe('passwd');
     expect(cleanFileName('a\u0000b\tc\u202egpj.exe')).toBe('abcgpj.exe');
+    expect(cleanFileName('a\u061cb\u200bc\u200cd\u200de.pdf')).toBe('abcde.pdf');
     expect(cleanFileName('   ')).toBe('receipt');
     expect(cleanFileName('folder/')).toBe('receipt');
     expect(Array.from(cleanFileName('é'.repeat(300)))).toHaveLength(200);
@@ -137,6 +138,11 @@ describe('size, path and name', () => {
   it('names a converted photo and a download', () => {
     expect(jpgFileName('IMG_0042.HEIC')).toBe('IMG_0042.jpg');
     expect(jpgFileName('photo.heif')).toBe('photo.jpg');
+    // Any of the five extensions goes, so a photo already named .jpg is not named .jpg.jpg.
+    expect(jpgFileName('IMG_0042.jpg')).toBe('IMG_0042.jpg');
+    expect(jpgFileName('scan.PNG')).toBe('scan.jpg');
+    expect(jpgFileName('scan.jpeg')).toBe('scan.jpg');
+    expect(jpgFileName('scan.pdf')).toBe('scan.jpg');
     expect(jpgFileName('.heic')).toBe('receipt.jpg');
     expect(Array.from(jpgFileName(`${'x'.repeat(300)}.heic`))).toHaveLength(200);
     expect(receiptDownloadName('image/jpeg')).toBe('receipt.jpg');

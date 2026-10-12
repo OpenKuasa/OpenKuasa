@@ -113,8 +113,14 @@ export function typeOfReceiptPath(path: string): InboxReceiptType | null {
 }
 
 export const RECEIPT_NAME_MAX = 200;
-// Control characters, and the marks that reorder text, which can make a name read as another one.
-const UNSAFE_NAME_CHARS = /[\p{Cc}‎‏‪-‮⁦-⁩]/gu;
+// Control characters, the marks that reorder text (which can make a name read as another one), and the
+// invisible ones: U+061C, U+200B to U+200F, U+202A to U+202E, U+2066 to U+2069.
+const UNSAFE_NAME_CHARS = /[\p{Cc}\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069]/gu;
+
+/** Text a person typed, without control, direction or zero-width characters, one space between words, trimmed. */
+export function cleanTypedText(text: string): string {
+  return text.replace(UNSAFE_NAME_CHARS, '').replace(/\s+/g, ' ').trim();
+}
 
 /**
  * The name kept to show for a file: what the device called it, without any
@@ -124,15 +130,15 @@ const UNSAFE_NAME_CHARS = /[\p{Cc}‎‏‪-‮⁦-⁩]/gu;
  */
 export function cleanFileName(name: string): string {
   const base = name.split(/[/\\]/).pop() ?? '';
-  const clean = base.replace(UNSAFE_NAME_CHARS, '').replace(/\s+/g, ' ').trim();
+  const clean = cleanTypedText(base);
   // By character, not by UTF-16 unit: half an emoji is not valid text.
   return Array.from(clean).slice(0, RECEIPT_NAME_MAX).join('') || 'receipt';
 }
 
-/** The name of the JPG a HEIC or HEIF was turned into: the same name with `.jpg`. */
+/** The name of the JPG a HEIC or HEIF was turned into: the same name with `.jpg` (never `.jpg.jpg`). */
 export function jpgFileName(name: string): string {
   const clean = cleanFileName(name);
-  const stem = clean.replace(/\.(heic|heif)$/i, '');
+  const stem = clean.replace(/\.(heic|heif|jpe?g|png|pdf)$/i, '');
   return `${Array.from(stem).slice(0, RECEIPT_NAME_MAX - 4).join('') || 'receipt'}.jpg`;
 }
 
