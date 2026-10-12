@@ -5,7 +5,8 @@ import {
   afterRefusedExpenseSave,
   editExpenseForm,
   expenseActions,
-  expenseControls,
+  canEditExpenses,
+  expenseDecisionPayload,
   expenseQuestion,
   expenseFormError,
   expenseHiddenNote,
@@ -84,8 +85,12 @@ describe('the form', () => {
     for (const typed of ['1,200.50', 'RM 1200', 'rm1200', 'RM1,200.50', '$20', 'MYR 20']) {
       expect(expenseFormError({ ...form, amount: typed }), typed).toBe(format);
     }
-    expect(expenseFormError({ ...form, sst: '1,0' })).toBe(format);
-    expect(expenseFormError({ ...form, sst: 'RM 6' })).toBe(format);
+    // The SST box names itself, so a person is not sent to look at an amount that is fine.
+    const sst = 'Enter the SST as a number, without commas or RM: 72.00.';
+    expect(expenseFormError({ ...form, amount: '120.00', sst: '7,20' })).toBe(sst);
+    expect(expenseFormError({ ...form, sst: '1,0' })).toBe(sst);
+    expect(expenseFormError({ ...form, sst: 'RM 6' })).toBe(sst);
+    expect(expenseFormError({ ...form, amount: '1,200', sst: '1,0' })).toBe(format);
     // Words that are not a number are still just not an amount.
     expect(expenseFormError({ ...form, amount: 'lots' })).toBe('Enter an amount above 0.');
   });
@@ -93,7 +98,7 @@ describe('the form', () => {
     const form = editExpenseForm(row());
     expect(expenseFormError({ ...form, amount: '12.345' })).toBe('Enter the amount to two decimal places.');
     expect(expenseFormError({ ...form, amount: '12.3450' })).toBe('Enter the amount to two decimal places.');
-    expect(expenseFormError({ ...form, sst: '1.005' })).toBe('Enter the amount to two decimal places.');
+    expect(expenseFormError({ ...form, sst: '1.005' })).toBe('Enter the SST to two decimal places.');
     expect(expenseFormError({ ...form, amount: '12.34', sst: '1.5' })).toBeNull();
     expect(expenseFormError({ ...form, amount: '12.', sst: '.5' })).toBeNull();
   });
@@ -199,10 +204,23 @@ describe('the questions asked in a row', () => {
   });
 });
 
-describe('what the screen draws for whom', () => {
-  it('gives a person who may write the New expense button and the Actions column, and no one else', () => {
-    expect(expenseControls(true)).toEqual({ newButton: true, actionsColumn: true, columns: 7 });
-    expect(expenseControls(false)).toEqual({ newButton: false, actionsColumn: false, columns: 6 });
+describe('who may enter and change expenses', () => {
+  it('is an owner, an admin or a member of a real workspace, and no viewer and no demo workspace', () => {
+    for (const role of ['owner', 'admin', 'member'] as const) expect(canEditExpenses(role, false), role).toBe(true);
+    expect(canEditExpenses('viewer', false)).toBe(false);
+    for (const role of ['owner', 'admin', 'member', 'viewer'] as const) expect(canEditExpenses(role, true), `demo ${role}`).toBe(false);
+  });
+});
+
+describe('what a decision sends of the row it was asked on', () => {
+  it('is the row as shown, and nothing that is not its own', () => {
+    expect(expenseDecisionPayload(row())).toEqual({
+      id: row().id, updated_at: '2026-10-05T09:00:00.123456+00:00', status: 'pending', amount: 120, sst_amount: 6,
+      expense_date: '2026-10-05', category_id: CATEGORY, vendor_id: null, vendor_name: 'Kedai Ali', notes: 'Printer paper',
+    });
+    expect(expenseDecisionPayload(row({ vendor_id: CONTACT, vendor_name: 'Supplier A', notes: null }))).toMatchObject({
+      vendor_id: CONTACT, vendor_name: 'Supplier A', notes: null,
+    });
   });
 });
 

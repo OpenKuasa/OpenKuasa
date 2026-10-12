@@ -7,6 +7,8 @@
  * expense that was written and is not in the list. Pure.
  */
 import { type ExpenseCategory, EXPENSE_MESSAGES, type ExpenseRow, type ExpenseStatus, saveExpenseInput } from './expenses';
+import { can } from '@/lib/auth/permissions';
+import type { OrgRole } from '@/lib/auth/current-org';
 import { rm, typedNumber } from './format';
 import { displayDate } from './view-helpers';
 
@@ -93,15 +95,15 @@ export function expenseFormError(form: ExpenseForm): string | null {
   const parsed = saveExpenseInput.safeParse(expensePayload(form));
   // A wrong date is reported before a money box, as the form reads.
   if (!parsed.success && parsed.error.issues[0]?.path[0] === 'expense_date') return parsed.error.issues[0].message;
-  const typed = moneyBoxError(form.amount) ?? moneyBoxError(form.sst);
+  const typed = moneyBoxError(form.amount, M.amountFormat, M.amountDecimals) ?? moneyBoxError(form.sst, M.sstFormat, M.sstDecimals);
   if (typed) return typed;
   return parsed.success ? null : (parsed.error.issues[0]?.message ?? M.invalid);
 }
 
 /** What is wrong with the way a money box was typed, when it is not just "not a number": a comma or RM, or more than a sen. */
-function moneyBoxError(text: string): string | null {
-  if (/[,$]|^\s*(rm|myr)/i.test(text)) return M.amountFormat;
-  if (/\.\d{3,}\s*$/.test(text)) return M.amountDecimals;
+function moneyBoxError(text: string, format: string, decimals: string): string | null {
+  if (/[,$]|^\s*(rm|myr)/i.test(text)) return format;
+  if (/\.\d{3,}\s*$/.test(text)) return decimals;
   return null;
 }
 
@@ -153,6 +155,27 @@ export function expenseActions(row: ExpenseRow, canDecide: boolean): ExpenseActi
   if (row.status === 'pending') return canDecide ? ['edit', 'approve', 'reject', 'delete'] : ['edit', 'delete'];
   if (row.status === 'rejected') return ['edit', 'delete'];
   return canDecide && row.paid === 0 && row.held === 0 ? ['reject'] : [];
+}
+
+/** Who is given the expense form and the row menus: anyone who may edit data in a real workspace, never the demo. */
+export function canEditExpenses(role: OrgRole, isDemo: boolean): boolean {
+  return !isDemo && can(role, 'edit-data');
+}
+
+/** What an approval or a rejection sends of the row it was asked on: the row as shown, so the database decides that very expense. */
+export function expenseDecisionPayload(row: ExpenseRow) {
+  return {
+    id: row.id,
+    updated_at: row.updated_at,
+    status: row.status,
+    amount: row.amount,
+    sst_amount: row.sst_amount,
+    expense_date: row.expense_date,
+    category_id: row.category_id,
+    vendor_id: row.vendor_id,
+    vendor_name: row.vendor_name,
+    notes: row.notes,
+  };
 }
 
 /** What the Expenses screen draws for someone who may write and for someone who may not. */

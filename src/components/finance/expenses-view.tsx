@@ -36,6 +36,7 @@ import {
   type WrittenExpense,
   expenseActions,
   expenseControls,
+  expenseDecisionPayload,
   expenseHiddenNote,
   expenseName,
   expensePaymentNote,
@@ -184,7 +185,7 @@ export function ExpensesView({
   const decide = (row: ExpenseRow, call: (input: unknown) => Promise<FinResult<{ id: string }>>, status: 'approved' | 'rejected') =>
     confirm.run(
       async () => {
-        const result = await call({ id: row.id, updated_at: row.updated_at });
+        const result = await call(expenseDecisionPayload(row));
         if (!result.ok && result.error === EXPENSE_MESSAGES.changed) setOpen(null);
         return result;
       },
@@ -327,7 +328,15 @@ export function ExpensesView({
           flush
           action={
             matching.length > LATEST_ROWS ? (
-              <Button variant="outline" size="sm" aria-pressed={showAll} onClick={() => setShowAll((v) => !v)}>
+              <Button
+                variant="outline"
+                size="sm"
+                aria-pressed={showAll}
+                onClick={() => {
+                  listChanged();
+                  setShowAll((v) => !v);
+                }}
+              >
                 {showAll ? 'Show latest' : 'View all'}
               </Button>
             ) : undefined
@@ -413,7 +422,7 @@ export function ExpensesView({
                   <TableHead>Method</TableHead>
                   <TableHead>Status</TableHead>
                   {actionsColumn ? (
-                    <TableHead className="sticky right-0 w-10 bg-muted">
+                    <TableHead className="sticky right-0 w-10 border-l bg-[color-mix(in_oklab,var(--muted)_40%,var(--card))]">
                       <span className="sr-only">Actions</span>
                     </TableHead>
                   ) : null}
@@ -436,16 +445,13 @@ export function ExpensesView({
                   const items = writer ? expenseActions(e, writer.canDecide).map((action) => menuItem(e, action)) : [];
                   const payments = expensePaymentNote(e);
                   return (
-                    <TableRow key={e.id} className={cn(e.display_status === 'rejected' && 'opacity-60')}>
+                    <TableRow key={e.id} className={cn('group/row', e.display_status === 'rejected' && 'opacity-60')}>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(e.expense_date)}</TableCell>
                       <TableCell className="min-w-24 whitespace-normal break-words font-medium">{e.category_name}</TableCell>
                       {/* A long vendor name wraps; it is never cut off behind a tooltip. */}
                       <TableCell className="min-w-28 max-w-72 whitespace-normal break-words">{e.vendor_name}</TableCell>
                       <TableCell className="text-right tabular-nums">
                         <span className="whitespace-nowrap">{rm(e.amount)}</span>
-                        {payments ? (
-                          <span className="ml-auto block w-36 whitespace-normal text-xs text-muted-foreground">{payments}</span>
-                        ) : null}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{expenseMethod(e)}</TableCell>
                       <TableCell>
@@ -460,9 +466,11 @@ export function ExpensesView({
                             {isPartPaid(e) ? 'Part paid' : EXPENSE_STATUS_LABELS[e.display_status]}
                           </span>
                         </span>
+                        {/* Under the chip, and no wider than the column the chip makes: it wraps there and adds no width. */}
+                        {payments ? <span className="block w-0 min-w-full whitespace-normal text-xs text-muted-foreground">{payments}</span> : null}
                       </TableCell>
                       {actionsColumn ? (
-                        <TableCell className="sticky right-0 bg-card">
+                        <TableCell className="sticky right-0 border-l bg-card group-hover/row:bg-[color-mix(in_oklab,var(--muted)_50%,var(--card))] group-has-aria-expanded/row:bg-[color-mix(in_oklab,var(--muted)_50%,var(--card))]">
                           {items.length ? (
                             // RowMenu has no disabled prop; an inert wrapper keeps its button from being used while an action runs or the form is open.
                             <span inert={locked} className={cn(locked && 'opacity-50')}>

@@ -8,6 +8,7 @@ import { type ExpenseActions, ExpensesView } from '@/components/finance/expenses
 import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { listContacts } from '@/lib/finance/contacts';
+import { canEditExpenses } from '@/lib/finance/expense-form';
 import { listExpenseCategories, listExpenses } from '@/lib/finance/expenses';
 import { todayUtc } from '@/lib/finance/view-helpers';
 import { createClient } from '@/lib/supabase/server';
@@ -34,7 +35,7 @@ export default async function ExpensesScreen() {
   }
   const viewer = await getViewer();
   const ctx = { client: await createClient(), orgId: viewer.orgId };
-  const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
+  const canEdit = canEditExpenses(viewer.role, viewer.isDemo);
   // The form offers contacts and expense categories; anyone without the form has neither read made for them.
   const [rows, contacts, categories] = await Promise.all([
     listExpenses(ctx),
