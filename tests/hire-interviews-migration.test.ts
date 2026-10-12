@@ -17,16 +17,16 @@ const FUNCTIONS = {
   hire_schedule_interview: {
     returns: 'jsonb',
     params:
-      'p_application_id uuid, p_scheduled_at timestamptz, p_duration_minutes integer, p_kind text, ' +
+      'p_application_id uuid, p_scheduled_at text, p_duration_minutes integer, p_kind text, ' +
       'p_place text, p_interviewer_name text, p_notes text',
-    args: 'uuid, timestamptz, integer, text, text, text, text',
+    args: 'uuid, text, integer, text, text, text, text',
   },
   hire_record_past_interview: {
     returns: 'jsonb',
     params:
-      'p_application_id uuid, p_scheduled_at timestamptz, p_duration_minutes integer, p_kind text, ' +
+      'p_application_id uuid, p_scheduled_at text, p_duration_minutes integer, p_kind text, ' +
       'p_outcome text, p_place text, p_interviewer_name text, p_notes text',
-    args: 'uuid, timestamptz, integer, text, text, text, text, text',
+    args: 'uuid, text, integer, text, text, text, text, text',
   },
   hire_reschedule_interview: {
     returns: 'text',
@@ -77,6 +77,15 @@ const APPLICATION_LOCK =
 const APPLICATION_LOCK_NO_OUTCOME =
   'select a.org_id into v_app_org from public.hire_applications a where a.id = p_application_id for update;';
 const INSERT = 'insert into public.hire_interviews';
+const ZONED_REGEX = "'^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,6})?)?(Z|[+-]\\d{2}:\\d{2})$'";
+const helperText = () => {
+  const start = writes.indexOf('create or replace function private.hire_zoned_instant(');
+  expect(start).toBeGreaterThan(-1);
+  const end = writes.indexOf('end $$;', start);
+  expect(end).toBeGreaterThan(start);
+  return flat(writes.slice(start, end));
+};
+const IS_NULL_TIME = (name: Name) => `if v_at is null then ${answer(name, 'invalid_time').replace('return ', 'return ')} end if;`;
 const UPDATE = 'update public.hire_interviews';
 
 describe('hire interviews migration: the columns file', () => {
@@ -124,14 +133,14 @@ describe('hire interviews migration: the writes file', () => {
   });
 
   test('holds the six functions and, outside them, only their revokes and grants', () => {
-    expect(writes.match(/create or replace function/g)).toHaveLength(6);
+    expect(writes.match(/create or replace function/g)).toHaveLength(7);
     expect(writes.match(/create or replace function public\.hire_/g)).toHaveLength(6);
     const outside = writes.replace(/create or replace function[\s\S]*?end \$\$;/g, '');
     const statements = outside.split(';').map((statement) => flat(statement)).filter(Boolean);
-    expect(statements).toHaveLength(12);
+    expect(statements).toHaveLength(13);
     for (const statement of statements) {
       expect(statement).toMatch(
-        /^(revoke execute on function public\.hire_\w+\([^)]*\) from public, anon, service_role|grant execute on function public\.hire_\w+\([^)]*\) to authenticated)$/,
+        /^(revoke execute on function private\.hire_zoned_instant\(text\) from public, anon, authenticated|revoke execute on function public\.hire_\w+\([^)]*\) from public, anon, service_role|grant execute on function public\.hire_\w+\([^)]*\) to authenticated)$/,
       );
     }
   });
@@ -192,7 +201,7 @@ describe('hire interviews migration: the writes file', () => {
     expect(row).toContain('(org_id, application_id, scheduled_at, duration_minutes, kind, place, interviewer_name, notes, status)');
     const status = name === 'hire_schedule_interview' ? "'scheduled'" : 'p_outcome';
     expect(row).toContain(
-      `(v_app_org, p_application_id, p_scheduled_at, p_duration_minutes::smallint, p_kind, v_place, v_interviewer, v_notes, ${status})`,
+      `(v_app_org, p_application_id, v_at, p_duration_minutes::smallint, p_kind, v_place, v_interviewer, v_notes, ${status})`,
     );
     expect(row).toContain('returning id into v_id;');
     expect(row).toContain("return jsonb_build_object('word', 'ok', 'id', v_id);");
@@ -203,7 +212,8 @@ describe('hire interviews migration: the writes file', () => {
     inOrder(body, [
       APPLICATION_LOCK,
       "if v_outcome <> 'active' then return jsonb_build_object('word', 'not_active'); end if;",
-      "if p_scheduled_at is null then return jsonb_build_object('word', 'invalid_time'); end if;",
+      'v_at := private.hire_zoned_instant(p_scheduled_at);',
+      "if v_at is null then return jsonb_build_object('word', 'invalid_time'); end if;",
       'if p_duration_minutes is null or p_duration_minutes < 15 or p_duration_minutes > 480 then',
       "return jsonb_build_object('word', 'invalid_duration');",
       "if p_kind is null or p_kind not in ('video', 'onsite', 'phone') then",
@@ -211,9 +221,9 @@ describe('hire interviews migration: the writes file', () => {
       "if char_length(v_place) > 300 then return jsonb_build_object('word', 'invalid_place'); end if;",
       "if char_length(v_interviewer) > 120 then return jsonb_build_object('word', 'invalid_interviewer'); end if;",
       "if char_length(v_notes) > 2000 then return jsonb_build_object('word', 'invalid_notes'); end if;",
-      "if p_scheduled_at < now() - interval '5 minutes' then return jsonb_build_object('word', 'in_past'); end if;",
-      "if p_scheduled_at > now() + interval '366 days' then return jsonb_build_object('word', 'too_far_ahead'); end if;",
-      "where i.application_id = p_application_id and i.status = 'scheduled' and i.scheduled_at = p_scheduled_at",
+      "if v_at < now() - interval '5 minutes' then return jsonb_build_object('word', 'in_past'); end if;",
+      "if v_at > now() + interval '366 days' then return jsonb_build_object('word', 'too_far_ahead'); end if;",
+      "where i.application_id = p_application_id and i.status = 'scheduled' and i.scheduled_at = v_at",
       "return jsonb_build_object('word', 'duplicate');",
       INSERT,
     ]);
@@ -227,7 +237,8 @@ describe('hire interviews migration: the writes file', () => {
     const body = fn('hire_record_past_interview');
     inOrder(body, [
       APPLICATION_LOCK_NO_OUTCOME,
-      "if p_scheduled_at is null then return jsonb_build_object('word', 'invalid_time'); end if;",
+      'v_at := private.hire_zoned_instant(p_scheduled_at);',
+      "if v_at is null then return jsonb_build_object('word', 'invalid_time'); end if;",
       'if p_duration_minutes is null or p_duration_minutes < 15 or p_duration_minutes > 480 then',
       "return jsonb_build_object('word', 'invalid_duration');",
       "if p_kind is null or p_kind not in ('video', 'onsite', 'phone') then",
@@ -237,9 +248,9 @@ describe('hire interviews migration: the writes file', () => {
       "if char_length(v_place) > 300 then return jsonb_build_object('word', 'invalid_place'); end if;",
       "if char_length(v_interviewer) > 120 then return jsonb_build_object('word', 'invalid_interviewer'); end if;",
       "if char_length(v_notes) > 2000 then return jsonb_build_object('word', 'invalid_notes'); end if;",
-      "if p_scheduled_at > now() then return jsonb_build_object('word', 'not_past'); end if;",
-      "if p_scheduled_at < now() - interval '366 days' then return jsonb_build_object('word', 'too_far_back'); end if;",
-      "where i.application_id = p_application_id and i.status <> 'cancelled' and i.scheduled_at = p_scheduled_at",
+      "if v_at > now() then return jsonb_build_object('word', 'not_past'); end if;",
+      "if v_at < now() - interval '366 days' then return jsonb_build_object('word', 'too_far_back'); end if;",
+      "where i.application_id = p_application_id and i.status <> 'cancelled' and i.scheduled_at = v_at",
       "return jsonb_build_object('word', 'duplicate');",
       INSERT,
     ]);
@@ -369,16 +380,51 @@ describe('hire interviews migration: the writes file', () => {
     expect(body).toContain("if v_number <> trunc(v_number) or v_number < 15 or v_number > 480 then return 'invalid_duration'; end if;");
   });
 
-  test('reschedule: a time that is not a real instant with a zone is refused before it is cast', () => {
+  test('reschedule: a time that is not a real instant with a zone is refused by the shared helper, before any cast here', () => {
     const body = fn('hire_reschedule_interview');
     inOrder(body, [
-      "v_text := p_changes ->> 'scheduled_at';",
-      "or v_text !~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,6})?)?(Z|[+-]\\d{2}:\\d{2})$'",
-      "or pg_input_is_valid(v_text, 'timestamptz') is not true then",
-      "return 'invalid_time';",
-      'v_at := v_text::timestamptz;',
+      "if p_changes ? 'scheduled_at' then",
+      "if jsonb_typeof(p_changes -> 'scheduled_at') <> 'string' then return 'invalid_time'; end if;",
+      "v_at := private.hire_zoned_instant(p_changes ->> 'scheduled_at');",
+      "if v_at is null then return 'invalid_time'; end if;",
+    ]);
+    expect(body).not.toContain('::timestamptz');
+  });
+
+  test('the shared helper refuses text without a zone or that is not a real instant, and casts only after both checks', () => {
+    const body = helperText();
+    expect(body).toContain(
+      "create or replace function private.hire_zoned_instant(p_text text) returns timestamptz language plpgsql stable set search_path = '' as $$",
+    );
+    inOrder(body, [
+      'begin',
+      'if p_text is null',
+      `or p_text !~ ${ZONED_REGEX}`,
+      "or pg_input_is_valid(p_text, 'timestamptz') is not true then",
+      'return null;',
+      'return p_text::timestamptz;',
     ]);
     expect(body.match(/::timestamptz/g)).toHaveLength(1);
+    expect(body).not.toMatch(/\braise\b|\bexception\b/i);
+    expect(writes).toContain('revoke execute on function private.hire_zoned_instant(text) from public, anon, authenticated;');
+    expect(writes).not.toMatch(/grant[^;]*hire_zoned_instant/);
+  });
+
+  test.each(INSERTING)('%s takes the time as text and never casts it itself', (name) => {
+    const body = fn(name);
+    expect(body).toContain('p_scheduled_at text,');
+    expect(body).not.toMatch(/p_scheduled_at timestamptz/);
+    expect(body).not.toContain('::timestamptz');
+    expect(body.match(/p_scheduled_at/g)).toHaveLength(2); // the parameter and the one helper call
+    expect(body).toContain('v_at timestamptz;');
+    // The helper answers before any write, and after the caller checks and the application lock (the order is pinned above).
+    expect(body.indexOf('private.hire_zoned_instant(p_scheduled_at)')).toBeLessThan(body.indexOf('insert into'));
+    expect(body.indexOf(IS_NULL_TIME(name))).toBeGreaterThan(body.indexOf('private.hire_zoned_instant(p_scheduled_at)'));
+  });
+
+  test('no function in the file has a timestamptz parameter that a caller\'s text would be cast into for a time', () => {
+    expect(writes).not.toMatch(/p_scheduled_at timestamptz/);
+    for (const name of INSERTING) expect(writes).not.toContain(`${name}(uuid, timestamptz`);
   });
 
   test.each(STATUS_ONLY)('%s locks the interview only and never reads the application', (name) => {
@@ -432,7 +478,7 @@ describe('hire interviews migration: the writes file', () => {
       expect(writes).toContain(`revoke execute on function public.${signature} from public, anon, service_role;`);
       expect(writes).toContain(`grant execute on function public.${signature} to authenticated;`);
     }
-    expect(writes.match(/revoke execute/g)).toHaveLength(6);
+    expect(writes.match(/revoke execute/g)).toHaveLength(7);
     expect(writes.match(/grant execute/g)).toHaveLength(6);
     expect(writes).not.toMatch(/grant execute[^;]*to[^;]*\b(anon|service_role|public)\b/i);
   });

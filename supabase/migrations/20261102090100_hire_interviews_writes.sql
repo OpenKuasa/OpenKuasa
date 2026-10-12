@@ -8,6 +8,27 @@
 -- grants. The columns these functions use are added in 20261102090000.
 
 -- ---------------------------------------------------------------------------
+-- A time that arrives as text becomes an instant only when it says which zone
+-- it is in. A parameter typed timestamptz would be cast in the session's zone
+-- (UTC) before a function body runs, so "2026-10-20T15:00:00" would be stored
+-- as 15:00 UTC, which is 23:00 in Kuala Lumpur, and be answered "ok". All three
+-- functions that take a time go through this one check, so the rule cannot
+-- drift. The form is checked, then whether it is a real instant, and only then
+-- is it cast: null is the answer for anything else, and nothing raises.
+-- ---------------------------------------------------------------------------
+create or replace function private.hire_zoned_instant(p_text text)
+returns timestamptz language plpgsql stable set search_path = '' as $$
+begin
+  if p_text is null
+     or p_text !~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?(Z|[+-]\d{2}:\d{2})$'
+     or pg_input_is_valid(p_text, 'timestamptz') is not true then
+    return null;
+  end if;
+  return p_text::timestamptz;
+end $$;
+revoke execute on function private.hire_zoned_instant(text) from public, anon, authenticated;
+
+-- ---------------------------------------------------------------------------
 -- Schedule an interview for an active application, at any stage. The new row
 -- takes the application's own workspace, read under the application's row
 -- lock: the caller never names one. A deletion of the application takes the
@@ -16,7 +37,7 @@
 -- ---------------------------------------------------------------------------
 create or replace function public.hire_schedule_interview(
   p_application_id uuid,
-  p_scheduled_at timestamptz,
+  p_scheduled_at text,
   p_duration_minutes integer,
   p_kind text,
   p_place text,
@@ -31,6 +52,7 @@ declare
   v_place text := private.hire_one_line(p_place);
   v_interviewer text := private.hire_one_line(p_interviewer_name);
   v_notes text := nullif(regexp_replace(coalesce(p_notes, ''), '^\s+|\s+$', '', 'g'), '');
+  v_at timestamptz;
   v_id uuid;
 begin
   select a.org_id into v_org from public.hire_applications a where a.id = p_application_id;
@@ -51,7 +73,8 @@ begin
   if v_app_org is distinct from v_org then return jsonb_build_object('word', 'not_found'); end if;
   if v_outcome <> 'active' then return jsonb_build_object('word', 'not_active'); end if;
 
-  if p_scheduled_at is null then return jsonb_build_object('word', 'invalid_time'); end if;
+  v_at := private.hire_zoned_instant(p_scheduled_at);
+  if v_at is null then return jsonb_build_object('word', 'invalid_time'); end if;
   if p_duration_minutes is null or p_duration_minutes < 15 or p_duration_minutes > 480 then
     return jsonb_build_object('word', 'invalid_duration');
   end if;
@@ -63,12 +86,14 @@ begin
   if char_length(v_notes) > 2000 then return jsonb_build_object('word', 'invalid_notes'); end if;
 
   -- Five minutes of grace for a slow form and a clock that is slightly off.
-  if p_scheduled_at < now() - interval '5 minutes' then return jsonb_build_object('word', 'in_past'); end if;
-  if p_scheduled_at > now() + interval '366 days' then return jsonb_build_object('word', 'too_far_ahead'); end if;
+  if v_at < now() - interval '5 minutes' then return jsonb_build_object('word', 'in_past'); end if;
+  if v_at > now() + interval '366 days' then return jsonb_build_object('word', 'too_far_ahead'); end if;
 
+  -- Spec: the same application cannot have two scheduled interviews at one instant, so a double submit is harmless at the database. Only a scheduled
+  -- interview counts here; the instant is compared exactly, to the microsecond.
   if exists (
        select 1 from public.hire_interviews i
-        where i.application_id = p_application_id and i.status = 'scheduled' and i.scheduled_at = p_scheduled_at) then
+        where i.application_id = p_application_id and i.status = 'scheduled' and i.scheduled_at = v_at) then
     return jsonb_build_object('word', 'duplicate');
   end if;
 
@@ -76,7 +101,7 @@ begin
   insert into public.hire_interviews
     (org_id, application_id, scheduled_at, duration_minutes, kind, place, interviewer_name, notes, status)
   values
-    (v_app_org, p_application_id, p_scheduled_at, p_duration_minutes::smallint, p_kind, v_place, v_interviewer, v_notes, 'scheduled')
+    (v_app_org, p_application_id, v_at, p_duration_minutes::smallint, p_kind, v_place, v_interviewer, v_notes, 'scheduled')
   returning id into v_id;
   return jsonb_build_object('word', 'ok', 'id', v_id);
 end $$;
@@ -89,7 +114,7 @@ end $$;
 -- ---------------------------------------------------------------------------
 create or replace function public.hire_record_past_interview(
   p_application_id uuid,
-  p_scheduled_at timestamptz,
+  p_scheduled_at text,
   p_duration_minutes integer,
   p_kind text,
   p_outcome text,
@@ -104,6 +129,7 @@ declare
   v_place text := private.hire_one_line(p_place);
   v_interviewer text := private.hire_one_line(p_interviewer_name);
   v_notes text := nullif(regexp_replace(coalesce(p_notes, ''), '^\s+|\s+$', '', 'g'), '');
+  v_at timestamptz;
   v_id uuid;
 begin
   select a.org_id into v_org from public.hire_applications a where a.id = p_application_id;
@@ -121,7 +147,8 @@ begin
   if not found then return jsonb_build_object('word', 'not_found'); end if;
   if v_app_org is distinct from v_org then return jsonb_build_object('word', 'not_found'); end if;
 
-  if p_scheduled_at is null then return jsonb_build_object('word', 'invalid_time'); end if;
+  v_at := private.hire_zoned_instant(p_scheduled_at);
+  if v_at is null then return jsonb_build_object('word', 'invalid_time'); end if;
   if p_duration_minutes is null or p_duration_minutes < 15 or p_duration_minutes > 480 then
     return jsonb_build_object('word', 'invalid_duration');
   end if;
@@ -135,20 +162,21 @@ begin
   if char_length(v_interviewer) > 120 then return jsonb_build_object('word', 'invalid_interviewer'); end if;
   if char_length(v_notes) > 2000 then return jsonb_build_object('word', 'invalid_notes'); end if;
 
-  if p_scheduled_at > now() then return jsonb_build_object('word', 'not_past'); end if;
-  if p_scheduled_at < now() - interval '366 days' then return jsonb_build_object('word', 'too_far_back'); end if;
+  if v_at > now() then return jsonb_build_object('word', 'not_past'); end if;
+  if v_at < now() - interval '366 days' then return jsonb_build_object('word', 'too_far_back'); end if;
 
-  -- Any interview of this application at that instant counts, a cancelled one aside.
+  -- Spec: the same application cannot have two interviews at one instant whatever their status, a cancelled
+  -- one aside (so a second recording of the same meeting is refused). Compared exactly, to the microsecond.
   if exists (
        select 1 from public.hire_interviews i
-        where i.application_id = p_application_id and i.status <> 'cancelled' and i.scheduled_at = p_scheduled_at) then
+        where i.application_id = p_application_id and i.status <> 'cancelled' and i.scheduled_at = v_at) then
     return jsonb_build_object('word', 'duplicate');
   end if;
 
   insert into public.hire_interviews
     (org_id, application_id, scheduled_at, duration_minutes, kind, place, interviewer_name, notes, status)
   values
-    (v_app_org, p_application_id, p_scheduled_at, p_duration_minutes::smallint, p_kind, v_place, v_interviewer, v_notes, p_outcome)
+    (v_app_org, p_application_id, v_at, p_duration_minutes::smallint, p_kind, v_place, v_interviewer, v_notes, p_outcome)
   returning id into v_id;
   return jsonb_build_object('word', 'ok', 'id', v_id);
 end $$;
@@ -173,7 +201,6 @@ declare
   v_app_org uuid;
   v_outcome text;
   v_row public.hire_interviews%rowtype;
-  v_text text;
   v_number numeric;
   v_at timestamptz;
   v_duration integer;
@@ -213,18 +240,13 @@ begin
   if v_row.status <> 'scheduled' then return 'not_scheduled'; end if;
   if v_outcome <> 'active' then return 'not_active'; end if;
 
-  -- The time: text with a zone. The form is checked, then whether it is a real
-  -- instant, and only then is it cast, so text that is not a time is answered
-  -- with a word.
+  -- The time: text with a zone, checked by the helper shared with the two
+  -- functions that insert. Anything else is answered with a word.
   v_at := v_row.scheduled_at;
   if p_changes ? 'scheduled_at' then
-    v_text := p_changes ->> 'scheduled_at';
-    if jsonb_typeof(p_changes -> 'scheduled_at') <> 'string'
-       or v_text !~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?(Z|[+-]\d{2}:\d{2})$'
-       or pg_input_is_valid(v_text, 'timestamptz') is not true then
-      return 'invalid_time';
-    end if;
-    v_at := v_text::timestamptz;
+    if jsonb_typeof(p_changes -> 'scheduled_at') <> 'string' then return 'invalid_time'; end if;
+    v_at := private.hire_zoned_instant(p_changes ->> 'scheduled_at');
+    if v_at is null then return 'invalid_time'; end if;
   end if;
 
   v_duration := v_row.duration_minutes;
@@ -363,18 +385,20 @@ begin
   if not found then return 'not_found'; end if;
   if v_status = 'scheduled' then return 'not_closed'; end if;
 
+  -- Deliberately no duplicate check on this undo: it can leave two scheduled interviews of one application at
+  -- the same instant. The owner accepted that; do not "fix" it by accident.
   update public.hire_interviews set status = 'scheduled', updated_at = now() where id = p_interview_id;
   return 'ok';
 end $$;
 
-revoke execute on function public.hire_schedule_interview(uuid, timestamptz, integer, text, text, text, text) from public, anon, service_role;
-revoke execute on function public.hire_record_past_interview(uuid, timestamptz, integer, text, text, text, text, text) from public, anon, service_role;
+revoke execute on function public.hire_schedule_interview(uuid, text, integer, text, text, text, text) from public, anon, service_role;
+revoke execute on function public.hire_record_past_interview(uuid, text, integer, text, text, text, text, text) from public, anon, service_role;
 revoke execute on function public.hire_reschedule_interview(uuid, jsonb, timestamptz) from public, anon, service_role;
 revoke execute on function public.hire_cancel_interview(uuid) from public, anon, service_role;
 revoke execute on function public.hire_set_interview_outcome(uuid, text) from public, anon, service_role;
 revoke execute on function public.hire_reopen_interview(uuid) from public, anon, service_role;
-grant execute on function public.hire_schedule_interview(uuid, timestamptz, integer, text, text, text, text) to authenticated;
-grant execute on function public.hire_record_past_interview(uuid, timestamptz, integer, text, text, text, text, text) to authenticated;
+grant execute on function public.hire_schedule_interview(uuid, text, integer, text, text, text, text) to authenticated;
+grant execute on function public.hire_record_past_interview(uuid, text, integer, text, text, text, text, text) to authenticated;
 grant execute on function public.hire_reschedule_interview(uuid, jsonb, timestamptz) to authenticated;
 grant execute on function public.hire_cancel_interview(uuid) to authenticated;
 grant execute on function public.hire_set_interview_outcome(uuid, text) to authenticated;
