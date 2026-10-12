@@ -10,9 +10,11 @@
  * only the database writes are refused to both. Three tests go through the
  * cash book functions (a cash receipt, two payment vouchers), which number a
  * payment and so run as the owner like the rest; two go through the
- * cash receipts data layer (a receipt for income, a receipt for invoices), and five through
+ * cash receipts data layer (a receipt for income, a receipt for invoices), and seven through
  * the expenses data layer (the form's writes, a payment against an expense, a decision on an
- * expense changed meanwhile, and one of NaN).
+ * expense changed meanwhile, one of NaN, and marking an expense paid, in part, in full and after it
+ * changed). The last one writes categories and the two closed columns of an expense directly: no
+ * screen writes either yet.
  *
  * Workspaces and users come from tests/helpers/live-workspaces.ts, which also
  * removes them.
@@ -27,7 +29,9 @@ import {
   voidCashReceipt,
 } from '@/lib/finance/cash-receipts';
 import { expenseDecisionPayload } from '@/lib/finance/expense-form';
+import { expensePayPayload, markExpensePaid, newExpensePayForm } from '@/lib/finance/expense-payment';
 import { approveExpense, deleteExpense, listExpenseCategories, listExpenses, rejectExpense, saveExpense } from '@/lib/finance/expenses';
+import { listAccounts } from '@/lib/finance/money';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import { createConfirmedTestUser, createOrg, liveClient, signInOwner } from './helpers/live-workspaces';
 
@@ -551,20 +555,30 @@ testWithSupabase('an expense changed after the owner opened it is not approved o
   expect((await expenseRow(saved.id))?.status).toBe('approved');
 });
 
-testWithSupabase('a direct update that leaves updated_at alone is still not approved as it now stands', async () => {
+testWithSupabase('a direct update of a pending expense moves updated_at, and is not approved as it was shown', async () => {
   const asMember = { client: member.c, orgId };
   const asOwner = { client: owner.c, orgId };
   const rent = await category('Rent');
   const saved = done(await saveExpense(asMember, { expense_date: daysFromToday(0), category_id: rent, vendor_name: 'Kedai Ali', amount: 120 }));
   const opened = await shown(saved.id);
-  // The member goes round the app: a plain update of the amount, nothing else, so updated_at does not move.
+  // The member goes round the app: a plain update of the amount and nothing else. The database stamps it
+  // (the trigger finance_expense_stamp), so updated_at moves all the same.
   const direct = await member.c.from('finance_expenses').update({ amount: 9999 }).eq('id', saved.id).select('id').maybeSingle();
   expect(direct.error, direct.error?.message).toBeNull();
-  expect((await shown(saved.id)).updated_at).toBe(opened.updated_at);
+  expect((await shown(saved.id)).updated_at).not.toBe(opened.updated_at);
+  // Nor can they put the old value back with the change.
+  const pinned = await member.c
+    .from('finance_expenses')
+    .update({ amount: 8888, updated_at: opened.updated_at })
+    .eq('id', saved.id)
+    .select('id')
+    .maybeSingle();
+  expect(pinned.error, pinned.error?.message).toBeNull();
+  expect((await shown(saved.id)).updated_at).not.toBe(opened.updated_at);
   const changed = 'This expense was changed after you opened it. Check it again, then approve or reject it.';
   expect(await approveExpense(asOwner, opened)).toEqual({ ok: false, error: changed });
   expect(await rejectExpense(asOwner, opened)).toEqual({ ok: false, error: changed });
-  expect(await expenseRow(saved.id)).toMatchObject({ status: 'pending', amount: 9999, approved_by: null });
+  expect(await expenseRow(saved.id)).toMatchObject({ status: 'pending', amount: 8888, approved_by: null });
 });
 
 testWithSupabase('an expense of NaN is refused by the database, whoever sends it', async () => {
@@ -584,4 +598,169 @@ testWithSupabase('an expense of NaN is refused by the database, whoever sends it
   }
   const { data } = await owner.c.from('finance_expenses').select('id').eq('org_id', orgId).eq('vendor_name', 'X');
   expect(data ?? []).toEqual([]);
+});
+
+// ---- stage 5c-2: marking an expense paid, and the rules of bendahara_expense_stamp_and_category_writers ----
+// Marking paid goes through src/lib/finance/expense-payment.ts with what the Mark paid card sends: the row as
+// the screen reads it, the accounts as the screen reads them, and the card's own form and payload functions.
+
+/** The expense as the Expenses screen lists it. */
+const listed = async (id: string) => {
+  const row = (await listExpenses({ client: owner.c, orgId })).find((e) => e.id === id);
+  expect(row).toBeTruthy();
+  return row!;
+};
+/** What the Mark paid card sends for that row with this amount typed; with no amount, the card as it opens (all that is left). */
+const cardPayment = async (id: string, amount?: string) => {
+  const row = await listed(id);
+  const form = newExpensePayForm(row, await listAccounts({ client: owner.c, orgId }), daysFromToday(0));
+  return expensePayPayload(row, amount === undefined ? form : { ...form, amount });
+};
+const vouchersFor = async (party: string) => {
+  const { data, error } = await owner.c
+    .from('finance_payment_vouchers')
+    .select('kind, status, number, amount, party_name, category_name, contact_id')
+    .eq('org_id', orgId)
+    .eq('party_name', party)
+    .order('amount', { ascending: true });
+  expect(error, error?.message).toBeNull();
+  return data ?? [];
+};
+
+testWithSupabase('an approved expense is marked paid by the owner, in part and then in full; a member cannot', async () => {
+  const asMember = { client: member.c, orgId };
+  const asOwner = { client: owner.c, orgId };
+  const rent = await category('Rent');
+  const saved = done(await saveExpense(asOwner, { expense_date: daysFromToday(0), category_id: rent, vendor_name: 'Paid Landlord', amount: 100 }));
+  expect((await cardPayment(saved.id)).amount).toBe(100);
+
+  // A member is refused by the database, and nothing is left behind.
+  const before = await transactions();
+  expect(await markExpensePaid(asMember, await cardPayment(saved.id, '30'))).toEqual({ ok: false, error: NEEDS_SIGN_OFF });
+  expect(await transactions()).toBe(before);
+
+  // The owner pays 30 of 100: a posted voucher with a number, and the expense is part paid.
+  const part = done(await markExpensePaid(asOwner, await cardPayment(saved.id, '30')));
+  expect(part.number).toMatch(/^PV-\d+$/);
+  expect(await listed(saved.id)).toMatchObject({ display_status: 'approved', paid: 30, held: 0, method: 'bank_transfer' });
+  // What is left is what the card now opens with, and more than that is refused by the database itself.
+  expect((await cardPayment(saved.id)).amount).toBe(70);
+  expect(await markExpensePaid(asOwner, await cardPayment(saved.id, '70.01'))).toEqual({
+    ok: false,
+    error: 'That is more than is still to pay on this expense.',
+  });
+  done(await markExpensePaid(asOwner, await cardPayment(saved.id)));
+  expect(await listed(saved.id)).toMatchObject({ display_status: 'paid', paid: 100, held: 0 });
+  expect(await markExpensePaid(asOwner, await cardPayment(saved.id, '0.01'))).toEqual({
+    ok: false,
+    error: 'That is more than is still to pay on this expense.',
+  });
+
+  // Both payments are on Payment Vouchers as expense vouchers, paid to the vendor the expense names.
+  expect(await vouchersFor('Paid Landlord')).toMatchObject([
+    { kind: 'expense', status: 'posted', amount: 30, party_name: 'Paid Landlord', category_name: 'Rent', contact_id: null },
+    { kind: 'expense', status: 'posted', amount: 70, party_name: 'Paid Landlord', category_name: 'Rent', contact_id: null },
+  ]);
+  // A paid expense is not rejected.
+  expect(await rejectExpense(asOwner, await shown(saved.id))).toEqual({
+    ok: false,
+    error: 'This expense has a payment against it, paid or still to be paid, so it cannot be rejected.',
+  });
+});
+
+testWithSupabase('an expense is paid to its contact, and not as it was shown once it has been rejected or changed', async () => {
+  const asMember = { client: member.c, orgId };
+  const asOwner = { client: owner.c, orgId };
+  const rent = await category('Rent');
+  const details = { expense_date: daysFromToday(0), category_id: rent, vendor_id: supplier, vendor_name: null, amount: 80 };
+  const saved = done(await saveExpense(asOwner, details));
+  const opened = await cardPayment(saved.id);
+
+  // Rejected while the card was open: not paid.
+  done(await rejectExpense(asOwner, await shown(saved.id)));
+  expect(await markExpensePaid(asOwner, opened)).toEqual({ ok: false, error: 'This expense is not approved any more, so it cannot be paid.' });
+  // Changed by a member and approved again: it is approved, and it is not the expense the card showed.
+  done(await saveExpense(asMember, { ...details, id: saved.id, amount: 800 }));
+  done(await approveExpense(asOwner, await shown(saved.id)));
+  expect(await markExpensePaid(asOwner, opened)).toEqual({
+    ok: false,
+    error: 'This expense was changed after you opened it. Check it again, then mark it paid.',
+  });
+  expect(await listed(saved.id)).toMatchObject({ display_status: 'approved', amount: 800, paid: 0, held: 0 });
+
+  // Shown again, it is paid, to the contact.
+  done(await markExpensePaid(asOwner, await cardPayment(saved.id)));
+  expect(await listed(saved.id)).toMatchObject({ display_status: 'paid', paid: 800 });
+  expect(await vouchersFor('Guarded Supplier')).toMatchObject([{ kind: 'expense', status: 'posted', amount: 800, contact_id: supplier }]);
+  // An expense that is not there.
+  expect(await markExpensePaid(asOwner, { ...opened, id: '00000000-0000-4000-8000-000000000000' })).toEqual({
+    ok: false,
+    error: 'That expense no longer exists.',
+  });
+});
+
+testWithSupabase('categories are an owner\'s to change, a category has a name, and who entered an expense is not rewritten', async () => {
+  const asMember = { client: member.c, orgId };
+  const rent = await category('Rent');
+
+  // A member reads categories and changes none of them.
+  const added = await member.c.from('finance_categories').insert({ org_id: orgId, name: 'Member Fuel', kind: 'expense' });
+  expect(added.error?.code).toBe(DENIED);
+  const renamed = await member.c.from('finance_categories').update({ name: 'Member Rent' }).eq('id', rent).select('id');
+  expect(renamed.error, renamed.error?.message).toBeNull();
+  expect(renamed.data).toEqual([]);
+  const archived = await member.c.from('finance_categories').update({ active: false }).eq('id', rent).select('id');
+  expect(archived.data).toEqual([]);
+  const removed = await member.c.from('finance_categories').delete().eq('org_id', orgId).eq('name', 'Travel').select('id');
+  expect(removed.data).toEqual([]);
+  expect((await listExpenseCategories(asMember)).map((c) => c.name)).toEqual(
+    expect.arrayContaining(['Rent', 'Travel']),
+  );
+
+  // The owner adds, renames, archives and restores one; its name is checked by the database.
+  const made = await owner.c.from('finance_categories').insert({ org_id: orgId, name: 'Live Fuel', kind: 'expense' }).select('id').single();
+  expect(made.error, made.error?.message).toBeNull();
+  const fuel = made.data!.id as string;
+  for (const name of ['', '   ', 'Live Petrol ', 'n'.repeat(81)]) {
+    const refused = await owner.c.from('finance_categories').update({ name }).eq('id', fuel);
+    expect(refused.error?.code, JSON.stringify(name)).toBe('23514');
+    expect(refused.error?.message).toContain('finance_categories_name_check');
+  }
+  const again = await owner.c.from('finance_categories').insert({ org_id: orgId, name: 'live fuel', kind: 'expense' });
+  expect(again.error?.code).toBe('23505');
+  for (const change of [{ name: 'Live Petrol' }, { active: false }, { active: true }]) {
+    const changed = await owner.c.from('finance_categories').update(change).eq('id', fuel).select('id');
+    expect(changed.error, changed.error?.message).toBeNull();
+    expect(changed.data).toEqual([{ id: fuel }]);
+  }
+  // Its account in the books followed the new name.
+  const account = await owner.c.from('finance_ledger_accounts').select('name, active').eq('org_id', orgId).eq('category_id', fuel).maybeSingle();
+  expect(account.data).toEqual({ name: 'Live Petrol', active: true });
+  const gone = await owner.c.from('finance_categories').delete().eq('id', fuel).select('id');
+  expect(gone.data).toEqual([{ id: fuel }]);
+
+  // Who entered an expense, and when, is the database's: neither a member nor the owner writes it.
+  const saved = done(await saveExpense(asMember, { expense_date: daysFromToday(0), category_id: rent, vendor_name: 'Kedai Ali', amount: 15 }));
+  for (const c of [member.c, owner.c]) {
+    const who = await c.from('finance_expenses').update({ created_by: owner.userId }).eq('id', saved.id);
+    expect(who.error?.code).toBe(DENIED);
+    const when = await c.from('finance_expenses').update({ created_at: '2020-01-01T00:00:00Z' }).eq('id', saved.id);
+    expect(when.error?.code).toBe(DENIED);
+    const borrowed = await c
+      .from('finance_expenses')
+      .insert({ org_id: orgId, category_id: rent, vendor_name: 'Y', amount: 5, created_by: c === member.c ? owner.userId : member.userId });
+    expect(borrowed.error?.code).toBe(DENIED);
+  }
+  expect(await expenseRow(saved.id)).toMatchObject({ status: 'pending', amount: 15, created_by: member.userId });
+  // An insert by hand is the caller's own, and is stamped by the database whatever updated_at it sends.
+  const byHand = await member.c
+    .from('finance_expenses')
+    .insert({ org_id: orgId, category_id: rent, vendor_name: 'By hand', amount: 5, updated_at: '2020-01-01T00:00:00Z' })
+    .select('id, created_by, updated_at')
+    .single();
+  expect(byHand.error, byHand.error?.message).toBeNull();
+  expect(byHand.data!.created_by).toBe(member.userId);
+  expect(new Date(byHand.data!.updated_at as string).getFullYear()).toBeGreaterThan(2020);
+  done(await deleteExpense(asMember, { id: byHand.data!.id as string }));
+  done(await deleteExpense(asMember, { id: saved.id }));
 });
