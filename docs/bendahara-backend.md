@@ -39,7 +39,8 @@ the data layer, with unit tests; the client components only draw them.
 | `cash-book.ts` | Reading the cash book: one row per movement of money in (`listCashReceipts`, from the view `finance_cash_receipts`) and out (`listPaymentVouchers`, from `finance_payment_vouchers`), a page at a time, with the row types and the kinds a receipt and a voucher can be. It only reads |
 | `cash-receipts.ts` | A receipt's writes, and the one read its form needs: the Zod schema of a draft receipt (`saveCashReceiptInput`, for invoices or for income, told apart by `kind`), saving a draft (`saveCashReceipt`), posting it (`postCashReceipt`), voiding a posted one (`voidCashReceipt`), deleting a draft (`deleteCashReceipt`), the sentence for each database code (`CASH_RECEIPT_MESSAGES`), and the active income categories (`listIncomeCategories`). Every write given an id asks `finance_cash_receipts` first, so one side of a transfer is never reached |
 | `cash-receipt-form.ts` | The receipt form: defaults, the form for a draft being changed (`editCashReceiptForm`, from its row and its Payments In rows), which invoices it can go against (`receivableFor`: the payment-in rule, without counting what the draft being changed holds itself), validation, what is sent (the chosen side only), a picker's list with a draft's archived choice in it (`withCurrent`). `receiptSavedNotPosted` words a receipt that was saved as a draft but not posted. `receiptInvoicesForForm` and `receiptPaymentsForForm` trim what the loader sends the form to the invoices that can still take money and the payments that hold part of one. `leftOutInvoicesNote` says when ticked invoices were left out. `afterRefusedReceiptSave` makes the form forget the id of a draft that was deleted meanwhile |
-| `expenses.ts` | Reading expenses (`listExpenses`, from the view `finance_expense_totals`), a page at a time, with the row type, the three statuses a person sets and `paid`, which is only how an expense reads. It only reads |
+| `expenses.ts` | Expenses: reading them (`listExpenses`, from the view `finance_expense_totals`, a page at a time; `listExpenseCategories`), the row type, the three statuses a person sets and `paid`, which is only how an expense reads; and the writes of the Expenses screen: `saveExpenseInput`, `saveExpense` (`finance_save_expense`, then a read of the status the database left), `approveExpense` and `rejectExpense` (one update of `status`), `deleteExpense`, and `EXPENSE_MESSAGES` |
+| `expense-form.ts` | The Expenses screen's rules, pure: the form (`newExpenseForm`, `editExpenseForm`, `expensePayload`, `expenseFormError`, `expenseSaveHint`), what a row's menu offers each person (`expenseActions`), how a part-paid expense reads (`isPartPaid`, `expensePaymentNote`), and the note for an expense just written that is not in the list |
 | `cash-book-views.ts` | KPI figures, chart data, table filters, status words and CSV rows for Cash Receipts, Payment Vouchers and Expenses; the period selector of the first two (`inPeriod`), which sets the cards, the donut and the table rows alike (`cashReceiptsInPeriod`, `paymentVouchersInPeriod`: a draft receipt, and a voucher waiting for approval or still to be paid, stay in every period because their cards count them whatever their date; search, filters, "View all" and Export work on top of it); which category a voucher counts under (`voucherCategory`) and which screen changes it (`voucherHome`); what a receipt's row menu offers, by its status and by whether the person may sign off (`cashReceiptActions`), and the words of its questions (`receiptName`, `receiptVoidEffect`, `receiptDeleteEffect`) |
 | `receipts.ts` | Reading the Receipts Inbox (`listInboxReceipts`, from the view `finance_receipt_inbox`), a page at a time, with the row type and the bucket's name, size limit and five file types. An inbox receipt is an uploaded photo or PDF, not a cash receipt: everything exported says `Inbox`. It never reads `file_path`: only `getReceiptFile` in `receipt-inbox.ts` does, on the server |
 | `receipt-views.ts` | The three counts, the donut, the status and type words, the "Matched to" words (`inboxDocument`), whether a row says anything about AI reading and what (`inboxReadingNote`, `INBOX_READING_NOTES`), the filter and the CSV rows of the Receipts Inbox |
@@ -112,9 +113,14 @@ Payment Vouchers and Expenses, where it can be the payer, the payee or the
 vendor. Every cash receipt action (save, save and post, post, void, delete)
 refreshes what an invoice or a payment in refreshes, whatever the receipt is
 for: one against invoices moves what they owe, or holds part of them while it
-is a draft, and one save can turn a draft of one kind into the other. Payment
-Vouchers and Expenses have no action of their own yet: they are read-only for
-everyone.
+is a draft, and one save can turn a draft of one kind into the other. The
+four expense actions (`saveExpenseAction`, `approveExpenseAction`,
+`rejectExpenseAction`, `deleteExpenseAction`) refresh `EXPENSE_PATHS`:
+Expenses, Receipts Inbox (which names the expense a receipt is tied to),
+Payment Vouchers and Banking (which name the category of the expenses a
+voucher pays). Approve and reject are refused to anyone who may not sign off,
+before anything is read, in the expense's own sentence. Payment Vouchers has
+no action of its own yet: it is read-only for everyone.
 
 The Receipts Inbox has its own actions file,
 `src/app/(app)/finance/receipt-inbox-actions.ts`: `registerReceiptAction`,
@@ -370,6 +376,57 @@ expense is locked; an owner or admin can still reject it while no payment
 stands against it. A rejected expense can be deleted, or edited, and the
 edit must itself set its status back to pending, as `finance_save_expense`
 does: an update that leaves it rejected is refused (`FIN01`).
+
+An expense's `amount` and `sst_amount` cannot be NaN
+(`finance_expenses_amount_not_nan`, `finance_expenses_sst_amount_not_nan`,
+from `20261110100000_bendahara_expense_amounts.sql`): NaN is a numeric that
+passes `> 0`, and one saved expense of NaN would turn every total it is added
+into NaN. `supabase/tests/bendahara_expense_amounts_check.sql` proves it.
+
+### The expense form
+
+`/finance/expenses` is writable for anyone who may edit. "New expense" opens
+a card (`expense-form-card.tsx`): date, category, vendor (a contact, or "Not
+a contact" and a typed name: exactly one), the amount with its SST inside it,
+the SST, notes. There is one button. Who is saving decides what happens, in
+the database: saved by an owner or admin the expense is approved in the same
+call, **whoever entered it**, so an owner who edits a member's pending
+expense approves it; saved by anyone else it waits as Pending approval. The
+form says which before the save, and `saveExpense` reads the status back
+after it. The status, the workspace and the two approval columns are never
+taken from input.
+
+Who is offered what is `expenseActions(row, canDecide)`, and `canDecide` is
+worked out once, on the server, in `src/screens/finance/expenses.tsx`
+(`can(role, 'sign-off-finance')`, the same people as the database's
+`private.finance_may_decide`):
+
+| Expense | Owner, admin | Member |
+|---|---|---|
+| Pending | Edit, Approve, Reject, Delete | Edit, Delete |
+| Rejected | Edit (it is sent for approval again), Delete | the same |
+| Approved, nothing paid, nothing held by a payment | Reject | nothing |
+| Approved with a payment against it; Paid | nothing | nothing |
+
+Approving and rejecting are checked by the expense's own guard
+(`private.finance_expense_guard`), not by the sign-off trigger, which is not
+on this table: a member's direct update answers `FIN14` "only an owner or
+admin approves or rejects an expense". `FIN01` means five things on this
+table and is worded by what was being done (`locked`, `cannotApprove`,
+`cannotReject`, `cannotDelete`); `FIN02` is a rejection of an expense with a
+payment against it; `23503` on a delete is a rejected expense that a voided
+payment still names, which is kept.
+
+An approved expense that is paid in part reads "Part paid", with a line
+under its amount: what was paid, what payments not yet made hold, and what
+has no payment yet (`expensePaymentNote`). The view's `display_status` is
+still `approved` for it, and the status filter's Approved includes it.
+
+For the Receipts Inbox (stage 7d): `ExpenseFormCard` takes `initial` (fields
+to start a new form with) and `actions.save` (whatever saves it), so "Create
+expense" opens the same card pre-filled and saves through
+`finance_receipt_to_expense`; `saveExpenseInput` without its `id` is what
+that function is given; "Attach receipt" is one more `ExpenseAction`.
 
 The view `finance_expense_totals` adds the category's and the vendor's name,
 `paid` (posted money out allocated to the expense), `held` (what payments not
@@ -1137,10 +1194,11 @@ voucher, and deleting a draft receipt, a pending or rejected expense, or a
 payment that was never paid, are plain updates and deletes as well.
 `cash-receipts.ts` calls `finance_save_cash_receipt` and
 `finance_post_cash_receipt`, and voids and deletes a receipt, each after
-asking `finance_cash_receipts` whether the payment is one. No function of
-`src/lib/finance/` calls `finance_record_voucher` or `finance_save_expense`,
-approves or rejects an expense or a payment, or touches an expense:
-`cash-book.ts` and `expenses.ts` only read, and each of those writes arrives
+asking `finance_cash_receipts` whether the payment is one. `expenses.ts`
+calls `finance_save_expense`, approves and rejects an expense with one
+update of `status`, and deletes one. No function of `src/lib/finance/` calls
+`finance_record_voucher`, or approves or rejects a payment: `cash-book.ts`
+only reads, and each of those writes arrives
 with its form. The other voids and deletes that exist are those of Payments
 In, Payments Out and Refunds, and reach only what those screens show.
 
@@ -1549,10 +1607,24 @@ with no date).
 - A contact's Payable counts bills that are pending or overdue, and the
   Payable card is totalled from every open bill, not only the contacts loaded.
   Receivable is the same for invoices that are sent or overdue.
-- Payment Vouchers and Expenses are read-only. A voucher that is not a
-  supplier payment or a refund, and an expense, exist only in the demo
-  workspace until their forms are built; the database functions for them are
-  there and nothing calls them.
+- Payment Vouchers is read-only. A voucher that is not a supplier payment or
+  a refund exists only in the demo workspace until its form is built; the
+  database function for it is there and nothing calls it. So an approved
+  expense cannot be paid from the app yet ("Mark paid" and the voucher form).
+- Any writer may change or delete any pending or rejected expense, whoever
+  entered it: the database does not look at `created_by`, and neither does
+  the screen. `created_by` on a pending expense can also be rewritten by a
+  direct update; the column is not closed to the `authenticated` role as it
+  is on payments.
+- An owner or admin who saves over someone else's pending expense approves
+  it. To change it and leave it waiting is not possible for them.
+- A rejection carries no reason: the table has no column for one.
+- Two people changing one expense at once: the later save wins without a
+  warning. An expense approved meanwhile answers that it is locked.
+- An expense's category can be one that was archived since; the form keeps
+  it in its picker for that expense only. Categories have no screen yet.
+- A rejected expense that a voided payment still names cannot be deleted
+  (the allocation's foreign key); it stays in the list as Rejected.
 - A payment to a supplier or a refund recorded by someone who is not an owner
   or admin is not held for approval. The owner decides whether it should be.
 - A voucher that settles no document, recorded by someone who is not an owner
