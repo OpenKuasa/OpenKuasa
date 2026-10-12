@@ -1,0 +1,119 @@
+/**
+ * The workspace logo, client-safe half. One logo per workspace, in the public `org-logos` bucket, at
+ * `<org id>/<random uuid>.<png|jpg|webp>`. This file holds what is allowed, what a path looks like, how the public
+ * address is formed, and the browser's upload (as the signed-in user). Pointing the workspace at a file and removing
+ * a file need the server: see `logo-server.ts`.
+ *
+ * A path is always built here from the file's TYPE, never taken from a form or from a file name, and the
+ * database checks it again. Nothing here logs a file name or a path.
+ */
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { type CapResult, refuse } from '@/lib/people/capabilities';
+import { LOGO_NOT_IMAGE, LOGO_TOO_BIG, LOGO_UPLOAD_FAILED } from './logo-refusals';
+
+export const LOGO_BUCKET = 'org-logos';
+export const LOGO_MAX_BYTES = 1_048_576;
+/** The only types the bucket takes. SVG is never one of them. */
+export const LOGO_TYPES: readonly string[] = ['image/png', 'image/jpeg', 'image/webp'];
+const EXTENSION_OF: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
+/** The static sample logo the demo workspace shows wherever it has none of its own. */
+export const DEMO_LOGO_PATH = '/demo-logo.png';
+
+type Converted<T> = { ok: true; input: T } | { ok: false; error: string };
+
+const typeOf = (file: { type: string }): string => file.type.trim().toLowerCase();
+
+/** The file when it can be a logo by its DECLARED type and size, else the sentence to show. Checked again by storage. */
+export function pickLogoFile(file: File): Converted<File> {
+  if (!LOGO_TYPES.includes(typeOf(file)) || !(file.size > 0)) return { ok: false, error: LOGO_NOT_IMAGE };
+  if (file.size > LOGO_MAX_BYTES) return { ok: false, error: LOGO_TOO_BIG };
+  return { ok: true, input: file };
+}
+
+/** The image type a file's first bytes announce (PNG, JPEG or WebP), else null. */
+export function logoTypeOfBytes(bytes: Uint8Array): string | null {
+  const at = (i: number) => bytes[i];
+  if (bytes.length >= 8 && [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((b, i) => at(i) === b)) return 'image/png';
+  if (bytes.length >= 3 && at(0) === 0xff && at(1) === 0xd8 && at(2) === 0xff) return 'image/jpeg';
+  // "RIFF" + 4 size bytes + "WEBP".
+  if (
+    bytes.length >= 12 &&
+    [0x52, 0x49, 0x46, 0x46].every((b, i) => at(i) === b) &&
+    [0x57, 0x45, 0x42, 0x50].every((b, i) => at(8 + i) === b)
+  ) {
+    return 'image/webp';
+  }
+  return null;
+}
+
+/**
+ * What a screen calls on a chosen file. The type is decided from the file's leading bytes (a browser may report an
+ * empty or odd type for a valid image, or a wrong one); a file that does not begin like a PNG, JPEG or WebP is
+ * refused whatever it says it is. The file returned carries that type, so the path's extension, the upload's type
+ * and the type storage records are one value.
+ */
+export async function prepareLogoFile(file: File): Promise<Converted<File>> {
+  if (!(file.size > 0)) return { ok: false, error: LOGO_NOT_IMAGE };
+  let type: string | null = null;
+  try {
+    type = logoTypeOfBytes(new Uint8Array(await file.slice(0, 12).arrayBuffer()));
+  } catch {
+    // Unreadable: the same as not an image.
+  }
+  if (!type) return { ok: false, error: LOGO_NOT_IMAGE };
+  if (file.size > LOGO_MAX_BYTES) return { ok: false, error: LOGO_TOO_BIG };
+  return { ok: true, input: new File([file], file.name, { type }) };
+}
+
+const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+/** Exactly what {@link logoPath} makes and the database accepts: lower case throughout, JPEG as `.jpg`. */
+export const LOGO_PATH = new RegExp(`^${UUID}/${UUID}\\.(png|jpg|webp)$`);
+
+/** `<org>/<random uuid>.<ext>`, the extension from the file's TYPE. Throws for a type that is not allowed. */
+export function logoPath(orgId: string, file: File): string {
+  const type = typeOf(file);
+  if (!Object.hasOwn(EXTENSION_OF, type)) throw new Error('Not a logo type.');
+  return `${orgId.toLowerCase()}/${crypto.randomUUID()}.${EXTENSION_OF[type]}`;
+}
+
+/** True when `path` has the exact shape and sits in this workspace's folder. */
+export function isLogoPath(path: string, orgId: string): boolean {
+  if (typeof path !== 'string' || !LOGO_PATH.test(path)) return false;
+  return path.split('/')[0] === orgId.toLowerCase();
+}
+
+/**
+ * The address of a logo anyone may fetch: the public URL of the path (formed as the avatars' is), or, for the demo
+ * workspace with no logo of its own, the sample asset shipped with the app. A path of any other shape, or no project
+ * configured, gives null, and a null path outside the demo gives null.
+ */
+export function logoUrl(path: string | null, opts: { isDemo: boolean }): string | null {
+  if (path === null) return opts.isDemo ? DEMO_LOGO_PATH : null;
+  const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!base || !LOGO_PATH.test(path)) return null;
+  return `${base}/storage/v1/object/public/${LOGO_BUCKET}/${path}`;
+}
+
+/**
+ * Uploads a file to `path` (made by {@link logoPath}) as the signed-in user. Type, size, the path's shape and that
+ * the path's extension is the type's are checked first, so the rule holds even if a screen skipped it. Never
+ * `upsert`: the bucket has no update policy, so a path is only ever written once. The caller then points the
+ * workspace at it (`setLogoAction`); a refusal there removes the upload. Nothing is logged but a fixed sentence.
+ */
+export async function uploadLogoFile(client: SupabaseClient, path: string, file: File): Promise<CapResult<{ path: string }>> {
+  const picked = pickLogoFile(file);
+  if (!picked.ok) return refuse(picked.error);
+  const type = typeOf(file);
+  if (!LOGO_PATH.test(path) || !path.endsWith(`.${EXTENSION_OF[type]}`)) return refuse(LOGO_UPLOAD_FAILED);
+  try {
+    // storage-js ignores `contentType` for a File body and records the body's own `.type`, which must be the very
+    // type the path's extension stands for (the database compares the two).
+    const body = new File([file], file.name, { type });
+    const { error } = await client.storage.from(LOGO_BUCKET).upload(path, body, { contentType: type, upsert: false });
+    if (!error) return { ok: true, data: { path } };
+  } catch {
+    // Reported the same way as a refused upload.
+  }
+  console.error('[account/logo] a logo could not be uploaded.');
+  return refuse(LOGO_UPLOAD_FAILED);
+}
