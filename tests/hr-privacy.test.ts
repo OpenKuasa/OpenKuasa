@@ -104,7 +104,7 @@ describe('ALL_PEOPLE_TOOL_NAMES', () => {
     const missing = names.filter((name) => !ALL_PEOPLE_TOOL_NAMES.has(name));
     expect(missing).toEqual([]);
     // Spot-check the sensitive ones are in the set.
-    for (const name of ['getPayrollSummary', 'listPayslips', 'decideLeave', 'getMyAttendanceToday', 'previewOvertime']) {
+    for (const name of ['getPayrollSummary', 'listPayslips', 'decideLeave', 'getMyAttendanceToday', 'previewOvertime', 'setReportsTo', 'listMyTeam', 'getWaitingForMe']) {
       expect(ALL_PEOPLE_TOOL_NAMES.has(name), name).toBe(true);
     }
   });

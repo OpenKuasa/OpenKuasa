@@ -1373,3 +1373,29 @@ describe('approval cards for letters and acknowledgement requests', () => {
     expect(approvalDetail('issueLetter', { letter_id: LETTER }, undefined, find)).toBe('The employee will be able to see it. This is the text as last shown in this chat; the letter is issued as it is saved now.');
   });
 });
+
+describe('the card for setReportsTo', () => {
+  const BOSS = '33333333-3333-4333-8333-333333333333';
+  const lookups = nameIn([
+    { tool: 'listEmployees', output: { total: 2, employees: [{ id: EMP, name: 'Faiz Hakim' }, { id: BOSS, name: 'Farid Ismail' }] } },
+  ]);
+
+  it('names both people from earlier lookups', () => {
+    expect(approvalTitle('setReportsTo', { id: EMP, manager_id: BOSS }, lookups)).toBe(
+      'Set employee “Faiz Hakim” to report to Farid Ismail?',
+    );
+  });
+  it('asks to clear when there is nobody', () => {
+    expect(approvalTitle('setReportsTo', { id: EMP, manager_id: null }, lookups)).toBe('Clear who employee “Faiz Hakim” reports to?');
+  });
+  it('does not name a manager no lookup showed', () => {
+    expect(approvalTitle('setReportsTo', { id: EMP, manager_id: '44444444-4444-4444-8444-444444444444' }, lookups)).toBe(
+      'Set who employee “Faiz Hakim” reports to?',
+    );
+  });
+  it('never talks about a manager flag', () => {
+    for (const manager_id of [BOSS, null]) {
+      expect(approvalTitle('setReportsTo', { id: EMP, manager_id }, lookups)).not.toMatch(/is_manager|manager flag/i);
+    }
+  });
+});

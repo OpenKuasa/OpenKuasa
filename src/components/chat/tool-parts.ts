@@ -114,6 +114,8 @@ const TOOL_META: Record<string, ToolMeta> = {
   listDepartments: { label: 'Departments', Icon: Users },
   getHeadcountByDepartment: { label: 'Headcount', Icon: ChartColumn },
   listWhoIsOnLeave: { label: 'On leave', Icon: CalendarDays },
+  listMyTeam: { label: 'My team', Icon: Users },
+  getWaitingForMe: { label: 'Waiting for me', Icon: ClipboardList },
   listLeaveRequests: { label: 'Leave requests', Icon: ClipboardList },
   listTimeOffRequests: { label: 'Time-off requests', Icon: ClipboardList },
   previewLeave: { label: 'Leave preview', Icon: CalendarDays },

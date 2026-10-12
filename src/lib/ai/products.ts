@@ -82,7 +82,7 @@ export const HIRE_WRITE_TOOL_NAMES = ['createJob', 'updateJob', 'setJobStatus', 
 /** The HR data an agent reads, who is asking, and whether they may change it. */
 export type PeopleAccess = { data: PeopleData; viewer: PeopleViewer; write?: PeopleWrite };
 
-/** HR tools that change data: employees, departments, leave, time-off, claims, overtime, attendance, public holidays, attendance settings, payroll drafts, goals, reviews, training, announcements, and letters and acknowledgement requests. */
+/** HR tools that change data: employees, departments, who reports to whom, leave, time-off, claims, overtime, attendance, public holidays, attendance settings, payroll drafts, goals, reviews, training, announcements, and letters and acknowledgement requests. A manager holds only the four decide tools of these beyond a member's. */
 export const PEOPLE_WRITE_TOOL_NAMES = [
   'createEmployee',
   'updateEmployee',
@@ -137,11 +137,12 @@ export const PEOPLE_WRITE_TOOL_NAMES = [
   'startLetterFromTemplate',
   'issueLetter',
   'requestAcknowledgement',
+  'setReportsTo',
 ] as const;
 
 /**
  * HR lookups that `createPeopleTools` adds only for some viewers (a linked
- * member, or anyone who may preview a request): not in the always-present read
+ * member, or anyone who may preview a request, or a manager's two team reads): not in the always-present read
  * list, but still HR tools for the privacy check below.
  */
 const CONDITIONAL_PEOPLE_READ_TOOL_NAMES = [
@@ -150,6 +151,8 @@ const CONDITIONAL_PEOPLE_READ_TOOL_NAMES = [
   'getMyAttendanceToday',
   'getAttendanceSettings',
   'listLetterTemplates',
+  'listMyTeam',
+  'getWaitingForMe',
 ] as const;
 
 /**

@@ -131,3 +131,21 @@ describe('combineToolkits', () => {
     expect(() => combineToolkits([one, two])).toThrow(/both have a tool called/);
   });
 });
+
+describe('Lekiu for a manager', () => {
+  it('puts the four decide tools in write and the two team reads in read', () => {
+    const kit = peopleProduct({
+      data: createSeedPeopleData(),
+      viewer: { employeeId: 'seed-emp-12', isHr: false, isDemo: false, managesTeam: true },
+      write: { ctx: { client: {} as never, orgId: 'org1' }, tier: 'manager', employeeId: 'seed-emp-12', receipt: null, userId: 'u1' },
+    });
+    for (const name of ['decideLeave', 'decideTimeOff', 'decideClaim', 'decideOvertime']) {
+      expect(kit.write, name).toHaveProperty(name);
+      expect(kit.read, name).not.toHaveProperty(name);
+    }
+    for (const name of ['listMyTeam', 'getWaitingForMe']) {
+      expect(kit.read, name).toHaveProperty(name);
+      expect(kit.write, name).not.toHaveProperty(name);
+    }
+  });
+});

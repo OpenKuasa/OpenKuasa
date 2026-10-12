@@ -223,3 +223,10 @@ describe('the rows of a change', () => {
     expect(row.to).toBe(description);
   });
 });
+
+describe('the reports-to field', () => {
+  it('is labelled for a person, not a flag', () => {
+    expect(fieldLabel('manager_id')).toBe('Reports to');
+    expect(fieldLabel('manager_id')).not.toMatch(/manager flag|is_manager/i);
+  });
+});

@@ -225,6 +225,7 @@ const KIND_OF_TOOL: Record<string, ItemKind> = {
   setEmployeeStatus: 'employee',
   deleteEmployee: 'employee',
   linkEmployeeToMember: 'employee',
+  setReportsTo: 'employee',
   listLeaveRequests: 'leave',
   listTimeOffRequests: 'time-off',
   listClaims: 'claim',
@@ -1742,6 +1743,14 @@ export function approvalTitle(
       return typeof i.memberEmail === 'string' && i.memberEmail.trim()
         ? `Link ${the('employee', 'employee')} to the account ${i.memberEmail.trim()}?`
         : 'Approve this change?';
+    case 'setReportsTo': {
+      // Names come only from lookups earlier in the conversation, never from the model's own words.
+      if (i.manager_id === null) return `Clear who ${the('employee', 'employee')} reports to?`;
+      const manager = find(i.manager_id, 'employee');
+      return manager
+        ? `Set ${the('employee', 'employee')} to report to ${manager}?`
+        : `Set who ${the('employee', 'employee')} reports to?`;
+    }
     case 'createDepartment': return `Add department “${i.name ?? ''}”?`;
     case 'updateDepartment': return `Rename ${the('department', 'department')} to “${i.name ?? ''}”?`;
     case 'deleteDepartment': return `Delete ${the('department', 'department')}?`;

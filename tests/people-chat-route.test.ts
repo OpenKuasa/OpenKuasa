@@ -23,6 +23,8 @@ const ctl = vi.hoisted(() => ({
   /** What the claim write path was given, and what the receipt upload was given. */
   submitted: [] as unknown[],
   uploaded: [] as { userId: string; bytes: string; mediaType: string }[],
+  /** The ids hr_my_team answers: the signed-in person's direct reports. */
+  team: [] as string[],
 }));
 
 vi.mock('@/lib/people/pay-requests', async (importOriginal) => ({
@@ -62,6 +64,7 @@ vi.mock('@/lib/supabase/server', () => ({
         ctl.freeConsumed += 1;
         return { data: ctl.freeRemaining, error: null };
       }
+      if (name === 'hr_my_team') return { data: ctl.team, error: null };
       if (name === 'consume_ai_quota') {
         ctl.dailyConsumed += 1;
         return { data: ctl.dailyRemaining, error: null };
@@ -217,6 +220,7 @@ beforeEach(() => {
   ctl.orgLookups = 0;
   ctl.submitted = [];
   ctl.uploaded = [];
+  ctl.team = [];
   process.env.AI_KEYS_ENCRYPTION_SECRET = SECRET;
 });
 
@@ -365,6 +369,47 @@ describe('POST /api/people/chat happy path', () => {
     for (const name of ['correctAttendance', 'saveHoliday', 'removeHoliday', 'saveAttendanceSettings', 'getAttendanceSettings']) {
       expect(ctl.calls[0].tools).not.toContain(name);
     }
+  });
+
+  it('gives a linked member with people reporting to them the manager tier', async () => {
+    ctl.org = { orgId: 'org1', role: 'member' };
+    ctl.linkedEmployee = { id: 'emp-7' };
+    ctl.team = ['emp-8', 'emp-9'];
+    await (await POST(post(validBody))).text();
+    expect(ctl.captured!.viewer.managesTeam).toBe(true);
+    expect(ctl.captured!.write).toMatchObject({ tier: 'manager', employeeId: 'emp-7' });
+    for (const name of ['listMyTeam', 'getWaitingForMe', 'decideLeave', 'decideTimeOff', 'decideClaim', 'decideOvertime']) {
+      expect(ctl.calls[0].tools).toContain(name);
+    }
+    for (const name of ['markClaimPaid', 'correctAttendance', 'setReportsTo', 'setLeaveEntitlement', 'runPayroll']) {
+      expect(ctl.calls[0].tools).not.toContain(name);
+    }
+  });
+
+  it('keeps the hr tier for an owner who also has people reporting to them', async () => {
+    ctl.org = { orgId: 'org1', role: 'owner' };
+    ctl.linkedEmployee = { id: 'emp-3' };
+    ctl.team = ['emp-8'];
+    await (await POST(post(validBody))).text();
+    expect(ctl.captured!.write).toMatchObject({ tier: 'hr', employeeId: 'emp-3' });
+    expect(ctl.calls[0].tools).not.toContain('listMyTeam');
+  });
+
+  it('gives a manager no change tool in the demo workspace', async () => {
+    ctl.org = { orgId: 'org1', role: 'member' };
+    ctl.slug = DEMO_ORG_SLUG;
+    ctl.linkedEmployee = { id: 'emp-7' };
+    ctl.team = ['emp-8'];
+    await (await POST(post(validBody))).text();
+    expect(ctl.captured!.write).toBeUndefined();
+  });
+
+  it('takes the tier from the viewer, not from the request body', async () => {
+    ctl.org = { orgId: 'org1', role: 'member' };
+    ctl.linkedEmployee = { id: 'emp-7' };
+    await (await POST(post({ ...validBody, tier: 'hr', managesTeam: true, write: { tier: 'hr' } }))).text();
+    expect(ctl.captured!.write).toMatchObject({ tier: 'self' });
+    expect(ctl.captured!.viewer.managesTeam).toBeUndefined();
   });
 
   it('gives a member in the demo workspace the lookups only, even with a linked record', async () => {
