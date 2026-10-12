@@ -101,7 +101,7 @@ export function expenseFormError(form: ExpenseForm): string | null {
 }
 
 /** What is wrong with the way a money box was typed, when it is not just "not a number": a comma or RM, or more than a sen. */
-function moneyBoxError(text: string, format: string, decimals: string): string | null {
+export function moneyBoxError(text: string, format: string, decimals: string): string | null {
   if (/[,$]|^\s*(rm|myr)/i.test(text)) return format;
   if (/\.\d{3,}\s*$/.test(text)) return decimals;
   return null;
@@ -135,6 +135,15 @@ export function expenseSaveHint(canDecide: boolean, editing: ExpenseRow | undefi
 }
 
 /* ---- the row ---------------------------------------------------------- */
+
+/**
+ * What is still to pay on an expense, to the sen: its amount less what is
+ * paid and less what payments not yet made hold (the database counts both,
+ * FIN05). Never below 0.
+ */
+export function expenseLeft(row: ExpenseRow): number {
+  return Math.max(0, Math.round((row.amount - row.paid - row.held) * 100) / 100);
+}
 
 export type ExpenseAction = 'edit' | 'approve' | 'reject' | 'delete';
 
@@ -236,7 +245,7 @@ export function isPartPaid(row: ExpenseRow): boolean {
  */
 export function expensePaymentNote(row: ExpenseRow): string | null {
   if (row.display_status !== 'approved' || (row.paid === 0 && row.held === 0)) return null;
-  const left = Math.round((row.amount - row.paid - row.held) * 100) / 100;
+  const left = expenseLeft(row);
   const parts: string[] = [];
   if (row.paid > 0) parts.push(`${rm(row.paid)} paid`);
   if (row.held > 0) parts.push(`${rm(row.held)} to be paid`);

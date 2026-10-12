@@ -11,6 +11,7 @@ import {
   expenseQuestion,
   expenseFormError,
   expenseHiddenNote,
+  expenseLeft,
   expenseName,
   expensePayload,
   expensePaymentNote,
@@ -173,6 +174,13 @@ describe('what a row offers', () => {
       expect(expenseActions(r, false)).not.toContain('approve');
       expect(expenseActions(r, false)).not.toContain('reject');
     }
+  });
+  it('works out what is left of an expense to the sen, and never below nothing', () => {
+    expect(expenseLeft(approved())).toBe(120);
+    expect(expenseLeft(approved({ paid: 30, held: 20 }))).toBe(70);
+    expect(expenseLeft(approved({ paid: 100.1, held: 19.9 }))).toBe(0);
+    expect(expenseLeft(approved({ paid: 0.1, held: 0.2 }))).toBe(119.7);
+    expect(expenseLeft(approved({ paid: 100, held: 50 }))).toBe(0);
   });
   it('names an expense by its amount and vendor', () => {
     expect(expenseName(row())).toBe('the expense of RM 120.00 to Kedai Ali');
