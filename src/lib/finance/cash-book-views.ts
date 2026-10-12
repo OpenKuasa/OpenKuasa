@@ -278,32 +278,42 @@ export function cashReceiptActions(row: CashReceiptRow, canSignOff: boolean): Ca
   return [];
 }
 
+/** A receipt the person just posted or voided, kept so the screen can tell whether it is in the list. */
+export type WrittenReceipt = { id: string; kind: 'posted' | 'voided'; number: string; date: string };
+
 /**
- * What a receipt that was just posted or voided did to the list on screen,
- * when it leaves the list or is not in it. A posted receipt is listed by its
- * date, so one dated outside the chosen period is not there ("All time" holds
- * every date, so it never says so); a status filter of Draft or Void cannot
- * show it either. A voided receipt leaves "All except void" and Posted. A
- * draft is never hidden by the period (`cashReceiptsInPeriod`). Null when the
- * person can see the receipt where they are, so there is nothing to say.
+ * What to say when the receipt just posted or voided is not among the rows on
+ * screen; null when it is, so there is nothing to say. Worked out at render
+ * from the rows listed now, so changing the period, the filter or the search
+ * updates it. `inMatching` is whether it is among the rows the period, status
+ * filter and search keep; `inShown` whether it is among those on screen (the
+ * table shows ten until "View all"). The first reason that hides it is given:
+ * a posted receipt dated outside the period ("All time" holds every date), a
+ * status filter that cannot show it (a posted receipt under Draft or Void; a
+ * voided one under All except void or Posted), and otherwise search text or
+ * the ten-row limit.
  */
-export function receiptLeftNote(
-  event: { kind: 'posted'; number: string; date: string } | { kind: 'voided'; number: string },
+export function receiptHiddenNote(
+  written: WrittenReceipt,
   today: string,
   period: CashBookPeriod,
   filter: CashReceiptFilter,
+  inMatching: boolean,
+  inShown: boolean,
 ): string | null {
-  if (event.kind === 'voided') {
-    return filter === 'open' || filter === 'posted'
-      ? `Receipt ${event.number} was voided. Choose Void in the status filter to see it.`
-      : null;
+  if (inShown) return null;
+  if (!inMatching) {
+    if (written.kind === 'posted' && !inPeriod(written.date, today, period)) {
+      return `Receipt ${written.number} dated ${displayDate(written.date)} was posted. It is outside ${CASH_BOOK_PERIOD_LABELS[period].toLowerCase()}: choose a longer period to see it.`;
+    }
+    if (written.kind === 'posted' && (filter === 'draft' || filter === 'void')) {
+      return `Receipt ${written.number} was posted. Choose Posted in the status filter to see it.`;
+    }
+    if (written.kind === 'voided' && (filter === 'open' || filter === 'posted')) {
+      return `Receipt ${written.number} was voided. Choose Void in the status filter to see it.`;
+    }
   }
-  if (!inPeriod(event.date, today, period)) {
-    return `Receipt ${event.number} dated ${displayDate(event.date)} was posted. It is outside ${CASH_BOOK_PERIOD_LABELS[period].toLowerCase()}: choose a longer period to see it.`;
-  }
-  return filter === 'draft' || filter === 'void'
-    ? `Receipt ${event.number} was posted. Choose Posted in the status filter to see it.`
-    : null;
+  return `Receipt ${written.number} was ${written.kind}. Clear the search or choose View all to see it.`;
 }
 
 /** How a receipt is named in a question and to a screen reader: "RC-0007 from Aiman", "the draft receipt from Aiman", "the draft receipt". */

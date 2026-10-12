@@ -87,7 +87,7 @@ export function CashReceiptFormCard({
   canSignOff: boolean;
   actions: CashReceiptFormActions;
   /** Called when the card should go: after a save, or Cancel. After a post it is told which receipt, and its date. */
-  onClose: (posted?: { number: string; date: string }) => void;
+  onClose: (posted?: { id: string; number: string; date: string }) => void;
 }) {
   const id = useId();
   const [typed, setForm] = useState<CashReceiptForm>(() =>
@@ -164,7 +164,7 @@ export function CashReceiptFormCard({
         }
         return forgetGone(result);
       },
-      (posted) => onClose({ number: posted.number, date }),
+      (posted) => onClose({ id: posted.id, number: posted.number, date }),
     );
   };
 

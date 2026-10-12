@@ -33,13 +33,14 @@ import {
   inPeriod,
   nothingInPeriod,
   type CashReceiptFilter,
+  type WrittenReceipt,
   cashReceiptsCsv,
   cashReceiptsInPeriod,
   cashReceiptsView,
   filterCashReceipts,
   receiptDeleteEffect,
   receiptFor,
-  receiptLeftNote,
+  receiptHiddenNote,
   receiptName,
   receiptVoidEffect,
 } from '@/lib/finance/cash-book-views';
@@ -121,8 +122,8 @@ export function CashReceiptsView({
   const [filter, setFilter] = useState<CashReceiptFilter>('open');
   const [showAll, setShowAll] = useState(false);
   const [open, setOpen] = useState<Open>(null);
-  // Said when a receipt that was just posted or voided is not in the list on screen.
-  const [leftNote, setLeftNote] = useState<{ title: string; text: string } | null>(null);
+  // The receipt just posted or voided; whether to say anything about it is decided at render, from the rows listed now.
+  const [written, setWritten] = useState<WrittenReceipt | null>(null);
   const confirm = useFinanceAction();
 
   const view = cashReceiptsView(rows, today, period);
@@ -143,6 +144,17 @@ export function CashReceiptsView({
     keptLater: outside.filter((row) => row.txn_date >= today).length,
   });
 
+  const hiddenNote = written
+    ? receiptHiddenNote(
+        written,
+        today,
+        period,
+        filter,
+        matching.some((r) => r.transaction_id === written.id),
+        shown.some((r) => r.transaction_id === written.id),
+      )
+    : null;
+
   const columns = writer ? 9 : 8;
   const asking = open && open.kind !== 'form' ? open : null;
   // The form holds what was typed, so nothing else opens over it: it is closed with its own Cancel first.
@@ -153,7 +165,7 @@ export function CashReceiptsView({
   /** Opens one thing, dropping whatever message the last question left behind. */
   const ask = (next: Exclude<Open, null>) => {
     confirm.clear();
-    setLeftNote(null);
+    setWritten(null);
     setOpen(next);
   };
   /** Closes whatever is open, and the message that went with it. */
@@ -162,11 +174,10 @@ export function CashReceiptsView({
     setOpen(null);
   };
 
-  /** Closes, and says so when the receipt just posted or voided is not in the list the person is looking at. */
-  const closeSaying = (event: Parameters<typeof receiptLeftNote>[0]) => {
+  /** Closes, and keeps the receipt just written so the screen can say when it is not in the list. */
+  const closeSaying = (receipt: WrittenReceipt) => {
     close();
-    const text = receiptLeftNote(event, today, period, filter);
-    setLeftNote(text ? { title: event.kind === 'posted' ? 'Receipt posted' : 'Receipt voided', text } : null);
+    setWritten(receipt);
   };
 
   const menuItem = (row: CashReceiptRow, action: CashReceiptAction): RowMenuItem => {
@@ -211,7 +222,7 @@ export function CashReceiptsView({
           onConfirm={() =>
             confirm.run(
               () => actions.post({ id: row.transaction_id }),
-              (posted) => closeSaying({ kind: 'posted', number: posted.number, date: row.txn_date }),
+              (posted) => closeSaying({ id: row.transaction_id, kind: 'posted', number: posted.number, date: row.txn_date }),
             )
           }
           onCancel={close}
@@ -235,7 +246,7 @@ export function CashReceiptsView({
           onConfirm={() =>
             confirm.run(
               () => actions.voidReceipt({ id: row.transaction_id }),
-              () => closeSaying({ kind: 'voided', number: row.number ?? '—' }),
+              () => closeSaying({ id: row.transaction_id, kind: 'voided', number: row.number ?? '—', date: row.txn_date }),
             )
           }
           onCancel={close}
@@ -273,10 +284,7 @@ export function CashReceiptsView({
           <div className="flex flex-wrap items-center gap-2">
             <Select
               value={period}
-              onValueChange={(v) => {
-                setLeftNote(null);
-                setPeriod(v as CashBookPeriod);
-              }}
+              onValueChange={(v) => setPeriod(v as CashBookPeriod)}
             >
               <SelectTrigger className="w-40" aria-label="Period">
                 <SelectValue />
@@ -321,9 +329,13 @@ export function CashReceiptsView({
             onClose={(posted) => (posted ? closeSaying({ kind: 'posted', ...posted }) : close())}
           />
         ) : null}
-        {leftNote ? (
-          <SavedNoteCard title={leftNote.title} subtitle="It is not in the list below" onClose={() => setLeftNote(null)}>
-            {leftNote.text}
+        {written && hiddenNote ? (
+          <SavedNoteCard
+            title={written.kind === 'posted' ? 'Receipt posted' : 'Receipt voided'}
+            subtitle="It is not in the list below"
+            onClose={() => setWritten(null)}
+          >
+            {hiddenNote}
           </SavedNoteCard>
         ) : null}
 
@@ -376,10 +388,7 @@ export function CashReceiptsView({
             </div>
             <Select
               value={filter}
-              onValueChange={(v) => {
-                setLeftNote(null);
-                setFilter(v as CashReceiptFilter);
-              }}
+              onValueChange={(v) => setFilter(v as CashReceiptFilter)}
             >
               <SelectTrigger className="w-40" aria-label="Status">
                 <SelectValue />
