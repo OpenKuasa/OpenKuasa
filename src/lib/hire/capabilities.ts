@@ -1070,8 +1070,15 @@ const lengthInMinutes = () =>
   z.number().int(SAID.length).min(INTERVIEW_LIMITS.durationMin, SAID.length).max(INTERVIEW_LIMITS.durationMax, SAID.length);
 const interviewKind = () => z.enum(INTERVIEW_KINDS);
 const whatHappened = () => z.enum(INTERVIEW_OUTCOMES, SAID.outcome);
+/**
+ * No NUL character in a place, an interviewer or notes. Neither a text column nor the record the chat keeps of a
+ * proposed change (jsonb) can hold one: a change carrying it would fail to be recorded every time, behind a sentence
+ * that says to try again. Refused here with what to do, and not quietly taken out: what is saved is what was sent.
+ */
+const NO_NUL = /^[^\u0000]*$/;
+export const HAS_NUL = 'This text holds a character that cannot be saved (a NUL). Type it again without pasting.';
 /** Text that may be left out or cleared, with the form's own sentence when it is too long. A blank becomes null in the function. */
-const limitedText = (max: number, message: string) => z.string().trim().max(max, message).nullable().optional();
+const limitedText = (max: number, message: string) => z.string().trim().max(max, message).regex(NO_NUL, HAS_NUL).nullable().optional();
 
 const LENGTH_HELP = 'How long it lasts, in whole minutes from 15 to 480. Leave out for 60.';
 const KIND_HELP = 'How it is held: video, onsite or phone. Ask the user when it was not given: never pick one.';

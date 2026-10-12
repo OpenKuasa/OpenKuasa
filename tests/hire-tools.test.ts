@@ -701,6 +701,27 @@ describe('hire change tools', () => {
       else expect(fn.mock.calls[0], name).toHaveLength(2);
     }
   });
+  it('a NUL character in a place, an interviewer or notes is refused by the input check, with what to do: no record of a proposal could hold it', () => {
+    const SAID = 'This text holds a character that cannot be saved (a NUL). Type it again without pasting.';
+    const id = '11111111-1111-4111-8111-111111111111';
+    const when = { date: '2026-10-20', time: '15:00', kind: 'video' };
+    const schemas = [
+      ['scheduleInterview', scheduleInterviewInput, { application_id: id, ...when }],
+      ['recordPastInterview', recordPastInterviewInput, { application_id: id, ...when, outcome: 'completed' }],
+      ['rescheduleInterview', rescheduleInterviewInput, { id }],
+    ] as const;
+    for (const [name, schema, base] of schemas) {
+      for (const field of ['place', 'interviewer_name', 'notes']) {
+        const refused = schema.safeParse({ ...base, [field]: 'Level 3\u0000, Menara' });
+        expect(refused.success, `${name} ${field}`).toBe(false);
+        expect(refused.error!.issues.map((issue) => issue.message), `${name} ${field}`).toEqual([SAID]);
+        // Ordinary text, with a line break or a tab in it, is as it was.
+        expect(schema.safeParse({ ...base, [field]: 'Level 3,\n\tMenara' }).success, `${name} ${field}`).toBe(true);
+        expect(schema.safeParse({ ...base, [field]: null }).success, `${name} ${field}`).toBe(true);
+      }
+      expect(schema.safeParse(base).success, name).toBe(true);
+    }
+  });
   it('each interview change has a card of its own, and reads as a change while a specialist prepares it', () => {
     const labels: Record<string, string> = {
       scheduleInterview: 'Schedule interview', recordPastInterview: 'Record a past interview', rescheduleInterview: 'Reschedule or edit interview',
