@@ -129,7 +129,7 @@ export function RfqsView({
     setOpen(null);
   };
 
-  const menuItem = (rfq: RfqListRow, action: RfqAction, actions: RfqActions): RowMenuItem => {
+  const menuItem = (rfq: RfqListRow, action: Exclude<RfqAction, 'convert'>, actions: RfqActions): RowMenuItem => {
     switch (action) {
       case 'edit':
         return {
@@ -418,7 +418,12 @@ export function RfqsView({
                 {shown.map((r) => {
                   const asked = question(r);
                   if (asked) return asked;
-                  const items = writer ? rfqActions(r).map((action) => menuItem(r, action, writer.actions)) : [];
+                  // 'convert' is drawn once Purchase Orders is built (the next task); until then the menu leaves it out.
+                  const items = writer
+                    ? rfqActions(r)
+                        .filter((action) => action !== 'convert')
+                        .map((action) => menuItem(r, action, writer.actions))
+                    : [];
                   const status = rfqDisplayStatus(r, today);
                   return (
                     <TableRow key={r.id} className={cn(r.status === 'closed' && 'opacity-60')}>

@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { BillListRow } from '@/lib/finance/bills';
 import type { PaymentOutRow } from '@/lib/finance/money';
+import type { PurchaseOrderListRow } from '@/lib/finance/purchase-orders';
 import type { RfqListRow } from '@/lib/finance/rfqs';
 import {
+  PO_DELIVERY_LABELS,
+  PO_STATUS_LABELS,
   RFQ_STATUS_LABELS,
   alsoCovers,
   billsCsv,
@@ -10,9 +13,14 @@ import {
   displayDate,
   filterBills,
   filterPayments,
+  filterPurchaseOrders,
   filterRfqs,
   paymentsCsv,
   paymentsView,
+  purchaseOrderActions,
+  purchaseOrderName,
+  purchaseOrdersCsv,
+  purchaseOrdersView,
   rfqActions,
   rfqDisplayStatus,
   rfqName,
@@ -450,8 +458,14 @@ describe('rfqActions', () => {
     expect(rfqActions(rfq({ status: 'draft', rfq_no: null }))).toEqual(['edit', 'send', 'delete']);
     expect(rfqActions(rfq({ status: 'sent' }))).toEqual(['recordPrices', 'close']);
     expect(rfqActions(rfq({ status: 'sent', reply_by: '2026-10-01' }))).toEqual(['recordPrices', 'close']);
-    expect(rfqActions(rfq({ status: 'quoted' }))).toEqual(['close']);
+    expect(rfqActions(rfq({ status: 'quoted' }))).toEqual(['convert', 'close']);
     expect(rfqActions(rfq({ status: 'closed' }))).toEqual([]);
+  });
+  it('offers a purchase order only for a quoted RFQ that has none: a standing order is the way on', () => {
+    expect(rfqActions(rfq({ status: 'quoted', purchase_order_id: 'po-1', purchase_order_no: 'PO-0003' }))).toEqual(['close']);
+    for (const status of ['draft', 'sent', 'closed'] as const) {
+      expect(rfqActions(rfq({ status, purchase_order_id: null })), status).not.toContain('convert');
+    }
   });
   it('names an RFQ by its number, or as a draft', () => {
     expect(rfqName(rfq({ rfq_no: 'RFQ-0007' }))).toBe('RFQ-0007');
@@ -497,6 +511,183 @@ describe('rfqsCsv', () => {
         ',2026-10-01,"Lim, Tan & Co",,,1,,Draft,\r\n' +
         'RFQ-0009,2026-10-01,Syarikat Kertas,2026-10-20,Q-4411,2,132.5,Quoted,PO-0003\r\n' +
         'RFQ-0010,2026-10-01,Syarikat Kertas,2026-10-20,,2,,Sent,\r\n',
+    );
+  });
+});
+
+/* ---- purchase orders ------------------------------------------------ */
+
+const po = (r: Partial<PurchaseOrderListRow>): PurchaseOrderListRow => {
+  seq += 1;
+  return {
+    id: `po-${seq}`,
+    po_no: `PO-${String(seq).padStart(4, '0')}`,
+    supplier_id: 'kertas',
+    supplier_name: 'Syarikat Kertas',
+    rfq_id: null,
+    rfq_no: null,
+    po_date: '2026-10-01',
+    expected_date: null,
+    status: 'approved',
+    created_by: 'raiser',
+    submitted_by: 'raiser',
+    rejection_reason: null,
+    payment_terms_days: 30,
+    delivery_address: null,
+    total: 100,
+    delivery: 'pending',
+    received_total: 0,
+    billed_total: 0,
+    over_billed: false,
+    billed_over_received: false,
+    ...r,
+  };
+};
+
+describe('purchase order labels', () => {
+  it('words each status and delivery state', () => {
+    expect(PO_STATUS_LABELS).toEqual({
+      draft: 'Draft', pending_approval: 'Awaiting approval', approved: 'Approved', closed: 'Closed', cancelled: 'Cancelled',
+    });
+    expect(PO_DELIVERY_LABELS).toEqual({ pending: 'Not delivered', partial: 'Partly delivered', delivered: 'Delivered' });
+  });
+});
+
+describe('filterPurchaseOrders', () => {
+  const rows = [
+    po({ po_no: null, status: 'draft', supplier_name: 'Lim Hardware' }),
+    po({ po_no: 'PO-0007', status: 'pending_approval' }),
+    po({ po_no: 'PO-0008', status: 'approved', rfq_no: 'RFQ-0042' }),
+    po({ po_no: 'PO-0009', status: 'closed' }),
+    po({ po_no: 'PO-0010', status: 'cancelled' }),
+  ];
+  it('shows what is still going on until a status is chosen', () => {
+    expect(filterPurchaseOrders(rows, '', 'open').map((r) => r.po_no)).toEqual([null, 'PO-0007', 'PO-0008']);
+    expect(filterPurchaseOrders(rows, '', 'all')).toHaveLength(5);
+  });
+  it('filters by one status', () => {
+    expect(filterPurchaseOrders(rows, '', 'closed').map((r) => r.po_no)).toEqual(['PO-0009']);
+    expect(filterPurchaseOrders(rows, '', 'cancelled').map((r) => r.po_no)).toEqual(['PO-0010']);
+    expect(filterPurchaseOrders(rows, '', 'pending_approval').map((r) => r.po_no)).toEqual(['PO-0007']);
+  });
+  it('matches the search text against the number, the supplier and the RFQ number, ignoring case and spaces', () => {
+    expect(filterPurchaseOrders(rows, ' po-0008 ', 'all')).toHaveLength(1);
+    expect(filterPurchaseOrders(rows, 'lim', 'all')).toHaveLength(1);
+    expect(filterPurchaseOrders(rows, 'rfq-0042', 'all').map((r) => r.po_no)).toEqual(['PO-0008']);
+    expect(filterPurchaseOrders(rows, 'nothing', 'all')).toEqual([]);
+  });
+});
+
+describe('purchaseOrderActions', () => {
+  // A member, the admin who raised the order, another admin, and the owner. The order is raised by 'raiser'.
+  const member = { userId: 'raiser', canSignOff: false, isOwner: false };
+  const otherMember = { userId: 'someone', canSignOff: false, isOwner: false };
+  const raisingAdmin = { userId: 'raiser', canSignOff: true, isOwner: false };
+  const otherAdmin = { userId: 'admin', canSignOff: true, isOwner: false };
+  const owner = { userId: 'owner', canSignOff: true, isOwner: true };
+  const raisingOwner = { userId: 'raiser', canSignOff: true, isOwner: true };
+
+  it('offers a draft that was never numbered to be edited, submitted or deleted, to anyone who may write', () => {
+    const draft = po({ status: 'draft', po_no: null, submitted_by: null });
+    for (const viewer of [member, otherMember, raisingAdmin, otherAdmin, owner]) {
+      expect(purchaseOrderActions(draft, viewer), JSON.stringify(viewer)).toEqual(['edit', 'submit', 'delete']);
+    }
+  });
+  it('offers a numbered draft (rejected or withdrawn) to be cancelled, not deleted, by its raiser or an admin', () => {
+    const rejected = po({ status: 'draft', po_no: 'PO-0007', rejection_reason: 'Too dear' });
+    expect(purchaseOrderActions(rejected, member)).toEqual(['edit', 'submit', 'cancel']);
+    expect(purchaseOrderActions(rejected, otherMember)).toEqual(['edit', 'submit']);
+    expect(purchaseOrderActions(rejected, otherAdmin)).toEqual(['edit', 'submit', 'cancel']);
+    expect(purchaseOrderActions(rejected, owner)).toEqual(['edit', 'submit', 'cancel']);
+  });
+  describe('awaiting approval', () => {
+    const pending = po({ status: 'pending_approval', created_by: 'raiser', submitted_by: 'submitter' });
+    it('lets the person who raised it take it back or cancel it, and nothing more', () => {
+      expect(purchaseOrderActions(pending, member)).toEqual(['withdraw', 'cancel']);
+    });
+    it('lets another member do nothing', () => {
+      expect(purchaseOrderActions(pending, otherMember)).toEqual([]);
+    });
+    it('lets another admin approve, reject, withdraw or cancel it', () => {
+      expect(purchaseOrderActions(pending, otherAdmin)).toEqual(['approve', 'reject', 'withdraw', 'cancel']);
+    });
+    it('lets the admin who raised it reject, withdraw or cancel it, but not approve it', () => {
+      expect(purchaseOrderActions(pending, raisingAdmin)).toEqual(['reject', 'withdraw', 'cancel']);
+    });
+    it('keeps the person who submitted it from approving it, even when someone else raised it', () => {
+      const submitter = { userId: 'submitter', canSignOff: true, isOwner: false };
+      expect(purchaseOrderActions(pending, submitter)).toEqual(['reject', 'withdraw', 'cancel']);
+      expect(purchaseOrderActions(pending, { ...submitter, canSignOff: false })).toEqual([]);
+    });
+    it('lets the owner approve even an order they raised or submitted', () => {
+      expect(purchaseOrderActions(pending, owner)).toEqual(['approve', 'reject', 'withdraw', 'cancel']);
+      expect(purchaseOrderActions(pending, raisingOwner)).toEqual(['approve', 'reject', 'withdraw', 'cancel']);
+    });
+    it('treats an order with no known raiser as nobody’s own', () => {
+      const orphan = po({ status: 'pending_approval', created_by: null, submitted_by: null });
+      expect(purchaseOrderActions(orphan, otherAdmin)).toEqual(['approve', 'reject', 'withdraw', 'cancel']);
+      expect(purchaseOrderActions(orphan, member)).toEqual([]);
+    });
+  });
+  describe('approved', () => {
+    const approved = po({ status: 'approved' });
+    it('lets anyone who may write record a delivery and raise a bill', () => {
+      for (const viewer of [member, otherMember]) {
+        expect(purchaseOrderActions(approved, viewer), JSON.stringify(viewer)).toEqual(['receive', 'createBill']);
+      }
+    });
+    it('lets an admin or the owner also close or cancel it', () => {
+      for (const viewer of [raisingAdmin, otherAdmin, owner]) {
+        expect(purchaseOrderActions(approved, viewer), JSON.stringify(viewer)).toEqual(['receive', 'createBill', 'close', 'cancel']);
+      }
+    });
+  });
+  it('offers nothing on a closed or a cancelled order', () => {
+    for (const status of ['closed', 'cancelled'] as const) {
+      for (const viewer of [member, otherAdmin, owner]) {
+        expect(purchaseOrderActions(po({ status }), viewer), `${status} ${JSON.stringify(viewer)}`).toEqual([]);
+      }
+    }
+  });
+  it('names an order by its number, or as a draft', () => {
+    expect(purchaseOrderName(po({ po_no: 'PO-0007' }))).toBe('PO-0007');
+    expect(purchaseOrderName(po({ po_no: null, status: 'draft' }))).toBe('this draft purchase order');
+  });
+});
+
+describe('purchaseOrdersView', () => {
+  it('counts those awaiting approval, those approved and still open, and those billed for more than ordered', () => {
+    const rows = [
+      po({ status: 'draft', po_no: null }),
+      po({ status: 'pending_approval' }),
+      po({ status: 'pending_approval' }),
+      po({ status: 'approved' }),
+      po({ status: 'approved', over_billed: true, billed_total: 120 }),
+      po({ status: 'closed', over_billed: true, billed_total: 130 }),
+      po({ status: 'cancelled' }),
+    ];
+    expect(purchaseOrdersView(rows)).toEqual({ awaitingApproval: 2, approvedOpen: 2, overBilled: 2 });
+  });
+  it('is all zeros for no orders', () => {
+    expect(purchaseOrdersView([])).toEqual({ awaitingApproval: 0, approvedOpen: 0, overBilled: 0 });
+  });
+});
+
+describe('purchaseOrdersCsv', () => {
+  it('writes the purchase order table, with the status and delivery as the screen words them', () => {
+    const csv = purchaseOrdersCsv([
+      po({
+        po_no: 'PO-0007', po_date: '2026-10-01', supplier_name: '=cmd|calc', rfq_no: 'RFQ-0042', expected_date: '2026-10-20',
+        total: 132.5, received_total: 50, billed_total: 40, delivery: 'partial', status: 'approved',
+      }),
+      po({ po_no: null, status: 'draft', supplier_name: 'Lim, Tan & Co', total: 10, delivery: 'pending' }),
+      po({ po_no: 'PO-0009', status: 'closed', total: 100, received_total: 100, billed_total: 100, delivery: 'delivered' }),
+    ]);
+    expect(csv).toBe(
+      '\uFEFFNo.,Date,Supplier,RFQ,Expected delivery,Total,Received,Billed,Delivery,Status\r\n' +
+        "PO-0007,2026-10-01,'=cmd|calc,RFQ-0042,2026-10-20,132.5,50,40,Partly delivered,Approved\r\n" +
+        ',2026-10-01,"Lim, Tan & Co",,,10,0,0,,Draft\r\n' +
+        'PO-0009,2026-10-01,Syarikat Kertas,,,100,100,100,Delivered,Closed\r\n',
     );
   });
 });
