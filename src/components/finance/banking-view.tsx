@@ -17,6 +17,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import type { BankAccountRow, BankTransactionRow } from '@/lib/finance/banking';
 import {
   type BankFilter,
+  accountOptionLabel,
   bankDescription,
   bankingCsv,
   bankingView,
@@ -76,11 +77,11 @@ export function BankingView({
       <PageHeader title="Banking" subtitle="Accounts, balances and reconciliation, Saudara." />
 
       <BentoGrid>
-        <BentoCard tone="primary" className="col-span-1 md:col-span-3">
+        <BentoCard tone="primary" className="col-span-2 md:col-span-3">
           <BentoStat label={view.total.label} value={view.total.value} delta={view.total.delta} deltaTone="flat" onPrimary />
         </BentoCard>
         {view.tiles.map((tile) => (
-          <BentoCard key={tile.id} className="col-span-1 md:col-span-3">
+          <BentoCard key={tile.id} className="col-span-2 md:col-span-3">
             <BentoStat
               label={
                 <span className="inline-flex items-center gap-1.5">
@@ -102,12 +103,12 @@ export function BankingView({
             <p className="grid h-60 place-items-center text-sm text-muted-foreground">No money has moved yet.</p>
           )}
         </BentoCard>
-        <BentoCard title="Reconciliation" subtitle={view.gauge.label} icon={ChartColumn} className="col-span-2 md:col-span-4">
+        <BentoCard title="Reconciliation" subtitle={view.gauge.label || undefined} icon={ChartColumn} className="col-span-2 md:col-span-4">
           {view.hasGauge ? (
             <RadialGauge value={view.gauge.percent} valueLabel={`${view.gauge.percent}%`} label="reconciled" color="var(--chart-2)" height={240} />
           ) : (
             <p className="grid h-60 place-items-center px-4 text-center text-sm text-muted-foreground">
-              No bank movements this month to reconcile.
+              {view.gaugeEmpty}
             </p>
           )}
         </BentoCard>
@@ -146,7 +147,7 @@ export function BankingView({
                 <SelectItem value="all">All accounts</SelectItem>
                 {accounts.map((a) => (
                   <SelectItem key={a.id} value={a.id}>
-                    {a.name}
+                    {accountOptionLabel(a)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -156,7 +157,7 @@ export function BankingView({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="all">All statuses</SelectItem>
                 <SelectItem value="reconciled">Reconciled</SelectItem>
                 <SelectItem value="unreconciled">Unreconciled</SelectItem>
               </SelectContent>
@@ -181,7 +182,7 @@ export function BankingView({
                   <TableHead>Account</TableHead>
                   <TableHead className="text-right">Money In</TableHead>
                   <TableHead className="text-right">Money Out</TableHead>
-                  <TableHead className="text-right">Balance</TableHead>
+                  <TableHead className="text-right">Account balance</TableHead>
                   <TableHead>Status</TableHead>
                 </TableRow>
               </TableHeader>
@@ -203,7 +204,7 @@ export function BankingView({
                     <TableRow key={r.transaction_id}>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(r.txn_date)}</TableCell>
                       <TableCell className="whitespace-nowrap font-medium">{r.number ?? '—'}</TableCell>
-                      <TableCell className="max-w-72 truncate" title={description}>
+                      <TableCell className="min-w-48 max-w-72 whitespace-normal break-words">
                         {description}
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
@@ -242,10 +243,12 @@ export function BankingView({
               </TableBody>
             </Table>
           </div>
-          <div className="border-t px-4 py-3 text-sm text-muted-foreground">
-            Showing {shown.length} of {matching.length} transactions
-            {matching.length !== ledger.length ? ` (${ledger.length} in all)` : ''}
-          </div>
+          {ledger.length > 0 && (
+            <div className="border-t px-4 py-3 text-sm text-muted-foreground">
+              Showing {shown.length} of {matching.length} transactions
+              {matching.length !== ledger.length ? ` (${ledger.length} in all)` : ''}
+            </div>
+          )}
         </BentoCard>
       </BentoGrid>
     </ScreenContainer>
