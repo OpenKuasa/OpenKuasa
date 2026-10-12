@@ -336,7 +336,18 @@ describe('the navigation badge figure', () => {
     const announcements = getProduct('people')!.sections.flatMap((s) => s.items).find((i) => i.slug === 'announcements');
     expect(announcements?.badge).toBe('unreadAnnouncements');
     const badged = PRODUCTS.flatMap((p) => p.sections.flatMap((s) => s.items)).filter((i) => i.badge);
-    expect(badged).toHaveLength(3);
+    // Exactly these: the agents proposals, the two People ones, and the four approval queues' waiting counts.
+    expect(badged.map((i) => `${i.slug}:${i.badge}`).sort()).toEqual(
+      [
+        'agents:pendingProposals',
+        'announcements:unreadAnnouncements',
+        'my-documents:awaitingAcknowledgement',
+        'approve-leave:waitingLeave',
+        'approve-claims:waitingClaims',
+        'approve-overtime:waitingOvertime',
+        'approve-time-off:waitingTimeOff',
+      ].sort(),
+    );
   });
 });
 
@@ -526,7 +537,11 @@ describe('the screens use these decisions, with static imports only', () => {
     const screen = read('src/screens/people/employees.tsx');
     expect(screen).toContain('showsOwnerDocumentControls(');
     expect(screen).not.toMatch(/isHr\s*&&\s*!\S*isDemo/);
-    expect(screen.match(/showsOwnerDocumentControls\(/g)?.length).toBeGreaterThanOrEqual(3);
+    // The third site (canEdit for the table and departments) now goes through employeesControls, which asks
+    // showsOwnerDocumentControls once for the whole screen, so the rule is still decided in one place.
+    expect(screen.match(/showsOwnerDocumentControls\(/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(screen).toContain('employeesControls(viewer)');
+    expect(read('src/lib/people/employees.ts')).toMatch(/const canEdit = showsOwnerDocumentControls\(viewer\);/);
   });
   it('the Request / Withdraw explanation is text tied to the button, not only a title attribute', () => {
     const owner = read('src/components/people/employee-documents.tsx');

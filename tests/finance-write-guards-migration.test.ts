@@ -19,7 +19,8 @@ const sql = (name: string) =>
 const GATING = '20261030121500_people_release_gating.sql';
 const GUARDS = '20261030123000_finance_write_guards.sql';
 const OWN = '20261030124500_people_no_self_approval.sql';
-const CASH_BOOK = '20261028100000_bendahara_cash_book.sql';
+const REPORTING_LINES = '20261115133700_people_reporting_lines.sql';
+const CASH_BOOK ='20261028100000_bendahara_cash_book.sql';
 
 /** One `create or replace function <name>(...) ... $$;` out of a file. */
 function fn(text: string, name: string): string {
@@ -133,8 +134,33 @@ test('each HR function is the latest text with the one test added', () => {
     const now = fn(own, name);
     expect(now, name).toContain(added);
     expect(now.replace(added, ''), name).toBe(fn(sql(file), name));
-    // No migration after the one it is taken from defines the function again.
-    const later = readdirSync(DIR).filter((f) => f.endsWith('.sql') && f > file && f !== OWN);
+    // No migration after the one it is taken from defines the function again,
+    // except the reporting-lines one, which redefines the four decide functions
+    // (and is checked below to keep the own-request rule).
+    const later = readdirSync(DIR).filter((f) => f.endsWith('.sql') && f > file && f !== OWN && f !== REPORTING_LINES);
     for (const f of later) expect(read(f), `${name} in ${f}`).not.toContain(`create or replace function ${name}(`);
+    // Marking a claim paid is still defined by nobody after the own-request file.
+    if (name === 'public.hr_mark_claim_paid') {
+      expect(sql(REPORTING_LINES), name).not.toContain(`create or replace function ${name}(`);
+    }
+  }
+});
+
+test('the reporting-lines migration keeps the own-request rule in the newest decide functions', () => {
+  const text = sql(REPORTING_LINES);
+  const decide: Record<string, string> = {
+    'public.hr_decide_leave': 'LEAVE_OWN_REQUEST',
+    'public.hr_decide_time_off': 'LEAVE_OWN_REQUEST',
+    'public.hr_decide_claim': 'PAY_OWN_REQUEST',
+    'public.hr_decide_overtime': 'PAY_OWN_REQUEST',
+  };
+  for (const [name, code] of Object.entries(decide)) {
+    const added = [
+      '  if private.is_own_employee(req.employee_id) and not private.is_org_owner(req.org_id) then',
+      `    raise exception '${code}';`,
+      '  end if;',
+      '',
+    ].join('\n');
+    expect(fn(text, name), name).toContain(added);
   }
 });
