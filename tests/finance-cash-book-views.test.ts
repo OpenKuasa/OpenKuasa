@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { CashReceiptRow, PaymentVoucherRow } from '@/lib/finance/cash-book';
+import type { CashBookPeriod } from '@/lib/finance/cash-book-views';
 import {
   CASH_BOOK_PERIODS,
+  cashBookCountLine,
+  emptyPeriodText,
+  nothingInPeriod,
   CASH_BOOK_PERIOD_LABELS,
   CASH_RECEIPT_STATUS_LABELS,
   DONUT_SLICES,
@@ -30,6 +34,7 @@ import {
 } from '@/lib/finance/cash-book-views';
 import { CSV_BOM } from '@/lib/finance/csv';
 import type { ExpenseRow } from '@/lib/finance/expenses';
+import { rmShort } from '@/lib/finance/format';
 import { paymentCount, sum } from '@/lib/finance/view-helpers';
 import { SAMPLE_CASH_RECEIPTS, SAMPLE_EXPENSES, SAMPLE_PAYMENT_VOUCHERS } from '@/screens/finance/cash-book-sample';
 import { SAMPLE_PAYMENTS_IN, SAMPLE_REFUNDS, SAMPLE_TODAY } from '@/screens/finance/sales-sample';
@@ -115,9 +120,27 @@ const expense = (e: Partial<ExpenseRow> = {}): ExpenseRow => {
 const stat = (stats: { label: string; value: string; delta?: string }[], label: string) => stats.find((s) => s.label === label)!;
 
 describe('the period selector', () => {
-  it('offers this month, this quarter and this year, and says so in a person’s words', () => {
-    expect(CASH_BOOK_PERIODS).toEqual(['month', 'quarter', 'year']);
-    expect(CASH_BOOK_PERIOD_LABELS).toEqual({ month: 'This month', quarter: 'This quarter', year: 'This year' });
+  it('offers this month, this quarter, this year and all time, last, and says so in a person’s words', () => {
+    expect(CASH_BOOK_PERIODS).toEqual(['month', 'quarter', 'year', 'all']);
+    expect(CASH_BOOK_PERIOD_LABELS).toEqual({ month: 'This month', quarter: 'This quarter', year: 'This year', all: 'All time' });
+  });
+  it('puts every date in All time, however far from today', () => {
+    expect(inPeriod('1999-01-01', today, 'all')).toBe(true);
+    expect(inPeriod('2031-12-31', today, 'all')).toBe(true);
+  });
+  it('words an empty chart without saying "all time" as if it were a month', () => {
+    expect(nothingInPeriod('received', 'month')).toBe('Nothing received this month.');
+    expect(nothingInPeriod('paid out', 'year')).toBe('Nothing paid out this year.');
+    expect(nothingInPeriod('received', 'all')).toBe('Nothing received yet.');
+  });
+  it('only tells a person to choose a longer period when there is one', () => {
+    expect(emptyPeriodText('receipts', 'month')).toBe('Nothing in this period. Choose a longer one to see earlier receipts.');
+    expect(emptyPeriodText('vouchers', 'year')).toBe('Nothing in this period. Choose a longer one to see earlier vouchers.');
+    expect(emptyPeriodText('vouchers', 'all')).toBe('Nothing here.');
+  });
+  it('words the cards for All time as "all time"', () => {
+    const view = cashReceiptsView([cash({ amount: 250, txn_date: '2020-01-01' })], today, 'all');
+    expect(stat(view.stats, 'Received')).toMatchObject({ value: 'RM 250', delta: 'all time' });
   });
   it('places a date by the calendar: month, quarter and year of today', () => {
     expect(inPeriod('2026-10-01', today, 'month')).toBe(true);
@@ -564,12 +587,12 @@ describe('the sample shown when there is no database', () => {
 
 describe('the table follows the period, as the cards do', () => {
   const receipts = [
-    receipt({ number: 'RC-A', txn_date: '2026-10-03' }),
-    receipt({ number: 'RC-B', txn_date: '2026-11-15' }),
-    receipt({ number: 'RC-C', txn_date: '2025-12-31' }),
-    receipt({ number: 'RC-D', txn_date: '2026-10-01', status: 'void' }),
-    receipt({ number: null, party_name: 'Old draft', txn_date: '2026-02-01', status: 'draft' }),
-    receipt({ number: 'RC-E', txn_date: '2026-02-01', status: 'void' }),
+    receipt({ number: 'RC-A', txn_date: '2026-10-03', amount: 120 }),
+    receipt({ number: 'RC-B', txn_date: '2026-11-15', amount: 230.5 }),
+    receipt({ number: 'RC-C', txn_date: '2025-12-31', amount: 75.25 }),
+    receipt({ number: 'RC-D', txn_date: '2026-10-01', status: 'void', amount: 40 }),
+    receipt({ number: null, party_name: 'Old draft', txn_date: '2026-02-01', status: 'draft', amount: 10 }),
+    receipt({ number: 'RC-E', txn_date: '2026-02-01', status: 'void', amount: 60 }),
   ];
   const parties = (rows: CashReceiptRow[]) => rows.map((r) => r.number ?? r.party_name);
 
@@ -583,8 +606,34 @@ describe('the table follows the period, as the cards do', () => {
       const view = cashReceiptsView(receipts, today, period);
       const posted = filterCashReceipts(cashReceiptsInPeriod(receipts, today, period), '', 'posted');
       expect(String(posted.length), period).toBe(view.stats.find((s) => s.label === 'Receipts')?.value);
-      expect(sum(posted, (r) => r.amount), period).toBe(posted.length * 100);
+      expect(rmShort(sum(posted, (r) => r.amount)), period).toBe(view.received);
+      expect(rmShort(sum(posted, (r) => r.amount)), period).toBe(view.stats.find((s) => s.label === 'Received')?.value);
     }
+    // The sums really differ between periods, so the comparison above can fail.
+    expect(cashReceiptsView(receipts, today, 'month').received).toBe('RM 120');
+    expect(cashReceiptsView(receipts, today, 'quarter').received).toBe('RM 351');
+    expect(cashReceiptsView(receipts, today, 'all').received).toBe('RM 426');
+  });
+  it('puts the first and last day of a month and of a quarter in the right periods, and the table agrees with the cards', () => {
+    const edges = [
+      receipt({ number: 'Sep-30', txn_date: '2026-09-30', amount: 11 }),
+      receipt({ number: 'Oct-01', txn_date: '2026-10-01', amount: 22 }),
+      receipt({ number: 'Oct-31', txn_date: '2026-10-31', amount: 33 }),
+      receipt({ number: 'Nov-01', txn_date: '2026-11-01', amount: 44 }),
+      receipt({ number: 'Dec-31', txn_date: '2026-12-31', amount: 55 }),
+      receipt({ number: 'Jan-01', txn_date: '2027-01-01', amount: 66 }),
+    ];
+    const posted = (period: CashBookPeriod) => filterCashReceipts(cashReceiptsInPeriod(edges, today, period), '', 'posted');
+    expect(parties(posted('month'))).toEqual(['Oct-01', 'Oct-31']);
+    expect(parties(posted('quarter'))).toEqual(['Oct-01', 'Oct-31', 'Nov-01', 'Dec-31']);
+    expect(parties(posted('year'))).toEqual(['Sep-30', 'Oct-01', 'Oct-31', 'Nov-01', 'Dec-31']);
+    expect(posted('all')).toHaveLength(6);
+    for (const period of CASH_BOOK_PERIODS) {
+      expect(rmShort(sum(posted(period), (r) => r.amount)), period).toBe(cashReceiptsView(edges, today, period).received);
+    }
+    // The first of the next quarter belongs to that quarter, not to the one ending the day before.
+    expect(parties(filterCashReceipts(cashReceiptsInPeriod(edges, '2026-12-31', 'quarter'), '', 'posted'))).toEqual(['Oct-01', 'Oct-31', 'Nov-01', 'Dec-31']);
+    expect(parties(filterCashReceipts(cashReceiptsInPeriod(edges, '2027-01-01', 'quarter'), '', 'posted'))).toEqual(['Jan-01']);
   });
   it('leaves search and the status filter to work on top of the period', () => {
     const inMonth = cashReceiptsInPeriod(receipts, today, 'month');
@@ -623,3 +672,49 @@ describe('the table follows the period, as the cards do', () => {
     }
   });
 });
+
+describe('the line under the table', () => {
+  const line = (over: Partial<Parameters<typeof cashBookCountLine>[0]> = {}) =>
+    cashBookCountLine({
+      noun: 'vouchers',
+      period: 'month',
+      workspaceRows: 5,
+      shown: 3,
+      matching: 3,
+      total: 3,
+      keptEarlier: 0,
+      keptLater: 0,
+      ...over,
+    });
+
+  it('says the period when every row is dated in it', () => {
+    expect(line()).toBe('Showing 3 of 3 vouchers this month');
+    expect(line({ noun: 'receipts', period: 'quarter' })).toBe('Showing 3 of 3 receipts this quarter');
+  });
+  it('says so in plain words when rows from outside the period are kept', () => {
+    expect(line({ keptEarlier: 2 })).toBe('Showing 3 of 3 vouchers: this month, and 2 earlier ones still waiting');
+    expect(line({ keptEarlier: 1 })).toBe('Showing 3 of 3 vouchers: this month, and 1 earlier one still waiting');
+    expect(line({ noun: 'receipts', keptEarlier: 1 })).toBe('Showing 3 of 3 receipts: this month, and 1 earlier draft');
+    expect(line({ noun: 'receipts', keptEarlier: 2 })).toBe('Showing 3 of 3 receipts: this month, and 2 earlier drafts');
+    expect(line({ keptLater: 1 })).toBe('Showing 3 of 3 vouchers: this month, and 1 later one still waiting');
+    expect(line({ keptEarlier: 1, keptLater: 1 })).toBe('Showing 3 of 3 vouchers: this month, and 2 more dated outside it, still waiting');
+    expect(line({ noun: 'receipts', keptEarlier: 1, keptLater: 1 })).toBe('Showing 3 of 3 receipts: this month, and 2 more drafts dated outside it');
+  });
+  it('keeps the whole table in view when a search or filter narrows it', () => {
+    expect(line({ shown: 1, matching: 1, total: 3 })).toBe('Showing 1 of 1 vouchers (3 this month)');
+    expect(line({ shown: 1, matching: 1, total: 3, keptEarlier: 2 })).toBe(
+      'Showing 1 of 1 vouchers (3 in the table: this month, and 2 earlier ones still waiting)',
+    );
+  });
+  it('reads sensibly for All time', () => {
+    expect(line({ period: 'all' })).toBe('Showing 3 of 3 vouchers, all time');
+    expect(line({ period: 'all', shown: 1, matching: 1, total: 3 })).toBe('Showing 1 of 1 vouchers (3 in all)');
+  });
+  it('reads sensibly when the period holds nothing', () => {
+    expect(line({ shown: 0, matching: 0, total: 0 })).toBe('Showing 0 of 0 vouchers this month');
+  });
+  it('shows no line when the workspace has no rows at all', () => {
+    expect(line({ workspaceRows: 0, shown: 0, matching: 0, total: 0 })).toBeNull();
+  });
+});
+

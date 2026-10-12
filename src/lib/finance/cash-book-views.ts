@@ -16,14 +16,15 @@ import { type Stat, count, lastMonths, monthOf, sum, thousands } from './view-he
 
 /* ---- the period selector ------------------------------------------- */
 
-export const CASH_BOOK_PERIODS = ['month', 'quarter', 'year'] as const;
+export const CASH_BOOK_PERIODS = ['month', 'quarter', 'year', 'all'] as const;
 export type CashBookPeriod = (typeof CASH_BOOK_PERIODS)[number];
 
-/** There is no financial-year setting, so the longest period is the calendar year. */
+/** There is no financial-year setting, so the longest dated period is the calendar year; "All time" has no date limit. */
 export const CASH_BOOK_PERIOD_LABELS: Record<CashBookPeriod, string> = {
   month: 'This month',
   quarter: 'This quarter',
   year: 'This year',
+  all: 'All time',
 };
 
 /** The calendar year a date falls in. */
@@ -34,9 +35,58 @@ const quarterOf = (iso: string) => `${yearOf(iso)}-Q${Math.ceil(Number(iso.slice
 
 /** Whether a date falls in the calendar month, quarter or year that today is in. A later date in that period counts too. */
 export function inPeriod(iso: string, today: string, period: CashBookPeriod): boolean {
+  if (period === 'all') return true;
   if (period === 'month') return monthOf(iso) === monthOf(today);
   if (period === 'quarter') return quarterOf(iso) === quarterOf(today);
   return yearOf(iso) === yearOf(today);
+}
+
+/** "Nothing received this month." / "Nothing received yet." for All time. */
+export function nothingInPeriod(verb: string, period: CashBookPeriod): string {
+  return period === 'all' ? `Nothing ${verb} yet.` : `Nothing ${verb} ${CASH_BOOK_PERIOD_LABELS[period].toLowerCase()}.`;
+}
+
+/** What the table says when no row falls in the chosen period; it only suggests a longer period when there is one. */
+export function emptyPeriodText(noun: 'receipts' | 'vouchers', period: CashBookPeriod): string {
+  return period === 'all' ? 'Nothing here.' : `Nothing in this period. Choose a longer one to see earlier ${noun}.`;
+}
+
+/**
+ * The line under the table. `shown` of `matching` rows are on screen; `total`
+ * is every row the table holds for the period before search and filters, and
+ * `keptEarlier` / `keptLater` how many of those are dated outside the period
+ * and kept in it anyway (drafts for receipts, money still waiting for
+ * vouchers). Null when the workspace has no rows at all, because the table
+ * already says so.
+ */
+export function cashBookCountLine(args: {
+  noun: 'receipts' | 'vouchers';
+  period: CashBookPeriod;
+  workspaceRows: number;
+  shown: number;
+  matching: number;
+  total: number;
+  keptEarlier: number;
+  keptLater: number;
+}): string | null {
+  const { noun, period, workspaceRows, shown, matching, total, keptEarlier, keptLater } = args;
+  if (workspaceRows === 0) return null;
+  const base = `Showing ${shown} of ${matching} ${noun}`;
+  const span = period === 'all' ? 'all time' : CASH_BOOK_PERIOD_LABELS[period].toLowerCase();
+  const kept = keptEarlier + keptLater;
+  let keptText = '';
+  if (kept > 0) {
+    const which = keptLater === 0 ? 'earlier' : keptEarlier === 0 ? 'later' : null;
+    if (noun === 'receipts') {
+      keptText = which ? `${kept} ${which} ${kept === 1 ? 'draft' : 'drafts'}` : `${kept} more ${kept === 1 ? 'draft' : 'drafts'} dated outside it`;
+    } else {
+      keptText = which ? `${kept} ${which} ${kept === 1 ? 'one' : 'ones'} still waiting` : `${kept} more dated outside it, still waiting`;
+    }
+  }
+  const filtered = matching !== total;
+  if (kept === 0) return filtered ? `${base} (${total} ${period === 'all' ? 'in all' : span})` : period === 'all' ? `${base}, all time` : `${base} ${span}`;
+  const detail = `${span}, and ${keptText}`;
+  return filtered ? `${base} (${total} in the table: ${detail})` : `${base}: ${detail}`;
 }
 
 const SLICE_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-5)', 'var(--chart-3)', 'var(--chart-4)'];
