@@ -24,6 +24,7 @@ import {
   saveCashReceipt,
   voidCashReceipt,
 } from '@/lib/finance/cash-receipts';
+import { approveExpense, deleteExpense, listExpenseCategories, rejectExpense, saveExpense } from '@/lib/finance/expenses';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import { createConfirmedTestUser, createOrg, liveClient, signInOwner } from './helpers/live-workspaces';
 
@@ -432,4 +433,109 @@ testWithSupabase('a receipt for invoices: a draft holds its part, is changed wit
   expect(await voidCashReceipt(asMember, { id: again.id })).toEqual({ ok: false, error: NEEDS_SIGN_OFF });
   done(await voidCashReceipt(asOwner, { id: again.id }));
   expect(await balance()).toBe(125);
+});
+
+// ---- stage 5c: the expense form's writes, through the app's own data layer ----------------------
+// src/lib/finance/expenses.ts with the payloads the expense form sends, as a member and as the owner: who
+// ends up with what status, the sentence each refusal reads as, and that an amount of NaN is refused by the
+// database itself (20261110100000_bendahara_expense_amounts).
+
+const NEEDS_DECIDER = 'Only an owner or admin can approve or reject an expense. Ask one of them to do this.';
+
+const expenseRow = async (id: string) => {
+  const { data, error } = await owner.c
+    .from('finance_expenses')
+    .select('status, amount, sst_amount, vendor_name, created_by, approved_by')
+    .eq('id', id)
+    .maybeSingle();
+  expect(error, error?.message).toBeNull();
+  return data;
+};
+
+testWithSupabase('an expense: a member saves, changes and cannot decide it; the owner approves, rejects, and approves by saving', async () => {
+  const asMember = { client: member.c, orgId };
+  const asOwner = { client: owner.c, orgId };
+  const categories = await listExpenseCategories(asMember);
+  const rent = categories.find((c) => c.name === 'Rent')?.id as string;
+  expect(rent).toBeTruthy();
+  const details = { expense_date: daysFromToday(0), category_id: rent, vendor_name: 'Kedai Ali', amount: 120, sst_amount: 6, notes: 'Paper' };
+
+  // Saved by the member: it waits, in their name.
+  const saved = done(await saveExpense(asMember, details));
+  expect(saved.status).toBe('pending');
+  expect(await expenseRow(saved.id)).toEqual({
+    status: 'pending', amount: 120, sst_amount: 6, vendor_name: 'Kedai Ali', created_by: member.userId, approved_by: null,
+  });
+  // Changed by the member: still waiting.
+  expect(done(await saveExpense(asMember, { ...details, id: saved.id, amount: 130 })).status).toBe('pending');
+  expect(await approveExpense(asMember, { id: saved.id })).toEqual({ ok: false, error: NEEDS_DECIDER });
+  expect(await rejectExpense(asMember, { id: saved.id })).toEqual({ ok: false, error: NEEDS_DECIDER });
+  expect((await expenseRow(saved.id))?.status).toBe('pending');
+
+  // Rejected by the owner; not approved as it stands; edited by the member, it waits again.
+  done(await rejectExpense(asOwner, { id: saved.id }));
+  expect(await expenseRow(saved.id)).toMatchObject({ status: 'rejected', approved_by: owner.userId });
+  expect((await approveExpense(asOwner, { id: saved.id })).ok).toBe(false);
+  expect(await rejectExpense(asOwner, { id: saved.id })).toEqual({ ok: false, error: 'This expense has already been rejected.' });
+  expect(done(await saveExpense(asMember, { ...details, id: saved.id, amount: 125 })).status).toBe('pending');
+  expect(await expenseRow(saved.id)).toMatchObject({ status: 'pending', amount: 125, approved_by: null });
+
+  // Approved by the owner, and then locked for everyone; rejected again while nothing is paid.
+  done(await approveExpense(asOwner, { id: saved.id }));
+  expect(await expenseRow(saved.id)).toMatchObject({ status: 'approved', approved_by: owner.userId, created_by: member.userId });
+  for (const ctx of [asMember, asOwner]) {
+    expect((await saveExpense(ctx, { ...details, id: saved.id })).ok).toBe(false);
+    expect((await deleteExpense(ctx, { id: saved.id })).ok).toBe(false);
+  }
+  expect((await expenseRow(saved.id))?.status).toBe('approved');
+  done(await rejectExpense(asOwner, { id: saved.id }));
+
+  // The owner saves over the member's rejected expense: approved in the same call, still the member's.
+  expect(done(await saveExpense(asOwner, { ...details, id: saved.id })).status).toBe('approved');
+  expect(await expenseRow(saved.id)).toMatchObject({ status: 'approved', created_by: member.userId, approved_by: owner.userId });
+
+  // A new one by the owner is approved at once; one by the member is deleted by the member.
+  const own = done(await saveExpense(asOwner, { ...details, vendor_name: null, vendor_id: supplier }));
+  expect(own.status).toBe('approved');
+  const draft = done(await saveExpense(asMember, details));
+  done(await deleteExpense(asMember, { id: draft.id }));
+  expect(await expenseRow(draft.id)).toBeNull();
+  expect(await deleteExpense(asMember, { id: draft.id })).toEqual({ ok: false, error: 'That expense no longer exists.' });
+});
+
+testWithSupabase('an approved expense with a payment against it cannot be rejected', async () => {
+  const asOwner = { client: owner.c, orgId };
+  const rent = await category('Rent');
+  const saved = done(await saveExpense(asOwner, { expense_date: daysFromToday(0), category_id: rent, vendor_name: 'Landlord', amount: 60 }));
+  const scheduled = await owner.c.rpc('finance_record_voucher', {
+    target_org: orgId,
+    voucher: { account_id: bank, method: 'bank_transfer', status: 'scheduled' },
+    allocations: [{ expense_id: saved.id, amount: 20 }],
+  });
+  expect(scheduled.error, scheduled.error?.message).toBeNull();
+  expect(await rejectExpense(asOwner, { id: saved.id })).toEqual({
+    ok: false,
+    error: 'This expense has a payment against it, paid or still to be paid, so it cannot be rejected.',
+  });
+  const totals = await owner.c.from('finance_expense_totals').select('display_status, paid, held').eq('id', saved.id).maybeSingle();
+  expect(totals.data).toMatchObject({ display_status: 'approved', paid: 0, held: 20 });
+});
+
+testWithSupabase('an expense of NaN is refused by the database, whoever sends it', async () => {
+  const rent = await category('Rent');
+  for (const c of [member.c, owner.c]) {
+    const refused = await c.rpc('finance_save_expense', {
+      target_org: orgId,
+      expense: { category_id: rent, vendor_name: 'X', amount: 'NaN', sst_amount: 0 },
+    });
+    expect(refused.error?.code).toBe('23514');
+    expect(refused.error?.message).toContain('finance_expenses_amount_not_nan');
+    const both = await c.rpc('finance_save_expense', {
+      target_org: orgId,
+      expense: { category_id: rent, vendor_name: 'X', amount: 'NaN', sst_amount: 'NaN' },
+    });
+    expect(both.error?.code).toBe('23514');
+  }
+  const { data } = await owner.c.from('finance_expenses').select('id').eq('org_id', orgId).eq('vendor_name', 'X');
+  expect(data ?? []).toEqual([]);
 });
