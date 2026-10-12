@@ -1,10 +1,8 @@
--- NOTE (20261030123000_finance_write_guards): this script was written before
--- that migration and has not been brought up to date with it. Once it is
--- applied, every statement here that writes a payment's `number` straight to
--- finance_transactions as a signed-in person answers 42501 (the column is no
--- longer writable) in place of the code expected below, and anything the
--- editor (role `member`) posts, pays or voids answers FIN14. Revise those
--- expectations before reading a failure here as a regression.
+-- Brought up to date with 20261030123000_finance_write_guards, which it now
+-- needs: a statement that writes a payment's `number` straight to
+-- finance_transactions as a signed-in person is expected to answer 42501 (the
+-- column is not writable), and what the editor (role `member`) posts or pays
+-- is expected to answer FIN14, with the owner then doing it.
 -- Bendahara invoices check. Run it after 20261014100000_bendahara_invoices.sql,
 -- in the same transaction for a dry run, or by itself once the migration is
 -- applied. It leaves nothing behind either way: the block always ends with
@@ -308,7 +306,10 @@ begin
     format('insert into public.finance_allocations (org_id, transaction_id, bill_id, amount) values (%L, %L, %L, 10)', org, stray, bill));
   fails := fails || public.bendahara_check_try('a split draft payment out is made smaller than its split', 'FIN03',
     format('update public.finance_transactions set amount = 9.99 where id = %L', stray));
-  fails := fails || public.bendahara_check_try('a split draft payment out is shrunk and posted at once', 'FIN03',
+  -- Naming `number` is refused before the guard is asked (42501); without it the guard still answers.
+  fails := fails || public.bendahara_check_try('a split draft payment out is shrunk and posted at once, without a number', 'FIN03',
+    format('update public.finance_transactions set amount = 1, status = %L where id = %L', 'posted', stray));
+  fails := fails || public.bendahara_check_try('a split draft payment out is shrunk and posted at once', '42501',
     format('update public.finance_transactions set amount = 1, status = %L, number = %L where id = %L', 'posted', 'PV-SNEAKY', stray));
   fails := fails || public.bendahara_check_try('a split draft payment out is turned into money in', 'FIN04',
     format('update public.finance_transactions set direction = %L where id = %L', 'in', stray));
@@ -332,11 +333,15 @@ begin
     format('insert into public.finance_allocations (org_id, transaction_id, invoice_id, amount) values (%L, %L, %L, 20)', org, stray, theirs));
   fails := fails || public.bendahara_check_try('a split draft payment in is made smaller than its split', 'FIN03',
     format('update public.finance_transactions set amount = 1 where id = %L', stray));
-  fails := fails || public.bendahara_check_try('a split draft payment in is shrunk and posted at once', 'FIN03',
+  fails := fails || public.bendahara_check_try('a split draft payment in is shrunk and posted at once, without a number', 'FIN03',
+    format('update public.finance_transactions set amount = 1, status = %L where id = %L', 'posted', stray));
+  fails := fails || public.bendahara_check_try('a split draft payment in is shrunk and posted at once', '42501',
     format('update public.finance_transactions set amount = 1, status = %L, number = %L where id = %L', 'posted', 'RC-SNEAKY', stray));
   fails := fails || public.bendahara_check_try('a split draft payment in is turned into money out', 'FIN04',
     format('update public.finance_transactions set direction = %L where id = %L', 'out', stray));
-  fails := fails || public.bendahara_check_try('a split draft payment in is turned round and posted at once', 'FIN04',
+  fails := fails || public.bendahara_check_try('a split draft payment in is turned round and posted at once, without a number', 'FIN04',
+    format('update public.finance_transactions set direction = %L, status = %L where id = %L', 'out', 'posted', stray));
+  fails := fails || public.bendahara_check_try('a split draft payment in is turned round and posted at once', '42501',
     format('update public.finance_transactions set direction = %L, status = %L, number = %L where id = %L', 'out', 'posted', 'RC-SNEAKY', stray));
   fails := fails || public.bendahara_check_try('a split draft payment in is made larger', 'ok',
     format('update public.finance_transactions set amount = 25, updated_at = now() where id = %L', stray));
@@ -394,13 +399,28 @@ begin
   set local role authenticated;
   draft := public.finance_save_invoice(org,
     jsonb_build_object('customer_id', cust2, 'invoice_date', current_date, 'due_date', current_date + 30), one_line);
+  -- Posting and recording money received are sign-offs: an owner's or admin's (20261030123000).
+  fails := fails || public.bendahara_check_try('an editor posts their own draft invoice', 'FIN14',
+    format('select public.finance_post_invoice(%L, %L)', org, draft));
+  fails := fails || public.bendahara_check_try('an editor records a payment in', 'FIN14',
+    format('select public.finance_record_payment_in(%L, %L, %L)', org,
+      jsonb_build_object('account_id', bank, 'method', 'duitnow'), jsonb_build_array(jsonb_build_object('invoice_id', theirs, 'amount', 1))));
+  -- A draft payment is still anyone's to write, and is recorded as theirs.
+  insert into public.finance_transactions (org_id, direction, account_id, amount, method)
+  values (org, 'out', bank, 7, 'cash') returning id into rc1;
+  reset role;
+  select count(*) into n from public.finance_invoices where id = draft and created_by = editor_id and status = 'draft';
+  if n <> 1 then fails := array_append(fails, 'an invoice does not record who made it, or a refused post left a mark'); end if;
+  select count(*) into n from public.finance_transactions where id = rc1 and created_by = editor_id;
+  if n <> 1 then fails := array_append(fails, 'a draft payment does not record who made it'); end if;
+  -- The owner posts the editor's draft and records the money for it.
+  perform set_config('request.jwt.claims', json_build_object('sub', owner_id, 'role', 'authenticated', 'aal', 'aal2')::text, true);
+  set local role authenticated;
   perform public.finance_post_invoice(org, draft);
-  rc1 := public.finance_record_payment_in(org,
+  perform public.finance_record_payment_in(org,
     jsonb_build_object('account_id', bank, 'method', 'duitnow'),
     jsonb_build_array(jsonb_build_object('invoice_id', draft, 'amount', 50)));
   reset role;
-  select count(*) into n from public.finance_invoices where id = draft and created_by = editor_id;
-  if n <> 1 then fails := array_append(fails, 'an invoice does not record who made it'); end if;
 
   -- ==== as the viewer: reads everything, changes nothing =====================
   perform set_config('request.jwt.claims', json_build_object('sub', viewer_id, 'role', 'authenticated', 'aal', 'aal2')::text, true);
@@ -456,8 +476,8 @@ begin
   end;
   select count(*) into n from public.finance_invoices where id = draft and status = 'posted' and created_by is null;
   if n <> 1 then fails := array_append(fails, 'deleting a user did not clear created_by on their posted invoice'); end if;
-  select count(*) into n from public.finance_transactions where id = rc1 and status = 'posted' and created_by is null;
-  if n <> 1 then fails := array_append(fails, 'deleting a user did not clear created_by on their posted payment in'); end if;
+  select count(*) into n from public.finance_transactions where id = rc1 and status = 'draft' and created_by is null;
+  if n <> 1 then fails := array_append(fails, 'deleting a user did not clear created_by on their draft payment'); end if;
   begin
     delete from auth.users where id = owner_id;
   exception when others then

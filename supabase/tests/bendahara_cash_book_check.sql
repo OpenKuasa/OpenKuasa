@@ -1,12 +1,12 @@
--- NOTE (20261030123000_finance_write_guards): this script was written before
--- that migration and has not been brought up to date with it. Once it is
--- applied, every statement here that writes a payment's `number`,
--- `approved_by`, `approved_at` or `created_by` straight to
--- finance_transactions as a signed-in person answers 42501 (the column is no
--- longer writable) in place of the code expected below, and anything the
--- editor (role `member`) posts or pays, a cash receipt and a voucher for
--- approved expenses included, answers FIN14. Revise those expectations
--- before reading a failure here as a regression.
+-- Brought up to date with 20261030123000_finance_write_guards, which it now
+-- needs. A statement that writes a payment's `number`, `approved_by`,
+-- `approved_at` or `created_by` straight to finance_transactions as a
+-- signed-in person is expected to answer 42501 (the column is not writable);
+-- where the rule it proved was a guard's, the same statement without the
+-- closed column is tried too and still expects the guard's code. What the
+-- editor (role `member`) posts, pays or voids, a cash receipt and a voucher
+-- for approved expenses included, is expected to answer FIN14, and an admin
+-- then does it, so the numbers and totals further down are what they were.
 -- Bendahara cash book check. Run it after
 -- 20261028100000_bendahara_cash_book.sql, in the same transaction for a dry
 -- run, or by itself once the migration is applied. It goes through expenses,
@@ -376,8 +376,8 @@ begin
   fails := fails || public.bendahara_check_try('a rejected expense is deleted', 'ok',
     format('delete from public.finance_expenses where id = %L', ex6));
 
-  -- ==== paying an approved expense, as the editor ==============================
-  -- No second approval: the expense was approved.
+  -- ==== paying an approved expense: scheduled by the editor, paid by an admin ===
+  -- No second approval: the expense was approved. Paying is a sign-off.
   perform set_config('request.jwt.claims', editor_claims, true);
 
   p1 := public.finance_record_voucher(org,
@@ -396,16 +396,26 @@ begin
     format('select public.finance_record_voucher(%L, %L, %L)', org,
       jsonb_build_object('account_id', bank, 'method', 'fpx', 'contact_id', sup),
       jsonb_build_array(jsonb_build_object('expense_id', ex1, 'amount', 70.01))));
+  fails := fails || public.bendahara_check_try('an editor pays an approved expense now', 'FIN14',
+    format('select public.finance_record_voucher(%L, %L, %L)', org,
+      jsonb_build_object('account_id', till, 'method', 'cash', 'contact_id', sup),
+      jsonb_build_array(jsonb_build_object('expense_id', ex1, 'amount', 70))));
+  perform set_config('request.jwt.claims', admin_claims, true);
   p2 := public.finance_record_voucher(org,
     jsonb_build_object('account_id', till, 'method', 'cash', 'contact_id', sup),
     jsonb_build_array(jsonb_build_object('expense_id', ex1, 'amount', 70)));
+  perform set_config('request.jwt.claims', editor_claims, true);
   select status || '/' || number into t from public.finance_transactions where id = p2;
   if t is distinct from 'posted/PV-0001' then fails := fails || format('the first voucher reads %s', t); end if;
   select * into r from public.finance_expense_totals where id = ex1;
   if (r.paid, r.held, r.display_status, r.method) is distinct from (70.00, 50.00, 'approved', 'cash') then
     fails := fails || format('with RM 70 paid and RM 50 scheduled the expense reads %s', row_to_json(r));
   end if;
+  fails := fails || public.bendahara_check_try('an editor marks the scheduled payment of an expense paid', 'FIN14',
+    format('select public.finance_mark_payment_paid(%L, %L, current_date)', org, p1));
+  perform set_config('request.jwt.claims', admin_claims, true);
   no := public.finance_mark_payment_paid(org, p1, current_date);
+  perform set_config('request.jwt.claims', editor_claims, true);
   if no is distinct from 'PV-0002' then fails := fails || format('the scheduled payment was numbered %s', no); end if;
   select * into r from public.finance_expense_totals where id = ex1;
   if (r.paid, r.held, r.display_status) is distinct from (120.00, 0.00, 'paid') then
@@ -513,6 +523,8 @@ begin
   fails := fails || public.bendahara_check_try('an editor rejects a voucher', 'FIN14',
     format('update public.finance_transactions set status = %L, updated_at = now() where id = %L', 'rejected', v1));
   fails := fails || public.bendahara_check_try('an editor pays a voucher that is waiting', 'FIN14',
+    format('update public.finance_transactions set status = %L where id = %L', 'posted', v1));
+  fails := fails || public.bendahara_check_try('an editor pays a voucher that is waiting, with a number written by hand', '42501',
     format('update public.finance_transactions set status = %L, number = %L where id = %L', 'posted', 'PV-SNEAKY', v1));
   fails := fails || public.bendahara_check_try('a voucher that is waiting is marked paid', 'FIN09',
     format('select public.finance_mark_payment_paid(%L, %L, current_date)', org, v1));
@@ -528,36 +540,49 @@ begin
     format('insert into public.finance_transactions (org_id, direction, account_id, amount, method, category_id, status) values (%L, %L, %L, 10, %L, %L, %L)',
       org, 'out', bank, 'cash', rent, 'scheduled'));
   fails := fails || public.bendahara_check_try('a payment is created already posted', 'FIN09',
+    format('insert into public.finance_transactions (org_id, direction, account_id, amount, method, category_id, status) values (%L, %L, %L, 10, %L, %L, %L)',
+      org, 'out', bank, 'cash', rent, 'posted'));
+  -- A number, an approver and a time are not columns a signed-in person writes at all.
+  fails := fails || public.bendahara_check_try('a payment is created already posted, with a number', '42501',
     format('insert into public.finance_transactions (org_id, direction, account_id, amount, method, category_id, status, number) values (%L, %L, %L, 10, %L, %L, %L, %L)',
       org, 'out', bank, 'cash', rent, 'posted', 'PV-SNEAKY'));
-  insert into public.finance_transactions (org_id, direction, account_id, amount, method, category_id, approved_by, approved_at)
-  values (org, 'out', bank, 500, 'cash', rent, owner_id, now()) returning id into stray;
-  select count(*) into n from public.finance_transactions where id = stray and approved_by is null and approved_at is null;
-  if n <> 1 then fails := array_append(fails, 'a payment was created already approved'); end if;
+  fails := fails || public.bendahara_check_try('a payment is created already approved', '42501',
+    format('insert into public.finance_transactions (org_id, direction, account_id, amount, method, category_id, approved_by, approved_at) values (%L, %L, %L, 500, %L, %L, %L, now())',
+      org, 'out', bank, 'cash', rent, owner_id));
+  insert into public.finance_transactions (org_id, direction, account_id, amount, method, category_id)
+  values (org, 'out', bank, 500, 'cash', rent) returning id into stray;
+  select count(*) into n from public.finance_transactions where id = stray and approved_by is null and approved_at is null and created_by = editor_id;
+  if n <> 1 then fails := array_append(fails, 'a new draft payment is approved, or is not recorded as its maker''s'); end if;
   -- Nor is it approved afterwards by writing who approved it and when: with
   -- those two filled in, the draft would pass for one an owner had approved,
   -- and its maker could pay it. (On a draft of its own, so that a failure
   -- here is reported and does not stop the rest.)
   insert into public.finance_transactions (org_id, direction, account_id, amount, method, category_id)
   values (org, 'out', bank, 700, 'cash', rent) returning id into v6;
-  fails := fails || public.bendahara_check_try('an editor writes an approver and a time on their own draft', 'FIN14',
+  fails := fails || public.bendahara_check_try('an editor writes an approver and a time on their own draft', '42501',
     format('update public.finance_transactions set approved_at = now(), approved_by = %L where id = %L', owner_id, v6));
-  fails := fails || public.bendahara_check_try('an editor writes a time of approval on their own draft', 'FIN14',
+  fails := fails || public.bendahara_check_try('an editor writes a time of approval on their own draft', '42501',
     format('update public.finance_transactions set approved_at = now() where id = %L', v6));
-  fails := fails || public.bendahara_check_try('an editor writes an approver on their own draft', 'FIN14',
+  fails := fails || public.bendahara_check_try('an editor writes an approver on their own draft', '42501',
     format('update public.finance_transactions set approved_by = %L where id = %L', owner_id, v6));
   select count(*) into n from public.finance_transactions where id = v6 and approved_by is null and approved_at is null;
   if n <> 1 then fails := array_append(fails, 'a draft has an approver or a time after an editor tried to write them'); end if;
   fails := fails || public.bendahara_check_try('an editor pays the draft they tried to mark as approved', 'FIN14',
+    format('update public.finance_transactions set status = %L where id = %L', 'posted', v6));
+  fails := fails || public.bendahara_check_try('an editor pays the draft they tried to mark as approved, with a number written by hand', '42501',
     format('update public.finance_transactions set status = %L, number = %L where id = %L', 'posted', 'PV-SNEAKY', v6));
   delete from public.finance_transactions where id = v6 and status = 'draft';
   fails := fails || public.bendahara_check_try('an editor schedules money out that settles no document', 'FIN14',
     format('update public.finance_transactions set status = %L where id = %L', 'scheduled', stray));
   fails := fails || public.bendahara_check_try('an editor pays money out that settles no document', 'FIN14',
+    format('update public.finance_transactions set status = %L where id = %L', 'posted', stray));
+  fails := fails || public.bendahara_check_try('an editor pays money out that settles no document, with a number written by hand', '42501',
     format('update public.finance_transactions set status = %L, number = %L where id = %L', 'posted', 'PV-SNEAKY', stray));
   -- A sen against a bill does not make the other RM 499.99 a payment to a supplier.
   insert into public.finance_allocations (org_id, transaction_id, bill_id, amount) values (org, stray, bill1, 0.01);
   fails := fails || public.bendahara_check_try('an editor pays money out that is mostly not for its bill', 'FIN14',
+    format('update public.finance_transactions set status = %L where id = %L', 'posted', stray));
+  fails := fails || public.bendahara_check_try('an editor pays money out that is mostly not for its bill, with a number written by hand', '42501',
     format('update public.finance_transactions set status = %L, number = %L where id = %L', 'posted', 'PV-SNEAKY', stray));
   fails := fails || public.bendahara_check_try('a draft is deleted', 'ok',
     format('delete from public.finance_transactions where id = %L', stray));
@@ -571,11 +596,11 @@ begin
   v7 := public.finance_record_payment_out(org,
     jsonb_build_object('account_id', bank, 'method', 'fpx', 'status', 'scheduled'),
     jsonb_build_array(jsonb_build_object('bill_id', bill1, 'amount', 2)));
-  fails := fails || public.bendahara_check_try('an editor raises a scheduled payment and writes a time of approval on it', 'FIN14',
+  fails := fails || public.bendahara_check_try('an editor raises a scheduled payment and writes a time of approval on it', '42501',
     format('update public.finance_transactions set amount = 50000, approved_at = now() where id = %L', v7));
   select count(*) into n from public.finance_transactions where id = v7 and amount = 2 and approved_by is null and approved_at is null;
   if n <> 1 then fails := array_append(fails, 'a scheduled payment was raised or marked approved by an editor'); end if;
-  fails := fails || public.bendahara_check_try('an editor writes a time of approval on a scheduled payment', 'FIN14',
+  fails := fails || public.bendahara_check_try('an editor writes a time of approval on a scheduled payment', '42501',
     format('update public.finance_transactions set approved_at = now() where id = %L', v7));
   delete from public.finance_transactions where id = v7;
   -- Scheduled, it stays covered by its bill: it is not raised above it, and
@@ -590,8 +615,16 @@ begin
   select t.amount::text || '/' || coalesce((select sum(a.amount) from public.finance_allocations a where a.transaction_id = t.id), 0) into t
     from public.finance_transactions t where t.id = stray;
   if t is distinct from '1.00/1.00' then fails := fails || format('a scheduled payment of RM 1 against a bill now reads %s', t); end if;
-  fails := fails || public.bendahara_check_try('an editor marks paid a scheduled payment that is exactly its bill', 'ok',
+  -- Scheduling it needed nobody; paying it is a sign-off, and so is voiding it afterwards.
+  fails := fails || public.bendahara_check_try('an editor marks paid a scheduled payment that is exactly its bill', 'FIN14',
     format('select public.finance_mark_payment_paid(%L, %L, current_date)', org, stray));
+  perform set_config('request.jwt.claims', admin_claims, true);
+  fails := fails || public.bendahara_check_try('an admin marks paid a scheduled payment that is exactly its bill', 'ok',
+    format('select public.finance_mark_payment_paid(%L, %L, current_date)', org, stray));
+  perform set_config('request.jwt.claims', editor_claims, true);
+  fails := fails || public.bendahara_check_try('an editor voids the payment an admin marked paid', 'FIN14',
+    format('update public.finance_transactions set status = %L, updated_at = now() where id = %L', 'void', stray));
+  perform set_config('request.jwt.claims', admin_claims, true);
   update public.finance_transactions set status = 'void', updated_at = now() where id = stray and status = 'posted';
   delete from public.finance_transactions where id = stray and status = 'scheduled';
 
@@ -600,17 +633,18 @@ begin
 
   fails := fails || public.bendahara_check_try('a voucher is approved and changed in one update', 'FIN14',
     format('update public.finance_transactions set status = %L, amount = 3000 where id = %L', 'scheduled', v1));
-  fails := fails || public.bendahara_check_try('a voucher that is waiting is paid without being approved', 'FIN14',
+  -- A number written by hand is refused for the column, whoever writes it.
+  fails := fails || public.bendahara_check_try('a voucher that is waiting is paid without being approved', '42501',
     format('update public.finance_transactions set status = %L, number = %L where id = %L', 'posted', 'PV-SNEAKY', v1));
   -- Without a number the table's own check would refuse it (23514); the guard comes first.
   fails := fails || public.bendahara_check_try('a voucher that is waiting is paid in one step', 'FIN14',
     format('update public.finance_transactions set status = %L where id = %L', 'posted', v1));
   -- Who approved and when is the guard's to write: not even an owner fills them in.
-  fails := fails || public.bendahara_check_try('an owner approves a voucher and writes the time by hand', 'FIN14',
+  fails := fails || public.bendahara_check_try('an owner approves a voucher and writes the time by hand', '42501',
     format('update public.finance_transactions set status = %L, approved_at = now() - interval %L where id = %L', 'scheduled', '3 days', v1));
   insert into public.finance_transactions (org_id, direction, account_id, amount, method, category_id)
   values (org, 'out', bank, 9, 'cash', rent) returning id into stray;
-  fails := fails || public.bendahara_check_try('an owner writes a time of approval on a draft', 'FIN14',
+  fails := fails || public.bendahara_check_try('an owner writes a time of approval on a draft', '42501',
     format('update public.finance_transactions set approved_at = now() where id = %L', stray));
   delete from public.finance_transactions where id = stray;
   fails := fails || public.bendahara_check_try('an owner approves a voucher', 'ok',
@@ -658,7 +692,7 @@ begin
     format('update public.finance_transactions set status = %L, updated_at = now() where id = %L', 'rejected', v7));
   perform set_config('request.jwt.claims', admin_claims, true);
   -- The decision is recorded in the name of whoever made it, never in a name they wrote.
-  fails := fails || public.bendahara_check_try('an admin rejects a voucher in the owner''s name', 'FIN14',
+  fails := fails || public.bendahara_check_try('an admin rejects a voucher in the owner''s name', '42501',
     format('update public.finance_transactions set status = %L, approved_by = %L where id = %L', 'rejected', owner_id, v7));
   fails := fails || public.bendahara_check_try('an admin approves a voucher', 'ok',
     format('update public.finance_transactions set status = %L, updated_at = now() where id = %L', 'scheduled', v6));
@@ -671,21 +705,30 @@ begin
   end if;
   delete from public.finance_transactions where id in (v6, v7);
 
-  -- ==== an approved voucher is paid as it was approved, by anyone who may write =
+  -- ==== an approved voucher is paid as it was approved, by an owner or admin ====
   perform set_config('request.jwt.claims', editor_claims, true);
 
   fails := fails || public.bendahara_check_try('an approved voucher is changed', 'FIN14',
     format('update public.finance_transactions set amount = 3000 where id = %L', v1));
   fails := fails || public.bendahara_check_try('an approved voucher is paid for another amount', 'FIN14',
+    format('update public.finance_transactions set status = %L, amount = 3000 where id = %L', 'posted', v1));
+  fails := fails || public.bendahara_check_try('an approved voucher is paid for another amount, with a number written by hand', '42501',
     format('update public.finance_transactions set status = %L, number = %L, amount = 3000 where id = %L', 'posted', 'PV-SNEAKY', v1));
   fails := fails || public.bendahara_check_try('an approved voucher goes back to draft', 'FIN14',
     format('update public.finance_transactions set status = %L where id = %L', 'draft', v1));
   fails := fails || public.bendahara_check_try('an approved voucher is given a split', 'FIN09',
     format('insert into public.finance_allocations (org_id, transaction_id, bill_id, amount) values (%L, %L, %L, 10)', org, v1, bill1));
   -- Who approved it is cleared by the foreign key when that user is deleted, and by nobody's own update.
-  fails := fails || public.bendahara_check_try('an editor blanks who approved a voucher', 'FIN14',
+  fails := fails || public.bendahara_check_try('an editor blanks who approved a voucher', '42501',
     format('update public.finance_transactions set approved_by = null where id = %L', v1));
+  -- Approved by the owner, it is paid by an admin: the editor who recorded it cannot, and the owner stays its approver.
+  fails := fails || public.bendahara_check_try('an editor marks an approved voucher paid', 'FIN14',
+    format('select public.finance_mark_payment_paid(%L, %L, current_date)', org, v1));
+  perform set_config('request.jwt.claims', admin_claims, true);
+  fails := fails || public.bendahara_check_try('an admin pays an approved voucher for another amount', 'FIN14',
+    format('update public.finance_transactions set status = %L, amount = 3000 where id = %L', 'posted', v1));
   no := public.finance_mark_payment_paid(org, v1, current_date - 1);
+  perform set_config('request.jwt.claims', editor_claims, true);
   select * into r from public.finance_transactions where id = v1;
   if (no, r.status, r.number, r.txn_date, r.amount, r.approved_by)
      is distinct from ('PV-0005', 'posted', 'PV-0005', current_date - 1, 300.00, owner_id) then
@@ -693,16 +736,20 @@ begin
   end if;
   fails := fails || public.bendahara_check_try('a paid voucher is changed', 'FIN09',
     format('update public.finance_transactions set amount = 1 where id = %L', v1));
-  fails := fails || public.bendahara_check_try('who approved a paid voucher is blanked by hand', 'FIN09',
+  fails := fails || public.bendahara_check_try('who approved a paid voucher is blanked by hand', '42501',
     format('update public.finance_transactions set approved_by = null where id = %L', v1));
-  fails := fails || public.bendahara_check_try('who recorded a paid voucher is blanked by hand', 'FIN09',
+  fails := fails || public.bendahara_check_try('who recorded a paid voucher is blanked by hand', '42501',
     format('update public.finance_transactions set created_by = null where id = %L', v1));
   select count(*) into n from public.finance_transactions where id = v1 and approved_by = owner_id and created_by = editor_id;
   if n <> 1 then fails := array_append(fails, 'who approved or recorded a paid voucher was blanked by hand'); end if;
   fails := fails || public.bendahara_check_try('a paid voucher is deleted', 'FIN09',
     format('delete from public.finance_transactions where id = %L', v1));
+  fails := fails || public.bendahara_check_try('a paid voucher is voided by the editor who recorded it', 'FIN14',
+    format('update public.finance_transactions set status = %L, updated_at = now() where id = %L', 'void', v1));
+  perform set_config('request.jwt.claims', admin_claims, true);
   fails := fails || public.bendahara_check_try('a paid voucher is voided', 'ok',
     format('update public.finance_transactions set status = %L, updated_at = now() where id = %L', 'void', v1));
+  perform set_config('request.jwt.claims', editor_claims, true);
   fails := fails || public.bendahara_check_try('an approved voucher that was never paid is deleted', 'ok',
     format('delete from public.finance_transactions where id = %L', v3));
 
@@ -720,9 +767,10 @@ begin
   if t is distinct from 'rejected/' || owner_id then fails := fails || format('a rejected voucher reads %s', t); end if;
   foreach t in array array['scheduled','posted','draft','pending_approval'] loop
     fails := fails || public.bendahara_check_try(format('a rejected voucher becomes %s', t), 'FIN14',
-      format('update public.finance_transactions set status = %L, number = case when %L = %L then %L end where id = %L',
-        t, t, 'posted', 'PV-SNEAKY', v4));
+      format('update public.finance_transactions set status = %L where id = %L', t, v4));
   end loop;
+  fails := fails || public.bendahara_check_try('a rejected voucher becomes posted, with a number written by hand', '42501',
+    format('update public.finance_transactions set status = %L, number = %L where id = %L', 'posted', 'PV-SNEAKY', v4));
   fails := fails || public.bendahara_check_try('a rejected voucher is changed', 'FIN14',
     format('update public.finance_transactions set amount = 1 where id = %L', v4));
   fails := fails || public.bendahara_check_try('a rejected voucher is marked paid', 'FIN09',
@@ -741,14 +789,18 @@ begin
   -- A draft that settles nothing, moved here and paid in the same update.
   insert into public.finance_transactions (org_id, direction, account_id, amount, method)
   values (other_org, 'out', their_bank, 50000, 'cash') returning id into v6;
-  fails := fails || public.bendahara_check_try('an editor who owns another workspace moves a draft from it and pays it here in one update', 'FIN09',
+  -- org_id is not a column a signed-in person updates either (20261030123000): 42501, with or without a number.
+  -- The guard's own rule (FIN09: a payment never changes workspace) is now behind that and is not reached.
+  fails := fails || public.bendahara_check_try('an editor who owns another workspace moves a draft from it and pays it here in one update', '42501',
     format('update public.finance_transactions set org_id = %L, account_id = %L, status = %L, number = %L where id = %L',
       org, bank, 'posted', 'PV-SNEAKY', v6));
+  fails := fails || public.bendahara_check_try('an editor who owns another workspace moves a draft from it here', '42501',
+    format('update public.finance_transactions set org_id = %L, account_id = %L where id = %L', org, bank, v6));
   -- Scheduled money in, which nobody is asked about, moved here as money out, and then marked paid.
   insert into public.finance_transactions (org_id, direction, account_id, amount, method)
   values (other_org, 'in', their_bank, 40000, 'cash') returning id into v7;
   update public.finance_transactions set status = 'scheduled' where id = v7;
-  fails := fails || public.bendahara_check_try('an editor who owns another workspace moves scheduled money in from it here as money out', 'FIN09',
+  fails := fails || public.bendahara_check_try('an editor who owns another workspace moves scheduled money in from it here as money out', '42501',
     format('update public.finance_transactions set org_id = %L, account_id = %L, direction = %L where id = %L', org, bank, 'out', v7));
   fails := fails || public.bendahara_check_try('the payment that was not moved here is marked paid here', 'FIN11',
     format('select public.finance_mark_payment_paid(%L, %L, current_date)', org, v7));
@@ -814,8 +866,15 @@ begin
       jsonb_build_object('id', v2, 'account_id', bank, 'method', 'cash', 'party_name', 'X', 'category_id', sales, 'amount', 10), null::jsonb));
   fails := fails || public.bendahara_check_try('a voucher is posted as if it were a receipt', 'FIN11',
     format('select public.finance_post_cash_receipt(%L, %L)', org, v2));
-  -- Money in needs nobody's approval: the editor posts it.
+  -- Money in needs nobody's approval, and posting it is a sign-off: the editor's draft is posted by an admin.
+  fails := fails || public.bendahara_check_try('an editor posts their own draft receipt', 'FIN14',
+    format('select public.finance_post_cash_receipt(%L, %L)', org, r1));
+  if (select next_number from public.finance_sequences where org_id = org and doc_type = 'receipt') is distinct from null then
+    fails := array_append(fails, 'a refused post of a receipt used up an RC- number');
+  end if;
+  perform set_config('request.jwt.claims', admin_claims, true);
   no := public.finance_post_cash_receipt(org, r1);
+  perform set_config('request.jwt.claims', editor_claims, true);
   select * into r from public.finance_transactions where id = r1;
   if (no, r.status, r.number, r.direction) is distinct from ('RC-0001', 'posted', 'RC-0001', 'in') or r.approved_at is not null then
     fails := fails || format('a posted receipt reads as %s', row_to_json(r));
@@ -827,8 +886,12 @@ begin
     format('select public.finance_post_cash_receipt(%L, %L)', org, r1));
   fails := fails || public.bendahara_check_try('a posted receipt is deleted', 'FIN09',
     format('delete from public.finance_transactions where id = %L', r1));
+  fails := fails || public.bendahara_check_try('a posted receipt is voided by the editor who saved it', 'FIN14',
+    format('update public.finance_transactions set status = %L, updated_at = now() where id = %L', 'void', r1));
+  perform set_config('request.jwt.claims', admin_claims, true);
   fails := fails || public.bendahara_check_try('a posted receipt is voided', 'ok',
     format('update public.finance_transactions set status = %L, updated_at = now() where id = %L', 'void', r1));
+  perform set_config('request.jwt.claims', editor_claims, true);
   -- A draft that names neither invoices nor a category, written straight to the table, is not posted.
   insert into public.finance_transactions (org_id, direction, account_id, amount, method)
   values (org, 'in', bank, 20, 'cash') returning id into stray;
@@ -857,8 +920,13 @@ begin
   fails := fails || public.bendahara_check_try('an invoice is paid in full while a draft receipt holds part of it', 'FIN05',
     format('select public.finance_record_payment_in(%L, %L, %L)', org,
       jsonb_build_object('account_id', bank, 'method', 'fpx'), jsonb_build_array(jsonb_build_object('invoice_id', inv, 'amount', 32.51))));
+  fails := fails || public.bendahara_check_try('an editor records a payment in for what the draft receipt leaves', 'FIN14',
+    format('select public.finance_record_payment_in(%L, %L, %L)', org,
+      jsonb_build_object('account_id', bank, 'method', 'fpx'), jsonb_build_array(jsonb_build_object('invoice_id', inv, 'amount', 32.5))));
+  perform set_config('request.jwt.claims', admin_claims, true);
   pay := public.finance_record_payment_in(org,
     jsonb_build_object('account_id', bank, 'method', 'fpx'), jsonb_build_array(jsonb_build_object('invoice_id', inv, 'amount', 32.5)));
+  perform set_config('request.jwt.claims', editor_claims, true);
   fails := fails || public.bendahara_check_try('a receipt is for two customers', 'FIN06',
     format('select public.finance_save_cash_receipt(%L, %L, %L)', org,
       jsonb_build_object('account_id', bank, 'method', 'fpx'),
@@ -877,7 +945,9 @@ begin
   select amount::text || '/' || (select count(*) from public.finance_allocations where transaction_id = r2) into t
     from public.finance_transactions where id = r2;
   if t is distinct from '50.00/1' then fails := fails || format('a draft receipt saved for less reads %s', t); end if;
+  perform set_config('request.jwt.claims', admin_claims, true);
   no := public.finance_post_cash_receipt(org, r2);
+  perform set_config('request.jwt.claims', editor_claims, true);
   if no is distinct from 'RC-0003' then fails := fails || format('the receipt for an invoice was numbered %s', no); end if;
   select paid || '/' || balance || '/' || display_status into t from public.finance_invoice_totals where id = inv;
   if t is distinct from '82.50/50.00/sent' then fails := fails || format('after the receipt was posted the invoice reads %s', t); end if;
@@ -919,12 +989,20 @@ begin
        + (select count(*) from public.finance_refunds where transaction_id in (pay, p2, v2))
        + (select count(*) from public.finance_payments_in where transaction_id in (rf, pay, p2, v2)) into n;
   if n <> 0 then fails := fails || format('%s rows of a voucher show on a screen that is not its own', n); end if;
-  -- An editor's payment to a supplier and refund are not held for approval: those two functions are untouched.
+  -- An editor's payment to a supplier is not held for approval: they schedule it, and nobody is written down as
+  -- approving it. Paying it now, or marking it paid, is a sign-off: an admin's here.
   perform set_config('request.jwt.claims', editor_claims, true);
+  fails := fails || public.bendahara_check_try('an editor pays a supplier now', 'FIN14',
+    format('select public.finance_record_payment_out(%L, %L, %L)', org,
+      jsonb_build_object('account_id', bank, 'method', 'fpx'), jsonb_build_array(jsonb_build_object('bill_id', bill2, 'amount', 10))));
   stray := public.finance_record_payment_out(org,
-    jsonb_build_object('account_id', bank, 'method', 'fpx'), jsonb_build_array(jsonb_build_object('bill_id', bill2, 'amount', 10)));
-  select status into t from public.finance_transactions where id = stray;
-  if t is distinct from 'posted' then fails := fails || format('a payment to a supplier recorded by an editor is %s', t); end if;
+    jsonb_build_object('account_id', bank, 'method', 'fpx', 'status', 'scheduled'), jsonb_build_array(jsonb_build_object('bill_id', bill2, 'amount', 10)));
+  select status || '/' || coalesce(approved_by::text, 'nobody') into t from public.finance_transactions where id = stray;
+  if t is distinct from 'scheduled/nobody' then fails := fails || format('a payment to a supplier scheduled by an editor is %s', t); end if;
+  perform set_config('request.jwt.claims', admin_claims, true);
+  perform public.finance_mark_payment_paid(org, stray, current_date);
+  select status || '/' || coalesce(approved_by::text, 'nobody') into t from public.finance_transactions where id = stray;
+  if t is distinct from 'posted/nobody' then fails := fails || format('a payment to a supplier scheduled by an editor and paid by an admin is %s', t); end if;
   perform set_config('request.jwt.claims', owner_claims, true);
   -- Each view has exactly one row per movement of its direction, and their totals are the table's.
   select (select count(*) from public.finance_payment_vouchers where org_id = org)
@@ -1008,10 +1086,11 @@ begin
   if n <> 0 then fails := fails || format('another workspace reads %s rows of the three views', n); end if;
   fails := fails || public.bendahara_check_try('another workspace saves an expense here', 'FIN15',
     format('select public.finance_save_expense(%L, %L)', org, jsonb_build_object('category_id', rent, 'vendor_name', 'X', 'amount', 10)));
-  fails := fails || public.bendahara_check_try('another workspace pays an expense here', 'FIN06',
+  -- The two functions below run as their owner since 20261030123000 and begin by asking whether the caller may write here.
+  fails := fails || public.bendahara_check_try('another workspace pays an expense here', '42501',
     format('select public.finance_record_voucher(%L, %L, %L)', org,
       jsonb_build_object('account_id', bank, 'method', 'fpx'), jsonb_build_array(jsonb_build_object('expense_id', ex2, 'amount', 10))));
-  fails := fails || public.bendahara_check_try('another workspace posts a receipt here', 'FIN11',
+  fails := fails || public.bendahara_check_try('another workspace posts a receipt here', '42501',
     format('select public.finance_post_cash_receipt(%L, %L)', org, r2));
   -- Its own expense cannot be paid from here, nor carry a category from here.
   select id into t from public.finance_categories where org_id = other_org and kind = 'expense' and name = 'Rent';
