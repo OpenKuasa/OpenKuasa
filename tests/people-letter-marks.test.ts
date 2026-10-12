@@ -407,6 +407,14 @@ describe('print rules', () => {
     const source = readFileSync(resolve('src/components/people/letter-view.tsx'), 'utf8');
     expect(source).toContain('[data-letter-print] :is(h3, h4) + p[aria-hidden] { break-after: avoid; }');
   });
+
+  it('undo the centring of the dialog, which is done with translate and not transform, or the letter prints off the page', () => {
+    const source = readFileSync(resolve('src/components/people/letter-view.tsx'), 'utf8');
+    const rule = /\[data-letter-dialog\] \{([^}]*)\}/.exec(source)?.[1] ?? '';
+    expect(rule).toContain('position: static !important');
+    expect(rule).toContain('translate: none !important');
+    expect(rule).toContain('transform: none !important');
+  });
 });
 
 describe('letterHeadLines', () => {

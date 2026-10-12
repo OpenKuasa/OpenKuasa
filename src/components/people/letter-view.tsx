@@ -22,7 +22,9 @@ const PRINT_CSS = `
   body > *:not([data-letter-dialog]) { display: none !important; }
   html, body { height: auto !important; overflow: visible !important; background: #fff !important; }
   [data-letter-dialog] {
-    position: static !important; transform: none !important;
+    /* The dialog is centred with the separate translate property (Tailwind's -translate-x-1/2 -translate-y-1/2), not
+       with transform: left in place it shifts the letter up and left, off the printed page. */
+    position: static !important; transform: none !important; translate: none !important; inset: auto !important; margin: 0 !important;
     width: 100% !important; max-width: none !important; max-height: none !important; overflow: visible !important;
     border: 0 !important; box-shadow: none !important; padding: 0 !important; background: #fff !important; color: #000 !important;
   }
