@@ -25,7 +25,6 @@ import { prepareCvStep } from '@/lib/ai/hire-tools';
 import {
   AMBIGUOUS_DELETION,
   HIRE_DELETE_TOOL_NAMES,
-  ambiguousLookup,
   ONE_DELETION,
   cardDecision,
   cardShown,
