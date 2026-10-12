@@ -45,7 +45,8 @@ function signingKey(env: EnvLike): Buffer {
   };
   const secret =
     usable(env.AUTH_COOKIE_SECRET) ?? usable(env.AI_KEYS_ENCRYPTION_SECRET);
-  if (secret) return Buffer.from(secret, 'utf8');
+  // Never the secret itself: a key derived from it for this purpose alone.
+  if (secret) return createHmac('sha256', secret).update(PURPOSE).digest();
 
   // Kept on globalThis so every server bundle in the process shares it.
   const store = globalThis as { [FALLBACK_KEY]?: Buffer };
