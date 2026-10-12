@@ -71,6 +71,9 @@ const CREDIT = [
   '/finance/refunds',
   '/finance/payment-vouchers',
   '/finance/banking',
+  // Issuing or voiding a credit note, and paying or voiding a refund, move the books.
+  '/finance/chart-of-accounts',
+  '/finance/journals',
 ];
 const FORBIDDEN = { ok: false, error: 'You do not have permission to make changes here.' };
 const NOTE_LOCKED =
