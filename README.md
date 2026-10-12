@@ -227,6 +227,11 @@ curl -X POST https://<your-host>/api/agents/run \
   -H "Authorization: Bearer $CRON_SECRET"
 ```
 
+- `/api/finance/receipt-cleanup` answers `{"ok": true, "queued": n, "removed": n}`:
+  how many unrecorded uploads it listed and how many files it removed.
+  `"ok": false` means part of the work is left for the next call (it stops
+  after 20 seconds); it needs attention only if it stays false for many calls
+  in a row.
 - `CRON_SECRET` must be at least 32 characters. Unset, empty or shorter means
   the endpoints accept nothing with it (they answer `401`).
 - Use a value made for this purpose only. Do not reuse a Supabase key.

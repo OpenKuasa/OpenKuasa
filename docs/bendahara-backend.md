@@ -717,7 +717,9 @@ that is not a JPG, PNG, PDF, HEIC or HEIF is refused there. The path is
 `<workspace id>/<uuid>.<ext>`; the browser makes the uuid, the action refuses
 a path that is not of that shape in the caller's own workspace
 (`isInboxReceiptPath`), and the guard refuses one with no object behind it.
-The upload is a plain one, not a resumable one. `registerReceiptAction` then
+The upload is a plain one, not a resumable one: there is no percentage, only
+"Uploading", and a dropped connection starts that file again.
+`registerReceiptAction` then
 records the row; called twice for one file it answers with the same receipt.
 Files go one at a time through a queue of at most twenty
 (`queueAdd`, `queueNext`, `retryPlan`), each with its own state and sentence.
@@ -739,7 +741,10 @@ file's first 64 bytes through a ranged request (`storedFileCheck` in
 `receipt-files-server.ts`) and refuses a file that is not the type its
 receipt says. A JPG or PNG is previewed in the review card from bytes the
 browser fetches and checks itself, as an object URL: no image, frame or new
-tab is ever pointed at a stored file. A PDF and a stored HEIC are downloads.
+tab is ever pointed at a stored file. A download is saved the same way: the
+browser fetches the bytes through the link and saves its own copy from an
+object URL, so the page never navigates to storage. A PDF and a stored HEIC
+are downloads only.
 
 **Reviewing.** `reviewReceiptInput` and `finance_review_receipt`: vendor (200
 characters), a real date, an amount above 0 with its SST inside it, SST from 0
@@ -758,7 +763,12 @@ reads up to 100 due paths, asks about each again immediately before removing
 it, and marks done only what the database sees is gone. It is authorized like
 the other scheduled endpoints (`isTriggerAuthorized`) and must be called by
 the operator's scheduler; it stops after 20 seconds and takes up the rest on
-the next call.
+the next call. It answers `{"ok", "queued", "removed"}`: how many unrecorded
+uploads it put on the list, and how many files it took off it. `ok: false` means
+something was left for the next call (the list could not be read, a file could
+not be removed, or the 20 seconds ran out); it is not an error to alert on
+unless it stays false for many calls in a row. A `401` means the secret is
+wrong.
 
 **The demo** has eight receipts with no file (a migration cannot upload), so
 `has_file` is false on them and the screen says so. Its guests are anonymous
@@ -1661,8 +1671,22 @@ with no date).
 - An upload refused by the bucket's rule says the workspace may be out of
   room or the person may no longer write: storage gives one answer for both.
 - A second tab does not see what the first one added or deleted until it is
-  reloaded. Leaving the page while files are on their way asks first; files
-  that were stored and not recorded are removed by the clean-up run.
+  reloaded. Closing or reloading the tab while files are on their way asks
+  first; moving to another screen of the app does not, and the queue keeps
+  going in the background. Files that were stored and not recorded are removed
+  by the clean-up run.
+- A JPG or PNG is uploaded as the person's device made it, so its metadata
+  stays in it, a phone's location included. Only a HEIC that was converted to a
+  JPG loses its metadata, because that JPG is drawn afresh from the pixels.
+- There is no upload percentage, and a dropped connection starts that file
+  again from the beginning (resumable uploads were left out on purpose).
+- The download name on a signed link is added to the link by the client and is
+  not covered by the link's signature: whoever holds a link can drop it, and
+  storage then serves the file inline with its declared type. Nothing in the app
+  relies on "a link is always an attachment" as a guarantee. What protects a
+  file is that the bucket only stores the five declared types, none of which a
+  browser runs as a page or script, and that it is served from the storage
+  origin, where the app has no session.
 - A signed-up member of the demo workspace (not a guest: an account the
   operator made a member) can review and delete the demo's sample receipts,
   as with every finance table. Uploading there is refused for everyone.
