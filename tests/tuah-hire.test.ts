@@ -2140,3 +2140,203 @@ describe('one agent holding the pool tools, through the user\'s answer', () => {
     });
   });
 });
+
+// A change the user approved and a last check then stopped never ran and is over: it is not the turn's one. The
+// browser tells the server only that the call was denied, so on the NEXT request the stopped call comes back with
+// the SDK's own words and no reason of the gate's. These go through the browser's round trip for three requests:
+// the card, the yes that is stopped, and the yes to the card prepared in its place.
+describe('a change stopped after approval is not the turn\'s one, as the browser carries it', () => {
+  type UI = import('ai').UIMessage;
+  type Model = import('ai').ModelMessage;
+  type ToolPart = { type: string; state?: string; toolCallId?: string; input?: unknown; approval?: { id: string; approved?: boolean; reason?: string; requestReason?: string; isAutomatic?: boolean } };
+  const A = '11111111-1111-4111-8111-111111111161';
+  const B = '22222222-2222-4222-8222-222222222262';
+  const JOB = '55555555-5555-4555-8555-555555555563';
+  const ONE_POOL_CHANGE = 'One talent pool change at a time. One is already prepared for approval.';
+  const LINE = 'More than one candidate is called Zarina binti Hashim. This one: zarina.klang@example.com · added 03 Oct 2026.';
+  const say = (id: string, text: string): UI => ({ id, role: 'user', parts: [{ type: 'text', text }] });
+  const added = { created_at: '2026-10-03T02:00:00Z' };
+  /** A is in the pool while `pool.on`; B has A's name (in another letter case) while `twin.on`. The first open job has a real id. */
+  const world = (pool = { on: true }, twin = { on: false }) => {
+    const base = hire().data;
+    const listCandidates = async () =>
+      (await base.listCandidates()).map((c, n) =>
+        n === 0 ? { ...c, ...added, id: A, name: 'Zarina binti Hashim', email: 'zarina.klang@example.com', pool_status: pool.on ? ('available' as const) : ('none' as const) }
+          : n === 1 ? { ...c, ...added, id: B, name: twin.on ? ' zarina  BINTI hashim' : 'Kamal Ariffin', email: 'zarina.ipoh@example.com', pool_status: 'passive' as const } : c);
+    const listJobs = async () => {
+      const jobs = await base.listJobs();
+      const open = jobs.find((j) => j.status === 'open')!;
+      return jobs.map((j) => (j.id === open.id ? { ...j, id: JOB } : j));
+    };
+    return { data: { ...base, listCandidates, listJobs }, write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true } };
+  };
+  type Access = ReturnType<typeof world>;
+  type Runner = (messages: Model[], chat: UI[]) => { toUIMessageStream: () => ReadableStream<unknown> };
+  const runners: Record<'lekir' | 'tuah' | 'team', (access: Access) => Runner> = {
+    lekir: (access) => (messages) => runLekir(messages, access),
+    tuah: (access) => (messages) => runTuah(messages, reach(), undefined, undefined, null, null, null, access),
+    team: (access) => (messages, chat) =>
+      runTuah(messages, reach(), undefined, undefined, null, null, { transcript: '', proposals: proposalsIn(chat), names: namesIn(chat) }, access),
+  };
+  type Call = { tool: string; input: unknown };
+  /**
+   * One request as the route runs it, and the chat as the browser holds it afterwards. `calls` is what the one agent's
+   * model calls, one list per step (it answers in words after the last). The team's specialist follows `seen.workerScript`.
+   */
+  const exchange = async (chat: UI[], run: Runner, calls: Call[][] | null): Promise<UI[]> => {
+    const { convertToModelMessages, readUIMessageStream } = await import('ai');
+    const last = chat[chat.length - 1];
+    const paused = last.role === 'assistant' ? structuredClone(last) : undefined;
+    seen.calls = [];
+    seen.singleScript = calls;
+    try {
+      const result = run(await convertToModelMessages(chat), chat);
+      let answer: UI | undefined;
+      for await (const message of readUIMessageStream({ message: paused, stream: result.toUIMessageStream() as never })) answer = message as UI;
+      return paused ? [...chat.slice(0, -1), answer!] : [...chat, answer!];
+    } finally {
+      seen.singleScript = null;
+    }
+  };
+  const toolParts = (chat: UI[]) => chat.flatMap((m) => m.parts as unknown as ToolPart[]).filter((p) => p.type.startsWith('tool-'));
+  const waiting = (chat: UI[]) => toolParts(chat).filter((p) => p.state === 'approval-requested' && !p.approval?.isAutomatic);
+  /** The parts the user said yes to that then did not run. */
+  const stopped = (chat: UI[]) => toolParts(chat).filter((p) => p.state === 'output-denied' && p.approval?.approved === true);
+  const decide = (chat: UI[], approved: boolean): UI[] => {
+    const next = structuredClone(chat);
+    const [card] = waiting(next);
+    card.state = 'approval-responded';
+    card.approval = { ...card.approval!, approved };
+    return next;
+  };
+  /** What a waiting card would do, whichever agent shows it: the tool and its input. */
+  const asks = (chat: UI[], card: ToolPart): { action: string; input: unknown } => {
+    if (card.type !== 'tool-applyChange') return { action: card.type.slice('tool-'.length), input: card.input };
+    const proposal = proposalsIn(chat).get((card.input as { proposalId: string }).proposalId)!;
+    return { action: proposal.action, input: proposal.input };
+  };
+  const reset = () => {
+    for (const fn of [poolSet, pipelineMoved, candidateDeleted]) fn.mockReset();
+    poolSet.mockResolvedValue({ ok: true, data: { id: A, name: 'Zarina binti Hashim', from: 'none', to: 'available', message: 'Added Zarina binti Hashim to the talent pool as Available.' } });
+    candidateDeleted.mockResolvedValue({ ok: true, data: { id: A, name: 'Zarina binti Hashim', job: null, applications: 0, interviews: 0, cv_files: 0, message: 'Deleted Zarina binti Hashim.' } });
+    seen.refusals = [];
+    seen.workerStep = 0;
+  };
+  const lookups: Call[] = [{ tool: 'listCandidates', input: { name: 'Zarina binti Hashim' } }, { tool: 'listJobs', input: {} }];
+  // A filler lookup first, so the call that follows gets a call id of its own: the scripted model names a call after its tool and its place.
+  const again = (call: Call): Call[][] => [[{ tool: 'listJobs', input: {} }, call]];
+
+  type Case = {
+    name: string;
+    first: Call;
+    /** What changes between the card and the yes. */
+    change: (pool: { on: boolean }, twin: { on: boolean }) => void;
+    second: Call;
+    /** The second card carries the line that says which one it is. */
+    line: boolean;
+    ran: () => void;
+  };
+  const cases: Case[] = [
+    {
+      name: 'a move for someone who then left the pool, then adding them to it',
+      first: { tool: 'moveToPipeline', input: { id: A, job_id: JOB } },
+      change: (pool) => { pool.on = false; },
+      second: { tool: 'setPoolStatus', input: { id: A, status: 'available', only_if_outside: true } },
+      line: false,
+      ran: () => {
+        expect(pipelineMoved).not.toHaveBeenCalled();
+        expect(poolSet).toHaveBeenCalledTimes(1);
+        expect(poolSet.mock.calls[0][1]).toEqual({ id: A, status: 'available', only_if_outside: true });
+      },
+    },
+    {
+      name: 'a pool change when a namesake then appeared, prepared again',
+      first: { tool: 'setPoolStatus', input: { id: A, status: 'passive' } },
+      change: (_pool, twin) => { twin.on = true; },
+      second: { tool: 'setPoolStatus', input: { id: A, status: 'passive' } },
+      line: true,
+      ran: () => {
+        expect(poolSet).toHaveBeenCalledTimes(1);
+        expect(poolSet.mock.calls[0][1]).toEqual({ id: A, status: 'passive' });
+      },
+    },
+    {
+      name: 'a deletion when a namesake then appeared, prepared again',
+      first: { tool: 'deleteCandidate', input: { id: A } },
+      change: (_pool, twin) => { twin.on = true; },
+      second: { tool: 'deleteCandidate', input: { id: A } },
+      line: true,
+      ran: () => {
+        expect(candidateDeleted).toHaveBeenCalledTimes(1);
+        expect(candidateDeleted.mock.calls[0][1]).toEqual({ id: A });
+      },
+    },
+  ];
+
+  describe.each(['lekir', 'tuah', 'team'] as const)('%s', (mode) => {
+    it.each(cases)('$name: the second card can be approved and runs once', async ({ first, change, second, line, ran }) => {
+      const { toToolStep } = await import('@/components/chat/tool-parts');
+      reset();
+      const [pool, twin] = [{ on: true }, { on: false }];
+      const run = runners[mode](world(pool, twin));
+      const own = mode !== 'team';
+      seen.workerScript = own ? null : [...lookups, first, second, 'answer'];
+      try {
+        const shown = await exchange([say('u1', 'Do this for the candidate Zarina binti Hashim')], run, own ? [lookups, [first]] : null);
+        expect(waiting(shown)).toHaveLength(1);
+        expect(asks(shown, waiting(shown)[0])).toEqual({ action: first.tool, input: first.input });
+
+        change(pool, twin);
+        // The yes arrives; the last check stops it; the assistant prepares the next thing, as the refusal tells it to.
+        const retried = await exchange(decide(shown, true), run, own ? again(second) : null);
+        expect(stopped(retried)).toHaveLength(1);
+        // What the person reads on the stopped card: "Not done", not "Not approved".
+        expect(toToolStep(stopped(retried)[0] as never, 'm', 0)).toMatchObject({ denied: true, afterApproval: true });
+        expect(waiting(retried)).toHaveLength(1);
+        expect(asks(retried, waiting(retried)[0])).toEqual({ action: second.tool, input: second.input });
+        if (line) expect(waiting(retried)[0].approval?.requestReason).toBe(LINE);
+
+        // The third request: the stopped call now comes back in the SDK's own words. The second card must still run.
+        const done = await exchange(decide(retried, true), run, own ? [] : null);
+        ran();
+        expect(stopped(done)).toHaveLength(1);
+        expect(waiting(done)).toEqual([]);
+      } finally {
+        seen.workerScript = null;
+      }
+    });
+
+    // The other side: what the user said no to, and what ran, are each still the turn's one. A deletion card in
+    // between gives the turn a third request, where the first card comes back in the browser's form.
+    it.each([['the user rejected', false], ['ran', true]] as const)('a pool change that %s is still the turn\'s one on a later request', async (_what, approved) => {
+      reset();
+      const run = runners[mode](world());
+      const own = mode !== 'team';
+      const first: Call = { tool: 'setPoolStatus', input: { id: A, status: 'passive' } };
+      const deletion: Call = { tool: 'deleteCandidate', input: { id: B } };
+      const another: Call = { tool: 'setPoolStatus', input: { id: B, status: 'available' } };
+      seen.workerScript = own ? null : [{ tool: 'listCandidates', input: {} }, first, deletion, another, 'answer'];
+      try {
+        const shown = await exchange([say('u1', 'Mark Zarina passive, delete Kamal, then mark Kamal available')], run, own ? [[{ tool: 'listCandidates', input: {} }], [first]] : null);
+        expect(waiting(shown)).toHaveLength(1);
+        const second = await exchange(decide(shown, approved), run, own ? [[deletion]] : null);
+        expect(poolSet).toHaveBeenCalledTimes(approved ? 1 : 0);
+        expect(waiting(second)).toHaveLength(1);
+        expect(asks(second, waiting(second)[0])).toEqual({ action: 'deleteCandidate', input: { id: B } });
+        const third = await exchange(decide(second, true), run, own ? again(another) : null);
+        expect(candidateDeleted).toHaveBeenCalledTimes(1);
+        // No card for the second pool change, and nothing of it saved.
+        expect(waiting(third)).toEqual([]);
+        expect(poolSet).toHaveBeenCalledTimes(approved ? 1 : 0);
+        if (own) {
+          expect(toolParts(third).filter((p) => p.approval?.isAutomatic).map((p) => p.approval?.reason)).toEqual([ONE_POOL_CHANGE]);
+        } else {
+          expect(seen.refusals.length).toBeGreaterThan(0);
+          for (const refusal of seen.refusals) expect(refusal).toBe(ONE_POOL_CHANGE);
+        }
+      } finally {
+        seen.workerScript = null;
+      }
+    });
+  });
+});

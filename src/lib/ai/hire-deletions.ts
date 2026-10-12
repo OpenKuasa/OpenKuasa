@@ -97,6 +97,46 @@ export function thisTurn(messages: readonly ModelMessage[]): ModelMessage[] {
   return messages.slice(from);
 }
 
+/** What the SDK writes as the result of a call that was denied when the browser kept no reason for it. */
+const DENIED_WITHOUT_REASON = 'Tool call execution denied.';
+
+/**
+ * The calls in these messages that the user approved and a gate's last check then stopped, by call id. Such a call
+ * never ran. The SDK asks a gate again about an approved call when the user's yes arrives; when the gate then says
+ * no, the browser is told only that the call was denied, and it keeps the user's yes on the part. So on the next
+ * request the call reads: a card of its own (not an automatic one), the user's answer to that card with
+ * `approved: true`, and a result that is a denial. Three other things look near it and are not it:
+ * - the user said no: the answer says `approved: false`;
+ * - the change ran: its result is the change's own output, not a denial;
+ * - a gate refused it before any card: its card is an automatic one, which no user answered.
+ *
+ * All three parts are parts of the conversation's structure, written by the SDK from the tool part's state. Text
+ * cannot make one: a name, a CV, a cover letter or a message from the user is only ever a string inside a part.
+ */
+export function stoppedAfterApproval(turn: readonly ModelMessage[]): Set<unknown> {
+  const cardOf = new Map<unknown, unknown>();
+  const approved = new Set<unknown>();
+  const ids = new Set<unknown>();
+  type Wide = MessagePart & { approvalId?: unknown; approved?: unknown; isAutomatic?: unknown };
+  for (const message of turn) {
+    for (const part of partsOf(message) as Wide[]) {
+      if (message.role === 'assistant' && part.type === 'tool-approval-request' && part.isAutomatic !== true) {
+        cardOf.set(part.approvalId, part.toolCallId);
+      } else if (message.role === 'tool' && part.type === 'tool-approval-response' && part.approved === true && cardOf.has(part.approvalId)) {
+        approved.add(cardOf.get(part.approvalId));
+      } else if (message.role === 'tool' && part.type === 'tool-result' && approved.has(part.toolCallId)) {
+        const output = part.output as { type?: unknown; reason?: unknown; value?: unknown } | null | undefined;
+        // In the request that stopped it the result still carries the gate's reason; from the browser it carries none.
+        const denial =
+          (output?.type === 'execution-denied' && isGateReason(output.reason)) ||
+          (output?.type === 'error-text' && (output.value === DENIED_WITHOUT_REASON || isGateReason(output.value)));
+        if (denial) ids.add(part.toolCallId);
+      }
+    }
+  }
+  return ids;
+}
+
 /**
  * The calls in these messages that the gate below denied itself, by call id.
  * Such a call never became a card, so it is not the turn's one deletion: the
@@ -106,7 +146,8 @@ export function thisTurn(messages: readonly ModelMessage[]): ModelMessage[] {
  * request as `execution-denied`, from the browser as `error-text`.
  */
 export function deniedHere(turn: readonly ModelMessage[]): Set<unknown> {
-  const ids = new Set<unknown>();
+  // A call stopped after the user's yes is over too: it never ran, and what replaces it must be able to reach a card.
+  const ids = stoppedAfterApproval(turn);
   for (const message of turn) {
     if (message.role !== 'tool') continue;
     for (const part of partsOf(message)) {

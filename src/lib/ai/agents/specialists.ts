@@ -32,6 +32,7 @@ import {
   deniedHere,
   notLookedUp,
   partsOf,
+  stoppedAfterApproval,
   thisTurn,
   type DeletionGate,
 } from '@/lib/ai/hire-deletions';
@@ -161,9 +162,15 @@ function turnStateFrom(messages: readonly ModelMessage[], proposals: Map<string,
   };
   const turn = thisTurn(messages);
   const denied = deniedHere(turn);
+  const stopped = stoppedAfterApproval(turn);
   for (const message of turn) {
     for (const part of partsOf(message)) {
-      if (message.role === 'tool' && part.type === 'tool-result' && typeof part.toolName === 'string' && part.toolName.startsWith(ASK_PREFIX)) {
+      if (message.role === 'assistant' && part.type === 'tool-call' && part.toolName === APPLY_TOOL && stopped.has(part.toolCallId)) {
+        // Approved, then stopped by the last check: it never ran and is over, so it is not the turn's one. The
+        // specialist's report that prepared it is earlier in the turn, so it is already in `prepared` here.
+        const id = (part.input as { proposalId?: unknown } | null | undefined)?.proposalId;
+        if (typeof id === 'string') for (const held of Object.values(state.prepared)) held.delete(id);
+      } else if (message.role === 'tool' && part.type === 'tool-result' && typeof part.toolName === 'string' && part.toolName.startsWith(ASK_PREFIX)) {
         const output = part.output as { type?: unknown; value?: unknown } | null | undefined;
         const report = output?.type === 'json' ? output.value : null;
         if (!isDelegation(report)) continue;
@@ -210,7 +217,15 @@ function applyGate(products: ProductToolkit[], team: TeamContext, turn: TurnStat
       kind === 'deletion'
         ? (product?.checkDeletion ? cardDecision(await product.checkDeletion(proposal.action, target), was) : 'user-approval')
         : (product?.checkPoolChange ? poolCardDecision(await product.checkPoolChange(proposal.action, target), was) : 'user-approval');
-    if (typeof decision === 'object' && decision.type === 'denied') return decision;
+    if (typeof decision === 'object' && decision.type === 'denied') {
+      // Stopped after the user's yes (the card had been shown): it will not run, so it stops being the turn's one,
+      // and what the specialist prepares in its place can reach a card. One the user rejected, or that ran, stays.
+      if (was) {
+        prepared.delete(proposal.id);
+        shown.delete(proposal.id);
+      }
+      return decision;
+    }
     shown.set(proposal.id, toolCallId);
     return decision;
   };
