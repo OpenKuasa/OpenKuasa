@@ -3,8 +3,8 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 const DIR = join(process.cwd(), 'supabase/migrations');
-const LOGO = '20261105090000_org_logo.sql';
-const LETTERS = '20261105090100_people_letter_salary_templates.sql';
+const LOGO = '20261107090000_org_logo.sql';
+const LETTERS = '20261107090100_people_letter_salary_templates.sql';
 /** The letters slice: the functions the second file redefines come from here. */
 const BEFORE = '20261102090100_people_letters_writes.sql';
 

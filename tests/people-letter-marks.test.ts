@@ -386,7 +386,7 @@ describe('heading sizes', () => {
 
 describe('the starter templates in the salary migration', () => {
   it('pins all twelve (six English, six Bahasa Malaysia) as rendering unchanged', () => {
-    const sql = readFileSync(resolve('supabase/migrations/20261105090100_people_letter_salary_templates.sql'), 'utf8');
+    const sql = readFileSync(resolve('supabase/migrations/20261107090100_people_letter_salary_templates.sql'), 'utf8');
     const bodies: string[] = [];
     for (const m of sql.matchAll(/E'((?:[^']|'')*)'/g)) {
       if (m[1].startsWith('{today}')) bodies.push(m[1].replace(/\\n/g, '\n').replace(/''/g, "'"));
