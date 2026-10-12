@@ -38,9 +38,12 @@ function Outcome({ title, children }: { title: string; children: string }) {
  */
 export function PublicLeadForm({
   action,
+  submitLabel = 'Send',
 }: {
   /** The submit action, already tied to this form. */
   action: (prev: PublicFormState, formData: FormData) => Promise<PublicFormState>;
+  /** What the button says. A landing page can give its own. */
+  submitLabel?: string;
 }) {
   const id = useId();
   const [state, formAction, pending] = useActionState<PublicFormState, FormData>(action, undefined);
@@ -177,7 +180,7 @@ export function PublicLeadForm({
       ) : null}
 
       <Button type="submit" size="lg" className="h-10 w-full" disabled={pending}>
-        {pending ? 'Sending…' : 'Send'}
+        {pending ? 'Sending…' : submitLabel}
       </Button>
     </form>
   );
