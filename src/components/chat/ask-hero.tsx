@@ -19,6 +19,7 @@ import { useChat } from '@ai-sdk/react';
 import {
   ChatKeyNotice,
   DAILY_LIMIT_NOTICE,
+  attachmentRefusal,
   chatErrorCode,
   isChatLocked,
   useChatStatus,
@@ -430,7 +431,7 @@ function Thread({
               ? `${persona.name} needs a workspace to look at. Create or join one first.`
               : chatErrorCode(error) === 'daily_limit'
                 ? DAILY_LIMIT_NOTICE
-              : `${persona.name} couldn’t respond just now. Please try again.`}
+              : (attachmentRefusal(error) ?? `${persona.name} couldn’t respond just now. Please try again.`)}
         </div>
       )}
     </div>

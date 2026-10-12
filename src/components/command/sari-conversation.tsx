@@ -40,6 +40,7 @@ import { useViewer } from '@/components/app/viewer-context';
 import {
   ChatKeyNotice,
   DAILY_LIMIT_NOTICE,
+  attachmentRefusal,
   chatErrorCode,
   isChatLocked,
   useChatStatus,
@@ -1140,7 +1141,7 @@ function ChatPane({
                       ? 'That question was not sent: your free questions are used up.'
                       : chatErrorCode(chat.error) === 'daily_limit'
                         ? DAILY_LIMIT_NOTICE
-                        : 'Tuah could not respond just now. Please try again.'}
+                        : (attachmentRefusal(chat.error) ?? 'Tuah could not respond just now. Please try again.')}
                   </p>
                 ) : null}
                 <div ref={endRef} />

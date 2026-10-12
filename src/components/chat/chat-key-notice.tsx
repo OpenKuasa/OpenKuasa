@@ -69,6 +69,20 @@ export function chatErrorCode(error: Error | undefined): string | null {
 }
 
 /**
+ * Why the server turned a question's files away (code `attachment_limit`), in
+ * the server's own sentence, or null for any other error. Shown as plain text.
+ */
+export function attachmentRefusal(error: Error | undefined): string | null {
+  if (!error || chatErrorCode(error) !== 'attachment_limit') return null;
+  try {
+    const body = JSON.parse(error.message) as { error?: unknown };
+    return typeof body.error === 'string' && body.error.trim() ? `That question was not sent. ${body.error}` : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The one line every chat shows while the workspace has no OpenRouter key:
  * how many free questions are left, and how to get unlimited chat.
  */
