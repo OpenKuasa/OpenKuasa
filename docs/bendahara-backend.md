@@ -120,7 +120,7 @@ policy.
 |---|---|
 | `finance_contacts` | Customers and suppliers. `is_customer` and `is_supplier` can both be true. |
 | `finance_products` | Products and services for document lines. `cost` keeps four decimals, `price` two. |
-| `finance_accounts` | Bank and cash accounts. Every workspace starts with "Main Bank" and "Cash in hand". No screen yet. |
+| `finance_accounts` | Bank and cash accounts. Every workspace starts with "Main Bank" and "Cash in hand". Banking lists them with their balances; they have no form yet. |
 | `finance_categories` | Expense and income categories. Every workspace starts with nine. No screen yet. |
 | `finance_sequences` | The next document number per type. |
 | `supplier_bills`, `supplier_bill_lines` | Supplier bills and their lines. A draft has no `bill_no`. |
@@ -130,13 +130,15 @@ policy.
 | `finance_transactions` | One row per movement of money: direction, account, date, amount, method, status. |
 | `finance_allocations` | How a movement is split across the documents it pays. Each row names exactly one document: a bill (`bill_id`), an invoice (`invoice_id`), a credit note (`credit_note_id`) or an expense (`expense_id`). `reason` is what a refund is for. One payment pays one kind of document: bills, or invoices and credit notes, or expenses. |
 | `finance_expenses` | An expense: a date, a category, a vendor who is a contact (`vendor_id`) or a typed name (`vendor_name`), never both, and `amount`, which has its SST inside it (`sst_amount` is that part). `status` is `pending`, `approved` or `rejected`; `approved_by` and `approved_at` say who decided and when, whichever way. It has no number. |
+| `finance_statement_imports` | One row per bank statement file imported for one account: `account_id`, `file_name`, `created_by`. |
+| `finance_statement_lines` | One row per line of a statement, in the file's order (`position`): `line_date`, `description`, and `money_in` or `money_out`, never both. `transaction_id` is the movement of money a person matched it to; a movement is matched by at most one line. A line belongs to its import's account. |
 
 ## Document numbers
 
 `select public.finance_next_number(target_org, doc)` with `doc` set to
 `'invoice'` returns the next number (`INV-0001`) and moves the counter on. It locks the workspace's row for that
 type, so simultaneous callers never get the same number. Types: `invoice`,
-`quotation`, `credit_note`, `bill`, `receipt`, `voucher`. Call it from inside
+`quotation`, `credit_note`, `bill`, `receipt`, `voucher`, `transfer`. Call it from inside
 the database function that posts a document, so a failed post does not use up a
 number.
 
@@ -145,7 +147,11 @@ number when it is issued. A refund is money out and takes a `PV-` number when
 it is paid out, from the same counter as a payment to a supplier. A payment
 voucher of any other kind takes its `PV-` number from that counter too, when
 it is paid, and a cash receipt its `RC-` number when it is posted, from the
-counter payments in use. An expense has no number.
+counter payments in use. An expense has no number. A transfer between
+accounts takes one `TR-` number for both of its sides, from a counter of its
+own, so a transfer leaves no gap in the receipt or voucher numbers. A
+payment's number is unique in its workspace; the two sides of a transfer are
+the one case of two rows with one number.
 
 ## Money
 
@@ -410,6 +416,98 @@ tables (it has no default privileges here, and no migration grants it any).
 If `service_role` were ever granted them, whoever holds the service key could
 approve, as they could already read and write every table past row-level
 security; nothing in the app writes finance tables with that key.
+
+## Banking
+
+Banking shows the workspace's accounts and every movement of money on them.
+It reads two views. `finance_account_balances` has one row per account,
+archived ones included: `balance` is the opening balance, plus every posted
+movement in, less every posted movement out, whatever its date (`opening_date`
+is a label and takes no part in the sum); `to_be_paid` is scheduled money out;
+`last_import_at` and `unmatched_lines` come from the account's statements.
+`finance_bank_transactions` has one row per `finance_transactions` row, either
+direction, any status: `kind` is what the cash book calls it (`invoice`,
+`income`, `bill`, `refund`, `expense`, `other`) or `transfer`;
+`other_account_name` is the account at the other end of a transfer;
+`reconciled` says a statement line is matched to it. The screen lists posted
+rows only, and works out the running balance in the browser
+(`withRunningBalance` in `banking-views.ts`): per account, from the opening
+balance, in the order date, time recorded, id. The newest row of an account
+therefore carries the balance the view gives; the table's "Account balance"
+column is the balance of that row's account after it. The cards show exact
+amounts, to the sen, as a bank statement does. The table's count line is left
+out when no posted movement exists at all.
+
+Banking is read-only for everyone. `banking.ts` only reads; accounts,
+transfers and statements get their forms later. Every action that records,
+pays, voids or deletes money refreshes `/finance/banking`; an action added
+later must do the same.
+
+**A transfer between accounts** is two `finance_transactions` rows that share
+a `transfer_id`: money out of one account and the same money in to another,
+on one date, with one `TR-` number, no payee, no category and no split.
+Neither side is a receipt or a voucher: `finance_cash_receipts` and
+`finance_payment_vouchers` leave rows with a `transfer_id` out, and a
+transfer moves the total of the accounts nowhere.
+`finance_record_transfer` makes both sides and posts them at once;
+`finance_void_transfer` voids both.
+
+Only an owner or admin can record a transfer. The side that leaves an account
+is money out that settles no document, and the guard on payments holds that
+to an owner or admin (see Approval): the function says so first (`FIN14`),
+and a pair posted by hand meets the guard itself. The guard writes the owner
+or admin down as approving the money out. Anyone who may write can void a
+transfer, as with every posted payment.
+
+The pair is kept whole by triggers that run after each statement on
+`finance_transactions` (`private.finance_transfer_pair_check`). Once any side
+of a transfer is posted or void there must be exactly two sides, one in and
+one out, on different accounts, with the same amount, date, status and
+number, naming nobody, carrying no category and split across nothing, and
+both posted or both void; anything else is `FIN16`. So one side cannot be
+posted, voided or changed alone, and both are posted or voided by one UPDATE.
+Sides that are all still drafts are not looked at: a draft moves no money. A
+payment never joins or leaves a transfer: an UPDATE that changes
+`transfer_id` is `FIN16`. A transfer has at most one side in each direction
+(a unique index, `23505`), and a side carries a number only once it is posted
+or void (`23514`), so a draft nobody sees cannot sit on the next `TR-` number.
+The pair check is the one finance trigger function that runs as its owner
+(`security definer`): when a user is deleted the foreign keys clear
+`created_by` and `approved_by`, and Postgres runs that update's statement
+triggers at the end of the delete as whoever issued it, which for Supabase
+Auth is a role with no rights on `public` tables.
+
+An amount is a number. `'NaN'` is a valid `numeric` in Postgres, is greater
+than every number and would turn every balance it is added into to NaN, so
+`finance_transactions.amount` and both amounts of a statement line refuse it
+(`23514`), whichever function or direct write it comes through;
+`finance_record_transfer` and `finance_import_statement` refuse it first
+(`FIN16`, `FIN17`).
+
+**A bank charge and interest** are not special. A charge is money out for an
+expense category, recorded by `finance_record_voucher`: from someone who is
+not an owner or admin it waits for approval like any other. Interest is money
+in for an income category, a cash receipt, and needs no approval. A statement
+line is something a person imported, so matching a line approves nothing, and
+a line cannot be matched to a payment that is not posted.
+
+**Statements.** `finance_import_statement` stores one file's lines for one
+account, at most 1,000, each unmatched. A line is what the bank said: once it
+is in, only its match changes (`FIN17`). Matching is a plain update of
+`transaction_id`, and unmatching sets it back to null; anyone who may write
+can do both. The guard on lines (`private.finance_statement_line_guard`)
+holds a match to a posted payment of the line's account, in its direction,
+for its amount. How far apart the two dates may be is not the database's
+business: the three days in the design limit what is proposed. A payment is
+matched by at most one line (`23505`). A matched line, or an import that has
+one, is unmatched before it is deleted (`FIN17`). When a payment is voided, a
+line matched to it goes back to unmatched
+(`private.finance_transaction_unmatch`). A cash account can be given a
+statement, but the screen shows a dash instead of a reconciliation status for
+a cash movement and for a movement on a bank account that has never had a
+statement imported, and leaves both out of the gauge. While no bank account
+has had a statement imported, the Reconciliation card says "No statement
+imported yet." and shows no count.
 
 ## Invoices
 
@@ -726,6 +824,9 @@ All run as the caller, so RLS decides who may write.
 | `finance_post_cash_receipt(target_org, target_txn)` | Posts a draft cash receipt and returns its `RC-` number. |
 | `finance_record_voucher(target_org, voucher, allocations)` | Records money out for approved expenses or for an expense category. `voucher` has `account_id`, `txn_date`, `method`, `reference`, `notes`, `contact_id` or `party_name`, `status` (`posted`, the default, or `scheduled`), and either nothing more, with `allocations` a list of `{ expense_id, amount }`, or `category_id` and `amount`, with no allocations. A voucher with no allocations recorded by someone who is not an owner or admin is left `pending_approval`. Returns the id. |
 | `finance_save_expense(target_org, expense)` | Creates an expense or changes one that is pending or rejected. `expense` has `id` (to change one), `expense_date`, `category_id`, `vendor_id` or `vendor_name`, `amount`, `sst_amount`, `notes`. Saved by an owner or admin it is approved in the same call. Returns the id. |
+| `finance_record_transfer(target_org, transfer)` | Moves money between two active accounts of the workspace: two posted payments with one `TR-` number. `transfer` has `from_account_id`, `to_account_id`, `amount`, `txn_date`, `reference`, `notes`. An owner or admin only (`FIN14`). Returns the transfer's id. |
+| `finance_void_transfer(target_org, target_transfer)` | Voids both sides of a posted transfer. |
+| `finance_import_statement(target_org, target_account, file_name, lines)` | Stores one statement for one account. `lines` is a list of `{ line_date, description, money_in, money_out }` in the file's order, at most 1,000. Returns the import's id. |
 | `finance_next_number(target_org, doc)` | The next document number. |
 
 Accepting or declining a quotation, voiding a credit note or a refund, and
@@ -849,6 +950,21 @@ contact and a typed vendor or neither, with more SST than its amount, or of
 nothing; a payment with both a contact and a typed name. `23503`: an expense
 that a voided or rejected payment still names cannot be deleted. For these cases none of
 the codes has a sentence yet: the files that word them arrive with the forms.
+
+Banking adds two codes, and neither has a sentence yet either. `FIN16` is a
+transfer: it is between two different, active accounts of the workspace and
+has an amount; a payment does not join or leave a transfer; once a side is
+posted, a transfer is two matching sides. `FIN17` is a statement: an import
+has between 1 and 1,000 lines; a line starts unmatched and only its match
+changes; it is matched to a posted payment of its account, direction and
+amount; a matched line is unmatched before it is deleted; an import stays
+with its account. Banking reuses `FIN14` (recording a transfer needs an owner
+or admin), `FIN11` (the transfer no longer exists, or is not the caller's to
+void), `FIN09` (only a posted transfer is voided), `23505` (a second line on
+one payment, or a third side on a transfer), `23514` (a line with money in
+and money out, or neither; an amount of NaN on a payment or a line; a draft
+side of a transfer given a number), `23503` (a statement for an account that is not
+the workspace's) and `23502` (a line with no date).
 
 ## Known limits
 
@@ -1134,3 +1250,48 @@ the codes has a sentence yet: the files that word them arrive with the forms.
 - The database tests for this stage, `tests/bendahara-cash-book.test.ts`, run
   against the hosted database as owners only. What an editor and a viewer may
   not do is proved by `supabase/tests/bendahara_cash_book_check.sql`.
+- Banking is read-only. Accounts cannot be added or edited, money cannot be
+  moved between accounts and no statement can be imported until their forms
+  are built; the database functions are there and nothing calls them. A
+  transfer and a statement exist only in the demo workspace.
+- Only an owner or admin can record a transfer between accounts. Nothing
+  waits for approval: anyone else is refused.
+- A bank charge recorded by someone who is not an owner or admin waits for
+  approval, though the bank has already taken the money.
+- An account's balance counts every posted movement, whatever its date. The
+  opening date is a label. A movement dated before it still counts.
+- A movement is reconciled only by a statement line matched to it. Cash
+  accounts, and bank accounts that have never had a statement imported, show a
+  dash instead of a reconciliation status, and the "Reconciled" and
+  "Unreconciled" filters leave those rows out. One bank line that covers two
+  payments, or two lines for one payment, cannot be matched.
+- The same statement can be imported twice; nothing warns.
+- Sides of a transfer that are all drafts are not checked: a direct write can
+  leave a lone draft side. It moves no money, shows on no screen, and cannot
+  be posted.
+- Banking loads every movement and filters in the browser. The running
+  balance orders two movements on one day by when they were recorded, which
+  need not be the order the bank had them in.
+- The reconciliation gauge counts posted movements dated in the current month
+  on bank accounts that have had a statement imported. It reads 99% while one
+  is unmatched and 1% while one is matched, however close the figures are to
+  all or none. The cash position chart is today's total with later
+  movements taken back out, so a changed opening balance moves every month.
+- An owner or admin who posts the two sides of a transfer by hand, not
+  through `finance_record_transfer`, may give them any number, one another
+  kind of payment already has included (`RC-0001`), and may use an archived
+  account. Rows are keyed by id, and no code looks a payment up by number.
+- Accounts are plain rows: anyone who may write can change an opening
+  balance, which moves a balance with no transfer and no record. Who may
+  edit one is decided with the account form.
+- The 1,000-line limit and the import's date are the import function's, not
+  the tables': a direct insert can add more lines to an import, and a direct
+  update can change an import's `created_at` or `created_by`. Nothing reads
+  them for a rule; "Last import" reads the date.
+- An account, a category and a contact that nothing refers to can still be
+  moved to another workspace by someone who writes in both; the two
+  statement tables refuse it.
+- The database tests for Banking, `tests/bendahara-banking.test.ts`, run
+  against the hosted database as owners only. What an admin, an editor and a
+  viewer may and may not do is proved by
+  `supabase/tests/bendahara_banking_check.sql`.
