@@ -210,7 +210,7 @@ end $$;
 
 -- Whether a stored journal line uses the account. Its own function, written
 -- as dynamic SQL, because the table it reads does not exist until
--- 20261107093000: a plain query here would be planned against a missing
+-- 20261108093000: a plain query here would be planned against a missing
 -- table the first time the guard reached it. Runs as the caller, from inside
 -- the guard, which has already checked that the table is there.
 create or replace function private.finance_ledger_account_in_use(target_org uuid, target_account uuid)

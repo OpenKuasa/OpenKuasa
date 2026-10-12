@@ -4,7 +4,7 @@ import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import { createConfirmedTestUser, createOrg, liveClient, signInOwner } from './helpers/live-workspaces';
 
 // Bendahara's chart of accounts, ledger, manual journals and bill category
-// (20261107090000 to 20261107094500), against the live project. Each test makes
+// (20261108090000 to 20261108094500), against the live project. Each test makes
 // its own workspace; the helper deletes what it made when the file finishes.
 // Run by the controller only, after the four migrations are applied.
 

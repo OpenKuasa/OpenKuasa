@@ -4,7 +4,7 @@
 -- A bill's cost has to land in an account. supplier_bills gains category_id,
 -- an expense category, and the ledger debits that category's account. A bill
 -- saved without one gets the workspace's "Purchases" category: the one whose
--- ledger account 20261107090000 marked default_for = 'purchases'.
+-- ledger account 20261108090000 marked default_for = 'purchases'.
 --
 -- The code deployed while this is applied saves bills through
 -- finance_save_bill without a category_id, and gets Purchases on a new bill
