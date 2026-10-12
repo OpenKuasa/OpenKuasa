@@ -248,6 +248,8 @@ const CONTACT_PATHS = [
   '/finance/expenses',
   // Banking names who paid or was paid on every movement.
   '/finance/banking',
+  // A ledger entry's description carries the customer's or supplier's name.
+  '/finance/journals',
 ];
 const PRODUCT_PATHS = ['/finance/products'];
 // The two ledger screens read the books, which every document that posts, voids, pays or is deleted changes:
