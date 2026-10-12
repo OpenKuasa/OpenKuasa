@@ -5,17 +5,16 @@
 // Needs NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY; without all
 // three every case is skipped.
 // WRITTEN, NOT YET RUN: it runs only after the migration 20261028093000_hire_deletions.sql is applied.
+// Cases 15 and 16 also need the interview migrations (20261102090000_hire_interviews_columns.sql and
+// 20261102090100_hire_interviews_writes.sql): they create their interviews with hire_schedule_interview, which is
+// what makes the `interviews` count of a deletion real. Every earlier case deletes rows that have no interview,
+// so its `interviews: 0` stays as it is.
 //
 // Who calls what. Both deletion functions are granted to `authenticated` only, so every call is made by a signed-in
 // client (the owner, the owner of another workspace, a demo viewer) or by the signed-out visitor client, which must
 // be refused outright (42501). The service client is used for two things only: hire_attach_cv (to give a hand-added
 // application a stored file) and hire_cv_deletions_done (to ask whether the deletion queue held a path, and to
 // clear it again so the cleanup run never looks for a file that was never stored). It never deletes anything.
-//
-// A gap. Nothing can create an interview on live: members and the server have read access only on hire_interviews.
-// Every case therefore expects `interviews: 0`. The interview cascade and the count rest on the foreign key
-// (20261013090000_hire_foundation.sql, line 63) and on the migration's text test. The piece that makes
-// interviews writable adds the live case.
 //
 // Another gap. Candidates are stored with a lower-case email (the hand-add and the public form both lower it), so
 // a candidate whose STORED email has capitals cannot be made through any function. The migration reads the email
@@ -240,6 +239,34 @@ async function givePath(applicationId: string, jobId: string): Promise<string> {
   expect(res.error, res.error?.message).toBeNull();
   expect(res.data).toBe('ok');
   return path;
+}
+
+/** A Kuala Lumpur clock time on the day `days` from today, as the app sends an instant. Kuala Lumpur is UTC+8 all year. */
+const klAt = (days: number, time: string) =>
+  `${new Date(Date.now() + 8 * 3_600_000 + days * 86_400_000).toISOString().slice(0, 10)}T${time}:00+08:00`;
+
+/** Schedules an interview for one of the owner's applications through the function, and returns its id. */
+async function scheduleFor(applicationId: string, days: number, time: string): Promise<string> {
+  const res = await owner.c.rpc('hire_schedule_interview', {
+    p_application_id: applicationId,
+    p_scheduled_at: klAt(days, time),
+    p_duration_minutes: 60,
+    p_kind: 'video',
+    p_place: null,
+    p_interviewer_name: null,
+    p_notes: null,
+  });
+  expectWord(res, 'ok');
+  const id = (res.data as { id?: unknown }).id;
+  expect(typeof id, 'the answer carries the new id').toBe('string');
+  return id as string;
+}
+
+/** How many of these interviews are still there, as the owner reads them. */
+async function interviewsLeft(ids: string[]): Promise<number> {
+  const res = await owner.c.from('hire_interviews').select('id').in('id', ids);
+  expect(res.error, res.error?.message).toBeNull();
+  return (res.data ?? []).length;
 }
 
 beforeAll(async () => {
@@ -491,3 +518,52 @@ testWithSupabase('14. a deletion racing a hand-add for the same email never rais
     expect(await applicationCount(owner.c, people[0]), `round ${round}: exactly one application`).toBe(1);
   }
 }, 120_000);
+
+// Until interviews became writable (slice 4a) no row of hire_interviews could exist outside the demo, so the count
+// a deletion answers was always 0 and rested on the foreign key alone. These two make it real.
+testWithSupabase('15. deleting an application with two interviews answers interviews: 2, and both rows are gone', async () => {
+  const { candidateId, applicationId } = await addApplied(openJob, { name: 'Two Interviews' });
+  const first = await scheduleFor(applicationId, 2, '10:00');
+  const second = await scheduleFor(applicationId, 4, '15:00');
+  expect(await interviewsLeft([first, second])).toBe(2);
+
+  expectRemoved(
+    await removeApplication(owner.c, applicationId),
+    { applications: 1, interviews: 2, cv_files: 0 },
+    { name: 'Two Interviews', job: openJob.title },
+  );
+  expect(await exists(owner.c, 'hire_applications', applicationId)).toBe(false);
+  expect(await interviewsLeft([first, second]), 'both interviews went with the application').toBe(0);
+  expect(await exists(owner.c, 'hire_candidates', candidateId)).toBe(true);
+}, 60_000);
+
+testWithSupabase('16. deleting a candidate with two applications and three interviews between them answers interviews: 3', async () => {
+  const email = uniqueEmail();
+  const first = await addApplied(openJob, { name: 'Three Interviews', email });
+  const secondAdded = expectAdded(
+    await add(owner.c, owner.orgId, { name: 'Three Interviews', email, job_id: secondJob.id }),
+    'existing',
+    'created',
+  );
+  expect(secondAdded.candidate_id).toBe(first.candidateId);
+
+  const ids = [
+    await scheduleFor(first.applicationId, 2, '10:00'),
+    await scheduleFor(first.applicationId, 5, '10:00'),
+    await scheduleFor(secondAdded.application_id!, 3, '14:00'),
+  ];
+  // One of them is no longer scheduled: an interview is counted whatever its status.
+  const cancelled = await owner.c.rpc('hire_cancel_interview', { p_interview_id: ids[1] });
+  expectWord(cancelled, 'ok');
+  expect(await interviewsLeft(ids)).toBe(3);
+
+  expectRemoved(
+    await removeCandidate(owner.c, first.candidateId),
+    { applications: 2, interviews: 3, cv_files: 0 },
+    { name: 'Three Interviews' },
+  );
+  expect(await exists(owner.c, 'hire_candidates', first.candidateId)).toBe(false);
+  expect(await exists(owner.c, 'hire_applications', first.applicationId)).toBe(false);
+  expect(await exists(owner.c, 'hire_applications', secondAdded.application_id!)).toBe(false);
+  expect(await interviewsLeft(ids), 'all three interviews went with the candidate').toBe(0);
+}, 60_000);
