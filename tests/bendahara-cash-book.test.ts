@@ -36,8 +36,8 @@ async function anonUserWithOrg(orgName: string): Promise<Org> {
   const { data: contacts, error: contactErr } = await c
     .from('finance_contacts')
     .insert([
-      { org_id: orgId, name: `Customer of ${orgName}`, is_customer: true },
-      { org_id: orgId, name: `Supplier of ${orgName}`, is_supplier: true },
+      { org_id: orgId, name: `Customer of ${orgName}`, is_customer: true, is_supplier: false },
+      { org_id: orgId, name: `Supplier of ${orgName}`, is_customer: false, is_supplier: true },
     ])
     .select('id, is_customer');
   expect(contactErr, contactErr?.message).toBeNull();
