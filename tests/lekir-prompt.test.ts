@@ -263,7 +263,7 @@ describe('changing an application', () => {
   });
   it('Tuah alone carries the safeguards for application changes', () => {
     const p = TUAH_SYSTEM.toLowerCase();
-    expect(p).toContain('hiring and hr');
+    expect(p).toContain('hiring, hr and finance');
     expect(p).not.toContain('the crm and jobs)');
     expect(p).toContain('job, application');
     expect(p).toContain('first list it with a read tool to get its id');
