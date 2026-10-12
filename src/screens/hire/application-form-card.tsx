@@ -167,7 +167,7 @@ export function ApplicationFormCard({
       )}
       {mode !== 'demo' && (
         <p className="mt-3 text-xs text-muted-foreground">
-          Saved to your workspace. Used by the public apply form, coming soon.
+          Saved to your workspace. The public apply form follows these switches.
         </p>
       )}
 
