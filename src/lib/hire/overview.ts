@@ -1,6 +1,6 @@
 // src/lib/hire/overview.ts
-import { formatWhen } from '@/lib/reach/overview';
 import { STAGE_LABEL, funnelCounts, stageRank } from './applications-view';
+import { shortWhen } from './interview-time';
 import {
   APPLICATION_STAGES,
   type Application,
@@ -122,7 +122,9 @@ export async function buildHireOverviewModel(data: HireData, now: Date): Promise
     interviews: upcomingInterviews(interviews, now, 3).map((i) => ({
       name: i.candidate_name,
       role: i.job_title,
-      when: formatWhen(i.scheduled_at, now),
+      // With its date and its year ("Tue 20 Oct 2026, 3:00 pm"): an interview can be a year off, and a weekday alone
+      // would be read as this week's.
+      when: shortWhen(i.scheduled_at),
       via: KIND_LABEL[i.kind],
       soon: Date.parse(i.scheduled_at) - now.getTime() < 2 * DAY,
     })),

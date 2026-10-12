@@ -173,6 +173,18 @@ describe('models', () => {
     expect(model.interviews).toHaveLength(3);
     expect(model.top).toHaveLength(5);
   });
+  it('gives each upcoming interview its date and its year: never a weekday alone, never Today or Tomorrow', async () => {
+    const model = await buildHireOverviewModel(data, NOW);
+    for (const i of model.interviews) {
+      expect(i.when).toMatch(/^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d{1,2} [A-Z][a-z]{2} \d{4}, \d{1,2}:\d{2} (am|pm)$/);
+    }
+    // An interview five weeks off reads as its own day, not as "Thu".
+    const far: HireData = {
+      ...EMPTY,
+      listInterviews: async () => [{ ...(await data.listInterviews())[0], status: 'scheduled', scheduled_at: '2026-11-19T07:00:00+00:00' }],
+    };
+    expect((await buildHireOverviewModel(far, NOW)).interviews.map((i) => i.when)).toEqual(['Thu 19 Nov 2026, 3:00 pm']);
+  });
   it('builds empty models without NaN or a throw', async () => {
     const overview = await buildHireOverviewModel(EMPTY, NOW);
     expect(overview.isEmpty).toBe(true);
