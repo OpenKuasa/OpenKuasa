@@ -43,4 +43,36 @@ describe('storage policy guard and table privileges migration', () => {
       expect(body, name).toMatch(/using \(case when bucket_id = '[a-z-]+' and name ~ '\^\[0-9a-f\]\{8\}-/);
     }
   });
+
+  test('each of the six tables is revoked from anon and authenticated before it is granted', () => {
+    for (const table of TABLES) {
+      const revoke = sql.indexOf(`revoke all on public.${table} from anon, authenticated;`);
+      const grant = flat.indexOf(` on public.${table} to authenticated;`);
+      expect(revoke, table).toBeGreaterThanOrEqual(0);
+      expect(grant, table).toBeGreaterThanOrEqual(0);
+      expect(sql.slice(0, revoke)).not.toMatch(new RegExp(`grant [^;]* on public\\.${table} to`));
+    }
+    expect(sql).not.toMatch(/\bto anon\b/);
+    expect(sql).not.toMatch(/service_role/);
+  });
+
+  test('the grants are exactly the ones the earlier migrations gave', () => {
+    expect(grantsOn('orgs')).toEqual([
+      'select',
+      'update (name, registration_no, sst_no, website, industry, company_size, address, city, state, postcode)',
+    ]);
+    expect(grantsOn('org_members')).toEqual(['select']);
+    expect(grantsOn('ai_usage')).toEqual(['select']);
+    expect(grantsOn('agent_configs')).toEqual([
+      'select, insert, delete',
+      'update (enabled, cadence, max_cost_cents, last_run_at, updated_at, daily_cap_cents, weekly_cap_cents)',
+    ]);
+    expect(grantsOn('agent_runs')).toEqual(['select']);
+    expect(grantsOn('agent_run_assets')).toEqual(['select']);
+  });
+
+  test('no policy on those tables is dropped or replaced', () => {
+    expect(sql).not.toMatch(/policy [^;]* on public\./);
+    expect(sql).not.toMatch(/disable row level security/);
+  });
 });
