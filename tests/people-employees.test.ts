@@ -10,7 +10,9 @@ import {
   reportsToChange,
   reportsToOptions,
   reportsToProblem,
+  reportsToBaseline,
   reportsToRefusal,
+  runSave,
   saveFailure,
   searchReportsTo,
   suggestedMember,
@@ -18,6 +20,7 @@ import {
 } from '@/lib/people/employees';
 import { showsOwnerDocumentControls } from '@/lib/people/documents-screens';
 import { REPORTS_TO_REFUSALS, reportsToLoop } from '@/lib/people/reporting-refusals';
+import type { StepResult } from '@/lib/people/employees';
 import type { PeopleViewer } from '@/lib/people/types';
 import { entitlementChanges, entitlementValues } from '@/components/people/entitlements-fields';
 import { createSeedPeopleData } from '@/lib/people/seed';
@@ -206,6 +209,83 @@ describe('employeesControls', () => {
   });
 });
 
+describe('runSave', () => {
+  const spies = (results: Partial<Record<'details' | 'reports_to' | 'entitlements', unknown>> = {}) => {
+    const calls: string[] = [];
+    const step = (name: 'details' | 'reports_to' | 'entitlements') => async (): Promise<StepResult> => {
+      calls.push(name);
+      const r = results[name];
+      if (r instanceof Error) throw r;
+      return (r as StepResult | undefined) ?? { ok: true };
+    };
+    return {
+      calls,
+      steps: { details: step('details'), reports_to: step('reports_to'), entitlements: step('entitlements') },
+    };
+  };
+
+  it('runs the steps in SAVE_ORDER', async () => {
+    const { calls, steps } = spies();
+    const outcome = await runSave(true, steps);
+    expect(calls).toEqual([...SAVE_ORDER]);
+    expect(outcome).toEqual({ ok: true, done: [...SAVE_ORDER] });
+  });
+  it('calls nothing else when the details are refused, and says it as it was', async () => {
+    const { calls, steps } = spies({ details: { ok: false, error: 'Name taken.' } });
+    expect(await runSave(true, steps)).toEqual({ ok: false, step: 'details', error: 'Name taken.', done: [] });
+    expect(calls).toEqual(['details']);
+  });
+  it('skips entitlements when the line is refused, with the saved-but sentence', async () => {
+    const { calls, steps } = spies({ reports_to: { ok: false, error: 'No.' } });
+    expect(await runSave(true, steps)).toEqual({
+      ok: false,
+      step: 'reports_to',
+      error: saveFailure('reports_to', 'No.'),
+      done: ['details'],
+    });
+    expect(calls).toEqual(['details', 'reports_to']);
+  });
+  it('never calls the line step when the line did not change', async () => {
+    const { calls, steps } = spies();
+    const outcome = await runSave(false, steps);
+    expect(calls).toEqual(['details', 'entitlements']);
+    expect(outcome).toEqual({ ok: true, done: ['details', 'entitlements'] });
+  });
+  it('reports a refused entitlement after the line was saved', async () => {
+    const { steps } = spies({ entitlements: { ok: false, error: 'Too many.' } });
+    expect(await runSave(true, steps)).toEqual({
+      ok: false,
+      step: 'entitlements',
+      error: saveFailure('entitlements', 'Too many.'),
+      done: ['details', 'reports_to'],
+    });
+  });
+  it('turns a rejected line request into the saved-but sentence', async () => {
+    const { calls, steps } = spies({ reports_to: new Error('network') });
+    const outcome = await runSave(true, steps);
+    expect(outcome).toMatchObject({ ok: false, step: 'reports_to', done: ['details'] });
+    expect(outcome.ok === false && outcome.error).toBe(saveFailure('reports_to', 'Something went wrong. Try again.'));
+    expect(calls).toEqual(['details', 'reports_to']);
+  });
+  it('lets a rejected details request through, since nothing was saved', async () => {
+    const { steps } = spies({ details: new Error('network') });
+    await expect(runSave(true, steps)).rejects.toThrow('network');
+  });
+});
+
+describe('the line baseline after a partial save', () => {
+  it('moves to the saved manager when the line went through and a later step failed', () => {
+    const outcome = { ok: false as const, step: 'entitlements' as const, error: 'x', done: ['details', 'reports_to'] as ('details' | 'reports_to' | 'entitlements')[] };
+    const baseline = reportsToBaseline('a', outcome, 'd');
+    expect(baseline).toBe('d');
+    // Changing the control back to Aminah is now a change, and is sent.
+    expect(reportsToChange(baseline, 'a')).toEqual({ changed: true, managerId: 'a' });
+  });
+  it('stays when the line was not saved', () => {
+    expect(reportsToBaseline('a', { ok: false, step: 'reports_to', error: 'x', done: ['details'] }, 'd')).toBe('a');
+  });
+});
+
 describe('the order of an edit', () => {
   it('saves details, then the line, then entitlements', () => {
     expect(SAVE_ORDER).toEqual(['details', 'reports_to', 'entitlements']);
@@ -276,6 +356,7 @@ describe('the employee form', () => {
   it('never carries the reporting line in the table update', () => {
     const values = employeeFormValues(employees[0], null);
     const result = toEmployeeInput(values, { includePrivate: false });
+    expect(result.ok).toBe(true);
     for (const key of ['reports_to', 'manager_id', 'is_manager']) {
       expect(values).not.toHaveProperty(key);
       expect(result.ok && key in result.input).toBe(false);

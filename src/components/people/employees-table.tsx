@@ -28,8 +28,10 @@ import {
   directoryExtras,
   filterEmployees,
   linkableMembers,
+  type StepResult,
+  reportsToBaseline,
   reportsToRefusal,
-  saveFailure,
+  runSave,
   suggestedMember,
 } from '@/lib/people/employees';
 import type { WorkspaceMember } from '@/lib/people/members';
@@ -47,6 +49,8 @@ type ActionResult = {
   notice?: string;
   /** The reporting line was refused on an edit; the form's control goes back to the saved value. */
   lineRefused?: boolean;
+  /** The reporting line was saved though a later step failed: the manager now in the database (null for nobody). */
+  baseline?: string | null;
 };
 type ReportsToChange = { changed: boolean; managerId: string | null };
 
@@ -114,6 +118,12 @@ export function EmployeesTable({
       const res = await result;
       setError(res.ok ? (res.notice ?? null) : (res.error ?? 'Something went wrong.'));
       if (res.lineRefused) setReportsToResets((count) => count + 1);
+      if (res.baseline !== undefined) {
+        const managerId = res.baseline;
+        setEditing((current) =>
+          current ? { ...current, employee: { ...current.employee, reports_to: managerId } } : current,
+        );
+      }
       if (res.ok) {
         setCreating(false);
         setEditing(null);
@@ -142,10 +152,10 @@ export function EmployeesTable({
     });
   }
 
-  /** The reporting line, a separate request: only called when it changed, so a phone-number edit never takes its lock. */
-  async function saveLine(id: string, managerId: string | null) {
+  /** The reporting line, a separate request: only run when it changed, so a phone-number edit never takes its lock. */
+  async function lineStep(id: string, managerId: string | null): Promise<StepResult> {
     const res = await setReportsToAction({ id, manager_id: managerId });
-    return res.ok ? null : saveFailure('reports_to', reportsToRefusal(res.error, managerId ?? '', employees));
+    return res.ok ? { ok: true } : { ok: false, error: reportsToRefusal(res.error, managerId ?? '', employees) };
   }
 
   /** Saves in SAVE_ORDER (details, the reporting line when it changed, each changed entitlement), stopping at the first refusal. */
@@ -155,26 +165,50 @@ export function EmployeesTable({
     changes: EntitlementChange[],
     reportsTo: ReportsToChange,
   ): Promise<ActionResult> {
-    const saved = await updateEmployeeAction({ id, ...input });
-    if (!saved.ok) return saved;
-    if (reportsTo.changed) {
-      const refused = await saveLine(id, reportsTo.managerId);
-      if (refused) return { ok: false, error: refused, lineRefused: true };
-    }
-    for (const change of changes) {
-      const res = await setLeaveEntitlementAction({ employee_id: id, ...change });
-      if (!res.ok) return { ok: false, error: saveFailure('entitlements', res.error) };
-    }
-    return { ok: true };
+    const outcome = await runSave(reportsTo.changed, {
+      details: async () => {
+        const res = await updateEmployeeAction({ id, ...input });
+        return res.ok ? { ok: true } : { ok: false, error: res.error };
+      },
+      reports_to: () => lineStep(id, reportsTo.managerId),
+      entitlements: async () => {
+        for (const change of changes) {
+          const res = await setLeaveEntitlementAction({ employee_id: id, ...change });
+          if (!res.ok) return { ok: false, error: res.error };
+        }
+        return { ok: true };
+      },
+    });
+    if (outcome.ok) return { ok: true };
+    const lineSaved = outcome.done.includes('reports_to');
+    return {
+      ok: false,
+      error: outcome.error,
+      lineRefused: outcome.step === 'reports_to',
+      // The line is in the database now, so the form's baseline moves with it.
+      ...(lineSaved ? { baseline: reportsToBaseline(null, outcome, reportsTo.managerId) } : {}),
+    };
   }
 
   /** Adds the employee, then sets the reporting line. A refusal there never undoes the new employee: the form closes and the table says so. */
   async function saveNew(input: Record<string, unknown>, reportsTo: ReportsToChange): Promise<ActionResult> {
-    const created = await createEmployeeAction(input);
-    if (!created.ok) return created;
-    if (!reportsTo.changed) return { ok: true };
-    const refused = await saveLine(created.data.id, reportsTo.managerId);
-    return refused ? { ok: true, notice: refused } : { ok: true };
+    let createdId = '';
+    let createError = 'Something went wrong.';
+    const outcome = await runSave(reportsTo.changed, {
+      details: async () => {
+        const created = await createEmployeeAction(input);
+        if (!created.ok) {
+          createError = created.error;
+          return { ok: false, error: created.error };
+        }
+        createdId = created.data.id;
+        return { ok: true };
+      },
+      reports_to: () => lineStep(createdId, reportsTo.managerId),
+      entitlements: async () => ({ ok: true }),
+    });
+    if (outcome.ok) return { ok: true };
+    return outcome.step === 'details' ? { ok: false, error: createError } : { ok: true, notice: outcome.error };
   }
 
   return (

@@ -191,13 +191,23 @@ export function EmployeeForm({
         <Field label="Reports to">
           {/* Outside the select: a text input inside the list would lose its keystrokes to the list's type-ahead. */}
           <Input
-            aria-label="Search by name"
+            aria-label="Search people to report to"
             placeholder="Search by name"
-            className="h-8"
             value={reportsToSearch}
             onChange={(event) => setReportsToSearch(event.target.value)}
           />
-          <Select value={reportsTo || NOBODY} onValueChange={(value) => setReportsTo(value === NOBODY ? '' : value)}>
+          {reportsToSearch.trim() !== '' && searchReportsTo(options, reportsToSearch, '').length === 0 ? (
+            <p role="status" className="text-xs text-muted-foreground">
+              No one matches
+            </p>
+          ) : null}
+          <Select
+            value={reportsTo || NOBODY}
+            onValueChange={(value) => {
+              setReportsTo(value === NOBODY ? '' : value);
+              setReportsToSearch('');
+            }}
+          >
             <SelectTrigger aria-label="Reports to" className="w-full">
               <SelectValue />
             </SelectTrigger>

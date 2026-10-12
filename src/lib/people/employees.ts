@@ -166,6 +166,41 @@ export function employeesControls(viewer: PeopleViewer | null | undefined): Empl
 /** The order the table saves an edit in, and what the person is told when a later step is refused. */
 export const SAVE_ORDER = ['details', 'reports_to', 'entitlements'] as const;
 
+export type SaveStep = (typeof SAVE_ORDER)[number];
+export type StepResult = { ok: true } | { ok: false; error: string };
+export type SaveOutcome =
+  | { ok: true; done: SaveStep[] }
+  | { ok: false; step: SaveStep; error: string; done: SaveStep[] };
+
+/**
+ * Walks SAVE_ORDER with the table's steps, stopping at the first refusal. The line step runs only when
+ * `lineChanged`. A refusal after the details is worded with {@link saveFailure}; a request that rejects after the
+ * details were saved says so the same way. A rejected details request is rethrown: nothing was saved.
+ */
+export async function runSave(lineChanged: boolean, steps: Record<SaveStep, () => Promise<StepResult>>): Promise<SaveOutcome> {
+  const done: SaveStep[] = [];
+  for (const step of SAVE_ORDER) {
+    if (step === 'reports_to' && !lineChanged) continue;
+    let result: StepResult;
+    try {
+      result = await steps[step]();
+    } catch (error) {
+      if (step === 'details') throw error;
+      result = { ok: false, error: 'Something went wrong. Try again.' };
+    }
+    if (!result.ok) {
+      return { ok: false, step, error: step === 'details' ? result.error : saveFailure(step, result.error), done };
+    }
+    done.push(step);
+  }
+  return { ok: true, done };
+}
+
+/** The reporting line the form should treat as saved after a save that stopped part way. */
+export function reportsToBaseline(initial: string | null, outcome: SaveOutcome, savedManagerId: string | null): string | null {
+  return outcome.done.includes('reports_to') ? savedManagerId : initial;
+}
+
 export function saveFailure(step: 'reports_to' | 'entitlements', reason: string): string {
   return step === 'reports_to'
     ? REPORTS_TO_SAVED_NOT_LINE(reason)
