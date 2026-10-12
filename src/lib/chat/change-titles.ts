@@ -77,6 +77,14 @@ function labelOf(row: Record<string, unknown>, kind?: ItemKind): string | null {
     const type = typeof row.leave_type === 'string' ? LEAVE_WORDS[row.leave_type] : undefined;
     return `${who}'s ${type ?? 'leave'}, ${when}`;
   }
+  // Finance documents are named by their number, falling back to the counterparty
+  // while still a draft (no number yet). Payments and refunds key on a transaction
+  // id, not `id`, so they are not named here.
+  if (kind === 'invoice') return text(row.invoice_no) ?? text(row.customer_name);
+  if (kind === 'quotation') return text(row.quotation_no) ?? text(row.customer_name);
+  if (kind === 'bill') return text(row.bill_no) ?? text(row.supplier_name);
+  if (kind === 'credit-note') return text(row.credit_note_no) ?? text(row.customer_name);
+  if (kind === 'finance-contact' || kind === 'item') return text(row.name);
   return typeof row.name === 'string' && row.name.trim() ? row.name.trim() : null;
 }
 
@@ -133,7 +141,15 @@ export type ItemKind =
   | 'announcement'
   | 'letter'
   | 'document'
-  | 'template';
+  | 'template'
+  | 'invoice'
+  | 'quotation'
+  | 'bill'
+  | 'credit-note'
+  | 'refund'
+  | 'payment'
+  | 'finance-contact'
+  | 'item';
 const KIND_OF_TOOL: Record<string, ItemKind> = {
   getCampaigns: 'campaign',
   createCampaign: 'campaign',
@@ -239,6 +255,45 @@ const KIND_OF_TOOL: Record<string, ItemKind> = {
   createDepartment: 'department',
   updateDepartment: 'department',
   deleteDepartment: 'department',
+  // Finance (Bendahara)
+  listInvoices: 'invoice',
+  getInvoice: 'invoice',
+  saveInvoice: 'invoice',
+  postInvoice: 'invoice',
+  voidInvoice: 'invoice',
+  deleteInvoice: 'invoice',
+  setEInvoice: 'invoice',
+  listQuotations: 'quotation',
+  saveQuotation: 'quotation',
+  sendQuotation: 'quotation',
+  acceptQuotation: 'quotation',
+  declineQuotation: 'quotation',
+  convertQuotation: 'quotation',
+  deleteQuotation: 'quotation',
+  listBills: 'bill',
+  getBill: 'bill',
+  saveBill: 'bill',
+  postBill: 'bill',
+  voidBill: 'bill',
+  deleteBill: 'bill',
+  listCreditNotes: 'credit-note',
+  saveCreditNote: 'credit-note',
+  issueCreditNote: 'credit-note',
+  voidCreditNote: 'credit-note',
+  deleteCreditNote: 'credit-note',
+  listRefunds: 'refund',
+  listPaymentsIn: 'payment',
+  listPaymentsOut: 'payment',
+  listFinanceContacts: 'finance-contact',
+  createFinanceContact: 'finance-contact',
+  updateFinanceContact: 'finance-contact',
+  setFinanceContactActive: 'finance-contact',
+  deleteFinanceContact: 'finance-contact',
+  listFinanceItems: 'item',
+  createFinanceItem: 'item',
+  updateFinanceItem: 'item',
+  setFinanceItemActive: 'item',
+  deleteFinanceItem: 'item',
 };
 
 /** The kind of thing a tool's result, or a change tool's `id`, is about. Undefined for a tool that names none. */
@@ -1786,6 +1841,47 @@ export function approvalTitle(
       const changes = describeFormChange(i);
       return changes.length === 1 ? `${changes[0]} on applications?` : 'Change what the application form asks for?';
     }
+    // Finance (Bendahara)
+    case 'saveInvoice': return i.id ? `Save changes to ${the('invoice', 'invoice')}?` : 'Create a draft invoice?';
+    case 'postInvoice': return `Post ${the('invoice', 'invoice')}?`;
+    case 'voidInvoice': return `Void ${the('invoice', 'invoice')}?`;
+    case 'deleteInvoice': return `Delete ${the('invoice', 'invoice')}?`;
+    case 'setEInvoice': return `Record the e-Invois status on ${the('invoice', 'invoice')}?`;
+    case 'saveQuotation': return i.id ? `Save changes to ${the('quotation', 'quotation')}?` : 'Create a draft quotation?';
+    case 'sendQuotation': return `Mark ${the('quotation', 'quotation')} as sent?`;
+    case 'acceptQuotation': return `Mark ${the('quotation', 'quotation')} as accepted?`;
+    case 'declineQuotation': return `Mark ${the('quotation', 'quotation')} as declined?`;
+    case 'convertQuotation': return `Convert ${the('quotation', 'quotation')} into a draft invoice?`;
+    case 'deleteQuotation': return `Delete ${the('quotation', 'quotation')}?`;
+    case 'saveBill': return i.id ? `Save changes to ${the('supplier bill', 'bill')}?` : 'Create a draft supplier bill?';
+    case 'postBill': return `Post ${the('supplier bill', 'bill')}?`;
+    case 'voidBill': return `Void ${the('supplier bill', 'bill')}?`;
+    case 'deleteBill': return `Delete ${the('supplier bill', 'bill')}?`;
+    case 'saveCreditNote': return i.id ? `Save changes to ${the('credit note', 'credit-note')}?` : 'Create a draft credit note?';
+    case 'issueCreditNote': return `Issue ${the('credit note', 'credit-note')}?`;
+    case 'voidCreditNote': return `Void ${the('credit note', 'credit-note')}?`;
+    case 'deleteCreditNote': return `Delete ${the('credit note', 'credit-note')}?`;
+    case 'recordRefund': return 'Record a refund to a customer?';
+    case 'markRefundPaid': return 'Mark this refund as paid?';
+    case 'voidRefund': return 'Void this refund?';
+    case 'deleteRefund': return 'Delete this refund?';
+    case 'recordPaymentIn': return 'Record a payment received from a customer?';
+    case 'recordPaymentOut': return 'Record a payment made to a supplier?';
+    case 'markPaymentPaid': return 'Mark this payment as paid?';
+    case 'voidPayment':
+    case 'voidPaymentIn': return 'Void this payment?';
+    case 'createFinanceContact': return `Add finance contact “${text(i.name) ?? ''}”?`;
+    case 'updateFinanceContact': return `Save changes to ${the('finance contact', 'finance-contact')}?`;
+    case 'setFinanceContactActive':
+      return i.active === false
+        ? `Deactivate ${the('finance contact', 'finance-contact')}?`
+        : `Reactivate ${the('finance contact', 'finance-contact')}?`;
+    case 'deleteFinanceContact': return `Delete ${the('finance contact', 'finance-contact')}?`;
+    case 'createFinanceItem': return `Add item “${text(i.name) ?? ''}”?`;
+    case 'updateFinanceItem': return `Save changes to ${the('item', 'item')}?`;
+    case 'setFinanceItemActive':
+      return i.active === false ? `Deactivate ${the('item', 'item')}?` : `Reactivate ${the('item', 'item')}?`;
+    case 'deleteFinanceItem': return `Delete ${the('item', 'item')}?`;
     default: return 'Approve this change?';
   }
 }
@@ -2098,11 +2194,24 @@ export function approvalDetail(
   if (toolName === 'deleteJob') {
     return 'A job that has applications cannot be deleted: close it instead. This cannot be undone.';
   }
+  if (toolName === 'postInvoice') return 'Posting gives the invoice a number and locks it; record its e-Invois status afterwards for LHDN.';
+  if (toolName === 'postBill') return 'Posting locks the bill so it can no longer be edited.';
+  if (toolName === 'setEInvoice') return 'This records the e-Invois (MyInvois) status submitted to LHDN.';
+  if (toolName === 'voidInvoice' || toolName === 'voidBill' || toolName === 'voidCreditNote') {
+    return 'Voiding keeps the document for the record but cancels its effect.';
+  }
   if (
     toolName === 'deleteCreative' ||
     toolName === 'deleteLead' ||
     toolName === 'deleteAppointment' ||
-    toolName === 'deleteDepartment'
+    toolName === 'deleteDepartment' ||
+    toolName === 'deleteInvoice' ||
+    toolName === 'deleteQuotation' ||
+    toolName === 'deleteCreditNote' ||
+    toolName === 'deleteRefund' ||
+    toolName === 'deleteBill' ||
+    toolName === 'deleteFinanceContact' ||
+    toolName === 'deleteFinanceItem'
   ) {
     return 'This cannot be undone.';
   }
