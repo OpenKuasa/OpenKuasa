@@ -15,6 +15,7 @@ import type { CrmAccess } from '@/lib/ai/crm-tools';
 import { prepareCvStep } from '@/lib/ai/hire-tools';
 import { guardDeletions } from '@/lib/ai/hire-deletions';
 import { guardInterviewChanges } from '@/lib/ai/hire-interview-gate';
+import { cachedInstructions } from '@/lib/ai/prompt-cache';
 import { guardPoolChanges } from '@/lib/ai/hire-pool-gate';
 import {
   REACH_WRITE_TOOL_NAMES,
@@ -296,7 +297,8 @@ export function runTuah(
     : tuahSystem(screen);
   return streamText({
     model: getModel('orchestrator', apiKey),
-    system,
+    // Tuah's prompt is the same on every call of a turn and from one turn to the next: marked for the provider's cache.
+    system: cachedInstructions(system),
     messages,
     tools,
     toolApproval,

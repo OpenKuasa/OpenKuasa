@@ -177,6 +177,21 @@ describe('Tuah with hiring', () => {
     expect(tuah.tools).not.toContain('listJobs');
     expect(tuah.system).toContain('askLekir: Lekir, for hiring');
   });
+
+  it('sends its prompt marked for the provider\'s cache, with its team and alone', async () => {
+    const systemOf = (call: { prompt: string }) =>
+      (JSON.parse(call.prompt) as { role: string; content: unknown; providerOptions?: unknown }[]).find((m) => m.role === 'system');
+    for (const withTeam of [team(), undefined]) {
+      seen.calls = [];
+      await runTuah(...withTuah(ask, reach(), undefined, undefined, null, null, withTeam, hire())).consumeStream();
+      const tuah = seen.calls.find((c) => c.layer === 'orchestrator');
+      expect(tuah, String(Boolean(withTeam))).toBeDefined();
+      expect(systemOf(tuah!)?.providerOptions, String(Boolean(withTeam))).toEqual({ openrouter: { cacheControl: { type: 'ephemeral' } } });
+      // The words are untouched: one system message, the prompt as it always was.
+      expect(typeof systemOf(tuah!)?.content).toBe('string');
+      expect(String(systemOf(tuah!)?.content)).toContain('You are Tuah');
+    }
+  });
 });
 
 describe('Tuah as a single agent with hiring changes', () => {

@@ -8,7 +8,12 @@
 type CallEnd = {
   modelId?: string;
   finishReason: unknown;
-  usage: { inputTokens: number | undefined; outputTokens: number | undefined };
+  usage: {
+    inputTokens: number | undefined;
+    outputTokens: number | undefined;
+    /** How much of the input was read from, and written to, the provider's prompt cache. */
+    inputTokenDetails?: { cacheReadTokens?: number | undefined; cacheWriteTokens?: number | undefined };
+  };
   performance: { responseTimeMs: number };
 };
 
@@ -18,9 +23,12 @@ export function logModelCall(agent: string, model: string) {
       typeof call.finishReason === 'string'
         ? call.finishReason
         : ((call.finishReason as { unified?: string } | null)?.unified ?? 'unknown');
+    const cache = call.usage.inputTokenDetails;
     console.info(
       `[ai] agent=${agent} model=${call.modelId || model} ms=${Math.round(call.performance.responseTimeMs)} ` +
-        `in=${call.usage.inputTokens ?? '?'} out=${call.usage.outputTokens ?? '?'} finish=${finish}`,
+        // `cached` is input read from the prompt cache (billed at a fraction), `wrote` is input written to it.
+        `in=${call.usage.inputTokens ?? '?'} cached=${cache?.cacheReadTokens ?? 0} wrote=${cache?.cacheWriteTokens ?? 0} ` +
+        `out=${call.usage.outputTokens ?? '?'} finish=${finish}`,
     );
   };
 }
