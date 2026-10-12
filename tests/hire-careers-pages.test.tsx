@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   connection: vi.fn(),
   applyForm: vi.fn(),
   submitPublicApplication: vi.fn(),
+  consumeRateLimits: vi.fn(),
 }));
 
 vi.mock('@/lib/hire/public-careers', async (importOriginal) => ({
@@ -33,6 +34,13 @@ vi.mock('next/server', () => ({ connection: mocks.connection }));
 // The real check reads this shell's environment; the pages must not depend on it here.
 vi.mock('@/lib/auth/viewer', () => ({ hasSupabaseEnv: mocks.hasSupabaseEnv }));
 vi.mock('@/lib/supabase/anonymous', () => ({ createAnonymousClient: () => ({ anonymous: true }) }));
+// The action the page hands the form counts each application in the database.
+// Only the call that asks the counter is replaced; left alone it would count
+// every run against the live limit on applications.
+vi.mock('@/lib/security/rate-limit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/security/rate-limit')>()),
+  consumeRateLimits: mocks.consumeRateLimits,
+}));
 // The apply form has its own test file. Here a stand-in shows where the page
 // puts it and what the page hands it.
 vi.mock('@/app/careers/[orgId]/[jobId]/apply-form', () => ({
@@ -89,6 +97,7 @@ beforeEach(() => {
   mocks.getPublicCareers.mockResolvedValue(careers());
   mocks.getPublicJob.mockResolvedValue(job());
   mocks.readPublicJob.mockResolvedValue({ state: 'found', job: job() });
+  mocks.consumeRateLimits.mockResolvedValue({ allowed: true, enforced: true });
 });
 
 describe('the board page', () => {
@@ -274,6 +283,9 @@ describe('the job page', () => {
     expect(await action(undefined, formData)).toEqual({ done: { firstName: 'Aisyah' } });
     expect(mocks.readPublicJob).toHaveBeenCalledWith({ anonymous: true }, ORG, JOB_A);
     expect(mocks.submitPublicApplication.mock.calls[0].slice(1, 3)).toEqual([ORG, JOB_A]);
+    // Counted once, as an application with no file.
+    expect(mocks.consumeRateLimits).toHaveBeenCalledTimes(1);
+    expect(mocks.consumeRateLimits.mock.calls[0][0].map((c: { bucket: string }) => c.bucket)).toEqual(['apply_client']);
   });
 
   it('says "Applications closed" and offers no way to apply once a job has stopped taking applications', async () => {

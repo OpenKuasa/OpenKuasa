@@ -17,7 +17,7 @@ import { cn } from '@/lib/utils';
 const NO_PRODUCT = 'none';
 
 /**
- * The lines of a bill or an invoice, with live totals. On a phone each line
+ * The lines of a bill, invoice, quotation or RFQ, with live totals. On a phone each line
  * is a card with its fields stacked two to a row; from the md breakpoint a
  * line is one row. Nothing scrolls sideways. The arithmetic is in
  * src/lib/finance/bill-math.ts.

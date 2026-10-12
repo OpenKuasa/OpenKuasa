@@ -5,18 +5,22 @@
  * My Documents) and shape the rows for display.
  */
 
-import { daysBetween, formatDate, malaysiaDate } from './dates';
+import { daysBetween, formatDate, malaysiaDate, monthYearLabel } from './dates';
+import { EXPIRY_WINDOW_DAYS, type ExpiryState, expiryState } from './document-forms';
 import { EMPLOYMENT_LABEL } from './employees';
-import { DOCUMENT_STATUS_LABEL, DOCUMENT_TYPE_LABEL, isTeamView, ownRows } from './own';
+import { unfilledInLetter } from './letter-placeholders';
+import { DOCUMENT_TYPE_LABEL, LETTER_TYPE_LABEL, isTeamView, ownRows } from './own';
 import { sumBy } from './series';
 import type {
-  DocumentStatus,
   DocumentType,
   Employee,
   EmployeePrivate,
   HrDocument,
   LeaveBalance,
   Letter,
+  LetterTemplate,
+  LetterType,
+  Payslip,
   PeopleData,
   PeopleSettings,
   PeopleViewer,
@@ -24,8 +28,7 @@ import type {
 } from './types';
 
 export const NOT_RECORDED = 'Not recorded';
-/** A document that expires within this many days (today included) is "expiring soon". */
-export const EXPIRY_WINDOW_DAYS = 90;
+export { EXPIRY_WINDOW_DAYS };
 
 const present = (value: string | null | undefined): string | null => {
   const text = value?.trim();
@@ -175,87 +178,302 @@ export async function loadRecordsModel(data: PeopleData, viewer: PeopleViewer, t
   return buildRecordsModel(viewer, employees, priv, balances, today);
 }
 
-/* ------------------------------------------------------------ My Documents */
+/* ------------------------------------------------------------ Documents and letters */
 
-const DOCUMENT_COLORS: Record<DocumentType, string> = {
-  payslip: 'var(--chart-1)',
-  letter: 'var(--chart-2)',
-  contract: 'var(--chart-3)',
-  tax: 'var(--chart-4)',
-  benefits: 'var(--chart-5)',
+/** Who may add, change or remove other people's documents and letters: an owner or admin outside the sample company. */
+export function canManageDocuments(viewer: Pick<PeopleViewer, 'isHr' | 'isDemo'>): boolean {
+  return viewer.isHr && !viewer.isDemo;
+}
+
+/** `340 KB`, `1.2 MB`: a file's size for a person. Null for a size that is not known. */
+export function formatFileSize(bytes: number | null): string | null {
+  if (bytes === null || !Number.isFinite(bytes) || bytes < 0) return null;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(Math.round((bytes / (1024 * 1024)) * 10) / 10).toString()} MB`;
+}
+
+const FILE_TYPE_LABEL: Record<string, string> = {
+  'application/pdf': 'PDF',
+  'image/jpeg': 'JPEG',
+  'image/png': 'PNG',
+  'image/webp': 'WebP',
+  'image/heic': 'HEIC',
 };
-const DOCUMENT_TYPES = Object.keys(DOCUMENT_COLORS) as DocumentType[];
 
-/** Expires today or within the next 90 days. A document with no expiry date, or one 91 days away, is not. */
-export function isExpiringSoon(doc: Pick<HrDocument, 'expires_on'>, today: string): boolean {
-  if (!doc.expires_on) return false;
-  const days = daysBetween(today, doc.expires_on);
-  return days >= 0 && days <= EXPIRY_WINDOW_DAYS;
+/** `passport.pdf · 340 KB · PDF`, from what the row records (storage's own figures when it recorded them). Null without a file. */
+export function fileLabel(doc: Pick<HrDocument, 'has_file' | 'file_name' | 'file_size' | 'file_type'>): string | null {
+  if (!doc.has_file) return null;
+  return [doc.file_name, formatFileSize(doc.file_size), doc.file_type ? (FILE_TYPE_LABEL[doc.file_type] ?? null) : null]
+    .filter((part): part is string => part !== null && part !== '')
+    .join(' · ');
 }
 
-/** 'Expires 31 Dec 2026' for a document that has an expiry and is flagged expiring; else the issue date; else '—'. */
-export function documentDateLabel(doc: Pick<HrDocument, 'status' | 'issued_on' | 'expires_on'>): string {
-  if (doc.status === 'expiring' && doc.expires_on) return `Expires ${formatDate(doc.expires_on)}`;
-  if (doc.issued_on) return formatDate(doc.issued_on);
-  return '—';
+export const NO_FILE_LABEL = 'Sample document, no file';
+
+/** `Expires 31 Dec 2026`, `Expired 31 Dec 2026`, or null with no expiry date. */
+function expiryLabel(doc: Pick<HrDocument, 'expires_on'>, state: ExpiryState): string | null {
+  if (!doc.expires_on) return null;
+  return `${state === 'expired' ? 'Expired' : 'Expires'} ${formatDate(doc.expires_on)}`;
 }
 
-export type DocumentRow = {
+/** The document asks its employee to acknowledge it and they have not yet. */
+export const documentAwaiting = (doc: Pick<HrDocument, 'ack_requested' | 'acknowledged_at'>): boolean =>
+  doc.ack_requested && doc.acknowledged_at === null;
+
+/** The letter is issued, asks its employee to acknowledge it and they have not yet. */
+export const letterAwaiting = (letter: Pick<Letter, 'status' | 'ack_requested' | 'acknowledged_at'>): boolean =>
+  letter.status === 'issued' && letter.ack_requested && letter.acknowledged_at === null;
+
+/**
+ * How many of the viewer's OWN documents and letters await their acknowledgement: HR-added documents that ask and
+ * issued letters that ask. 0 in the sample company (the database refuses an acknowledgement there, so the count
+ * could never clear) and for a viewer with no employee record. An owner who is also an employee is counted their
+ * own rows, never the team's.
+ */
+export function awaitingAcknowledgement(documents: HrDocument[], letters: Letter[], viewer: PeopleViewer): number {
+  if (viewer.isDemo || viewer.employeeId === null) return 0;
+  return (
+    ownRows(documents, viewer).filter((doc) => doc.source === 'hr' && documentAwaiting(doc)).length +
+    ownRows(letters, viewer).filter(letterAwaiting).length
+  );
+}
+
+const readOn = (acknowledged_at: string | null): string | null =>
+  acknowledged_at ? `Acknowledged on ${formatDate(malaysiaDate(acknowledged_at))}` : null;
+
+export type MyDocumentRow = {
   id: string;
+  kind: 'document' | 'letter' | 'payslip';
   title: string;
   type_label: string;
+  /** When it was added or issued, or the payslip's month. */
   date_label: string;
-  status: DocumentStatus;
-  status_label: string;
-  pending_signature: boolean;
+  expiry: ExpiryState;
+  /** `Expires 31 Dec 2026` / `Expired 31 Dec 2026`; null without an expiry date or for a letter or payslip. */
+  expiry_label: string | null;
+  /** The file as storage recorded it, e.g. `passport.pdf · 340 KB · PDF`; null without one. */
+  file_label: string | null;
+  /** `Sample document, no file` for a document with nothing attached, else null. */
+  no_file_label: string | null;
+  /** `Added by you` / `Added by HR` for a document; null for a letter or payslip. */
+  added_by_label: string | null;
+  /** Needs the employee's acknowledgement (shown first, even in the sample company). */
+  awaiting_acknowledgement: boolean;
+  /** `Acknowledged on 12 Oct 2026` once acknowledged. */
+  acknowledged_label: string | null;
+  /** Awaiting, and not in the sample company, where the database refuses it: the only condition for the button. */
+  can_acknowledge: boolean;
+  /** A document with a file, outside the sample company. */
+  can_download: boolean;
+  /** The employee's own upload, outside the sample company. */
+  can_remove: boolean;
+  /** Where a letter or a payslip lives; null for a document. */
+  href: string | null;
 };
 
-export type DocumentsModel =
+export type MyDocumentsModel =
   | { linked: false }
   | {
       linked: true;
-      total: number;
-      pending_signature: number;
+      /** Add one with `addMyDocumentAction` (not in the sample company). */
+      can_upload: boolean;
+      employee_id: string;
+      /** Tiles: the viewer's documents (files), those awaiting acknowledgement, expiring within 90 days, payslips. */
+      documents: number;
+      awaiting_acknowledgement: number;
       expiring_soon: number;
+      expired: number;
       payslips: number;
-      by_type: { key: DocumentType; label: string; value: number; color: string }[];
-      rows: DocumentRow[];
+      letters: number;
+      /** Awaiting acknowledgement first; then newest first. */
+      rows: MyDocumentRow[];
     };
 
-/** Newest issue date first; documents with no issue date last; ties by title. */
-function byIssuedDesc(a: HrDocument, b: HrDocument): number {
-  if (a.issued_on === b.issued_on) return a.title.localeCompare(b.title);
-  if (a.issued_on === null) return 1;
-  if (b.issued_on === null) return -1;
-  return b.issued_on.localeCompare(a.issued_on);
-}
+const dateOfDocument = (doc: HrDocument): string => malaysiaDate(doc.created_at);
+const byNewest = (a: { sort: string; title: string }, b: { sort: string; title: string }) =>
+  a.sort === b.sort ? a.title.localeCompare(b.title) : b.sort.localeCompare(a.sort);
 
-/** The viewer's own documents. */
-export function buildDocumentsModel(documents: HrDocument[], viewer: PeopleViewer, today: string): DocumentsModel {
+/**
+ * The viewer's own documents, issued letters and paid payslips in one list. Whatever the provider returned, only
+ * the viewer's own rows are used, a letter only once issued, a payslip only once paid: a draft letter or payslip
+ * never gets as far as a row or a count. Anything awaiting acknowledgement comes first.
+ */
+export function buildMyDocumentsModel(input: {
+  documents: HrDocument[];
+  letters: Letter[];
+  payslips: Payslip[];
+  today: string;
+  viewer: PeopleViewer;
+}): MyDocumentsModel {
+  const { viewer, today } = input;
   if (viewer.employeeId === null) return { linked: false };
-  const own = ownRows(documents, viewer).sort(byIssuedDesc);
-  const counts = new Map(sumBy(own, (d) => d.doc_type, () => 1).map((entry) => [entry.key, entry.value]));
+  const documents = ownRows(input.documents, viewer);
+  const letters = ownRows(input.letters, viewer).filter((letter) => letter.status === 'issued');
+  const payslips = ownRows(input.payslips, viewer).filter((slip) => slip.status === 'paid');
+
+  const rows: { sort: string; title: string; row: MyDocumentRow }[] = [
+    ...documents.map((doc) => {
+      const expiry = expiryState(doc.expires_on, today);
+      const awaiting = documentAwaiting(doc);
+      const sort = dateOfDocument(doc);
+      const row: MyDocumentRow = {
+        id: doc.id,
+        kind: 'document',
+        title: doc.title,
+        type_label: DOCUMENT_TYPE_LABEL[doc.doc_type],
+        date_label: sort ? formatDate(sort) : '—',
+        expiry,
+        expiry_label: expiryLabel(doc, expiry),
+        file_label: fileLabel(doc),
+        no_file_label: doc.has_file ? null : NO_FILE_LABEL,
+        added_by_label: doc.source === 'employee' ? 'Added by you' : 'Added by HR',
+        awaiting_acknowledgement: awaiting,
+        acknowledged_label: readOn(doc.acknowledged_at),
+        can_acknowledge: awaiting && !viewer.isDemo,
+        can_download: doc.has_file && !viewer.isDemo,
+        can_remove: doc.source === 'employee' && !viewer.isDemo,
+        href: null,
+      };
+      return { sort, title: doc.title, row };
+    }),
+    ...letters.map((letter) => {
+      const awaiting = letterAwaiting(letter);
+      const sort = letter.issued_on ?? malaysiaDate(letter.created_at);
+      const row: MyDocumentRow = {
+        id: letter.id,
+        kind: 'letter',
+        title: letter.title,
+        type_label: LETTER_TYPE_LABEL[letter.letter_type],
+        date_label: sort ? formatDate(sort) : '—',
+        expiry: 'none',
+        expiry_label: null,
+        file_label: null,
+        no_file_label: null,
+        added_by_label: null,
+        awaiting_acknowledgement: awaiting,
+        acknowledged_label: readOn(letter.acknowledged_at),
+        can_acknowledge: awaiting && !viewer.isDemo,
+        can_download: false,
+        can_remove: false,
+        href: '/people/letters',
+      };
+      return { sort, title: letter.title, row };
+    }),
+    ...payslips.map((slip) => {
+      const row: MyDocumentRow = {
+        id: slip.id,
+        kind: 'payslip',
+        title: `Payslip, ${monthYearLabel(slip.period_month)}`,
+        type_label: 'Payslip',
+        date_label: monthYearLabel(slip.period_month),
+        expiry: 'none',
+        expiry_label: null,
+        file_label: null,
+        no_file_label: null,
+        added_by_label: null,
+        awaiting_acknowledgement: false,
+        acknowledged_label: null,
+        can_acknowledge: false,
+        can_download: false,
+        can_remove: false,
+        href: '/people/my-payslips',
+      };
+      return { sort: slip.period_month, title: row.title, row };
+    }),
+  ].sort((a, b) => Number(b.row.awaiting_acknowledgement) - Number(a.row.awaiting_acknowledgement) || byNewest(a, b));
+
+  const states = documents.map((doc) => expiryState(doc.expires_on, today));
   return {
     linked: true,
-    total: own.length,
-    pending_signature: own.filter((d) => d.status === 'pending_signature').length,
-    expiring_soon: own.filter((d) => isExpiringSoon(d, today)).length,
-    payslips: counts.get('payslip') ?? 0,
-    by_type: DOCUMENT_TYPES.filter((type) => (counts.get(type) ?? 0) > 0).map((type) => ({
-      key: type,
-      label: DOCUMENT_TYPE_LABEL[type],
-      value: counts.get(type) ?? 0,
-      color: DOCUMENT_COLORS[type],
-    })),
-    rows: own.map((d) => ({
-      id: d.id,
-      title: d.title,
-      type_label: DOCUMENT_TYPE_LABEL[d.doc_type],
-      date_label: documentDateLabel(d),
-      status: d.status,
-      status_label: DOCUMENT_STATUS_LABEL[d.status],
-      pending_signature: d.status === 'pending_signature',
-    })),
+    can_upload: !viewer.isDemo,
+    employee_id: viewer.employeeId,
+    documents: documents.length,
+    awaiting_acknowledgement: awaitingAcknowledgement(documents, letters, viewer),
+    expiring_soon: states.filter((state) => state === 'expiring').length,
+    expired: states.filter((state) => state === 'expired').length,
+    payslips: payslips.length,
+    letters: letters.length,
+    rows: rows.map((entry) => entry.row),
+  };
+}
+
+export type EmployeeDocumentRow = {
+  id: string;
+  title: string;
+  doc_type: DocumentType;
+  type_label: string;
+  expires_on: string | null;
+  expiry: ExpiryState;
+  expiry_label: string | null;
+  date_label: string;
+  file_label: string | null;
+  no_file_label: string | null;
+  source: 'hr' | 'employee';
+  /** `Added by HR` / `Uploaded by the employee`. */
+  added_by_label: string;
+  ack_requested: boolean;
+  /** `Not asked`, `Waiting for the employee`, or `Acknowledged on 12 Oct 2026`. */
+  ack_label: string;
+  acknowledged_at: string | null;
+  can_download: boolean;
+  /** Asking for an acknowledgement is allowed only for a document HR added. */
+  can_request_ack: boolean;
+  can_withdraw_ack: boolean;
+};
+
+export type EmployeeDocumentsModel =
+  | { allowed: false }
+  | { allowed: true; employee_id: string; total: number; expiring_soon: number; expired: number; rows: EmployeeDocumentRow[] };
+
+/**
+ * One employee's documents for an owner or admin (the Employees screen's Documents action). Everyone else gets
+ * nothing: an employee's own list is My Documents.
+ */
+export function buildEmployeeDocumentsModel(input: {
+  documents: HrDocument[];
+  employeeId: string;
+  today: string;
+  viewer: PeopleViewer;
+}): EmployeeDocumentsModel {
+  const { viewer, today, employeeId } = input;
+  if (!canManageDocuments(viewer)) return { allowed: false };
+  const documents = input.documents.filter((doc) => doc.employee_id === employeeId);
+  const rows = documents
+    .map((doc) => {
+      const expiry = expiryState(doc.expires_on, today);
+      const sort = dateOfDocument(doc);
+      const row: EmployeeDocumentRow = {
+        id: doc.id,
+        title: doc.title,
+        doc_type: doc.doc_type,
+        type_label: DOCUMENT_TYPE_LABEL[doc.doc_type],
+        expires_on: doc.expires_on,
+        expiry,
+        expiry_label: expiryLabel(doc, expiry),
+        date_label: sort ? formatDate(sort) : '—',
+        file_label: fileLabel(doc),
+        no_file_label: doc.has_file ? null : NO_FILE_LABEL,
+        source: doc.source,
+        added_by_label: doc.source === 'employee' ? 'Uploaded by the employee' : 'Added by HR',
+        ack_requested: doc.ack_requested,
+        ack_label: doc.acknowledged_at ? (readOn(doc.acknowledged_at) ?? '') : doc.ack_requested ? 'Waiting for the employee' : 'Not asked',
+        acknowledged_at: doc.acknowledged_at,
+        can_download: doc.has_file,
+        can_request_ack: doc.source === 'hr' && !doc.ack_requested,
+        can_withdraw_ack: doc.source === 'hr' && doc.ack_requested,
+      };
+      return { sort, title: doc.title, row };
+    })
+    .sort(byNewest)
+    .map((entry) => entry.row);
+  return {
+    allowed: true,
+    employee_id: employeeId,
+    total: rows.length,
+    expiring_soon: rows.filter((row) => row.expiry === 'expiring').length,
+    expired: rows.filter((row) => row.expiry === 'expired').length,
+    rows,
   };
 }
 
@@ -263,16 +481,37 @@ export function buildDocumentsModel(documents: HrDocument[], viewer: PeopleViewe
 
 export type LetterRow = {
   id: string;
+  employee_id: string;
   title: string;
   employee_name: string;
+  letter_type: LetterType;
   type_label: string;
   date_label: string;
   status: Letter['status'];
+  /** The letter's text, for the viewer's printable layout. */
+  body: string;
+  ack_requested: boolean;
+  acknowledged_at: string | null;
+  /** Issued, asked for, not yet read by the employee (the owner's view of "waiting"). */
+  awaiting_acknowledgement: boolean;
+  acknowledged_label: string | null;
+  /** The addressee only, on an issued letter that asks, outside the sample company. */
+  can_acknowledge: boolean;
+  /** Known placeholders still in the title or body of a DRAFT, in the order they appear; none for an issued letter. */
+  unfilled: string[];
+  /** Owners and admins only, outside the sample company. */
+  can_edit: boolean;
+  can_delete: boolean;
+  /** A draft with text and no placeholder left. */
+  can_issue: boolean;
+  can_unissue: boolean;
 };
 
 export type LettersModel = {
-  /** True for HR and the demo: the rows are the team's. Otherwise they are the viewer's own letters. */
+  /** True for HR and the demo: the rows are the team's. Otherwise they are the viewer's own issued letters. */
   team: boolean;
+  /** Owners and admins outside the sample company: the controls (New letter, Edit, Issue, ...) exist. */
+  can_manage: boolean;
   /** Null for someone who is not on the team view: those figures would be the team's. */
   totals: { issued_this_year: number; drafts: number; issued_this_month: number } | null;
   by_type: { key: string; label: string; value: number; color: string }[] | null;
@@ -281,13 +520,15 @@ export type LettersModel = {
 
 const LETTER_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)'];
 
-const letterType = (letter: Letter) => present(letter.letter_type) ?? 'Other';
 /** A letter's date: when it was issued, or for a draft (or a missing date) when it was started. */
 const letterDate = (letter: Letter) => letter.issued_on ?? malaysiaDate(letter.created_at);
 
 export function buildLettersModel(letters: Letter[], viewer: PeopleViewer, today: string): LettersModel {
   const team = isTeamView(viewer);
-  const rows = [...letters]
+  const manage = canManageDocuments(viewer);
+  // A member sees their own issued letters only, whatever the provider returned: a draft is not even a count.
+  const visible = team ? letters : ownRows(letters, viewer).filter((letter) => letter.status === 'issued');
+  const rows = [...visible]
     .sort((a, b) => {
       const da = letterDate(a);
       const db = letterDate(b);
@@ -298,16 +539,31 @@ export function buildLettersModel(letters: Letter[], viewer: PeopleViewer, today
     })
     .map((l): LetterRow => {
       const date = letterDate(l);
+      const unfilled = l.status === 'draft' ? unfilledInLetter(l.title, l.body) : [];
+      const awaiting = letterAwaiting(l);
       return {
         id: l.id,
+        employee_id: l.employee_id,
         title: l.title,
         employee_name: l.employee_name,
-        type_label: letterType(l),
+        letter_type: l.letter_type,
+        type_label: LETTER_TYPE_LABEL[l.letter_type],
         date_label: date ? formatDate(date) : '—',
         status: l.status,
+        body: l.body,
+        ack_requested: l.ack_requested,
+        acknowledged_at: l.acknowledged_at,
+        awaiting_acknowledgement: awaiting,
+        acknowledged_label: readOn(l.acknowledged_at),
+        can_acknowledge: awaiting && viewer.employeeId === l.employee_id && !viewer.isDemo,
+        unfilled,
+        can_edit: manage && l.status === 'draft',
+        can_delete: manage && l.status === 'draft',
+        can_issue: manage && l.status === 'draft' && l.body.trim() !== '' && unfilled.length === 0,
+        can_unissue: manage && l.status === 'issued',
       };
     });
-  if (!team) return { team, totals: null, by_type: null, rows };
+  if (!team) return { team, can_manage: false, totals: null, by_type: null, rows };
 
   const year = today.slice(0, 4);
   const month = today.slice(0, 7);
@@ -315,18 +571,38 @@ export function buildLettersModel(letters: Letter[], viewer: PeopleViewer, today
   const issuedThisYear = issued.filter((l) => l.issued_on?.startsWith(year));
   return {
     team,
+    can_manage: manage,
     totals: {
       issued_this_year: issuedThisYear.length,
       drafts: letters.filter((l) => l.status === 'draft').length,
       issued_this_month: issued.filter((l) => l.issued_on?.startsWith(month)).length,
     },
-    by_type: sumBy(issuedThisYear, letterType, () => 1).map((entry, index) => ({
+    by_type: sumBy(issuedThisYear, (l) => l.letter_type, () => 1).map((entry, index) => ({
       key: entry.key,
-      label: entry.key,
+      label: LETTER_TYPE_LABEL[entry.key as LetterType],
       value: entry.value,
       color: LETTER_COLORS[index % LETTER_COLORS.length],
     })),
     rows,
+  };
+}
+
+export type LetterTemplateRow = { id: string; name: string; letter_type: LetterType; type_label: string; title: string; body: string };
+
+export type LetterTemplatesModel =
+  | { allowed: false }
+  /** `can_manage` is false in the sample company: the templates are shown, nothing can be changed. */
+  | { allowed: true; can_manage: boolean; rows: LetterTemplateRow[] };
+
+/** Templates are for owners and admins (and the sample company's visitors, read-only). Anyone else gets none. */
+export function buildLetterTemplatesModel(templates: LetterTemplate[], viewer: PeopleViewer): LetterTemplatesModel {
+  if (!isTeamView(viewer)) return { allowed: false };
+  return {
+    allowed: true,
+    can_manage: canManageDocuments(viewer),
+    rows: [...templates]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((t) => ({ ...t, type_label: LETTER_TYPE_LABEL[t.letter_type] })),
   };
 }
 

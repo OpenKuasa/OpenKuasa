@@ -20,8 +20,10 @@ export default async function PaymentsInScreen() {
   }
   const viewer = await getViewer();
   const ctx = { client: await createClient(), orgId: viewer.orgId };
-  const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
-  // The payment form offers open invoices and accounts; a viewer has no form, so neither is read for them.
+  // Money in is posted the moment it is recorded, and the only other change here is voiding it: both need an
+  // owner or admin, so nobody else has anything to do on this screen but read it.
+  const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data') && can(viewer.role, 'sign-off-finance');
+  // The payment form offers open invoices and accounts; anyone without the form has neither read for them.
   const [rows, invoices, accounts] = await Promise.all([
     listPaymentsIn(ctx),
     canEdit ? listInvoices(ctx) : [],

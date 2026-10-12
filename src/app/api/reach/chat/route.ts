@@ -13,6 +13,7 @@ import { runJebat } from '@/lib/ai/agents/orchestrator';
 import { getCurrentOrg } from '@/lib/auth/current-org';
 import { can } from '@/lib/auth/permissions';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
+import { chatApprovals } from '@/lib/chat/approvals';
 import { getReachData } from '@/lib/reach/supabase';
 
 export const dynamic = 'force-dynamic';
@@ -37,7 +38,9 @@ export async function POST(request: Request) {
         }
       : undefined;
 
-  const result = runJebat(chat.messages, { data, write }, request.signal, chat.apiKey);
+  // An approval is answered from the server's record of the change, never from what the browser sent back.
+  const approvals = await chatApprovals(chat, org?.orgId ?? null);
+  const result = runJebat(chat.messages, { data, write }, request.signal, chat.apiKey, approvals);
 
   return result.toUIMessageStreamResponse({
     onError: streamErrorHandler('ask-jebat', 'Jebat ran into a problem. Please try again in a moment.'),

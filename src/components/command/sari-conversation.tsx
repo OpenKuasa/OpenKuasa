@@ -40,6 +40,7 @@ import { useViewer } from '@/components/app/viewer-context';
 import {
   ChatKeyNotice,
   DAILY_LIMIT_NOTICE,
+  attachmentRefusal,
   chatErrorCode,
   isChatLocked,
   useChatStatus,
@@ -69,6 +70,7 @@ import {
   hasVisibleContent,
   isText,
   proposalFor,
+  rowFinder,
   toPendingApproval,
   toSpecialistWork,
   toToolStep,
@@ -1083,6 +1085,7 @@ function ChatPane({
                                   key={pending.approvalId}
                                   approval={pending}
                                   named={nameFinder(chat.messages)}
+                                  before={rowFinder(chat.messages)}
                                   proposal={proposalFor(pending.input, chat.messages)}
                                   onDecide={(approved) => {
                                     setAttachNote(null);
@@ -1140,7 +1143,7 @@ function ChatPane({
                       ? 'That question was not sent: your free questions are used up.'
                       : chatErrorCode(chat.error) === 'daily_limit'
                         ? DAILY_LIMIT_NOTICE
-                        : 'Tuah could not respond just now. Please try again.'}
+                        : (attachmentRefusal(chat.error) ?? 'Tuah could not respond just now. Please try again.')}
                   </p>
                 ) : null}
                 <div ref={endRef} />

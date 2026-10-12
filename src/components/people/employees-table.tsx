@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from 'react';
 import { Dialog } from 'radix-ui';
-import { Pencil, Plus, Search, Target, Trash2, UserCheck, UserX } from 'lucide-react';
+import { FileText, Pencil, Plus, Search, Target, Trash2, UserCheck, UserX } from 'lucide-react';
 import {
   createEmployeeAction,
   deleteEmployeeAction,
@@ -17,6 +17,8 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatDay, todayInMalaysia } from '@/lib/people/dates';
+import type { EmployeeDocumentRow } from '@/lib/people/documents';
+import { showsEmployeeDocumentsAction } from '@/lib/people/documents-screens';
 import { type GoalLike, showGoalsAction } from '@/lib/people/goals-training';
 import {
   EMPLOYMENT_LABEL,
@@ -29,6 +31,7 @@ import type { WorkspaceMember } from '@/lib/people/members';
 import type { Department, Employee } from '@/lib/people/types';
 import { cn } from '@/lib/utils';
 import { type EditingEmployee, EmployeeForm } from './employee-form';
+import { EmployeeDocuments } from './employee-documents';
 import { EmployeeGoals } from './employee-goals';
 import type { EntitlementChange } from './entitlements-fields';
 
@@ -55,6 +58,8 @@ export function EmployeesTable({
   departments,
   members,
   goals = null,
+  documents = null,
+  orgId = null,
   canEdit,
 }: {
   employees: Employee[];
@@ -63,6 +68,10 @@ export function EmployeesTable({
   members: WorkspaceMember[];
   /** Each employee's goals, by employee id, for the "Goals" action (owners and admins). Null hides the action. */
   goals?: Record<string, GoalLike[]> | null;
+  /** Each employee's documents, by employee id, for the "Documents" action (owners and admins). Null hides the action. */
+  documents?: Record<string, EmployeeDocumentRow[]> | null;
+  /** The workspace id, to build a file's path. */
+  orgId?: string | null;
   canEdit: boolean;
 }) {
   const [pending, start] = useTransition();
@@ -72,6 +81,8 @@ export function EmployeesTable({
   const [editing, setEditing] = useState<EditingEmployee | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [goalsFor, setGoalsFor] = useState<Employee | null>(null);
+  const [documentsFor, setDocumentsFor] = useState<Employee | null>(null);
+  const showDocuments = showsEmployeeDocumentsAction(canEdit, documents, orgId);
 
   const shown = useMemo(() => filterEmployees(employees, filter), [employees, filter]);
   const formOpen = canEdit && (creating || editing !== null);
@@ -307,6 +318,19 @@ export function EmployeesTable({
                           Goals
                         </Button>
                       ) : null}
+                      {showDocuments ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          disabled={pending}
+                          aria-label={`Documents for ${employee.name}`}
+                          onClick={() => setDocumentsFor(employee)}
+                        >
+                          <FileText className="size-4" />
+                          Documents
+                        </Button>
+                      ) : null}
                       <Button
                         type="button"
                         variant="ghost"
@@ -359,7 +383,7 @@ export function EmployeesTable({
                     </div>
                     {confirmingId === employee.id ? (
                       <p role="alert" className="mt-1 text-right text-xs text-destructive">
-                        Their leave, claims, draft payslips and every other HR record are deleted too. This cannot be undone. Someone with a paid payslip cannot be deleted: make them inactive instead.
+                        Their leave, claims, draft payslips and every other HR record are deleted too, including their documents, the files attached to them and their letters. This cannot be undone. Someone with a paid payslip cannot be deleted: make them inactive instead.
                       </p>
                     ) : null}
                   </TableCell>
@@ -436,6 +460,29 @@ export function EmployeesTable({
             </Dialog.Description>
             {goalsFor && goals ? (
               <EmployeeGoals key={goalsFor.id} employeeId={goalsFor.id} name={goalsFor.name} goals={goals[goalsFor.id] ?? []} />
+            ) : null}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      <Dialog.Root open={showDocuments && documentsFor !== null} onOpenChange={(open) => !open && setDocumentsFor(null)}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+          <Dialog.Content className="fixed top-1/2 left-1/2 z-50 max-h-[90vh] w-[calc(100%-2rem)] max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border bg-background p-5 shadow-lg outline-none">
+            <Dialog.Title className="text-base font-semibold">
+              {documentsFor ? `${documentsFor.name}’s documents` : 'Documents'}
+            </Dialog.Title>
+            <Dialog.Description className="mb-4 text-sm text-muted-foreground">
+              Add, change, replace or remove this employee’s documents, and ask them to acknowledge one.
+            </Dialog.Description>
+            {documentsFor && documents && orgId ? (
+              <EmployeeDocuments
+                key={documentsFor.id}
+                orgId={orgId}
+                employeeId={documentsFor.id}
+                name={documentsFor.name}
+                rows={documents[documentsFor.id] ?? []}
+              />
             ) : null}
           </Dialog.Content>
         </Dialog.Portal>

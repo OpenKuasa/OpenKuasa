@@ -222,7 +222,13 @@ testWithSupabase('a voucher that settles no document is approved in the owner\'s
   const direct = await a.c.from('finance_transactions').insert({
     org_id: a.orgId, direction: 'out', account_id: a.bank, amount: 5, method: 'cash', category_id: a.rent, status: 'posted', number: 'PV-SNEAKY',
   });
-  expect(direct.error?.code).toBe('FIN09');
+  // 42501: `number` is a column nobody signed in writes (20261030123000), asked before any trigger.
+  expect(direct.error?.code).toBe('42501');
+  const directUnnumbered = await a.c.from('finance_transactions').insert({
+    org_id: a.orgId, direction: 'out', account_id: a.bank, amount: 5, method: 'cash', category_id: a.rent, status: 'posted',
+  });
+  // FIN09: with no closed column named, the insert guard answers that a payment starts as a draft.
+  expect(directUnnumbered.error?.code).toBe('FIN09');
   const wrongKind = await a.c.rpc('finance_record_voucher', {
     target_org: a.orgId,
     voucher: { account_id: a.bank, method: 'fpx', party_name: 'X', category_id: a.sales, amount: 5 },
@@ -246,6 +252,7 @@ testWithSupabase('a voucher that settles no document is approved in the owner\'s
 // Every user this file can make owns its workspace (see the note at the top), so the member's own attempt is
 // in the check script. What is proved here is the rule that stops a member: approved_at and approved_by are
 // written by the database and by nobody's update, not even an owner's, so nobody approves by writing them.
+// On a payment the two columns are closed to every signed-in person (42501); on an expense the guard refuses (FIN14).
 testWithSupabase('nobody approves a payment or an expense by writing approved_at: the database records it, or refuses', async () => {
   const { data: draft } = await a.c
     .from('finance_transactions')
@@ -254,14 +261,15 @@ testWithSupabase('nobody approves a payment or an expense by writing approved_at
     .single();
   const now = new Date().toISOString();
   const byHand = await a.c.from('finance_transactions').update({ approved_at: now, approved_by: a.userId }).eq('id', draft!.id);
-  expect(byHand.error?.code).toBe('FIN14');
+  // 42501: approved_at and approved_by are columns nobody signed in writes (20261030123000), asked before the guard.
+  expect(byHand.error?.code).toBe('42501');
   const timeOnly = await a.c.from('finance_transactions').update({ approved_at: now }).eq('id', draft!.id);
-  expect(timeOnly.error?.code).toBe('FIN14');
+  expect(timeOnly.error?.code).toBe('42501'); // the same closed column
   const withStatus = await a.c
     .from('finance_transactions')
     .update({ status: 'scheduled', approved_at: '2020-01-01T00:00:00Z' })
     .eq('id', draft!.id);
-  expect(withStatus.error?.code).toBe('FIN14');
+  expect(withStatus.error?.code).toBe('42501'); // the same closed column, whatever else the update changes
   expect(await txn(a.c, draft!.id)).toMatchObject({ status: 'draft', approved_by: null, approved_at: null });
 
   // Scheduled by its owner with nothing written by hand, the database names them and the time, and the two then stay as they are.
@@ -270,7 +278,7 @@ testWithSupabase('nobody approves a payment or an expense by writing approved_at
   expect(approved).toMatchObject({ status: 'scheduled', approved_by: a.userId });
   expect(approved.approved_at).not.toBeNull();
   const blanked = await a.c.from('finance_transactions').update({ approved_by: null }).eq('id', draft!.id);
-  expect(blanked.error?.code).toBe('FIN14');
+  expect(blanked.error?.code).toBe('42501'); // approved_by is a closed column: clearing it is refused like writing it
   expect((await txn(a.c, draft!.id)).approved_by).toBe(a.userId);
   expect((await a.c.from('finance_transactions').delete().eq('id', draft!.id)).error).toBeNull();
 
@@ -434,7 +442,8 @@ testWithSupabase('another workspace cannot see or touch expenses, vouchers or re
   });
   expect(pay.error?.code).toBe('FIN06');
   const post = await b.c.rpc('finance_post_cash_receipt', { target_org: a.orgId, target_txn: receipt.data });
-  expect(post.error?.code).toBe('FIN11');
+  // 42501: the function runs as its owner since 20261030123000 and begins by asking whether the caller may write there.
+  expect(post.error?.code).toBe('42501');
   const { data: approved } = await b.c.from('finance_expenses').update({ status: 'rejected' }).eq('id', saved.data).select('id');
   expect(approved ?? []).toEqual([]);
   expect((await expense(a.c, saved.data)).status).toBe('approved');

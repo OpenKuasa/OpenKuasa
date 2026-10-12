@@ -8,6 +8,7 @@ import {
   Bot,
   Wand2,
   Images,
+  ClipboardCheck,
   ClipboardList,
   CalendarDays,
   SlidersHorizontal,
@@ -51,7 +52,7 @@ import type { OrgRole } from '@/lib/auth/current-org';
 import { type Capability, canSee } from '@/lib/auth/permissions';
 
 /** A live count pill on a nav item, resolved client-side from the nav-badges context. */
-export type NavBadgeKey = 'pendingProposals' | 'unreadAnnouncements';
+export type NavBadgeKey = 'pendingProposals' | 'unreadAnnouncements' | 'awaitingAcknowledgement';
 
 export type NavItem = {
   label: string;
@@ -198,7 +199,7 @@ export const PRODUCTS: Product[] = [
           { label: 'Announcements', slug: 'announcements', icon: Megaphone, badge: 'unreadAnnouncements', badgeLabel: 'unread' },
           { label: 'My Attendance', slug: 'my-attendance', icon: Clock },
           { label: 'My Goals', slug: 'my-goals', icon: Target },
-          { label: 'My Documents', slug: 'my-documents', icon: FileText },
+          { label: 'My Documents', slug: 'my-documents', icon: FileText, badge: 'awaitingAcknowledgement', badgeLabel: 'awaiting your acknowledgement' },
           { label: 'My Payslips', slug: 'my-payslips', icon: Receipt },
           { label: 'Records', slug: 'records', icon: Archive },
         ],
@@ -330,6 +331,8 @@ export const PRODUCTS: Product[] = [
         items: [
           { label: 'Expenses', slug: 'expenses', icon: CreditCard },
           { label: 'Receipts Inbox', slug: 'receipts-inbox', icon: Inbox },
+          { label: 'RFQs', slug: 'rfqs', icon: MessageSquare },
+          { label: 'Purchase Orders', slug: 'purchase-orders', icon: ClipboardCheck },
           { label: 'Supplier Bills', slug: 'supplier-bills', icon: Building2 },
           { label: 'Payments Out', slug: 'payments-out', icon: ArrowUpRight },
           { label: 'Banking', slug: 'banking', icon: Landmark },

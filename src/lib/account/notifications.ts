@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { safeAppPath } from '@/lib/security/safe-path';
 
 // Imported by the client notifications menu, so this file must not pull in
 // server-only modules (`next/headers`, the server Supabase client).
@@ -24,12 +25,9 @@ const FEED_SIZE = 10;
 
 /** True for same-app paths like "/account/security"; rejects other origins. */
 export function isAppHref(href: string | null | undefined): href is string {
-  return (
-    typeof href === 'string' &&
-    href.startsWith('/') &&
-    !href.startsWith('//') &&
-    !href.includes('\\')
-  );
+  // Only the exact, already-normalised form passes, so the stored value can be
+  // used as the link without rewriting it.
+  return typeof href === 'string' && safeAppPath(href) === href;
 }
 
 /** "Just now", "2m ago", "3h ago", "4d ago", then a short date. */

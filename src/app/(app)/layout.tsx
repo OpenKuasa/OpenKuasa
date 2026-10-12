@@ -14,7 +14,7 @@ export default async function AppLayout({
 
   // A live pending-proposals count for the AI Agents nav badge. A failed count must
   // never break the app shell, so it falls back to zero.
-  const badges: NavBadges = { pendingProposals: 0, unreadAnnouncements: 0 };
+  const badges: NavBadges = { pendingProposals: 0, unreadAnnouncements: 0, awaitingAcknowledgement: 0 };
   if (!viewer.isDemo && viewer.orgId) {
     try {
       const supabase = await createClient();

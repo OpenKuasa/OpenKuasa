@@ -5,7 +5,13 @@ import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { getViewer } from '@/lib/auth/viewer';
 import { can } from '@/lib/auth/permissions';
+import { endOtherSessions } from '@/lib/auth/sessions';
+import {
+  PASSWORD_CHECK_ERRORS,
+  verifyCurrentPassword,
+} from '@/lib/auth/verify-password';
 import { recordEvent } from '@/lib/events';
+import { passwordCheckLimited } from '@/lib/security/limits';
 import {
   COMPANY_SIZES,
   INDUSTRIES,
@@ -222,21 +228,21 @@ export async function changePasswordAction(
     confirm: field(formData, 'confirm'),
   });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
+  const limited = await passwordCheckLimited(viewer.userId);
+  if (limited) return { error: limited };
+
+  // Re-check the current password so a borrowed session cannot change it.
+  const check = await verifyCurrentPassword(viewer.email, parsed.data.current);
+  if (check !== 'ok') return { error: PASSWORD_CHECK_ERRORS[check] };
 
   const supabase = await createClient();
-  // Re-check the current password so a borrowed session cannot change it.
-  const { error: checkErr } = await supabase.auth.signInWithPassword({
-    email: viewer.email,
-    password: parsed.data.current,
-  });
-  if (checkErr) return { error: 'Your current password is incorrect.' };
-
   const { error } = await supabase.auth.updateUser({
     password: parsed.data.next,
   });
   if (error) {
     return { error: 'Could not update your password. Please try again.' };
   }
+  const othersEnded = await endOtherSessions(supabase);
   await recordEvent(supabase, {
     action: 'Changed password',
     category: 'security',
@@ -248,7 +254,11 @@ export async function changePasswordAction(
       href: '/account/security',
     },
   });
-  return { notice: 'Password updated.' };
+  return {
+    notice: othersEnded
+      ? 'Password updated.'
+      : 'Password updated. Your other devices could not be signed out; use "Sign out other devices" below.',
+  };
 }
 
 export async function signOutOtherSessionsAction(

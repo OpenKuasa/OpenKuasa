@@ -31,6 +31,7 @@ import { type SupabaseClient } from '@supabase/supabase-js';
 import { createAnonymousClient } from '@/lib/supabase/anonymous';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import { createOrg, joinDemo, liveClient, signInAnon, beforeCleanup, signInOwner } from './helpers/live-workspaces';
+import { publicWriter } from './helpers/public-writer';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
@@ -72,6 +73,7 @@ let owner: Owned;
 let other: Owned;
 let viewer: SupabaseClient; // a viewer of the DEMO workspace
 let visitor: SupabaseClient; // no session
+let writer: SupabaseClient; // who sends a public application: the server, or the visitor on an older database
 let demoApplicationId: string;
 let demoBefore: Row;
 
@@ -97,7 +99,7 @@ async function readRow(c: SupabaseClient, id: string): Promise<Row> {
 /** A fresh application on the job, made the way a real applicant makes one, then found by the owner. */
 async function newApplication(): Promise<string> {
   const email = uniqueEmail();
-  const sent = await visitor.rpc('submit_public_application', {
+  const sent = await writer.rpc('submit_public_application', {
     p_org_id: owner.orgId,
     p_job_id: job.id,
     p_name: NAME,
@@ -156,6 +158,7 @@ beforeAll(async () => {
   const joined = await joinDemo(viewer);
   expect(joined.error, joined.error?.message).toBeNull();
   visitor = createAnonymousClient();
+  ({ writer } = await publicWriter(visitor));
 
   await switchBoardOn(owner);
   const set = await owner.c.from('hire_settings').update(ALL_OFF).eq('org_id', owner.orgId).select('org_id').single();

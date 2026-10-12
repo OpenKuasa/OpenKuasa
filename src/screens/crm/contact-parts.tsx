@@ -17,17 +17,21 @@ import { cn } from '@/lib/utils';
 import type { CrmContact } from '@/lib/crm/contacts';
 import type { CrmFollowUp } from '@/lib/crm/follow-ups';
 import type { CrmFormAction } from '@/lib/crm/form-state';
+import type { BillingCustomerChoice } from '@/lib/crm/invoice-links';
 import { SELECT_CLASS, useCrmForm } from './crm-form';
 
 /** The card above the table: adds a contact, or edits the one picked from a row. */
 export function ContactFormCard({
   action,
   editing,
+  billingCustomers,
   onSaved,
   onClose,
   firstFieldRef,
 }: {
   action: CrmFormAction;
+  /** Bendahara's customers. Absent on screens that do not link to billing: the picker is not shown. */
+  billingCustomers?: BillingCustomerChoice[];
   /** The contact being edited; null to add a new one. */
   editing: CrmContact | null;
   /** Called after a save has gone through. */
@@ -38,7 +42,9 @@ export function ContactFormCard({
 }) {
   const { formAction, pending, error, values } = useCrmForm(action, onSaved);
   const v = values ?? editing?.form ?? {};
-
+  // A customer made inactive in Bendahara is not offered, but stays chosen on a contact that has it.
+  const linkedElsewhere =
+    v.billingCustomerId && !billingCustomers?.some((customer) => customer.id === v.billingCustomerId);
 
   return (
     <BentoCard
@@ -145,6 +151,29 @@ export function ContactFormCard({
             Separate tags with commas.
           </p>
         </div>
+        {billingCustomers ? (
+          <div className="space-y-1.5 md:col-span-4">
+            <Label htmlFor="billingCustomerId">Billing customer</Label>
+            <select
+              id="billingCustomerId"
+              name="billingCustomerId"
+              defaultValue={v.billingCustomerId ?? ''}
+              className={SELECT_CLASS}
+              aria-describedby="billing-customer-hint"
+            >
+              <option value="">None</option>
+              {linkedElsewhere ? <option value={v.billingCustomerId}>Inactive customer</option> : null}
+              {billingCustomers.map((customer) => (
+                <option key={customer.id} value={customer.id}>
+                  {customer.name}
+                </option>
+              ))}
+            </select>
+            <p id="billing-customer-hint" className="text-xs text-muted-foreground">
+              The Bendahara customer this contact is invoiced through.
+            </p>
+          </div>
+        ) : null}
         <div className="flex flex-wrap items-end gap-3 md:col-span-12">
           <Button type="submit" className="w-full md:w-auto" disabled={pending}>
             {editing ? <Check className="size-4" /> : <Plus className="size-4" />}

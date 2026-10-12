@@ -42,6 +42,23 @@ export function modelErrorCode(error: unknown): { code: unknown } {
 }
 
 /**
+ * What may be logged of a failed read or write: the database's or storage's
+ * code (`23505`, `PGRST116`, a status), else the error's class name. Never its
+ * message: a constraint or validation message quotes the values it refused,
+ * and those are a contact's details, a salary, a file's name.
+ */
+export function errorCodeOf(error: unknown): string {
+  const { code, statusCode, status, name } = (error && typeof error === 'object' ? error : {}) as {
+    code?: unknown;
+    statusCode?: unknown;
+    status?: unknown;
+    name?: unknown;
+  };
+  const first = [code, statusCode, status, name].find((v) => typeof v === 'string' || typeof v === 'number');
+  return first === undefined ? 'unknown' : String(first).slice(0, 64);
+}
+
+/**
  * The `onError` of a chat route's stream: logs the tag and a code, and answers
  * with the sentence the user is shown. Every chat route uses it, so none logs
  * the error itself, which carries the chat and any file attached to it.

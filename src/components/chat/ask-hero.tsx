@@ -19,6 +19,7 @@ import { useChat } from '@ai-sdk/react';
 import {
   ChatKeyNotice,
   DAILY_LIMIT_NOTICE,
+  attachmentRefusal,
   chatErrorCode,
   isChatLocked,
   useChatStatus,
@@ -48,12 +49,15 @@ import {
   isText,
   nameFinder,
   receiptStateFor,
+  rowFinder,
   toPendingApproval,
   toToolStep,
   toolMeta,
   type AnyPart,
   type ToolStep,
 } from '@/components/chat/tool-parts';
+import { ChangeList } from '@/components/chat/tool-cards';
+import { changeHeading, changeRows } from '@/lib/chat/change-rows';
 
 /** Who answers in the card, and where its questions go. Plain strings, so a server screen can pass it. */
 export type AskPersona = {
@@ -381,7 +385,11 @@ function Thread({
                       key={`appr-${pending.approvalId}`}
                       className="rounded-lg border border-border bg-card p-3 text-sm text-card-foreground"
                     >
-                      <p className="font-medium">{approvalTitle(pending.toolName, pending.input, named)}</p>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Change to approve · {changeHeading(pending.toolName)}
+                      </p>
+                      <p className="mt-1 font-medium">{approvalTitle(pending.toolName, pending.input, named)}</p>
+                      <ChangeList rows={changeRows(pending.toolName, pending.input, named, rowFinder(messages))} />
                       {detail && <p className="mt-1 text-muted-foreground">{detail}</p>}
                       <div className="mt-3 flex gap-2">
                         <button
@@ -430,7 +438,7 @@ function Thread({
               ? `${persona.name} needs a workspace to look at. Create or join one first.`
               : chatErrorCode(error) === 'daily_limit'
                 ? DAILY_LIMIT_NOTICE
-              : `${persona.name} couldn’t respond just now. Please try again.`}
+              : (attachmentRefusal(error) ?? `${persona.name} couldn’t respond just now. Please try again.`)}
         </div>
       )}
     </div>

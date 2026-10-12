@@ -54,6 +54,8 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
 });
 
 const { runKasturi } = await import('@/lib/ai/agents/orchestrator');
+// After this file's mocks and the values they use are in place: the helpers load the tools too.
+const { withKasturi } = await import('./helpers/approvals');
 
 const crm = { client: {} as never, orgId: 'org1', userId: 'user1', canWrite: true };
 const { createSeedReachData } = await import('@/lib/reach/seed');
@@ -63,7 +65,7 @@ const ask = [{ role: 'user' as const, content: 'Add Ali Hassan, ali@example.com,
 describe('Kasturi’s changes require approval', () => {
   it('a change does not run until it is approved', async () => {
     executed.creates = 0;
-    const result = runKasturi(ask, crm, reach);
+    const result = runKasturi(...withKasturi(ask, crm, reach));
     await result.consumeStream();
     expect(executed.creates).toBe(0);
     // The call is surfaced as awaiting approval rather than silently dropped.
@@ -74,7 +76,7 @@ describe('Kasturi’s changes require approval', () => {
   // Replays the history the client sends after the user clicks Approve / Reject:
   // user -> assistant(tool-call + approval-request) -> tool(approval-response).
   const resume = (approved: boolean) =>
-    runKasturi(
+    runKasturi(...withKasturi(
       [
         ...ask,
         {
@@ -93,7 +95,7 @@ describe('Kasturi’s changes require approval', () => {
       ],
       crm,
       reach,
-    );
+    ));
 
   it('approve: the resumed turn adds the contact', async () => {
     executed.creates = 0;

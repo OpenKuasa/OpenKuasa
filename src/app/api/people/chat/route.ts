@@ -9,6 +9,7 @@
  * of them for an owner or admin, only their own for anyone else. An owner or admin also gets the change tools; a linked member gets leave, time-off, claim and overtime tools for themselves. Each change waits for approval.
  */
 
+import { errorCodeOf } from '@/lib/ai/call-log';
 import { chatJson, prepareChat } from '@/lib/ai/chat-request';
 import { receiptFromMessages, type PeopleWrite } from '@/lib/ai/people-tools';
 import { runLekiu } from '@/lib/ai/agents/orchestrator';
@@ -18,6 +19,7 @@ import { hasSupabaseEnv } from '@/lib/auth/viewer';
 import { createSupabasePeopleData, getPeopleData } from '@/lib/people/supabase';
 import type { PeopleData, PeopleViewer } from '@/lib/people/types';
 import { streamErrorName } from '@/lib/people/stream-error';
+import { chatApprovals } from '@/lib/chat/approvals';
 import { getPeopleViewer } from '@/lib/people/viewer';
 
 export const dynamic = 'force-dynamic';
@@ -47,7 +49,7 @@ export async function POST(request: Request) {
       getPeopleViewer(chat.supabase, org),
     ]);
   } catch (error) {
-    console.error('[ask-lekiu] could not load the workspace:', error instanceof Error ? error.message : error);
+    console.error('[ask-lekiu] could not load the workspace:', errorCodeOf(error));
     return chatJson(503, {
       error: 'Lekiu could not load your HR data. Please try again in a moment.',
       code: 'data_unavailable',
@@ -87,7 +89,9 @@ export async function POST(request: Request) {
       userId: chat.userId,
     };
   }
-  const result = runLekiu(chat.messages, { data, viewer, write }, request.signal, chat.apiKey);
+  // An approval is answered from the server's record of the change, never from what the browser sent back.
+  const approvals = await chatApprovals(chat, org?.orgId ?? null);
+  const result = runLekiu(chat.messages, { data, viewer, write }, request.signal, chat.apiKey, approvals);
 
   return result.toUIMessageStreamResponse({
     onError: (error) => {

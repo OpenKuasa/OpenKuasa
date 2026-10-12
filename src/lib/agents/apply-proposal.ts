@@ -1,3 +1,4 @@
+import { errorCodeOf } from '@/lib/ai/call-log';
 import type { ZodType } from 'zod';
 import {
   type CapResult,
@@ -60,9 +61,9 @@ export async function runProposalAction(
   try {
     res = await found.run(ctx, parsed.data);
   } catch (e) {
-    // Log for ops (server-side only; this path holds no API keys). The caller keeps the
+    // Log the code for ops: the error itself can quote the proposal's values. The caller keeps the
     // generic message and never writes the raw error to the user-visible row.
-    console.error('[agent-proposals] apply capability threw', e);
+    console.error('[agent-proposals] apply capability threw', errorCodeOf(e));
     return { ok: false, error: 'That change could not be applied.' };
   }
   return res.ok ? { ok: true, result: res.data } : { ok: false, error: res.error };

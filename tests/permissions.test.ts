@@ -33,3 +33,11 @@ test('agent settings and schedules are owner/admin only; members keep data edits
   expect(can('viewer', 'manage-agents')).toBe(false);
   expect(can('member', 'edit-data')).toBe(true);
 });
+
+test('posting, paying and voiding finance documents is owner/admin only; drafts stay with every writer', () => {
+  expect(can('owner', 'sign-off-finance')).toBe(true);
+  expect(can('admin', 'sign-off-finance')).toBe(true);
+  expect(can('member', 'sign-off-finance')).toBe(false);
+  expect(can('viewer', 'sign-off-finance')).toBe(false);
+  expect(can('member', 'edit-data')).toBe(true);
+});

@@ -9,10 +9,10 @@ import { average } from './series';
 import type {
   ClaimCategory,
   ClaimStatus,
-  DocumentStatus,
   DocumentType,
   Employee,
   LeaveRequest,
+  LetterType,
   LeaveType,
   PeopleViewer,
 } from './types';
@@ -77,16 +77,20 @@ export const CLAIM_CATEGORY_LABEL: Record<ClaimCategory, string> = {
 };
 
 export const DOCUMENT_TYPE_LABEL: Record<DocumentType, string> = {
-  payslip: 'Payslip',
   contract: 'Contract',
-  letter: 'Letter',
   tax: 'Tax form',
   benefits: 'Benefits',
+  identity: 'Identity',
+  medical: 'Medical',
+  certificate: 'Certificate',
+  other: 'Other',
 };
 
-export const DOCUMENT_STATUS_LABEL: Record<DocumentStatus, string> = {
-  signed: 'Signed',
-  pending_signature: 'Pending signature',
-  available: 'Available',
-  expiring: 'Expiring',
+export const LETTER_TYPE_LABEL: Record<LetterType, string> = {
+  offer: 'Offer',
+  confirmation: 'Confirmation',
+  promotion: 'Promotion',
+  warning: 'Warning',
+  contract_renewal: 'Contract renewal',
+  other: 'Other',
 };

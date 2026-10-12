@@ -3,12 +3,16 @@ import {
   type BillForm,
   billFormError,
   billFormFromDetail,
+  billOrderWarnings,
+  ownCountedTotal,
   billPayload,
   defaultDueDate,
   emptyLine,
   lineNumbers,
   newBillForm,
+  ordersForSupplier,
   savedNotPosted,
+  type BillOrderOption,
   withBillDate,
   withDueDate,
   withProduct,
@@ -55,6 +59,7 @@ describe('newBillForm', () => {
       due_date: today,
       dueEdited: false,
       notes: '',
+      purchase_order_id: '',
       lines: [{ key: 'k1', product_id: '', description: '', quantity: '1', uom: '', pack_size: '', unit_price: '', sst_rate: '0' }],
     });
   });
@@ -186,6 +191,7 @@ describe('billPayload', () => {
       supplier_ref: ' INV 88 ',
       bill_date: today,
       due_date: '2026-11-10',
+      purchase_order_id: '',
       notes: '',
       lines: [{ product_id: PRODUCT, description: ' Gloves ', uom: 'box', pack_size: '', quantity: 10, unit_price: 12.5, sst_rate: 6 }],
     });
@@ -201,7 +207,7 @@ describe('billPayload', () => {
   });
   it('never carries the line keys, the dueEdited flag or a workspace', () => {
     const payload = billPayload(filled({ id: BILL }));
-    expect(Object.keys(payload).sort()).toEqual(['bill_date', 'due_date', 'id', 'lines', 'notes', 'supplier_id', 'supplier_ref']);
+    expect(Object.keys(payload).sort()).toEqual(['bill_date', 'due_date', 'id', 'lines', 'notes', 'purchase_order_id', 'supplier_id', 'supplier_ref']);
     expect(Object.keys(payload.lines[0]).sort()).toEqual(['description', 'pack_size', 'product_id', 'quantity', 'sst_rate', 'unit_price', 'uom']);
   });
 });
@@ -220,6 +226,8 @@ describe('billFormFromDetail', () => {
     display_status: 'draft',
     supplier_ref: null,
     notes: 'urgent',
+    purchase_order_id: null,
+    purchase_order_no: null,
     lines: [
       { id: 'line-1', product_id: PRODUCT, description: 'Nitrile Gloves (Box)', quantity: 10, uom: 'box', pack_size: '100 pcs', unit_price: 12.5, sst_rate: 6, amount: 125, sst_amount: 7.5 },
       { id: 'line-2', product_id: null, description: 'Delivery', quantity: 1, uom: null, pack_size: null, unit_price: 0, sst_rate: 0, amount: 0, sst_amount: 0 },
@@ -228,7 +236,7 @@ describe('billFormFromDetail', () => {
 
   it('shows a saved draft as it was saved, and keeps its due date', () => {
     const form = billFormFromDetail(detail);
-    expect(form).toMatchObject({ id: BILL, supplier_id: SUPPLIER, supplier_ref: '', due_date: '2026-10-15', dueEdited: true, notes: 'urgent' });
+    expect(form).toMatchObject({ id: BILL, supplier_id: SUPPLIER, supplier_ref: '', due_date: '2026-10-15', dueEdited: true, notes: 'urgent', purchase_order_id: '' });
     expect(form.lines).toEqual([
       { key: 'line-1', product_id: PRODUCT, description: 'Nitrile Gloves (Box)', quantity: '10', uom: 'box', pack_size: '100 pcs', unit_price: '12.5', sst_rate: '6' },
       { key: 'line-2', product_id: '', description: 'Delivery', quantity: '1', uom: '', pack_size: '', unit_price: '0', sst_rate: '0' },
@@ -258,5 +266,134 @@ describe('savedNotPosted', () => {
     const text = savedNotPosted(BILL_MESSAGES.lines);
     expect(text).toBe(`The bill was saved as a draft, but it was not posted. ${BILL_MESSAGES.lines}`);
     expect(text).not.toContain('could not be saved');
+  });
+});
+
+const PO = '88888888-8888-4888-8888-888888888888';
+const detailFor = (): BillDetail => ({
+  id: BILL,
+  bill_no: null,
+  supplier_id: SUPPLIER,
+  supplier_name: 'Lim Hardware',
+  bill_date: '2026-10-01',
+  due_date: '2026-10-15',
+  total: 125,
+  paid: 0,
+  balance: 125,
+  display_status: 'draft',
+  supplier_ref: null,
+  notes: null,
+  purchase_order_id: null,
+  purchase_order_no: null,
+  lines: [],
+});
+const PO_2 = '77777777-7777-4777-8777-777777777777';
+const PO_3 = '66666666-6666-4666-8666-666666666666';
+const OTHER_SUPPLIER = '55555555-5555-4555-8555-555555555555';
+
+const order = (o: Partial<BillOrderOption> = {}): BillOrderOption => ({
+  id: PO,
+  po_no: 'PO-0003',
+  supplier_id: SUPPLIER,
+  status: 'approved',
+  total: 1200,
+  billed_total: 300,
+  received_total: 1200,
+  ...o,
+});
+
+describe('the purchase order choice', () => {
+  it('is empty on a new bill, and is sent as an empty string so that choosing none unlinks', () => {
+    expect(billPayload(filled()).purchase_order_id).toBe('');
+    expect(saveBillInput.parse(billPayload(filled())).purchase_order_id).toBeNull();
+  });
+  it('is sent as chosen', () => {
+    expect(billPayload(filled({ purchase_order_id: PO })).purchase_order_id).toBe(PO);
+    expect(billFormError(filled({ purchase_order_id: PO }))).toBeNull();
+  });
+  it('shows the order a saved draft is linked to, and none when it has none', () => {
+    const base = { ...detailFor(), purchase_order_id: PO, purchase_order_no: 'PO-0003' };
+    expect(billFormFromDetail(base).purchase_order_id).toBe(PO);
+    expect(billFormFromDetail(detailFor()).purchase_order_id).toBe('');
+  });
+  it('is cleared when a different supplier is chosen, and kept when the same one is', () => {
+    const linked = filled({ purchase_order_id: PO });
+    expect(withSupplier(linked, { id: OTHER_SUPPLIER, payment_terms_days: 30 }).purchase_order_id).toBe('');
+    expect(withSupplier(linked, { id: SUPPLIER, payment_terms_days: 30 }).purchase_order_id).toBe(PO);
+  });
+});
+
+describe('ordersForSupplier', () => {
+  const mine = order();
+  const theirs = order({ id: PO_2, po_no: 'PO-0004', supplier_id: OTHER_SUPPLIER });
+  it('offers only the chosen supplier’s orders, labelled with number, total and billed so far', () => {
+    expect(ordersForSupplier([mine, theirs], SUPPLIER, '')).toEqual([{ id: PO, label: 'PO-0003 · RM 1,200.00 · billed RM 300.00' }]);
+  });
+  it('offers nothing before a supplier is chosen', () => {
+    expect(ordersForSupplier([mine, theirs], '', '')).toEqual([]);
+  });
+  it('still offers the order a draft is linked to when it has since been closed, and not other closed orders', () => {
+    const closed = order({ id: PO_2, po_no: 'PO-0002', status: 'closed', total: 500, billed_total: 500 });
+    const other = order({ id: PO_3, po_no: 'PO-0001', status: 'closed' });
+    expect(ordersForSupplier([mine, closed, other], SUPPLIER, PO_2).map((o) => o.id)).toEqual([PO, PO_2]);
+    expect(ordersForSupplier([mine, closed, other], SUPPLIER, '').map((o) => o.id)).toEqual([PO]);
+  });
+  it('does not offer the current order under another supplier', () => {
+    const closed = order({ id: PO_2, status: 'closed', supplier_id: OTHER_SUPPLIER });
+    expect(ordersForSupplier([mine, closed], SUPPLIER, PO_2).map((o) => o.id)).toEqual([PO]);
+  });
+});
+
+describe('billOrderWarnings', () => {
+  // 10 x 12.50 = RM 125.00
+  const lines = filled().lines;
+  const big = [{ ...emptyLine('k'), description: 'Pallets', quantity: '1', unit_price: '1000' }];
+  it('says nothing without an order', () => {
+    expect(billOrderWarnings(lines, null, 0)).toEqual([]);
+  });
+  it('says nothing when the bill fits inside both what is ordered and what has arrived', () => {
+    expect(billOrderWarnings(lines, order(), 0)).toEqual([]);
+  });
+  it('warns when the bills would pass the order’s total', () => {
+    // 300 already billed + 1000 = 1300 > 1200
+    expect(billOrderWarnings(big, order({ received_total: 5000 }), 0)).toEqual(['This takes the bills for PO-0003 over its total of RM 1,200.00.']);
+  });
+  it('warns when the bills would pass what has arrived', () => {
+    const arrived = order({ received_total: 350 });
+    // 300 + 125 = 425 > 350, but within 1200
+    expect(billOrderWarnings(lines, arrived, 0)).toEqual(['This is more than has arrived on PO-0003 so far (RM 350.00).']);
+  });
+  it('gives both, the total first', () => {
+    const both = order({ received_total: 400 });
+    expect(billOrderWarnings(big, both, 0)).toEqual([
+      'This takes the bills for PO-0003 over its total of RM 1,200.00.',
+      'This is more than has arrived on PO-0003 so far (RM 400.00).',
+    ]);
+  });
+  it('does not count the bill’s own saved total twice when it is the linked draft', () => {
+    // billed_total 300 includes this draft's own 125: others = 175; 175 + 125 = 300, not over 300
+    expect(billOrderWarnings(lines, order({ received_total: 300 }), 125)).toEqual([]);
+    expect(billOrderWarnings(lines, order({ received_total: 300 }), 0)).toHaveLength(1);
+  });
+  it('is not bothered by rounding, and says nothing for a bill of nothing', () => {
+    expect(billOrderWarnings(lines, order({ total: 425, received_total: 425 }), 0)).toEqual([]);
+    expect(billOrderWarnings([emptyLine('k')], order({ billed_total: 5000 }), 0)).toEqual([]);
+  });
+});
+
+describe('ownCountedTotal', () => {
+  const saved = (id: string, purchase_order_id: string | null, total: number) => ({ id, purchase_order_id, total });
+  const rows = [saved('b1', PO, 125), saved('b2', PO_2, 80), saved('b3', null, 50)];
+  it('is nothing for a bill never saved', () => {
+    expect(ownCountedTotal(rows, undefined, PO)).toBe(0);
+    expect(ownCountedTotal(rows, 'not-in-the-list', PO)).toBe(0);
+  });
+  it('is the saved total when the saved bill is linked to the chosen order', () => {
+    expect(ownCountedTotal(rows, 'b1', PO)).toBe(125);
+  });
+  it('is nothing when the saved bill is linked to another order, or to none, or no order is chosen', () => {
+    expect(ownCountedTotal(rows, 'b2', PO)).toBe(0);
+    expect(ownCountedTotal(rows, 'b3', PO)).toBe(0);
+    expect(ownCountedTotal(rows, 'b1', '')).toBe(0);
   });
 });

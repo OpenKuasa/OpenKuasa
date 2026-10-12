@@ -14,6 +14,7 @@ import { prepareChat } from '@/lib/ai/chat-request';
 import { runLekir } from '@/lib/ai/agents/orchestrator';
 import { getCurrentOrg } from '@/lib/auth/current-org';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
+import { chatApprovals } from '@/lib/chat/approvals';
 import { createCvReader } from '@/lib/hire/cv-read';
 import { getHireData } from '@/lib/hire/supabase';
 import { originFromHeaders } from '@/lib/reach/form-submissions';
@@ -41,6 +42,8 @@ export async function POST(request: Request) {
     { data, write, origin: originFromHeaders((name) => request.headers.get(name)), files, cvShelf: [] },
     request.signal,
     chat.apiKey,
+    // An approval is answered from the server's record of the change, never from what the browser sent back.
+    await chatApprovals(chat, org?.orgId ?? null),
   );
 
   return result.toUIMessageStreamResponse({

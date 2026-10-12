@@ -22,7 +22,7 @@ import { isRealDate } from './dates';
 import { PAYROLL_REFUSALS } from './payroll-refusals';
 import type { Claim, OvertimeDayKind } from './types';
 
-import { decideInput, requestIdInput } from './leave';
+import { OWN_REQUEST_REFUSAL, decideInput, requestIdInput } from './leave';
 
 // Defined once, in leave.ts; re-exported so a caller of this file needs one import.
 export { decideInput, requestIdInput };
@@ -32,6 +32,8 @@ export { decideInput, requestIdInput };
 /** Each refusal code the claim and overtime functions raise, and what the person is told. */
 export const PAY_REFUSALS: Record<string, string> = {
   PAY_NOT_ALLOWED: "You can't make that change.",
+  // An admin deciding, or marking as paid, their own claim or overtime; the workspace's owner may.
+  PAY_OWN_REQUEST: OWN_REQUEST_REFUSAL,
   PAY_NOT_FOUND: 'That request was not found.',
   PAY_NOT_PENDING: 'That request has already been decided or cancelled.',
   PAY_NOT_APPROVED: 'Only an approved claim can be marked as paid.',

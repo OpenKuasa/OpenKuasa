@@ -6,6 +6,7 @@
  * one waits for the user's approval before it runs (see `CRM_WRITE_TOOL_NAMES`).
  */
 
+import { errorCodeOf } from '@/lib/ai/call-log';
 import { tool } from 'ai';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
@@ -28,7 +29,10 @@ import {
   MAX_LOST_REASON_LENGTH,
   type CrmDeal,
 } from '@/lib/crm/deals';
+import { buildBillings } from '@/lib/crm/billings';
 import { loadCrmCalendar, parseMonth } from '@/lib/crm/calendar';
+import { listDealInvoiceLinks } from '@/lib/crm/invoice-links';
+import { listInvoices } from '@/lib/finance/invoices';
 import { klDay } from '@/lib/crm/deal-stats';
 import { completeFollowUp, createFollowUp, parseFollowUpForm } from '@/lib/crm/follow-ups';
 import {
@@ -126,7 +130,8 @@ async function attempt<T>(run: () => Promise<T>): Promise<Outcome<T>> {
     return { ok: true, data: await run() };
   } catch (error) {
     if (error instanceof CrmContactFormError) return { ok: false, error: error.message };
-    console.error('[tuah] CRM change failed:', error instanceof Error ? error.message : error);
+    // The code only: a database error's message quotes the values it refused (a contact's details).
+    console.error('[tuah] CRM change failed:', errorCodeOf(error));
     return { ok: false, error: 'That change could not be saved. Please try again.' };
   }
 }
@@ -220,19 +225,27 @@ const dealFields = {
   expectedCloseDate: z.string().optional().describe('YYYY-MM-DD.'),
 };
 
+/**
+ * Gives a workspace its starting pipeline when it has none, as opening the Deals screen does. A chat route calls
+ * this once, for someone who may edit, before the assistant runs: a deal cannot be added without a stage to put
+ * it in. It is a write, so it lives here and not in a lookup tool. Never throws: without a pipeline the assistant
+ * simply finds none.
+ */
+export async function ensureCrmPipeline(client: SupabaseClient, orgId: string): Promise<void> {
+  try {
+    if (needsDefaultPipeline(await listCrmPipelines(client, orgId))) await ensureDefaultPipeline(client, orgId);
+  } catch (error) {
+    console.error('[tuah] could not set up the default pipeline:', errorCodeOf(error));
+  }
+}
+
 /** Builds Tuah's CRM tools for one request. Without write access only the lookups exist. */
 export function createCrmTools(access: CrmAccess) {
   const { client, orgId } = access;
 
-  const pipelines = async () => {
-    let list = await listCrmPipelines(client, orgId);
-    // The Deals screen gives a new workspace its first pipeline; so does asking here.
-    if (access.canWrite && needsDefaultPipeline(list)) {
-      await ensureDefaultPipeline(client, orgId);
-      list = await listCrmPipelines(client, orgId);
-    }
-    return list;
-  };
+  // A lookup only reads. A new workspace's first pipeline is set up before the tools are built
+  // (`ensureCrmPipeline`, called by the chat routes for someone who may edit), never from here.
+  const pipelines = () => listCrmPipelines(client, orgId);
 
   const readContact = async (id: string): Promise<ContactRow> => {
     const { data, error } = await client
@@ -431,6 +444,100 @@ export function createCrmTools(access: CrmAccess) {
               what: item.label,
             })),
           ),
+        };
+      },
+    }),
+
+    getBillingSummary: tool({
+      description:
+        'Billing totals from the workspace’s sales invoices (kept in Bendahara), in RM: billed this month, what is ' +
+        'outstanding and overdue, money received, the collection rate, invoice counts by status and the customers ' +
+        'billed the most. Drafts and void invoices are not counted as billed. Invoices are read-only here.',
+      inputSchema: z.object({}),
+      execute: async () => {
+        const model = buildBillings(await listInvoices({ client, orgId }), new Date());
+        return {
+          month: model.monthTitle,
+          billed_this_month_rm: model.stats.billedThisMonth,
+          invoices_this_month: model.stats.billedThisMonthCount,
+          outstanding_rm: model.stats.outstanding,
+          outstanding_invoices: model.stats.outstandingCount,
+          overdue_rm: model.stats.overdue,
+          overdue_invoices: model.stats.overdueCount,
+          received_rm: model.stats.received,
+          collection_rate_pct: model.stats.collectionRate,
+          invoices_by_status: Object.fromEntries(model.byStatus.map(({ status, count }) => [status, count])),
+          top_customers: model.topCustomers.map((customer) => ({
+            customer: customer.name,
+            billed_rm: customer.billed,
+            outstanding_rm: customer.outstanding,
+          })),
+        };
+      },
+    }),
+
+    listBillingInvoices: tool({
+      description:
+        'Sales invoices (kept in Bendahara), newest first: number, customer, dates (YYYY-MM-DD), total, paid and ' +
+        'balance in RM, status and the deal it is linked to. Filter by status, by a contact (the invoices of the ' +
+        'billing customer that contact is linked to) or by a deal (the invoices linked to it). Read-only: invoices ' +
+        'are created and changed on Bendahara’s Invoices screen.',
+      inputSchema: z.object({
+        status: z.enum(['draft', 'sent', 'overdue', 'paid', 'void']).optional(),
+        contactId: idSchema.optional().describe('Only invoices of this contact’s billing customer.'),
+        dealId: idSchema.optional().describe('Only invoices linked to this deal.'),
+        limit: limitSchema('Max rows to return (default 20, at most 50).'),
+      }),
+      execute: async ({ status, contactId, dealId, limit }) => {
+        let customerId: string | null = null;
+        if (contactId) {
+          const { data, error } = await client
+            .from('crm_contacts')
+            .select('id,finance_customer_id')
+            .eq('org_id', orgId)
+            .eq('id', contactId)
+            .maybeSingle();
+          if (error) throw error;
+          if (!data) return { total_matching: 0, invoices: [], note: 'That contact no longer exists.' };
+          customerId = (data as { finance_customer_id: string | null }).finance_customer_id;
+          if (!customerId) {
+            return {
+              total_matching: 0,
+              invoices: [],
+              note: 'This contact has no billing customer. One is chosen on the contact’s edit form in Kasturi.',
+            };
+          }
+        }
+
+        const [invoices, links, { deals }] = await Promise.all([
+          listInvoices({ client, orgId }),
+          listDealInvoiceLinks(client, orgId),
+          listCrmDeals(client, orgId, 500),
+        ]);
+        const dealOf = new Map(links.map((link) => [link.invoiceId, link.dealId] as const));
+        const titles = new Map(deals.map((deal) => [deal.id, deal.title] as const));
+
+        const matching = invoices
+          .filter((invoice) => (status ? invoice.display_status === status : true))
+          .filter((invoice) => (customerId ? invoice.customer_id === customerId : true))
+          .filter((invoice) => (dealId ? dealOf.get(invoice.id) === dealId : true));
+        return {
+          total_matching: matching.length,
+          invoices: matching.slice(0, rowLimit(limit, 20)).map((invoice) => {
+            const linked = dealOf.get(invoice.id);
+            return {
+              number: invoice.invoice_no ?? 'Draft',
+              customer: invoice.customer_name,
+              invoice_date: invoice.invoice_date,
+              due_date: invoice.due_date,
+              total_rm: invoice.total,
+              paid_rm: invoice.paid,
+              // Nothing is owed on a void invoice, whatever it totalled.
+              balance_rm: invoice.display_status === 'void' ? 0 : invoice.balance,
+              status: invoice.display_status,
+              deal: linked ? (titles.get(linked) ?? null) : null,
+            };
+          }),
         };
       },
     }),

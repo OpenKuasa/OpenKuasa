@@ -297,6 +297,23 @@ describe('over balance, yours and cancel on the leave queue', () => {
     expect(unlinked.rows[0].yours).toBe(false);
   });
 
+  it("lets an admin decide anyone's request but their own, and an owner decide their own too", async () => {
+    const rows = withRows({ listLeaveRequests: [leave({ id: 'a' }), leave({ id: 'b', employee_id: 'e2' })] });
+    const admin: PeopleViewer = { employeeId: 'e1', isHr: true, isDemo: false };
+    const asAdmin = (await leaveApprovals(rows, admin, NOW))!;
+    expect(asAdmin.rows.find((r) => r.id === 'a')!.decidable).toBe(false);
+    expect(asAdmin.rows.find((r) => r.id === 'b')!.decidable).toBe(true);
+    // Withdrawing their own request is still theirs to do.
+    expect(asAdmin.rows.find((r) => r.id === 'a')!.cancellable).toBe(true);
+
+    const asOwner = (await leaveApprovals(rows, { ...admin, isOwner: true }, NOW))!;
+    expect(asOwner.rows.map((r) => r.decidable)).toEqual([true, true]);
+
+    // Not linked to an employee record: nothing is theirs, so everything can be decided.
+    const unlinked = (await leaveApprovals(rows, HR, NOW))!;
+    expect(unlinked.rows.map((r) => r.decidable)).toEqual([true, true]);
+  });
+
   it('allows cancel on everything but a cancelled request, on leave and time-off', async () => {
     const l = (await leaveApprovals(
       withRows({

@@ -11,6 +11,8 @@ import { PIPELINE_CARD_DETAIL, pipelineCardTitle, poolCardDetail, poolCardTitle 
 import { interviewCardDetail, interviewCardTitle } from '@/lib/hire/interviews';
 import { isRealDate, monthLabel, weekdayName } from '@/lib/people/dates';
 import { blank, hhmm } from '@/lib/people/loose-input';
+import { unfilledInLetter } from '@/lib/people/letter-placeholders';
+import { LETTER_TYPE_LABEL } from '@/lib/people/own';
 import { toPeriod, toScore } from '@/lib/people/performance-forms';
 import { STATUTORY_FIELDS } from '@/lib/people/statutory-fields';
 import { centsToRinggit, monthLabel as payrollMonthLabel, ringgitToCents, toStatutoryInput } from '@/lib/people/payroll-forms';
@@ -30,6 +32,7 @@ const APPOINTMENT_STATUS_LABELS: Record<string, string> = {
  */
 function labelOf(row: Record<string, unknown>, kind?: ItemKind): string | null {
   if (kind === 'goal' || kind === 'review' || kind === 'training' || kind === 'announcement') return performanceFact(row, kind);
+  if (kind === 'letter' || kind === 'document') return letterDocumentFact(row, kind);
   if (kind === 'application' || kind === 'interview') {
     // A listApplications row has `candidate` and `job`, not `name`. So has an interview's row, and the result of an
     // interview change: the card's own line gives the time, so an interview is named by the person and the job alone.
@@ -76,6 +79,14 @@ function labelOf(row: Record<string, unknown>, kind?: ItemKind): string | null {
     const type = typeof row.leave_type === 'string' ? LEAVE_WORDS[row.leave_type] : undefined;
     return `${who}'s ${type ?? 'leave'}, ${when}`;
   }
+  // Finance documents are named by their number, falling back to the counterparty
+  // while still a draft (no number yet). Payments and refunds key on a transaction
+  // id, not `id`, so they are not named here.
+  if (kind === 'invoice') return text(row.invoice_no) ?? text(row.customer_name);
+  if (kind === 'quotation') return text(row.quotation_no) ?? text(row.customer_name);
+  if (kind === 'bill') return text(row.bill_no) ?? text(row.supplier_name);
+  if (kind === 'credit-note') return text(row.credit_note_no) ?? text(row.customer_name);
+  if (kind === 'finance-contact' || kind === 'item') return text(row.name);
   return typeof row.name === 'string' && row.name.trim() ? row.name.trim() : null;
 }
 
@@ -130,7 +141,18 @@ export type ItemKind =
   | 'goal'
   | 'review'
   | 'training'
-  | 'announcement';
+  | 'announcement'
+  | 'letter'
+  | 'document'
+  | 'template'
+  | 'invoice'
+  | 'quotation'
+  | 'bill'
+  | 'credit-note'
+  | 'refund'
+  | 'payment'
+  | 'finance-contact'
+  | 'item';
 const KIND_OF_TOOL: Record<string, ItemKind> = {
   getCampaigns: 'campaign',
   createCampaign: 'campaign',
@@ -234,10 +256,71 @@ const KIND_OF_TOOL: Record<string, ItemKind> = {
   publishAnnouncement: 'announcement',
   unpublishAnnouncement: 'announcement',
   removeAnnouncement: 'announcement',
+  // Letters and documents: a lookup row and a change's result carry the same fields. `requestAcknowledgement` is a
+  // letter or a document by what it returned: see `kindOfResult`.
+  listLetters: 'letter',
+  saveLetter: 'letter',
+  startLetterFromTemplate: 'letter',
+  issueLetter: 'letter',
+  listDocuments: 'document',
+  listLetterTemplates: 'template',
   listDepartments: 'department',
   createDepartment: 'department',
   updateDepartment: 'department',
   deleteDepartment: 'department',
+  // Finance (Bendahara)
+  listInvoices: 'invoice',
+  getInvoice: 'invoice',
+  saveInvoice: 'invoice',
+  postInvoice: 'invoice',
+  voidInvoice: 'invoice',
+  deleteInvoice: 'invoice',
+  setEInvoice: 'invoice',
+  listQuotations: 'quotation',
+  saveQuotation: 'quotation',
+  sendQuotation: 'quotation',
+  acceptQuotation: 'quotation',
+  declineQuotation: 'quotation',
+  convertQuotation: 'quotation',
+  deleteQuotation: 'quotation',
+  listBills: 'bill',
+  getBill: 'bill',
+  saveBill: 'bill',
+  postBill: 'bill',
+  voidBill: 'bill',
+  deleteBill: 'bill',
+  listCreditNotes: 'credit-note',
+  saveCreditNote: 'credit-note',
+  issueCreditNote: 'credit-note',
+  voidCreditNote: 'credit-note',
+  deleteCreditNote: 'credit-note',
+  listRefunds: 'refund',
+  listPaymentsIn: 'payment',
+  listPaymentsOut: 'payment',
+  listFinanceContacts: 'finance-contact',
+  createFinanceContact: 'finance-contact',
+  updateFinanceContact: 'finance-contact',
+  setFinanceContactActive: 'finance-contact',
+  deleteFinanceContact: 'finance-contact',
+  listFinanceItems: 'item',
+  createFinanceItem: 'item',
+  updateFinanceItem: 'item',
+  setFinanceItemActive: 'item',
+  deleteFinanceItem: 'item',
+};
+
+/** The kind of thing a tool's result, or a change tool's `id`, is about. Undefined for a tool that names none. */
+export function kindOfTool(toolName: string): ItemKind | undefined {
+  if (Object.hasOwn(KIND_OF_TOOL, toolName)) return KIND_OF_TOOL[toolName];
+  return Object.hasOwn(SUBJECT_ONLY, toolName) ? SUBJECT_ONLY[toolName] : undefined;
+}
+
+// Tools whose `id` is of a known kind but whose result names nothing (the row is gone).
+const SUBJECT_ONLY: Record<string, ItemKind> = {
+  deleteCampaign: 'campaign',
+  deleteCreative: 'creative',
+  deleteForm: 'form',
+  deleteLead: 'lead',
 };
 
 /** Names by `kind:id`, so a later turn can still say what an id refers to. */
@@ -297,7 +380,21 @@ const EMPLOYEE_SOURCES = new Set([
   'enrolInTraining',
   'withdrawFromTraining',
   'setTrainingCompleted',
+  'listDocuments',
+  'listLetters',
+  'saveLetter',
+  'startLetterFromTemplate',
+  'issueLetter',
+  'requestAcknowledgement',
 ]);
+
+/** What kind of thing a tool's result is about: by its tool, except `requestAcknowledgement`, which says which it acted on. */
+function kindOfResult(result: ToolResult): ItemKind | undefined {
+  if (result.tool !== 'requestAcknowledgement') return KIND_OF_TOOL[result.tool];
+  const output = asRecord(result.output);
+  const item = asRecord(output?.data)?.item ?? output?.item;
+  return item === 'letter' ? 'letter' : item === 'document' ? 'document' : undefined;
+}
 
 /** Calls `each` for every `employee_id` with a name beside it, anywhere in a result (a course's people sit four deep). */
 function eachNamedEmployee(value: unknown, each: (id: string, name: string) => void, depth = 0): void {
@@ -315,7 +412,7 @@ function eachNamedEmployee(value: unknown, each: (id: string, name: string) => v
 /** Every named row in a set of tool results, by the kind of thing its tool is about. */
 export function collectNames(results: ToolResult[], into: KnownNames = {}): KnownNames {
   for (const result of results) {
-    const kind = KIND_OF_TOOL[result.tool];
+    const kind = kindOfResult(result);
     if (kind === 'candidate') {
       // A candidate's name is kept with a mark of which side it came from, or not at all: a name whose mark
       // did not fit under the cap would read as one from before the marks, which counts as on file.
@@ -379,7 +476,7 @@ export function nameIn(results: ToolResult[]): NameFinder {
       return fact ? JSON.stringify(fact) : null;
     }
     for (let r = results.length - 1; r >= 0; r -= 1) {
-      if (kind && KIND_OF_TOOL[results[r].tool] !== kind) continue;
+      if (kind && kindOfResult(results[r]) !== kind) continue;
       const found = nameOf(results[r].output, id, kind);
       if (found) return found;
     }
@@ -393,6 +490,44 @@ export function nameIn(results: ToolResult[]): NameFinder {
         });
         if (hit.name) return hit.name;
       }
+    }
+    return null;
+  };
+}
+
+/** Looks up a row by its id, as a lookup or an earlier change last returned it. */
+export type RowFinder = (id: unknown, kind?: ItemKind) => Record<string, unknown> | null;
+
+function rowOf(value: unknown, id: string, depth = 0): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || depth > 3) return null;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = rowOf(item, id, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+  const row = value as Record<string, unknown>;
+  if (row.id === id) return row;
+  for (const inner of Object.values(row)) {
+    const found = rowOf(inner, id, depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * Finds a row by its id among tool results, newest first: the values a card
+ * shows as what is there now. With a `kind`, only results about that kind of
+ * thing count, as for `nameIn`.
+ */
+export function rowIn(results: ToolResult[]): RowFinder {
+  return (id, kind) => {
+    if (typeof id !== 'string' || !id) return null;
+    for (let r = results.length - 1; r >= 0; r -= 1) {
+      if (kind && KIND_OF_TOOL[results[r].tool] !== kind) continue;
+      const found = rowOf(results[r].output, id);
+      if (found) return found;
     }
     return null;
   };
@@ -1120,6 +1255,181 @@ const PERFORMANCE_TOOLS = new Set([
   'unpublishAnnouncement',
 ]);
 
+// ---- Letters and acknowledgement requests ------------------------------------------------------
+//
+// As for the performance tools: a lookup row and a change's result carry the same fields, `nameIn` (newest result
+// first) makes the newest of the two what a later card believes, and a card states exactly what will be saved, in
+// full. A letter's whole body is shown every time. Anything the conversation suggests about the row's state is a
+// hedged sentence in the detail, never a change to the question.
+
+const UNLISTED_LETTER = 'a letter that was not in the list above';
+const UNLISTED_DOCUMENT = 'a document that was not in the list above';
+const UNLISTED_TEMPLATE = 'a template that was not in the list above';
+
+type LetterFact = {
+  employee: string | null;
+  employee_id: string | null;
+  letter_type: string | null;
+  title: string;
+  body: string;
+  status: 'draft' | 'issued' | null;
+  ack_requested: boolean | null;
+};
+type DocumentFact = { employee: string | null; employee_id: string | null; title: string; uploaded_by: 'HR' | 'the employee' | null; ack_requested: boolean | null };
+
+/** What the conversation knows about one letter or document, as JSON text, from a lookup row or a change's result. */
+function letterDocumentFact(row: Record<string, unknown>, kind: 'letter' | 'document'): string | null {
+  const title = text(row.title);
+  if (!title) return null;
+  const ack = typeof row.ack_requested === 'boolean' ? row.ack_requested : null;
+  if (kind === 'letter') {
+    // The body is kept exactly as it came: a card shows the whole letter.
+    if (typeof row.body !== 'string') return null;
+    const fact: LetterFact = {
+      employee: text(row.employee),
+      employee_id: text(row.employee_id),
+      letter_type: typeof row.letter_type === 'string' && Object.hasOwn(LETTER_TYPE_LABEL, row.letter_type) ? row.letter_type : null,
+      title,
+      body: row.body,
+      status: row.status === 'draft' || row.status === 'issued' ? row.status : null,
+      ack_requested: ack,
+    };
+    return JSON.stringify(fact);
+  }
+  const fact: DocumentFact = {
+    employee: text(row.employee),
+    employee_id: text(row.employee_id),
+    title,
+    uploaded_by: row.uploaded_by === 'HR' || row.uploaded_by === 'the employee' ? row.uploaded_by : null,
+    ack_requested: ack,
+  };
+  return JSON.stringify(fact);
+}
+
+const letterTypeWords = (type: unknown): string =>
+  typeof type === 'string' && Object.hasOwn(LETTER_TYPE_LABEL, type)
+    ? LETTER_TYPE_LABEL[type as keyof typeof LETTER_TYPE_LABEL]
+    : 'a type that could not be read';
+
+const letterBodyWords = (body: unknown): string => (typeof body === 'string' && body.trim() ? `“${body}”` : 'no text yet');
+
+/** "{a}", "{a} and {b}" or "{a}, {b} and {c}". */
+function placeholderList(names: string[]): string {
+  const braced = names.map((name) => `{${name}}`);
+  return braced.length <= 1 ? braced.join('') : `${braced.slice(0, -1).join(', ')} and ${braced[braced.length - 1]}`;
+}
+
+/** The question on a card for one of the letter and acknowledgement tools. */
+function letterTitle(toolName: string, i: Record<string, unknown>, find: NameFinder): string {
+  switch (toolName) {
+    case 'saveLetter': {
+      const who = find(i.employee_id, 'employee') ?? 'this employee';
+      const letterId = blank(i.letter_id);
+      const ask =
+        i.ack_requested === true
+          ? ', asking them to acknowledge it'
+          : letterId === null
+            ? ''
+            : i.ack_requested === false
+              ? ', not asking them to acknowledge it'
+              : ', leaving the acknowledgement request as it is';
+      const what = `type ${letterTypeWords(i.letter_type)}, titled “${text(i.title) ?? ''}”: ${letterBodyWords(i.body)}${ask}`;
+      if (letterId === null) return `Save a draft letter for ${who}, ${what}?`;
+      const { fact } = factOf<LetterFact>(find, letterId, 'letter');
+      return `Change ${fact ? `the letter “${fact.title}”` : UNLISTED_LETTER} for ${who} to ${what}?`;
+    }
+    case 'startLetterFromTemplate': {
+      const who = find(i.employee_id, 'employee') ?? 'this employee';
+      const template = find(i.template_id, 'template');
+      return `Start a draft letter for ${who} from ${template ? `the template “${template}”` : UNLISTED_TEMPLATE}?`;
+    }
+    case 'issueLetter': {
+      const { fact } = factOf<LetterFact>(find, i.letter_id, 'letter');
+      if (!fact) return `Issue ${UNLISTED_LETTER}? Nothing in this chat shows its text, so it cannot be shown here.`;
+      return `Issue the letter to ${fact.employee ?? find(fact.employee_id, 'employee') ?? 'this employee'}, type ${letterTypeWords(fact.letter_type)}, titled “${fact.title}”: ${letterBodyWords(fact.body)}?`;
+    }
+    case 'requestAcknowledgement': {
+      const withdraws = i.requested === false;
+      const documentId = blank(i.document_id);
+      const letterId = blank(i.letter_id);
+      if ((documentId === null) === (letterId === null)) return 'Approve this change?';
+      const isLetter = letterId !== null;
+      const { fact } = isLetter ? factOf<LetterFact>(find, letterId, 'letter') : factOf<DocumentFact>(find, documentId, 'document');
+      if (!fact) {
+        const unlisted = isLetter ? UNLISTED_LETTER : UNLISTED_DOCUMENT;
+        return withdraws ? `Withdraw the acknowledgement request on ${unlisted}?` : `Ask for an acknowledgement of ${unlisted}?`;
+      }
+      const who = fact.employee ?? find(fact.employee_id, 'employee') ?? 'this employee';
+      const item = `${isLetter ? 'the letter' : 'the document'} “${fact.title}”`;
+      return withdraws ? `Withdraw the request for ${who} to acknowledge ${item}?` : `Ask ${who} to acknowledge ${item}?`;
+    }
+    default:
+      return 'Approve this change?';
+  }
+}
+
+/** The second line of a card for one of these tools: the fixed sentence, then what the conversation suggests. */
+function letterDetail(toolName: string, i: Record<string, unknown>, find?: NameFinder): string | null {
+  const parts: (string | null)[] = [];
+  switch (toolName) {
+    case 'saveLetter': {
+      const letterId = blank(i.letter_id);
+      const fact = find && letterId !== null ? factOf<LetterFact>(find, letterId, 'letter').fact : null;
+      if (fact?.status === 'issued') {
+        parts.push('This letter was issued when last checked, so this is likely to be refused. It is pulled back to a draft on the Letters screen first.');
+      } else {
+        parts.push('A draft: the employee cannot see it yet.');
+      }
+      break;
+    }
+    case 'startLetterFromTemplate':
+      parts.push(
+        'A draft: the employee cannot see it yet. The template\'s placeholders are filled in from their record, and any that cannot be filled are left in the text.',
+      );
+      break;
+    case 'issueLetter': {
+      parts.push('The employee will be able to see it.');
+      const fact = find ? factOf<LetterFact>(find, i.letter_id, 'letter').fact : null;
+      if (fact?.ack_requested === true) parts.push('They will be asked to acknowledge it.');
+      // Worked out from the title and the body the conversation holds, by the one rule the database mirrors.
+      const left = fact ? unfilledInLetter(fact.title, fact.body) : [];
+      if (fact && !fact.body.trim()) parts.push('It has no text yet, so this is likely to be refused.');
+      if (left.length > 0) parts.push(`It still has ${placeholderList(left)} in it, so this is likely to be refused until they are replaced.`);
+      if (fact?.status === 'issued') parts.push('This letter was issued when last checked, so this may be refused.');
+      if (fact) parts.push('This is the text as last shown in this chat; the letter is issued as it is saved now.');
+      break;
+    }
+    case 'requestAcknowledgement': {
+      const withdraws = i.requested === false;
+      const letterId = blank(i.letter_id);
+      if (letterId !== null) {
+        const fact = find ? factOf<LetterFact>(find, letterId, 'letter').fact : null;
+        if (fact?.status === 'issued') {
+          parts.push('This letter was issued when last checked, so this will be refused. It is pulled back to a draft on the Letters screen first.');
+        } else {
+          parts.push(withdraws ? 'A draft: the employee will not be asked when it is issued.' : 'A draft: the employee will be asked when it is issued.');
+        }
+        break;
+      }
+      parts.push(
+        withdraws
+          ? 'Any acknowledgement already recorded is cleared.'
+          : 'They can mark it as read on their My Documents page. This records that they have read it; it is not a signature.',
+      );
+      const fact = find ? factOf<DocumentFact>(find, blank(i.document_id), 'document').fact : null;
+      if (fact?.uploaded_by === 'the employee') {
+        parts.push('The employee uploaded this document themselves, so this is likely to be refused.');
+      }
+      break;
+    }
+    default:
+      break;
+  }
+  return parts.filter(Boolean).join(' ') || null;
+}
+
+const LETTER_TOOLS = new Set(['saveLetter', 'startLetterFromTemplate', 'issueLetter', 'requestAcknowledgement']);
+
 const UNLISTED_APPLICATION = 'an application that was not in the list above';
 const UNLISTED_CANDIDATE = 'a candidate that was not in the list above';
 const UNLISTED_INTERVIEW = 'an interview that was not in the list above';
@@ -1525,6 +1835,11 @@ export function approvalTitle(
     case 'publishAnnouncement':
     case 'unpublishAnnouncement':
       return performanceTitle(toolName, i, find);
+    case 'saveLetter':
+    case 'startLetterFromTemplate':
+    case 'issueLetter':
+    case 'requestAcknowledgement':
+      return letterTitle(toolName, i, find);
     case 'runPayroll':
     case 'recalculatePayroll':
     case 'savePayslipLine':
@@ -1549,6 +1864,47 @@ export function approvalTitle(
       const changes = describeFormChange(i);
       return changes.length === 1 ? `${changes[0]} on applications?` : 'Change what the application form asks for?';
     }
+    // Finance (Bendahara)
+    case 'saveInvoice': return i.id ? `Save changes to ${the('invoice', 'invoice')}?` : 'Create a draft invoice?';
+    case 'postInvoice': return `Post ${the('invoice', 'invoice')}?`;
+    case 'voidInvoice': return `Void ${the('invoice', 'invoice')}?`;
+    case 'deleteInvoice': return `Delete ${the('invoice', 'invoice')}?`;
+    case 'setEInvoice': return `Record the e-Invois status on ${the('invoice', 'invoice')}?`;
+    case 'saveQuotation': return i.id ? `Save changes to ${the('quotation', 'quotation')}?` : 'Create a draft quotation?';
+    case 'sendQuotation': return `Mark ${the('quotation', 'quotation')} as sent?`;
+    case 'acceptQuotation': return `Mark ${the('quotation', 'quotation')} as accepted?`;
+    case 'declineQuotation': return `Mark ${the('quotation', 'quotation')} as declined?`;
+    case 'convertQuotation': return `Convert ${the('quotation', 'quotation')} into a draft invoice?`;
+    case 'deleteQuotation': return `Delete ${the('quotation', 'quotation')}?`;
+    case 'saveBill': return i.id ? `Save changes to ${the('supplier bill', 'bill')}?` : 'Create a draft supplier bill?';
+    case 'postBill': return `Post ${the('supplier bill', 'bill')}?`;
+    case 'voidBill': return `Void ${the('supplier bill', 'bill')}?`;
+    case 'deleteBill': return `Delete ${the('supplier bill', 'bill')}?`;
+    case 'saveCreditNote': return i.id ? `Save changes to ${the('credit note', 'credit-note')}?` : 'Create a draft credit note?';
+    case 'issueCreditNote': return `Issue ${the('credit note', 'credit-note')}?`;
+    case 'voidCreditNote': return `Void ${the('credit note', 'credit-note')}?`;
+    case 'deleteCreditNote': return `Delete ${the('credit note', 'credit-note')}?`;
+    case 'recordRefund': return 'Record a refund to a customer?';
+    case 'markRefundPaid': return 'Mark this refund as paid?';
+    case 'voidRefund': return 'Void this refund?';
+    case 'deleteRefund': return 'Delete this refund?';
+    case 'recordPaymentIn': return 'Record a payment received from a customer?';
+    case 'recordPaymentOut': return 'Record a payment made to a supplier?';
+    case 'markPaymentPaid': return 'Mark this payment as paid?';
+    case 'voidPayment':
+    case 'voidPaymentIn': return 'Void this payment?';
+    case 'createFinanceContact': return `Add finance contact “${text(i.name) ?? ''}”?`;
+    case 'updateFinanceContact': return `Save changes to ${the('finance contact', 'finance-contact')}?`;
+    case 'setFinanceContactActive':
+      return i.active === false
+        ? `Deactivate ${the('finance contact', 'finance-contact')}?`
+        : `Reactivate ${the('finance contact', 'finance-contact')}?`;
+    case 'deleteFinanceContact': return `Delete ${the('finance contact', 'finance-contact')}?`;
+    case 'createFinanceItem': return `Add item “${text(i.name) ?? ''}”?`;
+    case 'updateFinanceItem': return `Save changes to ${the('item', 'item')}?`;
+    case 'setFinanceItemActive':
+      return i.active === false ? `Deactivate ${the('item', 'item')}?` : `Reactivate ${the('item', 'item')}?`;
+    case 'deleteFinanceItem': return `Delete ${the('item', 'item')}?`;
     default: return 'Approve this change?';
   }
 }
@@ -1735,7 +2091,7 @@ export function approvalDetail(
 ): string | null {
   const i = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
   if (toolName === 'deleteEmployee') {
-    return 'Their leave, claims, draft payslips and every other HR record are deleted too. This cannot be undone. Someone with a paid payslip cannot be deleted: make them inactive instead.';
+    return 'Their leave, claims, draft payslips and every other HR record are deleted too, including their documents, the files attached to them and their letters. This cannot be undone. Someone with a paid payslip cannot be deleted: make them inactive instead.';
   }
   if (toolName === 'updateEmployee') {
     const words = employeeFieldWords(i, true);
@@ -1812,6 +2168,7 @@ export function approvalDetail(
     return [payrollDetail(toolName, i), caveat].filter(Boolean).join(' ') || null;
   }
   if (PERFORMANCE_TOOLS.has(toolName)) return performanceDetail(toolName, i, named);
+  if (LETTER_TOOLS.has(toolName)) return letterDetail(toolName, i, named);
   if (toolName === 'removeHoliday' || (toolName === 'saveHoliday' && blank(i.id) !== null)) {
     return 'Leave and overtime already recorded are not changed.';
   }
@@ -1874,16 +2231,58 @@ export function approvalDetail(
     const basis = typeof i.basis === 'string' ? i.basis.replace(/\s+/g, ' ').trim() : '';
     return basis ? `Why: ${basis}` : null;
   }
-  if (toolName === 'deleteContact') return 'Their deals are deleted too. This cannot be undone.';
+  // What goes with the row, where the database's own rules say so (see the CRM, forms and ads migrations).
+  if (toolName === 'deleteContact') {
+    return 'Their deals are deleted too, with the notes, activities and files kept on them. This cannot be undone.';
+  }
+  if (toolName === 'deleteDeal') return 'Its notes, activities and files are deleted too. This cannot be undone.';
+  if (toolName === 'deleteForm') return 'Every submission it has collected is deleted too. This cannot be undone.';
+  if (toolName === 'deleteCampaign') {
+    return 'Its creatives are kept, no longer linked to a campaign. This cannot be undone.';
+  }
+  if (toolName === 'deleteJob') {
+    return 'A job that has applications cannot be deleted: close it instead. This cannot be undone.';
+  }
+  if (toolName === 'recordPaymentIn' || toolName === 'recordPaymentOut') {
+    const allocations = Array.isArray(i.allocations) ? (i.allocations as { amount?: unknown }[]) : [];
+    const total = allocations.reduce((n, a) => n + (typeof a?.amount === 'number' ? a.amount : 0), 0);
+    const noun = toolName === 'recordPaymentIn' ? 'invoice' : 'bill';
+    const ref = text(i.reference);
+    const parts = [
+      total > 0 ? `Amount: ${ringgitFixed(total)}` : null,
+      allocations.length > 0 ? `${allocations.length} ${noun}${allocations.length === 1 ? '' : 's'}` : null,
+      ref && `Reference: “${ref}”`,
+    ].filter(Boolean);
+    return parts.length > 0 ? parts.join(' · ') : null;
+  }
+  if (toolName === 'recordRefund') {
+    const amount = typeof i.amount === 'number' ? ringgitFixed(i.amount) : null;
+    const ref = text(i.reference);
+    const parts = [amount && `Amount: ${amount}`, ref && `Reference: “${ref}”`].filter(Boolean);
+    return parts.length > 0 ? parts.join(' · ') : null;
+  }
+  if (toolName === 'markPaymentPaid' || toolName === 'markRefundPaid') {
+    const paid = dateText(i.paid_on);
+    return paid ? `Paid on ${paid}` : null;
+  }
+  if (toolName === 'postInvoice') return 'Posting gives the invoice a number and locks it; record its e-Invois status afterwards for LHDN.';
+  if (toolName === 'postBill') return 'Posting locks the bill so it can no longer be edited.';
+  if (toolName === 'setEInvoice') return 'This records the e-Invois (MyInvois) status submitted to LHDN.';
+  if (toolName === 'voidInvoice' || toolName === 'voidBill' || toolName === 'voidCreditNote') {
+    return 'Voiding keeps the document for the record but cancels its effect.';
+  }
   if (
-    toolName === 'deleteCampaign' ||
     toolName === 'deleteCreative' ||
-    toolName === 'deleteForm' ||
-    toolName === 'deleteDeal' ||
     toolName === 'deleteLead' ||
     toolName === 'deleteAppointment' ||
-    toolName === 'deleteJob' ||
-    toolName === 'deleteDepartment'
+    toolName === 'deleteDepartment' ||
+    toolName === 'deleteInvoice' ||
+    toolName === 'deleteQuotation' ||
+    toolName === 'deleteCreditNote' ||
+    toolName === 'deleteRefund' ||
+    toolName === 'deleteBill' ||
+    toolName === 'deleteFinanceContact' ||
+    toolName === 'deleteFinanceItem'
   ) {
     return 'This cannot be undone.';
   }

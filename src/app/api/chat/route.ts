@@ -14,13 +14,15 @@
  */
 
 import { readUIMessageStream, type UIMessage } from 'ai';
-import { modelErrorCode } from '@/lib/ai/call-log';
+import { errorCodeOf, modelErrorCode } from '@/lib/ai/call-log';
 import { prepareChat } from '@/lib/ai/chat-request';
+import { ensureCrmPipeline } from '@/lib/ai/crm-tools';
 import { runTuah, type HireAccess, type PeopleAccess } from '@/lib/ai/agents/orchestrator';
 import { receiptFromMessages, type PeopleWrite } from '@/lib/ai/people-tools';
 import { getCurrentOrg } from '@/lib/auth/current-org';
 import { can } from '@/lib/auth/permissions';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
+import { chatApprovals, recordedProposals } from '@/lib/chat/approvals';
 import { answersWithTeam, namesIn, proposalsIn, transcriptOf } from '@/lib/chat/delegation';
 import { touchedPeople, withoutPeopleTurns } from '@/lib/chat/hr-privacy';
 import { saveAnswer, saveQuestion } from '@/lib/chat/store';
@@ -79,6 +81,9 @@ export async function POST(request: Request) {
       }
     : null;
 
+  // A new workspace gets its starting pipeline here, as on the Deals screen: the lookups themselves never write.
+  if (crm?.canWrite) await ensureCrmPipeline(supabase, crm.orgId);
+
   // HR is workspace-only, like the CRM: no workspace, no HR this turn (never the
   // sample data, and never a crash — a failed viewer load just drops HR).
   // Rows are the caller's own session's, so the database decides who sees what;
@@ -100,20 +105,27 @@ export async function POST(request: Request) {
       }
       people = { data, viewer, write };
     } catch (error) {
-      console.error('[tuah] HR unavailable this turn:', error instanceof Error ? error.message : error);
+      console.error('[tuah] HR unavailable this turn:', errorCodeOf(error));
       people = null;
     }
   }
 
-  // Prepared changes so far, by id: both the team context and the HR-privacy
-  // check need them (the latter to spot an applyChange on an HR proposal).
-  const conversationProposals = proposalsIn(chat.uiMessages);
+  // An approval is answered from the server's record of the change, never from what the browser sent back.
+  const approvals = await chatApprovals(chat, org?.orgId ?? null);
+  // Prepared changes so far, by id, as the server recorded them: what the team gates on and applies.
+  const recorded = withTeam ? await recordedProposals(approvals.store, chat.uiMessages) : new Map();
+  // For the HR-privacy check only (spotting an applyChange on an HR proposal), what the conversation itself says
+  // is kept as well: a change prepared before records were kept, or whose record has since been cleared, must
+  // still mark its turn as HR. Where the server has a record, the record wins. Read when needed, so changes
+  // prepared during this request (added to `recorded`) count too.
+  const described = proposalsIn(chat.uiMessages);
+  const conversationProposals = () => new Map([...described, ...recorded]);
   const team = withTeam
     ? {
         // HR turns are kept out of the shared transcript: an HR answer must not
         // reach the other specialists' models (see hr-privacy).
-        transcript: transcriptOf(withoutPeopleTurns(chat.uiMessages.slice(-8), conversationProposals)),
-        proposals: conversationProposals,
+        transcript: transcriptOf(withoutPeopleTurns(chat.uiMessages.slice(-8), conversationProposals())),
+        proposals: recorded,
         names: namesIn(chat.uiMessages),
       }
     : null;
@@ -131,6 +143,7 @@ export async function POST(request: Request) {
     team,
     hire,
     people,
+    approvals,
   );
   void result.consumeStream();
 
@@ -153,7 +166,7 @@ export async function POST(request: Request) {
       // saves nothing, and Tuah matches that for any turn that touched HR data.
       // The check runs on the finished answer, so the question is saved only now
       // (after the answer), and an HR turn leaves no trace of question or answer.
-      if (touchedPeople(answer.parts, conversationProposals)) return;
+      if (touchedPeople(answer.parts, conversationProposals())) return;
       const questionSaved =
         lastMessage.role === 'user'
           ? await saveQuestion(supabase, chat.userId, threadId, lastMessage.parts)
@@ -161,10 +174,7 @@ export async function POST(request: Request) {
       if (!questionSaved) return;
       await saveAnswer(supabase, threadId, answer.parts);
     })().catch((error) => {
-      console.error(
-        '[tuah] answer not saved:',
-        error instanceof Error ? error.message : error,
-      );
+      console.error('[tuah] answer not saved:', errorCodeOf(error));
     });
   }
 

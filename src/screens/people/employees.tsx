@@ -6,6 +6,7 @@ import { EmployeesTable } from '@/components/people/employees-table';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
 import { todayInMalaysia } from '@/lib/people/dates';
+import { employeeDocumentRows, showsOwnerDocumentControls } from '@/lib/people/documents-screens';
 import { buildEmployeesModel } from '@/lib/people/employees';
 import { type GoalLike, goalsByEmployee } from '@/lib/people/goals-training';
 import { type WorkspaceMember, listWorkspaceMembers } from '@/lib/people/members';
@@ -33,18 +34,33 @@ export default async function EmployeesScreen() {
     }
     // Each employee's goals, only for someone who can open them from the "Goals" action. A failed read hides the action.
     let goals: Record<string, GoalLike[]> | null = null;
-    if (ctx.viewer.isHr && !ctx.viewer.isDemo) {
+    if (showsOwnerDocumentControls(ctx.viewer)) {
       try {
         goals = goalsByEmployee(await data.listGoals());
       } catch (error) {
         console.error('[people/employees] could not list goals:', error instanceof Error ? error.message : 'error');
       }
     }
-    return { ...buildEmployeesModel(employees, departments, todayInMalaysia(now)), members, goals };
+    // Each employee's documents, only for an owner or admin outside the demo (null for anyone else, and nothing is
+    // read for them). A failed read hides the action.
+    let documents: ReturnType<typeof employeeDocumentRows> = null;
+    if (showsOwnerDocumentControls(ctx.viewer)) {
+      try {
+        documents = employeeDocumentRows({
+          documents: await data.listDocuments(),
+          employeeIds: employees.map((employee) => employee.id),
+          today: todayInMalaysia(now),
+          viewer: ctx.viewer,
+        });
+      } catch (error) {
+        console.error('[people/employees] could not list documents:', error instanceof Error ? error.message : 'error');
+      }
+    }
+    return { ...buildEmployeesModel(employees, departments, todayInMalaysia(now)), members, goals, documents, orgId: ctx.orgId };
   });
 
   // Owner or admin, and not the demo workspace (the server refuses changes there). The actions and the database both check again.
-  const canEdit = viewer.isHr && !viewer.isDemo;
+  const canEdit = showsOwnerDocumentControls(viewer);
   const totals = model?.totals;
   const departmentMix: Slice[] = (model?.by_department ?? []).map((d, index) => ({
     key: d.department,
@@ -154,6 +170,8 @@ export default async function EmployeesScreen() {
               departments={model.departments}
               members={model.members}
               goals={model.goals}
+              documents={model.documents}
+              orgId={model.orgId}
               canEdit={canEdit}
             />
           )}

@@ -173,17 +173,33 @@ export function withCurrentParty(parties: DocumentParty[], current?: { id: strin
  * `quotation-form.ts`), which are what the tests pin.
  */
 export type DocumentFormKind<F extends DocumentFormState> = {
-  noun: 'bill' | 'invoice' | 'quotation';
+  noun: 'bill' | 'invoice' | 'quotation' | 'RFQ' | 'purchase order';
   party: 'supplier' | 'customer';
   dateLabel: string;
   partyId: (form: F) => string;
   date: (form: F) => string;
   withParty: (form: F, party: { id: string; payment_terms_days: number }) => F;
   withDate: (form: F, date: string, termsDays: number | undefined) => F;
-  /** The second date box: when a bill or an invoice is due, or until when a quotation is valid. */
-  secondDate: { label: string; get: (form: F) => string; set: (form: F, value: string) => F };
+  /**
+   * The second date box: when a bill or an invoice is due, or until when a quotation is valid. `optional`
+   * lets it be empty (an RFQ's reply-by date); absent, the box is required.
+   */
+  secondDate: { label: string; optional?: boolean; get: (form: F) => string; set: (form: F, value: string) => F };
   /** Present when the document is not posted but marked as sent. Absent, the card uses `POSTING_WORDS`. */
   words?: DocumentFormWords;
+  /**
+   * More boxes drawn after the dates, each a line of text held in the form: a purchase order's payment terms
+   * and delivery address. Absent for a bill, an invoice, a quotation and an RFQ.
+   */
+  extras?: {
+    label: string;
+    placeholder?: string;
+    inputMode?: 'numeric' | 'text';
+    /** A short line under the box, read with it. */
+    hint?: string;
+    get: (form: F) => string;
+    set: (form: F, value: string) => F;
+  }[];
   /** A second text box beside the party: the supplier's own reference on a bill. An invoice has none. */
   reference?: { label: string; placeholder: string; get: (form: F) => string; set: (form: F, value: string) => F };
   withProduct: (line: LineDraft, product: FinanceProduct | null) => LineDraft;

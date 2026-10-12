@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import { ChangeList } from '@/components/chat/tool-cards';
 import { Button } from '@/components/ui/button';
+import { changeRows } from '@/lib/chat/change-rows';
 import type { AgentProposal } from '@/lib/agents/types';
 import { applyProposalAction, rejectProposalAction } from '@/app/(app)/reach/actions';
 
@@ -49,6 +51,8 @@ export function PendingApprovals({
               <p className="font-medium">{p.title}</p>
               {p.rationale && <p className="text-muted-foreground">{p.rationale}</p>}
               {p.detail && <p className="text-muted-foreground">{p.detail}</p>}
+              {/* Every value the change carries, from the stored proposal itself. */}
+              <ChangeList rows={changeRows(p.action, p.input)} />
               {canEdit ? (
                 <div className="flex gap-2 pt-1">
                   <Button

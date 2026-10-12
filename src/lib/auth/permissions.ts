@@ -4,6 +4,7 @@ export type Capability =
   | 'view'
   | 'edit-data'
   | 'approve'
+  | 'sign-off-finance'
   | 'manage-company'
   | 'manage-billing'
   | 'manage-members'
@@ -23,6 +24,8 @@ export const PERMISSIONS: {
   { capability: 'view', label: 'View dashboards', allow: ['owner', 'admin', 'member', 'viewer'] },
   { capability: 'edit-data', label: 'Manage contacts & deals', allow: ['owner', 'admin', 'member'] },
   { capability: 'approve', label: 'Approve leave & claims', allow: ['owner', 'admin'] },
+  // Kept in step with private.finance_may_sign_off in the database, which is what enforces it.
+  { capability: 'sign-off-finance', label: 'Post, pay & void finance documents', allow: ['owner', 'admin'] },
   { capability: 'manage-company', label: 'Edit company details', allow: ['owner', 'admin'] },
   { capability: 'manage-billing', label: 'Manage billing & plan', allow: ['owner', 'admin'] },
   { capability: 'manage-members', label: 'Invite & manage members', allow: ['owner', 'admin'] },

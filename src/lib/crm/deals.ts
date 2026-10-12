@@ -30,6 +30,8 @@ export type CrmDeal = {
   wonAt: string | null;
   lostAt: string | null;
   lostReason: string | null;
+  /** What the invoices linked to the deal add up to. Absent when none is linked. */
+  billing?: { count: number; billed: number; outstanding: number };
   /** Raw values keyed by the form's field names, for prefilling the edit form. */
   form?: Record<string, string>;
 };

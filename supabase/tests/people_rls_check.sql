@@ -3,7 +3,11 @@
 -- member reads their own payslip (and its lines) only once it is paid, and
 -- their own letter only once it is issued. Since the performance slice a
 -- member reads their own review only once it is released, an announcement
--- only once it is published, and no read mark but their own. Read the message:
+-- only once it is published, and no read mark but their own. Since the
+-- letters and documents slice a letter's type is one of a fixed list, and
+-- letter templates are for owners and admins only. Since
+-- 20261103120000_people_employee_delete_by_function.sql an employee is deleted
+-- through hr_delete_employee only: a direct delete is refused. Read the message:
 --   PEOPLE_RLS_CHECK PASSED ...   or   PEOPLE_RLS_CHECK FAILED: <what went wrong>
 -- When not to run it. It rebuilds the demo HR rows inside its transaction and
 -- holds them until the rollback, and the scheduled demo reseed commits the
@@ -14,7 +18,8 @@
 --   * do not run it at the same time as another people check
 --     (people_leave_check, people_claims_overtime_check,
 --     people_attendance_check, people_payroll_check,
---     people_performance_check): each of them rebuilds the demo too;
+--     people_performance_check, people_documents_check): each of them
+--     rebuilds the demo too;
 --   * do not run it while a migration is being applied.
 do $$
 declare
@@ -26,6 +31,7 @@ declare
   outsider uuid := gen_random_uuid();
   e1 uuid;
   e2 uuid;
+  e3 uuid;
   run_id uuid := gen_random_uuid();       -- last month's run, paid
   draft_run uuid := gen_random_uuid();    -- this month's run, still a draft
   this_month date := date_trunc('month', current_date)::date;
@@ -45,7 +51,7 @@ declare
   shared text[] := array['hr_departments','hr_public_holidays','hr_trainings','hr_announcements'];
   fails text[] := '{}';
   personal text[] := array['hr_employee_private','hr_leave_requests','hr_claims','hr_payslips','hr_payslip_lines','hr_reviews','hr_documents','hr_letters'];
-  hr_only text[] := array['hr_payroll_runs','hr_payment_vouchers','hr_settings'];
+  hr_only text[] := array['hr_payroll_runs','hr_payment_vouchers','hr_settings','hr_letter_templates'];
 begin
   -- ---- every table: the right read rule, and no write it should not have --
   for t, k in
@@ -55,8 +61,9 @@ begin
       ('hr_claims','personal'), ('hr_overtime_records','personal'),
       ('hr_attendance_days','personal'), ('hr_timesheet_entries','personal'), ('hr_shifts','personal'), ('hr_public_holidays','shared'),
       ('hr_payroll_runs','hr'), ('hr_payslips','paid'), ('hr_payslip_lines','lines'), ('hr_payment_vouchers','hr'),
-      ('hr_goals','personal'), ('hr_scorecards','personal'), ('hr_reviews','released'), ('hr_trainings','shared'), ('hr_training_enrolments','personal'),
-      ('hr_announcements','published'), ('hr_documents','personal'), ('hr_letters','issued'), ('hr_settings','hr')
+      ('hr_goals','personal'), ('hr_scorecards','released'), ('hr_reviews','released'), ('hr_trainings','shared'), ('hr_training_enrolments','personal'),
+      ('hr_announcements','published'), ('hr_documents','personal'), ('hr_letters','issued'), ('hr_settings','hr'),
+      ('hr_letter_templates','hr')
     ) as x(t, k)
   loop
     select p.qual into q from pg_policies p
@@ -134,6 +141,29 @@ begin
     end if;
   end loop;
 
+  -- ---- the three tables written directly: which writes, exactly ----------
+  -- Departments and private details are added, edited and deleted directly by
+  -- an owner or admin. An employee is added and edited directly, but deleted
+  -- only through hr_delete_employee (which releases their document files):
+  -- signed-in users hold no DELETE on hr_employees. Its write policy stays,
+  -- being the rule for adding and editing too.
+  foreach t in array core loop
+    if not has_table_privilege('authenticated', 'public.' || t, 'INSERT')
+       or not has_any_column_privilege('authenticated', 'public.' || t, 'UPDATE')
+       or has_table_privilege('authenticated', 'public.' || t, 'DELETE') <> (t <> 'hr_employees') then
+      fails := array_append(fails, format('signed-in users do not hold exactly the direct writes meant on %s (insert, update, and delete everywhere but on hr_employees)', t));
+    end if;
+    select count(*) into n from pg_policies p
+    where p.schemaname = 'public' and p.tablename = t and p.policyname = t || '_write' and p.cmd = 'ALL'
+      and p.permissive = 'PERMISSIVE' and p.roles = array['authenticated']::name[]
+      and p.qual like '%is_org_admin(org_id)%' and p.with_check like '%is_org_admin(org_id)%';
+    if n <> 1 then fails := array_append(fails, format('%s does not have its owner-and-admin write policy', t)); end if;
+  end loop;
+  if not has_function_privilege('authenticated', 'public.hr_delete_employee(uuid,uuid)', 'execute')
+     or has_function_privilege('anon', 'public.hr_delete_employee(uuid,uuid)', 'execute') then
+    fails := array_append(fails, 'hr_delete_employee is not for signed-in users only');
+  end if;
+
   -- ---- the statutory rules: the same for every workspace, read-only ------
   select count(*) into n from pg_policies p
   where p.schemaname = 'public' and p.tablename = 'hr_statutory_rules';
@@ -185,19 +215,26 @@ begin
   insert into public.org_members (org_id, user_id, role)
   values (org, admin_id, 'admin'), (other_org, outsider, 'owner');
 
-  -- Link on joining: the employee exists first, then the member joins.
+  -- A work email that equals a sign-in email links nobody (20261101134500_employee_account_link):
+  -- an owner or admin makes the link. The employee exists first, then the member joins.
   insert into public.hr_employees (org_id, employee_no, name, work_email)
   values (org, 'E1', 'Member One', m1 || '@rls-check.openkuasa-test.dev') returning id into e1;
   insert into public.org_members (org_id, user_id, role) values (org, m1, 'member');
   select user_id into linked from public.hr_employees where id = e1;
-  if linked is distinct from m1 then fails := array_append(fails, 'joining did not link the employee'); end if;
+  if linked is not null then fails := array_append(fails, 'joining linked the employee whose work email matches'); end if;
+  update public.hr_employees set user_id = m1 where id = e1;
+  select user_id into linked from public.hr_employees where id = e1;
+  if linked is distinct from m1 then fails := array_append(fails, 'a member could not be linked to their employee record'); end if;
 
-  -- Link on adding: the member exists first, then the employee is added.
+  -- The member exists first, then the employee is added: not linked either, until someone links them.
   insert into public.org_members (org_id, user_id, role) values (org, m2, 'member');
   insert into public.hr_employees (org_id, employee_no, name, work_email)
   values (org, 'E2', 'Member Two', m2 || '@rls-check.openkuasa-test.dev') returning id into e2;
   select user_id into linked from public.hr_employees where id = e2;
-  if linked is distinct from m2 then fails := array_append(fails, 'adding an employee did not link the member'); end if;
+  if linked is not null then fails := array_append(fails, 'adding an employee linked the member whose sign-in email matches'); end if;
+  update public.hr_employees set user_id = m2 where id = e2;
+  select user_id into linked from public.hr_employees where id = e2;
+  if linked is distinct from m2 then fails := array_append(fails, 'a member could not be linked to the employee record added for them'); end if;
 
   -- A link to someone outside the workspace is refused.
   begin
@@ -228,9 +265,12 @@ begin
   select org, p.id, 'deduction', 'hr', 'Uniform', 1000 from public.hr_payslips p where p.org_id = org;
   -- Letters: one issued and one still a draft for member one, one issued for member two.
   insert into public.hr_letters (org_id, employee_id, letter_type, title, status, issued_on)
-  values (org, e1, 'Confirmation', 'Confirmation of employment', 'issued', current_date),
-         (org, e1, 'Warning', 'Not sent yet', 'draft', null),
-         (org, e2, 'Confirmation', 'Confirmation of employment', 'issued', current_date);
+  values (org, e1, 'confirmation', 'Confirmation of employment', 'issued', current_date),
+         (org, e1, 'warning', 'Not sent yet', 'draft', null),
+         (org, e2, 'confirmation', 'Confirmation of employment', 'issued', current_date);
+  -- Letter templates: the starter set a new workspace is given, one per letter type.
+  select count(*), count(distinct letter_type) into n, n2 from public.hr_letter_templates where org_id = org;
+  if n <> 6 or n2 <> 6 then fails := array_append(fails, format('the new workspace was given %s starter templates of %s types, expected 6 of 6', n, n2)); end if;
   -- Reviews: one released and one still a draft for member one, one released for member two.
   insert into public.hr_reviews (org_id, employee_id, period, rating, score, status, released_at)
   values (org, e1, 'H1 2025', 'meets', 3.5, 'released', now()),
@@ -298,11 +338,22 @@ begin
   execute format('update public.hr_employee_private set base_salary_cents = 1 where employee_id = %L', e1);
   get diagnostics n = row_count;
   if n <> 0 then fails := array_append(fails, 'a member changed their own salary'); end if;
-  execute format('delete from public.hr_employees where id = %L', e2);
-  get diagnostics n = row_count;
-  if n <> 0 then fails := array_append(fails, 'a member deleted a colleague'); end if;
+  -- Nobody signed in deletes an employee directly; the function answers a member with null.
+  begin
+    execute format('delete from public.hr_employees where id = %L', e2);
+    get diagnostics n = row_count;
+    fails := array_append(fails, format('a member''s direct delete of a colleague was not refused (%s rows went)', n));
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    if public.hr_delete_employee(org, e2) is not null then fails := array_append(fails, 'a member deleted a colleague through hr_delete_employee'); end if;
+  exception when others then
+    fails := array_append(fails, 'a member calling hr_delete_employee was answered with: ' || sqlerrm);
+  end;
 
   reset role;
+  select count(*) into n from public.hr_employees where id in (e1, e2);
+  if n <> 2 then fails := array_append(fails, format('%s of the 2 employees are left after a member tried to delete one', n)); end if;
 
   -- ---- as the admin ----------------------------------------------------
   perform set_config('request.jwt.claims', json_build_object('sub', admin_id, 'role', 'authenticated', 'aal', 'aal1')::text, true);
@@ -315,14 +366,50 @@ begin
   end loop;
   foreach t in array hr_only loop
     execute format('select count(*) from public.%I where org_id = %L', t, org) into n;
-    -- One of everything, but two payroll runs (the paid one and the draft).
-    n2 := case t when 'hr_payroll_runs' then 2 else 1 end;
+    -- One of everything, but two payroll runs (the paid one and the draft) and the six starter templates.
+    n2 := case t when 'hr_payroll_runs' then 2 when 'hr_letter_templates' then 6 else 1 end;
     if n <> n2 then fails := array_append(fails, format('the admin reads %s rows of %s, expected %s', n, t, n2)); end if;
   end loop;
   -- Both announcements, the draft included; and of the read marks only their own.
   execute format('select count(*) from public.hr_announcements where org_id = %L', org) into n;
   select count(*) into n2 from public.hr_announcement_reads;
   if n <> 2 or n2 <> 1 then fails := array_append(fails, format('the admin reads %s announcements and %s read marks, expected 2 and their own 1', n, n2)); end if;
+  -- The admin adds and edits an employee directly, and deletes one only through
+  -- hr_delete_employee: a direct delete is refused, whoever sends it. With a
+  -- paid payslip the function refuses too, with the payroll slice's code.
+  begin
+    execute format('insert into public.hr_employees (org_id, employee_no, name) values (%L, ''E3'', ''Short Stay'') returning id', org) into e3;
+    execute format('update public.hr_employees set designation = ''Temp'' where id = %L', e3);
+    get diagnostics n = row_count;
+    if n <> 1 then fails := array_append(fails, 'the admin could not edit an employee directly'); end if;
+  exception when others then
+    fails := array_append(fails, 'the admin adding and editing an employee directly was refused with: ' || sqlerrm);
+  end;
+  begin
+    execute format('delete from public.hr_employees where id = %L', e3);
+    get diagnostics n = row_count;
+    fails := array_append(fails, format('the admin''s direct delete of an employee was not refused (%s rows went)', n));
+  exception when insufficient_privilege then null;
+  end;
+  execute format('select count(*) from public.hr_employees where id = %L', e3) into n;
+  if n <> 1 then fails := array_append(fails, 'the employee is gone after a refused direct delete'); end if;
+  begin
+    perform public.hr_delete_employee(org, e1);
+    fails := array_append(fails, 'the admin deleted an employee who has a paid payslip through hr_delete_employee');
+  exception when others then
+    if sqlerrm <> 'HR_EMPLOYEE_HAS_PAID_PAYSLIPS' then
+      fails := array_append(fails, 'hr_delete_employee on an employee with a paid payslip was refused with: ' || sqlerrm);
+    end if;
+  end;
+  begin
+    if public.hr_delete_employee(org, e3) ->> 'id' is distinct from e3::text then
+      fails := array_append(fails, 'hr_delete_employee did not answer the admin with the employee it deleted');
+    end if;
+  exception when others then
+    fails := array_append(fails, 'the admin deleting an employee through hr_delete_employee was refused with: ' || sqlerrm);
+  end;
+  execute format('select count(*) from public.hr_employees where org_id = %L', org) into n;
+  if n <> 2 then fails := array_append(fails, format('%s employees are left after the admin deleted the third through hr_delete_employee, expected 2', n)); end if;
   reset role;
 
   -- ---- as the owner of another workspace -------------------------------
@@ -334,7 +421,17 @@ begin
   end loop;
   select count(*) into n from public.hr_announcement_reads;
   if n <> 0 then fails := array_append(fails, format('another workspace reads %s read marks', n)); end if;
+  -- Nor does it delete an employee here: under this workspace's name or its own.
+  begin
+    if public.hr_delete_employee(org, e2) is not null or public.hr_delete_employee(other_org, e2) is not null then
+      fails := array_append(fails, 'another workspace''s owner deleted an employee through hr_delete_employee');
+    end if;
+  exception when others then
+    fails := array_append(fails, 'another workspace''s owner calling hr_delete_employee was answered with: ' || sqlerrm);
+  end;
   reset role;
+  select count(*) into n from public.hr_employees where id in (e1, e2);
+  if n <> 2 then fails := array_append(fails, format('%s of the 2 employees are left after another workspace tried to delete one', n)); end if;
 
   -- ---- a member who is removed loses their own rows at once -------------
   delete from public.org_members where org_id = org and user_id = m1;

@@ -9,6 +9,13 @@ const ctl = vi.hoisted(() => ({
   answers: {} as Record<string, { data: unknown; error: unknown }>,
   calls: [] as { fn: string; args: Record<string, unknown> }[],
   clientsMade: 0,
+  /** Calls made as the server itself, and what the database answers the server with (else `answers`). */
+  serviceCalls: 0,
+  serviceAnswer: null as null | { data: unknown; error: unknown },
+  serviceConfigured: true,
+  /** What the per-client limit answers: null lets the post through. */
+  limited: null as string | null,
+  limitAsked: 0,
 }));
 
 /** A stand-in client that records each function call and answers from `ctl.answers`. */
@@ -20,6 +27,24 @@ const fakeClient = () => ({
 });
 
 vi.mock('@/lib/auth/viewer', () => ({ hasSupabaseEnv: () => ctl.hasEnv }));
+vi.mock('@/lib/supabase/service', () => ({
+  serviceClient: () => {
+    if (!ctl.serviceConfigured) throw new Error('Service role is not configured.');
+    return {
+      rpc: async (fn: string, args: Record<string, unknown>) => {
+        ctl.serviceCalls += 1;
+        if (ctl.serviceAnswer) return ctl.serviceAnswer;
+        return fakeClient().rpc(fn, args);
+      },
+    };
+  },
+}));
+vi.mock('@/lib/security/limits', () => ({
+  formSubmitLimited: async () => {
+    ctl.limitAsked += 1;
+    return ctl.limited;
+  },
+}));
 vi.mock('@supabase/supabase-js', () => ({
   createClient: (_url: string, _key: string, options: { auth?: Record<string, unknown> }) => {
     ctl.clientsMade += 1;
@@ -51,6 +76,11 @@ beforeEach(() => {
   ctl.answers = {};
   ctl.calls = [];
   ctl.clientsMade = 0;
+  ctl.serviceCalls = 0;
+  ctl.serviceAnswer = null;
+  ctl.serviceConfigured = true;
+  ctl.limited = null;
+  ctl.limitAsked = 0;
   logged = vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 afterEach(() => {
@@ -93,6 +123,35 @@ describe('recordFormView', () => {
   it('calls the view function for the form', async () => {
     await recordFormView(client(), ID);
     expect(ctl.calls).toEqual([{ fn: 'record_form_view', args: { p_form_id: ID } }]);
+  });
+
+  it('names the signed-in visitor when the server is the one counting', async () => {
+    await recordFormView(client(), ID, { viewerId: 'user-1' });
+    await recordFormView(client(), ID, { viewerId: null });
+    expect(ctl.calls).toEqual([
+      { fn: 'record_form_view', args: { p_form_id: ID, p_viewer: 'user-1' } },
+      { fn: 'record_form_view', args: { p_form_id: ID, p_viewer: null } },
+    ]);
+  });
+
+  it.each(['PGRST202', '42501'])(
+    'counts the way it did before when the database has not been moved on yet (%s)',
+    async (code) => {
+      const legacyCalls: unknown[] = [];
+      const legacy = { rpc: async (fn: string, args: unknown) => { legacyCalls.push({ fn, args }); return { data: null, error: null }; } };
+      ctl.answers.record_form_view = { data: null, error: { code } };
+      await recordFormView(client(), ID, { viewerId: 'user-1', legacy: legacy as never });
+      expect(legacyCalls).toEqual([{ fn: 'record_form_view', args: { p_form_id: ID } }]);
+      expect(logged).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not count twice after any other failure', async () => {
+    const legacy = { rpc: vi.fn() };
+    ctl.answers.record_form_view = { data: null, error: { code: '57014' } };
+    await recordFormView(client(), ID, { viewerId: null, legacy: legacy as never });
+    expect(legacy.rpc).not.toHaveBeenCalled();
+    expect(logged).toHaveBeenCalledTimes(1);
   });
 
   it('never fails the page when the count fails', async () => {
@@ -148,10 +207,51 @@ describe('submitPublicFormAction', () => {
     });
   });
 
+  it('sends it as the server itself, after asking the per-client limit once', async () => {
+    ctl.answers.submit_public_form = { data: 'ok', error: null };
+    await submitPublicFormAction(ID, undefined, filled());
+    expect(ctl.limitAsked).toBe(1);
+    expect(ctl.serviceCalls).toBe(1);
+    // No client without a session was needed.
+    expect(ctl.clientsMade).toBe(0);
+  });
+
+  it('when the client has sent too many, says so, keeps what was typed and sends nothing', async () => {
+    ctl.limited = 'Too many attempts from your network. Please try again in 4 minutes.';
+    const state = await submitPublicFormAction(ID, undefined, filled());
+    expect(state).toEqual({
+      error: 'Too many attempts from your network. Please try again in 4 minutes.',
+      values: { name: 'Siti Aisyah', email: 'Siti@Example.com', phone: '', message: 'Hi' },
+    });
+    expect(ctl.calls).toHaveLength(0);
+    expect(ctl.serviceCalls).toBe(0);
+    expect(ctl.clientsMade).toBe(0);
+  });
+
+  it('sends it the way it did before while the database does not let the server call', async () => {
+    ctl.serviceAnswer = { data: null, error: { code: '42501' } };
+    ctl.answers.submit_public_form = { data: 'ok', error: null };
+    expect(await submitPublicFormAction(ID, undefined, filled())).toEqual({ done: true });
+    expect(ctl.serviceCalls).toBe(1);
+    expect(ctl.clientsMade).toBe(1);
+    expect(ctl.calls).toHaveLength(1);
+  });
+
+  it('does not send a response twice when the server\'s call fails any other way', async () => {
+    ctl.serviceAnswer = { data: null, error: { code: '57014' } };
+    const state = await submitPublicFormAction(ID, undefined, filled());
+    expect(state?.error).toBe('Your response could not be sent. Please try again.');
+    expect(ctl.serviceCalls).toBe(1);
+    expect(ctl.clientsMade).toBe(0);
+    expect(ctl.calls).toHaveLength(0);
+  });
+
   it('thanks a filled honeypot and sends nothing', async () => {
     expect(await submitPublicFormAction(ID, undefined, filled({ [HONEYPOT_FIELD]: 'http://spam' }))).toEqual({ done: true });
     expect(ctl.calls).toHaveLength(0);
     expect(ctl.clientsMade).toBe(0);
+    expect(ctl.serviceCalls).toBe(0);
+    expect(ctl.limitAsked).toBe(0);
   });
 
   it('gives back what was typed with a message beside each wrong field, without calling the database', async () => {
@@ -161,6 +261,8 @@ describe('submitPublicFormAction', () => {
       values: typed,
     });
     expect(ctl.calls).toHaveLength(0);
+    // A post that was never going to be sent does not use up the client's allowance.
+    expect(ctl.limitAsked).toBe(0);
   });
 
   it('treats a missing field as empty rather than failing', async () => {

@@ -44,7 +44,7 @@ const EMPTY: PeopleData = {
   listPayrollRuns: async () => [], listPayslips: async () => [], listGoals: async () => [],
   listReviews: async () => [], listTrainings: async () => [],
   listTrainingEnrolments: async () => [], listAnnouncements: async () => [],
-  listDocuments: async () => [], listLetters: async () => [], listPaymentVouchers: async () => [],
+  listDocuments: async () => [], listLetters: async () => [], listLetterTemplates: async () => [], listPaymentVouchers: async () => [],
   getSettings: async () => structuredClone(DEFAULT_PEOPLE_SETTINGS),
 };
 

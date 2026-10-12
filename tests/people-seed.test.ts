@@ -131,23 +131,35 @@ describe('people seed', () => {
 
   it('has the documents, letters, vouchers and settings the demo has', async () => {
     const documents = await data.listDocuments();
-    expect(documents).toHaveLength(26);
-    expect(documents.filter((d) => d.doc_type === 'contract' && d.status === 'signed')).toHaveLength(20);
+    expect(documents).toHaveLength(24);
+    expect(documents.filter((d) => d.doc_type === 'contract' && d.title === 'Employment contract')).toHaveLength(20);
     const mine = documents.filter((d) => d.employee_id === DEMO_EMPLOYEE_ID);
-    expect(mine).toHaveLength(7);
-    expect(mine.filter((d) => d.status === 'pending_signature')).toHaveLength(1);
-    expect(mine.filter((d) => d.status === 'expiring')).toHaveLength(1);
-    expect(mine.find((d) => d.status === 'expiring')?.expires_on).toBe(addDays(TODAY, 25));
+    expect(mine).toHaveLength(5);
+    // None has a file: the screens say "Sample document, no file".
+    expect(documents.every((d) => !d.has_file && d.file_name === null && d.file_size === null && d.file_type === null)).toBe(true);
+    expect(documents.every((d) => d.source === 'hr' && d.acknowledged_at === null)).toBe(true);
+    expect(documents.filter((d) => d.ack_requested).map((d) => d.title)).toEqual(['Code of conduct']);
+    expect(mine.find((d) => d.title === 'Medical card')?.expires_on).toBe(addDays(TODAY, 25));
+    expect(mine.find((d) => d.title === 'Insurance certificate')?.expires_on).toBe(addDays(TODAY, -10));
     expect(documents.every((d) => d.employee_name !== '')).toBe(true);
-    const issued = documents.map((d) => d.issued_on ?? '');
-    expect(issued).toEqual([...issued].sort().reverse());
+    const created = documents.map((d) => d.created_at);
+    expect(created).toEqual([...created].sort().reverse());
 
     const letters = await data.listLetters();
     expect(letters).toHaveLength(5);
     expect(letters.filter((l) => l.status === 'issued')).toHaveLength(3);
     expect(letters.filter((l) => l.status === 'draft').every((l) => l.issued_on === null)).toBe(true);
-    const created = letters.map((l) => l.created_at);
-    expect(created).toEqual([...created].sort().reverse());
+    expect(letters.every((l) => l.body.startsWith('Dear ') && l.acknowledged_at === null)).toBe(true);
+    expect(letters.filter((l) => l.ack_requested).map((l) => [l.status, l.employee_id])).toEqual([['issued', DEMO_EMPLOYEE_ID]]);
+    expect(letters.map((l) => l.letter_type).sort()).toEqual(['confirmation', 'contract_renewal', 'offer', 'promotion', 'warning']);
+    const lettersMade = letters.map((l) => l.created_at);
+    expect(lettersMade).toEqual([...lettersMade].sort().reverse());
+
+    const templates = await data.listLetterTemplates();
+    expect(templates.map((t) => t.name)).toEqual([
+      'Offer of employment', 'Confirmation of employment', 'Promotion', 'Warning', 'Contract renewal', 'General letter',
+    ]);
+    expect(new Set(templates.map((t) => t.letter_type)).size).toBe(6);
 
     const vouchers = await data.listPaymentVouchers();
     expect(vouchers).toHaveLength(6);

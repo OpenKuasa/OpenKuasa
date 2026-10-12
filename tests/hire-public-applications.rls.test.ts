@@ -10,6 +10,7 @@ import { type SupabaseClient } from '@supabase/supabase-js';
 import { createAnonymousClient } from '@/lib/supabase/anonymous';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import { createOrg, joinDemo, signInAnon, liveClient, beforeCleanup, signInOwner } from './helpers/live-workspaces';
+import { publicWriter } from './helpers/public-writer';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
@@ -45,6 +46,8 @@ let owner: Owned;
 let other: Owned;
 let viewer: SupabaseClient;
 let visitor: SupabaseClient;
+/** Who sends an application: the server once the database takes them from nobody else, else the visitor. */
+let writer: SupabaseClient;
 let demoId: string;
 
 let openJob: { id: string; title: string };
@@ -105,9 +108,9 @@ type Params = Partial<{
   p_honeypot: string | null;
 }>;
 
-/** Calls the function as the signed-out visitor, with good defaults a case can override. */
+/** Calls the function the way the careers page does, with good defaults a case can override. */
 const apply = (overrides: Params = {}) =>
-  visitor.rpc('submit_public_application', {
+  writer.rpc('submit_public_application', {
     p_org_id: owner.orgId,
     p_job_id: openJob.id,
     p_name: NAME,
@@ -192,6 +195,7 @@ beforeAll(async () => {
   expect(error, error?.message).toBeNull();
   demoId = data as string;
   visitor = createAnonymousClient();
+  ({ writer } = await publicWriter(visitor));
 
   // Both boards on, the owner's form switches all off.
   await switchBoardOn(owner);

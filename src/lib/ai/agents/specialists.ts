@@ -59,17 +59,20 @@ import {
 import type { ProductToolkit } from '@/lib/ai/products';
 import { logModelCall, logModelError, modelErrorCode } from '@/lib/ai/call-log';
 import { getModel, pickModelId } from '@/lib/ai/provider';
+import { changeRows } from '@/lib/chat/change-rows';
 import {
   approvalDetail,
   approvalTitle,
   collectNames,
   knownOnFile,
   nameIn,
+  rowIn,
   withoutPoolSide,
   type ItemKind,
   type KnownNames,
   type ToolResult,
 } from '@/lib/chat/change-titles';
+import { NOT_PREPARED, NOT_WAITING, type ProposalStore } from '@/lib/chat/proposal-store';
 import {
   APPLY_TOOL,
   ASK_PREFIX,
@@ -84,8 +87,13 @@ export type TeamContext = {
   apiKey?: string;
   /** The conversation so far, in words, for specialists that only see their task. */
   transcript: string;
-  /** Changes prepared earlier in the conversation, by id. New ones are added here. */
+  /**
+   * Changes prepared earlier in the conversation, by id, as the server recorded them (never as the conversation
+   * describes them). New ones are added here. Used to word and to gate; the change that runs is taken from `store`.
+   */
   proposals: Map<string, Proposal>;
+  /** Where prepared changes are kept: one is recorded when it is prepared, and taken, once, when it is applied. */
+  store: ProposalStore;
   /** Names of rows the conversation has come across, by `kind:id`. Added to as it goes. */
   names?: KnownNames;
 };
@@ -209,6 +217,21 @@ function turnStateFrom(messages: readonly ModelMessage[], proposals: Map<string,
     }
   }
   return state;
+}
+
+/** The changes specialists reported preparing, by id, as the reports in these messages hold them. */
+function describedIn(messages: readonly ModelMessage[]): Map<string, Proposal> {
+  const found = new Map<string, Proposal>();
+  for (const message of messages) {
+    if (message.role !== 'tool') continue;
+    for (const part of partsOf(message)) {
+      if (part.type !== 'tool-result' || typeof part.toolName !== 'string' || !part.toolName.startsWith(ASK_PREFIX)) continue;
+      const output = part.output as { type?: unknown; value?: unknown } | null | undefined;
+      const report = output?.type === 'json' ? output.value : null;
+      if (isDelegation(report)) for (const proposal of report.proposals) found.set(proposal.id, proposal);
+    }
+  }
+  return found;
 }
 
 /**
@@ -430,9 +453,16 @@ function specialistTools(
         const rejected = rejectedByUser(messages);
         const wasInterviewCard = (call: { toolName?: unknown; toolCallId?: unknown; input?: unknown }) => {
           const id = call.toolName === APPLY_TOOL ? (call.input as { proposalId?: unknown } | null | undefined)?.proposalId : undefined;
+          // Whether it was an interview change is the server's record's to say.
           const shown = typeof id === 'string' ? team.proposals.get(id) : undefined;
           if (!shown || !INTERVIEW_CHANGES.has(shown.action)) return false;
-          return !(rejected.has(call.toolCallId) && sameInterviewTarget(shown.action, shown.input, name, input));
+          if (!rejected.has(call.toolCallId)) return true;
+          // A record that was answered no longer holds its arguments (proposal-store.ts). Which row the rejected
+          // card was about is then read from the specialist's own report in the conversation. That report comes
+          // back through the browser, and all it can do here is keep the user's own link for the same row.
+          const reported = describedIn(messages).get(shown.id);
+          const was = shown.input ?? (reported?.action === shown.action ? reported.input : null);
+          return !sameInterviewTarget(shown.action, was, name, input);
         };
         // And the interviewer is a name: a link in it would reach the candidate unchecked, so it is refused outright.
         const linked = INTERVIEW_CHANGES.has(name) ? interviewLinkProblem(messages, name, input, results, wasInterviewCard) : null;
@@ -447,16 +477,29 @@ function specialistTools(
           nameIn(results)(id, kind) ??
           (kind && typeof id === 'string' ? (team.names?.[`${kind}:${id}`] ?? null) : null);
         const proposal: Proposal = {
-          id: crypto.randomUUID().slice(0, 8),
+          // The id of the server's record of this change: what an approval names.
+          id: crypto.randomUUID(),
           product: product.key,
           action: name,
           input,
           title: approvalTitle(name, input, find),
           detail: approvalDetail(name, input, undefined, find),
+          // Every value it carries, from the input itself, beside what this specialist's lookups showed is there now.
+          changes: changeRows(name, input, find, rowIn(results)),
         };
         team.proposals.set(proposal.id, proposal);
         prepared.push(proposal);
         if (limited) turn.prepared[limited].add(proposal.id);
+        // Its place is held above without a pause; now it is recorded. An approval is answered from this record,
+        // so a change that could not be recorded is withdrawn and never reaches a card: a deletion or a talent
+        // pool change gives its one place in the turn back, like any other.
+        const kept = await team.store.record({ id: proposal.id, product: product.key, action: name, input });
+        if (!kept) {
+          team.proposals.delete(proposal.id);
+          prepared.splice(prepared.indexOf(proposal), 1);
+          if (limited) turn.prepared[limited].delete(proposal.id);
+          return { prepared: false, error: NOT_PREPARED };
+        }
         return { prepared: true, proposalId: proposal.id, card: proposal.title };
       },
     });
@@ -553,21 +596,23 @@ const AREA: Record<ProductToolkit['key'], string> = {
   crm: 'the CRM (contacts, deals, pipelines and their stages)',
   hire: 'hiring (jobs, candidates, applications, the hiring funnel, interviews, the talent pool; it can read one candidate\'s uploaded CV and give a verdict on it; it can prepare moving, rejecting, reopening or rating one application at a time; it can prepare adding or editing one candidate at a time; it can prepare scheduling, changing, cancelling or closing one interview at a time, or recording one that already took place; it can prepare deleting one application or one candidate at a time; it can prepare a talent pool change for one candidate at a time)',
   people: 'HR (existing staff, leave, time-off, claims, overtime, attendance, payroll, performance; it can prepare deciding leave, claims and overtime, correcting attendance, and editing staff and departments, one change at a time)',
+  finance: 'finance (sales invoices and quotations, supplier bills, payments in and out, credit notes, refunds, customers and suppliers, items, bank and cash accounts; it can prepare drafting, posting and voiding invoices and bills, recording payments, issuing credit notes and refunds, and managing customers, suppliers and items, each with approval)',
 };
 
-/** Runs a prepared change through the product's own change tool, after checking its input again. */
+/**
+ * Runs a prepared change through the product's own change tool. The change is the server's record of it, taken
+ * here once: which product, which tool and which arguments all come from that record, and nothing from the
+ * conversation the browser sent. A change with no waiting record does not run.
+ */
 async function apply(
   products: ProductToolkit[],
   team: TeamContext,
-  proposal: Proposal | undefined,
+  proposalId: string,
   options: unknown,
 ): Promise<unknown> {
-  if (!proposal) {
-    return {
-      ok: false,
-      error: 'That prepared change was not found. Ask the specialist to prepare it again.',
-    };
-  }
+  const stored = await team.store.claim({ id: proposalId });
+  if (!stored) return { ok: false, error: NOT_WAITING };
+  const proposal = { product: stored.product, action: stored.action, input: stored.input };
   const product = products.find((p) => p.key === proposal.product);
   const change =
     product && Object.hasOwn(product.write, proposal.action)
@@ -577,7 +622,7 @@ async function apply(
   if (!change || !run) {
     return { ok: false, error: 'You are not able to make that change in this workspace.' };
   }
-  // A proposal read back from the conversation is checked like any other input.
+  // Checked like any other input before it runs.
   const parsed = (change.inputSchema as z.ZodType).safeParse(proposal.input);
   if (!parsed.success) {
     return { ok: false, error: 'That prepared change is no longer valid. Ask for it again.' };
@@ -675,8 +720,7 @@ export function createTeamTools(
     inputSchema: z.object({
       proposalId: z.string().min(1).describe('The id the specialist reported.'),
     }),
-    execute: async ({ proposalId }, options) =>
-      apply(products, team, team.proposals.get(proposalId), options),
+    execute: async ({ proposalId }, options) => apply(products, team, proposalId, options),
   });
   return {
     tools,

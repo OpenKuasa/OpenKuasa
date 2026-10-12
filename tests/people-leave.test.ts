@@ -27,6 +27,7 @@ describe('LEAVE_REFUSALS', () => {
   it('has the spec sentence for every code the database raises', () => {
     expect(LEAVE_REFUSALS).toEqual({
       LEAVE_NOT_ALLOWED: "You can't make that change.",
+      LEAVE_OWN_REQUEST: "You can't approve, reject or pay your own request. Ask the workspace owner or another admin.",
       LEAVE_OVERLAP: 'That overlaps leave already applied for on those dates.',
       LEAVE_NO_WORKING_DAY: 'Those dates have no working day in them.',
       LEAVE_NOT_PENDING: 'That request has already been decided or cancelled.',

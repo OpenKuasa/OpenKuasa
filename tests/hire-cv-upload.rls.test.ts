@@ -16,6 +16,7 @@ import { createCvReader } from '@/lib/hire/cv-read';
 import { createSupabaseHireData } from '@/lib/hire/supabase';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import { createOrg, joinDemo, liveClient, signInAnon, beforeCleanup, signInOwner } from './helpers/live-workspaces';
+import { publicWriter } from './helpers/public-writer';
 
 const hasService = hasSupabaseEnv && Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
 const testWithSupabase = hasService ? test : test.skip;
@@ -63,6 +64,9 @@ let other: Owned;
 let viewer: SupabaseClient;
 let stranger: SupabaseClient; // signed in anonymously, in no workspace
 let visitor: SupabaseClient; // no session
+let writer: SupabaseClient; // who sends an application without a file: the server, or the visitor on an older database
+/** True once the database takes applications from the server alone. */
+let serverOnly = false;
 let demoId: string;
 
 let openJob: { id: string; title: string };
@@ -156,6 +160,19 @@ const applyAs = (c: SupabaseClient, overrides: Params = {}) =>
     ...overrides,
   });
 
+/**
+ * A visitor naming a file is turned away: by the function's own word while a visitor may still call it,
+ * and outright (no EXECUTE) once only the server may.
+ */
+function expectVisitorRefused(res: { data: unknown; error: { code?: string; message: string } | null }) {
+  if (serverOnly) {
+    expect(res.error?.code, res.error?.message).toBe('42501');
+    return;
+  }
+  expect(res.error, res.error?.message).toBeNull();
+  expect(res.data).toBe('invalid_cv_path');
+}
+
 /** The function must answer with exactly this word and no error: an error for another reason cannot pass. */
 function expectWord(res: { data: unknown; error: { message: string } | null }, word: string) {
   expect(res.error, res.error?.message).toBeNull();
@@ -247,6 +264,7 @@ beforeAll(async () => {
   const signedIn = await signInAnon(stranger);
   expect(signedIn.error, signedIn.error?.message).toBeNull();
   visitor = createAnonymousClient();
+  ({ writer, serverOnly } = await publicWriter(visitor));
 
   await switchBoardOn(owner);
   await switchBoardOn(other);
@@ -351,22 +369,17 @@ testWithSupabase('4. the bucket refuses a text file and a file over 5 MB, even f
 testWithSupabase('5. a visitor naming a file is refused, and nothing is written, not even a rate-limit tick', async () => {
   const before = await snapshot();
   const email = uniqueEmail();
-  expectWord(
-    await applyAs(visitor, { p_email: email, p_cv_path: pathFor(owner.orgId, openJob.id) }),
-    'invalid_cv_path',
-  );
+  expectVisitorRefused(await applyAs(visitor, { p_email: email, p_cv_path: pathFor(owner.orgId, openJob.id) }));
   expect(await snapshot()).toEqual(before);
   expect(await candidatesByEmail(email)).toHaveLength(0);
 
   // A tick would count toward the job's 30 a minute. Refuse 31 times, then a plain application still goes in.
   const job = await freshOpenJob('no ticks');
   for (let i = 0; i < 31; i++) {
-    const res = await applyAs(visitor, { p_job_id: job.id, p_cv_path: pathFor(owner.orgId, job.id) });
-    expect(res.error, res.error?.message).toBeNull();
-    expect(res.data, `refusal ${i + 1}`).toBe('invalid_cv_path');
+    expectVisitorRefused(await applyAs(visitor, { p_job_id: job.id, p_cv_path: pathFor(owner.orgId, job.id) }));
   }
   expect(await countRows('hire_applications', owner, job.id)).toBe(0);
-  expectWord(await applyAs(visitor, { p_job_id: job.id }), 'ok');
+  expectWord(await applyAs(writer, { p_job_id: job.id }), 'ok');
 }, 120_000);
 
 testWithSupabase('6. the service client is refused a path under another workspace or job, or a bad name', async () => {
@@ -453,7 +466,7 @@ testWithSupabase('9. a visitor repeating an application without a path still get
   const before = await countRows('hire_applications', owner, cvJob.id);
   // The workspace still requires a CV: the visitor sends a link, as the 2d form did.
   expectWord(
-    await applyAs(visitor, { p_job_id: cvJob.id, p_email: cvEmail, p_cv_url: 'https://example.com/cv.pdf' }),
+    await applyAs(writer, { p_job_id: cvJob.id, p_email: cvEmail, p_cv_url: 'https://example.com/cv.pdf' }),
     'ok',
   );
   expect(await countRows('hire_applications', owner, cvJob.id)).toBe(before);

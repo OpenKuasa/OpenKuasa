@@ -1,0 +1,117 @@
+import type { ReactNode } from 'react';
+import { describe, expect, it, vi } from 'vitest';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { BillFormCard } from '@/components/finance/bill-form-card';
+import { BillsView } from '@/components/finance/bills-view';
+import type { BillDetail, BillListRow } from '@/lib/finance/bills';
+import type { FinanceContact } from '@/lib/finance/contacts';
+import { billsView } from '@/lib/finance/purchase-views';
+
+/**
+ * The Supplier Bills screen as the server sends it: rendered to a string and
+ * read as markup (no DOM here). What a press decides is in
+ * tests/finance-bill-form.test.ts; what needs a browser is checked by hand.
+ */
+
+// A closed select draws no options. Here its options are drawn in place, and the chosen one is marked.
+vi.mock('@/components/ui/select', () => {
+  const Pass = ({ children }: { children?: ReactNode }) => <>{children}</>;
+  return {
+    Select: ({ value, children }: { value?: string; children?: ReactNode }) => <div data-chosen={value}>{children}</div>,
+    SelectTrigger: Pass,
+    SelectValue: () => null,
+    SelectContent: Pass,
+    SelectItem: ({ value, children }: { value: string; children?: ReactNode }) => <div data-option={value}>{children}</div>,
+  };
+});
+
+const SUPPLIER = '44444444-4444-4444-8444-444444444444';
+const OTHER = '55555555-5555-4555-8555-555555555555';
+const PO = '88888888-8888-4888-8888-888888888888';
+const PO_2 = '77777777-7777-4777-8777-777777777777';
+
+const bill = (id: string, extra: Partial<BillListRow> = {}): BillListRow => ({
+  id,
+  bill_no: 'BILL-0001',
+  supplier_id: SUPPLIER,
+  supplier_name: 'Lim Hardware',
+  bill_date: '2026-10-01',
+  due_date: '2026-10-31',
+  total: 100,
+  paid: 0,
+  balance: 100,
+  display_status: 'pending',
+  purchase_order_id: null,
+  purchase_order_no: null,
+  ...extra,
+});
+
+describe('the bills list', () => {
+  it('has a Purchase order column showing the number on a linked bill and a dash on the rest', () => {
+    const rows = [bill('a', { purchase_order_id: PO, purchase_order_no: 'PO-0003' }), bill('b', { bill_no: 'BILL-0002' })];
+    const html = renderToStaticMarkup(<BillsView rows={rows} view={billsView(rows, [], '2026-10-09')} held={{}} />);
+    expect(html).toContain('Purchase order');
+    expect(html).toContain('PO-0003');
+    const cells = html.match(/<td[^>]*>[^<]*<\/td>/g) ?? [];
+    expect(cells.filter((c) => c.includes('PO-0003'))).toHaveLength(1);
+  });
+});
+
+const supplier = (id: string, name: string): FinanceContact =>
+  ({ id, name, is_supplier: true, is_customer: false, active: true, payment_terms_days: 30 }) as unknown as FinanceContact;
+
+const detail = (extra: Partial<BillDetail> = {}): BillDetail => ({
+  ...bill('d', { display_status: 'draft', bill_no: null }),
+  supplier_ref: null,
+  notes: null,
+  lines: [{ id: 'l1', product_id: null, description: 'Gloves', quantity: 1, uom: null, pack_size: null, unit_price: 100, sst_rate: 0, amount: 100, sst_amount: 0 }],
+  ...extra,
+});
+
+const actions = { save: vi.fn(), saveAndPost: vi.fn() };
+const orders = [
+  { id: PO, po_no: 'PO-0003', supplier_id: SUPPLIER, status: 'approved', total: 1200, billed_total: 300, received_total: 1200 },
+  { id: PO_2, po_no: 'PO-0009', supplier_id: OTHER, status: 'approved', total: 50, billed_total: 0, received_total: 0 },
+];
+
+const card = (props: Partial<Parameters<typeof BillFormCard>[0]> = {}) =>
+  renderToStaticMarkup(
+    <BillFormCard suppliers={[supplier(SUPPLIER, 'Lim Hardware'), supplier(OTHER, 'Other')]} products={[]} today="2026-10-11" actions={actions} onClose={() => {}} {...props} />,
+  );
+
+describe('the bill form’s purchase order picker', () => {
+  it('lists the chosen supplier’s approved orders, with a none choice, and no other supplier’s', () => {
+    const html = card({ editing: detail(), orders });
+    expect(html).toContain('Purchase order');
+    expect(html).toContain('PO-0003 · RM 1,200.00 · billed RM 300.00');
+    expect(html).not.toContain('PO-0009');
+    expect(html).toContain('data-option="none"');
+  });
+  it('is absent when the screen offers no orders (nothing else changes)', () => {
+    expect(card({ editing: detail() })).not.toContain('Purchase order');
+  });
+  it('marks the linked order as chosen, and still offers it when it has since been closed', () => {
+    const html = card({ editing: detail({ purchase_order_id: PO_2, purchase_order_no: 'PO-0002' }), orders: [{ id: PO_2, po_no: 'PO-0002', supplier_id: SUPPLIER, status: 'closed', total: 500, billed_total: 500, received_total: 500 }] });
+    expect(html).toContain('data-chosen="' + PO_2 + '"');
+    expect(html).toContain('PO-0002 · RM 500.00 · billed RM 500.00');
+  });
+  it('does not count the bill twice after a save that leaves the form open: its own total comes from the saved row', () => {
+    const linked = detail({ purchase_order_id: PO, purchase_order_no: 'PO-0003', total: 1000, lines: [{ ...detail().lines[0], unit_price: 1000, amount: 1000 }] });
+    const row = bill('d', { purchase_order_id: PO, purchase_order_no: 'PO-0003', total: 1000, display_status: 'draft' });
+    // The order's billed figure (1000) is just this bill: 1000 of 1200 is fine.
+    const html = card({ editing: linked, orders: [{ ...orders[0], billed_total: 1000 }], rows: [row] });
+    expect(html).not.toContain('over its total');
+  });
+  it('keeps the party-choice notes in one status container that is always there', () => {
+    const quiet = card({ editing: detail(), orders });
+    expect(quiet.match(/role="status"/g)).toHaveLength(1);
+    const html = card({ editing: detail({ purchase_order_id: PO, purchase_order_no: 'PO-0003', total: 1000, lines: [{ ...detail().lines[0], unit_price: 1000, amount: 1000 }] }), orders: [{ ...orders[0], billed_total: 1300 }] });
+    expect(html.match(/role="status"/g)).toHaveLength(1);
+    expect(html).toMatch(/role="status"[^>]*>(<p[^>]*>)?This takes/);
+  });
+  it('warns, as a status and not an alert, when the draft would take the order over its total', () => {
+    const html = card({ editing: detail({ purchase_order_id: PO, purchase_order_no: 'PO-0003', total: 1000, lines: [{ ...detail().lines[0], unit_price: 1000, amount: 1000 }] }), orders: [{ ...orders[0], billed_total: 1300 }] });
+    expect(html).toContain('role="status"');
+    expect(html).toContain('This takes the bills for PO-0003 over its total of RM 1,200.00.');
+  });
+});

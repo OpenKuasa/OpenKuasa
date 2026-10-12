@@ -38,6 +38,8 @@ export async function getPeopleViewer(client: SupabaseClient, org: CurrentOrg | 
     employeeId: linkedRow?.id ?? (isDemo ? DEMO_EMPLOYEE_ID : null),
     isHr: can(org.role, 'approve'),
     isDemo,
+    // Left out, not false, for everyone but the owner: callers compare viewers whole.
+    ...(org.role === 'owner' && !isDemo ? { isOwner: true } : {}),
     // Left out, not null, when unknown: callers compare viewers whole.
     ...(linkedRow?.name ? { employeeName: linkedRow.name } : {}),
   };

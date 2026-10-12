@@ -20,19 +20,37 @@ export type DocumentFormActions = {
   saveAndPost: (input: unknown) => Promise<FinResult<unknown> & { draftId?: string }>;
 };
 
+/**
+ * A choice tied to the chosen party, drawn after the dates: the bill form's purchase order. Held by the form
+ * (`get`/`set`), offered by the caller (`options`), advised on by `notes` (sentences shown as a status, never
+ * a refusal). Absent for every other form.
+ */
+export type PartyChoice<F> = {
+  label: string;
+  noneLabel: string;
+  options: (form: F) => { id: string; label: string }[];
+  get: (form: F) => string;
+  set: (form: F, id: string) => F;
+  notes: (form: F) => string[];
+};
+
+/** Radix Select has no empty value, so "none" is a word, as on a line's product. */
+const NO_CHOICE = 'none';
+
 const capital = (word: string) => word.charAt(0).toUpperCase() + word.slice(1);
 
 /**
- * A new bill, invoice or quotation, or a draft being changed. Saved as a
- * draft, or saved and posted (a quotation: marked as sent) in one go. `kind`
+ * A new bill, invoice, quotation or RFQ, or a draft being changed. Saved as a
+ * draft, or saved and posted (a quotation or RFQ: marked as sent) in one go. `kind`
  * says which document it is and carries its words and its rules, which are in
- * src/lib/finance/bill-form.ts, invoice-form.ts and quotation-form.ts.
+ * src/lib/finance/bill-form.ts, invoice-form.ts, quotation-form.ts and rfq-form.ts.
  */
 export function DocumentFormCard<F extends DocumentFormState>({
   kind,
   initial,
   parties,
   products,
+  partyChoice,
   actions,
   onClose,
 }: {
@@ -43,6 +61,7 @@ export function DocumentFormCard<F extends DocumentFormState>({
   parties: DocumentParty[];
   /** Active products and services. */
   products: FinanceProduct[];
+  partyChoice?: PartyChoice<F>;
   actions: DocumentFormActions;
   onClose: () => void;
 }) {
@@ -166,10 +185,59 @@ export function DocumentFormCard<F extends DocumentFormState>({
             type="date"
             value={secondDate.get(form)}
             min={kind.date(form) || undefined}
-            required
+            required={!secondDate.optional}
             onChange={(e) => edit((f) => secondDate.set(f, e.target.value))}
           />
         </div>
+        {partyChoice ? (
+          <div className="space-y-1.5 md:col-span-12">
+            <Label htmlFor={`${id}-choice`}>{partyChoice.label}</Label>
+            <Select
+              value={partyChoice.get(form) || NO_CHOICE}
+              onValueChange={(v) => edit((f) => partyChoice.set(f, v === NO_CHOICE ? '' : v))}
+            >
+              <SelectTrigger id={`${id}-choice`} className="w-full md:w-1/2">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_CHOICE}>{partyChoice.noneLabel}</SelectItem>
+                {partyChoice.options(form).map((o) => (
+                  <SelectItem key={o.id} value={o.id}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {/* One container that is always there, so a reader announces a note when it appears. */}
+            <div role="status" className="space-y-1">
+              {partyChoice.notes(form).map((note) => (
+                <p key={note} className="text-xs text-amber-600">
+                  {note}
+                </p>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {kind.extras?.map((extra, index) => (
+          <div key={extra.label} className={extra.inputMode === 'numeric' ? 'space-y-1.5 md:col-span-4' : 'space-y-1.5 md:col-span-8'}>
+            <Label htmlFor={`${id}-extra-${index}`}>{extra.label}</Label>
+            <Input
+              id={`${id}-extra-${index}`}
+              value={extra.get(form)}
+              inputMode={extra.inputMode}
+              maxLength={extra.inputMode === 'numeric' ? 3 : 500}
+              placeholder={extra.placeholder}
+              autoComplete="off"
+              aria-describedby={extra.hint ? `${id}-extra-${index}-hint` : undefined}
+              onChange={(e) => edit((f) => extra.set(f, e.target.value))}
+            />
+            {extra.hint ? (
+              <p id={`${id}-extra-${index}-hint`} className="text-xs text-muted-foreground">
+                {extra.hint}
+              </p>
+            ) : null}
+          </div>
+        ))}
 
         <fieldset
           className="space-y-2 md:col-span-12"

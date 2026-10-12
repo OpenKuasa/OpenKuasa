@@ -6,11 +6,8 @@ import { PublicFormNotice, PublicFormShell } from '@/components/reach/public-for
 import { PublicLeadForm } from '@/components/reach/public-lead-form';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
 import { SUBMISSION_MESSAGES } from '@/lib/reach/form-submissions';
-import {
-  createAnonymousClient,
-  getPublicForm,
-  recordFormView,
-} from '@/lib/reach/public-forms';
+import { countFormView } from '@/lib/reach/form-views';
+import { createAnonymousClient, getPublicForm } from '@/lib/reach/public-forms';
 import { createClient } from '@/lib/supabase/server';
 import { submitPublicFormAction } from './actions';
 
@@ -62,9 +59,9 @@ export default async function PublicFormPage({ params }: Props) {
     );
   }
 
-  // Counted with the visitor's own session, so the database can leave out a
-  // member of this workspace who is only previewing their form.
-  await recordFormView(await createClient(), id);
+  // The visitor's own session says who they are, so a member of this workspace
+  // who is only previewing their form is left out. One view per client per window.
+  await countFormView(await createClient(), id);
 
   return (
     <PublicFormShell>

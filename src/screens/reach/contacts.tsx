@@ -36,6 +36,7 @@ import {
 import type { CrmContact } from '@/lib/crm/contacts';
 import type { CrmFollowUp } from '@/lib/crm/follow-ups';
 import type { CrmContactActions } from '@/lib/crm/form-state';
+import type { BillingCustomerChoice } from '@/lib/crm/invoice-links';
 import { useHiddenColumns } from '@/screens/crm/contact-columns';
 import { ContactImportCard } from '@/screens/crm/contact-import';
 import {
@@ -252,6 +253,8 @@ type ContactsScreenProps = {
   followUps?: Record<string, CrmFollowUp[]>;
   /** Present only when the signed-in person may change contacts. */
   actions?: CrmContactActions;
+  /** Bendahara's customers, for the form's "Billing customer" picker. Kasturi only. */
+  billingCustomers?: BillingCustomerChoice[];
 };
 
 export default function ContactsScreen({
@@ -259,6 +262,7 @@ export default function ContactsScreen({
   totalContacts,
   followUps,
   actions,
+  billingCustomers,
 }: ContactsScreenProps = {}) {
   // With live contacts, only what is backed by real data is shown: the total
   // and the table. The trend, score and pipeline cards are sample figures and
@@ -382,6 +386,7 @@ export default function ContactsScreen({
             key={editing?.id ?? 'new'}
             action={actions.save}
             editing={editing}
+            billingCustomers={billingCustomers}
             // An edit is finished once saved. After adding, the cleared form
             // stays for the next contact until it is closed.
             onSaved={() => {

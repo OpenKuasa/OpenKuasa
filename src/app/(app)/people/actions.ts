@@ -24,6 +24,7 @@ import {
   updateEmployee,
   updateEmployeeInput,
 } from '@/lib/people/capabilities';
+import { removeDocumentFiles } from '@/lib/people/document-files-server';
 import { PEOPLE_PATHS } from '@/lib/people/paths';
 import { createSupabasePeopleData } from '@/lib/people/supabase';
 import type { EmployeePrivate } from '@/lib/people/types';
@@ -69,7 +70,8 @@ export async function setEmployeeStatusAction(input: unknown) {
   return run(setEmployeeStatusInput, input, setEmployeeStatus);
 }
 export async function deleteEmployeeAction(input: unknown) {
-  return run(deleteEmployeeInput, input, deleteEmployee);
+  // The database returns the employee's document files; they are removed here, one path at a time, after the delete.
+  return run(deleteEmployeeInput, input, (ctx, parsed) => deleteEmployee(ctx, parsed, removeDocumentFiles));
 }
 export async function linkEmployeeToMemberAction(input: unknown) {
   return run(linkEmployeeToMemberInput, input, linkEmployeeToMember);

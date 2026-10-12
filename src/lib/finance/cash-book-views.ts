@@ -12,7 +12,7 @@ import { toCsv } from './csv';
 import type { ExpenseDisplayStatus, ExpenseRow } from './expenses';
 import { rmShort } from './format';
 import { PAYMENT_METHOD_LABELS } from './money';
-import { type Stat, count, lastMonths, monthOf, sum, thousands } from './view-helpers';
+import { type Stat, count, displayDate, lastMonths, monthOf, sum, thousands } from './view-helpers';
 
 /* ---- the period selector ------------------------------------------- */
 
@@ -260,6 +260,78 @@ export function cashReceiptsCsv(rows: CashReceiptRow[]): string {
       CASH_RECEIPT_STATUS_LABELS[r.status],
     ]),
   );
+}
+
+export type CashReceiptAction = 'edit' | 'post' | 'delete' | 'void';
+
+/**
+ * What a receipt's row menu offers, by its status and by whether the person
+ * may sign off (an owner or admin). A draft is edited or deleted by anyone
+ * who may write; posting it, and voiding a posted receipt, are sign-offs,
+ * which the database refuses to anyone else (FIN14), so they are not offered.
+ * A void receipt offers nothing. The same for both kinds: a receipt against
+ * invoices that was recorded on Payments In can be voided here too.
+ */
+export function cashReceiptActions(row: CashReceiptRow, canSignOff: boolean): CashReceiptAction[] {
+  if (row.status === 'draft') return canSignOff ? ['edit', 'post', 'delete'] : ['edit', 'delete'];
+  if (row.status === 'posted') return canSignOff ? ['void'] : [];
+  return [];
+}
+
+/** A receipt the person just posted or voided, kept so the screen can tell whether it is in the list. */
+export type WrittenReceipt = { id: string; kind: 'posted' | 'voided'; number: string; date: string };
+
+/**
+ * What to say when the receipt just posted or voided is not among the rows on
+ * screen; null when it is, so there is nothing to say. Worked out at render
+ * from the rows listed now, so changing the period, the filter or the search
+ * updates it. `inMatching` is whether it is among the rows the period, status
+ * filter and search keep; `inShown` whether it is among those on screen (the
+ * table shows ten until "View all"). The first reason that hides it is given:
+ * a posted receipt dated outside the period ("All time" holds every date), a
+ * status filter that cannot show it (a posted receipt under Draft or Void; a
+ * voided one under All except void or Posted), and otherwise search text or
+ * the ten-row limit.
+ */
+export function receiptHiddenNote(
+  written: WrittenReceipt,
+  today: string,
+  period: CashBookPeriod,
+  filter: CashReceiptFilter,
+  inMatching: boolean,
+  inShown: boolean,
+): string | null {
+  if (inShown) return null;
+  if (!inMatching) {
+    if (written.kind === 'posted' && !inPeriod(written.date, today, period)) {
+      return `Receipt ${written.number} dated ${displayDate(written.date)} was posted. It is outside ${CASH_BOOK_PERIOD_LABELS[period].toLowerCase()}: choose a longer period to see it.`;
+    }
+    if (written.kind === 'posted' && (filter === 'draft' || filter === 'void')) {
+      return `Receipt ${written.number} was posted. Choose Posted in the status filter to see it.`;
+    }
+    if (written.kind === 'voided' && (filter === 'open' || filter === 'posted')) {
+      return `Receipt ${written.number} was voided. Choose Void in the status filter to see it.`;
+    }
+  }
+  return `Receipt ${written.number} was ${written.kind}. Clear the search or choose View all to see it.`;
+}
+
+/** How a receipt is named in a question and to a screen reader: "RC-0007 from Aiman", "the draft receipt from Aiman", "the draft receipt". */
+export function receiptName(row: CashReceiptRow): string {
+  const what = row.number ?? (row.status === 'draft' ? 'the draft receipt' : 'the receipt');
+  return row.party_name ? `${what} from ${row.party_name}` : what;
+}
+
+/** What voiding a posted receipt does, for the question that asks. */
+export function receiptVoidEffect(row: CashReceiptRow): string {
+  return row.kind === 'invoice'
+    ? 'The invoices it paid will owe that amount again.'
+    : 'It will no longer count as money received.';
+}
+
+/** What a draft holds while it waits, for the question that asks whether to delete it. */
+export function receiptDeleteEffect(row: CashReceiptRow): string {
+  return row.kind === 'invoice' ? 'What it holds of its invoices is freed. ' : '';
 }
 
 /* ---- Payment Vouchers ----------------------------------------------- */

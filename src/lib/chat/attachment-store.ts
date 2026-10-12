@@ -6,35 +6,14 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { isAttachable, isFilePart, type FilePart } from '@/lib/chat/attachments';
+import { dataUrlBytes, isFilePart, sniffAttachment } from '@/lib/chat/attachments';
+import { errorCodeOf } from '@/lib/ai/call-log';
 import type { StoredFileRef } from '@/lib/chat/stored-parts';
 
 const BUCKET = 'chat-attachments';
 const SIGNED_FOR_SECONDS = 60 * 60;
 /** Most a request may pull back out of storage for the model, in bytes. */
 const RESOLVE_MAX_BYTES = 8 * 1024 * 1024;
-
-const TEXT_NAME = /\.(txt|csv|md)$/i;
-
-function dataUrlBytes(url: string): Buffer | null {
-  const match = /^data:[^,]*?(;base64)?,([\s\S]*)$/.exec(url);
-  if (!match) return null;
-  try {
-    return match[1]
-      ? Buffer.from(match[2], 'base64')
-      : Buffer.from(decodeURIComponent(match[2]), 'utf8');
-  } catch {
-    return null;
-  }
-}
-
-/** Browsers name text files loosely (a CSV may arrive as a spreadsheet type). */
-function contentType(part: FilePart): string {
-  if (part.mediaType.startsWith('image/') || part.mediaType === 'application/pdf') {
-    return part.mediaType;
-  }
-  return 'text/plain';
-}
 
 /**
  * Uploads the files of a question. Resolves to what to save in their place:
@@ -53,24 +32,26 @@ export async function storeQuestionFiles(
   for (const part of parts) {
     if (!isFilePart(part)) continue;
     const name = part.filename?.trim() || 'a file';
-    const bytes = isAttachable(part) ? dataUrlBytes(part.url) : null;
-    if (!bytes) {
+    const bytes = dataUrlBytes(part.url);
+    // Kept under the type its bytes say it is, never the label it arrived with.
+    const type = bytes ? sniffAttachment(bytes, part) : null;
+    if (!bytes || !type) {
       lost.push(name);
       continue;
     }
     const path = `${userId}/${threadId}/${crypto.randomUUID()}`;
     const { error } = await supabase.storage
       .from(BUCKET)
-      .upload(path, bytes, { contentType: contentType(part), upsert: false });
+      .upload(path, bytes, { contentType: type, upsert: false });
     if (error) {
-      console.error('[chat] could not keep an attachment:', error.message);
+      console.error('[chat] could not keep an attachment:', errorCodeOf(error));
       lost.push(name);
       continue;
     }
     kept.push({
       type: 'file',
       // Text files keep a text type so they are read as text when sent again.
-      mediaType: contentType(part),
+      mediaType: type,
       path,
       ...(part.filename ? { filename: part.filename } : {}),
     });
@@ -89,7 +70,7 @@ export async function signStoredFiles(
     .from(BUCKET)
     .createSignedUrls(paths, SIGNED_FOR_SECONDS);
   if (error) {
-    console.error('[chat] could not open attachments:', error.message);
+    console.error('[chat] could not open attachments:', errorCodeOf(error));
     return links;
   }
   for (const row of data ?? []) {
@@ -147,12 +128,13 @@ export async function resolveStoredFiles(
       const path = storedPathOf(part.url, userId);
       const file = path ? await supabase.storage.from(BUCKET).download(path) : null;
       const bytes = file?.data ? Buffer.from(await file.data.arrayBuffer()) : null;
-      if (!bytes || bytes.length > budget) {
+      // A stored file is checked like a new one: what it is comes from its bytes.
+      const mediaType = bytes ? sniffAttachment(bytes, part) : null;
+      if (!bytes || !mediaType || bytes.length > budget) {
         next.push({ type: 'text', text: `\n\n[Attached earlier, no longer available: ${name}]` });
         continue;
       }
       budget -= bytes.length;
-      const mediaType = TEXT_NAME.test(part.filename ?? '') ? 'text/plain' : part.mediaType;
       next.push({
         ...part,
         mediaType,
@@ -172,10 +154,10 @@ export async function removeThreadFiles(
 ): Promise<void> {
   const folder = `${userId}/${threadId}`;
   const { data, error } = await supabase.storage.from(BUCKET).list(folder, { limit: 1000 });
-  if (error) console.error('[chat] could not list attachments:', error.message);
+  if (error) console.error('[chat] could not list attachments:', errorCodeOf(error));
   if (error || !data || data.length === 0) return;
   const { error: removeErr } = await supabase.storage
     .from(BUCKET)
     .remove(data.map((file) => `${folder}/${file.name}`));
-  if (removeErr) console.error('[chat] could not remove attachments:', removeErr.message);
+  if (removeErr) console.error('[chat] could not remove attachments:', errorCodeOf(removeErr));
 }

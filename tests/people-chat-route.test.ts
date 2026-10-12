@@ -161,6 +161,13 @@ const sealForWorkspace = () => {
 };
 const { PEOPLE_TOOL_NAMES } = await import('@/lib/ai/people-tools');
 const { PEOPLE_WRITE_TOOL_NAMES } = await import('@/lib/ai/products');
+// The route answers an approval from the server's record of the change. Here that record is what an earlier
+// request would have left: every change call the conversation holds, kept as proposed.
+vi.mock('@/lib/chat/approvals', async () => {
+  const { proposedBefore } = await import('./helpers/approvals');
+  return { chatApprovals: async (chat: { messages: never[] }) => proposedBefore(chat.messages) };
+});
+
 const { POST } = await import('@/app/api/people/chat/route');
 const { DEMO_ORG_SLUG } = await import('@/lib/people/types');
 
@@ -175,7 +182,7 @@ const SELF_TOOLS = [
 const CLOCK_TOOLS = ['clockIn', 'clockOut', 'getMyAttendanceToday'];
 /** What an owner or admin with no employee record holds: every change tool but the clock ones, and the settings lookup. */
 const UNLINKED_OWNER_TOOLS = [
-  ...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getAttendanceSettings',
+  ...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getAttendanceSettings', 'listLetterTemplates',
   ...PEOPLE_WRITE_TOOL_NAMES.filter((name) => name !== 'clockIn' && name !== 'clockOut'),
 ];
 
@@ -265,7 +272,8 @@ describe('POST /api/people/chat gating', () => {
     expect(JSON.parse(text)).toMatchObject({ code: 'data_unavailable' });
     expect(text).not.toContain('secret db detail');
     expect(ctl.usedKeys).toEqual([]);
-    expect(spy).toHaveBeenCalledWith('[ask-lekiu] could not load the workspace:', 'secret db detail');
+    expect(spy).toHaveBeenCalledWith('[ask-lekiu] could not load the workspace:', 'Error');
+    expect(JSON.stringify(spy.mock.calls)).not.toContain('secret db detail');
     spy.mockRestore();
   });
 });
@@ -291,7 +299,8 @@ describe('POST /api/people/chat happy path', () => {
 
   it('tells the tools an owner is HR', async () => {
     await (await POST(post(validBody))).text();
-    expect(ctl.captured!.viewer).toEqual({ employeeId: null, isHr: true, isDemo: false });
+    // An owner, and marked as one: the owner alone may decide their own request.
+    expect(ctl.captured!.viewer).toEqual({ employeeId: null, isHr: true, isDemo: false, isOwner: true });
   });
 
   it('tells the tools a member is not HR, and which employee they are', async () => {
@@ -449,7 +458,9 @@ describe('POST /api/people/chat claims and overtime', () => {
     for (const name of [...MEMBER_PAY, ...DECIDING]) expect(held, name).not.toContain(name);
   });
 
-  const PHOTO = 'data:image/png;base64,' + Buffer.from('the photo').toString('base64');
+  // A real PNG's first bytes: the server tells a file's type from them, not from its label.
+  const PHOTO_BYTES = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('the photo')]);
+  const PHOTO = 'data:image/png;base64,' + PHOTO_BYTES.toString('base64');
   const question = {
     id: 'm1',
     role: 'user',
@@ -466,7 +477,7 @@ describe('POST /api/people/chat claims and overtime', () => {
     const write = ctl.captured!.write!;
     expect(write.userId).toBe('u1');
     expect(write.receipt?.mediaType).toBe('image/png');
-    expect(write.receipt?.bytes.toString()).toBe('the photo');
+    expect(write.receipt?.bytes.toString()).toBe(PHOTO_BYTES.toString());
   });
 
   it('hands the tools no receipt when the newest question has no file, and none from the request body', async () => {
@@ -494,13 +505,13 @@ describe('POST /api/people/chat claims and overtime', () => {
     });
     // The first request proposes the claim: nothing is saved while the card waits.
     await (await POST(post({ messages: [question, card('approval-requested')] }))).text();
-    expect(ctl.captured!.write!.receipt?.bytes.toString()).toBe('the photo');
+    expect(ctl.captured!.write!.receipt?.bytes.toString()).toBe(PHOTO_BYTES.toString());
     expect(ctl.submitted).toEqual([]);
     // The second request carries the answer. The newest user message is still the question with the photo.
     ctl.captured = null;
     await (await POST(post({ messages: [question, card('approval-responded')] }))).text();
-    expect(ctl.captured!.write!.receipt?.bytes.toString()).toBe('the photo');
-    expect(ctl.uploaded).toEqual([{ userId: 'u1', bytes: 'the photo', mediaType: 'image/png' }]);
+    expect(ctl.captured!.write!.receipt?.bytes.toString()).toBe(PHOTO_BYTES.toString());
+    expect(ctl.uploaded).toEqual([{ userId: 'u1', bytes: PHOTO_BYTES.toString(), mediaType: 'image/png' }]);
     expect(ctl.submitted).toEqual([
       expect.objectContaining({ employee_id: 'emp-7', amount_cents: 8500, receipt_path: 'u1/uploaded.png' }),
     ]);
@@ -520,15 +531,15 @@ describe('POST /api/people/chat claims and overtime', () => {
       role: 'user',
       parts: [
         { type: 'text', text: 'dan satu lagi' },
-        { type: 'file', mediaType: 'application/pdf', url: 'data:application/pdf;base64,' + Buffer.from('newer file').toString('base64') },
+        { type: 'file', mediaType: 'application/pdf', url: 'data:application/pdf;base64,' + Buffer.from('%PDF-1.4 newer file').toString('base64') },
       ],
     };
     await (await POST(post({ messages: [question, waiting, newerWithFile] }))).text();
-    expect(ctl.captured!.write!.receipt?.bytes.toString()).toBe('the photo');
+    expect(ctl.captured!.write!.receipt?.bytes.toString()).toBe(PHOTO_BYTES.toString());
     expect(ctl.captured!.write!.receipt?.mediaType).toBe('image/png');
     ctl.captured = null;
     await (await POST(post({ messages: [question, waiting, { id: 'm3', role: 'user', parts: [{ type: 'text', text: 'hello' }] }] }))).text();
-    expect(ctl.captured!.write!.receipt?.bytes.toString()).toBe('the photo');
+    expect(ctl.captured!.write!.receipt?.bytes.toString()).toBe(PHOTO_BYTES.toString());
     // And a claim whose own question had no file never takes a newer question's file.
     ctl.captured = null;
     const plain = { id: 'm0', role: 'user', parts: [{ type: 'text', text: 'tuntut teksi' }] };
@@ -674,5 +685,57 @@ describe('POST /api/people/chat performance, training and announcement tools', (
     expect(system).toContain('\nPERFORMANCE, TRAINING AND ANNOUNCEMENTS\n');
     expect(system.indexOf('\nPERFORMANCE, TRAINING AND ANNOUNCEMENTS\n')).toBeLessThan(system.indexOf('\nPAYROLL\n'));
     expect(system).not.toContain('You cannot post an announcement');
+  });
+});
+
+describe('POST /api/people/chat letter and document tools', () => {
+  const HR_TOOLS = ['saveLetter', 'startLetterFromTemplate', 'issueLetter', 'requestAcknowledgement', 'listLetterTemplates'];
+  const held = async () => {
+    const res = await POST(post(validBody));
+    expect(res.status).toBe(200);
+    await res.text();
+    return ctl.calls[0].tools;
+  };
+
+  it.each(['owner', 'admin'])('gives an %s all of them, linked to an employee record or not', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    for (const linked of [null, { id: 'emp-3' }]) {
+      ctl.calls = [];
+      ctl.linkedEmployee = linked;
+      const tools = await held();
+      for (const name of HR_TOOLS) expect(tools, name).toContain(name);
+    }
+  });
+
+  it.each(['member', 'viewer'])('gives a linked or unlinked %s none of them: absent, not disabled', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    for (const linked of [null, { id: 'emp-7' }]) {
+      ctl.calls = [];
+      ctl.linkedEmployee = linked;
+      const tools = await held();
+      for (const name of HR_TOOLS) expect(tools, name).not.toContain(name);
+    }
+  });
+
+  it.each(['owner', 'admin', 'member', 'viewer'])('gives a %s in the demo workspace none of them', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    ctl.slug = DEMO_ORG_SLUG;
+    const tools = await held();
+    for (const name of HR_TOOLS) expect(tools, name).not.toContain(name);
+  });
+
+  it('gives everyone the two lookups, and sends the model the rules in a section of their own', async () => {
+    for (const role of ['owner', 'member']) {
+      ctl.calls = [];
+      ctl.org = { orgId: 'org1', role };
+      ctl.linkedEmployee = { id: 'emp-3' };
+      const tools = await held();
+      for (const name of ['listDocuments', 'listLetters']) expect(tools, name).toContain(name);
+      expect(ctl.calls[0].system).toContain('\nLETTERS AND DOCUMENTS\n');
+    }
+  });
+
+  it('every change tool is on the list of tools that wait for approval', () => {
+    for (const name of HR_TOOLS.filter((n) => n !== 'listLetterTemplates')) expect(PEOPLE_WRITE_TOOL_NAMES).toContain(name);
   });
 });

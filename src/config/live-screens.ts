@@ -28,6 +28,9 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'crm/calendar',
   // Reads Bendahara's invoices; they are created and changed on finance/invoices.
   'crm/billings',
+  'crm/landing-page',
+  // Writing and audiences are live; sending is not connected yet.
+  'crm/broadcast',
   // Shared with Jebat's analytics (registry 'reach/reports'); /reach/reports
   // is not a nav item, so the screen is served at /crm/reports.
   'crm/reports',
@@ -79,6 +82,8 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'finance/invoices',
   'finance/payments-in',
   'finance/quotations',
+  'finance/rfqs',
+  'finance/purchase-orders',
   'finance/credit-notes',
   'finance/refunds',
   'finance/supplier-bills',
@@ -86,6 +91,7 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'finance/cash-receipts',
   'finance/payment-vouchers',
   'finance/expenses',
+  'finance/banking',
 ]);
 
 /** Whether the app path is a screen that is not connected to live data yet. */

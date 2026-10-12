@@ -78,7 +78,7 @@ describe('who holds which leave tools', () => {
     // This owner has no linked employee record, so the clock tools (and "have I clocked in?") are not theirs.
     const held = Object.keys(tools(HR_VIEWER, hr()));
     expect(held.sort()).toEqual(
-      [...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getAttendanceSettings', ...PEOPLE_WRITE_TOOL_NAMES]
+      [...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getAttendanceSettings', 'listLetterTemplates', ...PEOPLE_WRITE_TOOL_NAMES]
         .filter((name) => !['clockIn', 'clockOut'].includes(name))
         .sort(),
     );

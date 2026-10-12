@@ -146,3 +146,37 @@ test('chat is locked when the key status cannot be read', async () => {
   ctl.statusError = true;
   await expectUnavailable();
 });
+
+test('a request too heavy for a free question is refused before the question is used up', async () => {
+  ctl.statusRows = [];
+  let asked = 0;
+  const refusal = { status: 413, code: 'attachment_limit' as const, error: 'Too much for a free question.' };
+  const access = await resolveChatAccess(session, user, {
+    beforeFree: () => {
+      asked += 1;
+      return refusal;
+    },
+  });
+  expect(access).toEqual({ kind: 'locked', ...refusal });
+  expect(asked).toBe(1);
+  expect(ctl.rpcs).not.toContain('consume_free_question');
+
+  // Nothing to refuse: the question is used as before.
+  ctl.rpcs = [];
+  expect(await resolveChatAccess(session, user, { beforeFree: () => null })).toEqual({ kind: 'free', remaining: 2 });
+  expect(ctl.rpcs).toContain('consume_free_question');
+});
+
+test('a turn on a workspace key is never asked the free-question check', async () => {
+  ctl.statusRows = [{ key_hint: 'sk-…cdef' }];
+  ctl.stored[ORG_A] = encryptApiKey(key, ORG_A);
+  let asked = 0;
+  const access = await resolveChatAccess(session, user, {
+    beforeFree: () => {
+      asked += 1;
+      return { status: 413, code: 'attachment_limit', error: 'x' };
+    },
+  });
+  expect(access.kind).toBe('byok');
+  expect(asked).toBe(0);
+});

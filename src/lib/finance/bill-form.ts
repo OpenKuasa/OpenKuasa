@@ -6,6 +6,7 @@
  */
 import { billTotals } from './bill-math';
 import { type BillDetail, BILL_MESSAGES, saveBillInput } from './bills';
+import { rm } from './format';
 import {
   type DocumentFormKind,
   type LineDraft,
@@ -34,6 +35,8 @@ export type BillForm = {
   /** Once the person sets the due date by hand, it is no longer recalculated. */
   dueEdited: boolean;
   notes: string;
+  /** The purchase order the bill is raised against; '' for none. */
+  purchase_order_id: string;
   lines: LineDraft[];
 };
 
@@ -46,6 +49,7 @@ export function newBillForm(today: string, lineKey: string): BillForm {
     due_date: today,
     dueEdited: false,
     notes: '',
+    purchase_order_id: '',
     lines: [emptyLine(lineKey)],
   };
 }
@@ -60,6 +64,7 @@ export function billFormFromDetail(bill: BillDetail): BillForm {
     due_date: bill.due_date,
     dueEdited: true,
     notes: bill.notes ?? '',
+    purchase_order_id: bill.purchase_order_id ?? '',
     lines: bill.lines.map(lineDraft),
   };
 }
@@ -74,6 +79,8 @@ export function withSupplier(form: BillForm, supplier: { id: string; payment_ter
   return {
     ...form,
     supplier_id: supplier.id,
+    // An order belongs to one supplier, so choosing another one leaves it behind.
+    purchase_order_id: supplier.id === form.supplier_id ? form.purchase_order_id : '',
     due_date: form.dueEdited ? form.due_date : defaultDueDate(form.bill_date, supplier.payment_terms_days),
   };
 }
@@ -103,9 +110,68 @@ export function billPayload(form: BillForm) {
     supplier_ref: form.supplier_ref,
     bill_date: form.bill_date,
     due_date: form.due_date,
+    // Always sent, so that choosing none unlinks; callers that leave it out leave the link alone.
+    purchase_order_id: form.purchase_order_id,
     notes: form.notes,
     lines: form.lines.map(linePayload),
   };
+}
+
+/** An order the picker can offer: what the label and the warnings need. */
+export type BillOrderOption = {
+  id: string;
+  po_no: string | null;
+  supplier_id: string;
+  status: string;
+  total: number;
+  billed_total: number;
+  received_total: number;
+};
+
+/**
+ * The orders the picker offers for the chosen supplier: their approved ones, labelled with number, total and
+ * billed so far, and the order this draft is already linked to even if it has since been closed, so saving
+ * does not drop the link.
+ */
+export function ordersForSupplier(orders: BillOrderOption[], supplierId: string, currentId: string): { id: string; label: string }[] {
+  if (!supplierId) return [];
+  return orders
+    .filter((o) => o.supplier_id === supplierId && (o.status === 'approved' || o.id === currentId))
+    .map((o) => ({ id: o.id, label: `${o.po_no ?? 'Purchase order'} · ${rm(o.total)} · billed ${rm(o.billed_total)}` }));
+}
+
+/**
+ * How much of the chosen order's billed figure is this very bill: its saved total, when the saved bill with
+ * `billId` is linked to that order; nothing for a bill never saved or linked elsewhere. Read from the list's
+ * rows rather than the draft the form opened with, because a save that leaves the form open changes them.
+ */
+export function ownCountedTotal(
+  rows: { id: string; purchase_order_id: string | null; total: number }[],
+  billId: string | undefined,
+  orderId: string,
+): number {
+  if (!billId || !orderId) return 0;
+  const saved = rows.find((b) => b.id === billId);
+  return saved && saved.purchase_order_id === orderId ? saved.total : 0;
+}
+
+const cents = (n: number) => Math.round(n * 100);
+
+/**
+ * What to tell the person, in sentences, when this bill would take its order past what was ordered or past
+ * what has arrived. `ownBilled` is how much of the order's `billed_total` is this bill's own saved total
+ * (when a linked draft is being changed), so it is not counted twice. Advisory only: it never blocks saving.
+ */
+export function billOrderWarnings(lines: LineDraft[], order: BillOrderOption | null, ownBilled: number): string[] {
+  if (!order) return [];
+  const total = billTotals(lines.map(lineNumbers)).total;
+  if (!(total > 0)) return [];
+  const afterThis = cents(total) + cents(order.billed_total) - cents(ownBilled);
+  const no = order.po_no ?? 'this order';
+  const warnings: string[] = [];
+  if (afterThis > cents(order.total)) warnings.push(`This takes the bills for ${no} over its total of ${rm(order.total)}.`);
+  if (afterThis > cents(order.received_total)) warnings.push(`This is more than has arrived on ${no} so far (${rm(order.received_total)}).`);
+  return warnings;
 }
 
 /**

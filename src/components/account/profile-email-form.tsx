@@ -9,11 +9,14 @@ import { SaveBar, useSettingsForm } from './settings-form';
 export function ProfileEmailForm({
   email,
   pendingEmail,
+  hasAuthenticator,
   readOnly,
 }: {
   email: string | null;
   /** A new address that has been requested but not confirmed yet. */
   pendingEmail: string | null;
+  /** Two-factor authentication is on, so a code is asked for as well. */
+  hasAuthenticator: boolean;
   readOnly: boolean;
 }) {
   const { state, onSubmit, pending } = useSettingsForm(
@@ -21,8 +24,19 @@ export function ProfileEmailForm({
   );
   const disabled = readOnly || !email;
 
+  // The shared hook keeps field values after a save. That suits settings, not
+  // secrets: the values are already captured, so empty these two right away.
+  const submit = (event: React.FormEvent<HTMLFormElement>) => {
+    const form = event.currentTarget;
+    onSubmit(event);
+    for (const name of ['current', 'code']) {
+      const input = form.elements.namedItem(name);
+      if (input instanceof HTMLInputElement) input.value = '';
+    }
+  };
+
   return (
-    <form onSubmit={onSubmit}>
+    <form onSubmit={submit}>
       <Card>
         <CardHeader>
           <CardTitle>Sign-in email</CardTitle>
@@ -52,11 +66,37 @@ export function ProfileEmailForm({
                 disabled={disabled}
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="email-current-password">Current password</Label>
+              <Input
+                id="email-current-password"
+                name="current"
+                type="password"
+                autoComplete="current-password"
+                required
+                disabled={disabled}
+              />
+            </div>
+            {hasAuthenticator ? (
+              <div className="space-y-2">
+                <Label htmlFor="email-mfa-code">Authenticator code</Label>
+                <Input
+                  id="email-mfa-code"
+                  name="code"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  placeholder="6-digit code"
+                  maxLength={7}
+                  required
+                  disabled={disabled}
+                />
+              </div>
+            ) : null}
           </div>
           <p className="text-xs text-muted-foreground">
             {disabled
               ? 'The demo workspace has no sign-in email to change.'
-              : 'We’ll email a confirmation link to the new address. Nothing changes until you open that link: until then you keep signing in with your current email.'}
+              : `For your security we ask for your password${hasAuthenticator ? ' and an authenticator code' : ''} first. We’ll then email a confirmation link to the new address. Nothing changes until you open that link: until then you keep signing in with your current email.`}
           </p>
           {pendingEmail && !disabled ? (
             <p

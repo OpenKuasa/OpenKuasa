@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   serviceClient: vi.fn(),
   /** The service client's one call here: has this job had too many applications just now? */
   rpc: vi.fn(),
+  /** The per-client limit: null lets the application through, a message stops it. */
+  applyLimited: vi.fn(),
 }));
 
 vi.mock('@/lib/hire/public-careers', async (importOriginal) => ({
@@ -36,6 +38,11 @@ vi.mock('@/lib/hire/cv-store', async (importOriginal) => ({
 vi.mock('@/lib/supabase/service', () => ({ serviceClient: mocks.serviceClient }));
 vi.mock('@/lib/auth/viewer', () => ({ hasSupabaseEnv: mocks.hasSupabaseEnv }));
 vi.mock('@/lib/supabase/anonymous', () => ({ createAnonymousClient: () => ({ anonymous: true }) }));
+vi.mock('@/lib/security/limits', () => ({ applyLimited: mocks.applyLimited }));
+// The server's own client for an application without a file, and what it falls back to.
+vi.mock('@/lib/supabase/server-writer', () => ({
+  serverWriteClient: (fallback: () => unknown) => ({ server: true, fallback: fallback() }),
+}));
 
 import * as actions from '@/app/careers/[orgId]/[jobId]/actions';
 
@@ -77,6 +84,9 @@ const VALUES = {
 
 /** The service client the action is handed. */
 const SERVICE = { service: true, rpc: mocks.rpc };
+/** What an application without a file is sent with: the server, falling back to no session at all. */
+const WRITER = { server: true, fallback: { anonymous: true } };
+const LIMITED = 'Too many attempts from your network. Please try again in 12 minutes.';
 /** Where the store says it put the file. */
 const PATH = `${ORG}/${JOB}/33333333-3333-4333-8333-333333333333.pdf`;
 const PDF = new TextEncoder().encode('%PDF-1.7\n1 0 obj\n<<>>\nendobj\n');
@@ -108,6 +118,7 @@ beforeEach(() => {
   mocks.rpc.mockResolvedValue({ data: false, error: null });
   mocks.storeCv.mockResolvedValue(PATH);
   mocks.removeCv.mockResolvedValue(true);
+  mocks.applyLimited.mockResolvedValue(null);
 });
 
 describe('what the file offers', () => {
@@ -214,7 +225,7 @@ describe('the job is read again by the action', () => {
     await applyAction(ORG, JOB, undefined, post(filled));
     expect(mocks.submitPublicApplication).toHaveBeenCalledTimes(1);
     const [client, orgId, jobId, values, form] = mocks.submitPublicApplication.mock.calls[0];
-    expect(client).toEqual({ anonymous: true });
+    expect(client).toEqual(WRITER);
     expect([orgId, jobId]).toEqual([ORG, JOB]);
     // Ringgit as typed: the sender converts it.
     expect(values).toEqual({ ...VALUES, ...filled });
@@ -346,7 +357,7 @@ describe('a post with no file in it', () => {
     const formData = withFile({}, new Uint8Array(0), '', 'application/octet-stream');
     expect(await applyAction(ORG, JOB, undefined, formData)).toEqual({ done: { firstName: 'Aisyah' } });
     expect(mocks.submitPublicApplication).toHaveBeenCalledTimes(1);
-    expect(mocks.submitPublicApplication.mock.calls[0]).toEqual([{ anonymous: true }, ORG, JOB, VALUES, NO_EXTRAS]);
+    expect(mocks.submitPublicApplication.mock.calls[0]).toEqual([WRITER, ORG, JOB, VALUES, NO_EXTRAS]);
     expect(mocks.serviceClient).not.toHaveBeenCalled();
     expect(mocks.rpc).not.toHaveBeenCalled();
     expect(mocks.storeCv).not.toHaveBeenCalled();
@@ -371,6 +382,56 @@ describe('a post with no file in it', () => {
     expect(state?.errors).toEqual({ cv_url: 'Upload a PDF or paste a link to your CV.' });
     expect(mocks.submitPublicApplication).not.toHaveBeenCalled();
     expect(mocks.storeCv).not.toHaveBeenCalled();
+  });
+});
+
+describe('the limit on one client', () => {
+  it('is asked once for an application without a file, and not about files', async () => {
+    await applyAction(ORG, JOB, undefined, post());
+    expect(mocks.applyLimited).toHaveBeenCalledExactlyOnceWith(false);
+  });
+
+  it('is asked once for an application with a file, about files too, before anything is stored', async () => {
+    mocks.applyLimited.mockImplementation(async () => {
+      expect(mocks.serviceClient).not.toHaveBeenCalled();
+      expect(mocks.storeCv).not.toHaveBeenCalled();
+      return null;
+    });
+    await applyAction(ORG, JOB, undefined, withFile({}, PDF));
+    expect(mocks.applyLimited).toHaveBeenCalledExactlyOnceWith(true);
+    expect(mocks.storeCv).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops an application without a file: nothing is sent, what was typed is kept', async () => {
+    mocks.applyLimited.mockResolvedValue(LIMITED);
+    expect(await applyAction(ORG, JOB, undefined, post())).toEqual({ error: LIMITED, values: VALUES });
+    expect(mocks.submitPublicApplication).not.toHaveBeenCalled();
+  });
+
+  it('stops an application with a file: nothing is stored or sent, and the file is to be chosen again', async () => {
+    mocks.applyLimited.mockResolvedValue(LIMITED);
+    expect(await applyAction(ORG, JOB, undefined, withFile({}, PDF))).toEqual({
+      error: LIMITED, values: VALUES, fileDropped: true,
+    });
+    expect(mocks.serviceClient).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.storeCv).not.toHaveBeenCalled();
+    expect(mocks.submitPublicApplication).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a filled honeypot', () => post({ [APPLY_HONEYPOT]: 'http://spam' })],
+    ['a form with a problem', () => post({ email: 'not-an-email' })],
+    ['a file that is not a PDF', () => withFile({}, new TextEncoder().encode('hello'), 'cv.pdf')],
+  ])('is not used up by %s', async (_name, make) => {
+    await applyAction(ORG, JOB, undefined, make());
+    expect(mocks.applyLimited).not.toHaveBeenCalled();
+  });
+
+  it('is not used up by a job that is not taking applications', async () => {
+    mocks.readPublicJob.mockResolvedValue(found({ accepting: false }));
+    await applyAction(ORG, JOB, undefined, post());
+    expect(mocks.applyLimited).not.toHaveBeenCalled();
   });
 });
 

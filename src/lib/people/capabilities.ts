@@ -341,9 +341,12 @@ export async function createEmployee(
       .from('hr_employee_private')
       .insert({ ...priv, employee_id: saved.id, org_id: ctx.orgId });
     if (privateError) {
-      // Two tables, no transaction: take the employee back out so nothing is left half-made.
-      const undo = await ctx.client.from('hr_employees').delete().eq('id', saved.id).eq('org_id', ctx.orgId);
+      // Two tables, no transaction: take the employee back out so nothing is left half-made. Through the
+      // function, as every delete of an employee is: signed-in users hold no DELETE on the table.
+      const undo = await ctx.client.rpc('hr_delete_employee', { p_org: ctx.orgId, p_employee: saved.id });
       if (undo.error) writeFailed('createEmployee (rollback)', undo.error);
+      // null: the function deleted nothing, so the employee is still there.
+      else if (!undo.data) writeFailed('createEmployee (rollback)', { message: 'the employee was not removed' });
       return writeFailed('createEmployee (private details)', privateError);
     }
   }
@@ -430,26 +433,39 @@ export async function setEmployeeStatus(
   return updateEmployee(ctx, { id: target, status });
 }
 
-/** Deletes an employee. Their leave, claims, payslips and every other HR row go with them. */
+/**
+ * Deletes an employee. Their leave, claims, payslips and every other HR row go with them. It goes through
+ * `hr_delete_employee`, which hands back the paths of the employee's document files (already released); each is
+ * then removed by `removeFiles` (the server's `removeDocumentFiles`, one path at a time). A file that cannot be
+ * removed never fails the delete: the sweep will find it. Without `removeFiles` the files stay for the sweep.
+ * The paths are never part of the reply.
+ */
 export async function deleteEmployee(
   ctx: PeopleWriteContext,
   input: z.infer<typeof deleteEmployeeInput>,
+  removeFiles?: (paths: readonly string[]) => Promise<void>,
 ): Promise<CapResult<{ id: string; name: string }>> {
   const parsed = parseInput(deleteEmployeeInput, input);
   if (!parsed.ok) return parsed;
   const { id: target } = parsed.data;
-  const { data, error } = await ctx.client
-    .from('hr_employees')
-    .delete()
-    .eq('id', target)
-    .eq('org_id', ctx.orgId)
-    .select('id,name')
-    .maybeSingle();
+  const { data, error } = await ctx.client.rpc('hr_delete_employee', { p_org: ctx.orgId, p_employee: target });
   // A trigger refuses an employee with a paid payslip; its message is the bare code.
   if (error?.message === 'HR_EMPLOYEE_HAS_PAID_PAYSLIPS') return refuse(PAYROLL_REFUSALS.HR_EMPLOYEE_HAS_PAID_PAYSLIPS);
   if (error) return writeFailed('deleteEmployee', error);
-  if (!data) return refuse(EMPLOYEE_MISSING);
-  return { ok: true, data: data as { id: string; name: string } };
+  // null: nothing was deleted (no such employee here, or the caller may not delete it).
+  if (!data || typeof data !== 'object') return refuse(EMPLOYEE_MISSING);
+  const row = data as { id?: unknown; name?: unknown; document_paths?: unknown };
+  if (typeof row.id !== 'string' || typeof row.name !== 'string') return writeFailed('deleteEmployee', { message: 'unexpected reply' });
+  const paths = Array.isArray(row.document_paths) ? row.document_paths.filter((p): p is string => typeof p === 'string') : [];
+  if (removeFiles && paths.length > 0) {
+    try {
+      await removeFiles(paths);
+    } catch {
+      // The employee is gone; a leftover file is unreachable and the sweep finds it. Logged without any path.
+      console.error('[people-capability] deleteEmployee: document files could not be removed.');
+    }
+  }
+  return { ok: true, data: { id: row.id, name: row.name } };
 }
 
 /** Links an employee record to a workspace member's account, or unlinks it with `user_id: null`. */

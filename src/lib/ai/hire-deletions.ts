@@ -63,6 +63,8 @@ const GATE_REASON_STARTS = [
   'The date and time sent are the ones this interview already has',
   'Nothing would change:',
   'The interviewer\'s name holds a link',
+  // Not a rule of this file: the change could not be recorded for approval (see proposal-store.ts). No card either.
+  'Changes cannot be prepared right now',
 ];
 export function isGateReason(reason: unknown): boolean {
   return typeof reason === 'string' && GATE_REASON_STARTS.some((start) => reason.startsWith(start));

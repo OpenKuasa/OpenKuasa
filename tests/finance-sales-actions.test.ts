@@ -8,7 +8,7 @@ const ACCOUNT = '66666666-6666-4666-8666-666666666666';
 type Answer = { ok: true; data: unknown } | { ok: false; error: string };
 
 const ctl = vi.hoisted(() => ({
-  viewer: { userId: 'u1', orgId: 'org1', role: 'member', isDemo: false } as {
+  viewer: { userId: 'u1', orgId: 'org1', role: 'admin', isDemo: false } as {
     userId: string; orgId: string; role: string; isDemo: boolean;
   },
   /** Every data-layer call, in order: the function, the workspace it was given, and its input. */
@@ -74,6 +74,7 @@ const PATHS = [
   '/finance/refunds',
   // A payment in is a receipt: Cash Receipts lists every movement of money in.
   '/finance/cash-receipts',
+  '/finance/banking',
 ];
 const FORBIDDEN = { ok: false, error: 'You do not have permission to make changes here.' };
 
@@ -103,7 +104,8 @@ const writes: [string, (input: unknown) => Promise<Answer>, unknown, string][] =
 ];
 
 beforeEach(() => {
-  ctl.viewer = { userId: 'u1', orgId: 'org1', role: 'member', isDemo: false };
+  // An admin: posting, paying and voiding need an owner or admin. What a member may do is at the end.
+  ctl.viewer = { userId: 'u1', orgId: 'org1', role: 'admin', isDemo: false };
   ctl.calls = [];
   ctl.revalidated = [];
   ctl.answers = {};
@@ -161,6 +163,7 @@ describe('each write action', () => {
     expect(ctl.calls.map((c) => c.fn)).toEqual(['voidPayment']);
     expect(ctl.revalidated).toEqual([
       '/finance/supplier-bills', '/finance/payments-out', '/finance/customers-suppliers', '/finance/payment-vouchers',
+      '/finance/banking',
     ]);
     expect(ctl.revalidated).not.toContain('/finance/cash-receipts');
   });
@@ -283,5 +286,39 @@ describe('getInvoiceAction', () => {
     expect(await actions.getInvoiceAction({ id: INVOICE })).toEqual({ ok: false, error: 'That could not be loaded. Please try again.' });
     expect(logged).toHaveBeenCalled();
     logged.mockRestore();
+  });
+});
+
+describe('a member, who may write but not sign off', () => {
+  const NEEDS = { ok: false, error: 'Only an owner or admin can post, pay or void. Ask one of them to do this.' };
+  beforeEach(() => {
+    ctl.viewer = { userId: 'u1', orgId: 'org1', role: 'member', isDemo: false };
+  });
+
+  it('saves and deletes a draft invoice and records an e-Invois status', async () => {
+    expect((await actions.saveInvoiceAction(invoice)).ok).toBe(true);
+    expect((await actions.deleteInvoiceAction({ id: INVOICE })).ok).toBe(true);
+    expect((await actions.setEInvoiceAction(einvoice)).ok).toBe(true);
+    expect(ctl.calls.map((c) => c.fn)).toEqual(['saveInvoice', 'deleteInvoice', 'setEInvoice']);
+  });
+
+  it('is told who can post or void an invoice, or record or void money in, before anything is read or written', async () => {
+    expect(await actions.postInvoiceAction({ id: INVOICE })).toEqual(NEEDS);
+    expect(await actions.voidInvoiceAction({ id: INVOICE })).toEqual(NEEDS);
+    // Money in is posted the moment it is recorded.
+    expect(await actions.recordPaymentInAction(payment)).toEqual(NEEDS);
+    expect(await actions.voidPaymentInAction({ id: TXN })).toEqual(NEEDS);
+    expect(ctl.calls).toEqual([]);
+    expect(ctl.revalidated).toEqual([]);
+  });
+
+  it('keeps the draft from "save and post", without trying the post', async () => {
+    expect(await actions.saveAndPostInvoiceAction(invoice)).toEqual({
+      ok: false,
+      error: 'Saved as a draft. Only an owner or admin can post or issue it.',
+      draftId: INVOICE,
+    });
+    expect(ctl.calls.map((c) => c.fn)).toEqual(['saveInvoice']);
+    expect(ctl.revalidated).toEqual(PATHS);
   });
 });

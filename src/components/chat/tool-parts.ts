@@ -5,7 +5,7 @@
 
 import type { ComponentType } from 'react';
 import type { UIMessage } from 'ai';
-import { nameIn, type ItemKind, type NameFinder, type ToolResult } from '@/lib/chat/change-titles';
+import { nameIn, rowIn, type ItemKind, type NameFinder, type RowFinder, type ToolResult } from '@/lib/chat/change-titles';
 import { pickReceipt, userMessageBefore, type ReceiptState } from '@/lib/people/receipts';
 import { isFilePart } from '@/lib/chat/attachments';
 import {
@@ -49,7 +49,7 @@ type Icon = ComponentType<{ className?: string }>;
 export type AnyPart = UIMessage['parts'][number];
 
 export { approvalDetail, approvalTitle } from '@/lib/chat/change-titles';
-export type { ItemKind } from '@/lib/chat/change-titles';
+export type { ItemKind, RowFinder } from '@/lib/chat/change-titles';
 
 type ToolMeta = {
   label: string;
@@ -88,6 +88,8 @@ const TOOL_META: Record<string, ToolMeta> = {
   getDealStats: { label: 'Deal totals', Icon: ChartColumn },
   listFollowUps: { label: 'Follow-ups', Icon: ClipboardList },
   getCalendar: { label: 'Calendar', Icon: CalendarDays },
+  getBillingSummary: { label: 'Billing totals', Icon: ChartColumn },
+  listBillingInvoices: { label: 'Invoices', Icon: ClipboardList },
   getHiringOverview: { label: 'Hiring overview', Icon: PieChart },
   listJobs: { label: 'Jobs', Icon: Briefcase },
   listApplications: { label: 'Applications', Icon: ClipboardList },
@@ -133,6 +135,9 @@ const TOOL_META: Record<string, ToolMeta> = {
   listReviews: { label: 'Reviews', Icon: ClipboardList },
   listTrainings: { label: 'Trainings', Icon: Briefcase },
   listAnnouncements: { label: 'Announcements', Icon: Megaphone },
+  listDocuments: { label: 'Documents', Icon: FileText },
+  listLetters: { label: 'Letters', Icon: FileText },
+  listLetterTemplates: { label: 'Letter templates', Icon: FileText },
   getCareersPage: { label: 'Careers page', Icon: Globe },
   readCandidateCv: { label: 'Reading CV', Icon: FileText, detail: cvCandidate, running: 'Reading a CV…' },
   listContacts: { label: 'Leads', Icon: Users },
@@ -208,6 +213,7 @@ const REFUSAL_LINES: [start: string, line: string | null][] = [
   ['This interview no longer exists', null],
   ['The application this interview belongs to is no longer active', null],
   ['I could not check ', null],
+  ['Changes cannot be prepared right now', 'Changes cannot be prepared right now, so nothing was put up for approval. Try again in a few minutes.'],
 ];
 export function refusalForUser(reason: string): string {
   const known = REFUSAL_LINES.find(([start]) => reason.startsWith(start));
@@ -299,6 +305,11 @@ export function toolResults(messages: { parts: AnyPart[] }[]): ToolResult[] {
 /** Looks names up by id across a conversation's tool results. */
 export function nameFinder(messages: { parts: AnyPart[] }[]): NameFinder {
   return nameIn(toolResults(messages));
+}
+
+/** Looks rows up by id across a conversation's tool results: what a card shows as there now. */
+export function rowFinder(messages: { parts: AnyPart[] }[]): RowFinder {
+  return rowIn(toolResults(messages));
 }
 
 /** The name of the thing a change is about, when the change names it by `id`. */

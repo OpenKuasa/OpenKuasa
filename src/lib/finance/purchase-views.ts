@@ -1,5 +1,5 @@
 /**
- * What the Supplier Bills and Payments Out screens show, worked out from the
+ * What the Supplier Bills, Payments Out, RFQs and Purchase Orders screens show, worked out from the
  * rows the data layer reads. Pure, with no server imports, so the client views
  * and the tests both use it. `today` is always a YYYY-MM-DD date.
  */
@@ -8,6 +8,8 @@ import type { BillDisplayStatus, BillListRow } from './bills';
 import { toCsv } from './csv';
 import { rmShort } from './format';
 import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentMethod, type PaymentOutRow } from './money';
+import type { PurchaseOrderDelivery, PurchaseOrderListRow, PurchaseOrderStatus } from './purchase-orders';
+import type { RfqDisplayStatus, RfqListRow } from './rfqs';
 import {
   ELECTRONIC,
   METHOD_COLORS,
@@ -118,8 +120,17 @@ export function filterBills(bills: BillListRow[], query: string, filter: BillFil
 /** The bills table as a CSV file. Amounts are numbers, so a spreadsheet can add them up. */
 export function billsCsv(bills: BillListRow[]): string {
   return toCsv(
-    ['No.', 'Date', 'Supplier', 'Due', 'Total', 'Balance', 'Status'],
-    bills.map((b) => [b.bill_no, b.bill_date, b.supplier_name, b.due_date, b.total, b.balance, BILL_STATUS_LABELS[b.display_status]]),
+    ['No.', 'Date', 'Supplier', 'Due', 'Total', 'Balance', 'Status', 'Purchase order'],
+    bills.map((b) => [
+      b.bill_no,
+      b.bill_date,
+      b.supplier_name,
+      b.due_date,
+      b.total,
+      b.balance,
+      BILL_STATUS_LABELS[b.display_status],
+      b.purchase_order_no,
+    ]),
   );
 }
 
@@ -227,6 +238,217 @@ export function paymentsCsv(rows: PaymentOutRow[]): string {
       PAYMENT_METHOD_LABELS[p.method],
       p.amount,
       PAYMENT_STATUS_LABELS[p.status],
+    ]),
+  );
+}
+
+/* ---- RFQs ----------------------------------------------------------- */
+
+export const RFQ_STATUS_LABELS: Record<RfqDisplayStatus, string> = {
+  draft: 'Draft',
+  sent: 'Sent',
+  quoted: 'Quoted',
+  closed: 'Closed',
+  overdue: 'Reply overdue',
+};
+
+/** A sent RFQ whose reply-by date has passed reads "overdue"; one with no reply-by date never does. */
+export function rfqDisplayStatus(row: RfqListRow, today: string): RfqDisplayStatus {
+  return row.status === 'sent' && row.reply_by !== null && row.reply_by < today ? 'overdue' : row.status;
+}
+
+/** `open` is every RFQ that is not closed: what the table shows until a status is chosen. */
+export type RfqFilter = 'open' | 'all' | RfqDisplayStatus;
+
+/** RFQs matching the status filter whose number, supplier or supplier's reference contains the search text. */
+export function filterRfqs(rows: RfqListRow[], query: string, filter: RfqFilter, today: string): RfqListRow[] {
+  const q = query.trim().toLowerCase();
+  return rows.filter((row) => {
+    const status = rfqDisplayStatus(row, today);
+    return (
+      (filter === 'all' || (filter === 'open' ? status !== 'closed' : status === filter)) &&
+      `${row.rfq_no ?? ''} ${row.supplier_name} ${row.supplier_ref ?? ''}`.toLowerCase().includes(q)
+    );
+  });
+}
+
+export type RfqAction = 'edit' | 'send' | 'delete' | 'recordPrices' | 'convert' | 'close';
+
+/**
+ * What an RFQ's row menu offers, in order: only what the database allows for
+ * its status. A draft is edited, marked as sent or deleted. Once sent it is
+ * locked, and only the supplier's answer is recorded (an overdue RFQ too:
+ * a late reply is still a reply), or the RFQ is closed. A quoted RFQ becomes a
+ * purchase order, unless one stands already, or is closed. A closed one offers
+ * nothing.
+ */
+export function rfqActions(row: RfqListRow): RfqAction[] {
+  switch (row.status) {
+    case 'draft':
+      return ['edit', 'send', 'delete'];
+    case 'sent':
+      return ['recordPrices', 'close'];
+    case 'quoted':
+      return row.purchase_order_id === null ? ['convert', 'close'] : ['close'];
+    default:
+      return [];
+  }
+}
+
+/** How a question or a menu names one RFQ: its number, or "this draft RFQ". */
+export function rfqName(row: RfqListRow): string {
+  return row.rfq_no ?? 'this draft RFQ';
+}
+
+export type RfqsViewData = {
+  /** How many RFQs are in each status; an overdue one counts as overdue, not as sent. */
+  counts: Record<RfqDisplayStatus, number>;
+  /** Sent and not yet answered, overdue ones included. */
+  awaitingReply: number;
+  overdue: number;
+};
+
+export function rfqsView(rows: RfqListRow[], today: string): RfqsViewData {
+  const counts: Record<RfqDisplayStatus, number> = { draft: 0, sent: 0, quoted: 0, closed: 0, overdue: 0 };
+  for (const row of rows) counts[rfqDisplayStatus(row, today)] += 1;
+  return { counts, awaitingReply: counts.sent + counts.overdue, overdue: counts.overdue };
+}
+
+/** The RFQs table as a CSV file. The total is a number, and empty until every line is priced. */
+export function rfqsCsv(rows: RfqListRow[], today: string): string {
+  return toCsv(
+    ['No.', 'Date', 'Supplier', 'Reply by', 'Supplier ref', 'Lines', 'Total', 'Status', 'Purchase order'],
+    rows.map((r) => [
+      r.rfq_no,
+      r.rfq_date,
+      r.supplier_name,
+      r.reply_by,
+      r.supplier_ref,
+      r.line_count,
+      // Empty until every line is priced, like the dash on the screen: a part-priced total would read as the whole.
+      r.fully_priced ? r.total : null,
+      RFQ_STATUS_LABELS[rfqDisplayStatus(r, today)],
+      r.purchase_order_no,
+    ]),
+  );
+}
+
+/* ---- Purchase Orders ------------------------------------------------ */
+
+export const PO_STATUS_LABELS: Record<PurchaseOrderStatus, string> = {
+  draft: 'Draft',
+  pending_approval: 'Awaiting approval',
+  approved: 'Approved',
+  closed: 'Closed',
+  cancelled: 'Cancelled',
+};
+
+export const PO_DELIVERY_LABELS: Record<PurchaseOrderDelivery, string> = {
+  pending: 'Not delivered',
+  partial: 'Partly delivered',
+  delivered: 'Delivered',
+};
+
+/** `open` is every order still going on (a draft, awaiting approval, or approved): what the table shows until a status is chosen. */
+export type PurchaseOrderFilter = 'open' | 'all' | PurchaseOrderStatus;
+
+const OPEN_ORDER: ReadonlySet<PurchaseOrderStatus> = new Set(['draft', 'pending_approval', 'approved']);
+
+/** Orders matching the status filter whose number, supplier or RFQ number contains the search text. */
+export function filterPurchaseOrders(rows: PurchaseOrderListRow[], query: string, filter: PurchaseOrderFilter): PurchaseOrderListRow[] {
+  const q = query.trim().toLowerCase();
+  return rows.filter(
+    (row) =>
+      (filter === 'all' || (filter === 'open' ? OPEN_ORDER.has(row.status) : row.status === filter)) &&
+      `${row.po_no ?? ''} ${row.supplier_name} ${row.rfq_no ?? ''}`.toLowerCase().includes(q),
+  );
+}
+
+export type PurchaseOrderAction =
+  | 'edit'
+  | 'submit'
+  | 'delete'
+  | 'approve'
+  | 'reject'
+  | 'withdraw'
+  | 'receive'
+  | 'createBill'
+  | 'close'
+  | 'cancel';
+
+/**
+ * What an order's row menu offers the viewer, in order: only what the database allows for its status and for
+ * them. The database asks again and its answer counts; this keeps the menu from offering what it would refuse.
+ * `raiser` created the order; `mine` also covers whoever submitted it, and neither may approve it unless they
+ * own the workspace. A draft that was never numbered is deleted; a numbered one (rejected or withdrawn) is
+ * cancelled, since its number was given out. Closing and cancelling an approved order are an owner's or admin's.
+ */
+export function purchaseOrderActions(
+  row: PurchaseOrderListRow,
+  viewer: { userId: string; canSignOff: boolean; isOwner: boolean },
+): PurchaseOrderAction[] {
+  const raiser = row.created_by !== null && row.created_by === viewer.userId;
+  const mine = raiser || (row.submitted_by !== null && row.submitted_by === viewer.userId);
+  const mayCancel = raiser || viewer.canSignOff;
+  switch (row.status) {
+    case 'draft':
+      if (row.po_no === null) return ['edit', 'submit', 'delete'];
+      return mayCancel ? ['edit', 'submit', 'cancel'] : ['edit', 'submit'];
+    case 'pending_approval': {
+      const actions: PurchaseOrderAction[] = [];
+      if (viewer.canSignOff) {
+        if (!mine || viewer.isOwner) actions.push('approve');
+        actions.push('reject');
+      }
+      if (mayCancel) actions.push('withdraw', 'cancel');
+      return actions;
+    }
+    case 'approved':
+      return viewer.canSignOff ? ['receive', 'createBill', 'close', 'cancel'] : ['receive', 'createBill'];
+    default:
+      return [];
+  }
+}
+
+/** How a question or a menu names one order: its number, or "this draft purchase order". */
+export function purchaseOrderName(row: PurchaseOrderListRow): string {
+  return row.po_no ?? 'this draft purchase order';
+}
+
+export type PurchaseOrdersViewData = {
+  awaitingApproval: number;
+  /** Approved and not yet closed or cancelled. */
+  approvedOpen: number;
+  /** Billed for more than the order is worth, whatever its status. */
+  overBilled: number;
+};
+
+export function purchaseOrdersView(rows: PurchaseOrderListRow[]): PurchaseOrdersViewData {
+  return {
+    awaitingApproval: rows.filter((r) => r.status === 'pending_approval').length,
+    approvedOpen: rows.filter((r) => r.status === 'approved').length,
+    overBilled: rows.filter((r) => r.over_billed).length,
+  };
+}
+
+/**
+ * The purchase orders table as a CSV file. Amounts are numbers. The delivery column is empty for an order
+ * that was never approved: "Not delivered" would read as a late delivery.
+ */
+export function purchaseOrdersCsv(rows: PurchaseOrderListRow[]): string {
+  return toCsv(
+    ['No.', 'Date', 'Supplier', 'RFQ', 'Expected delivery', 'Total', 'Received', 'Billed', 'Delivery', 'Status'],
+    rows.map((r) => [
+      r.po_no,
+      r.po_date,
+      r.supplier_name,
+      r.rfq_no,
+      r.expected_date,
+      r.total,
+      r.received_total,
+      r.billed_total,
+      r.status === 'approved' || r.status === 'closed' ? PO_DELIVERY_LABELS[r.delivery] : null,
+      PO_STATUS_LABELS[r.status],
     ]),
   );
 }

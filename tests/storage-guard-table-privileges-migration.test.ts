@@ -40,7 +40,8 @@ describe('storage policy guard and table privileges migration', () => {
     expect(latest.size).toBeGreaterThan(5);
     for (const [name, body] of latest) {
       if (!/foldername\(name\)\)\[1\]\)?::uuid/.test(body)) continue;
-      expect(body, name).toMatch(/using \(case when bucket_id = '[a-z-]+' and name ~ '\^\[0-9a-f\]\{8\}-/);
+      // A read rule opens with `using`, an upload rule with `with check`: either way the cast sits inside the case.
+      expect(body, name).toMatch(/(?:using|with check) \( ?case when bucket_id = '[a-z-]+' and name ~ '\^\[0-9a-f\]\{8\}-/);
     }
   });
 

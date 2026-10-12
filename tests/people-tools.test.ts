@@ -38,18 +38,19 @@ const EMPTY: PeopleData = {
   listPayrollRuns: async () => [], listPayslips: async () => [], listGoals: async () => [],
   listReviews: async () => [], listTrainings: async () => [],
   listTrainingEnrolments: async () => [], listAnnouncements: async () => [],
-  listDocuments: async () => [], listLetters: async () => [], listPaymentVouchers: async () => [],
+  listDocuments: async () => [], listLetters: async () => [], listLetterTemplates: async () => [], listPaymentVouchers: async () => [],
   getSettings: async () => structuredClone(DEFAULT_PEOPLE_SETTINGS),
 };
 
 describe('people tools', () => {
-  it('is exactly the twenty-three lookups, none sharing a name with another product', () => {
+  it('is exactly the twenty-five lookups, none sharing a name with another product', () => {
     expect(Object.keys(createPeopleTools(data, HR, NOW))).toEqual([...PEOPLE_TOOL_NAMES]);
     expect(PEOPLE_TOOL_NAMES).toEqual([
       'getPeopleOverview', 'listEmployees', 'getEmployee', 'listDepartments', 'getHeadcountByDepartment',
       'listWhoIsOnLeave', 'listLeaveRequests', 'listTimeOffRequests', 'getLeaveBalances', 'listPendingApprovals', 'listClaims',
       'listOvertime', 'getAttendanceSummary', 'getTimesheet', 'listShifts', 'listPublicHolidays',
       'getPayrollSummary', 'listPayslips', 'getPerformanceSummary', 'listGoals', 'listReviews', 'listTrainings', 'listAnnouncements',
+      'listDocuments', 'listLetters',
     ]);
     const others = new Set<string>([
       ...Object.keys(createReachTools(createSeedReachData())),
@@ -57,6 +58,7 @@ describe('people tools', () => {
       ...CRM_WRITE_TOOL_NAMES,
       ...HIRE_TOOL_NAMES,
       'listCrmContacts', 'listDeals', 'listPipelines', 'getDealStats', 'listFollowUps', 'getCalendar',
+      'getBillingSummary', 'listBillingInvoices',
     ]);
     for (const name of PEOPLE_TOOL_NAMES) expect(others.has(name), name).toBe(false);
   });

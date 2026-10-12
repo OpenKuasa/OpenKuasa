@@ -61,6 +61,8 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
 });
 
 const { runLekiu } = await import('@/lib/ai/agents/orchestrator');
+// After this file's mocks and the values they use are in place: the helpers load the tools too.
+const { withLekiu } = await import('./helpers/approvals');
 const { createSeedPeopleData } = await import('@/lib/people/seed');
 
 const ME = '22222222-2222-4222-8222-222222222222';
@@ -88,7 +90,7 @@ const ran = (name: string) => executed.counts[name] ?? 0;
 
 /** The history a client sends after the person taps Approve or Reject on the card. */
 const resume = (people: typeof asMember | typeof asOwner, approved: boolean) =>
-  runLekiu(
+  runLekiu(...withLekiu(
     [
       ...ask,
       {
@@ -101,7 +103,7 @@ const resume = (people: typeof asMember | typeof asOwner, approved: boolean) =>
       { role: 'tool', content: [{ type: 'tool-approval-response', approvalId: 'a1', approved }] },
     ],
     people,
-  );
+  ));
 
 const CLOCK = [
   ['clockIn', {}],
@@ -123,7 +125,7 @@ describe('Lekiu’s attendance changes require approval', () => {
     ...OWNER.map(([tool, input]) => [tool, input, asOwner] as const),
   ])('%s does not run until it is approved', async (tool, input, people) => {
     reset(tool, input);
-    const result = runLekiu(ask, people);
+    const result = runLekiu(...withLekiu(ask, people));
     await result.consumeStream();
     expect(ran(writeOf(tool))).toBe(0);
     const parts = (await result.content) as { type: string }[];
@@ -157,7 +159,7 @@ describe('Lekiu’s attendance changes require approval', () => {
     ['clockOut', '', asOwner],
   ] as const)('%s sent as %j: a card appears, and once approved only the caller\'s own employee reaches the write path', async (tool, sent, people) => {
     reset(tool, sent);
-    const first = runLekiu(ask, people);
+    const first = runLekiu(...withLekiu(ask, people));
     await first.consumeStream();
     expect(ran(tool)).toBe(0);
     const parts = (await first.content) as { type: string; toolCallId?: string; toolName?: string; input?: unknown; approvalId?: string }[];
@@ -168,14 +170,14 @@ describe('Lekiu’s attendance changes require approval', () => {
     // The card carries nothing the model sent.
     expect(call?.input).toEqual({});
 
-    const second = runLekiu(
+    const second = runLekiu(...withLekiu(
       [
         ...ask,
         { role: 'assistant', content: [{ type: 'tool-call', toolCallId: call!.toolCallId!, toolName: tool, input: call!.input }, { type: 'tool-approval-request', approvalId: request!.approvalId!, toolCallId: call!.toolCallId! }] },
         { role: 'tool', content: [{ type: 'tool-approval-response', approvalId: request!.approvalId!, approved: true }] },
       ],
       people,
-    );
+    ));
     await second.consumeStream();
     expect(ran(tool)).toBe(1);
     expect(executed.last).toEqual({ employee_id: ME });
@@ -202,7 +204,7 @@ describe('Lekiu’s attendance changes require approval', () => {
 
   it.each(OWNER)('a member cannot reach %s: the tool is not theirs, so nothing runs even if the model asks', async (tool, input) => {
     reset(tool, input);
-    const result = runLekiu(ask, asMember);
+    const result = runLekiu(...withLekiu(ask, asMember));
     await result.consumeStream();
     expect(ran(writeOf(tool))).toBe(0);
     const parts = (await result.content) as { type: string }[];

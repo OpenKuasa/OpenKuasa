@@ -224,6 +224,7 @@ export default async function BillingsPage() {
                   <TableRow className="bg-muted/40">
                     <TableHead>Invoice #</TableHead>
                     <TableHead>Customer</TableHead>
+                    <TableHead>Deal</TableHead>
                     <TableHead className="whitespace-nowrap">Date</TableHead>
                     <TableHead className="whitespace-nowrap">Due</TableHead>
                     <TableHead className="text-right">Total</TableHead>
@@ -241,6 +242,15 @@ export default async function BillingsPage() {
                         {invoice.invoice_no ?? <span className="text-muted-foreground">Draft</span>}
                       </TableCell>
                       <TableCell className="whitespace-nowrap">{invoice.customer_name}</TableCell>
+                      <TableCell className="max-w-48 truncate">
+                        {invoice.dealTitle ? (
+                          <Link href="/crm/deals" className="hover:underline">
+                            {invoice.dealTitle}
+                          </Link>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">
                         {formatDay(invoice.invoice_date)}
                       </TableCell>

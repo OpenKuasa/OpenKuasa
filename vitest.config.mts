@@ -11,6 +11,8 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    // Refuses the network to every test that is not a live one, and fails a file that tried.
+    setupFiles: ['./tests/setup/no-network.ts'],
     // Per-file cleanup of live-test users and workspaces (tests/helpers/live-workspaces.ts)
     // relies on `isolate: true` (the default: each file gets its own module registry) and on
     // nothing setting `sequence.hooks` to 'list' or 'parallel' (the helper's afterAll must run

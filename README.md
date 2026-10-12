@@ -155,8 +155,37 @@ NEXT_PUBLIC_SUPABASE_URL=https://<your-project-ref>.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<your-anon-key>
 ```
 
-Until these are set, the app runs normally but the Supabase session refresh is a
-no-op — see `src/lib/supabase/middleware.ts`.
+### Preview mode (no Supabase project)
+
+Without those two values the app has no sign-in and no database. What it does
+then depends on where it is running:
+
+- **`pnpm dev` and tests** — it runs in *preview mode*: every visitor is a
+  read-only "Guest" in a "Preview workspace" and the screens show sample data.
+  Nothing needs to be set.
+- **A production server (`pnpm start`, or any host)** — it refuses to serve.
+  Every request gets a plain `503 Service unavailable` and the server log says
+  which variables are missing. A deployment that loses a variable therefore
+  fails visibly instead of quietly turning into the sample app with nobody
+  signed in.
+- **A production preview on purpose** — set `OPENKUASA_PREVIEW=1` on the host
+  to serve the sample-data preview from a production build. The flag is only
+  read when the Supabase values are missing; it does nothing on a configured
+  deployment. Do not set it on the deployment that serves your real data.
+
+The check is made per request (`src/lib/auth/preview-mode.ts`, applied in
+`src/lib/supabase/middleware.ts`), so `pnpm build` works with or without the
+variables. `pnpm smoke:routes` sets the flag for the server it starts.
+
+### Optional: `AUTH_COOKIE_SECRET`
+
+Opening a password-reset link leaves a short-lived signed cookie that the "set
+a new password" form checks. It is signed with `AUTH_COOKIE_SECRET` (32+
+characters) when set, otherwise with a key derived from
+`AI_KEYS_ENCRYPTION_SECRET`, otherwise with a random key made when the server
+starts. The last option is fine for one long-running server; if you run several
+instances or a serverless host and set neither secret, set
+`AUTH_COOKIE_SECRET` or reset links will intermittently be refused.
 
 ## Self-hosting setup
 
@@ -166,9 +195,11 @@ slice), a fresh Supabase project needs these Auth settings (Supabase dashboard �
 Authentication) for sign-in and signup to work:
 
 - **Enable Anonymous sign-ins** — powers the demo workspace and the tests.
-- **Turn OFF "Confirm email"** — signup then creates a session immediately and
+- **"Confirm email"** — with it off, signup creates a session immediately and
   lands on `/command`. With it on, signup stops at a "check your email" message
-  and the user must confirm and sign in.
+  and the user must confirm and sign in. An already-registered address always
+  gets that same "check your email" message, so the form does not say which
+  addresses have an account.
 - **Leave hCaptcha OFF for now** — the auth forms don't yet pass a captcha
   token, so *enabling* hCaptcha would break sign-in and signup. Wiring the
   hCaptcha widget into the auth UI is a planned hardening step before it can be
@@ -215,12 +246,20 @@ curl -X POST https://<your-host>/api/agents/run \
 ## Scripts
 
 ```bash
-pnpm dev      # start the dev server
-pnpm build    # production build
-pnpm start    # run the production build
-pnpm lint     # eslint
-pnpm test     # vitest
+pnpm dev           # start the dev server
+pnpm build         # production build
+pnpm start         # run the production build
+pnpm lint          # eslint
+pnpm test          # run the tests once (vitest)
+pnpm test:watch    # run the tests again on every change
+pnpm smoke:routes  # check that every screen responds
 ```
+
+`pnpm smoke:routes` needs a production build, so run `pnpm build` first.
+Nothing else needs to be running: it starts its own server on `127.0.0.1:3100`,
+requests the public pages, every account screen and every product screen, and fails if
+any of them answers with something other than a page or a redirect. It works
+without a Supabase project. Set `SMOKE_PORT` if port 3100 is taken.
 
 ### Testing against a live Supabase project
 
@@ -232,6 +271,12 @@ still run, but cleanup is skipped and a loud line says rows were left behind.
 The cleanup also needs the function from
 `supabase/migrations/*_delete_test_org.sql` applied (it deletes only recent, slugless, test-only workspaces, and only service_role can run it). Never commit the
 key.
+
+Every other test runs without the network. `tests/setup/no-network.ts` (loaded
+before each test file) refuses `fetch` to anything but this machine and fails
+the file that tried, so a unit test that forgot to fake a client cannot reach
+the live project. A test file is live when its name contains `.rls.` or
+`.live.`, or when it imports `tests/setup/supabase.ts`.
 
 ## License
 

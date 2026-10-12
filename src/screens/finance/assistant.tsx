@@ -1,15 +1,11 @@
 import {
-  ArrowUp,
   BadgeCheck,
   Bot,
   CreditCard,
   Filter,
   Gauge,
   HandCoins,
-  Mic,
   PieChart,
-  Plus,
-  Sparkles,
   TrendingUp,
   Users,
 } from 'lucide-react';
@@ -26,6 +22,9 @@ import {
   type Slice,
 } from '@/components/charts';
 import { LiveDot } from '@/components/ui/live-dot';
+import { AskBendaharaHero } from '@/components/finance/ask-bendahara-hero';
+import { createClient } from '@/lib/supabase/server';
+import { isLiveChatAllowed } from '@/lib/ai/access';
 import { cn } from '@/lib/utils';
 
 /* ---- mock data (Rimba Ventures Sdn Bhd · 201901027453) ------------ */
@@ -119,60 +118,27 @@ const AGENTS = [
 ];
 
 const PROMPTS = [
-  'Cash position?',
   'Overdue invoices',
-  "Summarise this month's P&L",
-  'SST due this month',
+  'Who owes us the most?',
+  'Draft an invoice',
+  'Unpaid supplier bills',
 ];
 
 /* ------------------------------------------------------------------ */
 
-export default function OverviewScreen() {
+export default async function OverviewScreen() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const isDemo = !isLiveChatAllowed(user);
+
   return (
     <ScreenContainer>
       <BentoGrid>
         {/* Ask-Bendahara hero */}
         <BentoCard tone="primary" className="col-span-2 md:col-span-12">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 text-xs font-medium text-primary-foreground/70">
-                <Sparkles className="size-3.5 animate-twinkle" />
-                Bendahara · your CFO
-              </div>
-              <h1 className="mt-1 text-2xl font-bold tracking-tight">
-                How are the books looking, Saudara?
-              </h1>
-              <p className="mt-1 text-xs text-primary-foreground/70">
-                Prudent guardian of the treasury — RM, SST and LHDN e-Invois. Powered by
-                Taming Sari.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {PROMPTS.map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    className="rounded-full bg-primary-foreground/10 px-3 py-1 text-xs font-medium text-primary-foreground ring-1 ring-inset ring-primary-foreground/20 transition hover:bg-primary-foreground/20"
-                  >
-                    {p}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="flex w-full items-center gap-2 rounded-2xl bg-primary-foreground/10 p-2 ring-1 ring-inset ring-primary-foreground/20 lg:w-96">
-              <span className="grid size-8 shrink-0 place-items-center rounded-full bg-primary-foreground/15">
-                <Plus className="size-4" />
-              </span>
-              <span className="flex-1 truncate text-sm text-primary-foreground/70">
-                Ask Bendahara anything…
-              </span>
-              <span className="grid size-8 shrink-0 place-items-center rounded-full bg-primary-foreground/15">
-                <Mic className="size-4" />
-              </span>
-              <span className="grid size-8 shrink-0 place-items-center rounded-full bg-primary-foreground text-primary">
-                <ArrowUp className="size-4" />
-              </span>
-            </div>
-          </div>
+          <AskBendaharaHero prompts={PROMPTS} isDemo={isDemo} />
         </BentoCard>
 
         {/* KPI row */}

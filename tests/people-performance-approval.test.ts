@@ -103,6 +103,8 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
 });
 
 const { runLekiu } = await import('@/lib/ai/agents/orchestrator');
+// After this file's mocks and the values they use are in place: the helpers load the tools too.
+const { withLekiu } = await import('./helpers/approvals');
 const { createSeedPeopleData } = await import('@/lib/people/seed');
 const { approvalDetail, approvalTitle, nameIn } = await import('@/lib/chat/change-titles');
 
@@ -289,7 +291,7 @@ const history = (call: Part, request: Part, approved: boolean) => [
 
 const firstTurn = async (c: Pick<Case, 'tool' | 'sent'>, people: People = asOwner) => {
   reset(c.tool, c.sent);
-  const first = runLekiu(ask, people);
+  const first = runLekiu(...withLekiu(ask, people));
   await first.consumeStream();
   const parts = (await first.content) as Part[];
   return { parts, call: parts.find((p) => p.type === 'tool-call'), request: parts.find((p) => p.type === 'tool-approval-request') };
@@ -317,7 +319,7 @@ describe('Lekiu’s performance, training and announcement changes require appro
     const { call, request } = await firstTurn(c, c.who);
     expect(call).toBeDefined();
     expect(request).toBeDefined();
-    const second = runLekiu(history(call!, request!, true), c.who);
+    const second = runLekiu(...withLekiu(history(call!, request!, true), c.who));
     await second.consumeStream();
     expect(ran(c.write)).toBe(1);
     expect(total()).toBe(1);
@@ -327,7 +329,7 @@ describe('Lekiu’s performance, training and announcement changes require appro
 
   it.each(rows)('%s sent as %s: rejecting it writes nothing and the turn continues', async (_tool, _sent, c) => {
     const { call, request } = await firstTurn(c, c.who);
-    const second = runLekiu(history(call!, request!, false), c.who);
+    const second = runLekiu(...withLekiu(history(call!, request!, false), c.who));
     await second.consumeStream();
     expect(total()).toBe(0);
     expect(await second.text).toBe('Done.');
@@ -473,7 +475,7 @@ describe('Lekiu’s performance, training and announcement changes require appro
     const c = { tool: 'saveGoal', sent: { title: 'Learn SQL', progress: 40 } };
     const { call, request } = await firstTurn(c, asOwner);
     expect(request).toBeDefined();
-    const second = runLekiu(history(call!, request!, true), asOwner);
+    const second = runLekiu(...withLekiu(history(call!, request!, true), asOwner));
     await second.consumeStream();
     expect(total()).toBe(0);
     // The model is told why, in the sentence the tool gives, and not that anything was saved.
@@ -518,7 +520,7 @@ describe('Lekiu’s performance, training and announcement changes require appro
     const c = CASES[8];
     const { call, request } = await firstTurn(c, c.who);
     reset(c.tool, c.sent);
-    const replay = runLekiu(history(call!, request!, false).slice(0, 2), c.who);
+    const replay = runLekiu(...withLekiu(history(call!, request!, false).slice(0, 2), c.who));
     await replay.consumeStream();
     expect(total()).toBe(0);
   });

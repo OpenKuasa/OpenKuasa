@@ -37,8 +37,10 @@ the data layer, with unit tests; the client components only draw them.
 | `credit-note-form.ts` | The credit note form: which invoices can take a credit note and how much (`creditableInvoices`: posted, for the total less what is already credited), defaults, validation, what is sent. `creditNoteSavedNotIssued` words a credit note that was saved as a draft but not issued |
 | `refund-form.ts` | The refund form: what can be refunded and how much (`refundTargets`: an invoice whose customer is in credit, or one of its issued credit notes, less refunds still to be paid), defaults, validation, what is sent |
 | `cash-book.ts` | Reading the cash book: one row per movement of money in (`listCashReceipts`, from the view `finance_cash_receipts`) and out (`listPaymentVouchers`, from `finance_payment_vouchers`), a page at a time, with the row types and the kinds a receipt and a voucher can be. It only reads |
+| `cash-receipts.ts` | A receipt's writes, and the one read its form needs: the Zod schema of a draft receipt (`saveCashReceiptInput`, for invoices or for income, told apart by `kind`), saving a draft (`saveCashReceipt`), posting it (`postCashReceipt`), voiding a posted one (`voidCashReceipt`), deleting a draft (`deleteCashReceipt`), the sentence for each database code (`CASH_RECEIPT_MESSAGES`), and the active income categories (`listIncomeCategories`). Every write given an id asks `finance_cash_receipts` first, so one side of a transfer is never reached |
+| `cash-receipt-form.ts` | The receipt form: defaults, the form for a draft being changed (`editCashReceiptForm`, from its row and its Payments In rows), which invoices it can go against (`receivableFor`: the payment-in rule, without counting what the draft being changed holds itself), validation, what is sent (the chosen side only), a picker's list with a draft's archived choice in it (`withCurrent`). `receiptSavedNotPosted` words a receipt that was saved as a draft but not posted. `receiptInvoicesForForm` and `receiptPaymentsForForm` trim what the loader sends the form to the invoices that can still take money and the payments that hold part of one. `leftOutInvoicesNote` says when ticked invoices were left out. `afterRefusedReceiptSave` makes the form forget the id of a draft that was deleted meanwhile |
 | `expenses.ts` | Reading expenses (`listExpenses`, from the view `finance_expense_totals`), a page at a time, with the row type, the three statuses a person sets and `paid`, which is only how an expense reads. It only reads |
-| `cash-book-views.ts` | KPI figures, chart data, table filters, status words and CSV rows for Cash Receipts, Payment Vouchers and Expenses; the period selector of the first two (`inPeriod`), which sets the cards, the donut and the table rows alike (`cashReceiptsInPeriod`, `paymentVouchersInPeriod`: a draft receipt, and a voucher waiting for approval or still to be paid, stay in every period because their cards count them whatever their date; search, filters, "View all" and Export work on top of it); which category a voucher counts under (`voucherCategory`) and which screen changes it (`voucherHome`) |
+| `cash-book-views.ts` | KPI figures, chart data, table filters, status words and CSV rows for Cash Receipts, Payment Vouchers and Expenses; the period selector of the first two (`inPeriod`), which sets the cards, the donut and the table rows alike (`cashReceiptsInPeriod`, `paymentVouchersInPeriod`: a draft receipt, and a voucher waiting for approval or still to be paid, stay in every period because their cards count them whatever their date; search, filters, "View all" and Export work on top of it); which category a voucher counts under (`voucherCategory`) and which screen changes it (`voucherHome`); what a receipt's row menu offers, by its status and by whether the person may sign off (`cashReceiptActions`), and the words of its questions (`receiptName`, `receiptVoidEffect`, `receiptDeleteEffect`) |
 | `csv.ts` | CSV text for Export: RFC 4180, a UTF-8 byte-order mark, and a guard against spreadsheet formulas |
 
 The forms validate by running the write's own Zod schema on what they are about
@@ -102,8 +104,12 @@ refresh it as well: an invoice or a payment in also refreshes Cash Receipts; a
 bill or a payment out, and a credit note issued or voided or a refund at any
 step, also refresh Payment Vouchers; a contact also refreshes Cash Receipts,
 Payment Vouchers and Expenses, where it can be the payer, the payee or the
-vendor. Cash Receipts, Payment Vouchers and Expenses have no action of their
-own yet: they are read-only for everyone.
+vendor. Every cash receipt action (save, save and post, post, void, delete)
+refreshes what an invoice or a payment in refreshes, whatever the receipt is
+for: one against invoices moves what they owe, or holds part of them while it
+is a draft, and one save can turn a draft of one kind into the other. Payment
+Vouchers and Expenses have no action of their own yet: they are read-only for
+everyone.
 
 Every action refuses a viewer and the demo workspace before the data layer is
 reached. Without that, a viewer's void or delete would come back from the
@@ -120,7 +126,7 @@ policy.
 |---|---|
 | `finance_contacts` | Customers and suppliers. `is_customer` and `is_supplier` can both be true. |
 | `finance_products` | Products and services for document lines. `cost` keeps four decimals, `price` two. |
-| `finance_accounts` | Bank and cash accounts. Every workspace starts with "Main Bank" and "Cash in hand". No screen yet. |
+| `finance_accounts` | Bank and cash accounts. Every workspace starts with "Main Bank" and "Cash in hand". Banking lists them with their balances; they have no form yet. |
 | `finance_categories` | Expense and income categories. Every workspace starts with nine. No screen yet. |
 | `finance_sequences` | The next document number per type. |
 | `supplier_bills`, `supplier_bill_lines` | Supplier bills and their lines. A draft has no `bill_no`. |
@@ -130,13 +136,15 @@ policy.
 | `finance_transactions` | One row per movement of money: direction, account, date, amount, method, status. |
 | `finance_allocations` | How a movement is split across the documents it pays. Each row names exactly one document: a bill (`bill_id`), an invoice (`invoice_id`), a credit note (`credit_note_id`) or an expense (`expense_id`). `reason` is what a refund is for. One payment pays one kind of document: bills, or invoices and credit notes, or expenses. |
 | `finance_expenses` | An expense: a date, a category, a vendor who is a contact (`vendor_id`) or a typed name (`vendor_name`), never both, and `amount`, which has its SST inside it (`sst_amount` is that part). `status` is `pending`, `approved` or `rejected`; `approved_by` and `approved_at` say who decided and when, whichever way. It has no number. |
+| `finance_statement_imports` | One row per bank statement file imported for one account: `account_id`, `file_name`, `created_by`. |
+| `finance_statement_lines` | One row per line of a statement, in the file's order (`position`): `line_date`, `description`, and `money_in` or `money_out`, never both. `transaction_id` is the movement of money a person matched it to; a movement is matched by at most one line. A line belongs to its import's account. |
 
 ## Document numbers
 
 `select public.finance_next_number(target_org, doc)` with `doc` set to
 `'invoice'` returns the next number (`INV-0001`) and moves the counter on. It locks the workspace's row for that
 type, so simultaneous callers never get the same number. Types: `invoice`,
-`quotation`, `credit_note`, `bill`, `receipt`, `voucher`. Call it from inside
+`quotation`, `credit_note`, `bill`, `receipt`, `voucher`, `transfer`. Call it from inside
 the database function that posts a document, so a failed post does not use up a
 number.
 
@@ -145,7 +153,24 @@ number when it is issued. A refund is money out and takes a `PV-` number when
 it is paid out, from the same counter as a payment to a supplier. A payment
 voucher of any other kind takes its `PV-` number from that counter too, when
 it is paid, and a cash receipt its `RC-` number when it is posted, from the
-counter payments in use. An expense has no number.
+counter payments in use. An expense has no number. A transfer between
+accounts takes one `TR-` number for both of its sides, from a counter of its
+own, so a transfer leaves no gap in the receipt or voucher numbers. A
+payment's number is unique in its workspace; the two sides of a transfer are
+the one case of two rows with one number.
+
+`finance_next_number` runs as its owner (`security definer`) and is the only
+writer of `finance_sequences`: since `20261030123000_finance_write_guards` the
+table is read-only to a signed-in person, and the function begins by asking
+whether the caller may write in the workspace (`42501` for a viewer and for
+anyone outside it). `20261031090000_bendahara_banking`, written before that
+file and applied after it, replaced the function to add the `transfer` type
+and declared it `security invoker` again, as it had been; run as the caller
+it could not write the counters, and every numbered document was refused
+until `20261031090200_bendahara_banking_next_number_definer` put it back. A
+later migration that replaces this function, or any function listed as
+running as its owner under Database functions, must keep `security definer`
+and the test of the caller it begins with.
 
 ## Money
 
@@ -241,8 +266,8 @@ transfer between accounts (`transfer_id`) are in neither.
 
 | View | `kind` | What it is | Also shown on | Changed on |
 |---|---|---|---|---|
-| `finance_cash_receipts` | `invoice` | Money in against invoices | Payments In, one row per invoice | Payments In |
-| `finance_cash_receipts` | `income` | Money in that settles no invoice, with an income category | nowhere else | Cash Receipts (no form yet) |
+| `finance_cash_receipts` | `invoice` | Money in against invoices | Payments In, one row per invoice | Payments In (recorded and posted at once; void) and Cash Receipts (a draft: edit, post, delete; void) |
+| `finance_cash_receipts` | `income` | Money in that settles no invoice, with an income category | nowhere else | Cash Receipts |
 | `finance_payment_vouchers` | `bill` | A payment to a supplier | Payments Out, one row per bill | Payments Out |
 | `finance_payment_vouchers` | `refund` | Money back to a customer | Refunds | Refunds |
 | `finance_payment_vouchers` | `expense` | A payment of approved expenses | Expenses, as Paid | Payment Vouchers, Expenses (no form yet) |
@@ -275,6 +300,47 @@ approval. A payment recorded on Payments In is still
 `finance_record_voucher` records money out that pays approved expenses, or
 money out that settles no document and carries an expense category. A payment
 to a supplier and a refund are not recorded through it.
+
+### The receipt form
+
+Cash Receipts is writable. `cash-receipts.ts` holds the writes and
+`cash-receipt-form.ts` the form's rules; `cash-receipt-form-card.tsx` draws
+the form, a card of its own. A receipt is saved as a draft, posted, and after
+that only voided; a draft is deleted. Who may do which is the database's
+rule (`20261030123000_finance_write_guards`), and the screen offers each
+person only what it will let them do:
+
+| | Owner, admin | Member | Viewer, demo |
+|---|---|---|---|
+| New receipt, Save draft, Edit a draft, Delete a draft | Yes | Yes, anyone's draft | No button, no menu; the action answers "You do not have permission to make changes here." |
+| Post (the form's "Post receipt", a draft's Post) | Yes | Not offered. `postCashReceiptAction` (a draft's Post) answers "Only an owner or admin can post, pay or void. Ask one of them to do this." without reading or writing. `saveAndPostCashReceiptAction` (the form's "Post receipt") saves the draft and answers "Saved as a draft. Only an owner or admin can post or issue it."; nothing is posted. The database answers `FIN14` and uses up no number | No |
+| Void a posted receipt, of either kind | Yes | Not offered; the same sentence, `FIN14` | No |
+
+The screen loader works `canSignOff` out from the viewer's role
+(`can(role, 'sign-off-finance')`) and hands it to the view with the actions;
+the server actions ask again (`SIGN_OFF` in `actions.ts`), and the trigger
+`finance_transaction_sign_off` has the last word. A member's form has "Save
+draft" only and says an owner or admin posts it. "Post receipt" saves and
+then posts (`saveAndPostCashReceiptAction`); when only the post is refused
+the draft is kept and the form goes on editing it.
+
+A receipt for invoices is sent its split and nothing else: the database
+makes its amount the sum of the split and its payer the invoices' customer. A
+receipt for income is sent a category, an amount, and a contact or a typed
+name or neither, never both (`finance_transactions_party_check`). The form
+holds both sides while it is open and sends only the one chosen.
+
+A draft being changed is not read again: the form is built from the draft's
+row on the screen and, for its split, from the rows `finance_payments_in` has
+for it. What it holds of its own invoices is not counted against it
+(`receivableFor`), as the database deletes the old split before it checks the
+new one. Saving replaces the draft whole; a draft that was posted or deleted
+meanwhile answers with that sentence (`FIN09`, `FIN11`); after "That receipt no longer exists." the form forgets the draft's id and says "Save again to record it as a new receipt.", so what was typed can be saved as a new one. A ticked invoice that can no longer take money is left out, and the form says so.
+
+Void is offered on every posted receipt, a payment recorded on Payments In
+included: it is the same status change `voidPaymentIn` makes, asked of
+`finance_cash_receipts` instead of `finance_payments_in`, so it also reaches a
+receipt for income, which `voidPaymentIn` refuses.
 
 ## Expenses
 
@@ -410,6 +476,132 @@ tables (it has no default privileges here, and no migration grants it any).
 If `service_role` were ever granted them, whoever holds the service key could
 approve, as they could already read and write every table past row-level
 security; nothing in the app writes finance tables with that key.
+
+## Banking
+
+Banking shows the workspace's accounts and every movement of money on them.
+It reads two views. `finance_account_balances` has one row per account,
+archived ones included: `balance` is the opening balance, plus every posted
+movement in, less every posted movement out, whatever its date (`opening_date`
+is a label and takes no part in the sum); `to_be_paid` is scheduled money out;
+`last_import_at` and `unmatched_lines` come from the account's statements.
+It has the bank's name and no account number: `finance_accounts.account_no`
+is not readable by a signed-in person through the table
+(`20261030123000_finance_write_guards`), the view runs as its reader, and
+Banking shows no account number. A screen that needs one calls
+`finance_account_numbers(target_org)`, which answers only to someone who may
+write in the workspace. (The view first had the column and could be read by
+nobody; `20261031090300_bendahara_banking_write_guards_fit` made it again
+without.)
+`finance_bank_transactions` has one row per `finance_transactions` row, either
+direction, any status: `kind` is what the cash book calls it (`invoice`,
+`income`, `bill`, `refund`, `expense`, `other`) or `transfer`;
+`other_account_name` is the account at the other end of a transfer;
+`reconciled` says a statement line is matched to it. The screen lists posted
+rows only, and works out the running balance in the browser
+(`withRunningBalance` in `banking-views.ts`): per account, from the opening
+balance, in the order date, time recorded, id. The newest row of an account
+therefore carries the balance the view gives; the table's "Account balance"
+column is the balance of that row's account after it. The cards show exact
+amounts, to the sen, as a bank statement does. The table's count line is left
+out when no posted movement exists at all.
+
+Banking is read-only for everyone. `banking.ts` only reads; accounts,
+transfers and statements get their forms later. Every action that records,
+pays, voids or deletes money refreshes `/finance/banking`; an action added
+later must do the same.
+
+**A transfer between accounts** is two `finance_transactions` rows that share
+a `transfer_id`: money out of one account and the same money in to another,
+on one date, with one `TR-` number, no payee, no category and no split.
+Neither side is a receipt or a voucher: `finance_cash_receipts` and
+`finance_payment_vouchers` leave rows with a `transfer_id` out, and a
+transfer moves the total of the accounts nowhere.
+`finance_record_transfer` makes both sides and posts them at once;
+`finance_void_transfer` voids both.
+
+Only an owner or admin can record a transfer. The side that leaves an account
+is money out that settles no document, and the guard on payments holds that
+to an owner or admin (see Approval): the function says so first (`FIN14`).
+The guard writes the owner or admin down as approving the money out, and both
+sides are recorded as made by them (`created_by`).
+
+`finance_record_transfer` runs as its owner (`security definer`), like the
+six functions that number a payment: a payment's `number` is a column no
+signed-in person writes, so only a function that runs as the owner can post.
+It begins by asking whether the caller may write in the workspace, which
+row-level security no longer asks for it: a viewer, a session that still owes
+a second factor and anyone outside the workspace get `42501`, whatever they
+sent. A writer who is not an owner or admin gets `FIN16` for a transfer that
+is wrong in itself and `FIN14` otherwise. Every read and write in it names
+the workspace, so it cannot reach another's accounts. For the same reason two
+sides inserted by hand cannot be posted by hand, by anyone signed in: an
+update that names `number` is `42501`, and one that posts without a number
+is `23514`. The function is the only way a transfer is posted.
+
+Only an owner or admin can void a transfer. Voiding any posted payment is a
+sign-off since `20261030123000_finance_write_guards`, and the trigger that
+asks for one answers `FIN14` to anyone else, through `finance_void_transfer`
+or by a plain update. `finance_void_transfer` still runs as the caller: it
+writes only `status`, and row-level security decides which transfers it can
+find (`FIN11` for a viewer or another workspace; `FIN11` and `FIN09` are
+answered before `FIN14`).
+
+The pair is kept whole by triggers that run after each statement on
+`finance_transactions` (`private.finance_transfer_pair_check`). Once any side
+of a transfer is posted or void there must be exactly two sides, one in and
+one out, on different accounts, with the same amount, date, status and
+number, naming nobody, carrying no category and split across nothing, and
+both posted or both void; anything else is `FIN16`. So one side cannot be
+posted, voided or changed alone, and both are posted or voided by one UPDATE.
+Sides that are all still drafts are not looked at: a draft moves no money. A
+payment never joins or leaves a transfer: an UPDATE that changes
+`transfer_id` is `FIN16`. A transfer has at most one side in each direction
+(a unique index, `23505`), and a side carries a number only once it is posted
+or void (`23514`), so a draft nobody sees cannot sit on the next `TR-` number.
+The pair check is the one finance trigger function that runs as its owner
+(`security definer`): when a user is deleted the foreign keys clear
+`created_by` and `approved_by`, and Postgres runs that update's statement
+triggers at the end of the delete as whoever issued it, which for Supabase
+Auth is a role with no rights on `public` tables.
+
+An amount is a number. `'NaN'` is a valid `numeric` in Postgres, is greater
+than every number and would turn every balance it is added into to NaN, so
+`finance_transactions.amount` and both amounts of a statement line refuse it
+(`23514`), whichever function or direct write it comes through;
+`finance_record_transfer` and `finance_import_statement` refuse it first
+(`FIN16`, `FIN17`).
+
+**A bank charge and interest** are not special. A charge is money out for an
+expense category, recorded by `finance_record_voucher`: from someone who is
+not an owner or admin it waits for approval like any other, and paying it is
+an owner's or admin's. Interest is money in for an income category, a cash
+receipt: anyone who may write saves it as a draft, it needs no approval, and
+posting it is a sign-off like posting any receipt (`FIN14` for anyone who is
+not an owner or admin). A statement
+line is something a person imported, so matching a line approves nothing, and
+a line cannot be matched to a payment that is not posted.
+
+**Statements.** `finance_import_statement` stores one file's lines for one
+account, at most 1,000, each unmatched. A line is what the bank said: once it
+is in, only its match changes (`FIN17`). Matching is a plain update of
+`transaction_id`, and unmatching sets it back to null; anyone who may write
+can do both. The guard on lines (`private.finance_statement_line_guard`)
+holds a match to a posted payment of the line's account, in its direction,
+for its amount. How far apart the two dates may be is not the database's
+business: the three days in the design limit what is proposed. A payment is
+matched by at most one line (`23505`). A matched line, or an import that has
+one, is unmatched before it is deleted (`FIN17`). When a payment is voided, a
+line matched to it goes back to unmatched
+(`private.finance_transaction_unmatch`). So a member can match and unmatch
+lines and import a statement (`finance_import_statement` runs as the caller;
+the two statement tables are not among the ones the write guards closed),
+and cannot void the payment a line is matched to. A cash account can be given a
+statement, but the screen shows a dash instead of a reconciliation status for
+a cash movement and for a movement on a bank account that has never had a
+statement imported, and leaves both out of the gauge. While no bank account
+has had a statement imported, the Reconciliation card says "No statement
+imported yet." and shows no count.
 
 ## Invoices
 
@@ -705,7 +897,21 @@ Triggers enforce it, so no caller can get round it:
 
 ## Database functions
 
-All run as the caller, so RLS decides who may write.
+Most run as the caller, so RLS decides who may write. Eight run as their
+owner (`security definer`), because each writes something no signed-in person
+may write directly: a payment's `number`, or the counters. They are
+`finance_record_payment_out`, `finance_mark_payment_paid`,
+`finance_record_payment_in`, `finance_record_refund`,
+`finance_post_cash_receipt`, `finance_record_voucher`
+(`20261030123000_finance_write_guards`), `finance_record_transfer`
+(`20261031090300_bendahara_banking_write_guards_fit`) and
+`finance_next_number`. Each begins by asking whether the caller may write in
+`target_org` and answers `42501` if not; each reads and writes by
+`target_org` only; and the guards and the sign-off trigger still see the
+person signed in, because that comes from the request and not from the role
+a function runs as. `finance_account_numbers(target_org)` runs as its owner
+too and returns the workspace's account numbers to a writer, and no row to
+anyone else.
 
 | Function | Does |
 |---|---|
@@ -726,7 +932,11 @@ All run as the caller, so RLS decides who may write.
 | `finance_post_cash_receipt(target_org, target_txn)` | Posts a draft cash receipt and returns its `RC-` number. |
 | `finance_record_voucher(target_org, voucher, allocations)` | Records money out for approved expenses or for an expense category. `voucher` has `account_id`, `txn_date`, `method`, `reference`, `notes`, `contact_id` or `party_name`, `status` (`posted`, the default, or `scheduled`), and either nothing more, with `allocations` a list of `{ expense_id, amount }`, or `category_id` and `amount`, with no allocations. A voucher with no allocations recorded by someone who is not an owner or admin is left `pending_approval`. Returns the id. |
 | `finance_save_expense(target_org, expense)` | Creates an expense or changes one that is pending or rejected. `expense` has `id` (to change one), `expense_date`, `category_id`, `vendor_id` or `vendor_name`, `amount`, `sst_amount`, `notes`. Saved by an owner or admin it is approved in the same call. Returns the id. |
-| `finance_next_number(target_org, doc)` | The next document number. |
+| `finance_record_transfer(target_org, transfer)` | Moves money between two active accounts of the workspace: two posted payments with one `TR-` number. `transfer` has `from_account_id`, `to_account_id`, `amount`, `txn_date`, `reference`, `notes`. An owner or admin only (`FIN14`); runs as its owner, and anyone who may not write in the workspace is `42501`. Returns the transfer's id. |
+| `finance_void_transfer(target_org, target_transfer)` | Voids both sides of a posted transfer. An owner or admin only (`FIN14`, from the sign-off trigger); runs as the caller. |
+| `finance_import_statement(target_org, target_account, file_name, lines)` | Stores one statement for one account. `lines` is a list of `{ line_date, description, money_in, money_out }` in the file's order, at most 1,000. Returns the import's id. |
+| `finance_next_number(target_org, doc)` | The next document number. Runs as its owner; the only writer of `finance_sequences`. |
+| `finance_account_numbers(target_org)` | The account numbers of the workspace, one row per account, for someone who may write there; nobody else gets a row. |
 
 Accepting or declining a quotation, voiding a credit note or a refund, and
 deleting a draft quotation, a draft credit note or a pending refund, are plain
@@ -742,12 +952,15 @@ updates and deletes too. The data layer for all of it is in `quotations.ts`,
 
 Approving or rejecting an expense or a payment, voiding a posted receipt or
 voucher, and deleting a draft receipt, a pending or rejected expense, or a
-payment that was never paid, are plain updates and deletes as well. No
-function of `src/lib/finance/` calls the four functions above, approves or
-rejects an expense or a payment, or touches an expense or a draft receipt:
-`cash-book.ts` and `expenses.ts` only read, and each write arrives with its
-form. The voids and deletes that exist are those of Payments In, Payments Out
-and Refunds, and reach only what those screens show.
+payment that was never paid, are plain updates and deletes as well.
+`cash-receipts.ts` calls `finance_save_cash_receipt` and
+`finance_post_cash_receipt`, and voids and deletes a receipt, each after
+asking `finance_cash_receipts` whether the payment is one. No function of
+`src/lib/finance/` calls `finance_record_voucher` or `finance_save_expense`,
+approves or rejects an expense or a payment, or touches an expense:
+`cash-book.ts` and `expenses.ts` only read, and each of those writes arrives
+with its form. The other voids and deletes that exist are those of Payments
+In, Payments Out and Refunds, and reach only what those screens show.
 
 Voiding a bill, an invoice or a payment, and deleting a draft bill, a draft
 invoice or a scheduled payment, are plain updates and deletes; the guards
@@ -778,8 +991,8 @@ quotation, a credit note or a refund by the file that made the call.
 | `FIN11` | The bill, invoice, quotation, credit note or payment no longer exists. `finance_post_invoice`, `finance_send_quotation`, `finance_convert_quotation` and `finance_issue_credit_note` also answer this to a viewer: each locks its row first, and a viewer may not, so to them it is not there |
 | `FIN12` | The invoice has a credit note that is a draft or issued, so it cannot be voided. `invoices.ts` words it: "This invoice has credit notes. Void them on Credit Notes, or delete the drafts, before voiding it." |
 | `FIN13` | The quotation already has an invoice that is not void: it cannot be converted again, and its answer can no longer change. `quotations.ts` words it |
-| `FIN14` | Approval. Only an owner or admin approves or rejects an expense or a payment; a payment is submitted for approval only from a draft and rejected only before it is approved; money out that settles no document needs one of them before it is scheduled or paid; a payment waiting for approval, or rejected, cannot be changed; a rejected payment is final; an approved payment is paid as it was approved, with nothing but its status, number and date changing. Also: `approved_by` and `approved_at` on a payment or an expense are written by the database, and an update from a signed-in person that changes either by hand is this code, unless an earlier rule refuses it first (`FIN09` on a posted or void payment, `FIN01` on an approved or rejected expense whose status is left as it was); a scheduled payment out that nobody approved cannot be raised above its split, or made from scheduled money in, by someone who is not an owner or admin, and its split cannot be deleted or lowered below the payment by any signed-in person. Nothing in the app meets it yet |
-| `FIN15` | A receipt, a voucher or an expense names the wrong thing: a receipt is for invoices or for an income category, a voucher for expenses or for an expense category, never both and never neither; a receipt for invoices that is being posted must be exactly its split and carry no category; an expense needs an expense category of its own workspace. Nothing in the app meets it yet |
+| `FIN14` | Approval. Only an owner or admin approves or rejects an expense or a payment; a payment is submitted for approval only from a draft and rejected only before it is approved; money out that settles no document needs one of them before it is scheduled or paid; a payment waiting for approval, or rejected, cannot be changed; a rejected payment is final; an approved payment is paid as it was approved, with nothing but its status, number and date changing. Also: `approved_by` and `approved_at` on a payment or an expense are written by the database, and an update from a signed-in person that changes either by hand is this code, unless an earlier rule refuses it first (`FIN09` on a posted or void payment, `FIN01` on an approved or rejected expense whose status is left as it was); a scheduled payment out that nobody approved cannot be raised above its split, or made from scheduled money in, by someone who is not an owner or admin, and its split cannot be deleted or lowered below the payment by any signed-in person. Also a member's post or void of a cash receipt: Cash Receipts offers a member no Post and no Void, and if one is sent anyway the action answers "Only an owner or admin can post, pay or void. Ask one of them to do this." before reading or writing, and the database answers this code and uses up no number. |
+| `FIN15` | A receipt, a voucher or an expense names the wrong thing: a receipt is for invoices or for an income category, a voucher for expenses or for an expense category, never both and never neither; a receipt for invoices that is being posted must be exactly its split and carry no category; an expense needs an expense category of its own workspace. `cash-receipts.ts` words it for a receipt: "A receipt needs either invoices that add up to its amount, or an income category that still exists. Edit it and try again." The voucher and the expense meet it with their forms |
 | `42501` | Row-level security refused the write: "You do not have permission to make changes here." |
 | `22003` | A number does not fit its column (quantity × unit price can overflow): "That amount is too large." |
 | `22023` | `finance_record_refund` was given a status other than `posted` or `scheduled`. The app always sends one of the two, so only a direct call reaches it; `refunds.ts` has no sentence for it. |
@@ -825,9 +1038,13 @@ The sentence for `FIN01` on an invoice is "This invoice has been posted or
 voided, so that can no longer be done.". The row menus offer only what a
 status allows, so the code reaches a person only when the invoice changed under
 them, and the sentence is true of every such case, voiding an invoice that was
-just voided included. `FIN09` on a payment in is "This payment has already been
-voided." for the same reason. Bills and payments out still say "Void it
-instead."; see Known limits.
+just voided included. `FIN09` on voiding a payment in is "This payment cannot
+be voided as it now stands: it has already been voided, or it is still a
+draft.": the first for the same reason, the second for a draft receipt against
+invoices sent to `voidPaymentIn` by a direct call. A receipt has three
+sentences for the code, by what was being done (`CASH_RECEIPT_MESSAGES`:
+`locked` for a save or a post, `cannotVoid`, `cannotDelete`). Bills and
+payments out still say "Void it instead."; see Known limits.
 
 The cash book reuses the codes above where the meaning is the same. `FIN01`:
 an expense is created pending, an approved or rejected one is locked, it is
@@ -849,6 +1066,26 @@ contact and a typed vendor or neither, with more SST than its amount, or of
 nothing; a payment with both a contact and a typed name. `23503`: an expense
 that a voided or rejected payment still names cannot be deleted. For these cases none of
 the codes has a sentence yet: the files that word them arrive with the forms.
+
+Banking adds two codes, and neither has a sentence yet either. `FIN16` is a
+transfer: it is between two different, active accounts of the workspace and
+has an amount; a payment does not join or leave a transfer; once a side is
+posted, a transfer is two matching sides. `FIN17` is a statement: an import
+has between 1 and 1,000 lines; a line starts unmatched and only its match
+changes; it is matched to a posted payment of its account, direction and
+amount; a matched line is unmatched before it is deleted; an import stays
+with its account. Banking reuses `FIN14` (recording or voiding a transfer
+needs an owner or admin), `FIN11` (the transfer no longer exists, or is not
+the caller's to void), `FIN09` (only a posted transfer is voided), `42501`
+(`finance_record_transfer` called by someone who may not write in the
+workspace; a statement imported by one; and any direct write by a signed-in
+person that names a payment's `number`, so posting two sides by hand),
+`23505` (a second line on one payment, or a third side on a transfer),
+`23514` (a line with money in and money out, or neither; an amount of NaN on
+a payment or a line; a payment posted with no number; a draft side of a
+transfer given a number, which only the database owner can now try), `23503`
+(a statement for an account that is not the workspace's) and `23502` (a line
+with no date).
 
 ## Known limits
 
@@ -956,10 +1193,41 @@ the codes has a sentence yet: the files that word them arrive with the forms.
   schema a payment's is. Only a direct call can send one.
 - A draft cash receipt against invoices is on Payments In with the status
   Draft, and holds its part of each invoice until it is posted or deleted.
-  Nothing in the app makes one yet. Payments In offers nothing on such a row;
-  sent to `voidPaymentIn` by a direct call it is answered "This payment has
-  already been voided.", which is not true of a draft. The part that adds the
-  receipt form rewords it.
+  It is made, changed, posted and deleted on Cash Receipts. Payments In
+  offers nothing on such a row, and shows it under the status "All" only.
+- Nothing on Invoices says what a draft receipt holds of an invoice (the
+  payment forms do, under each invoice), and nothing on a draft receipt's row
+  says when its invoice was credited since and no longer owes what the draft
+  holds.
+- A receipt against invoices can be voided on Payments In or on Cash
+  Receipts. A receipt for income can be voided on Cash Receipts only.
+- Anyone who may write can change or delete any draft receipt, whoever saved
+  it. `created_by` stays the person who first saved it, and nothing records
+  who posted it. Two people saving the same draft at once: the later save
+  replaces the earlier, with no warning.
+- A draft receipt keeps the date it was given when it is posted later:
+  posting does not move it to the day it is posted. The Post question shows
+  the date.
+- A draft receipt stays in the table in every period; once posted it is
+  listed by its date, so posting a draft dated outside the chosen period
+  takes it out of the table until a longer period is chosen. The screen says
+  so when it happens, from the form's "Post receipt" and from a row's Post
+  ("Receipt RC-0012 dated 30 Oct 2026 was posted. It is outside this month:
+  choose a longer period to see it."; never for All time, which holds every
+  date). It says too when a posted receipt is hidden by the Draft or Void
+  status filter, and when a receipt is voided and the filter is "All except
+  void" or Posted ("Receipt RC-0012 was voided. Choose Void in the status
+  filter to see it."). A draft saved with a date outside the period needs no
+  note: drafts show in every period. A draft is hidden by the Posted or Void
+  status filter, by search text, or by the ten-row limit until "View all", and
+  no note is given then (saving a draft is not posting it). A receipt just
+  posted or voided that search text or the ten-row limit hides gets the note
+  too ("Receipt RC-0012 was posted. Clear the search or choose View all to see
+  it."). The note is worked out each time the screen draws, from the rows
+  listed then, so changing the period, the filter or the search updates or
+  removes it; Close and the next action remove it too.
+- Income categories cannot be added, renamed or archived yet: every workspace
+  has "Sales" and "Other income" until the Expenses forms manage categories.
 - A sent quotation cannot be edited: mark it declined and write a new one.
   "Mark as sent" is offered on a draft whatever its total, and refused with
   the reason when its lines total nothing, as Post is on an invoice.
@@ -1084,10 +1352,10 @@ the codes has a sentence yet: the files that word them arrive with the forms.
 - A contact's Payable counts bills that are pending or overdue, and the
   Payable card is totalled from every open bill, not only the contacts loaded.
   Receivable is the same for invoices that are sent or overdue.
-- Cash Receipts, Payment Vouchers and Expenses are read-only. A receipt for
-  income, a voucher that is not a supplier payment or a refund, and an
-  expense exist only in the demo workspace until their forms are built; the
-  database functions for them are there and nothing calls them.
+- Payment Vouchers and Expenses are read-only. A voucher that is not a
+  supplier payment or a refund, and an expense, exist only in the demo
+  workspace until their forms are built; the database functions for them are
+  there and nothing calls them.
 - A payment to a supplier or a refund recorded by someone who is not an owner
   or admin is not held for approval. The owner decides whether it should be.
 - A voucher that settles no document, recorded by someone who is not an owner
@@ -1134,3 +1402,64 @@ the codes has a sentence yet: the files that word them arrive with the forms.
 - The database tests for this stage, `tests/bendahara-cash-book.test.ts`, run
   against the hosted database as owners only. What an editor and a viewer may
   not do is proved by `supabase/tests/bendahara_cash_book_check.sql`.
+- Banking is read-only. Accounts cannot be added or edited, money cannot be
+  moved between accounts and no statement can be imported until their forms
+  are built; the database functions are there and nothing calls them. A
+  transfer and a statement exist only in the demo workspace.
+- Only an owner or admin can record a transfer between accounts, and only an
+  owner or admin can void one. Nothing waits for approval: anyone else is
+  refused (`FIN14`), and a member has no way to ask for either.
+- Banking shows no account number, and `finance_account_balances` does not
+  have one. A writer reads account numbers with
+  `finance_account_numbers(target_org)`; a viewer cannot read them at all.
+  Nothing in the app calls that function yet: the account form will.
+- `finance_record_transfer` runs as its owner, so row-level security does not
+  check what it does: its own first test (may the caller write in
+  `target_org`) and the workspace named in each of its statements do. A
+  change to it must keep both. The same is true of the six functions that
+  number a payment and of `finance_next_number`.
+- A bank charge recorded by someone who is not an owner or admin waits for
+  approval, though the bank has already taken the money.
+- An account's balance counts every posted movement, whatever its date. The
+  opening date is a label. A movement dated before it still counts.
+- A movement is reconciled only by a statement line matched to it. Cash
+  accounts, and bank accounts that have never had a statement imported, show a
+  dash instead of a reconciliation status, and the "Reconciled" and
+  "Unreconciled" filters leave those rows out. One bank line that covers two
+  payments, or two lines for one payment, cannot be matched.
+- The same statement can be imported twice; nothing warns.
+- Sides of a transfer that are all drafts are not checked: a direct write can
+  leave a lone draft side. It moves no money, shows on no screen, and cannot
+  be posted.
+- Banking loads every movement and filters in the browser. The running
+  balance orders two movements on one day by when they were recorded, which
+  need not be the order the bank had them in.
+- The reconciliation gauge counts posted movements dated in the current month
+  on bank accounts that have had a statement imported. It reads 99% while one
+  is unmatched and 1% while one is matched, however close the figures are to
+  all or none. The cash position chart is today's total with later
+  movements taken back out, so a changed opening balance moves every month.
+- No signed-in person can post the two sides of a transfer by hand: the
+  number column is closed to them. The database owner still can (a migration
+  or the SQL editor, as the demo seed does), may give the two sides any
+  number, one another kind of payment already has included (`RC-0001`), and
+  may use an archived account; the pair check is the only rule such a write
+  meets. Rows are keyed by id, and no code looks a payment up by number.
+- Accounts are plain rows: anyone who may write can change an opening
+  balance, which moves a balance with no transfer and no record. Who may
+  edit one is decided with the account form.
+- The 1,000-line limit and the import's date are the import function's, not
+  the tables': a direct insert can add more lines to an import, and a direct
+  update can change an import's `created_at` or `created_by`. Nothing reads
+  them for a rule; "Last import" reads the date.
+- An account, a category and a contact that nothing refers to can still be
+  moved to another workspace by someone who writes in both; the two
+  statement tables refuse it.
+- The database tests for Banking, `tests/bendahara-banking.test.ts`, run
+  against the hosted database as owners, with one member in one test and the
+  demo's viewer in another. What an admin, an editor and a viewer may and may
+  not do, at length, is proved by
+  `supabase/tests/bendahara_banking_check.sql`, which needs every finance
+  migration up to `20261031090300` applied. Two parts of it run as the
+  database owner with a person's id in the claims, because posting two sides
+  by hand is no longer something a signed-in person can try.

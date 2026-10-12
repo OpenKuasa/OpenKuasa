@@ -30,6 +30,12 @@ export type ApprovalRow = {
   over_by: number;
   /** The request belongs to the viewer's own employee record. */
   yours: boolean;
+  /**
+   * The viewer may approve, reject or mark it paid: anyone's but their own, and their own only when they are
+   * the workspace's owner. The database decides (LEAVE_OWN_REQUEST, PAY_OWN_REQUEST); this keeps the buttons
+   * in step with it. Cancelling is not part of it: a person may always withdraw their own request.
+   */
+  decidable: boolean;
   /** An owner or admin may cancel it: anything not already cancelled. */
   cancellable: boolean;
   /** Claims only: the receipt, the year's total, the paid mark. Null on the other queues. */
@@ -228,22 +234,26 @@ function buildQueue(
       : null,
     rows: [...items]
       .sort((a, b) => b.created_at.localeCompare(a.created_at) || a.id.localeCompare(b.id))
-      .map((item) => ({
-        id: item.id,
-        employee_name: item.employee_name,
-        cells: item.cells,
-        status: item.status,
-        status_label: REQUEST_STATUS_LABEL[item.status],
-        pending: item.status === 'pending',
-        created_at: item.created_at,
-        over_by: item.over_by ?? 0,
-        yours: viewer.employeeId !== null && item.employee_id === viewer.employeeId,
-        // A paid claim is not cancelled until its paid mark is undone.
-        cancellable: item.status !== 'cancelled' && item.status !== 'paid',
-        claim: item.claim ?? null,
-        overtime: item.overtime ?? null,
-        notes: item.notes ?? [],
-      })),
+      .map((item) => {
+        const yours = viewer.employeeId !== null && item.employee_id === viewer.employeeId;
+        return {
+          id: item.id,
+          employee_name: item.employee_name,
+          cells: item.cells,
+          status: item.status,
+          status_label: REQUEST_STATUS_LABEL[item.status],
+          pending: item.status === 'pending',
+          created_at: item.created_at,
+          over_by: item.over_by ?? 0,
+          yours,
+          decidable: !yours || viewer.isOwner === true,
+          // A paid claim is not cancelled until its paid mark is undone.
+          cancellable: item.status !== 'cancelled' && item.status !== 'paid',
+          claim: item.claim ?? null,
+          overtime: item.overtime ?? null,
+          notes: item.notes ?? [],
+        };
+      }),
   };
 }
 

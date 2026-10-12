@@ -27,7 +27,8 @@ export type ChatLockCode =
   | 'sign_in'
   | 'demo'
   | 'key_required'
-  | 'key_unavailable';
+  | 'key_unavailable'
+  | 'attachment_limit';
 
 const locked = (
   status: number,
@@ -65,6 +66,14 @@ async function readSessionWorkspaceKey(supabase: SupabaseClient): Promise<Worksp
 export async function resolveChatAccess(
   supabase: SupabaseClient,
   user: User | null | undefined,
+  options?: {
+    /**
+     * Asked once the turn is known to be a free question, before one is used up:
+     * a refusal returned here (a request too heavy for the platform key) costs
+     * the caller nothing.
+     */
+    beforeFree?: () => { status: number; code: ChatLockCode; error: string } | null;
+  },
 ): Promise<ChatAccess> {
   if (!user) return locked(401, 'sign_in', 'Please sign in to chat.');
   if (!isLiveChatAllowed(user)) {
@@ -101,6 +110,9 @@ export async function resolveChatAccess(
     'Add your OpenRouter key to keep chatting.',
   );
   if (!hasProviderKey()) return needsKey;
+
+  const tooHeavy = options?.beforeFree?.();
+  if (tooHeavy) return { kind: 'locked', ...tooHeavy };
 
   const { data: remaining, error: quotaErr } = await supabase.rpc(
     'consume_free_question',
