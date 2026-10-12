@@ -146,7 +146,8 @@ export function CashReceiptFormCard({
     const forgetGone = <R extends FinResult<unknown>>(result: R): R => {
       if (result.ok) return result;
       const after = afterRefusedReceiptSave(form, result.error);
-      if (after.form !== form) setForm(after.form);
+      // Only the id is forgotten: anything typed while the save was pending is kept.
+      if (after.form !== form) setForm((f) => ({ ...f, id: undefined }));
       return { ...result, error: after.error };
     };
     if (!post) {
