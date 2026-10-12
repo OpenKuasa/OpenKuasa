@@ -33,7 +33,7 @@ import {
   submitOvertime,
 } from '@/lib/people/pay-requests';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { createConfirmedTestUser, createOrg, liveClient, signInAnon } from './helpers/live-workspaces';
+import { createConfirmedTestUser, createOrg, liveClient, signInOwner } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
@@ -62,7 +62,7 @@ const adminCtx = () => ({ client: admin.c, orgId });
 beforeAll(async () => {
   if (!hasSupabaseEnv) return;
   const c = liveClient();
-  const signedIn = await signInAnon(c);
+  const signedIn = await signInOwner(c);
   expect(signedIn.error, signedIn.error?.message).toBeNull();
   const org = await createOrg(c, 'Self Approval Sdn Bhd');
   expect(org.error, org.error?.message).toBeNull();

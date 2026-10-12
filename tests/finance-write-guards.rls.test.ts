@@ -7,7 +7,9 @@
  * One workspace with its owner and a member (role `member`, a writer). The
  * member writes drafts and schedules; posting, paying and voiding are refused
  * to them with FIN14 and work for the owner. The columns of a payment that
- * only the database writes are refused to both.
+ * only the database writes are refused to both. The last three tests go
+ * through the cash book functions (a cash receipt, a payment voucher), which
+ * number a payment and so run as the owner like the rest.
  *
  * Workspaces and users come from tests/helpers/live-workspaces.ts, which also
  * removes them.
@@ -15,7 +17,7 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { createConfirmedTestUser, createOrg, liveClient, signInAnon } from './helpers/live-workspaces';
+import { createConfirmedTestUser, createOrg, liveClient, signInOwner } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
@@ -61,7 +63,7 @@ const transactions = async () => {
 beforeAll(async () => {
   if (!hasSupabaseEnv) return;
   const c = liveClient();
-  const signedIn = await signInAnon(c);
+  const signedIn = await signInOwner(c);
   expect(signedIn.error, signedIn.error?.message).toBeNull();
   const org = await createOrg(c, 'Finance Guards Sdn Bhd');
   expect(org.error, org.error?.message).toBeNull();
@@ -212,4 +214,114 @@ testWithSupabase('a payment starts as a draft, and its number and approval are n
   const removed = await member.c.from('finance_transactions').delete().eq('id', id).select('id');
   expect(removed.error, removed.error?.message).toBeNull();
   expect(removed.data).toEqual([{ id }]);
+});
+
+/** One of the categories every workspace starts with. */
+async function category(name: string): Promise<string> {
+  const { data, error } = await owner.c
+    .from('finance_categories')
+    .select('id')
+    .eq('org_id', orgId)
+    .eq('name', name)
+    .single();
+  expect(error, error?.message).toBeNull();
+  return data!.id as string;
+}
+const payment = async (id: unknown) => {
+  const { data, error } = await owner.c
+    .from('finance_transactions')
+    .select('status, number, created_by, approved_by')
+    .eq('id', id)
+    .single();
+  expect(error, error?.message).toBeNull();
+  return data!;
+};
+
+// The cash book functions (20261028100000) write a payment's number, so they run as the owner too.
+testWithSupabase('a member saves a draft cash receipt; only the owner posts it', async () => {
+  const sales = await category('Sales');
+  const saved = await member.c.rpc('finance_save_cash_receipt', {
+    target_org: orgId,
+    receipt: { account_id: bank, method: 'cash', amount: 40, category_id: sales, party_name: 'Walk-in customer' },
+    allocations: [],
+  });
+  expect(saved.error, saved.error?.message).toBeNull();
+  expect(await payment(saved.data)).toEqual({
+    status: 'draft',
+    number: null,
+    created_by: member.userId,
+    approved_by: null,
+  });
+
+  const post = { target_org: orgId, target_txn: saved.data };
+  expect((await member.c.rpc('finance_post_cash_receipt', post)).error?.code).toBe(SIGN_OFF);
+  const posted = await owner.c.rpc('finance_post_cash_receipt', post);
+  expect(posted.error, posted.error?.message).toBeNull();
+  expect(posted.data).toMatch(/^RC-\d{4}$/);
+});
+
+testWithSupabase('a voucher that settles no document waits for approval from a member; the owner pays one', async () => {
+  const rent = await category('Rent');
+  const voucher = (c: SupabaseClient) =>
+    c.rpc('finance_record_voucher', {
+      target_org: orgId,
+      voucher: {
+        account_id: bank,
+        method: 'bank_transfer',
+        amount: 75,
+        category_id: rent,
+        party_name: 'Landlord',
+        status: 'posted',
+      },
+      allocations: [],
+    });
+
+  const waiting = await voucher(member.c);
+  expect(waiting.error, waiting.error?.message).toBeNull();
+  expect(await payment(waiting.data)).toEqual({
+    status: 'pending_approval',
+    number: null,
+    created_by: member.userId,
+    approved_by: null,
+  });
+  // Approving it is an owner's or admin's, as it was before this migration.
+  const memberApproves = await member.c
+    .from('finance_transactions')
+    .update({ status: 'scheduled' })
+    .eq('id', waiting.data);
+  expect(memberApproves.error?.code).toBe(SIGN_OFF);
+
+  const paid = await voucher(owner.c);
+  expect(paid.error, paid.error?.message).toBeNull();
+  const row = await payment(paid.data);
+  expect(row).toMatchObject({ status: 'posted', created_by: owner.userId, approved_by: owner.userId });
+  expect(row.number).toMatch(/^PV-\d{4}$/);
+});
+
+testWithSupabase('a member schedules a voucher for an approved expense; paying it now is refused', async () => {
+  const rent = await category('Rent');
+  // Saved by the owner, so approved in the same call.
+  const expense = await owner.c.rpc('finance_save_expense', {
+    target_org: orgId,
+    expense: { category_id: rent, vendor_name: 'Landlord', amount: 60 },
+  });
+  expect(expense.error, expense.error?.message).toBeNull();
+  const voucher = (status: 'posted' | 'scheduled') =>
+    member.c.rpc('finance_record_voucher', {
+      target_org: orgId,
+      voucher: { account_id: bank, method: 'bank_transfer', status },
+      allocations: [{ expense_id: expense.data, amount: 60 }],
+    });
+
+  const before = await transactions();
+  expect((await voucher('posted')).error?.code).toBe(SIGN_OFF);
+  expect(await transactions()).toBe(before);
+  const scheduled = await voucher('scheduled');
+  expect(scheduled.error, scheduled.error?.message).toBeNull();
+  expect(await payment(scheduled.data)).toEqual({
+    status: 'scheduled',
+    number: null,
+    created_by: member.userId,
+    approved_by: null,
+  });
 });
