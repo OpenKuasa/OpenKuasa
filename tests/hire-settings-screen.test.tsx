@@ -48,6 +48,14 @@ const CARDS = [
   { key: 'notifications', Card: NotificationsPreview },
 ] as const;
 
+const TITLES = {
+  pipeline: { title: 'Hiring pipeline', subtitle: 'Stages candidates move through' },
+  boards: { title: 'Job board integrations', subtitle: 'Where your roles get posted' },
+  templates: { title: 'Email templates', subtitle: 'Automated candidate messages' },
+  team: { title: 'Hiring team', subtitle: 'Managers and interviewers' },
+  notifications: { title: 'Notifications', subtitle: 'Choose what you get notified about' },
+} as const;
+
 const LINE = 'A preview of what is planned. Nothing here works or is saved yet.';
 
 /** Every opening tag that starts a button (a switch is a button with role="switch"). */
@@ -66,6 +74,7 @@ describe('the five preview cards', () => {
 
       it('says Coming soon and explains it in the card', () => {
         expect(html).toContain('Coming soon');
+        expect(html).toContain(LINE);
         expect(html).toMatch(new RegExp(`<[a-z]+[^>]*\\bid="${id}"[^>]*>${LINE}</`));
       });
 
@@ -73,14 +82,22 @@ describe('the five preview cards', () => {
         const tags = buttonTags(html);
         expect(tags.length).toBeGreaterThan(0);
         const inert = tags.filter(
-          (tag) => tag.includes('disabled=""') && tag.includes(`aria-describedby="${id}"`),
+          (tag) => /\sdisabled=""/.test(tag) && tag.includes(`aria-describedby="${id}"`),
         );
         expect(inert.length).toBe(tags.length);
         const switches = html.match(/role="switch"/g) ?? [];
         const inertSwitches = tags.filter(
-          (tag) => tag.includes('role="switch"') && tag.includes('disabled=""') && tag.includes(`aria-describedby="${id}"`),
+          (tag) => tag.includes('role="switch"') && /\sdisabled=""/.test(tag) && tag.includes(`aria-describedby="${id}"`),
         );
         expect(inertSwitches.length).toBe(switches.length);
+      });
+
+      it('lets the title and the subtitle wrap instead of being cut off', () => {
+        const title = TITLES[key];
+        const wraps = (text: string) =>
+          new RegExp(`<[a-z]+[^>]*class="[^"]*\\bwhitespace-normal\\b[^"]*"[^>]*>${text}</`).test(html);
+        expect(wraps(title.title)).toBe(true);
+        expect(wraps(title.subtitle)).toBe(true);
       });
 
       it('has no switch that is on', () => {

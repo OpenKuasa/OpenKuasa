@@ -38,8 +38,9 @@ function PreviewCard({
 }) {
   return (
     <BentoCard
-      title={title}
-      subtitle={subtitle}
+      // BentoCard truncates its header text; a wrapping child lets it use a second line instead.
+      title={<span className="block whitespace-normal break-words">{title}</span>}
+      subtitle={<span className="block whitespace-normal break-words">{subtitle}</span>}
       icon={icon}
       className="col-span-2 md:col-span-6"
       action={
