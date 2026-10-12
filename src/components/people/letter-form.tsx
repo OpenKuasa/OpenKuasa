@@ -2,7 +2,7 @@
 
 import { Plus } from 'lucide-react';
 import { Dialog } from 'radix-ui';
-import { useId, useRef, useState, useTransition } from 'react';
+import { useEffect, useId, useRef, useState, useTransition } from 'react';
 import {
   issueLetterAction,
   saveLetterAction,
@@ -24,6 +24,8 @@ import {
   startChoice,
 } from '@/lib/people/letters-screens';
 import { LETTER_TYPE_LABEL } from '@/lib/people/own';
+import { LetterPreview } from './letter-body';
+import { LetterToolbar, useMarkApply } from './letter-toolbar';
 import { LETTER_TYPES, type LetterType } from '@/lib/people/types';
 
 /** The draft being edited. */
@@ -195,6 +197,31 @@ function WriteStep({
   const [pressed, setPressed] = useState<'save' | 'issue' | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
+  // Preview swaps the letter field for the rendered letter. The text field stays in the page, hidden, so the text,
+  // the selection and everything typed are still there when it comes back.
+  const [preview, setPreview] = useState(false);
+  const afterPreview = useRef<{ start: number; end: number } | null>(null);
+  const applyToolbar = useMarkApply({
+    ref: bodyRef,
+    value: values.body,
+    setValue: (body) => setValues((v) => ({ ...v, body })),
+    max: LETTER_BODY_MAX,
+    onError: (message) => {
+      setError(message);
+      if (message === null) setConfirmingIssue(false);
+    },
+  });
+
+  // Coming back from Preview: the text field is shown again, then focused (and a placeholder selected, if that is why).
+  useEffect(() => {
+    if (preview) return;
+    const element = bodyRef.current;
+    const spot = afterPreview.current;
+    afterPreview.current = null;
+    if (!element || !spot) return;
+    element.focus();
+    element.setSelectionRange(spot.start, spot.end);
+  }, [preview]);
 
   // Found in the text as it is now, not from the list the database reported: a known placeholder typed or left
   // anywhere in the title or body stops the issue.
@@ -209,6 +236,11 @@ function WriteStep({
   function select(name: string) {
     const spot = placeholderSpot(values.title, values.body, name);
     if (!spot) return;
+    if (spot.field === 'body' && preview) {
+      afterPreview.current = { start: spot.start, end: spot.end };
+      setPreview(false);
+      return;
+    }
     const element = spot.field === 'title' ? titleRef.current : bodyRef.current;
     if (!element) return;
     element.focus();
@@ -294,18 +326,43 @@ function WriteStep({
           onChange={(event) => edit({ title: event.target.value })}
         />
       </label>
-      <label className="flex flex-col gap-1 text-sm" htmlFor={`${id}-body`}>
-        Letter
+      <div className="space-y-1.5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <label className="text-sm" htmlFor={`${id}-body`}>
+            Letter
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <LetterToolbar disabled={pending || preview} onMark={applyToolbar} />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={pending}
+              aria-pressed={preview}
+              onClick={() => setPreview((on) => !on)}
+            >
+              {preview ? 'Edit' : 'Preview'}
+            </Button>
+          </div>
+        </div>
         <Textarea
           id={`${id}-body`}
           ref={bodyRef}
           rows={12}
           maxLength={LETTER_BODY_MAX}
           disabled={pending}
+          hidden={preview}
+          className={preview ? 'hidden' : undefined}
           value={values.body}
           onChange={(event) => edit({ body: event.target.value })}
         />
-      </label>
+        {preview ? <LetterPreview title={values.title} body={values.body} /> : null}
+        {!preview ? (
+          <p className="text-xs text-muted-foreground">
+            Format with **bold**, *italic*, # headings, - bullets and 1. numbers, or the buttons above. Preview shows the letter as it will print.
+          </p>
+        ) : null}
+      </div>
       {state.names.length > 0 ? (
         <div className="space-y-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
           <p className="font-medium">Still to replace in this letter</p>

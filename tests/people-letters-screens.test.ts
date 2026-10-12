@@ -327,3 +327,28 @@ describe('the member side of Letters names no owner-only action', () => {
     }
   });
 });
+
+describe('placeholders and marks (raw text decides)', () => {
+  it('lists eight placeholders, salary last, and inserts {salary} like any other', () => {
+    expect(PLACEHOLDERS).toHaveLength(8);
+    expect(PLACEHOLDERS[7]).toBe('salary');
+    expect(insertPlaceholder('Pay: ', 5, 5, 'salary')).toEqual({ text: 'Pay: {salary}', caret: 13 });
+  });
+  it('finds a placeholder wrapped in marks, so the Issue button stays disabled and the list names it', () => {
+    for (const body of ['**{designation}**', '*{designation}*', '# {designation}', '- {designation}', '***{designation}***']) {
+      const state = issueState('Offer', body);
+      expect(state.allowed, body).toBe(false);
+      expect(state.names, body).toEqual(['designation']);
+    }
+    expect(issueState('Offer', 'Pay **{salary}** monthly').names).toEqual(['salary']);
+    expect(issueState('Offer', 'Pay **RM 3,000** monthly').allowed).toBe(true);
+  });
+  it('selects the placeholder itself, not the marks around it', () => {
+    const body = 'Dear **{employee_name}**,\n*{salary}*';
+    const spot = placeholderSpot('T', body, 'employee_name');
+    expect(spot).not.toBeNull();
+    expect(body.slice(spot!.start, spot!.end)).toBe('{employee_name}');
+    const salary = placeholderSpot('T', body, 'salary');
+    expect(body.slice(salary!.start, salary!.end)).toBe('{salary}');
+  });
+});

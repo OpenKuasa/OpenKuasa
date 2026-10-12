@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button';
 import type { LetterRow } from '@/lib/people/documents';
 import { letterView } from '@/lib/people/letters-screens';
 import { AcknowledgeLetterButton } from './letter-ack-button';
+import { LetterBody } from './letter-body';
+import { LetterHead } from './letter-head';
 
 /**
  * Print styles. Hidden with `display: none`: every direct child of <body> except the dialog's content (the app shell
@@ -26,12 +28,17 @@ const PRINT_CSS = `
   }
   /* Inside the dialog: the buttons and the draft note. */
   [data-letter-noprint] { display: none !important; }
+  /* The letterhead is the first thing on the first page and stays in one piece; a heading is never left alone at the
+     foot of a page, and a list item is not split. (The editors' Preview is marked data-letter-noprint: it never prints.) */
+  [data-letter-print] header { break-inside: avoid; }
+  [data-letter-print] h2, [data-letter-print] h3, [data-letter-print] h4 { break-after: avoid; }
+  [data-letter-print] li { break-inside: avoid; }
 }
 `;
 
 /**
- * The printable letter: workspace name, the date, the employee's name, the title and the body as plain text with its
- * line breaks kept (it is never put in as HTML). A draft (owners and admins only) is marked as one. Opens from a
+ * The printable letter: the letterhead (logo, name, registration number, address), the date, the employee's name,
+ * the title and the formatted body (built from a parsed tree, never put in as HTML). A draft (owners and admins only) is marked as one. Opens from a
  * "View" button; "Print" calls the browser's print. A member's component: it names no owner-only action.
  */
 export function LetterViewDialog({ letter, workspaceName }: { letter: LetterRow; workspaceName: string }) {
@@ -61,15 +68,15 @@ export function LetterViewDialog({ letter, workspaceName }: { letter: LetterRow;
           ) : null}
           <article data-letter-print className="space-y-4 bg-white p-6 text-black">
             {view.draft ? <p className="text-xs font-semibold uppercase tracking-wide">Draft</p> : null}
-            <header className="flex flex-wrap items-baseline justify-between gap-2 border-b border-black/20 pb-3">
-              <p className="text-base font-semibold">{view.workspace}</p>
+            <header className="flex flex-wrap items-start justify-between gap-2 border-b border-black/20 pb-3">
+              <LetterHead fallbackName={view.workspace} />
               <p className="text-sm">{view.date_line}</p>
             </header>
             <p className="text-sm">
               <span className="font-semibold">To:</span> {view.employee_name}
             </p>
             <h2 className="text-lg font-semibold">{view.title}</h2>
-            <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">{view.body}</div>
+            <LetterBody body={view.body} />
           </article>
           <div className="mt-4 flex flex-wrap items-start justify-between gap-3" data-letter-noprint>
             <div>{view.can_acknowledge ? <AcknowledgeLetterButton letterId={letter.id} /> : null}</div>

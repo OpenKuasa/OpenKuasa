@@ -13,6 +13,8 @@ import { PLACEHOLDERS } from '@/lib/people/letter-placeholders';
 import { insertPlaceholder, insertRefusal } from '@/lib/people/letters-screens';
 import { LETTER_TYPE_LABEL } from '@/lib/people/own';
 import { LETTER_TYPES, type LetterType } from '@/lib/people/types';
+import { LetterPreview } from './letter-body';
+import { LetterToolbar, useMarkApply } from './letter-toolbar';
 
 /** The template being edited. */
 export type EditableTemplate = { id: string; name: string; letter_type: string; title: string; body: string };
@@ -43,6 +45,16 @@ function TemplateFormBody({
   // Whichever of title and body had the cursor last; the body until the title is touched.
   const lastField = useRef<Field>('body');
   const caret = useRef<{ field: Field; at: number } | null>(null);
+  // Preview swaps the letter text for the rendered letter; the text field stays in the page, hidden.
+  const [preview, setPreview] = useState(false);
+  const applyToolbar = useMarkApply({ ref: bodyRef, value: body, setValue: setBody, max: LETTER_BODY_MAX, onError: setError });
+
+  // Coming back from Preview: put the cursor back in the text.
+  const wasPreview = useRef(false);
+  useEffect(() => {
+    if (wasPreview.current && !preview) bodyRef.current?.focus();
+    wasPreview.current = preview;
+  }, [preview]);
 
   // After an insert, put the cursor just behind the placeholder (the state change has to land first).
   useEffect(() => {
@@ -151,21 +163,47 @@ function TemplateFormBody({
           onChange={(event) => clear(setTitle)(event.target.value)}
         />
       </label>
-      <label className="flex flex-col gap-1 text-sm" htmlFor={`${id}-body`}>
-        Letter text
+      <div className="space-y-1.5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <label className="text-sm" htmlFor={`${id}-body`}>
+            Letter text
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <LetterToolbar disabled={pending || preview} onMark={applyToolbar} />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={pending}
+              aria-pressed={preview}
+              onClick={() => setPreview((on) => !on)}
+            >
+              {preview ? 'Edit' : 'Preview'}
+            </Button>
+          </div>
+        </div>
         <Textarea
           id={`${id}-body`}
           ref={bodyRef}
           rows={12}
           maxLength={LETTER_BODY_MAX}
           disabled={pending}
+          hidden={preview}
+          className={preview ? 'hidden' : undefined}
           value={body}
           onFocus={() => {
             lastField.current = 'body';
           }}
           onChange={(event) => clear(setBody)(event.target.value)}
         />
-      </label>
+        {preview ? <LetterPreview title={title} body={body} /> : null}
+        {!preview ? (
+          <p className="text-xs text-muted-foreground">
+            Format with **bold**, *italic*, # headings, - bullets and 1. numbers, or the buttons above. Placeholders in a
+            preview are shown as typed.
+          </p>
+        ) : null}
+      </div>
       <div className="space-y-1.5">
         <p className="text-sm font-medium">Placeholders</p>
         <div className="flex flex-wrap gap-1.5">
@@ -175,7 +213,7 @@ function TemplateFormBody({
               type="button"
               variant="outline"
               size="xs"
-              disabled={pending}
+              disabled={pending || preview}
               // Keep the cursor where it was in the text field instead of moving focus to the button.
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => insert(p)}

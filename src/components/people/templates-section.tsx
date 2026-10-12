@@ -5,6 +5,7 @@ import { deleteLetterTemplateAction } from '@/app/(app)/people/letter-actions';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { WRITE_FAILED } from '@/lib/people/capabilities';
+import { plainPreview } from '@/lib/people/letter-marks';
 import { removeTemplateSentence } from '@/lib/people/letters-screens';
 import { TemplateDialog } from './template-form';
 
@@ -34,7 +35,7 @@ function TemplateItem({ template }: { template: TemplateListRow }) {
         <Badge variant="secondary">{template.type_label}</Badge>
       </div>
       <p className="text-sm text-muted-foreground">{template.title}</p>
-      <p className="line-clamp-3 whitespace-pre-line text-xs text-muted-foreground">{template.body}</p>
+      <p className="line-clamp-3 whitespace-pre-line text-xs text-muted-foreground">{plainPreview(template.body)}</p>
       <div className="flex flex-wrap items-center gap-2">
         <TemplateDialog template={template} />
         <Button
