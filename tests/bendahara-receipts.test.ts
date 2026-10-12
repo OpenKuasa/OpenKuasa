@@ -2,6 +2,17 @@ import { expect, test } from 'vitest';
 import { type SupabaseClient, createClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import { beforeCleanup, createOrg, joinDemo, liveClient, signInAnon, signInOwner } from './helpers/live-workspaces';
+import { RECEIPT_FILE_MESSAGES, RECEIPT_SNIFF_BYTES, inboxReceiptPath, uploadFailure } from '@/lib/finance/receipt-files';
+import { cleanReceiptFiles, removeReleasedReceiptFile, storedFileCheck } from '@/lib/finance/receipt-files-server';
+import {
+  RECEIPT_INBOX_MESSAGES,
+  deleteInboxReceipt,
+  getReceiptFile,
+  registerReceipt,
+  reviewReceipt,
+  reviewReceiptInput,
+  signReceiptLink,
+} from '@/lib/finance/receipt-inbox';
 
 // The Receipts Inbox against the hosted database and the hosted storage
 // service. Run by the controller only, after the receipts inbox migration is
@@ -483,3 +494,168 @@ testWithStorage('a demo viewer reads the seeded inbox, and can write none of it'
   const { data: removed } = await c.from('finance_receipts').delete().eq('id', one![0].id).select('id');
   expect(removed ?? []).toEqual([]);
 });
+
+// ---- Stage 7b: the app's own upload, open, review, delete and clean-up code, against the real storage service ----
+
+const ctxOf = (o: Org) => ({ client: o.c, orgId: o.orgId });
+const objectExists = async (path: string) => {
+  const [folder, name] = path.split('/');
+  const listed = await service().storage.from(INBOX_RECEIPT_BUCKET).list(folder, { limit: 100, search: name });
+  if (listed.error) throw new Error(`the folder could not be listed: ${listed.error.message}`);
+  return (listed.data ?? []).some((o) => o.name === name);
+};
+
+testWithStorage('storage refuses a file over 10 MB, and the app words the refusal', async () => {
+  const a = await confirmedOwner('Receipts Big');
+  // 11 MB that begins as a PNG does. This is the only proof there is of the bucket's size limit.
+  const big = Buffer.concat([PNG, Buffer.alloc(11 * 1024 * 1024 - PNG.length)]);
+  const path = inboxReceiptPath(a.orgId, 'image/png');
+  uploaded.push(path);
+  const stored = await a.c.storage.from(INBOX_RECEIPT_BUCKET).upload(path, big, { contentType: 'image/png', upsert: false });
+  expect(stored.error).not.toBeNull();
+  expect(uploadFailure(stored.error as { status?: unknown; statusCode?: unknown })).toBe(RECEIPT_FILE_MESSAGES.tooBig);
+  expect(await objectExists(path)).toBe(false);
+  // And what it says to a type the bucket does not take.
+  const webp = `${a.orgId}/${crypto.randomUUID()}.png`;
+  uploaded.push(webp);
+  const wrong = await a.c.storage.from(INBOX_RECEIPT_BUCKET).upload(webp, PNG, { contentType: 'image/webp', upsert: false });
+  expect(uploadFailure(wrong.error as { status?: unknown; statusCode?: unknown })).toBe(RECEIPT_FILE_MESSAGES.wrongType);
+});
+
+testWithStorage('the app records an upload once, however often it is asked, and reviews it', async () => {
+  const a = await confirmedOwner('Receipts App');
+  const path = inboxReceiptPath(a.orgId, 'image/png');
+  expect((await upload(a.c, path)).error).toBeNull();
+  const first = await registerReceipt(ctxOf(a), { path, name: 'C:\\photos\\Resit Kedai.png' });
+  expect(first.ok, JSON.stringify(first)).toBe(true);
+  // The answer was lost and the browser asked again: the same receipt, not a second one and not an error.
+  const again = await registerReceipt(ctxOf(a), { path, name: 'Resit Kedai.png' });
+  expect(again).toEqual(first);
+  const id = (first as { data: { id: string } }).data.id;
+  const { data: rows } = await a.c.from('finance_receipt_inbox').select('id,file_name,status').eq('org_id', a.orgId);
+  expect(rows).toEqual([{ id, file_name: 'Resit Kedai.png', status: 'review' }]);
+
+  // A path of another workspace is refused before the database is asked; one that was never uploaded, by the database.
+  const b = await confirmedOwner('Receipts App Other');
+  expect(await registerReceipt(ctxOf(b), { path, name: 'x.png' })).toEqual({ ok: false, error: RECEIPT_INBOX_MESSAGES.fileGone });
+  const never = inboxReceiptPath(a.orgId, 'image/png');
+  expect(await registerReceipt(ctxOf(a), { path: never, name: 'x.png' })).toEqual({ ok: false, error: RECEIPT_INBOX_MESSAGES.fileGone });
+
+  const reviewed = await reviewReceipt(ctxOf(a), reviewReceiptInput.parse({ id, vendor: ' Kedai Ali ', receipt_date: '2026-10-01', amount: 12.5, sst_amount: 0.75 }));
+  expect(reviewed).toEqual({ ok: true, data: { id } });
+  const { data: after } = await a.c.from('finance_receipt_inbox').select('vendor,receipt_date,amount,sst_amount,status').eq('id', id).single();
+  expect(after).toEqual({ vendor: 'Kedai Ali', receipt_date: '2026-10-01', amount: 12.5, sst_amount: 0.75, status: 'unmatched' });
+  // Emptied again: every field may be empty, and it stays out of review.
+  expect((await reviewReceipt(ctxOf(a), reviewReceiptInput.parse({ id }))).ok).toBe(true);
+  const { data: emptied } = await a.c.from('finance_receipt_inbox').select('vendor,amount,status').eq('id', id).single();
+  expect(emptied).toEqual({ vendor: null, amount: null, status: 'unmatched' });
+  // Another workspace's owner reviews nothing here.
+  expect(await reviewReceipt({ client: b.c, orgId: a.orgId }, reviewReceiptInput.parse({ id, vendor: 'Mine' }))).toEqual({
+    ok: false,
+    error: RECEIPT_INBOX_MESSAGES.gone,
+  });
+});
+
+testWithStorage('a file is opened as a download, after its first bytes are read through a ranged request', async () => {
+  const a = await confirmedOwner('Receipts Open');
+  const { id } = await receipt(a, 'resit.png');
+  const file = await getReceiptFile(ctxOf(a), id);
+  expect(file.ok, JSON.stringify(file)).toBe(true);
+  if (!file.ok) return;
+  expect(file.data.type).toBe('image/png');
+  const link = await signReceiptLink(ctxOf(a), file.data);
+  expect(link.ok, JSON.stringify(link)).toBe(true);
+  if (!link.ok) return;
+
+  // What the server reads before it hands the link out: storage honours the range.
+  const ranged = await fetch(link.data.url, { headers: { Range: `bytes=0-${RECEIPT_SNIFF_BYTES - 1}` } });
+  expect(ranged.status).toBe(206);
+  expect((await ranged.arrayBuffer()).byteLength).toBe(RECEIPT_SNIFF_BYTES);
+  expect(await storedFileCheck(link.data.url, 'image/png')).toBe('match');
+  // What the browser gets: an attachment under our name, never the person's.
+  const got = await fetch(link.data.url);
+  expect(got.headers.get('content-disposition') ?? '').toMatch(/^attachment/);
+  expect(got.headers.get('content-disposition') ?? '').toContain('receipt.png');
+  // The browser's own fetch for a preview needs the store to allow it from another origin.
+  const cors = await fetch(link.data.url, { headers: { Origin: 'https://openkuasa.com' } });
+  expect(cors.headers.get('access-control-allow-origin')).toBeTruthy();
+
+  // PNG bytes stored as a JPEG under .jpg: storage and the database take the consistent lie; the app does not open it.
+  const lie = inboxReceiptPath(a.orgId, 'image/jpeg');
+  expect((await upload(a.c, lie, 'image/jpeg')).error).toBeNull();
+  const lied = await registerReceipt(ctxOf(a), { path: lie, name: 'not-a-jpeg.jpg' });
+  expect(lied.ok, JSON.stringify(lied)).toBe(true);
+  if (!lied.ok) return;
+  const lieFile = await getReceiptFile(ctxOf(a), lied.data.id);
+  if (!lieFile.ok) throw new Error('the receipt has no file');
+  const lieLink = await signReceiptLink(ctxOf(a), lieFile.data);
+  if (!lieLink.ok) throw new Error('no link');
+  expect(await storedFileCheck(lieLink.data.url, lieFile.data.type)).toBe('mismatch');
+
+  // Another workspace gets no file and no link.
+  const b = await confirmedOwner('Receipts Open Other');
+  expect((await getReceiptFile(ctxOf(b), id)).ok).toBe(false);
+  expect((await signReceiptLink(ctxOf(b), file.data)).ok).toBe(false);
+});
+
+testWithStorage('deleting a receipt removes its file at once, and only because the database let it go', async () => {
+  const a = await confirmedOwner('Receipts Delete');
+  const kept = await receipt(a, 'kept.png');
+  const gone = await receipt(a, 'gone.png');
+  const s = service();
+
+  // Not queued: the server removes nothing, whatever it is asked.
+  expect(await removeReleasedReceiptFile(s, kept.path)).toBe(false);
+  expect(await objectExists(kept.path)).toBe(true);
+
+  const deleted = await deleteInboxReceipt(ctxOf(a), { id: gone.id });
+  expect(deleted).toEqual({ ok: true, data: { id: gone.id, file_path: gone.path } });
+  expect((await s.rpc('finance_receipt_deletion_queued', { p_path: gone.path })).data).toBe(true);
+  expect(await removeReleasedReceiptFile(s, gone.path)).toBe(true);
+  expect(await objectExists(gone.path)).toBe(false);
+  expect((await s.rpc('finance_receipt_deletion_queued', { p_path: gone.path })).data).toBe(false);
+  // Gone for good: the same path can never be a receipt again, and a second delete finds nothing.
+  expect(await deleteInboxReceipt(ctxOf(a), { id: gone.id })).toEqual({ ok: false, error: RECEIPT_INBOX_MESSAGES.gone });
+
+  // A matched receipt is refused, in the app's sentence.
+  const made = await a.c.rpc('finance_receipt_to_expense', {
+    target_org: a.orgId,
+    target_receipt: kept.id,
+    expense: { expense_date: '2026-10-01', category_id: a.rent, vendor_name: 'Tuan Rumah', amount: 10 },
+  });
+  expect(made.error, made.error?.message).toBeNull();
+  expect(await deleteInboxReceipt(ctxOf(a), { id: kept.id })).toEqual({ ok: false, error: RECEIPT_INBOX_MESSAGES.matched });
+  expect(await objectExists(kept.path)).toBe(true);
+});
+
+testWithStorage('the clean-up run removes a deleted receipt’s file, and leaves a held file and a fresh upload alone', async () => {
+  const a = await confirmedOwner('Receipts Cleanup');
+  const held = await receipt(a, 'held.png');
+  const dropped = await receipt(a, 'dropped.png');
+  // Uploaded a moment ago and recorded by nobody: not an orphan for another hour.
+  const fresh = inboxReceiptPath(a.orgId, 'image/png');
+  expect((await upload(a.c, fresh)).error).toBeNull();
+  // Deleted through the API, as a browser that never came back for the file would leave it.
+  const removedRow = await a.c.from('finance_receipts').delete().eq('org_id', a.orgId).eq('id', dropped.id).select('id');
+  expect(removedRow.data).toHaveLength(1);
+  expect(await objectExists(dropped.path)).toBe(true);
+
+  // This is the run the operator's scheduler makes. It works through production's own list too, which is its job.
+  // The list is worked oldest first and this path is its newest, so a backlog on production can take more than one run.
+  let removed = 0;
+  for (let run = 0; run < 5; run += 1) {
+    removed += (await cleanReceiptFiles(service(), { limit: 500, budgetMs: 10_000 })).removed;
+    if ((await service().rpc('finance_receipt_deletion_queued', { p_path: dropped.path })).data === false) break;
+  }
+  expect(removed).toBeGreaterThanOrEqual(1);
+  expect(await objectExists(dropped.path)).toBe(false);
+  expect((await service().rpc('finance_receipt_deletion_queued', { p_path: dropped.path })).data).toBe(false);
+  expect(await objectExists(held.path)).toBe(true);
+  expect(await objectExists(fresh)).toBe(true);
+  expect((await service().rpc('finance_receipt_deletion_queued', { p_path: fresh })).data).toBe(false);
+
+  // Nobody signed in may call what the run calls.
+  for (const fn of ['finance_receipt_queue_orphans', 'finance_receipt_deletions_due']) {
+    expect((await a.c.rpc(fn)).error?.code, fn).toBe('42501');
+  }
+}, 120_000);
