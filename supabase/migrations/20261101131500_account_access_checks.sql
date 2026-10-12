@@ -71,3 +71,45 @@ end; $$;
 -- on its own (20261010100000_activity_invites_notifications_avatars.sql set them).
 revoke all on function public.accept_invite(uuid) from public, anon;
 grant execute on function public.accept_invite(uuid) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 2. Recovery-code attempts are counted one caller at a time.
+--    Replaces the definition in 20261010110000_mfa_recovery_codes.sql
+--    (lines 59-86). The one difference: a transaction-scoped advisory lock per
+--    user is taken before the recent attempts are counted, so calls made at
+--    the same moment for the same user queue up and each sees the attempts the
+--    ones before it recorded. Five failures in fifteen minutes stays the limit.
+--    The lock is released when the call's transaction ends.
+-- ---------------------------------------------------------------------------
+create or replace function public.redeem_recovery_code(p_hash text)
+returns boolean language plpgsql security definer set search_path = public as $$
+declare
+  uid uuid := auth.uid();
+  matched uuid;
+begin
+  if uid is null then raise exception 'not authenticated'; end if;
+  perform pg_advisory_xact_lock(hashtext('redeem_recovery_code'), hashtext(uid::text));
+  if (
+    select count(*) from public.mfa_recovery_attempts
+    where user_id = uid and created_at > now() - interval '15 minutes'
+  ) >= 5 then
+    raise exception 'too many attempts';
+  end if;
+
+  select id into matched from public.mfa_recovery_codes
+  where user_id = uid and used_at is null and code_hash = p_hash
+  limit 1 for update;
+
+  if matched is null then
+    insert into public.mfa_recovery_attempts (user_id) values (uid);
+    return false;
+  end if;
+
+  delete from auth.mfa_factors where user_id = uid;
+  delete from public.mfa_recovery_codes where user_id = uid;
+  delete from public.mfa_recovery_attempts where user_id = uid;
+  return true;
+end; $$;
+
+revoke all on function public.redeem_recovery_code(text) from public, anon;
+grant execute on function public.redeem_recovery_code(text) to authenticated;

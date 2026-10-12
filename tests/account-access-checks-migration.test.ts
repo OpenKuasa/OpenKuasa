@@ -50,4 +50,21 @@ describe('account access checks migration', () => {
     expect(sql).toContain('revoke all on function public.accept_invite(uuid) from public, anon;');
     expect(sql).toContain('grant execute on function public.accept_invite(uuid) to authenticated;');
   });
+
+  test('recovery-code attempts are counted under a per-user lock', () => {
+    const redeem = definition('public.redeem_recovery_code(p_hash text)');
+    expect(redeem).toContain('returns boolean language plpgsql security definer set search_path = public as $$');
+    expectInOrder(
+      redeem,
+      "if uid is null then raise exception 'not authenticated'; end if;",
+      "perform pg_advisory_xact_lock(hashtext('redeem_recovery_code'), hashtext(uid::text));",
+      'select count(*) from public.mfa_recovery_attempts',
+      ") >= 5 then",
+      "raise exception 'too many attempts';",
+      'insert into public.mfa_recovery_attempts (user_id) values (uid);',
+      'delete from auth.mfa_factors where user_id = uid;',
+    );
+    expect(sql).toContain('revoke all on function public.redeem_recovery_code(text) from public, anon;');
+    expect(sql).toContain('grant execute on function public.redeem_recovery_code(text) to authenticated;');
+  });
 });
