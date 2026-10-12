@@ -388,12 +388,20 @@ describe('a new form for invoices', () => {
 
 describe('a draft whose ticked invoice can no longer take money', () => {
   const receivable = receivableFor([invoice(1)], []);
-  it('says so in one sentence for one invoice, and for several', () => {
-    expect(leftOutInvoicesNote(invoiceForm({ amounts: { [invoiceId(1)]: '10', [invoiceId(9)]: '5' } }), receivable)).toBe(
+  it('says so in one sentence for one invoice, and for several, on a saved draft', () => {
+    expect(leftOutInvoicesNote(invoiceForm({ id: DRAFT, amounts: { [invoiceId(1)]: '10', [invoiceId(9)]: '5' } }), receivable)).toBe(
       'An invoice ticked on this draft can no longer take money, so it has been left out.',
     );
-    expect(leftOutInvoicesNote(invoiceForm({ amounts: { [invoiceId(8)]: '10', [invoiceId(9)]: '5' } }), receivable)).toBe(
+    expect(leftOutInvoicesNote(invoiceForm({ id: DRAFT, amounts: { [invoiceId(8)]: '10', [invoiceId(9)]: '5' } }), receivable)).toBe(
       '2 invoices ticked on this draft can no longer take money, so they have been left out.',
+    );
+  });
+  it('does not say "this draft" on a new receipt that was never saved', () => {
+    expect(leftOutInvoicesNote(invoiceForm({ amounts: { [invoiceId(1)]: '10', [invoiceId(9)]: '5' } }), receivable)).toBe(
+      'An invoice you ticked can no longer take money, so it has been left out.',
+    );
+    expect(leftOutInvoicesNote(invoiceForm({ amounts: { [invoiceId(8)]: '10', [invoiceId(9)]: '5' } }), receivable)).toBe(
+      '2 invoices you ticked can no longer take money, so they have been left out.',
     );
   });
   it('says nothing when every ticked invoice is still offered, or none is ticked', () => {

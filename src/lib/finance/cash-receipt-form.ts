@@ -226,9 +226,11 @@ export function receiptSavedNotPosted(error: string): string {
 export function leftOutInvoicesNote(form: CashReceiptForm, receivable: ReceivableInvoice[]): string | null {
   const left = Object.keys(form.amounts).length - Object.keys(keepReceiptInvoices(form, receivable).amounts).length;
   if (left <= 0) return null;
+  // "On this draft" is true only of a saved draft; a new receipt that was never saved has none.
+  const ticked = form.id ? 'ticked on this draft' : 'you ticked';
   return left === 1
-    ? 'An invoice ticked on this draft can no longer take money, so it has been left out.'
-    : `${left} invoices ticked on this draft can no longer take money, so they have been left out.`;
+    ? `An invoice ${ticked} can no longer take money, so it has been left out.`
+    : `${left} invoices ${ticked} can no longer take money, so they have been left out.`;
 }
 
 /**
