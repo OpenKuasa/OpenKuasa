@@ -284,10 +284,12 @@ begin
   perform public.finance_mark_payment_paid(org, charge, current_date);
   fails := fails || public.bendahara_bank_accounts_try('the owner archives the account once the payment is paid', 'ok',
     format('update public.finance_accounts set active = false where id = %L', held));
-  -- The rule is about archiving, not about being archived. Nothing but the forms keeps a payment off an archived
-  -- account (a known limit), so one can come to wait on it; the account is still edited, and stays archived.
-  perform public.finance_record_voucher(org,
-    jsonb_build_object('account_id', held, 'method', 'bank_transfer', 'amount', 5, 'party_name', 'Late', 'category_id', utilities, 'status', 'scheduled'), '[]');
+  -- The rule is about archiving, not about being archived. Since 20261116110000 a payment cannot come to wait on an
+  -- archived account either (FIN37; bendahara_archived_account_check.sql has the rest of that rule); the account is
+  -- still edited, and stays archived.
+  fails := fails || public.bendahara_bank_accounts_try('a voucher is scheduled on an archived account', 'FIN37',
+    format('select public.finance_record_voucher(%L, %L, ''[]'')', org,
+      jsonb_build_object('account_id', held, 'method', 'bank_transfer', 'amount', 5, 'party_name', 'Late', 'category_id', utilities, 'status', 'scheduled')));
   fails := fails || public.bendahara_bank_accounts_try('an archived account is edited', 'ok',
     format('update public.finance_accounts set bank_name = ''Closed Bank'', active = false where id = %L', held));
   select format('%s/%s', active, balance) into t from public.finance_account_balances where id = held;
