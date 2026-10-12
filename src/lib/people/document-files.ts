@@ -105,9 +105,11 @@ export async function uploadDocumentFile(client: SupabaseClient, path: string, f
   if (!picked.ok) return refuse(picked.error);
   if (!isDocumentPathShape(path)) return refuse(UPLOAD_FAILED);
   try {
-    const { error } = await client.storage
-      .from(DOCUMENT_BUCKET)
-      .upload(path, file, { contentType: documentMediaType(file), upsert: false });
+    // storage-js ignores `contentType` for a File/Blob body and records the body's own `.type`, so the body must
+    // carry the very type that is later declared to the database (which compares the two).
+    const type = documentMediaType(file);
+    const body = new File([file], file.name, { type });
+    const { error } = await client.storage.from(DOCUMENT_BUCKET).upload(path, body, { contentType: type, upsert: false });
     if (!error) return { ok: true, data: { path } };
   } catch {
     // Reported the same way as a refused upload.

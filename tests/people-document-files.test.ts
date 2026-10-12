@@ -200,8 +200,24 @@ describe('uploadDocumentFile', () => {
     const path = documentPath(ORG, EMP, f);
     expect(await uploadDocumentFile(client, path, f)).toEqual({ ok: true, data: { path } });
     expect(from).toHaveBeenCalledWith('hr-documents');
-    expect(upload).toHaveBeenCalledWith(path, f, { contentType: 'image/heic', upsert: false });
+    expect(upload).toHaveBeenCalledWith(path, expect.objectContaining({ type: 'image/heic', size: 50 }), { contentType: 'image/heic', upsert: false });
     expect(upload.mock.calls[0][2].contentType).toBe(documentFileFacts(f).file_type);
+  });
+  it.each([
+    ['a .heic with no type', 'IMG_5.heic', '', 'image/heic'],
+    ['an image/heif file', 'IMG_6.heif', 'image/heif', 'image/heic'],
+    ['an upper-case type', 'a.PDF', 'APPLICATION/PDF', 'application/pdf'],
+    ['an octet-stream pdf', 'b.pdf', 'application/octet-stream', 'application/pdf'],
+  ])('sends storage a body whose own type is the declared one, for %s', async (_label, name, type, declared) => {
+    const { client, upload } = clientOf(() => ({ error: null }));
+    const f = file(name, type, 64);
+    const path = documentPath(ORG, EMP, f);
+    expect((await uploadDocumentFile(client, path, f)).ok).toBe(true);
+    const body = upload.mock.calls[0][1];
+    expect(body.type).toBe(declared);
+    expect(body.type).toBe(documentFileFacts(f).file_type);
+    expect(body.size).toBe(f.size);
+    expect(body.name).toBe(f.name);
   });
   it('refuses a bad file without touching storage', async () => {
     const { client, from } = clientOf(() => ({ error: null }));

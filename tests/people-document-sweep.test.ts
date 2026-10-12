@@ -30,14 +30,23 @@ function fakeClient(opts: {
   const removed: string[] = [];
   const folders = opts.folders ?? [];
   const client = {
-    rpc: async (fn: string, args: { p_org: string; p_limit?: number }) => {
+    rpc: (fn: string, args: { p_org: string; p_limit?: number }) => {
       calls.push({ kind: `rpc:${fn}`, args: [args] });
-      if (fn === 'hr_orphaned_document_files') return { data: opts.listed?.[args.p_org] ?? [], error: null };
-      if (fn === 'hr_release_orphaned_document_files') {
-        const answer = (opts.release ?? (() => []))(args.p_org, args.p_limit ?? -1);
-        return Array.isArray(answer) ? { data: answer, error: null } : { data: null, error: answer.error };
-      }
-      return { data: null, error: { message: 'unknown function' } };
+      const settle = async (from = 0, to = Number.MAX_SAFE_INTEGER) => {
+        if (fn === 'hr_orphaned_document_files') {
+          if (to !== Number.MAX_SAFE_INTEGER) calls.push({ kind: 'range', args: [from, to] });
+          return { data: (opts.listed?.[args.p_org] ?? []).slice(from, to + 1), error: null };
+        }
+        if (fn === 'hr_release_orphaned_document_files') {
+          const answer = (opts.release ?? (() => []))(args.p_org, args.p_limit ?? -1);
+          return Array.isArray(answer) ? { data: answer, error: null } : { data: null, error: answer.error };
+        }
+        return { data: null, error: { message: 'unknown function' } };
+      };
+      return {
+        range: (from: number, to: number) => settle(from, to),
+        then: (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) => settle().then(resolve, reject),
+      };
     },
     storage: {
       from: (bucket: string) => ({
@@ -76,6 +85,8 @@ describe('parseArgs', () => {
     expect(parseArgs([])).toEqual({ remove: false });
     expect(parseArgs(['--remove'])).toEqual({ remove: true });
     expect(parseArgs(['--dry-run'])).toEqual({ remove: false });
+    expect(parseArgs(['--verbose'])).toEqual({ remove: false, verbose: true });
+    expect(parseArgs(['--remove', '--verbose'])).toEqual({ remove: true, verbose: true });
   });
   it('refuses anything else, so a typo cannot delete or silently do nothing', () => {
     for (const argv of [['--rm'], ['--remove=true'], ['remove'], ['--remove', '--force'], ['-r']]) {
@@ -115,13 +126,29 @@ describe('listWorkspaceFolders', () => {
 });
 
 describe('a dry run', () => {
+  it('prints counts and no path unless --verbose is given', async () => {
+    const out = logger();
+    const { client } = fakeClient({ folders: [{ name: ORG_A, id: null }], listed: { [ORG_A]: [file(ORG_A, 1)] } });
+    await runSweep(client, { remove: false, log: out.log });
+    const text = out.lines.join('\n');
+    expect(text).toContain(`${ORG_A}: 1 file(s)`);
+    expect(text).not.toContain(file(ORG_A, 1));
+    expect(text).not.toContain(EMP);
+  });
+  it('pages through more than 1,000 orphans instead of stopping at the first page', async () => {
+    const many = Array.from({ length: 2500 }, (_, i) => `${ORG_A}/${EMP}/${String(i).padStart(8, '0')}-aaaa-4bbb-8ccc-0123456789ab.pdf`);
+    const { client, calls } = fakeClient({ folders: [{ name: ORG_A, id: null }], listed: { [ORG_A]: many } });
+    const report = await runSweep(client, { remove: false, log: () => {} });
+    expect(report.workspaces[0].listed).toBe(2500);
+    expect(calls.filter((c) => c.kind === 'range').map((c) => c.args)).toEqual([[0, 999], [1000, 1999], [2000, 2999]]);
+  });
   it('only lists, per workspace folder, and never releases or removes anything', async () => {
     const out = logger();
     const { client, calls, removed } = fakeClient({
       folders: [{ name: ORG_A, id: null }, { name: ORG_B, id: null }],
       listed: { [ORG_A]: [file(ORG_A, 1), file(ORG_A, 2)], [ORG_B]: [] },
     });
-    const report = await runSweep(client, { remove: false, log: out.log });
+    const report = await runSweep(client, { remove: false, verbose: true, log: out.log });
     expect(report.workspaces.map((w) => [w.org, w.listed, w.removed])).toEqual([[ORG_A, 2, 0], [ORG_B, 0, 0]]);
     expect(calls.filter((c) => c.kind.startsWith('rpc:')).map((c) => c.kind)).toEqual([
       'rpc:hr_orphaned_document_files',
@@ -195,7 +222,30 @@ describe('removing', () => {
     });
     const result = await sweepWorkspace(client, ORG_A, { remove: true, log: () => {} });
     expect(result).toMatchObject({ removed: 0, failed: 1 });
-    expect(calls.filter((c) => c.kind === 'rpc:hr_release_orphaned_document_files')).toHaveLength(1);
+    // The path is tried once; the second call returns only it again, so there is nothing new and the workspace ends.
+    expect(calls.filter((c) => c.kind === 'rpc:hr_release_orphaned_document_files')).toHaveLength(2);
+    expect(calls.filter((c) => c.kind.startsWith('remove:'))).toHaveLength(1);
+  });
+
+  it('tries a path that failed once only once, and still removes the paths that come after it', async () => {
+    const [bad, later] = [file(ORG_A, 1), file(ORG_A, 2)];
+    const rounds = [[bad], [bad, later], [bad]];
+    const { client, calls, removed } = fakeClient({
+      folders: [{ name: ORG_A, id: null }],
+      release: () => rounds.shift() ?? [],
+      removeFails: (p) => p === bad,
+    });
+    const result = await sweepWorkspace(client, ORG_A, { remove: true, log: () => {} });
+    expect(calls.filter((c) => c.kind.startsWith('remove:') && (c.args[0] as string[])[0] === bad)).toHaveLength(1);
+    expect(removed).toEqual([later]);
+    expect(result).toMatchObject({ removed: 1, failed: 1 });
+  });
+
+  it('reports the total of failures at the end', async () => {
+    const out = logger();
+    const { client } = fakeClient({ folders: [{ name: ORG_A, id: null }], release: () => [file(ORG_A, 1)], removeFails: () => true });
+    await runSweep(client, { remove: true, log: out.log });
+    expect(out.lines.join('\n')).toContain('failed 1');
   });
 
   it('carries on after a failed removal in the same batch', async () => {

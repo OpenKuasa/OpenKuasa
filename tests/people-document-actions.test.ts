@@ -315,6 +315,17 @@ describe('a file that was uploaded and not attached', () => {
     expect(ranFns()).toEqual(['addDocument']);
   });
 
+  it('is released and removed when the write path refuses the input itself (a blank title), the path being well formed', async () => {
+    ctl.reply = { ok: false, error: 'Give the document a title.' };
+    expect(await actions.addMyDocumentAction({ ...ADD, title: ' ' })).toEqual(ctl.reply);
+    expect(ctl.order.slice(-2)).toEqual(['releaseDocumentFile', 'removeDocumentFile']);
+    expect(ctl.ran.find((r) => r.fn === 'removeDocumentFile')).toMatchObject({ input: PATH });
+    ctl.ran = [];
+    ctl.order = [];
+    await actions.addDocumentForAction({ ...ADD, employee_id: EMP, title: '' });
+    expect(ctl.order.slice(-2)).toEqual(['releaseDocumentFile', 'removeDocumentFile']);
+  });
+
   it('is never released from another workspace\'s folder', async () => {
     ctl.reply = { ok: false, error: DOCUMENT_REFUSALS.DOC_BAD_FILE };
     await actions.addMyDocumentAction({ ...ADD, file_path: `99999999-9999-4999-8999-999999999999/${EMP}/${NAME}.pdf` });

@@ -345,6 +345,32 @@ testWithSupabase('an attach is refused for a wrong size, a wrong type, or a type
   expect((await pathsUnder(owner.orgId)).sort()).toEqual([state.hrDoc.path, state.ownDoc.path, state.ownersDoc.path].sort());
 });
 
+testWithSupabase('a type-less .heic is stored with the type the database is told, and attaches', async () => {
+  // A browser may report no type for a .heic; storage records the body's own type, so the upload must carry the
+  // resolved one. The bytes are not a real HEIC: only the declared and recorded types matter here.
+  const bytes = new TextEncoder().encode(`not really a heic ${crypto.randomUUID()}`);
+  const file = new File([bytes], 'x.heic', { type: '' });
+  expect(file.type).toBe('');
+  const path = documentPath(owner.orgId, ids.memberEmp, file);
+  const up = await uploadDocumentFile(member.c, path, file);
+  expect(up).toEqual({ ok: true, data: { path } });
+  uploaded.add(path);
+  const facts = documentFileFacts(file);
+  expect(facts).toMatchObject({ file_type: 'image/heic', file_size: bytes.byteLength });
+  const added = await addDocument(memberCtx(), { employee_id: ids.memberEmp, title: 'Scan', doc_type: 'other', file_path: path, ...facts });
+  expect(added, JSON.stringify(added)).toMatchObject({ ok: true, data: { file_type: 'image/heic', file_name: 'x.heic' } });
+  if (!added.ok) {
+    if (await releaseDocumentFile(memberCtx(), path)) await discard(path);
+    return;
+  }
+  const link = await documentLink(memberCtx(), added.data.id);
+  expect(link.ok).toBe(true);
+  if (link.ok) expect(Buffer.compare(Buffer.from(await fetchBytes(link.data.url)), Buffer.from(bytes))).toBe(0);
+  const removed = await removeDocument(memberCtx(), { document_id: added.data.id });
+  expect(removed).toMatchObject({ ok: true, data: { path } });
+  await discard(path);
+});
+
 testWithSupabase('acknowledgement is the employee\'s alone, once, and only when asked', async () => {
   // Not asked yet.
   expect(await acknowledgeDocument(memberCtx(), { document_id: state.hrDoc.id })).toEqual(refused('DOC_ACK_NOT_REQUESTED'));
