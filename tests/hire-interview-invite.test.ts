@@ -16,8 +16,10 @@ function made(value: string | null): string {
   if (value === null) throw new Error('nothing was made for this row');
   return value;
 }
-const file = (i: InviteSource) => made(interviewIcs(i));
-const words = (i: InviteSource, moved: boolean) => made(invitationText(i, moved));
+/** The moment the row was made: every start in this file but the ones a test says have passed is after it. */
+const NOW = new Date('2026-10-12T02:15:00Z');
+const file = (i: InviteSource) => made(interviewIcs(i, NOW));
+const words = (i: InviteSource, moved: boolean) => made(invitationText(i, moved, NOW));
 const fileName = (i: InviteSource) => made(icsFileName(i));
 const text = (...lines: string[]) => lines.join('\n');
 const CRLF = '\r\n';
@@ -351,9 +353,9 @@ describe('the calendar file at the edges', () => {
       for (const zone of ['UTC', 'America/New_York', 'Asia/Kuala_Lumpur']) {
         process.env.TZ = zone;
         const row = { ...BASE, scheduled_at: '2026-10-20T15:00:00' };
-        expect(interviewIcs(row), zone).toBeNull();
+        expect(interviewIcs(row, NOW), zone).toBeNull();
         expect(icsFileName(row), zone).toBeNull();
-        expect(invitationText(row, false), zone).toBeNull();
+        expect(invitationText(row, false, NOW), zone).toBeNull();
       }
     } finally {
       if (before === undefined) delete process.env.TZ;
@@ -391,7 +393,7 @@ describe('the calendar file at the edges', () => {
 });
 
 describe('nothing is made from a row that cannot give a whole file or a whole invitation', () => {
-  const all = (row: InviteSource) => [interviewIcs(row), icsFileName(row), invitationText(row, false), invitationText(row, true)];
+  const all = (row: InviteSource) => [interviewIcs(row, NOW), icsFileName(row), invitationText(row, false, NOW), invitationText(row, true, NOW)];
   const NOTHING = [null, null, null, null];
   it('a start that is not an instant', () => {
     for (const scheduled_at of ['', 'nonsense', 'next Tuesday', '2026-10-20', '2026-10-20T15:00', '2026-10-20 15:00:00+08:00', 'Oct 20 2026 15:00']) {
@@ -408,9 +410,9 @@ describe('nothing is made from a row that cannot give a whole file or a whole in
   it('a file needs the stamp of its last change too; the name and the invitation do not use it', () => {
     for (const updated_at of ['', 'nonsense', '2026-10-12T02:15:00']) {
       const row = { ...BASE, updated_at };
-      expect(interviewIcs(row), updated_at).toBeNull();
+      expect(interviewIcs(row, NOW), updated_at).toBeNull();
       expect(icsFileName(row), updated_at).toBe('interview-aina-rahman-2026-10-20.ics');
-      expect(invitationText(row, false), updated_at).toBe(words(BASE, false));
+      expect(invitationText(row, false, NOW), updated_at).toBe(words(BASE, false));
     }
   });
   it('so no file has an empty line of its own, and no name ends in a hyphen', () => {
@@ -423,5 +425,53 @@ describe('nothing is made from a row that cannot give a whole file or a whole in
   it('a whole row still gives all three', () => {
     expect(all(BASE).every((made) => typeof made === 'string' && made.length > 0)).toBe(true);
     expect(all({ ...BASE, duration_minutes: 1 }).every((made) => typeof made === 'string')).toBe(true);
+  });
+});
+
+describe('nothing is made for an interview whose start has passed', () => {
+  // BASE starts at 3:00 pm on Tuesday 20 October 2026 in Kuala Lumpur: 07:00 UTC.
+  const START = Date.UTC(2026, 9, 20, 7, 0);
+  const at = (ms: number) => new Date(START + ms);
+  it('no invitation and no calendar file once the start is behind the clock it is given', () => {
+    for (const now of [at(1), at(60_000), at(3_600_000), new Date('2026-10-27T04:00:00Z'), new Date('2027-10-20T07:00:00Z')]) {
+      expect(invitationText(BASE, false, now), now.toISOString()).toBeNull();
+      expect(invitationText(BASE, true, now), now.toISOString()).toBeNull();
+      expect(interviewIcs(BASE, now), now.toISOString()).toBeNull();
+    }
+  });
+  it('both are made up to the very moment it starts', () => {
+    for (const now of [at(0), at(-1), at(-60_000), new Date('2026-10-12T02:15:00Z')]) {
+      expect(invitationText(BASE, false, now), now.toISOString()).toBe(words(BASE, false));
+      expect(interviewIcs(BASE, now), now.toISOString()).toBe(file(BASE));
+    }
+  });
+  it('is judged by the instant, not by the day: 11:30 pm tonight is ahead of 11:00 pm, and behind 12:10 am', () => {
+    const tonight = { ...BASE, scheduled_at: klInstant('2026-10-20', '23:30')! };
+    // 11:00 pm on the 20th in Kuala Lumpur is 15:00 UTC; 12:10 am on the 21st is 16:10 UTC on the 20th.
+    expect(invitationText(tonight, false, new Date('2026-10-20T15:00:00Z'))).not.toBeNull();
+    expect(interviewIcs(tonight, new Date('2026-10-20T15:00:00Z'))).not.toBeNull();
+    expect(invitationText(tonight, false, new Date('2026-10-20T16:10:00Z'))).toBeNull();
+    expect(interviewIcs(tonight, new Date('2026-10-20T16:10:00Z'))).toBeNull();
+  });
+  it('reads no clock of its own: the same row and the same moment give the same answer in any zone', () => {
+    const before = process.env.TZ;
+    try {
+      for (const zone of ['UTC', 'America/New_York', 'Pacific/Kiritimati']) {
+        process.env.TZ = zone;
+        expect(invitationText(BASE, false, at(-1)), zone).toBe(words(BASE, false));
+        expect(invitationText(BASE, false, at(1)), zone).toBeNull();
+        expect(interviewIcs(BASE, at(1)), zone).toBeNull();
+      }
+    } finally {
+      if (before === undefined) delete process.env.TZ;
+      else process.env.TZ = before;
+    }
+  });
+  it('a clock that is not a time gives nothing either', () => {
+    expect(invitationText(BASE, false, new Date(Number.NaN))).toBeNull();
+    expect(interviewIcs(BASE, new Date(Number.NaN))).toBeNull();
+  });
+  it('the file name needs no clock: it only names the day', () => {
+    expect(icsFileName(BASE)).toBe('interview-aina-rahman-2026-10-20.ics');
   });
 });

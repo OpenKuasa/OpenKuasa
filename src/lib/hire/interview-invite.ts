@@ -2,8 +2,9 @@
 /**
  * What a recruiter hands to a candidate: the invitation to copy, and a
  * calendar file (RFC 5545) to download. Both are made from one plain object
- * and neither reads the clock, so the same row always gives the same text and
- * the same file. The file is built in the browser, so nothing here uses a
+ * and neither reads the clock (the caller says what time it is), so the same
+ * row at the same moment always gives the same text and the same file, or
+ * neither: nothing is made for a start that has passed. The file is built in the browser, so nothing here uses a
  * Node-only API. The notes are not part of `InviteSource`: they cannot reach
  * a candidate from here.
  */
@@ -43,14 +44,27 @@ function hasItsTime(i: InviteSource): boolean {
 }
 
 /**
+ * Whether the start has not passed at `now`. An invitation or a calendar file
+ * for an interview that has already begun asks a candidate to a time that is
+ * gone (an interview marked as scheduled again a week later, or one edited
+ * after it started). `now` is always given by the caller, the server's clock
+ * on the server: nothing here reads a clock of its own. A start that is
+ * exactly now is still ahead, as `needsOutcome` has it.
+ */
+function isStillAhead(i: InviteSource, now: Date): boolean {
+  return instantMs(i.scheduled_at) >= now.getTime();
+}
+
+/**
  * The invitation, in English, for the recruiter to copy into their own email
  * or message. `moved`: the interview's time was changed, so the opening line
  * says the time is new. A line whose value is missing is left out, with
  * nothing in its place. Null when the row has no time to tell (see
- * `hasItsTime`): there is then no invitation, never one with a gap.
+ * `hasItsTime`), or its start has passed at `now`: there is then no
+ * invitation, never one with a gap and never one to a time that is gone.
  */
-export function invitationText(i: InviteSource, moved: boolean): string | null {
-  if (!hasItsTime(i)) return null;
+export function invitationText(i: InviteSource, moved: boolean, now: Date): string | null {
+  if (!hasItsTime(i) || !isStillAhead(i, now)) return null;
   const workspace = present(i.workspace);
   const at = workspace ? ` at ${workspace}` : '';
   const place = present(i.place);
@@ -144,10 +158,11 @@ function fold(line: string): string {
  * grows with every change, so a file downloaded after a reschedule replaces
  * the entry a calendar already has. Null when the row has no time to tell, or
  * no stamp of its last change: a file with an empty DTSTART, DTEND or DTSTAMP
- * is one a calendar refuses, so no file is made and none can be offered.
+ * is one a calendar refuses, so no file is made and none can be offered. Null
+ * too when the start has passed at `now`.
  */
-export function interviewIcs(i: InviteSource): string | null {
-  if (!hasItsTime(i) || Number.isNaN(instantMs(i.updated_at))) return null;
+export function interviewIcs(i: InviteSource, now: Date): string | null {
+  if (!hasItsTime(i) || !isStillAhead(i, now) || Number.isNaN(instantMs(i.updated_at))) return null;
   const start = instantMs(i.scheduled_at);
   const changedAfter = Math.floor((instantMs(i.updated_at) - instantMs(i.created_at)) / 1000);
   const sequence = Number.isFinite(changedAfter) && changedAfter > 0 ? changedAfter : 0;

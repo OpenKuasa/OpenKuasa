@@ -1149,7 +1149,7 @@ export type InterviewChange = {
   updated_at: string | null;
   /** The sentence for the screen's notice line and for the assistant's reply. */
   message: string;
-  /** The text to copy to the candidate: only for an interview that reads as scheduled, and never for one recorded as already held. */
+  /** The text to copy to the candidate: only for an interview that reads as scheduled and has not started, and never for one recorded as already held. */
   invitation: string | null;
   /** True when these values were read back after the change; false when they are only what the change implies. */
   confirmed: boolean;
@@ -1201,10 +1201,11 @@ async function callInterviewFunction(
 /**
  * The answer after a function said ok: the row read back with the member's own client, inside their workspace.
  * The change is saved by then, so a read that fails or finds nothing still answers ok, with only what the change
- * implies, a note, and no invitation.
+ * implies, a note, and no invitation. `now` is the server's clock: an interview whose start has passed at it is
+ * given no invitation.
  */
 async function interviewChanged(
-  ctx: HireWriteContext, id: string, implied: Partial<InterviewDetails>, wording: InterviewWording,
+  ctx: HireWriteContext, id: string, implied: Partial<InterviewDetails>, wording: InterviewWording, now: Date,
 ): Promise<CapResult<InterviewChange>> {
   let row: InterviewRead | null = null;
   try {
@@ -1227,13 +1228,14 @@ async function interviewChanged(
   }
   const candidate = row.application?.candidate?.name ?? '';
   const job = row.application?.job?.title ?? '';
-  // Only a scheduled interview has an invitation, and only when there is a name to address it to.
+  // Only a scheduled interview has an invitation, and only when there is a name to address it to. `invitationText`
+  // itself gives none for a start that has passed, or for a row with no time to tell.
   const invitation = wording.invite && row.status === 'scheduled' && candidate && job
     ? invitationText({
       id: row.id, scheduled_at: row.scheduled_at, duration_minutes: row.duration_minutes, kind: row.kind, place: row.place,
       interviewer_name: row.interviewer_name, created_at: row.created_at, updated_at: row.updated_at,
       candidate, job, workspace: ctx.orgName?.trim() || null,
-    }, wording.moved)
+    }, wording.moved, now)
     : null;
   return {
     ok: true,
@@ -1301,6 +1303,7 @@ export async function scheduleInterview(
       kind: d.kind, place, interviewer_name: interviewer, status: 'scheduled',
     },
     { message: (name, at) => scheduledMessage(name, at ?? iso), invite: true, moved: false },
+    now,
   );
 }
 
@@ -1345,6 +1348,7 @@ export async function recordPastInterview(
       kind: d.kind, place, interviewer_name: interviewer, status: d.outcome,
     },
     { message: (name, at) => recordedPastMessage(name, at ?? iso, d.outcome), invite: false, moved: false },
+    now,
   );
 }
 
@@ -1374,8 +1378,6 @@ export async function rescheduleInterview(
     // `too_far_ahead` when the time does change, and both words have their sentences.
     iso = at;
   }
-  // Kept in the signature so every interview capability that takes a time is called the same way.
-  void now;
   const place = blankToNull(d.place);
   const interviewer = blankToNull(d.interviewer_name);
   // Only what was sent: undefined is left out; '' and null are sent as null (a cleared field).
@@ -1407,53 +1409,60 @@ export async function rescheduleInterview(
   // never asked. An answer that does not say, or says it with anything but true, is not a move: the invitation
   // then has the plainer opening, never a "new time" that is not one.
   const moved = (called.answer as { moved?: unknown } | null)?.moved === true;
-  return interviewChanged(ctx, d.id, implied, { message: updatedMessage, invite: true, moved });
+  // `now` is not a rule on the new time (the database's, above): it only keeps an invitation from an interview that has begun.
+  return interviewChanged(ctx, d.id, implied, { message: updatedMessage, invite: true, moved }, now);
 }
 
 /** One of the three changes that take an interview's id and nothing that needs checking first. */
 async function interviewStatusChange(
   ctx: HireWriteContext, fnName: string, fn: string, args: Record<string, unknown>, id: string,
-  status: InterviewStatus, message: (name: string) => string,
+  status: InterviewStatus, message: (name: string) => string, now: Date,
 ): Promise<CapResult<InterviewChange>> {
   const called = await callInterviewFunction(ctx, fnName, fn, args);
   if (!called.ok) return called;
   const word = wordOf(called.answer);
   if (word !== 'ok') return { ok: false, error: interviewMessage(word, 'interview') };
-  return interviewChanged(ctx, id, { status }, { message: (name) => message(name), invite: true, moved: false });
+  return interviewChanged(ctx, id, { status }, { message: (name) => message(name), invite: true, moved: false }, now);
 }
 
 /** Cancels one scheduled interview. It stays in the list as cancelled, and the candidate is not told. */
 export async function cancelInterview(
   ctx: HireWriteContext,
   input: z.input<typeof cancelInterviewInput>,
+  now: Date = new Date(),
 ): Promise<CapResult<InterviewChange>> {
   const parsed = cancelInterviewInput.safeParse(input);
   if (!parsed.success) return invalid(parsed.error);
   const { id } = parsed.data;
-  return interviewStatusChange(ctx, 'cancelInterview', 'hire_cancel_interview', { p_interview_id: id }, id, 'cancelled', cancelledMessage);
+  return interviewStatusChange(ctx, 'cancelInterview', 'hire_cancel_interview', { p_interview_id: id }, id, 'cancelled', cancelledMessage, now);
 }
 
 /** Marks one scheduled interview completed, or a no-show. At any time: an interview held early can be marked at once. */
 export async function setInterviewOutcome(
   ctx: HireWriteContext,
   input: z.input<typeof setInterviewOutcomeInput>,
+  now: Date = new Date(),
 ): Promise<CapResult<InterviewChange>> {
   const parsed = setInterviewOutcomeInput.safeParse(input);
   if (!parsed.success) return invalid(parsed.error);
   const { id, outcome } = parsed.data;
   return interviewStatusChange(
     ctx, 'setInterviewOutcome', 'hire_set_interview_outcome', { p_interview_id: id, p_outcome: outcome }, id, outcome,
-    (name) => outcomeMessage(name, outcome),
+    (name) => outcomeMessage(name, outcome), now,
   );
 }
 
-/** Marks one cancelled, completed or no-show interview as scheduled again, with its time and details as they were. */
+/**
+ * Marks one cancelled, completed or no-show interview as scheduled again, with its time and details as they were.
+ * `now` decides whether there is still an invitation to give: none for one whose start has passed.
+ */
 export async function reopenInterview(
   ctx: HireWriteContext,
   input: z.input<typeof reopenInterviewInput>,
+  now: Date = new Date(),
 ): Promise<CapResult<InterviewChange>> {
   const parsed = reopenInterviewInput.safeParse(input);
   if (!parsed.success) return invalid(parsed.error);
   const { id } = parsed.data;
-  return interviewStatusChange(ctx, 'reopenInterview', 'hire_reopen_interview', { p_interview_id: id }, id, 'scheduled', reopenedMessage);
+  return interviewStatusChange(ctx, 'reopenInterview', 'hire_reopen_interview', { p_interview_id: id }, id, 'scheduled', reopenedMessage, now);
 }

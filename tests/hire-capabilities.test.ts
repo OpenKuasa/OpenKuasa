@@ -1994,7 +1994,7 @@ describe('cancelInterview, setInterviewOutcome and reopenInterview', () => {
       ok: true, data: { status: 'no_show', message: 'Marked the interview with Aina Rahman as a no-show.', invitation: null },
     });
     // Scheduled again: the invitation is for the time it already had, so it does not say the time is new.
-    expect(await reopenInterview(ivFake({ answer: 'ok' }).ctx, { id: IV_ID })).toMatchObject({
+    expect(await reopenInterview(ivFake({ answer: 'ok' }).ctx, { id: IV_ID }, NOW)).toMatchObject({
       ok: true, data: { status: 'scheduled', message: 'The interview with Aina Rahman is scheduled again.', invitation: INVITE, confirmed: true },
     });
   });
@@ -2098,6 +2098,55 @@ describe('closeApplication and the interviews still ahead', () => {
     ]) {
       expect(result.ok && result.data).not.toHaveProperty('scheduled_interviews');
     }
+  });
+});
+
+// ─── no invitation for a start that has passed ───────────────────────────────
+
+describe('an interview whose start has passed is given no invitation', () => {
+  // IV_ROW starts at 3:00 pm on 20 October 2026 in Kuala Lumpur (07:00 UTC). NOW is nine days before it.
+  const AFTER = new Date('2026-10-20T07:00:00.001Z');
+  const AT_START = new Date('2026-10-20T07:00:00Z');
+  const A_WEEK_ON = new Date('2026-10-27T04:00:00Z');
+  it('"mark as scheduled again" on an interview from last week: saved, said, and nothing to send', async () => {
+    const result = await reopenInterview(ivFake({ answer: 'ok' }).ctx, { id: IV_ID }, A_WEEK_ON);
+    expect(result).toMatchObject({
+      ok: true,
+      data: { status: 'scheduled', scheduled_at: '2026-10-20T07:00:00+00:00', message: 'The interview with Aina Rahman is scheduled again.', invitation: null, confirmed: true },
+    });
+    expect(result.ok && result.data).not.toHaveProperty('note');
+  });
+  it('the same for an edit of one that has begun', async () => {
+    const result = await rescheduleInterview(ivFake({ answer: { word: 'ok', moved: false } }).ctx, { id: IV_ID, notes: 'Ran late' }, A_WEEK_ON);
+    expect(result).toMatchObject({
+      ok: true,
+      data: { message: 'Updated the interview with Aina Rahman. It is on Tuesday, 20 October 2026, 3:00 pm. Nothing has been sent to them.', invitation: null, confirmed: true },
+    });
+  });
+  it('is by the clock the capability is given, to the millisecond, for each change that can invite', async () => {
+    const ok = { word: 'ok', id: IV_ID };
+    const runs: [string, (now: Date) => Promise<{ ok: boolean; data?: { invitation: string | null } }>][] = [
+      ['reopen', (now) => reopenInterview(ivFake({ answer: 'ok' }).ctx, { id: IV_ID }, now)],
+      ['reschedule', (now) => rescheduleInterview(ivFake({ answer: { word: 'ok', moved: false } }).ctx, { id: IV_ID, kind: 'phone' }, now)],
+      // Scheduling lets a start up to five minutes old through; it is saved, with nothing to send for it.
+      ['schedule', (now) => scheduleInterview(ivFake({ answer: ok }).ctx, SCHEDULE, now)],
+    ];
+    for (const [name, run] of runs) {
+      const before = await run(NOW);
+      expect(before.ok && before.data?.invitation, name).toBe(INVITE);
+      const atStart = await run(AT_START);
+      expect(atStart.ok && atStart.data?.invitation, name).toBe(INVITE);
+      const after = await run(AFTER);
+      expect(after.ok, name).toBe(true);
+      expect(after.ok && after.data?.invitation, name).toBeNull();
+    }
+  });
+  it('cancelling and marking take the clock too, and never invite', async () => {
+    expect(await cancelInterview(ivFake({ answer: 'ok', row: { ...IV_ROW, status: 'cancelled' } }).ctx, { id: IV_ID }, NOW)).toMatchObject({ ok: true, data: { invitation: null } });
+    expect(await setInterviewOutcome(ivFake({ answer: 'ok', row: { ...IV_ROW, status: 'completed' } }).ctx, { id: IV_ID, outcome: 'completed' }, NOW))
+      .toMatchObject({ ok: true, data: { invitation: null } });
+    // A row that reads as scheduled again by the time it is read back (someone undid it) and has passed: still nothing.
+    expect(await cancelInterview(ivFake({ answer: 'ok' }).ctx, { id: IV_ID }, A_WEEK_ON)).toMatchObject({ ok: true, data: { status: 'scheduled', invitation: null } });
   });
 });
 
