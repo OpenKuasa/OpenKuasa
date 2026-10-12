@@ -11,6 +11,7 @@ import {
   verifyCurrentPassword,
 } from '@/lib/auth/verify-password';
 import { recordEvent } from '@/lib/events';
+import { passwordCheckLimited } from '@/lib/security/limits';
 import {
   COMPANY_SIZES,
   INDUSTRIES,
@@ -227,6 +228,8 @@ export async function changePasswordAction(
     confirm: field(formData, 'confirm'),
   });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
+  const limited = await passwordCheckLimited(viewer.userId);
+  if (limited) return { error: limited };
 
   // Re-check the current password so a borrowed session cannot change it.
   const check = await verifyCurrentPassword(viewer.email, parsed.data.current);

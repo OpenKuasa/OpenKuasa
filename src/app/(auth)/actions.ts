@@ -13,6 +13,7 @@ import {
 } from '@/lib/auth/recovery-marker';
 import { endOtherSessions } from '@/lib/auth/sessions';
 import { createWorkspaceError, workspaceNameSchema } from '@/lib/auth/workspace-name';
+import { demoLimited, passwordResetLimited, signInLimited, signUpLimited } from '@/lib/security/limits';
 
 // Persist the "remember me" choice so token refreshes (in the proxy) keep the
 // same cookie lifetime. A session cookie itself clears on browser close.
@@ -76,6 +77,8 @@ export async function signInAction(
   if (!parsed.success) {
     return { error: parsed.error.issues[0].message, values };
   }
+  const limited = await signInLimited(parsed.data.email);
+  if (limited) return { error: limited, values };
 
   await setRememberCookie(remember);
   const supabase = await createClient({ remember });
@@ -111,6 +114,8 @@ export async function signUpAction(
   if (!parsed.success) {
     return { error: parsed.error.issues[0].message, values };
   }
+  const limited = await signUpLimited(parsed.data.email);
+  if (limited) return { error: limited, values };
 
   await setRememberCookie(true);
   const supabase = await createClient({ remember: true });
@@ -154,6 +159,8 @@ export async function demoSignInAction(): Promise<AuthState> {
   if (process.env.NEXT_PUBLIC_DEMO_ENABLED !== '1') {
     return { error: 'Demo is not available.' };
   }
+  const limited = await demoLimited();
+  if (limited) return { error: limited };
   await setRememberCookie(true);
   const supabase = await createClient({ remember: true });
   const { error: anonErr } = await supabase.auth.signInAnonymously();
@@ -188,6 +195,8 @@ export async function requestPasswordResetAction(
   if (!parsed.success) {
     return { error: parsed.error.issues[0].message, values: { email } };
   }
+  const limited = await passwordResetLimited(parsed.data.email);
+  if (limited) return { error: limited, values: { email } };
 
   const supabase = await createClient();
   const origin = await requestOrigin();

@@ -17,6 +17,7 @@ import {
   originFromHeaders,
   type InviteAcceptState,
 } from '@/lib/account/invites';
+import { signInLimited, signUpLimited } from '@/lib/security/limits';
 
 type ServerClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -110,6 +111,8 @@ export async function signInAndAcceptAction(
   const supabase = await createClient({ remember: true });
   const invite = await pendingInvite(supabase, formData);
   if (invite.error !== undefined) return { error: invite.error };
+  const limited = await signInLimited(invite.email);
+  if (limited) return { error: limited };
 
   const { error } = await supabase.auth.signInWithPassword({
     email: invite.email,
@@ -162,6 +165,8 @@ export async function signUpAndAcceptAction(
   const supabase = await createClient({ remember: true });
   const invite = await pendingInvite(supabase, formData);
   if (invite.error !== undefined) return { error: invite.error, fullName };
+  const limited = await signUpLimited(invite.email);
+  if (limited) return { error: limited, fullName };
 
   // Where email confirmation is on, the link in the confirmation email comes
   // back to this invite, signed in, so joining is one more click.
