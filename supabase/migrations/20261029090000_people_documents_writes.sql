@@ -70,7 +70,8 @@ where doc_type not in ('contract','tax','benefits','identity','medical','certifi
 -- ---- columns ---------------------------------------------------------
 
 -- A document that has been acknowledged was asked to be; nothing an employee
--- uploaded themselves is ever up for acknowledgement.
+-- uploaded themselves is ever up for acknowledgement. A document has a file
+-- with its name, size and type, or none of the four (the demo's have none).
 alter table public.hr_documents
   add constraint hr_documents_doc_type_check check (doc_type in ('contract','tax','benefits','identity','medical','certificate','other')),
   add column file_path text,
@@ -82,7 +83,8 @@ alter table public.hr_documents
   add column ack_requested boolean not null default false,
   add column acknowledged_at timestamptz,
   add constraint hr_documents_acknowledgement
-    check ((acknowledged_at is null or ack_requested) and (source <> 'employee' or not ack_requested));
+    check ((acknowledged_at is null or ack_requested) and (source <> 'employee' or not ack_requested)),
+  add constraint hr_documents_file_columns check (num_nulls(file_path, file_name, file_size, file_type) in (0, 4));
 
 -- A file is the file of one document at most. Also what the storage read rule
 -- below looks a file up by.
@@ -153,7 +155,10 @@ revoke all on function private.hr_doc_held(uuid) from public, anon, authenticate
 -- the one shape the app makes, in this workspace and this employee's folder,
 -- with the extension of its type. Then, under a lock on the path that
 -- releasing takes too: the file was really uploaded, no document carries it,
--- and it has not been released. Returns the name to store. This shape must
+-- and it has not been released; and where storage has recorded the file's
+-- size and type (`metadata`, keys `size` and `mimetype`), the size and type
+-- given here are those, exactly. A key storage has not recorded is not held
+-- against the caller. Returns the name to store. This shape must
 -- stay in step with the storage rule below, hr_release_document_file, and
 -- `isDocumentPath` in src/lib/people/document-files-server.ts.
 create or replace function private.hr_doc_file_ok(
@@ -163,6 +168,7 @@ declare
   named text := trim(p_name);
   ext text := case p_type when 'application/pdf' then 'pdf' when 'image/jpeg' then 'jpg' when 'image/png' then 'png'
     when 'image/webp' then 'webp' when 'image/heic' then 'heic' end;
+  meta jsonb;
 begin
   if p_path is null or ext is null
      or named is null or char_length(named) not between 1 and 200 or named ~ '[[:cntrl:]/\\]'
@@ -176,12 +182,15 @@ begin
 
   -- Held to the end of the transaction; hr_release_document_file takes the same one.
   perform pg_advisory_xact_lock(hashtextextended(p_path, 0));
-  if not exists (
-       select 1 from storage.objects o
-       where o.bucket_id = 'hr-documents' and o.name = p_path
-     )
+  select o.metadata into meta from storage.objects o
+  where o.bucket_id = 'hr-documents' and o.name = p_path;
+  if not found
      or exists (select 1 from public.hr_documents d where d.file_path = p_path)
      or exists (select 1 from private.hr_released_documents x where x.path = p_path) then
+    raise exception 'DOC_BAD_FILE';
+  end if;
+  if (meta ? 'size' and meta ->> 'size' <> p_size::text)
+     or (meta ? 'mimetype' and meta ->> 'mimetype' <> p_type) then
     raise exception 'DOC_BAD_FILE';
   end if;
   return named;
@@ -437,7 +446,8 @@ grant execute on function public.hr_acknowledge_document(uuid) to authenticated;
 -- An employee with a paid payslip is still refused, by the trigger of the
 -- payroll slice, with its own code (HR_EMPLOYEE_HAS_PAID_PAYSLIPS); nothing
 -- is released then. The row is held first, so no document can be added to
--- the employee between the paths being read and the row going.
+-- the employee between the paths being read and the row going; the
+-- employee's documents are held next, so no file can be replaced in between.
 
 create or replace function public.hr_delete_employee(p_org uuid, p_employee uuid)
 returns jsonb language plpgsql security definer set search_path = public as $$
@@ -450,6 +460,7 @@ begin
   if not found then return null; end if;
   if private.is_demo_org(emp.org_id) or not private.is_org_admin(emp.org_id) then return null; end if;
 
+  perform 1 from public.hr_documents d where d.employee_id = emp.id for update;
   select coalesce(array_agg(d.file_path order by d.file_path), '{}') into paths
   from public.hr_documents d where d.employee_id = emp.id and d.file_path is not null;
   insert into private.hr_released_documents (path) select unnest(paths) on conflict do nothing;
@@ -461,13 +472,31 @@ revoke all on function public.hr_delete_employee(uuid, uuid) from public, anon;
 grant execute on function public.hr_delete_employee(uuid, uuid) to authenticated;
 
 -- ---- the sweep: files with no document ----------------------------------------------
--- For the app's service client, and nobody else. The names in the bucket,
--- under one workspace's folder, that are no document's file and are more than
--- a day old (a younger one may still be on its way to a document). Each name
--- it hands back is released first, so a file the sweep is about to remove can
--- never be attached in the meantime.
+-- For the app's service client, and nobody else. Two steps.
+-- Listing changes nothing: the names in the bucket, under one workspace's
+-- folder, that are no document's file and are more than a day old (a younger
+-- one may still be on its way to a document).
+-- Releasing is what makes a file safe to remove: for up to p_limit of those
+-- names (500 at most, and by default), each under the lock attaching takes,
+-- it looks again (still there, still more than a day old, still on no
+-- document), records the path as released, so it can never be attached, and
+-- hands it back. The sweep removes only what this step hands back, never
+-- what the listing showed, and calls it again until it hands back nothing
+-- new. The workspace need not exist any more: a deleted workspace's folder is
+-- swept the same way.
 
-create or replace function private.hr_orphaned_document_files(p_org uuid)
+create or replace function public.hr_orphaned_document_files(p_org uuid)
+returns setof text language sql stable security definer set search_path = public as $$
+  select o.name from storage.objects o
+  where o.bucket_id = 'hr-documents' and o.name like p_org::text || '/%'
+    and o.created_at < now() - interval '1 day'
+    and not exists (select 1 from public.hr_documents d where d.file_path = o.name)
+  order by o.name;
+$$;
+revoke all on function public.hr_orphaned_document_files(uuid) from public, anon, authenticated;
+grant execute on function public.hr_orphaned_document_files(uuid) to service_role;
+
+create or replace function public.hr_release_orphaned_document_files(p_org uuid, p_limit int default 500)
 returns setof text language plpgsql security definer set search_path = public as $$
 declare
   f text;
@@ -478,16 +507,21 @@ begin
       and o.created_at < now() - interval '1 day'
       and not exists (select 1 from public.hr_documents d where d.file_path = o.name)
     order by o.name
+    limit least(greatest(coalesce(p_limit, 500), 0), 500)
   loop
+    -- Held to the end of the transaction; attaching a file takes the same one.
     perform pg_advisory_xact_lock(hashtextextended(f, 0));
     continue when exists (select 1 from public.hr_documents d where d.file_path = f);
+    continue when not exists (
+      select 1 from storage.objects o
+      where o.bucket_id = 'hr-documents' and o.name = f and o.created_at < now() - interval '1 day'
+    );
     insert into private.hr_released_documents (path) values (f) on conflict do nothing;
     return next f;
   end loop;
 end; $$;
-revoke all on function private.hr_orphaned_document_files(uuid) from public, anon, authenticated;
-grant usage on schema private to service_role;
-grant execute on function private.hr_orphaned_document_files(uuid) to service_role;
+revoke all on function public.hr_release_orphaned_document_files(uuid, int) from public, anon, authenticated;
+grant execute on function public.hr_release_orphaned_document_files(uuid, int) to service_role;
 
 -- ---- files: a private bucket ------------------------------------------------------
 -- 10 MB a file; PDF, JPEG, PNG, WebP and HEIC. Nothing is public: the app
@@ -499,7 +533,9 @@ grant execute on function private.hr_orphaned_document_files(uuid) to service_ro
 --     account that is an owner or admin there or is that employee. The case
 --     keeps the casts from ever running on another bucket's names or on a
 --     name of another shape. Inside the look-up the file's name is written
---     in full (storage.objects.name): an employee has a `name` too.
+--     in full (storage.objects.name): an employee has a `name` too. Never
+--     at a path a document already carries: should that document's file ever
+--     go missing, nobody can put another in its place.
 --   update, delete: nobody. The app removes files with the service client.
 -- A session that still owes a second factor gets nothing in this bucket.
 
@@ -533,6 +569,7 @@ create policy hr_document_files_insert on storage.objects
                   and e.org_id = ((storage.foldername(storage.objects.name))[1])::uuid
                   and (private.is_org_admin(e.org_id) or private.is_own_employee(e.id))
               )
+              and not exists (select 1 from public.hr_documents d where d.file_path = storage.objects.name)
          else false end
   );
 create policy hr_document_files_mfa_required on storage.objects as restrictive

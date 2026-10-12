@@ -10,7 +10,8 @@
 -- x(who, what, call, want) runs a call as one person: want null = it must go
 -- through, '=<json>' = it must return that, else the refusal expected.
 -- d(who, what, statement, want) runs a statement: ok, denied, or none (no row touched).
--- v(what, query, want) reads one value as the database owner. up() plants a file.
+-- v(what, query, want) reads one value as the database owner. up() plants a file
+-- (with what storage records of it, when given); p() makes a path with no file.
 do $$
 declare
   org uuid := gen_random_uuid(); oth uuid := gen_random_uuid(); demo uuid;
@@ -48,7 +49,7 @@ begin
     count(*) filter (where n.nspname = 'private' and (p.proname like 'hr\_%' or p.proname = 'reseed_demo_people')
       and (has_function_privilege('authenticated', p.oid, 'execute') or has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('public', p.oid, 'execute')))
   into i, j, ctx from pg_proc p join pg_namespace n on n.oid = p.pronamespace;
-  if i <> 16 or j <> 12 or ctx <> '0' then fails := fails || format('%s public functions (16), %s helpers (12), %s helpers callable (0)', i, j, ctx); end if;
+  if i <> 16 or j <> 11 or ctx <> '0' then fails := fails || format('%s public functions (16), %s helpers (11), %s helpers callable (0)', i, j, ctx); end if;
   foreach t in array tabs loop
     select count(*) filter (where (p.policyname = t || '_select' and p.cmd = 'SELECT' and p.permissive = 'PERMISSIVE')
       or (p.policyname = 'mfa_required' and p.cmd = 'ALL' and p.permissive = 'RESTRICTIVE' and p.qual like '%mfa_ok()%')), count(*)
@@ -63,14 +64,19 @@ begin
   end loop;
   foreach t in array array['anon', 'authenticated', 'service_role', 'public'] loop
     if has_table_privilege(t, 'private.hr_released_documents', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE') or has_any_column_privilege(t, 'private.hr_released_documents', 'SELECT, INSERT, UPDATE')
-       or (t <> 'service_role') = has_function_privilege(t, 'private.hr_orphaned_document_files(uuid)', 'execute') then
-      fails := fails || format('%s holds the wrong rights on the released list or the sweep', t);
+       or (t <> 'service_role') = has_function_privilege(t, 'public.hr_orphaned_document_files(uuid)', 'execute')
+       or (t <> 'service_role') = has_function_privilege(t, 'public.hr_release_orphaned_document_files(uuid,int)', 'execute') then
+      fails := fails || format('%s holds the wrong rights on the released list or the two steps of the sweep', t);
     end if;
   end loop;
+  select count(*), count(*) filter (where p.prosecdef and p.proconfig @> array['search_path=public']) into i, j from pg_proc p
+  where p.oid in (to_regprocedure('public.hr_orphaned_document_files(uuid)'), to_regprocedure('public.hr_release_orphaned_document_files(uuid,int)'));
+  if i <> 2 or j <> 2 or (select p.provolatile from pg_proc p where p.oid = to_regprocedure('public.hr_orphaned_document_files(uuid)')) <> 's' then
+    fails := fails || 'the two steps of the sweep are not definer functions on a fixed search path, the listing one unable to write'::text;
+  end if;
   select count(*) into i from pg_policies p where p.schemaname = 'private' and p.tablename = 'hr_released_documents';
-  if i <> 0 or not (select c.relrowsecurity from pg_class c where c.oid = 'private.hr_released_documents'::regclass)
-     or not has_schema_privilege('service_role', 'private', 'usage') then
-    fails := fails || 'the released list is not closed behind row level security, or the service role cannot reach the sweep'::text;
+  if i <> 0 or not (select c.relrowsecurity from pg_class c where c.oid = 'private.hr_released_documents'::regclass) then
+    fails := fails || 'the released list is not closed behind row level security'::text;
   end if;
   select count(*) into i from storage.buckets b where b.id = 'hr-documents' and b.public is not true and b.file_size_limit = 10485760
     and b.allowed_mime_types @> array['application/pdf','image/jpeg','image/png','image/webp','image/heic'] and cardinality(b.allowed_mime_types) = 5;
@@ -121,10 +127,10 @@ begin
     create function pg_temp.p(o uuid, e uuid) returns text language sql as $b$ select o || '/' || e || '/' || gen_random_uuid() || '.pdf' $b$
   $f$;
   execute $f$
-    create function pg_temp.up(o uuid, e uuid, ext text default 'pdf', age interval default '0') returns text language plpgsql as $b$
+    create function pg_temp.up(o uuid, e uuid, ext text default 'pdf', age interval default '0', meta jsonb default null) returns text language plpgsql as $b$
     declare p text := o || '/' || e || '/' || gen_random_uuid() || '.' || ext;
     begin
-      insert into storage.objects (bucket_id, name, created_at) values ('hr-documents', p, now() - age);
+      insert into storage.objects (bucket_id, name, created_at, metadata) values ('hr-documents', p, now() - age, meta);
       return p;
     end $b$
   $f$;
@@ -197,6 +203,8 @@ begin
       (format('hr_acknowledge_letter(%L)', li), 'LETTER_NOT_FOUND', 1),
       (format('hr_release_document_file(%L)', f3), '=false', 1),
       (format('hr_update_document(%L,''T'',''other'',null)', dh), 'DOC_NOT_FOUND', 0),
+      (format('hr_update_document(%L,''T'',''other'',null)', dm), 'DOC_NOT_FOUND', 0),
+      (format('hr_replace_document_file(%L,%L' || pdf, dm, f3), 'DOC_NOT_FOUND', 0),
       (format('hr_replace_document_file(%L,%L' || pdf, dh, f3), 'DOC_NOT_FOUND', 0),
       (format('hr_remove_document(%L)', dh), 'DOC_NOT_FOUND', 0),
       (format('hr_request_document_ack(%L,true)', dh), 'DOC_NOT_FOUND', 0),
@@ -315,6 +323,34 @@ begin
     fails := fails || pg_temp.x(adm, 'a document with ' || lbl, format('hr_add_document(%L,''T'',''other'',null,%L,%L,%s,%L)', ea, q, fname, sz, t), 'DOC_BAD_FILE')
       || pg_temp.x(adm, 'a file replaced by ' || lbl, format('hr_replace_document_file(%L,%L,%L,%s,%L)', dh, q, fname, sz, t), 'DOC_BAD_FILE');
   end loop;
+  -- What storage recorded of a file is what must be said of it; what it did not record is taken on the caller's word.
+  fo := pg_temp.up(org, ea, 'pdf', '0', '{"size":10,"mimetype":"application/pdf"}');
+  fa := pg_temp.up(org, ea, 'pdf', '0', '{"mimetype":"image/png"}');
+  fp := pg_temp.up(org, ea, 'pdf', '0', '{"size":77,"eTag":"x"}');
+  fails := fails || pg_temp.x(adm, 'a size that is not the file''s', format('hr_add_document(%L,''T'',''other'',null,%L,''a.pdf'',11,''application/pdf'')', ea, fo), 'DOC_BAD_FILE')
+    || pg_temp.x(adm, 'a file replaced by one of another size', format('hr_replace_document_file(%L,%L,''a.pdf'',9,''application/pdf'')', dh, fo), 'DOC_BAD_FILE')
+    || pg_temp.x(adm, 'a type that is not the file''s', format('hr_add_document(%L,''T'',''other'',null,%L' || pdf, ea, fa), 'DOC_BAD_FILE')
+    || pg_temp.x(adm, 'the size and type storage recorded', format('hr_add_document(%L,''T'',''other'',null,%L' || pdf || ' -> ''file_size''', ea, fo), '=10')
+    || pg_temp.x(adm, 'the size storage recorded, and a type it did not', format('hr_add_document(%L,''T'',''other'',null,%L,''a.pdf'',77,''application/pdf'') -> ''file_size''', ea, fp), '=77');
+  -- The table's own rules, whoever writes: these are the database owner's statements.
+  foreach q in array array[
+    format('insert into public.hr_documents (org_id, employee_id, title, doc_type, source, ack_requested) values (%L, %L, ''T'', ''other'', ''employee'', true)', org, ea),
+    format('update public.hr_documents set acknowledged_at = now() where id = %L', dm),
+    format('update public.hr_documents set file_name = null where id = %L', dh),
+    format('insert into public.hr_documents (org_id, employee_id, title, doc_type, file_path) values (%L, %L, ''T'', ''other'', %L)', org, ea, pg_temp.p(org, ea)),
+    format('update public.hr_documents set doc_type = ''payslip'' where id = %L', dh),
+    format('update public.hr_letters set acknowledged_at = now() where id = %L', ld),
+    format('update public.hr_letters set issued_on = null where id = %L', li),
+    format('update public.hr_letters set issued_on = %L where id = %L', d, ld),
+    format('update public.hr_letters set acknowledged_at = now(), ack_requested = false where id = %L', li),
+    format('update public.hr_letters set letter_type = ''Offer'' where id = %L', ld)]
+  loop
+    begin
+      execute q;
+      fails := fails || ('the table took: ' || q);
+    exception when check_violation then null;
+    end;
+  end loop;
   insert into public.hr_documents (org_id, employee_id, title, doc_type) select org, ec, 'Planted ' || s, 'other' from generate_series(1, 199) s;
   select a.id into g from public.hr_documents a where a.employee_id = ea and a.source = 'employee' and a.doc_type = 'other' and a.id <> dm;
   fails := fails || pg_temp.x(ma, 'A attaches a file from B''s folder', format('hr_add_document(%L,''T'',''other'',null,%L' || pdf, ea, pg_temp.up(org, eb)), 'DOC_BAD_FILE')
@@ -349,7 +385,14 @@ begin
     fails := fails || pg_temp.d(who, lbl, format(ins, q, who), want, t);
   end loop;
   insert into storage.objects (bucket_id, name) values ('chat-attachments', f1);
-  insert into public.hr_documents (org_id, employee_id, title, doc_type, file_path) values (org, eb, 'B''s', 'contract', pg_temp.up(org, eb));
+  -- A document of A's whose file has gone missing: nobody may put another in its place.
+  fa := pg_temp.p(org, ea);
+  insert into public.hr_documents (org_id, employee_id, title, doc_type, file_path, file_name, file_size, file_type) values (org, ea, 'File gone', 'contract', fa, 'a.pdf', 10, 'application/pdf');
+  fails := fails || pg_temp.d(ma, 'A uploads at the path of their document whose file is gone', format(ins, fa, ma), 'denied')
+    || pg_temp.d(adm, 'the admin uploads at that path', format(ins, fa, adm), 'denied');
+  delete from public.hr_documents a where a.file_path = fa;
+  fails := fails || pg_temp.d(ma, 'A uploads there once no document carries it', format(ins, fa, ma), 'ok');
+  insert into public.hr_documents (org_id, employee_id, title, doc_type, file_path, file_name, file_size, file_type) values (org, eb, 'B''s', 'contract', pg_temp.up(org, eb), 'a.pdf', 10, 'application/pdf');
   q := format('(select count(*) || ''/'' || count(*) filter (where o.name not in (select a.file_path from public.hr_documents a where a.employee_id = %%L and a.file_path is not null)) from storage.objects o where left(o.name, 36) = %L)', org);
   fails := fails || pg_temp.d(ma, 'an account still anonymous uploads', format(ins, pg_temp.p(org, ea), ma), 'denied', 'authenticated', '{"is_anonymous":true}')
     || pg_temp.x(ma, 'A reads the files of their own documents and no other', format(q, ea), format('="%s/0"', (select count(*) from public.hr_documents a where a.employee_id = ea and a.file_path is not null)))
@@ -474,16 +517,27 @@ begin
   -- 7. the sweep, and deleting an employee
   fo := pg_temp.up(org, ea, 'pdf', '2 days');
   fa := pg_temp.up(oth, eo, 'pdf', '2 days');
-  insert into public.hr_documents (org_id, employee_id, title, doc_type, file_path) values (org, ea, 'Old and attached', 'other', pg_temp.up(org, ea, 'pdf', '2 days'));
-  fails := fails || pg_temp.x(adm, 'the admin runs the sweep', format('(select count(*) from private.hr_orphaned_document_files(%L))', org), 'permission denied for function hr_orphaned_document_files')
-    || pg_temp.x(null, 'the service role lists the one old file on no document', format('(select jsonb_agg(f) from private.hr_orphaned_document_files(%L) f)', org), format('=["%s"]', fo), 'aal1', 'service_role')
-    || pg_temp.x(null, 'and again', format('(select jsonb_agg(f) from private.hr_orphaned_document_files(%L) f)', org), format('=["%s"]', fo), 'aal1', 'service_role')
-    || pg_temp.x(null, 'the service role reads no document', '(select count(*) from public.hr_documents)', 'permission denied for table hr_documents', 'aal1', 'service_role')
-    || pg_temp.x(null, 'nor the released list', '(select count(*) from private.hr_released_documents)', 'permission denied for table hr_released_documents', 'aal1', 'service_role')
-    || pg_temp.x(adm, 'a listed file is attached after all', format('hr_add_document(%L,''T'',''other'',null,%L' || pdf, ea, fo), 'DOC_BAD_FILE')
-    || pg_temp.v('the other workspace''s file was not listed', format('select count(*) from private.hr_released_documents where path = %L', fa), '0');
+  insert into public.hr_documents (org_id, employee_id, title, doc_type, file_path, file_name, file_size, file_type) values (org, ea, 'Old and attached', 'other', pg_temp.up(org, ea, 'pdf', '2 days'), 'a.pdf', 10, 'application/pdf');
+  f4 := pg_temp.up(org, ea, 'pdf', '3 days');
+  q := format('(select coalesce(jsonb_agg(f order by f), ''[]'') from %%s(%L%%s) f)', org);
+  want := (select jsonb_agg(f order by f) from unnest(array[fo, f4]) f)::text;
+  fails := fails || pg_temp.x(adm, 'the admin lists for the sweep', format(q, 'hr_orphaned_document_files', ''), 'permission denied for function hr_orphaned_document_files')
+    || pg_temp.x(adm, 'the admin releases for the sweep', format(q, 'hr_release_orphaned_document_files', ''), 'permission denied for function hr_release_orphaned_document_files')
+    || pg_temp.x(ma, 'a signed-out visitor lists for the sweep', format(q, 'hr_orphaned_document_files', ''), 'permission denied for function hr_orphaned_document_files', 'aal1', 'anon')
+    || pg_temp.x(ma, 'a signed-out visitor releases for the sweep', format(q, 'hr_release_orphaned_document_files', ''), 'permission denied for function hr_release_orphaned_document_files', 'aal1', 'anon')
+    || pg_temp.x(null, 'the service role lists the two old files on no document', format(q, 'hr_orphaned_document_files', ''), '=' || want, 'aal1', 'service_role')
+    || pg_temp.v('listing released nothing', format('select count(*) from private.hr_released_documents where path in (%L, %L)', fo, f4), '0')
+    || pg_temp.x(adm, 'a listed file is attached after all', format('hr_add_document(%L,''T'',''other'',null,%L' || pdf || ' ? ''id''', ea, f4), '=true')
+    || pg_temp.x(null, 'the service role releases none when told none', format(q, 'hr_release_orphaned_document_files', ',0'), '=[]', 'aal1', 'service_role')
+    || pg_temp.x(null, 'the service role releases the one left', format(q, 'hr_release_orphaned_document_files', ',1'), format('=["%s"]', fo), 'aal1', 'service_role')
+    || pg_temp.x(null, 'and is handed it again on a second try', format(q, 'hr_release_orphaned_document_files', ''), format('=["%s"]', fo), 'aal1', 'service_role')
+    || pg_temp.v('what the sweep released', format('select string_agg(path, '','') from private.hr_released_documents where path in (%L, %L, %L)', fo, f4, fa), fo)
+    || pg_temp.x(adm, 'a released file is attached after all', format('hr_add_document(%L,''T'',''other'',null,%L' || pdf, ea, fo), 'DOC_BAD_FILE')
+    || pg_temp.x(null, 'the service role releases the old file of a folder with no workspace behind it', format('(select count(*) from hr_release_orphaned_document_files(%L))', split_part(pg_temp.up(gen_random_uuid(), gen_random_uuid(), 'pdf', '2 days'), '/', 1)), '=1', 'aal1', 'service_role')
+    || pg_temp.x(null, 'the service role reads no document', '(select count(*) from public.hr_documents)', 'permission denied for table hr_documents', 'aal1', 'service_role');
   fa := pg_temp.up(org, ex); fb := pg_temp.up(org, ex); fp := pg_temp.up(org, ep);
-  insert into public.hr_documents (org_id, employee_id, title, doc_type, file_path) values (org, ex, 'One', 'other', fa), (org, ex, 'Two', 'other', fb), (org, ex, 'No file', 'other', null), (org, ep, 'Kept', 'other', fp);
+  insert into public.hr_documents (org_id, employee_id, title, doc_type, file_path, file_name, file_size, file_type) values (org, ex, 'One', 'other', fa, 'a.pdf', 10, 'application/pdf'), (org, ex, 'Two', 'other', fb, 'a.pdf', 10, 'application/pdf'), (org, ep, 'Kept', 'other', fp, 'a.pdf', 10, 'application/pdf');
+  insert into public.hr_documents (org_id, employee_id, title, doc_type) values (org, ex, 'No file', 'other');
   insert into public.hr_payroll_runs (id, org_id, period_month, status, paid_at) values (run, org, '2025-01-01', 'paid', now());
   insert into public.hr_payslips (org_id, employee_id, payroll_run_id, period_month, basic_cents, gross_cents, status) values (org, ep, run, '2025-01-01', 1, 1, 'paid');
   fails := fails || pg_temp.x(adm, 'the admin deletes an employee', format('hr_delete_employee(%L,%L)', org, ex),

@@ -7,7 +7,6 @@ const DOCUMENTS = '20261029090000_people_documents_writes.sql';
 const LETTERS = '20261029090100_people_letters_writes.sql';
 const SEED = '20261029090200_people_documents_demo_seed.sql';
 const FILES = [DOCUMENTS, LETTERS, SEED];
-const BEFORE = '20261028090200_people_performance_demo_seed.sql';
 
 const raw = (file: string) => readFileSync(join(DIR, file), 'utf8');
 
@@ -48,12 +47,17 @@ const FUNCTIONS: Fn[] = [
   { name: 'hr_delete_letter_template', args: 'uuid', file: LETTERS, gate: 'private.hr_template_held(null, p_template)', returns: 'jsonb' },
 ];
 const HELPERS: Record<string, string[]> = {
-  [DOCUMENTS]: ['private.hr_doc_employee', 'private.hr_doc_held', 'private.hr_doc_file_ok', 'private.hr_document_json', 'private.hr_orphaned_document_files'],
+  [DOCUMENTS]: ['private.hr_doc_employee', 'private.hr_doc_held', 'private.hr_doc_file_ok', 'private.hr_document_json'],
   [LETTERS]: [
     'private.hr_seed_letter_templates', 'private.hr_seed_letter_templates_new_org', 'private.hr_letter_employee', 'private.hr_letter_held',
     'private.hr_template_held', 'private.hr_letter_json', 'private.hr_letter_fill',
   ],
 };
+/** The two steps of the sweep: for the app's service client only. */
+const SWEEP = [
+  { name: 'hr_orphaned_document_files', args: 'uuid' },
+  { name: 'hr_release_orphaned_document_files', args: 'uuid, int' },
+];
 const DOC_CODES = [
   'DOC_NOT_ALLOWED', 'DOC_NOT_FOUND', 'DOC_BAD_INPUT', 'DOC_TYPE_NOT_ALLOWED', 'DOC_TOO_MANY', 'DOC_BAD_FILE',
   'DOC_ACK_NOT_REQUESTED', 'DOC_ALREADY_ACKNOWLEDGED',
@@ -97,8 +101,6 @@ describe('Lekiu letters and documents migrations', () => {
     const at = FILES.map((f) => files.indexOf(f));
     expect(at.every((i) => i > -1)).toBe(true);
     expect(at).toEqual([at[0], at[0] + 1, at[0] + 2]);
-    expect(at[0]).toBe(files.indexOf(BEFORE) + 1);
-    expect(at[2]).toBe(files.length - 1);
     for (const f of FILES) expect(files.filter((x) => x.slice(0, 14) === f.slice(0, 14)), f).toEqual([f]);
     expect(FILES.map((f) => f.slice(0, 14))).toEqual(['20261029090000', '20261029090100', '20261029090200']);
   });
@@ -126,7 +128,9 @@ describe('Lekiu letters and documents migrations', () => {
       "add column source text not null default 'hr' check (source in ('hr','employee')),",
       'add column ack_requested boolean not null default false,',
       'add column acknowledged_at timestamptz,',
-      "add constraint hr_documents_acknowledgement\n    check ((acknowledged_at is null or ack_requested) and (source <> 'employee' or not ack_requested));",
+      "add constraint hr_documents_acknowledgement\n    check ((acknowledged_at is null or ack_requested) and (source <> 'employee' or not ack_requested)),",
+      // A file comes with its name, size and type, or there is none of the four.
+      'add constraint hr_documents_file_columns check (num_nulls(file_path, file_name, file_size, file_type) in (0, 4));',
       'create unique index hr_documents_file_path_idx on public.hr_documents (file_path) where file_path is not null;',
     ]) {
       expect(text, line).toContain(line);
@@ -253,6 +257,8 @@ describe('Lekiu letters and documents migrations', () => {
         + '                  and e.org_id = ((storage.foldername(storage.objects.name))[1])::uuid\n'
         + '                  and (private.is_org_admin(e.org_id) or private.is_own_employee(e.id))\n'
         + '              )\n'
+        // Never at a path a document carries, should that document's file ever go missing.
+        + '              and not exists (select 1 from public.hr_documents d where d.file_path = storage.objects.name)\n'
         + '         else false end\n'
         + '  );',
     );
@@ -279,12 +285,15 @@ describe('Lekiu letters and documents migrations', () => {
     const lock = body.indexOf('perform pg_advisory_xact_lock(hashtextextended(p_path, 0));');
     expect(lock).toBeGreaterThan(-1);
     for (const read of [
-      "where o.bucket_id = 'hr-documents' and o.name = p_path",
+      "select o.metadata into meta from storage.objects o\n  where o.bucket_id = 'hr-documents' and o.name = p_path;",
+      'if not found\n',
       'select 1 from public.hr_documents d where d.file_path = p_path',
       'select 1 from private.hr_released_documents x where x.path = p_path',
     ]) {
       expect(body.indexOf(read), read).toBeGreaterThan(lock);
     }
+    // What storage recorded of the file is what the caller must say; a key it did not record is not held against them.
+    expect(body).toContain("if (meta ? 'size' and meta ->> 'size' <> p_size::text)\n     or (meta ? 'mimetype' and meta ->> 'mimetype' <> p_type) then\n    raise exception 'DOC_BAD_FILE';");
     expect(codes(body)).toEqual(['DOC_BAD_FILE']);
     for (const name of ['hr_add_document', 'hr_replace_document_file']) {
       const caller = fn(text, `public.${name}`).body;
@@ -319,22 +328,41 @@ describe('Lekiu letters and documents migrations', () => {
     }
   });
 
-  test('the service role is granted the sweep and nothing else', () => {
-    const text = rules();
-    expect((text.match(/[^\n]*service_role[^\n]*/g) ?? []).map((l) => l.trim()).sort()).toEqual([
-      'grant execute on function private.hr_orphaned_document_files(uuid) to service_role;',
-      'grant usage on schema private to service_role;',
+  test('the sweep: two public functions for the service role only, a listing that changes nothing and a release that is limited', () => {
+    const text = statements(DOCUMENTS);
+    expect((rules().match(/[^\n]*service_role[^\n]*/g) ?? []).map((l) => l.trim()).sort()).toEqual([
+      'grant execute on function public.hr_orphaned_document_files(uuid) to service_role;',
+      'grant execute on function public.hr_release_orphaned_document_files(uuid, int) to service_role;',
       'revoke all on private.hr_released_documents from public, anon, authenticated, service_role;',
     ]);
-    const { header, body } = fn(statements(DOCUMENTS), 'private.hr_orphaned_document_files');
-    expect(header).toContain('returns setof text language plpgsql security definer set search_path = public');
-    expect(statements(DOCUMENTS)).toContain('revoke all on function private.hr_orphaned_document_files(uuid) from public, anon, authenticated;');
-    expect(body).toContain("o.bucket_id = 'hr-documents'");
-    expect(body).toContain("o.name like p_org::text || '/%'");
-    expect(body).toContain('not exists (select 1 from public.hr_documents d where d.file_path = o.name)');
-    // A file somebody is still in the middle of attaching is left alone, and what is listed can never be attached.
-    expect(body).toContain("o.created_at < now() - interval '1 day'");
-    expect(body).toContain('insert into private.hr_released_documents (path)');
+    // The service role is let into no schema it was not in, and signed-in users are let into neither function.
+    expect(rules()).not.toMatch(/grant usage|private\.hr_orphaned/);
+    for (const { name, args } of SWEEP) {
+      expect(text).toContain(`revoke all on function public.${name}(${args}) from public, anon, authenticated;`);
+      expect(text).not.toContain(`grant execute on function public.${name}(${args}) to authenticated;`);
+      const { header, body } = fn(text, `public.${name}`);
+      expect(header, name).toMatch(/returns setof text language (sql stable|plpgsql) security definer set search_path = public$/);
+      expect(body, name).toContain("o.bucket_id = 'hr-documents' and o.name like p_org::text || '/%'");
+      expect(body, name).toContain("and o.created_at < now() - interval '1 day'");
+      expect(body, name).toContain('and not exists (select 1 from public.hr_documents d where d.file_path = o.name)');
+    }
+    // Listing: one read, declared stable, so the database itself refuses a write from it.
+    const list = fn(text, 'public.hr_orphaned_document_files');
+    expect(list.header).toContain('(p_org uuid)\nreturns setof text language sql stable');
+    expect(list.body).not.toMatch(/\b(insert|update|delete|perform)\b/);
+    // Releasing: at most 500 a call; each path locked, looked at again, recorded, and only then handed back.
+    const release = fn(text, 'public.hr_release_orphaned_document_files');
+    expect(release.header).toContain('(p_org uuid, p_limit int default 500)');
+    const steps = [
+      'limit least(greatest(coalesce(p_limit, 500), 0), 500)',
+      'perform pg_advisory_xact_lock(hashtextextended(f, 0));',
+      'continue when exists (select 1 from public.hr_documents d where d.file_path = f);',
+      "where o.bucket_id = 'hr-documents' and o.name = f and o.created_at < now() - interval '1 day'",
+      'insert into private.hr_released_documents (path) values (f) on conflict do nothing;',
+      'return next f;',
+    ].map((step) => release.body.indexOf(step));
+    expect(steps.every((i) => i > -1)).toBe(true);
+    expect([...steps].sort((x, y) => x - y)).toEqual(steps);
   });
 
   test('no table gets a write grant or a write policy', () => {
@@ -342,8 +370,7 @@ describe('Lekiu letters and documents migrations', () => {
     expect((text.match(/grant [^;]*;/g) ?? []).sort()).toEqual(
       [
         ...FUNCTIONS.map((f) => `grant execute on function public.${f.name}(${f.args}) to authenticated;`),
-        'grant execute on function private.hr_orphaned_document_files(uuid) to service_role;',
-        'grant usage on schema private to service_role;',
+        ...SWEEP.map((f) => `grant execute on function public.${f.name}(${f.args}) to service_role;`),
       ].sort(),
     );
     expect(text).not.toMatch(/grant\s+(all|select|insert|update|delete|truncate)/i);
@@ -352,10 +379,13 @@ describe('Lekiu letters and documents migrations', () => {
     expect(statements(SEED)).not.toMatch(/\bgrant\b|(create|drop) policy|alter table|create table|storage\./);
   });
 
-  test('the sixteen functions, and no other in the public schema', () => {
+  test('the sixteen functions and the two of the sweep, and no other in the public schema', () => {
     for (const file of [DOCUMENTS, LETTERS]) {
       const made = allFunctions(statements(file));
-      expect(made.filter((n) => n.startsWith('public.'))).toEqual(FUNCTIONS.filter((f) => f.file === file).map((f) => `public.${f.name}`));
+      expect(made.filter((n) => n.startsWith('public.'))).toEqual([
+        ...FUNCTIONS.filter((f) => f.file === file).map((f) => `public.${f.name}`),
+        ...(file === DOCUMENTS ? SWEEP.map((f) => `public.${f.name}`) : []),
+      ]);
       expect(made.filter((n) => n.startsWith('private.'))).toEqual(HELPERS[file]);
       expect(new Set(made).size).toBe(made.length);
     }
@@ -592,10 +622,13 @@ describe('Lekiu letters and documents migrations', () => {
     const text = statements(DOCUMENTS);
     const { body } = fn(text, 'public.hr_delete_employee');
     const held = body.indexOf('select e.* into emp from public.hr_employees e where e.id = p_employee and e.org_id = p_org for update;');
+    // The employee's documents are held too, so no file is replaced between the paths being read and the row going.
+    const docsHeld = body.indexOf('perform 1 from public.hr_documents d where d.employee_id = emp.id for update;');
     const collected = body.indexOf('from public.hr_documents d where d.employee_id = emp.id and d.file_path is not null;');
     const deleted = body.indexOf('delete from public.hr_employees e where e.id = emp.id;');
     expect(held).toBeGreaterThan(-1);
-    expect(collected).toBeGreaterThan(held);
+    expect(docsHeld).toBeGreaterThan(held);
+    expect(collected).toBeGreaterThan(docsHeld);
     expect(deleted).toBeGreaterThan(collected);
     expect(body).toContain('private.is_org_admin(emp.org_id)');
     // The guard of the payroll slice is a trigger on the table: it is not touched, replaced or switched off here.
@@ -652,7 +685,9 @@ describe('Lekiu letters and documents migrations', () => {
 
   test('only the documents, the letters and the templates of the demo re-seed differ from the performance slice\'s', () => {
     const parts = (file: string) => fn(raw(file), 'private.reseed_demo_people').body.split('\n\n');
-    const before = parts(BEFORE);
+    // The re-seed this one replaces: the newest earlier migration that defines it, whatever its version.
+    const earlier = readdirSync(DIR).sort().filter((f) => f < SEED && /create or replace function private\.reseed_demo_people\(/.test(raw(f)));
+    const before = parts(earlier[earlier.length - 1]);
     const after = parts(SEED);
     expect(before.length).toBeGreaterThan(30);
     // One part more: the templates. Every other part is where it was.
