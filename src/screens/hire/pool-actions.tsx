@@ -213,22 +213,27 @@ export function PoolSearch({ search }: { search: string | null }) {
           stop();
           timer.current = window.setTimeout(() => go(next), 300);
         }}
-        // The browser's own clear cross is hidden: the button beside it is the one with a name and a 44-pixel target.
+        // The browser's own clear cross is hidden: the link beside it is the one with a name and a 44-pixel target.
         className={cn('h-11 w-full rounded-md border bg-background pl-8 text-sm [&::-webkit-search-cancel-button]:hidden', value ? 'pr-11' : 'pr-3', FOCUS)}
       />
       {value ? (
-        <button
-          type="button"
+        // A link to the page with no query, so it works before scripting has run and with it off. With scripting on
+        // the press is taken over: the box empties at once, the address is replaced and focus stays in the box.
+        <a
+          href={pathname}
           aria-label="Clear search"
           className={cn('absolute right-0 top-0 grid place-items-center rounded-md text-muted-foreground hover:text-foreground', TARGET, FOCUS)}
-          onClick={() => {
+          onClick={(event) => {
+            // A press that asks for a new tab or window is the browser's to handle.
+            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
             setValue('');
             go('');
             field.current?.focus();
           }}
         >
           <X className="size-4" aria-hidden />
-        </button>
+        </a>
       ) : null}
     </form>
   );

@@ -93,6 +93,8 @@ const unescape = (html: string) => html.replace(/&quot;/g, '"').replace(/&#x27;/
 const buttons = (html: string) =>
   [...html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)].map(([, attrs, inner]) => /aria-label="([^"]*)"/.exec(attrs)?.[1] ?? text(inner));
 const tagOf = (html: string, pattern: RegExp) => pattern.exec(html)?.[0] ?? '';
+/** The opening tag of every link named "Clear search". */
+const clearLinks = (html: string) => [...html.matchAll(/<a\b[^>]*>/g)].map(([tag]) => tag).filter((tag) => tag.includes('aria-label="Clear search"'));
 // The attribute, not the `disabled:` classes every button carries.
 const DISABLED = /\sdisabled(=|\s|>)/;
 const row = (over: Partial<PoolModel['rows'][number]> = {}): PoolModel['rows'][number] => ({
@@ -173,18 +175,22 @@ describe('the search box', () => {
     // 44 pixels tall.
     expect(field).toContain('h-11');
   });
-  it('shows the text being searched for and a Clear search button; with no text there is no such button', async () => {
+  it('shows the text being searched for and Clear search as a link to the page with no query, which works with scripting off', async () => {
     mocks.pool = pool({ search: 'aina', matched: 1 });
     const searched = await screen('aina');
     expect(tagOf(searched, /<input\b[^>]*name="q"[^>]*>/)).toContain('value="aina"');
-    expect(buttons(searched)).toContain('Clear search');
-    const clear = tagOf(searched, /<button\b[^>]*aria-label="Clear search"[^>]*>/);
-    expect(clear).toContain('type="button"');
+    // A real link: a button here would do nothing until scripting has run.
+    expect(clearLinks(searched)).toHaveLength(1);
+    const clear = clearLinks(searched)[0];
+    expect(clear).toContain('href="/hire/talent-pool"');
+    expect(clear).not.toContain('?');
     expect(clear).toContain('min-h-11');
     expect(clear).toContain('min-w-11');
-    // The model is what says what was searched for: one with no search draws no such button.
+    expect(clear).toMatch(/focus-visible:ring-/);
+    expect(buttons(searched)).not.toContain('Clear search');
+    // The model is what says what was searched for: one with no search draws no such control.
     mocks.pool = pool();
-    expect(buttons(await screen())).not.toContain('Clear search');
+    expect(clearLinks(await screen())).toEqual([]);
   });
   it('is there for a viewer too: it changes nothing', async () => {
     mocks.viewer = { orgId: 'org1', role: 'viewer', isDemo: false };
@@ -196,9 +202,11 @@ describe('the search box', () => {
     for (const label of ['Filter', 'All sources']) {
       expect(tagOf(html, new RegExp(`<button\\b[^>]*>(?:(?!</button>)[\\s\\S])*${label}`)), label).toMatch(DISABLED);
     }
-    // The box on its own: a field and, until something is typed, no button.
+    // The box on its own: a field, no button, and the Clear search link only while there is a search.
     expect(buttons(renderToStaticMarkup(<PoolSearch search={null} />))).toEqual([]);
-    expect(buttons(renderToStaticMarkup(<PoolSearch search="aina" />))).toEqual(['Clear search']);
+    expect(clearLinks(renderToStaticMarkup(<PoolSearch search={null} />))).toEqual([]);
+    expect(buttons(renderToStaticMarkup(<PoolSearch search="aina" />))).toEqual([]);
+    expect(clearLinks(renderToStaticMarkup(<PoolSearch search="aina" />))).toHaveLength(1);
   });
 });
 
@@ -231,7 +239,7 @@ describe('the line under the table', () => {
     expect(html).not.toContain('<table');
     expect(text(html)).toContain('Talent pool size');
     expect(text(html)).toMatch(/\b137\b/);
-    expect(buttons(html)).toContain('Clear search');
+    expect(clearLinks(html)).toHaveLength(1);
     expect(text(html)).not.toContain('No one in the talent pool yet');
   });
   it('an empty pool says so, with or without a search', async () => {
