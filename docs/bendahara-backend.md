@@ -37,8 +37,10 @@ the data layer, with unit tests; the client components only draw them.
 | `credit-note-form.ts` | The credit note form: which invoices can take a credit note and how much (`creditableInvoices`: posted, for the total less what is already credited), defaults, validation, what is sent. `creditNoteSavedNotIssued` words a credit note that was saved as a draft but not issued |
 | `refund-form.ts` | The refund form: what can be refunded and how much (`refundTargets`: an invoice whose customer is in credit, or one of its issued credit notes, less refunds still to be paid), defaults, validation, what is sent |
 | `cash-book.ts` | Reading the cash book: one row per movement of money in (`listCashReceipts`, from the view `finance_cash_receipts`) and out (`listPaymentVouchers`, from `finance_payment_vouchers`), a page at a time, with the row types and the kinds a receipt and a voucher can be. It only reads |
+| `cash-receipts.ts` | A receipt's writes, and the one read its form needs: the Zod schema of a draft receipt (`saveCashReceiptInput`, for invoices or for income, told apart by `kind`), saving a draft (`saveCashReceipt`), posting it (`postCashReceipt`), voiding a posted one (`voidCashReceipt`), deleting a draft (`deleteCashReceipt`), the sentence for each database code (`CASH_RECEIPT_MESSAGES`), and the active income categories (`listIncomeCategories`). Every write given an id asks `finance_cash_receipts` first, so one side of a transfer is never reached |
+| `cash-receipt-form.ts` | The receipt form: defaults, the form for a draft being changed (`editCashReceiptForm`, from its row and its Payments In rows), which invoices it can go against (`receivableFor`: the payment-in rule, without counting what the draft being changed holds itself), validation, what is sent (the chosen side only), a picker's list with a draft's archived choice in it (`withCurrent`). `receiptSavedNotPosted` words a receipt that was saved as a draft but not posted |
 | `expenses.ts` | Reading expenses (`listExpenses`, from the view `finance_expense_totals`), a page at a time, with the row type, the three statuses a person sets and `paid`, which is only how an expense reads. It only reads |
-| `cash-book-views.ts` | KPI figures, chart data, table filters, status words and CSV rows for Cash Receipts, Payment Vouchers and Expenses; the period selector of the first two (`inPeriod`), which sets the cards, the donut and the table rows alike (`cashReceiptsInPeriod`, `paymentVouchersInPeriod`: a draft receipt, and a voucher waiting for approval or still to be paid, stay in every period because their cards count them whatever their date; search, filters, "View all" and Export work on top of it); which category a voucher counts under (`voucherCategory`) and which screen changes it (`voucherHome`) |
+| `cash-book-views.ts` | KPI figures, chart data, table filters, status words and CSV rows for Cash Receipts, Payment Vouchers and Expenses; the period selector of the first two (`inPeriod`), which sets the cards, the donut and the table rows alike (`cashReceiptsInPeriod`, `paymentVouchersInPeriod`: a draft receipt, and a voucher waiting for approval or still to be paid, stay in every period because their cards count them whatever their date; search, filters, "View all" and Export work on top of it); which category a voucher counts under (`voucherCategory`) and which screen changes it (`voucherHome`); what a receipt's row menu offers, by its status and by whether the person may sign off (`cashReceiptActions`), and the words of its questions (`receiptName`, `receiptVoidEffect`, `receiptDeleteEffect`) |
 | `csv.ts` | CSV text for Export: RFC 4180, a UTF-8 byte-order mark, and a guard against spreadsheet formulas |
 
 The forms validate by running the write's own Zod schema on what they are about
@@ -102,8 +104,12 @@ refresh it as well: an invoice or a payment in also refreshes Cash Receipts; a
 bill or a payment out, and a credit note issued or voided or a refund at any
 step, also refresh Payment Vouchers; a contact also refreshes Cash Receipts,
 Payment Vouchers and Expenses, where it can be the payer, the payee or the
-vendor. Cash Receipts, Payment Vouchers and Expenses have no action of their
-own yet: they are read-only for everyone.
+vendor. Every cash receipt action (save, save and post, post, void, delete)
+refreshes what an invoice or a payment in refreshes, whatever the receipt is
+for: one against invoices moves what they owe, or holds part of them while it
+is a draft, and one save can turn a draft of one kind into the other. Payment
+Vouchers and Expenses have no action of their own yet: they are read-only for
+everyone.
 
 Every action refuses a viewer and the demo workspace before the data layer is
 reached. Without that, a viewer's void or delete would come back from the
@@ -260,8 +266,8 @@ transfer between accounts (`transfer_id`) are in neither.
 
 | View | `kind` | What it is | Also shown on | Changed on |
 |---|---|---|---|---|
-| `finance_cash_receipts` | `invoice` | Money in against invoices | Payments In, one row per invoice | Payments In |
-| `finance_cash_receipts` | `income` | Money in that settles no invoice, with an income category | nowhere else | Cash Receipts (no form yet) |
+| `finance_cash_receipts` | `invoice` | Money in against invoices | Payments In, one row per invoice | Payments In (recorded and posted at once; void) and Cash Receipts (a draft: edit, post, delete; void) |
+| `finance_cash_receipts` | `income` | Money in that settles no invoice, with an income category | nowhere else | Cash Receipts |
 | `finance_payment_vouchers` | `bill` | A payment to a supplier | Payments Out, one row per bill | Payments Out |
 | `finance_payment_vouchers` | `refund` | Money back to a customer | Refunds | Refunds |
 | `finance_payment_vouchers` | `expense` | A payment of approved expenses | Expenses, as Paid | Payment Vouchers, Expenses (no form yet) |
@@ -294,6 +300,47 @@ approval. A payment recorded on Payments In is still
 `finance_record_voucher` records money out that pays approved expenses, or
 money out that settles no document and carries an expense category. A payment
 to a supplier and a refund are not recorded through it.
+
+### The receipt form
+
+Cash Receipts is writable. `cash-receipts.ts` holds the writes and
+`cash-receipt-form.ts` the form's rules; `cash-receipt-form-card.tsx` draws
+the form, a card of its own. A receipt is saved as a draft, posted, and after
+that only voided; a draft is deleted. Who may do which is the database's
+rule (`20261030123000_finance_write_guards`), and the screen offers each
+person only what it will let them do:
+
+| | Owner, admin | Member | Viewer, demo |
+|---|---|---|---|
+| New receipt, Save draft, Edit a draft, Delete a draft | Yes | Yes, anyone's draft | No button, no menu; the action answers "You do not have permission to make changes here." |
+| Post (the form's "Post receipt", a draft's Post) | Yes | Not offered. The action answers "Only an owner or admin can post, pay or void. Ask one of them to do this." without reading or writing; the database answers `FIN14` and uses up no number | No |
+| Void a posted receipt, of either kind | Yes | Not offered; the same sentence, `FIN14` | No |
+
+The screen loader works `canSignOff` out from the viewer's role
+(`can(role, 'sign-off-finance')`) and hands it to the view with the actions;
+the server actions ask again (`SIGN_OFF` in `actions.ts`), and the trigger
+`finance_transaction_sign_off` has the last word. A member's form has "Save
+draft" only and says an owner or admin posts it. "Post receipt" saves and
+then posts (`saveAndPostCashReceiptAction`); when only the post is refused
+the draft is kept and the form goes on editing it.
+
+A receipt for invoices is sent its split and nothing else: the database
+makes its amount the sum of the split and its payer the invoices' customer. A
+receipt for income is sent a category, an amount, and a contact or a typed
+name or neither, never both (`finance_transactions_party_check`). The form
+holds both sides while it is open and sends only the one chosen.
+
+A draft being changed is not read again: the form is built from the draft's
+row on the screen and, for its split, from the rows `finance_payments_in` has
+for it. What it holds of its own invoices is not counted against it
+(`receivableFor`), as the database deletes the old split before it checks the
+new one. Saving replaces the draft whole; a draft that was posted or deleted
+meanwhile answers with that sentence (`FIN09`, `FIN11`).
+
+Void is offered on every posted receipt, a payment recorded on Payments In
+included: it is the same status change `voidPaymentIn` makes, asked of
+`finance_cash_receipts` instead of `finance_payments_in`, so it also reaches a
+receipt for income, which `voidPaymentIn` refuses.
 
 ## Expenses
 
@@ -905,12 +952,15 @@ updates and deletes too. The data layer for all of it is in `quotations.ts`,
 
 Approving or rejecting an expense or a payment, voiding a posted receipt or
 voucher, and deleting a draft receipt, a pending or rejected expense, or a
-payment that was never paid, are plain updates and deletes as well. No
-function of `src/lib/finance/` calls the four functions above, approves or
-rejects an expense or a payment, or touches an expense or a draft receipt:
-`cash-book.ts` and `expenses.ts` only read, and each write arrives with its
-form. The voids and deletes that exist are those of Payments In, Payments Out
-and Refunds, and reach only what those screens show.
+payment that was never paid, are plain updates and deletes as well.
+`cash-receipts.ts` calls `finance_save_cash_receipt` and
+`finance_post_cash_receipt`, and voids and deletes a receipt, each after
+asking `finance_cash_receipts` whether the payment is one. No function of
+`src/lib/finance/` calls `finance_record_voucher` or `finance_save_expense`,
+approves or rejects an expense or a payment, or touches an expense:
+`cash-book.ts` and `expenses.ts` only read, and each of those writes arrives
+with its form. The other voids and deletes that exist are those of Payments
+In, Payments Out and Refunds, and reach only what those screens show.
 
 Voiding a bill, an invoice or a payment, and deleting a draft bill, a draft
 invoice or a scheduled payment, are plain updates and deletes; the guards
@@ -942,7 +992,7 @@ quotation, a credit note or a refund by the file that made the call.
 | `FIN12` | The invoice has a credit note that is a draft or issued, so it cannot be voided. `invoices.ts` words it: "This invoice has credit notes. Void them on Credit Notes, or delete the drafts, before voiding it." |
 | `FIN13` | The quotation already has an invoice that is not void: it cannot be converted again, and its answer can no longer change. `quotations.ts` words it |
 | `FIN14` | Approval. Only an owner or admin approves or rejects an expense or a payment; a payment is submitted for approval only from a draft and rejected only before it is approved; money out that settles no document needs one of them before it is scheduled or paid; a payment waiting for approval, or rejected, cannot be changed; a rejected payment is final; an approved payment is paid as it was approved, with nothing but its status, number and date changing. Also: `approved_by` and `approved_at` on a payment or an expense are written by the database, and an update from a signed-in person that changes either by hand is this code, unless an earlier rule refuses it first (`FIN09` on a posted or void payment, `FIN01` on an approved or rejected expense whose status is left as it was); a scheduled payment out that nobody approved cannot be raised above its split, or made from scheduled money in, by someone who is not an owner or admin, and its split cannot be deleted or lowered below the payment by any signed-in person. Nothing in the app meets it yet |
-| `FIN15` | A receipt, a voucher or an expense names the wrong thing: a receipt is for invoices or for an income category, a voucher for expenses or for an expense category, never both and never neither; a receipt for invoices that is being posted must be exactly its split and carry no category; an expense needs an expense category of its own workspace. Nothing in the app meets it yet |
+| `FIN15` | A receipt, a voucher or an expense names the wrong thing: a receipt is for invoices or for an income category, a voucher for expenses or for an expense category, never both and never neither; a receipt for invoices that is being posted must be exactly its split and carry no category; an expense needs an expense category of its own workspace. `cash-receipts.ts` words it for a receipt: "A receipt needs either invoices that add up to its amount, or an income category that still exists. Edit it and try again." The voucher and the expense meet it with their forms |
 | `42501` | Row-level security refused the write: "You do not have permission to make changes here." |
 | `22003` | A number does not fit its column (quantity × unit price can overflow): "That amount is too large." |
 | `22023` | `finance_record_refund` was given a status other than `posted` or `scheduled`. The app always sends one of the two, so only a direct call reaches it; `refunds.ts` has no sentence for it. |
@@ -988,9 +1038,13 @@ The sentence for `FIN01` on an invoice is "This invoice has been posted or
 voided, so that can no longer be done.". The row menus offer only what a
 status allows, so the code reaches a person only when the invoice changed under
 them, and the sentence is true of every such case, voiding an invoice that was
-just voided included. `FIN09` on a payment in is "This payment has already been
-voided." for the same reason. Bills and payments out still say "Void it
-instead."; see Known limits.
+just voided included. `FIN09` on voiding a payment in is "This payment cannot
+be voided as it now stands: it has already been voided, or it is still a
+draft.": the first for the same reason, the second for a draft receipt against
+invoices sent to `voidPaymentIn` by a direct call. A receipt has three
+sentences for the code, by what was being done (`CASH_RECEIPT_MESSAGES`:
+`locked` for a save or a post, `cannotVoid`, `cannotDelete`). Bills and
+payments out still say "Void it instead."; see Known limits.
 
 The cash book reuses the codes above where the meaning is the same. `FIN01`:
 an expense is created pending, an approved or rejected one is locked, it is
@@ -1139,10 +1193,26 @@ with no date).
   schema a payment's is. Only a direct call can send one.
 - A draft cash receipt against invoices is on Payments In with the status
   Draft, and holds its part of each invoice until it is posted or deleted.
-  Nothing in the app makes one yet. Payments In offers nothing on such a row;
-  sent to `voidPaymentIn` by a direct call it is answered "This payment has
-  already been voided.", which is not true of a draft. The part that adds the
-  receipt form rewords it.
+  It is made, changed, posted and deleted on Cash Receipts. Payments In
+  offers nothing on such a row, and shows it under the status "All" only.
+- Nothing on Invoices says what a draft receipt holds of an invoice (the
+  payment forms do, under each invoice), and nothing on a draft receipt's row
+  says when its invoice was credited since and no longer owes what the draft
+  holds.
+- A receipt against invoices can be voided on Payments In or on Cash
+  Receipts. A receipt for income can be voided on Cash Receipts only.
+- Anyone who may write can change or delete any draft receipt, whoever saved
+  it. `created_by` stays the person who first saved it, and nothing records
+  who posted it. Two people saving the same draft at once: the later save
+  replaces the earlier, with no warning.
+- A draft receipt keeps the date it was given when it is posted later:
+  posting does not move it to the day it is posted. The Post question shows
+  the date.
+- A draft receipt stays in the table in every period; once posted it is
+  listed by its date, so posting a draft dated outside the chosen period
+  takes it out of the table until a longer period is chosen.
+- Income categories cannot be added, renamed or archived yet: every workspace
+  has "Sales" and "Other income" until the Expenses forms manage categories.
 - A sent quotation cannot be edited: mark it declined and write a new one.
   "Mark as sent" is offered on a draft whatever its total, and refused with
   the reason when its lines total nothing, as Post is on an invoice.
@@ -1267,10 +1337,10 @@ with no date).
 - A contact's Payable counts bills that are pending or overdue, and the
   Payable card is totalled from every open bill, not only the contacts loaded.
   Receivable is the same for invoices that are sent or overdue.
-- Cash Receipts, Payment Vouchers and Expenses are read-only. A receipt for
-  income, a voucher that is not a supplier payment or a refund, and an
-  expense exist only in the demo workspace until their forms are built; the
-  database functions for them are there and nothing calls them.
+- Payment Vouchers and Expenses are read-only. A voucher that is not a
+  supplier payment or a refund, and an expense, exist only in the demo
+  workspace until their forms are built; the database functions for them are
+  there and nothing calls them.
 - A payment to a supplier or a refund recorded by someone who is not an owner
   or admin is not held for approval. The owner decides whether it should be.
 - A voucher that settles no document, recorded by someone who is not an owner
