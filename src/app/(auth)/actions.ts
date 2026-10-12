@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/server';
 import { REMEMBER_COOKIE } from '@/lib/supabase/remember';
 import { recordEvent } from '@/lib/events';
 import { MFA_VERIFY_PATH, getMfaStatus } from '@/lib/auth/mfa';
+import { createWorkspaceError, workspaceNameSchema } from '@/lib/auth/workspace-name';
 
 // Persist the "remember me" choice so token refreshes (in the proxy) keep the
 // same cookie lifetime. A session cookie itself clears on browser close.
@@ -54,11 +55,7 @@ const signInSchema = z.object({
 const signUpSchema = z.object({
   email: emailSchema,
   password: z.string().min(8, 'Password must be at least 8 characters.'),
-  orgName: z
-    .string()
-    .trim()
-    .min(1, 'Please enter your business name.')
-    .max(120, 'Business name must be 120 characters or fewer.'),
+  orgName: workspaceNameSchema,
 });
 
 export async function signInAction(
@@ -132,7 +129,7 @@ export async function signUpAction(
     org_name: parsed.data.orgName,
   });
   if (orgErr) {
-    return { error: 'Could not create your workspace. Please try again.', values };
+    return { error: createWorkspaceError(orgErr), values };
   }
   await recordEvent(supabase, {
     action: 'Created the workspace',
