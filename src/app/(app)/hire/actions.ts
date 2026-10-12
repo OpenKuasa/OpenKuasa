@@ -13,6 +13,8 @@ import {
   type Deleted,
   type HireWriteContext,
   type InterviewChange,
+  type InterviewFeedbackChange,
+  type InterviewFeedbackForEdit,
   type InterviewForEdit,
   type InterviewHandover,
   type InterviewSaved,
@@ -22,12 +24,14 @@ import {
   attachCandidateCv,
   calendarOfChange,
   cancelInterview,
+  clearInterviewFeedback,
   closeApplication,
   createJob,
   deleteJob,
   deleteApplication,
   deleteCandidate,
   deletionSummary,
+  interviewFeedbackForEdit,
   interviewForEdit,
   interviewInvitation,
   moveApplication,
@@ -37,6 +41,7 @@ import {
   reopenApplication,
   reopenInterview,
   rescheduleInterview,
+  saveInterviewFeedback,
   scheduleInterview,
   setInterviewOutcome,
   setJobStatus,
@@ -604,4 +609,51 @@ export async function setInterviewOutcomeAction(input: unknown): Promise<CapResu
 /** Marking one cancelled, completed or no-show interview as scheduled again. */
 export async function reopenInterviewAction(input: unknown): Promise<CapResult<InterviewSaved>> {
   return interviewChange((ctx) => reopenInterview(ctx, input as never));
+}
+
+// ─── feedback on an interview ───────────────────────────────────────────────
+
+/**
+ * Guard, then the capability (which parses with its own schema), then every
+ * screen that shows an interview: the Interviews screen shows the feedback in
+ * its table, and the Applications panel lists it under each interview. A
+ * refusal revalidates nothing.
+ */
+async function feedbackChange(
+  call: (ctx: HireWriteContext) => Promise<CapResult<InterviewFeedbackChange>>,
+): Promise<CapResult<InterviewFeedbackChange>> {
+  const ctx = await writeCtx();
+  if (!ctx) return FORBIDDEN;
+  const result = await call(ctx);
+  if (result.ok) for (const path of CANDIDATE_PATHS) revalidatePath(path);
+  return result;
+}
+
+/**
+ * Recording feedback on one completed interview, replacing it, or marking a
+ * scheduled interview completed with its feedback in one step. `seen` is the
+ * time the edit form's feedback was last saved; the database saves nothing
+ * when the feedback has been changed or cleared since. Anything but a
+ * non-empty string is not passed on.
+ */
+export async function saveInterviewFeedbackAction(input: unknown, seen: unknown): Promise<CapResult<InterviewFeedbackChange>> {
+  const opened = typeof seen === 'string' && seen !== '' ? seen : undefined;
+  return feedbackChange((ctx) => saveInterviewFeedback(ctx, input as never, opened));
+}
+
+/** Clearing the feedback on one interview. The interview stays completed. */
+export async function clearInterviewFeedbackAction(input: unknown): Promise<CapResult<InterviewFeedbackChange>> {
+  return feedbackChange((ctx) => clearInterviewFeedback(ctx, input as never));
+}
+
+/**
+ * One interview's feedback as it is stored now, for a form that was refused
+ * because someone else changed it meanwhile. Only for someone who may edit
+ * (the form is drawn for no one else), and only from their own workspace. The
+ * input is the interview's id. Nothing is changed and nothing is fetched again.
+ */
+export async function getInterviewFeedbackAction(input: unknown): Promise<CapResult<InterviewFeedbackForEdit>> {
+  const ctx = await writeCtx();
+  if (!ctx) return FORBIDDEN;
+  return interviewFeedbackForEdit(ctx, input as never);
 }
