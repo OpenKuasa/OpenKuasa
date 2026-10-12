@@ -712,6 +712,47 @@ statement imported, and leaves both out of the gauge. While no bank account
 has had a statement imported, the Reconciliation card says "No statement
 imported yet." and shows no count.
 
+### Accounts
+
+Accounts are managed on Banking: "Add account" in the header, and Edit,
+Archive and Restore in the Accounts table, which lists every account,
+archived ones included. `bank-accounts.ts` has one schema and one function per
+write (`createBankAccount`, `updateBankAccount`, `setBankAccountActive`) and
+`listBankAccountNumbers`; `bank-account-form.ts` has the form's rules and what the
+table shows. The three actions refresh `BANK_ACCOUNT_PATHS`: Banking and every
+screen whose forms offer an account or whose rows name one.
+
+What the database holds an account to (`20261110110000_bendahara_bank_account_rules`):
+
+- **An opening balance is an owner's or admin's.** Adding an account with
+  one, changing an account's opening balance or opening date, and deleting an
+  account that has one are refused for any other writer (`FIN14`, from
+  `private.finance_bank_account_guard`, which asks `private.finance_may_sign_off`).
+  A member's form has no opening balance box and sends neither column; the
+  server action refuses an input that carries one before anything is written.
+  An opening balance is a number (`23514` for NaN).
+- **Bank or cash is chosen once.** `kind`, `org_id`, `id` and `created_at`
+  are not columns a signed-in person can update (`42501`); `id` and
+  `created_at` cannot be inserted either.
+- **An account is archived, not deleted,** and not while a payment on it is
+  to be paid (`scheduled`) or waits for approval (`pending_approval`):
+  `FIN30`. Drafts and posted payments do not hold it. An archived account
+  keeps its movements and its balance, stays in Total cash, is no longer
+  offered by any payment form, and cannot take or send a transfer. The screen
+  offers no Delete; the database still lets an unused account be deleted, and
+  refuses any other with `23503`.
+- **The account number** is written with the row and read back only through
+  `finance_account_numbers`, by someone who may write. The loader reads the
+  numbers only for them; the table shows the last four characters and the
+  form the whole number. A viewer sees the bank's name.
+
+The guard steps aside when nobody is signed in (a migration, the demo seeds)
+and, on a delete, when the workspace itself is being deleted.
+
+On `finance_statement_imports`, `created_by`, `id` and `created_at` are the
+database's to write since the same migration (`42501`): an import is recorded
+as made by the person signed in, and "Last import" cannot be moved.
+
 ## Receipts Inbox
 
 A receipt is a photo or a PDF in the private storage bucket
@@ -1271,6 +1312,7 @@ quotation, a credit note or a refund by the file that made the call.
 | `FIN23` | A receipt's state does not allow it: it starts in review, tied to nothing; it does not move to another workspace; its file, name, type, size, uploader and upload time do not change; a matched receipt is untied before it is deleted (the guard, for any delete), and `finance_attach_receipt`, `finance_receipt_to_expense` and `finance_receipt_to_bill` refuse a receipt that is already matched. A plain update of `expense_id` or `bill_id` by a writer is allowed by the grants, and the guard moves the receipt to the new document (with `FIN14` when it leaves an approved expense or a posted bill and the writer cannot decide). `receipt-inbox.ts` words it for deleting a matched receipt. |
 | `FIN24` | The file of a receipt: there is none; it is not in the bucket; it was uploaded more than 30 minutes ago or is waiting to be removed; it is already a receipt; it is not the type its name says; its path names none of the five types. `receipt-inbox.ts` words it for recording an upload. |
 | `FIN25` | A void bill takes no receipt. Not worded yet. |
+| `FIN30` | An account with payments still to be paid or waiting for approval is not archived. `bank-accounts.ts`: "This account has payments that are still to be paid or waiting for approval. Pay, reject or delete them, then archive it." (`FIN14` on an account is an opening balance from someone who is not an owner or admin: "Only an owner or admin can set or change an opening balance.") |
 
 `FIN23`, `FIN24` and `FIN25` are not the Receipts Inbox's alone. The ledger
 migrations (`20261108091500` to `20261108094500`) raise `FIN23` to `FIN27` with
@@ -1404,7 +1446,12 @@ with no date).
 - Payment dates are not restricted: "pay now" accepts a future date and
   "schedule for later" a past one.
 - A payment's account must be active when it is chosen (only active accounts
-  are offered), but the database does not refuse an archived account yet.
+  are offered), but the database does not refuse a payment on an archived
+  account: only `finance_record_transfer` asks. So a form left open while its
+  account is archived, or a direct call, can still record one, and a payment
+  scheduled in the same instant as the archive can slip past the rule that an
+  account with money to be paid is not archived (`FIN30`). The balance of an
+  archived account still shows on Banking while it is not zero.
 - Voiding a paid bill is offered and refused until its payments are voided.
   The same goes for an invoice that has payments.
 - Posted and void bills, invoices and payments cannot be deleted, by design.
@@ -1761,13 +1808,16 @@ with no date).
   number, one another kind of payment already has included (`RC-0001`), and
   may use an archived account; the pair check is the only rule such a write
   meets. Rows are keyed by id, and no code looks a payment up by number.
-- Accounts are plain rows: anyone who may write can change an opening
-  balance, which moves a balance with no transfer and no record. Who may
-  edit one is decided with the account form.
-- The 1,000-line limit and the import's date are the import function's, not
-  the tables': a direct insert can add more lines to an import, and a direct
-  update can change an import's `created_at` or `created_by`. Nothing reads
-  them for a rule; "Last import" reads the date.
+- An opening balance is an owner's or admin's to set, change or remove, but
+  no record is kept of a change: the account's `updated_at` moves and nothing
+  says what the balance was before or who changed it.
+- Any writer may rename, archive or restore any account, an owner's included,
+  and two people editing one account at once: the later save wins.
+- An account's kind cannot be corrected once it is added. An account made as
+  the wrong kind is archived (or deleted by hand if nothing used it) and
+  added again.
+- The 1,000-line limit is the import function's, not the tables': a direct
+  insert can add more lines to an import. Nothing reads the count for a rule.
 - An account, a category and a contact that nothing refers to can still be
   moved to another workspace by someone who writes in both; the two
   statement tables refuse it.
