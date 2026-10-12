@@ -83,7 +83,7 @@ const draft: JournalRow = {
 describe('the ledger', () => {
   it('shows the entries newest first, each with its date, number, source and description', () => {
     const html = text(render());
-    expect(html).toContain('Entries shown 11 of 11');
+    expect(html).toContain('Entries shown 12 of 12');
     expect(html.indexOf('Depreciation of office equipment')).toBeLessThan(html.indexOf('Payment to Kopi Hulu Supplies'));
     expect(html.indexOf('Payment to Kopi Hulu Supplies')).toBeLessThan(html.indexOf('Opening balance of Main Bank'));
     expect(html).toContain('05 Oct 2026');
@@ -102,8 +102,8 @@ describe('the ledger', () => {
 
   it('shows equal total debits and total credits', () => {
     const html = text(render());
-    expect(html).toContain('Total debits RM 69,090.00');
-    expect(html).toContain('Total credits RM 69,090.00');
+    expect(html).toContain('Total debits RM 70,290.00');
+    expect(html).toContain('Total credits RM 70,290.00');
     expect(html).not.toContain('Out of balance');
   });
 

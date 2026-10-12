@@ -86,7 +86,7 @@ describe('the Reports screen', () => {
     const html = text(render());
     expect(html).toContain('Balance Sheet As at 31 October 2026');
     expect(html).toContain('Assets 1100 Main Bank RM 53,300.00 1200 Trade Receivables RM 4,240.00 1500 Accumulated Depreciation RM -400.00 Total assets RM 57,140.00');
-    expect(html).toContain('Liabilities 2000 Trade Payables RM 1,050.00 2100 SST Payable RM 540.00 Total liabilities RM 1,590.00');
+    expect(html).toContain('Liabilities 2000 Trade Payables RM 1,050.00 2050 Accrued Expenses RM 0.00 2100 SST Payable RM 540.00 Total liabilities RM 1,590.00');
     expect(html).toContain('Equity 3000 Owner’s Capital RM 50,000.00 Current earnings RM 5,550.00 Total equity RM 55,550.00');
     expect(html).toContain('Total liabilities and equity RM 57,140.00');
   });
@@ -126,7 +126,7 @@ describe('the Reports screen', () => {
     expect(html).toContain('Trial Balance Debits and credits in January to October 2026');
     expect(html).toContain('1100 Main Bank RM 55,300.00 RM 2,000.00');
     expect(html).toContain('4000 Sales RM 9,000.00');
-    expect(html).toContain('Total RM 69,090.00 RM 69,090.00');
+    expect(html).toContain('Total RM 70,290.00 RM 70,290.00');
     expect(html).toContain('Debits and credits are equal');
   });
 

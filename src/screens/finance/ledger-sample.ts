@@ -16,6 +16,7 @@ const BASE_ACCOUNTS: SampleAccount[] = [
   { id: 'acc-1200', code: '1200', name: 'Trade Receivables', type: 'asset', stands_for: 'system' },
   { id: 'acc-1500', code: '1500', name: 'Accumulated Depreciation', type: 'asset', stands_for: 'own' },
   { id: 'acc-2000', code: '2000', name: 'Trade Payables', type: 'liability', stands_for: 'system' },
+  { id: 'acc-2050', code: '2050', name: 'Accrued Expenses', type: 'liability', stands_for: 'system' },
   { id: 'acc-2100', code: '2100', name: 'SST Payable', type: 'liability', stands_for: 'system' },
   { id: 'acc-3000', code: '3000', name: 'Owner’s Capital', type: 'equity', stands_for: 'system' },
   { id: 'acc-4000', code: '4000', name: 'Sales', type: 'income', stands_for: 'system' },
@@ -43,8 +44,8 @@ function entry(
 }
 
 /**
- * Eleven entries over four months (July to October 2026): an opening balance, three invoices, two bills, a
- * receipt, a payment, an expense, a manual journal and a second receipt, so the Reports screen has months to compare.
+ * Twelve entries over four months (July to October 2026): an opening balance, three invoices, two bills, a
+ * receipt, a payment, an expense (accrued) and its payment, a manual journal and a second receipt, so the Reports screen has months to compare.
  */
 export const SAMPLE_LEDGER_LINES: LedgerLine[] = [
   ...entry('opening:bank-1100', '2026-07-01', 'opening', 'bank-1100', null, 'Opening balance of Main Bank', [
@@ -75,6 +76,10 @@ export const SAMPLE_LEDGER_LINES: LedgerLine[] = [
   ]),
   ...entry('expense:exp-1', '2026-10-01', 'expense', 'exp-1', 'EXP-0001', 'October office rent', [
     { account_id: 'acc-6100', debit: 1_200, credit: 0 },
+    { account_id: 'acc-2050', debit: 0, credit: 1_200 },
+  ]),
+  ...entry('payment_out:pay-2', '2026-10-01', 'payment_out', 'pay-2', 'PAY-0002', 'Payment of EXP-0001', [
+    { account_id: 'acc-2050', debit: 1_200, credit: 0 },
     { account_id: 'acc-1100', debit: 0, credit: 1_200 },
   ]),
   ...entry('payment_out:pay-1', '2026-10-02', 'payment_out', 'pay-1', 'PAY-0001', 'Payment to Kopi Hulu Supplies', [

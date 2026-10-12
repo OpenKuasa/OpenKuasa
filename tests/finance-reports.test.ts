@@ -22,6 +22,8 @@ import {
   monthlySeries,
   monthlyTotals,
   monthsIn,
+  openPayables,
+  openReceivables,
   periodFor,
   periodLabel,
   profitAndLoss,
@@ -725,44 +727,52 @@ describe('cash flow', () => {
   const bank = (code: string, name: string): LedgerAccount => ({ ...account(code, name, 'asset'), stands_for: 'bank' });
   const MAIN = bank('1100', 'Main Bank');
   const CASH = bank('1000', 'Cash in Hand');
-  const BOOK = [CASH, MAIN, AR, AP, CAPITAL, SALES, PURCHASES, UTILITIES];
+  const CARD = bank('1150', 'Card Account');
+  const ACCRUED = account('2050', 'Accrued Expenses', 'liability');
+  const BOOK = [CASH, MAIN, CARD, AR, AP, ACCRUED, CAPITAL, SALES, PURCHASES, UTILITIES];
   const src = (key: string, date: string, source: LedgerSource, sides: Side[]): LedgerLine[] =>
     entry(key, date, sides).map((l) => ({ ...l, source }));
 
   /**
    * Hand-made books. Bank and cash accounts are 1100 and 1000.
-   *   Jan  opening balances: bank 10,000.00 and cash 500.00 (against capital); an invoice of 1,060.00 (no cash)
+   *   Jan  opening balances: bank 10,000.00, cash 500.00 and a card account overdrawn by 200.00 (a negative opening balance); an invoice of 1,060.00 (no cash)
    *   Feb  receipt of 1,060.00; a transfer of 300.00 from the bank to the cash tin; a bill of 400.00 (no cash)
-   *   Mar  the bill is paid (400.00); an expense of 150.50 from the bank; a second receipt of 530.00
-   *   Apr  that second receipt is voided (its reversal, 530.00 out, is dated April); a refund of 100.00; a manual journal puts 75.00 in the bank
-   * Cash in each month: Jan +10,500.00; Feb +1,060.00 (the transfer nets to nothing); Mar +(-400 - 150.50 + 530) = -20.50;
-   * Apr +(-530 - 100 + 75) = -555.00. The cumulative balance of the two accounts: 10,500.00; 11,560.00; 11,539.50; 10,984.50.
+   *   Mar  the bill is paid (400.00); an expense of 150.50 is approved (against Accrued Expenses, no cash) and then paid from the bank (a payment out);
+   *        a second receipt of 530.00; a transfer of 100.00 from the bank to the cash tin
+   *   Apr  that transfer is voided (its reversal is dated April); the second receipt is voided (its reversal, 530.00 out, is dated April);
+   *        a refund of 100.00; a manual journal puts 75.00 in the bank; another moves 40.00 from the bank to the cash tin
+   * Cash in each month: Jan +10,300.00 (10,500.00 in, 200.00 out); Feb +1,060.00 (the transfer nets to nothing); Mar +(-400 - 150.50 + 530) = -20.50;
+   * Apr +(-530 - 100 + 75 + 40 - 40) = -555.00. The cumulative balance of the three accounts: 10,300.00; 11,360.00; 11,339.50; 10,784.50.
    */
   const CASH_LINES: LedgerLine[] = [
     ...src('opening:bank', '2026-01-02', 'opening', [[MAIN, 10000, 0], [CAPITAL, 0, 10000]]),
     ...src('opening:cash', '2026-01-02', 'opening', [[CASH, 500, 0], [CAPITAL, 0, 500]]),
+    ...src('opening:card', '2026-01-02', 'opening', [[CAPITAL, 200, 0], [CARD, 0, 200]]),
     ...src('invoice:1', '2026-01-15', 'invoice', [[AR, 1060, 0], [SALES, 0, 1060]]),
     ...src('payment_in:1', '2026-02-10', 'payment_in', [[MAIN, 1060, 0], [AR, 0, 1060]]),
     ...src('transfer:1', '2026-02-15', 'transfer', [[CASH, 300, 0], [MAIN, 0, 300]]),
     ...src('bill:1', '2026-02-20', 'bill', [[PURCHASES, 400, 0], [AP, 0, 400]]),
     ...src('payment_out:1', '2026-03-05', 'payment_out', [[AP, 400, 0], [MAIN, 0, 400]]),
-    ...src('expense:1', '2026-03-12', 'expense', [[UTILITIES, 150.5, 0], [MAIN, 0, 150.5]]),
+    ...src('expense:1', '2026-03-12', 'expense', [[UTILITIES, 150.5, 0], [ACCRUED, 0, 150.5]]),
+    ...src('payment_out:2', '2026-03-12', 'payment_out', [[ACCRUED, 150.5, 0], [MAIN, 0, 150.5]]),
+    ...src('transfer:2', '2026-03-14', 'transfer', [[CASH, 100, 0], [MAIN, 0, 100]]),
     ...src('invoice:2', '2026-03-15', 'invoice', [[AR, 530, 0], [SALES, 0, 530]]),
     ...src('payment_in:2', '2026-03-20', 'payment_in', [[MAIN, 530, 0], [AR, 0, 530]]),
     ...src('payment_in:2:void', '2026-04-03', 'payment_in', [[AR, 530, 0], [MAIN, 0, 530]]),
+    ...src('transfer:2:void', '2026-04-05', 'transfer', [[MAIN, 100, 0], [CASH, 0, 100]]),
     ...src('refund:1', '2026-04-08', 'refund', [[AR, 100, 0], [MAIN, 0, 100]]),
     ...src('journal:1', '2026-04-20', 'journal', [[MAIN, 75, 0], [SALES, 0, 75]]),
+    ...src('journal:2', '2026-04-25', 'journal', [[CASH, 40, 0], [MAIN, 0, 40]]),
   ];
 
   describe('cashMovements', () => {
     it('adds the bank and cash lines up by month and source, leaving transfers out', () => {
       expect(cashMovements(CASH_LINES, BOOK)).toEqual([
-        { month: '2026-01', source: 'opening', in: 10500, out: 0 },
+        { month: '2026-01', source: 'opening', in: 10500, out: 200 },
         { month: '2026-02', source: 'payment_in', in: 1060, out: 0 },
-        { month: '2026-03', source: 'expense', in: 0, out: 150.5 },
         { month: '2026-03', source: 'payment_in', in: 530, out: 0 },
-        { month: '2026-03', source: 'payment_out', in: 0, out: 400 },
-        { month: '2026-04', source: 'journal', in: 75, out: 0 },
+        { month: '2026-03', source: 'payment_out', in: 0, out: 550.5 },
+        { month: '2026-04', source: 'journal', in: 115, out: 40 },
         { month: '2026-04', source: 'payment_in', in: 0, out: 530 },
         { month: '2026-04', source: 'refund', in: 0, out: 100 },
       ]);
@@ -771,6 +781,14 @@ describe('cash flow', () => {
       const rows = cashMovements(CASH_LINES, BOOK).filter((r) => r.source === 'payment_in');
       expect(rows.find((r) => r.month === '2026-03')).toMatchObject({ in: 530, out: 0 });
       expect(rows.find((r) => r.month === '2026-04')).toMatchObject({ in: 0, out: 530 });
+    });
+    it('leaves out a transfer and its void, which net to nothing, but keeps a journal between two bank accounts (in and out)', () => {
+      const rows = cashMovements(CASH_LINES, BOOK);
+      expect(rows.some((r) => r.source === 'transfer')).toBe(false);
+      expect(rows.find((r) => r.month === '2026-04' && r.source === 'journal')).toMatchObject({ in: 115, out: 40 });
+    });
+    it('does not count an approved expense, which accrues and never touches a bank account', () => {
+      expect(cashMovements(CASH_LINES, BOOK).some((r) => r.source === 'expense')).toBe(false);
     });
     it('ignores accounts that are not bank or cash, and lines with no account', () => {
       expect(cashMovements(src('x', '2026-01-01', 'journal', [[AR, 5, 0], [null, 0, 5]]), BOOK)).toEqual([]);
@@ -791,36 +809,37 @@ describe('cash flow', () => {
 
     it('brings the opening cash forward, groups the period and ends on the closing cash (March to April)', () => {
       expect(cashFlow(MOVES, per('2026-03', '2026-04'))).toEqual({
-        opening: 11560,
+        opening: 11360,
         lines: [
           { key: 'payment_in', label: 'Received from customers and other income', in: 530, out: 530, net: 0 },
           { key: 'refund', label: 'Refunds to customers', in: 0, out: 100, net: -100 },
           { key: 'payment_out', label: 'Paid to suppliers and for expenses', in: 0, out: 550.5, net: -550.5 },
-          { key: 'journal', label: 'Manual journals', in: 75, out: 0, net: 75 },
+          { key: 'journal', label: 'Manual journals', in: 115, out: 40, net: 75 },
         ],
-        totalIn: 605,
-        totalOut: 1180.5,
+        totalIn: 645,
+        totalOut: 1220.5,
         net: -575.5,
-        closing: 10984.5,
+        closing: 10784.5,
       });
     });
     it('shows opening balances brought in as a line of the month they were dated', () => {
       const cf = cashFlow(MOVES, per('2026-01', '2026-01'));
       expect(cf.opening).toBe(0);
-      expect(cf.lines).toEqual([{ key: 'opening', label: 'Opening balances brought in', in: 10500, out: 0, net: 10500 }]);
-      expect(cf.closing).toBe(10500);
+      expect(cf.lines).toEqual([{ key: 'opening', label: 'Opening balances brought in', in: 10500, out: 200, net: 10300 }]);
+      expect(cf.closing).toBe(10300);
     });
     it('has no lines for a quiet period, but still the opening and closing cash', () => {
       const cf = cashFlow(MOVES, per('2026-06', '2026-07'));
-      expect(cf).toEqual({ opening: 10984.5, lines: [], totalIn: 0, totalOut: 0, net: 0, closing: 10984.5 });
+      expect(cf).toEqual({ opening: 10784.5, lines: [], totalIn: 0, totalOut: 0, net: 0, closing: 10784.5 });
     });
     it('counts nothing from after the period', () => {
-      expect(cashFlow(MOVES, per('2026-02', '2026-02')).closing).toBe(11560);
+      expect(cashFlow(MOVES, per('2026-02', '2026-02')).closing).toBe(11360);
     });
     it('puts a source that should not touch a bank in Other, last', () => {
-      const odd = [...MOVES, { month: '2026-04', source: 'invoice' as const, in: 10, out: 0 }];
+      // an invoice or an expense on a bank account does not occur in the live ledger; if one did, it would be seen
+      const odd = [...MOVES, { month: '2026-04', source: 'invoice' as const, in: 10, out: 0 }, { month: '2026-04', source: 'expense' as const, in: 0, out: 3 }];
       const cf = cashFlow(odd, per('2026-04', '2026-04'));
-      expect(cf.lines[cf.lines.length - 1]).toEqual({ key: 'other', label: 'Other', in: 10, out: 0, net: 10 });
+      expect(cf.lines[cf.lines.length - 1]).toEqual({ key: 'other', label: 'Other', in: 10, out: 3, net: 7 });
     });
     it('is empty for an invalid period rather than throwing', () => {
       expect(() => cashFlow(MOVES, per('2026-05', '2026-04'))).not.toThrow();
@@ -828,8 +847,16 @@ describe('cash flow', () => {
 
     it('closes on the sum of the bank and cash balances the balance sheet shows, for every month', () => {
       const { totals } = monthlyTotals(CASH_LINES);
-      const bankIds = new Set([MAIN.id, CASH.id]);
+      const bankIds = new Set([MAIN.id, CASH.id, CARD.id]);
       const months = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2025-12'];
+      const sheetOf = (month: string) => {
+        const bs = balanceSheet(BOOK, totals, only(month));
+        return bs.assets.filter((l) => bankIds.has(l.account_id)).reduce((t, l) => t + Math.round(l.amount * 100), 0);
+      };
+      // three periods that are not a single month, each ending where the sheet is read
+      for (const [from, to] of [['2026-01', '2026-04'], ['2026-02', '2026-03'], ['2026-03', '2026-05']]) {
+        expect(Math.round(cashFlow(MOVES, per(from, to)).closing * 100), `${from}..${to}`).toBe(sheetOf(to));
+      }
       for (const month of months) {
         const bs = balanceSheet(BOOK, totals, only(month));
         const sheet = Math.round(bs.assets.filter((l) => bankIds.has(l.account_id)).reduce((t, l) => t + Math.round(l.amount * 100), 0));
@@ -838,7 +865,7 @@ describe('cash flow', () => {
           expect(Math.round(cashFlow(MOVES, per(from, month)).closing * 100), `${from}..${month}`).toBe(sheet);
         }
       }
-      expect(cashFlow(MOVES, per('2026-04', '2026-04')).closing).toBe(10984.5);
+      expect(cashFlow(MOVES, per('2026-04', '2026-04')).closing).toBe(10784.5);
     });
   });
 
@@ -847,14 +874,65 @@ describe('cash flow', () => {
       const cf = cashFlow(cashMovements(CASH_LINES, BOOK), { from: '2026-03', to: '2026-04' });
       expect(csvRows(cashFlowCsv(cf, { from: '2026-03', to: '2026-04' }))).toEqual([
         'Period,Line,In,Out,Net',
-        'March to April 2026,Opening cash,,,11560',
+        'March to April 2026,Opening cash,,,11360',
         'March to April 2026,Received from customers and other income,530,530,0',
         'March to April 2026,Refunds to customers,0,100,-100',
         'March to April 2026,Paid to suppliers and for expenses,0,550.5,-550.5',
-        'March to April 2026,Manual journals,75,0,75',
-        'March to April 2026,Total,605,1180.5,-575.5',
-        'March to April 2026,Closing cash,,,10984.5',
+        'March to April 2026,Manual journals,115,40,75',
+        'March to April 2026,Total,645,1220.5,-575.5',
+        'March to April 2026,Closing cash,,,10784.5',
       ]);
     });
+  });
+});
+
+/* ---- which documents are open ------------------------------------------ */
+
+describe('openReceivables', () => {
+  const invoice = (display_status: string, balance: number) => ({
+    customer_id: 'c1', customer_name: 'Aisyah Trading', due_date: '2026-10-01', balance, display_status,
+  });
+  const statuses = ['draft', 'sent', 'overdue', 'paid', 'void'];
+  const kept = (status: string, balance: number) => openReceivables([invoice(status, balance)]).length;
+
+  it('keeps a posted invoice (sent, overdue or paid) with any nonzero balance, and nothing else', () => {
+    expect(statuses.map((s) => [s, kept(s, 100), kept(s, 0), kept(s, -50)])).toEqual([
+      ['draft', 0, 0, 0],
+      ['sent', 1, 0, 1],
+      ['overdue', 1, 0, 1],
+      ['paid', 1, 0, 1],
+      ['void', 0, 0, 0],
+    ]);
+  });
+  it('turns a row into an open document, with the customer as the party', () => {
+    expect(openReceivables([invoice('sent', 12.5)])).toEqual([
+      { party_id: 'c1', party_name: 'Aisyah Trading', due_date: '2026-10-01', balance: 12.5 },
+    ]);
+  });
+  it('leaves out a status it does not know', () => {
+    expect(kept('mystery', 10)).toBe(0);
+  });
+});
+
+describe('openPayables', () => {
+  const bill = (display_status: string, balance: number) => ({
+    supplier_id: 's1', supplier_name: 'Kopi Hulu Supplies', due_date: '2026-09-04', balance, display_status,
+  });
+  const statuses = ['draft', 'pending', 'overdue', 'paid', 'void'];
+  const kept = (status: string, balance: number) => openPayables([bill(status, balance)]).length;
+
+  it('keeps a pending or overdue bill with a balance above zero, and nothing else', () => {
+    expect(statuses.map((s) => [s, kept(s, 100), kept(s, 0), kept(s, -50)])).toEqual([
+      ['draft', 0, 0, 0],
+      ['pending', 1, 0, 0],
+      ['overdue', 1, 0, 0],
+      ['paid', 0, 0, 0],
+      ['void', 0, 0, 0],
+    ]);
+  });
+  it('turns a row into an open document, with the supplier as the party', () => {
+    expect(openPayables([bill('overdue', 700)])).toEqual([
+      { party_id: 's1', party_name: 'Kopi Hulu Supplies', due_date: '2026-09-04', balance: 700 },
+    ]);
   });
 });

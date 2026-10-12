@@ -536,6 +536,29 @@ export function creditSummary(documents: { party_id: string; balance: number }[]
   return { count: parties.size, total: fromSen(sen) };
 }
 
+/** The part of an invoice the receivables need (an InvoiceListRow, or the lighter row the screen reads, has it). */
+export type InvoiceBalance = { customer_id: string; customer_name: string; due_date: string; balance: number; display_status: string };
+/** The part of a supplier bill the payables need. */
+export type BillBalance = { supplier_id: string; supplier_name: string; due_date: string; balance: number; display_status: string };
+
+/**
+ * What customers still owe, or are owed back: every posted invoice (sent, overdue, or paid, which holds a negative
+ * balance for a customer in credit) with a balance that is not zero. A draft or void invoice is owed nothing. The
+ * query that reads the rows filters the same way as an optimisation; this is the rule.
+ */
+export function openReceivables(invoices: InvoiceBalance[]): OpenDocument[] {
+  return invoices
+    .filter((i) => ['sent', 'overdue', 'paid'].includes(i.display_status) && toSen(i.balance) !== 0)
+    .map((i) => ({ party_id: i.customer_id, party_name: i.customer_name, due_date: i.due_date, balance: i.balance }));
+}
+
+/** What is still owed on supplier bills: a pending or overdue bill with a balance above zero (draft, void and paid bills are not payable). */
+export function openPayables(bills: BillBalance[]): OpenDocument[] {
+  return bills
+    .filter((b) => (b.display_status === 'pending' || b.display_status === 'overdue') && toSen(b.balance) > 0)
+    .map((b) => ({ party_id: b.supplier_id, party_name: b.supplier_name, due_date: b.due_date, balance: b.balance }));
+}
+
 /** An aged table as a CSV file: a row per party, then the totals. Amounts are numbers. */
 export function agedCsv(a: Aged, today: string, partyHeading: 'Customer' | 'Supplier'): string {
   const asAt = dateLabel(today);
@@ -592,8 +615,8 @@ export type CashFlow = {
 const CASH_GROUPS: { key: string; label: string; sources: LedgerSource[] }[] = [
   { key: 'payment_in', label: 'Received from customers and other income', sources: ['payment_in'] },
   { key: 'refund', label: 'Refunds to customers', sources: ['refund'] },
-  // An approved expense is paid from the bank at once, so it is money out like a payment to a supplier.
-  { key: 'payment_out', label: 'Paid to suppliers and for expenses', sources: ['payment_out', 'expense'] },
+  // An approved expense accrues (its category against Accrued Expenses) and never touches a bank account; paying it is a payment out.
+  { key: 'payment_out', label: 'Paid to suppliers and for expenses', sources: ['payment_out'] },
   { key: 'opening', label: 'Opening balances brought in', sources: ['opening'] },
   { key: 'journal', label: 'Manual journals', sources: ['journal'] },
 ];

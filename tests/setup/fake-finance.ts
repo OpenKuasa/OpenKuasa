@@ -62,6 +62,19 @@ export function fakeFinance(answer: FinanceAnswer | ((call: FinanceCall) => Fina
           call.filters[`${column} is`] = value;
           return builder;
         },
+        // Recorded under "column op", so a test reads them beside the plain eq filters.
+        neq(column: string, value: unknown) {
+          call.filters[`${column} neq`] = value;
+          return builder;
+        },
+        gt(column: string, value: unknown) {
+          call.filters[`${column} gt`] = value;
+          return builder;
+        },
+        in(column: string, values: unknown[]) {
+          call.filters[`${column} in`] = values;
+          return builder;
+        },
         order(column: string, options?: { ascending?: boolean }) {
           call.order.push(`${column} ${options?.ascending === false ? 'desc' : 'asc'}`);
           return builder;
