@@ -1,10 +1,17 @@
 'use client';
 
-import { useState } from 'react';
-import { Download, FileText, PieChart, Receipt, Search } from 'lucide-react';
+import { useCallback, useState } from 'react';
+import { Download, FileText, Pencil, PieChart, Receipt, Search, Trash2 } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { DonutStat } from '@/components/charts';
+import { ConfirmRow } from '@/components/finance/confirm-row';
 import { downloadCsv } from '@/components/finance/download-csv';
+import { type ReceiptLinkOf, ReceiptReviewCard, type ReviewReceipt } from '@/components/finance/receipt-review-card';
+import { startDownload } from '@/components/finance/receipt-upload';
+import { ReceiptUploadCard, type RegisterReceipt } from '@/components/finance/receipt-upload-card';
+import { RowMenu, type RowMenuItem } from '@/components/finance/row-menu';
+import { useFinanceAction } from '@/components/finance/use-finance-action';
+import { useLocalToday } from '@/components/finance/use-local-today';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
 import { NoMatchesRow } from '@/components/screen/table-filter';
@@ -16,6 +23,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { localIsoDate } from '@/lib/finance/bill-math';
 import { csvFileName } from '@/lib/finance/csv';
 import { rm } from '@/lib/finance/format';
+import { canPreview } from '@/lib/finance/receipt-files';
+import { type InboxWritten, inboxHiddenNote } from '@/lib/finance/receipt-inbox';
 import {
   INBOX_READING_NOTES,
   INBOX_STATUS_LABELS,
@@ -29,6 +38,7 @@ import {
   inboxReceiptsCsv,
 } from '@/lib/finance/receipt-views';
 import type { InboxReceiptRow, InboxReceiptStatus } from '@/lib/finance/receipts';
+import type { FinResult } from '@/lib/finance/result';
 import { LATEST_ROWS, displayDate } from '@/lib/finance/view-helpers';
 import { cn } from '@/lib/utils';
 
@@ -38,35 +48,127 @@ const STATUS_STYLES: Record<InboxReceiptStatus, string> = {
   unmatched: 'bg-red-500/15 text-red-600',
 };
 
+export type ReceiptInboxActions = {
+  register: RegisterReceipt;
+  review: ReviewReceipt;
+  remove: (input: unknown) => Promise<FinResult<{ id: string }>>;
+};
+
 /**
  * Receipts Inbox: the three counts, the donut and the table, with search, a
- * status filter, "View all" and Export. Nothing here changes data yet:
- * uploading, reviewing, matching and deleting arrive later. A file name is
- * whatever the uploader's device called the file, so it is only ever drawn as
- * text. A row says "Read by AI" only when the database says a model read it,
- * and what a failed reading says is this screen's own sentence, never the
- * stored message.
+ * status filter, "View all" and Export. Someone who may edit also gets the
+ * upload area, and on each receipt that is tied to nothing "Review" and
+ * "Delete"; anyone who can see a receipt that has a file can download it. A
+ * viewer and the demo workspace change nothing, and the demo is told why it
+ * has no upload area. A file name is whatever the uploader's device called
+ * the file, so it is only ever drawn as text. A row says "Read by AI" only
+ * when the database says a model read it, and what a failed reading says is
+ * this screen's own sentence, never the stored message.
  */
 export function ReceiptsInboxView({
   rows,
   view,
+  today,
+  followClock = true,
+  linkOf,
+  writer,
+  demo = false,
 }: {
   /** Every receipt, newest upload first. */
   rows: InboxReceiptRow[];
   view: ReceiptsInboxViewData;
+  /** The server's date; the person's own date takes over in the browser. */
+  today: string;
+  followClock?: boolean;
+  /** Makes a one-minute link to a receipt's file. Absent when there is no database behind the screen. */
+  linkOf?: ReceiptLinkOf;
+  /** Present only for someone who may add, review and delete receipts. */
+  writer?: { orgId: string; actions: ReceiptInboxActions };
+  /** The shared demo workspace: it is told why there is no upload area. */
+  demo?: boolean;
 }) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<InboxReceiptFilter>('all');
   const [showAll, setShowAll] = useState(false);
+  const [reviewing, setReviewing] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [written, setWritten] = useState<InboxWritten | null>(null);
+  const localToday = useLocalToday(today, followClock);
+  const remove = useFinanceAction();
+  const open = useFinanceAction('read');
 
   const matching = filterInboxReceipts(rows, query, filter);
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
+  const reviewed = reviewing ? rows.find((r) => r.id === reviewing) : undefined;
+  const hiddenNote = written ? inboxHiddenNote(written, rows, shown, filter) : null;
+  const columns = linkOf || writer ? 7 : 6;
+
+  const added = useCallback((id: string) => {
+    setWritten((was) => ({ kind: 'added', ids: was?.kind === 'added' ? [...was.ids, id] : [id] }));
+  }, []);
+
+  const menuFor = (r: InboxReceiptRow): RowMenuItem[] => {
+    const items: RowMenuItem[] = [];
+    if (linkOf && r.has_file) {
+      items.push({
+        label: canPreview(r.mime_type) ? 'Download' : 'Download to view',
+        icon: Download,
+        onSelect: () => open.run(() => linkOf({ id: r.id }), (link) => startDownload(link.url)),
+      });
+    }
+    // A matched receipt is its document's evidence: it is untied before it is changed or deleted.
+    if (writer && r.status !== 'matched') {
+      items.push({
+        label: r.status === 'review' ? 'Review' : 'Edit details',
+        icon: Pencil,
+        opens: true,
+        onSelect: () => {
+          setDeleting(null);
+          setReviewing(r.id);
+        },
+      });
+      items.push({
+        label: 'Delete',
+        icon: Trash2,
+        destructive: true,
+        opens: true,
+        onSelect: () => {
+          remove.clear();
+          setReviewing(null);
+          setDeleting(r.id);
+        },
+      });
+    }
+    return items;
+  };
 
   return (
     <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader title="Receipts Inbox" subtitle="Receipts waiting to be reviewed and matched, Saudara." />
 
       <BentoGrid>
+        {writer && linkOf && reviewed ? (
+          <ReceiptReviewCard
+            // A fresh card, with fresh boxes, for each receipt.
+            key={reviewed.id}
+            row={reviewed}
+            today={localToday}
+            review={writer.actions.review}
+            linkOf={linkOf}
+            onClose={() => setReviewing(null)}
+            onSaved={(id) => {
+              setReviewing(null);
+              setWritten({ kind: 'reviewed', ids: [id] });
+            }}
+          />
+        ) : null}
+        {writer ? <ReceiptUploadCard orgId={writer.orgId} register={writer.actions.register} onAdded={added} /> : null}
+        {demo ? (
+          <p className="col-span-2 rounded-xl border border-dashed px-4 py-3 text-sm text-muted-foreground md:col-span-12">
+            Uploading is switched off in the demo workspace, because everyone who tries the demo shares it. These are
+            sample receipts with no files. In a workspace of your own you can add photos and PDFs here.
+          </p>
+        ) : null}
         {view.stats.map((s, i) => (
           <BentoCard key={s.label} tone={i === 0 ? 'primary' : 'default'} className={i === 0 ? 'col-span-2 md:col-span-4' : 'col-span-1 md:col-span-4'}>
             <BentoStat label={s.label} value={s.value} delta={s.delta} deltaTone={s.deltaTone} onPrimary={i === 0} />
@@ -127,6 +229,16 @@ export function ReceiptsInboxView({
               Export
             </Button>
           </div>
+          {hiddenNote ? (
+            <p role="status" className="mt-2 px-4 text-sm text-muted-foreground">
+              {hiddenNote}
+            </p>
+          ) : null}
+          {open.error ? (
+            <p role="alert" className="mt-2 px-4 text-sm text-destructive">
+              {open.error}
+            </p>
+          ) : null}
           <div className="mt-3 overflow-x-auto">
             <Table>
               <TableHeader>
@@ -137,21 +249,48 @@ export function ReceiptsInboxView({
                   <TableHead className="text-right">Amount</TableHead>
                   <TableHead>Matched to</TableHead>
                   <TableHead>Status</TableHead>
+                  {columns === 7 ? (
+                    <TableHead className="w-10">
+                      <span className="sr-only">Actions</span>
+                    </TableHead>
+                  ) : null}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {shown.length === 0 &&
                   (rows.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                        No receipts yet. Uploading receipts is not available yet.
+                      <TableCell colSpan={columns} className="py-8 text-center text-muted-foreground">
+                        {writer ? 'No receipts yet. Add the first one above.' : 'No receipts yet.'}
                       </TableCell>
                     </TableRow>
                   ) : (
-                    <NoMatchesRow colSpan={6} />
+                    <NoMatchesRow colSpan={columns} />
                   ))}
                 {shown.map((r) => {
                   const note = inboxReadingNote(r);
+                  if (writer && deleting === r.id) {
+                    return (
+                      <ConfirmRow
+                        key={r.id}
+                        colSpan={columns}
+                        label={`Delete ${r.file_name}`}
+                        confirmLabel="Delete"
+                        pendingLabel="Deleting…"
+                        pending={remove.pending}
+                        error={remove.error}
+                        onConfirm={() => remove.run(() => writer.actions.remove({ id: r.id }), () => setDeleting(null))}
+                        onCancel={() => {
+                          remove.clear();
+                          setDeleting(null);
+                        }}
+                      >
+                        Delete <span className="break-words font-medium">{r.file_name}</span>
+                        {r.has_file ? ' and its file' : ''}? This cannot be undone.
+                      </ConfirmRow>
+                    );
+                  }
+                  const menu = menuFor(r);
                   return (
                     <TableRow key={r.id}>
                       <TableCell>
@@ -199,6 +338,9 @@ export function ReceiptsInboxView({
                           </span>
                         </span>
                       </TableCell>
+                      {columns === 7 ? (
+                        <TableCell className="w-10">{menu.length > 0 ? <RowMenu label={r.file_name} items={menu} /> : null}</TableCell>
+                      ) : null}
                     </TableRow>
                   );
                 })}
