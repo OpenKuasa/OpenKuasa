@@ -7,11 +7,11 @@ import { DonutStat } from '@/components/charts';
 import { ConfirmRow } from '@/components/finance/confirm-row';
 import { downloadCsv } from '@/components/finance/download-csv';
 import { type ReceiptLinkOf, ReceiptReviewCard, type ReviewReceipt } from '@/components/finance/receipt-review-card';
-import { downloadReceipt } from '@/components/finance/receipt-upload';
 import { ReceiptUploadCard, type RegisterReceipt } from '@/components/finance/receipt-upload-card';
 import { RowMenu, type RowMenuItem } from '@/components/finance/row-menu';
 import { SavedNoteCard } from '@/components/finance/saved-note-card';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
+import { useReceiptDownload } from '@/components/finance/use-receipt-download';
 import { useLocalToday } from '@/components/finance/use-local-today';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
@@ -98,7 +98,8 @@ export function ReceiptsInboxView({
   const [written, setWritten] = useState<InboxWritten | null>(null);
   const localToday = useLocalToday(today, followClock);
   const remove = useFinanceAction();
-  const open = useFinanceAction('read');
+  // The download has its own state, so a slow file does not hold the page's other actions in "pending".
+  const open = useReceiptDownload(async (input) => (linkOf ? linkOf(input) : { ok: false, error: '' }));
 
   const matching = filterInboxReceipts(rows, query, filter);
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
@@ -120,9 +121,7 @@ export function ReceiptsInboxView({
       items.push({
         label: canPreview(r.mime_type) ? 'Download' : 'Download to view',
         icon: Download,
-        onSelect: () => {
-          if (!open.pending) open.run(() => downloadReceipt(linkOf, r.id));
-        },
+        onSelect: () => void open.start(r.id, r.file_name),
       });
     }
     // A matched receipt is its document's evidence: it is untied before it is changed or deleted.
@@ -251,9 +250,9 @@ export function ReceiptsInboxView({
               {hiddenNote}
             </p>
           ) : null}
-          {open.pending ? (
+          {open.busyWith !== null ? (
             <p role="status" className="mt-2 px-4 text-sm text-muted-foreground">
-              Preparing the download…
+              Preparing the download of {open.busyWith}…
             </p>
           ) : null}
           {open.error ? (

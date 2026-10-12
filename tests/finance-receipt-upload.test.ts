@@ -66,6 +66,35 @@ describe('previewUrlOf: bytes are checked before an object URL is made', () => {
   });
 });
 
+describe('previewUrlOf: a closed card stops the fetch', () => {
+  it('passes the abort signal to the fetch and answers null once aborted', async () => {
+    const stop = new AbortController();
+    const fetcher = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      expect(init?.signal).toBe(stop.signal);
+      stop.abort();
+      throw new DOMException('aborted', 'AbortError');
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const made = vi.spyOn(URL, 'createObjectURL');
+    expect(await previewUrlOf('u', 'image/png', stop.signal)).toBeNull();
+    expect(made).not.toHaveBeenCalled();
+  });
+
+  it('makes no object URL when the card closed while the bytes were arriving', async () => {
+    const stop = new AbortController();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        stop.abort();
+        return new Response(new Uint8Array(PNG), { status: 200 });
+      }),
+    );
+    const made = vi.spyOn(URL, 'createObjectURL');
+    expect(await previewUrlOf('u', 'image/png', stop.signal)).toBeNull();
+    expect(made).not.toHaveBeenCalled();
+  });
+});
+
 describe('prepareReceipt', () => {
   const prepare = (f: File) => prepareReceipt(f, () => {});
 
@@ -131,13 +160,17 @@ describe('downloadReceipt: the page never navigates to the stored file', () => {
   it('fetches the bytes, saves them from an object URL under our name, and revokes it afterwards', async () => {
     const fetcher = served(JPEG);
     vi.stubGlobal('fetch', fetcher);
-    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:saved');
+    const created = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:saved');
     const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
     expect(await downloadReceipt(async () => link(), 'r1')).toEqual({ ok: true, data: true });
     expect(fetcher).toHaveBeenCalledWith('https://store.example/signed?token=t', expect.objectContaining({ credentials: 'omit' }));
     expect(anchor.download).toBe('receipt.jpg');
     // The anchor points at the page's own copy, never at the stored file.
     expect(navigated).toEqual(['blob:saved']);
+    // Never drawn under the app's origin if a browser ignores `download`: the type says nothing, the name carries the extension.
+    const saved = created.mock.calls[0][0] as Blob;
+    expect(saved.type).toBe('application/octet-stream');
+    expect(saved.size).toBe(JPEG.length);
     expect(revoke).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(revoke).toHaveBeenCalledWith('blob:saved');
@@ -151,6 +184,31 @@ describe('downloadReceipt: the page never navigates to the stored file', () => {
     expect(await downloadReceipt(async () => link(), 'r1')).toEqual({ ok: false, error: M.downloadFailed });
     expect(anchor.click).not.toHaveBeenCalled();
     expect(made).not.toHaveBeenCalled();
+  });
+
+  it('reads the download sentence when the link action throws, and fetches nothing', async () => {
+    const fetcher = served(JPEG);
+    vi.stubGlobal('fetch', fetcher);
+    const thrown = async () => {
+      throw new Error('network');
+    };
+    expect(await downloadReceipt(thrown, 'r1')).toEqual({ ok: false, error: M.downloadFailed });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('gives up on a stalled transfer after its time limit with the same sentence', async () => {
+    vi.useRealTimers();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_url: unknown, init?: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+          }),
+      ),
+    );
+    expect(await downloadReceipt(async () => link(), 'r1', 20)).toEqual({ ok: false, error: M.downloadFailed });
+    expect(anchor.click).not.toHaveBeenCalled();
   });
 
   it('passes on the server’s sentence when no link is made, and fetches nothing', async () => {

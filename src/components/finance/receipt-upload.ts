@@ -27,6 +27,9 @@ import { heicToJpeg } from './receipt-heic';
 
 const M = RECEIPT_FILE_MESSAGES;
 
+/** How long the browser's transfer of a file to be saved may take. */
+const DOWNLOAD_TIMEOUT_MS = 60_000;
+
 /** The first bytes of a file or a blob, or null when the device would not read it. */
 export async function headOf(blob: Blob): Promise<Uint8Array | null> {
   try {
@@ -94,13 +97,16 @@ export async function storeReceipt(
  * Used for the preview of a JPG or PNG: the browser fetches the file, checks
  * its first bytes are that image type, and draws its own copy. The page never
  * points an image or a frame at the stored file. Revoke the URL when done.
+ * Aborting `signal` stops the fetch and answers null.
  */
-export async function previewUrlOf(url: string, type: InboxReceiptType): Promise<string | null> {
+export async function previewUrlOf(url: string, type: InboxReceiptType, signal?: AbortSignal): Promise<string | null> {
   if (type !== 'image/jpeg' && type !== 'image/png') return null;
   try {
-    const res = await fetch(url, { cache: 'no-store', credentials: 'omit' });
+    const res = await fetch(url, { cache: 'no-store', credentials: 'omit', signal });
     if (!res.ok) return null;
     const bytes = new Uint8Array(await res.arrayBuffer());
+    // The card closed while the bytes were arriving: no copy is made, so none is left behind.
+    if (signal?.aborted) return null;
     if (sniffReceiptType(bytes.subarray(0, RECEIPT_SNIFF_BYTES)) !== type) return null;
     // The blob's type is the one just checked, never the one the store sent.
     return URL.createObjectURL(new Blob([bytes], { type }));
@@ -118,12 +124,13 @@ export async function previewUrlOf(url: string, type: InboxReceiptType): Promise
  * interrupted by a "leave this site?" question. Null when it worked, or the
  * sentence that says why not.
  */
-async function saveFromLink(url: string, type: InboxReceiptType): Promise<string | null> {
+async function saveFromLink(url: string, type: InboxReceiptType, timeoutMs: number): Promise<string | null> {
   try {
-    const res = await fetch(url, { cache: 'no-store', credentials: 'omit' });
+    const res = await fetch(url, { cache: 'no-store', credentials: 'omit', signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) return M.downloadFailed;
-    // The type is the receipt's own, not whatever the store sent.
-    const copy = URL.createObjectURL(new Blob([await res.arrayBuffer()], { type }));
+    // Never the file's own type: if a browser ignored `download` and opened the copy, a picture or a PDF would be
+    // drawn under this app's origin. The name carries the extension, which is all a saved file needs.
+    const copy = URL.createObjectURL(new Blob([await res.arrayBuffer()], { type: 'application/octet-stream' }));
     const link = document.createElement('a');
     link.href = copy;
     link.download = receiptDownloadName(type);
@@ -148,9 +155,15 @@ async function saveFromLink(url: string, type: InboxReceiptType): Promise<string
 export async function downloadReceipt(
   linkOf: (input: unknown) => Promise<FinResult<ReceiptLink>>,
   id: string,
+  timeoutMs = DOWNLOAD_TIMEOUT_MS,
 ): Promise<FinResult<true>> {
-  const link = await linkOf({ id });
+  let link: FinResult<ReceiptLink>;
+  try {
+    link = await linkOf({ id });
+  } catch {
+    return { ok: false, error: M.downloadFailed };
+  }
   if (!link.ok) return link;
-  const failed = await saveFromLink(link.data.url, link.data.type);
+  const failed = await saveFromLink(link.data.url, link.data.type, timeoutMs);
   return failed ? { ok: false, error: failed } : { ok: true, data: true };
 }
