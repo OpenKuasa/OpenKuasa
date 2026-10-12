@@ -53,6 +53,19 @@ const TABLE: [string, MessageLanguage, string][] = [
   ['Terjemahkan: I would like to apply for two weeks of unpaid leave from the first of the month.', 'either', 'a one-word Malay request, an English paste'],
   ['Hi,\nboleh saya tahu baki cuti saya?', 'ms', 'a greeting on the first line says nothing; the question decides'],
   ['Mesyuarat pukul 10:30, boleh tukar ke pukul 3:00 petang?', 'ms', 'a colon inside a time is not an instruction'],
+
+  // Asking for the reply in a language: the person has said it, so the server does not.
+  ['reply in malay please', 'either', 'an explicit request for the reply\'s language'],
+  ['jawab dalam English', 'either', 'the same, asked in Bahasa Malaysia'],
+  ['can you reply dalam BM', 'either', 'rojak request for the reply\'s language'],
+  ['Reply in English: berapa baki cuti saya?', 'either', 'the request names the language; the question after it does not decide'],
+  ['Write a warning letter for Ahmad in Bahasa Malaysia', 'en', 'asks for a document in a language, not for the reply in it'],
+
+  // A Malay opening word with many English words after it is rojak, not English.
+  ['nak tengok the report for all the staff that are on leave', 'either', 'a Malay opening with English after it'],
+  ['Tunjuk all the leads from Facebook that have not been contacted', 'either', 'a Malay opening verb, then English'],
+  ['Saya on leave from Monday to Friday for a family matter in Johor', 'either', 'a Malay pronoun, then English'],
+
 ];
 
 describe('the language of a chat message, decided by the server', () => {
@@ -65,6 +78,10 @@ describe('the language of a chat message, decided by the server', () => {
     const started = performance.now();
     expect(messageLanguage(paste)).toBe('en');
     expect(performance.now() - started).toBeLessThan(200);
+  });
+
+  it('trims blank space before it cuts the message to the part that is read', () => {
+    expect(messageLanguage(' '.repeat(5000) + 'Berapa orang pekerja dalam syarikat ini?')).toBe('ms');
   });
 
   it('does not slow down on a long run of one character', () => {
