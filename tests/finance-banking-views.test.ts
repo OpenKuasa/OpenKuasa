@@ -22,7 +22,6 @@ const account = (id: string, patch: Partial<BankAccountRow> = {}): BankAccountRo
   name: id === 'till' ? 'Cash in hand' : id === 'bank' ? 'Main Bank' : 'Savings',
   kind: id === 'till' ? 'cash' : 'bank',
   bank_name: null,
-  account_no: null,
   opening_balance: 0,
   opening_date: '2026-01-01',
   active: true,

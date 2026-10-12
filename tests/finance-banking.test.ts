@@ -5,7 +5,7 @@ import { type FinanceCall, fakeFinance } from './setup/fake-finance';
 
 // The fixture gives numeric columns as strings, as PostgREST can; the data layer must turn them into numbers either way.
 const accountRow = {
-  id: 'a1', name: 'Main Bank', kind: 'bank', bank_name: 'Maybank', account_no: '5140', opening_balance: '1000.00',
+  id: 'a1', name: 'Main Bank', kind: 'bank', bank_name: 'Maybank', opening_balance: '1000.00',
   opening_date: '2026-01-01', active: true, balance: '72400.00', to_be_paid: '960.00', last_import_at: '2026-10-09T02:00:00Z',
   unmatched_lines: 2,
 };
@@ -26,6 +26,8 @@ describe('listBankAccounts', () => {
     });
     // The selector asks for exactly the columns of this test's fixture row (not checked against the migration).
     expect(calls[0].columns!.split(',').sort()).toEqual(Object.keys(accountRow).sort());
+    // The view has no account number: nobody signed in may read that column, and asking for it refuses the whole read.
+    expect(calls[0].columns).not.toContain('account_no');
   });
   it('answers with no rows when the view has none, and throws when it cannot be read', async () => {
     expect(await listBankAccounts(fakeFinance({ data: null, error: null }).ctx)).toEqual([]);

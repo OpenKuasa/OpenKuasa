@@ -9,13 +9,16 @@ import type { CashBookStatus } from './cash-book';
 import { PAYMENT_PAGE_SIZE, type PaymentMethod } from './money';
 import type { FinanceWriteContext } from './result';
 
-/** One account, archived ones included, with what the database works out for it. */
+/**
+ * One account, archived ones included, with what the database works out for it. It has the bank's name and no
+ * account number: `finance_accounts.account_no` is not readable through the table or this view, and a writer who
+ * needs it asks `finance_account_numbers(target_org)`. Banking does not show one.
+ */
 export type BankAccountRow = {
   id: string;
   name: string;
   kind: 'bank' | 'cash';
   bank_name: string | null;
-  account_no: string | null;
   /** The balance before anything was recorded here. */
   opening_balance: number;
   opening_date: string;
@@ -69,7 +72,7 @@ export type BankTransactionRow = {
 };
 
 const ACCOUNT_COLUMNS =
-  'id,name,kind,bank_name,account_no,opening_balance,opening_date,active,balance,to_be_paid,last_import_at,unmatched_lines';
+  'id,name,kind,bank_name,opening_balance,opening_date,active,balance,to_be_paid,last_import_at,unmatched_lines';
 const TRANSACTION_COLUMNS =
   'transaction_id,account_id,account_name,account_kind,direction,txn_date,amount,status,number,method,reference,notes,' +
   'party_name,kind,category_name,documents,transfer_id,other_account_name,reconciled,created_at';

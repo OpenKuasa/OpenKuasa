@@ -83,7 +83,6 @@ const account = (
   id: AccountKey,
   kind: 'bank' | 'cash',
   bank_name: string | null,
-  account_no: string | null,
   opening_balance: number,
   last_import_at: string | null,
   unmatched_lines: number,
@@ -97,7 +96,6 @@ const account = (
     name: ACCOUNT_NAMES[id],
     kind,
     bank_name,
-    account_no,
     opening_balance,
     opening_date: '2026-03-01',
     active: true,
@@ -110,7 +108,7 @@ const account = (
 
 /** Bank accounts first, then by name, as the real list is. */
 export const SAMPLE_BANK_ACCOUNTS: BankAccountRow[] = [
-  account('bank', 'bank', 'Maybank', '5140 2218 7730', 60000, LAST_IMPORT_AT, 2),
-  account('savings', 'bank', 'CIMB Bank', '8600 4471 2290', 4100, null, 0),
-  account('cash', 'cash', null, null, 9000, null, 0),
+  account('bank', 'bank', 'Maybank', 60000, LAST_IMPORT_AT, 2),
+  account('savings', 'bank', 'CIMB Bank', 4100, null, 0),
+  account('cash', 'cash', null, 9000, null, 0),
 ];
