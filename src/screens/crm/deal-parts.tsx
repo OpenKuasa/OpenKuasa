@@ -596,7 +596,7 @@ export function LostDealConfirm({
         and counts against the win rate. You can reopen it later.
       </p>
       <div className="space-y-1.5">
-        <Label htmlFor={reasonId}>Reason (optional)</Label>
+        <Label htmlFor={reasonId}>Reason</Label>
         <Input
           ref={focusRef as RefObject<HTMLInputElement | null>}
           id={reasonId}

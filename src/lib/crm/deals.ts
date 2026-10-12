@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { CrmContactFormError, MAX_TAG_LENGTH, ownerNames } from '@/lib/crm/contacts';
 import { isWonStage } from '@/lib/crm/pipelines';
+import { LOST_REASON_REQUIRED_CODE, LOST_REASON_REQUIRED_MESSAGE } from '@/lib/crm/settings';
 
 /** Separate from the stage: a deal anywhere on the board can be lost. */
 export type CrmDealStatus = 'open' | 'won' | 'lost';
@@ -397,6 +398,8 @@ export async function listCrmDealContacts(
 
 /** A foreign key that failed: say which choice has gone, beside the form. */
 function throwWriteError(error: { code?: string; message?: string; details?: string }): never {
+  // The workspace's own rule (Settings): the database refuses a lost deal with no reason.
+  if (error.code === LOST_REASON_REQUIRED_CODE) throw new CrmContactFormError(LOST_REASON_REQUIRED_MESSAGE);
   if (error.code === FOREIGN_KEY_VIOLATION) {
     const about = `${error.message ?? ''} ${error.details ?? ''}`;
     if (about.includes('contact')) {
