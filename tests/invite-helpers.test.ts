@@ -1,6 +1,9 @@
 import { expect, test } from 'vitest';
 import {
+  INVITE_CONFIRM_FIRST,
+  INVITE_CONFIRM_NOTICE,
   friendlyRpcError,
+  inviteConfirmUrl,
   inviteProblem,
   inviteUrl,
   isPendingInvite,
@@ -73,4 +76,20 @@ test('the invite link uses the request origin', () => {
   expect(inviteUrl('https://openkuasa.com/', 'abc')).toBe(
     'https://openkuasa.com/invite/abc',
   );
+});
+
+test('joining before the address is confirmed says what to do next', () => {
+  expect(friendlyRpcError({ message: 'email not confirmed' }, 'Could not join.')).toBe(
+    INVITE_CONFIRM_FIRST,
+  );
+  expect(INVITE_CONFIRM_FIRST).toMatch(/come back to this invite/);
+  expect(INVITE_CONFIRM_NOTICE).toMatch(/brings you back to this invite/);
+});
+
+test('the confirmation link returns to the same invite', () => {
+  const token = '7b1f6c0e-3a52-4d0b-9c1e-2f4a5b6c7d8e';
+  const url = inviteConfirmUrl('https://openkuasa.com/', token);
+  expect(url).toBe(`https://openkuasa.com/auth/confirm?next=%2Finvite%2F${token}`);
+  // The confirm route only follows a same-origin relative path.
+  expect(new URL(url).searchParams.get('next')).toBe(`/invite/${token}`);
 });
