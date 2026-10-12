@@ -9,12 +9,10 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
  * would let any signed-in session set a password without knowing the current
  * one, which the change-password form deliberately does not allow.
  *
- * Why a cookie and not the session's `amr` claim: a recovery link verified by
- * token hash is recorded by the auth server as a generic one-time-code
- * sign-in, the same as any other emailed link, so the claim cannot tell a
- * recovery apart; and the claim lasts as long as the session does, where this
- * should last minutes. The verified link type is known for certain in
- * `/auth/confirm`, so that is where the proof is minted.
+ * Why a cookie and not the session's `amr` claim: the claim describes the
+ * session for as long as it lives, where this should last minutes and be used
+ * once; and the verified link type is known for certain in `/auth/confirm`,
+ * so that is where the proof is minted.
  *
  * The value is signed, so it cannot be made up in the browser, and it is tied
  * to the user it was issued for.

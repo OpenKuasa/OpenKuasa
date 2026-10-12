@@ -18,7 +18,7 @@ vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 import { changePasswordAction } from '@/app/account/actions';
 import { verifyCurrentPassword } from '@/lib/auth/verify-password';
 
-type AuthError = { code?: string; status?: number } | null;
+type AuthError = { code?: string; status?: number; message?: string } | null;
 
 /** The caller's own cookie-bound client. */
 function sessionClient(options: { update?: AuthError; others?: AuthError } = {}) {
@@ -78,6 +78,10 @@ test('verifyCurrentPassword signs in on a throwaway client and ends that session
 
 test('verifyCurrentPassword tells a wrong password from a failed check', async () => {
   checkClient({ code: 'invalid_credentials', status: 400 });
+  expect(await verifyCurrentPassword('siti@acme.my', 'nope')).toBe('wrong');
+
+  // Older auth servers send the message without an error code.
+  checkClient({ status: 400, message: 'Invalid login credentials' });
   expect(await verifyCurrentPassword('siti@acme.my', 'nope')).toBe('wrong');
 
   checkClient({ code: 'over_request_rate_limit', status: 429 });

@@ -197,8 +197,9 @@ Authentication) for sign-in and signup to work:
 - **Enable Anonymous sign-ins** — powers the demo workspace and the tests.
 - **"Confirm email"** — with it off, signup creates a session immediately and
   lands on `/command`. With it on, signup stops at a "check your email" message
-  and the user must confirm and sign in. The signup form gives the same answer
-  for a new address and an already-registered one under either setting.
+  and the user must confirm and sign in. An already-registered address always
+  gets that same "check your email" message, so the form does not say which
+  addresses have an account.
 - **Leave hCaptcha OFF for now** — the auth forms don't yet pass a captcha
   token, so *enabling* hCaptcha would break sign-in and signup. Wiring the
   hCaptcha widget into the auth UI is a planned hardening step before it can be

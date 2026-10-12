@@ -23,7 +23,10 @@ export async function verifyCurrentPassword(
     password,
   });
   if (error || !data.session) {
-    return error?.code === 'invalid_credentials' ? 'wrong' : 'unavailable';
+    const rejected =
+      error?.code === 'invalid_credentials' ||
+      /invalid login credentials/i.test(error?.message ?? '');
+    return rejected ? 'wrong' : 'unavailable';
   }
 
   // The check created a real session on the auth server; end it so it does
