@@ -51,7 +51,13 @@ export const jobNotLookedUp = (id: unknown) =>
 /** The other way: add them to the pool first (the model is told to offer it), or add them to the job from the Candidates board. */
 export const NOT_IN_POOL_MOVE =
   'This candidate is not in the talent pool, so no move to the pipeline was prepared. Say so, and offer to add them to the talent pool first.';
-/** The other way is in the sentence: the two screens, where each row has its own controls. */
+/**
+ * The other way is in the sentence, and is the whole of it: the Talent Pool screen, where each member's row has its
+ * own status menu, "Move to pipeline" and "Remove from pool", and "Add to Pool" lists each person on file who is not
+ * in it; and the Candidates board, for someone with an application. Nothing here counts on "Edit candidate" to make
+ * two such people tell apart: it is offered on the board and in the Applications panel only, so a pool member with
+ * no application cannot be reached by it.
+ */
 export const lookTheSameInPool = (name: string) =>
   `Two candidates called ${name} look the same from here, so I cannot tell them apart. Nothing was changed. ` +
   'Change the right one from the Talent Pool screen or the Candidates board.';
