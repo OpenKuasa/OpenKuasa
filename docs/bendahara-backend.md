@@ -425,19 +425,30 @@ table and is worded by what was being done (`locked`, `cannotApprove`,
 payment against it; `23503` on a delete is an expense that a voided payment
 still names, which is kept.
 
-Approving and rejecting decide the expense the person was shown. The view's
-`updated_at` goes with the id, as the text the database gave, and the update
-is filtered by it as well. When no row matches, one more read tells whether
-the expense is still there: if it is, someone changed it after the screen was
-drawn and the answer is "This expense was changed after you opened it. Check
-it again, then approve or reject it."; the screen refreshes, the question
-closes and the row shows what it now holds. If it is gone, "That expense no
-longer exists.".
+Approving and rejecting decide the expense the person was shown. The update
+is filtered by everything the row showed, as the view returned it: `id`,
+`updated_at` (the text the database gave, never reformatted), `status`,
+`amount`, `sst_amount` (compared as numbers, so `120` and `120.00` are the
+same), `expense_date`, `category_id`, the vendor (a contact by `vendor_id`,
+with the table's own `vendor_name` empty; a typed vendor by `vendor_name`,
+with `vendor_id` empty) and `notes` (`is null` when there are none). The
+database does not move `updated_at` on a direct update: only
+`finance_save_expense` writes it, so a writer's plain update of the amount
+leaves it alone, which is why the fields are compared as well. When no row
+matches, one more read tells what happened: the expense is gone ("That expense
+no longer exists."); it now holds another status than the row showed ("This
+expense has already been approved.", "...rejected." or "This expense is
+pending again."); or it was changed ("This expense was changed after you
+opened it. Check it again, then approve or reject it."). The screen refreshes
+and, for the last, the question closes and the row shows what it now holds.
+Not compared: a contact or a category renamed after the screen was drawn.
 
 A money box (the amount and the SST are both text boxes) that holds a comma, a
 `$` or RM in front is told "Enter the amount as a number, without commas or
-RM: 1200.50."; one with three or more decimals is told "Enter the amount to
-two decimal places." instead of being rounded.
+RM: 1200.50." (the SST box: "Enter the SST as a number, without commas or RM:
+72.00."); one with three or more decimals is told "Enter the amount to two
+decimal places." (the SST box: "Enter the SST to two decimal places.") instead
+of being rounded.
 
 An approved expense that is paid in part reads "Part paid", with a line
 under its amount: what was paid, what payments not yet made hold, and what
@@ -1645,6 +1656,12 @@ with no date).
 - A rejection carries no reason: the table has no column for one.
 - Two people changing one expense at once: the later save wins without a
   warning. An expense approved meanwhile answers that it is locked.
+- `finance_expenses.updated_at` is written only by `finance_save_expense`; no
+  trigger moves it, so a direct update by a writer leaves it as it was. A
+  decision is therefore also matched on the fields the row showed. The next
+  part's migration should have the guard set `updated_at` on every update by a
+  signed-in person (after its "nothing changed" early return, and not for the
+  foreign keys' own clears).
 - An expense's category can be one that was archived since; the form keeps
   it in its picker for that expense only. `finance_save_expense` accepts an
   archived expense category from a direct call, for a new expense too: it
