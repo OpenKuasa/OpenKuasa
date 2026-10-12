@@ -2,9 +2,10 @@
 
 import { useId, useState, useTransition } from 'react';
 import { ChevronDown } from 'lucide-react';
-import type { ApplicationDetails, ApplicationState, SafeLink } from '@/lib/hire/lists';
+import type { ApplicationDetails, ApplicationState, InterviewRow, SafeLink } from '@/lib/hire/lists';
 import type { PoolStatus } from '@/lib/hire/types';
 import { viewCvAction } from '@/app/(app)/hire/actions';
+import { PANEL_EMPTY, PANEL_HEADING, panelLine, panelMore, panelRows } from '@/lib/hire/interview-dialog-state';
 import { cn } from '@/lib/utils';
 import { LiveDot } from '@/components/ui/live-dot';
 import { Badge } from '@/components/ui/badge';
@@ -29,7 +30,12 @@ export type ApplicationRowData = {
   live: boolean;
   applied: string;
   details: ApplicationDetails | null;
-} & ApplicationState & { /** The person's stored talent pool status; left out reads as not in the pool. */ poolStatus?: PoolStatus };
+} & ApplicationState & {
+  /** The person's stored talent pool status; left out reads as not in the pool. */
+  poolStatus?: PoolStatus;
+  /** This application's interviews, the ones ahead first. Left out reads as none. No contact details. */
+  interviews?: InterviewRow[];
+};
 
 /** A link is drawn only from a SafeLink, never from a raw string. */
 function DetailLink({ label, link }: { label: string; link: SafeLink }) {
@@ -110,15 +116,57 @@ function ViewCv({ applicationId }: { applicationId: string }) {
 }
 
 /**
- * The table row of an application and, under it, the row of its details (hidden until opened):
- * what the applicant gave on the form, then the controls that change the application.
- * Someone who may not edit gets the details alone, and no button where there are none.
+ * The application's interviews, for reading while deciding: at most five, then
+ * how many more there are. Shown to everyone who can open the panel, viewers
+ * included. An interview is changed on the Interviews screen, not here. A
+ * place is a link only from `placeLink`, which the server made with `safeLink`.
+ */
+function InterviewList({ interviews }: { interviews: InterviewRow[] }) {
+  const { shown, more } = panelRows(interviews);
+  return (
+    <section className="flex flex-col gap-1">
+      <h4 className="text-xs font-medium text-muted-foreground">{PANEL_HEADING}</h4>
+      {shown.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{PANEL_EMPTY}</p>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {shown.map((interview) => (
+            <li key={interview.id} className="max-w-prose text-sm">
+              <p className="break-words">{panelLine(interview)}</p>
+              {interview.placeLink ? (
+                <a
+                  href={interview.placeLink.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={cn('inline-flex max-w-full items-center rounded-md break-all text-primary underline underline-offset-2', TARGET, FOCUS)}
+                >
+                  {interview.placeLink.host}
+                </a>
+              ) : interview.place ? (
+                <p className="break-words text-muted-foreground">{interview.place}</p>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+      {more > 0 ? <p className="text-xs text-muted-foreground">{panelMore(more)}</p> : null}
+    </section>
+  );
+}
+
+/**
+ * The table row of an application and, under it, the row of its details (hidden until opened): what the applicant
+ * gave on the form, then its interviews, then the controls that change the application. Someone who may not edit gets
+ * the details and the interviews alone, and no button where there is nothing to open.
  */
 export function ApplicationRow({ row, canEdit }: { row: ApplicationRowData; canEdit: boolean }) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
   const { details } = row;
-  const hasPanel = details !== null || canEdit;
+  const interviews = row.interviews ?? [];
+  // Something to open: what the applicant gave, the controls, or interviews to read. A viewer of an application with
+  // none of the three still gets no button.
+  const hasPanel = details !== null || canEdit || interviews.length > 0;
 
   return (
     <>
@@ -184,6 +232,7 @@ export function ApplicationRow({ row, canEdit }: { row: ApplicationRowData; canE
               ) : null}
             </dl>
             ) : null}
+            <InterviewList interviews={interviews} />
             <ApplicationActions
               application={{
                 id: row.id, candidateId: row.candidateId, name: row.name, job: row.job,

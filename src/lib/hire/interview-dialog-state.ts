@@ -409,6 +409,30 @@ export function stepAfter(mode: InterviewFormMode, change: Pick<InterviewChange,
   return typeof change.invitation === 'string' && change.invitation !== '' ? 'invitation' : 'done';
 }
 
+/**
+ * Whether an invitation or a calendar file may be handed over at `now` for an
+ * interview with this start and length: the start is an instant that has not
+ * passed, and the length is a positive whole number of minutes. Asked at the
+ * press, never while drawing, so the clock is read in a handler.
+ */
+export function mayHandOver(start: string | null, minutes: number | null, now: Date): boolean {
+  if (start === null || minutes === null) return false;
+  const at = instantMs(start);
+  return !Number.isNaN(at) && at >= now.getTime() && Number.isInteger(minutes) && minutes > 0;
+}
+
+/** `stepAfter` at a moment: the invitation step only while the interview it invites to is still ahead. */
+export function stepAfterAt(
+  mode: InterviewFormMode,
+  change: Pick<InterviewChange, 'invitation' | 'scheduled_at' | 'duration_minutes'>,
+  now: Date,
+): 'invitation' | 'done' {
+  return stepAfter(mode, change) === 'invitation' && mayHandOver(change.scheduled_at, change.duration_minutes, now) ? 'invitation' : 'done';
+}
+
+/** Said at a row whose "Invitation and calendar file" was chosen after its start had passed. */
+export const NO_INVITATION = 'This interview\'s time has passed, so there is no invitation or calendar file for it. Mark what happened, or reschedule it.';
+
 export type FieldPart = InterviewField | 'find' | 'alert' | 'copy' | 'unchanged';
 /** The DOM id of a part of the form: `base` is the form's own `useId`. */
 export const fieldId = (base: string, part: FieldPart): string => `${base}-${part}`;
@@ -500,8 +524,10 @@ export function moveResult(result: unknown): { ok: true } | { ok: false; error: 
 /** What a row's menu offers: by its status, and by whether its application is still active. */
 export function rowMenu(row: InterviewRow): InterviewMenuItem[] {
   const items = menuFor(row.statusKey, row.applicationOutcome);
-  // No invitation and no calendar file from a row whose times cannot be read as instants.
-  return allInstants(row.scheduledAt, row.createdAt, row.updatedAt) ? items : items.filter((item) => item !== 'invitation');
+  // No invitation and no calendar file from a row whose times cannot be read as instants, or whose start had passed
+  // when the server drew it ("Needs an outcome").
+  const invites = !row.needsOutcome && allInstants(row.scheduledAt, row.createdAt, row.updatedAt);
+  return invites ? items : items.filter((item) => item !== 'invitation');
 }
 
 const MENU_GROUPS: InterviewMenuItem[][] = [['edit', 'invitation'], ['completed', 'no_show'], ['cancel'], ['reopen']];

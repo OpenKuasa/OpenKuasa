@@ -11,6 +11,7 @@ import {
   menuGroups, menuName, moveInput, moveLabel, moveResult, noticeOf, offersMove, onOf, openerId, outcomeInput, panelLine, panelMore, panelRows,
   pastInput, pickerLabel, pickerNotes, pickerOptions, placeHelper, placeLabel, refreshAfter, refusalWord, rowMenu, sayOnNotice, scheduleInput,
   stepAfter, stillScheduledNotice, submission, submitLabel, tagsFor, timeCell, timeHelper, valuesFrom, type InterviewFormValues,
+  NO_INVITATION, mayHandOver, stepAfterAt,
 } from '@/lib/hire/interview-dialog-state';
 
 const APP = '44444444-4444-4444-8444-444444444444';
@@ -564,5 +565,24 @@ describe('a time that is not an instant', () => {
       expect(rowMenu(row({ updatedAt: odd })), odd).toEqual(REST);
     }
     expect(rowMenu(row({ scheduledAt: '2026-10-20T15:00:00', statusKey: 'cancelled' }))).toEqual(['reopen']);
+  });
+  it('a scheduled interview whose start has passed offers no invitation either', () => {
+    expect(rowMenu(row({ needsOutcome: true }))).toEqual(REST);
+    expect(rowMenu(row({ needsOutcome: true, applicationOutcome: 'rejected' }))).toEqual(['completed', 'no_show', 'cancel']);
+  });
+  it('hands nothing over once the start has passed, or for a length that is not whole minutes above none', () => {
+    const START = '2026-10-20T07:00:00+00:00';
+    expect(mayHandOver(START, 60, NOW)).toBe(true);
+    expect(mayHandOver(START, 60, new Date(START))).toBe(true);
+    expect(mayHandOver(START, 60, new Date('2026-10-20T07:00:01Z'))).toBe(false);
+    for (const minutes of [0, -30, 22.5, Number.NaN, null]) expect(mayHandOver(START, minutes, NOW), String(minutes)).toBe(false);
+    for (const odd of [...ZONELESS, null]) expect(mayHandOver(odd, 60, NOW), String(odd)).toBe(false);
+    // After a save: the step is shown only while the interview is ahead, and never for a past one.
+    expect(stepAfterAt('schedule', change(), NOW)).toBe('invitation');
+    expect(stepAfterAt('change', change(), new Date('2026-10-20T07:00:01Z'))).toBe('done');
+    expect(stepAfterAt('schedule', change({ invitation: null }), NOW)).toBe('done');
+    expect(stepAfterAt('schedule', change({ duration_minutes: null }), NOW)).toBe('done');
+    expect(stepAfterAt('past', change(), NOW)).toBe('done');
+    expect(NO_INVITATION).toBe('This interview\'s time has passed, so there is no invitation or calendar file for it. Mark what happened, or reschedule it.');
   });
 });

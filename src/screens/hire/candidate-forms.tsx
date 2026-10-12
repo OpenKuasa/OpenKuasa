@@ -126,11 +126,12 @@ const WAITING = 'aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-
 const HELP = 'text-xs text-muted-foreground';
 
 /**
- * The dialog both forms sit in: a title, the form, and "discard?" before a
- * form with something typed is closed. There is no Radix trigger, so focus is
- * given back by `returnFocus` when it closes.
+ * The dialog a form sits in: a title, the form, and "discard?" before a form
+ * with something typed is closed. There is no Radix trigger, so focus is given
+ * back by `returnFocus` when it closes. Used by the two candidate forms here
+ * and by the interview dialog.
  */
-function FormDialog({
+export function FormDialog({
   open,
   title,
   description,

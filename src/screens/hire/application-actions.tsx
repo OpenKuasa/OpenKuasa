@@ -18,9 +18,11 @@ import { cn } from '@/lib/utils';
 import { EditCandidateDialog } from '@/screens/hire/candidate-forms';
 import { deleteTargetFor } from '@/lib/hire/delete-dialog-state';
 import type { DeletionKind } from '@/lib/hire/deletion';
-import { DeleteDialog, claimResult, useNewest } from '@/screens/hire/delete-dialog';
+import { DeleteDialog, announceDeletion, claimResult, useNewest } from '@/screens/hire/delete-dialog';
 import { boardPoolLine } from '@/lib/hire/pool-dialog-state';
 import { useAddToPool } from '@/screens/hire/pool-actions';
+import { openerId, stillScheduledNotice } from '@/lib/hire/interview-dialog-state';
+import { openInterview } from '@/screens/hire/interview-dialog';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -100,7 +102,7 @@ function useApplicationChange(application: ApplicationSubject) {
     router.refresh();
   }
 
-  function run(key: Busy, send: () => Promise<ActionResult>, onOk?: () => void) {
+  function run(key: Busy, send: () => Promise<ActionResult>, onOk?: (result: unknown) => void) {
     // Both: `inFlight` covers the moment before `pending` turns true, `pending` the moment after `inFlight` clears.
     if (pending || inFlight.current) return;
     inFlight.current = true;
@@ -110,7 +112,7 @@ function useApplicationChange(application: ApplicationSubject) {
     start(async () => {
       try {
         const result = await send();
-        if (result.ok) onOk?.();
+        if (result.ok) onOk?.(result);
         else refused(result.error);
       } catch {
         refused(FAILED);
@@ -137,9 +139,13 @@ function useApplicationChange(application: ApplicationSubject) {
     reopen: () => run('reopen', () => reopenApplicationAction({ id })),
     /** The confirm button of the dialog. Success closes it; a refusal leaves it open with the reason chosen. */
     close: (outcome: CloseOutcome, reason: RejectReason | null) =>
-      run(`close:${outcome}`, () => closeApplicationAction({ id, outcome, reason }), () => {
+      run(`close:${outcome}`, () => closeApplicationAction({ id, outcome, reason }), (result) => {
         closed.current = true;
         setConfirming(null);
+        // Nothing is cancelled by a rejection or a withdrawal. When an interview is still scheduled, the screen's notice
+        // line says so: it outlives the board card, which is about to go.
+        const still = stillScheduledNotice(result, application.name);
+        if (still) announceDeletion(still);
       }),
     askToClose: (outcome: CloseOutcome) => {
       if (pending || inFlight.current) return;
@@ -467,6 +473,48 @@ export function ApplicationActions({ application, canEdit }: { application: Appl
         )}
       </div>
 
+      {/* Interviews. Planning one needs an active application; recording one that already took place does not. */}
+      <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+        {outcome === 'active' && (
+          <Button
+            id={openerId('panel-schedule', application.id)}
+            type="button"
+            variant="outline"
+            size="sm"
+            className={cn(TARGET, WAITING)}
+            aria-disabled={waiting}
+            onClick={() => {
+              if (pending) return;
+              openInterview({
+                mode: 'schedule',
+                application: { id: application.id, name: application.name, job: application.job },
+                focusId: openerId('panel-schedule', application.id),
+              });
+            }}
+          >
+            Schedule interview
+          </Button>
+        )}
+        <Button
+          id={openerId('panel-past', application.id)}
+          type="button"
+          variant="outline"
+          size="sm"
+          className={cn(TARGET, WAITING)}
+          aria-disabled={waiting}
+          onClick={() => {
+            if (pending) return;
+            openInterview({
+              mode: 'past',
+              application: { id: application.id, name: application.name, job: application.job },
+              focusId: openerId('panel-past', application.id),
+            });
+          }}
+        >
+          Record a past interview
+        </Button>
+      </div>
+
       {/* The person, not the application: their name and details, behind a form that fetches them when it opens. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t pt-3">
         <Button
@@ -600,6 +648,8 @@ export function ApplicationMenu({
   const thenAsk = useRef<CloseOutcome | null>(null);
   /** Edit candidate was chosen: its form opens once the menu has closed. */
   const thenEdit = useRef(false);
+  /** Schedule interview was chosen: the screen's interview dialog opens once the menu has closed. */
+  const thenSchedule = useRef(false);
   const [editing, setEditing] = useState(false);
   /** What the Edit candidate form said when it was saved. */
   const [edited, setEdited] = useState<string | null>(null);
@@ -654,6 +704,7 @@ export function ApplicationMenu({
         <DropdownMenuTrigger asChild>
           <button
             ref={trigger}
+            id={openerId('card', id)}
             type="button"
             aria-label={`Actions for ${application.name}`}
             aria-disabled={pending || undefined}
@@ -666,6 +717,18 @@ export function ApplicationMenu({
           align="end"
           className="w-60"
           onCloseAutoFocus={(event) => {
+            if (thenSchedule.current) {
+              // The form takes focus now. It gives focus back by this button's id, which is the same if the card has
+              // meanwhile been drawn again in another column.
+              thenSchedule.current = false;
+              event.preventDefault();
+              openInterview({
+                mode: 'schedule',
+                application: { id, name: application.name, job: application.job },
+                focusId: openerId('card', id),
+              });
+              return;
+            }
             if (thenEdit.current) {
               // The form takes focus now, and gives it back to the menu button when it closes.
               thenEdit.current = false;
@@ -731,6 +794,20 @@ export function ApplicationMenu({
             <DropdownMenuItem className={item} onSelect={choose(() => change.rate(null))}>
               Clear rating
             </DropdownMenuItem>
+          )}
+          {outcome === 'active' && (
+            <>
+              <DropdownMenuSeparator />
+              {/* Under a rule of its own, above the rule that precedes "Edit candidate". Nothing is sent by choosing it. */}
+              <DropdownMenuItem
+                className={item}
+                onSelect={() => {
+                  thenSchedule.current = true;
+                }}
+              >
+                Schedule interview
+              </DropdownMenuItem>
+            </>
           )}
           <DropdownMenuSeparator />
           {/* The person, not the application. Nothing is sent by choosing it: the form asks for the details when it opens. */}

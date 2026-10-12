@@ -34,6 +34,12 @@ vi.mock('@/app/(app)/hire/actions', () => ({
   setPoolStatusAction: mocks.action,
   moveToPipelineAction: mocks.action,
   listPoolPickerAction: mocks.action,
+  scheduleInterviewAction: mocks.action,
+  recordPastInterviewAction: mocks.action,
+  rescheduleInterviewAction: mocks.action,
+  cancelInterviewAction: mocks.action,
+  setInterviewOutcomeAction: mocks.action,
+  reopenInterviewAction: mocks.action,
 }));
 // No app router is mounted in a string render: the controls only need one to ask for a refresh after a refusal.
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: mocks.refresh, replace: () => {} }), usePathname: () => '/hire/talent-pool' }));
@@ -87,7 +93,8 @@ describe('the controls for one application', () => {
   it('offers, at interview: back one stage, every later stage, reject, withdraw and five ratings', () => {
     const html = controls();
     expect(buttons(html)).toEqual([
-      'Back to Screening', 'Move to Offer', 'Move to Hired', 'Mark withdrawn', 'Reject', ...STARS, 'Edit candidate', 'Add to talent pool', 'Delete application', 'Delete candidate',
+      'Back to Screening', 'Move to Offer', 'Move to Hired', 'Mark withdrawn', 'Reject', ...STARS,
+      'Schedule interview', 'Record a past interview', 'Edit candidate', 'Add to talent pool', 'Delete application', 'Delete candidate',
     ]);
     // The stage it is at, in words.
     expect(text(html)).toContain('Stage: Interview');
@@ -108,7 +115,11 @@ describe('the controls for one application', () => {
     expect(text(html)).toContain('Rejected');
     expect(text(html)).toContain('Not enough experience');
     expect(moves(html)).toEqual([]);
-    expect(buttons(html)).toEqual(['Reopen', ...STARS, 'Edit candidate', 'Add to talent pool', 'Delete application', 'Delete candidate']);
+    expect(buttons(html)).toEqual([
+      'Reopen', ...STARS, 'Record a past interview', 'Edit candidate', 'Add to talent pool', 'Delete application', 'Delete candidate',
+    ]);
+    // Planning an interview needs an active application. Recording one that already took place does not.
+    expect(buttons(html)).not.toContain('Schedule interview');
     expect(buttons(html)).not.toContain('Reject');
     expect(buttons(html)).not.toContain('Mark withdrawn');
   });
