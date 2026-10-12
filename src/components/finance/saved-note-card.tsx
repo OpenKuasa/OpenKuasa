@@ -12,8 +12,8 @@ import { Button } from '@/components/ui/button';
  * refund made from an invoice's or a credit note's row is on Refunds. Without
  * it the form would close and the page the person is on might show nothing
  * new. It opens at the top of the page, away from the row that was used, so
- * its link takes focus once, which also scrolls it into view. Nothing
- * navigates by itself.
+ * its link takes focus once, which also scrolls it into view (a note with
+ * no link focuses its Close button instead). Nothing navigates by itself.
  */
 export function SavedNoteCard({
   title,
@@ -34,8 +34,10 @@ export function SavedNoteCard({
 }) {
   const id = useId();
   const link = useRef<HTMLAnchorElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    link.current?.focus();
+    // With no link, Close takes focus instead, so the note scrolls into view and is read out with its text.
+    (link.current ?? closeButton.current)?.focus();
   }, []);
   const linked = href && linkLabel;
 
@@ -59,7 +61,14 @@ export function SavedNoteCard({
             </>
           ) : null}
         </p>
-        <Button type="button" variant="outline" size="sm" onClick={onClose}>
+        <Button
+          ref={closeButton}
+          type="button"
+          variant="outline"
+          size="sm"
+          aria-describedby={linked ? undefined : id}
+          onClick={onClose}
+        >
           Close
         </Button>
       </div>
