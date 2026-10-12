@@ -83,6 +83,7 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'finance/payments-in',
   'finance/quotations',
   'finance/rfqs',
+  'finance/purchase-orders',
   'finance/credit-notes',
   'finance/refunds',
   'finance/supplier-bills',

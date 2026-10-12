@@ -165,6 +165,7 @@ export const PURCHASE_ORDER_FORM_KIND: DocumentFormKind<PurchaseOrderForm> = {
       label: 'Payment terms (days)',
       placeholder: 'e.g. 30',
       inputMode: 'numeric',
+      hint: "Leave empty to use the supplier's terms.",
       get: (form) => form.payment_terms_days,
       set: withTerms,
     },
