@@ -10,6 +10,8 @@ const executed = vi.hoisted(() => ({
   input: {} as object | string,
   /** What the model was shown after the approval: the tool messages of its last prompt. */
   shown: [] as unknown[],
+  /** When set, every write path answers with this refusal sentence. */
+  fail: null as string | null,
 }));
 
 const bump = (name: string, input: unknown) => {
@@ -40,6 +42,7 @@ vi.mock('@/lib/people/letter-writes', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/people/letter-writes')>();
   const record = (name: string, data: unknown) => async (_ctx: unknown, input: unknown) => {
     bump(name, input);
+    if (executed.fail) return { ok: false as const, error: executed.fail };
     return { ok: true as const, data };
   };
   return {
@@ -56,6 +59,7 @@ vi.mock('@/lib/people/document-writes', async (importOriginal) => {
     ...actual,
     requestDocumentAck: async (_ctx: unknown, input: unknown) => {
       bump('requestDocumentAck', input);
+      if (executed.fail) return { ok: false as const, error: executed.fail };
       return { ok: true as const, data: savedDoc };
     },
   };
@@ -139,7 +143,7 @@ const ask = [{ role: 'user' as const, content: 'Please' }];
 vi.spyOn(console, 'log').mockImplementation(() => {});
 
 const reset = (tool: string, input: object | string) => {
-  Object.assign(executed, { counts: {}, last: null, shown: [], tool, input });
+  Object.assign(executed, { counts: {}, last: null, shown: [], fail: null, tool, input });
 };
 const ran = (name: string) => executed.counts[name] ?? 0;
 const total = () => Object.values(executed.counts).reduce((sum, n) => sum + n, 0);
@@ -286,6 +290,8 @@ describe('Lekiu’s letter and acknowledgement changes require approval', () => 
     ['saveLetter', { employee_id: A, title: 'x', body: 'x' }],
     ['saveLetter', { employee_id: A, letter_type: 'warning', title: 'x', body: 'x'.repeat(10001) }],
     ['saveLetter', { employee_id: A, letter_type: 'warning', title: 'x', body: 5 }],
+    ['saveLetter', { employee_id: A, letter_id: DRAFT, letter_type: 'warning', title: 'x' }],
+    ['saveLetter', { employee_id: A, letter_id: DRAFT, letter_type: 'warning', title: 'x', body: null }],
     ['saveLetter', { employee_id: A, letter_type: 'warning', title: 'x', body: 'x', ack_requested: 'yes' }],
     ['saveLetter', { employee_id: A, letter_type: 'warning', title: 'x', body: 'x', letter_id: 'nope' }],
     ['saveLetter', { employee_id: A, letter_type: 'warning', title: 'x', body: 'x', letter_id: 5 }],
@@ -415,10 +421,69 @@ describe('the card, read with a finder built from the REAL lookups and changes, 
   });
 
   it('an issue card follows a real change made after the lookup', async () => {
-    const lookup = await result('listLetters');
+    const real = await result('listLetters');
+    // An older lookup that disagrees with what the change then saved: the newest must win, so the two can be told apart.
+    const old = {
+      tool: 'listLetters',
+      output: { letters: (real.output as { letters: Record<string, unknown>[] }).letters.map((l) => (l.id === DRAFT ? { ...l, title: 'Old title', body: 'Old body' } : l)) },
+    };
     const change = await result('saveLetter', { employee_id: A, letter_type: 'warning', title: 'Amaran', body: 'x' });
-    // The mocked write path answers with the same draft: the card believes the newest of the two, and names the person.
-    const find = nameIn([lookup, change]);
-    expect(approvalTitle('issueLetter', { letter_id: DRAFT }, find)).toContain('Issue the letter to Aisyah Rahim');
+    const find = nameIn([old, change]);
+    const card = approvalTitle('issueLetter', { letter_id: DRAFT }, find);
+    expect(card).toContain('Issue the letter to Aisyah Rahim');
+    expect(card).toContain(`“Amaran”: “${savedDraft.body}”`);
+    expect(card).not.toContain('Old');
+    // And the other way round: a lookup after the change is newer again.
+    expect(approvalTitle('issueLetter', { letter_id: DRAFT }, nameIn([change, old]))).toContain('“Old title”: “Old body”');
+  });
+
+  it('a card names the person from the id when the result that holds the letter named nobody', async () => {
+    const nameless = { tool: 'saveLetter', output: { ok: true, data: { id: DRAFT, employee_id: A, letter_type: 'warning', title: 'Amaran', body: 'Text.', status: 'draft', ack_requested: false } } };
+    const find = nameIn([await result('listEmployees'), nameless]);
+    expect(approvalTitle('issueLetter', { letter_id: DRAFT }, find)).toBe('Issue the letter to Aisyah Rahim, type Warning, titled “Amaran”: “Text.”?');
+    expect(approvalTitle('requestAcknowledgement', { letter_id: DRAFT, requested: true }, find)).toBe('Ask Aisyah Rahim to acknowledge the letter “Amaran”?');
+  });
+});
+
+describe('what the model is told when the write path refuses, or the read fails', () => {
+  const refuse = async (c: Pick<Case, 'tool' | 'sent'>, sentence: string, people: People = asOwner) => {
+    const { call, request } = await firstTurn(c, people);
+    executed.fail = sentence;
+    const second = runLekiu(history(call!, request!, true), people);
+    await second.consumeStream();
+    return JSON.stringify(executed.shown);
+  };
+
+  it.each([
+    ['saveLetter', CASES[0].sent, 'That letter has been issued. Pull it back to draft on the Letters screen to change it.', 'saveLetter'],
+    ['startLetterFromTemplate', CASES[4].sent, 'That letter could not be found.', 'startLetterFromTemplate'],
+    ['issueLetter', CASES[5].sent, 'The letter still has a placeholder in it. Replace it before issuing.', 'issueLetter'],
+    ['issueLetter', CASES[5].sent, 'The letter has no text yet.', 'issueLetter'],
+    ['requestAcknowledgement', CASES[6].sent, 'That document could not be found.', 'requestDocumentAck'],
+    ['requestAcknowledgement', CASES[9].sent, 'That letter has been issued. Pull it back to draft on the Letters screen to change it.', 'saveLetter'],
+  ])('%s: a refusal reaches the model as its sentence', async (tool, sent, sentence, write) => {
+    const shown = await refuse({ tool, sent }, sentence);
+    expect(shown).toContain(sentence);
+    expect(ran(write)).toBe(1);
+  });
+
+  it('listLetters failing inside requestAcknowledgement gives the write-failed sentence and writes nothing', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const broken = { ...asOwner, data: { ...data, listLetters: async () => { throw new TypeError('SECRET BODY'); } } };
+    const { call, request } = await firstTurn({ tool: 'requestAcknowledgement', sent: { letter_id: DRAFT, requested: true } }, broken);
+    const second = runLekiu(history(call!, request!, true), broken);
+    await second.consumeStream();
+    expect(total()).toBe(0);
+    expect(JSON.stringify(executed.shown)).toContain('That change could not be saved. Please try again.');
+    expect(JSON.stringify(log.mock.calls)).not.toContain('SECRET');
+    log.mockRestore();
+  });
+
+  it('saveLetter on a draft id the read does not return keeps no request: it saves with ack_requested false', async () => {
+    const c = { tool: 'saveLetter', sent: { employee_id: A, letter_id: GONE, letter_type: 'warning', title: 'T', body: 'B' } };
+    const { call, request } = await firstTurn(c);
+    const second = runLekiu(history(call!, request!, true), asOwner);
+    await second.consumeStream();
+    expect(executed.last).toEqual({ employee_id: A, letter_id: GONE, letter_type: 'warning', title: 'T', body: 'B', ack_requested: false });
   });
 });

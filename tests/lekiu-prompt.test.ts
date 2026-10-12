@@ -672,6 +672,17 @@ describe('letters and documents', () => {
     expect(section).toContain('for an issued letter say at once that it is pulled back to a draft on the letters screen first');
   });
 
+  it('says an employee removes their own upload on My Documents, and an owner removes any on the Documents screen', () => {
+    expect(section).toContain('an employee uploads their own, and removes one they uploaded, on their my documents page');
+  });
+
+  it('keeps the not_linked rule, lists documents and letters under own records, and names the pages for acknowledging', () => {
+    expect(section).toContain('and the result does not carry not_linked, the whole answer is');
+    const who = LEKIU_SYSTEM.slice(LEKIU_SYSTEM.indexOf('\nWHO CAN SEE WHAT\n')).toLowerCase();
+    expect(who).toContain('documents and letters');
+    expect(section).toContain('on my documents for a document, on letters for a letter');
+  });
+
   it('declines in the language of the latest message', () => {
     expect(section).toContain("when you decline any of this, reply in the language of the user's latest message");
   });

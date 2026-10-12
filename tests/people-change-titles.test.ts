@@ -1281,6 +1281,13 @@ describe('approval cards for letters and acknowledgement requests', () => {
     expect(approvalDetail('issueLetter', { letter_id: LETTER }, undefined, plain)).toBe('The employee will be able to see it.');
   });
 
+  it('issueLetter hedges an empty body', () => {
+    const find = nameIn([lookupLetter({ body: '  ' })]);
+    expect(approvalDetail('issueLetter', { letter_id: LETTER }, undefined, find)).toBe(
+      'The employee will be able to see it. It has no text yet, so this is likely to be refused.',
+    );
+  });
+
   it('issueLetter with no facts for the letter says so plainly and invents no body', () => {
     const title = approvalTitle('issueLetter', { letter_id: LETTER }, nameIn([employees]));
     expect(title).toBe('Issue a letter that was not in the list above? Nothing in this chat shows its text, so it cannot be shown here.');

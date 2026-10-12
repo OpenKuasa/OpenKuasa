@@ -1200,13 +1200,14 @@ const UNLISTED_TEMPLATE = 'a template that was not in the list above';
 
 type LetterFact = {
   employee: string | null;
+  employee_id: string | null;
   letter_type: string | null;
   title: string;
   body: string;
   status: 'draft' | 'issued' | null;
   ack_requested: boolean | null;
 };
-type DocumentFact = { employee: string | null; title: string; uploaded_by: 'HR' | 'the employee' | null; ack_requested: boolean | null };
+type DocumentFact = { employee: string | null; employee_id: string | null; title: string; uploaded_by: 'HR' | 'the employee' | null; ack_requested: boolean | null };
 
 /** What the conversation knows about one letter or document, as JSON text, from a lookup row or a change's result. */
 function letterDocumentFact(row: Record<string, unknown>, kind: 'letter' | 'document'): string | null {
@@ -1218,6 +1219,7 @@ function letterDocumentFact(row: Record<string, unknown>, kind: 'letter' | 'docu
     if (typeof row.body !== 'string') return null;
     const fact: LetterFact = {
       employee: text(row.employee),
+      employee_id: text(row.employee_id),
       letter_type: typeof row.letter_type === 'string' && Object.hasOwn(LETTER_TYPE_LABEL, row.letter_type) ? row.letter_type : null,
       title,
       body: row.body,
@@ -1228,6 +1230,7 @@ function letterDocumentFact(row: Record<string, unknown>, kind: 'letter' | 'docu
   }
   const fact: DocumentFact = {
     employee: text(row.employee),
+    employee_id: text(row.employee_id),
     title,
     uploaded_by: row.uploaded_by === 'HR' || row.uploaded_by === 'the employee' ? row.uploaded_by : null,
     ack_requested: ack,
@@ -1275,7 +1278,7 @@ function letterTitle(toolName: string, i: Record<string, unknown>, find: NameFin
     case 'issueLetter': {
       const { fact } = factOf<LetterFact>(find, i.letter_id, 'letter');
       if (!fact) return `Issue ${UNLISTED_LETTER}? Nothing in this chat shows its text, so it cannot be shown here.`;
-      return `Issue the letter to ${fact.employee ?? 'this employee'}, type ${letterTypeWords(fact.letter_type)}, titled “${fact.title}”: ${letterBodyWords(fact.body)}?`;
+      return `Issue the letter to ${fact.employee ?? find(fact.employee_id, 'employee') ?? 'this employee'}, type ${letterTypeWords(fact.letter_type)}, titled “${fact.title}”: ${letterBodyWords(fact.body)}?`;
     }
     case 'requestAcknowledgement': {
       const withdraws = i.requested === false;
@@ -1288,7 +1291,7 @@ function letterTitle(toolName: string, i: Record<string, unknown>, find: NameFin
         const unlisted = isLetter ? UNLISTED_LETTER : UNLISTED_DOCUMENT;
         return withdraws ? `Withdraw the acknowledgement request on ${unlisted}?` : `Ask for an acknowledgement of ${unlisted}?`;
       }
-      const who = fact.employee ?? 'this employee';
+      const who = fact.employee ?? find(fact.employee_id, 'employee') ?? 'this employee';
       const item = `${isLetter ? 'the letter' : 'the document'} “${fact.title}”`;
       return withdraws ? `Withdraw the request for ${who} to acknowledge ${item}?` : `Ask ${who} to acknowledge ${item}?`;
     }
@@ -1322,6 +1325,7 @@ function letterDetail(toolName: string, i: Record<string, unknown>, find?: NameF
       if (fact?.ack_requested === true) parts.push('They will be asked to acknowledge it.');
       // Worked out from the title and the body the conversation holds, by the one rule the database mirrors.
       const left = fact ? unfilledInLetter(fact.title, fact.body) : [];
+      if (fact && !fact.body.trim()) parts.push('It has no text yet, so this is likely to be refused.');
       if (left.length > 0) parts.push(`It still has ${placeholderList(left)} in it, so this is likely to be refused until they are replaced.`);
       if (fact?.status === 'issued') parts.push('This letter was issued when last checked, so this may be refused.');
       break;

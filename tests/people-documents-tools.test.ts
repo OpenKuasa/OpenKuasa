@@ -241,7 +241,37 @@ describe('listLetters', () => {
   });
 });
 
+describe('listLetters is capped, with whole bodies', () => {
+  const many = Array.from({ length: 30 }, (_, n) =>
+    letter({ id: `00000000-0000-4000-8000-0000000002${String(n).padStart(2, '0')}`, title: `Letter ${n}`, body: `Body ${n} ${'y'.repeat(500)}`, status: 'issued', issued_on: '2026-09-20' }),
+  );
+  it('returns at most 10 rows to an owner however many are asked for, each with its whole body; the totals count them all', async () => {
+    const result = await run('listLetters', { limit: 50 }, HR, dataWith({ listLetters: async () => many }), hrWrite());
+    expect(result.letters).toHaveLength(10);
+    expect(result.total).toBe(30);
+    expect(result.letters[0].body).toBe(many[0].body);
+    expect(result.letters[9].body).toBe(many[9].body);
+  });
+  it('returns at most 10 rows to a member', async () => {
+    const result = await run('listLetters', { limit: 50 }, MEMBER, dataWith({ listLetters: async () => many }));
+    expect(result.letters).toHaveLength(10);
+    expect(result.total).toBe(30);
+  });
+  it('says a member’s own upload is theirs', async () => {
+    const result = await run('listDocuments', {}, MEMBER);
+    expect(result.documents.find((d: Loose) => d.title === 'Passport').uploaded_by).toBe('you');
+    expect(result.documents.find((d: Loose) => d.title === 'Employment contract').uploaded_by).toBe('HR');
+  });
+});
+
 describe('listLetterTemplates', () => {
+  it('gives the first 300 characters of a body and its length, not the whole text, and says where the full text is seen', async () => {
+    const long = { ...template, body: `Start ${'z'.repeat(1000)}` };
+    const result = await run('listLetterTemplates', {}, HR, dataWith({ listLetterTemplates: async () => [long] }), hrWrite());
+    expect(result.templates[0].body_chars).toBe(long.body.length);
+    expect(result.templates[0].body).toBe(long.body.slice(0, 300));
+    expect(describeOf('listLetterTemplates', HR, hrWrite())).toMatch(/full text is seen when a letter is started from the template/i);
+  });
   it('is held by an owner or admin with change access, and by nobody else', () => {
     expect(Object.keys(createPeopleTools(dataWith(), HR, NOW, hrWrite()))).toContain('listLetterTemplates');
     expect(Object.keys(createPeopleTools(dataWith(), HR, NOW))).not.toContain('listLetterTemplates');
@@ -249,10 +279,10 @@ describe('listLetterTemplates', () => {
     expect(Object.keys(createPeopleTools(dataWith(), MEMBER, NOW, selfWrite()))).not.toContain('listLetterTemplates');
     expect(Object.keys(createPeopleTools(dataWith(), DEMO, NOW, hrWrite()))).not.toContain('listLetterTemplates');
   });
-  it('gives the name, type, title, whole text and the id the draft tool takes', async () => {
+  it('gives the name, type, title, the start of the text and the id the draft tool takes', async () => {
     const result = await run('listLetterTemplates', {}, HR, dataWith(), hrWrite());
     expect(result.total).toBe(1);
-    expect(result.templates[0]).toEqual({ id: template.id, name: 'Offer letter', letter_type: 'offer', title: 'Offer of employment', body: 'Dear {employee_name}' });
+    expect(result.templates[0]).toEqual({ id: template.id, name: 'Offer letter', letter_type: 'offer', title: 'Offer of employment', body: 'Dear {employee_name}', body_chars: 20 });
   });
 });
 
