@@ -55,6 +55,7 @@ import {
   saveCreditNoteInput,
   voidCreditNote,
 } from '@/lib/finance/credit-notes';
+import { markExpensePaid, markExpensePaidInput } from '@/lib/finance/expense-payment';
 import {
   EXPENSE_MESSAGES,
   approveExpense,
@@ -896,6 +897,14 @@ export async function rejectExpenseAction(input: unknown) {
 /** Deletes a pending or rejected expense. */
 export async function deleteExpenseAction(input: unknown) {
   return run(EXPENSE_PATHS, expenseIdInput, input, deleteExpense);
+}
+/**
+ * Marks an approved expense paid, in full or in part: a payment voucher against it, paid now, from the account
+ * chosen. Paying is a sign-off: an owner or admin only, which the database enforces on the voucher (FIN14). The
+ * voucher shows on Payment Vouchers and Banking and moves the books, all of which EXPENSE_PATHS already refreshes.
+ */
+export async function markExpensePaidAction(input: unknown) {
+  return run(EXPENSE_PATHS, markExpensePaidInput, input, markExpensePaid, SIGN_OFF);
 }
 
 /* ---- payment vouchers -------------------------------------------------- */

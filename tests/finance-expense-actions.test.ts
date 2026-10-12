@@ -42,6 +42,18 @@ vi.mock('@/lib/finance/expenses', async (orig) => {
   };
 });
 
+vi.mock('@/lib/finance/expense-payment', async (orig) => {
+  const actual = await orig<typeof import('@/lib/finance/expense-payment')>();
+  return {
+    ...actual,
+    markExpensePaid: recorder('markExpensePaid', {
+      id: '55555555-5555-4555-8555-555555555555',
+      voucher_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      number: 'PV-0007',
+    }),
+  };
+});
+
 const actions = await import('@/app/(app)/finance/actions');
 
 const PATHS = [
@@ -67,8 +79,19 @@ const DECIDE = {
   vendor_name: 'Kedai Ali',
   notes: null,
 };
+/** What the Mark paid card sends. */
+const PAY = {
+  id: EXPENSE,
+  updated_at: SEEN,
+  account_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  txn_date: '2026-10-12',
+  method: 'bank_transfer',
+  reference: 'TT 1',
+  amount: 120,
+};
 const FORBIDDEN = { ok: false, error: 'You do not have permission to make changes here.' };
 const NEEDS = { ok: false, error: 'Only an owner or admin can approve or reject an expense. Ask one of them to do this.' };
+const NEEDS_SIGN_OFF = { ok: false, error: 'Only an owner or admin can post, pay or void. Ask one of them to do this.' };
 
 const expense = {
   expense_date: '2026-10-05',
@@ -84,6 +107,7 @@ const writes: [string, (input: unknown) => Promise<Answer>, unknown, string][] =
   ['approveExpenseAction', actions.approveExpenseAction, DECIDE, 'approveExpense'],
   ['rejectExpenseAction', actions.rejectExpenseAction, DECIDE, 'rejectExpense'],
   ['deleteExpenseAction', actions.deleteExpenseAction, { id: EXPENSE }, 'deleteExpense'],
+  ['markExpensePaidAction', actions.markExpensePaidAction, PAY, 'markExpensePaid'],
 ];
 
 beforeEach(() => {
@@ -107,7 +131,7 @@ describe('who may write', () => {
     expect(ctl.revalidated).toEqual([]);
   });
 
-  it('lets an owner and an admin do all four, in their own workspace', async () => {
+  it('lets an owner and an admin do all five, in their own workspace', async () => {
     for (const role of ['owner', 'admin']) {
       ctl.viewer = { userId: 'u1', orgId: 'org1', role, isDemo: false };
       ctl.calls = [];
@@ -115,7 +139,7 @@ describe('who may write', () => {
         expect((await action(input)).ok, `${role} ${name}`).toBe(true);
         expect(ctl.calls.at(-1)).toMatchObject({ fn, orgId: 'org1' });
       }
-      expect(ctl.calls).toHaveLength(4);
+      expect(ctl.calls).toHaveLength(5);
     }
   });
 
@@ -130,6 +154,9 @@ describe('who may write', () => {
     expect(await actions.rejectExpenseAction(DECIDE)).toEqual(NEEDS);
     // Not even with an input the schema would refuse: the role is asked first.
     expect(await actions.approveExpenseAction({ id: 'nope' })).toEqual(NEEDS);
+    // Marking paid is a sign-off, told in the words every payment uses.
+    expect(await actions.markExpensePaidAction(PAY)).toEqual(NEEDS_SIGN_OFF);
+    expect(await actions.markExpensePaidAction({ id: 'nope' })).toEqual(NEEDS_SIGN_OFF);
     expect(ctl.calls).toEqual([]);
     expect(ctl.revalidated).toEqual([]);
   });
@@ -148,6 +175,8 @@ describe('what is sent and what is refreshed', () => {
       error: 'This expense was changed after you opened it. Check it again, then approve or reject it.',
     });
     expect(await actions.deleteExpenseAction(null)).toEqual({ ok: false, error: 'That expense no longer exists.' });
+    expect(await actions.markExpensePaidAction({ ...PAY, amount: Number.NaN })).toEqual({ ok: false, error: 'Enter an amount above 0.' });
+    expect(await actions.markExpensePaidAction({ ...PAY, account_id: '' })).toEqual({ ok: false, error: 'Choose the account the money leaves.' });
     expect(ctl.calls).toEqual([]);
     expect(ctl.revalidated).toEqual([]);
   });
@@ -161,6 +190,11 @@ describe('what is sent and what is refreshed', () => {
         input: { ...expense, vendor_id: null, notes: null },
       },
     ]);
+  });
+
+  it('hands marking paid the parsed input: never a payee, a status or a workspace from the caller', async () => {
+    await actions.markExpensePaidAction({ ...PAY, status: 'scheduled', org_id: 'other', contact_id: 'me', party_name: 'Me' });
+    expect(ctl.calls).toEqual([{ fn: 'markExpensePaid', orgId: 'org1', input: PAY }]);
   });
 
   it('refreshes the screens an expense shows on, the ledger screens included, after every action, refused or not', async () => {
