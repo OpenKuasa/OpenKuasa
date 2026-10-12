@@ -60,8 +60,22 @@ describe('newBillForm', () => {
       dueEdited: false,
       notes: '',
       purchase_order_id: '',
+      category_id: '',
       lines: [{ key: 'k1', product_id: '', description: '', quantity: '1', uom: '', pack_size: '', unit_price: '', sst_rate: '0' }],
     });
+  });
+});
+
+describe('the bill’s category', () => {
+  const CATEGORY = '99999999-9999-4999-8999-999999999999';
+  it('starts on the default category the screen names, or on none', () => {
+    expect(newBillForm(today, 'k1', CATEGORY).category_id).toBe(CATEGORY);
+    expect(newBillForm(today, 'k1').category_id).toBe('');
+  });
+  it('is sent with the bill, empty meaning the workspace default', () => {
+    expect(billPayload(filled({ category_id: CATEGORY })).category_id).toBe(CATEGORY);
+    expect(billPayload(filled()).category_id).toBe('');
+    expect(saveBillInput.parse(billPayload(filled({ category_id: CATEGORY }))).category_id).toBe(CATEGORY);
   });
 });
 
@@ -192,6 +206,7 @@ describe('billPayload', () => {
       bill_date: today,
       due_date: '2026-11-10',
       purchase_order_id: '',
+      category_id: '',
       notes: '',
       lines: [{ product_id: PRODUCT, description: ' Gloves ', uom: 'box', pack_size: '', quantity: 10, unit_price: 12.5, sst_rate: 6 }],
     });
@@ -207,7 +222,7 @@ describe('billPayload', () => {
   });
   it('never carries the line keys, the dueEdited flag or a workspace', () => {
     const payload = billPayload(filled({ id: BILL }));
-    expect(Object.keys(payload).sort()).toEqual(['bill_date', 'due_date', 'id', 'lines', 'notes', 'purchase_order_id', 'supplier_id', 'supplier_ref']);
+    expect(Object.keys(payload).sort()).toEqual(['bill_date', 'category_id', 'due_date', 'id', 'lines', 'notes', 'purchase_order_id', 'supplier_id', 'supplier_ref']);
     expect(Object.keys(payload.lines[0]).sort()).toEqual(['description', 'pack_size', 'product_id', 'quantity', 'sst_rate', 'unit_price', 'uom']);
   });
 });

@@ -170,6 +170,21 @@ async function readOrderLinks(ctx: FinanceWriteContext, billId?: string): Promis
   }
 }
 
+export type ExpenseCategory = { id: string; name: string };
+
+/** The workspace's active expense categories, by name, for the bill form's picker. */
+export async function listExpenseCategories(ctx: FinanceWriteContext): Promise<ExpenseCategory[]> {
+  const { data, error } = await ctx.client
+    .from('finance_categories')
+    .select('id,name')
+    .eq('org_id', ctx.orgId)
+    .eq('kind', 'expense')
+    .eq('active', true)
+    .order('name', { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as unknown as ExpenseCategory[];
+}
+
 /** Each bill's category: bill id → the category's id and name. */
 type BillCategories = Map<string, { id: string; name: string | null }>;
 

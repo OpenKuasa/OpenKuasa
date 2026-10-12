@@ -117,3 +117,42 @@ describe('the bill form’s purchase order picker', () => {
     expect(html).toContain('This takes the bills for PO-0003 over its total of RM 1,200.00.');
   });
 });
+
+describe('the bill form’s category picker', () => {
+  const CAT_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const CAT_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const categories = [
+    { id: CAT_A, name: 'Purchases' },
+    { id: CAT_B, name: 'Utilities' },
+  ];
+
+  it('lists the active expense categories and chooses the default for a new bill', () => {
+    const html = card({ categories, defaultCategoryId: CAT_A });
+    expect(html).toContain('Category');
+    expect(html).toContain('data-option="' + CAT_A + '"');
+    expect(html).toContain('data-option="' + CAT_B + '"');
+    expect(html).toContain('data-chosen="' + CAT_A + '"');
+  });
+  it('sits beside the purchase order picker when both are offered', () => {
+    const html = card({ categories, defaultCategoryId: CAT_A, orders });
+    expect(html).toContain('Purchase order');
+    expect(html).toContain('Category');
+  });
+  it('shows the draft’s own category, and still offers it when it has since been archived', () => {
+    const html = card({ editing: detail({ category_id: 'gone', category_name: 'Old Courier' }), categories, defaultCategoryId: CAT_A });
+    expect(html).toContain('data-chosen="gone"');
+    expect(html).toContain('Old Courier');
+  });
+  it('is absent when the screen offers no categories (nothing else changes)', () => {
+    expect(card({ editing: detail() })).not.toContain('Category');
+  });
+});
+
+describe('the bills list category column', () => {
+  it('shows the category, hidden below 2xl, and a dash where there is none', () => {
+    const rows = [bill('a', { category_id: 'c', category_name: 'Utilities' }), bill('b', { bill_no: 'BILL-0002' })];
+    const html = renderToStaticMarkup(<BillsView rows={rows} view={billsView(rows, [], '2026-10-09')} held={{}} />);
+    expect(html).toMatch(/<th[^>]*hidden[^>]*2xl:table-cell[^>]*>Category<\/th>/);
+    expect(html).toMatch(/<td[^>]*hidden[^>]*2xl:table-cell[^>]*>Utilities<\/td>/);
+  });
+});

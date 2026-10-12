@@ -37,11 +37,16 @@ export type BillForm = {
   notes: string;
   /** The purchase order the bill is raised against; '' for none. */
   purchase_order_id: string;
+  /** The expense category the bill's cost lands in; '' for the workspace's default. */
+  category_id: string;
   lines: LineDraft[];
 };
 
-/** A new bill dated today with one empty line. The due date follows once a supplier is chosen. */
-export function newBillForm(today: string, lineKey: string): BillForm {
+/**
+ * A new bill dated today with one empty line, in the default category when the screen names one. The due date
+ * follows once a supplier is chosen.
+ */
+export function newBillForm(today: string, lineKey: string, defaultCategoryId = ''): BillForm {
   return {
     supplier_id: '',
     supplier_ref: '',
@@ -50,6 +55,7 @@ export function newBillForm(today: string, lineKey: string): BillForm {
     dueEdited: false,
     notes: '',
     purchase_order_id: '',
+    category_id: defaultCategoryId,
     lines: [emptyLine(lineKey)],
   };
 }
@@ -65,6 +71,7 @@ export function billFormFromDetail(bill: BillDetail): BillForm {
     dueEdited: true,
     notes: bill.notes ?? '',
     purchase_order_id: bill.purchase_order_id ?? '',
+    category_id: bill.category_id ?? '',
     lines: bill.lines.map(lineDraft),
   };
 }
@@ -112,6 +119,8 @@ export function billPayload(form: BillForm) {
     due_date: form.due_date,
     // Always sent, so that choosing none unlinks; callers that leave it out leave the link alone.
     purchase_order_id: form.purchase_order_id,
+    // Empty takes the workspace's default category.
+    category_id: form.category_id,
     notes: form.notes,
     lines: form.lines.map(linePayload),
   };
