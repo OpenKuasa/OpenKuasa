@@ -77,7 +77,7 @@ export type HireAccess = {
 };
 
 /** Hiring tools that change data. */
-export const HIRE_WRITE_TOOL_NAMES = ['createJob', 'updateJob', 'setJobStatus', 'deleteJob', 'updateCareersPage', 'updateApplicationForm', 'moveApplication', 'rejectApplication', 'reopenApplication', 'rateApplication', 'addCandidate', 'updateCandidate', 'deleteApplication', 'deleteCandidate', 'setPoolStatus', 'moveToPipeline', 'scheduleInterview', 'recordPastInterview', 'rescheduleInterview', 'cancelInterview', 'setInterviewOutcome', 'reopenInterview'] as const;
+export const HIRE_WRITE_TOOL_NAMES = ['createJob', 'updateJob', 'setJobStatus', 'deleteJob', 'updateCareersPage', 'updateApplicationForm', 'moveApplication', 'rejectApplication', 'reopenApplication', 'rateApplication', 'addCandidate', 'updateCandidate', 'deleteApplication', 'deleteCandidate', 'setPoolStatus', 'moveToPipeline', 'scheduleInterview', 'recordPastInterview', 'rescheduleInterview', 'cancelInterview', 'setInterviewOutcome', 'reopenInterview', 'saveInterviewFeedback', 'clearInterviewFeedback'] as const;
 
 /** The HR data an agent reads, who is asking, and whether they may change it. */
 export type PeopleAccess = { data: PeopleData; viewer: PeopleViewer; write?: PeopleWrite };

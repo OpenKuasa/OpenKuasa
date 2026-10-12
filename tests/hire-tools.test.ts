@@ -477,9 +477,10 @@ describe('hire change tools', () => {
       'addCandidate', 'updateCandidate', 'deleteApplication', 'deleteCandidate',
       'setPoolStatus', 'moveToPipeline',
       'scheduleInterview', 'recordPastInterview', 'rescheduleInterview', 'cancelInterview', 'setInterviewOutcome', 'reopenInterview',
+      'saveInterviewFeedback', 'clearInterviewFeedback',
     ]);
-    // The six the interview gate holds to one a turn are exactly the six added here.
-    expect(HIRE_WRITE_TOOL_NAMES.slice(-6)).toEqual([...HIRE_INTERVIEW_TOOL_NAMES]);
+    // The six that make or change an interview, then the two for its feedback: all eight are held to one a turn.
+    expect(HIRE_WRITE_TOOL_NAMES.slice(-8, -2)).toEqual([...HIRE_INTERVIEW_TOOL_NAMES]);
   });
   it('gives a writer nothing beyond the lookups except the listed change tools, so each one needs approval', () => {
     const writerTools = createHireTools(data, NOW, { ctx, canWrite: true });
@@ -1199,7 +1200,7 @@ describe('listInterviews, for the interview changes', () => {
     expect(out.interviews[0]).toEqual({
       id: 'i1', application_id: 'a1', candidate: 'Aina Rahman', job: 'Sales Executive', scheduled_at: AT, when: 'Tue 20 Oct 2026, 3:00 pm',
       date: '2026-10-20', time: '15:00', duration_minutes: 45, kind: 'video', place: 'https://meet.example.com/abc', interviewer: 'Farah Lim',
-      notes: 'Second round.', status: 'scheduled', application_stage: 'interview', application_outcome: 'active',
+      notes: 'Second round.', feedback: null, status: 'scheduled', application_stage: 'interview', application_outcome: 'active',
     });
     expect(out.several_match).toBeUndefined();
   });
@@ -1319,15 +1320,17 @@ describe('listInterviews, for the interview changes', () => {
   });
   it('never lets the model choose the workspace, and takes no id', () => {
     const shape = (createHireTools(three, NOW).listInterviews as unknown as { inputSchema: { shape: Record<string, unknown> } }).inputSchema.shape;
-    expect(Object.keys(shape).sort()).toEqual(['candidate', 'jobTitle', 'limit', 'status', 'when']);
+    expect(Object.keys(shape).sort()).toEqual(['candidate', 'hasFeedback', 'jobTitle', 'limit', 'status', 'when']);
   });
   it('says what it returns, and which changes take its ids', () => {
     expect((createHireTools(three, NOW).listInterviews as unknown as { description: string }).description).toBe(
-      'List interviews with the candidate, the job, the time, the length, how it is held (video, onsite, phone), the place or link, the interviewer, the notes and the status. ' +
-        'Ask for upcoming or past ones, or filter by status, by candidate name or by job. ' +
+      'List interviews with the candidate, the job, the time, the length, how it is held (video, onsite, phone), the place or link, the interviewer, the notes, the status and the feedback. ' +
+        'Ask for upcoming or past ones, or filter by status, by candidate name, by job, or by whether there is feedback. ' +
         '`when` is the day, the date and the time in Kuala Lumpur, as a person reads it; use it when telling the user the time, and always give the date with it. ' +
         '`date` and `time` are that same time in Kuala Lumpur, in the form the change tools take. ' +
-        'Each row has the interview\'s id, which rescheduleInterview, cancelInterview, setInterviewOutcome and reopenInterview take, and its application\'s id. ' +
+        '`feedback` is null when the interview has none; otherwise it is the rating out of 5, the recommendation (advance, hold or reject), the comments, and `recorded`, when it was saved. ' +
+        'Comments longer than 600 characters are cut, and `comments_cut` then says so. ' +
+        'Each row has the interview\'s id, which rescheduleInterview, cancelInterview, setInterviewOutcome, reopenInterview, saveInterviewFeedback and clearInterviewFeedback take, and its application\'s id. ' +
         'To schedule an interview or record a past one, use the application\'s id from listApplications. ' +
         'If the result has "several_match", more than one interview fits, or one person has more than one: prepare no change and ask the user which one.',
     );

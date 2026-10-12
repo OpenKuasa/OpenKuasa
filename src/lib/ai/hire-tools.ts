@@ -18,10 +18,13 @@ import { z } from 'zod';
 import {
   type CapResult,
   type HireWriteContext,
+  type InterviewFeedbackChange,
   addCandidate,
   addCandidateInput,
   cancelInterview,
   cancelInterviewInput,
+  clearInterviewFeedback,
+  clearInterviewFeedbackInput,
   closeApplication,
   closeApplicationInput,
   createJob,
@@ -47,6 +50,8 @@ import {
   rescheduleInterview,
   rescheduleInterviewInput,
   scheduleInterview,
+  saveInterviewFeedback,
+  saveInterviewFeedbackInput,
   scheduleInterviewInput,
   setInterviewOutcome,
   setInterviewOutcomeInput,
@@ -71,6 +76,7 @@ import type { CvReader } from '@/lib/hire/cv-read';
 import { sameText } from '@/lib/hire/namesakes';
 import { timeToHire } from '@/lib/hire/dashboard';
 import { klDateOf, klTimeOf, klTodayWords, shortWhen } from '@/lib/hire/interview-time';
+import { feedbackForModel } from '@/lib/hire/interview-feedback';
 import { careersPath, careersUrl } from '@/lib/hire/public-careers';
 import { applicantsByJob, overviewTotals, sourceBreakdown } from '@/lib/hire/overview';
 import { APPLICATION_STAGES, HIRE_READ_CAP, type HireData, type Job } from '@/lib/hire/types';
@@ -259,6 +265,12 @@ function withoutInvitation<T extends { invitation?: unknown }>(result: CapResult
   const { invitation: _left, ...rest } = result.data;
   void _left;
   return { ...result, data: rest };
+}
+
+/** A feedback change's answer as a model is given it: the same, with long comments cut as the lookup cuts them. */
+function feedbackForTool(result: CapResult<InterviewFeedbackChange>) {
+  if (!result.ok) return result;
+  return { ...result, data: { ...result.data, feedback: feedbackForModel(result.data.feedback) } };
 }
 
 const limit = limitSchema(`How many rows to return, at most ${LOOKUP_MAX}.`);
@@ -545,11 +557,13 @@ export function createHireTools(
 
     listInterviews: tool({
       description:
-        'List interviews with the candidate, the job, the time, the length, how it is held (video, onsite, phone), the place or link, the interviewer, the notes and the status. ' +
-        'Ask for upcoming or past ones, or filter by status, by candidate name or by job. ' +
+        'List interviews with the candidate, the job, the time, the length, how it is held (video, onsite, phone), the place or link, the interviewer, the notes, the status and the feedback. ' +
+        'Ask for upcoming or past ones, or filter by status, by candidate name, by job, or by whether there is feedback. ' +
         '`when` is the day, the date and the time in Kuala Lumpur, as a person reads it; use it when telling the user the time, and always give the date with it. ' +
         '`date` and `time` are that same time in Kuala Lumpur, in the form the change tools take. ' +
-        "Each row has the interview's id, which rescheduleInterview, cancelInterview, setInterviewOutcome and reopenInterview take, and its application's id. " +
+        '`feedback` is null when the interview has none; otherwise it is the rating out of 5, the recommendation (advance, hold or reject), the comments, and `recorded`, when it was saved. ' +
+        'Comments longer than 600 characters are cut, and `comments_cut` then says so. ' +
+        "Each row has the interview's id, which rescheduleInterview, cancelInterview, setInterviewOutcome, reopenInterview, saveInterviewFeedback and clearInterviewFeedback take, and its application's id. " +
         "To schedule an interview or record a past one, use the application's id from listApplications. " +
         'If the result has "several_match", more than one interview fits, or one person has more than one: prepare no change and ask the user which one.',
       inputSchema: z.object({
@@ -557,15 +571,19 @@ export function createHireTools(
         status: z.enum(['scheduled', 'completed', 'cancelled', 'no_show']).optional().describe('Only this status.'),
         candidate: z.string().optional().describe('Only interviews with candidates whose name contains this.'),
         jobTitle,
+        hasFeedback: z.boolean().optional().describe('true: only interviews that have feedback. false: only completed interviews that have none yet.'),
         limit,
       }),
-      execute: async ({ when, status, candidate, jobTitle: title, limit: requested }) =>
+      execute: async ({ when, status, candidate, jobTitle: title, hasFeedback, limit: requested }) =>
         safe('listInterviews', async () => {
           const t = now().getTime();
           const rows = (await data.listInterviews()).filter((i) => {
             const ahead = Date.parse(i.scheduled_at) > t;
             if (when === 'upcoming' && !(ahead && i.status === 'scheduled')) return false;
             if (when === 'past' && ahead) return false;
+            if (hasFeedback === true && !i.feedback) return false;
+            // "None yet" is a question about interviews that could have some: the completed ones.
+            if (hasFeedback === false && (i.status !== 'completed' || i.feedback)) return false;
             return (!status || i.status === status) && matchesText(i.candidate_name, candidate) && matchesText(i.job_title, title);
           });
           // Past interviews read better latest first; the rest soonest first. Not left to the provider's order.
@@ -639,6 +657,8 @@ export function createHireTools(
               place: i.place,
               interviewer: i.interviewer_name,
               notes: notesExcerpt(i.notes),
+              // Null, or the feedback with long comments cut. Never left out: "none yet" is an answer.
+              feedback: feedbackForModel(i.feedback),
               status: i.status,
               application_stage: i.application_stage,
               application_outcome: i.application_outcome,
@@ -907,6 +927,22 @@ export function createHireTools(
       description: 'Mark ONE cancelled, completed or no-show interview as scheduled again.',
       inputSchema: reopenInterviewInput,
       execute: async (input) => withoutInvitation(await reopenInterview(ctx, input)),
+    }),
+    // Feedback on an interview: two more interview changes, held to the same one a turn. Each result carries the
+    // interview's `id` with `candidate` and `job`, as the six above do.
+    saveInterviewFeedback: tool({
+      description:
+        'Record feedback on ONE completed interview: a rating from 1 to 5, a recommendation (advance, hold or reject) and comments. ' +
+        "Use the interview's id from listInterviews. It does not move, reject or rate the application. " +
+        'When the rating or the recommendation is your own reading, put the grounds in basis.',
+      inputSchema: saveInterviewFeedbackInput,
+      // No "last seen" version is passed: the gate reads the interview again when the user's yes arrives.
+      execute: async (input) => feedbackForTool(await saveInterviewFeedback(ctx, input)),
+    }),
+    clearInterviewFeedback: tool({
+      description: "Clear the feedback on ONE interview for good. Use the interview's id from listInterviews.",
+      inputSchema: clearInterviewFeedbackInput,
+      execute: async (input) => feedbackForTool(await clearInterviewFeedback(ctx, input)),
     }),
   };
 }

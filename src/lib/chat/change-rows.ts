@@ -60,6 +60,10 @@ const FIELD_LABELS: Record<string, string> = {
   half_day: 'Half day',
   memberEmail: 'Account email',
   approve: 'Decision',
+  mark_completed: 'Also marks it completed',
+  replace: 'Replaces existing feedback',
+  // An assistant's grounds for a rating it proposed itself: on the card for the person who approves, never stored.
+  basis: 'Why (shown here, not saved)',
 };
 
 /** `salary_min_cents` → "Salary min", `firstName` → "First name", `nric` → "NRIC". */

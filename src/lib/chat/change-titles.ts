@@ -9,6 +9,7 @@ import { REASON_LABEL } from '@/lib/hire/application-changes';
 import { STAGE_LABEL } from '@/lib/hire/applications-view';
 import { PIPELINE_CARD_DETAIL, pipelineCardTitle, poolCardDetail, poolCardTitle } from '@/lib/hire/pool';
 import { interviewCardDetail, interviewCardTitle } from '@/lib/hire/interviews';
+import { feedbackCardDetail, feedbackCardTitle } from '@/lib/hire/interview-feedback';
 import { isRealDate, monthLabel, weekdayName } from '@/lib/people/dates';
 import { blank, hhmm } from '@/lib/people/loose-input';
 import { unfilledInLetter } from '@/lib/people/letter-placeholders';
@@ -214,6 +215,9 @@ const KIND_OF_TOOL: Record<string, ItemKind> = {
   cancelInterview: 'interview',
   setInterviewOutcome: 'interview',
   reopenInterview: 'interview',
+  // The two changes to an interview's feedback answer with the interview's `id`, `candidate` and `job` too.
+  saveInterviewFeedback: 'interview',
+  clearInterviewFeedback: 'interview',
   listEmployees: 'employee',
   getEmployee: 'employee',
   createEmployee: 'employee',
@@ -1722,6 +1726,9 @@ export function approvalTitle(
     case 'setInterviewOutcome':
     case 'reopenInterview':
       return interviewCardTitle(toolName, i, find(i.id, 'interview') ?? UNLISTED_INTERVIEW) ?? 'Approve this change?';
+    case 'saveInterviewFeedback':
+    case 'clearInterviewFeedback':
+      return feedbackCardTitle(toolName, find(i.id, 'interview')) ?? 'Approve this change?';
     case 'createEmployee': return `Add employee “${i.name ?? ''}”?`;
     case 'updateEmployee': return `Save changes to ${the('employee', 'employee')}?`;
     case 'setEmployeeStatus':
@@ -2117,6 +2124,10 @@ export function approvalDetail(
   // Fixed sentences. Which of two same-named people it is, is said on a line of its own, read on the server (hire-pool-gate.ts).
   if (toolName === 'setPoolStatus') return poolCardDetail(i.status);
   if (toolName === 'moveToPipeline') return PIPELINE_CARD_DETAIL;
+  // A feedback change's second line is worded by the hiring code too: everything that will be saved (the comments
+  // cut at 600 characters, with how many more there are) and what the save will not do. Null for every other tool.
+  const feedbackDetail = feedbackCardDetail(toolName, i);
+  if (feedbackDetail !== null) return feedbackDetail;
   // An interview change's second line is worded by the hiring code from the change's own input (it answers null for
   // every other tool, and for the two interview changes that have no second line). Which interview it is, is said on
   // a line of its own, read on the server (hire-interview-gate.ts).
