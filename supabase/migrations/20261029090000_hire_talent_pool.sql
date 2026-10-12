@@ -1,8 +1,8 @@
 -- supabase/migrations/20261029090000_hire_talent_pool.sql
 -- Lekir slice 3d: the talent pool. Two functions are the only way to change a
 -- candidate's pool status; members still have select only. hire_add_candidate
--- is replaced with one expression changed, and one statement at the end moves
--- the people already added by hand with no job into the pool.
+-- is replaced with one expression changed. The one-time move of the people
+-- already added by hand with no job is the next migration, a file of its own.
 
 -- ---------------------------------------------------------------------------
 -- Set a candidate's pool status: add (from none), change, or remove (to none).
