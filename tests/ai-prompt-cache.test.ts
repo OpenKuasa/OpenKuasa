@@ -20,6 +20,41 @@ describe('cachedInstructions', () => {
   });
 });
 
+describe('cachedInstructions, for a prompt that ends with the time of day', () => {
+  const FIXED = 'You are Kasturi.\n\nRULES\n- One rule.';
+  const TODAY = 'TODAY\n- It is Tuesday, 2026-10-13, 09:41 in Malaysia (UTC+8).';
+  const mark = { openrouter: { cacheControl: { type: 'ephemeral' } } };
+
+  it('marks the fixed part and leaves the dated part out of the cache, in that order', () => {
+    expect(cachedInstructions(`${FIXED}\n\n${TODAY}`, FIXED)).toEqual([
+      { role: 'system', content: FIXED, providerOptions: mark },
+      { role: 'system', content: TODAY },
+    ]);
+  });
+
+  it('gives the model the same words, in the same order, as the one prompt did', () => {
+    const whole = `${FIXED}\n\n${TODAY}`;
+    const parts = cachedInstructions(whole, FIXED) as { content: string }[];
+    expect(parts.map((p) => p.content).join('\n\n')).toBe(whole);
+  });
+
+  it('a minute later, the cached part is word for word the same', () => {
+    const later = TODAY.replace('09:41', '09:42');
+    const [a] = cachedInstructions(`${FIXED}\n\n${TODAY}`, FIXED) as { content: string }[];
+    const [b] = cachedInstructions(`${FIXED}\n\n${later}`, FIXED) as { content: string }[];
+    expect(a.content).toBe(b.content);
+  });
+
+  it('caches nothing, and loses nothing, when the prompt does not begin with the fixed part', () => {
+    // Marked whole, a prompt holding the time would be written to the cache on every call and never read back.
+    expect(cachedInstructions(`Something else.\n\n${TODAY}`, FIXED)).toEqual({ role: 'system', content: `Something else.\n\n${TODAY}` });
+  });
+
+  it('is one marked message when nothing follows the fixed part', () => {
+    expect(cachedInstructions(FIXED, FIXED)).toEqual({ role: 'system', content: FIXED, providerOptions: mark });
+  });
+});
+
 describe('logModelCall', () => {
   const call = (details?: { cacheReadTokens?: number; cacheWriteTokens?: number }) => ({
     modelId: 'anthropic/claude-sonnet-4.6',

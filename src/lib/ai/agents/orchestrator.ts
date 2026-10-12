@@ -36,9 +36,12 @@ import {
   type ReachAccess,
 } from '@/lib/ai/products';
 import {
+  BENDAHARA_SYSTEM,
   bendaharaSystem,
   JEBAT_SYSTEM,
+  KASTURI_SYSTEM,
   LEKIR_SYSTEM,
+  LEKIU_SYSTEM,
   lekiuSystem,
   kasturiSystem,
   tuahSystem,
@@ -84,7 +87,7 @@ export function runJebat(
   const { tools, toolApproval } = boundToolkit([reachProduct(reach)], messages, approvals);
   return streamText({
     model: inUsersLanguage(getModel('orchestrator', apiKey)),
-    system: JEBAT_SYSTEM,
+    system: cachedInstructions(JEBAT_SYSTEM),
     messages,
     tools,
     toolApproval,
@@ -116,7 +119,8 @@ export function runKasturi(
   const { tools, toolApproval } = boundToolkit([crmProduct(crm), kasturiSharedProduct(reach)], messages, approvals);
   return streamText({
     model: inUsersLanguage(getModel('orchestrator', apiKey)),
-    system: kasturiSystem(new Date()),
+    // The fixed prompt is marked for the provider's cache; today's date and time follow it, unmarked.
+    system: cachedInstructions(kasturiSystem(new Date()), KASTURI_SYSTEM),
     messages,
     tools,
     toolApproval,
@@ -148,7 +152,7 @@ export function runLekir(
   const { tools, toolApproval } = boundToolkit([product], messages, approvals);
   return streamText({
     model: inUsersLanguage(getModel('orchestrator', apiKey)),
-    system: LEKIR_SYSTEM,
+    system: cachedInstructions(LEKIR_SYSTEM),
     messages,
     tools,
     toolApproval,
@@ -180,7 +184,7 @@ export function runLekiu(
   const { tools, toolApproval } = boundToolkit([peopleProduct(people)], messages, approvals);
   return streamText({
     model: inUsersLanguage(getModel('orchestrator', apiKey)),
-    system: lekiuSystem(new Date()),
+    system: cachedInstructions(lekiuSystem(new Date()), LEKIU_SYSTEM),
     messages,
     tools,
     toolApproval,
@@ -211,7 +215,7 @@ export function runBendahara(
   const { tools, toolApproval } = boundToolkit([financeProduct(finance)], messages, approvals);
   return streamText({
     model: inUsersLanguage(getModel('orchestrator', apiKey)),
-    system: bendaharaSystem(new Date()),
+    system: cachedInstructions(bendaharaSystem(new Date()), BENDAHARA_SYSTEM),
     messages,
     tools,
     toolApproval,

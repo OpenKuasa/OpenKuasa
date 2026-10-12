@@ -191,6 +191,19 @@ describe('Tuah with hiring', () => {
       expect(typeof systemOf(tuah!)?.content).toBe('string');
       expect(String(systemOf(tuah!)?.content)).toContain('You are Tuah');
     }
+    // A specialist Tuah asks sends its own prompt marked the same way.
+    seen.calls = [];
+    seen.prepareJob = true;
+    try {
+      await runTuah(...withTuah([{ role: 'user' as const, content: 'Post a job for a Barista' }], reach(), undefined, undefined, null, null, team(), hire())).consumeStream();
+    } finally {
+      seen.prepareJob = false;
+    }
+    const specialists = seen.calls.filter((c) => c.layer === 'worker');
+    expect(specialists.length).toBeGreaterThan(0);
+    for (const specialist of specialists) {
+      expect(systemOf(specialist)?.providerOptions).toEqual({ openrouter: { cacheControl: { type: 'ephemeral' } } });
+    }
   });
 });
 

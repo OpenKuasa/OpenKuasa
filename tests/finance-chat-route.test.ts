@@ -67,7 +67,8 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
       return new MockLanguageModelV4({
         doStream: async (options: { prompt: { role: string; content: unknown }[]; tools?: { name: string }[] }) => {
           ctl.calls.push({
-            system: String(options.prompt.find((m) => m.role === 'system')?.content ?? ''),
+            // The fixed prompt and today's date are two system messages (the first is marked for the provider's cache).
+            system: options.prompt.filter((m) => m.role === 'system').map((m) => String(m.content)).join('\n\n'),
             tools: (options.tools ?? []).map((tool) => tool.name),
           });
           return {

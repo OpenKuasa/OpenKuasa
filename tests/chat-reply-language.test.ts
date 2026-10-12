@@ -142,9 +142,11 @@ describe.each(ASSISTANTS)('%s is told the language of this reply', (_name, run) 
 
   it('the instructions say what the note is only when there is one, after everything else in them', async () => {
     await run(NOT_CLEAR).consumeStream();
-    const plain = String(lastPrompt().find((m) => m.role === 'system')?.content);
+    // The instructions are every leading system message: a prompt that ends with today's date is two of them.
+    const instructions = () => lastPrompt().filter((m) => m.role === 'system').map((m) => String(m.content)).join('\n\n');
+    const plain = instructions();
     await run(MALAY_THEN_ENGLISH).consumeStream();
-    const noted = String(lastPrompt().find((m) => m.role === 'system')?.content);
+    const noted = instructions();
     expect(noted.startsWith(plain)).toBe(true);
     expect(noted.length).toBeGreaterThan(plain.length);
     expect(noted.slice(plain.length)).toContain('not the user');

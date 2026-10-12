@@ -21,6 +21,7 @@ import {
 } from 'ai';
 import { z } from 'zod';
 import { subAgentSystem } from '@/lib/ai/agents/prompts';
+import { cachedInstructions } from '@/lib/ai/prompt-cache';
 import { prepareCvStep } from '@/lib/ai/hire-tools';
 import {
   AMBIGUOUS_DELETION,
@@ -558,7 +559,8 @@ function askTool(product: ProductToolkit, team: TeamContext, turn: TurnState, me
       try {
         const result = streamText({
           model: getModel('worker', team.apiKey),
-          system: subAgentSystem(product.key, canChange),
+          // A specialist's prompt is the same for every task of its kind: marked for the provider's cache.
+          system: cachedInstructions(subAgentSystem(product.key, canChange)),
           prompt: given,
           tools: specialistTools(product, team, results, prepared, given, turn, messages),
           // A CV this specialist reads reaches its own model as a user file in the next step:

@@ -13,7 +13,7 @@ const ctl = vi.hoisted(() => ({
   /** The key each model was built with: undefined means the platform key. */
   usedKeys: [] as (string | undefined)[],
   /** The system prompt and tool names each model call was given. */
-  calls: [] as { system: string; tools: string[] }[],
+  calls: [] as { system: string; tools: string[]; systemParts?: { content: string; marked: boolean }[] }[],
   freeConsumed: 0,
   /** What consume_ai_quota answers on a workspace key: turns left today, or -1 when used up. */
   dailyRemaining: 100 as number,
@@ -81,7 +81,11 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
           tools?: { name: string }[];
         }) => {
           ctl.calls.push({
-            system: String(options.prompt.find((m) => m.role === 'system')?.content ?? ''),
+            // The fixed prompt and today's date are two system messages (the first is marked for the provider's cache).
+            system: options.prompt.filter((m) => m.role === 'system').map((m) => String(m.content)).join('\n\n'),
+            systemParts: options.prompt
+              .filter((m) => m.role === 'system')
+              .map((m) => ({ content: String(m.content), marked: JSON.stringify((m as { providerOptions?: unknown }).providerOptions ?? {}).includes('ephemeral') })),
             tools: (options.tools ?? []).map((tool) => tool.name),
           });
           return {
@@ -204,6 +208,12 @@ describe('POST /api/crm/chat happy path', () => {
     );
     expect(call.tools).toEqual(expect.arrayContaining(['getBillingSummary', 'listBillingInvoices']));
     expect(call.system).toContain('TODAY');
+    // The fixed prompt is marked for the provider's cache; the date and time, which change every minute, are not.
+    expect(call.systemParts).toHaveLength(2);
+    expect(call.systemParts?.[0].marked).toBe(true);
+    expect(call.systemParts?.[0].content).not.toContain('TODAY');
+    expect(call.systemParts?.[1].marked).toBe(false);
+    expect(call.systemParts?.[1].content).toMatch(/^TODAY\n- It is /);
     // Appointments and lead forms are Kasturi screens too; ads and leads are not.
     expect(call.tools).toHaveLength(4 + 2 + 2 + CRM_WRITE_TOOL_NAMES.length + KASTURI_SHARED_TOOL_NAMES.length);
     expect(call.tools).not.toContain('getCampaigns');
