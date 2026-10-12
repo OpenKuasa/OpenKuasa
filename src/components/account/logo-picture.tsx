@@ -16,6 +16,10 @@ export function LogoPicture({ url, companyName }: { url: string | null; companyN
       {showing && url ? (
         // eslint-disable-next-line @next/next/no-img-element -- a user's logo from public storage; sized by the box
         <img
+          // An image that failed before hydration never fires onError: check it once it is mounted.
+          ref={(img) => {
+            if (img && img.complete && img.naturalWidth === 0) setFailedUrl(url);
+          }}
           src={url}
           alt={`${companyName} logo`}
           className="max-h-full max-w-full object-contain"

@@ -4,8 +4,64 @@ import {
   LOGO_REMOVE_PROMPT,
   logoButtonLabels,
   logoCardMode,
+  focusAfterConfirmClose,
+  isSampleLogo,
   logoShowsImage,
+  runLogoSave,
 } from '@/lib/account/logo-screens';
+
+describe('focusAfterConfirmClose', () => {
+  it('goes to Remove while a logo remains, else to the pick button', () => {
+    expect(focusAfterConfirmClose({ hasLogo: true })).toBe('remove');
+    expect(focusAfterConfirmClose({ hasLogo: false })).toBe('pick');
+  });
+});
+
+describe('isSampleLogo', () => {
+  it('is true only for the demo asset', () => {
+    expect(isSampleLogo('/demo-logo.png')).toBe(true);
+    expect(isSampleLogo('https://x.supabase.co/storage/v1/object/public/org-logos/a/b.png')).toBe(false);
+    expect(isSampleLogo(null)).toBe(false);
+  });
+});
+
+describe('runLogoSave', () => {
+  const file = new File(['x'], 'a.png', { type: 'image/png' });
+  type Deps = Parameters<typeof runLogoSave>[1];
+  const make = (over: Partial<Deps> = {}) => {
+    const calls: string[] = [];
+    const deps: Deps = {
+      prepare: async () => (calls.push('prepare'), { ok: true as const, input: file }),
+      pathFor: () => (calls.push('path'), 'org/p.png'),
+      upload: async () => (calls.push('upload'), { ok: true as const, data: { path: 'org/p.png' } }),
+      attach: async () => (calls.push('attach'), { ok: true as const, data: { logo_path: 'org/p.png' } }),
+      urlOf: (p) => `u:${p}`,
+      ...over,
+    };
+    return { calls, deps };
+  };
+  it('runs prepare, path, upload, attach in order and returns the new url', async () => {
+    const { calls, deps } = make();
+    expect(await runLogoSave(file, deps)).toEqual({ ok: true, url: 'u:org/p.png' });
+    expect(calls).toEqual(['prepare', 'path', 'upload', 'attach']);
+  });
+  it('uploads nothing when prepare refuses', async () => {
+    const { calls, deps } = make({ prepare: async () => ({ ok: false as const, error: 'not image' }) });
+    expect(await runLogoSave(file, deps)).toEqual({ ok: false, error: 'not image' });
+    expect(calls).toEqual([]);
+  });
+  it('calls no action when the upload fails', async () => {
+    const { calls, deps } = make({ upload: async () => ({ ok: false as const, error: 'up failed' }) });
+    expect(await runLogoSave(file, deps)).toEqual({ ok: false, error: 'up failed' });
+    expect(calls).not.toContain('attach');
+  });
+  it('reports the sentence and no new logo when the attach is refused', async () => {
+    const { deps } = make({ attach: async () => ({ ok: false as const, error: 'nope' }) });
+    const r = await runLogoSave(file, deps);
+    expect(r).toEqual({ ok: false, error: 'nope' });
+    expect('url' in r).toBe(false);
+  });
+});
 
 describe('logoCardMode', () => {
   it('lets an owner and an admin edit', () => {

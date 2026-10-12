@@ -7,7 +7,9 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LOGO_TYPES, logoPath, logoUrl, prepareLogoFile, uploadLogoFile } from '@/lib/account/logo';
 import {
+  focusAfterConfirmClose,
   LOGO_REMOVE_PROMPT,
+  runLogoSave,
   logoButtonLabels,
   type LogoWorking,
 } from '@/lib/account/logo-screens';
@@ -33,6 +35,8 @@ export function LogoCard({
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const keepRef = useRef<HTMLButtonElement>(null);
+  const pickRef = useRef<HTMLButtonElement>(null);
+  const confirmRef = useRef<HTMLDivElement>(null);
   const removeRef = useRef<HTMLButtonElement>(null);
   const wasConfirming = useRef(false);
   const [url, setUrl] = useState<string | null>(initialUrl);
@@ -43,34 +47,33 @@ export function LogoCard({
   const labels = logoButtonLabels({ hasLogo: url !== null, working });
 
   // Focus follows the Remove confirmation: to Keep when it opens, back to Remove when it is dismissed.
+  const hasLogo = url !== null;
   useEffect(() => {
     if (confirming) keepRef.current?.focus();
-    else if (wasConfirming.current) removeRef.current?.focus();
+    else if (wasConfirming.current) {
+      const target = focusAfterConfirmClose({ hasLogo }) === 'remove' ? (removeRef.current ?? pickRef.current) : pickRef.current;
+      target?.focus();
+    }
     wasConfirming.current = confirming;
-  }, [confirming]);
+  }, [confirming, hasLogo]);
 
   const save = async (chosen: File) => {
+    if (busy) return;
     setMessage(null);
     setWorking('saving');
     try {
-      const prepared = await prepareLogoFile(chosen);
-      if (!prepared.ok) {
-        setMessage({ kind: 'error', text: prepared.error });
+      const result = await runLogoSave(chosen, {
+        prepare: prepareLogoFile,
+        pathFor: (file) => logoPath(orgId, file),
+        upload: (path, file) => uploadLogoFile(createClient(), path, file),
+        attach: setLogoAction,
+        urlOf: (path) => logoUrl(path, { isDemo: false }),
+      });
+      if (!result.ok) {
+        setMessage({ kind: 'error', text: result.error });
         return;
       }
-      const file = prepared.input;
-      const path = logoPath(orgId, file);
-      const up = await uploadLogoFile(createClient(), path, file);
-      if (!up.ok) {
-        setMessage({ kind: 'error', text: up.error });
-        return;
-      }
-      const set = await setLogoAction(path);
-      if (!set.ok) {
-        setMessage({ kind: 'error', text: set.error });
-        return;
-      }
-      setUrl(logoUrl(set.data.logo_path, { isDemo: false }));
+      setUrl(result.url);
       setMessage({ kind: 'ok', text: 'Logo saved.' });
       router.refresh();
     } catch {
@@ -81,6 +84,9 @@ export function LogoCard({
   };
 
   const remove = async () => {
+    if (busy) return;
+    // The buttons are disabled while it runs: keep focus inside the confirmation until it closes.
+    confirmRef.current?.focus();
     setMessage(null);
     setWorking('removing');
     try {
@@ -112,7 +118,7 @@ export function LogoCard({
             Shown at the top of letters. PNG, JPEG or WebP, up to 1 MB.
           </p>
           {confirming ? (
-            <div className="space-y-2">
+            <div ref={confirmRef} tabIndex={-1} className="space-y-2 outline-none">
               <p className="text-sm">{LOGO_REMOVE_PROMPT}</p>
               <div className="flex gap-2">
                 <Button type="button" variant="destructive" size="sm" disabled={busy} onClick={() => void remove()}>
@@ -147,7 +153,7 @@ export function LogoCard({
                   if (file) void save(file);
                 }}
               />
-              <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => inputRef.current?.click()}>
+              <Button ref={pickRef} type="button" variant="outline" size="sm" disabled={busy} onClick={() => inputRef.current?.click()}>
                 {labels.pick}
               </Button>
               {labels.remove ? (

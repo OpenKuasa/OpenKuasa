@@ -1,3 +1,4 @@
+import { DEMO_LOGO_PATH } from '@/lib/account/logo';
 import { can } from '@/lib/auth/permissions';
 import type { OrgRole } from '@/lib/auth/current-org';
 
@@ -39,4 +40,41 @@ export function logoButtonLabels(state: { hasLogo: boolean; working: LogoWorking
 /** The picture shows only for a web address that has not failed to load; otherwise the empty state does. */
 export function logoShowsImage(state: { url: string | null; failed: boolean }): boolean {
   return Boolean(state.url) && !state.failed;
+}
+
+/** Which control takes focus when the Remove confirmation closes: Remove while a logo remains, else the pick button. */
+export function focusAfterConfirmClose(state: { hasLogo: boolean }): 'remove' | 'pick' {
+  return state.hasLogo ? 'remove' : 'pick';
+}
+
+/** True only for the demo's shipped sample asset, not for a demo workspace's own logo. */
+export function isSampleLogo(url: string | null): boolean {
+  return url === DEMO_LOGO_PATH;
+}
+
+type Outcome<T> = { ok: true; data: T } | { ok: false; error: string };
+
+/**
+ * The save sequence with its collaborators passed in: check the file (nothing is uploaded when it is refused),
+ * build the path, upload, then attach. An upload failure calls no action; a refused attach returns its sentence
+ * and no url, so the caller keeps the old logo.
+ */
+export async function runLogoSave(
+  chosen: File,
+  deps: {
+    prepare: (file: File) => Promise<{ ok: true; input: File } | { ok: false; error: string }>;
+    pathFor: (file: File) => string;
+    upload: (path: string, file: File) => Promise<Outcome<{ path: string }>>;
+    attach: (path: string) => Promise<Outcome<{ logo_path: string }>>;
+    urlOf: (path: string) => string | null;
+  },
+): Promise<{ ok: true; url: string | null } | { ok: false; error: string }> {
+  const prepared = await deps.prepare(chosen);
+  if (!prepared.ok) return { ok: false, error: prepared.error };
+  const path = deps.pathFor(prepared.input);
+  const up = await deps.upload(path, prepared.input);
+  if (!up.ok) return { ok: false, error: up.error };
+  const set = await deps.attach(path);
+  if (!set.ok) return { ok: false, error: set.error };
+  return { ok: true, url: deps.urlOf(set.data.logo_path) };
 }
