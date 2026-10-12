@@ -183,6 +183,16 @@ import {
   PAID_NOW_NEEDS_SIGN_OFF,
   READ_FAILED,
 } from '@/lib/finance/result';
+import {
+  VOUCHER_MESSAGES,
+  approveVoucher,
+  deleteVoucher,
+  deleteVoucherInput,
+  recordVoucher,
+  recordVoucherInput,
+  rejectVoucher,
+  voucherDecisionInput,
+} from '@/lib/finance/vouchers';
 import { createClient } from '@/lib/supabase/server';
 
 const FORBIDDEN: FinResult<never> = { ok: false, error: NOT_ALLOWED };
@@ -864,6 +874,44 @@ export async function rejectExpenseAction(input: unknown) {
 /** Deletes a pending or rejected expense. */
 export async function deleteExpenseAction(input: unknown) {
   return run(EXPENSE_PATHS, expenseIdInput, input, deleteExpense);
+}
+
+/* ---- payment vouchers -------------------------------------------------- */
+
+// A voucher is on Payment Vouchers. One that is waiting or still to be paid stands against the account it will
+// leave, which Banking will not archive while it does. A voucher that pays expenses holds its part of each, which
+// Expenses shows; one that pays supplier bills holds its part of each bill, which Supplier Bills and Payments
+// Out show, and once approved it is a payment still to be paid on Payments Out; a refund that was waiting is on
+// Refunds. Nothing here posts, pays or voids, so the books do not move and the ledger screens are not in the list.
+const VOUCHER_PATHS = [
+  '/finance/payment-vouchers',
+  '/finance/banking',
+  '/finance/expenses',
+  '/finance/supplier-bills',
+  '/finance/payments-out',
+  '/finance/refunds',
+];
+/** Approving or rejecting a voucher: an owner or admin only, told so in the voucher's own words. */
+const VOUCHER_DECIDE = { signOff: true, signOffError: VOUCHER_MESSAGES.needsDecider } as const;
+
+/**
+ * Records a voucher for a category. Anyone who may write can do this. The database approves it in the same call
+ * when the person recording it is an owner or admin, and makes it wait for approval otherwise; the answer says which.
+ */
+export async function recordVoucherAction(input: unknown) {
+  return run(VOUCHER_PATHS, recordVoucherInput, input, recordVoucher);
+}
+/** Approves a voucher that is waiting, as the person was shown it (every field the row showed): an owner or admin only, which the guard on payments enforces. */
+export async function approveVoucherAction(input: unknown) {
+  return run(VOUCHER_PATHS, voucherDecisionInput, input, approveVoucher, VOUCHER_DECIDE);
+}
+/** Rejects a voucher that is waiting, as the person was shown it: an owner or admin only. */
+export async function rejectVoucherAction(input: unknown) {
+  return run(VOUCHER_PATHS, voucherDecisionInput, input, rejectVoucher, VOUCHER_DECIDE);
+}
+/** Deletes a voucher that has not been paid, while it still has the status the person was shown. */
+export async function deleteVoucherAction(input: unknown) {
+  return run(VOUCHER_PATHS, deleteVoucherInput, input, deleteVoucher);
 }
 
 /* ---- chart of accounts and journals ------------------------------------ */
