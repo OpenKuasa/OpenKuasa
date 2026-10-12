@@ -273,4 +273,34 @@ describe('more boundaries', () => {
     expect(Number.isNaN(instantMs(undefined as never))).toBe(true);
     expect(Number.isNaN(instantMs(1_792_479_600_000 as never))).toBe(true);
   });
+  it('does not take a day or a time of day that does not exist and read it as a later one, in any zone', () => {
+    // Each of these has the shape of an instant. `Date.parse` alone reads 30 February as 2 March and 24:00 as the next day.
+    const impossible = [
+      '2026-02-30T10:00:00Z', '2026-02-29T10:00:00+08:00', '2026-02-31T10:00:00+08:00', '2026-04-31T10:00:00Z', '2100-02-29T10:00:00Z',
+      '2026-13-01T10:00:00Z', '2026-00-10T10:00:00Z', '2026-10-00T10:00:00Z', '2026-10-32T10:00:00Z',
+      '2026-10-20T24:00:00Z', '2026-10-20T24:00:00+08:00', '2026-10-20T25:00:00Z', '2026-10-20T10:60:00Z', '2026-10-20T10:00:60Z', '2026-10-20T10:00:61.5Z',
+      '2026-10-20T10:00:00+24:00', '2026-10-20T10:00:00+08:60', '2026-10-20T10:00:00-99:00',
+    ];
+    for (const [zone] of ZONES) {
+      inZone(zone, () => {
+        for (const text of impossible) {
+          expect(Number.isNaN(instantMs(text)), `${zone} ${text}`).toBe(true);
+          expect([klDateOf(text), klTimeOf(text), longDate(text), shortWhen(text), clock12(text), timeRange(text, 60)], `${zone} ${text}`)
+            .toEqual(['', '', text, text, text, text]);
+          expect(timeProblem(text, NOW), `${zone} ${text}`).toBe('in_past');
+          expect(pastProblem(text, NOW), `${zone} ${text}`).toBe('not_past');
+        }
+      });
+    }
+  });
+  it('still takes every real day and time at its edges', () => {
+    expect(instantMs('2028-02-29T23:59:59.999999+08:00')).toBe(Date.UTC(2028, 1, 29, 15, 59, 59, 999));
+    expect(instantMs('2000-02-29T00:00:00Z')).toBe(Date.UTC(2000, 1, 29));
+    expect(instantMs('2026-12-31T23:59:59Z')).toBe(Date.UTC(2026, 11, 31, 23, 59, 59));
+    expect(instantMs('2026-10-20T00:00:00+14:00')).toBe(Date.UTC(2026, 9, 19, 10, 0));
+    expect(instantMs('2026-10-20T00:00:00-12:00')).toBe(Date.UTC(2026, 9, 20, 12, 0));
+    expect(instantMs('2026-10-20T23:59:00+05:45')).toBe(Date.UTC(2026, 9, 20, 18, 14));
+    // The day is judged as it is written, in the text's own zone: 31 October written with +08:00 is real.
+    expect(instantMs('2026-10-31T23:30:00+08:00')).toBe(Date.UTC(2026, 9, 31, 15, 30));
+  });
 });

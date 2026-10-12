@@ -30,16 +30,25 @@ const WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_SHAPE = /^([01]\d|2[0-3]):[0-5]\d$/;
 // An instant says its own zone: `Z`, or an offset. Seconds and decimals are optional (the database writes six).
-const INSTANT_SHAPE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
+// The groups: the date, the hour and minute, the seconds, and the offset's hours and minutes.
+const INSTANT_SHAPE = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::(\d{2})(?:\.\d+)?)?(?:Z|[+-](\d{2}):(\d{2}))$/;
 
 /**
  * An instant as milliseconds, or NaN for text that is not one. Text with no
  * zone of its own (`2026-10-20T15:00`, `2026-10-20`, `Oct 20 2026`) is not an
  * instant: `Date.parse` would read it in the machine's zone, and the answer
  * would then differ between a laptop in Kuala Lumpur and a server in UTC.
+ * Nor is text whose day or time of day does not exist: `Date.parse` reads
+ * 30 February as 2 March and 24:00 as the next day, and a shifted time is
+ * worse than none. Every other function here reads an instant through this.
  */
 export function instantMs(iso: string): number {
-  return typeof iso === 'string' && INSTANT_SHAPE.test(iso) ? Date.parse(iso) : Number.NaN;
+  const parts = typeof iso === 'string' ? INSTANT_SHAPE.exec(iso) : null;
+  if (!parts) return Number.NaN;
+  const [, date, clock, seconds, offsetHours, offsetMinutes] = parts;
+  if (!isRealDate(date) || !TIME_SHAPE.test(clock)) return Number.NaN;
+  if (Number(seconds ?? 0) > 59 || Number(offsetHours ?? 0) > 23 || Number(offsetMinutes ?? 0) > 59) return Number.NaN;
+  return Date.parse(iso);
 }
 
 /** Whether a YYYY-MM-DD string names a day that exists: 31 February and month 13 do not. */
