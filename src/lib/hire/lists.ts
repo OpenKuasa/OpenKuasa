@@ -14,6 +14,8 @@ import {
 } from './applications-view';
 import type { RejectReason } from './application-changes';
 import { ago } from './dashboard';
+import { durationText, klDateOf } from './interview-time';
+import { needsOutcome } from './interviews';
 import { applicantsByJob, applicationsPerWeek } from './overview';
 import { POOL_LABEL, matchesPoolSearch, poolSearchText, type InPool } from './pool';
 import { ringgit } from './public-careers';
@@ -26,6 +28,7 @@ import {
   type EmploymentType,
   type HireData,
   type HireSettings,
+  type Interview,
   type InterviewKind,
   type InterviewStatus,
   type Job,
@@ -63,11 +66,6 @@ function klDate(iso: string): { day: string; month: string; year: string } {
 export const fullDate = (iso: string) => {
   const d = klDate(iso);
   return `${d.day} ${d.month} ${d.year}`;
-};
-/** "08 Oct". */
-const shortDate = (iso: string) => {
-  const d = klDate(iso);
-  return `${d.day} ${d.month}`;
 };
 /** "14:00". */
 const clock = (iso: string) =>
@@ -283,6 +281,82 @@ function applicationDetails(a: Application): ApplicationDetails | null {
   return details.coverLetter || details.cv || details.hasCvFile || details.portfolio || details.expectedSalary ? details : null;
 }
 
+/**
+ * One interview as the screens need it: what is drawn (`date`, `time`, `type`, `status`, `interviewer`), and the
+ * stored values the row's menu, the reschedule form, the invitation and the calendar file are made from. The
+ * candidate's name and the job's title are all it says of a person: no contact details.
+ */
+export type InterviewRow = {
+  id: string;
+  name: string;
+  role: string;
+  /** "12 Oct 2026", in Kuala Lumpur. With the year: the list runs from a year back to a year ahead. */
+  date: string;
+  /** "15:00", in Kuala Lumpur. */
+  time: string;
+  /** The interviewer's name, or a dash. */
+  interviewer: string;
+  type: 'Video' | 'Onsite' | 'Phone';
+  status: 'Scheduled' | 'Completed' | 'Cancelled' | 'No-show';
+  applicationId: string;
+  statusKey: InterviewStatus;
+  /** The start, as the instant stored. */
+  scheduledAt: string;
+  durationMinutes: number;
+  /** The length in words: "1 hour 30 minutes". */
+  length: string;
+  kind: InterviewKind;
+  /** The place or link as typed. */
+  place: string | null;
+  /** The place as a link, only when `safeLink` accepts it. */
+  placeLink: SafeLink | null;
+  interviewerName: string | null;
+  /** For the team only. */
+  notes: string | null;
+  createdAt: string;
+  /** What the reschedule form sends back, so a stale form saves nothing. */
+  updatedAt: string;
+  applicationStage: ApplicationStage;
+  applicationOutcome: ApplicationOutcome;
+  /** Scheduled, and its start has passed: tagged "Needs an outcome". */
+  needsOutcome: boolean;
+};
+
+const startOf = (i: Interview) => Date.parse(i.scheduled_at);
+const soonestFirst = (a: Interview, b: Interview) => startOf(a) - startOf(b);
+const latestFirst = (a: Interview, b: Interview) => startOf(b) - startOf(a);
+
+/** Each field is named: nothing of an interview reaches the browser by riding along. */
+function interviewRow(i: Interview, now: Date): InterviewRow {
+  return {
+    id: i.id,
+    name: i.candidate_name,
+    role: i.job_title,
+    // `fullDate`, already in this file ("12 Oct 2026"). `shortDate` ("12 Oct") had this one use: delete that
+    // helper from the file, or lint reports it unused.
+    date: fullDate(i.scheduled_at),
+    time: clock(i.scheduled_at),
+    interviewer: i.interviewer_name ?? '—',
+    type: KIND_LABEL[i.kind],
+    status: INTERVIEW_STATUS_LABEL[i.status],
+    applicationId: i.application_id,
+    statusKey: i.status,
+    scheduledAt: i.scheduled_at,
+    durationMinutes: i.duration_minutes,
+    length: durationText(i.duration_minutes),
+    kind: i.kind,
+    place: i.place,
+    placeLink: safeLink(i.place),
+    interviewerName: i.interviewer_name,
+    notes: i.notes,
+    createdAt: i.created_at,
+    updatedAt: i.updated_at,
+    applicationStage: i.application_stage,
+    applicationOutcome: i.application_outcome,
+    needsOutcome: needsOutcome(i.status, i.scheduled_at, now),
+  };
+}
+
 export type ApplicationsModel = {
   isEmpty: boolean;
   total: number;
@@ -290,14 +364,24 @@ export type ApplicationsModel = {
     /** `id` is the application's; `candidateId` the person's, for the Edit candidate form. */
     id: string; candidateId: string; poolStatus?: PoolStatus; name: string; job: string; source: string; status: ApplicationLabel; applied: string;
     details: ApplicationDetails | null;
+    /** The application's interviews, all of them: the ones ahead first (soonest first), then the past ones (latest first). */
+    interviews: InterviewRow[];
   } & ApplicationState)[];
   statusMix: { key: ApplicationLabel; value: number }[];
   byJob: { label: string; applications: number }[];
 };
 
-export async function buildApplicationsModel(data: HireData): Promise<ApplicationsModel> {
-  const [jobs, apps] = await Promise.all([data.listJobs(), data.listApplications()]);
+export async function buildApplicationsModel(data: HireData, now: Date = new Date()): Promise<ApplicationsModel> {
+  const [jobs, apps, interviews] = await Promise.all([data.listJobs(), data.listApplications(), data.listInterviews()]);
   const labelled = apps.map((a) => ({ a, status: applicationLabel(a.stage, a.outcome) }));
+  const byApplication = new Map<string, Interview[]>();
+  for (const i of interviews) byApplication.set(i.application_id, [...(byApplication.get(i.application_id) ?? []), i]);
+  const interviewsOf = (applicationId: string): InterviewRow[] => {
+    const own = byApplication.get(applicationId) ?? [];
+    const ahead = own.filter((i) => startOf(i) >= now.getTime());
+    const past = own.filter((i) => !(startOf(i) >= now.getTime()));
+    return [...ahead.sort(soonestFirst), ...past.sort(latestFirst)].map((i) => interviewRow(i, now));
+  };
   return {
     isEmpty: apps.length === 0,
     total: apps.length,
@@ -312,6 +396,7 @@ export async function buildApplicationsModel(data: HireData): Promise<Applicatio
       ...applicationState(a),
       applied: fullDate(a.applied_at),
       details: applicationDetails(a),
+      interviews: interviewsOf(a.id),
     })),
     statusMix: LABELS.map((key) => ({ key, value: labelled.filter((row) => row.status === key).length })),
     byJob: applicantsByJob(jobs, apps)
@@ -323,12 +408,19 @@ export async function buildApplicationsModel(data: HireData): Promise<Applicatio
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
 
+/** One application as the schedule form's picker lists it: who, for which job, and where it stands. No contact details. */
+export type PickerApplication = { id: string; name: string; job: string; stage: ApplicationStage; outcome: ApplicationOutcome };
+
 export type InterviewsModel = {
   isEmpty: boolean;
-  rows: {
-    id: string; name: string; role: string; date: string; time: string; interviewer: string;
-    type: 'Video' | 'Onsite' | 'Phone'; status: 'Scheduled' | 'Completed' | 'Cancelled' | 'No-show';
-  }[];
+  /**
+   * "All interviews": scheduled ones whose start has passed first (they need an outcome), then the scheduled ones
+   * still ahead, soonest first, then the cancelled, completed and no-show ones, latest first. Cut at ROWS_SHOWN.
+   */
+  rows: InterviewRow[];
+  /** "Upcoming interviews": scheduled AND still ahead, soonest first. Cut at ROWS_SHOWN. */
+  upcoming: InterviewRow[];
+  /** Every scheduled interview, whether or not its start has passed. */
   scheduled: number;
   completed: number;
   noShow: number;
@@ -336,38 +428,44 @@ export type InterviewsModel = {
   next7Days: number;
   /** Those interviews by weekday, Monday to Friday only (for the chart; weekend ones are not in it). */
   weekLoad: { label: string; count: number }[];
+  /**
+   * Every application that was read, by name: the schedule form lists the active ones, and the form for an
+   * interview that already took place lists them all.
+   */
+  applications: PickerApplication[];
+  /** True when the applications read came back with its full HIRE_READ_CAP rows: an older application may be missing. */
+  applicationsCut: boolean;
+  /** Today in Kuala Lumpur, as YYYY-MM-DD: the date field's `min` or `max`. The browser's own today can be another day. */
+  today: string;
 };
 
 export async function buildInterviewsModel(data: HireData, now: Date): Promise<InterviewsModel> {
-  const interviews = await data.listInterviews();
+  const [interviews, apps] = await Promise.all([data.listInterviews(), data.listApplications()]);
   const count = (status: InterviewStatus) => interviews.filter((i) => i.status === status).length;
   const ahead = interviews.filter((i) => {
     const at = Date.parse(i.scheduled_at);
     return i.status === 'scheduled' && at >= now.getTime() && at < now.getTime() + 7 * DAY;
   });
   const weekday = (iso: string) => new Date(iso).toLocaleDateString('en-US', { weekday: 'short', timeZone: TZ });
-  // Scheduled first (soonest first), then the past ones, latest first.
-  const ordered = [
-    ...interviews.filter((i) => i.status === 'scheduled'),
-    ...interviews.filter((i) => i.status !== 'scheduled').reverse(),
-  ];
+  // Sorted here, not left to the provider's order.
+  const overdue = interviews.filter((i) => needsOutcome(i.status, i.scheduled_at, now)).sort(soonestFirst);
+  const coming = interviews.filter((i) => i.status === 'scheduled' && !needsOutcome(i.status, i.scheduled_at, now)).sort(soonestFirst);
+  const closed = interviews.filter((i) => i.status !== 'scheduled').sort(latestFirst);
   return {
     isEmpty: interviews.length === 0,
-    rows: ordered.slice(0, ROWS_SHOWN).map((i) => ({
-      id: i.id,
-      name: i.candidate_name,
-      role: i.job_title,
-      date: shortDate(i.scheduled_at),
-      time: clock(i.scheduled_at),
-      interviewer: i.interviewer_name ?? '—',
-      type: KIND_LABEL[i.kind],
-      status: INTERVIEW_STATUS_LABEL[i.status],
-    })),
+    rows: [...overdue, ...coming, ...closed].slice(0, ROWS_SHOWN).map((i) => interviewRow(i, now)),
+    upcoming: coming.slice(0, ROWS_SHOWN).map((i) => interviewRow(i, now)),
     scheduled: count('scheduled'),
     completed: count('completed'),
     noShow: count('no_show'),
     next7Days: ahead.length,
     weekLoad: WEEKDAYS.map((label) => ({ label, count: ahead.filter((i) => weekday(i.scheduled_at) === label).length })),
+    // Each field is named: an email, a phone, a CV link or a path can never ride along.
+    applications: apps
+      .map((a) => ({ id: a.id, name: a.candidate_name, job: a.job_title, stage: a.stage, outcome: a.outcome }))
+      .sort((a, b) => a.name.localeCompare(b.name) || a.job.localeCompare(b.job)),
+    applicationsCut: apps.length >= HIRE_READ_CAP,
+    today: klDateOf(now.toISOString()),
   };
 }
 

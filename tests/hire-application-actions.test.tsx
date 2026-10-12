@@ -269,8 +269,8 @@ describe('the two screens', () => {
   const applications: ApplicationsModel = {
     isEmpty: false, total: 2,
     rows: [
-      { id: ID, candidateId: CANDIDATE, name: 'Aina Rahman', job: 'Barista', source: 'LinkedIn', status: 'Shortlisted', applied: '08 Oct 2026', details: null, stage: 'interview', outcome: 'active', rating: 4, rejectReason: null },
-      { id: '55555555-5555-4555-8555-555555555555', candidateId: '66666666-6666-4666-8666-666666666666', name: 'Ben Tan', job: 'Cashier', source: 'Referral', status: 'Rejected', applied: '07 Oct 2026', details: null, stage: 'applied', outcome: 'rejected', rating: null, rejectReason: 'role_filled' },
+      { id: ID, candidateId: CANDIDATE, name: 'Aina Rahman', job: 'Barista', source: 'LinkedIn', status: 'Shortlisted', applied: '08 Oct 2026', details: null, interviews: [], stage: 'interview', outcome: 'active', rating: 4, rejectReason: null },
+      { id: '55555555-5555-4555-8555-555555555555', candidateId: '66666666-6666-4666-8666-666666666666', name: 'Ben Tan', job: 'Cashier', source: 'Referral', status: 'Rejected', applied: '07 Oct 2026', details: null, interviews: [], stage: 'applied', outcome: 'rejected', rating: null, rejectReason: 'role_filled' },
     ],
     statusMix: [{ key: 'New', value: 0 }, { key: 'In review', value: 0 }, { key: 'Shortlisted', value: 1 }, { key: 'Rejected', value: 1 }],
     byJob: [],
