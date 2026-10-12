@@ -7,11 +7,14 @@ import {
   inboxReceiptPath,
   isHeif,
   jpgFileName,
+  receiptDownloadName,
   receiptSizeProblem,
   sniffReceiptType,
   uploadFailure,
 } from '@/lib/finance/receipt-files';
+import type { ReceiptLink } from '@/lib/finance/receipt-inbox';
 import { INBOX_RECEIPT_BUCKET, type InboxReceiptType } from '@/lib/finance/receipts';
+import type { FinResult } from '@/lib/finance/result';
 import { createClient } from '@/lib/supabase/client';
 import { heicToJpeg } from './receipt-heic';
 
@@ -106,12 +109,48 @@ export async function previewUrlOf(url: string, type: InboxReceiptType): Promise
   }
 }
 
-/** Starts the download of a short link. Storage serves it as an attachment, so the page stays where it is. */
-export function startDownload(url: string): void {
-  const link = document.createElement('a');
-  link.href = url;
-  link.rel = 'noopener';
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
+/**
+ * Saves the file behind a short link to the person's device without leaving
+ * the page: the browser fetches the bytes and hands its own copy to a
+ * temporary `<a download>`, then lets the copy go. The page is never pointed
+ * at the stored file, so a refused or expired link cannot replace it with
+ * storage's error text, and an upload running in the background is not
+ * interrupted by a "leave this site?" question. Null when it worked, or the
+ * sentence that says why not.
+ */
+async function saveFromLink(url: string, type: InboxReceiptType): Promise<string | null> {
+  try {
+    const res = await fetch(url, { cache: 'no-store', credentials: 'omit' });
+    if (!res.ok) return M.downloadFailed;
+    // The type is the receipt's own, not whatever the store sent.
+    const copy = URL.createObjectURL(new Blob([await res.arrayBuffer()], { type }));
+    const link = document.createElement('a');
+    link.href = copy;
+    link.download = receiptDownloadName(type);
+    link.rel = 'noopener';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    // Not at once: some browsers read the copy after the click returns.
+    setTimeout(() => URL.revokeObjectURL(copy), 60_000);
+    return null;
+  } catch {
+    return M.downloadFailed;
+  }
+}
+
+/**
+ * Makes a one-minute link to a receipt's file (the server reads the stored
+ * bytes first and refuses a file that is not what its receipt says) and saves
+ * the file from it. Answers like a server action, so a screen can show it as
+ * one: pending while it works, the sentence if it fails.
+ */
+export async function downloadReceipt(
+  linkOf: (input: unknown) => Promise<FinResult<ReceiptLink>>,
+  id: string,
+): Promise<FinResult<true>> {
+  const link = await linkOf({ id });
+  if (!link.ok) return link;
+  const failed = await saveFromLink(link.data.url, link.data.type);
+  return failed ? { ok: false, error: failed } : { ok: true, data: true };
 }

@@ -20,6 +20,7 @@ import {
   receiptDownloadName,
   receiptSizeProblem,
   retryPlan,
+  tooManyLeftOut,
   sniffReceiptType,
   typeOfReceiptPath,
   uploadFailure,
@@ -174,6 +175,14 @@ describe('the upload queue', () => {
     // A finished file frees its place.
     const done = queueSet(full.items, 'k0', { step: 'done' });
     expect(queueAdd(done, picked(2, 100)).refused).toBe(1);
+    // So does a failed one: it is waiting for a person, not for a turn.
+    const failed = queueSet(full.items, 'k0', { step: 'failed', error: M.network });
+    expect(queueAdd(failed, picked(2, 100)).refused).toBe(1);
+  });
+
+  it('says how many were left out and that they can be added later', () => {
+    expect(tooManyLeftOut(5)).toBe('Twenty files can wait at once. 5 files were left out. Add them when these have finished.');
+    expect(tooManyLeftOut(1)).toBe('Twenty files can wait at once. 1 file was left out. Add it when these have finished.');
   });
 
   it('cleans the name it shows', () => {

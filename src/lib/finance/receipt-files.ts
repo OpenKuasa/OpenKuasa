@@ -16,11 +16,19 @@ export const RECEIPT_FILE_MESSAGES = {
   // Storage refused the upload under the bucket's rule: the workspace is out of room, or the person may no longer write.
   refused:
     'The upload was refused. Your workspace may have used its 1 GB for receipts, or you may no longer be allowed to add files here. Reload the page and try again.',
+  // Saving a file from a short link to the person's device failed.
+  downloadFailed: 'The file could not be downloaded. Please try again.',
   network: 'The upload did not finish. Check your connection and try again.',
   // The file is in the bucket and the inbox does not have it yet.
   notSaved: 'The file was uploaded, but it could not be added to the inbox. Try again: nothing needs to be uploaded twice.',
   tooMany: 'Twenty files can wait at once. Add the rest when these have finished.',
 } as const;
+
+/** A pick that did not all fit: how many were left out, and that they can be added once these are done. */
+export function tooManyLeftOut(left: number): string {
+  const these = left === 1 ? 'file was' : 'files were';
+  return `Twenty files can wait at once. ${left} ${these} left out. Add ${left === 1 ? 'it' : 'them'} when these have finished.`;
+}
 
 const M = RECEIPT_FILE_MESSAGES;
 
@@ -196,12 +204,12 @@ export type UploadItem = {
   storedAt: number | null;
 };
 
-/** Adds picked files to the queue, up to the cap. `refused` is how many did not fit. */
+/** Adds picked files to the queue, up to the cap; a failed file does not count toward it. `refused` is how many did not fit. */
 export function queueAdd(
   items: UploadItem[],
   picked: { key: string; name: string; size: number }[],
 ): { items: UploadItem[]; refused: number } {
-  const open = items.filter((i) => i.step !== 'done').length;
+  const open = items.filter((i) => i.step !== 'done' && i.step !== 'failed').length;
   const room = Math.max(0, UPLOAD_QUEUE_MAX - open);
   const taken = picked.slice(0, room);
   return {
