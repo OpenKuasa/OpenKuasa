@@ -170,6 +170,26 @@ export function DocumentFormCard<F extends DocumentFormState>({
             onChange={(e) => edit((f) => secondDate.set(f, e.target.value))}
           />
         </div>
+        {kind.extras?.map((extra, index) => (
+          <div key={extra.label} className={extra.inputMode === 'numeric' ? 'space-y-1.5 md:col-span-4' : 'space-y-1.5 md:col-span-8'}>
+            <Label htmlFor={`${id}-extra-${index}`}>{extra.label}</Label>
+            <Input
+              id={`${id}-extra-${index}`}
+              value={extra.get(form)}
+              inputMode={extra.inputMode}
+              maxLength={extra.inputMode === 'numeric' ? 3 : 500}
+              placeholder={extra.placeholder}
+              autoComplete="off"
+              aria-describedby={extra.hint ? `${id}-extra-${index}-hint` : undefined}
+              onChange={(e) => edit((f) => extra.set(f, e.target.value))}
+            />
+            {extra.hint ? (
+              <p id={`${id}-extra-${index}-hint`} className="text-xs text-muted-foreground">
+                {extra.hint}
+              </p>
+            ) : null}
+          </div>
+        ))}
 
         <fieldset
           className="space-y-2 md:col-span-12"

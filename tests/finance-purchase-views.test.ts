@@ -600,6 +600,11 @@ describe('purchaseOrderActions', () => {
     expect(purchaseOrderActions(rejected, otherAdmin)).toEqual(['edit', 'submit', 'cancel']);
     expect(purchaseOrderActions(rejected, owner)).toEqual(['edit', 'submit', 'cancel']);
   });
+  it('offers a numbered draft with no recorded raiser to edit and submit, and to cancel only to a sign-off viewer', () => {
+    const orphan = po({ status: 'draft', po_no: 'PO-0007', created_by: null, submitted_by: null });
+    expect(purchaseOrderActions(orphan, member)).toEqual(['edit', 'submit']);
+    expect(purchaseOrderActions(orphan, otherAdmin)).toEqual(['edit', 'submit', 'cancel']);
+  });
   describe('awaiting approval', () => {
     const pending = po({ status: 'pending_approval', created_by: 'raiser', submitted_by: 'submitter' });
     it('lets the person who raised it take it back or cancel it, and nothing more', () => {

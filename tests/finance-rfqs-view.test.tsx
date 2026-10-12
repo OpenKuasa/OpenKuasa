@@ -72,6 +72,7 @@ const actions: RfqActions = {
   send: done({ id: 'x', rfq_no: 'RFQ-0001' }),
   quote: done({ id: 'x' }),
   close: done({ id: 'x' }),
+  convert: done({ id: 'x' }),
   remove: done({ id: 'x' }),
   get: vi.fn(async () => ({ ok: false as const, error: 'unused' })),
   getSent: vi.fn(async () => ({ ok: false as const, error: 'unused' })),
@@ -98,6 +99,12 @@ describe('the RFQs list', () => {
 
   it('offers a sent RFQ Record prices and Close', () => {
     expect(items(render([row({ status: 'sent' })]))).toEqual(['Record prices', 'Close RFQ']);
+  });
+
+  it('offers a quoted RFQ with no order Make purchase order and Close, and one with an order only Close', () => {
+    expect(items(render([row({ status: 'quoted', total: 100, fully_priced: true })]))).toEqual(['Make purchase order', 'Close RFQ']);
+    const ordered = render([row({ status: 'quoted', fully_priced: true, purchase_order_id: 'po-1', purchase_order_no: 'PO-0007' })]);
+    expect(items(ordered)).not.toContain('Make purchase order');
   });
 
   it('offers a closed RFQ no menu, and shows only open ones until a status is chosen', () => {

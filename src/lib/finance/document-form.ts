@@ -195,6 +195,8 @@ export type DocumentFormKind<F extends DocumentFormState> = {
     label: string;
     placeholder?: string;
     inputMode?: 'numeric' | 'text';
+    /** A short line under the box, read with it. */
+    hint?: string;
     get: (form: F) => string;
     set: (form: F, value: string) => F;
   }[];

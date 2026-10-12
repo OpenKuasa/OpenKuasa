@@ -1,5 +1,6 @@
 import {
   closeRfqAction,
+  convertRfqAction,
   deleteRfqAction,
   getRfqAction,
   getSentRfqAction,
@@ -25,6 +26,7 @@ const ACTIONS: RfqActions = {
   send: sendRfqAction,
   quote: quoteRfqAction,
   close: closeRfqAction,
+  convert: convertRfqAction,
   remove: deleteRfqAction,
   get: getRfqAction,
   getSent: getSentRfqAction,

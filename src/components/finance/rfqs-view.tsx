@@ -1,13 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { Download, Lock, MessageSquare, Pencil, Plus, Search, Send, Tag, Trash2 } from 'lucide-react';
+import { ClipboardCheck, Download, Lock, MessageSquare, Pencil, Plus, Search, Send, Tag, Trash2 } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { ConfirmRow } from '@/components/finance/confirm-row';
 import { downloadCsv } from '@/components/finance/download-csv';
 import { RfqFormCard, type RfqFormActions } from '@/components/finance/rfq-form-card';
 import { type QuoteRfq, RfqPricesCard } from '@/components/finance/rfq-prices-card';
 import { RowMenu, type RowMenuItem } from '@/components/finance/row-menu';
+import { SavedNoteCard } from '@/components/finance/saved-note-card';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { useLocalToday } from '@/components/finance/use-local-today';
 import { PageHeader } from '@/components/screen/page-header';
@@ -43,6 +44,8 @@ export type RfqActions = RfqFormActions & {
   send: (input: unknown) => Promise<FinResult<{ id: string; rfq_no: string }>>;
   quote: QuoteRfq;
   close: (input: unknown) => Promise<FinResult<{ id: string }>>;
+  /** Makes a draft purchase order from a quoted RFQ. */
+  convert: (input: unknown) => Promise<FinResult<unknown>>;
   remove: (input: unknown) => Promise<FinResult<{ id: string }>>;
   /** Reads one draft with its lines, for the Edit form. */
   get: (input: unknown) => Promise<FinResult<RfqDetail>>;
@@ -77,6 +80,8 @@ type Open =
   | { kind: 'edit'; rfq: RfqListRow; detail: RfqDetail | null; today: string }
   /** `detail` is null while the sent RFQ's lines are being read. */
   | { kind: 'prices'; rfq: RfqListRow; detail: RfqDetail | null }
+  /** A draft purchase order has just been made from this RFQ. */
+  | { kind: 'converted'; rfq: RfqListRow }
   | { kind: Question; rfq: RfqListRow }
   | null;
 
@@ -111,7 +116,8 @@ export function RfqsView({
   const matching = filterRfqs(rows, query, filter, today);
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
   const columns = writer ? 9 : 8;
-  const asking = open && open.kind !== 'new' && open.kind !== 'edit' && open.kind !== 'prices' ? open : null;
+  const asking =
+    open && open.kind !== 'new' && open.kind !== 'edit' && open.kind !== 'prices' && open.kind !== 'converted' ? open : null;
   // A form holds what was typed, so nothing else opens over it: it is closed with its own Cancel first.
   const formOpen = open?.kind === 'new' || open?.kind === 'edit' || open?.kind === 'prices';
   // A row that is gone after a refresh takes its question with it; the message still has to be seen.
@@ -129,7 +135,7 @@ export function RfqsView({
     setOpen(null);
   };
 
-  const menuItem = (rfq: RfqListRow, action: Exclude<RfqAction, 'convert'>, actions: RfqActions): RowMenuItem => {
+  const menuItem = (rfq: RfqListRow, action: RfqAction, actions: RfqActions): RowMenuItem => {
     switch (action) {
       case 'edit':
         return {
@@ -162,6 +168,8 @@ export function RfqsView({
         };
       case 'send':
         return { label: 'Mark as sent', icon: Send, opens: true, onSelect: () => ask({ kind: 'send', rfq }) };
+      case 'convert':
+        return { label: 'Make purchase order', icon: ClipboardCheck, opens: true, onSelect: () => ask({ kind: 'convert', rfq }) };
       case 'close':
         return { label: 'Close RFQ', icon: Lock, opens: true, onSelect: () => ask({ kind: 'close', rfq }) };
       case 'delete':
@@ -192,6 +200,28 @@ export function RfqsView({
           >
             Mark this RFQ to {who} as sent? It gets its number and can no longer be edited or deleted: after this, only the
             supplier’s answer is recorded. Nothing is emailed from here.
+          </ConfirmRow>
+        );
+      case 'convert':
+        return (
+          <ConfirmRow
+            key={rfq.id}
+            {...shared}
+            tone="default"
+            icon={ClipboardCheck}
+            label={`Make a purchase order from ${name}`}
+            confirmLabel="Make purchase order"
+            pendingLabel="Making…"
+            onConfirm={() =>
+              confirm.run(
+                () => actions.convert(id),
+                // The row's question goes; the note at the top of the page says where the order is.
+                () => ask({ kind: 'converted', rfq }),
+              )
+            }
+          >
+            Make a draft purchase order from {number} to {who} ({rm(rfq.total)})? It gets the same supplier and lines, at the
+            prices quoted, and stays a draft on Purchase Orders until it is submitted for approval.
           </ConfirmRow>
         );
       case 'close':
@@ -282,6 +312,19 @@ export function RfqsView({
         <RfqPricesCard key={open.detail.id} rfq={open.detail} quote={actions.quote} onClose={close} />
       ) : (
         loading('Record prices', `${open.rfq.rfq_no ?? 'The RFQ'} to ${open.rfq.supplier_name}`)
+      );
+    }
+    if (open.kind === 'converted') {
+      return (
+        <SavedNoteCard
+          title="Draft purchase order made"
+          subtitle={`From ${open.rfq.rfq_no ?? 'the RFQ'} to ${open.rfq.supplier_name}`}
+          href="/finance/purchase-orders"
+          linkLabel="Purchase Orders"
+          onClose={close}
+        >
+          It has the RFQ’s supplier and lines, at the prices quoted. It is a draft: check it, then submit it for approval, on
+        </SavedNoteCard>
       );
     }
     return null;
@@ -418,12 +461,7 @@ export function RfqsView({
                 {shown.map((r) => {
                   const asked = question(r);
                   if (asked) return asked;
-                  // 'convert' is drawn once Purchase Orders is built (the next task); until then the menu leaves it out.
-                  const items = writer
-                    ? rfqActions(r)
-                        .filter((action) => action !== 'convert')
-                        .map((action) => menuItem(r, action, writer.actions))
-                    : [];
+                  const items = writer ? rfqActions(r).map((action) => menuItem(r, action, writer.actions)) : [];
                   const status = rfqDisplayStatus(r, today);
                   return (
                     <TableRow key={r.id} className={cn(r.status === 'closed' && 'opacity-60')}>
