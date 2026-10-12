@@ -55,6 +55,7 @@ const GATE_REASON_STARTS = [
   // The interview gate (hire-interview-gate.ts). Its other sentences begin as the ones above do, on purpose.
   'One interview change at a time.',
   'That link was not given by the user',
+  'That link has hidden characters in it',
   'Two interviews with ',
   'This interview was changed after the card was shown',
   'This interview no longer exists',

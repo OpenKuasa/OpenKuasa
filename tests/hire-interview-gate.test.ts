@@ -5,7 +5,7 @@ import { deletionProblem, guardDeletions, isGateReason, notLookedUp, stoppedAfte
 import {
   AMBIGUOUS_INTERVIEW_CHANGE, APPLICATION_NOT_ACTIVE, HIRE_INTERVIEW_TOOL_NAMES, INTERVIEW_GONE, NOTHING_WOULD_CHANGE, SAME_TIME_SENT, INTERVIEW_CHANGED_SINCE, INTERVIEW_CHECK_FAILED, LINK_NOT_GIVEN, ONE_INTERVIEW_CHANGE,
   actsOnApplication, ambiguousFor, guardInterviewChanges, interviewCardDecision, interviewChangeProblem, interviewCheckFor, interviewNotLookedUp, interviewTarget,
-  LINK_IN_INTERVIEWER, interviewLinkProblem, interviewPlacesIn, linkNobodyGave, linksIn, lookTheSameInterviews, sameLink, stringsIn,
+  LINK_HIDDEN, LINK_IN_INTERVIEWER, interviewLinkProblem, interviewPlacesIn, linkNobodyGave, linksIn, lookTheSameInterviews, sameLink, stringsIn,
 } from '@/lib/ai/hire-interview-gate';
 import { guardPoolChanges, lookedUpAs, poolChangeProblem } from '@/lib/ai/hire-pool-gate';
 import { THIS_INTERVIEW, interviewFullLine, interviewLine } from '@/lib/hire/interviews';
@@ -80,7 +80,7 @@ describe('the sentences', () => {
   it('are each known as a gate\'s own denial, so a call the gate denied is never taken for the user\'s no', () => {
     for (const reason of [
       ONE_INTERVIEW_CHANGE, interviewNotLookedUp(IV), notLookedUp('application', APP), AMBIGUOUS_INTERVIEW_CHANGE, LINK_NOT_GIVEN,
-      lookTheSameInterviews('Aina Rahman', 'Sales Executive'), INTERVIEW_CHECK_FAILED, INTERVIEW_CHANGED_SINCE, INTERVIEW_GONE, APPLICATION_NOT_ACTIVE, SAME_TIME_SENT, NOTHING_WOULD_CHANGE, LINK_IN_INTERVIEWER,
+      lookTheSameInterviews('Aina Rahman', 'Sales Executive'), INTERVIEW_CHECK_FAILED, INTERVIEW_CHANGED_SINCE, INTERVIEW_GONE, APPLICATION_NOT_ACTIVE, SAME_TIME_SENT, NOTHING_WOULD_CHANGE, LINK_IN_INTERVIEWER, LINK_HIDDEN,
     ]) {
       expect(isGateReason(reason), reason).toBe(true);
     }
@@ -550,6 +550,104 @@ describe('linkNobodyGave', () => {
     expect(interviewLinkProblem(typed, 'scheduleInterview', { place: 'zoom.us/j/9911', interviewer_name: 'Farah Lim' })).toBeNull();
     expect(interviewLinkProblem(typed, 'scheduleInterview', { place: 'Bilik Mesyuarat 2.1', interviewer_name: 'Dr. Aina b. Rahman' })).toBeNull();
     for (const odd of [undefined, null, 7, 'text']) expect(interviewLinkProblem(typed, 'scheduleInterview', odd)).toBeNull();
+  });
+  // An applicant chooses how a link is written in their CV. Every form below was once not seen as a link, so it was
+  // never compared with what the user typed, and got a card.
+  const ZW = '​';
+  it.each([
+    // An IP address for a host, with something after it.
+    ['203.0.113.5/join', ['203.0.113.5/join']],
+    ['203.0.113.5:8443/j/1', ['203.0.113.5:8443/j/1']],
+    ['Join on 192.168.1.5/meet.', ['192.168.1.5/meet']],
+    ['10.0.0.7:3000', ['10.0.0.7:3000']],
+    ['[2001:db8::1]/room', ['[2001:db8::1]/room']],
+    ['[2001:db8::1]:8443', ['[2001:db8::1]:8443']],
+    // A host followed only by a query, a fragment or a port.
+    ['evil.ru?id=5', ['evil.ru?id=5']],
+    ['evil.ru#room', ['evil.ru#room']],
+    ['evil.ru:8443', ['evil.ru:8443']],
+    ['meet.example.zone', ['meet.example.zone']],
+    ['zoom.us.evil.ru', ['zoom.us.evil.ru']],
+    ['meet.new', ['meet.new']],
+    // A host with a hyphen, an underscore, a full stop or a slash in front of it.
+    ['-zoom.us/j/1', ['zoom.us/j/1']],
+    ['_zoom.us/j/1', ['zoom.us/j/1']],
+    ['.zoom.us/j/1', ['zoom.us/j/1']],
+    ['see/zoom.us/j/1', ['zoom.us/j/1']],
+    // A login part in front of the host that is really meant, when a path follows.
+    ['@zoom.us/j/1', ['zoom.us/j/1']],
+    ['zoom.us@evil.ru/j/1', ['evil.ru/j/1']],
+    ['good.example@evil.example/x', ['evil.example/x']],
+    ['farah@evil.ru/join', ['evil.ru/join']],
+    // A scheme written with one slash.
+    ['msteams:/l/meetup-join/abc', ['msteams:/l/meetup-join/abc']],
+    ['https:/zoom.us/j/1', ['https:/zoom.us/j/1']],
+    // Full-width letters and a full-width full stop read as the letters they look like.
+    ['ｚｏｏｍ.ｕｓ/ｊ/1', ['zoom.us/j/1']],
+    ['zoom．us/j/1', ['zoom.us/j/1']],
+    // A hidden character in the host is taken out before the text is read.
+    [`zoom${ZW}.us/j/1`, ['zoom.us/j/1']],
+    [`zoom.${ZW}us/j/1`, ['zoom.us/j/1']],
+    ['zoom⁠.us‍/j/1', ['zoom.us/j/1']],
+    ['zo‮om.us/j/1', ['zoom.us/j/1']],
+    // A host in another script.
+    ['зум.рф/abc', ['зум.рф/abc']],
+    // A link inside the marks of bold text or code.
+    ['**https://meet.example.com/abc**', [LINK]],
+    ['`zoom.us/j/1`', ['zoom.us/j/1']],
+    // And the forms that were always seen.
+    ['zoom.us/j/9911', ['zoom.us/j/9911']],
+    ['www.example.xyz', ['www.example.xyz']],
+    ['syarikat.com.my', ['syarikat.com.my']],
+    ['t.co/abc', ['t.co/abc']],
+    ['zoommtg://zoom.us/join?confno=123', ['zoommtg://zoom.us/join?confno=123']],
+  ])('a link, however it is written: %s', (text, found) => {
+    expect(linksIn(text)).toEqual(found);
+    // Nobody typed it: refused as the place, and as part of an interviewer's name.
+    expect(interviewLinkProblem([user('Schedule her for Tuesday at 3, video')], 'scheduleInterview', { place: text })).not.toBeNull();
+    expect(interviewLinkProblem([user('Schedule her for Tuesday at 3, video')], 'scheduleInterview', { interviewer_name: `Farah ${text}` })).not.toBeNull();
+  });
+  it.each([
+    // Places, as people in Malaysia write them, with and without the space after an abbreviation.
+    'Level 3, Menara KL', 'Bilik Mesyuarat 2.1', 'Tingkat 12.5, Blok A/3', 'No.12, Jalan Ampang', 'Lot 5.02/5.03', 'Wisma U.N.', 'Tmn. Desa',
+    'Level 3A, The Gardens North Tower', 'Kg.Baru/KL', 'Sg.Buloh/Hospital', 'Bkt.Bintang/Pavilion', 'Sdn.Bhd/HQ', 'Menara.KL/Level3', 'Menara.KL',
+    'Jln.Ampang/KLCC', 'Tmn.Desa/Blok C', 'Blok B.My office', 'Aras 1.Me', 'Bilik 3.in the east wing', 'Plaza.Mont/Kiara', '3.30pm, bilik 4',
+    'Lobby, 9.30am-10.30am', 'Suite 12-3A, Jalan 1/2', 'Unit B-3-2', 'HR/Admin office', 'Aina Sdn.Bhd',
+    // Names and titles.
+    'Dr. Aina b. Rahman', 'Dr.Tan/Ops', 'Ms.Lim/HR', 'Mr.Lim', 'A.Rahman', 'Puan Farah (HR/Admin)', 'Tn.Hj.Ali/Ops', 'Dato.Seri/Board', 'Prof.Madya/Fakulti',
+    'En.Farid/Finance', 'Cik.Aina/HR',
+    // Other things that are not links.
+    'e.g. the lobby', 'v2.1 of the test', '+60 12-345 6789', '1.2.3.4', 'version 10.0.0.7', 'Is it ok.Boleh?', 'Call at 3:30', 'Ratio 3: 4 is odd',
+    // An email address is left alone: it is not a link, and whether it belongs in a place is the card's to show.
+    'farah@example.com', 'Write to farah.lim@syarikat.com.my', 'farah@example.com, level 3',
+  ])('ordinary text, not a link: %s', (text) => {
+    expect(linksIn(text)).toEqual([]);
+    expect(interviewLinkProblem([user('Schedule her for Tuesday at 3')], 'scheduleInterview', { place: text, interviewer_name: text })).toBeNull();
+  });
+  it('a link with a hidden character in it is refused outright, even when the user\'s message holds the same thing: nobody types one on purpose', () => {
+    expect(LINK_HIDDEN).toBe('That link has hidden characters in it, so no interview change was prepared: ask the user to type the link out by hand in their message, or prepare it without one.');
+    const hidden = `zoom${ZW}.us/j/666`;
+    const pasted = [user(`Schedule her on ${hidden}`)];
+    expect(interviewLinkProblem(pasted, 'scheduleInterview', { place: hidden })).toBe(LINK_HIDDEN);
+    expect(interviewLinkProblem(pasted, 'scheduleInterview', { place: `https://zoom.us/j/666${ZW}` })).toBe(LINK_HIDDEN);
+    expect(interviewLinkProblem(pasted, 'scheduleInterview', { place: 'Level 3', interviewer_name: `Farah ${hidden}` })).toBe(LINK_HIDDEN);
+    expect(interviewLinkProblem([user('Schedule her')], 'rescheduleInterview', { id: IV, place: 'zo‮om.us/j/1' })).toBe(LINK_HIDDEN);
+    // The same link sent clean is the link the user gave, hidden character and all in their message.
+    expect(interviewLinkProblem(pasted, 'scheduleInterview', { place: 'zoom.us/j/666' })).toBeNull();
+    // A hidden character that is in no link changes nothing.
+    expect(interviewLinkProblem([user('Schedule her')], 'scheduleInterview', { place: `Level 3${ZW}, Menara KL` })).toBeNull();
+  });
+  it('a link the user typed in full-width letters by accident is still their link, in either spelling', () => {
+    const wide = [user('Schedule her on ｚｏｏｍ．ｕｓ/ｊ/９９１１')];
+    expect(interviewLinkProblem(wide, 'scheduleInterview', { place: 'zoom.us/j/9911' })).toBeNull();
+    expect(interviewLinkProblem(wide, 'scheduleInterview', { place: 'ｚｏｏｍ．ｕｓ/ｊ/９９１１' })).toBeNull();
+    expect(interviewLinkProblem([user('Schedule her on zoom.us/j/9911')], 'scheduleInterview', { place: 'ｚｏｏｍ．ｕｓ/ｊ/９９１１' })).toBeNull();
+    expect(interviewLinkProblem(wide, 'scheduleInterview', { place: 'zoom.us/j/9912' })).toBe(LINK_NOT_GIVEN);
+    // An IP address, a one-slash scheme and a link in bold are compared like any other.
+    for (const link of ['203.0.113.5/join', 'msteams:/l/meetup-join/abc', '[2001:db8::1]:8443/x']) {
+      expect(interviewLinkProblem([user(`Use **${link}**`)], 'scheduleInterview', { place: link }), link).toBeNull();
+      expect(interviewLinkProblem([user(`Use ${link}x`)], 'scheduleInterview', { place: link }), link).toBe(LINK_NOT_GIVEN);
+    }
   });
   it('`extra` counts: the text of the lookups a specialist ran itself', () => {
     expect(linkNobodyGave([user('Schedule her')], LINK, `Aina Rahman\n${LINK}\nvideo`)).toBe(false);

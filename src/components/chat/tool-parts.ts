@@ -202,6 +202,7 @@ const REFUSAL_LINES: [start: string, line: string | null][] = [
   ['Two applications from someone called ', null],
   ['The date and time sent are the ones this interview already has', 'The time given was the time this interview already has, so nothing was prepared. Ask again for only what should change.'],
   ['The interviewer\'s name holds a link', 'The interviewer\'s name held a link, so nothing was prepared. A link goes in the Place or link field: give it as the place and ask again, or type it there on the Interviews screen.'],
+  ['That link has hidden characters in it', 'That link had hidden characters in it, so nothing was prepared: type the link out by hand in your message, or ask again without one.'],
   ['Nothing would change:', null],
   ['Two interviews with ', null],
   ['This interview no longer exists', null],

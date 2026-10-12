@@ -65,6 +65,14 @@ export const interviewNotLookedUp = (id: unknown) =>
 export const LINK_NOT_GIVEN =
   'That link was not given by the user since the last interview card, so no interview change was prepared: ask the user to give the link again in their message, or prepare it without one.';
 /**
+ * A link with a zero-width or a direction-changing character in it. It reads as one link and is another, or is one
+ * only once the hidden character is taken out: nobody types that on purpose, and it is how a link in a CV would get
+ * past a reader. Refused even when the user's own message holds the same thing. The other way is in the sentence:
+ * the user types the link out by hand (a typed link has no such character), or goes ahead without one.
+ */
+export const LINK_HIDDEN =
+  'That link has hidden characters in it, so no interview change was prepared: ask the user to type the link out by hand in their message, or prepare it without one.';
+/**
  * The interviewer is a typed name, and it is shown to the candidate in the invitation and the calendar file: a link
  * there would reach them unchecked. Refused whoever gave the link. The other way: give the link as the place (where
  * it is checked), or type it in "Place or link" on the Interviews screen.
@@ -185,47 +193,121 @@ export function interviewChangeProblem(
   return ambiguousFor(lookups, call.id) ? AMBIGUOUS_INTERVIEW_CHANGE : null;
 }
 
-/** A link with its scheme: "https://…", and any other scheme ("zoommtg://…"). */
-const SCHEME_LINK = /[a-z][a-z0-9+.-]*:\/\/\S+/gi;
-const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
+/** Characters that take no room or change the direction of the text: taken out before anything is read. */
+const HIDDEN = /[­͏؜ᅟᅠ឴឵᠎​-‏‪-‮⁠-⁤⁦-⁯ㅤ﻿ﾠ]/g;
+/** Text with look-alike forms folded into the plain ones (full-width letters, a full-width full stop). */
+const folded = (text: string) => text.normalize('NFKC');
+/** Text as it is read for links: folded, and with the hidden characters gone. */
+const plain = (text: string) => folded(text).replace(HIDDEN, '');
+
+/** A link with a scheme: "https://…", any other scheme ("zoommtg://…"), and a scheme written with one slash ("msteams:/…"). */
+const SCHEME_LINK = /(?<![\p{L}\p{N}])[a-z][a-z0-9+.-]*:\/\S+/giu;
+const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:\//i;
+/** An IP address for a host: four numbers, or the bracketed form, each with what follows it. */
+const IP_HOST = /(?<![\p{L}\p{N}.])((?:\d{1,3}\.){3}\d{1,3}|\[[0-9a-f:.]{2,}\])(?![\p{L}\p{N}.])(:\d{1,5})?([/?#]\S*)?/giu;
 /**
- * A host written without a scheme, with what follows it: labels joined by dots, ending in letters. Not one that is
- * part of an email address (an "@" before it, or after it), and not the middle of a longer word.
+ * A host written without a scheme, with what follows it: labels joined by dots, ending in letters, in any script.
+ * Not the middle of a longer word, and not the part of an email address before its "@".
  */
-const BARE_HOST = /(?<![a-z0-9@._\-/])((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+)([a-z]{2,24})(?![a-z0-9@-])(:\d{1,5})?([/?#]\S*)?/gi;
+const BARE_HOST = /(?<![\p{L}\p{N}])((?:[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?\.)+)(\p{L}{2,24})(?![\p{L}\p{N}@-])(:\d{1,5})?([/?#]\S*)?/giu;
 /**
- * Endings that make a dotted word a web address on their own ("zoom.us", "syarikat.com.my"). A dotted word with
- * another ending ("Menara.KL", "Sdn.Bhd", "Mr.Lim") is taken for a link only when it begins "www." or a path follows.
+ * Endings that make a dotted word a web address on their own ("zoom.us", "syarikat.com.my", "meet.new"). Not "am"
+ * or "pm": "3.pm" is a time.
  */
 const WEB_ENDINGS = new Set([
   'com', 'net', 'org', 'io', 'co', 'my', 'us', 'me', 'app', 'dev', 'ai', 'edu', 'gov', 'info', 'biz', 'sg', 'uk', 'id', 'ly', 'gl', 'to', 'tv', 'cc',
   'link', 'page', 'site', 'online', 'live', 'team', 'chat', 'video', 'cloud', 'xyz', 'in', 'au', 'ca', 'de', 'fr', 'eu', 'asia',
+  'ru', 'cn', 'jp', 'kr', 'hk', 'tw', 'th', 'vn', 'ph', 'bn', 'nz', 'br', 'mx', 'es', 'nl', 'se', 'ch', 'pl', 'tr', 'ae', 'sa', 'pk', 'bd', 'lk', 'za',
+  'ua', 'su', 'tk', 'ml', 'ga', 'cf', 'gq', 'ws', 'fm', 'la', 'sh', 'ac', 'pw', 'top', 'club', 'shop', 'store', 'tech', 'space', 'website', 'zone', 'new',
+  'one', 'work', 'world', 'today', 'life', 'fun', 'icu', 'vip', 'pro', 'name', 'mobi', 'meet', 'zoom', 'click', 'rest', 'bar', 'email', 'run', 'art',
 ]);
-/** What ends a sentence or closes a bracket is not part of a link someone typed: "Use https://meet.example.com/abc." */
-const CLOSING = /[.,;:!?)\]}>'"”’]+$/;
-
 /**
- * Every link in a text, each as it was written but without the punctuation that follows it. A link is text with a
- * scheme ("https://meet.example.com/abc"), or a host without one: "www.…", a host with a known ending
- * ("zoom.us", "meet.google.com/abc"), or any dotted host with a path after it ("rooms.example.zone/abc").
- * Not a link: a place ("Level 3, Menara KL"), a room number ("Bilik Mesyuarat 2.1"), a title or an initial
- * ("Dr. Aina b. Rahman"), a phone number, and an email address, which is left alone on purpose.
+ * Titles and place words that people write with a full stop and no space after it: "Dr.Tan/Ops", "Kg.Baru/KL",
+ * "Sdn.Bhd/HQ". A dotted word made of these and one more word that is not a web ending is not a link, even with a
+ * slash after it.
  */
-export function linksIn(text: unknown): string[] {
-  if (typeof text !== 'string') return [];
+const TITLES_AND_PLACES = new Set([
+  'dr', 'mr', 'mrs', 'ms', 'mdm', 'miss', 'en', 'encik', 'cik', 'pn', 'puan', 'tn', 'tuan', 'hj', 'hjh', 'haji', 'hajah', 'dato', 'datuk', 'datin', 'tan',
+  'sri', 'seri', 'prof', 'ir', 'ts', 'ar', 'sr', 'jr', 'st', 'ybhg', 'yb',
+  'jln', 'jalan', 'lrg', 'lorong', 'tmn', 'taman', 'kg', 'kampung', 'sg', 'sungai', 'bkt', 'bukit', 'bdr', 'bandar', 'blk', 'blok', 'aras', 'tkt',
+  'tingkat', 'lot', 'no', 'bgn', 'bangunan', 'menara', 'wisma', 'plaza', 'kompleks', 'pejabat', 'bilik', 'level', 'lvl', 'suite', 'unit', 'sdn', 'bhd',
+  'pt', 'psn', 'persiaran', 'lbh', 'lebuh', 'kws', 'kawasan', 'seksyen', 'sek', 'pusat',
+]);
+/** What ends a sentence or closes a bracket, bold text or code is not part of a link someone typed: "Use https://meet.example.com/abc." */
+const CLOSING = /[.,;:!?)\]}>'"”’*`]+$/;
+
+/** Whether a dotted word, with what follows it, is a web address. The rule is said whole in `linksIn`. */
+function isWebHost(labels: string[], ending: string, followed: boolean): boolean {
+  const first = labels[0];
+  if (first === 'www') return true;
+  // "Blok B.My office", "Aras 1.Me": one letter, or a number, then a short word that happens to be an ending.
+  if (labels.length === 1 && !followed && ([...first].length === 1 || /^\d+$/.test(first))) return false;
+  if (WEB_ENDINGS.has(ending)) return true;
+  // With another ending, it takes a port, a path, a query or a fragment to be an address; and then not when every
+  // word before the ending is a title or a place word.
+  return followed && !labels.every((label) => TITLES_AND_PLACES.has(label));
+}
+
+/** The links in text that was already made ready (`plain`, or `folded` alone), each without its closing punctuation. */
+function linksInReady(ready: string): string[] {
   const found: { at: number; link: string }[] = [];
-  // Those with a scheme first, each then blanked out so its host is not found a second time.
-  const rest = text.replace(SCHEME_LINK, (whole, at: number) => {
+  const blank = (whole: string) => ' '.repeat(whole.length);
+  // Those with a scheme first, then IP addresses, each blanked out so that no part of it is found a second time.
+  let rest = ready.replace(SCHEME_LINK, (whole, at: number) => {
     const link = whole.replace(CLOSING, '');
-    if (HAS_SCHEME.test(link) && link.replace(HAS_SCHEME, '')) found.push({ at, link });
-    return ' '.repeat(whole.length);
+    if (link.replace(HAS_SCHEME, '')) found.push({ at, link });
+    return blank(whole);
+  });
+  rest = rest.replace(IP_HOST, (whole: string, host: string, port: string | undefined, after: string | undefined, at: number) => {
+    const numbers = host.startsWith('[') ? [] : host.split('.').map(Number);
+    // An address alone ("1.2.3.4") is a number, a version, a section: it takes a port or something after it.
+    const followed = Boolean(port) || (after ?? '').replace(CLOSING, '').length > 1;
+    if (!followed || numbers.some((n) => n > 255)) return whole;
+    found.push({ at, link: whole.replace(CLOSING, '') });
+    return blank(whole);
   });
   for (const match of rest.matchAll(BARE_HOST)) {
-    const [whole, labels, ending, , after] = match;
-    const web = labels.toLowerCase().startsWith('www.') || WEB_ENDINGS.has(ending.toLowerCase()) || (after?.startsWith('/') && after.length > 1);
-    if (web) found.push({ at: match.index ?? 0, link: whole.replace(CLOSING, '') });
+    const [whole, labels, ending, port, after] = match;
+    const at = match.index ?? 0;
+    const link = whole.replace(CLOSING, '');
+    // A port, or a path, a query or a fragment with something in it: "evil.ru?id=5", not "ok.Boleh?".
+    const followed = Boolean(port) || link.length > labels.length + ending.length + 1;
+    // After an "@" it is the host of an email address, which is left alone, unless something follows the host:
+    // "good.example@evil.example/x" is a link to evil.example.
+    if (rest[at - 1] === '@' && !followed) continue;
+    if (isWebHost(labels.toLowerCase().split('.').filter(Boolean), ending.toLowerCase(), followed)) found.push({ at, link });
   }
   return found.sort((a, b) => a.at - b.at).map((one) => one.link);
+}
+
+/**
+ * Every link in a text, each without the punctuation that follows it. The text is first folded into plain forms
+ * (full-width letters read as the letters they look like) and its hidden characters are taken out, so a link is
+ * found however it was dressed. A link is:
+ * - text with a scheme, with two slashes or one ("https://meet.example.com/abc", "zoommtg://…", "msteams:/…");
+ * - an IP address with a port or something after it ("203.0.113.5/join", "[2001:db8::1]:8443");
+ * - a host that begins "www.";
+ * - a host with a web ending ("zoom.us", "syarikat.com.my", "meet.new"), with or without anything after it;
+ * - any other dotted host with a port, a path, a query or a fragment after it ("rooms.example.host/abc",
+ *   "evil.host?id=5"), in any script, even after "user@".
+ * Not a link: a place ("Level 3, Menara KL"), a room number ("Bilik Mesyuarat 2.1"), a title or an initial
+ * ("Dr. Aina b. Rahman"), a phone number, a bare IP address, an email address (left alone on purpose), one letter
+ * or a number and a short word with nothing after ("Blok B.My office"), and a title or a place word joined to one
+ * more word that is not a web ending, even with a slash after it ("Dr.Tan/Ops", "Kg.Baru/KL", "Sdn.Bhd/HQ").
+ * What that last rule lets through: a real address whose every label is such a word and whose ending is not in the
+ * list of web endings. The card shows the place in full.
+ */
+export function linksIn(text: unknown): string[] {
+  return typeof text === 'string' ? linksInReady(plain(text)) : [];
+}
+
+/**
+ * True when a hidden character changes which links a text holds: one is a link only once the character is taken
+ * out, or reads differently with it. A hidden character that is in no link changes nothing.
+ */
+export function hasHiddenLink(text: unknown): boolean {
+  if (typeof text !== 'string' || folded(text) === plain(text)) return false;
+  return linksInReady(folded(text)).join('\n') !== linksInReady(plain(text)).join('\n');
 }
 
 /** Every string anywhere in a value, such as a tool's result. */
@@ -258,7 +340,7 @@ export function sameLink(link: string): string {
 function linkParts(link: string): { scheme: string | null; rest: string } {
   const written = HAS_SCHEME.test(link);
   const whole = sameLink(written ? link : `https://${link}`);
-  return { scheme: written ? whole.slice(0, whole.indexOf('://')).toLowerCase() : null, rest: whole.replace(HAS_SCHEME, '') };
+  return { scheme: written ? whole.slice(0, whole.indexOf(':')).toLowerCase() : null, rest: whole.replace(/^[a-z][a-z0-9+.-]*:\/*/i, '') };
 }
 /**
  * True when the two are the same link. With a scheme on both, the schemes must be the same. One written without a
@@ -373,7 +455,8 @@ export function linkNobodyGave(messages: readonly ModelMessage[], place: unknown
 
 /**
  * Why a change's place or interviewer must not reach a card, or null: a link in the place that nobody gave
- * (`linkNobodyGave`), or any link at all in the interviewer's name. Notes are not read: no candidate sees them.
+ * (`linkNobodyGave`), any link at all in the interviewer's name, or a link with a hidden character in either. Notes
+ * are not read: no candidate sees them.
  * For a change to an interview that exists, the place that interview already has counts as given: `results` are the
  * lookups to find it in (a specialist's own, in Tuah's team); left out, they are the conversation's. `card` says
  * which earlier calls were an interview card: a call id (the call being asked about, which is not its own
@@ -387,6 +470,8 @@ export function interviewLinkProblem(
   card?: string | IsInterviewCard,
 ): string | null {
   const sent = (input && typeof input === 'object' ? input : {}) as { place?: unknown; interviewer_name?: unknown };
+  // A link dressed with a hidden character is refused whoever gave it, in either field a candidate reads.
+  if (hasHiddenLink(sent.place) || hasHiddenLink(sent.interviewer_name)) return LINK_HIDDEN;
   // A new interview has no place yet: only what the user typed counts for it.
   const own = actsOnApplication(tool) ? [] : interviewPlacesIn(results ?? resultsIn(messages), interviewTarget(tool, input));
   const isCard: IsInterviewCard = typeof card === 'function' ? card : (call) => anInterviewCall(call) && call.toolCallId !== card;

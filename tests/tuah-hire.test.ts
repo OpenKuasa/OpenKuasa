@@ -2609,6 +2609,7 @@ describe('interview changes', () => {
     'More than one match was found for that name, so no interview change was prepared. Stop here: say which match and ask the user which one they mean. ' +
     'Once the user has said which, they can ask again.';
   const LINK_NOT_GIVEN = 'That link was not given by the user since the last interview card, so no interview change was prepared: ask the user to give the link again in their message, or prepare it without one.';
+  const LINK_HIDDEN = 'That link has hidden characters in it, so no interview change was prepared: ask the user to type the link out by hand in their message, or prepare it without one.';
   const LINK_IN_INTERVIEWER =
     'The interviewer\'s name holds a link, so no interview change was prepared. Give the interviewer as a name only. A link goes in the place, and only one the user gave.';
   const LOOK_THE_SAME =
@@ -2898,6 +2899,27 @@ describe('interview changes', () => {
         expect(run.context.proposals.size, name).toBe(0);
         expect(seen.refusals[0], name).toBe(LINK_IN_INTERVIEWER);
       }
+      nothingSaved();
+    });
+    it('a link in a form an applicant might choose (a hidden character, an IP address) is refused; a title with a slash is still a name', async () => {
+      const at = (place: string | undefined, more: Record<string, unknown> = {}): Call => ({ tool: 'scheduleInterview', input: { ...NEW, ...(place && { place }), ...more } });
+      const PLAIN = `Schedule ${WHO} for 12 January at 3pm, video`;
+      const hidden = await prepare([byName, at('zoom​.us/j/666'), 'answer'], world(), { said: PLAIN });
+      expect(hidden.context.proposals.size).toBe(0);
+      expect(seen.refusals[0]).toBe(LINK_HIDDEN);
+      for (const place of ['203.0.113.5/join', 'evil.ru?id=5', 'msteams:/l/meetup-join/abc']) {
+        const run = await prepare([byName, at(place), 'answer'], world(), { said: PLAIN });
+        expect(run.context.proposals.size, place).toBe(0);
+        expect(seen.refusals[0], place).toBe(LINK_NOT_GIVEN);
+      }
+      for (const link of [LINK, '203.0.113.5/join']) {
+        const run = await prepare([byName, at(link)], world(), { said: `${PLAIN}, on ${link}` });
+        expect(seen.refusals, link).toEqual([]);
+        expect(run.context.proposals.size, link).toBe(1);
+      }
+      const named = await prepare([byName, at('Kg.Baru/KL', { interviewer_name: 'Dr.Tan/Ops', kind: 'onsite' })], world(), { said: PLAIN });
+      expect(seen.refusals).toEqual([]);
+      expect(named.context.proposals.size).toBe(1);
       nothingSaved();
     });
     it('lets through a link the user typed in this turn, and the stored place of the interview being changed; not another interview\'s link, and not one from an earlier turn', async () => {
@@ -3395,6 +3417,29 @@ describe('interview changes', () => {
       }
       const changed = await request([[{ tool: 'rescheduleInterview', input: { id: IV, interviewer_name: 'see zoom.us/j/9911' } }]], agent);
       expect(changed.denials).toEqual([LINK_IN_INTERVIEWER]);
+      nothingSaved();
+    });
+    it.each(agents)('%s: a link in a form an applicant might choose (a hidden character, an IP address) gets no card; a title with a slash is still a name', async (agent) => {
+      const at = (place: string | undefined, more: Record<string, unknown> = {}): Call => ({ tool: 'scheduleInterview', input: { ...NEW, ...(place && { place }), ...more } });
+      const PLAIN = `Schedule ${WHO} for 12 January at 3pm, video`;
+      const hidden = await request([[at('zoom​.us/j/666')]], agent, world(), PLAIN);
+      expect(hidden.cards).toEqual([]);
+      expect(hidden.denials).toEqual([LINK_HIDDEN]);
+      for (const place of ['203.0.113.5/join', 'evil.ru?id=5', 'msteams:/l/meetup-join/abc', 'ｚｏｏｍ．ｕｓ/ｊ/６６６']) {
+        const run = await request([[at(place)]], agent, world(), PLAIN);
+        expect(run.cards, place).toEqual([]);
+        expect(run.denials, place).toEqual([LINK_NOT_GIVEN]);
+      }
+      // A real link the user typed is still accepted, and so is an IP address they typed.
+      for (const link of [LINK, '203.0.113.5/join']) {
+        const run = await request([[at(link)]], agent, world(), `${PLAIN}, on ${link}`);
+        expect(run.denials, link).toEqual([]);
+        expect(run.cards, link).toHaveLength(1);
+      }
+      // "Dr.Tan/Ops" is an interviewer, and "Kg.Baru/KL" a place, though nobody typed them.
+      const named = await request([[at('Kg.Baru/KL', { interviewer_name: 'Dr.Tan/Ops', kind: 'onsite' })]], agent, world(), PLAIN);
+      expect(named.denials).toEqual([]);
+      expect(named.cards).toHaveLength(1);
       nothingSaved();
     });
     it.each(agents)('%s: two interviews that read the same are refused, and so is a change when the server cannot be read', async (agent) => {
