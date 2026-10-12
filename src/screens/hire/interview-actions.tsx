@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useRef, useState, useTransition } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { AlertDialog, Popover } from 'radix-ui';
 import { MoreHorizontal, Plus } from 'lucide-react';
@@ -174,7 +174,9 @@ function useInterviewChange() {
   };
   /** A refusal known without asking the server: said at the row like any other, and the newest thing said on the screen. */
   const refuse = (text: string) => setRefusal({ text, seq: claimResult() });
-  return { pending, error: refusal && newest ? refusal.text : null, inFlight, send, ask, refuse, clearError: () => setRefusal(null) };
+  /** Stable, so an effect that holds it is not set up again on every render. */
+  const clearError = useCallback(() => setRefusal(null), []);
+  return { pending, error: refusal && newest ? refusal.text : null, inFlight, send, ask, refuse, clearError };
 }
 
 /**
@@ -215,6 +217,25 @@ export function InterviewRowMenu({ row }: { row: InterviewRow }) {
   const triggerId = openerId('row', row.id);
   const groups = rowMenuWithFeedback(row);
   const waiting = change.pending || undefined;
+  /** The refusal card is up (the cancel and clear-feedback confirms show the refusal themselves). */
+  const showing = Boolean(change.error && panel === null);
+  const card = useRef<HTMLDivElement>(null);
+  const { clearError } = change;
+  // A press anywhere outside the card clears it. Radix's own outside-press check stops counting once another row's menu
+  // (a modal layer) is open above it, so this does not lean on that. Capture phase, never prevented or stopped: the press
+  // still reaches what was pressed. Added after a tick, so the gesture that raised the refusal cannot dismiss it.
+  useEffect(() => {
+    if (!showing) return;
+    const onDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && card.current?.contains(event.target)) return;
+      clearError();
+    };
+    const timer = window.setTimeout(() => document.addEventListener('pointerdown', onDown, true), 0);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener('pointerdown', onDown, true);
+    };
+  }, [showing, clearError]);
 
   const choose = (item: RowMenuItem) => {
     if (item === 'reopen') {
@@ -240,7 +261,7 @@ export function InterviewRowMenu({ row }: { row: InterviewRow }) {
         shows at the row; it never takes focus. Escape and a press outside clear it through `clearError`.
       */}
       <Popover.Root
-        open={Boolean(change.error && panel === null)}
+        open={showing}
         // Escape or a press outside the card: the same clearing as everywhere else. The press itself is not stopped, so it still reaches what was pressed.
         onOpenChange={(next) => {
           if (!next) change.clearError();
@@ -326,6 +347,7 @@ export function InterviewRowMenu({ row }: { row: InterviewRow }) {
       </Popover.Anchor>
       <Popover.Portal>
         <Popover.Content
+          ref={card}
           role="alert"
           side="bottom"
           align="end"
