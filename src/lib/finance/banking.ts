@@ -106,6 +106,9 @@ export async function listBankTransactions(ctx: FinanceWriteContext): Promise<Ba
     if (error) throw error;
     const page = (data ?? []) as unknown as Record<string, unknown>[];
     rows.push(...page.map((row) => ({ ...(row as unknown as BankTransactionRow), amount: Number(row.amount) })));
-    if (page.length < PAYMENT_PAGE_SIZE) return rows;
+    if (page.length < PAYMENT_PAGE_SIZE) break;
   }
+  // A movement recorded between two page requests can arrive on both: keep the first.
+  const seen = new Set<string>();
+  return rows.filter((row) => !seen.has(row.transaction_id) && !!seen.add(row.transaction_id));
 }

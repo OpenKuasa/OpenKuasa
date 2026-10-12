@@ -3,7 +3,7 @@ import { listBankAccounts, listBankTransactions } from '@/lib/finance/banking';
 import { PAYMENT_PAGE_SIZE } from '@/lib/finance/money';
 import { type FinanceCall, fakeFinance } from './setup/fake-finance';
 
-// PostgREST answers a numeric column as a string when it is large, and as a number otherwise.
+// The fixture gives numeric columns as strings, as PostgREST can; the data layer must turn them into numbers either way.
 const accountRow = {
   id: 'a1', name: 'Main Bank', kind: 'bank', bank_name: 'Maybank', account_no: '5140', opening_balance: '1000.00',
   opening_date: '2026-01-01', active: true, balance: '72400.00', to_be_paid: '960.00', last_import_at: '2026-10-09T02:00:00Z',
@@ -24,7 +24,7 @@ describe('listBankAccounts', () => {
     expect(calls[0]).toMatchObject({
       kind: 'table', name: 'finance_account_balances', op: 'select', filters: { org_id: 'org-1' }, order: ['kind asc', 'name asc'],
     });
-    // Every column the row type has, and nothing the view does not have.
+    // The selector asks for exactly the columns of this test's fixture row (not checked against the migration).
     expect(calls[0].columns!.split(',').sort()).toEqual(Object.keys(accountRow).sort());
   });
   it('answers with no rows when the view has none, and throws when it cannot be read', async () => {
@@ -45,10 +45,18 @@ describe('listBankTransactions', () => {
   });
   it('reads on until a page comes back short', async () => {
     const full = Array.from({ length: PAYMENT_PAGE_SIZE }, (_, i) => ({ ...transactionRow, transaction_id: `t${i}` }));
-    const pages = (call: FinanceCall) => ({ data: call.range![0] === 0 ? full : [transactionRow], error: null });
+    const pages = (call: FinanceCall) => ({ data: call.range![0] === 0 ? full : [{ ...transactionRow, transaction_id: 'last' }], error: null });
     const { ctx, calls } = fakeFinance(pages);
     expect(await listBankTransactions(ctx)).toHaveLength(PAYMENT_PAGE_SIZE + 1);
     expect(calls.map((c) => c.range)).toEqual([[0, PAYMENT_PAGE_SIZE - 1], [PAYMENT_PAGE_SIZE, 2 * PAYMENT_PAGE_SIZE - 1]]);
+  });
+  it('drops a movement that arrives on two pages, as one recorded between two requests can', async () => {
+    const full = Array.from({ length: PAYMENT_PAGE_SIZE }, (_, i) => ({ ...transactionRow, transaction_id: `t${i}` }));
+    const second = [{ ...transactionRow, transaction_id: `t${PAYMENT_PAGE_SIZE - 1}` }, { ...transactionRow, transaction_id: 'new' }];
+    const { ctx } = fakeFinance((call) => ({ data: call.range![0] === 0 ? full : second, error: null }));
+    const rows = await listBankTransactions(ctx);
+    expect(rows).toHaveLength(PAYMENT_PAGE_SIZE + 1);
+    expect(new Set(rows.map((r) => r.transaction_id)).size).toBe(rows.length);
   });
   it('throws when the view cannot be read', async () => {
     await expect(listBankTransactions(fakeFinance({ data: null, error: { code: 'XX000' } }).ctx)).rejects.toEqual({ code: 'XX000' });
