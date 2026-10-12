@@ -22,11 +22,15 @@
  *     workspace's folder (checked with the service client: signed-in roles cannot list the bucket); a teardown
  *     step removes what an earlier failure left and fails loudly if anything remains.
  *
+ * The public address of a REMOVED file is deliberately not checked: storage serves public objects with a cache
+ * lifetime, so a removed object's address can keep answering 200 for a while. That a file is gone is proved by asking
+ * storage itself with the service client (the object is not listed under the workspace's folder).
+ *
  * Users and workspaces come from tests/helpers/live-workspaces.ts, which deletes them (it removes no storage
  * object: that is this file's job). Every sentence comes from the refusals modules, never a literal.
  */
 import { deflateSync } from 'node:zlib';
-import { afterAll, beforeAll, expect, test } from 'vitest';
+import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { LOGO_BUCKET, logoPath, logoUrl, uploadLogoFile } from '@/lib/account/logo';
 import { clearLogo, discardLogoUpload, removeLogoFile, setLogo } from '@/lib/account/logo-server';
@@ -146,9 +150,21 @@ const currentLogoPath = async (): Promise<string | null> => {
 async function publicBytes(path: string): Promise<{ status: number; type: string | null; bytes: Uint8Array }> {
   const url = logoUrl(path, { isDemo: false });
   expect(url).not.toBeNull();
-  const response = await fetch(url!);
+  // A cache-busting query string, so an earlier cached answer cannot interfere.
+  const response = await fetch(`${url!}?t=${crypto.randomUUID()}`);
   return { status: response.status, type: response.headers.get('content-type'), bytes: new Uint8Array(await response.arrayBuffer()) };
 }
+
+/** Leaves the workspace as it found it, even when an assertion threw: no logo, nothing in the folder. */
+async function reset() {
+  if (!owner || !service) return;
+  await clearLogo(ownerCtx());
+  for (const path of await pathsUnder(owner.orgId)) {
+    await service.storage.from(LOGO_BUCKET).remove([path]);
+    uploaded.delete(path);
+  }
+}
+afterEach(reset);
 
 beforeAll(async () => {
   if (!hasSupabaseEnv) return;
@@ -247,7 +263,7 @@ testWithSupabase('an owner sets, replaces and removes the logo; each old file is
   uploaded.delete(first.path);
   expect(await currentLogoPath()).toBe(second.path);
   expect(await pathsUnder(owner.orgId)).toEqual([second.path]);
-  expect((await publicBytes(first.path)).status).not.toBe(200);
+  expect(await pathsUnder(owner.orgId)).not.toContain(first.path);
   expect((await publicBytes(second.path)).status).toBe(200);
 
   // The same path again changes nothing and removes nothing.

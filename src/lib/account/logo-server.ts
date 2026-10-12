@@ -28,7 +28,8 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /**
- * Removes a logo file with the service client. Never throws. Only a path of the exact shape is ever passed to the
+ * Removes a logo file with the service client. Never throws. A removed logo's public address can keep answering
+ * until the storage cache expires; the file itself is gone. Only a path of the exact shape is ever passed to the
  * service role; callers pass only a path the database handed back, or an unattached upload they made (see
  * {@link discardLogoUpload}).
  */
