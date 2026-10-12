@@ -9,6 +9,8 @@ export type Capability =
   | 'manage-billing'
   | 'manage-members'
   | 'manage-ai-key'
+  | 'manage-email-key'
+  | 'send-broadcasts'
   | 'manage-agents'
   | 'manage-developers'
   | 'delete-workspace';
@@ -30,6 +32,9 @@ export const PERMISSIONS: {
   { capability: 'manage-billing', label: 'Manage billing & plan', allow: ['owner', 'admin'] },
   { capability: 'manage-members', label: 'Invite & manage members', allow: ['owner', 'admin'] },
   { capability: 'manage-ai-key', label: 'Manage the workspace AI key', allow: ['owner', 'admin'] },
+  { capability: 'manage-email-key', label: 'Manage the workspace email key', allow: ['owner', 'admin'] },
+  // Kept in step with public.crm_begin_broadcast_send in the database, which is what enforces it.
+  { capability: 'send-broadcasts', label: 'Send broadcasts by email', allow: ['owner', 'admin'] },
   { capability: 'manage-agents', label: 'Manage AI agents & their spend', allow: ['owner', 'admin'] },
   { capability: 'manage-developers', label: 'Manage API keys & webhooks', allow: ['owner'] },
   { capability: 'delete-workspace', label: 'Delete workspace', allow: ['owner'] },

@@ -66,6 +66,7 @@ function fakeClient(answers: Result[]) {
         return builder;
       };
     }
+    builder.maybeSingle = async () => ({ data: null, error: null, ...answers.shift() });
     builder.then = (resolve: (value: unknown) => void) => resolve({ data: null, error: null, ...answers.shift() });
     return builder;
   };
@@ -200,8 +201,14 @@ describe('saving a broadcast', () => {
     ]);
   });
 
-  it('says so when the broadcast has gone', async () => {
-    await expect(updateBroadcast(fakeClient([{ data: [] }]).client, 'org1', ID, fields)).rejects.toThrow(M.gone);
+  it('says so when the broadcast has gone, and differently when it was sent meanwhile', async () => {
+    await expect(updateBroadcast(fakeClient([{ data: [] }, { data: null }]).client, 'org1', ID, fields)).rejects.toThrow(
+      M.gone,
+    );
+    // The database only lets a draft be changed: the row is still there, but no longer a draft.
+    await expect(
+      updateBroadcast(fakeClient([{ data: [] }, { data: { id: ID } }]).client, 'org1', ID, fields),
+    ).rejects.toThrow(M.sentAlready);
     await expect(deleteBroadcast(fakeClient([{ data: [] }]).client, 'org1', ID)).rejects.toThrow(CrmContactFormError);
   });
 
@@ -222,7 +229,40 @@ describe('saving a broadcast', () => {
       subject: 'Diskaun Raya',
       body: 'Hi',
       audience: { statuses: ['lead', 'customer'], tags: [] },
+      status: 'draft',
+      revision: 1,
       updatedDay: '2026-10-12',
+      sentDay: null,
+      sentCount: 0,
+      failedCount: 0,
     });
+  });
+
+  it('reads a sent row back with its totals, dated by the day in Malaysia', () => {
+    expect(
+      mapBroadcast({
+        id: ID,
+        name: 'Raya promo',
+        subject: 'Diskaun Raya',
+        body: 'Hi',
+        audience_statuses: [],
+        audience_tags: [],
+        updated_at: '2026-10-12T03:04:05.000Z',
+        status: 'sent',
+        // 17:30 UTC on the 12th is 1:30 am on the 13th in Kuala Lumpur.
+        sent_at: '2026-10-12T17:30:00.000Z',
+        sent_count: 41,
+        failed_count: 2,
+      }),
+    ).toMatchObject({ status: 'sent', sentDay: '2026-10-13', sentCount: 41, failedCount: 2 });
+  });
+
+  it('leaves out an address that has unsubscribed, however it is written on the contact', () => {
+    const recipients = audienceFor(
+      [contact({ name: 'Stays', email: 'stays@example.com' }), contact({ name: 'Out', email: ' OUT@Example.com ' })],
+      { statuses: [], tags: [] },
+      new Set(['out@example.com']),
+    );
+    expect(recipients.map((c) => c.name)).toEqual(['Stays']);
   });
 });
