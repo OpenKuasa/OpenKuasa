@@ -55,6 +55,11 @@ export const APPLY_CV_PER_CLIENT: Rule = { bucket: 'apply_cv_client', limit: 10,
 /** Counted views of one form by one client: one per window. */
 export const FORM_VIEW_PER_CLIENT_AND_FORM: Rule = { bucket: 'form_view_client_form', limit: 1, unknownLimit: 60, windowSeconds: 10 * MINUTE };
 
+/** Questions one client puts to chatbots on public landing pages, across every page. Each is a paid model call for a workspace. */
+export const CHATBOT_MESSAGE_PER_CLIENT: Rule = { bucket: 'chatbot_message_client', limit: 20, unknownLimit: 200, windowSeconds: HOUR };
+/** Requests for a person made through those chatbots by one client. */
+export const CHATBOT_PERSON_PER_CLIENT: Rule = { bucket: 'chatbot_person_client', limit: 5, unknownLimit: 50, windowSeconds: HOUR };
+
 /** What a person is told once a limit on signing in, signing up or resetting is used up. */
 export const tooManyAttempts = (retryAfterSeconds: number) => {
   const minutes = retryMinutes(retryAfterSeconds);
@@ -151,4 +156,17 @@ export async function applyLimited(withCvFile: boolean): Promise<string | null> 
 /** Whether this view of a form is one to count: the first by this client in the window. */
 export async function formViewCounts(formId: string): Promise<boolean> {
   return (await waitFor((client) => [perClient(FORM_VIEW_PER_CLIENT_AND_FORM, client, formId)])) === null;
+}
+
+/**
+ * Before a visitor's question to a landing page's chatbot is answered, and
+ * before their request for a person is taken. Unlike the questions above this
+ * one fails closed: the answer costs a workspace money, so when the counter
+ * cannot be asked the question is refused ('unavailable'), not waved through.
+ */
+export async function chatbotLimited(rule: Rule): Promise<'ok' | 'limited' | 'unavailable'> {
+  const client = clientKey(await requestClientAddress());
+  const verdict = await consumeRateLimits([perClient(rule, client)]);
+  if (!verdict.allowed) return 'limited';
+  return verdict.enforced ? 'ok' : 'unavailable';
 }
