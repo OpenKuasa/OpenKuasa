@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { createElement } from 'react';
+import { type ComponentProps, createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { LetterBody, HEADING_CLASS } from '@/components/people/letter-body';
@@ -9,6 +9,7 @@ import { LETTER_BODY_MAX } from '@/lib/people/document-forms';
 import {
   type Block,
   type Inline,
+  type LetterheadDetails,
   type Mark,
   applyMark,
   inlineText,
@@ -29,14 +30,15 @@ function plainOf(blocks: Block[]): string {
     if (block.kind === 'gap') lines.push('');
     else if (block.kind === 'paragraph') for (const line of block.lines) lines.push(inlineText(line));
     else if (block.kind === 'heading') lines.push(inlineText(block.content));
-    else for (const item of block.items) lines.push(inlineText(item));
+    else if (block.kind === 'bullets') for (const item of block.items) lines.push(inlineText(item));
+    else for (const item of block.items) lines.push(inlineText(item.content));
   }
   return lines.join('\n');
 }
 
 const render = (body: string): string => renderToStaticMarkup(createElement(LetterBody, { body }));
 const ELEMENTS = new Set(['div', 'p', 'br', 'strong', 'em', 'ul', 'ol', 'li', 'h3', 'h4']);
-const ATTRIBUTES = new Set(['class', 'aria-hidden']);
+const ATTRIBUTES = new Set(['class', 'aria-hidden', 'value']);
 
 /** The tag and attribute names in the markup. */
 function shape(html: string): { tags: Set<string>; attributes: Set<string> } {
@@ -77,7 +79,7 @@ describe('parseLetter: blocks', () => {
       { kind: 'heading', level: 3, content: [T('Three')] },
       paragraph([T('Plain line')]),
       { kind: 'bullets', items: [[T('a')], [T('b')]] },
-      { kind: 'numbers', items: [[T('x')], [T('y')]] },
+      { kind: 'numbers', items: [{ n: 1, content: [T('x')] }, { n: 2, content: [T('y')] }] },
     ]);
   });
   it('keeps the line breaks inside a paragraph and makes each empty line a gap', () => {
@@ -205,7 +207,7 @@ describe('parseLetter: hostile text stays text', () => {
       expect(letters(visible(render(input)))).toBe(letters(input));
     }
   });
-  it('10,000 lines of marks parse as 10,000 lines', () => {
+  it('4,000 lines of marks parse as 4,000 lines', () => {
     const input = Array.from({ length: 4000 }, () => '**a *b').join('\n');
     const [p] = parseLetter(input) as Extract<Block, { kind: 'paragraph' }>[];
     expect(p.lines).toHaveLength(4000);
@@ -266,7 +268,7 @@ describe('the renderer maps node kinds to fixed elements', () => {
     expect(html).toContain(`<h4 class="${HEADING_CLASS[3]}">H3</h4>`);
     expect(html).toContain('<strong>b</strong> <em>i</em>');
     expect(html).toContain('<ul class="list-disc pl-6"><li class="break-inside-avoid">x</li></ul>');
-    expect(html).toContain('<ol class="list-decimal pl-6"><li class="break-inside-avoid">y</li></ol>');
+    expect(html).toContain('<ol class="list-decimal pl-6"><li value="1" class="break-inside-avoid">y</li></ol>');
   });
   it('keeps a heading with the line after it and a list item whole when printing', () => {
     for (const level of [1, 2, 3] as const) expect(HEADING_CLASS[level]).toContain('break-after-avoid');
@@ -306,8 +308,109 @@ describe('the source holds no way to turn text into markup', () => {
   });
 });
 
+describe('the parser is linear in a long line', () => {
+  const time = (input: string) => {
+    const t0 = performance.now();
+    parseLetter(input);
+    return performance.now() - t0;
+  };
+  it('parses 100,000 stars in under 200 ms', () => {
+    expect(time('*'.repeat(100000))).toBeLessThan(200);
+  });
+  it('parses 100,000 repetitions of "a*" in under 200 ms', () => {
+    expect(time('a*'.repeat(100000))).toBeLessThan(200);
+  });
+});
+
+describe('numbered lists keep the number that was typed', () => {
+  const numbers = (body: string) =>
+    parseLetter(body)
+      .filter((b): b is Extract<Block, { kind: 'numbers' }> => b.kind === 'numbers')
+      .flatMap((b) => b.items.map((i) => i.n));
+  const values = (body: string) => [...render(body).matchAll(/<li value="(\d+)"/g)].map((m) => m[1]);
+  it('shows 1, 2, 3 across three lists split by blank lines', () => {
+    const body = '1. one\n\n2. two\n\n3. three';
+    expect(numbers(body)).toEqual([1, 2, 3]);
+    expect(values(body)).toEqual(['1', '2', '3']);
+  });
+  it('shows 3, 4 for a list that starts at 3, and 1, 1 for 1. 1. as typed', () => {
+    expect(numbers('3. third\n4. fourth')).toEqual([3, 4]);
+    expect(numbers('1. a\n1. b')).toEqual([1, 1]);
+    expect(values('1. a\n1. b')).toEqual(['1', '1']);
+  });
+  it('the value is a number the parser built, from at most three digits', () => {
+    expect(numbers('007. x')).toEqual([7]);
+    expect(numbers('999. x')).toEqual([999]);
+    expect(parseLetter('1000. x')).toEqual([paragraph([T('1000. x')])]);
+  });
+  it('the preview uses the typed number', () => {
+    expect(plainPreview('3. third\n4. fourth')).toBe('3. third\n4. fourth');
+  });
+});
+
+describe('a star inside a word or number is text', () => {
+  const asText = (line: string) => expect(parseLetter(line), line).toEqual([paragraph([T(line)])]);
+  it('leaves a*b*c, 2*3*4 and 5*4=20 and 3*2=6 as typed', () => {
+    for (const line of ['a*b*c', '2*3*4', '5*4=20 and 3*2=6', 'x**y**z']) asText(line);
+  });
+  it('still reads marks at the edges of words and next to punctuation', () => {
+    const only = (body: string) => (parseLetter(body)[0] as Extract<Block, { kind: 'paragraph' }>).lines[0];
+    expect(only('**bold**')).toEqual([{ t: 'bold', children: [T('bold')] }]);
+    expect(only('*italic*')).toEqual([{ t: 'italic', children: [T('italic')] }]);
+    expect(only('(*note*)')).toEqual([T('('), { t: 'italic', children: [T('note')] }, T(')')]);
+    expect(only('**bold**, then')).toEqual([{ t: 'bold', children: [T('bold')] }, T(', then')]);
+  });
+});
+
+describe('line endings and look-alikes', () => {
+  it('reads CRLF and a lone CR as a line feed', () => {
+    expect(parseLetter('- a\r\n- b\r\n\r\nx')).toEqual(parseLetter('- a\n- b\n\nx'));
+    expect(parseLetter('a\rb')).toEqual(parseLetter('a\nb'));
+  });
+  it('keeps a null character and the full-width look-alikes as text', () => {
+    for (const text of ['a\u0000b', '＊a＊', '＃ x', '－ x']) {
+      expect(parseLetter(text)).toEqual([paragraph([T(text)])]);
+      expect(visible(render(text))).toBe(text);
+    }
+  });
+});
+
+describe('heading sizes', () => {
+  it('gives each level its own size, the largest still modest, and ## larger than body text', () => {
+    const size = (level: 1 | 2 | 3) => HEADING_CLASS[level].split(' ').find((c) => c.startsWith('text-'))!;
+    expect(new Set([size(1), size(2), size(3)]).size).toBe(3);
+    expect(size(2)).not.toBe('text-sm');
+    expect(size(1)).not.toMatch(/xl/);
+  });
+});
+
+describe('the starter templates in the salary migration', () => {
+  it('pins all twelve (six English, six Bahasa Malaysia) as rendering unchanged', () => {
+    const sql = readFileSync(resolve('supabase/migrations/20261105090100_people_letter_salary_templates.sql'), 'utf8');
+    const bodies: string[] = [];
+    for (const m of sql.matchAll(/E'((?:[^']|'')*)'/g)) {
+      if (m[1].startsWith('{today}')) bodies.push(m[1].replace(/\\n/g, '\n').replace(/''/g, "'"));
+    }
+    expect(bodies).toHaveLength(12);
+    for (const body of bodies) {
+      const tree = parseLetter(body);
+      expect(tree.every((b) => b.kind === 'paragraph' || b.kind === 'gap')).toBe(true);
+      expect(plainOf(tree)).toBe(body);
+      expect(visible(render(body))).toBe(body);
+      expect(render(body)).not.toMatch(/<(strong|em|ul|ol|li|h3|h4)/);
+    }
+  });
+});
+
+describe('print rules', () => {
+  it('keep a heading with what follows even across a blank line', () => {
+    const source = readFileSync(resolve('src/components/people/letter-view.tsx'), 'utf8');
+    expect(source).toContain('[data-letter-print] :is(h3, h4) + p[aria-hidden] { break-after: avoid; }');
+  });
+});
+
 describe('letterHeadLines', () => {
-  const base = { name: 'Rimba Ventures Sdn Bhd', registration_no: null, address: null, city: null, state: null, postcode: null };
+  const base: LetterheadDetails = { name: 'Rimba Ventures Sdn Bhd', registration_no: null, address: null, city: null, state: null, postcode: null };
   it('gives only the name when nothing else is set', () => {
     expect(letterHeadLines(base)).toEqual({ name: 'Rimba Ventures Sdn Bhd', details: [] });
   });
@@ -322,7 +425,7 @@ describe('letterHeadLines', () => {
     ]);
   });
   it('leaves out blank parts and never makes ", ," or a leading or trailing comma', () => {
-    const cases: [Partial<typeof base>, string][] = [
+    const cases: [Partial<LetterheadDetails>, string][] = [
       [{ address: '1 Jalan A' }, '1 Jalan A'],
       [{ city: 'Ipoh' }, 'Ipoh'],
       [{ postcode: '30000' }, '30000'],
@@ -361,7 +464,7 @@ describe('LetterHead', () => {
     ...over,
   });
   const draw = (value: ReturnType<typeof head> | null, workspaceName = 'Rimba Ventures') =>
-    renderToStaticMarkup(createElement(LetterheadProvider, { head: value, workspaceName }, createElement(LetterHead)));
+    renderToStaticMarkup(createElement(LetterheadProvider, { head: value, workspaceName } as ComponentProps<typeof LetterheadProvider>, createElement(LetterHead)));
   it('draws the name and lines with no logo when the workspace has none', () => {
     const html = draw(head());
     expect(html).toContain('Rimba Ventures');
@@ -514,5 +617,50 @@ describe('applyMark: headings and lists', () => {
   });
   it('works on an empty text', () => {
     expect(ok('', 0, 0, 'heading')).toEqual({ ok: true, text: '## ', selStart: 3, selEnd: 3 });
+  });
+});
+
+describe('applyMark keeps block markers outside the marks', () => {
+  const ok = (text: string, a: number, b: number, mark: Mark) => {
+    const r = applyMark(text, a, b, mark, LETTER_BODY_MAX);
+    if (!r.ok) throw new Error(r.error);
+    return r;
+  };
+  it('puts the mark after a bullet, a number and a heading marker', () => {
+    expect(ok('- one', 0, 5, 'bold').text).toBe('- **one**');
+    expect(ok('1. first', 0, 8, 'bold').text).toBe('1. **first**');
+    expect(ok('## Terms', 0, 8, 'bold').text).toBe('## **Terms**');
+    expect(ok('- one', 0, 5, 'italic').text).toBe('- *one*');
+  });
+  it('does the same for each line of a selection of list items', () => {
+    expect(ok('- one\n- two\n1. three', 0, 20, 'bold').text).toBe('- **one**\n- **two**\n1. **three**');
+  });
+  it('gives text the parser still reads as the list or heading', () => {
+    expect(parseLetter(ok('- one\n- two', 0, 11, 'bold').text)[0]).toEqual({
+      kind: 'bullets',
+      items: [[{ t: 'bold', children: [T('one')] }], [{ t: 'bold', children: [T('two')] }]],
+    });
+    expect(parseLetter(ok('## Terms', 0, 8, 'bold').text)[0]).toMatchObject({ kind: 'heading', level: 2 });
+  });
+  it('does not move a selection that starts after the marker', () => {
+    expect(ok('- one two', 2, 5, 'bold').text).toBe('- **one** two');
+  });
+  it('leaves a line that is only a marker alone', () => {
+    expect(ok('- ', 0, 2, 'bold').text).toBe('- ****');
+  });
+});
+
+describe('applyMark over text that already holds the mark', () => {
+  it('toggles off a selection exactly wrapped in the mark', () => {
+    expect(applyMark('**a b**', 0, 7, 'bold', LETTER_BODY_MAX)).toEqual({ ok: true, text: 'a b', selStart: 0, selEnd: 3 });
+  });
+  it('refuses, with a sentence, text with the mark inside it', () => {
+    const bold = applyMark('**a** b', 0, 7, 'bold', LETTER_BODY_MAX);
+    expect(bold.ok).toBe(false);
+    if (!bold.ok) expect(bold.error).toMatch(/\*\*/);
+    expect(applyMark('a*b', 0, 3, 'italic', LETTER_BODY_MAX).ok).toBe(false);
+  });
+  it('still allows italic over bold text', () => {
+    expect(applyMark('**a**', 0, 5, 'italic', LETTER_BODY_MAX)).toMatchObject({ ok: true, text: '***a***' });
   });
 });

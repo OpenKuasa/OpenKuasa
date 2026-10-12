@@ -11,13 +11,15 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { type CapResult, refuse } from '@/lib/people/capabilities';
 import { LOGO_NOT_IMAGE, LOGO_TOO_BIG, LOGO_UPLOAD_FAILED } from './logo-refusals';
 
-export const LOGO_BUCKET = 'org-logos';
+import { DEMO_LOGO_PATH, LOGO_BUCKET, LOGO_PATH, isLogoPath, logoUrl } from './logo-url';
+
+// The read-only half lives in a leaf module (`logo-url.ts`) so a member's page can import it without the upload.
+export { DEMO_LOGO_PATH, LOGO_BUCKET, LOGO_PATH, isLogoPath, logoUrl };
+
 export const LOGO_MAX_BYTES = 1_048_576;
 /** The only types the bucket takes. SVG is never one of them. */
 export const LOGO_TYPES: readonly string[] = ['image/png', 'image/jpeg', 'image/webp'];
 const EXTENSION_OF: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
-/** The static sample logo the demo workspace shows wherever it has none of its own. */
-export const DEMO_LOGO_PATH = '/demo-logo.png';
 
 type Converted<T> = { ok: true; input: T } | { ok: false; error: string };
 
@@ -65,33 +67,11 @@ export async function prepareLogoFile(file: File): Promise<Converted<File>> {
   return { ok: true, input: new File([file], file.name, { type }) };
 }
 
-const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
-/** Exactly what {@link logoPath} makes and the database accepts: lower case throughout, JPEG as `.jpg`. */
-export const LOGO_PATH = new RegExp(`^${UUID}/${UUID}\\.(png|jpg|webp)$`);
-
 /** `<org>/<random uuid>.<ext>`, the extension from the file's TYPE. Throws for a type that is not allowed. */
 export function logoPath(orgId: string, file: File): string {
   const type = typeOf(file);
   if (!Object.hasOwn(EXTENSION_OF, type)) throw new Error('Not a logo type.');
   return `${orgId.toLowerCase()}/${crypto.randomUUID()}.${EXTENSION_OF[type]}`;
-}
-
-/** True when `path` has the exact shape and sits in this workspace's folder. */
-export function isLogoPath(path: string, orgId: string): boolean {
-  if (typeof path !== 'string' || !LOGO_PATH.test(path)) return false;
-  return path.split('/')[0] === orgId.toLowerCase();
-}
-
-/**
- * The address of a logo anyone may fetch: the public URL of the path (formed as the avatars' is), or, for the demo
- * workspace with no logo of its own, the sample asset shipped with the app. A path of any other shape, or no project
- * configured, gives null, and a null path outside the demo gives null.
- */
-export function logoUrl(path: string | null, opts: { isDemo: boolean }): string | null {
-  if (path === null) return opts.isDemo ? DEMO_LOGO_PATH : null;
-  const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (!base || !LOGO_PATH.test(path)) return null;
-  return `${base}/storage/v1/object/public/${LOGO_BUCKET}/${path}`;
 }
 
 /**

@@ -13,9 +13,9 @@ import { LetterHead } from './letter-head';
 
 /** The classes used for each heading level (fixed). */
 export const HEADING_CLASS = {
-  1: 'break-after-avoid text-base font-semibold',
-  2: 'break-after-avoid text-sm font-semibold',
-  3: 'break-after-avoid text-sm font-medium',
+  1: 'break-after-avoid text-[1.0625rem] font-bold',
+  2: 'break-after-avoid text-base font-semibold',
+  3: 'break-after-avoid text-sm font-semibold',
 } as const;
 
 function inline(content: Inline[]): ReactNode {
@@ -84,8 +84,9 @@ function blockNode(block: Block, key: number): ReactNode {
       return (
         <ol key={key} className="list-decimal pl-6">
           {block.items.map((item, index) => (
-            <li key={index} className="break-inside-avoid">
-              {inline(item)}
+            // `value` is the number the parser read (one to three digits), never text.
+            <li key={index} value={item.n} className="break-inside-avoid">
+              {inline(item.content)}
             </li>
           ))}
         </ol>

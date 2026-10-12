@@ -301,6 +301,7 @@ describe('the member side of Letters names no owner-only action', () => {
         if (file.endsWith('letter-actions.ts')) continue;
         expect(file, file).not.toMatch(/letter-form|letter-row-controls|template-form|templates-section|letter-writes/);
         for (const name of ownerOnly) expect(source, `${file} names ${name}`).not.toContain(name);
+        expect(source, `${file} reaches a logo write`).not.toMatch(/uploadLogoFile|logo-actions|logo-server|setLogoAction|clearLogoAction/);
       }
     });
   }

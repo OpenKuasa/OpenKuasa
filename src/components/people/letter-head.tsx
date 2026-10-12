@@ -1,7 +1,7 @@
 'use client';
 
 import { type ReactNode, createContext, useContext, useState } from 'react';
-import { logoUrl } from '@/lib/account/logo';
+import { logoUrl } from '@/lib/account/logo-url';
 import type { Letterhead } from '@/lib/people/letterhead-data';
 import { letterHeadLines } from '@/lib/people/letter-marks';
 

@@ -1,4 +1,4 @@
-import { DEMO_LOGO_PATH } from '@/lib/account/logo';
+import { DEMO_LOGO_PATH } from '@/lib/account/logo-url';
 import { can } from '@/lib/auth/permissions';
 import type { OrgRole } from '@/lib/auth/current-org';
 

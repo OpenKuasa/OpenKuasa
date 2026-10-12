@@ -29,9 +29,10 @@ const PRINT_CSS = `
   /* Inside the dialog: the buttons and the draft note. */
   [data-letter-noprint] { display: none !important; }
   /* The letterhead is the first thing on the first page and stays in one piece; a heading is never left alone at the
-     foot of a page, and a list item is not split. (The editors' Preview is marked data-letter-noprint: it never prints.) */
+     foot of a page, and a list item is not split. (These rules exist only while a letter view is open. The editors' Preview is marked data-letter-noprint, so it is hidden if a view is open; printing with an editor open prints the page as before.) */
   [data-letter-print] header { break-inside: avoid; }
   [data-letter-print] h2, [data-letter-print] h3, [data-letter-print] h4 { break-after: avoid; }
+  [data-letter-print] :is(h3, h4) + p[aria-hidden] { break-after: avoid; }
   [data-letter-print] li { break-inside: avoid; }
 }
 `;

@@ -20,8 +20,12 @@
  *   nothing deeper. A mark must close on the same line, must not start or end with a space and must hold something
  *   besides stars and spaces; otherwise its characters stay text. `{placeholders}` are never marks.
  *
+ * - A star inside a word or number is text: an opening mark directly after a letter or digit, and a closing mark
+ *   directly before one, do not count (`a*b*c`, `2*3*4`). `\r\n` and a lone `\r` are read as `\n`.
+ *
  * Linear in the length of the input: no backtracking pattern, every closing search is paid for from a budget
- * proportional to the line, and a line that runs out of budget keeps the rest as text.
+ * proportional to the line (the budget is tested before each step of a search, so a long run of stars is not
+ * rescanned once it is spent), and a line that runs out of budget keeps the rest as text.
  */
 
 export type Inline =
@@ -33,13 +37,17 @@ export type Block =
   | { kind: 'heading'; level: 1 | 2 | 3; content: Inline[] }
   | { kind: 'paragraph'; lines: Inline[][] }
   | { kind: 'bullets'; items: Inline[][] }
-  | { kind: 'numbers'; items: Inline[][] }
+  /** `n` is the number as typed (one to three digits), kept so a list split by blank lines still reads 1, 2, 3. */
+  | { kind: 'numbers'; items: { n: number; content: Inline[] }[] }
   /** One empty line of the body. */
   | { kind: 'gap' };
 
 type MarkKind = 'bold' | 'italic';
 
 const isSpace = (ch: string): boolean => ch.trim() === '';
+
+/** A letter or digit (any script): a star touching one is part of a word or number, not a mark. */
+const isWordChar = (ch: string | undefined): boolean => ch !== undefined && /[\p{L}\p{N}]/u.test(ch);
 
 // ---- Inline ---------------------------------------------------------------------------
 
@@ -60,17 +68,20 @@ function validContent(content: string): boolean {
 function findClose(s: string, from: number, kind: MarkKind, budget: { left: number }): number {
   let p = from;
   for (;;) {
+    if (budget.left < 0) return -1;
     const q = s.indexOf('*', p);
     if (q < 0) return -1;
     budget.left -= q - p + 1;
     let r = q;
-    while (r < s.length && s[r] === '*') r += 1;
-    budget.left -= r - q;
+    while (r < s.length && s[r] === '*' && budget.left >= 0) {
+      r += 1;
+      budget.left -= 1;
+    }
     if (budget.left < 0) return -1;
     const run = r - q;
     if (kind === 'bold') {
-      if (run >= 2) return r - 2;
-    } else if (run === 1) {
+      if (run >= 2 && !isWordChar(s[r])) return r - 2;
+    } else if (run === 1 && !isWordChar(s[r])) {
       return q;
     }
     p = r;
@@ -87,7 +98,7 @@ function parseInline(s: string, allowed: readonly MarkKind[], budget: { left: nu
   let i = 0;
   while (i < s.length) {
     const ch = s[i];
-    if (ch === '*') {
+    if (ch === '*' && !isWordChar(s[i - 1])) {
       const double = s[i + 1] === '*';
       const kind: MarkKind | null = double
         ? allowed.includes('bold')
@@ -156,12 +167,12 @@ export function linePrefix(line: string, requireContent = true): LinePrefix | nu
 
 export function parseLetter(body: string): Block[] {
   if (body === '') return [];
-  const lines = body.split('\n');
+  const lines = body.replace(/\r\n?/g, '\n').split('\n');
   if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop();
 
   const blocks: Block[] = [];
   let paragraph: Inline[][] = [];
-  let list: { kind: 'bullets' | 'numbers'; items: Inline[][] } | null = null;
+  let list: Extract<Block, { kind: 'bullets' | 'numbers' }> | null = null;
   const closeParagraph = () => {
     if (paragraph.length > 0) blocks.push({ kind: 'paragraph', lines: paragraph });
     paragraph = [];
@@ -189,8 +200,14 @@ export function parseLetter(body: string): Block[] {
       closeParagraph();
       const kind = prefix.kind === 'bullet' ? 'bullets' : 'numbers';
       if (list && list.kind !== kind) closeList();
-      if (!list) list = { kind, items: [] };
-      list.items.push(parseInlineLine(line.slice(prefix.length).trim()));
+      const content = parseInlineLine(line.slice(prefix.length).trim());
+      if (kind === 'bullets') {
+        if (!list) list = { kind, items: [] };
+        (list as Extract<Block, { kind: 'bullets' }>).items.push(content);
+      } else {
+        if (!list) list = { kind, items: [] };
+        (list as Extract<Block, { kind: 'numbers' }>).items.push({ n: Number(line.slice(0, prefix.length - 2)), content });
+      }
       continue;
     }
     closeList();
@@ -216,7 +233,8 @@ export function plainPreview(body: string): string {
     if (block.kind === 'gap') lines.push('');
     else if (block.kind === 'heading') lines.push(inlineText(block.content));
     else if (block.kind === 'paragraph') for (const line of block.lines) lines.push(inlineText(line));
-    else block.items.forEach((item, index) => lines.push(`${block.kind === 'bullets' ? '•' : `${index + 1}.`} ${inlineText(item)}`));
+    else if (block.kind === 'bullets') for (const item of block.items) lines.push(`• ${inlineText(item)}`);
+    else for (const item of block.items) lines.push(`${item.n}. ${inlineText(item.content)}`);
   }
   return lines.join('\n');
 }
@@ -281,6 +299,22 @@ function lineSpans(text: string): Span[] {
   }
 }
 
+/** Whether `part` already holds the mark's own characters (a run of two or more stars for bold, an odd run for italic). */
+function holdsMark(part: string, mark: 'bold' | 'italic'): boolean {
+  let i = 0;
+  while (i < part.length) {
+    if (part[i] !== '*') {
+      i += 1;
+      continue;
+    }
+    let j = i;
+    while (j < part.length && part[j] === '*') j += 1;
+    if (mark === 'bold' ? j - i >= 2 : (j - i) % 2 === 1) return true;
+    i = j;
+  }
+  return false;
+}
+
 function wrapSelection(text: string, a: number, b: number, mark: 'bold' | 'italic', max: number): MarkResult {
   const m = mark === 'bold' ? '**' : '*';
   const segments: Span[] = [];
@@ -288,13 +322,18 @@ function wrapSelection(text: string, a: number, b: number, mark: 'bold' | 'itali
     if (line.end < a || line.start > b) continue;
     let s = Math.max(a, line.start);
     let e = Math.min(b, line.end);
+    // A selection that starts at the start of a line leaves the line's list or heading marker outside the mark.
+    if (s === line.start) s += linePrefix(text.slice(line.start, line.end), false)?.length ?? 0;
     while (s < e && isSpace(text[s])) s += 1;
     while (e > s && isSpace(text[e - 1])) e -= 1;
     if (e > s) segments.push({ start: s, end: e });
   }
   let result: { text: string; selStart: number; selEnd: number };
   if (segments.length === 0) {
-    result = { text: text.slice(0, a) + m + m + text.slice(a), selStart: a + m.length, selEnd: a + m.length };
+    // Never inside a line's own marker: "- " gives "- ****", not "****- ".
+    const home = lineSpans(text).find((line) => line.start <= a && a <= line.end);
+    const at = home ? Math.max(a, Math.min(home.end, home.start + (linePrefix(text.slice(home.start, home.end), false)?.length ?? 0))) : a;
+    result = { text: text.slice(0, at) + m + m + text.slice(at), selStart: at + m.length, selEnd: at + m.length };
   } else {
     const first = segments[0];
     const last = segments[segments.length - 1];
@@ -324,6 +363,17 @@ function wrapSelection(text: string, a: number, b: number, mark: 'bold' | 'itali
         selEnd: only.end - 2 * m.length,
       };
     } else {
+      for (const seg of segments) {
+        if (holdsMark(text.slice(seg.start, seg.end), mark)) {
+          return {
+            ok: false,
+            error:
+              mark === 'bold'
+                ? 'The selection already has ** in it. Take those off first, or select less.'
+                : 'The selection already has a single * in it. Take it off first, or select less.',
+          };
+        }
+      }
       let out = '';
       let cursor = 0;
       for (const seg of segments) {

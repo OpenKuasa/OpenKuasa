@@ -7,7 +7,7 @@
  * without its letterhead; the screen decides what null looks like.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { isLogoPath } from '@/lib/account/logo';
+import { isLogoPath } from '@/lib/account/logo-url';
 
 /** What a letter's header is made from. `null` for each line that is not set. */
 export type Letterhead = {
