@@ -77,11 +77,11 @@ export function BankingView({
       <PageHeader title="Banking" subtitle="Accounts, balances and reconciliation, Saudara." />
 
       <BentoGrid>
-        <BentoCard tone="primary" className="col-span-2 md:col-span-3">
+        <BentoCard tone="primary" className="col-span-2 md:col-span-6 xl:col-span-3">
           <BentoStat label={view.total.label} value={view.total.value} delta={view.total.delta} deltaTone="flat" onPrimary />
         </BentoCard>
         {view.tiles.map((tile) => (
-          <BentoCard key={tile.id} className="col-span-2 md:col-span-3">
+          <BentoCard key={tile.id} className="col-span-2 md:col-span-6 xl:col-span-3">
             <BentoStat
               label={
                 <span className="inline-flex items-center gap-1.5">
