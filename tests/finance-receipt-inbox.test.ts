@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   RECEIPT_INBOX_MESSAGES as M,
   deleteInboxReceipt,
+  escapeClosesCard,
   getReceiptFile,
   inboxHiddenNote,
   registerReceipt,
@@ -246,5 +247,22 @@ describe('inboxHiddenNote', () => {
     );
     expect(inboxHiddenNote({ kind: 'reviewed', ids: ['a'] }, listed, [{ id: 'b' }], 'review')).toContain('now under Unmatched');
     expect(inboxHiddenNote({ kind: 'reviewed', ids: ['a'] }, listed, [{ id: 'b' }], 'all')).toContain('Clear the search');
+  });
+});
+
+describe('escapeClosesCard', () => {
+  it('closes on Escape pressed in the card, and on nothing else', () => {
+    expect(escapeClosesCard({ key: 'Escape' }, false)).toBe(true);
+    expect(escapeClosesCard({ key: 'Enter' }, false)).toBe(false);
+    expect(escapeClosesCard({ key: 'a' }, false)).toBe(false);
+  });
+
+  it('does not close while a save is on its way', () => {
+    expect(escapeClosesCard({ key: 'Escape' }, true)).toBe(false);
+  });
+
+  it('does not close an Escape that ends text composition', () => {
+    expect(escapeClosesCard({ key: 'Escape', isComposing: true }, false)).toBe(false);
+    expect(escapeClosesCard({ key: 'Escape', keyCode: 229 }, false)).toBe(false);
   });
 });

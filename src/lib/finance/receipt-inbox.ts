@@ -370,3 +370,12 @@ export function inboxHiddenNote(
     ? `${what} under To review: choose To review or All receipts in the status filter.`
     : `${what} not in the rows below: clear the search or choose View all.`;
 }
+
+/**
+ * Whether a key press closes the review card: Escape pressed inside the card,
+ * not while a save is on its way, and not the Escape that ends text
+ * composition (an input method's candidate list uses it too).
+ */
+export function escapeClosesCard(key: { key: string; keyCode?: number; isComposing?: boolean }, saving: boolean): boolean {
+  return key.key === 'Escape' && !saving && key.isComposing !== true && key.keyCode !== 229;
+}

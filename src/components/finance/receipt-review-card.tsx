@@ -12,6 +12,7 @@ import {
   INBOX_READING_FAILED_REVIEW,
   type ReceiptLink,
   type ReceiptReviewForm,
+  escapeClosesCard,
   reviewFormInput,
   reviewFormOf,
   reviewFormProblem,
@@ -19,7 +20,8 @@ import {
 import { INBOX_READING_NOTES, INBOX_TYPE_LABELS, fileSizeLabel, inboxReadingNote } from '@/lib/finance/receipt-views';
 import type { InboxReceiptRow } from '@/lib/finance/receipts';
 import type { FinResult } from '@/lib/finance/result';
-import { downloadReceipt, previewUrlOf } from './receipt-upload';
+import { previewUrlOf } from './receipt-upload';
+import { useReceiptDownload } from './use-receipt-download';
 
 export type ReviewReceipt = (input: unknown) => Promise<FinResult<{ id: string }>>;
 export type ReceiptLinkOf = (input: unknown) => Promise<FinResult<ReceiptLink>>;
@@ -44,13 +46,15 @@ function ReceiptPreview({ row, linkOf }: { row: InboxReceiptRow; linkOf: Receipt
   useEffect(() => {
     let made: string | null = null;
     let left = false;
+    // Closing the card, or opening another receipt, stops a fetch still in flight.
+    const stop = new AbortController();
     void (async () => {
       let next: Preview = { state: 'none', why: NO_PREVIEW };
       try {
         const answer = await link.current({ id: row.id });
         if (!answer.ok) next = { state: 'none', why: answer.error };
         else if (answer.data.preview) {
-          const url = await previewUrlOf(answer.data.url, answer.data.type);
+          const url = await previewUrlOf(answer.data.url, answer.data.type, stop.signal);
           if (url) {
             made = url;
             next = { state: 'shown', url };
@@ -67,6 +71,7 @@ function ReceiptPreview({ row, linkOf }: { row: InboxReceiptRow; linkOf: Receipt
     })();
     return () => {
       left = true;
+      stop.abort();
       if (made) URL.revokeObjectURL(made);
     };
   }, [row.id]);
@@ -112,23 +117,13 @@ export function ReceiptReviewCard({
   const id = useId();
   const [form, setForm] = useState<ReceiptReviewForm>(() => reviewFormOf(row));
   const save = useFinanceAction();
-  const open = useFinanceAction('read');
+  const download = useReceiptDownload(linkOf);
   const note = inboxReadingNote(row);
 
   const edit = (change: Partial<ReceiptReviewForm>) => {
     save.clear();
     setForm((f) => ({ ...f, ...change }));
   };
-
-  // Escape closes the card, unless a save is on its way.
-  useEffect(() => {
-    if (save.pending) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !event.defaultPrevented) onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [save.pending, onClose]);
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     // Handled here rather than as a form action, so a refused form keeps what was typed.
@@ -145,7 +140,6 @@ export function ReceiptReviewCard({
     );
   };
 
-  const download = () => open.run(() => downloadReceipt(linkOf, row.id));
 
   return (
     <BentoCard
@@ -154,7 +148,17 @@ export function ReceiptReviewCard({
       icon={FileText}
       className="col-span-2 md:col-span-12"
     >
-      <div className="grid gap-4 md:grid-cols-12">
+      <div
+        role="group"
+        aria-label="Review receipt"
+        className="grid gap-4 md:grid-cols-12"
+        // Only an Escape pressed inside the card closes it: the page's search box keeps its own.
+        onKeyDown={(event) => {
+          if (!escapeClosesCard({ key: event.key, keyCode: event.keyCode, isComposing: event.nativeEvent.isComposing }, save.pending)) return;
+          event.stopPropagation();
+          onClose();
+        }}
+      >
         <div className="space-y-2 md:col-span-5">
           <div>
             <p className="whitespace-normal break-words text-sm font-medium">{row.file_name}</p>
@@ -174,13 +178,13 @@ export function ReceiptReviewCard({
                 </p>
               )}
               <div className="flex flex-wrap items-center gap-3">
-                <Button type="button" variant="outline" size="sm" onClick={download} disabled={open.pending}>
+                <Button type="button" variant="outline" size="sm" onClick={() => void download.start(row.id, row.file_name)} disabled={download.busyWith !== null}>
                   <Download className="size-4" />
-                  {open.pending ? 'Preparing…' : canPreview(row.mime_type) ? 'Download' : 'Download to view'}
+                  {download.busyWith !== null ? 'Preparing…' : canPreview(row.mime_type) ? 'Download' : 'Download to view'}
                 </Button>
-                {open.error ? (
+                {download.error ? (
                   <p role="alert" className="text-sm text-destructive">
-                    {open.error}
+                    {download.error}
                   </p>
                 ) : null}
               </div>
