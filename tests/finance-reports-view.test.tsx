@@ -93,6 +93,17 @@ describe('the Reports screen', () => {
     expect(html).toMatch(/<p role="status"[^>]*>[^]*?Balances/);
   });
 
+  it('says the sheet is out of balance when it is, by how much', () => {
+    // 100.01 of debits against 100.00 of credits: no entry the database would take, but the safety net is for that
+    const bad: MonthlyTotals = [
+      { account_id: 'acc-1100', month: '2026-10', debit: 100.01, credit: 0 },
+      { account_id: 'acc-3000', month: '2026-10', debit: 0, credit: 100 },
+    ];
+    const html = render({ totals: bad });
+    expect(text(html)).toContain('Out of balance by RM 0.01');
+    expect(html).toContain('role="alert"');
+  });
+
   it('names each statement table for a screen reader, and announces the equal totals as a status', () => {
     const html = render();
     for (const name of ['Profit and loss', 'Balance sheet', 'Trial balance']) expect(html, name).toContain(`aria-label="${name}"`);
