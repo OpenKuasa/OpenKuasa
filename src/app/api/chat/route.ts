@@ -110,6 +110,9 @@ export async function POST(request: Request) {
     }
   }
 
+  // Finance is workspace-only, like the CRM: a non-viewer member gets the change tools (each still approved).
+  const finance = org ? { client: supabase, orgId: org.orgId, canWrite: org.role !== 'viewer' } : null;
+
   // An approval is answered from the server's record of the change, never from what the browser sent back.
   const approvals = await chatApprovals(chat, org?.orgId ?? null);
   // Prepared changes so far, by id, as the server recorded them: what the team gates on and applies.
@@ -143,6 +146,7 @@ export async function POST(request: Request) {
     team,
     hire,
     people,
+    finance,
     approvals,
   );
   void result.consumeStream();

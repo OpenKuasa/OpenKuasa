@@ -103,6 +103,7 @@ const people = () => ({
   viewer: { employeeId: null, isHr: true, isDemo: false },
   write: { ctx: { client: {} as never, orgId: 'org1' }, tier: 'hr' as const, employeeId: null, receipt: null, userId: 'u1' },
 });
+const finance = () => ({ client: {} as never, orgId: 'org1', canWrite: true });
 const ask = [{ role: 'user' as const, content: 'Add Ali Hassan, ali@example.com, as a contact' }];
 const team = () => ({ transcript: 'User: Add Ali Hassan', proposals: new Map<string, Proposal>() });
 
@@ -184,6 +185,16 @@ describe('Tuah with its team', () => {
     seen.tuahTools = [];
     await runTuah(...withTuah(ask, reach(), undefined, undefined, null, crm(), team())).consumeStream();
     expect(seen.tuahTools[0]).not.toContain('askLekiu');
+  });
+
+  it('adds Bendahara to the roster when finance is passed, and not otherwise', async () => {
+    seen.tuahTools = [];
+    await runTuah(...withTuah(ask, reach(), undefined, undefined, null, crm(), team(), null, null, finance())).consumeStream();
+    expect(seen.tuahTools[0]).toContain('askBendahara');
+
+    seen.tuahTools = [];
+    await runTuah(...withTuah(ask, reach(), undefined, undefined, null, crm(), team())).consumeStream();
+    expect(seen.tuahTools[0]).not.toContain('askBendahara');
   });
 });
 

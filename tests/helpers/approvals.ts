@@ -76,4 +76,4 @@ export const withJebat = bound<'runJebat'>(4);
 export const withKasturi = bound<'runKasturi'>(5);
 export const withLekir = bound<'runLekir'>(4);
 export const withLekiu = bound<'runLekiu'>(4);
-export const withTuah = bound<'runTuah'>(9, 6);
+export const withTuah = bound<'runTuah'>(10, 6);

@@ -228,9 +228,9 @@ const TEAM_AREA = {
 /**
  * Tuah, the cross-app assistant on the Command page and the floating button.
  * It has the marketing tools Jebat has, Kasturi's CRM tools, Lekir's hiring
- * tools and Lekiu's HR tools (lookups, and changes behind an approval), runs on
- * the model those rules were tuned on, and says so rather than inventing data
- * from the products it cannot see yet (finance).
+ * tools, Lekiu's HR tools and Bendahara's finance tools (lookups, and changes
+ * behind an approval), runs on the model those rules were tuned on, and never
+ * invents data.
  */
 export function runTuah(
   messages: ModelMessage[],
@@ -258,15 +258,22 @@ export function runTuah(
    * the route resolved, and each waits for the user's approval.
    */
   people?: PeopleAccess | null,
+  /**
+   * The workspace's finance data. The lookups need no workspace role; the
+   * change tools are added when the caller may write, and each waits for the
+   * owner's approval.
+   */
+  finance?: FinanceAccess | null,
   /** Where proposed changes are kept; a chat route passes its own. */
   approvals?: ApprovalBinding,
 ) {
-  // Every product the user can reach: marketing always, the CRM in a workspace, hiring when passed, HR when passed.
+  // Every product the user can reach: marketing always, the CRM in a workspace, hiring when passed, HR when passed, finance when passed.
   const products = [
     reachProduct(reach),
     ...(crm ? [crmProduct(crm)] : []),
     ...(hire ? [hireProduct(hire)] : []),
     ...(people ? [peopleProduct(people)] : []),
+    ...(finance ? [financeProduct(finance)] : []),
   ];
   const binding = approvals ?? requestOnlyBinding(messages);
   // With its team, Tuah's one change tool is `applyChange`, which takes the stored record itself.
