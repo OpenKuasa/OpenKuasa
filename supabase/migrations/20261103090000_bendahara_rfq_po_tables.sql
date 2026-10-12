@@ -147,7 +147,7 @@ end $$;
 
 -- ---- a bill may belong to a purchase order -----------------------------------
 -- Optional: many small businesses pay bills without an order. The rule for
--- which order a bill may point at is in 20261102100000.
+-- which order a bill may point at is in 20261103100000.
 alter table public.supplier_bills
   add column purchase_order_id uuid,
   add constraint supplier_bills_purchase_order_fkey

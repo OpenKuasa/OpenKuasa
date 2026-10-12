@@ -3,7 +3,7 @@ import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import { createConfirmedTestUser, createOrg, liveClient, signInOwner } from './helpers/live-workspaces';
 
-// Bendahara RFQs and purchase orders (20261102090000 to 20261102100000),
+// Bendahara RFQs and purchase orders (20261103090000 to 20261103100000),
 // against the live project. Each test makes its own workspace; the helper
 // deletes what it made when the file finishes.
 
