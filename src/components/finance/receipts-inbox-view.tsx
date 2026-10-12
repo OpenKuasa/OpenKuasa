@@ -74,9 +74,9 @@ export function ReceiptsInboxView({
         ))}
         <BentoCard title="By status" subtitle="Every receipt" icon={PieChart} className="col-span-1 md:col-span-3">
           {view.hasReceipts ? (
-            <DonutStat data={view.byStatus} height={150} showLegend={false} centerValue={view.total} centerLabel="receipts" />
+            <DonutStat data={view.byStatus} height={220} centerValue={view.total} centerLabel="receipts" />
           ) : (
-            <p className="grid h-[150px] place-items-center text-sm text-muted-foreground">Nothing to chart yet.</p>
+            <p className="grid h-[220px] place-items-center text-sm text-muted-foreground">Nothing to chart yet.</p>
           )}
         </BentoCard>
 
@@ -153,53 +153,53 @@ export function ReceiptsInboxView({
                 {shown.map((r) => {
                   const note = inboxReadingNote(r);
                   return (
-                  <TableRow key={r.id}>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <div className="grid size-8 shrink-0 place-items-center rounded bg-muted">
-                          <Receipt className="size-4 text-muted-foreground" />
+                    <TableRow key={r.id}>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <div className="grid size-8 shrink-0 place-items-center rounded bg-muted">
+                            <Receipt className="size-4 text-muted-foreground" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="max-w-56 whitespace-normal break-words font-medium">
+                              {r.file_name}
+                            </p>
+                            <p className="whitespace-normal text-xs text-muted-foreground">
+                              {r.has_file
+                                ? `${INBOX_TYPE_LABELS[r.mime_type]} · ${fileSizeLabel(r.size_bytes)}`
+                                : 'Sample receipt, no file'}
+                            </p>
+                          </div>
                         </div>
-                        <div className="min-w-0">
-                          <p className="max-w-56 whitespace-normal break-words font-medium">
-                            {r.file_name}
+                      </TableCell>
+                      <TableCell>
+                        <p className="max-w-64 whitespace-normal break-words">{r.vendor ?? '—'}</p>
+                        {note && (
+                          <p className="max-w-64 whitespace-normal text-xs text-muted-foreground">
+                            {INBOX_READING_NOTES[note]}
                           </p>
-                          <p className="whitespace-normal text-xs text-muted-foreground">
-                            {r.has_file
-                              ? `${INBOX_TYPE_LABELS[r.mime_type]} · ${fileSizeLabel(r.size_bytes)}`
-                              : 'Sample receipt, no file'}
-                          </p>
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <p className="whitespace-nowrap">{r.vendor ?? '—'}</p>
-                      {note && (
-                        <p className="max-w-64 whitespace-normal text-xs text-muted-foreground">
-                          {INBOX_READING_NOTES[note]}
-                        </p>
-                      )}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {r.receipt_date ? displayDate(r.receipt_date) : '—'}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-right font-medium tabular-nums">
-                      {r.amount === null ? '—' : rm(r.amount)}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">{inboxDocument(r)}</TableCell>
-                    <TableCell>
-                      <span className="flex items-center gap-2">
-                        <LiveDot active={r.status === 'matched'} />
-                        <span
-                          className={cn(
-                            'inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold',
-                            STATUS_STYLES[r.status],
-                          )}
-                        >
-                          {INBOX_STATUS_LABELS[r.status]}
+                        )}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-muted-foreground">
+                        {r.receipt_date ? displayDate(r.receipt_date) : '—'}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-right font-medium tabular-nums">
+                        {r.amount === null ? '—' : rm(r.amount)}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-muted-foreground">{inboxDocument(r)}</TableCell>
+                      <TableCell>
+                        <span className="flex items-center gap-2">
+                          <LiveDot active={r.status === 'matched'} />
+                          <span
+                            className={cn(
+                              'inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold',
+                              STATUS_STYLES[r.status],
+                            )}
+                          >
+                            {INBOX_STATUS_LABELS[r.status]}
+                          </span>
                         </span>
-                      </span>
-                    </TableCell>
-                  </TableRow>
+                      </TableCell>
+                    </TableRow>
                   );
                 })}
               </TableBody>
