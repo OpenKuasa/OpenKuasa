@@ -5,7 +5,7 @@
  * never from a whole list, so no page size can make the answer wrong.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Application, Candidate, Namesake, Namesakes } from './types';
+import type { Application, Candidate, Interview, InterviewCardRead, InterviewCardRow, InterviewKind, Namesake, Namesakes } from './types';
 
 /** How many same-named rows are read. More than this and the answer is marked `cut`. */
 export const NAMESAKE_LIMIT = 50;
@@ -170,5 +170,115 @@ export async function readNamesakes(
     },
     others: twinsRead.slice(0, NAMESAKE_LIMIT).map(of),
     cut: called.cut || jobsRead.length > NAMESAKE_LIMIT || twinsRead.length > NAMESAKE_LIMIT,
+  };
+}
+
+// ─── which interview an approval card is about ───────────────────────────────
+
+const NO_INTERVIEW: InterviewCardRead = { target: null, others: [], cut: false };
+
+/**
+ * The same answer from interviews already in memory, for a provider that holds all of its rows (the sample data,
+ * a test). Never used over a list that a page size may have cut: the database provider has its own read below.
+ */
+export function interviewCardFromLists(
+  id: unknown,
+  interviews: readonly Pick<Interview, 'id' | 'application_id' | 'candidate_name' | 'job_title' | 'scheduled_at' | 'kind'>[],
+): InterviewCardRead {
+  const describe = (i: (typeof interviews)[number]): InterviewCardRow => ({
+    id: i.id, application_id: i.application_id, candidate: i.candidate_name, job: i.job_title, scheduled_at: i.scheduled_at, kind: i.kind,
+  });
+  const row = interviews.find((i) => i.id === id);
+  if (!row) return NO_INTERVIEW;
+  const [name, job] = [sameText(row.candidate_name), sameText(row.job_title)];
+  return {
+    target: describe(row),
+    others: interviews
+      .filter((i) => i.id !== row.id && sameText(i.candidate_name) === name && sameText(i.job_title) === job)
+      .map(describe),
+    cut: false,
+  };
+}
+
+/** The ids of the rows of one table whose name (or title) is this text, by the exact rule; `cut` when the database had more than were read. */
+async function idsCalled(
+  client: SupabaseClient,
+  orgId: string,
+  table: 'hire_candidates' | 'hire_jobs',
+  column: 'name' | 'title',
+  text: string,
+): Promise<{ ids: string[]; cut: boolean }> {
+  const { data, error } = await client
+    .from(table)
+    .select(`id,${column}`)
+    .eq('org_id', orgId)
+    .filter(column, 'imatch', nameRegex(text))
+    .limit(NAMESAKE_LIMIT + 1);
+  if (error) throw error;
+  const read = (data ?? []) as unknown as Record<string, string>[];
+  // The database only narrows the rows: `sameText` decides.
+  return { ids: read.filter((row) => sameText(row[column] ?? '') === sameText(text)).map((row) => row.id), cut: read.length > NAMESAKE_LIMIT };
+}
+
+/**
+ * One interview by its id, and every other interview that could be taken for it: those of anyone with the same
+ * name, for a job with the same title, whether of the same application (a second round) or of a namesake's.
+ * Read by id and by name with the member's own client (row-level security and the workspace filter apply), never
+ * from a whole list, so no page size can make the answer wrong. No contact detail and no notes are read. A failed
+ * query throws; the caller then prepares no change.
+ */
+export async function readInterviewCard(client: SupabaseClient, orgId: string, id: unknown): Promise<InterviewCardRead> {
+  if (typeof id !== 'string' || !id) return NO_INTERVIEW;
+
+  const found = await client
+    .from('hire_interviews')
+    .select('id,application_id,scheduled_at,kind,application:hire_applications(candidate:hire_candidates(name),job:hire_jobs(title))')
+    .eq('org_id', orgId)
+    .eq('id', id)
+    .maybeSingle();
+  if (found.error) throw found.error;
+  const row = found.data as unknown as {
+    id: string; application_id: string; scheduled_at: string; kind: InterviewKind;
+    application: { candidate: { name: string } | null; job: { title: string } | null } | null;
+  } | null;
+  const name = row?.application?.candidate?.name;
+  const title = row?.application?.job?.title;
+  // An interview that cannot be named cannot be described on a card.
+  if (!row || !name || !title) return NO_INTERVIEW;
+
+  // Everyone of that name, and every job of that title; then the applications that join one of each.
+  const people = await idsCalled(client, orgId, 'hire_candidates', 'name', name);
+  const jobs = await idsCalled(client, orgId, 'hire_jobs', 'title', title);
+  const applications = await client
+    .from('hire_applications')
+    .select('id')
+    .eq('org_id', orgId)
+    .in('candidate_id', people.ids)
+    .in('job_id', jobs.ids)
+    .limit(NAMESAKE_LIMIT + 1);
+  if (applications.error) throw applications.error;
+  const applicationsRead = (applications.data ?? []) as unknown as { id: string }[];
+  // The interview's own application first, whatever was or was not among the rows read: a second round is the common case.
+  const applicationIds = [...new Set([row.application_id, ...applicationsRead.slice(0, NAMESAKE_LIMIT).map((a) => a.id)])];
+
+  const twins = await client
+    .from('hire_interviews')
+    .select('id,application_id,scheduled_at,kind')
+    .eq('org_id', orgId)
+    .neq('id', id)
+    .in('application_id', applicationIds)
+    .order('scheduled_at', { ascending: true })
+    .limit(NAMESAKE_LIMIT + 1);
+  if (twins.error) throw twins.error;
+  const twinsRead = (twins.data ?? []) as unknown as { id: string; application_id: string; scheduled_at: string; kind: InterviewKind }[];
+
+  const describe = (i: { id: string; application_id: string; scheduled_at: string; kind: InterviewKind }): InterviewCardRow => ({
+    // The others are of the same name and title by the rule above, so they are worded as the target is.
+    id: i.id, application_id: i.application_id, candidate: name, job: title, scheduled_at: i.scheduled_at, kind: i.kind,
+  });
+  return {
+    target: describe(row),
+    others: twinsRead.slice(0, NAMESAKE_LIMIT).map(describe),
+    cut: people.cut || jobs.cut || applicationsRead.length > NAMESAKE_LIMIT || twinsRead.length > NAMESAKE_LIMIT,
   };
 }

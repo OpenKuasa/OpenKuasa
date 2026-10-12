@@ -223,10 +223,17 @@ export function createSeedHireData(now: Date = new Date()): HireData {
       candidate_name: application.candidate_name,
       job_title: application.job_title,
       scheduled_at: iso(scheduled),
+      duration_minutes: 60,
       kind: KINDS[index % 3],
+      place: null,
       interviewer_name: INTERVIEWERS[index % 4],
+      notes: null,
       status,
       created_at: iso(t - 6 * DAY),
+      // As the migration leaves the demo rows: never changed since they were made.
+      updated_at: iso(t - 6 * DAY),
+      application_stage: application.stage,
+      application_outcome: application.outcome,
     };
   });
 

@@ -5,6 +5,7 @@ vi.mock('@/lib/auth/viewer', () => ({ hasSupabaseEnv: () => env.hasEnv }));
 vi.mock('@/lib/auth/current-org', () => ({ getCurrentOrg: async () => env.org }));
 
 import { getHireData, readPoolStatus } from '@/lib/hire/supabase';
+import { createSeedHireData } from '@/lib/hire/seed';
 
 const asked: { table: string; columns: string; org: unknown; orderBy?: string; ascending?: boolean }[] = [];
 const ROWS: Record<string, unknown[]> = {
@@ -17,7 +18,11 @@ const ROWS: Record<string, unknown[]> = {
   hire_interviews: [
     // Descending by scheduled_at, as the database returns them.
     { id: 'i2', application_id: 'a9', scheduled_at: '2026-10-20T09:00:00Z', application: null },
-    { id: 'i1', application_id: 'a1', scheduled_at: '2026-10-12T09:00:00Z', application: { candidate: { name: 'Aisyah Rahim' }, job: { title: 'Sales Executive' } } },
+    {
+      id: 'i1', application_id: 'a1', scheduled_at: '2026-10-12T09:00:00Z', duration_minutes: 45, place: 'Level 3', notes: 'Bring a portfolio',
+      updated_at: '2026-10-09T02:00:00Z',
+      application: { stage: 'screening', outcome: 'rejected', candidate: { name: 'Aisyah Rahim' }, job: { title: 'Sales Executive' } },
+    },
   ],
 };
 const fakeClient = {
@@ -68,6 +73,32 @@ describe('getHireData', () => {
     const ask = asked.find((a) => a.table === 'hire_interviews');
     expect(ask).toMatchObject({ orderBy: 'scheduled_at', ascending: false });
     expect(interviews.map((i) => i.id)).toEqual(['i1', 'i2']);
+  });
+
+  it('asks for the four new interview columns, and the stage and outcome of the application', async () => {
+    const data = await getHireData(fakeClient);
+    await data.listInterviews();
+    expect(asked.find((a) => a.table === 'hire_interviews')!.columns).toBe(
+      'id,application_id,scheduled_at,duration_minutes,kind,place,interviewer_name,notes,status,created_at,updated_at,'
+      + 'application:hire_applications(stage,outcome,candidate:hire_candidates(name),job:hire_jobs(title))',
+    );
+  });
+
+  it('carries the new columns, and flattens the application\'s stage and outcome beside its names', async () => {
+    const [first, second] = await (await getHireData(fakeClient)).listInterviews();
+    expect(first).toEqual({
+      id: 'i1', application_id: 'a1', scheduled_at: '2026-10-12T09:00:00Z', duration_minutes: 45, place: 'Level 3', notes: 'Bring a portfolio',
+      updated_at: '2026-10-09T02:00:00Z', candidate_name: 'Aisyah Rahim', job_title: 'Sales Executive',
+      application_stage: 'screening', application_outcome: 'rejected',
+    });
+    expect(first).not.toHaveProperty('application');
+    // An interview whose application could not be read with it: named Unknown, and treated as applied and active.
+    expect(second).toMatchObject({ id: 'i2', candidate_name: 'Unknown', job_title: 'Unknown', application_stage: 'applied', application_outcome: 'active' });
+  });
+
+  it('has the read behind an interview card over a database, and leaves it to the lists for the sample data', async () => {
+    expect(typeof (await getHireData(fakeClient)).interviewCard).toBe('function');
+    expect(createSeedHireData(new Date('2026-10-10T04:00:00Z')).interviewCard).toBeUndefined();
   });
 
   it('turns a null skills column into an empty list', async () => {

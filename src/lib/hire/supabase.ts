@@ -1,10 +1,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getCurrentOrg } from '@/lib/auth/current-org';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
-import { readNamesakes } from './namesakes';
+import { readInterviewCard, readNamesakes } from './namesakes';
 import { createSeedHireData } from './seed';
 import { DEFAULT_HIRE_SETTINGS, HIRE_READ_CAP, JOB_COLUMNS, SETTINGS_COLUMNS } from './types';
-import type { Application, Candidate, HireData, HireSettings, Interview, Job, PoolStatus } from './types';
+import type {
+  Application, ApplicationOutcome, ApplicationStage, Candidate, HireData, HireSettings, Interview, Job, PoolStatus,
+} from './types';
 
 /** The API answers with at most this many rows per request. */
 const PAGE_SIZE = HIRE_READ_CAP;
@@ -15,15 +17,15 @@ const APPLICATION_COLUMNS =
   'cover_letter,cv_url,cv_path,portfolio_url,expected_salary_cents,consented_at,' +
   'candidate:hire_candidates(name,pool_status),job:hire_jobs(title)';
 const INTERVIEW_COLUMNS =
-  'id,application_id,scheduled_at,kind,interviewer_name,status,created_at,' +
-  'application:hire_applications(candidate:hire_candidates(name),job:hire_jobs(title))';
+  'id,application_id,scheduled_at,duration_minutes,kind,place,interviewer_name,notes,status,created_at,updated_at,' +
+  'application:hire_applications(stage,outcome,candidate:hire_candidates(name),job:hire_jobs(title))';
 
 type Named = { name?: string | null } | null | undefined;
 type Titled = { title?: string | null } | null | undefined;
 type Pooled = { name?: string | null; pool_status?: PoolStatus | null } | null | undefined;
 type ApplicationRow = Omit<Application, 'candidate_name' | 'job_title' | 'candidate_pool_status'> & { candidate: Pooled; job: Titled };
-type InterviewRow = Omit<Interview, 'candidate_name' | 'job_title'> & {
-  application: { candidate: Named; job: Titled } | null;
+type InterviewRow = Omit<Interview, 'candidate_name' | 'job_title' | 'application_stage' | 'application_outcome'> & {
+  application: { stage?: ApplicationStage | null; outcome?: ApplicationOutcome | null; candidate: Named; job: Titled } | null;
 };
 
 const UNKNOWN = 'Unknown';
@@ -85,6 +87,10 @@ export function createSupabaseHireData(client: SupabaseClient, orgId: string): H
           ...row,
           candidate_name: application?.candidate?.name ?? UNKNOWN,
           job_title: application?.job?.title ?? UNKNOWN,
+          // The foreign key means an interview always has its application. Should one ever be unreadable, the row
+          // is treated as applied and active: every change is still checked by the database.
+          application_stage: application?.stage ?? 'applied',
+          application_outcome: application?.outcome ?? 'active',
         })),
     getSettings: async () => {
       const { data, error } = await client
@@ -94,6 +100,7 @@ export function createSupabaseHireData(client: SupabaseClient, orgId: string): H
     },
     namesakes: (kind, id) => readNamesakes(client, orgId, kind, id),
     poolStatusOf: (id) => readPoolStatus(client, orgId, id),
+    interviewCard: (id) => readInterviewCard(client, orgId, id),
   };
 }
 

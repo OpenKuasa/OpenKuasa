@@ -1,6 +1,8 @@
 // tests/hire-namesakes.test.ts
 import { describe, expect, it } from 'vitest';
-import { NAMESAKE_LIMIT, nameRegex, namesakesFromLists, readNamesakes, sameText } from '@/lib/hire/namesakes';
+import {
+  NAMESAKE_LIMIT, interviewCardFromLists, nameRegex, namesakesFromLists, readInterviewCard, readNamesakes, sameText,
+} from '@/lib/hire/namesakes';
 
 /**
  * The read that finds the rows sharing a name with one row. No database here:
@@ -157,5 +159,146 @@ describe('namesakesFromLists', () => {
     const got = namesakesFromLists('application', 'x1', candidates, apps);
     expect(got.target).toMatchObject({ id: 'x1', job: 'Barista', email: 'a@example.com', added_at: '2026-10-05T02:00:00Z' });
     expect(got.others).toEqual([{ id: 'x2', name: 'aisyah lim', job: ' BARISTA', email: null, location: 'Ipoh', headline: null, added_at: '2026-10-05T02:00:00Z' }]);
+  });
+});
+
+describe('readInterviewCard', () => {
+  const IV = '99999999-9999-4999-8999-999999999999';
+  const SECOND = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const THIRD = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const APP = '77777777-7777-4777-8777-777777777777';
+  const TWIN_APP = '88888888-8888-4888-8888-888888888888';
+  const found = {
+    id: IV, application_id: APP, scheduled_at: '2026-10-20T07:00:00+00:00', kind: 'video',
+    application: { candidate: { name: 'Aisyah Lim' }, job: { title: 'Barista' } },
+  };
+  const byId = (q: { table: string; calls: [string, ...unknown[]][] }) =>
+    q.table === 'hire_interviews' && q.calls.some((c) => c[0] === 'eq' && c[1] === 'id');
+  /** Answers each of the five reads; `over` replaces the answer for one table of the last four. */
+  const answering = (over: Record<string, { data?: unknown; error?: unknown }> = {}) =>
+    standIn((q) => {
+      if (byId(q)) return over.target ?? { data: found };
+      if (q.table === 'hire_candidates') return over.hire_candidates ?? { data: [{ id: A, name: 'Aisyah Lim' }, { id: B, name: 'aisyah  lim' }, { id: C, name: 'Aisyah Lim x' }] };
+      if (q.table === 'hire_jobs') return over.hire_jobs ?? { data: [{ id: 'j1', title: 'Barista' }, { id: 'j2', title: 'barista ' }, { id: 'j3', title: 'Barista (night)' }] };
+      if (q.table === 'hire_applications') return over.hire_applications ?? { data: [{ id: TWIN_APP }, { id: APP }] };
+      return over.hire_interviews ?? {
+        data: [
+          { id: SECOND, application_id: APP, scheduled_at: '2026-10-27T07:00:00+00:00', kind: 'onsite' },
+          { id: THIRD, application_id: TWIN_APP, scheduled_at: '2026-10-20T07:00:00+00:00', kind: 'video' },
+        ],
+      };
+    });
+
+  it('reads the interview by its id, then every other interview of someone of that name for a job of that title', async () => {
+    const { client, queries } = answering();
+    const got = await readInterviewCard(client, 'org1', IV);
+    expect(queries.map((q) => q.table)).toEqual(['hire_interviews', 'hire_candidates', 'hire_jobs', 'hire_applications', 'hire_interviews']);
+    for (const query of queries) expect(has(query, 'eq', 'org_id', 'org1'), query.table).toBe(true);
+
+    expect(has(queries[0], 'eq', 'id', IV)).toBe(true);
+    expect(has(queries[0], 'select', 'id,application_id,scheduled_at,kind,application:hire_applications(candidate:hire_candidates(name),job:hire_jobs(title))')).toBe(true);
+
+    expect(has(queries[1], 'select', 'id,name')).toBe(true);
+    expect(has(queries[1], 'filter', 'name', 'imatch', '^\\s*(Aisyah\\s+Lim)\\s*$')).toBe(true);
+    expect(has(queries[1], 'limit', NAMESAKE_LIMIT + 1)).toBe(true);
+
+    expect(has(queries[2], 'select', 'id,title')).toBe(true);
+    expect(has(queries[2], 'filter', 'title', 'imatch', '^\\s*(Barista)\\s*$')).toBe(true);
+    expect(has(queries[2], 'limit', NAMESAKE_LIMIT + 1)).toBe(true);
+
+    // A person and a job the database let through that are not the same name are left out by the code.
+    expect(has(queries[3], 'in', 'candidate_id', [A, B])).toBe(true);
+    expect(has(queries[3], 'in', 'job_id', ['j1', 'j2'])).toBe(true);
+    expect(has(queries[3], 'limit', NAMESAKE_LIMIT + 1)).toBe(true);
+
+    // The interview's own application is always among them: a second round is the common case.
+    expect(has(queries[4], 'in', 'application_id', [APP, TWIN_APP])).toBe(true);
+    expect(has(queries[4], 'neq', 'id', IV)).toBe(true);
+    expect(has(queries[4], 'select', 'id,application_id,scheduled_at,kind')).toBe(true);
+    expect(has(queries[4], 'order', 'scheduled_at', { ascending: true })).toBe(true);
+    expect(has(queries[4], 'limit', NAMESAKE_LIMIT + 1)).toBe(true);
+
+    expect(got).toEqual({
+      target: { id: IV, application_id: APP, candidate: 'Aisyah Lim', job: 'Barista', scheduled_at: '2026-10-20T07:00:00+00:00', kind: 'video' },
+      others: [
+        { id: SECOND, application_id: APP, candidate: 'Aisyah Lim', job: 'Barista', scheduled_at: '2026-10-27T07:00:00+00:00', kind: 'onsite' },
+        { id: THIRD, application_id: TWIN_APP, candidate: 'Aisyah Lim', job: 'Barista', scheduled_at: '2026-10-20T07:00:00+00:00', kind: 'video' },
+      ],
+      cut: false,
+    });
+  });
+  it('reads no contact detail and no notes at any step', async () => {
+    const { client, queries } = answering();
+    await readInterviewCard(client, 'org1', IV);
+    const selected = queries.map((q) => String(q.calls.find((c) => c[0] === 'select')?.[1])).join(' ');
+    expect(selected).not.toMatch(/email|phone|notes|place|interviewer|cv_/);
+  });
+  it('still looks among the interview\'s own application when the applications read does not return it', async () => {
+    const { client, queries } = answering({ hire_applications: { data: [] } });
+    await readInterviewCard(client, 'org1', IV);
+    expect(has(queries[4], 'in', 'application_id', [APP])).toBe(true);
+  });
+  it('an interview that is not there, or an id that is not text: nothing, and no further query', async () => {
+    const missing = answering({ target: { data: null } });
+    expect(await readInterviewCard(missing.client, 'org1', IV)).toEqual({ target: null, others: [], cut: false });
+    expect(missing.queries).toHaveLength(1);
+    for (const odd of [undefined, null, '', 7, {}]) {
+      const { client, queries } = answering();
+      expect(await readInterviewCard(client, 'org1', odd)).toEqual({ target: null, others: [], cut: false });
+      expect(queries).toHaveLength(0);
+    }
+  });
+  it('an interview whose candidate or job cannot be read with it is not described', async () => {
+    const nameless = answering({ target: { data: { ...found, application: { candidate: null, job: { title: 'Barista' } } } } });
+    expect(await readInterviewCard(nameless.client, 'org1', IV)).toEqual({ target: null, others: [], cut: false });
+    expect(nameless.queries).toHaveLength(1);
+    const orphan = answering({ target: { data: { ...found, application: null } } });
+    expect((await readInterviewCard(orphan.client, 'org1', IV)).target).toBeNull();
+  });
+  it('says so when any of the reads had more rows than it took', async () => {
+    const people = Array.from({ length: NAMESAKE_LIMIT + 1 }, (_, n) => ({ id: `c-${n}`, name: 'Aisyah Lim' }));
+    expect((await readInterviewCard(answering({ hire_candidates: { data: people } }).client, 'org1', IV)).cut).toBe(true);
+    const jobs = Array.from({ length: NAMESAKE_LIMIT + 1 }, (_, n) => ({ id: `j-${n}`, title: 'Barista' }));
+    expect((await readInterviewCard(answering({ hire_jobs: { data: jobs } }).client, 'org1', IV)).cut).toBe(true);
+    const applications = Array.from({ length: NAMESAKE_LIMIT + 1 }, (_, n) => ({ id: `a-${n}` }));
+    expect((await readInterviewCard(answering({ hire_applications: { data: applications } }).client, 'org1', IV)).cut).toBe(true);
+    const interviews = Array.from({ length: NAMESAKE_LIMIT + 1 }, (_, n) => ({ id: `i-${n}`, application_id: APP, scheduled_at: '2026-10-27T07:00:00+00:00', kind: 'video' }));
+    const many = await readInterviewCard(answering({ hire_interviews: { data: interviews } }).client, 'org1', IV);
+    expect(many.cut).toBe(true);
+    expect(many.others).toHaveLength(NAMESAKE_LIMIT);
+  });
+  it('throws what the database answered with at any step, for the caller to refuse on', async () => {
+    await expect(readInterviewCard(answering({ target: { error: { code: '42501' } } }).client, 'org1', IV)).rejects.toEqual({ code: '42501' });
+    for (const table of ['hire_candidates', 'hire_jobs', 'hire_applications', 'hire_interviews']) {
+      await expect(readInterviewCard(answering({ [table]: { error: { code: '57014' } } }).client, 'org1', IV), table).rejects.toEqual({ code: '57014' });
+    }
+  });
+});
+
+describe('interviewCardFromLists', () => {
+  const interview = (id: string, application_id: string, candidate_name: string, job_title: string, scheduled_at: string, kind: 'video' | 'onsite' | 'phone' = 'video') =>
+    ({ id, application_id, candidate_name, job_title, scheduled_at, kind });
+  const list = [
+    interview('i1', 'a1', 'Aisyah Lim', 'Barista', '2026-10-20T07:00:00Z'),
+    interview('i2', 'a1', 'Aisyah Lim', 'Barista', '2026-10-27T07:00:00Z', 'onsite'),
+    interview('i3', 'a2', ' aisyah  LIM', 'BARISTA ', '2026-10-20T07:00:00Z'),
+    interview('i4', 'a3', 'Aisyah Lim', 'Cashier', '2026-10-20T07:00:00Z'),
+    interview('i5', 'a4', 'Farid Osman', 'Barista', '2026-10-20T07:00:00Z'),
+  ];
+  it('finds the interview and the others with the same name and the same job, of the same application or a namesake\'s', () => {
+    expect(interviewCardFromLists('i1', list)).toEqual({
+      target: { id: 'i1', application_id: 'a1', candidate: 'Aisyah Lim', job: 'Barista', scheduled_at: '2026-10-20T07:00:00Z', kind: 'video' },
+      others: [
+        { id: 'i2', application_id: 'a1', candidate: 'Aisyah Lim', job: 'Barista', scheduled_at: '2026-10-27T07:00:00Z', kind: 'onsite' },
+        { id: 'i3', application_id: 'a2', candidate: ' aisyah  LIM', job: 'BARISTA ', scheduled_at: '2026-10-20T07:00:00Z', kind: 'video' },
+      ],
+      cut: false,
+    });
+  });
+  it('has no others for an interview that is alone, and nothing for an id that is not in the list', () => {
+    expect(interviewCardFromLists('i5', list).others).toEqual([]);
+    expect(interviewCardFromLists('i4', list).others).toEqual([]);
+    for (const id of ['nobody', undefined, null, 7]) expect(interviewCardFromLists(id, list)).toEqual({ target: null, others: [], cut: false });
+    expect(interviewCardFromLists('i1', [])).toEqual({ target: null, others: [], cut: false });
   });
 });
