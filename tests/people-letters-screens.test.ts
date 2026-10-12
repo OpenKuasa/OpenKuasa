@@ -6,6 +6,8 @@ import {
   ACK_LINE,
   deleteDraftSentence,
   insertPlaceholder,
+  insertRefusal,
+  issueFailureSentence,
   issueState,
   letterFormDefaults,
   letterIssueSentence,
@@ -18,6 +20,7 @@ import {
   visibleLetterRows,
 } from '@/lib/people/letters-screens';
 import { PLACEHOLDERS } from '@/lib/people/letter-placeholders';
+import { WRITE_FAILED } from '@/lib/people/capabilities';
 import type { Letter, PeopleViewer } from '@/lib/people/types';
 
 const EMP = '11111111-1111-4111-8111-111111111111';
@@ -42,7 +45,6 @@ const VIEWERS: Record<string, PeopleViewer> = {
   admin: { employeeId: OTHER, isHr: true, isDemo: false },
   linkedMember: { employeeId: EMP, isHr: false, isDemo: false },
   unlinkedMember: { employeeId: null, isHr: false, isDemo: false },
-  viewerRole: { employeeId: EMP, isHr: false, isDemo: false },
   demo: { employeeId: 'demo', isHr: false, isDemo: true },
   demoOwner: { employeeId: null, isHr: true, isDemo: true },
 };
@@ -52,14 +54,44 @@ describe('lettersScreenControls', () => {
     expect(lettersScreenControls(VIEWERS.owner, true).write).toBe(true);
     expect(lettersScreenControls(VIEWERS.admin, true).write).toBe(true);
   });
-  it('draws none for a member, a viewer role, an unlinked account or a demo visitor', () => {
-    for (const key of ['linkedMember', 'unlinkedMember', 'viewerRole', 'demo', 'demoOwner']) {
+  it('draws none for a member (a viewer role is the same to this rule: only isHr and isDemo decide), an unlinked account or a demo visitor', () => {
+    for (const key of ['linkedMember', 'unlinkedMember', 'demo', 'demoOwner']) {
       expect(lettersScreenControls(VIEWERS[key], true).write, key).toBe(false);
     }
   });
-  it('draws none when the data did not load (an unknown viewer)', () => {
+  it('is decided by the kind of viewer alone: true exactly for the owner and the admin', () => {
+    const expected: Record<string, boolean> = {
+      owner: true,
+      admin: true,
+      linkedMember: false,
+      unlinkedMember: false,
+      demo: false,
+      demoOwner: false,
+    };
+    for (const key of Object.keys(VIEWERS)) expect(lettersScreenControls(VIEWERS[key], true).write, key).toBe(expected[key]);
+  });
+  it('draws none when the data did not load', () => {
     expect(lettersScreenControls(VIEWERS.owner, false).write).toBe(false);
-    expect(lettersScreenControls({ employeeId: null, isHr: false, isDemo: false }, false).write).toBe(false);
+    expect(lettersScreenControls(VIEWERS.admin, false).write).toBe(false);
+  });
+});
+
+describe('issueFailureSentence', () => {
+  it('says the draft was saved when the issue was refused', () => {
+    expect(issueFailureSentence(true, 'The letter still has a placeholder in it. Replace it before issuing.')).toBe(
+      'Saved as a draft, but not issued. The letter still has a placeholder in it. Replace it before issuing.',
+    );
+  });
+  it('says the draft was saved when the issue threw', () => {
+    expect(issueFailureSentence(true, null)).toBe('Saved as a draft, but not issued. Try again.');
+  });
+  it('gives the refusal as it is when nothing was saved', () => {
+    expect(issueFailureSentence(false, 'Some of that was not accepted. Check it and try again.')).toBe(
+      'Some of that was not accepted. Check it and try again.',
+    );
+  });
+  it('gives the generic sentence only when nothing was saved and the call threw', () => {
+    expect(issueFailureSentence(false, null)).toBe(WRITE_FAILED);
   });
 });
 
@@ -156,6 +188,17 @@ describe('insertPlaceholder', () => {
   it('refuses to go over a length limit, leaving the text and caret', () => {
     expect(insertPlaceholder('abcd', 2, 2, 'today', 8)).toEqual({ text: 'abcd', caret: 2 });
     expect(insertPlaceholder('abcd', 2, 4, 'today', 9)).toEqual({ text: 'ab{today}', caret: 9 });
+  });
+});
+
+describe('insertRefusal', () => {
+  it('says why when the placeholder would not fit', () => {
+    expect(insertRefusal('abcd', 2, 2, 'today', 8, 'title')).toBe('That would make the title longer than 8 characters.');
+  });
+  it('is null when it fits, or the name is not a placeholder', () => {
+    expect(insertRefusal('abcd', 2, 2, 'today', 20, 'title')).toBeNull();
+    expect(insertRefusal('abcd', 2, 4, 'today', 9, 'letter text')).toBeNull();
+    expect(insertRefusal('abcd', 2, 2, 'salary', 3, 'title')).toBeNull();
   });
 });
 

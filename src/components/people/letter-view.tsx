@@ -8,19 +8,23 @@ import { letterView } from '@/lib/people/letters-screens';
 import { AcknowledgeLetterButton } from './letter-ack-button';
 
 /**
- * Print styles: everything on the page is hidden except the letter, which is laid out from the top left of the
- * paper. The app's chrome (sidebar, header, the dialog's overlay and buttons) is hidden by visibility, so nothing
- * has to know what the chrome is called.
+ * Print styles. Hidden with `display: none`: every direct child of <body> except the dialog's content (the app shell
+ * with its rail, nav, topbar and assistant button, and the overlay), and inside the dialog the elements marked
+ * `data-letter-noprint` (the draft note and the button row). The letter (`article[data-letter-print]`) stays.
  */
 const PRINT_CSS = `
 @media print {
-  body * { visibility: hidden !important; }
-  [data-letter-print], [data-letter-print] * { visibility: visible !important; }
+  /* The dialog's content is a direct child of <body> (Radix portal). Everything else directly under <body> is the
+     app (rail, sidebar, topbar, main, assistant button) or the dialog's overlay: removed from the layout so no
+     blank pages are printed. */
+  body > *:not([data-letter-dialog]) { display: none !important; }
+  html, body { height: auto !important; overflow: visible !important; background: #fff !important; }
   [data-letter-dialog] {
-    position: absolute !important; inset: 0 auto auto 0 !important; transform: none !important;
+    position: static !important; transform: none !important;
     width: 100% !important; max-width: none !important; max-height: none !important; overflow: visible !important;
     border: 0 !important; box-shadow: none !important; padding: 0 !important; background: #fff !important; color: #000 !important;
   }
+  /* Inside the dialog: the buttons and the draft note. */
   [data-letter-noprint] { display: none !important; }
 }
 `;
@@ -51,7 +55,7 @@ export function LetterViewDialog({ letter, workspaceName }: { letter: LetterRow;
             A letter from {view.workspace} to {view.employee_name}.
           </Dialog.Description>
           {view.draft_note ? (
-            <p className="mb-3 rounded-md bg-amber-500/15 px-3 py-2 text-sm font-medium text-amber-700" data-letter-noprint>
+            <p className="mb-3 rounded-md bg-amber-500/15 px-3 py-2 text-sm font-medium text-amber-600" data-letter-noprint>
               {view.draft_note}
             </p>
           ) : null}

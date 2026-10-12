@@ -14,7 +14,9 @@ import { Textarea } from '@/components/ui/textarea';
 import { WRITE_FAILED } from '@/lib/people/capabilities';
 import { LETTER_BODY_MAX, LETTER_TITLE_MAX, toLetterInput } from '@/lib/people/document-forms';
 import {
+  DRAFT_KEPT_NOTE,
   type LetterFormValues,
+  issueFailureSentence,
   letterFormDefaults,
   letterIssueSentence,
   issueState,
@@ -223,26 +225,29 @@ function WriteStep({
     setPressed(issue ? 'issue' : 'save');
     onBusy(true);
     start(async () => {
+      // Set once this press has saved the draft, so a later failure can say so.
+      let saved = false;
       try {
-        const saved = await saveLetterAction({
+        const result = await saveLetterAction({
           employee_id: target.employee_id,
           ...(letterId ? { letter_id: letterId } : {}),
           ...converted.input,
         });
-        if (!saved.ok) {
-          setError(saved.error);
+        if (!result.ok) {
+          setError(issueFailureSentence(false, result.error));
           return;
         }
-        setLetterId(saved.data.id);
+        saved = true;
+        setLetterId(result.data.id);
         if (!issue) {
           onClose();
           return;
         }
-        const issued = await issueLetterAction({ letter_id: saved.data.id });
+        const issued = await issueLetterAction({ letter_id: result.data.id });
         if (issued.ok) onClose();
-        else setError(issued.error);
+        else setError(issueFailureSentence(true, issued.error));
       } catch {
-        setError(WRITE_FAILED);
+        setError(issueFailureSentence(saved && issue, null));
       } finally {
         setPressed(null);
         onBusy(false);
@@ -335,7 +340,7 @@ function WriteStep({
             <Button type="button" size="sm" disabled={pending || !state.allowed} onClick={() => run(true)}>
               {pending && pressed === 'issue' ? 'Working…' : 'Save and issue'}
             </Button>
-            <Button type="button" variant="ghost" size="sm" data-autofocus disabled={pending} onClick={() => setConfirmingIssue(false)}>
+            <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={() => setConfirmingIssue(false)}>
               Keep as draft
             </Button>
           </div>
@@ -346,10 +351,11 @@ function WriteStep({
           {error}
         </p>
       ) : null}
+      {letterId ? <p className="text-xs text-muted-foreground">{DRAFT_KEPT_NOTE}</p> : null}
       {!state.allowed ? <p className="text-xs text-muted-foreground">Issue is unavailable. {state.reason}</p> : null}
       <div className="flex flex-wrap justify-end gap-2">
         <Button type="button" variant="ghost" disabled={pending} onClick={onClose}>
-          Cancel
+          {letterId ? 'Close' : 'Cancel'}
         </Button>
         <Button type="button" variant="outline" disabled={pending} onClick={() => run(false)}>
           {pending && pressed === 'save' ? 'Working…' : 'Save as draft'}

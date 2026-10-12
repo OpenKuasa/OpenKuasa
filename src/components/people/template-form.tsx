@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { WRITE_FAILED } from '@/lib/people/capabilities';
 import { LETTER_BODY_MAX, LETTER_TITLE_MAX, TEMPLATE_NAME_MAX, toTemplateInput } from '@/lib/people/document-forms';
 import { PLACEHOLDERS } from '@/lib/people/letter-placeholders';
-import { insertPlaceholder } from '@/lib/people/letters-screens';
+import { insertPlaceholder, insertRefusal } from '@/lib/people/letters-screens';
 import { LETTER_TYPE_LABEL } from '@/lib/people/own';
 import { LETTER_TYPES, type LetterType } from '@/lib/people/types';
 
@@ -59,13 +59,15 @@ function TemplateFormBody({
     const field = lastField.current;
     const element = field === 'title' ? titleRef.current : bodyRef.current;
     const text = field === 'title' ? title : body;
-    const result = insertPlaceholder(
-      text,
-      element?.selectionStart ?? text.length,
-      element?.selectionEnd ?? text.length,
-      placeholder,
-      field === 'title' ? LETTER_TITLE_MAX : LETTER_BODY_MAX,
-    );
+    const start = element?.selectionStart ?? text.length;
+    const end = element?.selectionEnd ?? text.length;
+    const max = field === 'title' ? LETTER_TITLE_MAX : LETTER_BODY_MAX;
+    const refusal = insertRefusal(text, start, end, placeholder, max, field === 'title' ? 'title' : 'letter text');
+    if (refusal) {
+      setError(refusal);
+      return;
+    }
+    const result = insertPlaceholder(text, start, end, placeholder, max);
     if (result.text === text) return;
     setError(null);
     caret.current = { field, at: result.caret };

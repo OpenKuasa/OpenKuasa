@@ -8,6 +8,7 @@
  * issued letters only; `visibleLetterRows` filters again, so a draft handed to a member's screen by mistake still
  * draws no row.
  */
+import { WRITE_FAILED } from './capabilities';
 import type { LetterRow, LettersModel } from './documents';
 import { PLACEHOLDERS, unfilledInLetter } from './letter-placeholders';
 
@@ -93,6 +94,21 @@ export function insertPlaceholder(
   return { text: next, caret: start + token.length };
 }
 
+/** Why an insert did nothing because of the length limit, or null when it fits (or the name is not a placeholder). */
+export function insertRefusal(
+  text: string,
+  selectionStart: number,
+  selectionEnd: number,
+  name: string,
+  max: number,
+  fieldLabel: string,
+): string | null {
+  if (!PLACEHOLDERS.includes(name)) return null;
+  const result = insertPlaceholder(text, selectionStart, selectionEnd, name, max);
+  const fits = insertPlaceholder(text, selectionStart, selectionEnd, name);
+  return result.text === fits.text ? null : `That would make the ${fieldLabel} longer than ${max} characters.`;
+}
+
 export type PlaceholderSpot = { field: 'title' | 'body'; start: number; end: number };
 
 /** Where `{name}` first appears: the title before the body. Null when it is not there. */
@@ -104,6 +120,19 @@ export function placeholderSpot(title: string, body: string, name: string): Plac
   if (inBody >= 0) return { field: 'body', start: inBody, end: inBody + token.length };
   return null;
 }
+
+// ---- "Save and issue" ----------------------------------------------------------------
+
+/**
+ * What to say when "Save and issue" did not finish. `refusal` is the sentence the rules gave, or null when the call
+ * threw. Once the draft is saved the person is told so, never the generic write-failed sentence.
+ */
+export function issueFailureSentence(saved: boolean, refusal: string | null): string {
+  if (saved) return `Saved as a draft, but not issued. ${refusal ?? 'Try again.'}`;
+  return refusal ?? WRITE_FAILED;
+}
+
+export const DRAFT_KEPT_NOTE = 'The draft is kept in your list of letters.';
 
 // ---- The New letter start ------------------------------------------------------------
 

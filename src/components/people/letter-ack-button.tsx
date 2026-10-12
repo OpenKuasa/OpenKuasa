@@ -13,14 +13,21 @@ import { ACK_LINE } from '@/lib/people/letters-screens';
 export function AcknowledgeLetterButton({ letterId }: { letterId: string }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // Shown at once; the refresh that follows confirms it, and a refusal puts the button back.
+  const [done, setDone] = useState(false);
 
   function acknowledge() {
     setError(null);
+    setDone(true);
     start(async () => {
       try {
         const result = await acknowledgeLetterAction({ letter_id: letterId });
-        if (!result.ok) setError(result.error);
+        if (!result.ok) {
+          setDone(false);
+          setError(result.error);
+        }
       } catch {
+        setDone(false);
         setError(WRITE_FAILED);
       }
     });
@@ -28,10 +35,18 @@ export function AcknowledgeLetterButton({ letterId }: { letterId: string }) {
 
   return (
     <div className="space-y-1">
-      <Button type="button" size="sm" disabled={pending} onClick={acknowledge}>
-        {pending ? 'Working…' : 'I have read this'}
-      </Button>
-      <p className="text-xs text-muted-foreground">{ACK_LINE}</p>
+      {done ? (
+        <p role="status" className="text-sm font-medium">
+          Acknowledged
+        </p>
+      ) : (
+        <>
+          <Button type="button" size="sm" disabled={pending} onClick={acknowledge}>
+            I have read this
+          </Button>
+          <p className="text-xs text-muted-foreground">{ACK_LINE}</p>
+        </>
+      )}
       {error ? (
         <p role="alert" className="text-sm text-destructive">
           {error}
