@@ -7,6 +7,8 @@
 --
 -- Safe to run again: it holds only "create or replace function", revokes and
 -- grants. The columns these functions use are added in 20261108090000.
+-- Do not run 20261107090100_hire_interviews_writes.sql again after this file: it would put back
+-- the earlier hire_reopen_interview, which does not know about feedback.
 
 -- ---------------------------------------------------------------------------
 -- Record feedback on a completed interview, or replace it. A rating from 1 to
