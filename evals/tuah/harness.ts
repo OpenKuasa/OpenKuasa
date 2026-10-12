@@ -263,6 +263,9 @@ export class Conversation {
         if (proposal) turn.pending.push(proposal);
       }
     }
+    // `EVAL_DEBUG=1` also shows what Tuah said at the end of the turn: a check that passed prints nothing, and a
+    // loose pattern can pass on the wrong sentence.
+    if (process.env.EVAL_DEBUG) console.log('said:', JSON.stringify(turn.text));
     return turn;
   }
 }
