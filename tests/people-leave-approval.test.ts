@@ -53,6 +53,8 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
 });
 
 const { runLekiu } = await import('@/lib/ai/agents/orchestrator');
+// After this file's mocks and the values they use are in place: the helpers load the tools too.
+const { withLekiu } = await import('./helpers/approvals');
 const { createSeedPeopleData } = await import('@/lib/people/seed');
 
 const ME = '22222222-2222-4222-8222-222222222222';
@@ -70,7 +72,7 @@ const reset = (tool: string, input: object) => {
 
 /** The history a client sends after the person taps Approve or Reject on the card. */
 const resume = (people: typeof asMember | typeof asOwner, approved: boolean) =>
-  runLekiu(
+  runLekiu(...withLekiu(
     [
       ...ask,
       {
@@ -83,7 +85,7 @@ const resume = (people: typeof asMember | typeof asOwner, approved: boolean) =>
       { role: 'tool', content: [{ type: 'tool-approval-response', approvalId: 'a1', approved }] },
     ],
     people,
-  );
+  ));
 
 const APPLY = { leave_type: 'annual', start_date: '2026-10-20', end_date: '2026-10-22' };
 
@@ -94,7 +96,7 @@ describe('Lekiu’s leave changes require approval', () => {
     ['decideLeave', { id: REQ, approve: true }, 'decides', asOwner],
   ] as const)('%s does not run until it is approved', async (tool, input, counter, people) => {
     reset(tool, input);
-    const result = runLekiu(ask, people);
+    const result = runLekiu(...withLekiu(ask, people));
     await result.consumeStream();
     expect(executed[counter]).toBe(0);
     const parts = (await result.content) as { type: string }[];
@@ -128,7 +130,7 @@ describe('Lekiu’s leave changes require approval', () => {
 
   it('a member cannot reach a decision: the tool is not theirs, so nothing runs even if the model asks', async () => {
     reset('decideLeave', { id: REQ, approve: true });
-    const result = runLekiu(ask, asMember);
+    const result = runLekiu(...withLekiu(ask, asMember));
     await result.consumeStream();
     expect(executed.decides).toBe(0);
     const parts = (await result.content) as { type: string }[];

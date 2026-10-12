@@ -161,6 +161,13 @@ const sealForWorkspace = () => {
 };
 const { PEOPLE_TOOL_NAMES } = await import('@/lib/ai/people-tools');
 const { PEOPLE_WRITE_TOOL_NAMES } = await import('@/lib/ai/products');
+// The route answers an approval from the server's record of the change. Here that record is what an earlier
+// request would have left: every change call the conversation holds, kept as proposed.
+vi.mock('@/lib/chat/approvals', async () => {
+  const { proposedBefore } = await import('./helpers/approvals');
+  return { chatApprovals: async (chat: { messages: never[] }) => proposedBefore(chat.messages) };
+});
+
 const { POST } = await import('@/app/api/people/chat/route');
 const { DEMO_ORG_SLUG } = await import('@/lib/people/types');
 

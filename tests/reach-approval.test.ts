@@ -72,17 +72,19 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
 });
 
 const { runJebat } = await import('@/lib/ai/agents/orchestrator');
+// After this file's mocks and the values they use are in place: the helpers load the tools too.
+const { withJebat } = await import('./helpers/approvals');
 
 describe('AI writes require approval', () => {
   it('a write tool call does not execute until approved', async () => {
     executed.deletes = 0;
-    const result = runJebat(
+    const result = runJebat(...withJebat(
       [{ role: 'user', content: 'delete the Brand Awareness campaign' }],
       {
         data: createSeedReachData(),
         write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true },
       },
-    );
+    ));
     await result.consumeStream();
     expect(executed.deletes).toBe(0);
     // The call is surfaced as awaiting approval rather than silently dropped.
@@ -94,7 +96,7 @@ describe('AI writes require approval', () => {
   // user -> assistant(tool-call + approval-request) -> tool(approval-response).
   const resume = (approved: boolean) => {
     const input = { id: '00000000-0000-0000-0000-000000000000' };
-    return runJebat(
+    return runJebat(...withJebat(
       [
         { role: 'user', content: 'delete the Brand Awareness campaign' },
         {
@@ -113,7 +115,7 @@ describe('AI writes require approval', () => {
         data: createSeedReachData(),
         write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true },
       },
-    );
+    ));
   };
 
   it('approve: the resumed turn executes the approved write', async () => {

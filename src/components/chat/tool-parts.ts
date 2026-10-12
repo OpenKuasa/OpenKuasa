@@ -184,6 +184,7 @@ const REFUSAL_LINES: [start: string, line: string | null][] = [
   ['Two candidates called ', null],
   ['Two applications from someone called ', null],
   ['I could not check ', null],
+  ['Changes cannot be prepared right now', 'Changes cannot be prepared right now, so nothing was put up for approval. Try again in a few minutes.'],
 ];
 export function refusalForUser(reason: string): string {
   const known = REFUSAL_LINES.find(([start]) => reason.startsWith(start));

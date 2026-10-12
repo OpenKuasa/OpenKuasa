@@ -19,6 +19,7 @@ import { hasSupabaseEnv } from '@/lib/auth/viewer';
 import { createSupabasePeopleData, getPeopleData } from '@/lib/people/supabase';
 import type { PeopleData, PeopleViewer } from '@/lib/people/types';
 import { streamErrorName } from '@/lib/people/stream-error';
+import { chatApprovals } from '@/lib/chat/approvals';
 import { getPeopleViewer } from '@/lib/people/viewer';
 
 export const dynamic = 'force-dynamic';
@@ -88,7 +89,9 @@ export async function POST(request: Request) {
       userId: chat.userId,
     };
   }
-  const result = runLekiu(chat.messages, { data, viewer, write }, request.signal, chat.apiKey);
+  // An approval is answered from the server's record of the change, never from what the browser sent back.
+  const approvals = await chatApprovals(chat, org?.orgId ?? null);
+  const result = runLekiu(chat.messages, { data, viewer, write }, request.signal, chat.apiKey, approvals);
 
   return result.toUIMessageStreamResponse({
     onError: (error) => {

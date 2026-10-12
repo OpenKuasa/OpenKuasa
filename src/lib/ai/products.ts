@@ -8,9 +8,9 @@
  * rule is taken from which side a tool is on, never from a list kept elsewhere.
  */
 
-import { deletionCheckFor, type DeletionCheck } from '@/lib/ai/hire-deletions';
+import { deletionCheckFor, type DeletionCheck, type DeletionGate } from '@/lib/ai/hire-deletions';
 import { poolCheckFor, type PoolCheck } from '@/lib/ai/hire-pool-gate';
-import type { ToolSet } from 'ai';
+import type { ModelMessage, Tool, ToolSet } from 'ai';
 import { CRM_WRITE_TOOL_NAMES, createCrmTools, type CrmAccess } from '@/lib/ai/crm-tools';
 import { createHireTools, type HeldCv } from '@/lib/ai/hire-tools';
 import {
@@ -19,6 +19,7 @@ import {
   type PeopleWrite,
 } from '@/lib/ai/people-tools';
 import { createReachTools, type ReachWrite } from '@/lib/ai/tools';
+import { NOT_PREPARED, NOT_WAITING, memoryProposalStore, type ProposalStore } from '@/lib/chat/proposal-store';
 import type { HireWriteContext } from '@/lib/hire/capabilities';
 import type { CvReader } from '@/lib/hire/cv-read';
 import type { HireData } from '@/lib/hire/types';
@@ -265,4 +266,94 @@ export function combineToolkits(products: ProductToolkit[]): {
     tools,
     toolApproval: Object.keys(toolApproval).length > 0 ? toolApproval : undefined,
   };
+}
+
+/**
+ * What ties an approval to the change the server proposed. `store` is where
+ * proposed changes are kept; `incoming` is every model call the conversation
+ * already held when this request arrived. A call that is not among them was
+ * made by the model in this request, and only such a call is ever recorded as
+ * a proposal: the browser cannot make one look new.
+ */
+export type ApprovalBinding = { store: ProposalStore; incoming: ReadonlySet<string> };
+
+export function approvalBinding(store: ProposalStore, messages: readonly ModelMessage[]): ApprovalBinding {
+  const incoming = new Set<string>();
+  for (const message of messages) {
+    if (message.role !== 'assistant' || !Array.isArray(message.content)) continue;
+    for (const part of message.content as { type?: unknown; toolCallId?: unknown }[]) {
+      if (part?.type === 'tool-call' && typeof part.toolCallId === 'string') incoming.add(part.toolCallId);
+    }
+  }
+  return { store, incoming };
+}
+
+/**
+ * The binding of a run that was given none: a store that lives for this one
+ * request. A change proposed in it is recorded, but nothing can be approved in
+ * a later request, since that request starts with an empty store. A chat route
+ * always passes its own (see `chatApprovals`).
+ */
+export const requestOnlyBinding = (messages: readonly ModelMessage[]): ApprovalBinding =>
+  approvalBinding(memoryProposalStore(), messages);
+
+type Approval = 'user-approval' | DeletionGate;
+type Run = (input: unknown, options: unknown) => unknown;
+
+/**
+ * Binds an agent's change tools to the store, for an agent that holds them
+ * itself. Two things change, and no tool is left out: every change tool of
+ * every product is wrapped.
+ *
+ * Proposing: when the model calls a change tool and nothing else refuses it,
+ * the call is recorded (its id, the product, the tool and its arguments) before
+ * the card goes out. A change that cannot be recorded is not shown at all.
+ *
+ * Applying: when the user's yes arrives, the tool does not run on what the
+ * request carried. It takes the record for that call and those arguments, once,
+ * and runs on the arguments the server kept. No record (never proposed here,
+ * already answered, lapsed, another person's) means nothing runs.
+ *
+ * `toolApproval` is passed in after any other gate has been put on it (the
+ * deletion rules), so a call those refuse is never recorded.
+ */
+export function bindApprovals(
+  kit: { tools: ToolSet; toolApproval: Record<string, Approval> | undefined },
+  products: ProductToolkit[],
+  binding: ApprovalBinding,
+): { tools: ToolSet; toolApproval: Record<string, Approval> | undefined } {
+  if (!kit.toolApproval) return kit;
+  const tools: ToolSet = { ...kit.tools };
+  const toolApproval: Record<string, Approval> = { ...kit.toolApproval };
+  for (const product of products) {
+    for (const name of Object.keys(product.write)) {
+      const change = kit.tools[name];
+      const run = (change as { execute?: Run }).execute?.bind(change);
+      const inner = kit.toolApproval[name] ?? 'user-approval';
+
+      toolApproval[name] = async (input, options) => {
+        const decision = typeof inner === 'function' ? await inner(input, options) : inner;
+        if (typeof decision === 'object' && decision.type === 'denied') return decision;
+        // The user's answer to a call the conversation already held: nothing new is proposed here.
+        // Whether that call was ever recorded is settled when the change runs.
+        if (binding.incoming.has(options.toolCallId)) return decision;
+        const kept = await binding.store.record({ toolCallId: options.toolCallId, product: product.key, action: name, input });
+        return kept ? decision : { type: 'denied', reason: NOT_PREPARED };
+      };
+
+      tools[name] = {
+        ...change,
+        execute: async (input: unknown, options: unknown) => {
+          const toolCallId = (options as { toolCallId?: unknown } | null)?.toolCallId;
+          const stored = typeof toolCallId === 'string' ? await binding.store.claim({ toolCallId, input }) : null;
+          if (!stored || !run || stored.product !== product.key || stored.action !== name) {
+            return { ok: false, error: NOT_WAITING };
+          }
+          // The arguments the server kept when it proposed the change, not the ones this request carried.
+          return run(stored.input, options);
+        },
+      } as Tool;
+    }
+  }
+  return { tools, toolApproval };
 }

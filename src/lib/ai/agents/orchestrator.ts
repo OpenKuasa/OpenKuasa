@@ -14,14 +14,18 @@ import { guardDeletions } from '@/lib/ai/hire-deletions';
 import { guardPoolChanges } from '@/lib/ai/hire-pool-gate';
 import {
   REACH_WRITE_TOOL_NAMES,
+  bindApprovals,
   combineToolkits,
+  requestOnlyBinding,
   crmProduct,
   hireProduct,
   kasturiSharedProduct,
   peopleProduct,
   reachProduct,
+  type ApprovalBinding,
   type HireAccess,
   type PeopleAccess,
+  type ProductToolkit,
   type ReachAccess,
 } from '@/lib/ai/products';
 import {
@@ -38,7 +42,23 @@ import type { Screen } from '@/lib/chat/screen';
 /** Tools that change data: each one pauses for the owner's approval before running. */
 export const WRITE_TOOL_NAMES = REACH_WRITE_TOOL_NAMES;
 
-export type { HireAccess, PeopleAccess, ReachAccess };
+export type { ApprovalBinding, HireAccess, PeopleAccess, ReachAccess };
+
+/**
+ * One agent's tools from its products, with every change tool bound to the record the server keeps of what it
+ * proposed (see `bindApprovals`). The deletion and talent pool rules are put on first, so a change they refuse is
+ * never recorded.
+ */
+function boundToolkit(products: ProductToolkit[], messages: ModelMessage[], approvals: ApprovalBinding | undefined) {
+  const kit = combineToolkits(products);
+  // The first deletion of a turn, and the first talent pool change, go to the user as a card; any other is denied
+  // before a card exists, and so is one for an id nobody looked up. Deletions first, then the pool, as before.
+  const toolApproval = guardPoolChanges(
+    guardDeletions(kit.toolApproval, products.find((p) => p.checkDeletion)?.checkDeletion),
+    products.find((p) => p.checkPoolChange)?.checkPoolChange,
+  );
+  return bindApprovals({ tools: kit.tools, toolApproval }, products, approvals ?? requestOnlyBinding(messages));
+}
 
 export function runJebat(
   messages: ModelMessage[],
@@ -46,8 +66,10 @@ export function runJebat(
   abortSignal?: AbortSignal,
   /** A workspace's own OpenRouter key; omitted for platform-paid turns. */
   apiKey?: string,
+  /** Where proposed changes are kept; a chat route passes its own. */
+  approvals?: ApprovalBinding,
 ) {
-  const { tools, toolApproval } = combineToolkits([reachProduct(reach)]);
+  const { tools, toolApproval } = boundToolkit([reachProduct(reach)], messages, approvals);
   return streamText({
     model: getModel('orchestrator', apiKey),
     system: JEBAT_SYSTEM,
@@ -76,8 +98,10 @@ export function runKasturi(
   abortSignal?: AbortSignal,
   /** A workspace's own OpenRouter key; omitted for platform-paid turns. */
   apiKey?: string,
+  /** Where proposed changes are kept; a chat route passes its own. */
+  approvals?: ApprovalBinding,
 ) {
-  const { tools, toolApproval } = combineToolkits([crmProduct(crm), kasturiSharedProduct(reach)]);
+  const { tools, toolApproval } = boundToolkit([crmProduct(crm), kasturiSharedProduct(reach)], messages, approvals);
   return streamText({
     model: getModel('orchestrator', apiKey),
     system: kasturiSystem(new Date()),
@@ -104,17 +128,18 @@ export function runLekir(
   abortSignal?: AbortSignal,
   /** A workspace's own OpenRouter key; omitted for platform-paid turns. */
   apiKey?: string,
+  /** Where proposed changes are kept; a chat route passes its own. */
+  approvals?: ApprovalBinding,
 ) {
   const product = hireProduct(hire);
-  const { tools, toolApproval } = combineToolkits([product]);
+  // The first deletion of a turn goes to the user as a card; any other is denied before a card exists.
+  const { tools, toolApproval } = boundToolkit([product], messages, approvals);
   return streamText({
     model: getModel('orchestrator', apiKey),
     system: LEKIR_SYSTEM,
     messages,
     tools,
-    // The first deletion of a turn, and the first talent pool change, go to the user as a card; any other is denied
-    // before a card exists, and so is one for an id nobody looked up.
-    toolApproval: guardPoolChanges(guardDeletions(toolApproval, product.checkDeletion), product.checkPoolChange),
+    toolApproval,
     // A CV Lekir has read reaches its model as a user file in the next step, never inside the tool result.
     prepareStep: prepareCvStep(product.cvShelf),
     onLanguageModelCallEnd: logModelCall('lekir', pickModelId('orchestrator')),
@@ -137,8 +162,10 @@ export function runLekiu(
   abortSignal?: AbortSignal,
   /** A workspace's own OpenRouter key; omitted for platform-paid turns. */
   apiKey?: string,
+  /** Where proposed changes are kept; a chat route passes its own. */
+  approvals?: ApprovalBinding,
 ) {
-  const { tools, toolApproval } = combineToolkits([peopleProduct(people)]);
+  const { tools, toolApproval } = boundToolkit([peopleProduct(people)], messages, approvals);
   return streamText({
     model: getModel('orchestrator', apiKey),
     system: lekiuSystem(new Date()),
@@ -184,7 +211,7 @@ export function runTuah(
    * Set to run Tuah with its team: it asks a specialist per product and
    * carries out what they prepare, instead of holding every tool itself.
    */
-  team?: Omit<TeamContext, 'apiKey'> | null,
+  team?: Omit<TeamContext, 'apiKey' | 'store'> | null,
   /**
    * The workspace's hiring data. The lookups need no workspace role; the change
    * tools (jobs, careers page, application form, applications) are added only when `hire.write.canWrite` is set, and each
@@ -197,6 +224,8 @@ export function runTuah(
    * the route resolved, and each waits for the user's approval.
    */
   people?: PeopleAccess | null,
+  /** Where proposed changes are kept; a chat route passes its own. */
+  approvals?: ApprovalBinding,
 ) {
   // Every product the user can reach: marketing always, the CRM in a workspace, hiring when passed, HR when passed.
   const products = [
@@ -205,8 +234,10 @@ export function runTuah(
     ...(hire ? [hireProduct(hire)] : []),
     ...(people ? [peopleProduct(people)] : []),
   ];
-  const teamTools = team ? createTeamTools(products, { ...team, apiKey }, messages) : null;
-  const { tools, toolApproval } = teamTools ?? combineToolkits(products);
+  const binding = approvals ?? requestOnlyBinding(messages);
+  // With its team, Tuah's one change tool is `applyChange`, which takes the stored record itself.
+  const teamTools = team ? createTeamTools(products, { ...team, apiKey, store: binding.store }, messages) : null;
+  const { tools, toolApproval } = teamTools ?? boundToolkit(products, messages, binding);
   const system = team
     ? tuahTeamSystem(
         products.map((p) => ({ name: p.name, area: TEAM_AREA[p.key] })),
@@ -219,11 +250,7 @@ export function runTuah(
     system,
     messages,
     tools,
-    // The first deletion of a turn, and the first talent pool change, go to the user as a card; any other is denied before a card exists.
-    toolApproval: guardPoolChanges(
-      guardDeletions(toolApproval, products.find((p) => p.checkDeletion)?.checkDeletion),
-      products.find((p) => p.checkPoolChange)?.checkPoolChange,
-    ),
+    toolApproval,
     prepareStep: teamTools?.prepareStep as never,
     onLanguageModelCallEnd: logModelCall(team ? 'tuah-team' : 'tuah', pickModelId('orchestrator')),
     onError: logModelError(team ? 'tuah-team' : 'tuah'),

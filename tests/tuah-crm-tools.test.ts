@@ -56,6 +56,8 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
 });
 
 const { runTuah } = await import('@/lib/ai/agents/orchestrator');
+// After this file's mocks and the values they use are in place: the helpers load the tools too.
+const { withTuah } = await import('./helpers/approvals');
 const { CRM_WRITE_TOOL_NAMES, deriveDealStats } = await import('@/lib/ai/crm-tools');
 
 const reach = () => ({ data: createSeedReachData() });
@@ -75,9 +77,9 @@ describe('Tuah has the CRM tools', () => {
       await run().consumeStream();
       return seen.toolNames[0];
     };
-    const member = await offered(() => runTuah(ask, reach(), undefined, undefined, null, crm(true)));
-    const viewer = await offered(() => runTuah(ask, reach(), undefined, undefined, null, crm(false)));
-    const noWorkspace = await offered(() => runTuah(ask, reach()));
+    const member = await offered(() => runTuah(...withTuah(ask, reach(), undefined, undefined, null, crm(true))));
+    const viewer = await offered(() => runTuah(...withTuah(ask, reach(), undefined, undefined, null, crm(false))));
+    const noWorkspace = await offered(() => runTuah(...withTuah(ask, reach())));
 
     for (const name of ['listCrmContacts', 'listDeals', 'listPipelines', 'getDealStats']) {
       expect(member).toContain(name);
@@ -94,7 +96,7 @@ describe('Tuah has the CRM tools', () => {
 
   it('a CRM change does not run until it is approved', async () => {
     seen.creates = 0;
-    const result = runTuah(ask, reach(), undefined, undefined, null, crm(true));
+    const result = runTuah(...withTuah(ask, reach(), undefined, undefined, null, crm(true)));
     await result.consumeStream();
     expect(seen.creates).toBe(0);
     const parts = (await result.content) as { type: string }[];
@@ -103,7 +105,7 @@ describe('Tuah has the CRM tools', () => {
 
   it('approve: the resumed turn adds the contact', async () => {
     seen.creates = 0;
-    const result = runTuah(
+    const result = runTuah(...withTuah(
       [
         ...ask,
         {
@@ -125,7 +127,7 @@ describe('Tuah has the CRM tools', () => {
       undefined,
       null,
       crm(true),
-    );
+    ));
     await result.consumeStream();
     expect(seen.creates).toBe(1);
     expect(await result.text).toBe('Done.');

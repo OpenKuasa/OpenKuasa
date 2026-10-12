@@ -60,6 +60,7 @@ import {
   type KnownNames,
   type ToolResult,
 } from '@/lib/chat/change-titles';
+import { NOT_PREPARED, NOT_WAITING, type ProposalStore } from '@/lib/chat/proposal-store';
 import {
   APPLY_TOOL,
   ASK_PREFIX,
@@ -74,8 +75,13 @@ export type TeamContext = {
   apiKey?: string;
   /** The conversation so far, in words, for specialists that only see their task. */
   transcript: string;
-  /** Changes prepared earlier in the conversation, by id. New ones are added here. */
+  /**
+   * Changes prepared earlier in the conversation, by id, as the server recorded them (never as the conversation
+   * describes them). New ones are added here. Used to word and to gate; the change that runs is taken from `store`.
+   */
   proposals: Map<string, Proposal>;
+  /** Where prepared changes are kept: one is recorded when it is prepared, and taken, once, when it is applied. */
+  store: ProposalStore;
   /** Names of rows the conversation has come across, by `kind:id`. Added to as it goes. */
   names?: KnownNames;
 };
@@ -383,7 +389,8 @@ function specialistTools(
           nameIn(results)(id, kind) ??
           (kind && typeof id === 'string' ? (team.names?.[`${kind}:${id}`] ?? null) : null);
         const proposal: Proposal = {
-          id: crypto.randomUUID().slice(0, 8),
+          // The id of the server's record of this change: what an approval names.
+          id: crypto.randomUUID(),
           product: product.key,
           action: name,
           input,
@@ -395,6 +402,16 @@ function specialistTools(
         team.proposals.set(proposal.id, proposal);
         prepared.push(proposal);
         if (limited) turn.prepared[limited].add(proposal.id);
+        // Its place is held above without a pause; now it is recorded. An approval is answered from this record,
+        // so a change that could not be recorded is withdrawn and never reaches a card: a deletion or a talent
+        // pool change gives its one place in the turn back, like any other.
+        const kept = await team.store.record({ id: proposal.id, product: product.key, action: name, input });
+        if (!kept) {
+          team.proposals.delete(proposal.id);
+          prepared.splice(prepared.indexOf(proposal), 1);
+          if (limited) turn.prepared[limited].delete(proposal.id);
+          return { prepared: false, error: NOT_PREPARED };
+        }
         return { prepared: true, proposalId: proposal.id, card: proposal.title };
       },
     });
@@ -493,19 +510,20 @@ const AREA: Record<ProductToolkit['key'], string> = {
   people: 'HR (existing staff, leave, time-off, claims, overtime, attendance, payroll, performance; it can prepare deciding leave, claims and overtime, correcting attendance, and editing staff and departments, one change at a time)',
 };
 
-/** Runs a prepared change through the product's own change tool, after checking its input again. */
+/**
+ * Runs a prepared change through the product's own change tool. The change is the server's record of it, taken
+ * here once: which product, which tool and which arguments all come from that record, and nothing from the
+ * conversation the browser sent. A change with no waiting record does not run.
+ */
 async function apply(
   products: ProductToolkit[],
   team: TeamContext,
-  proposal: Proposal | undefined,
+  proposalId: string,
   options: unknown,
 ): Promise<unknown> {
-  if (!proposal) {
-    return {
-      ok: false,
-      error: 'That prepared change was not found. Ask the specialist to prepare it again.',
-    };
-  }
+  const stored = await team.store.claim({ id: proposalId });
+  if (!stored) return { ok: false, error: NOT_WAITING };
+  const proposal = { product: stored.product, action: stored.action, input: stored.input };
   const product = products.find((p) => p.key === proposal.product);
   const change =
     product && Object.hasOwn(product.write, proposal.action)
@@ -515,7 +533,7 @@ async function apply(
   if (!change || !run) {
     return { ok: false, error: 'You are not able to make that change in this workspace.' };
   }
-  // A proposal read back from the conversation is checked like any other input.
+  // Checked like any other input before it runs.
   const parsed = (change.inputSchema as z.ZodType).safeParse(proposal.input);
   if (!parsed.success) {
     return { ok: false, error: 'That prepared change is no longer valid. Ask for it again.' };
@@ -613,8 +631,7 @@ export function createTeamTools(
     inputSchema: z.object({
       proposalId: z.string().min(1).describe('The id the specialist reported.'),
     }),
-    execute: async ({ proposalId }, options) =>
-      apply(products, team, team.proposals.get(proposalId), options),
+    execute: async ({ proposalId }, options) => apply(products, team, proposalId, options),
   });
   return {
     tools,

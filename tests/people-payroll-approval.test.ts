@@ -77,6 +77,8 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
 });
 
 const { runLekiu } = await import('@/lib/ai/agents/orchestrator');
+// After this file's mocks and the values they use are in place: the helpers load the tools too.
+const { withLekiu } = await import('./helpers/approvals');
 const { createSeedPeopleData } = await import('@/lib/people/seed');
 const { approvalTitle, nameIn } = await import('@/lib/chat/change-titles');
 
@@ -195,7 +197,7 @@ const history = (call: Part, request: Part, approved: boolean) => [
 
 const firstTurn = async (c: Case, people = asOwner) => {
   reset(c.tool, c.sent);
-  const first = runLekiu(ask, people);
+  const first = runLekiu(...withLekiu(ask, people));
   await first.consumeStream();
   const parts = (await first.content) as Part[];
   return { parts, call: parts.find((p) => p.type === 'tool-call'), request: parts.find((p) => p.type === 'tool-approval-request') };
@@ -222,7 +224,7 @@ describe('Lekiu’s payroll changes require approval', () => {
       const { call, request } = await firstTurn(c);
       expect(call).toBeDefined();
       expect(request).toBeDefined();
-      const second = runLekiu(history(call!, request!, true), asOwner);
+      const second = runLekiu(...withLekiu(history(call!, request!, true), asOwner));
       await second.consumeStream();
       expect(ran(c.write)).toBe(1);
       expect(Object.values(executed.counts).reduce((sum, n) => sum + n, 0)).toBe(1);
@@ -233,7 +235,7 @@ describe('Lekiu’s payroll changes require approval', () => {
 
   it.each(CASES.map((c) => [c.tool, JSON.stringify(c.sent), c] as const))('%s sent as %s: rejecting it writes nothing and the turn continues', async (_tool, _sent, c) => {
     const { call, request } = await firstTurn(c);
-    const second = runLekiu(history(call!, request!, false), asOwner);
+    const second = runLekiu(...withLekiu(history(call!, request!, false), asOwner));
     await second.consumeStream();
     expect(ran(c.write)).toBe(0);
     expect(await second.text).toBe('Done.');
@@ -242,7 +244,7 @@ describe('Lekiu’s payroll changes require approval', () => {
   it.each(['', '2026-13', 'bulan ni'])('runPayroll sent a month of %j is refused by the schema: no card, no write', async (month) => {
     for (const tool of ['runPayroll', 'recalculatePayroll']) {
       reset(tool, { month });
-      const result = runLekiu(ask, asOwner);
+      const result = runLekiu(...withLekiu(ask, asOwner));
       await result.consumeStream();
       const parts = (await result.content) as Part[];
       expect(Object.values(executed.counts).reduce((sum, n) => sum + n, 0), tool).toBe(0);
@@ -256,7 +258,7 @@ describe('Lekiu’s payroll changes require approval', () => {
     ['setPayslipStatutory', { payslip_id: SLIP, field: 'epf', amount: '12.345' }],
   ])('%s with %j is refused by the schema before any card', async (tool, sent) => {
     reset(tool, sent);
-    const result = runLekiu(ask, asOwner);
+    const result = runLekiu(...withLekiu(ask, asOwner));
     await result.consumeStream();
     const parts = (await result.content) as Part[];
     expect(Object.values(executed.counts).reduce((sum, n) => sum + n, 0)).toBe(0);
@@ -299,7 +301,7 @@ describe('Lekiu’s payroll changes require approval', () => {
       ['removePayslipLine', ''],
     ] as const) {
       reset(tool, sent);
-      const result = runLekiu(ask, asOwner);
+      const result = runLekiu(...withLekiu(ask, asOwner));
       await result.consumeStream();
       const parts = (await result.content) as Part[];
       const writes = Object.values(executed.counts).reduce((sum, n) => sum + n, 0);
@@ -313,7 +315,7 @@ describe('Lekiu’s payroll changes require approval', () => {
     'a member cannot reach %s: the tool is not theirs, so no card and no write even if the model asks',
     async (_tool, c) => {
       reset(c.tool, c.sent);
-      const result = runLekiu(ask, asMember);
+      const result = runLekiu(...withLekiu(ask, asMember));
       await result.consumeStream();
       expect(Object.values(executed.counts).reduce((sum, n) => sum + n, 0)).toBe(0);
       const parts = (await result.content) as Part[];
@@ -327,7 +329,7 @@ describe('Lekiu’s payroll changes require approval', () => {
   ])('%s cannot reach any payroll tool', async (_who, people) => {
     for (const c of CASES) {
       reset(c.tool, c.sent);
-      const result = runLekiu(ask, people);
+      const result = runLekiu(...withLekiu(ask, people));
       await result.consumeStream();
       expect(Object.values(executed.counts).reduce((sum, n) => sum + n, 0), c.tool).toBe(0);
       const parts = (await result.content) as Part[];
@@ -339,7 +341,7 @@ describe('Lekiu’s payroll changes require approval', () => {
     const c = CASES[3];
     const { call, request } = await firstTurn(c);
     reset(c.tool, c.sent);
-    const replay = runLekiu(history(call!, request!, false).slice(0, 2), asOwner);
+    const replay = runLekiu(...withLekiu(history(call!, request!, false).slice(0, 2), asOwner));
     await replay.consumeStream();
     expect(ran(c.write)).toBe(0);
   });

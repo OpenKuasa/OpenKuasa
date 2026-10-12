@@ -15,6 +15,7 @@ import { runKasturi } from '@/lib/ai/agents/orchestrator';
 import { ensureCrmPipeline } from '@/lib/ai/crm-tools';
 import { getCurrentOrg } from '@/lib/auth/current-org';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
+import { chatApprovals } from '@/lib/chat/approvals';
 import { getReachData } from '@/lib/reach/supabase';
 
 export const dynamic = 'force-dynamic';
@@ -47,6 +48,8 @@ export async function POST(request: Request) {
     },
     request.signal,
     chat.apiKey,
+    // An approval is answered from the server's record of the change, never from what the browser sent back.
+    await chatApprovals(chat, org.orgId),
   );
 
   return result.toUIMessageStreamResponse({

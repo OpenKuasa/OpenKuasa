@@ -75,6 +75,8 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
 });
 
 const { runLekiu } = await import('@/lib/ai/agents/orchestrator');
+// After this file's mocks and the values they use are in place: the helpers load the tools too.
+const { withLekiu } = await import('./helpers/approvals');
 const { createSeedPeopleData } = await import('@/lib/people/seed');
 
 const ME = '22222222-2222-4222-8222-222222222222';
@@ -104,7 +106,7 @@ const ran = (name: string) => executed.counts[name] ?? 0;
 
 /** The history a client sends after the person taps Approve or Reject on the card. */
 const resume = (people: typeof asMember | typeof asOwner, approved: boolean) =>
-  runLekiu(
+  runLekiu(...withLekiu(
     [
       ...ask,
       {
@@ -117,7 +119,7 @@ const resume = (people: typeof asMember | typeof asOwner, approved: boolean) =>
       { role: 'tool', content: [{ type: 'tool-approval-response', approvalId: 'a1', approved }] },
     ],
     people,
-  );
+  ));
 
 const CLAIM = { category: 'travel', amount_cents: 8500, claim_date: '2026-10-09', description: 'Teksi' };
 const OT = { work_date: '2026-10-08', hours: 3, reason: 'Stocktake' };
@@ -134,7 +136,7 @@ describe('Lekiu’s claim and overtime changes require approval', () => {
     ['decideOvertime', { id: REQ, approve: true }, asOwner],
   ] as const)('%s does not run until it is approved', async (tool, input, people) => {
     reset(tool, input);
-    const result = runLekiu(ask, people);
+    const result = runLekiu(...withLekiu(ask, people));
     await result.consumeStream();
     expect(ran(tool)).toBe(0);
     expect(executed.uploads).toBe(0);
@@ -202,7 +204,7 @@ describe('Lekiu’s claim and overtime changes require approval', () => {
     'a member cannot reach %s: the tool is not theirs, so nothing runs even if the model asks',
     async (tool) => {
       reset(tool, { id: REQ, approve: true, paid_on: '2026-10-10' });
-      const result = runLekiu(ask, asMember);
+      const result = runLekiu(...withLekiu(ask, asMember));
       await result.consumeStream();
       expect(ran(tool)).toBe(0);
       const parts = (await result.content) as { type: string }[];

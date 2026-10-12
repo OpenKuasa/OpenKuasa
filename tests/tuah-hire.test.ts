@@ -121,6 +121,8 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
 });
 
 const { runLekir, runTuah } = await import('@/lib/ai/agents/orchestrator');
+// After this file's mocks and the values they use are in place: the helpers load the tools too.
+const { storeOf, withLekir, withTuah } = await import('./helpers/approvals');
 const { createTeamTools } = await import('@/lib/ai/agents/specialists');
 const { namesIn, proposalsIn } = await import('@/lib/chat/delegation');
 const { toPendingApproval } = await import('@/components/chat/tool-parts');
@@ -136,7 +138,7 @@ const team = () => ({ transcript: '', proposals: new Map(), names: {} });
 describe('Tuah with hiring', () => {
   it('holds the hiring lookups as a single agent', async () => {
     seen.calls = [];
-    await runTuah(ask, reach(), undefined, undefined, null, null, null, hire()).consumeStream();
+    await runTuah(...withTuah(ask, reach(), undefined, undefined, null, null, null, hire())).consumeStream();
     // Reading a CV belongs to Lekir: Tuah on its own is given no file reader, so that tool is not made.
     for (const name of HIRE_TOOL_NAMES.filter((n) => n !== 'readCandidateCv')) expect(seen.calls[0].tools, name).toContain(name);
     expect(seen.calls[0].tools).not.toContain('readCandidateCv');
@@ -144,13 +146,13 @@ describe('Tuah with hiring', () => {
 
   it('has no hiring tools when no hiring data is passed', async () => {
     seen.calls = [];
-    await runTuah(ask, reach()).consumeStream();
+    await runTuah(...withTuah(ask, reach())).consumeStream();
     for (const name of HIRE_TOOL_NAMES) expect(seen.calls[0].tools).not.toContain(name);
   });
 
   it('gets askLekir on its team, and holds no hiring lookup itself', async () => {
     seen.calls = [];
-    await runTuah(ask, reach(), undefined, undefined, null, null, team(), hire()).consumeStream();
+    await runTuah(...withTuah(ask, reach(), undefined, undefined, null, null, team(), hire())).consumeStream();
     const [tuah] = seen.calls;
     expect(tuah.tools).toContain('askLekir');
     expect(tuah.tools).toContain('askJebat');
@@ -162,14 +164,14 @@ describe('Tuah with hiring', () => {
 describe('Tuah as a single agent with hiring changes', () => {
   it('a viewer (no write access) gets the lookups and no change tools', async () => {
     seen.calls = [];
-    await runTuah(ask, reach(), undefined, undefined, null, null, null, hire()).consumeStream();
+    await runTuah(...withTuah(ask, reach(), undefined, undefined, null, null, null, hire())).consumeStream();
     for (const name of HIRE_TOOL_NAMES.filter((n) => n !== 'readCandidateCv')) expect(seen.calls[0].tools).toContain(name);
     for (const name of HIRE_WRITE_TOOL_NAMES) expect(seen.calls[0].tools).not.toContain(name);
   });
   it('a writer gets all the change tools', async () => {
     seen.calls = [];
     const writer = { ...hire(), write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true } };
-    await runTuah(ask, reach(), undefined, undefined, null, null, null, writer).consumeStream();
+    await runTuah(...withTuah(ask, reach(), undefined, undefined, null, null, null, writer)).consumeStream();
     for (const name of HIRE_WRITE_TOOL_NAMES) expect(seen.calls[0].tools).toContain(name);
   });
 });
@@ -178,7 +180,7 @@ describe('Tuah with hiring changes', () => {
   it('on its team holds askLekir and applyChange, and no hiring change tool itself', async () => {
     seen.calls = [];
     const writer = { ...hire(), write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true } };
-    await runTuah(ask, reach(), undefined, undefined, null, null, team(), writer).consumeStream();
+    await runTuah(...withTuah(ask, reach(), undefined, undefined, null, null, team(), writer)).consumeStream();
     const [tuah] = seen.calls;
     expect(tuah.tools).toContain('askLekir');
     expect(tuah.tools).toContain('applyChange');
@@ -213,7 +215,7 @@ describe('Tuah’s team changing a job', () => {
 
     seen.calls = [];
     seen.prepareJob = true;
-    const result = runTuah(post, reach(), undefined, undefined, null, null, context, writer);
+    const result = runTuah(...withTuah(post, reach(), undefined, undefined, null, null, context, writer));
     try {
       await result.consumeStream();
     } finally {
@@ -242,6 +244,7 @@ describe('Tuah’s team changing a job', () => {
     const { tools, toolApproval } = createTeamTools([reachProduct(reach()), hireProduct(writer)], {
       transcript: '',
       proposals: context.proposals,
+      store: storeOf(context.proposals.values()),
     });
     // A team that can prepare a deletion asks through a gate; for a change that is not a deletion it answers as before.
     expect(Object.keys(toolApproval!)).toEqual(['applyChange']);
@@ -339,10 +342,10 @@ describe('the four application changes need approval', () => {
   });
   it('the single agent Tuah holds the four tools for a writer only', async () => {
     seen.calls = [];
-    await runTuah(ask, reach(), undefined, undefined, null, null, null, writer()).consumeStream();
+    await runTuah(...withTuah(ask, reach(), undefined, undefined, null, null, null, writer())).consumeStream();
     for (const name of APPLICATION_TOOLS) expect(seen.calls[0].tools).toContain(name);
     seen.calls = [];
-    await runTuah(ask, reach(), undefined, undefined, null, null, null, hire()).consumeStream();
+    await runTuah(...withTuah(ask, reach(), undefined, undefined, null, null, null, hire())).consumeStream();
     for (const name of APPLICATION_TOOLS) expect(seen.calls[0].tools).not.toContain(name);
   });
 });
@@ -377,10 +380,10 @@ describe('Tuah’s team rejecting an application', () => {
     seen.workerStep = 0;
     seen.refusals = [];
     try {
-      await runTuah(
+      await runTuah(...withTuah(
         [{ role: 'user' as const, content: 'Reject the first applicant' }],
         reach(), undefined, undefined, null, null, context, access,
-      ).consumeStream();
+      )).consumeStream();
     } finally {
       seen.workerScript = null;
     }
@@ -538,10 +541,10 @@ describe('Tuah’s team adding and editing a candidate', () => {
     seen.workerStep = 0;
     seen.refusals = [];
     try {
-      await runTuah(
+      await runTuah(...withTuah(
         [{ role: 'user' as const, content: 'Update the first candidate' }],
         reach(), undefined, undefined, null, null, context, access,
-      ).consumeStream();
+      )).consumeStream();
     } finally {
       seen.workerScript = null;
     }
@@ -677,7 +680,7 @@ describe('Tuah’s team adding and editing a candidate', () => {
   });
   it('tells Tuah, in its roster line, that Lekir can add or edit one candidate at a time', async () => {
     seen.calls = [];
-    await runTuah(ask, reach(), undefined, undefined, null, null, team(), hire()).consumeStream();
+    await runTuah(...withTuah(ask, reach(), undefined, undefined, null, null, team(), hire())).consumeStream();
     const line = seen.calls[0].system.split('\n').find((l) => l.startsWith('- askLekir:'));
     expect(line).toContain('Applications can be moved, rejected, reopened and rated, one at a time. Candidates can be added by hand and edited, one at a time. ');
     expect(line).toContain('Candidates can be added by hand and edited, one at a time. An application or a candidate can be deleted, one at a time. ');
@@ -686,7 +689,7 @@ describe('Tuah’s team adding and editing a candidate', () => {
     expect(line).not.toContain('..');
   });
   it('tells the specialist, in what it is asked, that it can prepare adding or editing one candidate at a time', async () => {
-    const asks = createTeamTools([hireProduct(writer())], team()).tools.askLekir as unknown as { description: string };
+    const asks = createTeamTools([hireProduct(writer())], { ...team(), store: storeOf() }).tools.askLekir as unknown as { description: string };
     expect(asks.description).toContain('it can prepare adding or editing one candidate at a time');
     expect(asks.description).toMatch(/to look things up or to prepare a change\. Give Lekir/);
   });
@@ -734,10 +737,10 @@ describe('Tuah’s team deleting an application or a candidate', () => {
     seen.workerStep = 0;
     seen.refusals = [];
     try {
-      await runTuah(
+      await runTuah(...withTuah(
         [{ role: 'user' as const, content: 'Delete the candidate Aisyah Lim' }],
         reach(), undefined, undefined, null, null, context, access,
-      ).consumeStream();
+      )).consumeStream();
     } finally {
       seen.workerScript = null;
     }
@@ -951,7 +954,7 @@ describe('Tuah’s team deleting an application or a candidate', () => {
   });
   it('tells Tuah, in what the specialist is asked, that Lekir can prepare a deletion', () => {
     const writer = { ...hire(), write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true } };
-    const asks = createTeamTools([hireProduct(writer)], team()).tools.askLekir as unknown as { description: string };
+    const asks = createTeamTools([hireProduct(writer)], { ...team(), store: storeOf() }).tools.askLekir as unknown as { description: string };
     expect(asks.description).toContain('it can prepare deleting one application or one candidate at a time');
     expect(asks.description).toContain('it can prepare adding or editing one candidate at a time');
   });
@@ -985,7 +988,7 @@ describe('one agent holding the delete tools', () => {
     ]];
     let steps: { content: Part[] }[] = [];
     try {
-      const result = runTuah(asked, reach(), undefined, undefined, null, null, null, writer());
+      const result = runTuah(...withTuah(asked, reach(), undefined, undefined, null, null, null, writer()));
       await result.consumeStream();
       steps = (await result.steps) as unknown as { content: Part[] }[];
     } finally {
@@ -1016,8 +1019,8 @@ describe('one agent holding the delete tools', () => {
     seen.singleScript = (Array.isArray(script[0]) ? script : [script]) as Call[][];
     try {
       const result = agent === 'lekir'
-        ? runLekir(messages, access)
-        : runTuah(messages, reach(), undefined, undefined, null, null, null, access);
+        ? runLekir(...withLekir(messages, access))
+        : runTuah(...withTuah(messages, reach(), undefined, undefined, null, null, null, access));
       await result.consumeStream();
       const content = ((await result.steps) as unknown as { content: (Part & Record<string, unknown>)[] }[]).flatMap((s) => s.content);
       return {
@@ -1220,7 +1223,7 @@ describe('one agent holding the delete tools', () => {
   });
   it('a viewer holds no delete tool, so there is nothing to gate', async () => {
     seen.calls = [];
-    await runLekir(asked, { ...hire(), write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: false } }).consumeStream();
+    await runLekir(...withLekir(asked, { ...hire(), write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: false } })).consumeStream();
     expect(seen.calls[0].tools).not.toContain('deleteCandidate');
     expect(seen.calls[0].tools).not.toContain('deleteApplication');
   });
@@ -1249,9 +1252,9 @@ describe('one deletion a turn, as the browser carries the turn between requests'
   };
   type Runner = (messages: Model[], chat: UI[]) => { toUIMessageStream: () => ReadableStream<unknown> };
   const teamWith = (hiring: ReturnType<typeof access>): Runner => (messages, chat) =>
-    runTuah(messages, reach(), undefined, undefined, null, null, { transcript: '', proposals: proposalsIn(chat), names: namesIn(chat) }, hiring);
+    runTuah(...withTuah(messages, reach(), undefined, undefined, null, null, { transcript: '', proposals: proposalsIn(chat), names: namesIn(chat) }, hiring));
   const asTeam = teamWith(access());
-  const alone: Runner = (messages) => runTuah(messages, reach(), undefined, undefined, null, null, null, access());
+  const alone: Runner = (messages) => runTuah(...withTuah(messages, reach(), undefined, undefined, null, null, null, access()));
   /** One request, and the chat as the browser holds it afterwards. */
   const exchange = async (chat: UI[], run: Runner): Promise<UI[]> => {
     const { convertToModelMessages, readUIMessageStream } = await import('ai');
@@ -1457,7 +1460,7 @@ describe('one deletion a turn, as the browser carries the turn between requests'
     const user = (text: string): Model => ({ role: 'user', content: text });
     const gateFor = (messages: Model[]) => {
       const proposals = new Map([older, newer, edit].map((p) => [p.id, p]));
-      const made = createTeamTools([hireProduct(access())], { transcript: '', proposals, names: {} }, messages);
+      const made = createTeamTools([hireProduct(access())], { transcript: '', proposals, names: {}, store: storeOf(proposals.values()) }, messages);
       return (input: unknown, toolCallId: string) => (made.toolApproval!.applyChange as Gate)(input, { toolCallId, messages });
     };
     const DENIED = { type: 'denied', reason: ONE_DELETION };
@@ -1553,10 +1556,10 @@ describe('Tuah’s team changing the talent pool', () => {
     seen.refusals = [];
     let cards: Card[] = [];
     try {
-      const result = runTuah(
+      const result = runTuah(...withTuah(
         [{ role: 'user' as const, content: 'Mark the candidate Zarina binti Hashim as available in the talent pool' }],
         reach(), undefined, undefined, null, null, context, access,
-      );
+      ));
       await result.consumeStream();
       cards = ((await result.steps) as unknown as { content: Card[] }[])
         .flatMap((s) => s.content)
@@ -1771,13 +1774,13 @@ describe('Tuah’s team changing the talent pool', () => {
   });
   it('tells Tuah, in its roster line and in what the specialist is asked, that Lekir can change the talent pool', async () => {
     seen.calls = [];
-    await runTuah(ask, reach(), undefined, undefined, null, null, team(), hire()).consumeStream();
+    await runTuah(...withTuah(ask, reach(), undefined, undefined, null, null, team(), hire())).consumeStream();
     const line = seen.calls[0].system.split('\n').find((l) => l.startsWith('- askLekir:'));
     expect(line).toContain('An application or a candidate can be deleted, one at a time. A candidate can be added to the talent pool, given a pool status, removed from the pool or moved to the pipeline for a job, one at a time. ');
     expect(line!.endsWith('.')).toBe(true);
     expect(line).not.toContain('..');
     const writer = { ...hire(), write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true } };
-    const asks = createTeamTools([hireProduct(writer)], team()).tools.askLekir as unknown as { description: string };
+    const asks = createTeamTools([hireProduct(writer)], { ...team(), store: storeOf() }).tools.askLekir as unknown as { description: string };
     expect(asks.description).toContain('it can prepare deleting one application or one candidate at a time; it can prepare a talent pool change for one candidate at a time)');
   });
 });
@@ -1803,7 +1806,7 @@ describe('one talent pool change a turn, as the browser carries the turn between
   };
   type Runner = (messages: Model[], chat: UI[]) => { toUIMessageStream: () => ReadableStream<unknown> };
   const asTeam: Runner = (messages, chat) =>
-    runTuah(messages, reach(), undefined, undefined, null, null, { transcript: '', proposals: proposalsIn(chat), names: namesIn(chat) }, access());
+    runTuah(...withTuah(messages, reach(), undefined, undefined, null, null, { transcript: '', proposals: proposalsIn(chat), names: namesIn(chat) }, access()));
   /** One request, and the chat as the browser holds it afterwards. */
   const exchange = async (chat: UI[], run: Runner): Promise<UI[]> => {
     const { convertToModelMessages, readUIMessageStream } = await import('ai');
@@ -1879,7 +1882,7 @@ describe('one talent pool change a turn, as the browser carries the turn between
     const user = (text: string): Model => ({ role: 'user', content: text });
     const gateFor = (messages: Model[]) => {
       const proposals = new Map([older, newer, deletion].map((p) => [p.id, p]));
-      const made = createTeamTools([hireProduct(access())], { transcript: '', proposals, names: {} }, messages);
+      const made = createTeamTools([hireProduct(access())], { transcript: '', proposals, names: {}, store: storeOf(proposals.values()) }, messages);
       return (input: unknown, toolCallId: string) => (made.toolApproval!.applyChange as Gate)(input, { toolCallId, messages });
     };
     const DENIED = { type: 'denied', reason: ONE_POOL_CHANGE };
@@ -1952,7 +1955,7 @@ describe('one agent holding the pool tools', () => {
     seen.calls = [];
     seen.singleScript = [script];
     try {
-      const result = agent === 'lekir' ? runLekir(asked, access) : runTuah(asked, reach(), undefined, undefined, null, null, null, access);
+      const result = agent === 'lekir' ? runLekir(...withLekir(asked, access)) : runTuah(...withTuah(asked, reach(), undefined, undefined, null, null, null, access));
       await result.consumeStream();
       const content = ((await result.steps) as unknown as { content: Part[] }[]).flatMap((s) => s.content);
       return {
@@ -2049,7 +2052,7 @@ describe('one agent holding the pool tools, through the user\'s answer', () => {
     seen.calls = [];
     seen.singleScript = [script];
     try {
-      const result = agent === 'lekir' ? runLekir(messages, access) : runTuah(messages, reach(), undefined, undefined, null, null, null, access);
+      const result = agent === 'lekir' ? runLekir(...withLekir(messages, access)) : runTuah(...withTuah(messages, reach(), undefined, undefined, null, null, null, access));
       await result.consumeStream();
       const content = ((await result.steps) as unknown as { content: Part[] }[]).flatMap((s) => s.content);
       return {
@@ -2133,7 +2136,7 @@ describe('one agent holding the pool tools, through the user\'s answer', () => {
     type Gate = (input: unknown, options: { toolCallId: string; messages: Message[] }) => unknown;
     const move = { id: 'p-move', product: 'hire' as const, action: 'moveToPipeline', input: { id: A, job_id: JOB }, title: 'Move?', detail: null };
     const messages = [{ role: 'user', content: 'Move her to the pipeline' }] as Message[];
-    const made = createTeamTools([hireProduct(writer({ on: false }))], { transcript: '', proposals: new Map([[move.id, move]]), names: {} }, messages);
+    const made = createTeamTools([hireProduct(writer({ on: false }))], { transcript: '', proposals: new Map([[move.id, move]]), names: {}, store: storeOf([move]) }, messages);
     expect(await (made.toolApproval!.applyChange as Gate)({ proposalId: 'p-move' }, { toolCallId: 'c1', messages })).toEqual({
       type: 'denied',
       reason: 'This candidate is not in the talent pool, so no move to the pipeline was prepared. Say so, and offer to add them to the talent pool first.',
@@ -2173,10 +2176,10 @@ describe('a change stopped after approval is not the turn\'s one, as the browser
   type Access = ReturnType<typeof world>;
   type Runner = (messages: Model[], chat: UI[]) => { toUIMessageStream: () => ReadableStream<unknown> };
   const runners: Record<'lekir' | 'tuah' | 'team', (access: Access) => Runner> = {
-    lekir: (access) => (messages) => runLekir(messages, access),
-    tuah: (access) => (messages) => runTuah(messages, reach(), undefined, undefined, null, null, null, access),
+    lekir: (access) => (messages) => runLekir(...withLekir(messages, access)),
+    tuah: (access) => (messages) => runTuah(...withTuah(messages, reach(), undefined, undefined, null, null, null, access)),
     team: (access) => (messages, chat) =>
-      runTuah(messages, reach(), undefined, undefined, null, null, { transcript: '', proposals: proposalsIn(chat), names: namesIn(chat) }, access),
+      runTuah(...withTuah(messages, reach(), undefined, undefined, null, null, { transcript: '', proposals: proposalsIn(chat), names: namesIn(chat) }, access)),
   };
   type Call = { tool: string; input: unknown };
   /**
@@ -2467,7 +2470,7 @@ describe('a deletion never rests on the pool lookup alone', () => {
     seen.singleScript = steps;
     try {
       const messages = [{ role: 'user', content: 'Do it for Zarina' }] as Message[];
-      const result = agent === 'lekir' ? runLekir(messages, world()) : runTuah(messages, reach(), undefined, undefined, null, null, null, world());
+      const result = agent === 'lekir' ? runLekir(...withLekir(messages, world())) : runTuah(...withTuah(messages, reach(), undefined, undefined, null, null, null, world()));
       await result.consumeStream();
       const content = ((await result.steps) as unknown as { content: Part[] }[]).flatMap((s) => s.content);
       return {
@@ -2488,7 +2491,7 @@ describe('a deletion never rests on the pool lookup alone', () => {
     seen.workerStep = 0;
     seen.refusals = [];
     try {
-      await runTuah([{ role: 'user' as const, content: 'Do it for Zarina' }], reach(), undefined, undefined, null, null, context, world()).consumeStream();
+      await runTuah(...withTuah([{ role: 'user' as const, content: 'Do it for Zarina' }], reach(), undefined, undefined, null, null, context, world())).consumeStream();
     } finally {
       seen.workerScript = null;
     }

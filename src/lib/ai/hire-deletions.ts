@@ -52,6 +52,8 @@ const GATE_REASON_STARTS = [
   'One talent pool change at a time.',
   'This candidate is not in the talent pool',
   'A candidate with the same name appeared ',
+  // Not a rule of this file: the change could not be recorded for approval (see proposal-store.ts). No card either.
+  'Changes cannot be prepared right now',
 ];
 export function isGateReason(reason: unknown): boolean {
   return typeof reason === 'string' && GATE_REASON_STARTS.some((start) => reason.startsWith(start));
