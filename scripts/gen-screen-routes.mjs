@@ -32,6 +32,7 @@ const SERVER_PAGES = {
   'crm/calendar': '@/screens/crm/calendar-page',
   'crm/billings': '@/screens/crm/billings-page',
   'crm/landing-page': '@/screens/crm/landing-pages-page',
+  'crm/broadcast': '@/screens/crm/broadcasts-page',
 };
 
 /**
