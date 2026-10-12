@@ -94,7 +94,7 @@ describe('receiptsInboxView', () => {
       row({ id: 'f', status: 'unmatched', amount: 540 }),
     ]);
     expect(view.stats).toEqual([
-      { label: 'To review', value: '2', delta: '1 receipt with no amount yet', deltaTone: 'down' },
+      { label: 'To review', value: '2', delta: 'RM 249.90 · 1 with no amount yet', deltaTone: 'down' },
       // 0.1 + 0.2 + 310 is 310.30, not 310.30000000000004.
       { label: 'Matched', value: '3', delta: 'RM 310.30', deltaTone: 'flat' },
       { label: 'Unmatched', value: '1', delta: 'RM 540.00', deltaTone: 'down' },
@@ -113,6 +113,22 @@ describe('receiptsInboxView', () => {
   });
   it('says "receipts" for more than one with no amount', () => {
     expect(receiptsInboxView([row({ id: 'a' }), row({ id: 'b' })]).stats[0].delta).toBe('2 receipts with no amount yet');
+  });
+  it('shows both the sum entered and how many have no amount, on all three cards', () => {
+    const view = receiptsInboxView([
+      row({ id: 'a', amount: 249.9 }),
+      row({ id: 'b' }),
+      onBill({ id: 'c', amount: 310 }),
+      onExpense({ id: 'd', amount: null }),
+      onExpense({ id: 'e', amount: null }),
+      row({ id: 'f', status: 'unmatched', amount: 5 }),
+      row({ id: 'g', status: 'unmatched', amount: null }),
+    ]);
+    expect(view.stats.map((s) => s.delta)).toEqual([
+      'RM 249.90 · 1 with no amount yet',
+      'RM 310.00 · 2 with no amount yet',
+      'RM 5.00 · 1 with no amount yet',
+    ]);
   });
   it('never shows RM 0.00 on any card for amounts nobody has entered', () => {
     const view = receiptsInboxView([
@@ -150,14 +166,31 @@ describe('receiptsInboxView', () => {
     const colors = INBOX_STATUSES.map((status) => INBOX_STATUS_COLORS[status]);
     for (const color of colors) expect(allowed).toContain(color);
     expect(new Set(colors).size).toBe(INBOX_STATUSES.length);
-    // None of the three theme colours is purple, violet or indigo: the hue (degrees) of each is outside 255 to 345.
+    // None of the three theme colours is purple, violet or indigo, wherever it is defined: the hue (degrees) of every
+    // definition of each token (light, dark and the finance scope) is outside 255 to 345. A token set to var(--x) is
+    // followed to every definition of --x, so the finance scope's --chart-3 (var(--brand)) is checked as well.
     const css = readFileSync('src/app/globals.css', 'utf8');
+    const definitions = (name: string): string[] =>
+      [...css.matchAll(new RegExp(`${name}:\\s*([^;]+);`, 'g'))].map((m) => m[1].trim());
+    const hues = (name: string, depth = 0): number[] =>
+      definitions(name).flatMap((value) => {
+        const ref = /^var\((--[\w-]+)\)$/.exec(value);
+        if (ref) return depth < 3 ? hues(ref[1], depth + 1) : [Number.NaN];
+        return [Number(/^oklch\(\S+ \S+ (\d+(?:\.\d+)?)\)$/.exec(value)?.[1])];
+      });
     for (const color of colors) {
       const name = color.slice(4, -1);
-      const hue = Number(new RegExp(`${name}:\\s*oklch\\(\\S+ \\S+ (\\d+(?:\\.\\d+)?)\\)`).exec(css)?.[1]);
-      expect(Number.isNaN(hue), name).toBe(false);
-      expect(hue < 255 || hue > 345, name).toBe(true);
+      const found = hues(name);
+      // light, dark and, where a product scope redefines it, that scope as well
+      expect(found.length, name).toBeGreaterThanOrEqual(2);
+      for (const hue of found) {
+        expect(Number.isNaN(hue), name).toBe(false);
+        expect(hue < 255 || hue > 345, `${name} hue ${hue}`).toBe(true);
+      }
     }
+    // The finance scope really is read: --chart-3 is --brand there, so its hue is among those checked.
+    expect(definitions('--chart-3')).toContain('var(--brand)');
+    expect(hues('--chart-3')).toContain(164);
     // And the donut draws those colours, not others.
     expect(receiptsInboxView(SAMPLE_INBOX_RECEIPTS).byStatus.map((s) => s.color)).toEqual(colors);
   });

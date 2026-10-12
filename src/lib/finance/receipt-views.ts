@@ -81,10 +81,12 @@ export type ReceiptsInboxViewData = {
 
 export function receiptsInboxView(rows: InboxReceiptRow[]): ReceiptsInboxViewData {
   const by = (status: InboxReceiptStatus) => rows.filter((r) => r.status === status);
-  // A card says what its receipts add up to, unless some have no amount yet: it then says so instead of RM 0.00.
+  // A card says what its receipts add up to and, when some have no amount yet, how many; if none has one it says only that, never RM 0.00.
   const delta = (group: InboxReceiptRow[]) => {
     const unread = group.filter((r) => r.amount === null);
-    return unread.length ? `${count(unread.length, 'receipt')} with no amount yet` : rm(amountOf(group));
+    if (!unread.length) return rm(amountOf(group));
+    if (unread.length === group.length) return `${count(unread.length, 'receipt')} with no amount yet`;
+    return `${rm(amountOf(group))} · ${unread.length} with no amount yet`;
   };
   const review = by('review');
   const matched = by('matched');
