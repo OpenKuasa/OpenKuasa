@@ -18,7 +18,7 @@ export const INBOX_STATUS_LABELS: Record<InboxReceiptStatus, string> = {
 /** The order the cards and the donut show the three states in. */
 export const INBOX_STATUSES: InboxReceiptStatus[] = ['review', 'matched', 'unmatched'];
 
-const STATUS_COLORS: Record<InboxReceiptStatus, string> = {
+export const INBOX_STATUS_COLORS: Record<InboxReceiptStatus, string> = {
   matched: 'var(--chart-2)',
   review: 'var(--chart-3)',
   unmatched: 'var(--chart-4)',
@@ -104,7 +104,7 @@ export function receiptsInboxView(rows: InboxReceiptRow[]): ReceiptsInboxViewDat
       key: status,
       label: INBOX_STATUS_LABELS[status],
       value: by(status).length,
-      color: STATUS_COLORS[status],
+      color: INBOX_STATUS_COLORS[status],
     })).filter((slice) => slice.value > 0),
     hasReceipts: rows.length > 0,
     total: String(rows.length),

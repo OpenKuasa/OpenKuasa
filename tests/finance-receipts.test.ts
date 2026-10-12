@@ -23,6 +23,19 @@ const unreadRow = {
   created_at: '2026-10-02T09:12:00+00:00',
 };
 
+/** The names of the columns of `finance_receipt_inbox`, read from the migration's own text. */
+function inboxViewColumns(): string[] {
+  const sql = readFileSync('supabase/migrations/20261107100000_bendahara_receipts_inbox.sql', 'utf8');
+  const start = sql.indexOf('create view public.finance_receipt_inbox');
+  const block = sql.slice(sql.indexOf('select', start) + 'select'.length, sql.indexOf('from public.finance_receipts r', start));
+  // One column a line: "r.name," or "<expression> as name,".
+  return block
+    .split('\n')
+    .map((line) => line.trim().replace(/,$/, ''))
+    .filter(Boolean)
+    .map((line) => /(?:\bas\s+|^r\.)(\w+)$/.exec(line)?.[1] ?? `unparsed: ${line}`);
+}
+
 describe('listInboxReceipts', () => {
   it('reads the inbox view for the workspace, newest upload first, with amounts as numbers', async () => {
     const { ctx, calls } = fakeFinance({ data: [matchedRow, unreadRow], error: null });
@@ -37,8 +50,12 @@ describe('listInboxReceipts', () => {
       kind: 'table', name: 'finance_receipt_inbox', op: 'select', filters: { org_id: 'org-1' },
       order: ['created_at desc', 'id asc'], range: [0, INBOX_RECEIPT_PAGE_SIZE - 1],
     });
-    // Every column the query asks for, and nothing the view does not have.
-    expect(calls[0].columns!.split(',').sort()).toEqual(Object.keys(matchedRow).sort());
+    // Every column the query asks for is one the view has: a renamed column fails here, not in production.
+    const asked = calls[0].columns!.split(',').sort();
+    expect(asked).toEqual(Object.keys(matchedRow).sort());
+    const inView = inboxViewColumns();
+    expect(inView.length).toBeGreaterThan(15);
+    for (const column of asked) expect(inView, column).toContain(column);
   });
   it('sends the browser only what the screen uses: no ids of documents, and no error text', async () => {
     const rows = await listInboxReceipts(fakeFinance({ data: [matchedRow, unreadRow], error: null }).ctx);
@@ -104,6 +121,8 @@ describe('the bucket, as the app and the migration each describe it', () => {
     }
     expect(sql.match(/^ {4}when '[a-z]+' then '[a-z/]+'$/gm)).toHaveLength(Object.keys(INBOX_RECEIPT_TYPES).length);
   });
+  // A tripwire on purpose: a later migration that legitimately adds or replaces one of these sixteen functions
+  // (or the table, view, triggers and policies named below) must update this test.
   it('is made of new objects only: it replaces and drops nothing an earlier migration made', () => {
     const own = statements(MIGRATION);
     expect(own).not.toMatch(/create or replace/);
@@ -132,6 +151,8 @@ describe('the bucket, as the app and the migration each describe it', () => {
       expect(own.includes(name), name).toBe(false);
     }
   });
+  // A tripwire on purpose: a later migration that legitimately raises a new FIN code, or replaces one of these
+  // sixteen functions, must update this test (the list of codes, the count of functions, the FIN2[3-9] range below).
   it('makes its bucket and never adopts one, refuses NaN by name, and uses error codes nobody else has', () => {
     const own = statements(MIGRATION);
     expect(own).toContain('insert into storage.buckets');

@@ -1,8 +1,10 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { CSV_BOM } from '@/lib/finance/csv';
 import {
   INBOX_READING_NOTES,
   INBOX_STATUSES,
+  INBOX_STATUS_COLORS,
   INBOX_STATUS_LABELS,
   INBOX_TYPE_LABELS,
   fileSizeLabel,
@@ -142,10 +144,22 @@ describe('receiptsInboxView', () => {
     expect(view.total).toBe('0');
     expect(view.stats.map((s) => [s.value, s.delta])).toEqual([['0', 'RM 0.00'], ['0', 'RM 0.00'], ['0', 'RM 0.00']]);
   });
-  it('gives each state its own colour, none of them a banned one', () => {
-    const colors = receiptsInboxView(SAMPLE_INBOX_RECEIPTS).byStatus.map((s) => s.color);
-    expect(new Set(colors).size).toBe(3);
-    expect(colors.join(' ')).not.toMatch(/purple|violet|indigo|fuchsia/);
+  it('gives each state a theme chart colour of its own, from the ones the donut may use', () => {
+    const allowed = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)'];
+    expect(Object.keys(INBOX_STATUS_COLORS).sort()).toEqual([...INBOX_STATUSES].sort());
+    const colors = INBOX_STATUSES.map((status) => INBOX_STATUS_COLORS[status]);
+    for (const color of colors) expect(allowed).toContain(color);
+    expect(new Set(colors).size).toBe(INBOX_STATUSES.length);
+    // None of the three theme colours is purple, violet or indigo: the hue (degrees) of each is outside 255 to 345.
+    const css = readFileSync('src/app/globals.css', 'utf8');
+    for (const color of colors) {
+      const name = color.slice(4, -1);
+      const hue = Number(new RegExp(`${name}:\\s*oklch\\(\\S+ \\S+ (\\d+(?:\\.\\d+)?)\\)`).exec(css)?.[1]);
+      expect(Number.isNaN(hue), name).toBe(false);
+      expect(hue < 255 || hue > 345, name).toBe(true);
+    }
+    // And the donut draws those colours, not others.
+    expect(receiptsInboxView(SAMPLE_INBOX_RECEIPTS).byStatus.map((s) => s.color)).toEqual(colors);
   });
 });
 
