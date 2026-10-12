@@ -33,6 +33,13 @@ describe('what a manager component may name', () => {
     expect(buttons).toContain('PAY_NOT_PENDING');
   });
 
+  it("HR's decide buttons refresh the same way", () => {
+    const hr = text('src/components/people/decide-buttons.tsx');
+    expect(hr).toContain('router.refresh()');
+    expect(hr).toContain('LEAVE_NOT_PENDING');
+    expect(hr).toContain('PAY_NOT_PENDING');
+  });
+
   it('the team section module imports nothing from the app directory', () => {
     expect(text('src/lib/people/team-section.ts')).not.toMatch(/from '@\/app\//);
   });

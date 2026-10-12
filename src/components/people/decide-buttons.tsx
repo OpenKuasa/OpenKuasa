@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useRef, useState, useTransition } from 'react';
 import {
   cancelClaimAction,
@@ -16,6 +17,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { CapResult } from '@/lib/people/capabilities';
+import { LEAVE_REFUSALS } from '@/lib/people/leave';
+import { PAY_REFUSALS } from '@/lib/people/pay-requests';
 import { RowPrompt, usePromptId } from './request-row';
 
 export type DecideKind = 'leave' | 'time_off' | 'claim' | 'overtime';
@@ -57,6 +60,7 @@ export function DecideButtons({
   /** A demo visitor: every control is there but off. */
   disabled: boolean;
 }) {
+  const router = useRouter();
   const [busy, start] = useTransition();
   const [rejecting, setRejecting] = useState(false);
   const [note, setNote] = useState('');
@@ -77,7 +81,13 @@ export function DecideButtons({
         result = { ok: false, error: 'That change could not be saved. Please try again.' };
       }
       if (result.ok) done?.();
-      else setError(result.error);
+      else {
+        setError(result.error);
+        // Someone else decided it first: load the page afresh so the stale row and its buttons go.
+        if (result.error === LEAVE_REFUSALS.LEAVE_NOT_PENDING || result.error === PAY_REFUSALS.PAY_NOT_PENDING) {
+          router.refresh();
+        }
+      }
     });
   }
 
