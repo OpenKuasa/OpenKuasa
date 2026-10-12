@@ -333,6 +333,18 @@ describe('who holds the four change tools', () => {
       expect(kit.read, name).not.toHaveProperty(name);
     }
   });
+  it('the letter tools tell an owner the five marks and the eight placeholders, and the members never get them', () => {
+    const describe_ = (name: string, tools: Record<string, unknown>) => (tools[name] as { description: string }).description;
+    const owner = createPeopleTools(dataWith(), HR, NOW, hrWrite());
+    const save = describe_('saveLetter', owner);
+    for (const mark of ['# headings', '**bold**', '*italic*', '"- " bullet', '"1. " numbered']) expect(save, mark).toContain(mark);
+    for (const name of ['employee_name', 'employee_no', 'designation', 'department', 'join_date', 'company_name', 'today', 'salary']) {
+      expect(save, name).toContain(`{${name}}`);
+      expect(describe_('startLetterFromTemplate', owner), name).toContain(name);
+    }
+    const member = createPeopleTools(dataWith(), MEMBER, NOW, selfWrite() as never);
+    for (const tool of Object.values(member)) expect((tool as { description?: string }).description ?? '').not.toMatch(/\{salary\}|bullet/i);
+  });
   it('is absent, not merely refused, for a linked member, an unlinked member, a viewer and the demo', () => {
     const cases: [PeopleViewer, ReturnType<typeof hrWrite> | undefined][] = [
       [MEMBER, selfWrite() as never],

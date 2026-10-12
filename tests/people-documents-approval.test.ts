@@ -49,6 +49,7 @@ vi.mock('@/lib/people/letter-writes', async (importOriginal) => {
     ...actual,
     saveLetter: record('saveLetter', savedDraft),
     startLetterFromTemplate: record('startLetterFromTemplate', { letter: savedDraft, unfilled: ['designation'] }),
+    requestLetterAck: record('requestLetterAck', savedDraft),
     issueLetter: record('issueLetter', { ...savedDraft, status: 'issued', issued_on: '2026-10-09' }),
   };
 });
@@ -207,14 +208,14 @@ const CASES: Case[] = [
     detail: 'Any acknowledgement already recorded is cleared.',
   },
   {
-    // A letter: the whole draft is saved again with only the request changed, the other fields as the database has them.
-    tool: 'requestAcknowledgement', write: 'saveLetter', sent: { letter_id: DRAFT, document_id: '', requested: false, title: 'Injected', body: 'Injected' },
-    saved: { employee_id: A, letter_id: DRAFT, letter_type: 'warning', title: 'Amaran', body: 'Dear {employee_name}, take note of {today}.', ack_requested: false },
+    // A letter: one write that changes the request and nothing else (the database leaves the text alone).
+    tool: 'requestAcknowledgement', write: 'requestLetterAck', sent: { letter_id: DRAFT, document_id: '', requested: false, title: 'Injected', body: 'Injected' },
+    saved: { letter_id: DRAFT, requested: false },
     card: 'Withdraw the acknowledgement request on a letter that was not in the list above?', detail: 'A draft: the employee will not be asked when it is issued.',
   },
   {
-    tool: 'requestAcknowledgement', write: 'saveLetter', sent: { letter_id: DRAFT, requested: true },
-    saved: { employee_id: A, letter_id: DRAFT, letter_type: 'warning', title: 'Amaran', body: 'Dear {employee_name}, take note of {today}.', ack_requested: true },
+    tool: 'requestAcknowledgement', write: 'requestLetterAck', sent: { letter_id: DRAFT, requested: true },
+    saved: { letter_id: DRAFT, requested: true },
     card: 'Ask for an acknowledgement of a letter that was not in the list above?', detail: 'A draft: the employee will be asked when it is issued.',
   },
 ];
@@ -336,25 +337,6 @@ describe('Lekiu’s letter and acknowledgement changes require approval', () => 
     },
   );
 
-  it('an issued letter is refused in the tool when a request is asked for, with the sentence that it is pulled back first, and nothing is written', async () => {
-    const c = { tool: 'requestAcknowledgement', sent: { letter_id: ISSUED, requested: true } };
-    const { call, request } = await firstTurn(c);
-    expect(request).toBeDefined();
-    const second = runLekiu(...withLekiu(history(call!, request!, true), asOwner));
-    await second.consumeStream();
-    expect(total()).toBe(0);
-    expect(JSON.stringify(executed.shown)).toContain('That letter has been issued. Pull it back to draft on the Letters screen to change it.');
-  });
-
-  it('a letter that does not exist is refused in the tool, and nothing is written', async () => {
-    const c = { tool: 'requestAcknowledgement', sent: { letter_id: GONE, requested: true } };
-    const { call, request } = await firstTurn(c);
-    const second = runLekiu(...withLekiu(history(call!, request!, true), asOwner));
-    await second.consumeStream();
-    expect(total()).toBe(0);
-    expect(JSON.stringify(executed.shown)).toContain('That letter could not be found.');
-  });
-
   it('a result carries no path and no link, and a letter result names the person and carries the whole letter', async () => {
     const tools = createPeopleTools(data, asOwner.viewer, NOW, asOwner.write);
     const exec = (name: string, input: object) =>
@@ -447,7 +429,7 @@ describe('the card, read with a finder built from the REAL lookups and changes, 
   });
 });
 
-describe('what the model is told when the write path refuses, or the read fails', () => {
+describe('what the model is told when the write path refuses', () => {
   const refuse = async (c: Pick<Case, 'tool' | 'sent'>, sentence: string, people: People = asOwner) => {
     const { call, request } = await firstTurn(c, people);
     executed.fail = sentence;
@@ -462,14 +444,15 @@ describe('what the model is told when the write path refuses, or the read fails'
     ['issueLetter', CASES[5].sent, 'The letter still has a placeholder in it. Replace it before issuing.', 'issueLetter'],
     ['issueLetter', CASES[5].sent, 'The letter has no text yet.', 'issueLetter'],
     ['requestAcknowledgement', CASES[6].sent, 'That document could not be found.', 'requestDocumentAck'],
-    ['requestAcknowledgement', CASES[9].sent, 'That letter has been issued. Pull it back to draft on the Letters screen to change it.', 'saveLetter'],
+    ['requestAcknowledgement', CASES[9].sent, 'That letter has been issued. Pull it back to draft on the Letters screen to change it.', 'requestLetterAck'],
+    ['requestAcknowledgement', CASES[9].sent, 'That letter could not be found.', 'requestLetterAck'],
   ])('%s: a refusal reaches the model as its sentence', async (tool, sent, sentence, write) => {
     const shown = await refuse({ tool, sent }, sentence);
     expect(shown).toContain(sentence);
     expect(ran(write)).toBe(1);
   });
 
-  it('applies the server-recorded ask/withdraw flag and ids, with the rest read fresh; an approval carrying other arguments writes nothing', async () => {
+  it('applies the server-recorded letter id and flag in one write; an approval carrying a flipped flag writes nothing', async () => {
     const { proposedBefore } = await import('./helpers/approvals');
     const c = { tool: 'requestAcknowledgement', sent: { letter_id: DRAFT, requested: false } };
     const { call, request } = await firstTurn(c);
@@ -480,25 +463,41 @@ describe('what the model is told when the write path refuses, or the read fails'
     const refused = runLekiu(tampered, asOwner, undefined, undefined, binding);
     await refused.consumeStream();
     expect(total()).toBe(0);
-    // The approval as proposed is applied once: recorded ids and flag, the body, title and type read fresh.
+    // The approval as proposed is applied once, with the recorded id and flag, and no letter is read or saved.
     const applied = runLekiu(history(call!, request!, true), asOwner, undefined, undefined, proposedBefore(proposed));
     await applied.consumeStream();
-    expect(ran('saveLetter')).toBe(1);
-    expect(executed.last).toEqual({
-      employee_id: A, letter_id: DRAFT, letter_type: 'warning', title: 'Amaran', body: 'Dear {employee_name}, take note of {today}.', ack_requested: false,
-    });
+    expect(ran('requestLetterAck')).toBe(1);
+    expect(total()).toBe(1);
+    expect(executed.last).toEqual({ letter_id: DRAFT, requested: false });
   });
 
-  it('listLetters failing inside requestAcknowledgement gives the write-failed sentence and writes nothing', async () => {
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const broken = { ...asOwner, data: { ...data, listLetters: async () => { throw new TypeError('SECRET BODY'); } } };
-    const { call, request } = await firstTurn({ tool: 'requestAcknowledgement', sent: { letter_id: DRAFT, requested: true } }, broken);
-    const second = runLekiu(...withLekiu(history(call!, request!, true), broken));
+  it('does not read the letters to ask for an acknowledgement', async () => {
+    const listLetters = vi.fn(async () => { throw new TypeError('SECRET BODY'); });
+    const unreadable = { ...asOwner, data: { ...data, listLetters } };
+    const { call, request } = await firstTurn({ tool: 'requestAcknowledgement', sent: { letter_id: DRAFT, requested: true } }, unreadable);
+    const second = runLekiu(...withLekiu(history(call!, request!, true), unreadable));
     await second.consumeStream();
-    expect(total()).toBe(0);
-    expect(JSON.stringify(executed.shown)).toContain('That change could not be saved. Please try again.');
-    expect(JSON.stringify(log.mock.calls)).not.toContain('SECRET');
-    log.mockRestore();
+    expect(ran('requestLetterAck')).toBe(1);
+    expect(listLetters).not.toHaveBeenCalled();
+  });
+
+  it('a requestAcknowledgement result for a letter carries the whole letter, so a later issue card still states the whole body', async () => {
+    const tools = createPeopleTools(data, asOwner.viewer, NOW, asOwner.write);
+    const exec = async (name: string, input: object) =>
+      (tools[name] as unknown as { execute: (i: unknown, o: unknown) => Promise<unknown> }).execute(input, { toolCallId: 't', messages: [] });
+    const longBody = savedDraft.body;
+    const saved = { tool: 'saveLetter', output: await exec('saveLetter', { employee_id: A, letter_type: 'warning', title: 'Amaran', body: longBody }) };
+    const acked = { tool: 'requestAcknowledgement', output: await exec('requestAcknowledgement', { letter_id: DRAFT, requested: true }) };
+    const find = nameIn([saved, acked]);
+    expect(approvalTitle('issueLetter', { letter_id: DRAFT }, find)).toBe(
+      `Issue the letter to Aisyah Rahim, type Warning, titled “Amaran”: “${longBody}”?`,
+    );
+    // And when it is the only result in the chat.
+    expect(approvalTitle('issueLetter', { letter_id: DRAFT }, nameIn([acked]))).toContain(`“${longBody}”`);
+    // The card before approval is built from the earlier facts alone.
+    expect(approvalDetail('requestAcknowledgement', { letter_id: DRAFT, requested: true }, undefined, nameIn([saved]))).toBe(
+      'A draft: the employee will be asked when it is issued.',
+    );
   });
 
   it('saveLetter on a draft id the read does not return keeps no request: it saves with ack_requested false', async () => {
