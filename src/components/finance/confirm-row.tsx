@@ -42,8 +42,9 @@ export function ConfirmRow({
         <div
           role="group"
           aria-label={label}
-          // Stays in view when the table has been scrolled sideways on a phone.
-          className="sticky left-2 flex max-w-[calc(100vw-4rem)] flex-wrap items-center gap-3 py-1 whitespace-normal md:max-w-none"
+          // Stays in view when the table has been scrolled sideways, at any width: never wider than
+          // the part of the table that shows (cqw is measured on the table's scrolling box).
+          className="sticky left-2 flex max-w-[calc(100cqw-1rem)] flex-wrap items-center gap-3 py-1 whitespace-normal"
           onKeyDown={(event) => {
             if (event.key !== 'Escape' || pending) return;
             event.stopPropagation();
