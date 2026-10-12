@@ -214,7 +214,17 @@ describe('how the code is kept safe', () => {
     const card = read('src/components/finance/receipt-review-card.tsx');
     expect(card.match(/<img /g)).toHaveLength(1);
     expect(card).toContain('<img src={preview.url}');
-    expect(read('src/components/finance/receipt-upload.ts')).toContain('URL.createObjectURL(new Blob([bytes], { type }))');
+    // That its bytes are checked first is tested by running it: tests/finance-receipt-upload.test.ts.
+  });
+
+  it('keeps the focus target off anything that is always on the page, so a row menu moves focus to what it opened', () => {
+    expect(read('src/components/finance/receipt-upload-card.tsx')).not.toContain('data-finance-focus');
+  });
+
+  it('never points the page at a signed link: a file is saved from the bytes the page fetched', () => {
+    for (const file of SOURCES) {
+      expect(read(file), file).not.toMatch(/link\.href = (url|link\.url)|location\.(href|assign)|startDownload/);
+    }
   });
 
   it('loads the HEIC decoder only on demand, and only its build that needs no WebAssembly', () => {

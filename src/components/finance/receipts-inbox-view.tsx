@@ -7,9 +7,10 @@ import { DonutStat } from '@/components/charts';
 import { ConfirmRow } from '@/components/finance/confirm-row';
 import { downloadCsv } from '@/components/finance/download-csv';
 import { type ReceiptLinkOf, ReceiptReviewCard, type ReviewReceipt } from '@/components/finance/receipt-review-card';
-import { startDownload } from '@/components/finance/receipt-upload';
+import { downloadReceipt } from '@/components/finance/receipt-upload';
 import { ReceiptUploadCard, type RegisterReceipt } from '@/components/finance/receipt-upload-card';
 import { RowMenu, type RowMenuItem } from '@/components/finance/row-menu';
+import { SavedNoteCard } from '@/components/finance/saved-note-card';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { useLocalToday } from '@/components/finance/use-local-today';
 import { PageHeader } from '@/components/screen/page-header';
@@ -24,7 +25,7 @@ import { localIsoDate } from '@/lib/finance/bill-math';
 import { csvFileName } from '@/lib/finance/csv';
 import { rm } from '@/lib/finance/format';
 import { canPreview } from '@/lib/finance/receipt-files';
-import { type InboxWritten, inboxHiddenNote } from '@/lib/finance/receipt-inbox';
+import { type InboxWritten, RECEIPT_INBOX_MESSAGES, inboxHiddenNote } from '@/lib/finance/receipt-inbox';
 import {
   INBOX_READING_NOTES,
   INBOX_STATUS_LABELS,
@@ -90,7 +91,9 @@ export function ReceiptsInboxView({
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<InboxReceiptFilter>('all');
   const [showAll, setShowAll] = useState(false);
-  const [reviewing, setReviewing] = useState<string | null>(null);
+  // The receipt being reviewed as it was when the card opened: kept, so the card can stay if someone else deletes it.
+  const [reviewing, setReviewing] = useState<InboxReceiptRow | null>(null);
+  const [deleted, setDeleted] = useState<InboxReceiptRow | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [written, setWritten] = useState<InboxWritten | null>(null);
   const localToday = useLocalToday(today, followClock);
@@ -99,9 +102,13 @@ export function ReceiptsInboxView({
 
   const matching = filterInboxReceipts(rows, query, filter);
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
-  const reviewed = reviewing ? rows.find((r) => r.id === reviewing) : undefined;
+  const live = reviewing ? rows.find((r) => r.id === reviewing.id) : undefined;
+  const reviewed = reviewing ? (live ?? reviewing) : undefined;
+  // Someone else deleted or matched it while the card was open: the card stays, says so, and keeps what was typed.
+  const blocked = reviewing ? (!live ? RECEIPT_INBOX_MESSAGES.gone : live.status === 'matched' ? RECEIPT_INBOX_MESSAGES.matched : null) : null;
   const hiddenNote = written ? inboxHiddenNote(written, rows, shown, filter) : null;
-  const columns = linkOf || writer ? 7 : 6;
+  // Someone who cannot change anything has a menu only where a file can be downloaded: the demo's sample receipts have none.
+  const columns = writer || (linkOf && rows.some((r) => r.has_file)) ? 7 : 6;
 
   const added = useCallback((id: string) => {
     setWritten((was) => ({ kind: 'added', ids: was?.kind === 'added' ? [...was.ids, id] : [id] }));
@@ -113,7 +120,9 @@ export function ReceiptsInboxView({
       items.push({
         label: canPreview(r.mime_type) ? 'Download' : 'Download to view',
         icon: Download,
-        onSelect: () => open.run(() => linkOf({ id: r.id }), (link) => startDownload(link.url)),
+        onSelect: () => {
+          if (!open.pending) open.run(() => downloadReceipt(linkOf, r.id));
+        },
       });
     }
     // A matched receipt is its document's evidence: it is untied before it is changed or deleted.
@@ -124,7 +133,8 @@ export function ReceiptsInboxView({
         opens: true,
         onSelect: () => {
           setDeleting(null);
-          setReviewing(r.id);
+          setDeleted(null);
+          setReviewing(r);
         },
       });
       items.push({
@@ -135,6 +145,7 @@ export function ReceiptsInboxView({
         onSelect: () => {
           remove.clear();
           setReviewing(null);
+          setDeleted(null);
           setDeleting(r.id);
         },
       });
@@ -152,6 +163,7 @@ export function ReceiptsInboxView({
             // A fresh card, with fresh boxes, for each receipt.
             key={reviewed.id}
             row={reviewed}
+            blocked={blocked}
             today={localToday}
             review={writer.actions.review}
             linkOf={linkOf}
@@ -161,6 +173,11 @@ export function ReceiptsInboxView({
               setWritten({ kind: 'reviewed', ids: [id] });
             }}
           />
+        ) : null}
+        {deleted ? (
+          <SavedNoteCard title="Receipt deleted" subtitle={deleted.file_name} onClose={() => setDeleted(null)}>
+            {deleted.has_file ? 'The receipt and its file were deleted.' : 'The receipt was deleted.'}
+          </SavedNoteCard>
         ) : null}
         {writer ? <ReceiptUploadCard orgId={writer.orgId} register={writer.actions.register} onAdded={added} /> : null}
         {demo ? (
@@ -234,6 +251,11 @@ export function ReceiptsInboxView({
               {hiddenNote}
             </p>
           ) : null}
+          {open.pending ? (
+            <p role="status" className="mt-2 px-4 text-sm text-muted-foreground">
+              Preparing the download…
+            </p>
+          ) : null}
           {open.error ? (
             <p role="alert" className="mt-2 px-4 text-sm text-destructive">
               {open.error}
@@ -279,7 +301,15 @@ export function ReceiptsInboxView({
                         pendingLabel="Deleting…"
                         pending={remove.pending}
                         error={remove.error}
-                        onConfirm={() => remove.run(() => writer.actions.remove({ id: r.id }), () => setDeleting(null))}
+                        onConfirm={() =>
+                          remove.run(
+                            () => writer.actions.remove({ id: r.id }),
+                            () => {
+                              setDeleting(null);
+                              setDeleted(r);
+                            },
+                          )
+                        }
                         onCancel={() => {
                           remove.clear();
                           setDeleting(null);
