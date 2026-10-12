@@ -15,6 +15,13 @@ import type { HireData, Namesake, Namesakes } from '@/lib/hire/types';
 
 export const HIRE_DELETE_TOOL_NAMES = ['deleteApplication', 'deleteCandidate'] as const;
 
+/**
+ * What Tuah's team answers when a change of a kind held to one a turn is approved in a request where the gate
+ * could not read its record, so its last check never ran (specialists.ts, `apply`). Nothing runs and the record
+ * keeps waiting. Written for a person. The other way: ask for it again; it is prepared and shown anew.
+ */
+export const CHANGE_NOT_CHECKED = 'This change could not be checked just now, so nothing was changed. Ask for it again in a moment.';
+
 export const ONE_DELETION = 'One deletion at a time. One is already prepared for approval.';
 export const AMBIGUOUS_DELETION =
   // No "look it up again": a later lookup cannot clear this in the same turn, and a model told to try would loop.

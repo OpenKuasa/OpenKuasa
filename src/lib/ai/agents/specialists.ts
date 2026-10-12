@@ -24,6 +24,7 @@ import { subAgentSystem } from '@/lib/ai/agents/prompts';
 import { prepareCvStep } from '@/lib/ai/hire-tools';
 import {
   AMBIGUOUS_DELETION,
+  CHANGE_NOT_CHECKED,
   HIRE_DELETE_TOOL_NAMES,
   ONE_DELETION,
   cardDecision,
@@ -241,11 +242,13 @@ function describedIn(messages: readonly ModelMessage[]): Map<string, Proposal> {
  * proposal; the same proposal asked for again under a new call is another too. The SDK asks again about a call the
  * user approved, when their answer arrives: same proposal, same call, so it passes.
  */
-function applyGate(products: ProductToolkit[], team: TeamContext, turn: TurnState): DeletionGate {
+function applyGate(products: ProductToolkit[], team: TeamContext, turn: TurnState, gated: Set<string>): DeletionGate {
   return async (input, { toolCallId, messages }) => {
     const id = (input as { proposalId?: unknown } | null)?.proposalId;
     const proposal = typeof id === 'string' ? team.proposals.get(id) : undefined;
     const kind = proposal ? limitedKind(proposal.action) : null;
+    // A change of no limited kind has no check here: its record was seen, and it goes to the user as before.
+    if (proposal && !kind) gated.add(proposal.id);
     if (!proposal || !kind) return 'user-approval';
     // A record that was already answered (approved, rejected or lapsed) keeps its tool and loses its arguments. There
     // is then no row to check and nothing that could run: said as what it is, before any check could read "no id" as
@@ -279,6 +282,8 @@ function applyGate(products: ProductToolkit[], team: TeamContext, turn: TurnStat
       return decision;
     }
     shown.set(proposal.id, toolCallId);
+    // The record was seen and every check of its kind ran on it in this request: only now may `apply` take it.
+    gated.add(proposal.id);
     return decision;
   };
 }
@@ -614,7 +619,22 @@ async function apply(
   team: TeamContext,
   proposalId: string,
   options: unknown,
+  /** The proposals whose record `applyGate` saw, and let through, in this request. */
+  gated: ReadonlySet<string>,
 ): Promise<unknown> {
+  // The gate decides from the records the request was given (`team.proposals`); this takes a record straight from
+  // the store. The two can disagree: the read behind `team.proposals` answers nothing when it fails, and the take a
+  // moment later can still work. A deletion, a talent pool change or an interview change would then run without its
+  // last check (the row changed since the card, the person left the pool, a second one in the turn). So a record the
+  // gate did not see in this request is looked at before it is taken, and one of a limited kind is left waiting.
+  // It cannot be got round by a failed read: the only way to `claim` below is to be in `gated`, which the gate fills
+  // after its checks, or to be read here and found to be of a kind that has no gate. A record that cannot be read
+  // here either is not taken at all.
+  if (!gated.has(proposalId)) {
+    const seen = (await team.store.peek([proposalId])).get(proposalId);
+    if (!seen) return { ok: false, error: NOT_WAITING };
+    if (limitedKind(seen.action)) return { ok: false, error: CHANGE_NOT_CHECKED };
+  }
   const stored = await team.store.claim({ id: proposalId });
   if (!stored) return { ok: false, error: NOT_WAITING };
   const proposal = { product: stored.product, action: stored.action, input: stored.input };
@@ -711,6 +731,8 @@ export function createTeamTools(
   const tools: ToolSet = {};
   // Every specialist asked in this request, and applyChange, share what the turn holds.
   const turn = turnStateFrom(messages, team.proposals);
+  // The proposals `applyGate` saw the record of, and let through, in this request: what `apply` may take.
+  const gated = new Set<string>();
   for (const product of products) {
     tools[`${ASK_PREFIX}${product.name}`] = askTool(product, team, turn, messages);
   }
@@ -725,14 +747,14 @@ export function createTeamTools(
     inputSchema: z.object({
       proposalId: z.string().min(1).describe('The id the specialist reported.'),
     }),
-    execute: async ({ proposalId }, options) => apply(products, team, proposalId, options),
+    execute: async ({ proposalId }, options) => apply(products, team, proposalId, options, gated),
   });
   return {
     tools,
     // Only a team that can prepare a change held to one a turn needs the gate; any other keeps the plain card.
     toolApproval: {
       [APPLY_TOOL]: products.some((p) => Object.keys(p.write).some((name) => limitedKind(name) !== null))
-        ? applyGate(products, team, turn)
+        ? applyGate(products, team, turn, gated)
         : 'user-approval',
     },
     prepareStep: ({ steps }) => {
