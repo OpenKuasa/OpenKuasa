@@ -163,8 +163,24 @@ export function interviewLine(iso: string, kind: InterviewKind): string {
 }
 export const THIS_INTERVIEW = (line: string) => `This interview: ${line}`;
 
+const DOT = ' · ';
+
 /** A name, a title or a place on one line: a line break in it must not start a line of its own on a card. */
 const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim();
+
+/**
+ * "Tue 20 Oct 2026, 3:00 pm · video · 1 hour · Link: https://meet.example.com/abc": the stored interview as a card
+ * about it says it, after "This interview:". Its length and its place are there too, so that the person sees what
+ * they are changing, and so that a colleague's change of either between the card and the yes is noticed.
+ */
+export function interviewFullLine(row: { scheduled_at: string; kind: InterviewKind; duration_minutes: number; place: string | null }): string {
+  const place = row.place ? oneLine(row.place) : '';
+  return [
+    interviewLine(row.scheduled_at, row.kind),
+    durationText(row.duration_minutes),
+    place ? `${PLACE_LABEL[row.kind]}: ${place}` : 'No place or link given',
+  ].join(DOT);
+}
 
 /** How many other scheduled interviews a card lists before it says how many more there are. */
 export const ALSO_SCHEDULED_MAX = 3;
@@ -249,7 +265,6 @@ function newInterviewParts(input: Record<string, unknown>): { when: string; type
 }
 
 const has = (input: Record<string, unknown>, key: string) => input[key] !== undefined;
-const DOT = ' · ';
 
 /**
  * The card's second line, from the tool's own input. Notes are never shown:

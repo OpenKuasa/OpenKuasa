@@ -39,7 +39,7 @@ import {
 } from '@/lib/ai/hire-deletions';
 import { lookedUpAs } from '@/lib/ai/hire-pool-gate';
 import { isHeldCvMessage } from '@/lib/ai/hire-tools';
-import { THIS_INTERVIEW, alsoScheduledLines, interviewLine } from '@/lib/hire/interviews';
+import { THIS_INTERVIEW, alsoScheduledLines, interviewFullLine, interviewLine } from '@/lib/hire/interviews';
 import { interviewCardFromLists, namesakesFromLists } from '@/lib/hire/namesakes';
 import type { HireData, Namesakes } from '@/lib/hire/types';
 
@@ -72,6 +72,22 @@ export const LINK_NOT_GIVEN =
 export const lookTheSameInterviews = (name: string, job: string) =>
   `Two interviews with ${name} for ${job} look the same from here, so I cannot tell them apart. Nothing was changed. ` +
   'Use the menu on the interview\'s own row on the Interviews screen.';
+/**
+ * The interview is not there: it was deleted, or its application was (its interviews go with it; from an
+ * interview's id alone the two cannot be told apart). Written for a person as it is. There is no other way and none
+ * is needed: there is nothing left to change, and the sentence says where to see what is still there.
+ */
+export const INTERVIEW_GONE =
+  'This interview no longer exists: it was deleted, or the application it belonged to was. Nothing was changed, and there is nothing left to change. ' +
+  'The Interviews screen shows what is still there.';
+/**
+ * A change of time or details for an interview whose application was rejected or withdrawn: the database would refuse
+ * it only after the user's yes. The other way is in the sentence: reopen the application, or cancel the interview
+ * (cancelling, marking and reopening an interview do not need an active application).
+ */
+export const APPLICATION_NOT_ACTIVE =
+  'The application this interview belongs to is no longer active, so the interview\'s time and details cannot be changed. Nothing was changed. ' +
+  'Reopen the application first, or cancel the interview instead.';
 /** The other way: ask again in a moment, or use the Interviews screen, which does not depend on this read. */
 export const INTERVIEW_CHECK_FAILED = 'I could not check which interview this is just now, so no change was prepared. Try again in a moment.';
 /** The other way: ask again; the new card shows the interview as it is now. */
@@ -276,11 +292,17 @@ export function interviewCheckFor(
           ? check
           : { ok: false, refusal: lookTheSameInterviews(found.target?.name.trim() ?? '', found.target?.job?.trim() ?? '') };
       }
-      const { target, others, cut, also } = data.interviewCard
+      const { target, others, cut, also, application_outcome: outcome } = data.interviewCard
         ? await data.interviewCard(id)
         : interviewCardFromLists(id, await data.listInterviews());
-      // Not there (deleted since it was listed): there is no line to put on a card, and no card goes without one.
-      if (!target) return { ok: false, refusal: INTERVIEW_CHECK_FAILED };
+      // Not there (deleted since it was listed, or since its card was shown): there is no line to put on a card.
+      if (!target) return { ok: false, refusal: INTERVIEW_GONE };
+      // Its time and details can be changed only while its application is active. Said here, before a card and again
+      // when the user's yes arrives, rather than by the database after it.
+      if (tool === 'rescheduleInterview' && (outcome === 'rejected' || outcome === 'withdrawn')) {
+        return { ok: false, refusal: APPLICATION_NOT_ACTIVE };
+      }
+      // Two read the same when their day, time and type do: that is what a person asks for one by.
       const line = interviewLine(target.scheduled_at, target.kind);
       const twins = others.filter((other) => other.id !== target.id && interviewLine(other.scheduled_at, other.kind) === line);
       const application = cardCheck(await applicationAndNamesakes(target.application_id));
@@ -294,7 +316,7 @@ export function interviewCheckFor(
       // The card's lines: which interview this is; which application, when a namesake has one for the same job; and
       // what else is scheduled with the person, so "cancel Aina's" cannot be approved without seeing there is another.
       const named = application.ok && application.note ? application : null;
-      const note = [THIS_INTERVIEW(line), ...(named ? [named.note] : []), ...alsoScheduledLines(target.candidate, also ?? [])].join('\n');
+      const note = [THIS_INTERVIEW(interviewFullLine(target)), ...(named ? [named.note] : []), ...alsoScheduledLines(target.candidate, also ?? [])].join('\n');
       return { ok: true, note, namesakes: named ? named.namesakes : [] };
     } catch {
       // Nothing of the error is logged: its words can hold a name, an email or a link.
@@ -319,8 +341,11 @@ const sameLine = (shown: string | null, now: string | null): boolean =>
 /**
  * The gate's answer once nothing else refused the call: a card, with the line
  * as the request's reason. When the SDK asks again about a call the user
- * approved and the line is no longer the one their card showed (someone moved
- * the interview meanwhile, or a namesake came or went), the change is stopped.
+ * approved and the line is no longer the one their card showed (someone
+ * changed the interview's time, type, length or place meanwhile, or a namesake
+ * came or went), the change is stopped. An interview that was deleted
+ * meanwhile, or whose application was closed, is stopped by the check's own
+ * refusal, in that outcome's own words.
  */
 export function interviewCardDecision(check: CardCheck, shown: { note: string | null } | null): Decision {
   if (!check.ok) return { type: 'denied', reason: check.refusal };

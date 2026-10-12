@@ -3,12 +3,12 @@ import type { ModelMessage } from 'ai';
 import { describe, expect, it, vi } from 'vitest';
 import { deletionProblem, guardDeletions, isGateReason, notLookedUp, stoppedAfterApproval } from '@/lib/ai/hire-deletions';
 import {
-  AMBIGUOUS_INTERVIEW_CHANGE, HIRE_INTERVIEW_TOOL_NAMES, INTERVIEW_CHANGED_SINCE, INTERVIEW_CHECK_FAILED, LINK_NOT_GIVEN, ONE_INTERVIEW_CHANGE,
+  AMBIGUOUS_INTERVIEW_CHANGE, APPLICATION_NOT_ACTIVE, HIRE_INTERVIEW_TOOL_NAMES, INTERVIEW_GONE, INTERVIEW_CHANGED_SINCE, INTERVIEW_CHECK_FAILED, LINK_NOT_GIVEN, ONE_INTERVIEW_CHANGE,
   actsOnApplication, ambiguousFor, guardInterviewChanges, interviewCardDecision, interviewChangeProblem, interviewCheckFor, interviewNotLookedUp, interviewTarget,
   interviewPlacesIn, linkNobodyGave, linksIn, lookTheSameInterviews, placesIn, sameLink, stringsIn,
 } from '@/lib/ai/hire-interview-gate';
 import { guardPoolChanges, lookedUpAs, poolChangeProblem } from '@/lib/ai/hire-pool-gate';
-import { THIS_INTERVIEW, interviewLine } from '@/lib/hire/interviews';
+import { THIS_INTERVIEW, interviewFullLine, interviewLine } from '@/lib/hire/interviews';
 
 const IV = '11111111-1111-4111-8111-111111111181';
 const IV2 = '22222222-2222-4222-8222-222222222282';
@@ -19,7 +19,7 @@ const MADE_UP = '99999999-9999-4999-8999-999999999981';
 /** 3:00 pm on Tuesday 20 October 2026 in Kuala Lumpur, and 11:00 am on the Thursday. */
 const AT = '2026-10-20T07:00:00.000Z';
 const LATER = '2026-10-22T03:00:00.000Z';
-const LINE = THIS_INTERVIEW(interviewLine(AT, 'video'));
+const LINE = THIS_INTERVIEW(interviewFullLine({ scheduled_at: AT, kind: 'video', duration_minutes: 60, place: null }));
 const LINK = 'https://meet.example.com/abc';
 const ALSO_LATER = 'Also scheduled for Aina Rahman: Thu 22 Oct 2026, 11:00 am · video (Sales Executive)';
 
@@ -50,7 +50,15 @@ const cv = {
 describe('the sentences', () => {
   it('are as agreed', () => {
     expect(HIRE_INTERVIEW_TOOL_NAMES).toEqual(['scheduleInterview', 'recordPastInterview', 'rescheduleInterview', 'cancelInterview', 'setInterviewOutcome', 'reopenInterview']);
-    expect(LINE).toBe('This interview: Tue 20 Oct 2026, 3:00 pm · video');
+    expect(LINE).toBe('This interview: Tue 20 Oct 2026, 3:00 pm · video · 1 hour · No place or link given');
+    expect(INTERVIEW_GONE).toBe(
+      'This interview no longer exists: it was deleted, or the application it belonged to was. Nothing was changed, and there is nothing left to change. ' +
+        'The Interviews screen shows what is still there.',
+    );
+    expect(APPLICATION_NOT_ACTIVE).toBe(
+      'The application this interview belongs to is no longer active, so the interview\'s time and details cannot be changed. Nothing was changed. ' +
+        'Reopen the application first, or cancel the interview instead.',
+    );
     expect(ONE_INTERVIEW_CHANGE).toBe('One interview change at a time. One is already prepared for approval.');
     expect(interviewNotLookedUp(IV)).toBe(
       `You have not looked up ${IV} as an interview. Never guess an id: use listInterviews to find the interview and get its real id, then prepare the change again.`,
@@ -72,7 +80,7 @@ describe('the sentences', () => {
   it('are each known as a gate\'s own denial, so a call the gate denied is never taken for the user\'s no', () => {
     for (const reason of [
       ONE_INTERVIEW_CHANGE, interviewNotLookedUp(IV), notLookedUp('application', APP), AMBIGUOUS_INTERVIEW_CHANGE, LINK_NOT_GIVEN,
-      lookTheSameInterviews('Aina Rahman', 'Sales Executive'), INTERVIEW_CHECK_FAILED, INTERVIEW_CHANGED_SINCE,
+      lookTheSameInterviews('Aina Rahman', 'Sales Executive'), INTERVIEW_CHECK_FAILED, INTERVIEW_CHANGED_SINCE, INTERVIEW_GONE, APPLICATION_NOT_ACTIVE,
     ]) {
       expect(isGateReason(reason), reason).toBe(true);
     }
@@ -84,6 +92,8 @@ describe('the sentences', () => {
       'This interview is already scheduled.',
       'That interview could not be found. It may have been deleted with its application.',
       'That change could not be saved. Please try again.',
+      'This application is no longer active. Reopen it before scheduling or changing an interview.',
+      'That application could not be found. It may have been deleted.',
       // The words a person might type as a reason for saying no.
       'That link is the old one', 'One interview is enough', 'This interview is not needed', 'Two interviews is too many',
     ]) {
@@ -394,7 +404,7 @@ describe('the server\'s check of the interview', () => {
   it('comes from the server\'s row, never from what the model looked up or passed in', async () => {
     const { check } = provider({ target: row(IV, APP), others: [], cut: false });
     const got = await check('rescheduleInterview', { id: IV, date: '2030-01-01', time: '09:00', kind: 'phone', place: 'Somewhere else' });
-    expect(got).toEqual({ ok: true, note: 'This interview: Tue 20 Oct 2026, 3:00 pm · video', namesakes: [] });
+    expect(got).toEqual({ ok: true, note: 'This interview: Tue 20 Oct 2026, 3:00 pm · video · 1 hour · No place or link given', namesakes: [] });
   });
   it('a second interview of the same application at another time is not a reason to refuse', async () => {
     const { check } = provider({ target: row(IV, APP), others: [row(IV2, APP, { scheduled_at: LATER })], cut: false });
@@ -457,8 +467,35 @@ describe('the server\'s check of the interview', () => {
     expect(await provider({ target: row(IV, APP), others: [], cut: false, also: [second] }).check('scheduleInterview', { application_id: APP })).toEqual({ ok: true, note: null, namesakes: [] });
   });
   it('an interview that is not there gets no card: there is no line to put on one', async () => {
-    const { check } = provider({ target: null, others: [], cut: false });
-    for (const tool of EXISTING) expect(await check(tool, { id: MADE_UP }), tool).toEqual({ ok: false, refusal: INTERVIEW_CHECK_FAILED });
+    const { check } = provider({ target: null, others: [], cut: false, application_outcome: null });
+    // Said as what it is: it was deleted, or its application was. "Try again in a moment" could never work.
+    for (const tool of EXISTING) expect(await check(tool, { id: MADE_UP }), tool).toEqual({ ok: false, refusal: INTERVIEW_GONE });
+  });
+  it('the line carries the length and the place too, so a colleague\'s change of either is seen by the last check', async () => {
+    const placed = await provider({ target: row(IV, APP, { duration_minutes: 45, place: 'https://meet.example.com/abc' }), others: [], cut: false }).check('cancelInterview', { id: IV });
+    expect(placed).toEqual({ ok: true, note: 'This interview: Tue 20 Oct 2026, 3:00 pm · video · 45 minutes · Link: https://meet.example.com/abc', namesakes: [] });
+    const was = { note: LINE };
+    // The place was added, or the length changed, since the card: stopped.
+    expect(interviewCardDecision(placed as never, was)).toEqual({ type: 'denied', reason: INTERVIEW_CHANGED_SINCE });
+    const longer = await provider({ target: row(IV, APP, { duration_minutes: 90 }), others: [], cut: false }).check('cancelInterview', { id: IV });
+    expect(interviewCardDecision(longer as never, was)).toEqual({ type: 'denied', reason: INTERVIEW_CHANGED_SINCE });
+    const same = await provider({ target: row(IV, APP), others: [], cut: false }).check('cancelInterview', { id: IV });
+    expect(interviewCardDecision(same as never, was)).toEqual({ type: 'user-approval', reason: LINE });
+    // Two that differ only in place still count as reading the same: a time and a type are what a person asks by.
+    const twin = await provider({ target: row(IV, APP), others: [row(IV2, APP, { place: 'Level 3' })], cut: false }).check('cancelInterview', { id: IV });
+    expect(twin).toEqual({ ok: false, refusal: lookTheSameInterviews('Aina Rahman', 'Sales Executive') });
+  });
+  it('an interview whose application is no longer active cannot have its time or details changed; it can still be cancelled, marked or reopened', async () => {
+    for (const outcome of ['rejected', 'withdrawn']) {
+      const closed = () => provider({ target: row(IV, APP), others: [], cut: false, application_outcome: outcome });
+      expect(await closed().check('rescheduleInterview', { id: IV, date: '2026-10-27', time: '15:00' }), outcome).toEqual({ ok: false, refusal: APPLICATION_NOT_ACTIVE });
+      for (const tool of ['cancelInterview', 'setInterviewOutcome', 'reopenInterview']) {
+        expect(await closed().check(tool, { id: IV }), `${outcome} ${tool}`).toEqual({ ok: true, note: LINE, namesakes: [] });
+      }
+    }
+    // An outcome the read could not tell is left to the database.
+    expect(await provider({ target: row(IV, APP), others: [], cut: false, application_outcome: null }).check('rescheduleInterview', { id: IV, kind: 'phone' }))
+      .toEqual({ ok: true, note: LINE, namesakes: [] });
   });
   it('refuses when a read fails, does not throw, and logs nothing of the error', async () => {
     const said = vi.spyOn(console, 'error').mockImplementation(() => {});

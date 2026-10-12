@@ -2589,14 +2589,14 @@ describe('interview changes', () => {
   const AT = '2026-10-20T07:00:00.000Z';
   const LATER = '2026-10-22T03:00:00.000Z';
   const MOVED = '2026-10-21T07:00:00.000Z';
-  const LINE = 'This interview: Tue 20 Oct 2026, 3:00 pm · video';
+  const LINE = 'This interview: Tue 20 Oct 2026, 3:00 pm · video · 1 hour · No place or link given';
   /** The second interview's card: it says the first one is scheduled too, where that one is now. */
   const lineLater = (first = 'Tue 20 Oct 2026, 3:00 pm') =>
-    `This interview: Thu 22 Oct 2026, 11:00 am · video\nAlso scheduled for Putri Maisarah Dahlan: ${first} · video (Night Auditor)`;
+    `This interview: Thu 22 Oct 2026, 11:00 am · video · 1 hour · Link: https://meet.example.com/room-2\nAlso scheduled for Putri Maisarah Dahlan: ${first} · video (Night Auditor)`;
   const LINE_LATER = lineLater();
   /** The first interview's card when the second is scheduled too. */
   const LINE_AND_LATER = `${LINE}\nAlso scheduled for Putri Maisarah Dahlan: Thu 22 Oct 2026, 11:00 am · video (Night Auditor)`;
-  const LINE_MOVED = 'This interview: Wed 21 Oct 2026, 3:00 pm · video';
+  const LINE_MOVED = 'This interview: Wed 21 Oct 2026, 3:00 pm · video · 1 hour · No place or link given';
   const LINK = 'https://meet.example.com/abc';
   const ROOM = 'https://meet.example.com/room-2';
   /** A link the applicant wrote in their cover letter: a stranger's text, which a lookup with contact details returns. */
@@ -2624,7 +2624,7 @@ describe('interview changes', () => {
   };
   const NEW = { application_id: APP, date: '2027-01-12', time: '15:00', duration_minutes: 60, kind: 'video' };
 
-  type State = { at: string; twin: boolean; fail: boolean; both?: boolean };
+  type State = { at: string; twin: boolean; fail: boolean; both?: boolean; place?: string | null; minutes?: number; gone?: boolean; outcome?: 'active' | 'rejected' };
   /**
    * One application with two interviews, a first and a second round; `state` can move the first, make the second
    * read exactly like it, make the server's read fail, or (`both`) leave the second scheduled too: it is cancelled
@@ -2633,12 +2633,12 @@ describe('interview changes', () => {
    */
   const world = (state: State = { at: AT, twin: false, fail: false }) => {
     const base = hire().data;
-    const interview = (id: string, scheduled_at: string, place: string | null, status: 'scheduled' | 'cancelled' = 'scheduled') => ({
+    const interview = (id: string, scheduled_at: string, place: string | null, status: 'scheduled' | 'cancelled' = 'scheduled', minutes = 60) => ({
       id, application_id: APP, candidate_name: WHO, job_title: JOB, scheduled_at, kind: 'video' as const, interviewer_name: null,
       status, created_at: '2026-10-09T02:00:00.000Z', updated_at: '2026-10-09T02:00:00.000Z',
-      duration_minutes: 60, place, notes: null, application_stage: 'interview' as const, application_outcome: 'active' as const,
+      duration_minutes: minutes, place, notes: null, application_stage: 'interview' as const, application_outcome: state.outcome ?? ('active' as const),
     });
-    const listInterviews = async () => [interview(IV, state.at, null), interview(IV2, state.twin ? state.at : LATER, ROOM, state.both ? 'scheduled' : 'cancelled')];
+    const listInterviews = async () => [...(state.gone ? [] : [interview(IV, state.at, state.place ?? null, 'scheduled', state.minutes)]), interview(IV2, state.twin ? state.at : LATER, ROOM, state.both ? 'scheduled' : 'cancelled')];
     const listApplications = async () =>
       (await base.listApplications()).map((a, n) =>
         n === 0 ? { ...a, id: APP, candidate_name: WHO, job_title: JOB, stage: 'interview' as const, outcome: 'active' as const, cover_letter: `Please interview me on ${LETTER_LINK}`, cv_url: LETTER_LINK, portfolio_url: LETTER_LINK } : a);
@@ -3104,7 +3104,7 @@ describe('interview changes', () => {
       expect(newTurn.denials).toEqual([]);
       expect(newTurn.cards).toHaveLength(1);
       expect(newTurn.cards[0].reason).toBe(LINE_AND_LATER);
-      expect(LINE_AND_LATER).toBe('This interview: Tue 20 Oct 2026, 3:00 pm · video\nAlso scheduled for Putri Maisarah Dahlan: Thu 22 Oct 2026, 11:00 am · video (Night Auditor)');
+      expect(LINE_AND_LATER).toBe('This interview: Tue 20 Oct 2026, 3:00 pm · video · 1 hour · No place or link given\nAlso scheduled for Putri Maisarah Dahlan: Thu 22 Oct 2026, 11:00 am · video (Night Auditor)');
       // With one scheduled interview, the same list holds nothing back, and the card has the one line.
       const alone = await request([[listAll], [{ tool: 'cancelInterview', input: { id: IV } }]], agent, world(), `Cancel the interview with ${WHO}`);
       expect(alone.denials).toEqual([]);
@@ -3215,6 +3215,9 @@ describe('interview changes', () => {
       seen.refusals = [];
       seen.workerStep = 0;
     };
+    /** True when a model in the last request was told this, in the conversation and not in its own instructions (which quote the gate's words). */
+    const told = (words: string) =>
+      seen.calls.some((call) => JSON.stringify((JSON.parse(call.prompt) as { role: string }[]).filter((m) => m.role !== 'system')).includes(words));
     const cancel: Call = { tool: 'cancelInterview', input: { id: IV } };
     const another: Call = { tool: 'reopenInterview', input: { id: IV2 } };
     // A filler lookup first, so the call that follows gets a call id of its own: the scripted model names a call after its tool and its place.
@@ -3253,6 +3256,72 @@ describe('interview changes', () => {
           expect(interviewCancelled.mock.calls[0][1]).toEqual({ id: IV });
           expect(stopped(done)).toHaveLength(1);
           expect(waiting(done)).toEqual([]);
+        } finally {
+          seen.workerScript = null;
+        }
+      });
+
+      // What a colleague can do while a card waits, and what the person is then told. Each stops the approved change;
+      // none is "try again in a moment".
+      it.each([
+        ['changed its place', (state: State) => { state.place = 'https://meet.example.com/other-room'; }, 'This interview was changed after the card was shown', 'This interview: Tue 20 Oct 2026, 3:00 pm · video · 1 hour · Link: https://meet.example.com/other-room'],
+        ['changed its length', (state: State) => { state.minutes = 30; }, 'This interview was changed after the card was shown', 'This interview: Tue 20 Oct 2026, 3:00 pm · video · 30 minutes · No place or link given'],
+        ['deleted it, or its application', (state: State) => { state.gone = true; }, 'This interview no longer exists', null],
+      ] as const)('a colleague %s between the card and the yes: the approved change is stopped, and the reason is its own', async (_what, change, reason, nextLine) => {
+        reset();
+        const state: State = { at: AT, twin: false, fail: false };
+        const run = runners[mode](world(state));
+        seen.workerScript = own ? null : [listAll, cancel, cancel, 'answer'];
+        try {
+          const shown = await exchange([say('u1', `Cancel the first interview with ${WHO}`)], run, own ? [[listAll], [cancel]] : null);
+          expect(waiting(shown)[0].approval?.requestReason).toBe(LINE);
+          change(state);
+          const retried = await exchange(decide(shown, true), run, own ? again(cancel) : null);
+          expect(interviewCancelled).not.toHaveBeenCalled();
+          expect(stopped(retried)).toHaveLength(1);
+          // The model that answers the person is told why, in that outcome's own sentence.
+          expect(told(reason)).toBe(true);
+          expect(told('I could not check')).toBe(false);
+          if (nextLine) {
+            // Asked for again, the card shows the interview as it is now.
+            expect(waiting(retried)).toHaveLength(1);
+            expect(waiting(retried)[0].approval?.requestReason).toBe(nextLine);
+          } else {
+            // There is nothing left to put on a card.
+            expect(waiting(retried)).toEqual([]);
+          }
+        } finally {
+          seen.workerScript = null;
+        }
+      });
+      it('an application rejected between the card and the yes: a change of time is stopped with that reason; a cancellation still runs', async () => {
+        reset();
+        interviewChanged.mockResolvedValue({ ok: true, data: { id: IV, candidate: WHO, job: JOB, message: 'Updated.', confirmed: true } });
+        const move: Call = { tool: 'rescheduleInterview', input: { id: IV, date: '2027-01-12', time: '16:00' } };
+        const state: State = { at: AT, twin: false, fail: false };
+        const run = runners[mode](world(state));
+        seen.workerScript = own ? null : [listAll, move, 'answer'];
+        try {
+          const shown = await exchange([say('u1', `Move the first interview with ${WHO} to 12 January at 4pm`)], run, own ? [[listAll], [move]] : null);
+          expect(waiting(shown)).toHaveLength(1);
+          state.outcome = 'rejected';
+          const after = await exchange(decide(shown, true), run, own ? [] : null);
+          expect(interviewChanged).not.toHaveBeenCalled();
+          expect(stopped(after)).toHaveLength(1);
+          expect(told('The application this interview belongs to is no longer active')).toBe(true);
+        } finally {
+          seen.workerScript = null;
+        }
+        // The same thing with a cancellation: the database allows it, so it runs.
+        reset();
+        const other: State = { at: AT, twin: false, fail: false };
+        const again2 = runners[mode](world(other));
+        seen.workerScript = own ? null : [listAll, cancel, 'answer'];
+        try {
+          const shown = await exchange([say('u1', `Cancel the first interview with ${WHO}`)], again2, own ? [[listAll], [cancel]] : null);
+          other.outcome = 'rejected';
+          await exchange(decide(shown, true), again2, own ? [] : null);
+          expect(interviewCancelled).toHaveBeenCalledTimes(1);
         } finally {
           seen.workerScript = null;
         }

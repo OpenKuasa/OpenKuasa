@@ -201,6 +201,8 @@ const REFUSAL_LINES: [start: string, line: string | null][] = [
   ['Two candidates called ', null],
   ['Two applications from someone called ', null],
   ['Two interviews with ', null],
+  ['This interview no longer exists', null],
+  ['The application this interview belongs to is no longer active', null],
   ['I could not check ', null],
 ];
 export function refusalForUser(reason: string): string {

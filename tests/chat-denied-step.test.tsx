@@ -11,7 +11,7 @@ import {
   lookTheSameInPool, poolNotLookedUp,
 } from '@/lib/ai/hire-pool-gate';
 import {
-  AMBIGUOUS_INTERVIEW_CHANGE, INTERVIEW_CHANGED_SINCE, INTERVIEW_CHECK_FAILED, LINK_NOT_GIVEN, ONE_INTERVIEW_CHANGE, interviewNotLookedUp,
+  AMBIGUOUS_INTERVIEW_CHANGE, APPLICATION_NOT_ACTIVE, INTERVIEW_CHANGED_SINCE, INTERVIEW_GONE, INTERVIEW_CHECK_FAILED, LINK_NOT_GIVEN, ONE_INTERVIEW_CHANGE, interviewNotLookedUp,
   lookTheSameInterviews,
 } from '@/lib/ai/hire-interview-gate';
 
@@ -143,6 +143,8 @@ describe('the line a person reads on a change the server refused', () => {
     // Written for a person already.
     [lookTheSameInterviews('Aina Rahman', 'Sales Executive'), lookTheSameInterviews('Aina Rahman', 'Sales Executive')],
     [INTERVIEW_CHECK_FAILED, INTERVIEW_CHECK_FAILED],
+    [INTERVIEW_GONE, INTERVIEW_GONE],
+    [APPLICATION_NOT_ACTIVE, APPLICATION_NOT_ACTIVE],
   ];
   it.each(each)('%s', (reason, line) => {
     expect(refusalForUser(reason)).toBe(line);

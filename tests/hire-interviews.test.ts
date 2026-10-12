@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DURATION_CHOICES, INTERVIEW_INPUT_MESSAGES, INTERVIEW_KINDS, INTERVIEW_LIMITS, INTERVIEW_NOT_READ_BACK, INTERVIEW_NOT_SENT,
-  INTERVIEW_OUTCOMES, INTERVIEW_SAVE_FAILED, KIND_WORDS, PLACE_LABEL, THIS_INTERVIEW, alsoScheduledLines, cancelledMessage, interviewCardDetail,
+  INTERVIEW_OUTCOMES, INTERVIEW_SAVE_FAILED, KIND_WORDS, PLACE_LABEL, THIS_INTERVIEW, alsoScheduledLines, cancelledMessage, interviewFullLine, interviewCardDetail,
   interviewCardTitle, interviewLine, interviewMessage, menuFor, needsOutcome, offerMoveToInterview, outcomeMessage,
   recordedPastMessage, reopenedMessage, scheduledMessage, stillScheduledMessage, updatedMessage,
 } from '@/lib/hire/interviews';
@@ -369,5 +369,23 @@ describe('what else is scheduled with the same person, on a card about one inter
       'Also scheduled for Aina Rahman: Thu 22 Oct 2026, 10:00 am · onsite (Sales Executive)',
     ]);
     expect(alsoScheduledLines('  ', [other('2026-10-22T02:00:00.000Z', 'onsite', 'Barista')])[0]).toBe('Also scheduled for the candidate: Thu 22 Oct 2026, 10:00 am · onsite (Barista)');
+  });
+});
+
+describe('the stored interview as a card says it', () => {
+  const AT = '2026-10-20T07:00:00.000Z';
+  it('its day, its time, its type, its length and its place, the place under the label of its type', () => {
+    expect(THIS_INTERVIEW(interviewFullLine({ scheduled_at: AT, kind: 'video', duration_minutes: 60, place: null })))
+      .toBe('This interview: Tue 20 Oct 2026, 3:00 pm · video · 1 hour · No place or link given');
+    expect(interviewFullLine({ scheduled_at: AT, kind: 'video', duration_minutes: 45, place: 'https://meet.example.com/abc' }))
+      .toBe('Tue 20 Oct 2026, 3:00 pm · video · 45 minutes · Link: https://meet.example.com/abc');
+    expect(interviewFullLine({ scheduled_at: AT, kind: 'onsite', duration_minutes: 90, place: 'Level 3, Menara Aina' }))
+      .toBe('Tue 20 Oct 2026, 3:00 pm · onsite · 1 hour 30 minutes · Place: Level 3, Menara Aina');
+    expect(interviewFullLine({ scheduled_at: AT, kind: 'phone', duration_minutes: 15, place: '+60 12-345 6789' }))
+      .toBe('Tue 20 Oct 2026, 3:00 pm · phone · 15 minutes · Details: +60 12-345 6789');
+  });
+  it('a place of spaces is no place, and one with a line break stays on the line', () => {
+    expect(interviewFullLine({ scheduled_at: AT, kind: 'video', duration_minutes: 60, place: '   ' })).toBe('Tue 20 Oct 2026, 3:00 pm · video · 1 hour · No place or link given');
+    expect(interviewFullLine({ scheduled_at: AT, kind: 'onsite', duration_minutes: 60, place: ' Level 3,\n Menara  Aina ' })).toBe('Tue 20 Oct 2026, 3:00 pm · onsite · 1 hour · Place: Level 3, Menara Aina');
   });
 });
