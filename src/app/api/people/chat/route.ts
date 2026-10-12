@@ -9,6 +9,7 @@
  * of them for an owner or admin, only their own for anyone else. An owner or admin also gets the change tools; a linked member gets leave, time-off, claim and overtime tools for themselves. Each change waits for approval.
  */
 
+import { errorCodeOf } from '@/lib/ai/call-log';
 import { chatJson, prepareChat } from '@/lib/ai/chat-request';
 import { receiptFromMessages, type PeopleWrite } from '@/lib/ai/people-tools';
 import { runLekiu } from '@/lib/ai/agents/orchestrator';
@@ -47,7 +48,7 @@ export async function POST(request: Request) {
       getPeopleViewer(chat.supabase, org),
     ]);
   } catch (error) {
-    console.error('[ask-lekiu] could not load the workspace:', error instanceof Error ? error.message : error);
+    console.error('[ask-lekiu] could not load the workspace:', errorCodeOf(error));
     return chatJson(503, {
       error: 'Lekiu could not load your HR data. Please try again in a moment.',
       code: 'data_unavailable',

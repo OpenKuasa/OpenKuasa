@@ -12,6 +12,7 @@
  * text, path, name) is logged.
  */
 
+import { errorCodeOf } from '@/lib/ai/call-log';
 import { tool, type ModelMessage, type ToolSet } from 'ai';
 import { z } from 'zod';
 import {
@@ -202,7 +203,7 @@ async function safe<T>(name: string, read: () => Promise<T>): Promise<T | typeof
   try {
     return await read();
   } catch (error) {
-    console.error(`[lekir] ${name} failed:`, error instanceof Error ? error.message : error);
+    console.error(`[lekir] ${name} failed:`, errorCodeOf(error));
     return READ_ERROR;
   }
 }

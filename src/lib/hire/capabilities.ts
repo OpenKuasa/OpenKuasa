@@ -5,6 +5,7 @@
  * action parses with it, so the two cannot accept different things. org_id
  * always comes from the HireWriteContext (the caller's session), never the input.
  */
+import { errorCodeOf } from '@/lib/ai/call-log';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { REJECT_REASONS, changeMessage, type RejectReason } from './application-changes';
@@ -32,7 +33,8 @@ const WRITE_FAILED = 'That change could not be saved. Please try again.';
 
 /** Logs the DB error for triage; callers only ever see the generic user-facing message. */
 function writeFailed(fnName: string, error: unknown): { ok: false; error: string } {
-  console.error(`[hire-capability] ${fnName} failed:`, error);
+  // The code only: a database error's message and details quote the values it refused.
+  console.error(`[hire-capability] ${fnName} failed:`, errorCodeOf(error));
   return { ok: false, error: WRITE_FAILED };
 }
 
