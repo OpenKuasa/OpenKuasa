@@ -89,6 +89,10 @@ export async function signInAction(
   redirect('/command');
 }
 
+const SIGN_UP_NOTICE =
+  'Check your email to finish signing up. If you already have an account, sign in or reset your password instead.';
+const ADDRESS_TAKEN_CODES = new Set(['user_already_exists', 'email_exists']);
+
 export async function signUpAction(
   _prev: AuthState,
   formData: FormData,
@@ -114,14 +118,15 @@ export async function signUpAction(
       email: parsed.data.email,
       password: parsed.data.password,
     });
-    if (signUpErr) {
-      return { error: 'Could not sign up. Try a different email.', values };
+    // A registered address gets the same answer as a new one that still has
+    // to confirm, so the form never says which addresses have an account.
+    // Which of the two the auth server reports depends on whether the project
+    // has email confirmation on.
+    if (signUpErr && !ADDRESS_TAKEN_CODES.has(signUpErr.code ?? '')) {
+      return { error: 'Could not sign up right now. Please try again.', values };
     }
-    if (!data.session) {
-      return {
-        notice: 'Check your email to confirm your account, then sign in.',
-        values,
-      };
+    if (signUpErr || !data.session) {
+      return { notice: SIGN_UP_NOTICE, values };
     }
   }
 
