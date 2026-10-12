@@ -1,9 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { Banknote, ChartColumn, Download, Landmark, Search, TrendingUp } from 'lucide-react';
+import Link from 'next/link';
+import { Banknote, ChartColumn, Download, Landmark, Plus, Search, TrendingUp } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { AreaTrend, RadialGauge, type Series } from '@/components/charts';
+import { BankAccountFormCard, type BankAccountFormActions } from '@/components/finance/bank-account-form-card';
+import { BankAccountsCard } from '@/components/finance/bank-accounts-card';
 import { downloadCsv } from '@/components/finance/download-csv';
 import { useLocalToday } from '@/components/finance/use-local-today';
 import { PageHeader } from '@/components/screen/page-header';
@@ -29,7 +32,25 @@ import { localIsoDate } from '@/lib/finance/bill-math';
 import { csvFileName } from '@/lib/finance/csv';
 import { rm } from '@/lib/finance/format';
 import { LATEST_ROWS, displayDate } from '@/lib/finance/view-helpers';
+import type { SavedBankAccount } from '@/lib/finance/bank-accounts';
+import type { FinResult } from '@/lib/finance/result';
 import { cn } from '@/lib/utils';
+
+export type BankingActions = BankAccountFormActions & {
+  setActive: (input: unknown) => Promise<FinResult<SavedBankAccount>>;
+};
+
+/** What only a person who may edit is given: the actions, whether they may sign off, and the account numbers. */
+export type BankingWriter = {
+  actions: BankingActions;
+  /** True for an owner or admin: they set and change an opening balance. Decided on the server. */
+  canSignOff: boolean;
+  /** Account numbers by account id, read with finance_account_numbers; an account with none is absent. */
+  numbers: Record<string, string>;
+};
+
+/** The account form: for a new account, or for one being changed. `today` is the person's own date when it was opened. */
+type OpenForm = { today: string; editing: BankAccountRow | null } | null;
 
 const CASH_SERIES: Series[] = [{ key: 'balance', label: 'Cash position (RM k)', color: 'var(--chart-1)' }];
 
@@ -42,16 +63,22 @@ const STATUS_STYLES = {
  * Banking: a balance per account, the cash position over eight months, how
  * much of this month is reconciled, and every posted movement of money with
  * the balance of its account after it. Search, an account filter, a
- * reconciliation filter, "View all" and Export. Nothing here changes data
- * yet: accounts, transfers and statements get their forms later, and a
- * payment is changed on the screen that recorded it.
+ * reconciliation filter, "View all" and Export. A person who may edit
+ * (`writer`) also gets "Add account", a link to Cash Receipts for a new
+ * receipt, and Edit, Archive and Restore on each account; the opening
+ * balance in the account form is an owner's or admin's. Transfers and
+ * statements get their forms later, and a payment is changed on the screen
+ * that recorded it.
  */
 export function BankingView({
   accounts,
   rows,
   today: serverToday,
   followClock = true,
+  writer,
 }: {
+  /** Absent for a viewer, the demo workspace and the sample: then nothing here changes data. */
+  writer?: BankingWriter;
   /** Every account, bank accounts first. */
   accounts: BankAccountRow[];
   /** Every movement of money, any status. */
@@ -66,6 +93,7 @@ export function BankingView({
   const [accountId, setAccountId] = useState('all');
   const [filter, setFilter] = useState<BankFilter>('all');
   const [showAll, setShowAll] = useState(false);
+  const [form, setForm] = useState<OpenForm>(null);
 
   const view = bankingView(accounts, rows, today);
   const ledger = withRunningBalance(accounts, rows);
@@ -74,9 +102,42 @@ export function BankingView({
 
   return (
     <ScreenContainer className="pb-24 sm:pb-24">
-      <PageHeader title="Banking" subtitle="Accounts, balances and reconciliation, Saudara." />
+      <PageHeader
+        title="Banking"
+        subtitle="Accounts, balances and reconciliation, Saudara."
+        actions={
+          writer ? (
+            <>
+              <Button variant="outline" size="sm" asChild>
+                <Link href="/finance/cash-receipts">New receipt</Link>
+              </Button>
+              <Button
+                size="sm"
+                aria-expanded={form !== null && form.editing === null}
+                disabled={form !== null}
+                // The date is the person's own, taken when the form opens, never the server's.
+                onClick={() => setForm({ today: localIsoDate(new Date()), editing: null })}
+              >
+                <Plus className="size-4" />
+                Add account
+              </Button>
+            </>
+          ) : undefined
+        }
+      />
 
       <BentoGrid>
+        {writer && form ? (
+          <BankAccountFormCard
+            key={form.editing?.id ?? 'new'}
+            editing={form.editing}
+            accountNo={form.editing ? writer.numbers[form.editing.id] : undefined}
+            today={form.today}
+            canSignOff={writer.canSignOff}
+            actions={writer.actions}
+            onClose={() => setForm(null)}
+          />
+        ) : null}
         <BentoCard tone="primary" className="col-span-2 md:col-span-6 xl:col-span-3">
           <BentoStat label={view.total.label} value={view.total.value} delta={view.total.delta} deltaTone="flat" onPrimary />
         </BentoCard>
@@ -112,6 +173,20 @@ export function BankingView({
             </p>
           )}
         </BentoCard>
+
+        <BankAccountsCard
+          accounts={accounts}
+          writer={
+            writer
+              ? {
+                  numbers: writer.numbers,
+                  setActive: writer.actions.setActive,
+                  onEdit: (account) => setForm({ today: localIsoDate(new Date()), editing: account }),
+                  locked: form !== null,
+                }
+              : undefined
+          }
+        />
 
         <BentoCard
           title="Transactions"
