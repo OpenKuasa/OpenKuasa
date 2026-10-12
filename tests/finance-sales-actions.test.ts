@@ -78,6 +78,7 @@ const PATHS = [
   // Every document that posts, voids or pays also moves the books.
   '/finance/chart-of-accounts',
   '/finance/journals',
+  '/finance/reports',
 ];
 const FORBIDDEN = { ok: false, error: 'You do not have permission to make changes here.' };
 
@@ -166,7 +167,7 @@ describe('each write action', () => {
     expect(ctl.calls.map((c) => c.fn)).toEqual(['voidPayment']);
     expect(ctl.revalidated).toEqual([
       '/finance/supplier-bills', '/finance/payments-out', '/finance/customers-suppliers', '/finance/payment-vouchers',
-      '/finance/banking', '/finance/chart-of-accounts', '/finance/journals',
+      '/finance/banking', '/finance/chart-of-accounts', '/finance/journals', '/finance/reports',
     ]);
     expect(ctl.revalidated).not.toContain('/finance/cash-receipts');
   });

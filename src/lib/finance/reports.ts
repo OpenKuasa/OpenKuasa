@@ -19,6 +19,9 @@ export type Month = string;
 
 export type MonthlyTotals = { account_id: string; month: Month; debit: number; credit: number }[];
 
+/** The part of an account the statements need: the screen sends no more. */
+export type ReportAccount = Pick<LedgerAccount, 'id' | 'code' | 'name' | 'type'>;
+
 /** From the first month to the last, both inclusive; from is not after to. */
 export type Period = { from: Month; to: Month };
 
@@ -179,7 +182,7 @@ export type StatementLine = { account_id: string; code: string; name: string; am
 type SenLine = StatementLine & { sen: number };
 
 /** The accounts of the given kinds that have a movement, each with its signed amount, by code. */
-function linesOf(accounts: LedgerAccount[], moves: Map<string, Movement>, types: AccountType[], keep: (m: Movement, sen: number) => boolean): SenLine[] {
+function linesOf(accounts: ReportAccount[], moves: Map<string, Movement>, types: AccountType[], keep: (m: Movement, sen: number) => boolean): SenLine[] {
   return accounts
     .filter((a) => types.includes(a.type))
     .flatMap((a) => {
@@ -210,7 +213,7 @@ export type ProfitAndLoss = {
  * Movement within the period. Income is credits less debits, an expense debits less credits; an account with
  * no movement in the period is left out. A void's reversal in a later month shows as a negative line there.
  */
-export function profitAndLoss(accounts: LedgerAccount[], totals: MonthlyTotals, period: Period): ProfitAndLoss {
+export function profitAndLoss(accounts: ReportAccount[], totals: MonthlyTotals, period: Period): ProfitAndLoss {
   const moves = movements(totals, inPeriod(period));
   const active = (m: Movement) => m.active;
   const income = linesOf(accounts, moves, ['income'], active);
@@ -252,7 +255,7 @@ export type BalanceSheet = {
  * Nothing closes a year into Retained Earnings yet, so all the income less all the expenses up to the date
  * is shown as its own line, Current earnings, and counted in the equity.
  */
-export function balanceSheet(accounts: LedgerAccount[], totals: MonthlyTotals, period: Period): BalanceSheet {
+export function balanceSheet(accounts: ReportAccount[], totals: MonthlyTotals, period: Period): BalanceSheet {
   const moves = movements(totals, (month) => month <= period.to);
   const shown = (m: Movement, sen: number) => m.active || sen !== 0;
   const assets = linesOf(accounts, moves, ['asset'], shown);
@@ -281,7 +284,7 @@ export type TrialBalanceRow = { account_id: string; code: string; name: string; 
 export type TrialBalance = { rows: TrialBalanceRow[]; totalDebit: number; totalCredit: number; balanced: boolean };
 
 /** Each account's debits and credits within the period (the movement, not the net), by code; an account with none is left out. */
-export function trialBalance(accounts: LedgerAccount[], totals: MonthlyTotals, period: Period): TrialBalance {
+export function trialBalance(accounts: ReportAccount[], totals: MonthlyTotals, period: Period): TrialBalance {
   const moves = movements(totals, inPeriod(period));
   const rows = accounts
     .flatMap((a) => {
@@ -304,7 +307,7 @@ export type MonthSeries = { month: Month; label: string; revenue: number; expens
  * One point per month of the period, empty months included, and the last 24 of them when the period is longer.
  * The label is the month's short name, with the two-digit year added when the points span more than one year.
  */
-export function monthlySeries(accounts: LedgerAccount[], totals: MonthlyTotals, period: Period): MonthSeries {
+export function monthlySeries(accounts: ReportAccount[], totals: MonthlyTotals, period: Period): MonthSeries {
   const months = monthsIn(period).slice(-SERIES_MONTHS_MAX);
   if (months.length === 0) return [];
   const type = new Map(accounts.map((a) => [a.id, a.type]));

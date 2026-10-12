@@ -2,7 +2,7 @@ import type { AccountStandsFor, AccountType, JournalRow, LedgerAccount, LedgerLi
 import { round2 } from '@/lib/finance/view-helpers';
 
 /**
- * The ledger of an invented workspace (Rimba Ventures Sdn Bhd), shown by Chart of Accounts and Journals when no
+ * The ledger of an invented workspace (Rimba Ventures Sdn Bhd), shown by Chart of Accounts, Journals and Reports when no
  * database is connected. The accounts' totals are worked out from the lines, so the books balance by
  * construction: every entry below has equal debits and credits.
  */
@@ -41,24 +41,40 @@ function entry(
   return sides.map((s) => ({ entry_key: key, entry_date: date, source, source_id, source_no, description, ...s }));
 }
 
-/** Six entries: an opening balance, an invoice, a bill, a receipt, a payment and a manual journal. */
+/**
+ * Eleven entries over four months (July to October 2026): an opening balance, three invoices, two bills, a
+ * receipt, a payment, an expense, a manual journal and a second receipt, so the Reports screen has months to compare.
+ */
 export const SAMPLE_LEDGER_LINES: LedgerLine[] = [
-  ...entry('opening:bank-1100', '2026-09-01', 'opening', 'bank-1100', null, 'Opening balance of Main Bank', [
+  ...entry('opening:bank-1100', '2026-07-01', 'opening', 'bank-1100', null, 'Opening balance of Main Bank', [
     { account_id: 'acc-1100', debit: 50_000, credit: 0 },
     { account_id: 'acc-3000', debit: 0, credit: 50_000 },
   ]),
-  ...entry('invoice:inv-1', '2026-09-15', 'invoice', 'inv-1', 'INV-0001', 'Invoice INV-0001 to Aisyah Trading', [
+  ...entry('invoice:inv-1', '2026-07-15', 'invoice', 'inv-1', 'INV-0001', 'Invoice INV-0001 to Aisyah Trading', [
     { account_id: 'acc-1200', debit: 2_120, credit: 0 },
     { account_id: 'acc-4000', debit: 0, credit: 2_000 },
     { account_id: 'acc-2100', debit: 0, credit: 120 },
   ]),
-  ...entry('bill:bill-1', '2026-09-20', 'bill', 'bill-1', 'BILL-0001', 'Bill from Kopi Hulu Supplies', [
+  ...entry('bill:bill-1', '2026-08-05', 'bill', 'bill-1', 'BILL-0001', 'Bill from Kopi Hulu Supplies', [
     { account_id: 'acc-5000', debit: 1_500, credit: 0 },
     { account_id: 'acc-2000', debit: 0, credit: 1_500 },
   ]),
-  ...entry('payment_in:rcp-1', '2026-09-28', 'payment_in', 'rcp-1', 'RCP-0001', 'Receipt from Aisyah Trading', [
+  ...entry('payment_in:rcp-1', '2026-08-20', 'payment_in', 'rcp-1', 'RCP-0001', 'Receipt from Aisyah Trading', [
     { account_id: 'acc-1100', debit: 2_120, credit: 0 },
     { account_id: 'acc-1200', debit: 0, credit: 2_120 },
+  ]),
+  ...entry('invoice:inv-2', '2026-09-12', 'invoice', 'inv-2', 'INV-0002', 'Invoice INV-0002 to Bunga Raya Cafe', [
+    { account_id: 'acc-1200', debit: 3_180, credit: 0 },
+    { account_id: 'acc-4000', debit: 0, credit: 3_000 },
+    { account_id: 'acc-2100', debit: 0, credit: 180 },
+  ]),
+  ...entry('bill:bill-2', '2026-09-25', 'bill', 'bill-2', 'BILL-0002', 'Bill from Tenaga Utilities', [
+    { account_id: 'acc-6300', debit: 350, credit: 0 },
+    { account_id: 'acc-2000', debit: 0, credit: 350 },
+  ]),
+  ...entry('expense:exp-1', '2026-10-01', 'expense', 'exp-1', 'EXP-0001', 'October office rent', [
+    { account_id: 'acc-6100', debit: 1_200, credit: 0 },
+    { account_id: 'acc-1100', debit: 0, credit: 1_200 },
   ]),
   ...entry('payment_out:pay-1', '2026-10-02', 'payment_out', 'pay-1', 'PAY-0001', 'Payment to Kopi Hulu Supplies', [
     { account_id: 'acc-2000', debit: 800, credit: 0 },
@@ -67,6 +83,15 @@ export const SAMPLE_LEDGER_LINES: LedgerLine[] = [
   ...entry(`journal:${SAMPLE_JOURNAL_ID}`, '2026-10-05', 'journal', SAMPLE_JOURNAL_ID, 'JNL-0001', 'Depreciation of office equipment', [
     { account_id: 'acc-6200', debit: 400, credit: 0 },
     { account_id: 'acc-1500', debit: 0, credit: 400 },
+  ]),
+  ...entry('invoice:inv-3', '2026-10-08', 'invoice', 'inv-3', 'INV-0003', 'Invoice INV-0003 to Aisyah Trading', [
+    { account_id: 'acc-1200', debit: 4_240, credit: 0 },
+    { account_id: 'acc-4000', debit: 0, credit: 4_000 },
+    { account_id: 'acc-2100', debit: 0, credit: 240 },
+  ]),
+  ...entry('payment_in:rcp-2', '2026-10-09', 'payment_in', 'rcp-2', 'RCP-0002', 'Receipt from Bunga Raya Cafe', [
+    { account_id: 'acc-1100', debit: 3_180, credit: 0 },
+    { account_id: 'acc-1200', debit: 0, credit: 3_180 },
   ]),
 ];
 

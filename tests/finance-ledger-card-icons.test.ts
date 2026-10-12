@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
  */
 const mapKeys = new Set([...readFileSync('src/components/ui/animated-icon.tsx', 'utf8').matchAll(/^\s+'(\w+)': /gm)].map((m) => m[1]));
 
-describe.each(['accounts-view', 'journals-view'])('the icons %s gives its cards', (file) => {
+describe.each(['accounts-view', 'journals-view', 'reports-view'])('the icons %s gives its cards', (file) => {
   const source = readFileSync(`src/components/finance/${file}.tsx`, 'utf8');
   // <BentoCard icon={X}> (the icons inline in menus and buttons are drawn as they are)
   // and icon={cond ? A : B}

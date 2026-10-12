@@ -83,7 +83,7 @@ const draft: JournalRow = {
 describe('the ledger', () => {
   it('shows the entries newest first, each with its date, number, source and description', () => {
     const html = text(render());
-    expect(html).toContain('Entries shown 6');
+    expect(html).toContain('Entries shown 11 of 11');
     expect(html.indexOf('Depreciation of office equipment')).toBeLessThan(html.indexOf('Payment to Kopi Hulu Supplies'));
     expect(html.indexOf('Payment to Kopi Hulu Supplies')).toBeLessThan(html.indexOf('Opening balance of Main Bank'));
     expect(html).toContain('05 Oct 2026');
@@ -91,7 +91,7 @@ describe('the ledger', () => {
     expect(html).toContain('Manual journal');
     expect(html).toContain('Supplier bill');
     // An entry with no number shows a dash.
-    expect(html).toMatch(/01 Sep 2026 — Opening balance/);
+    expect(html).toMatch(/01 Jul 2026 — Opening balance/);
   });
 
   it('lists the lines of an entry with account code and name, debit and credit', () => {
@@ -102,8 +102,8 @@ describe('the ledger', () => {
 
   it('shows equal total debits and total credits', () => {
     const html = text(render());
-    expect(html).toContain('Total debits RM 56,940.00');
-    expect(html).toContain('Total credits RM 56,940.00');
+    expect(html).toContain('Total debits RM 69,090.00');
+    expect(html).toContain('Total credits RM 69,090.00');
     expect(html).not.toContain('Out of balance');
   });
 
