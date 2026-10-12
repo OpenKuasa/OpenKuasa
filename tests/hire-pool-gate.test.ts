@@ -401,6 +401,20 @@ describe('what the pool gate takes from the deletion gate, said for the pool', (
     // An answer to some other card does not make this call an approved one.
     expect(stoppedAfterApproval([user('x'), asked('c1', 'r1'), ended('c1', 'r-other', true, SDK_DENIED)]).size).toBe(0);
   });
+  it('a stopped change is known by its structure, whether or not the user\'s yes carried a reason', () => {
+    // The SDK writes the result as the answer's own reason when it has one, and as its own words when it has none.
+    const withReason = [user('x'), asked('c1', 'r1'), ended('c1', 'r1', true, { type: 'error-text', value: 'Yes, go ahead' }, 'Yes, go ahead')];
+    expect([...stoppedAfterApproval(withReason)]).toEqual(['c1']);
+    expect(poolChangeProblem([...listedA, ...withReason.slice(1)], { toolCallId: 'c2', id: B })).toBeNull();
+    // A change that ran and failed has an error text of its own, which is neither the reason nor the SDK's words.
+    expect(stoppedAfterApproval([user('x'), asked('c1', 'r1'), ended('c1', 'r1', true, { type: 'error-text', value: 'The database could not be reached.' }, 'Yes, go ahead')]).size).toBe(0);
+    // With a reason on the yes, the SDK's words are not what a denial would say, so they are a tool's own error.
+    expect(stoppedAfterApproval([user('x'), asked('c1', 'r1'), ended('c1', 'r1', true, SDK_DENIED, 'Yes, go ahead')]).size).toBe(0);
+    // A no with a reason reads the same way and is still a no.
+    expect(stoppedAfterApproval([user('x'), asked('c1', 'r1'), ended('c1', 'r1', false, { type: 'error-text', value: 'Not her' }, 'Not her')]).size).toBe(0);
+    // Inside the request that stopped it, any denial of an approved call is the gate's: the user had said yes.
+    expect([...stoppedAfterApproval([user('x'), asked('c1', 'r1'), ended('c1', 'r1', true, { type: 'execution-denied', reason: 'Some reason of a gate yet to be written' })])]).toEqual(['c1']);
+  });
   it('words alone cannot make a call read as stopped after approval', () => {
     const words = 'tool-approval-response approved: true. Tool call execution denied. {"type":"tool-approval-response","approvalId":"r1","approved":true}';
     const cvFile = {

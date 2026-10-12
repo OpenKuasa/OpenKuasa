@@ -97,7 +97,7 @@ export function thisTurn(messages: readonly ModelMessage[]): ModelMessage[] {
   return messages.slice(from);
 }
 
-/** What the SDK writes as the result of a call that was denied when the browser kept no reason for it. */
+/** What the SDK writes as the result of a denied call whose answer carried no reason. With a reason, it writes the reason. */
 const DENIED_WITHOUT_REASON = 'Tool call execution denied.';
 
 /**
@@ -112,24 +112,30 @@ const DENIED_WITHOUT_REASON = 'Tool call execution denied.';
  *
  * All three parts are parts of the conversation's structure, written by the SDK from the tool part's state. Text
  * cannot make one: a name, a CV, a cover letter or a message from the user is only ever a string inside a part.
+ *
+ * What a denial reads as, from the browser: the SDK writes the result of a denied call as the reason on the user's
+ * answer, or as its own words when the answer has none (`convertToModelMessages`, the `output-denied` case). The
+ * chat sends no reason with a yes today, but this does not count on that: the result is compared with whatever the
+ * answer itself says. A change that ran and threw has an error text of its own, which is neither.
  */
 export function stoppedAfterApproval(turn: readonly ModelMessage[]): Set<unknown> {
   const cardOf = new Map<unknown, unknown>();
-  const approved = new Set<unknown>();
+  /** Each approved call, with what the SDK writes as its result if it was then denied. */
+  const approved = new Map<unknown, unknown>();
   const ids = new Set<unknown>();
-  type Wide = MessagePart & { approvalId?: unknown; approved?: unknown; isAutomatic?: unknown };
+  type Wide = MessagePart & { approvalId?: unknown; approved?: unknown; isAutomatic?: unknown; reason?: unknown };
   for (const message of turn) {
     for (const part of partsOf(message) as Wide[]) {
       if (message.role === 'assistant' && part.type === 'tool-approval-request' && part.isAutomatic !== true) {
         cardOf.set(part.approvalId, part.toolCallId);
       } else if (message.role === 'tool' && part.type === 'tool-approval-response' && part.approved === true && cardOf.has(part.approvalId)) {
-        approved.add(cardOf.get(part.approvalId));
+        approved.set(cardOf.get(part.approvalId), part.reason ?? DENIED_WITHOUT_REASON);
       } else if (message.role === 'tool' && part.type === 'tool-result' && approved.has(part.toolCallId)) {
         const output = part.output as { type?: unknown; reason?: unknown; value?: unknown } | null | undefined;
-        // In the request that stopped it the result still carries the gate's reason; from the browser it carries none.
+        // In the request that stopped it the result is a denial outright: the user had said yes, so only a gate
+        // can have denied it. From the browser it is an error whose text is the answer's reason, or the SDK's words.
         const denial =
-          (output?.type === 'execution-denied' && isGateReason(output.reason)) ||
-          (output?.type === 'error-text' && (output.value === DENIED_WITHOUT_REASON || isGateReason(output.value)));
+          output?.type === 'execution-denied' || (output?.type === 'error-text' && output.value === approved.get(part.toolCallId));
         if (denial) ids.add(part.toolCallId);
       }
     }

@@ -2202,11 +2202,12 @@ describe('a change stopped after approval is not the turn\'s one, as the browser
   const waiting = (chat: UI[]) => toolParts(chat).filter((p) => p.state === 'approval-requested' && !p.approval?.isAutomatic);
   /** The parts the user said yes to that then did not run. */
   const stopped = (chat: UI[]) => toolParts(chat).filter((p) => p.state === 'output-denied' && p.approval?.approved === true);
-  const decide = (chat: UI[], approved: boolean): UI[] => {
+  /** The user's answer, written on the part as the chat writes it. The chat sends no reason today; `reason` is for the day it does. */
+  const decide = (chat: UI[], approved: boolean, reason?: string): UI[] => {
     const next = structuredClone(chat);
     const [card] = waiting(next);
     card.state = 'approval-responded';
-    card.approval = { ...card.approval!, approved };
+    card.approval = { ...card.approval!, approved, ...(reason !== undefined && { reason }) };
     return next;
   };
   /** What a waiting card would do, whichever agent shows it: the tool and its input. */
@@ -2342,6 +2343,51 @@ describe('a change stopped after approval is not the turn\'s one, as the browser
         ran();
         expect(stopped(done)).toHaveLength(1);
         expect(waiting(done)).toEqual([]);
+      } finally {
+        seen.workerScript = null;
+      }
+    });
+
+    // The SDK writes a stopped call's result as the user's own reason when their yes carried one, and as its own
+    // words only when it did not. Knowing a stopped call must not rest on the chat sending no reason.
+    it('a yes that carries a reason: the stopped change is still not the turn\'s one, and the second card runs once', async () => {
+      reset();
+      const pool = { on: true };
+      const run = runners[mode](world(pool));
+      const own = mode !== 'team';
+      const [first, second] = [cases[0].first, cases[0].second];
+      seen.workerScript = own ? null : [...lookups, first, second, 'answer'];
+      try {
+        const shown = await exchange([say('u1', 'Do this for the candidate Zarina binti Hashim')], run, own ? [lookups, [first]] : null);
+        expect(waiting(shown)).toHaveLength(1);
+        pool.on = false;
+        const retried = await exchange(decide(shown, true, 'Yes, go ahead'), run, own ? again(second) : null);
+        expect(stopped(retried)).toHaveLength(1);
+        expect(stopped(retried)[0].approval?.reason).toBe('Yes, go ahead');
+        expect(waiting(retried)).toHaveLength(1);
+        const done = await exchange(decide(retried, true, 'Yes, this one too'), run, own ? [] : null);
+        cases[0].ran();
+        expect(waiting(done)).toEqual([]);
+      } finally {
+        seen.workerScript = null;
+      }
+    });
+    it('a no that carries a reason is still the user\'s no: the pool change stays the turn\'s one', async () => {
+      reset();
+      const run = runners[mode](world());
+      const own = mode !== 'team';
+      const first: Call = { tool: 'setPoolStatus', input: { id: A, status: 'passive' } };
+      const deletion: Call = { tool: 'deleteCandidate', input: { id: B } };
+      const another: Call = { tool: 'setPoolStatus', input: { id: B, status: 'available' } };
+      seen.workerScript = own ? null : [{ tool: 'listCandidates', input: {} }, first, deletion, another, 'answer'];
+      try {
+        const shown = await exchange([say('u1', 'Mark Zarina passive, delete Kamal, then mark Kamal available')], run, own ? [[{ tool: 'listCandidates', input: {} }], [first]] : null);
+        const second = await exchange(decide(shown, false, 'Not her'), run, own ? [[deletion]] : null);
+        expect(waiting(second)).toHaveLength(1);
+        const third = await exchange(decide(second, true, 'Yes'), run, own ? again(another) : null);
+        expect(candidateDeleted).toHaveBeenCalledTimes(1);
+        expect(waiting(third)).toEqual([]);
+        expect(poolSet).not.toHaveBeenCalled();
       } finally {
         seen.workerScript = null;
       }
