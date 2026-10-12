@@ -72,9 +72,9 @@ describe('LEKIU_SYSTEM', () => {
         !payrollTools.includes(name) &&
         !PERFORMANCE_TOOLS.includes(name),
     );
-    expect(others.every((name) => /Employee(Status|ToMember)?$|Department$/.test(name))).toBe(true);
-    expect(others).toHaveLength(8);
-    expect(PEOPLE_WRITE_TOOL_NAMES).toHaveLength(53);
+    expect(others.every((name) => /Employee(Status|ToMember)?$|Department$|^setReportsTo$/.test(name))).toBe(true);
+    expect(others).toHaveLength(9);
+    expect(PEOPLE_WRITE_TOOL_NAMES).toHaveLength(54);
     // Each leave, claim, overtime and attendance tool is named in the rules for using it.
     for (const name of [...leaveTools, ...payTools, ...attendanceTools, ...payrollTools, ...PERFORMANCE_TOOLS, ...letterWriteTools, 'previewOvertime', 'getMyAttendanceToday', 'getAttendanceSettings']) {
       expect(LEKIU_SYSTEM, name).toContain(name);
@@ -737,5 +737,35 @@ describe('letters and documents', () => {
   it('keeps every other pinned line and is still a plain template', () => {
     expect(LEKIU_SYSTEM).not.toContain('`');
     expect(LEKIU_SYSTEM).not.toContain('${');
+  });
+});
+
+describe('LEKIU_SYSTEM, the three kinds of asker', () => {
+  it('names the three kinds and says the tools held tell which', () => {
+    expect(t).toContain('three kinds of person asking: an owner or admin, a manager');
+    expect(t).toContain('the tools you hold tell you which');
+  });
+  it('tells a member who their manager is, and where requests go when there is none', () => {
+    expect(LEKIU_SYSTEM).toContain('reports_to');
+    expect(t).toContain('their requests go to the owners and admins');
+  });
+  it('limits a manager to direct reports and names the two team reads', () => {
+    expect(t).toContain('direct reports only, never a report\'s report');
+    for (const name of ['listMyTeam', 'getWaitingForMe', 'setReportsTo']) expect(LEKIU_SYSTEM, name).toContain(name);
+  });
+  it('keeps pay, and every owner-only action, away from a manager', () => {
+    expect(t).toContain('never told what a report\'s overtime pays');
+    expect(t).toContain('those are for an owner or admin');
+    for (const word of ['marking a claim paid', 'correcting attendance', 'cancelling someone else\'s request', 'payroll']) {
+      expect(t, word).toContain(word);
+    }
+  });
+  it('has a manager\'s own request decided by someone else, and setReportsTo refuse a loop', () => {
+    expect(t).toContain('never by themselves');
+    expect(t).toContain('needs approval, and the database refuses a loop');
+    expect(t).toContain('sits with the owners and admins');
+  });
+  it('never mentions the old manager flag', () => {
+    expect(LEKIU_SYSTEM).not.toContain('is_manager');
   });
 });
