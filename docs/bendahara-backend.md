@@ -718,7 +718,8 @@ that is not a JPG, PNG, PDF, HEIC or HEIF is refused there. The path is
 a path that is not of that shape in the caller's own workspace
 (`isInboxReceiptPath`), and the guard refuses one with no object behind it.
 The upload is a plain one, not a resumable one: there is no percentage, only
-"Uploading", and a dropped connection starts that file again.
+"Uploading", and a dropped connection fails that file, which starts again
+when the person presses Try again.
 `registerReceiptAction` then
 records the row; called twice for one file it answers with the same receipt.
 Files go one at a time through a queue of at most twenty
@@ -741,9 +742,10 @@ file's first 64 bytes through a ranged request (`storedFileCheck` in
 `receipt-files-server.ts`) and refuses a file that is not the type its
 receipt says. A JPG or PNG is previewed in the review card from bytes the
 browser fetches and checks itself, as an object URL: no image, frame or new
-tab is ever pointed at a stored file. A download is saved the same way: the
-browser fetches the bytes through the link and saves its own copy from an
-object URL, so the page never navigates to storage. A PDF and a stored HEIC
+tab is ever pointed at a stored file. A download also goes through the
+page's own copy of the bytes (it does not check their first bytes again; the
+server did): the browser fetches them through the link, with a 60-second limit,
+and saves its own copy, typed `application/octet-stream`, from an object URL, so the page never navigates to storage. A PDF and a stored HEIC
 are downloads only.
 
 **Reviewing.** `reviewReceiptInput` and `finance_review_receipt`: vendor (200
@@ -768,7 +770,7 @@ uploads it put on the list, and how many files it took off it. `ok: false` means
 something was left for the next call (the list could not be read, a file could
 not be removed, or the 20 seconds ran out); it is not an error to alert on
 unless it stays false for many calls in a row. A `401` means the secret is
-wrong.
+wrong, unset or shorter than 32 characters.
 
 **The demo** has eight receipts with no file (a migration cannot upload), so
 `has_file` is false on them and the screen says so. Its guests are anonymous
@@ -1678,8 +1680,12 @@ with no date).
 - A JPG or PNG is uploaded as the person's device made it, so its metadata
   stays in it, a phone's location included. Only a HEIC that was converted to a
   JPG loses its metadata, because that JPG is drawn afresh from the pixels.
-- There is no upload percentage, and a dropped connection starts that file
-  again from the beginning (resumable uploads were left out on purpose).
+- There is no upload percentage, and a dropped connection fails that file;
+  Try again then uploads it from the beginning (resumable uploads were left out
+  on purpose).
+- "Try again" on failed files can put more than twenty in the queue: a failed
+  file does not count toward the twenty, and the retry does not ask for a
+  place. Files still go one at a time and nothing is dropped.
 - The download name on a signed link is added to the link by the client and is
   not covered by the link's signature: whoever holds a link can drop it, and
   storage then serves the file inline with its declared type. Nothing in the app
