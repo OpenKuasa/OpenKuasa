@@ -307,14 +307,15 @@ export async function cancelOvertime(
 export async function decideOvertime(
   ctx: PeopleWriteContext,
   input: z.infer<typeof decideInput>,
-): Promise<CapResult<{ id: string; status: string; amount_cents: number }>> {
+): Promise<CapResult<{ id: string; status: string; amount_cents: number | null }>> {
   const parsed = parse(decideInput, input);
   if (!parsed.ok) return parsed;
   const { id, approve, note } = parsed.data;
   return call(ctx, 'decideOvertime', 'hr_decide_overtime', { p_request: id, p_approve: approve, p_note: orNull(note) }, (row) => {
     const saved = pickStatus(row);
-    const amount = whole(row.amount_cents);
-    return saved && amount !== null ? { ...saved, amount_cents: amount } : null;
+    // Null is the manager route: the database leaves the amount out for anyone who is not an owner or admin.
+    const amount = maybeWhole(row.amount_cents);
+    return saved && amount !== undefined ? { ...saved, amount_cents: amount } : null;
   });
 }
 

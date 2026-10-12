@@ -233,6 +233,37 @@ describe('the calls each function makes', () => {
   });
 });
 
+describe('decideOvertime and the amount a manager is not given', () => {
+  const decide = async (reply: Record<string, unknown>) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { client } = fakeSupabase({ 'rpc.hr_decide_overtime': { data: reply } });
+    return decideOvertime(ctxOf(client), { id: REQ, approve: true });
+  };
+
+  it('is a success with a null amount when the database answers null (the manager route)', async () => {
+    expect(await decide({ id: REQ, status: 'approved', amount_cents: null })).toEqual({
+      ok: true,
+      data: { id: REQ, status: 'approved', amount_cents: null },
+    });
+  });
+
+  it('keeps the number for an owner or admin', async () => {
+    expect(await decide({ id: REQ, status: 'approved', amount_cents: 6000 })).toEqual({
+      ok: true,
+      data: { id: REQ, status: 'approved', amount_cents: 6000 },
+    });
+  });
+
+  it.each([
+    ['an amount that is missing', { id: REQ, status: 'approved' }],
+    ['an amount that is text', { id: REQ, status: 'approved', amount_cents: 'abc' }],
+    ['an empty amount', { id: REQ, status: 'approved', amount_cents: '' }],
+    ['no id', { status: 'approved', amount_cents: null }],
+  ])('still fails on %s', async (_name, reply) => {
+    expect(await decide(reply)).toEqual({ ok: false, error: GENERIC });
+  });
+});
+
 describe('input checks happen before any call', () => {
   it.each([
     ['an id that is not a uuid', { ...CLAIM, employee_id: 'nope' }],

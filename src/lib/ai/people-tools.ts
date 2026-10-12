@@ -2598,9 +2598,9 @@ export function createPeopleTools(
     return { amount_calculated: calculated, amount: calculated ? rm(amountCents) : null };
   };
 
-  /** A rejected record, or one with no rate, has no amount: say so rather than RM 0.00. */
-  const decidedFigures = (status: string, amountCents: number) =>
-    status === 'approved' && amountCents > 0
+  /** A rejected record, one with no rate, or one a manager decided (amount null) has no amount: say so rather than RM 0.00. */
+  const decidedFigures = (status: string, amountCents: number | null) =>
+    status === 'approved' && amountCents !== null && amountCents > 0
       ? { amount_calculated: true, amount: rm(amountCents) }
       : { amount_calculated: false, amount: null };
 
