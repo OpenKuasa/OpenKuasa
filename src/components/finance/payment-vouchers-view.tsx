@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { LiveDot } from '@/components/ui/live-dot';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { useLocalToday } from '@/components/finance/use-local-today';
 import { localIsoDate } from '@/lib/finance/bill-math';
 import type { PaymentVoucherKind, PaymentVoucherRow } from '@/lib/finance/cash-book';
 import {
@@ -22,6 +23,10 @@ import {
   PAYMENT_VOUCHER_KIND_LABELS,
   PAYMENT_VOUCHER_STATUS_LABELS,
   type CashBookPeriod,
+  cashBookCountLine,
+  emptyPeriodText,
+  inPeriod,
+  nothingInPeriod,
   type PaymentVoucherFilter,
   filterPaymentVouchers,
   paymentVouchersCsv,
@@ -60,13 +65,17 @@ const STATUS_STYLES: Record<PaymentVoucherRow['status'], string> = {
  */
 export function PaymentVouchersView({
   rows,
-  today,
+  today: serverToday,
+  followClock = true,
 }: {
   /** Every voucher, newest first; waiting, rejected and void ones included. */
   rows: PaymentVoucherRow[];
-  /** The date the figures are worked out for, YYYY-MM-DD. */
+  /** The date the figures are worked out for, YYYY-MM-DD, until the browser's own date takes over. */
   today: string;
+  /** False for sample data, which keeps its own fixed date. */
+  followClock?: boolean;
 }) {
+  const today = useLocalToday(serverToday, followClock);
   const [period, setPeriod] = useState<CashBookPeriod>('month');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<PaymentVoucherFilter>('open');
@@ -78,6 +87,18 @@ export function PaymentVouchersView({
   const matching = filterPaymentVouchers(inPeriodRows, query, filter, kind);
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
   const span = CASH_BOOK_PERIOD_LABELS[period];
+  // Rows the table keeps from outside the period (drafts, money still waiting), earlier or later than it.
+  const outside = inPeriodRows.filter((row) => !inPeriod(row.txn_date, today, period));
+  const countLine = cashBookCountLine({
+    noun: 'vouchers',
+    period,
+    workspaceRows: rows.length,
+    shown: shown.length,
+    matching: matching.length,
+    total: inPeriodRows.length,
+    keptEarlier: outside.filter((row) => row.txn_date < today).length,
+    keptLater: outside.filter((row) => row.txn_date >= today).length,
+  });
 
   return (
     <ScreenContainer className="pb-24 sm:pb-24">
@@ -118,7 +139,7 @@ export function PaymentVouchersView({
           {view.hasPaid ? (
             <DonutStat data={view.byCategory} height={240} centerValue={view.paid} centerLabel="paid" />
           ) : (
-            <p className="grid h-60 place-items-center text-sm text-muted-foreground">Nothing paid out {span.toLowerCase()}.</p>
+            <p className="grid h-60 place-items-center text-sm text-muted-foreground">{nothingInPeriod('paid out', period)}</p>
           )}
         </BentoCard>
 
@@ -209,7 +230,7 @@ export function PaymentVouchersView({
                   ) : inPeriodRows.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
-                        Nothing in this period. Choose a longer one to see earlier vouchers.
+                        {emptyPeriodText('vouchers', period)}
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -259,10 +280,7 @@ export function PaymentVouchersView({
               </TableBody>
             </Table>
           </div>
-          <div className="border-t px-4 py-3 text-sm text-muted-foreground">
-            Showing {shown.length} of {matching.length} vouchers
-            {matching.length !== inPeriodRows.length ? ` (${inPeriodRows.length} ${span.toLowerCase()})` : ` ${span.toLowerCase()}`}
-          </div>
+          {countLine ? <div className="border-t px-4 py-3 text-sm text-muted-foreground">{countLine}</div> : null}
         </BentoCard>
       </BentoGrid>
     </ScreenContainer>

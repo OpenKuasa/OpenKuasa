@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { LiveDot } from '@/components/ui/live-dot';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { useLocalToday } from '@/components/finance/use-local-today';
 import { localIsoDate } from '@/lib/finance/bill-math';
 import type { CashReceiptRow } from '@/lib/finance/cash-book';
 import {
@@ -20,6 +21,10 @@ import {
   CASH_BOOK_PERIOD_LABELS,
   CASH_RECEIPT_STATUS_LABELS,
   type CashBookPeriod,
+  cashBookCountLine,
+  emptyPeriodText,
+  inPeriod,
+  nothingInPeriod,
   type CashReceiptFilter,
   cashReceiptsCsv,
   cashReceiptsInPeriod,
@@ -57,13 +62,17 @@ const STATUS_STYLES: Record<CashReceiptRow['status'], string> = {
  */
 export function CashReceiptsView({
   rows,
-  today,
+  today: serverToday,
+  followClock = true,
 }: {
   /** Every receipt, newest first; drafts and void ones included. */
   rows: CashReceiptRow[];
-  /** The date the figures are worked out for, YYYY-MM-DD. */
+  /** The date the figures are worked out for, YYYY-MM-DD, until the browser's own date takes over. */
   today: string;
+  /** False for sample data, which keeps its own fixed date. */
+  followClock?: boolean;
 }) {
+  const today = useLocalToday(serverToday, followClock);
   const [period, setPeriod] = useState<CashBookPeriod>('month');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<CashReceiptFilter>('open');
@@ -74,6 +83,18 @@ export function CashReceiptsView({
   const matching = filterCashReceipts(inPeriodRows, query, filter);
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
   const span = CASH_BOOK_PERIOD_LABELS[period];
+  // Rows the table keeps from outside the period (drafts, money still waiting), earlier or later than it.
+  const outside = inPeriodRows.filter((row) => !inPeriod(row.txn_date, today, period));
+  const countLine = cashBookCountLine({
+    noun: 'receipts',
+    period,
+    workspaceRows: rows.length,
+    shown: shown.length,
+    matching: matching.length,
+    total: inPeriodRows.length,
+    keptEarlier: outside.filter((row) => row.txn_date < today).length,
+    keptLater: outside.filter((row) => row.txn_date >= today).length,
+  });
 
   return (
     <ScreenContainer className="pb-24 sm:pb-24">
@@ -114,7 +135,7 @@ export function CashReceiptsView({
           {view.hasReceived ? (
             <DonutStat data={view.byAccount} height={240} centerValue={view.received} centerLabel="received" />
           ) : (
-            <p className="grid h-60 place-items-center text-sm text-muted-foreground">Nothing received {span.toLowerCase()}.</p>
+            <p className="grid h-60 place-items-center text-sm text-muted-foreground">{nothingInPeriod('received', period)}</p>
           )}
         </BentoCard>
 
@@ -190,7 +211,7 @@ export function CashReceiptsView({
                   ) : inPeriodRows.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
-                        Nothing in this period. Choose a longer one to see earlier receipts.
+                        {emptyPeriodText('receipts', period)}
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -228,10 +249,7 @@ export function CashReceiptsView({
               </TableBody>
             </Table>
           </div>
-          <div className="border-t px-4 py-3 text-sm text-muted-foreground">
-            Showing {shown.length} of {matching.length} receipts
-            {matching.length !== inPeriodRows.length ? ` (${inPeriodRows.length} ${span.toLowerCase()})` : ` ${span.toLowerCase()}`}
-          </div>
+          {countLine ? <div className="border-t px-4 py-3 text-sm text-muted-foreground">{countLine}</div> : null}
         </BentoCard>
       </BentoGrid>
     </ScreenContainer>

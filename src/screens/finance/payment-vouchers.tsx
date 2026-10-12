@@ -9,7 +9,7 @@ import { SAMPLE_TODAY } from './sales-sample';
 /** Every movement of money out. Read-only for everyone until the voucher form and approval arrive. */
 export default async function PaymentVouchersScreen() {
   if (!hasSupabaseEnv()) {
-    return <PaymentVouchersView rows={SAMPLE_PAYMENT_VOUCHERS} today={SAMPLE_TODAY} />;
+    return <PaymentVouchersView rows={SAMPLE_PAYMENT_VOUCHERS} today={SAMPLE_TODAY} followClock={false} />;
   }
   const viewer = await getViewer();
   const ctx = { client: await createClient(), orgId: viewer.orgId };

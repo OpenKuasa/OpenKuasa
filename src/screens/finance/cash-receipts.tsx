@@ -9,7 +9,7 @@ import { SAMPLE_TODAY } from './sales-sample';
 /** Every movement of money in. Read-only for everyone until the receipt form arrives. */
 export default async function CashReceiptsScreen() {
   if (!hasSupabaseEnv()) {
-    return <CashReceiptsView rows={SAMPLE_CASH_RECEIPTS} today={SAMPLE_TODAY} />;
+    return <CashReceiptsView rows={SAMPLE_CASH_RECEIPTS} today={SAMPLE_TODAY} followClock={false} />;
   }
   const viewer = await getViewer();
   const ctx = { client: await createClient(), orgId: viewer.orgId };
