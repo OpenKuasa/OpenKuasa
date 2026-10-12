@@ -32,7 +32,12 @@ export type EmailSettings = { apiKey: string; senderEmail: string; senderName: s
 export type WorkspaceEmailKey =
   /** The workspace has not stored a key. */
   | { status: 'none' }
-  | ({ status: 'ok' } & EmailSettings)
+  /**
+   * `stamp` is when this key and sender were saved, exactly as the database
+   * gives it. A send names the stamp it read, so the database can refuse if
+   * the saved key is no longer that one.
+   */
+  | ({ status: 'ok'; stamp: string } & EmailSettings)
   /** A key is stored but this server cannot open it for this workspace. */
   | { status: 'unusable' }
   /** The stored key could not be read. */
@@ -98,17 +103,35 @@ export async function getEmailKeyStatus(session: SupabaseClient): Promise<EmailK
 export async function readEmailKey(service: SupabaseClient, orgId: string): Promise<WorkspaceEmailKey> {
   const { data, error } = await service
     .from('org_email_keys')
-    .select('ciphertext,sender_email,sender_name')
+    .select('ciphertext,sender_email,sender_name,updated_at')
     .eq('org_id', orgId)
     .maybeSingle();
   if (error) return { status: 'error' };
 
-  const row = data as { ciphertext?: unknown; sender_email?: unknown; sender_name?: unknown } | null;
+  const row = data as {
+    ciphertext?: unknown;
+    sender_email?: unknown;
+    sender_name?: unknown;
+    updated_at?: unknown;
+  } | null;
   if (!row || typeof row.ciphertext !== 'string' || !row.ciphertext) return { status: 'none' };
 
   const apiKey = hasKeySecret() ? decryptApiKey(row.ciphertext, orgId, process.env, 'org-email-key') : null;
-  if (!apiKey || typeof row.sender_email !== 'string' || typeof row.sender_name !== 'string') {
+  if (
+    !apiKey ||
+    typeof row.sender_email !== 'string' ||
+    typeof row.sender_name !== 'string' ||
+    typeof row.updated_at !== 'string' ||
+    !row.updated_at
+  ) {
     return { status: 'unusable' };
   }
-  return { status: 'ok', apiKey, senderEmail: row.sender_email, senderName: row.sender_name };
+  return {
+    status: 'ok',
+    apiKey,
+    senderEmail: row.sender_email,
+    senderName: row.sender_name,
+    // Kept as text: turning it into a Date would lose the microseconds the database compares.
+    stamp: row.updated_at,
+  };
 }

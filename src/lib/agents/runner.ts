@@ -2,7 +2,9 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { checkVideo } from '@/lib/agents/openrouter-media';
 import { readWorkspaceKey } from '@/lib/ai/workspace-key';
 import { workspaceSpendCents } from '@/lib/agents/spend';
-import { runWeeklyStudio } from '@/lib/agents/weekly-studio';
+import { runAgent, type AgentRunResult } from '@/lib/agents/run-agent';
+import { AGENTS, agentFor } from '@/lib/agents/registry';
+import type { AgentRegistry } from '@/lib/agents/definition';
 import { RunInProgressError, WEEKLY_STUDIO } from '@/lib/agents/types';
 
 export type RunSchedulesSummary = {
@@ -75,25 +77,6 @@ export async function startRefusal(
   return overBudget(client, orgId, cfg);
 }
 
-/** Monitor-skip: has the org's reach data changed since `sinceIso`? */
-async function hasNewDataSince(
-  client: SupabaseClient,
-  orgId: string,
-  sinceIso: string,
-): Promise<boolean> {
-  for (const table of ['leads', 'campaigns', 'appointments']) {
-    const { data } = await client
-      .from(table)
-      .select('id')
-      .eq('org_id', orgId)
-      .gt('created_at', sinceIso)
-      .limit(1)
-      .maybeSingle();
-    if (data) return true;
-  }
-  return false;
-}
-
 type DueSchedule = {
   id: string;
   org_id: string;
@@ -119,7 +102,10 @@ type DueSchedule = {
  * generating. The org always comes from the schedule row. One failure never stops the
  * loop and exception text is dropped (it may carry request details or a key).
  */
-export async function runSchedules(client: SupabaseClient): Promise<RunSchedulesSummary> {
+export async function runSchedules(
+  client: SupabaseClient,
+  registry: AgentRegistry = AGENTS,
+): Promise<RunSchedulesSummary> {
   const summary: RunSchedulesSummary = { ran: 0, skipped: 0, paused: 0, completed: 0, failed: 0 };
   const flag = (process.env.AGENTS_ENABLED ?? '').trim().toLowerCase();
   if (flag !== 'true' && flag !== '1') return summary;
@@ -145,6 +131,14 @@ export async function runSchedules(client: SupabaseClient): Promise<RunSchedules
 
   for (const s of data as DueSchedule[]) {
     try {
+      // No definition for this agent_key (e.g. a schedule for an agent not yet deployed):
+      // leave the row untouched — no run, claim, or write — so it resumes if one is added.
+      const def = agentFor(s.agent_key, registry);
+      if (!def) {
+        summary.skipped += 1;
+        continue;
+      }
+
       // Off switch: leave the schedule untouched so re-enabling resumes it.
       // No config row keeps the default behavior (proceed).
       const config = await configFor(s.org_id);
@@ -193,7 +187,7 @@ export async function runSchedules(client: SupabaseClient): Promise<RunSchedules
         continue;
       }
 
-      if (s.last_run_at && !(await hasNewDataSince(client, s.org_id, s.last_run_at))) {
+      if (s.last_run_at && !(await def.hasNewData(client, s.org_id, s.last_run_at))) {
         await client.from('agent_runs').insert({
           org_id: s.org_id,
           agent_key: s.agent_key,
@@ -211,9 +205,9 @@ export async function runSchedules(client: SupabaseClient): Promise<RunSchedules
         continue;
       }
 
-      let result: Awaited<ReturnType<typeof runWeeklyStudio>>;
+      let result: AgentRunResult;
       try {
-        result = await runWeeklyStudio(client, s.org_id, 'schedule');
+        result = await runAgent(client, s.org_id, 'schedule', def);
       } catch (e) {
         if (!(e instanceof RunInProgressError)) throw e;
         // The workspace already has a run in progress (e.g. a manual "Run now").

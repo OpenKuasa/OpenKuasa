@@ -39,6 +39,8 @@ function bill(over: Partial<BillListRow>): BillListRow {
     display_status: 'pending',
     purchase_order_id: null,
     purchase_order_no: null,
+    category_id: null,
+    category_name: null,
     ...over,
   };
 }

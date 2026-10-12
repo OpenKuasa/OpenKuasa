@@ -294,7 +294,8 @@ function DeletePageRow({
   const { formAction, pending, error } = useCrmForm(action, onClose);
   return (
     <TableRow className="bg-destructive/5 hover:bg-destructive/5">
-      <TableCell colSpan={colSpan}>
+      {/* Table cells do not wrap by default; a question this long has to. */}
+      <TableCell colSpan={colSpan} className="whitespace-normal">
         <form action={formAction} className="flex flex-wrap items-center gap-3 py-1">
           <input type="hidden" name="pageId" value={page.id} />
           <p className="min-w-0 flex-1 text-sm">
@@ -436,7 +437,8 @@ export function LandingPagesView({
                     <TableHead className="text-right">Leads</TableHead>
                     <TableHead className="text-right">Conversion</TableHead>
                     <TableHead>Status</TableHead>
-                    {actions ? <TableHead className="text-right">Actions</TableHead> : null}
+                    {/* Pinned to the right edge, so the buttons stay in reach when the table is wider than its card. */}
+                    {actions ? <TableHead className="sticky right-0 bg-muted text-right shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.2)]">Actions</TableHead> : null}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -483,7 +485,7 @@ export function LandingPagesView({
                           </span>
                         </TableCell>
                         {actions ? (
-                          <TableCell>
+                          <TableCell className="sticky right-0 bg-card shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.2)]">
                             <div className="flex items-center justify-end gap-1">
                               <CopyLinkButton page={page} />
                               <Link

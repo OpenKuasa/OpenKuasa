@@ -59,6 +59,27 @@ import {
   voidInvoice,
 } from '@/lib/finance/invoices';
 import {
+  LEDGER_MESSAGES,
+  type JournalDetail,
+  type SaveAndPostJournalResult,
+  accountIdInput,
+  createAccount,
+  createAccountInput,
+  deleteAccount,
+  deleteJournal,
+  getJournal,
+  journalIdInput,
+  postJournal,
+  reverseJournal,
+  reverseJournalInput,
+  saveJournal,
+  saveJournalInput,
+  setAccountActive,
+  setAccountActiveInput,
+  updateAccount,
+  updateAccountInput,
+} from '@/lib/finance/ledger';
+import {
   deleteScheduledPayment,
   markPaymentPaid,
   markPaymentPaidInput,
@@ -168,6 +189,9 @@ const SIGN_OFF = { signOff: true } as const;
 /** Approving, rejecting or closing a purchase order: an owner or admin only, told so in the order's own words. */
 const PURCHASE_ORDER_SIGN_OFF = { signOff: true, signOffError: PURCHASE_ORDER_MESSAGES.needsSignOff } as const;
 
+/** Every ledger action: changing accounts and journals is an owner's or admin's, told so in the ledger's own words. */
+const LEDGER_SIGN_OFF = { signOff: true, signOffError: LEDGER_MESSAGES.needsSignOff } as const;
+
 function refresh(paths: string[]) {
   for (const path of paths) revalidatePath(path);
 }
@@ -224,8 +248,14 @@ const CONTACT_PATHS = [
   '/finance/expenses',
   // Banking names who paid or was paid on every movement.
   '/finance/banking',
+  // A ledger entry's description carries the customer's or supplier's name.
+  '/finance/journals',
 ];
 const PRODUCT_PATHS = ['/finance/products'];
+// The two ledger screens read the books, which every document that posts, voids, pays or is deleted changes:
+// Chart of Accounts shows each account's balance and Journals lists the manual entries beside them. So every
+// list below that belongs to such an action ends with these two.
+const LEDGER_PATHS = ['/finance/chart-of-accounts', '/finance/journals'];
 // A bill or a payment changes what is owed, which Customers & Suppliers shows as Payable. A payment to a
 // supplier is also a voucher: Payment Vouchers lists every movement of money out.
 const PURCHASE_PATHS = [
@@ -235,6 +265,7 @@ const PURCHASE_PATHS = [
   '/finance/payment-vouchers',
   // Banking lists every movement of money and the balance of the account it left.
   '/finance/banking',
+  ...LEDGER_PATHS,
 ];
 // A bill saved, posted, voided or deleted changes the billed total of the purchase order it is raised against
 // (drafts count), so Purchase Orders refreshes with the purchase screens. A payment does not, so it keeps PURCHASE_PATHS.
@@ -253,6 +284,7 @@ const SALES_PATHS = [
   '/finance/cash-receipts',
   // Banking lists every movement of money and the balance of the account it reached.
   '/finance/banking',
+  ...LEDGER_PATHS,
 ];
 // A quotation is on its own screen and moves no figure anywhere else: it is not money owed, and no other
 // screen counts or names it. So saving, sending, answering and deleting one refresh Quotations only.
@@ -287,9 +319,11 @@ const CREDIT_PATHS = [
   '/finance/payment-vouchers',
   // A refund is money out of an account: Banking lists it.
   '/finance/banking',
+  ...LEDGER_PATHS,
 ];
 // A draft credit note takes nothing off its invoice and nothing can be refunded against it: saving or
-// deleting one moves no figure and no menu anywhere but on Credit Notes.
+// deleting one moves no figure and no menu anywhere but on Credit Notes, and nothing reaches the books until
+// it is issued.
 const CREDIT_NOTE_DRAFT_PATHS = ['/finance/credit-notes'];
 
 /**
@@ -340,7 +374,7 @@ async function documentInStatus<D extends { display_status?: string; status?: st
   input: unknown,
   get: (ctx: FinanceWriteContext, id: string) => Promise<D | null>,
   messages: { gone: string; locked: string },
-  label: 'bill' | 'invoice' | 'quotation' | 'RFQ' | 'purchase order',
+  label: 'bill' | 'invoice' | 'quotation' | 'RFQ' | 'purchase order' | 'journal',
   wanted: string | null,
 ): Promise<FinResult<D>> {
   const ctx = await writeCtx();
@@ -366,7 +400,7 @@ function draftForEditing<D extends { display_status?: string; status?: string }>
   input: unknown,
   get: (ctx: FinanceWriteContext, id: string) => Promise<D | null>,
   messages: { gone: string; locked: string },
-  label: 'bill' | 'invoice' | 'quotation' | 'RFQ' | 'purchase order',
+  label: 'bill' | 'invoice' | 'quotation' | 'RFQ' | 'purchase order' | 'journal',
 ): Promise<FinResult<D>> {
   return documentInStatus(paths, schema, input, get, messages, label, 'draft');
 }
@@ -694,4 +728,62 @@ export async function deleteCashReceiptAction(input: unknown) {
 /** Saves the receipt as a draft, then posts it; see `saveThenPost`. Someone who may not sign off keeps the draft. */
 export async function saveAndPostCashReceiptAction(input: unknown): Promise<SaveAndPostCashReceiptResult> {
   return saveThenPost(SALES_PATHS, saveCashReceiptInput, input, saveCashReceipt, postCashReceipt, true);
+}
+
+/* ---- chart of accounts and journals ------------------------------------ */
+
+// Every ledger action is an owner's or admin's, and says so before anything is parsed or called. Each
+// refreshes the two ledger screens, a refusal included: a journal someone else posted or deleted shows as it now is.
+
+/**
+ * Someone who may not write is refused; someone who may write but not sign off is told so in the ledger's
+ * own words. Null when the viewer may go on. For the two actions that cannot go through `run`.
+ */
+async function ledgerGate(): Promise<FinResult<never> | null> {
+  const access = await writeAccess();
+  if (!access) return FORBIDDEN;
+  return access.signOff ? null : { ok: false, error: LEDGER_MESSAGES.needsSignOff };
+}
+
+export async function createAccountAction(input: unknown) {
+  return run(LEDGER_PATHS, createAccountInput, input, createAccount, LEDGER_SIGN_OFF);
+}
+export async function updateAccountAction(input: unknown) {
+  return run(LEDGER_PATHS, updateAccountInput, input, updateAccount, LEDGER_SIGN_OFF);
+}
+export async function setAccountActiveAction(input: unknown) {
+  return run(LEDGER_PATHS, setAccountActiveInput, input, setAccountActive, LEDGER_SIGN_OFF);
+}
+export async function deleteAccountAction(input: unknown) {
+  return run(LEDGER_PATHS, accountIdInput, input, deleteAccount, LEDGER_SIGN_OFF);
+}
+
+/** Creates a draft journal, or changes one. Nothing reaches the books until it is posted. */
+export async function saveJournalAction(input: unknown) {
+  return run(LEDGER_PATHS, saveJournalInput, input, saveJournal, LEDGER_SIGN_OFF);
+}
+/** Posts a draft: it gets its number, enters the books and is locked. */
+export async function postJournalAction(input: unknown) {
+  return run(LEDGER_PATHS, journalIdInput, input, postJournal, LEDGER_SIGN_OFF);
+}
+/** Makes the draft that undoes a posted journal; posting that draft is a separate step. */
+export async function reverseJournalAction(input: unknown) {
+  return run(LEDGER_PATHS, reverseJournalInput, input, reverseJournal, LEDGER_SIGN_OFF);
+}
+export async function deleteJournalAction(input: unknown) {
+  return run(LEDGER_PATHS, journalIdInput, input, deleteJournal, LEDGER_SIGN_OFF);
+}
+
+/** Saves the journal as a draft, then posts it; see `saveThenPost`. A draft is kept when posting is refused. */
+export async function saveAndPostJournalAction(input: unknown): Promise<SaveAndPostJournalResult> {
+  const refused = await ledgerGate();
+  if (refused) return refused;
+  return saveThenPost(LEDGER_PATHS, saveJournalInput, input, saveJournal, postJournal);
+}
+
+/** One draft journal with its lines, for an Edit form; see `documentInStatus`. */
+export async function getJournalAction(input: unknown): Promise<FinResult<JournalDetail>> {
+  const refused = await ledgerGate();
+  if (refused) return refused;
+  return draftForEditing(LEDGER_PATHS, journalIdInput, input, getJournal, LEDGER_MESSAGES, 'journal');
 }

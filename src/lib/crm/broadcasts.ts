@@ -78,7 +78,36 @@ export type Broadcast = {
   /** How many recipients the provider took, and how many it did not. Zero until sent. */
   sentCount: number;
   failedCount: number;
+  /** When the send first started, and when a second attempt last did; ISO timestamps. */
+  sendingStartedAt: string | null;
+  resumedAt: string | null;
 };
+
+/**
+ * Whether a send can be finished or tried again:
+ *   'none'     nothing to do (a draft, or every recipient was sent to)
+ *   'ready'    it can be resumed now
+ *   'wait'     it is still marked sending and its last attempt is under five minutes old
+ *   'too-old'  its first attempt is over 23 hours old, past what the provider remembers
+ * The database decides for real (`crm_resume_broadcast_send`); this is for the screen.
+ */
+export type RetryState = 'none' | 'ready' | 'wait' | 'too-old';
+
+const RETRY_WAIT_MS = 5 * 60 * 1000;
+const RETRY_WINDOW_MS = 23 * 60 * 60 * 1000;
+
+export function retryState(
+  broadcast: Pick<Broadcast, 'status' | 'failedCount' | 'sendingStartedAt' | 'resumedAt'>,
+  now: Date,
+): RetryState {
+  if (broadcast.status === 'draft' || !broadcast.sendingStartedAt) return 'none';
+  if (broadcast.status === 'sent' && broadcast.failedCount === 0) return 'none';
+  const started = new Date(broadcast.sendingStartedAt).getTime();
+  const last = Math.max(started, broadcast.resumedAt ? new Date(broadcast.resumedAt).getTime() : started);
+  if (broadcast.status === 'sending' && now.getTime() - last < RETRY_WAIT_MS) return 'wait';
+  if (now.getTime() - started > RETRY_WINDOW_MS) return 'too-old';
+  return 'ready';
+}
 
 /** The columns a person fills in on the form. */
 export type BroadcastFields = {
@@ -113,10 +142,12 @@ type BroadcastRow = {
   sent_at?: string | null;
   sent_count?: number | null;
   failed_count?: number | null;
+  sending_started_at?: string | null;
+  resumed_at?: string | null;
 };
 
 const BROADCAST_COLUMNS =
-  'id,name,subject,body,audience_statuses,audience_tags,updated_at,status,revision,sent_at,sent_count,failed_count';
+  'id,name,subject,body,audience_statuses,audience_tags,updated_at,status,revision,sent_at,sent_count,failed_count,sending_started_at,resumed_at';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** The shape the Contacts page asks of an email. */
@@ -271,6 +302,8 @@ export function mapBroadcast(row: BroadcastRow): Broadcast {
     sentDay: row.sent_at ? klDayOf(row.sent_at) : null,
     sentCount: row.sent_count ?? 0,
     failedCount: row.failed_count ?? 0,
+    sendingStartedAt: row.sending_started_at ?? null,
+    resumedAt: row.resumed_at ?? null,
   };
 }
 

@@ -51,6 +51,7 @@ export function DocumentFormCard<F extends DocumentFormState>({
   parties,
   products,
   partyChoice,
+  extraChoices,
   actions,
   onClose,
 }: {
@@ -62,6 +63,8 @@ export function DocumentFormCard<F extends DocumentFormState>({
   /** Active products and services. */
   products: FinanceProduct[];
   partyChoice?: PartyChoice<F>;
+  /** More choices drawn beside the first: the bill form's category. Absent for every other form. */
+  extraChoices?: PartyChoice<F>[];
   actions: DocumentFormActions;
   onClose: () => void;
 }) {
@@ -189,35 +192,40 @@ export function DocumentFormCard<F extends DocumentFormState>({
             onChange={(e) => edit((f) => secondDate.set(f, e.target.value))}
           />
         </div>
-        {partyChoice ? (
-          <div className="space-y-1.5 md:col-span-12">
-            <Label htmlFor={`${id}-choice`}>{partyChoice.label}</Label>
-            <Select
-              value={partyChoice.get(form) || NO_CHOICE}
-              onValueChange={(v) => edit((f) => partyChoice.set(f, v === NO_CHOICE ? '' : v))}
-            >
-              <SelectTrigger id={`${id}-choice`} className="w-full md:w-1/2">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NO_CHOICE}>{partyChoice.noneLabel}</SelectItem>
-                {partyChoice.options(form).map((o) => (
-                  <SelectItem key={o.id} value={o.id}>
-                    {o.label}
-                  </SelectItem>
+        {[...(partyChoice ? [partyChoice] : []), ...(extraChoices ?? [])].map((choice, index, all) => {
+          // Alone, a choice takes the row at half width; beside another, each takes half the row.
+          const beside = all.length > 1;
+          const choiceId = (n: number) => (n === 0 ? `${id}-choice` : `${id}-choice-${n}`);
+          return (
+            <div key={choice.label} className={beside ? 'space-y-1.5 md:col-span-6' : 'space-y-1.5 md:col-span-12'}>
+              <Label htmlFor={choiceId(index)}>{choice.label}</Label>
+              <Select
+                value={choice.get(form) || NO_CHOICE}
+                onValueChange={(v) => edit((f) => choice.set(f, v === NO_CHOICE ? '' : v))}
+              >
+                <SelectTrigger id={choiceId(index)} className={beside ? 'w-full' : 'w-full md:w-1/2'}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_CHOICE}>{choice.noneLabel}</SelectItem>
+                  {choice.options(form).map((o) => (
+                    <SelectItem key={o.id} value={o.id}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {/* One container that is always there, so a reader announces a note when it appears. */}
+              <div role="status" className="space-y-1">
+                {choice.notes(form).map((note) => (
+                  <p key={note} className="text-xs text-amber-600">
+                    {note}
+                  </p>
                 ))}
-              </SelectContent>
-            </Select>
-            {/* One container that is always there, so a reader announces a note when it appears. */}
-            <div role="status" className="space-y-1">
-              {partyChoice.notes(form).map((note) => (
-                <p key={note} className="text-xs text-amber-600">
-                  {note}
-                </p>
-              ))}
+              </div>
             </div>
-          </div>
-        ) : null}
+          );
+        })}
         {kind.extras?.map((extra, index) => (
           <div key={extra.label} className={extra.inputMode === 'numeric' ? 'space-y-1.5 md:col-span-4' : 'space-y-1.5 md:col-span-8'}>
             <Label htmlFor={`${id}-extra-${index}`}>{extra.label}</Label>

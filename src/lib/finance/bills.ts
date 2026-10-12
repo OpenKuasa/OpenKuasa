@@ -56,6 +56,8 @@ export const BILL_MESSAGES = {
   product: LINE_MESSAGES.product,
   // FIN21
   order: 'Choose an approved purchase order from this supplier, or none.',
+  // FIN26
+  category: 'Choose an expense category for the bill.',
 } as const;
 
 const M = BILL_MESSAGES;
@@ -63,6 +65,11 @@ const M = BILL_MESSAGES;
 /** The purchase order a bill is raised against: an id, or an empty box or null for none. */
 const purchaseOrderLink = z
   .union([z.string().uuid(M.order), z.literal(''), z.null()], { error: M.order })
+  .transform((v) => (v === '' ? null : v));
+
+/** The expense category a bill's cost lands in: an id, or an empty box or null to take the workspace's default. */
+const categoryLink = z
+  .union([z.string().uuid(M.category), z.literal(''), z.null()], { error: M.category })
   .transform((v) => (v === '' ? null : v));
 
 export const saveBillInput = z
@@ -75,6 +82,8 @@ export const saveBillInput = z
     due_date: isoDate,
     /** Left out when the input has none, so changing a draft keeps the order it is linked to. */
     purchase_order_id: purchaseOrderLink.optional(),
+    /** Left out when the input has none: a new bill then gets Purchases and a draft keeps the category it has. */
+    category_id: categoryLink.optional(),
     notes: optionalText.default(null),
     lines: z.array(documentLine, { error: M.lines }).min(1, M.lines).max(BILL_LINES_MAX, M.tooManyLines),
   })
@@ -88,6 +97,7 @@ const REFUSALS: Record<string, string> = {
   FIN10: M.empty,
   FIN11: M.gone,
   FIN21: M.order,
+  FIN26: M.category,
   [PG_UNIQUE]: M.numberTaken,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_FORBIDDEN]: NOT_ALLOWED,
@@ -118,6 +128,12 @@ export type BillListRow = {
   /** The purchase order the bill is raised against, with its number; null when it has none. */
   purchase_order_id: string | null;
   purchase_order_no: string | null;
+  /**
+   * The expense category the bill's cost lands in, with its name. Every bill has one; null only if it could
+   * not be read.
+   */
+  category_id: string | null;
+  category_name: string | null;
 };
 
 export type BillLine = DocumentLineRow;
@@ -154,12 +170,64 @@ async function readOrderLinks(ctx: FinanceWriteContext, billId?: string): Promis
   }
 }
 
-function toListRow(row: Record<string, unknown>, links: BillOrderLinks): BillListRow {
+export type ExpenseCategory = { id: string; name: string };
+
+/** The workspace's active expense categories, by name, for the bill form's picker. */
+export async function listExpenseCategories(ctx: FinanceWriteContext): Promise<ExpenseCategory[]> {
+  const { data, error } = await ctx.client
+    .from('finance_categories')
+    .select('id,name')
+    .eq('org_id', ctx.orgId)
+    .eq('kind', 'expense')
+    .eq('active', true)
+    .order('name', { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as unknown as ExpenseCategory[];
+}
+
+/** Each bill's category: bill id → the category's id and name. */
+type BillCategories = Map<string, { id: string; name: string | null }>;
+
+/**
+ * The category of each bill, read from the bills themselves because the totals view the list reads does not
+ * carry it, and the names from the categories. `billId` narrows the bill read to one bill. Throws when a read
+ * fails, like the others here.
+ */
+async function readCategories(ctx: FinanceWriteContext, billId?: string): Promise<BillCategories> {
+  const names = new Map<string, string>();
+  for (let from = 0; ; from += BILL_PAGE_SIZE) {
+    const { data, error } = await ctx.client
+      .from('finance_categories')
+      .select('id,name')
+      .eq('org_id', ctx.orgId)
+      .order('id', { ascending: true })
+      .range(from, from + BILL_PAGE_SIZE - 1);
+    if (error) throw error;
+    const page = (data ?? []) as unknown as { id: string; name: string }[];
+    for (const c of page) names.set(c.id, c.name);
+    if (page.length < BILL_PAGE_SIZE) break;
+  }
+  const categories: BillCategories = new Map();
+  for (let from = 0; ; from += BILL_PAGE_SIZE) {
+    let query = ctx.client.from('supplier_bills').select('id,category_id').eq('org_id', ctx.orgId);
+    if (billId) query = query.eq('id', billId);
+    const { data, error } = await query.order('id', { ascending: true }).range(from, from + BILL_PAGE_SIZE - 1);
+    if (error) throw error;
+    const page = (data ?? []) as unknown as { id: string; category_id: string | null }[];
+    for (const b of page) if (b.category_id) categories.set(b.id, { id: b.category_id, name: names.get(b.category_id) ?? null });
+    if (page.length < BILL_PAGE_SIZE) return categories;
+  }
+}
+
+function toListRow(row: Record<string, unknown>, links: BillOrderLinks, categories: BillCategories): BillListRow {
   const order = links.get(row.id as string);
+  const category = categories.get(row.id as string);
   return {
     ...(row as unknown as BillListRow),
     purchase_order_id: order?.id ?? null,
     purchase_order_no: order?.no ?? null,
+    category_id: category?.id ?? null,
+    category_name: category?.name ?? null,
     total: Number(row.total),
     paid: Number(row.paid),
     balance: Number(row.balance),
@@ -170,6 +238,7 @@ function toListRow(row: Record<string, unknown>, links: BillOrderLinks): BillLis
 export async function listBills(ctx: FinanceWriteContext): Promise<BillListRow[]> {
   const rows: BillListRow[] = [];
   const links = await readOrderLinks(ctx);
+  const categories = await readCategories(ctx);
   for (let from = 0; ; from += BILL_PAGE_SIZE) {
     const { data, error } = await ctx.client
       .from('supplier_bill_totals')
@@ -180,7 +249,7 @@ export async function listBills(ctx: FinanceWriteContext): Promise<BillListRow[]
       .range(from, from + BILL_PAGE_SIZE - 1);
     if (error) throw error;
     const page = (data ?? []) as unknown as Record<string, unknown>[];
-    rows.push(...page.map((r) => toListRow(r, links)));
+    rows.push(...page.map((r) => toListRow(r, links, categories)));
     if (page.length < BILL_PAGE_SIZE) return rows;
   }
 }
@@ -206,9 +275,10 @@ export async function getBill(ctx: FinanceWriteContext, id: string): Promise<Bil
     .order('id', { ascending: true });
   if (linesError) throw linesError;
   const links = await readOrderLinks(ctx, id);
+  const categories = await readCategories(ctx, id);
   const header = bill as unknown as Record<string, unknown>;
   return {
-    ...toListRow(header, links),
+    ...toListRow(header, links, categories),
     supplier_ref: (header.supplier_ref as string | null) ?? null,
     notes: (header.notes as string | null) ?? null,
     lines: ((lines ?? []) as unknown as Record<string, unknown>[]).map(toDocumentLine),

@@ -57,6 +57,10 @@ export type BillsWriter = {
   products: FinanceProduct[];
   /** Approved purchase orders, and those the drafts are linked to, for the bill form's picker. */
   orders: BillOrderOption[];
+  /** Active expense categories for the bill form's picker. */
+  categories: { id: string; name: string }[];
+  /** The category a new bill starts in. */
+  defaultCategoryId: string;
   accounts: FinanceAccount[];
   /** Every payment row, to know what scheduled payments already hold of each bill. */
   payments: PaymentOutRow[];
@@ -107,7 +111,7 @@ export function BillsView({
 
   const matching = filterBills(rows, query, filter);
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
-  const columns = writer ? 9 : 8;
+  const columns = writer ? 10 : 9;
   const billCount = view.byStatus.reduce((n, s) => n + s.value, 0);
   const payable = writer ? payableBills(rows, writer.payments) : [];
   const asking = open && (open.kind === 'post' || open.kind === 'void' || open.kind === 'delete') ? open : null;
@@ -253,6 +257,8 @@ export function BillsView({
           suppliers={writer.suppliers}
           products={writer.products}
           orders={writer.orders}
+          categories={writer.categories}
+          defaultCategoryId={writer.defaultCategoryId}
           rows={rows}
           today={open.today}
           actions={actions}
@@ -269,6 +275,8 @@ export function BillsView({
           suppliers={writer.suppliers}
           products={writer.products}
           orders={writer.orders}
+          categories={writer.categories}
+          defaultCategoryId={writer.defaultCategoryId}
           rows={rows}
           today={open.today}
           actions={actions}
@@ -427,6 +435,7 @@ export function BillsView({
                   <TableHead className="text-right">Balance</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Purchase order</TableHead>
+                  <TableHead className="hidden 2xl:table-cell">Category</TableHead>
                   {writer ? (
                     <TableHead className="w-10">
                       <span className="sr-only">Actions</span>
@@ -478,6 +487,7 @@ export function BillsView({
                         </span>
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{b.purchase_order_no ?? '—'}</TableCell>
+                      <TableCell className="hidden whitespace-nowrap text-muted-foreground 2xl:table-cell">{b.category_name ?? '—'}</TableCell>
                       {writer ? (
                         <TableCell>
                           {items.length ? (

@@ -102,18 +102,32 @@ describe('the email settings form', () => {
 
 describe('reading a workspace’s email key', () => {
   it('opens the key sealed for that workspace', async () => {
-    const row = { ciphertext: sealEmailKey(KEY, ORG_A), sender_email: 'hello@rimba.my', sender_name: 'Rimba' };
+    const row = {
+      ciphertext: sealEmailKey(KEY, ORG_A),
+      sender_email: 'hello@rimba.my',
+      sender_name: 'Rimba',
+      updated_at: '2026-10-12T08:29:15.175241+00:00',
+    };
     expect(await readEmailKey(fakeService(row), ORG_A)).toEqual({
       status: 'ok',
       apiKey: KEY,
       senderEmail: 'hello@rimba.my',
       senderName: 'Rimba',
+      // Exactly as the database gave it, microseconds and all: a send is matched to it.
+      stamp: '2026-10-12T08:29:15.175241+00:00',
     });
   });
 
   it('says there is none, or that it cannot be used, and never mistakes one for the other', async () => {
     expect(await readEmailKey(fakeService(null), ORG_A)).toEqual({ status: 'none' });
-    const row = { ciphertext: sealEmailKey(KEY, ORG_A), sender_email: 'hello@rimba.my', sender_name: 'Rimba' };
+    const row = {
+      ciphertext: sealEmailKey(KEY, ORG_A),
+      sender_email: 'hello@rimba.my',
+      sender_name: 'Rimba',
+      updated_at: '2026-10-12T08:29:15.175241+00:00',
+    };
+    // Without knowing when it was saved, a send could not be matched to it.
+    expect(await readEmailKey(fakeService({ ...row, updated_at: null }), ORG_A)).toEqual({ status: 'unusable' });
     // Stored against another workspace, or an AI key put in its place.
     expect(await readEmailKey(fakeService(row), ORG_B)).toEqual({ status: 'unusable' });
     expect(

@@ -9,6 +9,7 @@ import {
   billOrderWarnings,
   newBillForm,
   ordersForSupplier,
+  withCategory,
   ownCountedTotal,
 } from '@/lib/finance/bill-form';
 import { withCurrentParty } from '@/lib/finance/document-form';
@@ -31,6 +32,8 @@ export function BillFormCard({
   suppliers,
   products,
   orders,
+  categories,
+  defaultCategoryId,
   rows,
   today,
   actions,
@@ -47,6 +50,13 @@ export function BillFormCard({
    * no picker (and leaves a draft's link alone only if the caller sends no `purchase_order_id`).
    */
   orders?: BillOrderOption[];
+  /**
+   * The active expense categories to choose from. Absent, the form has no category picker. A draft whose
+   * category has since been archived still shows it.
+   */
+  categories?: { id: string; name: string }[];
+  /** The category a new bill starts in: the one behind the workspace's purchases account. */
+  defaultCategoryId?: string;
   /** The bills as listed, for what this bill already counts toward its order. */
   rows?: BillListRow[];
   /** The default bill date, YYYY-MM-DD. */
@@ -67,14 +77,29 @@ export function BillFormCard({
       return billOrderWarnings(form.lines, chosen, own);
     },
   };
+  const categoryChoice: PartyChoice<BillForm> | undefined = categories && {
+    label: 'Category',
+    noneLabel: 'Default category',
+    options: (form) => {
+      // A draft's own category stays on offer even once archived, so saving does not move it.
+      const current = form.category_id;
+      const known = current === '' || categories.some((c) => c.id === current);
+      const own = known ? [] : [{ id: current, name: editing?.category_id === current ? (editing.category_name ?? 'Archived category') : 'Archived category' }];
+      return [...categories, ...own].map((c) => ({ id: c.id, label: c.name }));
+    },
+    get: (form) => form.category_id,
+    set: (form, id) => withCategory(form, id, defaultCategoryId),
+    notes: () => [],
+  };
   return (
     <DocumentFormCard
       kind={BILL_FORM_KIND}
-      initial={() => (editing ? billFormFromDetail(editing) : newBillForm(today, 'new-0'))}
+      initial={() => (editing ? billFormFromDetail(editing) : newBillForm(today, 'new-0', defaultCategoryId ?? ''))}
       // A supplier archived since the draft was saved is still this bill's supplier.
       parties={withCurrentParty(suppliers, editing && { id: editing.supplier_id, name: editing.supplier_name })}
       products={products}
       partyChoice={partyChoice}
+      extraChoices={categoryChoice ? [categoryChoice] : undefined}
       actions={actions}
       onClose={onClose}
     />

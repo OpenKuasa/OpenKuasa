@@ -31,6 +31,7 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'crm/landing-page',
   // Writing and audiences are live; sending is not connected yet.
   'crm/broadcast',
+  'crm/automations',
   // Shared with Jebat's analytics (registry 'reach/reports'); /reach/reports
   // is not a nav item, so the screen is served at /crm/reports.
   'crm/reports',
@@ -92,6 +93,9 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'finance/payment-vouchers',
   'finance/expenses',
   'finance/banking',
+  'finance/receipts-inbox',
+  'finance/chart-of-accounts',
+  'finance/journals',
 ]);
 
 /** Whether the app path is a screen that is not connected to live data yet. */

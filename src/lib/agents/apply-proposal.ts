@@ -1,60 +1,24 @@
 import { errorCodeOf } from '@/lib/ai/call-log';
-import type { ZodType } from 'zod';
-import {
-  type CapResult,
-  type ReachWriteContext,
-  createAppointment,
-  createAppointmentInput,
-  createForm,
-  createFormInput,
-  promoteLeadToContact,
-  promoteLeadToContactInput,
-  setAppointmentStatus,
-  setAppointmentStatusInput,
-  setLeadStage,
-  setLeadStageInput,
-  updateAppointment,
-  updateAppointmentInput,
-  updateForm,
-  updateFormInput,
-} from '@/lib/reach/capabilities';
+import { actionsFor, type AgentRegistry } from '@/lib/agents/definition';
+import { AGENTS } from '@/lib/agents/registry';
 
 export type ApplyResult = { ok: true; result: unknown } | { ok: false; error: string };
 
-type Entry = { schema: ZodType; run: (ctx: ReachWriteContext, input: unknown) => Promise<CapResult<unknown>> };
-/** Erase the per-capability input type: parse with the schema, hand the parsed value on. */
-function entry<I>(schema: ZodType<I>, cap: (ctx: ReachWriteContext, input: I) => Promise<CapResult<unknown>>): Entry {
-  return { schema, run: (ctx, input) => cap(ctx, schema.parse(input) as I) };
-}
-
 /**
- * The ONLY reach actions the autonomous agent may propose and the queue may apply:
- * non-destructive, reversible, channel-free. No deletes, publishes, go-live or spend.
- */
-export const ALLOWED_ACTIONS: Record<string, Entry> = {
-  promoteLeadToContact: entry(promoteLeadToContactInput, promoteLeadToContact),
-  setLeadStage: entry(setLeadStageInput, setLeadStage),
-  createAppointment: entry(createAppointmentInput, createAppointment),
-  updateAppointment: entry(updateAppointmentInput, updateAppointment),
-  setAppointmentStatus: entry(setAppointmentStatusInput, setAppointmentStatus),
-  createForm: entry(createFormInput, createForm),
-  updateForm: entry(updateFormInput, updateForm),
-};
-
-export const ALLOWED_ACTION_NAMES = Object.keys(ALLOWED_ACTIONS);
-export const isAllowedAction = (action: string): boolean => Object.hasOwn(ALLOWED_ACTIONS, action);
-
-/**
- * Re-validate a persisted proposal's input and run its capability under `ctx`
- * (the OWNER's write context). Mirrors the in-chat applyChange re-validation.
+ * Re-validate a persisted proposal's input and run its capability under `ctx` (the OWNER's
+ * write-context), dispatched by the proposal's `product` to that agent's allow-list. Only the
+ * non-destructive actions the agent exposes can run; anything off-list is refused. Mirrors the
+ * in-chat applyChange re-validation. The registry is injectable for testing; defaults to AGENTS.
  */
 export async function runProposalAction(
-  ctx: ReachWriteContext,
+  product: string,
+  ctx: unknown,
   action: string,
   input: unknown,
+  registry: AgentRegistry = AGENTS,
 ): Promise<ApplyResult> {
-  if (!isAllowedAction(action)) return { ok: false, error: 'That action is not allowed.' };
-  const found = ALLOWED_ACTIONS[action];
+  const found = actionsFor(product, registry)[action];
+  if (!found) return { ok: false, error: 'That action is not allowed.' };
   const parsed = found.schema.safeParse(input);
   if (!parsed.success) return { ok: false, error: 'That proposed change is no longer valid.' };
   let res: Awaited<ReturnType<typeof found.run>>;

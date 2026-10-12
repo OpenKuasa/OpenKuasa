@@ -3,7 +3,7 @@ import { revalidatePath } from 'next/cache';
 import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv, type Viewer } from '@/lib/auth/viewer';
 import { hasKeySecret } from '@/lib/ai/key-crypto';
-import { sendBroadcast, sendTestEmail, type SendContext } from '@/lib/crm/broadcast-send';
+import { resumeBroadcast, sendBroadcast, sendTestEmail, type SendContext } from '@/lib/crm/broadcast-send';
 import {
   createBroadcast,
   deleteBroadcast,
@@ -13,6 +13,7 @@ import {
   parseBroadcastForm,
   readBroadcastId,
   readBroadcastRevision,
+  retryState,
   updateBroadcast,
   type AudienceContact,
   type Broadcast,
@@ -203,6 +204,37 @@ async function sendBroadcastAction(_prev: CrmFormState, formData: FormData): Pro
   }
 }
 
+/** Finishes a send that was cut short, or tries again for recipients the provider did not take. */
+async function resumeBroadcastAction(_prev: CrmFormState, formData: FormData): Promise<CrmFormState> {
+  'use server';
+  const context = await sendContext();
+  if ('denied' in context) return refused(context.denied);
+
+  let broadcastId: string;
+  try {
+    broadcastId = readBroadcastId(formData);
+  } catch (error) {
+    return refused(error instanceof CrmContactFormError ? error.message : 'Could not retry the broadcast.');
+  }
+
+  try {
+    const outcome = await resumeBroadcast(context.ctx, broadcastId);
+    revalidatePath(BROADCAST_PATH);
+    if (!outcome.ok) return refused(outcome.error);
+    return {
+      ok: true,
+      message:
+        outcome.failed > 0
+          ? `${outcome.sent} sent in all. ${outcome.failed} still could not be sent.`
+          : `All ${outcome.sent} sent.`,
+    };
+  } catch (error) {
+    console.error('[crm/broadcast] a retry failed:', (error as { code?: unknown } | null)?.code ?? 'error');
+    revalidatePath(BROADCAST_PATH);
+    return refused('The retry did not finish. Check the broadcast before trying again.');
+  }
+}
+
 async function sendTestAction(_prev: CrmFormState, formData: FormData): Promise<CrmFormState> {
   'use server';
   const context = await sendContext();
@@ -261,6 +293,7 @@ export default async function BroadcastsPage() {
 
   if (!live) return <SampleBroadcastScreen />;
 
+  const now = new Date();
   const canWrite = role !== 'viewer';
   const mayManageKey = !viewer.isDemo && can(role, 'manage-email-key');
   const maySend = !viewer.isDemo && can(role, 'send-broadcasts');
@@ -275,7 +308,11 @@ export default async function BroadcastsPage() {
       // Viewers can read broadcasts but the database refuses their writes.
       actions={canWrite ? { save: saveBroadcastAction, remove: deleteBroadcastAction } : undefined}
       keyActions={mayManageKey ? { save: saveEmailSettingsAction, remove: removeEmailSettingsAction } : undefined}
-      sendActions={maySend ? { send: sendBroadcastAction, test: sendTestAction } : undefined}
+      sendActions={
+        maySend ? { send: sendBroadcastAction, test: sendTestAction, resume: resumeBroadcastAction } : undefined
+      }
+      // Worked out here, once, so the server and the browser agree on "now".
+      retry={Object.fromEntries(live.broadcasts.map((broadcast) => [broadcast.id, retryState(broadcast, now)]))}
     />
   );
 }

@@ -120,7 +120,7 @@ export function filterBills(bills: BillListRow[], query: string, filter: BillFil
 /** The bills table as a CSV file. Amounts are numbers, so a spreadsheet can add them up. */
 export function billsCsv(bills: BillListRow[]): string {
   return toCsv(
-    ['No.', 'Date', 'Supplier', 'Due', 'Total', 'Balance', 'Status', 'Purchase order'],
+    ['No.', 'Date', 'Supplier', 'Due', 'Total', 'Balance', 'Status', 'Purchase order', 'Category'],
     bills.map((b) => [
       b.bill_no,
       b.bill_date,
@@ -130,6 +130,7 @@ export function billsCsv(bills: BillListRow[]): string {
       b.balance,
       BILL_STATUS_LABELS[b.display_status],
       b.purchase_order_no,
+      b.category_name,
     ]),
   );
 }

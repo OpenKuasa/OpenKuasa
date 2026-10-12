@@ -450,10 +450,15 @@ export async function applyProposalAction(input: unknown): Promise<{ ok: boolean
     .eq('org_id', ctx.orgId)
     .eq('status', 'pending')
     .gt('expires_at', new Date().toISOString())
-    .select('action, input')
+    .select('action, input, product')
     .maybeSingle();
   if (!claimed) return { ok: false, error: 'That suggestion has already been handled.' };
-  const applied = await runProposalAction(ctx, claimed.action as string, claimed.input);
+  const applied = await runProposalAction(
+    claimed.product as string,
+    ctx,
+    claimed.action as string,
+    claimed.input,
+  );
   if (!applied.ok) {
     await ctx.client
       .from('agent_proposals')

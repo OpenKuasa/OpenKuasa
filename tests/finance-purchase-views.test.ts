@@ -49,6 +49,8 @@ const bill = (b: Partial<BillListRow>): BillListRow => {
     display_status: 'pending',
     purchase_order_id: null,
     purchase_order_no: null,
+    category_id: null,
+    category_name: null,
     ...b,
   };
 };
@@ -368,13 +370,13 @@ describe('siblingBills', () => {
 describe('CSV export', () => {
   it('writes the bills table, with a formula-looking supplier name made harmless', () => {
     const csv = billsCsv([
-      bill({ bill_no: 'BILL-0007', supplier_name: '=cmd|calc', total: 1250.5, balance: 250.5, bill_date: '2026-10-01', due_date: '2026-10-31', purchase_order_id: 'po-1', purchase_order_no: 'PO-0003' }),
+      bill({ bill_no: 'BILL-0007', supplier_name: '=cmd|calc', total: 1250.5, balance: 250.5, bill_date: '2026-10-01', due_date: '2026-10-31', purchase_order_id: 'po-1', purchase_order_no: 'PO-0003', category_id: 'c1', category_name: 'Utilities' }),
       bill({ bill_no: null, supplier_name: 'Lim, Tan & Co', total: 80, balance: 80, display_status: 'draft' }),
     ]);
     expect(csv).toBe(
-      '﻿No.,Date,Supplier,Due,Total,Balance,Status,Purchase order\r\n' +
-        "BILL-0007,2026-10-01,'=cmd|calc,2026-10-31,1250.5,250.5,Pending,PO-0003\r\n" +
-        ',2026-10-01,"Lim, Tan & Co",2026-10-31,80,80,Draft,\r\n',
+      '﻿No.,Date,Supplier,Due,Total,Balance,Status,Purchase order,Category\r\n' +
+        "BILL-0007,2026-10-01,'=cmd|calc,2026-10-31,1250.5,250.5,Pending,PO-0003,Utilities\r\n" +
+        ',2026-10-01,"Lim, Tan & Co",2026-10-31,80,80,Draft,,\r\n',
     );
   });
 

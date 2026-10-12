@@ -54,6 +54,8 @@ describe('a change to a contact', () => {
         '/finance/payment-vouchers',
         '/finance/expenses',
         '/finance/banking',
+        // A ledger entry's description carries the party's name.
+        '/finance/journals',
       ]);
     }
   });

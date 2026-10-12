@@ -10,6 +10,7 @@ import {
   emptyLine,
   lineNumbers,
   newBillForm,
+  withCategory,
   ordersForSupplier,
   savedNotPosted,
   type BillOrderOption,
@@ -60,8 +61,37 @@ describe('newBillForm', () => {
       dueEdited: false,
       notes: '',
       purchase_order_id: '',
+      category_id: '',
       lines: [{ key: 'k1', product_id: '', description: '', quantity: '1', uom: '', pack_size: '', unit_price: '', sst_rate: '0' }],
     });
+  });
+});
+
+describe('the bill’s category', () => {
+  const CATEGORY = '99999999-9999-4999-8999-999999999999';
+  it('starts on the default category the screen names, or on none', () => {
+    expect(newBillForm(today, 'k1', CATEGORY).category_id).toBe(CATEGORY);
+    expect(newBillForm(today, 'k1').category_id).toBe('');
+  });
+  it('is sent with the bill, empty meaning the workspace default', () => {
+    expect(billPayload(filled({ category_id: CATEGORY })).category_id).toBe(CATEGORY);
+    expect(billPayload(filled()).category_id).toBe('');
+    expect(saveBillInput.parse(billPayload(filled({ category_id: CATEGORY }))).category_id).toBe(CATEGORY);
+  });
+});
+
+describe('withCategory', () => {
+  const CATEGORY = '99999999-9999-4999-8999-999999999999';
+  const OTHER_CATEGORY = '88888888-8888-4888-8888-888888888888';
+  it('sets the chosen category', () => {
+    expect(withCategory(filled(), OTHER_CATEGORY, CATEGORY).category_id).toBe(OTHER_CATEGORY);
+  });
+  it('turns "default" into the default category itself, since an empty one would keep the draft’s old category', () => {
+    expect(withCategory(filled({ category_id: OTHER_CATEGORY }), '', CATEGORY).category_id).toBe(CATEGORY);
+  });
+  it('stays empty when the workspace has no default to name', () => {
+    expect(withCategory(filled({ category_id: OTHER_CATEGORY }), '', '').category_id).toBe('');
+    expect(withCategory(filled({ category_id: OTHER_CATEGORY }), '', undefined).category_id).toBe('');
   });
 });
 
@@ -192,6 +222,7 @@ describe('billPayload', () => {
       bill_date: today,
       due_date: '2026-11-10',
       purchase_order_id: '',
+      category_id: '',
       notes: '',
       lines: [{ product_id: PRODUCT, description: ' Gloves ', uom: 'box', pack_size: '', quantity: 10, unit_price: 12.5, sst_rate: 6 }],
     });
@@ -207,7 +238,7 @@ describe('billPayload', () => {
   });
   it('never carries the line keys, the dueEdited flag or a workspace', () => {
     const payload = billPayload(filled({ id: BILL }));
-    expect(Object.keys(payload).sort()).toEqual(['bill_date', 'due_date', 'id', 'lines', 'notes', 'purchase_order_id', 'supplier_id', 'supplier_ref']);
+    expect(Object.keys(payload).sort()).toEqual(['bill_date', 'category_id', 'due_date', 'id', 'lines', 'notes', 'purchase_order_id', 'supplier_id', 'supplier_ref']);
     expect(Object.keys(payload.lines[0]).sort()).toEqual(['description', 'pack_size', 'product_id', 'quantity', 'sst_rate', 'unit_price', 'uom']);
   });
 });
@@ -228,6 +259,8 @@ describe('billFormFromDetail', () => {
     notes: 'urgent',
     purchase_order_id: null,
     purchase_order_no: null,
+    category_id: null,
+    category_name: null,
     lines: [
       { id: 'line-1', product_id: PRODUCT, description: 'Nitrile Gloves (Box)', quantity: 10, uom: 'box', pack_size: '100 pcs', unit_price: 12.5, sst_rate: 6, amount: 125, sst_amount: 7.5 },
       { id: 'line-2', product_id: null, description: 'Delivery', quantity: 1, uom: null, pack_size: null, unit_price: 0, sst_rate: 0, amount: 0, sst_amount: 0 },
@@ -285,6 +318,8 @@ const detailFor = (): BillDetail => ({
   notes: null,
   purchase_order_id: null,
   purchase_order_no: null,
+  category_id: null,
+  category_name: null,
   lines: [],
 });
 const PO_2 = '77777777-7777-4777-8777-777777777777';

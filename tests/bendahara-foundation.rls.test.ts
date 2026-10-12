@@ -54,7 +54,8 @@ testWithSupabase('a new workspace starts with the default categories', async () 
     .eq('org_id', a.orgId);
   expect(error, error?.message).toBeNull();
   const expense = (data ?? []).filter((c) => c.kind === 'expense').map((c) => c.name).sort();
-  expect(expense).toEqual(['Marketing', 'Rent', 'Salaries', 'Services', 'Supplies', 'Travel', 'Utilities']);
+  // Purchases since 20261108090000: the category a supplier bill gets when none is given.
+  expect(expense).toEqual(['Marketing', 'Purchases', 'Rent', 'Salaries', 'Services', 'Supplies', 'Travel', 'Utilities']);
   expect((data ?? []).filter((c) => c.kind === 'income').map((c) => c.name).sort()).toEqual(['Other income', 'Sales']);
 });
 

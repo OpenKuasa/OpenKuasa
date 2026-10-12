@@ -37,7 +37,12 @@ export type EmailProvider = {
 };
 
 /** What the provider said, reduced to something safe to store and show. */
-function reason(status: number): string {
+function reason(status: number, name?: unknown): string {
+  // The same key with different content, or while its first use is still running.
+  if (status === 409 && name === 'invalid_idempotent_request') {
+    return 'Something these emails are made of changed since the first attempt, so this cannot be retried safely.';
+  }
+  if (status === 409) return 'The provider is still working on the first attempt. Try again in a few minutes.';
   if (status === 401 || status === 403) return 'The email key was refused. Check it in the email settings.';
   if (status === 422 || status === 400) {
     return 'The provider refused the message. Check that the sender address is on a verified domain.';
@@ -64,11 +69,16 @@ export const resendProvider: EmailProvider = {
         cache: 'no-store',
         signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
       });
-      if (!response.ok) return failAll(reason(response.status));
+      if (!response.ok) {
+        const problem = (await response.json().catch(() => null)) as { name?: unknown } | null;
+        return failAll(reason(response.status, problem?.name));
+      }
       // { data: [{ id }, …] }, one per message, in order.
       const body = (await response.json().catch(() => null)) as { data?: { id?: unknown }[] } | null;
       const ids = Array.isArray(body?.data) ? body.data : [];
-      return emails.map((_, index) => {
+      // An answer for fewer messages than were sent is not an answer for the rest.
+      return emails.map((_, index): SendResult => {
+        if (index >= ids.length) return { ok: false, error: 'The provider did not confirm this message.' };
         const id = ids[index]?.id;
         return { ok: true, providerId: typeof id === 'string' ? id.slice(0, 100) : null };
       });

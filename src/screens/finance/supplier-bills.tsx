@@ -10,8 +10,9 @@ import {
 import { type BillActions, BillsView } from '@/components/finance/bills-view';
 import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
-import { type BillDisplayStatus, type BillListRow, listBills } from '@/lib/finance/bills';
+import { type BillDisplayStatus, type BillListRow, listBills, listExpenseCategories } from '@/lib/finance/bills';
 import { listContacts } from '@/lib/finance/contacts';
+import { purchasesCategoryId } from '@/lib/finance/ledger';
 import { type PaymentOutRow, listAccounts, listPaymentsOut } from '@/lib/finance/money';
 import { heldByBill } from '@/lib/finance/payment-form';
 import { listPurchaseOrders } from '@/lib/finance/purchase-orders';
@@ -44,6 +45,8 @@ const sample = (
   display_status,
   purchase_order_id: null,
   purchase_order_no: null,
+  category_id: 'sample-purchases',
+  category_name: 'Purchases',
 });
 
 const SAMPLE_BILLS: BillListRow[] = [
@@ -102,13 +105,16 @@ export default async function SupplierBillsScreen() {
   const ctx = { client: await createClient(), orgId: viewer.orgId };
   const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
   // The forms offer suppliers, products and accounts; a viewer has no form, so none of them is read for them.
-  const [rows, payments, contacts, products, accounts, orders] = await Promise.all([
+  const [rows, payments, contacts, products, accounts, orders, categories, defaultCategoryId] = await Promise.all([
     listBills(ctx),
     listPaymentsOut(ctx),
     canEdit ? listContacts(ctx) : [],
     canEdit ? listProducts(ctx) : [],
     canEdit ? listAccounts(ctx) : [],
     canEdit ? listPurchaseOrders(ctx) : [],
+    canEdit ? listExpenseCategories(ctx) : [],
+    // The ledger account behind purchases says which category a new bill starts in.
+    canEdit ? purchasesCategoryId(ctx) : null,
   ]);
   // The picker offers approved orders, and keeps the order a draft is already linked to even once it is closed.
   const linked = new Set(rows.flatMap((b) => (b.display_status === 'draft' && b.purchase_order_id ? [b.purchase_order_id] : [])));
@@ -135,6 +141,8 @@ export default async function SupplierBillsScreen() {
                   billed_total,
                   received_total,
                 })),
+              categories,
+              defaultCategoryId: defaultCategoryId ?? '',
               accounts,
               payments,
             }
