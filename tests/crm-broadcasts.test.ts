@@ -10,6 +10,7 @@ import {
   createBroadcast,
   deleteBroadcast,
   mapBroadcast,
+  retryState,
   parseBroadcastForm,
   readBroadcastId,
   recipientsCsv,
@@ -165,6 +166,33 @@ describe('who a broadcast is for', () => {
   });
 });
 
+describe('whether a send can be finished or retried', () => {
+  const now = new Date('2026-10-12T12:00:00.000Z');
+  const ago = (minutes: number) => new Date(now.getTime() - minutes * 60_000).toISOString();
+  const state = (over: Parameters<typeof retryState>[0]) => retryState(over, now);
+  const sent = { status: 'sent' as const, resumedAt: null };
+  const sending = { status: 'sending' as const, failedCount: 0, resumedAt: null };
+
+  it('has nothing to do for a draft, or a send that reached everyone', () => {
+    expect(state({ status: 'draft', failedCount: 0, sendingStartedAt: null, resumedAt: null })).toBe('none');
+    expect(state({ ...sent, failedCount: 0, sendingStartedAt: ago(10) })).toBe('none');
+  });
+
+  it('can retry a finished send with failures straight away, for 23 hours', () => {
+    expect(state({ ...sent, failedCount: 2, sendingStartedAt: ago(1) })).toBe('ready');
+    expect(state({ ...sent, failedCount: 2, sendingStartedAt: ago(22 * 60) })).toBe('ready');
+    expect(state({ ...sent, failedCount: 2, sendingStartedAt: ago(23 * 60 + 1) })).toBe('too-old');
+  });
+
+  it('waits five minutes on one still marked sending, in case it is still going', () => {
+    expect(state({ ...sending, sendingStartedAt: ago(2) })).toBe('wait');
+    expect(state({ ...sending, sendingStartedAt: ago(6) })).toBe('ready');
+    // A second attempt started a moment ago counts too.
+    expect(state({ ...sending, sendingStartedAt: ago(60), resumedAt: ago(1) })).toBe('wait');
+    expect(state({ ...sending, sendingStartedAt: ago(24 * 60) })).toBe('too-old');
+  });
+});
+
 describe('the recipients file', () => {
   it('has a header and one row each, quoting commas and neutralising formulas', () => {
     const csv = recipientsCsv([
@@ -235,6 +263,8 @@ describe('saving a broadcast', () => {
       sentDay: null,
       sentCount: 0,
       failedCount: 0,
+      sendingStartedAt: null,
+      resumedAt: null,
     });
   });
 

@@ -9,6 +9,7 @@ import {
   FileText,
   Megaphone,
   Pencil,
+  RotateCcw,
   Plus,
   Send,
   Settings,
@@ -47,6 +48,7 @@ import {
   type AudienceStatus,
   type Broadcast,
   type BroadcastAudience,
+  type RetryState,
 } from '@/lib/crm/broadcasts';
 import { formatDay } from '@/lib/crm/deal-stats';
 import type { CrmFormAction, CrmFormState } from '@/lib/crm/form-state';
@@ -55,7 +57,7 @@ import { useCrmForm } from './crm-form';
 
 type Actions = { save: CrmFormAction; remove: CrmFormAction };
 type KeyActions = { save: CrmFormAction; remove: CrmFormAction };
-type SendActions = { send: CrmFormAction; test: CrmFormAction };
+type SendActions = { send: CrmFormAction; test: CrmFormAction; resume: CrmFormAction };
 /** What members may know about the workspace's email key. */
 type EmailKey = { keyHint: string; senderEmail: string; senderName: string };
 
@@ -292,6 +294,62 @@ function SendBroadcastRow({
           {test.message ? (
             <p role="status" className="text-sm text-emerald-600">
               {test.message}
+            </p>
+          ) : null}
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+/** Replaces a broadcast's row while asking whether to finish or retry its send. */
+function ResumeBroadcastRow({
+  broadcast,
+  action,
+  colSpan,
+  onClose,
+}: {
+  broadcast: Broadcast;
+  action: CrmFormAction;
+  colSpan: number;
+  onClose: () => void;
+}) {
+  const resume = useAnswer(action);
+  const interrupted = broadcast.status === 'sending';
+  return (
+    <TableRow className="bg-primary/5 hover:bg-primary/5">
+      <TableCell colSpan={colSpan}>
+        <div className="space-y-3 py-2">
+          <p className="text-sm">
+            {interrupted ? (
+              <>
+                The send of <span className="font-medium">{broadcast.name}</span> was cut short. Finish it?
+              </>
+            ) : (
+              <>
+                Try again for the {people(broadcast.failedCount)} of{' '}
+                <span className="font-medium">{broadcast.name}</span> that could not be sent?
+              </>
+            )}{' '}
+            This repeats the original request to the email provider, which recognises what it has
+            already sent, so people who received it should not get it again. It works for 23 hours after
+            the first attempt, and only while the email settings are unchanged.
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <form action={resume.formAction}>
+              <input type="hidden" name="broadcastId" value={broadcast.id} />
+              <Button type="submit" size="sm" disabled={resume.pending}>
+                <RotateCcw className="size-4" />
+                {resume.pending ? 'Sending…' : interrupted ? 'Finish sending' : 'Retry failed'}
+              </Button>
+            </form>
+            <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={resume.pending}>
+              Cancel
+            </Button>
+          </div>
+          {resume.error ? (
+            <p role="alert" className="text-sm text-destructive">
+              {resume.error}
             </p>
           ) : null}
         </div>
@@ -546,6 +604,7 @@ export function BroadcastsView({
   actions,
   keyActions,
   sendActions,
+  retry,
 }: {
   broadcasts: Broadcast[];
   contacts: AudienceContact[];
@@ -562,12 +621,15 @@ export function BroadcastsView({
   /** Present only for an owner or admin. */
   keyActions?: KeyActions;
   sendActions?: SendActions;
+  /** Whether each broadcast's send can be finished or retried, by id. */
+  retry?: Record<string, RetryState>;
 }) {
   // One thing is open at a time: a form, the settings, or a question about one row.
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Broadcast | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [sendingId, setSendingId] = useState<string | null>(null);
+  const [resumingId, setResumingId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const optedOut = useMemo(() => new Set(optOuts), [optOuts]);
@@ -588,6 +650,7 @@ export function BroadcastsView({
   const closeRows = () => {
     setDeletingId(null);
     setSendingId(null);
+    setResumingId(null);
   };
 
   return (
@@ -736,6 +799,14 @@ export function BroadcastsView({
                         colSpan={5}
                         onClose={() => setSendingId(null)}
                       />
+                    ) : sendActions && emailKey && resumingId === broadcast.id && retry?.[broadcast.id] === 'ready' ? (
+                      <ResumeBroadcastRow
+                        key={broadcast.id}
+                        broadcast={broadcast}
+                        action={sendActions.resume}
+                        colSpan={5}
+                        onClose={() => setResumingId(null)}
+                      />
                     ) : (
                       <TableRow key={broadcast.id}>
                         <TableCell className="max-w-64">
@@ -769,8 +840,15 @@ export function BroadcastsView({
                                   ? `, ${broadcast.failedCount.toLocaleString('en-MY')} failed`
                                   : '')
                               : broadcast.status === 'sending'
-                                ? 'Started and not finished. Do not send it again.'
+                                ? retry?.[broadcast.id] === 'wait'
+                                  ? 'Sending now, or cut short a moment ago.'
+                                  : retry?.[broadcast.id] === 'too-old'
+                                    ? 'Cut short, and too old to finish safely.'
+                                    : 'Cut short before it finished.'
                                 : `Changed ${formatDay(broadcast.updatedDay)}`}
+                            {broadcast.status === 'sent' && retry?.[broadcast.id] === 'too-old'
+                              ? ' · too old to retry'
+                              : ''}
                           </p>
                         </TableCell>
                         <TableCell className="sticky right-0 bg-card shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.2)]">
@@ -785,6 +863,25 @@ export function BroadcastsView({
                             >
                               <Download className="size-4" />
                             </Button>
+                            {sendActions && emailKey && retry?.[broadcast.id] === 'ready' ? (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                aria-label={
+                                  broadcast.status === 'sending'
+                                    ? `Finish sending ${broadcast.name}`
+                                    : `Retry the failed recipients of ${broadcast.name}`
+                                }
+                                onClick={() => {
+                                  closeForm();
+                                  setSettingsOpen(false);
+                                  closeRows();
+                                  setResumingId(broadcast.id);
+                                }}
+                              >
+                                <RotateCcw className="size-4 text-primary" />
+                              </Button>
+                            ) : null}
                             {sendActions && emailKey && broadcast.status === 'draft' ? (
                               <Button
                                 variant="ghost"
