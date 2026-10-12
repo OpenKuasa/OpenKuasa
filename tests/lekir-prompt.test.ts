@@ -702,3 +702,15 @@ describe('a candidate to delete is looked up among everyone on file, even when t
     expect(tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], false, null)).not.toContain(SENTENCE);
   });
 });
+
+describe('the team prompt\'s pool rule lists the protected grounds itself', () => {
+  it('verbatim and in order, in the part about talent pool changes, and only when changes are allowed', () => {
+    const SENTENCE = 'A protected ground for a talent pool change is race, religion, gender, age, marital status, pregnancy, disability and nationality, or a stand-in for one of them.';
+    const withChanges = tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], true, null);
+    expect(withChanges).toContain(SENTENCE);
+    expect(withChanges.indexOf(SENTENCE)).toBeGreaterThan(withChanges.indexOf('Never ask for a talent pool change on a protected ground.'));
+    // On the same line as the rule it explains.
+    expect(withChanges.split('\n').find((line) => line.includes(SENTENCE))).toContain('Never ask for a talent pool change on a protected ground.');
+    expect(tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], false, null)).not.toContain(SENTENCE);
+  });
+});
