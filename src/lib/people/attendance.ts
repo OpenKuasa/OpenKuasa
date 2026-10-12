@@ -385,13 +385,15 @@ export function buildOvertimeView(input: {
   today: string;
 }): OvertimeView {
   const team = isTeamView(input.viewer);
-  const sorted = [...input.records].sort(
+  // The database hands a manager their reports' rows too: a viewer who is not a team viewer sees their own only.
+  const records = team ? input.records : ownRows(input.records, input.viewer);
+  const sorted = [...records].sort(
     (a, b) => b.work_date.localeCompare(a.work_date) || b.created_at.localeCompare(a.created_at),
   );
   return {
     team,
     // A member's records are their own: no department split.
-    model: overtimeModel(input.records, team ? input.employees : [], input.today),
+    model: overtimeModel(records, team ? input.employees : [], input.today),
     records: sorted.slice(0, OVERTIME_TABLE_LIMIT),
     truncated: sorted.length > OVERTIME_TABLE_LIMIT,
   };

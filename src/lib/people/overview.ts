@@ -5,6 +5,7 @@
  */
 
 import { rm } from '@/lib/reach/format';
+import { isTeamView, ownRows } from './own';
 import { attendanceCounts } from './summaries';
 import { addDays, addMonths, daysBetween, formatDay, monthLabel, monthStart, todayInMalaysia } from './dates';
 import type {
@@ -16,6 +17,7 @@ import type {
   LeaveType,
   OvertimeRecord,
   PeopleData,
+  PeopleViewer,
   TimeOffRequest,
 } from './types';
 
@@ -259,9 +261,18 @@ export type PeopleOverviewModel = {
   occasions: Occasion[];
 };
 
-export async function buildPeopleOverviewModel(data: PeopleData, now: Date): Promise<PeopleOverviewModel> {
+/**
+ * `ctx` is given by `loadPeople`. With it, a viewer who is not a team viewer (a manager) sees their own rows only:
+ * the database also hands a manager their reports', and the Overview is not a team screen. Without it, or for a
+ * team viewer, every row the data holds is used.
+ */
+export async function buildPeopleOverviewModel(
+  data: PeopleData,
+  now: Date,
+  ctx?: { viewer: PeopleViewer },
+): Promise<PeopleOverviewModel> {
   const today = todayInMalaysia(now);
-  const [employees, leave, claims, overtime, timeOff, attendance] = await Promise.all([
+  const [employees, allLeave, allClaims, allOvertime, allTimeOff, allAttendance] = await Promise.all([
     data.listEmployees(),
     data.listLeaveRequests(),
     data.listClaims(),
@@ -269,6 +280,13 @@ export async function buildPeopleOverviewModel(data: PeopleData, now: Date): Pro
     data.listTimeOffRequests(),
     data.listAttendance(today, today),
   ]);
+  const narrow = ctx !== undefined && !isTeamView(ctx.viewer);
+  const mine = <T extends { employee_id: string }>(rows: T[]): T[] => (narrow ? ownRows(rows, ctx.viewer) : rows);
+  const leave = mine(allLeave);
+  const claims = mine(allClaims);
+  const overtime = mine(allOvertime);
+  const timeOff = mine(allTimeOff);
+  const attendance = mine(allAttendance);
   const departments = headcountByDepartment(employees);
   const away = onLeaveOn(leave, today);
   const approvals = pendingApprovals(leave, claims, overtime, timeOff);
