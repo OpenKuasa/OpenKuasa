@@ -12,7 +12,7 @@ import { toCsv } from './csv';
 import type { ExpenseDisplayStatus, ExpenseRow } from './expenses';
 import { rmShort } from './format';
 import { PAYMENT_METHOD_LABELS } from './money';
-import { type Stat, count, lastMonths, monthOf, sum, thousands } from './view-helpers';
+import { type Stat, count, displayDate, lastMonths, monthOf, sum, thousands } from './view-helpers';
 
 /* ---- the period selector ------------------------------------------- */
 
@@ -276,6 +276,34 @@ export function cashReceiptActions(row: CashReceiptRow, canSignOff: boolean): Ca
   if (row.status === 'draft') return canSignOff ? ['edit', 'post', 'delete'] : ['edit', 'delete'];
   if (row.status === 'posted') return canSignOff ? ['void'] : [];
   return [];
+}
+
+/**
+ * What a receipt that was just posted or voided did to the list on screen,
+ * when it leaves the list or is not in it. A posted receipt is listed by its
+ * date, so one dated outside the chosen period is not there ("All time" holds
+ * every date, so it never says so); a status filter of Draft or Void cannot
+ * show it either. A voided receipt leaves "All except void" and Posted. A
+ * draft is never hidden by the period (`cashReceiptsInPeriod`). Null when the
+ * person can see the receipt where they are, so there is nothing to say.
+ */
+export function receiptLeftNote(
+  event: { kind: 'posted'; number: string; date: string } | { kind: 'voided'; number: string },
+  today: string,
+  period: CashBookPeriod,
+  filter: CashReceiptFilter,
+): string | null {
+  if (event.kind === 'voided') {
+    return filter === 'open' || filter === 'posted'
+      ? `Receipt ${event.number} was voided. Choose Void in the status filter to see it.`
+      : null;
+  }
+  if (!inPeriod(event.date, today, period)) {
+    return `Receipt ${event.number} dated ${displayDate(event.date)} was posted. It is outside ${CASH_BOOK_PERIOD_LABELS[period].toLowerCase()}: choose a longer period to see it.`;
+  }
+  return filter === 'draft' || filter === 'void'
+    ? `Receipt ${event.number} was posted. Choose Posted in the status filter to see it.`
+    : null;
 }
 
 /** How a receipt is named in a question and to a screen reader: "RC-0007 from Aiman", "the draft receipt from Aiman", "the draft receipt". */

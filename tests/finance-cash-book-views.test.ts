@@ -32,6 +32,7 @@ import {
   voucherCategory,
   voucherHome,
 } from '@/lib/finance/cash-book-views';
+import { receiptLeftNote } from '@/lib/finance/cash-book-views';
 import { CSV_BOM } from '@/lib/finance/csv';
 import type { ExpenseRow } from '@/lib/finance/expenses';
 import { rmShort } from '@/lib/finance/format';
@@ -718,3 +719,46 @@ describe('the line under the table', () => {
   });
 });
 
+
+describe('what the screen says when a receipt leaves the list', () => {
+  const today = '2026-11-03';
+  const posted = (date: string) => ({ kind: 'posted' as const, number: 'RC-0012', date });
+
+  it('says nothing when the posted receipt is in the period and the status filter shows it', () => {
+    expect(receiptLeftNote(posted('2026-11-01'), today, 'month', 'open')).toBeNull();
+    expect(receiptLeftNote(posted('2026-11-01'), today, 'month', 'posted')).toBeNull();
+    expect(receiptLeftNote(posted('2026-01-01'), today, 'year', 'open')).toBeNull();
+  });
+  it('says a posted receipt is outside the period, for each period', () => {
+    expect(receiptLeftNote(posted('2026-10-30'), today, 'month', 'open')).toBe(
+      'Receipt RC-0012 dated 30 Oct 2026 was posted. It is outside this month: choose a longer period to see it.',
+    );
+    expect(receiptLeftNote(posted('2026-06-30'), today, 'quarter', 'open')).toBe(
+      'Receipt RC-0012 dated 30 Jun 2026 was posted. It is outside this quarter: choose a longer period to see it.',
+    );
+    expect(receiptLeftNote(posted('2025-12-31'), today, 'year', 'open')).toBe(
+      'Receipt RC-0012 dated 31 Dec 2025 was posted. It is outside this year: choose a longer period to see it.',
+    );
+  });
+  it('never says it for All time, which holds every date', () => {
+    expect(receiptLeftNote(posted('2019-01-01'), today, 'all', 'open')).toBeNull();
+    expect(receiptLeftNote(posted('2031-01-01'), today, 'all', 'open')).toBeNull();
+  });
+  it('says a posted receipt is hidden by a status filter that cannot show it', () => {
+    for (const filter of ['draft', 'void'] as const) {
+      expect(receiptLeftNote(posted('2026-11-01'), today, 'month', filter)).toBe(
+        'Receipt RC-0012 was posted. Choose Posted in the status filter to see it.',
+      );
+    }
+  });
+  it('puts the period first when both hide a posted receipt', () => {
+    expect(receiptLeftNote(posted('2026-10-30'), today, 'month', 'void')).toMatch(/outside this month/);
+  });
+  it('says a voided receipt left the list unless the Void filter is on', () => {
+    const voided = { kind: 'voided' as const, number: 'RC-0012' };
+    const sentence = 'Receipt RC-0012 was voided. Choose Void in the status filter to see it.';
+    expect(receiptLeftNote(voided, today, 'month', 'open')).toBe(sentence);
+    expect(receiptLeftNote(voided, today, 'all', 'posted')).toBe(sentence);
+    expect(receiptLeftNote(voided, today, 'month', 'void')).toBeNull();
+  });
+});
