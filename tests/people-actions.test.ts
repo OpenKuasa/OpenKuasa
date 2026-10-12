@@ -36,6 +36,7 @@ vi.mock('@/lib/people/capabilities', async (orig) => {
     setEmployeeStatus: record('setEmployeeStatus', { id: 'e1', name: 'Farah', employee_no: 'EMP-001' }),
     deleteEmployee: record('deleteEmployee', { id: 'e1', name: 'Farah' }),
     linkEmployeeToMember: record('linkEmployeeToMember', { id: 'e1', name: 'Farah', user_id: null }),
+    setReportsTo: record('setReportsTo', { id: '22222222-2222-4222-8222-222222222222', reports_to: '44444444-4444-4444-8444-444444444444' }),
     createDepartment: record('createDepartment', { id: 'd1', name: 'Sales', created_at: '' }),
     updateDepartment: record('updateDepartment', { id: 'd1', name: 'Sales', created_at: '' }),
     deleteDepartment: async () => ({ ok: false as const, error: 'That department still has employees, including inactive ones. Move them to another department first.' }),
@@ -133,6 +134,42 @@ describe('people actions', () => {
     });
     expect(ctl.privateReads).toEqual([EMP]);
     expect(ctl.revalidated).toEqual([]);
+  });
+
+  describe('setReportsToAction', () => {
+    const MANAGER = '44444444-4444-4444-8444-444444444444';
+
+    it.each(['member', 'viewer'])('refuses a %s (a manager is a member with a team) before anything runs', async (role) => {
+      ctl.viewer.role = role;
+      expect(await actions.setReportsToAction({ id: EMP, manager_id: MANAGER })).toEqual(FORBIDDEN);
+      expect(ctl.ran).toEqual([]);
+      expect(ctl.revalidated).toEqual([]);
+    });
+
+    it('refuses the demo, even with an owner role', async () => {
+      ctl.viewer.isDemo = true;
+      expect(await actions.setReportsToAction({ id: EMP, manager_id: MANAGER })).toEqual(FORBIDDEN);
+      expect(ctl.ran).toEqual([]);
+    });
+
+    it('lets an owner or admin set the line once, with the parsed input, and refreshes the pages', async () => {
+      for (const role of ['owner', 'admin']) {
+        ctl.ran = [];
+        ctl.revalidated = [];
+        ctl.viewer.role = role;
+        expect(await actions.setReportsToAction({ id: EMP, manager_id: MANAGER, org_id: 'someone-else' })).toEqual({
+          ok: true,
+          data: { id: EMP, reports_to: MANAGER },
+        });
+        expect(ctl.ran).toEqual([{ fn: 'setReportsTo', orgId: 'org1', input: { id: EMP, manager_id: MANAGER } }]);
+        expect(ctl.revalidated).toEqual(PEOPLE_PATHS);
+      }
+    });
+
+    it('answers a bad input in words and runs nothing', async () => {
+      expect(await actions.setReportsToAction({ id: EMP })).toMatchObject({ ok: false });
+      expect(ctl.ran).toEqual([]);
+    });
   });
 
   it('accepts a Postgres uuid that is not RFC-versioned', async () => {

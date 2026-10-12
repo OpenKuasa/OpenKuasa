@@ -13,6 +13,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { PAYROLL_REFUSALS } from './payroll-refusals';
+import { REPORTS_TO_REFUSALS } from './reporting-refusals';
 import type { Department } from './types';
 
 export type PeopleWriteContext = { client: SupabaseClient; orgId: string };
@@ -495,4 +496,45 @@ export async function linkEmployeeToMember(
   if (error) return writeFailed('linkEmployeeToMember', error);
   if (!data) return refuse(EMPLOYEE_MISSING);
   return { ok: true, data: data as { id: string; name: string; user_id: string | null } };
+}
+
+// ---- Reporting lines -------------------------------------------------------------
+
+export const setReportsToInput = z.object({
+  id: employeeId,
+  manager_id: id
+    .nullable()
+    .describe('The employee they report to, by their id from listEmployees, or null for nobody.'),
+});
+
+/** The leading `EMP_...` code of a database message, or null when it does not begin with one. */
+const leadingEmpCode = (message: string | undefined): string | null => /^EMP_[A-Z_]+/.exec(message ?? '')?.[0] ?? null;
+
+/**
+ * Who an employee reports to, through `hr_set_reports_to`: the column is not writable any other way, and the
+ * database refuses a loop, another workspace's manager and anyone who is not an owner or admin. Only the
+ * reply's `id` and `reports_to` are read.
+ */
+export async function setReportsTo(
+  ctx: PeopleWriteContext,
+  input: z.infer<typeof setReportsToInput>,
+): Promise<CapResult<{ id: string; reports_to: string | null }>> {
+  const parsed = parseInput(setReportsToInput, input);
+  if (!parsed.ok) return parsed;
+  const { data, error } = await ctx.client.rpc('hr_set_reports_to', {
+    p_employee: parsed.data.id,
+    p_manager: parsed.data.manager_id,
+  });
+  if (error) {
+    const code = leadingEmpCode(error.message);
+    if (code && Object.hasOwn(REPORTS_TO_REFUSALS, code)) {
+      return refuse(REPORTS_TO_REFUSALS[code as keyof typeof REPORTS_TO_REFUSALS]);
+    }
+    return writeFailed('setReportsTo', error);
+  }
+  const row = data as { id?: unknown; reports_to?: unknown } | null;
+  if (!row || typeof row !== 'object' || typeof row.id !== 'string') {
+    return writeFailed('setReportsTo', { message: 'unexpected reply' });
+  }
+  return { ok: true, data: { id: row.id, reports_to: typeof row.reports_to === 'string' ? row.reports_to : null } };
 }

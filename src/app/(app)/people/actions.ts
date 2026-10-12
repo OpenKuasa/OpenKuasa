@@ -19,6 +19,8 @@ import {
   linkEmployeeToMemberInput,
   setEmployeeStatus,
   setEmployeeStatusInput,
+  setReportsTo,
+  setReportsToInput,
   updateDepartment,
   updateDepartmentInput,
   updateEmployee,
@@ -65,6 +67,9 @@ export async function createEmployeeAction(input: unknown) {
 }
 export async function updateEmployeeAction(input: unknown) {
   return run(updateEmployeeInput, input, updateEmployee);
+}
+export async function setReportsToAction(input: unknown) {
+  return run(setReportsToInput, input, setReportsTo);
 }
 export async function setEmployeeStatusAction(input: unknown) {
   return run(setEmployeeStatusInput, input, setEmployeeStatus);

@@ -9,12 +9,15 @@ import {
   deleteEmployee,
   linkEmployeeToMember,
   setEmployeeStatus,
+  setReportsTo,
+  setReportsToInput,
   updateDepartment,
   updateEmployee,
   updateEmployeeInput,
   WRITE_FAILED,
   writeOutcome,
 } from '@/lib/people/capabilities';
+import { REPORTS_TO_REFUSALS } from '@/lib/people/reporting-refusals';
 import { fakeSupabase } from './setup/fake-supabase';
 
 const ORG = 'org-1';
@@ -569,5 +572,92 @@ describe('ids and bad input', () => {
     const rollback = log.mock.calls.filter((c) => String(c[0]).includes('rollback'));
     expect(rollback).toHaveLength(1);
     expect(JSON.stringify(rollback)).toContain('the employee was not removed');
+  });
+});
+
+describe('setReportsTo', () => {
+  const MANAGER = '44444444-4444-4444-8444-444444444444';
+
+  it('calls the function once with the ids and answers its id and reports_to', async () => {
+    const { client, calls } = fakeSupabase({ 'rpc.hr_set_reports_to': { data: { id: EMP, reports_to: MANAGER, extra: 'ignored' } } });
+    expect(await setReportsTo(ctxOf(client), { id: EMP, manager_id: MANAGER })).toEqual({
+      ok: true,
+      data: { id: EMP, reports_to: MANAGER },
+    });
+    const rpc = calls.filter((c) => c.op === 'rpc');
+    expect(rpc).toHaveLength(1);
+    expect(rpc[0]).toMatchObject({ fn: 'hr_set_reports_to', args: { p_employee: EMP, p_manager: MANAGER } });
+  });
+
+  it('sends null for nobody', async () => {
+    const { client, calls } = fakeSupabase({ 'rpc.hr_set_reports_to': { data: { id: EMP, reports_to: null } } });
+    expect(await setReportsTo(ctxOf(client), { id: EMP, manager_id: null })).toEqual({
+      ok: true,
+      data: { id: EMP, reports_to: null },
+    });
+    expect(calls[0]).toMatchObject({ fn: 'hr_set_reports_to', args: { p_employee: EMP, p_manager: null } });
+  });
+
+  it.each([
+    ['an id that is not a uuid', { id: 'nope', manager_id: MANAGER }],
+    ['a manager that is not a uuid', { id: EMP, manager_id: 'nope' }],
+    ['a manager left out', { id: EMP }],
+  ])('refuses %s at the schema, calling nothing', async (_name, input) => {
+    expect(setReportsToInput.safeParse(input).success).toBe(false);
+    const { client, calls } = fakeSupabase({});
+    const result = await setReportsTo(ctxOf(client), input as never);
+    expect(result.ok).toBe(false);
+    expect(calls).toEqual([]);
+  });
+
+  it.each([
+    ['EMP_BAD_MANAGER', REPORTS_TO_REFUSALS.EMP_BAD_MANAGER],
+    ['EMP_NOT_FOUND', REPORTS_TO_REFUSALS.EMP_NOT_FOUND],
+    ['EMP_NOT_ALLOWED', REPORTS_TO_REFUSALS.EMP_NOT_ALLOWED],
+    ['EMP_BAD_MANAGER\nCONTEXT: PL/pgSQL function hr_set_reports_to line 9', REPORTS_TO_REFUSALS.EMP_BAD_MANAGER],
+  ])("answers the database's %j in its own sentence", async (message, sentence) => {
+    const { client } = fakeSupabase({ 'rpc.hr_set_reports_to': { error: { code: 'P0001', message } } });
+    expect(await setReportsTo(ctxOf(client), { id: EMP, manager_id: MANAGER })).toEqual({ ok: false, error: sentence });
+  });
+
+  it('answers any other error generically and logs the function and code, not the ids', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { client } = fakeSupabase({
+      'rpc.hr_set_reports_to': { error: { code: '57014', message: 'canceling statement' } },
+    });
+    expect(await setReportsTo(ctxOf(client), { id: EMP, manager_id: MANAGER })).toEqual({ ok: false, error: WRITE_FAILED });
+    const text = JSON.stringify(log.mock.calls);
+    expect(text).toContain('setReportsTo');
+    expect(text).toContain('57014');
+    expect(text).not.toContain(EMP);
+    expect(text).not.toContain(MANAGER);
+  });
+
+  it.each([['a string', 'ok'], ['null', null], ['an object with no id', { reports_to: null }], ['a number', 5]])(
+    'treats %s as a failed save',
+    async (_name, data) => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const { client } = fakeSupabase({ 'rpc.hr_set_reports_to': { data } });
+      expect(await setReportsTo(ctxOf(client), { id: EMP, manager_id: MANAGER })).toEqual({ ok: false, error: WRITE_FAILED });
+    },
+  );
+});
+
+describe('the employee schemas no longer know the manager flag or the line', () => {
+  it('strips is_manager', () => {
+    const created = createEmployeeInput.safeParse({ name: 'A', is_manager: true });
+    expect(created.success).toBe(true);
+    if (created.success) expect(created.data).not.toHaveProperty('is_manager');
+    const updated = updateEmployeeInput.safeParse({ id: EMP, is_manager: true });
+    expect(updated.success).toBe(true);
+    if (updated.success) expect(updated.data).not.toHaveProperty('is_manager');
+  });
+
+  it('has no reports_to or manager_id key', () => {
+    for (const schema of [createEmployeeInput, updateEmployeeInput]) {
+      expect(Object.keys(schema.shape)).not.toContain('reports_to');
+      expect(Object.keys(schema.shape)).not.toContain('manager_id');
+      expect(Object.keys(schema.shape)).not.toContain('is_manager');
+    }
   });
 });

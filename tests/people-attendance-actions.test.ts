@@ -83,6 +83,15 @@ beforeEach(() => {
   ctl.lookupFails = false;
 });
 
+describe('a manager is not HR', () => {
+  it('is still refused a correction to attendance', async () => {
+    as('member');
+    ctl.people = { employeeId: 'emp-own', isHr: false, isDemo: false, managesTeam: true } as typeof ctl.people;
+    expect(await actions.correctAttendanceAction({ employee_id: EMP, work_date: '2026-10-09', status: 'absent' })).toEqual(FORBIDDEN);
+    expect(ctl.ran).toEqual([]);
+  });
+});
+
 describe('clocking in and out', () => {
   it.each(['owner', 'admin', 'member', 'viewer'] as Role[])('is open to a linked %s', async (role) => {
     as(role);
