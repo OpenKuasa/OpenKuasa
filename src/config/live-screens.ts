@@ -37,6 +37,8 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   // Shared with Jebat's analytics (registry 'reach/reports'); /reach/reports
   // is not a nav item, so the screen is served at /crm/reports.
   'crm/reports',
+  // The deal rule, the person's own notifications and the contacts export; the rest links to where it is set.
+  'crm/settings',
 
   // Lekir (read-only for now; Settings joins in a later slice)
   'hire/assistant',
