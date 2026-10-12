@@ -251,8 +251,21 @@ function whenOf(input: Record<string, unknown>, minutes: number | null): string 
   return `${longDate(iso)}, ${minutes === null ? clock12(iso) : timeRange(iso, minutes)}, ${ZONE_LABEL}`;
 }
 
-/** The four parts a new interview's card always has: when, the type, the place, the interviewer. */
-function newInterviewParts(input: Record<string, unknown>): { when: string; type: string; place: string; interviewer: string } {
+/** How much of an interview's notes a card shows. */
+const NOTES_SHOWN = 300;
+/**
+ * The notes a change would save, as a card shows them: on one line, cut at 300 characters. Empty when none were
+ * sent. No candidate ever reads the notes, but they are saved, and an assistant wrote them: the person who approves
+ * must see what they say.
+ */
+function notesShown(value: unknown): string {
+  const text = oneLine(sent(value));
+  if (!text) return '';
+  return `Notes: ${text.length > NOTES_SHOWN ? `${text.slice(0, NOTES_SHOWN)}…` : text}`;
+}
+
+/** The parts of a new interview's card: when, the type, the place and the interviewer always; the notes when there are some. */
+function newInterviewParts(input: Record<string, unknown>): { when: string; type: string; place: string; interviewer: string; notes: string } {
   const place = sent(input.place);
   const interviewer = sent(input.interviewer_name);
   return {
@@ -261,26 +274,27 @@ function newInterviewParts(input: Record<string, unknown>): { when: string; type
     type: isKind(input.kind) ? KIND_WORDS[input.kind] : sent(input.kind),
     place: place ? `${isKind(input.kind) ? PLACE_LABEL[input.kind] : 'Place'}: ${place}` : 'No place or link given',
     interviewer: interviewer ? `With: ${interviewer}` : 'No interviewer given',
+    notes: notesShown(input.notes),
   };
 }
 
 const has = (input: Record<string, unknown>, key: string) => input[key] !== undefined;
 
 /**
- * The card's second line, from the tool's own input. Notes are never shown:
- * only that they change. Null when the tool has nothing to add, or is not one
+ * The card's second line, from the tool's own input. The notes a change
+ * would save are shown, cut at 300 characters. Null when the tool has nothing to add, or is not one
  * of the six.
  */
 export function interviewCardDetail(tool: string, input: Record<string, unknown>): string | null {
   switch (tool) {
     case 'scheduleInterview': {
       const p = newInterviewParts(input);
-      return [p.when, p.type, p.place, p.interviewer, 'Nothing is sent to the candidate.'].filter(Boolean).join(DOT);
+      return [p.when, p.type, p.place, p.interviewer, p.notes, 'Nothing is sent to the candidate.'].filter(Boolean).join(DOT);
     }
     case 'recordPastInterview': {
       const p = newInterviewParts(input);
       const outcome = isOutcome(input.outcome) ? OUTCOME_WORDS[input.outcome] : sent(input.outcome);
-      return [p.when, p.type, outcome, p.place, p.interviewer, 'Recorded as already held. No invitation is made.'].filter(Boolean).join(DOT);
+      return [p.when, p.type, outcome, p.place, p.interviewer, p.notes, 'Recorded as already held. No invitation is made.'].filter(Boolean).join(DOT);
     }
     case 'rescheduleInterview': {
       const parts: string[] = [];
@@ -290,7 +304,7 @@ export function interviewCardDetail(tool: string, input: Record<string, unknown>
       if (has(input, 'kind')) parts.push(`Type: ${isKind(input.kind) ? KIND_WORDS[input.kind] : sent(input.kind)}`);
       if (has(input, 'place')) parts.push(`Place or link: ${sent(input.place) || 'cleared'}`);
       if (has(input, 'interviewer_name')) parts.push(`Interviewer: ${sent(input.interviewer_name) || 'cleared'}`);
-      if (has(input, 'notes')) parts.push(`Notes: ${sent(input.notes) ? 'changed' : 'cleared'}`);
+      if (has(input, 'notes')) parts.push(notesShown(input.notes) || 'Notes: cleared');
       return [...parts, 'Nothing is sent to the candidate.'].join(DOT);
     }
     case 'cancelInterview': return 'It stays in the list as cancelled. Nothing is sent to the candidate.';

@@ -204,7 +204,7 @@ describe('the detail of an Approve card', () => {
       application_id: 'x', date: '2026-10-20', time: '15:00', duration_minutes: 60, kind: 'video',
       place: 'https://meet.example.com/abc', interviewer_name: 'Farah Lim', notes: 'Second round',
     })).toBe(
-      'Tuesday, 20 October 2026, 3:00 pm to 4:00 pm, Kuala Lumpur time (GMT+8) · Video call · Link: https://meet.example.com/abc · With: Farah Lim · Nothing is sent to the candidate.',
+      'Tuesday, 20 October 2026, 3:00 pm to 4:00 pm, Kuala Lumpur time (GMT+8) · Video call · Link: https://meet.example.com/abc · With: Farah Lim · Notes: Second round · Nothing is sent to the candidate.',
     );
   });
   it('says what nobody gave, and takes 60 minutes when no length was sent', () => {
@@ -258,7 +258,7 @@ describe('the detail of an Approve card', () => {
     expect(interviewCardDetail('rescheduleInterview', {
       id: 'x', duration_minutes: 90, kind: 'phone', place: '+60 3-1234 5678', interviewer_name: 'Farah Lim', notes: 'Call the mobile first',
     })).toBe(
-      'Length: 1 hour 30 minutes · Type: Phone call · Place or link: +60 3-1234 5678 · Interviewer: Farah Lim · Notes: changed · Nothing is sent to the candidate.',
+      'Length: 1 hour 30 minutes · Type: Phone call · Place or link: +60 3-1234 5678 · Interviewer: Farah Lim · Notes: Call the mobile first · Nothing is sent to the candidate.',
     );
   });
   it('shows the start alone for a new time when the length is not part of the change: the stored length is not known here', () => {
@@ -275,9 +275,34 @@ describe('the detail of an Approve card', () => {
     expect(interviewCardDetail('rescheduleInterview', { id: 'x', date: '2026-10-22' })).toBe('New time: 2026-10-22 · Nothing is sent to the candidate.');
     expect(interviewCardDetail('rescheduleInterview', { id: 'x', date: 'Thursday', time: '11am' })).toBe('New time: Thursday, 11am · Nothing is sent to the candidate.');
   });
-  it('never shows the notes themselves', () => {
-    expect(interviewCardDetail('rescheduleInterview', { id: 'x', notes: 'Salary was the sticking point' })).not.toContain('Salary');
-    expect(interviewCardDetail('scheduleInterview', { date: '2026-10-20', time: '15:00', kind: 'video', notes: 'Salary was the sticking point' })).not.toContain('Salary');
+  // The notes are the team's own and no candidate ever reads them. They are saved all the same, and the person who
+  // approves must see what the assistant wrote there.
+  it('shows the notes that will be saved, on one line, on a new interview, a past one and a change', () => {
+    const when = { date: '2026-10-20', time: '15:00', kind: 'video' };
+    expect(interviewCardDetail('scheduleInterview', { ...when, notes: 'Salary was the sticking point' })).toBe(
+      'Tuesday, 20 October 2026, 3:00 pm to 4:00 pm, Kuala Lumpur time (GMT+8) · Video call · No place or link given · No interviewer given · ' +
+        'Notes: Salary was the sticking point · Nothing is sent to the candidate.',
+    );
+    expect(interviewCardDetail('recordPastInterview', { date: '2026-10-06', time: '15:00', kind: 'video', outcome: 'completed', notes: 'Strong on the till.\nWeak on stock.' })).toBe(
+      'Tuesday, 6 October 2026, 3:00 pm to 4:00 pm, Kuala Lumpur time (GMT+8) · Video call · Completed · No place or link given · No interviewer given · ' +
+        'Notes: Strong on the till. Weak on stock. · Recorded as already held. No invitation is made.',
+    );
+    expect(interviewCardDetail('rescheduleInterview', { id: 'x', notes: ' Second round.\n\n  Bring the portfolio. ' })).toBe(
+      'Notes: Second round. Bring the portfolio. · Nothing is sent to the candidate.',
+    );
+  });
+  it('cuts long notes at 300 characters, and says nothing of notes that were not sent or are blank', () => {
+    const long = 'n'.repeat(301);
+    expect(interviewCardDetail('scheduleInterview', { date: '2026-10-20', time: '15:00', kind: 'video', notes: long })).toContain(` · Notes: ${'n'.repeat(300)}… · Nothing is sent`);
+    expect(interviewCardDetail('rescheduleInterview', { id: 'x', notes: long })).toBe(`Notes: ${'n'.repeat(300)}… · Nothing is sent to the candidate.`);
+    expect(interviewCardDetail('rescheduleInterview', { id: 'x', notes: 'n'.repeat(300) })).toBe(`Notes: ${'n'.repeat(300)} · Nothing is sent to the candidate.`);
+    for (const none of [undefined, null, '', '  \n ']) {
+      expect(interviewCardDetail('scheduleInterview', { date: '2026-10-20', time: '15:00', kind: 'video', notes: none }), String(none)).not.toContain('Notes');
+      expect(interviewCardDetail('recordPastInterview', { date: '2026-10-06', time: '15:00', kind: 'video', outcome: 'no_show', notes: none }), String(none)).not.toContain('Notes');
+    }
+    // On a change, notes sent blank are notes cleared.
+    expect(interviewCardDetail('rescheduleInterview', { id: 'x', notes: null })).toBe('Notes: cleared · Nothing is sent to the candidate.');
+    expect(interviewCardDetail('rescheduleInterview', { id: 'x', date: '2026-10-22', time: '11:00' })).not.toContain('Notes');
   });
   it('says what a cancellation leaves, and has nothing to add for an outcome or an undo', () => {
     expect(interviewCardDetail('cancelInterview', { id: 'x' })).toBe('It stays in the list as cancelled. Nothing is sent to the candidate.');

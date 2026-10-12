@@ -2733,6 +2733,15 @@ describe('interview changes', () => {
       expect([...past.context.proposals.values()][0]).toMatchObject({ action: 'recordPastInterview', title: `Record a past interview with ${WHO} (${JOB})?` });
       nothingSaved();
     });
+    it('the card for a new interview, and for a change, shows the notes that will be saved', async () => {
+      const made = await prepare([byName, { tool: 'scheduleInterview', input: { ...NEW, notes: 'Second round.\nAsk about weekends.' } }], world(), { said: `Schedule ${WHO} for 12 January at 3pm, video. Note: second round, ask about weekends` });
+      expect([...made.context.proposals.values()][0].detail).toBe(
+        'Tuesday, 12 January 2027, 3:00 pm to 4:00 pm, Kuala Lumpur time (GMT+8) · Video call · No place or link given · No interviewer given · ' +
+          'Notes: Second round. Ask about weekends. · Nothing is sent to the candidate.',
+      );
+      const changed = await prepare([listAll, { tool: 'rescheduleInterview', input: { id: IV, notes: 'Bring the portfolio.' } }], world(), { said: 'Note on her first interview: bring the portfolio' });
+      expect([...changed.context.proposals.values()][0].detail).toBe('Notes: Bring the portfolio. · Nothing is sent to the candidate.');
+    });
     it('accepts an id an earlier turn knew as an interview, and not one it knew as something else', async () => {
       const known = await prepare([{ tool: 'reopenInterview', input: { id: IV } }], world(), { names: { [`interview:${IV}`]: `${WHO} (${JOB})` } });
       expect(seen.refusals).toEqual([]);
@@ -3189,6 +3198,15 @@ describe('interview changes', () => {
       const moved = await request([[{ tool: 'rescheduleInterview', input: { id: IV, date: '2026-10-21', time: '15:00' } }]], agent, world(), 'Move it to Wednesday at 3');
       expect(moved.denials).toEqual([]);
       expect(approvalDetail('rescheduleInterview', moved.cards[0].toolCall!.input)).toBe('New time: Wednesday, 21 October 2026, 3:00 pm, Kuala Lumpur time (GMT+8) · Nothing is sent to the candidate.');
+    });
+    it.each(agents)('%s: the card for a new interview shows the notes that will be saved', async (agent) => {
+      const { approvalDetail } = await import('@/lib/chat/change-titles');
+      const run = await request([[{ tool: 'scheduleInterview', input: { ...NEW, notes: 'Second round.\nAsk about weekends.' } }]], agent, world(), `Schedule ${WHO} for 12 January at 3pm, video. Note: second round, ask about weekends`);
+      expect(run.cards).toHaveLength(1);
+      expect(approvalDetail('scheduleInterview', run.cards[0].toolCall!.input)).toBe(
+        'Tuesday, 12 January 2027, 3:00 pm to 4:00 pm, Kuala Lumpur time (GMT+8) · Video call · No place or link given · No interviewer given · ' +
+          'Notes: Second round. Ask about weekends. · Nothing is sent to the candidate.',
+      );
     });
     it.each(agents)('%s: a made-up link is denied, and a link the user typed passes', async (agent) => {
       const withLink: Call = { tool: 'scheduleInterview', input: { ...NEW, place: LINK } };
