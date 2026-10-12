@@ -1,12 +1,17 @@
 import { expect, test } from 'vitest';
 import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { createOrg, joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
+import { createConfirmedTestUser, createOrg, joinDemo, signInAnon, liveClient, signInOwner } from './helpers/live-workspaces';
 
 // Banking against the hosted database: transfers between accounts, balances,
 // statement lines and their matches. Run by the controller only, after the
-// banking migration is applied. Every user here owns the workspace it makes,
-// so each is an owner: what an editor and a viewer may not do is proved by
+// banking migrations are applied, 20261031090300_bendahara_banking_write_guards_fit
+// included: until then the balances view cannot be read and no transfer can
+// be recorded, and most of this file fails. Every workspace here is made by
+// a signed-up user, who is its owner (a demo guest may not make one). One
+// test invites a member (a writer who is not an owner or admin), the way
+// finance-write-guards.rls.test.ts does. What an admin, an editor and a
+// viewer may and may not do, at length, is proved by
 // supabase/tests/bendahara_banking_check.sql, which acts as each of them.
 // This file adds what only the API and real concurrent sessions can show.
 // The last test reads the demo seed.
@@ -15,11 +20,12 @@ const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 
-type Org = { c: SupabaseClient; orgId: string; bank: string; till: string; savings: string; sales: string };
+type Org = { c: SupabaseClient; userId: string; orgId: string; bank: string; till: string; savings: string; sales: string };
 
-async function anonUserWithOrg(orgName: string): Promise<Org> {
+/** A new signed-up user and the workspace they own, with a second bank account. */
+async function ownerWithOrg(orgName: string): Promise<Org> {
   const c = liveClient();
-  const { error: authErr } = await signInAnon(c);
+  const { data: auth, error: authErr } = await signInOwner(c);
   expect(authErr, authErr?.message).toBeNull();
   const { data: orgId, error } = await createOrg(c, orgName);
   expect(error, error?.message).toBeNull();
@@ -33,6 +39,7 @@ async function anonUserWithOrg(orgName: string): Promise<Org> {
   expect(savingsErr, savingsErr?.message).toBeNull();
   return {
     c,
+    userId: auth.user!.id,
     orgId: orgId as string,
     bank: accounts!.find((a) => a.kind === 'bank')!.id as string,
     till: accounts!.find((a) => a.kind === 'cash')!.id as string,
@@ -70,7 +77,7 @@ async function balances(o: Org): Promise<Record<string, number>> {
 }
 
 testWithSupabase('a transfer is two posted sides with one TR- number, and is in neither cash book view', async () => {
-  const o = await anonUserWithOrg(`Banking transfer ${Date.now()}`);
+  const o = await ownerWithOrg(`Banking transfer ${Date.now()}`);
   const made = await transfer(o, o.bank, o.savings, 250.5);
   expect(made.error, made.error?.message).toBeNull();
 
@@ -86,6 +93,11 @@ testWithSupabase('a transfer is two posted sides with one TR- number, and is in 
   expect(sides!.find((s) => s.direction === 'in')).toMatchObject({ account_id: o.savings, other_account_name: 'Main Bank' });
 
   const ids = sides!.map((s) => s.transaction_id as string);
+  // The function runs as its owner, and the rows still name the person signed in: both sides are theirs, and
+  // the guard on payments wrote them down as approving the money out.
+  const { data: stored } = await o.c.from('finance_transactions').select('direction, created_by, approved_by').in('id', ids);
+  expect(stored!.find((s) => s.direction === 'out')).toMatchObject({ created_by: o.userId, approved_by: o.userId });
+  expect(stored!.find((s) => s.direction === 'in')).toMatchObject({ created_by: o.userId, approved_by: null });
   const { data: receipts } = await o.c.from('finance_cash_receipts').select('transaction_id').in('transaction_id', ids);
   const { data: vouchers } = await o.c.from('finance_payment_vouchers').select('transaction_id').in('transaction_id', ids);
   expect([...(receipts ?? []), ...(vouchers ?? [])]).toEqual([]);
@@ -98,8 +110,70 @@ testWithSupabase('a transfer is two posted sides with one TR- number, and is in 
   expect((await transfer(o, o.bank, crypto.randomUUID(), 10)).error?.code).toBe('FIN16');
 });
 
+testWithSupabase('the balances view is read by a member and has no account number; a member cannot record or void a transfer', async () => {
+  const o = await ownerWithOrg(`Banking member ${Date.now()}`);
+  const numbered = await o.c
+    .from('finance_accounts')
+    .update({ bank_name: 'Check Bank', account_no: '8001234567' })
+    .eq('id', o.savings)
+    .select('id');
+  expect(numbered.error, numbered.error?.message).toBeNull();
+
+  // A member needs an address to accept an invite sent to it; see finance-write-guards.rls.test.ts.
+  const m = liveClient();
+  const signUp = await createConfirmedTestUser(m, 'banking-member-pass-123');
+  const invite = await o.c.rpc('create_invite', { p_email: signUp.email, p_role: 'member' });
+  expect(invite.error, invite.error?.message).toBeNull();
+  const accepted = await m.rpc('accept_invite', { p_token: invite.data });
+  expect(accepted.error, accepted.error?.message).toBeNull();
+  const member: Org = { ...o, c: m, userId: signUp.userId as string };
+
+  const made = await transfer(o, o.bank, o.savings, 60);
+  expect(made.error, made.error?.message).toBeNull();
+
+  // Both read the view. It has the bank's name and no account number, which is asked for by name, by a writer.
+  for (const who of [o, member]) {
+    const { data, error } = await who.c
+      .from('finance_account_balances')
+      .select('id, name, bank_name, balance')
+      .eq('org_id', o.orgId)
+      .eq('id', o.savings);
+    expect(error, error?.message).toBeNull();
+    expect(data).toHaveLength(1);
+    expect(data![0]).toMatchObject({ id: o.savings, name: 'Savings', bank_name: 'Check Bank' });
+    expect(Number(data![0].balance)).toBe(60);
+    // 42703: the view has no such column.
+    expect((await who.c.from('finance_account_balances').select('account_no').eq('org_id', o.orgId)).error?.code).toBe('42703');
+    const numbers = await who.c.rpc('finance_account_numbers', { target_org: o.orgId });
+    expect(numbers.error, numbers.error?.message).toBeNull();
+    expect(numbers.data).toContainEqual({ account_id: o.savings, account_no: '8001234567' });
+  }
+
+  // FIN14 from the function's own rule: moving money between accounts needs an owner or admin.
+  expect((await transfer(member, o.bank, o.savings, 5)).error?.code).toBe('FIN14');
+  // FIN16 first, as for an owner: what is wrong with the transfer is answered before who is asking.
+  expect((await transfer(member, o.bank, o.bank, 5)).error?.code).toBe('FIN16');
+  // FIN14 from the sign-off trigger (20261030123000): voiding is an owner's or admin's, through the function or by hand.
+  const memberVoid = await m.rpc('finance_void_transfer', { target_org: o.orgId, target_transfer: made.data });
+  expect(memberVoid.error?.code).toBe('FIN14');
+  const byHand = await m.from('finance_transactions').update({ status: 'void' }).eq('org_id', o.orgId).eq('transfer_id', made.data);
+  expect(byHand.error?.code).toBe('FIN14');
+  const { data: still } = await o.c.from('finance_transactions').select('status, number').eq('org_id', o.orgId);
+  expect(still).toHaveLength(2);
+  expect(still!.every((s) => s.status === 'posted' && s.number === 'TR-0001')).toBe(true);
+
+  const voided = await o.c.rpc('finance_void_transfer', { target_org: o.orgId, target_transfer: made.data });
+  expect(voided.error, voided.error?.message).toBeNull();
+  // The refused tries took no number: the owner's next transfer is the second.
+  const next = await transfer(o, o.savings, o.bank, 1);
+  expect(next.error, next.error?.message).toBeNull();
+  const { data: numbers } = await o.c.from('finance_transactions').select('number').eq('org_id', o.orgId).eq('transfer_id', next.data);
+  expect(new Set(numbers!.map((n) => n.number))).toEqual(new Set(['TR-0002']));
+  await m.auth.signOut();
+});
+
 testWithSupabase('half a transfer cannot be posted or voided through the API; the whole of it can be voided', async () => {
-  const o = await anonUserWithOrg(`Banking half ${Date.now()}`);
+  const o = await ownerWithOrg(`Banking half ${Date.now()}`);
   const made = await transfer(o, o.bank, o.till, 80);
   expect(made.error, made.error?.message).toBeNull();
 
@@ -121,7 +195,11 @@ testWithSupabase('half a transfer cannot be posted or voided through the API; th
     .update({ status: 'posted', number: 'TR-9999' })
     .eq('org_id', o.orgId)
     .eq('transfer_id', lone);
-  expect(posted.error?.code).toBe('FIN16');
+  // 42501: a payment's number is a column nobody signed in writes (20261030123000), asked before any trigger.
+  expect(posted.error?.code).toBe('42501');
+  const unnumbered = await o.c.from('finance_transactions').update({ status: 'posted' }).eq('org_id', o.orgId).eq('transfer_id', lone);
+  // 23514: and a payment is not posted without one (the table's own check), so nothing is posted by hand.
+  expect(unnumbered.error?.code).toBe('23514');
   const leaves = await o.c.from('finance_transactions').update({ transfer_id: null }).eq('org_id', o.orgId).eq('transfer_id', lone);
   expect(leaves.error?.code).toBe('FIN16');
   expect((await balances(o))[o.bank]).toBe(-80);
@@ -134,7 +212,7 @@ testWithSupabase('half a transfer cannot be posted or voided through the API; th
 });
 
 testWithSupabase('two transfers at the same moment take two numbers', async () => {
-  const o = await anonUserWithOrg(`Banking numbers ${Date.now()}`);
+  const o = await ownerWithOrg(`Banking numbers ${Date.now()}`);
   const [a, b] = await Promise.all([transfer(o, o.bank, o.savings, 10), transfer(o, o.bank, o.till, 20)]);
   expect(a.error, a.error?.message).toBeNull();
   expect(b.error, b.error?.message).toBeNull();
@@ -144,7 +222,7 @@ testWithSupabase('two transfers at the same moment take two numbers', async () =
 });
 
 testWithSupabase('a statement line is matched to one posted payment of its account and amount, and a void unmatches it', async () => {
-  const o = await anonUserWithOrg(`Banking statement ${Date.now()}`);
+  const o = await ownerWithOrg(`Banking statement ${Date.now()}`);
   const receipt = await income(o, 120);
   const imported = await o.c.rpc('finance_import_statement', {
     target_org: o.orgId,
@@ -197,7 +275,7 @@ testWithSupabase('a statement line is matched to one posted payment of its accou
 });
 
 testWithSupabase('a match and a void of the same payment at the same moment never leave a line matched to a void payment', async () => {
-  const o = await anonUserWithOrg(`Banking race ${Date.now()}`);
+  const o = await ownerWithOrg(`Banking race ${Date.now()}`);
   const receipt = await income(o, 75);
   const imported = await o.c.rpc('finance_import_statement', {
     target_org: o.orgId, target_account: o.bank, file_name: 'race.csv', lines: [{ line_date: today(), money_in: 75 }],
@@ -217,7 +295,7 @@ testWithSupabase('a match and a void of the same payment at the same moment neve
 });
 
 testWithSupabase('an amount that is not a number is refused everywhere, and a draft side cannot hold a number', async () => {
-  const o = await anonUserWithOrg(`Banking nan ${Date.now()}`);
+  const o = await ownerWithOrg(`Banking nan ${Date.now()}`);
   const nan = await o.c.rpc('finance_record_transfer', {
     target_org: o.orgId,
     transfer: { from_account_id: o.bank, to_account_id: o.savings, amount: 'NaN' },
@@ -237,14 +315,15 @@ testWithSupabase('an amount that is not a number is refused everywhere, and a dr
     org_id: o.orgId, direction: 'out', account_id: o.bank, amount: 1, method: 'bank_transfer',
     transfer_id: crypto.randomUUID(), number: 'TR-0001',
   });
-  expect(parked.error?.code).toBe('23514');
+  // 42501: the number column is closed to every signed-in person, so the table's own rule (23514) is never reached.
+  expect(parked.error?.code).toBe('42501');
   const first = await transfer(o, o.bank, o.savings, 5);
   expect(first.error, first.error?.message).toBeNull();
 });
 
 testWithSupabase('another workspace cannot see or touch accounts, transfers or statement lines', async () => {
-  const a = await anonUserWithOrg(`Banking mine ${Date.now()}`);
-  const b = await anonUserWithOrg(`Banking theirs ${Date.now()}`);
+  const a = await ownerWithOrg(`Banking mine ${Date.now()}`);
+  const b = await ownerWithOrg(`Banking theirs ${Date.now()}`);
   const made = await transfer(a, a.bank, a.savings, 40);
   expect(made.error, made.error?.message).toBeNull();
   const imported = await a.c.rpc('finance_import_statement', {
@@ -261,6 +340,13 @@ testWithSupabase('another workspace cannot see or touch accounts, transfers or s
     target_org: a.orgId, target_account: a.bank, file_name: 's.csv', lines: [{ line_date: today(), money_in: 1 }],
   });
   expect(theirs.error?.code).toBe('42501');
+  // 42501 from the function's own test of the caller: it runs as its owner and would otherwise find a's accounts.
+  const moved = await b.c.rpc('finance_record_transfer', {
+    target_org: a.orgId,
+    transfer: { from_account_id: a.bank, to_account_id: a.savings, amount: 1 },
+  });
+  expect(moved.error?.code).toBe('42501');
+  expect(await balances(a)).toMatchObject({ [a.bank]: -40, [a.savings]: 40 });
 });
 
 testWithSupabase('a demo viewer reads the seeded banking, and can write none of it', async () => {
@@ -287,7 +373,8 @@ testWithSupabase('a demo viewer reads the seeded banking, and can write none of 
     target_org: demoId,
     transfer: { from_account_id: crypto.randomUUID(), to_account_id: crypto.randomUUID(), amount: 1 },
   });
-  expect(moved.error?.code).toBe('FIN16');
+  // 42501: a viewer may not write in the workspace, and the function asks that before anything else.
+  expect(moved.error?.code).toBe('42501');
   const { data: unmatched } = await c.from('finance_statement_lines').update({ transaction_id: null }).eq('org_id', demoId).select('id');
   expect(unmatched ?? []).toEqual([]);
 });
