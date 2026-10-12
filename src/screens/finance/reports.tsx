@@ -1,7 +1,7 @@
 import { ReportsView } from '@/components/finance/reports-view';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { type LedgerAccount, listLedgerAccounts, listLedgerLines } from '@/lib/finance/ledger';
-import { monthlyTotals } from '@/lib/finance/reports';
+import { countUnassigned, monthlyTotals } from '@/lib/finance/reports';
 import { todayUtc } from '@/lib/finance/view-helpers';
 import { createClient } from '@/lib/supabase/server';
 import { SAMPLE_LEDGER_ACCOUNTS, SAMPLE_LEDGER_LINES } from './ledger-sample';
@@ -20,6 +20,8 @@ export default async function ReportsScreen() {
   // Every member reads the books; there is nothing here to change. The lines are added up by account and month
   // here, so the browser is sent the totals and not every line of the ledger.
   const [lines, ledgerAccounts] = await Promise.all([listLedgerLines(ctx), listLedgerAccounts(ctx)]);
-  const { totals, unassigned } = monthlyTotals(lines);
+  const { totals } = monthlyTotals(lines);
+  // Lines with no account, and lines whose account the other read did not return, are not in the statements.
+  const unassigned = countUnassigned(lines, ledgerAccounts);
   return <ReportsView accounts={reportAccounts(ledgerAccounts)} totals={totals} unassigned={unassigned} today={todayUtc()} />;
 }

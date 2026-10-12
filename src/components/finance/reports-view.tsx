@@ -27,6 +27,7 @@ import {
   type TrialBalance,
   balanceSheet,
   balanceSheetCsv,
+  chartState,
   expenseBreakdown,
   isValidPeriod,
   monthEndLabel,
@@ -35,6 +36,8 @@ import {
   periodLabel,
   profitAndLoss,
   profitAndLossCsv,
+  rangeMessage,
+  sliceTotal,
   trialBalance,
   trialBalanceCsv,
 } from '@/lib/finance/reports';
@@ -51,7 +54,7 @@ const PERIOD_CHOICES: { key: PeriodKey; label: string }[] = [
   { key: 'custom', label: 'Custom' },
 ];
 
-const BAD_RANGE = 'Choose a From month that is not after the To month.';
+const RANGE_ERROR_ID = 'reports-range-error';
 
 const SERIES: Series[] = [
   { key: 'revenue', label: 'Revenue (RM)', color: 'var(--chart-1)' },
@@ -130,7 +133,7 @@ function Section({ title, lines, empty, extra }: { title: string; lines: Stateme
 
 function BooksBalance({ balanced, difference, what }: { balanced: boolean; difference: number; what: string }) {
   return balanced ? (
-    <p className="flex items-center gap-2 text-sm text-muted-foreground">
+    <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
       <CircleCheck className="size-4 text-emerald-600 dark:text-emerald-400" />
       Balances
     </p>
@@ -165,7 +168,7 @@ function ProfitAndLossCard({ pl, period, today }: { pl: ProfitAndLoss; period: P
       }
     >
       <div className="overflow-x-auto">
-        <Table>
+        <Table aria-label="Profit and loss">
           <TableHeader>
             <TableRow className="bg-muted/40">
               <TableHead>Account</TableHead>
@@ -208,7 +211,7 @@ function BalanceSheetCard({ bs, today }: { bs: BalanceSheet; today: string }) {
       }
     >
       <div className="overflow-x-auto">
-        <Table>
+        <Table aria-label="Balance sheet">
           <TableHeader>
             <TableRow className="bg-muted/40">
               <TableHead>Account</TableHead>
@@ -259,7 +262,7 @@ function TrialBalanceCard({ tb, period, today }: { tb: TrialBalance; period: Per
       }
     >
       <div className="overflow-x-auto">
-        <Table>
+        <Table aria-label="Trial balance">
           <TableHeader>
             <TableRow className="bg-muted/40">
               <TableHead>Code</TableHead>
@@ -299,7 +302,7 @@ function TrialBalanceCard({ tb, period, today }: { tb: TrialBalance; period: Per
       </div>
       <div className="border-t px-4 py-3">
         {tb.balanced ? (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
             <CircleCheck className="size-4 text-emerald-600 dark:text-emerald-400" />
             Debits and credits are equal
           </p>
@@ -341,7 +344,7 @@ export function ReportsView({
   const [applied, setApplied] = useState<Period>(() => periodFor('this_year', serverToday, totals));
 
   const period = key === 'custom' ? applied : periodFor(key, today, totals);
-  const badRange = key === 'custom' && !isValidPeriod(custom);
+  const rangeError = key === 'custom' ? rangeMessage(custom) : null;
 
   const choose = (next: PeriodKey) => {
     if (next === 'custom') {
@@ -365,7 +368,7 @@ export function ReportsView({
     ...s,
     color: s.key === 'other' ? 'var(--muted-foreground)' : (SLICE_COLORS[i] ?? 'var(--muted-foreground)'),
   }));
-  const quiet = series.every((p) => p.revenue === 0 && p.expenses === 0);
+  const chart = chartState(pl, period);
 
   return (
     <ScreenContainer>
@@ -378,11 +381,11 @@ export function ReportsView({
               <>
                 <Label className="flex items-center gap-2 text-sm font-normal">
                   From
-                  <Input type="month" className="w-40" value={custom.from} max={custom.to || undefined} onChange={(e) => type({ from: e.target.value })} />
+                  <Input type="month" className="w-40" value={custom.from} max={custom.to || undefined} aria-invalid={rangeError ? true : undefined} aria-describedby={rangeError ? RANGE_ERROR_ID : undefined} onChange={(e) => type({ from: e.target.value })} />
                 </Label>
                 <Label className="flex items-center gap-2 text-sm font-normal">
                   To
-                  <Input type="month" className="w-40" value={custom.to} min={custom.from || undefined} onChange={(e) => type({ to: e.target.value })} />
+                  <Input type="month" className="w-40" value={custom.to} min={custom.from || undefined} aria-invalid={rangeError ? true : undefined} aria-describedby={rangeError ? RANGE_ERROR_ID : undefined} onChange={(e) => type({ to: e.target.value })} />
                 </Label>
               </>
             ) : null}
@@ -401,9 +404,9 @@ export function ReportsView({
           </>
         }
       />
-      {badRange ? (
-        <p role="alert" className="mb-4 text-sm text-destructive">
-          {BAD_RANGE}
+      {rangeError ? (
+        <p id={RANGE_ERROR_ID} role="alert" className="mb-4 text-sm text-destructive">
+          {rangeError}
         </p>
       ) : null}
 
@@ -423,11 +426,11 @@ export function ReportsView({
 
         <BentoCard
           title="Revenue and expenses"
-          subtitle="By month"
+          subtitle={chart.subtitle}
           icon={ChartColumn}
           className="col-span-2 md:col-span-8"
         >
-          {quiet ? (
+          {chart.quiet ? (
             <p className="py-10 text-center text-sm text-muted-foreground">No revenue or expenses in this period.</p>
           ) : (
             <BarGroup
@@ -447,7 +450,7 @@ export function ReportsView({
           {slices.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted-foreground">No expenses in this period.</p>
           ) : (
-            <DonutStat data={slices} height={240} centerValue={rmShort(pl.totalExpenses)} centerLabel="expenses" />
+            <DonutStat data={slices} height={240} centerValue={rmShort(sliceTotal(slices))} centerLabel="expenses" />
           )}
         </BentoCard>
 

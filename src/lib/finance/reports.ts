@@ -431,3 +431,8 @@ export function countUnassigned(lines: LedgerLine[], accounts: Pick<LedgerAccoun
   const known = new Set(accounts.map((a) => a.id));
   return lines.filter((l) => !l.account_id || !known.has(l.account_id)).length;
 }
+
+/** What the donut's centre shows: the slices added up, so it agrees with the ring even when a negative line was left out of it. */
+export function sliceTotal(slices: { value: number }[]): number {
+  return fromSen(slices.reduce((t, s) => t + toSen(s.value), 0));
+}

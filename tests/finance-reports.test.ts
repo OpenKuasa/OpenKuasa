@@ -17,6 +17,7 @@ import {
   profitAndLoss,
   profitAndLossCsv,
   rangeMessage,
+  sliceTotal,
   trialBalance,
   trialBalanceCsv,
   type MonthlyTotals,
@@ -431,6 +432,21 @@ describe('chartState', () => {
   it('says By month for a period of 24 months or fewer', () => {
     expect(chartState(plOf(1, 1), { from: '2023-01', to: '2024-12' }).subtitle).toBe('By month');
     expect(chartState(plOf(1, 1), { from: '2022-12', to: '2024-12' }).subtitle).toBe('Last 24 months');
+  });
+});
+
+describe('sliceTotal', () => {
+  it('adds the slices, so a negative expense line left out of the ring is not in the centre', () => {
+    const pl = {
+      income: [], totalIncome: 0, totalExpenses: 350, netProfit: -350, margin: null,
+      expenses: [
+        { account_id: 'a', code: '5000', name: 'Purchases', amount: 400 },
+        { account_id: 'b', code: '6300', name: 'Utilities', amount: -50 },
+      ],
+    };
+    expect(sliceTotal(expenseBreakdown(pl))).toBe(400);
+    expect(sliceTotal([{ value: 0.1 }, { value: 0.2 }])).toBe(0.3);
+    expect(sliceTotal([])).toBe(0);
   });
 });
 
