@@ -54,9 +54,16 @@ export const BILL_MESSAGES = {
   numberTaken: 'That bill number is already used.',
   missing: 'The supplier or a product on this bill no longer exists.',
   product: LINE_MESSAGES.product,
+  // FIN21
+  order: 'Choose an approved purchase order from this supplier, or none.',
 } as const;
 
 const M = BILL_MESSAGES;
+
+/** The purchase order a bill is raised against: an id, or an empty box or null for none. */
+const purchaseOrderLink = z
+  .union([z.string().uuid(M.order), z.literal(''), z.null()], { error: M.order })
+  .transform((v) => (v === '' ? null : v));
 
 export const saveBillInput = z
   .object({
@@ -66,6 +73,8 @@ export const saveBillInput = z
     supplier_ref: optionalText.default(null),
     bill_date: isoDate,
     due_date: isoDate,
+    /** Left out when the input has none, so changing a draft keeps the order it is linked to. */
+    purchase_order_id: purchaseOrderLink.optional(),
     notes: optionalText.default(null),
     lines: z.array(documentLine, { error: M.lines }).min(1, M.lines).max(BILL_LINES_MAX, M.tooManyLines),
   })
@@ -78,6 +87,7 @@ const REFUSALS: Record<string, string> = {
   FIN02: M.hasPayments,
   FIN10: M.empty,
   FIN11: M.gone,
+  FIN21: M.order,
   [PG_UNIQUE]: M.numberTaken,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_FORBIDDEN]: NOT_ALLOWED,

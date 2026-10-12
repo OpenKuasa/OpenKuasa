@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  RFQ_MESSAGES,
   RFQ_PAGE_SIZE,
   closeRfq,
+  convertRfq,
   deleteRfq,
   getRfq,
   listRfqs,
@@ -208,5 +210,38 @@ describe('RFQ writes', () => {
     expect(await saveRfq(ctx, valid)).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
     expect(await closeRfq(ctx, { id: ID })).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
     expect(logged).toHaveBeenCalled();
+  });
+});
+
+describe('convertRfq', () => {
+  const PO = '88888888-8888-4888-8888-888888888888';
+  it('makes a purchase order through the database function, in the caller’s workspace', async () => {
+    const { ctx, calls } = fakeFinance({ data: PO, error: null });
+    expect(await convertRfq(ctx, { id: ID })).toEqual({ ok: true, data: { id: ID, purchase_order_id: PO } });
+    expect(calls[0]).toMatchObject({ kind: 'rpc', name: 'finance_convert_rfq' });
+    expect(calls[0].args).toEqual({ target_org: 'org-1', target_rfq: ID });
+  });
+  it('says the RFQ already has an order for FIN22 and for a unique-key clash', async () => {
+    const sentence = 'This RFQ already has a purchase order. Cancel that order first to make another.';
+    for (const code of ['FIN22', '23505']) {
+      const { ctx } = fakeFinance({ data: null, error: { code } });
+      expect(await convertRfq(ctx, { id: ID }), code).toEqual({ ok: false, error: sentence });
+    }
+    expect(RFQ_MESSAGES.hasOrder).toBe(sentence);
+  });
+  it('uses the RFQ sentences for the other refusals, and the general one with a log for the rest', async () => {
+    const cases: [string, string][] = [
+      ['FIN01', RFQ_MESSAGES.locked],
+      ['FIN11', 'That RFQ no longer exists.'],
+      ['42501', 'You do not have permission to make changes here.'],
+      ['22003', 'That amount is too large.'],
+    ];
+    for (const [code, message] of cases) {
+      const { ctx } = fakeFinance({ data: null, error: { code } });
+      expect(await convertRfq(ctx, { id: ID }), code).toEqual({ ok: false, error: message });
+    }
+    const { ctx } = fakeFinance({ data: null, error: { code: 'XX000' } });
+    expect(await convertRfq(ctx, { id: ID })).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
+    expect(logged).toHaveBeenCalledTimes(1);
   });
 });

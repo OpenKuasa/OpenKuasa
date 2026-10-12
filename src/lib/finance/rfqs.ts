@@ -54,6 +54,8 @@ export const RFQ_MESSAGES = {
   unpriced: 'Enter a price for every line before marking the RFQ as quoted.',
   numberTaken: 'That RFQ number is already used.',
   missing: 'The supplier or a product on this RFQ no longer exists.',
+  // FIN22, or the database's one-order-per-RFQ key
+  hasOrder: 'This RFQ already has a purchase order. Cancel that order first to make another.',
 } as const;
 
 const M = RFQ_MESSAGES;
@@ -329,4 +331,27 @@ export async function deleteRfq(
   if (error) return rfqWriteFailed('deleteRfq', error);
   if (!data) return { ok: false, error: M.gone };
   return { ok: true, data: { id: data.id } };
+}
+
+/**
+ * Makes a draft purchase order from a quoted RFQ: the same supplier, notes and
+ * lines, dated today. The RFQ stays quoted. Refused while a purchase order
+ * made from it stands; a cancelled one frees it.
+ */
+export async function convertRfq(
+  ctx: FinanceWriteContext,
+  input: z.input<typeof rfqIdInput>,
+): Promise<FinResult<{ id: string; purchase_order_id: string }>> {
+  const { id } = rfqIdInput.parse(input);
+  const { data, error } = await ctx.client.rpc('finance_convert_rfq', {
+    target_org: ctx.orgId,
+    target_rfq: id,
+  });
+  if (error || !data) {
+    // Here a clash on the unique key is the second order for one RFQ, not a taken number.
+    const code = pgCode(error);
+    if (code === 'FIN22' || code === PG_UNIQUE) return { ok: false, error: M.hasOrder };
+    return rfqWriteFailed('convertRfq', error);
+  }
+  return { ok: true, data: { id, purchase_order_id: data as string } };
 }

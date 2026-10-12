@@ -73,6 +73,35 @@ describe('saveBillInput', () => {
   });
 });
 
+describe('saveBillInput purchase_order_id', () => {
+  const PO = '88888888-8888-4888-8888-888888888888';
+  it('leaves the key out when the input has none, so a draft keeps the order it has', () => {
+    expect(saveBillInput.parse(valid)).not.toHaveProperty('purchase_order_id');
+  });
+  it('takes an order id, and an empty box or null as null (no order)', () => {
+    expect(saveBillInput.parse({ ...valid, purchase_order_id: PO }).purchase_order_id).toBe(PO);
+    expect(saveBillInput.parse({ ...valid, purchase_order_id: '' }).purchase_order_id).toBeNull();
+    expect(saveBillInput.parse({ ...valid, purchase_order_id: null }).purchase_order_id).toBeNull();
+  });
+  it('refuses something that is not an id, in the order’s words', () => {
+    expect(first({ ...valid, purchase_order_id: 'nope' })).toBe('Choose an approved purchase order from this supplier, or none.');
+  });
+  it('sends it to the database function only when the input has it', async () => {
+    const withOrder = fakeClient({ data: ID, error: null });
+    await saveBill(withOrder.ctx, { ...valid, purchase_order_id: PO });
+    expect(withOrder.calls[0].args!.bill).toMatchObject({ purchase_order_id: PO });
+    const without = fakeClient({ data: ID, error: null });
+    await saveBill(without.ctx, valid);
+    expect(without.calls[0].args!.bill).not.toHaveProperty('purchase_order_id');
+  });
+  it('turns FIN21 into the order sentence', async () => {
+    const { ctx } = fakeClient({ data: null, error: { code: 'FIN21' } });
+    expect(await saveBill(ctx, { ...valid, purchase_order_id: PO })).toEqual({
+      ok: false, error: 'Choose an approved purchase order from this supplier, or none.',
+    });
+  });
+});
+
 describe('saveBillInput quantity rounding', () => {
   it('refuses a quantity that rounds to 0 and rounds a half step up', () => {
     expect(first({ ...valid, lines: [{ ...line, quantity: 0.0004 }] })).toBe('Enter a quantity above 0.');
