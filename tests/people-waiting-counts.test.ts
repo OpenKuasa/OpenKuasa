@@ -4,6 +4,7 @@ import {
   ZERO_WAITING,
   parseWaitingCounts,
   readWaitingCounts,
+  readWaitingCountsStrict,
   shouldReadWaiting,
   waitingTotal,
 } from '@/lib/people/waiting-counts';
@@ -76,6 +77,26 @@ describe('readWaitingCounts', () => {
       throw new Error('network down');
     });
     expect(await readWaitingCounts({ client, orgId: 'o1' })).toEqual(ZERO_WAITING);
+  });
+});
+
+describe('readWaitingCountsStrict', () => {
+  it('returns the parsed reply', async () => {
+    const { client, rpc } = fakeClient(async () => ({ data: { leave: 1, time_off: 0, claims: 0, overtime: 2 }, error: null }));
+    expect(await readWaitingCountsStrict({ client, orgId: 'o1' })).toEqual({ leave: 1, time_off: 0, claims: 0, overtime: 2 });
+    expect(rpc).toHaveBeenCalledWith('hr_waiting_counts', { p_org: 'o1' });
+  });
+
+  it('throws on a database error instead of reading zeros', async () => {
+    const { client } = fakeClient(async () => ({ data: null, error: { code: '42883' } }));
+    await expect(readWaitingCountsStrict({ client, orgId: 'o1' })).rejects.toThrow('42883');
+  });
+
+  it('throws when the call itself fails', async () => {
+    const { client } = fakeClient(async () => {
+      throw new Error('network down');
+    });
+    await expect(readWaitingCountsStrict({ client, orgId: 'o1' })).rejects.toThrow('network down');
   });
 });
 

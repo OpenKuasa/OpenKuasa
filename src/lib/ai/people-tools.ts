@@ -185,7 +185,7 @@ import { rm } from '@/lib/reach/format';
 import { managerLabel, reportsOf, teamIds } from '@/lib/people/reporting';
 import { type PeopleTier } from '@/lib/people/tier';
 import { readTeamOvertime } from '@/lib/people/supabase';
-import { parseWaitingCounts, waitingTotal, type WaitingCounts } from '@/lib/people/waiting-counts';
+import { readWaitingCountsStrict, waitingTotal } from '@/lib/people/waiting-counts';
 import { ownRows } from '@/lib/people/own';
 
 export const PEOPLE_TOOL_NAMES = [
@@ -275,17 +275,7 @@ export function receiptFromMessages(messages: UIMessage[]): ReceiptFile | null {
   return bytes ? { bytes, mediaType: resolvedTypeOf(chosen) } : null;
 }
 
-/**
- * The waiting counts, read so that a failure is a failure. (`readWaitingCounts` turns one into zeros, which is right for
- * a navigation badge and wrong for an answer: "nothing is waiting" must never be what a broken read says.)
- */
-async function readWaitingCountsStrict(ctx: PeopleWriteContext): Promise<WaitingCounts> {
-  const { data, error } = await ctx.client.rpc('hr_waiting_counts', { p_org: ctx.orgId });
-  if (error) throw new Error(`hr_waiting_counts failed: ${error.code ?? 'no-code'}`);
-  return parseWaitingCounts(data);
-}
-
-const READ_ERROR ={ ok: false as const, error: 'Could not read HR data.' };
+const READ_ERROR = { ok: false as const, error: 'Could not read HR data.' };
 
 /** A lookup never throws at the model: a failed read is logged and reported plainly. */
 async function safe<T>(name: string, read: () => Promise<T>): Promise<T | typeof READ_ERROR> {

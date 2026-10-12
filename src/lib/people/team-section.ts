@@ -58,7 +58,8 @@ export function buildTeamSection(input: {
 /**
  * The card for the dashboard: the section, null for anyone but a manager, or 'unavailable' when its own reads
  * fail, so the rest of the dashboard still renders and the card never claims "Nobody is away" on a failed read.
- * `readWaiting` never throws (zeros on a failure).
+ * `readWaiting` must throw on a failure (pass `readWaitingCountsStrict`), never answer zeros: zeros read as
+ * "Nothing is waiting for you".
  */
 export async function loadTeamSection(
   data: Pick<PeopleData, 'listLeaveRequests'>,

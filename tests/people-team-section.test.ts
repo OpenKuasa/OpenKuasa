@@ -110,6 +110,13 @@ describe('loadTeamSection', () => {
     const data = { listLeaveRequests: async () => { throw new Error('boom'); } };
     expect(await loadTeamSection(data, { viewer: manager, employees, today: TODAY, readWaiting })).toBe('unavailable');
   });
+  it('is unavailable, not "nothing waiting", when the waiting-count read fails', async () => {
+    const data = { listLeaveRequests: async () => [] as LeaveRequest[] };
+    const failing = async (): Promise<typeof ZERO_WAITING> => {
+      throw new Error('hr_waiting_counts failed: 42883');
+    };
+    expect(await loadTeamSection(data, { viewer: manager, employees, today: TODAY, readWaiting: failing })).toBe('unavailable');
+  });
   it('is null for a member and reads nothing', async () => {
     const data = { listLeaveRequests: async () => { throw new Error('read'); } };
     expect(await loadTeamSection(data, { viewer: member, employees, today: TODAY, readWaiting })).toBeNull();

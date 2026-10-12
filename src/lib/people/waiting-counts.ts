@@ -31,6 +31,16 @@ export function shouldReadWaiting(input: { isDemo: boolean; orgId: string | null
 }
 
 /**
+ * The four counts, read so that a failure is a failure. (`readWaitingCounts` turns one into zeros, which is right for a
+ * navigation badge and wrong for a sentence: "nothing is waiting" must never be what a broken read says.)
+ */
+export async function readWaitingCountsStrict(ctx: { client: SupabaseClient; orgId: string }): Promise<WaitingCounts> {
+  const { data, error } = await ctx.client.rpc('hr_waiting_counts', { p_org: ctx.orgId });
+  if (error) throw new Error(`hr_waiting_counts failed: ${error.code ?? 'no-code'}`);
+  return parseWaitingCounts(data);
+}
+
+/**
  * The four counts in one database call. It runs on every Lekiu page load, so it never throws: any failure reads as
  * zeros, and a log line carries the database's code and nothing else.
  */
