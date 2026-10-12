@@ -521,12 +521,12 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
                   <TableHead>No.</TableHead>
                   <TableHead>Supplier</TableHead>
                   <TableHead>Order date</TableHead>
-                  <TableHead>Expected</TableHead>
+                  <TableHead className="hidden 2xl:table-cell">Expected</TableHead>
                   <TableHead className="text-right">Total</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Delivery</TableHead>
                   <TableHead className="text-right">Billed</TableHead>
-                  <TableHead>RFQ</TableHead>
+                  <TableHead className="hidden 2xl:table-cell">RFQ</TableHead>
                   {writer ? (
                     <TableHead className="w-10">
                       <span className="sr-only">Actions</span>
@@ -554,7 +554,7 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
                       <TableCell className="whitespace-nowrap font-medium">{r.po_no ?? 'Draft'}</TableCell>
                       <TableCell className="whitespace-nowrap">{r.supplier_name}</TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(r.po_date)}</TableCell>
-                      <TableCell className="whitespace-nowrap text-muted-foreground">
+                      <TableCell className="hidden whitespace-nowrap text-muted-foreground 2xl:table-cell">
                         {r.expected_date ? displayDate(r.expected_date) : '—'}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-right tabular-nums">{rm(r.total)}</TableCell>
@@ -596,7 +596,7 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
                           {rm(r.billed_total)}
                         </span>
                       </TableCell>
-                      <TableCell className="whitespace-nowrap text-muted-foreground">{r.rfq_no ?? '—'}</TableCell>
+                      <TableCell className="hidden whitespace-nowrap text-muted-foreground 2xl:table-cell">{r.rfq_no ?? '—'}</TableCell>
                       {writer ? (
                         <TableCell>
                           {items.length ? (
