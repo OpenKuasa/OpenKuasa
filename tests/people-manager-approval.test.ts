@@ -65,8 +65,17 @@ const manager = {
   viewer: { employeeId: MANAGER, isHr: false, isDemo: false, managesTeam: true },
   write: { ctx: { client: client as never, orgId: 'org1' }, tier: 'manager' as const, employeeId: MANAGER, receipt: null, userId: 'u1' },
 };
+const base = createSeedPeopleData(NOW);
+const ownerData = {
+  ...data,
+  // The two ids the owner tests name must be employees of the workspace, as the tool now checks.
+  listEmployees: async () => {
+    const people = await base.listEmployees();
+    return [...people, { ...people[0], id: EMP, name: 'Faiz Hakim', reports_to: null }, { ...people[1], id: BOSS, name: 'Farid Ismail', reports_to: null }];
+  },
+};
 const owner = {
-  data,
+  data: ownerData,
   viewer: { employeeId: null, isHr: true, isDemo: false },
   write: { ctx: { client: client as never, orgId: 'org1' }, tier: 'hr' as const, employeeId: null, receipt: null, userId: 'u1' },
 };
@@ -133,11 +142,21 @@ describe("a manager's decisions", () => {
     expect(ctl.answers).toEqual([{ ok: false, error: 'That request was not found.' }]);
   });
 
-  it('an overtime decision for a manager is saved with no amount to tell', async () => {
+  it('a manager\'s decision reply carries no figures at all, even if the database sent an amount', async () => {
     start('decideOvertime', { id: REQ, approve: true });
+    ctl.reply = { data: { id: 'r1', status: 'approved', amount_cents: 99999 }, error: null };
     const result = resume(manager);
     await result.consumeStream();
-    expect(ctl.answers[0]).toEqual({ ok: true, data: { id: 'r1', status: 'approved', amount_calculated: false, amount: null } });
+    expect(ctl.answers[0]).toEqual({ ok: true, data: { id: 'r1', status: 'approved' } });
+    // Nothing that reads like "no salary on file".
+    expect(JSON.stringify(ctl.answers)).not.toMatch(/amount|calculated|salary/i);
+  });
+
+  it('a manager\'s decision with no amount in the reply says nothing about one', async () => {
+    start('decideOvertime', { id: REQ, approve: false });
+    const result = resume(manager);
+    await result.consumeStream();
+    expect(ctl.answers[0]).toEqual({ ok: true, data: { id: 'r1', status: 'approved' } });
   });
 
   it('markClaimPaid is not in a manager\'s set: nothing runs, even if the model asks', async () => {
@@ -166,6 +185,17 @@ describe('setReportsTo for an owner', () => {
     const result = resume(owner);
     await result.consumeStream();
     expect((ctl.answers[0] as { error: string }).error).toMatch(/would make a loop/);
+  });
+
+  it('refuses a manager who is no employee here, and an employee reporting to themselves, before any call', async () => {
+    start('setReportsTo', { id: EMP, manager_id: '99999999-9999-4999-8999-999999999999' });
+    await resume(owner).consumeStream();
+    expect(ctl.calls).toEqual([]);
+    expect(ctl.answers[0]).toEqual({ ok: false, error: 'That manager was not found.' });
+    start('setReportsTo', { id: EMP, manager_id: EMP });
+    await resume(owner).consumeStream();
+    expect(ctl.calls).toEqual([]);
+    expect(ctl.answers[0]).toEqual({ ok: false, error: 'An employee cannot report to themselves.' });
   });
 
   it('is not a manager\'s tool', async () => {

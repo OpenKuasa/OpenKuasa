@@ -78,7 +78,7 @@ export type ApprovalRow = {
 export function pendingApprovals(
   leave: LeaveRequest[],
   claims: Claim[],
-  overtime: OvertimeRecord[],
+  overtime: Pick<OvertimeRecord, 'id' | 'status' | 'employee_name' | 'hours' | 'work_date' | 'created_at'>[],
   timeOff: TimeOffRequest[],
 ): ApprovalRow[] {
   const waiting = <T extends { status: string }>(rows: T[]) => rows.filter((r) => r.status === 'pending');
