@@ -92,6 +92,14 @@ describe('payableBills', () => {
     ]);
   });
 
+  it('carries the purchase order a bill is raised against, for the order notes', () => {
+    const payable = payableBills([bill(1, { purchase_order_id: 'po-1', purchase_order_no: 'PO-0003' }), bill(2)], []);
+    expect(payable.map((b) => [b.bill_no, b.purchase_order_id])).toEqual([
+      ['BILL-0001', 'po-1'],
+      ['BILL-0002', null],
+    ]);
+  });
+
   it('takes scheduled payments off what a bill can still take, and drops a bill they cover', () => {
     const payable = payableBills(
       [bill(1, { balance: 500 }), bill(2, { balance: 300 }), bill(3, { balance: 80.1 })],

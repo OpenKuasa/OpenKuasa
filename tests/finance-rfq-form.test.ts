@@ -88,9 +88,9 @@ describe('a copy of an RFQ, for another supplier', () => {
   it('keeps the notes and every line, and empties every price box, a price of 0 included', () => {
     const form = rfqFormCopiedFrom(priced, today);
     expect(form.notes).toBe('Deliver to the back door');
-    expect(form.lines.map(({ key: _key, ...rest }) => rest)).toEqual([
-      { product_id: PRODUCT, description: 'Printer paper', quantity: '5', uom: 'ream', pack_size: 'box of 5', unit_price: '', sst_rate: '6' },
-      { product_id: '', description: 'Sample', quantity: '1', uom: '', pack_size: '', unit_price: '', sst_rate: '0' },
+    expect(form.lines.map((line) => ({ ...line, key: undefined }))).toEqual([
+      { key: undefined, product_id: PRODUCT, description: 'Printer paper', quantity: '5', uom: 'ream', pack_size: 'box of 5', unit_price: '', sst_rate: '6' },
+      { key: undefined, product_id: '', description: 'Sample', quantity: '1', uom: '', pack_size: '', unit_price: '', sst_rate: '0' },
     ]);
   });
   it('gives the lines new keys, none of them the source line ids, and no two the same', () => {

@@ -122,6 +122,7 @@ describe('the payment-out form, as the shared card draws it', () => {
     bill_no: `BILL-000${n}`,
     supplier_id: LIM,
     supplier_name: 'Lim Hardware',
+    purchase_order_id: null,
     due_date: '2026-10-31',
     overdue: false,
     balance: 100,

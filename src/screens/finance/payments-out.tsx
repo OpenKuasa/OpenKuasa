@@ -9,6 +9,7 @@ import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { listBills } from '@/lib/finance/bills';
 import { type PaymentMethod, type PaymentOutRow, listAccounts, listPaymentsOut } from '@/lib/finance/money';
+import { listPurchaseOrders } from '@/lib/finance/purchase-orders';
 import { paymentsView, todayUtc } from '@/lib/finance/purchase-views';
 import { createClient } from '@/lib/supabase/server';
 
@@ -82,16 +83,28 @@ export default async function PaymentsOutScreen() {
   const ctx = { client: await createClient(), orgId: viewer.orgId };
   const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
   // The payment form offers open bills and accounts; a viewer has no form, so neither is read for them.
-  const [rows, bills, accounts] = await Promise.all([
+  // The purchase orders are read for the same people, to say when a bill being paid is over its order.
+  const [rows, bills, accounts, orders] = await Promise.all([
     listPaymentsOut(ctx),
     canEdit ? listBills(ctx) : [],
     canEdit ? listAccounts(ctx) : [],
+    canEdit ? listPurchaseOrders(ctx) : [],
   ]);
   return (
     <PaymentsView
       rows={rows}
       view={paymentsView(rows, todayUtc())}
-      writer={canEdit ? { actions: ACTIONS, bills, accounts } : undefined}
+      writer={
+        canEdit
+          ? {
+              actions: ACTIONS,
+              bills,
+              accounts,
+              // A closed order can still have unpaid bills; a draft, pending or cancelled one has none that matter.
+              orders: orders.filter((o) => o.status === 'approved' || o.status === 'closed'),
+            }
+          : undefined
+      }
     />
   );
 }

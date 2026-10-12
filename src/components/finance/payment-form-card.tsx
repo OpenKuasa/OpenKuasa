@@ -3,6 +3,7 @@
 import { AllocationFormCard, type RecordPayment } from '@/components/finance/allocation-form-card';
 import type { FinanceAccount } from '@/lib/finance/money';
 import { PAYMENT_OUT_KIND, type PayableBill } from '@/lib/finance/payment-form';
+import { type OrderBilling, orderNotesForBills } from '@/lib/finance/purchase-views';
 
 export type { RecordPayment } from '@/components/finance/allocation-form-card';
 
@@ -17,6 +18,7 @@ export function PaymentFormCard({
   accounts,
   today,
   preselect,
+  orders = [],
   record,
   onClose,
 }: {
@@ -27,6 +29,8 @@ export function PaymentFormCard({
   today: string;
   /** Opened from a bill row: that supplier chosen and that bill ticked. */
   preselect?: { supplierId: string; billId: string };
+  /** The purchase orders the bills may be raised against, to advise on the bills ticked. */
+  orders?: OrderBilling[];
   record: RecordPayment;
   onClose: () => void;
 }) {
@@ -37,6 +41,12 @@ export function PaymentFormCard({
       accounts={accounts}
       today={today}
       preselect={preselect ? { partyId: preselect.supplierId, documentId: preselect.billId } : undefined}
+      notes={(form) =>
+        orderNotesForBills(
+          payable.filter((b) => b.id in form.amounts),
+          orders,
+        )
+      }
       record={record}
       onClose={onClose}
     />

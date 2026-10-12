@@ -15,6 +15,8 @@ import {
   filterPayments,
   filterPurchaseOrders,
   filterRfqs,
+  orderNotesForBills,
+  paymentsAgainstFlaggedOrders,
   paymentsCsv,
   paymentsView,
   purchaseOrderActions,
@@ -696,5 +698,99 @@ describe('purchaseOrdersCsv', () => {
         ',2026-10-01,"Lim, Tan & Co",,,10,0,0,,Draft\r\n' +
         'PO-0009,2026-10-01,Syarikat Kertas,,,100,100,100,Delivered,Closed\r\n',
     );
+  });
+});
+
+describe('orderNotesForBills', () => {
+  const order = (o: Partial<Parameters<typeof orderNotesForBills>[1][number]> = {}) => ({
+    id: 'po-1',
+    po_no: 'PO-0003',
+    total: 1000,
+    billed_total: 400,
+    received_total: 400,
+    over_billed: false,
+    billed_over_received: false,
+    ...o,
+  });
+  const against = (bill_no: string | null, purchase_order_id: string | null = 'po-1') => ({ bill_no, purchase_order_id });
+
+  it('says nothing for a bill with no order', () => {
+    expect(orderNotesForBills([against('BILL-0001', null)], [order({ over_billed: true })])).toEqual([]);
+    expect(orderNotesForBills([], [order({ over_billed: true })])).toEqual([]);
+  });
+  it('says nothing for a bill whose order is fine', () => {
+    expect(orderNotesForBills([against('BILL-0001')], [order()])).toEqual([]);
+  });
+  it('says nothing for an order that is not in the list: closed or cancelled orders may not be passed', () => {
+    expect(orderNotesForBills([against('BILL-0001', 'po-gone')], [order({ over_billed: true })])).toEqual([]);
+    expect(orderNotesForBills([against('BILL-0001')], [])).toEqual([]);
+  });
+  it('says the bills come to more than the order total', () => {
+    expect(orderNotesForBills([against('BILL-0001')], [order({ over_billed: true, billed_total: 1250.5 })])).toEqual([
+      'BILL-0001 is against PO-0003, whose bills come to RM 1,250.50, over its total of RM 1,000.00.',
+    ]);
+  });
+  it('says the order is billed for more than has arrived', () => {
+    expect(orderNotesForBills([against('BILL-0001')], [order({ billed_over_received: true, billed_total: 800, received_total: 300 })])).toEqual([
+      'BILL-0001 is against PO-0003, which is billed RM 800.00 with RM 300.00 arrived so far.',
+    ]);
+  });
+  it('gives only the over-the-total sentence when both flags are set', () => {
+    const notes = orderNotesForBills([against('BILL-0001')], [order({ over_billed: true, billed_over_received: true, billed_total: 1100 })]);
+    expect(notes).toEqual(['BILL-0001 is against PO-0003, whose bills come to RM 1,100.00, over its total of RM 1,000.00.']);
+  });
+  it('calls a bill with no number a draft bill', () => {
+    expect(orderNotesForBills([against(null)], [order({ over_billed: true })])[0]).toMatch(/^A draft bill is against PO-0003,/);
+  });
+  it('names the first bill of an order and counts the others', () => {
+    const bills = [against('BILL-0001'), against('BILL-0002'), against(null)];
+    const notes = orderNotesForBills(bills, [order({ over_billed: true })]);
+    expect(notes).toEqual(['BILL-0001 and 2 more are against PO-0003, whose bills come to RM 400.00, over its total of RM 1,000.00.']);
+    expect(orderNotesForBills(bills.slice(0, 2), [order({ over_billed: true })])[0]).toMatch(/^BILL-0001 and 1 more are against/);
+  });
+  it('gives one sentence for each flagged order, in the order the bills come, and none for a fine one', () => {
+    const bills = [against('BILL-0001', 'po-2'), against('BILL-0002', 'po-1'), against('BILL-0003', 'po-3')];
+    const orders = [
+      order({ over_billed: true }),
+      order({ id: 'po-2', po_no: 'PO-0004', billed_over_received: true }),
+      order({ id: 'po-3', po_no: 'PO-0005' }),
+    ];
+    const notes = orderNotesForBills(bills, orders);
+    expect(notes).toHaveLength(2);
+    expect(notes[0]).toMatch(/^BILL-0001 is against PO-0004, which is billed/);
+    expect(notes[1]).toMatch(/^BILL-0002 is against PO-0003, whose bills/);
+  });
+});
+
+describe('paymentsAgainstFlaggedOrders', () => {
+  const orders = [
+    { id: 'po-1', po_no: 'PO-0003', total: 100, billed_total: 150, received_total: 100, over_billed: true, billed_over_received: false },
+    { id: 'po-2', po_no: 'PO-0004', total: 100, billed_total: 50, received_total: 50, over_billed: false, billed_over_received: false },
+  ];
+  const bills = [
+    bill({ id: 'b1', purchase_order_id: 'po-1' }),
+    bill({ id: 'b2', purchase_order_id: 'po-2' }),
+    bill({ id: 'b3' }),
+  ];
+  const row = (bill_id: string, status: PaymentOutRow['status'], transaction_id: string) =>
+    payment({ bill_id, status, transaction_id });
+
+  it('marks a payment still to be paid whose bill has a flagged order', () => {
+    const rows = [row('b1', 'scheduled', 't1'), row('b1', 'pending_approval', 't2')];
+    expect([...paymentsAgainstFlaggedOrders(rows, bills, orders)].sort()).toEqual(['t1', 't2']);
+  });
+  it('marks nothing that is paid or void', () => {
+    expect(paymentsAgainstFlaggedOrders([row('b1', 'posted', 't1'), row('b1', 'void', 't2')], bills, orders).size).toBe(0);
+  });
+  it('marks nothing for a bill with a fine order, no order or no bill in the list', () => {
+    const rows = [row('b2', 'scheduled', 't1'), row('b3', 'scheduled', 't2'), row('b9', 'scheduled', 't3')];
+    expect(paymentsAgainstFlaggedOrders(rows, bills, orders).size).toBe(0);
+  });
+  it('marks the whole payment when only one of its bills is flagged', () => {
+    const rows = [row('b2', 'scheduled', 't1'), row('b1', 'scheduled', 't1')];
+    expect([...paymentsAgainstFlaggedOrders(rows, bills, orders)]).toEqual(['t1']);
+  });
+  it('marks nothing without orders', () => {
+    expect(paymentsAgainstFlaggedOrders([row('b1', 'scheduled', 't1')], bills, []).size).toBe(0);
   });
 });

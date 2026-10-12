@@ -3,6 +3,7 @@
 import { type FormEvent, useId, useState } from 'react';
 import { Banknote } from 'lucide-react';
 import { BentoCard } from '@/components/bento/bento';
+import { OrderNotes } from '@/components/finance/order-notes';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,6 +30,7 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
   accounts,
   today,
   preselect,
+  notes,
   record,
   onClose,
 }: {
@@ -40,6 +42,8 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
   today: string;
   /** Opened from a document's row: that party chosen and that document ticked. */
   preselect?: { partyId: string; documentId: string };
+  /** Advice on the documents ticked, as sentences shown under them; never a refusal. Absent for no advice. */
+  notes?: (form: F) => string[];
   record: RecordPayment;
   onClose: () => void;
 }) {
@@ -163,6 +167,7 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
               })}
             </ul>
           )}
+          {notes ? <OrderNotes notes={notes(form)} /> : null}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm" aria-live="polite">
               Total <span className="font-semibold tabular-nums">{rm(kind.total(form))}</span>

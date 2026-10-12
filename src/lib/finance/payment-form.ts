@@ -36,6 +36,8 @@ export type PayableBill = {
   bill_no: string;
   supplier_id: string;
   supplier_name: string;
+  /** The purchase order the bill is raised against; null when it has none. */
+  purchase_order_id: string | null;
   due_date: string;
   overdue: boolean;
   /** Still owed after every paid payment. */
@@ -84,6 +86,7 @@ export function payableBills(bills: BillListRow[], payments: PaymentOutRow[]): P
         bill_no: b.bill_no ?? '—',
         supplier_id: b.supplier_id,
         supplier_name: b.supplier_name,
+        purchase_order_id: b.purchase_order_id,
         due_date: b.due_date,
         overdue: b.display_status === 'overdue',
         balance: b.balance,
