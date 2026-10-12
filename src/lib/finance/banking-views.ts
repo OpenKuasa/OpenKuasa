@@ -8,7 +8,7 @@
  */
 import type { BankAccountRow, BankTransactionKind, BankTransactionRow } from './banking';
 import { toCsv } from './csv';
-import { rm, rmShort } from './format';
+import { rm } from './format';
 import { PAYMENT_METHOD_LABELS } from './money';
 import { type Stat, count, displayDate, lastMonths, monthOf, round2, sum, thousands } from './view-helpers';
 
@@ -42,16 +42,29 @@ export function signedAmount(row: BankTransactionRow): number {
   return row.direction === 'in' ? row.amount : -row.amount;
 }
 
-/** A posted movement with the balance of its account once it had happened. */
-export type LedgerRow = BankTransactionRow & { balance: number };
+export type Reconciliation = 'Reconciled' | 'Unreconciled';
+
+/**
+ * A posted movement with the balance of its account once it had happened, and
+ * its reconciliation status: null (a dash) on a cash account and on a bank
+ * account that has never had a statement imported, which has nothing to match.
+ */
+export type LedgerRow = BankTransactionRow & { balance: number; reconciliation: Reconciliation | null };
+
+/** Plain code-unit comparison: `localeCompare` sorts `.` before `+`, which would swap two timestamps in one second. */
+const compare = (x: string, y: string): number => (x < y ? -1 : x > y ? 1 : 0);
 
 /** Oldest first: by date, then by when it was recorded, then by id, so two movements on one day keep one order. */
 function byTime(x: BankTransactionRow, y: BankTransactionRow): number {
-  return (
-    x.txn_date.localeCompare(y.txn_date) ||
-    x.created_at.localeCompare(y.created_at) ||
-    x.transaction_id.localeCompare(y.transaction_id)
-  );
+  return compare(x.txn_date, y.txn_date) || compare(x.created_at, y.created_at) || compare(x.transaction_id, y.transaction_id);
+}
+
+/** A bank account with a statement imported is one whose movements can be reconciled. */
+const hasStatement = (account: BankAccountRow | undefined): boolean => account?.kind === 'bank' && account.last_import_at !== null;
+
+/** What the account select calls an account: an archived one says so. */
+export function accountOptionLabel(account: BankAccountRow): string {
+  return account.active ? account.name : `${account.name} (archived)`;
 }
 
 /**
@@ -62,11 +75,13 @@ function byTime(x: BankTransactionRow, y: BankTransactionRow): number {
  */
 export function withRunningBalance(accounts: BankAccountRow[], rows: BankTransactionRow[]): LedgerRow[] {
   const running = new Map(accounts.map((a) => [a.id, a.opening_balance]));
+  const statements = new Set(accounts.filter(hasStatement).map((a) => a.id));
   const posted = rows.filter((r) => r.status === 'posted').sort(byTime);
-  const ledger = posted.map((row) => {
+  const ledger = posted.map((row): LedgerRow => {
     const balance = round2((running.get(row.account_id) ?? 0) + signedAmount(row));
     running.set(row.account_id, balance);
-    return { ...row, balance };
+    const reconciliation = row.account_kind === 'bank' && statements.has(row.account_id) ? (row.reconciled ? 'Reconciled' : 'Unreconciled') : null;
+    return { ...row, balance, reconciliation };
   });
   return ledger.reverse();
 }
@@ -89,10 +104,15 @@ export type BankingViewData = {
   trend: { label: string; balance: number }[];
   /** Whether there is a balance to draw: an opening balance or a posted movement. */
   hasTrend: boolean;
-  /** Posted movements on bank accounts dated this month: how many have a statement line matched to them. */
+  /**
+   * Posted movements this month on bank accounts that have had a statement imported: how many have a statement
+   * line matched to them. The label is empty while no bank account has had a statement imported.
+   */
   gauge: { percent: number; label: string; reconciled: number; total: number };
   /** Whether any bank account has a posted movement this month. */
   hasGauge: boolean;
+  /** What the gauge's card says when there is nothing to draw. */
+  gaugeEmpty: string;
 };
 
 function accountNote(account: BankAccountRow): string {
@@ -115,33 +135,37 @@ export function bankingView(accounts: BankAccountRow[], rows: BankTransactionRow
   });
 
   const month = lastMonths(today, 1)[0];
-  const atBank = posted.filter((r) => r.account_kind === 'bank' && monthOf(r.txn_date) === month.key);
+  const statements = new Set(accounts.filter(hasStatement).map((a) => a.id));
+  const atBank = posted.filter((r) => r.account_kind === 'bank' && statements.has(r.account_id) && monthOf(r.txn_date) === month.key);
   const reconciled = atBank.filter((r) => r.reconciled).length;
+  // Never 100 while something is unmatched, never 0 while something is matched.
+  const raw = atBank.length ? Math.round((reconciled / atBank.length) * 100) : 0;
+  const percent = reconciled === 0 || reconciled === atBank.length ? raw : Math.min(99, Math.max(1, raw));
 
   return {
     total: {
       label: 'Total cash',
-      value: rmShort(totalNow),
+      value: rm(totalNow),
       delta: toBePaid > 0 ? `${rm(toBePaid)} to be paid` : count(shown.length, 'account'),
       deltaTone: 'flat',
     },
-    tiles: shown.map((a) => ({ id: a.id, name: a.name, kind: a.kind, balance: rmShort(a.balance), note: accountNote(a) })),
+    tiles: shown.map((a) => ({ id: a.id, name: a.name, kind: a.kind, balance: rm(a.balance), note: accountNote(a) })),
     trend,
     hasTrend: posted.length > 0 || accounts.some((a) => a.opening_balance !== 0),
     gauge: {
-      percent: atBank.length ? Math.round((reconciled / atBank.length) * 100) : 0,
-      label: `${reconciled} of ${count(atBank.length, `${month.label} movement`)}`,
+      percent,
+      label: statements.size ? `${reconciled} of ${count(atBank.length, `${month.label} movement`)}` : '',
       reconciled,
       total: atBank.length,
     },
     hasGauge: atBank.length > 0,
+    gaugeEmpty: statements.size ? 'No bank movements this month to reconcile.' : 'No statement imported yet.',
   };
 }
 
-/** A cash account has no statement, so its movements have no reconciliation status: null. */
-export function reconcileLabel(row: BankTransactionRow): 'Reconciled' | 'Unreconciled' | null {
-  if (row.account_kind === 'cash') return null;
-  return row.reconciled ? 'Reconciled' : 'Unreconciled';
+/** A cash account, or a bank account with no statement imported, has nothing to match: null. */
+export function reconcileLabel(row: LedgerRow): Reconciliation | null {
+  return row.reconciliation;
 }
 
 export type BankFilter = 'all' | 'reconciled' | 'unreconciled';
@@ -164,7 +188,7 @@ export function filterLedger(rows: LedgerRow[], query: string, accountId: string
 /** The table as a CSV file, its columns in the table's order. Amounts are numbers, so a spreadsheet can add them up. */
 export function bankingCsv(rows: LedgerRow[]): string {
   return toCsv(
-    ['Date', 'No.', 'Description', 'Account', 'Method', 'Reference', 'Money In', 'Money Out', 'Balance', 'Status'],
+    ['Date', 'No.', 'Description', 'Account', 'Method', 'Reference', 'Money In', 'Money Out', 'Account balance', 'Status'],
     rows.map((r) => [
       r.txn_date,
       r.number,

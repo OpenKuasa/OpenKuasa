@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { BankAccountRow, BankTransactionRow } from '@/lib/finance/banking';
 import {
+  accountOptionLabel,
   bankDescription,
   bankingCsv,
   bankingView,
@@ -77,6 +78,13 @@ describe('bankDescription', () => {
   });
 });
 
+describe('accountOptionLabel', () => {
+  it('marks an archived account', () => {
+    expect(accountOptionLabel(account('savings'))).toBe('Savings');
+    expect(accountOptionLabel(account('savings', { active: false }))).toBe('Savings (archived)');
+  });
+});
+
 describe('withRunningBalance', () => {
   it('starts each account from its opening balance and adds posted movements in date order, newest first', () => {
     const accounts = [account('bank', { opening_balance: 1000 }), account('till', { opening_balance: 50 })];
@@ -101,6 +109,23 @@ describe('withRunningBalance', () => {
       ['b', 7],
       ['a', 11],
       ['z', 10],
+    ]);
+  });
+  it('orders two movements recorded in the same second by their fractions, not by how the text sorts', () => {
+    const rows = [
+      txn({ transaction_id: 'b', created_at: '2026-10-05T03:00:00.5+00:00', direction: 'out', amount: 4 }),
+      txn({ transaction_id: 'a', created_at: '2026-10-05T03:00:00+00:00', amount: 10 }),
+    ];
+    expect(withRunningBalance([account('bank')], rows).map((r) => [r.transaction_id, r.balance])).toEqual([
+      ['b', 6],
+      ['a', 10],
+    ]);
+  });
+  it('lets a balance go below nothing', () => {
+    const rows = [txn({ transaction_id: 'a', amount: 30 }), txn({ transaction_id: 'b', txn_date: '2026-10-06', direction: 'out', amount: 100 })];
+    expect(withRunningBalance([account('bank', { opening_balance: 20 })], rows).map((r) => [r.transaction_id, r.balance])).toEqual([
+      ['b', -50],
+      ['a', 50],
     ]);
   });
   it('leaves out everything that is not posted, and does not drift on sen', () => {
@@ -150,17 +175,17 @@ describe('bankingView', () => {
   const view = bankingView(accounts, rows, TODAY);
 
   it('adds every account up and says what is to be paid', () => {
-    expect(view.total).toEqual({ label: 'Total cash', value: 'RM 15.5k', delta: 'RM 960.00 to be paid', deltaTone: 'flat' });
+    expect(view.total).toEqual({ label: 'Total cash', value: 'RM 15,500.50', delta: 'RM 960.00 to be paid', deltaTone: 'flat' });
     expect(bankingView([account('bank', { balance: 10 })], [], TODAY).total.delta).toBe('1 account');
   });
   it('gives a tile to each active account, and to an archived one only while it holds money', () => {
     expect(view.tiles).toEqual([
-      { id: 'bank', name: 'Main Bank', kind: 'bank', balance: 'RM 12.0k', note: 'Last import 07 Oct 2026 · 2 to match' },
-      { id: 'savings', name: 'Savings', kind: 'bank', balance: 'RM 3,000', note: 'No statement yet' },
-      { id: 'till', name: 'Cash in hand', kind: 'cash', balance: 'RM 501', note: 'Cash account' },
+      { id: 'bank', name: 'Main Bank', kind: 'bank', balance: 'RM 12,000.00', note: 'Last import 07 Oct 2026 · 2 to match' },
+      { id: 'savings', name: 'Savings', kind: 'bank', balance: 'RM 3,000.00', note: 'No statement yet' },
+      { id: 'till', name: 'Cash in hand', kind: 'cash', balance: 'RM 500.50', note: 'Cash account' },
     ]);
     const kept = bankingView([account('old', { active: false, balance: 12, last_import_at: '2026-01-02T00:00:00Z' })], [], TODAY);
-    expect(kept.tiles).toEqual([{ id: 'old', name: 'Savings', kind: 'bank', balance: 'RM 12', note: 'Last import 02 Jan 2026' }]);
+    expect(kept.tiles).toEqual([{ id: 'old', name: 'Savings', kind: 'bank', balance: 'RM 12.00', note: 'Last import 02 Jan 2026' }]);
   });
   it('draws the total at the end of each of the last eight months by taking later movements back out', () => {
     expect(view.trend.map((m) => m.label)).toEqual(['Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct']);
@@ -179,29 +204,54 @@ describe('bankingView', () => {
     const none = bankingView(accounts, rows.filter((r) => r.account_kind === 'cash'), TODAY);
     expect(none.gauge).toEqual({ percent: 0, label: '0 of 0 Oct movements', reconciled: 0, total: 0 });
     expect(none.hasGauge).toBe(false);
+    expect(none.gaugeEmpty).toBe('No bank movements this month to reconcile.');
     expect(bankingView(accounts, [txn({ txn_date: '2026-10-01', reconciled: true })], TODAY).gauge.label).toBe('1 of 1 Oct movement');
+  });
+});
+
+describe('the reconciliation gauge', () => {
+  const bank = account('bank', { last_import_at: '2026-10-07T03:00:00Z' });
+  const month = (n: number, matched: number) =>
+    Array.from({ length: n }, (_, i) => txn({ txn_date: '2026-10-03', reconciled: i < matched }));
+  it('is never 100 while something is unmatched, and never 0 while something is matched', () => {
+    expect(bankingView([bank], month(200, 199), TODAY).gauge.percent).toBe(99);
+    expect(bankingView([bank], month(201, 1), TODAY).gauge.percent).toBe(1);
+    expect(bankingView([bank], month(5, 0), TODAY).gauge.percent).toBe(0);
+    expect(bankingView([bank], month(5, 5), TODAY).gauge.percent).toBe(100);
+    expect(bankingView([bank], month(3, 1), TODAY).gauge.percent).toBe(33);
+  });
+  it('leaves out an account that has never had a statement imported, and says so when none has', () => {
+    const never = account('savings');
+    const rows = [...month(2, 1), txn({ account_id: 'savings', account_name: 'Savings', txn_date: '2026-10-04' })];
+    expect(bankingView([bank, never], rows, TODAY).gauge).toEqual({ percent: 50, label: '1 of 2 Oct movements', reconciled: 1, total: 2 });
+    const noImport = bankingView([never, account('bank')], rows, TODAY);
+    expect(noImport.hasGauge).toBe(false);
+    expect(noImport.gauge.label).toBe('');
+    expect(noImport.gaugeEmpty).toBe('No statement imported yet.');
   });
 });
 
 describe('reconcileLabel and filterLedger', () => {
   const rows = withRunningBalance(
-    [account('bank'), account('till')],
+    [account('bank', { last_import_at: '2026-10-07T03:00:00Z' }), account('till'), account('savings')],
     [
       txn({ transaction_id: 'r', reconciled: true, number: 'RC-0007', reference: 'IBG 5521' }),
       txn({ transaction_id: 'u', party_name: 'Zaki Enterprise' }),
       txn({ transaction_id: 'c', account_id: 'till', account_name: 'Cash in hand', account_kind: 'cash', reconciled: true }),
+      txn({ transaction_id: 'n', account_id: 'savings', account_name: 'Savings', party_name: 'Never Imported' }),
     ],
   );
-  it('gives a cash movement no status', () => {
+  const ids = (found: { transaction_id: string }[]) => found.map((r) => r.transaction_id).sort();
+  it('gives a cash movement, and a movement on an account with no statement imported, no status', () => {
     expect(rows.map((r) => [r.transaction_id, reconcileLabel(r)]).sort()).toEqual([
       ['c', null],
+      ['n', null],
       ['r', 'Reconciled'],
       ['u', 'Unreconciled'],
     ]);
   });
   it('filters by account, by status and by text', () => {
-    const ids = (found: { transaction_id: string }[]) => found.map((r) => r.transaction_id).sort();
-    expect(ids(filterLedger(rows, ''))).toEqual(['c', 'r', 'u']);
+    expect(ids(filterLedger(rows, ''))).toEqual(['c', 'n', 'r', 'u']);
     expect(ids(filterLedger(rows, '', 'till'))).toEqual(['c']);
     expect(ids(filterLedger(rows, '', 'all', 'reconciled'))).toEqual(['r']);
     expect(ids(filterLedger(rows, '', 'all', 'unreconciled'))).toEqual(['u']);
@@ -211,16 +261,25 @@ describe('reconcileLabel and filterLedger', () => {
     expect(ids(filterLedger(rows, 'cash in hand'))).toEqual(['c']);
     expect(ids(filterLedger(rows, 'nothing like this'))).toEqual([]);
   });
+  it('lists a movement with no status under neither Reconciled nor Unreconciled', () => {
+    expect(ids(filterLedger(rows, '', 'savings', 'unreconciled'))).toEqual([]);
+    expect(ids(filterLedger(rows, '', 'till', 'reconciled'))).toEqual([]);
+  });
+  it('applies an account and a status together', () => {
+    expect(ids(filterLedger(rows, '', 'bank', 'unreconciled'))).toEqual(['u']);
+    expect(ids(filterLedger(rows, '', 'bank', 'reconciled'))).toEqual(['r']);
+    expect(ids(filterLedger(rows, 'zaki', 'bank', 'reconciled'))).toEqual([]);
+  });
 });
 
 describe('bankingCsv', () => {
   it('writes the table with amounts as numbers, in the column they belong to', () => {
     const ledger = withRunningBalance(
-      [account('bank', { opening_balance: 100 })],
+      [account('bank', { opening_balance: 100, last_import_at: '2026-10-07T03:00:00Z' })],
       [txn({ direction: 'out', amount: 25, number: 'PV-0003', kind: 'other', party_name: 'Maybank', documents: null, category_name: 'Bank charges' })],
     );
     expect(bankingCsv(ledger)).toBe(
-      `${CSV_BOM}Date,No.,Description,Account,Method,Reference,Money In,Money Out,Balance,Status\r\n` +
+      `${CSV_BOM}Date,No.,Description,Account,Method,Reference,Money In,Money Out,Account balance,Status\r\n` +
         '2026-10-05,PV-0003,Maybank · Bank charges,Main Bank,FPX,,,25,75,Unreconciled\r\n',
     );
   });
@@ -236,6 +295,11 @@ describe('the sample shown when there is no database', () => {
     for (const receipt of SAMPLE_CASH_RECEIPTS) {
       expect(SAMPLE_BANK_TRANSACTIONS.find((t) => t.transaction_id === receipt.transaction_id)).toMatchObject({
         direction: 'in', amount: receipt.amount, status: receipt.status,
+      });
+    }
+    for (const voucher of SAMPLE_PAYMENT_VOUCHERS) {
+      expect(SAMPLE_BANK_TRANSACTIONS.find((t) => t.transaction_id === voucher.transaction_id)).toMatchObject({
+        direction: 'out', amount: voucher.amount, status: voucher.status,
       });
     }
     expect(transfers.reduce((total, t) => total + signedAmount(t), 0)).toBe(0);
