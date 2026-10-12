@@ -327,6 +327,9 @@ begin
   values (other_org, 'L', 'Member A Elsewhere', ma) returning id into el;
   insert into public.hr_employees (org_id, employee_no, name, user_id, status)
   values (other_org, 'R', 'Member B Elsewhere', mb, 'inactive') returning id into er;
+  -- Linked by hand, as an owner or admin links them: a matching email links nobody (20261101134500_employee_account_link).
+  update public.hr_employees e set user_id = v.u
+  from (values (ead, admin_id), (ea, ma), (eb, mb), (ev, mv), (ei, mi), (e3, m3), (e4, m4), (e5, m5)) as v(e, u) where e.id = v.e;
   select count(*) into n from public.hr_employees
   where (id, user_id) in ((ead, admin_id), (ea, ma), (eb, mb), (ev, mv), (ei, mi), (e3, m3), (e4, m4), (e5, m5));
   if n <> 8 then fails := array_append(fails, format('%s of 8 members were linked to their employee records', n)); end if;

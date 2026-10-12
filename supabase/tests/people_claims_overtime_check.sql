@@ -231,6 +231,8 @@ begin
   -- Member A also belongs to the other workspace, with an employee record there.
   insert into public.hr_employees (org_id, employee_no, name, work_email)
   values (other_org, 'O', 'Member A Elsewhere', ma || '@pay-check.openkuasa-test.dev') returning id into eo;
+  -- Linked by hand, as an owner or admin links them: a matching email links nobody (20261101134500_employee_account_link).
+  update public.hr_employees e set user_id = v.u from (values (ea, ma), (eb, mb), (ev, mv), (eo, ma)) as v(e, u) where e.id = v.e;
   select count(*) into n from public.hr_employees where id = eo and user_id = ma;
   if n <> 1 then fails := array_append(fails, 'member A was not linked to their employee record in the other workspace'); end if;
   select count(*) into n from public.hr_employees where id in (ea, eb, ev) and user_id in (ma, mb, mv);

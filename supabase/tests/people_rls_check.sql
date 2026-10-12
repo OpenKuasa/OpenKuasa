@@ -189,19 +189,26 @@ begin
   insert into public.org_members (org_id, user_id, role)
   values (org, admin_id, 'admin'), (other_org, outsider, 'owner');
 
-  -- Link on joining: the employee exists first, then the member joins.
+  -- A work email that equals a sign-in email links nobody (20261101134500_employee_account_link):
+  -- an owner or admin makes the link. The employee exists first, then the member joins.
   insert into public.hr_employees (org_id, employee_no, name, work_email)
   values (org, 'E1', 'Member One', m1 || '@rls-check.openkuasa-test.dev') returning id into e1;
   insert into public.org_members (org_id, user_id, role) values (org, m1, 'member');
   select user_id into linked from public.hr_employees where id = e1;
-  if linked is distinct from m1 then fails := array_append(fails, 'joining did not link the employee'); end if;
+  if linked is not null then fails := array_append(fails, 'joining linked the employee whose work email matches'); end if;
+  update public.hr_employees set user_id = m1 where id = e1;
+  select user_id into linked from public.hr_employees where id = e1;
+  if linked is distinct from m1 then fails := array_append(fails, 'a member could not be linked to their employee record'); end if;
 
-  -- Link on adding: the member exists first, then the employee is added.
+  -- The member exists first, then the employee is added: not linked either, until someone links them.
   insert into public.org_members (org_id, user_id, role) values (org, m2, 'member');
   insert into public.hr_employees (org_id, employee_no, name, work_email)
   values (org, 'E2', 'Member Two', m2 || '@rls-check.openkuasa-test.dev') returning id into e2;
   select user_id into linked from public.hr_employees where id = e2;
-  if linked is distinct from m2 then fails := array_append(fails, 'adding an employee did not link the member'); end if;
+  if linked is not null then fails := array_append(fails, 'adding an employee linked the member whose sign-in email matches'); end if;
+  update public.hr_employees set user_id = m2 where id = e2;
+  select user_id into linked from public.hr_employees where id = e2;
+  if linked is distinct from m2 then fails := array_append(fails, 'a member could not be linked to the employee record added for them'); end if;
 
   -- A link to someone outside the workspace is refused.
   begin
