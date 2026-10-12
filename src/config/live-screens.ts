@@ -86,6 +86,7 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'finance/cash-receipts',
   'finance/payment-vouchers',
   'finance/expenses',
+  'finance/banking',
 ]);
 
 /** Whether the app path is a screen that is not connected to live data yet. */

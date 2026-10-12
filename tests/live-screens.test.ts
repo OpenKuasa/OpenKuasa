@@ -41,11 +41,11 @@ describe('live screens', () => {
     }
   });
 
-  it('counts Cash Receipts, Payment Vouchers and Expenses as live, and Banking and Receipts Inbox as sample', () => {
-    for (const slug of ['cash-receipts', 'payment-vouchers', 'expenses']) {
+  it('counts Cash Receipts, Payment Vouchers, Expenses and Banking as live, and Receipts Inbox as sample', () => {
+    for (const slug of ['cash-receipts', 'payment-vouchers', 'expenses', 'banking']) {
       expect(isSampleScreen(`/finance/${slug}`), slug).toBe(false);
     }
-    for (const slug of ['banking', 'receipts-inbox']) {
+    for (const slug of ['receipts-inbox']) {
       expect(isSampleScreen(`/finance/${slug}`), slug).toBe(true);
     }
   });

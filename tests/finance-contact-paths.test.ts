@@ -50,6 +50,7 @@ describe('a change to a contact', () => {
         '/finance/cash-receipts',
         '/finance/payment-vouchers',
         '/finance/expenses',
+        '/finance/banking',
       ]);
     }
   });

@@ -70,7 +70,10 @@ const actions = await import('@/app/(app)/finance/actions');
 
 const QUOTATIONS = ['/finance/quotations'];
 const QUOTATIONS_AND_INVOICES = ['/finance/quotations', '/finance/invoices'];
-const PURCHASES = ['/finance/supplier-bills', '/finance/payments-out', '/finance/customers-suppliers', '/finance/payment-vouchers'];
+const PURCHASES = [
+  '/finance/supplier-bills', '/finance/payments-out', '/finance/customers-suppliers', '/finance/payment-vouchers',
+  '/finance/banking',
+];
 const FORBIDDEN = { ok: false, error: 'You do not have permission to make changes here.' };
 const LOCKED =
   'That cannot be done to this quotation as it now stands. It may have been sent, accepted or declined since this page was loaded.';

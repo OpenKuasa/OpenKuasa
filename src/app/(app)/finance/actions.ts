@@ -173,6 +173,8 @@ const CONTACT_PATHS = [
   '/finance/cash-receipts',
   '/finance/payment-vouchers',
   '/finance/expenses',
+  // Banking names who paid or was paid on every movement.
+  '/finance/banking',
 ];
 const PRODUCT_PATHS = ['/finance/products'];
 // A bill or a payment changes what is owed, which Customers & Suppliers shows as Payable. A payment to a
@@ -182,6 +184,8 @@ const PURCHASE_PATHS = [
   '/finance/payments-out',
   '/finance/customers-suppliers',
   '/finance/payment-vouchers',
+  // Banking lists every movement of money and the balance of the account it left.
+  '/finance/banking',
 ];
 // An invoice or a payment in changes what customers owe, which Customers & Suppliers shows as Receivable.
 // It also shows on the three follow-on screens: Quotations names the invoice made from a quotation, Credit
@@ -195,6 +199,8 @@ const SALES_PATHS = [
   '/finance/refunds',
   // A payment in is a receipt: Cash Receipts lists every movement of money in.
   '/finance/cash-receipts',
+  // Banking lists every movement of money and the balance of the account it reached.
+  '/finance/banking',
 ];
 // A quotation is on its own screen and moves no figure anywhere else: it is not money owed, and no other
 // screen counts or names it. So saving, sending, answering and deleting one refresh Quotations only.
@@ -216,6 +222,8 @@ const CREDIT_PATHS = [
   '/finance/refunds',
   // A refund is a voucher: Payment Vouchers lists every movement of money out. (Payments Out still never shows one.)
   '/finance/payment-vouchers',
+  // A refund is money out of an account: Banking lists it.
+  '/finance/banking',
 ];
 // A draft credit note takes nothing off its invoice and nothing can be refunded against it: saving or
 // deleting one moves no figure and no menu anywhere but on Credit Notes.

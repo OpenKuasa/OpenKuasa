@@ -70,6 +70,7 @@ const CREDIT = [
   '/finance/credit-notes',
   '/finance/refunds',
   '/finance/payment-vouchers',
+  '/finance/banking',
 ];
 const FORBIDDEN = { ok: false, error: 'You do not have permission to make changes here.' };
 const NOTE_LOCKED =
