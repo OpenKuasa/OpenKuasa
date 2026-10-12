@@ -230,7 +230,8 @@ export function createSeedHireData(now: Date = new Date()): HireData {
       notes: null,
       status,
       created_at: iso(t - 6 * DAY),
-      // As the migration leaves the demo rows: never changed since they were made.
+      // The sample rows read as never changed since they were made. The demo workspace's own rows in the database
+      // differ: a reseed stamps them with the moment it ran, so nothing may assume a demo row was never changed.
       updated_at: iso(t - 6 * DAY),
       application_stage: application.stage,
       application_outcome: application.outcome,
