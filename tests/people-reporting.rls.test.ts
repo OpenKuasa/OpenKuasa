@@ -7,7 +7,10 @@
  * Then, as the manager: the report's rows in the five widened tables and none of the third's; overtime only through
  * `hr_team_overtime` (the table gives a manager their own rows only); none of the report's private records; a signed
  * link for the report's receipt and none for the third's; decisions, a second decision refused, the waiting counts,
- * the team, the refusals, and the notifications (none with an amount or a reason in them).
+ * the team, the refusals, and the notifications (none with an amount or a reason in them). Last: the manager decides
+ * overtime and is told no amount (the owner is told one), the manager's own request is refused, and `hr_team_overtime`
+ * called directly sends no pay keys to the manager and nothing to a member with no reports. The report's leave
+ * balance and attendance day are planted by the owner through the product's own functions and read by the manager.
  *
  * Workspaces and users come from tests/helpers/live-workspaces.ts, which also removes them. The one receipt file
  * the test uploads is removed by the service client before that cleanup.
@@ -16,8 +19,9 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { createEmployee, linkEmployeeToMember, setReportsTo } from '@/lib/people/capabilities';
 import { addDays, todayInMalaysia } from '@/lib/people/dates';
-import { LEAVE_REFUSALS, applyLeave, applyTimeOff, decideLeave } from '@/lib/people/leave';
-import { PAY_REFUSALS, decideClaim, submitClaim, submitOvertime } from '@/lib/people/pay-requests';
+import { correctAttendance } from '@/lib/people/attendance-writes';
+import { LEAVE_REFUSALS, applyLeave, applyTimeOff, decideLeave, setLeaveEntitlement } from '@/lib/people/leave';
+import { PAY_REFUSALS, decideClaim, decideOvertime, submitClaim, submitOvertime } from '@/lib/people/pay-requests';
 import { RECEIPT_BUCKET, receiptPath } from '@/lib/people/receipts';
 import { REPORTS_TO_REFUSALS } from '@/lib/people/reporting-refusals';
 import { readMyTeam } from '@/lib/people/my-team';
@@ -38,6 +42,10 @@ const MONDAY = '2026-03-02';
 const LEAVE_DAY = '2027-03-01';
 const TIME_OFF_DAY = '2027-03-08';
 const THIRD_LEAVE_DAY = '2027-03-15';
+// More Mondays: a second overtime day for the report, and a leave day and an overtime day for the manager's own requests.
+const SECOND_OVERTIME_DAY = '2026-03-09';
+const OWN_OVERTIME_DAY = '2026-03-16';
+const OWN_LEAVE_DAY = '2027-03-22';
 const LEAVE_REASON = 'Family trip to Ipoh';
 const CLAIM_DESCRIPTION = 'Taxi to the client';
 const OVERTIME_REASON = 'Month-end close';
@@ -149,6 +157,20 @@ testWithSupabase('the report and the third file their requests, with a real rece
   thirdLeaveId = thirdLeave.data.id;
 }, 60_000);
 
+testWithSupabase('the owner plants a leave balance and an attendance day for the report and for the third', async () => {
+  // The same functions the product uses: an owner sets an entitlement and records a past day.
+  for (const who of [report, third]) {
+    const entitlement = await setLeaveEntitlement(ctx(owner), {
+      employee_id: who.employeeId, leave_type: 'annual', year: Number(TODAY.slice(0, 4)), days: 12,
+    });
+    expect(entitlement.ok, JSON.stringify(entitlement)).toBe(true);
+    const day = await correctAttendance(ctx(owner), {
+      employee_id: who.employeeId, work_date: MONDAY, status: 'present', clock_in: '09:00', clock_out: '18:00',
+    });
+    expect(day.ok, JSON.stringify(day)).toBe(true);
+  }
+}, 60_000);
+
 testWithSupabase("the manager reads the report's rows in the five widened tables and none of the third's", async () => {
   const widened = ['hr_leave_requests', 'hr_leave_balances', 'hr_time_off_requests', 'hr_claims', 'hr_attendance_days'] as const;
   for (const table of widened) {
@@ -157,9 +179,23 @@ testWithSupabase("the manager reads the report's rows in the five widened tables
     const theirs = await manager.c.from(table).select('employee_id').eq('employee_id', third.employeeId);
     expect(theirs.error, table).toBeNull();
     expect(theirs.data, table).toEqual([]);
-    // The request tables hold the report's row; balances and attendance may be empty, but never the third's.
-    if (table !== 'hr_leave_balances' && table !== 'hr_attendance_days') expect(mine.data?.length, table).toBeGreaterThan(0);
+    // Every table holds a row of the report's (balances and attendance were planted above).
+    expect(mine.data?.length, table).toBeGreaterThan(0);
   }
+});
+
+testWithSupabase("the manager reads the report's leave balance and attendance day, with their values, and not the third's", async () => {
+  const balances = await manager.c.from('hr_leave_balances').select('employee_id,leave_type,entitled_days');
+  expect(balances.error, balances.error?.message).toBeNull();
+  const seenBalance = balances.data ?? [];
+  expect(seenBalance.some((b) => b.employee_id === report.employeeId && b.leave_type === 'annual' && Number(b.entitled_days) === 12)).toBe(true);
+  expect(seenBalance.some((b) => b.employee_id === third.employeeId)).toBe(false);
+
+  const days = await manager.c.from('hr_attendance_days').select('employee_id,work_date,status');
+  expect(days.error, days.error?.message).toBeNull();
+  const seenDays = days.data ?? [];
+  expect(seenDays.some((d) => d.employee_id === report.employeeId && d.work_date === MONDAY && d.status === 'present')).toBe(true);
+  expect(seenDays.some((d) => d.employee_id === third.employeeId)).toBe(false);
 });
 
 testWithSupabase("overtime: the table gives the manager their own rows only; the function gives the report's, with no pay", async () => {
@@ -255,4 +291,68 @@ testWithSupabase('notifications: one decision for the report per decision, one f
   // The third's requests are told to the report, not to the manager.
   expect(await mine(report, 'hr_request_filed')).toHaveLength(2);
   expect(overtimeId).toBeTruthy();
+});
+
+testWithSupabase("the manager decides the report's overtime and is told no amount; the owner's decision on another record carries one", async () => {
+  const byManager = await decideOvertime(ctx(manager), { id: overtimeId, approve: true });
+  expect(byManager).toEqual({ ok: true, data: { id: overtimeId, status: 'approved', amount_cents: null } });
+
+  // Another record of the report's, decided by the owner: the amount is a number.
+  const second = await submitOvertime(ctx(report), {
+    employee_id: report.employeeId, work_date: SECOND_OVERTIME_DAY, hours: 1, reason: OVERTIME_REASON,
+  });
+  expect(second.ok, JSON.stringify(second)).toBe(true);
+  if (!second.ok) return;
+  const byOwner = await decideOvertime(ctx(owner), { id: second.data.id, approve: true });
+  expect(byOwner.ok, JSON.stringify(byOwner)).toBe(true);
+  if (!byOwner.ok) return;
+  expect(byOwner.data).toMatchObject({ id: second.data.id, status: 'approved' });
+  expect(typeof byOwner.data.amount_cents).toBe('number');
+
+  // A second decision by the manager on the first record is told only that it is no longer waiting.
+  expect(await decideOvertime(ctx(manager), { id: overtimeId, approve: false })).toEqual({
+    ok: false,
+    error: PAY_REFUSALS.PAY_NOT_PENDING,
+  });
+}, 60_000);
+
+testWithSupabase("the manager's own request cannot be decided by the manager: it is refused as not allowed", async () => {
+  const leave = await applyLeave(ctx(manager), {
+    employee_id: manager.employeeId, leave_type: 'annual', start_date: OWN_LEAVE_DAY, end_date: OWN_LEAVE_DAY,
+  });
+  const overtime = await submitOvertime(ctx(manager), {
+    employee_id: manager.employeeId, work_date: OWN_OVERTIME_DAY, hours: 1, reason: OVERTIME_REASON,
+  });
+  expect(leave.ok, JSON.stringify(leave)).toBe(true);
+  expect(overtime.ok, JSON.stringify(overtime)).toBe(true);
+  if (!leave.ok || !overtime.ok) return;
+  expect(await decideLeave(ctx(manager), { id: leave.data.id, approve: true })).toEqual({
+    ok: false,
+    error: LEAVE_REFUSALS.LEAVE_NOT_ALLOWED,
+  });
+  expect(await decideOvertime(ctx(manager), { id: overtime.data.id, approve: true })).toEqual({
+    ok: false,
+    error: PAY_REFUSALS.PAY_NOT_ALLOWED,
+  });
+  // Still pending, and the manager reads their own overtime row from the table.
+  const own = await manager.c.from('hr_overtime_records').select('id,status').eq('id', overtime.data.id);
+  expect(own.error, own.error?.message).toBeNull();
+  expect(own.data).toEqual([{ id: overtime.data.id, status: 'pending' }]);
+}, 60_000);
+
+testWithSupabase('hr_team_overtime, called directly: rows without pay keys for the manager, nothing for a plain member', async () => {
+  const forManager = await manager.c.rpc('hr_team_overtime', { p_org: orgId });
+  expect(forManager.error, forManager.error?.message).toBeNull();
+  const rows = (forManager.data ?? []) as Record<string, unknown>[];
+  expect(rows.length).toBeGreaterThan(0);
+  expect(rows.map((r) => r.id)).toContain(overtimeId);
+  // The raw reply: the keys are checked on what the database sent, not on what the app's parser kept.
+  for (const row of rows) {
+    for (const key of ['amount_cents', 'hourly_rate_cents', 'payslip_id']) expect(Object.keys(row), key).not.toContain(key);
+    expect(row.employee_id).toBe(report.employeeId);
+  }
+  // The third reports to the report, not to the manager, and the third manages nobody.
+  const forMember = await third.c.rpc('hr_team_overtime', { p_org: orgId });
+  expect(forMember.error, forMember.error?.message).toBeNull();
+  expect(forMember.data).toEqual([]);
 });
