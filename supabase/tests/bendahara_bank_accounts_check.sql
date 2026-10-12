@@ -126,6 +126,15 @@ begin
      or has_table_privilege('service_role', 'public.finance_accounts', 'delete') then
     fails := array_append(fails, 'service_role can write finance_accounts: with no signed-in user it would pass the guard');
   end if;
+  -- Nothing at all, on either table: not even a select.
+  foreach t in array array['finance_accounts', 'finance_statement_imports'] loop
+    if has_table_privilege('service_role', 'public.' || t, 'select')
+       or has_table_privilege('service_role', 'public.' || t, 'insert')
+       or has_table_privilege('service_role', 'public.' || t, 'update')
+       or has_table_privilege('service_role', 'public.' || t, 'delete') then
+      fails := fails || format('service_role holds a privilege on %s', t);
+    end if;
+  end loop;
 
   -- ---- people and two workspaces -------------------------------------------
   insert into auth.users (id, instance_id, aud, role, email, encrypted_password,
@@ -291,7 +300,18 @@ begin
   perform set_config('request.jwt.claims', owner_claims, true);
   fails := fails || public.bendahara_bank_accounts_try('the owner adds an unused account with an opening balance', 'ok',
     format('insert into public.finance_accounts (org_id, name, kind, opening_balance) values (%L, ''Unused money'', ''cash'', 75)', org));
+  -- The same rules at their edges: an overdraft, a cash account, a cent, and a date on an account holding nothing.
+  fails := fails || public.bendahara_bank_accounts_try('the owner adds an unused overdrawn account', 'ok',
+    format('insert into public.finance_accounts (org_id, name, kind, opening_balance) values (%L, ''Unused debt'', ''cash'', -10)', org));
   perform set_config('request.jwt.claims', editor_claims, true);
+  fails := fails || public.bendahara_bank_accounts_try('an editor deletes an unused account holding -10', 'FIN14',
+    format('delete from public.finance_accounts where org_id = %L and name = ''Unused debt''', org));
+  fails := fails || public.bendahara_bank_accounts_try('an editor adds a cash account with an opening balance', 'FIN14',
+    format('insert into public.finance_accounts (org_id, name, kind, opening_balance) values (%L, ''Editor till'', ''cash'', 10)', org));
+  fails := fails || public.bendahara_bank_accounts_try('an editor changes an opening balance by 0.01', 'FIN14',
+    format('update public.finance_accounts set opening_balance = opening_balance + 0.01 where id = %L', opened));
+  fails := fails || public.bendahara_bank_accounts_try('an editor moves the opening date of an account holding nothing', 'FIN14',
+    format('update public.finance_accounts set opening_date = opening_date - 1 where id = %L', plain));
   fails := fails || public.bendahara_bank_accounts_try('an editor deletes an unused account with an opening balance', 'FIN14',
     format('delete from public.finance_accounts where org_id = %L and name = ''Unused money''', org));
   select count(*) into n from public.finance_accounts where org_id = org and name = 'Unused money';
