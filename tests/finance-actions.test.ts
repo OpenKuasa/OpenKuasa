@@ -69,6 +69,8 @@ const PATHS = [
   '/finance/supplier-bills', '/finance/payments-out', '/finance/customers-suppliers', '/finance/payment-vouchers',
   '/finance/banking',
 ];
+// A bill saved, posted, voided or deleted also changes the billed total of the purchase order it is raised against.
+const BILL_PATHS = [...PATHS, '/finance/purchase-orders'];
 const FORBIDDEN = { ok: false, error: 'You do not have permission to make changes here.' };
 
 const bill = {
@@ -128,7 +130,7 @@ describe('each write action', () => {
       ctl.revalidated = [];
       expect((await action(input)).ok, name).toBe(true);
       expect(ctl.calls.map((c) => [c.fn, c.orgId]), name).toEqual([[fn, 'org1']]);
-      expect(ctl.revalidated, name).toEqual(PATHS);
+      expect(ctl.revalidated, name).toEqual(name.includes('Bill') ? BILL_PATHS : PATHS);
     }
   });
 
@@ -156,7 +158,7 @@ describe('each write action', () => {
     // The bill was posted in another tab while this one still had its draft open.
     ctl.answers.saveBill = { ok: false, error: 'This bill is posted and can no longer be changed. Void it instead.' };
     expect(await actions.saveBillAction({ ...bill, id: BILL })).toEqual(ctl.answers.saveBill);
-    expect(ctl.revalidated).toEqual(PATHS);
+    expect(ctl.revalidated).toEqual(BILL_PATHS);
 
     ctl.revalidated = [];
     ctl.answers.voidPayment = { ok: false, error: 'That payment no longer exists.' };
@@ -170,14 +172,14 @@ describe('saveAndPostBillAction', () => {
     expect(await actions.saveAndPostBillAction(bill)).toEqual({ ok: true, data: { id: BILL, bill_no: 'BILL-0007' } });
     expect(ctl.calls.map((c) => c.fn)).toEqual(['saveBill', 'postBill']);
     expect(ctl.calls[1].input).toEqual({ id: BILL });
-    expect(ctl.revalidated).toEqual(PATHS);
+    expect(ctl.revalidated).toEqual(BILL_PATHS);
   });
 
   it('does not post when the save is refused', async () => {
     ctl.answers.saveBill = { ok: false, error: 'The supplier or a product on this bill no longer exists.' };
     expect(await actions.saveAndPostBillAction(bill)).toEqual(ctl.answers.saveBill);
     expect(ctl.calls.map((c) => c.fn)).toEqual(['saveBill']);
-    expect(ctl.revalidated).toEqual(PATHS);
+    expect(ctl.revalidated).toEqual(BILL_PATHS);
   });
 
   it('keeps the draft when the post is refused, and says which draft it is', async () => {
@@ -188,7 +190,7 @@ describe('saveAndPostBillAction', () => {
       draftId: BILL,
     });
     expect(ctl.calls.map((c) => c.fn)).toEqual(['saveBill', 'postBill']);
-    expect(ctl.revalidated).toEqual(PATHS);
+    expect(ctl.revalidated).toEqual(BILL_PATHS);
   });
 
   it('answers with the schema’s sentence and saves nothing when the form is refused', async () => {
@@ -210,7 +212,7 @@ describe('getBillAction', () => {
 
   it('says the bill is gone, and refreshes the list, when it was deleted meanwhile', async () => {
     expect(await actions.getBillAction({ id: BILL })).toEqual({ ok: false, error: 'That bill no longer exists.' });
-    expect(ctl.revalidated).toEqual(PATHS);
+    expect(ctl.revalidated).toEqual(BILL_PATHS);
   });
 
   it('says the bill is locked, and refreshes the list, when it was posted meanwhile', async () => {
@@ -219,7 +221,7 @@ describe('getBillAction', () => {
       ok: false,
       error: 'This bill is posted and can no longer be changed. Void it instead.',
     });
-    expect(ctl.revalidated).toEqual(PATHS);
+    expect(ctl.revalidated).toEqual(BILL_PATHS);
   });
 
   it('says the bill is gone for an id that is not an id, without reading', async () => {
@@ -275,6 +277,6 @@ describe('a member, who may write but not sign off', () => {
       draftId: BILL,
     });
     expect(ctl.calls.map((c) => c.fn)).toEqual(['saveBill']);
-    expect(ctl.revalidated).toEqual(PATHS);
+    expect(ctl.revalidated).toEqual(BILL_PATHS);
   });
 });

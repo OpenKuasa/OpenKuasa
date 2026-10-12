@@ -41,6 +41,7 @@ vi.mock('@/lib/finance/rfqs', async (orig) => {
     saveRfq: recorder('saveRfq', { id: '33333333-3333-4333-8333-333333333333' }),
     sendRfq: recorder('sendRfq', { id: '33333333-3333-4333-8333-333333333333', rfq_no: 'RFQ-0007' }),
     quoteRfq: recorder('quoteRfq', { id: '33333333-3333-4333-8333-333333333333' }),
+    convertRfq: recorder('convertRfq', { id: '33333333-3333-4333-8333-333333333333', purchase_order_id: '88888888-8888-4888-8888-888888888888' }),
     closeRfq: recorder('closeRfq', { id: '33333333-3333-4333-8333-333333333333' }),
     deleteRfq: recorder('deleteRfq', { id: '33333333-3333-4333-8333-333333333333' }),
     getRfq: async (ctx: { orgId: string }, id: string) => {
@@ -172,6 +173,34 @@ describe('each write action', () => {
     ctl.answers.saveRfq = { ok: false, error: LOCKED };
     expect(await actions.saveRfqAction({ ...rfq, id: RFQ })).toEqual(ctl.answers.saveRfq);
     expect(ctl.revalidated).toEqual(RFQS);
+  });
+});
+
+describe('convertRfqAction', () => {
+  it('makes the order in the viewer’s workspace and refreshes RFQs and Purchase Orders', async () => {
+    expect(await actions.convertRfqAction({ id: RFQ })).toEqual({
+      ok: true, data: { id: RFQ, purchase_order_id: '88888888-8888-4888-8888-888888888888' },
+    });
+    expect(ctl.calls).toEqual([{ fn: 'convertRfq', orgId: 'org1', input: { id: RFQ } }]);
+    expect(ctl.revalidated).toEqual(['/finance/rfqs', '/finance/purchase-orders']);
+  });
+  it('refuses a viewer and the demo workspace before parsing, and an id that is not an id with the RFQ sentence', async () => {
+    expect(await actions.convertRfqAction({ id: 'nope' })).toEqual(GONE);
+    expect(ctl.calls).toEqual([]);
+    for (const viewer of [
+      { userId: 'u1', orgId: 'org1', role: 'viewer', isDemo: false },
+      { userId: 'u1', orgId: 'org1', role: 'owner', isDemo: true },
+    ]) {
+      ctl.viewer = viewer;
+      expect(await actions.convertRfqAction({ id: RFQ })).toEqual(FORBIDDEN);
+      expect(await actions.convertRfqAction(null)).toEqual(FORBIDDEN);
+    }
+    expect(ctl.calls).toEqual([]);
+  });
+  it('refreshes both screens after a refusal too, so an RFQ that already has an order shows it', async () => {
+    ctl.answers.convertRfq = { ok: false, error: 'This RFQ already has a purchase order. Cancel that order first to make another.' };
+    expect(await actions.convertRfqAction({ id: RFQ })).toEqual(ctl.answers.convertRfq);
+    expect(ctl.revalidated).toEqual(['/finance/rfqs', '/finance/purchase-orders']);
   });
 });
 

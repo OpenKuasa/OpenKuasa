@@ -100,6 +100,7 @@ import {
   type RfqDetail,
   type SaveAndSendRfqResult,
   closeRfq,
+  convertRfq,
   deleteRfq,
   getRfq,
   quoteRfq,
@@ -109,6 +110,26 @@ import {
   saveRfqInput,
   sendRfq,
 } from '@/lib/finance/rfqs';
+import {
+  PURCHASE_ORDER_MESSAGES,
+  type PurchaseOrderDetail,
+  type SaveAndSubmitPurchaseOrderResult,
+  billFromPurchaseOrder,
+  billFromPurchaseOrderInput,
+  cancelPurchaseOrder,
+  closePurchaseOrder,
+  decidePurchaseOrder,
+  decidePurchaseOrderInput,
+  deletePurchaseOrder,
+  getPurchaseOrder,
+  purchaseOrderIdInput,
+  receivePurchaseOrder,
+  receivePurchaseOrderInput,
+  savePurchaseOrder,
+  savePurchaseOrderInput,
+  submitPurchaseOrder,
+  withdrawPurchaseOrder,
+} from '@/lib/finance/purchase-orders';
 import { deleteRefund, markRefundPaid, recordRefund, recordRefundInput, voidRefund } from '@/lib/finance/refunds';
 import {
   DRAFT_NEEDS_SIGN_OFF,
@@ -144,6 +165,8 @@ async function writeCtx(): Promise<FinanceWriteContext | null> {
 
 /** An action that posts, pays or voids: an owner or admin only. */
 const SIGN_OFF = { signOff: true } as const;
+/** Approving, rejecting or closing a purchase order: an owner or admin only, told so in the order's own words. */
+const PURCHASE_ORDER_SIGN_OFF = { signOff: true, signOffError: PURCHASE_ORDER_MESSAGES.needsSignOff } as const;
 
 function refresh(paths: string[]) {
   for (const path of paths) revalidatePath(path);
@@ -161,7 +184,7 @@ function firstMessage(error: { issues: { message: string }[] }): string {
  * message shows it as it now is.
  *
  * `needs.signOff` marks an action that posts, pays or voids. Someone who may write but not sign off is told
- * so before anything is read or written. `needs.paidNow` is for the two forms that either pay now or
+ * so before anything is read or written, in `needs.signOffError` when the action has its own sentence for it. `needs.paidNow` is for the two forms that either pay now or
  * schedule: it is asked of the parsed input, and only paying now needs the sign-off.
  */
 async function run<I, O>(
@@ -169,11 +192,11 @@ async function run<I, O>(
   schema: ZodType<I>,
   input: unknown,
   fn: (ctx: FinanceWriteContext, parsed: I) => Promise<FinResult<O>>,
-  needs: { signOff?: boolean; paidNow?: (parsed: I) => boolean } = {},
+  needs: { signOff?: boolean; signOffError?: string; paidNow?: (parsed: I) => boolean } = {},
 ): Promise<FinResult<O>> {
   const access = await writeAccess();
   if (!access) return FORBIDDEN;
-  if (needs.signOff && !access.signOff) return { ok: false, error: NEEDS_SIGN_OFF };
+  if (needs.signOff && !access.signOff) return { ok: false, error: needs.signOffError ?? NEEDS_SIGN_OFF };
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { ok: false, error: firstMessage(parsed.error) };
   if (needs.paidNow?.(parsed.data) && !access.signOff) return { ok: false, error: PAID_NOW_NEEDS_SIGN_OFF };
@@ -189,6 +212,8 @@ const CONTACT_PATHS = [
   '/finance/supplier-bills',
   '/finance/payments-out',
   '/finance/rfqs',
+  // A purchase order names its supplier.
+  '/finance/purchase-orders',
   '/finance/invoices',
   '/finance/payments-in',
   '/finance/quotations',
@@ -211,6 +236,9 @@ const PURCHASE_PATHS = [
   // Banking lists every movement of money and the balance of the account it left.
   '/finance/banking',
 ];
+// A bill saved, posted, voided or deleted changes the billed total of the purchase order it is raised against
+// (drafts count), so Purchase Orders refreshes with the purchase screens. A payment does not, so it keeps PURCHASE_PATHS.
+const BILL_PATHS = [...PURCHASE_PATHS, '/finance/purchase-orders'];
 // An invoice or a payment in changes what customers owe, which Customers & Suppliers shows as Receivable.
 // It also shows on the three follow-on screens: Quotations names the invoice made from a quotation, Credit
 // Notes names each note's invoice, and Refunds adds up what customers are in credit from the invoices.
@@ -231,6 +259,14 @@ const SALES_PATHS = [
 const QUOTATION_PATHS = ['/finance/quotations'];
 // An RFQ is likewise on its own screen: it is a request, not money owed, and no other screen counts or names it.
 const RFQ_PATHS = ['/finance/rfqs'];
+// A purchase order is on its own screen; its billed total moves when a bill does (BILL_PATHS), and its RFQ column
+// comes from the RFQ. Nothing else counts or names an order, so its own writes refresh Purchase Orders only.
+const PURCHASE_ORDER_PATHS = ['/finance/purchase-orders'];
+// Making a purchase order from an RFQ adds a draft to Purchase Orders and puts that order in the RFQ's column.
+const CONVERT_RFQ_PATHS = ['/finance/rfqs', '/finance/purchase-orders'];
+// Raising a bill from an order adds a draft to Supplier Bills and moves the order's billed total. A draft bill is
+// not payable, so nothing else moves.
+const ORDER_BILL_PATHS = ['/finance/purchase-orders', '/finance/supplier-bills'];
 // Making an invoice from a quotation adds a draft to Invoices (its table and its "by status" chart) and puts
 // that invoice in the quotation's Invoice column. A draft is not receivable, so nothing else moves.
 const CONVERT_PATHS = ['/finance/quotations', '/finance/invoices'];
@@ -292,17 +328,19 @@ async function saveThenPost<I, O>(
 }
 
 /**
- * One draft with its lines, for an Edit form. A read, but only people who may
- * edit have a use for it. A document that has gone, or been posted since the
- * list was loaded, answers with that sentence and refreshes the list.
+ * One document with its lines, for a form that works on it in one status: a draft for an Edit form, a sent RFQ
+ * for "Record prices", an approved purchase order for "Record delivery". A read, but only people who may edit
+ * have a use for it. A document that has gone, or left that status since the list was loaded, answers with that
+ * sentence and refreshes the list.
  */
-async function draftForEditing<D extends { display_status?: string; status?: string }>(
+async function documentInStatus<D extends { display_status?: string; status?: string }>(
   paths: string[],
   schema: ZodType<{ id: string }>,
   input: unknown,
   get: (ctx: FinanceWriteContext, id: string) => Promise<D | null>,
   messages: { gone: string; locked: string },
-  label: 'bill' | 'invoice' | 'quotation' | 'RFQ',
+  label: 'bill' | 'invoice' | 'quotation' | 'RFQ' | 'purchase order',
+  wanted: string,
 ): Promise<FinResult<D>> {
   const ctx = await writeCtx();
   if (!ctx) return FORBIDDEN;
@@ -310,14 +348,26 @@ async function draftForEditing<D extends { display_status?: string; status?: str
   if (!parsed.success) return { ok: false, error: messages.gone };
   try {
     const document = await get(ctx, parsed.data.id);
-    // A bill, an invoice or a quotation has a display status; an RFQ has only its stored one, and a draft is a draft in both.
-    if (document && (document.display_status ?? document.status) === 'draft') return { ok: true, data: document };
+    // A bill, an invoice or a quotation has a display status; an RFQ or an order has only its stored one, and a draft is a draft in both.
+    if (document && (document.display_status ?? document.status) === wanted) return { ok: true, data: document };
     refresh(paths);
     return { ok: false, error: document ? messages.locked : messages.gone };
   } catch (error) {
-    console.error(`[finance] a draft ${label} could not be read:`, error);
+    console.error(`[finance] a ${wanted} ${label} could not be read:`, error);
     return { ok: false, error: READ_FAILED };
   }
+}
+
+/** One draft with its lines, for an Edit form; see `documentInStatus`. */
+function draftForEditing<D extends { display_status?: string; status?: string }>(
+  paths: string[],
+  schema: ZodType<{ id: string }>,
+  input: unknown,
+  get: (ctx: FinanceWriteContext, id: string) => Promise<D | null>,
+  messages: { gone: string; locked: string },
+  label: 'bill' | 'invoice' | 'quotation' | 'RFQ' | 'purchase order',
+): Promise<FinResult<D>> {
+  return documentInStatus(paths, schema, input, get, messages, label, 'draft');
 }
 
 export async function createContactAction(input: unknown) {
@@ -349,16 +399,16 @@ export async function deleteProductAction(input: unknown) {
 /* ---- supplier bills ---------------------------------------------------- */
 
 export async function saveBillAction(input: unknown) {
-  return run(PURCHASE_PATHS, saveBillInput, input, saveBill);
+  return run(BILL_PATHS, saveBillInput, input, saveBill);
 }
 export async function postBillAction(input: unknown) {
-  return run(PURCHASE_PATHS, billIdInput, input, postBill, SIGN_OFF);
+  return run(BILL_PATHS, billIdInput, input, postBill, SIGN_OFF);
 }
 export async function voidBillAction(input: unknown) {
-  return run(PURCHASE_PATHS, billIdInput, input, voidBill, SIGN_OFF);
+  return run(BILL_PATHS, billIdInput, input, voidBill, SIGN_OFF);
 }
 export async function deleteBillAction(input: unknown) {
-  return run(PURCHASE_PATHS, billIdInput, input, deleteBill);
+  return run(BILL_PATHS, billIdInput, input, deleteBill);
 }
 
 /**
@@ -367,7 +417,7 @@ export async function deleteBillAction(input: unknown) {
  * draft's id, so the form goes on editing that draft.
  */
 export async function saveAndPostBillAction(input: unknown): Promise<SaveAndPostResult> {
-  return saveThenPost(PURCHASE_PATHS, saveBillInput, input, saveBill, postBill, true);
+  return saveThenPost(BILL_PATHS, saveBillInput, input, saveBill, postBill, true);
 }
 
 /**
@@ -376,7 +426,7 @@ export async function saveAndPostBillAction(input: unknown): Promise<SaveAndPost
  * the list was loaded, answers with that sentence and refreshes the list.
  */
 export async function getBillAction(input: unknown): Promise<FinResult<BillDetail>> {
-  return draftForEditing(PURCHASE_PATHS, billIdInput, input, getBill, BILL_MESSAGES, 'bill');
+  return draftForEditing(BILL_PATHS, billIdInput, input, getBill, BILL_MESSAGES, 'bill');
 }
 
 /* ---- payments out ------------------------------------------------------ */
@@ -493,19 +543,68 @@ export async function getRfqAction(input: unknown): Promise<FinResult<RfqDetail>
  * other end of the life of an RFQ, the one awaiting the supplier's answer.
  */
 export async function getSentRfqAction(input: unknown): Promise<FinResult<RfqDetail>> {
-  const ctx = await writeCtx();
-  if (!ctx) return FORBIDDEN;
-  const parsed = rfqIdInput.safeParse(input);
-  if (!parsed.success) return { ok: false, error: RFQ_MESSAGES.gone };
-  try {
-    const rfq = await getRfq(ctx, parsed.data.id);
-    if (rfq?.status === 'sent') return { ok: true, data: rfq };
-    refresh(RFQ_PATHS);
-    return { ok: false, error: rfq ? RFQ_MESSAGES.locked : RFQ_MESSAGES.gone };
-  } catch (error) {
-    console.error('[finance] a sent RFQ could not be read:', error);
-    return { ok: false, error: READ_FAILED };
-  }
+  return documentInStatus(RFQ_PATHS, rfqIdInput, input, getRfq, RFQ_MESSAGES, 'RFQ', 'sent');
+}
+
+/** Makes a draft purchase order from a quoted RFQ, and refreshes Purchase Orders as well. */
+export async function convertRfqAction(input: unknown) {
+  return run(CONVERT_RFQ_PATHS, rfqIdInput, input, convertRfq);
+}
+
+/* ---- purchase orders --------------------------------------------------- */
+
+export async function savePurchaseOrderAction(input: unknown) {
+  return run(PURCHASE_ORDER_PATHS, savePurchaseOrderInput, input, savePurchaseOrder);
+}
+/** Sends a draft for approval: it gets its number the first time, and is locked. */
+export async function submitPurchaseOrderAction(input: unknown) {
+  return run(PURCHASE_ORDER_PATHS, purchaseOrderIdInput, input, submitPurchaseOrder);
+}
+/**
+ * Approves an order, or rejects it back to draft with a reason: an owner or admin only. The database also refuses
+ * an approval by the person who raised or submitted the order, unless they own the workspace.
+ */
+export async function decidePurchaseOrderAction(input: unknown) {
+  return run(PURCHASE_ORDER_PATHS, decidePurchaseOrderInput, input, decidePurchaseOrder, PURCHASE_ORDER_SIGN_OFF);
+}
+/** Takes an order back from approval. The raiser may; so may an owner or admin, which the database decides. */
+export async function withdrawPurchaseOrderAction(input: unknown) {
+  return run(PURCHASE_ORDER_PATHS, purchaseOrderIdInput, input, withdrawPurchaseOrder);
+}
+/** What has arrived on an approved order. */
+export async function receivePurchaseOrderAction(input: unknown) {
+  return run(PURCHASE_ORDER_PATHS, receivePurchaseOrderInput, input, receivePurchaseOrder);
+}
+/** No more deliveries or bills are expected: an owner or admin only. */
+export async function closePurchaseOrderAction(input: unknown) {
+  return run(PURCHASE_ORDER_PATHS, purchaseOrderIdInput, input, closePurchaseOrder, PURCHASE_ORDER_SIGN_OFF);
+}
+export async function cancelPurchaseOrderAction(input: unknown) {
+  return run(PURCHASE_ORDER_PATHS, purchaseOrderIdInput, input, cancelPurchaseOrder);
+}
+export async function deletePurchaseOrderAction(input: unknown) {
+  return run(PURCHASE_ORDER_PATHS, purchaseOrderIdInput, input, deletePurchaseOrder);
+}
+/** Raises a draft bill from an approved order, and refreshes Supplier Bills as well. */
+export async function billFromPurchaseOrderAction(input: unknown) {
+  return run(ORDER_BILL_PATHS, billFromPurchaseOrderInput, input, billFromPurchaseOrder);
+}
+
+/** Saves the order as a draft, then submits it for approval; see `saveThenPost`. */
+export async function saveAndSubmitPurchaseOrderAction(input: unknown): Promise<SaveAndSubmitPurchaseOrderResult> {
+  return saveThenPost(PURCHASE_ORDER_PATHS, savePurchaseOrderInput, input, savePurchaseOrder, submitPurchaseOrder);
+}
+
+/** One draft purchase order with its lines, for the Edit form; see `documentInStatus`. */
+export async function getPurchaseOrderAction(input: unknown): Promise<FinResult<PurchaseOrderDetail>> {
+  return draftForEditing(PURCHASE_ORDER_PATHS, purchaseOrderIdInput, input, getPurchaseOrder, PURCHASE_ORDER_MESSAGES, 'purchase order');
+}
+
+/** One approved purchase order with its lines, for the "Record delivery" card; see `documentInStatus`. */
+export async function getApprovedPurchaseOrderAction(input: unknown): Promise<FinResult<PurchaseOrderDetail>> {
+  return documentInStatus(
+    PURCHASE_ORDER_PATHS, purchaseOrderIdInput, input, getPurchaseOrder, PURCHASE_ORDER_MESSAGES, 'purchase order', 'approved',
+  );
 }
 
 /* ---- credit notes ------------------------------------------------------ */

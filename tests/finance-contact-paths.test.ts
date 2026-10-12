@@ -42,6 +42,8 @@ describe('a change to a contact', () => {
         '/finance/supplier-bills',
         '/finance/payments-out',
         '/finance/rfqs',
+        // A purchase order names its supplier.
+        '/finance/purchase-orders',
         '/finance/invoices',
         '/finance/payments-in',
         '/finance/quotations',
