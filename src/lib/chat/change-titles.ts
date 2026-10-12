@@ -2194,6 +2194,28 @@ export function approvalDetail(
   if (toolName === 'deleteJob') {
     return 'A job that has applications cannot be deleted: close it instead. This cannot be undone.';
   }
+  if (toolName === 'recordPaymentIn' || toolName === 'recordPaymentOut') {
+    const allocations = Array.isArray(i.allocations) ? (i.allocations as { amount?: unknown }[]) : [];
+    const total = allocations.reduce((n, a) => n + (typeof a?.amount === 'number' ? a.amount : 0), 0);
+    const noun = toolName === 'recordPaymentIn' ? 'invoice' : 'bill';
+    const ref = text(i.reference);
+    const parts = [
+      total > 0 ? `Amount: ${ringgitFixed(total)}` : null,
+      allocations.length > 0 ? `${allocations.length} ${noun}${allocations.length === 1 ? '' : 's'}` : null,
+      ref && `Reference: “${ref}”`,
+    ].filter(Boolean);
+    return parts.length > 0 ? parts.join(' · ') : null;
+  }
+  if (toolName === 'recordRefund') {
+    const amount = typeof i.amount === 'number' ? ringgitFixed(i.amount) : null;
+    const ref = text(i.reference);
+    const parts = [amount && `Amount: ${amount}`, ref && `Reference: “${ref}”`].filter(Boolean);
+    return parts.length > 0 ? parts.join(' · ') : null;
+  }
+  if (toolName === 'markPaymentPaid' || toolName === 'markRefundPaid') {
+    const paid = dateText(i.paid_on);
+    return paid ? `Paid on ${paid}` : null;
+  }
   if (toolName === 'postInvoice') return 'Posting gives the invoice a number and locks it; record its e-Invois status afterwards for LHDN.';
   if (toolName === 'postBill') return 'Posting locks the bill so it can no longer be edited.';
   if (toolName === 'setEInvoice') return 'This records the e-Invois (MyInvois) status submitted to LHDN.';

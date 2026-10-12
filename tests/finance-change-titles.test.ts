@@ -28,6 +28,13 @@ describe('finance approve-card titles', () => {
     expect(approvalDetail('deleteBill', { id: 'b1' })).toBe('This cannot be undone.');
     expect(approvalDetail('deleteFinanceItem', { id: 'p1' })).toBe('This cannot be undone.');
   });
+
+  it('shows the amount on a money-movement card so the owner does not approve blind', () => {
+    expect(approvalDetail('recordPaymentIn', { allocations: [{ invoice_id: 'i1', amount: 1200.5 }], reference: 'TT123' })).toContain('RM 1,200.50');
+    expect(approvalDetail('recordPaymentOut', { allocations: [{ bill_id: 'b1', amount: 300 }, { bill_id: 'b2', amount: 200 }] })).toContain('RM 500.00');
+    expect(approvalDetail('recordRefund', { amount: 75.9 })).toContain('RM 75.90');
+    expect(approvalDetail('markPaymentPaid', { id: 'p1', paid_on: '2026-10-12' })).toContain('12 Oct 2026');
+  });
 });
 
 describe('finance name resolution', () => {
