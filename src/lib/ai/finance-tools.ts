@@ -162,7 +162,7 @@ export function createBendaharaTools(access: FinanceAccess) {
     getFinanceOverview: tool({
       description:
         'A money snapshot for the owner: total receivables (money owed to the business) and payables ' +
-        '(money it owes), how many of each are overdue, and the bank and cash accounts. Amounts in sen.',
+        '(money it owes), how many of each are overdue, and the bank and cash accounts. Amounts in ringgit.',
       inputSchema: z.object({}),
       execute: async () => {
         const [receivable, payable, accounts] = await Promise.all([
@@ -170,12 +170,14 @@ export function createBendaharaTools(access: FinanceAccess) {
           listBillBalances(ctx),
           listAccounts(ctx),
         ]);
-        const sum = (rows: { balance: number }[]) => rows.reduce((n, r) => n + r.balance, 0);
+        // Balances are numeric(14,2) ringgit; round the float sum to 2dp (as the finance views do).
+        const total = (rows: { balance: number }[]) =>
+          Math.round(rows.reduce((n, r) => n + r.balance, 0) * 100) / 100;
         const overdue = (rows: { display_status: string }[]) =>
           rows.filter((r) => r.display_status === 'overdue').length;
         return {
-          receivables: { total_sen: sum(receivable), overdue_count: overdue(receivable) },
-          payables: { total_sen: sum(payable), overdue_count: overdue(payable) },
+          receivables: { total: total(receivable), overdue_count: overdue(receivable) },
+          payables: { total: total(payable), overdue_count: overdue(payable) },
           accounts: accounts.map((a) => ({ id: a.id, name: a.name, kind: a.kind })),
         };
       },

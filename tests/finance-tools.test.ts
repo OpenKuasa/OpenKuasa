@@ -15,6 +15,26 @@ vi.mock('@/lib/finance/invoices', async (importOriginal) => {
   };
 });
 
+// getFinanceOverview sums balances; keep real schemas, override the balance reads.
+vi.mock('@/lib/finance/contacts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/finance/contacts')>();
+  return {
+    ...actual,
+    listInvoiceBalances: async () => [
+      { customer_id: 'c1', balance: 16900.1, display_status: 'overdue' },
+      { customer_id: 'c2', balance: 0.399999, display_status: 'open' },
+    ],
+    listBillBalances: async () => [{ supplier_id: 's1', balance: 9300, display_status: 'open' }],
+  };
+});
+vi.mock('@/lib/finance/money', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/finance/money')>();
+  return {
+    ...actual,
+    listAccounts: async () => [{ id: 'a1', name: 'Maybank', kind: 'bank', bank_name: 'Maybank Berhad' }],
+  };
+});
+
 const { createBendaharaTools, FINANCE_WRITE_TOOL_NAMES } = await import('@/lib/ai/finance-tools');
 
 const viewer = () => ({ client: {} as never, orgId: 'org1', canWrite: false });
@@ -59,6 +79,23 @@ describe('Bendahara read tools', () => {
   it('runs lookups with the caller ctx (org never from the model)', async () => {
     const tools = createBendaharaTools(viewer());
     expect(await exec(tools.listInvoices, {})).toEqual({ echoedOrg: 'org1' });
+  });
+
+  it('getFinanceOverview reports ringgit totals, rounded to 2dp, not sen', async () => {
+    const tools = createBendaharaTools(viewer());
+    const out = (await exec(tools.getFinanceOverview, {})) as {
+      receivables: { total: number; overdue_count: number };
+      payables: { total: number; overdue_count: number };
+      accounts: unknown[];
+    };
+    // 16900.1 + 0.399999 = 16900.499999… → rounded, and named `total` (ringgit), never `total_sen`.
+    expect(out.receivables).toEqual({ total: 16900.5, overdue_count: 1 });
+    expect(out.payables).toEqual({ total: 9300, overdue_count: 0 });
+    expect(out).not.toHaveProperty('receivables.total_sen');
+    expect(out.accounts).toEqual([{ id: 'a1', name: 'Maybank', kind: 'bank' }]);
+    // The description must not claim sen.
+    expect(String(tools.getFinanceOverview.description).toLowerCase()).not.toContain('sen');
+    expect(String(tools.getFinanceOverview.description).toLowerCase()).toContain('ringgit');
   });
 });
 

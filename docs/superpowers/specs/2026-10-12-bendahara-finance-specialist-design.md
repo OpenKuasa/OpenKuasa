@@ -16,7 +16,7 @@
 - Supabase project `ugchntdgaeefmufumchx` via `openkuasa-supabase` MCP only. No new migrations in this slice (the finance schema already exists).
 - Agent/chat tests must mock the model via `@/lib/ai/provider` (as the other `*-chat-route`/`tuah-*` tests do); CI never spends money.
 - Branch→PR→squash-merge as `OpenKuasa`; PR title = branch name; never commit to main; never `git add -A`; `pnpm` only; full suite = `pnpm test`.
-- Money is stored in **sen** (`src/lib/finance/money.ts`); replies show **RM** to 2 decimals.
+- Money is **ringgit decimals** (`numeric(14,2)`, unit prices `numeric(14,4)`) — plain numbers where `1250.5` means RM 1,250.50 (NOT sen; the people/agent `_cents` columns are unrelated). Replies show **RM** to 2 decimals; tools never multiply/divide/convert a figure.
 - Finance tool names must not clash with the reach/crm/hire/people toolkits in Tuah's combined single-agent set (`combineToolkits` throws on a duplicate). Contacts and items therefore use finance-scoped names.
 
 ## What already exists (context)

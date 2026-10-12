@@ -13,8 +13,12 @@ describe('BENDAHARA_SYSTEM', () => {
     expect(t).toContain('never invent');
   });
 
-  it('uses Ringgit and leaves amounts to the tools', () => {
+  it('uses Ringgit and leaves amounts to the tools, and never calls finance amounts sen', () => {
     expect(t).toContain('rm');
+    expect(t).toContain('ringgit');
+    // Finance money is numeric(14,2) ringgit, not sen — the persona must not mislabel it.
+    expect(t).not.toContain('in sen');
+    expect(t).not.toContain('amounts in sen');
   });
 
   it('is honest about approval: a change is reported done only after it is approved', () => {
