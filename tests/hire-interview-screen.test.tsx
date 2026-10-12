@@ -123,7 +123,7 @@ const items = (html: string) =>
 const DISABLED = /\sdisabled(=|\s|>)/;
 
 const row = (over: Partial<InterviewRow> = {}): InterviewRow => ({
-  id: IV, name: 'Aina Rahman', role: 'Sales Executive', date: '20 Oct 2026', time: '15:00', interviewer: 'Farah Lim', type: 'Video', status: 'Scheduled',
+  id: IV, name: 'Aina Rahman', role: 'Sales Executive', date: '20 Oct 2026', time: '3:00 pm', interviewer: 'Farah Lim', type: 'Video', status: 'Scheduled',
   applicationId: APP, statusKey: 'scheduled', scheduledAt: '2026-10-20T07:00:00+00:00', durationMinutes: 60, length: '1 hour', kind: 'video',
   place: 'https://meet.example.com/abc', placeLink: { href: 'https://meet.example.com/abc', host: 'meet.example.com' },
   interviewerName: 'Farah Lim', notes: null, createdAt: '2026-10-12T02:00:00+00:00', updatedAt: '2026-10-12T02:05:00+00:00',
@@ -131,7 +131,7 @@ const row = (over: Partial<InterviewRow> = {}): InterviewRow => ({
 });
 const AHEAD = row();
 const OVERDUE = row({
-  id: 'iv-overdue', name: 'Ben Tan', role: 'Cashier', date: '10 Oct 2026', time: '09:30', length: '1 hour 30 minutes', durationMinutes: 90, type: 'Onsite',
+  id: 'iv-overdue', name: 'Ben Tan', role: 'Cashier', date: '10 Oct 2026', time: '9:30 am', length: '1 hour 30 minutes', durationMinutes: 90, type: 'Onsite',
   kind: 'onsite', scheduledAt: '2026-10-10T01:30:00+00:00', place: 'Level 3, Menara Rimba', placeLink: null, needsOutcome: true,
 });
 const CLOSED_APPLICATION = row({
@@ -231,8 +231,10 @@ describe('the Interviews screen\'s lists', () => {
   });
   it('writes the time with the length', async () => {
     const said = text(await screen());
-    expect(said).toContain('15:00 · 1 hour');
-    expect(said).toContain('09:30 · 1 hour 30 minutes');
+    // Changed from the plan's 24-hour `15:00`: a row's time now reads as the invitation's does (Task 2's review).
+    expect(said).toContain('3:00 pm · 1 hour');
+    expect(said).toContain('9:30 am · 1 hour 30 minutes');
+    expect(said).not.toMatch(/\b15:00\b|\b09:30\b/);
   });
   it('draws a place as a link only from the link the server made safe, and otherwise as text or a dash', async () => {
     const html = await screen();

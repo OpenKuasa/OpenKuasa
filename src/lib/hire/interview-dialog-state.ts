@@ -555,7 +555,7 @@ export function tagsFor(row: InterviewRow): string[] {
   return tags;
 }
 
-/** The Time cell: the 24-hour start, then the length. */
+/** The Time cell: the start as the row has it ("3:00 pm"), then the length. Beside the row's Date column. */
 export const timeCell = (row: InterviewRow): string => `${row.time} · ${row.length}`;
 
 export const cancelTitle = (name: string): string => `Cancel the interview with ${name}?`;

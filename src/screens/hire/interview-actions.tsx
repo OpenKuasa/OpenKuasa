@@ -210,8 +210,9 @@ export function InterviewRowMenu({ row, workspace }: { row: InterviewRow; worksp
               // Made now, with the clock as it is now, and never from the notes. Nothing is handed over for a start
               // that has passed or cannot be read: the row says so, focus stays on this button, and nothing opens.
               const source = inviteSourceOfRow(row, workspace);
-              const text: string | null = mayHandOver(source.scheduled_at, source.duration_minutes, new Date())
-                ? invitationText(source, false)
+              const now = new Date();
+              const text: string | null = mayHandOver(source.scheduled_at, source.duration_minutes, now)
+                ? invitationText(source, false, now)
                 : null;
               if (!text) {
                 change.refuse(NO_INVITATION);

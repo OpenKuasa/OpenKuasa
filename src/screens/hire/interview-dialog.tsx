@@ -596,8 +596,9 @@ export function InvitationStep({
     if (!source) return;
     // Asked at the press, with the clock as it is now. A file is made only for a start that is an instant still ahead
     // and a whole length; the builder may itself answer that there is none. Then nothing is saved and the button goes.
-    const ahead = mayHandOver(source.scheduled_at, source.duration_minutes, new Date());
-    const body: string | null = ahead ? interviewIcs(source) : null;
+    const now = new Date();
+    const ahead = mayHandOver(source.scheduled_at, source.duration_minutes, now);
+    const body: string | null = ahead ? interviewIcs(source, now) : null;
     const name: string | null = body ? icsFileName(source) : null;
     if (!body || !name) {
       setFileGone(true);
