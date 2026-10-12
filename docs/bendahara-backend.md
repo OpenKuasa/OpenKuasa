@@ -299,8 +299,8 @@ transfer between accounts (`transfer_id`) are in neither.
 | `finance_cash_receipts` | `income` | Money in that settles no invoice, with an income category | nowhere else | Cash Receipts |
 | `finance_payment_vouchers` | `bill` | A payment to a supplier | Payments Out, one row per bill | Payments Out |
 | `finance_payment_vouchers` | `refund` | Money back to a customer | Refunds | Refunds |
-| `finance_payment_vouchers` | `expense` | A payment of approved expenses | Expenses, as Paid | Payment Vouchers, Expenses (no form yet) |
-| `finance_payment_vouchers` | `other` | Money out that settles no document, with an expense category | nowhere else | Payment Vouchers (no form yet) |
+| `finance_payment_vouchers` | `expense` | A payment of approved expenses | Expenses, as Paid | Payment Vouchers (delete before it is paid; approve and reject if it waits) |
+| `finance_payment_vouchers` | `other` | Money out that settles no document, with an expense category | nowhere else | Payment Vouchers (record, approve, reject, delete before it is paid) |
 
 Nothing is counted twice. Payments In, Payments Out and Refunds are views of
 allocations joined to their documents, so each shows only its own kind, one
@@ -370,6 +370,78 @@ Void is offered on every posted receipt, a payment recorded on Payments In
 included: it is the same status change `voidPaymentIn` makes, asked of
 `finance_cash_receipts` instead of `finance_payments_in`, so it also reaches a
 receipt for income, which `voidPaymentIn` refuses.
+
+### The voucher form
+
+Payment Vouchers is writable for anyone who may edit (`can(role, 'edit-data')`,
+never the demo workspace). The writes are in `src/lib/finance/vouchers.ts`, the
+screen's rules in `src/lib/finance/voucher-form.ts`, the actions
+(`recordVoucherAction`, `approveVoucherAction`, `rejectVoucherAction`,
+`deleteVoucherAction`) in `actions.ts`. No migration came with it: every write
+is one the database already allowed.
+
+**New voucher** records money out that settles no document: who is paid (a
+contact or a typed name, exactly one), an expense category, an amount, the
+account, the date, the method, a reference and notes. It calls
+`finance_record_voucher` asking for "To be paid" and sends no status of the
+person's choosing. The database decides by who is recording: an owner's or
+admin's voucher is approved in the same call and reads "To be paid"; anyone
+else's waits as "Pending approval". The status is read back and the screen says
+which it was. There is no draft: the function leaves none, and a voucher that
+waits cannot be edited (the guard refuses any change of one, `FIN14`), so a
+mistake is deleted and recorded again. Nothing is paid here yet: "Paid now",
+Mark as paid and Void are part 5d-2.
+
+**Approve** and **Reject** are offered to an owner or admin on every voucher
+that is waiting, whatever it pays. Each is one update of `status`
+(`scheduled` or `rejected`) and nothing else; the guard writes who decided and
+when. The update is matched on the voucher as the person's row showed it:
+`status = 'pending_approval'`, amount, date, method, account, contact, typed
+name, category, reference and notes, each compared with `eq`, or with `is null`
+where the row showed nothing. `finance_transactions.updated_at` is not moved by
+the database, so it is not what is compared. When no row matches, one read of
+`finance_payment_vouchers` words the answer: "That voucher no longer exists.",
+"This voucher has already been approved.", "This voucher has already been
+rejected.", or "This voucher is not as it was shown to you. Check it again
+before you decide." A rejected voucher is final (the guard refuses to bring
+one back): it is deleted and recorded again.
+
+At **Approve**, a voucher that pays supplier bills shows the same advice
+Payments Out shows before a payment is marked paid: `OrderNotes` with the
+sentences of `orderNotesForBills`, for each purchase order behind its bills
+that is billed for more than its total or for more than has arrived
+(`orderNotesByVoucher`). The bills and purchase orders are read only for
+someone who may approve, and only while such a voucher is waiting. No screen
+can send a supplier payment for approval yet (Payments Out schedules or pays
+it; `finance_record_voucher` takes no bills), so today this shows only for a
+voucher made by a direct call; part 5d-3 would add the form for it.
+
+**Delete** is offered, to anyone who may write and whoever recorded the
+voucher, on any voucher that is a draft, waiting or rejected, and on one that
+is "To be paid" when it is of kind `expense` or `other`. It is one delete matched on the status the row
+showed, so a voucher approved meanwhile is not deleted by someone who saw it
+waiting ("This voucher has changed since you opened it, so it was not deleted.
+Check it again."). A payment to a supplier and a refund are, from "To be paid"
+onward, marked paid, voided and deleted on Payments Out and Refunds
+(`voucherHome`), so their rows offer nothing here then; before that those two
+screens offer nothing on them, so the delete is here.
+
+What each role is answered by the database, and what the screen offers:
+
+| Write | Owner, admin | Member | Viewer | Outsider |
+|---|---|---|---|---|
+| `finance_record_voucher` for a category | recorded, approved by them, "To be paid" | recorded, "Pending approval" whatever status was asked | `42501` "not allowed" | `42501` |
+| Approve or reject a waiting voucher | done; `approved_by` and `approved_at` written by the guard | `FIN14` "only an owner or admin approves or rejects a payment" | no row changed | no row changed |
+| Reject one that is "To be paid"; bring a rejected one back | `FIN14` | `FIN14` | no row changed | no row changed |
+| Delete one that is not paid | done | done | no row changed | no row changed |
+| Delete a paid one | `FIN09` | `FIN09` | no row changed | no row changed |
+
+| On the screen | Owner, admin | Member | Viewer, demo, sample |
+|---|---|---|---|
+| New voucher | Yes: "Save voucher", approved on saving | Yes: "Send for approval" | No button |
+| Approve, Reject on a waiting voucher | Yes | Not offered. The actions answer "Only an owner or admin can approve or reject a voucher. Ask one of them to do this." before anything is read | No menu |
+| Delete on a draft, waiting or rejected voucher of any kind, and on a "To be paid" one of kind `expense` or `other` | Yes | Yes | No menu |
+| A supplier payment or a refund that is "To be paid" or paid | A link to Payments Out or Refunds | The link | The link |
 
 ## Expenses
 
@@ -1488,6 +1560,18 @@ with no date).
 
 ## Known limits
 
+- Payment Vouchers: a voucher that waits or is "To be paid" can be deleted by
+  any writer, whoever recorded or approved it: the guard on payments refuses a
+  delete only once the payment is paid or void. An approved voucher cannot be
+  marked paid on Payment Vouchers yet (part 5d-2). No screen sends a payment to
+  a supplier for approval, so the over-billing note at Approve shows only for
+  one made by a direct call.
+- A payment that is "To be paid" and that nobody had to approve (a supplier
+  payment a member scheduled, a voucher for expenses a member scheduled) can
+  still have its account, method, date, reference and notes changed by any
+  writer with a direct call until it is paid, and `finance_mark_payment_paid`
+  compares nothing: what is marked paid is the payment as it is then, not as
+  the row showed it. An approved payment cannot be changed at all.
 - A scheduled payment cannot be edited: delete it and schedule it again.
 - Supplier Bills and Payments Out load every bill and payment and filter in the
   browser. The product picker on a bill line is a plain list with no search.
