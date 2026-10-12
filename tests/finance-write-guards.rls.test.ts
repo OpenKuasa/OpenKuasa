@@ -84,8 +84,8 @@ beforeAll(async () => {
   const made = await c
     .from('finance_contacts')
     .insert([
-      { org_id: orgId, name: 'Guarded Customer', is_customer: true },
-      { org_id: orgId, name: 'Guarded Supplier', is_supplier: true },
+      { org_id: orgId, name: 'Guarded Customer', is_customer: true, is_supplier: false },
+      { org_id: orgId, name: 'Guarded Supplier', is_customer: false, is_supplier: true },
     ])
     .select('id, name');
   expect(made.error, made.error?.message).toBeNull();
