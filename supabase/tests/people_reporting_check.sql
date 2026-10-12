@@ -110,6 +110,7 @@ begin
   create temp table rl_cast (name text, uid uuid) on commit drop;
   create temp table rl_seen (said text) on commit drop;
   create temp sequence rl_n;
+  create temp sequence rl_f;
   execute $f$
     create function pg_temp.tbl(kind text) returns text language sql as $b$
       select case kind when 'leave' then 'hr_leave_requests' when 'time_off' then 'hr_time_off_requests' when 'claim' then 'hr_claims' when 'overtime' then 'hr_overtime_records'
@@ -160,8 +161,10 @@ begin
   $f$;
   execute $f$
     create function pg_temp.fq(kind text, e uuid) returns text language plpgsql as $b$
-    declare n int := nextval('rl_n');
+    declare n int := nextval('rl_f');
     begin
+      -- Every call gets days of its own (leave on a Tuesday of 2031), so no two filings can overlap.
+      if n > 50 then raise exception 'the check files more requests than it has days for'; end if;
       return case kind
         when 'leave' then format('public.hr_apply_leave(%L, ''annual'', %L, %L, false, ''ZZREASONZZ'')', e, date '2031-01-07' + 7 * (n % 51), date '2031-01-07' + 7 * (n % 51))
         when 'time_off' then format('public.hr_apply_time_off(%L, %L, ''09:00'', ''10:00'', ''ZZREASONZZ'')', e, date '2031-07-01' + n)
@@ -287,6 +290,18 @@ begin
   foreach x in array array[peer, own, outs] loop
     fails := fails || pg_temp.t(x, 'someone with no report has an empty team', format('public.hr_my_team(%L)', org), '=[]');
   end loop;
+  -- The rule itself, asked directly as the policies ask it.
+  fails := fails
+    || pg_temp.t(mgr, 'the rule: a manager of their report', format('private.is_manager_of(%L)', e_rep), '=true')
+    || pg_temp.t(mgr, 'the rule: a manager of a report''s report', format('private.is_manager_of(%L)', e_sub), '=false')
+    || pg_temp.t(mgr, 'the rule: a manager of themselves', format('private.is_manager_of(%L)', e_mgr), '=false')
+    || pg_temp.t(rep, 'the rule: a report of their manager', format('private.is_manager_of(%L)', e_mgr), '=false')
+    || pg_temp.t(mgr, 'the rule: a made-up employee', format('private.is_manager_of(%L)', nobody), '=false')
+    || pg_temp.t(mgr, 'the rule: no employee named', 'private.is_manager_of(null)', '=false')
+    || pg_temp.t(null, 'the rule: no session', format('private.is_manager_of(%L)', e_rep), '=false')
+    || pg_temp.t(mfa, 'the rule: a manager who owes a second factor', format('private.is_manager_of(%L)', e_mfarep), '=false')
+    || pg_temp.t(da, 'the rule: never in the demo, even for the lead''s own account', format('private.is_manager_of(%L)', de1), '=false')
+    || pg_temp.t(mgr, 'a signed-in user may not ask whether they manage anyone except through the public functions', format('private.hr_manages_any(%L)', org), 'denied');
   fails := fails || pg_temp.t(null, 'no session: an empty team', format('public.hr_my_team(%L)', org), '=[]');
 
   -- ---- 1. reading the six tables ----------------------------------------------------------------
@@ -417,8 +432,9 @@ begin
   update public.profiles set notification_prefs = '{"channels":{"inapp":false}}' where user_id = mgr;
   update public.profiles set notification_prefs = '{"events":{"hr_request_decided":{"inapp":false}}}' where user_id = rep;
   if (select count(*) from public.profiles where user_id in (mgr, rep) and notification_prefs <> '{}') <> 2 then fails := fails || 'the two preference rows were not there to set'::text; end if;
-  fails := fails || pg_temp.t(rep, 'rep files with the manager''s in-app channel off', pg_temp.fq('leave', e_rep), '*');
-  select id into x from public.hr_leave_requests where employee_id = e_rep and status = 'pending' order by start_date desc limit 1;
+  a := pg_temp.g(rep, pg_temp.fq('leave', e_rep));
+  if left(a, 1) <> '=' then raise exception 'rep could not file with the manager''s in-app channel off: %', a; end if;
+  x := (substr(a, 2)::jsonb ->> 'id')::uuid;
   fails := fails || pg_temp.t(mgr, 'the manager decides it with the employee''s event off', pg_temp.dq('leave', x, false) || ' ->> ''status''', '="rejected"');
   a := pg_temp.inbox();
   if a <> '' then fails := fails || format('preferences off: the request and the decision went through and nobody was told, got "%s"', a); end if;
@@ -637,8 +653,12 @@ begin
     returns void language plpgsql security definer set search_path = public as $b$ begin raise exception 'delivery is down'; end $b$
   $f$;
   for i in 1..4 loop
-    fails := fails || pg_temp.t(rep, format('delivery down: rep files %s', kinds[i]), pg_temp.fq(kinds[i], e_rep) || ' ->> ''status''', '="pending"');
-    execute format('select id from public.%I where employee_id = %L and status = ''pending'' order by created_at desc, id limit 1', pg_temp.tbl(kinds[i]), e_rep) into x;
+    a := pg_temp.g(rep, pg_temp.fq(kinds[i], e_rep));
+    if left(a, 1) <> '=' or substr(a, 2)::jsonb ->> 'status' is distinct from 'pending' then
+      fails := fails || format('delivery down: rep files %s: wanted the usual reply, got %s', kinds[i], a);
+      continue;
+    end if;
+    x := (substr(a, 2)::jsonb ->> 'id')::uuid;
     fails := fails || pg_temp.t(mgr, format('delivery down: the manager decides the %s', kinds[i]), pg_temp.dq(kinds[i], x, false, 'ZZNOTEZZ') || ' ->> ''status''', '="rejected"');
   end loop;
   a := pg_temp.inbox();
