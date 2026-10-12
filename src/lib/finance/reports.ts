@@ -42,27 +42,39 @@ const fromSen = (sen: number) => sen / 100;
 
 /* ---- months ----------------------------------------------------------- */
 
-const MONTH_PATTERN = /^(\d{4})-(0[1-9]|1[0-2])$/;
+/** Years 1900 to 2999: a typed year outside them is not a month, and the arithmetic below never leaves them. */
+const MONTH_PATTERN = /^(19\d\d|2\d\d\d)-(0[1-9]|1[0-2])$/;
 
 function parts(month: Month): { year: number; index: number } {
   const [year, number] = month.split('-').map(Number);
   return { year, index: number - 1 };
 }
 
-/** The month `by` months after (or, negative, before) the given one. */
+/** The month `by` months after (or, negative, before) the given one, in whole numbers: no Date, so no year limit or two-digit-year rule. */
 function shiftMonth(month: Month, by: number): Month {
   const { year, index } = parts(month);
-  const at = new Date(Date.UTC(year, index + by, 1));
-  return at.toISOString().slice(0, 7);
+  const n = year * 12 + index + by;
+  return `${String(Math.floor(n / 12)).padStart(4, '0')}-${String((n % 12) + 1).padStart(2, '0')}`;
 }
 
-/** A month is real when it reads YYYY-MM with a month from 01 to 12. */
+/** A month is real when it reads YYYY-MM, the year 1900 to 2999 and the month 01 to 12. */
 function isMonth(value: string): boolean {
   return MONTH_PATTERN.test(value);
 }
 
 export function isValidPeriod(period: Period): boolean {
   return isMonth(period.from) && isMonth(period.to) && period.from <= period.to;
+}
+
+export const RANGE_MESSAGES = {
+  both: 'Enter both months.',
+  order: 'Choose a From month that is not after the To month.',
+} as const;
+
+/** What is wrong with a typed range, in a sentence, or null when it is fine. */
+export function rangeMessage(period: Period): string | null {
+  if (!isMonth(period.from) || !isMonth(period.to)) return RANGE_MESSAGES.both;
+  return period.from <= period.to ? null : RANGE_MESSAGES.order;
 }
 
 /** Every month of the period, oldest first; none for an invalid period. */
@@ -76,7 +88,8 @@ export function monthsIn(period: Period): Month[] {
 /** 2026-02 gives 2026-02-28 (and 2028-02 gives 2028-02-29). */
 export function lastDayOfMonth(month: Month): string {
   const { year, index } = parts(month);
-  const day = new Date(Date.UTC(year, index + 1, 0)).getUTCDate();
+  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  const day = index === 1 ? (leap ? 29 : 28) : [3, 5, 8, 10].includes(index) ? 30 : 31;
   return `${month}-${String(day).padStart(2, '0')}`;
 }
 
@@ -125,7 +138,7 @@ export function monthlyTotals(lines: LedgerLine[]): { totals: MonthlyTotals; una
 /**
  * The period a choice stands for, from the person's date (YYYY-MM-DD). Quarters are calendar quarters and the
  * year is the calendar year, and the quarter and the year run only to this month: a statement for next month
- * would be empty. All time starts at the earliest month with any line, or at this month when there is none.
+ * would be empty. All time runs from the earliest month with any line (or this month when there is none) to the later of this month and the latest month with any line.
  */
 export function periodFor(key: Exclude<PeriodKey, 'custom'>, today: string, totals: MonthlyTotals): Period {
   const now = today.slice(0, 7);
@@ -145,8 +158,9 @@ export function periodFor(key: Exclude<PeriodKey, 'custom'>, today: string, tota
       return { from: `${year - 1}-01`, to: `${year - 1}-12` };
     case 'all_time': {
       const earliest = totals.reduce<Month | null>((min, t) => (min === null || t.month < min ? t.month : min), null);
-      // A line dated after this month does not start the period after it ends.
-      return { from: earliest !== null && earliest < now ? earliest : now, to: now };
+      const latest = totals.reduce<Month | null>((max, t) => (max === null || t.month > max ? t.month : max), null);
+      // An entry dated after this month is in the books, so all time runs on to it.
+      return { from: earliest !== null && earliest < now ? earliest : now, to: latest !== null && latest > now ? latest : now };
     }
   }
 }
@@ -396,4 +410,24 @@ export function trialBalanceCsv(tb: TrialBalance, period: Period): string {
       [label, null, 'Total', null, tb.totalDebit, tb.totalCredit],
     ],
   );
+}
+
+/* ---- what the screen decides ------------------------------------------ */
+
+/**
+ * Whether the month chart has nothing to draw, and what its subtitle says. It is decided from the statement,
+ * not from the series, which is cut to the last 24 months: income or expenses further back are still in the
+ * figures. A period longer than the cut says the chart shows only the last 24 months.
+ */
+export function chartState(pl: ProfitAndLoss, period: Period): { quiet: boolean; subtitle: string } {
+  return {
+    quiet: pl.income.length === 0 && pl.expenses.length === 0,
+    subtitle: monthsIn(period).length > SERIES_MONTHS_MAX ? `Last ${SERIES_MONTHS_MAX} months` : 'By month',
+  };
+}
+
+/** Ledger lines the statements cannot place: no account, or an account that is not in the list (the two reads raced). */
+export function countUnassigned(lines: LedgerLine[], accounts: Pick<LedgerAccount, 'id'>[]): number {
+  const known = new Set(accounts.map((a) => a.id));
+  return lines.filter((l) => !l.account_id || !known.has(l.account_id)).length;
 }

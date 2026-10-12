@@ -3,6 +3,8 @@ import type { AccountType, LedgerAccount, LedgerLine } from '@/lib/finance/ledge
 import {
   balanceSheet,
   balanceSheetCsv,
+  chartState,
+  countUnassigned,
   expenseBreakdown,
   isValidPeriod,
   lastDayOfMonth,
@@ -14,6 +16,7 @@ import {
   periodLabel,
   profitAndLoss,
   profitAndLossCsv,
+  rangeMessage,
   trialBalance,
   trialBalanceCsv,
   type MonthlyTotals,
@@ -129,8 +132,10 @@ describe('periods', () => {
   it('run all time from the earliest month with a line, or from this month when there is none', () => {
     expect(periodFor('all_time', '2026-05-20', TOTALS)).toEqual({ from: '2026-01', to: '2026-05' });
     expect(periodFor('all_time', '2026-05-20', none)).toEqual(only('2026-05'));
-    // a line dated after today does not start the period after it ends
-    expect(periodFor('all_time', '2026-05-20', [{ account_id: 'x', month: '2026-09', debit: 1, credit: 0 }])).toEqual(only('2026-05'));
+    // an entry dated after this month is in the books, so all time runs on to it
+    expect(periodFor('all_time', '2026-05-20', [{ account_id: 'x', month: '2026-09', debit: 1, credit: 0 }])).toEqual({ from: '2026-05', to: '2026-09' });
+    expect(periodFor('all_time', '2026-05-20', [...TOTALS, { account_id: 'x', month: '2026-07', debit: 1, credit: 0 }])).toEqual({ from: '2026-01', to: '2026-07' });
+    expect(periodFor('this_year', '2026-05-20', [{ account_id: 'x', month: '2026-09', debit: 1, credit: 0 }])).toEqual({ from: '2026-01', to: '2026-05' });
   });
   it('list their months, including a year boundary', () => {
     expect(monthsIn({ from: '2025-11', to: '2026-02' })).toEqual(['2025-11', '2025-12', '2026-01', '2026-02']);
@@ -147,6 +152,34 @@ describe('periods', () => {
     expect(isValidPeriod({ from: '2026-1', to: '2026-01' })).toBe(false);
     expect(isValidPeriod({ from: '2026-01-01', to: '2026-02' })).toBe(false);
   });
+  it('accept only years 1900 to 2999, so a typed year can never break the arithmetic', () => {
+    expect(isValidPeriod({ from: '2026-01', to: '9999-12' })).toBe(false);
+    expect(isValidPeriod({ from: '1899-12', to: '2026-01' })).toBe(false);
+    expect(isValidPeriod({ from: '0002-01', to: '2026-01' })).toBe(false);
+    expect(isValidPeriod({ from: '1900-01', to: '2999-12' })).toBe(true);
+    expect(isValidPeriod({ from: '2026-01', to: '3000-01' })).toBe(false);
+    expect(() => monthsIn({ from: '2026-01', to: '9999-12' })).not.toThrow();
+    expect(monthsIn({ from: '2026-01', to: '9999-12' })).toEqual([]);
+    expect(monthsIn({ from: '0050-01', to: '0050-06' })).toEqual([]);
+  });
+  it('count 300 months across many year boundaries', () => {
+    const months = monthsIn({ from: '2000-01', to: '2024-12' });
+    expect(months).toHaveLength(300);
+    expect(months[0]).toBe('2000-01');
+    expect(months[11]).toBe('2000-12');
+    expect(months[12]).toBe('2001-01');
+    expect(months[299]).toBe('2024-12');
+    expect(monthsIn({ from: '2999-11', to: '2999-12' })).toEqual(['2999-11', '2999-12']);
+  });
+  it('name the range problem: both months, or the order', () => {
+    expect(rangeMessage({ from: '2026-01', to: '2026-03' })).toBeNull();
+    expect(rangeMessage({ from: '2026-03', to: '2026-03' })).toBeNull();
+    expect(rangeMessage({ from: '2026-04', to: '2026-03' })).toBe('Choose a From month that is not after the To month.');
+    expect(rangeMessage({ from: '', to: '2026-03' })).toBe('Enter both months.');
+    expect(rangeMessage({ from: '2026-01', to: '' })).toBe('Enter both months.');
+    expect(rangeMessage({ from: '2026-1', to: '2026-03' })).toBe('Enter both months.');
+    expect(rangeMessage({ from: '2026-01', to: '9999-12' })).toBe('Enter both months.');
+  });
   it('are put in words', () => {
     expect(periodLabel(only('2026-10'))).toBe('October 2026');
     expect(periodLabel({ from: '2026-01', to: '2026-10' })).toBe('January to October 2026');
@@ -158,6 +191,11 @@ describe('periods', () => {
     expect(lastDayOfMonth('2026-04')).toBe('2026-04-30');
     expect(lastDayOfMonth('2026-02')).toBe('2026-02-28');
     expect(lastDayOfMonth('2028-02')).toBe('2028-02-29');
+    // 2100 is divisible by 100 but not 400: not a leap year
+    expect(lastDayOfMonth('2100-02')).toBe('2100-02-28');
+    expect(lastDayOfMonth('2000-02')).toBe('2000-02-29');
+    expect(lastDayOfMonth('1900-02')).toBe('1900-02-28');
+    expect(lastDayOfMonth('2999-12')).toBe('2999-12-31');
     expect(lastDayOfMonth('2026-12')).toBe('2026-12-31');
     expect(monthEndLabel('2026-10')).toBe('31 October 2026');
     expect(monthEndLabel('2028-02')).toBe('29 February 2028');
@@ -365,6 +403,45 @@ describe('monthlySeries', () => {
   });
   it('is empty for an invalid period', () => {
     expect(monthlySeries(ACCOUNTS, TOTALS, { from: '2026-05', to: '2026-01' })).toEqual([]);
+  });
+});
+
+describe('chartState', () => {
+  const plOf = (income: number, expense: number) =>
+    profitAndLoss(
+      ACCOUNTS,
+      [
+        ...(income ? [{ account_id: 'a-4000', month: '2020-03', debit: 0, credit: income }] : []),
+        ...(expense ? [{ account_id: 'a-5000', month: '2020-03', debit: expense, credit: 0 }] : []),
+      ],
+      { from: '2020-01', to: '2024-12' },
+    );
+  it('is quiet only when the statement has no income and no expense lines', () => {
+    const period = { from: '2020-01', to: '2024-12' };
+    expect(chartState(plOf(0, 0), period).quiet).toBe(true);
+    expect(chartState(plOf(10, 0), period).quiet).toBe(false);
+    expect(chartState(plOf(0, 10), period).quiet).toBe(false);
+  });
+  it('is not quiet for 60 months with activity only in the first 12, and says the chart shows the last 24', () => {
+    const period = { from: '2020-01', to: '2024-12' };
+    const state = chartState(plOf(500, 200), period);
+    expect(monthlySeries(ACCOUNTS, [{ account_id: 'a-4000', month: '2020-03', debit: 0, credit: 500 }], period).every((p) => p.revenue === 0)).toBe(true);
+    expect(state).toEqual({ quiet: false, subtitle: 'Last 24 months' });
+  });
+  it('says By month for a period of 24 months or fewer', () => {
+    expect(chartState(plOf(1, 1), { from: '2023-01', to: '2024-12' }).subtitle).toBe('By month');
+    expect(chartState(plOf(1, 1), { from: '2022-12', to: '2024-12' }).subtitle).toBe('Last 24 months');
+  });
+});
+
+describe('countUnassigned', () => {
+  it('counts lines with no account and lines whose account is not in the list', () => {
+    const lines = entry('x', '2026-03-01', [[BANK, 10, 0], [null, 0, 6], [SALES, 0, 4]]);
+    lines.push({ ...lines[0], account_id: 'gone', debit: 1 });
+    expect(countUnassigned(lines, [BANK, SALES])).toBe(2);
+    expect(countUnassigned(lines, ACCOUNTS)).toBe(2);
+    expect(countUnassigned(lines, [BANK])).toBe(3);
+    expect(countUnassigned([], [])).toBe(0);
   });
 });
 
