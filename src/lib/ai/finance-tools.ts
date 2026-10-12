@@ -41,6 +41,7 @@ import {
 import {
   acceptQuotation,
   convertQuotation,
+  convertQuotationInput,
   declineQuotation,
   deleteQuotation,
   listQuotations,
@@ -307,8 +308,8 @@ export function createBendaharaTools(access: FinanceAccess) {
       execute: async (input) => declineQuotation(ctx, input),
     }),
     convertQuotation: tool({
-      description: 'Convert an accepted quotation into a draft invoice.',
-      inputSchema: quotationIdInput,
+      description: 'Convert an accepted quotation into a draft invoice dated as given.',
+      inputSchema: convertQuotationInput,
       execute: async (input) => convertQuotation(ctx, input),
     }),
     deleteQuotation: tool({
