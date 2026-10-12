@@ -394,7 +394,7 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
       return open.detail ? (
         <PurchaseOrderReceiveCard key={open.detail.id} order={open.detail} receive={actions.receive} onClose={close} />
       ) : (
-        loading('Record delivery', `${open.order.po_no ?? 'The order'} to ${open.order.supplier_name}`)
+        loading('Record delivery', `${open.order.po_no ?? 'The order'} from ${open.order.supplier_name}`)
       );
     }
     if (open.kind === 'reject') {
