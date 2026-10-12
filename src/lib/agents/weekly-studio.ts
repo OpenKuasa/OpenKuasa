@@ -7,6 +7,7 @@ import {
   costOr,
 } from '@/lib/agents/costs';
 import { proposeChanges } from '@/lib/agents/proposer';
+import { reachAgent } from '@/lib/agents/reach-agent';
 import {
   RunInProgressError,
   WEEKLY_STUDIO,
@@ -218,9 +219,10 @@ export async function runWeeklyStudio(
         orgId,
         runId,
         apiKey,
-        { leads, appts, context, trend: search.text },
+        { context, raw: { leads, appts, campaigns }, trend: search.text },
         maxCost,
         cost,
+        reachAgent,
       );
       cost += prop.cost_cents;
     } catch {
