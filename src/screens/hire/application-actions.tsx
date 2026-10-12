@@ -13,12 +13,14 @@ import {
 import { REASON_LABEL, REJECT_REASONS, allowedMoves, type RejectReason } from '@/lib/hire/application-changes';
 import { STAGE_LABEL, stageRank } from '@/lib/hire/applications-view';
 import type { ApplicationState } from '@/lib/hire/lists';
-import type { ApplicationStage } from '@/lib/hire/types';
+import type { ApplicationStage, PoolStatus } from '@/lib/hire/types';
 import { cn } from '@/lib/utils';
 import { EditCandidateDialog } from '@/screens/hire/candidate-forms';
 import { deleteTargetFor } from '@/lib/hire/delete-dialog-state';
 import type { DeletionKind } from '@/lib/hire/deletion';
-import { DeleteDialog } from '@/screens/hire/delete-dialog';
+import { DeleteDialog, claimResult, useNewest } from '@/screens/hire/delete-dialog';
+import { boardPoolLine } from '@/lib/hire/pool-dialog-state';
+import { useAddToPool } from '@/screens/hire/pool-actions';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -34,10 +36,11 @@ import {
 /**
  * One application, as plain values from the server: its id, its candidate's id
  * (for the Edit candidate form, which fetches the rest itself when it opens),
- * the two names the controls say aloud, and where it stands. No storage path,
- * no contact details.
+ * the two names the controls say aloud, where it stands, and the person's
+ * stored talent pool status (left out reads as not in the pool). No storage
+ * path, no contact details.
  */
-export type ApplicationSubject = { id: string; candidateId: string; name: string; job: string } & ApplicationState;
+export type ApplicationSubject = { id: string; candidateId: string; name: string; job: string; poolStatus?: PoolStatus } & ApplicationState;
 
 type CloseOutcome = 'rejected' | 'withdrawn';
 type ActionResult = { ok: true } | { ok: false; error: string };
@@ -312,10 +315,20 @@ export function ApplicationActions({ application, canEdit }: { application: Appl
   /** The Edit candidate form: whether it is open, and what it said when it was saved. */
   const [editing, setEditing] = useState(false);
   const [edited, setEdited] = useState<string | null>(null);
+  /** The line's number among the results said on this screen: it is shown only while it is the newest of them. */
+  const [editedSeq, setEditedSeq] = useState<number | null>(null);
+  const say = (message: string | null) => {
+    setEdited(message);
+    setEditedSeq(message ? claimResult() : null);
+  };
+  const said = useNewest(editedSeq) ? edited : null;
   const editButton = useRef<HTMLButtonElement>(null);
   /** Which deletion the confirm dialog is asking about, and the button that opened it. */
   const [deleting, setDeleting] = useState<DeletionKind | null>(null);
   const deleteOpener = useRef<HTMLElement | null>(null);
+  /** Add to talent pool: says what it did on the line that announces "Changes saved." */
+  const pool = useAddToPool(application.candidateId, say);
+  const poolLine = boardPoolLine(application.poolStatus);
   const focusLeft = useKeepFocus(change, application, group);
   if (!canEdit) return null;
 
@@ -472,9 +485,27 @@ export function ApplicationActions({ application, canEdit }: { application: Appl
         >
           Edit candidate
         </Button>
+        {/* The pool is about the person too. Offered only to someone outside it; a pool member's standing is said instead. */}
+        {poolLine ? (
+          <p className="text-sm text-muted-foreground">{poolLine}</p>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className={cn(TARGET, WAITING)}
+            aria-disabled={waiting || pool.adding || undefined}
+            onClick={() => {
+              if (pending) return;
+              pool.add();
+            }}
+          >
+            {pool.adding ? 'Adding…' : 'Add to talent pool'}
+          </Button>
+        )}
         {/* Always in the page, so "Changes saved." is announced when it appears. */}
         <p aria-live="polite" className="text-sm text-muted-foreground">
-          {edited}
+          {said}
         </p>
       </div>
 
@@ -505,6 +536,11 @@ export function ApplicationActions({ application, canEdit }: { application: Appl
           {change.error}
         </p>
       )}
+      {pool.error && (
+        <p role="alert" className={ALERT_CLASS}>
+          {pool.error}
+        </p>
+      )}
 
       <CloseDialog
         application={application}
@@ -515,7 +551,7 @@ export function ApplicationActions({ application, canEdit }: { application: Appl
         candidate={{ id: application.candidateId, name: application.name }}
         open={editing}
         onClose={() => setEditing(false)}
-        onSaved={setEdited}
+        onSaved={say}
         returnFocus={() => (editButton.current ?? group.current)?.focus()}
       />
       <DeleteDialog
@@ -567,9 +603,19 @@ export function ApplicationMenu({
   const [editing, setEditing] = useState(false);
   /** What the Edit candidate form said when it was saved. */
   const [edited, setEdited] = useState<string | null>(null);
+  /** The line's number among the results said on this screen: it is shown only while it is the newest of them. */
+  const [editedSeq, setEditedSeq] = useState<number | null>(null);
+  const say = (message: string | null) => {
+    setEdited(message);
+    setEditedSeq(message ? claimResult() : null);
+  };
+  const said = useNewest(editedSeq) ? edited : null;
   /** A deletion was chosen: its confirm dialog opens once the menu has closed. */
   const thenDelete = useRef<DeletionKind | null>(null);
   const [deleting, setDeleting] = useState<DeletionKind | null>(null);
+  /** Add to talent pool: says what it did on the card's own line. */
+  const pool = useAddToPool(application.candidateId, say);
+  const poolLine = boardPoolLine(application.poolStatus);
   useKeepFocus(change, application, trigger);
   const { id } = application;
   const { pending } = change;
@@ -696,6 +742,13 @@ export function ApplicationMenu({
           >
             Edit candidate
           </DropdownMenuItem>
+          {poolLine ? (
+            <DropdownMenuLabel className="font-normal text-muted-foreground">{poolLine}</DropdownMenuLabel>
+          ) : (
+            <DropdownMenuItem className={item} onSelect={() => pool.add()}>
+              Add to talent pool
+            </DropdownMenuItem>
+          )}
           {outcome === 'active' && (
             <>
               <DropdownMenuSeparator />
@@ -741,12 +794,17 @@ export function ApplicationMenu({
       </DropdownMenu>
 
       {/* Always in the page, so its text is announced when it changes. It takes a line of the card only while there is something to say. */}
-      <p aria-live="polite" className={cn('basis-full text-xs text-muted-foreground', !change.busy && !edited && 'sr-only')}>
-        {busyWord(change.busy) || edited}
+      <p aria-live="polite" className={cn('basis-full text-xs text-muted-foreground', !change.busy && !pool.adding && !said && 'sr-only')}>
+        {busyWord(change.busy) || (pool.adding ? 'Adding…' : said)}
       </p>
       {change.error && change.confirming === null && (
         <p role="alert" className={cn(ALERT_CLASS, 'basis-full')}>
           {change.error}
+        </p>
+      )}
+      {pool.error && (
+        <p role="alert" className={cn(ALERT_CLASS, 'basis-full')}>
+          {pool.error}
         </p>
       )}
 
@@ -763,7 +821,7 @@ export function ApplicationMenu({
         candidate={{ id: application.candidateId, name: application.name }}
         open={editing}
         onClose={() => setEditing(false)}
-        onSaved={setEdited}
+        onSaved={say}
         returnFocus={() => trigger.current?.focus()}
       />
       <DeleteDialog

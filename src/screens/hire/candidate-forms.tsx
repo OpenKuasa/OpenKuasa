@@ -28,6 +28,7 @@ import {
 } from '@/lib/hire/candidate-fields';
 import { cn } from '@/lib/utils';
 import { SELECT_CLASS } from '@/screens/crm/crm-form';
+import { claimResult, useNewest } from '@/screens/hire/delete-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -58,11 +59,11 @@ const NOT_LOADED = "This candidate's details could not be loaded. Check your con
 const NOTHING_CHANGED = 'Nothing was changed.';
 const NO_EMAIL = "Without an email, this person can't be matched if they apply online later.";
 /**
- * Under the job select while no job is picked. The board and the lists are drawn from applications, so
- * someone added without a job is on none of them: the hint says so, and where they can still be found.
+ * Under the job select while no job is picked. Someone added without a job has no application, so they are not on
+ * the board: they go into the talent pool as Available, and the hint says so.
  */
 const NO_JOB_HINT =
-  'This person will not appear on the board until they are added to a job. Lekir can find them by name. '
+  'This person will go to the talent pool as Available. They will not appear on the board until they are added to a job. '
   + 'A CV can be added once the candidate is put forward for a job.';
 
 /** The seven details of the person, in the order both forms show them. */
@@ -683,6 +684,9 @@ export function AddCandidate({ jobs }: { jobs: { id: string; title: string }[] }
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /** The sentence's number among the results said on this screen: it is shown only while it is the newest of them. */
+  const [noticeSeq, setNoticeSeq] = useState<number | null>(null);
+  const shown = useNewest(noticeSeq) ? notice : null;
   const button = useRef<HTMLButtonElement>(null);
   /** True from the press until the answer: `pending` only turns true on the next render. */
   const inFlight = useRef(false);
@@ -705,6 +709,9 @@ export function AddCandidate({ jobs }: { jobs: { id: string; title: string }[] }
         if (result.ok) {
           close();
           setNotice(result.data.message);
+          // The newest result on the screen: an older sentence on the notice line or a card empties, and this one
+          // empties when a later change is said elsewhere.
+          setNoticeSeq(claimResult());
         } else {
           setError(result.error);
         }
@@ -737,9 +744,9 @@ export function AddCandidate({ jobs }: { jobs: { id: string; title: string }[] }
       {/* Always in the page, so its text is announced when it changes. It takes a line of the header only while there is something to say. */}
       <p
         aria-live="polite"
-        className={cn('order-last max-w-sm basis-full text-sm break-words text-muted-foreground', !notice && 'sr-only')}
+        className={cn('order-last max-w-sm basis-full text-sm break-words text-muted-foreground', !shown && 'sr-only')}
       >
-        {notice}
+        {shown}
       </p>
       <FormDialog
         open={open}

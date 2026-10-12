@@ -31,9 +31,12 @@ vi.mock('@/app/(app)/hire/actions', () => ({
   deleteApplicationAction: mocks.action,
   deleteCandidateAction: mocks.action,
   getDeletionSummaryAction: mocks.action,
+  setPoolStatusAction: mocks.action,
+  moveToPipelineAction: mocks.action,
+  listPoolPickerAction: mocks.action,
 }));
 // No app router is mounted in a string render: the controls only need one to ask for a refresh after a refusal.
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: mocks.refresh }) }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: mocks.refresh, replace: () => {} }), usePathname: () => '/hire/talent-pool' }));
 vi.mock('@/lib/auth/viewer', () => ({ getViewer: async () => mocks.viewer }));
 // The screens' loader reads the session and the database: replaced by the model under test.
 vi.mock('@/screens/hire/parts', () => ({
@@ -84,7 +87,7 @@ describe('the controls for one application', () => {
   it('offers, at interview: back one stage, every later stage, reject, withdraw and five ratings', () => {
     const html = controls();
     expect(buttons(html)).toEqual([
-      'Back to Screening', 'Move to Offer', 'Move to Hired', 'Mark withdrawn', 'Reject', ...STARS, 'Edit candidate', 'Delete application', 'Delete candidate',
+      'Back to Screening', 'Move to Offer', 'Move to Hired', 'Mark withdrawn', 'Reject', ...STARS, 'Edit candidate', 'Add to talent pool', 'Delete application', 'Delete candidate',
     ]);
     // The stage it is at, in words.
     expect(text(html)).toContain('Stage: Interview');
@@ -105,7 +108,7 @@ describe('the controls for one application', () => {
     expect(text(html)).toContain('Rejected');
     expect(text(html)).toContain('Not enough experience');
     expect(moves(html)).toEqual([]);
-    expect(buttons(html)).toEqual(['Reopen', ...STARS, 'Edit candidate', 'Delete application', 'Delete candidate']);
+    expect(buttons(html)).toEqual(['Reopen', ...STARS, 'Edit candidate', 'Add to talent pool', 'Delete application', 'Delete candidate']);
     expect(buttons(html)).not.toContain('Reject');
     expect(buttons(html)).not.toContain('Mark withdrawn');
   });

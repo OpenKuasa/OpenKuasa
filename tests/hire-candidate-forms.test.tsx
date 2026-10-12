@@ -40,8 +40,11 @@ vi.mock('@/app/(app)/hire/actions', () => ({
   deleteApplicationAction: mocks.action,
   deleteCandidateAction: mocks.action,
   getDeletionSummaryAction: mocks.action,
+  setPoolStatusAction: mocks.action,
+  moveToPipelineAction: mocks.action,
+  listPoolPickerAction: mocks.action,
 }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: mocks.refresh }) }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: mocks.refresh, replace: () => {} }), usePathname: () => '/hire/talent-pool' }));
 vi.mock('@/lib/auth/viewer', () => ({ getViewer: async () => mocks.viewer }));
 vi.mock('@/screens/hire/parts', () => ({
   LOAD_FAILED: <p>load failed</p>,
@@ -237,18 +240,19 @@ describe('the Add Candidate form', () => {
     expect(html).not.toContain('name="cv_url"');
   });
 
-  it('with no job: the hint tied to the job select says the person will not be on the board, and that Lekir can find them', () => {
+  it('with no job: the hint tied to the job select says the person goes to the talent pool, and will not be on the board', () => {
     const html = addForm();
     const hintId = attr(control(html, 'Job'), 'aria-describedby')!;
     const hint = unescape(new RegExp(`<p\\b[^>]*id="${hintId}"[^>]*>([^<]*)</p>`).exec(html)?.[1] ?? '');
     expect(hint).toBe(
-      'This person will not appear on the board until they are added to a job. Lekir can find them by name. '
+      'This person will go to the talent pool as Available. They will not appear on the board until they are added to a job. '
       + 'A CV can be added once the candidate is put forward for a job.',
     );
+    expect(hint).not.toContain('Lekir can find');
     // Said only while no job is picked, and never on the Edit form, which has no job.
-    expect(text(addForm(JOBS[0].id))).not.toMatch(/will not appear on the board|Lekir can find/);
+    expect(text(addForm(JOBS[0].id))).not.toMatch(/will not appear on the board|talent pool as Available/);
     expect(attr(control(addForm(JOBS[0].id), 'Job'), 'aria-describedby')).toBeUndefined();
-    expect(text(editForm())).not.toMatch(/will not appear on the board|Lekir can find/);
+    expect(text(editForm())).not.toMatch(/will not appear on the board|talent pool as Available/);
   });
 
   it('with a job: a fieldset For this application with the cover note and its count, the CV link and the file input', () => {

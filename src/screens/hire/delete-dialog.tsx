@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { AlertDialog } from 'radix-ui';
-import { MoreHorizontal } from 'lucide-react';
 import { deleteApplicationAction, deleteCandidateAction, getDeletionSummaryAction } from '@/app/(app)/hire/actions';
 import {
   DELETION_NOTICE_ID, LOADING, canConfirm, confirmLabel, dialogBody, focusIdAfter, mayClose, summaryFrom,
@@ -12,7 +11,6 @@ import {
 import { DELETE_FAILED, confirmTitle } from '@/lib/hire/deletion';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 
 // The same sizes and looks as the other hiring controls (see application-actions.tsx).
 const TARGET = 'min-h-11 min-w-11';
@@ -28,6 +26,9 @@ const CONTENT_CLASS =
 // So each screen has one line that stays, and the dialog writes its success sentence there.
 
 let notice = '';
+/** Results said on this screen are numbered: only the newest is shown, wherever it was said. */
+let latest = 0;
+let noticeSeq = 0;
 const listeners = new Set<() => void>();
 const subscribe = (listener: () => void) => {
   listeners.add(listener);
@@ -35,11 +36,38 @@ const subscribe = (listener: () => void) => {
     listeners.delete(listener);
   };
 };
-
-/** Puts a sentence on the screen's notice line, where it is read out. */
-export function announceDeletion(message: string): void {
-  notice = message;
+const tell = () => {
   for (const listener of listeners) listener();
+};
+
+/**
+ * Puts a sentence on the screen's notice line, where it is read out: a deletion's, or a talent pool change's.
+ * It becomes the newest result on the screen, so any older result line elsewhere on it empties.
+ */
+export function announceDeletion(message: string): void {
+  latest += 1;
+  noticeSeq = latest;
+  notice = message;
+  tell();
+}
+
+/**
+ * A result said somewhere else on the screen (a card's own line, a row's refusal) takes over as the newest: the
+ * notice line and every older result line empty. Answers the result's number, for `useNewest`.
+ */
+export function claimResult(): number {
+  latest += 1;
+  tell();
+  return latest;
+}
+
+/** What the notice line shows now: its sentence while that is the newest result on the screen, else nothing. */
+export const shownNotice = (): string => (noticeSeq === latest ? notice : '');
+
+/** True while the result with this number is still the newest said on the screen. */
+export function useNewest(seq: number | null): boolean {
+  const now = useSyncExternalStore(subscribe, () => latest, () => 0);
+  return seq !== null && seq === now;
 }
 
 /**
@@ -48,7 +76,7 @@ export function announceDeletion(message: string): void {
  * the opener has gone. Drawn once per screen, only for someone who may edit.
  */
 export function DeletionNotice({ className }: { className?: string }) {
-  const message = useSyncExternalStore(subscribe, () => notice, () => '');
+  const message = useSyncExternalStore(subscribe, shownNotice, () => '');
   // The sentence belongs to the screen it was said on: leaving the screen clears it.
   useEffect(() => () => {
     notice = '';
@@ -255,59 +283,5 @@ export function DeleteDialog({
         </AlertDialog.Content>
       </AlertDialog.Portal>
     </AlertDialog.Root>
-  );
-}
-
-/**
- * The menu on a Talent Pool row. One item for now: Delete candidate. A menu
- * and not a bare button, so the pool's other controls can be added beside it.
- */
-export function CandidateRowMenu({ candidate }: { candidate: { id: string; name: string } }) {
-  const [open, setOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const trigger = useRef<HTMLButtonElement>(null);
-  /** Delete was chosen: the dialog opens once the menu has closed. */
-  const thenDelete = useRef(false);
-  return (
-    <>
-      <DropdownMenu open={open} onOpenChange={setOpen}>
-        <DropdownMenuTrigger asChild>
-          <button
-            ref={trigger}
-            type="button"
-            aria-label={`Actions for ${candidate.name}`}
-            className={cn('grid shrink-0 place-items-center rounded-md hover:bg-muted', TARGET, FOCUS)}
-          >
-            <MoreHorizontal className="size-4" aria-hidden />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="end"
-          className="w-52"
-          onCloseAutoFocus={(event) => {
-            if (!thenDelete.current) return;
-            // The dialog takes focus now, and gives it back to the menu button if it is cancelled.
-            thenDelete.current = false;
-            event.preventDefault();
-            setDeleting(true);
-          }}
-        >
-          <DropdownMenuItem
-            variant="destructive"
-            className="min-h-11 px-2"
-            onSelect={() => {
-              thenDelete.current = true;
-            }}
-          >
-            Delete candidate
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <DeleteDialog
-        target={deleting ? { kind: 'candidate', id: candidate.id, name: candidate.name, job: null } : null}
-        onClose={() => setDeleting(false)}
-        returnFocus={() => trigger.current?.focus()}
-      />
-    </>
   );
 }

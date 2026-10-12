@@ -30,8 +30,11 @@ vi.mock('@/app/(app)/hire/actions', () => ({
   deleteApplicationAction: mocks.action,
   deleteCandidateAction: mocks.action,
   getDeletionSummaryAction: mocks.action,
+  setPoolStatusAction: mocks.action,
+  moveToPipelineAction: mocks.action,
+  listPoolPickerAction: mocks.action,
 }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: mocks.refresh }) }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: mocks.refresh, replace: () => {} }), usePathname: () => '/hire/talent-pool' }));
 vi.mock('@/lib/auth/viewer', () => ({ getViewer: async () => mocks.viewer }));
 vi.mock('@/screens/hire/parts', () => ({
   LOAD_FAILED: <p>load failed</p>,
@@ -56,7 +59,8 @@ vi.mock('@/components/ui/dropdown-menu', () => {
 });
 
 import { ApplicationActions, ApplicationMenu, type ApplicationSubject } from '@/screens/hire/application-actions';
-import { CandidateRowMenu, DeletionNotice } from '@/screens/hire/delete-dialog';
+import { DeletionNotice, announceDeletion, claimResult, shownNotice } from '@/screens/hire/delete-dialog';
+import { PoolRowControls } from '@/screens/hire/pool-actions';
 import TalentPoolScreen from '@/screens/hire/talent-pool';
 import {
   DELETION_NOTICE_ID, LOADING, canConfirm, confirmLabel, deleteTargetFor, dialogBody, focusIdAfter, mayClose, summaryFrom,
@@ -172,7 +176,7 @@ describe('where a deletion is offered', () => {
   it('sends nothing to the server just by being drawn', () => {
     renderToStaticMarkup(<ApplicationMenu application={subject} canEdit />);
     renderToStaticMarkup(<ApplicationActions application={subject} canEdit />);
-    renderToStaticMarkup(<CandidateRowMenu candidate={{ id: CANDIDATE, name: 'Aina Rahman' }} />);
+    renderToStaticMarkup(<PoolRowControls candidate={{ id: CANDIDATE, name: 'Aina Rahman', poolStatus: 'available', label: 'Available' }} jobs={[]} />);
     expect(mocks.action).not.toHaveBeenCalled();
     expect(mocks.refresh).not.toHaveBeenCalled();
   });
@@ -197,19 +201,22 @@ describe('a talent pool row', () => {
     mocks.pool = pool;
   });
 
-  it('has a menu named after the candidate holding one item, Delete candidate', () => {
-    const html = renderToStaticMarkup(<CandidateRowMenu candidate={{ id: CANDIDATE, name: 'Aina Rahman' }} />);
-    expect(buttons(html)).toEqual(['Actions for Aina Rahman']);
-    expect(items(html)).toEqual([{ variant: 'destructive', label: 'Delete candidate' }]);
-    const tag = [...html.matchAll(/<button\b[^>]*>/g)][0][0];
+  const rowControls = () =>
+    renderToStaticMarkup(<PoolRowControls candidate={{ id: CANDIDATE, name: 'Aina Rahman', poolStatus: 'available', label: 'Available' }} jobs={[]} />);
+
+  it('Delete candidate is the last item of the row\'s menu, in the danger style, under a rule of its own', () => {
+    const html = rowControls();
+    expect(buttons(html)).toContain('Actions for Aina Rahman');
+    expect(items(html).slice(-1)).toEqual([{ variant: 'destructive', label: 'Delete candidate' }]);
+    expect(html.slice(html.lastIndexOf('<hr/>'))).toContain('Delete candidate');
+    const tag = [...html.matchAll(/<button\b[^>]*>/g)].map(([t]) => t).find((t) => t.includes('aria-label="Actions for Aina Rahman"'))!;
     expect(tag).toContain('min-h-11');
     expect(tag).toContain('min-w-11');
     expect(tag).toMatch(/focus-visible:ring-/);
   });
-  it('is on the screen for someone who may edit, beside the button that is still to come', async () => {
+  it('is on the screen for someone who may edit, with the notice line', async () => {
     const html = renderToStaticMarkup(await TalentPoolScreen());
     expect(buttons(html)).toContain('Actions for Aina Rahman');
-    expect(buttons(html)).toContain('Move to pipeline');
     expect(html).toContain(`id="${DELETION_NOTICE_ID}"`);
   });
   it('is not on the screen for a viewer or the demo workspace', async () => {
@@ -225,7 +232,7 @@ describe('a talent pool row', () => {
   it('carries no email, phone or storage path, and nothing purple or violet', async () => {
     const html = renderToStaticMarkup(await TalentPoolScreen());
     expect(html).not.toMatch(/cv_path|[\w.]+@[\w-]+\.\w+|\+?60\d{8,}/);
-    expect(renderToStaticMarkup(<CandidateRowMenu candidate={{ id: CANDIDATE, name: 'Aina Rahman' }} />)).not.toMatch(/purple|violet/i);
+    expect(rowControls()).not.toMatch(/purple|violet/i);
   });
 });
 
@@ -237,5 +244,22 @@ describe('the notice line', () => {
     expect(html).toContain('tabindex="-1"');
     expect(text(html)).toBe('');
     expect(html).not.toMatch(/purple|violet/i);
+  });
+  it('holds one result at a time: a newer result elsewhere on the screen empties it, and a newer notice takes over again', () => {
+    announceDeletion('Deleted Aina Rahman.');
+    expect(shownNotice()).toBe('Deleted Aina Rahman.');
+    // A card says "Changes saved." on its own line: the older sentence must not stay beside it.
+    const card = claimResult();
+    expect(shownNotice()).toBe('');
+    // Then a pool change is said on the notice line: it shows, and the card's line is no longer the newest.
+    announceDeletion('Removed Aina Rahman from the talent pool. They are still on file.');
+    expect(shownNotice()).toBe('Removed Aina Rahman from the talent pool. They are still on file.');
+    const later = claimResult();
+    expect(later).toBeGreaterThan(card);
+    expect(shownNotice()).toBe('');
+    // The same sentence said twice is two results.
+    announceDeletion('x');
+    announceDeletion('x');
+    expect(shownNotice()).toBe('x');
   });
 });

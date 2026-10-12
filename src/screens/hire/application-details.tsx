@@ -3,6 +3,7 @@
 import { useId, useState, useTransition } from 'react';
 import { ChevronDown } from 'lucide-react';
 import type { ApplicationDetails, ApplicationState, SafeLink } from '@/lib/hire/lists';
+import type { PoolStatus } from '@/lib/hire/types';
 import { viewCvAction } from '@/app/(app)/hire/actions';
 import { cn } from '@/lib/utils';
 import { LiveDot } from '@/components/ui/live-dot';
@@ -28,7 +29,7 @@ export type ApplicationRowData = {
   live: boolean;
   applied: string;
   details: ApplicationDetails | null;
-} & ApplicationState;
+} & ApplicationState & { /** The person's stored talent pool status; left out reads as not in the pool. */ poolStatus?: PoolStatus };
 
 /** A link is drawn only from a SafeLink, never from a raw string. */
 function DetailLink({ label, link }: { label: string; link: SafeLink }) {
@@ -187,6 +188,7 @@ export function ApplicationRow({ row, canEdit }: { row: ApplicationRowData; canE
               application={{
                 id: row.id, candidateId: row.candidateId, name: row.name, job: row.job,
                 stage: row.stage, outcome: row.outcome, rating: row.rating, rejectReason: row.rejectReason,
+                poolStatus: row.poolStatus,
               }}
               canEdit={canEdit}
             />

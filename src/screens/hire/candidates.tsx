@@ -81,6 +81,7 @@ function CandidateCard({ candidate, canEdit }: { candidate: Candidate; canEdit: 
           application={{
             id: candidate.id, candidateId: candidate.candidateId, name: candidate.name, job: candidate.role,
             stage: candidate.stage, outcome: candidate.outcome, rating: candidate.rating, rejectReason: candidate.rejectReason,
+            poolStatus: candidate.poolStatus,
           }}
           canEdit={canEdit}
           columnHeadingId={headingId(candidate.stage)}
