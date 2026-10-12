@@ -503,8 +503,12 @@ describe('lookups carry what a change needs, and no one else’s pay', () => {
 
   it('give a member the id of their own claims only, and no year total', async () => {
     const { claims } = await lookup('listClaims', MEMBER_VIEWER, self());
+    // The source holds other people's claims too; a member's answer is narrowed to their own before anything is shown.
     expect(claims.find((c: Loose) => c.id === 'c-me')).toBeDefined();
-    expect(claims.find((c: Loose) => c.employee === 'Amirul Hakim')).not.toHaveProperty('id');
+    expect(claims.length).toBeGreaterThan(0);
+    for (const c of claims) expect(c.employee).toBe('Faiz Hakim');
+    expect(claims.find((c: Loose) => c.employee === 'Amirul Hakim')).toBeUndefined();
+    expect(JSON.stringify(claims)).not.toContain('c-other');
     for (const c of claims) expect(c).not.toHaveProperty('approved_this_year');
   });
 
@@ -533,14 +537,10 @@ describe('lookups carry what a change needs, and no one else’s pay', () => {
   it('give a member the figures on their own record and none on any other row', async () => {
     const { overtime } = await lookup('listOvertime', MEMBER_VIEWER, self());
     expect(overtime.find((o: Loose) => o.id === 'o-me')).toMatchObject({ hourly_rate: 'RM 25.00', amount: 'RM 150.00', amount_calculated: true });
-    const others = overtime.filter((o: Loose) => o.employee !== 'Faiz Hakim');
-    expect(others.length).toBeGreaterThan(0);
-    for (const o of others) {
-      for (const key of ['hourly_rate', 'hourly_rate_cents', 'amount', 'amount_calculated', 'id']) expect(o, key).not.toHaveProperty(key);
-      // What is left is the fact of the record, not pay.
-      expect(o).toHaveProperty('hours');
-      expect(o).toHaveProperty('day_kind');
-    }
+    // The source holds other people's records too; nothing of theirs reaches a member's answer.
+    expect(overtime.length).toBeGreaterThan(0);
+    expect(overtime.filter((o: Loose) => o.employee !== 'Faiz Hakim')).toEqual([]);
+    for (const o of overtime) expect(o).not.toHaveProperty('hourly_rate_cents');
   });
 
   it('gate on who the viewer is, not on holding change tools: a read-only owner sees the figures, a read-only member only their own', async () => {
@@ -550,9 +550,7 @@ describe('lookups carry what a change needs, and no one else’s pay', () => {
     for (const o of owner) expect(o).not.toHaveProperty('id');
     const member = (await lookup('listOvertime', MEMBER_VIEWER)).overtime;
     expect(member.find((o: Loose) => o.employee === 'Faiz Hakim')).toMatchObject({ amount_calculated: true, hourly_rate: 'RM 25.00' });
-    for (const o of member.filter((r: Loose) => r.employee !== 'Faiz Hakim')) {
-      for (const key of ['hourly_rate', 'amount', 'amount_calculated']) expect(o, key).not.toHaveProperty(key);
-    }
+    expect(member.filter((r: Loose) => r.employee !== 'Faiz Hakim')).toEqual([]);
   });
 
   it('give no id to a read-only caller, and no figures to a demo visitor’s view of other people’s rows', async () => {

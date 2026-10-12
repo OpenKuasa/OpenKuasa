@@ -252,8 +252,11 @@ describe('leave lookups carry what a change needs', () => {
 
   it('give a member the id of their own requests only, and no over_balance', async () => {
     const { requests } = await runWith(lookupData, 'listLeaveRequests', MEMBER_VIEWER, self());
+    // The source holds another person's request too; a member's answer is narrowed to their own before anything is shown.
+    expect(requests).toHaveLength(1);
     expect(requests[0].id).toBe('55555555-5555-4555-8555-555555555555');
-    expect(requests[1]).not.toHaveProperty('id');
+    expect(requests[0].employee).toBe('Faiz Hakim');
+    expect(JSON.stringify(requests)).not.toContain('66666666-6666-4666-8666-666666666666');
     for (const r of requests) expect(r).not.toHaveProperty('over_balance');
   });
 
@@ -294,8 +297,9 @@ describe('leave lookups carry what a change needs', () => {
     expect(hrRows.map((r: Loose) => r.id)).toEqual(['77777777-7777-4777-8777-777777777777', '88888888-8888-4888-8888-888888888888']);
     expect(hrRows[0]).toMatchObject({ off_date: '2026-10-20', start_time: '14:00', end_time: '16:00', employee: 'Faiz Hakim' });
     const memberRows = (await runWith(lookupData, 'listTimeOffRequests', MEMBER_VIEWER, self())).requests;
+    expect(memberRows).toHaveLength(1);
     expect(memberRows[0].id).toBe('77777777-7777-4777-8777-777777777777');
-    expect(memberRows[1]).not.toHaveProperty('id');
+    expect(JSON.stringify(memberRows)).not.toContain('88888888-8888-4888-8888-888888888888');
     const none = (await runWith(lookupData, 'listTimeOffRequests', MEMBER_VIEWER)).requests;
     for (const r of none) expect(r).not.toHaveProperty('id');
   });

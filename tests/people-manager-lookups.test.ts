@@ -98,6 +98,18 @@ describe("a manager's lookups say whose rows they are", () => {
     expect(result.requests.every((r: Loose) => !('yours' in r))).toBe(true);
   });
 
+  it("a manager's own rows carry no over_balance or approved_this_year; only pending team claims carry the year total", async () => {
+    const data = await withOwnRequests();
+    const leave = (await run('listLeaveRequests', {}, { data })).requests as Loose[];
+    expect(leave.some((r) => r.yours)).toBe(true);
+    for (const r of leave.filter((x) => x.yours)) expect(r).not.toHaveProperty('over_balance');
+    for (const r of leave.filter((x) => !x.yours)) expect(r).toHaveProperty('over_balance');
+    const claims = (await run('listClaims', {}, { data })).claims as Loose[];
+    expect(claims.some((c) => c.yours)).toBe(true);
+    for (const c of claims.filter((x) => x.yours)) expect(c).not.toHaveProperty('approved_this_year');
+    for (const c of claims.filter((x) => !x.yours && x.status !== 'pending')) expect(c).not.toHaveProperty('approved_this_year');
+  });
+
   it('listOvertime comes from the pay-free function for the team, and holds no money for a report', async () => {
     const reports = TEAM.slice(0, 2);
     const client = fakeClient([teamOvertime('ot-1', reports[0]), teamOvertime('ot-2', reports[1], 'approved')]);
