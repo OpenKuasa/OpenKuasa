@@ -584,8 +584,31 @@ export function createHireTools(
           // And whatever was asked for, even nothing: when the list holds two interviews still SCHEDULED with one
           // person. "Cancel Aina's" after a plain list must lead to a question, not to the first of the two. This one
           // says which rows it means (`several_ids`), so the other people in the list are not held back with them.
-          const ahead = ordered.filter((i) => i.status === 'scheduled');
-          const twice = ahead.filter((i) => ahead.some((other) => other.id !== i.id && sameText(other.candidate_name) === sameText(i.candidate_name)));
+          const sameOnes = (list: typeof ordered) =>
+            list.filter((i) => list.some((other) => other.id !== i.id && sameText(other.candidate_name) === sameText(i.candidate_name)));
+          const twice = sameOnes(ordered.filter((i) => i.status === 'scheduled'));
+          // The same for two CLOSED interviews with one person: "mark hers as scheduled again" can mean only one.
+          const twiceClosed = sameOnes(ordered.filter((i) => i.status !== 'scheduled'));
+          const which = [
+            ...(twice.length > 0
+              ? [
+                  `More than one scheduled interview is with the same person: ${twice
+                    .slice(0, 10)
+                    .map((i) => `${i.candidate_name.trim()} (${i.job_title}, ${shortWhen(i.scheduled_at)})`)
+                    .join('; ')}. ` +
+                    'If the user means one of these, do not choose one. Prepare no change to it: say which ones there are and ask the user which one they mean.',
+                ]
+              : []),
+            ...(twiceClosed.length > 0
+              ? [
+                  `More than one closed interview (cancelled, completed or a no-show) is with the same person: ${twiceClosed
+                    .slice(0, 10)
+                    .map((i) => `${i.candidate_name.trim()} (${i.job_title}, ${shortWhen(i.scheduled_at)}, ${i.status})`)
+                    .join('; ')}. ` +
+                    'If the user means one of these to be marked as scheduled again, do not choose one. Prepare no change to it: say which ones there are and ask the user which one they mean.',
+                ]
+              : []),
+          ];
           return {
             total: rows.length,
             ...(asked
@@ -597,15 +620,7 @@ export function createHireTools(
                       .join('; ')}. ` +
                     'Do not choose one. Prepare no change: say which interviews match and ask the user which one they mean.',
                 }
-              : twice.length > 0 && {
-                  several_match:
-                    `More than one scheduled interview is with the same person: ${twice
-                      .slice(0, 10)
-                      .map((i) => `${i.candidate_name.trim()} (${i.job_title}, ${shortWhen(i.scheduled_at)})`)
-                      .join('; ')}. ` +
-                    'If the user means one of these, do not choose one. Prepare no change to it: say which ones there are and ask the user which one they mean.',
-                  several_ids: twice.map((i) => i.id),
-                }),
+              : which.length > 0 && { several_match: which.join(' '), several_ids: [...twice, ...twiceClosed].map((i) => i.id) }),
             interviews: ordered.slice(0, rowLimit(requested, 20)).map((i) => ({
               id: i.id,
               application_id: i.application_id,

@@ -156,7 +156,8 @@ export type InterviewCardRow = {
  * title are the same, of the same application or of a namesake's. `cut` when there were more than were read.
  * `also`: every other interview still SCHEDULED with this very CANDIDATE (by the candidate's id, across all their
  * applications; never a namesake's), soonest first, at most the first fifty: what a card lists so the person sees
- * there is more than one. `application_outcome`: whether the
+ * there is more than one. `alsoClosed`: the same candidate's other interviews that are NOT scheduled (cancelled,
+ * completed or a no-show), for the one change that acts on a closed interview. `application_outcome`: whether the
  * target's application is still active; null when there is no target.
  */
 export type InterviewCardRead = {
@@ -164,6 +165,7 @@ export type InterviewCardRead = {
   others: InterviewCardRow[];
   cut: boolean;
   also: InterviewCardRow[];
+  alsoClosed: InterviewCardRow[];
   application_outcome: ApplicationOutcome | null;
 };
 

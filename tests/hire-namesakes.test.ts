@@ -162,7 +162,7 @@ describe('namesakesFromLists', () => {
   });
 });
 
-const NOTHING = { target: null, others: [], cut: false, also: [], application_outcome: null };
+const NOTHING = { target: null, others: [], cut: false, also: [], alsoClosed: [], application_outcome: null };
 
 describe('readInterviewCard', () => {
   const IV = '99999999-9999-4999-8999-999999999999';
@@ -260,6 +260,10 @@ describe('readInterviewCard', () => {
       also: [
         { id: FOURTH, application_id: OTHER_APP, candidate: 'Aisyah Lim', job: 'Cashier', scheduled_at: '2026-10-23T02:00:00+00:00', kind: 'phone', ...rest, place: '+60 12-345 6789' },
       ],
+      // And her other interviews that are over: what a "mark as scheduled again" card lists.
+      alsoClosed: [
+        { id: SECOND, application_id: APP, candidate: 'Aisyah Lim', job: 'Barista', scheduled_at: '2026-10-27T07:00:00+00:00', kind: 'onsite', ...rest, status: 'completed' },
+      ],
       application_outcome: 'active',
     });
   });
@@ -341,11 +345,13 @@ describe('interviewCardFromLists', () => {
         { id: 'i4', application_id: 'a3', candidate: 'Aisyah Lim', job: 'Cashier', scheduled_at: '2026-10-20T07:00:00Z', kind: 'video', ...more },
         { id: 'i2', application_id: 'a1', candidate: 'Aisyah Lim', job: 'Barista', scheduled_at: '2026-10-27T07:00:00Z', kind: 'onsite', ...more },
       ],
+      alsoClosed: [],
       application_outcome: 'active',
     });
     // One that is no longer scheduled is not listed as still to come.
     const closed = list.map((i) => (i.id === 'i2' ? { ...i, status: 'cancelled' as const } : i));
     expect(interviewCardFromLists('i1', closed, applications).also.map((i) => i.id)).toEqual(['i4']);
+    expect(interviewCardFromLists('i1', closed, applications).alsoClosed).toEqual([{ id: 'i2', application_id: 'a1', candidate: 'Aisyah Lim', job: 'Barista', scheduled_at: '2026-10-27T07:00:00Z', kind: 'onsite', ...more, status: 'cancelled' }]);
     expect(interviewCardFromLists('i1', closed, applications).others.map((i) => i.id)).toEqual(['i2', 'i3']);
     // The namesake's own card lists nothing of hers.
     expect(interviewCardFromLists('i3', list, applications).also).toEqual([]);

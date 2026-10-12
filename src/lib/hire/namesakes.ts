@@ -177,7 +177,7 @@ export async function readNamesakes(
 
 // ─── which interview an approval card is about ───────────────────────────────
 
-const NO_INTERVIEW: InterviewCardRead = { target: null, others: [], cut: false, also: [], application_outcome: null };
+const NO_INTERVIEW: InterviewCardRead = { target: null, others: [], cut: false, also: [], alsoClosed: [], application_outcome: null };
 
 /**
  * The same answer from interviews already in memory, for a provider that holds all of its rows (the sample data,
@@ -204,16 +204,16 @@ export function interviewCardFromLists(
   const candidate = candidateOf.get(row.application_id);
   const sameCandidate = (applicationId: string) =>
     applicationId === row.application_id || (candidate !== undefined && candidateOf.get(applicationId) === candidate);
+  const theirs = interviews
+    .filter((i) => i.id !== row.id && sameCandidate(i.application_id))
+    .sort((a, b) => Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at));
   return {
     target: describe(row),
     others: sameName.filter((i) => sameText(i.job_title) === job).map(describe),
     cut: false,
     // The same person is the same candidate, never the same name: a namesake's interview is not this person's.
-    also: interviews
-      .filter((i) => i.id !== row.id && sameCandidate(i.application_id))
-      .filter((i) => i.status === 'scheduled')
-      .sort((a, b) => Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at))
-      .map(describe),
+    also: theirs.filter((i) => i.status === 'scheduled').map(describe),
+    alsoClosed: theirs.filter((i) => i.status !== 'scheduled').map(describe),
     application_outcome: row.application_outcome,
   };
 }
@@ -335,6 +335,7 @@ export async function readInterviewCard(client: SupabaseClient, orgId: string, i
     cut: people.cut || jobs.cut || applicationsRead.length > NAMESAKE_LIMIT || twinsRead.length > NAMESAKE_LIMIT,
     // A list for the person to read, not a promise: more than were read are simply not all listed.
     also: theirsRead.filter((i) => i.status === 'scheduled').map((i) => describe(i, titleOf.get(i.application_id) ?? title)),
+    alsoClosed: theirsRead.filter((i) => i.status !== 'scheduled').map((i) => describe(i, titleOf.get(i.application_id) ?? title)),
     application_outcome: row.application?.outcome ?? null,
   };
 }

@@ -1269,6 +1269,33 @@ describe('listInterviews, for the interview changes', () => {
     expect(byName.several_ids).toBeUndefined();
     expect((await list({ jobTitle: 'Sales Executive' }, twoAhead)).several_ids).toBeUndefined();
   });
+  it('says so too when the list holds two CLOSED interviews with one person: only one of them can be meant by "mark hers as scheduled again"', async () => {
+    const twoOver = from(
+      interview('i1', { status: 'cancelled' }),
+      interview('i2', { scheduled_at: '2026-10-22T03:00:00.000Z', status: 'no_show', kind: 'onsite' }),
+      interview('i3', { application_id: 'a2', candidate_name: 'Farid bin Osman', job_title: 'Barista', scheduled_at: '2026-10-21T02:00:00.000Z', status: 'completed' }),
+    );
+    const CLOSED =
+      'More than one closed interview (cancelled, completed or a no-show) is with the same person: Aina Rahman (Sales Executive, Tue 20 Oct 2026, 3:00 pm, cancelled); ' +
+      'Aina Rahman (Sales Executive, Thu 22 Oct 2026, 11:00 am, no_show). ' +
+      'If the user means one of these to be marked as scheduled again, do not choose one. Prepare no change to it: say which ones there are and ask the user which one they mean.';
+    for (const input of [{}, { limit: 50 }]) {
+      const out = await list(input, twoOver);
+      expect(out.several_match, JSON.stringify(input)).toBe(CLOSED);
+      expect(out.several_ids, JSON.stringify(input)).toEqual(['i1', 'i2']);
+    }
+    // One closed and one scheduled are neither two scheduled nor two closed.
+    expect((await list({}, three)).several_match).toBeUndefined();
+    // Two of each: both are said, and all four are held back.
+    const both = from(
+      interview('i1'), interview('i2', { scheduled_at: '2026-10-22T03:00:00.000Z' }),
+      interview('i4', { scheduled_at: '2026-10-06T03:00:00.000Z', status: 'completed' }), interview('i5', { scheduled_at: '2026-10-07T03:00:00.000Z', status: 'cancelled' }),
+    );
+    const said = await list({}, both);
+    expect(said.several_match).toContain('More than one scheduled interview is with the same person: Aina Rahman (Sales Executive, Tue 20 Oct 2026, 3:00 pm); ');
+    expect(said.several_match).toContain(' More than one closed interview (cancelled, completed or a no-show) is with the same person: Aina Rahman (Sales Executive, Tue 6 Oct 2026, 11:00 am, completed); ');
+    expect([...said.several_ids].sort()).toEqual(['i1', 'i2', 'i4', 'i5']);
+  });
   it('never lets the model choose the workspace, and takes no id', () => {
     const shape = (createHireTools(three, NOW).listInterviews as unknown as { inputSchema: { shape: Record<string, unknown> } }).inputSchema.shape;
     expect(Object.keys(shape).sort()).toEqual(['candidate', 'jobTitle', 'limit', 'status', 'when']);

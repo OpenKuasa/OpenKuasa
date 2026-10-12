@@ -39,10 +39,10 @@ import {
 } from '@/lib/ai/hire-deletions';
 import { lookedUpAs } from '@/lib/ai/hire-pool-gate';
 import { isHeldCvMessage } from '@/lib/ai/hire-tools';
-import { THIS_INTERVIEW, alsoScheduledLines, interviewFullLine, interviewLine } from '@/lib/hire/interviews';
+import { ALSO_SCHEDULED_MAX, THIS_INTERVIEW, alsoScheduledLines, interviewFullLine, interviewLine } from '@/lib/hire/interviews';
 import { interviewCardFromLists, namesakesFromLists } from '@/lib/hire/namesakes';
 import { instantMs, klInstant } from '@/lib/hire/interview-time';
-import type { HireData, Namesakes } from '@/lib/hire/types';
+import type { HireData, InterviewCardRow, Namesakes } from '@/lib/hire/types';
 
 export const HIRE_INTERVIEW_TOOL_NAMES = [
   'scheduleInterview', 'recordPastInterview', 'rescheduleInterview', 'cancelInterview', 'setInterviewOutcome', 'reopenInterview',
@@ -424,7 +424,7 @@ export function interviewCheckFor(
           ? check
           : { ok: false, refusal: lookTheSameInterviews(found.target?.name.trim() ?? '', found.target?.job?.trim() ?? '') };
       }
-      const { target, others, cut, also, application_outcome: outcome } = data.interviewCard
+      const { target, others, cut, also, alsoClosed, application_outcome: outcome } = data.interviewCard
         ? await data.interviewCard(id)
         : interviewCardFromLists(id, await data.listInterviews(), await data.listApplications());
       // Not there (deleted since it was listed, or since its card was shown): there is no line to put on a card.
@@ -457,7 +457,9 @@ export function interviewCheckFor(
       // The card's lines: which interview this is; which application, when a namesake has one for the same job; and
       // what else is scheduled with the person, so "cancel Aina's" cannot be approved without seeing there is another.
       const named = application.ok && application.note ? application : null;
-      const note = [THIS_INTERVIEW(interviewFullLine(target)), ...(named ? [named.note] : []), ...alsoScheduledLines(target.candidate, also ?? [])].join('\n');
+      // Marking one as scheduled again is the one change to a closed interview: its card lists the other closed ones too.
+      const closed = tool === 'reopenInterview' ? alsoClosedLines(target.candidate, alsoClosed ?? []) : [];
+      const note = [THIS_INTERVIEW(interviewFullLine(target)), ...(named ? [named.note] : []), ...alsoScheduledLines(target.candidate, also ?? []), ...closed].join('\n');
       return { ok: true, note, namesakes: named ? named.namesakes : [] };
     } catch {
       // Nothing of the error is logged: its words can hold a name, an email or a link.
@@ -467,10 +469,27 @@ export function interviewCheckFor(
   };
 }
 
+const STATUS_WORDS: Record<string, string> = { cancelled: 'cancelled', completed: 'completed', no_show: 'no-show', scheduled: 'scheduled' };
+/**
+ * The candidate's other CLOSED interviews, for the card of the one change that acts on a closed interview ("mark as
+ * scheduled again"): one line each with how it ended, at most three, then how many more. Two closed interviews of one
+ * person are as easily taken for each other as two scheduled ones. (It stands here, not with the other card
+ * sentences in lib/hire/interviews.ts, because that file was being changed by someone else when this was written.)
+ */
+export function alsoClosedLines(name: string, others: readonly InterviewCardRow[]): string[] {
+  const one = (text: string) => text.replace(/\s+/g, ' ').trim();
+  const who = one(name) || 'the candidate';
+  const lines = others
+    .slice(0, ALSO_SCHEDULED_MAX)
+    .map((other) => `Also closed for ${who}: ${interviewLine(other.scheduled_at, other.kind)} · ${STATUS_WORDS[other.status] ?? other.status} (${one(other.job)})`);
+  const more = others.length - ALSO_SCHEDULED_MAX;
+  return more > 0 ? [...lines, `and ${more} more`] : lines;
+}
+
 /** A stored chat keeps this much of a card's line (src/lib/chat/stored-parts.ts). */
 const LINE_KEPT = 500;
 /** A card's lines about the interview itself: everything before the list of what else is scheduled. */
-const ownLines = (note: string | null): string | null => (note === null ? null : note.split('\nAlso scheduled for ')[0]);
+const ownLines = (note: string | null): string | null => (note === null ? null : note.split(/\nAlso (?:scheduled|closed) for /)[0]);
 /**
  * True when the line the card showed is the line now, allowing for a card reopened from a stored chat. What else
  * is scheduled with the person is not compared: another interview that came, went or moved since the card does not

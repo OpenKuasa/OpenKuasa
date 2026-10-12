@@ -568,7 +568,7 @@ describe('the server\'s check of the interview', () => {
   const alone = { target: application(APP), others: [], cut: false };
   const provider = (read: unknown, applications: unknown = alone) => {
     // What the server's read answers: nothing else scheduled with that name, and an active application, unless `read` says otherwise.
-    const interviewCard = vi.fn(async () => (read ? { also: [], application_outcome: 'active', ...(read as object) } : read));
+    const interviewCard = vi.fn(async () => (read ? { also: [], alsoClosed: [], application_outcome: 'active', ...(read as object) } : read));
     const namesakes = vi.fn(async () => applications);
     const lists = { listCandidates: vi.fn(async () => [] as never), listApplications: vi.fn(async () => [] as never), listInterviews: vi.fn(async () => [] as never) };
     return { interviewCard, namesakes, lists, check: interviewCheckFor({ ...lists, interviewCard, namesakes } as never) };
@@ -650,6 +650,35 @@ describe('the server\'s check of the interview', () => {
     expect(await provider({ target: row(IV, APP), others: [], cut: false, also: [] }).check('cancelInterview', { id: IV })).toEqual({ ok: true, note: LINE, namesakes: [] });
     // A new interview has no line of its own, and lists nothing.
     expect(await provider({ target: row(IV, APP), others: [], cut: false, also: [second] }).check('scheduleInterview', { application_id: APP })).toEqual({ ok: true, note: null, namesakes: [] });
+  });
+  it('marking one as scheduled again: the card also lists the candidate\'s other closed interviews, and no other change does', async () => {
+    const done = row(IV2, APP, { scheduled_at: LATER, status: 'completed' });
+    const missed = row('00000003-0000-4000-8000-000000000000', APP2, { scheduled_at: '2026-10-23T02:00:00.000Z', kind: 'phone', status: 'no_show', job: 'Barista' });
+    const read = { target: row(IV, APP, { status: 'cancelled' }), others: [], cut: false, also: [], alsoClosed: [done, missed] };
+    expect(await provider(read).check('reopenInterview', { id: IV })).toEqual({
+      ok: true, namesakes: [],
+      note: `${LINE}\nAlso closed for Aina Rahman: Thu 22 Oct 2026, 11:00 am · video · completed (Sales Executive)\nAlso closed for Aina Rahman: Fri 23 Oct 2026, 10:00 am · phone · no-show (Barista)`,
+    });
+    // After what is still scheduled; at most three, then how many more.
+    const many = [1, 2, 3, 4].map((n) => row(`0000000${n}-0000-4000-8000-000000000001`, APP, { scheduled_at: `2026-10-2${n}T03:00:00.000Z`, status: 'cancelled' }));
+    const ahead = row(IV2, APP, { scheduled_at: LATER });
+    const long = (await provider({ ...read, also: [ahead], alsoClosed: many }).check('reopenInterview', { id: IV })) as { note: string };
+    expect(long.note.split('\n')).toEqual([
+      LINE, ALSO_LATER,
+      'Also closed for Aina Rahman: Wed 21 Oct 2026, 11:00 am · video · cancelled (Sales Executive)',
+      'Also closed for Aina Rahman: Thu 22 Oct 2026, 11:00 am · video · cancelled (Sales Executive)',
+      'Also closed for Aina Rahman: Fri 23 Oct 2026, 11:00 am · video · cancelled (Sales Executive)',
+      'and 1 more',
+    ]);
+    // The other three changes act on a scheduled interview: a closed one cannot be taken for it.
+    for (const tool of ['rescheduleInterview', 'cancelInterview', 'setInterviewOutcome']) {
+      expect(await provider({ ...read, target: row(IV, APP) }).check(tool, { id: IV }), tool).toEqual({ ok: true, note: LINE, namesakes: [] });
+    }
+    // The closed ones may come or go between the card and the yes, as the scheduled ones may.
+    const shown = `${LINE}\nAlso closed for Aina Rahman: Thu 22 Oct 2026, 11:00 am · video · completed (Sales Executive)`;
+    expect(interviewCardDecision({ ok: true, note: LINE, namesakes: [] }, { note: shown })).toEqual({ type: 'user-approval', reason: LINE });
+    expect(interviewCardDecision({ ok: true, note: shown, namesakes: [] }, { note: `${LINE}\n${ALSO_LATER}` })).toEqual({ type: 'user-approval', reason: shown });
+    expect(interviewCardDecision({ ok: true, note: shown.replace('3:00 pm', '4:00 pm'), namesakes: [] }, { note: shown })).toEqual({ type: 'denied', reason: INTERVIEW_CHANGED_SINCE });
   });
   it('an interview that is not there gets no card: there is no line to put on one', async () => {
     const { check } = provider({ target: null, others: [], cut: false, application_outcome: null });

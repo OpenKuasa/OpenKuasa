@@ -2626,7 +2626,7 @@ describe('interview changes', () => {
   };
   const NEW = { application_id: APP, date: '2027-01-12', time: '15:00', duration_minutes: 60, kind: 'video' };
 
-  type State = { at: string; twin: boolean; fail: boolean; both?: boolean; place?: string | null; minutes?: number; gone?: boolean; outcome?: 'active' | 'rejected'; namesake?: boolean };
+  type State = { at: string; twin: boolean; fail: boolean; both?: boolean; place?: string | null; minutes?: number; gone?: boolean; outcome?: 'active' | 'rejected'; namesake?: boolean; first?: 'scheduled' | 'cancelled' | 'completed' };
   /**
    * One application with two interviews, a first and a second round; `state` can move the first, make the second
    * read exactly like it, make the server's read fail, or (`both`) leave the second scheduled too: it is cancelled
@@ -2643,7 +2643,7 @@ describe('interview changes', () => {
     /** A namesake's application for another job, with a scheduled interview: another person, not this one. */
     const NAMESAKE_APP = '44444444-4444-4444-8444-444444444478';
     const NAMESAKE_IV = '33333333-3333-4333-8333-333333333378';
-    const listInterviews = async () => [...(state.namesake ? [{ ...interview(NAMESAKE_IV, LATER, null), application_id: NAMESAKE_APP, job_title: 'Barista' }] : []), ...(state.gone ? [] : [interview(IV, state.at, state.place ?? null, 'scheduled', state.minutes)]), interview(IV2, state.twin ? state.at : LATER, ROOM, state.both ? 'scheduled' : 'cancelled')];
+    const listInterviews = async () => [...(state.namesake ? [{ ...interview(NAMESAKE_IV, LATER, null), application_id: NAMESAKE_APP, job_title: 'Barista' }] : []), ...(state.gone ? [] : [{ ...interview(IV, state.at, state.place ?? null, 'scheduled', state.minutes), status: state.first ?? ('scheduled' as const) }]), interview(IV2, state.twin ? state.at : LATER, ROOM, state.both ? 'scheduled' : 'cancelled')];
     const listApplications = async () =>
       (await base.listApplications()).map((a, n) =>
         n === 0 ? { ...a, id: APP, candidate_name: WHO, job_title: JOB, stage: 'interview' as const, outcome: 'active' as const, cover_letter: `Please interview me on ${LETTER_LINK}`, cv_url: LETTER_LINK, portfolio_url: LETTER_LINK }
@@ -2840,6 +2840,19 @@ describe('interview changes', () => {
       expect(namesake.cards[0].reason).toBe(LINE);
       const own = await prepare([{ tool: 'cancelInterview', input: { id: IV } }], world({ at: AT, twin: false, fail: false, namesake: true, both: true }), known);
       expect(own.cards[0].reason).toBe(LINE_AND_LATER);
+    });
+    it('two closed interviews with one person: marking one as scheduled again is held back after a plain list, and in a new turn the card lists the other', async () => {
+      const over = () => world({ at: AT, twin: false, fail: false, first: 'completed' });
+      const again: Call = { tool: 'reopenInterview', input: { id: IV2 } };
+      const sameTurn = await prepare([listAll, again, 'answer'], over(), { said: `Mark the interview with ${WHO} as scheduled again` });
+      expect(sameTurn.context.proposals.size).toBe(0);
+      expect(seen.refusals[0]).toBe(AMBIGUOUS);
+      const newTurn = await prepare([again], over(), { names: { [`interview:${IV2}`]: `${WHO} (${JOB})` }, said: 'Mark it as scheduled again' });
+      expect(seen.refusals).toEqual([]);
+      expect(newTurn.cards[0].reason).toBe(
+        'This interview: Thu 22 Oct 2026, 11:00 am · video · 1 hour · Link: https://meet.example.com/room-2\n' +
+          'Also closed for Putri Maisarah Dahlan: Tue 20 Oct 2026, 3:00 pm · video · completed (Night Auditor)',
+      );
     });
     it('refuses a link nobody gave: not one made up, and not one that only Tuah wrote', async () => {
       const withLink: Call = { tool: 'scheduleInterview', input: { ...NEW, place: LINK } };
@@ -3282,6 +3295,21 @@ describe('interview changes', () => {
       // Her own second interview is.
       const own = await request([[{ tool: 'cancelInterview', input: { id: IV } }]], agent, world({ at: AT, twin: false, fail: false, namesake: true, both: true }), 'Cancel it');
       expect(own.cards[0].reason).toBe(LINE_AND_LATER);
+    });
+    it.each(agents)('%s: two closed interviews with one person: "mark hers as scheduled again" is held back after a plain list, and in a new turn the card lists the other', async (agent) => {
+      // The first was completed and the second cancelled: either could be meant.
+      const over = () => world({ at: AT, twin: false, fail: false, first: 'completed' });
+      const again: Call = { tool: 'reopenInterview', input: { id: IV2 } };
+      const sameTurn = await request([[listAll], [again]], agent, over(), `Mark the interview with ${WHO} as scheduled again`);
+      expect(seen.calls[1].prompt).toContain('More than one closed interview (cancelled, completed or a no-show) is with the same person');
+      expect(sameTurn.cards).toEqual([]);
+      expect(sameTurn.denials).toEqual([AMBIGUOUS]);
+      const newTurn = await request([[again]], agent, over(), 'Mark it as scheduled again');
+      expect(newTurn.denials).toEqual([]);
+      expect(newTurn.cards[0].reason).toBe(
+        'This interview: Thu 22 Oct 2026, 11:00 am · video · 1 hour · Link: https://meet.example.com/room-2\n' +
+          'Also closed for Putri Maisarah Dahlan: Tue 20 Oct 2026, 3:00 pm · video · completed (Night Auditor)',
+      );
     });
     it.each(agents)('%s: a made-up link is denied, and a link the user typed passes', async (agent) => {
       const withLink: Call = { tool: 'scheduleInterview', input: { ...NEW, place: LINK } };

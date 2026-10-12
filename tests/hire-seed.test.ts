@@ -81,6 +81,7 @@ describe('hire seed', () => {
       others: [],
       cut: false,
       also: [],
+      alsoClosed: [],
       application_outcome: one.application_outcome,
     });
   });
