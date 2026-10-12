@@ -4,7 +4,7 @@ import type { FinanceWriteContext } from '@/lib/finance/result';
 export type FinanceCall = {
   kind: 'rpc' | 'table';
   name: string;
-  op: 'rpc' | 'select' | 'update' | 'delete';
+  op: 'rpc' | 'select' | 'insert' | 'update' | 'delete';
   args?: Record<string, unknown>;
   values?: Record<string, unknown>;
   columns?: string;
@@ -39,6 +39,11 @@ export function fakeFinance(answer: FinanceAnswer | ((call: FinanceCall) => Fina
           call.columns = columns;
           return builder;
         },
+        insert(values: Record<string, unknown>) {
+          call.op = 'insert';
+          call.values = values;
+          return builder;
+        },
         update(values: Record<string, unknown>) {
           call.op = 'update';
           call.values = values;
@@ -65,6 +70,7 @@ export function fakeFinance(answer: FinanceAnswer | ((call: FinanceCall) => Fina
           return builder;
         },
         maybeSingle: async () => reply(call),
+        single: async () => reply(call),
         then<A, B>(resolve: (value: FinanceAnswer) => A, reject?: (reason: unknown) => B) {
           return Promise.resolve(reply(call)).then(resolve, reject);
         },

@@ -228,6 +228,8 @@ describe('billFormFromDetail', () => {
     notes: 'urgent',
     purchase_order_id: null,
     purchase_order_no: null,
+    category_id: null,
+    category_name: null,
     lines: [
       { id: 'line-1', product_id: PRODUCT, description: 'Nitrile Gloves (Box)', quantity: 10, uom: 'box', pack_size: '100 pcs', unit_price: 12.5, sst_rate: 6, amount: 125, sst_amount: 7.5 },
       { id: 'line-2', product_id: null, description: 'Delivery', quantity: 1, uom: null, pack_size: null, unit_price: 0, sst_rate: 0, amount: 0, sst_amount: 0 },
@@ -285,6 +287,8 @@ const detailFor = (): BillDetail => ({
   notes: null,
   purchase_order_id: null,
   purchase_order_no: null,
+  category_id: null,
+  category_name: null,
   lines: [],
 });
 const PO_2 = '77777777-7777-4777-8777-777777777777';

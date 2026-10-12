@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FinanceWriteContext } from '@/lib/finance/result';
-import { BILL_PAGE_SIZE, deleteBill, getBill, listBills, postBill, saveBill, saveBillInput, voidBill } from '@/lib/finance/bills';
+import { BILL_MESSAGES, BILL_PAGE_SIZE, deleteBill, getBill, listBills, postBill, saveBill, saveBillInput, voidBill } from '@/lib/finance/bills';
 
 const ID = '33333333-3333-4333-8333-333333333333';
 const SUPPLIER = '44444444-4444-4444-8444-444444444444';
@@ -98,6 +98,36 @@ describe('saveBillInput purchase_order_id', () => {
     const { ctx } = fakeClient({ data: null, error: { code: 'FIN21' } });
     expect(await saveBill(ctx, { ...valid, purchase_order_id: PO })).toEqual({
       ok: false, error: 'Choose an approved purchase order from this supplier, or none.',
+    });
+  });
+});
+
+describe('saveBillInput category_id', () => {
+  const CATEGORY = '99999999-9999-4999-8999-999999999999';
+  it('leaves the key out when the input has none, so a draft keeps its category and a new bill gets the default', () => {
+    expect(saveBillInput.parse(valid)).not.toHaveProperty('category_id');
+  });
+  it('takes a category id, and an empty box or null as null (the database then gives the default)', () => {
+    expect(saveBillInput.parse({ ...valid, category_id: CATEGORY }).category_id).toBe(CATEGORY);
+    expect(saveBillInput.parse({ ...valid, category_id: '' }).category_id).toBeNull();
+    expect(saveBillInput.parse({ ...valid, category_id: null }).category_id).toBeNull();
+  });
+  it('refuses something that is not an id, in the category’s words', () => {
+    expect(first({ ...valid, category_id: 'nope' })).toBe('Choose an expense category for the bill.');
+    expect(BILL_MESSAGES.category).toBe('Choose an expense category for the bill.');
+  });
+  it('sends it to the database function only when the input has it', async () => {
+    const withCategory = fakeClient({ data: ID, error: null });
+    await saveBill(withCategory.ctx, { ...valid, category_id: CATEGORY });
+    expect(withCategory.calls[0].args!.bill).toMatchObject({ category_id: CATEGORY });
+    const without = fakeClient({ data: ID, error: null });
+    await saveBill(without.ctx, valid);
+    expect(without.calls[0].args!.bill).not.toHaveProperty('category_id');
+  });
+  it('turns FIN26 into the category sentence', async () => {
+    const { ctx } = fakeClient({ data: null, error: { code: 'FIN26' } });
+    expect(await saveBill(ctx, { ...valid, category_id: CATEGORY })).toEqual({
+      ok: false, error: 'Choose an expense category for the bill.',
     });
   });
 });
@@ -245,5 +275,56 @@ describe('getBill with purchase orders', () => {
       finance_bill_purchase_orders: { rows: [] },
     });
     expect(await getBill(ctx, ID)).toMatchObject({ purchase_order_id: null, purchase_order_no: null });
+  });
+});
+
+describe('bills with categories', () => {
+  const CAT = 'cat-1';
+  const cats = { finance_categories: { rows: [{ id: CAT, name: 'Purchases' }, { id: 'cat-2', name: 'Utilities' }] } };
+
+  it('gives each bill its category and the category’s name, read from the bills themselves', async () => {
+    const { ctx, reads } = tableClient({
+      supplier_bill_totals: { rows: [billRow('b1'), billRow('b2')] },
+      supplier_bills: { rows: [{ id: 'b1', category_id: CAT }, { id: 'b2', category_id: 'cat-2' }] },
+      ...cats,
+    });
+    const rows = await listBills(ctx);
+    expect(rows.map((r) => [r.id, r.category_id, r.category_name])).toEqual([
+      ['b1', CAT, 'Purchases'],
+      ['b2', 'cat-2', 'Utilities'],
+    ]);
+    expect(reads.find((r) => r.table === 'supplier_bills')!.eq).toEqual({ org_id: 'org-1' });
+    expect(reads.find((r) => r.table === 'finance_categories')!.eq).toEqual({ org_id: 'org-1' });
+  });
+  it('reads the categories of bills a page at a time as well', async () => {
+    const many = Array.from({ length: BILL_PAGE_SIZE + 1 }, (_, i) => ({ id: `b${i}`, category_id: CAT }));
+    const { ctx, reads } = tableClient({ supplier_bill_totals: { rows: [billRow('b0')] }, supplier_bills: { rows: many }, ...cats });
+    await listBills(ctx);
+    expect(reads.filter((r) => r.table === 'supplier_bills').map((r) => r.range)).toEqual([
+      [0, BILL_PAGE_SIZE - 1],
+      [BILL_PAGE_SIZE, 2 * BILL_PAGE_SIZE - 1],
+    ]);
+  });
+  it('has none for a bill whose category cannot be found', async () => {
+    const { ctx } = tableClient({ supplier_bill_totals: { rows: [billRow('b1')] }, supplier_bills: { rows: [] }, ...cats });
+    expect((await listBills(ctx))[0]).toMatchObject({ category_id: null, category_name: null });
+  });
+  it('fails like the other reads when the categories cannot be read', async () => {
+    const { ctx } = tableClient({ supplier_bill_totals: { rows: [billRow('b1')] }, supplier_bills: { error: { code: 'x' } }, ...cats });
+    await expect(listBills(ctx)).rejects.toEqual({ code: 'x' });
+    const second = tableClient({
+      supplier_bill_totals: { rows: [billRow('b1')] }, supplier_bills: { rows: [{ id: 'b1', category_id: CAT }] }, finance_categories: { error: { code: 'y' } },
+    });
+    await expect(listBills(second.ctx)).rejects.toEqual({ code: 'y' });
+  });
+  it('carries the category of one bill', async () => {
+    const { ctx, reads } = tableClient({
+      supplier_bill_totals: { rows: [billRow(ID, { supplier_ref: null, notes: null })] },
+      supplier_bill_lines: { rows: [] },
+      supplier_bills: { rows: [{ id: ID, category_id: 'cat-2' }, { id: 'other', category_id: CAT }] },
+      ...cats,
+    });
+    expect(await getBill(ctx, ID)).toMatchObject({ id: ID, category_id: 'cat-2', category_name: 'Utilities' });
+    expect(reads.find((r) => r.table === 'supplier_bills')!.eq).toEqual({ org_id: 'org-1', id: ID });
   });
 });

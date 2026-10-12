@@ -44,6 +44,8 @@ const sample = (
   display_status,
   purchase_order_id: null,
   purchase_order_no: null,
+  category_id: null,
+  category_name: null,
 });
 
 const SAMPLE_BILLS: BillListRow[] = [
