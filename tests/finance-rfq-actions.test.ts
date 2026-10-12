@@ -242,3 +242,33 @@ describe('getRfqAction', () => {
     logged.mockRestore();
   });
 });
+
+describe('getSentRfqAction', () => {
+  const sent = { id: RFQ, status: 'sent', lines: [] };
+
+  it('returns a sent RFQ with its lines, without refreshing anything', async () => {
+    ctl.rfq = sent;
+    expect(await actions.getSentRfqAction({ id: RFQ })).toEqual({ ok: true, data: sent });
+    expect(ctl.revalidated).toEqual([]);
+  });
+
+  it('refuses an RFQ in any other status, and refreshes the list', async () => {
+    for (const status of ['draft', 'quoted', 'closed']) {
+      ctl.revalidated = [];
+      ctl.rfq = { ...sent, status };
+      expect(await actions.getSentRfqAction({ id: RFQ }), status).toEqual({ ok: false, error: LOCKED });
+      expect(ctl.revalidated, status).toEqual(RFQS);
+    }
+  });
+
+  it('says the RFQ is gone, tells a viewer they may not, and answers a failed read with a sentence', async () => {
+    expect(await actions.getSentRfqAction({ id: RFQ })).toEqual(GONE);
+    expect(await actions.getSentRfqAction({ id: 'nope' })).toEqual(GONE);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    ctl.rfq = new Error('connection reset');
+    expect(await actions.getSentRfqAction({ id: RFQ })).toEqual({ ok: false, error: 'That could not be loaded. Please try again.' });
+    logged.mockRestore();
+    ctl.viewer = { userId: 'u1', orgId: 'org1', role: 'viewer', isDemo: false };
+    expect(await actions.getSentRfqAction({ id: RFQ })).toEqual(FORBIDDEN);
+  });
+});

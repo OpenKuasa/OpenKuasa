@@ -41,6 +41,7 @@ describe('a change to a contact', () => {
         '/finance/customers-suppliers',
         '/finance/supplier-bills',
         '/finance/payments-out',
+        '/finance/rfqs',
         '/finance/invoices',
         '/finance/payments-in',
         '/finance/quotations',

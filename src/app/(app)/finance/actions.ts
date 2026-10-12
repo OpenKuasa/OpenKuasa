@@ -179,6 +179,7 @@ const CONTACT_PATHS = [
   '/finance/customers-suppliers',
   '/finance/supplier-bills',
   '/finance/payments-out',
+  '/finance/rfqs',
   '/finance/invoices',
   '/finance/payments-in',
   '/finance/quotations',
@@ -476,6 +477,26 @@ export async function saveAndSendRfqAction(input: unknown): Promise<SaveAndSendR
 /** One draft RFQ with its lines, for the Edit form; see `draftForEditing`. */
 export async function getRfqAction(input: unknown): Promise<FinResult<RfqDetail>> {
   return draftForEditing(RFQ_PATHS, rfqIdInput, input, getRfq, RFQ_MESSAGES, 'RFQ');
+}
+
+/**
+ * One sent RFQ with its lines, for the Record prices form. `getRfqAction` reads drafts only; this reads the
+ * other end of the life of an RFQ, the one awaiting the supplier's answer.
+ */
+export async function getSentRfqAction(input: unknown): Promise<FinResult<RfqDetail>> {
+  const ctx = await writeCtx();
+  if (!ctx) return FORBIDDEN;
+  const parsed = rfqIdInput.safeParse(input);
+  if (!parsed.success) return { ok: false, error: RFQ_MESSAGES.gone };
+  try {
+    const rfq = await getRfq(ctx, parsed.data.id);
+    if (rfq?.status === 'sent') return { ok: true, data: rfq };
+    refresh(RFQ_PATHS);
+    return { ok: false, error: rfq ? RFQ_MESSAGES.locked : RFQ_MESSAGES.gone };
+  } catch (error) {
+    console.error('[finance] a sent RFQ could not be read:', error);
+    return { ok: false, error: READ_FAILED };
+  }
 }
 
 /* ---- credit notes ------------------------------------------------------ */
