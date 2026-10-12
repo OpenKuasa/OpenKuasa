@@ -228,9 +228,6 @@ export function EmployeesTable({
                     <div className="min-w-0">
                       <p className="truncate font-medium">
                         {employee.name}
-                        {employee.is_manager ? (
-                          <span className="ml-2 text-xs font-normal text-muted-foreground">Manager</span>
-                        ) : null}
                       </p>
                       <p className="truncate text-xs text-muted-foreground">{employee.work_email ?? '—'}</p>
                     </div>

@@ -1,5 +1,8 @@
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { addDays, monthStart, todayInMalaysia } from '@/lib/people/dates';
+import { wouldLoop } from '@/lib/people/reporting';
 import { createSeedPeopleData } from '@/lib/people/seed';
 import { DEMO_EMPLOYEE_ID } from '@/lib/people/types';
 
@@ -177,5 +180,47 @@ describe('people seed', () => {
     expect((await data.getSettings()).notifications).toEqual({
       leave_requests: true, payslip_ready: true, document_expiry: true, birthdays: false,
     });
+  });
+});
+
+describe('people seed reporting lines', () => {
+  const id = (n: number) => (n === 1 ? DEMO_EMPLOYEE_ID : `seed-emp-${n}`);
+
+  it('puts each department under its lead, and the leads and Management under nobody', async () => {
+    const employees = await data.listEmployees();
+    const line = (n: number) => employees.find((e) => e.id === id(n))?.reports_to;
+    for (const n of [1, 5, 10, 11, 13]) expect(line(n), `employee ${n}`).toBe('seed-emp-12');
+    for (const n of [6, 14, 15, 16]) expect(line(n), `employee ${n}`).toBe('seed-emp-3');
+    for (const n of [2, 17]) expect(line(n), `employee ${n}`).toBe('seed-emp-9');
+    for (const n of [4, 8]) expect(line(n), `employee ${n}`).toBe('seed-emp-18');
+    for (const n of [3, 9, 12, 18, 7, 19, 20]) expect(line(n), `employee ${n}`).toBeNull();
+  });
+
+  it('no longer carries the old manager flag', async () => {
+    for (const employee of await data.listEmployees()) expect(employee).not.toHaveProperty('is_manager');
+  });
+
+  it('holds no loop', async () => {
+    const employees = await data.listEmployees();
+    for (const e of employees) {
+      if (e.reports_to !== null) expect(wouldLoop(e.id, e.reports_to, employees), e.name).toBe(false);
+    }
+  });
+
+  it('is kept in step with the demo re-seed in the reporting lines migration', async () => {
+    const sql = readFileSync(
+      join(process.cwd(), 'supabase/migrations', readdirSync(join(process.cwd(), 'supabase/migrations')).find((f) => f.endsWith('_people_reporting_lines.sql'))!),
+      'utf8',
+    );
+    const pairs = [...sql.matchAll(/\('([A-Za-z]+)', (\d+)\)/g)]
+      .map((m) => [m[1], Number(m[2])] as const)
+      .filter(([dept]) => ['Sales', 'Operations', 'Marketing', 'Finance'].includes(dept));
+    expect(pairs).toEqual([['Sales', 12], ['Operations', 3], ['Marketing', 9], ['Finance', 18]]);
+    const employees = await data.listEmployees();
+    for (const [dept, lead] of pairs) {
+      const others = employees.filter((e) => e.department_name === dept && e.id !== id(lead));
+      expect(others.length, dept).toBeGreaterThan(0);
+      for (const e of others) expect(e.reports_to, `${dept}: ${e.name}`).toBe(id(lead));
+    }
   });
 });

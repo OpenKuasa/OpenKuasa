@@ -1974,7 +1974,6 @@ const EMPLOYEE_FIELDS: EmployeeField[] = [
   { key: 'department_id', word: 'department' },
   { key: 'designation', word: 'designation' },
   { key: 'employment_type', word: 'employment type' },
-  { key: 'is_manager', word: 'manager flag' },
   { key: 'join_date', word: 'join date' },
   { key: 'status', word: 'status', show: shownText },
 ];

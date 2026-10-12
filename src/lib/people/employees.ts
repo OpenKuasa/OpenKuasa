@@ -98,7 +98,6 @@ export type EmployeeFormValues = {
   department_id: string;
   designation: string;
   employment_type: EmploymentType;
-  is_manager: boolean;
   join_date: string;
   status: EmployeeStatus;
   nric: string;
@@ -137,7 +136,6 @@ export function employeeFormValues(employee: Employee | null, priv: EmployeePriv
     department_id: employee?.department_id ?? '',
     designation: employee?.designation ?? '',
     employment_type: employee?.employment_type ?? 'full_time',
-    is_manager: employee?.is_manager ?? false,
     join_date: employee?.join_date ?? '',
     status: employee?.status ?? 'active',
     nric: priv?.nric ?? '',
@@ -174,7 +172,6 @@ export function toEmployeeInput(
     department_id: orNull(values.department_id),
     designation: orNull(values.designation),
     employment_type: values.employment_type,
-    is_manager: values.is_manager,
     join_date: orNull(values.join_date),
     status: values.status,
   };

@@ -56,7 +56,6 @@ const FIELD_LABELS: Record<string, string> = {
   careers_enabled: 'Public careers page',
   careers_headline: 'Headline',
   careers_tagline: 'Tagline',
-  is_manager: 'Manager',
   half_day: 'Half day',
   memberEmail: 'Account email',
   approve: 'Decision',

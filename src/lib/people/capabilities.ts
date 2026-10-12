@@ -211,7 +211,6 @@ const directoryFields = {
   department_id: id.nullable().optional().describe('The department, by its id from listDepartments.'),
   designation: text(120).describe('Job title, such as Sales Executive.'),
   employment_type: z.enum(['full_time', 'part_time', 'contract', 'intern']).optional(),
-  is_manager: z.boolean().optional(),
   join_date: day('Join date'),
   status: z.enum(['active', 'inactive']).optional(),
   private: privateFields.optional(),
@@ -248,7 +247,6 @@ function directoryValues(input: DirectoryInput): CapResult<Record<string, unknow
   if (input.department_id !== undefined) out.department_id = input.department_id;
   if (input.designation !== undefined) out.designation = blankToNull(input.designation);
   if (input.employment_type !== undefined) out.employment_type = input.employment_type;
-  if (input.is_manager !== undefined) out.is_manager = input.is_manager;
   if (input.join_date !== undefined) {
     if (input.join_date !== null && !isRealDay(input.join_date)) {
       return refuse('Join date must be a real date, as YYYY-MM-DD.');

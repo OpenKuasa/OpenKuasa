@@ -564,7 +564,6 @@ const directoryRow = (e: Employee) => ({
   department: e.department_name,
   designation: e.designation,
   employment_type: e.employment_type,
-  is_manager: e.is_manager,
   join_date: e.join_date,
   status: e.status,
   work_email: e.work_email,

@@ -257,7 +257,13 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
     created_at: ago(3000),
   }));
 
-  const employees: Employee[] = PEOPLE.map(([n, name, handle, dept, designation, type, manager, tenure, bday]) => {
+  // Each department's lead; the others in it report to them. Kept in step with the demo re-seed in
+  // supabase/migrations/*_people_reporting_lines.sql (a test reads both).
+  const LEADS: Record<string, number> = { Sales: 12, Operations: 3, Marketing: 9, Finance: 18 };
+  const leadOf = (n: number, dept: string): string | null =>
+    LEADS[dept] !== undefined && LEADS[dept] !== n ? employeeId(LEADS[dept]) : null;
+
+  const employees: Employee[] = PEOPLE.map(([n, name, handle, dept, designation, type, , tenure, bday]) => {
     const birthday = addDays(today, bday);
     return {
       id: employeeId(n),
@@ -269,7 +275,7 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
       department_name: dept,
       designation,
       employment_type: type,
-      is_manager: manager,
+      reports_to: leadOf(n, dept),
       join_date: addDays(today, -tenure),
       status: 'active',
       date_of_birth_day: Number(birthday.slice(8, 10)),

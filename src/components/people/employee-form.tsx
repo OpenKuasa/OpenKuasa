@@ -149,16 +149,6 @@ export function EmployeeForm({
           </Field>
         ) : null}
       </div>
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          className="size-4 accent-primary"
-          checked={values.is_manager}
-          onChange={(event) => set('is_manager', event.target.checked)}
-        />
-        Manages other people
-      </label>
-
       <div className="space-y-3 border-t pt-4">
         <div>
           <p className="text-sm font-medium">Private details</p>

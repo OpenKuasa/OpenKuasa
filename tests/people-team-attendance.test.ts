@@ -17,7 +17,7 @@ const emp = (id: string, name: string, over: Partial<Employee> = {}): Employee =
   department_name: 'Ops',
   designation: null,
   employment_type: 'full_time',
-  is_manager: false,
+  reports_to: null,
   join_date: '2025-01-01',
   status: 'active',
   date_of_birth_day: null,
