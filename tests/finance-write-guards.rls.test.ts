@@ -7,9 +7,10 @@
  * One workspace with its owner and a member (role `member`, a writer). The
  * member writes drafts and schedules; posting, paying and voiding are refused
  * to them with FIN14 and work for the owner. The columns of a payment that
- * only the database writes are refused to both. The last three tests go
- * through the cash book functions (a cash receipt, a payment voucher), which
- * number a payment and so run as the owner like the rest.
+ * only the database writes are refused to both. Three tests go through the
+ * cash book functions (a cash receipt, two payment vouchers), which number a
+ * payment and so run as the owner like the rest; the last two go through the
+ * cash receipts data layer (a receipt for income, a receipt for invoices).
  *
  * Workspaces and users come from tests/helpers/live-workspaces.ts, which also
  * removes them.
@@ -358,7 +359,9 @@ const receiptRow = async (id: string) => {
 testWithSupabase('a receipt for income: a member saves, changes and cannot post or void it; the owner posts and voids it', async () => {
   const asMember = { client: member.c, orgId };
   const asOwner = { client: owner.c, orgId };
-  const sales = (await listIncomeCategories(asMember)).find((c) => c.name === 'Sales')!.id;
+  const salesCategory = (await listIncomeCategories(asMember)).find((c) => c.name === 'Sales');
+  expect(salesCategory, 'the workspace has an income category called Sales').toBeDefined();
+  const sales = salesCategory?.id as string;
   const details = { kind: 'income' as const, account_id: bank, txn_date: daysFromToday(0), method: 'cash' as const, category_id: sales };
 
   const { id } = done(await saveCashReceipt(asMember, { ...details, amount: 32.506, party_name: ' Walk-in ' }));
