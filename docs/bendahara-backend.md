@@ -719,8 +719,9 @@ Accounts are managed on Banking: "Add account" in the header, and Edit,
 Archive and Restore in the Accounts table, which lists every account,
 archived ones included. `bank-accounts.ts` has one schema and one function per
 write (`createBankAccount`, `updateBankAccount`, `setBankAccountActive`) and
-`listBankAccountNumbers`; `bank-account-form.ts` has the form's rules and what the
-table shows. The three actions refresh `BANK_ACCOUNT_PATHS`: Banking, every
+`listBankAccountNumbers`. A change always writes the bank name and number: one
+that is left out is cleared, and the form always sends both. `bank-account-form.ts`
+has the form's rules and what the table shows. The three actions refresh `BANK_ACCOUNT_PATHS`: Banking, every
 screen whose forms offer an account or whose rows name one, and the three ledger
 screens (Chart of Accounts, Journals and Reports), since each account has a ledger
 account and an opening balance is an entry in the books.

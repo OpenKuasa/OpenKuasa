@@ -96,7 +96,9 @@ export const createBankAccountInput = z.object({
 /**
  * An account being changed: its name and bank details always, its opening
  * balance and date only when they are sent. Bank or cash is not here: it was
- * chosen when the account was added.
+ * chosen when the account was added. A bank name or number that is left out
+ * is cleared, not kept: the form always sends both, so a change that omits
+ * them is a change to none (pinned by a unit test).
  */
 export const updateBankAccountInput = z.object({
   id,

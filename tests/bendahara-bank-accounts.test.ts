@@ -86,7 +86,7 @@ testWithSupabase('an owner adds an account with an opening balance and a number;
     ok: false,
     error: BANK_ACCOUNT_MESSAGES.needsSignOff,
   });
-  expect(await updateBankAccount(owner, { id: savings.data.id, name: 'Savings account', opening_balance: -20.5, opening_date: '2026-10-01' })).toMatchObject({ ok: true });
+  expect(await updateBankAccount(owner, { id: savings.data.id, name: 'Savings account', bank_name: 'Other Bank', account_no: '8009999999', opening_balance: -20.5, opening_date: '2026-10-01' })).toMatchObject({ ok: true });
   const after = (await listBankAccounts(owner)).find((a) => a.id === savings.data.id);
   expect(after).toMatchObject({ name: 'Savings account', bank_name: 'Other Bank', opening_balance: -20.5, opening_date: '2026-10-01' });
   expect((await listBankAccountNumbers(owner))[savings.data.id]).toBe('8009999999');

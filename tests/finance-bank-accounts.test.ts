@@ -211,6 +211,13 @@ describe('updateBankAccount', () => {
     expect(await updateBankAccount(fake(refused('FIN14')).ctx, { id: ID, name: 'A' })).toEqual({ ok: false, error: M.needsSignOff });
   });
 
+  it('clears the bank name and number of an update that leaves them out: the form always sends both', async () => {
+    expect(updateBankAccountInput.parse({ id: ID, name: 'A' })).toMatchObject({ bank_name: null, account_no: null });
+    const { ctx, calls } = fake({ data: { id: ID, name: 'A', active: true }, error: null });
+    await updateBankAccount(ctx, { id: ID, name: 'A' });
+    expect(calls[0].values).toMatchObject({ bank_name: null, account_no: null });
+  });
+
   it('does not tell an owner who owes a second step that they are not an owner', () => {
     expect(M.needsSignOff).toBe(
       'Only an owner or admin can set or change an opening balance. If you are one, sign in again with your second step.',
