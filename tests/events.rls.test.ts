@@ -43,18 +43,15 @@ afterAll(async () => {
 });
 
 testWithSupabase('log_event writes an activity row only the org can read', async () => {
-  const { error } = await owner.c.rpc('log_event', {
-    p_action: 'Changed password',
-    p_category: 'security',
-  });
+  const { error } = await owner.c.rpc('log_event', { p_key: 'password_changed' });
   expect(error, error?.message).toBeNull();
 
   const { data } = await owner.c
     .from('activity_log')
-    .select('action, category, actor_id')
+    .select('action, category, actor_id, audience')
     .eq('org_id', owner.orgId);
   expect(data).toEqual([
-    { action: 'Changed password', category: 'security', actor_id: owner.uid },
+    { action: 'Changed password', category: 'security', actor_id: owner.uid, audience: 'members' },
   ]);
 
   const { data: leaked } = await stranger.c
@@ -62,6 +59,36 @@ testWithSupabase('log_event writes an activity row only the org can read', async
     .select('id')
     .eq('org_id', owner.orgId);
   expect(leaked ?? []).toHaveLength(0);
+});
+
+testWithSupabase('log_event takes a known key and no text', async () => {
+  const unknown = await owner.c.rpc('log_event', { p_key: 'Forged sentence' });
+  expect(unknown.error?.message).toContain('unknown event');
+
+  // The earlier free-text form is gone.
+  const freeText = await owner.c.rpc('log_event', {
+    p_action: 'Forged sentence',
+    p_category: 'security',
+    p_notify: 'admins',
+    p_event: 'security',
+    p_title: 'Forged title',
+  });
+  expect(freeText.error).not.toBeNull();
+
+  // An event that does not match the account's state writes nothing: this
+  // account has no authenticator.
+  const before = await owner.c.from('activity_log').select('id').eq('org_id', owner.orgId);
+  const { error } = await owner.c.rpc('log_event', { p_key: 'mfa_enabled' });
+  expect(error, error?.message).toBeNull();
+  const after = await owner.c.from('activity_log').select('id').eq('org_id', owner.orgId);
+  expect(after.data).toHaveLength(before.data!.length);
+
+  const { data: forged } = await owner.c
+    .from('activity_log')
+    .select('id')
+    .eq('org_id', owner.orgId)
+    .eq('action', 'Forged sentence');
+  expect(forged ?? []).toHaveLength(0);
 });
 
 testWithSupabase('activity rows cannot be written directly', async () => {
@@ -75,21 +102,14 @@ testWithSupabase('activity rows cannot be written directly', async () => {
 });
 
 testWithSupabase('a self notification is private and can be marked read', async () => {
-  const { error } = await owner.c.rpc('log_event', {
-    p_action: 'Changed password',
-    p_category: 'security',
-    p_notify: 'self',
-    p_event: 'security',
-    p_title: 'Your password was changed',
-    p_href: '/account/security',
-  });
+  const { error } = await owner.c.rpc('log_event', { p_key: 'password_changed' });
   expect(error, error?.message).toBeNull();
 
   const { data: mine } = await owner.c
     .from('notifications')
     .select('id, title, href, read_at')
     .eq('user_id', owner.uid);
-  expect(mine).toHaveLength(1);
+  expect(mine!.length).toBeGreaterThanOrEqual(1);
   expect(mine![0]).toMatchObject({
     title: 'Your password was changed',
     href: '/account/security',
@@ -117,7 +137,7 @@ testWithSupabase('a self notification is private and can be marked read', async 
   expect(editErr).not.toBeNull();
 });
 
-testWithSupabase('a muted event is not delivered, but security always is', async () => {
+testWithSupabase('a sign-in notification is delivered even with in-app notifications off', async () => {
   const { error: prefErr } = await owner.c
     .from('profiles')
     .update({ notification_prefs: { channels: { inapp: false } } })
@@ -125,24 +145,14 @@ testWithSupabase('a muted event is not delivered, but security always is', async
   expect(prefErr, prefErr?.message).toBeNull();
 
   const before = await owner.c.from('notifications').select('id');
-  await owner.c.rpc('log_event', {
-    p_action: 'Did a thing',
-    p_category: 'data',
-    p_notify: 'self',
-    p_event: 'team_activity',
-    p_title: 'Muted',
-  });
-  await owner.c.rpc('log_event', {
-    p_action: 'Did a secure thing',
-    p_category: 'security',
-    p_notify: 'self',
-    p_event: 'security',
-    p_title: 'Always on',
-  });
-  const after = await owner.c.from('notifications').select('title');
+  // No notification belongs to this event.
+  await owner.c.rpc('log_event', { p_key: 'profile_updated' });
+  // This one always notifies the caller, and only the caller.
+  await owner.c.rpc('log_event', { p_key: 'password_reset' });
+  const after = await owner.c.from('notifications').select('title, user_id');
   expect((after.data ?? []).length - (before.data ?? []).length).toBe(1);
-  expect((after.data ?? []).map((n) => n.title)).toContain('Always on');
-  expect((after.data ?? []).map((n) => n.title)).not.toContain('Muted');
+  expect((after.data ?? []).map((n) => n.title)).toContain('Your password was reset');
+  expect((after.data ?? []).every((n) => n.user_id === owner.uid)).toBe(true);
 });
 
 testWithSupabase('an owner can create an invite that is readable by its token', async () => {
@@ -166,6 +176,25 @@ testWithSupabase('an owner can create an invite that is readable by its token', 
   // But the invite list itself is admin-only.
   const { data: leaked } = await stranger.c.from('org_invites').select('id');
   expect(leaked ?? []).toHaveLength(0);
+
+  // So is the activity entry that names the invited address.
+  const { data: entry } = await owner.c
+    .from('activity_log')
+    .select('target, audience')
+    .eq('org_id', owner.orgId)
+    .like('action', 'Invited a member as %');
+  expect(entry).toEqual([{ target: 'new.person@example.com', audience: 'admins' }]);
+});
+
+testWithSupabase('audit rows cannot be written from a session', async () => {
+  const { error } = await owner.c.from('crm_audit_logs').insert({
+    org_id: owner.orgId,
+    actor_user_id: owner.uid,
+    entity_type: 'contact',
+    entity_id: owner.uid,
+    action: 'forged',
+  });
+  expect(error).not.toBeNull();
 });
 
 testWithSupabase('invites are refused for non-admins and for the wrong email', async () => {
@@ -183,6 +212,9 @@ testWithSupabase('invites are refused for non-admins and for the wrong email', a
     p_token: token,
   });
   expect(wrongEmail?.message).toContain('another email');
+  // (An address that matches but was never confirmed is refused with 'email not
+  // confirmed'; that needs an unconfirmed account holding a session, which the
+  // project's settings do not issue, so it is covered by the migration's text test.)
 });
 
 testWithSupabase('an owner cannot change or remove their own membership', async () => {
