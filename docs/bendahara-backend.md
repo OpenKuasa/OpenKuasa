@@ -118,7 +118,9 @@ four expense actions (`saveExpenseAction`, `approveExpenseAction`,
 `rejectExpenseAction`, `deleteExpenseAction`) refresh `EXPENSE_PATHS`:
 Expenses, Receipts Inbox (which names the expense a receipt is tied to),
 Payment Vouchers and Banking (which name the category of the expenses a
-voucher pays). Approve and reject are refused to anyone who may not sign off,
+voucher pays), then Chart of Accounts and Journals (`LEDGER_PATHS`): an
+approved expense is two lines of the books, so approving or rejecting one
+moves them. Approve and reject are refused to anyone who may not sign off,
 before anything is read, in the expense's own sentence. Payment Vouchers has
 no action of its own yet: it is read-only for everyone.
 
@@ -377,6 +379,12 @@ stands against it. A rejected expense can be deleted, or edited, and the
 edit must itself set its status back to pending, as `finance_save_expense`
 does: an update that leaves it rejected is refused (`FIN01`).
 
+An approved expense is an entry in the books: through the view
+`finance_ledger_lines` (nothing is stored for it) it is a debit to its
+category's ledger account and a credit to Accounts Payable, for the whole
+amount, SST included. Rejecting it removes that entry again, with no reversing
+entry and no trace in Journals.
+
 An expense's `amount` and `sst_amount` cannot be NaN
 (`finance_expenses_amount_not_nan`, `finance_expenses_sst_amount_not_nan`,
 from `20261110100000_bendahara_expense_amounts.sql`): NaN is a numeric that
@@ -414,13 +422,29 @@ on this table: a member's direct update answers `FIN14` "only an owner or
 admin approves or rejects an expense". `FIN01` means five things on this
 table and is worded by what was being done (`locked`, `cannotApprove`,
 `cannotReject`, `cannotDelete`); `FIN02` is a rejection of an expense with a
-payment against it; `23503` on a delete is a rejected expense that a voided
-payment still names, which is kept.
+payment against it; `23503` on a delete is an expense that a voided payment
+still names, which is kept.
+
+Approving and rejecting decide the expense the person was shown. The view's
+`updated_at` goes with the id, as the text the database gave, and the update
+is filtered by it as well. When no row matches, one more read tells whether
+the expense is still there: if it is, someone changed it after the screen was
+drawn and the answer is "This expense was changed after you opened it. Check
+it again, then approve or reject it."; the screen refreshes, the question
+closes and the row shows what it now holds. If it is gone, "That expense no
+longer exists.".
+
+A money box (the amount and the SST are both text boxes) that holds a comma, a
+`$` or RM in front is told "Enter the amount as a number, without commas or
+RM: 1200.50."; one with three or more decimals is told "Enter the amount to
+two decimal places." instead of being rounded.
 
 An approved expense that is paid in part reads "Part paid", with a line
 under its amount: what was paid, what payments not yet made hold, and what
 has no payment yet (`expensePaymentNote`). The view's `display_status` is
-still `approved` for it, and the status filter's Approved includes it.
+still `approved` for it, and the status filter's Approved includes it. An
+approved expense with only a payment waiting shows the same line under an
+"Approved" chip.
 
 For the Receipts Inbox (stage 7d): `ExpenseFormCard` takes `initial` (fields
 to start a new form with) and `actions.save` (whatever saves it), so "Create
@@ -1247,7 +1271,7 @@ codes must never go in a map that both share.
 | Code | Meaning (continued) |
 |---|---|
 | `42501` | Row-level security refused the write: "You do not have permission to make changes here." |
-| `22003` | A number does not fit its column (quantity × unit price can overflow): "That amount is too large." |
+| `22003` | A number does not fit its column (quantity × unit price can overflow): "That amount is too large." An expense's amount or SST of `Infinity` answers it too (the schema refuses it first). |
 | `22023` | `finance_record_refund` was given a status other than `posted` or `scheduled`. The app always sends one of the two, so only a direct call reaches it; `refunds.ts` has no sentence for it. `finance_attach_receipt` answers it when it is given neither an expense nor a bill, or both: a receipt is tied to exactly one. |
 | `23514` | A check constraint refused the write. The one to know: an invoice's number must match its status (a draft has none, any other status has one, a posted invoice has `posted_at`); a quotation's and a credit note's number follow the same rule. Only a direct write can break it; the app never does. Others include the due date before the invoice date, a quotation valid until before its date, a line's quantity, price or SST rate out of range, a credit note of nothing, a refund reason outside the five, and an allocation naming more than one document, or none; `invoices.ts` has no sentence for them. One has a sentence: e-Invois set on a draft, which `setEInvoice` words as "e-Invois details can be recorded once the invoice is posted." Receipts: the table's checks refuse an amount that is not above zero or is NaN, an SST above the amount or below zero or NaN, a vendor longer than 200 characters, a file name with a slash, a backslash or a control character or longer than 200, a path outside the receipt's own workspace or of no known shape, and a receipt tied to two documents or a status that disagrees with its tie; `finance_receipt_to_expense` also answers it for an amount or SST of NaN. Not worded yet: no button reaches them. |
 | `22007`, `22008`, `22P02` | A date or a number that cannot be read: the receipt functions cast `details` and `expense` with `::date` and `::numeric` (`finance_set_receipt_extraction`, `finance_review_receipt`, `finance_receipt_to_expense`), so an unparsable `receipt_date` is `22007`, an out-of-range one such as `2026-13-45` is `22008`, and a bad `amount` or `sst_amount` is `22P02`. The schemas of the parts that call them must refuse these first. |
@@ -1622,9 +1646,12 @@ with no date).
 - Two people changing one expense at once: the later save wins without a
   warning. An expense approved meanwhile answers that it is locked.
 - An expense's category can be one that was archived since; the form keeps
-  it in its picker for that expense only. Categories have no screen yet.
+  it in its picker for that expense only. `finance_save_expense` accepts an
+  archived expense category from a direct call, for a new expense too: it
+  checks the category's kind, not whether it is active. Categories have no
+  screen yet.
 - A rejected expense that a voided payment still names cannot be deleted
-  (the allocation's foreign key); it stays in the list as Rejected.
+  (the allocation's foreign key); it stays in the list.
 - A payment to a supplier or a refund recorded by someone who is not an owner
   or admin is not held for approval. The owner decides whether it should be.
 - A voucher that settles no document, recorded by someone who is not an owner
