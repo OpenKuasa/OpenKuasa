@@ -3,10 +3,15 @@ import {
   APPROVAL_QUEUES,
   claimApprovals,
   leaveApprovals,
+  managerOvertimeItem,
   overtimeApprovals,
+  rowControls,
+  screenControls,
   timeOffApprovals,
 } from '@/lib/people/approvals';
 import { createSeedPeopleData } from '@/lib/people/seed';
+import { DEMO_EMPLOYEE_ID } from '@/lib/people/types';
+import { asManager } from './setup/people-manager-view';
 import type {
   Claim,
   LeaveBalance,
@@ -14,6 +19,7 @@ import type {
   OvertimeRecord,
   PeopleData,
   PeopleViewer,
+  TeamOvertimeRow,
   TimeOffRequest,
 } from '@/lib/people/types';
 
@@ -272,6 +278,7 @@ describe('over balance, yours and cancel on the leave queue', () => {
     ];
     const spy = {
       listLeaveRequests: async () => requests,
+      listEmployees: async () => [],
       listLeaveBalances: async (year: number) => {
         years.push(year);
         return [];
@@ -427,5 +434,196 @@ describe('overtime rows', () => {
     expect(row('d').cells[2]).toBe('RM 75.00');
     expect(row('d').overtime!.calculated).toBe(true);
     expect(model.unpaid).toBeNull();
+  });
+});
+
+// ---- the manager tier ----
+
+const MANAGER: PeopleViewer = { employeeId: 'seed-emp-12', isHr: false, isDemo: false, managesTeam: true };
+const DEMO: PeopleViewer = { employeeId: DEMO_EMPLOYEE_ID, isHr: false, isDemo: true };
+const OWNER: PeopleViewer = { employeeId: null, isHr: true, isOwner: true, isDemo: false };
+const TEAM = [DEMO_EMPLOYEE_ID, 'seed-emp-5', 'seed-emp-10', 'seed-emp-11', 'seed-emp-13'];
+const teamData = () => asManager(data, 'seed-emp-12', TEAM);
+
+/** What `hr_team_overtime` hands over: the whole row minus every pay field. */
+const toTeamRow = (r: OvertimeRecord): TeamOvertimeRow => ({
+  id: r.id, org_id: 'org', employee_id: r.employee_id, work_date: r.work_date, hours: r.hours, day_kind: r.day_kind,
+  rate_multiplier: r.rate_multiplier, reason: r.reason, status: r.status, requested_by: null, decided_by: null,
+  decided_at: null, decision_note: r.decision_note, created_at: r.created_at,
+});
+
+const BASE = { pending: true, decidable: true, cancellable: true, status: 'pending' as const, claim: null };
+const markable = { has_file: false, ticked: false, claim_date: '2026-10-01', year: 2026, year_total: null, markable: true, paid_on: null, paid_on_text: null, paid_reference: null };
+const NONE = { decide: false, cancel: false, markPaid: false, undoPaid: false, disabled: false, note: null };
+
+describe('rowControls', () => {
+  it.each([
+    ['hr', BASE, { ...NONE, decide: true, cancel: true }],
+    ['hr', { ...BASE, decidable: false }, { ...NONE, cancel: true, note: 'own-admin' }],
+    ['hr', { ...BASE, pending: false, status: 'approved' as const, claim: markable }, { ...NONE, cancel: true, markPaid: true }],
+    ['hr', { ...BASE, pending: false, decidable: false, status: 'approved' as const, claim: markable }, { ...NONE, cancel: true, note: 'own-admin' }],
+    ['hr', { ...BASE, pending: false, cancellable: false, status: 'paid' as const, claim: { ...markable, markable: false } }, { ...NONE, undoPaid: true }],
+    ['hr', { ...BASE, pending: false, cancellable: false, status: 'rejected' as const }, NONE],
+    ['demo', BASE, { ...NONE, decide: true, cancel: true, disabled: true }],
+    ['manager', { ...BASE, decidable: true }, { ...NONE, decide: true }],
+    ['manager', { ...BASE, pending: false, status: 'approved' as const, claim: markable }, NONE],
+    ['manager', { ...BASE, pending: false, cancellable: false, status: 'paid' as const, claim: { ...markable, markable: false } }, NONE],
+    ['manager', { ...BASE, pending: false, status: 'approved' as const }, NONE],
+    ['none', BASE, NONE],
+  ] as const)('%s: %#', (view, row, expected) => {
+    expect(rowControls(view, row)).toEqual(expected);
+  });
+});
+
+describe('screenControls', () => {
+  it('answers each view', () => {
+    expect(screenControls('hr', 'S')).toEqual({ addFor: true, export: true, disabled: false, subtitle: 'S' });
+    expect(screenControls('demo', 'S')).toEqual({ addFor: true, export: true, disabled: true, subtitle: 'S' });
+    expect(screenControls('manager', 'S')).toEqual({
+      addFor: false, export: false, disabled: false, subtitle: 'Requests from the people who report to you',
+    });
+    expect(screenControls('none', 'S')).toEqual({ addFor: false, export: false, disabled: false, subtitle: 'S' });
+  });
+});
+
+describe("a manager's queue", () => {
+  const builders = {
+    leave: (d: PeopleData, v: PeopleViewer) => leaveApprovals(d, v, NOW),
+    claims: (d: PeopleData, v: PeopleViewer) => claimApprovals(d, v, NOW),
+    overtime: async (d: PeopleData, v: PeopleViewer) => overtimeApprovals(d, v, NOW, (await data.listOvertime()).map(toTeamRow)),
+    time_off: (d: PeopleData, v: PeopleViewer) => timeOffApprovals(d, v, NOW),
+  };
+  const employeeOf = async (queue: keyof typeof builders, id: string) => {
+    const lists = {
+      leave: await data.listLeaveRequests(), claims: await data.listClaims(),
+      overtime: await data.listOvertime(), time_off: await data.listTimeOffRequests(),
+    };
+    return lists[queue].find((r) => r.id === id)!.employee_id;
+  };
+
+  it.each(Object.keys(builders) as (keyof typeof builders)[])('%s: team only, no HR controls', async (queue) => {
+    const model = (await builders[queue](teamData(), MANAGER))!;
+    expect(model).not.toBeNull();
+    expect(model.view).toBe('manager');
+    for (const row of model.rows) {
+      expect(TEAM).toContain(await employeeOf(queue, row.id));
+      expect(row).toMatchObject({ manager_label: null, cancellable: false, decidable: true, yours: false });
+    }
+  });
+
+  it('counts pending over the team only, from the seed', async () => {
+    const lists = {
+      leave: await data.listLeaveRequests(), claims: await data.listClaims(),
+      overtime: await data.listOvertime(), time_off: await data.listTimeOffRequests(),
+    };
+    for (const queue of Object.keys(builders) as (keyof typeof builders)[]) {
+      const expected = lists[queue].filter((r) => r.status === 'pending' && TEAM.includes(r.employee_id)).length;
+      expect((await builders[queue](teamData(), MANAGER))!.pending.count, queue).toBe(expected);
+    }
+  });
+
+  it("drops the manager's own request and anyone else's the provider hands over", async () => {
+    const mine = leave({ id: 'mine', employee_id: 'seed-emp-12', employee_name: 'Sales lead' });
+    const stranger = leave({ id: 'stranger', employee_id: 'seed-emp-3', employee_name: 'Stranger' });
+    const reports = leave({ id: 'report', employee_id: 'seed-emp-5', employee_name: 'Report' });
+    const d = withRows({ listLeaveRequests: [mine, stranger, reports], listEmployees: await data.listEmployees() });
+    const model = (await leaveApprovals(d, MANAGER, NOW))!;
+    expect(model.rows.map((r) => r.id)).toEqual(['report']);
+    expect(model.pending.count).toBe(1);
+    expect(model.trend.reduce((sum, b) => sum + b.submitted, 0)).toBe(1);
+  });
+
+  it('claims: unpaid counts the team approved claims only', async () => {
+    const claims = [
+      claim({ id: 'a', employee_id: 'seed-emp-5', status: 'approved' }),
+      claim({ id: 'b', employee_id: 'seed-emp-3', status: 'approved' }),
+      claim({ id: 'c', employee_id: 'seed-emp-12', status: 'approved' }),
+    ];
+    const d = withRows({ listClaims: claims, listEmployees: await data.listEmployees() });
+    const model = (await claimApprovals(d, MANAGER, NOW))!;
+    expect(model.unpaid!.count).toBe(1);
+    expect(model.rows.map((r) => r.id)).toEqual(['a']);
+  });
+
+  it('overtime: the breakdown is over the team only', async () => {
+    const rows = [
+      { ...toTeamRow(overtime({ id: 'x', employee_id: 'seed-emp-5', hours: 3 })) },
+      { ...toTeamRow(overtime({ id: 'y', employee_id: 'seed-emp-3', hours: 9 })) },
+    ];
+    const d = withRows({ listEmployees: await data.listEmployees() });
+    const model = (await overtimeApprovals(d, MANAGER, NOW, rows))!;
+    expect(model.rows.map((r) => r.id)).toEqual(['x']);
+    expect(model.breakdown!.reduce((sum, b) => sum + b.value, 0)).toBe(3);
+  });
+
+  it('a manager with no employee record gets an empty queue and no throw', async () => {
+    const nobody: PeopleViewer = { employeeId: null, isHr: false, isDemo: false, managesTeam: true };
+    for (const queue of Object.keys(builders) as (keyof typeof builders)[]) {
+      expect((await builders[queue](teamData(), nobody))!.rows, queue).toEqual([]);
+    }
+  });
+
+  it('a member gets null and nothing is read', async () => {
+    let called = false;
+    const spy = new Proxy({} as PeopleData, { get: () => () => { called = true; return []; } });
+    for (const build of [leaveApprovals, claimApprovals, overtimeApprovals, timeOffApprovals]) {
+      expect(await build(spy, MEMBER, NOW)).toBeNull();
+    }
+    expect(called).toBe(false);
+  });
+});
+
+describe("a manager's overtime row never shows money", () => {
+  const row = toTeamRow(overtime({ id: 'o1', day_kind: 'rest_day', rate_multiplier: 2, reason: 'Launch', hours: 3.5 }));
+  const MONEY = /amount|hourly|rate_cents|paid_month|payslip|RM\s?\d|paid at|Paid,/i;
+
+  it('shows date, hours, day kind, multiplier, reason and status', () => {
+    const item = managerOvertimeItem(row, 'Report');
+    expect(item.cells).toEqual(['02 Oct 2026', '3.5 h', 'Rest day, 2 times']);
+    expect(item.notes).toContain('Reason: Launch');
+    expect(item.status).toBe('pending');
+  });
+
+  it('carries no money field and no money text', () => {
+    const item = managerOvertimeItem(row, 'Report');
+    expect(JSON.stringify(item)).not.toMatch(MONEY);
+    expect(Object.keys(item)).not.toEqual(expect.arrayContaining(['amount_cents']));
+  });
+
+  it('the whole model carries none either', async () => {
+    const d = withRows({ listEmployees: await data.listEmployees() });
+    const rows = [toTeamRow(overtime({ id: 'x', employee_id: 'seed-emp-5', hours: 3, day_kind: 'weekday' }))];
+    const model = (await overtimeApprovals(d, MANAGER, NOW, rows))!;
+    expect(JSON.stringify(model)).not.toMatch(MONEY);
+    expect(model.rows[0].overtime).toEqual({ kind: 'Weekday, 1.5 times', calculated: true });
+  });
+
+  it('an old row without a kind or multiplier still shows no money', () => {
+    const item = managerOvertimeItem({ ...row, day_kind: null, rate_multiplier: null }, 'Report');
+    expect(item.cells[2]).toBe('—');
+    expect(JSON.stringify(item)).not.toMatch(MONEY);
+  });
+});
+
+describe('the manager on an HR row', () => {
+  it('names the manager for owner and demo, and null for the lead', async () => {
+    const employees = await data.listEmployees();
+    const reqs = [
+      leave({ id: 'r5', employee_id: 'seed-emp-5', employee_name: 'Five' }),
+      leave({ id: 'r12', employee_id: 'seed-emp-12', employee_name: 'Lead' }),
+    ];
+    const d = withRows({ listLeaveRequests: reqs, listEmployees: employees });
+    for (const viewer of [OWNER, DEMO]) {
+      const model = (await leaveApprovals(d, viewer, NOW))!;
+      expect(model.rows.find((r) => r.id === 'r5')!.manager_label).toBe('Farid Ismail');
+      expect(model.rows.find((r) => r.id === 'r12')!.manager_label).toBeNull();
+    }
+  });
+
+  it('says (inactive) after a manager who has left', async () => {
+    const employees = (await data.listEmployees()).map((e) => (e.id === 'seed-emp-12' ? { ...e, status: 'inactive' as const } : e));
+    const reqs = [leave({ id: 'r5', employee_id: 'seed-emp-5', employee_name: 'Five' })];
+    const model = (await leaveApprovals(withRows({ listLeaveRequests: reqs, listEmployees: employees }), OWNER, NOW))!;
+    expect(model.rows[0].manager_label).toBe('Farid Ismail (inactive)');
   });
 });
