@@ -5,7 +5,7 @@ import { createConfirmedTestUser, createOrg, liveClient, signInOwner } from './h
 
 // Bendahara's chart of accounts, ledger, manual journals and bill category
 // (20261108090000 to 20261108094500), and the reversing entry of a void and the
-// Accrued Expenses account (20261110090000), against the live project. Each test
+// Accrued Expenses account (20261111090000), against the live project. Each test
 // makes its own workspace; the helper deletes what it made when the file
 // finishes. Run by the controller only, after the migrations are applied.
 
