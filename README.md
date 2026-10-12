@@ -207,7 +207,7 @@ Authentication) for sign-in and signup to work:
 
 ### Scheduled triggers (cron)
 
-Three endpoints do background work and are meant to be called by a scheduler
+Four endpoints do background work and are meant to be called by a scheduler
 you run (for example a cron job every five minutes), not by a browser:
 
 | Endpoint | What it does |
@@ -215,6 +215,7 @@ you run (for example a cron job every five minutes), not by a browser:
 | `POST /api/agents/run` | Runs the agent schedules that are due |
 | `POST /api/agents/poll` | Finishes pending videos, fails stuck runs, expires old proposals |
 | `POST /api/hire/cv-cleanup` | Removes stored CV files of deleted applications |
+| `POST /api/finance/receipt-cleanup` | Removes Receipts Inbox files of deleted receipts, and uploads nobody recorded within the hour |
 
 They take no body and no parameters. Each call must carry a dedicated secret:
 
@@ -286,3 +287,8 @@ available to its users under the same license.
 
 The license covers this project's code only. It grants no rights to any
 third-party names, marks or products.
+
+Dependencies keep their own licenses. One is not permissive: `heic-to`, which
+turns a phone's HEIC photo into a JPEG in the browser and carries libheif and
+libde265, is LGPL-3.0. It is used unmodified, as published on npm, where its
+source and license text are.
