@@ -3020,6 +3020,8 @@ describe('interview changes', () => {
       expect(line).toContain('moved to the pipeline for a job, one at a time. An interview can be scheduled, changed, cancelled, marked completed or a no-show, marked scheduled again, or recorded after it took place, one at a time. ');
       expect(line!.endsWith('.')).toBe(true);
       expect(line).not.toContain('..');
+      expect(line).not.toContain('one at a time.Existing');
+      expect(line).toContain('can be recorded or cleared, one at a time. Existing staff');
       const asks = createTeamTools([hireProduct(world())], { ...team(), store: storeOf() }).tools.askLekir as unknown as { description: string };
       expect(asks.description).toContain(
         'it can prepare adding or editing one candidate at a time; it can prepare scheduling, changing, cancelling or closing one interview at a time, or recording one that already took place; it can prepare deleting',
