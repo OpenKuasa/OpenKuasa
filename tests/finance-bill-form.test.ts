@@ -10,6 +10,7 @@ import {
   emptyLine,
   lineNumbers,
   newBillForm,
+  withCategory,
   ordersForSupplier,
   savedNotPosted,
   type BillOrderOption,
@@ -76,6 +77,21 @@ describe('the bill’s category', () => {
     expect(billPayload(filled({ category_id: CATEGORY })).category_id).toBe(CATEGORY);
     expect(billPayload(filled()).category_id).toBe('');
     expect(saveBillInput.parse(billPayload(filled({ category_id: CATEGORY }))).category_id).toBe(CATEGORY);
+  });
+});
+
+describe('withCategory', () => {
+  const CATEGORY = '99999999-9999-4999-8999-999999999999';
+  const OTHER_CATEGORY = '88888888-8888-4888-8888-888888888888';
+  it('sets the chosen category', () => {
+    expect(withCategory(filled(), OTHER_CATEGORY, CATEGORY).category_id).toBe(OTHER_CATEGORY);
+  });
+  it('turns "default" into the default category itself, since an empty one would keep the draft’s old category', () => {
+    expect(withCategory(filled({ category_id: OTHER_CATEGORY }), '', CATEGORY).category_id).toBe(CATEGORY);
+  });
+  it('stays empty when the workspace has no default to name', () => {
+    expect(withCategory(filled({ category_id: OTHER_CATEGORY }), '', '').category_id).toBe('');
+    expect(withCategory(filled({ category_id: OTHER_CATEGORY }), '', undefined).category_id).toBe('');
   });
 });
 

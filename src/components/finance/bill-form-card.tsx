@@ -9,6 +9,7 @@ import {
   billOrderWarnings,
   newBillForm,
   ordersForSupplier,
+  withCategory,
   ownCountedTotal,
 } from '@/lib/finance/bill-form';
 import { withCurrentParty } from '@/lib/finance/document-form';
@@ -87,7 +88,7 @@ export function BillFormCard({
       return [...categories, ...own].map((c) => ({ id: c.id, label: c.name }));
     },
     get: (form) => form.category_id,
-    set: (form, id) => ({ ...form, category_id: id }),
+    set: (form, id) => withCategory(form, id, defaultCategoryId),
     notes: () => [],
   };
   return (

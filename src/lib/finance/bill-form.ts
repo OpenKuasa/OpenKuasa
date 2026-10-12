@@ -93,6 +93,15 @@ export function withSupplier(form: BillForm, supplier: { id: string; payment_ter
 }
 
 /**
+ * Choosing a category. "Default" (an empty choice) becomes the default category's own id when the screen names
+ * one: an empty `category_id` is read by the database as "keep the draft's current category", so it would leave
+ * the bill where it was while the form said default.
+ */
+export function withCategory(form: BillForm, id: string, defaultCategoryId?: string): BillForm {
+  return { ...form, category_id: id || defaultCategoryId || '' };
+}
+
+/**
  * Changing the bill date moves the due date with it, unless it was set by
  * hand. While the bill date is half typed the due date stays where it was.
  */

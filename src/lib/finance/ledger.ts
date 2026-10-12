@@ -281,9 +281,24 @@ export async function listLedgerAccounts(ctx: FinanceWriteContext): Promise<Ledg
 }
 
 /**
+ * The expense category behind the account purchases post to, or null when there is none. One small read, for a
+ * screen that needs only this and not every account's balance.
+ */
+export async function purchasesCategoryId(ctx: FinanceWriteContext): Promise<string | null> {
+  const { data, error } = await ctx.client
+    .from('finance_ledger_accounts')
+    .select('category_id')
+    .eq('org_id', ctx.orgId)
+    .eq('default_for', 'purchases')
+    .maybeSingle();
+  if (error) throw error;
+  return (data as { category_id: string | null } | null)?.category_id ?? null;
+}
+
+/**
  * Every line every posted document has left in the books, newest entry first. An entry's lines are kept
- * together, debits first, so no entry is split across two pages; the account is the last tiebreak so the
- * pages never overlap.
+ * together, debits first, so no entry is split across two pages; the account, then the credit, are the last
+ * tiebreaks so the pages never overlap.
  */
 export async function listLedgerLines(ctx: FinanceWriteContext): Promise<LedgerLine[]> {
   const rows = await readAll(ctx, 'finance_ledger_lines', LINE_COLUMNS, [
@@ -291,6 +306,8 @@ export async function listLedgerLines(ctx: FinanceWriteContext): Promise<LedgerL
     { column: 'entry_key', ascending: true },
     { column: 'debit', ascending: false },
     { column: 'account_id', ascending: true },
+    // Two credit lines on one account in one entry would otherwise straddle a page boundary ambiguously.
+    { column: 'credit', ascending: false },
   ]);
   return rows.map((row) => ({ ...(row as unknown as LedgerLine), debit: Number(row.debit), credit: Number(row.credit) }));
 }

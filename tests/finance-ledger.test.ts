@@ -12,6 +12,7 @@ import {
   listJournals,
   listLedgerAccounts,
   listLedgerLines,
+  purchasesCategoryId,
   postJournal,
   reverseJournal,
   reverseJournalInput,
@@ -220,7 +221,7 @@ describe('ledger line reads', () => {
       name: 'finance_ledger_lines',
       op: 'select',
       filters: { org_id: 'org-1' },
-      order: ['entry_date desc', 'entry_key asc', 'debit desc', 'account_id asc'],
+      order: ['entry_date desc', 'entry_key asc', 'debit desc', 'account_id asc', 'credit desc'],
       range: [0, LEDGER_PAGE_SIZE - 1],
     });
     expect(calls[0].columns).toBe('entry_key,entry_date,source,source_id,source_no,description,account_id,debit,credit');
@@ -457,5 +458,26 @@ describe('journal writes', () => {
     const { ctx } = fakeFinance({ data: null, error: { code: 'XX000' } });
     expect(await saveJournal(ctx, valid)).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
     expect(logged).toHaveBeenCalled();
+  });
+});
+
+describe('purchasesCategoryId', () => {
+  it('reads the one account behind purchases and gives its category', async () => {
+    const { ctx, calls } = fakeFinance({ data: { category_id: 'cat-1' }, error: null });
+    expect(await purchasesCategoryId(ctx)).toBe('cat-1');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      name: 'finance_ledger_accounts',
+      op: 'select',
+      columns: 'category_id',
+      filters: { org_id: 'org-1', default_for: 'purchases' },
+    });
+  });
+  it('is null when there is no such account, or it has no category', async () => {
+    expect(await purchasesCategoryId(fakeFinance({ data: null, error: null }).ctx)).toBeNull();
+    expect(await purchasesCategoryId(fakeFinance({ data: { category_id: null }, error: null }).ctx)).toBeNull();
+  });
+  it('throws a read error', async () => {
+    await expect(purchasesCategoryId(fakeFinance({ data: null, error: { code: 'XX000' } }).ctx)).rejects.toMatchObject({ code: 'XX000' });
   });
 });
