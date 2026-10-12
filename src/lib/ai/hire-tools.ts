@@ -67,6 +67,7 @@ import { CV_MAX_BYTES } from '@/lib/hire/application-fields';
 import { applicationFormOf } from '@/lib/hire/application-form';
 import { applicationLabel, funnelCounts, matchesText } from '@/lib/hire/applications-view';
 import type { CvReader } from '@/lib/hire/cv-read';
+import { sameText } from '@/lib/hire/namesakes';
 import { timeToHire } from '@/lib/hire/dashboard';
 import { klDateOf, klTimeOf, klTodayWords, shortWhen } from '@/lib/hire/interview-time';
 import { careersPath, careersUrl } from '@/lib/hire/public-careers';
@@ -572,22 +573,39 @@ export function createHireTools(
               ? Date.parse(b.scheduled_at) - Date.parse(a.scheduled_at)
               : Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at),
           );
+          // One application can rightly have two interviews, so "the interview with Aina" is unclear whenever she has
+          // more than one. A rule in the prompt alone was not enough for candidates, so the result says it.
+          // No "look again": a change from a second lookup in the same turn is refused, so the model must ask.
+          // Said when a name was asked for and more than one interview fits, and when a job was asked for and two of
+          // the interviews left are with the same person: the model never picks between those.
+          const asked =
+            (candidate?.trim() && rows.length > 1) ||
+            (title?.trim() && rows.some((a, at) => rows.findIndex((b) => b.candidate_name === a.candidate_name) !== at));
+          // And whatever was asked for, even nothing: when the list holds two interviews still SCHEDULED with one
+          // person. "Cancel Aina's" after a plain list must lead to a question, not to the first of the two. This one
+          // says which rows it means (`several_ids`), so the other people in the list are not held back with them.
+          const ahead = ordered.filter((i) => i.status === 'scheduled');
+          const twice = ahead.filter((i) => ahead.some((other) => other.id !== i.id && sameText(other.candidate_name) === sameText(i.candidate_name)));
           return {
             total: rows.length,
-            // One application can rightly have two interviews, so "the interview with Aina" is unclear whenever she has
-            // more than one. A rule in the prompt alone was not enough for candidates, so the result says it.
-            // No "look again": a change from a second lookup in the same turn is refused, so the model must ask.
-            // It is said when a name was asked for and more than one interview fits, and also when a job was asked
-            // for and two of the interviews left are with the same person: the model never picks between those.
-            ...(((candidate?.trim() && rows.length > 1) ||
-              (title?.trim() && rows.some((a, at) => rows.findIndex((b) => b.candidate_name === a.candidate_name) !== at))) && {
-              several_match:
-                `More than one interview matches this name: ${ordered
-                  .slice(0, 10)
-                  .map((i) => `${i.candidate_name} (${i.job_title}, ${shortWhen(i.scheduled_at)}, ${i.status})`)
-                  .join('; ')}. ` +
-                'Do not choose one. Prepare no change: say which interviews match and ask the user which one they mean.',
-            }),
+            ...(asked
+              ? {
+                  several_match:
+                    `More than one interview matches this name: ${ordered
+                      .slice(0, 10)
+                      .map((i) => `${i.candidate_name} (${i.job_title}, ${shortWhen(i.scheduled_at)}, ${i.status})`)
+                      .join('; ')}. ` +
+                    'Do not choose one. Prepare no change: say which interviews match and ask the user which one they mean.',
+                }
+              : twice.length > 0 && {
+                  several_match:
+                    `More than one scheduled interview is with the same person: ${twice
+                      .slice(0, 10)
+                      .map((i) => `${i.candidate_name.trim()} (${i.job_title}, ${shortWhen(i.scheduled_at)})`)
+                      .join('; ')}. ` +
+                    'If the user means one of these, do not choose one. Prepare no change to it: say which ones there are and ask the user which one they mean.',
+                  several_ids: twice.map((i) => i.id),
+                }),
             interviews: ordered.slice(0, rowLimit(requested, 20)).map((i) => ({
               id: i.id,
               application_id: i.application_id,

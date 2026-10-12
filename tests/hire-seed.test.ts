@@ -73,10 +73,15 @@ describe('hire seed', () => {
     const interviews = await data.listInterviews();
     const one = interviews[0];
     expect(interviewCardFromLists(one.id, interviews)).toEqual({
-      target: { id: one.id, application_id: one.application_id, candidate: one.candidate_name, job: one.job_title, scheduled_at: one.scheduled_at, kind: one.kind },
+      target: {
+        id: one.id, application_id: one.application_id, candidate: one.candidate_name, job: one.job_title, scheduled_at: one.scheduled_at, kind: one.kind,
+        status: one.status, duration_minutes: one.duration_minutes, place: one.place,
+      },
       // Every sample candidate has a name of their own, and each has one interview.
       others: [],
       cut: false,
+      also: [],
+      application_outcome: one.application_outcome,
     });
   });
 

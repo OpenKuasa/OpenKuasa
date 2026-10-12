@@ -163,6 +163,29 @@ export function interviewLine(iso: string, kind: InterviewKind): string {
 }
 export const THIS_INTERVIEW = (line: string) => `This interview: ${line}`;
 
+/** A name, a title or a place on one line: a line break in it must not start a line of its own on a card. */
+const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim();
+
+/** How many other scheduled interviews a card lists before it says how many more there are. */
+export const ALSO_SCHEDULED_MAX = 3;
+
+/**
+ * What else is scheduled with the same person, for a card about one of their interviews: one line each, at most
+ * three, then how many more. One person can rightly have two interviews, and "cancel Aina's" does not say which:
+ * the card shows the one it is about, and these lines show the person that there are others.
+ */
+export function alsoScheduledLines(
+  name: string,
+  others: readonly { scheduled_at: string; kind: InterviewKind; job: string }[],
+): string[] {
+  const who = oneLine(name) || 'the candidate';
+  const lines = others
+    .slice(0, ALSO_SCHEDULED_MAX)
+    .map((other) => `Also scheduled for ${who}: ${interviewLine(other.scheduled_at, other.kind)} (${oneLine(other.job)})`);
+  const more = others.length - ALSO_SCHEDULED_MAX;
+  return more > 0 ? [...lines, `and ${more} more`] : lines;
+}
+
 const UNLISTED_APPLICATION = 'an application that was not in the list above';
 const UNLISTED_INTERVIEW = 'an interview that was not in the list above';
 

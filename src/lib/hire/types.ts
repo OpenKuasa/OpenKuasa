@@ -144,13 +144,27 @@ export type InterviewCardRow = {
   job: string;
   scheduled_at: string;
   kind: InterviewKind;
+  status: InterviewStatus;
+  /** Whole minutes. */
+  duration_minutes: number;
+  /** Where it is held, or the meeting link. The team's own text: it goes to the browser on a card, never to a model. */
+  place: string | null;
 };
 
 /**
  * `target` is null when the interview is not there. `others`: every other interview whose candidate name and job
  * title are the same, of the same application or of a namesake's. `cut` when there were more than were read.
+ * `also`: every other interview still SCHEDULED with someone of that name, for any job, soonest first (at most the
+ * first fifty): what a card lists so the person sees there is more than one. `application_outcome`: whether the
+ * target's application is still active; null when there is no target.
  */
-export type InterviewCardRead = { target: InterviewCardRow | null; others: InterviewCardRow[]; cut: boolean };
+export type InterviewCardRead = {
+  target: InterviewCardRow | null;
+  others: InterviewCardRow[];
+  cut: boolean;
+  also: InterviewCardRow[];
+  application_outcome: ApplicationOutcome | null;
+};
 
 /** The most rows one list read returns: the API's page size. A list that long may have been cut short. */
 export const HIRE_READ_CAP = 1000;

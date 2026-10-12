@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { deletionProblem, guardDeletions, isGateReason, notLookedUp, stoppedAfterApproval } from '@/lib/ai/hire-deletions';
 import {
   AMBIGUOUS_INTERVIEW_CHANGE, HIRE_INTERVIEW_TOOL_NAMES, INTERVIEW_CHANGED_SINCE, INTERVIEW_CHECK_FAILED, LINK_NOT_GIVEN, ONE_INTERVIEW_CHANGE,
-  actsOnApplication, guardInterviewChanges, interviewCardDecision, interviewChangeProblem, interviewCheckFor, interviewNotLookedUp, interviewTarget,
+  actsOnApplication, ambiguousFor, guardInterviewChanges, interviewCardDecision, interviewChangeProblem, interviewCheckFor, interviewNotLookedUp, interviewTarget,
   interviewPlacesIn, linkNobodyGave, linksIn, lookTheSameInterviews, placesIn, sameLink, stringsIn,
 } from '@/lib/ai/hire-interview-gate';
 import { guardPoolChanges, lookedUpAs, poolChangeProblem } from '@/lib/ai/hire-pool-gate';
@@ -21,6 +21,7 @@ const AT = '2026-10-20T07:00:00.000Z';
 const LATER = '2026-10-22T03:00:00.000Z';
 const LINE = THIS_INTERVIEW(interviewLine(AT, 'video'));
 const LINK = 'https://meet.example.com/abc';
+const ALSO_LATER = 'Also scheduled for Aina Rahman: Thu 22 Oct 2026, 11:00 am · video (Sales Executive)';
 
 const user = (text: string): ModelMessage => ({ role: 'user', content: text });
 const called = (toolName: string, toolCallId: string, input: unknown): ModelMessage =>
@@ -149,6 +150,30 @@ describe('interviewChangeProblem (one agent)', () => {
     expect(interviewChangeProblem([...narrowed, user('The one on Tuesday')], { toolCallId: 'c4', id: IV })).toBeNull();
     // An application's id inside that ambiguous result is held back too, for the rest of the turn.
     expect(interviewChangeProblem(asked, { toolCallId: 'c2', id: APP })).toBe(AMBIGUOUS_INTERVIEW_CHANGE);
+  });
+  it('a plain list that says two scheduled interviews are with one person holds back those two, and nobody else\'s in the list', () => {
+    const FARID = '55555555-5555-4555-8555-555555555581';
+    const plain = {
+      total: 3,
+      several_match: 'More than one scheduled interview is with the same person: Aina Rahman (Sales Executive, Tue 20 Oct 2026, 3:00 pm); Aina Rahman (Sales Executive, Thu 22 Oct 2026, 11:00 am). ' +
+        'If the user means one of these, do not choose one. Prepare no change to it: say which ones there are and ask the user which one they mean.',
+      several_ids: [IV, IV2],
+      interviews: [listedRow(IV), listedRow(FARID, { application_id: APP2, candidate: 'Farid bin Osman' }), listedRow(IV2, { date: '2026-10-22', time: '11:00' })],
+    };
+    const turn = [user('Cancel one'), called('listInterviews', 'c1', {}), answered('listInterviews', 'c1', plain)];
+    expect(interviewChangeProblem(turn, { toolCallId: 'c2', id: IV })).toBe(AMBIGUOUS_INTERVIEW_CHANGE);
+    expect(interviewChangeProblem(turn, { toolCallId: 'c2', id: IV2 })).toBe(AMBIGUOUS_INTERVIEW_CHANGE);
+    expect(interviewChangeProblem(turn, { toolCallId: 'c2', id: FARID })).toBeNull();
+    // Once the user has said which, in a new message, it may be changed: the card then says the other one is there.
+    expect(interviewChangeProblem([...turn, user('The one on Tuesday')], { toolCallId: 'c3', id: IV })).toBeNull();
+    // The same, read from results as a specialist keeps them.
+    expect(ambiguousFor([plain], IV)).toBe(true);
+    expect(ambiguousFor([plain], FARID)).toBe(false);
+    // A result that names no ids holds back every id in it, as before.
+    expect(ambiguousFor([SEVERAL], IV)).toBe(true);
+    expect(ambiguousFor([{ ...plain, several_ids: 'not a list' }], FARID)).toBe(true);
+    expect(ambiguousFor([ONE], IV)).toBe(false);
+    for (const odd of [undefined, null, 7, '']) expect(ambiguousFor([plain], odd)).toBe(false);
   });
   it('does not count a call this gate denied itself, in either form the denial comes back in', () => {
     for (const output of [{ type: 'execution-denied', reason: ONE_INTERVIEW_CHANGE }, { type: 'error-text', value: LINK_NOT_GIVEN }]) {
@@ -342,12 +367,13 @@ describe('linkNobodyGave', () => {
 // name is not a reason to refuse; only two rows that nothing on the card could tell apart are.
 describe('the server\'s check of the interview', () => {
   const row = (id: string, application_id: string, over: Record<string, unknown> = {}) =>
-    ({ id, application_id, candidate: 'Aina Rahman', job: 'Sales Executive', scheduled_at: AT, kind: 'video' as const, ...over });
+    ({ id, application_id, candidate: 'Aina Rahman', job: 'Sales Executive', scheduled_at: AT, kind: 'video' as const, status: 'scheduled' as const, duration_minutes: 60, place: null, ...over });
   const application = (id: string, over: Record<string, unknown> = {}) =>
     ({ id, name: 'Aina Rahman', job: 'Sales Executive', email: 'aina@example.my', location: null, headline: null, added_at: '2026-10-08T02:00:00Z', ...over });
   const alone = { target: application(APP), others: [], cut: false };
   const provider = (read: unknown, applications: unknown = alone) => {
-    const interviewCard = vi.fn(async () => read);
+    // What the server's read answers: nothing else scheduled with that name, and an active application, unless `read` says otherwise.
+    const interviewCard = vi.fn(async () => (read ? { also: [], application_outcome: 'active', ...(read as object) } : read));
     const namesakes = vi.fn(async () => applications);
     const lists = { listCandidates: vi.fn(async () => [] as never), listApplications: vi.fn(async () => [] as never), listInterviews: vi.fn(async () => [] as never) };
     return { interviewCard, namesakes, lists, check: interviewCheckFor({ ...lists, interviewCard, namesakes } as never) };
@@ -381,11 +407,11 @@ describe('the server\'s check of the interview', () => {
     const shared = { target: application(APP), others: [application(APP2, { email: 'aina.r@example.my' })], cut: false };
     const { check } = provider({ target: row(IV, APP), others: [], cut: false }, shared);
     const got = await check('cancelInterview', { id: IV });
-    expect(got).toMatchObject({ ok: true, note: `${LINE}. ${APPLICATION_LINE}` });
+    expect(got).toMatchObject({ ok: true, note: `${LINE}\n${APPLICATION_LINE}` });
     expect((got as { note: string }).note).not.toContain('aina.r@');
     // The namesake's interview at the very same time and type: the application's line tells the two apart.
     const twin = provider({ target: row(IV, APP), others: [row(IV2, APP2)], cut: false }, shared);
-    expect(await twin.check('setInterviewOutcome', { id: IV, outcome: 'completed' })).toMatchObject({ ok: true, note: `${LINE}. ${APPLICATION_LINE}` });
+    expect(await twin.check('setInterviewOutcome', { id: IV, outcome: 'completed' })).toMatchObject({ ok: true, note: `${LINE}\n${APPLICATION_LINE}` });
   });
   it('refuses two interviews that would read the same, with the sentence that points to the Interviews screen', async () => {
     const refusal = { ok: false, refusal: lookTheSameInterviews('Aina Rahman', 'Sales Executive') };
@@ -404,6 +430,31 @@ describe('the server\'s check of the interview', () => {
     const { check } = provider({ target: row(IV, APP), others: [row(IV2, APP2, { scheduled_at: LATER })], cut: false }, alike);
     // The interview's own line is enough: no other interview with that name and job is at that time.
     expect(await check('cancelInterview', { id: IV })).toEqual({ ok: true, note: LINE, namesakes: [] });
+  });
+  it('says what else is scheduled with that person, one line each, after the interview\'s own line and the application\'s', async () => {
+    const second = row(IV2, APP, { scheduled_at: LATER });
+    const one = await provider({ target: row(IV, APP), others: [second], cut: false, also: [second] }).check('cancelInterview', { id: IV });
+    expect(one).toEqual({ ok: true, note: `${LINE}\n${ALSO_LATER}`, namesakes: [] });
+    expect(ALSO_LATER).toBe('Also scheduled for Aina Rahman: Thu 22 Oct 2026, 11:00 am · video (Sales Executive)');
+    // For another job too, and for each of the four changes.
+    const elsewhere = row(IV2, APP2, { scheduled_at: LATER, kind: 'onsite', job: 'Barista' });
+    for (const tool of EXISTING) {
+      const got = await provider({ target: row(IV, APP), others: [], cut: false, also: [elsewhere] }).check(tool, { id: IV });
+      expect(got, tool).toEqual({ ok: true, note: `${LINE}\nAlso scheduled for Aina Rahman: Thu 22 Oct 2026, 11:00 am · onsite (Barista)`, namesakes: [] });
+    }
+    // With a namesake's application: the application's own line, then what else is scheduled.
+    const shared = { target: application(APP), others: [application(APP2, { email: 'aina.r@example.my' })], cut: false };
+    const both = await provider({ target: row(IV, APP), others: [], cut: false, also: [second] }, shared).check('cancelInterview', { id: IV });
+    expect(both).toMatchObject({ ok: true, note: `${LINE}\n${APPLICATION_LINE}\n${ALSO_LATER}` });
+    // More than three: three, then how many more.
+    const many = [1, 2, 3, 4, 5].map((n) => row(`0000000${n}-0000-4000-8000-000000000000`, APP, { scheduled_at: `2026-10-2${n}T03:00:00.000Z` }));
+    const long = (await provider({ target: row(IV, APP), others: [], cut: false, also: many }).check('cancelInterview', { id: IV })) as { note: string };
+    expect(long.note.split('\n')).toHaveLength(5);
+    expect(long.note.endsWith('\nand 2 more')).toBe(true);
+    // Only one interview with that person: the line alone, as before.
+    expect(await provider({ target: row(IV, APP), others: [], cut: false, also: [] }).check('cancelInterview', { id: IV })).toEqual({ ok: true, note: LINE, namesakes: [] });
+    // A new interview has no line of its own, and lists nothing.
+    expect(await provider({ target: row(IV, APP), others: [], cut: false, also: [second] }).check('scheduleInterview', { application_id: APP })).toEqual({ ok: true, note: null, namesakes: [] });
   });
   it('an interview that is not there gets no card: there is no line to put on one', async () => {
     const { check } = provider({ target: null, others: [], cut: false });
@@ -443,7 +494,8 @@ describe('the server\'s check of the interview', () => {
     });
     const listInterviews = vi.fn(async () => [interview(IV, AT), interview(IV2, LATER)] as never);
     const check = interviewCheckFor({ listCandidates: async () => [] as never, listApplications: async () => [] as never, listInterviews });
-    expect(await check('cancelInterview', { id: IV })).toEqual({ ok: true, note: LINE, namesakes: [] });
+    // Both are scheduled, so each card says the other is there too.
+    expect(await check('cancelInterview', { id: IV })).toEqual({ ok: true, note: `${LINE}\n${ALSO_LATER}`, namesakes: [] });
     expect(listInterviews).toHaveBeenCalled();
   });
 });
@@ -466,6 +518,17 @@ describe('interviewCardDecision', () => {
     // A line that appeared, or went, since the card: the card did not say what it now would.
     expect(interviewCardDecision(lined, { note: null })).toEqual(STOPPED);
     expect(interviewCardDecision(plain, { note: LINE })).toEqual(STOPPED);
+  });
+  it('what else is scheduled with the person may come or go between the card and the yes: only this interview\'s own lines are compared', () => {
+    const withAlso = { ok: true as const, note: `${LINE}\n${ALSO_LATER}`, namesakes: [] };
+    // One appeared, one went, one moved: the interview the card was about is as it was.
+    expect(interviewCardDecision(withAlso, { note: LINE })).toEqual({ type: 'user-approval', reason: withAlso.note });
+    expect(interviewCardDecision(lined, { note: withAlso.note })).toEqual({ type: 'user-approval', reason: LINE });
+    expect(interviewCardDecision(withAlso, { note: `${LINE}\nAlso scheduled for Aina Rahman: Fri 23 Oct 2026, 9:00 am · phone (Barista)` })).toEqual({ type: 'user-approval', reason: withAlso.note });
+    // The interview itself moved: stopped, whatever else is listed.
+    const movedWithAlso = { ok: true as const, note: `${moved.note}\n${ALSO_LATER}`, namesakes: [] };
+    expect(interviewCardDecision(movedWithAlso, { note: withAlso.note })).toEqual({ type: 'denied', reason: INTERVIEW_CHANGED_SINCE });
+    expect(interviewCardDecision(movedWithAlso, { note: LINE })).toEqual({ type: 'denied', reason: INTERVIEW_CHANGED_SINCE });
   });
   it('a refusal stays a refusal', () => {
     expect(interviewCardDecision({ ok: false, refusal: INTERVIEW_CHECK_FAILED }, null)).toEqual({ type: 'denied', reason: INTERVIEW_CHECK_FAILED });

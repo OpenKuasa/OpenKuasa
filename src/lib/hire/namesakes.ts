@@ -5,7 +5,9 @@
  * never from a whole list, so no page size can make the answer wrong.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Application, Candidate, Interview, InterviewCardRead, InterviewCardRow, InterviewKind, Namesake, Namesakes } from './types';
+import type {
+  Application, ApplicationOutcome, Candidate, Interview, InterviewCardRead, InterviewCardRow, InterviewKind, InterviewStatus, Namesake, Namesakes,
+} from './types';
 
 /** How many same-named rows are read. More than this and the answer is marked `cut`. */
 export const NAMESAKE_LIMIT = 50;
@@ -175,7 +177,7 @@ export async function readNamesakes(
 
 // ─── which interview an approval card is about ───────────────────────────────
 
-const NO_INTERVIEW: InterviewCardRead = { target: null, others: [], cut: false };
+const NO_INTERVIEW: InterviewCardRead = { target: null, others: [], cut: false, also: [], application_outcome: null };
 
 /**
  * The same answer from interviews already in memory, for a provider that holds all of its rows (the sample data,
@@ -183,20 +185,28 @@ const NO_INTERVIEW: InterviewCardRead = { target: null, others: [], cut: false }
  */
 export function interviewCardFromLists(
   id: unknown,
-  interviews: readonly Pick<Interview, 'id' | 'application_id' | 'candidate_name' | 'job_title' | 'scheduled_at' | 'kind'>[],
+  interviews: readonly Pick<
+    Interview,
+    'id' | 'application_id' | 'candidate_name' | 'job_title' | 'scheduled_at' | 'kind' | 'status' | 'duration_minutes' | 'place' | 'application_outcome'
+  >[],
 ): InterviewCardRead {
   const describe = (i: (typeof interviews)[number]): InterviewCardRow => ({
     id: i.id, application_id: i.application_id, candidate: i.candidate_name, job: i.job_title, scheduled_at: i.scheduled_at, kind: i.kind,
+    status: i.status, duration_minutes: i.duration_minutes, place: i.place,
   });
   const row = interviews.find((i) => i.id === id);
   if (!row) return NO_INTERVIEW;
   const [name, job] = [sameText(row.candidate_name), sameText(row.job_title)];
+  const sameName = interviews.filter((i) => i.id !== row.id && sameText(i.candidate_name) === name);
   return {
     target: describe(row),
-    others: interviews
-      .filter((i) => i.id !== row.id && sameText(i.candidate_name) === name && sameText(i.job_title) === job)
-      .map(describe),
+    others: sameName.filter((i) => sameText(i.job_title) === job).map(describe),
     cut: false,
+    also: sameName
+      .filter((i) => i.status === 'scheduled')
+      .sort((a, b) => Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at))
+      .map(describe),
+    application_outcome: row.application_outcome,
   };
 }
 
@@ -220,9 +230,16 @@ async function idsCalled(
   return { ids: read.filter((row) => sameText(row[column] ?? '') === sameText(text)).map((row) => row.id), cut: read.length > NAMESAKE_LIMIT };
 }
 
+/** What a card says of one interview. No contact detail and no notes. */
+const CARD_COLUMNS = 'id,application_id,scheduled_at,kind,status,duration_minutes,place';
+type CardColumns = {
+  id: string; application_id: string; scheduled_at: string; kind: InterviewKind; status: InterviewStatus; duration_minutes: number; place: string | null;
+};
+
 /**
  * One interview by its id, and every other interview that could be taken for it: those of anyone with the same
- * name, for a job with the same title, whether of the same application (a second round) or of a namesake's.
+ * name, for a job with the same title, whether of the same application (a second round) or of a namesake's. Then
+ * every other interview still scheduled with anyone of that name, for any job: what the card lists beside it.
  * Read by id and by name with the member's own client (row-level security and the workspace filter apply), never
  * from a whole list, so no page size can make the answer wrong. No contact detail and no notes are read. A failed
  * query throws; the caller then prepares no change.
@@ -232,15 +249,14 @@ export async function readInterviewCard(client: SupabaseClient, orgId: string, i
 
   const found = await client
     .from('hire_interviews')
-    .select('id,application_id,scheduled_at,kind,application:hire_applications(candidate:hire_candidates(name),job:hire_jobs(title))')
+    .select(`${CARD_COLUMNS},application:hire_applications(outcome,candidate:hire_candidates(name),job:hire_jobs(title))`)
     .eq('org_id', orgId)
     .eq('id', id)
     .maybeSingle();
   if (found.error) throw found.error;
-  const row = found.data as unknown as {
-    id: string; application_id: string; scheduled_at: string; kind: InterviewKind;
-    application: { candidate: { name: string } | null; job: { title: string } | null } | null;
-  } | null;
+  const row = found.data as unknown as (CardColumns & {
+    application: { outcome: ApplicationOutcome | null; candidate: { name: string } | null; job: { title: string } | null } | null;
+  }) | null;
   const name = row?.application?.candidate?.name;
   const title = row?.application?.job?.title;
   // An interview that cannot be named cannot be described on a card.
@@ -263,22 +279,50 @@ export async function readInterviewCard(client: SupabaseClient, orgId: string, i
 
   const twins = await client
     .from('hire_interviews')
-    .select('id,application_id,scheduled_at,kind')
+    .select(CARD_COLUMNS)
     .eq('org_id', orgId)
     .neq('id', id)
     .in('application_id', applicationIds)
     .order('scheduled_at', { ascending: true })
     .limit(NAMESAKE_LIMIT + 1);
   if (twins.error) throw twins.error;
-  const twinsRead = (twins.data ?? []) as unknown as { id: string; application_id: string; scheduled_at: string; kind: InterviewKind }[];
+  const twinsRead = (twins.data ?? []) as unknown as CardColumns[];
 
-  const describe = (i: { id: string; application_id: string; scheduled_at: string; kind: InterviewKind }): InterviewCardRow => ({
-    // The others are of the same name and title by the rule above, so they are worded as the target is.
-    id: i.id, application_id: i.application_id, candidate: name, job: title, scheduled_at: i.scheduled_at, kind: i.kind,
+  // Every application of anyone of that name, with its job's title; then their interviews that are still scheduled.
+  const everyApplication = await client
+    .from('hire_applications')
+    .select('id,job:hire_jobs(title)')
+    .eq('org_id', orgId)
+    .in('candidate_id', people.ids)
+    .limit(NAMESAKE_LIMIT + 1);
+  if (everyApplication.error) throw everyApplication.error;
+  const titleOf = new Map<string, string>([[row.application_id, title]]);
+  for (const a of ((everyApplication.data ?? []) as unknown as { id: string; job: { title: string } | null }[]).slice(0, NAMESAKE_LIMIT)) {
+    if (!titleOf.has(a.id)) titleOf.set(a.id, a.job?.title ?? title);
+  }
+  const scheduled = await client
+    .from('hire_interviews')
+    .select(CARD_COLUMNS)
+    .eq('org_id', orgId)
+    .eq('status', 'scheduled')
+    .neq('id', id)
+    .in('application_id', [...titleOf.keys()])
+    .order('scheduled_at', { ascending: true })
+    .limit(NAMESAKE_LIMIT + 1);
+  if (scheduled.error) throw scheduled.error;
+  const scheduledRead = (scheduled.data ?? []) as unknown as CardColumns[];
+
+  const describe = (i: CardColumns, job: string): InterviewCardRow => ({
+    id: i.id, application_id: i.application_id, candidate: name, job, scheduled_at: i.scheduled_at, kind: i.kind,
+    status: i.status, duration_minutes: i.duration_minutes, place: i.place ?? null,
   });
   return {
-    target: describe(row),
-    others: twinsRead.slice(0, NAMESAKE_LIMIT).map(describe),
+    target: describe(row, title),
+    // The others are of the same name and title by the rule above, so they are worded as the target is.
+    others: twinsRead.slice(0, NAMESAKE_LIMIT).map((i) => describe(i, title)),
     cut: people.cut || jobs.cut || applicationsRead.length > NAMESAKE_LIMIT || twinsRead.length > NAMESAKE_LIMIT,
+    // A list for the person to read, not a promise: more than were read are simply not all listed.
+    also: scheduledRead.slice(0, NAMESAKE_LIMIT).map((i) => describe(i, titleOf.get(i.application_id) ?? title)),
+    application_outcome: row.application?.outcome ?? null,
   };
 }

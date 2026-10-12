@@ -111,7 +111,8 @@ export function ApprovalCard({
       className="rounded-xl border bg-card p-3 text-sm text-card-foreground shadow-sm"
     >
       <p className="font-medium">{title}</p>
-      {approval.note ? <p className="mt-1 break-words text-foreground">{approval.note}</p> : null}
+      {/* The server's lines keep their line breaks: an interview's card has one line for each other interview. */}
+      {approval.note ? <p className="mt-1 whitespace-pre-line break-words text-foreground">{approval.note}</p> : null}
       {detail ? (
         <p className="mt-1 flex items-center gap-1.5 text-muted-foreground">
           <TriangleAlert className="size-4 shrink-0" aria-hidden />

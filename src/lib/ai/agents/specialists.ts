@@ -50,6 +50,7 @@ import {
   LINK_NOT_GIVEN,
   ONE_INTERVIEW_CHANGE,
   actsOnApplication,
+  ambiguousFor,
   interviewCardDecision,
   interviewNotLookedUp,
   interviewPlacesIn,
@@ -162,9 +163,12 @@ export function idsIn(value: unknown, depth = 0): string[] {
   return Object.values(value).flatMap((inner) => idsIn(inner, depth + 1));
 }
 
-/** Every id that a lookup among these returned while saying its name fits several rows. */
+/**
+ * Every id that a lookup among these returned while saying its name fits several rows. A result that says which
+ * rows it means (an interview list with two of one person's) holds back those alone; any other, every id in it.
+ */
 function ambiguousIn(results: ToolResult[]): string[] {
-  return [...new Set(results.flatMap((r) => idsIn(r.output).filter((id) => ambiguousLookup([r.output], id))))];
+  return [...new Set(results.flatMap((r) => idsIn(r.output).filter((id) => ambiguousFor([r.output], id))))];
 }
 
 /**
@@ -413,7 +417,7 @@ function specialistTools(
         const target = INTERVIEW_CHANGES.has(name) ? interviewTarget(name, input) : (input as { id?: unknown } | null)?.id;
         if (
           limited &&
-          ((typeof target === 'string' && turn.ambiguous.has(target)) || ambiguousLookup(results.map((r) => r.output), target))
+          ((typeof target === 'string' && turn.ambiguous.has(target)) || ambiguousFor(results.map((r) => r.output), target))
         ) {
           return { prepared: false, error: AMBIGUOUS[limited] };
         }

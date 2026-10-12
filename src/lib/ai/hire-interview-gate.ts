@@ -13,7 +13,12 @@
  * denied, which were stopped after the user's yes, and what a lookup said, are
  * all asked of those files.
  *
- * One thing is the interview's own. Every card about an interview that already
+ * Two things are the interview's own. The second: one person can have two
+ * scheduled interviews, and a name does not say which. A lookup that holds
+ * two says so (`several_match`), and a change to either is held back for the
+ * rest of the turn; and whenever a card is shown, it lists what else is
+ * scheduled with that person, read on the server, so the person deciding sees
+ * that there is another. The first: every card about an interview that already
  * exists carries a line that says which interview it is: its day, its time and
  * how it is held, read on the server by the interview's id and never taken
  * from what the model looked up or passed in. One application can rightly have
@@ -34,7 +39,7 @@ import {
 } from '@/lib/ai/hire-deletions';
 import { lookedUpAs } from '@/lib/ai/hire-pool-gate';
 import { isHeldCvMessage } from '@/lib/ai/hire-tools';
-import { THIS_INTERVIEW, interviewLine } from '@/lib/hire/interviews';
+import { THIS_INTERVIEW, alsoScheduledLines, interviewLine } from '@/lib/hire/interviews';
 import { interviewCardFromLists, namesakesFromLists } from '@/lib/hire/namesakes';
 import type { HireData, Namesakes } from '@/lib/hire/types';
 
@@ -87,6 +92,29 @@ export function interviewTarget(tool: unknown, input: unknown): unknown {
   return actsOnApplication(tool) ? given.application_id : given.id;
 }
 
+/** The ids a lookup's result says its `several_match` is about, or null when it names none (then it is about every row). */
+function severalIdsOf(output: unknown): unknown[] | null {
+  const at = (value: unknown): unknown => (value && typeof value === 'object' ? (value as { several_ids?: unknown }).several_ids : undefined);
+  // A result as a tool returned it, or as the part of a message that carries it.
+  const inner = (output as { output?: { value?: unknown } } | null | undefined)?.output?.value;
+  const ids = at(output) ?? at(inner);
+  return Array.isArray(ids) ? ids : null;
+}
+
+/**
+ * True when a lookup result that holds this id says more than one row fits, and means this row. The deletion gate's
+ * rule (`ambiguousLookup`), with one thing more: a plain list of interviews can hold two of one person's beside
+ * other people's, and then says which ids it means (`several_ids`); the others in that list are not held back.
+ * The other way for the person whose change is held back: say which one, in the next message.
+ */
+export function ambiguousFor(outputs: unknown[], id: unknown): boolean {
+  return outputs.some((output) => {
+    if (!ambiguousLookup([output], id)) return false;
+    const only = severalIdsOf(output);
+    return only === null || only.includes(id);
+  });
+}
+
 /**
  * Why an interview change an agent has just called must not become a card, or
  * null. `messages` is the conversation as the agent has it; the call itself may
@@ -118,7 +146,7 @@ export function interviewChangeProblem(
     .filter((part) => part.type === 'tool-result');
   // Any lookup: an interview's row holds its application's id, so an application found inside an ambiguous interview
   // lookup is held back too. It fails safe; the user says which, and the next message is a new turn.
-  return ambiguousLookup(lookups, call.id) ? AMBIGUOUS_INTERVIEW_CHANGE : null;
+  return ambiguousFor(lookups, call.id) ? AMBIGUOUS_INTERVIEW_CHANGE : null;
 }
 
 const LINK = /https?:\/\/\S+/gi;
@@ -248,7 +276,7 @@ export function interviewCheckFor(
           ? check
           : { ok: false, refusal: lookTheSameInterviews(found.target?.name.trim() ?? '', found.target?.job?.trim() ?? '') };
       }
-      const { target, others, cut } = data.interviewCard
+      const { target, others, cut, also } = data.interviewCard
         ? await data.interviewCard(id)
         : interviewCardFromLists(id, await data.listInterviews());
       // Not there (deleted since it was listed): there is no line to put on a card, and no card goes without one.
@@ -263,10 +291,11 @@ export function interviewCheckFor(
         twins.some((other) => other.application_id === target.application_id) ||
         (twins.length > 0 && !application.ok);
       if (alike) return { ok: false, refusal: lookTheSameInterviews(target.candidate.trim(), target.job.trim()) };
-      const note = THIS_INTERVIEW(line);
-      return application.ok && application.note
-        ? { ok: true, note: `${note}. ${application.note}`, namesakes: application.namesakes }
-        : { ok: true, note, namesakes: [] };
+      // The card's lines: which interview this is; which application, when a namesake has one for the same job; and
+      // what else is scheduled with the person, so "cancel Aina's" cannot be approved without seeing there is another.
+      const named = application.ok && application.note ? application : null;
+      const note = [THIS_INTERVIEW(line), ...(named ? [named.note] : []), ...alsoScheduledLines(target.candidate, also ?? [])].join('\n');
+      return { ok: true, note, namesakes: named ? named.namesakes : [] };
     } catch {
       // Nothing of the error is logged: its words can hold a name, an email or a link.
       console.error('[lekir] the check before an interview change could not read the rows');
@@ -277,9 +306,15 @@ export function interviewCheckFor(
 
 /** A stored chat keeps this much of a card's line (src/lib/chat/stored-parts.ts). */
 const LINE_KEPT = 500;
-/** True when the line the card showed is the line now, allowing for a card reopened from a stored chat. */
+/** A card's lines about the interview itself: everything before the list of what else is scheduled. */
+const ownLines = (note: string | null): string | null => (note === null ? null : note.split('\nAlso scheduled for ')[0]);
+/**
+ * True when the line the card showed is the line now, allowing for a card reopened from a stored chat. What else
+ * is scheduled with the person is not compared: another interview that came, went or moved since the card does not
+ * change which interview the person said yes to.
+ */
 const sameLine = (shown: string | null, now: string | null): boolean =>
-  shown === now || (shown !== null && now !== null && shown.length === LINE_KEPT && now.startsWith(shown));
+  ownLines(shown) === ownLines(now) || (shown !== null && now !== null && shown.length === LINE_KEPT && now.startsWith(shown));
 
 /**
  * The gate's answer once nothing else refused the call: a card, with the line

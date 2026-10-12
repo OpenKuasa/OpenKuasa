@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DURATION_CHOICES, INTERVIEW_INPUT_MESSAGES, INTERVIEW_KINDS, INTERVIEW_LIMITS, INTERVIEW_NOT_READ_BACK, INTERVIEW_NOT_SENT,
-  INTERVIEW_OUTCOMES, INTERVIEW_SAVE_FAILED, KIND_WORDS, PLACE_LABEL, THIS_INTERVIEW, cancelledMessage, interviewCardDetail,
+  INTERVIEW_OUTCOMES, INTERVIEW_SAVE_FAILED, KIND_WORDS, PLACE_LABEL, THIS_INTERVIEW, alsoScheduledLines, cancelledMessage, interviewCardDetail,
   interviewCardTitle, interviewLine, interviewMessage, menuFor, needsOutcome, offerMoveToInterview, outcomeMessage,
   recordedPastMessage, reopenedMessage, scheduledMessage, stillScheduledMessage, updatedMessage,
 } from '@/lib/hire/interviews';
@@ -340,5 +340,34 @@ describe('times at the edges of a day and a year', () => {
     expect(needsOutcome('scheduled', '2026-10-19', now)).toBe(false);
     expect(needsOutcome('scheduled', '2026-10-20T14:59:00+08:00', now)).toBe(true);
     expect(needsOutcome('scheduled', '2026-10-20T15:00:00+08:00', now)).toBe(false);
+  });
+});
+
+describe('what else is scheduled with the same person, on a card about one interview', () => {
+  const other = (scheduled_at: string, kind: 'video' | 'onsite' | 'phone', job: string) => ({ scheduled_at, kind, job });
+  it('one line for each, with its date, its time, its type and its job', () => {
+    expect(alsoScheduledLines('Aina Rahman', [other('2026-10-22T02:00:00.000Z', 'onsite', 'Sales Executive')])).toEqual([
+      'Also scheduled for Aina Rahman: Thu 22 Oct 2026, 10:00 am · onsite (Sales Executive)',
+    ]);
+    expect(alsoScheduledLines('Aina Rahman', [])).toEqual([]);
+  });
+  it('at most three, then how many more', () => {
+    const many = [
+      other('2026-10-22T02:00:00.000Z', 'onsite', 'Sales Executive'), other('2026-10-23T02:00:00.000Z', 'video', 'Barista'),
+      other('2026-10-24T02:00:00.000Z', 'phone', 'Barista'), other('2026-10-25T02:00:00.000Z', 'video', 'Barista'), other('2026-10-26T02:00:00.000Z', 'video', 'Barista'),
+    ];
+    expect(alsoScheduledLines('Aina Rahman', many)).toEqual([
+      'Also scheduled for Aina Rahman: Thu 22 Oct 2026, 10:00 am · onsite (Sales Executive)',
+      'Also scheduled for Aina Rahman: Fri 23 Oct 2026, 10:00 am · video (Barista)',
+      'Also scheduled for Aina Rahman: Sat 24 Oct 2026, 10:00 am · phone (Barista)',
+      'and 2 more',
+    ]);
+    expect(alsoScheduledLines('Aina Rahman', many.slice(0, 3))).toHaveLength(3);
+  });
+  it('a name or a job with a line break in it stays on its one line, and no name is "the candidate"', () => {
+    expect(alsoScheduledLines(' Aina\nRahman ', [other('2026-10-22T02:00:00.000Z', 'onsite', 'Sales\n Executive ')])).toEqual([
+      'Also scheduled for Aina Rahman: Thu 22 Oct 2026, 10:00 am · onsite (Sales Executive)',
+    ]);
+    expect(alsoScheduledLines('  ', [other('2026-10-22T02:00:00.000Z', 'onsite', 'Barista')])[0]).toBe('Also scheduled for the candidate: Thu 22 Oct 2026, 10:00 am · onsite (Barista)');
   });
 });

@@ -4,6 +4,7 @@ import { createSeedReachData } from '@/lib/reach/seed';
 import { HIRE_TOOL_NAMES } from '@/lib/ai/hire-tools';
 import { HIRE_WRITE_TOOL_NAMES } from '@/lib/ai/products';
 import { fullDate } from '@/lib/hire/lists';
+import { interviewCardFromLists } from '@/lib/hire/namesakes';
 
 const seen = vi.hoisted(() => ({
   calls: [] as { layer: string; system: string; tools: string[]; prompt: string }[],
@@ -2589,7 +2590,12 @@ describe('interview changes', () => {
   const LATER = '2026-10-22T03:00:00.000Z';
   const MOVED = '2026-10-21T07:00:00.000Z';
   const LINE = 'This interview: Tue 20 Oct 2026, 3:00 pm · video';
-  const LINE_LATER = 'This interview: Thu 22 Oct 2026, 11:00 am · video';
+  /** The second interview's card: it says the first one is scheduled too, where that one is now. */
+  const lineLater = (first = 'Tue 20 Oct 2026, 3:00 pm') =>
+    `This interview: Thu 22 Oct 2026, 11:00 am · video\nAlso scheduled for Putri Maisarah Dahlan: ${first} · video (Night Auditor)`;
+  const LINE_LATER = lineLater();
+  /** The first interview's card when the second is scheduled too. */
+  const LINE_AND_LATER = `${LINE}\nAlso scheduled for Putri Maisarah Dahlan: Thu 22 Oct 2026, 11:00 am · video (Night Auditor)`;
   const LINE_MOVED = 'This interview: Wed 21 Oct 2026, 3:00 pm · video';
   const LINK = 'https://meet.example.com/abc';
   const ROOM = 'https://meet.example.com/room-2';
@@ -2618,30 +2624,30 @@ describe('interview changes', () => {
   };
   const NEW = { application_id: APP, date: '2027-01-12', time: '15:00', duration_minutes: 60, kind: 'video' };
 
-  type State = { at: string; twin: boolean; fail: boolean };
+  type State = { at: string; twin: boolean; fail: boolean; both?: boolean };
   /**
    * One application with two interviews, a first and a second round; `state` can move the first, make the second
-   * read exactly like it, or make the server's read fail. One candidate has a real id, for a deletion or a pool
+   * read exactly like it, make the server's read fail, or (`both`) leave the second scheduled too: it is cancelled
+   * otherwise, so that a plain list holds one scheduled interview with the person. One candidate has a real id, for a deletion or a pool
    * change beside an interview change. The checks read these rows; what a model "looked up" is in the conversation.
    */
   const world = (state: State = { at: AT, twin: false, fail: false }) => {
     const base = hire().data;
-    const interview = (id: string, scheduled_at: string, place: string | null) => ({
+    const interview = (id: string, scheduled_at: string, place: string | null, status: 'scheduled' | 'cancelled' = 'scheduled') => ({
       id, application_id: APP, candidate_name: WHO, job_title: JOB, scheduled_at, kind: 'video' as const, interviewer_name: null,
-      status: 'scheduled' as const, created_at: '2026-10-09T02:00:00.000Z', updated_at: '2026-10-09T02:00:00.000Z',
+      status, created_at: '2026-10-09T02:00:00.000Z', updated_at: '2026-10-09T02:00:00.000Z',
       duration_minutes: 60, place, notes: null, application_stage: 'interview' as const, application_outcome: 'active' as const,
     });
-    const listInterviews = async () => [interview(IV, state.at, null), interview(IV2, state.twin ? state.at : LATER, ROOM)];
+    const listInterviews = async () => [interview(IV, state.at, null), interview(IV2, state.twin ? state.at : LATER, ROOM, state.both ? 'scheduled' : 'cancelled')];
     const listApplications = async () =>
       (await base.listApplications()).map((a, n) =>
         n === 0 ? { ...a, id: APP, candidate_name: WHO, job_title: JOB, stage: 'interview' as const, outcome: 'active' as const, cover_letter: `Please interview me on ${LETTER_LINK}`, cv_url: LETTER_LINK, portfolio_url: LETTER_LINK } : a);
     const listCandidates = async () =>
       (await base.listCandidates()).map((c, n) => (n === 0 ? { ...c, id: PERSON, name: 'Zulaikha Tan Abdullah', pool_status: 'available' as const } : c));
+    // The server's read, by the same rule the database's has.
     const interviewCard = async (id: unknown) => {
       if (state.fail) throw new Error('putri@example.my could not be read');
-      const rows = (await listInterviews()).map((i) => ({ id: i.id, application_id: i.application_id, candidate: i.candidate_name, job: i.job_title, scheduled_at: i.scheduled_at, kind: i.kind }));
-      const target = rows.find((row) => row.id === id) ?? null;
-      return { target, others: target ? rows.filter((row) => row.id !== id) : [], cut: false };
+      return interviewCardFromLists(id, await listInterviews());
     };
     return { data: { ...base, listInterviews, listApplications, listCandidates, interviewCard }, write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true } };
   };
@@ -2775,6 +2781,22 @@ describe('interview changes', () => {
       // The script's last call repeats in delegations that looked nothing up, until Tuah's step limit: refused as well.
       for (const refusal of seen.refusals) expect(refusal === AMBIGUOUS || refusal.startsWith('You have not looked up')).toBe(true);
       nothingSaved();
+    });
+    it('a plain list that holds two scheduled interviews with one person holds a change back; in a new turn the card says the other is there', async () => {
+      const two = () => world({ at: AT, twin: false, fail: false, both: true });
+      const sameTurn = await prepare([listAll, { tool: 'cancelInterview', input: { id: IV } }], two());
+      expect(sameTurn.context.proposals.size).toBe(0);
+      expect(sameTurn.cards).toEqual([]);
+      expect(seen.refusals[0]).toBe(AMBIGUOUS);
+      // A new turn, with the interview known from the earlier one: a card, and it says the second is scheduled too.
+      const newTurn = await prepare([{ tool: 'cancelInterview', input: { id: IV } }], two(), { names: { [`interview:${IV}`]: `${WHO} (${JOB})` }, said: 'Cancel it' });
+      expect(seen.refusals).toEqual([]);
+      expect(newTurn.cards).toHaveLength(1);
+      expect(newTurn.cards[0].reason).toBe(LINE_AND_LATER);
+      // With one scheduled interview: nothing held back, and the one line.
+      const alone = await prepare([listAll, { tool: 'cancelInterview', input: { id: IV } }]);
+      expect(seen.refusals).toEqual([]);
+      expect(alone.cards[0].reason).toBe(LINE);
     });
     it('refuses a link nobody gave: not one made up, and not one that only Tuah wrote', async () => {
       const withLink: Call = { tool: 'scheduleInterview', input: { ...NEW, place: LINK } };
@@ -2969,7 +2991,7 @@ describe('interview changes', () => {
           reason: 'This interview was changed after the card was shown, so a last check stopped it. Nothing was changed. Prepare it again: the card will show it as it is now.',
         });
         // It never ran: another interview change can reach a card in what is left of the turn, with the row as it is now.
-        expect(await gate({ proposalId: 'p-new' }, 'c2')).toEqual({ type: 'user-approval', reason: LINE_LATER });
+        expect(await gate({ proposalId: 'p-new' }, 'c2')).toEqual({ type: 'user-approval', reason: lineLater('Wed 21 Oct 2026, 3:00 pm') });
         // The same row, unmoved, goes through with its line.
         expect(await gateFor(turn)({ proposalId: 'p-old' }, 'c1')).toEqual({ type: 'user-approval', reason: LINE });
       });
@@ -3069,6 +3091,25 @@ describe('interview changes', () => {
       expect(byJob.denials).toEqual([AMBIGUOUS]);
       // With no ambiguous lookup in the turn, the same call goes to a card.
       expect((await request([[listAll], [{ tool: 'cancelInterview', input: { id: IV } }]], agent)).cards).toHaveLength(1);
+    });
+    it.each(agents)('%s: a plain list that holds two scheduled interviews with one person holds a change back for the turn; in a new turn the card says the other is there', async (agent) => {
+      const two = world({ at: AT, twin: false, fail: false, both: true });
+      // The same turn: the list said there are two, and the model must ask, not take the first.
+      const sameTurn = await request([[listAll], [{ tool: 'cancelInterview', input: { id: IV } }]], agent, two, `Cancel the interview with ${WHO}`);
+      expect(seen.calls[1].prompt).toContain('More than one scheduled interview is with the same person');
+      expect(sameTurn.cards).toEqual([]);
+      expect(sameTurn.denials).toEqual([AMBIGUOUS]);
+      // A new turn (the list is in an earlier one): a card, and it says the second one is scheduled too.
+      const newTurn = await request([[{ tool: 'cancelInterview', input: { id: IV } }]], agent, two, 'Cancel it');
+      expect(newTurn.denials).toEqual([]);
+      expect(newTurn.cards).toHaveLength(1);
+      expect(newTurn.cards[0].reason).toBe(LINE_AND_LATER);
+      expect(LINE_AND_LATER).toBe('This interview: Tue 20 Oct 2026, 3:00 pm · video\nAlso scheduled for Putri Maisarah Dahlan: Thu 22 Oct 2026, 11:00 am · video (Night Auditor)');
+      // With one scheduled interview, the same list holds nothing back, and the card has the one line.
+      const alone = await request([[listAll], [{ tool: 'cancelInterview', input: { id: IV } }]], agent, world(), `Cancel the interview with ${WHO}`);
+      expect(alone.denials).toEqual([]);
+      expect(alone.cards).toHaveLength(1);
+      expect(alone.cards[0].reason).toBe(LINE);
     });
     it.each(agents)('%s: a made-up link is denied, and a link the user typed passes', async (agent) => {
       const withLink: Call = { tool: 'scheduleInterview', input: { ...NEW, place: LINK } };

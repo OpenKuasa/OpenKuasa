@@ -1235,6 +1235,39 @@ describe('listInterviews, for the interview changes', () => {
     // Narrowed to one of the two, it is clear again.
     expect((await list({ jobTitle: 'Sales Executive', status: 'scheduled' }, three)).several_match).toBeUndefined();
   });
+  it('says so whenever the list holds two SCHEDULED interviews with one person, whatever was asked for, and which ones', async () => {
+    // A first and a second round still to come, and someone else's.
+    const twoAhead = from(
+      interview('i1'),
+      interview('i2', { scheduled_at: '2026-10-22T03:00:00.000Z', kind: 'onsite' }),
+      interview('i3', { application_id: 'a2', candidate_name: 'Farid bin Osman', job_title: 'Barista', scheduled_at: '2026-10-21T02:00:00.000Z' }),
+      // Another job of hers, and one of hers that is over: the first counts, the second does not.
+      interview('i4', { application_id: 'a3', job_title: 'Barista', scheduled_at: '2026-10-23T03:00:00.000Z' }),
+      interview('i5', { scheduled_at: '2026-10-06T03:00:00.000Z', status: 'completed' }),
+    );
+    const SAID =
+      'More than one scheduled interview is with the same person: Aina Rahman (Sales Executive, Tue 20 Oct 2026, 3:00 pm); ' +
+      'Aina Rahman (Sales Executive, Thu 22 Oct 2026, 11:00 am); Aina Rahman (Barista, Fri 23 Oct 2026, 11:00 am). ' +
+      'If the user means one of these, do not choose one. Prepare no change to it: say which ones there are and ask the user which one they mean.';
+    for (const input of [{}, { when: 'upcoming' }, { status: 'scheduled' }, { limit: 50 }]) {
+      const out = await list(input, twoAhead);
+      expect(out.several_match, JSON.stringify(input)).toBe(SAID);
+      // Which ids are meant: the others in the list are not held back.
+      expect(out.several_ids, JSON.stringify(input)).toEqual(['i1', 'i2', 'i4']);
+    }
+    // A name in another letter case or spacing is the same person's name.
+    const spelled = from(interview('i1'), interview('i2', { candidate_name: ' aina  RAHMAN', scheduled_at: '2026-10-22T03:00:00.000Z' }));
+    expect((await list({}, spelled)).several_ids).toEqual(['i1', 'i2']);
+    // Only one of hers still scheduled, or the two are with different people: a list, not a question.
+    expect((await list({}, three)).several_match).toBeUndefined();
+    expect((await list({}, three)).several_ids).toBeUndefined();
+    expect((await list({ status: 'completed' }, twoAhead)).several_match).toBeUndefined();
+    // Asked for by name or by job, the older sentence is said, and it holds back every row of the result.
+    const byName = await list({ candidate: 'Aina' }, twoAhead);
+    expect(byName.several_match).toContain('More than one interview matches this name:');
+    expect(byName.several_ids).toBeUndefined();
+    expect((await list({ jobTitle: 'Sales Executive' }, twoAhead)).several_ids).toBeUndefined();
+  });
   it('never lets the model choose the workspace, and takes no id', () => {
     const shape = (createHireTools(three, NOW).listInterviews as unknown as { inputSchema: { shape: Record<string, unknown> } }).inputSchema.shape;
     expect(Object.keys(shape).sort()).toEqual(['candidate', 'jobTitle', 'limit', 'status', 'when']);
