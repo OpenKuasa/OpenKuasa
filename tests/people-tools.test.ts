@@ -43,13 +43,14 @@ const EMPTY: PeopleData = {
 };
 
 describe('people tools', () => {
-  it('is exactly the twenty-three lookups, none sharing a name with another product', () => {
+  it('is exactly the twenty-five lookups, none sharing a name with another product', () => {
     expect(Object.keys(createPeopleTools(data, HR, NOW))).toEqual([...PEOPLE_TOOL_NAMES]);
     expect(PEOPLE_TOOL_NAMES).toEqual([
       'getPeopleOverview', 'listEmployees', 'getEmployee', 'listDepartments', 'getHeadcountByDepartment',
       'listWhoIsOnLeave', 'listLeaveRequests', 'listTimeOffRequests', 'getLeaveBalances', 'listPendingApprovals', 'listClaims',
       'listOvertime', 'getAttendanceSummary', 'getTimesheet', 'listShifts', 'listPublicHolidays',
       'getPayrollSummary', 'listPayslips', 'getPerformanceSummary', 'listGoals', 'listReviews', 'listTrainings', 'listAnnouncements',
+      'listDocuments', 'listLetters',
     ]);
     const others = new Set<string>([
       ...Object.keys(createReachTools(createSeedReachData())),

@@ -67,11 +67,12 @@ describe('Lekiu change tools', () => {
       'saveGoal', 'removeGoal', 'enrolInTraining', 'withdrawFromTraining',
       'saveReview', 'deleteReview', 'releaseReview', 'saveTraining', 'removeTraining', 'setTrainingCompleted',
       'saveAnnouncement', 'removeAnnouncement', 'publishAnnouncement', 'unpublishAnnouncement',
+      'saveLetter', 'startLetterFromTemplate', 'issueLetter', 'requestAcknowledgement',
     ]);
     // An owner with no linked employee record holds no clock tool; one with a record holds every one.
     const unlinked = Object.keys(createPeopleTools(data, HR, NOW, write())).sort();
     expect(unlinked).toEqual(
-      [...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getAttendanceSettings', ...PEOPLE_WRITE_TOOL_NAMES]
+      [...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getAttendanceSettings', 'listLetterTemplates', ...PEOPLE_WRITE_TOOL_NAMES]
         .filter((name) => name !== 'clockIn' && name !== 'clockOut')
         .sort(),
     );
@@ -79,7 +80,7 @@ describe('Lekiu change tools', () => {
       createPeopleTools(data, { ...HR, employeeId: EMP }, NOW, { ...write(), employeeId: EMP }),
     ).sort();
     expect(linked).toEqual(
-      [...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getMyAttendanceToday', 'getAttendanceSettings', ...PEOPLE_WRITE_TOOL_NAMES].sort(),
+      [...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getMyAttendanceToday', 'getAttendanceSettings', 'listLetterTemplates', ...PEOPLE_WRITE_TOOL_NAMES].sort(),
     );
   });
 
@@ -88,7 +89,7 @@ describe('Lekiu change tools', () => {
     const kit = peopleProduct({ data, viewer: { ...HR, employeeId: EMP }, write: linked });
     expect(Object.keys(kit.write).sort()).toEqual([...PEOPLE_WRITE_TOOL_NAMES].sort());
     expect(Object.keys(kit.read).sort()).toEqual(
-      [...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getMyAttendanceToday', 'getAttendanceSettings'].sort(),
+      [...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getMyAttendanceToday', 'getAttendanceSettings', 'listLetterTemplates'].sort(),
     );
     const { toolApproval } = combineToolkits([kit]);
     for (const name of PEOPLE_WRITE_TOOL_NAMES) expect(toolApproval?.[name]).toBe('user-approval');
@@ -167,7 +168,8 @@ describe('Lekiu change tools for goals, reviews, training and announcements', ()
   it('are all in the list of tools that wait for approval, once each, after the payroll tools', () => {
     const names = [...PEOPLE_WRITE_TOOL_NAMES];
     expect(new Set(names).size).toBe(names.length);
-    expect(names.slice(-14)).toEqual([...OWN, 'saveReview', 'deleteReview', 'releaseReview', 'saveTraining', 'removeTraining', 'setTrainingCompleted', 'saveAnnouncement', 'removeAnnouncement', 'publishAnnouncement', 'unpublishAnnouncement']);
+    expect(names.slice(-18, -4)).toEqual([...OWN, 'saveReview', 'deleteReview', 'releaseReview', 'saveTraining', 'removeTraining', 'setTrainingCompleted', 'saveAnnouncement', 'removeAnnouncement', 'publishAnnouncement', 'unpublishAnnouncement']);
+    expect(names.slice(-4)).toEqual(['saveLetter', 'startLetterFromTemplate', 'issueLetter', 'requestAcknowledgement']);
     const kit = peopleProduct({ data, viewer: { ...HR, employeeId: EMP }, write: { ...write(), employeeId: EMP } });
     const { toolApproval } = combineToolkits([kit]);
     for (const name of [...OWN, ...HR_ONLY]) {

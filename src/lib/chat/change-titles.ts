@@ -10,6 +10,8 @@ import { STAGE_LABEL } from '@/lib/hire/applications-view';
 import { PIPELINE_CARD_DETAIL, pipelineCardTitle, poolCardDetail, poolCardTitle } from '@/lib/hire/pool';
 import { isRealDate, monthLabel, weekdayName } from '@/lib/people/dates';
 import { blank, hhmm } from '@/lib/people/loose-input';
+import { unfilledInLetter } from '@/lib/people/letter-placeholders';
+import { LETTER_TYPE_LABEL } from '@/lib/people/own';
 import { toPeriod, toScore } from '@/lib/people/performance-forms';
 import { STATUTORY_FIELDS } from '@/lib/people/statutory-fields';
 import { centsToRinggit, monthLabel as payrollMonthLabel, ringgitToCents, toStatutoryInput } from '@/lib/people/payroll-forms';
@@ -29,6 +31,7 @@ const APPOINTMENT_STATUS_LABELS: Record<string, string> = {
  */
 function labelOf(row: Record<string, unknown>, kind?: ItemKind): string | null {
   if (kind === 'goal' || kind === 'review' || kind === 'training' || kind === 'announcement') return performanceFact(row, kind);
+  if (kind === 'letter' || kind === 'document') return letterDocumentFact(row, kind);
   if (kind === 'application') {
     // A listApplications row has `candidate` and `job`, not `name`.
     const who = text(row.candidate);
@@ -127,7 +130,10 @@ export type ItemKind =
   | 'goal'
   | 'review'
   | 'training'
-  | 'announcement';
+  | 'announcement'
+  | 'letter'
+  | 'document'
+  | 'template';
 const KIND_OF_TOOL: Record<string, ItemKind> = {
   getCampaigns: 'campaign',
   createCampaign: 'campaign',
@@ -221,6 +227,14 @@ const KIND_OF_TOOL: Record<string, ItemKind> = {
   publishAnnouncement: 'announcement',
   unpublishAnnouncement: 'announcement',
   removeAnnouncement: 'announcement',
+  // Letters and documents: a lookup row and a change's result carry the same fields. `requestAcknowledgement` is a
+  // letter or a document by what it returned: see `kindOfResult`.
+  listLetters: 'letter',
+  saveLetter: 'letter',
+  startLetterFromTemplate: 'letter',
+  issueLetter: 'letter',
+  listDocuments: 'document',
+  listLetterTemplates: 'template',
   listDepartments: 'department',
   createDepartment: 'department',
   updateDepartment: 'department',
@@ -298,7 +312,21 @@ const EMPLOYEE_SOURCES = new Set([
   'enrolInTraining',
   'withdrawFromTraining',
   'setTrainingCompleted',
+  'listDocuments',
+  'listLetters',
+  'saveLetter',
+  'startLetterFromTemplate',
+  'issueLetter',
+  'requestAcknowledgement',
 ]);
+
+/** What kind of thing a tool's result is about: by its tool, except `requestAcknowledgement`, which says which it acted on. */
+function kindOfResult(result: ToolResult): ItemKind | undefined {
+  if (result.tool !== 'requestAcknowledgement') return KIND_OF_TOOL[result.tool];
+  const output = asRecord(result.output);
+  const item = asRecord(output?.data)?.item ?? output?.item;
+  return item === 'letter' ? 'letter' : item === 'document' ? 'document' : undefined;
+}
 
 /** Calls `each` for every `employee_id` with a name beside it, anywhere in a result (a course's people sit four deep). */
 function eachNamedEmployee(value: unknown, each: (id: string, name: string) => void, depth = 0): void {
@@ -316,7 +344,7 @@ function eachNamedEmployee(value: unknown, each: (id: string, name: string) => v
 /** Every named row in a set of tool results, by the kind of thing its tool is about. */
 export function collectNames(results: ToolResult[], into: KnownNames = {}): KnownNames {
   for (const result of results) {
-    const kind = KIND_OF_TOOL[result.tool];
+    const kind = kindOfResult(result);
     if (kind === 'candidate') {
       // A candidate's name is kept with a mark of which side it came from, or not at all: a name whose mark
       // did not fit under the cap would read as one from before the marks, which counts as on file.
@@ -380,7 +408,7 @@ export function nameIn(results: ToolResult[]): NameFinder {
       return fact ? JSON.stringify(fact) : null;
     }
     for (let r = results.length - 1; r >= 0; r -= 1) {
-      if (kind && KIND_OF_TOOL[results[r].tool] !== kind) continue;
+      if (kind && kindOfResult(results[r]) !== kind) continue;
       const found = nameOf(results[r].output, id, kind);
       if (found) return found;
     }
@@ -1159,6 +1187,176 @@ const PERFORMANCE_TOOLS = new Set([
   'unpublishAnnouncement',
 ]);
 
+// ---- Letters and acknowledgement requests ------------------------------------------------------
+//
+// As for the performance tools: a lookup row and a change's result carry the same fields, `nameIn` (newest result
+// first) makes the newest of the two what a later card believes, and a card states exactly what will be saved, in
+// full. A letter's whole body is shown every time. Anything the conversation suggests about the row's state is a
+// hedged sentence in the detail, never a change to the question.
+
+const UNLISTED_LETTER = 'a letter that was not in the list above';
+const UNLISTED_DOCUMENT = 'a document that was not in the list above';
+const UNLISTED_TEMPLATE = 'a template that was not in the list above';
+
+type LetterFact = {
+  employee: string | null;
+  letter_type: string | null;
+  title: string;
+  body: string;
+  status: 'draft' | 'issued' | null;
+  ack_requested: boolean | null;
+};
+type DocumentFact = { employee: string | null; title: string; uploaded_by: 'HR' | 'the employee' | null; ack_requested: boolean | null };
+
+/** What the conversation knows about one letter or document, as JSON text, from a lookup row or a change's result. */
+function letterDocumentFact(row: Record<string, unknown>, kind: 'letter' | 'document'): string | null {
+  const title = text(row.title);
+  if (!title) return null;
+  const ack = typeof row.ack_requested === 'boolean' ? row.ack_requested : null;
+  if (kind === 'letter') {
+    // The body is kept exactly as it came: a card shows the whole letter.
+    if (typeof row.body !== 'string') return null;
+    const fact: LetterFact = {
+      employee: text(row.employee),
+      letter_type: typeof row.letter_type === 'string' && Object.hasOwn(LETTER_TYPE_LABEL, row.letter_type) ? row.letter_type : null,
+      title,
+      body: row.body,
+      status: row.status === 'draft' || row.status === 'issued' ? row.status : null,
+      ack_requested: ack,
+    };
+    return JSON.stringify(fact);
+  }
+  const fact: DocumentFact = {
+    employee: text(row.employee),
+    title,
+    uploaded_by: row.uploaded_by === 'HR' || row.uploaded_by === 'the employee' ? row.uploaded_by : null,
+    ack_requested: ack,
+  };
+  return JSON.stringify(fact);
+}
+
+const letterTypeWords = (type: unknown): string =>
+  typeof type === 'string' && Object.hasOwn(LETTER_TYPE_LABEL, type)
+    ? LETTER_TYPE_LABEL[type as keyof typeof LETTER_TYPE_LABEL]
+    : 'a type that could not be read';
+
+const letterBodyWords = (body: unknown): string => (typeof body === 'string' && body.trim() ? `“${body}”` : 'no text yet');
+
+/** "{a}", "{a} and {b}" or "{a}, {b} and {c}". */
+function placeholderList(names: string[]): string {
+  const braced = names.map((name) => `{${name}}`);
+  return braced.length <= 1 ? braced.join('') : `${braced.slice(0, -1).join(', ')} and ${braced[braced.length - 1]}`;
+}
+
+/** The question on a card for one of the letter and acknowledgement tools. */
+function letterTitle(toolName: string, i: Record<string, unknown>, find: NameFinder): string {
+  switch (toolName) {
+    case 'saveLetter': {
+      const who = find(i.employee_id, 'employee') ?? 'this employee';
+      const letterId = blank(i.letter_id);
+      const ask =
+        i.ack_requested === true
+          ? ', asking them to acknowledge it'
+          : letterId === null
+            ? ''
+            : i.ack_requested === false
+              ? ', not asking them to acknowledge it'
+              : ', leaving the acknowledgement request as it is';
+      const what = `type ${letterTypeWords(i.letter_type)}, titled “${text(i.title) ?? ''}”: ${letterBodyWords(i.body)}${ask}`;
+      if (letterId === null) return `Save a draft letter for ${who}, ${what}?`;
+      const { fact } = factOf<LetterFact>(find, letterId, 'letter');
+      return `Change ${fact ? `the letter “${fact.title}”` : UNLISTED_LETTER} for ${who} to ${what}?`;
+    }
+    case 'startLetterFromTemplate': {
+      const who = find(i.employee_id, 'employee') ?? 'this employee';
+      const template = find(i.template_id, 'template');
+      return `Start a draft letter for ${who} from ${template ? `the template “${template}”` : UNLISTED_TEMPLATE}?`;
+    }
+    case 'issueLetter': {
+      const { fact } = factOf<LetterFact>(find, i.letter_id, 'letter');
+      if (!fact) return `Issue ${UNLISTED_LETTER}? Nothing in this chat shows its text, so it cannot be shown here.`;
+      return `Issue the letter to ${fact.employee ?? 'this employee'}, type ${letterTypeWords(fact.letter_type)}, titled “${fact.title}”: ${letterBodyWords(fact.body)}?`;
+    }
+    case 'requestAcknowledgement': {
+      const withdraws = i.requested === false;
+      const documentId = blank(i.document_id);
+      const letterId = blank(i.letter_id);
+      if ((documentId === null) === (letterId === null)) return 'Approve this change?';
+      const isLetter = letterId !== null;
+      const { fact } = isLetter ? factOf<LetterFact>(find, letterId, 'letter') : factOf<DocumentFact>(find, documentId, 'document');
+      if (!fact) {
+        const unlisted = isLetter ? UNLISTED_LETTER : UNLISTED_DOCUMENT;
+        return withdraws ? `Withdraw the acknowledgement request on ${unlisted}?` : `Ask for an acknowledgement of ${unlisted}?`;
+      }
+      const who = fact.employee ?? 'this employee';
+      const item = `${isLetter ? 'the letter' : 'the document'} “${fact.title}”`;
+      return withdraws ? `Withdraw the request for ${who} to acknowledge ${item}?` : `Ask ${who} to acknowledge ${item}?`;
+    }
+    default:
+      return 'Approve this change?';
+  }
+}
+
+/** The second line of a card for one of these tools: the fixed sentence, then what the conversation suggests. */
+function letterDetail(toolName: string, i: Record<string, unknown>, find?: NameFinder): string | null {
+  const parts: (string | null)[] = [];
+  switch (toolName) {
+    case 'saveLetter': {
+      const letterId = blank(i.letter_id);
+      const fact = find && letterId !== null ? factOf<LetterFact>(find, letterId, 'letter').fact : null;
+      if (fact?.status === 'issued') {
+        parts.push('This letter was issued when last checked, so this is likely to be refused. It is pulled back to a draft on the Letters screen first.');
+      } else {
+        parts.push('A draft: the employee cannot see it yet.');
+      }
+      break;
+    }
+    case 'startLetterFromTemplate':
+      parts.push(
+        'A draft: the employee cannot see it yet. The template\'s placeholders are filled in from their record, and any that cannot be filled are left in the text.',
+      );
+      break;
+    case 'issueLetter': {
+      parts.push('The employee will be able to see it.');
+      const fact = find ? factOf<LetterFact>(find, i.letter_id, 'letter').fact : null;
+      if (fact?.ack_requested === true) parts.push('They will be asked to acknowledge it.');
+      // Worked out from the title and the body the conversation holds, by the one rule the database mirrors.
+      const left = fact ? unfilledInLetter(fact.title, fact.body) : [];
+      if (left.length > 0) parts.push(`It still has ${placeholderList(left)} in it, so this is likely to be refused until they are replaced.`);
+      if (fact?.status === 'issued') parts.push('This letter was issued when last checked, so this may be refused.');
+      break;
+    }
+    case 'requestAcknowledgement': {
+      const withdraws = i.requested === false;
+      const letterId = blank(i.letter_id);
+      if (letterId !== null) {
+        const fact = find ? factOf<LetterFact>(find, letterId, 'letter').fact : null;
+        if (fact?.status === 'issued') {
+          parts.push('This letter was issued when last checked, so this will be refused. It is pulled back to a draft on the Letters screen first.');
+        } else {
+          parts.push(withdraws ? 'A draft: the employee will not be asked when it is issued.' : 'A draft: the employee will be asked when it is issued.');
+        }
+        break;
+      }
+      parts.push(
+        withdraws
+          ? 'Any acknowledgement already recorded is cleared.'
+          : 'They can mark it as read on their My Documents page. This records that they have read it; it is not a signature.',
+      );
+      const fact = find ? factOf<DocumentFact>(find, blank(i.document_id), 'document').fact : null;
+      if (fact?.uploaded_by === 'the employee') {
+        parts.push('The employee uploaded this document themselves, so this is likely to be refused.');
+      }
+      break;
+    }
+    default:
+      break;
+  }
+  return parts.filter(Boolean).join(' ') || null;
+}
+
+const LETTER_TOOLS = new Set(['saveLetter', 'startLetterFromTemplate', 'issueLetter', 'requestAcknowledgement']);
+
 const UNLISTED_APPLICATION = 'an application that was not in the list above';
 const UNLISTED_CANDIDATE = 'a candidate that was not in the list above';
 const UNLISTED_LEAVE = 'a leave request that was not in the list above';
@@ -1554,6 +1752,11 @@ export function approvalTitle(
     case 'publishAnnouncement':
     case 'unpublishAnnouncement':
       return performanceTitle(toolName, i, find);
+    case 'saveLetter':
+    case 'startLetterFromTemplate':
+    case 'issueLetter':
+    case 'requestAcknowledgement':
+      return letterTitle(toolName, i, find);
     case 'runPayroll':
     case 'recalculatePayroll':
     case 'savePayslipLine':
@@ -1815,6 +2018,7 @@ export function approvalDetail(
     return [payrollDetail(toolName, i), caveat].filter(Boolean).join(' ') || null;
   }
   if (PERFORMANCE_TOOLS.has(toolName)) return performanceDetail(toolName, i, named);
+  if (LETTER_TOOLS.has(toolName)) return letterDetail(toolName, i, named);
   if (toolName === 'removeHoliday' || (toolName === 'saveHoliday' && blank(i.id) !== null)) {
     return 'Leave and overtime already recorded are not changed.';
   }
