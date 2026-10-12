@@ -92,7 +92,8 @@ testWithSupabase('reads every HR table through the PeopleData provider as a demo
   }
 
   // The four reads added for the remaining screens, with the demo's counts.
-  expect(r.documents).toHaveLength(26);
+  // 24 once the documents migrations and the re-seed are applied (it was 26 before: the payslip and letter records are gone).
+  expect(r.documents).toHaveLength(24);
   expect(r.letters).toHaveLength(5);
   expect(r.vouchers).toHaveLength(6);
   expect(r.settings.notifications).toMatchObject({ leave_requests: true, birthdays: false });

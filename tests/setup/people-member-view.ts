@@ -4,7 +4,7 @@ import { DEFAULT_PEOPLE_SETTINGS, type PeopleData } from '@/lib/people/types';
  * The sample data as the database would hand it to a member who is not an HR
  * admin and is linked to `employeeId`: the directory and other shared tables in
  * full, personal rows only when they are their own, no payroll runs, no payslip that is still a draft, only their
- * own RELEASED reviews, and only published announcements.
+ * own RELEASED reviews, only their own ISSUED letters, no letter template, and only published announcements.
  */
 export function asMember(data: PeopleData, employeeId: string): PeopleData {
   const mine = <T extends { employee_id: string }>(rows: T[]) => rows.filter((row) => row.employee_id === employeeId);
@@ -29,7 +29,9 @@ export function asMember(data: PeopleData, employeeId: string): PeopleData {
     // The database gives a member an announcement only once it is published.
     listAnnouncements: async () => (await data.listAnnouncements()).filter((post) => post.status === 'published'),
     listDocuments: async () => mine(await data.listDocuments()),
-    listLetters: async () => mine(await data.listLetters()),
+    // The database gives a member their own letter only once it is issued, and no template at all.
+    listLetters: async () => mine(await data.listLetters()).filter((letter) => letter.status === 'issued'),
+    listLetterTemplates: async () => [],
     listPaymentVouchers: async () => [],
     getSettings: async () => structuredClone(DEFAULT_PEOPLE_SETTINGS),
   };

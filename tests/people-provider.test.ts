@@ -26,8 +26,12 @@ const ROWS: Record<string, unknown[]> = {
     { id: 'l1', employee_id: 'e1', leave_type: 'annual', employee: { name: 'Aisyah Rahim' } },
     { id: 'l2', employee_id: 'e9', leave_type: 'medical', employee: null },
   ],
-  hr_documents: [{ id: 'd1', employee_id: 'e1', title: 'Payslip', doc_type: 'payslip', employee: { name: 'Aisyah Rahim' } }],
+  hr_documents: [
+    { id: 'd1', employee_id: 'e1', title: 'Passport', doc_type: 'identity', file_name: 'p.pdf', file_size: 1234, file_type: 'application/pdf', employee: { name: 'Aisyah Rahim' } },
+    { id: 'd2', employee_id: 'e1', title: 'Sample', doc_type: 'contract', file_name: null, file_size: null, file_type: null, employee: { name: 'Aisyah Rahim' } },
+  ],
   hr_letters: [{ id: 'lt1', employee_id: 'e1', title: 'Offer', employee: { name: 'Aisyah Rahim' } }],
+  hr_letter_templates: [{ id: 'tp1', name: 'Offer', letter_type: 'offer', title: 'Offer', body: 'Dear {employee_name}' }],
   hr_payroll_runs: [{ id: 'r1', period_month: '2026-10-01', status: 'draft', paid_at: null }],
   hr_payslips: [
     {
@@ -106,11 +110,11 @@ describe('getPeopleData', () => {
       data.listShifts('2026-10-05', '2026-10-11'), data.listPublicHolidays(), data.listPayrollRuns(),
       data.listPayslips(), data.listGoals(), data.listReviews(), data.listTrainings(),
       data.listTrainingEnrolments(), data.listAnnouncements(), data.getEmployeePrivate('e1'),
-      data.listDocuments(), data.listLetters(), data.listPaymentVouchers(), data.getSettings(),
+      data.listDocuments(), data.listLetters(), data.listLetterTemplates(), data.listPaymentVouchers(), data.getSettings(),
     ]);
     expect([...new Set(calls.map((c) => c.table))].sort()).toEqual([
       'hr_announcements', 'hr_attendance_days', 'hr_claims', 'hr_departments', 'hr_documents',
-      'hr_employee_private', 'hr_employees', 'hr_goals', 'hr_leave_balances', 'hr_leave_requests', 'hr_letters',
+      'hr_employee_private', 'hr_employees', 'hr_goals', 'hr_leave_balances', 'hr_leave_requests', 'hr_letter_templates', 'hr_letters',
       'hr_overtime_records', 'hr_payment_vouchers', 'hr_payroll_runs', 'hr_payslips', 'hr_public_holidays',
       'hr_reviews', 'hr_settings', 'hr_shifts', 'hr_time_off_requests', 'hr_timesheet_entries', 'hr_training_enrolments', 'hr_trainings',
     ]);
@@ -286,6 +290,30 @@ describe('getPeopleData', () => {
     expect(calls.at(-1)!.filters).toContainEqual(['eq', 'employee_id', 'e1']);
   });
 
+  it('never selects a file path for documents, says whether a file is attached from the file name, and takes the size as a number', async () => {
+    const data = await getPeopleData(client);
+    const documents = await data.listDocuments();
+    const columns = calls.find((c) => c.table === 'hr_documents')!.columns as string;
+    expect(columns).not.toContain('file_path');
+    expect(columns.split(',')).toEqual(
+      expect.arrayContaining(['file_name', 'file_size', 'file_type', 'source', 'ack_requested', 'acknowledged_at', 'created_at']),
+    );
+    expect(documents.map((d) => d.has_file)).toEqual([true, false]);
+    expect(documents[0]).toMatchObject({ file_name: 'p.pdf', file_size: 1234, file_type: 'application/pdf' });
+    expect(documents[1]).toMatchObject({ file_name: null, file_size: null, file_type: null });
+    expect(JSON.stringify(documents)).not.toContain('file_path');
+  });
+
+  it('reads letters with their text and acknowledgement and no status filter, and templates by name', async () => {
+    const data = await getPeopleData(client);
+    await data.listLetters();
+    const letters = calls.find((c) => c.table === 'hr_letters')!;
+    expect((letters.columns as string).split(',')).toEqual(expect.arrayContaining(['body', 'ack_requested', 'acknowledged_at', 'issued_on']));
+    expect(letters.filters.map((f) => f[1])).not.toContain('status');
+    expect(await data.listLetterTemplates()).toEqual([{ id: 'tp1', name: 'Offer', letter_type: 'offer', title: 'Offer', body: 'Dear {employee_name}' }]);
+    expect(calls.find((c) => c.table === 'hr_letter_templates')!.order[0]).toBe('name');
+  });
+
   it('reads documents and letters with the employee joined, and vouchers newest first', async () => {
     const data = await getPeopleData(client);
     const [document] = await data.listDocuments();
@@ -294,8 +322,7 @@ describe('getPeopleData', () => {
     expect((await data.listLetters())[0]).toMatchObject({ id: 'lt1', employee_name: 'Aisyah Rahim' });
     expect(await data.listPaymentVouchers()).toHaveLength(1);
     expect(calls.find((c) => c.table === 'hr_documents')!.columns).toContain('employee:hr_employees(name)');
-    expect(calls.find((c) => c.table === 'hr_documents')!.order[0]).toBe('issued_on');
-    expect(calls.find((c) => c.table === 'hr_documents')!.nullsLast).toEqual(['issued_on']);
+    expect(calls.find((c) => c.table === 'hr_documents')!.order[0]).toBe('created_at');
     expect(calls.find((c) => c.table === 'hr_letters')!.order[0]).toBe('created_at');
     expect(calls.find((c) => c.table === 'hr_payment_vouchers')!.order[0]).toBe('issued_date');
   });

@@ -303,29 +303,60 @@ export type Announcement = {
   unread: boolean;
 };
 
-export type DocumentType = 'payslip' | 'contract' | 'letter' | 'tax' | 'benefits';
-export type DocumentStatus = 'signed' | 'pending_signature' | 'available' | 'expiring';
+/** What a document is. An employee adds only the four in {@link EMPLOYEE_DOCUMENT_TYPES}. */
+export const DOCUMENT_TYPES = ['contract', 'tax', 'benefits', 'identity', 'medical', 'certificate', 'other'] as const;
+export type DocumentType = (typeof DOCUMENT_TYPES)[number];
+export const EMPLOYEE_DOCUMENT_TYPES = ['identity', 'medical', 'certificate', 'other'] as const;
+export const LETTER_TYPES = ['offer', 'confirmation', 'promotion', 'warning', 'contract_renewal', 'other'] as const;
+export type LetterType = (typeof LETTER_TYPES)[number];
 
+/**
+ * A document of one employee. There is no status: "expiring" and "expired" are worked out from `expires_on` by
+ * `expiryState`. The file's path is never part of this (it is read on the server only, to sign a link);
+ * `has_file` says whether one is attached, and `file_size` / `file_type` are what storage recorded when it did.
+ * The demo's documents have no file.
+ */
 export type HrDocument = {
   id: string;
   employee_id: string;
   employee_name: string;
   title: string;
   doc_type: DocumentType;
-  status: DocumentStatus;
-  issued_on: string | null;
   expires_on: string | null;
+  file_name: string | null;
+  file_size: number | null;
+  file_type: string | null;
+  /** `hr` for one an owner or admin added, `employee` for the employee's own upload. */
+  source: 'hr' | 'employee';
+  /** An owner or admin asked the employee to acknowledge it. Never true for an employee's own upload. */
+  ack_requested: boolean;
+  /** When the employee said they had read it. */
+  acknowledged_at: string | null;
+  created_at: string;
+  has_file: boolean;
 };
 
 export type Letter = {
   id: string;
   employee_id: string;
   employee_name: string;
-  letter_type: string;
+  letter_type: LetterType;
   title: string;
+  body: string;
   status: 'draft' | 'issued';
   issued_on: string | null;
+  ack_requested: boolean;
+  acknowledged_at: string | null;
   created_at: string;
+};
+
+/** A reusable letter. Owners and admins only. The placeholders in the title and body are filled when a letter is started. */
+export type LetterTemplate = {
+  id: string;
+  name: string;
+  letter_type: LetterType;
+  title: string;
+  body: string;
 };
 
 export type PaymentVoucher = {
@@ -394,10 +425,12 @@ export type PeopleData = {
   listTrainingEnrolments(): Promise<TrainingEnrolment[]>;
   /** Drafts too for an owner or admin; `unread` is the caller's own. */
   listAnnouncements(): Promise<Announcement[]>;
-  /** hr_documents, newest `issued_on` first. */
+  /** hr_documents, newest `created_at` first. */
   listDocuments(): Promise<HrDocument[]>;
-  /** hr_letters, newest `created_at` first. */
+  /** hr_letters, newest `created_at` first. Drafts too: the database decides who reads one, and models filter again. */
   listLetters(): Promise<Letter[]>;
+  /** hr_letter_templates, by name. Owners and admins (and the demo) only: anyone else gets none. */
+  listLetterTemplates(): Promise<LetterTemplate[]>;
   /** hr_payment_vouchers, newest `issued_date` first. HR only: anyone else gets none. */
   listPaymentVouchers(): Promise<PaymentVoucher[]>;
   /** The workspace's settings, or {@link DEFAULT_PEOPLE_SETTINGS} when there is no row or the caller may not read it. */

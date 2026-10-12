@@ -14,6 +14,7 @@ import type {
   LeaveBalance,
   LeaveRequest,
   Letter,
+  LetterTemplate,
   OvertimeRecord,
   PayrollRun,
   Payslip,
@@ -67,8 +68,11 @@ const PAYSLIP_COLUMNS =
 const GOAL_NAME = 'employee:hr_employees!hr_goals_employee_id_org_id_fkey(name)';
 const REVIEW_NAME = 'employee:hr_employees!hr_reviews_employee_id_org_id_fkey(name)';
 const GOAL_COLUMNS = `id,employee_id,title,progress,due_date,status,${GOAL_NAME}`;
-const DOCUMENT_COLUMNS = `id,employee_id,title,doc_type,status,issued_on,expires_on,${NAME}`;
-const LETTER_COLUMNS = `id,employee_id,letter_type,title,status,issued_on,created_at,${NAME}`;
+// `file_path` is never selected: the app reads it on the server only, to sign a link (document-files-server.ts).
+// The four file columns go together in the database, so a file name means a file is attached.
+const DOCUMENT_COLUMNS = `id,employee_id,title,doc_type,expires_on,file_name,file_size,file_type,source,ack_requested,acknowledged_at,created_at,${NAME}`;
+const LETTER_COLUMNS = `id,employee_id,letter_type,title,body,status,issued_on,ack_requested,acknowledged_at,created_at,${NAME}`;
+const TEMPLATE_COLUMNS = 'id,name,letter_type,title,body';
 const VOUCHER_COLUMNS = 'id,voucher_no,payee,voucher_type,amount_cents,issued_date,status';
 const SETTINGS_COLUMNS = 'work_week,work_start_time,late_grace_minutes,default_annual_leave_days,default_medical_leave_days,default_emergency_leave_days,overtime_rates,notifications';
 const ATTENDANCE_COLUMNS = 'id,employee_id,work_date,clock_in,clock_out,status,corrected_at,correction_note';
@@ -402,9 +406,21 @@ export function createSupabasePeopleData(client: SupabaseClient, orgId: string):
       return list.map((row) => announcementOf(row, marks));
     },
     listDocuments: async () =>
-      (await rows<WithEmployee<HrDocument>>('hr_documents', DOCUMENT_COLUMNS, { col: 'issued_on', asc: false, nullsLast: true })).map(named),
+      (await rows<WithEmployee<Omit<HrDocument, 'has_file'>>>('hr_documents', DOCUMENT_COLUMNS, { col: 'created_at', asc: false })).map(
+        (row) => {
+          const doc = named(row);
+          return {
+            ...doc,
+            file_size: doc.file_size === null || doc.file_size === undefined ? null : Number(doc.file_size),
+            has_file: doc.file_name !== null && doc.file_name !== undefined,
+          };
+        },
+      ),
+    // No status filter on letters or templates: the database decides who reads a draft (an owner or admin, and the
+    // demo) and who reads a template, and the models filter again.
     listLetters: async () =>
       (await rows<WithEmployee<Letter>>('hr_letters', LETTER_COLUMNS, { col: 'created_at', asc: false })).map(named),
+    listLetterTemplates: () => rows<LetterTemplate>('hr_letter_templates', TEMPLATE_COLUMNS, { col: 'name', asc: true }),
     listPaymentVouchers: () =>
       rows<PaymentVoucher>('hr_payment_vouchers', VOUCHER_COLUMNS, { col: 'issued_date', asc: false }),
     getSettings: async () => {
@@ -439,6 +455,7 @@ const EMPTY_PEOPLE_DATA: PeopleData = {
   listAnnouncements: none,
   listDocuments: none,
   listLetters: none,
+  listLetterTemplates: none,
   listPaymentVouchers: none,
   getSettings: async () => withDefaults(null),
 };

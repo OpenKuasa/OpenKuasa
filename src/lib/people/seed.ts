@@ -23,6 +23,7 @@ import {
   type LeaveRequest,
   type LeaveType,
   type Letter,
+  type LetterTemplate,
   type OvertimeRecord,
   type PayrollRun,
   type Payslip,
@@ -165,23 +166,42 @@ const ANNOUNCEMENTS: [string, string, Announcement['category'], Announcement['st
   ['Year-end dinner', 'Save the date for the year-end dinner. Venue and time to be confirmed.', 'general', 'draft', 0],
 ];
 
-/** title, document type, status, issued day from today, expiry day from today. All employee 1's, as in the demo. */
-const OWN_DOCUMENTS: [string, HrDocument['doc_type'], HrDocument['status'], number, number | null][] = [
-  ['Payslip, last month', 'payslip', 'available', -8, null],
-  ['Payslip, two months ago', 'payslip', 'available', -38, null],
-  ['Payslip, three months ago', 'payslip', 'available', -69, null],
-  ['EA form', 'tax', 'available', -150, null],
-  ['Confirmation letter', 'letter', 'pending_signature', -2, null],
-  ['Medical card', 'benefits', 'expiring', -340, 25],
+/** title, document type, day added from today, expiry day from today, asks for acknowledgement. All employee 1's, as in the demo. */
+const OWN_DOCUMENTS: [string, HrDocument['doc_type'], number, number | null, boolean][] = [
+  ['EA form', 'tax', -150, null, false],
+  ['Code of conduct', 'contract', -6, null, true],
+  ['Medical card', 'benefits', -340, 25, false],
+  ['Insurance certificate', 'benefits', -375, -10, false],
 ];
 
-/** employee, type, title, status, issued day from today. */
-const LETTERS: [number, string, string, Letter['status'], number][] = [
-  [1, 'Confirmation', 'Confirmation of employment', 'issued', -2],
-  [13, 'Offer', 'Offer of employment', 'issued', -330],
-  [10, 'Warning', 'Late attendance reminder', 'draft', 0],
-  [9, 'Promotion', 'Promotion to Content Lead', 'issued', -120],
-  [16, 'Contract renewal', 'Contract renewal', 'draft', 0],
+/** employee, type, title, status, issued day from today, asks for acknowledgement, body. As the demo's. */
+const LETTERS: [number, Letter['letter_type'], string, Letter['status'], number, boolean, string][] = [
+  [1, 'confirmation', 'Confirmation of employment', 'issued', -2, true,
+    'Following the end of your probation, we are pleased to confirm your employment as Sales Executive. The other terms of your employment stay as they are.'],
+  [13, 'offer', 'Offer of employment', 'issued', -330, false,
+    'We are pleased to offer you the position of Account Executive in the Sales department. Your salary and benefits are set out in your employment contract.'],
+  [10, 'warning', 'Late attendance reminder', 'draft', 0, false,
+    'Our records show several late arrivals this month. Please make sure you are at work by the start of the working day from now on.'],
+  [9, 'promotion', 'Promotion to Content Lead', 'issued', -120, false,
+    'We are pleased to tell you that you have been promoted to Content Lead in the Marketing department. Congratulations.'],
+  [16, 'contract_renewal', 'Contract renewal', 'draft', 0, false,
+    'We are pleased to renew your contract as Technician in the Operations department for a further twelve months.'],
+];
+
+/** The starter templates every workspace gets (the same six as `private.hr_seed_letter_templates`). */
+const TEMPLATES: [LetterTemplate['letter_type'], string, string, string][] = [
+  ['offer', 'Offer of employment', 'Offer of employment',
+    '{today}\n\nDear {employee_name},\n\nWe are pleased to offer you the position of {designation} in the {department} department of {company_name}, starting on {join_date}.\n\nYour salary, benefits and other terms of employment are set out in your employment contract. Please read it with this letter.\n\nWe look forward to working with you.\n\nYours sincerely,\n{company_name}'],
+  ['confirmation', 'Confirmation of employment', 'Confirmation of employment',
+    '{today}\n\nDear {employee_name} ({employee_no}),\n\nFollowing the end of your probation, we are pleased to confirm your employment as {designation} in the {department} department of {company_name}. You joined us on {join_date}.\n\nThe other terms of your employment stay as they are.\n\nCongratulations, and thank you for your work so far.\n\nYours sincerely,\n{company_name}'],
+  ['promotion', 'Promotion', 'Letter of promotion',
+    '{today}\n\nDear {employee_name},\n\nWe are pleased to tell you that you have been promoted to {designation} in the {department} department.\n\nThis recognises your contribution to {company_name} since you joined on {join_date}. Any change to your pay will be confirmed to you separately.\n\nCongratulations.\n\nYours sincerely,\n{company_name}'],
+  ['warning', 'Warning', 'Warning letter',
+    '{today}\n\nDear {employee_name} ({employee_no}),\n\nThis letter is a formal warning about the matter discussed with you. [Describe what happened, and when.]\n\nWe expect this to improve from now on. [Describe what is expected, and by when.] If it does not, further action may follow.\n\nPlease speak to us if anything in this letter is unclear.\n\nYours sincerely,\n{company_name}'],
+  ['contract_renewal', 'Contract renewal', 'Renewal of contract',
+    '{today}\n\nDear {employee_name} ({employee_no}),\n\nWe are pleased to renew your contract as {designation} in the {department} department of {company_name}.\n\nThe renewed contract runs from [start date] to [end date]. The other terms of your contract stay as they are.\n\nThank you for your continued work.\n\nYours sincerely,\n{company_name}'],
+  ['other', 'General letter', 'To whom it may concern',
+    "{today}\n\nTo whom it may concern,\n\nThis is to confirm that {employee_name} ({employee_no}) has been employed by {company_name} as {designation} in the {department} department since {join_date}.\n\nThis letter is issued at the employee's request.\n\nYours sincerely,\n{company_name}"],
 ];
 
 /** number, payee, type, amount in cents, day from today, status. */
@@ -605,6 +625,8 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
     unread: false,
   }));
 
+  // None of the demo's documents has a file: the screens say "Sample document, no file".
+  const noFile = { file_name: null, file_size: null, file_type: null, has_file: false, source: 'hr' as const };
   const documents: HrDocument[] = [
     ...employees.map((e, index): HrDocument => ({
       id: `seed-doc-contract-${index + 1}`,
@@ -612,31 +634,46 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
       employee_name: e.name,
       title: 'Employment contract',
       doc_type: 'contract',
-      status: 'signed',
-      issued_on: e.join_date,
       expires_on: null,
+      ack_requested: false,
+      acknowledged_at: null,
+      created_at: `${e.join_date}T00:00:00.000Z`,
+      ...noFile,
     })),
-    ...OWN_DOCUMENTS.map(([title, doc_type, status, issued, expires], index): HrDocument => ({
+    ...OWN_DOCUMENTS.map(([title, doc_type, added, expires, ack], index): HrDocument => ({
       id: `seed-doc-own-${index + 1}`,
       employee_id: employeeId(1),
       employee_name: nameOf.get(1)!,
       title,
       doc_type,
-      status,
-      issued_on: addDays(today, issued),
       expires_on: expires === null ? null : addDays(today, expires),
+      ack_requested: ack,
+      acknowledged_at: null,
+      created_at: ago(-added),
+      ...noFile,
     })),
-  ].sort((a, b) => (b.issued_on ?? '').localeCompare(a.issued_on ?? ''));
+  ].sort((a, b) => b.created_at.localeCompare(a.created_at));
 
-  const letters: Letter[] = LETTERS.map(([n, letter_type, title, status, day], index) => ({
+  const letters: Letter[] = LETTERS.map(([n, letter_type, title, status, day, ack, body], index) => ({
     id: `seed-letter-${index + 1}`,
     employee_id: employeeId(n),
     employee_name: nameOf.get(n)!,
     letter_type,
     title,
+    body: `Dear ${nameOf.get(n)!},\n\n${body}\n\nYours sincerely,\nRimba Ventures`,
     status,
     issued_on: status === 'issued' ? addDays(today, day) : null,
+    ack_requested: ack,
+    acknowledged_at: null,
     created_at: ago(-day),
+  }));
+
+  const templates: LetterTemplate[] = TEMPLATES.map(([letter_type, name, title, body], index) => ({
+    id: `seed-template-${index + 1}`,
+    name,
+    letter_type,
+    title,
+    body,
   }));
 
   const vouchers: PaymentVoucher[] = VOUCHERS.map(([no, payee, voucher_type, amount_cents, day, status]) => ({
@@ -675,6 +712,7 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
     listAnnouncements: async () => announcements,
     listDocuments: async () => documents,
     listLetters: async () => newestFirst(letters),
+    listLetterTemplates: async () => templates,
     listPaymentVouchers: async () => vouchers,
     getSettings: async () => structuredClone(SETTINGS),
   };
