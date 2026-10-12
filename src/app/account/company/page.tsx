@@ -1,7 +1,7 @@
 import { CompanyForm } from '@/components/account/company-form';
 import { LogoCard } from '@/components/account/logo-card';
 import { LogoCardView } from '@/components/account/logo-card-view';
-import { logoUrl } from '@/lib/account/logo';
+import { logoUrl } from '@/lib/account/logo-url';
 import { logoCardMode } from '@/lib/account/logo-screens';
 import { getCompany } from '@/lib/account/data';
 import { can } from '@/lib/auth/permissions';

@@ -13,7 +13,7 @@
  * - Bullet list: a line that starts with `- ` (dash, space) followed by something other than spaces. `-5`, `- `
  *   alone and a dash inside a sentence are text. Numbered list: one to three digits, `. ` (dot, space), then
  *   something other than spaces: `1.5 million` and `2026. ` followed by nothing are text. A list is the run of
- *   consecutive lines of one kind; a line indented before the marker is text. Numbers are renumbered from 1 on
+ *   consecutive lines of one kind; a line indented before the marker is text. The number typed is kept (0 to 999) on
  *   screen.
  * - Paragraph: the other consecutive non-empty lines, line breaks kept.
  * - Inline, one line at a time: `**bold**` and `*italic*`. Bold may contain italic and italic may contain bold;

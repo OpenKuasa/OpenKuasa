@@ -81,14 +81,14 @@ export function logoPath(orgId: string, file: File): string {
  * workspace at it (`setLogoAction`); a refusal there removes the upload. Nothing is logged but a fixed sentence.
  */
 export async function uploadLogoFile(client: SupabaseClient, path: string, file: File): Promise<CapResult<{ path: string }>> {
-  const picked = pickLogoFile(file);
-  if (!picked.ok) return refuse(picked.error);
-  const type = typeOf(file);
+  const prepared = await prepareLogoFile(file);
+  if (!prepared.ok) return refuse(prepared.error);
+  const type = typeOf(prepared.input);
   if (!LOGO_PATH.test(path) || !path.endsWith(`.${EXTENSION_OF[type]}`)) return refuse(LOGO_UPLOAD_FAILED);
   try {
     // storage-js ignores `contentType` for a File body and records the body's own `.type`, which must be the very
     // type the path's extension stands for (the database compares the two).
-    const body = new File([file], file.name, { type });
+    const body = new File([prepared.input], prepared.input.name, { type });
     const { error } = await client.storage.from(LOGO_BUCKET).upload(path, body, { contentType: type, upsert: false });
     if (!error) return { ok: true, data: { path } };
   } catch {

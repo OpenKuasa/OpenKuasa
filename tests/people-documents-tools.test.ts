@@ -337,7 +337,7 @@ describe('who holds the four change tools', () => {
     const describe_ = (name: string, tools: Record<string, unknown>) => (tools[name] as { description: string }).description;
     const owner = createPeopleTools(dataWith(), HR, NOW, hrWrite());
     const save = describe_('saveLetter', owner);
-    for (const mark of ['# headings', '**bold**', '*italic*', '"- " bullet', '"1. " numbered']) expect(save, mark).toContain(mark);
+    for (const mark of ['"# " heading lines', '**bold**', '*italic*', '"- " bullet', '"1. " numbered']) expect(save, mark).toContain(mark);
     for (const name of ['employee_name', 'employee_no', 'designation', 'department', 'join_date', 'company_name', 'today', 'salary']) {
       expect(save, name).toContain(`{${name}}`);
       expect(describe_('startLetterFromTemplate', owner), name).toContain(`{${name}}`);

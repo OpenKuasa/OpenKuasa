@@ -704,6 +704,8 @@ describe('letters and documents', () => {
     expect(section).toContain('stay plain text');
     expect(section).toContain('text the person gave is passed as they gave it');
     expect(section).toContain('"### "');
+    expect(section).toContain('hugs its words with no space inside, closes on the same line and never sits inside a word');
+    expect(section).toContain('a list or heading line starts at the margin, not indented');
   });
 
   it('names {salary} as the eighth placeholder, filled from a template, never invented', () => {

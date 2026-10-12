@@ -52,7 +52,7 @@ describe('pickLogoFile', () => {
   });
   it('accepts exactly 1 MB and refuses one byte more', () => {
     expect(pickLogoFile(file([], 'a', 'image/png', LOGO_MAX_BYTES)).ok).toBe(true);
-    expect(pickLogoFile(file([], 'a', 'image/png', LOGO_MAX_BYTES + 1))).toEqual({ ok: false, error: LOGO_TOO_BIG });
+    expect(pickLogoFile(file(PNG, 'a', 'image/png', LOGO_MAX_BYTES))).toEqual({ ok: false, error: LOGO_TOO_BIG });
   });
   it('says the sentences the spec gives', () => {
     expect(LOGO_NOT_IMAGE).toBe('That file is not a PNG, JPEG or WebP image.');
@@ -151,6 +151,12 @@ describe('logoUrl', () => {
       `https://proj.supabase.co/storage/v1/object/public/${LOGO_BUCKET}/${ORG}/${NAME}.png`,
     );
   });
+  it('trims trailing slashes from the base url', () => {
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://x.supabase.co/');
+    expect(logoUrl(`${ORG}/${NAME}.png`, { isDemo: false })).toBe(
+      `https://x.supabase.co/storage/v1/object/public/${LOGO_BUCKET}/${ORG}/${NAME}.png`,
+    );
+  });
   it('gives the demo asset for a null path in the demo, and null elsewhere', () => {
     vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://proj.supabase.co');
     expect(logoUrl(null, { isDemo: true })).toBe(DEMO_LOGO_PATH);
@@ -201,9 +207,27 @@ describe('uploadLogoFile', () => {
     const { client } = clientOf(upload);
     expect(await uploadLogoFile(client, `${OTHER.toUpperCase()}/x.png`, file(PNG, 'a', 'image/png'))).toEqual({ ok: false, error: LOGO_UPLOAD_FAILED });
     expect(await uploadLogoFile(client, `${ORG}/${NAME}.jpg`, file(PNG, 'a', 'image/png'))).toEqual({ ok: false, error: LOGO_UPLOAD_FAILED });
-    expect(await uploadLogoFile(client, `${ORG}/${NAME}.png`, file(PNG, 'a', 'image/svg+xml'))).toEqual({ ok: false, error: LOGO_NOT_IMAGE });
-    expect(await uploadLogoFile(client, `${ORG}/${NAME}.png`, file([], 'a', 'image/png', LOGO_MAX_BYTES + 1))).toEqual({ ok: false, error: LOGO_TOO_BIG });
+    expect(await uploadLogoFile(client, `${ORG}/${NAME}.png`, file([0x3c, 0x73, 0x76, 0x67], 'a', 'image/svg+xml'))).toEqual({ ok: false, error: LOGO_NOT_IMAGE });
+    expect(await uploadLogoFile(client, `${ORG}/${NAME}.png`, file(PNG, 'a', 'image/png', LOGO_MAX_BYTES))).toEqual({ ok: false, error: LOGO_TOO_BIG });
     expect(upload).not.toHaveBeenCalled();
+  });
+
+  it('decides the type from the bytes: a text file named x.png declared image/png uploads nothing', async () => {
+    const upload = vi.fn();
+    const { client } = clientOf(upload);
+    const text = new File([new TextEncoder().encode('not an image at all')], 'x.png', { type: 'image/png' });
+    expect(await uploadLogoFile(client, `${ORG}/${NAME}.png`, text)).toEqual({ ok: false, error: LOGO_NOT_IMAGE });
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it('uploads real PNG bytes with an empty declared type as image/png', async () => {
+    const upload = vi.fn().mockResolvedValue({ error: null });
+    const { client } = clientOf(upload);
+    const path = `${ORG}/${NAME}.png`;
+    expect(await uploadLogoFile(client, path, file(PNG, 'a', ''))).toEqual({ ok: true, data: { path } });
+    const [, body, options] = upload.mock.calls[0];
+    expect((body as File).type).toBe('image/png');
+    expect(options).toEqual({ contentType: 'image/png', upsert: false });
   });
 
   it('answers the upload-failed sentence for a refused or thrown upload and logs no name or path', async () => {

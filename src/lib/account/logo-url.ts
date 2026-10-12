@@ -27,5 +27,5 @@ export function logoUrl(path: string | null, opts: { isDemo: boolean }): string 
   if (path === null) return opts.isDemo ? DEMO_LOGO_PATH : null;
   const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
   if (!base || !LOGO_PATH.test(path)) return null;
-  return `${base}/storage/v1/object/public/${LOGO_BUCKET}/${path}`;
+  return `${base.replace(/\/+$/, '')}/storage/v1/object/public/${LOGO_BUCKET}/${path}`;
 }

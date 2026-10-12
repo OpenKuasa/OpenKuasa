@@ -2409,7 +2409,7 @@ export function createPeopleTools(
         'Write a letter to an employee as a DRAFT the employee cannot see, or change a draft (its id from listLetters). The employee ' +
         'by their id from listEmployees; the type (offer, confirmation, promotion, warning, contract_renewal or other); a title; the ' +
         'WHOLE text exactly as the person gave or approved it, never shortened (up to 10,000 characters); and whether the employee is ' +
-        'asked to acknowledge it once it is issued. Never make up the text. The text may use # headings, **bold**, *italic*, "- " bullet lines and "1. " numbered lines, nothing else, ' +
+        'asked to acknowledge it once it is issued. Never make up the text. The text may use "# " heading lines, **bold**, *italic*, "- " bullet lines and "1. " numbered lines, nothing else, ' +
         'and the placeholders {employee_name}, {employee_no}, {designation}, {department}, {join_date}, {company_name}, {today} and {salary} (never invent a salary figure). ' +
         'An issued letter cannot be changed here. Needs approval.',
       inputSchema: saveLetterToolInput,

@@ -10,7 +10,7 @@ import { LOGO_REFUSALS } from './logo-refusals';
  * may change it, check the file and record the activity entry themselves: nothing here records one. Both hand back
  * the path they replaced; that file is then removed with the service client (the bucket lets no signed-in user
  * delete). A removal that fails never fails the change: the row no longer points at the file, so it is unreachable,
- * and the sweep will find it. Nothing typed and no path is logged, only fixed sentences and the database's code.
+ * it is left behind (a known gap: no sweep covers the `org-logos` bucket). Nothing typed and no path is logged, only fixed sentences and the database's code.
  */
 
 type Ctx = { client: SupabaseClient; orgId: string };

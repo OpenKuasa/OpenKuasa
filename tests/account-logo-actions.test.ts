@@ -10,6 +10,7 @@ const OLD = `${ORG}/abcdef02-aaaa-4bbb-8ccc-0123456789ab.webp`;
 const DEMO_SENTENCE = 'The demo workspace is read-only. Sign up to save changes.';
 
 const ctl = vi.hoisted(() => ({
+  events: 0,
   viewer: { userId: 'u1', orgId: '11111111-1111-4111-8111-111111111111', role: 'owner', isDemo: false } as {
     userId: string;
     orgId: string;
@@ -55,7 +56,7 @@ vi.mock('@/lib/supabase/service', () => ({
 }));
 vi.mock('@/lib/events', () => ({
   recordEvent: () => {
-    throw new Error('the logo functions record their own entry; the action must not');
+    ctl.events += 1;
   },
 }));
 
@@ -73,6 +74,7 @@ beforeEach(() => {
   ctl.removeError = null;
   ctl.removeThrows = false;
   ctl.serviceBuilt = 0;
+  ctl.events = 0;
   ctl.revalidated = [];
   vi.restoreAllMocks();
 });
@@ -276,6 +278,7 @@ describe('setLogoAction', () => {
     const { client } = fakeSupabase({ 'rpc.set_org_logo': { data: { logo_path: NEW, old_path: null } } });
     ctl.client = client;
     await expect(setLogoAction(NEW)).resolves.toMatchObject({ ok: true });
+    expect(ctl.events).toBe(0);
   });
 });
 
@@ -297,6 +300,7 @@ describe('clearLogoAction', () => {
     expect(calls.map((c) => c.fn)).toEqual(['clear_org_logo']);
     expect(ctl.removed).toEqual([OLD]);
     expect(ctl.revalidated[0]).toEqual(['/', 'layout']);
+    expect(ctl.events).toBe(0);
   });
   it('does not revalidate on a refusal', async () => {
     const { client } = fakeSupabase({ 'rpc.clear_org_logo': { error: { code: 'P0001', message: 'LOGO_NOT_ALLOWED' } } });
