@@ -37,14 +37,18 @@ export const SOURCE_LABELS: Record<LedgerSource, string> = {
   journal: 'Manual journal',
 };
 
-/** The screen each kind of entry comes from; a manual journal is on Journals itself. */
+/**
+ * The screen each kind of entry comes from; a manual journal is on Journals itself. A receipt or payment opens
+ * Cash Receipts or Payment Vouchers, which list every movement of money; Payments In and Payments Out list only
+ * those against invoices and bills, so they would not find a receipt for other income.
+ */
 export const SOURCE_PATHS: Record<LedgerSource, string | null> = {
   invoice: '/finance/invoices',
   credit_note: '/finance/credit-notes',
-  payment_in: '/finance/payments-in',
+  payment_in: '/finance/cash-receipts',
   refund: '/finance/refunds',
   bill: '/finance/supplier-bills',
-  payment_out: '/finance/payments-out',
+  payment_out: '/finance/payment-vouchers',
   expense: '/finance/expenses',
   transfer: '/finance/banking',
   opening: '/finance/banking',
@@ -221,4 +225,21 @@ export function journalActions(journal: Pick<JournalRow, 'status' | 'reversed'>,
   if (!canSignOff) return [];
   if (journal.status === 'draft') return ['edit', 'post', 'delete'];
   return journal.reversed ? [] : ['reverse'];
+}
+
+/* ---- shared by both screens ------------------------------------------- */
+
+/**
+ * The error to show in a screen's toolbar. A question asked in a row shows its own refusal in that row; but a
+ * refusal that came because the row had gone or changed refreshes the page and takes the row with it, so the
+ * message moves to the toolbar rather than vanish.
+ */
+export function toolbarError(error: string | null, questionOpen: boolean, questionInView: boolean): string | null {
+  if (!error) return null;
+  return questionOpen && questionInView ? null : error;
+}
+
+/** The account the address names (`?account=`) when it is one of the workspace's, otherwise none (empty). */
+export function accountFromParam(param: string | null, accounts: { id: string }[]): string {
+  return param && accounts.some((a) => a.id === param) ? param : '';
 }

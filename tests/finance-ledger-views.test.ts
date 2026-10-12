@@ -7,12 +7,14 @@ import {
   SOURCE_PATHS,
   STANDS_FOR_LABELS,
   accountActions,
+  accountFromParam,
   accountsCsv,
   entriesCsv,
   filterEntries,
   groupAccounts,
   groupEntries,
   journalActions,
+  toolbarError,
   trialBalance,
 } from '@/lib/finance/ledger-views';
 
@@ -40,8 +42,8 @@ describe('the words', () => {
       payment_out: 'Payment', expense: 'Expense', transfer: 'Transfer', opening: 'Opening balance', journal: 'Manual journal',
     });
     expect(SOURCE_PATHS).toEqual({
-      invoice: '/finance/invoices', credit_note: '/finance/credit-notes', payment_in: '/finance/payments-in', refund: '/finance/refunds',
-      bill: '/finance/supplier-bills', payment_out: '/finance/payments-out', expense: '/finance/expenses', transfer: '/finance/banking',
+      invoice: '/finance/invoices', credit_note: '/finance/credit-notes', payment_in: '/finance/cash-receipts', refund: '/finance/refunds',
+      bill: '/finance/supplier-bills', payment_out: '/finance/payment-vouchers', expense: '/finance/expenses', transfer: '/finance/banking',
       opening: '/finance/banking', journal: null,
     });
   });
@@ -233,5 +235,33 @@ describe('CSV export', () => {
         '1000,Main Bank,Asset,Bank or cash account,Active,150.5,50.25,100.25\r\n' +
         '1500,Old van,Asset,Added by you,Archived,0,0,0\r\n',
     );
+  });
+});
+
+describe('toolbarError', () => {
+  it('shows nothing when there is no error', () => {
+    expect(toolbarError(null, false, false)).toBeNull();
+    expect(toolbarError(null, true, true)).toBeNull();
+  });
+  it('shows an error that belongs to no question', () => {
+    expect(toolbarError('Nope', false, false)).toBe('Nope');
+  });
+  it('leaves an error to the question while its row is on screen', () => {
+    expect(toolbarError('Nope', true, true)).toBeNull();
+  });
+  it('shows it in the toolbar once the question’s row is gone after a refresh', () => {
+    expect(toolbarError('That journal no longer exists.', true, false)).toBe('That journal no longer exists.');
+  });
+});
+
+describe('accountFromParam', () => {
+  const known = [{ id: 'a1' }, { id: 'a2' }];
+  it('is the account named in the address when it is one of the workspace’s', () => {
+    expect(accountFromParam('a2', known)).toBe('a2');
+  });
+  it('is empty for no parameter or an unknown account', () => {
+    expect(accountFromParam(null, known)).toBe('');
+    expect(accountFromParam('', known)).toBe('');
+    expect(accountFromParam('zzz', known)).toBe('');
   });
 });

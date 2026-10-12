@@ -2,7 +2,7 @@
 
 import { Fragment, useState } from 'react';
 import Link from 'next/link';
-import { Archive, ArchiveRestore, CircleCheck, Download, ListTree, Pencil, Plus, Search, Trash2, TriangleAlert } from 'lucide-react';
+import { Archive, ArchiveRestore, CircleCheck, Download, ListTree, Pencil, Plus, Search, Trash2, ShieldAlert } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { AccountFormCard, type AccountFormActions } from '@/components/finance/account-form-card';
 import { ConfirmRow } from '@/components/finance/confirm-row';
@@ -20,8 +20,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { localIsoDate } from '@/lib/finance/bill-math';
 import { csvFileName } from '@/lib/finance/csv';
 import { rm } from '@/lib/finance/format';
-import type { LedgerAccount } from '@/lib/finance/ledger';
-import { STANDS_FOR_LABELS, accountActions, accountsCsv, groupAccounts, trialBalance } from '@/lib/finance/ledger-views';
+import type { AccountType, LedgerAccount } from '@/lib/finance/ledger';
+import { STANDS_FOR_LABELS, accountActions, accountsCsv, groupAccounts, toolbarError, trialBalance } from '@/lib/finance/ledger-views';
 import type { FinResult } from '@/lib/finance/result';
 import { cn } from '@/lib/utils';
 
@@ -63,11 +63,15 @@ export function AccountsView({
   const shown = filterAccounts(accounts, query, showArchived);
   const groups = groupAccounts(shown);
   const all = groupAccounts(accounts);
-  const totalOf = (type: 'asset' | 'liability') => all.find((g) => g.type === type)?.total ?? 0;
+  // Totals are over every account of the kind, shown or not, so a heading and the headline always agree.
+  const totalOf = (type: AccountType) => all.find((g) => g.type === type)?.total ?? 0;
   const books = trialBalance(accounts);
   const columns = writer ? 5 : 4;
   // A form holds what was typed, so nothing else opens over it: it is closed with its own Cancel first.
   const formOpen = open?.kind === 'new' || open?.kind === 'edit';
+  // A row that is gone after a refresh takes its delete question with it; the message still has to be seen.
+  const askingInView = open?.kind === 'delete' ? shown.some((a) => a.id === open.account.id) : false;
+  const tableError = toolbarError(deleteAction.error, open?.kind === 'delete', askingInView);
   const locked = rowAction.pending || formOpen;
   const now = () => localIsoDate(new Date());
   const close = () => {
@@ -153,7 +157,7 @@ export function AccountsView({
         <BentoCard
           title={books.balanced ? 'Books balance' : `Out of balance by ${rm(Math.abs(books.debit - books.credit))}`}
           subtitle={`${rm(books.debit)} debit and ${rm(books.credit)} credit`}
-          icon={books.balanced ? CircleCheck : TriangleAlert}
+          icon={books.balanced ? CircleCheck : ShieldAlert}
           className="col-span-2 md:col-span-4"
         />
 
@@ -194,9 +198,9 @@ export function AccountsView({
               <Download className="size-4" />
               Export
             </Button>
-            {rowAction.error ? (
+            {rowAction.error || tableError ? (
               <p role="alert" className="text-sm text-destructive">
-                {rowAction.error}
+                {rowAction.error ?? tableError}
               </p>
             ) : null}
           </div>
@@ -232,7 +236,7 @@ export function AccountsView({
                       <TableCell colSpan={columns} className="font-semibold">
                         <span className="flex items-center justify-between gap-3">
                           <span>{g.label}</span>
-                          <span className="tabular-nums">{rm(g.total)}</span>
+                          <span className="tabular-nums">{rm(totalOf(g.type))}</span>
                         </span>
                       </TableCell>
                     </TableRow>

@@ -111,7 +111,10 @@ describe('the ledger', () => {
     const html = render();
     expect(html).toContain('href="/finance/invoices"');
     expect(html).toContain('href="/finance/supplier-bills"');
-    expect(html).toContain('href="/finance/payments-in"');
+    expect(html).toContain('href="/finance/cash-receipts"');
+    expect(html).toContain('href="/finance/payment-vouchers"');
+    expect(text(html)).toContain('Open in Cash Receipts');
+    expect(text(html)).toContain('Open in Payment Vouchers');
     expect(html).toContain('href="/finance/banking"');
     expect(text(html)).toContain('Open in Invoices');
     expect(text(html)).toContain('Open in Supplier Bills');

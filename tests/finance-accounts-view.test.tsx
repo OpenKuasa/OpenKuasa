@@ -126,6 +126,17 @@ describe('the chart of accounts', () => {
     expect(filterAccounts(withArchived, '', true).map((a) => a.id)).toEqual(['a1', 'a2', 'l1', 'e1', 'old']);
   });
 
+  it('totals each kind over all its accounts, so the headline and the heading agree with archived rows hidden', () => {
+    const withArchived = [
+      ...books,
+      account({ id: 'old', code: '1900', name: 'Old Float', stands_for: 'own', active: false, debit_total: 400, credit_total: 0, balance: 400 }),
+    ];
+    const html = text(render(withArchived));
+    expect(html).not.toContain('Old Float');
+    expect(html).toContain('Total assets RM 6,400.00');
+    expect(html).toContain('Asset RM 6,400.00');
+  });
+
   it('searches by code or name', () => {
     expect(filterAccounts(books, '1200', false).map((a) => a.id)).toEqual(['a2']);
     expect(filterAccounts(books, 'payables', false).map((a) => a.id)).toEqual(['l1']);

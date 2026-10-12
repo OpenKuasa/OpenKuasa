@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { BookOpen, CircleCheck, Download, ExternalLink, Pencil, Plus, Search, Send, Trash2, TriangleAlert, Undo2 } from 'lucide-react';
+import { BookOpen, CircleCheck, ClipboardList, Download, ExternalLink, Pencil, Plus, Search, Send, Trash2, TriangleAlert, Undo2 } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { ConfirmRow } from '@/components/finance/confirm-row';
 import { downloadCsv } from '@/components/finance/download-csv';
@@ -27,10 +27,12 @@ import {
   type LedgerEntry,
   SOURCE_LABELS,
   SOURCE_PATHS,
+  accountFromParam,
   entriesCsv,
   filterEntries,
   groupEntries,
   journalActions,
+  toolbarError,
 } from '@/lib/finance/ledger-views';
 import type { FinResult } from '@/lib/finance/result';
 import { displayDate, round2, sum } from '@/lib/finance/view-helpers';
@@ -55,10 +57,10 @@ export const ENTRIES_PAGE_SIZE = 50;
 const SOURCE_SCREENS: Record<LedgerSource, string> = {
   invoice: 'Invoices',
   credit_note: 'Credit Notes',
-  payment_in: 'Payments In',
+  payment_in: 'Cash Receipts',
   refund: 'Refunds',
   bill: 'Supplier Bills',
-  payment_out: 'Payments Out',
+  payment_out: 'Payment Vouchers',
   expense: 'Expenses',
   transfer: 'Banking',
   opening: 'Banking',
@@ -98,14 +100,22 @@ export function JournalsView({
   writer?: JournalsWriter;
 }) {
   // A link such as /finance/journals?account=<id> (from Chart of Accounts) opens filtered to that account.
-  const accountParam = useSearchParams()?.get('account') ?? '';
+  const accountParam = useSearchParams()?.get('account') ?? null;
   const [filter, setFilterState] = useState<EntryFilter>(() => ({
     query: '',
     source: 'all',
     from: '',
     to: '',
-    account: accounts.some((a) => a.id === accountParam) ? accountParam : '',
+    account: accountFromParam(accountParam, accounts),
   }));
+  // The account filter follows the address: when the address changes (the nav's "Journals" link drops the
+  // parameter, a Chart of Accounts link sets it) the filter is set to match. Adjusted while rendering, not in an
+  // effect, so there is no flash of the old filter. A choice in the picker is left alone until the address changes.
+  const [seenParam, setSeenParam] = useState(accountParam);
+  if (seenParam !== accountParam) {
+    setSeenParam(accountParam);
+    setFilterState((f) => ({ ...f, account: accountFromParam(accountParam, accounts) }));
+  }
   const [pageSize, setPageSize] = useState(ENTRIES_PAGE_SIZE);
   const [open, setOpen] = useState<Open>(null);
   const confirm = useFinanceAction();
@@ -127,6 +137,15 @@ export function JournalsView({
   const sorted = [...accounts].sort((a, b) => a.code.localeCompare(b.code, 'en', { numeric: true }));
 
   const formOpen = open?.kind === 'new' || open?.kind === 'edit';
+  // A row that is gone after a refresh takes its question with it; the message still has to be seen.
+  const questionInView =
+    open?.kind === 'post' || open?.kind === 'delete'
+      ? Boolean(writer) && drafts.some((d) => d.id === open.draft.id)
+      : open?.kind === 'reverse'
+        ? shown.some((e) => e.source === 'journal' && e.source_id === open.journal.id)
+        : false;
+  const questionOpen = open?.kind === 'post' || open?.kind === 'delete' || open?.kind === 'reverse';
+  const tableError = toolbarError(confirm.error, questionOpen, questionInView);
   const locked = confirm.pending || formOpen;
   const now = () => localIsoDate(new Date());
   const ask = (next: Exclude<Open, null>) => {
@@ -246,7 +265,7 @@ export function JournalsView({
           subtitle={`Undoes ${open.journal.journal_no ?? 'the journal'}`}
           onClose={close}
         >
-          The reversal is a draft dated {displayDate(open.date)}, in the drafts above. Check it, then post it to put the
+          The reversal is a draft dated {displayDate(open.date)}, in Draft journals below. Check it, then post it to put the
           reversal in the books.
         </SavedNoteCard>
       );
@@ -394,7 +413,7 @@ export function JournalsView({
           <BentoCard
             title="Draft journals"
             subtitle="Not in the books until posted"
-            icon={Pencil}
+            icon={ClipboardList}
             flush
             className="col-span-2 md:col-span-12"
           >
@@ -510,9 +529,9 @@ export function JournalsView({
               <Download className="size-4" />
               Export
             </Button>
-            {confirm.error && open?.kind !== 'reverse' && open?.kind !== 'post' && open?.kind !== 'delete' ? (
+            {tableError ? (
               <p role="alert" className="text-sm text-destructive">
-                {confirm.error}
+                {tableError}
               </p>
             ) : null}
           </div>
