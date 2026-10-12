@@ -16,6 +16,13 @@
  */
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { type SupabaseClient } from '@supabase/supabase-js';
+import {
+  deleteCashReceipt,
+  listIncomeCategories,
+  postCashReceipt,
+  saveCashReceipt,
+  voidCashReceipt,
+} from '@/lib/finance/cash-receipts';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import { createConfirmedTestUser, createOrg, liveClient, signInOwner } from './helpers/live-workspaces';
 
@@ -324,4 +331,102 @@ testWithSupabase('a member schedules a voucher for an approved expense; paying i
     created_by: member.userId,
     approved_by: null,
   });
+});
+
+// ---- stage 5b: the receipt form's writes, through the app's own data layer ----------------------
+// Everything above calls the database functions directly. These two go through
+// src/lib/finance/cash-receipts.ts with the payloads the receipt form sends, so what is pinned is the
+// sentence a member and an owner read, and that the JSON the app sends is JSON the functions take.
+
+const NEEDS_SIGN_OFF = 'Only an owner or admin can post, pay or void. Ask one of them to do this.';
+
+/** The data layer's answer, or a failed test that says what it answered instead. */
+function done<T>(result: { ok: true; data: T } | { ok: false; error: string }): T {
+  if (!result.ok) throw new Error(`expected the write to go through, got: ${result.error}`);
+  return result.data;
+}
+const receiptRow = async (id: string) => {
+  const { data, error } = await owner.c
+    .from('finance_cash_receipts')
+    .select('kind, status, number, amount, party_name, category_name')
+    .eq('transaction_id', id)
+    .maybeSingle();
+  expect(error, error?.message).toBeNull();
+  return data;
+};
+
+testWithSupabase('a receipt for income: a member saves, changes and cannot post or void it; the owner posts and voids it', async () => {
+  const asMember = { client: member.c, orgId };
+  const asOwner = { client: owner.c, orgId };
+  const sales = (await listIncomeCategories(asMember)).find((c) => c.name === 'Sales')!.id;
+  const details = { kind: 'income' as const, account_id: bank, txn_date: daysFromToday(0), method: 'cash' as const, category_id: sales };
+
+  const { id } = done(await saveCashReceipt(asMember, { ...details, amount: 32.506, party_name: ' Walk-in ' }));
+  expect(await receiptRow(id)).toEqual({
+    kind: 'income', status: 'draft', number: null, amount: 32.51, party_name: 'Walk-in', category_name: 'Sales',
+  });
+  // Changed by the member: now from a contact, with no typed name.
+  done(await saveCashReceipt(asMember, { ...details, id, amount: 40, contact_id: customer, party_name: '' }));
+  expect(await receiptRow(id)).toMatchObject({ status: 'draft', amount: 40, party_name: 'Guarded Customer' });
+
+  expect(await postCashReceipt(asMember, { id })).toEqual({ ok: false, error: NEEDS_SIGN_OFF });
+  expect(await receiptRow(id)).toMatchObject({ status: 'draft', number: null });
+  const posted = done(await postCashReceipt(asOwner, { id }));
+  expect(posted.number).toMatch(/^RC-\d{4}$/);
+
+  // Posted is locked, for the member and for the owner.
+  expect(await saveCashReceipt(asOwner, { ...details, id, amount: 1 })).toEqual({
+    ok: false, error: 'This receipt has been posted or voided, so that can no longer be done.',
+  });
+  expect(await deleteCashReceipt(asMember, { id })).toEqual({
+    ok: false, error: 'This receipt has been posted, so it cannot be deleted. Void it instead.',
+  });
+  expect(await voidCashReceipt(asMember, { id })).toEqual({ ok: false, error: NEEDS_SIGN_OFF });
+  expect(await receiptRow(id)).toMatchObject({ status: 'posted', number: posted.number });
+
+  done(await voidCashReceipt(asOwner, { id }));
+  // A void receipt keeps its number.
+  expect(await receiptRow(id)).toMatchObject({ status: 'void', number: posted.number });
+  expect(await voidCashReceipt(asOwner, { id })).toEqual({
+    ok: false, error: 'This receipt cannot be voided as it now stands: it has already been voided, or it is still a draft.',
+  });
+});
+
+testWithSupabase('a receipt for invoices: a draft holds its part, is changed without counting its own hold, and a void gives the balance back', async () => {
+  const asMember = { client: member.c, orgId };
+  const asOwner = { client: owner.c, orgId };
+  const draft = await saveInvoice(owner.c);
+  const invoicePosted = await owner.c.rpc('finance_post_invoice', { target_org: orgId, target_invoice: draft.data });
+  expect(invoicePosted.error, invoicePosted.error?.message).toBeNull();
+  const invoice = draft.data as string; // RM 125.00
+  const details = { kind: 'invoice' as const, account_id: bank, txn_date: daysFromToday(0), method: 'fpx' as const };
+  const balance = async () => {
+    const { data } = await owner.c.from('finance_invoice_totals').select('balance').eq('id', invoice).single();
+    return data!.balance;
+  };
+
+  const { id } = done(await saveCashReceipt(asMember, { ...details, allocations: [{ invoice_id: invoice, amount: 100 }] }));
+  expect(await receiptRow(id)).toMatchObject({ kind: 'invoice', status: 'draft', amount: 100, party_name: 'Guarded Customer' });
+  // The draft holds RM 100 of the RM 125: a second receipt may take RM 25 and no more.
+  expect(await saveCashReceipt(asMember, { ...details, allocations: [{ invoice_id: invoice, amount: 25.01 }] })).toEqual({
+    ok: false,
+    error: 'That is more than is still owed on an invoice, counting what other receipts not yet posted already hold.',
+  });
+  // Changing the draft itself replaces its hold: it can take the whole invoice.
+  done(await saveCashReceipt(asMember, { ...details, id, allocations: [{ invoice_id: invoice, amount: 125 }] }));
+  expect(await receiptRow(id)).toMatchObject({ status: 'draft', amount: 125 });
+  // A draft moves no balance.
+  expect(await balance()).toBe(125);
+
+  // Deleted by the member, and made again.
+  done(await deleteCashReceipt(asMember, { id }));
+  expect(await receiptRow(id)).toBeNull();
+  const again = done(await saveCashReceipt(asMember, { ...details, allocations: [{ invoice_id: invoice, amount: 125 }] }));
+
+  expect(await postCashReceipt(asMember, { id: again.id })).toEqual({ ok: false, error: NEEDS_SIGN_OFF });
+  done(await postCashReceipt(asOwner, { id: again.id }));
+  expect(await balance()).toBe(0);
+  expect(await voidCashReceipt(asMember, { id: again.id })).toEqual({ ok: false, error: NEEDS_SIGN_OFF });
+  done(await voidCashReceipt(asOwner, { id: again.id }));
+  expect(await balance()).toBe(125);
 });
