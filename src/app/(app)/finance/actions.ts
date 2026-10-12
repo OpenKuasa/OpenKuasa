@@ -48,6 +48,7 @@ import {
   EXPENSE_MESSAGES,
   approveExpense,
   deleteExpense,
+  expenseDecisionInput,
   expenseIdInput,
   rejectExpense,
   saveExpense,
@@ -743,8 +744,16 @@ export async function saveAndPostCashReceiptAction(input: unknown): Promise<Save
 
 // An expense is on Expenses. Receipts Inbox names the expense a receipt is tied to (its category), and deleting
 // an expense sends its receipt back to Unmatched. Payment Vouchers and Banking name the category of the expenses
-// a voucher pays, which changes when a rejected expense that a voided voucher still names is edited.
-const EXPENSE_PATHS = ['/finance/expenses', '/finance/receipts-inbox', '/finance/payment-vouchers', '/finance/banking'];
+// a voucher pays, which changes when a rejected expense that a voided voucher still names is edited. An approved
+// expense is two lines of the books (its category's account and Accounts Payable), so approving or rejecting one
+// moves Chart of Accounts and Journals: they end the list, as every action that changes the books does.
+const EXPENSE_PATHS = [
+  '/finance/expenses',
+  '/finance/receipts-inbox',
+  '/finance/payment-vouchers',
+  '/finance/banking',
+  ...LEDGER_PATHS,
+];
 /** Approving or rejecting an expense: an owner or admin only, told so in the expense's own words. */
 const EXPENSE_DECIDE = { signOff: true, signOffError: EXPENSE_MESSAGES.needsDecider } as const;
 
@@ -756,13 +765,13 @@ const EXPENSE_DECIDE = { signOff: true, signOffError: EXPENSE_MESSAGES.needsDeci
 export async function saveExpenseAction(input: unknown) {
   return run(EXPENSE_PATHS, saveExpenseInput, input, saveExpense);
 }
-/** Approves a pending expense as it stands: an owner or admin only, which the expense's own guard enforces. */
+/** Approves a pending expense as the person was shown it (its `updated_at`): an owner or admin only, which the expense's own guard enforces. */
 export async function approveExpenseAction(input: unknown) {
-  return run(EXPENSE_PATHS, expenseIdInput, input, approveExpense, EXPENSE_DECIDE);
+  return run(EXPENSE_PATHS, expenseDecisionInput, input, approveExpense, EXPENSE_DECIDE);
 }
 /** Rejects a pending expense, or an approved one that no payment stands against: an owner or admin only. */
 export async function rejectExpenseAction(input: unknown) {
-  return run(EXPENSE_PATHS, expenseIdInput, input, rejectExpense, EXPENSE_DECIDE);
+  return run(EXPENSE_PATHS, expenseDecisionInput, input, rejectExpense, EXPENSE_DECIDE);
 }
 /** Deletes a pending or rejected expense. */
 export async function deleteExpenseAction(input: unknown) {

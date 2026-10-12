@@ -47,6 +47,7 @@ const expense = (
   held: 0,
   method: paidWith,
   paid_on: paidWith ? expense_date : null,
+  updated_at: `${expense_date}T09:00:00.000000+00:00`,
 });
 
 /** Earlier months, so the trend has a shape: [month, rent, salaries]. All approved and paid. */

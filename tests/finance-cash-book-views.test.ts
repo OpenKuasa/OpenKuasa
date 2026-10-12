@@ -114,6 +114,7 @@ const expense = (e: Partial<ExpenseRow> = {}): ExpenseRow => {
     held: 0,
     method: null,
     paid_on: null,
+    updated_at: '2026-10-05T09:00:00.000000+00:00',
     ...e,
   };
 };

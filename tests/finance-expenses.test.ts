@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   approveExpense,
   deleteExpense,
+  expenseDecisionInput,
   expenseIdInput,
   listExpenseCategories,
   rejectExpense,
@@ -106,6 +107,11 @@ describe('saveExpense', () => {
     const { ctx } = saving({ data: EXPENSE, error: null }, { data: null, error: { code: 'XX000' } });
     expect(await saveExpense(ctx, typed)).toEqual({ ok: true, data: { id: EXPENSE, status: null } });
   });
+  it('does not call a save saved when the database answers neither an id nor an error', async () => {
+    const { ctx, calls } = saving({ data: null, error: null });
+    expect(await saveExpense(ctx, typed)).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
+    expect(calls).toHaveLength(1);
+  });
   it('words each refusal, and reads nothing after one', async () => {
     const cases: [string, string][] = [
       ['FIN01', 'This expense has been approved, so it can no longer be changed. An owner or admin can reject it first, while no payment stands against it.'],
@@ -114,6 +120,7 @@ describe('saveExpense', () => {
       ['23503', 'The category or the vendor on this expense no longer exists.'],
       ['23514', 'Check the vendor, the amount and the SST, then try again.'],
       ['23502', 'Check the vendor, the amount and the SST, then try again.'],
+      ['FIN14', 'Only an owner or admin can approve or reject an expense. Ask one of them to do this.'],
       ['42501', 'You do not have permission to make changes here.'],
       ['22003', 'That amount is too large.'],
       ['XX000', 'That change could not be saved. Please try again.'],
@@ -126,38 +133,76 @@ describe('saveExpense', () => {
   });
 });
 
+// The exact text the view gave for `updated_at`, microseconds and offset included: it is sent back as it came.
+const SEEN = '2026-10-12T09:15:22.123456+00:00';
+const SEEN_EXPENSE = { id: EXPENSE, updated_at: SEEN };
+const CHANGED = 'This expense was changed after you opened it. Check it again, then approve or reject it.';
+
+describe('expenseDecisionInput', () => {
+  it('asks for the expense and the time it was last changed, as the view gave it', () => {
+    expect(expenseDecisionInput.parse(SEEN_EXPENSE)).toEqual(SEEN_EXPENSE);
+    expect(expenseDecisionInput.parse({ id: EXPENSE, updated_at: '2026-10-12T09:15:22Z' }).updated_at).toBe('2026-10-12T09:15:22Z');
+    expect(expenseDecisionInput.safeParse({ id: 'x', updated_at: SEEN }).error?.issues[0]?.message).toBe('That expense no longer exists.');
+    for (const bad of [undefined, '', 'yesterday', '2026-10-12', 5]) {
+      expect(expenseDecisionInput.safeParse({ id: EXPENSE, updated_at: bad }).error?.issues[0]?.message, String(bad)).toBe(CHANGED);
+    }
+    expect(Object.keys(expenseDecisionInput.parse({ ...SEEN_EXPENSE, status: 'approved' }))).toEqual(['id', 'updated_at']);
+  });
+});
+
 describe('approveExpense, rejectExpense', () => {
-  it('change the status and nothing else, kept to the workspace', async () => {
+  it('change the status and nothing else, on the expense as it was shown, kept to the workspace', async () => {
     for (const [fn, status] of [[approveExpense, 'approved'], [rejectExpense, 'rejected']] as const) {
       const { ctx, calls } = fakeFinance({ data: { id: EXPENSE }, error: null });
-      expect(await fn(ctx, { id: EXPENSE })).toEqual({ ok: true, data: { id: EXPENSE } });
+      expect(await fn(ctx, SEEN_EXPENSE)).toEqual({ ok: true, data: { id: EXPENSE } });
       expect(calls).toHaveLength(1);
-      expect(calls[0]).toMatchObject({ kind: 'table', name: 'finance_expenses', op: 'update', filters: { id: EXPENSE, org_id: 'org-1' } });
+      expect(calls[0]).toMatchObject({
+        kind: 'table', name: 'finance_expenses', op: 'update', filters: { id: EXPENSE, org_id: 'org-1', updated_at: SEEN },
+      });
       expect(Object.keys(calls[0].values ?? {}).sort()).toEqual(['status', 'updated_at']);
       expect(calls[0].values?.status).toBe(status);
     }
   });
-  it('answer "no longer exists" when no row was changed', async () => {
-    const { ctx } = fakeFinance({ data: null, error: null });
-    expect(await approveExpense(ctx, { id: EXPENSE })).toEqual({ ok: false, error: 'That expense no longer exists.' });
-    expect(await rejectExpense(ctx, { id: EXPENSE })).toEqual({ ok: false, error: 'That expense no longer exists.' });
+  /** An update that changes no row, then the read of whether the expense is still there. */
+  const changesNothing = (stillThere: boolean) =>
+    fakeFinance((call: FinanceCall) =>
+      call.op === 'update' ? { data: null, error: null } : { data: stillThere ? { id: EXPENSE } : null, error: null },
+    );
+  it('say it was changed after it was shown when no row matched but the expense is still there', async () => {
+    for (const fn of [approveExpense, rejectExpense]) {
+      const { ctx, calls } = changesNothing(true);
+      expect(await fn(ctx, SEEN_EXPENSE)).toEqual({ ok: false, error: CHANGED });
+      expect(calls).toHaveLength(2);
+      expect(calls[1]).toMatchObject({ kind: 'table', name: 'finance_expenses', op: 'select', filters: { id: EXPENSE, org_id: 'org-1' } });
+      expect(calls[1].filters).not.toHaveProperty('updated_at');
+    }
+  });
+  it('say "no longer exists" when no row matched and the expense is gone', async () => {
+    for (const fn of [approveExpense, rejectExpense]) {
+      expect(await fn(changesNothing(false).ctx, SEEN_EXPENSE)).toEqual({ ok: false, error: 'That expense no longer exists.' });
+    }
   });
   it('word FIN01, FIN02 and FIN14 by what was being done', async () => {
     const refused = (code: string) => fakeFinance({ data: null, error: { code } }).ctx;
     const decider = 'Only an owner or admin can approve or reject an expense. Ask one of them to do this.';
-    expect((await approveExpense(refused('FIN01'), { id: EXPENSE }))).toEqual({
+    expect((await approveExpense(refused('FIN01'), SEEN_EXPENSE))).toEqual({
       ok: false,
       error: 'This expense cannot be approved as it now stands: it is already approved, or it was rejected and has to be edited first.',
     });
-    expect(await approveExpense(refused('FIN14'), { id: EXPENSE })).toEqual({ ok: false, error: decider });
-    expect(await rejectExpense(refused('FIN01'), { id: EXPENSE })).toEqual({ ok: false, error: 'This expense has already been rejected.' });
-    expect(await rejectExpense(refused('FIN02'), { id: EXPENSE })).toEqual({
+    expect(await approveExpense(refused('FIN14'), SEEN_EXPENSE)).toEqual({ ok: false, error: decider });
+    expect(await rejectExpense(refused('FIN01'), SEEN_EXPENSE)).toEqual({ ok: false, error: 'This expense has already been rejected.' });
+    expect(await rejectExpense(refused('FIN02'), SEEN_EXPENSE)).toEqual({
       ok: false,
       error: 'This expense has a payment against it, paid or still to be paid, so it cannot be rejected.',
     });
-    expect(await rejectExpense(refused('FIN14'), { id: EXPENSE })).toEqual({ ok: false, error: decider });
+    expect(await rejectExpense(refused('FIN14'), SEEN_EXPENSE)).toEqual({ ok: false, error: decider });
     // FIN02 has no meaning for an approval: it is not worded as one.
-    expect(await approveExpense(refused('FIN02'), { id: EXPENSE })).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
+    expect(await approveExpense(refused('FIN02'), SEEN_EXPENSE)).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
+  });
+  it('word a refusal by the database for a viewer or an outsider', async () => {
+    const refused = fakeFinance({ data: null, error: { code: '42501' } }).ctx;
+    expect(await approveExpense(refused, SEEN_EXPENSE)).toEqual({ ok: false, error: 'You do not have permission to make changes here.' });
+    expect(await rejectExpense(refused, SEEN_EXPENSE)).toEqual({ ok: false, error: 'You do not have permission to make changes here.' });
   });
 });
 
@@ -176,8 +221,9 @@ describe('deleteExpense', () => {
     });
     expect(await deleteExpense(refused('23503'), { id: EXPENSE })).toEqual({
       ok: false,
-      error: 'This expense has a voided payment against it, so it is kept. It stays in the list as Rejected.',
+      error: 'This expense has a voided payment against it, so it is kept.',
     });
+    expect(await deleteExpense(refused('42501'), { id: EXPENSE })).toEqual({ ok: false, error: 'You do not have permission to make changes here.' });
     expect(await deleteExpense(fakeFinance({ data: null, error: null }).ctx, { id: EXPENSE })).toEqual({ ok: false, error: 'That expense no longer exists.' });
   });
 });

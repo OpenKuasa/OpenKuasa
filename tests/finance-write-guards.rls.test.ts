@@ -452,6 +452,13 @@ const expenseRow = async (id: string) => {
   return data;
 };
 
+/** The expense as the screen shows it: its id and `updated_at`, as the view returns them. */
+const shown = async (id: string) => {
+  const { data, error } = await owner.c.from('finance_expense_totals').select('updated_at').eq('id', id).maybeSingle();
+  expect(error, error?.message).toBeNull();
+  return { id, updated_at: (data as { updated_at: string }).updated_at };
+};
+
 testWithSupabase('an expense: a member saves, changes and cannot decide it; the owner approves, rejects, and approves by saving', async () => {
   const asMember = { client: member.c, orgId };
   const asOwner = { client: owner.c, orgId };
@@ -468,27 +475,27 @@ testWithSupabase('an expense: a member saves, changes and cannot decide it; the 
   });
   // Changed by the member: still waiting.
   expect(done(await saveExpense(asMember, { ...details, id: saved.id, amount: 130 })).status).toBe('pending');
-  expect(await approveExpense(asMember, { id: saved.id })).toEqual({ ok: false, error: NEEDS_DECIDER });
-  expect(await rejectExpense(asMember, { id: saved.id })).toEqual({ ok: false, error: NEEDS_DECIDER });
+  expect(await approveExpense(asMember, await shown(saved.id))).toEqual({ ok: false, error: NEEDS_DECIDER });
+  expect(await rejectExpense(asMember, await shown(saved.id))).toEqual({ ok: false, error: NEEDS_DECIDER });
   expect((await expenseRow(saved.id))?.status).toBe('pending');
 
   // Rejected by the owner; not approved as it stands; edited by the member, it waits again.
-  done(await rejectExpense(asOwner, { id: saved.id }));
+  done(await rejectExpense(asOwner, await shown(saved.id)));
   expect(await expenseRow(saved.id)).toMatchObject({ status: 'rejected', approved_by: owner.userId });
-  expect((await approveExpense(asOwner, { id: saved.id })).ok).toBe(false);
-  expect(await rejectExpense(asOwner, { id: saved.id })).toEqual({ ok: false, error: 'This expense has already been rejected.' });
+  expect((await approveExpense(asOwner, await shown(saved.id))).ok).toBe(false);
+  expect(await rejectExpense(asOwner, await shown(saved.id))).toEqual({ ok: false, error: 'This expense has already been rejected.' });
   expect(done(await saveExpense(asMember, { ...details, id: saved.id, amount: 125 })).status).toBe('pending');
   expect(await expenseRow(saved.id)).toMatchObject({ status: 'pending', amount: 125, approved_by: null });
 
   // Approved by the owner, and then locked for everyone; rejected again while nothing is paid.
-  done(await approveExpense(asOwner, { id: saved.id }));
+  done(await approveExpense(asOwner, await shown(saved.id)));
   expect(await expenseRow(saved.id)).toMatchObject({ status: 'approved', approved_by: owner.userId, created_by: member.userId });
   for (const ctx of [asMember, asOwner]) {
     expect((await saveExpense(ctx, { ...details, id: saved.id })).ok).toBe(false);
     expect((await deleteExpense(ctx, { id: saved.id })).ok).toBe(false);
   }
   expect((await expenseRow(saved.id))?.status).toBe('approved');
-  done(await rejectExpense(asOwner, { id: saved.id }));
+  done(await rejectExpense(asOwner, await shown(saved.id)));
 
   // The owner saves over the member's rejected expense: approved in the same call, still the member's.
   expect(done(await saveExpense(asOwner, { ...details, id: saved.id })).status).toBe('approved');
@@ -513,12 +520,29 @@ testWithSupabase('an approved expense with a payment against it cannot be reject
     allocations: [{ expense_id: saved.id, amount: 20 }],
   });
   expect(scheduled.error, scheduled.error?.message).toBeNull();
-  expect(await rejectExpense(asOwner, { id: saved.id })).toEqual({
+  expect(await rejectExpense(asOwner, await shown(saved.id))).toEqual({
     ok: false,
     error: 'This expense has a payment against it, paid or still to be paid, so it cannot be rejected.',
   });
   const totals = await owner.c.from('finance_expense_totals').select('display_status, paid, held').eq('id', saved.id).maybeSingle();
   expect(totals.data).toMatchObject({ display_status: 'approved', paid: 0, held: 20 });
+});
+
+testWithSupabase('an expense changed after the owner opened it is not approved or rejected as it now stands', async () => {
+  const asMember = { client: member.c, orgId };
+  const asOwner = { client: owner.c, orgId };
+  const rent = await category('Rent');
+  const saved = done(await saveExpense(asMember, { expense_date: daysFromToday(0), category_id: rent, vendor_name: 'Kedai Ali', amount: 120 }));
+  // The owner's screen shows RM 120; then the member changes it.
+  const opened = await shown(saved.id);
+  done(await saveExpense(asMember, { id: saved.id, expense_date: daysFromToday(0), category_id: rent, vendor_name: 'Kedai Ali', amount: 9999 }));
+  const changed = 'This expense was changed after you opened it. Check it again, then approve or reject it.';
+  expect(await approveExpense(asOwner, opened)).toEqual({ ok: false, error: changed });
+  expect(await rejectExpense(asOwner, opened)).toEqual({ ok: false, error: changed });
+  expect(await expenseRow(saved.id)).toMatchObject({ status: 'pending', amount: 9999, approved_by: null });
+  // Shown again, it is decided.
+  done(await approveExpense(asOwner, await shown(saved.id)));
+  expect((await expenseRow(saved.id))?.status).toBe('approved');
 });
 
 testWithSupabase('an expense of NaN is refused by the database, whoever sends it', async () => {

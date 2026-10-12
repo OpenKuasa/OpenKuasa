@@ -44,7 +44,15 @@ vi.mock('@/lib/finance/expenses', async (orig) => {
 
 const actions = await import('@/app/(app)/finance/actions');
 
-const PATHS = ['/finance/expenses', '/finance/receipts-inbox', '/finance/payment-vouchers', '/finance/banking'];
+const PATHS = [
+  '/finance/expenses',
+  '/finance/receipts-inbox',
+  '/finance/payment-vouchers',
+  '/finance/banking',
+  '/finance/chart-of-accounts',
+  '/finance/journals',
+];
+const SEEN = '2026-10-12T09:15:22.123456+00:00';
 const FORBIDDEN = { ok: false, error: 'You do not have permission to make changes here.' };
 const NEEDS = { ok: false, error: 'Only an owner or admin can approve or reject an expense. Ask one of them to do this.' };
 
@@ -59,8 +67,8 @@ const expense = {
 /** Every expense action with an input its schema accepts, and the data-layer function it must call. */
 const writes: [string, (input: unknown) => Promise<Answer>, unknown, string][] = [
   ['saveExpenseAction', actions.saveExpenseAction, expense, 'saveExpense'],
-  ['approveExpenseAction', actions.approveExpenseAction, { id: EXPENSE }, 'approveExpense'],
-  ['rejectExpenseAction', actions.rejectExpenseAction, { id: EXPENSE }, 'rejectExpense'],
+  ['approveExpenseAction', actions.approveExpenseAction, { id: EXPENSE, updated_at: SEEN }, 'approveExpense'],
+  ['rejectExpenseAction', actions.rejectExpenseAction, { id: EXPENSE, updated_at: SEEN }, 'rejectExpense'],
   ['deleteExpenseAction', actions.deleteExpenseAction, { id: EXPENSE }, 'deleteExpense'],
 ];
 
@@ -104,8 +112,8 @@ describe('who may write', () => {
     expect(ctl.calls.map((c) => c.fn)).toEqual(['saveExpense', 'deleteExpense']);
     ctl.calls = [];
     ctl.revalidated = [];
-    expect(await actions.approveExpenseAction({ id: EXPENSE })).toEqual(NEEDS);
-    expect(await actions.rejectExpenseAction({ id: EXPENSE })).toEqual(NEEDS);
+    expect(await actions.approveExpenseAction({ id: EXPENSE, updated_at: SEEN })).toEqual(NEEDS);
+    expect(await actions.rejectExpenseAction({ id: EXPENSE, updated_at: SEEN })).toEqual(NEEDS);
     // Not even with an input the schema would refuse: the role is asked first.
     expect(await actions.approveExpenseAction({ id: 'nope' })).toEqual(NEEDS);
     expect(ctl.calls).toEqual([]);
@@ -120,7 +128,11 @@ describe('what is sent and what is refreshed', () => {
       ok: false,
       error: 'Say who was paid: choose a contact or type a name.',
     });
-    expect(await actions.approveExpenseAction({ id: 'nope' })).toEqual({ ok: false, error: 'That expense no longer exists.' });
+    expect(await actions.approveExpenseAction({ id: 'nope', updated_at: SEEN })).toEqual({ ok: false, error: 'That expense no longer exists.' });
+    expect(await actions.rejectExpenseAction({ id: EXPENSE })).toEqual({
+      ok: false,
+      error: 'This expense was changed after you opened it. Check it again, then approve or reject it.',
+    });
     expect(await actions.deleteExpenseAction(null)).toEqual({ ok: false, error: 'That expense no longer exists.' });
     expect(ctl.calls).toEqual([]);
     expect(ctl.revalidated).toEqual([]);
@@ -137,7 +149,7 @@ describe('what is sent and what is refreshed', () => {
     ]);
   });
 
-  it('refreshes the four screens an expense shows on after every action, refused or not', async () => {
+  it('refreshes the screens an expense shows on, the ledger screens included, after every action, refused or not', async () => {
     for (const [name, action, input, fn] of writes) {
       ctl.revalidated = [];
       expect((await action(input)).ok, name).toBe(true);
