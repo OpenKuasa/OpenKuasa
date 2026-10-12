@@ -8,9 +8,12 @@ import {
   deleteKnowledgeEntry,
   loadChatbot,
   mapChatbotSettings,
+  mapConversations,
+  monthStart,
   parseChatbotSettingsForm,
   parseKnowledgeForm,
   readKnowledgeId,
+  resumeChatbot,
   saveChatbotSettings,
   updateKnowledgeEntry,
 } from '@/lib/crm/chatbot';
@@ -165,10 +168,27 @@ describe('reading and saving the bot', () => {
     const { client } = fakeClient([{ data: null }, { data: [] }, { data: { name: 'Rimba' } }]);
     expect(await loadChatbot(client, ORG)).toEqual({
       settings: DEFAULT_CHATBOT_SETTINGS,
+      pausedReason: null,
       saved: false,
       knowledge: [],
       businessName: 'Rimba',
     });
+  });
+
+  it('says why the public chat is paused, and nothing for a reason it does not know', async () => {
+    const row = { bot_name: 'Melati', tone: 'friendly', welcome: 'Hi', handoff_enabled: true, handoff_after: 3 };
+    const paused = fakeClient([{ data: { ...row, paused_reason: 'no_credit' } }, { data: [] }, { data: null }]);
+    expect(await loadChatbot(paused.client, ORG)).toMatchObject({ pausedReason: 'no_credit', saved: true });
+    const odd = fakeClient([{ data: { ...row, paused_reason: 'whatever' } }, { data: [] }, { data: null }]);
+    expect((await loadChatbot(odd.client, ORG)).pausedReason).toBeNull();
+  });
+
+  it('switches the chat back on by clearing the reason, in this workspace only', async () => {
+    const { client, seen } = fakeClient([{}]);
+    await resumeChatbot(client, ORG, 'user-2');
+    expect(seen[0]).toMatchObject({ op: 'update', table: 'crm_chatbot_settings', filters: [['org_id', ORG]] });
+    // Named as the one who changed it: the database refuses a change that leaves someone else's name.
+    expect(seen[0].payload).toMatchObject({ paused_reason: null, updated_by: 'user-2' });
   });
 
   it('maps a saved row, falling back on an unknown tone', () => {
@@ -215,5 +235,47 @@ describe('reading and saving the bot', () => {
     const gone = fakeClient([{ data: [] }, { data: [] }]);
     await expect(updateKnowledgeEntry(gone.client, ORG, ID, { title: 'A', body: 'B' })).rejects.toThrow(M.gone);
     await expect(deleteKnowledgeEntry(gone.client, ORG, ID)).rejects.toThrow(M.gone);
+  });
+});
+
+describe('what customers asked', () => {
+  it('starts the month at midnight in Malaysia', () => {
+    // 1 November, 2 am in Malaysia is still 31 October in UTC.
+    expect(monthStart(new Date('2026-10-31T18:00:00.000Z'))).toBe('2026-10-31T16:00:00.000Z');
+    expect(monthStart(new Date('2026-10-12T05:00:00.000Z'))).toBe('2026-09-30T16:00:00.000Z');
+  });
+
+  it('puts each conversation with its page and its own messages, in order', () => {
+    const conversation = {
+      id: 'c1',
+      page_id: 'p1',
+      status: 'handed_off',
+      handoff_name: 'Aisyah',
+      handoff_email: 'aisyah@example.com',
+      handoff_phone: null,
+      created_at: '2026-10-12T01:00:00.000Z',
+      last_message_at: '2026-10-12T01:05:00.000Z',
+    };
+    const other = { ...conversation, id: 'c2', page_id: 'gone', status: 'open', handoff_name: null, handoff_email: null };
+    const mapped = mapConversations(
+      [conversation, other],
+      [
+        { id: 'm1', conversation_id: 'c1', role: 'visitor', body: 'Ada COD?' },
+        { id: 'm2', conversation_id: 'c1', role: 'bot', body: 'Ada.' },
+        { id: 'm3', conversation_id: 'c2', role: 'visitor', body: 'Hello' },
+      ],
+      new Map([['p1', 'Raya promo']]),
+    );
+    expect(mapped[0]).toMatchObject({
+      pageName: 'Raya promo',
+      handedOff: true,
+      person: { name: 'Aisyah', email: 'aisyah@example.com', phone: null },
+      messages: [
+        { id: 'm1', role: 'visitor', body: 'Ada COD?' },
+        { id: 'm2', role: 'bot', body: 'Ada.' },
+      ],
+    });
+    expect(mapped[1]).toMatchObject({ pageName: null, handedOff: false, person: null });
+    expect(mapped[1].messages).toHaveLength(1);
   });
 });

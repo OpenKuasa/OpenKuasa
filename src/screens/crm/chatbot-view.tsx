@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
+import Link from 'next/link';
 import { BookOpen, Bot, Check, MessageSquare, MessagesSquare, Pencil, Plus, Radio, Send, Trash2 } from 'lucide-react';
 import {
   ChatKeyNotice,
@@ -25,8 +26,12 @@ import {
   KNOWLEDGE_BODY_MAX,
   KNOWLEDGE_MAX,
   KNOWLEDGE_TITLE_MAX,
+  PAUSE_MESSAGES,
   TONE_LABELS,
   WELCOME_MAX,
+  type ChatConversation,
+  type ChatbotActivity,
+  type ChatbotPause,
   type ChatbotSettings,
   type KnowledgeEntry,
 } from '@/lib/crm/chatbot';
@@ -34,13 +39,17 @@ import type { CrmFormAction } from '@/lib/crm/form-state';
 import { cn } from '@/lib/utils';
 import { SELECT_CLASS, useCrmForm } from './crm-form';
 
-type Actions = { saveSettings: CrmFormAction; saveEntry: CrmFormAction; removeEntry: CrmFormAction };
+type Actions = {
+  saveSettings: CrmFormAction;
+  saveEntry: CrmFormAction;
+  removeEntry: CrmFormAction;
+  resume: CrmFormAction;
+};
 
 const PREVIEW_API = '/api/crm/chatbot/preview';
 
-/** Where a bot could answer. Only the web chat is planned; the rest need a connection that does not exist yet. */
-const CHANNELS = [
-  { label: 'Web chat', state: 'Not switched on yet' },
+/** Where a bot could answer besides the web chat. Each needs a connection that does not exist yet. */
+const OTHER_CHANNELS = [
   { label: 'WhatsApp', state: 'Not connected' },
   { label: 'Instagram DM', state: 'Not connected' },
   { label: 'Messenger', state: 'Not connected' },
@@ -384,17 +393,101 @@ function Bubble({ from, children }: { from: 'bot' | 'user'; children: React.Reac
   );
 }
 
-/** Kasturi's chatbot set-up: how the bot behaves, what it knows, and a chat to try it. */
+/** '12 Oct, 3:04 pm' in Malaysia. */
+function when(iso: string) {
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: 'Asia/Kuala_Lumpur',
+  }).format(new Date(iso));
+}
+
+/** The pause notice, with the button that ends it for people who may. */
+function PausedNotice({ reason, action }: { reason: ChatbotPause; action?: CrmFormAction }) {
+  const { formAction, pending, error } = useCrmForm(action ?? (async () => undefined));
+  return (
+    <form
+      action={action ? formAction : undefined}
+      className="col-span-2 flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 md:col-span-12"
+    >
+      <p role="status" className="min-w-0 flex-1 text-sm">
+        {PAUSE_MESSAGES[reason]}
+      </p>
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+      {action ? (
+        <Button type="submit" size="sm" variant="outline" disabled={pending}>
+          {pending ? 'Switching on…' : 'Switch the chat back on'}
+        </Button>
+      ) : null}
+    </form>
+  );
+}
+
+/** One conversation: a line that opens to show what was said. */
+function ConversationItem({ conversation }: { conversation: ChatConversation }) {
+  const first = conversation.messages.find((message) => message.role === 'visitor');
+  return (
+    <li className="rounded-lg border bg-background/50">
+      <details>
+        <summary className="flex cursor-pointer items-center gap-3 px-3 py-2">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium">{first?.body ?? 'A conversation'}</p>
+            <p className="truncate text-xs text-muted-foreground">
+              {conversation.pageName ?? 'A page since deleted'} · {when(conversation.lastMessageAt)} ·{' '}
+              {conversation.messages.length} {conversation.messages.length === 1 ? 'message' : 'messages'}
+            </p>
+          </div>
+          {conversation.handedOff ? (
+            <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-semibold text-amber-600">
+              Asked for a person
+            </span>
+          ) : null}
+        </summary>
+        <div className="space-y-2 border-t px-3 py-3">
+          {conversation.person ? (
+            <p className="text-xs text-muted-foreground">
+              {conversation.person.name} · {conversation.person.email}
+              {conversation.person.phone ? ` · ${conversation.person.phone}` : ''}. A follow-up was added to their
+              contact.
+            </p>
+          ) : null}
+          {conversation.messages.map((message) => (
+            <Bubble key={message.id} from={message.role === 'visitor' ? 'user' : 'bot'}>
+              {message.body}
+            </Bubble>
+          ))}
+        </div>
+      </details>
+    </li>
+  );
+}
+
+/** Kasturi's chatbot: how the bot behaves, what it knows, a chat to try it, and what customers asked. */
 export function ChatbotView({
   settings,
   saved,
   knowledge,
+  pausedReason,
+  activity,
+  hasKey,
   actions,
 }: {
   settings: ChatbotSettings;
   /** False until the workspace has saved its settings once. */
   saved: boolean;
   knowledge: KnowledgeEntry[];
+  /** Set while the server has stopped the chat on landing pages. */
+  pausedReason: ChatbotPause | null;
+  activity: ChatbotActivity;
+  /** Whether the workspace has its own AI key: the chat on landing pages needs one. */
+  hasKey: boolean;
   /** Present only when the signed-in person may change the bot. */
   actions?: Actions;
 }) {
@@ -409,15 +502,25 @@ export function ChatbotView({
   };
   const characters = knowledge.reduce((sum, entry) => sum + entry.body.length, 0);
   const full = knowledge.length >= KNOWLEDGE_MAX;
+  const webChat = pausedReason
+    ? 'Paused'
+    : !hasKey
+      ? 'Needs an AI key'
+      : activity.pagesWithChat === 0
+        ? 'Not switched on yet'
+        : `On for ${activity.pagesWithChat} ${activity.pagesWithChat === 1 ? 'page' : 'pages'}`;
+  const webChatOn = !pausedReason && hasKey && activity.pagesWithChat > 0;
 
   return (
     <ScreenContainer>
       <PageHeader
         title="AI Chatbot"
-        subtitle="A bot that answers your customers from what you write here. Set it up and try it; it is not answering customers yet."
+        subtitle="A bot that answers your customers from what you write here, on the landing pages you switch it on for."
       />
 
       <BentoGrid>
+        {pausedReason ? <PausedNotice reason={pausedReason} action={actions?.resume} /> : null}
+
         <BentoCard tone="primary" className="col-span-1 md:col-span-3">
           <BentoStat
             label="Knowledge entries"
@@ -430,10 +533,13 @@ export function ChatbotView({
           <BentoStat label="Characters written" value={characters.toLocaleString('en-MY')} />
         </BentoCard>
         <BentoCard className="col-span-1 md:col-span-3">
-          <BentoStat label="Conversations" value="—" />
+          <BentoStat
+            label="Conversations this month"
+            value={activity.conversationsThisMonth.toLocaleString('en-MY')}
+          />
         </BentoCard>
         <BentoCard className="col-span-1 md:col-span-3">
-          <BentoStat label="Handed to a person" value="—" />
+          <BentoStat label="Asked for a person" value={activity.handedOffThisMonth.toLocaleString('en-MY')} />
         </BentoCard>
 
         <BentoCard
@@ -541,7 +647,18 @@ export function ChatbotView({
 
         <BentoCard title="Channels" subtitle="Where the bot can answer" icon={Radio} className="col-span-2 md:col-span-4">
           <ul className="space-y-1">
-            {CHANNELS.map((channel) => (
+            <li className="flex items-center justify-between gap-3 rounded-lg border bg-background/50 px-3 py-2">
+              <span className="text-sm">Web chat</span>
+              <span
+                className={cn(
+                  'shrink-0 rounded-full px-2 py-0.5 text-xs font-medium',
+                  webChatOn ? 'bg-emerald-500/15 text-emerald-600' : 'bg-muted text-muted-foreground',
+                )}
+              >
+                {webChat}
+              </span>
+            </li>
+            {OTHER_CHANNELS.map((channel) => (
               <li
                 key={channel.label}
                 className="flex items-center justify-between gap-3 rounded-lg border bg-background/50 px-3 py-2"
@@ -553,15 +670,46 @@ export function ChatbotView({
               </li>
             ))}
           </ul>
+          <p className="mt-3 text-xs text-muted-foreground">
+            {hasKey ? (
+              <>
+                Switch the chat on for a page when you edit it on{' '}
+                <Link href="/crm/landing-page" className="font-medium text-primary underline-offset-4 hover:underline">
+                  Landing Page
+                </Link>
+                . Each customer question is an AI question on your workspace&rsquo;s key.
+              </>
+            ) : (
+              <>
+                The chat answers customers on your workspace&rsquo;s own AI key.{' '}
+                <Link href="/account/ai" className="font-medium text-primary underline-offset-4 hover:underline">
+                  Add an OpenRouter key
+                </Link>{' '}
+                to use it.
+              </>
+            )}
+          </p>
         </BentoCard>
 
         <BentoCard
           title="Conversations"
-          subtitle="What customers asked, and what the bot said"
+          subtitle={
+            activity.conversations.length === 0
+              ? 'What customers asked, and what the bot said'
+              : 'The latest, newest first. Kept for 90 days.'
+          }
           icon={MessagesSquare}
           className="col-span-2 md:col-span-12"
         >
-          <Muted>No conversations yet. They will appear here once the bot is answering on a landing page.</Muted>
+          {activity.conversations.length === 0 ? (
+            <Muted>No conversations yet. They appear here once a customer asks the bot something on a landing page.</Muted>
+          ) : (
+            <ul className="space-y-2">
+              {activity.conversations.map((conversation) => (
+                <ConversationItem key={conversation.id} conversation={conversation} />
+              ))}
+            </ul>
+          )}
         </BentoCard>
       </BentoGrid>
     </ScreenContainer>

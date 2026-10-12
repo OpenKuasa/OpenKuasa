@@ -1,11 +1,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { CrmContactFormError } from '@/lib/crm/contacts';
+import { klDay } from '@/lib/crm/deal-stats';
 
 /**
  * Kasturi's AI chatbot: the bot a workspace sets up to answer its own
  * customers. This file is how the screen reads and saves the set-up (the
  * bot's name, tone and welcome, and what it may answer from), and how those
- * become the model's instructions. Nothing here talks to a customer.
+ * become the model's instructions. Nothing here talks to a customer: the
+ * public chat is `public-chatbot.ts`. What customers asked is read here.
  */
 
 export const CHATBOT_TONES = ['friendly', 'professional', 'playful'] as const;
@@ -64,8 +66,47 @@ export const DEFAULT_CHATBOT_SETTINGS: ChatbotSettings = {
 export type KnowledgeEntry = { id: string; title: string; body: string };
 export type KnowledgeFields = { title: string; body: string };
 
+/** Why the server stopped the public chat. */
+export type ChatbotPause = 'key_refused' | 'no_credit';
+
+export const PAUSE_MESSAGES: Record<ChatbotPause, string> = {
+  key_refused: 'The chat on your landing pages is paused: your OpenRouter key could not be used. Check it or save it again, then switch the chat back on.',
+  no_credit: 'The chat on your landing pages is paused: your OpenRouter key has no credit left. Top it up, then switch the chat back on.',
+};
+
+/** How many conversations the screen lists. */
+export const CONVERSATIONS_LISTED = 20;
+/** The most messages read for them: a conversation holds at most 20 questions and their answers. */
+const MESSAGES_READ_MAX = CONVERSATIONS_LISTED * 40;
+
+export type ChatConversation = {
+  id: string;
+  /** The landing page it happened on; null when the page has since been deleted. */
+  pageName: string | null;
+  handedOff: boolean;
+  /** Who the visitor said they are, when they asked for a person. */
+  person: { name: string; email: string; phone: string | null } | null;
+  /** ISO timestamps. */
+  startedAt: string;
+  lastMessageAt: string;
+  messages: { id: string; role: 'visitor' | 'bot'; body: string }[];
+};
+
+export type ChatbotActivity = {
+  /** Conversations begun since the first of this month, in Malaysia. */
+  conversationsThisMonth: number;
+  /** Of those, how many asked for a person. */
+  handedOffThisMonth: number;
+  /** Published landing pages with the chat switched on. */
+  pagesWithChat: number;
+  /** The latest conversations, newest first. */
+  conversations: ChatConversation[];
+};
+
 export type Chatbot = {
   settings: ChatbotSettings;
+  /** Set while the server has stopped the public chat. */
+  pausedReason: ChatbotPause | null;
   /** False until the workspace has saved its settings once. */
   saved: boolean;
   knowledge: KnowledgeEntry[];
@@ -184,6 +225,7 @@ type SettingsRow = {
   welcome: string;
   handoff_enabled: boolean | null;
   handoff_after: number | null;
+  paused_reason?: string | null;
 };
 
 export function mapChatbotSettings(row: SettingsRow): ChatbotSettings {
@@ -201,7 +243,7 @@ export async function loadChatbot(client: SupabaseClient, orgId: string): Promis
   const [settings, knowledge, org] = await Promise.all([
     client
       .from('crm_chatbot_settings')
-      .select('bot_name,tone,welcome,handoff_enabled,handoff_after')
+      .select('bot_name,tone,welcome,handoff_enabled,handoff_after,paused_reason')
       .eq('org_id', orgId)
       .maybeSingle(),
     client
@@ -219,6 +261,7 @@ export async function loadChatbot(client: SupabaseClient, orgId: string): Promis
   const row = settings.data as SettingsRow | null;
   return {
     settings: row ? mapChatbotSettings(row) : DEFAULT_CHATBOT_SETTINGS,
+    pausedReason: row?.paused_reason === 'key_refused' || row?.paused_reason === 'no_credit' ? row.paused_reason : null,
     saved: row !== null,
     knowledge: (knowledge.data ?? []) as KnowledgeEntry[],
     // The name is a nicety: the bot still works without it.
@@ -307,4 +350,111 @@ export async function deleteKnowledgeEntry(client: SupabaseClient, orgId: string
     .select('id');
   if (error) throw error;
   if (!data || data.length === 0) throw new CrmContactFormError(M.gone);
+}
+
+/**
+ * Switches the public chat back on after the server paused it. The row is
+ * marked as changed by whoever did it: the database refuses a change that
+ * leaves someone else named as the last to change it.
+ */
+export async function resumeChatbot(client: SupabaseClient, orgId: string, userId?: string | null): Promise<void> {
+  const { error } = await client
+    .from('crm_chatbot_settings')
+    .update({ paused_reason: null, updated_by: userId ?? null, updated_at: new Date().toISOString() })
+    .eq('org_id', orgId);
+  if (error) throw error;
+}
+
+/** The first moment of this month in Malaysia, as an ISO timestamp. */
+export function monthStart(now: Date): string {
+  return new Date(`${klDay(now).slice(0, 7)}-01T00:00:00+08:00`).toISOString();
+}
+
+type ConversationRow = {
+  id: string;
+  page_id: string | null;
+  status: string;
+  handoff_name: string | null;
+  handoff_email: string | null;
+  handoff_phone: string | null;
+  created_at: string;
+  last_message_at: string;
+};
+
+type MessageRow = { id: string; conversation_id: string; role: string; body: string };
+
+/** Puts each conversation together with its page's name and its messages, oldest message first. */
+export function mapConversations(
+  rows: ConversationRow[],
+  messages: MessageRow[],
+  pageNames: ReadonlyMap<string, string>,
+): ChatConversation[] {
+  const byConversation = new Map<string, ChatConversation['messages']>();
+  for (const message of messages) {
+    const list = byConversation.get(message.conversation_id) ?? [];
+    list.push({ id: message.id, role: message.role === 'bot' ? 'bot' : 'visitor', body: message.body });
+    byConversation.set(message.conversation_id, list);
+  }
+  return rows.map((row) => ({
+    id: row.id,
+    pageName: row.page_id ? (pageNames.get(row.page_id) ?? null) : null,
+    handedOff: row.status === 'handed_off',
+    person:
+      row.handoff_name && row.handoff_email
+        ? { name: row.handoff_name, email: row.handoff_email, phone: row.handoff_phone }
+        : null,
+    startedAt: row.created_at,
+    lastMessageAt: row.last_message_at,
+    messages: byConversation.get(row.id) ?? [],
+  }));
+}
+
+/** What customers have asked the bot: this month's counts and the latest conversations. */
+export async function loadChatbotActivity(client: SupabaseClient, orgId: string, now: Date): Promise<ChatbotActivity> {
+  const since = monthStart(now);
+  const [started, handedOff, pages, latest] = await Promise.all([
+    client
+      .from('crm_chatbot_conversations')
+      .select('id', { count: 'exact', head: true })
+      .eq('org_id', orgId)
+      .gte('created_at', since),
+    client
+      .from('crm_chatbot_conversations')
+      .select('id', { count: 'exact', head: true })
+      .eq('org_id', orgId)
+      .eq('status', 'handed_off')
+      .gte('created_at', since),
+    client.from('crm_landing_pages').select('id,name,chat_enabled,status').eq('org_id', orgId).limit(500),
+    client
+      .from('crm_chatbot_conversations')
+      .select('id,page_id,status,handoff_name,handoff_email,handoff_phone,created_at,last_message_at')
+      .eq('org_id', orgId)
+      .order('last_message_at', { ascending: false })
+      .order('id', { ascending: true })
+      .limit(CONVERSATIONS_LISTED),
+  ]);
+  for (const result of [started, handedOff, pages, latest]) if (result.error) throw result.error;
+
+  const rows = (latest.data ?? []) as ConversationRow[];
+  let messages: MessageRow[] = [];
+  if (rows.length > 0) {
+    const read = await client
+      .from('crm_chatbot_messages')
+      .select('id,conversation_id,role,body')
+      .eq('org_id', orgId)
+      .in('conversation_id', rows.map((row) => row.id))
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .limit(MESSAGES_READ_MAX);
+    if (read.error) throw read.error;
+    messages = (read.data ?? []) as MessageRow[];
+  }
+
+  const pageRows = (pages.data ?? []) as { id: string; name: string; chat_enabled: boolean | null; status: string }[];
+  return {
+    conversationsThisMonth: started.count ?? 0,
+    handedOffThisMonth: handedOff.count ?? 0,
+    pagesWithChat: pageRows.filter((page) => page.chat_enabled === true && page.status === 'published').length,
+    conversations: mapConversations(rows, messages, new Map(pageRows.map((page) => [page.id, page.name]))),
+  };
 }
