@@ -38,7 +38,7 @@ the data layer, with unit tests; the client components only draw them.
 | `refund-form.ts` | The refund form: what can be refunded and how much (`refundTargets`: an invoice whose customer is in credit, or one of its issued credit notes, less refunds still to be paid), defaults, validation, what is sent |
 | `cash-book.ts` | Reading the cash book: one row per movement of money in (`listCashReceipts`, from the view `finance_cash_receipts`) and out (`listPaymentVouchers`, from `finance_payment_vouchers`), a page at a time, with the row types and the kinds a receipt and a voucher can be. It only reads |
 | `cash-receipts.ts` | A receipt's writes, and the one read its form needs: the Zod schema of a draft receipt (`saveCashReceiptInput`, for invoices or for income, told apart by `kind`), saving a draft (`saveCashReceipt`), posting it (`postCashReceipt`), voiding a posted one (`voidCashReceipt`), deleting a draft (`deleteCashReceipt`), the sentence for each database code (`CASH_RECEIPT_MESSAGES`), and the active income categories (`listIncomeCategories`). Every write given an id asks `finance_cash_receipts` first, so one side of a transfer is never reached |
-| `cash-receipt-form.ts` | The receipt form: defaults, the form for a draft being changed (`editCashReceiptForm`, from its row and its Payments In rows), which invoices it can go against (`receivableFor`: the payment-in rule, without counting what the draft being changed holds itself), validation, what is sent (the chosen side only), a picker's list with a draft's archived choice in it (`withCurrent`). `receiptSavedNotPosted` words a receipt that was saved as a draft but not posted |
+| `cash-receipt-form.ts` | The receipt form: defaults, the form for a draft being changed (`editCashReceiptForm`, from its row and its Payments In rows), which invoices it can go against (`receivableFor`: the payment-in rule, without counting what the draft being changed holds itself), validation, what is sent (the chosen side only), a picker's list with a draft's archived choice in it (`withCurrent`). `receiptSavedNotPosted` words a receipt that was saved as a draft but not posted. `receiptInvoicesForForm` and `receiptPaymentsForForm` trim what the loader sends the form to the invoices that can still take money and the payments that hold part of one. `leftOutInvoicesNote` says when ticked invoices were left out. `afterRefusedReceiptSave` makes the form forget the id of a draft that was deleted meanwhile |
 | `expenses.ts` | Reading expenses (`listExpenses`, from the view `finance_expense_totals`), a page at a time, with the row type, the three statuses a person sets and `paid`, which is only how an expense reads. It only reads |
 | `cash-book-views.ts` | KPI figures, chart data, table filters, status words and CSV rows for Cash Receipts, Payment Vouchers and Expenses; the period selector of the first two (`inPeriod`), which sets the cards, the donut and the table rows alike (`cashReceiptsInPeriod`, `paymentVouchersInPeriod`: a draft receipt, and a voucher waiting for approval or still to be paid, stay in every period because their cards count them whatever their date; search, filters, "View all" and Export work on top of it); which category a voucher counts under (`voucherCategory`) and which screen changes it (`voucherHome`); what a receipt's row menu offers, by its status and by whether the person may sign off (`cashReceiptActions`), and the words of its questions (`receiptName`, `receiptVoidEffect`, `receiptDeleteEffect`) |
 | `csv.ts` | CSV text for Export: RFC 4180, a UTF-8 byte-order mark, and a guard against spreadsheet formulas |
@@ -313,7 +313,7 @@ person only what it will let them do:
 | | Owner, admin | Member | Viewer, demo |
 |---|---|---|---|
 | New receipt, Save draft, Edit a draft, Delete a draft | Yes | Yes, anyone's draft | No button, no menu; the action answers "You do not have permission to make changes here." |
-| Post (the form's "Post receipt", a draft's Post) | Yes | Not offered. The action answers "Only an owner or admin can post, pay or void. Ask one of them to do this." without reading or writing; the database answers `FIN14` and uses up no number | No |
+| Post (the form's "Post receipt", a draft's Post) | Yes | Not offered. `postCashReceiptAction` (a draft's Post) answers "Only an owner or admin can post, pay or void. Ask one of them to do this." without reading or writing. `saveAndPostCashReceiptAction` (the form's "Post receipt") saves the draft and answers "Saved as a draft. Only an owner or admin can post or issue it."; nothing is posted. The database answers `FIN14` and uses up no number | No |
 | Void a posted receipt, of either kind | Yes | Not offered; the same sentence, `FIN14` | No |
 
 The screen loader works `canSignOff` out from the viewer's role
@@ -1218,8 +1218,14 @@ with no date).
   status filter, and when a receipt is voided and the filter is "All except
   void" or Posted ("Receipt RC-0012 was voided. Choose Void in the status
   filter to see it."). A draft saved with a date outside the period needs no
-  note: drafts show in every period. A draft is hidden only by the Posted or
-  Void status filter or by search text, and no note is given then.
+  note: drafts show in every period. A draft is hidden by the Posted or Void
+  status filter, by search text, or by the ten-row limit until "View all", and
+  no note is given then (saving a draft is not posting it). A receipt just
+  posted or voided that search text or the ten-row limit hides gets the note
+  too ("Receipt RC-0012 was posted. Clear the search or choose View all to see
+  it."). The note is worked out each time the screen draws, from the rows
+  listed then, so changing the period, the filter or the search updates or
+  removes it; Close and the next action remove it too.
 - Income categories cannot be added, renamed or archived yet: every workspace
   has "Sales" and "Other income" until the Expenses forms manage categories.
 - A sent quotation cannot be edited: mark it declined and write a new one.
