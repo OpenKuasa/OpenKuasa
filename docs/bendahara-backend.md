@@ -870,6 +870,56 @@ What the database holds an account to (`20261114110000_bendahara_bank_account_ru
 The guard steps aside when nobody is signed in (a migration, the demo seeds)
 and, on a delete, when the workspace itself is being deleted.
 
+**No money on an archived account** (`20261116110000_bendahara_archived_account_rule`).
+The database refuses it for every signed-in person, by whatever path
+(`FIN37`, from `private.finance_transaction_account_guard` on two triggers of
+`finance_transactions`, `finance_use_account_insert` and
+`finance_use_account_update`):
+
+- a payment is not started on an archived account, not even a draft;
+- a payment is not moved onto one, whatever its status;
+- a payment whose account is archived is not sent for approval, approved,
+  scheduled, posted or marked paid. A draft that was on the account when it
+  was archived is still edited there, and is posted once the account is
+  restored or the draft is pointed at an active account.
+
+Voiding, rejecting and deleting go on working on an archived account, in both
+directions and for both sides of a transfer. The two triggers sort after
+every guard that was there (`finance_transaction_guard`,
+`finance_transaction_insert_guard`, `finance_transaction_sign_off`,
+`finance_transfer_id_guard`), so a write those refuse keeps its code, and
+before `finance_void_stamp`, which must stay the last BEFORE trigger. A member
+posting a draft on an archived account is therefore answered `FIN14`, not
+`FIN37`. A BEFORE trigger answers before the row policy: a viewer or an
+outsider who names an archived account of a workspace in an insert gets
+`FIN37` where an active account gives `42501`; nothing is written either way.
+
+The same trigger locks the account's row (`for share`) until the payment's
+transaction ends, and an archive is an update of that row, so the two wait for
+each other: an archive that meets a payment being scheduled is refused
+(`FIN30`) once that payment is in, and a payment that meets an archive under
+way is refused (`FIN37`) once the account is archived. An archived account
+therefore never holds a payment that is scheduled or waits for approval.
+Renaming an account waits the same few milliseconds for a payment in flight.
+One statement that archives two accounts while a transfer between those two
+is being recorded can deadlock; Postgres ends one of them (`40P01`) and a
+retry works. The function runs as its owner so that it can take the lock
+whoever is writing; it steps aside when nobody is signed in.
+
+`money.ts`, `refunds.ts` and `cash-receipts.ts` word `FIN37` with one
+sentence from `result.ts` (`ACCOUNT_ARCHIVED`): "The account this is on has
+been archived. Restore it on Banking, or use another account, then try again."
+A person meets it when the account was archived after their form was opened,
+or when they post, from Cash Receipts, a draft whose account was archived
+after the draft was saved. A stage that adds a write of `finance_transactions`
+adds the code to its own map.
+
+`service_role` holds no privilege on any finance table or view since the same
+migration. On hosted it had been left TRUNCATE, REFERENCES, TRIGGER and
+MAINTAIN on the 32 whose migrations revoked "from anon, authenticated" only;
+it never held a read or a write on them. A migration that adds a finance
+table revokes "from anon, authenticated, service_role".
+
 On `finance_statement_imports`, `created_by`, `id` and `created_at` are the
 database's to write since the same migration (`42501`): an import is recorded
 as made by the person signed in, and "Last import" cannot be moved.
@@ -1445,6 +1495,7 @@ quotation, a credit note or a refund by the file that made the call.
 | `FIN24` | The file of a receipt: there is none; it is not in the bucket; it was uploaded more than 30 minutes ago or is waiting to be removed; it is already a receipt; it is not the type its name says; its path names none of the five types. `receipt-inbox.ts` words it for recording an upload. |
 | `FIN25` | A void bill takes no receipt. Not worded yet. |
 | `FIN30` | An account with payments still to be paid or waiting for approval is not archived. `bank-accounts.ts`: "This account has payments that are still to be paid or waiting for approval. Pay, reject or delete them, then archive it." (`FIN14` on an account is an opening balance from someone who is not an owner or admin, or an owner who has not given their second factor: "Only an owner or admin can set or change an opening balance. If you are one, sign in again with your second step." The guard counts payments in both directions; the screen's archive question warns about money out only.) |
+| `FIN37` | Money does not move on an archived account: a payment is not started on one, moved onto one, or sent for approval, approved, scheduled, posted or marked paid while its account is archived. `result.ts` has the one sentence (`ACCOUNT_ARCHIVED`), which `money.ts`, `refunds.ts` and `cash-receipts.ts` each list in their own map; `transfers.ts` words it as it words `FIN16`. |
 
 `FIN23`, `FIN24` and `FIN25` are not the Receipts Inbox's alone. The ledger
 migrations (`20261108091500` to `20261108094500`) raise `FIN23` to `FIN27` with
@@ -1605,14 +1656,17 @@ with no date).
   a quotation has one invoice at a time, so a retry is refused.
 - Payment dates are not restricted: "pay now" accepts a future date and
   "schedule for later" a past one.
-- A payment's account must be active when it is chosen (only active accounts
-  are offered), but the database does not refuse a payment on an archived
-  account: only `finance_record_transfer` asks. So a form left open while its
-  account is archived, or a direct call, can still record one, and a payment
-  scheduled in the same instant as the archive can slip past the rule that an
-  account with a payment to be paid or waiting for approval, in either
-  direction, is not archived (`FIN30`). The balance of an
-  archived account still shows on Banking while it is not zero.
+- A payment form left open while its account is archived is refused when it
+  is sent (`FIN37`), and so is posting a draft whose account was archived
+  since: the person restores the account or picks another. The forms do not
+  say an account is archived before that, except that a draft's own archived
+  account is still listed in its picker. The balance of an archived account
+  still shows on Banking while it is not zero.
+- A payment that was scheduled or waiting for approval on an account before
+  `20261116110000` and whose account had been archived by a direct write is
+  not approved or marked paid until the account is restored. The archive rule
+  (`FIN30`) has refused such an archive since `20261114110000`, so none is
+  expected.
 - Voiding a paid bill is offered and refused until its payments are voided.
   The same goes for an invoice that has payments.
 - Posted and void bills, invoices and payments cannot be deleted, by design.
