@@ -1,10 +1,10 @@
--- supabase/migrations/20261108090000_hire_interview_feedback_columns.sql
+-- supabase/migrations/20261111090000_hire_interview_feedback_columns.sql
 -- Lekir slice 4b, part 1 of 2: an interview can hold one feedback. Four
 -- columns: a rating from 1 to 5, a recommendation (advance, hold or reject),
 -- comments, and the time the feedback was last saved.
 --
 -- NOT safe to run twice: the second run fails at the first "add column". The
--- functions that write these columns are in 20261108090100, which can be run
+-- functions that write these columns are in 20261111090100, which can be run
 -- again.
 --
 -- Existing rows: every column is nullable and has no default, so every

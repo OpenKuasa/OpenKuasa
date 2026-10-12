@@ -8,8 +8,8 @@ const read = (file: string) => readFileSync(join(process.cwd(), 'supabase/migrat
 const strip = (text: string) => text.split('\n').filter((line) => !line.trim().startsWith('--')).join('\n');
 const flat = (text: string) => text.replace(/\s+/g, ' ').trim();
 
-const COLUMNS_FILE = '20261108090000_hire_interview_feedback_columns.sql';
-const WRITES_FILE = '20261108090100_hire_interview_feedback_writes.sql';
+const COLUMNS_FILE = '20261111090000_hire_interview_feedback_columns.sql';
+const WRITES_FILE = '20261111090100_hire_interview_feedback_writes.sql';
 const rawColumns = read(COLUMNS_FILE);
 const rawWrites = read(WRITES_FILE);
 const columns = flat(strip(rawColumns));
