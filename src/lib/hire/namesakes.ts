@@ -189,6 +189,8 @@ export function interviewCardFromLists(
     Interview,
     'id' | 'application_id' | 'candidate_name' | 'job_title' | 'scheduled_at' | 'kind' | 'status' | 'duration_minutes' | 'place' | 'application_outcome'
   >[],
+  /** Which candidate each application is of. Left out, only the interview's own application is known to be the same person's. */
+  applications: readonly Pick<Application, 'id' | 'candidate_id'>[] = [],
 ): InterviewCardRead {
   const describe = (i: (typeof interviews)[number]): InterviewCardRow => ({
     id: i.id, application_id: i.application_id, candidate: i.candidate_name, job: i.job_title, scheduled_at: i.scheduled_at, kind: i.kind,
@@ -198,11 +200,17 @@ export function interviewCardFromLists(
   if (!row) return NO_INTERVIEW;
   const [name, job] = [sameText(row.candidate_name), sameText(row.job_title)];
   const sameName = interviews.filter((i) => i.id !== row.id && sameText(i.candidate_name) === name);
+  const candidateOf = new Map(applications.map((a) => [a.id, a.candidate_id]));
+  const candidate = candidateOf.get(row.application_id);
+  const sameCandidate = (applicationId: string) =>
+    applicationId === row.application_id || (candidate !== undefined && candidateOf.get(applicationId) === candidate);
   return {
     target: describe(row),
     others: sameName.filter((i) => sameText(i.job_title) === job).map(describe),
     cut: false,
-    also: sameName
+    // The same person is the same candidate, never the same name: a namesake's interview is not this person's.
+    also: interviews
+      .filter((i) => i.id !== row.id && sameCandidate(i.application_id))
       .filter((i) => i.status === 'scheduled')
       .sort((a, b) => Date.parse(a.scheduled_at) - Date.parse(b.scheduled_at))
       .map(describe),
@@ -239,7 +247,8 @@ type CardColumns = {
 /**
  * One interview by its id, and every other interview that could be taken for it: those of anyone with the same
  * name, for a job with the same title, whether of the same application (a second round) or of a namesake's. Then
- * every other interview still scheduled with anyone of that name, for any job: what the card lists beside it.
+ * every other interview still scheduled with this very candidate (by the candidate's id), for any job: what the card
+ * lists beside it. A namesake's interviews are not this person's and are not listed.
  * Read by id and by name with the member's own client (row-level security and the workspace filter apply), never
  * from a whole list, so no page size can make the answer wrong. No contact detail and no notes are read. A failed
  * query throws; the caller then prepares no change.
@@ -249,13 +258,13 @@ export async function readInterviewCard(client: SupabaseClient, orgId: string, i
 
   const found = await client
     .from('hire_interviews')
-    .select(`${CARD_COLUMNS},application:hire_applications(outcome,candidate:hire_candidates(name),job:hire_jobs(title))`)
+    .select(`${CARD_COLUMNS},application:hire_applications(outcome,candidate_id,candidate:hire_candidates(name),job:hire_jobs(title))`)
     .eq('org_id', orgId)
     .eq('id', id)
     .maybeSingle();
   if (found.error) throw found.error;
   const row = found.data as unknown as (CardColumns & {
-    application: { outcome: ApplicationOutcome | null; candidate: { name: string } | null; job: { title: string } | null } | null;
+    application: { outcome: ApplicationOutcome | null; candidate_id: string | null; candidate: { name: string } | null; job: { title: string } | null } | null;
   }) | null;
   const name = row?.application?.candidate?.name;
   const title = row?.application?.job?.title;
@@ -288,29 +297,32 @@ export async function readInterviewCard(client: SupabaseClient, orgId: string, i
   if (twins.error) throw twins.error;
   const twinsRead = (twins.data ?? []) as unknown as CardColumns[];
 
-  // Every application of anyone of that name, with its job's title; then their interviews that are still scheduled.
-  const everyApplication = await client
-    .from('hire_applications')
-    .select('id,job:hire_jobs(title)')
-    .eq('org_id', orgId)
-    .in('candidate_id', people.ids)
-    .limit(NAMESAKE_LIMIT + 1);
-  if (everyApplication.error) throw everyApplication.error;
+  // Every application of this candidate, with its job's title; then the other interviews of those applications.
+  // By the candidate's id: someone else with the same name is someone else.
   const titleOf = new Map<string, string>([[row.application_id, title]]);
-  for (const a of ((everyApplication.data ?? []) as unknown as { id: string; job: { title: string } | null }[]).slice(0, NAMESAKE_LIMIT)) {
-    if (!titleOf.has(a.id)) titleOf.set(a.id, a.job?.title ?? title);
+  const candidateId = row.application?.candidate_id;
+  if (candidateId) {
+    const theirApplications = await client
+      .from('hire_applications')
+      .select('id,job:hire_jobs(title)')
+      .eq('org_id', orgId)
+      .eq('candidate_id', candidateId)
+      .limit(NAMESAKE_LIMIT + 1);
+    if (theirApplications.error) throw theirApplications.error;
+    for (const a of ((theirApplications.data ?? []) as unknown as { id: string; job: { title: string } | null }[]).slice(0, NAMESAKE_LIMIT)) {
+      if (!titleOf.has(a.id)) titleOf.set(a.id, a.job?.title ?? title);
+    }
   }
-  const scheduled = await client
+  const theirs = await client
     .from('hire_interviews')
     .select(CARD_COLUMNS)
     .eq('org_id', orgId)
-    .eq('status', 'scheduled')
     .neq('id', id)
     .in('application_id', [...titleOf.keys()])
     .order('scheduled_at', { ascending: true })
     .limit(NAMESAKE_LIMIT + 1);
-  if (scheduled.error) throw scheduled.error;
-  const scheduledRead = (scheduled.data ?? []) as unknown as CardColumns[];
+  if (theirs.error) throw theirs.error;
+  const theirsRead = ((theirs.data ?? []) as unknown as CardColumns[]).slice(0, NAMESAKE_LIMIT);
 
   const describe = (i: CardColumns, job: string): InterviewCardRow => ({
     id: i.id, application_id: i.application_id, candidate: name, job, scheduled_at: i.scheduled_at, kind: i.kind,
@@ -322,7 +334,7 @@ export async function readInterviewCard(client: SupabaseClient, orgId: string, i
     others: twinsRead.slice(0, NAMESAKE_LIMIT).map((i) => describe(i, title)),
     cut: people.cut || jobs.cut || applicationsRead.length > NAMESAKE_LIMIT || twinsRead.length > NAMESAKE_LIMIT,
     // A list for the person to read, not a promise: more than were read are simply not all listed.
-    also: scheduledRead.slice(0, NAMESAKE_LIMIT).map((i) => describe(i, titleOf.get(i.application_id) ?? title)),
+    also: theirsRead.filter((i) => i.status === 'scheduled').map((i) => describe(i, titleOf.get(i.application_id) ?? title)),
     application_outcome: row.application?.outcome ?? null,
   };
 }

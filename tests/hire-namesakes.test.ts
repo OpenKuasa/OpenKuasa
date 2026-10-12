@@ -172,30 +172,30 @@ describe('readInterviewCard', () => {
   const TWIN_APP = '88888888-8888-4888-8888-888888888888';
   const found = {
     id: IV, application_id: APP, scheduled_at: '2026-10-20T07:00:00+00:00', kind: 'video', status: 'scheduled', duration_minutes: 45, place: 'Level 3',
-    application: { outcome: 'active', candidate: { name: 'Aisyah Lim' }, job: { title: 'Barista' } },
+    application: { outcome: 'active', candidate_id: A, candidate: { name: 'Aisyah Lim' }, job: { title: 'Barista' } },
   };
   const byId = (q: { table: string; calls: [string, ...unknown[]][] }) =>
     q.table === 'hire_interviews' && q.calls.some((c) => c[0] === 'eq' && c[1] === 'id');
   const OTHER_APP = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
   const FOURTH = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
   const selects = (q: { calls: [string, ...unknown[]][] }, text: string) => q.calls.some((c) => c[0] === 'select' && c[1] === text);
-  const onlyScheduled = (q: { calls: [string, ...unknown[]][] }) => q.calls.some((c) => c[0] === 'eq' && c[1] === 'status');
   const rest = { status: 'scheduled', duration_minutes: 60, place: null };
-  /** Answers each of the seven reads; `over` replaces the answer for one table of the middle four, or one of the last two. */
+  /** Answers each of the seven reads; `over` replaces the answer for one table of the middle four, or one of the last two (`every_application`, `scheduled`). */
   const answering = (over: Record<string, { data?: unknown; error?: unknown }> = {}) =>
     standIn((q) => {
       if (byId(q)) return over.target ?? { data: found };
       if (q.table === 'hire_candidates') return over.hire_candidates ?? { data: [{ id: A, name: 'Aisyah Lim' }, { id: B, name: 'aisyah  lim' }, { id: C, name: 'Aisyah Lim x' }] };
       if (q.table === 'hire_jobs') return over.hire_jobs ?? { data: [{ id: 'j1', title: 'Barista' }, { id: 'j2', title: 'barista ' }, { id: 'j3', title: 'Barista (night)' }] };
       if (q.table === 'hire_applications' && selects(q, 'id,job:hire_jobs(title)')) {
-        return over.every_application ?? over.hire_applications ?? { data: [{ id: APP, job: { title: 'Barista' } }, { id: TWIN_APP, job: { title: 'barista ' } }, { id: OTHER_APP, job: { title: 'Cashier' } }] };
+        return over.every_application ?? over.hire_applications ?? { data: [{ id: APP, job: { title: 'Barista' } }, { id: OTHER_APP, job: { title: 'Cashier' } }] };
       }
       if (q.table === 'hire_applications') return over.hire_applications ?? { data: [{ id: TWIN_APP }, { id: APP }] };
-      if (onlyScheduled(q)) {
+      // The last read: every other interview of the candidate's own applications, whatever its status.
+      if (q.calls.some((c) => c[0] === 'in' && c[1] === 'application_id' && JSON.stringify(c[2]) === JSON.stringify([APP, OTHER_APP]))) {
         return over.scheduled ?? over.hire_interviews ?? {
           data: [
-            { id: THIRD, application_id: TWIN_APP, scheduled_at: '2026-10-20T07:00:00+00:00', kind: 'video', ...rest },
             { id: FOURTH, application_id: OTHER_APP, scheduled_at: '2026-10-23T02:00:00+00:00', kind: 'phone', ...rest, place: '+60 12-345 6789' },
+            { id: SECOND, application_id: APP, scheduled_at: '2026-10-27T07:00:00+00:00', kind: 'onsite', ...rest, status: 'completed' },
           ],
         };
       }
@@ -214,7 +214,7 @@ describe('readInterviewCard', () => {
     for (const query of queries) expect(has(query, 'eq', 'org_id', 'org1'), query.table).toBe(true);
 
     expect(has(queries[0], 'eq', 'id', IV)).toBe(true);
-    expect(has(queries[0], 'select', 'id,application_id,scheduled_at,kind,status,duration_minutes,place,application:hire_applications(outcome,candidate:hire_candidates(name),job:hire_jobs(title))')).toBe(true);
+    expect(has(queries[0], 'select', 'id,application_id,scheduled_at,kind,status,duration_minutes,place,application:hire_applications(outcome,candidate_id,candidate:hire_candidates(name),job:hire_jobs(title))')).toBe(true);
 
     expect(has(queries[1], 'select', 'id,name')).toBe(true);
     expect(has(queries[1], 'filter', 'name', 'imatch', '^\\s*(Aisyah\\s+Lim)\\s*$')).toBe(true);
@@ -236,14 +236,15 @@ describe('readInterviewCard', () => {
     expect(has(queries[4], 'order', 'scheduled_at', { ascending: true })).toBe(true);
     expect(has(queries[4], 'limit', NAMESAKE_LIMIT + 1)).toBe(true);
 
-    // Every application of anyone of that name, whatever the job; then their interviews that are still scheduled.
+    // Every application of this very candidate, whatever the job (by the candidate's id, never by name: a namesake's
+    // interviews are not this person's); then the other interviews of those applications.
     expect(has(queries[5], 'select', 'id,job:hire_jobs(title)')).toBe(true);
-    expect(has(queries[5], 'in', 'candidate_id', [A, B])).toBe(true);
-    expect(queries[5].calls.some((c) => c[0] === 'in' && c[1] === 'job_id')).toBe(false);
+    expect(has(queries[5], 'eq', 'candidate_id', A)).toBe(true);
+    expect(queries[5].calls.some((c) => c[0] === 'in')).toBe(false);
+    expect(queries[5].calls.some((c) => c[0] === 'filter')).toBe(false);
     expect(has(queries[5], 'limit', NAMESAKE_LIMIT + 1)).toBe(true);
-    expect(has(queries[6], 'eq', 'status', 'scheduled')).toBe(true);
     expect(has(queries[6], 'neq', 'id', IV)).toBe(true);
-    expect(has(queries[6], 'in', 'application_id', [APP, TWIN_APP, OTHER_APP])).toBe(true);
+    expect(has(queries[6], 'in', 'application_id', [APP, OTHER_APP])).toBe(true);
     expect(has(queries[6], 'order', 'scheduled_at', { ascending: true })).toBe(true);
     expect(has(queries[6], 'limit', NAMESAKE_LIMIT + 1)).toBe(true);
 
@@ -254,9 +255,9 @@ describe('readInterviewCard', () => {
         { id: THIRD, application_id: TWIN_APP, candidate: 'Aisyah Lim', job: 'Barista', scheduled_at: '2026-10-20T07:00:00+00:00', kind: 'video', ...rest },
       ],
       cut: false,
-      // Still scheduled, with anyone of that name, each under its own job's title.
+      // Still scheduled, with this candidate, each under its own job's title. The namesake's interview (THIRD) is in
+      // `others`, because a card could be taken for it; it is not listed as this person's.
       also: [
-        { id: THIRD, application_id: TWIN_APP, candidate: 'Aisyah Lim', job: 'barista ', scheduled_at: '2026-10-20T07:00:00+00:00', kind: 'video', ...rest },
         { id: FOURTH, application_id: OTHER_APP, candidate: 'Aisyah Lim', job: 'Cashier', scheduled_at: '2026-10-23T02:00:00+00:00', kind: 'phone', ...rest, place: '+60 12-345 6789' },
       ],
       application_outcome: 'active',
@@ -318,6 +319,7 @@ describe('interviewCardFromLists', () => {
   const interview = (id: string, application_id: string, candidate_name: string, job_title: string, scheduled_at: string, kind: 'video' | 'onsite' | 'phone' = 'video') =>
     ({ id, application_id, candidate_name, job_title, scheduled_at, kind, status: 'scheduled' as const, duration_minutes: 60, place: null, application_outcome: 'active' as const });
   const more = { status: 'scheduled', duration_minutes: 60, place: null };
+  const applications = [{ id: 'a1', candidate_id: 'c1' }, { id: 'a2', candidate_id: 'c2' }, { id: 'a3', candidate_id: 'c1' }, { id: 'a4', candidate_id: 'c9' }];
   const list = [
     interview('i1', 'a1', 'Aisyah Lim', 'Barista', '2026-10-20T07:00:00Z'),
     interview('i2', 'a1', 'Aisyah Lim', 'Barista', '2026-10-27T07:00:00Z', 'onsite'),
@@ -326,16 +328,16 @@ describe('interviewCardFromLists', () => {
     interview('i5', 'a4', 'Farid Osman', 'Barista', '2026-10-20T07:00:00Z'),
   ];
   it('finds the interview and the others with the same name and the same job, of the same application or a namesake\'s', () => {
-    expect(interviewCardFromLists('i1', list)).toEqual({
+    expect(interviewCardFromLists('i1', list, applications)).toEqual({
       target: { id: 'i1', application_id: 'a1', candidate: 'Aisyah Lim', job: 'Barista', scheduled_at: '2026-10-20T07:00:00Z', kind: 'video', ...more },
       others: [
         { id: 'i2', application_id: 'a1', candidate: 'Aisyah Lim', job: 'Barista', scheduled_at: '2026-10-27T07:00:00Z', kind: 'onsite', ...more },
         { id: 'i3', application_id: 'a2', candidate: ' aisyah  LIM', job: 'BARISTA ', scheduled_at: '2026-10-20T07:00:00Z', kind: 'video', ...more },
       ],
       cut: false,
-      // Everything else still scheduled with someone of that name, for any job, soonest first.
+      // Everything else still scheduled with this very candidate, for any job, soonest first: a1 and a3 are hers,
+      // a2 is a namesake's.
       also: [
-        { id: 'i3', application_id: 'a2', candidate: ' aisyah  LIM', job: 'BARISTA ', scheduled_at: '2026-10-20T07:00:00Z', kind: 'video', ...more },
         { id: 'i4', application_id: 'a3', candidate: 'Aisyah Lim', job: 'Cashier', scheduled_at: '2026-10-20T07:00:00Z', kind: 'video', ...more },
         { id: 'i2', application_id: 'a1', candidate: 'Aisyah Lim', job: 'Barista', scheduled_at: '2026-10-27T07:00:00Z', kind: 'onsite', ...more },
       ],
@@ -343,8 +345,12 @@ describe('interviewCardFromLists', () => {
     });
     // One that is no longer scheduled is not listed as still to come.
     const closed = list.map((i) => (i.id === 'i2' ? { ...i, status: 'cancelled' as const } : i));
-    expect(interviewCardFromLists('i1', closed).also.map((i) => i.id)).toEqual(['i3', 'i4']);
-    expect(interviewCardFromLists('i1', closed).others.map((i) => i.id)).toEqual(['i2', 'i3']);
+    expect(interviewCardFromLists('i1', closed, applications).also.map((i) => i.id)).toEqual(['i4']);
+    expect(interviewCardFromLists('i1', closed, applications).others.map((i) => i.id)).toEqual(['i2', 'i3']);
+    // The namesake's own card lists nothing of hers.
+    expect(interviewCardFromLists('i3', list, applications).also).toEqual([]);
+    // Without the applications, only the interview's own application is known to be the same person's.
+    expect(interviewCardFromLists('i1', list).also.map((i) => i.id)).toEqual(['i2']);
   });
   it('has no others for an interview that is alone, and nothing for an id that is not in the list', () => {
     expect(interviewCardFromLists('i5', list).others).toEqual([]);

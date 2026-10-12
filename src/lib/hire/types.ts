@@ -154,8 +154,9 @@ export type InterviewCardRow = {
 /**
  * `target` is null when the interview is not there. `others`: every other interview whose candidate name and job
  * title are the same, of the same application or of a namesake's. `cut` when there were more than were read.
- * `also`: every other interview still SCHEDULED with someone of that name, for any job, soonest first (at most the
- * first fifty): what a card lists so the person sees there is more than one. `application_outcome`: whether the
+ * `also`: every other interview still SCHEDULED with this very CANDIDATE (by the candidate's id, across all their
+ * applications; never a namesake's), soonest first, at most the first fifty: what a card lists so the person sees
+ * there is more than one. `application_outcome`: whether the
  * target's application is still active; null when there is no target.
  */
 export type InterviewCardRead = {

@@ -742,6 +742,12 @@ describe('the server\'s check of the interview', () => {
     // Both are scheduled, so each card says the other is there too.
     expect(await check('cancelInterview', { id: IV })).toEqual({ ok: true, note: `${LINE}\n${ALSO_LATER}`, namesakes: [] });
     expect(listInterviews).toHaveBeenCalled();
+    // The same person is the same CANDIDATE, told from the applications: a namesake's interview is not listed.
+    const theirs = { ...interview(IV2, LATER), application_id: APP2, job_title: 'Barista' };
+    const applications = (second: string) => [{ id: APP, candidate_id: 'c1', candidate_name: 'Aina Rahman', job_title: 'Sales Executive', applied_at: AT }, { id: APP2, candidate_id: second, candidate_name: 'Aina Rahman', job_title: 'Barista', applied_at: AT }];
+    const from = (second: string) => interviewCheckFor({ listCandidates: async () => [] as never, listApplications: async () => applications(second) as never, listInterviews: async () => [interview(IV, AT), theirs] as never });
+    expect(await from('c2')('cancelInterview', { id: IV })).toEqual({ ok: true, note: LINE, namesakes: [] });
+    expect(await from('c1')('cancelInterview', { id: IV })).toEqual({ ok: true, note: `${LINE}\nAlso scheduled for Aina Rahman: Thu 22 Oct 2026, 11:00 am · video (Barista)`, namesakes: [] });
   });
 });
 

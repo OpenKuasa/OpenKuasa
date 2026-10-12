@@ -2626,7 +2626,7 @@ describe('interview changes', () => {
   };
   const NEW = { application_id: APP, date: '2027-01-12', time: '15:00', duration_minutes: 60, kind: 'video' };
 
-  type State = { at: string; twin: boolean; fail: boolean; both?: boolean; place?: string | null; minutes?: number; gone?: boolean; outcome?: 'active' | 'rejected' };
+  type State = { at: string; twin: boolean; fail: boolean; both?: boolean; place?: string | null; minutes?: number; gone?: boolean; outcome?: 'active' | 'rejected'; namesake?: boolean };
   /**
    * One application with two interviews, a first and a second round; `state` can move the first, make the second
    * read exactly like it, make the server's read fail, or (`both`) leave the second scheduled too: it is cancelled
@@ -2640,16 +2640,20 @@ describe('interview changes', () => {
       status, created_at: '2026-10-09T02:00:00.000Z', updated_at: '2026-10-09T02:00:00.000Z',
       duration_minutes: minutes, place, notes: null, application_stage: 'interview' as const, application_outcome: state.outcome ?? ('active' as const),
     });
-    const listInterviews = async () => [...(state.gone ? [] : [interview(IV, state.at, state.place ?? null, 'scheduled', state.minutes)]), interview(IV2, state.twin ? state.at : LATER, ROOM, state.both ? 'scheduled' : 'cancelled')];
+    /** A namesake's application for another job, with a scheduled interview: another person, not this one. */
+    const NAMESAKE_APP = '44444444-4444-4444-8444-444444444478';
+    const NAMESAKE_IV = '33333333-3333-4333-8333-333333333378';
+    const listInterviews = async () => [...(state.namesake ? [{ ...interview(NAMESAKE_IV, LATER, null), application_id: NAMESAKE_APP, job_title: 'Barista' }] : []), ...(state.gone ? [] : [interview(IV, state.at, state.place ?? null, 'scheduled', state.minutes)]), interview(IV2, state.twin ? state.at : LATER, ROOM, state.both ? 'scheduled' : 'cancelled')];
     const listApplications = async () =>
       (await base.listApplications()).map((a, n) =>
-        n === 0 ? { ...a, id: APP, candidate_name: WHO, job_title: JOB, stage: 'interview' as const, outcome: 'active' as const, cover_letter: `Please interview me on ${LETTER_LINK}`, cv_url: LETTER_LINK, portfolio_url: LETTER_LINK } : a);
+        n === 0 ? { ...a, id: APP, candidate_name: WHO, job_title: JOB, stage: 'interview' as const, outcome: 'active' as const, cover_letter: `Please interview me on ${LETTER_LINK}`, cv_url: LETTER_LINK, portfolio_url: LETTER_LINK }
+          : n === 1 && state.namesake ? { ...a, id: NAMESAKE_APP, candidate_name: WHO, job_title: 'Barista', stage: 'interview' as const, outcome: 'active' as const } : a);
     const listCandidates = async () =>
       (await base.listCandidates()).map((c, n) => (n === 0 ? { ...c, id: PERSON, name: 'Zulaikha Tan Abdullah', pool_status: 'available' as const } : c));
     // The server's read, by the same rule the database's has.
     const interviewCard = async (id: unknown) => {
       if (state.fail) throw new Error('putri@example.my could not be read');
-      return interviewCardFromLists(id, await listInterviews());
+      return interviewCardFromLists(id, await listInterviews(), await listApplications());
     };
     return { data: { ...base, listInterviews, listApplications, listCandidates, interviewCard }, write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true } };
   };
@@ -2828,6 +2832,14 @@ describe('interview changes', () => {
       const nothing = await prepare([listAll, { tool: 'rescheduleInterview', input: { id: IV, date: '2026-10-20', time: '15:00' } }, 'answer'], world(), { said: 'Keep it on Tuesday at 3' });
       expect(nothing.context.proposals.size).toBe(0);
       expect(seen.refusals[0]).toBe('Nothing would change: this interview is already at that date and time. No change was prepared.');
+    });
+    it('the card lists the same CANDIDATE\'s other scheduled interviews, not those of someone else with the same name', async () => {
+      const known = { names: { [`interview:${IV}`]: `${WHO} (${JOB})` }, said: 'Cancel it' };
+      const namesake = await prepare([{ tool: 'cancelInterview', input: { id: IV } }], world({ at: AT, twin: false, fail: false, namesake: true }), known);
+      expect(seen.refusals).toEqual([]);
+      expect(namesake.cards[0].reason).toBe(LINE);
+      const own = await prepare([{ tool: 'cancelInterview', input: { id: IV } }], world({ at: AT, twin: false, fail: false, namesake: true, both: true }), known);
+      expect(own.cards[0].reason).toBe(LINE_AND_LATER);
     });
     it('refuses a link nobody gave: not one made up, and not one that only Tuah wrote', async () => {
       const withLink: Call = { tool: 'scheduleInterview', input: { ...NEW, place: LINK } };
@@ -3261,6 +3273,15 @@ describe('interview changes', () => {
       const two = await request([[{ tool: 'scheduleInterview', input: NEW }], [{ tool: 'listJobs', input: {} }, { tool: 'scheduleInterview', input: { ...NEW, time: '16:00' } }]], agent);
       expect(two.cards).toHaveLength(1);
       nothingSaved();
+    });
+    it.each(agents)('%s: the card lists the same CANDIDATE\'s other scheduled interviews, not those of someone else with the same name', async (agent) => {
+      // A namesake has an interview on the Thursday for another job. It is not this person's, and is not listed as hers.
+      const namesake = await request([[{ tool: 'cancelInterview', input: { id: IV } }]], agent, world({ at: AT, twin: false, fail: false, namesake: true }), 'Cancel it');
+      expect(namesake.denials).toEqual([]);
+      expect(namesake.cards[0].reason).toBe(LINE);
+      // Her own second interview is.
+      const own = await request([[{ tool: 'cancelInterview', input: { id: IV } }]], agent, world({ at: AT, twin: false, fail: false, namesake: true, both: true }), 'Cancel it');
+      expect(own.cards[0].reason).toBe(LINE_AND_LATER);
     });
     it.each(agents)('%s: a made-up link is denied, and a link the user typed passes', async (agent) => {
       const withLink: Call = { tool: 'scheduleInterview', input: { ...NEW, place: LINK } };

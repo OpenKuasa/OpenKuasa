@@ -426,7 +426,7 @@ export function interviewCheckFor(
       }
       const { target, others, cut, also, application_outcome: outcome } = data.interviewCard
         ? await data.interviewCard(id)
-        : interviewCardFromLists(id, await data.listInterviews());
+        : interviewCardFromLists(id, await data.listInterviews(), await data.listApplications());
       // Not there (deleted since it was listed, or since its card was shown): there is no line to put on a card.
       if (!target) return { ok: false, refusal: INTERVIEW_GONE };
       // Its time and details can be changed only while its application is active. Said here, before a card and again
