@@ -149,13 +149,21 @@ describe('reportsToProblem and reportsToRefusal', () => {
     expect(reportsToProblem('b', '', line)).toBeNull();
     expect(reportsToProblem(null, 'a', line)).toBeNull();
   });
-  it("words the database's loop refusal with the chosen name", () => {
-    expect(reportsToRefusal(REPORTS_TO_REFUSALS.EMP_BAD_MANAGER, 'b', line)).toBe(reportsToLoop('Bakar'));
-    expect(reportsToRefusal(REPORTS_TO_REFUSALS.EMP_BAD_MANAGER, 'gone', line)).toBe(REPORTS_TO_REFUSALS.EMP_BAD_MANAGER);
+  it('words the general bad-manager refusal so that it is true for every cause', () => {
+    expect(REPORTS_TO_REFUSALS.EMP_BAD_MANAGER).toBe(
+      "That person cannot be this employee's manager: it would make a loop, or they are no longer in this workspace.",
+    );
+  });
+  it("names the loop only when the loaded rows show one", () => {
+    expect(reportsToRefusal(REPORTS_TO_REFUSALS.EMP_BAD_MANAGER, 'a', 'b', line)).toBe(reportsToLoop('Bakar'));
+  });
+  it('keeps the general sentence when the loaded rows show no loop (a manager gone, a chain too deep)', () => {
+    expect(reportsToRefusal(REPORTS_TO_REFUSALS.EMP_BAD_MANAGER, 'c', 'a', line)).toBe(REPORTS_TO_REFUSALS.EMP_BAD_MANAGER);
+    expect(reportsToRefusal(REPORTS_TO_REFUSALS.EMP_BAD_MANAGER, 'a', 'gone', line)).toBe(REPORTS_TO_REFUSALS.EMP_BAD_MANAGER);
   });
   it('leaves any other text as it is', () => {
-    expect(reportsToRefusal(REPORTS_TO_REFUSALS.EMP_NOT_ALLOWED, 'b', line)).toBe(REPORTS_TO_REFUSALS.EMP_NOT_ALLOWED);
-    expect(reportsToRefusal('Something else.', 'b', line)).toBe('Something else.');
+    expect(reportsToRefusal(REPORTS_TO_REFUSALS.EMP_NOT_ALLOWED, 'a', 'b', line)).toBe(REPORTS_TO_REFUSALS.EMP_NOT_ALLOWED);
+    expect(reportsToRefusal('Something else.', 'a', 'b', line)).toBe('Something else.');
   });
 });
 

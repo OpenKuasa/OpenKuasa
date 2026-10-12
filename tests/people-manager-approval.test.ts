@@ -179,12 +179,14 @@ describe('setReportsTo for an owner', () => {
     expect(ctl.calls).toEqual([{ name: 'hr_set_reports_to', args: { p_employee: EMP, p_manager: null } }]);
   });
 
-  it('a loop comes back as the loop sentence', async () => {
+  it('a bad manager comes back as the general sentence, true for a loop or a manager gone', async () => {
     start('setReportsTo', { id: EMP, manager_id: BOSS });
     ctl.reply = { data: null, error: { message: 'EMP_BAD_MANAGER' } };
     const result = resume(owner);
     await result.consumeStream();
-    expect((ctl.answers[0] as { error: string }).error).toMatch(/would make a loop/);
+    expect((ctl.answers[0] as { error: string }).error).toBe(
+      "That person cannot be this employee's manager: it would make a loop, or they are no longer in this workspace.",
+    );
   });
 
   it('refuses a manager who is no employee here, and an employee reporting to themselves, before any call', async () => {

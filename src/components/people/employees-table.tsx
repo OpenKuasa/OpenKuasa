@@ -155,7 +155,7 @@ export function EmployeesTable({
   /** The reporting line, a separate request: only run when it changed, so a phone-number edit never takes its lock. */
   async function lineStep(id: string, managerId: string | null): Promise<StepResult> {
     const res = await setReportsToAction({ id, manager_id: managerId });
-    return res.ok ? { ok: true } : { ok: false, error: reportsToRefusal(res.error, managerId ?? '', employees) };
+    return res.ok ? { ok: true } : { ok: false, error: reportsToRefusal(res.error, id, managerId ?? '', employees) };
   }
 
   /** Saves in SAVE_ORDER (details, the reporting line when it changed, each changed entitlement), stopping at the first refusal. */

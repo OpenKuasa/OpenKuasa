@@ -136,9 +136,13 @@ export function reportsToProblem(employeeId: string | null, chosen: string, empl
   return name ? reportsToLoop(name) : REPORTS_TO_REFUSALS.EMP_BAD_MANAGER;
 }
 
-/** A refusal from setReportsToAction, worded for the form: the loop sentence gets the chosen manager's name. */
-export function reportsToRefusal(error: string, chosen: string, employees: Employee[]): string {
+/**
+ * A refusal from setReportsToAction, worded for the form. The database's bad-manager sentence is general (a loop, a
+ * manager gone, a chain too deep); only when the loaded rows themselves show a loop does it name the chosen manager.
+ */
+export function reportsToRefusal(error: string, employeeId: string, chosen: string, employees: Employee[]): string {
   if (error !== REPORTS_TO_REFUSALS.EMP_BAD_MANAGER) return error;
+  if (!chosen || !wouldLoop(employeeId, chosen, employees)) return error;
   const name = employees.find((e) => e.id === chosen)?.name;
   return name ? reportsToLoop(name) : error;
 }

@@ -3055,7 +3055,7 @@ export function createPeopleTools(
       inputSchema: setReportsToInput,
       execute: async (input) =>
         change('setReportsTo', async () => {
-          // The database answers the loop sentence for these two as well; say what is actually wrong, before any call.
+          // The database answers its general bad-manager sentence for these two as well; say what is actually wrong, before any call.
           if (input.manager_id === input.id) return { ok: false as const, error: 'An employee cannot report to themselves.' };
           if (input.manager_id !== null && !(await data.listEmployees()).some((e) => e.id === input.manager_id)) {
             return { ok: false as const, error: 'That manager was not found.' };

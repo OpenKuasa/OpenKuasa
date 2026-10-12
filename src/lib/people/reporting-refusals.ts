@@ -2,7 +2,8 @@
 export const REPORTS_TO_REFUSALS: Record<'EMP_NOT_ALLOWED' | 'EMP_NOT_FOUND' | 'EMP_BAD_MANAGER', string> = {
   EMP_NOT_ALLOWED: 'Only owners and admins can change who someone reports to.',
   EMP_NOT_FOUND: 'That employee was not found.',
-  EMP_BAD_MANAGER: 'That would make a loop: that person already reports to this employee, directly or through others.',
+  // The database raises this for a loop, a manager gone from the workspace and a chain too deep: true for each.
+  EMP_BAD_MANAGER: "That person cannot be this employee's manager: it would make a loop, or they are no longer in this workspace.",
 };
 
 /** The loop refusal with the chosen manager's name, for the form, which knows it. */
