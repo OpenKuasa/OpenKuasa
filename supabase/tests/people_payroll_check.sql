@@ -1018,12 +1018,19 @@ begin
   if n <> 1 then fails := array_append(fails, 'a refused undo changed the paid run'); end if;
 
   -- ---- deleting an employee ---------------------------------------------------------------
-  -- With a paid payslip: refused, for the admin through the API and for the
-  -- database owner alike. With only a draft payslip: gone, and the payslip too.
+  -- The admin deletes through hr_delete_employee, the one way a signed-in user
+  -- has (a direct delete is refused before any rule is asked: no DELETE grant).
+  -- With a paid payslip: refused, for the admin through the function and for
+  -- the database owner alike. With only a draft payslip: gone, and the payslip too.
   perform set_config('request.jwt.claims', json_build_object('sub', admin_id, 'role', 'authenticated', 'aal', 'aal1')::text, true);
   set local role authenticated;
   begin
-    delete from public.hr_employees where id = ea;
+    delete from public.hr_employees where id = ex;
+    fails := array_append(fails, 'the admin deleted an employee directly, not through hr_delete_employee');
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.hr_delete_employee(org, ea);
     fails := array_append(fails, 'the admin deleted an employee who has a paid payslip');
   exception when others then
     if sqlerrm <> 'HR_EMPLOYEE_HAS_PAID_PAYSLIPS' then
@@ -1031,9 +1038,9 @@ begin
     end if;
   end;
   begin
-    delete from public.hr_employees where id = ex;
-    get diagnostics n = row_count;
-    if n <> 1 then fails := array_append(fails, 'the admin could not delete an employee who has only a draft payslip'); end if;
+    if public.hr_delete_employee(org, ex) ->> 'id' is distinct from ex::text then
+      fails := array_append(fails, 'the admin could not delete an employee who has only a draft payslip');
+    end if;
   exception when others then
     fails := array_append(fails, 'deleting an employee with only a draft payslip was refused with: ' || sqlerrm);
   end;

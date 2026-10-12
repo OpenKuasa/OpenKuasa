@@ -264,11 +264,16 @@ describe('createEmployee', () => {
       'hr_employees.select': { data: [] },
       'hr_employees.insert': { data: saved },
       'hr_employee_private.insert': { error: { code: '42501', message: 'permission denied' } },
+      'rpc.hr_delete_employee': { data: { id: EMP, name: 'Farah Idris', document_paths: [] } },
     });
     const result = await createEmployee(ctxOf(client), { name: 'Farah Idris', private: { base_salary: 3000 } });
     expect(result).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
-    const undo = calls.find((c) => c.table === 'hr_employees' && c.op === 'delete')!;
-    expect(undo.filters).toEqual({ id: EMP, org_id: ORG });
+    // Through the function, never a delete on the table: signed-in users hold no DELETE on hr_employees.
+    expect(calls.filter((c) => c.op === 'delete')).toEqual([]);
+    const undo = calls.filter((c) => c.op === 'rpc');
+    expect(undo).toHaveLength(1);
+    expect(undo[0]).toMatchObject({ fn: 'hr_delete_employee', args: { p_org: ORG, p_employee: EMP } });
+    expect(calls.at(-1)).toBe(undo[0]);
   });
 
   it('names the clash when the employee number or email is taken', async () => {
@@ -542,7 +547,7 @@ describe('ids and bad input', () => {
       'hr_employees.select': { data: [] },
       'hr_employees.insert': { data: saved },
       'hr_employee_private.insert': { error: { code: '42501', message: 'permission denied' } },
-      'hr_employees.delete': { error: { code: '57014', message: 'canceling statement' } },
+      'rpc.hr_delete_employee': { error: { code: '57014', message: 'canceling statement' } },
     });
     const result = await createEmployee(ctxOf(client), { name: 'Farah Idris', private: { base_salary: 3000 } });
     expect(result).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
@@ -550,5 +555,19 @@ describe('ids and bad input', () => {
     expect(logged).toContain('rollback');
     expect(logged).toContain('57014');
     expect(logged).not.toContain('3000');
+  });
+  it('logs it when the rollback of a half-made employee removes nothing', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { client } = fakeSupabase({
+      'hr_employees.select': { data: [] },
+      'hr_employees.insert': { data: saved },
+      'hr_employee_private.insert': { error: { code: '42501', message: 'permission denied' } },
+      'rpc.hr_delete_employee': { data: null },
+    });
+    const result = await createEmployee(ctxOf(client), { name: 'Farah Idris', private: { base_salary: 3000 } });
+    expect(result).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
+    const rollback = log.mock.calls.filter((c) => String(c[0]).includes('rollback'));
+    expect(rollback).toHaveLength(1);
+    expect(JSON.stringify(rollback)).toContain('the employee was not removed');
   });
 });

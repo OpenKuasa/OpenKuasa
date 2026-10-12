@@ -86,6 +86,11 @@ begin
   into j, ctx from pg_policies p where p.schemaname = 'storage' and p.tablename = 'objects'
     and (p.policyname like 'hr\_document%' or p.qual like '%hr-documents%' or p.with_check like '%hr-documents%');
   if i <> 1 or j <> 3 or ctx <> '3' then fails := fails || format('the hr-documents bucket (%s of 1) or its policies (%s, %s as expected, of 3) are not as expected', i, j, ctx); end if;
+  -- An employee is deleted through hr_delete_employee only: signed-in users hold no DELETE on the table, and still add and edit.
+  if has_table_privilege('authenticated', 'public.hr_employees', 'DELETE') or has_table_privilege('anon', 'public.hr_employees', 'DELETE')
+     or not has_table_privilege('authenticated', 'public.hr_employees', 'INSERT') or not has_any_column_privilege('authenticated', 'public.hr_employees', 'UPDATE') then
+    fails := fails || 'signed-in users should add and edit employees directly and delete them only through hr_delete_employee'::text;
+  end if;
   if cardinality(fails) > 0 then raise exception 'the functions, grants, policies and bucket are not as expected, so nothing else was tried'; end if;
 
   execute $f$
@@ -547,7 +552,13 @@ begin
     || pg_temp.x(own, 'the owner deletes one with 200 documents, one of them a file', format('jsonb_array_length(hr_delete_employee(%L,%L) -> ''document_paths'')', org, ec), '=1')
     || pg_temp.x(own, 'the owner deletes one with a paid payslip', format('hr_delete_employee(%L,%L)', org, ep), 'HR_EMPLOYEE_HAS_PAID_PAYSLIPS')
     || pg_temp.v('who is still there, the file not released', format('select (select count(*) from public.hr_documents where employee_id = %L) || ''/'' || (select count(*) from private.hr_released_documents where path = %L)', ep, fp), '1/0')
-    || pg_temp.d(adm, 'the admin deletes an employee as the app deployed before did', format('delete from public.hr_employees where id = %L', eb), 'ok');
+    -- No way around the function: a direct delete is refused for the owner and the admin alike, and nobody went.
+    || pg_temp.d(adm, 'the admin deletes an employee directly, not through the function', format('delete from public.hr_employees where id = %L', eb), 'denied')
+    || pg_temp.d(own, 'the owner deletes an employee directly, not through the function', format('delete from public.hr_employees where id = %L', eb), 'denied')
+    || pg_temp.d(own, 'the owner deletes every employee directly', 'delete from public.hr_employees', 'denied')
+    || pg_temp.v('who is left after the direct deletes', format('select count(*) from public.hr_employees where id in (%L, %L)', eb, ep), '2')
+    || pg_temp.x(own, 'the owner deletes that employee through the function', format('hr_delete_employee(%L,%L) ->> ''id''', org, eb), format('="%s"', eb))
+    || pg_temp.v('who then is gone', format('select count(*) from public.hr_employees where id = %L', eb), '0');
 
   -- 8. no direct writes, for anyone
   foreach t in array tabs || array['hr_released_documents'] loop

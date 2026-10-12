@@ -341,9 +341,12 @@ export async function createEmployee(
       .from('hr_employee_private')
       .insert({ ...priv, employee_id: saved.id, org_id: ctx.orgId });
     if (privateError) {
-      // Two tables, no transaction: take the employee back out so nothing is left half-made.
-      const undo = await ctx.client.from('hr_employees').delete().eq('id', saved.id).eq('org_id', ctx.orgId);
+      // Two tables, no transaction: take the employee back out so nothing is left half-made. Through the
+      // function, as every delete of an employee is: signed-in users hold no DELETE on the table.
+      const undo = await ctx.client.rpc('hr_delete_employee', { p_org: ctx.orgId, p_employee: saved.id });
       if (undo.error) writeFailed('createEmployee (rollback)', undo.error);
+      // null: the function deleted nothing, so the employee is still there.
+      else if (!undo.data) writeFailed('createEmployee (rollback)', { message: 'the employee was not removed' });
       return writeFailed('createEmployee (private details)', privateError);
     }
   }

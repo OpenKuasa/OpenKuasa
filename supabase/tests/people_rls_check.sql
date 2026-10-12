@@ -5,7 +5,9 @@
 -- member reads their own review only once it is released, an announcement
 -- only once it is published, and no read mark but their own. Since the
 -- letters and documents slice a letter's type is one of a fixed list, and
--- letter templates are for owners and admins only. Read the message:
+-- letter templates are for owners and admins only. Since
+-- 20261103090000_people_employee_delete_by_function.sql an employee is deleted
+-- through hr_delete_employee only: a direct delete is refused. Read the message:
 --   PEOPLE_RLS_CHECK PASSED ...   or   PEOPLE_RLS_CHECK FAILED: <what went wrong>
 -- When not to run it. It rebuilds the demo HR rows inside its transaction and
 -- holds them until the rollback, and the scheduled demo reseed commits the
@@ -29,6 +31,7 @@ declare
   outsider uuid := gen_random_uuid();
   e1 uuid;
   e2 uuid;
+  e3 uuid;
   run_id uuid := gen_random_uuid();       -- last month's run, paid
   draft_run uuid := gen_random_uuid();    -- this month's run, still a draft
   this_month date := date_trunc('month', current_date)::date;
@@ -137,6 +140,29 @@ begin
       fails := array_append(fails, format('%s is meant to be read-only this slice but has a write grant', t));
     end if;
   end loop;
+
+  -- ---- the three tables written directly: which writes, exactly ----------
+  -- Departments and private details are added, edited and deleted directly by
+  -- an owner or admin. An employee is added and edited directly, but deleted
+  -- only through hr_delete_employee (which releases their document files):
+  -- signed-in users hold no DELETE on hr_employees. Its write policy stays,
+  -- being the rule for adding and editing too.
+  foreach t in array core loop
+    if not has_table_privilege('authenticated', 'public.' || t, 'INSERT')
+       or not has_any_column_privilege('authenticated', 'public.' || t, 'UPDATE')
+       or has_table_privilege('authenticated', 'public.' || t, 'DELETE') <> (t <> 'hr_employees') then
+      fails := array_append(fails, format('signed-in users do not hold exactly the direct writes meant on %s (insert, update, and delete everywhere but on hr_employees)', t));
+    end if;
+    select count(*) into n from pg_policies p
+    where p.schemaname = 'public' and p.tablename = t and p.policyname = t || '_write' and p.cmd = 'ALL'
+      and p.permissive = 'PERMISSIVE' and p.roles = array['authenticated']::name[]
+      and p.qual like '%is_org_admin(org_id)%' and p.with_check like '%is_org_admin(org_id)%';
+    if n <> 1 then fails := array_append(fails, format('%s does not have its owner-and-admin write policy', t)); end if;
+  end loop;
+  if not has_function_privilege('authenticated', 'public.hr_delete_employee(uuid,uuid)', 'execute')
+     or has_function_privilege('anon', 'public.hr_delete_employee(uuid,uuid)', 'execute') then
+    fails := array_append(fails, 'hr_delete_employee is not for signed-in users only');
+  end if;
 
   -- ---- the statutory rules: the same for every workspace, read-only ------
   select count(*) into n from pg_policies p
@@ -312,11 +338,22 @@ begin
   execute format('update public.hr_employee_private set base_salary_cents = 1 where employee_id = %L', e1);
   get diagnostics n = row_count;
   if n <> 0 then fails := array_append(fails, 'a member changed their own salary'); end if;
-  execute format('delete from public.hr_employees where id = %L', e2);
-  get diagnostics n = row_count;
-  if n <> 0 then fails := array_append(fails, 'a member deleted a colleague'); end if;
+  -- Nobody signed in deletes an employee directly; the function answers a member with null.
+  begin
+    execute format('delete from public.hr_employees where id = %L', e2);
+    get diagnostics n = row_count;
+    fails := array_append(fails, format('a member''s direct delete of a colleague was not refused (%s rows went)', n));
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    if public.hr_delete_employee(org, e2) is not null then fails := array_append(fails, 'a member deleted a colleague through hr_delete_employee'); end if;
+  exception when others then
+    fails := array_append(fails, 'a member calling hr_delete_employee was answered with: ' || sqlerrm);
+  end;
 
   reset role;
+  select count(*) into n from public.hr_employees where id in (e1, e2);
+  if n <> 2 then fails := array_append(fails, format('%s of the 2 employees are left after a member tried to delete one', n)); end if;
 
   -- ---- as the admin ----------------------------------------------------
   perform set_config('request.jwt.claims', json_build_object('sub', admin_id, 'role', 'authenticated', 'aal', 'aal1')::text, true);
@@ -337,6 +374,42 @@ begin
   execute format('select count(*) from public.hr_announcements where org_id = %L', org) into n;
   select count(*) into n2 from public.hr_announcement_reads;
   if n <> 2 or n2 <> 1 then fails := array_append(fails, format('the admin reads %s announcements and %s read marks, expected 2 and their own 1', n, n2)); end if;
+  -- The admin adds and edits an employee directly, and deletes one only through
+  -- hr_delete_employee: a direct delete is refused, whoever sends it. With a
+  -- paid payslip the function refuses too, with the payroll slice's code.
+  begin
+    execute format('insert into public.hr_employees (org_id, employee_no, name) values (%L, ''E3'', ''Short Stay'') returning id', org) into e3;
+    execute format('update public.hr_employees set designation = ''Temp'' where id = %L', e3);
+    get diagnostics n = row_count;
+    if n <> 1 then fails := array_append(fails, 'the admin could not edit an employee directly'); end if;
+  exception when others then
+    fails := array_append(fails, 'the admin adding and editing an employee directly was refused with: ' || sqlerrm);
+  end;
+  begin
+    execute format('delete from public.hr_employees where id = %L', e3);
+    get diagnostics n = row_count;
+    fails := array_append(fails, format('the admin''s direct delete of an employee was not refused (%s rows went)', n));
+  exception when insufficient_privilege then null;
+  end;
+  execute format('select count(*) from public.hr_employees where id = %L', e3) into n;
+  if n <> 1 then fails := array_append(fails, 'the employee is gone after a refused direct delete'); end if;
+  begin
+    perform public.hr_delete_employee(org, e1);
+    fails := array_append(fails, 'the admin deleted an employee who has a paid payslip through hr_delete_employee');
+  exception when others then
+    if sqlerrm <> 'HR_EMPLOYEE_HAS_PAID_PAYSLIPS' then
+      fails := array_append(fails, 'hr_delete_employee on an employee with a paid payslip was refused with: ' || sqlerrm);
+    end if;
+  end;
+  begin
+    if public.hr_delete_employee(org, e3) ->> 'id' is distinct from e3::text then
+      fails := array_append(fails, 'hr_delete_employee did not answer the admin with the employee it deleted');
+    end if;
+  exception when others then
+    fails := array_append(fails, 'the admin deleting an employee through hr_delete_employee was refused with: ' || sqlerrm);
+  end;
+  execute format('select count(*) from public.hr_employees where org_id = %L', org) into n;
+  if n <> 2 then fails := array_append(fails, format('%s employees are left after the admin deleted the third through hr_delete_employee, expected 2', n)); end if;
   reset role;
 
   -- ---- as the owner of another workspace -------------------------------
@@ -348,7 +421,17 @@ begin
   end loop;
   select count(*) into n from public.hr_announcement_reads;
   if n <> 0 then fails := array_append(fails, format('another workspace reads %s read marks', n)); end if;
+  -- Nor does it delete an employee here: under this workspace's name or its own.
+  begin
+    if public.hr_delete_employee(org, e2) is not null or public.hr_delete_employee(other_org, e2) is not null then
+      fails := array_append(fails, 'another workspace''s owner deleted an employee through hr_delete_employee');
+    end if;
+  exception when others then
+    fails := array_append(fails, 'another workspace''s owner calling hr_delete_employee was answered with: ' || sqlerrm);
+  end;
   reset role;
+  select count(*) into n from public.hr_employees where id in (e1, e2);
+  if n <> 2 then fails := array_append(fails, format('%s of the 2 employees are left after another workspace tried to delete one', n)); end if;
 
   -- ---- a member who is removed loses their own rows at once -------------
   delete from public.org_members where org_id = org and user_id = m1;
