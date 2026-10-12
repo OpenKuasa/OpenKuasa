@@ -5,6 +5,17 @@ import type { ZodType } from 'zod';
 import { can } from '@/lib/auth/permissions';
 import { getViewer } from '@/lib/auth/viewer';
 import {
+  BANK_ACCOUNT_MESSAGES,
+  changesOpeningBalance,
+  createBankAccount,
+  createBankAccountInput,
+  setBankAccountActive,
+  setBankAccountActiveInput,
+  setsOpeningBalance,
+  updateBankAccount,
+  updateBankAccountInput,
+} from '@/lib/finance/bank-accounts';
+import {
   BILL_MESSAGES,
   type BillDetail,
   type SaveAndPostResult,
@@ -266,6 +277,24 @@ const PRODUCT_PATHS = ['/finance/products'];
 // Chart of Accounts shows each account's balance, Journals lists the manual entries beside them and Reports
 // works the statements out of every line. So every list below that belongs to such an action ends with these three.
 const LEDGER_PATHS = ['/finance/chart-of-accounts', '/finance/journals', '/finance/reports'];
+// A bank or cash account is on Banking, and in the account picker of every form that records money: the payment forms on
+// Supplier Bills, Payments Out, Invoices and Payments In, the refund forms on Credit Notes and Refunds, and the
+// receipt form on Cash Receipts. A new, renamed, archived or restored account must appear, change or go there.
+// Cash Receipts and Payment Vouchers also name each movement's account. The two ledger screens end the list: each
+// bank or cash account has a ledger account that is renamed and archived with it, and an opening balance is an
+// entry in the books.
+const BANK_ACCOUNT_PATHS = [
+  '/finance/banking',
+  '/finance/supplier-bills',
+  '/finance/payments-out',
+  '/finance/invoices',
+  '/finance/payments-in',
+  '/finance/credit-notes',
+  '/finance/refunds',
+  '/finance/cash-receipts',
+  '/finance/payment-vouchers',
+  ...LEDGER_PATHS,
+];
 // A bill or a payment changes what is owed, which Customers & Suppliers shows as Payable. A payment to a
 // supplier is also a voucher: Payment Vouchers lists every movement of money out.
 const PURCHASE_PATHS = [
@@ -439,6 +468,43 @@ export async function setProductActiveAction(input: unknown) {
 }
 export async function deleteProductAction(input: unknown) {
   return run(PRODUCT_PATHS, deleteProductInput, input, deleteProduct);
+}
+
+/* ---- bank and cash accounts (Banking) ---------------------------------- */
+
+// Not the chart of accounts: a ledger account is created, changed and archived by the actions further down
+// (createAccountAction and its neighbours, from ledger.ts), which are an owner's or admin's altogether.
+
+/**
+ * Guard → parse → write → refresh for the two account forms. Anyone who may write adds and changes an account;
+ * an opening balance is an owner's or admin's, and `opening` says whether the parsed input carries one. Someone
+ * who may not is told so before anything is written. The database refuses the same thing (FIN14).
+ */
+async function runBankAccount<I, O>(
+  schema: ZodType<I>,
+  input: unknown,
+  fn: (ctx: FinanceWriteContext, parsed: I) => Promise<FinResult<O>>,
+  opening: (parsed: I) => boolean,
+): Promise<FinResult<O>> {
+  const access = await writeAccess();
+  if (!access) return FORBIDDEN;
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: firstMessage(parsed.error) };
+  if (opening(parsed.data) && !access.signOff) return { ok: false, error: BANK_ACCOUNT_MESSAGES.needsSignOff };
+  const result = await fn(access.ctx, parsed.data);
+  refresh(BANK_ACCOUNT_PATHS);
+  return result;
+}
+
+export async function createBankAccountAction(input: unknown) {
+  return runBankAccount(createBankAccountInput, input, createBankAccount, setsOpeningBalance);
+}
+export async function updateBankAccountAction(input: unknown) {
+  return runBankAccount(updateBankAccountInput, input, updateBankAccount, changesOpeningBalance);
+}
+/** Archives or restores an account. The database refuses an archive while money is still to be paid from it. */
+export async function setBankAccountActiveAction(input: unknown) {
+  return run(BANK_ACCOUNT_PATHS, setBankAccountActiveInput, input, setBankAccountActive);
 }
 
 /* ---- supplier bills ---------------------------------------------------- */
