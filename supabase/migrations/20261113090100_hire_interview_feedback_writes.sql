@@ -1,4 +1,4 @@
--- supabase/migrations/20261111090100_hire_interview_feedback_writes.sql
+-- supabase/migrations/20261113090100_hire_interview_feedback_writes.sql
 -- Lekir slice 4b, part 2 of 2: a recruiter can record feedback on a completed
 -- interview, replace it and clear it. Two functions are the only way: members
 -- still have select only on hire_interviews. Each answers with a word and
@@ -6,7 +6,7 @@
 -- that has feedback is not marked as scheduled again.
 --
 -- Safe to run again: it holds only "create or replace function", revokes and
--- grants. The columns these functions use are added in 20261111090000.
+-- grants. The columns these functions use are added in 20261113090000.
 -- Do not run 20261107090100_hire_interviews_writes.sql again after this file: it would put back
 -- the earlier hire_reopen_interview, which does not know about feedback.
 

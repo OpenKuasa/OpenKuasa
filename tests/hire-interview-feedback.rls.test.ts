@@ -4,8 +4,8 @@
 // hire_save_interview_feedback and hire_clear_interview_feedback, and of the one rule 4b adds to 4a's
 // hire_reopen_interview. Needs NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY and
 // SUPABASE_SERVICE_ROLE_KEY; without all three every case is skipped.
-// WRITTEN, NOT YET RUN: it fails until 20261111090000_hire_interview_feedback_columns.sql and
-// 20261111090100_hire_interview_feedback_writes.sql are applied.
+// WRITTEN, NOT YET RUN: it fails until 20261113090000_hire_interview_feedback_columns.sql and
+// 20261113090100_hire_interview_feedback_writes.sql are applied.
 //
 // The cases are numbered as in the design's section 10, "Database, live" (1 to 15). Cases 16 and 17 are added:
 // `mark_completed` for an interview that is already completed, and the reads the app makes (the list a screen and
