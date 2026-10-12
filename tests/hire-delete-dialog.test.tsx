@@ -182,12 +182,16 @@ describe('a talent pool row', () => {
   const pool: PoolModel = {
     isEmpty: false,
     size: 1,
-    rows: [{ id: CANDIDATE, name: 'Aina Rahman', title: 'Barista', skills: ['POS'], location: 'Klang', source: 'Referral', rating: 4, status: 'Available' }],
+    rows: [{ id: CANDIDATE, name: 'Aina Rahman', title: 'Barista', skills: ['POS'], location: 'Klang', source: 'Referral', rating: 4, status: 'Available', poolStatus: 'available' }],
     statusCounts: [
       { key: 'Available', value: 1 }, { key: 'Shortlisted', value: 0 }, { key: 'Passive', value: 0 }, { key: 'Re-engaged', value: 0 },
     ],
     byTitle: [{ label: 'Barista', value: 1 }],
     bySource: [{ label: 'Referral', value: 1 }],
+    jobs: [],
+    search: null,
+    matched: 1,
+    readCapped: false,
   };
   beforeEach(() => {
     mocks.pool = pool;

@@ -4,7 +4,7 @@ const env = vi.hoisted(() => ({ hasEnv: true, org: { orgId: 'o1', role: 'member'
 vi.mock('@/lib/auth/viewer', () => ({ hasSupabaseEnv: () => env.hasEnv }));
 vi.mock('@/lib/auth/current-org', () => ({ getCurrentOrg: async () => env.org }));
 
-import { getHireData } from '@/lib/hire/supabase';
+import { getHireData, readPoolStatus } from '@/lib/hire/supabase';
 
 const asked: { table: string; columns: string; org: unknown; orderBy?: string; ascending?: boolean }[] = [];
 const ROWS: Record<string, unknown[]> = {
@@ -155,5 +155,35 @@ describe('getHireData', () => {
       const { client } = settingsClient({ data: null, error: new Error('boom') });
       await expect((await getHireData(client)).getSettings()).rejects.toThrow('boom');
     });
+  });
+});
+
+describe('readPoolStatus', () => {
+  const ID = '44444444-4444-4444-8444-444444444444';
+  /** A client that records the one read and answers it. */
+  const fake = (answer: { data: unknown; error: unknown }) => {
+    const seen: { table?: string; columns?: string; filters: Record<string, unknown> } = { filters: {} };
+    const chain = {
+      select: (columns: string) => { seen.columns = columns; return chain; },
+      eq: (key: string, value: unknown) => { seen.filters[key] = value; return chain; },
+      maybeSingle: async () => answer,
+    };
+    return { client: { from: (table: string) => { seen.table = table; return chain; } } as never, seen };
+  };
+  it('reads the one column of the one row, inside the workspace', async () => {
+    const f = fake({ data: { pool_status: 'passive' }, error: null });
+    expect(await readPoolStatus(f.client, 'org1', ID)).toBe('passive');
+    expect(f.seen).toEqual({ table: 'hire_candidates', columns: 'pool_status', filters: { org_id: 'org1', id: ID } });
+  });
+  it('answers null for a row that is not there, and for something that is not an id, without reading', async () => {
+    expect(await readPoolStatus(fake({ data: null, error: null }).client, 'org1', ID)).toBeNull();
+    for (const odd of [undefined, null, '', 7]) {
+      const f = fake({ data: { pool_status: 'passive' }, error: null });
+      expect(await readPoolStatus(f.client, 'org1', odd)).toBeNull();
+      expect(f.seen.table).toBeUndefined();
+    }
+  });
+  it('throws on a failed read, so the caller refuses rather than guesses', async () => {
+    await expect(readPoolStatus(fake({ data: null, error: { code: '57014' } }).client, 'org1', ID)).rejects.toEqual({ code: '57014' });
   });
 });

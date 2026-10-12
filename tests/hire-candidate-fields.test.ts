@@ -125,7 +125,7 @@ describe('CV_UPLOADS_REFUSED', () => {
 describe('addedMessage', () => {
   const base = { name: 'Aina', job: null, candidate: 'created', application: 'none' } as const;
   it('says each of the five results', () => {
-    expect(addedMessage(base)).toBe('Added Aina.');
+    expect(addedMessage(base)).toBe('Added Aina to the talent pool as Available.');
     expect(addedMessage({ ...base, job: 'Barista', application: 'created' })).toBe('Added Aina and an application for Barista.');
     expect(addedMessage({ ...base, job: 'Barista', candidate: 'existing', application: 'created' }))
       .toBe('Aina was already on file; added an application for Barista.');
@@ -134,7 +134,7 @@ describe('addedMessage', () => {
     expect(addedMessage({ ...base, candidate: 'existing' })).toBe('Aina is already on file. Nothing was changed.');
   });
   it('appends the CV sentence when a file was not attached', () => {
-    expect(addedMessage(base, true)).toBe('Added Aina. The CV could not be attached.');
-    expect(addedMessage(base, false)).toBe('Added Aina.');
+    expect(addedMessage(base, true)).toBe('Added Aina to the talent pool as Available. The CV could not be attached.');
+    expect(addedMessage(base, false)).toBe('Added Aina to the talent pool as Available.');
   });
 });

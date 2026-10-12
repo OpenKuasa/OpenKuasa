@@ -15,9 +15,11 @@ import {
 import type { RejectReason } from './application-changes';
 import { ago } from './dashboard';
 import { applicantsByJob, applicationsPerWeek } from './overview';
+import { POOL_LABEL, matchesPoolSearch, poolSearchText, type InPool } from './pool';
 import { ringgit } from './public-careers';
 import {
   APPLICATION_STAGES,
+  HIRE_READ_CAP,
   type Application,
   type ApplicationOutcome,
   type ApplicationStage,
@@ -48,9 +50,6 @@ const KIND_LABEL: Record<InterviewKind, 'Video' | 'Onsite' | 'Phone'> = {
 };
 const INTERVIEW_STATUS_LABEL: Record<InterviewStatus, 'Scheduled' | 'Completed' | 'Cancelled' | 'No-show'> = {
   scheduled: 'Scheduled', completed: 'Completed', cancelled: 'Cancelled', no_show: 'No-show',
-};
-const POOL_LABEL: Record<Exclude<PoolStatus, 'none'>, 'Available' | 'Passive' | 'Re-engaged'> = {
-  available: 'Available', passive: 'Passive', re_engaged: 'Re-engaged',
 };
 
 // A fixed list: a locale's own short month names vary ("Sep" or "Sept").
@@ -193,8 +192,8 @@ export type BoardModel = {
     name: string;
     /** Live applications in this stage, over all applications (the list below is cut at ROWS_SHOWN). */
     count: number;
-    /** `id` is the application's; `candidateId` the person's, for the Edit candidate form. No contact details. */
-    candidates: ({ id: string; candidateId: string; name: string; role: string; source: string; lastTouch: string; active: boolean } & ApplicationState)[];
+    /** `id` is the application's; `candidateId` the person's, for the Edit candidate form; `poolStatus` their stored talent pool status. No contact details. */
+    candidates: ({ id: string; candidateId: string; poolStatus?: PoolStatus; name: string; role: string; source: string; lastTouch: string; active: boolean } & ApplicationState)[];
   }[];
   /** The jobs a new application can be for (open and paused), by title: the Add Candidate form's picker. */
   jobs: { id: string; title: string }[];
@@ -222,6 +221,7 @@ export async function buildBoardModel(data: HireData, now: Date): Promise<BoardM
       candidates: groups[key].slice(0, ROWS_SHOWN).map((a) => ({
         id: a.id,
         candidateId: a.candidate_id,
+        poolStatus: a.candidate_pool_status ?? 'none',
         name: a.candidate_name,
         role: a.job_title,
         source: a.source ?? 'Unknown',
@@ -288,7 +288,7 @@ export type ApplicationsModel = {
   total: number;
   rows: ({
     /** `id` is the application's; `candidateId` the person's, for the Edit candidate form. */
-    id: string; candidateId: string; name: string; job: string; source: string; status: ApplicationLabel; applied: string;
+    id: string; candidateId: string; poolStatus?: PoolStatus; name: string; job: string; source: string; status: ApplicationLabel; applied: string;
     details: ApplicationDetails | null;
   } & ApplicationState)[];
   statusMix: { key: ApplicationLabel; value: number }[];
@@ -304,6 +304,7 @@ export async function buildApplicationsModel(data: HireData): Promise<Applicatio
     rows: labelled.slice(0, ROWS_SHOWN).map(({ a, status }) => ({
       id: a.id,
       candidateId: a.candidate_id,
+      poolStatus: a.candidate_pool_status ?? 'none',
       name: a.candidate_name,
       job: a.job_title,
       source: a.source ?? 'Unknown',
@@ -372,10 +373,13 @@ export async function buildInterviewsModel(data: HireData, now: Date): Promise<I
 
 export type PoolModel = {
   isEmpty: boolean;
+  /** Everyone in the pool, whatever is being searched for. */
   size: number;
   rows: {
     id: string; name: string; title: string; skills: string[]; location: string; source: string;
     rating: number | null; status: 'Available' | 'Shortlisted' | 'Passive' | 'Re-engaged';
+    /** The stored status, which the row's menu shows and changes. `status` is the label drawn. */
+    poolStatus: InPool;
   }[];
   /** The whole pool by status: always the four keys, in this order. */
   statusCounts: { key: 'Available' | 'Shortlisted' | 'Passive' | 'Re-engaged'; value: number }[];
@@ -383,6 +387,14 @@ export type PoolModel = {
   byTitle: { label: string; value: number }[];
   /** The whole pool by source, largest first. */
   bySource: { label: string; value: number }[];
+  /** The jobs a pool member can be moved to (open and paused), by title: the Move to pipeline dialog's picker. */
+  jobs: { id: string; title: string; status: 'open' | 'paused' }[];
+  /** The text the rows were searched for, or null. */
+  search: string | null;
+  /** How many pool members fit the search, before the cut to ROWS_SHOWN. The pool's size when nothing is searched for. */
+  matched: number;
+  /** True when the read came back with its full HIRE_READ_CAP candidates: an older pool member may be missing. */
+  readCapped: boolean;
 };
 
 /** Groups `items` by `pick`, largest group first (ties keep first-seen order). */
@@ -392,8 +404,14 @@ function tally<T>(items: T[], pick: (item: T) => string): { label: string; value
   return [...counts.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
 }
 
-export async function buildPoolModel(data: HireData): Promise<PoolModel> {
-  const [candidates, apps] = await Promise.all([data.listCandidates(), data.listApplications()]);
+/**
+ * The talent pool. `search` (from the page's address) is applied to the WHOLE
+ * pool and only then are the rows cut to ROWS_SHOWN: that is what makes every
+ * pool member reachable by name. The size, the status counts and the two
+ * tallies are always figures for the whole pool.
+ */
+export async function buildPoolModel(data: HireData, search?: string | null): Promise<PoolModel> {
+  const [candidates, apps, jobs] = await Promise.all([data.listCandidates(), data.listApplications(), data.listJobs()]);
   const pool = candidates.filter((c) => c.pool_status !== 'none');
   // "Shortlisted": has a live application at interview or beyond. Best rating across their applications.
   const shortlisted = new Set<string>();
@@ -403,12 +421,15 @@ export async function buildPoolModel(data: HireData): Promise<PoolModel> {
     if (a.rating !== null) rating.set(a.candidate_id, Math.max(rating.get(a.candidate_id) ?? 0, a.rating));
   }
   const statusOf = (c: (typeof pool)[number]) =>
-    shortlisted.has(c.id) ? ('Shortlisted' as const) : POOL_LABEL[c.pool_status as Exclude<PoolStatus, 'none'>];
+    shortlisted.has(c.id) ? ('Shortlisted' as const) : POOL_LABEL[c.pool_status as InPool];
   const STATUS_KEYS = ['Available', 'Shortlisted', 'Passive', 'Re-engaged'] as const;
+  const text = poolSearchText(search);
+  // Before the cut, over everyone in the pool that was read.
+  const matches = text === null ? pool : pool.filter((c) => matchesPoolSearch(c, text));
   return {
     isEmpty: pool.length === 0,
     size: pool.length,
-    rows: pool.slice(0, ROWS_SHOWN).map((c) => ({
+    rows: matches.slice(0, ROWS_SHOWN).map((c) => ({
       id: c.id,
       name: c.name,
       title: c.headline ?? '—',
@@ -417,9 +438,37 @@ export async function buildPoolModel(data: HireData): Promise<PoolModel> {
       source: c.source ?? 'Unknown',
       rating: rating.get(c.id) ?? null,
       status: statusOf(c),
+      poolStatus: c.pool_status as InPool,
     })),
     statusCounts: STATUS_KEYS.map((key) => ({ key, value: pool.filter((c) => statusOf(c) === key).length })),
     byTitle: tally(pool, (c) => c.headline ?? '—'),
     bySource: tally(pool, (c) => c.source ?? 'Unknown'),
+    jobs: jobs
+      .flatMap((job) => (job.status === 'open' || job.status === 'paused' ? [{ id: job.id, title: job.title, status: job.status }] : []))
+      .sort((a, b) => a.title.localeCompare(b.title)),
+    search: text,
+    matched: matches.length,
+    readCapped: candidates.length >= HIRE_READ_CAP,
+  };
+}
+
+/** One person the "Add to Pool" picker can offer: who they are, and nothing to contact them by. */
+export type PickerPerson = {
+  id: string; name: string; headline: string | null; location: string | null; skills: string[]; source: string | null;
+};
+export type PoolPicker = {
+  people: PickerPerson[];
+  /** True when the read came back with its full HIRE_READ_CAP candidates: someone added long ago may be missing. */
+  capped: boolean;
+};
+
+/** Everyone on file who is not in the pool, newest on file first. Each field is named: an email or a phone can never ride along. */
+export async function buildPoolPicker(data: HireData): Promise<PoolPicker> {
+  const candidates = await data.listCandidates();
+  return {
+    people: candidates
+      .filter((c) => c.pool_status === 'none')
+      .map((c) => ({ id: c.id, name: c.name, headline: c.headline, location: c.location, skills: c.skills, source: c.source })),
+    capped: candidates.length >= HIRE_READ_CAP,
   };
 }

@@ -33,6 +33,7 @@ import {
   updateCandidateInput,
   attachCandidateCv,
   deleteApplication, deleteApplicationInput, deleteCandidate, deleteCandidateInput, deletionSummary, deletionSummaryInput,
+  setPoolStatus, setPoolStatusInput, moveToPipeline, moveToPipelineInput,
   type HireWriteContext,
 } from '@/lib/hire/capabilities';
 import type { Job } from '@/lib/hire/types';
@@ -877,7 +878,7 @@ describe('addCandidate', () => {
   });
   it('still answers ok with the typed name when a read-back fails or finds nothing', async () => {
     expect(await addCandidate(candFake({ answer: ADDED, name: null }).ctx, { name: 'Aina' })).toMatchObject({
-      ok: true, data: { name: 'Aina', message: 'Added Aina.' },
+      ok: true, data: { name: 'Aina', message: 'Added Aina to the talent pool as Available.' },
     });
     expect(await addCandidate(candFake({ answer: ADDED, readThrows: true }).ctx, { name: 'Aina' })).toMatchObject({
       ok: true, data: { name: 'Aina' },
@@ -1177,6 +1178,188 @@ describe('deletionSummary', () => {
     expect(spy).toHaveBeenLastCalledWith('[hire-capability] deletionSummary failed:', { code: 'PGRST301' });
     expect(await deletionSummary(summaryFake({}, true).ctx, { kind: 'application', id: APP_ID })).toEqual({ ok: false, error: FAILED });
     expect(spy).toHaveBeenLastCalledWith('[hire-capability] deletionSummary failed:', { code: 'TypeError' });
+    spy.mockRestore();
+  });
+});
+
+// ─── the talent pool ─────────────────────────────────────────────────────────
+
+describe('pool schemas', () => {
+  it('refuse a missing or malformed id and a status outside the four', () => {
+    expect(setPoolStatusInput.safeParse({ status: 'available' }).success).toBe(false);
+    expect(setPoolStatusInput.safeParse({ id: 'nope', status: 'available' }).success).toBe(false);
+    expect(setPoolStatusInput.safeParse({ id: CAND_ID }).success).toBe(false);
+    for (const status of ['shortlisted', 'Available', '', null]) {
+      expect(setPoolStatusInput.safeParse({ id: CAND_ID, status }).success, String(status)).toBe(false);
+    }
+    for (const status of ['available', 'passive', 're_engaged', 'none']) {
+      expect(setPoolStatusInput.safeParse({ id: CAND_ID, status }).success, status).toBe(true);
+    }
+    expect(setPoolStatusInput.safeParse({ id: CAND_ID, status: 'available', only_if_outside: 'yes' }).success).toBe(false);
+    expect(moveToPipelineInput.safeParse({ id: CAND_ID }).success).toBe(false);
+    expect(moveToPipelineInput.safeParse({ id: CAND_ID, job_id: 'nope' }).success).toBe(false);
+    expect(moveToPipelineInput.safeParse({ id: 'nope', job_id: JOB_ID }).success).toBe(false);
+    expect(moveToPipelineInput.safeParse({ id: CAND_ID, job_id: JOB_ID }).success).toBe(true);
+  });
+  it('convert to JSON Schema, describe every field and carry no workspace key', () => {
+    for (const schema of [setPoolStatusInput, moveToPipelineInput]) {
+      expect(() => z.toJSONSchema(schema)).not.toThrow();
+      for (const [key, field] of Object.entries(schema.shape)) {
+        expect(key).not.toMatch(/org|tenant|workspace/i);
+        expect((field as z.ZodType).description, key).toBeTruthy();
+      }
+    }
+  });
+  it('drop a key they do not know, so a workspace named by the caller goes nowhere', () => {
+    expect(setPoolStatusInput.parse({ id: CAND_ID, status: 'passive', org_id: 'evil' })).toEqual({ id: CAND_ID, status: 'passive' });
+    expect(moveToPipelineInput.parse({ id: CAND_ID, job_id: JOB_ID, org_id: 'evil' })).toEqual({ id: CAND_ID, job_id: JOB_ID });
+  });
+  it('tell the model what each status means, and when to set the switch', () => {
+    const status = setPoolStatusInput.shape.status.description ?? '';
+    expect(status).toContain('open to hearing about a role now');
+    expect(status).toContain('none removes them from the pool; they stay on file');
+    expect(setPoolStatusInput.shape.only_if_outside.description).toBe(
+      'Set true when ADDING someone to the pool: it is then refused, changing nothing, if they are already in it. '
+      + 'Leave out when changing the status of someone already in the pool, or removing them.',
+    );
+    expect(setPoolStatusInput.shape.id.description).toBe('The candidate\'s id, from listCandidates or listTalentPool.');
+    expect(moveToPipelineInput.shape.job_id.description).toBe('The job to add an application for, from listJobs. It must be open or paused.');
+  });
+});
+
+describe('setPoolStatus', () => {
+  const OK = { word: 'ok', from: 'none', to: 'available' };
+  it('sends exactly the SQL argument names, and the switch as a real boolean', async () => {
+    const add = candFake({ answer: OK });
+    await setPoolStatus(add.ctx, { id: CAND_ID, status: 'available', only_if_outside: true });
+    expect(add.calls).toEqual([{ fn: 'hire_set_pool_status', args: { p_candidate_id: CAND_ID, p_status: 'available', p_only_if_outside: true } }]);
+    const change = candFake({ answer: { word: 'ok', from: 'available', to: 'passive' } });
+    await setPoolStatus(change.ctx, { id: CAND_ID, status: 'passive' });
+    expect(change.calls[0].args).toEqual({ p_candidate_id: CAND_ID, p_status: 'passive', p_only_if_outside: false });
+  });
+  it('never sends a workspace the caller named', async () => {
+    const f = candFake({ answer: OK });
+    await setPoolStatus(f.ctx, { id: CAND_ID, status: 'available', org_id: 'evil' } as never);
+    expect(JSON.stringify(f.calls)).not.toContain('evil');
+  });
+  it('refuses a bad input without calling the database', async () => {
+    const f = candFake();
+    expect((await setPoolStatus(f.ctx, { id: CAND_ID, status: 'shortlisted' } as never)).ok).toBe(false);
+    expect((await setPoolStatus(f.ctx, { id: 'nope', status: 'available' })).ok).toBe(false);
+    expect(f.calls).toEqual([]);
+  });
+  it('answers with the name, where they were, where they are now and the sentence', async () => {
+    const f = candFake({ answer: OK, name: 'Aina Rahman' });
+    expect(await setPoolStatus(f.ctx, { id: CAND_ID, status: 'available', only_if_outside: true })).toEqual({
+      ok: true,
+      data: { id: CAND_ID, name: 'Aina Rahman', from: 'none', to: 'available', message: 'Added Aina Rahman to the talent pool as Available.' },
+    });
+    expect(f.reads).toEqual([{ table: 'hire_candidates', filters: { id: CAND_ID, org_id: ORG } }]);
+    expect(await setPoolStatus(candFake({ answer: { word: 'ok', from: 'available', to: 'passive' } }).ctx, { id: CAND_ID, status: 'passive' }))
+      .toMatchObject({ ok: true, data: { from: 'available', to: 'passive', message: 'Aina is now marked Passive.' } });
+    expect(await setPoolStatus(candFake({ answer: { word: 'ok', from: 'passive', to: 'none' } }).ctx, { id: CAND_ID, status: 'none' }))
+      .toMatchObject({ ok: true, data: { to: 'none', message: 'Removed Aina from the talent pool. They are still on file.' } });
+  });
+  it('is still a success when the name cannot be read back, or the answer says nothing of where they were', async () => {
+    expect(await setPoolStatus(candFake({ answer: OK, readThrows: true }).ctx, { id: CAND_ID, status: 'available', only_if_outside: true }))
+      .toEqual({ ok: true, data: { id: CAND_ID, name: '', from: 'none', to: 'available', message: 'Added to the talent pool as Available.' } });
+    expect(await setPoolStatus(candFake({ answer: OK, name: null }).ctx, { id: CAND_ID, status: 'available' })).toMatchObject({ ok: true, data: { name: '' } });
+    // No `from` in the answer: an add was an add, anything else says only where they are now.
+    expect(await setPoolStatus(candFake({ answer: { word: 'ok' } }).ctx, { id: CAND_ID, status: 'passive', only_if_outside: true }))
+      .toMatchObject({ ok: true, data: { from: 'none', to: 'passive', message: 'Added Aina to the talent pool as Passive.' } });
+    expect(await setPoolStatus(candFake({ answer: { word: 'ok' } }).ctx, { id: CAND_ID, status: 'passive' }))
+      .toMatchObject({ ok: true, data: { from: null, to: 'passive', message: 'Aina is now marked Passive.' } });
+  });
+  it('maps each refusal word to its sentence, with the name and the status where the sentence has them', async () => {
+    const cases: [unknown, Record<string, unknown>, string][] = [
+      [{ word: 'not_found' }, { status: 'passive' }, 'That candidate could not be found.'],
+      [{ word: 'forbidden' }, { status: 'passive' }, 'You do not have permission to make changes here.'],
+      [{ word: 'invalid_status' }, { status: 'passive' }, 'Choose Available, Passive or Re-engaged.'],
+      [{ word: 'already_in_pool', from: 'passive' }, { status: 'available', only_if_outside: true }, 'Aina is already in the talent pool as Passive. Nothing was changed.'],
+      [{ word: 'same_status', from: 'passive' }, { status: 'passive' }, 'Aina is already marked Passive. Nothing was changed.'],
+      [{ word: 'same_status', from: 'none' }, { status: 'none' }, 'Aina is not in the talent pool. Nothing was changed.'],
+      // The answer left `from` out: the status that was asked for is the one they have.
+      [{ word: 'same_status' }, { status: 're_engaged' }, 'Aina is already marked Re-engaged. Nothing was changed.'],
+      [{ word: 'surprise' }, { status: 'passive' }, GENERIC_SENTENCE],
+      [null, { status: 'passive' }, GENERIC_SENTENCE],
+    ];
+    for (const [answer, input, sentence] of cases) {
+      expect(await setPoolStatus(candFake({ answer }).ctx, { id: CAND_ID, ...input } as never), JSON.stringify(answer)).toEqual({ ok: false, error: sentence });
+    }
+  });
+  it('gives the generic sentence and logs only a code on an rpc error and on a throw', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const e = await setPoolStatus(candFake({ error: { code: '42501', message: 'Aina secret', details: CAND_ID } }).ctx, { id: CAND_ID, status: 'passive' });
+    expect(e).toEqual({ ok: false, error: GENERIC_SENTENCE });
+    expect(spy).toHaveBeenCalledWith('[hire-capability] setPoolStatus failed:', { code: '42501' });
+    await setPoolStatus(candFake({ throws: new TypeError('Aina fetch failed') }).ctx, { id: CAND_ID, status: 'passive' });
+    expect(spy).toHaveBeenLastCalledWith('[hire-capability] setPoolStatus failed:', { code: 'TypeError' });
+    expect(JSON.stringify(spy.mock.calls)).not.toMatch(/Aina|55555555/);
+    spy.mockRestore();
+  });
+});
+
+describe('moveToPipeline', () => {
+  const MOVED = { word: 'ok', application_id: APP_ID, from: 'available', to: 're_engaged' };
+  it('sends exactly the SQL argument names', async () => {
+    const f = candFake({ answer: MOVED });
+    await moveToPipeline(f.ctx, { id: CAND_ID, job_id: JOB_ID });
+    expect(f.calls).toEqual([{ fn: 'hire_move_to_pipeline', args: { p_candidate_id: CAND_ID, p_job_id: JOB_ID } }]);
+  });
+  it('refuses a bad input without calling the database', async () => {
+    const f = candFake();
+    expect((await moveToPipeline(f.ctx, { id: CAND_ID, job_id: 'nope' })).ok).toBe(false);
+    expect(f.calls).toEqual([]);
+  });
+  it('answers with the person, the job, the new application and the sentence', async () => {
+    const f = candFake({ answer: MOVED, name: 'Aina Rahman', title: 'Barista' });
+    expect(await moveToPipeline(f.ctx, { id: CAND_ID, job_id: JOB_ID })).toEqual({
+      ok: true,
+      data: {
+        id: CAND_ID, name: 'Aina Rahman', application_id: APP_ID, job_id: JOB_ID, job: 'Barista', from: 'available', to: 're_engaged',
+        message: 'Aina Rahman now has an application for Barista at Applied, and is marked Re-engaged.',
+      },
+    });
+    expect(f.reads).toEqual([
+      { table: 'hire_candidates', filters: { id: CAND_ID, org_id: ORG } },
+      { table: 'hire_jobs', filters: { id: JOB_ID, org_id: ORG } },
+    ]);
+  });
+  it('is still a success when nothing can be read back', async () => {
+    expect(await moveToPipeline(candFake({ answer: MOVED, readThrows: true }).ctx, { id: CAND_ID, job_id: JOB_ID })).toEqual({
+      ok: true,
+      data: {
+        id: CAND_ID, name: '', application_id: APP_ID, job_id: JOB_ID, job: null, from: 'available', to: 're_engaged',
+        message: 'Added an application for the job at Applied, and marked them Re-engaged.',
+      },
+    });
+    expect(await moveToPipeline(candFake({ answer: { word: 'ok' } }).ctx, { id: CAND_ID, job_id: JOB_ID }))
+      .toMatchObject({ ok: true, data: { application_id: null, from: null, to: 're_engaged' } });
+  });
+  it('maps each refusal word to its sentence', async () => {
+    const cases: [unknown, string][] = [
+      [{ word: 'not_found' }, 'That candidate could not be found.'],
+      [{ word: 'forbidden' }, 'You do not have permission to make changes here.'],
+      [{ word: 'job_not_found' }, 'That job could not be found.'],
+      [{ word: 'job_not_open' }, 'Only an open or paused job can take a new application.'],
+      [{ word: 'not_in_pool' }, 'Aina is not in the talent pool. Add them to the pool first.'],
+      [{ word: 'already_applied', application_id: APP_ID, outcome: 'active' }, 'Aina has already applied for Barista. Nothing was changed.'],
+      [{ word: 'already_applied', application_id: APP_ID, outcome: 'rejected' }, 'Aina already has a rejected application for Barista. Reopen it from Applications. Nothing was changed.'],
+      [{ word: 'already_applied', application_id: APP_ID, outcome: 'withdrawn' }, 'Aina already has a withdrawn application for Barista. Reopen it from Applications. Nothing was changed.'],
+      [{ word: 'surprise' }, GENERIC_SENTENCE],
+      [null, GENERIC_SENTENCE],
+    ];
+    for (const [answer, sentence] of cases) {
+      expect(await moveToPipeline(candFake({ answer }).ctx, { id: CAND_ID, job_id: JOB_ID }), JSON.stringify(answer)).toEqual({ ok: false, error: sentence });
+    }
+  });
+  it('gives the generic sentence and logs only a code on an rpc error and on a throw', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await moveToPipeline(candFake({ error: { code: '40P01', message: 'Aina deadlock' } }).ctx, { id: CAND_ID, job_id: JOB_ID }))
+      .toEqual({ ok: false, error: GENERIC_SENTENCE });
+    expect(spy).toHaveBeenCalledWith('[hire-capability] moveToPipeline failed:', { code: '40P01' });
+    await moveToPipeline(candFake({ throws: new TypeError('Aina fetch failed') }).ctx, { id: CAND_ID, job_id: JOB_ID });
+    expect(spy).toHaveBeenLastCalledWith('[hire-capability] moveToPipeline failed:', { code: 'TypeError' });
     spy.mockRestore();
   });
 });

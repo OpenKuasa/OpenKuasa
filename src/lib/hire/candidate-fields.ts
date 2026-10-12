@@ -121,7 +121,10 @@ export function addedMessage(
   } else if (application === 'existing') {
     text = `${name} has already applied for ${title}. Nothing was changed.`;
   } else {
-    text = candidate === 'created' ? `Added ${name}.` : `${name} is already on file. Nothing was changed.`;
+    // A new person saved with no job goes into the talent pool; one already on file is left as they are.
+    text = candidate === 'created'
+      ? `Added ${name} to the talent pool as Available.`
+      : `${name} is already on file. Nothing was changed.`;
   }
   return cvNotAttached ? `${text} The CV could not be attached.` : text;
 }

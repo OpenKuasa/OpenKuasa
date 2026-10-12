@@ -74,6 +74,12 @@ export type Application = {
   candidate_name: string;
   /** The job's title, joined in by the provider. */
   job_title: string;
+  /**
+   * The person's talent pool status, joined in by the provider (`none`: not in the pool). Optional so an
+   * application written out by hand in a test still type-checks; both providers always fill it, and a
+   * missing value is read as `none`.
+   */
+  candidate_pool_status?: PoolStatus;
   stage: ApplicationStage;
   outcome: ApplicationOutcome;
   /** Why it was rejected, when a reason was given. */
@@ -130,6 +136,11 @@ export type HireData = {
    * holds every row in memory (the sample data) may leave it out: the lists are then used.
    */
   namesakes?(kind: 'application' | 'candidate', id: unknown): Promise<Namesakes>;
+  /**
+   * One candidate's stored talent pool status, read by id; null when the row is not there. A provider that holds
+   * every row in memory (the sample data) may leave it out: the candidates list is then used.
+   */
+  poolStatusOf?(id: unknown): Promise<PoolStatus | null>;
 };
 
 /** A candidate or an application as an approval card may need to describe it, to tell it from another of the same name. */

@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildApplicationsModel,
+  buildPoolPicker,
   buildBoardModel,
   buildCareersModel,
   buildInterviewsModel,
@@ -446,6 +447,116 @@ describe('talent pool', () => {
     expect(byId.unrated).toBeNull();
     expect(byId.interviewee).toBeNull();
   });
+  it('carries the stored status beside the label, so a Shortlisted row can still show and change it', async () => {
+    const byId = Object.fromEntries((await buildPoolModel(small)).rows.map((r) => [r.id, [r.status, r.poolStatus]]));
+    expect(byId).toMatchObject({
+      interviewee: ['Shortlisted', 'available'], offered: ['Shortlisted', 'passive'], hiree: ['Shortlisted', 're_engaged'],
+      rejected: ['Passive', 'passive'], rated: ['Available', 'available'],
+    });
+  });
+
+  it('carries the open and paused jobs, by title, each with its status', async () => {
+    const job = (id: string, title: string, status: Job['status']): Job => ({
+      id, title, department: null, location: null, employment_type: 'full_time', status,
+      description: null, salary_min_cents: null, salary_max_cents: null, show_salary: false, closes_on: null,
+      work_arrangement: null, headcount: 1, opened_at: null, closed_at: null, created_at: '2026-10-01T00:00:00Z',
+    });
+    const model = await buildPoolModel({
+      ...small,
+      listJobs: async () => [job('j3', 'Cashier', 'paused'), job('j1', 'Barista', 'open'), job('j2', 'Baker', 'closed'), job('j4', 'Driver', 'draft')],
+    });
+    expect(model.jobs).toEqual([{ id: 'j1', title: 'Barista', status: 'open' }, { id: 'j3', title: 'Cashier', status: 'paused' }]);
+    expect((await buildPoolModel(small)).jobs).toEqual([]);
+  });
+
+  describe('search', () => {
+    /** `n` pool members, newest first as the provider gives them; the last is the one put on file longest ago. */
+    const person = (id: string, over: Partial<Candidate> = {}): Candidate => ({
+      id, name: `Person ${id}`, email: `${id}@example.com`, phone: '+60 12-000 0000', headline: 'Sales Executive', location: 'Kuala Lumpur',
+      skills: ['Excel'], source: 'LinkedIn', pool_status: 'available', created_at: '2026-01-01T00:00:00Z', ...over,
+    });
+    const sixty = [
+      ...Array.from({ length: 59 }, (_, i) => person(`p${i + 1}`)),
+      person('oldest', { name: 'Zarina binti Hashim', headline: 'Warehouse Supervisor', location: 'Klang', source: 'Referral', skills: ['Forklift'], pool_status: 'passive' }),
+    ];
+    const big: HireData = { ...EMPTY, listCandidates: async () => [person('outsider', { name: 'Zarina Outside', pool_status: 'none' }), ...sixty] };
+
+    it('with no search draws the newest 50 and says so; the oldest member is not among them', async () => {
+      const model = await buildPoolModel(big);
+      expect(model).toMatchObject({ size: 60, matched: 60, search: null, readCapped: false });
+      expect(model.rows).toHaveLength(50);
+      expect(model.rows.map((r) => r.id)).not.toContain('oldest');
+      // A blank search is no search.
+      for (const blank of ['', '   ', null, undefined]) expect((await buildPoolModel(big, blank)).search).toBeNull();
+    });
+    it('finds the oldest member by name, though they are not among the 50 drawn', async () => {
+      const model = await buildPoolModel(big, 'zarina binti hashim');
+      expect(model.rows.map((r) => r.id)).toEqual(['oldest']);
+      expect(model).toMatchObject({ matched: 1, search: 'zarina binti hashim', size: 60 });
+    });
+    it('matches the headline, the location, the source and one skill, in any letter case, ignoring spaces around the text', async () => {
+      for (const text of ['warehouse', 'KLANG', 'referral', 'forklift', '  Zarina  ']) {
+        expect((await buildPoolModel(big, text)).rows.map((r) => r.id), text).toEqual(['oldest']);
+      }
+      expect((await buildPoolModel(big, '  Zarina  ')).search).toBe('Zarina');
+    });
+    it('never matches someone who is not in the pool', async () => {
+      const model = await buildPoolModel(big, 'zarina');
+      expect(model.rows.map((r) => r.id)).toEqual(['oldest']);
+      expect(model.matched).toBe(1);
+    });
+    it('draws 50 of 59 matches and reports 59', async () => {
+      const model = await buildPoolModel(big, 'person');
+      expect(model.rows).toHaveLength(50);
+      expect(model.matched).toBe(59);
+      expect(model.rows[0].id).toBe('p1');
+    });
+    it('gives no rows and a count of 0 when nobody matches', async () => {
+      const model = await buildPoolModel(big, 'nobody-at-all');
+      expect(model).toMatchObject({ rows: [], matched: 0, search: 'nobody-at-all', isEmpty: false, size: 60 });
+    });
+    it('leaves the size, the status counts and the two tallies as figures for the whole pool', async () => {
+      const whole = await buildPoolModel(big);
+      const searched = await buildPoolModel(big, 'zarina');
+      for (const key of ['size', 'statusCounts', 'byTitle', 'bySource', 'isEmpty'] as const) expect(searched[key], key).toEqual(whole[key]);
+    });
+    it('cuts a search of more than 80 characters', async () => {
+      expect((await buildPoolModel(big, 'z'.repeat(200))).search).toHaveLength(80);
+    });
+    it('says when the read came back full, and not below that', async () => {
+      const full: HireData = { ...EMPTY, listCandidates: async () => Array.from({ length: 1000 }, (_, i) => person(`c${i}`, { pool_status: 'none' })) };
+      expect((await buildPoolModel(full)).readCapped).toBe(true);
+      const under: HireData = { ...EMPTY, listCandidates: async () => Array.from({ length: 999 }, (_, i) => person(`c${i}`, { pool_status: 'none' })) };
+      expect((await buildPoolModel(under)).readCapped).toBe(false);
+    });
+  });
+
+  describe('the picker\'s read', () => {
+    it('lists the people who are not in the pool, newest on file first, with no contact details', async () => {
+      const picker = await buildPoolPicker({
+        ...EMPTY,
+        listCandidates: async () => [
+          { ...cand('c1', 'none'), name: 'Kamal Ariffin', email: 'kamal@example.com', phone: '+60 12-345 6789', headline: 'Driver', location: 'Klang', skills: ['GDL'], source: 'Referral' },
+          cand('c2', 'passive'),
+          cand('c3', 'none'),
+        ],
+      });
+      expect(picker).toEqual({
+        people: [
+          { id: 'c1', name: 'Kamal Ariffin', headline: 'Driver', location: 'Klang', skills: ['GDL'], source: 'Referral' },
+          { id: 'c3', name: 'c3', headline: null, location: null, skills: [], source: null },
+        ],
+        capped: false,
+      });
+      expect(JSON.stringify(picker)).not.toMatch(/kamal@example\.com|345 6789|email|phone|pool_status/);
+    });
+    it('says when the read came back full', async () => {
+      const full = Array.from({ length: 1000 }, (_, i) => cand(`c${i}`, i % 2 ? 'none' : 'available'));
+      expect((await buildPoolPicker({ ...EMPTY, listCandidates: async () => full })).capped).toBe(true);
+      expect((await buildPoolPicker({ ...EMPTY, listCandidates: async () => full.slice(1) })).capped).toBe(false);
+      expect(await buildPoolPicker(EMPTY)).toEqual({ people: [], capped: false });
+    });
+  });
 });
 
 /** Every number inside a model, however deep. */
@@ -501,5 +612,31 @@ describe('an empty workspace', () => {
       expect(leaves.length).toBeGreaterThan(0);
       expect(leaves.every(Number.isFinite)).toBe(true);
     }
+  });
+});
+
+describe('the pool status of the person behind an application', () => {
+  const application = (id: string, over: Partial<Application>): Application => ({
+    id, candidate_id: `c-${id}`, job_id: 'j1', candidate_name: `Person ${id}`, job_title: 'Barista', stage: 'applied', outcome: 'active',
+    rating: null, source: null, applied_at: '2026-10-01T00:00:00Z', offered_at: null, hired_at: null, created_at: '2026-10-01T00:00:00Z',
+    cover_letter: null, cv_url: null, cv_path: null, portfolio_url: null, expected_salary_cents: null, consented_at: null, reject_reason: null, ...over,
+  });
+  const source: HireData = {
+    ...EMPTY,
+    listApplications: async () => [application('a1', { candidate_pool_status: 'passive' }), application('a2', { candidate_pool_status: 'none' }), application('a3', {})],
+  };
+  it('is on every Applications row and every board card; a row that does not say reads as not in the pool', async () => {
+    const rows = (await buildApplicationsModel(source)).rows.map((r) => [r.id, r.poolStatus]);
+    expect(rows).toEqual([['a1', 'passive'], ['a2', 'none'], ['a3', 'none']]);
+    const cards = (await buildBoardModel(source, NOW)).stages.flatMap((s) => s.candidates).map((c) => [c.id, c.poolStatus]);
+    expect(cards).toEqual([['a1', 'passive'], ['a2', 'none'], ['a3', 'none']]);
+  });
+  it('is filled by the sample data from its own candidates', async () => {
+    const seeded = createSeedHireData(NOW);
+    const people = new Map((await seeded.listCandidates()).map((c) => [c.id, c.pool_status]));
+    const apps = await seeded.listApplications();
+    expect(apps.length).toBeGreaterThan(0);
+    for (const a of apps) expect(a.candidate_pool_status, a.id).toBe(people.get(a.candidate_id));
+    expect(apps.some((a) => a.candidate_pool_status === 'available')).toBe(true);
   });
 });

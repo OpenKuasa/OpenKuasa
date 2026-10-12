@@ -9,12 +9,13 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { REJECT_REASONS, changeMessage, type RejectReason } from './application-changes';
 import { CANDIDATE_LIMITS, addedMessage, candidateMessage } from './candidate-fields';
+import { isInPool, isPoolStatus, movedMessage, poolChangedMessage, poolRefusal } from './pool';
 import {
   DELETE_FAILED, SUMMARY_FAILED, deletedMessage, deletionMessage, type DeletionKind, type Removal,
 } from './deletion';
 import {
   APPLICATION_STAGES, DEFAULT_HIRE_SETTINGS, JOB_COLUMNS, SETTINGS_COLUMNS,
-  type ApplicationOutcome, type ApplicationStage, type HireSettings, type Job, type JobStatus,
+  type ApplicationOutcome, type ApplicationStage, type HireSettings, type Job, type JobStatus, type PoolStatus,
 } from './types';
 
 export type HireWriteContext = { client: SupabaseClient; orgId: string };
@@ -884,4 +885,119 @@ export async function deletionSummary(
   } catch (error) {
     return summaryFailed(error);
   }
+}
+
+// ─── the talent pool (two database functions, called by rpc) ─────────────────
+
+const candidateId = () => z.string().uuid().describe('The candidate\'s id, from listCandidates or listTalentPool.');
+
+export const setPoolStatusInput = z.object({
+  id: candidateId(),
+  status: z.enum(['available', 'passive', 're_engaged', 'none']).describe(
+    'available: open to hearing about a role now. passive: not looking right now, worth keeping in touch for later. '
+    + 're_engaged: back in touch and put forward for a job again. none removes them from the pool; they stay on file.',
+  ),
+  only_if_outside: z.boolean().optional().describe(
+    'Set true when ADDING someone to the pool: it is then refused, changing nothing, if they are already in it. '
+    + 'Leave out when changing the status of someone already in the pool, or removing them.',
+  ),
+});
+export const moveToPipelineInput = z.object({
+  id: candidateId(),
+  job_id: z.string().uuid().describe('The job to add an application for, from listJobs. It must be open or paused.'),
+});
+
+/** What a pool status change did, and the sentence for it. `from` is null when the answer did not say where the person was. */
+export type PoolChange = { id: string; name: string; from: PoolStatus | null; to: PoolStatus; message: string };
+/** What a move to the pipeline did. `id` is the candidate's; the application is new. */
+export type MovedToPipeline = {
+  id: string;
+  name: string;
+  application_id: string | null;
+  job_id: string;
+  job: string | null;
+  from: PoolStatus | null;
+  to: 're_engaged';
+  message: string;
+};
+
+/** The words that need no name in their sentence: the person is not read for them. */
+const NAMELESS_REFUSALS = ['not_found', 'forbidden', 'invalid_status', 'job_not_found', 'job_not_open'];
+
+/**
+ * Sets one candidate's pool status: adds them (from none), changes it, or
+ * removes them (to none). The change is saved once the function says ok, so a
+ * name that cannot be read back still answers ok, with the name left out.
+ */
+export async function setPoolStatus(
+  ctx: HireWriteContext,
+  input: z.input<typeof setPoolStatusInput>,
+): Promise<CapResult<PoolChange>> {
+  const parsed = setPoolStatusInput.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+  const { id, status } = parsed.data;
+  const onlyIfOutside = parsed.data.only_if_outside === true;
+  let answer: unknown;
+  try {
+    const { data, error } = await ctx.client.rpc('hire_set_pool_status', {
+      p_candidate_id: id, p_status: status, p_only_if_outside: onlyIfOutside,
+    });
+    if (error) return changeFailed('setPoolStatus', error);
+    answer = data;
+  } catch (error) {
+    return changeFailed('setPoolStatus', error);
+  }
+  const word = wordOf(answer);
+  if (typeof word !== 'string' || NAMELESS_REFUSALS.includes(word)) return { ok: false, error: poolRefusal(word) };
+  const got = (answer && typeof answer === 'object' ? answer : {}) as { from?: unknown };
+  const name = (await readColumn(ctx, 'hire_candidates', 'name', id)) ?? '';
+  if (word !== 'ok') {
+    // "The status they already have" is the one that was asked for, when the answer does not say.
+    const from = isPoolStatus(got.from) ? got.from : word === 'same_status' ? status : undefined;
+    return { ok: false, error: poolRefusal(word, { name, from }) };
+  }
+  // Only what the answer says or the request itself implies: an add was from outside the pool.
+  const from: PoolStatus | null = isPoolStatus(got.from) ? got.from : onlyIfOutside ? 'none' : null;
+  return { ok: true, data: { id, name, from, to: status, message: poolChangedMessage(name, from, status) } };
+}
+
+/**
+ * Gives one pool member a new application at Applied for an open or paused
+ * job, and marks them Re-engaged. If they had already applied for that job the
+ * function changes nothing and the sentence says so.
+ */
+export async function moveToPipeline(
+  ctx: HireWriteContext,
+  input: z.input<typeof moveToPipelineInput>,
+): Promise<CapResult<MovedToPipeline>> {
+  const parsed = moveToPipelineInput.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+  const { id, job_id: jobId } = parsed.data;
+  let answer: unknown;
+  try {
+    const { data, error } = await ctx.client.rpc('hire_move_to_pipeline', { p_candidate_id: id, p_job_id: jobId });
+    if (error) return changeFailed('moveToPipeline', error);
+    answer = data;
+  } catch (error) {
+    return changeFailed('moveToPipeline', error);
+  }
+  const word = wordOf(answer);
+  if (typeof word !== 'string' || NAMELESS_REFUSALS.includes(word)) return { ok: false, error: poolRefusal(word) };
+  const got = (answer && typeof answer === 'object' ? answer : {}) as { application_id?: unknown; from?: unknown; outcome?: unknown };
+  const name = (await readColumn(ctx, 'hire_candidates', 'name', id)) ?? '';
+  const job = await readColumn(ctx, 'hire_jobs', 'title', jobId);
+  if (word !== 'ok') return { ok: false, error: poolRefusal(word, { name, job, outcome: got.outcome }) };
+  return {
+    ok: true,
+    data: {
+      id,
+      name,
+      application_id: typeof got.application_id === 'string' ? got.application_id : null,
+      job_id: jobId,
+      job,
+      from: isInPool(got.from) ? got.from : null,
+      to: 're_engaged',
+      message: movedMessage(name, job),
+    },
+  };
 }

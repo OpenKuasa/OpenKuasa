@@ -189,6 +189,7 @@ export function createSeedHireData(now: Date = new Date()): HireData {
       candidate_id: candidates[index].id,
       job_id: jobs[row.jobIndex].id,
       candidate_name: candidates[index].name,
+      candidate_pool_status: candidates[index].pool_status,
       job_title: jobs[row.jobIndex].title,
       stage: row.stage,
       outcome: row.outcome,

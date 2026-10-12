@@ -4,7 +4,7 @@ import { hasSupabaseEnv } from '@/lib/auth/viewer';
 import { readNamesakes } from './namesakes';
 import { createSeedHireData } from './seed';
 import { DEFAULT_HIRE_SETTINGS, HIRE_READ_CAP, JOB_COLUMNS, SETTINGS_COLUMNS } from './types';
-import type { Application, Candidate, HireData, HireSettings, Interview, Job } from './types';
+import type { Application, Candidate, HireData, HireSettings, Interview, Job, PoolStatus } from './types';
 
 /** The API answers with at most this many rows per request. */
 const PAGE_SIZE = HIRE_READ_CAP;
@@ -13,19 +13,36 @@ const CANDIDATE_COLUMNS = 'id,name,email,phone,headline,location,skills,source,p
 const APPLICATION_COLUMNS =
   'id,candidate_id,job_id,stage,outcome,reject_reason,rating,source,applied_at,offered_at,hired_at,created_at,' +
   'cover_letter,cv_url,cv_path,portfolio_url,expected_salary_cents,consented_at,' +
-  'candidate:hire_candidates(name),job:hire_jobs(title)';
+  'candidate:hire_candidates(name,pool_status),job:hire_jobs(title)';
 const INTERVIEW_COLUMNS =
   'id,application_id,scheduled_at,kind,interviewer_name,status,created_at,' +
   'application:hire_applications(candidate:hire_candidates(name),job:hire_jobs(title))';
 
 type Named = { name?: string | null } | null | undefined;
 type Titled = { title?: string | null } | null | undefined;
-type ApplicationRow = Omit<Application, 'candidate_name' | 'job_title'> & { candidate: Named; job: Titled };
+type Pooled = { name?: string | null; pool_status?: PoolStatus | null } | null | undefined;
+type ApplicationRow = Omit<Application, 'candidate_name' | 'job_title' | 'candidate_pool_status'> & { candidate: Pooled; job: Titled };
 type InterviewRow = Omit<Interview, 'candidate_name' | 'job_title'> & {
   application: { candidate: Named; job: Titled } | null;
 };
 
 const UNKNOWN = 'Unknown';
+
+/**
+ * One candidate's stored talent pool status, read by id with the member's own client (row-level security and the
+ * workspace filter apply). Null when the row is not there, or the id is not one. A failed query throws.
+ */
+export async function readPoolStatus(client: SupabaseClient, orgId: string, id: unknown): Promise<PoolStatus | null> {
+  if (typeof id !== 'string' || !id) return null;
+  const { data, error } = await client
+    .from('hire_candidates')
+    .select('pool_status')
+    .eq('org_id', orgId)
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as { pool_status: PoolStatus } | null)?.pool_status ?? null;
+}
 
 /**
  * RLS-scoped {@link HireData} over Supabase. Reads are filtered to `orgId` (the
@@ -56,6 +73,7 @@ export function createSupabaseHireData(client: SupabaseClient, orgId: string): H
         ({ candidate, job, ...row }) => ({
           ...row,
           candidate_name: candidate?.name ?? UNKNOWN,
+          candidate_pool_status: candidate?.pool_status ?? 'none',
           job_title: job?.title ?? UNKNOWN,
         }),
       ),
@@ -75,6 +93,7 @@ export function createSupabaseHireData(client: SupabaseClient, orgId: string): H
       return { org_id: orgId, ...DEFAULT_HIRE_SETTINGS, ...((data ?? {}) as Partial<HireSettings>) };
     },
     namesakes: (kind, id) => readNamesakes(client, orgId, kind, id),
+    poolStatusOf: (id) => readPoolStatus(client, orgId, id),
   };
 }
 
