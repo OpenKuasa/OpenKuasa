@@ -332,7 +332,7 @@ async function saveThenPost<I, O>(
  * One document with its lines, for a form that works on it in one status: a draft for an Edit form, a sent RFQ
  * for "Record prices", an approved purchase order for "Record delivery". A read, but only people who may edit
  * have a use for it. A document that has gone, or left that status since the list was loaded, answers with that
- * sentence and refreshes the list.
+ * sentence and refreshes the list. With `wanted` null any status will do: a document read only to copy from.
  */
 async function documentInStatus<D extends { display_status?: string; status?: string }>(
   paths: string[],
@@ -341,7 +341,7 @@ async function documentInStatus<D extends { display_status?: string; status?: st
   get: (ctx: FinanceWriteContext, id: string) => Promise<D | null>,
   messages: { gone: string; locked: string },
   label: 'bill' | 'invoice' | 'quotation' | 'RFQ' | 'purchase order',
-  wanted: string,
+  wanted: string | null,
 ): Promise<FinResult<D>> {
   const ctx = await writeCtx();
   if (!ctx) return FORBIDDEN;
@@ -350,11 +350,11 @@ async function documentInStatus<D extends { display_status?: string; status?: st
   try {
     const document = await get(ctx, parsed.data.id);
     // A bill, an invoice or a quotation has a display status; an RFQ or an order has only its stored one, and a draft is a draft in both.
-    if (document && (document.display_status ?? document.status) === wanted) return { ok: true, data: document };
+    if (document && (wanted === null || (document.display_status ?? document.status) === wanted)) return { ok: true, data: document };
     refresh(paths);
     return { ok: false, error: document ? messages.locked : messages.gone };
   } catch (error) {
-    console.error(`[finance] a ${wanted} ${label} could not be read:`, error);
+    console.error(`[finance] ${wanted === null ? 'a' : `a ${wanted}`} ${label} could not be read:`, error);
     return { ok: false, error: READ_FAILED };
   }
 }
@@ -545,6 +545,14 @@ export async function getRfqAction(input: unknown): Promise<FinResult<RfqDetail>
  */
 export async function getSentRfqAction(input: unknown): Promise<FinResult<RfqDetail>> {
   return documentInStatus(RFQ_PATHS, rfqIdInput, input, getRfq, RFQ_MESSAGES, 'RFQ', 'sent');
+}
+
+/**
+ * One RFQ with its lines, in whatever status, for New RFQ to copy to another supplier. Nothing is changed;
+ * `getRfqAction` and `getSentRfqAction` read one status each.
+ */
+export async function getRfqForCopyAction(input: unknown): Promise<FinResult<RfqDetail>> {
+  return documentInStatus(RFQ_PATHS, rfqIdInput, input, getRfq, RFQ_MESSAGES, 'RFQ', null);
 }
 
 /** Makes a draft purchase order from a quoted RFQ, and refreshes Purchase Orders as well. */

@@ -6,7 +6,7 @@
 import type { Slice } from '@/components/charts';
 import type { BillDisplayStatus, BillListRow } from './bills';
 import { toCsv } from './csv';
-import { rmShort } from './format';
+import { rm, rmShort } from './format';
 import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentMethod, type PaymentOutRow } from './money';
 import type { PurchaseOrderDelivery, PurchaseOrderListRow, PurchaseOrderStatus } from './purchase-orders';
 import type { RfqDisplayStatus, RfqListRow } from './rfqs';
@@ -225,6 +225,60 @@ export function alsoCovers(rows: PaymentOutRow[], row: PaymentOutRow): string {
   return alsoCoversSentence(siblingBills(rows, row));
 }
 
+/** What a payment's bills are checked against: the billing figures and flags of a purchase order. */
+export type OrderBilling = Pick<
+  PurchaseOrderListRow,
+  'id' | 'po_no' | 'total' | 'billed_total' | 'received_total' | 'over_billed' | 'billed_over_received'
+>;
+
+/**
+ * One sentence for each purchase order, among the ones these bills are raised against, that is billed for more
+ * than its total or for more than has arrived, in the order the bills come. When several of the bills belong to
+ * the same order the first is named and the rest counted. Advice only: it blocks nothing. An order that is not
+ * in `orders` (cancelled ones may not be passed) says nothing.
+ */
+export function orderNotesForBills(
+  bills: { bill_no: string | null; purchase_order_id: string | null }[],
+  orders: OrderBilling[],
+): string[] {
+  const byOrder = new Map<string, string[]>();
+  for (const bill of bills) {
+    if (bill.purchase_order_id === null) continue;
+    byOrder.set(bill.purchase_order_id, [...(byOrder.get(bill.purchase_order_id) ?? []), bill.bill_no ?? 'A draft bill']);
+  }
+  const notes: string[] = [];
+  for (const [orderId, names] of byOrder) {
+    const order = orders.find((o) => o.id === orderId);
+    if (!order || !(order.over_billed || order.billed_over_received)) continue;
+    const [first, ...others] = names;
+    const subject = others.length === 0 ? `${first} is` : `${first} and ${others.length} more are`;
+    const po = order.po_no ?? 'its purchase order';
+    notes.push(
+      order.over_billed
+        ? `${subject} against ${po}, whose bills come to ${rm(order.billed_total)}, over its total of ${rm(order.total)}.`
+        : `${subject} against ${po}, which is billed ${rm(order.billed_total)} with ${rm(order.received_total)} arrived so far.`,
+    );
+  }
+  return notes;
+}
+
+/** Payments that have not been paid yet: the ones a purchase-order warning is still useful on. */
+const NOT_YET_PAID: ReadonlySet<PaymentOutRow['status']> = new Set(['scheduled', 'pending_approval']);
+
+/**
+ * The rows (by allocation id) of payments still to be paid whose own bill is raised against a flagged purchase
+ * order. A payment over several bills is several rows; only the row of the bill that is flagged is marked.
+ */
+export function paymentRowsAgainstFlaggedOrders(
+  rows: PaymentOutRow[],
+  bills: { id: string; purchase_order_id: string | null }[],
+  orders: OrderBilling[],
+): Set<string> {
+  const flagged = new Set(orders.filter((o) => o.over_billed || o.billed_over_received).map((o) => o.id));
+  const flaggedBills = new Set(bills.filter((b) => b.purchase_order_id !== null && flagged.has(b.purchase_order_id)).map((b) => b.id));
+  return new Set(rows.filter((r) => NOT_YET_PAID.has(r.status) && flaggedBills.has(r.bill_id)).map((r) => r.allocation_id));
+}
+
 /** The payments table as a CSV file. Amounts are numbers, so a spreadsheet can add them up. */
 export function paymentsCsv(rows: PaymentOutRow[]): string {
   return toCsv(
@@ -272,26 +326,27 @@ export function filterRfqs(rows: RfqListRow[], query: string, filter: RfqFilter,
   });
 }
 
-export type RfqAction = 'edit' | 'send' | 'delete' | 'recordPrices' | 'convert' | 'close';
+export type RfqAction = 'edit' | 'send' | 'delete' | 'recordPrices' | 'convert' | 'copy' | 'close';
 
 /**
  * What an RFQ's row menu offers, in order: only what the database allows for
  * its status. A draft is edited, marked as sent or deleted. Once sent it is
  * locked, and only the supplier's answer is recorded (an overdue RFQ too:
  * a late reply is still a reply), or the RFQ is closed. A quoted RFQ becomes a
- * purchase order, unless one stands already, or is closed. A closed one offers
- * nothing.
+ * purchase order, unless one stands already, or is closed. Any RFQ, in any
+ * status, can be copied to another supplier: that opens a new RFQ and changes
+ * nothing here, so it comes before what ends or removes the RFQ.
  */
 export function rfqActions(row: RfqListRow): RfqAction[] {
   switch (row.status) {
     case 'draft':
-      return ['edit', 'send', 'delete'];
+      return ['edit', 'send', 'copy', 'delete'];
     case 'sent':
-      return ['recordPrices', 'close'];
+      return ['recordPrices', 'copy', 'close'];
     case 'quoted':
-      return row.purchase_order_id === null ? ['convert', 'close'] : ['close'];
+      return row.purchase_order_id === null ? ['convert', 'copy', 'close'] : ['copy', 'close'];
     default:
-      return [];
+      return ['copy'];
   }
 }
 

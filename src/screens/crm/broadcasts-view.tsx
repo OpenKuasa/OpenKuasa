@@ -1,8 +1,20 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useActionState, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Check, Copy, Download, FileText, Megaphone, Pencil, Plus, Trash2, Users } from 'lucide-react';
+import {
+  Check,
+  Copy,
+  Download,
+  FileText,
+  Megaphone,
+  Pencil,
+  Plus,
+  Send,
+  Settings,
+  Trash2,
+  Users,
+} from 'lucide-react';
 import { ScreenContainer } from '@/components/screen/screen-container';
 import { PageHeader } from '@/components/screen/page-header';
 import { BentoGrid, BentoCard, BentoStat } from '@/components/bento/bento';
@@ -23,6 +35,8 @@ import {
   AUDIENCE_STATUSES,
   AUDIENCE_STATUS_LABELS,
   BROADCAST_BODY_MAX,
+  BROADCAST_RECIPIENTS_MAX,
+  BROADCAST_STATUS_LABELS,
   BROADCAST_NAME_MAX,
   BROADCAST_SUBJECT_MAX,
   audienceFor,
@@ -35,10 +49,26 @@ import {
   type BroadcastAudience,
 } from '@/lib/crm/broadcasts';
 import { formatDay } from '@/lib/crm/deal-stats';
-import type { CrmFormAction } from '@/lib/crm/form-state';
+import type { CrmFormAction, CrmFormState } from '@/lib/crm/form-state';
+import { cn } from '@/lib/utils';
 import { useCrmForm } from './crm-form';
 
 type Actions = { save: CrmFormAction; remove: CrmFormAction };
+type KeyActions = { save: CrmFormAction; remove: CrmFormAction };
+type SendActions = { send: CrmFormAction; test: CrmFormAction };
+/** What members may know about the workspace's email key. */
+type EmailKey = { keyHint: string; senderEmail: string; senderName: string };
+
+/** Runs an action and keeps what it answered, so a success message can be shown as well as a refusal. */
+function useAnswer(action: CrmFormAction) {
+  const [state, formAction, pending] = useActionState<CrmFormState, FormData>(action, undefined);
+  return {
+    formAction,
+    pending,
+    error: state && !state.ok && !pending ? state.error : null,
+    message: state?.ok && !pending ? (state.message ?? null) : null,
+  };
+}
 
 /** How many recipients the form's preview names. */
 const PREVIEW_LISTED = 8;
@@ -90,10 +120,191 @@ function CopyMessageButton({ broadcast }: { broadcast: Broadcast }) {
   );
 }
 
+/** Owner and admin only: the workspace's Resend key and the sender its broadcasts go out as. */
+function EmailSettingsCard({
+  emailKey,
+  actions,
+  onClose,
+}: {
+  emailKey: EmailKey | null;
+  actions: KeyActions;
+  onClose: () => void;
+}) {
+  const save = useAnswer(actions.save);
+  const remove = useAnswer(actions.remove);
+  return (
+    <BentoCard
+      title="Email settings"
+      subtitle={
+        emailKey
+          ? `Sending as ${emailKey.senderName} <${emailKey.senderEmail}> with key ${emailKey.keyHint}`
+          : 'Connect your own Resend account to send broadcasts'
+      }
+      icon={FileText}
+      className="col-span-2 md:col-span-12"
+    >
+      <form action={save.formAction} className="grid gap-3 md:grid-cols-12">
+        <div className="space-y-1.5 md:col-span-4">
+          <Label htmlFor="email-key">Resend API key</Label>
+          <Input
+            id="email-key"
+            name="apiKey"
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder={emailKey ? `Saved (${emailKey.keyHint}). Enter a key to replace it.` : 're_…'}
+            aria-describedby="email-key-hint"
+            required
+          />
+          <p id="email-key-hint" className="text-xs text-muted-foreground">
+            Stored sealed on the server. It is never shown again, and emails are billed to your Resend account.
+          </p>
+        </div>
+        <div className="space-y-1.5 md:col-span-4">
+          <Label htmlFor="email-sender-name">Sender name</Label>
+          <Input
+            id="email-sender-name"
+            name="senderName"
+            placeholder="Rimba Ventures"
+            defaultValue={emailKey?.senderName}
+            maxLength={80}
+            required
+          />
+        </div>
+        <div className="space-y-1.5 md:col-span-4">
+          <Label htmlFor="email-sender-email">Sender email</Label>
+          <Input
+            id="email-sender-email"
+            name="senderEmail"
+            type="email"
+            placeholder="hello@yourdomain.com"
+            defaultValue={emailKey?.senderEmail}
+            aria-describedby="email-sender-hint"
+            required
+          />
+          <p id="email-sender-hint" className="text-xs text-muted-foreground">
+            On a domain you have verified with Resend.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 md:col-span-12">
+          <Button type="submit" disabled={save.pending}>
+            <Check className="size-4" />
+            {save.pending ? 'Checking…' : 'Save settings'}
+          </Button>
+          <Button type="button" variant="outline" onClick={onClose} disabled={save.pending}>
+            Close
+          </Button>
+          {save.error ? (
+            <p role="alert" className="text-sm text-destructive">
+              {save.error}
+            </p>
+          ) : null}
+          {save.message ? (
+            <p role="status" className="text-sm text-emerald-600">
+              {save.message}
+            </p>
+          ) : null}
+        </div>
+      </form>
+      {emailKey ? (
+        <form action={remove.formAction} className="mt-4 flex flex-wrap items-center gap-3 border-t pt-4">
+          <p className="min-w-0 flex-1 text-sm text-muted-foreground">
+            Removing the key stops broadcasts from being sent. Broadcasts already sent are kept.
+          </p>
+          {remove.error ? (
+            <p role="alert" className="text-sm text-destructive">
+              {remove.error}
+            </p>
+          ) : null}
+          <Button type="submit" variant="outline" size="sm" disabled={remove.pending}>
+            <Trash2 className="size-4 text-destructive" />
+            {remove.pending ? 'Removing…' : 'Remove key'}
+          </Button>
+        </form>
+      ) : null}
+    </BentoCard>
+  );
+}
+
+/** Replaces a broadcast's row while asking whether to really send it. */
+function SendBroadcastRow({
+  broadcast,
+  recipients,
+  emailKey,
+  testAddress,
+  actions,
+  colSpan,
+  onClose,
+}: {
+  broadcast: Broadcast;
+  /** How many it would go to as of this page; the server counts again when it sends. */
+  recipients: number;
+  emailKey: EmailKey;
+  testAddress: string | null;
+  actions: SendActions;
+  colSpan: number;
+  onClose: () => void;
+}) {
+  const send = useAnswer(actions.send);
+  const test = useAnswer(actions.test);
+  const tooMany = recipients > BROADCAST_RECIPIENTS_MAX;
+  const busy = send.pending || test.pending;
+  return (
+    <TableRow className="bg-primary/5 hover:bg-primary/5">
+      <TableCell colSpan={colSpan}>
+        <div className="space-y-3 py-2">
+          <p className="text-sm">
+            Send <span className="font-medium">{broadcast.name}</span> to about{' '}
+            <span className="font-medium">{people(recipients)}</span> as {emailKey.senderName} &lt;
+            {emailKey.senderEmail}&gt;? Each email carries an unsubscribe link. A send cannot be undone, and
+            the broadcast cannot be edited or sent again afterwards.
+          </p>
+          {tooMany ? (
+            <p className="text-sm text-destructive">
+              A broadcast can go to at most {BROADCAST_RECIPIENTS_MAX} recipients. Narrow the audience first.
+            </p>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-3">
+            <form action={send.formAction}>
+              <input type="hidden" name="broadcastId" value={broadcast.id} />
+              {/* The version on screen: the server refuses to send any other. */}
+              <input type="hidden" name="revision" value={broadcast.revision} />
+              <Button type="submit" size="sm" disabled={busy || tooMany || recipients === 0}>
+                <Send className="size-4" />
+                {send.pending ? 'Sending…' : `Send to ${people(recipients)}`}
+              </Button>
+            </form>
+            <form action={test.formAction}>
+              <input type="hidden" name="broadcastId" value={broadcast.id} />
+              <Button type="submit" variant="outline" size="sm" disabled={busy || !testAddress}>
+                {test.pending ? 'Sending test…' : testAddress ? `Send a test to ${testAddress}` : 'Send a test to me'}
+              </Button>
+            </form>
+            <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={busy}>
+              Cancel
+            </Button>
+          </div>
+          {send.error || test.error ? (
+            <p role="alert" className="text-sm text-destructive">
+              {send.error ?? test.error}
+            </p>
+          ) : null}
+          {test.message ? (
+            <p role="status" className="text-sm text-emerald-600">
+              {test.message}
+            </p>
+          ) : null}
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+}
+
 function BroadcastFormCard({
   action,
   editing,
   contacts,
+  optedOut,
   tagOptions,
   onSaved,
   onClose,
@@ -102,6 +313,7 @@ function BroadcastFormCard({
   /** The broadcast being edited; null to write a new one. */
   editing: Broadcast | null;
   contacts: AudienceContact[];
+  optedOut: ReadonlySet<string>;
   tagOptions: string[];
   onSaved: () => void;
   onClose: () => void;
@@ -113,7 +325,7 @@ function BroadcastFormCard({
   const [body, setBody] = useState(editing?.body ?? '');
   const [audience, setAudience] = useState<BroadcastAudience>(editing?.audience ?? { statuses: [], tags: [] });
 
-  const recipients = useMemo(() => audienceFor(contacts, audience), [contacts, audience]);
+  const recipients = useMemo(() => audienceFor(contacts, audience, optedOut), [contacts, audience, optedOut]);
   // A tag the broadcast was saved with stays ticked even if no contact carries it now.
   const tags = useMemo(() => {
     const known = new Set(tagOptions.map((tag) => tag.toLowerCase()));
@@ -262,7 +474,8 @@ function BroadcastFormCard({
             </p>
             {recipients.length === 0 ? (
               <p className="text-xs text-muted-foreground">
-                No contact matches. Archived contacts and contacts with no email are never included.
+                No contact matches. Archived contacts, contacts with no email and people who have
+                unsubscribed are never included.
               </p>
             ) : (
               <ul className="space-y-0.5 text-xs text-muted-foreground">
@@ -327,54 +540,99 @@ export function BroadcastsView({
   broadcasts,
   contacts,
   contactsComplete,
+  optOuts,
+  emailKey,
+  testAddress,
   actions,
+  keyActions,
+  sendActions,
 }: {
   broadcasts: Broadcast[];
   contacts: AudienceContact[];
   /** False when the workspace has more contacts than an audience is worked out over. */
   contactsComplete: boolean;
+  /** Addresses that have unsubscribed, lower case. */
+  optOuts: string[];
+  /** Null when the workspace has not connected an email key. */
+  emailKey: EmailKey | null;
+  /** Where "Send a test" goes: the signed-in person's own address. */
+  testAddress: string | null;
   /** Present only when the signed-in person may change broadcasts. */
   actions?: Actions;
+  /** Present only for an owner or admin. */
+  keyActions?: KeyActions;
+  sendActions?: SendActions;
 }) {
-  // One thing is open at a time: the form, or a delete question.
+  // One thing is open at a time: a form, the settings, or a question about one row.
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Broadcast | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [sendingId, setSendingId] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
+  const optedOut = useMemo(() => new Set(optOuts), [optOuts]);
   const tagOptions = useMemo(() => audienceTagOptions(contacts), [contacts]);
-  const everyone = useMemo(() => audienceFor(contacts, { statuses: [], tags: [] }), [contacts]);
+  const everyone = useMemo(() => audienceFor(contacts, { statuses: [], tags: [] }, optedOut), [contacts, optedOut]);
   const rows = useMemo(
-    () => broadcasts.map((broadcast) => ({ broadcast, recipients: audienceFor(contacts, broadcast.audience) })),
-    [broadcasts, contacts],
+    () =>
+      broadcasts.map((broadcast) => ({
+        broadcast,
+        recipients: audienceFor(contacts, broadcast.audience, optedOut),
+      })),
+    [broadcasts, contacts, optedOut],
   );
   const closeForm = () => {
     setAdding(false);
     setEditing(null);
+  };
+  const closeRows = () => {
+    setDeletingId(null);
+    setSendingId(null);
   };
 
   return (
     <ScreenContainer>
       <PageHeader
         title="Broadcast"
-        subtitle="Write a message once for a chosen set of contacts."
+        subtitle="Write a message once for a chosen set of contacts, and send it by email."
         actions={
-          actions ? (
-            <Button
-              size="sm"
-              onClick={() => {
-                setEditing(null);
-                setDeletingId(null);
-                setAdding(true);
-              }}
-            >
-              <Plus className="size-4" />
-              New broadcast
-            </Button>
-          ) : null
+          <>
+            {keyActions ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  closeForm();
+                  closeRows();
+                  setSettingsOpen((open) => !open);
+                }}
+              >
+                <Settings className="size-4" />
+                Email settings
+              </Button>
+            ) : null}
+            {actions ? (
+              <Button
+                size="sm"
+                onClick={() => {
+                  setEditing(null);
+                  closeRows();
+                  setSettingsOpen(false);
+                  setAdding(true);
+                }}
+              >
+                <Plus className="size-4" />
+                New broadcast
+              </Button>
+            ) : null}
+          </>
         }
       />
 
       <BentoGrid>
+        {keyActions && settingsOpen ? (
+          <EmailSettingsCard emailKey={emailKey} actions={keyActions} onClose={() => setSettingsOpen(false)} />
+        ) : null}
         {actions && (adding || editing) ? (
           <BroadcastFormCard
             // A fresh form for each broadcast, and for adding.
@@ -382,25 +640,43 @@ export function BroadcastsView({
             action={actions.save}
             editing={editing}
             contacts={contacts}
+            optedOut={optedOut}
             tagOptions={tagOptions}
             onSaved={closeForm}
             onClose={closeForm}
           />
         ) : null}
 
-        <BentoCard tone="primary" className="col-span-1 md:col-span-4">
-          <BentoStat label="Broadcasts" value={String(broadcasts.length)} delta="drafts" onPrimary />
+        <BentoCard tone="primary" className="col-span-1 md:col-span-3">
+          <BentoStat
+            label="Broadcasts"
+            value={String(broadcasts.length)}
+            delta={`${broadcasts.filter((broadcast) => broadcast.status === 'sent').length} sent`}
+            onPrimary
+          />
         </BentoCard>
-        <BentoCard className="col-span-1 md:col-span-4">
+        <BentoCard className="col-span-1 md:col-span-3">
           <BentoStat label="Contacts you can reach" value={everyone.length.toLocaleString('en-MY')} />
         </BentoCard>
-        <BentoCard className="col-span-2 md:col-span-4">
-          <BentoStat label="Tags in use" value={String(tagOptions.length)} />
+        <BentoCard className="col-span-1 md:col-span-3">
+          <BentoStat
+            label="Emails sent"
+            value={broadcasts.reduce((total, broadcast) => total + broadcast.sentCount, 0).toLocaleString('en-MY')}
+          />
+        </BentoCard>
+        <BentoCard className="col-span-1 md:col-span-3">
+          <BentoStat label="Unsubscribed" value={optOuts.length.toLocaleString('en-MY')} />
         </BentoCard>
 
         <BentoCard
           title="My broadcasts"
-          subtitle="Sending is not connected yet: export the recipients or copy the message."
+          subtitle={
+            emailKey
+              ? `Sent as ${emailKey.senderName} <${emailKey.senderEmail}>`
+              : keyActions
+                ? 'To send by email, connect your Resend account under "Email settings".'
+                : 'Email sending is not set up. Ask an owner or admin to connect it.'
+          }
           icon={Megaphone}
           className="col-span-2 md:col-span-12"
         >
@@ -434,7 +710,7 @@ export function BroadcastsView({
                     <TableHead>Broadcast</TableHead>
                     <TableHead>Audience</TableHead>
                     <TableHead className="text-right">Recipients</TableHead>
-                    <TableHead className="whitespace-nowrap">Last changed</TableHead>
+                    <TableHead>Status</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -448,6 +724,17 @@ export function BroadcastsView({
                         colSpan={5}
                         onClose={() => setDeletingId(null)}
                       />
+                    ) : sendActions && emailKey && sendingId === broadcast.id && broadcast.status === 'draft' ? (
+                      <SendBroadcastRow
+                        key={broadcast.id}
+                        broadcast={broadcast}
+                        recipients={recipients.length}
+                        emailKey={emailKey}
+                        testAddress={testAddress}
+                        actions={sendActions}
+                        colSpan={5}
+                        onClose={() => setSendingId(null)}
+                      />
                     ) : (
                       <TableRow key={broadcast.id}>
                         <TableCell className="max-w-64">
@@ -456,10 +743,34 @@ export function BroadcastsView({
                         </TableCell>
                         <TableCell className="max-w-64 truncate">{audienceSummary(broadcast.audience)}</TableCell>
                         <TableCell className="text-right tabular-nums">
-                          {recipients.length.toLocaleString('en-MY')}
+                          {/* Once sent, who it went to is a record, not a rule worked out again. */}
+                          {broadcast.status === 'draft'
+                            ? recipients.length.toLocaleString('en-MY')
+                            : (broadcast.sentCount + broadcast.failedCount).toLocaleString('en-MY')}
                         </TableCell>
-                        <TableCell className="whitespace-nowrap text-muted-foreground">
-                          {formatDay(broadcast.updatedDay)}
+                        <TableCell className="whitespace-nowrap">
+                          <span
+                            className={cn(
+                              'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold',
+                              broadcast.status === 'sent'
+                                ? 'bg-emerald-500/15 text-emerald-600'
+                                : broadcast.status === 'sending'
+                                  ? 'bg-amber-500/15 text-amber-600'
+                                  : 'bg-muted text-muted-foreground',
+                            )}
+                          >
+                            {BROADCAST_STATUS_LABELS[broadcast.status]}
+                          </span>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {broadcast.status === 'sent' && broadcast.sentDay
+                              ? `${formatDay(broadcast.sentDay)} · ${broadcast.sentCount.toLocaleString('en-MY')} sent` +
+                                (broadcast.failedCount > 0
+                                  ? `, ${broadcast.failedCount.toLocaleString('en-MY')} failed`
+                                  : '')
+                              : broadcast.status === 'sending'
+                                ? 'Started and not finished. Do not send it again.'
+                                : `Changed ${formatDay(broadcast.updatedDay)}`}
+                          </p>
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center justify-end gap-1">
@@ -473,31 +784,53 @@ export function BroadcastsView({
                             >
                               <Download className="size-4" />
                             </Button>
+                            {sendActions && emailKey && broadcast.status === 'draft' ? (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                aria-label={`Send ${broadcast.name}`}
+                                onClick={() => {
+                                  closeForm();
+                                  setSettingsOpen(false);
+                                  setDeletingId(null);
+                                  setSendingId(broadcast.id);
+                                }}
+                              >
+                                <Send className="size-4 text-primary" />
+                              </Button>
+                            ) : null}
                             {actions ? (
                               <>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  aria-label={`Edit ${broadcast.name}`}
-                                  onClick={() => {
-                                    setAdding(false);
-                                    setDeletingId(null);
-                                    setEditing(broadcast);
-                                  }}
-                                >
-                                  <Pencil className="size-4" />
-                                </Button>
+                                {broadcast.status === 'draft' ? (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    aria-label={`Edit ${broadcast.name}`}
+                                    onClick={() => {
+                                      setAdding(false);
+                                      closeRows();
+                                      setSettingsOpen(false);
+                                      setEditing(broadcast);
+                                    }}
+                                  >
+                                    <Pencil className="size-4" />
+                                  </Button>
+                                ) : null}
+                                {/* A sent broadcast is a record of who was emailed; it stays. */}
+                                {broadcast.status === 'draft' ? (
                                 <Button
                                   variant="ghost"
                                   size="icon"
                                   aria-label={`Delete ${broadcast.name}`}
                                   onClick={() => {
                                     closeForm();
+                                    setSendingId(null);
                                     setDeletingId(broadcast.id);
                                   }}
                                 >
                                   <Trash2 className="size-4 text-destructive" />
                                 </Button>
+                                ) : null}
                               </>
                             ) : null}
                           </div>

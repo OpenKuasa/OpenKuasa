@@ -5,7 +5,8 @@
  * otherwise one of the user's free weekly questions on the platform key.
  *
  * Tuah works through a team: it asks a specialist per product (Jebat for
- * marketing, Kasturi for the CRM, Lekir for hiring) and carries out the changes they prepare.
+ * marketing, Kasturi for the CRM, Lekir for hiring, Lekiu for HR, Bendahara for
+ * finance) and carries out the changes they prepare.
  * Lookups run on their own; changes wait for the user's approval. A chat can
  * ask for the single agent that holds every tool itself with `team: false`.
  *
@@ -110,6 +111,9 @@ export async function POST(request: Request) {
     }
   }
 
+  // Finance is workspace-only, like the CRM: a non-viewer member gets the change tools (each still approved).
+  const finance = org ? { client: supabase, orgId: org.orgId, canWrite: org.role !== 'viewer' } : null;
+
   // An approval is answered from the server's record of the change, never from what the browser sent back.
   const approvals = await chatApprovals(chat, org?.orgId ?? null);
   // Prepared changes so far, by id, as the server recorded them: what the team gates on and applies.
@@ -143,6 +147,7 @@ export async function POST(request: Request) {
     team,
     hire,
     people,
+    finance,
     approvals,
   );
   void result.consumeStream();

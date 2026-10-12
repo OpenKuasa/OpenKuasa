@@ -20,12 +20,13 @@ describe('TUAH_SYSTEM', () => {
     expect(t).toContain('look up hr in lekiu');
   });
 
-  it('keeps only finance in the blind spot now that HR is wired', () => {
-    expect(t).toContain("cannot see the workspace's finance yet");
-    expect(t).toContain('invoices');
-    // HR is no longer unseen: the old "payroll and staff" blind spot is gone.
+  it('has no blind spot now that all five products are wired', () => {
+    // Finance (Bendahara) is the last product wired in; the old blind-spot lines are gone.
+    expect(t).not.toContain("cannot see the workspace's finance yet");
     expect(t).not.toContain('cannot see the rest of the workspace yet');
     expect(t).not.toContain('payroll and staff');
+    // ...and finance is now named among the products it can look up.
+    expect(t).toContain('look up finance in bendahara');
   });
 
   it('states changes need approval, and are reported as done once made', () => {

@@ -55,13 +55,20 @@ function secretKey(env: EnvLike): Buffer {
 }
 
 /**
+ * What a sealed value is for. It is authenticated with the value, so a key
+ * sealed for one purpose does not open as another: a workspace's email key
+ * can never be read back as its AI key, or the other way round.
+ */
+export type KeyPurpose = 'org-ai-key' | 'org-email-key';
+
+/**
  * The bytes authenticated with a v2 key. An empty or malformed id would be no
  * binding at all, so anything that is not a uuid is refused.
  */
-function workspaceBinding(orgId: string): Buffer {
+function workspaceBinding(orgId: string, purpose: KeyPurpose): Buffer {
   const id = typeof orgId === 'string' ? orgId.trim().toLowerCase() : '';
   if (!UUID.test(id)) throw new Error('A workspace id is required to seal or open a key.');
-  return Buffer.from(`openkuasa:org-ai-key:${VERSION}:${id}`, 'utf8');
+  return Buffer.from(`openkuasa:${purpose}:${VERSION}:${id}`, 'utf8');
 }
 
 /** Seals a key for one workspace as `v2.<iv>.<tag>.<ciphertext>` (base64url parts). */
@@ -69,8 +76,9 @@ export function encryptApiKey(
   apiKey: string,
   orgId: string,
   env: EnvLike = process.env,
+  purpose: KeyPurpose = 'org-ai-key',
 ): string {
-  const binding = workspaceBinding(orgId);
+  const binding = workspaceBinding(orgId, purpose);
   const iv = randomBytes(IV_BYTES);
   const cipher = createCipheriv('aes-256-gcm', secretKey(env), iv, {
     authTagLength: TAG_BYTES,
@@ -95,13 +103,16 @@ export function decryptApiKey(
   sealed: string,
   orgId: string,
   env: EnvLike = process.env,
+  purpose: KeyPurpose = 'org-ai-key',
 ): string | null {
   const [version, iv, tag, data, ...rest] = sealed.split('.');
   if (rest.length > 0 || !iv || !tag || !data) return null;
   if (version !== VERSION && version !== LEGACY_VERSION) return null;
+  // The earlier format carries no purpose, and only AI keys were ever sealed in it.
+  if (version === LEGACY_VERSION && purpose !== 'org-ai-key') return null;
   try {
     // Required for both formats, so a caller without a workspace opens nothing.
-    const binding = workspaceBinding(orgId);
+    const binding = workspaceBinding(orgId, purpose);
     const ivBytes = Buffer.from(iv, 'base64url');
     const tagBytes = Buffer.from(tag, 'base64url');
     if (ivBytes.length !== IV_BYTES || tagBytes.length !== TAG_BYTES) return null;

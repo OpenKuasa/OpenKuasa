@@ -1,11 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { Ban, CircleCheck, Download, PieChart, Plus, Search, Trash2, TrendingUp, Wallet } from 'lucide-react';
+import { Ban, CircleCheck, Download, PieChart, Plus, Search, Trash2, TrendingUp, TriangleAlert, Wallet } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { AreaTrend, DonutStat, type Series } from '@/components/charts';
 import { ConfirmRow } from '@/components/finance/confirm-row';
 import { downloadCsv } from '@/components/finance/download-csv';
+import { OrderNotes } from '@/components/finance/order-notes';
 import { PaymentFormCard, type RecordPayment } from '@/components/finance/payment-form-card';
 import { RowMenu, type RowMenuItem } from '@/components/finance/row-menu';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
@@ -34,11 +35,14 @@ import {
   LATEST_ROWS,
   PAYMENT_STATUS_LABELS,
   type PaymentMethodFilter,
+  type OrderBilling,
   type PaymentStatusFilter,
   type PaymentsViewData,
   alsoCovers,
   displayDate,
   filterPayments,
+  orderNotesForBills,
+  paymentRowsAgainstFlaggedOrders,
   paymentsCsv,
 } from '@/lib/finance/purchase-views';
 import type { FinResult } from '@/lib/finance/result';
@@ -57,6 +61,8 @@ export type PaymentsWriter = {
   /** Every bill, to find the ones that can still be paid. */
   bills: BillListRow[];
   accounts: FinanceAccount[];
+  /** Approved and closed purchase orders, to say when a bill being paid is over its order. */
+  orders: OrderBilling[];
 };
 
 const PAID_SERIES: Series[] = [
@@ -107,6 +113,9 @@ export function PaymentsView({
   // A row that is gone after a refresh takes its question with it; the message still has to be seen.
   const askingInView = asking ? shown.some((r) => r.allocation_id === asking.row.allocation_id) : false;
 
+  // Only a person who may pay is given the orders, so a reader sees no marks.
+  const flagged = writer ? paymentRowsAgainstFlaggedOrders(rows, writer.bills, writer.orders) : new Set<string>();
+
   const ask = (next: Exclude<Open, null>) => {
     confirm.clear();
     setOpen(next);
@@ -136,6 +145,12 @@ export function PaymentsView({
     const id = row.transaction_id;
     const whole = rm(row.transaction_amount);
     const also = alsoCovers(rows, row);
+    // The bills this payment settles are the rows that share its transaction.
+    const settled = rows.filter((r) => r.transaction_id === row.transaction_id).map((r) => r.bill_id);
+    const orderNotes = orderNotesForBills(
+      writer.bills.filter((b) => settled.includes(b.id)),
+      writer.orders,
+    );
     const close = () => {
       confirm.clear();
       setOpen(null);
@@ -184,6 +199,11 @@ export function PaymentsView({
             />
           </label>
           {also ? <p className="mt-1 text-muted-foreground">{also}</p> : null}
+          {orderNotes.length ? (
+            <div className="mt-1">
+              <OrderNotes notes={orderNotes} />
+            </div>
+          ) : null}
         </ConfirmRow>
       );
     }
@@ -250,6 +270,7 @@ export function PaymentsView({
         {writer && open?.kind === 'form' ? (
           <PaymentFormCard
             payable={payableBills(writer.bills, rows)}
+            orders={writer.orders}
             accounts={writer.accounts}
             today={open.today}
             record={writer.actions.record}
@@ -395,7 +416,17 @@ export function PaymentsView({
                           {PAYMENT_METHOD_LABELS[p.method]}
                         </Badge>
                       </TableCell>
-                      <TableCell className="whitespace-nowrap text-right tabular-nums">{rm(p.amount)}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums">
+                        <span className="inline-flex items-center justify-end gap-1.5">
+                          {flagged.has(p.allocation_id) ? (
+                            <span title="This bill’s purchase order is billed over its total or for more than has arrived" className="text-amber-600">
+                              <TriangleAlert className="size-4" aria-hidden />
+                              <span className="sr-only">This bill’s purchase order is billed over its total or for more than has arrived</span>
+                            </span>
+                          ) : null}
+                          {rm(p.amount)}
+                        </span>
+                      </TableCell>
                       <TableCell>
                         <span className="flex items-center gap-2">
                           <LiveDot active={p.status === 'posted'} />

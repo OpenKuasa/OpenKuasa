@@ -302,7 +302,7 @@ describe('Tuah prompts and hiring', () => {
   it('does not contradict itself about jobs', () => {
     expect(TUAH_SYSTEM).not.toContain('job posts');
     expect(tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], true, null)).not.toContain('job posts');
-    expect(TUAH_SYSTEM).toContain('outside marketing, the CRM, hiring and HR');
+    expect(TUAH_SYSTEM).toContain('outside marketing, the CRM, hiring, HR and finance');
     const sentence = TUAH_SYSTEM.toLowerCase().split('\n').find((l) => l.startsWith('- to change a specific campaign, creative'));
     expect(sentence).toContain('job');
   });
@@ -322,12 +322,11 @@ describe('Tuah prompts and hiring', () => {
     expect(lekir).toContain('a job with applications cannot be deleted');
     expect(lekir).not.toContain('you can only look things up');
   });
-  it('keeps only finance in the blind spot now that HR is wired', () => {
-    expect(TUAH_SYSTEM).toContain("cannot see the workspace's finance yet");
-    expect(TUAH_SYSTEM).toMatch(/invoices and other finance records/);
-    // HR is reachable via Lekiu now, so payroll and staff left the blind spot.
+  it('no longer keeps finance in the blind spot now that Bendahara is wired', () => {
+    expect(TUAH_SYSTEM).not.toContain("cannot see the workspace's finance yet");
+    expect(TUAH_SYSTEM).not.toMatch(/invoices and other finance records/);
     expect(TUAH_SYSTEM).not.toContain('cannot see the rest of the workspace yet');
-    expect(TUAH_SYSTEM).not.toContain('payroll and staff');
+    expect(TUAH_SYSTEM).toContain('look up finance in Bendahara');
   });
   it('offers a skills-based alternative when declining to rank by protected traits', () => {
     const offer = 'offer to do it on skills and experience instead';
@@ -2686,7 +2685,7 @@ describe('interview changes', () => {
       const approvals = approvalBinding(store, messages);
       if (mode === 'lekir') return runLekir(messages, access, undefined, undefined, approvals);
       const teamContext = mode === 'team' ? { transcript: '', proposals: await recordedProposals(store, sent as never), names: namesIn(sent) } : null;
-      return runTuah(messages, reach(), undefined, undefined, null, null, teamContext, access, null, approvals);
+      return runTuah(messages, reach(), undefined, undefined, null, null, teamContext, access, null, null, approvals);
     };
   };
   // With no name and no job asked for, the lookup is a plain list. By the job it would say `several_match`: the two
@@ -3517,7 +3516,7 @@ describe('interview changes', () => {
           const binding = approvalBinding(once as never, messages);
           const result = agent === 'lekir'
             ? runLekir(messages, world(), undefined, undefined, binding)
-            : runTuah(messages, reach(), undefined, undefined, null, null, null, world(), null, binding);
+            : runTuah(messages, reach(), undefined, undefined, null, null, null, world(), null, null, binding);
           await result.consumeStream();
           const content = ((await result.steps) as unknown as { content: Card[] }[]).flatMap((step) => step.content);
           expect(content.filter((p) => p.type === 'tool-approval-response' && p.approved === false).map((p) => p.reason), change.tool).toEqual([NOT_PREPARED]);

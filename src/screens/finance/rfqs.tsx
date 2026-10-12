@@ -3,6 +3,7 @@ import {
   convertRfqAction,
   deleteRfqAction,
   getRfqAction,
+  getRfqForCopyAction,
   getSentRfqAction,
   quoteRfqAction,
   saveAndSendRfqAction,
@@ -30,6 +31,7 @@ const ACTIONS: RfqActions = {
   remove: deleteRfqAction,
   get: getRfqAction,
   getSent: getSentRfqAction,
+  getForCopy: getRfqForCopyAction,
 };
 
 export default async function RfqsScreen() {

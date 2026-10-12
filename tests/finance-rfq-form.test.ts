@@ -8,6 +8,7 @@ import {
   priceDrafts,
   quoteFormError,
   quotePayload,
+  rfqFormCopiedFrom,
   rfqFormError,
   rfqFormFromDetail,
   rfqPayload,
@@ -65,6 +66,50 @@ describe('a saved draft, as the form shows it', () => {
         { key: LINE_2, product_id: '', description: 'Sample', quantity: '1', uom: '', pack_size: '', unit_price: '0', sst_rate: '0' },
       ],
     });
+  });
+});
+
+describe('a copy of an RFQ, for another supplier', () => {
+  const priced: RfqDetail = {
+    id: RFQ, rfq_no: 'RFQ-0004', supplier_id: SUPPLIER, supplier_name: 'Syarikat Kertas', rfq_date: '2026-09-01', reply_by: '2026-09-15',
+    supplier_ref: 'Q-77', status: 'quoted', line_count: 2, total: 130, fully_priced: true, purchase_order_id: 'po-1', purchase_order_no: 'PO-0003',
+    subtotal: 125, sst_total: 5, notes: 'Deliver to the back door',
+    lines: [
+      { id: LINE_1, product_id: PRODUCT, description: 'Printer paper', quantity: 5, uom: 'ream', pack_size: 'box of 5', unit_price: 24.9, sst_rate: 6 },
+      { id: LINE_2, product_id: null, description: 'Sample', quantity: 1, uom: null, pack_size: null, unit_price: 0, sst_rate: 0 },
+    ],
+  };
+
+  it('is a new RFQ: no id, no supplier, dated today, with no reply-by date', () => {
+    const form = rfqFormCopiedFrom(priced, today);
+    expect(form).not.toHaveProperty('id');
+    expect(form).toMatchObject({ supplier_id: '', rfq_date: today, reply_by: '' });
+  });
+  it('keeps the notes and every line, and empties every price box, a price of 0 included', () => {
+    const form = rfqFormCopiedFrom(priced, today);
+    expect(form.notes).toBe('Deliver to the back door');
+    expect(form.lines.map((line) => ({ ...line, key: undefined }))).toEqual([
+      { key: undefined, product_id: PRODUCT, description: 'Printer paper', quantity: '5', uom: 'ream', pack_size: 'box of 5', unit_price: '', sst_rate: '6' },
+      { key: undefined, product_id: '', description: 'Sample', quantity: '1', uom: '', pack_size: '', unit_price: '', sst_rate: '0' },
+    ]);
+  });
+  it('gives the lines new keys, none of them the source line ids, and no two the same', () => {
+    const keys = rfqFormCopiedFrom(priced, today).lines.map((line) => line.key);
+    expect(new Set(keys).size).toBe(2);
+    expect(keys).not.toContain(LINE_1);
+    expect(keys).not.toContain(LINE_2);
+  });
+  it('is not ready to save until a supplier is chosen, then saves as a new draft', () => {
+    const form = rfqFormCopiedFrom(priced, today);
+    expect(rfqFormError(form)).toBe('Choose a supplier.');
+    const chosen = RFQ_FORM_KIND.withParty(form, { id: SUPPLIER, payment_terms_days: 30 });
+    expect(rfqFormError(chosen)).toBeNull();
+    expect(rfqPayload(chosen)).not.toHaveProperty('id');
+  });
+  it('leaves the RFQ it was copied from unchanged', () => {
+    const before = JSON.stringify(priced);
+    rfqFormCopiedFrom(priced, today);
+    expect(JSON.stringify(priced)).toBe(before);
   });
 });
 

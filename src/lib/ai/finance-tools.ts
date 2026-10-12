@@ -92,6 +92,7 @@ import {
   updateProductInput,
 } from '@/lib/finance/products';
 import {
+  deleteScheduledPayment,
   listAccounts,
   listPaymentsIn,
   listPaymentsOut,
@@ -144,6 +145,7 @@ export const FINANCE_WRITE_TOOL_NAMES = [
   'markPaymentPaid',
   'voidPayment',
   'voidPaymentIn',
+  'deleteScheduledPayment',
   'createFinanceContact',
   'updateFinanceContact',
   'setFinanceContactActive',
@@ -405,6 +407,11 @@ export function createBendaharaTools(access: FinanceAccess) {
       description: 'Void a payment in.',
       inputSchema: paymentIdInput,
       execute: async (input) => voidPaymentIn(ctx, input),
+    }),
+    deleteScheduledPayment: tool({
+      description: 'Delete a scheduled payment out that has not been paid yet.',
+      inputSchema: paymentIdInput,
+      execute: async (input) => deleteScheduledPayment(ctx, input),
     }),
     // Contacts (customers / suppliers)
     createFinanceContact: tool({

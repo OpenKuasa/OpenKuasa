@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BENDAHARA_SYSTEM, bendaharaSystem } from '@/lib/ai/agents/prompts';
+import { BENDAHARA_SYSTEM, bendaharaSystem, subAgentSystem } from '@/lib/ai/agents/prompts';
 
 describe('BENDAHARA_SYSTEM', () => {
   const t = BENDAHARA_SYSTEM.toLowerCase();
@@ -40,5 +40,16 @@ describe('bendaharaSystem', () => {
     const s = bendaharaSystem(new Date('2026-10-12T00:00:00Z'));
     expect(s).toContain(BENDAHARA_SYSTEM);
     expect(s.toLowerCase()).toContain('today');
+  });
+});
+
+describe('SPECIALIST_RULES.finance (Bendahara as Tuah sub-agent)', () => {
+  it('gives the finance sub-agent its own rules, not the empty fallback', () => {
+    const s = subAgentSystem('finance', true).toLowerCase();
+    expect(s).toContain('bendahara');
+    expect(s).toContain('ringgit');
+    expect(s).toContain('post'); // posting/e-Invois weight is spelled out
+    // Not the generic fallback used when a product has no rules.
+    expect(s).not.toContain("you are a specialist on tuah's team.");
   });
 });
