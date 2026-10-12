@@ -29,7 +29,7 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   // Reads Bendahara's invoices; they are created and changed on finance/invoices.
   'crm/billings',
   'crm/landing-page',
-  // Writing and audiences are live; sending is not connected yet.
+  // Sends by email through the workspace's own Resend key.
   'crm/broadcast',
   'crm/automations',
   // Shared with Jebat's analytics (registry 'reach/reports'); /reach/reports
