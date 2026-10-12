@@ -84,7 +84,7 @@ Tasks 1 and 2 can run at the same time. Tasks 3 and 4 can run at the same time, 
 ### Task 1: The migration
 
 **Files:**
-- Create: `supabase/migrations/20261027090000_hire_deletions.sql`
+- Create: `supabase/migrations/20261028090000_hire_deletions.sql`
 - Test: `tests/hire-deletions-migration.test.ts`
 
 **Interfaces:**
@@ -102,7 +102,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 const read = (file: string) => readFileSync(join(process.cwd(), 'supabase/migrations', file), 'utf8');
-const raw = read('20261027090000_hire_deletions.sql');
+const raw = read('20261028090000_hire_deletions.sql');
 // Comment lines are dropped so an explanation can never satisfy an order check.
 const sql = raw.split('\n').filter((line) => !line.trim().startsWith('--')).join('\n');
 const fn = (name: string) => {
@@ -231,12 +231,12 @@ describe('hire deletions migration', () => {
 });
 ```
 
-- [ ] **Step 3: Run it.** `pnpm vitest run tests/hire-deletions-migration.test.ts` — Expected: FAIL, the file cannot be read (`ENOENT … 20261027090000_hire_deletions.sql`).
+- [ ] **Step 3: Run it.** `pnpm vitest run tests/hire-deletions-migration.test.ts` — Expected: FAIL, the file cannot be read (`ENOENT … 20261028090000_hire_deletions.sql`).
 
-- [ ] **Step 4: Write the migration.** Create `supabase/migrations/20261027090000_hire_deletions.sql` with exactly:
+- [ ] **Step 4: Write the migration.** Create `supabase/migrations/20261028090000_hire_deletions.sql` with exactly:
 
 ```sql
--- supabase/migrations/20261027090000_hire_deletions.sql
+-- supabase/migrations/20261028090000_hire_deletions.sql
 -- Lekir slice 3c: a recruiter can delete an application, or a candidate with
 -- everything held about them. Two functions are the only way: members get no
 -- delete on any hiring table. Nothing here touches a stored file: the trigger
@@ -356,9 +356,9 @@ grant execute on function public.hire_delete_candidate(uuid) to authenticated;
 
 - [ ] **Step 5: Run the test.** `pnpm vitest run tests/hire-deletions-migration.test.ts` — Expected: PASS, every test in the file.
 
-- [ ] **Step 6: Stage.** `git add supabase/migrations/20261027090000_hire_deletions.sql tests/hire-deletions-migration.test.ts`
+- [ ] **Step 6: Stage.** `git add supabase/migrations/20261028090000_hire_deletions.sql tests/hire-deletions-migration.test.ts`
 
-- [ ] **Step 7: Commit.** `git commit -m "feat(hire): two functions to delete an application or a candidate" -- supabase/migrations/20261027090000_hire_deletions.sql tests/hire-deletions-migration.test.ts`
+- [ ] **Step 7: Commit.** `git commit -m "feat(hire): two functions to delete an application or a candidate" -- supabase/migrations/20261028090000_hire_deletions.sql tests/hire-deletions-migration.test.ts`
 
 ---
 
@@ -2962,7 +2962,7 @@ Lekir can also prepare deleting one application or one candidate, one deletion p
 
 **Do not run either file.** The live file fails until the migration is applied, and the question set calls models and bills. Write, type-check, lint, commit.
 
-**The live test.** Follow `tests/hire-candidate-changes.rls.test.ts` for the header comment, the skip when a key is missing, `ownedOrg`, `newJob`, `openFields`, `add`, `attach`, `expectWord` and `expectRefusedOutright`: copy those helpers as they are. Every workspace and user is made through `tests/helpers/live-workspaces.ts`, which removes them when the file ends. The header says: WRITTEN, NOT YET RUN; needs migration `20261027090000_hire_deletions.sql`; who calls what; that the service client is used only for `hire_attach_cv` and `hire_cv_deletions_done`; and the interview gap below. Add these helpers:
+**The live test.** Follow `tests/hire-candidate-changes.rls.test.ts` for the header comment, the skip when a key is missing, `ownedOrg`, `newJob`, `openFields`, `add`, `attach`, `expectWord` and `expectRefusedOutright`: copy those helpers as they are. Every workspace and user is made through `tests/helpers/live-workspaces.ts`, which removes them when the file ends. The header says: WRITTEN, NOT YET RUN; needs migration `20261028090000_hire_deletions.sql`; who calls what; that the service client is used only for `hire_attach_cv` and `hire_cv_deletions_done`; and the interview gap below. Add these helpers:
 
 ```ts
 const removeApplication = (c: SupabaseClient, id: string) => c.rpc('hire_delete_application', { p_application_id: id });
@@ -3203,7 +3203,7 @@ Not for an implementer.
 - [ ] Whole-branch review by a fresh reviewer on the most capable model, given the diff and the Review Focus list, not this plan's conclusions. One fix pass.
 - [ ] Read the configured model ids from the environment before any model run (orchestrator and worker), and state them.
 - [ ] **Ask the owner for three yeses, separately:**
-  1. Apply migration `20261027090000_hire_deletions.sql` to the live database (two functions, no table change).
+  1. Apply migration `20261028090000_hire_deletions.sql` to the live database (two functions, no table change).
   2. Run the question set. Estimate, with `EVAL_RUNS=1` and 4 to 5 model calls a case: the 7 new `del-…` cases are about **28 to 35 billed calls**; adding the 6 existing cases this piece could disturb (`app-move`, `app-reject-reason`, `app-reject-age`, `app-rate-from-cv`, `cand-edit-phone`, `cand-two-matches`, because `listApplications` and the prompts changed) makes 13 cases, about **52 to 65 billed calls**. Recommend the 13. The browser smoke adds about 3 billed questions. Stop at the first credits refusal.
   3. Push and open the pull request once the checks below are green.
 - [ ] Read-only pre-checks on live: no function named `hire_delete_application` or `hire_delete_candidate` exists; the trigger `hire_applications_cv_deleted` exists on `hire_applications`; both cascades are in place (`confdeltype = 'c'` for `hire_applications.candidate_id` and `hire_interviews.application_id`); `git ls-tree --name-only origin/main supabase/migrations/` still shows no version at or above the one chosen.

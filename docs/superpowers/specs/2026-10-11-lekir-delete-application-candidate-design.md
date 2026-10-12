@@ -153,7 +153,7 @@ and for a candidate `changed`) and, on `ok`, the name and counts above.
 
 ## 5. Data model
 
-Migration `20261027090000_hire_deletions.sql`. No table, column, grant or policy changes.
+Migration `20261028090000_hire_deletions.sql`. No table, column, grant or policy changes.
 The timestamp is checked against `main` when the branch is pushed, as two branches are
 adding hiring migrations at once.
 
@@ -593,7 +593,7 @@ merge deploys, after a yes. One pull request. This piece merges before 3d.
 
 ## 13. Affected / new files
 
-- **New:** one migration (`supabase/migrations/20261027090000_hire_deletions.sql`);
+- **New:** one migration (`supabase/migrations/20261028090000_hire_deletions.sql`);
   `src/lib/hire/deletion.ts`; `src/screens/hire/delete-dialog.tsx`; tests
   (`tests/hire-deletion.test.ts`, `tests/hire-deletions-migration.test.ts`,
   `tests/hire-delete-actions.test.ts`, `tests/hire-deletions.rls.test.ts`); question-set
