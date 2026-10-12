@@ -43,10 +43,12 @@
 --      once it is posted or void (23514), so a hidden draft cannot sit on the
 --      next TR- number; no deployed write sets transfer_id.
 --
--- The whole migration runs with finance_transactions locked, taken first: the
--- app locks a payment and then takes a number from finance_sequences, and
--- this file would otherwise touch them in the other order and could deadlock
--- with a payment being recorded.
+-- The whole migration runs with finance_transactions and finance_sequences
+-- locked, both taken at once and without waiting. The app's functions take
+-- the two in both orders (a payment is locked and then numbered; a credit
+-- note is numbered and then reads the payments), so no order of waiting is
+-- free of a deadlock. If anything holds either table the migration stops at
+-- once with nothing applied, and is run again.
 --
 -- A transfer and approval. The guard on payments (20261028100000) asks for
 -- an owner or admin when money out is scheduled or posted for more than its
@@ -80,8 +82,8 @@
 
 -- Fail fast instead of queueing behind a long transaction and stalling sign-ins.
 set local lock_timeout = '5s';
--- Payments first, then the counters: the order the app takes them in.
-lock table public.finance_transactions in access exclusive mode;
+-- Both at once, or not at all: see the header.
+lock table public.finance_transactions, public.finance_sequences in access exclusive mode nowait;
 
 -- ---- numbering: a transfer takes a TR- number -------------------------------
 alter table public.finance_sequences
@@ -216,7 +218,7 @@ begin
     execute format(
       'create policy mfa_required on public.%I as restrictive for all to authenticated '
       || 'using ((select private.mfa_ok())) with check ((select private.mfa_ok()))', t);
-    execute format('revoke all on public.%I from anon, authenticated', t);
+    execute format('revoke all on public.%I from anon, authenticated, service_role', t);
     execute format('grant select, insert, update, delete on public.%I to authenticated', t);
   end loop;
 end $$;
@@ -473,7 +475,7 @@ left join lateral (
   from public.finance_statement_lines l
   where l.org_id = a.org_id and l.account_id = a.id and l.transaction_id is null
 ) u on true;
-revoke all on public.finance_account_balances from anon, authenticated;
+revoke all on public.finance_account_balances from anon, authenticated, service_role;
 grant select on public.finance_account_balances to authenticated;
 
 -- One row per movement of money, either direction, whatever its status, the
@@ -537,7 +539,7 @@ cross join lateral (
   left join public.finance_categories ec on ec.org_id = e.org_id and ec.id = e.category_id
   where a.org_id = t.org_id and a.transaction_id = t.id
 ) d;
-revoke all on public.finance_bank_transactions from anon, authenticated;
+revoke all on public.finance_bank_transactions from anon, authenticated, service_role;
 grant select on public.finance_bank_transactions to authenticated;
 
 -- ---- functions --------------------------------------------------------------
