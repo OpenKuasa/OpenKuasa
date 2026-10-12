@@ -17,7 +17,7 @@ import { getCurrentOrg } from '@/lib/auth/current-org';
 import { collectNames, type KnownNames } from '@/lib/chat/change-titles';
 import { APPLY_TOOL, ASK_PREFIX, isDelegation, type Proposal } from '@/lib/chat/delegation';
 import { createSupabaseHireData } from '@/lib/hire/supabase';
-import type { Application, Candidate, Job } from '@/lib/hire/types';
+import type { Application, Candidate, Interview, Job } from '@/lib/hire/types';
 import { createSupabaseReachData } from '@/lib/reach/supabase';
 
 /** Marks every row an eval creates, so cleanup never touches anything else. */
@@ -126,10 +126,10 @@ export class Conversation {
     /** Run as someone who can look but not change, whatever the account's role. */
     private viewer = false,
     /**
-     * Extra applications, candidates, jobs and one CV a case supplies, so no
+     * Extra applications, candidates, jobs, interviews and one CV a case supplies, so no
      * row or file is written anywhere. Without a CV, Lekir gets no CV reader.
      */
-    private hire?: { applications?: Application[]; cv?: Uint8Array; candidates?: Candidate[]; jobs?: Job[] },
+    private hire?: { applications?: Application[]; cv?: Uint8Array; candidates?: Candidate[]; jobs?: Job[]; interviews?: Interview[] },
   ) {}
 
   async ask(text: string): Promise<Turn> {
@@ -183,6 +183,10 @@ export class Conversation {
               namesakes: undefined,
               // The same for a person's pool status: read from the lists below, which hold the made-up people.
               poolStatusOf: undefined,
+              // The same for the one interview a change is about: read from the lists below, which hold the made-up interviews.
+              interviewCard: undefined,
+              // Made-up interviews come first, then the workspace's own.
+              listInterviews: async () => [...(extra.interviews ?? []), ...(await realHire.listInterviews())],
               listJobs: async () => [...(extra.jobs ?? []), ...(await realHire.listJobs())],
               listApplications: async () => [...extraApplications, ...(await realHire.listApplications())],
               // An application has a candidate behind it: a lookup by name must find the person too.
