@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { approvalDetail, approvalTitle, collectNames, knownOnFile, nameIn, withoutPoolSide } from '@/lib/chat/change-titles';
+import { interviewCardDetail } from '@/lib/hire/interviews';
 
 const ID = '33333333-3333-4333-8333-333333333333';
 const names = collectNames([{ tool: 'listJobs', output: { total: 1, jobs: [{ id: ID, name: 'Sales Executive' }] } }]);
@@ -378,5 +379,95 @@ describe('where a candidate\'s name came from, for a deletion', () => {
     expect(withoutPoolSide([pooled, listed, changed, moved]).map((r) => r.tool)).toEqual(['listCandidates']);
     expect(nameIn(withoutPoolSide([pooled]))(PERSON, 'candidate')).toBeNull();
     expect(nameIn([pooled])(PERSON, 'candidate')).toBe('Zarina Lau');
+  });
+});
+
+describe('approval cards for an interview', () => {
+  const APP = '44444444-4444-4444-8444-444444444491';
+  const IV = '11111111-1111-4111-8111-111111111191';
+  const NEW = '22222222-2222-4222-8222-222222222291';
+  const STRANGER = '99999999-9999-4999-8999-999999999991';
+  const applications = {
+    tool: 'listApplications',
+    output: { total: 1, applications: [{ id: APP, candidate: 'Aina Rahman', job: 'Sales Executive', stage: 'screening', outcome: 'active' }] },
+  };
+  const interviews = {
+    tool: 'listInterviews',
+    output: {
+      total: 1,
+      interviews: [{ id: IV, application_id: APP, candidate: 'Aina Rahman', job: 'Sales Executive', date: '2026-10-20', time: '15:00', kind: 'video', status: 'scheduled' }],
+    },
+  };
+  const found = nameIn([applications, interviews]);
+  const when = { date: '2026-10-20', time: '15:00', duration_minutes: 60, kind: 'video' };
+
+  it('names an interview by its candidate and its job, and only from a result about interviews', () => {
+    expect(found(IV, 'interview')).toBe('Aina Rahman (Sales Executive)');
+    expect(found(IV, 'application')).toBeNull();
+    // An interview's row holds its application's id, but is not that application's row.
+    expect(found(APP, 'interview')).toBeNull();
+    expect(found(APP, 'application')).toBe('Aina Rahman (Sales Executive)');
+    expect(collectNames([interviews])[`interview:${IV}`]).toBe('Aina Rahman (Sales Executive)');
+    expect(collectNames([interviews])[`application:${APP}`]).toBeUndefined();
+  });
+  it('a new interview is named by its application', () => {
+    expect(approvalTitle('scheduleInterview', { application_id: APP, ...when }, found)).toBe('Schedule an interview with Aina Rahman (Sales Executive)?');
+    expect(approvalTitle('recordPastInterview', { application_id: APP, ...when, outcome: 'completed' }, found))
+      .toBe('Record a past interview with Aina Rahman (Sales Executive)?');
+  });
+  it('a change to an existing interview is named by the interview', () => {
+    expect(approvalTitle('rescheduleInterview', { id: IV, date: '2026-10-22', time: '11:00' }, found)).toBe('Change the interview with Aina Rahman (Sales Executive)?');
+    expect(approvalTitle('cancelInterview', { id: IV }, found)).toBe('Cancel the interview with Aina Rahman (Sales Executive)?');
+    expect(approvalTitle('setInterviewOutcome', { id: IV, outcome: 'completed' }, found)).toBe('Mark the interview with Aina Rahman (Sales Executive) as completed?');
+    expect(approvalTitle('setInterviewOutcome', { id: IV, outcome: 'no_show' }, found)).toBe('Mark the interview with Aina Rahman (Sales Executive) as a no-show?');
+    expect(approvalTitle('reopenInterview', { id: IV }, found)).toBe('Mark the interview with Aina Rahman (Sales Executive) as scheduled again?');
+  });
+  it('never names someone from an id of the other kind, or one that was not looked up', () => {
+    // An interview's id where an application's belongs, and the other way round.
+    expect(approvalTitle('scheduleInterview', { application_id: IV, ...when }, found)).toBe('Schedule an interview with an application that was not in the list above?');
+    expect(approvalTitle('recordPastInterview', { application_id: STRANGER, ...when, outcome: 'no_show' }, found))
+      .toBe('Record a past interview with an application that was not in the list above?');
+    expect(approvalTitle('cancelInterview', { id: APP }, found)).toBe('Cancel the interview with an interview that was not in the list above?');
+    expect(approvalTitle('rescheduleInterview', { id: STRANGER }, found)).toBe('Change the interview with an interview that was not in the list above?');
+    expect(approvalTitle('reopenInterview', {})).toBe('Mark the interview with an interview that was not in the list above as scheduled again?');
+  });
+  it('the second line is the hiring code\'s own, from the change\'s input', () => {
+    expect(approvalDetail('scheduleInterview', { application_id: APP, ...when, place: 'https://meet.example.com/abc', interviewer_name: 'Farah Lim' }, undefined, found))
+      .toBe('Tuesday, 20 October 2026, 3:00 pm to 4:00 pm, Kuala Lumpur time (GMT+8) · Video call · Link: https://meet.example.com/abc · With: Farah Lim · Nothing is sent to the candidate.');
+    expect(approvalDetail('cancelInterview', { id: IV }, undefined, found)).toBe('It stays in the list as cancelled. Nothing is sent to the candidate.');
+    expect(approvalDetail('setInterviewOutcome', { id: IV, outcome: 'completed' }, undefined, found)).toBeNull();
+    expect(approvalDetail('reopenInterview', { id: IV }, undefined, found)).toBeNull();
+    for (const [tool, input] of [
+      ['scheduleInterview', { application_id: APP, ...when }],
+      ['recordPastInterview', { application_id: APP, ...when, outcome: 'no_show' }],
+      ['rescheduleInterview', { id: IV, date: '2026-10-22', time: '11:00', place: null }],
+    ] as const) {
+      expect(approvalDetail(tool, input, undefined, found), tool).toBe(interviewCardDetail(tool, input));
+      expect(approvalDetail(tool, input, undefined, found), tool).not.toBeNull();
+    }
+    // Another tool's second line is not disturbed.
+    expect(approvalDetail('deleteJob')).toBe('This cannot be undone.');
+    expect(approvalDetail('updateJob')).toBeNull();
+  });
+  it('remembers a new interview from the result of the change that made it, as an interview and never as an application', () => {
+    const result = (tool: string) => ({
+      tool,
+      output: {
+        ok: true,
+        data: {
+          id: NEW, application_id: APP, candidate: 'Aina Rahman', job: 'Sales Executive', scheduled_at: '2026-10-20T07:00:00.000Z',
+          message: 'Scheduled an interview with Aina Rahman for Tuesday, 20 October 2026, 3:00 pm. Nothing has been sent to them.', confirmed: true,
+        },
+      },
+    });
+    for (const tool of ['scheduleInterview', 'recordPastInterview']) {
+      const kept = collectNames([result(tool)]);
+      expect(kept[`interview:${NEW}`], tool).toBe('Aina Rahman (Sales Executive)');
+      expect(kept[`application:${NEW}`], tool).toBeUndefined();
+      expect(kept[`application:${APP}`], tool).toBeUndefined();
+      const later = nameIn([result(tool)]);
+      expect(later(NEW, 'interview'), tool).toBe('Aina Rahman (Sales Executive)');
+      expect(approvalTitle('cancelInterview', { id: NEW }, later), tool).toBe('Cancel the interview with Aina Rahman (Sales Executive)?');
+    }
   });
 });

@@ -8,6 +8,7 @@ import { describeFormChange } from '@/lib/hire/application-form';
 import { REASON_LABEL } from '@/lib/hire/application-changes';
 import { STAGE_LABEL } from '@/lib/hire/applications-view';
 import { PIPELINE_CARD_DETAIL, pipelineCardTitle, poolCardDetail, poolCardTitle } from '@/lib/hire/pool';
+import { interviewCardDetail, interviewCardTitle } from '@/lib/hire/interviews';
 import { isRealDate, monthLabel, weekdayName } from '@/lib/people/dates';
 import { blank, hhmm } from '@/lib/people/loose-input';
 import { toPeriod, toScore } from '@/lib/people/performance-forms';
@@ -29,8 +30,9 @@ const APPOINTMENT_STATUS_LABELS: Record<string, string> = {
  */
 function labelOf(row: Record<string, unknown>, kind?: ItemKind): string | null {
   if (kind === 'goal' || kind === 'review' || kind === 'training' || kind === 'announcement') return performanceFact(row, kind);
-  if (kind === 'application') {
-    // A listApplications row has `candidate` and `job`, not `name`.
+  if (kind === 'application' || kind === 'interview') {
+    // A listApplications row has `candidate` and `job`, not `name`. So has an interview's row, and the result of an
+    // interview change: the card's own line gives the time, so an interview is named by the person and the job alone.
     const who = text(row.candidate);
     if (!who) return null;
     const job = text(row.job);
@@ -113,6 +115,7 @@ export type ItemKind =
   | 'job'
   | 'application'
   | 'candidate'
+  | 'interview'
   | 'employee'
   | 'department'
   | 'leave'
@@ -181,6 +184,16 @@ const KIND_OF_TOOL: Record<string, ItemKind> = {
   listTalentPool: 'candidate',
   setPoolStatus: 'candidate',
   moveToPipeline: 'candidate',
+  // An interview's row, and the result of each of the six interview changes, carry the interview's `id` with `candidate`
+  // and `job`. The two that take an application's id (scheduleInterview, recordPastInterview) answer with the NEW
+  // interview's id, so they are an interview's too: a later turn can name that interview, and its id counts as looked up.
+  listInterviews: 'interview',
+  scheduleInterview: 'interview',
+  recordPastInterview: 'interview',
+  rescheduleInterview: 'interview',
+  cancelInterview: 'interview',
+  setInterviewOutcome: 'interview',
+  reopenInterview: 'interview',
   listEmployees: 'employee',
   getEmployee: 'employee',
   createEmployee: 'employee',
@@ -1109,6 +1122,7 @@ const PERFORMANCE_TOOLS = new Set([
 
 const UNLISTED_APPLICATION = 'an application that was not in the list above';
 const UNLISTED_CANDIDATE = 'a candidate that was not in the list above';
+const UNLISTED_INTERVIEW = 'an interview that was not in the list above';
 const UNLISTED_LEAVE = 'a leave request that was not in the list above';
 const UNLISTED_TIME_OFF = 'a time-off request that was not in the list above';
 const UNLISTED_CLAIM = 'a claim that was not in the list above';
@@ -1394,6 +1408,15 @@ export function approvalTitle(
       const name = find(i.id, 'candidate');
       return pipelineCardTitle(name ? `candidate “${name}”` : UNLISTED_CANDIDATE, find(i.job_id, 'job'));
     }
+    case 'scheduleInterview':
+    case 'recordPastInterview':
+      // There is no interview yet: the card names the application, from a listApplications row.
+      return interviewCardTitle(toolName, i, find(i.application_id, 'application') ?? UNLISTED_APPLICATION) ?? 'Approve this change?';
+    case 'rescheduleInterview':
+    case 'cancelInterview':
+    case 'setInterviewOutcome':
+    case 'reopenInterview':
+      return interviewCardTitle(toolName, i, find(i.id, 'interview') ?? UNLISTED_INTERVIEW) ?? 'Approve this change?';
     case 'createEmployee': return `Add employee “${i.name ?? ''}”?`;
     case 'updateEmployee': return `Save changes to ${the('employee', 'employee')}?`;
     case 'setEmployeeStatus':
@@ -1721,6 +1744,11 @@ export function approvalDetail(
   // Fixed sentences. Which of two same-named people it is, is said on a line of its own, read on the server (hire-pool-gate.ts).
   if (toolName === 'setPoolStatus') return poolCardDetail(i.status);
   if (toolName === 'moveToPipeline') return PIPELINE_CARD_DETAIL;
+  // An interview change's second line is worded by the hiring code from the change's own input (it answers null for
+  // every other tool, and for the two interview changes that have no second line). Which interview it is, is said on
+  // a line of its own, read on the server (hire-interview-gate.ts).
+  const interviewDetail = interviewCardDetail(toolName, i);
+  if (interviewDetail !== null) return interviewDetail;
   if (toolName === 'submitClaim') {
     // What will be saved under the person's name. The receipt line comes from the conversation (the file on the
     // question that led to the claim), never from anything the assistant put in the input; unknown, it says nothing.

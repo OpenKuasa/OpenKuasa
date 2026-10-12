@@ -10,6 +10,10 @@ import {
   AMBIGUOUS_POOL_CHANGE, NOT_IN_POOL_MOVE, ONE_POOL_CHANGE, POOL_CHECK_FAILED, POOL_NAMESAKE_APPEARED, jobNotLookedUp,
   lookTheSameInPool, poolNotLookedUp,
 } from '@/lib/ai/hire-pool-gate';
+import {
+  AMBIGUOUS_INTERVIEW_CHANGE, INTERVIEW_CHANGED_SINCE, INTERVIEW_CHECK_FAILED, LINK_NOT_GIVEN, ONE_INTERVIEW_CHANGE, interviewNotLookedUp,
+  lookTheSameInterviews,
+} from '@/lib/ai/hire-interview-gate';
 
 /**
  * A change can be stopped in two ways: the user says no on its card, or the
@@ -131,6 +135,14 @@ describe('the line a person reads on a change the server refused', () => {
     // Written for a person already.
     [lookTheSameInPool('Zarina Lau'), lookTheSameInPool('Zarina Lau')],
     [POOL_CHECK_FAILED, POOL_CHECK_FAILED],
+    [ONE_INTERVIEW_CHANGE, 'Only one interview change is prepared at a time, and one was already prepared. Ask for this one again afterwards.'],
+    [interviewNotLookedUp(ID), 'The assistant had not looked this record up, so nothing was prepared. Ask again and it will look it up first.'],
+    [AMBIGUOUS_INTERVIEW_CHANGE, 'More than one record matches that name, so nothing was prepared. Say which one you mean, then ask again.'],
+    [LINK_NOT_GIVEN, 'That link was not one you gave, so no interview change was prepared. Give the link, or ask again without one.'],
+    [INTERVIEW_CHANGED_SINCE, 'A last check stopped this, because the interview had been changed since the card was shown. Nothing was changed. Ask for it again.'],
+    // Written for a person already.
+    [lookTheSameInterviews('Aina Rahman', 'Sales Executive'), lookTheSameInterviews('Aina Rahman', 'Sales Executive')],
+    [INTERVIEW_CHECK_FAILED, INTERVIEW_CHECK_FAILED],
   ];
   it.each(each)('%s', (reason, line) => {
     expect(refusalForUser(reason)).toBe(line);
