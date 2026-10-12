@@ -382,7 +382,7 @@ testWithSupabase('a receipt for income: a member saves, changes and cannot post 
     ok: false, error: 'This receipt has been posted or voided, so that can no longer be done.',
   });
   expect(await deleteCashReceipt(asMember, { id })).toEqual({
-    ok: false, error: 'This receipt has been posted, so it cannot be deleted. Void it instead.',
+    ok: false, error: 'This receipt has been posted or voided, so it cannot be deleted.',
   });
   expect(await voidCashReceipt(asMember, { id })).toEqual({ ok: false, error: NEEDS_SIGN_OFF });
   expect(await receiptRow(id)).toMatchObject({ status: 'posted', number: posted.number });
