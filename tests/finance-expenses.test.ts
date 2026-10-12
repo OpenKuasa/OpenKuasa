@@ -210,6 +210,13 @@ describe('approveExpense, rejectExpense', () => {
     fakeFinance((call: FinanceCall) =>
       call.op === 'update' ? { data: null, error: null } : { data: stillThere ? { id: EXPENSE, status: 'pending' } : null, error: null },
     );
+  it('match a decision with no notes by `is null`, never by equality', async () => {
+    const { ctx, calls } = fakeFinance({ data: { id: EXPENSE }, error: null });
+    await approveExpense(ctx, { ...SEEN_EXPENSE, notes: null });
+    expect(calls[0].filters).toMatchObject({ 'notes is': null });
+    expect(calls[0].filters).not.toHaveProperty('notes');
+    expect((await approveExpense(database({ ...stored, notes: null }), { ...SEEN_EXPENSE, notes: null })).ok).toBe(true);
+  });
   it('say it was changed after it was shown when no row matched but the expense is still there', async () => {
     for (const fn of [approveExpense, rejectExpense]) {
       const { ctx, calls } = changesNothing(true);
@@ -238,6 +245,8 @@ describe('approveExpense, rejectExpense', () => {
       if (call.op === 'select') return { data: { id: row.id, status: row.status }, error: null };
       const same = Object.entries(call.filters).every(([key, want]) => {
         if (key.endsWith(' is')) return row[key.slice(0, -3)] === want;
+        // `eq(column, null)` matches nothing in the database: null is only ever compared with `is`.
+        if (want === null) return false;
         const have = row[key];
         return typeof want === 'number' ? Number(have) === want : have === want;
       });

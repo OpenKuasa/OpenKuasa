@@ -505,6 +505,9 @@ testWithSupabase('an expense: a member saves, changes and cannot decide it; the 
   // A new one by the owner is approved at once; one by the member is deleted by the member.
   const own = done(await saveExpense(asOwner, { ...details, vendor_name: null, vendor_id: supplier }));
   expect(own.status).toBe('approved');
+  // Decided through the screen's own read: a contact is matched by its id, with the table's vendor_name empty.
+  done(await rejectExpense(asOwner, await shown(own.id)));
+  expect((await expenseRow(own.id))?.status).toBe('rejected');
   const draft = done(await saveExpense(asMember, details));
   done(await deleteExpense(asMember, { id: draft.id }));
   expect(await expenseRow(draft.id)).toBeNull();
