@@ -745,7 +745,7 @@ export async function saveAndPostCashReceiptAction(input: unknown): Promise<Save
 // An expense is on Expenses. Receipts Inbox names the expense a receipt is tied to (its category), and deleting
 // an expense sends its receipt back to Unmatched. Payment Vouchers and Banking name the category of the expenses
 // a voucher pays, which changes when a rejected expense that a voided voucher still names is edited. An approved
-// expense is two lines of the books (its category's account and Accounts Payable), so approving or rejecting one
+// expense is two lines of the books (its category's account and Accrued Expenses), so approving or rejecting one
 // moves Chart of Accounts and Journals: they end the list, as every action that changes the books does.
 const EXPENSE_PATHS = [
   '/finance/expenses',

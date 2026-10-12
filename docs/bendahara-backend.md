@@ -381,7 +381,7 @@ does: an update that leaves it rejected is refused (`FIN01`).
 
 An approved expense is an entry in the books: through the view
 `finance_ledger_lines` (nothing is stored for it) it is a debit to its
-category's ledger account and a credit to Accounts Payable, for the whole
+category's ledger account and a credit to Accrued Expenses, for the whole
 amount, SST included. Rejecting it removes that entry again, with no reversing
 entry and no trace in Journals.
 
