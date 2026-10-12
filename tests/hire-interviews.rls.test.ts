@@ -13,6 +13,9 @@
 // the migrations were written: the time is sent as TEXT and must carry a zone (26), hire_reschedule_interview answers
 // { word, moved } (27), the text PostgREST returns for a timestamp is one the app can read (28), and the state
 // machine's remaining moves, including the duplicate that "Mark as scheduled again" is allowed to make (29).
+// Cases 30 and 31 are not about the six functions: they run the READ behind every assistant card about an existing
+// interview (readInterviewCard in src/lib/hire/namesakes.ts, seven queries), through the same data object the app
+// builds from a session client. Until these two ran, that read had only ever met a stand-in client.
 //
 // Who calls what. All six functions are granted to `authenticated` only, so every call is made by a signed-in
 // client or by the signed-out visitor client, which must be refused outright (42501). The service key is never
@@ -39,6 +42,7 @@ import { beforeAll, expect, test } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createAnonymousClient } from '@/lib/supabase/anonymous';
 import { instantMs } from '@/lib/hire/interview-time';
+import { createSupabaseHireData } from '@/lib/hire/supabase';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import {
   createConfirmedTestUser, createOrg, joinDemo, liveClient, signInAnon, signInOwner,
@@ -1061,3 +1065,99 @@ testWithSupabase('29. only a scheduled interview can be moved, cancelled or give
   // And a second recording of the same meeting is a duplicate.
   expectWord(await recordPast(owner.c, applicationId, { at: heldAt, outcome: 'completed' }), 'duplicate');
 }, 180_000);
+
+// ─── the read behind an assistant card ───────────────────────────────────────
+
+/** The read as the app makes it: the data object built from a session client and a workspace, then its `interviewCard`. */
+const cardRead = (c: SupabaseClient, orgId: string, id: unknown) => createSupabaseHireData(c, orgId).interviewCard!(id);
+const NO_CARD = { target: null, others: [], cut: false, also: [], alsoClosed: [], application_outcome: null };
+
+testWithSupabase('30. the read behind a card: the interview itself, the same candidate\'s other interviews under another job, and never a namesake\'s as hers', async () => {
+  const secondJob = await newJob(owner, 'card second job', openFields());
+  const name = `Card Read Person ${RUN}`;
+  const email = uniqueEmail();
+
+  // One candidate with two applications (the second add finds her by her email), and a namesake with one.
+  const first = expectAdded(await add(owner.c, owner.orgId, { name, email, job_id: openJob.id }), 'created', 'created');
+  const second = expectAdded(await add(owner.c, owner.orgId, { name, email, job_id: secondJob.id }), 'existing', 'created');
+  expect(second.candidate_id, 'the same candidate').toBe(first.candidate_id);
+  const namesake = expectAdded(await add(owner.c, owner.orgId, { name, email: uniqueEmail(), job_id: openJob.id }), 'created', 'created');
+  expect(namesake.candidate_id, 'another candidate with the same name').not.toBe(first.candidate_id);
+  const [firstApp, secondApp, namesakeApp] = [first.application_id!, second.application_id!, namesake.application_id!];
+
+  const at = klAt(5, '15:00');
+  const place = 'https://meet.example.com/card-read';
+  const target = expectCreated(await schedule(owner.c, firstApp, { at, duration: 45, kind: 'video', place, interviewer: 'Farah Lim', notes: 'Never read by the card.' }));
+  // Her other scheduled interview, for the other job; one of hers that is over; and the namesake's, for the same job.
+  const otherJobs = expectCreated(await schedule(owner.c, secondApp, { at: klAt(6, '10:00'), kind: 'onsite', place: 'Level 3' }));
+  const over = expectCreated(await schedule(owner.c, firstApp, { at: klAt(7, '11:00'), kind: 'phone' }));
+  expectWord(await cancel(owner.c, over), 'ok');
+  const theirs = expectCreated(await schedule(owner.c, namesakeApp, { at: klAt(8, '09:00') }));
+
+  const read = await cardRead(owner.c, owner.orgId, target);
+
+  // Every field the card's line and the last check use.
+  expect(read.target).toMatchObject({
+    id: target, application_id: firstApp, candidate: name, job: openJob.title, kind: 'video', status: 'scheduled', duration_minutes: 45, place,
+  });
+  expect(Number.isNaN(instantMs(read.target!.scheduled_at)), 'the stored time is text the app can read').toBe(false);
+  expect(sameInstant(read.target!.scheduled_at, at), 'the stored time is the one sent').toBe(true);
+  expect(read.application_outcome).toBe('active');
+  expect(read.cut).toBe(false);
+  // No notes, no interviewer, no contact detail in anything the read answers.
+  expect(JSON.stringify(read)).not.toMatch(/Never read by the card|Farah Lim|example\.com(?!\/card-read)/);
+
+  // "Also scheduled": hers under the other job, with that job's title. Not the cancelled one, and not the namesake's.
+  expect(read.also.map((i) => i.id)).toEqual([otherJobs]);
+  expect(read.also[0]).toMatchObject({ application_id: secondApp, candidate: name, job: secondJob.title, kind: 'onsite', status: 'scheduled', duration_minutes: 60, place: 'Level 3' });
+  // "Also closed": hers that is over.
+  expect(read.alsoClosed.map((i) => i.id)).toEqual([over]);
+  expect(read.alsoClosed[0]).toMatchObject({ application_id: firstApp, job: openJob.title, kind: 'phone', status: 'cancelled' });
+  // The ones a card could be taken for: the same name AND the same job, hers or the namesake's. Not the other job's.
+  expect(read.others.map((i) => i.id).sort()).toEqual([over, theirs].sort());
+  expect(read.others.find((i) => i.id === theirs)).toMatchObject({ application_id: namesakeApp, candidate: name, job: openJob.title });
+
+  // The namesake's own card lists nothing of hers.
+  const namesakeRead = await cardRead(owner.c, owner.orgId, theirs);
+  expect(namesakeRead.target?.id).toBe(theirs);
+  expect(namesakeRead.also).toEqual([]);
+  expect(namesakeRead.alsoClosed).toEqual([]);
+  expect(namesakeRead.others.map((i) => i.id).sort()).toEqual([target, over].sort());
+
+  // The closed one read as the target (what a "mark as scheduled again" card is about).
+  const closedRead = await cardRead(owner.c, owner.orgId, over);
+  expect(closedRead.target).toMatchObject({ id: over, status: 'cancelled' });
+  expect(closedRead.also.map((i) => i.id).sort()).toEqual([target, otherJobs].sort());
+  expect(closedRead.alsoClosed).toEqual([]);
+
+  // A member and a viewer of the same workspace read the same card: the read is what row-level security lets them see.
+  for (const [who, label] of [[member, 'member'], [viewerIn, 'viewer']] as const) {
+    const theirRead = await cardRead(who, owner.orgId, target);
+    expect(theirRead.target?.id, label).toBe(target);
+    expect(theirRead.also.map((i) => i.id), label).toEqual([otherJobs]);
+  }
+
+  // The application's outcome follows the application.
+  expectWord(await reject(owner.c, firstApp), 'ok');
+  expect((await cardRead(owner.c, owner.orgId, target)).application_outcome).toBe('rejected');
+}, 120_000);
+
+testWithSupabase('31. the read behind a card answers nothing to another workspace, to a demo guest, for an id that is not one, and once the interview is gone', async () => {
+  const applicationId = await applied(`Card Gone Person ${RUN}`);
+  const id = expectCreated(await schedule(owner.c, applicationId, { at: klAt(4, '10:00') }));
+  expect((await cardRead(owner.c, owner.orgId, id)).target?.id).toBe(id);
+
+  // Another workspace's owner: through their own workspace, and when they name the first one.
+  expect(await cardRead(other.c, other.orgId, id)).toEqual(NO_CARD);
+  expect(await cardRead(other.c, owner.orgId, id)).toEqual(NO_CARD);
+  // A viewer of the demo workspace: the same two ways.
+  expect(await cardRead(demoGuest, demoId, id)).toEqual(NO_CARD);
+  expect(await cardRead(demoGuest, owner.orgId, id)).toEqual(NO_CARD);
+  // An id that names nothing, and things that are not ids: no query error, nothing found.
+  expect(await cardRead(owner.c, owner.orgId, NONE)).toEqual(NO_CARD);
+  for (const odd of [undefined, null, '', 7]) expect(await cardRead(owner.c, owner.orgId, odd)).toEqual(NO_CARD);
+
+  // Its application is deleted, and the interview with it: the read says it is gone, it does not fail.
+  expectWord((await owner.c.rpc('hire_delete_application', { p_application_id: applicationId })) as Res, 'ok');
+  expect(await cardRead(owner.c, owner.orgId, id)).toEqual(NO_CARD);
+}, 120_000);
