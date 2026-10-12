@@ -149,6 +149,30 @@ export type OvertimeRecord = {
   paid_month: string | null;
 };
 
+/**
+ * An overtime request as a manager reads it, through `hr_team_overtime`. It has no pay fields at all (no hourly
+ * rate, no amount, no payslip, no paid month): they are absent, not zero, so a screen cannot show them. The name is
+ * not in it either: join it from the employee list.
+ */
+export type TeamOvertimeRow = {
+  id: string;
+  org_id: string;
+  employee_id: string;
+  work_date: string;
+  hours: number;
+  /** Null on a row made before the day kind was kept. */
+  day_kind: OvertimeDayKind | null;
+  /** The workspace-wide multiplier for that kind of day, not anyone's pay. Null on an old row. */
+  rate_multiplier: number | null;
+  reason: string | null;
+  status: RequestStatus;
+  requested_by: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+  decision_note: string | null;
+  created_at: string;
+};
+
 export type AttendanceDay = {
   id: string;
   employee_id: string;

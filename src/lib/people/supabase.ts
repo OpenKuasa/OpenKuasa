@@ -25,6 +25,7 @@ import type {
   PublicHoliday,
   Review,
   Shift,
+  TeamOvertimeRow,
   TimeOffRequest,
   TimesheetEntry,
   Training,
@@ -145,6 +146,59 @@ function overtimeOf({ payslip, ...row }: OvertimeRow): OvertimeRecord {
     ...named(row),
     paid_month: payslip && payslip.status === 'paid' ? payslip.period_month.slice(0, 7) : null,
   };
+}
+
+const OVERTIME_KINDS = ['weekday', 'rest_day', 'public_holiday'] as const;
+const REQUEST_STATUSES = ['pending', 'approved', 'rejected', 'cancelled'] as const;
+const text = (value: unknown): string | null => (typeof value === 'string' ? value : null);
+const numberOrNull = (value: unknown): number | null => {
+  const n = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+  return typeof n === 'number' && Number.isFinite(n) ? n : null;
+};
+
+/**
+ * What `hr_team_overtime` returns, as rows. Each row is rebuilt from the fourteen columns the function is meant to
+ * return and nothing else, so a pay field that ever turned up in the reply would be dropped here. A reply that is not
+ * a list, and a row that is not one (no id, no known status), is left out.
+ */
+export function parseTeamOvertime(data: unknown): TeamOvertimeRow[] {
+  if (!Array.isArray(data)) return [];
+  const rows: TeamOvertimeRow[] = [];
+  for (const item of data) {
+    if (typeof item !== 'object' || item === null) continue;
+    const r = item as Record<string, unknown>;
+    const status = REQUEST_STATUSES.find((s) => s === r.status);
+    const hours = numberOrNull(r.hours);
+    if (typeof r.id !== 'string' || typeof r.employee_id !== 'string' || !status || hours === null) continue;
+    rows.push({
+      id: r.id,
+      org_id: text(r.org_id) ?? '',
+      employee_id: r.employee_id,
+      work_date: text(r.work_date) ?? '',
+      hours,
+      day_kind: OVERTIME_KINDS.find((k) => k === r.day_kind) ?? null,
+      rate_multiplier: numberOrNull(r.rate_multiplier),
+      reason: text(r.reason),
+      status,
+      requested_by: text(r.requested_by),
+      decided_by: text(r.decided_by),
+      decided_at: text(r.decided_at),
+      decision_note: text(r.decision_note),
+      created_at: text(r.created_at) ?? '',
+    });
+  }
+  return rows;
+}
+
+/**
+ * A manager's team overtime, newest first, through `hr_team_overtime`: their direct reports' requests with no pay
+ * (the table itself gives a manager only their own rows). Empty for anyone who manages nobody and in the demo. Like
+ * the other provider reads it throws when the database refuses, and the message holds the code and nothing else.
+ */
+export async function readTeamOvertime(client: SupabaseClient, orgId: string): Promise<TeamOvertimeRow[]> {
+  const { data, error } = await client.rpc('hr_team_overtime', { p_org: orgId });
+  if (error) throw new Error(`hr_team_overtime failed: ${error.code ?? 'no-code'}`);
+  return parseTeamOvertime(data);
 }
 
 /** True when `a` is a later instant than `b` (microseconds compared, not just milliseconds). */
