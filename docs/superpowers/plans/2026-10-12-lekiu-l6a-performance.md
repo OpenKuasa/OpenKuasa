@@ -226,3 +226,24 @@ Spec §5.3. Rules:
 ## Not in this plan
 
 Everything in the spec's "Out" list. Also: dropping `hr_scorecards` and `hr_trainings.status`; Jebat, Kasturi and Lekir's reply-language wording; slice L6b.
+
+## Execution Notes (2026-10-12)
+
+- **Built as planned**, tasks 1 to 6, subagent-driven; tasks 3 to 5 in parallel. Each task was reviewed; a whole-branch review and one fix wave followed, then a scoped re-review (clean).
+- **Rulings made during the build:**
+  - "A member's page imports nothing that reaches an owner-only action" became "a component written for members names no owner-only action, and a screen renders an owner component only for an owner or admin outside the demo", decided by pure functions tested for every kind of viewer. The server refuses in any case.
+  - The unread count is read in `src/app/(app)/people/layout.tsx` only, so no other product's pages pay for it. The badge appears after hydration.
+  - Undoing a completion is always allowed; only marking needs the course to have started.
+  - For an owner or admin, a Lekiu change with no employee named falls back to their own record, as the leave tools do; the card says so.
+  - All three migrations were applied together (the plan held the re-seed back until the merge): the live check needs the new re-seed.
+- **Applied to live** 2026-10-12, about 08:50 MYT, one file at a time with a 5-second lock timeout. All 27 function bodies match their files by hash. The demo was re-seeded once by hand: 20 reviews (2 drafts), 6 announcements (1 draft).
+- **Checked on live:** `people_performance_check.sql` and `people_rls_check.sql` both PASSED (rolled back). Full `pnpm test` after the apply: 288 files, 5,830 tests, none failing.
+- **Browser passes:** demo visitor (separate signed-out context), owner, member: all pass. A member sees no draft review and no draft announcement in any form; the unread badge shows and clears on viewing.
+- **Real Lekiu questions (5):** an owner's goal for a named employee (card names them; saved); all reviews in Bahasa Malaysia (draft marked); pulling a review back (declined, pointed to the screen, no card); a member asking about a period with a draft ("no review on record", no hint); a member enrolling in Bahasa Malaysia (card, saved).
+- **Known, not fixed here:**
+  - After a Bahasa Malaysia turn, an English question was answered in Bahasa Malaysia (the decline in question 3). The language block was out of scope for this slice.
+  - Approval cards are always in English.
+  - An inactive linked employee is offered Enrol; the database refuses with the right sentence.
+  - A member enrolled in an upcoming course sees Withdraw without the words "You are enrolled".
+  - The demo still shows the disabled sample buttons ("Available in a later update") on My Goals and Training, as on other Lekiu screens.
+  - `hr_scorecards` and `hr_trainings.status` are kept and unused.
