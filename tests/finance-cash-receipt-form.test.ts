@@ -9,13 +9,17 @@ import {
 import {
   type CashReceiptForm,
   TYPED_PAYER,
+  afterRefusedReceiptSave,
   cashReceiptFormError,
   cashReceiptPayload,
   cashReceiptTotal,
   chooseReceiptCustomer,
   editCashReceiptForm,
   keepReceiptInvoices,
+  leftOutInvoicesNote,
   newCashReceiptForm,
+  receiptInvoicesForForm,
+  receiptPaymentsForForm,
   receiptSavedNotPosted,
   receivableFor,
   toggleAllReceiptInvoices,
@@ -329,5 +333,88 @@ describe('what a row’s menu offers', () => {
     expect(receiptVoidEffect(receipt())).toBe('It will no longer count as money received.');
     expect(receiptDeleteEffect(receipt({ kind: 'invoice' }))).toBe('What it holds of its invoices is freed. ');
     expect(receiptDeleteEffect(receipt())).toBe('');
+  });
+});
+
+describe('what the browser is sent for the form', () => {
+  const invoices = [
+    invoice(1),
+    invoice(2, { display_status: 'overdue' }),
+    invoice(3, { display_status: 'draft' }),
+    invoice(4, { display_status: 'paid', balance: 0 }),
+    invoice(5, { display_status: 'void' }),
+    invoice(6, { display_status: 'sent', balance: 0 }),
+  ];
+  it('keeps the invoices that can still take money: posted, with a balance', () => {
+    expect(receiptInvoicesForForm(invoices).map((i) => i.invoice_no)).toEqual(['INV-0001', 'INV-0002']);
+  });
+  it('keeps the payment rows that hold part of an invoice without being posted', () => {
+    const rows = ['draft', 'pending_approval', 'scheduled', 'posted', 'void', 'rejected'].map((status, n) =>
+      paid(n + 1, { status: status as PaymentInRow['status'] }),
+    );
+    expect(receiptPaymentsForForm(rows).map((p) => p.status)).toEqual(['draft', 'pending_approval', 'scheduled']);
+  });
+  it('changes nothing the form offers or holds, including for a draft being changed', () => {
+    const everything = [invoice(1), invoice(2, { balance: 40 }), invoice(3, { display_status: 'draft' }), invoice(4, { display_status: 'paid', balance: 0 })];
+    const payments = [
+      paid(1, { transaction_id: DRAFT, amount: 100 }),
+      paid(2, { transaction_id: 'other-draft', amount: 10 }),
+      paid(4, { transaction_id: 'posted-one', status: 'posted', amount: 100 }),
+    ];
+    const sentInvoices = receiptInvoicesForForm(everything);
+    const sentPayments = receiptPaymentsForForm(payments);
+    for (const editingId of [undefined, DRAFT]) {
+      expect(receivableFor(sentInvoices, sentPayments, editingId)).toEqual(receivableFor(everything, payments, editingId));
+    }
+    // The draft's own invoice is offered while it is being changed, though no one else can take it.
+    expect(receivableFor(sentInvoices, sentPayments, DRAFT).map((i) => i.invoice_no)).toContain('INV-0001');
+    const row = receipt({ kind: 'invoice', contact_id: AISYAH, party_name: 'Aisyah Trading', category_id: null, category_name: null, amount: 100 });
+    expect(editCashReceiptForm(row, sentPayments)).toEqual(editCashReceiptForm(row, payments));
+  });
+});
+
+describe('a new form for invoices', () => {
+  it('chooses the customer when exactly one has open invoices', () => {
+    const one = receivableFor([invoice(1), invoice(2)], []);
+    expect(newCashReceiptForm(accounts, categories, today, one).customerId).toBe(AISYAH);
+  });
+  it('leaves the customer to the person when several have, or none has', () => {
+    const several = receivableFor([invoice(1), invoice(5, { customer_id: ZAKI, customer_name: 'Zaki Enterprise' })], []);
+    expect(newCashReceiptForm(accounts, categories, today, several).customerId).toBe('');
+    expect(newCashReceiptForm(accounts, categories, today, []).customerId).toBe('');
+    expect(newCashReceiptForm(accounts, categories, today).customerId).toBe('');
+  });
+});
+
+describe('a draft whose ticked invoice can no longer take money', () => {
+  const receivable = receivableFor([invoice(1)], []);
+  it('says so in one sentence for one invoice, and for several', () => {
+    expect(leftOutInvoicesNote(invoiceForm({ amounts: { [invoiceId(1)]: '10', [invoiceId(9)]: '5' } }), receivable)).toBe(
+      'An invoice ticked on this draft can no longer take money, so it has been left out.',
+    );
+    expect(leftOutInvoicesNote(invoiceForm({ amounts: { [invoiceId(8)]: '10', [invoiceId(9)]: '5' } }), receivable)).toBe(
+      '2 invoices ticked on this draft can no longer take money, so they have been left out.',
+    );
+  });
+  it('says nothing when every ticked invoice is still offered, or none is ticked', () => {
+    expect(leftOutInvoicesNote(invoiceForm(), receivable)).toBeNull();
+    expect(leftOutInvoicesNote(invoiceForm({ amounts: {} }), receivable)).toBeNull();
+  });
+});
+
+describe('a draft that someone deleted while it was being changed', () => {
+  it('offers to save what was typed as a new receipt: the form forgets the id and the sentence says so', () => {
+    const form = incomeForm({ id: DRAFT, notes: 'kept' });
+    const after = afterRefusedReceiptSave(form, 'That receipt no longer exists.');
+    expect(after.error).toBe('That receipt no longer exists. Save again to record it as a new receipt.');
+    expect(after.form).toMatchObject({ notes: 'kept', amount: '50' });
+    expect(after.form.id).toBeUndefined();
+    expect(cashReceiptPayload(after.form)).not.toHaveProperty('id');
+  });
+  it('leaves the form and the sentence alone for any other refusal, and for a form with no id', () => {
+    const form = incomeForm({ id: DRAFT });
+    expect(afterRefusedReceiptSave(form, 'Enter an amount above 0.')).toEqual({ form, error: 'Enter an amount above 0.' });
+    const fresh = incomeForm();
+    expect(afterRefusedReceiptSave(fresh, 'That receipt no longer exists.')).toEqual({ form: fresh, error: 'That receipt no longer exists.' });
   });
 });

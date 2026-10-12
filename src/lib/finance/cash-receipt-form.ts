@@ -13,7 +13,7 @@ import { CASH_RECEIPT_MESSAGES, type IncomeCategory, saveCashReceiptInput } from
 import { typedNumber } from './format';
 import { INVOICE_MESSAGES, type InvoiceListRow } from './invoices';
 import type { FinanceAccount, PaymentInRow, PaymentMethod } from './money';
-import { type ReceivableInvoice, invoicesOf, receivableInvoices } from './receipt-form';
+import { type ReceivableInvoice, invoicesOf, receiptCustomers, receivableInvoices } from './receipt-form';
 import { DRAFT_NEEDS_SIGN_OFF, WRITE_FAILED } from './result';
 
 const M = CASH_RECEIPT_MESSAGES;
@@ -52,11 +52,40 @@ export function receivableFor(invoices: InvoiceListRow[], payments: PaymentInRow
   return receivableInvoices(invoices, editingId ? payments.filter((p) => p.transaction_id !== editingId) : payments);
 }
 
-/** A fresh form: for other income, into the first bank account, by bank transfer; the category chosen when there is only one. */
-export function newCashReceiptForm(accounts: FinanceAccount[], categories: IncomeCategory[], today: string): CashReceiptForm {
+/**
+ * The invoices the form can put a receipt against, from every invoice: posted
+ * ("Sent" or "Overdue") and still owing. Only these are sent to the browser.
+ * `receivableInvoices` applies the same test, so the form offers what it did
+ * before; a draft's own invoices are among them while it is being changed,
+ * because they are still posted and still owe.
+ */
+export function receiptInvoicesForForm(invoices: InvoiceListRow[]): InvoiceListRow[] {
+  return invoices.filter((i) => (i.display_status === 'sent' || i.display_status === 'overdue') && i.balance > 0);
+}
+
+/**
+ * The payment rows the form reads, from every payment in: the ones that hold
+ * part of an invoice without being posted (what `heldBy` counts, and every
+ * draft receipt's split). The rest never reach the browser.
+ */
+export function receiptPaymentsForForm(payments: PaymentInRow[]): PaymentInRow[] {
+  return payments.filter((p) => p.status === 'draft' || p.status === 'pending_approval' || p.status === 'scheduled');
+}
+
+/**
+ * A fresh form: for other income, into the first bank account, by bank transfer; the category chosen when there is only one.
+ * Given the invoices that can take a receipt, the customer is chosen too when exactly one has open invoices, as on Payments In.
+ */
+export function newCashReceiptForm(
+  accounts: FinanceAccount[],
+  categories: IncomeCategory[],
+  today: string,
+  receivable: ReceivableInvoice[] = [],
+): CashReceiptForm {
+  const customers = receiptCustomers(receivable);
   return {
     kind: 'income',
-    customerId: '',
+    customerId: customers.length === 1 ? customers[0].id : '',
     amounts: {},
     payer: TYPED_PAYER,
     payerName: '',
@@ -191,4 +220,24 @@ export function receiptSavedNotPosted(error: string): string {
   // Already says it was saved; reached only when the person's role changed while the form was open.
   if (error === DRAFT_NEEDS_SIGN_OFF) return 'The receipt was saved as a draft. Only an owner or admin can post it.';
   return `The receipt was saved as a draft, but it was not posted. ${error}`;
+}
+
+/** Says, in one sentence, that ticked invoices were left out because they can no longer take money; null when none was. */
+export function leftOutInvoicesNote(form: CashReceiptForm, receivable: ReceivableInvoice[]): string | null {
+  const left = Object.keys(form.amounts).length - Object.keys(keepReceiptInvoices(form, receivable).amounts).length;
+  if (left <= 0) return null;
+  return left === 1
+    ? 'An invoice ticked on this draft can no longer take money, so it has been left out.'
+    : `${left} invoices ticked on this draft can no longer take money, so they have been left out.`;
+}
+
+/**
+ * After a save that was refused. A draft that someone deleted meanwhile
+ * answers "no longer exists" on every try; the form then forgets the id, so
+ * the next save records what was typed as a new receipt, and the sentence
+ * says so. Any other refusal changes nothing.
+ */
+export function afterRefusedReceiptSave(form: CashReceiptForm, error: string): { form: CashReceiptForm; error: string } {
+  if (error !== M.gone || !form.id) return { form, error };
+  return { form: { ...form, id: undefined }, error: `${M.gone} Save again to record it as a new receipt.` };
 }
