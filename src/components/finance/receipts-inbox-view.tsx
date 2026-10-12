@@ -68,11 +68,11 @@ export function ReceiptsInboxView({
 
       <BentoGrid>
         {view.stats.map((s, i) => (
-          <BentoCard key={s.label} tone={i === 0 ? 'primary' : 'default'} className="col-span-1 md:col-span-3">
+          <BentoCard key={s.label} tone={i === 0 ? 'primary' : 'default'} className={i === 0 ? 'col-span-2 md:col-span-4' : 'col-span-1 md:col-span-4'}>
             <BentoStat label={s.label} value={s.value} delta={s.delta} deltaTone={s.deltaTone} onPrimary={i === 0} />
           </BentoCard>
         ))}
-        <BentoCard title="By status" subtitle="Every receipt" icon={PieChart} className="col-span-1 md:col-span-3">
+        <BentoCard title="By status" subtitle="Every receipt" icon={PieChart} className="col-span-2 md:col-span-4 md:self-start">
           {view.hasReceipts ? (
             <DonutStat data={view.byStatus} height={220} centerValue={view.total} centerLabel="receipts" />
           ) : (
@@ -92,7 +92,7 @@ export function ReceiptsInboxView({
               </Button>
             ) : undefined
           }
-          className="col-span-2 md:col-span-12"
+          className="col-span-2 md:col-span-8"
         >
           <div className="flex flex-wrap items-center gap-2 px-4">
             <div className="relative w-full sm:w-72">
@@ -159,7 +159,7 @@ export function ReceiptsInboxView({
                           <div className="grid size-8 shrink-0 place-items-center rounded bg-muted">
                             <Receipt className="size-4 text-muted-foreground" />
                           </div>
-                          <div className="min-w-0">
+                          <div className="min-w-36">
                             <p className="max-w-56 whitespace-normal break-words font-medium">
                               {r.file_name}
                             </p>
@@ -171,7 +171,7 @@ export function ReceiptsInboxView({
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="min-w-44">
                         <p className="max-w-64 whitespace-normal break-words">{r.vendor ?? '—'}</p>
                         {note && (
                           <p className="max-w-64 whitespace-normal text-xs text-muted-foreground">
