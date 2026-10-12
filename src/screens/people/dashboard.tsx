@@ -1,4 +1,5 @@
 import { Banknote, ChartColumn, Download, PieChart, TrendingUp, UsersRound } from 'lucide-react';
+import Link from 'next/link';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { AreaTrend, BarGroup, DonutStat, Sparkline, type Series, type Slice } from '@/components/charts';
 import { PageHeader } from '@/components/screen/page-header';
@@ -6,6 +7,8 @@ import { ScreenContainer } from '@/components/screen/screen-container';
 import { buildDashboardModel, dashboardAttendanceFrom } from '@/lib/people/company';
 import { monthYearLabel, todayInMalaysia } from '@/lib/people/dates';
 import { isTeamView } from '@/lib/people/own';
+import { buildTeamSection, showsTeamSection } from '@/lib/people/team-section';
+import { ZERO_WAITING, readWaitingCounts } from '@/lib/people/waiting-counts';
 import { rm } from '@/lib/reach/format';
 import { HR_ONLY, LOAD_FAILED, LaterButton, Muted, loadPeople } from './parts';
 
@@ -21,12 +24,22 @@ const LEAVE_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-5)', 'var
  * returns to HR (or in the demo), so a member sees a notice in its place.
  */
 export default async function DashboardScreen() {
-  const { model } = await loadPeople('dashboard', async (data, now, ctx) => {
+  const { model: loaded } = await loadPeople('dashboard', async (data, now, ctx) => {
     const today = todayInMalaysia(now);
     const team = isTeamView(ctx.viewer);
     const employees = await data.listEmployees();
     if (!team) {
-      return buildDashboardModel({ employees, leave: [], attendance: [], runs: [], payslips: [] }, today, false);
+      // A manager's company-wide cards keep their HR-only notices; the team card is extra.
+      const [teamLeave, waiting] = showsTeamSection(ctx.viewer)
+        ? await Promise.all([
+            data.listLeaveRequests(),
+            ctx.orgId ? readWaitingCounts({ client: ctx.client, orgId: ctx.orgId }) : Promise.resolve(ZERO_WAITING),
+          ])
+        : [[], ZERO_WAITING];
+      return {
+        dashboard: buildDashboardModel({ employees, leave: [], attendance: [], runs: [], payslips: [] }, today, false),
+        mine: buildTeamSection({ viewer: ctx.viewer, employees, leave: teamLeave, waiting, today }),
+      };
     }
     const [leave, attendance, runs, payslips] = await Promise.all([
       data.listLeaveRequests(),
@@ -34,8 +47,10 @@ export default async function DashboardScreen() {
       data.listPayrollRuns(),
       data.listPayslips(),
     ]);
-    return buildDashboardModel({ employees, leave, attendance, runs, payslips }, today, true);
+    return { dashboard: buildDashboardModel({ employees, leave, attendance, runs, payslips }, today, true), mine: null };
   });
+  const model = loaded?.dashboard ?? null;
+  const mine = loaded?.mine ?? null;
 
   const dash = '—';
   const clockedIn = model?.attendanceToday?.clocked_in;
@@ -101,6 +116,50 @@ export default async function DashboardScreen() {
             </p>
           ) : null}
         </BentoCard>
+
+        {mine ? (
+          <BentoCard title="My team" subtitle="The people who report to you" icon={UsersRound} className="col-span-2 md:col-span-12">
+            <div className="grid gap-6 md:grid-cols-3">
+              <div>
+                <BentoStat label="Reporting to you" value={mine.members} />
+              </div>
+              <div>
+                <h3 className="mb-2 text-sm font-medium">Away today</h3>
+                {mine.away.length === 0 ? (
+                  <Muted>Nobody is away today</Muted>
+                ) : (
+                  <ul className="space-y-1 text-sm">
+                    {mine.away.map((person) => (
+                      <li key={`${person.name}-${person.when}`}>
+                        <span className="font-medium">{person.name}</span>{' '}
+                        <span className="text-muted-foreground">
+                          {person.kind}, {person.when}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div>
+                <h3 className="mb-2 text-sm font-medium">Waiting for you</h3>
+                {mine.waiting.length === 0 ? (
+                  <Muted>Nothing is waiting for you</Muted>
+                ) : (
+                  <ul className="space-y-1 text-sm">
+                    {mine.waiting.map((item) => (
+                      <li key={item.href}>
+                        <Link href={item.href} className="font-medium text-primary hover:underline">
+                          {item.label}
+                        </Link>{' '}
+                        <span className="tabular-nums text-muted-foreground">{item.count}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          </BentoCard>
+        ) : null}
 
         <BentoCard
           title="Attendance trend"
