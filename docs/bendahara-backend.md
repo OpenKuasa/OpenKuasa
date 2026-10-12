@@ -40,7 +40,8 @@ the data layer, with unit tests; the client components only draw them.
 | `cash-receipts.ts` | A receipt's writes, and the one read its form needs: the Zod schema of a draft receipt (`saveCashReceiptInput`, for invoices or for income, told apart by `kind`), saving a draft (`saveCashReceipt`), posting it (`postCashReceipt`), voiding a posted one (`voidCashReceipt`), deleting a draft (`deleteCashReceipt`), the sentence for each database code (`CASH_RECEIPT_MESSAGES`), and the active income categories (`listIncomeCategories`). Every write given an id asks `finance_cash_receipts` first, so one side of a transfer is never reached |
 | `cash-receipt-form.ts` | The receipt form: defaults, the form for a draft being changed (`editCashReceiptForm`, from its row and its Payments In rows), which invoices it can go against (`receivableFor`: the payment-in rule, without counting what the draft being changed holds itself), validation, what is sent (the chosen side only), a picker's list with a draft's archived choice in it (`withCurrent`). `receiptSavedNotPosted` words a receipt that was saved as a draft but not posted. `receiptInvoicesForForm` and `receiptPaymentsForForm` trim what the loader sends the form to the invoices that can still take money and the payments that hold part of one. `leftOutInvoicesNote` says when ticked invoices were left out. `afterRefusedReceiptSave` makes the form forget the id of a draft that was deleted meanwhile |
 | `expenses.ts` | Expenses: reading them (`listExpenses`, from the view `finance_expense_totals`, a page at a time; `listExpenseCategories`), the row type, the three statuses a person sets and `paid`, which is only how an expense reads; and the writes of the Expenses screen: `saveExpenseInput`, `saveExpense` (`finance_save_expense`, then a read of the status the database left), `approveExpense` and `rejectExpense` (one update of `status`), `deleteExpense`, and `EXPENSE_MESSAGES` |
-| `expense-form.ts` | The Expenses screen's rules, pure: the form (`newExpenseForm`, `editExpenseForm`, `expensePayload`, `expenseFormError`, `expenseSaveHint`), what a row's menu offers each person (`expenseActions`), how a part-paid expense reads (`isPartPaid`, `expensePaymentNote`), and the note for an expense just written that is not in the list |
+| `expense-form.ts` | The Expenses screen's rules, pure: the form (`newExpenseForm`, `editExpenseForm`, `expensePayload`, `expenseFormError`, `expenseSaveHint`), what a row's menu offers each person (`expenseActions`), what is left of an expense (`expenseLeft`), how a part-paid expense reads (`isPartPaid`, `expensePaymentNote`), and the note for an expense just written that is not in the list |
+| `expense-payment.ts` | Marking an approved expense paid: `markExpensePaidInput`, `markExpensePaid` (a read of the expense as it was shown, then `finance_record_voucher` with status `posted` and one allocation, then a read of the voucher's number), `EXPENSE_PAYMENT_MESSAGES`, and the Mark paid card's rules, pure (`newExpensePayForm`, `expensePayPayload`, `expensePayError`, `expensePayHint`, the words of the note afterwards) |
 | `cash-book-views.ts` | KPI figures, chart data, table filters, status words and CSV rows for Cash Receipts, Payment Vouchers and Expenses; the period selector of the first two (`inPeriod`), which sets the cards, the donut and the table rows alike (`cashReceiptsInPeriod`, `paymentVouchersInPeriod`: a draft receipt, and a voucher waiting for approval or still to be paid, stay in every period because their cards count them whatever their date; search, filters, "View all" and Export work on top of it); which category a voucher counts under (`voucherCategory`) and which screen changes it (`voucherHome`); what a receipt's row menu offers, by its status and by whether the person may sign off (`cashReceiptActions`), and the words of its questions (`receiptName`, `receiptVoidEffect`, `receiptDeleteEffect`) |
 | `receipts.ts` | Reading the Receipts Inbox (`listInboxReceipts`, from the view `finance_receipt_inbox`), a page at a time, with the row type and the bucket's name, size limit and five file types. An inbox receipt is an uploaded photo or PDF, not a cash receipt: everything exported says `Inbox`. It never reads `file_path`: only `getReceiptFile` in `receipt-inbox.ts` does, on the server |
 | `receipt-views.ts` | The three counts, the donut, the status and type words, the "Matched to" words (`inboxDocument`), whether a row says anything about AI reading and what (`inboxReadingNote`, `INBOX_READING_NOTES`), the filter and the CSV rows of the Receipts Inbox |
@@ -118,8 +119,8 @@ vendor. Every cash receipt action (save, save and post, post, void, delete)
 refreshes what an invoice or a payment in refreshes, whatever the receipt is
 for: one against invoices moves what they owe, or holds part of them while it
 is a draft, and one save can turn a draft of one kind into the other. The
-four expense actions (`saveExpenseAction`, `approveExpenseAction`,
-`rejectExpenseAction`, `deleteExpenseAction`) refresh `EXPENSE_PATHS`:
+five expense actions (`saveExpenseAction`, `approveExpenseAction`,
+`rejectExpenseAction`, `deleteExpenseAction`, `markExpensePaidAction`) refresh `EXPENSE_PATHS`:
 Expenses, Receipts Inbox (which names the expense a receipt is tied to),
 Payment Vouchers and Banking (which name the category of the expenses a
 voucher pays), then Chart of Accounts, Journals and Reports (`LEDGER_PATHS`): an
@@ -161,7 +162,7 @@ policy.
 | `finance_contacts` | Customers and suppliers. `is_customer` and `is_supplier` can both be true. |
 | `finance_products` | Products and services for document lines. `cost` keeps four decimals, `price` two. |
 | `finance_accounts` | Bank and cash accounts. Every workspace starts with "Main Bank" and "Cash in hand". Banking lists them with their balances; they have no form yet. |
-| `finance_categories` | Expense and income categories. Every workspace starts with nine. No screen yet. |
+| `finance_categories` | Expense and income categories, each with a ledger account of its own. Every workspace starts with ten. Every member reads them; only an owner or admin adds, changes or deletes one (three restrictive policies beside the writer ones: `finance_categories_sign_off_insert`, `_update`, `_delete`). A name is 1 to 80 characters with no space at either end (`finance_categories_name_check`). No screen yet. |
 | `finance_sequences` | The next document number per type. |
 | `supplier_bills`, `supplier_bill_lines` | Supplier bills and their lines. A draft has no `bill_no`. |
 | `finance_invoices`, `finance_invoice_lines` | Sales invoices and their lines. A draft has no `invoice_no`. Lines keep the order they were entered in (`position`). `quotation_id` is the quotation an invoice was made from, if any. |
@@ -481,6 +482,21 @@ from `20261114100000_bendahara_expense_amounts.sql`): NaN is a numeric that
 passes `> 0`, and one saved expense of NaN would turn every total it is added
 into NaN. `supabase/tests/bendahara_expense_amounts_check.sql` proves it.
 
+Three columns of an expense are the database's to write
+(`20261116100000_bendahara_expense_stamp_and_category_writers.sql`).
+`updated_at` is set to the database's clock by the trigger
+`finance_expense_stamp` on every insert and on every update that changes
+anything, whatever the caller sent; it is left alone by an update that
+changes nothing, by a session with nobody signed in (a migration, a seed) and
+by the foreign key that clears a deleted user. The trigger's name sorts after
+`finance_expense_guard`, so the guard answers first and is not replaced.
+`created_by` and `created_at` are closed to the `authenticated` role by
+column grants: an insert or update that names either is refused (`42501`),
+whatever value it carries, and a new expense takes the person signed in and
+the time from the columns' defaults. `approved_by` and `approved_at` stay
+granted and are the guard's (`FIN14`, `FIN01`).
+`supabase/tests/bendahara_expense_rules_check.sql` proves all of it.
+
 ### The expense form
 
 `/finance/expenses` is writable for anyone who may edit. "New expense" opens
@@ -503,8 +519,9 @@ worked out once, on the server, in `src/screens/finance/expenses.tsx`
 |---|---|---|
 | Pending | Edit, Approve, Reject, Delete | Edit, Delete |
 | Rejected | Edit (it is sent for approval again), Delete | the same |
-| Approved, nothing paid, nothing held by a payment | Reject | nothing |
-| Approved with a payment against it; Paid | nothing | nothing |
+| Approved, nothing paid, nothing held by a payment | Mark paid, Reject | nothing |
+| Approved with a payment against it, and something left to pay | Mark paid | nothing |
+| Approved with payments that cover all of it; Paid | nothing | nothing |
 
 Approving and rejecting are checked by the expense's own guard
 (`private.finance_expense_guard`), not by the sign-off trigger, which is not
@@ -522,9 +539,11 @@ is filtered by everything the row showed, as the view returned it: `id`,
 same), `expense_date`, `category_id`, the vendor (a contact by `vendor_id`,
 with the table's own `vendor_name` empty; a typed vendor by `vendor_name`,
 with `vendor_id` empty) and `notes` (`is null` when there are none). The
-database does not move `updated_at` on a direct update: only
-`finance_save_expense` writes it, so a writer's plain update of the amount
-leaves it alone, which is why the fields are compared as well. When no row
+database moves `updated_at` on every change a signed-in person makes (the
+stamp above), so it alone would now tell a changed expense from the one
+shown; the fields are compared as well and stay compared, because the
+comparison costs nothing, was proved field by field, and does not lean on a
+trigger being there. When no row
 matches, one more read tells what happened: the expense is gone ("That expense
 no longer exists."); it now holds another status than the row showed ("This
 expense has already been approved.", "...rejected." or "This expense is
@@ -546,6 +565,43 @@ has no payment yet (`expensePaymentNote`). The view's `display_status` is
 still `approved` for it, and the status filter's Approved includes it. An
 approved expense with only a payment waiting shows the same line under an
 "Approved" chip.
+
+### Mark paid
+
+An owner or admin marks an approved expense paid from its row ("Mark paid",
+offered while anything is left of it: `expenseLeft`, its amount less what is
+paid and less what payments not yet made hold). The card
+(`expense-pay-card.tsx`) asks for the account the money leaves, the date
+paid, the method, a reference and the amount, which starts as all that is
+left and may be lowered to pay part. Who is paid is not a field: it is the
+expense's vendor, read from the database when the payment is recorded.
+
+`markExpensePaid` (`expense-payment.ts`) reads the expense as the card
+showed it (`id`, `status = approved`, `updated_at`), then calls
+`finance_record_voucher(target_org, { account_id, txn_date, method,
+reference, status: 'posted', contact_id | party_name }, [{ expense_id,
+amount }])`, then reads the voucher's number. So a payment made here is an
+ordinary payment voucher: one `finance_transactions` row, direction `out`,
+status `posted`, numbered `PV-`, with one allocation to the expense, no
+category of its own, and the expense's vendor as its payee. It shows on
+Payment Vouchers as kind `expense` and on Banking, it debits Accrued Expenses
+in the books, and it is voided as any voucher is: one change of status by an
+owner or admin (from the app once Payment Vouchers has its row actions; see
+Known limits). Voiding it makes the expense read Approved again (only posted
+money counts as paid).
+
+Paying is a sign-off: the action refuses anyone who may not sign off before
+anything is read, and the database refuses them on the voucher (`FIN14`, with
+nothing left behind). The database also has the last word on the amount
+(`FIN05`: more than is left, counting payments not made yet) and on the
+expense (`FIN04`: not approved; `FIN06`: not there). When the first read
+finds nothing, one more read tells why: "That expense no longer exists.",
+"This expense is not approved any more, so it cannot be paid." or "This
+expense was changed after you opened it. Check it again, then mark it paid."
+An amount of NaN is refused by the payment's own check
+(`finance_transactions_amount_number_check`); the schema refuses it first.
+Not checked by the database: that the account is active (the card offers
+active accounts only).
 
 For the Receipts Inbox (stage 7d): `ExpenseFormCard` takes `initial` (fields
 to start a new form with) and `actions.save` (whatever saves it), so "Create
@@ -1502,8 +1558,10 @@ Triggers enforce it, so no caller can get round it:
   deletes its split with it; the guard on allocations finds no payment row by
   then and locks nothing.
 - Clearing a deleted user from the `created_by` or `approved_by` of an
-  expense is allowed whatever its status, when the foreign key does it. By
-  hand, on an approved or rejected expense, it is `FIN01`.
+  expense is allowed whatever its status, when the foreign key does it, and
+  does not move the expense's `updated_at`. By hand, `approved_by` on an
+  approved or rejected expense is `FIN01`, and `created_by` is `42501` on any
+  expense: the column is closed.
 - Each guard steps aside when the workspace itself is being deleted.
 
 ## Database functions
@@ -1587,8 +1645,10 @@ payment that was never paid, are plain updates and deletes as well.
 `finance_post_cash_receipt`, and voids and deletes a receipt, each after
 asking `finance_cash_receipts` whether the payment is one. `expenses.ts`
 calls `finance_save_expense`, approves and rejects an expense with one
-update of `status`, and deletes one. No function of `src/lib/finance/` calls
-`finance_record_voucher`, or approves or rejects a payment: `cash-book.ts`
+update of `status`, and deletes one. `expense-payment.ts` calls
+`finance_record_voucher`, for one approved expense, paid now, and for nothing
+else. No function of `src/lib/finance/` records a voucher for a category,
+schedules one, or approves or rejects a payment: `cash-book.ts`
 only reads, and each of those writes arrives
 with its form. The other voids and deletes that exist are those of Payments
 In, Payments Out and Refunds, and reach only what those screens show.
@@ -1913,8 +1973,10 @@ with no date).
   it."). The note is worked out each time the screen draws, from the rows
   listed then, so changing the period, the filter or the search updates or
   removes it; Close and the next action remove it too.
-- Income categories cannot be added, renamed or archived yet: every workspace
-  has "Sales" and "Other income" until the Expenses forms manage categories.
+- Categories cannot be added, renamed or archived from the app yet: every
+  workspace has the ten it started with until the Categories card on Expenses
+  is built. The database is ready for it: only an owner or admin may change
+  one.
 - A sent quotation cannot be edited: mark it declined and write a new one.
   "Mark as sent" is offered on a draft whatever its total, and refused with
   the reason when its lines total nothing, as Post is on an invoice.
@@ -2040,33 +2102,37 @@ with no date).
   Payable card is totalled from every open bill, not only the contacts loaded.
   Receivable is the same for invoices that are sent or overdue.
 - Payment Vouchers is read-only. A voucher that is not a supplier payment or
-  a refund exists only in the demo workspace until its form is built; the
-  database function for it is there and nothing calls it. So an approved
-  expense cannot be paid from the app yet ("Mark paid" and the voucher form).
+  a refund exists only in the demo workspace until its form is built, with
+  one exception: "Mark paid" on Expenses records a voucher for one approved
+  expense, paid now. That voucher shows on Payment Vouchers and cannot be
+  voided from the app until Payment Vouchers has its row actions: until then
+  a wrong "Mark paid" is undone only in the database, by an owner or admin
+  (`update finance_transactions set status = 'void'`).
+- A member is offered nothing on an approved expense: scheduling a payment of
+  it is the voucher form's.
+- A payment can be recorded from an archived account by a direct call: the
+  database does not ask whether the account is active. The Mark paid card
+  offers active accounts only.
 - Any writer may change or delete any pending or rejected expense, whoever
   entered it: the database does not look at `created_by`, and neither does
-  the screen. `created_by` on a pending expense can also be rewritten by a
-  direct update; the column is not closed to the `authenticated` role as it
-  is on payments.
+  the screen.
 - An owner or admin who saves over someone else's pending expense approves
   it. To change it and leave it waiting is not possible for them.
 - A rejection carries no reason: the table has no column for one.
 - Two people changing one expense at once: the later save wins without a
   warning. An expense approved meanwhile answers that it is locked.
-- A writer's direct update of a pending expense can also still change
-  `created_by` and `created_at`; the column grants do not close them. To be
-  closed with the guard change in the next part.
-- `finance_expenses.updated_at` is written only by `finance_save_expense`; no
-  trigger moves it, so a direct update by a writer leaves it as it was. A
-  decision is therefore also matched on the fields the row showed. The next
-  part's migration should have the guard set `updated_at` on every update by a
-  signed-in person (after its "nothing changed" early return, and not for the
-  foreign keys' own clears).
+- An expense's `id` and `org_id` can still be chosen by whoever inserts it,
+  and `approved_by` and `approved_at` are still granted to the
+  `authenticated` role: the guard, not the grants, refuses a hand-written
+  value there.
+- A decision on an expense, and a payment of one, do not compare the names
+  shown: a contact renamed after the screen was drawn is approved or paid
+  under its new name. (A category can no longer be renamed by a member.)
 - An expense's category can be one that was archived since; the form keeps
   it in its picker for that expense only. `finance_save_expense` accepts an
   archived expense category from a direct call, for a new expense too: it
   checks the category's kind, not whether it is active. Categories have no
-  screen yet.
+  screen yet, and only an owner or admin can archive one.
 - A rejected expense that a voided payment still names cannot be deleted
   (the allocation's foreign key); it stays in the list.
 - A payment to a supplier or a refund recorded by someone who is not an owner
