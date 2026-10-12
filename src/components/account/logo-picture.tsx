@@ -22,7 +22,7 @@ export function LogoPicture({ url, companyName }: { url: string | null; companyN
           }}
           src={url}
           alt={`${companyName} logo`}
-          className="max-h-full max-w-full object-contain"
+          className="h-full w-full object-contain"
           onError={() => setFailedUrl(url)}
         />
       ) : (
