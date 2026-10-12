@@ -160,20 +160,28 @@ describe('what a row offers', () => {
     expect(expenseActions(rejected, true)).toEqual(['edit', 'delete']);
     expect(expenseActions(rejected, false)).toEqual(['edit', 'delete']);
   });
-  it('an approved expense: reject for an owner or admin while no payment stands against it, and nothing else', () => {
-    expect(expenseActions(approved(), true)).toEqual(['reject']);
+  it('an approved expense: an owner or admin marks it paid while anything is left, and rejects it while no payment stands against it', () => {
+    expect(expenseActions(approved(), true)).toEqual(['pay', 'reject']);
     expect(expenseActions(approved(), false)).toEqual([]);
+    // All of it is held by a payment still to be paid: nothing is left to pay, and it cannot be rejected.
     expect(expenseActions(approved({ held: 120 }), true)).toEqual([]);
-    expect(expenseActions(approved({ paid: 30 }), true)).toEqual([]);
+    expect(expenseActions(approved({ held: 20 }), true)).toEqual(['pay']);
+    expect(expenseActions(approved({ paid: 30 }), true)).toEqual(['pay']);
+    expect(expenseActions(approved({ paid: 100.1, held: 19.9 }), true)).toEqual([]);
     expect(expenseActions(approved({ paid: 120, display_status: 'paid' }), true)).toEqual([]);
     expect(expenseActions(approved({ paid: 120, display_status: 'paid' }), false)).toEqual([]);
   });
-  it('never offers a member approve or reject, whatever the row', () => {
+  it('never offers a member approve, reject or mark paid, whatever the row', () => {
     const rows = [row(), row({ status: 'rejected', display_status: 'rejected' }), approved(), approved({ paid: 1 }), approved({ held: 1 })];
     for (const r of rows) {
       expect(expenseActions(r, false)).not.toContain('approve');
       expect(expenseActions(r, false)).not.toContain('reject');
+      expect(expenseActions(r, false)).not.toContain('pay');
     }
+  });
+  it('never offers mark paid on an expense that is not approved', () => {
+    expect(expenseActions(row(), true)).not.toContain('pay');
+    expect(expenseActions(row({ status: 'rejected', display_status: 'rejected' }), true)).not.toContain('pay');
   });
   it('works out what is left of an expense to the sen, and never below nothing', () => {
     expect(expenseLeft(approved())).toBe(120);

@@ -145,7 +145,7 @@ export function expenseLeft(row: ExpenseRow): number {
   return Math.max(0, Math.round((row.amount - row.paid - row.held) * 100) / 100);
 }
 
-export type ExpenseAction = 'edit' | 'approve' | 'reject' | 'delete';
+export type ExpenseAction = 'edit' | 'approve' | 'reject' | 'delete' | 'pay';
 
 /**
  * What an expense's row menu offers, by its status and by whether the person
@@ -155,15 +155,20 @@ export type ExpenseAction = 'edit' | 'approve' | 'reject' | 'delete';
  *    an owner or admin also approves or rejects it;
  *  - rejected: edited (which sends it for approval again) or deleted;
  *    it is not approved as it stands;
- *  - approved, with nothing paid and nothing held by a payment: an owner or
- *    admin may reject it, which is its only way back; nobody edits or deletes it;
- *  - approved with a payment against it, paid or still to be paid, and paid:
- *    nothing.
+ *  - approved, for an owner or admin: marked paid while anything is left of
+ *    it (paying is a sign-off), and rejected while nothing is paid and
+ *    nothing is held by a payment, which is its only way back; nobody edits
+ *    or deletes it;
+ *  - approved, for anyone else, and paid in full: nothing.
  */
 export function expenseActions(row: ExpenseRow, canDecide: boolean): ExpenseAction[] {
   if (row.status === 'pending') return canDecide ? ['edit', 'approve', 'reject', 'delete'] : ['edit', 'delete'];
   if (row.status === 'rejected') return ['edit', 'delete'];
-  return canDecide && row.paid === 0 && row.held === 0 ? ['reject'] : [];
+  if (!canDecide) return [];
+  const actions: ExpenseAction[] = [];
+  if (expenseLeft(row) > 0) actions.push('pay');
+  if (row.paid === 0 && row.held === 0) actions.push('reject');
+  return actions;
 }
 
 /** Who is given the expense form and the row menus: anyone who may edit data in a real workspace, never the demo. */

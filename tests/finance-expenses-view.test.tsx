@@ -13,10 +13,11 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }))
 
 const never = async () => ({ ok: false as const, error: 'no' });
 const writer: ExpensesWriter = {
-  actions: { save: never, approve: never, reject: never, remove: never },
+  actions: { save: never, approve: never, reject: never, remove: never, pay: never },
   canDecide: true,
   contacts: [],
   categories: [],
+  accounts: [],
 };
 
 const render = (w?: ExpensesWriter) =>
