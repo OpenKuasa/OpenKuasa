@@ -103,7 +103,16 @@ begin
       ref := case k when 'hr' then 'hr_payroll_runs' when 'shared' then 'hr_departments' else 'hr_employee_private' end;
       select p.qual into ref_rule from pg_policies p
       where p.schemaname = 'public' and p.tablename = ref and p.policyname = ref || '_select';
-      if q is distinct from ref_rule then
+      -- Six personal tables are also read by the employee's manager
+      -- (20261115133700_people_reporting_lines.sql): their rule is the
+      -- reference rule with that one branch added at its end, word for word,
+      -- and nothing else. No other table may carry the branch, and none of
+      -- the six may lack it or carry it in another form.
+      if t in ('hr_leave_requests','hr_leave_balances','hr_time_off_requests','hr_claims','hr_overtime_records','hr_attendance_days') then
+        if q is distinct from left(ref_rule, length(ref_rule) - 1) || ' OR private.is_manager_of(employee_id))' then
+          fails := array_append(fails, format('%s does not have the read rule of %s with the manager branch added and nothing else: %s', t, ref, q));
+        end if;
+      elsif q is distinct from ref_rule then
         fails := array_append(fails, format('%s does not have the same read rule as %s: %s', t, ref, q));
       end if;
     end if;
