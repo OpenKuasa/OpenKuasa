@@ -97,6 +97,8 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
 });
 
 const { runLekiu } = await import('@/lib/ai/agents/orchestrator');
+// After this file's mocks and the values they use are in place: the helpers load the tools too.
+const { withLekiu } = await import('./helpers/approvals');
 const { createPeopleTools } = await import('@/lib/ai/people-tools');
 const { createSeedPeopleData } = await import('@/lib/people/seed');
 const { approvalDetail, approvalTitle, nameIn } = await import('@/lib/chat/change-titles');
@@ -234,7 +236,7 @@ const history = (call: Part, request: Part, approved: boolean) => [
 type People = typeof asOwner | typeof asMember;
 const firstTurn = async (c: Pick<Case, 'tool' | 'sent'>, people: People = asOwner) => {
   reset(c.tool, c.sent);
-  const first = runLekiu(ask, people);
+  const first = runLekiu(...withLekiu(ask, people));
   await first.consumeStream();
   const parts = (await first.content) as Part[];
   return { parts, call: parts.find((p) => p.type === 'tool-call'), request: parts.find((p) => p.type === 'tool-approval-request') };
@@ -261,7 +263,7 @@ describe('Lekiu’s letter and acknowledgement changes require approval', () => 
     const { call, request } = await firstTurn(c);
     expect(call).toBeDefined();
     expect(request).toBeDefined();
-    const second = runLekiu(history(call!, request!, true), asOwner);
+    const second = runLekiu(...withLekiu(history(call!, request!, true), asOwner));
     await second.consumeStream();
     expect(ran(c.write)).toBe(1);
     expect(total()).toBe(1);
@@ -271,7 +273,7 @@ describe('Lekiu’s letter and acknowledgement changes require approval', () => 
 
   it.each(rows)('%s sent as %s: rejecting it writes nothing and the turn continues', async (_tool, _sent, c) => {
     const { call, request } = await firstTurn(c);
-    const second = runLekiu(history(call!, request!, false), asOwner);
+    const second = runLekiu(...withLekiu(history(call!, request!, false), asOwner));
     await second.consumeStream();
     expect(total()).toBe(0);
     expect(await second.text).toBe('Done.');
@@ -338,7 +340,7 @@ describe('Lekiu’s letter and acknowledgement changes require approval', () => 
     const c = { tool: 'requestAcknowledgement', sent: { letter_id: ISSUED, requested: true } };
     const { call, request } = await firstTurn(c);
     expect(request).toBeDefined();
-    const second = runLekiu(history(call!, request!, true), asOwner);
+    const second = runLekiu(...withLekiu(history(call!, request!, true), asOwner));
     await second.consumeStream();
     expect(total()).toBe(0);
     expect(JSON.stringify(executed.shown)).toContain('That letter has been issued. Pull it back to draft on the Letters screen to change it.');
@@ -347,7 +349,7 @@ describe('Lekiu’s letter and acknowledgement changes require approval', () => 
   it('a letter that does not exist is refused in the tool, and nothing is written', async () => {
     const c = { tool: 'requestAcknowledgement', sent: { letter_id: GONE, requested: true } };
     const { call, request } = await firstTurn(c);
-    const second = runLekiu(history(call!, request!, true), asOwner);
+    const second = runLekiu(...withLekiu(history(call!, request!, true), asOwner));
     await second.consumeStream();
     expect(total()).toBe(0);
     expect(JSON.stringify(executed.shown)).toContain('That letter could not be found.');
@@ -449,7 +451,7 @@ describe('what the model is told when the write path refuses, or the read fails'
   const refuse = async (c: Pick<Case, 'tool' | 'sent'>, sentence: string, people: People = asOwner) => {
     const { call, request } = await firstTurn(c, people);
     executed.fail = sentence;
-    const second = runLekiu(history(call!, request!, true), people);
+    const second = runLekiu(...withLekiu(history(call!, request!, true), people));
     await second.consumeStream();
     return JSON.stringify(executed.shown);
   };
@@ -467,11 +469,31 @@ describe('what the model is told when the write path refuses, or the read fails'
     expect(ran(write)).toBe(1);
   });
 
+  it('applies the server-recorded ask/withdraw flag and ids, with the rest read fresh; an approval carrying other arguments writes nothing', async () => {
+    const { proposedBefore } = await import('./helpers/approvals');
+    const c = { tool: 'requestAcknowledgement', sent: { letter_id: DRAFT, requested: false } };
+    const { call, request } = await firstTurn(c);
+    const proposed = history(call!, request!, true);
+    const binding = proposedBefore(proposed);
+    // The approval comes back with the flag flipped: refused, nothing written.
+    const tampered = history({ ...call!, input: { letter_id: DRAFT, requested: true } }, request!, true);
+    const refused = runLekiu(tampered, asOwner, undefined, undefined, binding);
+    await refused.consumeStream();
+    expect(total()).toBe(0);
+    // The approval as proposed is applied once: recorded ids and flag, the body, title and type read fresh.
+    const applied = runLekiu(history(call!, request!, true), asOwner, undefined, undefined, proposedBefore(proposed));
+    await applied.consumeStream();
+    expect(ran('saveLetter')).toBe(1);
+    expect(executed.last).toEqual({
+      employee_id: A, letter_id: DRAFT, letter_type: 'warning', title: 'Amaran', body: 'Dear {employee_name}, take note of {today}.', ack_requested: false,
+    });
+  });
+
   it('listLetters failing inside requestAcknowledgement gives the write-failed sentence and writes nothing', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const broken = { ...asOwner, data: { ...data, listLetters: async () => { throw new TypeError('SECRET BODY'); } } };
     const { call, request } = await firstTurn({ tool: 'requestAcknowledgement', sent: { letter_id: DRAFT, requested: true } }, broken);
-    const second = runLekiu(history(call!, request!, true), broken);
+    const second = runLekiu(...withLekiu(history(call!, request!, true), broken));
     await second.consumeStream();
     expect(total()).toBe(0);
     expect(JSON.stringify(executed.shown)).toContain('That change could not be saved. Please try again.');
@@ -482,7 +504,7 @@ describe('what the model is told when the write path refuses, or the read fails'
   it('saveLetter on a draft id the read does not return keeps no request: it saves with ack_requested false', async () => {
     const c = { tool: 'saveLetter', sent: { employee_id: A, letter_id: GONE, letter_type: 'warning', title: 'T', body: 'B' } };
     const { call, request } = await firstTurn(c);
-    const second = runLekiu(history(call!, request!, true), asOwner);
+    const second = runLekiu(...withLekiu(history(call!, request!, true), asOwner));
     await second.consumeStream();
     expect(executed.last).toEqual({ employee_id: A, letter_id: GONE, letter_type: 'warning', title: 'T', body: 'B', ack_requested: false });
   });
