@@ -12,7 +12,8 @@ import {
   clock12, durationText, instantMs, isRealDate, klDateOf, klInstant, klTimeOf, longDate, pastProblem, shortWhen, timeProblem,
 } from './interview-time';
 import {
-  DURATION_CHOICES, INTERVIEW_LIMITS, INTERVIEW_NOT_READ_BACK, INTERVIEW_SAVE_FAILED, INVITATION_NOT_MADE, KIND_WORDS, interviewMessage, menuFor,
+  DURATION_CHOICES, INTERVIEW_KINDS, INTERVIEW_LIMITS, INTERVIEW_NOT_LOADED, INTERVIEW_NOT_READ_BACK, INTERVIEW_SAVE_FAILED, INVITATION_NOT_MADE,
+  KIND_WORDS, interviewMessage, menuFor,
   offerMoveToInterview, stillScheduledMessage, type InterviewMenuItem,
 } from './interviews';
 import type { InterviewRow, PanelInterview, PickerApplication } from './lists';
@@ -421,7 +422,88 @@ export function clockAt(serverNow: string, receivedMs: number | null, browserMs:
   const elapsed = receivedMs === null ? 0 : Math.max(0, browserMs - receivedMs);
   return new Date(instantMs(serverNow) + elapsed);
 }
-export type FieldPart = InterviewField | 'find' | 'alert' | 'copy' | 'unchanged';
+// ─── a form whose copy of the interview has gone stale ───────────────────────
+
+/** The interview as it is stored now: what the edit form holds, and when the row was last changed. */
+export type CurrentInterview = {
+  scheduledAt: string; durationMinutes: number; kind: InterviewKind; place: string | null; interviewerName: string | null;
+  notes: string | null; updatedAt: string;
+};
+
+const textOrNull = (value: unknown): value is string | null => value === null || typeof value === 'string';
+
+/**
+ * The answer of the action that reads an interview for its edit form, after a
+ * save was refused as stale. Only for the interview the form is about, only
+ * while it is still scheduled, and only whole: anything else fails closed, so
+ * a form is never refilled with half an interview.
+ */
+export function currentResult(answer: unknown, id: string): { ok: true; current: CurrentInterview } | { ok: false; error: string } {
+  const failed = { ok: false as const, error: INTERVIEW_NOT_LOADED };
+  if (!answer || typeof answer !== 'object') return failed;
+  const said = answer as { ok?: unknown; data?: unknown; error?: unknown };
+  if (said.ok === false) return typeof said.error === 'string' && said.error ? { ok: false, error: said.error } : failed;
+  if (said.ok !== true || !said.data || typeof said.data !== 'object') return failed;
+  const d = said.data as Record<string, unknown>;
+  const kind = INTERVIEW_KINDS.find((known) => known === d.kind);
+  if (d.id !== id || d.status !== 'scheduled' || !kind) return failed;
+  if (typeof d.scheduled_at !== 'string' || Number.isNaN(instantMs(d.scheduled_at))) return failed;
+  if (typeof d.updated_at !== 'string' || d.updated_at === '') return failed;
+  if (typeof d.duration_minutes !== 'number' || !Number.isInteger(d.duration_minutes)) return failed;
+  if (!textOrNull(d.place) || !textOrNull(d.interviewer_name) || !textOrNull(d.notes)) return failed;
+  return {
+    ok: true,
+    current: {
+      scheduledAt: d.scheduled_at, durationMinutes: d.duration_minutes, kind, place: d.place, interviewerName: d.interviewer_name,
+      notes: d.notes, updatedAt: d.updated_at,
+    },
+  };
+}
+
+const KIND_SHORT: Record<InterviewKind, InterviewRow['type']> = { video: 'Video', onsite: 'Onsite', phone: 'Phone' };
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** "22 Oct 2026", as a row's Date column has it, from a Kuala Lumpur date. */
+function rowDate(klDate: string): string {
+  const [year, month, day] = klDate.split('-');
+  return `${day} ${MONTHS_SHORT[Number(month) - 1] ?? ''} ${year}`;
+}
+
+/**
+ * The row an edit form is opened afresh with after the person chose to load
+ * the current details: whose interview it is stays, everything that can be
+ * edited and `updatedAt` (the next save's `seen`) are the stored ones. The
+ * place is given no link: a link is only ever made on the server.
+ */
+export function rowWithCurrent(row: InterviewRow, current: CurrentInterview): InterviewRow {
+  return {
+    ...row,
+    scheduledAt: current.scheduledAt,
+    date: rowDate(klDateOf(current.scheduledAt)),
+    time: clock12(current.scheduledAt),
+    durationMinutes: current.durationMinutes,
+    length: durationText(current.durationMinutes),
+    kind: current.kind,
+    type: KIND_SHORT[current.kind],
+    place: current.place,
+    placeLink: null,
+    interviewer: current.interviewerName ?? '—',
+    interviewerName: current.interviewerName,
+    notes: current.notes,
+    updatedAt: current.updatedAt,
+  };
+}
+
+/**
+ * Whether the form offers "Load the current details": only after the refusal
+ * that says someone else changed the interview, only once those details were
+ * read, and not while something is being saved. Nothing is ever sent again by
+ * itself: the person sees the current values first and saves again themselves.
+ */
+export const offersReload = (word: string | null, loaded: boolean, pending: boolean): boolean => word === 'changed' && loaded && !pending;
+export const LOAD_CURRENT = 'Load the current details';
+export const LOAD_CURRENT_HELP = 'This replaces what you typed with the interview as it is now. Nothing is saved until you save again.';
+
+export type FieldPart = InterviewField | 'find' | 'alert' | 'copy' | 'unchanged' | 'reload';
 /** The DOM id of a part of the form: `base` is the form's own `useId`. */
 export const fieldId = (base: string, part: FieldPart): string => `${base}-${part}`;
 

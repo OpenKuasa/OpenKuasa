@@ -1,7 +1,7 @@
 // tests/hire-interview-handover.test.ts
 import { describe, expect, it, vi } from 'vitest';
 import {
-  NOT_AN_INTERVIEW_ID, calendarOfChange, interviewInvitation, interviewInvitationInput, type HireWriteContext, type InterviewChange,
+  NOT_AN_INTERVIEW_ID, calendarOfChange, interviewForEdit, interviewInvitation, interviewInvitationInput, type HireWriteContext, type InterviewChange,
 } from '@/lib/hire/capabilities';
 
 /**
@@ -218,5 +218,40 @@ describe('the calendar file that goes with a saved change', () => {
     ]) {
       expect(calendarOfChange(change(missing), 'Rimba Ventures', NOW), JSON.stringify(missing)).toBeNull();
     }
+  });
+});
+
+describe('interviewForEdit: the interview as it stands now, for a form whose own copy has gone stale', () => {
+  const STORED = {
+    id: IV_ID, scheduled_at: '2026-10-22T08:00:00+00:00', duration_minutes: 90, kind: 'onsite', place: 'Level 3, Menara Rimba',
+    interviewer_name: null, notes: 'Second round.', status: 'scheduled', updated_at: '2026-10-11T04:05:00.123456+00:00',
+  };
+  const NOT_LOADED = 'The interview could not be loaded just now. Close this and open it again.';
+  it('gives the stored values the form edits, the notes among them, and the time the row was last changed, as stored', async () => {
+    const f = fake({ row: STORED });
+    expect(await interviewForEdit(f.ctx, { id: IV_ID })).toEqual({ ok: true, data: STORED });
+    expect(f.reads).toHaveLength(1);
+    expect(f.reads[0]).toMatchObject({ table: 'hire_interviews', filters: { id: IV_ID, org_id: ORG } });
+    expect(f.reads[0].columns).toBe('id,scheduled_at,duration_minutes,kind,place,interviewer_name,notes,status,updated_at');
+    expect(f.writes).toEqual([]);
+  });
+  it('names each field: nothing else the read returned rides along', async () => {
+    const result = await interviewForEdit(fake({ row: { ...STORED, org_id: ORG, application: { candidate: { email: 'aina@example.com' } } } }).ctx, { id: IV_ID });
+    expect(Object.keys(result.ok ? result.data : {}).sort()).toEqual(Object.keys(STORED).sort());
+    expect(JSON.stringify(result)).not.toContain('example.com');
+  });
+  it('refuses one that has gone, one that is no longer scheduled, a failed read and a made-up id', async () => {
+    expect(await interviewForEdit(fake({ row: null }).ctx, { id: IV_ID })).toEqual({ ok: false, error: NOT_FOUND });
+    for (const status of ['cancelled', 'completed', 'no_show']) {
+      expect(await interviewForEdit(fake({ row: { ...STORED, status } }).ctx, { id: IV_ID }), status).toEqual({ ok: false, error: NOT_SCHEDULED });
+    }
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await interviewForEdit(fake({ error: { code: '57014' } }).ctx, { id: IV_ID })).toEqual({ ok: false, error: NOT_LOADED });
+    expect(await interviewForEdit(fake({ throws: true }).ctx, { id: IV_ID })).toEqual({ ok: false, error: NOT_LOADED });
+    expect(JSON.stringify(spy.mock.calls)).not.toMatch(/Aina|77777777/);
+    spy.mockRestore();
+    const f = fake();
+    expect(await interviewForEdit(f.ctx, { id: 'iv-1' })).toEqual({ ok: false, error: NOT_AN_INTERVIEW_ID });
+    expect(f.reads).toEqual([]);
   });
 });

@@ -36,7 +36,7 @@ vi.mock('@/lib/supabase/server', () => ({
 vi.mock('@/lib/supabase/service', () => ({ serviceClient: () => { throw new Error('the service role is never used for an interview'); } }));
 vi.mock('@/lib/hire/capabilities', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/hire/capabilities')>();
-  const record = (fn: 'scheduleInterview' | 'recordPastInterview' | 'rescheduleInterview' | 'cancelInterview' | 'setInterviewOutcome' | 'reopenInterview' | 'interviewInvitation') =>
+  const record = (fn: 'scheduleInterview' | 'recordPastInterview' | 'rescheduleInterview' | 'cancelInterview' | 'setInterviewOutcome' | 'reopenInterview' | 'interviewInvitation' | 'interviewForEdit') =>
     async (ctx: Ctx, input: unknown, ...rest: unknown[]) => {
       ctl.calls.push({ fn, ctx, input, rest });
       if (ctl.real) return (actual[fn] as unknown as (...args: unknown[]) => Promise<unknown>)(ctx, input, ...rest);
@@ -51,11 +51,12 @@ vi.mock('@/lib/hire/capabilities', async (importOriginal) => {
     setInterviewOutcome: record('setInterviewOutcome'),
     reopenInterview: record('reopenInterview'),
     interviewInvitation: record('interviewInvitation'),
+    interviewForEdit: record('interviewForEdit'),
   };
 });
 
 const {
-  cancelInterviewAction, getInterviewInvitationAction, recordPastInterviewAction, reopenInterviewAction, rescheduleInterviewAction, scheduleInterviewAction,
+  cancelInterviewAction, getInterviewForEditAction, getInterviewInvitationAction, recordPastInterviewAction, reopenInterviewAction, rescheduleInterviewAction, scheduleInterviewAction,
   setInterviewOutcomeAction,
 } = await import('@/app/(app)/hire/actions');
 
@@ -238,6 +239,41 @@ describe('getInterviewInvitationAction: the invitation and the calendar file for
       const result = await getInterviewInvitationAction(odd);
       expect(result.ok, JSON.stringify(odd)).toBe(false);
     }
+    expect(ctl.asked).toEqual([]);
+  });
+});
+
+describe('getInterviewForEditAction: the interview as it stands now, for a form that was refused as stale', () => {
+  const CURRENT = {
+    ok: true,
+    data: {
+      id: IV, scheduled_at: '2026-10-22T08:00:00+00:00', duration_minutes: 90, kind: 'onsite', place: null, interviewer_name: null,
+      notes: 'Second round.', status: 'scheduled', updated_at: SEEN,
+    },
+  };
+  it('a viewer and the demo workspace are refused before anything is read: the notes are for those who may edit', async () => {
+    for (const viewer of [
+      { orgId: 'org1', orgName: 'Rimba Ventures', role: 'viewer', isDemo: false },
+      { orgId: 'org1', orgName: 'Rimba Ventures', role: 'owner', isDemo: true },
+    ]) {
+      ctl.viewer = viewer;
+      expect(await getInterviewForEditAction({ id: IV })).toEqual(FORBIDDEN);
+    }
+    expect(ctl.calls).toEqual([]);
+    expect(ctl.asked).toEqual([]);
+  });
+  it('someone who may edit gets what the capability read, in the session\'s workspace, and nothing is revalidated', async () => {
+    ctl.result = CURRENT;
+    const input = { id: IV, org_id: 'evil' };
+    expect(await getInterviewForEditAction(input)).toBe(CURRENT);
+    expect(ctl.calls.map((c) => c.fn)).toEqual(['interviewForEdit']);
+    expect(ctl.calls[0].input).toBe(input);
+    expect(ctl.calls[0].ctx).toMatchObject({ orgId: 'org1', client: { marker: 'session' } });
+    expect(ctl.revalidated).toEqual([]);
+  });
+  it('a malformed input is refused before the database is asked anything', async () => {
+    ctl.real = true;
+    for (const odd of [undefined, null, 'nope', {}, { id: 'not-an-id' }]) expect((await getInterviewForEditAction(odd)).ok, JSON.stringify(odd)).toBe(false);
     expect(ctl.asked).toEqual([]);
   });
 });

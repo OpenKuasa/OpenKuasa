@@ -41,6 +41,7 @@ vi.mock('@/app/(app)/hire/actions', () => ({
   setInterviewOutcomeAction: mocks.action,
   reopenInterviewAction: mocks.action,
   getInterviewInvitationAction: mocks.action,
+  getInterviewForEditAction: mocks.action,
 }));
 // No app router is mounted in a string render: the controls only need one to ask for a refresh after a refusal.
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: mocks.refresh, replace: () => {} }), usePathname: () => '/hire/talent-pool' }));

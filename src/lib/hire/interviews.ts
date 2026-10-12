@@ -150,6 +150,9 @@ export const withNoInvitation = (message: string): string => `${message} ${START
 /** What is said when the invitation could not be read or built. Nothing was changed, so it does not speak of saving. */
 export const INVITATION_NOT_MADE = 'The invitation could not be made just now. Please try again.';
 
+/** What is said when the interview's current details could not be read for a form that was refused as stale. */
+export const INTERVIEW_NOT_LOADED = 'The interview could not be loaded just now. Close this and open it again.';
+
 /**
  * What is said when an invitation is asked for and the interview's start has
  * passed. `items` is what that row's menu offers (`menuFor`): only a way out

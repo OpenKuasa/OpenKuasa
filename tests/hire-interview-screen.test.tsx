@@ -46,6 +46,7 @@ vi.mock('@/app/(app)/hire/actions', () => ({
   setInterviewOutcomeAction: mocks.action,
   reopenInterviewAction: mocks.action,
   getInterviewInvitationAction: mocks.action,
+  getInterviewForEditAction: mocks.action,
 }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: mocks.refresh, replace: () => {} }), usePathname: () => '/hire/interviews' }));
 vi.mock('@/lib/auth/viewer', () => ({ getViewer: async () => mocks.viewer }));
@@ -445,6 +446,26 @@ describe('the form\'s inner content', () => {
     expect(byId(html, 'f-alert')).toBe(SENTENCE);
     // Before every field.
     expect(html.indexOf('id="f-alert"')).toBeLessThan(html.indexOf('id="f-date"'));
+  });
+  // Final-review fix pass: a way on from "changed a moment ago" that does not need the dialog closed and opened again.
+  it('after "changed a moment ago", once the current details were read: a button to load them, which says what it discards', () => {
+    const SENTENCE = 'This interview was changed a moment ago. Nothing was saved. Check it and try again.';
+    const stale = { mode: 'change' as const, fixed: { name: 'Aina Rahman', job: 'Sales Executive' }, values: valuesFrom(AHEAD), refusal: { text: SENTENCE, word: 'changed' } };
+    const html = view({ ...stale, onLoadCurrent: () => {} });
+    expect(buttons(html)).toEqual(['Load the current details', 'Cancel', 'Save changes']);
+    const tag = buttonTag(html, 'Load the current details');
+    expect(tag).toContain('type="button"');
+    expect(tag).toContain('min-h-11');
+    expect(tag).not.toMatch(/\saria-disabled=/);
+    expect(byId(html, attr(tag, 'aria-describedby')!)).toBe('This replaces what you typed with the interview as it is now. Nothing is saved until you save again.');
+    // Under the sentence, before every field, and what was typed is still in the form.
+    expect(html.indexOf('id="f-alert"')).toBeLessThan(html.indexOf('Load the current details'));
+    expect(html.indexOf('Load the current details')).toBeLessThan(html.indexOf('id="f-date"'));
+    expect(attr(control(html, 'Time'), 'value')).toBe('15:00');
+    // Not before the current details were read, not for any other refusal, and not while a save is in flight.
+    expect(buttons(view(stale))).toEqual(['Cancel', 'Save changes']);
+    expect(buttons(view({ ...stale, refusal: { text: 'x', word: 'not_scheduled' }, onLoadCurrent: () => {} }))).toEqual(['Cancel', 'Save changes']);
+    expect(buttons(view({ ...stale, pending: true, onLoadCurrent: () => {} }))).toEqual(['Cancel', 'Saving…']);
   });
   it('a refusal about the time: at the date field (or the time field for a double booking), not in the box', () => {
     const PASSED = 'That time has already passed in Kuala Lumpur. Choose a later one, or use “Record a past interview” if it already took place.';

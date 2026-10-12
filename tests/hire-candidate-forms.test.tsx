@@ -50,6 +50,7 @@ vi.mock('@/app/(app)/hire/actions', () => ({
   setInterviewOutcomeAction: mocks.action,
   reopenInterviewAction: mocks.action,
   getInterviewInvitationAction: mocks.action,
+  getInterviewForEditAction: mocks.action,
 }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: mocks.refresh, replace: () => {} }), usePathname: () => '/hire/talent-pool' }));
 vi.mock('@/lib/auth/viewer', () => ({ getViewer: async () => mocks.viewer }));

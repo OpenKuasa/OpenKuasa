@@ -13,6 +13,7 @@ import {
   type Deleted,
   type HireWriteContext,
   type InterviewChange,
+  type InterviewForEdit,
   type InterviewHandover,
   type InterviewSaved,
   type MovedToPipeline,
@@ -27,6 +28,7 @@ import {
   deleteApplication,
   deleteCandidate,
   deletionSummary,
+  interviewForEdit,
   interviewInvitation,
   moveApplication,
   moveToPipeline,
@@ -555,6 +557,18 @@ export async function getInterviewInvitationAction(input: unknown): Promise<CapR
   const ctx = await writeCtx();
   if (!ctx) return FORBIDDEN;
   return interviewInvitation(ctx, input as never);
+}
+
+/**
+ * One scheduled interview as it is stored now, for an edit form that was
+ * refused because someone else changed the interview meanwhile. Only for
+ * someone who may edit: the notes are part of it. The input is the
+ * interview's id. Nothing is changed and nothing is fetched again.
+ */
+export async function getInterviewForEditAction(input: unknown): Promise<CapResult<InterviewForEdit>> {
+  const ctx = await writeCtx();
+  if (!ctx) return FORBIDDEN;
+  return interviewForEdit(ctx, input as never);
 }
 
 /** Scheduling one interview for an active application. The input is the application's id, a Kuala Lumpur date and time, and the details. */

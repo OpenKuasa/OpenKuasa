@@ -11,7 +11,7 @@ import {
   menuGroups, menuName, moveInput, moveLabel, moveResult, noticeOf, offersMove, onOf, openerId, outcomeInput, panelLine, panelMore, panelRows,
   pastInput, pickerLabel, pickerNotes, pickerOptions, placeHelper, placeLabel, refreshAfter, refusalWord, rowMenu, sayOnNotice, scheduleInput,
   stepAfter, stillScheduledNotice, submission, submitLabel, tagsFor, timeCell, timeHelper, valuesFrom, type InterviewFormValues,
-  GETTING_INVITATION, calendarOf, clockAt, handoverAfter, handoverResult, mayAskHandover, rowWaitingWord,
+  GETTING_INVITATION, LOAD_CURRENT, LOAD_CURRENT_HELP, calendarOf, clockAt, currentResult, offersReload, rowWithCurrent, handoverAfter, handoverResult, mayAskHandover, rowWaitingWord,
 } from '@/lib/hire/interview-dialog-state';
 
 const APP = '44444444-4444-4444-8444-444444444444';
@@ -560,6 +560,72 @@ describe('the Applications panel', () => {
     for (const none of [closed({ scheduled_interviews: 0 }), closed({}), closed({ scheduled_interviews: '2' }), closed({ scheduled_interviews: 1.5 }), { ok: false, error: 'x' }, { ok: true }, null, undefined]) {
       expect(stillScheduledNotice(none, 'Aina Rahman'), JSON.stringify(none)).toBeNull();
     }
+  });
+});
+
+// Final-review fix pass. A form refused as stale ("changed a moment ago") used to keep its stale copy, so Save could
+// never succeed until the dialog was closed and opened again.
+describe('after someone else changed the interview behind an open form', () => {
+  const CHANGED = 'This interview was changed a moment ago. Nothing was saved. Check it and try again.';
+  const NOT_LOADED = 'The interview could not be loaded just now. Close this and open it again.';
+  const stored = {
+    id: IV, scheduled_at: '2026-10-22T08:00:00+00:00', duration_minutes: 90, kind: 'onsite', place: 'Level 3, Menara Rimba', interviewer_name: null,
+    notes: 'Moved by Farah.', status: 'scheduled', updated_at: '2026-10-12T02:30:00.654321+00:00',
+  };
+  it('reads the interview as it stands now, for that interview only, and fails closed on anything else', () => {
+    expect(currentResult({ ok: true, data: stored }, IV)).toEqual({
+      ok: true,
+      current: {
+        scheduledAt: '2026-10-22T08:00:00+00:00', durationMinutes: 90, kind: 'onsite', place: 'Level 3, Menara Rimba', interviewerName: null,
+        notes: 'Moved by Farah.', updatedAt: '2026-10-12T02:30:00.654321+00:00',
+      },
+    });
+    const GONE = 'That interview could not be found. It may have been deleted with its application.';
+    expect(currentResult({ ok: false, error: GONE }, IV)).toEqual({ ok: false, error: GONE });
+    for (const odd of [
+      null, undefined, {}, { ok: true }, { ok: false }, { ok: true, data: { ...stored, id: 'another' } }, { ok: true, data: { ...stored, scheduled_at: '2026-10-22T16:00:00' } },
+      { ok: true, data: { ...stored, updated_at: '' } }, { ok: true, data: { ...stored, kind: 'lunch' } }, { ok: true, data: { ...stored, duration_minutes: '90' } },
+      { ok: true, data: { ...stored, status: 'cancelled' } }, { ok: true, data: { ...stored, place: 7 } },
+    ]) {
+      expect(currentResult(odd, IV), JSON.stringify(odd)).toEqual({ ok: false, error: NOT_LOADED });
+    }
+  });
+  it('makes the row the form is opened afresh with: the current values and the current `seen`, and whose interview it is unchanged', () => {
+    const result = currentResult({ ok: true, data: stored }, IV);
+    if (!result.ok) throw new Error('unreachable');
+    const fresh = rowWithCurrent(row(), result.current);
+    expect(fresh).toMatchObject({
+      id: IV, name: 'Aina Rahman', role: 'Sales Executive', applicationId: APP,
+      scheduledAt: '2026-10-22T08:00:00+00:00', durationMinutes: 90, length: '1 hour 30 minutes', kind: 'onsite', time: '4:00 pm',
+      place: 'Level 3, Menara Rimba', placeLink: null, interviewer: '—', interviewerName: null, notes: 'Moved by Farah.',
+      updatedAt: '2026-10-12T02:30:00.654321+00:00',
+    });
+    // The form then starts at the current values: 4:00 pm on the 22nd in Kuala Lumpur.
+    expect(valuesFrom(fresh)).toEqual({
+      application_id: APP, date: '2026-10-22', time: '16:00', duration_minutes: 90, kind: 'onsite', outcome: '', place: 'Level 3, Menara Rimba',
+      interviewer_name: '', notes: 'Moved by Farah.',
+    });
+    // And a save from it sends the current `seen`, with only what the person then changes.
+    expect(submission('change', { ...valuesFrom(fresh), notes: 'Confirmed.' }, { applicationId: APP, stored: fresh })).toEqual({
+      kind: 'change', input: { id: IV, notes: 'Confirmed.' }, seen: '2026-10-12T02:30:00.654321+00:00',
+    });
+    // The row it was made from is left as it was.
+    expect(row().updatedAt).toBe('2026-10-12T02:05:00+00:00');
+  });
+  it('offers to load the current details only after that refusal, only once they were read, and never while saving', () => {
+    expect(offersReload('changed', true, false)).toBe(true);
+    expect(offersReload('changed', false, false)).toBe(false);
+    expect(offersReload('changed', true, true)).toBe(false);
+    for (const word of ['not_found', 'not_scheduled', 'in_past', 'duplicate', 'unchanged', null]) expect(offersReload(word, true, false), String(word)).toBe(false);
+    expect(refusalWord(CHANGED, 'interview')).toBe('changed');
+  });
+  it('never sends again by itself: a stale form keeps its own `seen` until the person loads the current details', () => {
+    const opened = row();
+    const typed = { ...valuesFrom(opened), notes: 'My own note.' };
+    // The same form, submitted again without loading: still the old `seen`, so the database refuses it again.
+    expect(submission('change', typed, { applicationId: APP, stored: opened })).toMatchObject({ seen: '2026-10-12T02:05:00+00:00' });
+    expect(LOAD_CURRENT).toBe('Load the current details');
+    expect(LOAD_CURRENT_HELP).toBe('This replaces what you typed with the interview as it is now. Nothing is saved until you save again.');
   });
 });
 

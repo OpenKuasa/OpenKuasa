@@ -16,7 +16,8 @@ import {
 import { icsFileName, interviewIcs, invitationText, type InviteSource } from './interview-invite';
 import { instantMs, isRealDate, klDateOf, klInstant, klTimeOf, pastProblem, timeProblem } from './interview-time';
 import {
-  INTERVIEW_INPUT_MESSAGES, INTERVIEW_KINDS, INTERVIEW_LIMITS, INTERVIEW_NOT_READ_BACK, INTERVIEW_OUTCOMES, INVITATION_NOT_MADE, cancelledMessage,
+  INTERVIEW_INPUT_MESSAGES, INTERVIEW_KINDS, INTERVIEW_LIMITS, INTERVIEW_NOT_LOADED, INTERVIEW_NOT_READ_BACK, INTERVIEW_OUTCOMES,
+  INVITATION_NOT_MADE, cancelledMessage,
   interviewMessage, menuFor, noInvitationMessage, outcomeMessage, recordedPastMessage, reopenedMessage, scheduledMessage, updatedMessage, withNoInvitation,
 } from './interviews';
 import {
@@ -1545,6 +1546,54 @@ export async function interviewInvitation(
   const fileName = icsFileName(source);
   if (!text || !ics || !fileName) return { ok: false, error: INVITATION_NOT_MADE };
   return { ok: true, data: { text, ics, fileName } };
+}
+
+/** One interview as its edit form needs it: the values the form holds, with the notes, and when the row was last changed. */
+export type InterviewForEdit = {
+  id: string; scheduled_at: string; duration_minutes: number; kind: InterviewKind; place: string | null; interviewer_name: string | null;
+  notes: string | null; status: InterviewStatus; updated_at: string;
+};
+const INTERVIEW_EDIT_READ = 'id,scheduled_at,duration_minutes,kind,place,interviewer_name,notes,status,updated_at';
+
+/**
+ * One scheduled interview as it is stored now, for an edit form whose own copy was refused as stale. The notes are
+ * part of it, so only a caller who may edit is given it (the server action checks). `updated_at` goes back exactly
+ * as stored: the form sends it as `seen`, and the comparison is to the microsecond. Changes nothing.
+ */
+export async function interviewForEdit(
+  ctx: HireWriteContext,
+  input: z.input<typeof interviewInvitationInput>,
+): Promise<CapResult<InterviewForEdit>> {
+  const parsed = interviewInvitationInput.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+  const notLoaded = (error: unknown): { ok: false; error: string } => {
+    const code = (error as { code?: unknown } | null)?.code ?? (error as { name?: unknown } | null)?.name;
+    console.error('[hire-capability] interviewForEdit failed:', { code: typeof code === 'string' ? code : undefined });
+    return { ok: false, error: INTERVIEW_NOT_LOADED };
+  };
+  let row: InterviewForEdit | null;
+  try {
+    const { data, error } = await ctx.client
+      .from('hire_interviews')
+      .select(INTERVIEW_EDIT_READ)
+      .eq('id', parsed.data.id)
+      .eq('org_id', ctx.orgId)
+      .maybeSingle();
+    if (error) return notLoaded(error);
+    row = (data as unknown as InterviewForEdit | null) ?? null;
+  } catch (error) {
+    return notLoaded(error);
+  }
+  if (!row) return { ok: false, error: interviewMessage('not_found', 'interview') };
+  if (row.status !== 'scheduled') return { ok: false, error: interviewMessage('not_scheduled', 'interview') };
+  // Each field is named: nothing else the read returned rides along.
+  return {
+    ok: true,
+    data: {
+      id: row.id, scheduled_at: row.scheduled_at, duration_minutes: row.duration_minutes, kind: row.kind, place: row.place,
+      interviewer_name: row.interviewer_name, notes: row.notes, status: row.status, updated_at: row.updated_at,
+    },
+  };
 }
 
 /**

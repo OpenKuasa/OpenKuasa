@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState, useSyncExternalStore, useTransition, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import {
+  getInterviewForEditAction,
   moveApplicationAction,
   recordPastInterviewAction,
   rescheduleInterviewAction,
@@ -11,11 +12,11 @@ import {
 import type { InterviewChange } from '@/lib/hire/capabilities';
 import { DELETION_NOTICE_ID } from '@/lib/hire/delete-dialog-state';
 import {
-  COPY_FAILED, DONE, DOWNLOAD_HELP, DOWNLOAD_LABEL, FIND_HELP, ICS_MIME, INTERVIEWER_HELP, MOVED, NOTES_HELP, NOTHING_CHANGED, OUTCOME_HELP,
+  COPY_FAILED, DONE, DOWNLOAD_HELP, LOAD_CURRENT, LOAD_CURRENT_HELP, DOWNLOAD_LABEL, FIND_HELP, ICS_MIME, INTERVIEWER_HELP, MOVED, NOTES_HELP, NOTHING_CHANGED, OUTCOME_HELP,
   canSubmit, copyLabel, dateBounds, dateHelper, dialogDescription, dialogTitle, discardTitle, durationOptions, emptyValues, fieldId,
   fieldOfRefusal, focusIdAfter, interviewProblems, interviewResult, inviteLead, inviteTitle, isDirty, keptChoice,
   moveInput, moveLabel, moveResult, noticeOf, offersMove, onOf, pickerNotes, pickerOptions, placeHelper, placeLabel, refreshAfter, refusalWord,
-  calendarOf, clockAt, stepAfter, submission, submitLabel, timeHelper, valuesFrom,
+  calendarOf, clockAt, currentResult, offersReload, rowWithCurrent, stepAfter, submission, submitLabel, timeHelper, valuesFrom,
   type CalendarFile, type FieldPart, type InterviewField, type InterviewFormMode, type InterviewFormValues, type InterviewProblems, type PastOutcome, type Submission,
 } from '@/lib/hire/interview-dialog-state';
 import { INTERVIEW_KINDS, INTERVIEW_SAVE_FAILED, KIND_WORDS } from '@/lib/hire/interviews';
@@ -136,6 +137,8 @@ export type InterviewFormViewProps = {
   onChange: <K extends InterviewField>(field: K, value: InterviewFormValues[K]) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onCancel: () => void;
+  /** Given once the interview's current details were read after a "changed a moment ago" refusal: loads them into the form. */
+  onLoadCurrent?: () => void;
 };
 
 /**
@@ -145,7 +148,7 @@ export type InterviewFormViewProps = {
  * each part.
  */
 export function InterviewFormView({
-  base, mode, fixed, picker, query, values, problems, refusal, unchanged, pending, today, storedDuration, onQuery, onChange, onSubmit, onCancel,
+  base, mode, fixed, picker, query, values, problems, refusal, unchanged, pending, today, storedDuration, onQuery, onChange, onSubmit, onCancel, onLoadCurrent,
 }: InterviewFormViewProps) {
   const id = (part: FieldPart) => fieldId(base, part);
   const helpId = (part: FieldPart) => `${id(part)}-help`;
@@ -176,6 +179,18 @@ export function InterviewFormView({
         <p id={id('alert')} role="alert" tabIndex={-1} className={cn(ALERT_CLASS, 'break-words', FOCUS)}>
           {refusal.text}
         </p>
+      ) : null}
+      {/* Someone else changed the interview: its current details were read, and the person chooses whether to load them.
+          Nothing is sent again by itself, and what was typed stays until they choose. */}
+      {refusal && offersReload(refusal.word, onLoadCurrent !== undefined, pending) ? (
+        <div className="space-y-1.5">
+          <Button type="button" variant="outline" size="sm" className={TARGET} aria-describedby={helpId('reload')} onClick={onLoadCurrent}>
+            {LOAD_CURRENT}
+          </Button>
+          <p id={helpId('reload')} className={HELP}>
+            {LOAD_CURRENT_HELP}
+          </p>
+        </div>
       ) : null}
 
       {fixed ? (
@@ -435,8 +450,10 @@ type Send = Exclude<Submission, { kind: 'nothing' }>;
  * as soon as it is put right.
  */
 function InterviewForm({
-  mode, fixed, stored, picker, today, clock, pending, refusal, onDirtyChange, onClearRefusal, onPick, onCancel, onSend,
+  mode, fixed, stored, picker, today, clock, pending, refusal, onDirtyChange, onClearRefusal, onPick, onCancel, onSend, onLoadCurrent,
 }: {
+  /** Given once the current details were read after a "changed a moment ago" refusal. */
+  onLoadCurrent?: () => void;
   /** The time now, by the server's clock. Only ever called from a handler. */
   clock: () => Date;
   mode: InterviewFormMode;
@@ -540,6 +557,7 @@ function InterviewForm({
       onChange={change}
       onSubmit={submit}
       onCancel={onCancel}
+      onLoadCurrent={onLoadCurrent}
     />
   );
 }
@@ -751,6 +769,9 @@ export function InterviewDialogHost({
   const [saved, setSaved] = useState<InterviewChange | null>(null);
   const [moving, setMoving] = useState(false);
   const [pickedId, setPickedId] = useState('');
+  /** The interview as it is stored now, read after a save was refused because someone else had changed it. */
+  const [fresh, setFresh] = useState<InterviewRow | null>(null);
+  const [formKey, setFormKey] = useState(0);
   /** The opener's id, kept for the moment after the request is cleared, when focus is given back. */
   const opener = useRef<string | null>(null);
 
@@ -772,10 +793,22 @@ export function InterviewDialogHost({
   function close() {
     setDirty(false);
     setRefusal(null);
+    setFresh(null);
     setSaved(null);
     setMoving(false);
     setPickedId('');
     closeInterview();
+  }
+
+  /** "Load the current details": the form is drawn again from the interview as it is now. What was typed is discarded, by choice. */
+  function loadCurrent() {
+    if (!fresh || !req || req.mode !== 'change' || pending || inFlight.current) return;
+    setRefusal(null);
+    setDirty(false);
+    setFresh(null);
+    setFormKey((key) => key + 1);
+    // The request now holds the current row: its `updatedAt` is the next save's `seen`.
+    openInterview({ mode: 'change', row: fresh, focusId: req.focusId });
   }
 
   function save(plan: Send) {
@@ -783,6 +816,7 @@ export function InterviewDialogHost({
     inFlight.current = true;
     // Cleared first, so the same refusal twice in a row is announced twice.
     setRefusal(null);
+    setFresh(null);
     start(async () => {
       try {
         const answer = plan.kind === 'schedule'
@@ -796,6 +830,18 @@ export function InterviewDialogHost({
           setRefusal({ text: result.error, word });
           // Out of date, or not known to have failed: the fresh screen shows what is true.
           if (refreshAfter(word)) router.refresh();
+          if (word === 'changed' && plan.kind === 'change' && row) {
+            // Someone else changed it. Its current details are read, so the person can choose to load them: nothing is
+            // sent again by itself, and what they typed stays in the form until they choose.
+            try {
+              const current = currentResult(await getInterviewForEditAction({ id: row.id }), row.id);
+              if (current.ok) setFresh(rowWithCurrent(row, current.current));
+              // Gone, or no longer scheduled: that is what is true now, and there is nothing to load.
+              else setRefusal({ text: current.error, word: refusalWord(current.error, 'interview') });
+            } catch {
+              // The refusal stands as it was said; closing and opening the form again still works.
+            }
+          }
           return;
         }
         // The screen's notice line: read out now, and still there when the dialog has closed.
@@ -842,6 +888,8 @@ export function InterviewDialogHost({
           />
         ) : req ? (
           <InterviewForm
+            // A new form when the current details are loaded: it starts at them, as a form opened afresh does.
+            key={formKey}
             mode={mode}
             fixed={application}
             stored={row}
@@ -855,6 +903,7 @@ export function InterviewDialogHost({
             onPick={setPickedId}
             onCancel={requestClose}
             onSend={save}
+            onLoadCurrent={fresh ? loadCurrent : undefined}
           />
         ) : null
       }
