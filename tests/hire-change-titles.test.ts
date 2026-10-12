@@ -449,6 +449,26 @@ describe('approval cards for an interview', () => {
     expect(approvalDetail('deleteJob')).toBe('This cannot be undone.');
     expect(approvalDetail('updateJob')).toBeNull();
   });
+  it('notes longer than the card shows: the card says how much more will be saved', () => {
+    const when = { application_id: APP, date: '2026-10-20', time: '15:00', kind: 'video' };
+    const long = `${'n'.repeat(300)}${'m'.repeat(1700)}`;
+    expect(approvalDetail('scheduleInterview', { ...when, notes: long }, undefined, found)).toBe(
+      'Tuesday, 20 October 2026, 3:00 pm to 4:00 pm, Kuala Lumpur time (GMT+8) · Video call · No place or link given · No interviewer given · ' +
+        `Notes: ${'n'.repeat(300)}… (and 1,700 more characters) · Nothing is sent to the candidate.`,
+    );
+    expect(approvalDetail('recordPastInterview', { ...when, date: '2026-10-06', outcome: 'completed', notes: `${'n'.repeat(300)}m` }, undefined, found))
+      .toContain(` · Notes: ${'n'.repeat(300)}… (and 1 more character) · Recorded as already held.`);
+    expect(approvalDetail('rescheduleInterview', { id: IV, notes: long }, undefined, found)).toBe(`Notes: ${'n'.repeat(300)}… (and 1,700 more characters) · Nothing is sent to the candidate.`);
+    // Counted as the card reads them: on one line, with runs of spaces and line breaks as one space.
+    expect(approvalDetail('rescheduleInterview', { id: IV, notes: `  ${'n'.repeat(300)} \n\n mmm  ` }, undefined, found)).toBe(`Notes: ${'n'.repeat(300)}… (and 4 more characters) · Nothing is sent to the candidate.`);
+    // Notes the card shows whole say nothing more; nor do none, or cleared ones.
+    expect(approvalDetail('rescheduleInterview', { id: IV, notes: 'n'.repeat(300) }, undefined, found)).toBe(`Notes: ${'n'.repeat(300)} · Nothing is sent to the candidate.`);
+    expect(approvalDetail('rescheduleInterview', { id: IV, notes: null }, undefined, found)).toBe('Notes: cleared · Nothing is sent to the candidate.');
+    expect(approvalDetail('scheduleInterview', when, undefined, found)).not.toContain('more character');
+    // Notes that hold the card's own words do not move the count somewhere else.
+    const tricky = `${'x'.repeat(290)} · Notes: ${'y'.repeat(20)}`;
+    expect(approvalDetail('rescheduleInterview', { id: IV, notes: tricky }, undefined, found)).toBe(`Notes: ${tricky.slice(0, 300)}… (and ${tricky.length - 300} more characters) · Nothing is sent to the candidate.`);
+  });
   it('remembers a new interview from the result of the change that made it, as an interview and never as an application', () => {
     const result = (tool: string) => ({
       tool,
