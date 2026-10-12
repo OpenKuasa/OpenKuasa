@@ -1,7 +1,7 @@
 import { beforeAll, expect, test } from 'vitest';
 import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { createOrg, joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
+import { createOrg, joinDemo, signInAnon, liveClient, signInOwner } from './helpers/live-workspaces';
 
 // Cash receipts, payment vouchers and expenses against the hosted database.
 // Run by the controller only, after the cash book migration is applied. Every
@@ -27,7 +27,7 @@ type Org = {
 
 async function anonUserWithOrg(orgName: string): Promise<Org> {
   const c = liveClient();
-  const { data: auth, error: authErr } = await signInAnon(c);
+  const { data: auth, error: authErr } = await signInOwner(c);
   expect(authErr, authErr?.message).toBeNull();
   const { data: orgId, error } = await createOrg(c, orgName);
   expect(error, error?.message).toBeNull();
