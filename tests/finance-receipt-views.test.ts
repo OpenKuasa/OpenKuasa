@@ -108,6 +108,23 @@ describe('receiptsInboxView', () => {
   it('says "receipts" for more than one with no amount', () => {
     expect(receiptsInboxView([row({ id: 'a' }), row({ id: 'b' })]).stats[0].delta).toBe('2 receipts with no amount yet');
   });
+  it('never shows RM 0.00 on any card for amounts nobody has entered', () => {
+    const view = receiptsInboxView([
+      row({ id: 'a' }),
+      onBill({ id: 'b', amount: null }),
+      onExpense({ id: 'c', amount: null }),
+      row({ id: 'd', status: 'unmatched', amount: null }),
+    ]);
+    expect(view.stats.map((s) => s.delta)).toEqual([
+      '1 receipt with no amount yet',
+      '2 receipts with no amount yet',
+      '1 receipt with no amount yet',
+    ]);
+  });
+  it('shows ringgit on a card as soon as the amounts are there, whatever the other cards say', () => {
+    const view = receiptsInboxView([row({ id: 'a' }), onBill({ id: 'b', amount: 310 }), row({ id: 'd', status: 'unmatched', amount: 5 })]);
+    expect(view.stats.map((s) => s.delta)).toEqual(['1 receipt with no amount yet', 'RM 310.00', 'RM 5.00']);
+  });
   it('leaves a state with no receipts out of the donut, and keeps the three cards', () => {
     const view = receiptsInboxView([onBill({ amount: 310 })]);
     expect(view.byStatus.map((s) => s.key)).toEqual(['matched']);

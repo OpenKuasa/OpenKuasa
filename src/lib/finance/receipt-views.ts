@@ -79,23 +79,22 @@ export type ReceiptsInboxViewData = {
 
 export function receiptsInboxView(rows: InboxReceiptRow[]): ReceiptsInboxViewData {
   const by = (status: InboxReceiptStatus) => rows.filter((r) => r.status === status);
+  // A card says what its receipts add up to, unless some have no amount yet: it then says so instead of RM 0.00.
+  const delta = (group: InboxReceiptRow[]) => {
+    const unread = group.filter((r) => r.amount === null);
+    return unread.length ? `${count(unread.length, 'receipt')} with no amount yet` : rm(amountOf(group));
+  };
   const review = by('review');
-  const unread = review.filter((r) => r.amount === null);
   const matched = by('matched');
   const unmatched = by('unmatched');
   return {
     stats: [
-      {
-        label: 'To review',
-        value: String(review.length),
-        delta: unread.length ? `${count(unread.length, 'receipt')} with no amount yet` : rm(amountOf(review)),
-        deltaTone: review.length ? 'down' : 'flat',
-      },
-      { label: 'Matched', value: String(matched.length), delta: rm(amountOf(matched)), deltaTone: 'flat' },
+      { label: 'To review', value: String(review.length), delta: delta(review), deltaTone: review.length ? 'down' : 'flat' },
+      { label: 'Matched', value: String(matched.length), delta: delta(matched), deltaTone: 'flat' },
       {
         label: 'Unmatched',
         value: String(unmatched.length),
-        delta: rm(amountOf(unmatched)),
+        delta: delta(unmatched),
         deltaTone: unmatched.length ? 'down' : 'flat',
       },
     ],
