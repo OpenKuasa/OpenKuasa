@@ -8,6 +8,10 @@ const read = (file: string) => readFileSync(join(process.cwd(), 'supabase/migrat
 const strip = (text: string) => text.split('\n').filter((line) => !line.trim().startsWith('--')).join('\n');
 const sql = strip(read('20261029090000_hire_talent_pool.sql'));
 const before = strip(read('20261026090000_hire_candidate_changes.sql'));
+// The one-time data change has a file of its own: the three functions can be run again
+// safely, and a re-run of them must never repeat it.
+const backfill = strip(read('20261029090100_hire_talent_pool_backfill.sql'));
+const publicForm = strip(read('20261019090000_hire_cv_upload.sql'));
 const fnIn = (source: string, name: string) => {
   const start = source.indexOf(`create or replace function public.${name}(`);
   expect(start, name).toBeGreaterThan(-1);
@@ -154,27 +158,32 @@ describe('hire talent pool migration', () => {
   });
 
   describe('the one-time update', () => {
-    // Everything that is not inside a function.
-    const outside = sql.replace(/create or replace function[\s\S]*?end \$\$;/g, '');
+    const statement = flat(backfill);
 
-    test('moves exactly: not in the pool, no application at all, not from the public form', () => {
-      expect(flat(outside)).toContain(
+    test('the functions file writes no row outside a function, so running it again changes no data', () => {
+      const outside = sql.replace(/create or replace function[\s\S]*?end \$\$;/g, '');
+      expect(outside).not.toMatch(/\b(update|insert into|delete from)\b/i);
+    });
+    test('each function is defined once', () => {
+      for (const name of [...NEW, 'hire_add_candidate']) {
+        expect(sql.split(`create or replace function public.${name}(`), name).toHaveLength(2);
+      }
+    });
+    test('its own file holds that one statement and nothing else', () => {
+      expect(statement).toBe(
         "update public.hire_candidates c set pool_status = 'available' " +
           "where c.pool_status = 'none' " +
           'and not exists (select 1 from public.hire_applications a where a.candidate_id = c.id) ' +
           "and c.source is distinct from 'Careers page';",
       );
     });
-    test('appears once, outside every function, and is the only statement that writes a row', () => {
-      expect(outside.match(/update public\.hire_candidates/g)).toHaveLength(1);
-      expect(outside).not.toMatch(/insert into|delete from/);
-      expect(outside.match(/\bupdate\b/g)).toHaveLength(1);
+    test('leaves out exactly the source the public apply form writes', () => {
+      // The form's own file is read, so a change of its wording there fails here.
+      expect(publicForm).toContain("'Careers page'");
+      expect(statement).toContain("c.source is distinct from 'Careers page'");
     });
-    test('a row it moved no longer matches, so a second run moves nobody it moved before', () => {
-      const statement = flat(outside);
-      expect(statement).toContain("set pool_status = 'available'");
+    test('touches nobody already in the pool, so a row it moved is not moved again', () => {
       expect(statement).toContain("where c.pool_status = 'none'");
-      // Nobody already in the pool is touched: every stored status but none is left alone.
       expect(statement).not.toMatch(/pool_status (in|<>|!=)/);
     });
   });

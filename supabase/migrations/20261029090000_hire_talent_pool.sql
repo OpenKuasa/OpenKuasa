@@ -245,15 +245,6 @@ grant execute on function public.hire_set_pool_status(uuid, text, boolean) to au
 grant execute on function public.hire_move_to_pipeline(uuid, uuid) to authenticated;
 grant execute on function public.hire_add_candidate(uuid, text, text, text, text, text, text[], text, uuid, text, text) to authenticated;
 
--- ---------------------------------------------------------------------------
--- ONE TIME ONLY. The people already added by hand with no job: not in the
--- pool, no application of any kind, and not from the public apply form (its
--- applicants agreed to apply for one job, not to be kept for others). Run
--- once: a second run after release would put back people a recruiter has
--- since removed from the pool.
--- ---------------------------------------------------------------------------
-update public.hire_candidates c
-   set pool_status = 'available'
- where c.pool_status = 'none'
-   and not exists (select 1 from public.hire_applications a where a.candidate_id = c.id)
-   and c.source is distinct from 'Careers page';
+-- The people already added by hand with no job are moved into the pool by the next
+-- migration, 20261029090100_hire_talent_pool_backfill.sql. It is a file of its own so
+-- that running these functions again can never repeat a change to people's records.
