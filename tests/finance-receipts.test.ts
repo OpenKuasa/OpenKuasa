@@ -12,13 +12,13 @@ import { type FinanceCall, fakeFinance } from './setup/fake-finance';
 // PostgREST answers a numeric column as a string when it is large, and as a number otherwise.
 const matchedRow = {
   id: 'r1', file_name: 'IMG_0042.JPG', mime_type: 'image/jpeg', size_bytes: 204800, has_file: true, vendor: 'Shell Bangsar',
-  receipt_date: '2026-10-03', amount: '142.50', sst_amount: '8.07', status: 'matched', expense_id: 'e1', bill_id: null,
+  receipt_date: '2026-10-03', amount: '142.50', sst_amount: '8.07', status: 'matched',
   document_kind: 'expense', document_label: 'Travel', extraction_error: null, extracted_at: '2026-10-03T09:12:05+00:00',
   created_at: '2026-10-03T09:12:00+00:00',
 };
 const unreadRow = {
   id: 'r2', file_name: 'scan.pdf', mime_type: 'application/pdf', size_bytes: null, has_file: true, vendor: null,
-  receipt_date: null, amount: null, sst_amount: null, status: 'review', expense_id: null, bill_id: null,
+  receipt_date: null, amount: null, sst_amount: null, status: 'review',
   document_kind: null, document_label: null, extraction_error: 'The receipt could not be read.', extracted_at: null,
   created_at: '2026-10-02T09:12:00+00:00',
 };
@@ -26,14 +26,29 @@ const unreadRow = {
 describe('listInboxReceipts', () => {
   it('reads the inbox view for the workspace, newest upload first, with amounts as numbers', async () => {
     const { ctx, calls } = fakeFinance({ data: [matchedRow, unreadRow], error: null });
-    expect(await listInboxReceipts(ctx)).toEqual([{ ...matchedRow, amount: 142.5, sst_amount: 8.07 }, unreadRow]);
+    const { extraction_error: _a, ...matchedKept } = matchedRow;
+    const { extraction_error: _b, ...unreadKept } = unreadRow;
+    expect(await listInboxReceipts(ctx)).toEqual([
+      { ...matchedKept, amount: 142.5, sst_amount: 8.07, extraction_failed: false },
+      { ...unreadKept, extraction_failed: true },
+    ]);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
       kind: 'table', name: 'finance_receipt_inbox', op: 'select', filters: { org_id: 'org-1' },
       order: ['created_at desc', 'id asc'], range: [0, INBOX_RECEIPT_PAGE_SIZE - 1],
     });
-    // Every column the row type has, and nothing the view does not have.
+    // Every column the query asks for, and nothing the view does not have.
     expect(calls[0].columns!.split(',').sort()).toEqual(Object.keys(matchedRow).sort());
+  });
+  it('sends the browser only what the screen uses: no ids of documents, and no error text', async () => {
+    const rows = await listInboxReceipts(fakeFinance({ data: [matchedRow, unreadRow], error: null }).ctx);
+    for (const r of rows) {
+      expect(r).not.toHaveProperty('expense_id');
+      expect(r).not.toHaveProperty('bill_id');
+      expect(r).not.toHaveProperty('extraction_error');
+      expect(JSON.stringify(r)).not.toContain('could not be read.');
+    }
+    expect(rows.map((r) => r.extraction_failed)).toEqual([false, true]);
   });
   it('keeps what nobody has read as null, never as zero', async () => {
     const [row] = await listInboxReceipts(fakeFinance({ data: [unreadRow], error: null }).ctx);

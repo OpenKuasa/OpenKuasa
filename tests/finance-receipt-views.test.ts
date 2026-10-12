@@ -17,15 +17,15 @@ import { SAMPLE_INBOX_RECEIPTS } from '@/screens/finance/receipts-sample';
 
 const row = (over: Partial<InboxReceiptRow>): InboxReceiptRow => ({
   id: 'r1', file_name: 'receipt.jpg', mime_type: 'image/jpeg', size_bytes: 204800, has_file: true, vendor: null,
-  receipt_date: null, amount: null, sst_amount: null, status: 'review', expense_id: null, bill_id: null,
-  document_kind: null, document_label: null, extraction_error: null, extracted_at: null,
+  receipt_date: null, amount: null, sst_amount: null, status: 'review',
+  document_kind: null, document_label: null, extraction_failed: false, extracted_at: null,
   created_at: '2026-10-03T09:12:00+00:00',
   ...over,
 });
 const onExpense = (over: Partial<InboxReceiptRow>) =>
-  row({ status: 'matched', expense_id: 'e1', document_kind: 'expense', document_label: 'Travel', ...over });
+  row({ status: 'matched', document_kind: 'expense', document_label: 'Travel', ...over });
 const onBill = (over: Partial<InboxReceiptRow>) =>
-  row({ status: 'matched', bill_id: 'b1', document_kind: 'bill', document_label: 'BILL-0007', ...over });
+  row({ status: 'matched', document_kind: 'bill', document_label: 'BILL-0007', ...over });
 
 describe('labels', () => {
   it('has a word for every state and every type', () => {
@@ -67,9 +67,9 @@ describe('inboxReadingNote', () => {
     expect(inboxReadingNote(row({ vendor: 'Typed by hand', amount: 10 }))).toBeNull();
   });
   it('says a reading failed while the failure stands, and puts that before a stale stamp', () => {
-    expect(inboxReadingNote(row({ extraction_error: 'provider said no' }))).toBe('failed');
-    expect(inboxReadingNote(row({ extraction_error: 'x', extracted_at: read }))).toBe('failed');
-    expect(inboxReadingNote(row({ status: 'unmatched', extraction_error: 'x' }))).toBeNull();
+    expect(inboxReadingNote(row({ extraction_failed: true }))).toBe('failed');
+    expect(inboxReadingNote(row({ extraction_failed: true, extracted_at: read }))).toBe('failed');
+    expect(inboxReadingNote(row({ status: 'unmatched', extraction_failed: true }))).toBeNull();
   });
   it('has a sentence of its own for each, and tells the person to check a reading', () => {
     expect(INBOX_READING_NOTES.read).toBe('Read by AI. Check the figures before you use them.');
@@ -188,15 +188,13 @@ describe('the sample shown when there is no database', () => {
   it('has rows the database would allow', () => {
     for (const r of SAMPLE_INBOX_RECEIPTS) {
       // Matched exactly when tied to one document, as the table's check has it.
-      const tied = [r.expense_id, r.bill_id].filter((id) => id !== null).length;
-      expect(tied, r.file_name).toBe(r.status === 'matched' ? 1 : 0);
-      expect(r.document_kind, r.file_name).toBe(r.expense_id ? 'expense' : r.bill_id ? 'bill' : null);
+      expect(r.document_kind !== null, r.file_name).toBe(r.status === 'matched');
       expect(r.has_file, r.file_name).toBe(false);
       expect(r.file_name.endsWith(`.${INBOX_RECEIPT_TYPES[r.mime_type]}`), r.file_name).toBe(true);
       if (r.sst_amount !== null && r.amount !== null) expect(r.sst_amount).toBeLessThanOrEqual(r.amount);
     }
     // The one a model could not read has nothing read from it.
-    const unread = SAMPLE_INBOX_RECEIPTS.filter((r) => r.extraction_error);
+    const unread = SAMPLE_INBOX_RECEIPTS.filter((r) => r.extraction_failed);
     expect(unread).toHaveLength(1);
     expect([unread[0].status, unread[0].vendor, unread[0].amount]).toEqual(['review', null, null]);
     expect(inboxReadingNote(unread[0])).toBe('failed');

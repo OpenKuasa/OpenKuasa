@@ -36,7 +36,7 @@ export type InboxReceiptRow = {
   /** The name the uploader's device gave the file. Render it as text only. */
   file_name: string;
   mime_type: InboxReceiptType;
-  /** Null when storage did not say, and on the demo's sample rows. */
+  /** Null when storage did not say. */
   size_bytes: number | null;
   /** False only on the demo's sample rows, which have no file. */
   has_file: boolean;
@@ -46,20 +46,18 @@ export type InboxReceiptRow = {
   amount: number | null;
   sst_amount: number | null;
   status: InboxReceiptStatus;
-  expense_id: string | null;
-  bill_id: string | null;
   document_kind: 'expense' | 'bill' | null;
   /** A bill's number, or an expense's category. */
   document_label: string | null;
-  /** Why a model could not read it; null when it could, or when nothing has tried. */
-  extraction_error: string | null;
+  /** Whether a model tried and failed. The stored message stays on the server; the screen has its own sentence. */
+  extraction_failed: boolean;
   /** When a model read it and got something; null when none did. The only ground for saying "read". */
   extracted_at: string | null;
   created_at: string;
 };
 
 const RECEIPT_COLUMNS =
-  'id,file_name,mime_type,size_bytes,has_file,vendor,receipt_date,amount,sst_amount,status,expense_id,bill_id,' +
+  'id,file_name,mime_type,size_bytes,has_file,vendor,receipt_date,amount,sst_amount,status,' +
   'document_kind,document_label,extraction_error,extracted_at,created_at';
 
 const numberOrNull = (value: unknown): number | null => (value === null || value === undefined ? null : Number(value));
@@ -78,12 +76,17 @@ export async function listInboxReceipts(ctx: FinanceWriteContext): Promise<Inbox
     if (error) throw error;
     const page = (data ?? []) as unknown as Record<string, unknown>[];
     rows.push(
-      ...page.map((row) => ({
-        ...(row as unknown as InboxReceiptRow),
-        size_bytes: numberOrNull(row.size_bytes),
-        amount: numberOrNull(row.amount),
-        sst_amount: numberOrNull(row.sst_amount),
-      })),
+      ...page.map((row) => {
+        // The stored error text is read here and goes no further: only whether there is one.
+        const { extraction_error, ...rest } = row;
+        return {
+          ...(rest as unknown as InboxReceiptRow),
+          size_bytes: numberOrNull(row.size_bytes),
+          amount: numberOrNull(row.amount),
+          sst_amount: numberOrNull(row.sst_amount),
+          extraction_failed: Boolean(extraction_error),
+        };
+      }),
     );
     if (page.length < INBOX_RECEIPT_PAGE_SIZE) return rows;
   }

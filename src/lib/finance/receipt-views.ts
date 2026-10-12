@@ -60,7 +60,7 @@ export const INBOX_READING_NOTES = {
  */
 export function inboxReadingNote(row: InboxReceiptRow): keyof typeof INBOX_READING_NOTES | null {
   if (row.status !== 'review') return null;
-  if (row.extraction_error) return 'failed';
+  if (row.extraction_failed) return 'failed';
   return row.extracted_at ? 'read' : null;
 }
 
