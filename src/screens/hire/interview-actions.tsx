@@ -199,7 +199,7 @@ export function InterviewRowMenu({ row }: { row: InterviewRow }) {
   const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState<'invitation' | 'cancel' | 'clear_feedback' | null>(null);
   /** The feedback form of this row: closed, or open to add, to edit, or to mark completed with feedback. */
-  const [feedback, setFeedback] = useState<FeedbackMode | null>(null);
+  const [feedback, setFeedback] = useState<{ mode: FeedbackMode; row: InterviewRow } | null>(null);
   /** The row's invitation: not asked for, being fetched, or showing. */
   const [handover, setHandover] = useState<HandoverState>('idle');
   /** What the invitation panel shows, as the server made it. */
@@ -280,7 +280,11 @@ export function InterviewRowMenu({ row }: { row: InterviewRow }) {
             if (next === 'edit') openInterview({ mode: 'change', row, focusId: triggerId });
             else if (next === 'cancel' || next === 'clear_feedback') setPanel(next);
             // The feedback form takes the row as it is now: an edit sends its feedback's saved time, so a later change by someone else is refused.
-            else setFeedback(modeOf(next));
+            // The row is held as it was when the form opened, however often the screen behind it is fetched again.
+            else {
+              const mode = modeOf(next);
+              setFeedback(mode ? { mode, row } : null);
+            }
           }}
         >
           {groups.map((group, index) => (
@@ -421,7 +425,7 @@ export function InterviewRowMenu({ row }: { row: InterviewRow }) {
 
       {/* Add, edit, or "Mark completed and add feedback": one form, which gives focus back to this row's menu button. */}
       <FeedbackDialog
-        target={feedback ? { mode: feedback, row } : null}
+        target={feedback}
         onClose={() => setFeedback(null)}
         returnFocus={() => trigger.current?.focus()}
       />
