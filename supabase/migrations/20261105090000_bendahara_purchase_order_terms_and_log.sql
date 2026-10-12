@@ -22,6 +22,13 @@ alter table public.finance_purchase_orders
   add column payment_terms_days integer check (payment_terms_days >= 0),
   add column delivery_address text check (char_length(delivery_address) <= 500);
 
+-- Orders that already exist take their supplier's terms. Nobody is signed in
+-- here, so the guard steps aside.
+update public.finance_purchase_orders p
+   set payment_terms_days = c.payment_terms_days
+  from public.finance_contacts c
+ where c.org_id = p.org_id and c.id = p.supplier_id and p.payment_terms_days is null;
+
 -- The body of 20261103094500 with the two new fields. A new order with no
 -- terms given takes the supplier's. Changing a draft keeps its terms and
 -- address unless the caller sends them.
@@ -147,7 +154,7 @@ end $$;
 
 -- ---- 2. totals, with what has arrived -----------------------------------------
 -- A view's "p.*" is fixed when the view is made, so it is made again to carry
--- the two new columns. Nothing else reads this view.
+-- the two new columns. No other view or function is built on this one.
 drop view public.finance_purchase_order_totals;
 
 create view public.finance_purchase_order_totals with (security_invoker = true) as
@@ -223,6 +230,10 @@ declare
   about text := coalesce(new.po_no, 'a draft');
 begin
   if me is null or new.status is not distinct from old.status then
+    return null;
+  end if;
+  -- A draft that was never submitted has no number and nobody else saw it.
+  if new.status = 'cancelled' and old.po_no is null then
     return null;
   end if;
 
