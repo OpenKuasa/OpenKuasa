@@ -6,6 +6,7 @@
  * one waits for the user's approval before it runs (see `CRM_WRITE_TOOL_NAMES`).
  */
 
+import { errorCodeOf } from '@/lib/ai/call-log';
 import { tool } from 'ai';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
@@ -126,7 +127,8 @@ async function attempt<T>(run: () => Promise<T>): Promise<Outcome<T>> {
     return { ok: true, data: await run() };
   } catch (error) {
     if (error instanceof CrmContactFormError) return { ok: false, error: error.message };
-    console.error('[tuah] CRM change failed:', error instanceof Error ? error.message : error);
+    // The code only: a database error's message quotes the values it refused (a contact's details).
+    console.error('[tuah] CRM change failed:', errorCodeOf(error));
     return { ok: false, error: 'That change could not be saved. Please try again.' };
   }
 }
@@ -220,19 +222,27 @@ const dealFields = {
   expectedCloseDate: z.string().optional().describe('YYYY-MM-DD.'),
 };
 
+/**
+ * Gives a workspace its starting pipeline when it has none, as opening the Deals screen does. A chat route calls
+ * this once, for someone who may edit, before the assistant runs: a deal cannot be added without a stage to put
+ * it in. It is a write, so it lives here and not in a lookup tool. Never throws: without a pipeline the assistant
+ * simply finds none.
+ */
+export async function ensureCrmPipeline(client: SupabaseClient, orgId: string): Promise<void> {
+  try {
+    if (needsDefaultPipeline(await listCrmPipelines(client, orgId))) await ensureDefaultPipeline(client, orgId);
+  } catch (error) {
+    console.error('[tuah] could not set up the default pipeline:', errorCodeOf(error));
+  }
+}
+
 /** Builds Tuah's CRM tools for one request. Without write access only the lookups exist. */
 export function createCrmTools(access: CrmAccess) {
   const { client, orgId } = access;
 
-  const pipelines = async () => {
-    let list = await listCrmPipelines(client, orgId);
-    // The Deals screen gives a new workspace its first pipeline; so does asking here.
-    if (access.canWrite && needsDefaultPipeline(list)) {
-      await ensureDefaultPipeline(client, orgId);
-      list = await listCrmPipelines(client, orgId);
-    }
-    return list;
-  };
+  // A lookup only reads. A new workspace's first pipeline is set up before the tools are built
+  // (`ensureCrmPipeline`, called by the chat routes for someone who may edit), never from here.
+  const pipelines = () => listCrmPipelines(client, orgId);
 
   const readContact = async (id: string): Promise<ContactRow> => {
     const { data, error } = await client

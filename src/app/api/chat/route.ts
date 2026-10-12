@@ -14,8 +14,9 @@
  */
 
 import { readUIMessageStream, type UIMessage } from 'ai';
-import { modelErrorCode } from '@/lib/ai/call-log';
+import { errorCodeOf, modelErrorCode } from '@/lib/ai/call-log';
 import { prepareChat } from '@/lib/ai/chat-request';
+import { ensureCrmPipeline } from '@/lib/ai/crm-tools';
 import { runTuah, type HireAccess, type PeopleAccess } from '@/lib/ai/agents/orchestrator';
 import { receiptFromMessages, type PeopleWrite } from '@/lib/ai/people-tools';
 import { getCurrentOrg } from '@/lib/auth/current-org';
@@ -79,6 +80,9 @@ export async function POST(request: Request) {
       }
     : null;
 
+  // A new workspace gets its starting pipeline here, as on the Deals screen: the lookups themselves never write.
+  if (crm?.canWrite) await ensureCrmPipeline(supabase, crm.orgId);
+
   // HR is workspace-only, like the CRM: no workspace, no HR this turn (never the
   // sample data, and never a crash — a failed viewer load just drops HR).
   // Rows are the caller's own session's, so the database decides who sees what;
@@ -100,7 +104,7 @@ export async function POST(request: Request) {
       }
       people = { data, viewer, write };
     } catch (error) {
-      console.error('[tuah] HR unavailable this turn:', error instanceof Error ? error.message : error);
+      console.error('[tuah] HR unavailable this turn:', errorCodeOf(error));
       people = null;
     }
   }
@@ -161,10 +165,7 @@ export async function POST(request: Request) {
       if (!questionSaved) return;
       await saveAnswer(supabase, threadId, answer.parts);
     })().catch((error) => {
-      console.error(
-        '[tuah] answer not saved:',
-        error instanceof Error ? error.message : error,
-      );
+      console.error('[tuah] answer not saved:', errorCodeOf(error));
     });
   }
 
