@@ -1,10 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import type { AccountType, LedgerAccount, LedgerLine } from '@/lib/finance/ledger';
+import type { AccountType, LedgerAccount, LedgerLine, LedgerSource } from '@/lib/finance/ledger';
 import {
+  AGE_BUCKETS,
+  aged,
+  agedCsv,
   balanceSheet,
   balanceSheetCsv,
+  bucketFor,
+  cashFlow,
+  cashFlowCsv,
+  cashMovements,
   chartState,
   countUnassigned,
+  creditSummary,
+  dateLabel,
+  daysOverdue,
   expenseBreakdown,
   isValidPeriod,
   lastDayOfMonth,
@@ -21,6 +31,7 @@ import {
   trialBalance,
   trialBalanceCsv,
   type MonthlyTotals,
+  type OpenDocument,
   type Period,
 } from '@/lib/finance/reports';
 
@@ -552,5 +563,298 @@ describe('the CSV files', () => {
   it('writes a negative amount as a number, not as a formula', () => {
     const pl = profitAndLoss(ACCOUNTS, TOTALS, only('2026-04'));
     expect(profitAndLossCsv(pl, only('2026-04'))).toContain(',Sales,-500\r\n');
+  });
+});
+
+/* ---- aged receivables and payables ------------------------------------ */
+
+const csvRows = (csv: string) => csv.replace(/^﻿/, '').split('\r\n').filter(Boolean);
+
+describe('daysOverdue', () => {
+  it('counts whole calendar days from the due date to today', () => {
+    expect(daysOverdue('2026-10-10', '2026-10-10')).toBe(0);
+    expect(daysOverdue('2026-10-09', '2026-10-10')).toBe(1);
+    expect(daysOverdue('2026-09-10', '2026-10-10')).toBe(30);
+    expect(daysOverdue('2026-09-09', '2026-10-10')).toBe(31);
+  });
+  it('is zero or below for a due date in the future', () => {
+    expect(daysOverdue('2026-10-11', '2026-10-10')).toBe(-1);
+    expect(daysOverdue('2026-12-31', '2026-10-10')).toBe(-82);
+  });
+  it('crosses a month end, a year end and 29 February', () => {
+    expect(daysOverdue('2026-01-31', '2026-02-01')).toBe(1);
+    expect(daysOverdue('2025-12-31', '2026-01-01')).toBe(1);
+    expect(daysOverdue('2025-12-01', '2026-01-01')).toBe(31);
+    expect(daysOverdue('2028-02-28', '2028-03-01')).toBe(2);
+    expect(daysOverdue('2026-02-28', '2026-03-01')).toBe(1);
+    expect(daysOverdue('2028-02-29', '2028-03-01')).toBe(1);
+    expect(daysOverdue('2027-03-01', '2028-03-01')).toBe(366);
+  });
+  it('treats a date that is not a real date as not yet due, and does not throw', () => {
+    for (const bad of ['', 'soon', '2026-02-30', '2026-13-01', '2026-1-5', '2026-10-10T00:00:00Z']) {
+      expect(daysOverdue(bad, '2026-10-10'), bad).toBe(0);
+    }
+    expect(daysOverdue('2026-09-01', 'nonsense')).toBe(0);
+  });
+});
+
+describe('bucketFor', () => {
+  it('puts each boundary day in its bucket', () => {
+    const at = (days: number) => bucketFor(days);
+    expect([at(-30), at(-1), at(0)]).toEqual(['current', 'current', 'current']);
+    expect([at(1), at(30)]).toEqual(['d1_30', 'd1_30']);
+    expect([at(31), at(60)]).toEqual(['d31_60', 'd31_60']);
+    expect([at(61), at(90)]).toEqual(['d61_90', 'd61_90']);
+    expect([at(91), at(1000)]).toEqual(['d90_plus', 'd90_plus']);
+  });
+  it('has the five buckets in order, with their labels', () => {
+    expect(AGE_BUCKETS).toEqual([
+      { key: 'current', label: 'Not yet due' },
+      { key: 'd1_30', label: '1–30 days' },
+      { key: 'd31_60', label: '31–60 days' },
+      { key: 'd61_90', label: '61–90 days' },
+      { key: 'd90_plus', label: 'Over 90 days' },
+    ]);
+  });
+});
+
+describe('aged', () => {
+  const TODAY = '2026-10-10';
+  const doc = (party_id: string, party_name: string, due_date: string, balance: number): OpenDocument => ({ party_id, party_name, due_date, balance });
+  const DOCS: OpenDocument[] = [
+    doc('c1', 'Aisyah Trading', '2026-11-01', 100), // not yet due
+    doc('c1', 'Aisyah Trading', '2026-10-10', 50.5), // due today: current
+    doc('c1', 'Aisyah Trading', '2026-10-09', 20), // 1 day
+    doc('c2', 'Bunga Raya Cafe', '2026-09-10', 300), // 30 days
+    doc('c2', 'Bunga Raya Cafe', '2026-09-09', 40), // 31 days
+    doc('c2', 'Bunga Raya Cafe', '2026-08-11', 10), // 60 days
+    doc('c3', 'Cahaya Sdn Bhd', '2026-08-10', 5.25), // 61 days
+    doc('c3', 'Cahaya Sdn Bhd', '2026-07-12', 0.1), // 90 days
+    doc('c3', 'Cahaya Sdn Bhd', '2026-07-11', 0.2), // 91 days
+    doc('c4', 'Dalia Enterprise', '2026-10-01', 0), // nothing owed: left out
+    doc('c5', 'Eman Stores', '2026-10-01', -75), // in credit: left out
+  ];
+
+  it('makes one row per party with a balance, with the buckets in whole sen', () => {
+    const a = aged(DOCS, TODAY);
+    expect(a.rows.map((r) => r.party_id)).toEqual(['c2', 'c1', 'c3']);
+    expect(a.rows[0]).toEqual({
+      party_id: 'c2', party_name: 'Bunga Raya Cafe', total: 350,
+      buckets: { current: 0, d1_30: 300, d31_60: 50, d61_90: 0, d90_plus: 0 },
+    });
+    expect(a.rows[1].buckets).toEqual({ current: 150.5, d1_30: 20, d31_60: 0, d61_90: 0, d90_plus: 0 });
+    expect(a.rows[1].total).toBe(170.5);
+    // 5.25 (61 days) + 0.10 (90 days) in 61–90, 0.20 (91 days) over 90; no float drift
+    expect(a.rows[2].buckets).toEqual({ current: 0, d1_30: 0, d31_60: 0, d61_90: 5.35, d90_plus: 0.2 });
+    expect(a.rows[2].total).toBe(5.55);
+  });
+  it('counts a document 90 days over in 61–90 and one 91 days over in Over 90 days', () => {
+    const a = aged(DOCS, TODAY);
+    const cahaya = a.rows.find((r) => r.party_id === 'c3')!;
+    expect(cahaya.buckets.d61_90).toBe(5.35);
+    expect(cahaya.buckets.d90_plus).toBe(0.2);
+  });
+  it('adds the columns up, and says how much is overdue (everything but Not yet due)', () => {
+    const a = aged(DOCS, TODAY);
+    expect(a.totals).toEqual({ current: 150.5, d1_30: 320, d31_60: 50, d61_90: 5.35, d90_plus: 0.2 });
+    expect(a.total).toBe(526.05);
+    expect(a.overdue).toBe(375.55);
+  });
+  it('sorts the largest total first, and equal totals by name', () => {
+    const a = aged([doc('z', 'Zed', '2026-10-01', 10), doc('a', 'Alif', '2026-10-01', 10), doc('m', 'Mim', '2026-10-01', 20)], TODAY);
+    expect(a.rows.map((r) => r.party_name)).toEqual(['Mim', 'Alif', 'Zed']);
+  });
+  it('is empty for no documents, or for none with a balance', () => {
+    const empty = { rows: [], totals: { current: 0, d1_30: 0, d31_60: 0, d61_90: 0, d90_plus: 0 }, total: 0, overdue: 0 };
+    expect(aged([], TODAY)).toEqual(empty);
+    expect(aged([doc('c', 'C', '2026-10-01', 0), doc('d', 'D', '2026-10-01', -5)], TODAY)).toEqual(empty);
+  });
+  it('puts a document with an invalid due date in Not yet due', () => {
+    const a = aged([doc('c', 'C', 'not a date', 10)], TODAY);
+    expect(a.rows[0].buckets.current).toBe(10);
+    expect(a.overdue).toBe(0);
+  });
+  it('groups by party id, not by name, so two customers with one name stay apart', () => {
+    const a = aged([doc('1', 'Ali', '2026-10-01', 10), doc('2', 'Ali', '2026-10-01', 5)], TODAY);
+    expect(a.rows).toHaveLength(2);
+  });
+});
+
+describe('creditSummary', () => {
+  const d = (party_id: string, balance: number) => ({ party_id, balance });
+  it('counts the parties with a negative balance and adds up what they are owed', () => {
+    expect(creditSummary([d('a', -75), d('a', -25.5), d('b', -0.1), d('c', 50), d('d', 0)])).toEqual({ count: 2, total: 100.6 });
+  });
+  it('is nothing when nobody is in credit', () => {
+    expect(creditSummary([d('a', 10), d('b', 0)])).toEqual({ count: 0, total: 0 });
+    expect(creditSummary([])).toEqual({ count: 0, total: 0 });
+  });
+});
+
+describe('dateLabel', () => {
+  it('writes a date in words', () => {
+    expect(dateLabel('2026-10-10')).toBe('10 October 2026');
+    expect(dateLabel('2028-02-29')).toBe('29 February 2028');
+    expect(dateLabel('2026-01-05')).toBe('5 January 2026');
+  });
+});
+
+describe('agedCsv', () => {
+  it('writes a header, a row per party and a totals row, as numbers', () => {
+    const a = aged([
+      { party_id: 'c1', party_name: 'Aisyah, Trading', due_date: '2026-10-20', balance: 100 },
+      { party_id: 'c2', party_name: '=Evil', due_date: '2026-09-01', balance: 40.5 },
+    ], '2026-10-10');
+    expect(csvRows(agedCsv(a, '2026-10-10', 'Customer'))).toEqual([
+      'As at,Customer,Not yet due,1–30 days,31–60 days,61–90 days,Over 90 days,Total',
+      '10 October 2026,"Aisyah, Trading",100,0,0,0,0,100',
+      "10 October 2026,'=Evil,0,0,40.5,0,0,40.5",
+      '10 October 2026,Total,100,0,40.5,0,0,140.5',
+    ]);
+  });
+  it('names the supplier column for payables', () => {
+    expect(csvRows(agedCsv(aged([], '2026-10-10'), '2026-10-10', 'Supplier'))[0]).toBe(
+      'As at,Supplier,Not yet due,1–30 days,31–60 days,61–90 days,Over 90 days,Total',
+    );
+  });
+});
+
+/* ---- cash flow --------------------------------------------------------- */
+
+describe('cash flow', () => {
+  const bank = (code: string, name: string): LedgerAccount => ({ ...account(code, name, 'asset'), stands_for: 'bank' });
+  const MAIN = bank('1100', 'Main Bank');
+  const CASH = bank('1000', 'Cash in Hand');
+  const BOOK = [CASH, MAIN, AR, AP, CAPITAL, SALES, PURCHASES, UTILITIES];
+  const src = (key: string, date: string, source: LedgerSource, sides: Side[]): LedgerLine[] =>
+    entry(key, date, sides).map((l) => ({ ...l, source }));
+
+  /**
+   * Hand-made books. Bank and cash accounts are 1100 and 1000.
+   *   Jan  opening balances: bank 10,000.00 and cash 500.00 (against capital); an invoice of 1,060.00 (no cash)
+   *   Feb  receipt of 1,060.00; a transfer of 300.00 from the bank to the cash tin; a bill of 400.00 (no cash)
+   *   Mar  the bill is paid (400.00); an expense of 150.50 from the bank; a second receipt of 530.00
+   *   Apr  that second receipt is voided (its reversal, 530.00 out, is dated April); a refund of 100.00; a manual journal puts 75.00 in the bank
+   * Cash in each month: Jan +10,500.00; Feb +1,060.00 (the transfer nets to nothing); Mar +(-400 - 150.50 + 530) = -20.50;
+   * Apr +(-530 - 100 + 75) = -555.00. The cumulative balance of the two accounts: 10,500.00; 11,560.00; 11,539.50; 10,984.50.
+   */
+  const CASH_LINES: LedgerLine[] = [
+    ...src('opening:bank', '2026-01-02', 'opening', [[MAIN, 10000, 0], [CAPITAL, 0, 10000]]),
+    ...src('opening:cash', '2026-01-02', 'opening', [[CASH, 500, 0], [CAPITAL, 0, 500]]),
+    ...src('invoice:1', '2026-01-15', 'invoice', [[AR, 1060, 0], [SALES, 0, 1060]]),
+    ...src('payment_in:1', '2026-02-10', 'payment_in', [[MAIN, 1060, 0], [AR, 0, 1060]]),
+    ...src('transfer:1', '2026-02-15', 'transfer', [[CASH, 300, 0], [MAIN, 0, 300]]),
+    ...src('bill:1', '2026-02-20', 'bill', [[PURCHASES, 400, 0], [AP, 0, 400]]),
+    ...src('payment_out:1', '2026-03-05', 'payment_out', [[AP, 400, 0], [MAIN, 0, 400]]),
+    ...src('expense:1', '2026-03-12', 'expense', [[UTILITIES, 150.5, 0], [MAIN, 0, 150.5]]),
+    ...src('invoice:2', '2026-03-15', 'invoice', [[AR, 530, 0], [SALES, 0, 530]]),
+    ...src('payment_in:2', '2026-03-20', 'payment_in', [[MAIN, 530, 0], [AR, 0, 530]]),
+    ...src('payment_in:2:void', '2026-04-03', 'payment_in', [[AR, 530, 0], [MAIN, 0, 530]]),
+    ...src('refund:1', '2026-04-08', 'refund', [[AR, 100, 0], [MAIN, 0, 100]]),
+    ...src('journal:1', '2026-04-20', 'journal', [[MAIN, 75, 0], [SALES, 0, 75]]),
+  ];
+
+  describe('cashMovements', () => {
+    it('adds the bank and cash lines up by month and source, leaving transfers out', () => {
+      expect(cashMovements(CASH_LINES, BOOK)).toEqual([
+        { month: '2026-01', source: 'opening', in: 10500, out: 0 },
+        { month: '2026-02', source: 'payment_in', in: 1060, out: 0 },
+        { month: '2026-03', source: 'expense', in: 0, out: 150.5 },
+        { month: '2026-03', source: 'payment_in', in: 530, out: 0 },
+        { month: '2026-03', source: 'payment_out', in: 0, out: 400 },
+        { month: '2026-04', source: 'journal', in: 75, out: 0 },
+        { month: '2026-04', source: 'payment_in', in: 0, out: 530 },
+        { month: '2026-04', source: 'refund', in: 0, out: 100 },
+      ]);
+    });
+    it('keeps a voided receipt’s reversal in its own source and month, as money out, not netted against the original', () => {
+      const rows = cashMovements(CASH_LINES, BOOK).filter((r) => r.source === 'payment_in');
+      expect(rows.find((r) => r.month === '2026-03')).toMatchObject({ in: 530, out: 0 });
+      expect(rows.find((r) => r.month === '2026-04')).toMatchObject({ in: 0, out: 530 });
+    });
+    it('ignores accounts that are not bank or cash, and lines with no account', () => {
+      expect(cashMovements(src('x', '2026-01-01', 'journal', [[AR, 5, 0], [null, 0, 5]]), BOOK)).toEqual([]);
+      expect(cashMovements([], BOOK)).toEqual([]);
+    });
+    it('is exact to the sen', () => {
+      const lines = [
+        ...src('a', '2026-03-01', 'payment_in', [[MAIN, 0.1, 0], [AR, 0, 0.1]]),
+        ...src('b', '2026-03-02', 'payment_in', [[MAIN, 0.2, 0], [AR, 0, 0.2]]),
+      ];
+      expect(cashMovements(lines, BOOK)).toEqual([{ month: '2026-03', source: 'payment_in', in: 0.3, out: 0 }]);
+    });
+  });
+
+  describe('cashFlow', () => {
+    const MOVES = cashMovements(CASH_LINES, BOOK);
+    const per = (from: string, to: string): Period => ({ from, to });
+
+    it('brings the opening cash forward, groups the period and ends on the closing cash (March to April)', () => {
+      expect(cashFlow(MOVES, per('2026-03', '2026-04'))).toEqual({
+        opening: 11560,
+        lines: [
+          { key: 'payment_in', label: 'Received from customers and other income', in: 530, out: 530, net: 0 },
+          { key: 'refund', label: 'Refunds to customers', in: 0, out: 100, net: -100 },
+          { key: 'payment_out', label: 'Paid to suppliers and for expenses', in: 0, out: 550.5, net: -550.5 },
+          { key: 'journal', label: 'Manual journals', in: 75, out: 0, net: 75 },
+        ],
+        totalIn: 605,
+        totalOut: 1180.5,
+        net: -575.5,
+        closing: 10984.5,
+      });
+    });
+    it('shows opening balances brought in as a line of the month they were dated', () => {
+      const cf = cashFlow(MOVES, per('2026-01', '2026-01'));
+      expect(cf.opening).toBe(0);
+      expect(cf.lines).toEqual([{ key: 'opening', label: 'Opening balances brought in', in: 10500, out: 0, net: 10500 }]);
+      expect(cf.closing).toBe(10500);
+    });
+    it('has no lines for a quiet period, but still the opening and closing cash', () => {
+      const cf = cashFlow(MOVES, per('2026-06', '2026-07'));
+      expect(cf).toEqual({ opening: 10984.5, lines: [], totalIn: 0, totalOut: 0, net: 0, closing: 10984.5 });
+    });
+    it('counts nothing from after the period', () => {
+      expect(cashFlow(MOVES, per('2026-02', '2026-02')).closing).toBe(11560);
+    });
+    it('puts a source that should not touch a bank in Other, last', () => {
+      const odd = [...MOVES, { month: '2026-04', source: 'invoice' as const, in: 10, out: 0 }];
+      const cf = cashFlow(odd, per('2026-04', '2026-04'));
+      expect(cf.lines[cf.lines.length - 1]).toEqual({ key: 'other', label: 'Other', in: 10, out: 0, net: 10 });
+    });
+    it('is empty for an invalid period rather than throwing', () => {
+      expect(() => cashFlow(MOVES, per('2026-05', '2026-04'))).not.toThrow();
+    });
+
+    it('closes on the sum of the bank and cash balances the balance sheet shows, for every month', () => {
+      const { totals } = monthlyTotals(CASH_LINES);
+      const bankIds = new Set([MAIN.id, CASH.id]);
+      const months = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2025-12'];
+      for (const month of months) {
+        const bs = balanceSheet(BOOK, totals, only(month));
+        const sheet = Math.round(bs.assets.filter((l) => bankIds.has(l.account_id)).reduce((t, l) => t + Math.round(l.amount * 100), 0));
+        // any starting month: the identity holds whatever period.from is
+        for (const from of ['2025-01', month]) {
+          expect(Math.round(cashFlow(MOVES, per(from, month)).closing * 100), `${from}..${month}`).toBe(sheet);
+        }
+      }
+      expect(cashFlow(MOVES, per('2026-04', '2026-04')).closing).toBe(10984.5);
+    });
+  });
+
+  describe('cashFlowCsv', () => {
+    it('writes the opening cash, a row per group, the total and the closing cash', () => {
+      const cf = cashFlow(cashMovements(CASH_LINES, BOOK), { from: '2026-03', to: '2026-04' });
+      expect(csvRows(cashFlowCsv(cf, { from: '2026-03', to: '2026-04' }))).toEqual([
+        'Period,Line,In,Out,Net',
+        'March to April 2026,Opening cash,,,11560',
+        'March to April 2026,Received from customers and other income,530,530,0',
+        'March to April 2026,Refunds to customers,0,100,-100',
+        'March to April 2026,Paid to suppliers and for expenses,0,550.5,-550.5',
+        'March to April 2026,Manual journals,75,0,75',
+        'March to April 2026,Total,605,1180.5,-575.5',
+        'March to April 2026,Closing cash,,,10984.5',
+      ]);
+    });
   });
 });

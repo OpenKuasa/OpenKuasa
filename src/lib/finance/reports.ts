@@ -11,7 +11,7 @@
  * account is credit-normal (credits less debits). Every entry balances, so the trial balance does too.
  */
 import { toCsv } from './csv';
-import type { AccountType, LedgerAccount, LedgerLine } from './ledger';
+import type { AccountType, LedgerAccount, LedgerLine, LedgerSource } from './ledger';
 import { ACCOUNT_TYPE_LABELS } from './ledger-views';
 
 /** 'YYYY-MM' */
@@ -91,6 +91,12 @@ export function lastDayOfMonth(month: Month): string {
   const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
   const day = index === 1 ? (leap ? 29 : 28) : [3, 5, 8, 10].includes(index) ? 30 : 31;
   return `${month}-${String(day).padStart(2, '0')}`;
+}
+
+/** 2026-10-10 gives "10 October 2026": a date in words, for the "As at" of a statement worked out for one day. */
+export function dateLabel(date: string): string {
+  const [year, month, day] = date.split('-').map(Number);
+  return `${day} ${MONTH_NAMES[month - 1]} ${year}`;
 }
 
 /** 2026-10 gives "31 October 2026": the date a balance sheet for that month is as at. */
@@ -435,4 +441,208 @@ export function countUnassigned(lines: LedgerLine[], accounts: Pick<LedgerAccoun
 /** What the donut's centre shows: the slices added up, so it agrees with the ring even when a negative line was left out of it. */
 export function sliceTotal(slices: { value: number }[]): number {
   return fromSen(slices.reduce((t, s) => t + toSen(s.value), 0));
+}
+
+/* ---- aged receivables and payables ------------------------------------ */
+
+export type AgeBucket = 'current' | 'd1_30' | 'd31_60' | 'd61_90' | 'd90_plus';
+
+export const AGE_BUCKETS: { key: AgeBucket; label: string }[] = [
+  { key: 'current', label: 'Not yet due' },
+  { key: 'd1_30', label: '1–30 days' },
+  { key: 'd31_60', label: '31–60 days' },
+  { key: 'd61_90', label: '61–90 days' },
+  { key: 'd90_plus', label: 'Over 90 days' },
+];
+
+/** What is still owed on one posted document, and by or to whom. */
+export type OpenDocument = { party_id: string; party_name: string; due_date: string; balance: number };
+
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const MS_PER_DAY = 86_400_000;
+
+/** The day number of a YYYY-MM-DD date, counted as a calendar date in UTC (no time zone, no daylight saving); null when it is not a real date. */
+function dayNumber(date: string): number | null {
+  if (!DATE_PATTERN.test(date)) return null;
+  const ms = Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8, 10)));
+  // 2026-02-30 rolls over to March, and a year below 100 is read as 19xx: neither comes back as the same text.
+  return Number.isNaN(ms) || new Date(ms).toISOString().slice(0, 10) !== date ? null : ms / MS_PER_DAY;
+}
+
+/**
+ * Whole days from the due date to today, both YYYY-MM-DD, compared as calendar dates. Zero or below is not yet
+ * due. A date that is not a real date cannot be aged, so it counts as not yet due (0) rather than throwing or
+ * being left out: what is owed stays in the total, and the document shows up under Not yet due.
+ */
+export function daysOverdue(dueDate: string, today: string): number {
+  const due = dayNumber(dueDate);
+  const now = dayNumber(today);
+  return due === null || now === null ? 0 : now - due;
+}
+
+export function bucketFor(days: number): AgeBucket {
+  if (days <= 0) return 'current';
+  if (days <= 30) return 'd1_30';
+  if (days <= 60) return 'd31_60';
+  if (days <= 90) return 'd61_90';
+  return 'd90_plus';
+}
+
+export type AgedRow = { party_id: string; party_name: string; buckets: Record<AgeBucket, number>; total: number };
+export type Aged = { rows: AgedRow[]; totals: Record<AgeBucket, number>; total: number; overdue: number };
+
+const emptyBuckets = (): Record<AgeBucket, number> => ({ current: 0, d1_30: 0, d31_60: 0, d61_90: 0, d90_plus: 0 });
+
+/**
+ * One row per party that is owed or owes something, the largest total first and the name as the tie-break.
+ * A document with a balance of zero or below is left out (a negative one is a party in credit: creditSummary
+ * counts those). `overdue` is everything except Not yet due. Sums are made in whole sen.
+ */
+export function aged(documents: OpenDocument[], today: string): Aged {
+  const byParty = new Map<string, { party_name: string; buckets: Record<AgeBucket, number> }>();
+  const totals = emptyBuckets();
+  for (const d of documents) {
+    const sen = toSen(d.balance);
+    if (sen <= 0) continue;
+    const bucket = bucketFor(daysOverdue(d.due_date, today));
+    const row = byParty.get(d.party_id) ?? { party_name: d.party_name, buckets: emptyBuckets() };
+    row.buckets[bucket] += sen;
+    totals[bucket] += sen;
+    byParty.set(d.party_id, row);
+  }
+  const sum = (b: Record<AgeBucket, number>) => AGE_BUCKETS.reduce((t, { key }) => t + b[key], 0);
+  const scale = (b: Record<AgeBucket, number>) => Object.fromEntries(AGE_BUCKETS.map(({ key }) => [key, fromSen(b[key])])) as Record<AgeBucket, number>;
+  const rows = [...byParty.entries()]
+    .map(([party_id, r]) => ({ party_id, party_name: r.party_name, sen: sum(r.buckets), buckets: scale(r.buckets) }))
+    .sort((a, b) => b.sen - a.sen || a.party_name.localeCompare(b.party_name, 'en'))
+    .map(({ sen, ...row }) => ({ ...row, total: fromSen(sen) }));
+  const total = sum(totals);
+  return { rows, totals: scale(totals), total: fromSen(total), overdue: fromSen(total - totals.current) };
+}
+
+/**
+ * How many parties have a document in credit (a balance below zero) and how much that is in all. A party is
+ * counted once however many of its documents are in credit; a document of theirs that is still owed does not
+ * cancel it, as the aged table shows what is owed document by document.
+ */
+export function creditSummary(documents: { party_id: string; balance: number }[]): { count: number; total: number } {
+  const parties = new Set<string>();
+  let sen = 0;
+  for (const d of documents) {
+    if (toSen(d.balance) >= 0) continue;
+    parties.add(d.party_id);
+    sen -= toSen(d.balance);
+  }
+  return { count: parties.size, total: fromSen(sen) };
+}
+
+/** An aged table as a CSV file: a row per party, then the totals. Amounts are numbers. */
+export function agedCsv(a: Aged, today: string, partyHeading: 'Customer' | 'Supplier'): string {
+  const asAt = dateLabel(today);
+  const amounts = (b: Record<AgeBucket, number>, total: number) => [...AGE_BUCKETS.map(({ key }) => b[key]), total];
+  return toCsv(
+    ['As at', partyHeading, ...AGE_BUCKETS.map(({ label }) => label), 'Total'],
+    [
+      ...a.rows.map((r) => [asAt, r.party_name, ...amounts(r.buckets, r.total)]),
+      [asAt, 'Total', ...amounts(a.totals, a.total)],
+    ],
+  );
+}
+
+/* ---- cash flow --------------------------------------------------------- */
+
+/** The money that went into (in) and out of the bank and cash accounts in a month, from one kind of entry. */
+export type CashMovement = { month: Month; source: LedgerSource; in: number; out: number };
+
+/**
+ * The lines on bank and cash accounts (stands_for 'bank'), added up by month and source, oldest month first
+ * and the source name within it. A transfer is left out: it moves money between the workspace's own accounts, so it is
+ * no cash flow. A void is not undone in the month of the original: its reversal is a line dated the void date, and
+ * it stays in its own source's row as money out (or in), so each month's figures are what happened to the books that month.
+ */
+export function cashMovements(lines: LedgerLine[], accounts: Pick<LedgerAccount, 'id' | 'stands_for'>[]): CashMovement[] {
+  const bank = new Set(accounts.filter((a) => a.stands_for === 'bank').map((a) => a.id));
+  const sums = new Map<string, { month: Month; source: LedgerSource; in: number; out: number }>();
+  for (const line of lines) {
+    if (!line.account_id || !bank.has(line.account_id) || line.source === 'transfer') continue;
+    const month = line.entry_date.slice(0, 7);
+    const key = `${month}|${line.source}`;
+    const row = sums.get(key) ?? { month, source: line.source, in: 0, out: 0 };
+    row.in += toSen(line.debit);
+    row.out += toSen(line.credit);
+    sums.set(key, row);
+  }
+  return [...sums.values()]
+    .sort((a, b) => a.month.localeCompare(b.month) || a.source.localeCompare(b.source))
+    .map((row) => ({ ...row, in: fromSen(row.in), out: fromSen(row.out) }));
+}
+
+export type CashFlowLine = { key: string; label: string; in: number; out: number; net: number };
+export type CashFlow = {
+  /** The cash at the start of the period: the net of every movement before it. */
+  opening: number;
+  /** One per group that moved in the period. */
+  lines: CashFlowLine[];
+  totalIn: number;
+  totalOut: number;
+  net: number;
+  closing: number;
+};
+
+const CASH_GROUPS: { key: string; label: string; sources: LedgerSource[] }[] = [
+  { key: 'payment_in', label: 'Received from customers and other income', sources: ['payment_in'] },
+  { key: 'refund', label: 'Refunds to customers', sources: ['refund'] },
+  // An approved expense is paid from the bank at once, so it is money out like a payment to a supplier.
+  { key: 'payment_out', label: 'Paid to suppliers and for expenses', sources: ['payment_out', 'expense'] },
+  { key: 'opening', label: 'Opening balances brought in', sources: ['opening'] },
+  { key: 'journal', label: 'Manual journals', sources: ['journal'] },
+];
+
+/**
+ * A direct-method cash summary for a period. The opening cash is the net of every movement before the first
+ * month (opening balances are movements dated the account's opening date), so the closing cash equals the
+ * bank and cash accounts' balances on the balance sheet at the end of the period.
+ */
+export function cashFlow(movements: CashMovement[], period: Period): CashFlow {
+  const groups = new Map<string, { in: number; out: number }>();
+  let opening = 0;
+  for (const m of movements) {
+    if (m.month < period.from) opening += toSen(m.in) - toSen(m.out);
+    if (m.month < period.from || m.month > period.to) continue;
+    const key = CASH_GROUPS.find((g) => g.sources.includes(m.source))?.key ?? 'other';
+    const sum = groups.get(key) ?? { in: 0, out: 0 };
+    sum.in += toSen(m.in);
+    sum.out += toSen(m.out);
+    groups.set(key, sum);
+  }
+  const lines = [...CASH_GROUPS, { key: 'other', label: 'Other' }].flatMap((g) => {
+    const sum = groups.get(g.key);
+    return sum && (sum.in !== 0 || sum.out !== 0)
+      ? [{ key: g.key, label: g.label, in: fromSen(sum.in), out: fromSen(sum.out), net: fromSen(sum.in - sum.out) }]
+      : [];
+  });
+  const totalIn = [...groups.values()].reduce((t, g) => t + g.in, 0);
+  const totalOut = [...groups.values()].reduce((t, g) => t + g.out, 0);
+  return {
+    opening: fromSen(opening),
+    lines,
+    totalIn: fromSen(totalIn),
+    totalOut: fromSen(totalOut),
+    net: fromSen(totalIn - totalOut),
+    closing: fromSen(opening + totalIn - totalOut),
+  };
+}
+
+/** The cash flow as a CSV file: the opening cash, a row per group, the total and the closing cash. Amounts are numbers. */
+export function cashFlowCsv(cf: CashFlow, period: Period): string {
+  const label = periodLabel(period);
+  return toCsv(
+    ['Period', 'Line', 'In', 'Out', 'Net'],
+    [
+      [label, 'Opening cash', null, null, cf.opening],
+      ...cf.lines.map((l) => [label, l.label, l.in, l.out, l.net]),
+      [label, 'Total', cf.totalIn, cf.totalOut, cf.net],
+      [label, 'Closing cash', null, null, cf.closing],
+    ],
+  );
 }
