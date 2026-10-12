@@ -27,9 +27,9 @@ export function SavedNoteCard({
   subtitle: string;
   /** What was saved and what can be done with it there; the link follows it. */
   children: ReactNode;
-  /** The screen that shows what was saved. */
-  href: string;
-  linkLabel: string;
+  /** The screen that shows what was saved; absent when the note only explains what is on this screen. */
+  href?: string;
+  linkLabel?: string;
   onClose: () => void;
 }) {
   const id = useId();
@@ -37,21 +37,27 @@ export function SavedNoteCard({
   useEffect(() => {
     link.current?.focus();
   }, []);
+  const linked = href && linkLabel;
 
   return (
     <BentoCard title={title} subtitle={subtitle} icon={FileText} className="col-span-2 md:col-span-12">
       <div className="flex flex-wrap items-center gap-3">
         <p id={id} role="status" className="text-sm text-muted-foreground">
-          {children}{' '}
-          <Link
-            ref={link}
-            href={href}
-            aria-describedby={id}
-            className="font-medium text-primary underline-offset-4 hover:underline"
-          >
-            {linkLabel}
-          </Link>
-          .
+          {children}
+          {linked ? (
+            <>
+              {' '}
+              <Link
+                ref={link}
+                href={href}
+                aria-describedby={id}
+                className="font-medium text-primary underline-offset-4 hover:underline"
+              >
+                {linkLabel}
+              </Link>
+              .
+            </>
+          ) : null}
         </p>
         <Button type="button" variant="outline" size="sm" onClick={onClose}>
           Close

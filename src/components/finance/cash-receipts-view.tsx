@@ -6,6 +6,7 @@ import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { AreaTrend, DonutStat, type Series } from '@/components/charts';
 import { type CashReceiptFormActions, CashReceiptFormCard } from '@/components/finance/cash-receipt-form-card';
 import { ConfirmRow } from '@/components/finance/confirm-row';
+import { SavedNoteCard } from '@/components/finance/saved-note-card';
 import { downloadCsv } from '@/components/finance/download-csv';
 import { RowMenu, type RowMenuItem } from '@/components/finance/row-menu';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
@@ -38,6 +39,7 @@ import {
   filterCashReceipts,
   receiptDeleteEffect,
   receiptFor,
+  receiptLeftNote,
   receiptName,
   receiptVoidEffect,
 } from '@/lib/finance/cash-book-views';
@@ -61,7 +63,7 @@ export type CashReceiptsWriter = {
   actions: CashReceiptActions;
   /** True for an owner or admin: they may post a draft and void a posted receipt. */
   canSignOff: boolean;
-  /** Every invoice and every payment in, to find the invoices that can still take a receipt. */
+  /** The invoices that can still take money, and the payment rows that hold part of one without being posted: all the form reads. */
   invoices: InvoiceListRow[];
   payments: PaymentInRow[];
   accounts: FinanceAccount[];
@@ -119,6 +121,8 @@ export function CashReceiptsView({
   const [filter, setFilter] = useState<CashReceiptFilter>('open');
   const [showAll, setShowAll] = useState(false);
   const [open, setOpen] = useState<Open>(null);
+  // Said when a receipt that was just posted or voided is not in the list on screen.
+  const [leftNote, setLeftNote] = useState<{ title: string; text: string } | null>(null);
   const confirm = useFinanceAction();
 
   const view = cashReceiptsView(rows, today, period);
@@ -149,12 +153,20 @@ export function CashReceiptsView({
   /** Opens one thing, dropping whatever message the last question left behind. */
   const ask = (next: Exclude<Open, null>) => {
     confirm.clear();
+    setLeftNote(null);
     setOpen(next);
   };
   /** Closes whatever is open, and the message that went with it. */
   const close = () => {
     confirm.clear();
     setOpen(null);
+  };
+
+  /** Closes, and says so when the receipt just posted or voided is not in the list the person is looking at. */
+  const closeSaying = (event: Parameters<typeof receiptLeftNote>[0]) => {
+    close();
+    const text = receiptLeftNote(event, today, period, filter);
+    setLeftNote(text ? { title: event.kind === 'posted' ? 'Receipt posted' : 'Receipt voided', text } : null);
   };
 
   const menuItem = (row: CashReceiptRow, action: CashReceiptAction): RowMenuItem => {
@@ -196,7 +208,12 @@ export function CashReceiptsView({
           pendingLabel="Posting…"
           pending={confirm.pending}
           error={confirm.error}
-          onConfirm={() => confirm.run(() => actions.post({ id: row.transaction_id }), close)}
+          onConfirm={() =>
+            confirm.run(
+              () => actions.post({ id: row.transaction_id }),
+              (posted) => closeSaying({ kind: 'posted', number: posted.number, date: row.txn_date }),
+            )
+          }
           onCancel={close}
         >
           Post this receipt of <span className="font-medium">{rm(row.amount)}</span>
@@ -215,7 +232,12 @@ export function CashReceiptsView({
           pendingLabel="Voiding…"
           pending={confirm.pending}
           error={confirm.error}
-          onConfirm={() => confirm.run(() => actions.voidReceipt({ id: row.transaction_id }), close)}
+          onConfirm={() =>
+            confirm.run(
+              () => actions.voidReceipt({ id: row.transaction_id }),
+              () => closeSaying({ kind: 'voided', number: row.number ?? '—' }),
+            )
+          }
           onCancel={close}
         >
           Void receipt <span className="font-medium">{row.number}</span> of{' '}
@@ -249,7 +271,13 @@ export function CashReceiptsView({
         subtitle="Money received into cash and bank, Saudara."
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <Select value={period} onValueChange={(v) => setPeriod(v as CashBookPeriod)}>
+            <Select
+              value={period}
+              onValueChange={(v) => {
+                setLeftNote(null);
+                setPeriod(v as CashBookPeriod);
+              }}
+            >
               <SelectTrigger className="w-40" aria-label="Period">
                 <SelectValue />
               </SelectTrigger>
@@ -290,8 +318,13 @@ export function CashReceiptsView({
             today={open.today}
             canSignOff={writer.canSignOff}
             actions={writer.actions}
-            onClose={close}
+            onClose={(posted) => (posted ? closeSaying({ kind: 'posted', ...posted }) : close())}
           />
+        ) : null}
+        {leftNote ? (
+          <SavedNoteCard title={leftNote.title} subtitle="It is not in the list below" onClose={() => setLeftNote(null)}>
+            {leftNote.text}
+          </SavedNoteCard>
         ) : null}
 
         {view.stats.map((s, i) => (
@@ -341,7 +374,13 @@ export function CashReceiptsView({
                 onChange={(e) => setQuery(e.target.value)}
               />
             </div>
-            <Select value={filter} onValueChange={(v) => setFilter(v as CashReceiptFilter)}>
+            <Select
+              value={filter}
+              onValueChange={(v) => {
+                setLeftNote(null);
+                setFilter(v as CashReceiptFilter);
+              }}
+            >
               <SelectTrigger className="w-40" aria-label="Status">
                 <SelectValue />
               </SelectTrigger>
@@ -392,7 +431,9 @@ export function CashReceiptsView({
                   (rows.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={columns} className="py-8 text-center text-muted-foreground">
-                        No receipts yet. A payment recorded on Payments In shows here too.
+                        {writer
+                          ? 'No receipts yet. Record one with New receipt. A payment recorded on Payments In shows here too.'
+                          : 'No receipts yet. A payment recorded on Payments In shows here too.'}
                       </TableCell>
                     </TableRow>
                   ) : inPeriodRows.length === 0 ? (

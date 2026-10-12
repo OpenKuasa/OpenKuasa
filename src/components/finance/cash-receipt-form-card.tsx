@@ -12,12 +12,14 @@ import type { CashReceiptKind, CashReceiptRow } from '@/lib/finance/cash-book';
 import {
   type CashReceiptForm,
   TYPED_PAYER,
+  afterRefusedReceiptSave,
   cashReceiptFormError,
   cashReceiptPayload,
   cashReceiptTotal,
   chooseReceiptCustomer,
   editCashReceiptForm,
   keepReceiptInvoices,
+  leftOutInvoicesNote,
   newCashReceiptForm,
   receiptSavedNotPosted,
   receivableFor,
@@ -84,11 +86,14 @@ export function CashReceiptFormCard({
   /** True for an owner or admin, who may post. */
   canSignOff: boolean;
   actions: CashReceiptFormActions;
-  onClose: () => void;
+  /** Called when the card should go: after a save, or Cancel. After a post it is told which receipt, and its date. */
+  onClose: (posted?: { number: string; date: string }) => void;
 }) {
   const id = useId();
   const [typed, setForm] = useState<CashReceiptForm>(() =>
-    editing ? editCashReceiptForm(editing, payments) : newCashReceiptForm(accounts, categories, today),
+    editing
+      ? editCashReceiptForm(editing, payments)
+      : newCashReceiptForm(accounts, categories, today, receivableFor(invoices, payments)),
   );
   const [posting, setPosting] = useState(false);
   const save = useFinanceAction();
@@ -105,6 +110,7 @@ export function CashReceiptFormCard({
   const forInvoices = form.kind === 'invoice';
   const offered = invoicesOf(receivable, form.customerId);
   const tickedCount = Object.keys(form.amounts).length;
+  const leftOut = leftOutInvoicesNote(typed, receivable);
 
   // A draft may name an account, a contact, a category or a customer that is no longer offered: it stays the draft's.
   const accountChoices = withCurrent(
@@ -134,21 +140,32 @@ export function CashReceiptFormCard({
       return;
     }
     const payload = cashReceiptPayload(form);
+    const date = form.date;
     setPosting(post);
+    // A draft that someone deleted meanwhile is offered again as a new receipt.
+    const forgetGone = <R extends FinResult<unknown>>(result: R): R => {
+      if (result.ok) return result;
+      const after = afterRefusedReceiptSave(form, result.error);
+      if (after.form !== form) setForm(after.form);
+      return { ...result, error: after.error };
+    };
     if (!post) {
-      save.run(() => actions.save(payload), onClose);
+      save.run(async () => forgetGone(await actions.save(payload)), () => onClose());
       return;
     }
-    save.run(async () => {
-      const result = await actions.saveAndPost(payload);
-      // Saved but not posted: go on editing that draft, so a second try does not save a second receipt.
-      if (!result.ok && result.draftId) {
-        const draftId = result.draftId;
-        setForm((f) => ({ ...f, id: draftId }));
-        return { ...result, error: receiptSavedNotPosted(result.error) };
-      }
-      return result;
-    }, onClose);
+    save.run(
+      async () => {
+        const result = await actions.saveAndPost(payload);
+        // Saved but not posted: go on editing that draft, so a second try does not save a second receipt.
+        if (!result.ok && result.draftId) {
+          const draftId = result.draftId;
+          setForm((f) => ({ ...f, id: draftId }));
+          return { ...result, error: receiptSavedNotPosted(result.error) };
+        }
+        return forgetGone(result);
+      },
+      (posted) => onClose({ number: posted.number, date }),
+    );
   };
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -167,8 +184,8 @@ export function CashReceiptFormCard({
       <form onSubmit={submit} noValidate className="grid gap-3 md:grid-cols-12">
         <fieldset className="space-y-1.5 md:col-span-12">
           <legend className="text-sm font-medium leading-none">What it is for</legend>
-          <div className="flex h-8 flex-wrap items-center gap-4">
-            {(['income', 'invoice'] as const).map((kind, i) => (
+          <div className="flex min-h-8 flex-wrap items-center gap-x-4 gap-y-1">
+            {(['income', 'invoice'] as const).map((kind) => (
               <label key={kind} className="flex items-center gap-2 text-sm">
                 <input
                   type="radio"
@@ -176,9 +193,9 @@ export function CashReceiptFormCard({
                   className="size-4 accent-primary"
                   checked={form.kind === kind}
                   onChange={() => edit((f) => ({ ...f, kind }))}
-                  // The first choice takes focus when a row's menu opens the card.
-                  autoFocus={i === 0}
-                  data-finance-focus={i === 0 ? '' : undefined}
+                  // The choice that is checked takes focus when a row's menu opens the card, so a key press does not change it.
+                  autoFocus={form.kind === kind}
+                  data-finance-focus={form.kind === kind ? '' : undefined}
                 />
                 {KIND_LABELS[kind]}
               </label>
@@ -264,6 +281,11 @@ export function CashReceiptFormCard({
                   })}
                 </ul>
               )}
+              {leftOut ? (
+                <p role="status" className="text-sm text-muted-foreground">
+                  {leftOut}
+                </p>
+              ) : null}
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm" aria-live="polite">
                   Total <span className="font-semibold tabular-nums">{rm(cashReceiptTotal(form))}</span>
@@ -433,7 +455,7 @@ export function CashReceiptFormCard({
               {save.pending && posting ? 'Posting…' : 'Post receipt'}
             </Button>
           ) : null}
-          <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={save.pending}>
+          <Button type="button" variant="outline" size="sm" onClick={() => onClose()} disabled={save.pending}>
             Cancel
           </Button>
           {save.error ? (
