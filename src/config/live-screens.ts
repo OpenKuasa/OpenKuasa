@@ -32,6 +32,8 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   // Sends by email through the workspace's own Resend key.
   'crm/broadcast',
   'crm/automations',
+  // Set-up and a signed-in preview; the bot does not answer customers yet.
+  'crm/chatbot',
   // Shared with Jebat's analytics (registry 'reach/reports'); /reach/reports
   // is not a nav item, so the screen is served at /crm/reports.
   'crm/reports',
