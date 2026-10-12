@@ -118,10 +118,10 @@ const AGENTS = [
 ];
 
 const PROMPTS = [
-  'Cash position?',
   'Overdue invoices',
-  "Summarise this month's P&L",
-  'SST due this month',
+  'Who owes us the most?',
+  'Draft an invoice',
+  'Unpaid supplier bills',
 ];
 
 /* ------------------------------------------------------------------ */
