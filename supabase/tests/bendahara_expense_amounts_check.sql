@@ -1,5 +1,5 @@
 -- Bendahara expense amounts check. Run it after
--- 20261110100000_bendahara_expense_amounts.sql, in the same transaction for a
+-- 20261112100000_bendahara_expense_amounts.sql, in the same transaction for a
 -- dry run, or by itself once the migration is applied. It proves that an
 -- expense's amount and SST cannot be NaN, whichever way they are written, as
 -- an owner and as a member, and that nothing else about saving an expense

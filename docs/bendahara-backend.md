@@ -387,7 +387,7 @@ entry and no trace in Journals.
 
 An expense's `amount` and `sst_amount` cannot be NaN
 (`finance_expenses_amount_not_nan`, `finance_expenses_sst_amount_not_nan`,
-from `20261110100000_bendahara_expense_amounts.sql`): NaN is a numeric that
+from `20261112100000_bendahara_expense_amounts.sql`): NaN is a numeric that
 passes `> 0`, and one saved expense of NaN would turn every total it is added
 into NaN. `supabase/tests/bendahara_expense_amounts_check.sql` proves it.
 
