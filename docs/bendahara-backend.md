@@ -335,7 +335,7 @@ row on the screen and, for its split, from the rows `finance_payments_in` has
 for it. What it holds of its own invoices is not counted against it
 (`receivableFor`), as the database deletes the old split before it checks the
 new one. Saving replaces the draft whole; a draft that was posted or deleted
-meanwhile answers with that sentence (`FIN09`, `FIN11`).
+meanwhile answers with that sentence (`FIN09`, `FIN11`); after "That receipt no longer exists." the form forgets the draft's id and says "Save again to record it as a new receipt.", so what was typed can be saved as a new one. A ticked invoice that can no longer take money is left out, and the form says so.
 
 Void is offered on every posted receipt, a payment recorded on Payments In
 included: it is the same status change `voidPaymentIn` makes, asked of
@@ -991,7 +991,7 @@ quotation, a credit note or a refund by the file that made the call.
 | `FIN11` | The bill, invoice, quotation, credit note or payment no longer exists. `finance_post_invoice`, `finance_send_quotation`, `finance_convert_quotation` and `finance_issue_credit_note` also answer this to a viewer: each locks its row first, and a viewer may not, so to them it is not there |
 | `FIN12` | The invoice has a credit note that is a draft or issued, so it cannot be voided. `invoices.ts` words it: "This invoice has credit notes. Void them on Credit Notes, or delete the drafts, before voiding it." |
 | `FIN13` | The quotation already has an invoice that is not void: it cannot be converted again, and its answer can no longer change. `quotations.ts` words it |
-| `FIN14` | Approval. Only an owner or admin approves or rejects an expense or a payment; a payment is submitted for approval only from a draft and rejected only before it is approved; money out that settles no document needs one of them before it is scheduled or paid; a payment waiting for approval, or rejected, cannot be changed; a rejected payment is final; an approved payment is paid as it was approved, with nothing but its status, number and date changing. Also: `approved_by` and `approved_at` on a payment or an expense are written by the database, and an update from a signed-in person that changes either by hand is this code, unless an earlier rule refuses it first (`FIN09` on a posted or void payment, `FIN01` on an approved or rejected expense whose status is left as it was); a scheduled payment out that nobody approved cannot be raised above its split, or made from scheduled money in, by someone who is not an owner or admin, and its split cannot be deleted or lowered below the payment by any signed-in person. Nothing in the app meets it yet |
+| `FIN14` | Approval. Only an owner or admin approves or rejects an expense or a payment; a payment is submitted for approval only from a draft and rejected only before it is approved; money out that settles no document needs one of them before it is scheduled or paid; a payment waiting for approval, or rejected, cannot be changed; a rejected payment is final; an approved payment is paid as it was approved, with nothing but its status, number and date changing. Also: `approved_by` and `approved_at` on a payment or an expense are written by the database, and an update from a signed-in person that changes either by hand is this code, unless an earlier rule refuses it first (`FIN09` on a posted or void payment, `FIN01` on an approved or rejected expense whose status is left as it was); a scheduled payment out that nobody approved cannot be raised above its split, or made from scheduled money in, by someone who is not an owner or admin, and its split cannot be deleted or lowered below the payment by any signed-in person. Also a member's post or void of a cash receipt: Cash Receipts offers a member no Post and no Void, and if one is sent anyway the action answers "Only an owner or admin can post, pay or void. Ask one of them to do this." before reading or writing, and the database answers this code and uses up no number. |
 | `FIN15` | A receipt, a voucher or an expense names the wrong thing: a receipt is for invoices or for an income category, a voucher for expenses or for an expense category, never both and never neither; a receipt for invoices that is being posted must be exactly its split and carry no category; an expense needs an expense category of its own workspace. `cash-receipts.ts` words it for a receipt: "A receipt needs either invoices that add up to its amount, or an income category that still exists. Edit it and try again." The voucher and the expense meet it with their forms |
 | `42501` | Row-level security refused the write: "You do not have permission to make changes here." |
 | `22003` | A number does not fit its column (quantity × unit price can overflow): "That amount is too large." |
@@ -1210,7 +1210,16 @@ with no date).
   the date.
 - A draft receipt stays in the table in every period; once posted it is
   listed by its date, so posting a draft dated outside the chosen period
-  takes it out of the table until a longer period is chosen.
+  takes it out of the table until a longer period is chosen. The screen says
+  so when it happens, from the form's "Post receipt" and from a row's Post
+  ("Receipt RC-0012 dated 30 Oct 2026 was posted. It is outside this month:
+  choose a longer period to see it."; never for All time, which holds every
+  date). It says too when a posted receipt is hidden by the Draft or Void
+  status filter, and when a receipt is voided and the filter is "All except
+  void" or Posted ("Receipt RC-0012 was voided. Choose Void in the status
+  filter to see it."). A draft saved with a date outside the period needs no
+  note: drafts show in every period. A draft is hidden only by the Posted or
+  Void status filter or by search text, and no note is given then.
 - Income categories cannot be added, renamed or archived yet: every workspace
   has "Sales" and "Other income" until the Expenses forms manage categories.
 - A sent quotation cannot be edited: mark it declined and write a new one.
