@@ -1,10 +1,10 @@
--- supabase/migrations/20261102090000_hire_interviews_columns.sql
+-- supabase/migrations/20261107090000_hire_interviews_columns.sql
 -- Lekir slice 4a, part 1 of 2: the interviews table gains a length, a place or
 -- link, notes for the team and the time of its last change. The interviewer's
 -- name gets a length limit.
 --
 -- NOT safe to run twice: the second run fails at the first "add column". The
--- functions that write to this table are in 20261102090100, which can be run
+-- functions that write to this table are in 20261107090100, which can be run
 -- again.
 --
 -- Existing rows: only the demo workspace has any. Each gets 60 minutes, no

@@ -1,11 +1,11 @@
--- supabase/migrations/20261102090100_hire_interviews_writes.sql
+-- supabase/migrations/20261107090100_hire_interviews_writes.sql
 -- Lekir slice 4a, part 2 of 2: a recruiter can schedule an interview, record
 -- one that already took place, change it, cancel it, mark what happened and
 -- mark it scheduled again. Six functions are the only way: members still have
 -- select only on hire_interviews. Each answers with a word and never raises.
 --
 -- Safe to run again: it holds only "create or replace function", revokes and
--- grants. The columns these functions use are added in 20261102090000.
+-- grants. The columns these functions use are added in 20261107090000.
 
 -- ---------------------------------------------------------------------------
 -- A time that arrives as text becomes an instant only when it says which zone

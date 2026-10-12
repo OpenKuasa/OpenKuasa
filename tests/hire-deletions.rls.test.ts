@@ -5,8 +5,8 @@
 // Needs NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY; without all
 // three every case is skipped.
 // WRITTEN, NOT YET RUN: it runs only after the migration 20261028093000_hire_deletions.sql is applied.
-// Cases 15 and 16 also need the interview migrations (20261102090000_hire_interviews_columns.sql and
-// 20261102090100_hire_interviews_writes.sql): they create their interviews with hire_schedule_interview, which is
+// Cases 15 and 16 also need the interview migrations (20261107090000_hire_interviews_columns.sql and
+// 20261107090100_hire_interviews_writes.sql): they create their interviews with hire_schedule_interview, which is
 // what makes the `interviews` count of a deletion real. Every earlier case deletes rows that have no interview,
 // so its `interviews: 0` stays as it is.
 //

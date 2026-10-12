@@ -5,8 +5,8 @@
 // hire_set_interview_outcome and hire_reopen_interview.
 // Needs NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY; without all
 // three every case is skipped.
-// WRITTEN, NOT YET RUN: it fails until the migrations 20261102090000_hire_interviews_columns.sql and
-// 20261102090100_hire_interviews_writes.sql are applied (case 17 also needs 3c's
+// WRITTEN, NOT YET RUN: it fails until the migrations 20261107090000_hire_interviews_columns.sql and
+// 20261107090100_hire_interviews_writes.sql are applied (case 17 also needs 3c's
 // 20261028093000_hire_deletions.sql, for hire_delete_application).
 //
 // The cases are numbered as in the design's section 10, "Database, live" (1 to 25). Cases 26 to 29 are added after
