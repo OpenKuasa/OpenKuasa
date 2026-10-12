@@ -441,7 +441,7 @@ testWithSupabase('a receipt for invoices: a draft holds its part, is changed wit
 // ---- stage 5c: the expense form's writes, through the app's own data layer ----------------------
 // src/lib/finance/expenses.ts with the payloads the expense form sends, as a member and as the owner: who
 // ends up with what status, the sentence each refusal reads as, and that an amount of NaN is refused by the
-// database itself (20261112100000_bendahara_expense_amounts).
+// database itself (20261114100000_bendahara_expense_amounts).
 
 const NEEDS_DECIDER = 'Only an owner or admin can approve or reject an expense. Ask one of them to do this.';
 
