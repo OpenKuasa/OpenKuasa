@@ -698,7 +698,7 @@ describe('letters and documents', () => {
     expect(section).toContain('five marks');
     for (const mark of ['"# "', '**bold**', '*italic*', '"- "', '"1. "']) expect(section, mark).toContain(mark);
     expect(section).toContain('links, images, tables, html');
-    expect(section).toContain('show as typed');
+    expect(section).toContain('shows as typed');
     expect(section).toContain('sparingly');
     expect(section).toContain('for a saved letter only');
     expect(section).toContain('stay plain text');
