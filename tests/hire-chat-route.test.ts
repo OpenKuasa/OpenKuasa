@@ -19,8 +19,16 @@ const ctl = vi.hoisted(() => ({
     files?: import('@/lib/hire/cv-read').CvReader;
     cvShelf?: unknown[];
   },
-  /** What the Tuah route handed its runner: whether it ran with the team, and the HireAccess. */
-  tuah: null as null | { team: boolean; hire: { files?: import('@/lib/hire/cv-read').CvReader; cvShelf?: unknown[] } | null },
+  /** What the Tuah route handed its runner: whether it ran with the team, the HireAccess, and the PeopleAccess. */
+  tuah: null as null | {
+    team: boolean;
+    hire: { files?: import('@/lib/hire/cv-read').CvReader; cvShelf?: unknown[] } | null;
+    people: import('@/lib/ai/products').PeopleAccess | null;
+  },
+  /** The viewer the mocked getPeopleViewer returns, or 'throw' to make it fail. */
+  peopleViewer: { employeeId: null, isHr: true, isDemo: false } as
+    | { employeeId: string | null; isHr: boolean; isDemo: boolean }
+    | 'throw',
   /** When set, the model call throws this instead of answering. */
   fails: null as unknown,
 }));
@@ -34,10 +42,24 @@ vi.mock('@/lib/ai/agents/orchestrator', async (importOriginal) => {
       return actual.runLekir(messages, hire, ...rest);
     }) as typeof actual.runLekir,
     runTuah: ((...args) => {
-      ctl.tuah = { team: Boolean(args[6]), hire: args[7] ?? null };
+      ctl.tuah = { team: Boolean(args[6]), hire: args[7] ?? null, people: args[8] ?? null };
       return actual.runTuah(...args);
     }) as typeof actual.runTuah,
   };
+});
+
+// Control the HR viewer (and whether its load throws) without a real DB.
+vi.mock('@/lib/people/viewer', () => ({
+  getPeopleViewer: async () => {
+    if (ctl.peopleViewer === 'throw') throw new Error('viewer load failed');
+    return ctl.peopleViewer;
+  },
+}));
+vi.mock('@/lib/people/supabase', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/people/supabase')>();
+  const { createSeedPeopleData } = await import('@/lib/people/seed');
+  // A valid PeopleData shape without a DB: the seed. The route's tier logic is what we test.
+  return { ...actual, createSupabasePeopleData: () => createSeedPeopleData() };
 });
 
 // The Tuah route also reads marketing data; the fake client has no such tables.
@@ -138,6 +160,7 @@ beforeEach(() => {
   ctl.tablesRead = [];
   ctl.captured = null;
   ctl.tuah = null;
+  ctl.peopleViewer = { employeeId: null, isHr: true, isDemo: false };
   ctl.fails = null;
   process.env.AI_KEYS_ENCRYPTION_SECRET = SECRET;
 });
@@ -369,5 +392,57 @@ describe('POST /api/chat (Tuah) and reading a CV', () => {
     expect(ctl.tuah!.hire!.cvShelf).toBeUndefined();
     expect(ctl.calls[0].tools).toContain('listApplications');
     expect(ctl.calls[0].tools).not.toContain('readCandidateCv');
+  });
+});
+
+describe('POST /api/chat (Tuah) HR access', () => {
+  const tuahPost = (body: unknown) =>
+    new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  const run = async () => {
+    const { POST: tuah } = await import('@/app/api/chat/route');
+    await (await tuah(tuahPost(validBody))).text();
+    return ctl.tuah!.people;
+  };
+
+  it('gives an owner the HR change tools (hr tier)', async () => {
+    ctl.org = { orgId: 'org1', role: 'owner' };
+    ctl.peopleViewer = { employeeId: null, isHr: true, isDemo: false };
+    const people = await run();
+    expect(people).not.toBeNull();
+    expect(people!.write?.tier).toBe('hr');
+  });
+
+  it('gives a linked viewer only self-service HR tools (self tier)', async () => {
+    ctl.org = { orgId: 'org1', role: 'viewer' };
+    ctl.peopleViewer = { employeeId: 'emp-1', isHr: false, isDemo: false };
+    const people = await run();
+    expect(people!.write?.tier).toBe('self');
+    expect(people!.write?.employeeId).toBe('emp-1');
+  });
+
+  it('gives the demo workspace no HR change tools', async () => {
+    ctl.org = { orgId: 'org1', role: 'owner' };
+    ctl.peopleViewer = { employeeId: 'emp-1', isHr: true, isDemo: true };
+    const people = await run();
+    expect(people!.write).toBeUndefined();
+  });
+
+  it('passes no HR at all without a workspace', async () => {
+    ctl.org = null;
+    expect(await run()).toBeNull();
+  });
+
+  it('drops HR for the turn instead of crashing when the viewer load fails', async () => {
+    ctl.org = { orgId: 'org1', role: 'owner' };
+    ctl.peopleViewer = 'throw';
+    const { POST: tuah } = await import('@/app/api/chat/route');
+    const res = await tuah(tuahPost(validBody));
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(ctl.tuah!.people).toBeNull();
   });
 });

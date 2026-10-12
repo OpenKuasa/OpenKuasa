@@ -3,6 +3,7 @@ import {
   QUOTATION_PAGE_SIZE,
   acceptQuotation,
   convertQuotation,
+  convertQuotationInput,
   declineQuotation,
   deleteQuotation,
   getQuotation,
@@ -16,6 +17,8 @@ import { fakeFinance } from './setup/fake-finance';
 const ID = '33333333-3333-4333-8333-333333333333';
 const CUSTOMER = '44444444-4444-4444-8444-444444444444';
 const INVOICE = '55555555-5555-4555-8555-555555555555';
+/** What "Make invoice" sends: the quotation, and the date on the person's own calendar. */
+const CONVERT = { id: ID, invoice_date: '2026-10-12' };
 
 const line = { description: 'Design work', quantity: 10, unit_price: 12.5 };
 const valid = { customer_id: CUSTOMER, quote_date: '2026-10-01', valid_until: '2026-10-31', lines: [line] };
@@ -154,11 +157,24 @@ describe('quotation writes', () => {
     expect(await deleteQuotation(ctx, { id: ID })).toEqual({ ok: true, data: { id: ID } });
     expect(calls[0]).toMatchObject({ name: 'finance_quotations', op: 'delete', filters: { id: ID, org_id: 'org-1' } });
   });
-  it('converts through the database function and answers with the new invoice', async () => {
+  it('converts through the database function, handing it the person’s date, and answers with the new invoice', async () => {
     const { ctx, calls } = fakeFinance({ data: INVOICE, error: null });
-    expect(await convertQuotation(ctx, { id: ID })).toEqual({ ok: true, data: { id: ID, invoice_id: INVOICE } });
+    expect(await convertQuotation(ctx, CONVERT)).toEqual({ ok: true, data: { id: ID, invoice_id: INVOICE } });
     expect(calls[0]).toMatchObject({ kind: 'rpc', name: 'finance_convert_quotation' });
-    expect(calls[0].args).toEqual({ target_org: 'org-1', target_quotation: ID });
+    // The date is the person's, not the database's: before 08:00 in Malaysia the database is still on the day before.
+    expect(calls[0].args).toEqual({ target_org: 'org-1', target_quotation: ID, invoice_date: '2026-10-12' });
+  });
+  it('asks a conversion for a quotation and a real date', () => {
+    const said = (value: unknown) => convertQuotationInput.safeParse(value).error?.issues[0]?.message;
+    expect(said(CONVERT)).toBeUndefined();
+    expect(said({ id: 'nope', invoice_date: '2026-10-12' })).toBe('That quotation no longer exists.');
+    // Both wrong: the quotation is named first.
+    expect(said({ id: 'nope' })).toBe('That quotation no longer exists.');
+    for (const invoice_date of [undefined, null, '', '12/10/2026', '2026-02-30', '2026-10-12T08:00:00+08:00', 20261012]) {
+      expect(said({ id: ID, invoice_date }), String(invoice_date)).toBe('Enter a valid date.');
+    }
+    // Nothing else is taken from the input.
+    expect(convertQuotationInput.parse({ ...CONVERT, due_date: '2026-10-13', target_org: 'someone-else' })).toEqual(CONVERT);
   });
   it('words FIN01 so that it reads sensibly from every button that can meet it, and claims nothing false (FIN01)', async () => {
     const { ctx } = fakeFinance({ data: null, error: { code: 'FIN01' } });
@@ -201,13 +217,13 @@ describe('quotation writes', () => {
       expect(await acceptQuotation(ctx, { id: ID }), code).toEqual({ ok: false, error: message });
       expect(await declineQuotation(ctx, { id: ID }), code).toEqual({ ok: false, error: message });
       expect(await deleteQuotation(ctx, { id: ID }), code).toEqual({ ok: false, error: message });
-      if (code !== '23505') expect(await convertQuotation(ctx, { id: ID }), code).toEqual({ ok: false, error: message });
+      if (code !== '23505') expect(await convertQuotation(ctx, CONVERT), code).toEqual({ ok: false, error: message });
     }
     expect(logged).not.toHaveBeenCalled();
   });
   it('words two conversions at the same moment as the quotation having an invoice, not as a number being used', async () => {
     const { ctx } = fakeFinance({ data: null, error: { code: '23505' } });
-    expect(await convertQuotation(ctx, { id: ID })).toEqual({
+    expect(await convertQuotation(ctx, CONVERT)).toEqual({
       ok: false,
       error: 'This quotation already has an invoice. Void that invoice, or delete it if it is a draft, first.',
     });

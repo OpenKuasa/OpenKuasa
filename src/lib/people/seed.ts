@@ -5,7 +5,7 @@
  * stable. `private.reseed_demo_people()` writes the same people in SQL.
  */
 
-import { addDays, addMonths, isWeekday, monthStart, todayInMalaysia, weekStart } from './dates';
+import { addDays, addMonths, isWeekday, monthLabel, monthStart, todayInMalaysia, weekStart } from './dates';
 import {
   DEMO_EMPLOYEE_ID,
   type Announcement,
@@ -26,6 +26,7 @@ import {
   type OvertimeRecord,
   type PayrollRun,
   type Payslip,
+  type PayslipLine,
   type PaymentVoucher,
   type PeopleData,
   type PeopleSettings,
@@ -353,6 +354,7 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
     decision_note: null,
     status,
     created_at: ago(-day),
+    paid_month: null,
   }));
 
   // Every weekday of the last eight weeks. h is a stable 0..39 per employee and
@@ -426,28 +428,94 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
       period_month: period,
       status: m === 0 ? 'draft' : 'paid',
       paid_at: m === 0 ? null : new Date(Date.parse(`${addDays(period, 27)}T02:00:00Z`)).toISOString(),
+      paid_by_name: null,
     };
   });
+
+  // SAMPLE DATA ONLY, NOT THE PAYROLL RULE. This copy makes the demo look like what the demo re-seed produces; the
+  // rule lives in the database (`hr_run_payroll` and friends) and nothing should read this as it. It does NOT
+  // model: public holidays (working days are plain weekdays, so a joiner's cut can differ by a day), unpaid leave
+  // (there are no unpaid-leave lines), overtime paid late (every overtime line is on its own month's payslip),
+  // or a figure set by hand (`set_by_hr` is always empty).
+  const lastDay = (month: string) => addDays(addMonths(month, 1), -1);
+  const workingDays = (from: string, to: string) => {
+    let n = 0;
+    for (let d = from; d <= to; d = addDays(d, 1)) if (isWeekday(d)) n += 1;
+    return n;
+  };
+  const dayLabel = (date: string) => `${Number(date.slice(8, 10))} ${monthLabel(date)} ${date.slice(0, 4)}`;
+  // Lines an owner or admin added by hand: this month and last month. n, months ago, kind, name, amount.
+  const HAND_LINES: [number, number, 'earning' | 'deduction', string, number][] = [
+    [12, 0, 'earning', 'Sales commission', 85000],
+    [12, 1, 'earning', 'Sales commission', 72000],
+    [1, 1, 'earning', 'Sales commission', 45000],
+    [19, 0, 'earning', 'Project bonus', 100000],
+    [10, 0, 'deduction', 'Salary advance', 30000],
+    [5, 1, 'deduction', 'Uniform', 6000],
+  ];
+  const paidMonth = new Map<string, string>();
 
   const payslips: Payslip[] = runs.flatMap((run) =>
     employees
       .filter((employee) => employee.join_date! < addMonths(run.period_month, 1))
       .map((employee): Payslip => {
-        const gross = privates.find((p) => p.employee_id === employee.id)!.base_salary_cents!;
+        const basic = privates.find((p) => p.employee_id === employee.id)!.base_salary_cents!;
+        const id = `seed-slip-${run.id}-${employee.id}`;
+        const lines: PayslipLine[] = [];
+        const add = (kind: PayslipLine['kind'], source: PayslipLine['source'], label: string, amount: number) =>
+          lines.push({ id: `seed-line-${id}-${lines.length + 1}`, payslip_id: id, kind, source, label, amount_cents: amount });
+
+        if (employee.join_date! > run.period_month) {
+          const last = lastDay(run.period_month);
+          const month = workingDays(run.period_month, last);
+          const after = workingDays(employee.join_date!, last);
+          const cut = month === 0 ? 0 : basic - Math.round((basic * after) / month);
+          if (cut > 0) add('unpaid', 'joiner', `Joined ${dayLabel(employee.join_date!)}`, cut);
+        }
+        for (const record of overtime
+          .filter(
+            (o) =>
+              o.employee_id === employee.id &&
+              o.status === 'approved' &&
+              o.amount_cents > 0 &&
+              o.work_date.slice(0, 7) === run.period_month.slice(0, 7),
+          )
+          .sort((a, b) => a.work_date.localeCompare(b.work_date))) {
+          add('earning', 'overtime', `Overtime, ${dayLabel(record.work_date)}, ${record.hours} h`, record.amount_cents);
+          if (run.status === 'paid') paidMonth.set(record.id, run.period_month.slice(0, 7));
+        }
+        for (const [n, back, kind, label, amount] of HAND_LINES) {
+          if (employeeId(n) === employee.id && addMonths(thisMonth, -back) === run.period_month) add(kind, 'hr', label, amount);
+        }
+
+        const earnings = lines.filter((l) => l.kind === 'earning').reduce((t, l) => t + l.amount_cents, 0);
+        const unpaid = lines.filter((l) => l.kind === 'unpaid').reduce((t, l) => t + l.amount_cents, 0);
+        const other = lines.filter((l) => l.kind === 'deduction').reduce((t, l) => t + l.amount_cents, 0);
+        const gross = Math.max(0, basic + earnings - unpaid);
         const cut = deductions(gross);
+        // The illustrative PCB follows the salary, as the database's re-seed has it.
+        const pcb_cents = deductions(basic).pcb_cents;
         return {
-          id: `seed-slip-${run.id}-${employee.id}`,
+          id,
           employee_id: employee.id,
           employee_name: employee.name,
           payroll_run_id: run.id,
           period_month: run.period_month,
+          basic_cents: basic,
           gross_cents: gross,
-          ...cut,
-          net_cents: gross - cut.epf_cents - cut.socso_cents - cut.eis_cents - cut.pcb_cents,
+          epf_cents: cut.epf_cents,
+          socso_cents: cut.socso_cents,
+          eis_cents: cut.eis_cents,
+          pcb_cents,
+          other_deductions_cents: other,
+          net_cents: gross - cut.epf_cents - cut.socso_cents - cut.eis_cents - pcb_cents - other,
+          set_by_hr: [],
+          lines,
           status: run.status === 'paid' ? 'paid' : 'pending',
         };
       }),
   );
+  const overtimeOut = overtime.map((o) => ({ ...o, paid_month: paidMonth.get(o.id) ?? null }));
 
   const goals: Goal[] = PEOPLE.filter(([n]) => n <= 10).flatMap(([n, name]) =>
     GOALS.map(([title, base, due], index): Goal => {
@@ -575,13 +643,14 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
     listLeaveBalances: async (wanted) => balances.filter((b) => b.year === wanted),
     listTimeOffRequests: async () => newestFirst(timeOff),
     listClaims: async () => newestFirst(claims),
-    listOvertime: async () => newestFirst(overtime),
+    listOvertime: async () => newestFirst(overtimeOut),
     listAttendance: async (from, to) => attendance.filter((d) => between(d.work_date, from, to)),
     listTimesheet: async (from, to) => timesheet.filter((d) => between(d.work_date, from, to)),
     listShifts: async (from, to) => shifts.filter((s) => between(s.work_date, from, to)),
     listPublicHolidays: async () => holidays,
     listPayrollRuns: async () => runs,
-    listPayslips: async () => payslips,
+    listPayslips: async (employeeId) =>
+      employeeId ? payslips.filter((p) => p.employee_id === employeeId) : payslips,
     listGoals: async () => goals,
     listScorecards: async () => scorecards,
     listReviews: async () => reviews,

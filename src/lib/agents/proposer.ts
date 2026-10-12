@@ -5,12 +5,34 @@ import { isAllowedAction, ALLOWED_ACTIONS } from '@/lib/agents/apply-proposal';
 import { suggestProposals } from '@/lib/agents/openrouter-media';
 
 const MAX_PROPOSALS = 5;
+/** How long after any form proposal (any status) before the agent may offer another. */
+const FORM_PROPOSAL_COOLDOWN_MS = 30 * 24 * 3600_000;
+
+/**
+ * True when no createForm proposal (any status) exists in the cooldown window. The model
+ * names each form differently, so a name-based dedupe can't stop weekly re-offers on its
+ * own; this is the real gate. Fails closed: a query error means "do not offer".
+ */
+async function noRecentFormProposal(service: SupabaseClient, orgId: string): Promise<boolean> {
+  const since = new Date(Date.now() - FORM_PROPOSAL_COOLDOWN_MS).toISOString();
+  const { data, error } = await service
+    .from('agent_proposals')
+    .select('id')
+    .eq('org_id', orgId)
+    .eq('action', 'createForm')
+    .gte('created_at', since)
+    .limit(1);
+  if (error) return false;
+  return (data ?? []).length === 0;
+}
 
 export type Candidate = {
   action: string;
   input: unknown;
   title: string;
   detail: string | null;
+  /** The model supplies this candidate's form `name` at selection time (rule 4). */
+  fillName?: boolean;
 };
 
 /** A stable dedupe key: the action + the input's identifying field, so it matches
@@ -87,14 +109,14 @@ export async function proposeChanges(
   orgId: string,
   runId: string,
   apiKey: string,
-  reach: { leads: Lead[]; appts: Appointment[]; context: string },
+  reach: { leads: Lead[]; appts: Appointment[]; context: string; trend?: string },
   maxCost: number,
   costSoFar: number,
   scan: (leads: Lead[], appts: Appointment[], now: Date) => Candidate[] = opportunityScan,
 ): Promise<{ proposed: number; cost_cents: number }> {
   if (costSoFar >= maxCost) return { proposed: 0, cost_cents: 0 };
   const candidates = scan(reach.leads, reach.appts, new Date());
-  if (candidates.length === 0) return { proposed: 0, cost_cents: 0 };
+  if (candidates.length === 0 && !reach.trend) return { proposed: 0, cost_cents: 0 };
 
   // De-dupe BEFORE the paid LLM call: drop candidates already queued as pending, and
   // if nothing new remains, skip the model call entirely.
@@ -109,32 +131,52 @@ export async function proposeChanges(
       dedupeKeyOf((r as { action: string }).action, (r as { input: unknown }).input),
     ),
   );
-  const fresh = candidates.filter((c) => !pendingKeys.has(dedupeKeyOf(c.action, c.input)));
-  if (fresh.length === 0) return { proposed: 0, cost_cents: 0 }; // all already pending → no LLM call
+  const offered = candidates.filter((c) => !pendingKeys.has(dedupeKeyOf(c.action, c.input)));
+
+  // Rule 4: offer ONE draft lead-capture form for the model to NAME after the week's trend,
+  // when there is a trend and none was proposed in the cooldown window (so it is not
+  // re-offered every run). The model supplies only the name; channel/status stay server-locked.
+  if (reach.trend && (await noRecentFormProposal(service, orgId))) {
+    offered.push({
+      action: 'createForm',
+      input: {},
+      title: "Create a draft lead-capture form for this week's trend",
+      detail: null,
+      fillName: true,
+    });
+  }
+  if (offered.length === 0) return { proposed: 0, cost_cents: 0 }; // nothing new to offer → no LLM call
 
   const { keep, cost_cents } = await suggestProposals(
     apiKey,
     reach.context,
-    fresh.map((c, index) => ({ index, title: c.title })),
+    offered.map((c, index) => ({ index, title: c.title })),
+    reach.trend,
   );
 
   let proposed = 0;
   try {
     for (const sel of keep) {
       if (proposed >= MAX_PROPOSALS) break;
-      const c = fresh[sel.index];
+      const c = offered[sel.index];
       if (!c || !isAllowedAction(c.action)) continue; // tampered / off-list selection
-      if (!ALLOWED_ACTIONS[c.action].schema.safeParse(c.input).success) continue; // re-validate input
-      const key = dedupeKeyOf(c.action, c.input);
+      // For a fill-name candidate (the draft form) the model supplies only the name;
+      // channel + status are server-forced, so an approved form is never live or channel-bound.
+      const input = c.fillName
+        ? { name: sel.name, category: null, channel: null, status: 'draft' }
+        : c.input;
+      if (!ALLOWED_ACTIONS[c.action].schema.safeParse(input).success) continue; // re-validate input
+      const key = dedupeKeyOf(c.action, input);
       if (pendingKeys.has(key)) continue; // intra-run duplicate selection
+      const title = c.fillName ? approvalTitle(c.action, input, () => null) : c.title;
       const { error } = await service.from('agent_proposals').insert({
         org_id: orgId,
         run_id: runId,
         agent_key: 'weekly-studio',
         product: 'reach',
         action: c.action,
-        input: c.input,
-        title: c.title,
+        input,
+        title,
         detail: c.detail,
         rationale: sel.rationale.slice(0, 280),
         status: 'pending',

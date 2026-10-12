@@ -5,6 +5,7 @@
 
 import { rm } from '@/lib/reach/format';
 import { monthStart } from './dates';
+import { monthLabel } from './payroll-forms';
 import { bucketByMonth, sumBy, type Bucket } from './series';
 import type { Employee, OvertimeRecord } from './types';
 
@@ -73,4 +74,24 @@ export function overtimeModel(records: OvertimeRecord[], employees: Employee[], 
     ),
     people_with_overtime: new Set(inMonth.map((r) => r.employee_id)).size,
   };
+}
+
+/** "Paid, October 2026" for a record a paid payroll run took, else null. */
+export function overtimePaidText(r: { paid_month: string | null }): string | null {
+  return r.paid_month ? `Paid, ${monthLabel(r.paid_month)}` : null;
+}
+
+/** The "Paid, ..." text of each paid record, by id. A record not in the map is not paid. */
+export function paidOvertimeById(records: { id: string; paid_month: string | null }[]): Map<string, string> {
+  const paid = new Map<string, string>();
+  for (const r of records) {
+    const text = overtimePaidText(r);
+    if (text) paid.set(r.id, text);
+  }
+  return paid;
+}
+
+/** Whether to offer Cancel: only when the status allows it and no paid run has taken the record. */
+export function overtimeCancelOffered(cancellable: boolean, paidText: string | null | undefined): boolean {
+  return cancellable && !paidText;
 }

@@ -1,9 +1,19 @@
 -- Lekiu member-tier access check. Leaves nothing behind: the block always ends
--- with RAISE, so every insert below is rolled back. Read the message:
+-- with RAISE, so every insert below is rolled back. Since the payroll slice a
+-- member reads their own payslip (and its lines) only once it is paid, and
+-- their own letter only once it is issued. Read the message:
 --   PEOPLE_RLS_CHECK PASSED ...   or   PEOPLE_RLS_CHECK FAILED: <what went wrong>
--- It rebuilds the demo HR rows inside its transaction and holds them until the
--- rollback, so do not start it at minute 1 of the hour, when the scheduled
--- demo reseed runs.
+-- When not to run it. It rebuilds the demo HR rows inside its transaction and
+-- holds them until the rollback, and the scheduled demo reseed commits the
+-- same rows at minute 1 of every hour. So:
+--   * do not start it in minutes :00 to :02 of an hour, and do not start it so
+--     late that it could still be running at the next :01 (it takes seconds;
+--     leave it a few minutes);
+--   * do not run it at the same time as another people check
+--     (people_leave_check, people_claims_overtime_check,
+--     people_attendance_check, people_payroll_check): each of them rebuilds
+--     the demo too;
+--   * do not run it while a migration is being applied.
 do $$
 declare
   org uuid := gen_random_uuid();
@@ -14,10 +24,14 @@ declare
   outsider uuid := gen_random_uuid();
   e1 uuid;
   e2 uuid;
-  run_id uuid := gen_random_uuid();
+  run_id uuid := gen_random_uuid();       -- last month's run, paid
+  draft_run uuid := gen_random_uuid();    -- this month's run, still a draft
+  this_month date := date_trunc('month', current_date)::date;
+  last_month date := (date_trunc('month', current_date) - interval '1 month')::date;
   demo uuid;
   linked uuid;
   n int;
+  n2 int;
   t text;
   k text;
   q text;
@@ -26,7 +40,7 @@ declare
   core text[] := array['hr_departments','hr_employees','hr_employee_private'];
   shared text[] := array['hr_departments','hr_public_holidays','hr_trainings','hr_announcements'];
   fails text[] := '{}';
-  personal text[] := array['hr_employee_private','hr_leave_requests','hr_claims','hr_payslips','hr_reviews','hr_documents'];
+  personal text[] := array['hr_employee_private','hr_leave_requests','hr_claims','hr_payslips','hr_payslip_lines','hr_reviews','hr_documents','hr_letters'];
   hr_only text[] := array['hr_payroll_runs','hr_payment_vouchers','hr_settings'];
 begin
   -- ---- every table: the right read rule, and no write it should not have --
@@ -36,9 +50,9 @@ begin
       ('hr_leave_requests','personal'), ('hr_leave_balances','personal'), ('hr_time_off_requests','personal'),
       ('hr_claims','personal'), ('hr_overtime_records','personal'),
       ('hr_attendance_days','personal'), ('hr_timesheet_entries','personal'), ('hr_shifts','personal'), ('hr_public_holidays','shared'),
-      ('hr_payroll_runs','hr'), ('hr_payslips','personal'), ('hr_payment_vouchers','hr'),
+      ('hr_payroll_runs','hr'), ('hr_payslips','paid'), ('hr_payslip_lines','lines'), ('hr_payment_vouchers','hr'),
       ('hr_goals','personal'), ('hr_scorecards','personal'), ('hr_reviews','personal'), ('hr_trainings','shared'), ('hr_training_enrolments','personal'),
-      ('hr_announcements','shared'), ('hr_documents','personal'), ('hr_letters','personal'), ('hr_settings','hr')
+      ('hr_announcements','shared'), ('hr_documents','personal'), ('hr_letters','issued'), ('hr_settings','hr')
     ) as x(t, k)
   loop
     select p.qual into q from pg_policies p
@@ -47,9 +61,13 @@ begin
       fails := array_append(fails, format('%s has no read policy', t));
     elsif k = 'shared' and (q not like '%is_org_member(org_id)%' or q like '%is_org_admin%' or q like '%is_own_employee%') then
       fails := array_append(fails, format('%s should be readable by every member, its rule is: %s', t, q));
-    elsif k = 'personal' and not (q like '%is_org_admin(org_id)%' and q like '%is_own_employee(employee_id)%'
+    elsif k in ('personal', 'paid', 'issued') and not (q like '%is_org_admin(org_id)%' and q like '%is_own_employee(employee_id)%'
         and q like '%is_demo_org(org_id)%' and q like '%is_org_member(org_id)%') then
       fails := array_append(fails, format('%s should be HR-or-own, its rule is: %s', t, q));
+    elsif k = 'lines' and not (q like '%hr_payslips%' and q like '%is_org_admin(p.org_id)%'
+        and q like '%is_own_employee(p.employee_id)%'
+        and q like '%is_demo_org(p.org_id)%' and q like '%is_org_member(p.org_id)%') then
+      fails := array_append(fails, format('%s should be read through its payslip, its rule is: %s', t, q));
     elsif k = 'hr' and (q not like '%is_org_admin(org_id)%' or q not like '%is_demo_org(org_id)%' or q like '%is_own_employee%') then
       fails := array_append(fails, format('%s should be HR only, its rule is: %s', t, q));
     end if;
@@ -57,11 +75,19 @@ begin
     -- The rule must be word for word the rule of the table of its kind whose
     -- reads are tested as a member further down, so a rule that keeps every
     -- expected term but adds a wider one cannot pass.
-    ref := case k when 'personal' then 'hr_payslips' when 'hr' then 'hr_payroll_runs' else 'hr_departments' end;
-    select p.qual into ref_rule from pg_policies p
-    where p.schemaname = 'public' and p.tablename = ref and p.policyname = ref || '_select';
-    if q is distinct from ref_rule then
-      fails := array_append(fails, format('%s does not have the same read rule as %s: %s', t, ref, q));
+    -- A payslip, its lines and a letter have a rule of their own: the
+    -- employee reads their own only once it is paid, or issued. Their rules
+    -- are not compared as text (how a condition is printed is the database's
+    -- business); they are proven by what a member reads further down, where
+    -- member one has a paid and a draft payslip, a line on each, and an issued
+    -- and a draft letter, and by people_payroll_check.sql.
+    if k in ('personal', 'hr', 'shared') then
+      ref := case k when 'hr' then 'hr_payroll_runs' when 'shared' then 'hr_departments' else 'hr_employee_private' end;
+      select p.qual into ref_rule from pg_policies p
+      where p.schemaname = 'public' and p.tablename = ref and p.policyname = ref || '_select';
+      if q is distinct from ref_rule then
+        fails := array_append(fails, format('%s does not have the same read rule as %s: %s', t, ref, q));
+      end if;
     end if;
 
     select count(*) into n from pg_policies p
@@ -96,6 +122,26 @@ begin
       fails := array_append(fails, format('%s is meant to be read-only this slice but has a write grant', t));
     end if;
   end loop;
+
+  -- ---- the statutory rules: the same for every workspace, read-only ------
+  select count(*) into n from pg_policies p
+  where p.schemaname = 'public' and p.tablename = 'hr_statutory_rules';
+  select count(*) into n2 from pg_policies p
+  where p.schemaname = 'public' and p.tablename = 'hr_statutory_rules' and p.policyname = 'hr_statutory_rules_select'
+    and p.cmd = 'SELECT' and p.permissive = 'PERMISSIVE' and p.roles = array['authenticated']::name[] and p.qual = 'true';
+  if n <> 1 or n2 <> 1 then fails := array_append(fails, 'hr_statutory_rules does not have exactly one policy, a read for signed-in users'); end if;
+  if not (select c.relrowsecurity from pg_class c where c.oid = 'public.hr_statutory_rules'::regclass) then
+    fails := array_append(fails, 'hr_statutory_rules does not have row level security on');
+  end if;
+  if has_table_privilege('anon', 'public.hr_statutory_rules', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE')
+     or has_any_column_privilege('anon', 'public.hr_statutory_rules', 'SELECT, INSERT, UPDATE') then
+    fails := array_append(fails, 'signed-out visitors hold a privilege on hr_statutory_rules');
+  end if;
+  if not has_table_privilege('authenticated', 'public.hr_statutory_rules', 'SELECT')
+     or has_table_privilege('authenticated', 'public.hr_statutory_rules', 'INSERT, UPDATE, DELETE, TRUNCATE')
+     or has_any_column_privilege('authenticated', 'public.hr_statutory_rules', 'INSERT, UPDATE') then
+    fails := array_append(fails, 'signed-in users should read hr_statutory_rules and nothing more');
+  end if;
 
   -- ---- people and a workspace ----------------------------------------
   insert into auth.users (id, instance_id, aud, role, email, encrypted_password,
@@ -138,10 +184,22 @@ begin
   values (org, e1, 'annual', current_date, current_date, 1), (org, e2, 'medical', current_date, current_date, 1);
   insert into public.hr_claims (org_id, employee_id, category, amount_cents, claim_date)
   values (org, e1, 'travel', 1000, current_date), (org, e2, 'medical', 2000, current_date);
-  insert into public.hr_payroll_runs (id, org_id, period_month) values (run_id, org, date_trunc('month', current_date)::date);
-  insert into public.hr_payslips (org_id, employee_id, payroll_run_id, period_month, gross_cents)
-  values (org, e1, run_id, date_trunc('month', current_date)::date, 400000),
-         (org, e2, run_id, date_trunc('month', current_date)::date, 900000);
+  -- Payroll: last month paid, this month a draft. Each employee has a payslip
+  -- in both, and each payslip one line.
+  insert into public.hr_payroll_runs (id, org_id, period_month, status, paid_at)
+  values (run_id, org, last_month, 'paid', now()), (draft_run, org, this_month, 'draft', null);
+  insert into public.hr_payslips (org_id, employee_id, payroll_run_id, period_month, basic_cents, gross_cents, status)
+  values (org, e1, run_id, last_month, 400000, 400000, 'paid'),
+         (org, e2, run_id, last_month, 900000, 900000, 'paid'),
+         (org, e1, draft_run, this_month, 400000, 400000, 'pending'),
+         (org, e2, draft_run, this_month, 900000, 900000, 'pending');
+  insert into public.hr_payslip_lines (org_id, payslip_id, kind, source, label, amount_cents)
+  select org, p.id, 'deduction', 'hr', 'Uniform', 1000 from public.hr_payslips p where p.org_id = org;
+  -- Letters: one issued and one still a draft for member one, one issued for member two.
+  insert into public.hr_letters (org_id, employee_id, letter_type, title, status, issued_on)
+  values (org, e1, 'Confirmation', 'Confirmation of employment', 'issued', current_date),
+         (org, e1, 'Warning', 'Not sent yet', 'draft', null),
+         (org, e2, 'Confirmation', 'Confirmation of employment', 'issued', current_date);
   insert into public.hr_reviews (org_id, employee_id, period, rating, score)
   values (org, e1, 'H1', 'meets', 3.5), (org, e2, 'H1', 'exceeds', 4.5);
   insert into public.hr_documents (org_id, employee_id, title, doc_type)
@@ -164,6 +222,15 @@ begin
   end loop;
   execute format('select count(*) from public.hr_payslips where employee_id = %L', e2) into n;
   if n <> 0 then fails := array_append(fails, 'a member reads a colleague''s payslip'); end if;
+  -- The one payslip, line and letter a member reads are the paid and the issued ones.
+  execute format('select count(*) from public.hr_payslips where org_id = %L and (status <> ''paid'' or employee_id <> %L or payroll_run_id <> %L)', org, e1, run_id) into n;
+  if n <> 0 then fails := array_append(fails, 'a member reads a payslip that is not their own paid one'); end if;
+  execute format('select count(*) from public.hr_payslip_lines l where l.org_id = %L and l.payslip_id not in (select p.id from public.hr_payslips p where p.employee_id = %L and p.status = ''paid'')', org, e1) into n;
+  if n <> 0 then fails := array_append(fails, 'a member reads a line of a payslip that is not their own paid one'); end if;
+  execute format('select count(*) from public.hr_letters where org_id = %L and (status <> ''issued'' or employee_id <> %L)', org, e1) into n;
+  if n <> 0 then fails := array_append(fails, 'a member reads a letter that is not their own issued one'); end if;
+  select count(*) into n from public.hr_statutory_rules;
+  if n <> 3 then fails := array_append(fails, format('a member reads %s statutory rules, expected 3', n)); end if;
   foreach t in array hr_only loop
     execute format('select count(*) from public.%I where org_id = %L', t, org) into n;
     if n <> 0 then fails := array_append(fails, format('a member reads %s rows of HR-only %s', n, t)); end if;
@@ -194,11 +261,15 @@ begin
   set local role authenticated;
   foreach t in array personal loop
     execute format('select count(*) from public.%I where org_id = %L', t, org) into n;
-    if n <> 2 then fails := array_append(fails, format('the admin reads %s rows of %s, expected 2', n, t)); end if;
+    -- Two of everything, but four payslips with a line each (paid and draft), and three letters.
+    n2 := case t when 'hr_payslips' then 4 when 'hr_payslip_lines' then 4 when 'hr_letters' then 3 else 2 end;
+    if n <> n2 then fails := array_append(fails, format('the admin reads %s rows of %s, expected %s', n, t, n2)); end if;
   end loop;
   foreach t in array hr_only loop
     execute format('select count(*) from public.%I where org_id = %L', t, org) into n;
-    if n <> 1 then fails := array_append(fails, format('the admin reads %s rows of %s, expected 1', n, t)); end if;
+    -- One of everything, but two payroll runs (the paid one and the draft).
+    n2 := case t when 'hr_payroll_runs' then 2 else 1 end;
+    if n <> n2 then fails := array_append(fails, format('the admin reads %s rows of %s, expected %s', n, t, n2)); end if;
   end loop;
   reset role;
 
@@ -219,6 +290,10 @@ begin
   set local role authenticated;
   execute format('select count(*) from public.hr_payslips where org_id = %L', org) into n;
   if n <> 0 then fails := array_append(fails, 'a removed member still reads their payslip'); end if;
+  execute format('select count(*) from public.hr_payslip_lines where org_id = %L', org) into n;
+  if n <> 0 then fails := array_append(fails, 'a removed member still reads the lines of their payslip'); end if;
+  execute format('select count(*) from public.hr_letters where org_id = %L', org) into n;
+  if n <> 0 then fails := array_append(fails, 'a removed member still reads their letter'); end if;
   reset role;
 
   -- ---- the demo reseed keeps its shape when it runs again ---------------
@@ -240,6 +315,8 @@ begin
   if n <> 6 then fails := array_append(fails, format('%s pending approvals across the four queues in the demo, expected 6', n)); end if;
 
   -- ---- a workspace with HR data can still be deleted --------------------
+  -- Its employees have paid payslips, which would stop them being deleted one
+  -- by one; going with their workspace is allowed.
   begin
     delete from public.orgs where id = org;
   exception when others then

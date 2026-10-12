@@ -9,6 +9,8 @@ import { REASON_LABEL } from '@/lib/hire/application-changes';
 import { STAGE_LABEL } from '@/lib/hire/applications-view';
 import { isRealDate, monthLabel, weekdayName } from '@/lib/people/dates';
 import { blank, hhmm } from '@/lib/people/loose-input';
+import { STATUTORY_FIELDS } from '@/lib/people/statutory-fields';
+import { centsToRinggit, monthLabel as payrollMonthLabel, ringgitToCents, toStatutoryInput } from '@/lib/people/payroll-forms';
 import type { ReceiptState } from '@/lib/people/receipts';
 
 const APPOINTMENT_STATUS_LABELS: Record<string, string> = {
@@ -115,7 +117,10 @@ export type ItemKind =
   | 'claim'
   | 'overtime'
   | 'holiday'
-  | 'settings';
+  | 'settings'
+  | 'payslip'
+  | 'payslip-line'
+  | 'payroll-run';
 const KIND_OF_TOOL: Record<string, ItemKind> = {
   getCampaigns: 'campaign',
   createCampaign: 'campaign',
@@ -181,6 +186,13 @@ const KIND_OF_TOOL: Record<string, ItemKind> = {
   // A save's result carries the values now set, so the newest of lookup or save is "current".
   getAttendanceSettings: 'settings',
   saveAttendanceSettings: 'settings',
+  // A payslip lookup names the payslip (employee and month), the four figures now, and each of its lines, by id.
+  listPayslips: 'payslip',
+  // The payroll change tools hand back what they changed, so a later card believes the newest of lookup or change.
+  savePayslipLine: 'payslip',
+  removePayslipLine: 'payslip',
+  setPayslipStatutory: 'payslip',
+  removePayslip: 'payslip',
   listDepartments: 'department',
   createDepartment: 'department',
   updateDepartment: 'department',
@@ -201,7 +213,8 @@ function gather(value: unknown, kind: ItemKind, into: KnownNames, depth = 0): vo
   const row = value as Record<string, unknown>;
   const label = typeof row.id === 'string' ? labelOf(row, kind) : null;
   if (typeof row.id === 'string' && label) {
-    if (Object.keys(into).length < NAMES_MAX) into[`${kind}:${row.id}`] = label;
+    const key = `${kind}:${row.id}`;
+    if (key in into || Object.keys(into).length < NAMES_MAX) into[key] = label;
   }
   for (const inner of Object.values(row)) gather(inner, kind, into, depth + 1);
 }
@@ -210,7 +223,19 @@ function gather(value: unknown, kind: ItemKind, into: KnownNames, depth = 0): vo
 export function collectNames(results: ToolResult[], into: KnownNames = {}): KnownNames {
   for (const result of results) {
     const kind = KIND_OF_TOOL[result.tool];
-    if (kind) gather(result.output, kind, into);
+    // Payslips and their lines are read in order below, so the newest word on each one wins.
+    if (kind && kind !== 'payslip') gather(result.output, kind, into);
+  }
+  if (results.some((r) => PAYSLIP_TOOLS.has(r.tool))) {
+    const state = payslipState(results);
+    for (const [id, fact] of state.slips) {
+      if (fact === null) delete into[`payslip:${id}`];
+      else if (`payslip:${id}` in into || Object.keys(into).length < NAMES_MAX) into[`payslip:${id}`] = JSON.stringify(fact);
+    }
+    for (const [id, fact] of state.lines) {
+      if (fact === null) delete into[`payslip-line:${id}`];
+      else if (`payslip-line:${id}` in into || Object.keys(into).length < NAMES_MAX) into[`payslip-line:${id}`] = JSON.stringify(fact);
+    }
   }
   return into;
 }
@@ -229,8 +254,15 @@ export type NameFinder = (id: unknown, kind?: ItemKind) => string | null;
  * contact's name on a card about a deal. Later results win.
  */
 export function nameIn(results: ToolResult[]): NameFinder {
+  let state: PayslipState | null = null;
   return (id, kind) => {
     if (typeof id !== 'string' || !id) return null;
+    if (kind === 'payslip' || kind === 'payslip-line' || kind === 'payroll-run') {
+      state ??= payslipState(results);
+      if (kind === 'payroll-run') return state.runs.get(id) ?? null;
+      const fact = kind === 'payslip' ? state.slips.get(id) : state.lines.get(id);
+      return fact ? JSON.stringify(fact) : null;
+    }
     for (let r = results.length - 1; r >= 0; r -= 1) {
       if (kind && KIND_OF_TOOL[results[r].tool] !== kind) continue;
       const found = nameOf(results[r].output, id, kind);
@@ -238,6 +270,296 @@ export function nameIn(results: ToolResult[]): NameFinder {
     }
     return null;
   };
+}
+
+const UNLISTED_PAYSLIP = 'a payslip that was not in the list above';
+const UNLISTED_LINE = 'a payslip line that was not in the list above';
+
+const MONEY_WORDS = /^RM [\d,]+\.\d{2}$/;
+const STATUTORY_WORDS: Record<string, string> = Object.fromEntries(STATUTORY_FIELDS.map((field) => [field, field.toUpperCase()]));
+
+/**
+ * What a model sends as a payroll month: `2026-10`, or the first of that month (`2026-10-01`). Null for anything
+ * else, so the tool that runs the month and the card that names it agree. `YYYY-MM` otherwise.
+ */
+export function payrollMonth(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const match = /^(\d{4})-(0[1-9]|1[0-2])(?:-01)?$/.exec(value.trim());
+  return match && Number(match[1]) >= 2000 ? `${match[1]}-${match[2]}` : null;
+}
+
+/** An amount a model typed, as the text a form field would hold: a number is read as its digits; null, undefined and the rest as empty. */
+export function looseAmount(value: unknown): string {
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '';
+  return typeof value === 'string' ? value : '';
+}
+
+type PayslipFact = { employee: string | null; month: string; figures: Record<string, string | null>; paid: boolean | null };
+type LineFact = {
+  payslip_id: string;
+  employee: string | null;
+  month: string;
+  kind: 'earning' | 'deduction' | 'unpaid';
+  label: string;
+  amount: string | null;
+  source: string | null;
+};
+type PayslipState = {
+  /** null: removed. Absent: never seen. */
+  slips: Map<string, PayslipFact | null>;
+  lines: Map<string, LineFact | null>;
+  /** Per month, `YYYY-MM`. */
+  runs: Map<string, 'draft' | 'paid'>;
+};
+
+/** The tools whose results say something about a payslip, a line or a run. */
+const PAYSLIP_TOOLS = new Set([
+  'listPayslips',
+  'getPayrollSummary',
+  'runPayroll',
+  'recalculatePayroll',
+  'savePayslipLine',
+  'removePayslipLine',
+  'setPayslipStatutory',
+  'removePayslip',
+]);
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+const figureOf = (value: unknown): string | null => (typeof value === 'string' && MONEY_WORDS.test(value) ? value : null);
+const monthKey = (value: unknown): string | null =>
+  typeof value === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(value) ? value : null;
+const lineKindOf = (value: unknown): LineFact['kind'] | null =>
+  value === 'earning' || value === 'deduction' || value === 'unpaid' ? value : null;
+const paidOf = (status: unknown, run: unknown): boolean | null =>
+  status === 'paid' || run === 'paid' ? true : status === 'pending' || run === 'draft' ? false : null;
+
+/**
+ * What the conversation knows about payslips, their lines and runs, read in order so the newest word wins: a lookup,
+ * or a change that came back (its result carries the payslip as it is after the change). A recalculation rebuilds
+ * the month, so what was known about that month's figures and lines is dropped rather than trusted. Pure.
+ */
+function payslipState(results: ToolResult[]): PayslipState {
+  const state: PayslipState = { slips: new Map(), lines: new Map(), runs: new Map() };
+  const putLine = (raw: unknown, payslipId: string, employee: string | null, month: string) => {
+    const line = asRecord(raw);
+    const kind = line ? lineKindOf(line.kind) : null;
+    const label = line ? text(line.label) : null;
+    if (!line || typeof line.id !== 'string' || !kind || !label) return;
+    state.lines.set(line.id, {
+      payslip_id: payslipId,
+      employee,
+      month,
+      kind,
+      label,
+      amount: figureOf(line.amount),
+      source: typeof line.source === 'string' ? line.source : null,
+    });
+  };
+  for (const { tool, output } of results) {
+    const out = asRecord(output);
+    if (!out) continue;
+    if (tool === 'listPayslips') {
+      for (const raw of Array.isArray(out.payslips) ? out.payslips : []) {
+        const row = asRecord(raw);
+        const employee = row ? text(row.employee) : null;
+        const month = row ? monthKey(row.month) : null;
+        if (!row || typeof row.id !== 'string' || !employee || !month) continue;
+        const paid = paidOf(row.status, row.run_status);
+        state.slips.set(row.id, {
+          employee,
+          month,
+          paid,
+          figures: { epf: figureOf(row.epf), socso: figureOf(row.socso), eis: figureOf(row.eis), pcb: figureOf(row.pcb) },
+        });
+        if (paid !== null) state.runs.set(month, paid ? 'paid' : 'draft');
+        for (const line of Array.isArray(row.lines) ? row.lines : []) putLine(line, row.id, employee, month);
+      }
+      continue;
+    }
+    if (tool === 'getPayrollSummary') {
+      for (const raw of Array.isArray(out.runs) ? out.runs : []) {
+        const run = asRecord(raw);
+        const month = run ? monthKey(run.month) : null;
+        if (run && month && (run.status === 'paid' || run.status === 'draft')) state.runs.set(month, run.status);
+      }
+      continue;
+    }
+    // A change that failed changed nothing.
+    const data = out.ok === true ? asRecord(out.data) : null;
+    if (!data) continue;
+    const month = monthKey(data.period);
+    if (tool === 'runPayroll' || tool === 'recalculatePayroll') {
+      if (!month) continue;
+      state.runs.set(month, 'draft');
+      if (tool === 'recalculatePayroll') {
+        for (const [id, fact] of state.slips) {
+          if (fact && fact.month === month) {
+            state.slips.set(id, { ...fact, paid: false, figures: { epf: null, socso: null, eis: null, pcb: null } });
+          }
+        }
+        for (const [id, fact] of [...state.lines]) if (fact && fact.month === month) state.lines.delete(id);
+      }
+      continue;
+    }
+    const slipId = typeof data.payslip_id === 'string' ? data.payslip_id : null;
+    if (!slipId) continue;
+    if (tool === 'removePayslip') {
+      state.slips.set(slipId, null);
+      for (const [id, fact] of state.lines) if (fact && fact.payslip_id === slipId) state.lines.set(id, null);
+      continue;
+    }
+    if (!month) continue;
+    const employee = text(data.employee) ?? state.slips.get(slipId)?.employee ?? null;
+    state.slips.set(slipId, {
+      employee,
+      month,
+      paid: paidOf(data.status, null),
+      figures: { epf: figureOf(data.epf), socso: figureOf(data.socso), eis: figureOf(data.eis), pcb: figureOf(data.pcb) },
+    });
+    if (tool === 'savePayslipLine') putLine(data.line, slipId, employee, month);
+    if (tool === 'removePayslipLine' && typeof data.removed_line_id === 'string') state.lines.set(data.removed_line_id, null);
+  }
+  return state;
+}
+
+function factsOf<T>(raw: string | null): T | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+/** "Aisyah Rahim's October 2026 payslip", or the words for one no lookup in the conversation showed. */
+function payslipWords(find: NameFinder, id: unknown): { words: string; facts: PayslipFact | null; paid: boolean } {
+  const facts = factsOf<PayslipFact>(find(id, 'payslip'));
+  const label = facts ? payrollMonthLabel(facts.month) : '';
+  const words = !facts ? UNLISTED_PAYSLIP : facts.employee ? `${facts.employee}'s ${label} payslip` : `the ${label} payslip`;
+  const paid = facts ? (facts.paid ?? find(facts.month, 'payroll-run') === 'paid') : false;
+  return { facts, words, paid };
+}
+
+/** `the earning “Sales commission”, RM 500.00` from a lookup, else the words for a line no lookup showed. */
+function lineWords(find: NameFinder, id: unknown): { words: string; facts: LineFact | null } {
+  const facts = factsOf<LineFact>(find(id, 'payslip-line'));
+  return { facts, words: facts ? `the ${facts.kind} “${facts.label}”${facts.amount ? `, ${facts.amount}` : ''}` : UNLISTED_LINE };
+}
+
+/** A line the conversation shows is worked out by the system, so it is not the owner's to change. */
+const systemLine = (facts: LineFact | null): boolean => facts !== null && facts.source !== null && facts.source !== 'hr';
+
+const monthWords = (value: unknown): string => {
+  const month = payrollMonth(value);
+  return month ? payrollMonthLabel(month) : 'a month that could not be read';
+};
+
+const slipOf = (employee: string | null, month: string): string =>
+  employee ? `${employee}'s ${payrollMonthLabel(month)} payslip` : `the ${payrollMonthLabel(month)} payslip`;
+
+/**
+ * The payroll cards' question. It reads the input through the tools' own normalisers (payrollMonth, looseAmount,
+ * toStatutoryInput, ringgitToCents) and the conversation through `find`, so it never claims what it cannot know. A change
+ * the conversation already shows the database will refuse (a paid payslip, a system line) says so instead.
+ */
+function payrollTitle(toolName: string, i: Record<string, unknown>, find: NameFinder): string {
+  switch (toolName) {
+    case 'runPayroll':
+      return `Run payroll for ${monthWords(i.month)}? This creates a draft. Nobody is paid and employees can't see it yet.`;
+    case 'recalculatePayroll': {
+      return `Recalculate the ${monthWords(i.month)} draft? Your own lines and figures are kept.`;
+    }
+    case 'savePayslipLine': {
+      const { words: slip } = payslipWords(find, i.payslip_id);
+      const kind = i.kind === 'earning' || i.kind === 'deduction' ? i.kind : null;
+      const label = text(i.label);
+      const cents = ringgitToCents(looseAmount(i.amount));
+      const what = `${kind ? `the ${kind}` : 'a line'}${label ? ` “${label}”` : ''}`;
+      const amount = cents === null ? ' (the amount could not be read)' : `, ${centsToRinggit(cents)}`;
+      const lineId = blank(i.line_id);
+      if (lineId === null) return `Add ${what}${amount} to ${slip}?`;
+      // A line last seen on another payslip is not named here: the detail says so.
+      const line = lineOnPayslip(find, lineId, i.payslip_id) ? lineWords(find, lineId) : { words: UNLISTED_LINE };
+      return `Change ${line.words} on ${slip} to ${what}${amount}?`;
+    }
+    case 'removePayslipLine': {
+      const { words, facts } = lineWords(find, i.line_id);
+      if (!facts) return `Remove ${words}?`;
+      return `Remove ${words} from ${slipOf(facts.employee, facts.month)}?`;
+    }
+    case 'setPayslipStatutory': {
+      const { words: slip, facts } = payslipWords(find, i.payslip_id);
+      const field = typeof i.field === 'string' ? i.field : '';
+      const figure = Object.hasOwn(STATUTORY_WORDS, field) ? STATUTORY_WORDS[field] : null;
+      if (!figure) return `Change a statutory figure that could not be read on ${slip}?`;
+      const converted = toStatutoryInput({ field, amount: looseAmount(i.amount) });
+      if (!converted.ok) return `Set ${figure} on ${slip} to an amount that could not be read?`;
+      const old = facts?.figures[field] ?? null;
+      if (converted.input.amount_cents === null) {
+        return `Put ${figure} on ${slip} back to the proposed amount${old ? ` (now ${old})` : ''}?`;
+      }
+      const next = centsToRinggit(converted.input.amount_cents);
+      if (old === next) return `Keep ${figure} on ${slip} at ${next}, fixed by hand?`;
+      return old ? `Change ${figure} on ${slip} from ${old} to ${next}?` : `Set ${figure} on ${slip} to ${next}?`;
+    }
+    case 'removePayslip': {
+      return `Remove ${payslipWords(find, i.payslip_id).words} from the draft?`;
+    }
+    default:
+      return 'Approve this change?';
+  }
+}
+
+/** Whether a line the conversation knows is known to be on this payslip (or nothing is known about it). */
+const lineOnPayslip = (find: NameFinder, lineId: unknown, payslipId: unknown): boolean => {
+  const facts = factsOf<LineFact>(find(lineId, 'payslip-line'));
+  return !facts || typeof payslipId !== 'string' || facts.payslip_id === payslipId;
+};
+
+/**
+ * What the conversation suggests will make the database refuse a payroll change. It is a hedge in the detail, never a
+ * change to the question: the card always states exactly what will be saved, and what the chat saw can be out of date
+ * (paid can be undone on the Payroll screen).
+ */
+function payrollCaveat(toolName: string, i: Record<string, unknown>, find: NameFinder): string | null {
+  if (toolName === 'recalculatePayroll') {
+    const month = payrollMonth(i.month);
+    return month && find(month, 'payroll-run') === 'paid'
+      ? `The ${payrollMonthLabel(month)} run was paid when last checked, so this may be refused.`
+      : null;
+  }
+  const lineId = toolName === 'removePayslipLine' ? i.line_id : toolName === 'savePayslipLine' ? blank(i.line_id) : null;
+  if (typeof lineId === 'string') {
+    const line = factsOf<LineFact>(find(lineId, 'payslip-line'));
+    if (systemLine(line)) return 'This line is worked out by the system, so this will be refused.';
+    if (toolName === 'savePayslipLine' && !lineOnPayslip(find, lineId, i.payslip_id)) {
+      return 'This line was on a different payslip when last checked, so this may be refused.';
+    }
+    if (line && payslipWords(find, line.payslip_id).paid) return 'This payslip was paid when last checked, so this may be refused.';
+  }
+  if (toolName === 'savePayslipLine' || toolName === 'setPayslipStatutory' || toolName === 'removePayslip') {
+    if (payslipWords(find, i.payslip_id).paid) return 'This payslip was paid when last checked, so this may be refused.';
+  }
+  return null;
+}
+
+/** The second line of a payroll card: what else the change does. */
+function payrollDetail(toolName: string, i: Record<string, unknown>): string | null {
+  switch (toolName) {
+    case 'savePayslipLine':
+    case 'removePayslipLine':
+      return 'Gross pay, the proposed EPF, SOCSO, EIS and PCB figures and net pay are worked out again. Figures you set yourself are kept.';
+    case 'setPayslipStatutory': {
+      const reset = toStatutoryInput({ field: typeof i.field === 'string' ? i.field : '', amount: looseAmount(i.amount) });
+      if (reset.ok && reset.input.amount_cents === null) return 'The system proposes this figure again, and net pay changes with it.';
+      return 'EPF, SOCSO, EIS and PCB are proposals for you to confirm, not official amounts. A figure you set is kept when the run is recalculated, and net pay changes with it.';
+    }
+    case 'removePayslip':
+      return 'Their overtime on it is released. Recalculating the run adds them again if they are still eligible.';
+    default:
+      return null;
+  }
 }
 
 const UNLISTED_APPLICATION = 'an application that was not in the list above';
@@ -612,6 +934,13 @@ export function approvalTitle(
       return `Remove ${old ? `public holiday: ${old}` : UNLISTED_HOLIDAY}?`;
     }
     case 'saveAttendanceSettings': return settingsTitle(i, find);
+    case 'runPayroll':
+    case 'recalculatePayroll':
+    case 'savePayslipLine':
+    case 'removePayslipLine':
+    case 'setPayslipStatutory':
+    case 'removePayslip':
+      return payrollTitle(toolName, i, find);
     case 'setLeaveEntitlement': {
       const who = find(i.employee_id, 'employee');
       const days =
@@ -794,7 +1123,7 @@ export function approvalDetail(
 ): string | null {
   const i = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
   if (toolName === 'deleteEmployee') {
-    return 'Their leave, claims, payslips and every other HR record are deleted too. This cannot be undone.';
+    return 'Their leave, claims, draft payslips and every other HR record are deleted too. This cannot be undone. Someone with a paid payslip cannot be deleted: make them inactive instead.';
   }
   if (toolName === 'updateEmployee') {
     const words = employeeFieldWords(i, true);
@@ -858,6 +1187,10 @@ export function approvalDetail(
     return note ? `Note: “${note}”` : null;
   }
   if (toolName === 'saveAttendanceSettings') return settingsDetail(i);
+  if (toolName === 'recalculatePayroll' || ['savePayslipLine', 'removePayslipLine', 'setPayslipStatutory', 'removePayslip'].includes(toolName)) {
+    const caveat = named ? payrollCaveat(toolName, i, named) : null;
+    return [payrollDetail(toolName, i), caveat].filter(Boolean).join(' ') || null;
+  }
   if (toolName === 'removeHoliday' || (toolName === 'saveHoliday' && blank(i.id) !== null)) {
     return 'Leave and overtime already recorded are not changed.';
   }

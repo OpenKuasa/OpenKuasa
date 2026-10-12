@@ -12,6 +12,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
+import { PAYROLL_REFUSALS } from './payroll-refusals';
 import type { Department } from './types';
 
 export type PeopleWriteContext = { client: SupabaseClient; orgId: string };
@@ -444,6 +445,8 @@ export async function deleteEmployee(
     .eq('org_id', ctx.orgId)
     .select('id,name')
     .maybeSingle();
+  // A trigger refuses an employee with a paid payslip; its message is the bare code.
+  if (error?.message === 'HR_EMPLOYEE_HAS_PAID_PAYSLIPS') return refuse(PAYROLL_REFUSALS.HR_EMPLOYEE_HAS_PAID_PAYSLIPS);
   if (error) return writeFailed('deleteEmployee', error);
   if (!data) return refuse(EMPLOYEE_MISSING);
   return { ok: true, data: data as { id: string; name: string } };

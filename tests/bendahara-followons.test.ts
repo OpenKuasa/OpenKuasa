@@ -188,22 +188,24 @@ testWithSupabase('an accepted quotation becomes one draft invoice with the same 
   expect(early.error?.code).toBe('FIN04');
   expect((await answer(a, quotation.id, 'accepted')).error).toBeNull();
 
-  const dayBefore = daysFromToday(0);
-  const converted = await a.c.rpc('finance_convert_quotation', { target_org: a.orgId, target_quotation: quotation.id });
+  // The app sends the date on the person's own calendar, which is not always the database's: three days
+  // ago here, so the test cannot pass by the database using its own date.
+  const given = daysFromToday(-3);
+  const converted = await a.c.rpc('finance_convert_quotation', {
+    target_org: a.orgId,
+    target_quotation: quotation.id,
+    invoice_date: given,
+  });
   expect(converted.error, converted.error?.message).toBeNull();
-  const dayAfter = daysFromToday(0);
   const { data: invoice } = await a.c
     .from('finance_invoices')
     .select('status, customer_id, quotation_id, invoice_no, invoice_date, due_date')
     .eq('id', converted.data)
     .single();
-  // The invoice is dated by the database's UTC date at the moment it converted. Across midnight UTC that
-  // is one of the two days this machine saw either side of the call, so neither is assumed.
-  expect([dayBefore, dayAfter]).toContain(invoice!.invoice_date);
-  // The customer's payment terms are 14 days, counted from the invoice's own date.
+  // The invoice carries the date it was given. The customer's payment terms are 14 days, counted from that date.
   expect(invoice).toEqual({
     status: 'draft', customer_id: a.customer, quotation_id: quotation.id, invoice_no: null,
-    invoice_date: invoice!.invoice_date, due_date: daysAfter(invoice!.invoice_date, 14),
+    invoice_date: given, due_date: daysAfter(given, 14),
   });
   const { data: lines } = await a.c.from('finance_invoice_lines').select('description, amount, sst_amount').eq('invoice_id', converted.data);
   expect(lines).toEqual([{ description: 'Design work', amount: 125, sst_amount: 7.5 }]);
@@ -221,8 +223,16 @@ testWithSupabase('an accepted quotation becomes one draft invoice with the same 
   // Deleting the draft invoice frees the quotation.
   const removed = await a.c.from('finance_invoices').delete().eq('id', converted.data);
   expect(removed.error, removed.error?.message).toBeNull();
+  // With no date, as the code deployed before the date was added calls it: the one function still answers,
+  // and dates the invoice with the database's UTC date. Across midnight UTC that is one of the two days this
+  // machine saw either side of the call, so neither is assumed.
+  const dayBefore = daysFromToday(0);
   const again = await a.c.rpc('finance_convert_quotation', { target_org: a.orgId, target_quotation: quotation.id });
   expect(again.error, again.error?.message).toBeNull();
+  const dayAfter = daysFromToday(0);
+  const { data: undated } = await a.c.from('finance_invoices').select('invoice_date, due_date').eq('id', again.data).single();
+  expect([dayBefore, dayAfter]).toContain(undated!.invoice_date);
+  expect(undated!.due_date).toBe(daysAfter(undated!.invoice_date, 14));
 });
 
 testWithSupabase('changing the customer of an invoice made from a quotation unties it, and the quotation converts again', async () => {

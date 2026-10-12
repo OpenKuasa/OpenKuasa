@@ -6,8 +6,8 @@ const slugs = getProduct('people')!.sections.flatMap((section) => section.items.
 const own = slugs.filter((slug) => slug !== 'calendar');
 
 describe('Lekiu live screens', () => {
-  it('marks all 28 Lekiu screens as live, so none carries a work-in-progress banner', () => {
-    expect(own).toHaveLength(28);
+  it('marks all 29 Lekiu screens as live, so none carries a work-in-progress banner', () => {
+    expect(own).toHaveLength(29);
     for (const slug of own) {
       expect(LIVE_SCREENS.has(`people/${slug}`), slug).toBe(true);
       expect(isSampleScreen(`/people/${slug}`), slug).toBe(false);

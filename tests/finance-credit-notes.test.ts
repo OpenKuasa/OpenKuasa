@@ -112,18 +112,19 @@ describe('credit note writes', () => {
     expect(await deleteCreditNote(removed.ctx, { id: ID })).toEqual({ ok: true, data: { id: ID } });
     expect(removed.calls[0]).toMatchObject({ name: 'finance_credit_notes', op: 'delete', filters: { id: ID, org_id: 'org-1' } });
   });
-  it('tells a person a draft credit note is deleted, not voided (FIN01)', async () => {
+  it('words FIN01 so that it reads sensibly from every button that can meet it: Save, Issue, Void and Delete', async () => {
+    const sentence =
+      'That cannot be done to this credit note as it now stands. It may have been issued or voided since this page was loaded.';
     const { ctx } = fakeFinance({ data: null, error: { code: 'FIN01' } });
-    const result = await voidCreditNote(ctx, { id: ID });
-    expect(result).toMatchObject({ ok: false });
-    if (!result.ok) {
-      expect(result.error).toContain('A draft credit note is deleted, not voided');
-      expect(result.error).not.toContain('has been issued or voided, so');
-    }
+    // Save and Delete on a draft that was issued in another tab; Issue on one issued a moment ago; Void on one already void.
+    expect(await saveCreditNote(ctx, { ...valid, id: ID })).toEqual({ ok: false, error: sentence });
+    expect(await issueCreditNote(ctx, { id: ID })).toEqual({ ok: false, error: sentence });
+    expect(await voidCreditNote(ctx, { id: ID })).toEqual({ ok: false, error: sentence });
+    expect(await deleteCreditNote(ctx, { id: ID })).toEqual({ ok: false, error: sentence });
   });
   it('turns each database refusal into a sentence', async () => {
     const cases: [string, string][] = [
-      ['FIN01', 'That cannot be done to this credit note as it stands. A draft credit note is deleted, not voided; one that has been issued or voided can no longer be edited or deleted.'],
+      ['FIN01', 'That cannot be done to this credit note as it now stands. It may have been issued or voided since this page was loaded.'],
       ['FIN02', 'A refund depends on this credit note. Void or delete that refund on Refunds before voiding it.'],
       ['FIN04', 'A credit note can only go against a posted invoice.'],
       ['FIN05', 'That is more than this invoice has left to credit.'],

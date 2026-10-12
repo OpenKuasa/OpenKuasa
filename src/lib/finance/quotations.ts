@@ -78,6 +78,13 @@ export const saveQuotationInput = z
 
 export const quotationIdInput = z.object({ id: z.string({ error: M.gone }).uuid(M.gone) });
 
+/**
+ * What "Make invoice" sends: the quotation, and the date the invoice is to
+ * carry. That is the date on the person's own calendar: the database's date is
+ * UTC, which until 08:00 in Malaysia is still the day before.
+ */
+export const convertQuotationInput = quotationIdInput.extend({ invoice_date: isoDate });
+
 const REFUSALS: Record<string, string> = {
   FIN01: M.locked,
   FIN04: M.notAccepted,
@@ -297,15 +304,20 @@ export async function deleteQuotation(
   return { ok: true, data: { id: data.id } };
 }
 
-/** Makes a draft invoice from an accepted quotation, with the same lines. Answers with the invoice's id. */
+/**
+ * Makes a draft invoice from an accepted quotation, with the same lines, dated
+ * `invoice_date` and due after the customer's payment terms counted from it.
+ * Answers with the invoice's id.
+ */
 export async function convertQuotation(
   ctx: FinanceWriteContext,
-  input: z.input<typeof quotationIdInput>,
+  input: z.input<typeof convertQuotationInput>,
 ): Promise<FinResult<{ id: string; invoice_id: string }>> {
-  const { id } = quotationIdInput.parse(input);
+  const { id, invoice_date } = convertQuotationInput.parse(input);
   const { data, error } = await ctx.client.rpc('finance_convert_quotation', {
     target_org: ctx.orgId,
     target_quotation: id,
+    invoice_date,
   });
   if (error || !data) return quotationWriteFailed('convertQuotation', error, CONVERT_REFUSALS);
   return { ok: true, data: { id, invoice_id: data as string } };

@@ -243,7 +243,7 @@ describe('buildOtModel', () => {
   });
 
   it('shows rate labels, a status per row, and the newest first', () => {
-    const base = { employee_id: 'e', employee_name: 'E', hourly_rate_cents: 2500, day_kind: null, reason: null, decision_note: null, created_at: '2026-10-01T00:00:00Z' };
+    const base = { employee_id: 'e', employee_name: 'E', hourly_rate_cents: 2500, day_kind: null, reason: null, decision_note: null, created_at: '2026-10-01T00:00:00Z', paid_month: null };
     const model = buildOtModel(
       [
         { ...base, id: '1', work_date: '2026-10-01', hours: 2, rate_multiplier: 1.5, amount_cents: 7500, status: 'approved' },
@@ -392,7 +392,7 @@ describe('claim rows for the member', () => {
 });
 
 describe('overtime rows for the member', () => {
-  const base = { employee_id: 'e', employee_name: 'E', reason: null, decision_note: null, created_at: '2026-10-01T00:00:00Z', work_date: '2026-10-05', hours: 2, rate_multiplier: 1.5 };
+  const base = { employee_id: 'e', employee_name: 'E', reason: null, decision_note: null, created_at: '2026-10-01T00:00:00Z', paid_month: null, work_date: '2026-10-05', hours: 2, rate_multiplier: 1.5 };
 
   it('shows the kind of day, and "Not calculated" when there is no rate', () => {
     const model = buildOtModel(

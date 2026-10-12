@@ -113,6 +113,52 @@ describe('recording', () => {
     expect(calls).toContain('delete-user:su1');
   });
 
+  describe('createConfirmedTestUser', () => {
+    const adminOf = (
+      over: { id?: string | null; error?: Failure } = {},
+      seen: { email: string; confirm: boolean }[] = [],
+    ) => ({
+      auth: {
+        admin: {
+          createUser: async (attrs: { email: string; password: string; email_confirm: boolean }) => {
+            seen.push({ email: attrs.email, confirm: attrs.email_confirm });
+            return { data: { user: over.id === null ? null : { id: over.id ?? 'cu1' } }, error: over.error ?? null };
+          },
+        },
+      },
+    });
+    const signIn = (session: boolean, error: Failure = null) =>
+      ({
+        auth: { signInWithPassword: async () => ({ data: { session: session ? { access_token: 't' } : null, user: null }, error }) },
+      }) as unknown as SupabaseClient;
+
+    it('creates a confirmed user with the test address, signs in, and records it for clean-up', async () => {
+      const r = make();
+      const seen: { email: string; confirm: boolean }[] = [];
+      const res = await r.createConfirmedTestUser(adminOf({}, seen), signIn(true), 'pw');
+      expect(res.email).toMatch(new RegExp(TEST_EMAIL_SQL_PATTERN));
+      expect(seen).toEqual([{ email: res.email, confirm: true }]);
+      const { service, calls } = fake({ users: { cu1: { is_anonymous: false, email: res.email, created_at: FRESH } } });
+      await r.cleanup(() => service, () => {});
+      expect(calls).toContain('delete-user:cu1');
+    });
+
+    it('fails clearly, and still records the user, when no session comes back', async () => {
+      const r = make();
+      await expect(r.createConfirmedTestUser(adminOf(), signIn(false), 'pw')).rejects.toThrow(/no session/i);
+      const { service, calls } = fake({ users: { cu1: { is_anonymous: false, email: 'qa-abcdef012345-1@example.com', created_at: FRESH } } });
+      await r.cleanup(() => service, () => {});
+      expect(calls).toContain('delete-user:cu1');
+    });
+
+    it('fails clearly without the service key, or when the user cannot be created', async () => {
+      await expect(make().createConfirmedTestUser(null, signIn(true), 'pw')).rejects.toThrow(/SUPABASE_SERVICE_ROLE_KEY/);
+      await expect(
+        make().createConfirmedTestUser(adminOf({ id: null, error: { message: 'nope' } }), signIn(true), 'pw'),
+      ).rejects.toThrow(/nope/);
+    });
+  });
+
   it('a later recordUser cannot downgrade an existing record', async () => {
     const r = make();
     r.recordUser('x', { kind: 'signup', email: 'qa-abcdef012345-1@example.com' });

@@ -1,6 +1,7 @@
 -- Bendahara sales follow-ons check. Run it after
--- 20261022100000_bendahara_sales_followons.sql, in the same transaction for a
--- dry run, or by itself once the migration is applied. It goes through the
+-- 20261022100000_bendahara_sales_followons.sql and
+-- 20261027100000_bendahara_convert_quotation_date.sql, in the same transaction
+-- for a dry run, or by itself once the migrations are applied. It goes through the
 -- whole invoice flow and the whole bill flow again, because that migration
 -- replaces the guards they run under, and then through quotations, credit
 -- notes and refunds. It leaves nothing behind either way: the block always ends with
@@ -117,13 +118,21 @@ begin
        || 'einvoice_status,einvoice_uuid,created_by,created_at,updated_at,subtotal,sst,total,paid,balance,display_status,credited,refunded' then
     fails := fails || format('finance_invoice_totals has the columns: %s', t);
   end if;
+  -- One function answers the call with a date and the call without one. A second
+  -- function of the same name would make the call without a date ambiguous, and
+  -- every conversion below would stop this script with that error: say so here.
+  select count(*) into n from pg_proc p join pg_namespace s on s.oid = p.pronamespace
+   where s.nspname = 'public' and p.proname = 'finance_convert_quotation';
+  if n <> 1 then
+    raise exception 'BENDAHARA_FOLLOWONS_CHECK FAILED: expected 1 function named finance_convert_quotation, found %', n;
+  end if;
   foreach t in array array[
     'public.finance_save_invoice(uuid, jsonb, jsonb)',
     'public.finance_post_invoice(uuid, uuid)',
     'public.finance_record_payment_in(uuid, jsonb, jsonb)',
     'public.finance_save_quotation(uuid, jsonb, jsonb)',
     'public.finance_send_quotation(uuid, uuid)',
-    'public.finance_convert_quotation(uuid, uuid)',
+    'public.finance_convert_quotation(uuid, uuid, date)',
     'public.finance_save_credit_note(uuid, jsonb)',
     'public.finance_issue_credit_note(uuid, uuid)',
     'public.finance_record_refund(uuid, jsonb)',
@@ -524,12 +533,15 @@ begin
     format('update public.finance_quotations set status = %L, accepted_at = now(), updated_at = now() where id = %L', 'accepted', qt));
 
   -- ---- convert: one draft invoice with the same lines ------------------------
-  qinv := public.finance_convert_quotation(org, qt);
-  select i.status, i.customer_id, i.due_date - i.invoice_date as terms, i.quotation_id, i.notes, v.total, v.invoice_no
+  -- With no date, as the code deployed before the date was added calls it (two
+  -- named arguments): the invoice is dated with the database's date.
+  qinv := public.finance_convert_quotation(target_org => org, target_quotation => qt);
+  select i.status, i.customer_id, i.invoice_date, i.due_date, i.quotation_id, i.notes, v.total, v.invoice_no
     into r from public.finance_invoices i join public.finance_invoice_totals v on v.id = i.id where i.id = qinv;
-  if (r.status, r.customer_id, r.terms, r.quotation_id, r.notes, r.total, r.invoice_no)
-     is distinct from ('draft', cust, 30, qt, 'Quoted', 132.50, null::text) then
-    fails := fails || format('an invoice made from a quotation reads %s', row_to_json(r));
+  if (r.status, r.customer_id, r.invoice_date, r.due_date, r.quotation_id, r.notes, r.total, r.invoice_no)
+     is distinct from ('draft', cust, current_date, current_date + 30, qt, 'Quoted', 132.50, null::text) then
+    fails := fails || format('an invoice made from a quotation with no date given should be dated %s and due %s, and reads %s',
+      current_date, current_date + 30, row_to_json(r));
   end if;
   select invoice_id into r from public.finance_quotation_totals where id = qt;
   if r.invoice_id is distinct from qinv then fails := array_append(fails, 'a converted quotation does not name its invoice'); end if;
@@ -549,6 +561,25 @@ begin
   delete from public.finance_invoices where id = qinv;
   select invoice_id into r from public.finance_quotation_totals where id = qt;
   if r.invoice_id is not null then fails := array_append(fails, 'deleting the draft invoice did not free the quotation'); end if;
+  -- With a date, as the app calls it (the person's own date, which before 08:00
+  -- in Malaysia is the day after the database's): the invoice carries that date
+  -- and is due after the customer's terms counted from it, not from today.
+  qinv := public.finance_convert_quotation(target_org => org, target_quotation => qt, invoice_date => current_date - 10);
+  select i.status, i.invoice_date, i.due_date, i.quotation_id into r from public.finance_invoices i where i.id = qinv;
+  if (r.status, r.invoice_date, r.due_date, r.quotation_id)
+     is distinct from ('draft', current_date - 10, current_date + 20, qt) then
+    fails := fails || format('an invoice made from a quotation with the date %s given should be dated %s and due %s, and reads %s',
+      current_date - 10, current_date - 10, current_date + 20, row_to_json(r));
+  end if;
+  -- A date ahead of the database's, which is what the app sends before 08:00 in Malaysia.
+  delete from public.finance_invoices where id = qinv;
+  qinv := public.finance_convert_quotation(org, qt, current_date + 1);
+  select i.invoice_date, i.due_date into r from public.finance_invoices i where i.id = qinv;
+  if (r.invoice_date, r.due_date) is distinct from (current_date + 1, current_date + 31) then
+    fails := fails || format('an invoice made from a quotation with tomorrow''s date given should be dated %s and due %s, and reads %s',
+      current_date + 1, current_date + 31, row_to_json(r));
+  end if;
+  delete from public.finance_invoices where id = qinv;
   -- Converted again, posted, then voided: a void invoice does not hold the quotation either.
   qinv := public.finance_convert_quotation(org, qt);
   perform public.finance_post_invoice(org, qinv);

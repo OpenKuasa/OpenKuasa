@@ -41,7 +41,7 @@ export type DashboardModel = {
   leaveByType: { label: string; days: number }[] | null;
   joiners: { label: string; joiners: number }[] | null;
   payroll: {
-    latest: { period_month: string; gross_cents: number } | null;
+    latest: { period_month: string; gross_cents: number; headcount: number } | null;
     /** Gross pay in ringgit per month, oldest first. */
     byMonth: { label: string; payroll: number }[];
   } | null;
@@ -72,8 +72,10 @@ export function buildDashboardModel(input: DashboardInput, today: string, team: 
   if (!team) {
     return { ...base, attendanceToday: null, weeklyAttendance: null, leaveByType: null, joiners: null, payroll: null };
   }
-  // A run with no payslips yet has nothing to show: skip it rather than report RM 0.
-  const summary = payrollSummary(input.runs, input.payslips).filter((run) => run.headcount > 0);
+  // The latest tile is the newest run, empty or not (an empty paid month really paid nothing). Only the chart
+  // leaves out a run with no payslips.
+  const all = payrollSummary(input.runs, input.payslips);
+  const summary = all.filter((run) => run.headcount > 0);
   return {
     ...base,
     attendanceToday: attendanceOn(input.attendance, today),
@@ -87,7 +89,9 @@ export function buildDashboardModel(input: DashboardInput, today: string, team: 
       6,
     ).map((b) => ({ label: b.label, joiners: b.value })),
     payroll: {
-      latest: summary[0] ? { period_month: summary[0].period_month, gross_cents: summary[0].gross_cents } : null,
+      latest: all[0]
+        ? { period_month: all[0].period_month, gross_cents: all[0].gross_cents, headcount: all[0].headcount }
+        : null,
       byMonth: summary
         .slice(0, 8)
         .reverse()

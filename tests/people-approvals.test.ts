@@ -49,7 +49,7 @@ const claim = (over: Partial<Claim>): Claim => ({
 });
 const overtime = (over: Partial<OvertimeRecord>): OvertimeRecord => ({
   id: 'o', employee_id: 'e1', employee_name: 'E One', work_date: '2026-10-02', hours: 2, rate_multiplier: 1.5,
-  amount_cents: 7500, hourly_rate_cents: 2500, day_kind: null, reason: null, decision_note: null, status: 'pending', created_at: '2026-10-03T02:00:00Z', ...over,
+  amount_cents: 7500, hourly_rate_cents: 2500, day_kind: null, reason: null, decision_note: null, status: 'pending', created_at: '2026-10-03T02:00:00Z', paid_month: null, ...over,
 });
 const timeOff = (over: Partial<TimeOffRequest>): TimeOffRequest => ({
   id: 't', employee_id: 'e1', employee_name: 'E One', off_date: '2026-10-05', start_time: '09:00:00',

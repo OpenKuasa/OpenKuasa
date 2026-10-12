@@ -95,7 +95,10 @@ export default async function DashboardScreen() {
           {model && !model.team ? (
             <p className="mt-1 text-xs text-muted-foreground">Shown to HR admins</p>
           ) : latest ? (
-            <p className="mt-1 text-xs text-muted-foreground">{monthYearLabel(latest.period_month)}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {monthYearLabel(latest.period_month)}
+              {latest.headcount === 0 ? ' · no payslips' : ''}
+            </p>
           ) : null}
         </BentoCard>
 

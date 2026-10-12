@@ -270,6 +270,27 @@ export function refundedOnNote(note: CreditNoteRow): number | null {
   return note.status === 'issued' ? note.refunded : null;
 }
 
+export type CreditNoteAction = 'edit' | 'issue' | 'delete' | 'refund' | 'void';
+
+/**
+ * What a credit note's row menu offers, in order: only what the database
+ * allows for its status. A draft is edited, issued or deleted, never voided.
+ * An issued credit note is locked: it can be voided, and refunded while
+ * `canRefund`, which is when something of it can still be paid out. Voiding
+ * one that a refund depends on is offered and refused with the reason, as
+ * voiding a paid invoice is. A void credit note offers nothing.
+ */
+export function creditNoteActions(note: CreditNoteRow, canRefund: boolean): CreditNoteAction[] {
+  if (note.status === 'draft') return ['edit', 'issue', 'delete'];
+  if (note.status === 'issued') return canRefund ? ['refund', 'void'] : ['void'];
+  return [];
+}
+
+/** How a question or a menu names one credit note: its number, or "the draft credit note", and its customer. */
+export function creditNoteName(note: CreditNoteRow): string {
+  return `${note.credit_note_no ?? 'the draft credit note'} to ${note.customer_name}`;
+}
+
 /** The credit notes table as a CSV file. Amounts are numbers. */
 export function creditNotesCsv(rows: CreditNoteRow[]): string {
   return toCsv(
@@ -327,6 +348,29 @@ const REFUND_REASON_COLORS: Record<RefundReason, string> = {
 /** Recorded but not yet money out: it holds the customer's credit. */
 export function isPendingRefund(row: RefundRow): boolean {
   return row.status === 'scheduled' || row.status === 'draft' || row.status === 'pending_approval';
+}
+
+export type RefundAction = 'markPaid' | 'delete' | 'void';
+
+/**
+ * What a refund's row menu offers, in order: only what the database allows
+ * for its status. A pending refund (`scheduled`) is marked as paid or
+ * deleted, never voided. One that was paid out is locked and can only be
+ * voided. There is no edit: a pending refund is deleted and recorded again,
+ * as a scheduled payment to a supplier is. A void refund offers nothing, and
+ * neither does one in a state the app never makes (`draft`,
+ * `pending_approval`, `rejected`): the database marks only a scheduled
+ * payment as paid.
+ */
+export function refundActions(row: RefundRow): RefundAction[] {
+  if (row.status === 'scheduled') return ['markPaid', 'delete'];
+  if (row.status === 'posted') return ['void'];
+  return [];
+}
+
+/** How a question or a menu names one refund: its voucher number, or "the pending refund", and its customer. */
+export function refundName(row: RefundRow): string {
+  return `${row.number ?? 'the pending refund'} to ${row.customer_name}`;
 }
 
 /**

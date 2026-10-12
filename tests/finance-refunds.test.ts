@@ -144,10 +144,10 @@ describe('refund writes', () => {
   });
   it('turns each database refusal into a sentence about a refund', async () => {
     const cases: [string, string][] = [
-      ['FIN04', 'A refund needs a posted invoice, or an issued credit note, whose customer is in credit. If this refund is waiting to be paid out, delete it.'],
-      ['FIN05', 'That is more than the customer is in credit, or more than is left of the credit note. If this refund is waiting to be paid out, delete it.'],
+      ['FIN04', 'A refund needs a posted invoice, or an issued credit note, whose customer is in credit.'],
+      ['FIN05', 'That is more than the customer is in credit, or more than is left of the credit note.'],
       ['FIN06', 'The invoice or credit note for this refund no longer exists.'],
-      ['FIN09', 'That cannot be done to this refund as it stands. Void a refund that has been paid out, or delete one that is still waiting to be paid out.'],
+      ['FIN09', 'That cannot be done to this refund as it now stands. It may have been paid out or voided since this page was loaded.'],
       ['FIN11', 'That refund no longer exists.'],
       ['23503', 'The account on this refund no longer exists.'],
       ['42501', 'You do not have permission to make changes here.'],
@@ -156,27 +156,44 @@ describe('refund writes', () => {
     for (const [code, message] of cases) {
       const { ctx } = fakeFinance(refundOr(true, { data: null, error: { code } }));
       expect(await recordRefund(ctx, valid), code).toEqual({ ok: false, error: message });
-      expect(await markRefundPaid(ctx, { id: TXN, paid_on: '2026-10-09' }), code).toEqual({ ok: false, error: message });
       expect(await voidRefund(ctx, { id: TXN }), code).toEqual({ ok: false, error: message });
       expect(await deleteRefund(ctx, { id: TXN }), code).toEqual({ ok: false, error: message });
+      // Paying a pending refund out has its own sentences for the two codes that mean its credit has gone.
+      if (code !== 'FIN04' && code !== 'FIN05') {
+        expect(await markRefundPaid(ctx, { id: TXN, paid_on: '2026-10-09' }), code).toEqual({ ok: false, error: message });
+      }
     }
     expect(logged).not.toHaveBeenCalled();
   });
-  it('tells a person a refund never paid out is deleted, and what to do when paying one out is refused (FIN09, FIN04, FIN05)', async () => {
-    const voidPending = fakeFinance(refundOr(true, { data: null, error: { code: 'FIN09' } }));
-    const voided = await voidRefund(voidPending.ctx, { id: TXN });
-    expect(voided).toMatchObject({ ok: false });
-    if (!voided.ok) expect(voided.error).toContain('delete one that is still waiting to be paid out');
+  it('says what to do when paying a pending refund out is refused, and gives no such advice on a new refund', async () => {
+    const paidOut = (code: string) =>
+      markRefundPaid(fakeFinance(refundOr(true, { data: null, error: { code } })).ctx, { id: TXN, paid_on: '2026-10-09' });
+    // The payment in behind the credit was voided while the refund waited. Nothing may be left of the credit,
+    // so the sentence does not promise that a new refund can be recorded.
+    expect(await paidOut('FIN05')).toEqual({
+      ok: false,
+      error:
+        'This refund no longer fits in what the customer is in credit, or in what is left of its credit note, so it cannot be paid out. Delete it. If the customer is still in credit, a new refund can be recorded for no more than that.',
+    });
+    expect(await paidOut('FIN04')).toEqual({
+      ok: false,
+      error: 'This refund can no longer be paid out: its invoice is no longer posted, or its credit note is no longer issued. Delete it.',
+    });
+    // The new-refund form meets the same two codes with nothing waiting: nobody is told to delete a refund that does not exist.
     for (const code of ['FIN04', 'FIN05']) {
       const { ctx } = fakeFinance(refundOr(true, { data: null, error: { code } }));
-      const paid = await markRefundPaid(ctx, { id: TXN, paid_on: '2026-10-09' });
-      expect(paid, code).toMatchObject({ ok: false });
-      if (!paid.ok) expect(paid.error, code).toContain('delete it');
+      const recorded = await recordRefund(ctx, valid);
+      expect(recorded, code).toMatchObject({ ok: false });
+      if (!recorded.ok) expect(recorded.error, code).not.toMatch(/delete|waiting/i);
     }
-    const { ctx } = fakeFinance(refundOr(true, { data: null, error: { code: 'FIN05' } }));
-    const over = await recordRefund(ctx, valid);
-    expect(over).toMatchObject({ ok: false });
-    if (!over.ok) expect(over.error).toContain('left of the credit note');
+  });
+  it('words FIN09 so that it reads sensibly from every button that can meet it: Mark as paid, Void and Delete', async () => {
+    const sentence = 'That cannot be done to this refund as it now stands. It may have been paid out or voided since this page was loaded.';
+    const { ctx } = fakeFinance(refundOr(true, { data: null, error: { code: 'FIN09' } }));
+    // Mark as paid and Delete on a refund that was paid out in another tab; Void on one already void.
+    expect(await markRefundPaid(ctx, { id: TXN, paid_on: '2026-10-09' })).toEqual({ ok: false, error: sentence });
+    expect(await voidRefund(ctx, { id: TXN })).toEqual({ ok: false, error: sentence });
+    expect(await deleteRefund(ctx, { id: TXN })).toEqual({ ok: false, error: sentence });
   });
   it('says the refund is gone when void or delete touches no row', async () => {
     const { ctx } = fakeFinance(refundOr(true, { data: null, error: null }));

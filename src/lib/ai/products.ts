@@ -12,7 +12,11 @@ import { deletionCheckFor, type DeletionCheck } from '@/lib/ai/hire-deletions';
 import type { ToolSet } from 'ai';
 import { CRM_WRITE_TOOL_NAMES, createCrmTools, type CrmAccess } from '@/lib/ai/crm-tools';
 import { createHireTools, type HeldCv } from '@/lib/ai/hire-tools';
-import { createPeopleTools, type PeopleWrite } from '@/lib/ai/people-tools';
+import {
+  createPeopleTools,
+  PEOPLE_TOOL_NAMES as PEOPLE_READ_TOOL_NAMES,
+  type PeopleWrite,
+} from '@/lib/ai/people-tools';
 import { createReachTools } from '@/lib/ai/tools';
 import type { HireWriteContext } from '@/lib/hire/capabilities';
 import type { CvReader } from '@/lib/hire/cv-read';
@@ -75,7 +79,7 @@ export const HIRE_WRITE_TOOL_NAMES = ['createJob', 'updateJob', 'setJobStatus', 
 /** The HR data an agent reads, who is asking, and whether they may change it. */
 export type PeopleAccess = { data: PeopleData; viewer: PeopleViewer; write?: PeopleWrite };
 
-/** HR tools that change data: employees, departments, leave, time-off, claims, overtime, attendance, public holidays and attendance settings. */
+/** HR tools that change data: employees, departments, leave, time-off, claims, overtime, attendance, public holidays, attendance settings and payroll drafts. */
 export const PEOPLE_WRITE_TOOL_NAMES = [
   'createEmployee',
   'updateEmployee',
@@ -106,7 +110,36 @@ export const PEOPLE_WRITE_TOOL_NAMES = [
   'saveHoliday',
   'removeHoliday',
   'saveAttendanceSettings',
+  'runPayroll',
+  'recalculatePayroll',
+  'savePayslipLine',
+  'removePayslipLine',
+  'setPayslipStatutory',
+  'removePayslip',
 ] as const;
+
+/**
+ * HR lookups that `createPeopleTools` adds only for some viewers (a linked
+ * member, or anyone who may preview a request): not in the always-present read
+ * list, but still HR tools for the privacy check below.
+ */
+const CONDITIONAL_PEOPLE_READ_TOOL_NAMES = [
+  'previewLeave',
+  'previewOvertime',
+  'getMyAttendanceToday',
+  'getAttendanceSettings',
+] as const;
+
+/**
+ * Every HR tool name, read or write. Used to tell when a chat turn touched HR
+ * data, so it can be kept out of history and out of the other specialists'
+ * context. A test asserts this covers every tool `createPeopleTools` can return.
+ */
+export const ALL_PEOPLE_TOOL_NAMES: ReadonlySet<string> = new Set<string>([
+  ...PEOPLE_READ_TOOL_NAMES,
+  ...CONDITIONAL_PEOPLE_READ_TOOL_NAMES,
+  ...PEOPLE_WRITE_TOOL_NAMES,
+]);
 
 export type ProductKey = 'reach' | 'crm' | 'hire' | 'people';
 

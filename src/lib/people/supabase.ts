@@ -17,6 +17,7 @@ import type {
   OvertimeRecord,
   PayrollRun,
   Payslip,
+  PayslipLine,
   PaymentVoucher,
   PeopleData,
   PeopleSettings,
@@ -30,7 +31,9 @@ import type {
   TrainingEnrolment,
   Weekday,
 } from './types';
+import { STATUTORY_FIELDS } from './statutory-fields';
 import { DEFAULT_PEOPLE_SETTINGS, WEEKDAYS } from './types';
+
 
 /** The API answers with at most this many rows per request. */
 const PAGE_SIZE = 1000;
@@ -44,12 +47,23 @@ const EMPLOYEE_COLUMNS =
 const PRIVATE_COLUMNS =
   'employee_id,nric,date_of_birth,phone,address,base_salary_cents,bank_name,bank_account,epf_no,socso_no,tax_no,' +
   'emergency_contact_name,emergency_contact_phone';
+// A payslip reaches an employee by a composite foreign key (employee_id, org_id), which Postgres named by its
+// columns. The hint keeps the embed unambiguous if another path between the tables ever appears.
+const PAYSLIP_NAME = 'employee:hr_employees!hr_payslips_employee_id_org_id_fkey(name)';
+// An overtime line reaches its record by `overtime_record_id` (default constraint name); the record's day lets the
+// screen count overtime paid late. Other lines, and a record the caller cannot read, give null.
+const LINE_WORK_DATE = 'overtime:hr_overtime_records!hr_payslip_lines_overtime_record_id_fkey(work_date)';
 const LEAVE_COLUMNS = `id,employee_id,leave_type,start_date,end_date,days,half_day,reason,status,decision_note,created_at,${NAME}`;
 const TIME_OFF_COLUMNS = `id,employee_id,off_date,start_time,end_time,reason,status,decision_note,created_at,${NAME}`;
 const CLAIM_COLUMNS = `id,employee_id,category,amount_cents,claim_date,description,has_receipt,status,decision_note,receipt_path,paid_on,paid_reference,created_at,${NAME}`;
-const OVERTIME_COLUMNS = `id,employee_id,work_date,hours,rate_multiplier,amount_cents,hourly_rate_cents,day_kind,reason,decision_note,status,created_at,${NAME}`;
+// The payslip is embedded through the named constraint: the lines table gives a second path from an overtime
+// record to a payslip. A member gets null while the run is a draft, which reads as "not paid".
+const OVERTIME_COLUMNS =
+  'id,employee_id,work_date,hours,rate_multiplier,amount_cents,hourly_rate_cents,day_kind,reason,decision_note,status,created_at,' +
+  `payslip:hr_payslips!hr_overtime_records_payslip_id_fkey(period_month,status),${NAME}`;
 const PAYSLIP_COLUMNS =
-  `id,employee_id,payroll_run_id,period_month,gross_cents,epf_cents,socso_cents,eis_cents,pcb_cents,net_cents,status,${NAME}`;
+  'id,employee_id,payroll_run_id,period_month,basic_cents,gross_cents,epf_cents,socso_cents,eis_cents,pcb_cents,' +
+  `other_deductions_cents,net_cents,set_by_hr,status,lines:hr_payslip_lines(id,payslip_id,kind,source,label,amount_cents,created_at,${LINE_WORK_DATE}),${PAYSLIP_NAME}`;
 const GOAL_COLUMNS = `id,employee_id,title,progress,due_date,status,${NAME}`;
 const SCORECARD_COLUMNS = `id,employee_id,period,score,competencies,${NAME}`;
 const DOCUMENT_COLUMNS = `id,employee_id,title,doc_type,status,issued_on,expires_on,${NAME}`;
@@ -61,11 +75,68 @@ const REVIEW_COLUMNS = `id,employee_id,period,rating,score,reviewer_name,reviewe
 
 type Named = { name?: string | null } | null | undefined;
 type WithEmployee<T> = Omit<T, 'employee_name'> & { employee: Named };
+type PayslipRow = WithEmployee<Omit<Payslip, 'lines'>> & {
+  lines: (Omit<PayslipLine, 'work_date'> & { created_at: string; overtime?: { work_date: string } | null })[] | null;
+};
+type OvertimeRow = WithEmployee<Omit<OvertimeRecord, 'paid_month'>> & {
+  payslip: { period_month: string; status: string } | null;
+};
 type EmployeeRow = Omit<Employee, 'department_name'> & { department: Named };
 type Order = { col: string; asc: boolean; nullsLast?: boolean };
 type Options = { window?: { column: string; from: string; to: string }; eq?: [string, string | number] };
 
 const UNKNOWN = 'Unknown';
+
+/** A timestamp as [whole seconds in milliseconds, microseconds of fraction]; text compares wrongly (`:00+00` against `:00.000002+00`). */
+function instant(value: string): [number, number] {
+  const fraction = /\.(\d+)/.exec(value)?.[1] ?? '';
+  const ms = Date.parse(fraction ? value.replace(/\.\d+/, '') : value);
+  const micros = Number(fraction.padEnd(6, '0').slice(0, 6));
+  return [Number.isNaN(ms) ? 0 : ms, micros];
+}
+
+function byMade(a: string, b: string): number {
+  const [ams, amicro] = instant(a);
+  const [bms, bmicro] = instant(b);
+  // Whole seconds, then the fraction as microseconds; the raw text is the last resort.
+  return ams - bms || amicro - bmicro || (a < b ? -1 : a > b ? 1 : 0);
+}
+
+const SOURCE_ORDER: Record<string, number> = { joiner: 0, unpaid_leave: 1, overtime: 2, hr: 3 };
+
+/**
+ * A payslip's lines in the order the database stamps them: by source (joiner, unpaid leave, overtime, HR's own),
+ * then when made, then id. Sorting here keeps that order whatever order the nested select comes back in.
+ */
+function payslipOf({ lines, ...row }: PayslipRow): Payslip {
+  const ordered = [...(lines ?? [])].sort(
+    (a, b) =>
+      (SOURCE_ORDER[a.source] ?? 9) - (SOURCE_ORDER[b.source] ?? 9) ||
+      byMade(a.created_at, b.created_at) ||
+      a.id.localeCompare(b.id),
+  );
+  return {
+    ...named(row),
+    set_by_hr: STATUTORY_FIELDS.filter((field) => (row.set_by_hr ?? []).includes(field)),
+    lines: ordered.map((line) => ({
+      id: line.id,
+      payslip_id: line.payslip_id,
+      kind: line.kind,
+      source: line.source,
+      label: line.label,
+      amount_cents: line.amount_cents,
+      work_date: line.overtime?.work_date ?? null,
+    })),
+  };
+}
+
+/** `YYYY-MM` of the payslip an overtime record was paid on, only when that payslip is paid and readable. */
+function overtimeOf({ payslip, ...row }: OvertimeRow): OvertimeRecord {
+  return {
+    ...named(row),
+    paid_month: payslip && payslip.status === 'paid' ? payslip.period_month.slice(0, 7) : null,
+  };
+}
 
 function named<T extends { employee: Named }>(row: T): Omit<T, 'employee'> & { employee_name: string } {
   const { employee, ...rest } = row;
@@ -164,7 +235,7 @@ export function createSupabasePeopleData(client: SupabaseClient, orgId: string):
     listClaims: async () =>
       (await rows<WithEmployee<Claim>>('hr_claims', CLAIM_COLUMNS, { col: 'created_at', asc: false })).map(named),
     listOvertime: async () =>
-      (await rows<WithEmployee<OvertimeRecord>>('hr_overtime_records', OVERTIME_COLUMNS, { col: 'created_at', asc: false })).map(named),
+      (await rows<OvertimeRow>('hr_overtime_records', OVERTIME_COLUMNS, { col: 'created_at', asc: false })).map(overtimeOf),
     listAttendance: (from, to) =>
       rows<AttendanceRow>('hr_attendance_days', ATTENDANCE_COLUMNS, { col: 'work_date', asc: false }, byWorkDate(from, to)).then(
         (list) =>
@@ -182,9 +253,20 @@ export function createSupabasePeopleData(client: SupabaseClient, orgId: string):
     listPublicHolidays: () =>
       rows<PublicHoliday>('hr_public_holidays', 'id,name,holiday_date,scope,state', { col: 'holiday_date', asc: true }),
     listPayrollRuns: () =>
-      rows<PayrollRun>('hr_payroll_runs', 'id,period_month,status,paid_at', { col: 'period_month', asc: false }),
-    listPayslips: async () =>
-      (await rows<WithEmployee<Payslip>>('hr_payslips', PAYSLIP_COLUMNS, { col: 'period_month', asc: false })).map(named),
+      // There is no way to turn `paid_by` (an auth user id) into a name without a profile lookup, so none is read.
+      rows<Omit<PayrollRun, 'paid_by_name'>>('hr_payroll_runs', 'id,period_month,status,paid_at', {
+        col: 'period_month',
+        asc: false,
+      }).then((list) => list.map((run) => ({ ...run, paid_by_name: null }))),
+    listPayslips: async (employeeId) =>
+      (
+        await rows<PayslipRow>(
+          'hr_payslips',
+          PAYSLIP_COLUMNS,
+          { col: 'period_month', asc: false },
+          employeeId ? { eq: ['employee_id', employeeId] } : {},
+        )
+      ).map(payslipOf),
     listGoals: async () =>
       (await rows<WithEmployee<Goal>>('hr_goals', GOAL_COLUMNS, { col: 'due_date', asc: true })).map(named),
     listScorecards: async () =>

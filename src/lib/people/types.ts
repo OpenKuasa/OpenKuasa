@@ -144,6 +144,8 @@ export type OvertimeRecord = {
   decision_note: string | null;
   status: RequestStatus;
   created_at: string;
+  /** `YYYY-MM` of the payroll run that paid this, once that run is paid and the viewer can read its payslip; otherwise null. */
+  paid_month: string | null;
 };
 
 export type AttendanceDay = {
@@ -183,7 +185,25 @@ export type PayrollRun = {
   period_month: string;
   status: 'draft' | 'paid';
   paid_at: string | null;
+  /** Who marked it paid. Null when unknown: the app has no way to turn the user id into a name. */
+  paid_by_name: string | null;
 };
+
+/** `unpaid` lines subtract from gross, `earning` lines add to it, `deduction` lines come off net. */
+export type PayslipLineKind = 'earning' | 'unpaid' | 'deduction';
+/** `hr` lines are written by an owner or admin; the rest are worked out by the system. */
+export type PayslipLineSource = 'hr' | 'overtime' | 'unpaid_leave' | 'joiner';
+export type PayslipLine = {
+  id: string;
+  payslip_id: string;
+  kind: PayslipLineKind;
+  source: PayslipLineSource;
+  label: string;
+  amount_cents: number;
+  /** An overtime line: the day the work was done. Null (or absent) for every other line. */
+  work_date?: string | null;
+};
+export type StatutoryField = 'epf' | 'socso' | 'eis' | 'pcb';
 
 export type Payslip = {
   id: string;
@@ -191,12 +211,20 @@ export type Payslip = {
   employee_name: string;
   payroll_run_id: string;
   period_month: string;
+  /** The salary the payslip started from. */
+  basic_cents: number;
   gross_cents: number;
   epf_cents: number;
   socso_cents: number;
   eis_cents: number;
   pcb_cents: number;
+  /** The sum of the payslip's deduction lines. */
+  other_deductions_cents: number;
   net_cents: number;
+  /** Which of the four figures an owner or admin typed over, in the order epf, socso, eis, pcb. */
+  set_by_hr: StatutoryField[];
+  /** System lines first (joiner, unpaid leave, overtime), then the owner's own, each in the order made. */
+  lines: PayslipLine[];
   status: 'pending' | 'paid';
 };
 
@@ -338,7 +366,8 @@ export type PeopleData = {
   listShifts(fromDate: string, toDate: string): Promise<Shift[]>;
   listPublicHolidays(): Promise<PublicHoliday[]>;
   listPayrollRuns(): Promise<PayrollRun[]>;
-  listPayslips(): Promise<Payslip[]>;
+  /** Every payslip the caller may read, or (with `employeeId`) that one employee's only. */
+  listPayslips(employeeId?: string): Promise<Payslip[]>;
   listGoals(): Promise<Goal[]>;
   listScorecards(): Promise<Scorecard[]>;
   listReviews(): Promise<Review[]>;

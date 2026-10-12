@@ -2,6 +2,7 @@
 
 import { DocumentFormCard } from '@/components/finance/document-form-card';
 import { BILL_FORM_KIND, billFormFromDetail, newBillForm } from '@/lib/finance/bill-form';
+import { withCurrentParty } from '@/lib/finance/document-form';
 import type { BillDetail, SaveAndPostResult } from '@/lib/finance/bills';
 import type { FinanceContact } from '@/lib/finance/contacts';
 import type { FinanceProduct } from '@/lib/finance/products';
@@ -40,11 +41,7 @@ export function BillFormCard({
       kind={BILL_FORM_KIND}
       initial={() => (editing ? billFormFromDetail(editing) : newBillForm(today, 'new-0'))}
       // A supplier archived since the draft was saved is still this bill's supplier.
-      parties={
-        editing && !suppliers.some((s) => s.id === editing.supplier_id)
-          ? [{ id: editing.supplier_id, name: editing.supplier_name, payment_terms_days: 0 }, ...suppliers]
-          : suppliers
-      }
+      parties={withCurrentParty(suppliers, editing && { id: editing.supplier_id, name: editing.supplier_name })}
       products={products}
       actions={actions}
       onClose={onClose}

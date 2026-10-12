@@ -24,7 +24,7 @@ the data layer, with unit tests; the client components only draw them.
 |---|---|
 | `purchase-views.ts` | KPI figures, chart data, table filters and CSV rows for Supplier Bills and Payments Out |
 | `sales-views.ts` | KPI figures, chart data, table filters, status words and CSV rows for Invoices and Payments In; what each row's menu offers (`invoiceActions`, `paymentInActions`); which customer the filter is on after a refresh (`customerChoice`); how an invoice's balance is worded, a customer in credit included (`owed`, `inCredit`, `balanceText`) |
-| `sales-followon-views.ts` | KPI figures, chart data, table filters, status words and CSV rows for Quotations, Credit Notes and Refunds; what a quotation's row menu offers (`quotationActions`) |
+| `sales-followon-views.ts` | KPI figures, chart data, table filters, status words and CSV rows for Quotations, Credit Notes and Refunds; what a row's menu offers on each (`quotationActions`, `creditNoteActions`, `refundActions`) |
 | `view-helpers.ts` | What those two share: dates, sums to the sen, the eight-month window of a trend chart, how payment methods are grouped and coloured, and the "This payment also covers …" sentence of a split payment |
 | `document-lines.ts` | What a bill and an invoice share: the line schema, the real-date and SST-rate rules (`isIsoDate`, `roundRate`), and reading a saved line |
 | `bill-math.ts` | Line amounts and bill totals, rounded exactly as the generated columns `amount` and `sst_amount` round them; the SST rate keeps two decimals, as its column does (`roundRate` in `document-lines.ts`) |
@@ -35,6 +35,8 @@ the data layer, with unit tests; the client components only draw them.
 | `allocation-form.ts` | What the two payment forms share: ticking documents, amounts added in whole sen, what payments not yet posted hold of a document, and `AllocationFormKind`, the description of one form that the shared card draws |
 | `payment-form.ts` | The payment-out form: which bills can take a payment and how much, defaults, validation, what is sent. `heldByBill` adds up what unpaid payments already hold of each bill; `keepPayable` drops a ticked bill that was paid off while the form was open |
 | `receipt-form.ts` | The payment-in form: which invoices can take a payment and how much (`receivableInvoices`), defaults, validation, what is sent. It has no scheduling |
+| `credit-note-form.ts` | The credit note form: which invoices can take a credit note and how much (`creditableInvoices`: posted, for the total less what is already credited), defaults, validation, what is sent. `creditNoteSavedNotIssued` words a credit note that was saved as a draft but not issued |
+| `refund-form.ts` | The refund form: what can be refunded and how much (`refundTargets`: an invoice whose customer is in credit, or one of its issued credit notes, less refunds that are pending), defaults, validation, what is sent |
 | `csv.ts` | CSV text for Export: RFC 4180, a UTF-8 byte-order mark, and a guard against spreadsheet formulas |
 
 The forms validate by running the write's own Zod schema on what they are about
@@ -47,7 +49,27 @@ draws both payment forms (`allocation-form-card.tsx`). `BillFormCard`,
 (`BILL_FORM_KIND`, `INVOICE_FORM_KIND`, `QUOTATION_FORM_KIND`,
 `PAYMENT_OUT_KIND`, `PAYMENT_IN_KIND`). A rule or a word that differs between
 a bill, an invoice and a quotation, or between money out and money in, belongs
-in the kind, not in the card.
+in the kind, not in the card. `withCurrentParty` in `document-form.ts` gives
+all three document cards their picker's list: the active customers or
+suppliers, with a draft's own party first when it was archived since.
+
+A credit note and a refund each have a card of their own
+(`credit-note-form-card.tsx`, `refund-form-card.tsx`), and no kind. A credit
+note is one invoice, one amount and a reason: no lines, so not the document
+card; no account and no method, so not the payment card. A refund is one
+payment against exactly one invoice or one credit note, with a reason; the
+payment card splits one payment across many documents. Both cards are used on
+more than one screen: the credit note card on Credit Notes and from an
+invoice's row, the refund card on Refunds and from an invoice's or a credit
+note's row. Where the thing saved shows on another screen than the one the
+person is on, a note at the top says so and links there (`saved-note-card.tsx`).
+The card hands back what it saved, and the note is worded from that
+(`refundSavedNote`, `creditNoteSavedNote`): the amount as the schema rounds
+and stores it, the invoice or credit note it went against, the customer, and
+whether a refund was paid out or left pending and a credit note issued or kept
+as a draft. A card opened from a row has that row chosen but its picker is not
+locked, so the note names what was saved, whichever row the card was opened
+from.
 
 A server action refreshes the screens after every attempt that reached the
 database, refused or not, so a record someone else changed or removed shows as
@@ -66,7 +88,12 @@ Suppliers, Quotations, Credit Notes, Refunds. A contact: the eight
 screens that show a contact's name. A
 quotation saved, sent, answered or deleted: Quotations only, as nothing else
 counts or names a quotation. A quotation made into an invoice: Quotations and
-Invoices, as a draft invoice is not yet owed.
+Invoices, as a draft invoice is not yet owed. A draft credit note saved or
+deleted: Credit Notes only, as a draft takes nothing off its invoice. A credit
+note issued or voided, and a refund recorded, marked paid, voided or deleted:
+Invoices, Payments In, Customers & Suppliers, Credit Notes and Refunds, as
+each can move what an invoice owes; never Payments Out, which shows no refund,
+and not Quotations.
 
 Every action refuses a viewer and the demo workspace before the data layer is
 reached. Without that, a viewer's void or delete would come back from the
@@ -221,9 +248,24 @@ up to 100 characters; with no status there is no UUID.
 
 What a row's menu offers follows its status (`invoiceActions`): a draft is
 edited, posted or deleted; a posted invoice takes a payment while something is
-still owed, has its e-Invois set, and can be voided; a void invoice offers
-nothing. Voiding an invoice that has payments is offered and refused with the
-reason, as on a paid bill.
+still owed, a credit note while its total is not yet credited in full, and a
+refund while its customer is in credit and pending refunds do not already hold
+all of that credit; it has its e-Invois set, and can be voided; a void invoice
+offers nothing. Each of the three is offered exactly when the form it opens
+would offer the invoice (`receivableInvoices`, `creditableInvoices`,
+`refundTargets`, put together by `invoiceCan`), so a writer's Invoices page
+also reads the credit notes and the refunds. If either of those two reads
+fails, the failure is logged and the page still shows, with no row offering
+"Refund": the lists are not taken as empty, which would offer a refund that no
+pending refund had been counted against. "Credit note" is still offered, since
+it is decided from the invoice rows and its card needs neither list. A refund
+card that was open on Invoices when a refresh lost the two reads is closed,
+not drawn with nothing to refund. Any other read that
+fails is the page's failure, as before, and a viewer's page reads neither.
+Voiding an invoice that has payments, credit notes or refunds is offered and
+refused with the reason, as on a paid bill. "Credit note" and "Refund" open
+their cards on Invoices with that invoice chosen; what is saved shows on
+Credit Notes or Refunds, and a note at the top links there.
 
 ## Quotations
 
@@ -247,9 +289,17 @@ stands. An accepted quotation stays `accepted` after its date; a sent one can
 still be accepted after it expired.
 
 `finance_convert_quotation` makes a draft invoice from an accepted quotation:
-the same customer, notes and lines, dated with the database's date (UTC, so
-before 8 in the morning in Malaysia it is the day before), due after the customer's
-payment terms, with `quotation_id` set. A quotation has one invoice at a time
+the same customer, notes and lines, dated with the date it is given
+(`invoice_date`), due after the customer's payment terms counted from that
+date, with `quotation_id` set. "Make invoice" sends the date on the person's
+own calendar (`localIsoDate`, as the forms' default dates are), so the invoice
+is dated today for the person who made it, at any hour. The database's own
+date is UTC, which before 08:00 in Malaysia is the day before; the function
+uses it only when it is given no date, which the app never does. The function
+puts no limit on the date: the invoice is a draft and its date can be changed
+on the invoice form before it is posted, and `finance_save_invoice` puts no
+limit on a date either. The app's schema (`convertQuotationInput`) takes only
+a real calendar date. A quotation has one invoice at a time
 (a unique index on `finance_invoices`); a void invoice does not count, so a
 quotation whose invoice was voided, or deleted as a draft, can be converted
 again. The invoice is an ordinary draft afterwards, and it stays tied to the
@@ -267,10 +317,11 @@ accepted or declined; an accepted one is made into an invoice or marked
 declined; a declined one can be marked accepted; and once an invoice stands
 for the quotation the menu offers nothing. The form is the card bills and
 invoices use, with "Valid until" as its second date and "Save and mark as
-sent" as its second button. After "Make invoice" the screen stays on
-Quotations and a note at the top says a draft invoice was made, with a link to
-Invoices, where it is checked and posted; the row's Invoice column links there
-too.
+sent" as its second button. The question asked before "Make invoice" says the
+draft will be dated today. After "Make invoice" the screen stays on
+Quotations and a note at the top says a draft invoice was made and gives its
+date, with a link to Invoices, where it is checked and posted; the row's
+Invoice column links there too.
 
 ## Credit notes
 
@@ -285,6 +336,34 @@ pays that out.
 
 The view `finance_credit_note_totals` adds the invoice's number, the customer
 and `refunded`: posted refunds put against the note itself.
+
+The form offers posted invoices, each for its total less what is already
+credited (`creditableInvoices`); a draft credit note is not counted, as the
+database does not count one until it is issued. It is saved as a draft, or
+saved and issued in one go (`saveAndIssueCreditNoteAction`, through
+`saveThenPost`). Edit opens from the list row, which carries everything a
+credit note has: there is no read action for one draft. What a row's menu
+offers follows its status (`creditNoteActions`): a draft is edited, issued or
+deleted; an issued credit note is voided, and refunded while something of it
+can still be; a void one offers nothing.
+
+## Refunds
+
+The form offers what `refundTargets` works out from the invoices, the credit
+notes and the refunds, to the sen, and it is what the database allows. An
+invoice: what its customer is in credit there (`balance` below zero, which
+already has every refund that was paid out in it), less refunds that are
+pending against the invoice or against any of its credit notes. An issued
+credit note of such an invoice: the same figure, and no more than the note's
+amount less every refund standing against the note, paid out or pending.
+Choosing one fills the amount with all it can take. The refund is paid out now
+or left pending.
+
+What a row's menu offers follows its status (`refundActions`): a pending
+refund is marked as paid, with the date it was paid out, or deleted; one that
+was paid out is voided; a void one offers nothing. A refund has no edit. A
+refund still being written (`draft`) reads "Pending" and is counted as
+pending; the app never leaves one in that state.
 
 ## Posted is locked
 
@@ -377,7 +456,7 @@ All run as the caller, so RLS decides who may write.
 | `finance_record_payment_in(target_org, payment, allocations)` | Records money received from one customer, split across that customer's posted invoices, and posts it at once. `payment` has `account_id`, `txn_date`, `method`, `reference`, `notes`; `allocations` is a list of `{ invoice_id, amount }`. The payment's amount is the sum of the allocation amounts, each rounded to the sen first, as each is when stored. Returns the id. |
 | `finance_save_quotation(target_org, quotation, lines)` | Creates a draft quotation or replaces a draft's header and lines, keeping the lines in the order given. `quotation` has `id` (to change a draft), `customer_id`, `quote_date`, `valid_until`, `notes`. Returns the id. |
 | `finance_send_quotation(target_org, target_quotation)` | Marks a draft as sent and returns its number. |
-| `finance_convert_quotation(target_org, target_quotation)` | Makes a draft invoice from an accepted quotation. Returns the invoice's id. |
+| `finance_convert_quotation(target_org, target_quotation, invoice_date)` | Makes a draft invoice from an accepted quotation, dated `invoice_date` and due after the customer's payment terms counted from it. `invoice_date` may be left out or null, and the database's UTC date is then used. It is one function with a default, not two: a second function of the same name would make the two-argument call ambiguous. Returns the invoice's id. |
 | `finance_save_credit_note(target_org, note)` | Creates a draft credit note or replaces a draft. `note` has `id` (to change a draft), `invoice_id`, `credit_date`, `reason`, `amount`, `notes`. Returns the id. |
 | `finance_issue_credit_note(target_org, target_note)` | Issues a draft and returns its number. |
 | `finance_record_refund(target_org, refund)` | Records one refund against one invoice or one credit note. `refund` has `invoice_id` or `credit_note_id`, `account_id`, `txn_date`, `method`, `reason`, `amount`, `reference`, `notes`, and `status`: `posted` (the default) or `scheduled`. Returns the id. |
@@ -389,8 +468,11 @@ updates and deletes too. The data layer for all of it is in `quotations.ts`,
 `credit-notes.ts` and `refunds.ts`. The quotation writes are called by
 `saveQuotationAction`, `sendQuotationAction`, `saveAndSendQuotationAction`,
 `acceptQuotationAction`, `declineQuotationAction`, `deleteQuotationAction` and
-`convertQuotationAction`; no server action calls the credit note or refund
-writes yet.
+`convertQuotationAction`; the credit note writes by `saveCreditNoteAction`,
+`issueCreditNoteAction`, `saveAndIssueCreditNoteAction`,
+`voidCreditNoteAction` and `deleteCreditNoteAction`; the refund writes by
+`recordRefundAction`, `markRefundPaidAction`, `voidRefundAction` and
+`deleteRefundAction`.
 
 Voiding a bill, an invoice or a payment, and deleting a draft bill, a draft
 invoice or a scheduled payment, are plain updates and deletes; the guards
@@ -440,8 +522,27 @@ code reaches a person only when the quotation changed in another tab: a draft
 that was sent meanwhile being saved, sent or deleted, or an answer being
 recorded that is already the answer. The sentence says what may have happened
 and not what did, so it is not false of a draft answered by a direct call
-either. The credit note and refund sentences for `FIN01` and `FIN09` are
-checked the same way when their buttons are built.
+either.
+
+The sentence for `FIN01` on a credit note is "That cannot be done to this
+credit note as it now stands. It may have been issued or voided since this
+page was loaded.", and for `FIN09` on a refund "That cannot be done to this
+refund as it now stands. It may have been paid out or voided since this page
+was loaded.". Each was checked from every button that can meet it: Save,
+Issue, Void and Delete on a credit note; Mark as paid, Void and Delete on a
+refund.
+
+`FIN04` and `FIN05` are worded twice for a refund, by the button. Recording
+one: "A refund needs a posted invoice, or an issued credit note, whose
+customer is in credit." and "That is more than the customer is in credit, or
+more than is left of the credit note.". Paying a pending one out
+(`markRefundPaid` only), where the same codes mean the credit has gone since
+it was recorded: "This refund can no longer be paid out: its invoice is no
+longer posted, or its credit note is no longer issued. Delete it." and "This
+refund no longer fits in what the customer is in credit, or in what is left of
+its credit note, so it cannot be paid out. Delete it. If the customer is still
+in credit, a new refund can be recorded for no more than that.". The second
+does not promise a new refund, because nothing may be left of the credit.
 
 The sentence for `FIN01` on an invoice is "This invoice has been posted or
 voided, so that can no longer be done.". The row menus offer only what a
@@ -464,8 +565,14 @@ instead."; see Known limits.
   not confirm the change and asks the person to reload the page and check the
   list; it does not refresh by itself, which could reload the tab and lose the
   form. A retry after a save that did land can create a second bill, a second
-  invoice, a second quotation, a second part-payment or a second receipt,
+  invoice, a second quotation, a second credit note, a second part-payment, a
+  second receipt or a second refund,
   until writes carry a client-generated id (which needs a migration). A second
+  credit note is refused when it is issued (by Save and issue, or by Issue)
+  once the two together exceed the invoice's total; a second draft is not
+  refused, since a draft is not counted. A second refund is refused once the
+  two together exceed the customer's credit. Below those caps both go through. A second draft credit note or pending refund is
+  deleted; a second issued credit note or paid refund is voided. A second
   draft quotation can be deleted; a second one that was marked as sent cannot,
   and is marked declined. Making an invoice from a quotation is not affected:
   a quotation has one invoice at a time, so a retry is refused.
@@ -525,9 +632,29 @@ instead."; see Known limits.
   requests, a read and then a write, not one statement: a transaction that
   stopped being a payment to a supplier between the two would still be
   written, and nothing in the app can make one do that.
-- Credit Notes and Refunds are read-only so far: search, filters, "View all"
-  and Export, but no forms and no row actions. The data layer for them is in
-  `credit-notes.ts` and `refunds.ts`.
+- A refund cannot be edited, pending or paid: delete a pending one and record
+  it again; void a paid one.
+- An issued credit note cannot be edited: void it and write a new one. It
+  cannot be voided while a refund depends on it; "Void" is offered all the
+  same and refused with the reason.
+- The credit note form offers an invoice for its total less what is issued
+  against it. Two drafts for the same invoice can together exceed that; the
+  second to be issued is then refused.
+- "Refund" is offered on an invoice's row and on a credit note's row only
+  while something can be refunded there. A customer is only ever in credit
+  because of a credit note: a payment in cannot exceed what is owed.
+- A credit note or a refund made from an invoice's row is saved on its own
+  screen; once the card's save succeeds, Invoices says so in a note with a
+  link and does not go there by itself. There is one case with no note: Save
+  and issue saved the draft but could not issue it, the card stays open with
+  the reason, and the person then cancels. The draft is on Credit Notes and
+  nothing on Invoices says so.
+- An id that is not an id sent to `markRefundPaidAction`, `voidRefundAction`
+  or `deleteRefundAction` is answered "That payment no longer exists.": a refund's id is parsed by the
+  schema a payment's is. Only a direct call can send one.
+- `voidPaymentIn` is kept to `direction = 'in'` and reads no view first: every
+  movement of money in is a payment in. When cash receipts arrive (stage 5),
+  money in gains a second kind and this must be looked at again.
 - A sent quotation cannot be edited: mark it declined and write a new one.
   "Mark as sent" is offered on a draft whatever its total, and refused with
   the reason when its lines total nothing, as Post is on an invoice.
@@ -535,7 +662,12 @@ instead."; see Known limits.
   the thirty is not a setting.
 - Making an invoice from a quotation does not open that invoice: the screen
   says a draft was made and links to Invoices, where the draft carries the
-  database's date (UTC) and so is among the newest rows. The link does not single the draft out.
+  person's own date of that day and so is among the newest rows. The link does
+  not single the draft out.
+- "Make invoice" takes the date from the browser's clock, as every form's
+  default date does. A device whose clock or time zone is wrong dates the
+  draft wrongly; the note says which date it was given, and the date can be
+  changed on the invoice form before the invoice is posted.
 - A credit note is one amount with a reason. It has no lines and does not say
   how much of it is SST.
 - A quotation has no void. One that was sent by mistake is marked declined,
@@ -575,7 +707,8 @@ instead."; see Known limits.
 - A refund is to one customer against one invoice or one credit note. One
   payment out that refunds several invoices is not recorded as one refund.
 - The reason of a refund is one of five words; anything more is in the
-  payment's notes.
+  payment's notes. The Refunds table shows neither the notes nor the account;
+  the CSV has the account.
 - A void invoice does not hold its quotation: the quotation can be converted
   again, and the void invoice keeps `quotation_id` as a record of where it
   came from.
@@ -586,7 +719,9 @@ instead."; see Known limits.
   the day they were seeded, so its Sent quotations turn Expired as time passes
   and its month-to-date figures empty out.
 - The database tests for this stage, `tests/bendahara-followons.test.ts`, run
-  against the hosted database. They create their users and workspaces through
+  against the hosted database. The one that converts a quotation passes a date,
+  so it needs `20261027100000_bendahara_convert_quotation_date.sql` applied
+  there first. They create their users and workspaces through
   `tests/helpers/live-workspaces.ts` and delete them when the file finishes.
 - The demo workspace's invoices were dated from the day they were seeded, so
   its Sent examples turn Overdue as time passes, as its bills do.

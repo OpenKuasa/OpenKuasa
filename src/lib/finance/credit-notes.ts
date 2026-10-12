@@ -41,11 +41,11 @@ export const CREDIT_NOTE_MESSAGES = {
   amount: 'Enter an amount above 0.',
   tooLong: LINE_MESSAGES.tooLong,
   gone: 'That credit note no longer exists.',
-  // FIN01. A menu offers only what a credit note's status allows, so this reaches a person only when it
-  // changed under them in another tab. True of both cases: a draft voided, and a credit note already
-  // issued or voided being edited or deleted.
-  locked:
-    'That cannot be done to this credit note as it stands. A draft credit note is deleted, not voided; one that has been issued or voided can no longer be edited or deleted.',
+  // FIN01. A menu offers only what a credit note's status allows, so this reaches a person only when the
+  // credit note changed in another tab: a draft that was issued meanwhile being saved, issued or deleted, or
+  // an issued one that was voided meanwhile being voided again. It says what may have happened, not what
+  // did, so it reads sensibly from all four buttons and is not false of a draft voided by a direct call.
+  locked: 'That cannot be done to this credit note as it now stands. It may have been issued or voided since this page was loaded.',
   // FIN02
   hasRefunds: 'A refund depends on this credit note. Void or delete that refund on Refunds before voiding it.',
   // FIN04
@@ -108,6 +108,13 @@ export type CreditNoteRow = {
   status: CreditNoteStatus;
   notes: string | null;
 };
+
+/**
+ * The answer to "Save and issue". When the draft was saved but issuing it was
+ * refused, `draftId` is that draft, so the form goes on editing it instead of
+ * saving a second copy.
+ */
+export type SaveAndIssueCreditNoteResult = FinResult<{ id: string; credit_note_no: string }> & { draftId?: string };
 
 const LIST_COLUMNS =
   'id,credit_note_no,invoice_id,invoice_no,customer_id,customer_name,credit_date,reason,amount,refunded,status,notes';

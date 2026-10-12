@@ -194,6 +194,7 @@ export const PRODUCTS: Product[] = [
           { label: 'My Attendance', slug: 'my-attendance', icon: Clock },
           { label: 'My Goals', slug: 'my-goals', icon: Target },
           { label: 'My Documents', slug: 'my-documents', icon: FileText },
+          { label: 'My Payslips', slug: 'my-payslips', icon: Receipt },
           { label: 'Records', slug: 'records', icon: Archive },
         ],
       },

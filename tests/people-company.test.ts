@@ -66,7 +66,7 @@ describe('buildDashboardModel', () => {
     expect(model.weeklyAttendance).toHaveLength(8);
     expect(model.leaveByType?.length).toBeGreaterThan(0);
     expect(model.joiners).toHaveLength(6);
-    expect(model.payroll?.latest?.gross_cents).toBe(10_520_000);
+    expect(model.payroll?.latest?.gross_cents).toBe(10_738_750);
     expect(model.payroll?.byMonth).toHaveLength(8);
     expect(model.payroll?.byMonth[7].label).toBe('Oct');
   });
@@ -84,14 +84,14 @@ describe('buildDashboardModel', () => {
     expect(model.payroll).toBeNull();
   });
 
-  it('skips a payroll run that has no payslips', async () => {
+  it('shows the newest run as the latest tile even with no payslips, and charts only months with payslips', async () => {
     const input = await dashboardInput(data);
-    const empty: PayrollRun = { id: 'new', period_month: '2026-11-01', status: 'draft', paid_at: null };
+    const empty: PayrollRun = { id: 'new', period_month: '2026-11-01', status: 'paid', paid_at: '2026-11-28T02:00:00Z', paid_by_name: null };
     const model = buildDashboardModel({ ...input, runs: [...input.runs, empty] }, TODAY, true);
-    expect(model.payroll?.latest?.period_month).toBe('2026-10-01');
+    expect(model.payroll?.latest).toEqual({ period_month: '2026-11-01', gross_cents: 0, headcount: 0 });
     expect(model.payroll?.byMonth).toHaveLength(8);
     const only = buildDashboardModel({ ...input, runs: [empty], payslips: [] }, TODAY, true);
-    expect(only.payroll?.latest).toBeNull();
+    expect(only.payroll?.latest).toEqual({ period_month: '2026-11-01', gross_cents: 0, headcount: 0 });
     expect(only.payroll?.byMonth).toEqual([]);
   });
 

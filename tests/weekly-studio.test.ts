@@ -61,6 +61,12 @@ function fakeService(
               call.eqs.push([col, val]);
               return b;
             },
+            gte() {
+              return b;
+            },
+            limit() {
+              return b;
+            },
             then: (resolve: (v: { data: never[] }) => void) => resolve({ data: [] }),
             maybeSingle: async () => ({ data: table === 'agent_configs' ? cap : keyRow, error: null }),
           };

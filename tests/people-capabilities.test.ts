@@ -402,6 +402,27 @@ describe('setEmployeeStatus, deleteEmployee', () => {
     expect(calls[0].filters).toEqual({ id: EMP, org_id: ORG });
   });
 
+  it('refuses an employee with a paid payslip in the payroll sentence, and logs nothing', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { client } = fakeSupabase({
+      'hr_employees.delete': { error: { code: 'P0001', message: 'HR_EMPLOYEE_HAS_PAID_PAYSLIPS' } },
+    });
+    expect(await deleteEmployee(ctxOf(client), { id: EMP })).toEqual({
+      ok: false,
+      error: 'This employee has paid payslips. Make them inactive instead.',
+    });
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it('answers any other delete error generically', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { client } = fakeSupabase({
+      'hr_employees.delete': { error: { code: 'P0001', message: 'something about HR_EMPLOYEE_HAS_PAID_PAYSLIPS elsewhere' } },
+    });
+    const result = await deleteEmployee(ctxOf(client), { id: EMP });
+    expect(result).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
+  });
+
   it('says when the employee is not there', async () => {
     const { client } = fakeSupabase({ 'hr_employees.delete': { data: null } });
     expect(await deleteEmployee(ctxOf(client), { id: EMP })).toEqual({ ok: false, error: 'That employee was not found.' });

@@ -50,20 +50,27 @@ export const REFUND_MESSAGES = {
   amount: 'Enter an amount above 0.',
   tooLong: LINE_MESSAGES.tooLong,
   gone: 'That refund no longer exists.',
-  // FIN04. Also raised when a pending refund is paid out and its credit note is no longer issued.
-  notInCredit:
-    'A refund needs a posted invoice, or an issued credit note, whose customer is in credit. If this refund is waiting to be paid out, delete it.',
-  // FIN05. Raised when the amount is more than the customer's credit on the invoice, or more than is left
-  // of the credit note; also when a pending refund is paid out and that credit has gone or been used up.
-  tooMuch:
-    'That is more than the customer is in credit, or more than is left of the credit note. If this refund is waiting to be paid out, delete it.',
+  // FIN04, when a refund is recorded: the customer is not in credit on the invoice, the invoice is not
+  // posted, or the credit note is not issued. The form offers only what can be refunded, so this reaches a
+  // person when that changed in another tab.
+  notInCredit: 'A refund needs a posted invoice, or an issued credit note, whose customer is in credit.',
+  // FIN05, when a refund is recorded: more than the customer's credit on the invoice, counting refunds
+  // that are pending, or more than is left of the credit note.
+  tooMuch: 'That is more than the customer is in credit, or more than is left of the credit note.',
+  // FIN04, when a pending refund is paid out. Only markRefundPaid answers with it.
+  cannotPayOut: 'This refund can no longer be paid out: its invoice is no longer posted, or its credit note is no longer issued. Delete it.',
+  // FIN05, when a pending refund is paid out: the credit it was recorded against has gone since, most
+  // often because the payment in behind it was voided. Only markRefundPaid answers with it. Nothing may be
+  // left of the credit, so it does not say a new refund can be recorded, only when one can.
+  creditGone:
+    'This refund no longer fits in what the customer is in credit, or in what is left of its credit note, so it cannot be paid out. Delete it. If the customer is still in credit, a new refund can be recorded for no more than that.',
   // FIN06
   notFound: 'The invoice or credit note for this refund no longer exists.',
-  // FIN09. A menu offers only what a refund's status allows, so this reaches a person only when the
-  // refund changed under them in another tab, or when a refund that was never paid out is voided. True of
-  // each: only a paid refund is voided, a waiting one is deleted, and a paid or voided one is not edited.
-  locked:
-    'That cannot be done to this refund as it stands. Void a refund that has been paid out, or delete one that is still waiting to be paid out.',
+  // FIN09. A menu offers only what a refund's status allows, so this reaches a person only when the refund
+  // changed in another tab: a pending one that was paid out meanwhile being marked paid or deleted, or a
+  // paid one that was voided meanwhile being voided again. It says what may have happened, not what did,
+  // so it reads sensibly from all three buttons and is not false of a pending refund voided by a direct call.
+  locked: 'That cannot be done to this refund as it now stands. It may have been paid out or voided since this page was loaded.',
   missing: 'The account on this refund no longer exists.',
 } as const;
 
@@ -103,8 +110,19 @@ const REFUSALS: Record<string, string> = {
   [PG_OUT_OF_RANGE]: TOO_LARGE,
 };
 
-function refundWriteFailed(fnName: string, error: unknown): { ok: false; error: string } {
-  const refusal = REFUSALS[pgCode(error) ?? ''];
+/**
+ * Paying a pending refund out. The database looks at the credit again, and
+ * the two codes then mean "this refund no longer fits", which a person fixes
+ * by deleting it, not by typing a smaller amount.
+ */
+const PAY_OUT_REFUSALS: Record<string, string> = { ...REFUSALS, FIN04: M.cannotPayOut, FIN05: M.creditGone };
+
+function refundWriteFailed(
+  fnName: string,
+  error: unknown,
+  refusals: Record<string, string> = REFUSALS,
+): { ok: false; error: string } {
+  const refusal = refusals[pgCode(error) ?? ''];
   return refusal ? { ok: false, error: refusal } : writeFailed(fnName, error);
 }
 
@@ -220,7 +238,7 @@ export async function markRefundPaid(
     target_txn: id,
     paid_on,
   });
-  if (error || !data) return refundWriteFailed('markRefundPaid', error);
+  if (error || !data) return refundWriteFailed('markRefundPaid', error, PAY_OUT_REFUSALS);
   return { ok: true, data: { id, number: data as string } };
 }
 

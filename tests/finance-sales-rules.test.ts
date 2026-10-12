@@ -6,6 +6,7 @@ import {
   alsoCoversInvoices,
   customerChoice,
   invoiceActions,
+  invoiceCan,
   invoiceCustomers,
   paymentInActions,
   siblingInvoices,
@@ -48,42 +49,94 @@ const row = (allocation: string, p: Partial<PaymentInRow> = {}): PaymentInRow =>
   ...p,
 });
 
+/** What the forms' own rules say an invoice can still take; the menu rule is given it. */
+const NOTHING = { pay: false, credit: false, refund: false };
+const EVERYTHING = { pay: true, credit: true, refund: true };
+
 describe('invoiceActions, for a customer in credit', () => {
-  it('offers no payment on a paid invoice whose balance is below zero', () => {
-    const inCredit = invoice('paid', { paid: 100, credited: 30, balance: -30 });
-    expect(invoiceActions(inCredit, true)).toEqual(['einvoice', 'void']);
+  // RM 100 invoiced and paid, then RM 30 credited: the customer is RM 30 in credit.
+  const inCredit = invoice('paid', { paid: 100, credited: 30, balance: -30 });
+
+  it('offers a refund, and no payment, on a paid invoice whose balance is below zero', () => {
+    expect(invoiceActions(inCredit, EVERYTHING)).toEqual(['credit', 'refund', 'einvoice', 'void']);
+    expect(invoiceActions(inCredit, { pay: true, credit: false, refund: true })).toEqual(['refund', 'einvoice', 'void']);
+  });
+  it('offers no refund once refunds that are pending hold all of the credit', () => {
+    expect(invoiceActions(inCredit, { pay: false, credit: true, refund: false })).toEqual(['credit', 'einvoice', 'void']);
+    expect(invoiceActions(inCredit, NOTHING)).toEqual(['einvoice', 'void']);
+  });
+  it('never offers a refund while the customer owes money or is exactly settled, whatever the flag says', () => {
+    expect(invoiceActions(invoice('sent'), EVERYTHING)).not.toContain('refund');
+    expect(invoiceActions(invoice('overdue', { credited: 30, balance: 70 }), EVERYTHING)).not.toContain('refund');
+    expect(invoiceActions(invoice('paid', { paid: 100, balance: 0 }), EVERYTHING)).not.toContain('refund');
+  });
+});
+
+describe('invoiceCan: what the forms offer an invoice', () => {
+  // RM 100 invoiced and paid, then RM 30 credited: the customer is RM 30 in credit.
+  const inCredit = invoice('paid', { paid: 100, credited: 30, balance: -30 });
+  const owing = invoice('sent');
+  const receivable = [{ id: owing.id }];
+  const creditable = [{ id: owing.id }, { id: inCredit.id }];
+  const refundable = [
+    { kind: 'invoice' as const, id: inCredit.id },
+    { kind: 'credit_note' as const, id: 'note-1' },
+  ];
+
+  it('offers each of the three exactly when its form offers the invoice', () => {
+    expect(invoiceCan(owing, { receivable, creditable, refundable })).toEqual({ pay: true, credit: true, refund: false });
+    expect(invoiceCan(inCredit, { receivable, creditable, refundable })).toEqual({ pay: false, credit: true, refund: true });
+    // A credit note that can be refunded is not its invoice: an id is matched by kind.
+    expect(invoiceCan(invoice('paid', { id: 'note-1' }), { receivable, creditable, refundable })).toEqual({
+      pay: false,
+      credit: false,
+      refund: false,
+    });
+  });
+  it('offers no refund when the credit notes or the refunds could not be read, and still a credit note', () => {
+    // A credit note is decided from the invoice rows, which were read; only the refund needs the two lists.
+    const unread = { receivable, creditable, refundable: null };
+    expect(invoiceCan(owing, unread)).toEqual({ pay: true, credit: true, refund: false });
+    expect(invoiceCan(inCredit, unread)).toEqual({ pay: false, credit: true, refund: false });
+    // The rest of each row's menu is as it was.
+    expect(invoiceActions(owing, invoiceCan(owing, unread))).toEqual(['pay', 'credit', 'einvoice', 'void']);
+    expect(invoiceActions(inCredit, invoiceCan(inCredit, unread))).toEqual(['credit', 'einvoice', 'void']);
   });
 });
 
 describe('invoiceActions', () => {
-  it('lets a draft be edited, posted or deleted, and never voided or paid', () => {
-    expect(invoiceActions(invoice('draft'), false)).toEqual(['edit', 'post', 'delete']);
-    expect(invoiceActions(invoice('draft'), true)).toEqual(['edit', 'post', 'delete']);
+  it('lets a draft be edited, posted or deleted, and never voided, paid, credited or refunded', () => {
+    expect(invoiceActions(invoice('draft'), NOTHING)).toEqual(['edit', 'post', 'delete']);
+    expect(invoiceActions(invoice('draft'), EVERYTHING)).toEqual(['edit', 'post', 'delete']);
   });
-  it('lets a posted invoice take a payment while it can, have its e-Invois set, and be voided', () => {
-    expect(invoiceActions(invoice('sent'), true)).toEqual(['pay', 'einvoice', 'void']);
-    expect(invoiceActions(invoice('overdue'), true)).toEqual(['pay', 'einvoice', 'void']);
-    // Nothing left that a new payment could take.
-    expect(invoiceActions(invoice('sent'), false)).toEqual(['einvoice', 'void']);
-    expect(invoiceActions(invoice('paid', { paid: 100, balance: 0 }), false)).toEqual(['einvoice', 'void']);
+  it('lets a posted invoice take a payment and a credit note while it can, have its e-Invois set, and be voided', () => {
+    expect(invoiceActions(invoice('sent'), EVERYTHING)).toEqual(['pay', 'credit', 'einvoice', 'void']);
+    expect(invoiceActions(invoice('overdue'), EVERYTHING)).toEqual(['pay', 'credit', 'einvoice', 'void']);
+    expect(invoiceActions(invoice('sent'), { pay: true, credit: false, refund: false })).toEqual(['pay', 'einvoice', 'void']);
+    // Nothing left that a new payment or a new credit note could take.
+    expect(invoiceActions(invoice('sent'), NOTHING)).toEqual(['einvoice', 'void']);
+    expect(invoiceActions(invoice('paid', { paid: 100, balance: 0 }), NOTHING)).toEqual(['einvoice', 'void']);
+  });
+  it('offers a credit note on a paid invoice: what was paid does not limit one', () => {
+    expect(invoiceActions(invoice('paid', { paid: 100, balance: 0 }), EVERYTHING)).toEqual(['credit', 'einvoice', 'void']);
   });
   it('never offers a payment on a paid invoice, whatever the flag says', () => {
-    expect(invoiceActions(invoice('paid', { paid: 100, balance: 0 }), true)).toEqual(['einvoice', 'void']);
-    expect(invoiceActions(invoice('sent'), true)).toContain('pay');
+    expect(invoiceActions(invoice('paid', { paid: 100, balance: 0 }), EVERYTHING)).not.toContain('pay');
+    expect(invoiceActions(invoice('sent'), EVERYTHING)).toContain('pay');
   });
   it('offers nothing on a void invoice', () => {
-    expect(invoiceActions(invoice('void'), false)).toEqual([]);
-    expect(invoiceActions(invoice('void'), true)).toEqual([]);
+    expect(invoiceActions(invoice('void'), NOTHING)).toEqual([]);
+    expect(invoiceActions(invoice('void'), EVERYTHING)).toEqual([]);
   });
   it('never offers what the database refuses for the status: no editing or deleting once posted, no voiding a draft', () => {
     for (const status of ['sent', 'overdue', 'paid', 'void'] as const) {
-      const offered = invoiceActions(invoice(status), true);
+      const offered = invoiceActions(invoice(status), EVERYTHING);
       expect(offered, status).not.toContain('edit');
       expect(offered, status).not.toContain('post');
       expect(offered, status).not.toContain('delete');
     }
-    expect(invoiceActions(invoice('draft'), true)).not.toContain('void');
-    expect(invoiceActions(invoice('draft'), true)).not.toContain('einvoice');
+    expect(invoiceActions(invoice('draft'), EVERYTHING)).not.toContain('void');
+    expect(invoiceActions(invoice('draft'), EVERYTHING)).not.toContain('einvoice');
   });
 });
 

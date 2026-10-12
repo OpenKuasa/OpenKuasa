@@ -198,11 +198,26 @@ describe('people tools', () => {
   it('totals payroll and lists payslips in Ringgit', async () => {
     const payroll = await run('getPayrollSummary')({});
     expect(payroll.runs).toHaveLength(3);
-    expect(payroll.runs[0]).toMatchObject({ month: '2026-10', status: 'draft', headcount: 20, gross: 'RM 105,200.00' });
+    expect(payroll.runs[0]).toMatchObject({ month: '2026-10', status: 'draft', headcount: 20, gross: 'RM 107,387.50' });
     expect((await run('getPayrollSummary')({ months: 50 })).runs).toHaveLength(8);
     const slips = await run('listPayslips')({ employee: 'aisyah', month: '2026-09' });
     expect(slips.total).toBe(1);
-    expect(slips.payslips[0]).toMatchObject({ employee: 'Aisyah Rahim', month: '2026-09', gross: 'RM 5,600.00', status: 'paid' });
+    expect(slips.payslips[0]).toMatchObject({ employee: 'Aisyah Rahim', month: '2026-09', gross: 'RM 6,287.50', status: 'paid' });
+  });
+
+  it('lists a payslip’s basic pay, other deductions and lines in Ringgit; a lookup holding no change tool gets no ids', async () => {
+    const slips = await run('listPayslips')({ month: '2026-10', limit: 50 });
+    const withLine = slips.payslips.find((p: Loose) => p.lines.length > 0);
+    expect(withLine).toBeDefined();
+    expect(withLine.basic).toMatch(/^RM [\d,]+\.\d{2}$/);
+    expect(withLine.other_deductions).toMatch(/^RM [\d,]+\.\d{2}$/);
+    expect(withLine.run_status).toBe('draft');
+    for (const slip of slips.payslips) {
+      // createPeopleTools was given no write access here, so no payroll change tool could use an id.
+      expect(slip).not.toHaveProperty('id');
+      for (const line of slip.lines) expect(line).toMatchObject({ label: expect.any(String), kind: expect.any(String), amount: expect.stringMatching(/^RM / ) });
+    }
+    expect(JSON.stringify(slips)).not.toMatch(/_cents/);
   });
 
   it('summarises performance, trainings and announcements', async () => {

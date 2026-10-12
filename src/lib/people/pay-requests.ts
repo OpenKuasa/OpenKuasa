@@ -19,6 +19,7 @@ import {
   writeFailed,
 } from './capabilities';
 import { isRealDate } from './dates';
+import { PAYROLL_REFUSALS } from './payroll-refusals';
 import type { Claim, OvertimeDayKind } from './types';
 
 import { decideInput, requestIdInput } from './leave';
@@ -56,6 +57,8 @@ const leadingCode = (message: string | undefined): string | null => /^PAY_[A-Z_]
 function failed(fn: string, error: DbError): CapResult<never> {
   const code = leadingCode(error?.message);
   if (code && Object.hasOwn(PAY_REFUSALS, code)) return refuse(PAY_REFUSALS[code]);
+  // Raised by cancel and decide overtime once a payroll run has paid the record; its sentence lives with payroll's.
+  if (code === 'PAY_IN_PAID_RUN') return refuse(PAYROLL_REFUSALS.PAY_IN_PAID_RUN);
   return writeFailed(fn, error);
 }
 

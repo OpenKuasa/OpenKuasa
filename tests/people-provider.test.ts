@@ -28,6 +28,25 @@ const ROWS: Record<string, unknown[]> = {
   ],
   hr_documents: [{ id: 'd1', employee_id: 'e1', title: 'Payslip', doc_type: 'payslip', employee: { name: 'Aisyah Rahim' } }],
   hr_letters: [{ id: 'lt1', employee_id: 'e1', title: 'Offer', employee: { name: 'Aisyah Rahim' } }],
+  hr_payroll_runs: [{ id: 'r1', period_month: '2026-10-01', status: 'draft', paid_at: null }],
+  hr_payslips: [
+    {
+      id: 'p1', employee_id: 'e1', payroll_run_id: 'r1', period_month: '2026-10-01', status: 'pending',
+      set_by_hr: ['pcb', 'epf'], employee: { name: 'Aisyah Rahim' },
+      lines: [
+        { id: 'l4', payslip_id: 'p1', kind: 'earning', source: 'hr', label: 'Bonus', amount_cents: 100, created_at: '2026-10-11T00:00:01Z' },
+        { id: 'l3', payslip_id: 'p1', kind: 'earning', source: 'overtime', label: 'Overtime, 5 Oct 2026, 2 h', amount_cents: 50, created_at: '2026-10-11T00:00:00.000002Z' },
+        { id: 'l2', payslip_id: 'p1', kind: 'earning', source: 'overtime', label: 'Overtime, 2 Oct 2026, 1 h', amount_cents: 25, created_at: '2026-10-11T00:00:00.000001Z' },
+        { id: 'l1', payslip_id: 'p1', kind: 'unpaid', source: 'joiner', label: 'Joined 3 Oct 2026', amount_cents: 10, created_at: '2026-10-11T00:00:00.000003Z' },
+      ],
+    },
+    { id: 'p2', employee_id: 'e2', payroll_run_id: 'r1', period_month: '2026-10-01', status: 'pending', set_by_hr: [], employee: null, lines: null },
+  ],
+  hr_overtime_records: [
+    { id: 'o1', employee_id: 'e1', employee: { name: 'Aisyah Rahim' }, payslip: { period_month: '2026-09-01', status: 'paid' } },
+    { id: 'o2', employee_id: 'e1', employee: { name: 'Aisyah Rahim' }, payslip: { period_month: '2026-10-01', status: 'pending' } },
+    { id: 'o3', employee_id: 'e1', employee: { name: 'Aisyah Rahim' }, payslip: null },
+  ],
   hr_payment_vouchers: [{ id: 'v1', voucher_no: 'PV-1041', payee: 'KWSP', amount_cents: 100 }],
   hr_attendance_days: Array.from({ length: 1500 }, (_, i) => ({ id: `a${i}`, employee_id: 'e1', work_date: '2026-10-09', status: 'present', corrected_at: i === 0 ? '2026-10-10T01:00:00Z' : null, correction_note: i === 0 ? 'Forgot to clock in' : null })),
 };
@@ -105,6 +124,98 @@ describe('getPeopleData', () => {
     for (const column of ['decision_note', 'receipt_path', 'paid_on', 'paid_reference', 'has_receipt']) expect(claims).toContain(column);
     const overtime = calls.find((c) => c.table === 'hr_overtime_records')!.columns!;
     for (const column of ['hourly_rate_cents', 'day_kind', 'reason', 'decision_note']) expect(overtime).toContain(column);
+  });
+
+  it('reads each payslip with its lines, its marks and the new columns, system lines first', async () => {
+    const slips = await (await getPeopleData(client)).listPayslips();
+    const columns = calls.find((c) => c.table === 'hr_payslips')!.columns;
+    for (const column of ['basic_cents', 'other_deductions_cents', 'set_by_hr', 'hr_payslip_lines']) expect(columns).toContain(column);
+    expect(slips[0].lines.map((l) => l.id)).toEqual(['l1', 'l2', 'l3', 'l4']);
+    expect(slips[0].lines[0]).not.toHaveProperty('created_at');
+    expect(slips[0].set_by_hr).toEqual(['epf', 'pcb']);
+    expect(slips[0]).toMatchObject({ employee_name: 'Aisyah Rahim' });
+    expect(slips[1]).toMatchObject({ employee_name: 'Unknown', lines: [] });
+  });
+
+  it('names the key the employee embed of a payslip follows', async () => {
+    await (await getPeopleData(client)).listPayslips();
+    const columns = calls.find((c) => c.table === 'hr_payslips')!.columns;
+    expect(columns).toContain('employee:hr_employees!hr_payslips_employee_id_org_id_fkey(name)');
+    expect(columns).toContain('lines:hr_payslip_lines(');
+  });
+
+  it('gives an overtime line the date the work was done, through the named key, and null for other lines', async () => {
+    const saved = ROWS.hr_payslips;
+    ROWS.hr_payslips = [
+      {
+        id: 'p1', employee_id: 'e1', payroll_run_id: 'r1', period_month: '2026-10-01', status: 'pending', set_by_hr: [],
+        employee: { name: 'A' },
+        lines: [
+          { id: 'ot', payslip_id: 'p1', kind: 'earning', source: 'overtime', label: 'Overtime', amount_cents: 1,
+            created_at: '2026-10-11T00:00:00Z', overtime: { work_date: '2026-09-28' } },
+          { id: 'hr', payslip_id: 'p1', kind: 'earning', source: 'hr', label: 'Bonus', amount_cents: 1,
+            created_at: '2026-10-11T00:00:01Z', overtime: null },
+        ],
+      },
+    ];
+    try {
+      const [slip] = await (await getPeopleData(client)).listPayslips();
+      expect(slip.lines.map((l) => [l.id, l.work_date])).toEqual([['ot', '2026-09-28'], ['hr', null]]);
+      expect(calls.find((c) => c.table === 'hr_payslips')!.columns).toContain(
+        'overtime:hr_overtime_records!hr_payslip_lines_overtime_record_id_fkey(work_date)',
+      );
+    } finally {
+      ROWS.hr_payslips = saved;
+    }
+  });
+
+  it('can read one employee\'s payslips only', async () => {
+    await (await getPeopleData(client)).listPayslips('e1');
+    expect(calls.find((c) => c.table === 'hr_payslips')!.filters).toContainEqual(['eq', 'employee_id', 'e1']);
+  });
+
+  it('reads every payslip when no employee is named', async () => {
+    await (await getPeopleData(client)).listPayslips();
+    const filters = calls.find((c) => c.table === 'hr_payslips')!.filters;
+    expect(filters.some((f) => f[1] === 'employee_id')).toBe(false);
+  });
+
+  it('orders lines by the moment they were made, not by the text of the timestamp', async () => {
+    const line = (id: string, created_at: string) => ({
+      id, payslip_id: 'p1', kind: 'earning', source: 'hr', label: id, amount_cents: 1, created_at,
+    });
+    const saved = ROWS.hr_payslips;
+    ROWS.hr_payslips = [
+      {
+        id: 'p1', employee_id: 'e1', payroll_run_id: 'r1', period_month: '2026-10-01', status: 'pending', set_by_hr: [],
+        employee: { name: 'A' },
+        lines: [
+          line('a-late-fraction', '2026-10-11T00:00:00.000002+00:00'),
+          line('z-exact', '2026-10-11T00:00:00+00:00'),
+          line('b-next-second', '2026-10-11T00:00:01+00:00'),
+          line('c-before-next', '2026-10-11T00:00:00.999999+00:00'),
+        ],
+      },
+    ];
+    try {
+      const [slip] = await (await getPeopleData(client)).listPayslips();
+      expect(slip.lines.map((l) => l.id)).toEqual(['z-exact', 'a-late-fraction', 'c-before-next', 'b-next-second']);
+    } finally {
+      ROWS.hr_payslips = saved;
+    }
+  });
+
+  it('reads the month an overtime record was paid in only when its payslip is paid', async () => {
+    const records = await (await getPeopleData(client)).listOvertime();
+    const columns = calls.find((c) => c.table === 'hr_overtime_records')!.columns;
+    expect(columns).toContain('hr_overtime_records_payslip_id_fkey');
+    expect(records.map((r) => r.paid_month)).toEqual(['2026-09', null, null]);
+    expect(records[0]).not.toHaveProperty('payslip');
+  });
+
+  it('has no payer name to give a payroll run', async () => {
+    const runs = await (await getPeopleData(client)).listPayrollRuns();
+    expect(runs).toEqual([{ id: 'r1', period_month: '2026-10-01', status: 'draft', paid_at: null, paid_by_name: null }]);
   });
 
   it('never asks the directory for a private column', async () => {
