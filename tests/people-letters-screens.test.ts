@@ -157,7 +157,7 @@ describe('issueState', () => {
     expect(issueState('Offer', 'Dear {designation},').names).toEqual(['designation']);
   });
   it('leaves unknown braces alone', () => {
-    expect(issueState('Offer', 'Salary {salary} and { today } and {Today}').allowed).toBe(true);
+    expect(issueState('Offer', 'Salary {Salary} and { today } and {Today}').allowed).toBe(true);
   });
   it('gives the empty-body reason first when both apply, and still names the placeholders', () => {
     const state = issueState('Hi {today}', '');
@@ -181,9 +181,9 @@ describe('insertPlaceholder', () => {
   it('inserts at the end of empty text', () => {
     expect(insertPlaceholder('', 0, 0, 'today')).toEqual({ text: '{today}', caret: 7 });
   });
-  it('inserts every one of the seven and no other name', () => {
+  it('inserts every one of the eight and no other name', () => {
     for (const name of PLACEHOLDERS) expect(insertPlaceholder('x', 1, 1, name).text).toBe(`x{${name}}`);
-    expect(insertPlaceholder('x', 1, 1, 'salary')).toEqual({ text: 'x', caret: 1 });
+    expect(insertPlaceholder('x', 1, 1, 'bonus')).toEqual({ text: 'x', caret: 1 });
   });
   it('refuses to go over a length limit, leaving the text and caret', () => {
     expect(insertPlaceholder('abcd', 2, 2, 'today', 8)).toEqual({ text: 'abcd', caret: 2 });
@@ -198,7 +198,7 @@ describe('insertRefusal', () => {
   it('is null when it fits, or the name is not a placeholder', () => {
     expect(insertRefusal('abcd', 2, 2, 'today', 20, 'title')).toBeNull();
     expect(insertRefusal('abcd', 2, 4, 'today', 9, 'letter text')).toBeNull();
-    expect(insertRefusal('abcd', 2, 2, 'salary', 3, 'title')).toBeNull();
+    expect(insertRefusal('abcd', 2, 2, 'bonus', 3, 'title')).toBeNull();
   });
 });
 

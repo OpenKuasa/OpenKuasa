@@ -32,6 +32,10 @@ export const saveLetterInput = z.object({
   ack_requested: z.boolean('Say whether to ask for an acknowledgement.').nullish(),
 });
 export const startLetterInput = z.object({ employee_id: id('employee'), template_id: id('template') });
+export const requestLetterAckInput = z.object({
+  letter_id: id('letter'),
+  requested: z.boolean('Say whether to ask for an acknowledgement.'),
+});
 export const letterIdInput = z.object({ letter_id: id('letter') });
 export const saveTemplateInput = z.object({
   template_id: optionalGuid('The template to change, by its id. Leave out to add one.'),
@@ -146,6 +150,19 @@ export async function acknowledgeLetter(ctx: PeopleWriteContext, input: unknown)
   const parsed = parse(letterIdInput, input);
   if (!parsed.ok) return parsed;
   return callDb(ctx, 'acknowledgeLetter', 'hr_acknowledge_letter', { p_letter: parsed.data.letter_id }, letterOf);
+}
+
+/**
+ * Asks for an acknowledgement of a DRAFT letter, or stops asking. One database call that changes `ack_requested`
+ * and nothing else; an issued letter is refused (`LETTER_NOT_DRAFT`). The text is not read or sent.
+ */
+export async function requestLetterAck(ctx: PeopleWriteContext, input: unknown): Promise<CapResult<SavedLetter>> {
+  const parsed = parse(requestLetterAckInput, input);
+  if (!parsed.ok) return parsed;
+  return callDb(ctx, 'requestLetterAck', 'hr_request_letter_ack', {
+    p_letter: parsed.data.letter_id,
+    p_requested: parsed.data.requested,
+  }, letterOf);
 }
 
 /** Deletes a draft. */

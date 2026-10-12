@@ -423,7 +423,7 @@ describe('Letters model', () => {
     const row = (id: string) => model.rows.find((r) => r.id === id)!;
     expect(row('ok')).toMatchObject({ unfilled: [], can_edit: true, can_delete: true, can_issue: true, can_unissue: false });
     expect(row('blank')).toMatchObject({ unfilled: [], can_issue: false, can_edit: true });
-    expect(row('holes')).toMatchObject({ unfilled: ['employee_name', 'designation', 'join_date'], can_issue: false, can_edit: true });
+    expect(row('holes')).toMatchObject({ unfilled: ['employee_name', 'designation', 'join_date', 'salary'], can_issue: false, can_edit: true });
     expect(row('issued')).toMatchObject({ unfilled: [], can_edit: false, can_delete: false, can_issue: false, can_unissue: true });
   });
 

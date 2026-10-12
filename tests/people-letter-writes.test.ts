@@ -6,6 +6,7 @@ import {
   deleteLetter,
   deleteLetterTemplate,
   issueLetter,
+  requestLetterAck,
   saveLetter,
   saveLetterTemplate,
   startLetterFromTemplate,
@@ -219,6 +220,48 @@ describe('acknowledgeLetter', () => {
     const { client, calls } = fakeSupabase({ 'rpc.hr_acknowledge_letter': { data: SAVED } });
     await acknowledgeLetter(ctxOf(client), { letter_id: LETTER, employee_id: 'evil' } as never);
     expect(JSON.stringify(calls[0].args)).not.toContain('evil');
+  });
+});
+
+describe('requestLetterAck', () => {
+  it('calls hr_request_letter_ack with exactly p_letter and p_requested, and returns the letter', async () => {
+    const asked = { ...SAVED, ack_requested: true };
+    const { client, calls } = fakeSupabase({ 'rpc.hr_request_letter_ack': { data: asked } });
+    expect(await requestLetterAck(ctxOf(client), { letter_id: LETTER, requested: true })).toEqual({ ok: true, data: asked });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ fn: 'hr_request_letter_ack', args: { p_letter: LETTER, p_requested: true } });
+    expect(Object.keys(calls[0].args!).sort()).toEqual(['p_letter', 'p_requested']);
+  });
+  it('passes false as false', async () => {
+    const { client, calls } = fakeSupabase({ 'rpc.hr_request_letter_ack': { data: SAVED } });
+    await requestLetterAck(ctxOf(client), { letter_id: LETTER, requested: false });
+    expect(calls[0].args).toEqual({ p_letter: LETTER, p_requested: false });
+  });
+  it('refuses a bad id, a missing or non-boolean requested and a smuggled employee, without a call', async () => {
+    const { client, calls } = fakeSupabase({ 'rpc.hr_request_letter_ack': { data: SAVED } });
+    expect((await requestLetterAck(ctxOf(client), { letter_id: 'x', requested: true })).ok).toBe(false);
+    expect((await requestLetterAck(ctxOf(client), { letter_id: LETTER })).ok).toBe(false);
+    expect((await requestLetterAck(ctxOf(client), { letter_id: LETTER, requested: 'yes' })).ok).toBe(false);
+    expect((await requestLetterAck(ctxOf(client), { letter_id: LETTER, requested: null })).ok).toBe(false);
+    expect(calls).toEqual([]);
+    await requestLetterAck(ctxOf(client), { letter_id: LETTER, requested: true, employee_id: 'evil' } as never);
+    expect(JSON.stringify(calls[0].args)).not.toContain('evil');
+  });
+  it.each(['LETTER_NOT_ALLOWED', 'LETTER_NOT_FOUND', 'LETTER_BAD_INPUT', 'LETTER_NOT_DRAFT'])('turns %s into its sentence', async (code) => {
+    const { client } = fakeSupabase({ 'rpc.hr_request_letter_ack': { error: { code: 'P0001', message: code } } });
+    expect(await requestLetterAck(ctxOf(client), { letter_id: LETTER, requested: true })).toEqual({ ok: false, error: DOCUMENT_REFUSALS[code] });
+  });
+  it('says what to do about an issued letter', async () => {
+    const { client } = fakeSupabase({ 'rpc.hr_request_letter_ack': { error: { message: 'LETTER_NOT_DRAFT' } } });
+    expect(await requestLetterAck(ctxOf(client), { letter_id: LETTER, requested: true })).toEqual({
+      ok: false,
+      error: 'That letter has been issued. Pull it back to draft on the Letters screen to change it.',
+    });
+  });
+  it('answers the generic sentence for a reply that is not a letter', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { client } = fakeSupabase({ 'rpc.hr_request_letter_ack': { data: { id: LETTER } } });
+    expect(await requestLetterAck(ctxOf(client), { letter_id: LETTER, requested: true })).toEqual({ ok: false, error: WRITE_FAILED });
   });
 });
 

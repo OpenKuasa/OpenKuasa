@@ -3,11 +3,11 @@
  * and refuses to issue a letter that still has one; this mirrors its rule so a screen can say which are left.
  *
  * The rule, as the database writes it (case-sensitive, no spaces inside the braces):
- * `\{(employee_name|employee_no|designation|department|join_date|company_name|today)\}`.
- * Anything else in braces (`{salary}`, `{Today}`, `{ today }`, an unclosed `{today`) is ordinary text.
+ * `\{(employee_name|employee_no|designation|department|join_date|company_name|today|salary)\}`.
+ * Anything else in braces (`{Salary}`, `{Today}`, `{ today }`, an unclosed `{today`) is ordinary text.
  */
 
-/** The seven names, in the database's order. */
+/** The eight names, in the database's order (`salary` last, as `unfilled` lists them). */
 export const PLACEHOLDERS: readonly string[] = [
   'employee_name',
   'employee_no',
@@ -16,6 +16,7 @@ export const PLACEHOLDERS: readonly string[] = [
   'join_date',
   'company_name',
   'today',
+  'salary',
 ];
 
 const RULE = () => new RegExp(`\\{(${PLACEHOLDERS.join('|')})\\}`, 'g');
