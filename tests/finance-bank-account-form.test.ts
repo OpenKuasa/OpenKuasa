@@ -6,12 +6,13 @@ import {
   bankAccountRows,
   bankAccountArchiveEffect,
   bankAccountArchivedNote,
-  bankAccountOpeningChanged,
+  bankAccountOpeningChange,
   bankAccountRestoredNote,
   bankAccountSavedNote,
   editBankAccountForm,
   lastFour,
   newBankAccountForm,
+  type OpeningChange,
 } from '@/lib/finance/bank-account-form';
 import { BANK_ACCOUNT_MESSAGES, changesOpeningBalance, createBankAccountInput, setsOpeningBalance, updateBankAccountInput } from '@/lib/finance/bank-accounts';
 import type { BankAccountRow } from '@/lib/finance/banking';
@@ -63,41 +64,78 @@ describe('the form', () => {
   });
 });
 
-describe('bankAccountOpeningChanged', () => {
+describe('bankAccountOpeningChange', () => {
   const base = { ...newBankAccountForm('2026-10-12'), name: 'Savings' };
-  it('is true for a new account with a balance, false for none or for someone who cannot sign off', () => {
-    expect(bankAccountOpeningChanged({ ...base, opening: '1500' }, null, true)).toBe(true);
-    expect(bankAccountOpeningChanged({ ...base, opening: '-1' }, null, true)).toBe(true);
-    expect(bankAccountOpeningChanged({ ...base, opening: '' }, null, true)).toBe(false);
-    expect(bankAccountOpeningChanged({ ...base, opening: '1500' }, null, false)).toBe(false);
+  const held = account({ opening_balance: 300 });
+  const form = editBankAccountForm(held);
+  const none = { balance: false, date: false };
+
+  it('on a new account: the balance changed when one is typed, never for someone who cannot sign off', () => {
+    expect(bankAccountOpeningChange({ ...base, opening: '1500' }, null, true)).toMatchObject({ balance: true, date: false, amount: 1500 });
+    expect(bankAccountOpeningChange({ ...base, opening: '-1' }, null, true)).toMatchObject({ balance: true, amount: -1 });
+    expect(bankAccountOpeningChange({ ...base, opening: '' }, null, true)).toMatchObject(none);
+    expect(bankAccountOpeningChange({ ...base, opening: '1500' }, null, false)).toMatchObject(none);
   });
 
-  it('is true on a change only when the balance, or the date of a balance, differs', () => {
-    const held = account({ opening_balance: 300 });
-    const form = editBankAccountForm(held);
-    expect(bankAccountOpeningChanged(form, held, true)).toBe(false);
-    expect(bankAccountOpeningChanged({ ...form, opening: '0' }, held, true)).toBe(true);
-    expect(bankAccountOpeningChanged({ ...form, opening: '300.01' }, held, true)).toBe(true);
-    expect(bankAccountOpeningChanged({ ...form, openingDate: '2026-10-01' }, held, true)).toBe(true);
+  it('balance only', () => {
+    expect(bankAccountOpeningChange({ ...form, opening: '300.01' }, held, true)).toMatchObject({ balance: true, date: false, amount: 300.01 });
+    expect(bankAccountOpeningChange({ ...form, opening: '0' }, held, true)).toMatchObject({ balance: true, date: false, amount: 0 });
+  });
+
+  it('date only: a different date over a balance that is there', () => {
+    expect(bankAccountOpeningChange({ ...form, openingDate: '2026-10-01' }, held, true)).toMatchObject({
+      balance: false,
+      date: true,
+      openingDate: '2026-10-01',
+    });
+  });
+
+  it('both', () => {
+    expect(bankAccountOpeningChange({ ...form, opening: '500', openingDate: '2026-10-01' }, held, true)).toMatchObject({
+      balance: true,
+      date: true,
+    });
+  });
+
+  it('neither: the same form, a date over a balance of nothing, and someone who cannot sign off', () => {
+    expect(bankAccountOpeningChange(form, held, true)).toMatchObject(none);
     const empty = account();
-    expect(bankAccountOpeningChanged({ ...editBankAccountForm(empty), openingDate: '2026-10-01' }, empty, true)).toBe(false);
+    expect(bankAccountOpeningChange({ ...editBankAccountForm(empty), openingDate: '2026-10-01' }, empty, true)).toMatchObject(none);
+    expect(bankAccountOpeningChange({ ...form, opening: '999' }, held, false)).toMatchObject(none);
+  });
+
+  it('compares the balance to the sen, as the schema stores it', () => {
+    expect(bankAccountOpeningChange({ ...form, opening: '300.004' }, held, true)).toMatchObject(none);
+    expect(bankAccountOpeningChange({ ...form, opening: '300.006' }, held, true)).toMatchObject({ balance: true });
   });
 });
 
 describe('what the screen says after a save', () => {
-  it('names the books only when an opening balance changed', () => {
-    expect(bankAccountSavedNote('Savings', true, false)).toBe('Savings is added.');
-    expect(bankAccountSavedNote('Savings', false, false)).toBe('Savings is saved.');
-    expect(bankAccountSavedNote('Savings', false, true)).toBe(
-      'Savings is saved. Its opening balance changed, so Total cash and the Chart of Accounts changed with it.',
+  const change = (over: Partial<OpeningChange> = {}): OpeningChange => ({ balance: false, date: false, amount: 0, openingDate: '2026-10-01', ...over });
+
+  it('says only that it was added or saved when no opening balance changed', () => {
+    expect(bankAccountSavedNote('Savings', true, change())).toBe('Savings is added.');
+    expect(bankAccountSavedNote('Savings', false, change())).toBe('Savings is saved.');
+  });
+
+  it('names Total cash and the books when the balance changed', () => {
+    expect(bankAccountSavedNote('Savings', true, change({ balance: true, amount: 150.5 }))).toBe(
+      'Savings is added. It starts with RM 150.50, so Total cash and the Chart of Accounts changed with it.',
     );
-    expect(bankAccountSavedNote('Savings', true, true)).toContain('Savings is added. Its opening balance changed');
+    expect(bankAccountSavedNote('Savings', false, change({ balance: true, amount: 0 }))).toBe(
+      'Savings is saved. Its opening balance is now RM 0.00, so Total cash and the Chart of Accounts changed with it.',
+    );
+    expect(bankAccountSavedNote('Savings', false, change({ balance: true, date: true, amount: 5 }))).toContain('Total cash');
+  });
+
+  it('says only that the entry moved when only the date did, and not that Total cash changed', () => {
+    const note = bankAccountSavedNote('Savings', false, change({ date: true }));
+    expect(note).toBe('Savings is saved. Its opening balance is now dated 01 Oct 2026, so its entry in the Chart of Accounts moved.');
+    expect(note).not.toContain('Total cash');
   });
 
   it('says an account was restored', () => {
-    expect(bankAccountRestoredNote('Savings')).toBe(
-      'Savings is restored. It is offered on payment forms again, and so is its account in the Chart of Accounts.',
-    );
+    expect(bankAccountRestoredNote('Savings')).toBe('Savings is restored. Its account in the Chart of Accounts is restored with it.');
   });
 });
 

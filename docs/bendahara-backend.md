@@ -752,7 +752,7 @@ trigger, so it answers before the row policy does):
 | Account numbers | read | read | not read |
 
 An outsider, and a member who owes a second factor, are answered as a viewer:
-an insert with an opening balance is `FIN14`, anything else `42501`. An owner
+an insert with an opening balance is `FIN14`, anything else is `42501` or changes no row. An owner
 at `aal1` with a verified factor also gets `FIN14` on an insert with an opening
 balance, which is why the sentence for it does not say the person is not an
 owner.

@@ -159,22 +159,45 @@ export function bankAccountArchivedNote(name: string): string {
 
 /** What the screen says once an account was restored. */
 export function bankAccountRestoredNote(name: string): string {
-  return `${name} is restored. It is offered on payment forms again, and so is its account in the Chart of Accounts.`;
+  return `${name} is restored. Its account in the Chart of Accounts is restored with it.`;
 }
+
+/** What saving the form does to the opening balance in the books. */
+export type OpeningChange = {
+  /** The amount differs (or is set on a new account): Total cash and the ledger move. */
+  balance: boolean;
+  /** The date differs, over a balance that is there: the opening entry moves to another day. */
+  date: boolean;
+  /** The balance as it will be stored, to the sen. */
+  amount: number;
+  /** The date as typed. */
+  openingDate: string;
+};
 
 /**
- * Whether saving this form sets or changes an opening balance in the books: only an owner or admin sends one, and
- * only a balance other than none, or a different one from the account's, moves Total cash and the ledger.
+ * Which of the opening balance and its date saving this form changes. Only an owner or admin sends either. The
+ * typed amount is rounded to the sen first, as the schema does, so "300.004" over 300 is no change. A date over a
+ * balance of nothing changes nothing in the books. Both can be true; the note then speaks of the balance.
  */
-export function bankAccountOpeningChanged(form: BankAccountForm, editing: BankAccountRow | null, canSignOff: boolean): boolean {
-  if (!canSignOff) return false;
+export function bankAccountOpeningChange(form: BankAccountForm, editing: BankAccountRow | null, canSignOff: boolean): OpeningChange {
   const typed = form.opening.trim() === '' ? 0 : (typedNumber(form.opening) ?? Number.NaN);
-  if (!editing) return typed !== 0;
-  return typed !== editing.opening_balance || (typed !== 0 && form.openingDate !== editing.opening_date);
+  const amount = Math.round(typed * 100) / 100;
+  const out: OpeningChange = { balance: false, date: false, amount, openingDate: form.openingDate };
+  if (!canSignOff || Number.isNaN(amount)) return out;
+  if (!editing) return { ...out, balance: amount !== 0 };
+  return { ...out, balance: amount !== editing.opening_balance, date: amount !== 0 && form.openingDate !== editing.opening_date };
 }
 
-/** What the screen says after an account was added or changed, naming what else changed when an opening balance did. */
-export function bankAccountSavedNote(name: string, added: boolean, openingChanged: boolean): string {
+/** What the screen says after an account was added or changed; it names the books only for what really changed in them. */
+export function bankAccountSavedNote(name: string, added: boolean, change: OpeningChange): string {
   const first = added ? `${name} is added.` : `${name} is saved.`;
-  return openingChanged ? `${first} Its opening balance changed, so Total cash and the Chart of Accounts changed with it.` : first;
+  if (change.balance) {
+    const what = added ? `It starts with ${rm(change.amount)}` : `Its opening balance is now ${rm(change.amount)}`;
+    return `${first} ${what}, so Total cash and the Chart of Accounts changed with it.`;
+  }
+  if (change.date) {
+    return `${first} Its opening balance is now dated ${displayDate(change.openingDate)}, so its entry in the Chart of Accounts moved.`;
+  }
+  return first;
 }
+

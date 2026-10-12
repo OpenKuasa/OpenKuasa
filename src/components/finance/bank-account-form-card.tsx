@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   type BankAccountForm,
   bankAccountFormError,
-  bankAccountOpeningChanged,
+  bankAccountOpeningChange,
   bankAccountPayload,
   bankAccountSavedNote,
   editBankAccountForm,
@@ -71,10 +71,10 @@ export function BankAccountFormCard({
       return;
     }
     const payload = bankAccountPayload(form, canSignOff);
-    const openingChanged = bankAccountOpeningChanged(form, editing, canSignOff);
+    const change = bankAccountOpeningChange(form, editing, canSignOff);
     save.run(
       () => (editing ? actions.update(payload) : actions.create(payload)),
-      (saved) => onSaved(bankAccountSavedNote(saved.name, !editing, openingChanged)),
+      (saved) => onSaved(bankAccountSavedNote(saved.name, !editing, change)),
     );
   };
 

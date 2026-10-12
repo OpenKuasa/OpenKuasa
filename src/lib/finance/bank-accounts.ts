@@ -6,8 +6,8 @@
  *
  * What the database holds everyone to (20261114110000): an opening balance
  * is set, changed or removed by an owner or admin only (FIN14 for any other
- * writer); an account is not archived while money out on it is still to be
- * paid or waits for approval (FIN30); bank or cash is chosen when the account
+ * writer); an account is not archived while a payment on it, in either
+ * direction, is still to be paid or waits for approval (FIN30); bank or cash is chosen when the account
  * is added and is not a column anyone signed in can change afterwards. The
  * account number cannot be read through the table: a writer asks
  * `finance_account_numbers`, and nobody else gets a row.
@@ -37,7 +37,7 @@ export const BANK_ACCOUNT_NUMBER_MAX = 34;
 /** What numeric(14,2) holds, either side of zero. */
 const MAX_BALANCE = 999_999_999_999.99;
 
-/** An account with money out still to be paid, or waiting for approval, is not archived. */
+/** An account with a payment on it, in either direction, still to be paid or waiting for approval is not archived. */
 export const FIN_BANK_ACCOUNT_IN_USE = 'FIN30';
 
 export const BANK_ACCOUNT_MESSAGES = {
