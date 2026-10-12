@@ -76,7 +76,7 @@ export function ReceiptsInboxView({
           {view.hasReceipts ? (
             <DonutStat data={view.byStatus} height={150} showLegend={false} centerValue={view.total} centerLabel="receipts" />
           ) : (
-            <p className="grid h-[150px] place-items-center text-sm text-muted-foreground">No receipts yet.</p>
+            <p className="grid h-[150px] place-items-center text-sm text-muted-foreground">Nothing to chart yet.</p>
           )}
         </BentoCard>
 
@@ -144,7 +144,7 @@ export function ReceiptsInboxView({
                   (rows.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                        No receipts yet.
+                        No receipts yet. Uploading receipts is not available yet.
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -160,10 +160,10 @@ export function ReceiptsInboxView({
                           <Receipt className="size-4 text-muted-foreground" />
                         </div>
                         <div className="min-w-0">
-                          <p className="max-w-56 truncate font-medium" title={r.file_name}>
+                          <p className="max-w-56 whitespace-normal break-words font-medium">
                             {r.file_name}
                           </p>
-                          <p className="whitespace-nowrap text-xs text-muted-foreground">
+                          <p className="whitespace-normal text-xs text-muted-foreground">
                             {r.has_file
                               ? `${INBOX_TYPE_LABELS[r.mime_type]} · ${fileSizeLabel(r.size_bytes)}`
                               : 'Sample receipt, no file'}
@@ -174,7 +174,7 @@ export function ReceiptsInboxView({
                     <TableCell>
                       <p className="whitespace-nowrap">{r.vendor ?? '—'}</p>
                       {note && (
-                        <p className="max-w-64 truncate text-xs text-muted-foreground" title={INBOX_READING_NOTES[note]}>
+                        <p className="max-w-64 whitespace-normal text-xs text-muted-foreground">
                           {INBOX_READING_NOTES[note]}
                         </p>
                       )}
