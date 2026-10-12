@@ -33,7 +33,10 @@ vi.mock('@/lib/supabase/server', () => ({
   }),
 }));
 
-import { runProposalAction, isAllowedAction, ALLOWED_ACTION_NAMES } from '@/lib/agents/apply-proposal';
+import { runProposalAction } from '@/lib/agents/apply-proposal';
+import { actionsFor, entry, type AgentRegistry } from '@/lib/agents/definition';
+import { AGENTS } from '@/lib/agents/registry';
+import { z } from 'zod';
 import { promoteLeadToContact } from '@/lib/reach/capabilities';
 import { getViewer } from '@/lib/auth/viewer';
 import { applyProposalAction, rejectProposalAction } from '@/app/(app)/reach/actions';
@@ -43,19 +46,18 @@ const ctx = { client: {} as never, orgId: 'org-1' };
 describe('runProposalAction', () => {
   it('dispatches an allow-listed action after re-validating its input', async () => {
     const id = '11111111-1111-4111-8111-111111111111';
-    const res = await runProposalAction(ctx, 'promoteLeadToContact', { id });
+    const res = await runProposalAction('reach', ctx, 'promoteLeadToContact', { id });
     expect(res).toEqual({ ok: true, result: { contact_id: 'c1', contact: { id: 'c1', name: 'Aina' } } });
     expect(promoteLeadToContact).toHaveBeenCalledWith(ctx, { id });
   });
 
   it('rejects a non-allowlisted action', async () => {
-    expect(isAllowedAction('deleteLead')).toBe(false);
-    const res = await runProposalAction(ctx, 'deleteLead', { id: '1' });
+    const res = await runProposalAction('reach', ctx, 'deleteLead', { id: '1' });
     expect(res).toEqual({ ok: false, error: 'That action is not allowed.' });
   });
 
-  it('allow-list is exactly the seven non-destructive actions', () => {
-    expect([...ALLOWED_ACTION_NAMES].sort()).toEqual(
+  it("reach's allow-list is exactly the seven non-destructive actions", () => {
+    expect(Object.keys(actionsFor('reach', AGENTS)).sort()).toEqual(
       [
         'createAppointment',
         'createForm',
@@ -68,15 +70,45 @@ describe('runProposalAction', () => {
     );
   });
 
+  it('routes by product to that definition\'s actions, never reach\'s', async () => {
+    let qaRan = false;
+    const qa = {
+      agentKey: 'qa-agent',
+      product: 'qa',
+      buildContext: async () => ({ context: '', raw: {} }),
+      scan: () => [],
+      hasNewData: async () => true,
+      actions: {
+        noop: entry(z.object({ id: z.string() }), async () => {
+          qaRan = true;
+          return { ok: true as const, data: { id: 'x' } };
+        }),
+      },
+      buildWriteContext: () => ({}),
+      digest: { prompt: () => '' },
+      ui: { title: 'QA', subtitle: '', screenPath: '/qa/agents', assetKinds: [] },
+    } as never;
+    const reg: AgentRegistry = new Map([['qa-agent', qa]]); // reach absent
+    const res = await runProposalAction('qa', {}, 'noop', { id: 'x' }, reg);
+    expect(res).toEqual({ ok: true, result: { id: 'x' } });
+    expect(qaRan).toBe(true);
+    expect(promoteLeadToContact).not.toHaveBeenCalled();
+  });
+
+  it('rejects an action for an unknown product', async () => {
+    const res = await runProposalAction('ghost', ctx, 'noop', { id: 'x' }, new Map());
+    expect(res).toEqual({ ok: false, error: 'That action is not allowed.' });
+  });
+
   it('rejects input that no longer matches the capability schema', async () => {
-    const res = await runProposalAction(ctx, 'promoteLeadToContact', { id: 'not-a-uuid' });
+    const res = await runProposalAction('reach', ctx, 'promoteLeadToContact', { id: 'not-a-uuid' });
     expect(res.ok).toBe(false);
   });
 
   it('surfaces a capability failure (missing target) as ok:false', async () => {
     (promoteLeadToContact as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, error: 'That lead was not found.' });
     const id = '22222222-2222-4222-8222-222222222222';
-    const res = await runProposalAction(ctx, 'promoteLeadToContact', { id });
+    const res = await runProposalAction('reach', ctx, 'promoteLeadToContact', { id });
     expect(res).toEqual({ ok: false, error: 'That lead was not found.' });
   });
 
@@ -84,7 +116,7 @@ describe('runProposalAction', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     (promoteLeadToContact as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('network boom'));
     const id = '55555555-5555-4555-8555-555555555555';
-    const res = await runProposalAction(ctx, 'promoteLeadToContact', { id });
+    const res = await runProposalAction('reach', ctx, 'promoteLeadToContact', { id });
     expect(res.ok).toBe(false);
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
@@ -92,7 +124,7 @@ describe('runProposalAction', () => {
 });
 
 const ID = '44444444-4444-4444-8444-444444444444';
-const claimRow = { action: 'promoteLeadToContact', input: { id: '33333333-3333-4333-8333-333333333333' } };
+const claimRow = { action: 'promoteLeadToContact', input: { id: '33333333-3333-4333-8333-333333333333' }, product: 'reach' };
 
 describe('applyProposalAction', () => {
   beforeEach(() => {
