@@ -652,9 +652,10 @@ database has let go.
 
 **Recording.** `finance_register_receipt` inserts the row, and the guard
 (`private.finance_receipt_guard`) refuses it unless the object is in the
-bucket, under the row's own workspace, uploaded in the last 30 minutes, not
-already a receipt, not waiting to be removed, and of the type its extension
-names (`FIN24`). `mime_type`, `size_bytes` and `uploaded_by` are the
+bucket, uploaded in the last 30 minutes, not already a receipt, not waiting to
+be removed, and of the type its extension names (`FIN24`). That the path is
+under the row's own workspace is not the guard's check but the table's
+(`finance_receipts_file_path_check`, `23514`). `mime_type`, `size_bytes` and `uploaded_by` are the
 database's to write. Someone who may not write in the workspace is answered
 `42501` before anything is said about a file.
 
@@ -665,7 +666,7 @@ workspace never change: `42501` from the grants for a signed-in person, and
 `finance_set_receipt_extraction` is for a model's reading, writes only
 while the receipt is in review, and stamps `extracted_at` when the reading
 worked (a failed one clears it): the screen says "Read by AI" from that stamp
-alone, and only until a person has reviewed the receipt; `finance_review_receipt` is a person's and
+alone, and only until it leaves review; `finance_review_receipt` is a person's and
 moves a receipt in review to unmatched.
 
 **Matching.** A receipt names one expense or one bill of its workspace, or
@@ -1094,18 +1095,19 @@ quotation, a credit note or a refund by the file that made the call.
 | `FIN08` | The contact has invoices or quotations, so Customer cannot be unticked |
 | `FIN09` | The payment, money out or money in, is posted or void and cannot be changed or deleted, its split cannot be changed, or it is not scheduled and so cannot be marked paid; a payment that was never posted cannot be voided (delete it). Also: a payment or an allocation does not move to another workspace (an update that changes `org_id`) |
 | `FIN10` | The bill, invoice or quotation has no lines, or its lines total nothing; it cannot be saved without a line, and a bill or an invoice cannot be posted, nor a quotation sent, without an amount |
-| `FIN11` | The bill, invoice, quotation, credit note or payment no longer exists. `finance_post_invoice`, `finance_send_quotation`, `finance_convert_quotation` and `finance_issue_credit_note` also answer this to a viewer: each locks its row first, and a viewer may not, so to them it is not there |
+| `FIN11` | The bill, invoice, quotation, credit note or payment no longer exists. `finance_post_invoice`, `finance_send_quotation`, `finance_convert_quotation` and `finance_issue_credit_note` also answer this to a viewer: each locks its row first, and a viewer may not, so to them it is not there. Five receipt functions (`finance_review_receipt`, `finance_attach_receipt`, `finance_detach_receipt`, `finance_receipt_to_expense`, `finance_receipt_to_bill`) answer it when the receipt no longer exists, or is another workspace's |
 | `FIN12` | The invoice has a credit note that is a draft or issued, so it cannot be voided. `invoices.ts` words it: "This invoice has credit notes. Void them on Credit Notes, or delete the drafts, before voiding it." |
 | `FIN13` | The quotation already has an invoice that is not void: it cannot be converted again, and its answer can no longer change. `quotations.ts` words it |
 | `FIN14` | Approval. Only an owner or admin approves or rejects an expense or a payment; a payment is submitted for approval only from a draft and rejected only before it is approved; money out that settles no document needs one of them before it is scheduled or paid; a payment waiting for approval, or rejected, cannot be changed; a rejected payment is final; an approved payment is paid as it was approved, with nothing but its status, number and date changing. Also: `approved_by` and `approved_at` on a payment or an expense are written by the database, and an update from a signed-in person that changes either by hand is this code, unless an earlier rule refuses it first (`FIN09` on a posted or void payment, `FIN01` on an approved or rejected expense whose status is left as it was); a scheduled payment out that nobody approved cannot be raised above its split, or made from scheduled money in, by someone who is not an owner or admin, and its split cannot be deleted or lowered below the payment by any signed-in person. Also a member's post or void of a cash receipt: Cash Receipts offers a member no Post and no Void, and if one is sent anyway the action answers "Only an owner or admin can post, pay or void. Ask one of them to do this." before reading or writing, and the database answers this code and uses up no number. Only an owner or admin unties a receipt from an approved expense or a posted bill. |
 | `FIN15` | A receipt, a voucher or an expense names the wrong thing: a receipt is for invoices or for an income category, a voucher for expenses or for an expense category, never both and never neither; a receipt for invoices that is being posted must be exactly its split and carry no category; an expense needs an expense category of its own workspace. `cash-receipts.ts` words it for a receipt: "A receipt needs either invoices that add up to its amount, or an income category that still exists. Edit it and try again." The voucher and the expense meet it with their forms |
-| `FIN23` | A receipt's state does not allow it: it starts in review, tied to nothing; it does not move to another workspace; its file, name, type, size, uploader and upload time do not change; a matched receipt is untied before it is deleted, tied to something else, or made into an expense or a bill. Not worded yet: no button reaches it. |
+| `FIN23` | A receipt's state does not allow it: it starts in review, tied to nothing; it does not move to another workspace; its file, name, type, size, uploader and upload time do not change; a matched receipt is untied before it is deleted (the guard, for any delete), and `finance_attach_receipt`, `finance_receipt_to_expense` and `finance_receipt_to_bill` refuse a receipt that is already matched. A plain update of `expense_id` or `bill_id` by a writer is allowed by the grants, and the guard moves the receipt to the new document (with `FIN14` when it leaves an approved expense or a posted bill and the writer cannot decide). Not worded yet: no button reaches it. |
 | `FIN24` | The file of a receipt: there is none; it is not in the bucket; it was uploaded more than 30 minutes ago or is waiting to be removed; it is already a receipt; it is not the type its name says; its path names none of the five types. Not worded yet. |
 | `FIN25` | A void bill takes no receipt. Not worded yet. |
 | `42501` | Row-level security refused the write: "You do not have permission to make changes here." |
 | `22003` | A number does not fit its column (quantity × unit price can overflow): "That amount is too large." |
-| `22023` | `finance_record_refund` was given a status other than `posted` or `scheduled`. The app always sends one of the two, so only a direct call reaches it; `refunds.ts` has no sentence for it. |
-| `23514` | A check constraint refused the write. The one to know: an invoice's number must match its status (a draft has none, any other status has one, a posted invoice has `posted_at`); a quotation's and a credit note's number follow the same rule. Only a direct write can break it; the app never does. Others include the due date before the invoice date, a quotation valid until before its date, a line's quantity, price or SST rate out of range, a credit note of nothing, a refund reason outside the five, and an allocation naming more than one document, or none; `invoices.ts` has no sentence for them. One has a sentence: e-Invois set on a draft, which `setEInvoice` words as "e-Invois details can be recorded once the invoice is posted." |
+| `22023` | `finance_record_refund` was given a status other than `posted` or `scheduled`. The app always sends one of the two, so only a direct call reaches it; `refunds.ts` has no sentence for it. `finance_attach_receipt` answers it when it is given neither an expense nor a bill, or both: a receipt is tied to exactly one. |
+| `23514` | A check constraint refused the write. The one to know: an invoice's number must match its status (a draft has none, any other status has one, a posted invoice has `posted_at`); a quotation's and a credit note's number follow the same rule. Only a direct write can break it; the app never does. Others include the due date before the invoice date, a quotation valid until before its date, a line's quantity, price or SST rate out of range, a credit note of nothing, a refund reason outside the five, and an allocation naming more than one document, or none; `invoices.ts` has no sentence for them. One has a sentence: e-Invois set on a draft, which `setEInvoice` words as "e-Invois details can be recorded once the invoice is posted." Receipts: the table's checks refuse an amount that is not above zero or is NaN, an SST above the amount or below zero or NaN, a vendor longer than 200 characters, a file name with a slash, a backslash or a control character or longer than 200, a path outside the receipt's own workspace or of no known shape, and a receipt tied to two documents or a status that disagrees with its tie; `finance_receipt_to_expense` also answers it for an amount or SST of NaN. Not worded yet: no button reaches them. |
+| `22007`, `22P02` | A date or a number that cannot be read: the receipt functions cast `details` and `expense` with `::date` and `::numeric` (`finance_set_receipt_extraction`, `finance_review_receipt`, `finance_receipt_to_expense`), so a bad `receipt_date` is `22007` and a bad `amount` or `sst_amount` is `22P02`. The schemas of the parts that call them must refuse these first. |
 | `23505` | A unique constraint refused the write. `invoices.ts` words it as "That invoice number is already used.". When a payment is recorded it can only be the same bill or invoice twice on one payment (numbers are taken under a lock), so `recordPaymentOut` and `recordPaymentIn` word it as "Each bill can appear once on a payment." and "Each invoice can appear once on a payment."; the schemas refuse it first, comparing ids without regard to capitals. |
 
 `FIN01` is also raised for a quotation (created as a draft; one that has been
@@ -1626,8 +1628,18 @@ with no date).
 - A bill made from a receipt is a draft with no number, so the inbox reads
   "Draft bill" until it is posted.
 - The demo's receipts have no file.
-- Nothing removes files until the clean-up route exists and the operator's
-  cron calls it. Until then nothing can be uploaded either.
+- The app uploads nothing in this part, but once the migration is applied the
+  storage rule and `finance_register_receipt` are open to anyone who may write
+  in a real workspace, so a file can be put in the bucket, and recorded as a
+  receipt, through the API. Nothing removes files until the clean-up route of
+  the next part exists and the operator's cron calls it; until then such a
+  file stays, within the 1 GB a workspace and 20 GB bucket limits. When the
+  clean-up exists, anything not held by a receipt for an hour is removed.
+  Accepted for this part.
+- A receipt that leaves review without a person's review (tied by
+  `finance_attach_receipt`, or turned into an expense or a bill) stops saying
+  "Read by AI", so a model's figures can sit on a matched row with no caution.
+  To be decided in 7c and 7d.
 - The room limits (1 GB a workspace, 20 GB the bucket) add up every object in
   the bucket on each upload. That is one index scan today; it wants a stored
   total if the bucket grows to hundreds of thousands of files.
