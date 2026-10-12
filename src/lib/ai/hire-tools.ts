@@ -734,7 +734,10 @@ export function createHireTools(
   // closes_on is an absolute date; without this the model has to guess the year.
   const today = ` Today in Malaysia is ${klToday(now())}.`;
   // An interview is at a day and an hour: "Tuesday at 3" and "in an hour" need the weekday and the time to count from.
-  const todayWithTime = ` Today in Malaysia is ${klTodayWords(now())}.`;
+  // The exact form is said too: the input check's refusal of "9:00" is otherwise all a model learns it from.
+  const todayWithTime =
+    ' Give the date as YYYY-MM-DD and the time as HH:MM in 24-hour form, two digits each: 09:00, 15:00.' +
+    ` Today in Malaysia is ${klTodayWords(now())}.`;
   return {
     ...read,
     createJob: tool({

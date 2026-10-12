@@ -154,6 +154,43 @@ export function stoppedAfterApproval(turn: readonly ModelMessage[]): Set<unknown
 }
 
 /**
+ * How the SDK begins the error it gives a call whose input the tool's own schema refused: the message of its
+ * `InvalidToolInputError`, with the error's name in front when the whole error was written out (as it is in the
+ * request that refused the call).
+ */
+const isInvalidInput = (error: unknown, tool: unknown): boolean => {
+  const words = `Invalid input for tool ${String(tool)}:`;
+  return typeof error === 'string' && (error.startsWith(words) || error.startsWith(`AI_InvalidToolInputError: ${words}`));
+};
+
+/**
+ * The calls in these messages whose input the tool's own schema refused, by call id. The SDK never asks a gate about
+ * such a call and never runs it: it keeps the call in the messages and gives it an error for a result. So it is
+ * known by three things together: an error result (`error-text` or `error-json`), that begins as the SDK's own words for it, and no approval request of any kind for the
+ * call. A call that reached a gate always has a request (the user's card, or the automatic one of a denial), so a
+ * change that was shown, or that ran and threw, is never taken for one of these, whatever its error says.
+ * Without this, a model that sent "9:00" for a time and then 09:00 was told one was already prepared.
+ */
+export function refusedByInputCheck(turn: readonly ModelMessage[]): Set<unknown> {
+  const asked = new Set<unknown>();
+  for (const message of turn) {
+    if (message.role !== 'assistant') continue;
+    for (const part of partsOf(message)) if (part.type === 'tool-approval-request') asked.add(part.toolCallId);
+  }
+  const ids = new Set<unknown>();
+  for (const message of turn) {
+    if (message.role !== 'tool') continue;
+    for (const part of partsOf(message)) {
+      if (part.type !== 'tool-result' || asked.has(part.toolCallId)) continue;
+      const output = part.output as { type?: unknown; value?: unknown } | null | undefined;
+      const error = output?.type === 'error-json' || output?.type === 'error-text' ? output.value : undefined;
+      if (isInvalidInput(error, part.toolName)) ids.add(part.toolCallId);
+    }
+  }
+  return ids;
+}
+
+/**
  * The calls in these messages that the gate below denied itself, by call id.
  * Such a call never became a card, so it is not the turn's one deletion: the
  * SDK asks the gate about an approved call again in the request that carries
@@ -164,6 +201,8 @@ export function stoppedAfterApproval(turn: readonly ModelMessage[]): Set<unknown
 export function deniedHere(turn: readonly ModelMessage[]): Set<unknown> {
   // A call stopped after the user's yes is over too: it never ran, and what replaces it must be able to reach a card.
   const ids = stoppedAfterApproval(turn);
+  // So is one the tool's own input check refused: no gate was asked about it, and nothing was shown.
+  for (const id of refusedByInputCheck(turn)) ids.add(id);
   for (const message of turn) {
     if (message.role !== 'tool') continue;
     for (const part of partsOf(message)) {

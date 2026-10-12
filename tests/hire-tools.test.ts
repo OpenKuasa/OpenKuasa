@@ -644,8 +644,9 @@ describe('hire change tools', () => {
   it('describes the six interview changes as agreed, three of them with the weekday and the time to count from', () => {
     const t = createHireTools(data, NOW, { ctx, canWrite: true }) as Record<string, { description: string }>;
     // 04:00 UTC on 10 October 2026 is noon on that Saturday in Kuala Lumpur.
-    const TODAY = ' Today in Malaysia is Saturday, 2026-10-10, and the time there is 12:00.';
-    expect(TODAY).toBe(` Today in Malaysia is ${klTodayWords(NOW)}.`);
+    // The form of the date and the time is said outright: a refused "9:00" is all a model would otherwise learn it from.
+    const TODAY = ' Give the date as YYYY-MM-DD and the time as HH:MM in 24-hour form, two digits each: 09:00, 15:00. Today in Malaysia is Saturday, 2026-10-10, and the time there is 12:00.';
+    expect(TODAY).toBe(` Give the date as YYYY-MM-DD and the time as HH:MM in 24-hour form, two digits each: 09:00, 15:00. Today in Malaysia is ${klTodayWords(NOW)}.`);
     expect(t.scheduleInterview.description).toBe(
       `Schedule ONE interview for an active application. Use the application's id from listApplications. Give the date and the time in Kuala Lumpur. Nothing is sent to the candidate.${TODAY}`,
     );

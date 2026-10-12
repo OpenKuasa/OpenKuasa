@@ -244,6 +244,49 @@ describe('an interview change the user approved that a last check stopped', () =
   });
 });
 
+// A call whose input the tool's own schema refused never reached a gate, a card or the database. The SDK keeps the
+// call in the messages with an error for its result, and no approval request of any kind.
+describe('a call the tool\'s input check refused is not the turn\'s one, for any of the three kinds, and was never a card', () => {
+  type Form = ['error-text' | 'error-json', string];
+  const refused = (toolName: string, toolCallId: string, input: unknown, [type, name]: Form): ModelMessage[] => [
+    called(toolName, toolCallId, input),
+    { role: 'tool', content: [{ type: 'tool-result', toolCallId, toolName, output: { type, value: `${name}Invalid input for tool ${toolName}: AI_TypeValidationError: Type validation failed: Give the time as HH:MM in 24-hour form, like 15:00.` } }] } as ModelMessage,
+  ];
+  // As the SDK writes it in the request that refused the call (seen by running it), and the same message without the error's name.
+  const FORMS: Form[] = [['error-text', 'AI_InvalidToolInputError: '], ['error-text', ''], ['error-json', 'AI_InvalidToolInputError: '], ['error-json', '']];
+  it.each(FORMS)('an interview change (%s, "%s")', (...type) => {
+    const turn = [user('Schedule her at 9'), ...refused('scheduleInterview', 'c1', { application_id: APP, date: '2026-10-27', time: '9:00', kind: 'video' }, type)];
+    expect(interviewChangeProblem(turn, { toolCallId: 'c2', id: APP })).toBeNull();
+    // A link typed before it still counts in the next turn: nothing was shown.
+    const next = [user(`Schedule her at 9 on ${LINK}`), ...refused('scheduleInterview', 'c1', { application_id: APP, time: '9:00', place: LINK }, type), { role: 'assistant', content: 'Which day?' } as ModelMessage, user('Tuesday')];
+    expect(linkNobodyGave(next, LINK)).toBe(false);
+  });
+  it.each(FORMS)('a deletion and a talent pool change (%s, "%s")', (...type) => {
+    expect(deletionProblem([user('Delete her'), ...refused('deleteCandidate', 'c1', { id: 'aina' }, type)], { toolCallId: 'c2', id: PERSON })).toBeNull();
+    expect(poolChangeProblem([user('Mark her passive'), ...refused('setPoolStatus', 'c1', { id: 'aina', status: 'passive' }, type)], { toolCallId: 'c2', id: PERSON })).toBeNull();
+  });
+  it('a call that reached the user, or ran and failed, is still the turn\'s one', () => {
+    const failed = (output: unknown, request: boolean): ModelMessage[] => [
+      { role: 'assistant', content: [
+        { type: 'tool-call', toolCallId: 'c1', toolName: 'cancelInterview', input: { id: IV } },
+        ...(request ? [{ type: 'tool-approval-request', approvalId: 'r1', toolCallId: 'c1' }] : []),
+      ] } as ModelMessage,
+      { role: 'tool', content: [
+        ...(request ? [{ type: 'tool-approval-response', approvalId: 'r1', approved: true }] : []),
+        { type: 'tool-result', toolCallId: 'c1', toolName: 'cancelInterview', output },
+      ] } as ModelMessage,
+    ];
+    // Approved, ran, and threw: it was shown and it ran. Even with those very words in what it threw.
+    for (const output of [{ type: 'error-json', value: 'fetch failed' }, { type: 'error-text', value: 'Invalid input for tool cancelInterview: x' }]) {
+      expect(interviewChangeProblem([user('Cancel it'), ...failed(output, true)], { toolCallId: 'c2', id: IV2 })).toBe(ONE_INTERVIEW_CHANGE);
+    }
+    // An error that is not the input check's, with no card: counted, as before.
+    expect(interviewChangeProblem([user('Cancel it'), ...failed({ type: 'error-text', value: 'fetch failed' }, false)], { toolCallId: 'c2', id: IV2 })).toBe(ONE_INTERVIEW_CHANGE);
+    // A result that is not an error is never the input check's.
+    expect(interviewChangeProblem([user('Cancel it'), ...failed({ type: 'json', value: { note: 'Invalid input for tool cancelInterview: x' } }, false)], { toolCallId: 'c2', id: IV2 })).toBe(ONE_INTERVIEW_CHANGE);
+  });
+});
+
 describe('linkNobodyGave', () => {
   it('finds the links in a text, without the punctuation that ends a sentence or closes a bracket', () => {
     expect(linksIn('Use https://meet.example.com/abc.')).toEqual([LINK]);
@@ -289,7 +332,10 @@ describe('linkNobodyGave', () => {
   it('once an interview card was shown, a link typed before it must be given again: it was for that interview', () => {
     const card = (result: ModelMessage | null): ModelMessage[] => [
       user(`Schedule Aina on ${LINK}`),
-      called('scheduleInterview', 'c0', { application_id: APP, place: LINK }),
+      { role: 'assistant', content: [
+        { type: 'tool-call', toolCallId: 'c0', toolName: 'scheduleInterview', input: { application_id: APP, place: LINK } },
+        { type: 'tool-approval-request', approvalId: 'r0', toolCallId: 'c0' },
+      ] } as ModelMessage,
       ...(result ? [result] : []),
     ];
     const ran = answered('scheduleInterview', 'c0', { ok: true, data: { id: IV, place: LINK } });

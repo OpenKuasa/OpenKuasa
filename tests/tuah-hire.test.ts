@@ -3241,6 +3241,27 @@ describe('interview changes', () => {
           'Notes: Second round. Ask about weekends. · Nothing is sent to the candidate.',
       );
     });
+    it.each(agents)('%s: a call the tool\'s own input check refused is not the turn\'s one: sent again in the right form, it gets its card', async (agent) => {
+      // "9:00" is not HH:MM. The SDK refuses it before any gate is asked; the model sends 09:00.
+      const run = await request([
+        [{ tool: 'scheduleInterview', input: { ...NEW, time: '9:00' } }],
+        [{ tool: 'listJobs', input: {} }, { tool: 'scheduleInterview', input: { ...NEW, time: '09:00' } }],
+      ], agent, world(), `Schedule ${WHO} for 12 January at 9am, video`);
+      expect(run.denials).toEqual([]);
+      expect(run.cards).toHaveLength(1);
+      expect(run.cards[0].toolCall).toMatchObject({ toolName: 'scheduleInterview', input: { time: '09:00' } });
+      // The same for a deletion and a talent pool change: an id that is not an id, then the real one.
+      const others = await request([
+        [{ tool: 'deleteCandidate', input: { id: 'zulaikha' } }, { tool: 'setPoolStatus', input: { id: 'zulaikha', status: 'passive' } }],
+        [{ tool: 'listJobs', input: {} }, { tool: 'listJobs', input: {} }, { tool: 'deleteCandidate', input: { id: PERSON } }, { tool: 'setPoolStatus', input: { id: PERSON, status: 'passive' } }],
+      ], agent);
+      expect(others.denials).toEqual([]);
+      expect(others.cards.map((c) => c.toolCall?.toolName).sort()).toEqual(['deleteCandidate', 'setPoolStatus']);
+      // Two that reached a card are still two.
+      const two = await request([[{ tool: 'scheduleInterview', input: NEW }], [{ tool: 'listJobs', input: {} }, { tool: 'scheduleInterview', input: { ...NEW, time: '16:00' } }]], agent);
+      expect(two.cards).toHaveLength(1);
+      nothingSaved();
+    });
     it.each(agents)('%s: a made-up link is denied, and a link the user typed passes', async (agent) => {
       const withLink: Call = { tool: 'scheduleInterview', input: { ...NEW, place: LINK } };
       const madeUp = await request([[withLink]], agent, world(), `Schedule ${WHO} for 12 January at 3pm, video`);
