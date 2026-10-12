@@ -218,7 +218,8 @@ create trigger finance_rfq_line_guard
 -- Purchase orders.
 --   draft             -> pending_approval   any writer; needs an amount and a number
 --   draft             -> cancelled          the raiser, or an owner or admin
---   pending_approval  -> approved           an owner or admin, not the raiser unless they own the workspace
+--   pending_approval  -> approved           an owner or admin; not the person who raised it or the person
+--                                           who submitted it, unless they own the workspace
 --   pending_approval  -> draft              with a reason: rejected, by an owner or admin
 --                                           without: withdrawn, by the raiser, or an owner or admin
 --   pending_approval  -> cancelled          the raiser, or an owner or admin
@@ -245,6 +246,7 @@ begin
       new.created_by := me;
     end if;
     new.po_no := null;
+    new.submitted_by := null;
     new.submitted_at := null;
     new.approved_by := null;
     new.approved_at := null;
@@ -276,6 +278,7 @@ begin
 
   if old.status = 'draft' and new.status = 'draft' then
     new.po_no := old.po_no;
+    new.submitted_by := old.submitted_by;
     new.submitted_at := old.submitted_at;
     new.approved_by := old.approved_by;
     new.approved_at := old.approved_at;
@@ -301,6 +304,7 @@ begin
     new := old;
     new.status := 'pending_approval';
     new.po_no := kept;
+    new.submitted_by := me;
     new.submitted_at := now();
     new.rejected_by := null;
     new.rejected_at := null;
@@ -313,8 +317,10 @@ begin
     if not may_sign then
       raise exception 'approving a purchase order needs an owner or admin' using errcode = 'FIN14';
     end if;
-    if is_raiser and not private.is_org_owner(old.org_id) then
-      raise exception 'a purchase order is approved by someone other than the person who raised it'
+    -- Whoever sent it for approval answers for what it says, even when
+    -- someone else started the draft.
+    if (is_raiser or coalesce(old.submitted_by = me, false)) and not private.is_org_owner(old.org_id) then
+      raise exception 'a purchase order is approved by someone other than the person who raised or submitted it'
         using errcode = 'FIN18';
     end if;
     new := old;

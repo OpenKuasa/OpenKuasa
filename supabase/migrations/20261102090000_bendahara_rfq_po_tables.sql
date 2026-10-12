@@ -54,9 +54,10 @@ create table public.finance_rfq_lines (
 create index finance_rfq_lines_rfq_idx on public.finance_rfq_lines (org_id, rfq_id);
 create index finance_rfq_lines_product_idx on public.finance_rfq_lines (org_id, product_id);
 
--- created_by is the person who raised the order: they cannot approve it
--- unless they own the workspace. A rejected order returns to draft and keeps
--- its number and the reason until it is submitted again.
+-- created_by is the person who raised the order and submitted_by the person
+-- who last sent it for approval: neither can approve it unless they own the
+-- workspace. A rejected order returns to draft and keeps its number and the
+-- reason until it is submitted again.
 create table public.finance_purchase_orders (
   id uuid primary key default gen_random_uuid(),
   org_id uuid not null references public.orgs(id) on delete cascade,
@@ -69,6 +70,7 @@ create table public.finance_purchase_orders (
   status text not null default 'draft'
     check (status in ('draft','pending_approval','approved','closed','cancelled')),
   created_by uuid default auth.uid() references auth.users(id) on delete set null,
+  submitted_by uuid references auth.users(id) on delete set null,
   submitted_at timestamptz,
   approved_by uuid references auth.users(id) on delete set null,
   approved_at timestamptz,
@@ -82,14 +84,18 @@ create table public.finance_purchase_orders (
   unique (org_id, id),
   unique (org_id, po_no),
   constraint finance_purchase_orders_dates_check check (expected_date is null or expected_date >= po_date),
-  constraint finance_purchase_orders_number_check check (status = 'draft' or po_no is not null),
+  -- A draft that was never submitted has no number, and can be cancelled without one.
+  constraint finance_purchase_orders_number_check check (status in ('draft','cancelled') or po_no is not null),
   constraint finance_purchase_orders_approved_check
     check (status not in ('approved','closed') or approved_at is not null),
   foreign key (org_id, supplier_id) references public.finance_contacts(org_id, id),
   foreign key (org_id, rfq_id) references public.finance_rfqs(org_id, id)
 );
 create index finance_purchase_orders_supplier_idx on public.finance_purchase_orders (org_id, supplier_id);
-create index finance_purchase_orders_rfq_idx on public.finance_purchase_orders (org_id, rfq_id);
+-- One order per RFQ; a cancelled order frees the RFQ for another.
+create unique index finance_purchase_orders_rfq_key
+  on public.finance_purchase_orders (org_id, rfq_id)
+  where rfq_id is not null and status <> 'cancelled';
 
 -- received_quantity is the total that has arrived so far. More than was
 -- ordered is allowed: suppliers over-deliver, and the screen flags it.

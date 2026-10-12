@@ -125,6 +125,9 @@ testWithSupabase('an RFQ is sent, priced, turned into an order once, and closed'
   expect(converted.error, converted.error?.message).toBeNull();
   expect(await po(o, converted.data)).toMatchObject({ status: 'draft', rfq_no: 'RFQ-0001', total: 332.5, po_no: null });
   expect((await o.c.rpc('finance_convert_rfq', { target_org: o.orgId, target_rfq: id })).error?.code).toBe('FIN22');
+  // ...and a second order cannot be attached to the RFQ by hand.
+  const second = await o.c.from('finance_purchase_orders').insert({ org_id: o.orgId, supplier_id: o.supplier, rfq_id: id }).select('id');
+  expect(second.error?.code).toBe('23505');
   // A cancelled order frees the RFQ.
   expect((await o.c.rpc('finance_cancel_purchase_order', { target_org: o.orgId, target_po: converted.data })).error).toBeNull();
   expect((await o.c.rpc('finance_convert_rfq', { target_org: o.orgId, target_rfq: id })).error).toBeNull();
@@ -161,6 +164,24 @@ testWithSupabase('who may approve: not a member, not the admin who raised it, an
   const rewrite = await admin.c.from('finance_purchase_orders').update({ created_by: null }).eq('id', byAdmin.data).select('id');
   expect(rewrite.error?.code).toBe('FIN01');
   expect((await decide(o, byAdmin.data, true)).error).toBeNull();
+
+  // An admin who rewrites a member's draft and submits it has made it theirs: they cannot approve it.
+  const started = await savePo(member);
+  expect((await savePo(admin, [TONER], { id: started.data })).error).toBeNull();
+  expect((await submit(admin, started.data)).error).toBeNull();
+  expect(await po(o, started.data)).toMatchObject({ created_by: member.userId, submitted_by: admin.userId });
+  expect((await decide(admin, started.data, true)).error?.code).toBe('FIN18');
+  // The same after a withdrawal: the member's pending order, taken back, changed and sent again by the admin.
+  const pendingByMember = await savePo(member);
+  expect((await submit(member, pendingByMember.data)).error).toBeNull();
+  expect((await admin.c.rpc('finance_withdraw_purchase_order', { target_org: o.orgId, target_po: pendingByMember.data })).error).toBeNull();
+  expect((await savePo(admin, [TONER], { id: pendingByMember.data })).error).toBeNull();
+  expect((await submit(admin, pendingByMember.data)).error).toBeNull();
+  expect((await decide(admin, pendingByMember.data, true)).error?.code).toBe('FIN18');
+  expect((await decide(o, pendingByMember.data, true)).error).toBeNull();
+  // Who submitted cannot be rewritten either.
+  const resubmitter = await admin.c.from('finance_purchase_orders').update({ submitted_by: null }).eq('id', started.data).select('id');
+  expect(resubmitter.error?.code).toBe('FIN01');
 
   // The owner approves their own.
   const byOwner = await savePo(o);
