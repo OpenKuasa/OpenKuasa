@@ -166,9 +166,10 @@ begin
 
   -- 5. {salary}: filled from the basic salary of the same workspace, left in place when there is none, and no letter issued with it
   for r in select * from (values (450000, 'RM 4,500.00 per month'), (5, 'RM 0.05 per month'), (100, 'RM 1.00 per month'), (123456789, 'RM 1,234,567.89 per month'),
-    (9223372036854775807, 'RM 92,233,720,368,547,758.07 per month'), (0, null), (null, null)) x(cents, said) loop
+    (9223372036854775807, 'RM 92,233,720,368,547,758.07 per month'), (0, null), (null, null), (-1, null)) x(cents, said) loop
     insert into public.hr_employees (org_id, employee_no, name) values (org, 'S' || coalesce(r.cents::text, 'none'), 'S') returning id into e;
-    if r.cents is not null then insert into public.hr_employee_private (employee_id, org_id, base_salary_cents) values (e, org, r.cents); end if;
+    -- none: no private row at all; -1: a private row with no salary on it.
+    if r.cents is not null then insert into public.hr_employee_private (employee_id, org_id, base_salary_cents) values (e, org, nullif(r.cents, -1)); end if;
     fails := fails || pg_temp.t(adm, format('a letter started for a salary of %s', coalesce(r.cents::text, 'none')),
       format('(select jsonb_build_array(s #>> ''{letter,body}'', s -> ''unfilled'') from hr_start_letter_from_template(%L,%L) s)', e, tf),
       format('=["%s for S {Salary} { salary }", %s]', coalesce(r.said, '{salary}'), case when r.said is null then '["salary"]' else '[]' end));
@@ -202,7 +203,8 @@ begin
   delete from public.hr_letter_templates where org_id = any (b) and (name like 'Surat %' or org_id = b[3]);
   insert into public.hr_letter_templates (org_id, name, letter_type, title) select x, 'Planted ' || s, 'other', 'T' from generate_series(1, 42) s, unnest(b[2:2] || b[4]) x where x = b[2] or s <= 40;
   update public.hr_letter_templates set name = 'SURAT amaran' where org_id = b[4] and name = 'Warning';
-  select string_agg(private.hr_backfill_ms_letter_templates(x)::text, '/' order by n) || ' ' || string_agg(private.hr_backfill_ms_letter_templates(x)::text, '/' order by n) into ctx from unnest(b) with ordinality as w(x, n);
+  select string_agg(private.hr_backfill_ms_letter_templates(x)::text, '/' order by n) into ctx from unnest(b) with ordinality as w(x, n);
+  select ctx || ' ' || string_agg(private.hr_backfill_ms_letter_templates(x)::text, '/' order by n) into ctx from unnest(b) with ordinality as w(x, n);
   select ctx || ' ' || string_agg(s.c, '/' order by s.n) into ctx from (select w.n, count(t.id) || ':' || count(*) filter (where t.name like 'Surat %') || ':' || count(*) filter (where lower(t.name) = 'surat amaran') as c
     from unnest(b) with ordinality as w(x, n) left join public.hr_letter_templates t on t.org_id = w.x group by w.n) s;
   select ctx || ' ' || coalesce(string_agg(right(t.name, 7), ',' order by t.org_id = b[4], t.name), 'none') into ctx from public.hr_letter_templates t where t.org_id in (b[2], b[4]) and t.name like 'Surat %';

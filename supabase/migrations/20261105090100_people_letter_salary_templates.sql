@@ -80,10 +80,13 @@ revoke all on function private.hr_seed_letter_templates(uuid) from public, anon,
 -- added in the order of the list until the workspace is full. The lock is the
 -- one hr_save_letter_template takes, so the count holds; a template renamed
 -- onto one of the six names at the same moment (a rename takes no lock) is
--- left alone, not an error. Returns how many were added; a second run adds
--- none.
+-- left alone, not an error. Returns how many were added; a second run at
+-- once adds none.
+-- For the day this file is applied, and no later: run again after that, it
+-- would give back a Bahasa Malaysia template a workspace has since deleted.
+-- It runs as its owner, as the seed does, and nobody is granted it.
 create or replace function private.hr_backfill_ms_letter_templates(p_org uuid default null)
-returns int language plpgsql set search_path = public as $$
+returns int language plpgsql security definer set search_path = public as $$
 declare
   o uuid;
   held int;

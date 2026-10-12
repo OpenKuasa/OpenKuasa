@@ -174,7 +174,7 @@ describe('the workspace logo', () => {
       expect(body, name).toContain(gate);
       // The gate is the first statement; the row is then held before the old path is read or anything is written.
       expect(body.indexOf(gate), name).toBeLessThan(body.indexOf('select '));
-      const held = body.indexOf('select o.logo_path, o.name into old_path, called from public.orgs o where o.id = p_org for update;');
+      const held = body.indexOf('select o.logo_path, o.name into old_path, called from public.orgs o where o.id = p_org for no key update;');
       expect(held, name).toBeGreaterThan(body.indexOf(gate));
       expect(body.slice(held), name).toContain("if not found then raise exception 'LOGO_NOT_ALLOWED'; end if;");
       for (const write of ['update public.orgs', 'insert into public.activity_log']) {
@@ -277,7 +277,7 @@ describe('letters: the salary placeholder', () => {
 
   test('the amount is written with thousands separators and two decimals, room for any amount the column holds', () => {
     // Times 0.01, never a division: dividing a numeric rounds the last digits of a very large amount.
-    const mask = /to_char\(p\.base_salary_cents \* 0\.01, '(FM[0-9,.]+)'\)/.exec(SALARY)?.[1] ?? '';
+    const mask = /to_char\(p\.base_salary_cents \* 0\.01, '(FM[0-9,.]+)'\)/.exec(fn(text, 'public.hr_start_letter_from_template').body)?.[1] ?? '';
     // The largest bigint is 92,233,720,368,547,758.07 ringgit: seventeen digits before the point.
     expect(mask.split('.')[0].replace(/[^09]/g, '').length).toBeGreaterThanOrEqual(17);
     expect(mask.endsWith('990.00')).toBe(true);
@@ -355,8 +355,7 @@ describe('letters: the starter templates', () => {
 
   test('the backfill: only a workspace that has a template, only a name not used there, never past 50', () => {
     const { header, body } = fn(text, 'private.hr_backfill_ms_letter_templates');
-    expect(header).toContain('private.hr_backfill_ms_letter_templates(p_org uuid default null)\nreturns int language plpgsql set search_path = public');
-    expect(header).not.toContain('security definer');
+    expect(header).toContain('private.hr_backfill_ms_letter_templates(p_org uuid default null)\nreturns int language plpgsql security definer set search_path = public');
     for (const guard of [
       // 1. a workspace is visited only if it has a template, and is counted again once it is held
       'select distinct t.org_id from public.hr_letter_templates t where p_org is null or t.org_id = p_org',

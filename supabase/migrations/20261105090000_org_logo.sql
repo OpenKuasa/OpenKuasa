@@ -38,7 +38,10 @@ alter table public.orgs add column if not exists logo_path text;
 --     a name of another shape. Inside the look-up the file's name is written
 --     in full (storage.objects.name): a workspace has a `name` too. Never at
 --     a path that is a workspace's logo: should that file ever go missing,
---     nobody can put another in its place.
+--     nobody can put another in its place. That look-up of orgs runs under
+--     the uploader's row security, so it sees only their own workspaces:
+--     enough, because set_org_logo keeps a logo's path in its own
+--     workspace's folder, and the uploader is an owner or admin of this one.
 --   update, delete: nobody (so an upload never overwrites a file either).
 --     The app removes files with the service client.
 -- A session that still owes a second factor gets nothing in this bucket.
@@ -70,9 +73,10 @@ create policy org_logos_mfa_required on storage.objects as restrictive
   with check (bucket_id <> 'org-logos' or (select private.mfa_ok()));
 
 -- ---- set the logo (owners and admins) -------------------------------------------
--- The workspace's row is held `for update` before its path is read, so of two
--- admins replacing the logo at once the second is handed the path the first
--- set: no file is left with nobody to remove it.
+-- The workspace's row is held `for no key update` before its path is read, so
+-- of two admins replacing the logo at once the second is handed the path the
+-- first set: no file is left with nobody to remove it. (Not `for update`: that
+-- would also make every insert that references the workspace wait.)
 -- The path must be of the one shape and in the workspace's own folder, with
 -- an uploaded file behind it; where storage recorded the file's type, it is
 -- the type the name ends in (so one of the three). Setting the path the
@@ -91,7 +95,7 @@ begin
   if uid is null or p_org is null or private.is_demo_org(p_org) or not private.is_org_admin(p_org) then
     raise exception 'LOGO_NOT_ALLOWED';
   end if;
-  select o.logo_path, o.name into old_path, called from public.orgs o where o.id = p_org for update;
+  select o.logo_path, o.name into old_path, called from public.orgs o where o.id = p_org for no key update;
   if not found then raise exception 'LOGO_NOT_ALLOWED'; end if;
 
   if p_path is null
@@ -136,7 +140,7 @@ begin
   if uid is null or p_org is null or private.is_demo_org(p_org) or not private.is_org_admin(p_org) then
     raise exception 'LOGO_NOT_ALLOWED';
   end if;
-  select o.logo_path, o.name into old_path, called from public.orgs o where o.id = p_org for update;
+  select o.logo_path, o.name into old_path, called from public.orgs o where o.id = p_org for no key update;
   if not found then raise exception 'LOGO_NOT_ALLOWED'; end if;
 
   if old_path is not null then
