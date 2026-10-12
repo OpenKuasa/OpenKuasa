@@ -31,6 +31,12 @@ const applicationDeleted = vi.hoisted(() => vi.fn());
 const candidateDeleted = vi.hoisted(() => vi.fn());
 const poolSet = vi.hoisted(() => vi.fn());
 const pipelineMoved = vi.hoisted(() => vi.fn());
+const interviewScheduled = vi.hoisted(() => vi.fn());
+const interviewRecorded = vi.hoisted(() => vi.fn());
+const interviewChanged = vi.hoisted(() => vi.fn());
+const interviewCancelled = vi.hoisted(() => vi.fn());
+const interviewOutcomeSet = vi.hoisted(() => vi.fn());
+const interviewReopened = vi.hoisted(() => vi.fn());
 
 // The real schemas, so the prepared input is checked as it is in the app; only the write is recorded.
 vi.mock('@/lib/hire/capabilities', async (importOriginal) => ({
@@ -43,6 +49,12 @@ vi.mock('@/lib/hire/capabilities', async (importOriginal) => ({
   deleteCandidate: candidateDeleted,
   setPoolStatus: poolSet,
   moveToPipeline: pipelineMoved,
+  scheduleInterview: interviewScheduled,
+  recordPastInterview: interviewRecorded,
+  rescheduleInterview: interviewChanged,
+  cancelInterview: interviewCancelled,
+  setInterviewOutcome: interviewOutcomeSet,
+  reopenInterview: interviewReopened,
 }));
 
 // The real `tool`, but a refusal any tool answers with is noted: a specialist stops after the step in which
@@ -2554,5 +2566,700 @@ describe('a deletion never rests on the pool lookup alone', () => {
     expect((await team_([remove], { ...collectNames([listed]), ...collectNames([pooled]) }))[0]).toMatchObject({ action: 'deleteCandidate' });
     // Names kept before the pool lookup returned ids carry no mark of where they came from: they are as they were.
     expect((await team_([remove], { [`candidate:${A}`]: 'Zarina Lau' }))[0]).toMatchObject({ action: 'deleteCandidate' });
+  });
+});
+
+// Interview changes are the third kind held to one a turn. The same rules in the three ways a change is prepared:
+// Lekir's own chat, Tuah holding the tools itself, and Tuah's team.
+describe('interview changes', () => {
+  type UI = import('ai').UIMessage;
+  type Model = import('ai').ModelMessage;
+  type ToolPart = { type: string; state?: string; toolCallId?: string; input?: unknown; approval?: { id: string; approved?: boolean; reason?: string; requestReason?: string; isAutomatic?: boolean } };
+  type Card = { type: string; isAutomatic?: boolean; approved?: boolean; reason?: string; toolCall?: { toolName?: string; input?: unknown } };
+  type Call = { tool: string; input: unknown };
+  const APP = '44444444-4444-4444-8444-444444444471';
+  const IV = '11111111-1111-4111-8111-111111111171';
+  const IV2 = '22222222-2222-4222-8222-222222222272';
+  const PERSON = '66666666-6666-4666-8666-666666666671';
+  const MADE_UP = '99999999-9999-4999-8999-999999999971';
+  /** 3:00 pm on Tuesday 20 October 2026 in Kuala Lumpur; 11:00 am on the Thursday; and the Wednesday at 3:00 pm. */
+  const AT = '2026-10-20T07:00:00.000Z';
+  const LATER = '2026-10-22T03:00:00.000Z';
+  const MOVED = '2026-10-21T07:00:00.000Z';
+  const LINE = 'This interview: Tue 20 Oct 2026, 3:00 pm · video';
+  const LINE_LATER = 'This interview: Thu 22 Oct 2026, 11:00 am · video';
+  const LINE_MOVED = 'This interview: Wed 21 Oct 2026, 3:00 pm · video';
+  const LINK = 'https://meet.example.com/abc';
+  const ROOM = 'https://meet.example.com/room-2';
+  /** A link the applicant wrote in their cover letter: a stranger's text, which a lookup with contact details returns. */
+  const LETTER_LINK = 'https://meet.example.net/from-the-letter';
+  // A name and a job nobody else in the sample data has, so no namesake's line is ever added by accident.
+  const WHO = 'Putri Maisarah Dahlan';
+  const JOB = 'Night Auditor';
+  const ONE_INTERVIEW_CHANGE = 'One interview change at a time. One is already prepared for approval.';
+  const AMBIGUOUS =
+    'More than one match was found for that name, so no interview change was prepared. Stop here: say which match and ask the user which one they mean. ' +
+    'Once the user has said which, they can ask again.';
+  const LINK_NOT_GIVEN = 'That link was not given by the user, so no interview change was prepared. Ask the user for the link, or prepare it without one.';
+  const LOOK_THE_SAME =
+    `Two interviews with ${WHO} for ${JOB} look the same from here, so I cannot tell them apart. Nothing was changed. ` +
+    'Use the menu on the interview\'s own row on the Interviews screen.';
+  const CHECK_FAILED = 'I could not check which interview this is just now, so no change was prepared. Try again in a moment.';
+  const notAnInterview = (id: string) =>
+    `You have not looked up ${id} as an interview. Never guess an id: use listInterviews to find the interview and get its real id, then prepare the change again.`;
+  const notAnApplication = (id: string) =>
+    `You have not looked up ${id} as an application. Never guess an id: use listApplications to find the application and get its real id, then prepare the change again.`;
+  const cancelled = { ok: true, data: { id: IV, application_id: APP, candidate: WHO, job: JOB, message: `Cancelled the interview with ${WHO}. Nothing has been sent to them.`, invitation: null, confirmed: true } };
+  const mocks = [interviewScheduled, interviewRecorded, interviewChanged, interviewCancelled, interviewOutcomeSet, interviewReopened];
+  const nothingSaved = () => {
+    for (const fn of mocks) expect(fn).not.toHaveBeenCalled();
+  };
+  const NEW = { application_id: APP, date: '2027-01-12', time: '15:00', duration_minutes: 60, kind: 'video' };
+
+  type State = { at: string; twin: boolean; fail: boolean };
+  /**
+   * One application with two interviews, a first and a second round; `state` can move the first, make the second
+   * read exactly like it, or make the server's read fail. One candidate has a real id, for a deletion or a pool
+   * change beside an interview change. The checks read these rows; what a model "looked up" is in the conversation.
+   */
+  const world = (state: State = { at: AT, twin: false, fail: false }) => {
+    const base = hire().data;
+    const interview = (id: string, scheduled_at: string, place: string | null) => ({
+      id, application_id: APP, candidate_name: WHO, job_title: JOB, scheduled_at, kind: 'video' as const, interviewer_name: null,
+      status: 'scheduled' as const, created_at: '2026-10-09T02:00:00.000Z', updated_at: '2026-10-09T02:00:00.000Z',
+      duration_minutes: 60, place, notes: null, application_stage: 'interview' as const, application_outcome: 'active' as const,
+    });
+    const listInterviews = async () => [interview(IV, state.at, null), interview(IV2, state.twin ? state.at : LATER, ROOM)];
+    const listApplications = async () =>
+      (await base.listApplications()).map((a, n) =>
+        n === 0 ? { ...a, id: APP, candidate_name: WHO, job_title: JOB, stage: 'interview' as const, outcome: 'active' as const, cover_letter: `Please interview me on ${LETTER_LINK}`, cv_url: LETTER_LINK, portfolio_url: LETTER_LINK } : a);
+    const listCandidates = async () =>
+      (await base.listCandidates()).map((c, n) => (n === 0 ? { ...c, id: PERSON, name: 'Zulaikha Tan Abdullah', pool_status: 'available' as const } : c));
+    const interviewCard = async (id: unknown) => {
+      if (state.fail) throw new Error('putri@example.my could not be read');
+      const rows = (await listInterviews()).map((i) => ({ id: i.id, application_id: i.application_id, candidate: i.candidate_name, job: i.job_title, scheduled_at: i.scheduled_at, kind: i.kind }));
+      const target = rows.find((row) => row.id === id) ?? null;
+      return { target, others: target ? rows.filter((row) => row.id !== id) : [], cut: false };
+    };
+    return { data: { ...base, listInterviews, listApplications, listCandidates, interviewCard }, write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true } };
+  };
+  type Access = ReturnType<typeof world>;
+  // With no name and no job asked for, the lookup is a plain list. By the job it would say `several_match`: the two
+  // interviews are with one person, and the model must never pick between those (see the test of that below).
+  const listAll: Call = { tool: 'listInterviews', input: {} };
+  const byName: Call = { tool: 'listApplications', input: { candidate: WHO } };
+  const withLetter: Call = { tool: 'listApplications', input: { candidate: WHO, includeContact: true } };
+
+  describe('Tuah’s team preparing one', () => {
+    /** One request: what Lekir prepared, and the cards put in front of the user with the line each carried. */
+    const prepare = async (
+      script: NonNullable<typeof seen.workerScript>,
+      access: Access = world(),
+      given: { names?: Record<string, string>; said?: string; transcript?: string } = {},
+    ) => {
+      for (const fn of mocks) fn.mockReset();
+      const context = { ...team(), names: given.names ?? {}, transcript: given.transcript ?? '' };
+      seen.calls = [];
+      seen.workerScript = script;
+      seen.workerStep = 0;
+      seen.refusals = [];
+      let cards: Card[] = [];
+      try {
+        const result = runTuah(
+          [{ role: 'user' as const, content: given.said ?? `Cancel the interview with ${WHO}` }],
+          reach(), undefined, undefined, null, null, context, access,
+        );
+        await result.consumeStream();
+        cards = ((await result.steps) as unknown as { content: Card[] }[])
+          .flatMap((s) => s.content)
+          .filter((p) => p.type === 'tool-approval-request' && !p.isAutomatic);
+      } finally {
+        seen.workerScript = null;
+      }
+      return { context, cards };
+    };
+
+    it('all six tools ask for approval for a writer, and a viewer holds none', () => {
+      const { tools, toolApproval } = combineToolkits([hireProduct(world())]);
+      const six = ['scheduleInterview', 'recordPastInterview', 'rescheduleInterview', 'cancelInterview', 'setInterviewOutcome', 'reopenInterview'];
+      for (const name of six) {
+        expect(HIRE_WRITE_TOOL_NAMES, name).toContain(name);
+        expect(Object.keys(tools), name).toContain(name);
+        expect(toolApproval?.[name], name).toBe('user-approval');
+      }
+      expect(toolApproval?.listInterviews).toBeUndefined();
+      const viewer = combineToolkits([hireProduct({ ...world(), write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: false } })]);
+      for (const name of six) expect(Object.keys(viewer.tools), name).not.toContain(name);
+    });
+    it('prepares one card for a change to an interview it looked up, with the line that says which one, and saves nothing', async () => {
+      const { context, cards } = await prepare([listAll, { tool: 'cancelInterview', input: { id: IV } }]);
+      expect(seen.refusals).toEqual([]);
+      expect(context.proposals.size).toBe(1);
+      expect([...context.proposals.values()][0]).toMatchObject({
+        product: 'hire',
+        action: 'cancelInterview',
+        input: { id: IV },
+        title: `Cancel the interview with ${WHO} (${JOB})?`,
+        detail: 'It stays in the list as cancelled. Nothing is sent to the candidate.',
+      });
+      // The line is always there, and is on the card only: no proposal holds it.
+      expect(cards).toHaveLength(1);
+      expect(cards[0].reason).toBe(LINE);
+      expect(JSON.stringify([...context.proposals.values()])).not.toContain('This interview');
+      nothingSaved();
+    });
+    it('prepares a new interview for an application it looked up; there is no interview yet, so the card has no line', async () => {
+      const { context, cards } = await prepare([byName, { tool: 'scheduleInterview', input: NEW }], world(), { said: `Schedule ${WHO} for 12 January at 3pm, video` });
+      expect(seen.refusals).toEqual([]);
+      expect([...context.proposals.values()][0]).toMatchObject({
+        action: 'scheduleInterview',
+        title: `Schedule an interview with ${WHO} (${JOB})?`,
+        detail: 'Tuesday, 12 January 2027, 3:00 pm to 4:00 pm, Kuala Lumpur time (GMT+8) · Video call · No place or link given · No interviewer given · Nothing is sent to the candidate.',
+      });
+      expect(cards).toHaveLength(1);
+      expect(cards[0].reason).toBeUndefined();
+      const past = await prepare([byName, { tool: 'recordPastInterview', input: { ...NEW, date: '2026-10-06', outcome: 'completed' } }], world(), { said: `We interviewed ${WHO} on 6 October at 3pm, by video` });
+      expect(seen.refusals).toEqual([]);
+      expect([...past.context.proposals.values()][0]).toMatchObject({ action: 'recordPastInterview', title: `Record a past interview with ${WHO} (${JOB})?` });
+      nothingSaved();
+    });
+    it('accepts an id an earlier turn knew as an interview, and not one it knew as something else', async () => {
+      const known = await prepare([{ tool: 'reopenInterview', input: { id: IV } }], world(), { names: { [`interview:${IV}`]: `${WHO} (${JOB})` } });
+      expect(seen.refusals).toEqual([]);
+      expect([...known.context.proposals.values()][0]).toMatchObject({ title: `Mark the interview with ${WHO} (${JOB}) as scheduled again?` });
+      const other = await prepare([{ tool: 'reopenInterview', input: { id: IV } }], world(), { names: { [`application:${IV}`]: `${WHO} (${JOB})` } });
+      expect(other.context.proposals.size).toBe(0);
+      expect(seen.refusals[0]).toBe(notAnInterview(IV));
+    });
+    it('refuses an id that was not looked up as the right kind', async () => {
+      const madeUp = await prepare([listAll, { tool: 'cancelInterview', input: { id: MADE_UP } }]);
+      expect(madeUp.context.proposals.size).toBe(0);
+      expect(seen.refusals[0]).toContain(`You have not looked up ${MADE_UP}`);
+      // An application's id, even one it listed, is not an interview's.
+      const wrongKind = await prepare([byName, { tool: 'cancelInterview', input: { id: APP } }]);
+      expect(wrongKind.context.proposals.size).toBe(0);
+      expect(seen.refusals[0]).toBe(notAnInterview(APP));
+      // A new interview needs an application's id: an interview's does not pass, even one it listed.
+      for (const tool of ['scheduleInterview', 'recordPastInterview']) {
+        const input = { ...NEW, application_id: IV, ...(tool === 'recordPastInterview' && { date: '2026-10-06', outcome: 'no_show' }) };
+        const reversed = await prepare([listAll, { tool, input }]);
+        expect(reversed.context.proposals.size, tool).toBe(0);
+        expect(seen.refusals[0], tool).toBe(notAnApplication(IV));
+      }
+      nothingSaved();
+    });
+    it('makes one card when two interview changes are called in one step, and a call refused for its id is not the turn\'s one', async () => {
+      const two = await prepare([listAll, [{ tool: 'cancelInterview', input: { id: IV } }, { tool: 'reopenInterview', input: { id: IV2 } }]]);
+      expect(two.context.proposals.size).toBe(1);
+      expect([...two.context.proposals.values()][0]).toMatchObject({ action: 'cancelInterview', input: { id: IV } });
+      expect(seen.refusals).toEqual([ONE_INTERVIEW_CHANGE]);
+      const afterRefusal = await prepare([listAll, { tool: 'cancelInterview', input: { id: MADE_UP } }, { tool: 'cancelInterview', input: { id: IV } }]);
+      expect(seen.refusals).toHaveLength(1);
+      expect(afterRefusal.context.proposals.size).toBe(1);
+      expect(afterRefusal.cards).toHaveLength(1);
+    });
+    it('refuses a change from a lookup that said several interviews match, in that delegation and in a later one that looked more narrowly', async () => {
+      const { context } = await prepare([
+        // Two interviews of ONE application fit the name.
+        { tool: 'listInterviews', input: { candidate: 'Putri Maisarah' } },
+        { tool: 'cancelInterview', input: { id: IV } },
+        'answer',
+        // A new delegation: its own lookup is the plain list, and says nothing of several.
+        listAll,
+        { tool: 'cancelInterview', input: { id: IV } },
+      ]);
+      expect(context.proposals.size).toBe(0);
+      expect(seen.refusals.slice(0, 2)).toEqual([AMBIGUOUS, AMBIGUOUS]);
+      // The script's last call repeats in delegations that looked nothing up, until Tuah's step limit: refused as well.
+      for (const refusal of seen.refusals) expect(refusal === AMBIGUOUS || refusal.startsWith('You have not looked up')).toBe(true);
+      nothingSaved();
+    });
+    it('refuses a link nobody gave: not one made up, and not one that only Tuah wrote', async () => {
+      const withLink: Call = { tool: 'scheduleInterview', input: { ...NEW, place: LINK } };
+      const madeUp = await prepare([byName, withLink], world(), { said: `Schedule ${WHO} for 12 January at 3pm, video` });
+      expect(madeUp.context.proposals.size).toBe(0);
+      expect(seen.refusals[0]).toBe(LINK_NOT_GIVEN);
+      // What the specialist was told is not the user typing: neither Tuah's task nor Tuah's words in the transcript.
+      const fromTuah = await prepare([byName, withLink], world(), { said: `Schedule ${WHO} for 12 January at 3pm, video`, transcript: `Tuah: I will send ${LINK}` });
+      expect(fromTuah.context.proposals.size).toBe(0);
+      expect(seen.refusals[0]).toBe(LINK_NOT_GIVEN);
+      // Nor one the applicant wrote in a cover letter, or gave as a CV or portfolio link, though the specialist's own lookup returned it.
+      const fromLetter = await prepare([withLetter, { tool: 'scheduleInterview', input: { ...NEW, place: LETTER_LINK } }], world(), { said: `Schedule ${WHO} for 12 January at 3pm, video, with the link she sent` });
+      expect(JSON.stringify(seen.calls.map((c) => c.prompt))).toContain(LETTER_LINK);
+      expect(fromLetter.context.proposals.size).toBe(0);
+      expect(seen.refusals[0]).toBe(LINK_NOT_GIVEN);
+      nothingSaved();
+    });
+    it('lets through a link the user typed, and one a lookup of this delegation returned', async () => {
+      const typed = await prepare([byName, { tool: 'scheduleInterview', input: { ...NEW, place: LINK } }], world(), { said: `Schedule ${WHO} for 12 January at 3pm, video, at ${LINK}.` });
+      expect(seen.refusals).toEqual([]);
+      expect([...typed.context.proposals.values()][0].detail).toContain(`Link: ${LINK}`);
+      // The second round's link is in the interview lookup this delegation ran.
+      const lookedUp = await prepare([listAll, byName, { tool: 'scheduleInterview', input: { ...NEW, place: ROOM } }], world(), { said: `Schedule ${WHO} again, same link as her second round` });
+      expect(seen.refusals).toEqual([]);
+      expect(lookedUp.context.proposals.size).toBe(1);
+    });
+    it('refuses two interviews that read the same, and refuses when the server cannot be read, logging nothing of the error', async () => {
+      const same = await prepare([listAll, { tool: 'cancelInterview', input: { id: IV } }], world({ at: AT, twin: true, fail: false }));
+      expect(same.context.proposals.size).toBe(0);
+      expect(same.cards).toEqual([]);
+      expect(seen.refusals[0]).toBe(LOOK_THE_SAME);
+      const said = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const failed = await prepare([listAll, { tool: 'cancelInterview', input: { id: IV } }], world({ at: AT, twin: false, fail: true }));
+      expect(failed.context.proposals.size).toBe(0);
+      expect(seen.refusals[0]).toBe(CHECK_FAILED);
+      expect(JSON.stringify(said.mock.calls)).not.toContain('putri@');
+      said.mockRestore();
+      nothingSaved();
+    });
+    it('tells Tuah, in its roster line and in what the specialist is asked, that Lekir can change interviews', async () => {
+      seen.calls = [];
+      await runTuah(ask, reach(), undefined, undefined, null, null, team(), hire()).consumeStream();
+      const line = seen.calls[0].system.split('\n').find((l) => l.startsWith('- askLekir:'));
+      expect(line).toContain('moved to the pipeline for a job, one at a time. An interview can be scheduled, changed, cancelled, marked completed or a no-show, marked scheduled again, or recorded after it took place, one at a time. ');
+      expect(line!.endsWith('.')).toBe(true);
+      expect(line).not.toContain('..');
+      const asks = createTeamTools([hireProduct(world())], team()).tools.askLekir as unknown as { description: string };
+      expect(asks.description).toContain(
+        'it can prepare adding or editing one candidate at a time; it can prepare scheduling, changing, cancelling or closing one interview at a time, or recording one that already took place; it can prepare deleting',
+      );
+    });
+  });
+
+  describe('Tuah’s team, as the browser carries the turn between requests', () => {
+    const say = (id: string, text: string): UI => ({ id, role: 'user', parts: [{ type: 'text', text }] });
+    type Runner = (messages: Model[], chat: UI[]) => { toUIMessageStream: () => ReadableStream<unknown> };
+    const asTeam = (access: Access): Runner => (messages, chat) =>
+      runTuah(messages, reach(), undefined, undefined, null, null, { transcript: '', proposals: proposalsIn(chat), names: namesIn(chat) }, access);
+    const exchange = async (chat: UI[], run: Runner): Promise<UI[]> => {
+      const { convertToModelMessages, readUIMessageStream } = await import('ai');
+      const last = chat[chat.length - 1];
+      const paused = last.role === 'assistant' ? structuredClone(last) : undefined;
+      seen.calls = [];
+      const result = run(await convertToModelMessages(chat), chat);
+      let answer: UI | undefined;
+      for await (const message of readUIMessageStream({ message: paused, stream: result.toUIMessageStream() as never })) answer = message as UI;
+      return paused ? [...chat.slice(0, -1), answer!] : [...chat, answer!];
+    };
+    const toolParts = (chat: UI[]) => chat.flatMap((m) => m.parts as unknown as ToolPart[]).filter((p) => p.type.startsWith('tool-'));
+    const waiting = (chat: UI[]) => toolParts(chat).filter((p) => p.state === 'approval-requested' && !p.approval?.isAutomatic);
+    const decide = (chat: UI[], approved: boolean): UI[] => {
+      const next = structuredClone(chat);
+      const [card] = waiting(next);
+      card.state = 'approval-responded';
+      card.approval = { ...card.approval!, approved };
+      return next;
+    };
+
+    it.each([true, false])('after the card is answered (approved: %s), a second interview change across a new delegation is refused; the next message allows one', async (approved) => {
+      for (const fn of mocks) fn.mockReset();
+      interviewCancelled.mockResolvedValue(cancelled);
+      seen.refusals = [];
+      seen.workerStep = 0;
+      seen.workerScript = [
+        listAll,
+        { tool: 'cancelInterview', input: { id: IV } },
+        // The request that carries the answer: Tuah asks Lekir again, for the other interview.
+        listAll,
+        { tool: 'reopenInterview', input: { id: IV2 } },
+      ];
+      const run = asTeam(world());
+      try {
+        const shown = await exchange([say('u1', `Cancel the first interview with ${WHO} and mark the second scheduled again`)], run);
+        expect(waiting(shown)).toHaveLength(1);
+        expect(waiting(shown)[0].type).toBe('tool-applyChange');
+        expect(waiting(shown)[0].approval?.requestReason).toBe(LINE);
+        nothingSaved();
+
+        const after = await exchange(decide(shown, approved), run);
+        expect(interviewCancelled).toHaveBeenCalledTimes(approved ? 1 : 0);
+        if (approved) expect(interviewCancelled.mock.calls[0][1]).toEqual({ id: IV });
+        expect(waiting(after)).toEqual([]);
+        expect(seen.refusals.length).toBeGreaterThan(0);
+        for (const refusal of seen.refusals) expect(refusal).toBe(ONE_INTERVIEW_CHANGE);
+        // Nothing was prepared for the other interview.
+        expect([...proposalsIn(after).values()].map((p) => p.input)).toEqual([{ id: IV }]);
+        expect(interviewReopened).not.toHaveBeenCalled();
+
+        // The user speaks again: a new turn, with one interview change of its own.
+        seen.workerStep = 0;
+        seen.workerScript = [listAll, { tool: 'reopenInterview', input: { id: IV2 } }];
+        const next = await exchange([...after, say('u2', 'Now mark the second one scheduled again')], run);
+        expect(waiting(next)).toHaveLength(1);
+        expect(waiting(next)[0].approval?.requestReason).toBe(LINE_LATER);
+        const proposalId = (waiting(next)[0].input as { proposalId: string }).proposalId;
+        expect(proposalsIn(next).get(proposalId)).toMatchObject({ action: 'reopenInterview', input: { id: IV2 } });
+      } finally {
+        seen.workerScript = null;
+      }
+    });
+
+    // The same gate that holds a deletion and a pool change to one a turn, asked about interview changes.
+    describe('applyChange, asked about an interview change a specialist prepared', () => {
+      type Gate = (input: unknown, options: { toolCallId: string; messages: Model[] }) => unknown;
+      const older = { id: 'p-old', product: 'hire', action: 'cancelInterview', input: { id: IV }, title: 'Cancel?', detail: null };
+      const newer = { id: 'p-new', product: 'hire', action: 'reopenInterview', input: { id: IV2 }, title: 'Again?', detail: null };
+      const added = { id: 'p-add', product: 'hire', action: 'scheduleInterview', input: NEW, title: 'Schedule?', detail: null };
+      const deletion = { id: 'p-del', product: 'hire', action: 'deleteCandidate', input: { id: PERSON }, title: 'Delete?', detail: null };
+      const pooled = { id: 'p-pool', product: 'hire', action: 'setPoolStatus', input: { id: PERSON, status: 'passive' }, title: 'Mark?', detail: null };
+      const report = (toolCallId: string, proposals: unknown[]): Model =>
+        ({ role: 'tool', content: [{ type: 'tool-result', toolCallId, toolName: 'askLekir', output: { type: 'json', value: { agent: 'Lekir', product: 'hire', status: 'done', steps: [], answer: '', proposals } } }] }) as Model;
+      const applied = (toolCallId: string, proposalId: string): Model =>
+        ({ role: 'assistant', content: [{ type: 'tool-call', toolCallId, toolName: 'applyChange', input: { proposalId } }] }) as Model;
+      const user = (text: string): Model => ({ role: 'user', content: text });
+      const gateFor = (messages: Model[], access: Access = world()) => {
+        const proposals = new Map([older, newer, added, deletion, pooled].map((p) => [p.id, p]));
+        const made = createTeamTools([hireProduct(access)], { transcript: '', proposals, names: {} }, messages);
+        return (input: unknown, toolCallId: string) => (made.toolApproval!.applyChange as Gate)(input, { toolCallId, messages });
+      };
+      const DENIED = { type: 'denied', reason: ONE_INTERVIEW_CHANGE };
+
+      it('puts the line on the card, read when the card is shown; a new interview has none', async () => {
+        const gate = gateFor([user('x'), report('t0', [older, added]), user('Do it')]);
+        expect(await gate({ proposalId: 'p-old' }, 'c1')).toEqual({ type: 'user-approval', reason: LINE });
+        const fresh = gateFor([user('x'), report('t0', [added]), user('Do it')]);
+        expect(await fresh({ proposalId: 'p-add' }, 'c1')).toBe('user-approval');
+      });
+      it('denies an older interview change beside one prepared in this turn, in either order, whichever of the six they are', async () => {
+        const turn = [user('Cancel the first'), report('t0', [older]), user('And schedule her again'), report('t1', [added])];
+        expect(await gateFor(turn)({ proposalId: 'p-old' }, 'c1')).toEqual(DENIED);
+        const gate = gateFor(turn);
+        expect(await gate({ proposalId: 'p-add' }, 'c1')).toBe('user-approval');
+        expect(await gate({ proposalId: 'p-old' }, 'c2')).toEqual(DENIED);
+      });
+      it('denies a second interview change in one request, and lets the same card through again', async () => {
+        const gate = gateFor([user('x'), report('t0', [older, newer]), user('Do both now')]);
+        expect(await gate({ proposalId: 'p-old' }, 'c1')).toEqual({ type: 'user-approval', reason: LINE });
+        expect(await gate({ proposalId: 'p-new' }, 'c2')).toEqual(DENIED);
+        const answered = [user('x'), report('t0', [older, newer]), user('Do both now'), applied('c1', 'p-old')];
+        expect(await gateFor(answered)({ proposalId: 'p-old' }, 'c1')).toEqual({ type: 'user-approval', reason: LINE });
+        expect(await gateFor(answered)({ proposalId: 'p-new' }, 'c2')).toEqual(DENIED);
+      });
+      it('counts the three kinds apart: one deletion, one talent pool change and one interview change in a turn', async () => {
+        const gate = gateFor([user('x'), report('t0', [older, newer, deletion, pooled]), user('Do them now')]);
+        expect(await gate({ proposalId: 'p-old' }, 'c1')).toEqual({ type: 'user-approval', reason: LINE });
+        expect(await gate({ proposalId: 'p-del' }, 'c2')).toBe('user-approval');
+        expect(await gate({ proposalId: 'p-pool' }, 'c3')).toBe('user-approval');
+        // A second of any kind is still denied, each in its own words.
+        expect(await gate({ proposalId: 'p-new' }, 'c4')).toEqual(DENIED);
+        expect(await gate({ proposalId: 'p-del' }, 'c5')).toEqual({ type: 'denied', reason: 'One deletion at a time. One is already prepared for approval.' });
+        expect(await gate({ proposalId: 'p-pool' }, 'c6')).toEqual({ type: 'denied', reason: 'One talent pool change at a time. One is already prepared for approval.' });
+      });
+      it('starts again once the user has spoken', async () => {
+        const turn = [user('x'), report('t0', [older, newer]), user('Cancel the first'), applied('c1', 'p-old'), user('Now the second')];
+        expect(await gateFor(turn)({ proposalId: 'p-new' }, 'c2')).toEqual({ type: 'user-approval', reason: LINE_LATER });
+      });
+      it('an interview moved after its card was approved is stopped, and stops being the turn\'s one', async () => {
+        const state: State = { at: AT, twin: false, fail: false };
+        // The turn as it reads when the user's yes arrives: the card for c1 carried the line of the row as it was.
+        const turn = [
+          user('x'), report('t0', [older, newer]), user('Cancel the first'),
+          { role: 'assistant', content: [
+            { type: 'tool-call', toolCallId: 'c1', toolName: 'applyChange', input: { proposalId: 'p-old' } },
+            { type: 'tool-approval-request', approvalId: 'r1', toolCallId: 'c1', reason: LINE },
+          ] } as Model,
+          { role: 'tool', content: [{ type: 'tool-approval-response', approvalId: 'r1', approved: true }] } as Model,
+        ];
+        const gate = gateFor(turn, world(state));
+        state.at = MOVED;
+        expect(await gate({ proposalId: 'p-old' }, 'c1')).toEqual({
+          type: 'denied',
+          reason: 'This interview was changed after the card was shown, so a last check stopped it. Nothing was changed. Prepare it again: the card will show it as it is now.',
+        });
+        // It never ran: another interview change can reach a card in what is left of the turn, with the row as it is now.
+        expect(await gate({ proposalId: 'p-new' }, 'c2')).toEqual({ type: 'user-approval', reason: LINE_LATER });
+        // The same row, unmoved, goes through with its line.
+        expect(await gateFor(turn)({ proposalId: 'p-old' }, 'c1')).toEqual({ type: 'user-approval', reason: LINE });
+      });
+      it('refuses at the card what it would have refused when preparing: two that read the same, and a failed read', async () => {
+        const turn = [user('x'), report('t0', [older]), user('Do it')];
+        expect(await gateFor(turn, world({ at: AT, twin: true, fail: false }))({ proposalId: 'p-old' }, 'c1')).toEqual({ type: 'denied', reason: LOOK_THE_SAME });
+        const said = vi.spyOn(console, 'error').mockImplementation(() => {});
+        expect(await gateFor(turn, world({ at: AT, twin: false, fail: true }))({ proposalId: 'p-old' }, 'c1')).toEqual({ type: 'denied', reason: CHECK_FAILED });
+        said.mockRestore();
+      });
+    });
+  });
+
+  describe('one agent holding the interview tools', () => {
+    /** An earlier turn that listed the two interviews, the application and one candidate. What it says of the first interview is out of date on purpose. */
+    const listed = [
+      { role: 'user', content: 'What is planned for the Night Auditor job, and who is on file?' },
+      { role: 'assistant', content: [
+        { type: 'tool-call', toolCallId: 'l1', toolName: 'listInterviews', input: { jobTitle: JOB } },
+        { type: 'tool-call', toolCallId: 'l2', toolName: 'listApplications', input: { candidate: WHO } },
+        { type: 'tool-call', toolCallId: 'l3', toolName: 'listCandidates', input: {} },
+      ] },
+      { role: 'tool', content: [
+        { type: 'tool-result', toolCallId: 'l1', toolName: 'listInterviews', output: { type: 'json', value: { total: 2, interviews: [
+          { id: IV, application_id: APP, candidate: WHO, job: JOB, date: '2026-10-19', time: '09:00', kind: 'phone', status: 'scheduled', place: null },
+          { id: IV2, application_id: APP, candidate: WHO, job: JOB, date: '2026-10-22', time: '11:00', kind: 'video', status: 'scheduled', place: ROOM },
+        ] } } },
+        { type: 'tool-result', toolCallId: 'l2', toolName: 'listApplications', output: { type: 'json', value: { total: 1, applications: [{ id: APP, candidate: WHO, job: JOB, stage: 'interview', outcome: 'active' }] } } },
+        { type: 'tool-result', toolCallId: 'l3', toolName: 'listCandidates', output: { type: 'json', value: { total: 1, candidates: [{ id: PERSON, name: 'Zulaikha Tan Abdullah', pool_status: 'available' }] } } },
+      ] },
+      { role: 'assistant', content: 'Two interviews, one application, one candidate.' },
+    ] as Model[];
+    /** One request: the model's nth step makes every call of the nth list, and answers in words after the last. */
+    const request = async (steps: Call[][], agent: 'tuah' | 'lekir', access: Access = world(), said = 'Do it') => {
+      for (const fn of mocks) fn.mockReset();
+      const messages: Model[] = [...listed, { role: 'user', content: said }];
+      seen.calls = [];
+      seen.singleScript = steps;
+      try {
+        const result = agent === 'lekir' ? runLekir(messages, access) : runTuah(messages, reach(), undefined, undefined, null, null, null, access);
+        await result.consumeStream();
+        const content = ((await result.steps) as unknown as { content: Card[] }[]).flatMap((s) => s.content);
+        return {
+          cards: content.filter((p) => p.type === 'tool-approval-request' && !p.isAutomatic),
+          denials: content.filter((p) => p.type === 'tool-approval-response' && p.approved === false).map((p) => p.reason),
+        };
+      } finally {
+        seen.singleScript = null;
+      }
+    };
+    const agents = ['tuah', 'lekir'] as const;
+
+    it.each(agents)('%s: the second of two interview changes is denied with the reason, and never becomes a card', async (agent) => {
+      const run = await request([[{ tool: 'cancelInterview', input: { id: IV } }, { tool: 'reopenInterview', input: { id: IV2 } }]], agent);
+      expect(run.cards).toHaveLength(1);
+      expect(run.cards[0].toolCall).toMatchObject({ toolName: 'cancelInterview', input: { id: IV } });
+      expect(run.denials).toEqual([ONE_INTERVIEW_CHANGE]);
+      // A new interview beside it is a second one too.
+      const mixed = await request([[{ tool: 'setInterviewOutcome', input: { id: IV, outcome: 'completed' } }, { tool: 'scheduleInterview', input: NEW }]], agent);
+      expect(mixed.cards).toHaveLength(1);
+      expect(mixed.denials).toEqual([ONE_INTERVIEW_CHANGE]);
+      nothingSaved();
+    });
+    it.each(agents)('%s: the card\'s line is the server\'s row, not what the conversation\'s lookup said', async (agent) => {
+      // The lookup in the conversation says Monday at 09:00 by phone; the row is on Tuesday at 3:00 pm by video.
+      const run = await request([[{ tool: 'rescheduleInterview', input: { id: IV, date: '2026-10-27', time: '16:00' } }]], agent);
+      expect(run.denials).toEqual([]);
+      expect(run.cards).toHaveLength(1);
+      expect(run.cards[0].reason).toBe(LINE);
+      // A new interview has no line.
+      const fresh = await request([[{ tool: 'scheduleInterview', input: NEW }]], agent);
+      expect(fresh.cards).toHaveLength(1);
+      expect(fresh.cards[0].reason).toBeUndefined();
+    });
+    it.each(agents)('%s: no card for an id that was not looked up as the right kind, and that refusal is not the turn\'s one', async (agent) => {
+      expect((await request([[{ tool: 'cancelInterview', input: { id: MADE_UP } }]], agent)).denials).toEqual([notAnInterview(MADE_UP)]);
+      expect((await request([[{ tool: 'reopenInterview', input: { id: APP } }]], agent)).denials).toEqual([notAnInterview(APP)]);
+      expect((await request([[{ tool: 'scheduleInterview', input: { ...NEW, application_id: IV } }]], agent)).denials).toEqual([notAnApplication(IV)]);
+      expect((await request([[{ tool: 'recordPastInterview', input: { ...NEW, date: '2026-10-06', outcome: 'completed', application_id: MADE_UP } }]], agent)).denials)
+        .toEqual([notAnApplication(MADE_UP)]);
+      const both = await request([[{ tool: 'cancelInterview', input: { id: MADE_UP } }, { tool: 'cancelInterview', input: { id: IV } }]], agent);
+      expect(both.denials).toEqual([notAnInterview(MADE_UP)]);
+      expect(both.cards).toHaveLength(1);
+      expect(both.cards[0].toolCall).toMatchObject({ input: { id: IV } });
+    });
+    it.each(agents)('%s: a change after a lookup that said several match is denied, even after a narrower lookup in the same turn', async (agent) => {
+      const run = await request([
+        [{ tool: 'listInterviews', input: { candidate: 'Putri Maisarah' } }],
+        [listAll],
+        [{ tool: 'cancelInterview', input: { id: IV } }],
+      ], agent, world(), `Cancel the interview with ${WHO}`);
+      expect(run.cards).toEqual([]);
+      expect(run.denials).toEqual([AMBIGUOUS]);
+      // A lookup by the job leaves two interviews of one person, and says so too: the change is held back the same way.
+      const byJob = await request([[{ tool: 'listInterviews', input: { jobTitle: JOB } }], [{ tool: 'cancelInterview', input: { id: IV } }]], agent, world(), `Cancel the ${JOB} interview`);
+      expect(byJob.cards).toEqual([]);
+      expect(byJob.denials).toEqual([AMBIGUOUS]);
+      // With no ambiguous lookup in the turn, the same call goes to a card.
+      expect((await request([[listAll], [{ tool: 'cancelInterview', input: { id: IV } }]], agent)).cards).toHaveLength(1);
+    });
+    it.each(agents)('%s: a made-up link is denied, and a link the user typed passes', async (agent) => {
+      const withLink: Call = { tool: 'scheduleInterview', input: { ...NEW, place: LINK } };
+      const madeUp = await request([[withLink]], agent, world(), `Schedule ${WHO} for 12 January at 3pm, video`);
+      expect(madeUp.cards).toEqual([]);
+      expect(madeUp.denials).toEqual([LINK_NOT_GIVEN]);
+      const typed = await request([[withLink]], agent, world(), `Schedule ${WHO} for 12 January at 3pm, video, link ${LINK}`);
+      expect(typed.denials).toEqual([]);
+      expect(typed.cards).toHaveLength(1);
+      // The place of an interview an earlier lookup returned is a link somebody in the team gave.
+      const lookedUp = await request([[{ tool: 'rescheduleInterview', input: { id: IV, place: ROOM } }]], agent);
+      expect(lookedUp.denials).toEqual([]);
+      expect(lookedUp.cards).toHaveLength(1);
+      // A link the applicant wrote in a cover letter is not, though a lookup in this very turn returned it.
+      const fromLetter = await request([[withLetter], [{ tool: 'scheduleInterview', input: { ...NEW, place: LETTER_LINK } }]], agent, world(), `Schedule ${WHO} for 12 January at 3pm, video, with the link she sent`);
+      expect(seen.calls[1].prompt).toContain(LETTER_LINK);
+      expect(fromLetter.cards).toEqual([]);
+      expect(fromLetter.denials).toEqual([LINK_NOT_GIVEN]);
+      // The same link in another letter case, or with a closing slash, is the link the user typed.
+      const spelled = await request([[{ tool: 'scheduleInterview', input: { ...NEW, place: 'https://Meet.Example.com/abc/' } }]], agent, world(), `Schedule ${WHO} for 12 January at 3pm, video, link ${LINK}`);
+      expect(spelled.denials).toEqual([]);
+      expect(spelled.cards).toHaveLength(1);
+      nothingSaved();
+    });
+    it.each(agents)('%s: two interviews that read the same are refused, and so is a change when the server cannot be read', async (agent) => {
+      const same = await request([[{ tool: 'cancelInterview', input: { id: IV } }]], agent, world({ at: AT, twin: true, fail: false }));
+      expect(same.cards).toEqual([]);
+      expect(same.denials).toEqual([LOOK_THE_SAME]);
+      const said = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const failed = await request([[{ tool: 'cancelInterview', input: { id: IV } }]], agent, world({ at: AT, twin: false, fail: true }));
+      expect(failed.cards).toEqual([]);
+      expect(failed.denials).toEqual([CHECK_FAILED]);
+      expect(JSON.stringify(said.mock.calls)).not.toContain('putri@');
+      said.mockRestore();
+    });
+    it.each(agents)('%s: an interview change, a deletion and a talent pool change each keep their own card in one turn', async (agent) => {
+      const run = await request([[
+        { tool: 'cancelInterview', input: { id: IV } },
+        { tool: 'deleteCandidate', input: { id: PERSON } },
+        { tool: 'setPoolStatus', input: { id: PERSON, status: 'passive' } },
+      ]], agent);
+      expect(run.cards.map((c) => c.toolCall?.toolName).sort()).toEqual(['cancelInterview', 'deleteCandidate', 'setPoolStatus']);
+      expect(run.denials).toEqual([]);
+    });
+    it.each(agents)('%s: an application move is not on this gate, so "schedule and move her to Interview" can be two cards in one turn; a second interview change cannot', async (agent) => {
+      const run = await request([[
+        { tool: 'scheduleInterview', input: NEW },
+        { tool: 'moveApplication', input: { id: APP, stage: 'interview' } },
+        { tool: 'recordPastInterview', input: { ...NEW, date: '2026-10-06', outcome: 'completed' } },
+      ]], agent);
+      expect(run.cards.map((c) => c.toolCall?.toolName).sort()).toEqual(['moveApplication', 'scheduleInterview']);
+      expect(run.denials).toEqual([ONE_INTERVIEW_CHANGE]);
+    });
+  });
+
+  // The turn carried through the browser for three requests, in each mode: the card; the yes that the last check
+  // stops because the interview was moved meanwhile; and the yes to the card prepared in its place.
+  describe('through the user\'s answer', () => {
+    const say = (id: string, text: string): UI => ({ id, role: 'user', parts: [{ type: 'text', text }] });
+    type Runner = (messages: Model[], chat: UI[]) => { toUIMessageStream: () => ReadableStream<unknown> };
+    const runners: Record<'lekir' | 'tuah' | 'team', (access: Access) => Runner> = {
+      lekir: (access) => (messages) => runLekir(messages, access),
+      tuah: (access) => (messages) => runTuah(messages, reach(), undefined, undefined, null, null, null, access),
+      team: (access) => (messages, chat) =>
+        runTuah(messages, reach(), undefined, undefined, null, null, { transcript: '', proposals: proposalsIn(chat), names: namesIn(chat) }, access),
+    };
+    /** `calls` is what the one agent's model calls, one list per step. The team's specialist follows `seen.workerScript`. */
+    const exchange = async (chat: UI[], run: Runner, calls: Call[][] | null): Promise<UI[]> => {
+      const { convertToModelMessages, readUIMessageStream } = await import('ai');
+      const last = chat[chat.length - 1];
+      const paused = last.role === 'assistant' ? structuredClone(last) : undefined;
+      seen.calls = [];
+      seen.singleScript = calls;
+      try {
+        const result = run(await convertToModelMessages(chat), chat);
+        let answer: UI | undefined;
+        for await (const message of readUIMessageStream({ message: paused, stream: result.toUIMessageStream() as never })) answer = message as UI;
+        return paused ? [...chat.slice(0, -1), answer!] : [...chat, answer!];
+      } finally {
+        seen.singleScript = null;
+      }
+    };
+    const toolParts = (chat: UI[]) => chat.flatMap((m) => m.parts as unknown as ToolPart[]).filter((p) => p.type.startsWith('tool-'));
+    const waiting = (chat: UI[]) => toolParts(chat).filter((p) => p.state === 'approval-requested' && !p.approval?.isAutomatic);
+    /** The parts the user said yes to that then did not run. */
+    const stopped = (chat: UI[]) => toolParts(chat).filter((p) => p.state === 'output-denied' && p.approval?.approved === true);
+    const decide = (chat: UI[], approved: boolean, reason?: string): UI[] => {
+      const next = structuredClone(chat);
+      const [card] = waiting(next);
+      card.state = 'approval-responded';
+      card.approval = { ...card.approval!, approved, ...(reason !== undefined && { reason }) };
+      return next;
+    };
+    /** What a waiting card would do, whichever agent shows it: the tool and its input. */
+    const asks = (chat: UI[], card: ToolPart): { action: string; input: unknown } => {
+      if (card.type !== 'tool-applyChange') return { action: card.type.slice('tool-'.length), input: card.input };
+      const proposal = proposalsIn(chat).get((card.input as { proposalId: string }).proposalId)!;
+      return { action: proposal.action, input: proposal.input };
+    };
+    const reset = () => {
+      for (const fn of mocks) fn.mockReset();
+      interviewCancelled.mockResolvedValue(cancelled);
+      seen.refusals = [];
+      seen.workerStep = 0;
+    };
+    const cancel: Call = { tool: 'cancelInterview', input: { id: IV } };
+    const another: Call = { tool: 'reopenInterview', input: { id: IV2 } };
+    // A filler lookup first, so the call that follows gets a call id of its own: the scripted model names a call after its tool and its place.
+    const again = (call: Call): Call[][] => [[{ tool: 'listJobs', input: {} }, call]];
+
+    describe.each(['lekir', 'tuah', 'team'] as const)('%s', (mode) => {
+      const own = mode !== 'team';
+
+      it.each([[undefined], ['Yes, go ahead']])('an interview moved between the card and the yes (reason on the yes: %s) is stopped; the card prepared in its place runs once', async (reason) => {
+        const { toToolStep } = await import('@/components/chat/tool-parts');
+        reset();
+        const state: State = { at: AT, twin: false, fail: false };
+        const run = runners[mode](world(state));
+        seen.workerScript = own ? null : [listAll, cancel, cancel, 'answer'];
+        try {
+          const shown = await exchange([say('u1', `Cancel the first interview with ${WHO}`)], run, own ? [[listAll], [cancel]] : null);
+          expect(waiting(shown)).toHaveLength(1);
+          expect(asks(shown, waiting(shown)[0])).toEqual({ action: 'cancelInterview', input: { id: IV } });
+          expect(waiting(shown)[0].approval?.requestReason).toBe(LINE);
+
+          // A colleague moves the interview to the Wednesday while the card waits.
+          state.at = MOVED;
+          const retried = await exchange(decide(shown, true, reason), run, own ? again(cancel) : null);
+          expect(interviewCancelled).not.toHaveBeenCalled();
+          expect(stopped(retried)).toHaveLength(1);
+          // What the person reads on the stopped card: "Not done", not "Not approved".
+          expect(toToolStep(stopped(retried)[0] as never, 'm', 0)).toMatchObject({ denied: true, afterApproval: true });
+          // It was not the turn's one: the card prepared in its place is shown, with the row as it is now.
+          expect(waiting(retried)).toHaveLength(1);
+          expect(asks(retried, waiting(retried)[0])).toEqual({ action: 'cancelInterview', input: { id: IV } });
+          expect(waiting(retried)[0].approval?.requestReason).toBe(LINE_MOVED);
+
+          // The third request: the stopped call now comes back in the SDK's own words, or as the user's reason.
+          const done = await exchange(decide(retried, true, reason), run, own ? [] : null);
+          expect(interviewCancelled).toHaveBeenCalledTimes(1);
+          expect(interviewCancelled.mock.calls[0][1]).toEqual({ id: IV });
+          expect(stopped(done)).toHaveLength(1);
+          expect(waiting(done)).toEqual([]);
+        } finally {
+          seen.workerScript = null;
+        }
+      });
+
+      it.each([['the user rejected', false, undefined], ['the user rejected with a reason', false, 'Not that one'], ['ran', true, undefined]] as const)(
+        'an interview change that %s is still the turn\'s one in the request that carries the answer',
+        async (_what, approved, reason) => {
+          reset();
+          const run = runners[mode](world());
+          seen.workerScript = own ? null : [listAll, cancel, listAll, another, 'answer'];
+          try {
+            const shown = await exchange([say('u1', `Cancel the first interview with ${WHO}, then mark the second scheduled again`)], run, own ? [[listAll], [cancel]] : null);
+            expect(waiting(shown)).toHaveLength(1);
+            const after = await exchange(decide(shown, approved, reason), run, own ? again(another) : null);
+            expect(interviewCancelled).toHaveBeenCalledTimes(approved ? 1 : 0);
+            // No card for the second interview change, and nothing of it saved.
+            expect(waiting(after)).toEqual([]);
+            expect(interviewReopened).not.toHaveBeenCalled();
+            if (own) {
+              expect(toolParts(after).filter((p) => p.approval?.isAutomatic).map((p) => p.approval?.reason)).toEqual([ONE_INTERVIEW_CHANGE]);
+            } else {
+              expect(seen.refusals.length).toBeGreaterThan(0);
+              for (const refusal of seen.refusals) expect(refusal).toBe(ONE_INTERVIEW_CHANGE);
+            }
+          } finally {
+            seen.workerScript = null;
+          }
+        },
+      );
+
+      it('the next thing the user says is a new turn, with one interview change of its own', async () => {
+        reset();
+        interviewReopened.mockResolvedValue({ ok: true, data: { id: IV2, application_id: APP, candidate: WHO, job: JOB, message: `The interview with ${WHO} is scheduled again.`, invitation: null, confirmed: true } });
+        const run = runners[mode](world());
+        seen.workerScript = own ? null : [listAll, cancel, 'answer'];
+        try {
+          const shown = await exchange([say('u1', `Cancel the first interview with ${WHO}`)], run, own ? [[listAll], [cancel]] : null);
+          const after = await exchange(decide(shown, true), run, own ? [] : null);
+          expect(interviewCancelled).toHaveBeenCalledTimes(1);
+          seen.workerStep = 0;
+          seen.workerScript = own ? null : [listAll, another];
+          const next = await exchange([...after, say('u2', 'Now mark the second one scheduled again')], run, own ? again(another) : null);
+          expect(waiting(next)).toHaveLength(1);
+          expect(asks(next, waiting(next)[0])).toEqual({ action: 'reopenInterview', input: { id: IV2 } });
+          expect(waiting(next)[0].approval?.requestReason).toBe(LINE_LATER);
+        } finally {
+          seen.workerScript = null;
+        }
+      });
+    });
   });
 });
