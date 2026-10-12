@@ -222,7 +222,7 @@ export function refundSavedNote(saved: RefundSaved): { subtitle: string; lead: s
   return {
     subtitle: `For ${target.customer_name}`,
     lead: saved.scheduled
-      ? `${rm(saved.amount)} was left pending against ${against}. It is marked as paid or deleted on`
+      ? `${rm(saved.amount)} was saved to pay later, against ${against}. It is marked as paid or deleted on`
       : `${rm(saved.amount)} was paid out against ${against}. It can be voided on`,
   };
 }

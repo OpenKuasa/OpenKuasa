@@ -1,7 +1,7 @@
 import { beforeAll, expect, test } from 'vitest';
 import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { createOrg, joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
+import { createOrg, joinDemo, signInAnon, liveClient, signInOwner } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 
@@ -14,7 +14,7 @@ function client(): SupabaseClient {
 
 async function anonUserWithOrg(orgName: string) {
   const c = client();
-  const { error: authErr } = await signInAnon(c);
+  const { error: authErr } = await signInOwner(c);
   expect(authErr, authErr?.message).toBeNull();
   const { data: orgId, error } = await createOrg(c, orgName);
   expect(error, error?.message).toBeNull();

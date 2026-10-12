@@ -10,7 +10,7 @@ import {
   updateEmployee,
 } from '@/lib/people/capabilities';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { createOrg, joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
+import { createOrg, joinDemo, signInAnon, liveClient, signInOwner } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
@@ -23,7 +23,7 @@ let guest: { c: SupabaseClient; demoId: string };
 beforeAll(async () => {
   if (!hasSupabaseEnv) return;
   const c = client();
-  const signedIn = await signInAnon(c);
+  const signedIn = await signInOwner(c);
   expect(signedIn.error, signedIn.error?.message).toBeNull();
   const org = await createOrg(c, 'People Capabilities Sdn Bhd');
   expect(org.error, org.error?.message).toBeNull();

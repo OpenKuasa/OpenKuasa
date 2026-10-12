@@ -36,7 +36,7 @@ import {
 } from '@/lib/people/payroll-writes';
 import { createSupabasePeopleData } from '@/lib/people/supabase';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { createConfirmedTestUser, createOrg, joinDemo, liveClient, signInAnon } from './helpers/live-workspaces';
+import { createConfirmedTestUser, createOrg, joinDemo, liveClient, signInAnon, signInOwner } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
@@ -73,7 +73,7 @@ const memberData = () => createSupabasePeopleData(member.c, owner.orgId);
 beforeAll(async () => {
   if (!hasSupabaseEnv) return;
   const c = client();
-  expect((await signInAnon(c)).error).toBeNull();
+  expect((await signInOwner(c)).error).toBeNull();
   const org = await createOrg(c, 'People Payroll Sdn Bhd');
   expect(org.error, org.error?.message).toBeNull();
   owner = { c, orgId: org.data as string };
@@ -344,7 +344,7 @@ testWithSupabase('an owner undoes paid, the member loses sight of it, and the dr
 testWithSupabase('a month with nobody to pay is a real record: it is run, paid, and the next month follows', async () => {
   // Its own workspace, with one employee and no salary on file.
   const c = client();
-  expect((await signInAnon(c)).error).toBeNull();
+  expect((await signInOwner(c)).error).toBeNull();
   const org = await createOrg(c, 'People Payroll Empty Sdn Bhd');
   expect(org.error, org.error?.message).toBeNull();
   const ctx = { client: c, orgId: org.data as string };

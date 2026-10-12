@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getViewer } from '@/lib/auth/viewer';
 import { can } from '@/lib/auth/permissions';
 import { listAgentConfigs } from '@/lib/agents/config';
+import { workspaceSpendCents } from '@/lib/agents/spend';
 import { listSchedules } from '@/lib/reach/schedule-capabilities';
 import { listPendingProposals, listRecentlyDecided } from '@/lib/agents/proposals';
 import {
@@ -43,6 +44,8 @@ function isoAgo(ms: number): string {
 export default async function AgentsScreen() {
   const viewer = await getViewer();
   const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
+  // Settings, schedules and spend caps decide what the workspace key spends: owner/admin only.
+  const canManage = !viewer.isDemo && can(viewer.role, 'manage-agents');
 
   let config: AgentConfig = defaultConfig(viewer.orgId ?? '');
   let runs: AgentRun[] = [];
@@ -56,26 +59,20 @@ export default async function AgentsScreen() {
 
   if (!viewer.isDemo && viewer.orgId) {
     const supabase = await createClient();
-    const sumCost = (rows: { cost_cents: number | null }[] | null) =>
-      (rows ?? []).reduce((n, r) => n + (r.cost_cents ?? 0), 0);
-    const [configs, scheduleRows, proposalRows, decidedRows, dayRes, weekRes, runsRes] = await Promise.all([
+    // The same database-side sum the runner's budget gate reads. If it cannot be
+    // read the strip shows nothing spent; the gate itself refuses to run instead.
+    const spentSince = (ms: number) =>
+      workspaceSpendCents(supabase, viewer.orgId, isoAgo(ms)).catch(() => {
+        console.error('[agents] workspace spend could not be read');
+        return 0;
+      });
+    const [configs, scheduleRows, proposalRows, decidedRows, daySpent, weekSpent, runsRes] = await Promise.all([
       listAgentConfigs(supabase, viewer.orgId),
       listSchedules(supabase, viewer.orgId),
       listPendingProposals(supabase, viewer.orgId),
       listRecentlyDecided(supabase, viewer.orgId),
-      // Same basis as the runner's ceiling: only runs that actually cost something.
-      supabase
-        .from('agent_runs')
-        .select('cost_cents')
-        .eq('org_id', viewer.orgId)
-        .gt('cost_cents', 0)
-        .gte('started_at', isoAgo(24 * 3600_000)),
-      supabase
-        .from('agent_runs')
-        .select('cost_cents')
-        .eq('org_id', viewer.orgId)
-        .gt('cost_cents', 0)
-        .gte('started_at', isoAgo(7 * 24 * 3600_000)),
+      spentSince(24 * 3600_000),
+      spentSince(7 * 24 * 3600_000),
       supabase
         .from('agent_runs')
         .select('*')
@@ -87,8 +84,8 @@ export default async function AgentsScreen() {
     schedules = scheduleRows;
     proposals = proposalRows;
     decided = decidedRows;
-    spentTodayCents = sumCost(dayRes.data);
-    spentWeekCents = sumCost(weekRes.data);
+    spentTodayCents = daySpent;
+    spentWeekCents = weekSpent;
     runs = (runsRes.data ?? []) as AgentRun[];
     if (runs.length > 0) {
       const { data } = await supabase
@@ -133,6 +130,7 @@ export default async function AgentsScreen() {
             assets={assets}
             assetUrls={assetUrls}
             canEdit={canEdit}
+            canManage={canManage}
             schedules={schedules}
             proposals={proposals}
             decided={decided}

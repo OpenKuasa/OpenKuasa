@@ -1,10 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import { afterAll } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { createClient, type AuthError, type Session, type SupabaseClient, type User } from '@supabase/supabase-js';
 
 // Shared creation + cleanup for tests that run against the LIVE Supabase project.
 //
-// Every anonymous user and every workspace a test file creates goes through here
+// Every user and every workspace a test file creates goes through here
 // and is recorded in a per-file registry (Vitest gives each file its own module
 // instance: this relies on `isolate: true`, see vitest.config.mts). When the file
 // finishes, `cleanupLive` uses the service-role client to delete exactly the recorded
@@ -52,6 +52,17 @@ export type AdminLike = {
   };
 };
 
+/**
+ * What `signInOwner` answers. `error` is always null (a failure throws); it is typed like a sign-in's so a test
+ * can check it the way it checks `signInAnon`'s.
+ */
+export type OwnerSignIn = {
+  data: { user: User | null; session: Session | null };
+  error: AuthError | null;
+  email: string;
+  userId: string;
+};
+
 export type UserGuard = { kind: 'anonymous' } | { kind: 'signup'; email: string };
 export type CleanupResult = {
   skipped: boolean;
@@ -91,6 +102,24 @@ export function createRegistry(options: RegistryOptions = {}) {
     if (!users.has(id)) users.set(id, guard);
   };
 
+  const createConfirmedTestUser = async (admin: AdminLike | null, client: SupabaseClient, password: string) => {
+    if (!admin) {
+      throw new Error('createConfirmedTestUser needs SUPABASE_SERVICE_ROLE_KEY (and the project URL) to be set.');
+    }
+    const email = `qa-${runToken}-${++emailCounter}@example.com`;
+    const created = await admin.auth.admin.createUser({ email, password, email_confirm: true });
+    const id = created.data?.user?.id;
+    if (id) recordUser(id, { kind: 'signup', email });
+    if (created.error || !id) {
+      throw new Error(`creating the test user failed: ${created.error?.message ?? 'no user returned'}`);
+    }
+    const signedIn = await client.auth.signInWithPassword({ email, password });
+    if (signedIn.error || !signedIn.data.session) {
+      throw new Error(`the confirmed test user got no session: ${signedIn.error?.message ?? 'no session returned'}`);
+    }
+    return { ...signedIn, email, userId: id };
+  };
+
   return {
     recordOrg,
     recordUser,
@@ -128,22 +157,15 @@ export function createRegistry(options: RegistryOptions = {}) {
      * service client (same address pattern, same recording), then signs in with the password and insists on a
      * session. The user is recorded before the sign-in so a failure there still gets cleaned up.
      */
-    async createConfirmedTestUser(admin: AdminLike | null, client: SupabaseClient, password: string) {
-      if (!admin) {
-        throw new Error('createConfirmedTestUser needs SUPABASE_SERVICE_ROLE_KEY (and the project URL) to be set.');
-      }
-      const email = `qa-${runToken}-${++emailCounter}@example.com`;
-      const created = await admin.auth.admin.createUser({ email, password, email_confirm: true });
-      const id = created.data?.user?.id;
-      if (id) recordUser(id, { kind: 'signup', email });
-      if (created.error || !id) {
-        throw new Error(`creating the test user failed: ${created.error?.message ?? 'no user returned'}`);
-      }
-      const signedIn = await client.auth.signInWithPassword({ email, password });
-      if (signedIn.error || !signedIn.data.session) {
-        throw new Error(`the confirmed test user got no session: ${signedIn.error?.message ?? 'no session returned'}`);
-      }
-      return { ...signedIn, email, userId: id };
+    createConfirmedTestUser,
+    /**
+     * Signs `client` in as a new signed-up account, the only kind that may create a workspace (a demo guest may
+     * not: see 20261030131500_demo_guests_cannot_create_workspaces.sql). Same result shape as `signInAnon`, so a
+     * test reads `data.user` and `error` from it alike; it throws instead of returning an error. The password is
+     * generated here and never needed again. Needs the service key, like `createConfirmedTestUser`.
+     */
+    async signInOwner(admin: AdminLike | null, client: SupabaseClient): Promise<OwnerSignIn> {
+      return createConfirmedTestUser(admin, client, `Qa-${randomBytes(16).toString('hex')}`);
     },
 
     async cleanup(
@@ -316,6 +338,12 @@ export const signUpTestUser = (client: SupabaseClient, password: string) =>
 export const createConfirmedTestUser = (client: SupabaseClient, password: string) =>
   registry.createConfirmedTestUser(serviceClient() as unknown as AdminLike | null, client, password);
 /**
+ * Sign `client` in as a new signed-up account that may create a workspace (see `signInOwner` on the registry);
+ * cleanup deletes it. Needs the service key. Use `signInAnon` only for a demo guest or a user in no workspace.
+ */
+export const signInOwner = (client: SupabaseClient) =>
+  registry.signInOwner(serviceClient() as unknown as AdminLike | null, client);
+/**
  * Register a teardown step that runs first in the file's cleanup, even when the delete is
  * skipped (missing key / migration) and even if the file's own hooks failed.
  */
@@ -329,11 +357,12 @@ export async function anonClient(): Promise<{ client: SupabaseClient; userId: st
   return { client, userId: data.user.id };
 }
 
-/** A new anonymous, signed-in client that owns a new workspace. */
+/** A new signed-up, signed-in client that owns a new workspace. */
 export async function ownerClient(
   orgName: string,
 ): Promise<{ client: SupabaseClient; userId: string; orgId: string }> {
-  const { client, userId } = await anonClient();
+  const client = liveClient();
+  const { userId } = await signInOwner(client);
   const { data, error } = await createOrg(client, orgName);
   if (error || typeof data !== 'string') throw new Error(`create_org failed: ${error?.message}`);
   return { client, userId, orgId: data };

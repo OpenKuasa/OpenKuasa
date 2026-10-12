@@ -156,10 +156,10 @@ describe('the payment-out form, as the shared card draws it', () => {
     ]);
   });
 
-  it('words a bill as the form always has: what it can take, and what is already scheduled', () => {
+  it('words a bill as the form always has: what it can take, and what is waiting to be paid', () => {
     expect(PAYMENT_OUT_KIND.number(payable[0])).toBe('BILL-0001');
     expect(PAYMENT_OUT_KIND.owed(payable[0])).toBe('RM 100.00 to pay');
-    expect(PAYMENT_OUT_KIND.owed(payable[1])).toBe('RM 300.00 to pay · RM 200.00 of RM 500.00 already scheduled');
+    expect(PAYMENT_OUT_KIND.owed(payable[1])).toBe('RM 300.00 to pay · RM 200.00 of RM 500.00 in payments to be paid');
     expect(PAYMENT_OUT_KIND.amountLabel(payable[0])).toBe('Amount to pay on BILL-0001');
     expect(PAYMENT_OUT_KIND.words).toMatchObject({
       subtitle: 'Pay a supplier\'s bills, now or later',

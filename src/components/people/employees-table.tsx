@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from 'react';
 import { Dialog } from 'radix-ui';
-import { Pencil, Plus, Search, Trash2, UserCheck, UserX } from 'lucide-react';
+import { Pencil, Plus, Search, Target, Trash2, UserCheck, UserX } from 'lucide-react';
 import {
   createEmployeeAction,
   deleteEmployeeAction,
@@ -17,11 +17,13 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatDay, todayInMalaysia } from '@/lib/people/dates';
+import { type GoalLike, showGoalsAction } from '@/lib/people/goals-training';
 import { EMPLOYMENT_LABEL, type EmployeeFilter, filterEmployees, linkableMembers } from '@/lib/people/employees';
 import type { WorkspaceMember } from '@/lib/people/members';
 import type { Department, Employee } from '@/lib/people/types';
 import { cn } from '@/lib/utils';
 import { type EditingEmployee, EmployeeForm } from './employee-form';
+import { EmployeeGoals } from './employee-goals';
 import type { EntitlementChange } from './entitlements-fields';
 
 type ActionResult = { ok: boolean; error?: string };
@@ -46,12 +48,15 @@ export function EmployeesTable({
   employees,
   departments,
   members,
+  goals = null,
   canEdit,
 }: {
   employees: Employee[];
   departments: Department[];
   /** The workspace's members, for the account link. Empty for someone who cannot edit. */
   members: WorkspaceMember[];
+  /** Each employee's goals, by employee id, for the "Goals" action (owners and admins). Null hides the action. */
+  goals?: Record<string, GoalLike[]> | null;
   canEdit: boolean;
 }) {
   const [pending, start] = useTransition();
@@ -60,6 +65,7 @@ export function EmployeesTable({
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<EditingEmployee | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [goalsFor, setGoalsFor] = useState<Employee | null>(null);
 
   const shown = useMemo(() => filterEmployees(employees, filter), [employees, filter]);
   const formOpen = canEdit && (creating || editing !== null);
@@ -266,6 +272,19 @@ export function EmployeesTable({
                         <Pencil className="size-4" />
                         Edit
                       </Button>
+                      {showGoalsAction(canEdit, goals) ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          disabled={pending}
+                          aria-label={`Goals for ${employee.name}`}
+                          onClick={() => setGoalsFor(employee)}
+                        >
+                          <Target className="size-4" />
+                          Goals
+                        </Button>
+                      ) : null}
                       <Button
                         type="button"
                         variant="ghost"
@@ -379,6 +398,21 @@ export function EmployeesTable({
                   act(editing ? saveEdit(editing.employee.id, input, changes) : createEmployeeAction(input))
                 }
               />
+            ) : null}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      <Dialog.Root open={showGoalsAction(canEdit, goals) && goalsFor !== null} onOpenChange={(open) => !open && setGoalsFor(null)}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+          <Dialog.Content className="fixed top-1/2 left-1/2 z-50 max-h-[90vh] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border bg-background p-5 shadow-lg outline-none">
+            <Dialog.Title className="text-base font-semibold">{goalsFor ? `${goalsFor.name}’s goals` : 'Goals'}</Dialog.Title>
+            <Dialog.Description className="mb-4 text-sm text-muted-foreground">
+              Add, change or remove this employee’s goals.
+            </Dialog.Description>
+            {goalsFor && goals ? (
+              <EmployeeGoals key={goalsFor.id} employeeId={goalsFor.id} name={goalsFor.name} goals={goals[goalsFor.id] ?? []} />
             ) : null}
           </Dialog.Content>
         </Dialog.Portal>

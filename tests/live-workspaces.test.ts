@@ -157,6 +157,41 @@ describe('recording', () => {
         make().createConfirmedTestUser(adminOf({ id: null, error: { message: 'nope' } }), signIn(true), 'pw'),
       ).rejects.toThrow(/nope/);
     });
+
+    it('signInOwner makes a signed-up account with its own password, answers like a sign-in, and records it', async () => {
+      const r = make();
+      const seen: { email: string; confirm: boolean }[] = [];
+      const passwords: string[] = [];
+      const client = {
+        auth: {
+          signInWithPassword: async (creds: { password: string }) => {
+            passwords.push(creds.password);
+            return { data: { session: { access_token: 't' }, user: { id: 'cu1' } }, error: null };
+          },
+        },
+      } as unknown as SupabaseClient;
+      const first = await r.signInOwner(adminOf({}, seen), client);
+      const second = await r.signInOwner(adminOf({ id: 'cu2' }, seen), client);
+      expect(first.error).toBeNull();
+      expect(first.data.user?.id).toBe('cu1');
+      expect(first.userId).toBe('cu1');
+      expect(seen).toEqual([{ email: first.email, confirm: true }, { email: second.email, confirm: true }]);
+      expect(first.email).toMatch(new RegExp(TEST_EMAIL_SQL_PATTERN));
+      expect(passwords).toHaveLength(2);
+      expect(passwords[0]).not.toBe(passwords[1]);
+      const { service, calls } = fake({
+        users: {
+          cu1: { is_anonymous: false, email: first.email, created_at: FRESH },
+          cu2: { is_anonymous: false, email: second.email, created_at: FRESH },
+        },
+      });
+      await r.cleanup(() => service, () => {});
+      expect(calls).toEqual(expect.arrayContaining(['delete-user:cu1', 'delete-user:cu2']));
+    });
+
+    it('signInOwner fails clearly without the service key', async () => {
+      await expect(make().signInOwner(null, signIn(true))).rejects.toThrow(/SUPABASE_SERVICE_ROLE_KEY/);
+    });
   });
 
   it('a later recordUser cannot downgrade an existing record', async () => {

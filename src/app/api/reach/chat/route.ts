@@ -11,6 +11,7 @@ import { streamErrorHandler } from '@/lib/ai/call-log';
 import { prepareChat } from '@/lib/ai/chat-request';
 import { runJebat } from '@/lib/ai/agents/orchestrator';
 import { getCurrentOrg } from '@/lib/auth/current-org';
+import { can } from '@/lib/auth/permissions';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
 import { getReachData } from '@/lib/reach/supabase';
 
@@ -26,9 +27,14 @@ export async function POST(request: Request) {
   const org = hasSupabaseEnv() ? await getCurrentOrg(chat.supabase) : null;
   const data = await getReachData(chat.supabase);
   // Only a non-viewer member gets write tools (and each still needs approval).
+  // Scheduling the agent commits the workspace to spend, so that one is owner/admin only.
   const write =
     org && org.role !== 'viewer'
-      ? { ctx: { client: chat.supabase, orgId: org.orgId }, canWrite: true }
+      ? {
+          ctx: { client: chat.supabase, orgId: org.orgId },
+          canWrite: true,
+          canManageAgents: can(org.role, 'manage-agents'),
+        }
       : undefined;
 
   const result = runJebat(chat.messages, { data, write }, request.signal, chat.apiKey);

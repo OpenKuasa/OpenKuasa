@@ -238,26 +238,36 @@ export type Goal = {
   status: 'on_track' | 'at_risk' | 'done';
 };
 
-export type Scorecard = {
-  id: string;
-  employee_id: string;
-  employee_name: string;
-  period: string;
-  score: number;
-  competencies: Record<string, number>;
-};
+/** The four competencies a review scores, each 1 to 5 in half steps. The spelling is the database's. */
+export const COMPETENCIES = ['Delivery', 'Teamwork', 'Ownership', 'Communication'] as const;
+export type Competency = (typeof COMPETENCIES)[number];
+export type ReviewStatus = 'draft' | 'released';
 
+/**
+ * One record behind both the Scorecard and the Review Scores screens. A draft is read only by owners and admins
+ * (and in the demo); the person it is about reads it once it is released.
+ */
 export type Review = {
   id: string;
   employee_id: string;
   employee_name: string;
   period: string;
+  /**
+   * The four scores. A review written before the competencies existed (the demo's, until its next re-seed) has `{}`:
+   * read them through `Object.entries`, never by key.
+   */
+  competencies: Record<Competency, number>;
   rating: 'exceeds' | 'meets' | 'below';
+  /** The average of the competencies, set by the database. Never worked out in the app. */
   score: number;
+  comment: string | null;
+  status: ReviewStatus;
+  released_at: string | null;
   reviewer_name: string | null;
   reviewed_at: string | null;
 };
 
+/** A course. Its status is worked out from its dates by `courseStatus`; nothing reads the stored column. */
 export type Training = {
   id: string;
   title: string;
@@ -265,7 +275,6 @@ export type Training = {
   provider: string | null;
   starts_on: string | null;
   ends_on: string | null;
-  status: 'upcoming' | 'in_progress' | 'completed';
 };
 
 export type TrainingEnrolment = {
@@ -273,6 +282,8 @@ export type TrainingEnrolment = {
   employee_id: string;
   training_id: string;
   completed: boolean;
+  /** When an owner or admin marked it; null when not completed (or marked before the time was kept). */
+  completed_at: string | null;
 };
 
 export type Announcement = {
@@ -280,8 +291,16 @@ export type Announcement = {
   title: string;
   body: string;
   category: 'general' | 'holiday' | 'benefits' | 'strategy' | 'policy';
-  published_at: string;
+  /** A draft is read only by owners and admins (and in the demo). */
+  status: 'draft' | 'published';
+  /** Null on a draft. */
+  published_at: string | null;
+  /** Null on a draft that has never been published. */
   author_name: string | null;
+  /** Set when a published announcement is changed; cleared when it is published again. */
+  edited_at: string | null;
+  /** For the caller: published, not marked read, and published after they joined. Always false on a draft. */
+  unread: boolean;
 };
 
 export type DocumentType = 'payslip' | 'contract' | 'letter' | 'tax' | 'benefits';
@@ -369,10 +388,11 @@ export type PeopleData = {
   /** Every payslip the caller may read, or (with `employeeId`) that one employee's only. */
   listPayslips(employeeId?: string): Promise<Payslip[]>;
   listGoals(): Promise<Goal[]>;
-  listScorecards(): Promise<Scorecard[]>;
+  /** Every review for an owner or admin (drafts too); only their own released ones for anyone else. */
   listReviews(): Promise<Review[]>;
   listTrainings(): Promise<Training[]>;
   listTrainingEnrolments(): Promise<TrainingEnrolment[]>;
+  /** Drafts too for an owner or admin; `unread` is the caller's own. */
   listAnnouncements(): Promise<Announcement[]>;
   /** hr_documents, newest `issued_on` first. */
   listDocuments(): Promise<HrDocument[]>;

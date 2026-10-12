@@ -39,6 +39,7 @@ import { ReplyCard, type CardType } from '@/components/command/reply-cards';
 import { useViewer } from '@/components/app/viewer-context';
 import {
   ChatKeyNotice,
+  DAILY_LIMIT_NOTICE,
   chatErrorCode,
   isChatLocked,
   useChatStatus,
@@ -1137,7 +1138,9 @@ function ChatPane({
                   <p role="alert" className="text-sm text-muted-foreground">
                     {keyRequired
                       ? 'That question was not sent: your free questions are used up.'
-                      : 'Tuah could not respond just now. Please try again.'}
+                      : chatErrorCode(chat.error) === 'daily_limit'
+                        ? DAILY_LIMIT_NOTICE
+                        : 'Tuah could not respond just now. Please try again.'}
                   </p>
                 ) : null}
                 <div ref={endRef} />

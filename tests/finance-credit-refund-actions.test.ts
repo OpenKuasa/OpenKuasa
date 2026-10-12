@@ -59,13 +59,17 @@ const actions = await import('@/app/(app)/finance/actions');
 
 /** Credit Notes alone: a draft credit note takes nothing off its invoice. */
 const DRAFTS = ['/finance/credit-notes'];
-/** The five screens where a figure moves when an invoice's balance or a customer's credit does. */
+/**
+ * The five screens where a figure moves when an invoice's balance or a customer's credit does, and Payment
+ * Vouchers, which lists every refund as the money out it is.
+ */
 const CREDIT = [
   '/finance/invoices',
   '/finance/payments-in',
   '/finance/customers-suppliers',
   '/finance/credit-notes',
   '/finance/refunds',
+  '/finance/payment-vouchers',
 ];
 const FORBIDDEN = { ok: false, error: 'You do not have permission to make changes here.' };
 const NOTE_LOCKED =

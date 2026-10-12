@@ -211,7 +211,7 @@ export function PaymentsView({
       <ConfirmRow
         key={row.allocation_id}
         colSpan={columns}
-        label={`Delete the scheduled payment to ${row.supplier_name}`}
+        label={`Delete the payment still to be paid to ${row.supplier_name}`}
         confirmLabel="Delete payment"
         pendingLabel="Deleting…"
         pending={confirm.pending}
@@ -219,8 +219,8 @@ export function PaymentsView({
         onConfirm={() => confirm.run(() => actions.remove({ id }), close)}
         onCancel={close}
       >
-        Delete the scheduled payment of <span className="font-medium">{whole}</span> to{' '}
-        <span className="font-medium">{row.supplier_name}</span>? Nothing has been paid yet, so the bills stay as they
+        Delete the payment of <span className="font-medium">{whole}</span> to{' '}
+        <span className="font-medium">{row.supplier_name}</span> that is still to be paid? Nothing has been paid yet, so the bills stay as they
         are. {also}
       </ConfirmRow>
     );
@@ -314,10 +314,10 @@ export function PaymentsView({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="current">Paid and scheduled</SelectItem>
+                <SelectItem value="current">Paid and to be paid</SelectItem>
                 <SelectItem value="all">All</SelectItem>
                 <SelectItem value="posted">Paid</SelectItem>
-                <SelectItem value="scheduled">Scheduled</SelectItem>
+                <SelectItem value="scheduled">To be paid</SelectItem>
                 <SelectItem value="void">Void</SelectItem>
               </SelectContent>
             </Select>
@@ -414,7 +414,7 @@ export function PaymentsView({
                           {items.length ? (
                             // RowMenu has no disabled prop; an inert wrapper keeps its button from being used while an action runs or the form is open.
                             <span inert={locked} className={cn(locked && 'opacity-50')}>
-                              <RowMenu label={`${p.number ?? 'the scheduled payment'} to ${p.supplier_name}`} items={items} />
+                              <RowMenu label={`${p.number ?? 'the payment still to be paid'} to ${p.supplier_name}`} items={items} />
                             </span>
                           ) : null}
                         </TableCell>

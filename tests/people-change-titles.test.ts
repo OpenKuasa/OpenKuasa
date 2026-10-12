@@ -856,3 +856,337 @@ describe('payroll cards keep up with changes made in the same conversation', () 
     expect(approvalTitle('setPayslipStatutory', setEpf('630'), find)).toContain('from RM 605.00');
   });
 });
+
+// ---- Goals, reviews, courses and announcements ----------------------------------------------------------------
+
+const GOAL = '44444444-4444-4444-8444-444444444441';
+const REVIEW = '44444444-4444-4444-8444-444444444442';
+const COURSE = '44444444-4444-4444-8444-444444444443';
+const ANNOUNCEMENT = '44444444-4444-4444-8444-444444444444';
+const BODY = 'Pejabat tutup pada 31 Oktober.\nSila rujuk HR untuk soalan.';
+const SCORES = { Delivery: 4, Teamwork: 4.5, Ownership: 3, Communication: 5 };
+
+const employees = { tool: 'listEmployees', output: { total: 1, employees: [{ id: EMP, name: 'Faiz Hakim' }] } };
+const goals = (extra: object = {}) => ({
+  tool: 'listGoals',
+  output: { total: 1, goals: [{ id: GOAL, employee_id: EMP, employee: 'Faiz Hakim', title: 'Learn SQL', progress: 40, due_date: '2026-12-31', status: 'on_track', ...extra }] },
+});
+const reviews = (extra: object = {}) => ({
+  tool: 'listReviews',
+  output: {
+    total: 1,
+    reviews: [{ id: REVIEW, employee_id: EMP, employee: 'Faiz Hakim', period: 'H1 2026', status: 'draft', scores: SCORES, rating: 'meets', score: 4.13, comment: 'Steady quarter.', ...extra }],
+  },
+});
+const courses = (extra: object = {}) => ({
+  tool: 'listTrainings',
+  output: {
+    trainings: [{ id: COURSE, title: 'Safety induction', category: 'Safety', provider: 'NIOSH', starts_on: '2026-11-10', ends_on: '2026-11-11', status: 'upcoming', enrolled: 3, completed_count: 0, ...extra }],
+  },
+});
+const announcements = (extra: object = {}) => ({
+  tool: 'listAnnouncements',
+  output: { total: 1, announcements: [{ id: ANNOUNCEMENT, status: 'draft', title: 'Cuti Deepavali', body: BODY, category: 'holiday', ...extra }] },
+});
+const ok = (tool: string, data: object) => ({ tool, output: { ok: true, data } });
+const everything = nameIn([employees, goals(), reviews(), courses(), announcements()]);
+const nothing = nameIn([employees]);
+
+describe('approval cards for goals', () => {
+  const add = { employee_id: EMP, title: ' Learn SQL ', progress: 40, due_date: '2026-12-31', at_risk: true };
+
+  it('states the person, the title, the progress, the due date and the status, every time', () => {
+    expect(approvalTitle('saveGoal', add, nothing)).toBe('Add a goal for Faiz Hakim: “Learn SQL”, 40% done, due 31 Dec 2026, at risk?');
+    expect(approvalTitle('saveGoal', { title: 'Learn SQL', progress: 40, due_date: '', at_risk: null })).toBe(
+      'Add a goal for yourself: “Learn SQL”, 40% done, no due date, on track?',
+    );
+    expect(approvalTitle('saveGoal', { title: 'Learn SQL', progress: 100, at_risk: true })).toContain('100% done, no due date, done?');
+    expect(approvalTitle('saveGoal', { employee_id: '', title: 'x', progress: 0 })).toContain('for yourself');
+  });
+
+  it('a person no lookup showed is "this employee", never the caller', () => {
+    expect(approvalTitle('saveGoal', add)).toContain('for this employee');
+  });
+
+  it('with a finder it names the goal being changed and the person', () => {
+    expect(approvalTitle('saveGoal', { ...add, goal_id: GOAL, progress: 60, at_risk: false }, everything)).toBe(
+      'Change the goal “Learn SQL” for Faiz Hakim to “Learn SQL”, 60% done, due 31 Dec 2026, on track?',
+    );
+    expect(approvalTitle('removeGoal', { goal_id: GOAL }, everything)).toBe(
+      'Remove the goal “Learn SQL” of Faiz Hakim (40% done, due 31 Dec 2026, on track)?',
+    );
+    expect(approvalDetail('removeGoal', { goal_id: GOAL }, undefined, everything)).toBe('This cannot be undone.');
+  });
+
+  it('without a lookup it says so, and never names a goal it cannot know', () => {
+    expect(approvalTitle('removeGoal', { goal_id: GOAL })).toBe('Remove a goal that was not in the list above?');
+    expect(approvalTitle('saveGoal', { ...add, goal_id: GOAL }, nothing)).toContain('Change a goal that was not in the list above for Faiz Hakim');
+  });
+
+  it('the newest of the lookup or the change wins', () => {
+    const find = nameIn([employees, goals(), ok('saveGoal', { id: GOAL, employee_id: EMP, employee: 'Faiz Hakim', title: 'Learn SQL well', progress: 70, due_date: null, status: 'on_track' })]);
+    expect(approvalTitle('removeGoal', { goal_id: GOAL }, find)).toBe('Remove the goal “Learn SQL well” of Faiz Hakim (70% done, no due date, on track)?');
+  });
+
+  it('a goal removed earlier in the chat is not named again, and the detail says it is likely to be refused', () => {
+    const find = nameIn([employees, goals(), ok('removeGoal', { id: GOAL, employee_id: EMP, removed: true })]);
+    expect(approvalTitle('removeGoal', { goal_id: GOAL }, find)).toBe('Remove a goal that was not in the list above?');
+    expect(approvalDetail('removeGoal', { goal_id: GOAL }, undefined, find)).toContain('was deleted earlier in this chat, so this is likely to be refused.');
+  });
+
+  it('a value that cannot be read is said so, not hidden', () => {
+    expect(approvalTitle('saveGoal', { title: 'x', progress: 'lots', due_date: '31/12/2026' })).toBe(
+      'Add a goal for yourself: “x”, a progress that could not be read, a due date that could not be read?',
+    );
+  });
+});
+
+describe('approval cards for reviews', () => {
+  const write = { employee_id: EMP, period: 'h1 2026', delivery: '4', teamwork: 4.5, ownership: 3, communication: ' 5 ', rating: 'meets', comment: ' Steady quarter. ' };
+
+  it('a save states the employee, the period, all four scores, the rating and the whole comment, and says it is a draft', () => {
+    expect(approvalTitle('saveReview', write, nothing)).toBe(
+      'Save a draft review for Faiz Hakim, H1 2026: Delivery 4, Teamwork 4.5, Ownership 3, Communication 5, rated meets expectations, comment “Steady quarter.”?',
+    );
+    expect(approvalDetail('saveReview', write)).toBe('A draft: the employee cannot see it yet.');
+    expect(approvalTitle('saveReview', { ...write, comment: '' }, nothing)).toContain('rated meets expectations, no comment?');
+    const long = 'x'.repeat(1500);
+    expect(approvalTitle('saveReview', { ...write, comment: long }, nothing)).toContain(`comment “${long}”?`);
+  });
+
+  it('changing a draft says so', () => {
+    expect(approvalTitle('saveReview', { ...write, review_id: REVIEW }, nothing)).toMatch(/^Change the draft review for Faiz Hakim, H1 2026: /);
+    expect(approvalTitle('saveReview', { ...write, review_id: '' }, nothing)).toMatch(/^Save a draft review for /);
+  });
+
+  it('a person no lookup showed is "this employee", and a score or period it cannot read is said so', () => {
+    expect(approvalTitle('saveReview', write)).toContain('for this employee,');
+    expect(approvalTitle('saveReview', { ...write, delivery: '4.0', period: 'next year' }, nothing)).toBe(
+      'Save a draft review for Faiz Hakim, a period that could not be read: Delivery (could not be read), Teamwork 4.5, Ownership 3, Communication 5, rated meets expectations, comment “Steady quarter.”?',
+    );
+  });
+
+  it('a release states everything the employee will see, in full, and that they will see it', () => {
+    expect(approvalTitle('releaseReview', { review_id: REVIEW }, everything)).toBe(
+      'Release the review for Faiz Hakim, H1 2026: Delivery 4, Teamwork 4.5, Ownership 3, Communication 5, overall 4.13, rated meets expectations, comment “Steady quarter.”?',
+    );
+    expect(approvalDetail('releaseReview', { review_id: REVIEW }, undefined, everything)).toBe('The employee will be able to see it.');
+  });
+
+  it('a review the lookup showed released keeps its full title and the detail adds the hedge', () => {
+    const find = nameIn([employees, reviews({ status: 'released' })]);
+    expect(approvalTitle('releaseReview', { review_id: REVIEW }, find)).toContain('Release the review for Faiz Hakim, H1 2026: Delivery 4,');
+    expect(approvalDetail('releaseReview', { review_id: REVIEW }, undefined, find)).toBe(
+      'The employee will be able to see it. This review was released when last checked, so this may be refused.',
+    );
+    // It never also says "a draft": the hedge replaces that claim rather than contradicting it.
+    expect(approvalDetail('saveReview', { ...write, review_id: REVIEW }, undefined, find)).toBe(
+      'This review was released when last checked, so this may be refused.',
+    );
+    expect(approvalDetail('deleteReview', { review_id: REVIEW }, undefined, find)).toBe(
+      'This cannot be undone. This review was released when last checked, so this may be refused.',
+    );
+  });
+
+  it('a review no lookup showed is named as such, and the detail still says the employee will see it', () => {
+    expect(approvalTitle('releaseReview', { review_id: REVIEW })).toBe('Release a review that was not in the list above?');
+    expect(approvalDetail('releaseReview', { review_id: REVIEW })).toBe('The employee will be able to see it.');
+    expect(approvalTitle('deleteReview', { review_id: REVIEW })).toBe('Delete a review that was not in the list above?');
+  });
+
+  it('an older review with no scores says so, never NaN or undefined', () => {
+    const find = nameIn([employees, reviews({ scores: undefined, score: undefined })]);
+    const title = approvalTitle('releaseReview', { review_id: REVIEW }, find);
+    expect(title).toBe('Release the review for Faiz Hakim, H1 2026: no scores on record, rated meets expectations, comment “Steady quarter.”?');
+    expect(title).not.toMatch(/NaN|undefined/);
+  });
+
+  it('a review just saved in this chat is what the release card shows: the newest word wins, with the database score', () => {
+    const saved = ok('saveReview', {
+      id: REVIEW, employee_id: EMP, employee: 'Faiz Hakim', period: 'H2 2026', scores: { Delivery: 5, Teamwork: 5, Ownership: 4.5, Communication: 4 },
+      rating: 'exceeds', score: 4.63, comment: null, status: 'draft', released_at: null,
+    });
+    const find = nameIn([employees, reviews(), saved]);
+    expect(approvalTitle('releaseReview', { review_id: REVIEW }, find)).toBe(
+      'Release the review for Faiz Hakim, H2 2026: Delivery 5, Teamwork 5, Ownership 4.5, Communication 4, overall 4.63, rated exceeds expectations, no comment?',
+    );
+    // Released in this chat: the next card hedges.
+    const after = nameIn([employees, reviews(), saved, ok('releaseReview', { ...(saved.output.data as object), status: 'released' })]);
+    expect(approvalDetail('releaseReview', { review_id: REVIEW }, undefined, after)).toContain('released when last checked');
+  });
+
+  it('a delete states what is deleted, in full, and a review deleted earlier is not named', () => {
+    expect(approvalTitle('deleteReview', { review_id: REVIEW }, everything)).toContain('Delete the review for Faiz Hakim, H1 2026: Delivery 4,');
+    expect(approvalDetail('deleteReview', { review_id: REVIEW }, undefined, everything)).toBe(
+      'A draft: the employee cannot see it yet. This cannot be undone.',
+    );
+    const find = nameIn([employees, reviews(), ok('deleteReview', { id: REVIEW, employee_id: EMP, removed: true })]);
+    expect(approvalTitle('releaseReview', { review_id: REVIEW }, find)).toBe('Release a review that was not in the list above?');
+    expect(approvalDetail('releaseReview', { review_id: REVIEW }, undefined, find)).toContain('deleted earlier in this chat');
+  });
+
+  it('there is no card for pulling a review back to draft', () => {
+    expect(approvalTitle('unreleaseReview', { review_id: REVIEW }, everything)).toBe('Approve this change?');
+    expect(approvalDetail('unreleaseReview', { review_id: REVIEW }, undefined, everything)).toBeNull();
+  });
+});
+
+describe('approval cards for courses', () => {
+  const save = { title: ' Safety induction ', category: '', provider: 'NIOSH', starts_on: '2026-11-10', ends_on: '2026-11-11' };
+
+  it('a course save states the dates, the category and the provider, including what is cleared', () => {
+    expect(approvalTitle('saveTraining', save)).toBe('Add the course “Safety induction” (10 Nov 2026 to 11 Nov 2026, no category, provider “NIOSH”)?');
+    expect(approvalTitle('saveTraining', { ...save, starts_on: '2026-11-10', ends_on: '2026-11-10' })).toContain('(on 10 Nov 2026,');
+    expect(approvalTitle('saveTraining', { ...save, training_id: COURSE }, everything)).toBe(
+      'Change the course “Safety induction” to “Safety induction” (10 Nov 2026 to 11 Nov 2026, no category, provider “NIOSH”)?',
+    );
+    expect(approvalTitle('saveTraining', { ...save, training_id: COURSE })).toContain('Change a course that was not in the list above to');
+  });
+
+  it('enrol and withdraw name the person and the course with its dates', () => {
+    expect(approvalTitle('enrolInTraining', { training_id: COURSE }, everything)).toBe('Enrol yourself in the course “Safety induction” (10 Nov 2026 to 11 Nov 2026)?');
+    expect(approvalTitle('enrolInTraining', { training_id: COURSE, employee_id: EMP }, everything)).toBe('Enrol Faiz Hakim in the course “Safety induction” (10 Nov 2026 to 11 Nov 2026)?');
+    expect(approvalTitle('withdrawFromTraining', { training_id: COURSE, employee_id: '' }, everything)).toBe('Withdraw yourself from the course “Safety induction” (10 Nov 2026 to 11 Nov 2026)?');
+    expect(approvalTitle('enrolInTraining', { training_id: COURSE })).toBe('Enrol yourself in a course that was not in the list above?');
+  });
+
+  it('a completion names the person and the course, and marks or undoes', () => {
+    expect(approvalTitle('setTrainingCompleted', { training_id: COURSE, employee_id: EMP, completed: true }, everything)).toBe(
+      'Mark Faiz Hakim as having completed the course “Safety induction” (10 Nov 2026 to 11 Nov 2026)?',
+    );
+    expect(approvalTitle('setTrainingCompleted', { training_id: COURSE, employee_id: EMP, completed: false }, everything)).toContain("Undo Faiz Hakim's completion");
+    expect(approvalDetail('setTrainingCompleted', { training_id: COURSE, employee_id: EMP, completed: true })).toContain('cannot be removed until this is undone');
+  });
+
+  it('a removal states the course and everyone enrolled going with it', () => {
+    expect(approvalTitle('removeTraining', { training_id: COURSE }, everything)).toBe(
+      "Remove the course “Safety induction” (10 Nov 2026 to 11 Nov 2026) and everyone's enrolment in it?",
+    );
+    expect(approvalDetail('removeTraining', { training_id: COURSE }, undefined, everything)).toBe('Everyone enrolled is removed from it too. This cannot be undone.');
+  });
+
+  it('hedges only what the conversation shows: an ended course, a started one, one not started, one with a completion', () => {
+    const ended = nameIn([courses({ status: 'completed' })]);
+    const running = nameIn([courses({ status: 'in_progress' })]);
+    const upcoming = nameIn([courses({ status: 'upcoming' })]);
+    expect(approvalDetail('enrolInTraining', { training_id: COURSE }, undefined, ended)).toBe('This course had ended when last checked, so this may be refused.');
+    expect(approvalDetail('enrolInTraining', { training_id: COURSE }, undefined, running)).toBeNull();
+    expect(approvalDetail('withdrawFromTraining', { training_id: COURSE }, undefined, running)).toBe(
+      'This course had already started when last checked, so this may be refused. Ask an owner or admin to remove you.',
+    );
+    expect(approvalDetail('withdrawFromTraining', { training_id: COURSE }, undefined, upcoming)).toBeNull();
+    // An owner or admin naming the person is not held to the member's dates.
+    expect(approvalDetail('enrolInTraining', { training_id: COURSE, employee_id: EMP }, undefined, ended)).toBeNull();
+    expect(approvalDetail('setTrainingCompleted', { training_id: COURSE, employee_id: EMP, completed: true }, undefined, upcoming)).toContain(
+      'This course had not started when last checked, so this may be refused.',
+    );
+    expect(approvalDetail('setTrainingCompleted', { training_id: COURSE, employee_id: EMP, completed: false }, undefined, upcoming)).toBeNull();
+    expect(approvalDetail('removeTraining', { training_id: COURSE }, undefined, nameIn([courses({ completed_count: 2 })]))).toContain(
+      'Someone was marked as completed on it when last checked, so this may be refused.',
+    );
+    // The title still states the full change.
+    expect(approvalTitle('enrolInTraining', { training_id: COURSE }, ended)).toContain('Enrol yourself in the course “Safety induction”');
+  });
+
+  it('a course saved in this chat is what the next card shows', () => {
+    const find = nameIn([courses(), ok('saveTraining', { id: COURSE, title: 'Safety induction II', category: null, provider: null, starts_on: '2026-12-01', ends_on: '2026-12-02', status: 'upcoming' })]);
+    expect(approvalTitle('removeTraining', { training_id: COURSE }, find)).toContain('“Safety induction II” (1 Dec 2026 to 2 Dec 2026)');
+  });
+});
+
+describe('approval cards for announcements', () => {
+  const draft = { title: ' Cuti Deepavali ', body: BODY, category: 'holiday', publish: false };
+
+  it('a save shows the full title and body every time, and says a draft or that everyone will see it', () => {
+    expect(approvalTitle('saveAnnouncement', draft)).toBe(`Save the new announcement “Cuti Deepavali” (holiday): “${BODY}” as a draft?`);
+    expect(approvalDetail('saveAnnouncement', draft)).toBe('A draft: only owners and admins can see it.');
+    expect(approvalTitle('saveAnnouncement', { ...draft, publish: true })).toBe(`Publish the new announcement “Cuti Deepavali” (holiday): “${BODY}”?`);
+    expect(approvalDetail('saveAnnouncement', { ...draft, publish: true })).toBe('Everyone in the workspace will see it.');
+    const long = 'y'.repeat(5000);
+    expect(approvalTitle('saveAnnouncement', { ...draft, body: long })).toContain(`“${long}”`);
+    expect(approvalTitle('saveAnnouncement', { ...draft, body: null })).toContain('no text');
+  });
+
+  it('editing names the announcement and, when it is published, says it stays published', () => {
+    expect(approvalTitle('saveAnnouncement', { ...draft, announcement_id: ANNOUNCEMENT, publish: true }, everything)).toBe(
+      `Save changes to the announcement “Cuti Deepavali” and publish it, as “Cuti Deepavali” (holiday): “${BODY}”?`,
+    );
+    const published = nameIn([announcements({ status: 'published' })]);
+    // Saving without publishing never claims "a draft" for an announcement that may be published.
+    expect(approvalDetail('saveAnnouncement', { ...draft, announcement_id: ANNOUNCEMENT }, undefined, published)).toBe(
+      'Saved without publishing: a draft stays a draft, and a published announcement stays published and shows the changes. It was published when last checked, so everyone in the workspace sees the changes.',
+    );
+    expect(approvalDetail('saveAnnouncement', { ...draft, announcement_id: ANNOUNCEMENT })).toBe(
+      'Saved without publishing: a draft stays a draft, and a published announcement stays published and shows the changes.',
+    );
+    expect(approvalDetail('saveAnnouncement', { ...draft, announcement_id: ANNOUNCEMENT, publish: true }, undefined, published)).toContain(
+      'already published when last checked',
+    );
+    expect(approvalTitle('saveAnnouncement', { ...draft, announcement_id: ANNOUNCEMENT })).toContain('Save changes to an announcement that was not in the list above');
+  });
+
+  it('publish, pull back and delete name the announcement by title and show its whole body', () => {
+    expect(approvalTitle('publishAnnouncement', { announcement_id: ANNOUNCEMENT }, everything)).toBe(`Publish the announcement “Cuti Deepavali” (holiday): “${BODY}”?`);
+    expect(approvalDetail('publishAnnouncement', { announcement_id: ANNOUNCEMENT }, undefined, everything)).toBe('Everyone in the workspace will see it.');
+    expect(approvalTitle('unpublishAnnouncement', { announcement_id: ANNOUNCEMENT }, everything)).toContain('Pull back to a draft the announcement “Cuti Deepavali”');
+    expect(approvalDetail('unpublishAnnouncement', { announcement_id: ANNOUNCEMENT }, undefined, nameIn([announcements({ status: 'published' })]))).toBe('Members will no longer see it.');
+    expect(approvalTitle('removeAnnouncement', { announcement_id: ANNOUNCEMENT }, everything)).toContain(`Delete the announcement “Cuti Deepavali” (holiday): “${BODY}”?`);
+    expect(approvalDetail('removeAnnouncement', { announcement_id: ANNOUNCEMENT }, undefined, everything)).toContain('This cannot be undone.');
+  });
+
+  it('with no lookup the title says so and the publish detail still says everyone will see it', () => {
+    expect(approvalTitle('publishAnnouncement', { announcement_id: ANNOUNCEMENT })).toBe('Publish an announcement that was not in the list above?');
+    expect(approvalDetail('publishAnnouncement', { announcement_id: ANNOUNCEMENT })).toBe('Everyone in the workspace will see it.');
+  });
+
+  it('hedges a publish of one already published, a pull back of a draft, and one deleted earlier, keeping the full title', () => {
+    const published = nameIn([announcements({ status: 'published' })]);
+    expect(approvalDetail('publishAnnouncement', { announcement_id: ANNOUNCEMENT }, undefined, published)).toBe(
+      'Everyone in the workspace will see it. This announcement was published when last checked, so this may be refused.',
+    );
+    expect(approvalTitle('publishAnnouncement', { announcement_id: ANNOUNCEMENT }, published)).toContain(`“${BODY}”`);
+    expect(approvalDetail('unpublishAnnouncement', { announcement_id: ANNOUNCEMENT }, undefined, nameIn([announcements()]))).toContain('was a draft when last checked');
+    const gone = nameIn([announcements(), ok('removeAnnouncement', { id: ANNOUNCEMENT, removed: true })]);
+    expect(approvalTitle('publishAnnouncement', { announcement_id: ANNOUNCEMENT }, gone)).toBe('Publish an announcement that was not in the list above?');
+    expect(approvalDetail('publishAnnouncement', { announcement_id: ANNOUNCEMENT }, undefined, gone)).toContain('deleted earlier in this chat');
+  });
+
+  it('a publish after a save in this chat shows the saved text, not the lookup', () => {
+    const find = nameIn([announcements(), ok('saveAnnouncement', { id: ANNOUNCEMENT, title: 'Cuti Deepavali 2026', body: 'Tutup 31 Okt.', category: 'holiday', status: 'draft', published_at: null })]);
+    expect(approvalTitle('publishAnnouncement', { announcement_id: ANNOUNCEMENT }, find)).toBe('Publish the announcement “Cuti Deepavali 2026” (holiday): “Tutup 31 Okt.”?');
+  });
+});
+
+describe('what the conversation remembers about these rows', () => {
+  it('an id is only named from the right kind of result', () => {
+    expect(nameIn([goals()])(GOAL, 'review')).toBeNull();
+    expect(nameIn([reviews()])(REVIEW, 'goal')).toBeNull();
+    expect(nameIn([announcements()])(ANNOUNCEMENT, 'training')).toBeNull();
+  });
+
+  it('collects facts for a later turn, and a removal leaves only the word that it is gone', () => {
+    const names = collectNames([goals(), courses(), ok('removeGoal', { id: GOAL, employee_id: EMP, removed: true })]);
+    expect(JSON.parse(names[`goal:${GOAL}`])).toEqual({ removed: true });
+    expect(JSON.parse(names[`training:${COURSE}`]).title).toBe('Safety induction');
+  });
+
+  it('a name cap never stops a fact that is already known from being brought up to date', () => {
+    const into: Record<string, string> = {};
+    for (let n = 0; n < 200; n += 1) into[`department:filler-${n}`] = `Filler ${n}`;
+    into[`review:${REVIEW}`] = JSON.stringify({ employee: 'Faiz Hakim', period: 'H1 2026', status: 'draft' });
+    delete into['department:filler-0'];
+    const names = collectNames([ok('releaseReview', { id: REVIEW, employee: 'Faiz Hakim', period: 'H1 2026', status: 'released', rating: 'meets' })], into);
+    expect(JSON.parse(names[`review:${REVIEW}`]).status).toBe('released');
+    expect(Object.keys(names).length).toBeLessThanOrEqual(201);
+  });
+
+  it('a failed change changes nothing the card believes', () => {
+    const find = nameIn([employees, reviews(), { tool: 'releaseReview', output: { ok: false, error: 'That review could not be found.' } }]);
+    expect(approvalDetail('releaseReview', { review_id: REVIEW }, undefined, find)).toBe('The employee will be able to see it.');
+  });
+
+  it('fact JSON from a hostile text field cannot become a field: a title that looks like JSON is only a title', () => {
+    const find = nameIn([{ tool: 'listGoals', output: { goals: [{ id: GOAL, employee: 'A', title: '"},"removed":true,"x":"', progress: 1, due_date: null, status: 'done' }] } }]);
+    expect(approvalTitle('removeGoal', { goal_id: GOAL }, find)).toContain('“"},"removed":true,"x":"”');
+  });
+});

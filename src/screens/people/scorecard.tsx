@@ -4,40 +4,22 @@ import { BarGroup, RadarSpread, type Series } from '@/components/charts';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { buildScorecardModel, formatScore } from '@/lib/people/performance';
-import { EmployeeCell, HR_ONLY, LOAD_FAILED, Muted, loadPeople } from './parts';
+import { buildScorecardModel } from '@/lib/people/performance';
+import { scoreCell, scorecardTiles, visibleScorecardRows } from '@/lib/people/reviews-announcements';
+import { EmployeeCell, HR_ONLY, LOAD_FAILED, Muted, StatusPill, loadPeople } from './parts';
 
 const COMPETENCY_SERIES: Series[] = [{ key: 'score', label: 'Average score', color: 'var(--chart-1)' }];
 const DEPT_SERIES: Series[] = [{ key: 'score', label: 'Avg score', color: 'var(--chart-1)' }];
 
 export default async function ScorecardScreen() {
   const { model } = await loadPeople('scorecard', async (data, _now, ctx) => {
-    const [scorecards, employees] = await Promise.all([data.listScorecards(), data.listEmployees()]);
-    return buildScorecardModel(scorecards, employees, ctx.viewer);
+    const [reviews, employees] = await Promise.all([data.listReviews(), data.listEmployees()]);
+    return buildScorecardModel(reviews, employees, ctx.viewer);
   });
-  const dash = '—';
   const team = model?.team ?? true;
 
-  const tiles: { label: string; value: string; caption?: string }[] = !model
-    ? [
-        { label: 'Average score', value: dash },
-        { label: 'Highest', value: dash },
-        { label: 'Scored', value: dash },
-      ]
-    : model.team
-      ? [
-          { label: 'Average score', value: model.average === null ? dash : formatScore(model.average) },
-          {
-            label: 'Highest',
-            value: model.highest ? formatScore(model.highest.score) : dash,
-            caption: model.highest?.employee,
-          },
-          { label: 'Scored', value: String(model.scored) },
-        ]
-      : [
-          { label: 'Your score', value: model.average === null ? dash : formatScore(model.average) },
-          { label: 'Scored', value: String(model.scored) },
-        ];
+  const tiles = scorecardTiles(model);
+  const rows = model ? visibleScorecardRows(model) : [];
   const span = tiles.length === 2 ? 'md:col-span-6' : 'md:col-span-4';
 
   return (
@@ -107,7 +89,7 @@ export default async function ScorecardScreen() {
         >
           {!model ? (
             LOAD_FAILED
-          ) : model.rows.length === 0 ? (
+          ) : rows.length === 0 ? (
             <Muted>No scorecards yet</Muted>
           ) : (
             <div className="overflow-x-auto">
@@ -121,16 +103,23 @@ export default async function ScorecardScreen() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {model.rows.map((row) => (
+                  {rows.map((row) => (
                     <TableRow key={row.id}>
                       <TableCell>
                         <EmployeeCell name={row.employee} />
                       </TableCell>
-                      <TableCell className="whitespace-nowrap text-muted-foreground">{row.period}</TableCell>
-                      <TableCell className="whitespace-nowrap text-right font-semibold tabular-nums">
-                        {formatScore(row.score)}
+                      <TableCell className="whitespace-nowrap text-muted-foreground">
+                        {row.period}
+                        {row.draft ? (
+                          <span className="ml-2">
+                            <StatusPill tone="pending">Draft</StatusPill>
+                          </span>
+                        ) : null}
                       </TableCell>
-                      <TableCell className="text-muted-foreground">{row.competencies || dash}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right font-semibold tabular-nums">
+                        {scoreCell(row.score)}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">{row.competencies || '—'}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

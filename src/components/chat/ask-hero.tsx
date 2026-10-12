@@ -18,6 +18,7 @@ import Link from 'next/link';
 import { useChat } from '@ai-sdk/react';
 import {
   ChatKeyNotice,
+  DAILY_LIMIT_NOTICE,
   chatErrorCode,
   isChatLocked,
   useChatStatus,
@@ -427,6 +428,8 @@ function Thread({
             ? 'That question was not sent: your free questions are used up. Add an OpenRouter key to keep chatting.'
             : chatErrorCode(error) === 'no_workspace'
               ? `${persona.name} needs a workspace to look at. Create or join one first.`
+              : chatErrorCode(error) === 'daily_limit'
+                ? DAILY_LIMIT_NOTICE
               : `${persona.name} couldn’t respond just now. Please try again.`}
         </div>
       )}

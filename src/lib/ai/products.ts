@@ -18,10 +18,9 @@ import {
   PEOPLE_TOOL_NAMES as PEOPLE_READ_TOOL_NAMES,
   type PeopleWrite,
 } from '@/lib/ai/people-tools';
-import { createReachTools } from '@/lib/ai/tools';
+import { createReachTools, type ReachWrite } from '@/lib/ai/tools';
 import type { HireWriteContext } from '@/lib/hire/capabilities';
 import type { CvReader } from '@/lib/hire/cv-read';
-import type { ReachWriteContext } from '@/lib/reach/capabilities';
 import type { HireData } from '@/lib/hire/types';
 import type { PeopleData, PeopleViewer } from '@/lib/people/types';
 import type { ReachData } from '@/lib/reach/types';
@@ -29,7 +28,7 @@ import type { ReachData } from '@/lib/reach/types';
 /** The marketing data an agent works on, and whether this caller may change it. */
 export type ReachAccess = {
   data: ReachData;
-  write?: { ctx: ReachWriteContext; canWrite: boolean };
+  write?: ReachWrite;
 };
 
 /** Marketing tools that change data. */
@@ -80,7 +79,7 @@ export const HIRE_WRITE_TOOL_NAMES = ['createJob', 'updateJob', 'setJobStatus', 
 /** The HR data an agent reads, who is asking, and whether they may change it. */
 export type PeopleAccess = { data: PeopleData; viewer: PeopleViewer; write?: PeopleWrite };
 
-/** HR tools that change data: employees, departments, leave, time-off, claims, overtime, attendance, public holidays, attendance settings and payroll drafts. */
+/** HR tools that change data: employees, departments, leave, time-off, claims, overtime, attendance, public holidays, attendance settings, payroll drafts, goals, reviews, training and announcements. */
 export const PEOPLE_WRITE_TOOL_NAMES = [
   'createEmployee',
   'updateEmployee',
@@ -117,6 +116,20 @@ export const PEOPLE_WRITE_TOOL_NAMES = [
   'removePayslipLine',
   'setPayslipStatutory',
   'removePayslip',
+  'saveGoal',
+  'removeGoal',
+  'enrolInTraining',
+  'withdrawFromTraining',
+  'saveReview',
+  'deleteReview',
+  'releaseReview',
+  'saveTraining',
+  'removeTraining',
+  'setTrainingCompleted',
+  'saveAnnouncement',
+  'removeAnnouncement',
+  'publishAnnouncement',
+  'unpublishAnnouncement',
 ] as const;
 
 /**

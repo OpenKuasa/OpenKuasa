@@ -3,42 +3,45 @@ import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { BarGroup, DonutStat, type Series, type Slice } from '@/components/charts';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
+import { ReviewDialog } from '@/components/people/review-form';
+import { ReviewRowControls } from '@/components/people/review-row-controls';
+import { RequestRow } from '@/components/people/request-row';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { formatDate } from '@/lib/people/dates';
-import { RATING_LABEL, buildReviewsModel, formatScore } from '@/lib/people/performance';
+import { formatDate, todayInMalaysia } from '@/lib/people/dates';
+import { RATING_LABEL, buildReviewsModel } from '@/lib/people/performance';
+import { reviewPeriods } from '@/lib/people/performance-forms';
+import {
+  competencyLine,
+  reviewMark,
+  reviewTiles,
+  scoreCell,
+  reviewScreenControls,
+  visibleReviewRows,
+} from '@/lib/people/reviews-announcements';
 import { EmployeeCell, HR_ONLY, LOAD_FAILED, Muted, StatusPill, loadPeople } from './parts';
 
 const DEPT_SERIES: Series[] = [{ key: 'rating', label: 'Avg score', color: 'var(--chart-1)' }];
 const RATING_TONE = { exceeds: 'good', meets: 'pending', below: 'bad' } as const;
 
 export default async function ReviewScoresScreen() {
-  const { model } = await loadPeople('review-scores', async (data, _now, ctx) => {
+  const { model: loaded, viewer } = await loadPeople('review-scores', async (data, now, ctx) => {
     const [reviews, employees] = await Promise.all([data.listReviews(), data.listEmployees()]);
-    return buildReviewsModel(reviews, employees, ctx.viewer);
+    return {
+      reviews: buildReviewsModel(reviews, employees, ctx.viewer),
+      people: employees.filter((e) => e.status === 'active').map((e) => ({ id: e.id, name: e.name })),
+      periods: reviewPeriods(todayInMalaysia(now)),
+    };
   });
+  const model = loaded?.reviews ?? null;
   const dash = '—';
   const team = model?.team ?? true;
-  const average = model?.average ?? null;
-  const ratings = model?.ratings ?? null;
+  // The controls that change a review are drawn for an owner or admin outside the demo only.
+  const editing = reviewScreenControls(viewer, loaded !== null).write;
+  const rows = model ? visibleReviewRows(model) : [];
+  const reviewed = rows.map((r) => ({ id: r.id, employee_id: r.employee_id, period: r.period }));
 
-  const tiles: { label: string; value: string }[] = !model
-    ? [
-        { label: 'Exceeds', value: dash },
-        { label: 'Meets', value: dash },
-        { label: 'Below', value: dash },
-        { label: 'Average score', value: dash },
-      ]
-    : ratings
-      ? [
-          { label: 'Exceeds', value: String(ratings.exceeds) },
-          { label: 'Meets', value: String(ratings.meets) },
-          { label: 'Below', value: String(ratings.below) },
-          { label: 'Average score', value: average === null ? dash : formatScore(average) },
-        ]
-      : [
-          { label: 'Your reviews', value: String(model.scored) },
-          { label: 'Your score', value: average === null ? dash : formatScore(average) },
-        ];
+  const tiles = reviewTiles(model);
+  const ratings = model?.ratings ?? null;
   const span = tiles.length === 2 ? 'md:col-span-6' : 'md:col-span-3';
 
   const mix: Slice[] = ratings
@@ -55,6 +58,11 @@ export default async function ReviewScoresScreen() {
       <PageHeader
         title="Review Scores"
         subtitle={team ? 'Performance review results across the team' : 'Your performance review results'}
+        actions={
+          editing && loaded ? (
+            <ReviewDialog employees={loaded.people} periods={loaded.periods} reviewed={reviewed} />
+          ) : null
+        }
       />
 
       <BentoGrid>
@@ -64,7 +72,7 @@ export default async function ReviewScoresScreen() {
             tone={index === 0 ? 'primary' : 'default'}
             className={`col-span-1 ${span}`}
           >
-            <BentoStat label={tile.label} value={tile.value} onPrimary={index === 0} />
+            <BentoStat label={tile.label} value={tile.value} delta={tile.caption} deltaTone="flat" onPrimary={index === 0} />
           </BentoCard>
         ))}
 
@@ -115,7 +123,7 @@ export default async function ReviewScoresScreen() {
         >
           {!model ? (
             LOAD_FAILED
-          ) : model.rows.length === 0 ? (
+          ) : rows.length === 0 ? (
             <Muted>No reviews yet</Muted>
           ) : (
             <div className="overflow-x-auto">
@@ -124,31 +132,76 @@ export default async function ReviewScoresScreen() {
                   <TableRow className="bg-muted/40">
                     <TableHead>Employee</TableHead>
                     <TableHead>Period</TableHead>
+                    {team ? <TableHead>Status</TableHead> : null}
                     <TableHead>Rating</TableHead>
                     <TableHead className="text-right">Score</TableHead>
+                    <TableHead>Competencies</TableHead>
                     <TableHead>Reviewer</TableHead>
                     <TableHead>Reviewed on</TableHead>
+                    <TableHead>Comment</TableHead>
+                    {editing ? <TableHead>Actions</TableHead> : null}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {model.rows.map((row) => (
-                    <TableRow key={row.id}>
-                      <TableCell>
-                        <EmployeeCell name={row.employee} />
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-muted-foreground">{row.period}</TableCell>
-                      <TableCell>
-                        <StatusPill tone={RATING_TONE[row.rating]}>{RATING_LABEL[row.rating]}</StatusPill>
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-right font-semibold tabular-nums">
-                        {formatScore(row.score)}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-muted-foreground">{row.reviewer ?? dash}</TableCell>
-                      <TableCell className="whitespace-nowrap text-muted-foreground">
-                        {row.reviewed_at ? formatDate(row.reviewed_at) : dash}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {rows.map((row) => {
+                    const mark = reviewMark(row, team);
+                    const cells = (
+                      <>
+                        <TableCell>
+                          <EmployeeCell name={row.employee} />
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">{row.period}</TableCell>
+                        {team ? (
+                          <TableCell>
+                            <StatusPill tone={mark === 'Draft' ? 'pending' : 'good'}>{mark}</StatusPill>
+                          </TableCell>
+                        ) : null}
+                        <TableCell>
+                          <StatusPill tone={RATING_TONE[row.rating]}>{RATING_LABEL[row.rating]}</StatusPill>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-right font-semibold tabular-nums">
+                          {scoreCell(row.score)}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                          {competencyLine(row.competencies)}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">{row.reviewer ?? dash}</TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">
+                          {row.reviewed_at ? formatDate(row.reviewed_at) : dash}
+                        </TableCell>
+                        <TableCell className="min-w-48 max-w-sm whitespace-normal text-muted-foreground">
+                          {row.comment || dash}
+                        </TableCell>
+                        {editing && loaded ? (
+                          <TableCell>
+                            <ReviewRowControls
+                              review={{
+                                id: row.id,
+                                employee_id: row.employee_id,
+                                employee: row.employee,
+                                period: row.period,
+                                rating: row.rating,
+                                comment: row.comment,
+                                competencies: row.competencies,
+                              }}
+                              draft={row.draft}
+                              employees={loaded.people}
+                              periods={loaded.periods}
+                              reviewed={reviewed.filter((r) => r.employee_id === row.employee_id)}
+                            />
+                          </TableCell>
+                        ) : null}
+                      </>
+                    );
+                    // The controls' questions open in a row under this one, which needs a row that can hold them.
+                    return editing ? (
+                      <RequestRow key={row.id} columns={team ? 10 : 9}>
+                        {cells}
+                      </RequestRow>
+                    ) : (
+                      <TableRow key={row.id}>{cells}</TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>

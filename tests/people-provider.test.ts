@@ -9,7 +9,7 @@ const env = vi.hoisted(() => ({
 vi.mock('@/lib/auth/viewer', () => ({ hasSupabaseEnv: () => env.hasEnv }));
 vi.mock('@/lib/auth/current-org', () => ({ getCurrentOrg: async () => env.org }));
 
-import { getPeopleData } from '@/lib/people/supabase';
+import { getPeopleData, isUnread } from '@/lib/people/supabase';
 import { NO_WORKSPACE_VIEWER, PREVIEW_PEOPLE_VIEWER, getPeopleViewer } from '@/lib/people/viewer';
 import { DEFAULT_PEOPLE_SETTINGS, DEMO_EMPLOYEE_ID } from '@/lib/people/types';
 
@@ -104,7 +104,7 @@ describe('getPeopleData', () => {
       data.listTimeOffRequests(), data.listClaims(), data.listOvertime(),
       data.listAttendance('2026-10-01', '2026-10-09'), data.listTimesheet('2026-10-01', '2026-10-09'),
       data.listShifts('2026-10-05', '2026-10-11'), data.listPublicHolidays(), data.listPayrollRuns(),
-      data.listPayslips(), data.listGoals(), data.listScorecards(), data.listReviews(), data.listTrainings(),
+      data.listPayslips(), data.listGoals(), data.listReviews(), data.listTrainings(),
       data.listTrainingEnrolments(), data.listAnnouncements(), data.getEmployeePrivate('e1'),
       data.listDocuments(), data.listLetters(), data.listPaymentVouchers(), data.getSettings(),
     ]);
@@ -112,7 +112,7 @@ describe('getPeopleData', () => {
       'hr_announcements', 'hr_attendance_days', 'hr_claims', 'hr_departments', 'hr_documents',
       'hr_employee_private', 'hr_employees', 'hr_goals', 'hr_leave_balances', 'hr_leave_requests', 'hr_letters',
       'hr_overtime_records', 'hr_payment_vouchers', 'hr_payroll_runs', 'hr_payslips', 'hr_public_holidays',
-      'hr_reviews', 'hr_scorecards', 'hr_settings', 'hr_shifts', 'hr_time_off_requests', 'hr_timesheet_entries', 'hr_training_enrolments', 'hr_trainings',
+      'hr_reviews', 'hr_settings', 'hr_shifts', 'hr_time_off_requests', 'hr_timesheet_entries', 'hr_training_enrolments', 'hr_trainings',
     ]);
     for (const call of calls) expect(call.filters, call.table).toContainEqual(['eq', 'org_id', 'o1']);
   });
@@ -408,5 +408,199 @@ describe('getPeopleViewer', () => {
     env.hasEnv = false;
     expect(await getPeopleViewer(client, { orgId: 'o1', role: 'owner' })).toEqual(PREVIEW_PEOPLE_VIEWER);
     expect(calls).toEqual([]);
+  });
+});
+
+describe('reviews, goals, trainings and announcements', () => {
+  const withRows = async <T>(rows: Record<string, unknown[]>, run: () => Promise<T>): Promise<T> => {
+    const saved: Record<string, unknown[] | undefined> = {};
+    for (const key of Object.keys(rows)) saved[key] = ROWS[key];
+    Object.assign(ROWS, rows);
+    try {
+      return await run();
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete ROWS[key];
+        else ROWS[key] = value;
+      }
+    }
+  };
+
+  const reviewRow = (over: Record<string, unknown> = {}) => ({
+    id: 'rv1', employee_id: 'e1', period: 'H1 2026', competencies: { Delivery: 4, Teamwork: 3.5, Ownership: 5, Communication: 2 },
+    rating: 'meets', score: '3.63', comment: 'Solid.', status: 'released', released_at: '2026-10-01T00:00:00+00:00',
+    reviewer_name: 'Kavitha', reviewed_at: '2026-09-30', employee: { name: 'Aisyah Rahim' }, ...over,
+  });
+
+  it('reads the new review columns with no status filter, naming the key the employee embed follows', async () => {
+    await withRows({ hr_reviews: [reviewRow()] }, async () => {
+      await (await getPeopleData(client)).listReviews();
+    });
+    const call = calls.find((c) => c.table === 'hr_reviews')!;
+    for (const column of ['competencies', 'comment', 'status', 'released_at', 'reviewer_name', 'reviewed_at']) {
+      expect(call.columns).toContain(column);
+    }
+    expect(call.columns).toContain('employee:hr_employees!hr_reviews_employee_id_org_id_fkey(name)');
+    expect(call.filters.map((f) => f[1])).toEqual(['org_id']);
+  });
+
+  it('names the key the employee embed of a goal follows', async () => {
+    await (await getPeopleData(client)).listGoals();
+    expect(calls.find((c) => c.table === 'hr_goals')!.columns).toContain(
+      'employee:hr_employees!hr_goals_employee_id_org_id_fkey(name)',
+    );
+  });
+
+  it('shapes a review: a numeric score, the name, the scores, a draft kept a draft', async () => {
+    const list = await withRows(
+      { hr_reviews: [reviewRow(), reviewRow({ id: 'rv2', status: 'draft', released_at: null, comment: null })] },
+      async () => (await getPeopleData(client)).listReviews(),
+    );
+    expect(list[0]).toMatchObject({
+      id: 'rv1', employee_name: 'Aisyah Rahim', score: 3.63, status: 'released', comment: 'Solid.',
+      competencies: { Delivery: 4, Teamwork: 3.5, Ownership: 5, Communication: 2 },
+    });
+    expect(list[0]).not.toHaveProperty('employee');
+    expect(list[1]).toMatchObject({ status: 'draft', released_at: null, comment: null });
+  });
+
+  it('treats anything that is not exactly "released" as a draft, so a surprise value never reaches a member', async () => {
+    const list = await withRows(
+      { hr_reviews: [reviewRow({ id: 'a', status: 'Released' }), reviewRow({ id: 'b', status: null }), reviewRow({ id: 'c', status: undefined })] },
+      async () => (await getPeopleData(client)).listReviews(),
+    );
+    expect(list.map((r) => r.status)).toEqual(['draft', 'draft', 'draft']);
+  });
+
+  it('reads an old-shaped review (empty competencies, draft) without throwing or NaN', async () => {
+    const list = await withRows(
+      {
+        hr_reviews: [
+          reviewRow({ id: 'old', competencies: {}, status: 'draft', released_at: null, comment: null }),
+          reviewRow({ id: 'odd1', competencies: null }),
+          reviewRow({ id: 'odd2', competencies: [4, 5] }),
+          reviewRow({ id: 'odd3', competencies: { Delivery: 'x', Teamwork: null, Ownership: 4 } }),
+          reviewRow({ id: 'odd4', score: null }),
+        ],
+      },
+      async () => (await getPeopleData(client)).listReviews(),
+    );
+    expect(list.map((r) => r.competencies)).toEqual([{}, {}, {}, { Ownership: 4 }, expect.any(Object)]);
+    expect(list[4].score).toBe(0);
+    expect(JSON.stringify(list)).not.toMatch(/NaN|Infinity/);
+  });
+
+  it('reads a course without its stored status, and an enrolment with its completion time', async () => {
+    const enrolments = await withRows(
+      {
+        hr_trainings: [{ id: 't1', title: 'Excel', category: null, provider: null, starts_on: '2026-11-01', ends_on: '2026-11-02' }],
+        hr_training_enrolments: [
+          { id: 'en1', employee_id: 'e1', training_id: 't1', completed: true, completed_at: '2026-11-02T10:00:00+00:00' },
+          { id: 'en2', employee_id: 'e2', training_id: 't1', completed: false },
+        ],
+      },
+      async () => {
+        const data = await getPeopleData(client);
+        await data.listTrainings();
+        return data.listTrainingEnrolments();
+      },
+    );
+    expect(calls.find((c) => c.table === 'hr_trainings')!.columns).not.toContain('status');
+    expect(calls.find((c) => c.table === 'hr_training_enrolments')!.columns).toContain('completed_at');
+    expect(enrolments.map((e) => e.completed_at)).toEqual(['2026-11-02T10:00:00+00:00', null]);
+  });
+
+  describe('announcements and the unread flag', () => {
+    const ann = (id: string, published_at: string | null, over: Record<string, unknown> = {}) => ({
+      id, title: id, body: 'b', category: 'general', status: published_at ? 'published' : 'draft', published_at,
+      author_name: published_at ? 'Siti' : null, edited_at: null, ...over,
+    });
+    const list = (rows: unknown[], reads: unknown[] = []) =>
+      withRows({ hr_announcements: rows, hr_announcement_reads: reads }, async () => (await getPeopleData(client)).listAnnouncements());
+
+    it('reads the status, the edit time and the author, drafts last, with no status filter', async () => {
+      SINGLE.org_members = { created_at: '2026-01-01T00:00:00+00:00' };
+      await list([ann('a1', '2026-10-01T00:00:00+00:00')]);
+      const call = calls.find((c) => c.table === 'hr_announcements')!;
+      for (const column of ['status', 'published_at', 'author_name', 'edited_at']) expect(call.columns).toContain(column);
+      expect(call.filters.map((f) => f[1])).toEqual(['org_id']);
+      expect(call.nullsLast).toEqual(['published_at']);
+    });
+
+    it('is unread when published after joining and not marked; read when marked; not unread when published before joining', async () => {
+      SINGLE.org_members = { created_at: '2026-09-01T00:00:00+00:00' };
+      const rows = await list(
+        [
+          ann('new', '2026-10-01T00:00:00+00:00'),
+          ann('marked', '2026-10-02T00:00:00+00:00'),
+          ann('before-joining', '2026-08-01T00:00:00+00:00'),
+        ],
+        [{ announcement_id: 'marked' }],
+      );
+      expect(Object.fromEntries(rows.map((r) => [r.id, r.unread]))).toEqual({ new: true, marked: false, 'before-joining': false });
+    });
+
+    it('asks only for the caller\'s own marks and join time in this workspace', async () => {
+      SINGLE.org_members = { created_at: '2026-09-01T00:00:00+00:00' };
+      await list([ann('new', '2026-10-01T00:00:00+00:00')]);
+      const marks = calls.find((c) => c.table === 'hr_announcement_reads')!;
+      expect(marks.filters).toContainEqual(['eq', 'user_id', 'u1']);
+      const member = calls.find((c) => c.table === 'org_members')!;
+      expect(member.filters).toContainEqual(['eq', 'org_id', 'o1']);
+      expect(member.filters).toContainEqual(['eq', 'user_id', 'u1']);
+    });
+
+    it('never flags a draft, and does not look up marks when nothing is published', async () => {
+      const rows = await list([ann('d', null)]);
+      expect(rows[0]).toMatchObject({ status: 'draft', published_at: null, unread: false });
+      expect(calls.some((c) => c.table === 'hr_announcement_reads' || c.table === 'org_members')).toBe(false);
+    });
+
+    it('flags nothing without a session or without a membership', async () => {
+      env.user = null;
+      const anon = await list([ann('new', '2026-10-01T00:00:00+00:00')]);
+      expect(anon[0].unread).toBe(false);
+      env.user = { id: 'u1' };
+      const rows = await list([ann('new', '2026-10-01T00:00:00+00:00')]);
+      expect(rows[0].unread).toBe(false);
+    });
+
+    it('treats a status that is not exactly "published" as a draft', async () => {
+      SINGLE.org_members = { created_at: '2026-01-01T00:00:00+00:00' };
+      const rows = await list([ann('x', '2026-10-01T00:00:00+00:00', { status: 'Published' }), ann('y', '2026-10-01T00:00:00+00:00', { status: undefined })]);
+      expect(rows.map((r) => [r.status, r.unread])).toEqual([['draft', false], ['draft', false]]);
+    });
+
+    it('fails the whole read when the marks cannot be read, rather than showing everything as read', async () => {
+      SINGLE.org_members = { __error: true };
+      await expect(list([ann('new', '2026-10-01T00:00:00+00:00')])).rejects.toBeTruthy();
+    });
+  });
+});
+
+describe('isUnread', () => {
+  const context = (joinedAt: string | null, read: string[] = []) => ({ joinedAt, read: new Set(read) });
+  const row = (over: Partial<{ id: string; status: string; published_at: string | null }> = {}) => ({
+    id: 'a', status: 'published', published_at: '2026-10-02T00:00:00.000100+00:00', ...over,
+  });
+
+  it('needs published, after joining, and not marked', () => {
+    expect(isUnread(row(), context('2026-10-01T00:00:00+00:00'))).toBe(true);
+    expect(isUnread(row({ status: 'draft', published_at: null }), context('2026-10-01T00:00:00+00:00'))).toBe(false);
+    expect(isUnread(row(), context('2026-10-01T00:00:00+00:00', ['a']))).toBe(false);
+    expect(isUnread(row(), context(null))).toBe(false);
+    expect(isUnread(row({ published_at: null }), context('2026-10-01T00:00:00+00:00'))).toBe(false);
+  });
+
+  it('compares to the microsecond: strictly after, not at or before', () => {
+    const joined = '2026-10-02T00:00:00.000100+00:00';
+    expect(isUnread(row({ published_at: '2026-10-02T00:00:00.000101+00:00' }), context(joined))).toBe(true);
+    expect(isUnread(row({ published_at: '2026-10-02T00:00:00.000100+00:00' }), context(joined))).toBe(false);
+    expect(isUnread(row({ published_at: '2026-10-02T00:00:00.000099+00:00' }), context(joined))).toBe(false);
+  });
+
+  it('compares instants, not text, so two offsets for the same moment are equal', () => {
+    expect(isUnread(row({ published_at: '2026-10-02T08:00:00+08:00' }), context('2026-10-02T00:00:00+00:00'))).toBe(false);
+    expect(isUnread(row({ published_at: '2026-10-02T08:00:01+08:00' }), context('2026-10-02T00:00:00+00:00'))).toBe(true);
   });
 });

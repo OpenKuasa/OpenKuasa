@@ -1,24 +1,26 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { createOrg, signInAnon, liveClient } from './helpers/live-workspaces';
+import { createOrg, signInAnon, liveClient, signInOwner } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 
 // Activity log, in-app notifications and invites are written only through
-// SECURITY DEFINER functions. Identities are anonymous sign-ins, as in
-// tenancy.rls.test.ts; an anonymous user who creates an org is its owner.
+// SECURITY DEFINER functions. The owner is a signed-up account (only
+// those may create a workspace); the stranger is an anonymous sign-in.
 
 
 function client(): SupabaseClient {
   return liveClient();
 }
 
-async function anonUser() {
+// The owner is a signed-up account (only those may create a workspace); everyone
+// else is an anonymous sign-in.
+async function anonUser(signIn: typeof signInAnon | typeof signInOwner = signInAnon) {
   const c = client();
-  const { data, error } = await signInAnon(c);
+  const { data, error } = await signIn(c);
   expect(error, error?.message).toBeNull();
   return { c, uid: data.user!.id };
 }
@@ -28,7 +30,7 @@ let stranger: Awaited<ReturnType<typeof anonUser>>;
 
 beforeAll(async () => {
   if (!hasSupabaseEnv) return;
-  const o = await anonUser();
+  const o = await anonUser(signInOwner);
   const { data: orgId, error } = await createOrg(o.c, 'Events Test Sdn Bhd');
   expect(error, error?.message).toBeNull();
   owner = { ...o, orgId: orgId as string };

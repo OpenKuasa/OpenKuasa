@@ -48,14 +48,14 @@ describe('refundActions', () => {
 });
 
 describe('refundName', () => {
-  it('names a refund by its voucher number and customer, and one not yet paid out as pending', () => {
+  it('names a refund by its voucher number and customer, and one not yet paid out as still to be paid', () => {
     expect(refundName(refund('posted'))).toBe('PV-0004 to Aisyah Trading');
-    expect(refundName(refund('scheduled'))).toBe('the pending refund to Aisyah Trading');
+    expect(refundName(refund('scheduled'))).toBe('the refund still to be paid to Aisyah Trading');
   });
 });
 
 describe('a refund still being written', () => {
-  it('counts and reads as pending, like a scheduled one', () => {
+  it('counts and reads as to be paid, like a scheduled one', () => {
     expect(isPendingRefund(refund('draft'))).toBe(true);
     expect(REFUND_STATUS_LABELS.draft).toBe(REFUND_STATUS_LABELS.scheduled);
   });

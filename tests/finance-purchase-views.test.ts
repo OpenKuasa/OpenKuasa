@@ -165,7 +165,7 @@ describe('paymentsView', () => {
       ['Paid (MTD)', 'RM 4,000', 'this month'],
       ['Payments', '2', 'this month'],
       ['Via bank / FPX', '75%', 'of paid MTD'],
-      ['Scheduled', 'RM 4,300', '1 payment'],
+      ['To be paid', 'RM 4,300', '1 payment'],
     ]);
     expect(view.paidMtd).toBe('RM 4,000');
     expect(view.trend.map((t) => t.label)).toEqual(['Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct']);
@@ -366,7 +366,7 @@ describe('CSV export', () => {
     expect(csv).toBe(
       '﻿Date,No.,Supplier,Bill,Account,Method,Amount,Status\r\n' +
         '2026-10-05,PV-0003,Lim Hardware,BILL-0007,Main Bank,Bank Transfer,132.5,Paid\r\n' +
-        "2026-10-05,,'+60 Trading,BILL-0008,Main Bank,E-Wallet,40,Scheduled\r\n",
+        "2026-10-05,,'+60 Trading,BILL-0008,Main Bank,E-Wallet,40,To be paid\r\n",
     );
   });
 });

@@ -3,7 +3,8 @@ import { DEFAULT_PEOPLE_SETTINGS, type PeopleData } from '@/lib/people/types';
 /**
  * The sample data as the database would hand it to a member who is not an HR
  * admin and is linked to `employeeId`: the directory and other shared tables in
- * full, personal rows only when they are their own, no payroll runs, and no payslip that is still a draft.
+ * full, personal rows only when they are their own, no payroll runs, no payslip that is still a draft, only their
+ * own RELEASED reviews, and only published announcements.
  */
 export function asMember(data: PeopleData, employeeId: string): PeopleData {
   const mine = <T extends { employee_id: string }>(rows: T[]) => rows.filter((row) => row.employee_id === employeeId);
@@ -22,9 +23,11 @@ export function asMember(data: PeopleData, employeeId: string): PeopleData {
     // The database gives a member their own payslip only once it is paid.
     listPayslips: async () => mine(await data.listPayslips()).filter((slip) => slip.status === 'paid'),
     listGoals: async () => mine(await data.listGoals()),
-    listScorecards: async () => mine(await data.listScorecards()),
-    listReviews: async () => mine(await data.listReviews()),
+    // The database gives a member their own review only once it is released.
+    listReviews: async () => mine(await data.listReviews()).filter((review) => review.status === 'released'),
     listTrainingEnrolments: async () => mine(await data.listTrainingEnrolments()),
+    // The database gives a member an announcement only once it is published.
+    listAnnouncements: async () => (await data.listAnnouncements()).filter((post) => post.status === 'published'),
     listDocuments: async () => mine(await data.listDocuments()),
     listLetters: async () => mine(await data.listLetters()),
     listPaymentVouchers: async () => [],

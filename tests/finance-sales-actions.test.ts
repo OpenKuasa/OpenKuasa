@@ -72,6 +72,8 @@ const PATHS = [
   '/finance/quotations',
   '/finance/credit-notes',
   '/finance/refunds',
+  // A payment in is a receipt: Cash Receipts lists every movement of money in.
+  '/finance/cash-receipts',
 ];
 const FORBIDDEN = { ok: false, error: 'You do not have permission to make changes here.' };
 
@@ -157,7 +159,10 @@ describe('each write action', () => {
   it('leaves voiding a payment out refreshing the purchase screens', async () => {
     await actions.voidPaymentAction({ id: TXN });
     expect(ctl.calls.map((c) => c.fn)).toEqual(['voidPayment']);
-    expect(ctl.revalidated).toEqual(['/finance/supplier-bills', '/finance/payments-out', '/finance/customers-suppliers']);
+    expect(ctl.revalidated).toEqual([
+      '/finance/supplier-bills', '/finance/payments-out', '/finance/customers-suppliers', '/finance/payment-vouchers',
+    ]);
+    expect(ctl.revalidated).not.toContain('/finance/cash-receipts');
   });
 
   it('never takes the workspace from the input', async () => {

@@ -1,7 +1,7 @@
 import { beforeAll, expect, test, type TestContext } from 'vitest';
 import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { createOrg, joinDemo, signInAnon, liveClient, beforeCleanup } from './helpers/live-workspaces';
+import { createOrg, joinDemo, liveClient, beforeCleanup, signInAnon, signInOwner } from './helpers/live-workspaces';
 import { formsTableMissing, formsTableSkipReason } from './helpers/forms-table';
 import { createSupabaseReachData } from '@/lib/reach/supabase';
 import { createForm, deleteForm, setFormStatus } from '@/lib/reach/capabilities';
@@ -13,7 +13,7 @@ const client = liveClient;
 
 async function signedIn() {
   const c = client();
-  const { error } = await signInAnon(c);
+  const { error } = await signInOwner(c);
   expect(error, error?.message).toBeNull();
   return c;
 }
@@ -169,7 +169,10 @@ testWithSupabase('another workspace sees nothing and can change nothing', async 
 
 testWithSupabase('a viewer (demo member) reads the six demo forms and cannot write', async (ctx) => {
   needsFormsTable(ctx);
-  const v = await signedIn();
+  // A demo guest: an anonymous sign-in, the only kind of session the demo takes.
+  const v = client();
+  const guest = await signInAnon(v);
+  expect(guest.error, guest.error?.message).toBeNull();
   const { data: demoId, error: joinError } = await joinDemo(v);
   expect(joinError, joinError?.message).toBeNull();
 

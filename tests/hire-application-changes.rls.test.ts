@@ -30,7 +30,7 @@ import { beforeAll, expect, test } from 'vitest';
 import { type SupabaseClient } from '@supabase/supabase-js';
 import { createAnonymousClient } from '@/lib/supabase/anonymous';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { createOrg, joinDemo, liveClient, signInAnon, beforeCleanup } from './helpers/live-workspaces';
+import { createOrg, joinDemo, liveClient, signInAnon, beforeCleanup, signInOwner } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
@@ -49,7 +49,7 @@ const uniqueEmail = () => `rls-change-${RUN}-${++emailCounter}@example.com`;
 
 async function ownedOrg(name: string) {
   const c = client();
-  const { error: e1 } = await signInAnon(c);
+  const { error: e1 } = await signInOwner(c);
   expect(e1, e1?.message).toBeNull();
   const { data: orgId, error } = await createOrg(c, name);
   expect(error, error?.message).toBeNull();

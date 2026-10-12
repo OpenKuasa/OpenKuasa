@@ -64,7 +64,8 @@ vi.mock('@/lib/finance/money', async (orig) => {
 
 const actions = await import('@/app/(app)/finance/actions');
 
-const PATHS = ['/finance/supplier-bills', '/finance/payments-out', '/finance/customers-suppliers'];
+// A payment to a supplier is a voucher: Payment Vouchers lists every movement of money out.
+const PATHS = ['/finance/supplier-bills', '/finance/payments-out', '/finance/customers-suppliers', '/finance/payment-vouchers'];
 const FORBIDDEN = { ok: false, error: 'You do not have permission to make changes here.' };
 
 const bill = {

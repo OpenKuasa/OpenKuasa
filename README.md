@@ -174,6 +174,38 @@ Authentication) for sign-in and signup to work:
   hCaptcha widget into the auth UI is a planned hardening step before it can be
   turned on in production.
 
+### Scheduled triggers (cron)
+
+Three endpoints do background work and are meant to be called by a scheduler
+you run (for example a cron job every five minutes), not by a browser:
+
+| Endpoint | What it does |
+| --- | --- |
+| `POST /api/agents/run` | Runs the agent schedules that are due |
+| `POST /api/agents/poll` | Finishes pending videos, fails stuck runs, expires old proposals |
+| `POST /api/hire/cv-cleanup` | Removes stored CV files of deleted applications |
+
+They take no body and no parameters. Each call must carry a dedicated secret:
+
+```bash
+# Generate once, set it as CRON_SECRET on the app and on the scheduler.
+openssl rand -hex 32
+
+curl -X POST https://<your-host>/api/agents/run \
+  -H "Authorization: Bearer $CRON_SECRET"
+```
+
+- `CRON_SECRET` must be at least 32 characters. Unset, empty or shorter means
+  the endpoints accept nothing with it (they answer `401`).
+- Use a value made for this purpose only. Do not reuse a Supabase key.
+- `CRON_ALLOW_LEGACY_KEY` is a temporary switch for installs set up before
+  `CRON_SECRET` existed, whose scheduler still sends the Supabase service-role
+  key (in an `x-service-key` header or as the bearer token). It is on unless set
+  to `false`, and every call accepted that way logs a deprecation warning. Move
+  the scheduler to `CRON_SECRET`, then set `CRON_ALLOW_LEGACY_KEY=false`. New
+  installs should set it to `false` from the start. The switch and the old path
+  will be removed in a later release.
+
 ## Supabase helpers
 
 - `src/lib/supabase/client.ts` — browser client (Client Components)

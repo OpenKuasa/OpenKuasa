@@ -9,6 +9,7 @@
  * when `OPENROUTER_API_KEY` is unset (keeps builds and unit tests key-free).
  */
 
+import 'server-only';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import type { LanguageModel } from 'ai';
 

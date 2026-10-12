@@ -334,13 +334,19 @@ export function summarizeCreatives(
 
 
 /**
+ * Who may change marketing data in this chat. `canManageAgents` (owner/admin)
+ * additionally unlocks the tools that commit the workspace to recurring AI spend.
+ */
+export type ReachWrite = { ctx: ReachWriteContext; canWrite: boolean; canManageAgents?: boolean };
+
+/**
  * Build all Jebat read-only data tools over a {@link ReachData} provider. `now`
  * (a Date or a clock function) is injectable for tests; the route uses the real clock.
  */
 export function createReachTools(
   data: ReachData,
   nowArg: Date | (() => Date) = () => new Date(),
-  write?: { ctx: ReachWriteContext; canWrite: boolean },
+  write?: ReachWrite,
 ) {
   const now = typeof nowArg === 'function' ? nowArg : () => nowArg;
   const read = {
@@ -460,7 +466,7 @@ export function createReachTools(
   if (!write?.canWrite) return read;
   const ctx = write.ctx;
 
-  return {
+  const changes = {
     ...read,
     createCampaign: tool({
       description: 'Create a new ad campaign. Needs the owner’s approval before it is saved.',
@@ -572,6 +578,12 @@ export function createReachTools(
       inputSchema: deleteAppointmentInput,
       execute: async (input) => capDeleteAppointment(ctx, input),
     }),
+  };
+  // Recurring agent runs spend the workspace's key: owner/admin only.
+  if (!write.canManageAgents) return changes;
+
+  return {
+    ...changes,
     scheduleWeeklyStudio: tool({
       description:
         'Schedule the Weekly Studio agent to run itself on a recurring interval. interval_seconds is the gap between runs (min 300 = 5 min); optional starts_at (UTC ISO), max_runs, end_at (UTC ISO), max_total_cents (per-schedule budget). Set nl_text to the user’s own phrasing. Needs the owner’s approval before it is saved.',

@@ -220,7 +220,7 @@ export const PAYMENT_OUT_KIND: AllocationFormKind<PaymentForm, PayableBill> = {
   documentsOf: billsOf,
   number: (bill) => bill.bill_no,
   owed: (bill) =>
-    `${rm(bill.payable)} to pay${bill.scheduled > 0 ? ` · ${rm(bill.scheduled)} of ${rm(bill.balance)} already scheduled` : ''}`,
+    `${rm(bill.payable)} to pay${bill.scheduled > 0 ? ` · ${rm(bill.scheduled)} of ${rm(bill.balance)} in payments to be paid` : ''}`,
   amountLabel: (bill) => `Amount to pay on ${bill.bill_no}`,
   toggle: toggleBill,
   toggleAll,

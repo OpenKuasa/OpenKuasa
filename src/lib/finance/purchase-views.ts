@@ -56,7 +56,7 @@ export const BILL_STATUS_LABELS: Record<BillDisplayStatus, string> = {
 export const PAYMENT_STATUS_LABELS: Record<PaymentOutRow['status'], string> = {
   draft: 'Draft',
   pending_approval: 'Pending approval',
-  scheduled: 'Scheduled',
+  scheduled: 'To be paid',
   posted: 'Paid',
   rejected: 'Rejected',
   void: 'Void',
@@ -164,7 +164,7 @@ export function paymentsView(rows: PaymentOutRow[], today: string): PaymentsView
         delta: 'of paid MTD',
         deltaTone: 'flat',
       },
-      { label: 'Scheduled', value: rmShort(sum(scheduled, (p) => p.amount)), delta: count(paymentCount(scheduled), 'payment'), deltaTone: 'flat' },
+      { label: 'To be paid', value: rmShort(sum(scheduled, (p) => p.amount)), delta: count(paymentCount(scheduled), 'payment'), deltaTone: 'flat' },
     ],
     trend,
     hasTrend,

@@ -396,11 +396,11 @@ describe('the note that a refund was recorded', () => {
     });
     expect(`${said.subtitle} ${said.lead}`).not.toMatch(/CN-0003|INV-0007|Aisyah/);
   });
-  it('names the credit note with its invoice, and says when the refund was left pending', () => {
+  it('names the credit note with its invoice, and says when the refund was saved to pay later', () => {
     const pending = form({ amount: '12.5', scheduled: true });
     expect(refundSavedNote(refundSaved(pending, offered)!)).toEqual({
       subtitle: 'For Aisyah Trading',
-      lead: 'RM 12.50 was left pending against CN-0003 on INV-0007. It is marked as paid or deleted on',
+      lead: 'RM 12.50 was saved to pay later, against CN-0003 on INV-0007. It is marked as paid or deleted on',
     });
   });
   it('states the amount as it was stored, rounded to the sen as the schema rounds it', () => {

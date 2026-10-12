@@ -51,7 +51,7 @@ import type { OrgRole } from '@/lib/auth/current-org';
 import { type Capability, canSee } from '@/lib/auth/permissions';
 
 /** A live count pill on a nav item, resolved client-side from the nav-badges context. */
-export type NavBadgeKey = 'pendingProposals';
+export type NavBadgeKey = 'pendingProposals' | 'unreadAnnouncements';
 
 export type NavItem = {
   label: string;
@@ -61,7 +61,12 @@ export type NavItem = {
   needs?: Capability;
   /** Shows a live count pill from the nav-badges context (e.g. pending agent proposals). */
   badge?: NavBadgeKey;
+  /** The word after the count in the pill's accessible label ("3 waiting"). Default `waiting`. */
+  badgeLabel?: string;
 };
+/** The pill's accessible label: the count and a word (`waiting` unless the item says otherwise). */
+export const badgeAriaLabel = (count: number, word: string = 'waiting'): string => `${count} ${word}`;
+
 export type NavSection = { label: string; items: NavItem[] };
 
 export type Product = {
@@ -190,7 +195,7 @@ export const PRODUCTS: Product[] = [
           { label: 'Overview', slug: 'assistant', icon: LayoutDashboard },
           { label: 'Dashboard', slug: 'dashboard', icon: TrendingUp },
           { label: 'Calendar', slug: 'calendar', icon: Calendar },
-          { label: 'Announcements', slug: 'announcements', icon: Megaphone },
+          { label: 'Announcements', slug: 'announcements', icon: Megaphone, badge: 'unreadAnnouncements', badgeLabel: 'unread' },
           { label: 'My Attendance', slug: 'my-attendance', icon: Clock },
           { label: 'My Goals', slug: 'my-goals', icon: Target },
           { label: 'My Documents', slug: 'my-documents', icon: FileText },

@@ -11,6 +11,9 @@ const ctl = vi.hoisted(() => ({
   usedKeys: [] as (string | undefined)[],
   calls: [] as { system: string; tools: string[] }[],
   freeConsumed: 0,
+  /** What consume_ai_quota answers on a workspace key: turns left today, or -1 when used up. */
+  dailyRemaining: 100 as number,
+  dailyConsumed: 0,
   /** Tables the provider read, to prove which data the tools were given. */
   tablesRead: [] as string[],
   /** What the route handed to the runner. */
@@ -52,10 +55,16 @@ vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({
     auth: { getUser: async () => ({ data: { user: ctl.user }, error: null }) },
     rpc: async (name: string) => {
-      if (name === 'org_ai_key_ciphertext') return { data: ctl.sealedKey, error: null };
+      if (name === 'org_ai_key_status') {
+        return { data: ctl.sealedKey ? [{ key_hint: 'sk-or-…aaaa' }] : [], error: null };
+      }
       if (name === 'consume_free_question') {
         ctl.freeConsumed += 1;
         return { data: ctl.freeRemaining, error: null };
+      }
+      if (name === 'consume_ai_quota') {
+        ctl.dailyConsumed += 1;
+        return { data: ctl.dailyRemaining, error: null };
       }
       return { data: null, error: { message: `unexpected rpc ${name}` } };
     },
@@ -70,6 +79,23 @@ vi.mock('@/lib/supabase/server', () => ({
         range: async () => ({ data: [], error: null }),
         maybeSingle: async () => ({
           data: table === 'orgs' ? { slug: ctl.slug } : table === 'hr_employees' ? ctl.linkedEmployee : null,
+          error: null,
+        }),
+      };
+      return query;
+    },
+  }),
+}));
+
+// The sealed key is read on the server, by the service-role client.
+vi.mock('@/lib/supabase/service', () => ({
+  serviceClient: () => ({
+    from: () => {
+      const query = {
+        select: () => query,
+        eq: () => query,
+        maybeSingle: async () => ({
+          data: ctl.sealedKey ? { ciphertext: ctl.sealedKey } : null,
           error: null,
         }),
       };
@@ -126,6 +152,13 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
 
 const SECRET = 'test-secret-for-sealing-workspace-keys-0123456789';
 const { encryptApiKey } = await import('@/lib/ai/key-crypto');
+
+const KEY_ORG = '11111111-1111-4111-8111-111111111111';
+/** Stores a key sealed for the caller's workspace, as the server does. */
+const sealForWorkspace = () => {
+  ctl.org = { orgId: KEY_ORG, role: 'owner' };
+  return encryptApiKey('sk-or-v1-workspace-key-aaaaaaaaaaaa', KEY_ORG);
+};
 const { PEOPLE_TOOL_NAMES } = await import('@/lib/ai/people-tools');
 const { PEOPLE_WRITE_TOOL_NAMES } = await import('@/lib/ai/products');
 const { POST } = await import('@/app/api/people/chat/route');
@@ -136,6 +169,7 @@ const SELF_TOOLS = [
   'previewLeave', 'previewOvertime', 'applyLeave', 'applyTimeOff', 'cancelLeaveRequest', 'cancelTimeOffRequest',
   'submitClaim', 'cancelClaim', 'submitOvertime', 'cancelOvertime',
   'clockIn', 'clockOut', 'getMyAttendanceToday',
+  'saveGoal', 'removeGoal', 'enrolInTraining', 'withdrawFromTraining',
 ];
 /** Anyone linked to an employee record holds these, an owner or admin included. */
 const CLOCK_TOOLS = ['clockIn', 'clockOut', 'getMyAttendanceToday'];
@@ -168,6 +202,8 @@ beforeEach(() => {
   ctl.usedKeys = [];
   ctl.calls = [];
   ctl.freeConsumed = 0;
+  ctl.dailyRemaining = 100;
+  ctl.dailyConsumed = 0;
   ctl.tablesRead = [];
   ctl.captured = null;
   ctl.orgFails = false;
@@ -203,7 +239,7 @@ describe('POST /api/people/chat gating', () => {
   });
 
   it('fails closed when the workspace key cannot be opened on this server', async () => {
-    ctl.sealedKey = encryptApiKey('sk-or-v1-workspace-key-aaaaaaaaaaaa');
+    ctl.sealedKey = sealForWorkspace();
     process.env.AI_KEYS_ENCRYPTION_SECRET = 'a-different-secret-than-the-one-used-to-seal-it';
     const res = await POST(post(validBody));
     expect(res.status).toBe(503);
@@ -365,13 +401,14 @@ describe('POST /api/people/chat happy path', () => {
   });
 
   it('runs on the workspace key without touching the free allowance', async () => {
-    ctl.sealedKey = encryptApiKey('sk-or-v1-workspace-key-aaaaaaaaaaaa');
+    ctl.sealedKey = sealForWorkspace();
     ctl.freeRemaining = -1;
     ctl.providerKey = false;
     const res = await POST(post(validBody));
     expect(res.status).toBe(200);
     await res.text();
     expect(ctl.freeConsumed).toBe(0);
+    expect(ctl.dailyConsumed).toBe(1);
     expect(ctl.usedKeys).toEqual(['sk-or-v1-workspace-key-aaaaaaaaaaaa']);
   });
 });
@@ -561,5 +598,81 @@ describe('POST /api/people/chat payroll tools', () => {
     await held();
     expect(ctl.calls[0].system).toContain('\nPAYROLL\n');
     expect(ctl.calls[0].system).not.toContain('You cannot run payroll');
+  });
+});
+
+describe('POST /api/people/chat performance, training and announcement tools', () => {
+  const OWN_TOOLS = ['saveGoal', 'removeGoal', 'enrolInTraining', 'withdrawFromTraining'];
+  const HR_TOOLS = [
+    'saveReview', 'deleteReview', 'releaseReview', 'saveTraining', 'removeTraining', 'setTrainingCompleted',
+    'saveAnnouncement', 'removeAnnouncement', 'publishAnnouncement', 'unpublishAnnouncement',
+  ];
+  const LOOKUPS = ['listGoals', 'listReviews', 'listTrainings', 'listAnnouncements', 'getPerformanceSummary'];
+  const held = async () => {
+    const res = await POST(post(validBody));
+    expect(res.status).toBe(200);
+    await res.text();
+    return ctl.calls[0].tools;
+  };
+
+  it.each(['owner', 'admin'])('gives an %s all fourteen, linked to an employee record or not', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    for (const linked of [null, { id: 'emp-3' }]) {
+      ctl.calls = [];
+      ctl.linkedEmployee = linked;
+      const tools = await held();
+      for (const name of [...OWN_TOOLS, ...HR_TOOLS]) expect(tools, name).toContain(name);
+    }
+  });
+
+  it.each(['member', 'viewer'])('gives a linked %s the four own-record tools and none of the rest', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    ctl.linkedEmployee = { id: 'emp-7' };
+    const tools = await held();
+    for (const name of OWN_TOOLS) expect(tools, name).toContain(name);
+    for (const name of HR_TOOLS) expect(tools, name).not.toContain(name);
+    expect(ctl.captured!.write).toMatchObject({ tier: 'self', employeeId: 'emp-7' });
+  });
+
+  it.each(['member', 'viewer'])('gives an unlinked %s none: absent, not disabled', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    ctl.linkedEmployee = null;
+    const tools = await held();
+    for (const name of [...OWN_TOOLS, ...HR_TOOLS]) expect(tools, name).not.toContain(name);
+  });
+
+  it.each(['owner', 'admin', 'member', 'viewer'])('gives a %s in the demo workspace none, linked or not', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    ctl.slug = DEMO_ORG_SLUG;
+    for (const linked of [null, { id: 'emp-7' }]) {
+      ctl.calls = [];
+      ctl.linkedEmployee = linked;
+      const tools = await held();
+      for (const name of [...OWN_TOOLS, ...HR_TOOLS]) expect(tools, name).not.toContain(name);
+    }
+  });
+
+  it('gives everyone the lookups, and nobody a tool for pulling a review back to draft', async () => {
+    for (const role of ['owner', 'member']) {
+      ctl.calls = [];
+      ctl.org = { orgId: 'org1', role };
+      ctl.linkedEmployee = { id: 'emp-3' };
+      const tools = await held();
+      for (const name of LOOKUPS) expect(tools, name).toContain(name);
+      expect(tools.filter((name: string) => /Review/.test(name)).sort()).toEqual(role === 'owner' ? ['deleteReview', 'listReviews', 'releaseReview', 'saveReview'] : ['listReviews']);
+    }
+  });
+
+  it('every one of them is on the list of tools that wait for approval', () => {
+    for (const name of [...OWN_TOOLS, ...HR_TOOLS]) expect(PEOPLE_WRITE_TOOL_NAMES).toContain(name);
+  });
+
+  it('sends the model the performance rules in a section of their own, ahead of payroll', async () => {
+    ctl.org = { orgId: 'org1', role: 'owner' };
+    await held();
+    const system = ctl.calls[0].system;
+    expect(system).toContain('\nPERFORMANCE, TRAINING AND ANNOUNCEMENTS\n');
+    expect(system.indexOf('\nPERFORMANCE, TRAINING AND ANNOUNCEMENTS\n')).toBeLessThan(system.indexOf('\nPAYROLL\n'));
+    expect(system).not.toContain('You cannot post an announcement');
   });
 });

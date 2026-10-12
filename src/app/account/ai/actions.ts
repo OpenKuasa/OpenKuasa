@@ -3,7 +3,8 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
-import { getViewer } from '@/lib/auth/viewer';
+import { serviceClient } from '@/lib/supabase/service';
+import { getViewer, type Viewer } from '@/lib/auth/viewer';
 import { can } from '@/lib/auth/permissions';
 import {
   encryptApiKey,
@@ -16,7 +17,8 @@ import type { SettingsState } from '@/app/account/actions';
 
 const DEMO_ERROR = 'The demo workspace is read-only. Sign up to save changes.';
 const ROLE_ERROR = 'Only owners and admins can manage the workspace AI key.';
-const KEY_CHECK_URL = 'https://openrouter.ai/api/v1/key';
+const SAVE_ERROR = 'Could not save the key. Please try again.';
+const KEY_CHECK_URL ='https://openrouter.ai/api/v1/key';
 
 const keySchema = z
   .string()
@@ -42,19 +44,26 @@ async function checkWithOpenRouter(
   }
 }
 
-async function requireKeyManager(): Promise<string | null> {
+/**
+ * The signed-in owner or admin, or why they may not manage the key.
+ * `getViewer` sends a session that owes a second factor to the verify page,
+ * and reads the role through `org_members`, whose `mfa_required` policy hides
+ * every row from such a session.
+ */
+async function requireKeyManager(): Promise<{ viewer: Viewer } | { denied: string }> {
   const viewer = await getViewer();
-  if (viewer.isDemo) return DEMO_ERROR;
-  if (!can(viewer.role, 'manage-ai-key')) return ROLE_ERROR;
-  return null;
+  if (viewer.isDemo) return { denied: DEMO_ERROR };
+  if (!can(viewer.role, 'manage-ai-key')) return { denied: ROLE_ERROR };
+  return { viewer };
 }
 
 export async function saveAiKeyAction(
   _prev: SettingsState,
   formData: FormData,
 ): Promise<SettingsState> {
-  const denied = await requireKeyManager();
-  if (denied) return { error: denied };
+  const manager = await requireKeyManager();
+  if ('denied' in manager) return { error: manager.denied };
+  const { viewer } = manager;
 
   const parsed = keySchema.safeParse(String(formData.get('apiKey') ?? ''));
   if (!parsed.success) return { error: parsed.error.issues[0].message };
@@ -75,12 +84,23 @@ export async function saveAiKeyAction(
     return { error: 'Could not reach OpenRouter to check the key. Please try again.' };
   }
 
-  const supabase = await createClient();
-  const { error } = await supabase.rpc('set_org_ai_key', {
-    p_ciphertext: encryptApiKey(apiKey),
-    p_hint: keyHint(apiKey),
-  });
-  if (error) return { error: 'Could not save the key. Please try again.' };
+  // The server is the only writer of a sealed key. It seals for the workspace
+  // of the verified session (never an id from the form) and stores through a
+  // service-role-only function, so the value held for a workspace is always
+  // one sealed for that workspace. The function checks again that this user
+  // is an owner or admin there.
+  try {
+    const { error } = await serviceClient().rpc('set_org_ai_key', {
+      p_org: viewer.orgId,
+      p_actor: viewer.userId,
+      p_ciphertext: encryptApiKey(apiKey, viewer.orgId),
+      p_hint: keyHint(apiKey),
+    });
+    if (error) return { error: SAVE_ERROR };
+  } catch {
+    // No service role on this host. Never surface or log the key.
+    return { error: SAVE_ERROR };
+  }
 
   revalidatePath('/', 'layout');
   return { notice: 'Key saved. Chat now runs on your OpenRouter account.' };
@@ -91,8 +111,8 @@ export async function removeAiKeyAction(
   _formData: FormData,
 ): Promise<SettingsState> {
   void _formData;
-  const denied = await requireKeyManager();
-  if (denied) return { error: denied };
+  const manager = await requireKeyManager();
+  if ('denied' in manager) return { error: manager.denied };
 
   const supabase = await createClient();
   const { error } = await supabase.rpc('clear_org_ai_key');

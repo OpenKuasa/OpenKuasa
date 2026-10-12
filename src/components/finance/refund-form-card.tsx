@@ -135,7 +135,7 @@ export function RefundFormCard({
           </Select>
           <p className="text-xs text-muted-foreground tabular-nums" aria-live="polite">
             {chosen
-              ? `Up to ${rm(chosen.refundable)}: what the customer is in credit on ${chosen.invoice_no}, less refunds that are pending${chosen.kind === 'credit_note' ? `, and no more than is left of ${chosen.number}` : ''}.`
+              ? `Up to ${rm(chosen.refundable)}: what the customer is in credit on ${chosen.invoice_no}, less refunds still to be paid${chosen.kind === 'credit_note' ? `, and no more than is left of ${chosen.number}` : ''}.`
               : 'An invoice whose customer is in credit, or one of its issued credit notes.'}
           </p>
         </div>
@@ -256,14 +256,14 @@ export function RefundFormCard({
                 checked={form.scheduled}
                 onChange={() => edit((f) => ({ ...f, scheduled: true }))}
               />
-              Leave pending
+              Pay later
             </label>
           </div>
         </fieldset>
 
         <div className="flex flex-wrap items-center gap-3 md:col-span-12">
           <Button type="submit" size="sm" disabled={save.pending}>
-            {save.pending ? 'Saving…' : form.scheduled ? 'Save as pending' : 'Record refund'}
+            {save.pending ? 'Saving…' : form.scheduled ? 'Save to pay later' : 'Record refund'}
           </Button>
           <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={save.pending}>
             Cancel

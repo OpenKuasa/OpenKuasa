@@ -356,7 +356,7 @@ describe('refundsView', () => {
     );
     expect(view.stats.map((s) => [s.label, s.value, s.delta, s.deltaTone])).toEqual([
       ['Refunded (MTD)', 'RM 420', '2 refunds', 'flat'],
-      ['Pending', 'RM 680', '1 refund', 'down'],
+      ['To be paid', 'RM 680', '1 refund', 'down'],
       ['In credit', 'RM 0', '0 invoices', 'flat'],
       ['Invoices refunded', '2', 'in all', 'flat'],
     ]);
@@ -430,18 +430,18 @@ describe('filtering and exporting refunds', () => {
     expect(refundsCsv(rows.slice(0, 2))).toBe(
       '﻿Date,No.,Customer,Invoice,Credit note,Reason,Account,Method,Amount,Status\r\n' +
         '2026-10-05,PV-0003,Aisyah Trading,INV-1042,CN-0034,Damaged goods,Main Bank,FPX,100,Refunded\r\n' +
-        '2026-10-05,,Nurul Boutique,INV-1033,,Wrong item,Main Bank,DuitNow,100,Pending\r\n',
+        '2026-10-05,,Nurul Boutique,INV-1033,,Wrong item,Main Bank,DuitNow,100,To be paid\r\n',
     );
   });
-  it('words scheduled as Pending and posted as Refunded', () => {
-    expect(REFUND_STATUS_LABELS).toMatchObject({ scheduled: 'Pending', posted: 'Refunded', void: 'Void' });
+  it('words scheduled as To be paid and posted as Refunded', () => {
+    expect(REFUND_STATUS_LABELS).toMatchObject({ scheduled: 'To be paid', posted: 'Refunded', void: 'Void' });
   });
-  it('words a refund that is still being written as Pending, since the Pending filter and the Pending card count it', () => {
+  it('words a refund that is still being written as To be paid, since the To be paid filter and card count it', () => {
     const draft = refund({ status: 'draft', number: null });
     expect(isPendingRefund(draft)).toBe(true);
     expect(filterRefunds([draft], '', 'pending')).toHaveLength(1);
-    expect(REFUND_STATUS_LABELS.draft).toBe('Pending');
-    expect(refundsCsv([draft])).toContain(',Pending\r\n');
+    expect(REFUND_STATUS_LABELS.draft).toBe('To be paid');
+    expect(refundsCsv([draft])).toContain(',To be paid\r\n');
   });
 });
 
@@ -497,7 +497,7 @@ describe('the sample shown when there is no database', () => {
     const refunds = refundsView(SAMPLE_REFUNDS, SAMPLE_INVOICES, SAMPLE_TODAY);
     expect(refunds.stats.map((s) => [s.label, s.value, s.delta])).toEqual([
       ['Refunded (MTD)', 'RM 1,770', '4 refunds'],
-      ['Pending', 'RM 1,000', '2 refunds'],
+      ['To be paid', 'RM 1,000', '2 refunds'],
       // Siti Decor RM 600, and the two pending refunds' RM 680 and RM 320.
       ['In credit', 'RM 1,600', '3 invoices'],
       ['Invoices refunded', '4', 'in all'],

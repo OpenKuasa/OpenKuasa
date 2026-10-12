@@ -10,6 +10,9 @@ const ctl = vi.hoisted(() => ({
   usedKeys: [] as (string | undefined)[],
   calls: [] as { system: string; tools: string[] }[],
   freeConsumed: 0,
+  /** What consume_ai_quota answers on a workspace key: turns left today, or -1 when used up. */
+  dailyRemaining: 100 as number,
+  dailyConsumed: 0,
   /** Tables the provider read, to prove which data the tools were given. */
   tablesRead: [] as string[],
   /** The HireAccess the route handed to the runner. */
@@ -74,16 +77,39 @@ vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({
     auth: { getUser: async () => ({ data: { user: ctl.user }, error: null }) },
     rpc: async (name: string) => {
-      if (name === 'org_ai_key_ciphertext') return { data: ctl.sealedKey, error: null };
+      if (name === 'org_ai_key_status') {
+        return { data: ctl.sealedKey ? [{ key_hint: 'sk-or-…aaaa' }] : [], error: null };
+      }
       if (name === 'consume_free_question') {
         ctl.freeConsumed += 1;
         return { data: ctl.freeRemaining, error: null };
+      }
+      if (name === 'consume_ai_quota') {
+        ctl.dailyConsumed += 1;
+        return { data: ctl.dailyRemaining, error: null };
       }
       return { data: null, error: { message: `unexpected rpc ${name}` } };
     },
     from: (table: string) => {
       ctl.tablesRead.push(table);
       return { select: () => ({ eq: () => ({ order: () => ({ limit: async () => ({ data: [], error: null }) }) }) }) };
+    },
+  }),
+}));
+
+// The sealed key is read on the server, by the service-role client.
+vi.mock('@/lib/supabase/service', () => ({
+  serviceClient: () => ({
+    from: () => {
+      const query = {
+        select: () => query,
+        eq: () => query,
+        maybeSingle: async () => ({
+          data: ctl.sealedKey ? { ciphertext: ctl.sealedKey } : null,
+          error: null,
+        }),
+      };
+      return query;
     },
   }),
 }));
@@ -132,6 +158,13 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
 
 const SECRET = 'test-secret-for-sealing-workspace-keys-0123456789';
 const { encryptApiKey } = await import('@/lib/ai/key-crypto');
+
+const KEY_ORG = '11111111-1111-4111-8111-111111111111';
+/** Stores a key sealed for the caller's workspace, as the server does. */
+const sealForWorkspace = () => {
+  ctl.org = { orgId: KEY_ORG, role: 'owner' };
+  return encryptApiKey('sk-or-v1-workspace-key-aaaaaaaaaaaa', KEY_ORG);
+};
 const { HIRE_TOOL_NAMES } = await import('@/lib/ai/hire-tools');
 const { HIRE_WRITE_TOOL_NAMES } = await import('@/lib/ai/products');
 const { POST } = await import('@/app/api/hire/chat/route');
@@ -157,6 +190,8 @@ beforeEach(() => {
   ctl.usedKeys = [];
   ctl.calls = [];
   ctl.freeConsumed = 0;
+  ctl.dailyRemaining = 100;
+  ctl.dailyConsumed = 0;
   ctl.tablesRead = [];
   ctl.captured = null;
   ctl.tuah = null;
@@ -240,7 +275,7 @@ describe('POST /api/hire/chat gating', () => {
   });
 
   it('fails closed when the workspace key cannot be opened on this server', async () => {
-    ctl.sealedKey = encryptApiKey('sk-or-v1-workspace-key-aaaaaaaaaaaa');
+    ctl.sealedKey = sealForWorkspace();
     process.env.AI_KEYS_ENCRYPTION_SECRET = 'a-different-secret-than-the-one-used-to-seal-it';
     const res = await POST(post(validBody));
     expect(res.status).toBe(503);
@@ -322,13 +357,14 @@ describe('POST /api/hire/chat happy path', () => {
   });
 
   it('runs on the workspace key without touching the free allowance', async () => {
-    ctl.sealedKey = encryptApiKey('sk-or-v1-workspace-key-aaaaaaaaaaaa');
+    ctl.sealedKey = sealForWorkspace();
     ctl.freeRemaining = -1;
     ctl.providerKey = false;
     const res = await POST(post(validBody));
     expect(res.status).toBe(200);
     await res.text();
     expect(ctl.freeConsumed).toBe(0);
+    expect(ctl.dailyConsumed).toBe(1);
     expect(ctl.usedKeys).toEqual(['sk-or-v1-workspace-key-aaaaaaaaaaaa']);
   });
 });
