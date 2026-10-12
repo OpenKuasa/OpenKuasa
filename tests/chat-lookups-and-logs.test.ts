@@ -42,7 +42,7 @@ describe('CRM lookups', () => {
     calls.ensured = 0;
     calls.pipelines = [];
     const tools = createCrmTools({ client: readOnlyClient() as never, orgId: 'org1', userId: 'u1', canWrite: true });
-    const run = (tools.listPipelines as { execute: (input: unknown, options: unknown) => Promise<unknown> }).execute;
+    const run = (tools.listPipelines as unknown as { execute: (input: unknown, options: unknown) => Promise<unknown> }).execute;
     await run({}, { toolCallId: 't1', messages: [] });
     expect(calls.listed).toBeGreaterThan(0);
     expect(calls.ensured).toBe(0);

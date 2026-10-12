@@ -227,6 +227,20 @@ const KIND_OF_TOOL: Record<string, ItemKind> = {
   deleteDepartment: 'department',
 };
 
+/** The kind of thing a tool's result, or a change tool's `id`, is about. Undefined for a tool that names none. */
+export function kindOfTool(toolName: string): ItemKind | undefined {
+  if (Object.hasOwn(KIND_OF_TOOL, toolName)) return KIND_OF_TOOL[toolName];
+  return Object.hasOwn(SUBJECT_ONLY, toolName) ? SUBJECT_ONLY[toolName] : undefined;
+}
+
+// Tools whose `id` is of a known kind but whose result names nothing (the row is gone).
+const SUBJECT_ONLY: Record<string, ItemKind> = {
+  deleteCampaign: 'campaign',
+  deleteCreative: 'creative',
+  deleteForm: 'form',
+  deleteLead: 'lead',
+};
+
 /** Names by `kind:id`, so a later turn can still say what an id refers to. */
 export type KnownNames = Record<string, string>;
 
@@ -380,6 +394,44 @@ export function nameIn(results: ToolResult[]): NameFinder {
         });
         if (hit.name) return hit.name;
       }
+    }
+    return null;
+  };
+}
+
+/** Looks up a row by its id, as a lookup or an earlier change last returned it. */
+export type RowFinder = (id: unknown, kind?: ItemKind) => Record<string, unknown> | null;
+
+function rowOf(value: unknown, id: string, depth = 0): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || depth > 3) return null;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = rowOf(item, id, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+  const row = value as Record<string, unknown>;
+  if (row.id === id) return row;
+  for (const inner of Object.values(row)) {
+    const found = rowOf(inner, id, depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * Finds a row by its id among tool results, newest first: the values a card
+ * shows as what is there now. With a `kind`, only results about that kind of
+ * thing count, as for `nameIn`.
+ */
+export function rowIn(results: ToolResult[]): RowFinder {
+  return (id, kind) => {
+    if (typeof id !== 'string' || !id) return null;
+    for (let r = results.length - 1; r >= 0; r -= 1) {
+      if (kind && KIND_OF_TOOL[results[r].tool] !== kind) continue;
+      const found = rowOf(results[r].output, id);
+      if (found) return found;
     }
     return null;
   };
@@ -1825,15 +1877,22 @@ export function approvalDetail(
     const basis = typeof i.basis === 'string' ? i.basis.replace(/\s+/g, ' ').trim() : '';
     return basis ? `Why: ${basis}` : null;
   }
-  if (toolName === 'deleteContact') return 'Their deals are deleted too. This cannot be undone.';
+  // What goes with the row, where the database's own rules say so (see the CRM, forms and ads migrations).
+  if (toolName === 'deleteContact') {
+    return 'Their deals are deleted too, with the notes, activities and files kept on them. This cannot be undone.';
+  }
+  if (toolName === 'deleteDeal') return 'Its notes, activities and files are deleted too. This cannot be undone.';
+  if (toolName === 'deleteForm') return 'Every submission it has collected is deleted too. This cannot be undone.';
+  if (toolName === 'deleteCampaign') {
+    return 'Its creatives are kept, no longer linked to a campaign. This cannot be undone.';
+  }
+  if (toolName === 'deleteJob') {
+    return 'A job that has applications cannot be deleted: close it instead. This cannot be undone.';
+  }
   if (
-    toolName === 'deleteCampaign' ||
     toolName === 'deleteCreative' ||
-    toolName === 'deleteForm' ||
-    toolName === 'deleteDeal' ||
     toolName === 'deleteLead' ||
     toolName === 'deleteAppointment' ||
-    toolName === 'deleteJob' ||
     toolName === 'deleteDepartment'
   ) {
     return 'This cannot be undone.';

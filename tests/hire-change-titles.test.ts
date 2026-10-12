@@ -19,14 +19,14 @@ describe('approval titles for jobs', () => {
     expect(approvalTitle('deleteJob', { id: 'unknown' }, find as never)).toBe('Delete this job?');
   });
   it('warns that a delete cannot be undone', () => {
-    expect(approvalDetail('deleteJob')).toBe('This cannot be undone.');
+    expect(approvalDetail('deleteJob')).toBe('A job that has applications cannot be deleted: close it instead. This cannot be undone.');
   });
   it('has no changes line without a usable input, and leaves other tools alone', () => {
     expect(approvalDetail('updateJob')).toBeNull();
     expect(approvalDetail('updateJob', undefined)).toBeNull();
     expect(approvalDetail('updateJob', null)).toBeNull();
     expect(approvalDetail('updateJob', 'text')).toBeNull();
-    expect(approvalDetail('deleteCampaign')).toBe('This cannot be undone.');
+    expect(approvalDetail('deleteCampaign')).toBe('Its creatives are kept, no longer linked to a campaign. This cannot be undone.');
   });
   it('lists what an edit changes, with the salary and the closing date it would save', () => {
     expect(approvalDetail('updateJob', { id: ID, title: 'x', salary_min_cents: 300_000, salary_max_cents: 450_000, closes_on: '2026-10-31' }))

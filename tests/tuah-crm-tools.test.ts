@@ -177,7 +177,7 @@ describe('approval cards for CRM changes', () => {
       'Move this deal to another stage?',
     );
     expect(approvalDetail('deleteContact')).toContain('deals are deleted too');
-    expect(approvalDetail('deleteDeal')).toBe('This cannot be undone.');
+    expect(approvalDetail('deleteDeal')).toBe('Its notes, activities and files are deleted too. This cannot be undone.');
   });
 });
 
