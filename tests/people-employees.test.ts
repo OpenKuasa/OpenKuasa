@@ -4,6 +4,7 @@ import {
   employeeFormValues,
   filterEmployees,
   linkableMembers,
+  suggestedMember,
   toEmployeeInput,
 } from '@/lib/people/employees';
 import { entitlementChanges, entitlementValues } from '@/components/people/entitlements-fields';
@@ -132,6 +133,31 @@ describe('linkableMembers', () => {
     const staff = [person({ id: 'a', user_id: 'u1' }), person({ id: 'b', user_id: null })];
     expect(linkableMembers(members, staff, staff[1]).map((m) => m.userId)).toEqual(['u2']);
     expect(linkableMembers(members, staff, staff[0]).map((m) => m.userId)).toEqual(['u1', 'u2']);
+  });
+});
+
+describe('suggestedMember', () => {
+  const members = [
+    { userId: 'u1', name: 'Ali', email: 'ali@example.com' },
+    { userId: 'u2', name: 'Zara', email: 'Zara@Example.com' },
+  ];
+  it('is the unlinked member who signs in with the work email, whatever its capitals', () => {
+    const staff = [person({ id: 'a', user_id: null, work_email: ' zara@example.com ' })];
+    expect(suggestedMember(members, staff, staff[0])?.userId).toBe('u2');
+  });
+  it('is nobody for a linked employee, one with no work email, or one whose email no member has', () => {
+    const linked = person({ id: 'a', user_id: 'u1', work_email: 'zara@example.com' });
+    const noEmail = person({ id: 'b', user_id: null, work_email: null });
+    const stranger = person({ id: 'c', user_id: null, work_email: 'someone@example.com' });
+    const staff = [linked, noEmail, stranger];
+    for (const employee of staff) expect(suggestedMember(members, staff, employee)).toBeNull();
+  });
+  it('is nobody when that member is already linked to another employee', () => {
+    const staff = [
+      person({ id: 'a', user_id: 'u2', work_email: 'other@example.com' }),
+      person({ id: 'b', user_id: null, work_email: 'zara@example.com' }),
+    ];
+    expect(suggestedMember(members, staff, staff[1])).toBeNull();
   });
 });
 

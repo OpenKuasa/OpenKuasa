@@ -205,3 +205,20 @@ export function linkableMembers(
   );
   return members.filter((member) => !taken.has(member.userId));
 }
+
+/**
+ * The member an unlinked employee most likely is: the linkable one whose sign-in email is the record's work email.
+ * Only a suggestion for an owner or admin to accept; nothing links the two without them.
+ */
+export function suggestedMember(
+  members: WorkspaceMember[],
+  employees: Employee[],
+  employee: Employee,
+): WorkspaceMember | null {
+  const workEmail = employee.work_email?.trim().toLowerCase();
+  if (employee.user_id !== null || !workEmail) return null;
+  return (
+    linkableMembers(members, employees, employee).find((member) => member.email.trim().toLowerCase() === workEmail) ??
+    null
+  );
+}

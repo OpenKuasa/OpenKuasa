@@ -474,6 +474,10 @@ export async function linkEmployeeToMember(
   if (violates(error, 'P0001', 'not a member of this workspace') || violates(error, FOREIGN_KEY)) {
     return refuse('That person is not a member of this workspace.');
   }
+  // Only an account that has signed up and confirmed its email address can be linked (same trigger).
+  if (violates(error, 'P0001', 'has not confirmed their email')) {
+    return refuse('That member has not confirmed their email address yet, so their account cannot be linked.');
+  }
   if (error) return writeFailed('linkEmployeeToMember', error);
   if (!data) return refuse(EMPLOYEE_MISSING);
   return { ok: true, data: data as { id: string; name: string; user_id: string | null } };

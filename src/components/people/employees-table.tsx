@@ -18,7 +18,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatDay, todayInMalaysia } from '@/lib/people/dates';
 import { type GoalLike, showGoalsAction } from '@/lib/people/goals-training';
-import { EMPLOYMENT_LABEL, type EmployeeFilter, filterEmployees, linkableMembers } from '@/lib/people/employees';
+import {
+  EMPLOYMENT_LABEL,
+  type EmployeeFilter,
+  filterEmployees,
+  linkableMembers,
+  suggestedMember,
+} from '@/lib/people/employees';
 import type { WorkspaceMember } from '@/lib/people/members';
 import type { Department, Employee } from '@/lib/people/types';
 import { cn } from '@/lib/utils';
@@ -199,7 +205,9 @@ export function EmployeesTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {shown.map((employee) => (
+            {shown.map((employee) => {
+              const suggestion = canEdit ? suggestedMember(members, employees, employee) : null;
+              return (
               <TableRow key={employee.id}>
                 <TableCell>
                   <div className="flex items-center gap-3">
@@ -263,6 +271,20 @@ export function EmployeesTable({
                         ) : null}
                       </SelectContent>
                     </Select>
+                    {/* A member who signs in with this record's work email: offered, never linked without a click. */}
+                    {suggestion ? (
+                      <Button
+                        type="button"
+                        variant="link"
+                        size="sm"
+                        className="mt-1 h-auto max-w-44 justify-start p-0 text-xs"
+                        disabled={pending}
+                        title={`${suggestion.email} signs in with this employee's work email`}
+                        onClick={() => act(linkEmployeeToMemberAction({ id: employee.id, user_id: suggestion.userId }))}
+                      >
+                        <span className="truncate">Link {suggestion.email}</span>
+                      </Button>
+                    ) : null}
                   </TableCell>
                 ) : null}
                 {canEdit ? (
@@ -343,7 +365,8 @@ export function EmployeesTable({
                   </TableCell>
                 ) : null}
               </TableRow>
-            ))}
+              );
+            })}
             {shown.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={columns} className="py-8 text-center text-sm text-muted-foreground">
