@@ -326,6 +326,10 @@ begin
     format('delete from public.finance_accounts where org_id = %L and name = ''Unused money''', org));
   select count(*) into n from public.finance_accounts where org_id = org and name = 'Unused money';
   if n <> 0 then fails := array_append(fails, 'the owner''s delete of an unused account left it'); end if;
+  fails := fails || public.bendahara_bank_accounts_try('the owner deletes the unused overdrawn account', 'ok',
+    format('delete from public.finance_accounts where org_id = %L and name = ''Unused debt''', org));
+  select count(*) into n from public.finance_accounts where org_id = org and name = 'Unused debt';
+  if n <> 0 then fails := array_append(fails, 'the owner''s delete of the unused overdrawn account left it'); end if;
 
   -- ==== a member of two workspaces does not move an account ===================
   perform set_config('request.jwt.claims', mover_claims, true);
