@@ -37,7 +37,9 @@ const viewers: Record<string, PeopleViewer> = {
   admin: { isHr: true, isDemo: false, employeeId: null },
   member: { isHr: false, isDemo: false, employeeId: 'e2' },
   unlinked: { isHr: false, isDemo: false, employeeId: null },
-  viewerRole: { isHr: false, isDemo: false, employeeId: 'e3' },
+  // A viewer-role user maps to isHr false (can(role, 'approve') is false): the same shape as a member. Kept as its own
+  // case so a change to that mapping shows here, but it is not a different viewer.
+  viewerRoleSameShapeAsMember: { isHr: false, isDemo: false, employeeId: 'e3' },
   demoVisitor: { isHr: false, isDemo: true, employeeId: 'e4' },
   demoOwner: { isHr: true, isDemo: true, employeeId: 'e5' },
   signedOut: { isHr: false, isDemo: false, employeeId: null },
@@ -94,7 +96,7 @@ describe('myDocumentsControls: the Upload control', () => {
     const shown = Object.entries(viewers)
       .filter(([, v]) => myDocumentsControls(v, modelFor(v), 'org').upload)
       .map(([k]) => k);
-    expect(shown).toEqual(['owner', 'member', 'viewerRole']);
+    expect(shown).toEqual(['owner', 'member', 'viewerRoleSameShapeAsMember']);
   });
   it('is not drawn in the demo, whoever looks', () => {
     for (const key of ['demoVisitor', 'demoOwner']) {
@@ -149,15 +151,16 @@ describe('downloadSlot', () => {
 
 describe('ackDetail', () => {
   it('words the three states and nothing else', () => {
-    expect(ackDetail('Read on 12 Oct 2026')).toBe('Acknowledged on 12 Oct 2026');
+    expect(ackDetail('Acknowledged on 12 Oct 2026')).toBe('Acknowledged on 12 Oct 2026');
     expect(ackDetail(null, true)).toBe('Awaiting acknowledgement');
     expect(ackDetail('Waiting for the employee')).toBe('Awaiting acknowledgement');
     expect(ackDetail('Not asked')).toBeNull();
+    expect(ackDetail('Read on 12 Oct 2026')).toBe('Read on 12 Oct 2026'); // passed through, never reworded
     expect(ackDetail(null)).toBeNull();
     expect(ackDetail('')).toBeNull();
   });
   it('says awaiting before anything else', () => {
-    expect(ackDetail('Read on 1 Oct 2026', true)).toBe('Awaiting acknowledgement');
+    expect(ackDetail('Acknowledged on 1 Oct 2026', true)).toBe('Awaiting acknowledgement');
   });
 });
 
@@ -281,7 +284,7 @@ describe('employeeDocumentRows (the Documents action)', () => {
     expect(rows.find((r) => r.id === 'b')?.added_by_label).toBe('Uploaded by the employee');
   });
   it('gives everyone else nothing at all, so nothing is read or drawn', () => {
-    for (const key of ['member', 'unlinked', 'viewerRole', 'demoVisitor', 'demoOwner', 'signedOut']) {
+    for (const key of ['member', 'unlinked', 'viewerRoleSameShapeAsMember', 'demoVisitor', 'demoOwner', 'signedOut']) {
       expect(employeeDocumentRows(input(viewers[key])), key).toBeNull();
     }
   });
@@ -315,17 +318,18 @@ describe('the navigation badge figure', () => {
 
 // ---- The count query ------------------------------------------------------------------
 
-type Call = { table: string; filters: [string, string, unknown][]; head: boolean };
+type Call = { table: string; columns: string; filters: [string, string, unknown][]; head: boolean };
 
 /** A client whose queries record what was asked and answer from `answers` by table (letters and documents apart). */
 function fakeClient(answers: Record<string, { data?: unknown; count?: number | null; error?: { code: string } | null } | 'throw'>) {
   const calls: Call[] = [];
   const client = {
     from(table: string) {
-      const call: Call = { table, filters: [], head: false };
+      const call: Call = { table, columns: '', filters: [], head: false };
       calls.push(call);
       const chain: Record<string, unknown> = {
-        select(_cols: string, opts?: { head?: boolean }) {
+        select(cols: string, opts?: { head?: boolean }) {
+          call.columns = cols;
           call.head = opts?.head === true;
           return chain;
         },
@@ -358,49 +362,46 @@ function fakeClient(answers: Record<string, { data?: unknown; count?: number | n
 describe('awaitingAcknowledgementCount', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it('counts the viewer’s own documents and issued letters awaiting acknowledgement', async () => {
-    const { client, calls } = fakeClient({
-      hr_employees: { data: { id: 'emp-1' } },
-      hr_documents: { count: 2 },
-      hr_letters: { count: 1 },
-    });
+  it('counts the viewer’s own HR-added documents and issued letters awaiting acknowledgement, in two head queries', async () => {
+    const { client, calls } = fakeClient({ hr_documents: { count: 2 }, hr_letters: { count: 1 } });
     expect(await awaitingAcknowledgementCount({ client, orgId: 'org-1' }, 'user-1')).toBe(3);
+    expect(calls.map((c) => c.table).sort()).toEqual(['hr_documents', 'hr_letters']);
     const letters = calls.find((c) => c.table === 'hr_letters')!;
     const documents = calls.find((c) => c.table === 'hr_documents')!;
     expect(letters.head && documents.head).toBe(true);
-    // Their own rows only, never the workspace's; only asked-for, unanswered; a letter only once issued.
+    // Their own rows only, through an inner embed of their own employee row (named by its foreign key).
+    expect(documents.columns).toContain('hr_employees!hr_documents_employee_id_org_id_fkey!inner(user_id)');
+    expect(letters.columns).toContain('hr_employees!hr_letters_employee_id_org_id_fkey!inner(user_id)');
     for (const call of [letters, documents]) {
-      expect(call.filters).toContainEqual(['eq', 'employee_id', 'emp-1']);
+      expect(call.filters).toContainEqual(['eq', 'hr_employees.user_id', 'user-1']);
       expect(call.filters).toContainEqual(['eq', 'org_id', 'org-1']);
       expect(call.filters).toContainEqual(['eq', 'ack_requested', true]);
       expect(call.filters).toContainEqual(['is', 'acknowledged_at', null]);
     }
     expect(letters.filters).toContainEqual(['eq', 'status', 'issued']);
-    const employee = calls.find((c) => c.table === 'hr_employees')!;
-    expect(employee.filters).toContainEqual(['eq', 'user_id', 'user-1']);
+    expect(documents.filters).toContainEqual(['eq', 'source', 'hr']);
+    expect(letters.filters.some(([, col]) => col === 'source')).toBe(false);
   });
-  it('is 0 without an employee record, and reads no documents', async () => {
-    const { client, calls } = fakeClient({ hr_employees: { data: null } });
-    expect(await awaitingAcknowledgementCount({ client, orgId: 'o' }, 'u')).toBe(0);
-    expect(calls.map((c) => c.table)).toEqual(['hr_employees']);
+  it('is 0 when the viewer has no employee row (the inner join matches nothing)', async () => {
+    expect(await awaitingAcknowledgementCount({ client: fakeClient({ hr_documents: { count: 0 }, hr_letters: { count: 0 } }).client, orgId: 'o' }, 'u')).toBe(0);
   });
   it('reads a failure as 0, logging the code only', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { client } = fakeClient({
-      hr_employees: { data: { id: 'emp-1' } },
       hr_documents: { count: null, error: { code: '42501' } },
       hr_letters: { count: 4 },
     });
-    expect(await awaitingAcknowledgementCount({ client, orgId: 'o' }, 'u')).toBe(4);
+    expect(await awaitingAcknowledgementCount({ client, orgId: 'o' }, 'user-secret')).toBe(4);
     const text = log.mock.calls.flat().join(' ');
     expect(text).toContain('42501');
-    expect(text).not.toContain('emp-1');
+    expect(text).not.toContain('user-secret');
   });
   it('never throws', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    expect(await awaitingAcknowledgementCount({ client: fakeClient({ hr_employees: 'throw' }).client, orgId: 'o' }, 'u')).toBe(0);
-    const partial = fakeClient({ hr_employees: { data: { id: 'x' } }, hr_documents: 'throw', hr_letters: { count: 2 } });
+    const partial = fakeClient({ hr_documents: 'throw', hr_letters: { count: 2 } });
     expect(await awaitingAcknowledgementCount({ client: partial.client, orgId: 'o' }, 'u')).toBe(2);
+    const both = fakeClient({ hr_documents: 'throw', hr_letters: 'throw' });
+    expect(await awaitingAcknowledgementCount({ client: both.client, orgId: 'o' }, 'u')).toBe(0);
   });
 });
 
@@ -497,6 +498,28 @@ describe('the screens use these decisions, with static imports only', () => {
     const screen = read('src/screens/people/employees.tsx');
     expect(screen).toContain('employeeDocumentRows(');
     expect(screen).not.toMatch(/import\('/);
+  });
+  it('Employees asks showsOwnerDocumentControls at every site instead of repeating the rule', () => {
+    const screen = read('src/screens/people/employees.tsx');
+    expect(screen).toContain('showsOwnerDocumentControls(');
+    expect(screen).not.toMatch(/isHr\s*&&\s*!\S*isDemo/);
+    expect(screen.match(/showsOwnerDocumentControls\(/g)?.length).toBeGreaterThanOrEqual(3);
+  });
+  it('the Request / Withdraw explanation is text tied to the button, not only a title attribute', () => {
+    const owner = read('src/components/people/employee-documents.tsx');
+    expect(owner).not.toMatch(/title=\{(requestAckSentence|withdrawAckSentence)/);
+    expect(owner).toMatch(/aria-describedby=/);
+    expect(owner).toMatch(/requestAckSentence\(name\)/);
+    expect(owner).toMatch(/withdrawAckSentence\(\)/);
+  });
+  it('a Remove confirmation moves focus to Keep, and dismissing it returns focus to Remove', () => {
+    for (const file of ['document-row.tsx', 'employee-documents.tsx']) {
+      const source = read(`src/components/people/${file}`);
+      expect(source, file).toMatch(/keepRef/);
+      expect(source, file).toMatch(/removeRefs?\b/);
+      expect(source, file).toMatch(/keepRef\.current\??\.focus\(\)/);
+      expect(source, file).toMatch(/removeRefs?\.current(\[id\])?\??\.focus\(\)/);
+    }
   });
   it('the owner list is the only place the owner document actions are named', () => {
     const owner = read('src/components/people/employee-documents.tsx');

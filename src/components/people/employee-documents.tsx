@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import { BellOff, BellRing, FilePen, Plus, Replace, Trash2 } from 'lucide-react';
 import {
   addDocumentForAction,
@@ -42,6 +42,20 @@ export function EmployeeDocuments({
   const [editing, setEditing] = useState<Editing>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [error, setError] = useState<{ id: string; text: string } | null>(null);
+  // Focus follows the Remove confirmation: to Keep when it opens, back to Remove when it is dismissed.
+  const keepRef = useRef<HTMLButtonElement>(null);
+  const removeRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const lastConfirmed = useRef<string | null>(null);
+  useEffect(() => {
+    if (confirming !== null) {
+      lastConfirmed.current = confirming;
+      keepRef.current?.focus();
+    } else if (lastConfirmed.current !== null) {
+      const id = lastConfirmed.current;
+      lastConfirmed.current = null;
+      removeRefs.current[id]?.focus();
+    }
+  }, [confirming]);
 
   const run = (id: string, call: () => Promise<{ ok: boolean; error?: string }>, after?: () => void) => {
     setError(null);
@@ -135,7 +149,7 @@ export function EmployeeDocuments({
                     >
                       {pending ? 'Removing…' : 'Remove document'}
                     </Button>
-                    <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={() => setConfirming(null)}>
+                    <Button ref={keepRef} type="button" variant="ghost" size="sm" disabled={pending} onClick={() => setConfirming(null)}>
                       Keep
                     </Button>
                   </div>
@@ -158,7 +172,7 @@ export function EmployeeDocuments({
                       size="sm"
                       disabled={pending}
                       aria-label={`Request acknowledgement of ${row.title}`}
-                      title={requestAckSentence(name)}
+                      aria-describedby={`ack-request-${row.id}`}
                       onClick={() => run(row.id, () => requestDocumentAckAction({ document_id: row.id, requested: true }))}
                     >
                       <BellRing aria-hidden />
@@ -172,7 +186,7 @@ export function EmployeeDocuments({
                       size="sm"
                       disabled={pending}
                       aria-label={`Withdraw the request on ${row.title}`}
-                      title={withdrawAckSentence()}
+                      aria-describedby={`ack-withdraw-${row.id}`}
                       onClick={() => run(row.id, () => requestDocumentAckAction({ document_id: row.id, requested: false }))}
                     >
                       <BellOff aria-hidden />
@@ -180,6 +194,9 @@ export function EmployeeDocuments({
                     </Button>
                   ) : null}
                   <Button
+                    ref={(element) => {
+                      removeRefs.current[row.id] = element;
+                    }}
                     type="button"
                     variant="ghost"
                     size="sm"
@@ -196,6 +213,16 @@ export function EmployeeDocuments({
                   </Button>
                 </div>
               )}
+              {!here && confirming !== row.id && row.can_request_ack ? (
+                <p id={`ack-request-${row.id}`} className="text-xs text-muted-foreground">
+                  {requestAckSentence(name)}
+                </p>
+              ) : null}
+              {!here && confirming !== row.id && row.can_withdraw_ack ? (
+                <p id={`ack-withdraw-${row.id}`} className="text-xs text-muted-foreground">
+                  {withdrawAckSentence()}
+                </p>
+              ) : null}
               {error?.id === row.id ? (
                 <p role="alert" className="text-xs text-destructive">
                   {error.text}

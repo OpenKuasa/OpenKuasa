@@ -78,8 +78,7 @@ export function ackDetail(label: string | null | undefined, awaiting = false): s
   if (!label) return null;
   if (label === 'Not asked') return null;
   if (label === 'Waiting for the employee') return 'Awaiting acknowledgement';
-  const read = /^Read on (.+)$/.exec(label);
-  return read ? `Acknowledged on ${read[1]}` : label;
+  return label;
 }
 
 /** The pill for a My Documents row: what needs the person first, then the expiry state. */

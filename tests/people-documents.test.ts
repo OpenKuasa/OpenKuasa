@@ -115,20 +115,38 @@ describe('canManageDocuments', () => {
 });
 
 describe('awaitingAcknowledgement', () => {
-  it('counts documents that ask and letters that are issued, ask and are unread', () => {
-    const documents = [
-      doc({ id: '1', ack_requested: true }),
-      doc({ id: '2', ack_requested: true, acknowledged_at: '2026-10-01T00:00:00Z' }),
-      doc({ id: '3' }),
-    ];
-    const letters = [
-      letter({ id: '1', ack_requested: true }),
-      letter({ id: '2', ack_requested: true, acknowledged_at: '2026-10-01T00:00:00Z' }),
-      letter({ id: '3', ack_requested: true, status: 'draft', issued_on: null }),
-      letter({ id: '4' }),
-    ];
-    expect(awaitingAcknowledgement(documents, letters)).toBe(2);
-    expect(awaitingAcknowledgement([], [])).toBe(0);
+  const MINE = 'seed-emp-5';
+  const documents = [
+    doc({ id: '1', employee_id: MINE, ack_requested: true }),
+    doc({ id: '2', employee_id: MINE, ack_requested: true, acknowledged_at: '2026-10-01T00:00:00Z' }),
+    doc({ id: '3', employee_id: MINE }),
+    doc({ id: '4', employee_id: 'seed-emp-9', ack_requested: true }),
+    doc({ id: '5', employee_id: MINE, ack_requested: true, source: 'employee' }),
+  ];
+  const letters = [
+    letter({ id: '1', employee_id: MINE, ack_requested: true }),
+    letter({ id: '2', employee_id: MINE, ack_requested: true, acknowledged_at: '2026-10-01T00:00:00Z' }),
+    letter({ id: '3', employee_id: MINE, ack_requested: true, status: 'draft', issued_on: null }),
+    letter({ id: '4', employee_id: MINE }),
+    letter({ id: '5', employee_id: 'seed-emp-9', ack_requested: true }),
+  ];
+
+  it('counts a linked member one HR-added document and one issued letter awaiting, theirs only', () => {
+    expect(awaitingAcknowledgement(documents, letters, MEMBER)).toBe(2);
+    expect(awaitingAcknowledgement([], [], MEMBER)).toBe(0);
+  });
+  it("counts an owner who is also an employee their own rows, not the team's", () => {
+    expect(awaitingAcknowledgement(documents, letters, HR_5)).toBe(2);
+    const other: PeopleViewer = { employeeId: 'seed-emp-9', isHr: true, isDemo: false };
+    expect(awaitingAcknowledgement(documents, letters, other)).toBe(2); // doc 4 and letter 5, not the five of seed-emp-5
+  });
+  it('is 0 for a viewer with no employee record', () => {
+    expect(awaitingAcknowledgement(documents, letters, UNLINKED)).toBe(0);
+  });
+  it('is 0 for a demo visitor, whose acknowledgement the database refuses', () => {
+    const demoDocs = [doc({ id: 'd', ack_requested: true })];
+    const demoLetters = [letter({ id: 'l', ack_requested: true })];
+    expect(awaitingAcknowledgement(demoDocs, demoLetters, DEMO)).toBe(0);
   });
 });
 
@@ -154,7 +172,7 @@ describe('My Documents model', () => {
     expect(model.letters).toBe(1); // the one issued letter addressed to the sample employee
     expect(model.expiring_soon).toBe(1);
     expect(model.expired).toBe(1);
-    expect(model.awaiting_acknowledgement).toBe(2); // Code of conduct, Confirmation of employment
+    expect(model.awaiting_acknowledgement).toBe(0); // two sample items await, but the tile reads 0: nothing can clear them
     expect(model.payslips).toBeGreaterThan(0);
     expect(model.can_upload).toBe(false);
     const docs = model.rows.filter((r) => r.kind === 'document');
@@ -230,7 +248,7 @@ describe('My Documents model', () => {
     const row = (id: string) => model.rows.find((r) => r.id === id)!;
     expect(row('hr')).toMatchObject({ can_acknowledge: true, can_remove: false, can_download: true, added_by_label: 'Added by HR' });
     expect(row('own')).toMatchObject({ can_acknowledge: false, can_remove: true, can_download: true, added_by_label: 'Added by you' });
-    expect(row('read')).toMatchObject({ awaiting_acknowledgement: false, can_acknowledge: false, acknowledged_label: 'Read on 01 Oct 2026' });
+    expect(row('read')).toMatchObject({ awaiting_acknowledgement: false, can_acknowledge: false, acknowledged_label: 'Acknowledged on 01 Oct 2026' });
     expect(row('nofile')).toMatchObject({ can_download: false, file_label: null, no_file_label: NO_FILE_LABEL });
     expect(row('hr').file_label).toBe('f.pdf · 2 KB · PDF');
     expect(model.can_upload).toBe(true);
@@ -284,7 +302,7 @@ describe('Employee documents model', () => {
     const row = (id: string) => model.rows.find((r) => r.id === id)!;
     expect(row('a')).toMatchObject({ ack_label: 'Waiting for the employee', can_withdraw_ack: true, can_request_ack: false, added_by_label: 'Added by HR' });
     expect(row('b')).toMatchObject({ ack_label: 'Not asked', can_request_ack: false, can_withdraw_ack: false, added_by_label: 'Uploaded by the employee' });
-    expect(row('c')).toMatchObject({ ack_label: 'Read on 02 Apr 2026' });
+    expect(row('c')).toMatchObject({ ack_label: 'Acknowledged on 02 Apr 2026' });
     expect(row('c').can_request_ack).toBe(false);
   });
 
@@ -392,7 +410,7 @@ describe('Letters model', () => {
     const model = buildLettersModel([asking, read], HR_5, TODAY);
     const row = (id: string) => model.rows.find((r) => r.id === id)!;
     expect(row('a')).toMatchObject({ can_acknowledge: true, awaiting_acknowledgement: true });
-    expect(row('r')).toMatchObject({ can_acknowledge: false, awaiting_acknowledgement: false, acknowledged_label: 'Read on 01 Oct 2026' });
+    expect(row('r')).toMatchObject({ can_acknowledge: false, awaiting_acknowledgement: false, acknowledged_label: 'Acknowledged on 01 Oct 2026' });
     // An owner viewing a letter addressed to someone else cannot.
     const owner: PeopleViewer = { employeeId: 'seed-emp-9', isHr: true, isDemo: false };
     expect(buildLettersModel([asking], owner, TODAY).rows[0].can_acknowledge).toBe(false);

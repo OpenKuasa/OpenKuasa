@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import { FileText, Trash2 } from 'lucide-react';
 import { removeMyDocumentAction } from '@/app/(app)/people/document-actions';
 import { Button } from '@/components/ui/button';
@@ -33,6 +33,15 @@ export function DocumentRow({ row }: { row: MyDocumentRow }) {
   const [pending, start] = useTransition();
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Focus follows the Remove confirmation: to Keep when it opens, back to Remove when it is dismissed.
+  const keepRef = useRef<HTMLButtonElement>(null);
+  const removeRef = useRef<HTMLButtonElement>(null);
+  const wasConfirming = useRef(false);
+  useEffect(() => {
+    if (confirming) keepRef.current?.focus();
+    else if (wasConfirming.current) removeRef.current?.focus();
+    wasConfirming.current = confirming;
+  }, [confirming]);
   const status = myRowStatus(row);
   const slot = downloadSlot(row);
   const ack = ackDetail(row.acknowledged_label, row.awaiting_acknowledgement);
@@ -95,13 +104,14 @@ export function DocumentRow({ row }: { row: MyDocumentRow }) {
                   <Button type="button" variant="destructive" size="sm" disabled={pending} onClick={remove}>
                     {pending ? 'Removing…' : 'Remove'}
                   </Button>
-                  <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={() => setConfirming(false)}>
+                  <Button ref={keepRef} type="button" variant="ghost" size="sm" disabled={pending} onClick={() => setConfirming(false)}>
                     Keep
                   </Button>
                 </div>
               </div>
             ) : (
               <Button
+                ref={removeRef}
                 type="button"
                 variant="ghost"
                 size="sm"

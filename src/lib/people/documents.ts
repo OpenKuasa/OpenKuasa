@@ -231,16 +231,21 @@ export const letterAwaiting = (letter: Pick<Letter, 'status' | 'ack_requested' |
   letter.status === 'issued' && letter.ack_requested && letter.acknowledged_at === null;
 
 /**
- * How many of these documents and letters await acknowledgement. It has no viewer: the caller passes the viewer's
- * OWN rows (`ownRows`; an owner who is also an employee reads everyone's), and skips it in the sample company,
- * where the database refuses an acknowledgement and the count could never clear.
+ * How many of the viewer's OWN documents and letters await their acknowledgement: HR-added documents that ask and
+ * issued letters that ask. 0 in the sample company (the database refuses an acknowledgement there, so the count
+ * could never clear) and for a viewer with no employee record. An owner who is also an employee is counted their
+ * own rows, never the team's.
  */
-export function awaitingAcknowledgement(documents: HrDocument[], letters: Letter[]): number {
-  return documents.filter(documentAwaiting).length + letters.filter(letterAwaiting).length;
+export function awaitingAcknowledgement(documents: HrDocument[], letters: Letter[], viewer: PeopleViewer): number {
+  if (viewer.isDemo || viewer.employeeId === null) return 0;
+  return (
+    ownRows(documents, viewer).filter((doc) => doc.source === 'hr' && documentAwaiting(doc)).length +
+    ownRows(letters, viewer).filter(letterAwaiting).length
+  );
 }
 
 const readOn = (acknowledged_at: string | null): string | null =>
-  acknowledged_at ? `Read on ${formatDate(malaysiaDate(acknowledged_at))}` : null;
+  acknowledged_at ? `Acknowledged on ${formatDate(malaysiaDate(acknowledged_at))}` : null;
 
 export type MyDocumentRow = {
   id: string;
@@ -260,7 +265,7 @@ export type MyDocumentRow = {
   added_by_label: string | null;
   /** Needs the employee's acknowledgement (shown first, even in the sample company). */
   awaiting_acknowledgement: boolean;
-  /** `Read on 12 Oct 2026` once acknowledged. */
+  /** `Acknowledged on 12 Oct 2026` once acknowledged. */
   acknowledged_label: string | null;
   /** Awaiting, and not in the sample company, where the database refuses it: the only condition for the button. */
   can_acknowledge: boolean;
@@ -389,7 +394,7 @@ export function buildMyDocumentsModel(input: {
     can_upload: !viewer.isDemo,
     employee_id: viewer.employeeId,
     documents: documents.length,
-    awaiting_acknowledgement: awaitingAcknowledgement(documents, letters),
+    awaiting_acknowledgement: awaitingAcknowledgement(documents, letters, viewer),
     expiring_soon: states.filter((state) => state === 'expiring').length,
     expired: states.filter((state) => state === 'expired').length,
     payslips: payslips.length,
@@ -413,7 +418,7 @@ export type EmployeeDocumentRow = {
   /** `Added by HR` / `Uploaded by the employee`. */
   added_by_label: string;
   ack_requested: boolean;
-  /** `Not asked`, `Waiting for the employee`, or `Read on 12 Oct 2026`. */
+  /** `Not asked`, `Waiting for the employee`, or `Acknowledged on 12 Oct 2026`. */
   ack_label: string;
   acknowledged_at: string | null;
   can_download: boolean;
