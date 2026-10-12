@@ -334,7 +334,12 @@ function CashFlowCard({ cf, period, today }: { cf: CashFlow; period: Period; tod
       flush
       className="col-span-2 md:col-span-12"
       action={
-        <Button variant="outline" size="sm" onClick={() => downloadCsv(csvFileName('cash-flow', today), cashFlowCsv(cf, period))}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={cf.lines.length === 0 && cf.opening === 0}
+          onClick={() => downloadCsv(csvFileName('cash-flow', today), cashFlowCsv(cf, period))}
+        >
           <Download className="size-4" />
           Export CSV
         </Button>
@@ -404,6 +409,8 @@ function AgedCard({
   today,
   fileName,
   note,
+  owes,
+  unavailable,
 }: {
   title: string;
   /** True for what customers owe, false for what the workspace owes. */
@@ -411,10 +418,15 @@ function AgedCard({
   partyHeading: 'Customer' | 'Supplier';
   href: string;
   empty: string;
-  a: Aged;
+  /** Null when the documents could not be read. */
+  a: Aged | null;
   today: string;
   fileName: string;
   note?: string | null;
+  /** How the headline says what is owed: "owed" for money owed to the workspace, "you owe" for money it owes. */
+  owes: string;
+  /** What to say in place of the table when `a` is null. */
+  unavailable: string;
 }) {
   return (
     <BentoCard
@@ -427,15 +439,48 @@ function AgedCard({
         <Button
           variant="outline"
           size="sm"
-          disabled={a.rows.length === 0}
-          onClick={() => downloadCsv(csvFileName(fileName, today), agedCsv(a, today, partyHeading))}
+          disabled={a === null || a.rows.length === 0}
+          onClick={() => a && downloadCsv(csvFileName(fileName, today), agedCsv(a, today, partyHeading))}
         >
           <Download className="size-4" />
           Export CSV
         </Button>
       }
     >
-      {a.rows.length > 0 ? <p className="px-4 pb-3 text-sm font-medium">{rm(a.overdue)} overdue of {rm(a.total)} owed</p> : null}
+      {a === null ? (
+        <p role="alert" className="px-4 pb-4 text-sm text-destructive">
+          {unavailable}
+        </p>
+      ) : (
+        <AgedTable a={a} title={title} partyHeading={partyHeading} href={href} empty={empty} owes={owes} />
+      )}
+      {a !== null && note ? <p className="border-t px-4 py-3 text-sm text-muted-foreground">{note}</p> : null}
+    </BentoCard>
+  );
+}
+
+function AgedTable({
+  a,
+  title,
+  partyHeading,
+  href,
+  empty,
+  owes,
+}: {
+  a: Aged;
+  title: string;
+  partyHeading: 'Customer' | 'Supplier';
+  href: string;
+  empty: string;
+  owes: string;
+}) {
+  return (
+    <>
+      {a.rows.length > 0 ? (
+        <p className="px-4 pb-3 text-sm font-medium">
+          {rm(a.overdue)} overdue of {rm(a.total)} {owes}
+        </p>
+      ) : null}
       <div className="overflow-x-auto">
         <Table aria-label={title}>
           <TableHeader>
@@ -486,8 +531,7 @@ function AgedCard({
           </TableBody>
         </Table>
       </div>
-      {note ? <p className="border-t px-4 py-3 text-sm text-muted-foreground">{note}</p> : null}
-    </BentoCard>
+    </>
   );
 }
 
@@ -513,10 +557,10 @@ export function ReportsView({
   totals: MonthlyTotals;
   /** The money into and out of the bank and cash accounts by month and source (cashMovements). */
   cash: CashMovement[];
-  /** What each posted invoice still owes the workspace; one in credit has a balance below zero. As at today, not the period. */
-  receivables: OpenDocument[];
-  /** What each posted supplier bill still owes. As at today, not the period. */
-  payables: OpenDocument[];
+  /** What each posted invoice still owes the workspace; one in credit has a balance below zero. As at today, not the period. Null when they could not be read. */
+  receivables: OpenDocument[] | null;
+  /** What each posted supplier bill still owes. As at today, not the period. Null when they could not be read. */
+  payables: OpenDocument[] | null;
   /** Ledger lines left out because their account could not be found. */
   unassigned?: number;
   /** The date the periods are worked out from, YYYY-MM-DD. */
@@ -557,9 +601,9 @@ export function ReportsView({
   }));
   const chart = chartState(pl, period);
   const cf = cashFlow(cash, period);
-  const receivable = aged(receivables, today);
-  const payable = aged(payables, today);
-  const credit = creditSummary(receivables);
+  const receivable = receivables === null ? null : aged(receivables, today);
+  const payable = payables === null ? null : aged(payables, today);
+  const credit = creditSummary(receivables ?? []);
   const creditNote =
     credit.count > 0
       ? `${credit.count === 1 ? '1 customer is' : `${credit.count} customers are`} in credit by ${rm(credit.total)} in total, which is not counted above.`
@@ -670,6 +714,8 @@ export function ReportsView({
           a={receivable}
           today={today}
           fileName="aged-receivables"
+          owes="owed"
+          unavailable="Aged receivables could not be loaded. Please try again."
           note={creditNote}
         />
         <AgedCard
@@ -681,6 +727,8 @@ export function ReportsView({
           a={payable}
           today={today}
           fileName="aged-payables"
+          owes="you owe"
+          unavailable="Aged payables could not be loaded. Please try again."
         />
       </BentoGrid>
 

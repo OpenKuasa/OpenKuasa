@@ -32,15 +32,15 @@ const { totals: sampleTotals } = monthlyTotals(SAMPLE_LEDGER_LINES);
 const sampleCash = cashMovements(SAMPLE_LEDGER_LINES, SAMPLE_LEDGER_ACCOUNTS);
 
 const render = (
-  over: { totals?: MonthlyTotals; cash?: CashMovement[]; receivables?: OpenDocument[]; payables?: OpenDocument[]; unassigned?: number; today?: string } = {},
+  over: { totals?: MonthlyTotals; cash?: CashMovement[]; receivables?: OpenDocument[] | null; payables?: OpenDocument[] | null; unassigned?: number; today?: string } = {},
 ) =>
   renderToStaticMarkup(
     <ReportsView
       accounts={accounts}
       totals={over.totals ?? sampleTotals}
       cash={over.cash ?? sampleCash}
-      receivables={over.receivables ?? SAMPLE_RECEIVABLES}
-      payables={over.payables ?? SAMPLE_PAYABLES}
+      receivables={over.receivables === undefined ? SAMPLE_RECEIVABLES : over.receivables}
+      payables={over.payables === undefined ? SAMPLE_PAYABLES : over.payables}
       unassigned={over.unassigned}
       today={over.today ?? SAMPLE_TODAY}
       followClock={false}
@@ -224,7 +224,7 @@ describe('the Reports screen', () => {
     const html = render();
     const t = text(html);
     expect(t).toContain('Aged Payables As at 10 October 2026');
-    expect(t).toContain('RM 700.00 overdue of RM 1,050.00 owed');
+    expect(t).toContain('RM 700.00 overdue of RM 1,050.00 you owe');
     expect(t).toContain('Supplier Not yet due');
     expect(t.indexOf('Kopi Hulu Supplies')).toBeLessThan(t.indexOf('Tenaga Utilities'));
     expect(t).toContain('Kopi Hulu Supplies RM 700.00 RM 700.00 Tenaga Utilities RM 350.00 RM 350.00');
@@ -232,12 +232,62 @@ describe('the Reports screen', () => {
     expect(html).toMatch(/<a[^>]*href="\/finance\/supplier-bills"[^>]*>Kopi Hulu Supplies</);
   });
 
-  it('ages from the date it is given, and does not follow the period picker', () => {
-    // 2027-01-20: the November invoice is 74 days over, the September bill 138
+  it('ages from the date it is given: at 20 January 2027 the invoice is 74 days over, the bill due 4 September 138 and the one due 25 October 87', () => {
     const t = text(render({ today: '2027-01-20' }));
     expect(t).toContain('Aged Receivables As at 20 January 2027');
     expect(t).toContain('RM 4,240.00 overdue of RM 4,240.00 owed');
+    expect(t).toContain('Total RM 0.00 RM 0.00 RM 0.00 RM 4,240.00 RM 0.00 RM 4,240.00');
     expect(t).toContain('Aged Payables As at 20 January 2027');
+    expect(t).toContain('RM 1,050.00 overdue of RM 1,050.00 you owe');
+    // Kopi Hulu: Over 90 days; Tenaga: 61–90 days
+    expect(t).toContain('Kopi Hulu Supplies RM 700.00 RM 700.00 Tenaga Utilities RM 350.00 RM 350.00');
+    expect(t).toContain('Total RM 0.00 RM 0.00 RM 0.00 RM 350.00 RM 700.00 RM 1,050.00');
+  });
+
+  it('leaves both aged tables as they were when only what the period changes differs (the books and the cash)', () => {
+    // The period is chosen in the browser, so it cannot be pressed here; what it changes is the statements, which are fed other figures.
+    const agedOf = (html: string) => html.slice(html.indexOf('Aged Receivables'));
+    const full = agedOf(text(render()));
+    expect(agedOf(text(render({ totals: [], cash: [] })))).toBe(full);
+    expect(agedOf(text(render({ today: SAMPLE_TODAY, totals: sampleTotals.slice(0, 3), cash: sampleCash.slice(0, 1) })))).toBe(full);
+  });
+
+  it('says the aged receivables could not be loaded, in an alert, in place of the table, and still shows the rest', () => {
+    const html = render({ receivables: null });
+    expect(html).toMatch(/<p role="alert"[^>]*>Aged receivables could not be loaded\. Please try again\.<\/p>/);
+    const t = text(html);
+    expect(t).not.toContain('Nobody owes you anything.');
+    expect(html).not.toContain('aria-label="Aged Receivables"');
+    expect(t).not.toContain('in credit');
+    // the payables, the statements and the cash flow are untouched
+    expect(t).toContain('Kopi Hulu Supplies RM 700.00');
+    expect(t).toContain('Closing cash RM 53,300.00');
+    expect(t).toContain('Total assets RM 57,140.00');
+    expect(t).not.toContain('Aged payables could not be loaded');
+  });
+
+  it('says the aged payables could not be loaded, in an alert, in place of the table', () => {
+    const html = render({ payables: null });
+    expect(html).toMatch(/<p role="alert"[^>]*>Aged payables could not be loaded\. Please try again\.<\/p>/);
+    expect(html).not.toContain('aria-label="Aged Payables"');
+    expect(text(html)).not.toContain('You owe nothing on supplier bills.');
+    expect(text(html)).toContain('Aisyah Trading RM 4,240.00');
+  });
+
+  it('disables the export of an aged table that could not be loaded', () => {
+    const html = render({ receivables: null, payables: null });
+    expect(html.match(/<button[^>]*disabled=""[^>]*>[^]*?Export CSV/g)).toHaveLength(2);
+  });
+
+  it('disables the cash flow export when nothing moved and the opening cash is nothing, and not when only one of them is', () => {
+    // the export button of the Cash Flow card: the last button before its table
+    const cashExport = (html: string) => html.slice(html.indexOf('>Cash Flow<'), html.indexOf('aria-label="Cash flow"'));
+    const disabled = (html: string) => /<button[^>]*disabled=""/.test(cashExport(html));
+    expect(disabled(render({ cash: [] }))).toBe(true);
+    // a quiet period with cash brought forward still has something to export
+    expect(disabled(render({ today: '2027-03-10' }))).toBe(false);
+    // movement in the period
+    expect(disabled(render())).toBe(false);
   });
 
   it('has an empty state for each aged table, with no headline, no totals row and the export disabled', () => {
