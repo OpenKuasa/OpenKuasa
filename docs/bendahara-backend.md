@@ -41,8 +41,11 @@ the data layer, with unit tests; the client components only draw them.
 | `cash-receipt-form.ts` | The receipt form: defaults, the form for a draft being changed (`editCashReceiptForm`, from its row and its Payments In rows), which invoices it can go against (`receivableFor`: the payment-in rule, without counting what the draft being changed holds itself), validation, what is sent (the chosen side only), a picker's list with a draft's archived choice in it (`withCurrent`). `receiptSavedNotPosted` words a receipt that was saved as a draft but not posted. `receiptInvoicesForForm` and `receiptPaymentsForForm` trim what the loader sends the form to the invoices that can still take money and the payments that hold part of one. `leftOutInvoicesNote` says when ticked invoices were left out. `afterRefusedReceiptSave` makes the form forget the id of a draft that was deleted meanwhile |
 | `expenses.ts` | Reading expenses (`listExpenses`, from the view `finance_expense_totals`), a page at a time, with the row type, the three statuses a person sets and `paid`, which is only how an expense reads. It only reads |
 | `cash-book-views.ts` | KPI figures, chart data, table filters, status words and CSV rows for Cash Receipts, Payment Vouchers and Expenses; the period selector of the first two (`inPeriod`), which sets the cards, the donut and the table rows alike (`cashReceiptsInPeriod`, `paymentVouchersInPeriod`: a draft receipt, and a voucher waiting for approval or still to be paid, stay in every period because their cards count them whatever their date; search, filters, "View all" and Export work on top of it); which category a voucher counts under (`voucherCategory`) and which screen changes it (`voucherHome`); what a receipt's row menu offers, by its status and by whether the person may sign off (`cashReceiptActions`), and the words of its questions (`receiptName`, `receiptVoidEffect`, `receiptDeleteEffect`) |
-| `receipts.ts` | Reading the Receipts Inbox (`listInboxReceipts`, from the view `finance_receipt_inbox`), a page at a time, with the row type and the bucket's name, size limit and five file types. An inbox receipt is an uploaded photo or PDF, not a cash receipt: everything exported says `Inbox`. It never reads `file_path` |
+| `receipts.ts` | Reading the Receipts Inbox (`listInboxReceipts`, from the view `finance_receipt_inbox`), a page at a time, with the row type and the bucket's name, size limit and five file types. An inbox receipt is an uploaded photo or PDF, not a cash receipt: everything exported says `Inbox`. It never reads `file_path`: only `getReceiptFile` in `receipt-inbox.ts` does, on the server |
 | `receipt-views.ts` | The three counts, the donut, the status and type words, the "Matched to" words (`inboxDocument`), whether a row says anything about AI reading and what (`inboxReadingNote`, `INBOX_READING_NOTES`), the filter and the CSV rows of the Receipts Inbox |
+| `receipt-files.ts` | What is decided about a file before it is uploaded: its type from its first bytes (`sniffReceiptType`), the path it is stored at, the name kept to show (`cleanFileName`), what a refused upload means, and the upload queue's states |
+| `receipt-inbox.ts` | The inbox's writes and its review form: record an upload (`registerReceipt`), review (`reviewReceipt`), delete (`deleteInboxReceipt`), read a receipt's path and sign a download link, and the sentences for `FIN11`, `FIN23`, `FIN24` |
+| `receipt-files-server.ts` | Server only: reads a stored file's first bytes before it is opened (`storedFileCheck`), removes a deleted receipt's file (`removeReleasedReceiptFile`) and runs the clean-up (`cleanReceiptFiles`) |
 | `csv.ts` | CSV text for Export: RFC 4180, a UTF-8 byte-order mark, and a guard against spreadsheet formulas |
 
 The forms validate by running the write's own Zod schema on what they are about
@@ -113,10 +116,15 @@ is a draft, and one save can turn a draft of one kind into the other. Payment
 Vouchers and Expenses have no action of their own yet: they are read-only for
 everyone.
 
-The Receipts Inbox has no action either, and no action refreshes it: nothing
-the app can do yet changes a receipt. When matching arrives, deleting a
-pending expense or a draft bill, and posting a bill (which gives it the number
-the inbox shows), will have to refresh `/finance/receipts-inbox` too.
+The Receipts Inbox has its own actions file,
+`src/app/(app)/finance/receipt-inbox-actions.ts`: `registerReceiptAction`,
+`reviewReceiptAction`, `deleteReceiptAction` and `receiptLinkAction`. The
+first three use the same guard as every finance action and refresh
+`/finance/receipts-inbox` only; the last is a read, open to anyone who can see
+the receipt. When matching arrives, deleting a pending expense or a draft
+bill, and posting a bill (which gives it the number the inbox shows), will
+have to refresh `/finance/receipts-inbox` too, and the receipt actions the
+expense and bill screens.
 
 Every action refuses a viewer and the demo workspace before the data layer is
 reached. Without that, a viewer's void or delete would come back from the
@@ -699,8 +707,75 @@ its object is really gone. These four are the only things granted to
 `service_role` in finance, and they are functions: it has no right on any
 finance table.
 
+**Uploading.** The browser puts the file straight into the bucket as the
+signed-in person (`src/components/finance/receipt-upload.ts`), so the bucket's
+own rule decides and no file passes through the app's server; the server
+action body limit is not raised. Before anything is sent the browser reads the
+file's first bytes (`sniffReceiptType` in `receipt-files.ts`): the type is
+what the bytes say, never the name or what the device reports, and anything
+that is not a JPG, PNG, PDF, HEIC or HEIF is refused there. The path is
+`<workspace id>/<uuid>.<ext>`; the browser makes the uuid, the action refuses
+a path that is not of that shape in the caller's own workspace
+(`isInboxReceiptPath`), and the guard refuses one with no object behind it.
+The upload is a plain one, not a resumable one: there is no percentage, only
+"Uploading", and a dropped connection fails that file, which starts again
+when the person presses Try again.
+`registerReceiptAction` then
+records the row; called twice for one file it answers with the same receipt.
+Files go one at a time through a queue of at most twenty
+(`queueAdd`, `queueNext`, `retryPlan`), each with its own state and sentence.
+A file that was stored and not recorded is retried without a second upload
+for 25 minutes, and uploaded again after that.
+
+**HEIC.** A HEIC or HEIF is turned into a JPG before upload
+(`receipt-heic.ts`): by the browser's own decoder when it has one (Safari),
+otherwise by `heic-to` (LGPL-3.0, libheif inside), whose `heic-to/csp` build
+is plain JavaScript and runs under the Content-Security-Policy without
+`wasm-unsafe-eval`. It is loaded with a dynamic `import()` the first time it
+is needed, about 0.8 MB compressed, and by nobody else. When neither works
+the original is stored and is a download only.
+
+**Opening a file.** `receiptLinkAction` reads the path and signs a 60-second
+link as the caller, always with a download name of ours (`receipt.jpg`), so
+storage serves an attachment. Before it hands the link out it reads the
+file's first 64 bytes through a ranged request (`storedFileCheck` in
+`receipt-files-server.ts`) and refuses a file that is not the type its
+receipt says. A JPG or PNG is previewed in the review card from bytes the
+browser fetches and checks itself, as an object URL: no image, frame or new
+tab is ever pointed at a stored file. A download also goes through the
+page's own copy of the bytes (it does not check their first bytes again; the
+server did): the browser fetches them through the link, with a 60-second limit,
+and saves its own copy, typed `application/octet-stream`, from an object URL, so the page never navigates to storage. A PDF and a stored HEIC
+are downloads only.
+
+**Reviewing.** `reviewReceiptInput` and `finance_review_receipt`: vendor (200
+characters), a real date, an amount above 0 with its SST inside it, SST from 0
+to the amount and not without one. Every field may be empty. A receipt in
+review becomes unmatched. Any writer may review; the screen offers it on a
+receipt that is tied to nothing.
+
+**Deleting, and the clean-up run.** `deleteReceiptAction` deletes the row as
+the caller and gets the deleted row's path back in the same statement; the
+path stays on the server. `removeReleasedReceiptFile` then asks
+`finance_receipt_deletion_queued` for that path, removes the object with the
+service client and calls `finance_receipt_deletions_done`. If that fails the
+receipt is still deleted and the file waits for the run.
+`POST /api/finance/receipt-cleanup` (`cleanReceiptFiles`) queues orphans,
+reads up to 100 due paths, asks about each again immediately before removing
+it, and marks done only what the database sees is gone. It is authorized like
+the other scheduled endpoints (`isTriggerAuthorized`) and must be called by
+the operator's scheduler; it stops after 20 seconds and takes up the rest on
+the next call. It answers `{"ok", "queued", "removed"}`: how many unrecorded
+uploads it put on the list, and how many files it took off it. `ok: false` means
+something was left for the next call (the list could not be read, a file could
+not be removed, or the 20 seconds ran out); it is not an error to alert on
+unless it stays false for many calls in a row. A `401` means the secret is
+wrong, unset or shorter than 32 characters.
+
 **The demo** has eight receipts with no file (a migration cannot upload), so
-`has_file` is false on them and the screen says so.
+`has_file` is false on them and the screen says so. Its guests are anonymous
+accounts, which the bucket refuses, so the demo has no upload area and a
+sentence saying why.
 
 ## Invoices
 
@@ -1100,8 +1175,8 @@ quotation, a credit note or a refund by the file that made the call.
 | `FIN13` | The quotation already has an invoice that is not void: it cannot be converted again, and its answer can no longer change. `quotations.ts` words it |
 | `FIN14` | Approval. Only an owner or admin approves or rejects an expense or a payment; a payment is submitted for approval only from a draft and rejected only before it is approved; money out that settles no document needs one of them before it is scheduled or paid; a payment waiting for approval, or rejected, cannot be changed; a rejected payment is final; an approved payment is paid as it was approved, with nothing but its status, number and date changing. Also: `approved_by` and `approved_at` on a payment or an expense are written by the database, and an update from a signed-in person that changes either by hand is this code, unless an earlier rule refuses it first (`FIN09` on a posted or void payment, `FIN01` on an approved or rejected expense whose status is left as it was); a scheduled payment out that nobody approved cannot be raised above its split, or made from scheduled money in, by someone who is not an owner or admin, and its split cannot be deleted or lowered below the payment by any signed-in person. Also a member's post or void of a cash receipt: Cash Receipts offers a member no Post and no Void, and if one is sent anyway the action answers "Only an owner or admin can post, pay or void. Ask one of them to do this." before reading or writing, and the database answers this code and uses up no number. Only an owner or admin unties a receipt from an approved expense or a posted bill. |
 | `FIN15` | A receipt, a voucher or an expense names the wrong thing: a receipt is for invoices or for an income category, a voucher for expenses or for an expense category, never both and never neither; a receipt for invoices that is being posted must be exactly its split and carry no category; an expense needs an expense category of its own workspace. `cash-receipts.ts` words it for a receipt: "A receipt needs either invoices that add up to its amount, or an income category that still exists. Edit it and try again." The voucher and the expense meet it with their forms |
-| `FIN23` | A receipt's state does not allow it: it starts in review, tied to nothing; it does not move to another workspace; its file, name, type, size, uploader and upload time do not change; a matched receipt is untied before it is deleted (the guard, for any delete), and `finance_attach_receipt`, `finance_receipt_to_expense` and `finance_receipt_to_bill` refuse a receipt that is already matched. A plain update of `expense_id` or `bill_id` by a writer is allowed by the grants, and the guard moves the receipt to the new document (with `FIN14` when it leaves an approved expense or a posted bill and the writer cannot decide). Not worded yet: no button reaches it. |
-| `FIN24` | The file of a receipt: there is none; it is not in the bucket; it was uploaded more than 30 minutes ago or is waiting to be removed; it is already a receipt; it is not the type its name says; its path names none of the five types. Not worded yet. |
+| `FIN23` | A receipt's state does not allow it: it starts in review, tied to nothing; it does not move to another workspace; its file, name, type, size, uploader and upload time do not change; a matched receipt is untied before it is deleted (the guard, for any delete), and `finance_attach_receipt`, `finance_receipt_to_expense` and `finance_receipt_to_bill` refuse a receipt that is already matched. A plain update of `expense_id` or `bill_id` by a writer is allowed by the grants, and the guard moves the receipt to the new document (with `FIN14` when it leaves an approved expense or a posted bill and the writer cannot decide). `receipt-inbox.ts` words it for deleting a matched receipt. |
+| `FIN24` | The file of a receipt: there is none; it is not in the bucket; it was uploaded more than 30 minutes ago or is waiting to be removed; it is already a receipt; it is not the type its name says; its path names none of the five types. `receipt-inbox.ts` words it for recording an upload. |
 | `FIN25` | A void bill takes no receipt. Not worded yet. |
 
 `FIN23`, `FIN24` and `FIN25` are not the Receipts Inbox's alone. The ledger
@@ -1585,10 +1660,47 @@ with no date).
   migration up to `20261031090300` applied. Two parts of it run as the
   database owner with a person's id in the claims, because posting two sides
   by hand is no longer something a signed-in person can try.
-- The Receipts Inbox is read-only: nothing in the app reviews, matches or deletes,
-  and the app puts nothing in a real workspace's inbox yet (see the bullet on the API below). The database functions
-  are proven by `supabase/tests/bendahara_receipts_check.sql` and
-  `tests/bendahara-receipts.test.ts`; nothing in TypeScript calls them.
+- The Receipts Inbox uploads, opens, reviews and deletes. Nothing reads a
+  receipt with a model yet, and nothing ties one to an expense or a bill: the
+  database functions for both are proven by
+  `supabase/tests/bendahara_receipts_check.sql` and
+  `tests/bendahara-receipts.test.ts`, and nothing in TypeScript calls them.
+- The browser's check of a file's first bytes can be skipped by someone who
+  calls the storage API themselves. Such a file is stored under one of the
+  five types; the server's own check then refuses to open it, and it is never
+  previewed. Nobody is shown it as a page: it is only ever a download.
+- No virus scan. A PDF is opened by the person's own viewer.
+- An upload refused by the bucket's rule says the workspace may be out of
+  room or the person may no longer write: storage gives one answer for both.
+- A second tab does not see what the first one added or deleted until it is
+  reloaded. Closing or reloading the tab while files are on their way asks
+  first; moving to another screen of the app does not, and the queue keeps
+  going in the background. Files that were stored and not recorded are removed
+  by the clean-up run.
+- A JPG or PNG is uploaded as the person's device made it, so its metadata
+  stays in it, a phone's location included. Only a HEIC that was converted to a
+  JPG loses its metadata, because that JPG is drawn afresh from the pixels.
+- There is no upload percentage, and a dropped connection fails that file;
+  Try again then uploads it from the beginning (resumable uploads were left out
+  on purpose).
+- "Try again" on failed files can put more than twenty in the queue: a failed
+  file does not count toward the twenty, and the retry does not ask for a
+  place. Files still go one at a time and nothing is dropped.
+- The download name on a signed link is added to the link by the client and is
+  not covered by the link's signature: whoever holds a link can drop it, and
+  storage then serves the file inline with its declared type. Nothing in the app
+  relies on "a link is always an attachment" as a guarantee. What protects a
+  file is that the bucket only stores the five declared types, none of which a
+  browser runs as a page or script, and that it is served from the storage
+  origin, where the app has no session.
+- A signed-up member of the demo workspace (not a guest: an account the
+  operator made a member) can review and delete the demo's sample receipts,
+  as with every finance table. Uploading there is refused for everyone.
+- An image larger than about 10 MB cannot be stored, so a preview fetches at
+  most that; nothing makes thumbnails.
+- `Permissions-Policy: camera=()` is sent on every page. "Take photo" is a
+  file input that opens the phone's own camera app, which that policy does
+  not govern; it is checked on a phone in the smoke test.
 - The guard reads what the storage service writes about an object:
   `created_at`, and `metadata` (`size`, `mimetype`). If storage leaves
   `metadata` empty the receipt is recorded with no size and its type is taken
@@ -1605,8 +1717,8 @@ with no date).
   in the guard would add a deadlock with "delete the pending expense".
 - A stored type is the type the uploader declared (the `Content-Type` of the
   upload); the storage service and the database check that the extension, that
-  type and the bucket's list agree, and nothing on the server reads the bytes
-  until the app opens the file.
+  type and the bucket's list agree, and the server reads the first bytes
+  when the app opens the file (`storedFileCheck`), not when it is recorded.
 - A signed link to a file is served by the storage service with the stored
   type and no `X-Content-Type-Options: nosniff` header (seen on the hosted
   project on 2026-10-12), so nothing tells a browser not to guess at the
@@ -1645,14 +1757,10 @@ with no date).
 - A bill made from a receipt is a draft with no number, so the inbox reads
   "Draft bill" until it is posted.
 - The demo's receipts have no file.
-- The app uploads nothing in this part, but once the migration is applied the
-  storage rule and `finance_register_receipt` are open to anyone who may write
-  in a real workspace, so a file can be put in the bucket, and recorded as a
-  receipt, through the API. Nothing removes files until the clean-up route of
-  the next part exists and the operator's cron calls it; until then such a
-  file stays, within the 1 GB a workspace and 20 GB bucket limits. When the
-  clean-up exists, anything an hour after its upload and held by no receipt is removed.
-  Accepted for this part.
+- A file put in the bucket through the API and never recorded stays until
+  the clean-up run takes it, an hour after its upload. That needs the
+  operator's scheduler to call `/api/finance/receipt-cleanup`; until it does,
+  only the file of a receipt deleted through the app is removed.
 - A receipt that leaves review without a person's review (tied by
   `finance_attach_receipt`, or turned into an expense or a bill) stops saying
   "Read by AI", so a model's figures can sit on a matched row with no caution.
@@ -1663,5 +1771,5 @@ with no date).
 - The database tests for this stage run as owners only, and their owners are
   confirmed email users, not anonymous ones, because the bucket refuses
   anonymous accounts. They remove their own files; a run that is killed
-  half-way can leave files in the bucket, which the clean-up run would take
-  after an hour once it exists.
+  half-way can leave files in the bucket, which the clean-up run takes
+  after an hour.
