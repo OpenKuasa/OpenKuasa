@@ -47,12 +47,14 @@ import {
 import type { ProductToolkit } from '@/lib/ai/products';
 import { logModelCall, logModelError, modelErrorCode } from '@/lib/ai/call-log';
 import { getModel, pickModelId } from '@/lib/ai/provider';
+import { changeRows } from '@/lib/chat/change-rows';
 import {
   approvalDetail,
   approvalTitle,
   collectNames,
   knownOnFile,
   nameIn,
+  rowIn,
   withoutPoolSide,
   type ItemKind,
   type KnownNames,
@@ -387,6 +389,8 @@ function specialistTools(
           input,
           title: approvalTitle(name, input, find),
           detail: approvalDetail(name, input, undefined, find),
+          // Every value it carries, from the input itself, beside what this specialist's lookups showed is there now.
+          changes: changeRows(name, input, find, rowIn(results)),
         };
         team.proposals.set(proposal.id, proposal);
         prepared.push(proposal);

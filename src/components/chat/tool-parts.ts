@@ -5,7 +5,7 @@
 
 import type { ComponentType } from 'react';
 import type { UIMessage } from 'ai';
-import { nameIn, type ItemKind, type NameFinder, type ToolResult } from '@/lib/chat/change-titles';
+import { nameIn, rowIn, type ItemKind, type NameFinder, type RowFinder, type ToolResult } from '@/lib/chat/change-titles';
 import { pickReceipt, userMessageBefore, type ReceiptState } from '@/lib/people/receipts';
 import { isFilePart } from '@/lib/chat/attachments';
 import {
@@ -47,7 +47,7 @@ type Icon = ComponentType<{ className?: string }>;
 export type AnyPart = UIMessage['parts'][number];
 
 export { approvalDetail, approvalTitle } from '@/lib/chat/change-titles';
-export type { ItemKind } from '@/lib/chat/change-titles';
+export type { ItemKind, RowFinder } from '@/lib/chat/change-titles';
 
 type ToolMeta = {
   label: string;
@@ -275,6 +275,11 @@ export function toolResults(messages: { parts: AnyPart[] }[]): ToolResult[] {
 /** Looks names up by id across a conversation's tool results. */
 export function nameFinder(messages: { parts: AnyPart[] }[]): NameFinder {
   return nameIn(toolResults(messages));
+}
+
+/** Looks rows up by id across a conversation's tool results: what a card shows as there now. */
+export function rowFinder(messages: { parts: AnyPart[] }[]): RowFinder {
+  return rowIn(toolResults(messages));
 }
 
 /** The name of the thing a change is about, when the change names it by `id`. */

@@ -70,6 +70,7 @@ import {
   hasVisibleContent,
   isText,
   proposalFor,
+  rowFinder,
   toPendingApproval,
   toSpecialistWork,
   toToolStep,
@@ -1084,6 +1085,7 @@ function ChatPane({
                                   key={pending.approvalId}
                                   approval={pending}
                                   named={nameFinder(chat.messages)}
+                                  before={rowFinder(chat.messages)}
                                   proposal={proposalFor(pending.input, chat.messages)}
                                   onDecide={(approved) => {
                                     setAttachNote(null);

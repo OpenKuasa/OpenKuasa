@@ -8,8 +8,10 @@ import {
   toolMeta,
   type ItemKind,
   type PendingApproval,
+  type RowFinder,
   type ToolStep,
 } from '@/components/chat/tool-parts';
+import { LONG_VALUE_CHARS, changeHeading, changeRows, unchanged, type ChangeRow } from '@/lib/chat/change-rows';
 import type { ReceiptState } from '@/lib/people/receipts';
 import { cn } from '@/lib/utils';
 
@@ -85,17 +87,93 @@ export function ToolStepCard({
   );
 }
 
+/** One value on a card. A long one is cut, and says so: the rest is one press away. */
+function ChangeValue({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const long = text.length > LONG_VALUE_CHARS;
+  return (
+    <>
+      {long && !open ? `${text.slice(0, LONG_VALUE_CHARS)}…` : text}
+      {long ? (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="ml-1.5 cursor-pointer rounded font-medium text-primary underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {open ? 'Show less' : `Show more (${text.length - LONG_VALUE_CHARS} more characters)`}
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * Every value a change carries, one row each: the row it is about first, by
+ * name, then each field as "was → will be" when a lookup showed what is there
+ * now. All of it is shown as plain text. A record's name is set in quotes and
+ * in its own cell, apart from the card's question: it is whatever the record
+ * says, and a record can say anything.
+ */
+export function ChangeList({ rows }: { rows: ChangeRow[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <dl
+      aria-label="What this change holds"
+      className="mt-2 grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-3 gap-y-1.5 rounded-lg border bg-muted/40 px-3 py-2 text-xs"
+    >
+      {rows.map((row) => (
+        <div key={row.key} className="contents">
+          <dt className="text-muted-foreground">{row.label}</dt>
+          <dd className="min-w-0 whitespace-pre-wrap break-words text-foreground">
+            {row.kind === 'record' ? (
+              row.to.startsWith('id ') ? (
+                <span className="font-mono">{row.to}</span>
+              ) : (
+                <span className="rounded bg-background px-1 py-0.5 font-medium ring-1 ring-inset ring-border">
+                  “<ChangeValue text={row.to} />”
+                </span>
+              )
+            ) : unchanged(row) ? (
+              <>
+                <ChangeValue text={row.to} /> <span className="text-muted-foreground">(no change)</span>
+              </>
+            ) : row.from !== undefined ? (
+              <>
+                <span className="sr-only">was </span>
+                <span className="text-muted-foreground line-through decoration-muted-foreground/60">
+                  <ChangeValue text={row.from} />
+                </span>
+                <span aria-hidden className="mx-1.5 text-muted-foreground">→</span>
+                <span className="sr-only">, will be </span>
+                <span className="font-medium">
+                  <ChangeValue text={row.to} />
+                </span>
+              </>
+            ) : (
+              <ChangeValue text={row.to} />
+            )}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 /** A change waiting for a yes or no. Nothing is saved until it is approved. */
 export function ApprovalCard({
   approval,
   named,
   proposal,
+  before,
   receipt,
   onDecide,
 }: {
   approval: PendingApproval;
   /** A change a specialist prepared: its wording was settled when it was prepared. */
-  proposal?: { title: string; detail: string | null } | null;
+  proposal?: { title: string; detail: string | null; action?: string; input?: unknown; changes?: ChangeRow[] } | null;
+  /** Looks up a row as a lookup in the conversation last showed it, for "was → will be". */
+  before?: RowFinder;
   /** Looks up the name of a row the change mentions by id. */
   named?: (id: unknown, kind?: ItemKind) => string | null;
   /** What the claim's question carried (from `receiptStateFor`), for a claim's card. */
@@ -104,14 +182,24 @@ export function ApprovalCard({
 }) {
   const detail = proposal ? proposal.detail : approvalDetail(approval.toolName, approval.input, receipt, named);
   const title = proposal?.title ?? approvalTitle(approval.toolName, approval.input, named);
+  // The change itself: a specialist's proposal, or the call this card is for.
+  const toolName = proposal?.action ?? approval.toolName;
+  const rows = proposal
+    ? (proposal.changes ?? changeRows(toolName, proposal.input, named, before))
+    : changeRows(toolName, approval.input, named, before);
   return (
     <div
       role="group"
       aria-label="Change waiting for your approval"
       className="rounded-xl border bg-card p-3 text-sm text-card-foreground shadow-sm"
     >
-      <p className="font-medium">{title}</p>
+      {/* From the tool's name alone: nothing a record or the assistant wrote can change this line. */}
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Change to approve · {changeHeading(toolName)}
+      </p>
+      <p className="mt-1 font-medium">{title}</p>
       {approval.note ? <p className="mt-1 break-words text-foreground">{approval.note}</p> : null}
+      <ChangeList rows={rows} />
       {detail ? (
         <p className="mt-1 flex items-center gap-1.5 text-muted-foreground">
           <TriangleAlert className="size-4 shrink-0" aria-hidden />
