@@ -140,7 +140,7 @@ export default async function InterviewsScreen() {
         <InterviewDialogHost
           today={model.today}
           serverNow={serverNow}
-          workspace={viewer.orgName}
+         
           picker={{ applications: model.applications, cut: model.applicationsCut }}
         />
       ) : null}
@@ -273,8 +273,8 @@ export default async function InterviewsScreen() {
                         </span>
                       </TableCell>
                       <TableCell className="text-right">
-                        {/* The row as plain values, and the workspace's name for the calendar file. Only for someone who may edit; each action checks again. */}
-                        {canEdit ? <InterviewRowMenu row={r} workspace={viewer.orgName} serverNow={serverNow} /> : null}
+                        {/* The row as plain values. Only for someone who may edit; each action checks again. */}
+                        {canEdit ? <InterviewRowMenu row={r} /> : null}
                       </TableCell>
                     </TableRow>
                   ))}

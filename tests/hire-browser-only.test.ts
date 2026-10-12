@@ -80,6 +80,19 @@ describe('where the browser\'s clipboard and downloads are touched', () => {
     for (const path of files) {
       expect(readFileSync(join(root, path), 'utf8'), path).not.toMatch(/navigator\.clipboard|createObjectURL|new Blob\(|\.download\s*=|document\.createElement/);
     }
+    // Final-review fix pass. The invitation and the calendar file are made on the server, from the interview as stored
+    // at the press. No screen file imports or calls the builders, or makes their source out of a row: a row can be stale.
+    const screens = readdirSync(join(root, 'src/screens/hire')).map((name) => join('src/screens/hire', name));
+    expect(screens).toEqual(expect.arrayContaining(['src/screens/hire/interview-dialog.tsx', 'src/screens/hire/interview-actions.tsx']));
+    for (const path of [...screens, 'src/lib/hire/interview-dialog-state.ts']) {
+      expect(readFileSync(join(root, path), 'utf8'), path)
+        .not.toMatch(/interview-invite|invitationText|interviewIcs|icsFileName|inviteSourceOf|InviteSource|calendarOfChange/);
+    }
+    // The builders are called in one file, which only the server runs.
+    const callers = [
+      ...readdirSync(join(root, 'src/lib/hire')).map((name) => join('src/lib/hire', name)),
+    ].filter((path) => /\.tsx?$/.test(path) && /\b(interviewIcs|icsFileName)\(/.test(readFileSync(join(root, path), 'utf8')));
+    expect(callers.sort()).toEqual(['src/lib/hire/capabilities.ts', 'src/lib/hire/interview-invite.ts']);
     const only = readFileSync(join(root, 'src/screens/hire/browser-only.ts'), 'utf8');
     expect(only).toMatch(/navigator\.clipboard/);
     expect(only).toMatch(/createObjectURL/);

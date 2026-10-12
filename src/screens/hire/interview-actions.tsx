@@ -4,19 +4,21 @@ import { Fragment, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { AlertDialog } from 'radix-ui';
 import { MoreHorizontal, Plus } from 'lucide-react';
-import { cancelInterviewAction, reopenInterviewAction, setInterviewOutcomeAction } from '@/app/(app)/hire/actions';
+import {
+  cancelInterviewAction, getInterviewInvitationAction, reopenInterviewAction, setInterviewOutcomeAction,
+} from '@/app/(app)/hire/actions';
 import { DELETION_NOTICE_ID } from '@/lib/hire/delete-dialog-state';
 import {
-  KEEP_INTERVIEW, MENU_WORDS, NO_INVITATION, cancelBody, cancelLabel, cancelTitle, interviewResult, inviteLead, inviteSourceOfRow, inviteTitle,
-  mayClose, mayHandOver, menuGroups, menuName, noticeOf, openerId, outcomeInput, refusalWord, rowMenu, sayOnNotice,
+  KEEP_INTERVIEW, MENU_WORDS, cancelBody, cancelLabel, cancelTitle, handoverAfter, handoverResult, interviewResult, inviteLead, inviteTitle,
+  mayAskHandover, mayClose, menuGroups, menuName, noticeOf, openerId, outcomeInput, refusalWord, rowMenu, rowWaitingWord, sayOnNotice,
+  type Handover, type HandoverState,
 } from '@/lib/hire/interview-dialog-state';
-import { invitationText, type InviteSource } from '@/lib/hire/interview-invite';
-import { INTERVIEW_SAVE_FAILED, type InterviewMenuItem } from '@/lib/hire/interviews';
+import { INTERVIEW_SAVE_FAILED, INVITATION_NOT_MADE, type InterviewMenuItem } from '@/lib/hire/interviews';
 import type { InterviewRow } from '@/lib/hire/lists';
 import { cn } from '@/lib/utils';
 import { FormDialog } from '@/screens/hire/candidate-forms';
 import { announceDeletion, claimResult, useNewest } from '@/screens/hire/delete-dialog';
-import { InvitationStep, openInterview, useServerClock } from '@/screens/hire/interview-dialog';
+import { InvitationStep, openInterview } from '@/screens/hire/interview-dialog';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -129,12 +131,40 @@ function useInterviewChange() {
       }
     });
   };
-  /** Something that was asked for cannot be done, and nothing was sent: said at the row, and the row is fetched again. */
-  const refuse = (text: string) => {
-    setRefusal({ text, seq: claimResult() });
-    router.refresh();
+  /**
+   * Asks the server for the row's invitation and calendar file, made from the interview as it is stored now. It
+   * shares the one-at-a-time lock with the changes, so a second press does nothing. A refusal is said at the row
+   * (or on the notice line when the interview has gone) and the screen is fetched again, so a stale row is replaced.
+   */
+  const ask = (call: () => Promise<unknown>, onMade: (handover: Handover) => void, onSettled: (made: boolean) => void) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setRefusal(null);
+    start(async () => {
+      let made = false;
+      try {
+        const result = handoverResult(await call());
+        if (result.ok) {
+          made = true;
+          onMade(result.handover);
+        } else if (sayOnNotice(refusalWord(result.error, 'interview'))) {
+          announceDeletion(result.error);
+          focusNoticeSoon();
+          router.refresh();
+        } else {
+          setRefusal({ text: result.error, seq: claimResult() });
+          router.refresh();
+        }
+      } catch {
+        setRefusal({ text: INVITATION_NOT_MADE, seq: claimResult() });
+        router.refresh();
+      } finally {
+        inFlight.current = false;
+        onSettled(made);
+      }
+    });
   };
-  return { pending, error: refusal && newest ? refusal.text : null, inFlight, send, refuse, clearError: () => setRefusal(null) };
+  return { pending, error: refusal && newest ? refusal.text : null, inFlight, send, ask, clearError: () => setRefusal(null) };
 }
 
 /**
@@ -148,21 +178,21 @@ function useInterviewChange() {
  * The two outcomes and "scheduled again" act at once: each is undone in one
  * tap. Cancelling asks first. The row stays in the list after every change
  * here, so focus goes back to this button.
+ *
+ * "Invitation and calendar file" asks the server at the press: the text and
+ * the file are made there from the interview as it is stored at that moment,
+ * never from this row, which may be stale (a colleague rescheduled, the page
+ * was restored by Back, a second tab). While it loads the row says so and the
+ * menu stays shut.
  */
-export function InterviewRowMenu({
-  row, workspace, serverNow,
-}: {
-  row: InterviewRow;
-  workspace: string | null;
-  /** The instant the server drew the screen with: whether an invitation can still be handed over is told from it. */
-  serverNow?: string;
-}) {
+export function InterviewRowMenu({ row }: { row: InterviewRow }) {
   const change = useInterviewChange();
-  const clock = useServerClock(serverNow);
   const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState<'invitation' | 'cancel' | null>(null);
-  /** What the invitation panel shows: made when the item is chosen, from the row as it then is. */
-  const [invite, setInvite] = useState<{ text: string; source: InviteSource } | null>(null);
+  /** The row's invitation: not asked for, being fetched, or showing. */
+  const [handover, setHandover] = useState<HandoverState>('idle');
+  /** What the invitation panel shows, as the server made it. */
+  const [invite, setInvite] = useState<Handover | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   /** An item that opens something was chosen: it opens once the menu has closed. */
   const then = useRef<'edit' | 'invitation' | 'cancel' | null>(null);
@@ -215,18 +245,19 @@ export function InterviewRowMenu({
             // The dialog takes focus now, and gives it back to this button when it closes.
             then.current = null;
             if (next === 'invitation') {
-              // Made now, with the clock as it is now, and never from the notes. Nothing is handed over for a start
-              // that has passed or cannot be read: the row says so, focus stays on this button, and nothing opens.
-              const source = inviteSourceOfRow(row, workspace);
-              const now = clock();
-              const text: string | null = mayHandOver(source.scheduled_at, source.duration_minutes, now)
-                ? invitationText(source, false, now)
-                : null;
-              if (!text) {
-                change.refuse(NO_INVITATION);
-                return;
-              }
-              setInvite({ text, source });
+              // Focus goes back to this button while the server is asked; the panel takes it when the answer comes.
+              // One request at a time: nothing is asked while one is loading or showing, or while a change is saved.
+              if (!mayAskHandover(handover, change.pending || change.inFlight.current)) return;
+              setHandover((state) => handoverAfter(state, 'ask'));
+              change.ask(
+                () => getInterviewInvitationAction({ id: row.id }),
+                (made) => {
+                  setInvite(made);
+                  setPanel('invitation');
+                },
+                (made) => setHandover((state) => handoverAfter(state, made ? 'made' : 'refused')),
+              );
+              return;
             }
             event.preventDefault();
             change.clearError();
@@ -253,8 +284,10 @@ export function InterviewRowMenu({
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
-      {/* Always in the page, so "Saving…" is announced. It takes a line only while there is something to say. */}
-      <p aria-live="polite" className={cn(HELP, !change.pending && 'sr-only')}>{change.pending ? 'Saving…' : ''}</p>
+      {/* Always in the page, so "Saving…" and "Getting the invitation…" are announced. It takes a line only while there is something to say. */}
+      <p aria-live="polite" className={cn(HELP, !rowWaitingWord(change.pending, handover) && 'sr-only')}>
+        {rowWaitingWord(change.pending, handover)}
+      </p>
       {/* While the cancel confirm is open the refusal is shown inside it. */}
       {change.error && panel === null ? (
         <p role="alert" className={cn(ALERT_CLASS, 'max-w-xs text-left whitespace-normal')}>{change.error}</p>
@@ -315,7 +348,7 @@ export function InterviewRowMenu({
         </AlertDialog.Portal>
       </AlertDialog.Root>
 
-      {/* "Invitation and calendar file": the invitation step on its own, made from the row, with no move button. */}
+      {/* "Invitation and calendar file": the invitation step on its own, showing what the server made, with no move button. */}
       <FormDialog
         open={panel === 'invitation'}
         title={inviteTitle('row')}
@@ -323,13 +356,14 @@ export function InterviewRowMenu({
         discardTitle=""
         dirty={false}
         pending={false}
-        onClose={() => setPanel(null)}
+        onClose={() => {
+          setPanel(null);
+          setHandover((state) => handoverAfter(state, 'closed'));
+        }}
         returnFocus={() => trigger.current?.focus()}
       >
         {(requestClose) =>
-          invite ? (
-            <InvitationStep text={invite.text} source={invite.source} moveFor={null} onDone={requestClose} clock={clock} />
-          ) : null
+          invite ? <InvitationStep text={invite.text} file={invite.file} moveFor={null} onDone={requestClose} /> : null
         }
       </FormDialog>
     </div>

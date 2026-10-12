@@ -76,7 +76,7 @@ export default async function ApplicationsScreen() {
         subtitle="All incoming applications across your open roles, Saudara."
       />
       {/* The screen's one interview dialog, closed until a panel's button opens it. Only for someone who may edit. */}
-      {canEdit ? <InterviewDialogHost {...serverClock()} workspace={viewer.orgName} /> : null}
+      {canEdit ? <InterviewDialogHost {...serverClock()} /> : null}
 
       <BentoGrid>
         {/* KPI row: headline figures only, the tables hold no history to chart */}

@@ -7,11 +7,11 @@ import {
   INTERVIEWER_HELP, INTERVIEWER_TOO_LONG, KEEP_INTERVIEW, MENU_WORDS, MOVED, NOTES_HELP, NOTES_TOO_LONG, NOTHING_CHANGED, OUTCOME_HELP, PANEL_EMPTY,
   PANEL_HEADING, PANEL_ROWS, PICKER_MAX, PLACE_TOO_LONG, REAL_DATE, canSubmit, cancelBody, cancelLabel, cancelTitle, changesFrom, copyLabel,
   dateBounds, dateHelper, dialogDescription, dialogTitle, discardTitle, durationOptions, emptyValues, fieldId, fieldOfRefusal, firstWrongField,
-  focusIdAfter, interviewProblems, interviewResult, inviteLead, inviteSourceOfChange, inviteSourceOfRow, inviteTitle, isDirty, keptChoice, mayClose,
+  focusIdAfter, interviewProblems, interviewResult, inviteLead, inviteTitle, isDirty, keptChoice, mayClose,
   menuGroups, menuName, moveInput, moveLabel, moveResult, noticeOf, offersMove, onOf, openerId, outcomeInput, panelLine, panelMore, panelRows,
   pastInput, pickerLabel, pickerNotes, pickerOptions, placeHelper, placeLabel, refreshAfter, refusalWord, rowMenu, sayOnNotice, scheduleInput,
   stepAfter, stillScheduledNotice, submission, submitLabel, tagsFor, timeCell, timeHelper, valuesFrom, type InterviewFormValues,
-  NO_INVITATION, clockAt, mayHandOver,
+  GETTING_INVITATION, calendarOf, clockAt, handoverAfter, handoverResult, mayAskHandover, rowWaitingWord,
 } from '@/lib/hire/interview-dialog-state';
 
 const APP = '44444444-4444-4444-8444-444444444444';
@@ -415,30 +415,54 @@ describe('the invitation step', () => {
     expect(MOVED).toBe('Moved to Interview.');
     expect(DONE).toBe('Done');
   });
-  it('builds what the invitation and the calendar file are made from, out of a row', () => {
-    expect(inviteSourceOfRow(row(), 'Rimba Ventures')).toEqual({
-      id: IV, scheduled_at: '2026-10-20T07:00:00+00:00', duration_minutes: 60, kind: 'video', place: 'https://meet.example.com/abc',
-      interviewer_name: 'Farah Lim', created_at: '2026-10-12T02:00:00+00:00', updated_at: '2026-10-12T02:05:00+00:00',
-      candidate: 'Aina Rahman', job: 'Sales Executive', workspace: 'Rimba Ventures',
+  // Final-review fix pass. The plan's `inviteSourceOfRow` and `inviteSourceOfChange` (and their tests) are gone: the
+  // browser no longer makes an invitation or a file out of a row. Both come from the server, as given.
+  it('reads the invitation and the calendar file the server made for a row, and fails closed on anything else', () => {
+    const made = { text: 'Hi Aina Rahman,', ics: 'BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n', fileName: 'interview-aina-rahman-2026-10-20.ics' };
+    expect(handoverResult({ ok: true, data: made })).toEqual({
+      ok: true,
+      handover: { text: 'Hi Aina Rahman,', file: { name: 'interview-aina-rahman-2026-10-20.ics', content: 'BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n' } },
     });
-    // The notes are for the team: they are not in it, so they cannot reach the text or the file.
-    expect(JSON.stringify(inviteSourceOfRow(row(), null))).not.toContain('Second round');
-    expect(inviteSourceOfRow(row(), '').workspace).toBeNull();
-    // The interviewer is the stored name, never the dash the table draws for none.
-    expect(inviteSourceOfRow(row({ interviewer: '—', interviewerName: null }), null).interviewer_name).toBeNull();
-  });
-  it('and out of a saved change, but only for a scheduled interview that was read back whole', () => {
-    expect(inviteSourceOfChange(change({ place: 'Level 3', interviewer_name: 'Farah Lim' }), 'Rimba Ventures')).toEqual({
-      id: IV, scheduled_at: '2026-10-20T07:00:00+00:00', duration_minutes: 60, kind: 'video', place: 'Level 3', interviewer_name: 'Farah Lim',
-      created_at: '2026-10-12T02:15:00+00:00', updated_at: '2026-10-12T02:15:00+00:00', candidate: 'Aina Rahman', job: 'Sales Executive',
-      workspace: 'Rimba Ventures',
-    });
-    expect(inviteSourceOfChange(change({ confirmed: false }), null)).toBeNull();
-    expect(inviteSourceOfChange(change({ status: 'completed' }), null)).toBeNull();
-    expect(inviteSourceOfChange(change({ status: 'cancelled' }), null)).toBeNull();
-    for (const missing of [{ scheduled_at: null }, { duration_minutes: null }, { kind: null }, { created_at: null }, { updated_at: null }]) {
-      expect(inviteSourceOfChange(change(missing), null), JSON.stringify(missing)).toBeNull();
+    const SENTENCE = 'This interview is no longer scheduled. Mark it as scheduled again first.';
+    expect(handoverResult({ ok: false, error: SENTENCE })).toEqual({ ok: false, error: SENTENCE });
+    const NOT_MADE = 'The invitation could not be made just now. Please try again.';
+    for (const odd of [
+      null, undefined, 'ok', {}, { ok: true }, { ok: true, data: {} }, { ok: true, data: { ...made, text: '' } }, { ok: true, data: { ...made, ics: '' } },
+      { ok: true, data: { ...made, fileName: '' } }, { ok: true, data: { ...made, ics: 7 } }, { ok: false }, { ok: false, error: '' },
+    ]) {
+      expect(handoverResult(odd), JSON.stringify(odd)).toEqual({ ok: false, error: NOT_MADE });
     }
+  });
+  it('reads the calendar file that came beside a saved change, or none', () => {
+    const calendar = { ics: 'BEGIN:VCALENDAR\r\n', fileName: 'interview-aina-rahman-2026-10-20.ics' };
+    expect(calendarOf({ ...change(), calendar })).toEqual({ name: 'interview-aina-rahman-2026-10-20.ics', content: 'BEGIN:VCALENDAR\r\n' });
+    for (const odd of [change(), { ...change(), calendar: null }, { ...change(), calendar: { ics: '', fileName: 'x.ics' } }, { ...change(), calendar: { ics: 'x' } }, null, 'x']) {
+      expect(calendarOf(odd), JSON.stringify(odd)).toBeNull();
+    }
+  });
+  it('a row\'s invitation is asked for once at a time: a second press while it loads, or while a change is saved, does nothing', () => {
+    expect(mayAskHandover('idle', false)).toBe(true);
+    expect(mayAskHandover('loading', false)).toBe(false);
+    expect(mayAskHandover('shown', false)).toBe(false);
+    expect(mayAskHandover('idle', true)).toBe(false);
+    // Ask, then the answer opens the panel; a refusal goes back to idle with nothing open; closing the panel is idle again.
+    expect(handoverAfter('idle', 'ask')).toBe('loading');
+    expect(handoverAfter('loading', 'ask')).toBe('loading');
+    expect(handoverAfter('loading', 'made')).toBe('shown');
+    expect(handoverAfter('loading', 'refused')).toBe('idle');
+    expect(handoverAfter('shown', 'closed')).toBe('idle');
+    // An answer nobody is waiting for opens nothing.
+    expect(handoverAfter('idle', 'made')).toBe('idle');
+    expect(handoverAfter('shown', 'ask')).toBe('shown');
+  });
+  it('says what the row is waiting for', () => {
+    expect(GETTING_INVITATION).toBe('Getting the invitation…');
+    expect(rowWaitingWord(false, 'idle')).toBe('');
+    expect(rowWaitingWord(false, 'loading')).toBe('Getting the invitation…');
+    expect(rowWaitingWord(true, 'idle')).toBe('Saving…');
+    expect(rowWaitingWord(false, 'shown')).toBe('');
+    // Fetching the invitation is not saving anything.
+    expect(rowWaitingWord(true, 'loading')).toBe('Getting the invitation…');
   });
   it('offers Move to Interview only for an active application at Applied or Screening', () => {
     expect(offersMove(change({ application_stage: 'applied' }))).toBe(true);
@@ -544,14 +568,6 @@ describe('the Applications panel', () => {
 describe('a time that is not an instant', () => {
   const ZONELESS = ['2026-10-20T15:00:00', '2026-10-20', '', 'soon'];
   const REST = ['edit', 'completed', 'no_show', 'cancel'];
-  it('gives no calendar file from a saved change, whichever of its three times cannot be read', () => {
-    for (const odd of ZONELESS) {
-      expect(inviteSourceOfChange(change({ scheduled_at: odd }), null), odd).toBeNull();
-      expect(inviteSourceOfChange(change({ created_at: odd }), null), odd).toBeNull();
-      expect(inviteSourceOfChange(change({ updated_at: odd }), null), odd).toBeNull();
-    }
-    expect(inviteSourceOfChange(change(), null)).not.toBeNull();
-  });
   it('shows no invitation step after a save whose start cannot be read', () => {
     for (const odd of ZONELESS) {
       expect(stepAfter('schedule', change({ scheduled_at: odd })), odd).toBe('done');
@@ -584,16 +600,5 @@ describe('a time that is not an instant', () => {
   it('a scheduled interview whose start has passed offers no invitation either', () => {
     expect(rowMenu(row({ needsOutcome: true }))).toEqual(REST);
     expect(rowMenu(row({ needsOutcome: true, applicationOutcome: 'rejected' }))).toEqual(['completed', 'no_show', 'cancel']);
-  });
-  it('hands nothing over once the start has passed, or for a length that is not whole minutes above none', () => {
-    const START = '2026-10-20T07:00:00+00:00';
-    expect(mayHandOver(START, 60, NOW)).toBe(true);
-    expect(mayHandOver(START, 60, new Date(START))).toBe(true);
-    expect(mayHandOver(START, 60, new Date('2026-10-20T07:00:01Z'))).toBe(false);
-    for (const minutes of [0, -30, 22.5, Number.NaN, null]) expect(mayHandOver(START, minutes, NOW), String(minutes)).toBe(false);
-    for (const odd of [...ZONELESS, null]) expect(mayHandOver(odd, 60, NOW), String(odd)).toBe(false);
-    // A clock that cannot be told hands nothing over.
-    expect(mayHandOver(START, 60, new Date(Number.NaN))).toBe(false);
-    expect(NO_INVITATION).toBe('This interview\'s time has passed, so there is no invitation or calendar file for it. Mark what happened, or reschedule it.');
   });
 });

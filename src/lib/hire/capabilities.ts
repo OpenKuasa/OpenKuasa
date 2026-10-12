@@ -13,11 +13,11 @@ import { isInPool, isPoolStatus, movedMessage, poolChangedMessage, poolRefusal }
 import {
   DELETE_FAILED, SUMMARY_FAILED, deletedMessage, deletionMessage, type DeletionKind, type Removal,
 } from './deletion';
-import { invitationText } from './interview-invite';
+import { icsFileName, interviewIcs, invitationText, type InviteSource } from './interview-invite';
 import { instantMs, isRealDate, klDateOf, klInstant, klTimeOf, pastProblem, timeProblem } from './interview-time';
 import {
-  INTERVIEW_INPUT_MESSAGES, INTERVIEW_KINDS, INTERVIEW_LIMITS, INTERVIEW_NOT_READ_BACK, INTERVIEW_OUTCOMES, cancelledMessage,
-  interviewMessage, outcomeMessage, recordedPastMessage, reopenedMessage, scheduledMessage, updatedMessage, withNoInvitation,
+  INTERVIEW_INPUT_MESSAGES, INTERVIEW_KINDS, INTERVIEW_LIMITS, INTERVIEW_NOT_READ_BACK, INTERVIEW_OUTCOMES, INVITATION_NOT_MADE, cancelledMessage,
+  interviewMessage, menuFor, noInvitationMessage, outcomeMessage, recordedPastMessage, reopenedMessage, scheduledMessage, updatedMessage, withNoInvitation,
 } from './interviews';
 import {
   APPLICATION_STAGES, DEFAULT_HIRE_SETTINGS, JOB_COLUMNS, SETTINGS_COLUMNS,
@@ -1476,4 +1476,92 @@ export async function reopenInterview(
   if (!parsed.success) return invalid(parsed.error);
   const { id } = parsed.data;
   return interviewStatusChange(ctx, 'reopenInterview', 'hire_reopen_interview', { p_interview_id: id }, id, 'scheduled', reopenedMessage, now);
+}
+
+// ─── what is handed to a candidate (read only) ───────────────────────────────
+
+export const interviewInvitationInput = z.object({ id: interviewId() });
+
+/** The invitation to copy and the calendar file to download, with the file's name. Never the notes. */
+export type InterviewHandover = { text: string; ics: string; fileName: string };
+/** A calendar file as it travels with a saved change. */
+export type InterviewCalendar = { ics: string; fileName: string };
+/** A saved change as a server action answers a screen: the change, and the calendar file made beside it on the server. */
+export type InterviewSaved = InterviewChange & { calendar: InterviewCalendar | null };
+
+/**
+ * The invitation and the calendar file for one interview, made from the row AS STORED at this moment and by this
+ * clock (the server's). A screen's own row can be stale (a colleague rescheduled, a page was restored by Back, a
+ * second tab), and what is made here goes to a candidate: so it is never made from what a browser holds. The input
+ * is the interview's id and nothing else; the workspace and its name are the session's. Changes nothing.
+ *
+ * Refused with a sentence when the interview is gone, is no longer scheduled, has started, or cannot be put into
+ * words. The text never says the time is new: only the answer to a reschedule knows that.
+ */
+export async function interviewInvitation(
+  ctx: HireWriteContext,
+  input: z.input<typeof interviewInvitationInput>,
+  now: Date = new Date(),
+): Promise<CapResult<InterviewHandover>> {
+  const parsed = interviewInvitationInput.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+  const notMade = (error: unknown): { ok: false; error: string } => {
+    // The code only: never the error, an id, a name or a link.
+    const code = (error as { code?: unknown } | null)?.code ?? (error as { name?: unknown } | null)?.name;
+    console.error('[hire-capability] interviewInvitation failed:', { code: typeof code === 'string' ? code : undefined });
+    return { ok: false, error: INVITATION_NOT_MADE };
+  };
+  let row: InterviewRead | null;
+  try {
+    // INTERVIEW_READ has no notes and no contact detail.
+    const { data, error } = await ctx.client
+      .from('hire_interviews')
+      .select(INTERVIEW_READ)
+      .eq('id', parsed.data.id)
+      .eq('org_id', ctx.orgId)
+      .maybeSingle();
+    if (error) return notMade(error);
+    row = (data as unknown as InterviewRead | null) ?? null;
+  } catch (error) {
+    return notMade(error);
+  }
+  if (!row) return { ok: false, error: interviewMessage('not_found', 'interview') };
+  if (row.status !== 'scheduled') return { ok: false, error: interviewMessage('not_scheduled', 'interview') };
+  const candidate = row.application?.candidate?.name ?? '';
+  const job = row.application?.job?.title ?? '';
+  if (!candidate.trim() || !job.trim()) return { ok: false, error: INVITATION_NOT_MADE };
+  const source: InviteSource = {
+    id: row.id, scheduled_at: row.scheduled_at, duration_minutes: row.duration_minutes, kind: row.kind, place: row.place,
+    interviewer_name: row.interviewer_name, created_at: row.created_at, updated_at: row.updated_at,
+    candidate, job, workspace: ctx.orgName?.trim() || null,
+  };
+  const start = instantMs(typeof row.scheduled_at === 'string' ? row.scheduled_at : '');
+  if (!Number.isNaN(start) && start < now.getTime()) {
+    // Only a way out the row's own menu offers is named.
+    return { ok: false, error: noInvitationMessage(menuFor(row.status, row.application?.outcome ?? 'active')) };
+  }
+  const text = invitationText(source, false, now);
+  const ics = interviewIcs(source, now);
+  const fileName = icsFileName(source);
+  if (!text || !ics || !fileName) return { ok: false, error: INVITATION_NOT_MADE };
+  return { ok: true, data: { text, ics, fileName } };
+}
+
+/**
+ * The calendar file that goes with a change that was just saved, made here on the server from the row the change
+ * read back. Null whenever the change carries no invitation (not read back, not scheduled, started): the two are
+ * offered together or not at all. Never part of `InterviewChange` itself, which an assistant is also given.
+ */
+export function calendarOfChange(change: InterviewChange, orgName: string | null | undefined, now: Date): InterviewCalendar | null {
+  if (!change.confirmed || change.status !== 'scheduled' || !change.invitation) return null;
+  const { scheduled_at, duration_minutes, kind, created_at, updated_at } = change;
+  if (scheduled_at === null || duration_minutes === null || kind === null || created_at === null || updated_at === null) return null;
+  if (!change.candidate.trim() || !change.job.trim()) return null;
+  const source: InviteSource = {
+    id: change.id, scheduled_at, duration_minutes, kind, place: change.place, interviewer_name: change.interviewer_name,
+    created_at, updated_at, candidate: change.candidate, job: change.job, workspace: orgName?.trim() || null,
+  };
+  const ics = interviewIcs(source, now);
+  const fileName = icsFileName(source);
+  return ics && fileName ? { ics, fileName } : null;
 }

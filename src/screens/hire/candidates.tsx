@@ -145,7 +145,7 @@ export default async function CandidatesScreen() {
       {/* Where "Deleted …" is said: the card it was said about has gone. Only for someone who may edit. */}
       {canEdit ? <DeletionNotice className="mb-3" /> : null}
       {/* The screen's one interview dialog, closed until a card's menu opens it. It is not the card's: a card that moves column is drawn again. */}
-      {canEdit ? <InterviewDialogHost {...serverClock()} workspace={viewer.orgName} /> : null}
+      {canEdit ? <InterviewDialogHost {...serverClock()} /> : null}
       <BentoGrid className="mb-6">
         {/* KPI row: headline figures only, the tables hold no history to chart */}
         <BentoCard tone="primary" className="col-span-1 md:col-span-3">

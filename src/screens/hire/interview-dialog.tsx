@@ -13,12 +13,11 @@ import { DELETION_NOTICE_ID } from '@/lib/hire/delete-dialog-state';
 import {
   COPY_FAILED, DONE, DOWNLOAD_HELP, DOWNLOAD_LABEL, FIND_HELP, ICS_MIME, INTERVIEWER_HELP, MOVED, NOTES_HELP, NOTHING_CHANGED, OUTCOME_HELP,
   canSubmit, copyLabel, dateBounds, dateHelper, dialogDescription, dialogTitle, discardTitle, durationOptions, emptyValues, fieldId,
-  fieldOfRefusal, focusIdAfter, interviewProblems, interviewResult, inviteLead, inviteSourceOfChange, inviteTitle, isDirty, keptChoice,
+  fieldOfRefusal, focusIdAfter, interviewProblems, interviewResult, inviteLead, inviteTitle, isDirty, keptChoice,
   moveInput, moveLabel, moveResult, noticeOf, offersMove, onOf, pickerNotes, pickerOptions, placeHelper, placeLabel, refreshAfter, refusalWord,
-  clockAt, mayHandOver, stepAfter, submission, submitLabel, timeHelper, valuesFrom,
-  type FieldPart, type InterviewField, type InterviewFormMode, type InterviewFormValues, type InterviewProblems, type PastOutcome, type Submission,
+  calendarOf, clockAt, stepAfter, submission, submitLabel, timeHelper, valuesFrom,
+  type CalendarFile, type FieldPart, type InterviewField, type InterviewFormMode, type InterviewFormValues, type InterviewProblems, type PastOutcome, type Submission,
 } from '@/lib/hire/interview-dialog-state';
-import { icsFileName, interviewIcs, type InviteSource } from '@/lib/hire/interview-invite';
 import { INTERVIEW_KINDS, INTERVIEW_SAVE_FAILED, KIND_WORDS } from '@/lib/hire/interviews';
 import type { InterviewRow, PickerApplication } from '@/lib/hire/lists';
 import { cn } from '@/lib/utils';
@@ -61,8 +60,8 @@ const OUTCOMES: readonly PastOutcome[] = ['completed', 'no_show'];
  * The time now by the server's clock, for a handler to ask. `serverNow` is
  * the instant the server drew the screen with; the browser adds only how long
  * it has had the page (the difference of two of its own readings), so a
- * browser clock that is wrong or in another zone neither hides an invitation
- * nor shows one for an interview that has started. Without `serverNow` (a
+ * browser clock that is wrong or in another zone does not make the form
+ * refuse a time that is ahead, or let through one that has passed. Without `serverNow` (a
  * caller that has none) the browser's own clock is all there is.
  */
 export function useServerClock(serverNow: string | undefined): () => Date {
@@ -560,14 +559,15 @@ type MoveState = { state: 'idle' } | { state: 'moving' } | { state: 'moved' } | 
  * clipboard, the text can still be selected and copied by hand.
  */
 export function InvitationStep({
-  text, source, moveFor, onDone, onBusy, clock,
+  text, file, moveFor, onDone, onBusy,
 }: {
-  /** The time now, by the server's clock, asked at the Download press. Left out: the browser's own clock. */
-  clock?: () => Date;
-  /** The invitation, as the server or `invitationText` wrote it. Null: there is none, and nothing is drawn in its place. */
+  /** The invitation, as the server wrote it. Null: there is none, and nothing is drawn in its place. */
   text: string | null;
-  /** What the calendar file is made from. Null: no file is offered, and nothing is drawn in its place. */
-  source: InviteSource | null;
+  /**
+   * The calendar file, as the server made it from the stored interview: its name and its content. It is saved as it
+   * is; nothing here builds a file. Null: no file is offered, and nothing is drawn in its place.
+   */
+  file: CalendarFile | null;
   /** The application to move to Interview, or null when the move is not offered. */
   moveFor: string | null;
   onDone: () => void;
@@ -578,9 +578,6 @@ export function InvitationStep({
   const router = useRouter();
   const [copied, setCopied] = useState<'no' | 'yes' | 'failed'>('no');
   const [move, setMove] = useState<MoveState>({ state: 'idle' });
-  /** True once a press found there is no file to give any more (the start has passed): the button then goes. */
-  const [fileGone, setFileGone] = useState(false);
-  const offersFile = source !== null && !fileGone;
   const [, start] = useTransition();
   /** True from the press until the answer. */
   const inFlight = useRef(false);
@@ -615,20 +612,10 @@ export function InvitationStep({
     });
   }
 
+
   function onDownload() {
-    if (!source) return;
-    // Asked at the press, with the clock as it is now. A file is made only for a start that is an instant still ahead
-    // and a whole length; the builder may itself answer that there is none. Then nothing is saved and the button goes.
-    const now = clock ? clock() : new Date();
-    const ahead = mayHandOver(source.scheduled_at, source.duration_minutes, now);
-    const body: string | null = ahead ? interviewIcs(source, now) : null;
-    const name: string | null = body ? icsFileName(source) : null;
-    if (!body || !name) {
-      setFileGone(true);
-      doneButton.current?.focus();
-      return;
-    }
-    downloadTextFile(name, ICS_MIME, body);
+    // The content the server made, saved as it is.
+    if (file) downloadTextFile(file.name, ICS_MIME, file.content);
   }
 
   function onMove() {
@@ -679,7 +666,7 @@ export function InvitationStep({
               {copyLabel(copied === 'yes')}
             </Button>
           ) : null}
-          {offersFile ? (
+          {file ? (
             <Button type="button" variant="outline" size="sm" className={TARGET} onClick={onDownload}>
               {DOWNLOAD_LABEL}
             </Button>
@@ -689,7 +676,7 @@ export function InvitationStep({
         <p aria-live="polite" className={cn('text-sm break-words text-muted-foreground', copied !== 'failed' && 'sr-only')}>
           {copied === 'yes' ? copyLabel(true) : copied === 'failed' ? COPY_FAILED : ''}
         </p>
-        {offersFile ? <p className={HELP}>{DOWNLOAD_HELP}</p> : null}
+        {file ? <p className={HELP}>{DOWNLOAD_HELP}</p> : null}
       </div>
 
       {moveFor ? (
@@ -737,8 +724,7 @@ const NO_PICKER: { applications: PickerApplication[]; cut: boolean } = { applica
 /**
  * The interview dialog of a screen: closed until `openInterview` is called.
  * Drawn once a screen, only for someone who may edit; every action checks
- * again. `today` is today in Kuala Lumpur and `workspace` the workspace's
- * name, both from the server; `picker` is given on the Interviews screen only.
+ * again. `today` is today in Kuala Lumpur, from the server; `picker` is given on the Interviews screen only.
  *
  * It holds while a change is being saved: Escape, Cancel and a click outside
  * do nothing. After a schedule or a change it does not close: it becomes the
@@ -746,12 +732,11 @@ const NO_PICKER: { applications: PickerApplication[]; cut: boolean } = { applica
  * sentence goes to the screen's notice line either way.
  */
 export function InterviewDialogHost({
-  today, workspace, picker = NO_PICKER, serverNow,
+  today, picker = NO_PICKER, serverNow,
 }: {
-  /** The instant the server drew the screen with: the form's checks and the Download press tell the time from it. */
+  /** The instant the server drew the screen with: the form's checks tell the time from it. */
   serverNow?: string;
   today: string;
-  workspace: string | null;
   picker?: { applications: PickerApplication[]; cut: boolean };
 }) {
   const req = useSyncExternalStore(subscribe, () => request, () => null);
@@ -850,11 +835,10 @@ export function InterviewDialogHost({
         saved ? (
           <InvitationStep
             text={saved.invitation || null}
-            source={inviteSourceOfChange(saved, workspace)}
+            file={calendarOf(saved)}
             moveFor={offersMove(saved) ? saved.application_id : null}
             onDone={requestClose}
             onBusy={setMoving}
-            clock={clock}
           />
         ) : req ? (
           <InterviewForm

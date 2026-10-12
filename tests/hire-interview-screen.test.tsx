@@ -45,6 +45,7 @@ vi.mock('@/app/(app)/hire/actions', () => ({
   cancelInterviewAction: mocks.action,
   setInterviewOutcomeAction: mocks.action,
   reopenInterviewAction: mocks.action,
+  getInterviewInvitationAction: mocks.action,
 }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: mocks.refresh, replace: () => {} }), usePathname: () => '/hire/interviews' }));
 vi.mock('@/lib/auth/viewer', () => ({ getViewer: async () => mocks.viewer }));
@@ -298,7 +299,7 @@ describe('the Interviews screen\'s lists', () => {
 });
 
 describe('a row\'s menu', () => {
-  const menu = (r: InterviewRow) => renderToStaticMarkup(<InterviewRowMenu row={r} workspace="Rimba Ventures" />);
+  const menu = (r: InterviewRow) => renderToStaticMarkup(<InterviewRowMenu row={r} />);
   it('a scheduled interview: change, invitation, a rule, the two outcomes, a rule, and Cancel interview last in the danger style', () => {
     const html = menu(AHEAD);
     expect(items(html)).toEqual([
@@ -511,13 +512,11 @@ describe('the form\'s inner content', () => {
 
 describe('the invitation step', () => {
   const TEXT = 'Hi Aina Rahman,\n\nYou are invited to an interview for the Sales Executive role at Rimba Ventures.';
-  const SOURCE = {
-    id: IV, scheduled_at: '2026-10-20T07:00:00+00:00', duration_minutes: 60, kind: 'video' as const, place: null, interviewer_name: null,
-    created_at: '2026-10-12T02:00:00+00:00', updated_at: '2026-10-12T02:00:00+00:00', candidate: 'Aina Rahman', job: 'Sales Executive',
-    workspace: 'Rimba Ventures',
-  };
-  const step = (moveFor: string | null, source: typeof SOURCE | null = SOURCE) =>
-    renderToStaticMarkup(<InvitationStep text={TEXT} source={source} moveFor={moveFor} onDone={() => {}} />);
+  // The file as the server made it: the step is given the content and only saves it (final-review fix pass; the plan
+  // gave the step a source to build the file from in the browser).
+  const FILE = { name: 'interview-aina-rahman-2026-10-20.ics', content: 'BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n' };
+  const step = (moveFor: string | null, file: typeof FILE | null = FILE) =>
+    renderToStaticMarkup(<InvitationStep text={TEXT} file={file} moveFor={moveFor} onDone={() => {}} />);
 
   it('shows the invitation in a read-only, labelled text area', () => {
     const html = step(null);
@@ -542,7 +541,7 @@ describe('the invitation step', () => {
   });
   // Not in the plan: added by Task 3. With no text there is nothing to copy, and no stub stands where it would be.
   it('with no invitation text: no text area and no Copy button, and nothing in their place', () => {
-    const html = renderToStaticMarkup(<InvitationStep text={null} source={null} moveFor={null} onDone={() => {}} />);
+    const html = renderToStaticMarkup(<InvitationStep text={null} file={null} moveFor={null} onDone={() => {}} />);
     expect(buttons(html)).toEqual(['Done']);
     expect(tags(html, 'textarea')).toEqual([]);
     expect(labels(html)).toEqual([]);
@@ -566,8 +565,8 @@ describe('the invitation step', () => {
 
 describe('the dialog\'s host', () => {
   it('draws nothing until something opens it', () => {
-    expect(renderToStaticMarkup(<InterviewDialogHost today="2026-10-12" workspace="Rimba Ventures" picker={{ applications: APPS, cut: false }} />)).toBe('');
-    expect(renderToStaticMarkup(<InterviewDialogHost today="" workspace={null} />)).toBe('');
+    expect(renderToStaticMarkup(<InterviewDialogHost today="2026-10-12" picker={{ applications: APPS, cut: false }} />)).toBe('');
+    expect(renderToStaticMarkup(<InterviewDialogHost today="" />)).toBe('');
   });
 });
 

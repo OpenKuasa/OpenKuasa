@@ -8,12 +8,11 @@
  */
 import { STAGE_LABEL } from './applications-view';
 import type { InterviewChange } from './capabilities';
-import type { InviteSource } from './interview-invite';
 import {
   clock12, durationText, instantMs, isRealDate, klDateOf, klInstant, klTimeOf, longDate, pastProblem, shortWhen, timeProblem,
 } from './interview-time';
 import {
-  DURATION_CHOICES, INTERVIEW_LIMITS, INTERVIEW_NOT_READ_BACK, INTERVIEW_SAVE_FAILED, KIND_WORDS, interviewMessage, menuFor,
+  DURATION_CHOICES, INTERVIEW_LIMITS, INTERVIEW_NOT_READ_BACK, INTERVIEW_SAVE_FAILED, INVITATION_NOT_MADE, KIND_WORDS, interviewMessage, menuFor,
   offerMoveToInterview, stillScheduledMessage, type InterviewMenuItem,
 } from './interviews';
 import type { InterviewRow, PanelInterview, PickerApplication } from './lists';
@@ -410,35 +409,18 @@ export function stepAfter(mode: InterviewFormMode, change: Pick<InterviewChange,
 }
 
 /**
- * Whether an invitation or a calendar file may be handed over at `now` for an
- * interview with this start and length: the start is an instant that has not
- * passed, and the length is a positive whole number of minutes. Asked at the
- * press, never while drawing, with `clockAt`'s time. A `now` that is not a
- * real date hands nothing over.
- */
-export function mayHandOver(start: string | null, minutes: number | null, now: Date): boolean {
-  if (start === null || minutes === null) return false;
-  const at = instantMs(start);
-  return !Number.isNaN(at) && at >= now.getTime() && Number.isInteger(minutes) && minutes > 0;
-}
-
-/**
  * The time now, by the server's clock: the instant the server drew the page
  * with, plus how long the browser has had it. Only the DIFFERENCE of two
  * browser readings is used, so a browser clock that is hours wrong (or in
  * another zone) changes nothing. `receivedMs` is the browser's reading when
  * the page arrived (null: not yet noted, so no time has passed). A server
- * instant that cannot be read gives an invalid date, and `mayHandOver` then
- * hands nothing over.
+ * instant that cannot be read gives an invalid date, which the form's checks
+ * then refuse a time against.
  */
 export function clockAt(serverNow: string, receivedMs: number | null, browserMs: number): Date {
   const elapsed = receivedMs === null ? 0 : Math.max(0, browserMs - receivedMs);
   return new Date(instantMs(serverNow) + elapsed);
 }
-
-/** Said at a row whose "Invitation and calendar file" was chosen after its start had passed. */
-export const NO_INVITATION = 'This interview\'s time has passed, so there is no invitation or calendar file for it. Mark what happened, or reschedule it.';
-
 export type FieldPart = InterviewField | 'find' | 'alert' | 'copy' | 'unchanged';
 /** The DOM id of a part of the form: `base` is the form's own `useId`. */
 export const fieldId = (base: string, part: FieldPart): string => `${base}-${part}`;
@@ -478,35 +460,53 @@ export const MOVED = 'Moved to Interview.';
 export const DONE = 'Done';
 export const moveLabel = (busy: boolean): string => (busy ? 'Moving…' : 'Move to Interview');
 
-/** What the invitation and the calendar file are made from, out of a row on the screen. Never the notes. */
-export function inviteSourceOfRow(row: InterviewRow, workspace: string | null): InviteSource {
-  return {
-    id: row.id,
-    scheduled_at: row.scheduledAt,
-    duration_minutes: row.durationMinutes,
-    kind: row.kind,
-    place: row.place,
-    interviewer_name: row.interviewerName,
-    created_at: row.createdAt,
-    updated_at: row.updatedAt,
-    candidate: row.name,
-    job: row.role,
-    workspace: workspace || null,
-  };
+/**
+ * A calendar file as the browser is given it: a name and the content, both
+ * made on the server. The browser saves it as it is and never builds one: a
+ * row on a screen can be stale, and a file made from it would hand a candidate
+ * a time that is no longer true.
+ */
+export type CalendarFile = { name: string; content: string };
+/** What the server made for a row's "Invitation and calendar file": the text to copy and the file to download. */
+export type Handover = { text: string; file: CalendarFile };
+
+const filled = (value: unknown): value is string => typeof value === 'string' && value !== '';
+
+/** The answer of the action that makes a row's invitation. Anything malformed (a throw is passed as null) fails closed. */
+export function handoverResult(answer: unknown): { ok: true; handover: Handover } | { ok: false; error: string } {
+  const failed = { ok: false as const, error: INVITATION_NOT_MADE };
+  if (!answer || typeof answer !== 'object') return failed;
+  const said = answer as { ok?: unknown; data?: unknown; error?: unknown };
+  if (said.ok === false) return filled(said.error) ? { ok: false, error: said.error } : failed;
+  if (said.ok !== true || !said.data || typeof said.data !== 'object') return failed;
+  const { text, ics, fileName } = said.data as { text?: unknown; ics?: unknown; fileName?: unknown };
+  if (!filled(text) || !filled(ics) || !filled(fileName)) return failed;
+  return { ok: true, handover: { text, file: { name: fileName, content: ics } } };
 }
 
-/** The same out of a saved change: only for a scheduled interview that was read back whole. Null: no calendar file is offered. */
-export function inviteSourceOfChange(change: InterviewChange, workspace: string | null): InviteSource | null {
-  const { scheduled_at, duration_minutes, kind, created_at, updated_at } = change;
-  if (!change.confirmed || change.status !== 'scheduled') return null;
-  if (scheduled_at === null || duration_minutes === null || kind === null || created_at === null || updated_at === null) return null;
-  // The file's start, its stamp and its sequence are each worked out from one of these.
-  if (!allInstants(scheduled_at, created_at, updated_at)) return null;
-  return {
-    id: change.id, scheduled_at, duration_minutes, kind, place: change.place, interviewer_name: change.interviewer_name,
-    created_at, updated_at, candidate: change.candidate, job: change.job, workspace: workspace || null,
-  };
+/** The calendar file that came beside a saved change (the action's `calendar`), or null when none did. */
+export function calendarOf(change: unknown): CalendarFile | null {
+  if (!change || typeof change !== 'object') return null;
+  const { calendar } = change as { calendar?: unknown };
+  if (!calendar || typeof calendar !== 'object') return null;
+  const { ics, fileName } = calendar as { ics?: unknown; fileName?: unknown };
+  return filled(ics) && filled(fileName) ? { name: fileName, content: ics } : null;
 }
+
+/** A row's invitation: not asked for, being fetched from the server, or showing in its panel. */
+export type HandoverState = 'idle' | 'loading' | 'shown';
+/** One request at a time: not while one is loading or showing, and not while a change to the row is being saved. */
+export const mayAskHandover = (state: HandoverState, busy: boolean): boolean => state === 'idle' && !busy;
+/** What each moment does to it. An answer nobody is waiting for opens nothing. */
+export function handoverAfter(state: HandoverState, event: 'ask' | 'made' | 'refused' | 'closed'): HandoverState {
+  if (event === 'ask') return state === 'idle' ? 'loading' : state;
+  if (event === 'made') return state === 'loading' ? 'shown' : state;
+  return 'idle';
+}
+export const GETTING_INVITATION = 'Getting the invitation…';
+/** The row's polite line while it waits: for a change being saved, or for its invitation. */
+export const rowWaitingWord = (pending: boolean, state: HandoverState): string =>
+  (state === 'loading' ? GETTING_INVITATION : pending ? 'Saving…' : '');
 
 /** "Move to Interview" is offered exactly for an active application at Applied or Screening; never when that is not known. */
 export function offersMove(change: InterviewChange): boolean {

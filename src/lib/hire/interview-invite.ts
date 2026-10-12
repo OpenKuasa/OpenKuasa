@@ -4,8 +4,8 @@
  * calendar file (RFC 5545) to download. Both are made from one plain object
  * and neither reads the clock (the caller says what time it is), so the same
  * row at the same moment always gives the same text and the same file, or
- * neither: nothing is made for a start that has passed. The file is built in the browser, so nothing here uses a
- * Node-only API. The notes are not part of `InviteSource`: they cannot reach
+ * neither: nothing is made for a start that has passed. Both are made on the server (the capabilities), from the
+ * interview as stored: a browser is given the text and the file's content and never builds either. The notes are not part of `InviteSource`: they cannot reach
  * a candidate from here.
  */
 import { ZONE_LABEL, durationText, instantMs, klDateOf, longDate, timeRange } from './interview-time';

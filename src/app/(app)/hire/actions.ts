@@ -13,10 +13,13 @@ import {
   type Deleted,
   type HireWriteContext,
   type InterviewChange,
+  type InterviewHandover,
+  type InterviewSaved,
   type MovedToPipeline,
   type PoolChange,
   addCandidate,
   attachCandidateCv,
+  calendarOfChange,
   cancelInterview,
   closeApplication,
   createJob,
@@ -24,6 +27,7 @@ import {
   deleteApplication,
   deleteCandidate,
   deletionSummary,
+  interviewInvitation,
   moveApplication,
   moveToPipeline,
   rateApplication,
@@ -523,24 +527,43 @@ export async function listPoolPickerAction(): Promise<CapResult<PoolPicker>> {
  * screen that shows an interview or a number worked out from them: the
  * Interviews screen, the Dashboard and the Overview count them, and the
  * Applications panel lists them. A refusal revalidates nothing.
+ *
+ * A saved change goes back with the calendar file beside it, made here on the
+ * server from the row the change read back: the browser downloads that
+ * content and never builds a file of its own. The file is there exactly when
+ * the invitation is.
  */
 async function interviewChange(
   call: (ctx: HireWriteContext) => Promise<CapResult<InterviewChange>>,
-): Promise<CapResult<InterviewChange>> {
+): Promise<CapResult<InterviewSaved>> {
   const ctx = await writeCtx();
   if (!ctx) return FORBIDDEN;
   const result = await call(ctx);
-  if (result.ok) for (const path of CANDIDATE_PATHS) revalidatePath(path);
-  return result;
+  if (!result.ok) return result;
+  for (const path of CANDIDATE_PATHS) revalidatePath(path);
+  return { ok: true, data: { ...result.data, calendar: calendarOfChange(result.data, ctx.orgName, new Date()) } };
+}
+
+/**
+ * The invitation text and the calendar file for one scheduled interview, read
+ * at the press from the interview as it is stored now, by the server's clock.
+ * Only for someone who may edit (the row's menu is drawn for no one else), and
+ * only from their own workspace. The input is the interview's id. Nothing is
+ * changed, so no screen is fetched again; never the notes.
+ */
+export async function getInterviewInvitationAction(input: unknown): Promise<CapResult<InterviewHandover>> {
+  const ctx = await writeCtx();
+  if (!ctx) return FORBIDDEN;
+  return interviewInvitation(ctx, input as never);
 }
 
 /** Scheduling one interview for an active application. The input is the application's id, a Kuala Lumpur date and time, and the details. */
-export async function scheduleInterviewAction(input: unknown): Promise<CapResult<InterviewChange>> {
+export async function scheduleInterviewAction(input: unknown): Promise<CapResult<InterviewSaved>> {
   return interviewChange((ctx) => scheduleInterview(ctx, input as never));
 }
 
 /** Recording one interview that already took place, with what happened. No invitation is made. */
-export async function recordPastInterviewAction(input: unknown): Promise<CapResult<InterviewChange>> {
+export async function recordPastInterviewAction(input: unknown): Promise<CapResult<InterviewSaved>> {
   return interviewChange((ctx) => recordPastInterview(ctx, input as never));
 }
 
@@ -549,22 +572,22 @@ export async function recordPastInterviewAction(input: unknown): Promise<CapResu
  * `updated_at` the form was opened with; the database saves nothing when the
  * row has changed since. Anything but a non-empty string is not passed on.
  */
-export async function rescheduleInterviewAction(input: unknown, seen: unknown): Promise<CapResult<InterviewChange>> {
+export async function rescheduleInterviewAction(input: unknown, seen: unknown): Promise<CapResult<InterviewSaved>> {
   const opened = typeof seen === 'string' && seen !== '' ? seen : undefined;
   return interviewChange((ctx) => rescheduleInterview(ctx, input as never, undefined, opened));
 }
 
 /** Cancelling one scheduled interview. It stays in the list as cancelled. */
-export async function cancelInterviewAction(input: unknown): Promise<CapResult<InterviewChange>> {
+export async function cancelInterviewAction(input: unknown): Promise<CapResult<InterviewSaved>> {
   return interviewChange((ctx) => cancelInterview(ctx, input as never));
 }
 
 /** Marking one scheduled interview completed, or a no-show. */
-export async function setInterviewOutcomeAction(input: unknown): Promise<CapResult<InterviewChange>> {
+export async function setInterviewOutcomeAction(input: unknown): Promise<CapResult<InterviewSaved>> {
   return interviewChange((ctx) => setInterviewOutcome(ctx, input as never));
 }
 
 /** Marking one cancelled, completed or no-show interview as scheduled again. */
-export async function reopenInterviewAction(input: unknown): Promise<CapResult<InterviewChange>> {
+export async function reopenInterviewAction(input: unknown): Promise<CapResult<InterviewSaved>> {
   return interviewChange((ctx) => reopenInterview(ctx, input as never));
 }
