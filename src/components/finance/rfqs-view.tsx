@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ClipboardCheck, Download, Lock, MessageSquare, Pencil, Plus, Search, Send, Tag, Trash2 } from 'lucide-react';
+import { ClipboardCheck, Copy, Download, Lock, MessageSquare, Pencil, Plus, Search, Send, Tag, Trash2 } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { ConfirmRow } from '@/components/finance/confirm-row';
 import { downloadCsv } from '@/components/finance/download-csv';
@@ -51,6 +51,8 @@ export type RfqActions = RfqFormActions & {
   get: (input: unknown) => Promise<FinResult<RfqDetail>>;
   /** Reads one sent RFQ with its lines, for Record prices. */
   getSent: (input: unknown) => Promise<FinResult<RfqDetail>>;
+  /** Reads one RFQ in any status with its lines, to start a new RFQ from it. */
+  getForCopy: (input: unknown) => Promise<FinResult<RfqDetail>>;
 };
 
 /** What only a person who may edit is given: the actions, and what the form offers. */
@@ -70,8 +72,8 @@ const STATUS_STYLES: Record<RfqDisplayStatus, string> = {
   draft: 'bg-muted text-muted-foreground',
 };
 
-/** A question asked in an RFQ's own row. `edit` and `recordPrices` are not: they open a card. */
-type Question = Exclude<RfqAction, 'edit' | 'recordPrices'>;
+/** A question asked in an RFQ's own row. `edit`, `recordPrices` and `copy` are not: they open a card. */
+type Question = Exclude<RfqAction, 'edit' | 'recordPrices' | 'copy'>;
 
 /** One thing open at a time: a form card, or a question in one row. */
 type Open =
@@ -80,6 +82,8 @@ type Open =
   | { kind: 'edit'; rfq: RfqListRow; detail: RfqDetail | null; today: string }
   /** `detail` is null while the sent RFQ's lines are being read. */
   | { kind: 'prices'; rfq: RfqListRow; detail: RfqDetail | null }
+  /** `detail` is null while the RFQ to copy is being read. */
+  | { kind: 'copy'; rfq: RfqListRow; detail: RfqDetail | null; today: string; nonce: number }
   /** A draft purchase order has just been made from this RFQ. */
   | { kind: 'converted'; rfq: RfqListRow }
   | { kind: Question; rfq: RfqListRow }
@@ -117,9 +121,9 @@ export function RfqsView({
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
   const columns = writer ? 9 : 8;
   const asking =
-    open && open.kind !== 'new' && open.kind !== 'edit' && open.kind !== 'prices' && open.kind !== 'converted' ? open : null;
+    open && open.kind !== 'new' && open.kind !== 'edit' && open.kind !== 'prices' && open.kind !== 'copy' && open.kind !== 'converted' ? open : null;
   // A form holds what was typed, so nothing else opens over it: it is closed with its own Cancel first.
-  const formOpen = open?.kind === 'new' || open?.kind === 'edit' || open?.kind === 'prices';
+  const formOpen = open?.kind === 'new' || open?.kind === 'edit' || open?.kind === 'prices' || open?.kind === 'copy';
   // A row that is gone after a refresh takes its question with it; the message still has to be seen.
   const askingInView = asking ? shown.some((r) => r.id === asking.rfq.id) : false;
   const locked = confirm.pending || formOpen;
@@ -163,6 +167,20 @@ export function RfqsView({
             loader.run(
               () => actions.getSent({ id: rfq.id }),
               (detail) => setOpen((cur) => (cur?.kind === 'prices' && cur.rfq.id === rfq.id ? { ...cur, detail } : cur)),
+            );
+          },
+        };
+      case 'copy':
+        return {
+          label: 'Copy to another supplier',
+          icon: Copy,
+          opens: true,
+          onSelect: () => {
+            loader.clear();
+            ask({ kind: 'copy', rfq, detail: null, today: now(), nonce: Date.now() });
+            loader.run(
+              () => actions.getForCopy({ id: rfq.id }),
+              (detail) => setOpen((cur) => (cur?.kind === 'copy' && cur.rfq.id === rfq.id ? { ...cur, detail } : cur)),
             );
           },
         };
@@ -305,6 +323,22 @@ export function RfqsView({
         />
       ) : (
         loading('Edit RFQ', `The draft to ${open.rfq.supplier_name}`)
+      );
+    }
+    if (open.kind === 'copy') {
+      return open.detail ? (
+        <RfqFormCard
+          // Copying again, even from the same RFQ, starts a fresh form.
+          key={open.nonce}
+          copyOf={open.detail}
+          suppliers={writer.suppliers}
+          products={writer.products}
+          today={open.today}
+          actions={actions}
+          onClose={close}
+        />
+      ) : (
+        loading('New RFQ', `Copying ${open.rfq.rfq_no ?? 'the draft'} to ${open.rfq.supplier_name}`)
       );
     }
     if (open.kind === 'prices') {

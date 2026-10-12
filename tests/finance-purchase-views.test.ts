@@ -457,14 +457,14 @@ describe('filterRfqs', () => {
 
 describe('rfqActions', () => {
   it('offers only what the status allows', () => {
-    expect(rfqActions(rfq({ status: 'draft', rfq_no: null }))).toEqual(['edit', 'send', 'delete']);
-    expect(rfqActions(rfq({ status: 'sent' }))).toEqual(['recordPrices', 'close']);
-    expect(rfqActions(rfq({ status: 'sent', reply_by: '2026-10-01' }))).toEqual(['recordPrices', 'close']);
-    expect(rfqActions(rfq({ status: 'quoted' }))).toEqual(['convert', 'close']);
-    expect(rfqActions(rfq({ status: 'closed' }))).toEqual([]);
+    expect(rfqActions(rfq({ status: 'draft', rfq_no: null }))).toEqual(['edit', 'send', 'copy', 'delete']);
+    expect(rfqActions(rfq({ status: 'sent' }))).toEqual(['recordPrices', 'copy', 'close']);
+    expect(rfqActions(rfq({ status: 'sent', reply_by: '2026-10-01' }))).toEqual(['recordPrices', 'copy', 'close']);
+    expect(rfqActions(rfq({ status: 'quoted' }))).toEqual(['convert', 'copy', 'close']);
+    expect(rfqActions(rfq({ status: 'closed' }))).toEqual(['copy']);
   });
   it('offers a purchase order only for a quoted RFQ that has none: a standing order is the way on', () => {
-    expect(rfqActions(rfq({ status: 'quoted', purchase_order_id: 'po-1', purchase_order_no: 'PO-0003' }))).toEqual(['close']);
+    expect(rfqActions(rfq({ status: 'quoted', purchase_order_id: 'po-1', purchase_order_no: 'PO-0003' }))).toEqual(['copy', 'close']);
     for (const status of ['draft', 'sent', 'closed'] as const) {
       expect(rfqActions(rfq({ status, purchase_order_id: null })), status).not.toContain('convert');
     }

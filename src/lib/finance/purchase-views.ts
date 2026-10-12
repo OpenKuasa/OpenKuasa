@@ -272,26 +272,27 @@ export function filterRfqs(rows: RfqListRow[], query: string, filter: RfqFilter,
   });
 }
 
-export type RfqAction = 'edit' | 'send' | 'delete' | 'recordPrices' | 'convert' | 'close';
+export type RfqAction = 'edit' | 'send' | 'delete' | 'recordPrices' | 'convert' | 'copy' | 'close';
 
 /**
  * What an RFQ's row menu offers, in order: only what the database allows for
  * its status. A draft is edited, marked as sent or deleted. Once sent it is
  * locked, and only the supplier's answer is recorded (an overdue RFQ too:
  * a late reply is still a reply), or the RFQ is closed. A quoted RFQ becomes a
- * purchase order, unless one stands already, or is closed. A closed one offers
- * nothing.
+ * purchase order, unless one stands already, or is closed. Any RFQ, in any
+ * status, can be copied to another supplier: that opens a new RFQ and changes
+ * nothing here, so it comes before what ends or removes the RFQ.
  */
 export function rfqActions(row: RfqListRow): RfqAction[] {
   switch (row.status) {
     case 'draft':
-      return ['edit', 'send', 'delete'];
+      return ['edit', 'send', 'copy', 'delete'];
     case 'sent':
-      return ['recordPrices', 'close'];
+      return ['recordPrices', 'copy', 'close'];
     case 'quoted':
-      return row.purchase_order_id === null ? ['convert', 'close'] : ['close'];
+      return row.purchase_order_id === null ? ['convert', 'copy', 'close'] : ['copy', 'close'];
     default:
-      return [];
+      return ['copy'];
   }
 }
 

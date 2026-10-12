@@ -60,6 +60,30 @@ export function rfqFormFromDetail(rfq: RfqDetail): RfqForm {
   };
 }
 
+/**
+ * A new RFQ made from a saved one, to ask another supplier the same thing: no id, so saving makes a new
+ * draft; no supplier; dated today with no reply-by date; the same notes and lines, every price box empty
+ * (the first supplier's prices are not the next one's). The lines get keys of their own.
+ */
+export function rfqFormCopiedFrom(rfq: RfqDetail, today: string): RfqForm {
+  return {
+    supplier_id: '',
+    rfq_date: today,
+    reply_by: '',
+    notes: rfq.notes ?? '',
+    lines: rfq.lines.map((line, index) => ({
+      key: `copy-${index}`,
+      product_id: line.product_id ?? '',
+      description: line.description,
+      quantity: String(line.quantity),
+      uom: line.uom ?? '',
+      pack_size: line.pack_size ?? '',
+      unit_price: '',
+      sst_rate: String(line.sst_rate),
+    })),
+  };
+}
+
 /** Choosing a supplier changes nothing else: when a reply is wanted does not depend on who is asked. */
 export function withRfqSupplier(form: RfqForm, supplier: { id: string }): RfqForm {
   return { ...form, supplier_id: supplier.id };

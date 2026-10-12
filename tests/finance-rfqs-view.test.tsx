@@ -76,6 +76,7 @@ const actions: RfqActions = {
   remove: done({ id: 'x' }),
   get: vi.fn(async () => ({ ok: false as const, error: 'unused' })),
   getSent: vi.fn(async () => ({ ok: false as const, error: 'unused' })),
+  getForCopy: vi.fn(async () => ({ ok: false as const, error: 'unused' })),
 };
 const writer = { actions, suppliers: [], products: [] };
 
@@ -93,26 +94,35 @@ describe('the RFQs list', () => {
 
   it('offers a draft Edit, Mark as sent and Delete', () => {
     const html = render([row({ status: 'draft', rfq_no: null })]);
-    expect(items(html)).toEqual(['Edit', 'Mark as sent', 'Delete']);
+    expect(items(html)).toEqual(['Edit', 'Mark as sent', 'Copy to another supplier', 'Delete']);
     expect(text(html)).toContain('Draft');
   });
 
   it('offers a sent RFQ Record prices and Close', () => {
-    expect(items(render([row({ status: 'sent' })]))).toEqual(['Record prices', 'Close RFQ']);
+    expect(items(render([row({ status: 'sent' })]))).toEqual(['Record prices', 'Copy to another supplier', 'Close RFQ']);
   });
 
   it('offers a quoted RFQ with no order Make purchase order and Close, and one with an order only Close', () => {
-    expect(items(render([row({ status: 'quoted', total: 100, fully_priced: true })]))).toEqual(['Make purchase order', 'Close RFQ']);
+    expect(items(render([row({ status: 'quoted', total: 100, fully_priced: true })]))).toEqual(['Make purchase order', 'Copy to another supplier', 'Close RFQ']);
     const ordered = render([row({ status: 'quoted', fully_priced: true, purchase_order_id: 'po-1', purchase_order_no: 'PO-0007' })]);
     expect(items(ordered)).not.toContain('Make purchase order');
+    expect(items(ordered)).toEqual(['Copy to another supplier', 'Close RFQ']);
   });
 
-  it('offers a closed RFQ no menu, and shows only open ones until a status is chosen', () => {
+  it('offers an overdue RFQ the same menu as a sent one, Copy to another supplier included', () => {
+    expect(items(render([row({ status: 'sent', reply_by: '2026-10-01' })]))).toEqual([
+      'Record prices',
+      'Copy to another supplier',
+      'Close RFQ',
+    ]);
+  });
+
+  it('shows only open RFQs until a status is chosen, and a closed one can only be copied', () => {
     const html = render([row({ status: 'closed', rfq_no: 'RFQ-0009' })]);
     expect(html).not.toContain('Actions for');
     expect(text(html)).not.toContain('RFQ-0009');
-    // The status filter's "Closed" brings the row back; what its menu would offer is nothing.
-    expect(rfqActions(row({ status: 'closed' }))).toEqual([]);
+    // The status filter's "Closed" brings the row back; what its menu would offer is a copy.
+    expect(rfqActions(row({ status: 'closed' }))).toEqual(['copy']);
   });
 
   it('shows a dash for the total until every line is priced, and the order number when there is one', () => {
@@ -127,6 +137,7 @@ describe('the RFQs list', () => {
     expect(text(html)).not.toContain('New RFQ');
     expect(html).not.toContain('Actions for');
     expect(items(html)).toEqual([]);
+    expect(html).not.toContain('Copy to another supplier');
     expect(text(html)).toContain('Export');
   });
 });
@@ -154,6 +165,42 @@ describe('the RFQ form', () => {
     expect(html).toContain('data-chosen="sup-gone"');
     expect(html).toMatch(/<span data-option="sup-gone">Archived Traders/);
     expect(html).toMatch(/<span data-option="sup-1">Kopi Hulu Supplies/);
+  });
+});
+
+describe('a copied RFQ form', () => {
+  const source: RfqDetail = {
+    ...row({ status: 'quoted', supplier_id: 'sup-1', supplier_name: 'Kopi Hulu Supplies', fully_priced: true, total: 106 }),
+    subtotal: 100,
+    sst_total: 6,
+    notes: 'Deliver before noon',
+    lines: [
+      { id: 'l1', product_id: null, description: 'Arabica beans', quantity: 20, uom: 'kg', pack_size: null, unit_price: 5, sst_rate: 6 },
+    ],
+  };
+  const html = renderToStaticMarkup(
+    <RfqFormCard
+      copyOf={source}
+      suppliers={[{ id: 'sup-1', name: 'Kopi Hulu Supplies' } as FinanceContact, { id: 'sup-2', name: 'Biji Segar' } as FinanceContact]}
+      products={[]}
+      today={TODAY}
+      actions={actions}
+      onClose={() => {}}
+    />,
+  );
+
+  it('is the ordinary New RFQ form, with no supplier chosen', () => {
+    expect(text(html)).toContain('New RFQ');
+    expect(text(html)).not.toContain('Edit RFQ');
+    expect(html).toContain('data-chosen=""');
+    expect(html).not.toContain('data-chosen="sup-1"');
+  });
+  it('holds the lines and the notes, dated today, with the price boxes empty', () => {
+    expect(html).toContain('value="Arabica beans"');
+    expect(html).toContain('value="Deliver before noon"');
+    expect(html).toContain(`value="${TODAY}"`);
+    expect(html).not.toContain('value="5"');
+    expect(html).not.toContain('value="2026-10-20"');
   });
 });
 

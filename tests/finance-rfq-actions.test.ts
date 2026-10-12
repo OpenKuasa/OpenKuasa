@@ -308,3 +308,49 @@ describe('getSentRfqAction', () => {
     }
   });
 });
+
+describe('getRfqForCopyAction', () => {
+  const source = { id: RFQ, status: 'quoted', lines: [] };
+
+  it('returns an RFQ in any status with its lines, without refreshing anything', async () => {
+    for (const status of ['draft', 'sent', 'quoted', 'closed']) {
+      ctl.calls = [];
+      ctl.rfq = { ...source, status };
+      expect(await actions.getRfqForCopyAction({ id: RFQ }), status).toEqual({ ok: true, data: { ...source, status } });
+      expect(ctl.calls, status).toEqual([{ fn: 'getRfq', orgId: 'org1', input: RFQ }]);
+    }
+    expect(ctl.revalidated).toEqual([]);
+  });
+
+  it('says the RFQ is gone, and refreshes the list, when it was deleted meanwhile', async () => {
+    expect(await actions.getRfqForCopyAction({ id: RFQ })).toEqual(GONE);
+    expect(ctl.revalidated).toEqual(RFQS);
+  });
+
+  it('says the RFQ is gone for an id that is not an id, without reading', async () => {
+    expect(await actions.getRfqForCopyAction({ id: 'nope' })).toEqual(GONE);
+    expect(await actions.getRfqForCopyAction(undefined)).toEqual(GONE);
+    expect(ctl.calls).toEqual([]);
+  });
+
+  it('answers with a sentence when the read fails, and logs the cause', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    ctl.rfq = new Error('connection reset');
+    expect(await actions.getRfqForCopyAction({ id: RFQ })).toEqual({ ok: false, error: 'That could not be loaded. Please try again.' });
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
+  });
+
+  it('tells a viewer and the demo they may not, without reading', async () => {
+    ctl.rfq = source;
+    for (const viewer of [
+      { userId: 'u1', orgId: 'org1', role: 'viewer', isDemo: false },
+      { userId: 'u1', orgId: 'org1', role: 'owner', isDemo: true },
+    ]) {
+      ctl.viewer = viewer;
+      expect(await actions.getRfqForCopyAction({ id: RFQ }), JSON.stringify(viewer)).toEqual(FORBIDDEN);
+      expect(await actions.getRfqForCopyAction({ id: 'nope' }), JSON.stringify(viewer)).toEqual(FORBIDDEN);
+    }
+    expect(ctl.calls).toEqual([]);
+  });
+});
