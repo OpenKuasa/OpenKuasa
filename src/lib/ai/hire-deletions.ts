@@ -59,6 +59,8 @@ const GATE_REASON_STARTS = [
   'This interview was changed after the card was shown',
   'This interview no longer exists',
   'The application this interview belongs to is no longer active',
+  'The date and time sent are the ones this interview already has',
+  'Nothing would change:',
 ];
 export function isGateReason(reason: unknown): boolean {
   return typeof reason === 'string' && GATE_REASON_STARTS.some((start) => reason.startsWith(start));

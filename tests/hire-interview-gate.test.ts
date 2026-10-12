@@ -3,7 +3,7 @@ import type { ModelMessage } from 'ai';
 import { describe, expect, it, vi } from 'vitest';
 import { deletionProblem, guardDeletions, isGateReason, notLookedUp, stoppedAfterApproval } from '@/lib/ai/hire-deletions';
 import {
-  AMBIGUOUS_INTERVIEW_CHANGE, APPLICATION_NOT_ACTIVE, HIRE_INTERVIEW_TOOL_NAMES, INTERVIEW_GONE, INTERVIEW_CHANGED_SINCE, INTERVIEW_CHECK_FAILED, LINK_NOT_GIVEN, ONE_INTERVIEW_CHANGE,
+  AMBIGUOUS_INTERVIEW_CHANGE, APPLICATION_NOT_ACTIVE, HIRE_INTERVIEW_TOOL_NAMES, INTERVIEW_GONE, NOTHING_WOULD_CHANGE, SAME_TIME_SENT, INTERVIEW_CHANGED_SINCE, INTERVIEW_CHECK_FAILED, LINK_NOT_GIVEN, ONE_INTERVIEW_CHANGE,
   actsOnApplication, ambiguousFor, guardInterviewChanges, interviewCardDecision, interviewChangeProblem, interviewCheckFor, interviewNotLookedUp, interviewTarget,
   interviewPlacesIn, linkNobodyGave, linksIn, lookTheSameInterviews, placesIn, sameLink, stringsIn,
 } from '@/lib/ai/hire-interview-gate';
@@ -80,7 +80,7 @@ describe('the sentences', () => {
   it('are each known as a gate\'s own denial, so a call the gate denied is never taken for the user\'s no', () => {
     for (const reason of [
       ONE_INTERVIEW_CHANGE, interviewNotLookedUp(IV), notLookedUp('application', APP), AMBIGUOUS_INTERVIEW_CHANGE, LINK_NOT_GIVEN,
-      lookTheSameInterviews('Aina Rahman', 'Sales Executive'), INTERVIEW_CHECK_FAILED, INTERVIEW_CHANGED_SINCE, INTERVIEW_GONE, APPLICATION_NOT_ACTIVE,
+      lookTheSameInterviews('Aina Rahman', 'Sales Executive'), INTERVIEW_CHECK_FAILED, INTERVIEW_CHANGED_SINCE, INTERVIEW_GONE, APPLICATION_NOT_ACTIVE, SAME_TIME_SENT, NOTHING_WOULD_CHANGE,
     ]) {
       expect(isGateReason(reason), reason).toBe(true);
     }
@@ -92,6 +92,7 @@ describe('the sentences', () => {
       'This interview is already scheduled.',
       'That interview could not be found. It may have been deleted with its application.',
       'That change could not be saved. Please try again.',
+      'Nothing was changed: the interview already has these details.',
       'This application is no longer active. Reopen it before scheduling or changing an interview.',
       'That application could not be found. It may have been deleted.',
       // The words a person might type as a reason for saying no.
@@ -484,6 +485,29 @@ describe('the server\'s check of the interview', () => {
     // Two that differ only in place still count as reading the same: a time and a type are what a person asks by.
     const twin = await provider({ target: row(IV, APP), others: [row(IV2, APP, { place: 'Level 3' })], cut: false }).check('cancelInterview', { id: IV });
     expect(twin).toEqual({ ok: false, refusal: lookTheSameInterviews('Aina Rahman', 'Sales Executive') });
+  });
+  it('a change that sends the time the interview already has gets no card: a card would say "New time" of a time that is not new', async () => {
+    expect(SAME_TIME_SENT).toBe(
+      'The date and time sent are the ones this interview already has, so no change was prepared. Send only what changes: prepare it again without the date and the time.',
+    );
+    expect(NOTHING_WOULD_CHANGE).toBe('Nothing would change: this interview is already at that date and time. No change was prepared.');
+    const at = () => provider({ target: row(IV, APP), others: [], cut: false });
+    // 3:00 pm on 20 October in Kuala Lumpur is the stored instant.
+    const same = { id: IV, date: '2026-10-20', time: '15:00' };
+    for (const more of [{ interviewer_name: 'Farah Lim' }, { place: null }, { duration_minutes: 45 }, { kind: 'phone' }, { notes: 'Second round.' }]) {
+      expect(await at().check('rescheduleInterview', { ...same, ...more }), JSON.stringify(more)).toEqual({ ok: false, refusal: SAME_TIME_SENT });
+    }
+    // Nothing else sent: nothing would change at all.
+    expect(await at().check('rescheduleInterview', same)).toEqual({ ok: false, refusal: NOTHING_WOULD_CHANGE });
+    // Another time, or no time, is a change like any other.
+    expect(await at().check('rescheduleInterview', { id: IV, date: '2026-10-20', time: '15:30' })).toEqual({ ok: true, note: LINE, namesakes: [] });
+    expect(await at().check('rescheduleInterview', { id: IV, date: '2026-10-21', time: '15:00' })).toEqual({ ok: true, note: LINE, namesakes: [] });
+    expect(await at().check('rescheduleInterview', { id: IV, interviewer_name: 'Farah Lim' })).toEqual({ ok: true, note: LINE, namesakes: [] });
+    // A date or a time that cannot be read is left to the tool's own input check.
+    expect(await at().check('rescheduleInterview', { id: IV, date: 'Tuesday', time: '3pm' })).toEqual({ ok: true, note: LINE, namesakes: [] });
+    expect(await at().check('rescheduleInterview', { id: IV, date: '2026-10-20' })).toEqual({ ok: true, note: LINE, namesakes: [] });
+    // The other three changes send no time.
+    expect(await at().check('cancelInterview', { ...same })).toEqual({ ok: true, note: LINE, namesakes: [] });
   });
   it('an interview whose application is no longer active cannot have its time or details changed; it can still be cancelled, marked or reopened', async () => {
     for (const outcome of ['rejected', 'withdrawn']) {

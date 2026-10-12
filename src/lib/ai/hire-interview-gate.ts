@@ -41,6 +41,7 @@ import { lookedUpAs } from '@/lib/ai/hire-pool-gate';
 import { isHeldCvMessage } from '@/lib/ai/hire-tools';
 import { THIS_INTERVIEW, alsoScheduledLines, interviewFullLine, interviewLine } from '@/lib/hire/interviews';
 import { interviewCardFromLists, namesakesFromLists } from '@/lib/hire/namesakes';
+import { instantMs, klInstant } from '@/lib/hire/interview-time';
 import type { HireData, Namesakes } from '@/lib/hire/types';
 
 export const HIRE_INTERVIEW_TOOL_NAMES = [
@@ -88,6 +89,17 @@ export const INTERVIEW_GONE =
 export const APPLICATION_NOT_ACTIVE =
   'The application this interview belongs to is no longer active, so the interview\'s time and details cannot be changed. Nothing was changed. ' +
   'Reopen the application first, or cancel the interview instead.';
+/**
+ * A change that sends the date and time the interview already has, with something else. Its card is worded from the
+ * input and would say "New time" of a time that is not new, so there is no card: the model is told to send only what
+ * changes, and does so in the same turn (this refusal is not the turn's one). The person need do nothing; if the
+ * model does not, they ask again for only what should change.
+ */
+export const SAME_TIME_SENT =
+  'The date and time sent are the ones this interview already has, so no change was prepared. ' +
+  'Send only what changes: prepare it again without the date and the time.';
+/** The same with nothing else sent. Written for a person as it is; there is nothing to do, the interview is as they asked. */
+export const NOTHING_WOULD_CHANGE = 'Nothing would change: this interview is already at that date and time. No change was prepared.';
 /** The other way: ask again in a moment, or use the Interviews screen, which does not depend on this read. */
 export const INTERVIEW_CHECK_FAILED = 'I could not check which interview this is just now, so no change was prepared. Try again in a moment.';
 /** The other way: ask again; the new card shows the interview as it is now. */
@@ -268,7 +280,9 @@ export function linkNobodyGave(messages: readonly ModelMessage[], place: unknown
  * Asks the server about an interview change's row. Given the tool's whole
  * input, not an id: two of the six tools name an application and four an
  * interview, and the check, not each of its three callers, knows which key
- * holds the row's id. Nothing else of the input is read. Never throws.
+ * holds the row's id. One other thing of the input is read: the date and time
+ * of a change, to see whether they are the ones the interview already has.
+ * Nothing of the input is ever put on the card's line. Never throws.
  */
 export type InterviewCheck = (tool: string, input: unknown) => Promise<CardCheck>;
 
@@ -301,6 +315,15 @@ export function interviewCheckFor(
       // when the user's yes arrives, rather than by the database after it.
       if (tool === 'rescheduleInterview' && (outcome === 'rejected' || outcome === 'withdrawn')) {
         return { ok: false, refusal: APPLICATION_NOT_ACTIVE };
+      }
+      if (tool === 'rescheduleInterview') {
+        // The time sent, read as the capability reads it. The same instant as the stored one is not a new time.
+        const sent = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+        const at = typeof sent.date === 'string' && typeof sent.time === 'string' ? klInstant(sent.date, sent.time) : null;
+        if (at && instantMs(at) === instantMs(target.scheduled_at)) {
+          const more = ['duration_minutes', 'kind', 'place', 'interviewer_name', 'notes'].some((key) => sent[key] !== undefined);
+          return { ok: false, refusal: more ? SAME_TIME_SENT : NOTHING_WOULD_CHANGE };
+        }
       }
       // Two read the same when their day, time and type do: that is what a person asks for one by.
       const line = interviewLine(target.scheduled_at, target.kind);

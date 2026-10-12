@@ -200,6 +200,8 @@ const REFUSAL_LINES: [start: string, line: string | null][] = [
   ['This interview was changed after the card was shown', 'A last check stopped this, because the interview had been changed since the card was shown. Nothing was changed. Ask for it again.'],
   ['Two candidates called ', null],
   ['Two applications from someone called ', null],
+  ['The date and time sent are the ones this interview already has', 'The time given was the time this interview already has, so nothing was prepared. Ask again for only what should change.'],
+  ['Nothing would change:', null],
   ['Two interviews with ', null],
   ['This interview no longer exists', null],
   ['The application this interview belongs to is no longer active', null],

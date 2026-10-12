@@ -2798,6 +2798,18 @@ describe('interview changes', () => {
       expect(seen.refusals).toEqual([]);
       expect(alone.cards[0].reason).toBe(LINE);
     });
+    it('a change that re-sends the time the interview already has is refused; prepared again without it, the card has no "New time"', async () => {
+      const resent: Call = { tool: 'rescheduleInterview', input: { id: IV, date: '2026-10-20', time: '15:00', interviewer_name: 'Farah Lim' } };
+      const only: Call = { tool: 'rescheduleInterview', input: { id: IV, interviewer_name: 'Farah Lim' } };
+      const { context, cards } = await prepare([listAll, resent, only], world(), { said: 'Farah Lim will interview her' });
+      expect(seen.refusals).toEqual(['The date and time sent are the ones this interview already has, so no change was prepared. Send only what changes: prepare it again without the date and the time.']);
+      expect([...context.proposals.values()]).toHaveLength(1);
+      expect([...context.proposals.values()][0]).toMatchObject({ input: { id: IV, interviewer_name: 'Farah Lim' }, detail: 'Interviewer: Farah Lim · Nothing is sent to the candidate.' });
+      expect(cards).toHaveLength(1);
+      const nothing = await prepare([listAll, { tool: 'rescheduleInterview', input: { id: IV, date: '2026-10-20', time: '15:00' } }, 'answer'], world(), { said: 'Keep it on Tuesday at 3' });
+      expect(nothing.context.proposals.size).toBe(0);
+      expect(seen.refusals[0]).toBe('Nothing would change: this interview is already at that date and time. No change was prepared.');
+    });
     it('refuses a link nobody gave: not one made up, and not one that only Tuah wrote', async () => {
       const withLink: Call = { tool: 'scheduleInterview', input: { ...NEW, place: LINK } };
       const madeUp = await prepare([byName, withLink], world(), { said: `Schedule ${WHO} for 12 January at 3pm, video` });
@@ -3110,6 +3122,26 @@ describe('interview changes', () => {
       expect(alone.denials).toEqual([]);
       expect(alone.cards).toHaveLength(1);
       expect(alone.cards[0].reason).toBe(LINE);
+    });
+    it.each(agents)('%s: a change that re-sends the time the interview already has gets no card; sent again without it, the card has no "New time"', async (agent) => {
+      const { approvalDetail } = await import('@/lib/chat/change-titles');
+      const SAME_TIME = 'The date and time sent are the ones this interview already has, so no change was prepared. Send only what changes: prepare it again without the date and the time.';
+      // The row is on Tuesday 20 October at 3:00 pm. The model sends that again with a new interviewer.
+      const resent: Call = { tool: 'rescheduleInterview', input: { id: IV, date: '2026-10-20', time: '15:00', interviewer_name: 'Farah Lim' } };
+      const only: Call = { tool: 'rescheduleInterview', input: { id: IV, interviewer_name: 'Farah Lim' } };
+      const run = await request([[resent], [{ tool: 'listJobs', input: {} }, only]], agent, world(), 'Farah Lim will interview her');
+      expect(run.denials).toEqual([SAME_TIME]);
+      expect(run.cards).toHaveLength(1);
+      expect(run.cards[0].toolCall).toMatchObject({ toolName: 'rescheduleInterview', input: { id: IV, interviewer_name: 'Farah Lim' } });
+      expect(approvalDetail('rescheduleInterview', run.cards[0].toolCall!.input)).toBe('Interviewer: Farah Lim · Nothing is sent to the candidate.');
+      // The same time and nothing else: nothing would change, and no card.
+      const nothing = await request([[{ tool: 'rescheduleInterview', input: { id: IV, date: '2026-10-20', time: '15:00' } }]], agent, world(), 'Keep it on Tuesday at 3');
+      expect(nothing.cards).toEqual([]);
+      expect(nothing.denials).toEqual(['Nothing would change: this interview is already at that date and time. No change was prepared.']);
+      // A time that is new does say so.
+      const moved = await request([[{ tool: 'rescheduleInterview', input: { id: IV, date: '2026-10-21', time: '15:00' } }]], agent, world(), 'Move it to Wednesday at 3');
+      expect(moved.denials).toEqual([]);
+      expect(approvalDetail('rescheduleInterview', moved.cards[0].toolCall!.input)).toBe('New time: Wednesday, 21 October 2026, 3:00 pm, Kuala Lumpur time (GMT+8) · Nothing is sent to the candidate.');
     });
     it.each(agents)('%s: a made-up link is denied, and a link the user typed passes', async (agent) => {
       const withLink: Call = { tool: 'scheduleInterview', input: { ...NEW, place: LINK } };
