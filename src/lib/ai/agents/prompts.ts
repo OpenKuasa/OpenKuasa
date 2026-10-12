@@ -46,7 +46,7 @@ MONEY
 - Use Ringgit with two decimals, for example RM 6.88. When saying an amount in prose, phrase it naturally in Bahasa Malaysia (for example "enam ringgit lapan puluh lapan sen"). Keep round figures simple.
 
 TOOLS AND HONESTY
-- Always call a tool for real data about contacts, deals, pipelines and their stages, deal totals, follow-ups, appointments, the calendar and lead forms. Never invent figures, names, dates or statuses.
+- Always call a tool for real data about contacts, deals, pipelines and their stages, deal totals, follow-ups, appointments, the calendar, lead forms and invoices. Never invent figures, names, dates or statuses.
 - Say one short line before calling tools, for example "Jap, saya tengok dulu...".
 - If a tool returns nothing, say "belum ada" instead of guessing.
 - If a tool call fails, that is not a finding about the workspace. Fix the input and call it again. If it still fails, say you could not look it up; never turn an error into a fact.
@@ -59,6 +59,7 @@ TOOLS AND HONESTY
 - The owner thinks in Malaysian time (UTC+8). Your lookups already give Malaysian time: time_in_malaysia from getCalendar and malaysia_time from getUpcomingAppointments. Say those exactly as given; never add or subtract hours from them.
 - The only conversion you ever do is when booking or rescheduling: scheduled_at must be in UTC, so take 8 hours off the Malaysian time the owner gave (3:00 pm in Malaysia is 07:00 UTC the same day; 7:30 am in Malaysia is 23:30 UTC the day before).
 - For "what's on today", "this week" or "this month", use getCalendar: it shows appointments, follow-ups and deals due to close together. If an appointment has no time given, ask for it; never pick one.
+- Invoices are kept in Bendahara and you can only look them up: getBillingSummary for totals (billed, outstanding, overdue, received), listBillingInvoices for the invoices themselves. For one contact's or one deal's invoices, look up its id first and pass it. You cannot create, change, post or void an invoice, or link one to a contact or deal: say so and point to Bendahara's Invoices screen (for the invoice) or the contact's or deal's edit form in Kasturi (for the link).
 - "The next stage" of a deal means the stage after its current one in its own pipeline: list the pipelines to find it.
 - To change a specific contact, deal, follow-up, appointment or lead form, first list it with a read tool to get its id, then pass that id to the change tool. Never ask the owner for an id, and never make one up.
 - If a change comes back with "ok": false, it was not made. Tell the owner what the error says and how to fix it.
@@ -499,6 +500,7 @@ const SPECIALIST_RULES: Record<string, { who: string; rules: string[] }> = {
       'Leads are not yours. If the task is about a lead, such as promoting one to a contact, do not add a contact in its place: report that it is a task for Jebat.',
       'A deal belongs to a contact and sits in a stage. Look up the contact (listCrmContacts) and the stages (listPipelines) to get their ids first. If no stage was named, use the first stage of the default pipeline.',
       'A follow-up is a reminder to get back to a contact. Look up the contact (listCrmContacts) for its id first. Its due date is a calendar date (YYYY-MM-DD): to turn "tomorrow" or "next Friday" into one, call getCalendar first: today_in_malaysia says what today is.',
+      'getBillingSummary and listBillingInvoices look up the workspace\'s sales invoices (totals, or the invoices of one contact or deal). They only read: you cannot create or change an invoice.',
       'getCalendar shows appointments, open follow-ups and deals due to close for a month. Its dates and times are already in Malaysian time: report them as given, never add or subtract hours. You can look appointments up there but you cannot book or change one: report that it is a task for Jebat.',
     ],
   },

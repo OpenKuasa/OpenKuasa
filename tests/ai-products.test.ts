@@ -50,6 +50,8 @@ describe('product toolkits', () => {
       'getDealStats',
       'listFollowUps',
       'getCalendar',
+      'getBillingSummary',
+      'listBillingInvoices',
     ]);
     expect(Object.keys(kasturi.write)).toContain('deleteContact');
   });

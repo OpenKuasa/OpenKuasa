@@ -202,9 +202,10 @@ describe('POST /api/crm/chat happy path', () => {
     expect(call.tools).toEqual(
       expect.arrayContaining(['listFollowUps', 'getCalendar', ...KASTURI_SHARED_TOOL_NAMES]),
     );
+    expect(call.tools).toEqual(expect.arrayContaining(['getBillingSummary', 'listBillingInvoices']));
     expect(call.system).toContain('TODAY');
     // Appointments and lead forms are Kasturi screens too; ads and leads are not.
-    expect(call.tools).toHaveLength(4 + 2 + CRM_WRITE_TOOL_NAMES.length + KASTURI_SHARED_TOOL_NAMES.length);
+    expect(call.tools).toHaveLength(4 + 2 + 2 + CRM_WRITE_TOOL_NAMES.length + KASTURI_SHARED_TOOL_NAMES.length);
     expect(call.tools).not.toContain('getCampaigns');
     expect(call.tools).not.toContain('createLead');
     expect(call.tools).not.toContain('promoteLeadToContact');

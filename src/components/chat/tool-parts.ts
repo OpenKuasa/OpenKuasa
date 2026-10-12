@@ -83,6 +83,8 @@ const TOOL_META: Record<string, ToolMeta> = {
   getDealStats: { label: 'Deal totals', Icon: ChartColumn },
   listFollowUps: { label: 'Follow-ups', Icon: ClipboardList },
   getCalendar: { label: 'Calendar', Icon: CalendarDays },
+  getBillingSummary: { label: 'Billing totals', Icon: ChartColumn },
+  listBillingInvoices: { label: 'Invoices', Icon: ClipboardList },
   getHiringOverview: { label: 'Hiring overview', Icon: PieChart },
   listJobs: { label: 'Jobs', Icon: Briefcase },
   listApplications: { label: 'Applications', Icon: ClipboardList },

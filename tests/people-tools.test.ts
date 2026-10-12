@@ -58,6 +58,7 @@ describe('people tools', () => {
       ...CRM_WRITE_TOOL_NAMES,
       ...HIRE_TOOL_NAMES,
       'listCrmContacts', 'listDeals', 'listPipelines', 'getDealStats', 'listFollowUps', 'getCalendar',
+      'getBillingSummary', 'listBillingInvoices',
     ]);
     for (const name of PEOPLE_TOOL_NAMES) expect(others.has(name), name).toBe(false);
   });
