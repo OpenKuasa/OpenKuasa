@@ -4,7 +4,10 @@
  * nothing here works it out from a clock time. Times are Malaysia time.
  */
 import { addDays, clockTime, formatDate, isRealDate, weekdayKey, weekdayName } from './dates';
-import { isTeamView } from './own';
+import { workWeekFor } from './attendance';
+import { canApproveTeam } from './own';
+import { reportsOf } from './reporting';
+import { teamScreenView, type TeamScreenView } from './tier';
 import type {
   AttendanceDay,
   AttendanceStatus,
@@ -81,7 +84,19 @@ export type TeamAttendanceModel = {
   next: string | null;
   tiles: { present: number; late: number; absent: number; onLeave: number; noClockOut: number };
   rows: TeamAttendanceRow[];
+  /** Who is looking: decides whether the screen offers corrections. */
+  view: Exclude<TeamScreenView, 'none'>;
 };
+
+/** What the screen offers this viewer. A manager reads; only HR corrects. */
+export type AttendanceControls = { correct: boolean; disabled: boolean; title: string; emptyText: string };
+
+export function attendanceControls(view: Exclude<TeamScreenView, 'none'>): AttendanceControls {
+  if (view === 'manager') {
+    return { correct: false, disabled: false, title: 'Team Attendance', emptyText: 'Nobody reports to you' };
+  }
+  return { correct: true, disabled: view === 'demo', title: 'Team Attendance', emptyText: 'No active employees' };
+}
 
 export type TeamAttendanceInput = {
   date: string;
@@ -92,6 +107,8 @@ export type TeamAttendanceInput = {
   leave: LeaveRequest[];
   holidays: PublicHoliday[];
   workWeek: Weekday[];
+  /** Defaults to `hr`; `loadTeamAttendance` sets it. */
+  view?: Exclude<TeamScreenView, 'none'>;
 };
 
 const DEFAULT_WEEK: Weekday[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
@@ -245,32 +262,39 @@ export function buildTeamAttendanceModel(input: TeamAttendanceInput): TeamAttend
       noClockOut: rows.filter((r) => r.noClockOut).length,
     },
     rows,
+    view: input.view ?? 'hr',
   };
 }
 
-/** The screen's model for a viewer: the owners-and-admins notice for anyone else, and nothing is read for them. */
+/**
+ * The screen's model for a viewer: the notice for anyone who is neither HR nor a manager (nothing is read for
+ * them). A manager's rows and tiles are their direct reports' only, and they never read the workspace settings.
+ */
 export async function loadTeamAttendance(
   data: PeopleData,
   viewer: PeopleViewer,
   rawDate: string | string[] | undefined,
   today: string,
 ): Promise<TeamAttendanceModel | { hr_only: true }> {
-  if (!isTeamView(viewer)) return { hr_only: true };
+  if (!canApproveTeam(viewer)) return { hr_only: true };
+  const view = teamScreenView(viewer);
+  if (view === 'none') return { hr_only: true };
   const date = parseDay(rawDate, today);
   const [employees, attendance, leave, holidays, settings] = await Promise.all([
     data.listEmployees(),
     data.listAttendance(date, date),
     data.listLeaveRequests(),
     data.listPublicHolidays(),
-    data.getSettings(),
+    view === 'manager' ? Promise.resolve(null) : data.getSettings(),
   ]);
   return buildTeamAttendanceModel({
     date,
     today,
-    employees,
+    employees: view === 'manager' ? reportsOf(employees, viewer.employeeId) : employees,
     attendance,
     leave,
     holidays,
-    workWeek: settings.work_week,
+    workWeek: workWeekFor(settings),
+    view,
   });
 }

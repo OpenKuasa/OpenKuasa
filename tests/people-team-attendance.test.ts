@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { toCorrectionInput } from '@/lib/people/attendance-forms';
 import { PEOPLE_PATHS } from '@/lib/people/paths';
-import { buildTeamAttendanceModel, loadTeamAttendance, parseDay, prefillClockOut } from '@/lib/people/team-attendance';
+import {
+  attendanceControls,
+  buildTeamAttendanceModel,
+  loadTeamAttendance,
+  parseDay,
+  prefillClockOut,
+} from '@/lib/people/team-attendance';
 import type { AttendanceDay, Employee, LeaveRequest, PeopleData, PeopleViewer, PublicHoliday } from '@/lib/people/types';
 
 const TODAY = '2026-10-09'; // Friday
@@ -279,5 +285,90 @@ describe('prefillClockOut: what the clock-out field opens with', () => {
   });
   it('leaves a past day alone, even with none', () => {
     expect(prefillClockOut(prefill(''), '2026-10-08', TODAY, '15:00')).toBe('');
+  });
+});
+
+describe('attendanceControls', () => {
+  it('answers each view', () => {
+    expect(attendanceControls('hr')).toEqual({ correct: true, disabled: false, title: 'Team Attendance', emptyText: 'No active employees' });
+    expect(attendanceControls('demo')).toEqual({ correct: true, disabled: true, title: 'Team Attendance', emptyText: 'No active employees' });
+    expect(attendanceControls('manager')).toEqual({ correct: false, disabled: false, title: 'Team Attendance', emptyText: 'Nobody reports to you' });
+  });
+});
+
+describe('loadTeamAttendance for a manager', () => {
+  const MANAGER: PeopleViewer = { employeeId: 'boss', isHr: false, isDemo: false, managesTeam: true };
+  const MEMBER: PeopleViewer = { employeeId: 'e1', isHr: false, isDemo: false };
+  const OWNER: PeopleViewer = { employeeId: null, isHr: true, isDemo: false };
+  const DAY = '2026-10-08';
+  const employees = [
+    emp('boss', 'Boss'),
+    emp('e1', 'Amirul', { reports_to: 'boss' }),
+    emp('e2', 'Bee', { reports_to: 'boss' }),
+    emp('e3', 'Chong', { reports_to: 'boss', status: 'inactive' }),
+    emp('e4', 'Dina', { reports_to: 'e1' }),
+    emp('e5', 'Esa'),
+  ];
+  const rows = [
+    day({ id: 'a1', employee_id: 'e1' }),
+    day({ id: 'a2', employee_id: 'e2', status: 'late' }),
+    day({ id: 'a4', employee_id: 'e4' }),
+    day({ id: 'a5', employee_id: 'e5' }),
+    day({ id: 'ab', employee_id: 'boss', status: 'absent', clock_in: null, clock_out: null }),
+  ];
+  const fake = (calls: string[] = []) =>
+    ({
+      listEmployees: async () => employees,
+      listAttendance: async () => rows,
+      listLeaveRequests: async () => [],
+      listPublicHolidays: async () => [],
+      getSettings: async () => (calls.push('getSettings'), { work_week: [...WEEK] }),
+    }) as unknown as PeopleData;
+
+  it('has one row per active report, and none for the manager, a colleague or a report of a report', async () => {
+    const model = await loadTeamAttendance(fake(), MANAGER, DAY, TODAY);
+    if (model.hr_only) throw new Error('hr_only');
+    expect(model.view).toBe('manager');
+    expect(model.rows.map((r) => r.name)).toEqual(['Amirul', 'Bee']);
+  });
+
+  it('counts the tiles over the team only, and the manager own row changes nothing', async () => {
+    const model = await loadTeamAttendance(fake(), MANAGER, DAY, TODAY);
+    if (model.hr_only) throw new Error('hr_only');
+    expect(model.tiles).toEqual({ present: 1, late: 1, absent: 0, onLeave: 0, noClockOut: 0 });
+  });
+
+  it('never reads the settings for a manager, and does for an owner', async () => {
+    const calls: string[] = [];
+    await loadTeamAttendance(fake(calls), MANAGER, DAY, TODAY);
+    expect(calls).toEqual([]);
+    await loadTeamAttendance(fake(calls), OWNER, DAY, TODAY);
+    expect(calls).toEqual(['getSettings']);
+  });
+
+  it('lists an inactive report only when the day has a row for them', async () => {
+    const all = [emp('boss', 'Boss'), emp('e3', 'Chong', { reports_to: 'boss', status: 'inactive' })];
+    const data = { ...fake(), listEmployees: async () => all, listAttendance: async () => [] } as unknown as PeopleData;
+    const model = await loadTeamAttendance(data, MANAGER, DAY, TODAY);
+    if (model.hr_only) throw new Error('hr_only');
+    expect(model.rows).toEqual([]);
+    expect(attendanceControls(model.view).emptyText).toBe('Nobody reports to you');
+  });
+
+  it('gives a member the notice and reads nothing', async () => {
+    const touched: string[] = [];
+    const data = new Proxy({}, { get: (_t, name: string) => async () => (touched.push(name), []) }) as unknown as PeopleData;
+    expect(await loadTeamAttendance(data, MEMBER, DAY, TODAY)).toEqual({ hr_only: true });
+    expect(touched).toEqual([]);
+  });
+
+  it('an owner and the demo get the same model as before, plus the view', async () => {
+    const owner = await loadTeamAttendance(fake(), OWNER, DAY, TODAY);
+    if (owner.hr_only) throw new Error('hr_only');
+    expect(owner.view).toBe('hr');
+    expect(owner.rows).toHaveLength(6 - 1); // everyone active
+    const demo = await loadTeamAttendance(fake(), { employeeId: 'e1', isHr: false, isDemo: true }, DAY, TODAY);
+    if (demo.hr_only) throw new Error('hr_only');
+    expect(demo.view).toBe('demo');
   });
 });

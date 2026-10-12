@@ -9,31 +9,34 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { todayInMalaysia } from '@/lib/people/dates';
-import { loadTeamAttendance } from '@/lib/people/team-attendance';
+import { attendanceControls, loadTeamAttendance } from '@/lib/people/team-attendance';
 import { EmployeeCell, HrOnlyScreen, LOAD_FAILED, Muted, StatusPill, loadPeople } from './parts';
 
-const COLUMNS = 7;
 const dash = '—';
 
-/** Team Attendance: one day, a row per active employee, and a "Correct" action. Owners and admins only. */
+/**
+ * Team Attendance: one day, a row per active employee, and a "Correct" action for owners and admins. A manager
+ * sees their direct reports only, to read.
+ */
 export default async function TeamAttendanceScreen({
   searchParams,
 }: {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const raw = ((await searchParams) ?? {}).date;
-  const { model, viewer } = await loadPeople('attendance', (data, now, ctx) =>
+  const { model } = await loadPeople('attendance', (data, now, ctx) =>
     loadTeamAttendance(data, ctx.viewer, raw, todayInMalaysia(now)),
   );
 
   if (model?.hr_only) return <HrOnlyScreen title="Team Attendance" />;
   const day = model && !model.hr_only ? model : null;
-  const demo = viewer.isDemo;
+  const controls = day ? attendanceControls(day.view) : null;
+  const columns = controls?.correct === false ? 6 : 7;
 
   return (
     <ScreenContainer>
       <PageHeader
-        title="Team Attendance"
+        title={controls?.title ?? 'Team Attendance'}
         subtitle={day ? `${day.heading}${day.isToday ? ' (today)' : ''}` : 'Who was in, day by day.'}
         actions={
           day ? (
@@ -110,7 +113,7 @@ export default async function TeamAttendanceScreen({
           {!day ? (
             LOAD_FAILED
           ) : day.rows.length === 0 ? (
-            <Muted>No active employees</Muted>
+            <Muted>{controls?.emptyText}</Muted>
           ) : (
             <div className="overflow-x-auto">
               <Table>
@@ -122,14 +125,16 @@ export default async function TeamAttendanceScreen({
                     <TableHead>Clock-out</TableHead>
                     <TableHead>Hours</TableHead>
                     <TableHead>Notes</TableHead>
-                    <TableHead>
-                      <span className="sr-only">Action</span>
-                    </TableHead>
+                    {controls?.correct ? (
+                      <TableHead>
+                        <span className="sr-only">Action</span>
+                      </TableHead>
+                    ) : null}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {day.rows.map((row) => (
-                    <RequestRow key={row.employeeId} columns={COLUMNS}>
+                    <RequestRow key={row.employeeId} columns={columns}>
                       <TableCell>
                         <EmployeeCell name={row.name} sub={row.department} />
                         {row.inactive ? <span className="mt-0.5 block text-xs text-muted-foreground">Inactive</span> : null}
@@ -146,15 +151,17 @@ export default async function TeamAttendanceScreen({
                         {row.corrected ? <StatusPill tone="neutral">Corrected</StatusPill> : null}
                         {row.corrected && row.note ? <span className="text-xs text-muted-foreground">{row.note}</span> : null}
                       </TableCell>
-                      <TableCell>
-                        <CorrectAttendance
-                          employeeId={row.employeeId}
-                          name={row.name}
-                          workDate={day.date}
-                          prefill={row.prefill}
-                          disabled={demo}
-                        />
-                      </TableCell>
+                      {controls?.correct ? (
+                        <TableCell>
+                          <CorrectAttendance
+                            employeeId={row.employeeId}
+                            name={row.name}
+                            workDate={day.date}
+                            prefill={row.prefill}
+                            disabled={controls.disabled}
+                          />
+                        </TableCell>
+                      ) : null}
                     </RequestRow>
                   ))}
                 </TableBody>
