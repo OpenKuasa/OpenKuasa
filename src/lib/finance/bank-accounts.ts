@@ -4,7 +4,7 @@
  * security. One Zod schema and one function per write; org_id comes from the
  * context.
  *
- * What the database holds everyone to (20261110110000): an opening balance
+ * What the database holds everyone to (20261112110000): an opening balance
  * is set, changed or removed by an owner or admin only (FIN14 for any other
  * writer); an account is not archived while money out on it is still to be
  * paid or waits for approval (FIN30); bank or cash is chosen when the account
