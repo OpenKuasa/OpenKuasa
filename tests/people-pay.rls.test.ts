@@ -4,13 +4,13 @@
  * it fails at the first call (the functions do not exist). Skipped without
  * Supabase env vars.
  *
- * Why no receipt file: the receipts bucket takes uploads only from a signed-up
- * (non-anonymous) account, and this suite signs in anonymously like the leave
- * one. So the claim here has no receipt, and what a receipt adds (the folder
- * rule, the claim-scoped read, the removal) is covered by the access check in
- * supabase/tests/people_claims_overtime_check.sql and by the mocked tests. If a
- * real account becomes available to the suite, add an upload with
- * `uploadReceipt` and a `removeReceipt` of what it made.
+ * No receipt file: this suite was written when its owner signed in anonymously,
+ * and the receipts bucket takes uploads only from a signed-up account. So the
+ * claim here has no receipt, and what a receipt adds (the folder rule, the
+ * claim-scoped read, the removal) is covered by the access check in
+ * supabase/tests/people_claims_overtime_check.sql and by the mocked tests. The
+ * owner is a signed-up account now, so an upload with `uploadReceipt` and a
+ * `removeReceipt` of what it made can be added here.
  */
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { type SupabaseClient } from '@supabase/supabase-js';
@@ -29,7 +29,7 @@ import {
 } from '@/lib/people/pay-requests';
 import { DEMO_EMPLOYEE_ID } from '@/lib/people/types';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { createOrg, joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
+import { createOrg, joinDemo, signInAnon, liveClient, signInOwner } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
@@ -48,7 +48,7 @@ let createdEmployeeId: string | null = null;
 beforeAll(async () => {
   if (!hasSupabaseEnv) return;
   const c = client();
-  const signedIn = await signInAnon(c);
+  const signedIn = await signInOwner(c);
   expect(signedIn.error, signedIn.error?.message).toBeNull();
   const org = await createOrg(c, 'People Pay Sdn Bhd');
   expect(org.error, org.error?.message).toBeNull();

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test, type TestContext } from 'vitest';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import { proposalsTableMissing, proposalsTableSkipReason } from './helpers/agent-proposals-table';
-import { createOrg, signInAnon, liveClient } from './helpers/live-workspaces';
+import { createOrg, signInAnon, liveClient, signInOwner } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
@@ -22,7 +22,7 @@ if (hasSupabaseEnv && !service) {
 
 async function ownedCtx(name: string) {
   const c = liveClient();
-  const { error: e1 } = await signInAnon(c);
+  const { error: e1 } = await signInOwner(c);
   expect(e1, e1?.message).toBeNull();
   const { data: orgId, error } = await createOrg(c, name);
   expect(error, error?.message).toBeNull();

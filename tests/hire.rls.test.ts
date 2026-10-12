@@ -1,7 +1,7 @@
 // tests/hire.rls.test.ts
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { createOrg, signInAnon, liveClient } from './helpers/live-workspaces';
+import { createOrg, signInAnon, liveClient, signInOwner } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
@@ -9,9 +9,11 @@ if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 const client = liveClient;
 const TABLES = ['hire_jobs', 'hire_candidates', 'hire_applications', 'hire_interviews'];
 
-async function anonUser() {
+// The owner is a signed-up account (only those may create a workspace); everyone
+// else is an anonymous sign-in.
+async function anonUser(signIn: typeof signInAnon | typeof signInOwner = signInAnon) {
   const c = client();
-  const { data, error } = await signInAnon(c);
+  const { data, error } = await signIn(c);
   expect(error, error?.message).toBeNull();
   return { c, uid: data.user!.id };
 }
@@ -20,7 +22,7 @@ let owner: Awaited<ReturnType<typeof anonUser>> & { orgId: string };
 
 beforeAll(async () => {
   if (!hasSupabaseEnv) return;
-  const o = await anonUser();
+  const o = await anonUser(signInOwner);
   const { data: orgId, error } = await createOrg(o.c, 'Hire Test Sdn Bhd');
   expect(error, error?.message).toBeNull();
   owner = { ...o, orgId: orgId as string };

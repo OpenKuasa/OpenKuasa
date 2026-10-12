@@ -40,14 +40,14 @@ describe('ad settings schema', () => {
 });
 
 import { hasSupabaseEnv } from './setup/supabase';
-import { createOrg, signInAnon, liveClient } from './helpers/live-workspaces';
+import { createOrg, liveClient, signInOwner } from './helpers/live-workspaces';
 import { createCampaign, deleteCampaign, type ReachWriteContext } from '@/lib/reach/capabilities';
 import { test as vtest } from 'vitest';
 const itSb = hasSupabaseEnv ? vtest : vtest.skip;
 
 itSb('createCampaign writes to the caller org and ignores an input org_id', async () => {
   const c = liveClient();
-  const signIn = await signInAnon(c);
+  const signIn = await signInOwner(c);
   expect(signIn.error).toBeNull();
   const { data: orgId, error: orgError } = await createOrg(c, 'Cap IT Sdn Bhd');
   expect(orgError).toBeNull();
@@ -105,7 +105,7 @@ import { createLead, deleteLead, setLeadStage } from '@/lib/reach/capabilities';
 
 itSb('createLead writes to the caller org, ignores an input org_id, and round-trips', async () => {
   const c = liveClient();
-  const signIn = await signInAnon(c);
+  const signIn = await signInOwner(c);
   expect(signIn.error).toBeNull();
   const { data: orgId, error: orgError } = await createOrg(c, 'Lead Cap IT Sdn Bhd');
   expect(orgError).toBeNull();

@@ -15,7 +15,7 @@ import { createAnonymousClient } from '@/lib/supabase/anonymous';
 import { createCvReader } from '@/lib/hire/cv-read';
 import { createSupabaseHireData } from '@/lib/hire/supabase';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { createOrg, joinDemo, liveClient, signInAnon, beforeCleanup } from './helpers/live-workspaces';
+import { createOrg, joinDemo, liveClient, signInAnon, beforeCleanup, signInOwner } from './helpers/live-workspaces';
 
 const hasService = hasSupabaseEnv && Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
 const testWithSupabase = hasService ? test : test.skip;
@@ -48,7 +48,7 @@ const uniqueEmail = () => `rls-cv-${RUN}-${++emailCounter}@example.com`;
 
 async function ownedOrg(name: string) {
   const c = client();
-  const { error: e1 } = await signInAnon(c);
+  const { error: e1 } = await signInOwner(c);
   expect(e1, e1?.message).toBeNull();
   const { data: orgId, error } = await createOrg(c, name);
   expect(error, error?.message).toBeNull();

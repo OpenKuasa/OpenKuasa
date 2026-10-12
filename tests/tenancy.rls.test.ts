@@ -1,15 +1,16 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { createOrg, signInAnon, liveClient } from './helpers/live-workspaces';
+import { createOrg, liveClient, signInOwner } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 
 // Cross-tenant isolation is the core security guarantee of the tenancy spine.
-// Test identities use anonymous sign-ins: distinct authenticated users for RLS,
-// with no email-confirmation step.
+// Test identities are signed-up accounts made already confirmed by the helper:
+// distinct authenticated users for RLS. Only a signed-up account may create a
+// workspace.
 
 
 function client(): SupabaseClient {
@@ -18,7 +19,7 @@ function client(): SupabaseClient {
 
 async function anonUserWithOrg(orgName: string) {
   const c = client();
-  const { error: authErr } = await signInAnon(c);
+  const { error: authErr } = await signInOwner(c);
   expect(authErr, authErr?.message).toBeNull();
   const { data: orgId, error: rpcErr } = await createOrg(c, orgName);
   expect(rpcErr, rpcErr?.message).toBeNull();

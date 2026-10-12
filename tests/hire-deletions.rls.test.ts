@@ -34,7 +34,7 @@ import { beforeAll, expect, test } from 'vitest';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { createAnonymousClient } from '@/lib/supabase/anonymous';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { beforeCleanup, createOrg, joinDemo, liveClient, signInAnon } from './helpers/live-workspaces';
+import { beforeCleanup, createOrg, joinDemo, liveClient, signInAnon, signInOwner } from './helpers/live-workspaces';
 
 const hasService = hasSupabaseEnv && Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
 const testWithSupabase = hasService ? test : test.skip;
@@ -62,7 +62,7 @@ const uniqueEmail = () => `rls-deletion-${RUN}-${++emailCounter}@example.com`;
 
 async function ownedOrg(name: string) {
   const c = client();
-  const { error: e1 } = await signInAnon(c);
+  const { error: e1 } = await signInOwner(c);
   expect(e1, e1?.message).toBeNull();
   const { data: orgId, error } = await createOrg(c, name);
   expect(error, error?.message).toBeNull();

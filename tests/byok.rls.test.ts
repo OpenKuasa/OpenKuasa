@@ -1,13 +1,14 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { createOrg, signInAnon, liveClient } from './helpers/live-workspaces';
+import { createOrg, signInAnon, liveClient, signInOwner } from './helpers/live-workspaces';
 
 // Workspace AI keys: the sealed key is stored and read by the server only (the
 // service role). A signed-in session can neither read the sealed value nor
 // store one; members learn only the hint, an owner/admin may clear the key,
-// and nobody outside the workspace learns anything. Identities are anonymous
-// sign-ins; an anonymous user who creates an org is its owner.
+// and nobody outside the workspace learns anything. The owner is a signed-up
+// account (only those may create a workspace); the stranger is an anonymous
+// sign-in, as a demo guest is.
 //
 // The store/re-seal cases need SUPABASE_SERVICE_ROLE_KEY and are skipped
 // without it. All of this needs 20261030101500_ai_key_workspace_binding.sql.
@@ -50,7 +51,7 @@ const store = (over: Record<string, unknown> = {}) =>
 beforeAll(async () => {
   if (!hasSupabaseEnv) return;
   owner = client();
-  const a = await signInAnon(owner);
+  const a = await signInOwner(owner);
   expect(a.error, a.error?.message).toBeNull();
   ownerId = a.data.user!.id;
   const org = await createOrg(owner, 'BYOK Test Sdn Bhd');
@@ -161,6 +162,6 @@ testWithSupabase('an owner can remove the key', async () => {
 });
 
 testWithSupabase('demo-style anonymous sessions get no free questions', async () => {
-  expect((await owner.rpc('consume_free_question', { weekly_limit: 3 })).data).toBe(-1);
-  expect((await owner.rpc('free_questions_used')).data).toBe(0);
+  expect((await stranger.rpc('consume_free_question', { weekly_limit: 3 })).data).toBe(-1);
+  expect((await stranger.rpc('free_questions_used')).data).toBe(0);
 });

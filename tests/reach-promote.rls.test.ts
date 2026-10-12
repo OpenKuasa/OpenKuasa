@@ -6,7 +6,7 @@ import {
   promoteLeadToContact,
 } from '@/lib/reach/capabilities';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { createOrg, signInAnon, liveClient } from './helpers/live-workspaces';
+import { createOrg, liveClient, signInOwner } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
@@ -15,7 +15,7 @@ const client = liveClient;
 
 async function ownedCtx(name: string): Promise<ReachWriteContext> {
   const c = client();
-  const { error: e1 } = await signInAnon(c);
+  const { error: e1 } = await signInOwner(c);
   expect(e1, e1?.message).toBeNull();
   const { data: orgId, error } = await createOrg(c, name);
   expect(error, error?.message).toBeNull();

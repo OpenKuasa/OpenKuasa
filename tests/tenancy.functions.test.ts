@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { createOrg, joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
+import { createOrg, joinDemo, signInAnon, liveClient, signInOwner } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 
@@ -9,7 +9,7 @@ const client = liveClient;
 
 testWithSupabase('a new user can create an org and becomes its owner', async () => {
   const c = client();
-  const { data: auth, error: authErr } = await signInAnon(c);
+  const { data: auth, error: authErr } = await signInOwner(c);
   expect(authErr, authErr?.message).toBeNull();
   const uid = auth.user?.id;
 
