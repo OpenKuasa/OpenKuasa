@@ -712,6 +712,8 @@ describe('letters and documents', () => {
     expect(section).toContain('{salary} is the eighth placeholder');
     expect(section).toContain('rm 4,500.00 per month');
     expect(section).toContain('never invent a salary figure');
+    expect(section).toContain('draft it once, as plain text to copy: no heading mark, no stars, no list marks');
+    expect(section).toContain('never offer to save it, issue it or add it to the system');
     expect(section).toContain("write the employee's actual name and details from your lookup, never a placeholder".toLowerCase());
     expect(section).toContain('{company_name}, {today} or {salary}) or no text is refused');
   });
