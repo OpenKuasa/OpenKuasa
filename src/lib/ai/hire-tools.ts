@@ -19,6 +19,8 @@ import {
   type HireWriteContext,
   addCandidate,
   addCandidateInput,
+  cancelInterview,
+  cancelInterviewInput,
   closeApplication,
   closeApplicationInput,
   createJob,
@@ -35,8 +37,18 @@ import {
   moveToPipelineInput,
   rateApplication,
   rateApplicationInput,
+  recordPastInterview,
+  recordPastInterviewInput,
   reopenApplication,
   reopenApplicationInput,
+  reopenInterview,
+  reopenInterviewInput,
+  rescheduleInterview,
+  rescheduleInterviewInput,
+  scheduleInterview,
+  scheduleInterviewInput,
+  setInterviewOutcome,
+  setInterviewOutcomeInput,
   setJobStatus,
   setJobStatusInput,
   setPoolStatus,
@@ -50,13 +62,13 @@ import {
   updateJob,
   updateJobInput,
 } from '@/lib/hire/capabilities';
-import { formatWhen } from '@/lib/reach/overview';
 import { LOOKUP_MAX, limitSchema, rowLimit } from '@/lib/ai/limits';
 import { CV_MAX_BYTES } from '@/lib/hire/application-fields';
 import { applicationFormOf } from '@/lib/hire/application-form';
 import { applicationLabel, funnelCounts, matchesText } from '@/lib/hire/applications-view';
 import type { CvReader } from '@/lib/hire/cv-read';
 import { timeToHire } from '@/lib/hire/dashboard';
+import { klDateOf, klTimeOf, klTodayWords, shortWhen } from '@/lib/hire/interview-time';
 import { careersPath, careersUrl } from '@/lib/hire/public-careers';
 import { applicantsByJob, overviewTotals, sourceBreakdown } from '@/lib/hire/overview';
 import { APPLICATION_STAGES, HIRE_READ_CAP, type HireData, type Job } from '@/lib/hire/types';
@@ -228,6 +240,23 @@ function excerpt(text: string | null | undefined): string | null {
   const t = text?.trim();
   if (!t) return null;
   return t.length > 160 ? `${t.slice(0, 160)}…` : t;
+}
+
+/** An interview's notes cut to 300 characters, or null when there are none. They are the team's own, and can be long. */
+function notesExcerpt(text: string | null): string | null {
+  return text && text.length > 300 ? `${text.slice(0, 300)}…` : text;
+}
+
+/**
+ * An interview change's answer as a model is given it: everything but the invitation. The invitation and the
+ * calendar file are handed over by the Interviews screen ("Invitation and calendar file" in the row's menu), where
+ * the person copies them. A model that held the text could reword it on its way to a candidate.
+ */
+function withoutInvitation<T extends { invitation?: unknown }>(result: CapResult<T>): CapResult<Omit<T, 'invitation'>> {
+  if (!result.ok) return result;
+  const { invitation: _left, ...rest } = result.data;
+  void _left;
+  return { ...result, data: rest };
 }
 
 const limit = limitSchema(`How many rows to return, at most ${LOOKUP_MAX}.`);
@@ -514,22 +543,28 @@ export function createHireTools(
 
     listInterviews: tool({
       description:
-        'List interviews with the candidate, the job, the time, how it is held (video, onsite, phone), ' +
-        'the interviewer and the status. Ask for upcoming or past ones, or filter by status. ' +
-        '`when` is the time in Kuala Lumpur, relative to today; use it when telling the user the time.',
+        'List interviews with the candidate, the job, the time, the length, how it is held (video, onsite, phone), the place or link, the interviewer, the notes and the status. ' +
+        'Ask for upcoming or past ones, or filter by status, by candidate name or by job. ' +
+        '`when` is the day, the date and the time in Kuala Lumpur, as a person reads it; use it when telling the user the time, and always give the date with it. ' +
+        '`date` and `time` are that same time in Kuala Lumpur, in the form the change tools take. ' +
+        "Each row has the interview's id, which rescheduleInterview, cancelInterview, setInterviewOutcome and reopenInterview take, and its application's id. " +
+        "To schedule an interview or record a past one, use the application's id from listApplications. " +
+        'If the result has "several_match", more than one interview fits, or one person has more than one: prepare no change and ask the user which one.',
       inputSchema: z.object({
         when: z.enum(['upcoming', 'past']).optional().describe('Only interviews still ahead, or only ones already past.'),
         status: z.enum(['scheduled', 'completed', 'cancelled', 'no_show']).optional().describe('Only this status.'),
+        candidate: z.string().optional().describe('Only interviews with candidates whose name contains this.'),
+        jobTitle,
         limit,
       }),
-      execute: async ({ when, status, limit: requested }) =>
+      execute: async ({ when, status, candidate, jobTitle: title, limit: requested }) =>
         safe('listInterviews', async () => {
           const t = now().getTime();
           const rows = (await data.listInterviews()).filter((i) => {
             const ahead = Date.parse(i.scheduled_at) > t;
             if (when === 'upcoming' && !(ahead && i.status === 'scheduled')) return false;
             if (when === 'past' && ahead) return false;
-            return !status || i.status === status;
+            return (!status || i.status === status) && matchesText(i.candidate_name, candidate) && matchesText(i.job_title, title);
           });
           // Past interviews read better latest first; the rest soonest first. Not left to the provider's order.
           const ordered = [...rows].sort((a, b) =>
@@ -539,14 +574,40 @@ export function createHireTools(
           );
           return {
             total: rows.length,
+            // One application can rightly have two interviews, so "the interview with Aina" is unclear whenever she has
+            // more than one. A rule in the prompt alone was not enough for candidates, so the result says it.
+            // No "look again": a change from a second lookup in the same turn is refused, so the model must ask.
+            // It is said when a name was asked for and more than one interview fits, and also when a job was asked
+            // for and two of the interviews left are with the same person: the model never picks between those.
+            ...(((candidate?.trim() && rows.length > 1) ||
+              (title?.trim() && rows.some((a, at) => rows.findIndex((b) => b.candidate_name === a.candidate_name) !== at))) && {
+              several_match:
+                `More than one interview matches this name: ${ordered
+                  .slice(0, 10)
+                  .map((i) => `${i.candidate_name} (${i.job_title}, ${shortWhen(i.scheduled_at)}, ${i.status})`)
+                  .join('; ')}. ` +
+                'Do not choose one. Prepare no change: say which interviews match and ask the user which one they mean.',
+            }),
             interviews: ordered.slice(0, rowLimit(requested, 20)).map((i) => ({
+              id: i.id,
+              application_id: i.application_id,
               candidate: i.candidate_name,
               job: i.job_title,
               scheduled_at: i.scheduled_at,
-              when: formatWhen(i.scheduled_at, now()),
+              // The day, the date with its year and the time ("Tue 20 Oct 2026, 3:00 pm"), never "Thu · 4:00pm":
+              // an interview can be a year off, and a weekday alone would be read to a candidate as the wrong day.
+              when: shortWhen(i.scheduled_at),
+              // The same moment as the change tools take it: a date and a 24-hour time in Kuala Lumpur.
+              date: klDateOf(i.scheduled_at),
+              time: klTimeOf(i.scheduled_at),
+              duration_minutes: i.duration_minutes,
               kind: i.kind,
+              place: i.place,
               interviewer: i.interviewer_name,
+              notes: notesExcerpt(i.notes),
               status: i.status,
+              application_stage: i.application_stage,
+              application_outcome: i.application_outcome,
             })),
           };
         }),
@@ -654,6 +715,8 @@ export function createHireTools(
     result.ok ? { ...result, data: { ...result.data, name: result.data.title } } : result;
   // closes_on is an absolute date; without this the model has to guess the year.
   const today = ` Today in Malaysia is ${klToday(now())}.`;
+  // An interview is at a day and an hour: "Tuesday at 3" and "in an hour" need the weekday and the time to count from.
+  const todayWithTime = ` Today in Malaysia is ${klTodayWords(now())}.`;
   return {
     ...read,
     createJob: tool({
@@ -766,6 +829,47 @@ export function createHireTools(
         "Use the candidate's id from listCandidates or listTalentPool and the job's id from listJobs.",
       inputSchema: moveToPipelineInput,
       execute: async (input) => moveToPipeline(ctx, input),
+    }),
+    // Each result carries the interview's `id` with `candidate` and `job`, which is how a later card learns which
+    // interview it was. For the two that make one, that id is the NEW interview's. None carries the invitation
+    // (`withoutInvitation`): the Interviews screen hands that over.
+    scheduleInterview: tool({
+      description:
+        "Schedule ONE interview for an active application. Use the application's id from listApplications. " +
+        'Give the date and the time in Kuala Lumpur. Nothing is sent to the candidate.' +
+        todayWithTime,
+      inputSchema: scheduleInterviewInput,
+      execute: async (input) => withoutInvitation(await scheduleInterview(ctx, input, now())),
+    }),
+    recordPastInterview: tool({
+      description:
+        'Record ONE interview that has ALREADY taken place and was never scheduled here, with what happened (completed or no_show). ' +
+        "Use the application's id from listApplications. Only when the user said it already happened. No invitation is made." +
+        todayWithTime,
+      inputSchema: recordPastInterviewInput,
+      execute: async (input) => withoutInvitation(await recordPastInterview(ctx, input, now())),
+    }),
+    rescheduleInterview: tool({
+      description:
+        "Change ONE scheduled interview: its time or any detail. Use the interview's id from listInterviews. Send only what changes." +
+        todayWithTime,
+      inputSchema: rescheduleInterviewInput,
+      execute: async (input) => withoutInvitation(await rescheduleInterview(ctx, input, now())),
+    }),
+    cancelInterview: tool({
+      description: 'Cancel ONE scheduled interview. It stays in the list as cancelled.',
+      inputSchema: cancelInterviewInput,
+      execute: async (input) => withoutInvitation(await cancelInterview(ctx, input)),
+    }),
+    setInterviewOutcome: tool({
+      description: 'Mark ONE scheduled interview completed, or a no-show.',
+      inputSchema: setInterviewOutcomeInput,
+      execute: async (input) => withoutInvitation(await setInterviewOutcome(ctx, input)),
+    }),
+    reopenInterview: tool({
+      description: 'Mark ONE cancelled, completed or no-show interview as scheduled again.',
+      inputSchema: reopenInterviewInput,
+      execute: async (input) => withoutInvitation(await reopenInterview(ctx, input)),
     }),
   };
 }

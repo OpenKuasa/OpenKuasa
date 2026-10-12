@@ -10,6 +10,7 @@
 
 import { deletionCheckFor, type DeletionCheck } from '@/lib/ai/hire-deletions';
 import { poolCheckFor, type PoolCheck } from '@/lib/ai/hire-pool-gate';
+import { interviewCheckFor, type InterviewCheck } from '@/lib/ai/hire-interview-gate';
 import type { ToolSet } from 'ai';
 import { CRM_WRITE_TOOL_NAMES, createCrmTools, type CrmAccess } from '@/lib/ai/crm-tools';
 import { createHireTools, type HeldCv } from '@/lib/ai/hire-tools';
@@ -74,7 +75,7 @@ export type HireAccess = {
 };
 
 /** Hiring tools that change data. */
-export const HIRE_WRITE_TOOL_NAMES = ['createJob', 'updateJob', 'setJobStatus', 'deleteJob', 'updateCareersPage', 'updateApplicationForm', 'moveApplication', 'rejectApplication', 'reopenApplication', 'rateApplication', 'addCandidate', 'updateCandidate', 'deleteApplication', 'deleteCandidate', 'setPoolStatus', 'moveToPipeline'] as const;
+export const HIRE_WRITE_TOOL_NAMES = ['createJob', 'updateJob', 'setJobStatus', 'deleteJob', 'updateCareersPage', 'updateApplicationForm', 'moveApplication', 'rejectApplication', 'reopenApplication', 'rateApplication', 'addCandidate', 'updateCandidate', 'deleteApplication', 'deleteCandidate', 'setPoolStatus', 'moveToPipeline', 'scheduleInterview', 'recordPastInterview', 'rescheduleInterview', 'cancelInterview', 'setInterviewOutcome', 'reopenInterview'] as const;
 
 /** The HR data an agent reads, who is asking, and whether they may change it. */
 export type PeopleAccess = { data: PeopleData; viewer: PeopleViewer; write?: PeopleWrite };
@@ -172,6 +173,8 @@ export type ProductToolkit = {
   checkDeletion?: DeletionCheck;
   /** Hiring only: the server read asked before a talent pool change is put to the user (see hire-pool-gate.ts). */
   checkPoolChange?: PoolCheck;
+  /** Hiring only: the server read asked before an interview change is put to the user (see hire-interview-gate.ts). */
+  checkInterviewChange?: InterviewCheck;
 };
 
 function split(all: ToolSet, writeNames: readonly string[]): Pick<ProductToolkit, 'read' | 'write'> {
@@ -202,7 +205,7 @@ export function hireProduct(hire: HireAccess): ProductToolkit {
   const all = createHireTools(
     hire.data, () => new Date(), hire.write, { origin: hire.origin ?? null }, hire.files, cvShelf,
   );
-  return { key: 'hire', name: 'Lekir', ...split(all, HIRE_WRITE_TOOL_NAMES), cvShelf, checkDeletion: deletionCheckFor(hire.data), checkPoolChange: poolCheckFor(hire.data) };
+  return { key: 'hire', name: 'Lekir', ...split(all, HIRE_WRITE_TOOL_NAMES), cvShelf, checkDeletion: deletionCheckFor(hire.data), checkPoolChange: poolCheckFor(hire.data), checkInterviewChange: interviewCheckFor(hire.data) };
 }
 
 /** Lekiu: staff, leave, claims, overtime, attendance, payroll and performance. */

@@ -22,7 +22,7 @@ describe('LEKIR_SYSTEM', () => {
   it('says what it can change, in step with the change tools it holds', () => {
     expect(t).toContain('create, edit, open, pause, close, reopen or delete jobs');
     // A change tool for something else means this line has to grow with it.
-    expect([...HIRE_WRITE_TOOL_NAMES].every((name) => /Job(Status)?$|^updateCareersPage$|^updateApplicationForm$|^(move|reject|reopen|rate|delete)Application$|^(add|update|delete)Candidate$|^setPoolStatus$|^moveToPipeline$/.test(name))).toBe(true);
+    expect([...HIRE_WRITE_TOOL_NAMES].every((name) => /Job(Status)?$|^updateCareersPage$|^updateApplicationForm$|^(move|reject|reopen|rate|delete)Application$|^(add|update|delete)Candidate$|^setPoolStatus$|^moveToPipeline$|^(schedule|reschedule|cancel|reopen)Interview$|^recordPastInterview$|^setInterviewOutcome$/.test(name))).toBe(true);
     expect(t).toContain('you can prepare two changes to the talent pool');
     expect(t).toContain('you can prepare two deletions');
     expect(t).toContain('you can prepare two changes to a candidate: add one by hand, and edit one\'s details');

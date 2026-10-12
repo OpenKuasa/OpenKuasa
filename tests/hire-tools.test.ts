@@ -7,12 +7,14 @@ import { HIRE_WRITE_TOOL_NAMES, PEOPLE_WRITE_TOOL_NAMES, REACH_WRITE_TOOL_NAMES 
 import {
   addCandidateInput, updateCandidateInput, deleteApplicationInput, deleteCandidateInput,
   setPoolStatusInput, moveToPipelineInput,
+  scheduleInterviewInput, recordPastInterviewInput, rescheduleInterviewInput, cancelInterviewInput, setInterviewOutcomeInput, reopenInterviewInput,
   closeApplicationInput, createJobInput, deleteJobInput, moveApplicationInput, rateApplicationInput, reopenApplicationInput,
   setJobStatusInput, updateApplicationFormInput, updateCareersPageInput, updateJobInput,
 } from '@/lib/hire/capabilities';
+import { HIRE_INTERVIEW_TOOL_NAMES } from '@/lib/ai/hire-interview-gate';
+import { klTodayWords, shortWhen } from '@/lib/hire/interview-time';
 import { createReachTools } from '@/lib/ai/tools';
 import { liveStepStatus, toolMeta } from '@/components/chat/tool-parts';
-import { formatWhen } from '@/lib/reach/overview';
 import { funnelCounts } from '@/lib/hire/applications-view';
 import { timeToHire } from '@/lib/hire/dashboard';
 import { createSeedHireData } from '@/lib/hire/seed';
@@ -21,7 +23,7 @@ import type { CvRead, CvReader } from '@/lib/hire/cv-read';
 import { HIRE_READ_CAP, type HireData } from '@/lib/hire/types';
 
 // The real schemas; only the four application changes are recorded instead of run.
-const applied = vi.hoisted(() => ({ move: vi.fn(), close: vi.fn(), reopen: vi.fn(), rate: vi.fn(), addCandidate: vi.fn(), updateCandidate: vi.fn(), deleteApplication: vi.fn(), deleteCandidate: vi.fn(), setPoolStatus: vi.fn(), moveToPipeline: vi.fn() }));
+const applied = vi.hoisted(() => ({ move: vi.fn(), close: vi.fn(), reopen: vi.fn(), rate: vi.fn(), addCandidate: vi.fn(), updateCandidate: vi.fn(), deleteApplication: vi.fn(), deleteCandidate: vi.fn(), setPoolStatus: vi.fn(), moveToPipeline: vi.fn(), scheduleInterview: vi.fn(), recordPastInterview: vi.fn(), rescheduleInterview: vi.fn(), cancelInterview: vi.fn(), setInterviewOutcome: vi.fn(), reopenInterview: vi.fn() }));
 vi.mock('@/lib/hire/capabilities', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/hire/capabilities')>()),
   moveApplication: applied.move,
@@ -34,6 +36,12 @@ vi.mock('@/lib/hire/capabilities', async (importOriginal) => ({
   deleteCandidate: applied.deleteCandidate,
   setPoolStatus: applied.setPoolStatus,
   moveToPipeline: applied.moveToPipeline,
+  scheduleInterview: applied.scheduleInterview,
+  recordPastInterview: applied.recordPastInterview,
+  rescheduleInterview: applied.rescheduleInterview,
+  cancelInterview: applied.cancelInterview,
+  setInterviewOutcome: applied.setInterviewOutcome,
+  reopenInterview: applied.reopenInterview,
 }));
 
 const NOW = new Date('2026-10-10T04:00:00Z');
@@ -256,7 +264,9 @@ describe('hire tools', () => {
     expect(result.interviews.length).toBeGreaterThan(0);
     for (const row of result.interviews) expect(typeof row.when).toBe('string');
     const first = result.interviews[0];
-    expect(first.when).toBe(formatWhen(first.scheduled_at, NOW));
+    // The date with its year and a 12-hour time, from the hiring code's own formatter.
+    expect(first.when).toBe(shortWhen(first.scheduled_at));
+    expect(first.when).toMatch(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2} [A-Z][a-z]{2} \d{4}, \d{1,2}:\d{2} (am|pm)$/);
   });
 
   it('gives the same time to hire as the helper', async () => {
@@ -466,7 +476,10 @@ describe('hire change tools', () => {
       'moveApplication', 'rejectApplication', 'reopenApplication', 'rateApplication',
       'addCandidate', 'updateCandidate', 'deleteApplication', 'deleteCandidate',
       'setPoolStatus', 'moveToPipeline',
+      'scheduleInterview', 'recordPastInterview', 'rescheduleInterview', 'cancelInterview', 'setInterviewOutcome', 'reopenInterview',
     ]);
+    // The six the interview gate holds to one a turn are exactly the six added here.
+    expect(HIRE_WRITE_TOOL_NAMES.slice(-6)).toEqual([...HIRE_INTERVIEW_TOOL_NAMES]);
   });
   it('gives a writer nothing beyond the lookups except the listed change tools, so each one needs approval', () => {
     const writerTools = createHireTools(data, NOW, { ctx, canWrite: true });
@@ -507,6 +520,12 @@ describe('hire change tools', () => {
     expect(t.deleteCandidate.inputSchema).toBe(deleteCandidateInput);
     expect(t.setPoolStatus.inputSchema).toBe(setPoolStatusInput);
     expect(t.moveToPipeline.inputSchema).toBe(moveToPipelineInput);
+    expect(t.scheduleInterview.inputSchema).toBe(scheduleInterviewInput);
+    expect(t.recordPastInterview.inputSchema).toBe(recordPastInterviewInput);
+    expect(t.rescheduleInterview.inputSchema).toBe(rescheduleInterviewInput);
+    expect(t.cancelInterview.inputSchema).toBe(cancelInterviewInput);
+    expect(t.setInterviewOutcome.inputSchema).toBe(setInterviewOutcomeInput);
+    expect(t.reopenInterview.inputSchema).toBe(reopenInterviewInput);
   });
   it('describes the two candidate changes as agreed', () => {
     const t = createHireTools(data, NOW, { ctx, canWrite: true }) as Record<string, { description: string }>;
@@ -621,6 +640,87 @@ describe('hire change tools', () => {
       expect(fn.mock.calls[0][0], name).toBe(ctx);
       expect(fn.mock.calls[0][1], name).toBe(input);
     }
+  });
+  it('describes the six interview changes as agreed, three of them with the weekday and the time to count from', () => {
+    const t = createHireTools(data, NOW, { ctx, canWrite: true }) as Record<string, { description: string }>;
+    // 04:00 UTC on 10 October 2026 is noon on that Saturday in Kuala Lumpur.
+    const TODAY = ' Today in Malaysia is Saturday, 2026-10-10, and the time there is 12:00.';
+    expect(TODAY).toBe(` Today in Malaysia is ${klTodayWords(NOW)}.`);
+    expect(t.scheduleInterview.description).toBe(
+      `Schedule ONE interview for an active application. Use the application's id from listApplications. Give the date and the time in Kuala Lumpur. Nothing is sent to the candidate.${TODAY}`,
+    );
+    expect(t.recordPastInterview.description).toBe(
+      'Record ONE interview that has ALREADY taken place and was never scheduled here, with what happened (completed or no_show). ' +
+        `Use the application's id from listApplications. Only when the user said it already happened. No invitation is made.${TODAY}`,
+    );
+    expect(t.rescheduleInterview.description).toBe(
+      `Change ONE scheduled interview: its time or any detail. Use the interview's id from listInterviews. Send only what changes.${TODAY}`,
+    );
+    expect(t.cancelInterview.description).toBe('Cancel ONE scheduled interview. It stays in the list as cancelled.');
+    expect(t.setInterviewOutcome.description).toBe('Mark ONE scheduled interview completed, or a no-show.');
+    expect(t.reopenInterview.description).toBe('Mark ONE cancelled, completed or no-show interview as scheduled again.');
+  });
+  it('the day to count from is Kuala Lumpur\'s, past midnight there while it is still the day before in UTC', () => {
+    const lateUtc = new Date('2026-10-10T17:00:00Z'); // 01:00 on Sunday 11 Oct in Kuala Lumpur
+    const t = createHireTools(data, lateUtc, { ctx, canWrite: true }) as Record<string, { description: string }>;
+    for (const name of ['scheduleInterview', 'recordPastInterview', 'rescheduleInterview']) {
+      expect(t[name].description.endsWith(' Today in Malaysia is Sunday, 2026-10-11, and the time there is 01:00.'), name).toBe(true);
+    }
+    // The job tools keep their own line, the date alone.
+    expect(t.createJob.description.endsWith(' Today in Malaysia is 2026-10-11.')).toBe(true);
+  });
+  it('runs each interview change through its capability with the input unchanged, and the clock for the three that have a time', async () => {
+    const t = createHireTools(data, NOW, { ctx, canWrite: true }) as Record<
+      string,
+      { execute: (i: unknown, o: unknown) => Promise<unknown> }
+    >;
+    const id = '11111111-1111-4111-8111-111111111111';
+    const INVITATION = 'Hi Aina Rahman,\n\nYou are invited to an interview for the Sales Executive role at Kedai Kopi Aina.';
+    const out = { ok: true, data: { id, candidate: 'Aina Rahman', job: 'Sales Executive', message: 'Done.', invitation: INVITATION, confirmed: true } };
+    const when = { date: '2026-10-20', time: '15:00', duration_minutes: 60, kind: 'video' };
+    const cases: [string, ReturnType<typeof vi.fn>, Record<string, unknown>, boolean][] = [
+      ['scheduleInterview', applied.scheduleInterview, { application_id: id, ...when }, true],
+      ['recordPastInterview', applied.recordPastInterview, { application_id: id, ...when, outcome: 'completed' }, true],
+      ['rescheduleInterview', applied.rescheduleInterview, { id, time: '16:00' }, true],
+      ['cancelInterview', applied.cancelInterview, { id }, false],
+      ['setInterviewOutcome', applied.setInterviewOutcome, { id, outcome: 'no_show' }, false],
+      ['reopenInterview', applied.reopenInterview, { id }, false],
+    ];
+    for (const [name, fn, input, clock] of cases) {
+      fn.mockReset();
+      fn.mockResolvedValue(out);
+      const got = await t[name].execute(input, { toolCallId: 't', messages: [] });
+      // The capability's answer as it is, but for the invitation: that is the Interviews screen's to hand over, never a model's.
+      expect(got, name).toEqual({ ok: true, data: { id, candidate: 'Aina Rahman', job: 'Sales Executive', message: 'Done.', confirmed: true } });
+      expect(JSON.stringify(got), name).not.toContain('invit');
+      expect(fn, name).toHaveBeenCalledTimes(1);
+      expect(fn.mock.calls[0][0], name).toBe(ctx);
+      expect(fn.mock.calls[0][1], name).toBe(input);
+      if (clock) expect((fn.mock.calls[0][2] as Date).getTime(), name).toBe(NOW.getTime());
+      else expect(fn.mock.calls[0], name).toHaveLength(2);
+    }
+  });
+  it('each interview change has a card of its own, and reads as a change while a specialist prepares it', () => {
+    const labels: Record<string, string> = {
+      scheduleInterview: 'Schedule interview', recordPastInterview: 'Record a past interview', rescheduleInterview: 'Reschedule or edit interview',
+      cancelInterview: 'Cancel interview', setInterviewOutcome: 'Interview outcome', reopenInterview: 'Interview scheduled again',
+    };
+    for (const name of HIRE_INTERVIEW_TOOL_NAMES) {
+      expect(toolMeta(name).isFallback, name).toBe(false);
+      expect(toolMeta(name).label, name).toBe(labels[name]);
+      expect(liveStepStatus(name), name).toBe('Preparing a change…');
+    }
+    // Every other hiring change still has no entry and is named for what it does.
+    for (const name of HIRE_WRITE_TOOL_NAMES.filter((n) => !(HIRE_INTERVIEW_TOOL_NAMES as readonly string[]).includes(n))) {
+      expect(toolMeta(name).isFallback, name).toBe(true);
+    }
+  });
+  it('a refusal from an interview change is handed on as it is', async () => {
+    const t = createHireTools(data, NOW, { ctx, canWrite: true }) as Record<string, { execute: (i: unknown, o: unknown) => Promise<unknown> }>;
+    const refused = { ok: false, error: 'This interview is no longer scheduled. Mark it as scheduled again first.' };
+    applied.cancelInterview.mockReset();
+    applied.cancelInterview.mockResolvedValue(refused);
+    expect(await t.cancelInterview.execute({ id: '11111111-1111-4111-8111-111111111111' }, { toolCallId: 't', messages: [] })).toBe(refused);
   });
 });
 
@@ -1048,6 +1148,106 @@ describe('listTalentPool, for the pool changes', () => {
   it('says what it returns', () => {
     expect((createHireTools(data, NOW).listTalentPool as unknown as { description: string }).description).toBe(
       'List the saved candidates in the talent pool with their headline, skills, location, source. Each row has the candidate\'s id, which setPoolStatus and moveToPipeline take. Email and phone are returned only when includeContact is set. Filter by a name, a skill, a location or their pool status. If the result has "several_match", the name fits more than one person: prepare no change and ask the user which one.',
+    );
+  });
+});
+
+describe('listInterviews, for the interview changes', () => {
+  const AT = '2026-10-20T07:00:00.000Z'; // 3:00 pm on Tuesday 20 October 2026 in Kuala Lumpur
+  const interview = (id: string, over: Record<string, unknown> = {}) => ({
+    id, application_id: 'a1', candidate_name: 'Aina Rahman', job_title: 'Sales Executive', scheduled_at: AT, kind: 'video',
+    interviewer_name: 'Farah Lim', status: 'scheduled', created_at: '2026-10-09T02:00:00.000Z', updated_at: '2026-10-09T02:00:00.000Z',
+    duration_minutes: 45, place: 'https://meet.example.com/abc', notes: 'Second round.', application_stage: 'interview', application_outcome: 'active',
+    ...over,
+  });
+  const from = (...rows: ReturnType<typeof interview>[]): HireData => ({ ...createSeedHireData(NOW), listInterviews: async () => rows as never });
+  const list = (input: Record<string, unknown>, source: HireData) =>
+    (createHireTools(source, NOW).listInterviews as unknown as { execute: (i: unknown, o: unknown) => Promise<Loose> })
+      .execute(input, { toolCallId: 't', messages: [] });
+  // One application with two interviews, a first and a second round; and someone else's.
+  const three = from(
+    interview('i1'),
+    interview('i2', { scheduled_at: '2026-10-22T03:00:00.000Z', status: 'completed', kind: 'onsite', place: 'Level 3, Menara Aina' }),
+    interview('i3', { application_id: 'a2', candidate_name: 'Farid bin Osman', job_title: 'Barista', scheduled_at: '2026-10-21T02:00:00.000Z' }),
+  );
+
+  it('gives each row what a change needs: both ids, the date and the time in Kuala Lumpur, the length, the place, and how its application stands', async () => {
+    const out = await list({}, three);
+    expect(out.total).toBe(3);
+    expect(out.interviews[0]).toEqual({
+      id: 'i1', application_id: 'a1', candidate: 'Aina Rahman', job: 'Sales Executive', scheduled_at: AT, when: 'Tue 20 Oct 2026, 3:00 pm',
+      date: '2026-10-20', time: '15:00', duration_minutes: 45, kind: 'video', place: 'https://meet.example.com/abc', interviewer: 'Farah Lim',
+      notes: 'Second round.', status: 'scheduled', application_stage: 'interview', application_outcome: 'active',
+    });
+    expect(out.several_match).toBeUndefined();
+  });
+  it('`when` always carries the date and the year, however far off the interview is, and never a bare weekday', async () => {
+    // Eleven months ahead and eleven months back: "Thu · 4:00pm" would be a wrong day told to a candidate.
+    const far = await list({}, from(interview('i1', { scheduled_at: '2027-09-16T08:00:00.000Z' }), interview('i2', { scheduled_at: '2025-11-13T08:00:00.000Z', status: 'completed' })));
+    expect(far.interviews.map((i: { when: string }) => i.when).sort()).toEqual(['Thu 13 Nov 2025, 4:00 pm', 'Thu 16 Sep 2027, 4:00 pm']);
+    // Today and tomorrow are written the same way: a date, never "Today" or "Tomorrow".
+    const soon = await list({}, from(interview('i1', { scheduled_at: new Date(NOW.getTime() + 3_600_000).toISOString() })));
+    expect(soon.interviews[0].when).toMatch(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2} [A-Z][a-z]{2} \d{4}, \d{1,2}:\d{2} (am|pm)$/);
+  });
+  it('the date and the time are Kuala Lumpur\'s, past midnight there', async () => {
+    // 16:30 UTC on the 20th is 00:30 on the 21st in Kuala Lumpur.
+    const out = await list({}, from(interview('i1', { scheduled_at: '2026-10-20T16:30:00.000Z' })));
+    expect(out.interviews[0]).toMatchObject({ date: '2026-10-21', time: '00:30' });
+  });
+  it('cuts the notes at 300 characters, and leaves short ones and none as they are', async () => {
+    const out = await list({}, from(interview('i1', { notes: 'n'.repeat(400) }), interview('i2', { notes: null }), interview('i3', { notes: 'n'.repeat(300) })));
+    expect(out.interviews.map((i: { notes: string | null }) => i.notes)).toEqual([`${'n'.repeat(300)}…`, null, 'n'.repeat(300)]);
+  });
+  it('narrows by a candidate\'s name and by a job, in any letter case', async () => {
+    expect((await list({ candidate: 'farid' }, three)).interviews.map((i: { id: string }) => i.id)).toEqual(['i3']);
+    expect((await list({ jobTitle: 'sales exec' }, three)).interviews.map((i: { id: string }) => i.id)).toEqual(['i1', 'i2']);
+    expect((await list({ candidate: 'aina', status: 'completed' }, three)).interviews.map((i: { id: string }) => i.id)).toEqual(['i2']);
+    expect(await list({ candidate: 'nobody' }, three)).toMatchObject({ total: 0, interviews: [] });
+  });
+  it('says so when the name fits more than one interview, even two of ONE application, and only then', async () => {
+    const two = await list({ candidate: 'Aina' }, three);
+    expect(two.interviews.map((i: { id: string; application_id: string }) => [i.id, i.application_id])).toEqual([['i1', 'a1'], ['i2', 'a1']]);
+    expect(two.several_match).toBe(
+      'More than one interview matches this name: Aina Rahman (Sales Executive, Tue 20 Oct 2026, 3:00 pm, scheduled); ' +
+        'Aina Rahman (Sales Executive, Thu 22 Oct 2026, 11:00 am, completed). ' +
+        'Do not choose one. Prepare no change: say which interviews match and ask the user which one they mean.',
+    );
+    // One match is not a question.
+    expect((await list({ candidate: 'Farid' }, three)).several_match).toBeUndefined();
+    expect((await list({ candidate: 'Aina', status: 'completed' }, three)).several_match).toBeUndefined();
+    // With no name and no job asked for, a long list is just a list.
+    expect((await list({}, three)).several_match).toBeUndefined();
+    expect((await list({ candidate: '   ' }, three)).several_match).toBeUndefined();
+    expect((await list({ when: 'upcoming' }, three)).several_match).toBeUndefined();
+  });
+  it('says so too when a job was asked for and two of the interviews left are with the same person', async () => {
+    // The model must never pick between two interviews of one candidate, whichever filter it used.
+    const byJob = await list({ jobTitle: 'Sales Executive' }, three);
+    expect(byJob.interviews.map((i: { id: string }) => i.id)).toEqual(['i1', 'i2']);
+    expect(byJob.several_match).toBe(
+      'More than one interview matches this name: Aina Rahman (Sales Executive, Tue 20 Oct 2026, 3:00 pm, scheduled); ' +
+        'Aina Rahman (Sales Executive, Thu 22 Oct 2026, 11:00 am, completed). ' +
+        'Do not choose one. Prepare no change: say which interviews match and ask the user which one they mean.',
+    );
+    // A job with one interview each for two different people is a list, not a question.
+    const twoPeople = from(interview('i1'), interview('i3', { application_id: 'a2', candidate_name: 'Farid bin Osman', scheduled_at: '2026-10-21T02:00:00.000Z' }));
+    expect((await list({ jobTitle: 'Sales Executive' }, twoPeople)).several_match).toBeUndefined();
+    // Narrowed to one of the two, it is clear again.
+    expect((await list({ jobTitle: 'Sales Executive', status: 'scheduled' }, three)).several_match).toBeUndefined();
+  });
+  it('never lets the model choose the workspace, and takes no id', () => {
+    const shape = (createHireTools(three, NOW).listInterviews as unknown as { inputSchema: { shape: Record<string, unknown> } }).inputSchema.shape;
+    expect(Object.keys(shape).sort()).toEqual(['candidate', 'jobTitle', 'limit', 'status', 'when']);
+  });
+  it('says what it returns, and which changes take its ids', () => {
+    expect((createHireTools(three, NOW).listInterviews as unknown as { description: string }).description).toBe(
+      'List interviews with the candidate, the job, the time, the length, how it is held (video, onsite, phone), the place or link, the interviewer, the notes and the status. ' +
+        'Ask for upcoming or past ones, or filter by status, by candidate name or by job. ' +
+        '`when` is the day, the date and the time in Kuala Lumpur, as a person reads it; use it when telling the user the time, and always give the date with it. ' +
+        '`date` and `time` are that same time in Kuala Lumpur, in the form the change tools take. ' +
+        'Each row has the interview\'s id, which rescheduleInterview, cancelInterview, setInterviewOutcome and reopenInterview take, and its application\'s id. ' +
+        'To schedule an interview or record a past one, use the application\'s id from listApplications. ' +
+        'If the result has "several_match", more than one interview fits, or one person has more than one: prepare no change and ask the user which one.',
     );
   });
 });

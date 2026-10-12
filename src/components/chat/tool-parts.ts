@@ -18,6 +18,8 @@ import {
 } from '@/lib/chat/delegation';
 import {
   Briefcase,
+  CalendarCheck,
+  CalendarClock,
   CalendarDays,
   ClipboardList,
   Coins,
@@ -66,6 +68,9 @@ function cvCandidate(output: unknown): string | null {
     : null;
 }
 
+/** What a specialist's card says while a change is being prepared. */
+const PREPARING = 'Preparing a change…';
+
 const TOOL_META: Record<string, ToolMeta> = {
   getAdsOverview: { label: 'Ads overview', Icon: PieChart },
   getCampaigns: { label: 'Campaigns', Icon: Megaphone },
@@ -90,6 +95,15 @@ const TOOL_META: Record<string, ToolMeta> = {
   listTalentPool: { label: 'Talent pool', Icon: UserSearch },
   listCandidates: { label: 'Candidates', Icon: Users },
   listInterviews: { label: 'Interviews', Icon: CalendarDays },
+  // The six interview changes. A change tool otherwise has no entry and is named for what it does; these have one,
+  // for the icon. `running` keeps a specialist's card saying a change is being prepared: that card takes a tool with
+  // no entry to be a change, and would say "Looking up schedule interview…" of one that has an entry.
+  scheduleInterview: { label: 'Schedule interview', Icon: CalendarDays, running: PREPARING },
+  recordPastInterview: { label: 'Record a past interview', Icon: CalendarCheck, running: PREPARING },
+  rescheduleInterview: { label: 'Reschedule or edit interview', Icon: CalendarClock, running: PREPARING },
+  cancelInterview: { label: 'Cancel interview', Icon: CalendarDays, running: PREPARING },
+  setInterviewOutcome: { label: 'Interview outcome', Icon: CalendarCheck, running: PREPARING },
+  reopenInterview: { label: 'Interview scheduled again', Icon: CalendarDays, running: PREPARING },
   getTimeToHire: { label: 'Time to hire', Icon: Timer },
   getSourceBreakdown: { label: 'Candidate sources', Icon: Waypoints },
   getPeopleOverview: { label: 'Team overview', Icon: PieChart },
@@ -131,7 +145,7 @@ function humanize(name: string): string {
 
 export function toolMeta(name: string): ToolMeta & { isFallback: boolean } {
   const known = TOOL_META[name];
-  // Tools with no entry are the change tools, named for what they do.
+  // A tool with no entry is a change tool, named for what it does. (The six interview changes have entries, for their icons.)
   return known
     ? { ...known, isFallback: false }
     : { label: humanize(name) || 'Tool', Icon: Wrench, isFallback: true };
