@@ -53,6 +53,8 @@ import {
   interviewLinkProblem,
   interviewNotLookedUp,
   interviewTarget,
+  rejectedByUser,
+  sameInterviewTarget,
 } from '@/lib/ai/hire-interview-gate';
 import type { ProductToolkit } from '@/lib/ai/products';
 import { logModelCall, logModelError, modelErrorCode } from '@/lib/ai/call-log';
@@ -424,9 +426,13 @@ function specialistTools(
         // link typed for an earlier interview, and not another interview's. Not the rest of a lookup: a cover letter
         // is a stranger's text. Here a card is an `applyChange` call for an interview change a specialist prepared.
         // The other way for the person: give the link again in their next message, or add it on the Interviews screen.
-        const wasInterviewCard = (call: { toolName?: unknown; input?: unknown }) => {
+        // A card the user rejected for this very application or interview does not close it: a correction keeps the link.
+        const rejected = rejectedByUser(messages);
+        const wasInterviewCard = (call: { toolName?: unknown; toolCallId?: unknown; input?: unknown }) => {
           const id = call.toolName === APPLY_TOOL ? (call.input as { proposalId?: unknown } | null | undefined)?.proposalId : undefined;
-          return typeof id === 'string' && INTERVIEW_CHANGES.has(team.proposals.get(id)?.action ?? '');
+          const shown = typeof id === 'string' ? team.proposals.get(id) : undefined;
+          if (!shown || !INTERVIEW_CHANGES.has(shown.action)) return false;
+          return !(rejected.has(call.toolCallId) && sameInterviewTarget(shown.action, shown.input, name, input));
         };
         // And the interviewer is a name: a link in it would reach the candidate unchecked, so it is refused outright.
         const linked = INTERVIEW_CHANGES.has(name) ? interviewLinkProblem(messages, name, input, results, wasInterviewCard) : null;

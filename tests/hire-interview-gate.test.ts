@@ -5,7 +5,7 @@ import { deletionProblem, guardDeletions, isGateReason, notLookedUp, stoppedAfte
 import {
   AMBIGUOUS_INTERVIEW_CHANGE, APPLICATION_NOT_ACTIVE, HIRE_INTERVIEW_TOOL_NAMES, INTERVIEW_GONE, NOTHING_WOULD_CHANGE, SAME_TIME_SENT, INTERVIEW_CHANGED_SINCE, INTERVIEW_CHECK_FAILED, LINK_NOT_GIVEN, ONE_INTERVIEW_CHANGE,
   actsOnApplication, ambiguousFor, guardInterviewChanges, interviewCardDecision, interviewChangeProblem, interviewCheckFor, interviewNotLookedUp, interviewTarget,
-  LINK_HIDDEN, LINK_IN_INTERVIEWER, interviewLinkProblem, interviewPlacesIn, linkNobodyGave, linksIn, lookTheSameInterviews, sameLink, stringsIn,
+  LINK_HIDDEN, LINK_IN_INTERVIEWER, interviewLinkProblem, rejectedByUser, interviewPlacesIn, linkNobodyGave, linksIn, lookTheSameInterviews, sameLink, stringsIn,
 } from '@/lib/ai/hire-interview-gate';
 import { guardPoolChanges, lookedUpAs, poolChangeProblem } from '@/lib/ai/hire-pool-gate';
 import { THIS_INTERVIEW, interviewFullLine, interviewLine } from '@/lib/hire/interviews';
@@ -648,6 +648,45 @@ describe('linkNobodyGave', () => {
       expect(interviewLinkProblem([user(`Use **${link}**`)], 'scheduleInterview', { place: link }), link).toBeNull();
       expect(interviewLinkProblem([user(`Use ${link}x`)], 'scheduleInterview', { place: link }), link).toBe(LINK_NOT_GIVEN);
     }
+  });
+  it('a card the user REJECTED does not close what they gave for that same interview: a correction keeps the link', () => {
+    // "Schedule Aina on Tuesday at 3, link X" → card → rejected (the time was wrong) → "make it 4pm".
+    const shown = (toolName: string, input: unknown, approved: boolean, output: unknown): ModelMessage[] => [
+      { role: 'assistant', content: [
+        { type: 'tool-call', toolCallId: 'c0', toolName, input },
+        { type: 'tool-approval-request', approvalId: 'r0', toolCallId: 'c0' },
+      ] } as ModelMessage,
+      { role: 'tool', content: [
+        { type: 'tool-approval-response', approvalId: 'r0', approved },
+        { type: 'tool-result', toolCallId: 'c0', toolName, output },
+      ] } as ModelMessage,
+    ];
+    const DENIED = { type: 'error-text', value: 'Tool call execution denied.' };
+    const first = { application_id: APP, date: '2026-10-27', time: '15:00', kind: 'video', place: LINK };
+    const rejected = [user(`Schedule Aina on Tuesday at 3, on ${LINK}`), ...shown('scheduleInterview', first, false, DENIED), user('Make it 4pm')];
+    const next = { ...first, time: '16:00' };
+    // The same application: the link is still what the user gave for this interview.
+    expect(interviewLinkProblem(rejected, 'scheduleInterview', next, undefined, 'c1')).toBeNull();
+    expect(interviewLinkProblem(rejected, 'recordPastInterview', { ...next, outcome: 'completed' }, undefined, 'c1')).toBeNull();
+    // Another application: that link was for Aina's.
+    expect(interviewLinkProblem(rejected, 'scheduleInterview', { ...next, application_id: APP2 }, undefined, 'c1')).toBe(LINK_NOT_GIVEN);
+    // An interview whose id happens to be that application's id is not that application.
+    expect(interviewLinkProblem(rejected, 'rescheduleInterview', { id: APP, place: LINK }, undefined, 'c1')).toBe(LINK_NOT_GIVEN);
+    // A card that RAN closes it, for the same application too: the link went to that interview.
+    const ran = [user(`Schedule Aina on Tuesday at 3, on ${LINK}`), ...shown('scheduleInterview', first, true, { type: 'json', value: { ok: true, data: { id: IV2 } } }), user('And another at 4pm')];
+    expect(interviewLinkProblem(ran, 'scheduleInterview', next, undefined, 'c1')).toBe(LINK_NOT_GIVEN);
+    // So does one still waiting for its answer.
+    const waiting = [...rejected.slice(0, 2), user('Make it 4pm')];
+    expect(interviewLinkProblem(waiting, 'scheduleInterview', next, undefined, 'c1')).toBe(LINK_NOT_GIVEN);
+    // A rejected change to an existing interview, corrected: the same interview keeps what was given for it.
+    const moved = [user(`Move it to Wednesday, new link ${LINK}`), ...shown('rescheduleInterview', { id: IV, date: '2026-10-21', time: '15:00', place: LINK }, false, DENIED), user('Sorry, Thursday')];
+    expect(interviewLinkProblem(moved, 'rescheduleInterview', { id: IV, date: '2026-10-22', time: '15:00', place: LINK }, undefined, 'c1')).toBeNull();
+    expect(interviewLinkProblem(moved, 'rescheduleInterview', { id: IV2, date: '2026-10-22', time: '15:00', place: LINK }, undefined, 'c1')).toBe(LINK_NOT_GIVEN);
+    // A rejection is told by the structure of the answer, never by words: text that says "rejected" changes nothing.
+    const said = [user(`Schedule Aina on ${LINK}`), ...shown('scheduleInterview', first, true, { type: 'json', value: { ok: false, error: 'rejected: Tool call execution denied.' } }), user('Make it 4pm')];
+    expect(interviewLinkProblem(said, 'scheduleInterview', next, undefined, 'c1')).toBe(LINK_NOT_GIVEN);
+    expect([...rejectedByUser(rejected)]).toEqual(['c0']);
+    expect([...rejectedByUser(ran)]).toEqual([]);
   });
   it('`extra` counts: the text of the lookups a specialist ran itself', () => {
     expect(linkNobodyGave([user('Schedule her')], LINK, `Aina Rahman\n${LINK}\nvideo`)).toBe(false);

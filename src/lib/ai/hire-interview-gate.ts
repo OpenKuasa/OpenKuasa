@@ -399,6 +399,30 @@ export type IsInterviewCard = (call: { toolName?: unknown; toolCallId?: unknown;
 const anInterviewCall: IsInterviewCard = (call) => isInterviewChange(call.toolName);
 
 /**
+ * The calls in these messages whose card the user REJECTED, by call id: a card of their own (not an automatic one)
+ * answered with `approved: false`. Read from the structure of the conversation, as `stoppedAfterApproval` reads an
+ * approval: text cannot make one.
+ */
+export function rejectedByUser(messages: readonly ModelMessage[]): Set<unknown> {
+  const cardOf = new Map<unknown, unknown>();
+  const ids = new Set<unknown>();
+  type Wide = { type?: unknown; toolCallId?: unknown; approvalId?: unknown; approved?: unknown; isAutomatic?: unknown };
+  for (const message of messages) {
+    for (const part of partsOf(message) as Wide[]) {
+      if (message.role === 'assistant' && part.type === 'tool-approval-request' && part.isAutomatic !== true) cardOf.set(part.approvalId, part.toolCallId);
+      else if (message.role === 'tool' && part.type === 'tool-approval-response' && part.approved === false && cardOf.has(part.approvalId)) ids.add(cardOf.get(part.approvalId));
+    }
+  }
+  return ids;
+}
+
+/** True when two interview changes are about the same row: the same application for the two that make one, the same interview for the rest. */
+export function sameInterviewTarget(toolA: unknown, inputA: unknown, toolB: unknown, inputB: unknown): boolean {
+  const target = interviewTarget(toolA, inputA);
+  return typeof target === 'string' && Boolean(target) && actsOnApplication(toolA) === actsOnApplication(toolB) && target === interviewTarget(toolB, inputB);
+}
+
+/**
  * What the user has typed since the last interview card was shown to them, or since the conversation began when
  * none was. A card is a call (`isCard`) that reached the user, whatever they answered and whether or not they have
  * answered yet; a call a gate denied itself never did (`deniedHere`: known by its reason, or by having been stopped
@@ -430,7 +454,8 @@ function saidSinceLastCard(messages: readonly ModelMessage[], isCard: IsIntervie
  * Since the last interview card, not the whole conversation and not this
  * turn alone. A link typed for one interview must not reach the next
  * person's card; and a question the assistant asks in between ("video or
- * phone?") must not cost the user the link they gave. Not counted, because
+ * phone?") must not cost the user the link they gave. Nor must a card they
+ * rejected for the same interview (`interviewLinkProblem`). Not counted, because
  * none of them is the user typing: a CV the assistant fetched (it sits in a
  * user message, see `isHeldCvMessage`), anything an assistant wrote, a tool
  * call's input, a denial or an error, a lookup's result, and a specialist's
@@ -474,7 +499,16 @@ export function interviewLinkProblem(
   if (hasHiddenLink(sent.place) || hasHiddenLink(sent.interviewer_name)) return LINK_HIDDEN;
   // A new interview has no place yet: only what the user typed counts for it.
   const own = actsOnApplication(tool) ? [] : interviewPlacesIn(results ?? resultsIn(messages), interviewTarget(tool, input));
-  const isCard: IsInterviewCard = typeof card === 'function' ? card : (call) => anInterviewCall(call) && call.toolCallId !== card;
+  // A card the user rejected for this very row does not close what they gave for it: "make it 4pm" after a no is
+  // a correction of the same interview, and its link is still theirs. One that ran, or was for another row, does.
+  const rejected = rejectedByUser(messages);
+  const isCard: IsInterviewCard =
+    typeof card === 'function'
+      ? card
+      : (call) =>
+          anInterviewCall(call) &&
+          call.toolCallId !== card &&
+          !(rejected.has(call.toolCallId) && sameInterviewTarget(call.toolName, call.input, tool, input));
   if (linkNobodyGave(messages, sent.place, own.join('\n'), isCard)) return LINK_NOT_GIVEN;
   return linksIn(sent.interviewer_name).length > 0 ? LINK_IN_INTERVIEWER : null;
 }

@@ -3661,6 +3661,39 @@ describe('interview changes', () => {
         },
       );
 
+      it.each([[false], [true]])('a link given for an interview whose card was answered (approved: %s): a rejected card keeps it for the correction, one that ran does not', async (approved) => {
+        reset();
+        interviewScheduled.mockResolvedValue({ ok: true, data: { id: MADE_UP, application_id: APP, candidate: WHO, job: JOB, message: 'Scheduled.', confirmed: true } });
+        const first: Call = { tool: 'scheduleInterview', input: { ...NEW, place: LINK } };
+        const corrected: Call = { tool: 'scheduleInterview', input: { ...NEW, time: '16:00', place: LINK } };
+        const run = runners[mode](world());
+        seen.workerScript = own ? null : [byName, first];
+        try {
+          const shown = await exchange([say('u1', `Schedule ${WHO} for 12 January at 3pm, video, on ${LINK}`)], run, own ? [[byName], [first]] : null);
+          expect(waiting(shown)).toHaveLength(1);
+          seen.workerStep = 0;
+          seen.workerScript = own ? null : ['answer'];
+          const after = await exchange(decide(shown, approved), run, own ? [] : null);
+          expect(interviewScheduled).toHaveBeenCalledTimes(approved ? 1 : 0);
+          // The user corrects the time, and does not type the link again.
+          seen.workerStep = 0;
+          seen.refusals = [];
+          seen.workerScript = own ? null : [byName, corrected, 'answer'];
+          const next = await exchange([...after, say('u2', approved ? 'And one more at 4pm' : 'Make it 4pm')], run, own ? again(corrected) : null);
+          if (approved) {
+            // It ran: the link went to that interview, and must be given again for another.
+            expect(waiting(next)).toEqual([]);
+            if (own) expect(toolParts(next).filter((p) => p.approval?.isAutomatic).map((p) => p.approval?.reason)).toEqual([LINK_NOT_GIVEN]);
+            else expect(seen.refusals[0]).toBe(LINK_NOT_GIVEN);
+          } else {
+            expect(waiting(next)).toHaveLength(1);
+            expect(asks(next, waiting(next)[0])).toMatchObject({ action: 'scheduleInterview', input: { application_id: APP, time: '16:00', place: LINK } });
+          }
+        } finally {
+          seen.workerScript = null;
+        }
+      });
+
       it('the next thing the user says is a new turn, with one interview change of its own', async () => {
         reset();
         interviewReopened.mockResolvedValue({ ok: true, data: { id: IV2, application_id: APP, candidate: WHO, job: JOB, message: `The interview with ${WHO} is scheduled again.`, invitation: null, confirmed: true } });
