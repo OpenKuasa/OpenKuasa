@@ -186,6 +186,30 @@ describe('reading a stored file’s first bytes', () => {
   });
 });
 
+describe('a stalled store', () => {
+  /** Never answers; ends only when the request is aborted, as a real fetch does. */
+  const stalled = ((_url: unknown, init?: RequestInit) =>
+    new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+    })) as unknown as typeof fetch;
+
+  it('is given up on after a time limit and answers unreadable', async () => {
+    expect(await storedFileCheck('u', 'image/png', stalled, 20)).toBe('unreadable');
+    expect(await firstBytesOf('u', stalled, 20)).toBeNull();
+  });
+
+  it('is asked with a five second limit unless told otherwise', async () => {
+    let signal: AbortSignal | null | undefined;
+    const spy = (async (_url: unknown, init?: RequestInit) => {
+      signal = init?.signal;
+      return new Response(new Uint8Array([1]), { status: 404 });
+    }) as unknown as typeof fetch;
+    await firstBytesOf('u', spy);
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(signal?.aborted).toBe(false);
+  });
+});
+
 describe('POST /api/finance/receipt-cleanup', () => {
   const SECRET = 'cron-secret-0123456789abcdef0123456789abcdef';
   const KEY = 'test-service-key';

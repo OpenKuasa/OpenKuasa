@@ -14,14 +14,26 @@ import { INBOX_RECEIPT_BUCKET, type InboxReceiptType } from './receipts';
  * sentences and error codes are logged.
  */
 
+/** How long the first-bytes read may take before the file counts as unreadable. */
+const FIRST_BYTES_TIMEOUT_MS = 5_000;
+
 /**
  * The first bytes of what a signed link serves. Asks for a range, and stops
  * reading as soon as it has enough, so a store that ignores the range still
  * costs a few kilobytes and not the whole file. Null when nothing could be read.
  */
-export async function firstBytesOf(url: string, fetcher: typeof fetch = fetch): Promise<Uint8Array | null> {
+export async function firstBytesOf(
+  url: string,
+  fetcher: typeof fetch = fetch,
+  timeoutMs = FIRST_BYTES_TIMEOUT_MS,
+): Promise<Uint8Array | null> {
   try {
-    const res = await fetcher(url, { headers: { Range: `bytes=0-${RECEIPT_SNIFF_BYTES - 1}` }, cache: 'no-store' });
+    const res = await fetcher(url, {
+      headers: { Range: `bytes=0-${RECEIPT_SNIFF_BYTES - 1}` },
+      cache: 'no-store',
+      // A store that accepts the connection and then stalls must not hold the person's request open.
+      signal: AbortSignal.timeout(timeoutMs),
+    });
     if (!res.ok || !res.body) return null;
     const reader = res.body.getReader();
     const chunks: Uint8Array[] = [];
@@ -57,8 +69,9 @@ export async function storedFileCheck(
   url: string,
   type: InboxReceiptType,
   fetcher: typeof fetch = fetch,
+  timeoutMs = FIRST_BYTES_TIMEOUT_MS,
 ): Promise<'match' | 'mismatch' | 'unreadable'> {
-  const bytes = await firstBytesOf(url, fetcher);
+  const bytes = await firstBytesOf(url, fetcher, timeoutMs);
   if (!bytes) return 'unreadable';
   const found = sniffReceiptType(bytes);
   if (found === type) return 'match';
