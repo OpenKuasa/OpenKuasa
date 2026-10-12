@@ -39,8 +39,9 @@ function inboxViewColumns(): string[] {
 describe('listInboxReceipts', () => {
   it('reads the inbox view for the workspace, newest upload first, with amounts as numbers', async () => {
     const { ctx, calls } = fakeFinance({ data: [matchedRow, unreadRow], error: null });
-    const { extraction_error: _a, ...matchedKept } = matchedRow;
-    const { extraction_error: _b, ...unreadKept } = unreadRow;
+    const without = (r: object) => Object.fromEntries(Object.entries(r).filter(([key]) => key !== 'extraction_error'));
+    const matchedKept = without(matchedRow);
+    const unreadKept = without(unreadRow);
     expect(await listInboxReceipts(ctx)).toEqual([
       { ...matchedKept, amount: 142.5, sst_amount: 8.07, extraction_failed: false },
       { ...unreadKept, extraction_failed: true },
