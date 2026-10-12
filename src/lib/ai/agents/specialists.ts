@@ -247,6 +247,11 @@ function applyGate(products: ProductToolkit[], team: TeamContext, turn: TurnStat
     const proposal = typeof id === 'string' ? team.proposals.get(id) : undefined;
     const kind = proposal ? limitedKind(proposal.action) : null;
     if (!proposal || !kind) return 'user-approval';
+    // A record that was already answered (approved, rejected or lapsed) keeps its tool and loses its arguments. There
+    // is then no row to check and nothing that could run: said as what it is, before any check could read "no id" as
+    // "the interview is gone". It was not shown in this turn, so it is not the turn's one.
+    // The other way for the person: ask for the change again; it is prepared anew.
+    if (proposal.input === null || proposal.input === undefined) return { type: 'denied', reason: NOT_WAITING };
     const [prepared, shown] = [turn.prepared[kind], turn.shown[kind]];
     const another =
       [...prepared, ...shown.keys()].some((other) => other !== proposal.id) ||

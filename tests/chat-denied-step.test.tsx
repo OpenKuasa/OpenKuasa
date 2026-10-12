@@ -147,6 +147,11 @@ describe('the line a person reads on a change the server refused', () => {
     [APPLICATION_NOT_ACTIVE, APPLICATION_NOT_ACTIVE],
     [SAME_TIME_SENT, 'The time given was the time this interview already has, so nothing was prepared. Ask again for only what should change.'],
     [NOTHING_WOULD_CHANGE, NOTHING_WOULD_CHANGE],
+    // Tuah's team, of a change whose record was already answered (the sentence is the proposal store's own).
+    [
+      'This change is no longer waiting for approval: it was already answered, it waited more than an hour, or it is not one that was prepared here. Nothing was saved. If the user still wants it, prepare it again.',
+      'This change is no longer waiting for approval: it was already answered, or it waited too long. Nothing was saved. Ask for it again if you still want it.',
+    ],
     [LINK_HIDDEN, 'That link had hidden characters in it, so nothing was prepared: type the link out by hand in your message, or ask again without one.'],
     [LINK_IN_INTERVIEWER, 'The interviewer\'s name held a link, so nothing was prepared. A link goes in the Place or link field: give it as the place and ask again, or type it there on the Interviews screen.'],
   ];

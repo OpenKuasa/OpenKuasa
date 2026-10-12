@@ -65,6 +65,8 @@ const GATE_REASON_STARTS = [
   'The interviewer\'s name holds a link',
   // Not a rule of this file: the change could not be recorded for approval (see proposal-store.ts). No card either.
   'Changes cannot be prepared right now',
+  // The same file's other sentence, when a gate says it of a change whose record was already answered (specialists.ts).
+  'This change is no longer waiting for approval',
 ];
 export function isGateReason(reason: unknown): boolean {
   return typeof reason === 'string' && GATE_REASON_STARTS.some((start) => reason.startsWith(start));

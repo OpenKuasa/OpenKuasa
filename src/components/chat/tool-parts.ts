@@ -213,6 +213,7 @@ const REFUSAL_LINES: [start: string, line: string | null][] = [
   ['This interview no longer exists', null],
   ['The application this interview belongs to is no longer active', null],
   ['I could not check ', null],
+  ['This change is no longer waiting for approval', 'This change is no longer waiting for approval: it was already answered, or it waited too long. Nothing was saved. Ask for it again if you still want it.'],
   ['Changes cannot be prepared right now', 'Changes cannot be prepared right now, so nothing was put up for approval. Try again in a few minutes.'],
 ];
 export function refusalForUser(reason: string): string {

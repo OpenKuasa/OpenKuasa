@@ -1199,7 +1199,14 @@ describe('the interview gate under the server\'s record of proposed changes', ()
     const later = bound(memoryProposalStore(), answering);
     expect(await (later.toolApproval!.cancelInterview as Gate)({ id: IV }, at('c9', answering))).toEqual({ type: 'user-approval', reason: LINE });
     expect(later.store.rows).toEqual([]);
-    // A change that ran and was told "no longer waiting" is the change's own answer: it stays the turn's one.
-    expect(isGateReason(NOT_WAITING)).toBe(false);
+    // A call that reached its tool and was answered "no longer waiting" was shown and answered: its result is the
+    // tool's own answer, not a denial, so it stays the turn's one.
+    const answeredSo = [...listed, called('cancelInterview', 'c1', { id: IV }), answered('cancelInterview', 'c1', { ok: false, error: NOT_WAITING })];
+    expect(interviewChangeProblem(answeredSo, { toolCallId: 'c2', id: IV2 })).toBe(ONE_INTERVIEW_CHANGE);
+    // The same sentence as a gate's DENIAL (Tuah's team says it of a change whose record was already answered) is of
+    // a call that was never shown in this turn: that one is not the turn's one.
+    expect(isGateReason(NOT_WAITING)).toBe(true);
+    const deniedSo = [...listed, called('cancelInterview', 'c1', { id: IV }), { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'c1', toolName: 'cancelInterview', output: { type: 'execution-denied', reason: NOT_WAITING } }] } as ModelMessage];
+    expect(interviewChangeProblem(deniedSo, { toolCallId: 'c2', id: IV2 })).toBeNull();
   });
 });
