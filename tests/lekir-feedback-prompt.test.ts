@@ -58,6 +58,11 @@ describe('interview feedback, in all four prompts', () => {
     // and never sent the task, so nobody looked at the interview (a run against the configured models, twice).
     expect(teamLead).toContain('Comments are optional: never ask for them, and send the task without them when none were given.');
     expect(teamLead).not.toContain('when either is missing. If the user said a scheduled interview');
+    // Lekir is the one who can see the interview is still marked scheduled. Tuah then asks one plain question.
+    expect(teamLead).toContain('If Lekir reports that the interview is still marked scheduled, ask the user one question: did it take place? When they say it did, send the task again and say so.');
+    // The same mistake, scheduling: a link, a place and an interviewer are optional. Tuah asked for a link and an
+    // interviewer twice before sending the task (a run against the configured models).
+    expect(teamLead).toContain('Only the day and the time are needed: the link, the place and the interviewer are optional, so never ask for them, and send the task without them when none were given.');
   });
   it('the three that word a change themselves say one change marks completed and records the feedback, and when to set replace', () => {
     for (const [name, prompt] of [['LEKIR_SYSTEM', lekir], ['specialist', specialist], ['TUAH_SYSTEM', TUAH_SYSTEM]] as const) {

@@ -775,6 +775,8 @@ describe('the interview rules, in every prompt that can prepare an interview cha
       'create, edit, open, pause, close, reopen or delete. Lekir can also prepare six changes to an interview, one interview at a time: ' +
       'schedule it, change its time or details, cancel it, mark it completed or a no-show, or mark it scheduled again, or record one that already took place. ' +
       'Send ONE task, and pass the day, the time, the link, the place and the interviewer exactly as the user gave them: never work a date out yourself and never add one of them. ' +
+      // Added after a run against the configured models: Tuah asked for a link and an interviewer before sending the task.
+      'Only the day and the time are needed: the link, the place and the interviewer are optional, so never ask for them, and send the task without them when none were given. ' +
       'Lekir can also prepare turning the public careers page on or off';
     expect(teamLead).toContain(TEAM);
     // It stands in the part that begins "When changes are allowed", as the sentence it replaces did.
