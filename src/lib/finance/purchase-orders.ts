@@ -413,7 +413,7 @@ export async function deletePurchaseOrder(
 /**
  * Raises a draft bill from an approved order: its supplier, its lines at the
  * order's prices, the order's id, dated `bill_date` and due after the order's
- * payment terms (none means due that day). The bill is a draft; the person
+ * payment terms, else its supplier's (none of either means due that day). The bill is a draft; the person
  * edits and posts it on Supplier Bills.
  */
 export async function billFromPurchaseOrder(
@@ -424,10 +424,22 @@ export async function billFromPurchaseOrder(
   const order = await getPurchaseOrder(ctx, id);
   if (!order) return { ok: false, error: M.gone };
   if (order.status !== 'approved') return { ok: false, error: M.billFailed };
+  // An order saved with its terms box empty takes its supplier's terms (as the form says); only when those cannot be read is it due that day.
+  let terms = order.payment_terms_days;
+  if (terms === null) {
+    const { data } = await ctx.client
+      .from('finance_contacts')
+      .select('payment_terms_days')
+      .eq('org_id', ctx.orgId)
+      .eq('id', order.supplier_id)
+      .maybeSingle();
+    const read = (data as { payment_terms_days?: unknown } | null)?.payment_terms_days;
+    terms = typeof read === 'number' ? read : null;
+  }
   const saved = await saveBill(ctx, {
     supplier_id: order.supplier_id,
     bill_date,
-    due_date: addDaysIso(bill_date, order.payment_terms_days ?? 0),
+    due_date: addDaysIso(bill_date, terms ?? 0),
     purchase_order_id: order.id,
     lines: order.lines.map((line) => ({
       product_id: line.product_id,

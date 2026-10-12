@@ -82,7 +82,7 @@ export function PurchaseOrderReceiveCard({
                       min={0}
                       step="any"
                       aria-label={`Total received for line ${index + 1}, ${d.description}`}
-                      aria-describedby={`${id}-help`}
+                      aria-describedby={over ? `${id}-help ${id}-over-${index}` : `${id}-help`}
                       className="w-28 text-right tabular-nums"
                       autoFocus={index === 0}
                       data-finance-focus={index === 0 ? '' : undefined}
@@ -99,7 +99,11 @@ export function PurchaseOrderReceiveCard({
                         {d.uom}
                       </span>
                     ) : null}
-                    {over ? <span className="text-xs font-medium text-amber-600">More than ordered</span> : null}
+                    {over ? (
+                      <span id={`${id}-over-${index}`} className="text-xs font-medium text-amber-600">
+                        More than ordered
+                      </span>
+                    ) : null}
                   </div>
                 </li>
               );

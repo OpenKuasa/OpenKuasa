@@ -95,6 +95,20 @@ describe('the bill form’s purchase order picker', () => {
     expect(html).toContain('data-chosen="' + PO_2 + '"');
     expect(html).toContain('PO-0002 · RM 500.00 · billed RM 500.00');
   });
+  it('does not count the bill twice after a save that leaves the form open: its own total comes from the saved row', () => {
+    const linked = detail({ purchase_order_id: PO, purchase_order_no: 'PO-0003', total: 1000, lines: [{ ...detail().lines[0], unit_price: 1000, amount: 1000 }] });
+    const row = bill('d', { purchase_order_id: PO, purchase_order_no: 'PO-0003', total: 1000, display_status: 'draft' });
+    // The order's billed figure (1000) is just this bill: 1000 of 1200 is fine.
+    const html = card({ editing: linked, orders: [{ ...orders[0], billed_total: 1000 }], rows: [row] });
+    expect(html).not.toContain('over its total');
+  });
+  it('keeps the party-choice notes in one status container that is always there', () => {
+    const quiet = card({ editing: detail(), orders });
+    expect(quiet.match(/role="status"/g)).toHaveLength(1);
+    const html = card({ editing: detail({ purchase_order_id: PO, purchase_order_no: 'PO-0003', total: 1000, lines: [{ ...detail().lines[0], unit_price: 1000, amount: 1000 }] }), orders: [{ ...orders[0], billed_total: 1300 }] });
+    expect(html.match(/role="status"/g)).toHaveLength(1);
+    expect(html).toMatch(/role="status"[^>]*>(<p[^>]*>)?This takes/);
+  });
   it('warns, as a status and not an alert, when the draft would take the order over its total', () => {
     const html = card({ editing: detail({ purchase_order_id: PO, purchase_order_no: 'PO-0003', total: 1000, lines: [{ ...detail().lines[0], unit_price: 1000, amount: 1000 }] }), orders: [{ ...orders[0], billed_total: 1300 }] });
     expect(html).toContain('role="status"');

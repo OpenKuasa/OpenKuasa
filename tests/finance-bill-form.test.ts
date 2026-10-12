@@ -4,6 +4,7 @@ import {
   billFormError,
   billFormFromDetail,
   billOrderWarnings,
+  ownCountedTotal,
   billPayload,
   defaultDueDate,
   emptyLine,
@@ -377,5 +378,22 @@ describe('billOrderWarnings', () => {
   it('is not bothered by rounding, and says nothing for a bill of nothing', () => {
     expect(billOrderWarnings(lines, order({ total: 425, received_total: 425 }), 0)).toEqual([]);
     expect(billOrderWarnings([emptyLine('k')], order({ billed_total: 5000 }), 0)).toEqual([]);
+  });
+});
+
+describe('ownCountedTotal', () => {
+  const saved = (id: string, purchase_order_id: string | null, total: number) => ({ id, purchase_order_id, total });
+  const rows = [saved('b1', PO, 125), saved('b2', PO_2, 80), saved('b3', null, 50)];
+  it('is nothing for a bill never saved', () => {
+    expect(ownCountedTotal(rows, undefined, PO)).toBe(0);
+    expect(ownCountedTotal(rows, 'not-in-the-list', PO)).toBe(0);
+  });
+  it('is the saved total when the saved bill is linked to the chosen order', () => {
+    expect(ownCountedTotal(rows, 'b1', PO)).toBe(125);
+  });
+  it('is nothing when the saved bill is linked to another order, or to none, or no order is chosen', () => {
+    expect(ownCountedTotal(rows, 'b2', PO)).toBe(0);
+    expect(ownCountedTotal(rows, 'b3', PO)).toBe(0);
+    expect(ownCountedTotal(rows, 'b1', '')).toBe(0);
   });
 });

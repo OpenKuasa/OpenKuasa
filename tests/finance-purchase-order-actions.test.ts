@@ -59,7 +59,7 @@ vi.mock('@/lib/finance/purchase-orders', async (orig) => {
 
 const actions = await import('@/app/(app)/finance/actions');
 
-const POS = ['/finance/purchase-orders'];
+const POS = ['/finance/purchase-orders', '/finance/rfqs', '/finance/supplier-bills'];
 const FORBIDDEN = { ok: false, error: 'You do not have permission to make changes here.' };
 const GONE = { ok: false, error: 'That purchase order no longer exists.' };
 const NEEDS = { ok: false, error: 'Only an owner or admin can do that to a purchase order.' };

@@ -43,7 +43,7 @@ export function PurchaseOrderRejectCard({
   return (
     <BentoCard
       title="Reject purchase order"
-      subtitle={`${order.po_no ?? 'The order'} from ${order.supplier_name}: it goes back to draft`}
+      subtitle={`${order.po_no ?? 'The order'} to ${order.supplier_name}: it goes back to draft`}
       icon={X}
       className="col-span-2 md:col-span-12"
     >

@@ -5,7 +5,7 @@ import { DocumentFormCard } from '@/components/finance/document-form-card';
 import { PurchaseOrderFormCard } from '@/components/finance/purchase-order-form-card';
 import { PurchaseOrderReceiveCard } from '@/components/finance/purchase-order-receive-card';
 import { PurchaseOrderRejectCard } from '@/components/finance/purchase-order-reject-card';
-import { type PurchaseOrderActions, PurchaseOrdersView } from '@/components/finance/purchase-orders-view';
+import { type PurchaseOrderActions, PurchaseOrdersView, createBillQuestion } from '@/components/finance/purchase-orders-view';
 import { PURCHASE_ORDER_FORM_KIND, newPurchaseOrderForm, receiptDrafts, submitReceipts } from '@/lib/finance/purchase-order-form';
 import { PURCHASE_ORDER_MESSAGES, type PurchaseOrderDetail, type PurchaseOrderListRow } from '@/lib/finance/purchase-orders';
 
@@ -158,6 +158,20 @@ describe('the purchase orders list', () => {
     expect(fine).not.toContain('Billed more than');
   });
 
+  it('draws the two billed warnings with different icons', () => {
+    const over = render([row({ billed_total: 1200, over_billed: true })]);
+    const early = render([row({ delivery: 'partial', received_total: 400, billed_total: 600, billed_over_received: true })]);
+    expect(over).toContain('lucide-triangle-alert');
+    expect(over).not.toContain('lucide-package-x');
+    expect(early).toContain('lucide-package-x');
+    expect(early).not.toContain('lucide-triangle-alert');
+  });
+
+  it('asks before another bill is made from an order that already has bills, and not otherwise', () => {
+    expect(createBillQuestion(row({ billed_total: 300 }))).toBe('PO-0001 already has RM 300.00 billed. Make another draft bill for the full order?');
+    expect(createBillQuestion(row({ billed_total: 0 }))).toBeNull();
+  });
+
   it('shows the delivery of an approved order, and shows only open orders until a status is chosen', () => {
     const t = text(render([row({ delivery: 'partial' }), row({ id: 'z', po_no: 'PO-0099', status: 'cancelled' })]));
     expect(t).toContain('Partly delivered');
@@ -212,6 +226,12 @@ describe('the reject card', () => {
     expect(text(html)).toContain('Reject');
     expect(text(html)).toContain('Cancel');
   });
+
+  it('says the order goes to the supplier', () => {
+    const html = renderToStaticMarkup(<PurchaseOrderRejectCard order={row({ status: 'pending_approval' })} decide={actions.decide} onClose={() => {}} />);
+    expect(text(html)).toContain('PO-0001 to Kopi Hulu Supplies');
+    expect(text(html)).not.toContain('from Kopi Hulu Supplies');
+  });
 });
 
 describe('the receive card', () => {
@@ -236,6 +256,15 @@ describe('the receive card', () => {
     expect(html).toContain('Total received for line 1, Arabica beans');
     // Nothing over the ordered quantity yet.
     expect(t).not.toContain('More than ordered');
+  });
+
+  it('ties the More than ordered note to its box', () => {
+    const over = { ...order, lines: [{ ...order.lines[0], received_quantity: 9 }, order.lines[1]] };
+    const html = renderToStaticMarkup(<PurchaseOrderReceiveCard order={over} receive={actions.receive} onClose={() => {}} />);
+    const note = html.match(/<span id="([^"]+)"[^>]*>More than ordered<\/span>/);
+    expect(note).not.toBeNull();
+    const box = html.match(/<input[^>]*Total received for line 1[^>]*>/)?.[0] ?? '';
+    expect(box).toContain(note![1]);
   });
 
   it('refuses an empty box before any call, and lets an over-delivery through', () => {

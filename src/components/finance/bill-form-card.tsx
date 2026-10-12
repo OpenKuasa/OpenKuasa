@@ -9,9 +9,10 @@ import {
   billOrderWarnings,
   newBillForm,
   ordersForSupplier,
+  ownCountedTotal,
 } from '@/lib/finance/bill-form';
 import { withCurrentParty } from '@/lib/finance/document-form';
-import type { BillDetail, SaveAndPostResult } from '@/lib/finance/bills';
+import type { BillDetail, BillListRow, SaveAndPostResult } from '@/lib/finance/bills';
 import type { FinanceContact } from '@/lib/finance/contacts';
 import type { FinanceProduct } from '@/lib/finance/products';
 import type { FinResult } from '@/lib/finance/result';
@@ -30,6 +31,7 @@ export function BillFormCard({
   suppliers,
   products,
   orders,
+  rows,
   today,
   actions,
   onClose,
@@ -45,6 +47,8 @@ export function BillFormCard({
    * no picker (and leaves a draft's link alone only if the caller sends no `purchase_order_id`).
    */
   orders?: BillOrderOption[];
+  /** The bills as listed, for what this bill already counts toward its order. */
+  rows?: BillListRow[];
   /** The default bill date, YYYY-MM-DD. */
   today: string;
   actions: BillFormActions;
@@ -58,8 +62,8 @@ export function BillFormCard({
     set: (form, id) => ({ ...form, purchase_order_id: id }),
     notes: (form) => {
       const chosen = orders.find((o) => o.id === form.purchase_order_id && o.supplier_id === form.supplier_id) ?? null;
-      // The draft's own saved total is already in the order's billed figure.
-      const own = editing && editing.display_status === 'draft' && editing.purchase_order_id === chosen?.id ? editing.total : 0;
+      // The bill's own saved total is already in the order's billed figure; the saved row for the form's current id says how much.
+      const own = ownCountedTotal(rows ?? (editing ? [editing] : []), form.id, chosen?.id ?? '');
       return billOrderWarnings(form.lines, chosen, own);
     },
   };

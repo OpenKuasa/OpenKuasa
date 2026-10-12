@@ -259,9 +259,10 @@ const SALES_PATHS = [
 const QUOTATION_PATHS = ['/finance/quotations'];
 // An RFQ is likewise on its own screen: it is a request, not money owed, and no other screen counts or names it.
 const RFQ_PATHS = ['/finance/rfqs'];
-// A purchase order is on its own screen; its billed total moves when a bill does (BILL_PATHS), and its RFQ column
-// comes from the RFQ. Nothing else counts or names an order, so its own writes refresh Purchase Orders only.
-const PURCHASE_ORDER_PATHS = ['/finance/purchase-orders'];
+// A purchase order is on its own screen, and two others read it: RFQs shows its number and decides "Make purchase
+// order" from it, and the bill form on Supplier Bills lists the approved orders. So its own writes refresh all three.
+// Its billed total moves when a bill does (BILL_PATHS).
+const PURCHASE_ORDER_PATHS = ['/finance/purchase-orders', '/finance/rfqs', '/finance/supplier-bills'];
 // Making a purchase order from an RFQ adds a draft to Purchase Orders and puts that order in the RFQ's column.
 const CONVERT_RFQ_PATHS = ['/finance/rfqs', '/finance/purchase-orders'];
 // Raising a bill from an order adds a draft to Supplier Bills and moves the order's billed total. A draft bill is

@@ -208,11 +208,14 @@ export function DocumentFormCard<F extends DocumentFormState>({
                 ))}
               </SelectContent>
             </Select>
-            {partyChoice.notes(form).map((note) => (
-              <p key={note} role="status" className="text-xs text-amber-600">
-                {note}
-              </p>
-            ))}
+            {/* One container that is always there, so a reader announces a note when it appears. */}
+            <div role="status" className="space-y-1">
+              {partyChoice.notes(form).map((note) => (
+                <p key={note} className="text-xs text-amber-600">
+                  {note}
+                </p>
+              ))}
+            </div>
           </div>
         ) : null}
         {kind.extras?.map((extra, index) => (

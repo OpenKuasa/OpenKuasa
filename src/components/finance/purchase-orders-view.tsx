@@ -9,6 +9,7 @@ import {
   FilePlus,
   Lock,
   PackageCheck,
+  PackageX,
   Pencil,
   Plus,
   Search,
@@ -92,8 +93,8 @@ const STATUS_STYLES: Record<PurchaseOrderStatus, string> = {
   draft: 'bg-muted text-muted-foreground',
 };
 
-/** A question asked in an order's own row. The rest open a card, or (Create bill) just happen. */
-type Question = Extract<PurchaseOrderAction, 'submit' | 'delete' | 'approve' | 'withdraw' | 'close' | 'cancel'>;
+/** A question asked in an order's own row. The rest open a card, or (Create bill, with nothing billed yet) just happen. */
+type Question = Extract<PurchaseOrderAction, 'submit' | 'delete' | 'approve' | 'withdraw' | 'close' | 'cancel' | 'createBill'>;
 
 /** One thing open at a time: a form card, or a question in one row. */
 type Open =
@@ -107,6 +108,15 @@ type Open =
   | { kind: 'billed'; order: PurchaseOrderListRow; date: string }
   | { kind: Question; order: PurchaseOrderListRow }
   | null;
+
+/**
+ * What to ask before making a bill from an order that already has bills against it, or null when nothing is
+ * billed and the bill is simply made.
+ */
+export function createBillQuestion(order: PurchaseOrderListRow): string | null {
+  if (!(order.billed_total > 0)) return null;
+  return `${order.po_no ?? 'This order'} already has ${rm(order.billed_total)} billed. Make another draft bill for the full order?`;
+}
 
 /**
  * Purchase orders: the figures and the table, with search, a status filter and
@@ -184,16 +194,7 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
           label: 'Create bill',
           icon: FilePlus,
           opens: true,
-          onSelect: () => {
-            // Nothing to ask: the bill is a draft, dated the person's own today (the database's is UTC, a day behind until 08:00 in Malaysia).
-            const date = now();
-            close();
-            confirm.run(
-              () => actions.billFrom({ id: order.id, bill_date: date }),
-              // The note at the top of the page says where the bill is.
-              () => setOpen({ kind: 'billed', order, date }),
-            );
-          },
+          onSelect: () => (createBillQuestion(order) ? ask({ kind: 'createBill', order }) : makeBill(order)),
         };
       case 'submit':
         return { label: 'Submit for approval', icon: Send, opens: true, onSelect: () => ask({ kind: 'submit', order }) };
@@ -210,6 +211,19 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
     }
   };
 
+  /** The bill is a draft, dated the person's own today (the database's is UTC, a day behind until 08:00 in Malaysia). */
+  const makeBill = (order: PurchaseOrderListRow, fromQuestion = false) => {
+    if (!writer) return;
+    const date = now();
+    // Asked in its row, the row stays up while it works so a refusal is read there.
+    if (!fromQuestion) close();
+    confirm.run(
+      () => writer.actions.billFrom({ id: order.id, bill_date: date }),
+      // The note at the top of the page says where the bill is.
+      () => setOpen({ kind: 'billed', order, date }),
+    );
+  };
+
   const question = (order: PurchaseOrderListRow) => {
     if (!writer || !asking || asking.order.id !== order.id) return null;
     const { actions } = writer;
@@ -219,6 +233,21 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
     const number = <span className="font-medium">{order.po_no ?? 'This draft'}</span>;
     const shared = { colSpan: columns, pending: confirm.pending, error: confirm.error, onCancel: close };
     switch (asking.kind) {
+      case 'createBill':
+        return (
+          <ConfirmRow
+            key={order.id}
+            {...shared}
+            tone="default"
+            icon={FilePlus}
+            label={`Create a bill from ${name}`}
+            confirmLabel="Create bill"
+            pendingLabel="Creating…"
+            onConfirm={() => makeBill(order, true)}
+          >
+            {createBillQuestion(order)}
+          </ConfirmRow>
+        );
       case 'submit':
         return (
           <ConfirmRow
@@ -365,7 +394,7 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
       return open.detail ? (
         <PurchaseOrderReceiveCard key={open.detail.id} order={open.detail} receive={actions.receive} onClose={close} />
       ) : (
-        loading('Record delivery', `${open.order.po_no ?? 'The order'} from ${open.order.supplier_name}`)
+        loading('Record delivery', `${open.order.po_no ?? 'The order'} to ${open.order.supplier_name}`)
       );
     }
     if (open.kind === 'reject') {
@@ -375,7 +404,7 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
       return (
         <SavedNoteCard
           title="Draft bill made"
-          subtitle={`From ${open.order.po_no ?? 'the purchase order'} from ${open.order.supplier_name}`}
+          subtitle={`From ${open.order.po_no ?? 'the purchase order'} to ${open.order.supplier_name}`}
           href="/finance/supplier-bills"
           linkLabel="Supplier Bills"
           onClose={close}
@@ -560,7 +589,7 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
                           ) : null}
                           {r.billed_over_received ? (
                             <span title="Billed more than has arrived" className="text-amber-600">
-                              <TriangleAlert className="size-4" aria-hidden />
+                              <PackageX className="size-4" aria-hidden />
                               <span className="sr-only">Billed more than has arrived</span>
                             </span>
                           ) : null}

@@ -324,10 +324,15 @@ describe('billFromPurchaseOrder', () => {
   const poLines = [
     { id: 'l1', product_id: null, description: 'Printer paper', quantity: '10.000', uom: 'ream', pack_size: 'box of 5', unit_price: '12.5000', sst_rate: '6.00', amount: '125.00', sst_amount: '7.50', received_quantity: '4.000' },
   ];
-  const answering = (head: Record<string, unknown> | null, rpc: { data: unknown; error: unknown } = { data: BILL, error: null }) =>
+  const answering = (
+    head: Record<string, unknown> | null,
+    rpc: { data: unknown; error: unknown } = { data: BILL, error: null },
+    supplier: { data: unknown; error: unknown } = { data: { payment_terms_days: 14 }, error: null },
+  ) =>
     fakeFinance((call) => {
       if (call.name === 'finance_purchase_order_totals') return { data: head, error: null };
       if (call.name === 'finance_purchase_order_lines') return { data: poLines, error: null };
+      if (call.name === 'finance_contacts') return supplier;
       return rpc;
     });
 
@@ -345,10 +350,26 @@ describe('billFromPurchaseOrder', () => {
     // The bill is a draft: nothing is posted.
     expect(calls.map((c) => c.name)).not.toContain('finance_post_bill');
   });
-  it('is due on the bill date when the order has no terms', async () => {
+  const dueDate = (calls: { name: string; args?: Record<string, unknown> }[]) =>
+    (calls.find((c) => c.name === 'finance_save_bill')?.args as { bill: { due_date: string } }).bill.due_date;
+  it('uses the order’s own terms and does not look the supplier up', async () => {
+    const { ctx, calls } = answering(header);
+    await billFromPurchaseOrder(ctx, { id: ID, bill_date: '2026-10-12' });
+    expect(dueDate(calls)).toBe('2026-11-11');
+    expect(calls.map((c) => c.name)).not.toContain('finance_contacts');
+  });
+  it('uses the supplier’s terms when the order has none', async () => {
     const { ctx, calls } = answering({ ...header, payment_terms_days: null });
     await billFromPurchaseOrder(ctx, { id: ID, bill_date: '2026-10-12' });
-    expect((calls.find((c) => c.name === 'finance_save_bill')?.args as { bill: { due_date: string } }).bill.due_date).toBe('2026-10-12');
+    expect(dueDate(calls)).toBe('2026-10-26');
+    expect(calls.find((c) => c.name === 'finance_contacts')?.filters).toEqual({ org_id: 'org-1', id: SUPPLIER });
+  });
+  it('is due on the bill date when neither the order nor the supplier has terms to read', async () => {
+    for (const supplier of [{ data: null, error: null }, { data: null, error: { code: 'x' } }]) {
+      const { ctx, calls } = answering({ ...header, payment_terms_days: null }, undefined, supplier);
+      await billFromPurchaseOrder(ctx, { id: ID, bill_date: '2026-10-12' });
+      expect(dueDate(calls)).toBe('2026-10-12');
+    }
   });
   it('does not ask for a bill against an order that is not approved', async () => {
     for (const status of ['draft', 'pending_approval', 'closed', 'cancelled']) {

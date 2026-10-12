@@ -140,6 +140,21 @@ export function ordersForSupplier(orders: BillOrderOption[], supplierId: string,
     .map((o) => ({ id: o.id, label: `${o.po_no ?? 'Purchase order'} · ${rm(o.total)} · billed ${rm(o.billed_total)}` }));
 }
 
+/**
+ * How much of the chosen order's billed figure is this very bill: its saved total, when the saved bill with
+ * `billId` is linked to that order; nothing for a bill never saved or linked elsewhere. Read from the list's
+ * rows rather than the draft the form opened with, because a save that leaves the form open changes them.
+ */
+export function ownCountedTotal(
+  rows: { id: string; purchase_order_id: string | null; total: number }[],
+  billId: string | undefined,
+  orderId: string,
+): number {
+  if (!billId || !orderId) return 0;
+  const saved = rows.find((b) => b.id === billId);
+  return saved && saved.purchase_order_id === orderId ? saved.total : 0;
+}
+
 const cents = (n: number) => Math.round(n * 100);
 
 /**

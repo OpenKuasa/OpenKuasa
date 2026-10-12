@@ -253,6 +253,7 @@ export function BillsView({
           suppliers={writer.suppliers}
           products={writer.products}
           orders={writer.orders}
+          rows={rows}
           today={open.today}
           actions={actions}
           onClose={close}
@@ -268,6 +269,7 @@ export function BillsView({
           suppliers={writer.suppliers}
           products={writer.products}
           orders={writer.orders}
+          rows={rows}
           today={open.today}
           actions={actions}
           onClose={close}
