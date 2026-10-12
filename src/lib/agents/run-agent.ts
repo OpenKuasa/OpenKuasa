@@ -39,7 +39,7 @@ export async function runAgent(
     // The insert is a DB write (no API key involved), so its SQLSTATE and message
     // are safe to log and are the only trace of why a run never started -- e.g. a
     // missing service_role grant surfaces here as code '42501' / "permission denied".
-    console.error('[agent] agent_runs insert failed:', insertErr?.code, insertErr?.message);
+    console.error(`[agent ${def.agentKey}] agent_runs insert failed:`, insertErr?.code, insertErr?.message);
     throw new Error('Could not start the agent run.');
   }
   const runId = run.id as string;
