@@ -189,7 +189,7 @@ describe('POST /api/reach/chat happy path', () => {
   });
 
   it('refuses a workspace-key turn once the caller has used up the day, without calling a model', async () => {
-    ctl.sealedKey = encryptApiKey('sk-or-v1-workspace-key-aaaaaaaaaaaa');
+    ctl.sealedKey = sealForWorkspace();
     ctl.dailyRemaining = -1;
     const res = await POST(post(validBody));
     expect(res.status).toBe(429);
