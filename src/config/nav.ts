@@ -28,6 +28,7 @@ import {
   CircleCheck,
   Heart,
   CalendarClock,
+  FileSearch,
   Banknote,
   Receipt,
   Star,
@@ -330,6 +331,7 @@ export const PRODUCTS: Product[] = [
         items: [
           { label: 'Expenses', slug: 'expenses', icon: CreditCard },
           { label: 'Receipts Inbox', slug: 'receipts-inbox', icon: Inbox },
+          { label: 'RFQs', slug: 'rfqs', icon: FileSearch },
           { label: 'Supplier Bills', slug: 'supplier-bills', icon: Building2 },
           { label: 'Payments Out', slug: 'payments-out', icon: ArrowUpRight },
           { label: 'Banking', slug: 'banking', icon: Landmark },

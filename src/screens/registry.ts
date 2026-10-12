@@ -86,6 +86,7 @@ import CashReceiptsScreen from '@/screens/finance/cash-receipts';
 import FinPaymentVouchersScreen from '@/screens/finance/payment-vouchers';
 import InvoicesScreen from '@/screens/finance/invoices';
 import QuotationsScreen from '@/screens/finance/quotations';
+import RfqsScreen from '@/screens/finance/rfqs';
 import CreditNotesScreen from '@/screens/finance/credit-notes';
 import PaymentsInScreen from '@/screens/finance/payments-in';
 import RefundsScreen from '@/screens/finance/refunds';
@@ -190,6 +191,7 @@ export const SCREENS: Record<string, ComponentType> = {
   'finance/payment-vouchers': FinPaymentVouchersScreen,
   'finance/invoices': InvoicesScreen,
   'finance/quotations': QuotationsScreen,
+  'finance/rfqs': RfqsScreen,
   'finance/credit-notes': CreditNotesScreen,
   'finance/payments-in': PaymentsInScreen,
   'finance/refunds': RefundsScreen,
