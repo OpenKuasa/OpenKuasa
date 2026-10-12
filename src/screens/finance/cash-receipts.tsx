@@ -9,6 +9,7 @@ import { type CashReceiptActions, CashReceiptsView } from '@/components/finance/
 import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { listCashReceipts } from '@/lib/finance/cash-book';
+import { receiptInvoicesForForm, receiptPaymentsForForm } from '@/lib/finance/cash-receipt-form';
 import { listIncomeCategories } from '@/lib/finance/cash-receipts';
 import { listContacts } from '@/lib/finance/contacts';
 import { listInvoices } from '@/lib/finance/invoices';
@@ -58,8 +59,9 @@ export default async function CashReceiptsScreen() {
           ? {
               actions: ACTIONS,
               canSignOff: can(viewer.role, 'sign-off-finance'),
-              invoices,
-              payments,
+              // Only what the form reads goes to the browser.
+              invoices: receiptInvoicesForForm(invoices),
+              payments: receiptPaymentsForForm(payments),
               accounts,
               contacts: contacts.filter((c) => c.active).map((c) => ({ id: c.id, name: c.name })),
               categories,
