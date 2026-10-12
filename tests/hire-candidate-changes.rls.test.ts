@@ -28,6 +28,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { createAnonymousClient } from '@/lib/supabase/anonymous';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import { beforeCleanup, createOrg, joinDemo, liveClient, signInAnon, signInOwner } from './helpers/live-workspaces';
+import { publicWriter } from './helpers/public-writer';
 
 const hasService = hasSupabaseEnv && Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
 const testWithSupabase = hasService ? test : test.skip;
@@ -110,6 +111,7 @@ let owner: Owned;
 let other: Owned;
 let viewer: SupabaseClient; // a viewer of the DEMO workspace
 let visitor: SupabaseClient; // no session
+let writer: SupabaseClient; // who sends a public application: the server, or the visitor on an older database
 let demoId: string;
 
 let openJob: { id: string; title: string };
@@ -253,6 +255,7 @@ beforeAll(async () => {
   expect(joined.error, joined.error?.message).toBeNull();
   demoId = joined.data as string;
   visitor = createAnonymousClient();
+  ({ writer } = await publicWriter(visitor));
 
   await switchBoardOn(owner);
   const set = await owner.c.from('hire_settings').update(ALL_OFF).eq('org_id', owner.orgId).select('org_id').single();
@@ -465,7 +468,7 @@ testWithSupabase('8. an add racing the public form for one new email makes one c
   const email = uniqueEmail();
   const [added, sent] = (await Promise.all([
     add(owner.c, owner.orgId, { name: 'Race Runner', email, job_id: openJob.id }),
-    visitor.rpc('submit_public_application', {
+    writer.rpc('submit_public_application', {
       p_org_id: owner.orgId,
       p_job_id: openJob.id,
       p_name: 'Race Runner',
@@ -608,7 +611,7 @@ testWithSupabase('11. the server attaches a CV to a hand-added application once,
 
   // An application an applicant sent themselves carries a consent date and takes no file by hand.
   const email = uniqueEmail();
-  const sent = await visitor.rpc('submit_public_application', {
+  const sent = await writer.rpc('submit_public_application', {
     p_org_id: owner.orgId,
     p_job_id: openJob.id,
     p_name: 'Public Applicant',
