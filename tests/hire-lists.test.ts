@@ -808,11 +808,20 @@ describe('interviews: rows, order and the application picker', () => {
       expect(rows[0].interviews.map((i) => i.id)).toEqual(['soon', 'next', 'called-off', 'gone', 'overdue-new', 'overdue-old', 'done']);
       expect(rows[1].interviews).toEqual([]);
     });
-    it('are whole rows, as on the Interviews screen', async () => {
-      const { rows } = await buildApplicationsModel(apps, NOW);
-      const screen = await buildInterviewsModel(apps, NOW);
+    it('are the rows of the Interviews screen without the team\'s notes, which the panel never draws and a viewer must not be sent', async () => {
+      const noted: HireData = { ...apps, listInterviews: async () => seven.map((i) => ({ ...i, notes: 'Asked for RM 4,500. Weak on Excel.' })) };
+      const { rows } = await buildApplicationsModel(noted, NOW);
+      const screen = await buildInterviewsModel(noted, NOW);
       const byId = new Map(screen.rows.map((r) => [r.id, r]));
-      for (const interview of rows[0].interviews) expect(interview, interview.id).toEqual(byId.get(interview.id));
+      expect(rows[0].interviews).toHaveLength(7);
+      for (const interview of rows[0].interviews) {
+        const { notes, ...rest } = byId.get(interview.id)!;
+        // The Interviews screen's own row keeps them, for the edit form of someone who may edit.
+        expect(notes).toBe('Asked for RM 4,500. Weak on Excel.');
+        expect(interview, interview.id).toEqual(rest);
+        expect(Object.keys(interview)).not.toContain('notes');
+      }
+      expect(JSON.stringify(await buildApplicationsModel(noted, NOW))).not.toMatch(/4,500|Excel/);
       expect(rows[0].interviews.find((i) => i.id === 'overdue-new')).toMatchObject({ needsOutcome: true, status: 'Scheduled', length: '1 hour' });
     });
     it('are not cut: every one of an application\'s interviews is there for the panel to count', async () => {

@@ -2,7 +2,7 @@
 
 import { useId, useState, useTransition } from 'react';
 import { ChevronDown } from 'lucide-react';
-import type { ApplicationDetails, ApplicationState, InterviewRow, SafeLink } from '@/lib/hire/lists';
+import type { ApplicationDetails, ApplicationState, PanelInterview, SafeLink } from '@/lib/hire/lists';
 import type { PoolStatus } from '@/lib/hire/types';
 import { viewCvAction } from '@/app/(app)/hire/actions';
 import { PANEL_EMPTY, PANEL_HEADING, panelLine, panelMore, panelRows } from '@/lib/hire/interview-dialog-state';
@@ -33,8 +33,8 @@ export type ApplicationRowData = {
 } & ApplicationState & {
   /** The person's stored talent pool status; left out reads as not in the pool. */
   poolStatus?: PoolStatus;
-  /** This application's interviews, the ones ahead first. Left out reads as none. No contact details. */
-  interviews?: InterviewRow[];
+  /** This application's interviews, the ones ahead first. Left out reads as none. No contact details and no notes. */
+  interviews?: PanelInterview[];
 };
 
 /** A link is drawn only from a SafeLink, never from a raw string. */
@@ -121,7 +121,7 @@ function ViewCv({ applicationId }: { applicationId: string }) {
  * included. An interview is changed on the Interviews screen, not here. A
  * place is a link only from `placeLink`, which the server made with `safeLink`.
  */
-function InterviewList({ interviews }: { interviews: InterviewRow[] }) {
+function InterviewList({ interviews }: { interviews: PanelInterview[] }) {
   const { shown, more } = panelRows(interviews);
   return (
     <section className="flex flex-col gap-1">

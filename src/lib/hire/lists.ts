@@ -354,6 +354,20 @@ function interviewRow(i: Interview, now: Date): InterviewRow {
   };
 }
 
+/**
+ * An interview as the Applications panel lists it: a row without the team's notes. The panel is a client component
+ * that everyone who can open the screen gets, viewers included, and it never draws the notes: so they are not sent.
+ * Notes are shown in one place only, the interview form's Notes field, to someone who may edit.
+ */
+export type PanelInterview = Omit<InterviewRow, 'notes'>;
+
+function panelInterview(i: Interview, now: Date): PanelInterview {
+  // The key is dropped, not blanked: nothing that reads this type can come to rely on it.
+  const { notes: _team, ...rest } = interviewRow(i, now);
+  void _team;
+  return rest;
+}
+
 export type ApplicationsModel = {
   isEmpty: boolean;
   total: number;
@@ -362,7 +376,7 @@ export type ApplicationsModel = {
     id: string; candidateId: string; poolStatus?: PoolStatus; name: string; job: string; source: string; status: ApplicationLabel; applied: string;
     details: ApplicationDetails | null;
     /** The application's interviews, all of them: the ones ahead first (soonest first), then the past ones (latest first). */
-    interviews: InterviewRow[];
+    interviews: PanelInterview[];
   } & ApplicationState)[];
   statusMix: { key: ApplicationLabel; value: number }[];
   byJob: { label: string; applications: number }[];
@@ -373,11 +387,11 @@ export async function buildApplicationsModel(data: HireData, now: Date = new Dat
   const labelled = apps.map((a) => ({ a, status: applicationLabel(a.stage, a.outcome) }));
   const byApplication = new Map<string, Interview[]>();
   for (const i of interviews) byApplication.set(i.application_id, [...(byApplication.get(i.application_id) ?? []), i]);
-  const interviewsOf = (applicationId: string): InterviewRow[] => {
+  const interviewsOf = (applicationId: string): PanelInterview[] => {
     const own = byApplication.get(applicationId) ?? [];
     const ahead = own.filter((i) => startOf(i) >= now.getTime());
     const past = own.filter((i) => !(startOf(i) >= now.getTime()));
-    return [...ahead.sort(soonestFirst), ...past.sort(latestFirst)].map((i) => interviewRow(i, now));
+    return [...ahead.sort(soonestFirst), ...past.sort(latestFirst)].map((i) => panelInterview(i, now));
   };
   return {
     isEmpty: apps.length === 0,

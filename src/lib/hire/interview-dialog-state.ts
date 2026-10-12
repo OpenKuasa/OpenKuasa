@@ -16,7 +16,7 @@ import {
   DURATION_CHOICES, INTERVIEW_LIMITS, INTERVIEW_NOT_READ_BACK, INTERVIEW_SAVE_FAILED, KIND_WORDS, interviewMessage, menuFor,
   offerMoveToInterview, stillScheduledMessage, type InterviewMenuItem,
 } from './interviews';
-import type { InterviewRow, PickerApplication } from './lists';
+import type { InterviewRow, PanelInterview, PickerApplication } from './lists';
 import type { InterviewKind } from './types';
 
 // ─── the form's values ───────────────────────────────────────────────────────
@@ -591,12 +591,12 @@ export const PANEL_EMPTY = 'No interviews yet.';
 export const PANEL_ROWS = 5;
 
 /** "Tue 20 Oct 2026, 3:00 pm · 1 hour · Video call · Farah Lim · Scheduled". An interviewer nobody gave is left out. */
-export function panelLine(row: InterviewRow): string {
+export function panelLine(row: PanelInterview): string {
   return [shortWhen(row.scheduledAt), row.length, KIND_WORDS[row.kind], row.interviewerName, row.status].filter(Boolean).join(' · ');
 }
 
 /** At most five lines, and how many more there are. */
-export function panelRows(interviews: InterviewRow[]): { shown: InterviewRow[]; more: number } {
+export function panelRows<T>(interviews: T[]): { shown: T[]; more: number } {
   return { shown: interviews.slice(0, PANEL_ROWS), more: Math.max(0, interviews.length - PANEL_ROWS) };
 }
 export const panelMore = (count: number): string => `and ${count} more on the Interviews screen`;
