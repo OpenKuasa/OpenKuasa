@@ -262,6 +262,40 @@ export function cashReceiptsCsv(rows: CashReceiptRow[]): string {
   );
 }
 
+export type CashReceiptAction = 'edit' | 'post' | 'delete' | 'void';
+
+/**
+ * What a receipt's row menu offers, by its status and by whether the person
+ * may sign off (an owner or admin). A draft is edited or deleted by anyone
+ * who may write; posting it, and voiding a posted receipt, are sign-offs,
+ * which the database refuses to anyone else (FIN14), so they are not offered.
+ * A void receipt offers nothing. The same for both kinds: a receipt against
+ * invoices that was recorded on Payments In can be voided here too.
+ */
+export function cashReceiptActions(row: CashReceiptRow, canSignOff: boolean): CashReceiptAction[] {
+  if (row.status === 'draft') return canSignOff ? ['edit', 'post', 'delete'] : ['edit', 'delete'];
+  if (row.status === 'posted') return canSignOff ? ['void'] : [];
+  return [];
+}
+
+/** How a receipt is named in a question and to a screen reader: "RC-0007 from Aiman", "the draft receipt from Aiman", "the draft receipt". */
+export function receiptName(row: CashReceiptRow): string {
+  const what = row.number ?? (row.status === 'draft' ? 'the draft receipt' : 'the receipt');
+  return row.party_name ? `${what} from ${row.party_name}` : what;
+}
+
+/** What voiding a posted receipt does, for the question that asks. */
+export function receiptVoidEffect(row: CashReceiptRow): string {
+  return row.kind === 'invoice'
+    ? 'The invoices it paid will owe that amount again.'
+    : 'It will no longer count as money received.';
+}
+
+/** What a draft holds while it waits, for the question that asks whether to delete it. */
+export function receiptDeleteEffect(row: CashReceiptRow): string {
+  return row.kind === 'invoice' ? 'What it holds of its invoices is freed. ' : '';
+}
+
 /* ---- Payment Vouchers ----------------------------------------------- */
 
 export type PaymentVouchersViewData = {
