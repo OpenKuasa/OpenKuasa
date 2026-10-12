@@ -620,14 +620,14 @@ describe('letters and documents', () => {
 
   it('says at once, with no lookup and no offer, where each thing that is not a tool is done', () => {
     for (const line of [
-      'uploading a file, replacing a file and removing a document are done on the employees screen',
+      'uploading a file and replacing a file are done on the employees screen',
       'deleting a letter and pulling an issued letter back to a draft are done on the letters screen',
       'acknowledging is done by the employee, with the button on their own page',
       'adding, changing and removing a template is done on the letters screen',
     ]) {
       expect(section, line).toContain(line);
     }
-    expect(section).toContain('you have no tool for it: say so at once');
+    expect(section).toContain('you have no tool for any of this: say so at once');
     expect(section).toContain('do not look anything up, do not offer to do it and do not ask which');
     expect(section).toContain("i can't do that for you");
     expect(section).toContain('it is not a signature');
@@ -673,7 +673,8 @@ describe('letters and documents', () => {
   });
 
   it('says an employee removes their own upload on My Documents, and an owner removes any on the Documents screen', () => {
-    expect(section).toContain('an employee uploads their own, and removes one they uploaded, on their my documents page');
+    expect(section).toContain('an employee uploads their own on their my documents page');
+    expect(section).toContain('an employee removes only a document they uploaded themselves, on their my documents page');
   });
 
   it('keeps the not_linked rule, lists documents and letters under own records, and names the pages for acknowledging', () => {
