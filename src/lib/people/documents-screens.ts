@@ -82,11 +82,19 @@ export function ackDetail(label: string | null | undefined, awaiting = false): s
   return label;
 }
 
+/** The line under a My Documents row: "Awaiting acknowledgement" only where the viewer can act on it (the pill says the rest). */
+export const myRowAckDetail = (
+  row: Pick<MyDocumentRow, 'awaiting_acknowledgement' | 'can_acknowledge' | 'acknowledged_label'>,
+): string | null => ackDetail(row.acknowledged_label, row.awaiting_acknowledgement && row.can_acknowledge);
+
 /** The pill for a My Documents row: what needs the person first, then the expiry state. */
 export function myRowStatus(
-  row: Pick<MyDocumentRow, 'awaiting_acknowledgement' | 'expiry'>,
+  row: Pick<MyDocumentRow, 'awaiting_acknowledgement' | 'can_acknowledge' | 'expiry'>,
 ): { tone: 'good' | 'pending' | 'bad' | 'neutral'; label: string } {
-  if (row.awaiting_acknowledgement) return { tone: 'pending', label: 'Needs your acknowledgement' };
+  if (row.awaiting_acknowledgement) {
+    // A row that asks but cannot be acknowledged is a sample (the demo): a neutral fact, not addressed to the visitor.
+    return { tone: 'pending', label: row.can_acknowledge ? 'Needs your acknowledgement' : 'Acknowledgement requested' };
+  }
   if (row.expiry === 'expired') return { tone: 'bad', label: 'Expired' };
   if (row.expiry === 'expiring') return { tone: 'bad', label: 'Expiring soon' };
   return { tone: 'neutral', label: 'Available' };

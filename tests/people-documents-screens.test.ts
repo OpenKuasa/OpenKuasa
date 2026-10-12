@@ -18,6 +18,7 @@ import {
   downloadStep,
   employeeDocumentRows,
   myDocumentsControls,
+  myRowAckDetail,
   myRowStatus,
   planDocumentForm,
   removeForSentence,
@@ -29,7 +30,7 @@ import {
   showsOwnerDocumentControls,
 } from '@/lib/people/documents-screens';
 import { createSeedPeopleData } from '@/lib/people/seed';
-import type { HrDocument, PeopleViewer } from '@/lib/people/types';
+import { DEMO_EMPLOYEE_ID, type HrDocument, type PeopleViewer } from '@/lib/people/types';
 import { TOO_BIG, WRONG_TYPE } from '@/lib/people/document-files';
 
 const viewers: Record<string, PeopleViewer> = {
@@ -166,10 +167,33 @@ describe('ackDetail', () => {
 
 describe('myRowStatus', () => {
   it('puts the acknowledgement first, then the expiry', () => {
-    expect(myRowStatus({ awaiting_acknowledgement: true, expiry: 'expired' }).label).toBe('Needs your acknowledgement');
-    expect(myRowStatus({ awaiting_acknowledgement: false, expiry: 'expired' })).toEqual({ tone: 'bad', label: 'Expired' });
-    expect(myRowStatus({ awaiting_acknowledgement: false, expiry: 'expiring' }).label).toBe('Expiring soon');
-    expect(myRowStatus({ awaiting_acknowledgement: false, expiry: 'none' }).label).toBe('Available');
+    expect(myRowStatus({ awaiting_acknowledgement: true, can_acknowledge: true, expiry: 'expired' }).label).toBe('Needs your acknowledgement');
+    expect(myRowStatus({ awaiting_acknowledgement: false, can_acknowledge: false, expiry: 'expired' })).toEqual({ tone: 'bad', label: 'Expired' });
+    expect(myRowStatus({ awaiting_acknowledgement: false, can_acknowledge: false, expiry: 'expiring' }).label).toBe('Expiring soon');
+    expect(myRowStatus({ awaiting_acknowledgement: false, can_acknowledge: false, expiry: 'none' }).label).toBe('Available');
+  });
+  it('states a sample row that asks as a neutral fact, not addressed to the visitor', () => {
+    const sample = myRowStatus({ awaiting_acknowledgement: true, can_acknowledge: false, expiry: 'none' });
+    expect(sample).toEqual({ tone: 'pending', label: 'Acknowledgement requested' });
+  });
+  it('shows the "Awaiting acknowledgement" line only where the viewer can act on it', () => {
+    expect(myRowAckDetail({ awaiting_acknowledgement: true, can_acknowledge: true, acknowledged_label: null })).toBe('Awaiting acknowledgement');
+    expect(myRowAckDetail({ awaiting_acknowledgement: true, can_acknowledge: false, acknowledged_label: null })).toBeNull();
+    expect(myRowAckDetail({ awaiting_acknowledgement: false, can_acknowledge: false, acknowledged_label: 'Acknowledged on 1 Oct 2026' })).toBe('Acknowledged on 1 Oct 2026');
+  });
+  it('reads the demo visitor\'s sample rows neutrally and a linked member\'s rows unchanged', async () => {
+    const data = createSeedPeopleData();
+    const input = { documents: await data.listDocuments(), letters: await data.listLetters(), payslips: await data.listPayslips(), today: '2026-10-12' };
+    const demo = buildMyDocumentsModel({ ...input, viewer: { isHr: false, isDemo: true, employeeId: DEMO_EMPLOYEE_ID } });
+    if (!demo.linked) throw new Error('expected linked');
+    const asking = demo.rows.filter((r) => r.awaiting_acknowledgement);
+    expect(asking.map((r) => r.kind).sort()).toEqual(['document', 'letter']);
+    for (const r of asking) {
+      expect(myRowStatus(r).label).toBe('Acknowledgement requested');
+      expect(myRowAckDetail(r)).toBeNull();
+      expect(r.can_acknowledge).toBe(false);
+    }
+    expect(demo.awaiting_acknowledgement).toBe(0);
   });
 });
 

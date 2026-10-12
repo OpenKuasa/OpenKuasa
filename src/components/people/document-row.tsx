@@ -10,7 +10,7 @@ import { LiveDot } from '@/components/ui/live-dot';
 import { TableCell, TableRow } from '@/components/ui/table';
 import { WRITE_FAILED } from '@/lib/people/capabilities';
 import type { MyDocumentRow } from '@/lib/people/documents';
-import { ackDetail, downloadSlot, myRowStatus, removeMineSentence } from '@/lib/people/documents-screens';
+import { downloadSlot, myRowAckDetail, myRowStatus, removeMineSentence } from '@/lib/people/documents-screens';
 import { cn } from '@/lib/utils';
 import { AcknowledgeButton } from './acknowledge-button';
 import { DocumentDownload } from './document-download';
@@ -44,7 +44,7 @@ export function DocumentRow({ row }: { row: MyDocumentRow }) {
   }, [confirming]);
   const status = myRowStatus(row);
   const slot = downloadSlot(row);
-  const ack = ackDetail(row.acknowledged_label, row.awaiting_acknowledgement);
+  const ack = myRowAckDetail(row);
   const details = [row.file_label, row.expiry_label, row.added_by_label].filter((part): part is string => Boolean(part));
 
   const remove = () => {
