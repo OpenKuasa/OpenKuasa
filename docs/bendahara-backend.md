@@ -36,7 +36,7 @@ the data layer, with unit tests; the client components only draw them.
 | `payment-form.ts` | The payment-out form: which bills can take a payment and how much, defaults, validation, what is sent. `heldByBill` adds up what unpaid payments already hold of each bill; `keepPayable` drops a ticked bill that was paid off while the form was open |
 | `receipt-form.ts` | The payment-in form: which invoices can take a payment and how much (`receivableInvoices`), defaults, validation, what is sent. It has no scheduling |
 | `credit-note-form.ts` | The credit note form: which invoices can take a credit note and how much (`creditableInvoices`: posted, for the total less what is already credited), defaults, validation, what is sent. `creditNoteSavedNotIssued` words a credit note that was saved as a draft but not issued |
-| `refund-form.ts` | The refund form: what can be refunded and how much (`refundTargets`: an invoice whose customer is in credit, or one of its issued credit notes, less refunds that are pending), defaults, validation, what is sent |
+| `refund-form.ts` | The refund form: what can be refunded and how much (`refundTargets`: an invoice whose customer is in credit, or one of its issued credit notes, less refunds still to be paid), defaults, validation, what is sent |
 | `cash-book.ts` | Reading the cash book: one row per movement of money in (`listCashReceipts`, from the view `finance_cash_receipts`) and out (`listPaymentVouchers`, from `finance_payment_vouchers`), a page at a time, with the row types and the kinds a receipt and a voucher can be. It only reads |
 | `expenses.ts` | Reading expenses (`listExpenses`, from the view `finance_expense_totals`), a page at a time, with the row type, the three statuses a person sets and `paid`, which is only how an expense reads. It only reads |
 | `cash-book-views.ts` | KPI figures, chart data, table filters, status words and CSV rows for Cash Receipts, Payment Vouchers and Expenses; the period selector of the first two (`inPeriod`), which sets the cards, the donut and the table rows alike (`cashReceiptsInPeriod`, `paymentVouchersInPeriod`: a draft receipt, and a voucher waiting for approval or still to be paid, stay in every period because their cards count them whatever their date; search, filters, "View all" and Export work on top of it); which category a voucher counts under (`voucherCategory`) and which screen changes it (`voucherHome`) |
@@ -69,7 +69,7 @@ person is on, a note at the top says so and links there (`saved-note-card.tsx`).
 The card hands back what it saved, and the note is worded from that
 (`refundSavedNote`, `creditNoteSavedNote`): the amount as the schema rounds
 and stores it, the invoice or credit note it went against, the customer, and
-whether a refund was paid out or saved as to be paid and a credit note issued or kept
+whether a refund was paid out or saved to pay later and a credit note issued or kept
 as a draft. A card opened from a row has that row chosen but its picker is not
 locked, so the note names what was saved, whichever row the card was opened
 from.
@@ -566,13 +566,13 @@ pending against the invoice or against any of its credit notes. An issued
 credit note of such an invoice: the same figure, and no more than the note's
 amount less every refund standing against the note, paid out or pending.
 Choosing one fills the amount with all it can take. The refund is paid out now
-or left pending.
+or saved to pay later.
 
-What a row's menu offers follows its status (`refundActions`): a pending
-refund is marked as paid, with the date it was paid out, or deleted; one that
+What a row's menu offers follows its status (`refundActions`): a
+refund still to be paid is marked as paid, with the date it was paid out, or deleted; one that
 was paid out is voided; a void one offers nothing. A refund has no edit. A
-refund still being written (`draft`) reads "To be paid" and is counted as
-pending; the app never leaves one in that state.
+refund still being written (`draft`) reads "To be paid" and is
+counted as still to be paid; the app never leaves one in that state.
 
 Money out that may be paid and has not been (`status = 'scheduled'`) reads
 "To be paid" on every screen that shows it: the status badge, the card and the
