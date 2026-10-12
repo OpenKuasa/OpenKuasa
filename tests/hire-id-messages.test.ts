@@ -2,11 +2,17 @@
 import { describe, expect, it } from 'vitest';
 import {
   addCandidateInput,
+  cancelInterviewInput,
   deleteApplicationInput,
   deleteCandidateInput,
   deleteJobInput,
   moveApplicationInput,
   moveToPipelineInput,
+  recordPastInterviewInput,
+  reopenInterviewInput,
+  rescheduleInterviewInput,
+  scheduleInterviewInput,
+  setInterviewOutcomeInput,
   setPoolStatusInput,
   updateCandidateInput,
 } from '@/lib/hire/capabilities';
@@ -58,6 +64,30 @@ describe('a made-up id is answered with where to get a real one', () => {
       const message = said(schema, input);
       expect(message).toContain('listJobs');
       expect(message).toContain('Never make one up.');
+    }
+  });
+  it('for an interview', () => {
+    for (const [schema, input] of [
+      [rescheduleInterviewInput, { id: 'interview-7', notes: 'Bring a portfolio' }],
+      [cancelInterviewInput, { id: 'interview-7' }],
+      [setInterviewOutcomeInput, { id: 'interview-7', outcome: 'completed' }],
+      [reopenInterviewInput, { id: 'interview-7' }],
+    ] as const) {
+      const message = said(schema, input);
+      expect(message).toContain('listInterviews');
+      expect(message).toContain('Never make one up.');
+      expect(message).not.toContain('interview-7');
+    }
+  });
+  it('for the application an interview is scheduled or recorded for', () => {
+    for (const [schema, input] of [
+      [scheduleInterviewInput, { application_id: MADE_UP, date: '2026-10-20', time: '15:00', kind: 'video' }],
+      [recordPastInterviewInput, { application_id: MADE_UP, date: '2026-10-06', time: '15:00', kind: 'video', outcome: 'completed' }],
+    ] as const) {
+      const message = said(schema, input);
+      expect(message).toContain('listApplications');
+      expect(message).toContain('Never make one up.');
+      expect(message).not.toContain(MADE_UP);
     }
   });
   it('names no id back, so nothing a model typed is echoed', () => {
