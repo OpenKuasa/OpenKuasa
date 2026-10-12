@@ -17,6 +17,15 @@ import {
   voidBill,
 } from '@/lib/finance/bills';
 import {
+  type SaveAndPostCashReceiptResult,
+  cashReceiptIdInput,
+  deleteCashReceipt,
+  postCashReceipt,
+  saveCashReceipt,
+  saveCashReceiptInput,
+  voidCashReceipt,
+} from '@/lib/finance/cash-receipts';
+import {
   createContact,
   createContactInput,
   deleteContact,
@@ -548,4 +557,33 @@ export async function recordPaymentInAction(input: unknown) {
 /** Voiding money in refreshes the sales screens, and answers in the sentences of a payment in. */
 export async function voidPaymentInAction(input: unknown) {
   return run(SALES_PATHS, paymentIdInput, input, voidPaymentIn, SIGN_OFF);
+}
+
+/* ---- cash receipts ----------------------------------------------------- */
+
+// Every receipt action refreshes the sales screens, whatever the receipt is for. A receipt against invoices
+// moves what they owe once it is posted or voided, and while it is a draft it holds its part of each, which
+// changes what the payment forms on Invoices and Payments In offer and adds a Draft row to Payments In. A
+// receipt for income shows on Cash Receipts and Banking only, both of which are in the list; and one save can
+// turn a draft of one kind into the other.
+
+/** Creates a draft receipt, or changes one. Nothing is posted: anyone who may write can do this. */
+export async function saveCashReceiptAction(input: unknown) {
+  return run(SALES_PATHS, saveCashReceiptInput, input, saveCashReceipt);
+}
+/** Posts a draft: it gets its RC- number and is locked. */
+export async function postCashReceiptAction(input: unknown) {
+  return run(SALES_PATHS, cashReceiptIdInput, input, postCashReceipt, SIGN_OFF);
+}
+/** Voids a posted receipt of either kind; the invoices it paid owe that amount again. */
+export async function voidCashReceiptAction(input: unknown) {
+  return run(SALES_PATHS, cashReceiptIdInput, input, voidCashReceipt, SIGN_OFF);
+}
+export async function deleteCashReceiptAction(input: unknown) {
+  return run(SALES_PATHS, cashReceiptIdInput, input, deleteCashReceipt);
+}
+
+/** Saves the receipt as a draft, then posts it; see `saveThenPost`. Someone who may not sign off keeps the draft. */
+export async function saveAndPostCashReceiptAction(input: unknown): Promise<SaveAndPostCashReceiptResult> {
+  return saveThenPost(SALES_PATHS, saveCashReceiptInput, input, saveCashReceipt, postCashReceipt, true);
 }
