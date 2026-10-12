@@ -146,8 +146,6 @@ export type ItemKind =
   | 'quotation'
   | 'bill'
   | 'credit-note'
-  | 'refund'
-  | 'payment'
   | 'finance-contact'
   | 'item';
 const KIND_OF_TOOL: Record<string, ItemKind> = {
@@ -281,9 +279,6 @@ const KIND_OF_TOOL: Record<string, ItemKind> = {
   issueCreditNote: 'credit-note',
   voidCreditNote: 'credit-note',
   deleteCreditNote: 'credit-note',
-  listRefunds: 'refund',
-  listPaymentsIn: 'payment',
-  listPaymentsOut: 'payment',
   listFinanceContacts: 'finance-contact',
   createFinanceContact: 'finance-contact',
   updateFinanceContact: 'finance-contact',
@@ -1870,6 +1865,7 @@ export function approvalTitle(
     case 'markPaymentPaid': return 'Mark this payment as paid?';
     case 'voidPayment':
     case 'voidPaymentIn': return 'Void this payment?';
+    case 'deleteScheduledPayment': return 'Delete this scheduled payment?';
     case 'createFinanceContact': return `Add finance contact “${text(i.name) ?? ''}”?`;
     case 'updateFinanceContact': return `Save changes to ${the('finance contact', 'finance-contact')}?`;
     case 'setFinanceContactActive':
@@ -2233,7 +2229,8 @@ export function approvalDetail(
     toolName === 'deleteRefund' ||
     toolName === 'deleteBill' ||
     toolName === 'deleteFinanceContact' ||
-    toolName === 'deleteFinanceItem'
+    toolName === 'deleteFinanceItem' ||
+    toolName === 'deleteScheduledPayment'
   ) {
     return 'This cannot be undone.';
   }

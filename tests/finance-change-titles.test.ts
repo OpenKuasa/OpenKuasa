@@ -27,6 +27,11 @@ describe('finance approve-card titles', () => {
   it('warns that a finance delete cannot be undone', () => {
     expect(approvalDetail('deleteBill', { id: 'b1' })).toBe('This cannot be undone.');
     expect(approvalDetail('deleteFinanceItem', { id: 'p1' })).toBe('This cannot be undone.');
+    expect(approvalDetail('deleteScheduledPayment', { id: 'p1' })).toBe('This cannot be undone.');
+  });
+
+  it('titles a scheduled-payment delete specifically', () => {
+    expect(approvalTitle('deleteScheduledPayment', { id: 'p1' })).toBe('Delete this scheduled payment?');
   });
 
   it('shows the amount on a money-movement card so the owner does not approve blind', () => {

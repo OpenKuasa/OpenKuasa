@@ -12,6 +12,7 @@
  */
 import type { ModelMessage } from 'ai';
 import { CRM_WRITE_TOOL_NAMES } from '@/lib/ai/crm-tools';
+import { FINANCE_WRITE_TOOL_NAMES } from '@/lib/ai/finance-tools';
 import {
   HIRE_WRITE_TOOL_NAMES,
   PEOPLE_WRITE_TOOL_NAMES,
@@ -26,6 +27,7 @@ const PRODUCT_OF = new Map<string, string>([
   ...CRM_WRITE_TOOL_NAMES.map((name) => [name, 'crm'] as const),
   ...HIRE_WRITE_TOOL_NAMES.map((name) => [name, 'hire'] as const),
   ...PEOPLE_WRITE_TOOL_NAMES.map((name) => [name, 'people'] as const),
+  ...FINANCE_WRITE_TOOL_NAMES.map((name) => [name, 'finance'] as const),
 ]);
 
 type Prepared = { id: string; product: string; action: string; input: unknown };

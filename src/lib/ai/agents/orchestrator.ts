@@ -260,8 +260,8 @@ export function runTuah(
   people?: PeopleAccess | null,
   /**
    * The workspace's finance data. The lookups need no workspace role; the
-   * change tools are added when the caller may write, and each waits for the
-   * owner's approval.
+   * change tools are added when the caller may write (a non-viewer member), and
+   * each waits for the user's approval.
    */
   finance?: FinanceAccess | null,
   /** Where proposed changes are kept; a chat route passes its own. */

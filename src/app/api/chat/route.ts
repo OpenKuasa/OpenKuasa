@@ -5,7 +5,8 @@
  * otherwise one of the user's free weekly questions on the platform key.
  *
  * Tuah works through a team: it asks a specialist per product (Jebat for
- * marketing, Kasturi for the CRM, Lekir for hiring) and carries out the changes they prepare.
+ * marketing, Kasturi for the CRM, Lekir for hiring, Lekiu for HR, Bendahara for
+ * finance) and carries out the changes they prepare.
  * Lookups run on their own; changes wait for the user's approval. A chat can
  * ask for the single agent that holds every tool itself with `team: false`.
  *
