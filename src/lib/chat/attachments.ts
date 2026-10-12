@@ -238,14 +238,26 @@ export function inlineTextFiles(messages: UIMessage[]): UIMessage[] {
       const name = part.filename?.trim() || 'attachment';
       const content = decodeDataUrl(part.url);
       if (content == null) {
-        return { type: 'text' as const, text: `\n\n[Attached file "${name}" could not be read.]` };
+        return { type: 'text' as const, text: `${INLINED_UNREADABLE}${name}" could not be read.]` };
       }
       const cut = content.length > TEXT_FILE_MAX_CHARS;
       return {
         type: 'text' as const,
-        text: `\n\nAttached file "${name}"${cut ? ' (start of the file only)' : ''}:\n${content.slice(0, TEXT_FILE_MAX_CHARS)}`,
+        text: `${INLINED_FILE}${name}"${cut ? ' (start of the file only)' : ''}:\n${content.slice(0, TEXT_FILE_MAX_CHARS)}`,
       };
     });
     return { ...message, parts };
   });
+}
+
+/** How the text that stands for an attached text file begins (`inlineTextFiles` writes both). */
+const INLINED_FILE = '\n\nAttached file "';
+const INLINED_UNREADABLE = '\n\n[Attached file "';
+
+/**
+ * True for a piece of a user message that `inlineTextFiles` wrote: a file's contents, not words the person typed.
+ * A rule about what the person said (which language they wrote in) must look past it.
+ */
+export function isInlinedFileText(text: string): boolean {
+  return text.startsWith(INLINED_FILE) || text.startsWith(INLINED_UNREADABLE);
 }
