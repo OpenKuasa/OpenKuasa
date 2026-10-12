@@ -13,7 +13,7 @@ export default async function ApproveOvertimeScreen() {
       data,
       ctx.viewer,
       now,
-      teamScreenView(ctx.viewer) === 'manager' && ctx.orgId ? await readTeamOvertime(ctx.client, ctx.orgId) : [],
+      teamScreenView(ctx.viewer) === 'manager' && ctx.orgId ? await readTeamOvertime(ctx.client, ctx.orgId) : null,
     ),
     // Only a team viewer reads the employee list, for "Add overtime for…".
     employees: isTeamView(ctx.viewer)

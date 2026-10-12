@@ -83,7 +83,7 @@ describe('the sample data queues', () => {
   });
 
   it('overtime: 1 pending record of 4 hours, by department', async () => {
-    const model = (await overtimeApprovals(data, HR, NOW))!;
+    const model = (await overtimeApprovals(data, HR, NOW, null))!;
     expect(model.pending.count).toBe(1);
     expect(model.pending.caption).toBe('4 h');
     expect(model.breakdown).toEqual([{ label: 'Operations', value: 4, text: '4 h' }]);
@@ -101,7 +101,7 @@ describe('the sample data queues', () => {
 describe('who may build', () => {
   it('a plain member gets null from every builder and nothing is read', async () => {
     for (const build of [leaveApprovals, claimApprovals, overtimeApprovals, timeOffApprovals]) {
-      expect(await build(THROWING, MEMBER, NOW)).toBeNull();
+      expect(await build(THROWING, MEMBER, NOW, null)).toBeNull();
     }
   });
 });
@@ -110,7 +110,7 @@ describe('an empty workspace', () => {
   it('gives empty queues and zeros, no NaN', async () => {
     const empty = withRows({});
     for (const build of [leaveApprovals, claimApprovals, overtimeApprovals, timeOffApprovals]) {
-      const model = (await build(empty, HR, NOW))!;
+      const model = (await build(empty, HR, NOW, null))!;
       expect(model.rows).toEqual([]);
       expect(model.pending.count).toBe(0);
       expect(model.approved.count).toBe(0);
@@ -207,7 +207,7 @@ describe('the queue rules', () => {
     expect(l.rows[0].cells).toEqual(['Annual leave', '05 Oct–06 Oct', '2']);
     const c = (await claimApprovals(withRows({ listClaims: [claim({})] }), HR, NOW))!;
     expect(c.rows[0].cells).toEqual(['Travel', 'RM 10.00', '02 Oct 2026']);
-    const o = (await overtimeApprovals(withRows({ listOvertime: [overtime({})] }), HR, NOW))!;
+    const o = (await overtimeApprovals(withRows({ listOvertime: [overtime({})] }), HR, NOW, null))!;
     expect(o.rows[0].cells).toEqual(['02 Oct 2026', '2 h', 'RM 75.00']);
     const t = (await timeOffApprovals(withRows({ listTimeOffRequests: [timeOff({ reason: null })] }), HR, NOW))!;
     expect(t.rows[0].cells).toEqual(['05 Oct 2026', '1.5 h', '—']);
@@ -222,6 +222,7 @@ describe('the queue rules', () => {
       }),
       HR,
       NOW,
+      null,
     ))!;
     expect(model.breakdown).toEqual([{ label: 'Unassigned', value: 4, text: '4 h' }]);
     expect(model.pending.count).toBe(2);
@@ -403,7 +404,7 @@ describe('claim rows', () => {
   it('adds the tile of approved claims not yet paid, only on the claims queue', async () => {
     const model = await build();
     expect(model.unpaid).toEqual({ count: 2, caption: 'RM 109.00' });
-    const other = (await overtimeApprovals(withRows({}), HR, NOW))!;
+    const other = (await overtimeApprovals(withRows({}), HR, NOW, null))!;
     expect(other.unpaid).toBeNull();
     expect(other.rows.every((r) => r.claim === null)).toBe(true);
   });
@@ -422,6 +423,7 @@ describe('overtime rows', () => {
       }),
       HR,
       NOW,
+      null,
     ))!;
     const row = (id: string) => model.rows.find((r) => r.id === id)!;
     expect(row('a').overtime).toEqual({ kind: 'Rest day, paid at 2 times', calculated: true });
@@ -505,6 +507,7 @@ describe("a manager's queue", () => {
     const model = (await builders[queue](teamData(), MANAGER))!;
     expect(model).not.toBeNull();
     expect(model.view).toBe('manager');
+    expect(model.rows.length).toBeGreaterThan(0);
     for (const row of model.rows) {
       expect(TEAM).toContain(await employeeOf(queue, row.id));
       expect(row).toMatchObject({ manager_label: null, cancellable: false, decidable: true, yours: false });
@@ -556,6 +559,39 @@ describe("a manager's queue", () => {
     expect(model.breakdown!.reduce((sum, b) => sum + b.value, 0)).toBe(3);
   });
 
+  it("drops the manager's own claim, overtime and time-off request too", async () => {
+    const employees = await data.listEmployees();
+    const claims = await claimApprovals(
+      withRows({ listEmployees: employees, listClaims: [claim({ id: 'own', employee_id: 'seed-emp-12' }), claim({ id: 'rep', employee_id: 'seed-emp-5' })] }),
+      MANAGER, NOW,
+    );
+    expect(claims!.rows.map((r) => r.id)).toEqual(['rep']);
+    const off = await timeOffApprovals(
+      withRows({ listEmployees: employees, listTimeOffRequests: [timeOff({ id: 'own', employee_id: 'seed-emp-12' }), timeOff({ id: 'rep', employee_id: 'seed-emp-5' })] }),
+      MANAGER, NOW,
+    );
+    expect(off!.rows.map((r) => r.id)).toEqual(['rep']);
+    const ot = await overtimeApprovals(
+      withRows({ listEmployees: employees }), MANAGER, NOW,
+      [toTeamRow(overtime({ id: 'own', employee_id: 'seed-emp-12' })), toTeamRow(overtime({ id: 'rep', employee_id: 'seed-emp-5' }))],
+    );
+    expect(ot!.rows.map((r) => r.id)).toEqual(['rep']);
+    expect(ot!.pending.count).toBe(1);
+  });
+
+  it('never reads the overtime table for a manager', async () => {
+    const d = new Proxy(withRows({ listEmployees: await data.listEmployees() }), {
+      get: (target, name) =>
+        name === 'listOvertime'
+          ? () => {
+              throw new Error('the table was read');
+            }
+          : Reflect.get(target, name),
+    });
+    const model = await overtimeApprovals(d, MANAGER, NOW, [toTeamRow(overtime({ employee_id: 'seed-emp-5' }))]);
+    expect(model!.rows).toHaveLength(1);
+  });
+
   it('a manager with no employee record gets an empty queue and no throw', async () => {
     const nobody: PeopleViewer = { employeeId: null, isHr: false, isDemo: false, managesTeam: true };
     for (const queue of Object.keys(builders) as (keyof typeof builders)[]) {
@@ -567,7 +603,7 @@ describe("a manager's queue", () => {
     let called = false;
     const spy = new Proxy({} as PeopleData, { get: () => () => { called = true; return []; } });
     for (const build of [leaveApprovals, claimApprovals, overtimeApprovals, timeOffApprovals]) {
-      expect(await build(spy, MEMBER, NOW)).toBeNull();
+      expect(await build(spy, MEMBER, NOW, null)).toBeNull();
     }
     expect(called).toBe(false);
   });
@@ -587,7 +623,9 @@ describe("a manager's overtime row never shows money", () => {
   it('carries no money field and no money text', () => {
     const item = managerOvertimeItem(row, 'Report');
     expect(JSON.stringify(item)).not.toMatch(MONEY);
-    expect(Object.keys(item)).not.toEqual(expect.arrayContaining(['amount_cents']));
+    expect(Object.keys(item).sort()).toEqual(
+      ['cells', 'created_at', 'date', 'employee_id', 'employee_name', 'group', 'id', 'measure', 'notes', 'overtime', 'status', 'trend'],
+    );
   });
 
   it('the whole model carries none either', async () => {

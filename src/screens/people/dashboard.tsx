@@ -7,7 +7,7 @@ import { ScreenContainer } from '@/components/screen/screen-container';
 import { buildDashboardModel, dashboardAttendanceFrom } from '@/lib/people/company';
 import { monthYearLabel, todayInMalaysia } from '@/lib/people/dates';
 import { isTeamView } from '@/lib/people/own';
-import { buildTeamSection, showsTeamSection } from '@/lib/people/team-section';
+import { loadTeamSection } from '@/lib/people/team-section';
 import { ZERO_WAITING, readWaitingCounts } from '@/lib/people/waiting-counts';
 import { rm } from '@/lib/reach/format';
 import { HR_ONLY, LOAD_FAILED, LaterButton, Muted, loadPeople } from './parts';
@@ -30,15 +30,15 @@ export default async function DashboardScreen() {
     const employees = await data.listEmployees();
     if (!team) {
       // A manager's company-wide cards keep their HR-only notices; the team card is extra.
-      const [teamLeave, waiting] = showsTeamSection(ctx.viewer)
-        ? await Promise.all([
-            data.listLeaveRequests(),
-            ctx.orgId ? readWaitingCounts({ client: ctx.client, orgId: ctx.orgId }) : Promise.resolve(ZERO_WAITING),
-          ])
-        : [[], ZERO_WAITING];
+      const mine = await loadTeamSection(data, {
+        viewer: ctx.viewer,
+        employees,
+        today,
+        readWaiting: () => (ctx.orgId ? readWaitingCounts({ client: ctx.client, orgId: ctx.orgId }) : Promise.resolve(ZERO_WAITING)),
+      });
       return {
         dashboard: buildDashboardModel({ employees, leave: [], attendance: [], runs: [], payslips: [] }, today, false),
-        mine: buildTeamSection({ viewer: ctx.viewer, employees, leave: teamLeave, waiting, today }),
+        mine,
       };
     }
     const [leave, attendance, runs, payslips] = await Promise.all([
@@ -119,6 +119,9 @@ export default async function DashboardScreen() {
 
         {mine ? (
           <BentoCard title="My team" subtitle="The people who report to you" icon={UsersRound} className="col-span-2 md:col-span-12">
+            {mine === 'unavailable' ? (
+              LOAD_FAILED
+            ) : (
             <div className="grid gap-6 md:grid-cols-3">
               <div>
                 <BentoStat label="Reporting to you" value={mine.members} />
@@ -158,6 +161,7 @@ export default async function DashboardScreen() {
                 )}
               </div>
             </div>
+            )}
           </BentoCard>
         ) : null}
 

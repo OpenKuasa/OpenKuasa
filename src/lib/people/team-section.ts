@@ -6,7 +6,7 @@ import { formatDay } from './dates';
 import { leaveLabel, onLeaveOn } from './overview';
 import { reportsOf } from './reporting';
 import { teamScreenView } from './tier';
-import type { Employee, LeaveRequest, PeopleViewer } from './types';
+import type { Employee, LeaveRequest, PeopleData, PeopleViewer } from './types';
 import { waitingTotal, type WaitingCounts } from './waiting-counts';
 
 export type TeamSection = {
@@ -41,7 +41,8 @@ export function buildTeamSection(input: {
   today: string;
 }): TeamSection | null {
   if (!showsTeamSection(input.viewer)) return null;
-  const team = reportsOf(input.employees, input.viewer.employeeId);
+  // Active reports only, as team attendance lists them.
+  const team = reportsOf(input.employees, input.viewer.employeeId).filter((e) => e.status === 'active');
   const ids = new Set(team.map((e) => e.id));
   return {
     members: team.length,
@@ -52,4 +53,22 @@ export function buildTeamSection(input: {
     waiting: KINDS.filter((k) => input.waiting[k.key] > 0).map((k) => ({ label: k.label, count: input.waiting[k.key], href: k.href })),
     waitingTotal: waitingTotal(input.waiting),
   };
+}
+
+/**
+ * The card for the dashboard: the section, null for anyone but a manager, or 'unavailable' when its own reads
+ * fail, so the rest of the dashboard still renders and the card never claims "Nobody is away" on a failed read.
+ * `readWaiting` never throws (zeros on a failure).
+ */
+export async function loadTeamSection(
+  data: Pick<PeopleData, 'listLeaveRequests'>,
+  input: { viewer: PeopleViewer; employees: Employee[]; today: string; readWaiting: () => Promise<WaitingCounts> },
+): Promise<TeamSection | 'unavailable' | null> {
+  if (!showsTeamSection(input.viewer)) return null;
+  try {
+    const [leave, waiting] = await Promise.all([data.listLeaveRequests(), input.readWaiting()]);
+    return buildTeamSection({ viewer: input.viewer, employees: input.employees, leave, waiting, today: input.today });
+  } catch {
+    return 'unavailable';
+  }
 }

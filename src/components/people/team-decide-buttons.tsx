@@ -1,11 +1,14 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useRef, useState, useTransition } from 'react';
 import { decideClaimAction, decideOvertimeAction } from '@/app/(app)/people/pay-actions';
 import { decideLeaveAction, decideTimeOffAction } from '@/app/(app)/people/leave-actions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { CapResult } from '@/lib/people/capabilities';
+import { LEAVE_REFUSALS } from '@/lib/people/leave';
+import { PAY_REFUSALS } from '@/lib/people/pay-requests';
 import { RowPrompt, usePromptId } from './request-row';
 
 type Kind = 'leave' | 'time_off' | 'claim' | 'overtime';
@@ -26,6 +29,7 @@ const DECIDE: Record<Kind, Decide> = {
  * refreshes the page through the action's own revalidation.
  */
 export function TeamDecideButtons({ kind, id }: { kind: Kind; id: string }) {
+  const router = useRouter();
   const [busy, start] = useTransition();
   const [rejecting, setRejecting] = useState(false);
   const [note, setNote] = useState('');
@@ -49,6 +53,10 @@ export function TeamDecideButtons({ kind, id }: { kind: Kind; id: string }) {
         setNote('');
       } else {
         setError(result.error);
+        // Someone else decided it first: load the page afresh so the stale row and its buttons go.
+        if (result.error === LEAVE_REFUSALS.LEAVE_NOT_PENDING || result.error === PAY_REFUSALS.PAY_NOT_PENDING) {
+          router.refresh();
+        }
       }
     });
   }

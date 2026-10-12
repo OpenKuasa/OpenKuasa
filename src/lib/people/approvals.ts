@@ -441,14 +441,14 @@ export async function overtimeApprovals(
   data: PeopleData,
   viewer: PeopleViewer,
   now: Date,
-  teamOvertime: TeamOvertimeRow[] = [],
+  teamOvertime: TeamOvertimeRow[] | null,
 ): Promise<ApprovalsModel | null> {
   if (!canApproveTeam(viewer)) return null;
   const today = todayInMalaysia(now);
   if (teamScreenView(viewer) === 'manager') {
     const employees = await data.listEmployees();
     const names = new Map(employees.map((e) => [e.id, e.name]));
-    const rows = inScope(teamOvertime, viewer, employees);
+    const rows = inScope(teamOvertime ?? [], viewer, employees);
     const items = rows.map((r) => managerOvertimeItem(r, names.get(r.employee_id) ?? ''));
     const department = new Map(employees.map((e) => [e.id, e.department_name ?? 'Unassigned']));
     const breakdown = sumBy(

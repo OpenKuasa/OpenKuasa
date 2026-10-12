@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { formatDay } from '@/lib/people/dates';
 import { leaveLabel } from '@/lib/people/overview';
-import { buildTeamSection, showsTeamSection } from '@/lib/people/team-section';
+import { buildTeamSection, loadTeamSection, showsTeamSection } from '@/lib/people/team-section';
 import { ZERO_WAITING } from '@/lib/people/waiting-counts';
 import type { Employee, LeaveRequest, PeopleViewer } from '@/lib/people/types';
 
@@ -84,5 +84,38 @@ describe('buildTeamSection', () => {
 
   it('a manager with no employees in the list has no members and nobody away', () => {
     expect(build({ employees: [] })).toMatchObject({ members: 0, away: [] });
+  });
+});
+
+describe('active reports only', () => {
+  it('counts none when every report is inactive', () => {
+    const inactive = [emp('boss', { reports_to: null }), emp('r1', { status: 'inactive' }), emp('r2', { status: 'inactive' })];
+    expect(build({ employees: inactive })).toMatchObject({ members: 0, away: [] });
+  });
+
+  it('leaves an inactive report out of away and members', () => {
+    const mixed = [emp('boss', { reports_to: null }), emp('r1'), emp('r2', { status: 'inactive' })];
+    const section = build({
+      employees: mixed,
+      leave: [leave({ id: 'a', employee_id: 'r1', employee_name: 'R1' }), leave({ id: 'b', employee_id: 'r2', employee_name: 'R2' })],
+    })!;
+    expect(section.members).toBe(1);
+    expect(section.away.map((a) => a.name)).toEqual(['R1']);
+  });
+});
+
+describe('loadTeamSection', () => {
+  const readWaiting = async () => ZERO_WAITING;
+  it('is unavailable, not empty, when the leave read throws', async () => {
+    const data = { listLeaveRequests: async () => { throw new Error('boom'); } };
+    expect(await loadTeamSection(data, { viewer: manager, employees, today: TODAY, readWaiting })).toBe('unavailable');
+  });
+  it('is null for a member and reads nothing', async () => {
+    const data = { listLeaveRequests: async () => { throw new Error('read'); } };
+    expect(await loadTeamSection(data, { viewer: member, employees, today: TODAY, readWaiting })).toBeNull();
+  });
+  it('is the section when the reads work', async () => {
+    const data = { listLeaveRequests: async () => [] as LeaveRequest[] };
+    expect(await loadTeamSection(data, { viewer: manager, employees, today: TODAY, readWaiting })).toMatchObject({ members: 5 });
   });
 });

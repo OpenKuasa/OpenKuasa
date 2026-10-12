@@ -27,6 +27,12 @@ describe('what a manager component may name', () => {
     );
   });
 
+  it('refreshes the page when a decision is refused as already decided', () => {
+    expect(buttons).toContain('router.refresh()');
+    expect(buttons).toContain('LEAVE_NOT_PENDING');
+    expect(buttons).toContain('PAY_NOT_PENDING');
+  });
+
   it('the team section module imports nothing from the app directory', () => {
     expect(text('src/lib/people/team-section.ts')).not.toMatch(/from '@\/app\//);
   });
