@@ -49,15 +49,21 @@ export function roleLabel(role: OrgRole): string {
   return role[0].toUpperCase() + role.slice(1);
 }
 
+/** What a nav item may ask for: a capability, or `approve-team` (an owner or admin, or someone who manages a team). */
+export type NavNeed = Capability | 'approve-team';
+
 /**
  * Whether a screen should be shown at all. Demo guests may look at everything
  * (read-only) so the demo still tours the whole product; real members only see
- * what their role covers.
+ * what their role covers. `approve-team` is not a capability of a role (it is
+ * not in PERMISSIONS, which the Team page renders): it follows the reporting
+ * lines in Lekiu, which `managesTeam` carries.
  */
 export function canSee(
-  viewer: { role: OrgRole; isDemo: boolean },
-  capability: Capability | undefined,
+  viewer: { role: OrgRole; isDemo: boolean; managesTeam?: boolean },
+  need: NavNeed | undefined,
 ): boolean {
-  if (!capability || viewer.isDemo) return true;
-  return can(viewer.role, capability);
+  if (!need || viewer.isDemo) return true;
+  if (need === 'approve-team') return can(viewer.role, 'approve') || viewer.managesTeam === true;
+  return can(viewer.role, need);
 }

@@ -42,7 +42,7 @@ const MAX_PAGES = 5;
 
 const NAME = 'employee:hr_employees(name)';
 const EMPLOYEE_COLUMNS =
-  'id,user_id,employee_no,name,work_email,department_id,designation,employment_type,is_manager,join_date,status,' +
+  'id,user_id,employee_no,name,work_email,department_id,designation,employment_type,reports_to,join_date,status,' +
   'date_of_birth_day,date_of_birth_month,created_at,department:hr_departments(name)';
 const PRIVATE_COLUMNS =
   'employee_id,nric,date_of_birth,phone,address,base_salary_cents,bank_name,bank_account,epf_no,socso_no,tax_no,' +

@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-
 const env = vi.hoisted(() => ({
   hasEnv: true,
   org: { orgId: 'o1', role: 'member' } as { orgId: string; role: string } | null,
@@ -56,9 +55,18 @@ const ROWS: Record<string, unknown[]> = {
 };
 /** What `.maybeSingle()` answers, by table. */
 const SINGLE: Record<string, unknown> = {};
+/** What `rpc(name)` answers, by function name; `__throw` makes the call reject. */
+const RPC: Record<string, { data?: unknown; error?: { code?: string; message?: string }; __throw?: boolean }> = {};
+const rpcCalls: [string, unknown][] = [];
 
 const client = {
   auth: { getUser: async () => ({ data: { user: env.user }, error: null }) },
+  async rpc(name: string, args: unknown) {
+    rpcCalls.push([name, args]);
+    const reply = RPC[name];
+    if (reply?.__throw) throw new Error('network down');
+    return { data: reply?.data ?? null, error: reply?.error ?? null };
+  },
   from(table: string) {
     const call: Call = { table, columns: '', filters: [], order: [] };
     const query = {
@@ -98,6 +106,8 @@ afterEach(() => {
   env.fail = false;
   calls.length = 0;
   for (const key of Object.keys(SINGLE)) delete SINGLE[key];
+  for (const key of Object.keys(RPC)) delete RPC[key];
+  rpcCalls.length = 0;
 });
 
 describe('getPeopleData', () => {
@@ -439,6 +449,80 @@ describe('getPeopleViewer', () => {
     env.hasEnv = false;
     expect(await getPeopleViewer(client, { orgId: 'o1', role: 'owner' })).toEqual(PREVIEW_PEOPLE_VIEWER);
     expect(calls).toEqual([]);
+    expect(rpcCalls).toEqual([]);
+  });
+
+  describe('the team a member manages', () => {
+    it('marks a linked member with a team as managing it', async () => {
+      SINGLE.orgs = { slug: 'acme' };
+      SINGLE.hr_employees = { id: 'e2' };
+      RPC.hr_my_team = { data: ['r1'] };
+      expect(await getPeopleViewer(client, { orgId: 'o1', role: 'member' })).toEqual({
+        employeeId: 'e2', isHr: false, isDemo: false, managesTeam: true,
+      });
+      expect(rpcCalls).toEqual([['hr_my_team', { p_org: 'o1' }]]);
+    });
+
+    it('gives a member with no team exactly the viewer they had before, with no managesTeam key', async () => {
+      SINGLE.orgs = { slug: 'acme' };
+      SINGLE.hr_employees = { id: 'e2' };
+      RPC.hr_my_team = { data: [] };
+      const viewer = await getPeopleViewer(client, { orgId: 'o1', role: 'member' });
+      expect(viewer).toEqual({ employeeId: 'e2', isHr: false, isDemo: false });
+      expect('managesTeam' in viewer).toBe(false);
+    });
+
+    it('does not mark a member with no linked employee record', async () => {
+      SINGLE.orgs = { slug: 'acme' };
+      RPC.hr_my_team = { data: ['r1'] };
+      const viewer = await getPeopleViewer(client, { orgId: 'o1', role: 'member' });
+      expect(viewer.employeeId).toBeNull();
+      expect('managesTeam' in viewer).toBe(false);
+    });
+
+    it('never asks for the team of an owner or an admin', async () => {
+      SINGLE.orgs = { slug: 'acme' };
+      SINGLE.hr_employees = { id: 'e7' };
+      RPC.hr_my_team = { data: ['r1'] };
+      for (const role of ['owner', 'admin'] as const) {
+        expect('managesTeam' in (await getPeopleViewer(client, { orgId: 'o1', role }))).toBe(false);
+      }
+      expect(rpcCalls).toEqual([]);
+    });
+
+    it('does not mark a member in the demo workspace', async () => {
+      SINGLE.orgs = { slug: 'rimba-ventures-demo' };
+      SINGLE.hr_employees = { id: 'e2' };
+      RPC.hr_my_team = { data: ['r1'] };
+      const viewer = await getPeopleViewer(client, { orgId: 'demo', role: 'member' });
+      expect('managesTeam' in viewer).toBe(false);
+    });
+
+    it.each([
+      ['an error', { error: { code: '42883' } }],
+      ['a thrown call', { __throw: true }],
+    ] as const)('reads %s as no team, without throwing', async (_name, reply) => {
+      SINGLE.orgs = { slug: 'acme' };
+      SINGLE.hr_employees = { id: 'e2' };
+      RPC.hr_my_team = reply;
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        expect(await getPeopleViewer(client, { orgId: 'o1', role: 'member' })).toEqual({
+          employeeId: 'e2', isHr: false, isDemo: false,
+        });
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
+});
+
+describe('the employee columns', () => {
+  it('select reports_to and no longer is_manager', async () => {
+    await (await getPeopleData(client)).listEmployees();
+    const columns = calls.find((c) => c.table === 'hr_employees')!.columns;
+    expect(columns).toContain('reports_to');
+    expect(columns).not.toContain('is_manager');
   });
 });
 

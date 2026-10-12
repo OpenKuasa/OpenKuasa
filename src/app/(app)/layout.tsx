@@ -2,25 +2,42 @@ import { AppShell } from '@/components/app/app-shell';
 import { ViewerProvider } from '@/components/app/viewer-context';
 import { NavBadgesProvider, type NavBadges } from '@/components/app/nav-badges-context';
 import { getViewer } from '@/lib/auth/viewer';
+import { can } from '@/lib/auth/permissions';
 import { createClient } from '@/lib/supabase/server';
 import { countPendingProposals } from '@/lib/agents/proposals';
+import { readMyTeam } from '@/lib/people/my-team';
 
 export default async function AppLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const viewer = await getViewer();
+  let viewer = await getViewer();
 
   // A live pending-proposals count for the AI Agents nav badge. A failed count must
   // never break the app shell, so it falls back to zero.
-  const badges: NavBadges = { pendingProposals: 0, unreadAnnouncements: 0, awaitingAcknowledgement: 0 };
+  const badges: NavBadges = {
+    pendingProposals: 0,
+    unreadAnnouncements: 0,
+    awaitingAcknowledgement: 0,
+    waitingLeave: 0,
+    waitingTimeOff: 0,
+    waitingClaims: 0,
+    waitingOvertime: 0,
+  };
   if (!viewer.isDemo && viewer.orgId) {
     try {
       const supabase = await createClient();
-      badges.pendingProposals = await countPendingProposals(supabase, viewer.orgId);
+      // Lekiu: does this member manage a team? That decides which approval pages the nav shows them. Owners and
+      // admins see those pages by role. A failed read is "no team" (readMyTeam never throws).
+      const [pending, team] = await Promise.all([
+        countPendingProposals(supabase, viewer.orgId).catch(() => 0),
+        can(viewer.role, 'approve') ? Promise.resolve([] as string[]) : readMyTeam(supabase, viewer.orgId),
+      ]);
+      badges.pendingProposals = pending;
+      if (team.length > 0) viewer = { ...viewer, managesTeam: true };
     } catch {
-      // keep the default zero
+      // keep the defaults
     }
   }
 

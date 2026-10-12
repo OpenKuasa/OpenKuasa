@@ -22,6 +22,8 @@ export type Viewer = {
   orgName: string;
   role: OrgRole;
   isDemo: boolean;
+  /** Lekiu: has at least one direct report. Left out for everyone else; the app layout adds it. */
+  managesTeam?: boolean;
 };
 
 type ViewerUser = {

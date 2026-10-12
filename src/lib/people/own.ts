@@ -23,6 +23,14 @@ export function isTeamView(viewer: PeopleViewer): boolean {
   return viewer.isHr || viewer.isDemo;
 }
 
+/**
+ * The people the approval screens and team attendance are for: HR, the demo, and a manager. Not `isTeamView`:
+ * a manager's rows are their own and their direct reports', never the whole workspace's.
+ */
+export function canApproveTeam(viewer: PeopleViewer): boolean {
+  return isTeamView(viewer) || viewer.managesTeam === true;
+}
+
 /** The rows that belong to the viewer's own employee record. None when the account is not linked. */
 export function ownRows<T extends { employee_id: string }>(rows: T[], viewer: PeopleViewer): T[] {
   const id = viewer.employeeId;

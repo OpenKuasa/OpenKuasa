@@ -1,5 +1,5 @@
-import { expect, test } from 'vitest';
-import { can, canSee } from '@/lib/auth/permissions';
+import { describe, expect, it, test } from 'vitest';
+import { PERMISSIONS, can, canSee } from '@/lib/auth/permissions';
 
 test('billing and company edits are owner/admin only', () => {
   expect(can('owner', 'manage-billing')).toBe(true);
@@ -40,4 +40,30 @@ test('posting, paying and voiding finance documents is owner/admin only; drafts 
   expect(can('member', 'sign-off-finance')).toBe(false);
   expect(can('viewer', 'sign-off-finance')).toBe(false);
   expect(can('member', 'edit-data')).toBe(true);
+});
+
+describe("canSee and the nav need 'approve-team'", () => {
+  it.each([
+    [{ role: 'owner', isDemo: false }, true],
+    [{ role: 'admin', isDemo: false }, true],
+    [{ role: 'member', isDemo: false }, false],
+    [{ role: 'viewer', isDemo: false }, false],
+    [{ role: 'member', isDemo: false, managesTeam: true }, true],
+    [{ role: 'viewer', isDemo: false, managesTeam: true }, true],
+    [{ role: 'member', isDemo: false, managesTeam: false }, false],
+    [{ role: 'viewer', isDemo: true }, true],
+  ] as const)('%o: %s', (viewer, seen) => {
+    expect(canSee(viewer, 'approve-team')).toBe(seen);
+  });
+
+  it('a manager gains nothing else', () => {
+    const manager = { role: 'member', isDemo: false, managesTeam: true } as const;
+    for (const { capability } of PERMISSIONS) {
+      expect(canSee(manager, capability), capability).toBe(can('member', capability));
+    }
+  });
+
+  it("is not a capability: the Team page's table does not list it", () => {
+    expect(PERMISSIONS.map((p) => p.capability)).not.toContain('approve-team');
+  });
 });

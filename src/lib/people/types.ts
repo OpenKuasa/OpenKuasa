@@ -41,7 +41,8 @@ export type Employee = {
   department_name: string | null;
   designation: string | null;
   employment_type: EmploymentType;
-  is_manager: boolean;
+  /** The employee this one reports to, if any. Visible to every member. */
+  reports_to: string | null;
   join_date: string | null;
   status: EmployeeStatus;
   date_of_birth_day: number | null;
@@ -457,4 +458,9 @@ export type PeopleViewer = {
   isOwner?: boolean;
   /** The current workspace is the demo workspace. */
   isDemo: boolean;
+  /**
+   * Has at least one report they have access to. Left out, not false, for everyone else: callers compare viewers
+   * whole. Never set for an owner or admin, or in the demo.
+   */
+  managesTeam?: boolean;
 };

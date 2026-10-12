@@ -49,17 +49,24 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { OrgRole } from '@/lib/auth/current-org';
-import { type Capability, canSee } from '@/lib/auth/permissions';
+import { type NavNeed, canSee } from '@/lib/auth/permissions';
 
 /** A live count pill on a nav item, resolved client-side from the nav-badges context. */
-export type NavBadgeKey = 'pendingProposals' | 'unreadAnnouncements' | 'awaitingAcknowledgement';
+export type NavBadgeKey =
+  | 'pendingProposals'
+  | 'unreadAnnouncements'
+  | 'awaitingAcknowledgement'
+  | 'waitingLeave'
+  | 'waitingTimeOff'
+  | 'waitingClaims'
+  | 'waitingOvertime';
 
 export type NavItem = {
   label: string;
   slug: string;
   icon: LucideIcon;
-  /** Shown only to someone with this capability. Left out: shown to everyone. */
-  needs?: Capability;
+  /** Shown only to someone with this capability (or, for `approve-team`, who manages a team). Left out: shown to everyone. */
+  needs?: NavNeed;
   /** Shows a live count pill from the nav-badges context (e.g. pending agent proposals). */
   badge?: NavBadgeKey;
   /** The word after the count in the pill's accessible label ("3 waiting"). Default `waiting`. */
@@ -217,16 +224,16 @@ export const PRODUCTS: Product[] = [
         label: 'Management',
         items: [
           { label: 'Employees', slug: 'employees', icon: Users },
-          { label: 'Attendance', slug: 'attendance', icon: ClipboardList, needs: 'approve' },
+          { label: 'Attendance', slug: 'attendance', icon: ClipboardList, needs: 'approve-team' },
         ],
       },
       {
         label: 'Approvals',
         items: [
-          { label: 'Leave', slug: 'approve-leave', icon: CircleCheck, needs: 'approve' },
-          { label: 'Financial Claims', slug: 'approve-claims', icon: CircleCheck, needs: 'approve' },
-          { label: 'Overtime', slug: 'approve-overtime', icon: CircleCheck, needs: 'approve' },
-          { label: 'Time-Off', slug: 'approve-time-off', icon: CircleCheck, needs: 'approve' },
+          { label: 'Leave', slug: 'approve-leave', icon: CircleCheck, needs: 'approve-team', badge: 'waitingLeave' },
+          { label: 'Financial Claims', slug: 'approve-claims', icon: CircleCheck, needs: 'approve-team', badge: 'waitingClaims' },
+          { label: 'Overtime', slug: 'approve-overtime', icon: CircleCheck, needs: 'approve-team', badge: 'waitingOvertime' },
+          { label: 'Time-Off', slug: 'approve-time-off', icon: CircleCheck, needs: 'approve-team', badge: 'waitingTimeOff' },
           { label: 'Public Holidays', slug: 'public-holidays', icon: Heart },
           { label: 'Letters', slug: 'letters', icon: FileText },
         ],
@@ -420,7 +427,10 @@ export function findItem(
  * A product's navigation for one viewer: items they may not use are left out,
  * and so is a section with nothing left in it. Demo visitors see everything.
  */
-export function visibleSections(product: Product, viewer: { role: OrgRole; isDemo: boolean }): NavSection[] {
+export function visibleSections(
+  product: Product,
+  viewer: { role: OrgRole; isDemo: boolean; managesTeam?: boolean },
+): NavSection[] {
   return product.sections
     .map((section) => ({ ...section, items: section.items.filter((item) => canSee(viewer, item.needs)) }))
     .filter((section) => section.items.length > 0);
