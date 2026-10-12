@@ -30,6 +30,16 @@ export const DRAFT_NEEDS_SIGN_OFF = 'Saved as a draft. Only an owner or admin ca
 export const PAID_NOW_NEEDS_SIGN_OFF =
   'Only an owner or admin can record this as paid. Save it as scheduled or pending instead.';
 
+/**
+ * The database refused money on an archived account (`private.finance_transaction_account_guard`,
+ * 20261116110000): a payment started on one, moved onto one, or posted, scheduled, approved or sent for approval
+ * while its account is archived. Every account picker lists active accounts only, so a person meets it when the
+ * account was archived after their form was opened, or after the draft they are posting was saved.
+ */
+export const FIN_ACCOUNT_ARCHIVED = 'FIN37';
+export const ACCOUNT_ARCHIVED =
+  'The account this is on has been archived. Restore it on Banking, or use another account, then try again.';
+
 export function pgCode(error: unknown): string | undefined {
   return (error as { code?: string } | null)?.code;
 }

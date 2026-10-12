@@ -11,6 +11,8 @@ import { isIsoDate } from './bills';
 import {
   type FinResult,
   type FinanceWriteContext,
+  ACCOUNT_ARCHIVED,
+  FIN_ACCOUNT_ARCHIVED,
   FIN_SIGN_OFF,
   NEEDS_SIGN_OFF,
   NOT_ALLOWED,
@@ -145,6 +147,8 @@ const REFUSALS: Record<string, string> = {
   [PG_FOREIGN_KEY]: M.missing,
   [PG_FORBIDDEN]: NOT_ALLOWED,
   [FIN_SIGN_OFF]: NEEDS_SIGN_OFF,
+  // The account was archived after the form was opened or the draft was saved.
+  [FIN_ACCOUNT_ARCHIVED]: ACCOUNT_ARCHIVED,
   [PG_OUT_OF_RANGE]: TOO_LARGE,
 };
 

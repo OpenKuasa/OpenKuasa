@@ -20,6 +20,8 @@ import { PAYMENT_INVOICES_MAX, PAYMENT_METHODS } from './money';
 import {
   type FinResult,
   type FinanceWriteContext,
+  ACCOUNT_ARCHIVED,
+  FIN_ACCOUNT_ARCHIVED,
   FIN_SIGN_OFF,
   NEEDS_SIGN_OFF,
   NOT_ALLOWED,
@@ -150,6 +152,8 @@ const REFUSALS: Record<string, string> = {
   FIN11: M.gone,
   FIN15: M.shape,
   [FIN_SIGN_OFF]: NEEDS_SIGN_OFF,
+  // The account was archived after the form was opened or the draft was saved.
+  [FIN_ACCOUNT_ARCHIVED]: ACCOUNT_ARCHIVED,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_CHECK]: M.invalid,
   // A required column was left out: the schema asks for every one, so only a direct call meets it.
