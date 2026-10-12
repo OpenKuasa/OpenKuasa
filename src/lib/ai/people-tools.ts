@@ -623,6 +623,12 @@ export function createPeopleTools(
   const manages = !viewer.isHr && !viewer.isDemo && viewer.managesTeam === true;
   const teamScope = 'your own records and those of the people who report to you';
   const widenedScope = manages ? teamScope : scope;
+  /**
+   * Rows from a list the database may widen for a manager, narrowed to the caller's own unless they are HR, the demo or
+   * treated as a manager. "Your own records only" is then true by construction: even when the team lookup failed (so
+   * `manages` is false) and the database still returned a report's rows, nothing counts, sums or labels them.
+   */
+  const mine = <T extends { employee_id: string }>(rows: T[]): T[] => (ownOnly && !manages ? ownRows(rows, viewer) : rows);
   /** Whether the caller holds `setReportsTo`: then a directory row also carries the manager's id. */
   const holdsSetReportsTo = !viewer.isDemo && write?.tier === 'hr';
   /** The ids of the people who report to the caller, read once per tool call that needs them. Empty unless the caller is a manager. */
@@ -633,7 +639,7 @@ export function createPeopleTools(
    * come from `hr_team_overtime`, which holds no amount, rate or payslip, joined to names from the directory.
    */
   const loadOvertime = async (): Promise<OvertimeLine[]> => {
-    const records = await data.listOvertime();
+    const records = mine(await data.listOvertime());
     const whole = (o: OvertimeRecord): OvertimeLine => ({
       id: o.id, employee_id: o.employee_id, employee_name: o.employee_name, work_date: o.work_date, hours: o.hours,
       rate_multiplier: o.rate_multiplier, day_kind: o.day_kind, reason: o.reason, decision_note: o.decision_note,
@@ -692,10 +698,15 @@ export function createPeopleTools(
       execute: async () =>
         safe('getPeopleOverview', async () => {
           const date = today();
-          const [employees, leave, claims, overtime, timeOff, attendance] = await Promise.all([
+          const [employees, allLeave, allClaims, allOvertime, allTimeOff, allAttendance] = await Promise.all([
             data.listEmployees(), data.listLeaveRequests(), data.listClaims(), data.listOvertime(),
             data.listTimeOffRequests(), data.listAttendance(date, date),
           ]);
+          const leave = mine(allLeave);
+          const claims = mine(allClaims);
+          const overtime = mine(allOvertime);
+          const timeOff = mine(allTimeOff);
+          const attendance = mine(allAttendance);
           const at = attendanceOn(attendance, date);
           if (ownOnly) {
             // A manager's lists hold their reports' rows too: the member's answer is over their own.
@@ -707,7 +718,8 @@ export function createPeopleTools(
             let team = {};
             if (manages) {
               const members = reportsOf(employees, viewer.employeeId);
-              const ids = new Set(members.map((m) => m.id));
+              // Active reports only, as the dashboard card counts them.
+              const ids = new Set(members.filter((m) => m.status === 'active').map((m) => m.id));
               // The database's own count of what this person may decide. A count that could not be read is left out
               // and said to be unknown: it is never turned into "nothing is waiting".
               let waiting: { waiting_for_you: number } | { waiting_unknown: true } = { waiting_unknown: true };
@@ -877,7 +889,7 @@ export function createPeopleTools(
           const day = date && DATE.test(date) ? date : today();
           return {
             date: day,
-            people: onLeaveOn(await data.listLeaveRequests(), day).map((r) => ({
+            people: onLeaveOn(mine(await data.listLeaveRequests()), day).map((r) => ({
               name: r.employee_name,
               ...yoursFlag(r.employee_id),
               leave_type: leaveLabel(r.leave_type),
@@ -915,7 +927,7 @@ export function createPeopleTools(
       }),
       execute: async ({ employee: name, status, leaveType, limit: requested }) =>
         safe('listLeaveRequests', async () => {
-          const all = await data.listLeaveRequests();
+          const all = mine(await data.listLeaveRequests());
           const rows = all.filter(
             (r) =>
               matchesText(r.employee_name, name) && (!status || r.status === status) && (!leaveType || r.leave_type === leaveType),
@@ -927,7 +939,7 @@ export function createPeopleTools(
           let balances: LeaveBalance[] = [];
           if (write?.tier === 'hr' || write?.tier === 'manager') {
             const years = [...new Set(shown.filter((r) => r.status === 'pending' && withBalance(r.employee_id)).map((r) => Number(r.start_date.slice(0, 4))))];
-            balances = (await Promise.all(years.map((year) => data.listLeaveBalances(year)))).flat();
+            balances = mine((await Promise.all(years.map((year) => data.listLeaveBalances(year)))).flat());
           }
           return {
             total: rows.length,
@@ -970,7 +982,7 @@ export function createPeopleTools(
       inputSchema: z.object({ employee, status: requestStatus, limit }),
       execute: async ({ employee: name, status, limit: requested }) =>
         safe('listTimeOffRequests', async () => {
-          const rows = (await data.listTimeOffRequests()).filter(
+          const rows = mine(await data.listTimeOffRequests()).filter(
             (r) => matchesText(r.employee_name, name) && (!status || r.status === status),
           );
           const team = await loadTeam();
@@ -1008,7 +1020,8 @@ export function createPeopleTools(
       execute: async ({ employee: name }) =>
         safe('getLeaveBalances', async () => {
           const year = Number(today().slice(0, 4));
-          const [balances, employees] = await Promise.all([data.listLeaveBalances(year), data.listEmployees()]);
+          const [allBalances, employees] = await Promise.all([data.listLeaveBalances(year), data.listEmployees()]);
+          const balances = mine(allBalances);
           // A manager's rows say whose they are: the balances are turned into rows in two lots and merged in the usual order.
           const rows = (
             manages
@@ -1038,12 +1051,15 @@ export function createPeopleTools(
       inputSchema: z.object({ limit }),
       execute: async ({ limit: requested }) =>
         safe('listPendingApprovals', async () => {
-          const [leave, claims, overtime, timeOff] = await Promise.all([
+          const [allLeave, allClaims, overtime, allTimeOff] = await Promise.all([
             data.listLeaveRequests(), data.listClaims(), loadOvertime(), data.listTimeOffRequests(),
           ]);
+          const leave = mine(allLeave);
+          const claims = mine(allClaims);
+          const timeOff = mine(allTimeOff);
           const rows = pendingApprovals(leave, claims, overtime, timeOff);
           // A request id is unique across the four lists, so a manager's own requests are told apart by it.
-          const mine = new Set(
+          const ownIds = new Set(
             [...ownRows(leave, viewer), ...ownRows(claims, viewer), ...ownRows(overtime, viewer), ...ownRows(timeOff, viewer)].map((r) => r.id),
           );
           return {
@@ -1051,14 +1067,14 @@ export function createPeopleTools(
             ...(manages
               ? {
                   // What the manager may decide (their reports') apart from what they asked for themselves.
-                  waiting_for_you: approvalCounts(rows.filter((r) => !mine.has(r.id))),
-                  your_own_requests: approvalCounts(rows.filter((r) => mine.has(r.id))),
+                  waiting_for_you: approvalCounts(rows.filter((r) => !ownIds.has(r.id))),
+                  your_own_requests: approvalCounts(rows.filter((r) => ownIds.has(r.id))),
                 }
               : {}),
             approvals: rows.slice(0, rowLimit(requested, 20)).map((r) => ({
               kind: r.kind,
               employee: r.employee,
-              ...(manages ? { yours: mine.has(r.id) } : {}),
+              ...(manages ? { yours: ownIds.has(r.id) } : {}),
               type: r.type,
               detail: r.detail,
             })),
@@ -1087,7 +1103,7 @@ export function createPeopleTools(
       }),
       execute: async ({ employee: name, status, category, limit: requested }) =>
         safe('listClaims', async () => {
-          const all = await data.listClaims();
+          const all = mine(await data.listClaims());
           const rows = all.filter(
             (c) => matchesText(c.employee_name, name) && (!status || c.status === status) && (!category || c.category === category),
           );
@@ -1204,7 +1220,8 @@ export function createPeopleTools(
         safe('getAttendanceSummary', async () => {
           const to = today();
           const from = windowStart(requested);
-          const [rows, employees] = await Promise.all([data.listAttendance(from, to), data.listEmployees()]);
+          const [allRows, employees] = await Promise.all([data.listAttendance(from, to), data.listEmployees()]);
+          const rows = mine(allRows);
           const names = new Map(employees.map((e) => [e.id, e.name]));
           const allFlagged = rows
             .map((r) => ({ r, no_clock_out: r.clock_in !== null && r.clock_out === null && r.work_date < to }))

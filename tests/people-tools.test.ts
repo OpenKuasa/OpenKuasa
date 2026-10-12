@@ -509,15 +509,18 @@ describe('claim and overtime lookups', () => {
       expect(o).toHaveProperty('amount_calculated');
       expect(o).toHaveProperty('hourly_rate');
     }
-    // The member's own record carries figures; every other row, were the provider to return one, carries none.
-    const everyone = (await runner(data, MEMBER)('listOvertime')({})).overtime;
+    // Were the provider to return everyone's rows, a member is still narrowed to their own before anything is shown,
+    // and the member's own record carries its figures.
+    const all = await data.listOvertime();
+    const ownRecord = { ...all[0], id: 'ot-own', employee_id: 'seed-emp-2', employee_name: all.find((r) => r.employee_id === 'seed-emp-2')?.employee_name ?? 'Own' };
+    const shared: PeopleData = { ...data, listOvertime: async () => [...all, ownRecord] };
+    const everyone = (await runner(shared, MEMBER)('listOvertime')({})).overtime;
+    expect(everyone.length).toBeGreaterThan(0);
     for (const o of everyone) {
       expect(o).not.toHaveProperty('id');
-      const own = data.listOvertime().then((rows) => rows.find((r) => r.employee_name === o.employee)?.employee_id === 'seed-emp-2');
-      if (await own) expect(o).toHaveProperty('hourly_rate');
-      else for (const key of ['hourly_rate', 'amount', 'amount_calculated']) expect(o, key).not.toHaveProperty(key);
+      expect(o.employee).toBe(ownRecord.employee_name);
+      expect(o).toHaveProperty('hourly_rate');
     }
-    expect(everyone.some((o: Loose) => !('hourly_rate' in o))).toBe(true);
     for (const c of (await run('listClaims')({})).claims) {
       expect(c).not.toHaveProperty('id');
       expect(c).not.toHaveProperty('approved_this_year');
