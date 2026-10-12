@@ -304,12 +304,20 @@ describe('the member side of Letters names no owner-only action', () => {
       }
     });
   }
-  it('the acknowledge button imports exactly one action from the shared module', () => {
+  it('the letter acknowledge button is the one shared AcknowledgeButton with kind letter, and imports no action itself', () => {
     const source = readFileSync(resolve('src/components/people/letter-ack-button.tsx'), 'utf8');
-    const named = [...source.matchAll(/import\s*\{([^}]*)\}\s*from\s*'[^']*letter-actions'/g)].flatMap((m) =>
+    expect(source).toMatch(/import \{ AcknowledgeButton \} from '\.\/acknowledge-button'/);
+    expect(source).toMatch(/<AcknowledgeButton[^>]*kind="letter"/);
+    expect(source).not.toMatch(/-actions'/);
+  });
+  it('the shared button imports exactly the two own acknowledgement actions, shows Acknowledged at once and puts the button back on a refusal', () => {
+    const source = readFileSync(resolve('src/components/people/acknowledge-button.tsx'), 'utf8');
+    const named = [...source.matchAll(/import\s*\{([^}]*)\}\s*from\s*'[^']*(?:document|letter)-actions'/g)].flatMap((m) =>
       m[1].split(',').map((s) => s.trim()).filter(Boolean),
     );
-    expect(named).toEqual(['acknowledgeLetterAction']);
+    expect([...named].sort()).toEqual(['acknowledgeDocumentAction', 'acknowledgeLetterAction']);
+    expect(source).toContain('Acknowledged');
+    expect(source).toContain('setDone(false)');
   });
   it('nothing on the letter screens calls an acknowledgement a signature, except to say it is not one', () => {
     for (const file of ['letter-view', 'letter-ack-button', 'letter-form', 'letter-row-controls', 'template-form', 'templates-section']) {

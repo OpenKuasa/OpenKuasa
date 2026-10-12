@@ -418,7 +418,7 @@ describe('the card, read with a finder built from the REAL lookups and changes, 
   it('an issue card for a draft the real lookup shows with a placeholder says it will be refused, and which', async () => {
     const find = nameIn([await result('listLetters')]);
     expect(approvalDetail('issueLetter', { letter_id: DRAFT }, undefined, find)).toBe(
-      'The employee will be able to see it. They will be asked to acknowledge it. It still has {employee_name} and {today} in it, so this is likely to be refused until they are replaced.',
+      'The employee will be able to see it. They will be asked to acknowledge it. It still has {employee_name} and {today} in it, so this is likely to be refused until they are replaced. This is the text as last shown in this chat; the letter is issued as it is saved now.',
     );
   });
 

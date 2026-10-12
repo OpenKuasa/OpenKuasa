@@ -1328,6 +1328,7 @@ function letterDetail(toolName: string, i: Record<string, unknown>, find?: NameF
       if (fact && !fact.body.trim()) parts.push('It has no text yet, so this is likely to be refused.');
       if (left.length > 0) parts.push(`It still has ${placeholderList(left)} in it, so this is likely to be refused until they are replaced.`);
       if (fact?.status === 'issued') parts.push('This letter was issued when last checked, so this may be refused.');
+      if (fact) parts.push('This is the text as last shown in this chat; the letter is issued as it is saved now.');
       break;
     }
     case 'requestAcknowledgement': {
@@ -1950,7 +1951,7 @@ export function approvalDetail(
 ): string | null {
   const i = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
   if (toolName === 'deleteEmployee') {
-    return 'Their leave, claims, draft payslips and every other HR record are deleted too. This cannot be undone. Someone with a paid payslip cannot be deleted: make them inactive instead.';
+    return 'Their leave, claims, draft payslips and every other HR record are deleted too, including their documents, the files attached to them and their letters. This cannot be undone. Someone with a paid payslip cannot be deleted: make them inactive instead.';
   }
   if (toolName === 'updateEmployee') {
     const words = employeeFieldWords(i, true);

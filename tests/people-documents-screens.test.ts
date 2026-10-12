@@ -439,7 +439,6 @@ const OWN_ACTIONS = [
   'removeMyDocumentAction',
   'acknowledgeDocumentAction',
   'acknowledgeLetterAction',
-  'discardDocumentFileAction',
   'documentLinkAction',
 ];
 const ALL_ACTIONS = [...exportedFrom('src/app/(app)/people/document-actions.ts'), ...exportedFrom('src/app/(app)/people/letter-actions.ts')];

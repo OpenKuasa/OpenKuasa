@@ -683,6 +683,12 @@ describe('letters and documents', () => {
     expect(section).toContain('on my documents for a document, on letters for a letter');
   });
 
+  it('adds the two totals when asked what awaits their acknowledgement', () => {
+    expect(section).toContain(
+      'asked what is waiting for their acknowledgement, call both listdocuments and listletters and say the sum of their two awaiting_acknowledgement_total figures',
+    );
+  });
+
   it('declines in the language of the latest message', () => {
     expect(section).toContain("when you decline any of this, reply in the language of the user's latest message");
   });

@@ -145,6 +145,22 @@ describe('listDocuments', () => {
     expect(result.awaiting_acknowledgement_total).toBe(1);
   });
 
+  it('counts only HR-added documents toward the awaiting total, the rule the badge and the tile use', async () => {
+    const mixed = [
+      doc({ id: '00000000-0000-4000-8000-000000000011', title: 'HR asks', ack_requested: true }),
+      doc({ id: '00000000-0000-4000-8000-000000000012', title: 'Own upload', ack_requested: true, source: 'employee' }),
+    ];
+    const result = await run('listDocuments', {}, MEMBER, dataWith({ listDocuments: async () => mixed }), selfWrite() as never);
+    expect(result.awaiting_acknowledgement_total).toBe(1);
+    const team = await run('listDocuments', {}, HR, dataWith({ listDocuments: async () => mixed }), hrWrite());
+    expect(team.awaiting_acknowledgement_total).toBe(1);
+  });
+
+  it('answers 0 awaiting for a demo visitor, as the tile and the badge do', async () => {
+    const result = await run('listDocuments', {}, DEMO, dataWith());
+    expect(result.awaiting_acknowledgement_total).toBe(0);
+  });
+
   it('says a member with no employee record is not linked, and gives them nothing', async () => {
     const result = await run('listDocuments', {}, { ...MEMBER, employeeId: null }, dataWith());
     expect(result.documents).toEqual([]);
@@ -209,6 +225,22 @@ describe('listLetters', () => {
     }
   });
 
+  it('gives a member the total of their own issued letters awaiting acknowledgement, never counting a draft', async () => {
+    const asked = [
+      LETTERS[1],
+      letter({ id: '00000000-0000-4000-8000-0000000000a5', title: 'Draft that asks', ack_requested: true }),
+      letter({ id: '00000000-0000-4000-8000-0000000000a6', title: 'Already read', status: 'issued', issued_on: '2026-09-22', ack_requested: true, acknowledged_at: '2026-09-23T02:00:00.000Z' }),
+      LETTERS[3],
+    ];
+    const result = await run('listLetters', {}, MEMBER, dataWith({ listLetters: async () => asked }), selfWrite() as never);
+    expect(result.awaiting_acknowledgement_total).toBe(1);
+  });
+
+  it('answers 0 awaiting letters for a demo visitor, as the tile and the badge do', async () => {
+    const result = await run('listLetters', {}, DEMO, dataWith({ listLetters: async () => [LETTERS[1]] }));
+    expect(result.awaiting_acknowledgement_total).toBe(0);
+  });
+
   it('answers a member with nothing on record by an empty result, not by a hint of why', async () => {
     const onlyDraft = dataWith({ listLetters: async () => [LETTERS[0]] });
     const result = await run('listLetters', {}, MEMBER, onlyDraft);
@@ -261,6 +293,12 @@ describe('listLetters is capped, with whole bodies', () => {
     const result = await run('listDocuments', {}, MEMBER);
     expect(result.documents.find((d: Loose) => d.title === 'Passport').uploaded_by).toBe('you');
     expect(result.documents.find((d: Loose) => d.title === 'Employment contract').uploaded_by).toBe('HR');
+  });
+});
+
+describe('deleteEmployee', () => {
+  it('says the employee\'s documents, their files and their letters are deleted too', () => {
+    expect(describeOf('deleteEmployee', HR, hrWrite())).toContain('their documents, the files attached to them and their letters');
   });
 });
 

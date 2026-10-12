@@ -12,7 +12,8 @@ import { type CapResult, WRITE_FAILED, writeOutcome } from './capabilities';
 import { pickDocumentFile } from './document-files';
 import { type Converted, toDocumentInput } from './document-forms';
 import { DOCUMENT_TYPE_LABEL } from './own';
-import { type EmployeeDocumentRow, type MyDocumentRow, type MyDocumentsModel, buildEmployeeDocumentsModel } from './documents';
+import { type EmployeeDocumentRow, type MyDocumentRow, type MyDocumentsModel, buildEmployeeDocumentsModel, canManageDocuments } from './documents';
+import { FILE_UNAVAILABLE } from './documents-refusals';
 import { DOCUMENT_TYPES, type DocumentType, EMPLOYEE_DOCUMENT_TYPES, type HrDocument, type PeopleViewer } from './types';
 
 type Who = { isHr: boolean; isDemo: boolean };
@@ -24,7 +25,7 @@ type Who = { isHr: boolean; isDemo: boolean };
  * admin outside the demo. Anything else, including a signed-out or unknown viewer, gets none.
  */
 export const showsOwnerDocumentControls = (viewer: Who | null | undefined): boolean =>
-  viewer != null && viewer.isHr === true && viewer.isDemo === false;
+  viewer != null && typeof viewer.isHr === 'boolean' && typeof viewer.isDemo === 'boolean' && canManageDocuments(viewer);
 
 /** The Employees screen's "Documents" action: owner controls, the documents loaded, and a workspace to build paths in. */
 export const showsEmployeeDocumentsAction = (
@@ -57,7 +58,7 @@ export const myDocumentsControls = (
 export const ACK_NOTE = 'This records that you have read it. It is not a signature.';
 export const ACK_BUTTON = 'I have read this';
 export const POPUP_BLOCKED = 'Your browser blocked the new tab. Allow pop-ups for this site and try again.';
-export const LINK_FAILED = 'That file could not be opened. Please try again.';
+export const LINK_FAILED = FILE_UNAVAILABLE;
 export const CHOOSE_FILE = 'Choose a file to upload.';
 export const RELOAD_HINT = 'Reload the page to see whether it was saved before you try again.';
 

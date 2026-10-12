@@ -383,7 +383,7 @@ export function EmployeesTable({
                     </div>
                     {confirmingId === employee.id ? (
                       <p role="alert" className="mt-1 text-right text-xs text-destructive">
-                        Their leave, claims, draft payslips and every other HR record are deleted too. This cannot be undone. Someone with a paid payslip cannot be deleted: make them inactive instead.
+                        Their leave, claims, draft payslips and every other HR record are deleted too, including their documents, the files attached to them and their letters. This cannot be undone. Someone with a paid payslip cannot be deleted: make them inactive instead.
                       </p>
                     ) : null}
                   </TableCell>

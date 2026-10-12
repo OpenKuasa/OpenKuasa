@@ -10,7 +10,6 @@ import {
   canManageDocuments,
   fileLabel,
   formatFileSize,
-  isExpiringSoon,
   loadRecordsModel,
   loadSettingsModel,
   maskAccount,
@@ -72,14 +71,6 @@ describe('maskAccount', () => {
   });
 });
 
-describe('isExpiringSoon', () => {
-  it('counts 90 days away, not 91, and not past or undated', () => {
-    expect(isExpiringSoon({ expires_on: '2027-01-07' }, TODAY)).toBe(true); // +90
-    expect(isExpiringSoon({ expires_on: '2027-01-08' }, TODAY)).toBe(false); // +91
-    expect(isExpiringSoon({ expires_on: '2026-10-08' }, TODAY)).toBe(false);
-    expect(isExpiringSoon({ expires_on: null }, TODAY)).toBe(false);
-  });
-});
 
 describe('formatFileSize and fileLabel', () => {
   it('writes sizes for a person', () => {

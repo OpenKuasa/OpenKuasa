@@ -70,24 +70,6 @@ export async function acknowledgeDocumentAction(input: unknown) {
 }
 
 /**
- * Removes a file the caller uploaded and no longer wants (the person cancelled, or an attach did not finish). Cheap
- * guards here (exact shape, this workspace's folder); whether the file is really unused, and the caller's to
- * discard, is the database's call (`hr_release_document_file`), and the file is deleted only when it says yes.
- * It answers the same way whatever happened, never says anything about the path, and never logs it.
- */
-export async function discardDocumentFileAction(input: unknown): Promise<{ ok: boolean }> {
-  const guard = await asMember(SOURCE, false);
-  if (refused(guard)) return { ok: false };
-  const parsed = z.object({ path: z.string().max(200) }).safeParse(input);
-  if (!parsed.success) return { ok: false };
-  const { path } = parsed.data;
-  if (!isDocumentPathShape(path) || !path.startsWith(`${guard.ctx.orgId.toLowerCase()}/`)) return { ok: false };
-  if (!(await releaseDocumentFile(guard.ctx, path))) return { ok: false };
-  await removeDocumentFile(path);
-  return { ok: true };
-}
-
-/**
  * A one-minute link to a document's file. It checks nothing itself: the link is made with the caller's own
  * session, so the document's row rule and storage's read rule decide. Only the link is returned.
  */

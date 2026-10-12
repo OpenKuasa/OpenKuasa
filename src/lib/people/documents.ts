@@ -180,11 +180,6 @@ export async function loadRecordsModel(data: PeopleData, viewer: PeopleViewer, t
 
 /* ------------------------------------------------------------ Documents and letters */
 
-/** Expires today or within the next 90 days (the one rule is {@link expiryState}). */
-export function isExpiringSoon(doc: Pick<HrDocument, 'expires_on'>, today: string): boolean {
-  return expiryState(doc.expires_on, today) === 'expiring';
-}
-
 /** Who may add, change or remove other people's documents and letters: an owner or admin outside the sample company. */
 export function canManageDocuments(viewer: Pick<PeopleViewer, 'isHr' | 'isDemo'>): boolean {
   return viewer.isHr && !viewer.isDemo;

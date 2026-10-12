@@ -333,50 +333,6 @@ describe('a file that was uploaded and not attached', () => {
   });
 });
 
-describe('discardDocumentFileAction', () => {
-  it('releases the path with the caller\'s own session and removes it only on a yes', async () => {
-    expect(await actions.discardDocumentFileAction({ path: PATH })).toEqual({ ok: true });
-    expect(ctl.order).toEqual(['releaseDocumentFile', 'removeDocumentFile']);
-    expect(ctl.ran[0]).toMatchObject({ client: ctl.client, input: PATH });
-  });
-
-  it('keeps the file when the database says no', async () => {
-    ctl.released = false;
-    expect(await actions.discardDocumentFileAction({ path: PATH })).toEqual({ ok: false });
-    expect(ranFns()).toEqual(['releaseDocumentFile']);
-  });
-
-  it.each([
-    ['dot-dot', `${ORG}/${EMP}/../${NAME}.pdf`],
-    ['another workspace', `99999999-9999-4999-8999-999999999999/${EMP}/${NAME}.pdf`],
-    ['upper case', PATH.toUpperCase()],
-    ['a folder', `${ORG}/${EMP}`],
-    ['a pattern', `${ORG}/${EMP}/*`],
-    ['empty', ''],
-    ['not text', 5],
-    ['very long', 'x'.repeat(500)],
-  ])('answers no and calls nothing for %s', async (_label, path) => {
-    expect(await actions.discardDocumentFileAction({ path })).toEqual({ ok: false });
-    expect(ctl.ran).toEqual([]);
-  });
-
-  it('answers no for a missing input, a demo visitor and a failed lookup', async () => {
-    expect(await actions.discardDocumentFileAction(undefined)).toEqual({ ok: false });
-    ctl.viewer = { ...ctl.viewer, isDemo: true };
-    expect(await actions.discardDocumentFileAction({ path: PATH })).toEqual({ ok: false });
-    ctl.viewer = { ...ctl.viewer, isDemo: false };
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    ctl.lookupFails = true;
-    expect(await actions.discardDocumentFileAction({ path: PATH })).toEqual({ ok: false });
-    expect(ctl.ran).toEqual([]);
-  });
-
-  it('an owner may discard an upload for any employee in the workspace (the database decides)', async () => {
-    const other = `${ORG}/99999999-9999-4999-8999-999999999999/${NAME}.pdf`;
-    expect(await actions.discardDocumentFileAction({ path: other })).toEqual({ ok: true });
-  });
-});
-
 describe('documentLinkAction', () => {
   it('asks for the link with the caller\'s own session and returns the link only', async () => {
     asRole('member');
@@ -416,7 +372,6 @@ describe('the module', () => {
         'acknowledgeDocumentAction',
         'addDocumentForAction',
         'addMyDocumentAction',
-        'discardDocumentFileAction',
         'documentLinkAction',
         'removeDocumentAction',
         'removeMyDocumentAction',

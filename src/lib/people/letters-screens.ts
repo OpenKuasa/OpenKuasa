@@ -9,7 +9,7 @@
  * draws no row.
  */
 import { WRITE_FAILED } from './capabilities';
-import type { LetterRow, LettersModel } from './documents';
+import { type LetterRow, type LettersModel, canManageDocuments } from './documents';
 import { PLACEHOLDERS, unfilledInLetter } from './letter-placeholders';
 
 // ---- Who is shown what -----------------------------------------------------------
@@ -17,7 +17,7 @@ import { PLACEHOLDERS, unfilledInLetter } from './letter-placeholders';
 type ViewerKind = { isHr: boolean; isDemo: boolean };
 
 /** Owners and admins outside the demo: the only people who are shown a control that changes a letter or a template. */
-export const showsLetterControls = (viewer: ViewerKind): boolean => viewer.isHr && !viewer.isDemo;
+export const showsLetterControls = (viewer: ViewerKind): boolean => canManageDocuments(viewer);
 
 /** The Letters screen: owner controls only for an owner or admin outside the demo, with the data loaded. */
 export const lettersScreenControls = (viewer: ViewerKind, loaded: boolean) => ({
@@ -38,7 +38,7 @@ export function visibleLetterRows(model: LettersModel): LetterRow[] {
 
 // ---- Sentences -------------------------------------------------------------------
 
-export const ACK_LINE = 'This records that you have read it. It is not a signature.';
+export { ACK_NOTE as ACK_LINE } from './documents-screens';
 
 export const letterIssueSentence = (name: string): string => `${name} will be able to see this letter.`;
 export const letterPullBackSentence = (name: string): string =>

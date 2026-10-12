@@ -98,7 +98,8 @@ export function isDocumentPath(path: string, orgId: string, employeeId: string):
  * Uploads a file to `path` (made by {@link documentPath}) as the signed-in user, with the type
  * {@link documentFileFacts} will declare. The size, type and path shape are checked first, so the rule holds even
  * if a screen skipped it. The caller then attaches the path to a document; if that is refused (or the person
- * cancels) it calls `discardDocumentFileAction`: nobody but the service client can delete from the bucket.
+ * cancels) the file is left unattached: the add and replace actions release and remove it on a refusal (nobody but the
+ * service client can delete from the bucket), and the sweep script clears what is left.
  */
 export async function uploadDocumentFile(client: SupabaseClient, path: string, file: File): Promise<CapResult<{ path: string }>> {
   const picked = pickDocumentFile(file);

@@ -18,6 +18,8 @@
  *   removed, one at a time and only if they have the exact shape the app makes and sit in that workspace's folder.
  *   What the listing said is never what is removed.
  * - A round that removes nothing ends the workspace, and a workspace is limited to `maxRounds` rounds.
+ * - Files that cannot be removed (the storage call fails) are handed back first on the next run, 500 at a time, so a
+ *   workspace with 500 or more of them stops there: deal with those by hand before the files after them are reached.
  *
  * The functions are exported over an injected client so they can be tested; the command line is the last block.
  */
