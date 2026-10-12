@@ -272,6 +272,12 @@ The cleanup also needs the function from
 `supabase/migrations/*_delete_test_org.sql` applied (it deletes only recent, slugless, test-only workspaces, and only service_role can run it). Never commit the
 key.
 
+Every other test runs without the network. `tests/setup/no-network.ts` (loaded
+before each test file) refuses `fetch` to anything but this machine and fails
+the file that tried, so a unit test that forgot to fake a client cannot reach
+the live project. A test file is live when its name contains `.rls.` or
+`.live.`, or when it imports `tests/setup/supabase.ts`.
+
 ## License
 
 [AGPL-3.0](LICENSE). You are free to use, modify and self-host OpenKuasa OS. If

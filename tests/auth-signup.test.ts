@@ -2,12 +2,20 @@ import { beforeEach, expect, test, vi } from 'vitest';
 
 // The action needs a request scope for the real client, cookies and
 // redirect(); all are replaced so the flow can run offline.
-const { createClient, recordEvent, cookieStore } = vi.hoisted(() => ({
+const { createClient, recordEvent, cookieStore, consumeRateLimits } = vi.hoisted(() => ({
   createClient: vi.fn(),
   recordEvent: vi.fn(),
   cookieStore: { set: vi.fn(), get: vi.fn(), delete: vi.fn() },
+  consumeRateLimits: vi.fn(),
 }));
 vi.mock('@/lib/supabase/server', () => ({ createClient }));
+// The attempt counter is the database's. Only the call that asks it is
+// replaced, so the limits themselves (`@/lib/security/limits`) are the real
+// ones; left alone it would count every run against the live sign-up limit.
+vi.mock('@/lib/security/rate-limit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/security/rate-limit')>()),
+  consumeRateLimits,
+}));
 vi.mock('@/lib/events', () => ({ recordEvent }));
 vi.mock('next/headers', () => ({
   cookies: async () => cookieStore,
@@ -48,6 +56,35 @@ function form() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  consumeRateLimits.mockResolvedValue({ allowed: true, enforced: true });
+});
+
+test('a sign-up is counted once, per client and per address, before anything else', async () => {
+  const client = fakeClient({ data: { session: null }, error: null });
+  await signUpAction(undefined, form());
+  expect(consumeRateLimits).toHaveBeenCalledTimes(1);
+  expect(consumeRateLimits.mock.calls[0][0]).toEqual([
+    // No client address in this request, so the shared, wider limit applies.
+    { bucket: 'signup_client', value: 'unknown', limit: 100, windowSeconds: 3600 },
+    { bucket: 'signup_email', value: 'siti@acme.my', limit: 5, windowSeconds: 3600 },
+  ]);
+  expect(consumeRateLimits.mock.invocationCallOrder[0]).toBeLessThan(
+    client.auth.signUp.mock.invocationCallOrder[0],
+  );
+});
+
+test('once the limit is used up the form says so and the database is not asked', async () => {
+  const client = fakeClient({ data: { session: {} }, error: null });
+  consumeRateLimits.mockResolvedValue({ allowed: false, retryAfterSeconds: 300 });
+  const result = await signUpAction(undefined, form());
+  expect(result).toEqual({
+    error: 'Too many attempts. Try again in 5 minutes.',
+    values: { email: 'siti@acme.my', orgName: 'Acme Sdn Bhd' },
+  });
+  expect(createClient).not.toHaveBeenCalled();
+  expect(client.auth.signUp).not.toHaveBeenCalled();
+  expect(client.rpc).not.toHaveBeenCalled();
+  expect(cookieStore.set).not.toHaveBeenCalled();
 });
 
 test('a new address and a registered one get the same answer', async () => {

@@ -2,18 +2,26 @@ import { beforeEach, expect, test, vi } from 'vitest';
 
 // The actions need a request scope for the real clients; everything that
 // reaches the network or the request is replaced so the flow runs offline.
-const { createClient, createAnonymousClient, recordEvent, getViewer } =
+const { createClient, createAnonymousClient, recordEvent, getViewer, consumeRateLimits } =
   vi.hoisted(() => ({
     createClient: vi.fn(),
     createAnonymousClient: vi.fn(),
     recordEvent: vi.fn(),
     getViewer: vi.fn(),
+    consumeRateLimits: vi.fn(),
   }));
 vi.mock('@/lib/supabase/server', () => ({ createClient }));
 vi.mock('@/lib/supabase/anonymous', () => ({ createAnonymousClient }));
 vi.mock('@/lib/events', () => ({ recordEvent }));
 vi.mock('@/lib/auth/viewer', () => ({ getViewer }));
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
+// The attempt counter is the database's. Only the call that asks it is
+// replaced, so the limit itself (`@/lib/security/limits`) is the real one;
+// left alone it would count every run on the live database.
+vi.mock('@/lib/security/rate-limit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/security/rate-limit')>()),
+  consumeRateLimits,
+}));
 
 import { changePasswordAction } from '@/app/account/actions';
 import { verifyCurrentPassword } from '@/lib/auth/verify-password';
@@ -58,6 +66,7 @@ function form(current = 'old-password') {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  consumeRateLimits.mockResolvedValue({ allowed: true, enforced: true });
   getViewer.mockResolvedValue({
     userId: 'user-1',
     email: 'siti@acme.my',
@@ -123,6 +132,22 @@ test('a wrong current password changes nothing', async () => {
   expect(result).toEqual({ error: 'Your current password is incorrect.' });
   expect(session.auth.updateUser).not.toHaveBeenCalled();
   expect(session.auth.signOut).not.toHaveBeenCalled();
+});
+
+test('password checks are counted per account, and a used-up limit stops before the check', async () => {
+  const session = sessionClient();
+  const check = checkClient();
+  consumeRateLimits.mockResolvedValue({ allowed: false, retryAfterSeconds: 90 });
+
+  const result = await changePasswordAction(undefined, form());
+
+  expect(result).toEqual({ error: 'Too many attempts. Try again in 2 minutes.' });
+  expect(consumeRateLimits).toHaveBeenCalledTimes(1);
+  expect(consumeRateLimits.mock.calls[0][0]).toEqual([
+    { bucket: 'password_check_account', value: 'user-1', limit: 10, windowSeconds: 900 },
+  ]);
+  expect(check.auth.signInWithPassword).not.toHaveBeenCalled();
+  expect(session.auth.updateUser).not.toHaveBeenCalled();
 });
 
 test('a check that could not run is not reported as a wrong password', async () => {
