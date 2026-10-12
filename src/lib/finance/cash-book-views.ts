@@ -3,7 +3,8 @@
  * out from the rows the data layer reads. Pure, with no server imports, so
  * the client views and the tests both use it. `today` is always a YYYY-MM-DD
  * date. Cash Receipts and Payment Vouchers have a period selector, so their
- * figures are worked out again in the browser when it changes.
+ * figures, and the rows of their tables, are worked out again in the browser
+ * when it changes.
  */
 import type { Slice } from '@/components/charts';
 import type { CashBookStatus, CashReceiptRow, PaymentVoucherKind, PaymentVoucherRow } from './cash-book';
@@ -167,6 +168,17 @@ export function cashReceiptsView(rows: CashReceiptRow[], today: string, period: 
   };
 }
 
+/**
+ * The receipts the table lists for a period: the same "is it in the period"
+ * test as the cards (`inPeriod` on the receipt's date), so a figure on a card
+ * is always found in the table with the same period selected. The one
+ * exception is a draft: the Receipts card counts "N drafts not yet posted"
+ * whatever date they carry, so a draft stays in the table in every period.
+ */
+export function cashReceiptsInPeriod(rows: CashReceiptRow[], today: string, period: CashBookPeriod): CashReceiptRow[] {
+  return rows.filter((r) => r.status === 'draft' || inPeriod(r.txn_date, today, period));
+}
+
 /** `open` is every receipt that is not void: what the table shows until a status is chosen. */
 export type CashReceiptFilter = 'open' | 'draft' | 'posted' | 'void';
 
@@ -295,6 +307,19 @@ export function paymentVouchersView(rows: PaymentVoucherRow[], today: string, pe
     hasPaid: inRange.length > 0,
     paid: rmShort(total),
   };
+}
+
+/**
+ * The vouchers the table lists for a period: the same "is it in the period"
+ * test as the cards (`inPeriod` on the voucher's date), so a figure on a card
+ * is always found in the table with the same period selected. The exception
+ * is money still waiting: the Pending approval card and the "more to be paid"
+ * line on the Vouchers card count those whatever date they carry (what is
+ * waiting is waiting now), so a voucher waiting for approval or still to be
+ * paid stays in the table in every period.
+ */
+export function paymentVouchersInPeriod(rows: PaymentVoucherRow[], today: string, period: CashBookPeriod): PaymentVoucherRow[] {
+  return rows.filter((v) => isWaitingVoucher(v) || v.status === 'scheduled' || inPeriod(v.txn_date, today, period));
 }
 
 /** `open` is every voucher that is neither void nor rejected: what the table shows until a status is chosen. */

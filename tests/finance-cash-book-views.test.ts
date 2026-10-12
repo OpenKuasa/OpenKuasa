@@ -9,6 +9,7 @@ import {
   PAYMENT_VOUCHER_KIND_LABELS,
   PAYMENT_VOUCHER_STATUS_LABELS,
   cashReceiptsCsv,
+  cashReceiptsInPeriod,
   cashReceiptsView,
   expenseCategories,
   expenseMethod,
@@ -21,6 +22,7 @@ import {
   isApprovedExpense,
   isWaitingVoucher,
   paymentVouchersCsv,
+  paymentVouchersInPeriod,
   paymentVouchersView,
   receiptFor,
   voucherCategory,
@@ -557,5 +559,67 @@ describe('the sample shown when there is no database', () => {
     expect(sorted(SAMPLE_CASH_RECEIPTS.map((r) => r.txn_date))).toBe(true);
     expect(sorted(SAMPLE_PAYMENT_VOUCHERS.map((v) => v.txn_date))).toBe(true);
     expect(sorted(SAMPLE_EXPENSES.map((e) => e.expense_date))).toBe(true);
+  });
+});
+
+describe('the table follows the period, as the cards do', () => {
+  const receipts = [
+    receipt({ number: 'RC-A', txn_date: '2026-10-03' }),
+    receipt({ number: 'RC-B', txn_date: '2026-11-15' }),
+    receipt({ number: 'RC-C', txn_date: '2025-12-31' }),
+    receipt({ number: 'RC-D', txn_date: '2026-10-01', status: 'void' }),
+    receipt({ number: null, party_name: 'Old draft', txn_date: '2026-02-01', status: 'draft' }),
+    receipt({ number: 'RC-E', txn_date: '2026-02-01', status: 'void' }),
+  ];
+  const parties = (rows: CashReceiptRow[]) => rows.map((r) => r.number ?? r.party_name);
+
+  it('keeps the receipts dated in the period, and every draft the Receipts card counts as not yet posted', () => {
+    expect(parties(cashReceiptsInPeriod(receipts, today, 'month'))).toEqual(['RC-A', 'RC-D', 'Old draft']);
+    expect(parties(cashReceiptsInPeriod(receipts, today, 'quarter'))).toEqual(['RC-A', 'RC-B', 'RC-D', 'Old draft']);
+    expect(parties(cashReceiptsInPeriod(receipts, today, 'year'))).toEqual(['RC-A', 'RC-B', 'RC-D', 'Old draft', 'RC-E']);
+  });
+  it('lists exactly the posted receipts a card counts, with the same period selected', () => {
+    for (const period of CASH_BOOK_PERIODS) {
+      const view = cashReceiptsView(receipts, today, period);
+      const posted = filterCashReceipts(cashReceiptsInPeriod(receipts, today, period), '', 'posted');
+      expect(String(posted.length), period).toBe(view.stats.find((s) => s.label === 'Receipts')?.value);
+      expect(sum(posted, (r) => r.amount), period).toBe(posted.length * 100);
+    }
+  });
+  it('leaves search and the status filter to work on top of the period', () => {
+    const inMonth = cashReceiptsInPeriod(receipts, today, 'month');
+    expect(parties(filterCashReceipts(inMonth, '', 'posted'))).toEqual(['RC-A']);
+    expect(parties(filterCashReceipts(inMonth, 'rc-b', 'open'))).toEqual([]);
+    expect(cashReceiptsCsv(inMonth).split('\r\n').filter(Boolean)).toHaveLength(1 + 3);
+  });
+
+  const vouchers = [
+    voucher({ number: 'PV-A', txn_date: '2026-10-03' }),
+    voucher({ number: 'PV-B', txn_date: '2026-11-15' }),
+    voucher({ number: null, party_name: 'Old waiting', txn_date: '2026-01-01', status: 'pending_approval' }),
+    voucher({ number: null, party_name: 'Old to pay', txn_date: '2025-06-01', status: 'scheduled' }),
+    voucher({ number: null, party_name: 'Old draft', txn_date: '2026-01-01', status: 'draft' }),
+    voucher({ number: 'PV-C', txn_date: '2026-01-01', status: 'void' }),
+    voucher({ number: null, party_name: 'Old rejected', txn_date: '2026-01-01', status: 'rejected' }),
+  ];
+  const names = (rows: PaymentVoucherRow[]) => rows.map((v) => v.number ?? v.party_name);
+
+  it('keeps the vouchers dated in the period, and all that wait for approval or are still to be paid', () => {
+    expect(names(paymentVouchersInPeriod(vouchers, today, 'month'))).toEqual(['PV-A', 'Old waiting', 'Old to pay']);
+    expect(names(paymentVouchersInPeriod(vouchers, today, 'quarter'))).toEqual(['PV-A', 'PV-B', 'Old waiting', 'Old to pay']);
+    expect(names(paymentVouchersInPeriod(vouchers, today, 'year'))).toEqual([
+      'PV-A', 'PV-B', 'Old waiting', 'Old to pay', 'Old draft', 'PV-C', 'Old rejected',
+    ]);
+  });
+  it('lists every voucher a card counts, with the same period selected', () => {
+    for (const period of CASH_BOOK_PERIODS) {
+      const view = paymentVouchersView(vouchers, today, period);
+      const inTable = paymentVouchersInPeriod(vouchers, today, period);
+      expect(String(filterPaymentVouchers(inTable, '', 'posted').length), period).toBe(view.stats.find((s) => s.label === 'Vouchers')?.value);
+      const waiting = filterPaymentVouchers(inTable, '', 'waiting');
+      expect(view.stats.find((s) => s.label === 'Pending approval')?.delta, period).toBe(`${waiting.length} voucher`);
+      expect(view.stats.find((s) => s.label === 'Vouchers')?.delta, period).toBe('1 more to be paid');
+      expect(filterPaymentVouchers(inTable, '', 'scheduled')).toHaveLength(1);
+    }
   });
 });

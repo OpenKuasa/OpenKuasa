@@ -22,6 +22,7 @@ import {
   type CashBookPeriod,
   type CashReceiptFilter,
   cashReceiptsCsv,
+  cashReceiptsInPeriod,
   cashReceiptsView,
   filterCashReceipts,
   receiptFor,
@@ -47,9 +48,11 @@ const STATUS_STYLES: Record<CashReceiptRow['status'], string> = {
 };
 
 /**
- * Cash Receipts: every movement of money in, one row each, with figures and
- * charts for the chosen period, search, a status filter, "View all" and
- * Export. Nothing here changes data yet: a payment against invoices is
+ * Cash Receipts: every movement of money in, one row each. The chosen period
+ * sets the figures, the charts and the rows of the table (drafts stay in every
+ * period, as the Receipts card counts them), with search, a status filter,
+ * "View all" and Export working on top of it; Export gives what the table
+ * would show with "View all". Nothing here changes data yet: a payment against invoices is
  * recorded and voided on Payments In, and the receipt form arrives later.
  */
 export function CashReceiptsView({
@@ -67,7 +70,8 @@ export function CashReceiptsView({
   const [showAll, setShowAll] = useState(false);
 
   const view = cashReceiptsView(rows, today, period);
-  const matching = filterCashReceipts(rows, query, filter);
+  const inPeriodRows = cashReceiptsInPeriod(rows, today, period);
+  const matching = filterCashReceipts(inPeriodRows, query, filter);
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
   const span = CASH_BOOK_PERIOD_LABELS[period];
 
@@ -183,6 +187,12 @@ export function CashReceiptsView({
                         No receipts yet. A payment recorded on Payments In shows here too.
                       </TableCell>
                     </TableRow>
+                  ) : inPeriodRows.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                        Nothing in this period. Choose a longer one to see earlier receipts.
+                      </TableCell>
+                    </TableRow>
                   ) : (
                     <NoMatchesRow colSpan={8} />
                   ))}
@@ -220,7 +230,7 @@ export function CashReceiptsView({
           </div>
           <div className="border-t px-4 py-3 text-sm text-muted-foreground">
             Showing {shown.length} of {matching.length} receipts
-            {matching.length !== rows.length ? ` (${rows.length} in all)` : ''}
+            {matching.length !== inPeriodRows.length ? ` (${inPeriodRows.length} ${span.toLowerCase()})` : ` ${span.toLowerCase()}`}
           </div>
         </BentoCard>
       </BentoGrid>

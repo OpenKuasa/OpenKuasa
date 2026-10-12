@@ -25,6 +25,7 @@ import {
   type PaymentVoucherFilter,
   filterPaymentVouchers,
   paymentVouchersCsv,
+  paymentVouchersInPeriod,
   paymentVouchersView,
   voucherCategory,
   voucherHome,
@@ -48,9 +49,12 @@ const STATUS_STYLES: Record<PaymentVoucherRow['status'], string> = {
 };
 
 /**
- * Payment Vouchers: every movement of money out, one row each, with figures
- * and charts for the chosen period, search, status and kind filters, "View
- * all" and Export. Nothing here changes data yet. A payment to a supplier is
+ * Payment Vouchers: every movement of money out, one row each. The chosen
+ * period sets the figures, the charts and the rows of the table (vouchers
+ * waiting for approval or still to be paid stay in every period, as their
+ * cards count them), with search, status and kind filters, "View all" and
+ * Export working on top of it; Export gives what the table would show with
+ * "View all". Nothing here changes data yet. A payment to a supplier is
  * changed on Payments Out and a refund on Refunds, and each such row links
  * there; the voucher form and the approve and reject buttons arrive later.
  */
@@ -70,7 +74,8 @@ export function PaymentVouchersView({
   const [showAll, setShowAll] = useState(false);
 
   const view = paymentVouchersView(rows, today, period);
-  const matching = filterPaymentVouchers(rows, query, filter, kind);
+  const inPeriodRows = paymentVouchersInPeriod(rows, today, period);
+  const matching = filterPaymentVouchers(inPeriodRows, query, filter, kind);
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
   const span = CASH_BOOK_PERIOD_LABELS[period];
 
@@ -201,6 +206,12 @@ export function PaymentVouchersView({
                         No vouchers yet. A payment recorded on Payments Out or Refunds shows here too.
                       </TableCell>
                     </TableRow>
+                  ) : inPeriodRows.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                        Nothing in this period. Choose a longer one to see earlier vouchers.
+                      </TableCell>
+                    </TableRow>
                   ) : (
                     <NoMatchesRow colSpan={8} />
                   ))}
@@ -250,7 +261,7 @@ export function PaymentVouchersView({
           </div>
           <div className="border-t px-4 py-3 text-sm text-muted-foreground">
             Showing {shown.length} of {matching.length} vouchers
-            {matching.length !== rows.length ? ` (${rows.length} in all)` : ''}
+            {matching.length !== inPeriodRows.length ? ` (${inPeriodRows.length} ${span.toLowerCase()})` : ` ${span.toLowerCase()}`}
           </div>
         </BentoCard>
       </BentoGrid>
