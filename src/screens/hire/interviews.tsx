@@ -163,12 +163,19 @@ export default async function InterviewsScreen() {
         {/* Upcoming list + week load */}
         <BentoCard
           title="Upcoming interviews"
-          subtitle={model ? `${model.scheduled} scheduled` : undefined}
+          // The count is of what the list holds: scheduled and still ahead. Every scheduled one is the figure above.
+          subtitle={
+            model
+              ? model.ahead > upcoming.length
+                ? `${model.ahead} upcoming, showing the first ${upcoming.length}`
+                : `${model.ahead} upcoming`
+              : undefined
+          }
           icon={CalendarClock}
           className="col-span-2 md:col-span-8"
         >
           {!model ? LOAD_FAILED : upcoming.length === 0 ? (
-            <Muted>No interviews scheduled</Muted>
+            <Muted>No upcoming interviews</Muted>
           ) : (
             <ul className="space-y-2">
               {upcoming.map((interview) => (

@@ -152,7 +152,7 @@ const model = (over: Partial<InterviewsModel> = {}): InterviewsModel => ({
   isEmpty: false,
   rows: [OVERDUE, AHEAD, CLOSED_APPLICATION, DONE_ROW],
   upcoming: [AHEAD, CLOSED_APPLICATION],
-  scheduled: 3, completed: 1, noShow: 0, next7Days: 0, weekLoad: [],
+  scheduled: 3, ahead: 2, completed: 1, noShow: 0, next7Days: 0, weekLoad: [],
   applications: APPS, applicationsCut: false, today: '2026-10-12',
   ...over,
 });
@@ -220,8 +220,18 @@ describe('the Interviews screen\'s lists', () => {
     expect(upcoming[1]).toContain('Mei Ling Tan');
     // Ben Tan's interview is scheduled but its time has passed: it is in the table, tagged, and not here.
     expect(upcoming.join(' ')).not.toContain('Ben Tan');
-    mocks.interviews = model({ upcoming: [] });
-    expect(text(await screen())).toContain('No interviews scheduled');
+    // The card's count is of the same thing as its list: three are scheduled, two of them still ahead.
+    expect(text(await screen())).toContain('Upcoming interviews 2 upcoming');
+    expect(text(await screen())).not.toMatch(/Upcoming interviews \d+ scheduled/);
+    // One scheduled interview whose time has passed: nothing is upcoming, and the card does not say "1 scheduled" over an empty list.
+    mocks.interviews = model({ rows: [OVERDUE], upcoming: [], scheduled: 1, ahead: 0 });
+    const none = text(await screen());
+    expect(none).toContain('Upcoming interviews 0 upcoming');
+    expect(none).toContain('No upcoming interviews');
+    expect(none).not.toContain('No interviews scheduled');
+    // More ahead than the list shows.
+    mocks.interviews = model({ ahead: 60 });
+    expect(text(await screen())).toContain('60 upcoming, showing the first 2');
   });
   it('the table has the two new columns, Where and Actions', async () => {
     const html = await screen();

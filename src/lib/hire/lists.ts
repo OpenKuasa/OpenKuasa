@@ -419,6 +419,8 @@ export type InterviewsModel = {
   upcoming: InterviewRow[];
   /** Every scheduled interview, whether or not its start has passed. */
   scheduled: number;
+  /** How many are scheduled AND still ahead: what `upcoming` lists, counted before its cut. */
+  ahead: number;
   completed: number;
   noShow: number;
   /** Scheduled interviews in the next 7 days: the same number the Overview and the chat give. */
@@ -453,6 +455,7 @@ export async function buildInterviewsModel(data: HireData, now: Date): Promise<I
     rows: [...overdue, ...coming, ...closed].slice(0, ROWS_SHOWN).map((i) => interviewRow(i, now)),
     upcoming: coming.slice(0, ROWS_SHOWN).map((i) => interviewRow(i, now)),
     scheduled: count('scheduled'),
+    ahead: coming.length,
     completed: count('completed'),
     noShow: count('no_show'),
     next7Days: ahead.length,

@@ -715,6 +715,9 @@ describe('interviews: rows, order and the application picker', () => {
   it('leaves the figures as they were: scheduled counts every scheduled row, the next 7 days only the ones ahead', async () => {
     const model = await buildInterviewsModel(source, NOW);
     expect(model).toMatchObject({ isEmpty: false, scheduled: 4, completed: 1, noShow: 1, next7Days: 2 });
+    // What "Upcoming interviews" counts: the scheduled ones still ahead, by the list's own rule. Two more are overdue.
+    expect(model.ahead).toBe(2);
+    expect(model.ahead).toBe(model.upcoming.length);
     // 'soon' is Sunday 11 October and 'next' Monday 12 October in Kuala Lumpur: only the Monday is in the weekday chart.
     expect(model.weekLoad).toEqual([
       { label: 'Mon', count: 1 }, { label: 'Tue', count: 0 }, { label: 'Wed', count: 0 }, { label: 'Thu', count: 0 }, { label: 'Fri', count: 0 },
@@ -740,6 +743,8 @@ describe('interviews: rows, order and the application picker', () => {
     expect(model.rows).toHaveLength(50);
     expect(model.upcoming).toHaveLength(50);
     expect(model.scheduled).toBe(60);
+    // The count is not cut with the list.
+    expect(model.ahead).toBe(60);
   });
   it('lists every application for the two pickers, by name, with its stage and outcome and nothing to contact anyone by', async () => {
     const model = await buildInterviewsModel({
