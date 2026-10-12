@@ -103,7 +103,7 @@ const ACCOUNTS: Account[] = [
 ];
 
 type TxnTone = 'in' | 'out' | 'flat';
-type TxnStatus = 'Paid' | 'Cleared' | 'Sent' | 'Scheduled' | 'Overdue';
+type TxnStatus = 'Paid' | 'Cleared' | 'Sent' | 'To be paid' | 'Overdue';
 type Txn = {
   date: string;
   description: string;
@@ -115,7 +115,7 @@ type Txn = {
 
 const TRANSACTIONS: Txn[] = [
   { date: '09 Oct', description: 'Payment received', reference: 'Aisyah Trading · INV-1042', amount: '+RM 1,240', tone: 'in', status: 'Paid' },
-  { date: '08 Oct', description: 'Supplier bill', reference: 'Lim Hardware · BILL-304', amount: '−RM 3,300', tone: 'out', status: 'Scheduled' },
+  { date: '08 Oct', description: 'Supplier bill', reference: 'Lim Hardware · BILL-304', amount: '−RM 3,300', tone: 'out', status: 'To be paid' },
   { date: '07 Oct', description: 'Invoice sent', reference: 'Zaki Enterprise · INV-1041', amount: 'RM 3,500', tone: 'flat', status: 'Sent' },
   { date: '05 Oct', description: 'Expense · utilities', reference: 'TNB · Maybank Current', amount: '−RM 1,900', tone: 'out', status: 'Cleared' },
   { date: '03 Oct', description: 'Payment received', reference: 'Lim Hardware · INV-1039', amount: '+RM 2,100', tone: 'in', status: 'Paid' },
@@ -126,7 +126,7 @@ const STATUS_PILL: Record<TxnStatus, string> = {
   Paid: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
   Cleared: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
   Sent: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
-  Scheduled: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
+  'To be paid': 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
   Overdue: 'bg-red-500/15 text-red-600 dark:text-red-400',
 };
 
