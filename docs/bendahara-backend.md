@@ -1,7 +1,6 @@
 # Bendahara backend
 
-How the finance screens read and write. Design:
-`docs/superpowers/specs/2026-10-10-bendahara-crud-design.md`.
+How the finance screens read and write.
 
 ## Write path
 
