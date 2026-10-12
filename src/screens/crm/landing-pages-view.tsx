@@ -436,7 +436,8 @@ export function LandingPagesView({
                     <TableHead className="text-right">Leads</TableHead>
                     <TableHead className="text-right">Conversion</TableHead>
                     <TableHead>Status</TableHead>
-                    {actions ? <TableHead className="text-right">Actions</TableHead> : null}
+                    {/* Pinned to the right edge, so the buttons stay in reach when the table is wider than its card. */}
+                    {actions ? <TableHead className="sticky right-0 bg-muted text-right shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.2)]">Actions</TableHead> : null}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -483,7 +484,7 @@ export function LandingPagesView({
                           </span>
                         </TableCell>
                         {actions ? (
-                          <TableCell>
+                          <TableCell className="sticky right-0 bg-card shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.2)]">
                             <div className="flex items-center justify-end gap-1">
                               <CopyLinkButton page={page} />
                               <Link
