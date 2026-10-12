@@ -362,7 +362,9 @@ begin
   perform set_config('request.jwt.claims', editor_claims, true);
   fails := fails || public.bendahara_check_try('an editor blanks who approved an expense', 'FIN01',
     format('update public.finance_expenses set approved_by = null where id = %L', ex6));
-  fails := fails || public.bendahara_check_try('an editor blanks who entered an approved expense', 'FIN01',
+  -- created_by is closed to the authenticated role by column grants (bendahara_expense_stamp_and_category_writers),
+  -- so the refusal comes before the guard is asked.
+  fails := fails || public.bendahara_check_try('an editor blanks who entered an approved expense', '42501',
     format('update public.finance_expenses set created_by = null where id = %L', ex6));
   select count(*) into n from public.finance_expenses where id = ex6 and approved_by = admin_id and created_by = editor_id;
   if n <> 1 then fails := array_append(fails, 'who approved or entered an approved expense was blanked by hand'); end if;
