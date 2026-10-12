@@ -8,6 +8,8 @@ import {
   LINK_HIDDEN, LINK_IN_INTERVIEWER, interviewLinkProblem, rejectedByUser, interviewPlacesIn, linkNobodyGave, linksIn, lookTheSameInterviews, sameLink, stringsIn,
 } from '@/lib/ai/hire-interview-gate';
 import { guardPoolChanges, lookedUpAs, poolChangeProblem } from '@/lib/ai/hire-pool-gate';
+import { approvalBinding, bindApprovals } from '@/lib/ai/products';
+import { NOT_PREPARED, NOT_WAITING, memoryProposalStore, noProposalStore } from '@/lib/chat/proposal-store';
 import { THIS_INTERVIEW, interviewFullLine, interviewLine } from '@/lib/hire/interviews';
 
 const IV = '11111111-1111-4111-8111-111111111181';
@@ -1138,5 +1140,66 @@ describe('guardInterviewChanges', () => {
     expect(await (guarded.reopenInterview as Gate)({ id: IV2 }, at('c4'))).toEqual({ type: 'denied', reason: ONE_INTERVIEW_CHANGE });
     expect(await (guarded.deleteCandidate as Gate)({ id: PERSON }, at('c5'))).toEqual({ type: 'denied', reason: 'One deletion at a time. One is already prepared for approval.' });
     expect(await (guarded.setPoolStatus as Gate)({ id: PERSON, status: 'none' }, at('c6'))).toEqual({ type: 'denied', reason: 'One talent pool change at a time. One is already prepared for approval.' });
+  });
+});
+
+// The gate sits INSIDE the tie between an approval and the server's record of the change (products.ts,
+// `bindApprovals`): a call the gate refuses is never recorded, so it can never be approved; a call it lets through
+// is recorded before its card goes out; and what runs after the yes is the record, not what the request carried.
+describe('the interview gate under the server\'s record of proposed changes', () => {
+  type Gate = (input: unknown, options: { toolCallId: string; messages: ModelMessage[] }) => Promise<unknown>;
+  const listed: ModelMessage[] = [
+    user('What is planned?'), called('listInterviews', 'l1', {}), answered('listInterviews', 'l1', { total: 2, interviews: [listedRow(IV), listedRow(IV2, { date: '2026-10-22', time: '11:00' })] }),
+    { role: 'assistant', content: 'Two.' }, user('Cancel the first'),
+  ];
+  const ran = vi.fn(async (input: unknown) => ({ ok: true, data: input }));
+  const bound = (store = memoryProposalStore(), messages: ModelMessage[] = listed) => {
+    const names = [...HIRE_INTERVIEW_TOOL_NAMES];
+    const tools = Object.fromEntries(names.map((name) => [name, { execute: ran }])) as never;
+    const kit = { tools, toolApproval: guardInterviewChanges(Object.fromEntries(names.map((name) => [name, 'user-approval' as const])), async () => ({ ok: true as const, note: LINE, namesakes: [] })) };
+    const product = { key: 'hire', name: 'Lekir', read: {}, write: tools } as never;
+    return { store, ...bindApprovals(kit as never, [product], approvalBinding(store, messages)) };
+  };
+  const at = (toolCallId: string, messages: ModelMessage[] = listed) => ({ toolCallId, messages });
+
+  it('a change the gate lets through is recorded before its card, with the line as the request\'s reason; one it refuses is not recorded', async () => {
+    const { store, toolApproval } = bound();
+    expect(await (toolApproval!.cancelInterview as Gate)({ id: IV }, at('c1'))).toEqual({ type: 'user-approval', reason: LINE });
+    expect(store.rows.map((row) => [row.toolCallId, row.action, row.input, row.status])).toEqual([['c1', 'cancelInterview', { id: IV }, 'pending']]);
+    // A second one, an id nobody looked up, a made-up link: denied by the gate, and nothing more is kept.
+    expect(await (toolApproval!.reopenInterview as Gate)({ id: IV2 }, at('c2'))).toEqual({ type: 'denied', reason: ONE_INTERVIEW_CHANGE });
+    const fresh = bound();
+    expect(await (fresh.toolApproval!.cancelInterview as Gate)({ id: MADE_UP }, at('c1'))).toEqual({ type: 'denied', reason: interviewNotLookedUp(MADE_UP) });
+    expect(await (fresh.toolApproval!.rescheduleInterview as Gate)({ id: IV, place: LINK }, at('c2'))).toEqual({ type: 'denied', reason: LINK_NOT_GIVEN });
+    expect(store.rows).toHaveLength(1);
+    expect(fresh.store.rows).toEqual([]);
+  });
+  it('a change that cannot be recorded gets no card, and that refusal is not the turn\'s one', async () => {
+    const { toolApproval } = bound(noProposalStore as never);
+    expect(await (toolApproval!.cancelInterview as Gate)({ id: IV }, at('c1'))).toEqual({ type: 'denied', reason: NOT_PREPARED });
+    expect(isGateReason(NOT_PREPARED)).toBe(true);
+    const turn = [...listed, called('cancelInterview', 'c1', { id: IV }), { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'c1', toolName: 'cancelInterview', output: { type: 'execution-denied', reason: NOT_PREPARED } }] } as ModelMessage];
+    expect(interviewChangeProblem(turn, { toolCallId: 'c2', id: IV })).toBeNull();
+  });
+  it('after the yes, what runs is the record: once, with the arguments the server kept, and never for a call that was not proposed here', async () => {
+    ran.mockClear();
+    const { store, tools, toolApproval } = bound();
+    await (toolApproval!.cancelInterview as Gate)({ id: IV }, at('c1'));
+    const run = (tools as unknown as Record<string, { execute: (input: unknown, options: unknown) => Promise<unknown> }>).cancelInterview.execute;
+    // The request that carries the yes names another interview: no record for that call and those arguments.
+    expect(await run({ id: IV2 }, { toolCallId: 'c1' })).toEqual({ ok: false, error: NOT_WAITING });
+    expect(ran).not.toHaveBeenCalled();
+    expect(await run({ id: IV }, { toolCallId: 'c1' })).toEqual({ ok: true, data: { id: IV } });
+    expect(await run({ id: IV }, { toolCallId: 'c1' })).toEqual({ ok: false, error: NOT_WAITING });
+    expect(ran).toHaveBeenCalledTimes(1);
+    expect(store.rows[0].status).toBe('approved');
+    // A call the conversation already held when the request arrived is the user's answer, not a new proposal: the
+    // gate runs again on it (the last check), and nothing new is recorded.
+    const answering = [...listed, called('cancelInterview', 'c9', { id: IV })];
+    const later = bound(memoryProposalStore(), answering);
+    expect(await (later.toolApproval!.cancelInterview as Gate)({ id: IV }, at('c9', answering))).toEqual({ type: 'user-approval', reason: LINE });
+    expect(later.store.rows).toEqual([]);
+    // A change that ran and was told "no longer waiting" is the change's own answer: it stays the turn's one.
+    expect(isGateReason(NOT_WAITING)).toBe(false);
   });
 });

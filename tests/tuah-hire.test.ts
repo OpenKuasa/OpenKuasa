@@ -3722,6 +3722,32 @@ describe('interview changes', () => {
         }
       });
 
+      it('the card\'s lines go to the browser on the approval request and to no model, through the card, the yes and the next turn', async () => {
+        reset();
+        interviewReopened.mockResolvedValue({ ok: true, data: { id: IV2, application_id: APP, candidate: WHO, job: JOB, message: `The interview with ${WHO} is scheduled again.`, confirmed: true } });
+        seen.sent = [];
+        const run = runners[mode](world());
+        seen.workerScript = own ? null : [listAll, another, 'answer'];
+        try {
+          const shown = await exchange([say('u1', `Mark the second interview with ${WHO} as scheduled again`)], run, own ? [[listAll], [another]] : null);
+          expect(waiting(shown)).toHaveLength(1);
+          // Two lines: which interview this is, and what else is scheduled with her.
+          expect(waiting(shown)[0].approval?.requestReason).toBe(LINE_LATER);
+          const after = await exchange(decide(shown, true), run, own ? [] : null);
+          expect(interviewReopened).toHaveBeenCalledTimes(1);
+          seen.workerStep = 0;
+          seen.workerScript = own ? null : ['answer'];
+          await exchange([...after, say('u2', 'Thanks. Anything else planned?')], run, own ? [] : null);
+          // Nothing any model was sent, in any of the three requests, holds either line.
+          const sent = seen.sent.join('\n');
+          expect(seen.sent.length).toBeGreaterThan(2);
+          expect(sent).not.toContain('This interview: ');
+          expect(sent).not.toContain('Also scheduled for');
+        } finally {
+          seen.workerScript = null;
+        }
+      });
+
       it('the next thing the user says is a new turn, with one interview change of its own', async () => {
         reset();
         interviewReopened.mockResolvedValue({ ok: true, data: { id: IV2, application_id: APP, candidate: WHO, job: JOB, message: `The interview with ${WHO} is scheduled again.`, invitation: null, confirmed: true } });
