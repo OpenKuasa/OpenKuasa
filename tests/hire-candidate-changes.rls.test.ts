@@ -320,7 +320,7 @@ testWithSupabase('2. another workspace gets not_found, a demo viewer gets forbid
   expect(after.data?.phone ?? null, 'the viewer\'s phone was not written').not.toBe(sentPhone);
 }, 60_000);
 
-testWithSupabase('3. the owner adds a person with no job and no email: created, no application, added by hand', async () => {
+testWithSupabase('3. the owner adds a person with no job and no email: created, no application, added by hand, in the talent pool', async () => {
   const before = await candidates(owner.c, owner.orgId);
   const res = await add(owner.c, owner.orgId, { name: '  Nurul   Huda  ' });
   const added = expectAdded(res, 'created', 'none');
@@ -335,7 +335,7 @@ testWithSupabase('3. the owner adds a person with no job and no email: created, 
     location: null,
     skills: [],
     source: 'Added by hand',
-    pool_status: 'none',
+    pool_status: 'available',
   });
   expect(await candidates(owner.c, owner.orgId)).toHaveLength(before.length + 1);
   expect(await applicationsOf(owner.c, row.id)).toHaveLength(0);
@@ -516,7 +516,7 @@ testWithSupabase('9. the owner edits: only named fields change, null clears, an 
   );
   target = await readCandidate(owner.c, made.candidate_id!);
   neighbour = await readCandidate(owner.c, madeNeighbour.candidate_id!);
-  expect(target.pool_status).toBe('none');
+  expect(target.pool_status).toBe('available');
 
   // The phone only: everything else is as it was.
   expectWord(await update(owner.c, target.id, { phone: ' 012-345   6789 ' }), 'ok');
@@ -532,7 +532,7 @@ testWithSupabase('9. the owner edits: only named fields change, null clears, an 
   expectWord(await update(owner.c, target.id, { skills: ['Sales', '  Sales ', '', 'Excel'] }), 'ok');
   row = await readCandidate(owner.c, target.id);
   expect(row.skills).toEqual(['Sales', 'Excel']);
-  expect(row.pool_status).toBe('none');
+  expect(row.pool_status).toBe('available');
   const held = row;
 
   // A blank name is refused and changes nothing.
@@ -551,7 +551,7 @@ testWithSupabase('9. the owner edits: only named fields change, null clears, an 
   expectWord(await update(owner.c, target.id, { email: targetEmail.toUpperCase() }), 'ok');
   row = await readCandidate(owner.c, target.id);
   expect(row).toEqual({ ...held, email: targetEmail });
-  expect(row.pool_status).toBe('none');
+  expect(row.pool_status).toBe('available');
 }, 120_000);
 
 testWithSupabase('10. a viewer, another workspace\'s owner and a visitor cannot edit that candidate', async () => {

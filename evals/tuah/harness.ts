@@ -181,6 +181,8 @@ export class Conversation {
               ...realHire,
               // The made-up rows are in no database: the same-name check before a deletion must read these lists, not the database.
               namesakes: undefined,
+              // The same for a person's pool status: read from the lists below, which hold the made-up people.
+              poolStatusOf: undefined,
               listJobs: async () => [...(extra.jobs ?? []), ...(await realHire.listJobs())],
               listApplications: async () => [...extraApplications, ...(await realHire.listApplications())],
               // An application has a candidate behind it: a lookup by name must find the person too.
