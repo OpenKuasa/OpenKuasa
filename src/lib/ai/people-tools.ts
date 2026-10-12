@@ -32,6 +32,7 @@ import {
   updateEmployee as capUpdateEmployee,
   updateEmployeeInput,
 } from '@/lib/people/capabilities';
+import { removeDocumentFiles } from '@/lib/people/document-files-server';
 import {
   applyLeave as capApplyLeave,
   applyLeaveInput,
@@ -1433,7 +1434,7 @@ export function createPeopleTools(
         'instead. Otherwise their leave, claims, draft payslips and every other HR record are deleted too, and it ' +
         'cannot be undone. Needs approval.',
       inputSchema: deleteEmployeeInput,
-      execute: async (input) => change('deleteEmployee', () => capDeleteEmployee(ctx, input)),
+      execute: async (input) => change('deleteEmployee', () => capDeleteEmployee(ctx, input, removeDocumentFiles)),
     }),
 
     linkEmployeeToMember: tool({

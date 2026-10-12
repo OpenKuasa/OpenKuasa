@@ -396,16 +396,65 @@ describe('setEmployeeStatus, deleteEmployee', () => {
     expect(calls.find((c) => c.op === 'update')!.values).toEqual({ status: 'inactive' });
   });
 
-  it('deletes within the workspace and hands back who it was', async () => {
-    const { client, calls } = fakeSupabase({ 'hr_employees.delete': { data: { id: EMP, name: 'Farah Idris' } } });
+  it('deletes through the database function in the session workspace and hands back who it was', async () => {
+    const { client, calls } = fakeSupabase({
+      'rpc.hr_delete_employee': { data: { id: EMP, name: 'Farah Idris', document_paths: [] } },
+    });
     expect(await deleteEmployee(ctxOf(client), { id: EMP })).toEqual({ ok: true, data: { id: EMP, name: 'Farah Idris' } });
-    expect(calls[0].filters).toEqual({ id: EMP, org_id: ORG });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ fn: 'hr_delete_employee', args: { p_org: ORG, p_employee: EMP } });
+    expect(Object.keys(calls[0].args!).sort()).toEqual(['p_employee', 'p_org']);
+  });
+
+  it('removes each document file the database returned, one path at a time and after the delete, and never returns them', async () => {
+    const A = '11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/abcdef01-aaaa-4bbb-8ccc-0123456789ab.pdf';
+    const B = '11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/abcdef02-aaaa-4bbb-8ccc-0123456789ab.png';
+    const { client } = fakeSupabase({
+      'rpc.hr_delete_employee': { data: { id: EMP, name: 'Farah Idris', document_paths: [A, B] } },
+    });
+    const removed: string[][] = [];
+    const result = await deleteEmployee(ctxOf(client), { id: EMP }, async (paths) => void removed.push([...paths]));
+    expect(removed).toEqual([[A, B]]);
+    expect(result).toEqual({ ok: true, data: { id: EMP, name: 'Farah Idris' } });
+    expect(JSON.stringify(result)).not.toContain('abcdef01');
+  });
+
+  it('removes nothing for an employee with no files', async () => {
+    const { client } = fakeSupabase({ 'rpc.hr_delete_employee': { data: { id: EMP, name: 'Farah Idris', document_paths: [] } } });
+    const removeFiles = vi.fn(async () => {});
+    await deleteEmployee(ctxOf(client), { id: EMP }, removeFiles);
+    expect(removeFiles).not.toHaveBeenCalled();
+  });
+
+  it('does not remove a file when the delete is refused or finds nobody', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const removeFiles = vi.fn(async () => {});
+    for (const reply of [
+      { data: null },
+      { error: { code: 'P0001', message: 'HR_EMPLOYEE_HAS_PAID_PAYSLIPS' } },
+      { error: { code: 'XX000', message: 'boom' } },
+    ]) {
+      const { client } = fakeSupabase({ 'rpc.hr_delete_employee': reply });
+      await deleteEmployee(ctxOf(client), { id: EMP }, removeFiles);
+    }
+    expect(removeFiles).not.toHaveBeenCalled();
+  });
+
+  it('is not failed by a file that cannot be removed, and logs no path', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const PATH = '11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/abcdef01-aaaa-4bbb-8ccc-0123456789ab.pdf';
+    const { client } = fakeSupabase({ 'rpc.hr_delete_employee': { data: { id: EMP, name: 'Farah Idris', document_paths: [PATH] } } });
+    const result = await deleteEmployee(ctxOf(client), { id: EMP }, async () => {
+      throw new Error(`boom ${PATH}`);
+    });
+    expect(result).toEqual({ ok: true, data: { id: EMP, name: 'Farah Idris' } });
+    expect(JSON.stringify(log.mock.calls)).not.toContain(PATH);
   });
 
   it('refuses an employee with a paid payslip in the payroll sentence, and logs nothing', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { client } = fakeSupabase({
-      'hr_employees.delete': { error: { code: 'P0001', message: 'HR_EMPLOYEE_HAS_PAID_PAYSLIPS' } },
+      'rpc.hr_delete_employee': { error: { code: 'P0001', message: 'HR_EMPLOYEE_HAS_PAID_PAYSLIPS' } },
     });
     expect(await deleteEmployee(ctxOf(client), { id: EMP })).toEqual({
       ok: false,
@@ -417,15 +466,21 @@ describe('setEmployeeStatus, deleteEmployee', () => {
   it('answers any other delete error generically', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const { client } = fakeSupabase({
-      'hr_employees.delete': { error: { code: 'P0001', message: 'something about HR_EMPLOYEE_HAS_PAID_PAYSLIPS elsewhere' } },
+      'rpc.hr_delete_employee': { error: { code: 'P0001', message: 'something about HR_EMPLOYEE_HAS_PAID_PAYSLIPS elsewhere' } },
     });
     const result = await deleteEmployee(ctxOf(client), { id: EMP });
     expect(result).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
   });
 
-  it('says when the employee is not there', async () => {
-    const { client } = fakeSupabase({ 'hr_employees.delete': { data: null } });
+  it('says when the employee is not there (the function answers null)', async () => {
+    const { client } = fakeSupabase({ 'rpc.hr_delete_employee': { data: null } });
     expect(await deleteEmployee(ctxOf(client), { id: EMP })).toEqual({ ok: false, error: 'That employee was not found.' });
+  });
+
+  it('treats a reply that is not an employee as a failed save', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { client } = fakeSupabase({ 'rpc.hr_delete_employee': { data: { id: 5 } } });
+    expect(await deleteEmployee(ctxOf(client), { id: EMP })).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
   });
 });
 
