@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/server';
 import { REMEMBER_COOKIE } from '@/lib/supabase/remember';
 import { recordEvent } from '@/lib/events';
 import { MFA_VERIFY_PATH, getMfaStatus } from '@/lib/auth/mfa';
+import { endOtherSessions } from '@/lib/auth/sessions';
 import { createWorkspaceError, workspaceNameSchema } from '@/lib/auth/workspace-name';
 
 // Persist the "remember me" choice so token refreshes (in the proxy) keep the
@@ -223,6 +224,8 @@ export async function updatePasswordAction(
   if (error) {
     return { error: 'Could not update your password. Please try again.' };
   }
+  // Anyone still signed in with the old password is signed out.
+  await endOtherSessions(supabase);
   await recordEvent(supabase, {
     action: 'Reset password by email',
     category: 'security',
