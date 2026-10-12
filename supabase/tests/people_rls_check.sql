@@ -3,7 +3,9 @@
 -- member reads their own payslip (and its lines) only once it is paid, and
 -- their own letter only once it is issued. Since the performance slice a
 -- member reads their own review only once it is released, an announcement
--- only once it is published, and no read mark but their own. Read the message:
+-- only once it is published, and no read mark but their own. Since the
+-- letters and documents slice a letter's type is one of a fixed list, and
+-- letter templates are for owners and admins only. Read the message:
 --   PEOPLE_RLS_CHECK PASSED ...   or   PEOPLE_RLS_CHECK FAILED: <what went wrong>
 -- When not to run it. It rebuilds the demo HR rows inside its transaction and
 -- holds them until the rollback, and the scheduled demo reseed commits the
@@ -14,7 +16,8 @@
 --   * do not run it at the same time as another people check
 --     (people_leave_check, people_claims_overtime_check,
 --     people_attendance_check, people_payroll_check,
---     people_performance_check): each of them rebuilds the demo too;
+--     people_performance_check, people_documents_check): each of them
+--     rebuilds the demo too;
 --   * do not run it while a migration is being applied.
 do $$
 declare
@@ -45,7 +48,7 @@ declare
   shared text[] := array['hr_departments','hr_public_holidays','hr_trainings','hr_announcements'];
   fails text[] := '{}';
   personal text[] := array['hr_employee_private','hr_leave_requests','hr_claims','hr_payslips','hr_payslip_lines','hr_reviews','hr_documents','hr_letters'];
-  hr_only text[] := array['hr_payroll_runs','hr_payment_vouchers','hr_settings'];
+  hr_only text[] := array['hr_payroll_runs','hr_payment_vouchers','hr_settings','hr_letter_templates'];
 begin
   -- ---- every table: the right read rule, and no write it should not have --
   for t, k in
@@ -56,7 +59,8 @@ begin
       ('hr_attendance_days','personal'), ('hr_timesheet_entries','personal'), ('hr_shifts','personal'), ('hr_public_holidays','shared'),
       ('hr_payroll_runs','hr'), ('hr_payslips','paid'), ('hr_payslip_lines','lines'), ('hr_payment_vouchers','hr'),
       ('hr_goals','personal'), ('hr_scorecards','released'), ('hr_reviews','released'), ('hr_trainings','shared'), ('hr_training_enrolments','personal'),
-      ('hr_announcements','published'), ('hr_documents','personal'), ('hr_letters','issued'), ('hr_settings','hr')
+      ('hr_announcements','published'), ('hr_documents','personal'), ('hr_letters','issued'), ('hr_settings','hr'),
+      ('hr_letter_templates','hr')
     ) as x(t, k)
   loop
     select p.qual into q from pg_policies p
@@ -228,9 +232,12 @@ begin
   select org, p.id, 'deduction', 'hr', 'Uniform', 1000 from public.hr_payslips p where p.org_id = org;
   -- Letters: one issued and one still a draft for member one, one issued for member two.
   insert into public.hr_letters (org_id, employee_id, letter_type, title, status, issued_on)
-  values (org, e1, 'Confirmation', 'Confirmation of employment', 'issued', current_date),
-         (org, e1, 'Warning', 'Not sent yet', 'draft', null),
-         (org, e2, 'Confirmation', 'Confirmation of employment', 'issued', current_date);
+  values (org, e1, 'confirmation', 'Confirmation of employment', 'issued', current_date),
+         (org, e1, 'warning', 'Not sent yet', 'draft', null),
+         (org, e2, 'confirmation', 'Confirmation of employment', 'issued', current_date);
+  -- Letter templates: the starter set a new workspace is given, one per letter type.
+  select count(*), count(distinct letter_type) into n, n2 from public.hr_letter_templates where org_id = org;
+  if n <> 6 or n2 <> 6 then fails := array_append(fails, format('the new workspace was given %s starter templates of %s types, expected 6 of 6', n, n2)); end if;
   -- Reviews: one released and one still a draft for member one, one released for member two.
   insert into public.hr_reviews (org_id, employee_id, period, rating, score, status, released_at)
   values (org, e1, 'H1 2025', 'meets', 3.5, 'released', now()),
@@ -315,8 +322,8 @@ begin
   end loop;
   foreach t in array hr_only loop
     execute format('select count(*) from public.%I where org_id = %L', t, org) into n;
-    -- One of everything, but two payroll runs (the paid one and the draft).
-    n2 := case t when 'hr_payroll_runs' then 2 else 1 end;
+    -- One of everything, but two payroll runs (the paid one and the draft) and the six starter templates.
+    n2 := case t when 'hr_payroll_runs' then 2 when 'hr_letter_templates' then 6 else 1 end;
     if n <> n2 then fails := array_append(fails, format('the admin reads %s rows of %s, expected %s', n, t, n2)); end if;
   end loop;
   -- Both announcements, the draft included; and of the read marks only their own.

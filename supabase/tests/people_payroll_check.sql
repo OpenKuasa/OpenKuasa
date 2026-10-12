@@ -291,9 +291,9 @@ begin
   values (org, eb, '2025-01-15', 3.0, 7500, 'approved') returning id into o2;
   -- Letters: A has one issued and one still a draft; B has one issued.
   insert into public.hr_letters (org_id, employee_id, letter_type, title, status, issued_on)
-  values (org, ea, 'Confirmation', 'Confirmation of employment', 'issued', '2025-01-05'),
-         (org, ea, 'Warning', 'Not sent yet', 'draft', null),
-         (org, eb, 'Confirmation', 'Confirmation of employment', 'issued', '2025-01-05');
+  values (org, ea, 'confirmation', 'Confirmation of employment', 'issued', '2025-01-05'),
+         (org, ea, 'warning', 'Not sent yet', 'draft', null),
+         (org, eb, 'confirmation', 'Confirmation of employment', 'issued', '2025-01-05');
 
   -- other_org: P is active with no salary; Q has a salary but is inactive.
   insert into public.hr_employees (org_id, employee_no, name) values (other_org, 'P', 'Nothing On File') returning id into ep;
