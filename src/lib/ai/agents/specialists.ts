@@ -53,7 +53,6 @@ import {
   interviewCardDecision,
   interviewLinkProblem,
   interviewNotLookedUp,
-  interviewPlacesIn,
   interviewTarget,
 } from '@/lib/ai/hire-interview-gate';
 import type { ProductToolkit } from '@/lib/ai/products';
@@ -420,12 +419,13 @@ function specialistTools(
         ) {
           return { prepared: false, error: AMBIGUOUS[limited] };
         }
-        // A link in the place must be one somebody gave: typed by the user in the conversation, or the place of an
-        // interview this specialist looked up. Not `given`: the task Tuah wrote, and Tuah's words in the transcript,
-        // are not the user typing. Not the rest of a lookup either: a cover letter or a CV link is a stranger's text.
-        // The other way for the person: type the link, or go ahead without one and add it on the Interviews screen.
+        // A link in the place must be one somebody gave: typed by the user in the message that began this turn, or
+        // already the place of the very interview being changed, as a lookup of this specialist returned it. Not
+        // `given`: the task Tuah wrote, and Tuah's words in the transcript, are not the user typing. Not an earlier
+        // turn's link, and not another interview's. Not the rest of a lookup: a cover letter is a stranger's text.
+        // The other way for the person: give the link in the message that asks, or add it on the Interviews screen.
         // And the interviewer is a name: a link in it would reach the candidate unchecked, so it is refused outright.
-        const linked = INTERVIEW_CHANGES.has(name) ? interviewLinkProblem(messages, input, interviewPlacesIn(results).join('\n')) : null;
+        const linked = INTERVIEW_CHANGES.has(name) ? interviewLinkProblem(messages, name, input, results) : null;
         if (linked) return { prepared: false, error: linked };
         // Last, the server's own rows (read above): two rows of one name that look the same cannot be told apart on a card.
         // When they can, the card says which one it is; that line is added when the card is shown, not kept here.

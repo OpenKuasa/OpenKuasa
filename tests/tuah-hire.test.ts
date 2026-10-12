@@ -2665,7 +2665,7 @@ describe('interview changes', () => {
     const prepare = async (
       script: NonNullable<typeof seen.workerScript>,
       access: Access = world(),
-      given: { names?: Record<string, string>; said?: string; transcript?: string } = {},
+      given: { names?: Record<string, string>; said?: string; transcript?: string; before?: Model[] } = {},
     ) => {
       for (const fn of mocks) fn.mockReset();
       const context = { ...team(), names: given.names ?? {}, transcript: given.transcript ?? '' };
@@ -2676,7 +2676,7 @@ describe('interview changes', () => {
       let cards: Card[] = [];
       try {
         const result = runTuah(
-          [{ role: 'user' as const, content: given.said ?? `Cancel the interview with ${WHO}` }],
+          [...(given.before ?? []), { role: 'user' as const, content: given.said ?? `Cancel the interview with ${WHO}` }],
           reach(), undefined, undefined, null, null, context, access,
         );
         await result.consumeStream();
@@ -2858,14 +2858,29 @@ describe('interview changes', () => {
       }
       nothingSaved();
     });
-    it('lets through a link the user typed, and one a lookup of this delegation returned', async () => {
+    it('lets through a link the user typed in this turn, and the stored place of the interview being changed; not another interview\'s link, and not one from an earlier turn', async () => {
       const typed = await prepare([byName, { tool: 'scheduleInterview', input: { ...NEW, place: LINK } }], world(), { said: `Schedule ${WHO} for 12 January at 3pm, video, at ${LINK}.` });
       expect(seen.refusals).toEqual([]);
       expect([...typed.context.proposals.values()][0].detail).toContain(`Link: ${LINK}`);
-      // The second round's link is in the interview lookup this delegation ran.
-      const lookedUp = await prepare([listAll, byName, { tool: 'scheduleInterview', input: { ...NEW, place: ROOM } }], world(), { said: `Schedule ${WHO} again, same link as her second round` });
+      // The second interview keeps its own link, found in the lookup this delegation ran.
+      const kept = await prepare([listAll, { tool: 'rescheduleInterview', input: { id: IV2, duration_minutes: 45, place: ROOM } }], world(), { said: 'Make her second interview 45 minutes' });
       expect(seen.refusals).toEqual([]);
-      expect(lookedUp.context.proposals.size).toBe(1);
+      expect(kept.context.proposals.size).toBe(1);
+      // The second round's link on a new interview, or on the first one: another interview's link is not this one's.
+      const borrowed = await prepare([listAll, byName, { tool: 'scheduleInterview', input: { ...NEW, place: ROOM } }, 'answer'], world(), { said: `Schedule ${WHO} again, same link as her second round` });
+      expect(borrowed.context.proposals.size).toBe(0);
+      expect(seen.refusals[0]).toBe(LINK_NOT_GIVEN);
+      const moved = await prepare([listAll, { tool: 'rescheduleInterview', input: { id: IV, place: ROOM } }, 'answer'], world(), { said: 'Use the second round\'s link for the first' });
+      expect(moved.context.proposals.size).toBe(0);
+      expect(seen.refusals[0]).toBe(LINK_NOT_GIVEN);
+      // A link typed in an earlier turn: refused now, and passes once the user gives it again.
+      const before: Model[] = [{ role: 'user', content: `Schedule someone else on ${LINK}` }, { role: 'assistant', content: 'Done.' }];
+      const stale = await prepare([byName, { tool: 'scheduleInterview', input: { ...NEW, place: LINK } }, 'answer'], world(), { said: `Now schedule ${WHO} for 12 January at 3pm, video`, before });
+      expect(stale.context.proposals.size).toBe(0);
+      expect(seen.refusals[0]).toBe(LINK_NOT_GIVEN);
+      const again = await prepare([byName, { tool: 'scheduleInterview', input: { ...NEW, place: LINK } }], world(), { said: `Now schedule ${WHO} for 12 January at 3pm, video, on ${LINK}`, before });
+      expect(seen.refusals).toEqual([]);
+      expect(again.context.proposals.size).toBe(1);
     });
     it('refuses two interviews that read the same, and refuses when the server cannot be read, logging nothing of the error', async () => {
       const same = await prepare([listAll, { tool: 'cancelInterview', input: { id: IV } }], world({ at: AT, twin: true, fail: false }));
@@ -3069,9 +3084,9 @@ describe('interview changes', () => {
       { role: 'assistant', content: 'Two interviews, one application, one candidate.' },
     ] as Model[];
     /** One request: the model's nth step makes every call of the nth list, and answers in words after the last. */
-    const request = async (steps: Call[][], agent: 'tuah' | 'lekir', access: Access = world(), said = 'Do it') => {
+    const request = async (steps: Call[][], agent: 'tuah' | 'lekir', access: Access = world(), said = 'Do it', earlier: Model[] = []) => {
       for (const fn of mocks) fn.mockReset();
-      const messages: Model[] = [...listed, { role: 'user', content: said }];
+      const messages: Model[] = [...listed, ...earlier, { role: 'user', content: said }];
       seen.calls = [];
       seen.singleScript = steps;
       try {
@@ -3183,10 +3198,21 @@ describe('interview changes', () => {
       const typed = await request([[withLink]], agent, world(), `Schedule ${WHO} for 12 January at 3pm, video, link ${LINK}`);
       expect(typed.denials).toEqual([]);
       expect(typed.cards).toHaveLength(1);
-      // The place of an interview an earlier lookup returned is a link somebody in the team gave.
-      const lookedUp = await request([[{ tool: 'rescheduleInterview', input: { id: IV, place: ROOM } }]], agent);
+      // The stored place of the very interview being changed may be kept, from a lookup in an earlier turn.
+      const lookedUp = await request([[{ tool: 'rescheduleInterview', input: { id: IV2, duration_minutes: 45, place: ROOM } }]], agent);
       expect(lookedUp.denials).toEqual([]);
       expect(lookedUp.cards).toHaveLength(1);
+      // Another interview's link, on this interview's card or on a new interview: refused.
+      expect((await request([[{ tool: 'rescheduleInterview', input: { id: IV, place: ROOM } }]], agent)).denials).toEqual([LINK_NOT_GIVEN]);
+      expect((await request([[{ tool: 'scheduleInterview', input: { ...NEW, place: ROOM } }]], agent)).denials).toEqual([LINK_NOT_GIVEN]);
+      // A link the user typed in an earlier turn, for whoever that was about: refused now, and passes once given again.
+      const before: Model[] = [{ role: 'user', content: `Schedule someone else on ${LINK}` }, { role: 'assistant', content: 'Done.' }];
+      const stale = await request([[withLink]], agent, world(), `Now schedule ${WHO} for 12 January at 3pm, video`, before);
+      expect(stale.cards).toEqual([]);
+      expect(stale.denials).toEqual([LINK_NOT_GIVEN]);
+      const again = await request([[withLink]], agent, world(), `Now schedule ${WHO} for 12 January at 3pm, video, on ${LINK}`, before);
+      expect(again.denials).toEqual([]);
+      expect(again.cards).toHaveLength(1);
       // A link the applicant wrote in a cover letter is not, though a lookup in this very turn returned it.
       const fromLetter = await request([[withLetter], [{ tool: 'scheduleInterview', input: { ...NEW, place: LETTER_LINK } }]], agent, world(), `Schedule ${WHO} for 12 January at 3pm, video, with the link she sent`);
       expect(seen.calls[1].prompt).toContain(LETTER_LINK);

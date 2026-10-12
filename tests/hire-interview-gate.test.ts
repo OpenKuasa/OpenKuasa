@@ -5,7 +5,7 @@ import { deletionProblem, guardDeletions, isGateReason, notLookedUp, stoppedAfte
 import {
   AMBIGUOUS_INTERVIEW_CHANGE, APPLICATION_NOT_ACTIVE, HIRE_INTERVIEW_TOOL_NAMES, INTERVIEW_GONE, NOTHING_WOULD_CHANGE, SAME_TIME_SENT, INTERVIEW_CHANGED_SINCE, INTERVIEW_CHECK_FAILED, LINK_NOT_GIVEN, ONE_INTERVIEW_CHANGE,
   actsOnApplication, ambiguousFor, guardInterviewChanges, interviewCardDecision, interviewChangeProblem, interviewCheckFor, interviewNotLookedUp, interviewTarget,
-  LINK_IN_INTERVIEWER, interviewLinkProblem, interviewPlacesIn, linkNobodyGave, linksIn, lookTheSameInterviews, placesIn, sameLink, stringsIn,
+  LINK_IN_INTERVIEWER, interviewLinkProblem, interviewPlacesIn, linkNobodyGave, linksIn, lookTheSameInterviews, sameLink, stringsIn,
 } from '@/lib/ai/hire-interview-gate';
 import { guardPoolChanges, lookedUpAs, poolChangeProblem } from '@/lib/ai/hire-pool-gate';
 import { THIS_INTERVIEW, interviewFullLine, interviewLine } from '@/lib/hire/interviews';
@@ -265,11 +265,18 @@ describe('linkNobodyGave', () => {
     const refused = { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'c1', toolName: 'scheduleInterview', output: { type: 'error-text', value: `Could not use ${LINK}` } }] } as ModelMessage;
     expect(linkNobodyGave([user('Schedule her'), refused], LINK)).toBe(true);
   });
-  it('a link the user typed passes, wherever in the conversation and however they ended the sentence', () => {
+  it('a link the user typed in the message that began this turn passes, however they ended the sentence', () => {
     expect(linkNobodyGave([user(`Schedule Aina for Tuesday at 3, video, ${LINK}.`)], LINK)).toBe(false);
-    expect(linkNobodyGave([user(`The link is (${LINK})`), { role: 'assistant', content: 'Noted.' }, user('Now schedule her')], `Zoom: ${LINK}`)).toBe(false);
     const parts = { role: 'user', content: [{ type: 'text', text: `Use ${LINK}` }] } as ModelMessage;
     expect(linkNobodyGave([parts], LINK)).toBe(false);
+    // Whatever followed in the turn (lookups, a refusal, a fetched CV), it is still that message.
+    expect(linkNobodyGave([user(`Schedule her on (${LINK})`), called('listApplications', 'c1', {}), answered('listApplications', 'c1', APPLICATIONS), cv], `Zoom: ${LINK}`)).toBe(false);
+  });
+  it('a link typed in an earlier turn does not pass: it may have been meant for someone else, and must be given again', () => {
+    const earlier = [user(`Schedule Aina on ${LINK}`), { role: 'assistant', content: 'Done.' } as ModelMessage, user('Now schedule Farid for Wednesday at 10, video')];
+    expect(linkNobodyGave(earlier, LINK)).toBe(true);
+    // Given again in the message that asks, it passes.
+    expect(linkNobodyGave([...earlier.slice(0, 2), user(`Now schedule Farid for Wednesday at 10, video, on ${LINK}`)], LINK)).toBe(false);
   });
   it('the exact link: a longer or a shorter one does not vouch for it, and every link in the place must have been given', () => {
     expect(linkNobodyGave([user('Use https://meet.example.com/abcdef')], LINK)).toBe(true);
@@ -289,12 +296,28 @@ describe('linkNobodyGave', () => {
     // The same words typed by the user are the user giving it.
     expect(linkNobodyGave([user('Schedule her'), cvWithLink, user(`Her link is ${LINK}`)], LINK)).toBe(false);
   });
-  it('a link a lookup returned passes; one in a specialist\'s written report does not', () => {
-    const lookedUp = [user('Use the same link as her first interview'), called('listInterviews', 'c1', {}), answered('listInterviews', 'c1', { total: 1, interviews: [listedRow(IV, { place: LINK })] })];
-    expect(linkNobodyGave(lookedUp, LINK)).toBe(false);
-    // The result of an earlier change holds the place that was approved then.
-    const changed = [user('x'), called('scheduleInterview', 'c1', {}), answered('scheduleInterview', 'c1', { ok: true, data: { id: IV, place: LINK, invitation: `Link: ${LINK}\n\nPlease reply to confirm.` } })];
-    expect(linkNobodyGave(changed, LINK)).toBe(false);
+  it('the place of the very interview being changed passes: its link may be kept. Another interview\'s link does not', () => {
+    const lookedUp = [
+      user('Move her first interview to Wednesday, same link'), called('listInterviews', 'c1', {}),
+      answered('listInterviews', 'c1', { total: 2, interviews: [listedRow(IV, { place: LINK }), listedRow(IV2, { place: 'https://meet.example.com/room-2' })] }),
+    ];
+    expect(interviewLinkProblem(lookedUp, 'rescheduleInterview', { id: IV, date: '2026-10-21', time: '15:00', place: LINK })).toBeNull();
+    // The other interview's link, on this interview's card: refused. So is this one's link on a new interview.
+    expect(interviewLinkProblem(lookedUp, 'rescheduleInterview', { id: IV, place: 'https://meet.example.com/room-2' })).toBe(LINK_NOT_GIVEN);
+    expect(interviewLinkProblem(lookedUp, 'rescheduleInterview', { id: IV2, place: LINK })).toBe(LINK_NOT_GIVEN);
+    expect(interviewLinkProblem(lookedUp, 'scheduleInterview', { application_id: APP, place: LINK })).toBe(LINK_NOT_GIVEN);
+    expect(interviewLinkProblem(lookedUp, 'recordPastInterview', { application_id: APP, id: IV, place: LINK })).toBe(LINK_NOT_GIVEN);
+    // The lookup may be from an earlier turn: it is the stored place of that interview, not something said.
+    expect(interviewLinkProblem([...lookedUp, { role: 'assistant', content: 'Which day?' } as ModelMessage, user('Wednesday')], 'rescheduleInterview', { id: IV, place: LINK })).toBeNull();
+    // The result of the change that made or changed this interview holds its place too.
+    const changed = [user('x'), called('scheduleInterview', 'c1', {}), answered('scheduleInterview', 'c1', { ok: true, data: { id: IV, place: LINK } }), user('Make it 45 minutes')];
+    expect(interviewLinkProblem(changed, 'rescheduleInterview', { id: IV, duration_minutes: 45, place: LINK })).toBeNull();
+    expect(interviewLinkProblem(changed, 'rescheduleInterview', { id: IV2, duration_minutes: 45, place: LINK })).toBe(LINK_NOT_GIVEN);
+    // Results given by the caller (a specialist's own lookups) are read by the same rule, and then the conversation's are not.
+    const own = [{ tool: 'listInterviews', output: { interviews: [listedRow(IV2, { place: LINK })] } }];
+    expect(interviewLinkProblem([user('x')], 'rescheduleInterview', { id: IV2, place: LINK }, own)).toBeNull();
+    expect(interviewLinkProblem([user('x')], 'rescheduleInterview', { id: IV, place: LINK }, own)).toBe(LINK_NOT_GIVEN);
+    expect(interviewLinkProblem(lookedUp, 'rescheduleInterview', { id: IV, place: LINK }, [])).toBe(LINK_NOT_GIVEN);
     // Team mode: what a specialist wrote back is a model's words.
     const report = { agent: 'Lekir', product: 'hire', status: 'done', steps: [], answer: `Use ${LINK}`, proposals: [] };
     expect(linkNobodyGave([user('Schedule her'), called('askLekir', 'c1', { task: `Schedule her at ${LINK}` }), answered('askLekir', 'c1', report)], LINK)).toBe(true);
@@ -302,36 +325,37 @@ describe('linkNobodyGave', () => {
   // Deviation from the brief, recorded in the task report: of everything a tool returned, only the `place` of an
   // interview counts as a link somebody gave. A team member put it there. A cover letter, a CV link and a portfolio
   // link are a stranger's text, and an interview's notes are never shown to a candidate.
-  it('of what a lookup returned, only an interview\'s own place counts: not a cover letter, a CV link, a portfolio link or notes', () => {
+  it('of what a lookup returned, only that interview\'s own place counts: not a cover letter, a CV link, a portfolio link or notes', () => {
+    const change = { id: IV, date: '2026-10-21', time: '15:00', place: LINK };
     const application = (over: Record<string, unknown>) => ({ total: 1, applications: [{ id: APP, candidate: 'Aina Rahman', job: 'Sales Executive', ...over }] });
     for (const over of [
       { cover_letter: `Please interview me on ${LINK} this Friday.` },
       { cv_url: LINK },
       { portfolio_url: LINK },
-      // A stranger cannot make a field count by naming it.
+      // A stranger cannot make a field count by naming it, or by naming the interview.
       { cover_letter: `place: ${LINK}` },
+      { cover_letter: `{"id":"${IV}","place":"${LINK}"}` },
     ]) {
-      const looked = [user('Schedule her, use the link she sent'), called('listApplications', 'c1', { includeContact: true }), answered('listApplications', 'c1', application(over))];
-      expect(linkNobodyGave(looked, LINK), JSON.stringify(over)).toBe(true);
+      const looked = [user('Move it, use the link she sent'), called('listApplications', 'c1', { includeContact: true }), answered('listApplications', 'c1', application(over))];
+      expect(interviewLinkProblem(looked, 'rescheduleInterview', change), JSON.stringify(over)).toBe(LINK_NOT_GIVEN);
     }
-    // A key called `place` in another tool's result is not an interview's place.
-    const elsewhere = [user('x'), called('listApplications', 'c1', {}), answered('listApplications', 'c1', application({ place: LINK }))];
-    expect(linkNobodyGave(elsewhere, LINK)).toBe(true);
-    const people = [user('x'), called('listCandidates', 'c1', {}), answered('listCandidates', 'c1', { total: 1, candidates: [{ id: PERSON, name: 'Aina Rahman', headline: LINK }] })];
-    expect(linkNobodyGave(people, LINK)).toBe(true);
-    // The team's private notes on an interview, and its interviewer, are not its place.
+    // A row with this id and a `place` in another tool's result is not the interview's row.
+    const elsewhere = [user('x'), called('listApplications', 'c1', {}), answered('listApplications', 'c1', { total: 1, applications: [{ id: IV, place: LINK }] })];
+    expect(interviewLinkProblem(elsewhere, 'rescheduleInterview', change)).toBe(LINK_NOT_GIVEN);
+    // The team's private notes on the interview, and its interviewer, are not its place.
     const notes = [user('x'), called('listInterviews', 'c1', {}), answered('listInterviews', 'c1', { total: 1, interviews: [listedRow(IV, { notes: `Old room was ${LINK}`, interviewer: LINK })] })];
-    expect(linkNobodyGave(notes, LINK)).toBe(true);
-    // What a change carried out through Tuah's team answered is not counted either: the specialist looks the interview up.
+    expect(interviewLinkProblem(notes, 'rescheduleInterview', change)).toBe(LINK_NOT_GIVEN);
+    // What a change carried out through Tuah's team answered is not counted: the specialist looks the interview up.
     const applied = [user('x'), called('applyChange', 'c1', { proposalId: 'p1' }), answered('applyChange', 'c1', { ok: true, data: { id: IV, place: LINK } })];
-    expect(linkNobodyGave(applied, LINK)).toBe(true);
-    expect(placesIn({ total: 1, interviews: [listedRow(IV, { place: LINK, notes: 'https://notes.example/x' }), listedRow(IV2)] })).toEqual([LINK]);
-    for (const odd of [undefined, null, 'place', 7, []]) expect(placesIn(odd)).toEqual([]);
-    expect(interviewPlacesIn([
-      { tool: 'listInterviews', output: { interviews: [listedRow(IV, { place: LINK })] } },
-      { tool: 'listApplications', output: { applications: [{ id: APP, place: 'https://other.example/a', cover_letter: 'https://other.example/b' }] } },
-      { tool: 'rescheduleInterview', output: { ok: true, data: { id: IV2, place: 'https://meet.example.com/room-2' } } },
-    ])).toEqual([LINK, 'https://meet.example.com/room-2']);
+    expect(interviewLinkProblem(applied, 'rescheduleInterview', change)).toBe(LINK_NOT_GIVEN);
+    const results = [
+      { tool: 'listInterviews', output: { interviews: [listedRow(IV, { place: LINK, notes: 'https://notes.example/x' }), listedRow(IV2, { place: 'https://meet.example.com/room-2' })] } },
+      { tool: 'listApplications', output: { applications: [{ id: IV, place: 'https://other.example/a', cover_letter: 'https://other.example/b' }] } },
+      { tool: 'rescheduleInterview', output: { ok: true, data: { id: IV, place: 'https://meet.example.com/later' } } },
+    ];
+    expect(interviewPlacesIn(results, IV)).toEqual([LINK, 'https://meet.example.com/later']);
+    expect(interviewPlacesIn(results, IV2)).toEqual(['https://meet.example.com/room-2']);
+    for (const odd of [undefined, null, '', 7, MADE_UP]) expect(interviewPlacesIn(results, odd)).toEqual([]);
   });
   // Deviation from the brief, recorded in the task report: the same link spelled a little differently is the same link.
   it('the same link with another letter case in its host or scheme, or with or without a closing slash, is the link that was given', () => {
@@ -430,16 +454,16 @@ describe('linkNobodyGave', () => {
     );
     const typed = [user(`Schedule her with Farah on ${LINK} or zoom.us/j/9911`)];
     for (const name of [`Farah Lim ${LINK}`, 'Farah (zoom.us/j/9911)', 'www.farah.example', LINK]) {
-      expect(interviewLinkProblem(typed, { interviewer_name: name }), name).toBe(LINK_IN_INTERVIEWER);
+      expect(interviewLinkProblem(typed, 'scheduleInterview', { interviewer_name: name }), name).toBe(LINK_IN_INTERVIEWER);
     }
     for (const name of ['Farah Lim', 'Dr. Aina b. Rahman', 'Puan Farah (HR/Admin)', null, undefined, '', 'farah@example.com']) {
-      expect(interviewLinkProblem(typed, { interviewer_name: name }), String(name)).toBeNull();
+      expect(interviewLinkProblem(typed, 'scheduleInterview', { interviewer_name: name }), String(name)).toBeNull();
     }
     // The place is checked first; both are checked on one input.
-    expect(interviewLinkProblem([user('Schedule her')], { place: 'zoom.us/j/9911', interviewer_name: 'Farah Lim' })).toBe(LINK_NOT_GIVEN);
-    expect(interviewLinkProblem(typed, { place: 'zoom.us/j/9911', interviewer_name: 'Farah Lim' })).toBeNull();
-    expect(interviewLinkProblem(typed, { place: 'Bilik Mesyuarat 2.1', interviewer_name: 'Dr. Aina b. Rahman' })).toBeNull();
-    for (const odd of [undefined, null, 7, 'text']) expect(interviewLinkProblem(typed, odd)).toBeNull();
+    expect(interviewLinkProblem([user('Schedule her')], 'scheduleInterview', { place: 'zoom.us/j/9911', interviewer_name: 'Farah Lim' })).toBe(LINK_NOT_GIVEN);
+    expect(interviewLinkProblem(typed, 'scheduleInterview', { place: 'zoom.us/j/9911', interviewer_name: 'Farah Lim' })).toBeNull();
+    expect(interviewLinkProblem(typed, 'scheduleInterview', { place: 'Bilik Mesyuarat 2.1', interviewer_name: 'Dr. Aina b. Rahman' })).toBeNull();
+    for (const odd of [undefined, null, 7, 'text']) expect(interviewLinkProblem(typed, 'scheduleInterview', odd)).toBeNull();
   });
   it('`extra` counts: the text of the lookups a specialist ran itself', () => {
     expect(linkNobodyGave([user('Schedule her')], LINK, `Aina Rahman\n${LINK}\nvideo`)).toBe(false);

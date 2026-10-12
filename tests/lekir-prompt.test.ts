@@ -835,7 +835,7 @@ describe('the interview rules, in every prompt that can prepare an interview cha
       'Find the id yourself: listApplications to schedule an interview or to record one that already took place, listInterviews for the other four. Never ask for an id. If a lookup answers with "several_match", or more than one row fits, prepare nothing: report what matches and that the user must say which.',
       DAY_AND_TIME('Give the date and time you worked out, with the weekday, in your report; the card shows it again for the user to check.'),
       'If the day, the time or the type (video, onsite or phone) was not given, prepare nothing and report what is missing. Never pick one.',
-      'Never make up a meeting link, a place or an interviewer. Leave out what was not given; the card then says none was given. A link is refused unless the user typed it or it is the place of an interview you looked up.',
+      'Never make up a meeting link, a place or an interviewer. Leave out what was not given; the card then says none was given. A link is refused unless the user gave it in their latest message, or it is already the place of the very interview you are changing.',
       NOTES,
       'Only an active application can get an interview. If it is rejected or withdrawn, prepare nothing and report that it can be reopened first.',
       '"Schedule and move her to Interview" is two changes. Prepare the interview, and report that the move can follow once it is approved.',
@@ -882,7 +882,7 @@ describe('the interview rules, in every prompt that can prepare an interview cha
       'A protected ground for a talent pool change is race, religion, gender, age, marital status, pregnancy, disability and nationality, or a stand-in for one of them. ' +
       'For an interview change, Lekir works the exact date and time out in Kuala Lumpur and the card shows them: tell the user to check the card. ' +
       'If the day, the time or the type (video, onsite or phone) was not given, ask the user before sending anything. ' +
-      'Never write a link, a place or an interviewer into a task unless the user gave it: a link the user did not type is refused. ' +
+      'Never write a link, a place or an interviewer into a task unless the user gave it: a link the user did not type in their latest message is refused, so ask for it again when it was given earlier. ' +
       `${NOTES} ` +
       'For a group ("book all five shortlisted for Thursday"), send ONE task asking who matches; never one task per person, and at most one interview change reaches the user in a turn. ' +
       'To record an interview that already took place, the user must have said it happened: say so in the task, with whether it was completed or a no-show, and ask the user first when that is not clear. ' +

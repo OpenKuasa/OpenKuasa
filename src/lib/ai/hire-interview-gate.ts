@@ -271,81 +271,103 @@ function sameAddress(a: { scheme: string | null; rest: string }, b: { scheme: st
   return (a.scheme === null || b.scheme === null) && web(a.scheme) && web(b.scheme);
 }
 
-/** Every string held under a key called `place`, anywhere in a value. */
-export function placesIn(value: unknown, depth = 0): string[] {
+/** The `place` of every row with this id, anywhere in a value. */
+function placesOf(value: unknown, id: string, depth = 0): string[] {
   if (!value || typeof value !== 'object' || depth > 6) return [];
-  if (Array.isArray(value)) return value.flatMap((inner) => placesIn(inner, depth + 1));
-  return Object.entries(value).flatMap(([key, inner]) => (key === 'place' ? stringsIn(inner, depth + 1) : placesIn(inner, depth + 1)));
+  if (Array.isArray(value)) return value.flatMap((inner) => placesOf(inner, id, depth + 1));
+  const row = value as { id?: unknown; place?: unknown };
+  const own = row.id === id && typeof row.place === 'string' ? [row.place] : [];
+  return [...own, ...Object.values(row).flatMap((inner) => placesOf(inner, id, depth + 1))];
 }
 
 /** The tools whose results hold an interview's row: the lookup, and the six changes. */
 const INTERVIEW_RESULTS = new Set<string>(['listInterviews', ...HIRE_INTERVIEW_TOOL_NAMES]);
+type Result = { tool: string; output: unknown };
 
 /**
- * The place of every interview in these tool results. Only the results of
- * the interview lookup and of the six interview changes are read, and of
- * those only the `place`: a link there was typed by someone in the team, or
- * approved on a card. Nothing else a tool returns counts, because much of it
- * is a stranger's text: a cover letter, a CV link, a portfolio link, a
- * headline. An interview's notes do not count either: they are the team's
- * own, and are never shown to a candidate.
+ * The place of ONE interview, as these tool results hold it. Only the results
+ * of the interview lookup and of the six interview changes are read, only the
+ * rows with this interview's id, and of those only the `place`: a link there
+ * was typed by someone in the team, or approved on a card, for this very
+ * interview. Nothing else a tool returns counts, because much of it is a
+ * stranger's text (a cover letter, a CV link, a portfolio link, a headline),
+ * and another interview's place is another interview's. Notes do not count
+ * either: they are the team's own, and are never shown to a candidate.
  */
-export function interviewPlacesIn(results: readonly { tool: string; output: unknown }[]): string[] {
-  return results.filter((result) => INTERVIEW_RESULTS.has(result.tool)).flatMap((result) => placesIn(result.output));
+export function interviewPlacesIn(results: readonly Result[], id: unknown): string[] {
+  if (typeof id !== 'string' || !id) return [];
+  return results.filter((result) => INTERVIEW_RESULTS.has(result.tool)).flatMap((result) => placesOf(result.output, id));
+}
+
+/** Every tool result in a conversation, as a tool returned it. */
+function resultsIn(messages: readonly ModelMessage[]): Result[] {
+  return messages
+    .filter((message) => message.role === 'tool')
+    .flatMap(partsOf)
+    .filter((part) => part.type === 'tool-result' && typeof part.toolName === 'string')
+    .flatMap((part) => {
+      const output = part.output as { type?: unknown; value?: unknown } | null | undefined;
+      return output?.type === 'json' ? [{ tool: part.toolName as string, output: output.value }] : [];
+    });
+}
+
+/** The text of the message that began the turn in progress: the last thing the user said. A fetched CV is not that. */
+function saidThisTurn(messages: readonly ModelMessage[]): string[] {
+  for (let at = messages.length - 1; at >= 0; at -= 1) {
+    const message = messages[at];
+    if (message.role !== 'user' || isHeldCvMessage(message)) continue;
+    if (typeof message.content === 'string') return [message.content];
+    return (partsOf(message) as { type?: unknown; text?: unknown }[]).flatMap((part) => (part.type === 'text' && typeof part.text === 'string' ? [part.text] : []));
+  }
+  return [];
 }
 
 /**
  * True when `place` holds a link that nobody gave. A link is one with or
  * without its scheme (`linksIn`): a model whose "https://zoom.us/j/9911" was
- * refused must not get a card for "zoom.us/j/9911". A link passes only when the
- * same link (`sameLink`, and `sameAddress` for the scheme) is in something the user typed in this conversation,
- * or is the place of an interview a tool of the app returned
- * (`interviewPlacesIn`). Not counted, because none of them is the user typing:
- * a CV the assistant fetched (it sits in a user message, see
- * `isHeldCvMessage`), anything an assistant wrote, a tool call's input, a
- * denial or an error, any other part of a lookup's result (a cover letter, a
- * CV link, a portfolio link, notes), and a specialist's written report to Tuah
- * (the result of an `ask…` tool).
+ * refused must not get a card for "zoom.us/j/9911". A link passes only when
+ * the same link (`sameLink`, and `sameAddress` for the scheme) is in what the
+ * user typed in the message that began this turn, or in `extra`.
  *
- * `extra` is more text that counts. Team mode uses it for the places of the
- * interviews a specialist looked up in this delegation, which are not in
- * Tuah's messages. The task Tuah wrote is never passed: it is not the user
- * typing.
+ * This turn's message, not the whole conversation: a link typed three turns
+ * ago may have been for someone else's interview. Not counted, because none
+ * of them is the user typing now: an earlier message of theirs, a CV the
+ * assistant fetched (it sits in a user message, see `isHeldCvMessage`),
+ * anything an assistant wrote, a tool call's input, a denial or an error, a
+ * lookup's result, and a specialist's written report to Tuah.
  *
- * The other way for the person, when a link is refused: type it, or go ahead
- * without one and add it later with "Reschedule or edit" on the Interviews
- * screen, whose form takes any link.
+ * `extra` is more text that counts: the caller passes the stored place of the
+ * very interview being changed (`interviewLinkProblem`), so that a change may
+ * keep the link the interview already has.
+ *
+ * The other way for the person, when a link is refused: give it in the same
+ * message as the request (the assistant asks for it, and their answer is a
+ * new turn that holds it), or go ahead without one and add it later with
+ * "Reschedule or edit" on the Interviews screen, whose form takes any link.
  */
 export function linkNobodyGave(messages: readonly ModelMessage[], place: unknown, extra = ''): boolean {
   const wanted = linksIn(place).map(linkParts);
   if (wanted.length === 0) return false;
-  const given = linksIn(extra).map(linkParts);
-  const take = (text: unknown) => {
-    for (const link of linksIn(text)) given.push(linkParts(link));
-  };
-  for (const message of messages) {
-    if (message.role === 'user' && !isHeldCvMessage(message)) {
-      if (typeof message.content === 'string') take(message.content);
-      else for (const part of partsOf(message) as { type?: unknown; text?: unknown }[]) if (part.type === 'text') take(part.text);
-    } else if (message.role === 'tool') {
-      for (const part of partsOf(message)) {
-        if (part.type !== 'tool-result' || typeof part.toolName !== 'string') continue;
-        const output = part.output as { type?: unknown; value?: unknown } | null | undefined;
-        if (output?.type !== 'json') continue;
-        for (const text of interviewPlacesIn([{ tool: part.toolName, output: output.value }])) take(text);
-      }
-    }
-  }
+  const given = [extra, ...saidThisTurn(messages)].flatMap((text) => linksIn(text)).map(linkParts);
   return wanted.some((link) => !given.some((one) => sameAddress(link, one)));
 }
 
 /**
  * Why a change's place or interviewer must not reach a card, or null: a link in the place that nobody gave
  * (`linkNobodyGave`), or any link at all in the interviewer's name. Notes are not read: no candidate sees them.
+ * For a change to an interview that exists, the place that interview already has counts as given: `results` are the
+ * lookups to find it in (a specialist's own, in Tuah's team); left out, they are the conversation's.
  */
-export function interviewLinkProblem(messages: readonly ModelMessage[], input: unknown, extra = ''): string | null {
+export function interviewLinkProblem(
+  messages: readonly ModelMessage[],
+  tool: string,
+  input: unknown,
+  results?: readonly Result[],
+): string | null {
   const sent = (input && typeof input === 'object' ? input : {}) as { place?: unknown; interviewer_name?: unknown };
-  if (linkNobodyGave(messages, sent.place, extra)) return LINK_NOT_GIVEN;
+  // A new interview has no place yet: only what the user typed counts for it.
+  const own = actsOnApplication(tool) ? [] : interviewPlacesIn(results ?? resultsIn(messages), interviewTarget(tool, input));
+  if (linkNobodyGave(messages, sent.place, own.join('\n'))) return LINK_NOT_GIVEN;
   return linksIn(sent.interviewer_name).length > 0 ? LINK_IN_INTERVIEWER : null;
 }
 
@@ -485,7 +507,7 @@ export function guardInterviewChanges(
             ? null
             : onApplication ? notLookedUp('application', id) : interviewNotLookedUp(id))
           ?? inTurn
-          ?? interviewLinkProblem(messages, input));
+          ?? interviewLinkProblem(messages, tool, input));
     if (problem) return { type: 'denied', reason: problem };
     // The SDK waits for each call's answer before asking about the next, so the count is safe across this read.
     const decision = check ? interviewCardDecision(await check(tool, input), cardShown(messages, toolCallId)) : 'user-approval';
