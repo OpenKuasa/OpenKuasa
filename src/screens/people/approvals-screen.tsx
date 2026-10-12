@@ -11,10 +11,19 @@ import { RequestRow } from '@/components/people/request-row';
 import { DecideButtons, type DecideKind } from '@/components/people/decide-buttons';
 import { PaidButtons } from '@/components/people/paid-buttons';
 import { ReceiptLink } from '@/components/people/receipt-link';
+import { TeamDecideButtons } from '@/components/people/team-decide-buttons';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { APPROVAL_QUEUES, type ApprovalQueue, type ApprovalRow, type ApprovalsModel } from '@/lib/people/approvals';
+import {
+  APPROVAL_QUEUES,
+  queueColumns,
+  rowControls,
+  screenControls,
+  type ApprovalQueue,
+  type ApprovalRow,
+  type ApprovalsModel,
+} from '@/lib/people/approvals';
 import { OWN_REQUEST_REFUSAL } from '@/lib/people/leave';
-import { isTeamView } from '@/lib/people/own';
+import { teamScreenView, type TeamScreenView } from '@/lib/people/tier';
 import type { PeopleViewer } from '@/lib/people/types';
 import { cn } from '@/lib/utils';
 import { EmployeeCell, HrOnlyScreen, LOAD_FAILED, LaterButton, Muted, StatusPill, requestTone } from './parts';
@@ -49,7 +58,7 @@ const DECIDE_KIND: Record<ApprovalQueue, DecideKind> = {
 };
 
 /** What a claim or overtime row shows besides its columns: the receipt, the year's total, the kind of day, the notes. */
-function RowDetails({ row }: { row: ApprovalRow }) {
+function RowDetails({ row, view }: { row: ApprovalRow; view: TeamScreenView }) {
   return (
     <div className="space-y-1 text-xs text-muted-foreground">
       {row.claim ? (
@@ -65,7 +74,7 @@ function RowDetails({ row }: { row: ApprovalRow }) {
           {row.claim.paid_on_text ? <div>Paid {row.claim.paid_on_text}</div> : null}
         </>
       ) : null}
-      {row.overtime ? (
+      {row.overtime && view !== 'manager' ? (
         <>
           <div>{row.overtime.kind}</div>
           {row.overtime.calculated ? null : <div>Set a salary to work this out</div>}
@@ -100,7 +109,10 @@ export function ApprovalsScreen({
   employees?: LeaveEmployee[];
 }) {
   const config = APPROVAL_QUEUES[queue];
-  if (!isTeamView(viewer)) return <HrOnlyScreen title={config.title} />;
+  const view = teamScreenView(viewer);
+  if (view === 'none') return <HrOnlyScreen title={config.title} />;
+  const controls = screenControls(view, config.subtitle);
+  const columns = queueColumns(queue, view);
 
   const series: Series[] = [
     { key: 'submitted', label: `Submitted (${config.trendUnit})`, color: 'var(--chart-1)' },
@@ -116,16 +128,26 @@ export function ApprovalsScreen({
       <PageHeader
         className="mb-3"
         title={config.title}
-        subtitle={config.subtitle}
+        subtitle={controls.subtitle}
         actions={
-          <div className="flex flex-wrap items-center gap-2">
-            {queue === 'leave' && employees ? <AddLeaveFor employees={employees} disabled={viewer.isDemo} /> : null}
-            {queue === 'claims' && employees ? <AddClaimFor employees={employees} disabled={viewer.isDemo} /> : null}
-            {queue === 'overtime' && employees ? <AddOvertimeFor employees={employees} disabled={viewer.isDemo} /> : null}
-            <LaterButton variant="outline" size="sm" icon={Download}>
-              Export
-            </LaterButton>
-          </div>
+          controls.addFor || controls.export ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {controls.addFor && queue === 'leave' && employees ? (
+                <AddLeaveFor employees={employees} disabled={controls.disabled} />
+              ) : null}
+              {controls.addFor && queue === 'claims' && employees ? (
+                <AddClaimFor employees={employees} disabled={controls.disabled} />
+              ) : null}
+              {controls.addFor && queue === 'overtime' && employees ? (
+                <AddOvertimeFor employees={employees} disabled={controls.disabled} />
+              ) : null}
+              {controls.export ? (
+                <LaterButton variant="outline" size="sm" icon={Download}>
+                  Export
+                </LaterButton>
+              ) : null}
+            </div>
+          ) : null
         }
       />
 
@@ -216,7 +238,7 @@ export function ApprovalsScreen({
                 <TableHeader>
                   <TableRow className="bg-muted/40">
                     <TableHead>Employee</TableHead>
-                    {config.columns.map((column) => (
+                    {columns.map((column) => (
                       <TableHead key={column.label} className={column.right ? 'text-right' : undefined}>
                         {column.label}
                       </TableHead>
@@ -227,22 +249,27 @@ export function ApprovalsScreen({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {model.rows.map((row) => (
-                    <RequestRow key={row.id} columns={config.columns.length + (hasDetails ? 4 : 3)}>
+                  {model.rows.map((row) => {
+                    const offer = rowControls(view, row);
+                    return (
+                    <RequestRow key={row.id} columns={columns.length + (hasDetails ? 4 : 3)}>
                       <TableCell>
-                        <EmployeeCell name={row.employee_name} />
+                        <EmployeeCell
+                          name={row.employee_name}
+                          sub={row.manager_label ? `Reports to ${row.manager_label}` : null}
+                        />
                       </TableCell>
                       {row.cells.map((cell, index) => (
                         <TableCell
-                          key={config.columns[index]?.label ?? index}
-                          className={cn('whitespace-nowrap', config.columns[index]?.right && 'text-right tabular-nums')}
+                          key={columns[index]?.label ?? index}
+                          className={cn('whitespace-nowrap', columns[index]?.right && 'text-right tabular-nums')}
                         >
                           {cell}
                         </TableCell>
                       ))}
                       {hasDetails ? (
                         <TableCell className="align-top">
-                          <RowDetails row={row} />
+                          <RowDetails row={row} view={view} />
                         </TableCell>
                       ) : null}
                       <TableCell className="px-1.5">
@@ -251,7 +278,7 @@ export function ApprovalsScreen({
                           <StatusPill tone={requestTone(row.status)}>{row.status_label}</StatusPill>
                           {row.yours ? <StatusPill tone="neutral">Yours</StatusPill> : null}
                           {/* Their own request, waiting on a decision or a payment they may not make themselves. */}
-                          {!row.decidable && (row.pending || row.claim?.markable) ? (
+                          {offer.note === 'own-admin' ? (
                             <span title={OWN_REQUEST_REFUSAL}>
                               <StatusPill tone="neutral">Needs the owner or another admin</StatusPill>
                             </span>
@@ -266,30 +293,37 @@ export function ApprovalsScreen({
                       <TableCell className="whitespace-nowrap px-1.5">
                         {/* Side by side, not stacked; whatever a button opens appears in the row below. */}
                         <div className="flex items-center gap-1.5">
-                          {row.pending || row.cancellable ? (
-                            <DecideButtons
-                              kind={DECIDE_KIND[queue]}
-                              id={row.id}
-                              pending={row.pending && row.decidable}
-                              cancellable={row.cancellable}
-                              disabled={viewer.isDemo}
-                            />
-                          ) : null}
-                          {row.claim && ((row.claim.markable && row.decidable) || row.status === 'paid') ? (
-                            <PaidButtons
-                              id={row.id}
-                              paid={row.status === 'paid'}
-                              claimDate={row.claim.claim_date}
-                              disabled={viewer.isDemo}
-                            />
-                          ) : null}
-                          {!row.pending && !row.cancellable && !row.claim?.markable && row.status !== 'paid' ? (
-                            <span className="text-muted-foreground">—</span>
-                          ) : null}
+                          {view === 'manager' ? (
+                            offer.decide ? <TeamDecideButtons kind={DECIDE_KIND[queue]} id={row.id} /> : <span className="text-muted-foreground">—</span>
+                          ) : (
+                            <>
+                              {row.pending || row.cancellable ? (
+                                <DecideButtons
+                                  kind={DECIDE_KIND[queue]}
+                                  id={row.id}
+                                  pending={offer.decide}
+                                  cancellable={offer.cancel}
+                                  disabled={offer.disabled}
+                                />
+                              ) : null}
+                              {row.claim && (offer.markPaid || offer.undoPaid) ? (
+                                <PaidButtons
+                                  id={row.id}
+                                  paid={row.status === 'paid'}
+                                  claimDate={row.claim.claim_date}
+                                  disabled={offer.disabled}
+                                />
+                              ) : null}
+                              {!row.pending && !row.cancellable && !row.claim?.markable && row.status !== 'paid' ? (
+                                <span className="text-muted-foreground">—</span>
+                              ) : null}
+                            </>
+                          )}
                         </div>
                       </TableCell>
                     </RequestRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
