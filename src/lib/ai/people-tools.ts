@@ -2438,7 +2438,7 @@ export function createPeopleTools(
       description:
         'Start a DRAFT letter for an employee from a template, by the employee\'s id from listEmployees and the template\'s id from ' +
         'listLetterTemplates. The system fills the template\'s placeholders from the employee\'s record; the result carries the draft ' +
-        'and any placeholders it could not fill (the eight are employee_name, employee_no, designation, department, join_date, company_name, today and salary, the last as "RM 4,500.00 per month"). Needs approval.',
+        'and any placeholders it could not fill (the eight are {employee_name}, {employee_no}, {designation}, {department}, {join_date}, {company_name}, {today} and {salary}, the last as "RM 4,500.00 per month"). Needs approval.',
       inputSchema: startLetterToolInput,
       execute: async (input) =>
         change('startLetterFromTemplate', async () => {

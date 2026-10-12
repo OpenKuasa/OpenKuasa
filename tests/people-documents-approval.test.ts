@@ -12,6 +12,8 @@ const executed = vi.hoisted(() => ({
   shown: [] as unknown[],
   /** When set, every write path answers with this refusal sentence. */
   fail: null as string | null,
+  /** When set, requestLetterAck answers with this letter instead of the fixed draft. */
+  ackData: null as unknown,
 }));
 
 const bump = (name: string, input: unknown) => {
@@ -49,7 +51,11 @@ vi.mock('@/lib/people/letter-writes', async (importOriginal) => {
     ...actual,
     saveLetter: record('saveLetter', savedDraft),
     startLetterFromTemplate: record('startLetterFromTemplate', { letter: savedDraft, unfilled: ['designation'] }),
-    requestLetterAck: record('requestLetterAck', savedDraft),
+    requestLetterAck: async (_ctx: unknown, input: unknown) => {
+      bump('requestLetterAck', input);
+      if (executed.fail) return { ok: false as const, error: executed.fail };
+      return { ok: true as const, data: executed.ackData ?? savedDraft };
+    },
     issueLetter: record('issueLetter', { ...savedDraft, status: 'issued', issued_on: '2026-10-09' }),
   };
 });
@@ -146,7 +152,7 @@ const ask = [{ role: 'user' as const, content: 'Please' }];
 vi.spyOn(console, 'log').mockImplementation(() => {});
 
 const reset = (tool: string, input: object | string) => {
-  Object.assign(executed, { counts: {}, last: null, shown: [], fail: null, tool, input });
+  Object.assign(executed, { counts: {}, last: null, shown: [], fail: null, ackData: null, tool, input });
 };
 const ran = (name: string) => executed.counts[name] ?? 0;
 const total = () => Object.values(executed.counts).reduce((sum, n) => sum + n, 0);
@@ -481,19 +487,30 @@ describe('what the model is told when the write path refuses', () => {
     expect(listLetters).not.toHaveBeenCalled();
   });
 
-  it('a requestAcknowledgement result for a letter carries the whole letter, so a later issue card still states the whole body', async () => {
+  it('a requestAcknowledgement result for a letter carries the whole letter, so a later issue card states the whole body and the newest request', async () => {
     const tools = createPeopleTools(data, asOwner.viewer, NOW, asOwner.write);
     const exec = async (name: string, input: object) =>
       (tools[name] as unknown as { execute: (i: unknown, o: unknown) => Promise<unknown> }).execute(input, { toolCallId: 't', messages: [] });
-    const longBody = savedDraft.body;
-    const saved = { tool: 'saveLetter', output: await exec('saveLetter', { employee_id: A, letter_type: 'warning', title: 'Amaran', body: longBody }) };
-    const acked = { tool: 'requestAcknowledgement', output: await exec('requestAcknowledgement', { letter_id: DRAFT, requested: true }) };
-    const find = nameIn([saved, acked]);
-    expect(approvalTitle('issueLetter', { letter_id: DRAFT }, find)).toBe(
-      `Issue the letter to Aisyah Rahim, type Warning, titled “Amaran”: “${longBody}”?`,
+    const saved = { tool: 'saveLetter', output: await exec('saveLetter', { employee_id: A, letter_type: 'warning', title: 'Amaran', body: savedDraft.body }) };
+    const bigBody = `Opening words.\n${'x'.repeat(9000)} Closing words`;
+    const issueDetail = (results: { tool: string; output: unknown }[]) => approvalDetail('issueLetter', { letter_id: DRAFT }, undefined, nameIn(results)) ?? '';
+
+    // Asked: the newest fact holds the long body and the request.
+    executed.ackData = { ...savedDraft, body: bigBody, ack_requested: true };
+    const asked = { tool: 'requestAcknowledgement', output: await exec('requestAcknowledgement', { letter_id: DRAFT, requested: true }) };
+    expect(approvalTitle('issueLetter', { letter_id: DRAFT }, nameIn([saved, asked]))).toBe(
+      `Issue the letter to Aisyah Rahim, type Warning, titled “Amaran”: “${bigBody}”?`,
     );
-    // And when it is the only result in the chat.
-    expect(approvalTitle('issueLetter', { letter_id: DRAFT }, nameIn([acked]))).toContain(`“${longBody}”`);
+    expect(approvalTitle('issueLetter', { letter_id: DRAFT }, nameIn([asked]))).toContain('Closing words”');
+    expect(issueDetail([saved, asked])).toContain('They will be asked to acknowledge it.');
+
+    // Withdrawn: the newest fact says no request is made, whatever the earlier one said.
+    executed.ackData = { ...savedDraft, body: bigBody, ack_requested: false };
+    const withdrawn = { tool: 'requestAcknowledgement', output: await exec('requestAcknowledgement', { letter_id: DRAFT, requested: false }) };
+    expect((withdrawn.output as { data: { ack_requested: boolean } }).data.ack_requested).toBe(false);
+    expect(issueDetail([saved, asked, withdrawn])).not.toContain('asked to acknowledge');
+    expect(approvalTitle('issueLetter', { letter_id: DRAFT }, nameIn([saved, asked, withdrawn]))).toContain('Closing words”');
+
     // The card before approval is built from the earlier facts alone.
     expect(approvalDetail('requestAcknowledgement', { letter_id: DRAFT, requested: true }, undefined, nameIn([saved]))).toBe(
       'A draft: the employee will be asked when it is issued.',

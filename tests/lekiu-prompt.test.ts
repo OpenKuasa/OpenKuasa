@@ -700,6 +700,10 @@ describe('letters and documents', () => {
     expect(section).toContain('links, images, tables, html');
     expect(section).toContain('show as typed');
     expect(section).toContain('sparingly');
+    expect(section).toContain('for a saved letter only');
+    expect(section).toContain('stay plain text');
+    expect(section).toContain('text the person gave is passed as they gave it');
+    expect(section).toContain('"### "');
   });
 
   it('names {salary} as the eighth placeholder, filled from a template, never invented', () => {

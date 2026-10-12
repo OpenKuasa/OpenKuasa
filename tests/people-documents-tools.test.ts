@@ -340,10 +340,10 @@ describe('who holds the four change tools', () => {
     for (const mark of ['# headings', '**bold**', '*italic*', '"- " bullet', '"1. " numbered']) expect(save, mark).toContain(mark);
     for (const name of ['employee_name', 'employee_no', 'designation', 'department', 'join_date', 'company_name', 'today', 'salary']) {
       expect(save, name).toContain(`{${name}}`);
-      expect(describe_('startLetterFromTemplate', owner), name).toContain(name);
+      expect(describe_('startLetterFromTemplate', owner), name).toContain(`{${name}}`);
     }
     const member = createPeopleTools(dataWith(), MEMBER, NOW, selfWrite() as never);
-    for (const tool of Object.values(member)) expect((tool as { description?: string }).description ?? '').not.toMatch(/\{salary\}|bullet/i);
+    for (const tool of Object.values(member)) expect((tool as { description?: string }).description ?? '').not.toMatch(/\{salary\}|\*\*|bullet|heading|placeholder/i);
   });
   it('is absent, not merely refused, for a linked member, an unlinked member, a viewer and the demo', () => {
     const cases: [PeopleViewer, ReturnType<typeof hrWrite> | undefined][] = [
