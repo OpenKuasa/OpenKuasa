@@ -3,9 +3,12 @@
  * the server component, the client form and the tests share one version.
  */
 import { daysBetween } from './dates';
+import { showsOwnerDocumentControls } from './documents-screens';
 import type { WorkspaceMember } from './members';
 import { headcountByDepartment } from './overview';
-import type { Department, Employee, EmployeePrivate, EmployeeStatus, EmploymentType } from './types';
+import { managerIdsOf, managerLabel, wouldLoop } from './reporting';
+import { REPORTS_TO_REFUSALS, REPORTS_TO_SAVED_NOT_LINE, reportsToLoop } from './reporting-refusals';
+import type { Department, Employee, EmployeePrivate, EmployeeStatus, EmploymentType, PeopleViewer } from './types';
 
 export const EMPLOYMENT_TYPES: readonly EmploymentType[] = ['full_time', 'part_time', 'contract', 'intern'];
 export const EMPLOYMENT_LABEL: Record<EmploymentType, string> = {
@@ -72,12 +75,20 @@ export function buildEmployeesModel(employees: Employee[], departments: Departme
   };
 }
 
-export type EmployeeFilter = { query: string; departmentId: string; status: 'all' | EmployeeStatus };
+export type EmployeeFilter = { query: string; departmentId: string; status: 'all' | EmployeeStatus; team: 'all' | 'mine' };
 
-/** `departmentId` is a department's id, `'all'`, or `'none'` for staff in no department. */
-export function filterEmployees(employees: Employee[], filter: EmployeeFilter): Employee[] {
+/**
+ * `departmentId` is a department's id, `'all'`, or `'none'` for staff in no department. `team: 'mine'` keeps the
+ * viewer's direct reports, and nobody when the viewer has no employee record.
+ */
+export function filterEmployees(
+  employees: Employee[],
+  filter: EmployeeFilter,
+  viewerEmployeeId?: string | null,
+): Employee[] {
   const query = filter.query.trim().toLowerCase();
   return employees.filter((employee) => {
+    if (filter.team === 'mine' && (!viewerEmployeeId || employee.reports_to !== viewerEmployeeId)) return false;
     if (filter.status !== 'all' && employee.status !== filter.status) return false;
     if (filter.departmentId === 'none' && employee.department_id !== null) return false;
     if (filter.departmentId !== 'all' && filter.departmentId !== 'none' && employee.department_id !== filter.departmentId) {
@@ -88,6 +99,77 @@ export function filterEmployees(employees: Employee[], filter: EmployeeFilter): 
       (value ?? '').toLowerCase().includes(query),
     );
   });
+}
+
+export type ReportsToOption = { id: string; label: string };
+
+/** Who this employee may be set to report to: active employees, not themselves, by name; the manager they have now is kept even if inactive, labelled "(inactive)". */
+export function reportsToOptions(
+  employees: Employee[],
+  employeeId: string | null,
+  currentManagerId: string | null,
+): ReportsToOption[] {
+  return employees
+    .filter((e) => e.id !== employeeId && (e.status === 'active' || e.id === currentManagerId))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((e) => ({ id: e.id, label: e.status === 'inactive' ? `${e.name} (inactive)` : e.name }));
+}
+
+/** The options whose label contains the typed text, any capitals; all of them for a blank search. The chosen one is always kept. */
+export function searchReportsTo(options: ReportsToOption[], query: string, chosenId: string): ReportsToOption[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return options;
+  return options.filter((o) => o.id === chosenId || o.label.toLowerCase().includes(needle));
+}
+
+/** What the form sends for the reporting line: nothing when it is as it was. `''` means nobody. */
+export function reportsToChange(initial: string | null, chosen: string): { changed: boolean; managerId: string | null } {
+  const managerId = chosen === '' ? null : chosen;
+  return { changed: managerId !== initial, managerId };
+}
+
+/** The sentence the form shows before sending, or null when the choice is fine on the rows loaded. */
+export function reportsToProblem(employeeId: string | null, chosen: string, employees: Employee[]): string | null {
+  if (!employeeId || !chosen) return null;
+  if (!wouldLoop(employeeId, chosen, employees)) return null;
+  const name = employees.find((e) => e.id === chosen)?.name;
+  return name ? reportsToLoop(name) : REPORTS_TO_REFUSALS.EMP_BAD_MANAGER;
+}
+
+/** A refusal from setReportsToAction, worded for the form: the loop sentence gets the chosen manager's name. */
+export function reportsToRefusal(error: string, chosen: string, employees: Employee[]): string {
+  if (error !== REPORTS_TO_REFUSALS.EMP_BAD_MANAGER) return error;
+  const name = employees.find((e) => e.id === chosen)?.name;
+  return name ? reportsToLoop(name) : error;
+}
+
+/** What the list shows per employee: who they report to, and whether they are someone's manager. */
+export type DirectoryExtras = { reportsTo: string | null; manages: boolean };
+
+export function directoryExtras(employees: Employee[]): Map<string, DirectoryExtras> {
+  const managers = managerIdsOf(employees);
+  return new Map(
+    employees.map((e) => [e.id, { reportsTo: managerLabel(e, employees), manages: managers.has(e.id) }]),
+  );
+}
+
+/** What the Employees screen offers this viewer. */
+export type EmployeesControls = { canEdit: boolean; reportsToField: boolean; myTeamFilter: boolean };
+
+export function employeesControls(viewer: PeopleViewer | null | undefined): EmployeesControls {
+  const canEdit = showsOwnerDocumentControls(viewer);
+  const myTeamFilter =
+    !canEdit && viewer != null && !viewer.isHr && !viewer.isDemo && viewer.managesTeam === true && !!viewer.employeeId;
+  return { canEdit, reportsToField: canEdit, myTeamFilter };
+}
+
+/** The order the table saves an edit in, and what the person is told when a later step is refused. */
+export const SAVE_ORDER = ['details', 'reports_to', 'entitlements'] as const;
+
+export function saveFailure(step: 'reports_to' | 'entitlements', reason: string): string {
+  return step === 'reports_to'
+    ? REPORTS_TO_SAVED_NOT_LINE(reason)
+    : `The employee was saved, but an entitlement was not: ${reason}`;
 }
 
 /** What the form holds: every field as the text or choice on screen. `''` means empty. */

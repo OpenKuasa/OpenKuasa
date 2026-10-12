@@ -1,12 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import {
+  SAVE_ORDER,
   buildEmployeesModel,
+  directoryExtras,
   employeeFormValues,
+  employeesControls,
   filterEmployees,
   linkableMembers,
+  reportsToChange,
+  reportsToOptions,
+  reportsToProblem,
+  reportsToRefusal,
+  saveFailure,
+  searchReportsTo,
   suggestedMember,
   toEmployeeInput,
 } from '@/lib/people/employees';
+import { showsOwnerDocumentControls } from '@/lib/people/documents-screens';
+import { REPORTS_TO_REFUSALS, reportsToLoop } from '@/lib/people/reporting-refusals';
+import type { PeopleViewer } from '@/lib/people/types';
 import { entitlementChanges, entitlementValues } from '@/components/people/entitlements-fields';
 import { createSeedPeopleData } from '@/lib/people/seed';
 import { todayInMalaysia } from '@/lib/people/dates';
@@ -59,8 +71,153 @@ describe('buildEmployeesModel', () => {
   });
 });
 
+const emp = (id: string, name: string, reports_to: string | null, status: 'active' | 'inactive' = 'active'): Employee =>
+  person({ id, name, reports_to, status, department_id: null });
+const line = [
+  emp('a', 'Aminah', null),
+  emp('b', 'Bakar', 'a'),
+  emp('c', 'Chong', 'b'),
+  emp('d', 'Devi', 'a'),
+  emp('z', 'Zul', null, 'inactive'),
+  emp('y', 'Yati', 'z'),
+];
+
+describe('reportsToOptions', () => {
+  const ids = (list: { id: string }[]) => list.map((o) => o.id);
+  it('offers active employees but the person, by name', () => {
+    expect(ids(reportsToOptions(line, 'b', 'a'))).toEqual(['a', 'c', 'd', 'y']);
+  });
+  it('keeps an inactive current manager, labelled', () => {
+    const options = reportsToOptions(line, 'y', 'z');
+    expect(ids(options)).toEqual(['a', 'b', 'c', 'd', 'z']);
+    expect(options.find((o) => o.id === 'z')?.label).toBe('Zul (inactive)');
+  });
+  it('offers everyone active for a new employee', () => {
+    expect(ids(reportsToOptions(line, null, null))).toEqual(['a', 'b', 'c', 'd', 'y']);
+  });
+  it('does not invent a manager that is not in the rows', () => {
+    expect(ids(reportsToOptions(line, 'b', 'gone'))).toEqual(['a', 'c', 'd', 'y']);
+  });
+  it('is empty with no rows', () => {
+    expect(reportsToOptions([], 'b', null)).toEqual([]);
+  });
+});
+
+describe('searchReportsTo', () => {
+  const options = reportsToOptions(line, null, null);
+  it('gives all for a blank search', () => {
+    expect(searchReportsTo(options, '', '')).toHaveLength(5);
+    expect(searchReportsTo(options, '   ', '')).toHaveLength(5);
+  });
+  it('matches any capitals, ignoring outer spaces', () => {
+    expect(searchReportsTo(options, 'am', '').map((o) => o.id)).toEqual(['a']);
+    expect(searchReportsTo(options, 'AM', '').map((o) => o.id)).toEqual(['a']);
+    expect(searchReportsTo(options, '  am ', '').map((o) => o.id)).toEqual(['a']);
+  });
+  it('gives nothing for no match, but never drops the chosen one', () => {
+    expect(searchReportsTo(options, 'zzz', '')).toEqual([]);
+    expect(searchReportsTo(options, 'zzz', 'a').map((o) => o.id)).toEqual(['a']);
+  });
+});
+
+describe('reportsToChange', () => {
+  it.each([
+    [null, '', { changed: false, managerId: null }],
+    ['a', 'a', { changed: false, managerId: 'a' }],
+    [null, 'a', { changed: true, managerId: 'a' }],
+    ['a', '', { changed: true, managerId: null }],
+    ['a', 'd', { changed: true, managerId: 'd' }],
+  ])('%s -> %s', (initial, chosen, expected) => {
+    expect(reportsToChange(initial, chosen)).toEqual(expected);
+  });
+});
+
+describe('reportsToProblem and reportsToRefusal', () => {
+  it('names the loop for a chain of 1, 2 and 3', () => {
+    expect(reportsToProblem('a', 'b', line)).toBe(reportsToLoop('Bakar'));
+    expect(reportsToProblem('a', 'b', line)).toBe(
+      'That would make a loop: Bakar already reports to this person, directly or through others.',
+    );
+    expect(reportsToProblem('a', 'c', line)).toBe(reportsToLoop('Chong'));
+    expect(reportsToProblem('a', 'a', line)).toBe(reportsToLoop('Aminah'));
+  });
+  it('is null when the choice is fine', () => {
+    expect(reportsToProblem('c', 'a', line)).toBeNull();
+    expect(reportsToProblem('b', '', line)).toBeNull();
+    expect(reportsToProblem(null, 'a', line)).toBeNull();
+  });
+  it("words the database's loop refusal with the chosen name", () => {
+    expect(reportsToRefusal(REPORTS_TO_REFUSALS.EMP_BAD_MANAGER, 'b', line)).toBe(reportsToLoop('Bakar'));
+    expect(reportsToRefusal(REPORTS_TO_REFUSALS.EMP_BAD_MANAGER, 'gone', line)).toBe(REPORTS_TO_REFUSALS.EMP_BAD_MANAGER);
+  });
+  it('leaves any other text as it is', () => {
+    expect(reportsToRefusal(REPORTS_TO_REFUSALS.EMP_NOT_ALLOWED, 'b', line)).toBe(REPORTS_TO_REFUSALS.EMP_NOT_ALLOWED);
+    expect(reportsToRefusal('Something else.', 'b', line)).toBe('Something else.');
+  });
+});
+
+describe('directoryExtras', () => {
+  const extras = directoryExtras([...line, emp('q', 'Qadir', 'missing')]);
+  it('says who each reports to and who is a manager', () => {
+    expect(extras.get('a')).toEqual({ reportsTo: null, manages: true });
+    expect(extras.get('b')).toEqual({ reportsTo: 'Aminah', manages: true });
+    expect(extras.get('c')).toEqual({ reportsTo: 'Bakar', manages: false });
+    expect(extras.get('y')).toEqual({ reportsTo: 'Zul (inactive)', manages: false });
+    expect(extras.get('z')).toEqual({ reportsTo: null, manages: true });
+    expect(extras.get('q')).toEqual({ reportsTo: null, manages: false });
+  });
+});
+
+describe('filterEmployees, My team', () => {
+  const base = { query: '', departmentId: 'all', status: 'all' as const, team: 'mine' as const };
+  it('keeps the viewer\'s direct reports', () => {
+    expect(filterEmployees(line, base, 'a').map((e) => e.id)).toEqual(['b', 'd']);
+  });
+  it('is empty with no viewer employee', () => {
+    expect(filterEmployees(line, base, null)).toEqual([]);
+    expect(filterEmployees(line, base)).toEqual([]);
+  });
+  it('combines with the other filters', () => {
+    expect(filterEmployees(line, { ...base, query: 'dev' }, 'a').map((e) => e.id)).toEqual(['d']);
+    const dept = [{ ...line[1], department_id: 'x' }, line[3]];
+    expect(filterEmployees(dept, { ...base, departmentId: 'x' }, 'a').map((e) => e.id)).toEqual(['b']);
+    const gone = [{ ...line[1], status: 'inactive' as const }, line[3]];
+    expect(filterEmployees(gone, { ...base, status: 'active' }, 'a').map((e) => e.id)).toEqual(['d']);
+  });
+});
+
+describe('employeesControls', () => {
+  const v = (over: Partial<PeopleViewer>): PeopleViewer => ({ employeeId: 'e1', isHr: false, isDemo: false, ...over });
+  const none = { canEdit: false, reportsToField: false, myTeamFilter: false };
+  const cases: [string, PeopleViewer | null | undefined, { canEdit: boolean; reportsToField: boolean; myTeamFilter: boolean }][] = [
+    ['owner', v({ isHr: true, isOwner: true }), { canEdit: true, reportsToField: true, myTeamFilter: false }],
+    ['admin', v({ isHr: true }), { canEdit: true, reportsToField: true, myTeamFilter: false }],
+    ['manager', v({ managesTeam: true }), { canEdit: false, reportsToField: false, myTeamFilter: true }],
+    ['member', v({}), none],
+    ['unlinked manager', v({ managesTeam: true, employeeId: null }), none],
+    ['demo', v({ isDemo: true }), none],
+    ['demo hr', v({ isDemo: true, isHr: true }), none],
+    ['null', null, none],
+    ['undefined', undefined, none],
+  ];
+  it.each(cases)('%s', (_name, viewer, expected) => {
+    expect(employeesControls(viewer)).toEqual(expected);
+    expect(employeesControls(viewer).canEdit).toBe(showsOwnerDocumentControls(viewer));
+  });
+});
+
+describe('the order of an edit', () => {
+  it('saves details, then the line, then entitlements', () => {
+    expect(SAVE_ORDER).toEqual(['details', 'reports_to', 'entitlements']);
+  });
+  it('words a later refusal', () => {
+    expect(saveFailure('reports_to', 'x')).toBe('The employee was saved, but "Reports to" was not: x');
+    expect(saveFailure('entitlements', 'x')).toBe('The employee was saved, but an entitlement was not: x');
+  });
+});
+
 describe('filterEmployees', () => {
-  const all = { query: '', departmentId: 'all', status: 'all' as const };
+  const all = { query: '', departmentId: 'all', status: 'all' as const, team: 'all' as const };
   it('searches name, email, employee number and designation in any letter case', () => {
     expect(filterEmployees(employees, { ...all, query: 'AISYAH' }).map((e) => e.name)).toEqual(['Aisyah Rahim']);
     expect(filterEmployees(employees, { ...all, query: 'emp-003' }).map((e) => e.name)).toEqual(['Ahmad Zaki']);
@@ -114,6 +271,15 @@ describe('the employee form', () => {
       error: 'Salary must be a number, such as 3500.',
     });
     expect(toEmployeeInput({ ...employeeFormValues(null, null), name: 'A', base_salary: '-5' }, { includePrivate: true }).ok).toBe(false);
+  });
+
+  it('never carries the reporting line in the table update', () => {
+    const values = employeeFormValues(employees[0], null);
+    const result = toEmployeeInput(values, { includePrivate: false });
+    for (const key of ['reports_to', 'manager_id', 'is_manager']) {
+      expect(values).not.toHaveProperty(key);
+      expect(result.ok && key in result.input).toBe(false);
+    }
   });
 
   it('refuses an empty name', () => {

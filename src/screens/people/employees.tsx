@@ -7,7 +7,7 @@ import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
 import { todayInMalaysia } from '@/lib/people/dates';
 import { employeeDocumentRows, showsOwnerDocumentControls } from '@/lib/people/documents-screens';
-import { buildEmployeesModel } from '@/lib/people/employees';
+import { buildEmployeesModel, employeesControls } from '@/lib/people/employees';
 import { type GoalLike, goalsByEmployee } from '@/lib/people/goals-training';
 import { type WorkspaceMember, listWorkspaceMembers } from '@/lib/people/members';
 import { DEPARTMENT_COLORS, LOAD_FAILED, Muted, loadPeople } from './parts';
@@ -60,7 +60,8 @@ export default async function EmployeesScreen() {
   });
 
   // Owner or admin, and not the demo workspace (the server refuses changes there). The actions and the database both check again.
-  const canEdit = showsOwnerDocumentControls(viewer);
+  const controls = employeesControls(viewer);
+  const canEdit = controls.canEdit;
   const totals = model?.totals;
   const departmentMix: Slice[] = (model?.by_department ?? []).map((d, index) => ({
     key: d.department,
@@ -173,6 +174,8 @@ export default async function EmployeesScreen() {
               documents={model.documents}
               orgId={model.orgId}
               canEdit={canEdit}
+              controls={controls}
+              viewerEmployeeId={viewer.employeeId}
             />
           )}
         </BentoCard>
