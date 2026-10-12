@@ -268,9 +268,9 @@ begin
   values (org, e1, 'confirmation', 'Confirmation of employment', 'issued', current_date),
          (org, e1, 'warning', 'Not sent yet', 'draft', null),
          (org, e2, 'confirmation', 'Confirmation of employment', 'issued', current_date);
-  -- Letter templates: the starter set a new workspace is given, one per letter type.
+  -- Letter templates: the starter set a new workspace is given, two per letter type (English and Bahasa Malaysia).
   select count(*), count(distinct letter_type) into n, n2 from public.hr_letter_templates where org_id = org;
-  if n <> 6 or n2 <> 6 then fails := array_append(fails, format('the new workspace was given %s starter templates of %s types, expected 6 of 6', n, n2)); end if;
+  if n <> 12 or n2 <> 6 then fails := array_append(fails, format('the new workspace was given %s starter templates of %s types, expected 12 of 6', n, n2)); end if;
   -- Reviews: one released and one still a draft for member one, one released for member two.
   insert into public.hr_reviews (org_id, employee_id, period, rating, score, status, released_at)
   values (org, e1, 'H1 2025', 'meets', 3.5, 'released', now()),
@@ -366,8 +366,8 @@ begin
   end loop;
   foreach t in array hr_only loop
     execute format('select count(*) from public.%I where org_id = %L', t, org) into n;
-    -- One of everything, but two payroll runs (the paid one and the draft) and the six starter templates.
-    n2 := case t when 'hr_payroll_runs' then 2 when 'hr_letter_templates' then 6 else 1 end;
+    -- One of everything, but two payroll runs (the paid one and the draft) and the twelve starter templates.
+    n2 := case t when 'hr_payroll_runs' then 2 when 'hr_letter_templates' then 12 else 1 end;
     if n <> n2 then fails := array_append(fails, format('the admin reads %s rows of %s, expected %s', n, t, n2)); end if;
   end loop;
   -- Both announcements, the draft included; and of the read marks only their own.
