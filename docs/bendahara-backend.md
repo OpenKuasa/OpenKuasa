@@ -118,7 +118,7 @@ four expense actions (`saveExpenseAction`, `approveExpenseAction`,
 `rejectExpenseAction`, `deleteExpenseAction`) refresh `EXPENSE_PATHS`:
 Expenses, Receipts Inbox (which names the expense a receipt is tied to),
 Payment Vouchers and Banking (which name the category of the expenses a
-voucher pays), then Chart of Accounts and Journals (`LEDGER_PATHS`): an
+voucher pays), then Chart of Accounts, Journals and Reports (`LEDGER_PATHS`): an
 approved expense is two lines of the books, so approving or rejecting one
 moves them. Approve and reject are refused to anyone who may not sign off,
 before anything is read, in the expense's own sentence. Payment Vouchers has

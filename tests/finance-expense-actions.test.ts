@@ -51,6 +51,7 @@ const PATHS = [
   '/finance/banking',
   '/finance/chart-of-accounts',
   '/finance/journals',
+  '/finance/reports',
 ];
 const SEEN = '2026-10-12T09:15:22.123456+00:00';
 /** What the row showed when the owner pressed Approve or Reject. */
