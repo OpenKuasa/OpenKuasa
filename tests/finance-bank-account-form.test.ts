@@ -6,6 +6,9 @@ import {
   bankAccountRows,
   bankAccountArchiveEffect,
   bankAccountArchivedNote,
+  bankAccountOpeningChanged,
+  bankAccountRestoredNote,
+  bankAccountSavedNote,
   editBankAccountForm,
   lastFour,
   newBankAccountForm,
@@ -51,6 +54,50 @@ describe('the form', () => {
     expect(editBankAccountForm(account({ bank_name: null })).bankName).toBe('');
     expect(editBankAccountForm(account()).accountNo).toBe('');
     expect(editBankAccountForm(account()).opening).toBe('');
+  });
+
+  it('dates a balance set for the first time from today, and keeps the date of one that is there', () => {
+    expect(editBankAccountForm(account(), undefined, '2026-10-12').openingDate).toBe('2026-10-12');
+    expect(editBankAccountForm(account({ opening_balance: 300 }), undefined, '2026-10-12').openingDate).toBe('2026-09-30');
+    expect(editBankAccountForm(account()).openingDate).toBe('2026-09-30');
+  });
+});
+
+describe('bankAccountOpeningChanged', () => {
+  const base = { ...newBankAccountForm('2026-10-12'), name: 'Savings' };
+  it('is true for a new account with a balance, false for none or for someone who cannot sign off', () => {
+    expect(bankAccountOpeningChanged({ ...base, opening: '1500' }, null, true)).toBe(true);
+    expect(bankAccountOpeningChanged({ ...base, opening: '-1' }, null, true)).toBe(true);
+    expect(bankAccountOpeningChanged({ ...base, opening: '' }, null, true)).toBe(false);
+    expect(bankAccountOpeningChanged({ ...base, opening: '1500' }, null, false)).toBe(false);
+  });
+
+  it('is true on a change only when the balance, or the date of a balance, differs', () => {
+    const held = account({ opening_balance: 300 });
+    const form = editBankAccountForm(held);
+    expect(bankAccountOpeningChanged(form, held, true)).toBe(false);
+    expect(bankAccountOpeningChanged({ ...form, opening: '0' }, held, true)).toBe(true);
+    expect(bankAccountOpeningChanged({ ...form, opening: '300.01' }, held, true)).toBe(true);
+    expect(bankAccountOpeningChanged({ ...form, openingDate: '2026-10-01' }, held, true)).toBe(true);
+    const empty = account();
+    expect(bankAccountOpeningChanged({ ...editBankAccountForm(empty), openingDate: '2026-10-01' }, empty, true)).toBe(false);
+  });
+});
+
+describe('what the screen says after a save', () => {
+  it('names the books only when an opening balance changed', () => {
+    expect(bankAccountSavedNote('Savings', true, false)).toBe('Savings is added.');
+    expect(bankAccountSavedNote('Savings', false, false)).toBe('Savings is saved.');
+    expect(bankAccountSavedNote('Savings', false, true)).toBe(
+      'Savings is saved. Its opening balance changed, so Total cash and the Chart of Accounts changed with it.',
+    );
+    expect(bankAccountSavedNote('Savings', true, true)).toContain('Savings is added. Its opening balance changed');
+  });
+
+  it('says an account was restored', () => {
+    expect(bankAccountRestoredNote('Savings')).toBe(
+      'Savings is restored. It is offered on payment forms again, and so is its account in the Chart of Accounts.',
+    );
   });
 });
 
@@ -115,10 +162,14 @@ describe('bankAccountFormError', () => {
 });
 
 describe('lastFour', () => {
-  it('shows the end of a number and none of a short one', () => {
+  it('shows the end of a number of eight characters or more and nothing of a shorter one', () => {
     expect(lastFour('8001234567')).toBe('•••• 4567');
     expect(lastFour('8001-2345 67')).toBe('•••• 4567');
-    expect(lastFour('1234')).toBe('••••');
+    expect(lastFour('12345678')).toBe('•••• 5678');
+    expect(lastFour('1234567')).toBeNull();
+    expect(lastFour('12345')).toBeNull();
+    expect(lastFour('1234')).toBeNull();
+    expect(lastFour('GB82 WEST 1234 5698')).toBe('•••• 5698');
     expect(lastFour('')).toBeNull();
     expect(lastFour(undefined)).toBeNull();
   });
@@ -138,7 +189,7 @@ describe('bankAccountRows', () => {
 
   it('shows the end of a number only to someone who was given the numbers', () => {
     const numbers = { a: '8001234567', b: '5001', c: '999999' };
-    expect(bankAccountRows(accounts, numbers).map((r) => r.bank)).toEqual(['Maybank · •••• 4567', '••••', 'Cash', 'Maybank']);
+    expect(bankAccountRows(accounts, numbers).map((r) => r.bank)).toEqual(['Maybank · •••• 4567', '—', 'Cash', 'Maybank']);
     expect(bankAccountRows(accounts).map((r) => r.bank)).toEqual(['Maybank', '—', 'Cash', 'Maybank']);
   });
 
@@ -161,8 +212,11 @@ describe('the row menu and the archive question', () => {
     expect(bankAccountArchiveEffect(account({ balance: 925 }))).toContain('It still holds RM 925.00, which stays in Total cash.');
     expect(bankAccountArchiveEffect(account({ balance: -5, to_be_paid: 60 }))).toBe(
       'It will no longer be offered on payment forms, and its account in the Chart of Accounts is archived with it. Its movements stay, and it can be restored. ' +
-        'It still holds RM -5.00, which stays in Total cash. RM 60.00 is still to be paid from it: pay or delete that first.',
+        'It is overdrawn by RM 5.00, which stays in Total cash. ' +
+        'RM 60.00 is still to be paid from it. Pay, reject or delete those payments first; ones waiting for approval hold it too.',
     );
+    expect(bankAccountArchiveEffect(account({ to_be_paid: 60 }))).not.toContain('holds');
+    expect(bankAccountArchiveEffect(account({ balance: -5 }))).not.toContain('RM -');
   });
 
   it('says where an archived account went', () => {

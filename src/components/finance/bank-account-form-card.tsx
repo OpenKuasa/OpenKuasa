@@ -8,7 +8,15 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { type BankAccountForm, bankAccountFormError, bankAccountPayload, editBankAccountForm, newBankAccountForm } from '@/lib/finance/bank-account-form';
+import {
+  type BankAccountForm,
+  bankAccountFormError,
+  bankAccountOpeningChanged,
+  bankAccountPayload,
+  bankAccountSavedNote,
+  editBankAccountForm,
+  newBankAccountForm,
+} from '@/lib/finance/bank-account-form';
 import { BANK_ACCOUNT_BANK_MAX, BANK_ACCOUNT_NAME_MAX, BANK_ACCOUNT_NUMBER_MAX, type BankAccountKind, type SavedBankAccount } from '@/lib/finance/bank-accounts';
 import type { BankAccountRow } from '@/lib/finance/banking';
 import { rm } from '@/lib/finance/format';
@@ -33,6 +41,7 @@ export function BankAccountFormCard({
   canSignOff,
   actions,
   onClose,
+  onSaved,
 }: {
   /** The account being changed, or null for a new one. */
   editing: BankAccountRow | null;
@@ -43,9 +52,13 @@ export function BankAccountFormCard({
   canSignOff: boolean;
   actions: BankAccountFormActions;
   onClose: () => void;
+  /** Called with the sentence to show once the account is saved; the form is then closed by the caller. */
+  onSaved: (note: string) => void;
 }) {
   const id = useId();
-  const [form, setForm] = useState<BankAccountForm>(() => (editing ? editBankAccountForm(editing, accountNo) : newBankAccountForm(today)));
+  const [form, setForm] = useState<BankAccountForm>(() =>
+    editing ? editBankAccountForm(editing, accountNo, today) : newBankAccountForm(today),
+  );
   const save = useFinanceAction();
   const set = (patch: Partial<BankAccountForm>) => setForm((f) => ({ ...f, ...patch }));
   const atBank = form.kind === 'bank';
@@ -58,7 +71,11 @@ export function BankAccountFormCard({
       return;
     }
     const payload = bankAccountPayload(form, canSignOff);
-    save.run(() => (editing ? actions.update(payload) : actions.create(payload)), onClose);
+    const openingChanged = bankAccountOpeningChanged(form, editing, canSignOff);
+    save.run(
+      () => (editing ? actions.update(payload) : actions.create(payload)),
+      (saved) => onSaved(bankAccountSavedNote(saved.name, !editing, openingChanged)),
+    );
   };
 
   return (
@@ -80,13 +97,21 @@ export function BankAccountFormCard({
             autoFocus
             data-finance-focus
             required
+            aria-describedby={editing ? `${id}-name-help` : undefined}
             onChange={(e) => set({ name: e.target.value })}
           />
+          {editing ? (
+            <p id={`${id}-name-help`} className="text-xs text-muted-foreground">
+              Renaming it also renames its account in the Chart of Accounts, unless that one was renamed there.
+            </p>
+          ) : null}
         </div>
         <div className="space-y-1.5 md:col-span-3">
-          <Label htmlFor={`${id}-kind`}>Kind</Label>
+          <Label id={`${id}-kind-label`} htmlFor={editing ? undefined : `${id}-kind`}>
+            Kind
+          </Label>
           {editing ? (
-            <p id={`${id}-kind`} className="flex h-9 items-center text-sm text-muted-foreground">
+            <p role="group" aria-labelledby={`${id}-kind-label`} className="flex h-9 items-center text-sm text-muted-foreground">
               {atBank ? 'Bank account' : 'Cash'} · set when it was added
             </p>
           ) : (
@@ -120,7 +145,6 @@ export function BankAccountFormCard({
                 id={`${id}-number`}
                 value={form.accountNo}
                 maxLength={BANK_ACCOUNT_NUMBER_MAX}
-                inputMode="numeric"
                 autoComplete="off"
                 className="font-mono"
                 onChange={(e) => set({ accountNo: e.target.value })}
@@ -132,11 +156,10 @@ export function BankAccountFormCard({
           <>
             <div className="space-y-1.5 md:col-span-4">
               <Label htmlFor={`${id}-opening`}>Opening balance (RM)</Label>
-              {/* A text box, not a number box: a number box hands back nothing at all for "1,500", so the form could not say what is wrong. */}
+              {/* A text box, not a number box: a number box hands back nothing at all for "1,500", so the form could not say what is wrong. No inputMode: a phone's decimal keypad has no minus sign, and an overdraft needs one. */}
               <Input
                 id={`${id}-opening`}
                 value={form.opening}
-                inputMode="decimal"
                 placeholder="0.00"
                 autoComplete="off"
                 aria-describedby={`${id}-opening-help`}

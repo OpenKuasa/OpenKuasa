@@ -12,7 +12,8 @@ import type { FinanceWriteContext } from './result';
 /**
  * One account, archived ones included, with what the database works out for it. It has the bank's name and no
  * account number: `finance_accounts.account_no` is not readable through the table or this view, and a writer who
- * needs it asks `finance_account_numbers(target_org)`. Banking does not show one.
+ * needs it asks `finance_account_numbers(target_org)`: the Banking loader does so for someone who may write, who sees the
+ * end of each number in the Accounts table and the whole of one in the account form.
  */
 export type BankAccountRow = {
   id: string;

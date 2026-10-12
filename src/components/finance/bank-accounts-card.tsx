@@ -7,7 +7,7 @@ import { ConfirmRow } from '@/components/finance/confirm-row';
 import { RowMenu, type RowMenuItem } from '@/components/finance/row-menu';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { type BankAccountAction, bankAccountActions, bankAccountRows, bankAccountArchiveEffect, bankAccountArchivedNote } from '@/lib/finance/bank-account-form';
+import { type BankAccountAction, bankAccountActions, bankAccountRows, bankAccountArchiveEffect, bankAccountArchivedNote, bankAccountRestoredNote } from '@/lib/finance/bank-account-form';
 import type { SavedBankAccount } from '@/lib/finance/bank-accounts';
 import type { BankAccountRow } from '@/lib/finance/banking';
 import type { FinResult } from '@/lib/finance/result';
@@ -72,7 +72,10 @@ export function BankAccountsCard({ accounts, writer }: { accounts: BankAccountRo
           icon: ArchiveRestore,
           onSelect: () => {
             setNote(null);
-            restore.run(() => writer!.setActive({ id: account.id, active: true }));
+            restore.run(
+              () => writer!.setActive({ id: account.id, active: true }),
+              (saved) => setNote(bankAccountRestoredNote(saved.name)),
+            );
           },
         };
     }

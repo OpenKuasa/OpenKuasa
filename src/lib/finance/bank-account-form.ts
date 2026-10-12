@@ -33,8 +33,12 @@ export function newBankAccountForm(today: string): BankAccountForm {
   return { kind: 'bank', name: '', bankName: '', accountNo: '', opening: '', openingDate: today };
 }
 
-/** The form for an account being changed. `accountNo` is its number, which only someone who may write is given. */
-export function editBankAccountForm(account: BankAccountRow, accountNo?: string): BankAccountForm {
+/**
+ * The form for an account being changed. `accountNo` is its number, which only someone who may write is given.
+ * `today` is the person's own date: an account with no opening balance yet is dated from it, not from the day it was
+ * added, since a balance first set now is a balance as at now.
+ */
+export function editBankAccountForm(account: BankAccountRow, accountNo?: string, today?: string): BankAccountForm {
   return {
     id: account.id,
     kind: account.kind,
@@ -42,7 +46,7 @@ export function editBankAccountForm(account: BankAccountRow, accountNo?: string)
     bankName: account.bank_name ?? '',
     accountNo: accountNo ?? '',
     opening: account.opening_balance === 0 ? '' : String(account.opening_balance),
-    openingDate: account.opening_date,
+    openingDate: account.opening_balance === 0 && today ? today : account.opening_date,
   };
 }
 
@@ -78,13 +82,12 @@ export function bankAccountFormError(form: BankAccountForm, canSignOff: boolean)
 
 /**
  * The end of an account number, for a list: "•••• 4567". Spaces and dashes
- * are not counted. A number of four characters or fewer shows none of
- * itself, since its end would be all of it.
+ * are not counted. A number shorter than eight characters shows nothing of
+ * itself: four of five would be most of it.
  */
 export function lastFour(accountNo: string | undefined): string | null {
   const plain = (accountNo ?? '').replace(/[\s-]/g, '');
-  if (plain === '') return null;
-  return plain.length > 4 ? `•••• ${plain.slice(-4)}` : '••••';
+  return plain.length >= 8 ? `•••• ${plain.slice(-4)}` : null;
 }
 
 export type BankAccountListRow = {
@@ -139,12 +142,39 @@ export function bankAccountActions(account: { active: boolean }): BankAccountAct
  */
 export function bankAccountArchiveEffect(account: BankAccountRow): string {
   const parts = ['It will no longer be offered on payment forms, and its account in the Chart of Accounts is archived with it. Its movements stay, and it can be restored.'];
-  if (account.balance !== 0) parts.push(`It still holds ${rm(account.balance)}, which stays in Total cash.`);
-  if (account.to_be_paid > 0) parts.push(`${rm(account.to_be_paid)} is still to be paid from it: pay or delete that first.`);
+  if (account.balance > 0) parts.push(`It still holds ${rm(account.balance)}, which stays in Total cash.`);
+  if (account.balance < 0) parts.push(`It is overdrawn by ${rm(-account.balance)}, which stays in Total cash.`);
+  if (account.to_be_paid > 0) {
+    parts.push(
+      `${rm(account.to_be_paid)} is still to be paid from it. Pay, reject or delete those payments first; ones waiting for approval hold it too.`,
+    );
+  }
   return parts.join(' ');
 }
 
 /** What the screen says once an account was archived, when it then drops out of the tiles. */
 export function bankAccountArchivedNote(name: string): string {
   return `${name} is archived. It stays in the Accounts table, where it can be restored.`;
+}
+
+/** What the screen says once an account was restored. */
+export function bankAccountRestoredNote(name: string): string {
+  return `${name} is restored. It is offered on payment forms again, and so is its account in the Chart of Accounts.`;
+}
+
+/**
+ * Whether saving this form sets or changes an opening balance in the books: only an owner or admin sends one, and
+ * only a balance other than none, or a different one from the account's, moves Total cash and the ledger.
+ */
+export function bankAccountOpeningChanged(form: BankAccountForm, editing: BankAccountRow | null, canSignOff: boolean): boolean {
+  if (!canSignOff) return false;
+  const typed = form.opening.trim() === '' ? 0 : (typedNumber(form.opening) ?? Number.NaN);
+  if (!editing) return typed !== 0;
+  return typed !== editing.opening_balance || (typed !== 0 && form.openingDate !== editing.opening_date);
+}
+
+/** What the screen says after an account was added or changed, naming what else changed when an opening balance did. */
+export function bankAccountSavedNote(name: string, added: boolean, openingChanged: boolean): string {
+  const first = added ? `${name} is added.` : `${name} is saved.`;
+  return openingChanged ? `${first} Its opening balance changed, so Total cash and the Chart of Accounts changed with it.` : first;
 }

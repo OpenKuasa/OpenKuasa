@@ -8,6 +8,7 @@ import { AreaTrend, RadialGauge, type Series } from '@/components/charts';
 import { BankAccountFormCard, type BankAccountFormActions } from '@/components/finance/bank-account-form-card';
 import { BankAccountsCard } from '@/components/finance/bank-accounts-card';
 import { downloadCsv } from '@/components/finance/download-csv';
+import { SavedNoteCard } from '@/components/finance/saved-note-card';
 import { useLocalToday } from '@/components/finance/use-local-today';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
@@ -94,6 +95,8 @@ export function BankingView({
   const [filter, setFilter] = useState<BankFilter>('all');
   const [showAll, setShowAll] = useState(false);
   const [form, setForm] = useState<OpenForm>(null);
+  /** What was just saved on the account form, until it is closed or another form opens. */
+  const [saved, setSaved] = useState<{ title: string; note: string } | null>(null);
 
   const view = bankingView(accounts, rows, today);
   const ledger = withRunningBalance(accounts, rows);
@@ -116,7 +119,10 @@ export function BankingView({
                 aria-expanded={form !== null && form.editing === null}
                 disabled={form !== null}
                 // The date is the person's own, taken when the form opens, never the server's.
-                onClick={() => setForm({ today: localIsoDate(new Date()), editing: null })}
+                onClick={() => {
+                  setSaved(null);
+                  setForm({ today: localIsoDate(new Date()), editing: null });
+                }}
               >
                 <Plus className="size-4" />
                 Add account
@@ -136,7 +142,16 @@ export function BankingView({
             canSignOff={writer.canSignOff}
             actions={writer.actions}
             onClose={() => setForm(null)}
+            onSaved={(note) => {
+              setSaved({ title: form.editing ? 'Account saved' : 'Account added', note });
+              setForm(null);
+            }}
           />
+        ) : null}
+        {writer && !form && saved ? (
+          <SavedNoteCard title={saved.title} subtitle="Banking" onClose={() => setSaved(null)}>
+            {saved.note}
+          </SavedNoteCard>
         ) : null}
         <BentoCard tone="primary" className="col-span-2 md:col-span-6 xl:col-span-3">
           <BentoStat label={view.total.label} value={view.total.value} delta={view.total.delta} deltaTone="flat" onPrimary />
@@ -181,7 +196,10 @@ export function BankingView({
               ? {
                   numbers: writer.numbers,
                   setActive: writer.actions.setActive,
-                  onEdit: (account) => setForm({ today: localIsoDate(new Date()), editing: account }),
+                  onEdit: (account) => {
+                    setSaved(null);
+                    setForm({ today: localIsoDate(new Date()), editing: account });
+                  },
                   locked: form !== null,
                 }
               : undefined
