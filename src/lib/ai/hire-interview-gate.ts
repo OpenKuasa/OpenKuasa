@@ -267,7 +267,7 @@ function linksInReady(ready: string): string[] {
     return blank(whole);
   });
   for (const match of rest.matchAll(BARE_HOST)) {
-    const [whole, labels, ending, port, after] = match;
+    const [whole, labels, ending, port] = match;
     const at = match.index ?? 0;
     const link = whole.replace(CLOSING, '');
     // A port, or a path, a query or a fragment with something in it: "evil.ru?id=5", not "ok.Boleh?".
