@@ -19,6 +19,7 @@
  * Railway, this function is what has to change (to that proxy's own header).
  */
 import { isIP } from 'node:net';
+import { headers } from 'next/headers';
 
 /** The header Railway's edge sets to the client's address. */
 export const CLIENT_ADDRESS_HEADER = 'x-real-ip';
@@ -82,7 +83,6 @@ export function clientKey(address: string | null): { key: string; known: boolean
  */
 export async function requestClientAddress(): Promise<string | null> {
   try {
-    const { headers } = await import('next/headers');
     const list = await headers();
     return clientAddressFrom((name) => list.get(name));
   } catch {
