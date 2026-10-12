@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 const DIR = join(process.cwd(), 'supabase/migrations');
-const DOCUMENTS = '20261102090000_people_documents_writes.sql';
+const DOCUMENTS = '20261102090050_people_documents_writes.sql';
 const LETTERS = '20261102090100_people_letters_writes.sql';
 const SEED = '20261102090200_people_documents_demo_seed.sql';
 const FILES = [DOCUMENTS, LETTERS, SEED];
@@ -102,7 +102,7 @@ describe('Lekiu letters and documents migrations', () => {
     expect(at.every((i) => i > -1)).toBe(true);
     expect(at).toEqual([at[0], at[0] + 1, at[0] + 2]);
     for (const f of FILES) expect(files.filter((x) => x.slice(0, 14) === f.slice(0, 14)), f).toEqual([f]);
-    expect(FILES.map((f) => f.slice(0, 14))).toEqual(['20261102090000', '20261102090100', '20261102090200']);
+    expect(FILES.map((f) => f.slice(0, 14))).toEqual(['20261102090050', '20261102090100', '20261102090200']);
   });
 
   test('documents: old rows dealt with as the type check is replaced, then the columns and checks of the spec', () => {

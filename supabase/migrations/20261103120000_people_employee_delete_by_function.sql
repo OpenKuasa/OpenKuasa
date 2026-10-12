@@ -3,7 +3,7 @@
 -- public.hr_employees that the first people migration granted
 -- (20261014090000_people_core.sql, line 148).
 --
--- Why. The function (20261102090000_people_documents_writes.sql) records the
+-- Why. The function (20261102090050_people_documents_writes.sql) records the
 -- paths of the employee's document files as released and hands them back, so
 -- the app can remove the files. A delete sent straight to the table, by an
 -- owner or admin through the API, took the documents with the employee and
@@ -47,7 +47,7 @@ do $$
 declare fn oid := to_regprocedure('public.hr_delete_employee(uuid,uuid)');
 begin
   if fn is null or not has_function_privilege('authenticated', fn, 'execute') then
-    raise exception 'public.hr_delete_employee(uuid, uuid) is not there for signed-in users: apply 20261102090000_people_documents_writes.sql first';
+    raise exception 'public.hr_delete_employee(uuid, uuid) is not there for signed-in users: apply 20261102090050_people_documents_writes.sql first';
   end if;
 end $$;
 

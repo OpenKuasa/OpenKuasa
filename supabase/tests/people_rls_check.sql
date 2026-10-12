@@ -6,7 +6,7 @@
 -- only once it is published, and no read mark but their own. Since the
 -- letters and documents slice a letter's type is one of a fixed list, and
 -- letter templates are for owners and admins only. Since
--- 20261103090000_people_employee_delete_by_function.sql an employee is deleted
+-- 20261103120000_people_employee_delete_by_function.sql an employee is deleted
 -- through hr_delete_employee only: a direct delete is refused. Read the message:
 --   PEOPLE_RLS_CHECK PASSED ...   or   PEOPLE_RLS_CHECK FAILED: <what went wrong>
 -- When not to run it. It rebuilds the demo HR rows inside its transaction and

@@ -4,9 +4,9 @@ import { describe, expect, test } from 'vitest';
 
 const DIR = join(process.cwd(), 'supabase/migrations');
 const CHECKS = join(process.cwd(), 'supabase/tests');
-const FILE = '20261103090000_people_employee_delete_by_function.sql';
+const FILE = '20261103120000_people_employee_delete_by_function.sql';
 const CORE = '20261014090000_people_core.sql';
-const DOCUMENTS = '20261102090000_people_documents_writes.sql';
+const DOCUMENTS = '20261102090050_people_documents_writes.sql';
 
 const raw = (file: string) => readFileSync(join(DIR, file), 'utf8');
 
@@ -79,7 +79,7 @@ describe('deleting an employee only through the function', () => {
   test('the header says what, why, what stays, and the order to deploy in', () => {
     const header = raw(FILE).split('\n').filter((line) => line.startsWith('--')).join('\n');
     for (const said of [
-      'public.hr_delete_employee', '20261014090000_people_core.sql', '20261102090000_people_documents_writes.sql',
+      'public.hr_delete_employee', '20261014090000_people_core.sql', '20261102090050_people_documents_writes.sql',
       'hr_employees_write', 'hr_employees_paid_payslips_guard', 'HR_EMPLOYEE_HAS_PAID_PAYSLIPS', 'private.reseed_demo_people',
       'Safe with the app deployed before it?', 'createEmployee', 'deploy the app release first', 'Safe to apply twice.',
     ]) expect(header, said).toContain(said);
