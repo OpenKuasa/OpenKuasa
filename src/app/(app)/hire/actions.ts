@@ -12,6 +12,8 @@ import {
   type CapResult,
   type Deleted,
   type HireWriteContext,
+  type MovedToPipeline,
+  type PoolChange,
   addCandidate,
   attachCandidateCv,
   closeApplication,
@@ -21,9 +23,11 @@ import {
   deleteCandidate,
   deletionSummary,
   moveApplication,
+  moveToPipeline,
   rateApplication,
   reopenApplication,
   setJobStatus,
+  setPoolStatus,
   updateApplicationForm,
   updateCandidate,
   updateCareersPage,
@@ -31,7 +35,10 @@ import {
 } from '@/lib/hire/capabilities';
 import { isPdf, removeCv, signedCvUrl, storeCv } from '@/lib/hire/cv-store';
 import type { Removal } from '@/lib/hire/deletion';
+import { buildPoolPicker, type PoolPicker } from '@/lib/hire/lists';
+import { PICKER_FAILED } from '@/lib/hire/pool';
 import { careersPath } from '@/lib/hire/public-careers';
+import { createSupabaseHireData } from '@/lib/hire/supabase';
 import { createClient } from '@/lib/supabase/server';
 import { serviceClient } from '@/lib/supabase/service';
 
@@ -456,4 +463,45 @@ export async function getDeletionSummaryAction(input: unknown): Promise<CapResul
   const ctx = await writeCtx();
   if (!ctx) return FORBIDDEN;
   return deletionSummary(ctx, input as never);
+}
+
+// ─── the talent pool ────────────────────────────────────────────────────────
+
+/**
+ * Setting one candidate's pool status: adding them to the pool, changing the
+ * status, or removing them (status none; the person stays on file). The input
+ * is the candidate's id, the status, and whether this is an add.
+ */
+export async function setPoolStatusAction(input: unknown): Promise<CapResult<PoolChange>> {
+  const ctx = await writeCtx();
+  if (!ctx) return FORBIDDEN;
+  const result = await setPoolStatus(ctx, input as never);
+  if (result.ok) for (const path of CANDIDATE_PATHS) revalidatePath(path);
+  return result;
+}
+
+/** Moving one pool member to the pipeline for a job: a new application at Applied, and they are marked Re-engaged. */
+export async function moveToPipelineAction(input: unknown): Promise<CapResult<MovedToPipeline>> {
+  const ctx = await writeCtx();
+  if (!ctx) return FORBIDDEN;
+  const result = await moveToPipeline(ctx, input as never);
+  if (result.ok) for (const path of CANDIDATE_PATHS) revalidatePath(path);
+  return result;
+}
+
+/**
+ * The people the "Add to Pool" picker offers: everyone on file who is not in
+ * the pool. Only for someone who may edit, read with their own client inside
+ * their own workspace, when they open the picker. Names, headlines, places,
+ * skills and sources: never an email or a phone number. Nothing is changed.
+ */
+export async function listPoolPickerAction(): Promise<CapResult<PoolPicker>> {
+  const ctx = await writeCtx();
+  if (!ctx) return FORBIDDEN;
+  try {
+    return { ok: true, data: await buildPoolPicker(createSupabaseHireData(ctx.client, ctx.orgId)) };
+  } catch (error) {
+    console.error('[hire/pool-picker] the read failed:', codeOf(error));
+    return { ok: false, error: PICKER_FAILED };
+  }
 }
