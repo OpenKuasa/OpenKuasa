@@ -351,8 +351,11 @@ grant execute on function public.hr_team_overtime(uuid) to authenticated;
 -- 20261030124500_people_no_self_approval.sql with five changes: is_mgr is
 -- declared and set; "may see it" and "may decide it" each also pass a manager
 -- of the request's employee; and the employee is told after the decision is
--- written. hr_decide_overtime has a sixth: its reply carries the amount for an
--- owner or admin only, and null for a manager. Everything else is as it was. A manager is never their own
+-- written. hr_decide_overtime has two more: its reply carries the amount for
+-- an owner or admin only, and null for a manager; and a manager who meets a
+-- record that is no longer pending is told PAY_NOT_PENDING before the paid-run
+-- test is made, so the answer never says whether it was paid (an owner or
+-- admin still gets PAY_IN_PAID_RUN). Everything else is as it was. A manager is never their own
 -- manager, so a manager who is not an admin gets *_NOT_ALLOWED for their own
 -- request, as a member does; an admin who is also a manager is still an admin.
 
@@ -512,6 +515,8 @@ begin
     raise exception 'PAY_OWN_REQUEST';
   end if;
   if p_approve is null or char_length(note) > 500 then raise exception 'PAY_BAD_INPUT'; end if;
+  -- Whether overtime sits in a paid payroll run is pay: a manager is told only that it is no longer waiting.
+  if not is_admin and req.status <> 'pending' then raise exception 'PAY_NOT_PENDING'; end if;
   if exists (select 1 from public.hr_payslips p where p.id = req.payslip_id and p.status = 'paid') then
     raise exception 'PAY_IN_PAID_RUN';
   end if;

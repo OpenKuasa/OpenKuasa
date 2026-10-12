@@ -538,8 +538,12 @@ begin
     || pg_temp.t(adm, 'the admin reads both on the table', format('(select x.hourly_rate_cents || ''/'' || x.amount_cents from public.hr_overtime_records x where x.id = %L)', pg_temp.p('overtime', e_rep)), '="2000/6000"');
   x := pg_temp.mk('overtime', org, e_rep);
   fails := fails || pg_temp.t(adm, 'an admin approves a report''s overtime, and the reply carries the amount', pg_temp.dq('overtime', x), format('={"id":"%s","status":"approved","amount_cents":6000}', x));
+  z := x;
+  x := pg_temp.mk('overtime', org, e_rep);
+  fails := fails || pg_temp.t(own, 'the owner approves a report''s overtime, and the reply carries the amount', pg_temp.dq('overtime', x), format('={"id":"%s","status":"approved","amount_cents":6000}', x));
   y := pg_temp.mk('overtime', org, e_rep);
-  fails := fails || pg_temp.t(mgr, 'a manager rejects overtime: no amount in the reply either', pg_temp.dq('overtime', y, false), format('={"id":"%s","status":"rejected","amount_cents":null}', y));  select q.status || '/' || (q.decided_by = mgr) || '/' || coalesce(q.decision_note, '~') into a from public.hr_leave_requests q where q.id = pg_temp.p('leave', e_rep);
+  fails := fails || pg_temp.t(mgr, 'a manager rejects overtime: no amount in the reply either', pg_temp.dq('overtime', y, false), format('={"id":"%s","status":"rejected","amount_cents":null}', y));
+  select q.status || '/' || (q.decided_by = mgr) || '/' || coalesce(q.decision_note, '~') into a from public.hr_leave_requests q where q.id = pg_temp.p('leave', e_rep);
   select q.status || '/' || (q.decided_by = mgr) || '/' || coalesce(q.decision_note, '~') into b from public.hr_time_off_requests q where q.id = pg_temp.p('time_off', e_rep);
   select q.status || '/' || (q.decided_by = mgr) || '/' || coalesce(q.decision_note, '~') into ctx from public.hr_claims q where q.id = pg_temp.p('claim', e_rep);
   select q.status || '/' || (q.decided_by = mgr) || '/' || q.amount_cents || '/' || q.hourly_rate_cents into k from public.hr_overtime_records q where q.id = pg_temp.p('overtime', e_rep);
@@ -550,8 +554,9 @@ begin
   a := pg_temp.inbox();
   if a is distinct from 'rep|hr_request_decided|Your claim was approved|~|/people/claims ; rep|hr_request_decided|Your leave request was approved|~|/people/leave ; '
       || 'rep|hr_request_decided|Your overtime request was approved|~|/people/ot-claims ; rep|hr_request_decided|Your overtime request was approved|~|/people/ot-claims ; '
+      || 'rep|hr_request_decided|Your overtime request was approved|~|/people/ot-claims ; '
       || 'rep|hr_request_decided|Your overtime request was rejected|~|/people/ot-claims ; rep|hr_request_decided|Your time-off request was rejected|~|/people/time-off' then
-    fails := fails || format('the six decisions (four kinds, then overtime twice more) told: %s', a);
+    fails := fails || format('the seven decisions (four kinds, then overtime three times more) told: %s', a);
   end if;
   for i in 1..4 loop
     k := kinds[i]; ctx := case when i <= 2 then 'LEAVE' else 'PAY' end;
@@ -587,6 +592,19 @@ begin
   update public.hr_overtime_records set payslip_id = slip where id = x;
   fails := fails || pg_temp.t(mgr, 'a manager on overtime in a paid run', pg_temp.dq('overtime', x), 'PAY_IN_PAID_RUN');
   update public.hr_overtime_records set status = 'cancelled', payslip_id = null where id = x;
+  -- Whether a report's approved overtime was paid is pay. z is the record the admin approved: a manager who tries it again
+  -- hears the same thing before it is on a paid payslip and after, while an owner or admin is still told about the paid run.
+  if (select q.status || '/' || coalesce(q.payslip_id::text, '~') from public.hr_overtime_records q where q.id = z) is distinct from 'approved/~' then raise exception 'the approved overtime is not as planted'; end if;
+  a := pg_temp.g(mgr, pg_temp.dq('overtime', z)) || ' ' || pg_temp.g(mgr, pg_temp.dq('overtime', z, false));
+  update public.hr_overtime_records set payslip_id = slip where id = z;
+  b := pg_temp.g(mgr, pg_temp.dq('overtime', z)) || ' ' || pg_temp.g(mgr, pg_temp.dq('overtime', z, false));
+  if a is distinct from 'PAY_NOT_PENDING PAY_NOT_PENDING' or b is distinct from a then
+    fails := fails || format('a manager again on approved overtime, before its run is paid and after: wanted PAY_NOT_PENDING each time, got "%s" then "%s"', a, b);
+  end if;
+  fails := fails || pg_temp.t(adm, 'an admin on approved overtime in a paid run', pg_temp.dq('overtime', z), 'PAY_IN_PAID_RUN')
+    || pg_temp.t(own, 'the owner on approved overtime in a paid run', pg_temp.dq('overtime', z, false), 'PAY_IN_PAID_RUN');
+  update public.hr_overtime_records set payslip_id = null where id = z;
+  fails := fails || pg_temp.t(adm, 'an admin on approved overtime in no run', pg_temp.dq('overtime', z), 'PAY_NOT_PENDING');
   -- Owners and admins only, as before. A manager is answered as a colleague is.
   y := pg_temp.p('claim', e_rep);
   for r in select * from (values ('marks a report''s approved claim paid', format('public.hr_mark_claim_paid(%L, ''2026-01-10'', ''REF'')', y), 'PAY_NOT_FOUND'),

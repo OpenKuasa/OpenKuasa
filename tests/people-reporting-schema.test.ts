@@ -210,9 +210,18 @@ describe('the reporting-lines migration', () => {
       )
       .replace(`  perform private.hr_notify_request_decided(req.org_id, req.employee_id, '${kind}', outcome);\n`, '')
       // Overtime only: the reply carries the amount for an owner or admin, and null for a manager.
-      .replace("'amount_cents', case when is_admin then req.amount_cents end);", "'amount_cents', req.amount_cents);");
+      .replace("'amount_cents', case when is_admin then req.amount_cents end);", "'amount_cents', req.amount_cents);")
+      // Overtime only: a manager is told "no longer waiting" before the paid-run test, so never whether it was paid.
+      .replace(`  if not is_admin and req.status <> 'pending' then raise exception 'PAY_NOT_PENDING'; end if;\n`, '');
     expect(undone).toBe(before.body);
     expect(now.body.includes('case when is_admin then req.amount_cents end')).toBe(kind === 'overtime');
+    const early = now.body.indexOf("if not is_admin and req.status <> 'pending' then raise exception 'PAY_NOT_PENDING'; end if;");
+    expect(early > -1).toBe(kind === 'overtime');
+    if (kind === 'overtime') {
+      expect(early).toBeLessThan(now.body.indexOf("raise exception 'PAY_IN_PAID_RUN'"));
+      expect(early).toBeLessThan(now.body.indexOf('from public.hr_payslips p'));
+      expect(early).toBeGreaterThan(now.body.indexOf("raise exception 'PAY_BAD_INPUT'"));
+    }
     expect(now.body).not.toBe(before.body);
     expect(now.body.match(/is_mgr/g)).toHaveLength(4);
     // The decision is written before anyone is told.
