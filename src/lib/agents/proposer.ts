@@ -1,6 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { type Lead, type Appointment, LEAD_STAGES } from '@/lib/reach/types';
-import { approvalDetail, approvalTitle, type ItemKind } from '@/lib/chat/change-titles';
+import { approvalTitle } from '@/lib/chat/change-titles';
 import { type AgentDefinition, type Candidate } from '@/lib/agents/definition';
 import { TEXT_ESTIMATE_CENTS, costOr } from '@/lib/agents/costs';
 import { suggestProposals } from '@/lib/agents/openrouter-media';
@@ -22,52 +21,6 @@ function dedupeKeyOf(action: string, input: unknown): string {
           ? i.name
           : JSON.stringify(i);
   return `${action}:${key}`;
-}
-
-/** Deterministic: the opportunities worth proposing from this week's data. */
-export function opportunityScan(leads: Lead[], appts: Appointment[], now: Date): Candidate[] {
-  const nameOf = (id: unknown, kind?: ItemKind): string | null =>
-    kind === 'lead' && typeof id === 'string' ? (leads.find((l) => l.id === id)?.name ?? null) : null;
-  const make = (action: string, input: unknown): Candidate => ({
-    action,
-    input,
-    title: approvalTitle(action, input, nameOf),
-    detail: approvalDetail(action, input),
-  });
-  const upcomingByName = new Set(
-    appts.filter((a) => new Date(a.scheduled_at) > now).map((a) => a.contact_name),
-  );
-  const metByName = new Set(
-    appts.filter((a) => a.status === 'completed').map((a) => a.contact_name),
-  );
-  const bookedIndex = LEAD_STAGES.indexOf('booked');
-  const out: Candidate[] = [];
-  for (const l of leads) {
-    if (l.stage === 'won' && !l.promoted_contact_id) {
-      out.push(make('promoteLeadToContact', { id: l.id }));
-    }
-    // A lead that has met (a completed appointment) but is still short of 'booked' → advance it.
-    if (LEAD_STAGES.indexOf(l.stage) < bookedIndex && metByName.has(l.name)) {
-      out.push(make('setLeadStage', { id: l.id, stage: 'booked' }));
-    }
-    if ((l.stage === 'qualified' || l.stage === 'booked') && !upcomingByName.has(l.name)) {
-      const when = new Date(now.getTime() + 3 * 24 * 3600_000);
-      when.setUTCHours(9, 0, 0, 0);
-      out.push(
-        make(
-          'createAppointment',
-          {
-            contact_name: l.name,
-            kind: 'Follow-up call',
-            scheduled_at: when.toISOString(),
-            via: 'Phone',
-            status: 'scheduled',
-          },
-        ),
-      );
-    }
-  }
-  return out;
 }
 
 /**
@@ -130,15 +83,14 @@ export async function proposeChanges(
       if (proposed >= MAX_PROPOSALS) break;
       const c = offered[sel.index];
       if (!c || !Object.hasOwn(def.actions, c.action)) continue; // tampered / off-list selection
-      // For a fill-name candidate (the draft form) the model supplies only the name;
-      // channel + status are server-forced, so an approved form is never live or channel-bound.
-      const input = c.fillName
-        ? { name: sel.name, category: null, channel: null, status: 'draft' }
-        : c.input;
+      // A fill-input candidate (the definition owns the shape, e.g. reach's draft form) lets the
+      // model supply only the name; the definition server-forces the rest, so the server re-validates
+      // the built input against the action schema before it is ever inserted.
+      const input = c.fillInput ? c.fillInput(sel.name) : c.input;
       if (!def.actions[c.action].schema.safeParse(input).success) continue; // re-validate input
       const key = dedupeKeyOf(c.action, input);
       if (pendingKeys.has(key)) continue; // intra-run duplicate selection
-      const title = c.fillName ? approvalTitle(c.action, input, () => null) : c.title;
+      const title = c.fillInput ? approvalTitle(c.action, input, () => null) : c.title;
       const { error } = await service.from('agent_proposals').insert({
         org_id: orgId,
         run_id: runId,

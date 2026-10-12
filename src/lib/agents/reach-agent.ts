@@ -16,15 +16,58 @@ import {
   updateForm,
   updateFormInput,
 } from '@/lib/reach/capabilities';
-import { opportunityScan } from '@/lib/agents/proposer';
+import { approvalDetail, approvalTitle, type ItemKind } from '@/lib/chat/change-titles';
 import { generateImage, startVideo } from '@/lib/agents/openrouter-media';
 import { IMAGE_ESTIMATE_CENTS, VIDEO_ESTIMATE_CENTS, costOr } from '@/lib/agents/costs';
 import { WEEKLY_STUDIO } from '@/lib/agents/types';
 import { createSupabaseReachData } from '@/lib/reach/supabase';
 import { deriveReportsModel, type ReportsModel } from '@/lib/reach/reports';
-import type { Lead, Appointment, Campaign } from '@/lib/reach/types';
+import { type Lead, type Appointment, type Campaign, LEAD_STAGES } from '@/lib/reach/types';
 
 export type ReachRaw = { leads: Lead[]; appts: Appointment[]; campaigns: Campaign[] };
+
+/** Deterministic: the opportunities worth proposing from this week's reach data. */
+export function opportunityScan(leads: Lead[], appts: Appointment[], now: Date): Candidate[] {
+  const nameOf = (id: unknown, kind?: ItemKind): string | null =>
+    kind === 'lead' && typeof id === 'string' ? (leads.find((l) => l.id === id)?.name ?? null) : null;
+  const make = (action: string, input: unknown): Candidate => ({
+    action,
+    input,
+    title: approvalTitle(action, input, nameOf),
+    detail: approvalDetail(action, input),
+  });
+  const upcomingByName = new Set(
+    appts.filter((a) => new Date(a.scheduled_at) > now).map((a) => a.contact_name),
+  );
+  const metByName = new Set(
+    appts.filter((a) => a.status === 'completed').map((a) => a.contact_name),
+  );
+  const bookedIndex = LEAD_STAGES.indexOf('booked');
+  const out: Candidate[] = [];
+  for (const l of leads) {
+    if (l.stage === 'won' && !l.promoted_contact_id) {
+      out.push(make('promoteLeadToContact', { id: l.id }));
+    }
+    // A lead that has met (a completed appointment) but is still short of 'booked' → advance it.
+    if (LEAD_STAGES.indexOf(l.stage) < bookedIndex && metByName.has(l.name)) {
+      out.push(make('setLeadStage', { id: l.id, stage: 'booked' }));
+    }
+    if ((l.stage === 'qualified' || l.stage === 'booked') && !upcomingByName.has(l.name)) {
+      const when = new Date(now.getTime() + 3 * 24 * 3600_000);
+      when.setUTCHours(9, 0, 0, 0);
+      out.push(
+        make('createAppointment', {
+          contact_name: l.name,
+          kind: 'Follow-up call',
+          scheduled_at: when.toISOString(),
+          via: 'Phone',
+          status: 'scheduled',
+        }),
+      );
+    }
+  }
+  return out;
+}
 
 /** How long after any form proposal (any status) before the agent may offer another. */
 const FORM_PROPOSAL_COOLDOWN_MS = 30 * 24 * 3600_000;
@@ -112,7 +155,9 @@ export const reachAgent: AgentDefinition = {
         input: {},
         title: "Create a draft lead-capture form for this week's trend",
         detail: null,
-        fillName: true,
+        // The model supplies only the name; channel + status stay server-forced here, so an
+        // approved form is never live or channel-bound. Owning the shape keeps proposer generic.
+        fillInput: (name) => ({ name, category: null, channel: null, status: 'draft' }),
       },
     ];
   },
@@ -157,7 +202,9 @@ export const reachAgent: AgentDefinition = {
 
   async media(mctx: MediaContext): Promise<{ cost_cents: number }> {
     const { apiKey, context, maxCost, costSoFar, reserve, service, orgId, runId } = mctx;
-    let cost = costSoFar;
+    // Track only what this step ADDS (summed directly, never costSoFar−derived) so the
+    // rollup the worker adds back is bit-exact; reserve books the absolute costSoFar+added.
+    let added = 0;
 
     const recordAsset = async (
       kind: 'poster' | 'image',
@@ -174,12 +221,12 @@ export const reachAgent: AgentDefinition = {
 
     for (const step of IMAGE_STEPS) {
       // Gate each paid step: stop before anything that could exceed the cap.
-      if (cost + IMAGE_ESTIMATE_CENTS > maxCost) break;
+      if (costSoFar + added + IMAGE_ESTIMATE_CENTS > maxCost) break;
       const path = `${orgId}/${runId}/${step.kind}.png`;
-      await reserve(cost + IMAGE_ESTIMATE_CENTS);
+      await reserve(costSoFar + added + IMAGE_ESTIMATE_CENTS);
       try {
         const img = await generateImage(apiKey, step.prompt(context));
-        cost += costOr(img.cost_cents, IMAGE_ESTIMATE_CENTS);
+        added += costOr(img.cost_cents, IMAGE_ESTIMATE_CENTS);
         const { error: upErr } = await service.storage
           .from('agent-assets')
           .upload(path, img.bytes, { contentType: img.contentType, upsert: true });
@@ -192,8 +239,8 @@ export const reachAgent: AgentDefinition = {
     }
 
     // Video is async: only kick it off here and store a pending asset; pollVideos finalizes it.
-    if (cost + VIDEO_ESTIMATE_CENTS <= maxCost) {
-      await reserve(cost + VIDEO_ESTIMATE_CENTS);
+    if (costSoFar + added + VIDEO_ESTIMATE_CENTS <= maxCost) {
+      await reserve(costSoFar + added + VIDEO_ESTIMATE_CENTS);
       try {
         const video = await startVideo(
           apiKey,
@@ -203,7 +250,7 @@ export const reachAgent: AgentDefinition = {
         // it now (the estimate, unless submit already named a figure) on both the run and the
         // asset; pollVideos settles the difference later.
         const videoCost = Math.round(costOr(video.cost_cents, VIDEO_ESTIMATE_CENTS));
-        cost += videoCost;
+        added += videoCost;
         // A failed insert (returned as { error }) just means the clip is not tracked.
         const { error: videoInsertErr } = await service.from('agent_run_assets').insert({
           org_id: orgId,
@@ -220,7 +267,7 @@ export const reachAgent: AgentDefinition = {
       }
     }
 
-    return { cost_cents: cost - costSoFar };
+    return { cost_cents: added };
   },
 
   ui: {

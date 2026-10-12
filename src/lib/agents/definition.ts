@@ -5,15 +5,16 @@ import type { CapResult } from '@/lib/reach/capabilities';
 /**
  * A deterministic candidate change an agent may propose. The model only ever
  * SELECTS from these; the server re-validates each kept one against the matching
- * action schema before it is inserted. `fillName` marks a candidate whose final
- * input the model names at selection time (reach's draft lead-capture form).
+ * action schema before it is inserted. `fillInput`, when set, builds the final input
+ * from the name the model supplies at selection time (reach's draft lead-capture form) —
+ * the definition owns that shape, so the generic proposer stays product-neutral.
  */
 export type Candidate = {
   action: string;
   input: unknown;
   title: string;
   detail: string | null;
-  fillName?: boolean;
+  fillInput?: (name: string | undefined) => unknown;
 };
 
 /**
@@ -99,6 +100,11 @@ export function agentFor(agentKey: string, reg: AgentRegistry): AgentDefinition 
   return reg.get(agentKey);
 }
 
+/**
+ * The agent for a product. Returns the FIRST registered definition whose `product` matches
+ * (iteration order); the framework assumes one agent per product (YAGNI), so a product is
+ * never registered twice. Revisit this if that invariant is ever relaxed.
+ */
 export function agentForProduct(product: string, reg: AgentRegistry): AgentDefinition | undefined {
   for (const def of reg.values()) if (def.product === product) return def;
   return undefined;
