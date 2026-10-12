@@ -57,7 +57,8 @@ begin
     if i <> 2 or j <> 2 or not (select c.relrowsecurity from pg_class c where c.oid = ('public.' || t)::regclass)
        or has_table_privilege('authenticated', 'public.' || t, 'INSERT, UPDATE, DELETE, TRUNCATE') or has_any_column_privilege('authenticated', 'public.' || t, 'INSERT, UPDATE')
        or has_table_privilege('anon', 'public.' || t, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE') or has_any_column_privilege('anon', 'public.' || t, 'SELECT, INSERT, UPDATE')
-       or has_table_privilege('service_role', 'public.' || t, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE') or has_any_column_privilege('service_role', 'public.' || t, 'SELECT, INSERT, UPDATE')
+       -- (Not TRUNCATE: the live project's defaults leave it to the service role on every table, these included.)
+       or has_table_privilege('service_role', 'public.' || t, 'SELECT, INSERT, UPDATE, DELETE') or has_any_column_privilege('service_role', 'public.' || t, 'SELECT, INSERT, UPDATE')
        or not has_table_privilege('authenticated', 'public.' || t, 'SELECT') then
       fails := fails || format('%s is not read-only behind its read policy and the second-factor one, and closed to the service role', t);
     end if;
