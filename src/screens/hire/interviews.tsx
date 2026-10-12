@@ -26,6 +26,7 @@ import { can } from '@/lib/auth/permissions';
 import { getViewer } from '@/lib/auth/viewer';
 import { cn } from '@/lib/utils';
 import { tagsFor, timeCell } from '@/lib/hire/interview-dialog-state';
+import { feedbackCell } from '@/lib/hire/interview-feedback';
 import { ROWS_SHOWN, buildInterviewsModel, type InterviewsModel } from '@/lib/hire/lists';
 import { DeletionNotice } from '@/screens/hire/delete-dialog';
 import { InterviewHeaderButtons, InterviewRowMenu } from '@/screens/hire/interview-actions';
@@ -222,6 +223,7 @@ export default async function InterviewsScreen() {
                     <TableHead>Type</TableHead>
                     <TableHead>Where</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Feedback</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -272,6 +274,8 @@ export default async function InterviewsScreen() {
                           {r.status}
                         </span>
                       </TableCell>
+                      {/* For everyone who can open the screen. The comments are read in the Applications panel. */}
+                      <TableCell className="whitespace-nowrap">{feedbackCell(r.statusKey, r.feedback)}</TableCell>
                       <TableCell className="text-right">
                         {/* The row as plain values. Only for someone who may edit; each action checks again. */}
                         {canEdit ? <InterviewRowMenu row={r} /> : null}

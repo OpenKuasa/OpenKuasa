@@ -5,6 +5,8 @@ import { ChevronDown } from 'lucide-react';
 import type { ApplicationDetails, ApplicationState, PanelInterview, SafeLink } from '@/lib/hire/lists';
 import type { PoolStatus } from '@/lib/hire/types';
 import { viewCvAction } from '@/app/(app)/hire/actions';
+import { panelShowsHelper } from '@/lib/hire/feedback-dialog-state';
+import { PANEL_FEEDBACK_HELPER, panelFeedbackLine } from '@/lib/hire/interview-feedback';
 import { PANEL_EMPTY, PANEL_HEADING, panelLine, panelMore, panelRows } from '@/lib/hire/interview-dialog-state';
 import { cn } from '@/lib/utils';
 import { LiveDot } from '@/components/ui/live-dot';
@@ -120,12 +122,15 @@ function ViewCv({ applicationId }: { applicationId: string }) {
  * how many more there are. Shown to everyone who can open the panel, viewers
  * included. An interview is changed on the Interviews screen, not here. A
  * place is a link only from `placeLink`, which the server made with `safeLink`.
+ * An interview's feedback is shown under its line, to everyone who can open the panel; it is recorded on the Interviews screen.
  */
 function InterviewList({ interviews }: { interviews: PanelInterview[] }) {
   const { shown, more } = panelRows(interviews);
   return (
     <section className="flex flex-col gap-1">
       <h4 className="text-xs font-medium text-muted-foreground">{PANEL_HEADING}</h4>
+      {/* The application has a rating of its own, in the controls below: neither sets the other. */}
+      {panelShowsHelper(shown) ? <p className="text-xs text-muted-foreground">{PANEL_FEEDBACK_HELPER}</p> : null}
       {shown.length === 0 ? (
         <p className="text-sm text-muted-foreground">{PANEL_EMPTY}</p>
       ) : (
@@ -144,6 +149,15 @@ function InterviewList({ interviews }: { interviews: PanelInterview[] }) {
                 </a>
               ) : interview.place ? (
                 <p className="break-words text-muted-foreground">{interview.place}</p>
+              ) : null}
+              {interview.feedback ? (
+                <div className="mt-1">
+                  <p className="break-words">{panelFeedbackLine(interview.feedback)}</p>
+                  {/* In full, with their line breaks, wrapped inside the panel: a long word must not widen the page. */}
+                  {interview.feedback.comments ? (
+                    <p className="whitespace-pre-line break-words text-muted-foreground">{interview.feedback.comments}</p>
+                  ) : null}
+                </div>
               ) : null}
             </li>
           ))}

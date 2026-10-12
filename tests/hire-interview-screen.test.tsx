@@ -47,6 +47,9 @@ vi.mock('@/app/(app)/hire/actions', () => ({
   reopenInterviewAction: mocks.action,
   getInterviewInvitationAction: mocks.action,
   getInterviewForEditAction: mocks.action,
+  saveInterviewFeedbackAction: mocks.action,
+  clearInterviewFeedbackAction: mocks.action,
+  getInterviewFeedbackAction: mocks.action,
 }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: mocks.refresh, replace: () => {} }), usePathname: () => '/hire/interviews' }));
 vi.mock('@/lib/auth/viewer', () => ({ getViewer: async () => mocks.viewer }));
@@ -238,7 +241,7 @@ describe('the Interviews screen\'s lists', () => {
   it('the table has the two new columns, Where and Actions', async () => {
     const html = await screen();
     const heads = [...html.matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/g)].map(([, inner]) => text(inner));
-    expect(heads).toEqual(['Candidate', 'Role', 'Date', 'Time', 'Interviewer', 'Type', 'Where', 'Status', 'Actions']);
+    expect(heads).toEqual(['Candidate', 'Role', 'Date', 'Time', 'Interviewer', 'Type', 'Where', 'Status', 'Feedback', 'Actions']);
     expect(html.match(/<tr\b/g)).toHaveLength(5);
   });
   it('writes the time with the length', async () => {
@@ -307,6 +310,7 @@ describe('a row\'s menu', () => {
       { variant: 'default', label: 'Reschedule or edit' },
       { variant: 'default', label: 'Invitation and calendar file' },
       { variant: 'default', label: 'Mark completed' },
+      { variant: 'default', label: 'Mark completed and add feedback' },
       { variant: 'default', label: 'Mark no-show' },
       { variant: 'destructive', label: 'Cancel interview' },
     ]);
@@ -318,15 +322,18 @@ describe('a row\'s menu', () => {
   it('a scheduled interview of a rejected or withdrawn application: no Reschedule or edit, which would be refused', () => {
     for (const applicationOutcome of ['rejected', 'withdrawn'] as const) {
       const labelsOf = items(menu(row({ applicationOutcome }))).map((i) => i.label);
-      expect(labelsOf, applicationOutcome).toEqual(['Invitation and calendar file', 'Mark completed', 'Mark no-show', 'Cancel interview']);
+      expect(labelsOf, applicationOutcome).toEqual(['Invitation and calendar file', 'Mark completed', 'Mark completed and add feedback', 'Mark no-show', 'Cancel interview']);
     }
   });
-  it('a cancelled, completed or no-show interview: Mark as scheduled again, alone', () => {
-    for (const statusKey of ['cancelled', 'completed', 'no_show'] as const) {
+  it('a cancelled or no-show interview: Mark as scheduled again, alone; a completed one also offers feedback', () => {
+    for (const statusKey of ['cancelled', 'no_show'] as const) {
       const html = menu(row({ statusKey }));
       expect(items(html), statusKey).toEqual([{ variant: 'default', label: 'Mark as scheduled again' }]);
       expect(html).not.toContain('<hr/>');
     }
+    const completed = menu(row({ statusKey: 'completed' }));
+    expect(items(completed)).toEqual([{ variant: 'default', label: 'Add feedback' }, { variant: 'default', label: 'Mark as scheduled again' }]);
+    expect(completed.match(/<hr\/>/g)).toHaveLength(1);
   });
   it('has one polite line for "Saving…", empty and hidden until then, and no refusal before anything is tried', () => {
     const html = menu(AHEAD);

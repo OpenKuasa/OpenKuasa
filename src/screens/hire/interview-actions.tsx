@@ -5,19 +5,24 @@ import { useRouter } from 'next/navigation';
 import { AlertDialog } from 'radix-ui';
 import { MoreHorizontal, Plus } from 'lucide-react';
 import {
-  cancelInterviewAction, getInterviewInvitationAction, reopenInterviewAction, setInterviewOutcomeAction,
+  cancelInterviewAction, clearInterviewFeedbackAction, getInterviewInvitationAction, reopenInterviewAction, setInterviewOutcomeAction,
 } from '@/app/(app)/hire/actions';
 import { DELETION_NOTICE_ID } from '@/lib/hire/delete-dialog-state';
 import {
-  KEEP_INTERVIEW, MENU_WORDS, cancelBody, cancelLabel, cancelTitle, handoverAfter, handoverResult, interviewResult, inviteLead, inviteTitle,
-  mayAskHandover, mayClose, menuGroups, menuName, noticeOf, openerId, outcomeInput, refusalWord, rowMenu, rowWaitingWord, sayOnNotice,
+  CLEAR_BODY, KEEP_FEEDBACK, ROW_MENU_WORDS, clearLabel, clearTitle, isDestructive, modeOf, reopenRefusal, rowMenuWithFeedback,
+  type FeedbackMode, type RowMenuItem,
+} from '@/lib/hire/feedback-dialog-state';
+import {
+  KEEP_INTERVIEW, cancelBody, cancelLabel, cancelTitle, handoverAfter, handoverResult, interviewResult, inviteLead, inviteTitle,
+  mayAskHandover, mayClose, menuName, noticeOf, openerId, outcomeInput, refusalWord, rowWaitingWord, sayOnNotice,
   type Handover, type HandoverState,
 } from '@/lib/hire/interview-dialog-state';
-import { INTERVIEW_SAVE_FAILED, INVITATION_NOT_MADE, type InterviewMenuItem } from '@/lib/hire/interviews';
+import { INTERVIEW_SAVE_FAILED, INVITATION_NOT_MADE } from '@/lib/hire/interviews';
 import type { InterviewRow } from '@/lib/hire/lists';
 import { cn } from '@/lib/utils';
 import { FormDialog } from '@/screens/hire/candidate-forms';
 import { announceDeletion, claimResult, useNewest } from '@/screens/hire/delete-dialog';
+import { FeedbackDialog } from '@/screens/hire/feedback-dialog';
 import { InvitationStep, openInterview } from '@/screens/hire/interview-dialog';
 import { Button } from '@/components/ui/button';
 import {
@@ -164,7 +169,9 @@ function useInterviewChange() {
       }
     });
   };
-  return { pending, error: refusal && newest ? refusal.text : null, inFlight, send, ask, clearError: () => setRefusal(null) };
+  /** A refusal known without asking the server: said at the row like any other, and the newest thing said on the screen. */
+  const refuse = (text: string) => setRefusal({ text, seq: claimResult() });
+  return { pending, error: refusal && newest ? refusal.text : null, inFlight, send, ask, refuse, clearError: () => setRefusal(null) };
 }
 
 /**
@@ -184,34 +191,42 @@ function useInterviewChange() {
  * never from this row, which may be stale (a colleague rescheduled, the page
  * was restored by Back, a second tab). While it loads the row says so and the
  * menu stays shut.
+ *
+ * A scheduled interview can also be marked completed with its feedback in one step; a completed one takes feedback, or has it edited or cleared (feedback-dialog-state.ts says which).
  */
 export function InterviewRowMenu({ row }: { row: InterviewRow }) {
   const change = useInterviewChange();
   const [open, setOpen] = useState(false);
-  const [panel, setPanel] = useState<'invitation' | 'cancel' | null>(null);
+  const [panel, setPanel] = useState<'invitation' | 'cancel' | 'clear_feedback' | null>(null);
+  /** The feedback form of this row: closed, or open to add, to edit, or to mark completed with feedback. */
+  const [feedback, setFeedback] = useState<FeedbackMode | null>(null);
   /** The row's invitation: not asked for, being fetched, or showing. */
   const [handover, setHandover] = useState<HandoverState>('idle');
   /** What the invitation panel shows, as the server made it. */
   const [invite, setInvite] = useState<Handover | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   /** An item that opens something was chosen: it opens once the menu has closed. */
-  const then = useRef<'edit' | 'invitation' | 'cancel' | null>(null);
+  const then = useRef<RowMenuItem | null>(null);
   /** True while the cancellation is being saved: Escape and "Keep interview" then do nothing. */
   const busy = useRef(false);
   const triggerId = openerId('row', row.id);
-  const groups = menuGroups(rowMenu(row));
+  const groups = rowMenuWithFeedback(row);
   const waiting = change.pending || undefined;
 
-  const choose = (item: InterviewMenuItem) => {
-    if (item === 'edit' || item === 'invitation' || item === 'cancel') {
-      then.current = item;
-      return;
-    }
+  const choose = (item: RowMenuItem) => {
     if (item === 'reopen') {
-      change.send(() => reopenInterviewAction({ id: row.id }));
+      // A completed interview that has feedback cannot be scheduled again: said here, with what to do first, and nothing is sent.
+      const blocked = reopenRefusal(row);
+      if (blocked) change.refuse(blocked);
+      else change.send(() => reopenInterviewAction({ id: row.id }));
       return;
     }
-    change.send(() => setInterviewOutcomeAction(outcomeInput(row.id, item)));
+    if (item === 'completed' || item === 'no_show') {
+      change.send(() => setInterviewOutcomeAction(outcomeInput(row.id, item)));
+      return;
+    }
+    // Everything else opens something: the edit form, the invitation, a confirm, or the feedback form.
+    then.current = item;
   };
 
   return (
@@ -263,7 +278,9 @@ export function InterviewRowMenu({ row }: { row: InterviewRow }) {
             change.clearError();
             // The row as it is now: the form sends its `updatedAt`, so a later change by someone else is refused, not replaced.
             if (next === 'edit') openInterview({ mode: 'change', row, focusId: triggerId });
-            else setPanel(next);
+            else if (next === 'cancel' || next === 'clear_feedback') setPanel(next);
+            // The feedback form takes the row as it is now: an edit sends its feedback's saved time, so a later change by someone else is refused.
+            else setFeedback(modeOf(next));
           }}
         >
           {groups.map((group, index) => (
@@ -273,11 +290,11 @@ export function InterviewRowMenu({ row }: { row: InterviewRow }) {
                 <DropdownMenuItem
                   key={item}
                   // The danger colour and its words: colour is never the only signal.
-                  variant={item === 'cancel' ? 'destructive' : undefined}
+                  variant={isDestructive(item) ? 'destructive' : undefined}
                   className={ITEM}
                   onSelect={() => choose(item)}
                 >
-                  {MENU_WORDS[item]}
+                  {ROW_MENU_WORDS[item]}
                 </DropdownMenuItem>
               ))}
             </Fragment>
@@ -347,6 +364,67 @@ export function InterviewRowMenu({ row }: { row: InterviewRow }) {
           </AlertDialog.Content>
         </AlertDialog.Portal>
       </AlertDialog.Root>
+
+      {/* "Clear the feedback on the interview with Aina Rahman?" Focus starts on "Keep feedback". A click outside does not close it. */}
+      <AlertDialog.Root
+        open={panel === 'clear_feedback'}
+        onOpenChange={(next) => {
+          if (!next && mayClose(busy.current)) setPanel(null);
+        }}
+      >
+        <AlertDialog.Portal>
+          <AlertDialog.Overlay className={OVERLAY_CLASS} />
+          <AlertDialog.Content
+            className={CONTENT_CLASS}
+            onCloseAutoFocus={(event) => {
+              event.preventDefault();
+              trigger.current?.focus();
+            }}
+          >
+            <AlertDialog.Title className="text-base font-semibold break-words">{clearTitle(row.name)}</AlertDialog.Title>
+            <AlertDialog.Description className="mt-1 text-sm break-words text-muted-foreground">{CLEAR_BODY}</AlertDialog.Description>
+            {change.error ? <p role="alert" className={cn(ALERT_CLASS, 'mt-3')}>{change.error}</p> : null}
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+              <AlertDialog.Cancel asChild>
+                <Button type="button" variant="outline" size="sm" className={cn(TARGET, WAITING)} aria-disabled={waiting}>
+                  {KEEP_FEEDBACK}
+                </Button>
+              </AlertDialog.Cancel>
+              <AlertDialog.Action asChild>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  className={cn(TARGET, WAITING)}
+                  aria-disabled={waiting}
+                  onClick={(event) => {
+                    // Stay open while it is saved: a refusal is shown here, and only success closes the dialog.
+                    event.preventDefault();
+                    if (change.pending || change.inFlight.current) return;
+                    busy.current = true;
+                    change.send(
+                      () => clearInterviewFeedbackAction({ id: row.id }),
+                      () => setPanel(null),
+                      () => {
+                        busy.current = false;
+                      },
+                    );
+                  }}
+                >
+                  {clearLabel(change.pending)}
+                </Button>
+              </AlertDialog.Action>
+            </div>
+          </AlertDialog.Content>
+        </AlertDialog.Portal>
+      </AlertDialog.Root>
+
+      {/* Add, edit, or "Mark completed and add feedback": one form, which gives focus back to this row's menu button. */}
+      <FeedbackDialog
+        target={feedback ? { mode: feedback, row } : null}
+        onClose={() => setFeedback(null)}
+        returnFocus={() => trigger.current?.focus()}
+      />
 
       {/* "Invitation and calendar file": the invitation step on its own, showing what the server made, with no move button. */}
       <FormDialog
