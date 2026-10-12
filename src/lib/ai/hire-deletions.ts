@@ -391,6 +391,23 @@ export type DeletionGate = (
 ) => Decision | Promise<Decision>;
 
 /**
+ * True when a gate that lets one change of its kind through per request has already let one through that still
+ * stands. `passed` holds the ids of the calls it let through in this request. The SDK asks about each call once
+ * per request, so any of them that still stands is another call, even under a call id a model used again. One of
+ * them no longer stands when the
+ * messages now show it was denied after all: the record of what was proposed could not be kept (products.ts,
+ * `bindApprovals`, which asks this gate first and records afterwards), so no card was ever shown for it. Before,
+ * a plain count was kept, and a change sent again after such a failure was told one was already prepared.
+ * Two calls made in one step are asked about before either's result is in the messages: the second is then still
+ * refused, which errs on the safe side.
+ */
+export function oneStillStands(passed: ReadonlySet<string>, messages: readonly ModelMessage[]): boolean {
+  if (passed.size === 0) return false;
+  const denied = deniedHere(thisTurn(messages));
+  return [...passed].some((toolCallId) => !denied.has(toolCallId));
+}
+
+/**
  * An agent's approval map with the two delete tools gated: the first deletion
  * of a request goes to the user as a card, and any other is denied before a
  * card exists. Built once per request, so the count starts at zero each time;
@@ -410,20 +427,20 @@ export function guardDeletions(
   if (!approval) return undefined;
   const names = HIRE_DELETE_TOOL_NAMES.filter((name) => name in approval);
   if (names.length === 0) return approval;
-  let asked = 0;
+  const passed = new Set<string>();
   // One gate per tool, because the SDK does not say which tool it is asking about; one count between them.
   const gateFor = (tool: string): DeletionGate => async (input, { toolCallId, messages }) => {
     const id = (input as { id?: unknown } | null)?.id;
     const kind = kindOfDeletion(tool);
     // In this order: one a turn, then an id that was really looked up, then a lookup that was not ambiguous.
-    const inTurn = asked > 0 ? ONE_DELETION : deletionProblem(messages, { toolCallId, id });
+    const inTurn = oneStillStands(passed, messages) ? ONE_DELETION : deletionProblem(messages, { toolCallId, id });
     const problem =
       inTurn === ONE_DELETION ? inTurn : ((lookedUp(messages, kind, id) ? null : notLookedUp(kind, id)) ?? inTurn);
     if (problem) return { type: 'denied', reason: problem };
     // The SDK waits for each call's answer before asking about the next, so the count is safe across this read.
     const decision = check ? cardDecision(await check(tool, id), cardShown(messages, toolCallId)) : 'user-approval';
     if (typeof decision === 'object' && decision.type === 'denied') return decision;
-    asked += 1;
+    passed.add(toolCallId);
     return decision;
   };
   return { ...approval, ...Object.fromEntries(names.map((name) => [name, gateFor(name)])) };

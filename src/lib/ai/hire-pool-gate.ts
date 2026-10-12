@@ -20,7 +20,7 @@
  */
 import type { ModelMessage } from 'ai';
 import {
-  NAMESAKE_APPEARED, ambiguousLookup, cardCheck, cardDecision, cardShown, deniedHere, partsOf, thisTurn,
+  NAMESAKE_APPEARED, ambiguousLookup, cardCheck, cardDecision, cardShown, deniedHere, oneStillStands, partsOf, thisTurn,
   type CardCheck, type Decision, type DeletionGate,
 } from '@/lib/ai/hire-deletions';
 import { nameIn, type ItemKind } from '@/lib/chat/change-titles';
@@ -181,12 +181,12 @@ export function guardPoolChanges(
   if (!approval) return undefined;
   const names = HIRE_POOL_TOOL_NAMES.filter((name) => name in approval);
   if (names.length === 0) return approval;
-  let asked = 0;
+  const passed = new Set<string>();
   // One gate per tool, because the SDK does not say which tool it is asking about; one count between them.
   const gateFor = (tool: string): DeletionGate => async (input, { toolCallId, messages }) => {
     const { id, job_id: jobId } = (input ?? {}) as { id?: unknown; job_id?: unknown };
     // In this order: one a turn, then ids that were really looked up, then a lookup that was not ambiguous.
-    const inTurn = asked > 0 ? ONE_POOL_CHANGE : poolChangeProblem(messages, { toolCallId, id });
+    const inTurn = oneStillStands(passed, messages) ? ONE_POOL_CHANGE : poolChangeProblem(messages, { toolCallId, id });
     const problem =
       inTurn === ONE_POOL_CHANGE
         ? inTurn
@@ -197,7 +197,7 @@ export function guardPoolChanges(
     // The SDK waits for each call's answer before asking about the next, so the count is safe across this read.
     const decision = check ? poolCardDecision(await check(tool, id), cardShown(messages, toolCallId)) : 'user-approval';
     if (typeof decision === 'object' && decision.type === 'denied') return decision;
-    asked += 1;
+    passed.add(toolCallId);
     return decision;
   };
   return { ...approval, ...Object.fromEntries(names.map((name) => [name, gateFor(name)])) };

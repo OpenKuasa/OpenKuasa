@@ -34,7 +34,7 @@
  */
 import type { ModelMessage } from 'ai';
 import {
-  ambiguousLookup, cardCheck, cardShown, deniedHere, notLookedUp, partsOf, thisTurn,
+  ambiguousLookup, cardCheck, cardShown, deniedHere, notLookedUp, oneStillStands, partsOf, thisTurn,
   type CardCheck, type Decision, type DeletionGate,
 } from '@/lib/ai/hire-deletions';
 import { lookedUpAs } from '@/lib/ai/hire-pool-gate';
@@ -653,14 +653,14 @@ export function guardInterviewChanges(
   if (!approval) return undefined;
   const names = HIRE_INTERVIEW_TOOL_NAMES.filter((name) => name in approval);
   if (names.length === 0) return approval;
-  let asked = 0;
+  const passed = new Set<string>();
   // One gate per tool, because the SDK does not say which tool it is asking about; one count between them.
   const gateFor = (tool: string): DeletionGate => async (input, { toolCallId, messages }) => {
     const id = interviewTarget(tool, input);
     const onApplication = actsOnApplication(tool);
     // In this order: one a turn, then an id that was really looked up as the right kind, then a lookup that was not
     // ambiguous, then a link somebody gave.
-    const inTurn = asked > 0 ? ONE_INTERVIEW_CHANGE : interviewChangeProblem(messages, { toolCallId, id });
+    const inTurn = oneStillStands(passed, messages) ? ONE_INTERVIEW_CHANGE : interviewChangeProblem(messages, { toolCallId, id });
     const problem =
       inTurn === ONE_INTERVIEW_CHANGE
         ? inTurn
@@ -673,7 +673,7 @@ export function guardInterviewChanges(
     // The SDK waits for each call's answer before asking about the next, so the count is safe across this read.
     const decision = check ? interviewCardDecision(await check(tool, input), cardShown(messages, toolCallId)) : 'user-approval';
     if (typeof decision === 'object' && decision.type === 'denied') return decision;
-    asked += 1;
+    passed.add(toolCallId);
     return decision;
   };
   return { ...approval, ...Object.fromEntries(names.map((name) => [name, gateFor(name)])) };
