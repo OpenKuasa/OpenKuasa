@@ -19,6 +19,7 @@ import {
   RECEIPT_FILE_MESSAGES,
   RECEIPT_NAME_MAX,
   cleanFileName,
+  cleanTypedText,
   isInboxReceiptPath,
   receiptDownloadName,
 } from './receipt-files';
@@ -33,8 +34,8 @@ import {
   PG_UNIQUE,
   READ_FAILED,
   TOO_LARGE,
+  WRITE_FAILED,
   pgCode,
-  writeFailed,
 } from './result';
 
 export const RECEIPT_INBOX_MESSAGES = {
@@ -119,7 +120,7 @@ export const reviewReceiptInput = z
     {
       id,
       vendor: z
-        .union([z.string({ error: M.vendor }).trim().max(RECEIPT_NAME_MAX, M.vendor), z.null()], { error: M.vendor })
+        .union([z.string({ error: M.vendor }).transform(cleanTypedText).pipe(z.string().max(RECEIPT_NAME_MAX, M.vendor)), z.null()], { error: M.vendor })
         .transform((v) => (v === null || v === '' ? null : v))
         .default(null),
       receipt_date: z
@@ -148,7 +149,10 @@ const REFUSALS: Record<string, string> = {
 
 function inboxWriteFailed(fnName: string, error: unknown): { ok: false; error: string } {
   const refusal = REFUSALS[pgCode(error) ?? ''];
-  return refusal ? { ok: false, error: refusal } : writeFailed(fnName, error);
+  if (refusal) return { ok: false, error: refusal };
+  // The code only: the error object can carry a path or a file name.
+  console.error(`[finance] ${fnName} failed:`, pgCode(error) ?? 'no code');
+  return { ok: false, error: WRITE_FAILED };
 }
 
 /* ---- writes ----------------------------------------------------------- */
@@ -180,6 +184,11 @@ export async function registerReceipt(
       .eq('org_id', ctx.orgId)
       .eq('file_path', parsed.path)
       .limit(1);
+    if (existing.error) {
+      // Not knowing is not the same as the file being gone: trying again records the same path.
+      console.error('[finance] registerReceipt look-up failed:', pgCode(existing.error) ?? 'no code');
+      return { ok: false, error: M.notSaved };
+    }
     const found = existing.data?.[0] as { id: string } | undefined;
     if (found) return { ok: true, data: { id: found.id } };
     return { ok: false, error: M.fileGone };
