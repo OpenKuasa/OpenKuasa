@@ -319,10 +319,10 @@ describe('when the people layout reads the unread count', () => {
 });
 
 describe('nav badges set from a page', () => {
-  const server = { pendingProposals: 3, unreadAnnouncements: 0 };
+  const server = { pendingProposals: 3, unreadAnnouncements: 0, awaitingAcknowledgement: 0 };
   it('keeps the server value of the marketing badge whatever a page sets', () => {
     expect(mergeBadges(server, {})).toEqual(server);
-    expect(mergeBadges(server, setOverride({}, 'unreadAnnouncements', 5))).toEqual({ pendingProposals: 3, unreadAnnouncements: 5 });
+    expect(mergeBadges(server, setOverride({}, 'unreadAnnouncements', 5))).toEqual({ pendingProposals: 3, unreadAnnouncements: 5, awaitingAcknowledgement: 0 });
   });
   it('puts the count back to 0 when the page goes away', () => {
     const set = setOverride({}, 'unreadAnnouncements', 5);

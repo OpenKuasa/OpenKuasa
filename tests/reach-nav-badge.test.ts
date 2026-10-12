@@ -9,15 +9,16 @@ describe('AI Agents nav badge', () => {
     expect(agents?.badge).toBe('pendingProposals');
   });
 
-  it('is one of exactly two badged nav items across every product (the other is Lekiu Announcements)', () => {
+  it('is one of exactly three badged nav items across every product (the others are Lekiu Announcements and My Documents)', () => {
     const badged = PRODUCTS.flatMap((p) => p.sections.flatMap((s) => s.items)).filter((i) => i.badge);
     expect(badged.map((i) => [i.slug, i.badge]).sort()).toEqual([
       ['agents', 'pendingProposals'],
       ['announcements', 'unreadAnnouncements'],
+      ['my-documents', 'awaitingAcknowledgement'],
     ]);
   });
 
   it('still gets the marketing count from the server value, whatever a page sets', () => {
-    expect(mergeBadges({ pendingProposals: 4, unreadAnnouncements: 0 }, { unreadAnnouncements: 2 }).pendingProposals).toBe(4);
+    expect(mergeBadges({ pendingProposals: 4, unreadAnnouncements: 0, awaitingAcknowledgement: 0 }, { unreadAnnouncements: 2 }).pendingProposals).toBe(4);
   });
 });

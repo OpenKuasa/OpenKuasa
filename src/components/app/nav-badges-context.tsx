@@ -7,7 +7,7 @@ import { type BadgeOverrides, type NavBadges, clearOverride, mergeBadges, setOve
 export type { NavBadges };
 
 /** Live counts for nav-item badges, keyed by NavBadgeKey. The server provides the first values; a page can set one. */
-const EMPTY: NavBadges = { pendingProposals: 0, unreadAnnouncements: 0 };
+const EMPTY: NavBadges = { pendingProposals: 0, unreadAnnouncements: 0, awaitingAcknowledgement: 0 };
 
 const NavBadgesContext = createContext<NavBadges>(EMPTY);
 const NavBadgeSetter = createContext<{

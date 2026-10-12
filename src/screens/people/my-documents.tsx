@@ -1,45 +1,50 @@
-import { CalendarClock, Download, FileText, Upload } from 'lucide-react';
+import { CalendarClock, FileText } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
+import { UploadDocumentButton } from '@/components/people/document-form';
+import { DocumentRow } from '@/components/people/document-row';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
-import { LiveDot } from '@/components/ui/live-dot';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Table, TableBody, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { todayInMalaysia } from '@/lib/people/dates';
-import { type MyDocumentRow, buildMyDocumentsModel } from '@/lib/people/documents';
-import { LOAD_FAILED, LaterButton, Muted, NotLinkedCard, StatusPill, loadPeople } from './parts';
+import { buildMyDocumentsModel } from '@/lib/people/documents';
+import { myDocumentsControls } from '@/lib/people/documents-screens';
+import { LOAD_FAILED, Muted, NotLinkedCard, loadPeople } from './parts';
 
-/** The pill for a row: what needs the person first, then the expiry state. */
-function statusOf(row: MyDocumentRow): { tone: 'good' | 'pending' | 'bad' | 'neutral'; label: string } {
-  if (row.awaiting_acknowledgement) return { tone: 'pending', label: 'Needs your acknowledgement' };
-  if (row.expiry === 'expired') return { tone: 'bad', label: 'Expired' };
-  if (row.expiry === 'expiring') return { tone: 'bad', label: 'Expiring soon' };
-  return { tone: 'neutral', label: 'Available' };
-}
-
-/** The signed-in employee's own documents, issued letters and paid payslips. */
+/**
+ * The signed-in employee's own documents, issued letters and paid payslips. Anything awaiting their acknowledgement
+ * comes first, with its button. Upload is drawn only when `myDocumentsControls` says so: never in the sample
+ * company (not even as a disabled sample), and not for an account with no employee record.
+ */
 export default async function MyDocumentsScreen() {
-  const { model } = await loadPeople('my-documents', async (data, now, ctx) => {
+  const { model: loadedModel, viewer } = await loadPeople('my-documents', async (data, now, ctx) => {
     const today = todayInMalaysia(now);
     // Not linked to an employee: nothing to read, the builder answers "not linked".
     if (ctx.viewer.employeeId === null) {
-      return buildMyDocumentsModel({ documents: [], letters: [], payslips: [], today, viewer: ctx.viewer });
+      return {
+        orgId: ctx.orgId,
+        my: buildMyDocumentsModel({ documents: [], letters: [], payslips: [], today, viewer: ctx.viewer }),
+      };
     }
     const [documents, letters, payslips] = await Promise.all([
       data.listDocuments(),
       data.listLetters(),
       data.listPayslips(ctx.viewer.employeeId),
     ]);
-    return buildMyDocumentsModel({ documents, letters, payslips, today, viewer: ctx.viewer });
+    return { orgId: ctx.orgId, my: buildMyDocumentsModel({ documents, letters, payslips, today, viewer: ctx.viewer }) };
   });
+
+  const model = loadedModel?.my ?? null;
+  const orgId = loadedModel?.orgId ?? null;
+  const controls = myDocumentsControls(viewer, model, orgId);
 
   const header = (
     <PageHeader
       title="My Documents"
       subtitle="Your documents, letters and payslips."
       actions={
-        <LaterButton variant="outline" size="sm" icon={Upload}>
-          Upload
-        </LaterButton>
+        controls.upload && orgId && model && model.linked ? (
+          <UploadDocumentButton orgId={orgId} employeeId={model.employee_id} />
+        ) : null
       }
     />
   );
@@ -100,29 +105,7 @@ export default async function MyDocumentsScreen() {
                   </TableHeader>
                   <TableBody>
                     {loaded.rows.map((row) => (
-                      <TableRow key={row.id}>
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
-                              <FileText className="size-4" />
-                            </span>
-                            <span className="flex min-w-0 items-center gap-2">
-                              <span className="truncate font-medium">{row.title}</span>
-                              {row.awaiting_acknowledgement ? <LiveDot active /> : null}
-                            </span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap text-muted-foreground">{row.type_label}</TableCell>
-                        <TableCell className="whitespace-nowrap text-muted-foreground">{row.date_label}</TableCell>
-                        <TableCell>
-                          <StatusPill tone={statusOf(row).tone}>{statusOf(row).label}</StatusPill>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <LaterButton variant="ghost" size="sm" icon={Download} compact>
-                            Download
-                          </LaterButton>
-                        </TableCell>
-                      </TableRow>
+                      <DocumentRow key={`${row.kind}-${row.id}`} row={row} />
                     ))}
                   </TableBody>
                 </Table>
@@ -132,7 +115,7 @@ export default async function MyDocumentsScreen() {
                   {loaded.documents} documents · {loaded.letters} letters · {loaded.payslips} payslips
                 </span>
                 <span className="flex items-center gap-1.5">
-                  <CalendarClock className="size-4" />
+                  <CalendarClock className="size-4" aria-hidden />
                   {loaded.awaiting_acknowledgement} awaiting your acknowledgement
                 </span>
               </div>
