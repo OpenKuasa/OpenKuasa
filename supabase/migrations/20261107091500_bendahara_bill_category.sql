@@ -174,3 +174,16 @@ begin
 
   return bid;
 end $$;
+
+-- The backfill above switched finance_bill_guard off for one statement. If it
+-- were somehow still off, this stops the migration and everything rolls back.
+do $$
+begin
+  if exists (
+    select 1 from pg_trigger
+    where tgrelid = 'public.supplier_bills'::regclass
+      and tgname = 'finance_bill_guard' and tgenabled <> 'O'
+  ) then
+    raise exception 'finance_bill_guard was left disabled';
+  end if;
+end $$;
