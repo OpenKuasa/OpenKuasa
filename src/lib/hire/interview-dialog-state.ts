@@ -413,7 +413,8 @@ export function stepAfter(mode: InterviewFormMode, change: Pick<InterviewChange,
  * Whether an invitation or a calendar file may be handed over at `now` for an
  * interview with this start and length: the start is an instant that has not
  * passed, and the length is a positive whole number of minutes. Asked at the
- * press, never while drawing, so the clock is read in a handler.
+ * press, never while drawing, with `clockAt`'s time. A `now` that is not a
+ * real date hands nothing over.
  */
 export function mayHandOver(start: string | null, minutes: number | null, now: Date): boolean {
   if (start === null || minutes === null) return false;
@@ -421,13 +422,18 @@ export function mayHandOver(start: string | null, minutes: number | null, now: D
   return !Number.isNaN(at) && at >= now.getTime() && Number.isInteger(minutes) && minutes > 0;
 }
 
-/** `stepAfter` at a moment: the invitation step only while the interview it invites to is still ahead. */
-export function stepAfterAt(
-  mode: InterviewFormMode,
-  change: Pick<InterviewChange, 'invitation' | 'scheduled_at' | 'duration_minutes'>,
-  now: Date,
-): 'invitation' | 'done' {
-  return stepAfter(mode, change) === 'invitation' && mayHandOver(change.scheduled_at, change.duration_minutes, now) ? 'invitation' : 'done';
+/**
+ * The time now, by the server's clock: the instant the server drew the page
+ * with, plus how long the browser has had it. Only the DIFFERENCE of two
+ * browser readings is used, so a browser clock that is hours wrong (or in
+ * another zone) changes nothing. `receivedMs` is the browser's reading when
+ * the page arrived (null: not yet noted, so no time has passed). A server
+ * instant that cannot be read gives an invalid date, and `mayHandOver` then
+ * hands nothing over.
+ */
+export function clockAt(serverNow: string, receivedMs: number | null, browserMs: number): Date {
+  const elapsed = receivedMs === null ? 0 : Math.max(0, browserMs - receivedMs);
+  return new Date(instantMs(serverNow) + elapsed);
 }
 
 /** Said at a row whose "Invitation and calendar file" was chosen after its start had passed. */

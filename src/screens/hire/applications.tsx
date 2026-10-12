@@ -41,8 +41,14 @@ const BY_JOB_SERIES: Series[] = [
   { key: 'applications', label: 'Applications', color: 'var(--chart-2)' },
 ];
 
-/** Today in Kuala Lumpur, for the interview form's date field: the browser's own "today" can be another day. */
-const klToday = () => klDateOf(new Date().toISOString());
+/**
+ * The server's clock for the interview form: the instant itself (the form's checks tell the time from it) and
+ * today in Kuala Lumpur for the date field. The browser's own clock and its "today" can be wrong.
+ */
+const serverClock = () => {
+  const serverNow = new Date().toISOString();
+  return { serverNow, today: klDateOf(serverNow) };
+};
 
 export default async function ApplicationsScreen() {
   const [{ model }, viewer] = await Promise.all([
@@ -70,7 +76,7 @@ export default async function ApplicationsScreen() {
         subtitle="All incoming applications across your open roles, Saudara."
       />
       {/* The screen's one interview dialog, closed until a panel's button opens it. Only for someone who may edit. */}
-      {canEdit ? <InterviewDialogHost today={klToday()} workspace={viewer.orgName} /> : null}
+      {canEdit ? <InterviewDialogHost {...serverClock()} workspace={viewer.orgName} /> : null}
 
       <BentoGrid>
         {/* KPI row: headline figures only, the tables hold no history to chart */}

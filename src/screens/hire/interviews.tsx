@@ -120,6 +120,9 @@ export default async function InterviewsScreen() {
   const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
   // Scheduled and still ahead. A scheduled interview whose time has passed is in the table below, tagged "Needs an outcome".
   const upcoming = model?.upcoming ?? [];
+  // The server's clock, handed to the browser: whether an invitation can still be handed over is told from it, not
+  // from the browser's own clock, which may be wrong.
+  const serverNow = new Date().toISOString();
 
   return (
     <ScreenContainer>
@@ -136,6 +139,7 @@ export default async function InterviewsScreen() {
       {canEdit && model ? (
         <InterviewDialogHost
           today={model.today}
+          serverNow={serverNow}
           workspace={viewer.orgName}
           picker={{ applications: model.applications, cut: model.applicationsCut }}
         />
@@ -263,7 +267,7 @@ export default async function InterviewsScreen() {
                       </TableCell>
                       <TableCell className="text-right">
                         {/* The row as plain values, and the workspace's name for the calendar file. Only for someone who may edit; each action checks again. */}
-                        {canEdit ? <InterviewRowMenu row={r} workspace={viewer.orgName} /> : null}
+                        {canEdit ? <InterviewRowMenu row={r} workspace={viewer.orgName} serverNow={serverNow} /> : null}
                       </TableCell>
                     </TableRow>
                   ))}

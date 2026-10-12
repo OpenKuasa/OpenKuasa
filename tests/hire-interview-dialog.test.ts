@@ -11,7 +11,7 @@ import {
   menuGroups, menuName, moveInput, moveLabel, moveResult, noticeOf, offersMove, onOf, openerId, outcomeInput, panelLine, panelMore, panelRows,
   pastInput, pickerLabel, pickerNotes, pickerOptions, placeHelper, placeLabel, refreshAfter, refusalWord, rowMenu, sayOnNotice, scheduleInput,
   stepAfter, stillScheduledNotice, submission, submitLabel, tagsFor, timeCell, timeHelper, valuesFrom, type InterviewFormValues,
-  NO_INVITATION, mayHandOver, stepAfterAt,
+  NO_INVITATION, clockAt, mayHandOver,
 } from '@/lib/hire/interview-dialog-state';
 
 const APP = '44444444-4444-4444-8444-444444444444';
@@ -567,6 +567,20 @@ describe('a time that is not an instant', () => {
     }
     expect(rowMenu(row({ scheduledAt: '2026-10-20T15:00:00', statusKey: 'cancelled' }))).toEqual(['reopen']);
   });
+  it('tells the time by the server\'s clock and how long the page has been open, whatever the browser\'s clock says', () => {
+    const SERVER = '2026-10-12T02:15:00.000Z';
+    // The browser's clock is nine hours fast: only the ten minutes between its two readings count.
+    const received = Date.parse('2026-10-12T11:15:00Z');
+    expect(clockAt(SERVER, received, received + 600_000).toISOString()).toBe('2026-10-12T02:25:00.000Z');
+    expect(clockAt(SERVER, null, received).toISOString()).toBe(SERVER);
+    // A browser clock that was set back meanwhile never takes the time backwards.
+    expect(clockAt(SERVER, received, received - 5_000).toISOString()).toBe(SERVER);
+    for (const odd of ['2026-10-12T02:15:00', '', 'now']) expect(Number.isNaN(clockAt(odd, received, received).getTime()), odd).toBe(true);
+  });
+  it('a newly scheduled interview that the server gave no invitation (its start had just passed) is done, with no error', () => {
+    expect(stepAfter('schedule', change({ invitation: null, scheduled_at: '2026-10-12T02:12:00+00:00' }))).toBe('done');
+    expect(noticeOf(change({ invitation: null }))).toContain('Scheduled an interview with Aina Rahman');
+  });
   it('a scheduled interview whose start has passed offers no invitation either', () => {
     expect(rowMenu(row({ needsOutcome: true }))).toEqual(REST);
     expect(rowMenu(row({ needsOutcome: true, applicationOutcome: 'rejected' }))).toEqual(['completed', 'no_show', 'cancel']);
@@ -578,12 +592,8 @@ describe('a time that is not an instant', () => {
     expect(mayHandOver(START, 60, new Date('2026-10-20T07:00:01Z'))).toBe(false);
     for (const minutes of [0, -30, 22.5, Number.NaN, null]) expect(mayHandOver(START, minutes, NOW), String(minutes)).toBe(false);
     for (const odd of [...ZONELESS, null]) expect(mayHandOver(odd, 60, NOW), String(odd)).toBe(false);
-    // After a save: the step is shown only while the interview is ahead, and never for a past one.
-    expect(stepAfterAt('schedule', change(), NOW)).toBe('invitation');
-    expect(stepAfterAt('change', change(), new Date('2026-10-20T07:00:01Z'))).toBe('done');
-    expect(stepAfterAt('schedule', change({ invitation: null }), NOW)).toBe('done');
-    expect(stepAfterAt('schedule', change({ duration_minutes: null }), NOW)).toBe('done');
-    expect(stepAfterAt('past', change(), NOW)).toBe('done');
+    // A clock that cannot be told hands nothing over.
+    expect(mayHandOver(START, 60, new Date(Number.NaN))).toBe(false);
     expect(NO_INVITATION).toBe('This interview\'s time has passed, so there is no invitation or calendar file for it. Mark what happened, or reschedule it.');
   });
 });

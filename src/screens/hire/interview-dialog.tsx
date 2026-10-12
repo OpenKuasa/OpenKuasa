@@ -15,7 +15,7 @@ import {
   canSubmit, copyLabel, dateBounds, dateHelper, dialogDescription, dialogTitle, discardTitle, durationOptions, emptyValues, fieldId,
   fieldOfRefusal, focusIdAfter, interviewProblems, interviewResult, inviteLead, inviteSourceOfChange, inviteTitle, isDirty, keptChoice,
   moveInput, moveLabel, moveResult, noticeOf, offersMove, onOf, pickerNotes, pickerOptions, placeHelper, placeLabel, refreshAfter, refusalWord,
-  mayHandOver, stepAfterAt, submission, submitLabel, timeHelper, valuesFrom,
+  clockAt, mayHandOver, stepAfter, submission, submitLabel, timeHelper, valuesFrom,
   type FieldPart, type InterviewField, type InterviewFormMode, type InterviewFormValues, type InterviewProblems, type PastOutcome, type Submission,
 } from '@/lib/hire/interview-dialog-state';
 import { icsFileName, interviewIcs, type InviteSource } from '@/lib/hire/interview-invite';
@@ -54,6 +54,25 @@ const HELP = 'text-xs text-muted-foreground';
 const FIELD = 'min-w-0 space-y-1.5';
 const HAPPENED: Record<PastOutcome, string> = { completed: 'Completed', no_show: 'No-show' };
 const OUTCOMES: readonly PastOutcome[] = ['completed', 'no_show'];
+
+// ─── the time now ────────────────────────────────────────────────────────────
+
+/**
+ * The time now by the server's clock, for a handler to ask. `serverNow` is
+ * the instant the server drew the screen with; the browser adds only how long
+ * it has had the page (the difference of two of its own readings), so a
+ * browser clock that is wrong or in another zone neither hides an invitation
+ * nor shows one for an interview that has started. Without `serverNow` (a
+ * caller that has none) the browser's own clock is all there is.
+ */
+export function useServerClock(serverNow: string | undefined): () => Date {
+  const received = useRef<number | null>(null);
+  useEffect(() => {
+    // Noted when the page (or a fresh copy of it) arrives.
+    received.current = Date.now();
+  }, [serverNow]);
+  return () => (serverNow ? clockAt(serverNow, received.current, Date.now()) : new Date());
+}
 
 // ─── what is open ────────────────────────────────────────────────────────────
 
@@ -417,8 +436,10 @@ type Send = Exclude<Submission, { kind: 'nothing' }>;
  * as soon as it is put right.
  */
 function InterviewForm({
-  mode, fixed, stored, picker, today, pending, refusal, onDirtyChange, onClearRefusal, onPick, onCancel, onSend,
+  mode, fixed, stored, picker, today, clock, pending, refusal, onDirtyChange, onClearRefusal, onPick, onCancel, onSend,
 }: {
+  /** The time now, by the server's clock. Only ever called from a handler. */
+  clock: () => Date;
   mode: InterviewFormMode;
   /** The application a card or a panel fixed. Null from the header (it is picked) and when changing (the row has it). */
   fixed: { id: string; name: string; job: string } | null;
@@ -447,7 +468,7 @@ function InterviewForm({
 
   /** Only ever called from a handler: it reads the clock. */
   const check = (next: InterviewFormValues) =>
-    interviewProblems(next, new Date(), { mode, picking, stored: stored ? initial : undefined });
+    interviewProblems(next, clock(), { mode, picking, stored: stored ? initial : undefined });
 
   // Focus starts in the first field: "Find an application" from the header, "Date" otherwise.
   useEffect(() => {
@@ -539,8 +560,10 @@ type MoveState = { state: 'idle' } | { state: 'moving' } | { state: 'moved' } | 
  * clipboard, the text can still be selected and copied by hand.
  */
 export function InvitationStep({
-  text, source, moveFor, onDone, onBusy,
+  text, source, moveFor, onDone, onBusy, clock,
 }: {
+  /** The time now, by the server's clock, asked at the Download press. Left out: the browser's own clock. */
+  clock?: () => Date;
   /** The invitation, as the server or `invitationText` wrote it. Null: there is none, and nothing is drawn in its place. */
   text: string | null;
   /** What the calendar file is made from. Null: no file is offered, and nothing is drawn in its place. */
@@ -596,7 +619,7 @@ export function InvitationStep({
     if (!source) return;
     // Asked at the press, with the clock as it is now. A file is made only for a start that is an instant still ahead
     // and a whole length; the builder may itself answer that there is none. Then nothing is saved and the button goes.
-    const now = new Date();
+    const now = clock ? clock() : new Date();
     const ahead = mayHandOver(source.scheduled_at, source.duration_minutes, now);
     const body: string | null = ahead ? interviewIcs(source, now) : null;
     const name: string | null = body ? icsFileName(source) : null;
@@ -723,14 +746,17 @@ const NO_PICKER: { applications: PickerApplication[]; cut: boolean } = { applica
  * sentence goes to the screen's notice line either way.
  */
 export function InterviewDialogHost({
-  today, workspace, picker = NO_PICKER,
+  today, workspace, picker = NO_PICKER, serverNow,
 }: {
+  /** The instant the server drew the screen with: the form's checks and the Download press tell the time from it. */
+  serverNow?: string;
   today: string;
   workspace: string | null;
   picker?: { applications: PickerApplication[]; cut: boolean };
 }) {
   const req = useSyncExternalStore(subscribe, () => request, () => null);
   const router = useRouter();
+  const clock = useServerClock(serverNow);
   const [pending, start] = useTransition();
   /** True from the press until the answer: `pending` only turns true on the next render. */
   const inFlight = useRef(false);
@@ -790,8 +816,10 @@ export function InterviewDialogHost({
         // The screen's notice line: read out now, and still there when the dialog has closed.
         announceDeletion(noticeOf(result.change));
         setDirty(false);
-        // The invitation step only with an invitation for an interview still ahead; the clock is read here, in the handler.
-        if (stepAfterAt(mode, result.change, new Date()) === 'invitation') setSaved(result.change);
+        // The server decides whether there is an invitation, by its own clock: none for a start that had already
+        // passed when it was saved (a new interview may start up to five minutes ago). Then the interview is saved, the
+        // notice says so, and the dialog closes with no invitation step and no error.
+        if (stepAfter(mode, result.change) === 'invitation') setSaved(result.change);
         else close();
       } catch {
         // The answer was lost. The change may have been saved: say so and fetch the screen again.
@@ -826,6 +854,7 @@ export function InterviewDialogHost({
             moveFor={offersMove(saved) ? saved.application_id : null}
             onDone={requestClose}
             onBusy={setMoving}
+            clock={clock}
           />
         ) : req ? (
           <InterviewForm
@@ -834,6 +863,7 @@ export function InterviewDialogHost({
             stored={row}
             picker={picker}
             today={today}
+            clock={clock}
             pending={pending}
             refusal={refusal}
             onDirtyChange={setDirty}

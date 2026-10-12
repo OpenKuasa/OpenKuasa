@@ -16,7 +16,7 @@ import type { InterviewRow } from '@/lib/hire/lists';
 import { cn } from '@/lib/utils';
 import { FormDialog } from '@/screens/hire/candidate-forms';
 import { announceDeletion, claimResult, useNewest } from '@/screens/hire/delete-dialog';
-import { InvitationStep, openInterview } from '@/screens/hire/interview-dialog';
+import { InvitationStep, openInterview, useServerClock } from '@/screens/hire/interview-dialog';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -149,8 +149,16 @@ function useInterviewChange() {
  * tap. Cancelling asks first. The row stays in the list after every change
  * here, so focus goes back to this button.
  */
-export function InterviewRowMenu({ row, workspace }: { row: InterviewRow; workspace: string | null }) {
+export function InterviewRowMenu({
+  row, workspace, serverNow,
+}: {
+  row: InterviewRow;
+  workspace: string | null;
+  /** The instant the server drew the screen with: whether an invitation can still be handed over is told from it. */
+  serverNow?: string;
+}) {
   const change = useInterviewChange();
+  const clock = useServerClock(serverNow);
   const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState<'invitation' | 'cancel' | null>(null);
   /** What the invitation panel shows: made when the item is chosen, from the row as it then is. */
@@ -210,7 +218,7 @@ export function InterviewRowMenu({ row, workspace }: { row: InterviewRow; worksp
               // Made now, with the clock as it is now, and never from the notes. Nothing is handed over for a start
               // that has passed or cannot be read: the row says so, focus stays on this button, and nothing opens.
               const source = inviteSourceOfRow(row, workspace);
-              const now = new Date();
+              const now = clock();
               const text: string | null = mayHandOver(source.scheduled_at, source.duration_minutes, now)
                 ? invitationText(source, false, now)
                 : null;
@@ -319,7 +327,9 @@ export function InterviewRowMenu({ row, workspace }: { row: InterviewRow; worksp
         returnFocus={() => trigger.current?.focus()}
       >
         {(requestClose) =>
-          invite ? <InvitationStep text={invite.text} source={invite.source} moveFor={null} onDone={requestClose} /> : null
+          invite ? (
+            <InvitationStep text={invite.text} source={invite.source} moveFor={null} onDone={requestClose} clock={clock} />
+          ) : null
         }
       </FormDialog>
     </div>
