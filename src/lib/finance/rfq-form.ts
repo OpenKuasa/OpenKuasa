@@ -113,10 +113,9 @@ export function rfqPayload(form: RfqForm) {
 /**
  * The first thing wrong with the form, in the schema's own sentence, or null
  * when it can be sent. Sending needs no amount: an RFQ may have no prices, so
- * `sending` makes no difference here; it is taken because the shared card
- * passes it.
+ * unlike a quotation there is no stricter check for "mark as sent".
  */
-export function rfqFormError(form: RfqForm, _sending = false): string | null {
+export function rfqFormError(form: RfqForm): string | null {
   const parsed = saveRfqInput.safeParse(rfqPayload(form));
   if (!parsed.success) return parsed.error.issues[0]?.message ?? RFQ_MESSAGES.lines;
   return null;

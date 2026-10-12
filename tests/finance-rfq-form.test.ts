@@ -98,7 +98,6 @@ describe('what the RFQ form sends', () => {
 describe('what is wrong with an RFQ form', () => {
   it('passes a form with no prices, so an RFQ can be sent without any', () => {
     expect(rfqFormError(filled())).toBeNull();
-    expect(rfqFormError(filled(), true)).toBeNull();
   });
   it('says so in the schema’s own sentences, the first thing first', () => {
     expect(rfqFormError(filled({ supplier_id: '' }))).toBe('Choose a supplier.');

@@ -86,6 +86,20 @@ import {
   saveQuotationInput,
   sendQuotation,
 } from '@/lib/finance/quotations';
+import {
+  RFQ_MESSAGES,
+  type RfqDetail,
+  type SaveAndSendRfqResult,
+  closeRfq,
+  deleteRfq,
+  getRfq,
+  quoteRfq,
+  quoteRfqInput,
+  rfqIdInput,
+  saveRfq,
+  saveRfqInput,
+  sendRfq,
+} from '@/lib/finance/rfqs';
 import { deleteRefund, markRefundPaid, recordRefund, recordRefundInput, voidRefund } from '@/lib/finance/refunds';
 import {
   DRAFT_NEEDS_SIGN_OFF,
@@ -205,6 +219,8 @@ const SALES_PATHS = [
 // A quotation is on its own screen and moves no figure anywhere else: it is not money owed, and no other
 // screen counts or names it. So saving, sending, answering and deleting one refresh Quotations only.
 const QUOTATION_PATHS = ['/finance/quotations'];
+// An RFQ is likewise on its own screen: it is a request, not money owed, and no other screen counts or names it.
+const RFQ_PATHS = ['/finance/rfqs'];
 // Making an invoice from a quotation adds a draft to Invoices (its table and its "by status" chart) and puts
 // that invoice in the quotation's Invoice column. A draft is not receivable, so nothing else moves.
 const CONVERT_PATHS = ['/finance/quotations', '/finance/invoices'];
@@ -270,13 +286,13 @@ async function saveThenPost<I, O>(
  * edit have a use for it. A document that has gone, or been posted since the
  * list was loaded, answers with that sentence and refreshes the list.
  */
-async function draftForEditing<D extends { display_status: string }>(
+async function draftForEditing<D extends { display_status?: string; status?: string }>(
   paths: string[],
   schema: ZodType<{ id: string }>,
   input: unknown,
   get: (ctx: FinanceWriteContext, id: string) => Promise<D | null>,
   messages: { gone: string; locked: string },
-  label: 'bill' | 'invoice' | 'quotation',
+  label: 'bill' | 'invoice' | 'quotation' | 'RFQ',
 ): Promise<FinResult<D>> {
   const ctx = await writeCtx();
   if (!ctx) return FORBIDDEN;
@@ -284,7 +300,8 @@ async function draftForEditing<D extends { display_status: string }>(
   if (!parsed.success) return { ok: false, error: messages.gone };
   try {
     const document = await get(ctx, parsed.data.id);
-    if (document?.display_status === 'draft') return { ok: true, data: document };
+    // A bill, an invoice or a quotation has a display status; an RFQ has only its stored one, and a draft is a draft in both.
+    if (document && (document.display_status ?? document.status) === 'draft') return { ok: true, data: document };
     refresh(paths);
     return { ok: false, error: document ? messages.locked : messages.gone };
   } catch (error) {
@@ -428,6 +445,37 @@ export async function saveAndSendQuotationAction(input: unknown): Promise<SaveAn
 /** One draft quotation with its lines, for the Edit form; see `draftForEditing`. */
 export async function getQuotationAction(input: unknown): Promise<FinResult<QuotationDetail>> {
   return draftForEditing(QUOTATION_PATHS, quotationIdInput, input, getQuotation, QUOTATION_MESSAGES, 'quotation');
+}
+
+/* ---- RFQs -------------------------------------------------------------- */
+
+export async function saveRfqAction(input: unknown) {
+  return run(RFQ_PATHS, saveRfqInput, input, saveRfq);
+}
+/** Marks a draft as sent: it gets its number and is locked. Nothing is emailed. */
+export async function sendRfqAction(input: unknown) {
+  return run(RFQ_PATHS, rfqIdInput, input, sendRfq);
+}
+/** The supplier's answer: a price for every line. The RFQ becomes quoted. */
+export async function quoteRfqAction(input: unknown) {
+  return run(RFQ_PATHS, quoteRfqInput, input, quoteRfq);
+}
+/** The supplier declined, or the RFQ was not taken up. */
+export async function closeRfqAction(input: unknown) {
+  return run(RFQ_PATHS, rfqIdInput, input, closeRfq);
+}
+export async function deleteRfqAction(input: unknown) {
+  return run(RFQ_PATHS, rfqIdInput, input, deleteRfq);
+}
+
+/** Saves the RFQ as a draft, then marks it as sent; see `saveThenPost`. */
+export async function saveAndSendRfqAction(input: unknown): Promise<SaveAndSendRfqResult> {
+  return saveThenPost(RFQ_PATHS, saveRfqInput, input, saveRfq, sendRfq);
+}
+
+/** One draft RFQ with its lines, for the Edit form; see `draftForEditing`. */
+export async function getRfqAction(input: unknown): Promise<FinResult<RfqDetail>> {
+  return draftForEditing(RFQ_PATHS, rfqIdInput, input, getRfq, RFQ_MESSAGES, 'RFQ');
 }
 
 /* ---- credit notes ------------------------------------------------------ */
