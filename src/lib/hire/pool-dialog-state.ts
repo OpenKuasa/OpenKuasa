@@ -147,3 +147,34 @@ export function searchHref(pathname: string, text: string): string {
   const query = poolSearchText(text);
   return query === null ? pathname : `${pathname}?q=${encodeURIComponent(query)}`;
 }
+
+/**
+ * The search box: the text in it, and the searches it has itself put in the
+ * address that the address may still be on its way to (the oldest is the one
+ * the address was last seen at). Each is as the address shows it: trimmed, cut
+ * to 80, null for no search.
+ */
+export type SearchBox = { text: string; sent: (string | null)[] };
+
+/** The box as the page is first drawn: it shows what the address searches for. */
+export const searchBox = (search: string | null): SearchBox => ({ text: search ?? '', sent: [search] });
+
+/** The box after it put `text` in the address itself (typing, Enter, Clear search). What is shown is not touched. */
+export const boxSent = (box: SearchBox, text: string): SearchBox => ({ text: box.text, sent: [...box.sent, poolSearchText(text)] });
+
+/** True when the address shows a search the box did not ask for: a nav link, Back or Forward. */
+export const fromOutside = (sent: (string | null)[], incoming: string | null): boolean => !sent.includes(incoming);
+
+/**
+ * The box once the address reads `incoming`. A search the box itself asked for
+ * (now, or one it has since typed past) leaves the text exactly as typed, so
+ * typing never loses a character or the caret. Anything else came from outside
+ * the box, and the text follows it: otherwise an old word would sit above a
+ * list it did not filter.
+ */
+export function followAddress(box: SearchBox, incoming: string | null): SearchBox {
+  const at = box.sent.lastIndexOf(incoming);
+  if (at < 0) return searchBox(incoming);
+  // Searches older than the one the address now shows have been passed.
+  return at === 0 ? box : { text: box.text, sent: box.sent.slice(at) };
+}

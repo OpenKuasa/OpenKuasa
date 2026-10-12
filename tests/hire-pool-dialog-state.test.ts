@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CHOOSE_A_JOB, NO_JOBS, PICKER_LOADING, PICKER_ROWS, REMOVE_BODY, SHORTLISTED_NOTE, addInput, addLabel, addName, addToPoolInput,
-  addedLabel, boardPoolLine, changeResult, jobOption, moveBody, moveInput, moveLabel, moveTitle, nextAddFocus, personLine,
+  addedLabel, boardPoolLine, boxSent, changeResult, followAddress, fromOutside, searchBox, jobOption, moveBody, moveInput, moveLabel, moveTitle, nextAddFocus, personLine,
   pickerFrom, pickerMatches, pickerView, removeInput, removeLabel, removeTitle, searchHref, shortlistedNote, statusChangeInput,
 } from '@/lib/hire/pool-dialog-state';
 
@@ -151,5 +151,53 @@ describe('the search box\'s address', () => {
     expect(searchHref('/hire/talent-pool', '')).toBe('/hire/talent-pool');
     expect(searchHref('/hire/talent-pool', '   ')).toBe('/hire/talent-pool');
     expect(searchHref('/hire/talent-pool', 'x'.repeat(200))).toBe(`/hire/talent-pool?q=${'x'.repeat(80)}`);
+  });
+});
+
+describe('the search box\'s text follows the address, but never fights the typing', () => {
+  it('starts with what the address searches for', () => {
+    expect(searchBox('aina')).toEqual({ text: 'aina', sent: ['aina'] });
+    expect(searchBox(null)).toEqual({ text: '', sent: [null] });
+  });
+  it('typing in progress: nothing was sent yet and the address has not moved, so the text is left alone', () => {
+    const typing = { text: 'ai', sent: [null] };
+    expect(fromOutside(typing.sent, null)).toBe(false);
+    expect(followAddress(typing, null)).toEqual(typing);
+    // The page is drawn again for another reason (a pool change) with the same address: still left alone.
+    expect(followAddress({ text: 'zar', sent: ['aina'] }, 'aina')).toEqual({ text: 'zar', sent: ['aina'] });
+  });
+  it('the address catching up with what was typed keeps the text as typed, spaces and all', () => {
+    const sent = boxSent({ text: 'aina ', sent: [null] }, 'aina ');
+    expect(sent).toEqual({ text: 'aina ', sent: [null, 'aina'] });
+    // Before the server has answered, the address is still the old one.
+    expect(followAddress(sent, null)).toEqual(sent);
+    // The answer: the address is what the box asked for.
+    expect(followAddress(sent, 'aina')).toEqual({ text: 'aina ', sent: ['aina'] });
+  });
+  it('an earlier answer arriving while more has been typed and sent does not pull the text back', () => {
+    const box = { text: 'aina', sent: [null, 'ai', 'ain'] };
+    expect(followAddress(box, 'ai')).toEqual({ text: 'aina', sent: ['ai', 'ain'] });
+    expect(followAddress({ text: 'aina', sent: ['ai', 'ain'] }, 'ain')).toEqual({ text: 'aina', sent: ['ain'] });
+    // An answer that was skipped (a later search replaced it) is fine too.
+    expect(followAddress(box, 'ain')).toEqual({ text: 'aina', sent: ['ain'] });
+  });
+  it('a nav link to the page with no query empties the box', () => {
+    const box = { text: 'aina', sent: ['aina'] };
+    expect(fromOutside(box.sent, null)).toBe(true);
+    expect(followAddress(box, null)).toEqual({ text: '', sent: [null] });
+  });
+  it('Back or Forward to another query shows that query', () => {
+    expect(followAddress({ text: '', sent: [null] }, 'zarina')).toEqual({ text: 'zarina', sent: ['zarina'] });
+    expect(followAddress({ text: 'aina', sent: ['aina'] }, 'zarina')).toEqual({ text: 'zarina', sent: ['zarina'] });
+  });
+  it('Clear search: the box empties at once and stays empty when the address catches up', () => {
+    const cleared = boxSent({ text: '', sent: ['aina'] }, '');
+    expect(cleared).toEqual({ text: '', sent: ['aina', null] });
+    expect(followAddress(cleared, 'aina')).toEqual(cleared);
+    expect(followAddress(cleared, null)).toEqual({ text: '', sent: [null] });
+  });
+  it('what the box sent is recorded as the address will show it: trimmed, cut to 80, blank as no search', () => {
+    expect(boxSent({ text: '   ', sent: ['aina'] }, '   ').sent).toEqual(['aina', null]);
+    expect(boxSent({ text: 'x', sent: [null] }, 'x'.repeat(200)).sent).toEqual([null, 'x'.repeat(80)]);
   });
 });

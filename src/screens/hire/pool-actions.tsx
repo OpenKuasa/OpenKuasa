@@ -11,8 +11,8 @@ import {
   PICKER_CAPPED, POOL_LABEL, POOL_MEANING, POOL_NOT_SENT, POOL_SEARCH_MAX, POOL_STATUSES, isInPool, type InPool,
 } from '@/lib/hire/pool';
 import {
-  CHOOSE_A_JOB, NO_JOBS, PICKER_LOADING, REMOVE_BODY, addInput, addLabel, addName, addToPoolInput, addedLabel, changeResult,
-  jobOption, moveBody, moveInput, moveLabel, moveTitle, nextAddFocus, personLine, pickerFrom, pickerView, removeInput,
+  CHOOSE_A_JOB, NO_JOBS, PICKER_LOADING, REMOVE_BODY, addInput, addLabel, addName, addToPoolInput, addedLabel, boxSent,
+  changeResult, followAddress, fromOutside, searchBox, jobOption, moveBody, moveInput, moveLabel, moveTitle, nextAddFocus, personLine, pickerFrom, pickerView, removeInput,
   removeLabel, removeTitle, searchHref, shortlistedNote, statusChangeInput, type PickerState, type PoolJob,
 } from '@/lib/hire/pool-dialog-state';
 import { cn } from '@/lib/utils';
@@ -139,10 +139,24 @@ export function PoolSearch({ search }: { search: string | null }) {
   const router = useRouter();
   const pathname = usePathname();
   const fieldId = useId();
-  const [value, setValue] = useState(search ?? '');
+  /** The text in the box, and the searches the box itself has put in the address. */
+  const [box, setBox] = useState(() => searchBox(search));
+  /** The search the page was last drawn with, and how many times the address was changed from outside the box. */
+  const [seen, setSeen] = useState(search);
+  const [resets, setResets] = useState(0);
   const [pending, start] = useTransition();
   const field = useRef<HTMLInputElement>(null);
   const timer = useRef<number | null>(null);
+  const value = box.text;
+
+  // The address has changed. If the box asked for it, the text stays exactly as typed: the field is never drawn
+  // afresh, so focus and the caret stay where they are. If it came from outside (a nav link, Back, Forward), the text
+  // follows it. Decided in followAddress; set while drawing, so no stale text is ever painted.
+  if (seen !== search) {
+    setSeen(search);
+    if (fromOutside(box.sent, search)) setResets((n) => n + 1);
+    setBox(followAddress(box, search));
+  }
 
   useEffect(() => {
     setSearching(pending);
@@ -151,13 +165,21 @@ export function PoolSearch({ search }: { search: string | null }) {
     if (timer.current !== null) window.clearTimeout(timer.current);
     setSearching(false);
   }, []);
+  useEffect(() => {
+    // The address was changed from outside: a search still waiting on its 300 ms was for text the box no longer shows.
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = null;
+  }, [resets]);
 
+  const setValue = (text: string) => setBox((now) => ({ text, sent: now.sent }));
   const stop = () => {
     if (timer.current !== null) window.clearTimeout(timer.current);
     timer.current = null;
   };
   const go = (text: string) => {
     stop();
+    // Noted before it is sent, so the page drawn with this search is known to be the box's own doing.
+    setBox((now) => boxSent(now, text));
     start(() => {
       router.replace(searchHref(pathname, text), { scroll: false });
     });
