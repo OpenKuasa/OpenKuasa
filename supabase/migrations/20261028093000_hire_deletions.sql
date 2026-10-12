@@ -1,4 +1,4 @@
--- supabase/migrations/20261028090000_hire_deletions.sql
+-- supabase/migrations/20261028093000_hire_deletions.sql
 -- Lekir slice 3c: a recruiter can delete an application, or a candidate with
 -- everything held about them. Two functions are the only way: members get no
 -- delete on any hiring table. Nothing here touches a stored file: the trigger

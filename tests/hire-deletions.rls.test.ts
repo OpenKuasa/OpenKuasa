@@ -4,7 +4,7 @@
 // (Lekir slice 3c): public.hire_delete_application and public.hire_delete_candidate.
 // Needs NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY; without all
 // three every case is skipped.
-// WRITTEN, NOT YET RUN: it runs only after the migration 20261028090000_hire_deletions.sql is applied.
+// WRITTEN, NOT YET RUN: it runs only after the migration 20261028093000_hire_deletions.sql is applied.
 //
 // Who calls what. Both deletion functions are granted to `authenticated` only, so every call is made by a signed-in
 // client (the owner, the owner of another workspace, a demo viewer) or by the signed-out visitor client, which must

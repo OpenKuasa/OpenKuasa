@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 const read = (file: string) => readFileSync(join(process.cwd(), 'supabase/migrations', file), 'utf8');
-const raw = read('20261028090000_hire_deletions.sql');
+const raw = read('20261028093000_hire_deletions.sql');
 // Comment lines are dropped so an explanation can never satisfy an order check.
 const sql = raw.split('\n').filter((line) => !line.trim().startsWith('--')).join('\n');
 const fn = (name: string) => {

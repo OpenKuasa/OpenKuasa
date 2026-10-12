@@ -6,7 +6,7 @@
 // Needs NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY; without all
 // three every case is skipped.
 // WRITTEN, NOT YET RUN: it runs only after the migration 20261029090000_hire_talent_pool.sql is applied (and 3c's
-// 20261028090000_hire_deletions.sql, which case 22 needs for hire_delete_application).
+// 20261028093000_hire_deletions.sql, which case 22 needs for hire_delete_application).
 //
 // Who calls what. Both pool functions and hire_add_candidate are granted to `authenticated` only, so every call is
 // made by a signed-in client (the owner, the owner of another workspace, a demo viewer) or by the signed-out
