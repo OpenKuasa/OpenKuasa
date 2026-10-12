@@ -675,3 +675,30 @@ describe('the talent pool rules, in every prompt that can prepare a pool change'
     expect(tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], false, null)).not.toContain('two talent pool changes');
   });
 });
+
+describe('a candidate to delete is looked up among everyone on file, even when they are in the talent pool', () => {
+  const RULE = 'Look a candidate to delete up with listCandidates, even when they are in the talent pool: listTalentPool sees pool members only, so it cannot say that someone else on file has the same name. An id that came only from listTalentPool is refused for a deletion.';
+  it('Lekir and the specialist have the rule, straight after the one that says how to find the id', () => {
+    const lekir = LEKIR_SYSTEM.split('\n');
+    const at = lekir.indexOf(`- ${RULE}`);
+    expect(at).toBeGreaterThan(lekir.indexOf('DELETING AN APPLICATION OR A CANDIDATE'));
+    expect(at).toBeLessThan(lekir.indexOf('THE TALENT POOL'));
+    expect(lekir[at - 1].startsWith('- Find the id yourself: listApplications for an application, listCandidates for a candidate.')).toBe(true);
+    const specialist = subAgentSystem('hire', true).split('\n');
+    const there = specialist.indexOf(`- ${RULE}`);
+    expect(there).toBeGreaterThan(-1);
+    expect(specialist[there - 1].startsWith('- Find the id yourself: listApplications for an application, listCandidates for a candidate.')).toBe(true);
+  });
+  it('Tuah on its own has it, and Tuah with its team is told what Lekir will do', () => {
+    expect(TUAH_SYSTEM).toContain(
+      'tell the user to check that line before approving. To delete a candidate, look them up with listCandidates even when they are in the talent pool: ' +
+        'listTalentPool sees pool members only, so it cannot say that someone else on file has the same name.',
+    );
+    const withChanges = tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], true, null);
+    const SENTENCE =
+      'For a deletion, Lekir looks the candidate up among everyone on file even when they are in the talent pool, ' +
+      'because two people on file can share a name when only one is in the pool: if it then reports more than one match, ask the user which one.';
+    expect(withChanges).toContain(SENTENCE);
+    expect(tuahTeamSystem([{ name: 'Lekir', area: 'hiring' }], false, null)).not.toContain(SENTENCE);
+  });
+});

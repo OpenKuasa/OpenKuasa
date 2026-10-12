@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { approvalDetail, approvalTitle, collectNames, nameIn } from '@/lib/chat/change-titles';
+import { approvalDetail, approvalTitle, collectNames, knownOnFile, nameIn, withoutPoolSide } from '@/lib/chat/change-titles';
 
 const ID = '33333333-3333-4333-8333-333333333333';
 const names = collectNames([{ tool: 'listJobs', output: { total: 1, jobs: [{ id: ID, name: 'Sales Executive' }] } }]);
@@ -186,7 +186,8 @@ describe('approval cards for a candidate', () => {
     const added = [{ tool: 'addCandidate', output: { ok: true, data: { id: CAND, name: 'Aina Rahman', job_id: JOB, job: 'Barista', message: 'Added Aina Rahman.' } } }];
     const known = collectNames(added);
     expect(known[`candidate:${CAND}`]).toBe('Aina Rahman');
-    expect(Object.keys(known)).toEqual([`candidate:${CAND}`]);
+    // Only the candidate is named, with the mark that the name came from a lookup of everyone on file: the job is not.
+    expect(Object.keys(known)).toEqual([`candidate:${CAND}`, `candidate-on-file:${CAND}`]);
     const saved = [{ tool: 'updateCandidate', output: { ok: true, data: { id: CAND, name: 'Aina R.' } } }];
     expect(collectNames(saved)[`candidate:${CAND}`]).toBe('Aina R.');
   });
@@ -340,5 +341,42 @@ describe('approval cards for the talent pool', () => {
     const kept = collectNames(done);
     expect(kept[`candidate:${PERSON}`]).toBe('Aina binti Salleh');
     expect(kept[`candidate:${STRANGER}`]).toBe('Kamal Ariffin');
+  });
+});
+
+describe('where a candidate\'s name came from, for a deletion', () => {
+  const PERSON = '88888888-8888-4888-8888-888888888882';
+  const pooled = { tool: 'listTalentPool', output: { total: 1, candidates: [{ id: PERSON, name: 'Zarina Lau' }] } };
+  const changed = { tool: 'setPoolStatus', output: { ok: true, data: { id: PERSON, name: 'Zarina Lau', from: 'none', to: 'available', message: 'x' } } };
+  const moved = { tool: 'moveToPipeline', output: { ok: true, data: { id: PERSON, name: 'Zarina Lau', application_id: null, job_id: 'j', job: null, from: 'available', to: 're_engaged', message: 'x' } } };
+  const listed = { tool: 'listCandidates', output: { total: 1, candidates: [{ id: PERSON, name: 'Zarina Lau' }] } };
+
+  it('a name known only from the pool\'s side is not known as on file; one from a lookup of everyone is', () => {
+    for (const side of [pooled, changed, moved]) {
+      const names = collectNames([side]);
+      expect(names[`candidate:${PERSON}`], side.tool).toBe('Zarina Lau');
+      expect(knownOnFile(names, PERSON), side.tool).toBe(false);
+    }
+    expect(knownOnFile(collectNames([listed]), PERSON)).toBe(true);
+    expect(knownOnFile(collectNames([pooled, listed]), PERSON)).toBe(true);
+    expect(knownOnFile(collectNames([listed, pooled]), PERSON)).toBe(true);
+    // Two reports put together, as the chat's names are.
+    expect(knownOnFile({ ...collectNames([listed]), ...collectNames([pooled]) }, PERSON)).toBe(true);
+    // Names kept before there were marks are as they were; someone never named is not known at all.
+    expect(knownOnFile({ [`candidate:${PERSON}`]: 'Zarina Lau' }, PERSON)).toBe(true);
+    expect(knownOnFile({}, PERSON)).toBe(false);
+    expect(knownOnFile(undefined, PERSON)).toBe(false);
+    for (const odd of [undefined, null, '', 7]) expect(knownOnFile(collectNames([listed]), odd)).toBe(false);
+  });
+  it('a name is kept with its mark or not at all, so the cap can never turn a pool-side name into one on file', () => {
+    const full = Object.fromEntries(Array.from({ length: 199 }, (_, n) => [`job:${n}`, 'x']));
+    const names = collectNames([pooled], full);
+    expect(names[`candidate:${PERSON}`]).toBeUndefined();
+    expect(knownOnFile(names, PERSON)).toBe(false);
+  });
+  it('withoutPoolSide drops the pool lookup and the two pool changes, and nothing else', () => {
+    expect(withoutPoolSide([pooled, listed, changed, moved]).map((r) => r.tool)).toEqual(['listCandidates']);
+    expect(nameIn(withoutPoolSide([pooled]))(PERSON, 'candidate')).toBeNull();
+    expect(nameIn([pooled])(PERSON, 'candidate')).toBe('Zarina Lau');
   });
 });

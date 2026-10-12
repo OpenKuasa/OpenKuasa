@@ -2340,3 +2340,132 @@ describe('a change stopped after approval is not the turn\'s one, as the browser
     });
   });
 });
+
+// The pool lookup sees pool members only, so by a first name it can answer "one" when two people on file have it.
+// A deletion therefore takes only an id that listCandidates returned, which searches everyone and says when several
+// match. A pool change still takes an id from either lookup.
+describe('a deletion never rests on the pool lookup alone', () => {
+  const A = '11111111-1111-4111-8111-111111111171';
+  const B = '22222222-2222-4222-8222-222222222272';
+  type Message = import('ai').ModelMessage;
+  type Part = { type: string; isAutomatic?: boolean; approved?: boolean; reason?: string; toolCall?: { toolName?: string; input?: unknown } };
+  type Call = { tool: string; input: unknown };
+  const NOT_LOOKED_UP =
+    `You have not looked up ${A} as a candidate. Never guess an id: use listCandidates ` +
+    'to find the candidate and get its real id, then prepare the change again.';
+  const AMBIGUOUS =
+    'More than one match was found for that name, so no deletion was prepared. Stop here: say who matches and ask the user which one they mean. ' +
+    'Once the user has said who, they can ask for the deletion again.';
+  /** Two people called Zarina and nobody else: one in the pool, one on file outside it. */
+  const world = () => {
+    const base = hire().data;
+    const listCandidates = async () =>
+      (await base.listCandidates())
+        .filter((c, n) => n < 2 || !c.name.includes('Zarina'))
+        .map((c, n) =>
+          n === 0 ? { ...c, id: A, name: 'Zarina Lau', pool_status: 'passive' as const }
+            : n === 1 ? { ...c, id: B, name: 'Zarina binti Hashim', pool_status: 'none' as const } : c);
+    return { data: { ...base, listCandidates }, write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true } };
+  };
+  const inPool: Call = { tool: 'listTalentPool', input: { name: 'Zarina' } };
+  const onFile: Call = { tool: 'listCandidates', input: { name: 'Zarina' } };
+  const remove: Call = { tool: 'deleteCandidate', input: { id: A } };
+  const mark: Call = { tool: 'setPoolStatus', input: { id: A, status: 'available' } };
+
+  /** One request to one agent: each list is one step of its model, which answers in words after the last. */
+  const alone = async (steps: Call[][], agent: 'tuah' | 'lekir') => {
+    candidateDeleted.mockReset();
+    poolSet.mockReset();
+    seen.calls = [];
+    seen.singleScript = steps;
+    try {
+      const messages = [{ role: 'user', content: 'Do it for Zarina' }] as Message[];
+      const result = agent === 'lekir' ? runLekir(messages, world()) : runTuah(messages, reach(), undefined, undefined, null, null, null, world());
+      await result.consumeStream();
+      const content = ((await result.steps) as unknown as { content: Part[] }[]).flatMap((s) => s.content);
+      return {
+        cards: content.filter((p) => p.type === 'tool-approval-request' && !p.isAutomatic),
+        denials: content.filter((p) => p.type === 'tool-approval-response' && p.approved === false).map((p) => p.reason),
+      };
+    } finally {
+      seen.singleScript = null;
+    }
+  };
+  /** One request to the team: what Lekir prepared and what it was refused. */
+  const team_ = async (script: NonNullable<typeof seen.workerScript>, names: Record<string, string> = {}) => {
+    candidateDeleted.mockReset();
+    poolSet.mockReset();
+    const context = { ...team(), names };
+    seen.calls = [];
+    seen.workerScript = script;
+    seen.workerStep = 0;
+    seen.refusals = [];
+    try {
+      await runTuah([{ role: 'user' as const, content: 'Do it for Zarina' }], reach(), undefined, undefined, null, null, context, world()).consumeStream();
+    } finally {
+      seen.workerScript = null;
+    }
+    return [...context.proposals.values()];
+  };
+
+  it('the pool lookup by that first name finds one person and says nothing of several: that is why it is not enough', async () => {
+    const tools = hireProduct(world()).read as unknown as Record<string, { execute: (i: unknown, o: unknown) => Promise<{ total: number; several_match?: string }> }>;
+    const pool = await tools.listTalentPool.execute({ name: 'Zarina' }, { toolCallId: 't', messages: [] });
+    expect(pool.total).toBe(1);
+    expect(pool.several_match).toBeUndefined();
+    const everyone = await tools.listCandidates.execute({ name: 'Zarina' }, { toolCallId: 't', messages: [] });
+    expect(everyone.total).toBe(2);
+    expect(everyone.several_match).toContain('Zarina Lau, Zarina binti Hashim');
+  });
+  it.each(['tuah', 'lekir'] as const)('%s: an id known only from the pool lookup gets no deletion card, and the model is sent to listCandidates', async (agent) => {
+    const run = await alone([[inPool], [remove]], agent);
+    expect(run.cards).toEqual([]);
+    expect(run.denials).toEqual([NOT_LOOKED_UP]);
+    expect(candidateDeleted).not.toHaveBeenCalled();
+  });
+  it.each(['tuah', 'lekir'] as const)('%s: after listCandidates by that name the deletion is held back, because several match', async (agent) => {
+    const run = await alone([[inPool], [onFile], [remove]], agent);
+    expect(run.cards).toEqual([]);
+    expect(run.denials).toEqual([AMBIGUOUS]);
+  });
+  it.each(['tuah', 'lekir'] as const)('%s: a pool change from the same pool lookup still gets its card', async (agent) => {
+    const run = await alone([[inPool], [mark]], agent);
+    expect(run.denials).toEqual([]);
+    expect(run.cards).toHaveLength(1);
+    expect(run.cards[0].toolCall).toMatchObject({ toolName: 'setPoolStatus', input: { id: A, status: 'available' } });
+  });
+  it('team: an id known only from the pool lookup is refused for a deletion, in the delegation that looked it up', async () => {
+    expect(await team_([inPool, remove, 'answer'])).toEqual([]);
+    expect(seen.refusals[0]).toBe(NOT_LOOKED_UP);
+    expect(candidateDeleted).not.toHaveBeenCalled();
+  });
+  it('team: after listCandidates by that name the deletion is held back, because several match', async () => {
+    expect(await team_([inPool, onFile, remove, 'answer'])).toEqual([]);
+    expect(seen.refusals[0]).toBe(AMBIGUOUS);
+  });
+  it('team: a pool change from the same pool lookup is still prepared', async () => {
+    const proposals = await team_([inPool, mark]);
+    expect(seen.refusals).toEqual([]);
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]).toMatchObject({ action: 'setPoolStatus', input: { id: A, status: 'available' } });
+  });
+  it('team: an id an earlier turn knew only from the pool lookup, or from a pool change, is refused too; one listCandidates returned is accepted', async () => {
+    const { collectNames } = await import('@/lib/chat/change-titles');
+    const pooled = { tool: 'listTalentPool', output: { total: 1, candidates: [{ id: A, name: 'Zarina Lau' }] } };
+    const changed = { tool: 'setPoolStatus', output: { ok: true, data: { id: A, name: 'Zarina Lau', from: 'available', to: 'passive', message: 'x' } } };
+    const listed = { tool: 'listCandidates', output: { total: 1, candidates: [{ id: A, name: 'Zarina Lau' }] } };
+    for (const earlier of [[pooled], [changed], [pooled, changed]]) {
+      expect(await team_([remove, 'answer'], collectNames(earlier))).toEqual([]);
+      expect(seen.refusals[0]).toBe(NOT_LOOKED_UP);
+      // The same names still serve a pool change.
+      expect(await team_([mark], collectNames(earlier))).toHaveLength(1);
+    }
+    // In either order, and from two reports put together as the chat's names are.
+    for (const earlier of [[pooled, listed], [listed, pooled]]) {
+      expect((await team_([remove], collectNames(earlier)))[0]).toMatchObject({ action: 'deleteCandidate', input: { id: A } });
+    }
+    expect((await team_([remove], { ...collectNames([listed]), ...collectNames([pooled]) }))[0]).toMatchObject({ action: 'deleteCandidate' });
+    // Names kept before the pool lookup returned ids carry no mark of where they came from: they are as they were.
+    expect((await team_([remove], { [`candidate:${A}`]: 'Zarina Lau' }))[0]).toMatchObject({ action: 'deleteCandidate' });
+  });
+});

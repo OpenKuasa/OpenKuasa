@@ -51,7 +51,9 @@ import {
   approvalDetail,
   approvalTitle,
   collectNames,
+  knownOnFile,
   nameIn,
+  withoutPoolSide,
   type ItemKind,
   type KnownNames,
   type ToolResult,
@@ -319,8 +321,14 @@ function specialistTools(
         }
         if (name === 'updateCandidate' || name === 'deleteCandidate') {
           const id = (input as { id?: unknown } | null)?.id;
+          // A deletion takes only an id from a lookup of everyone on file: the pool lookup sees pool members only and
+          // cannot say that two people on file share the name. The other way for the person: the Talent Pool row's
+          // own "Delete candidate", or asking again, when the specialist looks the candidate up with listCandidates.
           const asCandidate =
-            typeof id === 'string' && (team.names?.[`candidate:${id}`] || nameIn(results)(id, 'candidate'));
+            typeof id === 'string' &&
+            (name === 'deleteCandidate'
+              ? knownOnFile(team.names, id) || nameIn(withoutPoolSide(results))(id, 'candidate')
+              : team.names?.[`candidate:${id}`] || nameIn(results)(id, 'candidate'));
           if (!asCandidate) {
             return { prepared: false, error: notLookedUp('candidate', id) };
           }

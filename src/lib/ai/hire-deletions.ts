@@ -8,7 +8,7 @@
  */
 import type { ModelMessage } from 'ai';
 import { isHeldCvMessage } from '@/lib/ai/hire-tools';
-import { nameIn } from '@/lib/chat/change-titles';
+import { nameIn, withoutPoolSide } from '@/lib/chat/change-titles';
 import { fullDate } from '@/lib/hire/lists';
 import { namesakesFromLists, sameText } from '@/lib/hire/namesakes';
 import type { HireData, Namesake, Namesakes } from '@/lib/hire/types';
@@ -209,7 +209,11 @@ export function lookedUp(messages: readonly ModelMessage[], kind: DeletionKind, 
       const output = part.output as { type?: unknown; value?: unknown } | null | undefined;
       return { tool: part.toolName as string, output: output?.type === 'json' ? output.value : null };
     });
-  return nameIn(results)(id, kind) !== null;
+  // A candidate to delete must have come from a lookup of everyone on file. The pool lookup sees pool members only:
+  // by a first name it can find one person when two on file have that name, and so never asks "which one?".
+  // The other way for the person: the Talent Pool row's own "Delete candidate", or ask again, and the assistant
+  // looks the candidate up with listCandidates first (the refusal sends it there).
+  return nameIn(kind === 'candidate' ? withoutPoolSide(results) : results)(id, kind) !== null;
 }
 
 /*
