@@ -807,8 +807,8 @@ A name is unique within its kind, capitals aside, archived categories
 included. The card refuses a name it can see is taken before anything is
 sent, and says which case it is ("There is already an expense category
 called Rent."; for an archived one, to restore it instead); the database's
-own refusal (`23505`), met only when two people add the same name at once,
-reads "Another category of the same kind already has that name. …".
+own refusal (`23505`), met when two people add the same name at once, or
+when JavaScript and Postgres lower-case a name differently, reads "Another category of the same kind already has that name. …".
 
 An update by someone who may not change categories raises nothing in the
 database: it touches no row. `renameCategory` and `setCategoryActive`
@@ -2286,7 +2286,9 @@ with no date).
   only, where the expense, receipt and bill forms add the draft's own);
   saving it unchanged keeps the category.
 - A category name that ends in a tab, or is made of a newline, is accepted:
-  the rule trims spaces only (`finance_categories_name_check`).
+  the rule trims spaces only (`finance_categories_name_check`), and the
+  Categories card's schema trims spaces only and counts the 80 characters by
+  code point, as the table does, so the card takes the same names.
 - An expense whose typed vendor is an empty string can be made only by a
   direct write to the table, and paying it records a voucher to nobody. A
   later rule should refuse an empty vendor name.
