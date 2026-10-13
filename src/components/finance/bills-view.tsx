@@ -481,7 +481,7 @@ export function BillsView({
                       <TableCell className="whitespace-nowrap text-right tabular-nums">
                         {rm(b.balance)}
                         {scheduled > 0 ? (
-                          <span className="block text-xs text-muted-foreground">{rm(scheduled)} in payments to be paid</span>
+                          <span className="block text-xs text-muted-foreground">{rm(scheduled)} in payments not yet paid</span>
                         ) : null}
                       </TableCell>
                       <TableCell>
