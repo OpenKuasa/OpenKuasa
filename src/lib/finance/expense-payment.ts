@@ -23,8 +23,10 @@ import { EXPENSE_MESSAGES, type ExpenseRow } from './expenses';
 import { rm, typedNumber } from './format';
 import { type FinanceAccount, MONEY_MESSAGES, PAYMENT_METHODS, type PaymentMethod } from './money';
 import {
+  ACCOUNT_ARCHIVED,
   type FinResult,
   type FinanceWriteContext,
+  FIN_ACCOUNT_ARCHIVED,
   FIN_SIGN_OFF,
   NEEDS_SIGN_OFF,
   NOT_ALLOWED,
@@ -94,6 +96,8 @@ const REFUSALS: Record<string, string> = {
   // The function found no expense of that id in the workspace.
   FIN06: M.gone,
   [FIN_SIGN_OFF]: NEEDS_SIGN_OFF,
+  // The account was archived after the card was opened.
+  [FIN_ACCOUNT_ARCHIVED]: ACCOUNT_ARCHIVED,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_CHECK]: M.invalid,
   [PG_NOT_NULL]: M.invalid,

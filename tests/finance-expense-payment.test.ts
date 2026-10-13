@@ -145,6 +145,8 @@ describe('markExpensePaid', () => {
     expect((await refused('FIN04')).error).toBe('This expense is not approved any more, so it cannot be paid.');
     expect((await refused('FIN05')).error).toBe('That is more than is still to pay on this expense.');
     expect((await refused('FIN06')).error).toBe('That expense no longer exists.');
+    // An account archived after the card was opened: the shared sentence, not the general one.
+    expect((await refused('FIN37')).error).toBe('The account this is on has been archived. Restore it on Banking, or use another account, then try again.');
     expect((await refused('FIN14')).error).toBe('Only an owner or admin can post, pay or void. Ask one of them to do this.');
     expect((await refused('23503')).error).toBe('That account no longer exists. Choose another account.');
     expect((await refused('23514')).error).toBe('Check the account, the method and the amount, then try again.');
