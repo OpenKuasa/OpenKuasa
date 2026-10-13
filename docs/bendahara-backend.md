@@ -398,8 +398,9 @@ admin's voucher is approved in the same call and reads "To be paid"; anyone
 else's waits as "Pending approval". The status is read back and the screen says
 which it was. A voucher that waits cannot be edited (the guard refuses any
 change of one, `FIN14`), so a mistake in one is deleted and recorded again; one
-saved as a draft first can be (next section). Nothing is paid here yet: "Paid
-now", Mark as paid and Void are part 5d-2.
+saved as a draft first can be (next section). An owner or admin can also record
+it as paid now; marking a voucher paid and voiding one are in "Paying and
+voiding a voucher" below.
 
 **Approve** and **Reject** are offered to an owner or admin on every voucher
 that is waiting, whatever it pays. Each is one update of `status`
@@ -525,6 +526,76 @@ sign-off, and both refresh the screens every voucher action refreshes
 | Edit a voucher that is no longer a draft | `FIN09` | `FIN09` | `FIN11` | `FIN06` or `FIN15` |
 | Send a draft for approval by its row | done | done | no row changed | no row changed |
 | Change a waiting voucher's split | `FIN09` | `FIN09` | no row changed | no row changed |
+
+### Paying and voiding a voucher
+
+No migration came with this either. Three writes, all a sign-off (an owner or
+admin; `can(role, 'sign-off-finance')` in the action, `FIN14` from the database
+for anyone else), on the two kinds of voucher that belong to this screen: one
+for a category (`other`) and one that pays expenses (`expense`). A payment to a
+supplier and a refund are paid and voided on Payments Out and Refunds, as
+before (`voucherHome`); `markVoucherPaid` and `voidVoucher` read the voucher's
+kind on `finance_payment_vouchers` first and refuse those two ("A payment to a
+supplier is paid and voided on Payments Out, and a refund on Refunds.").
+
+**Paid now.** On a new voucher for a category an owner or admin chooses "When":
+"To be paid" (the default, as before) or "Paid now". "Paid now" sends
+`paid_now: true`; `recordVoucher` then asks `finance_record_voucher` for
+`status: 'posted'`, and the voucher is approved, paid and numbered `PV-` in one
+call, dated the form's date ("Date paid"). The database does not refuse a
+member who asks for this: it leaves their voucher waiting for approval. So
+`recordVoucherAction` refuses them first ("Only an owner or admin can record a
+voucher as paid. Send it for approval instead."), and the form does not offer
+them the choice. A draft and a voucher for bills are never paid from the form.
+
+**Mark as paid** is on a voucher of those two kinds that is "To be paid". The
+question asks the day it was paid (it starts as the person's own today) and
+`markVoucherPaid` calls `finance_mark_payment_paid(target_org, target_txn,
+paid_on)`, the function Payments Out and Refunds use: the voucher gets its
+`PV-` number, its date becomes the day it was paid, and nothing else of it
+changes. Nothing is matched on what the row showed, because nothing needs to
+be: from the moment a payment leaves draft the database holds it still
+(`FIN14` on an approved one, `FIN28` on any other, `FIN09` on its split;
+`20261117090000`), so the voucher paid is the voucher the row showed, or it is
+gone (`FIN11`), or it is no longer "To be paid" (`FIN09`). After a `FIN09` one
+read of the view words the answer: "This voucher has already been paid.",
+"This voucher has already been voided.", or "Only a voucher that is To be paid
+can be marked paid."
+
+**Void** is on a paid voucher of those two kinds: one update of `status` to
+`void`, matched on `status = 'posted'`, money out, no side of a transfer.
+`finance_void_stamp` writes `voided_at`. The voucher keeps its number and
+stays in the list as Void (the status filter's first choice leaves void ones
+out; the note after the write says so). In the books it is its original entry
+and, on the day it was voided, the same entry the other way round
+(`payment_out:<id>:void`), so it leaves nothing on any account. A voucher that
+paid expenses stops counting as paid on each of them (`finance_expense_totals`
+counts posted money only): the expense reads Approved again, or Part paid, and
+can be marked paid again, which records a new voucher with the next number.
+**This is how a wrong "Mark paid" on Expenses is undone.** A void is final:
+the guard refuses to bring a voided payment back (`FIN09`).
+
+All three refresh `VOUCHER_PATHS`, which now ends with the three ledger
+screens, as every list of an action that moves the books does.
+
+| Write | Owner, admin | Member | Viewer | Outsider |
+|---|---|---|---|---|
+| `finance_record_voucher` for a category with `status: 'posted'` | paid, numbered, approved by them | recorded, **"Pending approval"**, no number | `42501` | `42501` |
+| `finance_mark_payment_paid` on a "To be paid" voucher (approved, or one for expenses that nobody had to approve) | paid, numbered, dated `paid_on` | `FIN14` | `42501` | `42501` |
+| The same on a draft, a waiting, a paid or a void voucher | `FIN09` | `FIN09` | `42501` | `42501` |
+| The same on an id that is not there | `FIN11` | `FIN11` | `42501` | `42501` |
+| Void a paid voucher | done, `voided_at` written | `FIN14` | no row changed | no row changed |
+| Void one that is "To be paid" | `FIN09` | `FIN09` | no row changed | no row changed |
+| Bring a void one back; delete a paid or a void one; change a paid one | `FIN09` | `FIN09` | no row changed | no row changed |
+| Change a "To be paid" one | `FIN14` (approved) or `FIN28` | the same | no row changed | no row changed |
+
+| On the screen | Owner, admin | Member | Viewer, demo, sample |
+|---|---|---|---|
+| "When" on a new voucher for a category | "To be paid" or "Paid now" | Not offered | No form |
+| A "To be paid" voucher of kind `expense` or `other` | Mark as paid, Delete | Delete | No menu |
+| A paid one of those kinds | Void | No menu | No menu |
+| A void one | Nothing | Nothing | Nothing |
+| A supplier payment or a refund that is "To be paid" or paid | A link to Payments Out or Refunds | The link | The link |
 
 ## Expenses
 
@@ -654,9 +725,10 @@ status `posted`, numbered `PV-`, with one allocation to the expense, no
 category of its own, and the expense's vendor as its payee. It shows on
 Payment Vouchers as kind `expense` and on Banking, it debits Accrued Expenses
 in the books, and it is voided as any voucher is: one change of status by an
-owner or admin (from the app once Payment Vouchers has its row actions; see
-Known limits). Voiding it makes the expense read Approved again (only posted
-money counts as paid).
+owner or admin, with Void on its row on Payment Vouchers. Voiding it makes the
+expense read Approved again (only posted money counts as paid), and that is how
+a wrong "Mark paid" is undone: Expenses itself has no undo, and the Mark paid
+card says so ("To undo a wrong one, void it on Payment Vouchers.").
 
 Paying is a sign-off: the action refuses anyone who may not sign off before
 anything is read, and the database refuses them on the voucher (`FIN14`, with
@@ -1944,8 +2016,11 @@ with no date).
 
 - Payment Vouchers: a voucher that waits or is "To be paid" can be deleted by
   any writer, whoever recorded or approved it: the guard on payments refuses a
-  delete only once the payment is paid or void. An approved voucher cannot be
-  marked paid on Payment Vouchers yet (part 5d-2).
+  delete only once the payment is paid or void.
+- Payment Vouchers: the day a voucher was paid is the day the person enters.
+  No rule refuses a day in the future, as on Payments Out and Refunds.
+- Payment Vouchers: a void cannot be taken back. A voucher voided by mistake
+  is recorded again, and gets a new number.
 - Payment Vouchers: approval of a supplier payment is a choice. A member can
   still schedule one on Payments Out with no approval, so the Approve step is
   a second look for those who ask for one, not a control on those who do not.
@@ -2266,13 +2341,9 @@ with no date).
 - A contact's Payable counts bills that are pending or overdue, and the
   Payable card is totalled from every open bill, not only the contacts loaded.
   Receivable is the same for invoices that are sent or overdue.
-- Payment Vouchers is read-only. A voucher that is not a supplier payment or
-  a refund exists only in the demo workspace until its form is built, with
-  one exception: "Mark paid" on Expenses records a voucher for one approved
-  expense, paid now. That voucher shows on Payment Vouchers and cannot be
-  voided from the app until Payment Vouchers has its row actions: until then
-  a wrong "Mark paid" is undone only in the database, by an owner or admin
-  (`update finance_transactions set status = 'void'`).
+- "Mark paid" on Expenses records a voucher for one approved expense, paid
+  now. A wrong one is undone on Payment Vouchers, not on Expenses: an owner or
+  admin voids that voucher from its row, and the expense reads Approved again.
 - A member is offered nothing on an approved expense: scheduling a payment of
   it is the voucher form's.
 - A payment from an account archived after the Mark paid card was opened is
