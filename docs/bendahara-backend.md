@@ -2113,6 +2113,15 @@ with no date).
 - A payment can be recorded from an archived account by a direct call: the
   database does not ask whether the account is active. The Mark paid card
   offers active accounts only.
+  A payment from an account that was archived a moment before is accepted,
+  and the note names the account. When the rule that refuses it (`FIN37`) has
+  merged, the card gets its own sentence for that refusal; until then the
+  data layer words it as the general "could not be saved" sentence.
+- Two part payments of one expense made at the same moment that together fit
+  what is left both go through: the database checks each payment against what
+  is left when it runs (`FIN05`), so too much together is refused, but a
+  deposit paid twice for a total that has room for both is not caught. The
+  second person finds the list changed once it refreshes.
 - Any writer may change or delete any pending or rejected expense, whoever
   entered it: the database does not look at `created_by`, and neither does
   the screen.
