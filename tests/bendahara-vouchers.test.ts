@@ -116,7 +116,9 @@ testWithSupabase('an owner’s voucher is approved on saving; a rejected one is 
   if (!own.ok) return;
   const ownRow = await rowOf(w.owner, own.data.id);
   expect(ownRow.approved_at).not.toBeNull();
-  expect(voucherActions(ownRow, true)).toEqual(['delete']);
+  // To be paid, and of a kind that belongs here: an owner or admin marks it paid (tests/bendahara-voucher-pay-void.test.ts).
+  expect(voucherActions(ownRow, true)).toEqual(['markPaid', 'delete']);
+  expect(voucherActions(ownRow, false)).toEqual(['delete']);
 
   // What the schema refuses never reaches the database; what the database refuses comes back as a sentence.
   const income = await w.owner.client.from('finance_categories').select('id').eq('org_id', w.owner.orgId).eq('kind', 'income').limit(1);
