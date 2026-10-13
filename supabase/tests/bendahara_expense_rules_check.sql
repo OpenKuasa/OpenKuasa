@@ -1,5 +1,5 @@
 -- Bendahara expense rules check. Run it after
--- 20261116100000_bendahara_expense_stamp_and_category_writers.sql, in the same
+-- 20261116120000_bendahara_expense_stamp_and_category_writers.sql, in the same
 -- transaction for a dry run, or by itself once the migration is applied. It
 -- proves that:
 --   * an expense's updated_at is written by the database on every insert and

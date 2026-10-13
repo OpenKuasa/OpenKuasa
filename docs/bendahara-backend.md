@@ -483,7 +483,7 @@ passes `> 0`, and one saved expense of NaN would turn every total it is added
 into NaN. `supabase/tests/bendahara_expense_amounts_check.sql` proves it.
 
 Three columns of an expense are the database's to write
-(`20261116100000_bendahara_expense_stamp_and_category_writers.sql`).
+(`20261116120000_bendahara_expense_stamp_and_category_writers.sql`).
 `updated_at` is set to the database's clock by the trigger
 `finance_expense_stamp` on every insert and on every update that changes
 anything, whatever the caller sent; it is left alone by an update that
