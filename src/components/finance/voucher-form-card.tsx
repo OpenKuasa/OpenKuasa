@@ -140,7 +140,7 @@ export function VoucherFormCard({
   return (
     <BentoCard
       title={form.id ? 'Edit draft voucher' : 'New voucher'}
-      subtitle={forBills ? 'A payment for a supplier’s bills, sent for approval' : 'Money paid out that settles no bill and no expense'}
+      subtitle={forBills ? 'A payment for a supplier’s bills, saved as a draft or sent for approval' : 'Money paid out that settles no bill and no expense'}
       icon={Wallet}
       className="col-span-2 md:col-span-12"
     >
