@@ -44,7 +44,7 @@ export function SavedNoteCard({
   return (
     <BentoCard title={title} subtitle={subtitle} icon={FileText} className="col-span-2 md:col-span-12">
       <div className="flex flex-wrap items-center gap-3">
-        <p id={id} role="status" className="text-sm text-muted-foreground">
+        <p id={id} role="status" className="min-w-0 text-sm text-muted-foreground [overflow-wrap:anywhere]">
           {children}
           {linked ? (
             <>

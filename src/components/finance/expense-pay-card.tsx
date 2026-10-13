@@ -87,9 +87,9 @@ export function ExpensePayCard({
 
   return (
     <BentoCard title="Mark expense paid" subtitle="Record the payment of an approved expense" icon={Banknote} className="col-span-2 md:col-span-12">
-      <form onSubmit={submit} noValidate className="grid gap-3 md:grid-cols-12">
+      <form onSubmit={submit} noValidate className="grid grid-cols-1 gap-3 md:grid-cols-12">
         {/* The expense being paid, in words that wrap: a long vendor or category is never cut off. */}
-        <p className="break-words text-sm md:col-span-12">
+        <p className="min-w-0 [overflow-wrap:anywhere] text-sm md:col-span-12">
           <span className="font-medium">{rm(row.amount)}</span> to <span className="font-medium">{row.vendor_name}</span>, dated{' '}
           {displayDate(row.expense_date)} · {row.category_name}
         </p>
