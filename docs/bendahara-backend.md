@@ -1977,6 +1977,11 @@ with no date).
   workspace has the ten it started with until the Categories card on Expenses
   is built. The database is ready for it: only an owner or admin may change
   one.
+- A category name that ends in a tab, or is made of a newline, is accepted:
+  the rule trims spaces only (`finance_categories_name_check`).
+- An expense whose typed vendor is an empty string can be made only by a
+  direct write to the table, and paying it records a voucher to nobody. A
+  later rule should refuse an empty vendor name.
 - A sent quotation cannot be edited: mark it declined and write a new one.
   "Mark as sent" is offered on a draft whatever its total, and refused with
   the reason when its lines total nothing, as Post is on an invoice.
