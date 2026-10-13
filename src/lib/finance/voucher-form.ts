@@ -517,11 +517,10 @@ export function voucherHiddenNote(
     return `${what} ${did(written)}. Clear the search and the Kind filter to see it.`;
   }
   if (written.status === 'draft') {
-    const outside = !inPeriod(written.date, today, period);
+    // A draft is listed in every period, so only the status filter, the search or the Kind filter can hide it.
     if (filter !== 'open') {
-      return `${what} ${did(written)}. Choose All but void and rejected in the status filter${outside ? ' and a longer period' : ''} to see it.`;
+      return `${what} ${did(written)}. Choose All but void and rejected in the status filter to see it.`;
     }
-    if (outside) return `${what} ${did(written)}. Choose a longer period to see it.`;
     return `${what} ${did(written)}. Clear the search and the Kind filter to see it.`;
   }
   return `${what} ${did(written)}. Clear the search and the filters to see it.`;

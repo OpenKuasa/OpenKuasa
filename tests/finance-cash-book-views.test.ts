@@ -655,12 +655,23 @@ describe('the table follows the period, as the cards do', () => {
   ];
   const names = (rows: PaymentVoucherRow[]) => rows.map((v) => v.number ?? v.party_name);
 
-  it('keeps the vouchers dated in the period, and all that wait for approval or are still to be paid', () => {
-    expect(names(paymentVouchersInPeriod(vouchers, today, 'month'))).toEqual(['PV-A', 'Old waiting', 'Old to pay']);
-    expect(names(paymentVouchersInPeriod(vouchers, today, 'quarter'))).toEqual(['PV-A', 'PV-B', 'Old waiting', 'Old to pay']);
+  it('keeps the vouchers dated in the period, and all that wait for approval, are still to be paid, or are drafts', () => {
+    // 'Old draft' is dated in January: it stays in the month and the quarter, as a draft receipt does.
+    expect(names(paymentVouchersInPeriod(vouchers, today, 'month'))).toEqual(['PV-A', 'Old waiting', 'Old to pay', 'Old draft']);
+    expect(names(paymentVouchersInPeriod(vouchers, today, 'quarter'))).toEqual(['PV-A', 'PV-B', 'Old waiting', 'Old to pay', 'Old draft']);
     expect(names(paymentVouchersInPeriod(vouchers, today, 'year'))).toEqual([
       'PV-A', 'PV-B', 'Old waiting', 'Old to pay', 'Old draft', 'PV-C', 'Old rejected',
     ]);
+  });
+  it('lists a draft dated last year in this month, and no figure counts it', () => {
+    const lastYear = [voucher({ number: null, party_name: 'Last year draft', txn_date: '2025-03-01', status: 'draft', amount: 999 })];
+    for (const period of CASH_BOOK_PERIODS) {
+      expect(names(paymentVouchersInPeriod(lastYear, today, period)), period).toEqual(['Last year draft']);
+      const view = paymentVouchersView(lastYear, today, period);
+      expect(view.stats.find((s) => s.label === 'Paid')?.value, period).not.toContain('999');
+      expect(view.stats.find((s) => s.label === 'Vouchers')?.value, period).toBe('0');
+      expect(view.stats.find((s) => s.label === 'Pending approval')?.delta, period).toBe('0 vouchers');
+    }
   });
   it('lists every voucher a card counts, with the same period selected', () => {
     for (const period of CASH_BOOK_PERIODS) {
@@ -694,18 +705,18 @@ describe('the line under the table', () => {
     expect(line({ noun: 'receipts', period: 'quarter' })).toBe('Showing 3 of 3 receipts this quarter');
   });
   it('says so in plain words when rows from outside the period are kept', () => {
-    expect(line({ keptEarlier: 2 })).toBe('Showing 3 of 3 vouchers: this month, and 2 earlier ones still waiting');
-    expect(line({ keptEarlier: 1 })).toBe('Showing 3 of 3 vouchers: this month, and 1 earlier one still waiting');
+    expect(line({ keptEarlier: 2 })).toBe('Showing 3 of 3 vouchers: this month, and 2 earlier ones still waiting or in draft');
+    expect(line({ keptEarlier: 1 })).toBe('Showing 3 of 3 vouchers: this month, and 1 earlier one still waiting or in draft');
     expect(line({ noun: 'receipts', keptEarlier: 1 })).toBe('Showing 3 of 3 receipts: this month, and 1 earlier draft');
     expect(line({ noun: 'receipts', keptEarlier: 2 })).toBe('Showing 3 of 3 receipts: this month, and 2 earlier drafts');
-    expect(line({ keptLater: 1 })).toBe('Showing 3 of 3 vouchers: this month, and 1 later one still waiting');
-    expect(line({ keptEarlier: 1, keptLater: 1 })).toBe('Showing 3 of 3 vouchers: this month, and 2 more dated outside it, still waiting');
+    expect(line({ keptLater: 1 })).toBe('Showing 3 of 3 vouchers: this month, and 1 later one still waiting or in draft');
+    expect(line({ keptEarlier: 1, keptLater: 1 })).toBe('Showing 3 of 3 vouchers: this month, and 2 more dated outside it, still waiting or in draft');
     expect(line({ noun: 'receipts', keptEarlier: 1, keptLater: 1 })).toBe('Showing 3 of 3 receipts: this month, and 2 more drafts dated outside it');
   });
   it('keeps the whole table in view when a search or filter narrows it', () => {
     expect(line({ shown: 1, matching: 1, total: 3 })).toBe('Showing 1 of 1 vouchers (3 this month)');
     expect(line({ shown: 1, matching: 1, total: 3, keptEarlier: 2 })).toBe(
-      'Showing 1 of 1 vouchers (3 in the table: this month, and 2 earlier ones still waiting)',
+      'Showing 1 of 1 vouchers (3 in the table: this month, and 2 earlier ones still waiting or in draft)',
     );
   });
   it('reads sensibly for All time', () => {

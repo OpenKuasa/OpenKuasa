@@ -174,15 +174,18 @@ describe('a draft’s row', () => {
     expect(voucherAnswerIsStale(M.notDraftSend)).toBe(true);
     expect(voucherAnswerIsStale(M.accountArchivedDraft)).toBe(false);
   });
-  it('says what hides a draft just saved: the status filter, the period, both, or the search', () => {
+  it('says what hides a draft just saved: the status filter or the search (a draft is listed in every period)', () => {
     const saved: WrittenVoucher = { id: VOUCHER, status: 'draft', recorded: true, payee: 'Syarikat Maju', amount: 150, date: '2026-10-05' };
     const what = 'The payment of RM 150.00 to Syarikat Maju, dated 05 Oct 2026, was saved as a draft.';
     expect(writtenVoucherTitle(saved)).toBe('Draft saved');
     expect(voucherHiddenNote(saved, TODAY, 'month', 'open', true, true)).toBeNull();
     expect(voucherHiddenNote(saved, TODAY, 'month', 'open', true, false)).toBe(`${what} Choose View all to see it.`);
     expect(voucherHiddenNote(saved, TODAY, 'month', 'waiting', false, false)).toBe(`${what} Choose All but void and rejected in the status filter to see it.`);
-    expect(voucherHiddenNote({ ...saved, date: '2025-01-05' }, TODAY, 'month', 'posted', false, false)).toContain('in the status filter and a longer period to see it.');
-    expect(voucherHiddenNote({ ...saved, date: '2025-01-05' }, TODAY, 'month', 'open', false, false)).toContain('Choose a longer period to see it.');
+    const old = { ...saved, date: '2025-01-05' };
+    const oldWhat = 'The payment of RM 150.00 to Syarikat Maju, dated 05 Jan 2025, was saved as a draft.';
+    expect(voucherHiddenNote(old, TODAY, 'month', 'posted', false, false)).toBe(`${oldWhat} Choose All but void and rejected in the status filter to see it.`);
+    expect(voucherHiddenNote(old, TODAY, 'month', 'open', false, false)).toBe(`${oldWhat} Clear the search and the Kind filter to see it.`);
+    expect(voucherHiddenNote(old, TODAY, 'month', 'open', false, false)).not.toContain('longer period');
     expect(voucherHiddenNote(saved, TODAY, 'month', 'open', false, false)).toBe(`${what} Clear the search and the Kind filter to see it.`);
   });
 });
