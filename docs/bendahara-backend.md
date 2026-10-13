@@ -405,6 +405,12 @@ the database, so it is not what is compared. When no row matches, one read of
 rejected.", or "This voucher is not as it was shown to you. Check it again
 before you decide." A rejected voucher is final (the guard refuses to bring
 one back): it is deleted and recorded again.
+"Already been approved" is said only of a voucher that an owner or admin did
+approve (`approved_at` is set); one that is "To be paid" and was never approved
+(a supplier payment a member scheduled, reached by a direct call) gets "not as
+it was shown". The Approve and the Reject question add one line under their
+sentence with what the table does not draw: the category, the method, and the
+reference and notes when they hold something, drawn as text.
 
 At **Approve**, a voucher that pays supplier bills shows the same advice
 Payments Out shows before a payment is marked paid: `OrderNotes` with the
@@ -1568,8 +1574,11 @@ with no date).
   one made by a direct call.
 - A payment that is "To be paid" and that nobody had to approve (a supplier
   payment a member scheduled, a voucher for expenses a member scheduled) can
-  still have its account, method, date, reference and notes changed by any
-  writer with a direct call until it is paid, and `finance_mark_payment_paid`
+  still be changed by any writer with a direct call until it is paid, in
+  everything but its amount: who is paid and its category (`contact_id`,
+  `party_name`, `category_id`), its account, method, date, reference and notes
+  (`finance_transaction_guard` checks only that the amount stays within the
+  split). `finance_mark_payment_paid`
   compares nothing: what is marked paid is the payment as it is then, not as
   the row showed it. An approved payment cannot be changed at all.
 - A scheduled payment cannot be edited: delete it and schedule it again.
