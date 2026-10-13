@@ -470,7 +470,7 @@ export function BillsView({
                   const scheduled = b.display_status === 'pending' || b.display_status === 'overdue' ? (held[b.id] ?? 0) : 0;
                   return (
                     <TableRow key={b.id} className={cn(b.display_status === 'void' && 'opacity-60')}>
-                      <TableCell className="font-medium">
+                      <TableCell className="min-w-36 font-medium">
                         <span className="whitespace-nowrap">{b.bill_no ?? '—'}</span>
                         <AttachedReceipts receipts={receipts?.[b.id]} linkOf={receiptLinkOf} />
                       </TableCell>
