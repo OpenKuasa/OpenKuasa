@@ -7,6 +7,7 @@ import {
   saveBillAction,
   voidBillAction,
 } from '@/app/(app)/finance/actions';
+import { receiptLinkAction } from '@/app/(app)/finance/receipt-inbox-actions';
 import { type BillActions, BillsView } from '@/components/finance/bills-view';
 import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
@@ -17,6 +18,7 @@ import { type PaymentOutRow, listAccounts, listPaymentsOut } from '@/lib/finance
 import { heldByBill } from '@/lib/finance/payment-form';
 import { listPurchaseOrders } from '@/lib/finance/purchase-orders';
 import { listProducts } from '@/lib/finance/products';
+import { listAttachedReceipts, receiptsByDocument } from '@/lib/finance/receipt-match';
 import { billsView, todayUtc } from '@/lib/finance/purchase-views';
 import { createClient } from '@/lib/supabase/server';
 
@@ -105,9 +107,11 @@ export default async function SupplierBillsScreen() {
   const ctx = { client: await createClient(), orgId: viewer.orgId };
   const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
   // The forms offer suppliers, products and accounts; a viewer has no form, so none of them is read for them.
-  const [rows, payments, contacts, products, accounts, orders, categories, defaultCategoryId] = await Promise.all([
+  // The receipts tied to a bill show in its row, for everyone who can see it.
+  const [rows, payments, attached, contacts, products, accounts, orders, categories, defaultCategoryId] = await Promise.all([
     listBills(ctx),
     listPaymentsOut(ctx),
+    listAttachedReceipts(ctx),
     canEdit ? listContacts(ctx) : [],
     canEdit ? listProducts(ctx) : [],
     canEdit ? listAccounts(ctx) : [],
@@ -124,6 +128,8 @@ export default async function SupplierBillsScreen() {
       view={billsView(rows, payments, todayUtc())}
       // Worked out here for everyone: a viewer has no payment rows in the browser, but still sees what is scheduled.
       held={heldByBill(payments)}
+      receipts={receiptsByDocument(attached)}
+      receiptLinkOf={receiptLinkAction}
       writer={
         canEdit
           ? {

@@ -9,6 +9,7 @@ import { downloadCsv } from '@/components/finance/download-csv';
 import { type ExpenseFormActions, ExpenseFormCard } from '@/components/finance/expense-form-card';
 import { RowMenu, type RowMenuItem } from '@/components/finance/row-menu';
 import { SavedNoteCard } from '@/components/finance/saved-note-card';
+import { type AttachedReceiptLinkOf, AttachedReceipts } from '@/components/finance/attached-receipts';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { useLocalToday } from '@/components/finance/use-local-today';
 import { PageHeader } from '@/components/screen/page-header';
@@ -47,6 +48,7 @@ import {
 } from '@/lib/finance/expense-form';
 import type { ExpenseCategory, ExpenseDisplayStatus, ExpenseRow } from '@/lib/finance/expenses';
 import { rm } from '@/lib/finance/format';
+import type { ReceiptsByDocument } from '@/lib/finance/receipt-match';
 import type { FinResult } from '@/lib/finance/result';
 import { LATEST_ROWS, displayDate } from '@/lib/finance/view-helpers';
 import { cn } from '@/lib/utils';
@@ -98,10 +100,16 @@ export function ExpensesView({
   rows,
   today: serverToday,
   followClock = true,
+  receipts,
+  receiptLinkOf,
   writer,
 }: {
   /** Every expense, newest first; pending and rejected ones included. */
   rows: ExpenseRow[];
+  /** The receipts tied to each expense, by the expense's id, from the Receipts Inbox. Absent with no database. */
+  receipts?: ReceiptsByDocument;
+  /** Makes a one-minute link to a receipt's file, for anyone who can see it. */
+  receiptLinkOf?: AttachedReceiptLinkOf;
   /** The date the figures are worked out for, YYYY-MM-DD, until the browser's own date takes over. */
   today: string;
   /** False for sample data, which keeps its own fixed date. */
@@ -450,7 +458,10 @@ export function ExpensesView({
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(e.expense_date)}</TableCell>
                       <TableCell className="min-w-24 whitespace-normal break-words font-medium">{e.category_name}</TableCell>
                       {/* A long vendor name wraps; it is never cut off behind a tooltip. */}
-                      <TableCell className="min-w-28 max-w-72 whitespace-normal break-words">{e.vendor_name}</TableCell>
+                      <TableCell className="min-w-28 max-w-72 whitespace-normal break-words">
+                        {e.vendor_name}
+                        <AttachedReceipts receipts={receipts?.[e.id]} linkOf={receiptLinkOf} />
+                      </TableCell>
                       <TableCell className="text-right tabular-nums">
                         <span className="whitespace-nowrap">{rm(e.amount)}</span>
                       </TableCell>

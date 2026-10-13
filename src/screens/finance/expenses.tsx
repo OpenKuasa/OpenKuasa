@@ -4,12 +4,14 @@ import {
   rejectExpenseAction,
   saveExpenseAction,
 } from '@/app/(app)/finance/actions';
+import { receiptLinkAction } from '@/app/(app)/finance/receipt-inbox-actions';
 import { type ExpenseActions, ExpensesView } from '@/components/finance/expenses-view';
 import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { listContacts } from '@/lib/finance/contacts';
 import { canEditExpenses } from '@/lib/finance/expense-form';
 import { listExpenseCategories, listExpenses } from '@/lib/finance/expenses';
+import { listAttachedReceipts, receiptsByDocument } from '@/lib/finance/receipt-match';
 import { todayUtc } from '@/lib/finance/view-helpers';
 import { createClient } from '@/lib/supabase/server';
 import { SAMPLE_EXPENSES } from './cash-book-sample';
@@ -37,8 +39,10 @@ export default async function ExpensesScreen() {
   const ctx = { client: await createClient(), orgId: viewer.orgId };
   const canEdit = canEditExpenses(viewer.role, viewer.isDemo);
   // The form offers contacts and expense categories; anyone without the form has neither read made for them.
-  const [rows, contacts, categories] = await Promise.all([
+  // The receipts tied to an expense show in its row, for everyone who can see it.
+  const [rows, attached, contacts, categories] = await Promise.all([
     listExpenses(ctx),
+    listAttachedReceipts(ctx),
     canEdit ? listContacts(ctx) : [],
     canEdit ? listExpenseCategories(ctx) : [],
   ]);
@@ -46,6 +50,8 @@ export default async function ExpensesScreen() {
     <ExpensesView
       rows={rows}
       today={todayUtc()}
+      receipts={receiptsByDocument(attached)}
+      receiptLinkOf={receiptLinkAction}
       writer={
         canEdit
           ? {

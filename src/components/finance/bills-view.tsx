@@ -9,6 +9,7 @@ import { ConfirmRow } from '@/components/finance/confirm-row';
 import { downloadCsv } from '@/components/finance/download-csv';
 import { PaymentFormCard, type RecordPayment } from '@/components/finance/payment-form-card';
 import { RowMenu, type RowMenuItem } from '@/components/finance/row-menu';
+import { type AttachedReceiptLinkOf, AttachedReceipts } from '@/components/finance/attached-receipts';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
@@ -36,6 +37,7 @@ import {
   displayDate,
   filterBills,
 } from '@/lib/finance/purchase-views';
+import type { ReceiptsByDocument } from '@/lib/finance/receipt-match';
 import type { FinResult } from '@/lib/finance/result';
 import { cn } from '@/lib/utils';
 
@@ -93,10 +95,16 @@ export function BillsView({
   rows,
   view,
   held,
+  receipts,
+  receiptLinkOf,
   writer,
 }: {
   /** Every bill, newest first; drafts and void ones included. */
   rows: BillListRow[];
+  /** The receipts tied to each bill, by the bill's id, from the Receipts Inbox. Absent with no database. */
+  receipts?: ReceiptsByDocument;
+  /** Makes a one-minute link to a receipt's file, for anyone who can see it. */
+  receiptLinkOf?: AttachedReceiptLinkOf;
   view: BillsViewData;
   /** What payments not yet paid already hold of each bill, by bill id, from `heldByBill`. */
   held: Record<string, number>;
@@ -462,7 +470,10 @@ export function BillsView({
                   const scheduled = b.display_status === 'pending' || b.display_status === 'overdue' ? (held[b.id] ?? 0) : 0;
                   return (
                     <TableRow key={b.id} className={cn(b.display_status === 'void' && 'opacity-60')}>
-                      <TableCell className="whitespace-nowrap font-medium">{b.bill_no ?? '—'}</TableCell>
+                      <TableCell className="font-medium">
+                        <span className="whitespace-nowrap">{b.bill_no ?? '—'}</span>
+                        <AttachedReceipts receipts={receipts?.[b.id]} linkOf={receiptLinkOf} />
+                      </TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(b.bill_date)}</TableCell>
                       <TableCell className="whitespace-nowrap">{b.supplier_name}</TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(b.due_date)}</TableCell>
