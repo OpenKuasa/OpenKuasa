@@ -40,6 +40,18 @@ export const FIN_ACCOUNT_ARCHIVED = 'FIN37';
 export const ACCOUNT_ARCHIVED =
   'The account this is on has been archived. Restore it on Banking, or use another account, then try again.';
 
+/**
+ * The database refused a change to a payment that has left draft, or to its split
+ * (`private.finance_transaction_still_guard` and `private.finance_allocation_still_guard`, 20261117090000). A payment
+ * that is posted, void, waiting for approval, rejected or approved was held already and still answers `FIN09` or
+ * `FIN14` first, so the only payment this code is raised for is one that is scheduled with nobody having had to
+ * approve it: a supplier payment, a pending refund, a voucher for approved expenses. No write in this folder can
+ * meet it: none edits a payment that is not a draft or sends one back to draft (`tests/finance-payment-held-still.test.ts`
+ * holds them to that). It is named here so that a write which one day does has the sentence to answer with.
+ */
+export const FIN_HELD_STILL = 'FIN28';
+export const HELD_STILL = 'This is waiting to be paid, so it can no longer be changed. Delete it and record it again.';
+
 export function pgCode(error: unknown): string | undefined {
   return (error as { code?: string } | null)?.code;
 }
