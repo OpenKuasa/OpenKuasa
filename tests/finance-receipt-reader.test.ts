@@ -5,7 +5,9 @@ import {
   RECEIPT_CATEGORY_MAX,
   RECEIPT_READING_MESSAGES as M,
   RECEIPT_READING_STORED_ERROR,
+  RECEIPT_PDF_MAX_BYTES,
   RECEIPT_READ_SYSTEM,
+  pdfTooLarge,
   RECEIPT_READ_USER,
   canOfferReading,
   categoryAt,
@@ -433,6 +435,24 @@ describe('before anything is sent', () => {
     expect(readingBlocker(row(), { ...ready, keyState: 'none', canManageKey: false })).toEqual({ message: M.noKey, link: false });
   });
 
+  it('a PDF over 4 MB is not read: just under and exactly at the cap go, just over does not, and an image over it still goes', () => {
+    expect(RECEIPT_PDF_MAX_BYTES).toBe(4 * 1024 * 1024);
+    expect(pdfTooLarge('application/pdf', RECEIPT_PDF_MAX_BYTES - 1)).toBe(false);
+    expect(pdfTooLarge('application/pdf', RECEIPT_PDF_MAX_BYTES)).toBe(false);
+    expect(pdfTooLarge('application/pdf', RECEIPT_PDF_MAX_BYTES + 1)).toBe(true);
+    expect(pdfTooLarge('image/jpeg', RECEIPT_PDF_MAX_BYTES + 1)).toBe(false);
+    expect(pdfTooLarge('image/png', 10 * 1024 * 1024)).toBe(false);
+    // A size that is not known is not a reason to refuse here: the server checks the bytes it fetched.
+    expect(pdfTooLarge('application/pdf', null)).toBe(false);
+    // The card says so in place of the question, only when the size is known to be over.
+    const ready = { setUp: true, keyState: 'set' as const, canManageKey: true };
+    expect(readingBlocker(row({ mime_type: 'application/pdf', size_bytes: RECEIPT_PDF_MAX_BYTES + 1 }), ready)).toEqual({ message: M.pdfTooBig, link: false });
+    expect(readingBlocker(row({ mime_type: 'application/pdf', size_bytes: RECEIPT_PDF_MAX_BYTES }), ready)).toBeNull();
+    expect(readingBlocker(row({ mime_type: 'application/pdf', size_bytes: null }), ready)).toBeNull();
+    expect(readingBlocker(row({ mime_type: 'image/jpeg', size_bytes: 9_000_000 }), ready)).toBeNull();
+    expect(M.pdfTooBig).toBe('This PDF is larger than 4 MB, so it was not sent to be read. Type the details in, or upload a smaller file.');
+  });
+
   it('the question says what is sent, to whom, and on whose key and credit', () => {
     const lines = readingQuestion(row());
     expect(lines).toHaveLength(3);
@@ -531,7 +551,12 @@ describe('the receipt and the key, read as the caller', () => {
         file: { path: PATH, type: 'image/jpeg' },
         details: { vendor: 'Typed Sdn Bhd', receipt_date: null, amount: 12.5, sst_amount: null },
         extractedAt: null,
+        sizeBytes: null,
       },
+    });
+    expect(await getReceiptForReading(fake({ data: [{ ...stored, size_bytes: '4194305' }], error: null }).ctx, RECEIPT)).toMatchObject({
+      ok: true,
+      data: { sizeBytes: 4194305 },
     });
     // A reading already on the receipt is known to the action, so a failed second one can leave it alone.
     const readBefore = await getReceiptForReading(fake({ data: [{ ...stored, extracted_at: '2026-10-12T02:00:00Z' }], error: null }).ctx, RECEIPT);

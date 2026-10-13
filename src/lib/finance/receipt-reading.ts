@@ -55,6 +55,8 @@ export const RECEIPT_READING_MESSAGES = {
   failed: 'The receipt was sent, and nothing could be read from it. Type the details in.',
   // The same, on a receipt a model has read before: that reading was not touched.
   failedAgain: 'The new reading found nothing it could use, so the earlier reading is still shown. Check its figures against the receipt.',
+  // A PDF over the bound: not sent, nothing counted.
+  pdfTooBig: 'This PDF is larger than 4 MB, so it was not sent to be read. Type the details in, or upload a smaller file.',
   // The call did not get through (busy, down, no connection, too slow): nothing is known about the receipt, nothing was stored.
   unavailable: 'The AI provider could not do the reading just now, so nothing was read and nothing on this receipt was changed. Please try again later.',
   // The answer never came back (the connection dropped): the file may have been sent and the credit used.
@@ -65,6 +67,18 @@ export const RECEIPT_READING_MESSAGES = {
   notSaved: 'The receipt was sent and read, but what was read could not be saved. Type the details in, or try again.',
   gone: 'That receipt no longer exists.',
 } as const;
+
+/**
+ * The most a PDF may weigh and still be sent to be read (4 MB). A PDF is billed by its pages and nothing here counts
+ * them, so its size is the bound; images keep the upload limit. The bound is in the file's stored size, which the
+ * database sets from the stored object, and again in the bytes fetched.
+ */
+export const RECEIPT_PDF_MAX_BYTES = 4 * 1024 * 1024;
+
+/** Whether this is a PDF known to be over the bound. A size that is not known is not a reason to refuse. */
+export function pdfTooLarge(type: InboxReceiptType, sizeBytes: number | null | undefined): boolean {
+  return type === 'application/pdf' && typeof sizeBytes === 'number' && sizeBytes > RECEIPT_PDF_MAX_BYTES;
+}
 
 /** The types that are sent: a picture or a PDF. A stored HEIC or HEIF is not. */
 export function readableReceiptType(type: InboxReceiptType): boolean {
@@ -111,12 +125,14 @@ export type ReceiptKeyState = 'set' | 'none' | 'unknown';
  * follows the sentence as a link.
  */
 export function readingBlocker(
-  row: Pick<InboxReceiptRow, 'mime_type'>,
+  row: Pick<InboxReceiptRow, 'mime_type' | 'size_bytes'>,
   state: { setUp: boolean; keyState: ReceiptKeyState; canManageKey: boolean },
 ): { message: string; link: boolean } | null {
   const M = RECEIPT_READING_MESSAGES;
   if (!state.setUp) return { message: M.notSetUp, link: false };
   if (!readableReceiptType(row.mime_type)) return { message: M.heic, link: false };
+  // The row's size is the stored file's, so a PDF known to be over the bound says so here and has no send button.
+  if (pdfTooLarge(row.mime_type, row.size_bytes)) return { message: M.pdfTooBig, link: false };
   if (state.keyState === 'none') return state.canManageKey ? { message: M.noKeyCanAdd, link: true } : { message: M.noKey, link: false };
   return null;
 }

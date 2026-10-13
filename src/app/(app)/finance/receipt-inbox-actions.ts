@@ -47,6 +47,7 @@ import {
   type ReceiptRead,
   categoryAt,
   offeredCategoryNames,
+  pdfTooLarge,
   readableReceiptType,
 } from '@/lib/finance/receipt-reading';
 import { type FinResult, type FinanceWriteContext, NOT_ALLOWED, pgCode } from '@/lib/finance/result';
@@ -255,6 +256,8 @@ export async function readReceiptAction(input: unknown): Promise<FinResult<Recei
   const file = receipt.data.file;
   if (!file) return refused(R.noFile);
   if (!readableReceiptType(file.type)) return refused(R.heic);
+  // A PDF over the bound is refused on its stored size, before a key is opened, a file fetched or a turn counted.
+  if (pdfTooLarge(file.type, receipt.data.sizeBytes)) return refused(R.pdfTooBig);
 
   // The workspace's own key, or nothing. Whether there is one is asked as the caller; the sealed key is opened on
   // the server for the session's own workspace, as chat does.
@@ -278,6 +281,8 @@ export async function readReceiptAction(input: unknown): Promise<FinResult<Recei
   const bytes = await receiptBytes(link.data.url);
   if (!bytes) return refused(R.fileUnavailable);
   if (bytes.length === 0) return refused(R.fileEmpty);
+  // No size was recorded: the bytes themselves decide, still before anything is counted or sent.
+  if (pdfTooLarge(file.type, bytes.length)) return refused(R.pdfTooBig);
   if (sendableAs(bytes, file.type) !== 'ok') {
     console.error('[finance/receipts] a stored file is not the type its receipt says.');
     return refused(R.notWhatItSays);

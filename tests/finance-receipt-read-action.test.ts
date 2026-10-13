@@ -399,6 +399,45 @@ describe('a reading that failed', () => {
     expect(called('consumeDailyQuota')).toHaveLength(1);
   });
 
+  it('a PDF over 4 MB is refused from its stored size: no key opened, no download, no turn, nothing written', async () => {
+    const PDF_PATH = PATH.replace('.jpg', '.pdf');
+    const pdf = (sizeBytes: number | null) => ({
+      ok: true,
+      data: { status: 'review', file: { path: PDF_PATH, type: 'application/pdf' }, details: { ...TYPED }, extractedAt: null, sizeBytes },
+    });
+    ctl.receipt = pdf(4 * 1024 * 1024 + 1);
+    expect(await readReceiptAction({ id: RECEIPT })).toEqual({ ok: false, error: M.pdfTooBig });
+    expect(called('receiptBytes')).toEqual([]);
+    expect(called('readWorkspaceKey')).toEqual([]);
+    nothingSpent();
+    // Exactly at the cap goes.
+    ctl.calls = [];
+    ctl.bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37, 0x0a, 0, 0, 0, 0, 0, 0, 0]);
+    ctl.receipt = pdf(4 * 1024 * 1024);
+    expect((await readReceiptAction({ id: RECEIPT })).ok).toBe(true);
+    expect(called('readReceiptWithModel')).toHaveLength(1);
+  });
+
+  it('a PDF whose size is not known is checked on the bytes fetched, still before a turn is counted', async () => {
+    ctl.receipt = {
+      ok: true,
+      data: { status: 'review', file: { path: PATH.replace('.jpg', '.pdf'), type: 'application/pdf' }, details: { ...TYPED }, extractedAt: null, sizeBytes: null },
+    };
+    const big = new Uint8Array(4 * 1024 * 1024 + 1);
+    big.set([0x25, 0x50, 0x44, 0x46, 0x2d]);
+    ctl.bytes = big;
+    expect(await readReceiptAction({ id: RECEIPT })).toEqual({ ok: false, error: M.pdfTooBig });
+    nothingSpent();
+  });
+
+  it('an image over 4 MB still goes', async () => {
+    ctl.receipt = {
+      ok: true,
+      data: { status: 'review', file: { path: PATH, type: 'image/jpeg' }, details: { ...TYPED }, extractedAt: null, sizeBytes: 9_000_000 },
+    };
+    expect((await readReceiptAction({ id: RECEIPT })).ok).toBe(true);
+  });
+
   it('an empty file is not a reason to try again', async () => {
     ctl.bytes = new Uint8Array(0);
     expect(await readReceiptAction({ id: RECEIPT })).toEqual({ ok: false, error: M.fileEmpty });

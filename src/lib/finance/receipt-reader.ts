@@ -83,6 +83,8 @@ export type ReceiptForReading = {
   details: { vendor: string | null; receipt_date: string | null; amount: number | null; sst_amount: number | null };
   /** When a reading was last stored; null when no model has read this receipt. A failed new reading leaves such a reading alone. */
   extractedAt: string | null;
+  /** The stored file's size, set by the database from the object; null when not recorded. */
+  sizeBytes: number | null;
 };
 
 const numberOrNull = (value: unknown): number | null => (value === null || value === undefined ? null : Number(value));
@@ -91,7 +93,7 @@ const numberOrNull = (value: unknown): number | null => (value === null || value
 export async function getReceiptForReading(ctx: FinanceWriteContext, receiptId: string): Promise<FinResult<ReceiptForReading>> {
   const { data, error } = await ctx.client
     .from('finance_receipts')
-    .select('status,file_path,mime_type,vendor,receipt_date,amount,sst_amount,extracted_at')
+    .select('status,file_path,mime_type,vendor,receipt_date,amount,sst_amount,extracted_at,size_bytes')
     .eq('org_id', ctx.orgId)
     .eq('id', receiptId)
     .limit(1);
@@ -109,6 +111,7 @@ export async function getReceiptForReading(ctx: FinanceWriteContext, receiptId: 
         amount: unknown;
         sst_amount: unknown;
         extracted_at?: string | null;
+        size_bytes?: unknown;
       }
     | undefined;
   if (!row) return { ok: false, error: RECEIPT_READING_MESSAGES.gone };
@@ -125,6 +128,7 @@ export async function getReceiptForReading(ctx: FinanceWriteContext, receiptId: 
         sst_amount: numberOrNull(row.sst_amount),
       },
       extractedAt: row.extracted_at ?? null,
+      sizeBytes: numberOrNull(row.size_bytes),
     },
   };
 }
