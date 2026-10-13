@@ -228,6 +228,20 @@ export function voucherDetailsLine(row: PaymentVoucherRow): string {
   return parts.join(' · ');
 }
 
+/**
+ * The link in a row's Kind cell: a payment to a supplier and a refund have a
+ * screen of their own. Its tooltip says the voucher is managed there only
+ * from "To be paid" on; before that (a draft, waiting, rejected) its own menu
+ * acts here, so the tooltip is left out. Nothing for the two kinds that
+ * belong here.
+ */
+export function voucherKindLink(row: Pick<PaymentVoucherRow, 'kind' | 'status'>): { label: string; href: string; title: string | null } | null {
+  const home = voucherHome(row.kind);
+  if (!home) return null;
+  const managedThere = row.status === 'scheduled' || row.status === 'posted' || row.status === 'void';
+  return { ...home, title: managedThere ? `Managed on ${home.label}` : null };
+}
+
 /** How a voucher is named to a screen reader: "the payment of RM 300.00 to Tenaga Nasional". */
 export function voucherName(row: PaymentVoucherRow): string {
   return paymentOf(row)

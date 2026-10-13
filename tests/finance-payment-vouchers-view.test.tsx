@@ -161,6 +161,17 @@ describe('a waiting voucher\'s menu', () => {
   });
 });
 
+describe('the Kind link', () => {
+  it('says "Managed on Payments Out" only once the supplier payment is to be paid', () => {
+    expect(render(writer(true), [voucher({ status: 'scheduled', approved_at: '2026-10-06T00:00:00Z' })])).toContain('title="Managed on Payments Out"');
+    for (const status of ['draft', 'pending_approval'] as const) {
+      const html = render(writer(true), [voucher({ status })]);
+      expect(html).toContain('href="/finance/payments-out"');
+      expect(html).not.toContain('Managed on');
+    }
+  });
+});
+
 describe('the questions', () => {
   const rows = [voucher()];
   const notes = { [ID]: [OVER_BILLED] };

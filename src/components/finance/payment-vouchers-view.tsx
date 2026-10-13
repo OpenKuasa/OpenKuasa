@@ -39,7 +39,6 @@ import {
   paymentVouchersInPeriod,
   paymentVouchersView,
   voucherCategory,
-  voucherHome,
 } from '@/lib/finance/cash-book-views';
 import { csvFileName } from '@/lib/finance/csv';
 import type { ExpenseCategory } from '@/lib/finance/expenses';
@@ -56,6 +55,7 @@ import {
   voucherControls,
   voucherDecisionPayload,
   voucherHiddenNote,
+  voucherKindLink,
   voucherName,
   voucherDetailsLine,
   voucherQuestion,
@@ -494,7 +494,7 @@ export function PaymentVouchersView({
                 {shown.map((v) => {
                   const asked = question(v);
                   if (asked) return asked;
-                  const home = voucherHome(v.kind);
+                  const home = voucherKindLink(v);
                   const items = writer ? voucherActions(v, writer.canDecide).map((action) => menuItem(v, action)) : [];
                   return (
                     <TableRow key={v.transaction_id} className={cn('group/row', v.status === 'void' && 'opacity-60')}>
@@ -506,7 +506,7 @@ export function PaymentVouchersView({
                         {home ? (
                           <Link
                             href={home.href}
-                            title={`Managed on ${home.label}`}
+                            title={home.title ?? undefined}
                             aria-label={`${PAYMENT_VOUCHER_KIND_LABELS[v.kind]}: open ${home.label}`}
                             className="font-medium text-primary underline-offset-4 hover:underline"
                           >

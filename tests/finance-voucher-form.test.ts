@@ -14,6 +14,7 @@ import {
   voucherControls,
   voucherDecisionPayload,
   voucherFormError,
+  voucherKindLink,
   voucherHiddenNote,
   voucherDetailsLine,
   voucherName,
@@ -215,6 +216,27 @@ describe('the line under an Approve or Reject question', () => {
 
   it('leaves out the category of a voucher for bills, which has none', () => {
     expect(voucherDetailsLine(row({ kind: 'bill', category_id: null, category_name: null, reference: null }))).toBe('Method: FPX');
+  });
+});
+
+describe('the link in the Kind cell', () => {
+  it('says the voucher is managed on its own screen only from To be paid on', () => {
+    for (const status of ['scheduled', 'posted', 'void'] as const) {
+      expect(voucherKindLink({ kind: 'bill', status })).toEqual({ label: 'Payments Out', href: '/finance/payments-out', title: 'Managed on Payments Out' });
+      expect(voucherKindLink({ kind: 'refund', status })?.title).toBe('Managed on Refunds');
+    }
+  });
+
+  it('has no such tooltip on a draft, waiting or rejected voucher, whose own menu acts here', () => {
+    for (const status of ['draft', 'pending_approval', 'rejected'] as const) {
+      expect(voucherKindLink({ kind: 'bill', status })).toEqual({ label: 'Payments Out', href: '/finance/payments-out', title: null });
+      expect(voucherKindLink({ kind: 'refund', status })?.title).toBeNull();
+    }
+  });
+
+  it('is nothing for the kinds that belong on this screen', () => {
+    expect(voucherKindLink({ kind: 'expense', status: 'scheduled' })).toBeNull();
+    expect(voucherKindLink({ kind: 'other', status: 'pending_approval' })).toBeNull();
   });
 });
 
