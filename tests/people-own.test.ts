@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   CLAIM_CATEGORY_LABEL,
-  DOCUMENT_STATUS_LABEL,
   DOCUMENT_TYPE_LABEL,
+  LETTER_TYPE_LABEL,
   REQUEST_STATUS_LABEL,
   departmentAverages,
   isTeamView,
@@ -10,7 +10,14 @@ import {
   ownRows,
 } from '@/lib/people/own';
 import { createSeedPeopleData } from '@/lib/people/seed';
-import { DEMO_EMPLOYEE_ID, type Employee, type LeaveRequest, type PeopleViewer } from '@/lib/people/types';
+import {
+  DEMO_EMPLOYEE_ID,
+  DOCUMENT_TYPES,
+  LETTER_TYPES,
+  type Employee,
+  type LeaveRequest,
+  type PeopleViewer,
+} from '@/lib/people/types';
 
 const NOW = new Date('2026-10-09T04:00:00Z');
 const data = createSeedPeopleData(NOW);
@@ -84,7 +91,7 @@ describe('departmentAverages', () => {
 
   it('averages scores per department, highest first, with unassigned staff apart', async () => {
     const employees = await data.listEmployees();
-    const out = departmentAverages(await data.listScorecards(), employees);
+    const out = departmentAverages(await data.listReviews(), employees);
     expect(out.reduce((total, d) => total + d.count, 0)).toBe(20);
     const averages = out.map((d) => d.average);
     expect(averages).toEqual([...averages].sort((a, b) => b - a));
@@ -97,9 +104,15 @@ describe('departmentAverages', () => {
 
 describe('labels', () => {
   it('cover every value the database allows', () => {
-    expect(Object.keys(REQUEST_STATUS_LABEL)).toEqual(['pending', 'approved', 'rejected', 'cancelled']);
+    expect(Object.keys(REQUEST_STATUS_LABEL)).toEqual(['pending', 'approved', 'paid', 'rejected', 'cancelled']);
     expect(Object.values(CLAIM_CATEGORY_LABEL)).toEqual(['Medical', 'Travel', 'Meals', 'Equipment', 'Other']);
-    expect(Object.values(DOCUMENT_TYPE_LABEL)).toEqual(['Payslip', 'Contract', 'Letter', 'Tax form', 'Benefits']);
-    expect(Object.values(DOCUMENT_STATUS_LABEL)).toEqual(['Signed', 'Pending signature', 'Available', 'Expiring']);
+    expect(Object.keys(DOCUMENT_TYPE_LABEL)).toEqual(DOCUMENT_TYPES);
+    expect(Object.values(DOCUMENT_TYPE_LABEL)).toEqual([
+      'Contract', 'Tax form', 'Benefits', 'Identity', 'Medical', 'Certificate', 'Other',
+    ]);
+    expect(Object.keys(LETTER_TYPE_LABEL)).toEqual(LETTER_TYPES);
+    expect(Object.values(LETTER_TYPE_LABEL)).toEqual([
+      'Offer', 'Confirmation', 'Promotion', 'Warning', 'Contract renewal', 'Other',
+    ]);
   });
 });

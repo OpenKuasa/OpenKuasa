@@ -35,6 +35,8 @@ export type Company = {
   city: string;
   state: string;
   postcode: string;
+  /** `<org>/<uuid>.<ext>` in the `org-logos` bucket, or null. Use `logoUrl` (lib/account/logo) for its address. */
+  logoPath: string | null;
 };
 
 export type TeamMember = {
@@ -99,6 +101,7 @@ export const getCompany = cache(async (): Promise<Company> => {
     city: '',
     state: '',
     postcode: '',
+    logoPath: null,
   };
   if (!hasSupabaseEnv()) return base;
 
@@ -106,7 +109,7 @@ export const getCompany = cache(async (): Promise<Company> => {
   const { data, error } = await supabase
     .from('orgs')
     .select(
-      'name, registration_no, sst_no, website, industry, company_size, address, city, state, postcode',
+      'name, registration_no, sst_no, website, industry, company_size, address, city, state, postcode, logo_path',
     )
     .eq('id', viewer.orgId)
     .maybeSingle();
@@ -124,6 +127,7 @@ export const getCompany = cache(async (): Promise<Company> => {
     city: data.city ?? '',
     state: data.state ?? '',
     postcode: data.postcode ?? '',
+    logoPath: data.logo_path ?? null,
   };
 });
 

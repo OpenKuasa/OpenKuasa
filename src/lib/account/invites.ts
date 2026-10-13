@@ -38,6 +38,14 @@ export const TEAM_DEMO_ERROR =
   'The demo workspace is read-only. Sign up to manage a team.';
 export const TEAM_ROLE_ERROR = 'Only owners and admins can manage members.';
 
+/** Shown after sign-up from an invite while the address still has to be confirmed. */
+export const INVITE_CONFIRM_NOTICE =
+  'Check your email to confirm your address. The link in that email brings you back to this invite, where you can join.';
+
+/** Shown when someone tries to join before confirming the invited address. */
+export const INVITE_CONFIRM_FIRST =
+  'Confirm your email address first: open the link we emailed you, then come back to this invite to join.';
+
 // Messages raised by the invite and member database functions.
 const RPC_MESSAGES: Record<string, string> = {
   'not authenticated': 'Please sign in and try again.',
@@ -52,6 +60,7 @@ const RPC_MESSAGES: Record<string, string> = {
     'This invite has expired or was already used. Ask for a new one.',
   'invite is for another email':
     'This invite was sent to a different email address.',
+  'email not confirmed': INVITE_CONFIRM_FIRST,
   'cannot change your own role': 'You cannot change your own role.',
   'cannot change the owner': 'The owner’s role cannot be changed.',
   'not a member': 'That person is no longer a member of this workspace.',
@@ -110,6 +119,15 @@ export function originFromHeaders(h: {
 
 export function inviteUrl(origin: string, token: string): string {
   return `${origin.replace(/\/+$/, '')}/invite/${token}`;
+}
+
+/**
+ * Where the confirmation email sends someone who signed up from an invite:
+ * through the link check, then back to the same invite, signed in.
+ */
+export function inviteConfirmUrl(origin: string, token: string): string {
+  const next = encodeURIComponent(`/invite/${token}`);
+  return `${origin.replace(/\/+$/, '')}/auth/confirm?next=${next}`;
 }
 
 /** Open invites for a workspace. RLS only returns rows to its owners and admins. */

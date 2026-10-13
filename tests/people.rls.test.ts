@@ -1,14 +1,12 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { createOrg, joinDemo, signInAnon, liveClient, signInOwner } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const client = (): SupabaseClient =>
-  createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
+const client = liveClient;
 
 const DEMO_EMPLOYEE_ID = 'dea97d89-a5b6-f264-bd42-c6df73f664a7';
 const PERSONAL = [
@@ -21,18 +19,18 @@ const SHARED = ['hr_departments', 'hr_employees', 'hr_public_holidays', 'hr_trai
 
 async function ownedOrg(name: string) {
   const c = client();
-  const { error: e1 } = await c.auth.signInAnonymously();
+  const { error: e1 } = await signInOwner(c);
   expect(e1, e1?.message).toBeNull();
-  const { data: orgId, error } = await c.rpc('create_org_for_current_user', { org_name: name });
+  const { data: orgId, error } = await createOrg(c, name);
   expect(error, error?.message).toBeNull();
   return { c, orgId: orgId as string };
 }
 
 async function demoGuest() {
   const c = client();
-  const { error: e1 } = await c.auth.signInAnonymously();
+  const { error: e1 } = await signInAnon(c);
   expect(e1, e1?.message).toBeNull();
-  const { data: demoId, error } = await c.rpc('join_demo_org');
+  const { data: demoId, error } = await joinDemo(c);
   expect(error, error?.message).toBeNull();
   return { c, demoId: demoId as string };
 }
@@ -48,6 +46,9 @@ const count = async (c: SupabaseClient, table: string, orgId: string) => {
 
 let owner: Awaited<ReturnType<typeof ownedOrg>>;
 let other: Awaited<ReturnType<typeof ownedOrg>>;
+
+/** Deletes one of the owner's employees the way the app does: through the function, the only way there is. */
+const deleteEmployee = (id: string) => owner.c.rpc('hr_delete_employee', { p_org: owner.orgId, p_employee: id });
 
 beforeAll(async () => {
   if (!hasSupabaseEnv) return;
@@ -98,9 +99,15 @@ testWithSupabase('an owner can add, edit and delete a department and an employee
   const blocked = await owner.c.from('hr_departments').delete().eq('id', dept.data!.id);
   expect(blocked.error?.code).toBe('23503');
 
+  // An employee is deleted through the function only: a direct delete is refused, owner or not.
+  const direct = await owner.c.from('hr_employees').delete().eq('id', emp.data!.id);
+  expect(direct.error?.code).toBe('42501'); // no delete grant
+  expect(await count(owner.c, 'hr_employees', owner.orgId)).toBe(1);
   // Deleting the employee takes the private row with it.
-  const del = await owner.c.from('hr_employees').delete().eq('id', emp.data!.id);
+  const del = await deleteEmployee(emp.data!.id);
   expect(del.error, del.error?.message).toBeNull();
+  expect(del.data).toMatchObject({ id: emp.data!.id, name: 'Farah Idris', document_paths: [] });
+  expect(await count(owner.c, 'hr_employees', owner.orgId)).toBe(0);
   expect(await count(owner.c, 'hr_employee_private', owner.orgId)).toBe(0);
   const delDept = await owner.c.from('hr_departments').delete().eq('id', dept.data!.id);
   expect(delDept.error, delDept.error?.message).toBeNull();
@@ -127,7 +134,7 @@ testWithSupabase('an owner cannot write to a table that is read-only this slice'
     start_date: '2026-10-20', end_date: '2026-10-21', days: 2,
   });
   expect(res.error?.code).toBe('42501'); // no insert grant
-  await owner.c.from('hr_employees').delete().eq('id', emp.data!.id);
+  await deleteEmployee(emp.data!.id);
 });
 
 testWithSupabase('one workspace cannot see or change another workspace\'s HR data', async () => {
@@ -153,7 +160,7 @@ testWithSupabase('one workspace cannot see or change another workspace\'s HR dat
   const plant = await other.c.from('hr_employees').insert({ org_id: owner.orgId, employee_no: 'X', name: 'Planted' });
   expect(plant.error?.code).toBe('42501');
 
-  await owner.c.from('hr_employees').delete().eq('id', emp.data!.id);
+  await deleteEmployee(emp.data!.id);
 });
 
 testWithSupabase('a demo guest reads the whole demo workspace, and it has the promised shape', async () => {
@@ -206,7 +213,12 @@ testWithSupabase('a demo guest cannot change anything', async () => {
   const upd = await d.c.from('hr_employees').update({ name: 'Changed' }).eq('id', DEMO_EMPLOYEE_ID).select('id');
   expect(upd.data ?? []).toHaveLength(0);
   const del = await d.c.from('hr_employees').delete().eq('id', DEMO_EMPLOYEE_ID).select('id');
+  expect(del.error?.code).toBe('42501'); // no delete grant, for anyone
   expect(del.data ?? []).toHaveLength(0);
+  const viaFunction = await d.c.rpc('hr_delete_employee', { p_org: d.demoId, p_employee: DEMO_EMPLOYEE_ID });
+  expect(viaFunction.error, viaFunction.error?.message).toBeNull();
+  expect(viaFunction.data).toBeNull(); // nothing is deleted in the demo
+  expect(await count(d.c, 'hr_employees', d.demoId)).toBe(20);
   const pay = await d.c.from('hr_employee_private').update({ base_salary_cents: 1 }).eq('employee_id', DEMO_EMPLOYEE_ID).select('employee_id');
   expect(pay.data ?? []).toHaveLength(0);
   await d.c.auth.signOut();
@@ -226,6 +238,6 @@ testWithSupabase('being in the demo opens the demo only', async () => {
     .single();
   expect(emp.error, emp.error?.message).toBeNull();
   expect(await count(guest.c, 'hr_employees', owner.orgId)).toBe(0);
-  await owner.c.from('hr_employees').delete().eq('id', emp.data!.id);
+  await deleteEmployee(emp.data!.id);
   await guest.c.auth.signOut();
 });

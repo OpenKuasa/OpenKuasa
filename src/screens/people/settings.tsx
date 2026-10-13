@@ -3,10 +3,11 @@ import type { ReactNode } from 'react';
 import { BentoCard, BentoGrid } from '@/components/bento/bento';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
+import { AttendanceSettingsForm } from '@/components/people/attendance-settings-form';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { loadSettingsModel } from '@/lib/people/documents';
-import { HrOnlyScreen, LOAD_FAILED, LaterButton, loadPeople } from './parts';
+import { HrOnlyScreen, LOAD_FAILED, loadPeople } from './parts';
 
 function ValueRow({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -19,7 +20,7 @@ function ValueRow({ label, children }: { label: string; children: ReactNode }) {
 
 /** The workspace's HR defaults, read-only. Owners and admins only; nobody else's request reads them. */
 export default async function SettingsScreen() {
-  const { model } = await loadPeople('settings', (data, _now, ctx) => loadSettingsModel(data, ctx.viewer));
+  const { model, viewer } = await loadPeople('settings', (data, _now, ctx) => loadSettingsModel(data, ctx.viewer));
 
   if (model?.hr_only) return <HrOnlyScreen title="Settings" />;
   const settings = model && !model.hr_only ? model : null;
@@ -47,12 +48,19 @@ export default async function SettingsScreen() {
         </BentoCard>
 
         <BentoCard
-          title="Working days"
-          subtitle="How the team week is structured"
+          title="Working days and attendance"
+          subtitle={settings ? `The team week is ${settings.working_days}` : 'How the team week is structured'}
           icon={CalendarClock}
           className="col-span-2 md:col-span-6"
         >
-          {!settings ? LOAD_FAILED : <ValueRow label="Working days">{settings.working_days}</ValueRow>}
+          {!settings ? (
+            LOAD_FAILED
+          ) : (
+            <AttendanceSettingsForm
+              initial={settings.attendance}
+              disabled={viewer.isDemo}
+            />
+          )}
         </BentoCard>
 
         <BentoCard
@@ -99,10 +107,6 @@ export default async function SettingsScreen() {
           )}
         </BentoCard>
       </BentoGrid>
-
-      <div className="mt-4 flex justify-end">
-        <LaterButton>Save changes</LaterButton>
-      </div>
     </ScreenContainer>
   );
 }

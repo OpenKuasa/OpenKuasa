@@ -40,6 +40,7 @@ describe('LaterButton', () => {
 describe('requestTone', () => {
   it('maps the four statuses', () => {
     expect(requestTone('approved')).toBe('good');
+    expect(requestTone('paid')).toBe('good');
     expect(requestTone('pending')).toBe('pending');
     expect(requestTone('rejected')).toBe('bad');
     expect(requestTone('cancelled')).toBe('neutral');

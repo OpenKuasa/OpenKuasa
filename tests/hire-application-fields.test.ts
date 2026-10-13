@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  APPLY_FIELDS, APPLY_HONEYPOT, APPLY_LIMITS, APPLY_MESSAGES, EMPTY_APPLY_VALUES, applyProblems, countCharacters, fieldProblem,
-  firstName, isRequired, isStaleForm, ringgitToSen, shownFields,
+  APPLY_FIELDS, APPLY_HONEYPOT, APPLY_LIMITS, APPLY_MESSAGES, EMPTY_APPLY_VALUES, applyProblems, chosenFile, countCharacters,
+  cvFileProblem, fieldProblem, fileSizeLabel, firstName, isRequired, isStaleForm, ringgitToSen, shownFields,
 } from '@/lib/hire/application-fields';
 
 const OFF = { require_cv: false, require_cover_letter: false, ask_portfolio: false, ask_expected_salary: false };
@@ -9,12 +9,12 @@ const ALL = { require_cv: true, require_cover_letter: true, ask_portfolio: true,
 const good = { ...EMPTY_APPLY_VALUES, name: 'Aina Rahman', email: 'aina@example.com', consent: true };
 
 describe('which fields a form shows', () => {
-  it('asks for name, email, phone and consent when every switch is off', () => {
-    expect(shownFields(OFF)).toEqual(['name', 'email', 'phone', 'consent']);
+  it('asks for name, email, phone, a CV and consent when every switch is off', () => {
+    expect(shownFields(OFF)).toEqual(['name', 'email', 'phone', 'cv_url', 'consent']);
   });
   it('adds each field its switch turns on, in the fixed order', () => {
     expect(shownFields(ALL)).toEqual([...APPLY_FIELDS]);
-    expect(shownFields({ ...OFF, ask_portfolio: true })).toEqual(['name', 'email', 'phone', 'portfolio_url', 'consent']);
+    expect(shownFields({ ...OFF, ask_portfolio: true })).toEqual(['name', 'email', 'phone', 'cv_url', 'portfolio_url', 'consent']);
   });
   it('requires name, email and consent always, a CV and cover letter only when switched on, the rest never', () => {
     for (const field of ['name', 'email', 'consent'] as const) expect(isRequired(field, OFF)).toBe(true);
@@ -116,7 +116,7 @@ describe('the words for a post that did not arrive', () => {
 
 describe('a form whose requirements changed while it was open', () => {
   it('is stale when the answer has a problem with a field the form does not show', () => {
-    expect(isStaleForm({ cv_url: APPLY_MESSAGES.cvRequired }, shownFields(OFF))).toBe(true);
+    expect(isStaleForm({ portfolio_url: APPLY_MESSAGES.urlInvalid }, shownFields(OFF))).toBe(true);
     expect(isStaleForm({ email: APPLY_MESSAGES.email, cover_letter: APPLY_MESSAGES.coverLetterRequired }, shownFields(OFF))).toBe(true);
     expect(isStaleForm({ expected_salary: APPLY_MESSAGES.salaryInvalid }, shownFields({ ...OFF, ask_portfolio: true }))).toBe(true);
   });
@@ -127,11 +127,65 @@ describe('a form whose requirements changed while it was open', () => {
     expect(isStaleForm(applyProblems({ ...EMPTY_APPLY_VALUES }, ALL), shownFields(ALL))).toBe(false);
   });
   it('does not count a field named with no message', () => {
-    expect(isStaleForm({ cv_url: undefined }, shownFields(OFF))).toBe(false);
-    expect(isStaleForm({ cv_url: '' }, shownFields(OFF))).toBe(false);
+    expect(isStaleForm({ portfolio_url: undefined }, shownFields(OFF))).toBe(false);
+    expect(isStaleForm({ portfolio_url: '' }, shownFields(OFF))).toBe(false);
   });
   it('has its own words', () => {
     expect(APPLY_MESSAGES.formChanged).toBe('This form has just changed. Please check the new fields below and send again.');
+  });
+});
+
+const MB = 1024 * 1024;
+const PDF_TYPE = 'application/pdf';
+
+describe('the size of a file, in words', () => {
+  it('gives one decimal for megabytes and whole kilobytes', () => {
+    expect(fileSizeLabel(7.2 * MB)).toBe('7.2 MB');
+    expect(fileSizeLabel(480 * 1024)).toBe('480 KB');
+    expect(fileSizeLabel(5 * MB)).toBe('5.0 MB');
+  });
+});
+
+describe('which value counts as a chosen file', () => {
+  it('is nothing for the untouched input, text or null', () => {
+    expect(chosenFile({ name: '', size: 0, type: 'application/octet-stream' })).toBeNull();
+    expect(chosenFile('text')).toBeNull();
+    expect(chosenFile(null)).toBeNull();
+  });
+  it('keeps the name, size and type and nothing else', () => {
+    expect(chosenFile({ name: 'cv.pdf', size: 10, type: PDF_TYPE, extra: 'x' })).toEqual({ name: 'cv.pdf', size: 10, type: PDF_TYPE });
+  });
+});
+
+describe('what is wrong with a chosen CV file', () => {
+  it('is nothing for no file or a small PDF', () => {
+    expect(cvFileProblem(null)).toBeNull();
+    expect(cvFileProblem({ name: 'cv.pdf', size: 10, type: PDF_TYPE })).toBeNull();
+    expect(cvFileProblem({ name: 'CV.PDF', size: 10, type: '' })).toBeNull();
+  });
+  it('asks for a PDF when the file is empty or not a PDF', () => {
+    expect(cvFileProblem({ name: 'cv.pdf', size: 0, type: PDF_TYPE })).toBe('Choose a PDF file.');
+    expect(cvFileProblem({
+      name: 'cv.docx', size: 10, type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    })).toBe('Choose a PDF file.');
+    expect(cvFileProblem({ name: 'cv.pdf', size: 10, type: 'application/octet-stream' })).toBeNull();
+    expect(cvFileProblem({ name: 'cv.txt', size: 10, type: 'text/plain' })).toBe('Choose a PDF file.');
+    expect(cvFileProblem({ name: 'scan', size: 10, type: 'application/pdf' })).toBeNull();
+  });
+  it('names the size when the file is over 5 MB', () => {
+    expect(cvFileProblem({ name: 'cv.pdf', size: 7.2 * MB, type: PDF_TYPE })).toBe('This file is 7.2 MB. Choose one under 5 MB.');
+  });
+});
+
+describe('a CV file meets the CV requirement', () => {
+  it('needs a link or a file when the workspace requires a CV', () => {
+    const values = { ...good, cover_letter: 'Hello.' };
+    expect(applyProblems(values, ALL).cv_url).toBe('Upload a PDF or paste a link to your CV.');
+    expect(applyProblems(values, ALL, true)).not.toHaveProperty('cv_url');
+    expect(fieldProblem('cv_url', values, ALL, true)).toBeNull();
+  });
+  it('still refuses a bad link when a file is chosen', () => {
+    expect(fieldProblem('cv_url', { ...good, cv_url: 'example.com/cv' }, ALL, true)).toBe(APPLY_MESSAGES.urlInvalid);
   });
 });
 

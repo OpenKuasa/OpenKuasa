@@ -21,22 +21,29 @@ const applyShape = z.object({
 });
 
 /** The same checks as `applyProblems`, as a schema: one issue per wrong field, on that field's path. */
-export const applicationInput = (form: ApplicationFormValues) =>
+export const applicationInput = (form: ApplicationFormValues, hasCvFile = false) =>
   applyShape
     .superRefine((values, ctx) => {
-      for (const [field, message] of Object.entries(applyProblems(values, form))) {
+      for (const [field, message] of Object.entries(applyProblems(values, form, hasCvFile))) {
         ctx.addIssue({ code: 'custom', path: [field], message });
       }
     });
 
 export type ApplyOutcome =
   | { kind: 'ok' }
+  /** A repeat application: the visitor is thanked as for a new one. */
+  | { kind: 'duplicate' }
   | { kind: 'closed' }
   | { kind: 'throttled' }
   | { kind: 'invalid'; errors: ApplyErrors }
   | { kind: 'failed' };
 
-const WORD_ERRORS: Record<string, readonly [ApplyField, keyof typeof APPLY_MESSAGES]> = {
+/** The messages that are plain text; the ones that are functions of something cannot be looked up by a word. */
+type TextMessageKey = {
+  [K in keyof typeof APPLY_MESSAGES]: (typeof APPLY_MESSAGES)[K] extends string ? K : never;
+}[keyof typeof APPLY_MESSAGES];
+
+const WORD_ERRORS: Record<string, readonly [ApplyField, TextMessageKey]> = {
   name_too_long: ['name', 'nameTooLong'],
   invalid_name: ['name', 'name'],
   email_too_long: ['email', 'emailTooLong'],
@@ -56,6 +63,7 @@ const WORD_ERRORS: Record<string, readonly [ApplyField, keyof typeof APPLY_MESSA
  */
 export function applyOutcome(word: unknown): ApplyOutcome {
   if (word === 'ok') return { kind: 'ok' };
+  if (word === 'ok_duplicate') return { kind: 'duplicate' };
   if (word === 'closed' || word === 'not_found') return { kind: 'closed' };
   if (word === 'throttled') return { kind: 'throttled' };
   const entry = typeof word === 'string' && Object.hasOwn(WORD_ERRORS, word) ? WORD_ERRORS[word] : undefined;
@@ -75,14 +83,17 @@ export async function submitPublicApplication(
   values: ApplyValues,
   form: ApplicationFormValues,
   honeypot?: string | null,
+  cvPath?: string | null,
 ): Promise<ApplyOutcome> {
   if (!isUuid(orgId) || !isUuid(jobId)) return { kind: 'closed' };
   // A post that is not the form's shape (a missing field, a number for a name) is not checked field by
   // field: the checks below read strings.
   const shaped = applyShape.safeParse(values);
   if (!shaped.success) return { kind: 'failed' };
-  const parsed = applicationInput(form).safeParse(shaped.data);
-  if (!parsed.success) return { kind: 'invalid', errors: applyProblems(shaped.data, form) };
+  // A path means a file was stored for this application, which meets a required CV.
+  const hasCvFile = Boolean(cvPath);
+  const parsed = applicationInput(form, hasCvFile).safeParse(shaped.data);
+  if (!parsed.success) return { kind: 'invalid', errors: applyProblems(shaped.data, form, hasCvFile) };
 
   const shown = new Set(shownFields(form));
   const text = (field: Exclude<ApplyField, 'consent'>) => {
@@ -103,6 +114,7 @@ export async function submitPublicApplication(
     p_expected_salary_cents: salary === 'invalid' ? null : salary,
     p_consent: parsed.data.consent,
     p_honeypot: honeypot ? honeypot : null,
+    ...(cvPath ? { p_cv_path: cvPath } : {}),
   };
 
   try {

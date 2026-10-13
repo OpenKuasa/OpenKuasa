@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { joinDemo, signInAnon, liveClient } from './helpers/live-workspaces';
 import { addDays, todayInMalaysia, weekStart } from '@/lib/people/dates';
 import { buildPeopleOverviewModel } from '@/lib/people/overview';
 import { createSupabasePeopleData } from '@/lib/people/supabase';
@@ -11,8 +12,6 @@ import type { PeopleData } from '@/lib/people/types';
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 let c: SupabaseClient;
 let demoId: string;
 
@@ -20,9 +19,9 @@ const AISYAH_ID = 'dea97d89-a5b6-f264-bd42-c6df73f664a7';
 
 beforeAll(async () => {
   if (!hasSupabaseEnv) return;
-  c = createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
-  await c.auth.signInAnonymously();
-  const { data } = await c.rpc('join_demo_org');
+  c = liveClient();
+  await signInAnon(c);
+  const { data } = await joinDemo(c);
   demoId = data as string;
 });
 afterAll(async () => { await c?.auth.signOut(); });
@@ -34,7 +33,7 @@ async function readAll(data: PeopleData) {
   const year = Number(today.slice(0, 4));
   const [
     departments, employees, employeePrivate, leave, balances, timeOff, claims, overtime,
-    attendance, timesheet, shifts, holidays, runs, payslips, goals, scorecards, reviews,
+    attendance, timesheet, shifts, holidays, runs, payslips, goals, reviews,
     trainings, enrolments, announcements, documents, letters, vouchers, settings,
   ] = await Promise.all([
     data.listDepartments(),
@@ -52,7 +51,6 @@ async function readAll(data: PeopleData) {
     data.listPayrollRuns(),
     data.listPayslips(),
     data.listGoals(),
-    data.listScorecards(),
     data.listReviews(),
     data.listTrainings(),
     data.listTrainingEnrolments(),
@@ -64,14 +62,14 @@ async function readAll(data: PeopleData) {
   ]);
   return {
     today, departments, employees, employeePrivate, leave, balances, timeOff, claims, overtime,
-    attendance, timesheet, shifts, holidays, runs, payslips, goals, scorecards, reviews,
+    attendance, timesheet, shifts, holidays, runs, payslips, goals, reviews,
     trainings, enrolments, announcements, documents, letters, vouchers, settings,
   };
 }
 
 testWithSupabase('reads every HR table through the PeopleData provider as a demo guest', async () => {
   const data = createSupabasePeopleData(c, demoId);
-  const r = await readAll(data); // none of the 24 methods may throw
+  const r = await readAll(data); // none of the 23 methods may throw
 
   // The demo's promised shape.
   expect(r.employees).toHaveLength(20);
@@ -87,14 +85,15 @@ testWithSupabase('reads every HR table through the PeopleData provider as a demo
   expect(r.runs.filter((p) => p.status === 'draft')).toHaveLength(1);
   for (const [name, rows] of Object.entries({
     balances: r.balances, attendance: r.attendance, timesheet: r.timesheet, shifts: r.shifts,
-    holidays: r.holidays, payslips: r.payslips, goals: r.goals, scorecards: r.scorecards,
+    holidays: r.holidays, payslips: r.payslips, goals: r.goals,
     reviews: r.reviews, trainings: r.trainings, enrolments: r.enrolments, announcements: r.announcements,
   })) {
     expect(rows.length, name).toBeGreaterThan(0);
   }
 
   // The four reads added for the remaining screens, with the demo's counts.
-  expect(r.documents).toHaveLength(26);
+  // 24 once the documents migrations and the re-seed are applied (it was 26 before: the payslip and letter records are gone).
+  expect(r.documents).toHaveLength(24);
   expect(r.letters).toHaveLength(5);
   expect(r.vouchers).toHaveLength(6);
   expect(r.settings.notifications).toMatchObject({ leave_requests: true, birthdays: false });
@@ -105,7 +104,7 @@ testWithSupabase('reads every HR table through the PeopleData provider as a demo
   // Joined names resolved.
   for (const [name, rows] of Object.entries({
     leave: r.leave, claims: r.claims, overtime: r.overtime, payslips: r.payslips,
-    goals: r.goals, scorecards: r.scorecards, reviews: r.reviews,
+    goals: r.goals, reviews: r.reviews,
   })) {
     expect(rows.filter((x) => x.employee_name === 'Unknown'), name).toHaveLength(0);
   }

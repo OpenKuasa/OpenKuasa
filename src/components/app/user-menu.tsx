@@ -21,8 +21,8 @@ const ITEMS: { label: string; href: string; needs?: Capability }[] = [
   { label: 'Change Password', href: '/account/security' },
   { label: 'Product Changelog', href: '/account/changelog' },
   { label: 'Contact Support', href: '/account/support' },
-  { label: 'Tutorials Docs', href: '/account/docs' },
-  { label: 'Features Request', href: '/account/feedback' },
+  { label: 'Tutorials & Docs', href: '/account/docs' },
+  { label: 'Feature Requests', href: '/account/feedback' },
 ];
 
 export function UserMenu() {

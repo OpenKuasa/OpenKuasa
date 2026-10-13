@@ -22,7 +22,14 @@ import {
   timesheetByEmployee,
 } from '@/lib/people/summaries';
 import { createSeedPeopleData } from '@/lib/people/seed';
-import { DEFAULT_PEOPLE_SETTINGS, type Employee, type LeaveRequest, type PeopleData, type TimesheetEntry } from '@/lib/people/types';
+import {
+  DEFAULT_PEOPLE_SETTINGS,
+  type Employee,
+  type LeaveRequest,
+  type PeopleData,
+  type Review,
+  type TimesheetEntry,
+} from '@/lib/people/types';
 
 // A Friday, so there is attendance for "today".
 const NOW = new Date('2026-10-09T04:00:00Z');
@@ -35,9 +42,9 @@ const EMPTY: PeopleData = {
   listClaims: async () => [], listOvertime: async () => [], listAttendance: async () => [],
   listTimesheet: async () => [], listShifts: async () => [], listPublicHolidays: async () => [],
   listPayrollRuns: async () => [], listPayslips: async () => [], listGoals: async () => [],
-  listScorecards: async () => [], listReviews: async () => [], listTrainings: async () => [],
+  listReviews: async () => [], listTrainings: async () => [],
   listTrainingEnrolments: async () => [], listAnnouncements: async () => [],
-  listDocuments: async () => [], listLetters: async () => [], listPaymentVouchers: async () => [],
+  listDocuments: async () => [], listLetters: async () => [], listLetterTemplates: async () => [], listPaymentVouchers: async () => [],
   getSettings: async () => structuredClone(DEFAULT_PEOPLE_SETTINGS),
 };
 
@@ -147,15 +154,18 @@ describe('overview helpers', () => {
 
   it('counts attendance on a day and the share at work', async () => {
     const days = await data.listAttendance(TODAY, TODAY);
-    expect(attendanceOn(days, TODAY)).toEqual({ present: 16, late: 1, absent: 0, on_leave: 3, at_work: 17, rate_pct: 100 });
-    expect(attendanceOn([], TODAY)).toEqual({ present: 0, late: 0, absent: 0, on_leave: 0, at_work: 0, rate_pct: null });
+    expect(attendanceOn(days, TODAY)).toEqual({ present: 16, late: 1, absent: 0, on_leave: 3, clocked_in: 17 });
+    // Clocked in means present or late with a clock-in; a row of today without one is not counted.
+    const row = (status: 'present' | 'late' | 'absent', clock_in: string | null) => ({ ...days[0], work_date: TODAY, status, clock_in });
+    expect(attendanceOn([row('present', '2026-10-09T01:00:00Z'), row('late', '2026-10-09T02:00:00Z'), row('absent', null), row('present', null)], TODAY).clocked_in).toBe(2);
+    expect(attendanceOn([], TODAY)).toEqual({ present: 0, late: 0, absent: 0, on_leave: 0, clocked_in: 0 });
   });
 
   it('builds the Overview from the same helpers', async () => {
     const model = await buildPeopleOverviewModel(data, NOW);
     expect(model.today).toBe(TODAY);
     expect(model.totals).toEqual({
-      headcount: 20, departments: 5, at_work_today: 17, attendance_rate_pct: 100, on_leave_today: 3, pending_approvals: 6,
+      headcount: 20, departments: 5, clocked_in_so_far: 17, on_leave_today: 3, pending_approvals: 6,
     });
     expect(model.onLeave).toEqual([
       { name: 'Lim Wei Jie', kind: 'Medical leave', when: '09 Oct' },
@@ -171,7 +181,7 @@ describe('overview helpers', () => {
   it('builds an empty Overview without NaN', async () => {
     const model = await buildPeopleOverviewModel(EMPTY, NOW);
     expect(model.totals).toEqual({
-      headcount: 0, departments: 0, at_work_today: 0, attendance_rate_pct: null, on_leave_today: 0, pending_approvals: 0,
+      headcount: 0, departments: 0, clocked_in_so_far: 0, on_leave_today: 0, pending_approvals: 0,
     });
     expect(model.trend.every((t) => t.headcount === 0)).toBe(true);
     expect(JSON.stringify(model)).not.toContain('NaN');
@@ -182,7 +192,7 @@ describe('summaries', () => {
   it('totals each payroll run, newest first', async () => {
     const runs = payrollSummary(await data.listPayrollRuns(), await data.listPayslips());
     expect(runs).toHaveLength(8);
-    expect(runs[0]).toMatchObject({ period_month: '2026-10-01', status: 'draft', headcount: 20, gross_cents: 10520000 });
+    expect(runs[0]).toMatchObject({ period_month: '2026-10-01', status: 'draft', headcount: 20, gross_cents: 10738750 });
     expect(runs[0].net_cents).toBe(runs[0].gross_cents - runs[0].deductions_cents);
     expect(runs[1]).toMatchObject({ period_month: '2026-09-01', status: 'paid' });
     expect(payrollSummary([], [])).toEqual([]);
@@ -214,14 +224,37 @@ describe('summaries', () => {
     expect(rows).toEqual([{ employee: 'A', hours: 0.3, billable_hours: 0.3 }]);
   });
 
-  it('summarises goals, scores and ratings', async () => {
-    const summary = performanceSummary(await data.listGoals(), await data.listScorecards(), await data.listReviews());
+  it('summarises goals, scores and ratings over released reviews only', async () => {
+    const reviews = await data.listReviews();
+    const summary = performanceSummary(await data.listGoals(), reviews);
     expect(summary.goals.total).toBe(40);
     expect(summary.goals.on_track + summary.goals.at_risk + summary.goals.done).toBe(40);
-    expect(summary.ratings.exceeds + summary.ratings.meets + summary.ratings.below).toBe(20);
+    // 20 reviews, two of them drafts: neither is rated, averaged or ranked.
+    expect(reviews).toHaveLength(20);
+    expect(summary.ratings.exceeds + summary.ratings.meets + summary.ratings.below).toBe(18);
     expect(summary.average_score).toBeGreaterThan(3);
     expect(summary.top).toHaveLength(5);
-    expect(performanceSummary([], [], []).average_score).toBeNull();
+    const drafts = new Set(reviews.filter((r) => r.status === 'draft').map((r) => r.employee_name));
+    expect(drafts.size).toBe(2);
+    expect(summary.top.some((t) => drafts.has(t.employee))).toBe(false);
+    expect(performanceSummary([], []).average_score).toBeNull();
+  });
+
+  it('never counts a draft, however high it scores, and is empty-safe for reviews with no competencies', () => {
+    const review = (over: Partial<Review>): Review => ({
+      id: 'r', employee_id: 'e', employee_name: 'A', period: 'H1 2026', competencies: {} as Review['competencies'],
+      rating: 'meets', score: 3, comment: null, status: 'released', released_at: null, reviewer_name: null,
+      reviewed_at: null, ...over,
+    });
+    const summary = performanceSummary([], [
+      review({ id: '1', score: 4 }),
+      review({ id: '2', score: 5, rating: 'exceeds', status: 'draft', employee_name: 'Draft Person' }),
+    ]);
+    expect(summary.average_score).toBe(4);
+    expect(summary.ratings).toEqual({ exceeds: 0, meets: 1, below: 0 });
+    expect(summary.top).toEqual([{ employee: 'A', period: 'H1 2026', score: 4 }]);
+    expect(performanceSummary([], [review({ status: 'draft' })]).average_score).toBeNull();
+    expect(JSON.stringify(summary)).not.toMatch(/NaN|Draft Person/);
   });
 
   it('gives each leave balance a name and what is left', async () => {

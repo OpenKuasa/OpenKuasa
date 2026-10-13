@@ -14,10 +14,19 @@ describe('TUAH_SYSTEM', () => {
     expect(t).toContain('never invent');
   });
 
-  it('stays honest about the products it cannot see yet', () => {
-    expect(t).toContain('cannot see the rest of the workspace yet');
-    expect(t).toContain('invoices');
-    expect(t).toContain('payroll');
+  it('names HR among the products it can now look up', () => {
+    // Lekiu is wired into Tuah, so the prompt must say HR is reachable or Tuah
+    // would wrongly deny it.
+    expect(t).toContain('look up hr in lekiu');
+  });
+
+  it('has no blind spot now that all five products are wired', () => {
+    // Finance (Bendahara) is the last product wired in; the old blind-spot lines are gone.
+    expect(t).not.toContain("cannot see the workspace's finance yet");
+    expect(t).not.toContain('cannot see the rest of the workspace yet');
+    expect(t).not.toContain('payroll and staff');
+    // ...and finance is now named among the products it can look up.
+    expect(t).toContain('look up finance in bendahara');
   });
 
   it('states changes need approval, and are reported as done once made', () => {

@@ -5,7 +5,6 @@ import {
   CalendarDays,
   MapPin,
   Phone,
-  Plus,
   Video,
   type LucideIcon,
 } from 'lucide-react';
@@ -15,7 +14,6 @@ import { BentoGrid, BentoCard, BentoStat } from '@/components/bento/bento';
 import { BarGroup, type Series } from '@/components/charts';
 import { LiveDot } from '@/components/ui/live-dot';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import {
   Table,
   TableBody,
@@ -24,8 +22,15 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { can } from '@/lib/auth/permissions';
+import { getViewer } from '@/lib/auth/viewer';
 import { cn } from '@/lib/utils';
+import { tagsFor, timeCell } from '@/lib/hire/interview-dialog-state';
+import { feedbackCell } from '@/lib/hire/interview-feedback';
 import { ROWS_SHOWN, buildInterviewsModel, type InterviewsModel } from '@/lib/hire/lists';
+import { DeletionNotice } from '@/screens/hire/delete-dialog';
+import { InterviewHeaderButtons, InterviewRowMenu } from '@/screens/hire/interview-actions';
+import { InterviewDialogHost } from '@/screens/hire/interview-dialog';
 import { LOAD_FAILED, Muted, loadHire } from '@/screens/hire/parts';
 
 type Interview = InterviewsModel['rows'][number];
@@ -47,16 +52,22 @@ const WEEK_SERIES: Series[] = [
   { key: 'count', label: 'Interviews', color: 'var(--chart-1)' },
 ];
 
+const FOCUS = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2';
+
 function UpcomingRow({ interview }: { interview: Interview }) {
   const TypeIcon = TYPE_ICONS[interview.type];
   return (
     <li className="flex items-center gap-3 rounded-xl border bg-card p-3 shadow-sm transition-colors hover:border-primary/40">
       <div className="flex w-14 shrink-0 flex-col items-center rounded-lg bg-primary/10 px-2 py-1 text-primary">
+        {/* `date` is "20 Oct 2026": the month, the day, and the year under them. An interview can be a year off. */}
         <span className="text-[10px] font-medium uppercase">
           {interview.date.split(' ')[1]}
         </span>
         <span className="text-base font-bold leading-none tabular-nums">
           {interview.date.split(' ')[0]}
+        </span>
+        <span className="text-[10px] font-medium tabular-nums">
+          {interview.date.split(' ')[2]}
         </span>
       </div>
       <div className="min-w-0 flex-1">
@@ -81,22 +92,59 @@ function UpcomingRow({ interview }: { interview: Interview }) {
   );
 }
 
+/**
+ * Where the interview is held. A link is drawn only from `placeLink`, which
+ * the server made with `safeLink` (http or https, no login part): the place
+ * as typed is never put in an `href`. Anything else is plain text.
+ */
+function Where({ interview }: { interview: Interview }) {
+  if (interview.placeLink) {
+    return (
+      <a
+        href={interview.placeLink.href}
+        target="_blank"
+        rel="noopener noreferrer"
+        // A long host wraps inside the cell instead of widening the table.
+        className={cn('inline-flex min-h-11 min-w-11 items-center rounded-md break-all text-primary underline underline-offset-2', FOCUS)}
+      >
+        {interview.placeLink.host}
+      </a>
+    );
+  }
+  if (interview.place) return <span className="break-words">{interview.place}</span>;
+  return <span className="text-muted-foreground">—</span>;
+}
+
 export default async function InterviewsScreen() {
-  const { model } = await loadHire('interviews', buildInterviewsModel);
-  const upcoming = model?.rows.filter((r) => r.status === 'Scheduled') ?? [];
+  const [{ model }, viewer] = await Promise.all([loadHire('interviews', buildInterviewsModel), getViewer()]);
+  // Worked out once for the screen. Each action checks again on the server, so this only decides what is drawn.
+  const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
+  // Scheduled and still ahead. A scheduled interview whose time has passed is in the table below, tagged "Needs an outcome".
+  const upcoming = model?.upcoming ?? [];
+  // The server's clock, handed to the browser: whether an invitation can still be handed over is told from it, not
+  // from the browser's own clock, which may be wrong.
+  const serverNow = new Date().toISOString();
 
   return (
     <ScreenContainer>
       <PageHeader
         title="Interviews"
         subtitle="Your upcoming and recent interviews, Saudara."
-        actions={
-          <Button size="sm" disabled title="Coming soon">
-            <Plus className="size-4" />
-            Schedule Interview
-          </Button>
-        }
+        // Only for someone who may edit, and only when the list of applications to pick from was read.
+        actions={canEdit && model ? <InterviewHeaderButtons /> : null}
       />
+
+      {/* Where a change is said ("Scheduled …", "Cancelled …"): the sentence stays when a dialog closes. Only for someone who may edit. */}
+      {canEdit ? <DeletionNotice className="mb-3" /> : null}
+      {/* The screen's one interview dialog, closed until a button or a row's menu opens it. */}
+      {canEdit && model ? (
+        <InterviewDialogHost
+          today={model.today}
+          serverNow={serverNow}
+         
+          picker={{ applications: model.applications, cut: model.applicationsCut }}
+        />
+      ) : null}
 
       <BentoGrid>
         {/* KPI row: headline figures only, the tables hold no history to chart */}
@@ -116,18 +164,19 @@ export default async function InterviewsScreen() {
         {/* Upcoming list + week load */}
         <BentoCard
           title="Upcoming interviews"
+          // The count is of what the list holds: scheduled and still ahead. Every scheduled one is the figure above.
           subtitle={
             model
-              ? model.scheduled > upcoming.length
-                ? `${model.scheduled} scheduled, showing the first ${upcoming.length}`
-                : `${model.scheduled} scheduled`
+              ? model.ahead > upcoming.length
+                ? `${model.ahead} upcoming, showing the first ${upcoming.length}`
+                : `${model.ahead} upcoming`
               : undefined
           }
           icon={CalendarClock}
           className="col-span-2 md:col-span-8"
         >
           {!model ? LOAD_FAILED : upcoming.length === 0 ? (
-            <Muted>No interviews scheduled</Muted>
+            <Muted>No upcoming interviews</Muted>
           ) : (
             <ul className="space-y-2">
               {upcoming.map((interview) => (
@@ -161,6 +210,7 @@ export default async function InterviewsScreen() {
             <Muted>No interviews yet</Muted>
           ) : (
           <>
+            {/* The table scrolls sideways inside its card; the page does not. */}
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -171,7 +221,10 @@ export default async function InterviewsScreen() {
                     <TableHead>Time</TableHead>
                     <TableHead>Interviewer</TableHead>
                     <TableHead>Type</TableHead>
+                    <TableHead>Where</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Feedback</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -186,18 +239,30 @@ export default async function InterviewsScreen() {
                           <span className="whitespace-nowrap font-medium">
                             {r.name}
                           </span>
+                          {/* In words: colour is never the only signal. */}
+                          {tagsFor(r).map((tag) => (
+                            <span
+                              key={tag}
+                              className="whitespace-nowrap rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400"
+                            >
+                              {tag}
+                            </span>
+                          ))}
                         </div>
                       </TableCell>
                       <TableCell className="whitespace-nowrap">{r.role}</TableCell>
                       <TableCell className="whitespace-nowrap">{r.date}</TableCell>
                       <TableCell className="whitespace-nowrap tabular-nums">
-                        {r.time}
+                        {timeCell(r)}
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
                         {r.interviewer}
                       </TableCell>
                       <TableCell>
                         <Badge variant="secondary">{r.type}</Badge>
+                      </TableCell>
+                      <TableCell className="max-w-64 min-w-32 whitespace-normal">
+                        <Where interview={r} />
                       </TableCell>
                       <TableCell>
                         <span
@@ -208,6 +273,12 @@ export default async function InterviewsScreen() {
                         >
                           {r.status}
                         </span>
+                      </TableCell>
+                      {/* For everyone who can open the screen. The comments are read in the Applications panel. */}
+                      <TableCell className="whitespace-nowrap">{feedbackCell(r.statusKey, r.feedback)}</TableCell>
+                      <TableCell className="text-right">
+                        {/* The row as plain values. Only for someone who may edit; each action checks again. */}
+                        {canEdit ? <InterviewRowMenu row={r} /> : null}
                       </TableCell>
                     </TableRow>
                   ))}

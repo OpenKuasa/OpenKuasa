@@ -210,7 +210,7 @@ describe('create Kasturi contact', () => {
       tags: ['VIP', 'Wholesale'],
     });
     expect(query.select).toHaveBeenCalledWith(
-      'id,email,company,first_name,last_name,phone,country,status,lead_score,owner_user_id,last_interaction_at,tags',
+      'id,email,company,first_name,last_name,phone,country,status,lead_score,owner_user_id,last_interaction_at,tags,finance_customer_id',
     );
     expect(query.single).toHaveBeenCalled();
     expect(contact.email).toBe('aisyah@example.com');

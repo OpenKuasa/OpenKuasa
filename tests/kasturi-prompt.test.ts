@@ -52,6 +52,11 @@ describe('KASTURI_SYSTEM', () => {
     expect(prompt.startsWith(KASTURI_SYSTEM)).toBe(true);
     expect(prompt).toContain('It is Sunday, 2026-10-11, 07:30 in Malaysia (UTC+8).');
   });
+  it('keeps its prompt byte-identical for the same moment', () => {
+    expect(kasturiSystem(new Date('2026-10-10T23:30:00.000Z'))).toBe(
+      `${KASTURI_SYSTEM}\n\nTODAY\n- It is Sunday, 2026-10-11, 07:30 in Malaysia (UTC+8). Work out "today", "tomorrow", "next week" and any other date from this, never from memory.`,
+    );
+  });
   it('names the lookups a deal needs first', () => {
     expect(KASTURI_SYSTEM).toContain('listCrmContacts');
     expect(KASTURI_SYSTEM).toContain('listPipelines');

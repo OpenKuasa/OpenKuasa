@@ -7,6 +7,7 @@ import { LiveDot } from '@/components/ui/live-dot';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { OVERTIME_TABLE_LIMIT, buildOvertimeView } from '@/lib/people/attendance';
 import { formatDay, todayInMalaysia } from '@/lib/people/dates';
+import { overtimeAmountText } from '@/lib/people/overtime';
 import { REQUEST_STATUS_LABEL } from '@/lib/people/own';
 import { rm } from '@/lib/reach/format';
 import { EmployeeCell, HR_ONLY, LOAD_FAILED, Muted, StatusPill, loadPeople, requestTone } from './parts';
@@ -143,7 +144,7 @@ export default async function OvertimeScreen() {
                       <TableCell className="text-right tabular-nums">{record.hours}</TableCell>
                       <TableCell className="tabular-nums">{record.rate_multiplier}x</TableCell>
                       <TableCell className="whitespace-nowrap text-right font-medium tabular-nums">
-                        {rm(record.amount_cents)}
+                        {overtimeAmountText(record)}
                       </TableCell>
                       <TableCell>
                         <span className="flex items-center gap-2">

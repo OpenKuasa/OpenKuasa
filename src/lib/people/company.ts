@@ -15,9 +15,19 @@ import {
   weekdayName,
 } from './dates';
 import { type AttendanceCounts, attendanceOn, headcountByDepartment, headcountTrend, leaveDaysByType } from './overview';
+import { isTeamView } from './own';
 import { bucketByMonth, bucketByWeek } from './series';
 import { attendanceCounts, payrollSummary } from './summaries';
-import type { Announcement, AttendanceDay, Employee, LeaveRequest, PayrollRun, Payslip, PublicHoliday } from './types';
+import type {
+  Announcement,
+  AttendanceDay,
+  Employee,
+  LeaveRequest,
+  PayrollRun,
+  Payslip,
+  PeopleViewer,
+  PublicHoliday,
+} from './types';
 
 /* ---- Dashboard ---------------------------------------------------- */
 
@@ -41,7 +51,7 @@ export type DashboardModel = {
   leaveByType: { label: string; days: number }[] | null;
   joiners: { label: string; joiners: number }[] | null;
   payroll: {
-    latest: { period_month: string; gross_cents: number } | null;
+    latest: { period_month: string; gross_cents: number; headcount: number } | null;
     /** Gross pay in ringgit per month, oldest first. */
     byMonth: { label: string; payroll: number }[];
   } | null;
@@ -72,8 +82,10 @@ export function buildDashboardModel(input: DashboardInput, today: string, team: 
   if (!team) {
     return { ...base, attendanceToday: null, weeklyAttendance: null, leaveByType: null, joiners: null, payroll: null };
   }
-  // A run with no payslips yet has nothing to show: skip it rather than report RM 0.
-  const summary = payrollSummary(input.runs, input.payslips).filter((run) => run.headcount > 0);
+  // The latest tile is the newest run, empty or not (an empty paid month really paid nothing). Only the chart
+  // leaves out a run with no payslips.
+  const all = payrollSummary(input.runs, input.payslips);
+  const summary = all.filter((run) => run.headcount > 0);
   return {
     ...base,
     attendanceToday: attendanceOn(input.attendance, today),
@@ -87,7 +99,9 @@ export function buildDashboardModel(input: DashboardInput, today: string, team: 
       6,
     ).map((b) => ({ label: b.label, joiners: b.value })),
     payroll: {
-      latest: summary[0] ? { period_month: summary[0].period_month, gross_cents: summary[0].gross_cents } : null,
+      latest: all[0]
+        ? { period_month: all[0].period_month, gross_cents: all[0].gross_cents, headcount: all[0].headcount }
+        : null,
       byMonth: summary
         .slice(0, 8)
         .reverse()
@@ -112,41 +126,90 @@ export const ANNOUNCEMENT_CATEGORIES: { key: Announcement['category']; label: st
 const categoryLabel = (key: Announcement['category']) =>
   ANNOUNCEMENT_CATEGORIES.find((c) => c.key === key)?.label ?? key;
 
-export type AnnouncementsModel = {
-  total: number;
-  thisMonth: number;
-  /** Categories with at least one post. */
-  categories: number;
-  byCategory: { key: string; label: string; value: number; color: string }[];
-  list: { id: string; title: string; body: string; category: string; author: string; when: string }[];
+export type AnnouncementItem = {
+  id: string;
+  title: string;
+  body: string;
+  /** The category's label (`Holiday`). */
+  category: string;
+  /** The category's key, for the edit form. */
+  category_key: Announcement['category'];
+  author: string;
+  /** `2 days ago`; `Draft` for a draft. */
+  when: string;
+  status: Announcement['status'];
+  /** A draft: team viewers only. */
+  draft: boolean;
+  published_at: string | null;
+  /** The announcement was changed after it was published. */
+  edited: boolean;
+  /** Unread for this viewer. Never true for a draft or in the demo. */
+  unread: boolean;
 };
 
-export function buildAnnouncementsModel(rows: Announcement[], now: Date): AnnouncementsModel {
+export type AnnouncementsModel = {
+  /** Published announcements. A draft is listed (for a team viewer) but never counted. */
+  total: number;
+  thisMonth: number;
+  /** Categories with at least one published post. */
+  categories: number;
+  byCategory: { key: string; label: string; value: number; color: string }[];
+  /** Team only: how many drafts are listed. Null for a member, who is never told a draft exists. */
+  drafts: number | null;
+  /** How many listed announcements are unread for this viewer; 0 in the demo. */
+  unread: number;
+  /** A team viewer: drafts first, then published newest first. Anyone else: published newest first, never a draft. */
+  list: AnnouncementItem[];
+};
+
+/**
+ * `viewer` decides who may see a draft: a team viewer (owner, admin, or anyone in the demo, where the database
+ * lets everyone read) does; nobody else ever gets one, whatever rows they were handed. A published row with no
+ * time (never written by the database) counts in `total` but is never "this month" and sorts last.
+ */
+export function buildAnnouncementsModel(rows: Announcement[], now: Date, viewer: PeopleViewer): AnnouncementsModel {
+  const team = isTeamView(viewer);
   const month = monthStart(malaysiaDate(now.toISOString()));
+  const published = rows.filter((r) => r.status === 'published');
+  const drafts = team ? rows.filter((r) => r.status === 'draft') : [];
+  const stamp = (r: Announcement) => (r.published_at ? Date.parse(r.published_at) : Number.NEGATIVE_INFINITY);
   const byCategory = ANNOUNCEMENT_CATEGORIES.map((c) => ({
     key: c.key as string,
     label: c.label,
     color: c.color,
-    value: rows.filter((r) => r.category === c.key).length,
+    value: published.filter((r) => r.category === c.key).length,
   })).filter((c) => c.value > 0);
+  const item = (r: Announcement): AnnouncementItem => ({
+    id: r.id,
+    title: r.title,
+    body: r.body,
+    category: categoryLabel(r.category),
+    category_key: r.category,
+    author: r.author_name?.trim() || 'Unknown',
+    when: r.status === 'draft' || !r.published_at ? 'Draft' : relativeTime(r.published_at, now),
+    status: r.status,
+    draft: r.status === 'draft',
+    published_at: r.published_at,
+    edited: r.edited_at !== null && r.edited_at !== undefined,
+    unread: !viewer.isDemo && r.status === 'published' && r.unread === true,
+  });
+  const list = [
+    ...[...drafts].sort((a, b) => a.title.localeCompare(b.title)).map(item),
+    ...[...published]
+      .sort((a, b) => (stamp(b) === stamp(a) ? 0 : stamp(b) > stamp(a) ? 1 : -1) || a.title.localeCompare(b.title))
+      .map(item),
+  ];
   return {
-    total: rows.length,
-    thisMonth: rows.filter((r) => {
-      const date = malaysiaDate(r.published_at);
+    total: published.length,
+    thisMonth: published.filter((r) => {
+      const date = r.published_at ? malaysiaDate(r.published_at) : '';
       return date !== '' && monthStart(date) === month;
     }).length,
     categories: byCategory.length,
     byCategory,
-    list: [...rows]
-      .sort((a, b) => Date.parse(b.published_at) - Date.parse(a.published_at) || a.title.localeCompare(b.title))
-      .map((r) => ({
-        id: r.id,
-        title: r.title,
-        body: r.body,
-        category: categoryLabel(r.category),
-        author: r.author_name?.trim() || 'Unknown',
-        when: relativeTime(r.published_at, now),
-      })),
+    drafts: team ? drafts.length : null,
+    unread: list.filter((a) => a.unread).length,
+    list,
   };
 }
 

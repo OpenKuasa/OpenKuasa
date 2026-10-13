@@ -1,15 +1,33 @@
 import { describe, expect, it } from 'vitest';
 import type { BillListRow } from '@/lib/finance/bills';
 import type { PaymentOutRow } from '@/lib/finance/money';
+import type { PurchaseOrderListRow } from '@/lib/finance/purchase-orders';
+import type { RfqListRow } from '@/lib/finance/rfqs';
 import {
+  PO_DELIVERY_LABELS,
+  PO_STATUS_LABELS,
+  RFQ_STATUS_LABELS,
   alsoCovers,
   billsCsv,
   billsView,
   displayDate,
   filterBills,
   filterPayments,
+  filterPurchaseOrders,
+  filterRfqs,
+  orderNotesForBills,
+  paymentRowsAgainstFlaggedOrders,
   paymentsCsv,
   paymentsView,
+  purchaseOrderActions,
+  purchaseOrderName,
+  purchaseOrdersCsv,
+  purchaseOrdersView,
+  rfqActions,
+  rfqDisplayStatus,
+  rfqName,
+  rfqsCsv,
+  rfqsView,
   siblingBills,
 } from '@/lib/finance/purchase-views';
 
@@ -29,6 +47,10 @@ const bill = (b: Partial<BillListRow>): BillListRow => {
     paid: 0,
     balance: 100,
     display_status: 'pending',
+    purchase_order_id: null,
+    purchase_order_no: null,
+    category_id: null,
+    category_name: null,
     ...b,
   };
 };
@@ -165,7 +187,7 @@ describe('paymentsView', () => {
       ['Paid (MTD)', 'RM 4,000', 'this month'],
       ['Payments', '2', 'this month'],
       ['Via bank / FPX', '75%', 'of paid MTD'],
-      ['Scheduled', 'RM 4,300', '1 payment'],
+      ['To be paid', 'RM 4,300', '1 payment'],
     ]);
     expect(view.paidMtd).toBe('RM 4,000');
     expect(view.trend.map((t) => t.label)).toEqual(['Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct']);
@@ -348,13 +370,13 @@ describe('siblingBills', () => {
 describe('CSV export', () => {
   it('writes the bills table, with a formula-looking supplier name made harmless', () => {
     const csv = billsCsv([
-      bill({ bill_no: 'BILL-0007', supplier_name: '=cmd|calc', total: 1250.5, balance: 250.5, bill_date: '2026-10-01', due_date: '2026-10-31' }),
+      bill({ bill_no: 'BILL-0007', supplier_name: '=cmd|calc', total: 1250.5, balance: 250.5, bill_date: '2026-10-01', due_date: '2026-10-31', purchase_order_id: 'po-1', purchase_order_no: 'PO-0003', category_id: 'c1', category_name: 'Utilities' }),
       bill({ bill_no: null, supplier_name: 'Lim, Tan & Co', total: 80, balance: 80, display_status: 'draft' }),
     ]);
     expect(csv).toBe(
-      '﻿No.,Date,Supplier,Due,Total,Balance,Status\r\n' +
-        "BILL-0007,2026-10-01,'=cmd|calc,2026-10-31,1250.5,250.5,Pending\r\n" +
-        ',2026-10-01,"Lim, Tan & Co",2026-10-31,80,80,Draft\r\n',
+      '﻿No.,Date,Supplier,Due,Total,Balance,Status,Purchase order,Category\r\n' +
+        "BILL-0007,2026-10-01,'=cmd|calc,2026-10-31,1250.5,250.5,Pending,PO-0003,Utilities\r\n" +
+        ',2026-10-01,"Lim, Tan & Co",2026-10-31,80,80,Draft,,\r\n',
     );
   });
 
@@ -366,7 +388,7 @@ describe('CSV export', () => {
     expect(csv).toBe(
       '﻿Date,No.,Supplier,Bill,Account,Method,Amount,Status\r\n' +
         '2026-10-05,PV-0003,Lim Hardware,BILL-0007,Main Bank,Bank Transfer,132.5,Paid\r\n' +
-        "2026-10-05,,'+60 Trading,BILL-0008,Main Bank,E-Wallet,40,Scheduled\r\n",
+        "2026-10-05,,'+60 Trading,BILL-0008,Main Bank,E-Wallet,40,To be paid\r\n",
     );
   });
 });
@@ -375,5 +397,421 @@ describe('displayDate', () => {
   it('writes the month as a fixed three-letter name', () => {
     expect(displayDate('2026-10-08')).toBe('08 Oct 2026');
     expect(displayDate('2026-09-30')).toBe('30 Sep 2026');
+  });
+});
+
+const rfq = (r: Partial<RfqListRow>): RfqListRow => {
+  seq += 1;
+  return {
+    id: `rfq-${seq}`,
+    rfq_no: `RFQ-${String(seq).padStart(4, '0')}`,
+    supplier_id: 'kertas',
+    supplier_name: 'Syarikat Kertas',
+    rfq_date: '2026-10-01',
+    reply_by: '2026-10-20',
+    supplier_ref: null,
+    status: 'sent',
+    line_count: 2,
+    total: 0,
+    quoted_at: null,
+    purchase_order_id: null,
+    purchase_order_no: null,
+    source_rfq_id: null,
+    ...r,
+  };
+};
+
+describe('rfqDisplayStatus', () => {
+  it('is overdue only for a sent RFQ whose reply-by date has passed', () => {
+    expect(rfqDisplayStatus(rfq({ status: 'sent', reply_by: '2026-10-08' }), today)).toBe('overdue');
+    expect(rfqDisplayStatus(rfq({ status: 'sent', reply_by: today }), today)).toBe('sent');
+    expect(rfqDisplayStatus(rfq({ status: 'sent', reply_by: null }), today)).toBe('sent');
+    for (const status of ['draft', 'quoted', 'closed'] as const) {
+      expect(rfqDisplayStatus(rfq({ status, rfq_no: null, reply_by: '2026-10-08' }), today)).toBe(status);
+    }
+  });
+  it('words every status', () => {
+    expect(RFQ_STATUS_LABELS).toEqual({ draft: 'Draft', sent: 'Sent', quoted: 'Quoted', closed: 'Closed', overdue: 'Reply overdue' });
+  });
+});
+
+describe('filterRfqs', () => {
+  const rows = [
+    rfq({ rfq_no: null, status: 'draft', supplier_name: 'Lim Hardware' }),
+    rfq({ rfq_no: 'RFQ-0007', status: 'sent', reply_by: '2026-10-08' }),
+    rfq({ rfq_no: 'RFQ-0008', status: 'sent', reply_by: '2026-10-30' }),
+    rfq({ rfq_no: 'RFQ-0009', status: 'quoted', supplier_ref: 'Q-4411' }),
+    rfq({ rfq_no: 'RFQ-0010', status: 'closed' }),
+  ];
+  it('shows everything but closed by default', () => {
+    expect(filterRfqs(rows, '', 'open', today).map((r) => r.rfq_no)).toEqual([null, 'RFQ-0007', 'RFQ-0008', 'RFQ-0009']);
+    expect(filterRfqs(rows, '', 'all', today)).toHaveLength(5);
+  });
+  it('filters by display status, so an overdue RFQ is not also "sent"', () => {
+    expect(filterRfqs(rows, '', 'overdue', today).map((r) => r.rfq_no)).toEqual(['RFQ-0007']);
+    expect(filterRfqs(rows, '', 'sent', today).map((r) => r.rfq_no)).toEqual(['RFQ-0008']);
+    expect(filterRfqs(rows, '', 'closed', today).map((r) => r.rfq_no)).toEqual(['RFQ-0010']);
+  });
+  it('searches the number, the supplier and the supplier’s reference', () => {
+    expect(filterRfqs(rows, ' rfq-0008 ', 'all', today)).toHaveLength(1);
+    expect(filterRfqs(rows, 'lim', 'all', today)).toHaveLength(1);
+    expect(filterRfqs(rows, 'q-4411', 'all', today).map((r) => r.rfq_no)).toEqual(['RFQ-0009']);
+    expect(filterRfqs(rows, 'nothing', 'all', today)).toEqual([]);
+  });
+});
+
+describe('rfqActions', () => {
+  it('offers only what the status allows', () => {
+    expect(rfqActions(rfq({ status: 'draft', rfq_no: null }))).toEqual(['edit', 'send', 'copy', 'delete']);
+    expect(rfqActions(rfq({ status: 'sent' }))).toEqual(['recordPrices', 'copy', 'close']);
+    expect(rfqActions(rfq({ status: 'sent', reply_by: '2026-10-01' }))).toEqual(['recordPrices', 'copy', 'close']);
+    expect(rfqActions(rfq({ status: 'quoted' }))).toEqual(['convert', 'copy', 'close']);
+    expect(rfqActions(rfq({ status: 'closed' }))).toEqual(['copy']);
+  });
+  it('offers a purchase order only for a quoted RFQ that has none: a standing order is the way on', () => {
+    expect(rfqActions(rfq({ status: 'quoted', purchase_order_id: 'po-1', purchase_order_no: 'PO-0003' }))).toEqual(['copy', 'close']);
+    for (const status of ['draft', 'sent', 'closed'] as const) {
+      expect(rfqActions(rfq({ status, purchase_order_id: null })), status).not.toContain('convert');
+    }
+  });
+  it('offers Compare quotes on an RFQ that can be compared, in every status but draft, an order or not', () => {
+    expect(rfqActions(rfq({ status: 'draft', rfq_no: null }), true)).toEqual(['edit', 'send', 'copy', 'delete']);
+    expect(rfqActions(rfq({ status: 'sent' }), true)).toEqual(['recordPrices', 'compare', 'copy', 'close']);
+    expect(rfqActions(rfq({ status: 'quoted' }), true)).toEqual(['convert', 'compare', 'copy', 'close']);
+    expect(rfqActions(rfq({ status: 'quoted', purchase_order_id: 'po-1', purchase_order_no: 'PO-0003' }), true)).toEqual([
+      'compare',
+      'copy',
+      'close',
+    ]);
+    expect(rfqActions(rfq({ status: 'closed' }), true)).toEqual(['compare', 'copy']);
+    // Not offered unless asked for: an RFQ with nothing to be compared with.
+    for (const status of ['draft', 'sent', 'quoted', 'closed'] as const) {
+      expect(rfqActions(rfq({ status }), false), status).not.toContain('compare');
+    }
+  });
+  it('names an RFQ by its number, or as a draft', () => {
+    expect(rfqName(rfq({ rfq_no: 'RFQ-0007' }))).toBe('RFQ-0007');
+    expect(rfqName(rfq({ rfq_no: null, status: 'draft' }))).toBe('this draft RFQ');
+  });
+});
+
+describe('rfqsView', () => {
+  it('counts each status, those waiting for a reply, and those overdue', () => {
+    const rows = [
+      rfq({ status: 'draft', rfq_no: null }),
+      rfq({ status: 'sent', reply_by: '2026-10-08' }),
+      rfq({ status: 'sent', reply_by: '2026-10-30' }),
+      rfq({ status: 'sent', reply_by: null }),
+      rfq({ status: 'quoted' }),
+      rfq({ status: 'closed' }),
+    ];
+    expect(rfqsView(rows, today)).toEqual({
+      counts: { draft: 1, sent: 2, quoted: 1, closed: 1, overdue: 1 },
+      awaitingReply: 3,
+      overdue: 1,
+    });
+  });
+  it('is all zeros for no RFQs', () => {
+    expect(rfqsView([], today)).toEqual({ counts: { draft: 0, sent: 0, quoted: 0, closed: 0, overdue: 0 }, awaitingReply: 0, overdue: 0 });
+  });
+});
+
+describe('rfqsCsv', () => {
+  it('writes the RFQ table, with the status as the screen words it', () => {
+    const csv = rfqsCsv(
+      [
+        rfq({ rfq_no: 'RFQ-0007', rfq_date: '2026-10-01', reply_by: '2026-10-08', supplier_name: '=cmd|calc', status: 'sent', line_count: 3 }),
+        rfq({ rfq_no: null, status: 'draft', reply_by: null, supplier_name: 'Lim, Tan & Co', line_count: 1 }),
+        rfq({ rfq_no: 'RFQ-0009', status: 'quoted', supplier_ref: 'Q-4411', total: 132.5, quoted_at: '2026-10-02T09:00:00Z', line_count: 2, purchase_order_no: 'PO-0003' }),
+        rfq({ rfq_no: 'RFQ-0010', status: 'sent', total: 40, line_count: 2 }),
+        // A closed RFQ keeps the answer it was given: the rule is the recorded answer, not the status.
+        rfq({ rfq_no: 'RFQ-0011', status: 'closed', total: 75, quoted_at: '2026-10-03T09:00:00Z', line_count: 1 }),
+      ],
+      today,
+    );
+    expect(csv).toBe(
+      '\uFEFFNo.,Date,Supplier,Reply by,Supplier ref,Lines,Total,Status,Purchase order\r\n' +
+        "RFQ-0007,2026-10-01,'=cmd|calc,2026-10-08,,3,,Reply overdue,\r\n" +
+        ',2026-10-01,"Lim, Tan & Co",,,1,,Draft,\r\n' +
+        'RFQ-0009,2026-10-01,Syarikat Kertas,2026-10-20,Q-4411,2,132.5,Quoted,PO-0003\r\n' +
+        'RFQ-0010,2026-10-01,Syarikat Kertas,2026-10-20,,2,,Sent,\r\n' +
+        'RFQ-0011,2026-10-01,Syarikat Kertas,2026-10-20,,1,75,Closed,\r\n',
+    );
+  });
+});
+
+/* ---- purchase orders ------------------------------------------------ */
+
+const po = (r: Partial<PurchaseOrderListRow>): PurchaseOrderListRow => {
+  seq += 1;
+  return {
+    id: `po-${seq}`,
+    po_no: `PO-${String(seq).padStart(4, '0')}`,
+    supplier_id: 'kertas',
+    supplier_name: 'Syarikat Kertas',
+    rfq_id: null,
+    rfq_no: null,
+    po_date: '2026-10-01',
+    expected_date: null,
+    status: 'approved',
+    created_by: 'raiser',
+    submitted_by: 'raiser',
+    rejection_reason: null,
+    payment_terms_days: 30,
+    delivery_address: null,
+    total: 100,
+    delivery: 'pending',
+    received_total: 0,
+    billed_total: 0,
+    over_billed: false,
+    billed_over_received: false,
+    ...r,
+  };
+};
+
+describe('purchase order labels', () => {
+  it('words each status and delivery state', () => {
+    expect(PO_STATUS_LABELS).toEqual({
+      draft: 'Draft', pending_approval: 'Awaiting approval', approved: 'Approved', closed: 'Closed', cancelled: 'Cancelled',
+    });
+    expect(PO_DELIVERY_LABELS).toEqual({ pending: 'Not delivered', partial: 'Partly delivered', delivered: 'Delivered' });
+  });
+});
+
+describe('filterPurchaseOrders', () => {
+  const rows = [
+    po({ po_no: null, status: 'draft', supplier_name: 'Lim Hardware' }),
+    po({ po_no: 'PO-0007', status: 'pending_approval' }),
+    po({ po_no: 'PO-0008', status: 'approved', rfq_no: 'RFQ-0042' }),
+    po({ po_no: 'PO-0009', status: 'closed' }),
+    po({ po_no: 'PO-0010', status: 'cancelled' }),
+  ];
+  it('shows what is still going on until a status is chosen', () => {
+    expect(filterPurchaseOrders(rows, '', 'open').map((r) => r.po_no)).toEqual([null, 'PO-0007', 'PO-0008']);
+    expect(filterPurchaseOrders(rows, '', 'all')).toHaveLength(5);
+  });
+  it('filters by one status', () => {
+    expect(filterPurchaseOrders(rows, '', 'closed').map((r) => r.po_no)).toEqual(['PO-0009']);
+    expect(filterPurchaseOrders(rows, '', 'cancelled').map((r) => r.po_no)).toEqual(['PO-0010']);
+    expect(filterPurchaseOrders(rows, '', 'pending_approval').map((r) => r.po_no)).toEqual(['PO-0007']);
+  });
+  it('matches the search text against the number, the supplier and the RFQ number, ignoring case and spaces', () => {
+    expect(filterPurchaseOrders(rows, ' po-0008 ', 'all')).toHaveLength(1);
+    expect(filterPurchaseOrders(rows, 'lim', 'all')).toHaveLength(1);
+    expect(filterPurchaseOrders(rows, 'rfq-0042', 'all').map((r) => r.po_no)).toEqual(['PO-0008']);
+    expect(filterPurchaseOrders(rows, 'nothing', 'all')).toEqual([]);
+  });
+});
+
+describe('purchaseOrderActions', () => {
+  // A member, the admin who raised the order, another admin, and the owner. The order is raised by 'raiser'.
+  const member = { userId: 'raiser', canSignOff: false, isOwner: false };
+  const otherMember = { userId: 'someone', canSignOff: false, isOwner: false };
+  const raisingAdmin = { userId: 'raiser', canSignOff: true, isOwner: false };
+  const otherAdmin = { userId: 'admin', canSignOff: true, isOwner: false };
+  const owner = { userId: 'owner', canSignOff: true, isOwner: true };
+  const raisingOwner = { userId: 'raiser', canSignOff: true, isOwner: true };
+
+  it('offers a draft that was never numbered to be edited, submitted or deleted, to anyone who may write', () => {
+    const draft = po({ status: 'draft', po_no: null, submitted_by: null });
+    for (const viewer of [member, otherMember, raisingAdmin, otherAdmin, owner]) {
+      expect(purchaseOrderActions(draft, viewer), JSON.stringify(viewer)).toEqual(['edit', 'submit', 'delete']);
+    }
+  });
+  it('offers a numbered draft (rejected or withdrawn) to be cancelled, not deleted, by its raiser or an admin', () => {
+    const rejected = po({ status: 'draft', po_no: 'PO-0007', rejection_reason: 'Too dear' });
+    expect(purchaseOrderActions(rejected, member)).toEqual(['edit', 'submit', 'cancel']);
+    expect(purchaseOrderActions(rejected, otherMember)).toEqual(['edit', 'submit']);
+    expect(purchaseOrderActions(rejected, otherAdmin)).toEqual(['edit', 'submit', 'cancel']);
+    expect(purchaseOrderActions(rejected, owner)).toEqual(['edit', 'submit', 'cancel']);
+  });
+  it('offers a numbered draft with no recorded raiser to edit and submit, and to cancel only to a sign-off viewer', () => {
+    const orphan = po({ status: 'draft', po_no: 'PO-0007', created_by: null, submitted_by: null });
+    expect(purchaseOrderActions(orphan, member)).toEqual(['edit', 'submit']);
+    expect(purchaseOrderActions(orphan, otherAdmin)).toEqual(['edit', 'submit', 'cancel']);
+  });
+  describe('awaiting approval', () => {
+    const pending = po({ status: 'pending_approval', created_by: 'raiser', submitted_by: 'submitter' });
+    it('lets the person who raised it take it back or cancel it, and nothing more', () => {
+      expect(purchaseOrderActions(pending, member)).toEqual(['withdraw', 'cancel']);
+    });
+    it('lets another member do nothing', () => {
+      expect(purchaseOrderActions(pending, otherMember)).toEqual([]);
+    });
+    it('lets another admin approve, reject, withdraw or cancel it', () => {
+      expect(purchaseOrderActions(pending, otherAdmin)).toEqual(['approve', 'reject', 'withdraw', 'cancel']);
+    });
+    it('lets the admin who raised it reject, withdraw or cancel it, but not approve it', () => {
+      expect(purchaseOrderActions(pending, raisingAdmin)).toEqual(['reject', 'withdraw', 'cancel']);
+    });
+    it('keeps the person who submitted it from approving it, even when someone else raised it', () => {
+      const submitter = { userId: 'submitter', canSignOff: true, isOwner: false };
+      expect(purchaseOrderActions(pending, submitter)).toEqual(['reject', 'withdraw', 'cancel']);
+      expect(purchaseOrderActions(pending, { ...submitter, canSignOff: false })).toEqual([]);
+    });
+    it('lets the owner approve even an order they raised or submitted', () => {
+      expect(purchaseOrderActions(pending, owner)).toEqual(['approve', 'reject', 'withdraw', 'cancel']);
+      expect(purchaseOrderActions(pending, raisingOwner)).toEqual(['approve', 'reject', 'withdraw', 'cancel']);
+    });
+    it('treats an order with no known raiser as nobody’s own', () => {
+      const orphan = po({ status: 'pending_approval', created_by: null, submitted_by: null });
+      expect(purchaseOrderActions(orphan, otherAdmin)).toEqual(['approve', 'reject', 'withdraw', 'cancel']);
+      expect(purchaseOrderActions(orphan, member)).toEqual([]);
+    });
+  });
+  describe('approved', () => {
+    const approved = po({ status: 'approved' });
+    it('lets anyone who may write record a delivery and raise a bill', () => {
+      for (const viewer of [member, otherMember]) {
+        expect(purchaseOrderActions(approved, viewer), JSON.stringify(viewer)).toEqual(['receive', 'createBill']);
+      }
+    });
+    it('lets an admin or the owner also close or cancel it', () => {
+      for (const viewer of [raisingAdmin, otherAdmin, owner]) {
+        expect(purchaseOrderActions(approved, viewer), JSON.stringify(viewer)).toEqual(['receive', 'createBill', 'close', 'cancel']);
+      }
+    });
+  });
+  it('offers nothing on a closed or a cancelled order', () => {
+    for (const status of ['closed', 'cancelled'] as const) {
+      for (const viewer of [member, otherAdmin, owner]) {
+        expect(purchaseOrderActions(po({ status }), viewer), `${status} ${JSON.stringify(viewer)}`).toEqual([]);
+      }
+    }
+  });
+  it('names an order by its number, or as a draft', () => {
+    expect(purchaseOrderName(po({ po_no: 'PO-0007' }))).toBe('PO-0007');
+    expect(purchaseOrderName(po({ po_no: null, status: 'draft' }))).toBe('this draft purchase order');
+  });
+});
+
+describe('purchaseOrdersView', () => {
+  it('counts those awaiting approval, those approved and still open, and those billed for more than ordered', () => {
+    const rows = [
+      po({ status: 'draft', po_no: null }),
+      po({ status: 'pending_approval' }),
+      po({ status: 'pending_approval' }),
+      po({ status: 'approved' }),
+      po({ status: 'approved', over_billed: true, billed_total: 120 }),
+      po({ status: 'closed', over_billed: true, billed_total: 130 }),
+      po({ status: 'cancelled' }),
+    ];
+    expect(purchaseOrdersView(rows)).toEqual({ awaitingApproval: 2, approvedOpen: 2, overBilled: 2 });
+  });
+  it('is all zeros for no orders', () => {
+    expect(purchaseOrdersView([])).toEqual({ awaitingApproval: 0, approvedOpen: 0, overBilled: 0 });
+  });
+});
+
+describe('purchaseOrdersCsv', () => {
+  it('writes the purchase order table, with the status and delivery as the screen words them', () => {
+    const csv = purchaseOrdersCsv([
+      po({
+        po_no: 'PO-0007', po_date: '2026-10-01', supplier_name: '=cmd|calc', rfq_no: 'RFQ-0042', expected_date: '2026-10-20',
+        total: 132.5, received_total: 50, billed_total: 40, delivery: 'partial', status: 'approved',
+      }),
+      po({ po_no: null, status: 'draft', supplier_name: 'Lim, Tan & Co', total: 10, delivery: 'pending' }),
+      po({ po_no: 'PO-0009', status: 'closed', total: 100, received_total: 100, billed_total: 100, delivery: 'delivered' }),
+    ]);
+    expect(csv).toBe(
+      '\uFEFFNo.,Date,Supplier,RFQ,Expected delivery,Total,Received,Billed,Delivery,Status\r\n' +
+        "PO-0007,2026-10-01,'=cmd|calc,RFQ-0042,2026-10-20,132.5,50,40,Partly delivered,Approved\r\n" +
+        ',2026-10-01,"Lim, Tan & Co",,,10,0,0,,Draft\r\n' +
+        'PO-0009,2026-10-01,Syarikat Kertas,,,100,100,100,Delivered,Closed\r\n',
+    );
+  });
+});
+
+describe('orderNotesForBills', () => {
+  const order = (o: Partial<Parameters<typeof orderNotesForBills>[1][number]> = {}) => ({
+    id: 'po-1',
+    po_no: 'PO-0003',
+    total: 1000,
+    billed_total: 400,
+    received_total: 400,
+    over_billed: false,
+    billed_over_received: false,
+    ...o,
+  });
+  const against = (bill_no: string | null, purchase_order_id: string | null = 'po-1') => ({ bill_no, purchase_order_id });
+
+  it('says nothing for a bill with no order', () => {
+    expect(orderNotesForBills([against('BILL-0001', null)], [order({ over_billed: true })])).toEqual([]);
+    expect(orderNotesForBills([], [order({ over_billed: true })])).toEqual([]);
+  });
+  it('says nothing for a bill whose order is fine', () => {
+    expect(orderNotesForBills([against('BILL-0001')], [order()])).toEqual([]);
+  });
+  it('says nothing for an order that is not in the list: closed or cancelled orders may not be passed', () => {
+    expect(orderNotesForBills([against('BILL-0001', 'po-gone')], [order({ over_billed: true })])).toEqual([]);
+    expect(orderNotesForBills([against('BILL-0001')], [])).toEqual([]);
+  });
+  it('says the bills come to more than the order total', () => {
+    expect(orderNotesForBills([against('BILL-0001')], [order({ over_billed: true, billed_total: 1250.5 })])).toEqual([
+      'BILL-0001 is against PO-0003, whose bills come to RM 1,250.50, over its total of RM 1,000.00.',
+    ]);
+  });
+  it('says the order is billed for more than has been received', () => {
+    expect(orderNotesForBills([against('BILL-0001')], [order({ billed_over_received: true, billed_total: 800, received_total: 300 })])).toEqual([
+      'BILL-0001 is against PO-0003, which is billed RM 800.00 with RM 300.00 received so far.',
+    ]);
+  });
+  it('gives only the over-the-total sentence when both flags are set', () => {
+    const notes = orderNotesForBills([against('BILL-0001')], [order({ over_billed: true, billed_over_received: true, billed_total: 1100 })]);
+    expect(notes).toEqual(['BILL-0001 is against PO-0003, whose bills come to RM 1,100.00, over its total of RM 1,000.00.']);
+  });
+  it('calls a bill with no number a draft bill', () => {
+    expect(orderNotesForBills([against(null)], [order({ over_billed: true })])[0]).toMatch(/^A draft bill is against PO-0003,/);
+  });
+  it('names the first bill of an order and counts the others', () => {
+    const bills = [against('BILL-0001'), against('BILL-0002'), against(null)];
+    const notes = orderNotesForBills(bills, [order({ over_billed: true })]);
+    expect(notes).toEqual(['BILL-0001 and 2 more are against PO-0003, whose bills come to RM 400.00, over its total of RM 1,000.00.']);
+    expect(orderNotesForBills(bills.slice(0, 2), [order({ over_billed: true })])[0]).toMatch(/^BILL-0001 and 1 more are against/);
+  });
+  it('gives one sentence for each flagged order, in the order the bills come, and none for a fine one', () => {
+    const bills = [against('BILL-0001', 'po-2'), against('BILL-0002', 'po-1'), against('BILL-0003', 'po-3')];
+    const orders = [
+      order({ over_billed: true }),
+      order({ id: 'po-2', po_no: 'PO-0004', billed_over_received: true }),
+      order({ id: 'po-3', po_no: 'PO-0005' }),
+    ];
+    const notes = orderNotesForBills(bills, orders);
+    expect(notes).toHaveLength(2);
+    expect(notes[0]).toMatch(/^BILL-0001 is against PO-0004, which is billed/);
+    expect(notes[1]).toMatch(/^BILL-0002 is against PO-0003, whose bills/);
+  });
+});
+
+describe('paymentRowsAgainstFlaggedOrders', () => {
+  const orders = [
+    { id: 'po-1', po_no: 'PO-0003', total: 100, billed_total: 150, received_total: 100, over_billed: true, billed_over_received: false },
+    { id: 'po-2', po_no: 'PO-0004', total: 100, billed_total: 50, received_total: 50, over_billed: false, billed_over_received: false },
+  ];
+  const bills = [
+    bill({ id: 'b1', purchase_order_id: 'po-1' }),
+    bill({ id: 'b2', purchase_order_id: 'po-2' }),
+    bill({ id: 'b3' }),
+  ];
+  const row = (bill_id: string, status: PaymentOutRow['status'], allocation_id: string, transaction_id = allocation_id) =>
+    payment({ bill_id, status, allocation_id, transaction_id });
+
+  it('marks a row still to be paid whose bill has a flagged order', () => {
+    const rows = [row('b1', 'scheduled', 'r1'), row('b1', 'pending_approval', 'r2')];
+    expect([...paymentRowsAgainstFlaggedOrders(rows, bills, orders)].sort()).toEqual(['r1', 'r2']);
+  });
+  it('marks nothing that is paid or void', () => {
+    expect(paymentRowsAgainstFlaggedOrders([row('b1', 'posted', 'r1'), row('b1', 'void', 'r2')], bills, orders).size).toBe(0);
+  });
+  it('marks nothing for a bill with a fine order, no order or no bill in the list', () => {
+    const rows = [row('b2', 'scheduled', 'r1'), row('b3', 'scheduled', 'r2'), row('b9', 'scheduled', 'r3')];
+    expect(paymentRowsAgainstFlaggedOrders(rows, bills, orders).size).toBe(0);
+  });
+  it('marks only the row of the bill that is over its order, in a payment over two bills', () => {
+    const rows = [row('b2', 'scheduled', 'r1', 't1'), row('b1', 'scheduled', 'r2', 't1')];
+    expect([...paymentRowsAgainstFlaggedOrders(rows, bills, orders)]).toEqual(['r2']);
+  });
+  it('marks nothing without orders', () => {
+    expect(paymentRowsAgainstFlaggedOrders([row('b1', 'scheduled', 'r1')], bills, []).size).toBe(0);
   });
 });

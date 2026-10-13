@@ -6,25 +6,43 @@
  */
 
 import { type ModelMessage, stepCountIs, streamText } from 'ai';
-import { logModelCall } from '@/lib/ai/call-log';
+import { logModelCall, logModelError } from '@/lib/ai/call-log';
 import { getModel, pickModelId } from '@/lib/ai/provider';
+// Each product's own assistant is told, on each call, which language the person's latest message is in (see the
+// file). Not Tuah, and not a specialist Tuah asks: their requests are as they were.
+import { inUsersLanguage } from '@/lib/ai/reply-language';
 import type { CrmAccess } from '@/lib/ai/crm-tools';
+import { prepareCvStep } from '@/lib/ai/hire-tools';
+import { guardDeletions } from '@/lib/ai/hire-deletions';
+import { guardInterviewChanges } from '@/lib/ai/hire-interview-gate';
+import { cachedInstructions } from '@/lib/ai/prompt-cache';
+import { guardPoolChanges } from '@/lib/ai/hire-pool-gate';
 import {
   REACH_WRITE_TOOL_NAMES,
+  bindApprovals,
   combineToolkits,
+  requestOnlyBinding,
   crmProduct,
+  financeProduct,
   hireProduct,
   kasturiSharedProduct,
   peopleProduct,
   reachProduct,
+  type ApprovalBinding,
+  type FinanceAccess,
   type HireAccess,
   type PeopleAccess,
+  type ProductToolkit,
   type ReachAccess,
 } from '@/lib/ai/products';
 import {
+  BENDAHARA_SYSTEM,
+  bendaharaSystem,
   JEBAT_SYSTEM,
+  KASTURI_SYSTEM,
   LEKIR_SYSTEM,
   LEKIU_SYSTEM,
+  lekiuSystem,
   kasturiSystem,
   tuahSystem,
   tuahTeamSystem,
@@ -35,7 +53,27 @@ import type { Screen } from '@/lib/chat/screen';
 /** Tools that change data: each one pauses for the owner's approval before running. */
 export const WRITE_TOOL_NAMES = REACH_WRITE_TOOL_NAMES;
 
-export type { HireAccess, PeopleAccess, ReachAccess };
+export type { ApprovalBinding, FinanceAccess, HireAccess, PeopleAccess, ReachAccess };
+
+/**
+ * One agent's tools from its products, with every change tool bound to the record the server keeps of what it
+ * proposed (see `bindApprovals`). The deletion, talent pool and interview rules are put on first, so a change they
+ * refuse is never recorded.
+ */
+function boundToolkit(products: ProductToolkit[], messages: ModelMessage[], approvals: ApprovalBinding | undefined) {
+  const kit = combineToolkits(products);
+  // The first deletion of a turn, the first talent pool change and the first interview change go to the user as a
+  // card; any other of its kind is denied before a card exists, and so is one for an id nobody looked up. Deletions
+  // first, then the pool, then interviews, as before.
+  const toolApproval = guardInterviewChanges(
+    guardPoolChanges(
+      guardDeletions(kit.toolApproval, products.find((p) => p.checkDeletion)?.checkDeletion),
+      products.find((p) => p.checkPoolChange)?.checkPoolChange,
+    ),
+    products.find((p) => p.checkInterviewChange)?.checkInterviewChange,
+  );
+  return bindApprovals({ tools: kit.tools, toolApproval }, products, approvals ?? requestOnlyBinding(messages));
+}
 
 export function runJebat(
   messages: ModelMessage[],
@@ -43,15 +81,18 @@ export function runJebat(
   abortSignal?: AbortSignal,
   /** A workspace's own OpenRouter key; omitted for platform-paid turns. */
   apiKey?: string,
+  /** Where proposed changes are kept; a chat route passes its own. */
+  approvals?: ApprovalBinding,
 ) {
-  const { tools, toolApproval } = combineToolkits([reachProduct(reach)]);
+  const { tools, toolApproval } = boundToolkit([reachProduct(reach)], messages, approvals);
   return streamText({
-    model: getModel('orchestrator', apiKey),
-    system: JEBAT_SYSTEM,
+    model: inUsersLanguage(getModel('orchestrator', apiKey)),
+    system: cachedInstructions(JEBAT_SYSTEM),
     messages,
     tools,
     toolApproval,
     onLanguageModelCallEnd: logModelCall('jebat', pickModelId('orchestrator')),
+    onError: logModelError('jebat'),
     stopWhen: stepCountIs(8),
     maxOutputTokens: 1000,
     // Stop in-flight model/tool work if the client disconnects.
@@ -72,15 +113,19 @@ export function runKasturi(
   abortSignal?: AbortSignal,
   /** A workspace's own OpenRouter key; omitted for platform-paid turns. */
   apiKey?: string,
+  /** Where proposed changes are kept; a chat route passes its own. */
+  approvals?: ApprovalBinding,
 ) {
-  const { tools, toolApproval } = combineToolkits([crmProduct(crm), kasturiSharedProduct(reach)]);
+  const { tools, toolApproval } = boundToolkit([crmProduct(crm), kasturiSharedProduct(reach)], messages, approvals);
   return streamText({
-    model: getModel('orchestrator', apiKey),
-    system: kasturiSystem(new Date()),
+    model: inUsersLanguage(getModel('orchestrator', apiKey)),
+    // The fixed prompt is marked for the provider's cache; today's date and time follow it, unmarked.
+    system: cachedInstructions(kasturiSystem(new Date()), KASTURI_SYSTEM),
     messages,
     tools,
     toolApproval,
     onLanguageModelCallEnd: logModelCall('kasturi', pickModelId('orchestrator')),
+    onError: logModelError('kasturi'),
     // A CRM change often needs two lookups first (the contact, then the stage).
     stopWhen: stepCountIs(10),
     maxOutputTokens: 1000,
@@ -90,7 +135,7 @@ export function runKasturi(
 
 /**
  * "Lekir, your hiring lead": the same single agent as Jebat, holding the
- * hiring lookups, plus (for someone who may write) job changes that each
+ * hiring lookups, plus (for someone who may write) job, careers page, application form and application changes that each
  * wait for the user's approval.
  */
 export function runLekir(
@@ -99,15 +144,23 @@ export function runLekir(
   abortSignal?: AbortSignal,
   /** A workspace's own OpenRouter key; omitted for platform-paid turns. */
   apiKey?: string,
+  /** Where proposed changes are kept; a chat route passes its own. */
+  approvals?: ApprovalBinding,
 ) {
-  const { tools, toolApproval } = combineToolkits([hireProduct(hire)]);
+  const product = hireProduct(hire);
+  // The gates for a deletion, a talent pool change and an interview change are put on in `boundToolkit`.
+  const { tools, toolApproval } = boundToolkit([product], messages, approvals);
   return streamText({
-    model: getModel('orchestrator', apiKey),
-    system: LEKIR_SYSTEM,
+    model: inUsersLanguage(getModel('orchestrator', apiKey)),
+    system: cachedInstructions(LEKIR_SYSTEM),
     messages,
     tools,
     toolApproval,
+    // A CV Lekir has read reaches its model as a user file in the next step, never inside the tool result.
+    prepareStep: prepareCvStep(product.cvShelf),
     onLanguageModelCallEnd: logModelCall('lekir', pickModelId('orchestrator')),
+    // After a CV read the request holds the file: a failure is logged by its code, never whole.
+    onError: logModelError('lekir'),
     stopWhen: stepCountIs(8),
     // A drafted job description runs longer than a data answer.
     maxOutputTokens: 1400,
@@ -125,15 +178,18 @@ export function runLekiu(
   abortSignal?: AbortSignal,
   /** A workspace's own OpenRouter key; omitted for platform-paid turns. */
   apiKey?: string,
+  /** Where proposed changes are kept; a chat route passes its own. */
+  approvals?: ApprovalBinding,
 ) {
-  const { tools, toolApproval } = combineToolkits([peopleProduct(people)]);
+  const { tools, toolApproval } = boundToolkit([peopleProduct(people)], messages, approvals);
   return streamText({
-    model: getModel('orchestrator', apiKey),
-    system: LEKIU_SYSTEM,
+    model: inUsersLanguage(getModel('orchestrator', apiKey)),
+    system: cachedInstructions(lekiuSystem(new Date()), LEKIU_SYSTEM),
     messages,
     tools,
     toolApproval,
     onLanguageModelCallEnd: logModelCall('lekiu', pickModelId('orchestrator')),
+    onError: logModelError('lekiu'),
     // A change often needs two lookups first (the employee, then the department).
     stopWhen: stepCountIs(10),
     // A drafted notice or letter runs longer than a data answer.
@@ -142,20 +198,52 @@ export function runLekiu(
   });
 }
 
+/**
+ * "Bendahara, your CFO": the same single agent as Jebat, holding the finance
+ * lookups and, for someone who may write, the full invoice/quotation/bill/
+ * payment lifecycle behind the owner's approval.
+ */
+export function runBendahara(
+  messages: ModelMessage[],
+  finance: FinanceAccess,
+  abortSignal?: AbortSignal,
+  /** A workspace's own OpenRouter key; omitted for platform-paid turns. */
+  apiKey?: string,
+  /** Where proposed changes are kept; a chat route passes its own. */
+  approvals?: ApprovalBinding,
+) {
+  const { tools, toolApproval } = boundToolkit([financeProduct(finance)], messages, approvals);
+  return streamText({
+    model: inUsersLanguage(getModel('orchestrator', apiKey)),
+    system: cachedInstructions(bendaharaSystem(new Date()), BENDAHARA_SYSTEM),
+    messages,
+    tools,
+    toolApproval,
+    onLanguageModelCallEnd: logModelCall('bendahara', pickModelId('orchestrator')),
+    onError: logModelError('bendahara'),
+    // Posting an invoice often needs a lookup first (the draft), then the post.
+    stopWhen: stepCountIs(10),
+    maxOutputTokens: 1200,
+    abortSignal,
+  });
+}
+
 /** What each specialist is for, as Tuah's instructions put it. */
 const TEAM_AREA = {
   reach:
     'marketing: ads and campaigns, spend, leads (finding, adding and editing them, and promoting a lead to a CRM contact), lead forms, creatives, appointments and ad settings',
-  crm: 'the CRM: contacts, deals, pipelines and their stages, follow-ups (reminders to get back to a contact) and the calendar. A lead is not a contact yet: anything about a lead goes to Jebat',
-  hire: 'hiring: job openings, candidates and their applications, the hiring funnel, interviews, the talent pool and time to hire. Job openings can be created, edited, opened, paused, closed and deleted. Existing staff, leave and payroll are not hiring',
-  people: 'HR: existing staff, leave, claims, overtime, attendance, payroll and performance. Lookups only for now. Hiring new people is not HR',
+  crm: 'the CRM: contacts, deals, pipelines and their stages, follow-ups (reminders to get back to a contact), the calendar, and looking up sales invoices and what customers owe. A lead is not a contact yet: anything about a lead goes to Jebat',
+  hire: 'hiring: job openings, candidates and their applications, the hiring funnel, interviews, the talent pool and time to hire. Job openings can be created, edited, opened, paused, closed and deleted. Applications can be moved, rejected, reopened and rated, one at a time. Candidates can be added by hand and edited, one at a time. An application or a candidate can be deleted, one at a time. A candidate can be added to the talent pool, given a pool status, removed from the pool or moved to the pipeline for a job, one at a time. An interview can be scheduled, changed, cancelled, marked completed or a no-show, marked scheduled again, or recorded after it took place, one at a time. Feedback on a completed interview (a rating out of 5, a recommendation and comments) can be recorded or cleared, one at a time. Existing staff, leave and payroll are not hiring. It can read one candidate\'s uploaded CV and give a verdict on it',
+  people: 'HR: existing staff, leave, time-off, claims, overtime, attendance, payroll and performance. It looks these up (an owner or admin sees everyone; others see their own) and can prepare changes that wait for approval — deciding leave, claims and overtime, correcting attendance, and editing staff and departments, one change at a time. Hiring new people is not HR',
+  finance: 'finance: sales invoices and quotations, supplier bills, payments in and out, credit notes, refunds, customers and suppliers, items, and bank and cash accounts. It looks these up and can prepare changes that wait for approval — drafting, posting and voiding invoices and bills, recording payments, issuing credit notes and refunds, and managing customers, suppliers and items',
 } as const;
 
 /**
  * Tuah, the cross-app assistant on the Command page and the floating button.
- * It has the marketing tools Jebat has, Kasturi's CRM tools (lookups, and
- * changes behind an approval) and Lekir's hiring tools (lookups, and job changes behind an approval), runs on the model those rules were tuned on,
- * and says so rather than inventing data from the products it cannot see yet.
+ * It has the marketing tools Jebat has, Kasturi's CRM tools, Lekir's hiring
+ * tools, Lekiu's HR tools and Bendahara's finance tools (lookups, and changes
+ * behind an approval), runs on the model those rules were tuned on, and never
+ * invents data.
  */
 export function runTuah(
   messages: ModelMessage[],
@@ -170,22 +258,40 @@ export function runTuah(
    * Set to run Tuah with its team: it asks a specialist per product and
    * carries out what they prepare, instead of holding every tool itself.
    */
-  team?: Omit<TeamContext, 'apiKey'> | null,
+  team?: Omit<TeamContext, 'apiKey' | 'store'> | null,
   /**
-   * The workspace's hiring data. The lookups need no workspace role; the job
-   * change tools are added only when `hire.write.canWrite` is set, and each
+   * The workspace's hiring data. The lookups need no workspace role; the change
+   * tools (jobs, careers page, application form, applications) are added only when `hire.write.canWrite` is set, and each
    * waits for the user's approval.
    */
   hire?: HireAccess | null,
+  /**
+   * The workspace's HR data. The caller's own session decides which rows the
+   * lookups return; the change tools are added per the HR tier (`hr` or `self`)
+   * the route resolved, and each waits for the user's approval.
+   */
+  people?: PeopleAccess | null,
+  /**
+   * The workspace's finance data. The lookups need no workspace role; the
+   * change tools are added when the caller may write (a non-viewer member), and
+   * each waits for the user's approval.
+   */
+  finance?: FinanceAccess | null,
+  /** Where proposed changes are kept; a chat route passes its own. */
+  approvals?: ApprovalBinding,
 ) {
-  // Every product the user can reach: marketing always, the CRM in a workspace, hiring when passed.
+  // Every product the user can reach: marketing always, the CRM in a workspace, hiring when passed, HR when passed, finance when passed.
   const products = [
     reachProduct(reach),
     ...(crm ? [crmProduct(crm)] : []),
     ...(hire ? [hireProduct(hire)] : []),
+    ...(people ? [peopleProduct(people)] : []),
+    ...(finance ? [financeProduct(finance)] : []),
   ];
-  const teamTools = team ? createTeamTools(products, { ...team, apiKey }) : null;
-  const { tools, toolApproval } = teamTools ?? combineToolkits(products);
+  const binding = approvals ?? requestOnlyBinding(messages);
+  // With its team, Tuah's one change tool is `applyChange`, which takes the stored record itself.
+  const teamTools = team ? createTeamTools(products, { ...team, apiKey, store: binding.store }, messages) : null;
+  const { tools, toolApproval } = teamTools ?? boundToolkit(products, messages, binding);
   const system = team
     ? tuahTeamSystem(
         products.map((p) => ({ name: p.name, area: TEAM_AREA[p.key] })),
@@ -195,12 +301,14 @@ export function runTuah(
     : tuahSystem(screen);
   return streamText({
     model: getModel('orchestrator', apiKey),
-    system,
+    // Tuah's prompt is the same on every call of a turn and from one turn to the next: marked for the provider's cache.
+    system: cachedInstructions(system),
     messages,
     tools,
     toolApproval,
     prepareStep: teamTools?.prepareStep as never,
     onLanguageModelCallEnd: logModelCall(team ? 'tuah-team' : 'tuah', pickModelId('orchestrator')),
+    onError: logModelError(team ? 'tuah-team' : 'tuah'),
     // A CRM change often needs two lookups first (the contact, then the stage).
     stopWhen: stepCountIs(10),
     maxOutputTokens: 1000,

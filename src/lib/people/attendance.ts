@@ -4,6 +4,7 @@
  * these functions only turn rows into what a screen draws.
  */
 
+import { todayState } from './attendance-forms';
 import { addDays, clockTime, formatDate, formatDay, hoursBetween, monthStart, weekStart } from './dates';
 import { isTeamView, leaveDaysByTypeInYear, ownRows } from './own';
 import { overtimeModel, type OvertimeModel } from './overtime';
@@ -21,7 +22,9 @@ import type {
   Shift,
   ShiftKind,
   TimesheetEntry,
+  Weekday,
 } from './types';
+import { WEEKDAYS as ALL_WEEKDAYS } from './types';
 
 const round1 = (value: number) => Math.round(value * 10) / 10;
 const round2 = (value: number) => Math.round(value * 100) / 100;
@@ -76,6 +79,11 @@ export type RecentClockIn = {
   status_label: string;
   tone: Tone;
   is_today: boolean;
+  /** An owner or admin set this day by hand. */
+  corrected: boolean;
+  correction_note: string | null;
+  /** A past day with a clock-in and no clock-out. Never today (it may still be open), nor a corrected day (it was set by hand). */
+  no_clock_out: boolean;
 };
 
 export type MyAttendanceModel = {
@@ -166,6 +174,9 @@ export function buildMyAttendance(input: {
       status_label: ATTENDANCE_STATUS_LABEL[d.status],
       tone: ATTENDANCE_TONE[d.status],
       is_today: d.work_date === today,
+      corrected: d.corrected,
+      correction_note: d.correction_note,
+      no_clock_out: !d.corrected && d.clock_in !== null && d.clock_out === null && d.work_date < today,
     }));
 
   return {
@@ -192,8 +203,51 @@ export function buildMyAttendance(input: {
   };
 }
 
+/**
+ * What to tell the employee after a clock-in or clock-out succeeded, from the row the database returned.
+ * The status is the database's ("present" is on time); the times are worded in Malaysia time by `todayState`.
+ */
+export function clockResultMessage(
+  action: 'in' | 'out',
+  row: Pick<AttendanceDay, 'work_date' | 'clock_in' | 'clock_out' | 'status'>,
+): string {
+  const state = todayState({
+    today: row.work_date,
+    day: { id: '', employee_id: '', corrected: false, correction_note: null, ...row },
+    workWeek: [...ALL_WEEKDAYS],
+    holidays: [],
+    leave: [],
+    employeeId: 'self',
+  });
+  if (action === 'in') {
+    if (state.kind !== 'in' && state.kind !== 'done') return 'Clocked in.';
+    const since = state.kind === 'in' ? state.since : state.from;
+    const how = row.status === 'present' ? ', on time' : row.status === 'late' ? ', late' : '';
+    return `Clocked in at ${since}${how}.`;
+  }
+  if (state.kind !== 'done') return 'Clocked out.';
+  return `Clocked out at ${state.to}. You worked ${state.worked}.`;
+}
+
+/** The work week for the Today card. Someone who cannot read the settings gets all seven days: a guess would be wrong, and the database's own sentence explains a refusal. */
+export function workWeekFor(settings: { work_week: Weekday[] } | null): Weekday[] {
+  return settings ? settings.work_week : [...ALL_WEEKDAYS];
+}
+
+/** The viewer's own attendance row for today, if there is one. */
+export function ownDayToday(days: AttendanceDay[], viewer: PeopleViewer, today: string): AttendanceDay | null {
+  if (viewer.employeeId === null) return null;
+  return days.find((d) => d.employee_id === viewer.employeeId && d.work_date === today) ?? null;
+}
+
+/** The clock button's words; `pending` is a call in flight. */
+export function clockButtonLabel(action: 'in' | 'out', pending: boolean): string {
+  if (pending) return action === 'in' ? 'Clocking in…' : 'Clocking out…';
+  return action === 'in' ? 'Clock in' : 'Clock out';
+}
+
 /* ---------------------------------------------------------------- */
-/* Timesheet                                                         */
+/* Timesheet                                                       */
 /* ---------------------------------------------------------------- */
 
 export type TimesheetRow = {
@@ -331,13 +385,15 @@ export function buildOvertimeView(input: {
   today: string;
 }): OvertimeView {
   const team = isTeamView(input.viewer);
-  const sorted = [...input.records].sort(
+  // The database hands a manager their reports' rows too: a viewer who is not a team viewer sees their own only.
+  const records = team ? input.records : ownRows(input.records, input.viewer);
+  const sorted = [...records].sort(
     (a, b) => b.work_date.localeCompare(a.work_date) || b.created_at.localeCompare(a.created_at),
   );
   return {
     team,
     // A member's records are their own: no department split.
-    model: overtimeModel(input.records, team ? input.employees : [], input.today),
+    model: overtimeModel(records, team ? input.employees : [], input.today),
     records: sorted.slice(0, OVERTIME_TABLE_LIMIT),
     truncated: sorted.length > OVERTIME_TABLE_LIMIT,
   };

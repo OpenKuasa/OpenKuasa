@@ -6,7 +6,16 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
 import { getViewer } from '@/lib/auth/viewer';
+import { getMfaStatus } from '@/lib/auth/mfa';
+import {
+  PASSWORD_CHECK_ERRORS,
+  verifyCurrentPassword,
+} from '@/lib/auth/verify-password';
 import { recordEvent } from '@/lib/events';
+import {
+  mfaVerifyErrorMessage,
+  totpCodeSchema,
+} from '@/components/account/mfa-helpers';
 import { isOwnAvatarPath } from '@/components/account/avatar-rules';
 import type { SettingsState } from '@/app/account/actions';
 
@@ -115,12 +124,17 @@ const emailChangeSchema = z.object({
     .toLowerCase()
     .max(254, 'Please enter a valid email address.')
     .email('Please enter a valid email address.'),
+  current: z.string().min(1, 'Please enter your current password.'),
 });
 
 /**
  * Starts an email change. Supabase emails a confirmation link to the new
  * address; the sign-in email only changes once that link is opened (handled
  * by /auth/confirm), and a database trigger then mirrors it to the profile.
+ *
+ * Whoever controls the sign-in email controls the account, so an open session
+ * is not enough: the current password is asked for again, and so is an
+ * authenticator code when two-factor authentication is on.
  */
 export async function requestEmailChangeAction(
   _prev: SettingsState,
@@ -131,6 +145,7 @@ export async function requestEmailChangeAction(
 
   const parsed = emailChangeSchema.safeParse({
     email: String(formData.get('email') ?? ''),
+    current: String(formData.get('current') ?? ''),
   });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
   const newEmail = parsed.data.email;
@@ -138,16 +153,29 @@ export async function requestEmailChangeAction(
     return { error: 'That is already your sign-in email.' };
   }
 
+  const check = await verifyCurrentPassword(viewer.email, parsed.data.current);
+  if (check !== 'ok') return { error: PASSWORD_CHECK_ERRORS[check] };
+
   const supabase = await createClient();
+  const { factors } = await getMfaStatus(supabase);
+  if (factors.length > 0) {
+    const code = totpCodeSchema.safeParse(String(formData.get('code') ?? ''));
+    if (!code.success) return { error: code.error.issues[0].message };
+    const { error: codeErr } = await supabase.auth.mfa.challengeAndVerify({
+      factorId: factors[0].id,
+      code: code.data,
+    });
+    if (codeErr) return { error: mfaVerifyErrorMessage(codeErr) };
+  }
+
   const origin = await requestOrigin();
   const { error } = await supabase.auth.updateUser(
     { email: newEmail },
     { emailRedirectTo: `${origin}/auth/confirm?next=/account/profile` },
   );
-  if (error) {
-    if (error.code === 'email_exists') {
-      return { error: 'That email is already used by another account.' };
-    }
+  // An address that belongs to another account is answered exactly like one
+  // that is free, so this form cannot be used to find out who has an account.
+  if (error && error.code !== 'email_exists') {
     if (error.code === 'over_email_send_rate_limit' || error.status === 429) {
       return {
         error: 'Too many emails sent. Please wait a few minutes and try again.',
@@ -164,13 +192,13 @@ export async function requestEmailChangeAction(
       to: 'self',
       event: 'security',
       title: 'Email change requested',
-      body: 'Confirm it from the link sent to ' + newEmail,
+      body: `If ${newEmail} can be used, a confirmation link has been sent to it.`,
       href: '/account/profile',
     },
   });
 
   revalidatePath('/account/profile');
   return {
-    notice: `Confirmation link sent to ${newEmail}. Your sign-in email stays ${viewer.email} until you open it.`,
+    notice: `If ${newEmail} can be used, a confirmation link is on its way to it. Your sign-in email stays ${viewer.email} until that link is opened.`,
   };
 }

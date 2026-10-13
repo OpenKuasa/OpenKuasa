@@ -10,8 +10,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { can } from '@/lib/auth/permissions';
+import { getViewer } from '@/lib/auth/viewer';
+import { klDateOf } from '@/lib/hire/interview-time';
 import { buildApplicationsModel } from '@/lib/hire/lists';
 import { ApplicationRow } from '@/screens/hire/application-details';
+import { DeletionNotice } from '@/screens/hire/delete-dialog';
+import { InterviewDialogHost } from '@/screens/hire/interview-dialog';
 import { LOAD_FAILED, Muted, loadHire } from '@/screens/hire/parts';
 
 /* ---- static config ------------------------------------------------ */
@@ -36,8 +41,22 @@ const BY_JOB_SERIES: Series[] = [
   { key: 'applications', label: 'Applications', color: 'var(--chart-2)' },
 ];
 
+/**
+ * The server's clock for the interview form: the instant itself (the form's checks tell the time from it) and
+ * today in Kuala Lumpur for the date field. The browser's own clock and its "today" can be wrong.
+ */
+const serverClock = () => {
+  const serverNow = new Date().toISOString();
+  return { serverNow, today: klDateOf(serverNow) };
+};
+
 export default async function ApplicationsScreen() {
-  const { model } = await loadHire('applications', (data) => buildApplicationsModel(data));
+  const [{ model }, viewer] = await Promise.all([
+    loadHire('applications', (data) => buildApplicationsModel(data)),
+    getViewer(),
+  ]);
+  // Worked out once for the screen. The actions check again on the server, so this only decides what is drawn.
+  const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
   const countOf = (key: Status) => model?.statusMix.find((s) => s.key === key)?.value;
   const stat = (key: Status) => {
     const value = countOf(key);
@@ -56,6 +75,8 @@ export default async function ApplicationsScreen() {
         title="Applications"
         subtitle="All incoming applications across your open roles, Saudara."
       />
+      {/* The screen's one interview dialog, closed until a panel's button opens it. Only for someone who may edit. */}
+      {canEdit ? <InterviewDialogHost {...serverClock()} /> : null}
 
       <BentoGrid>
         {/* KPI row: headline figures only, the tables hold no history to chart */}
@@ -120,6 +141,8 @@ export default async function ApplicationsScreen() {
           flush
           className="col-span-2 md:col-span-12"
         >
+          {/* Where "Deleted …" is said: the row it was said about has gone. Only for someone who may edit. */}
+          {canEdit ? <DeletionNotice className="px-4 pt-3" /> : null}
           {!model ? LOAD_FAILED : model.rows.length === 0 ? (
             <Muted>No applications yet</Muted>
           ) : (
@@ -143,6 +166,7 @@ export default async function ApplicationsScreen() {
                     <ApplicationRow
                       key={r.id}
                       row={{ ...r, statusClass: STATUS_STYLES[r.status], live: r.status !== 'Rejected' }}
+                      canEdit={canEdit}
                     />
                   ))}
                 </TableBody>

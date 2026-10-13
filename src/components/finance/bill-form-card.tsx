@@ -1,26 +1,19 @@
 'use client';
 
-import { type FormEvent, useId, useState } from 'react';
-import Link from 'next/link';
-import { FileText, Plus } from 'lucide-react';
-import { BentoCard } from '@/components/bento/bento';
-import { LineItemsEditor } from '@/components/finance/line-items-editor';
-import { useFinanceAction } from '@/components/finance/use-finance-action';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { DocumentFormCard, type PartyChoice } from '@/components/finance/document-form-card';
 import {
-  billFormError,
+  BILL_FORM_KIND,
+  type BillForm,
+  type BillOrderOption,
   billFormFromDetail,
-  billPayload,
+  billOrderWarnings,
   newBillForm,
-  savedNotPosted,
-  withBillDate,
-  withDueDate,
-  withSupplier,
+  ordersForSupplier,
+  withCategory,
+  ownCountedTotal,
 } from '@/lib/finance/bill-form';
-import type { BillDetail, SaveAndPostResult } from '@/lib/finance/bills';
+import { withCurrentParty } from '@/lib/finance/document-form';
+import type { BillDetail, BillListRow, SaveAndPostResult } from '@/lib/finance/bills';
 import type { FinanceContact } from '@/lib/finance/contacts';
 import type { FinanceProduct } from '@/lib/finance/products';
 import type { FinResult } from '@/lib/finance/result';
@@ -30,191 +23,92 @@ export type BillFormActions = {
   saveAndPost: (input: unknown) => Promise<SaveAndPostResult>;
 };
 
-type SupplierOption = Pick<FinanceContact, 'id' | 'name' | 'payment_terms_days'>;
-
 /**
- * A new bill, or a draft being changed (`editing`). Saved as a draft, or saved
- * and posted in one go. The rules are in src/lib/finance/bill-form.ts.
+ * A new bill, or a draft being changed (`editing`). The card itself is the
+ * one invoices use; the rules are in src/lib/finance/bill-form.ts.
  */
 export function BillFormCard({
   editing,
+  initial,
+  draftOnly,
   suppliers,
   products,
+  orders,
+  categories,
+  defaultCategoryId,
+  rows,
   today,
   actions,
   onClose,
 }: {
   /** The draft being changed, with its lines; absent for a new bill. */
   editing?: BillDetail;
+  /** What a new bill's form starts with, in place of an empty one: a receipt's details. Ignored when `editing`. */
+  initial?: BillForm;
+  /** True when the form may only save a draft: it has no button that posts. A bill made from a receipt. */
+  draftOnly?: boolean;
   /** Active suppliers, by name. */
   suppliers: FinanceContact[];
   /** Active products and services. */
   products: FinanceProduct[];
+  /**
+   * Purchase orders to choose from: the approved ones, and any the drafts are linked to. Absent, the form has
+   * no picker (and leaves a draft's link alone only if the caller sends no `purchase_order_id`).
+   */
+  orders?: BillOrderOption[];
+  /**
+   * The active expense categories to choose from. Absent, the form has no category picker. A draft whose
+   * category has since been archived still shows it.
+   */
+  categories?: { id: string; name: string }[];
+  /** The category a new bill starts in: the one behind the workspace's purchases account. */
+  defaultCategoryId?: string;
+  /** The bills as listed, for what this bill already counts toward its order. */
+  rows?: BillListRow[];
   /** The default bill date, YYYY-MM-DD. */
   today: string;
   actions: BillFormActions;
   onClose: () => void;
 }) {
-  const id = useId();
-  const [form, setForm] = useState(() => (editing ? billFormFromDetail(editing) : newBillForm(today, 'new-0')));
-  const [posting, setPosting] = useState(false);
-  const save = useFinanceAction();
-
-  // A supplier archived since the draft was saved is still this bill's supplier.
-  const options: SupplierOption[] =
-    editing && !suppliers.some((s) => s.id === editing.supplier_id)
-      ? [{ id: editing.supplier_id, name: editing.supplier_name, payment_terms_days: 0 }, ...suppliers]
-      : suppliers;
-  const terms = options.find((s) => s.id === form.supplier_id)?.payment_terms_days;
-
-  const send = (post: boolean) => {
-    const problem = billFormError(form, post);
-    if (problem) {
-      save.fail(problem);
-      return;
-    }
-    const payload = billPayload(form);
-    setPosting(post);
-    if (!post) {
-      save.run(() => actions.save(payload), onClose);
-      return;
-    }
-    save.run(async () => {
-      const result = await actions.saveAndPost(payload);
-      // Saved but not posted: go on editing that draft, so a second try does not save a second bill.
-      if (!result.ok && result.draftId) {
-        const draftId = result.draftId;
-        setForm((f) => ({ ...f, id: draftId }));
-        return { ...result, error: savedNotPosted(result.error) };
-      }
-      return result;
-    }, onClose);
+  const partyChoice: PartyChoice<BillForm> | undefined = orders && {
+    label: 'Purchase order',
+    noneLabel: 'No purchase order',
+    options: (form) => ordersForSupplier(orders, form.supplier_id, form.purchase_order_id),
+    get: (form) => form.purchase_order_id,
+    set: (form, id) => ({ ...form, purchase_order_id: id }),
+    notes: (form) => {
+      const chosen = orders.find((o) => o.id === form.purchase_order_id && o.supplier_id === form.supplier_id) ?? null;
+      // The bill's own saved total is already in the order's billed figure; the saved row for the form's current id says how much.
+      const own = ownCountedTotal(rows ?? (editing ? [editing] : []), form.id, chosen?.id ?? '');
+      return billOrderWarnings(form.lines, chosen, own);
+    },
   };
-
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    // Handled here rather than as a form action, so a refused form keeps what was typed.
-    event.preventDefault();
-    send(false);
+  const categoryChoice: PartyChoice<BillForm> | undefined = categories && {
+    label: 'Category',
+    noneLabel: 'Default category',
+    options: (form) => {
+      // A draft's own category stays on offer even once archived, so saving does not move it.
+      const current = form.category_id;
+      const known = current === '' || categories.some((c) => c.id === current);
+      const own = known ? [] : [{ id: current, name: editing?.category_id === current ? (editing.category_name ?? 'Archived category') : 'Archived category' }];
+      return [...categories, ...own].map((c) => ({ id: c.id, label: c.name }));
+    },
+    get: (form) => form.category_id,
+    set: (form, id) => withCategory(form, id, defaultCategoryId),
+    notes: () => [],
   };
-
-  const title = form.id ? 'Edit bill' : 'New bill';
-  const subtitle = form.id ? 'A draft: it gets its number when it is posted' : 'Saved as a draft until it is posted';
-
-  if (options.length === 0) {
-    return (
-      <BentoCard title={title} subtitle={subtitle} icon={Plus} className="col-span-2 md:col-span-12">
-        <div className="flex flex-wrap items-center gap-3">
-          <p className="text-sm text-muted-foreground">
-            Add a supplier under{' '}
-            <Link href="/finance/customers-suppliers" className="font-medium text-primary underline-offset-4 hover:underline">
-              Customers &amp; Suppliers
-            </Link>{' '}
-            first.
-          </p>
-          <Button type="button" variant="outline" size="sm" onClick={onClose} autoFocus data-finance-focus>
-            Close
-          </Button>
-        </div>
-      </BentoCard>
-    );
-  }
-
   return (
-    <BentoCard title={title} subtitle={subtitle} icon={form.id ? FileText : Plus} className="col-span-2 md:col-span-12">
-      <form onSubmit={submit} noValidate className="grid gap-3 md:grid-cols-12">
-        <div className="space-y-1.5 md:col-span-4">
-          <Label htmlFor={`${id}-supplier`}>Supplier</Label>
-          <Select
-            value={form.supplier_id}
-            onValueChange={(v) => {
-              const supplier = options.find((s) => s.id === v);
-              if (supplier) setForm((f) => withSupplier(f, supplier));
-            }}
-          >
-            <SelectTrigger id={`${id}-supplier`} className="w-full" autoFocus data-finance-focus>
-              <SelectValue placeholder="Choose a supplier" />
-            </SelectTrigger>
-            <SelectContent>
-              {options.map((s) => (
-                <SelectItem key={s.id} value={s.id}>
-                  {s.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1.5 md:col-span-2">
-          <Label htmlFor={`${id}-ref`}>Supplier&rsquo;s reference</Label>
-          <Input
-            id={`${id}-ref`}
-            value={form.supplier_ref}
-            maxLength={200}
-            placeholder="Their invoice no."
-            autoComplete="off"
-            onChange={(e) => setForm((f) => ({ ...f, supplier_ref: e.target.value }))}
-          />
-        </div>
-        <div className="space-y-1.5 md:col-span-3">
-          <Label htmlFor={`${id}-date`}>Bill date</Label>
-          <Input
-            id={`${id}-date`}
-            type="date"
-            value={form.bill_date}
-            required
-            onChange={(e) => setForm((f) => withBillDate(f, e.target.value, terms))}
-          />
-        </div>
-        <div className="space-y-1.5 md:col-span-3">
-          <Label htmlFor={`${id}-due`}>Due date</Label>
-          <Input
-            id={`${id}-due`}
-            type="date"
-            value={form.due_date}
-            min={form.bill_date || undefined}
-            required
-            onChange={(e) => setForm((f) => withDueDate(f, e.target.value))}
-          />
-        </div>
-
-        <fieldset
-          className="space-y-2 md:col-span-12"
-          // Enter in a line's box moves on like any other key; it does not save the bill half typed.
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && event.target instanceof HTMLInputElement) event.preventDefault();
-          }}
-        >
-          <legend className="text-sm font-medium leading-none">Lines</legend>
-          <LineItemsEditor lines={form.lines} products={products} onChange={(lines) => setForm((f) => ({ ...f, lines }))} />
-        </fieldset>
-
-        <div className="space-y-1.5 md:col-span-12">
-          <Label htmlFor={`${id}-notes`}>Notes</Label>
-          <Input
-            id={`${id}-notes`}
-            value={form.notes}
-            maxLength={200}
-            autoComplete="off"
-            onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-          />
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3 md:col-span-12">
-          <Button type="submit" size="sm" variant="outline" disabled={save.pending}>
-            {save.pending && !posting ? 'Saving…' : 'Save draft'}
-          </Button>
-          <Button type="button" size="sm" disabled={save.pending} onClick={() => send(true)}>
-            {save.pending && posting ? 'Posting…' : 'Save and post'}
-          </Button>
-          <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={save.pending}>
-            Cancel
-          </Button>
-          {save.error ? (
-            <p role="alert" className="text-sm text-destructive">
-              {save.error}
-            </p>
-          ) : null}
-        </div>
-      </form>
-    </BentoCard>
+    <DocumentFormCard
+      kind={BILL_FORM_KIND}
+      initial={() => (editing ? billFormFromDetail(editing) : (initial ?? newBillForm(today, 'new-0', defaultCategoryId ?? '')))}
+      // A supplier archived since the draft was saved is still this bill's supplier.
+      parties={withCurrentParty(suppliers, editing && { id: editing.supplier_id, name: editing.supplier_name })}
+      products={products}
+      partyChoice={partyChoice}
+      extraChoices={categoryChoice ? [categoryChoice] : undefined}
+      draftOnly={draftOnly}
+      actions={actions}
+      onClose={onClose}
+    />
   );
 }

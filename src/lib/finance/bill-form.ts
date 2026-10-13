@@ -2,26 +2,28 @@
  * The bill form's rules, kept out of the components so they can be tested:
  * what a new form holds, what choosing a supplier, a date or a product
  * changes, what is wrong with the form, and what is sent to saveBillAction.
- * Pure. Every box is held as the text the person typed.
+ * Pure. What an invoice form shares is in document-form.ts.
  */
-import { addDaysIso, billTotals, type LineNumbers } from './bill-math';
-import { type BillDetail, BILL_MESSAGES, isIsoDate, roundRate, saveBillInput } from './bills';
-import { typedNumber } from './format';
+import { billTotals } from './bill-math';
+import { type BillDetail, BILL_MESSAGES, saveBillInput } from './bills';
+import { rm } from './format';
+import {
+  type DocumentFormKind,
+  type LineDraft,
+  defaultDueDate,
+  emptyLine,
+  filledFromProduct,
+  followedDueDate,
+  lineDraft,
+  lineNumbers,
+  linePayload,
+  savedAsDraft,
+  withDueDate,
+} from './document-form';
 import type { FinanceProduct } from './products';
-import { WRITE_FAILED } from './result';
 
-export type LineDraft = {
-  /** Stable for React while the form is open; never sent. */
-  key: string;
-  product_id: string;
-  description: string;
-  quantity: string;
-  uom: string;
-  /** Not shown in the editor; carried so editing a draft does not drop it. */
-  pack_size: string;
-  unit_price: string;
-  sst_rate: string;
-};
+// Defined in document-form.ts, which the invoice form shares; kept exported from here because the purchase-side tests import them from this module.
+export { type LineDraft, defaultDueDate, emptyLine, lineNumbers, withDueDate } from './document-form';
 
 export type BillForm = {
   /** Present when a saved draft is being changed. */
@@ -33,15 +35,18 @@ export type BillForm = {
   /** Once the person sets the due date by hand, it is no longer recalculated. */
   dueEdited: boolean;
   notes: string;
+  /** The purchase order the bill is raised against; '' for none. */
+  purchase_order_id: string;
+  /** The expense category the bill's cost lands in; '' for the workspace's default. */
+  category_id: string;
   lines: LineDraft[];
 };
 
-export function emptyLine(key: string): LineDraft {
-  return { key, product_id: '', description: '', quantity: '1', uom: '', pack_size: '', unit_price: '', sst_rate: '0' };
-}
-
-/** A new bill dated today with one empty line. The due date follows once a supplier is chosen. */
-export function newBillForm(today: string, lineKey: string): BillForm {
+/**
+ * A new bill dated today with one empty line, in the default category when the screen names one. The due date
+ * follows once a supplier is chosen.
+ */
+export function newBillForm(today: string, lineKey: string, defaultCategoryId = ''): BillForm {
   return {
     supplier_id: '',
     supplier_ref: '',
@@ -49,6 +54,8 @@ export function newBillForm(today: string, lineKey: string): BillForm {
     due_date: today,
     dueEdited: false,
     notes: '',
+    purchase_order_id: '',
+    category_id: defaultCategoryId,
     lines: [emptyLine(lineKey)],
   };
 }
@@ -63,31 +70,35 @@ export function billFormFromDetail(bill: BillDetail): BillForm {
     due_date: bill.due_date,
     dueEdited: true,
     notes: bill.notes ?? '',
-    lines: bill.lines.map((l) => ({
-      key: l.id,
-      product_id: l.product_id ?? '',
-      description: l.description,
-      quantity: String(l.quantity),
-      uom: l.uom ?? '',
-      pack_size: l.pack_size ?? '',
-      unit_price: String(l.unit_price),
-      sst_rate: String(l.sst_rate),
-    })),
+    purchase_order_id: bill.purchase_order_id ?? '',
+    category_id: bill.category_id ?? '',
+    lines: bill.lines.map(lineDraft),
   };
 }
 
-/** Bill date plus the supplier's payment terms; with no supplier yet, the bill date itself. */
-export function defaultDueDate(billDate: string, termsDays: number | undefined): string {
-  return addDaysIso(billDate, termsDays ?? 0);
-}
-
-/** Choosing a supplier moves the due date to their terms, unless it was set by hand. */
+/**
+ * Choosing a supplier moves the due date to their terms, unless it was set by hand.
+ * The due-date rule is deliberately its own: it blanks the due date when the bill
+ * date is empty, which the invoice form's `withCustomer` does not do. Do not
+ * "tidy" it onto `followedDueDate`.
+ */
 export function withSupplier(form: BillForm, supplier: { id: string; payment_terms_days: number }): BillForm {
   return {
     ...form,
     supplier_id: supplier.id,
+    // An order belongs to one supplier, so choosing another one leaves it behind.
+    purchase_order_id: supplier.id === form.supplier_id ? form.purchase_order_id : '',
     due_date: form.dueEdited ? form.due_date : defaultDueDate(form.bill_date, supplier.payment_terms_days),
   };
+}
+
+/**
+ * Choosing a category. "Default" (an empty choice) becomes the default category's own id when the screen names
+ * one: an empty `category_id` is read by the database as "keep the draft's current category", so it would leave
+ * the bill where it was while the form said default.
+ */
+export function withCategory(form: BillForm, id: string, defaultCategoryId?: string): BillForm {
+  return { ...form, category_id: id || defaultCategoryId || '' };
 }
 
 /**
@@ -95,12 +106,7 @@ export function withSupplier(form: BillForm, supplier: { id: string; payment_ter
  * hand. While the bill date is half typed the due date stays where it was.
  */
 export function withBillDate(form: BillForm, billDate: string, termsDays: number | undefined): BillForm {
-  const follow = !form.dueEdited && isIsoDate(billDate);
-  return { ...form, bill_date: billDate, due_date: follow ? defaultDueDate(billDate, termsDays) : form.due_date };
-}
-
-export function withDueDate(form: BillForm, dueDate: string): BillForm {
-  return { ...form, due_date: dueDate, dueEdited: true };
+  return { ...form, bill_date: billDate, due_date: followedDueDate(form, billDate, termsDays) };
 }
 
 /**
@@ -109,29 +115,7 @@ export function withDueDate(form: BillForm, dueDate: string): BillForm {
  * them. Choosing "no product" only clears the link.
  */
 export function withProduct(line: LineDraft, product: FinanceProduct | null): LineDraft {
-  if (!product) return { ...line, product_id: '' };
-  return {
-    ...line,
-    product_id: product.id,
-    description: product.name,
-    uom: product.uom,
-    unit_price: String(product.cost),
-    sst_rate: String(product.sst_rate),
-  };
-}
-
-/** An empty SST box means no SST. The rate keeps two decimals, as it is stored. */
-function sstRate(text: string): number {
-  return text.trim() === '' ? 0 : roundRate(typedNumber(text) ?? Number.NaN);
-}
-
-/** The line's figures for the live total; a box that is not a number is NaN, which counts as nothing. */
-export function lineNumbers(line: LineDraft): LineNumbers {
-  return {
-    quantity: typedNumber(line.quantity) ?? Number.NaN,
-    unit_price: typedNumber(line.unit_price) ?? Number.NaN,
-    sst_rate: sstRate(line.sst_rate),
-  };
+  return filledFromProduct(line, product, product?.cost ?? 0);
 }
 
 /** What is sent to saveBillAction. Figures are numbers; a box that is not a number goes as NaN and is refused. */
@@ -142,15 +126,70 @@ export function billPayload(form: BillForm) {
     supplier_ref: form.supplier_ref,
     bill_date: form.bill_date,
     due_date: form.due_date,
+    // Always sent, so that choosing none unlinks; callers that leave it out leave the link alone.
+    purchase_order_id: form.purchase_order_id,
+    // Empty takes the workspace's default category.
+    category_id: form.category_id,
     notes: form.notes,
-    lines: form.lines.map((line) => ({
-      product_id: line.product_id,
-      description: line.description,
-      uom: line.uom,
-      pack_size: line.pack_size,
-      ...lineNumbers(line),
-    })),
+    lines: form.lines.map(linePayload),
   };
+}
+
+/** An order the picker can offer: what the label and the warnings need. */
+export type BillOrderOption = {
+  id: string;
+  po_no: string | null;
+  supplier_id: string;
+  status: string;
+  total: number;
+  billed_total: number;
+  received_total: number;
+};
+
+/**
+ * The orders the picker offers for the chosen supplier: their approved ones, labelled with number, total and
+ * billed so far, and the order this draft is already linked to even if it has since been closed, so saving
+ * does not drop the link.
+ */
+export function ordersForSupplier(orders: BillOrderOption[], supplierId: string, currentId: string): { id: string; label: string }[] {
+  if (!supplierId) return [];
+  return orders
+    .filter((o) => o.supplier_id === supplierId && (o.status === 'approved' || o.id === currentId))
+    .map((o) => ({ id: o.id, label: `${o.po_no ?? 'Purchase order'} · ${rm(o.total)} · billed ${rm(o.billed_total)}` }));
+}
+
+/**
+ * How much of the chosen order's billed figure is this very bill: its saved total, when the saved bill with
+ * `billId` is linked to that order; nothing for a bill never saved or linked elsewhere. Read from the list's
+ * rows rather than the draft the form opened with, because a save that leaves the form open changes them.
+ */
+export function ownCountedTotal(
+  rows: { id: string; purchase_order_id: string | null; total: number }[],
+  billId: string | undefined,
+  orderId: string,
+): number {
+  if (!billId || !orderId) return 0;
+  const saved = rows.find((b) => b.id === billId);
+  return saved && saved.purchase_order_id === orderId ? saved.total : 0;
+}
+
+const cents = (n: number) => Math.round(n * 100);
+
+/**
+ * What to tell the person, in sentences, when this bill would take its order past what was ordered or past
+ * what has arrived. `ownBilled` is how much of the order's `billed_total` is this bill's own saved total
+ * (when a linked draft is being changed), so it is not counted twice. Advisory only: it never blocks saving.
+ */
+export function billOrderWarnings(lines: LineDraft[], order: BillOrderOption | null, ownBilled: number): string[] {
+  if (!order) return [];
+  const total = billTotals(lines.map(lineNumbers)).total;
+  if (!(total > 0)) return [];
+  const afterThis = cents(total) + cents(order.billed_total) - cents(ownBilled);
+  const no = order.po_no ?? 'this order';
+  const warnings: string[] = [];
+  if (afterThis > cents(order.total)) warnings.push(`This takes the bills for ${no} over its total of ${rm(order.total)}.`);
+  if (afterThis > cents(order.received_total)) warnings.push(`This is more than has been received on ${no} so far (${rm(order.received_total)}).`);
+  return warnings;
 }
 
 /**
@@ -167,6 +206,27 @@ export function billFormError(form: BillForm, posting = false): string | null {
 
 /** What the form says when the bill was saved as a draft but posting it was refused. */
 export function savedNotPosted(error: string): string {
-  if (error === WRITE_FAILED) return 'The bill was saved as a draft, but posting it failed. Please try again.';
-  return `The bill was saved as a draft, but it was not posted. ${error}`;
+  return savedAsDraft('bill', error);
 }
+
+/** The bill form, as the shared card draws it. */
+export const BILL_FORM_KIND: DocumentFormKind<BillForm> = {
+  noun: 'bill',
+  party: 'supplier',
+  dateLabel: 'Bill date',
+  partyId: (form) => form.supplier_id,
+  date: (form) => form.bill_date,
+  withParty: withSupplier,
+  withDate: withBillDate,
+  secondDate: { label: 'Due date', get: (form) => form.due_date, set: withDueDate },
+  reference: {
+    label: 'Supplier’s reference',
+    placeholder: 'Their invoice no.',
+    get: (form) => form.supplier_ref,
+    set: (form, value) => ({ ...form, supplier_ref: value }),
+  },
+  withProduct,
+  error: billFormError,
+  payload: billPayload,
+  savedNotPosted,
+};

@@ -20,6 +20,7 @@ import type {
   PoolStatus,
   WorkArrangement,
 } from './types';
+import type { Feedback } from './interview-feedback';
 import { DEFAULT_HIRE_SETTINGS } from './types';
 
 const DAY = 86_400_000;
@@ -189,6 +190,7 @@ export function createSeedHireData(now: Date = new Date()): HireData {
       candidate_id: candidates[index].id,
       job_id: jobs[row.jobIndex].id,
       candidate_name: candidates[index].name,
+      candidate_pool_status: candidates[index].pool_status,
       job_title: jobs[row.jobIndex].title,
       stage: row.stage,
       outcome: row.outcome,
@@ -200,9 +202,11 @@ export function createSeedHireData(now: Date = new Date()): HireData {
       created_at: iso(applied),
       cover_letter: null,
       cv_url: null,
+      cv_path: null,
       portfolio_url: null,
       expected_salary_cents: null,
       consented_at: null,
+      reject_reason: null,
     };
   });
 
@@ -214,16 +218,32 @@ export function createSeedHireData(now: Date = new Date()): HireData {
     let scheduled = workingTime(t + hours * HOUR);
     // Snapping must not pull an upcoming interview back to now or earlier.
     if (status === 'scheduled' && scheduled <= t) scheduled += DAY;
+    // Two of the three completed interviews have feedback, so the screens and the assistant have some to show. Saved
+    // two hours after the interview, and never later than an hour ago.
+    const recorded_at = iso(Math.min(scheduled + 2 * HOUR, t - HOUR));
+    const feedback: Feedback | null =
+      index === 6 ? { rating: 4, recommendation: 'advance', comments: 'Clear on targets and strong on key accounts.', recorded_at }
+        : index === 7 ? { rating: 2, recommendation: 'hold', comments: null, recorded_at }
+          : null;
     return {
       id: `int-${index + 1}`,
       application_id: application.id,
       candidate_name: application.candidate_name,
       job_title: application.job_title,
       scheduled_at: iso(scheduled),
+      duration_minutes: 60,
       kind: KINDS[index % 3],
+      place: null,
       interviewer_name: INTERVIEWERS[index % 4],
+      notes: null,
       status,
       created_at: iso(t - 6 * DAY),
+      // The sample rows read as never changed since they were made. The demo workspace's own rows in the database
+      // differ: a reseed stamps them with the moment it ran, so nothing may assume a demo row was never changed.
+      updated_at: iso(t - 6 * DAY),
+      application_stage: application.stage,
+      application_outcome: application.outcome,
+      ...(feedback ? { feedback } : {}),
     };
   });
 

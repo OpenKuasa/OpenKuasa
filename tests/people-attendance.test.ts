@@ -4,6 +4,10 @@ import {
   buildOvertimeView,
   buildShiftCalendar,
   buildTimesheet,
+  clockButtonLabel,
+  clockResultMessage,
+  ownDayToday,
+  workWeekFor,
 } from '@/lib/people/attendance';
 import { createSeedPeopleData } from '@/lib/people/seed';
 import {
@@ -30,6 +34,8 @@ const day = (over: Partial<AttendanceDay>): AttendanceDay => ({
   clock_in: '2026-10-05T01:00:00Z', // 09:00 in Kuala Lumpur
   clock_out: '2026-10-05T10:00:00Z', // 18:00
   status: 'present',
+  corrected: false,
+  correction_note: null,
   ...over,
 });
 
@@ -235,7 +241,7 @@ describe('buildShiftCalendar', () => {
 describe('buildOvertimeView', () => {
   const record = (over: Partial<OvertimeRecord>): OvertimeRecord => ({
     id: 'r', employee_id: 'e1', employee_name: 'E', work_date: '2026-10-02', hours: 1, rate_multiplier: 1.5,
-    amount_cents: 3750, status: 'approved', created_at: '2026-10-02T00:00:00Z', ...over,
+    amount_cents: 3750, hourly_rate_cents: 2500, day_kind: null, reason: null, decision_note: null, status: 'approved', created_at: '2026-10-02T00:00:00Z', paid_month: null, ...over,
   });
 
   it('reproduces the overtime model for the team and lists records newest first', async () => {
@@ -270,5 +276,106 @@ describe('buildOvertimeView', () => {
     const view = buildOvertimeView({ records: many, employees: [], viewer: HR3, today: TODAY });
     expect(view.records).toHaveLength(25);
     expect(view.truncated).toBe(true);
+  });
+});
+
+describe('My Attendance history: corrected days and missing clock-outs', () => {
+  const viewer: PeopleViewer = { employeeId: 'e1', isHr: false, isDemo: false };
+  const build = (days: AttendanceDay[]) => buildMyAttendance({ days, leave: [], balances: [], viewer, today: TODAY });
+
+  it('carries the correction and its note onto the row', () => {
+    const model = build([
+      day({ work_date: '2026-10-06', corrected: true, correction_note: 'Forgot to clock in' }),
+      day({ id: 'b', work_date: '2026-10-07' }),
+    ]);
+    const byDate = Object.fromEntries(model.recent.map((r) => [r.work_date, r]));
+    expect(byDate['2026-10-06'].corrected).toBe(true);
+    expect(byDate['2026-10-06'].correction_note).toBe('Forgot to clock in');
+    expect(byDate['2026-10-07'].corrected).toBe(false);
+    expect(byDate['2026-10-07'].correction_note).toBeNull();
+  });
+
+  it('marks a past day with a clock-in and no clock-out as having no clock-out', () => {
+    const model = build([day({ work_date: '2026-10-08', clock_in: '2026-10-08T01:00:00Z', clock_out: null })]);
+    expect(model.recent[0].no_clock_out).toBe(true);
+  });
+
+  it('never marks today as having no clock-out, however late it is', () => {
+    const model = build([day({ work_date: TODAY, clock_in: '2026-10-09T01:00:00Z', clock_out: null })]);
+    expect(model.recent[0].is_today).toBe(true);
+    expect(model.recent[0].no_clock_out).toBe(false);
+  });
+
+  it('shows a corrected past day with a clock-in and no clock-out as Corrected only', () => {
+    const model = build([
+      day({ work_date: '2026-10-08', clock_in: '2026-10-08T01:00:00Z', clock_out: null, corrected: true, correction_note: 'Left early' }),
+    ]);
+    expect(model.recent[0].corrected).toBe(true);
+    expect(model.recent[0].no_clock_out).toBe(false);
+  });
+
+  it('does not mark a day with no clock-in, or a complete day', () => {
+    const model = build([
+      day({ work_date: '2026-10-06', clock_in: null, clock_out: null, status: 'absent' }),
+      day({ id: 'b', work_date: '2026-10-07' }),
+    ]);
+    expect(model.recent.every((r) => r.no_clock_out === false)).toBe(true);
+  });
+});
+
+describe('clockResultMessage', () => {
+  it('says a clock-in was on time, from the status the database returned', () => {
+    const row = { work_date: TODAY, clock_in: '2026-10-09T00:52:00Z', clock_out: null, status: 'present' as const };
+    expect(clockResultMessage('in', row)).toBe('Clocked in at 8:52 am, on time.');
+  });
+
+  it('says a clock-in was late', () => {
+    const row = { work_date: TODAY, clock_in: '2026-10-09T02:30:00Z', clock_out: null, status: 'late' as const };
+    expect(clockResultMessage('in', row)).toBe('Clocked in at 10:30 am, late.');
+  });
+
+  it('words a clock-in with a status that is neither on time nor late neutrally', () => {
+    for (const status of ['absent', 'on_leave'] as const) {
+      const row = { work_date: TODAY, clock_in: '2026-10-09T00:52:00Z', clock_out: null, status };
+      expect(clockResultMessage('in', row)).toBe('Clocked in at 8:52 am.');
+    }
+  });
+
+  it('says when a clock-out happened and how long the day was', () => {
+    const row = {
+      work_date: TODAY,
+      clock_in: '2026-10-09T00:52:00Z',
+      clock_out: '2026-10-09T10:03:00Z',
+      status: 'present' as const,
+    };
+    expect(clockResultMessage('out', row)).toBe('Clocked out at 6:03 pm. You worked 9 h 11 min.');
+  });
+});
+
+describe('the My Attendance screen rules', () => {
+  const SELF: PeopleViewer = { employeeId: 'e1', isHr: false, isDemo: false };
+
+  it('counts every day as a working day for someone who cannot read the settings', () => {
+    expect(workWeekFor(null)).toEqual(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
+    expect(workWeekFor({ work_week: ['mon', 'tue'] })).toEqual(['mon', 'tue']);
+  });
+
+  it("picks the viewer's own row for today, and no one else's or another day's", () => {
+    const mine = day({ id: 'mine', employee_id: 'e1', work_date: TODAY });
+    const days = [
+      day({ id: 'other', employee_id: 'e2', work_date: TODAY }),
+      day({ id: 'old', employee_id: 'e1', work_date: '2026-10-08' }),
+      mine,
+    ];
+    expect(ownDayToday(days, SELF, TODAY)).toBe(mine);
+    expect(ownDayToday(days.slice(0, 2), SELF, TODAY)).toBeNull();
+    expect(ownDayToday(days, { ...SELF, employeeId: null }, TODAY)).toBeNull();
+  });
+
+  it('words the clock button once, for resting and for a call in flight', () => {
+    expect(clockButtonLabel('in', false)).toBe('Clock in');
+    expect(clockButtonLabel('out', false)).toBe('Clock out');
+    expect(clockButtonLabel('in', true)).toBe('Clocking in…');
+    expect(clockButtonLabel('out', true)).toBe('Clocking out…');
   });
 });

@@ -1,0 +1,445 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { CrmContactFormError } from '@/lib/crm/contacts';
+
+/**
+ * Kasturi's broadcasts: a message written once for a chosen set of contacts.
+ * Here a broadcast is the message and the rule for who it is for; the
+ * recipients are worked out from the workspace's contacts each time. Nothing
+ * in this file sends anything: that is `./broadcast-send`.
+ */
+
+/** The same limits as the table's check constraints. */
+export const BROADCAST_NAME_MAX = 120;
+export const BROADCAST_SUBJECT_MAX = 200;
+export const BROADCAST_BODY_MAX = 10000;
+export const BROADCAST_TAGS_MAX = 20;
+/** How many broadcasts the screen loads. */
+export const BROADCASTS_LOADED = 500;
+/** The most recipients one broadcast can be sent to. Checked by the server at send time. */
+export const BROADCAST_RECIPIENTS_MAX = 500;
+/** How many contacts an audience is worked out over. */
+export const AUDIENCE_CONTACTS_MAX = 5000;
+const CONTACT_PAGE_SIZE = 1000;
+
+/** The contact statuses an audience can be narrowed to. Archived contacts are never in one. */
+export const AUDIENCE_STATUSES = ['lead', 'contacted', 'qualified', 'customer'] as const;
+export type AudienceStatus = (typeof AUDIENCE_STATUSES)[number];
+
+export const AUDIENCE_STATUS_LABELS: Record<AudienceStatus, string> = {
+  lead: 'New leads',
+  contacted: 'Contacted',
+  qualified: 'Qualified',
+  customer: 'Customers',
+};
+
+export const BROADCAST_MESSAGES = {
+  name: 'Enter a name for the broadcast.',
+  nameTooLong: `Keep the name to ${BROADCAST_NAME_MAX} characters or fewer.`,
+  subject: 'Enter a subject.',
+  subjectTooLong: `Keep the subject to ${BROADCAST_SUBJECT_MAX} characters or fewer.`,
+  body: 'Write the message.',
+  bodyTooLong: `Keep the message to ${BROADCAST_BODY_MAX.toLocaleString('en-MY')} characters or fewer.`,
+  tooManyTags: `Choose at most ${BROADCAST_TAGS_MAX} tags.`,
+  gone: 'That broadcast no longer exists.',
+  sentAlready: 'This broadcast has been sent, so it can no longer be changed or deleted.',
+} as const;
+
+const M = BROADCAST_MESSAGES;
+
+/** Who a broadcast is for. Empty `statuses` means any status; empty `tags` means no tag is needed. */
+export type BroadcastAudience = {
+  statuses: AudienceStatus[];
+  /** A contact needs at least one of these. Compared without regard to case. */
+  tags: string[];
+};
+
+/** `sending` is a send that has started and not finished (or was cut short). */
+export type BroadcastStatus = 'draft' | 'sending' | 'sent';
+
+export const BROADCAST_STATUS_LABELS: Record<BroadcastStatus, string> = {
+  draft: 'Draft',
+  sending: 'Sending',
+  sent: 'Sent',
+};
+
+export type Broadcast = {
+  id: string;
+  name: string;
+  subject: string;
+  body: string;
+  audience: BroadcastAudience;
+  status: BroadcastStatus;
+  /** Goes up each time the message or audience changes; a send names the one it saw. */
+  revision: number;
+  /** `YYYY-MM-DD` it was last changed. */
+  updatedDay: string;
+  /** `YYYY-MM-DD` it was sent, in Malaysia; null until then. */
+  sentDay: string | null;
+  /** How many recipients the provider took, and how many it did not. Zero until sent. */
+  sentCount: number;
+  failedCount: number;
+  /** When the send first started, and when a second attempt last did; ISO timestamps. */
+  sendingStartedAt: string | null;
+  resumedAt: string | null;
+};
+
+/**
+ * Whether a send can be finished or tried again:
+ *   'none'     nothing to do (a draft, or every recipient was sent to)
+ *   'ready'    it can be resumed now
+ *   'wait'     it is still marked sending and its last attempt is under five minutes old
+ *   'too-old'  its first attempt is over 23 hours old, past what the provider remembers
+ * The database decides for real (`crm_resume_broadcast_send`); this is for the screen.
+ */
+export type RetryState = 'none' | 'ready' | 'wait' | 'too-old';
+
+const RETRY_WAIT_MS = 5 * 60 * 1000;
+const RETRY_WINDOW_MS = 23 * 60 * 60 * 1000;
+
+export function retryState(
+  broadcast: Pick<Broadcast, 'status' | 'failedCount' | 'sendingStartedAt' | 'resumedAt'>,
+  now: Date,
+): RetryState {
+  if (broadcast.status === 'draft' || !broadcast.sendingStartedAt) return 'none';
+  if (broadcast.status === 'sent' && broadcast.failedCount === 0) return 'none';
+  const started = new Date(broadcast.sendingStartedAt).getTime();
+  const last = Math.max(started, broadcast.resumedAt ? new Date(broadcast.resumedAt).getTime() : started);
+  if (broadcast.status === 'sending' && now.getTime() - last < RETRY_WAIT_MS) return 'wait';
+  if (now.getTime() - started > RETRY_WINDOW_MS) return 'too-old';
+  return 'ready';
+}
+
+/** The columns a person fills in on the form. */
+export type BroadcastFields = {
+  name: string;
+  subject: string;
+  body: string;
+  audience_statuses: AudienceStatus[];
+  audience_tags: string[];
+};
+
+/** What an audience needs to know about a contact. */
+export type AudienceContact = {
+  id: string;
+  name: string;
+  email: string;
+  company: string;
+  /** The stored status: 'lead', 'customer', 'archived', … */
+  status: string;
+  tags: string[];
+};
+
+type BroadcastRow = {
+  id: string;
+  name: string;
+  subject: string;
+  body: string;
+  audience_statuses: string[] | null;
+  audience_tags: string[] | null;
+  updated_at: string;
+  status?: string | null;
+  revision?: number | null;
+  sent_at?: string | null;
+  sent_count?: number | null;
+  failed_count?: number | null;
+  sending_started_at?: string | null;
+  resumed_at?: string | null;
+};
+
+const BROADCAST_COLUMNS =
+  'id,name,subject,body,audience_statuses,audience_tags,updated_at,status,revision,sent_at,sent_count,failed_count,sending_started_at,resumed_at';
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** The shape the Contacts page asks of an email. */
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function read(formData: FormData, key: string) {
+  return String(formData.get(key) ?? '').trim();
+}
+
+/** One line of text: runs of spaces and line breaks become one space. */
+function oneLine(value: string) {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function isAudienceStatus(value: string): value is AudienceStatus {
+  return (AUDIENCE_STATUSES as readonly string[]).includes(value);
+}
+
+/** Tags as typed or ticked, with blanks and repeats (ignoring case) dropped. */
+function uniqueTags(values: string[]): string[] {
+  const seen = new Set<string>();
+  const tags: string[] = [];
+  for (const value of values) {
+    const tag = oneLine(value);
+    if (!tag || seen.has(tag.toLowerCase())) continue;
+    seen.add(tag.toLowerCase());
+    tags.push(tag);
+  }
+  return tags;
+}
+
+/** Validates the add and edit form. Statuses and tags arrive as repeated fields. */
+export function parseBroadcastForm(formData: FormData): BroadcastFields {
+  const name = oneLine(read(formData, 'name'));
+  const subject = oneLine(read(formData, 'subject'));
+  // The message keeps its line breaks.
+  const body = read(formData, 'body').replace(/\r\n/g, '\n');
+  const statuses = [...new Set(formData.getAll('statuses').map(String))].filter(isAudienceStatus);
+  const tags = uniqueTags(formData.getAll('tags').map(String));
+
+  if (!name) throw new CrmContactFormError(M.name);
+  if (name.length > BROADCAST_NAME_MAX) throw new CrmContactFormError(M.nameTooLong);
+  if (!subject) throw new CrmContactFormError(M.subject);
+  if (subject.length > BROADCAST_SUBJECT_MAX) throw new CrmContactFormError(M.subjectTooLong);
+  if (!body) throw new CrmContactFormError(M.body);
+  if (body.length > BROADCAST_BODY_MAX) throw new CrmContactFormError(M.bodyTooLong);
+  if (tags.length > BROADCAST_TAGS_MAX) throw new CrmContactFormError(M.tooManyTags);
+
+  return {
+    name,
+    subject,
+    body,
+    // Kept in the order the screen lists them.
+    audience_statuses: AUDIENCE_STATUSES.filter((status) => statuses.includes(status)),
+    audience_tags: tags,
+  };
+}
+
+/** The version of the broadcast a Send was pressed on. */
+export function readBroadcastRevision(formData: FormData): number {
+  const revision = Number(read(formData, 'revision'));
+  if (!Number.isInteger(revision) || revision < 1) throw new CrmContactFormError(M.gone);
+  return revision;
+}
+
+/** The id of the broadcast an edit or delete form is about. */
+export function readBroadcastId(formData: FormData): string {
+  const id = read(formData, 'broadcastId');
+  if (!UUID.test(id)) throw new CrmContactFormError(M.gone);
+  return id;
+}
+
+/**
+ * The contacts a broadcast is for, by name. Never an archived contact, never
+ * one without a usable email, and never an address in `optedOut` (lower-case
+ * addresses that have unsubscribed). When two contacts share an email, only
+ * the first (in the order given) is kept, so nobody gets the message twice.
+ */
+export function audienceFor(
+  contacts: AudienceContact[],
+  audience: BroadcastAudience,
+  optedOut: ReadonlySet<string> = new Set(),
+): AudienceContact[] {
+  const statuses = new Set<string>(audience.statuses);
+  const tags = new Set(audience.tags.map((tag) => tag.toLowerCase()));
+  const emails = new Set<string>();
+  const recipients: AudienceContact[] = [];
+  for (const contact of contacts) {
+    const email = contact.email.trim().toLowerCase();
+    if (contact.status === 'archived' || !EMAIL.test(email) || optedOut.has(email)) continue;
+    if (statuses.size > 0 && !statuses.has(contact.status)) continue;
+    if (tags.size > 0 && !contact.tags.some((tag) => tags.has(tag.toLowerCase()))) continue;
+    if (emails.has(email)) continue;
+    emails.add(email);
+    recipients.push(contact);
+  }
+  return recipients.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+}
+
+/** 'Customers, Qualified · tagged vip or wholesale', or 'All contacts'. */
+export function audienceSummary(audience: BroadcastAudience): string {
+  const who =
+    audience.statuses.length > 0
+      ? audience.statuses.map((status) => AUDIENCE_STATUS_LABELS[status]).join(', ')
+      : 'All contacts';
+  return audience.tags.length > 0 ? `${who} · tagged ${audience.tags.join(' or ')}` : who;
+}
+
+/** Every tag in use on a contact that could be in an audience, by name; the first spelling is kept. */
+export function audienceTagOptions(contacts: AudienceContact[]): string[] {
+  return uniqueTags(contacts.filter((contact) => contact.status !== 'archived').flatMap((contact) => contact.tags)).sort(
+    (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }),
+  );
+}
+
+/**
+ * One CSV cell. A value that a spreadsheet would run as a formula is made
+ * plain text first: names and companies come from public forms.
+ */
+function cell(value: string): string {
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+}
+
+/** The recipients as a CSV file: name, email, company, status, tags. */
+export function recipientsCsv(recipients: AudienceContact[]): string {
+  const rows = recipients.map((contact) =>
+    [contact.name, contact.email, contact.company, contact.status, contact.tags.join('; ')].map(cell).join(','),
+  );
+  return ['name,email,company,status,tags', ...rows].join('\r\n');
+}
+
+/** The day in Kuala Lumpur an instant falls on. */
+function klDayOf(iso: string): string {
+  return new Date(new Date(iso).getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+export function mapBroadcast(row: BroadcastRow): Broadcast {
+  const status: BroadcastStatus = row.status === 'sent' ? 'sent' : row.status === 'sending' ? 'sending' : 'draft';
+  return {
+    id: row.id,
+    name: row.name,
+    subject: row.subject,
+    body: row.body,
+    audience: {
+      statuses: AUDIENCE_STATUSES.filter((status) => (row.audience_statuses ?? []).includes(status)),
+      tags: row.audience_tags ?? [],
+    },
+    status,
+    revision: row.revision ?? 1,
+    updatedDay: row.updated_at.slice(0, 10),
+    sentDay: row.sent_at ? klDayOf(row.sent_at) : null,
+    sentCount: row.sent_count ?? 0,
+    failedCount: row.failed_count ?? 0,
+    sendingStartedAt: row.sending_started_at ?? null,
+    resumedAt: row.resumed_at ?? null,
+  };
+}
+
+/** One broadcast of this workspace; null when it is not there. */
+export async function getBroadcast(client: SupabaseClient, orgId: string, id: string): Promise<Broadcast | null> {
+  const { data, error } = await client
+    .from('crm_broadcasts')
+    .select(BROADCAST_COLUMNS)
+    .eq('org_id', orgId)
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? mapBroadcast(data as unknown as BroadcastRow) : null;
+}
+
+/** The addresses that have unsubscribed from this workspace's broadcasts, lower case. */
+export async function listEmailOptOuts(client: SupabaseClient, orgId: string): Promise<string[]> {
+  const emails: string[] = [];
+  for (let from = 0; from < AUDIENCE_CONTACTS_MAX * 4; from += CONTACT_PAGE_SIZE) {
+    const { data, error } = await client
+      .from('crm_email_opt_outs')
+      .select('email')
+      .eq('org_id', orgId)
+      .order('email', { ascending: true })
+      .range(from, from + CONTACT_PAGE_SIZE - 1);
+    if (error) throw error;
+    const page = (data ?? []) as { email: string }[];
+    emails.push(...page.map((row) => row.email));
+    if (page.length < CONTACT_PAGE_SIZE) break;
+  }
+  return emails;
+}
+
+/** The workspace's broadcasts, newest first. */
+export async function listBroadcasts(client: SupabaseClient, orgId: string): Promise<Broadcast[]> {
+  const { data, error } = await client
+    .from('crm_broadcasts')
+    .select(BROADCAST_COLUMNS)
+    .eq('org_id', orgId)
+    .order('created_at', { ascending: false })
+    .limit(BROADCASTS_LOADED);
+  if (error) throw error;
+  return ((data ?? []) as unknown as BroadcastRow[]).map(mapBroadcast);
+}
+
+/**
+ * The workspace's contacts as an audience sees them, oldest first (so the
+ * contact kept for a shared email is the one made first), read a page at a
+ * time up to `AUDIENCE_CONTACTS_MAX`. `complete` is false when there are more.
+ */
+export async function listAudienceContacts(
+  client: SupabaseClient,
+  orgId: string,
+): Promise<{ contacts: AudienceContact[]; complete: boolean }> {
+  type Row = {
+    id: string;
+    first_name: string;
+    last_name: string | null;
+    email: string | null;
+    company: string | null;
+    status: string;
+    tags: string[] | null;
+  };
+  const contacts: AudienceContact[] = [];
+  for (let from = 0; from < AUDIENCE_CONTACTS_MAX; from += CONTACT_PAGE_SIZE) {
+    const { data, error } = await client
+      .from('crm_contacts')
+      .select('id,first_name,last_name,email,company,status,tags')
+      .eq('org_id', orgId)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, from + CONTACT_PAGE_SIZE - 1);
+    if (error) throw error;
+    const page = (data ?? []) as unknown as Row[];
+    contacts.push(
+      ...page.map((row) => ({
+        id: row.id,
+        name: [row.first_name, row.last_name].filter(Boolean).join(' ').trim(),
+        email: row.email ?? '',
+        company: row.company ?? '',
+        status: row.status,
+        tags: row.tags ?? [],
+      })),
+    );
+    if (page.length < CONTACT_PAGE_SIZE) return { contacts, complete: true };
+  }
+  return { contacts, complete: false };
+}
+
+export async function createBroadcast(
+  client: SupabaseClient,
+  orgId: string,
+  fields: BroadcastFields,
+  userId?: string | null,
+): Promise<void> {
+  const { error } = await client
+    .from('crm_broadcasts')
+    .insert({ org_id: orgId, ...fields, ...(userId ? { created_by: userId } : {}) });
+  if (error) throw error;
+}
+
+/** Nothing in the database maintains `updated_at`, so the write sets it. */
+export async function updateBroadcast(
+  client: SupabaseClient,
+  orgId: string,
+  id: string,
+  fields: BroadcastFields,
+): Promise<void> {
+  const { data, error } = await client
+    .from('crm_broadcasts')
+    .update({ ...fields, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('org_id', orgId)
+    .select('id');
+  if (error) throw error;
+  if (!data || data.length === 0) throw new CrmContactFormError(await goneOrSent(client, orgId, id));
+}
+
+/** Why a change or a delete matched no row: the database only lets a draft be touched. */
+async function goneOrSent(client: SupabaseClient, orgId: string, id: string): Promise<string> {
+  const { data: still } = await client
+    .from('crm_broadcasts')
+    .select('id')
+    .eq('id', id)
+    .eq('org_id', orgId)
+    .maybeSingle();
+  return still ? M.sentAlready : M.gone;
+}
+
+export async function deleteBroadcast(client: SupabaseClient, orgId: string, id: string): Promise<void> {
+  const { data, error } = await client
+    .from('crm_broadcasts')
+    .delete()
+    .eq('id', id)
+    .eq('org_id', orgId)
+    .select('id');
+  if (error) throw error;
+  if (!data || data.length === 0) throw new CrmContactFormError(await goneOrSent(client, orgId, id));
+}

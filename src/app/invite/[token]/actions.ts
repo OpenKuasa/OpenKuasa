@@ -1,6 +1,6 @@
 'use server';
 
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
@@ -8,11 +8,16 @@ import { createClient } from '@/lib/supabase/server';
 import { REMEMBER_COOKIE } from '@/lib/supabase/remember';
 import { getMfaStatus, mfaVerifyHref } from '@/lib/auth/mfa';
 import {
+  INVITE_CONFIRM_FIRST,
+  INVITE_CONFIRM_NOTICE,
   friendlyRpcError,
   getInvite,
+  inviteConfirmUrl,
   inviteProblem,
+  originFromHeaders,
   type InviteAcceptState,
 } from '@/lib/account/invites';
+import { signInLimited, signUpLimited } from '@/lib/security/limits';
 
 type ServerClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -73,6 +78,17 @@ export async function acceptInviteAction(
   } = await supabase.auth.getUser();
   if (!user) return { error: 'Please sign in to accept this invite.' };
 
+  // Someone who signed up from this invite and has just confirmed their
+  // address gave their name at sign-up; it was not saved then (no session).
+  const metaName = user.user_metadata?.full_name;
+  if (typeof metaName === 'string' && metaName.trim()) {
+    await supabase
+      .from('profiles')
+      .update({ full_name: metaName.trim().slice(0, 120) })
+      .eq('user_id', user.id)
+      .is('full_name', null);
+  }
+
   const failure = await accept(supabase, invite.token);
   if (failure) return { error: failure };
   redirect('/command');
@@ -95,12 +111,17 @@ export async function signInAndAcceptAction(
   const supabase = await createClient({ remember: true });
   const invite = await pendingInvite(supabase, formData);
   if (invite.error !== undefined) return { error: invite.error };
+  const limited = await signInLimited(invite.email);
+  if (limited) return { error: limited };
 
   const { error } = await supabase.auth.signInWithPassword({
     email: invite.email,
     password: parsed.data.password,
   });
   if (error) {
+    // The account exists but its address was never confirmed: say so, rather
+    // than sending them to create an account that already exists.
+    if (error.code === 'email_not_confirmed') return { error: INVITE_CONFIRM_FIRST };
     return {
       error:
         'Incorrect password, or there is no account for this email yet. If you are new, choose "Create my account".',
@@ -144,11 +165,19 @@ export async function signUpAndAcceptAction(
   const supabase = await createClient({ remember: true });
   const invite = await pendingInvite(supabase, formData);
   if (invite.error !== undefined) return { error: invite.error, fullName };
+  const limited = await signUpLimited(invite.email);
+  if (limited) return { error: limited, fullName };
 
+  // Where email confirmation is on, the link in the confirmation email comes
+  // back to this invite, signed in, so joining is one more click.
+  const origin = originFromHeaders(await headers());
   const { data, error } = await supabase.auth.signUp({
     email: invite.email,
     password: parsed.data.password,
-    options: { data: { full_name: parsed.data.fullName } },
+    options: {
+      data: { full_name: parsed.data.fullName },
+      emailRedirectTo: inviteConfirmUrl(origin, invite.token),
+    },
   });
   if (error) {
     return {
@@ -167,11 +196,7 @@ export async function signUpAndAcceptAction(
     };
   }
   if (!data.session) {
-    return {
-      notice:
-        'Check your email to confirm your account, then reopen this invite link to join.',
-      fullName,
-    };
+    return { notice: INVITE_CONFIRM_NOTICE, fullName };
   }
 
   // Invited people join the inviting workspace; they do not get their own.

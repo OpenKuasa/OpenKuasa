@@ -5,6 +5,7 @@
  * progress and a later turn can find a change that was prepared.
  */
 
+import type { ChangeRow } from '@/lib/chat/change-rows';
 import { collectNames, type KnownNames } from '@/lib/chat/change-titles';
 
 /** The request tools Tuah has, one per specialist: `askJebat`, `askKasturi`. */
@@ -27,6 +28,11 @@ export type Proposal = {
   title: string;
   /** A warning under it, for changes that cannot be undone. */
   detail: string | null;
+  /**
+   * Every value the change carries, one row each, made from `input` when it was prepared (with what the
+   * specialist's lookups showed is there now). Absent on a change prepared before cards listed values.
+   */
+  changes?: ChangeRow[];
 };
 
 /** A specialist's work so far, or finished. */
@@ -41,6 +47,8 @@ export type Delegation = {
   proposals: Proposal[];
   /** Names of the rows it came across, so a later change can be worded with them. */
   names?: KnownNames;
+  /** Ids a lookup of its returned while saying the name fits several rows: held back from deletion for the rest of the turn. */
+  ambiguous?: string[];
 };
 
 function isProposal(value: unknown): value is Proposal {

@@ -5,6 +5,7 @@
  */
 
 import { rm } from '@/lib/reach/format';
+import { isTeamView, ownRows } from './own';
 import { attendanceCounts } from './summaries';
 import { addDays, addMonths, daysBetween, formatDay, monthLabel, monthStart, todayInMalaysia } from './dates';
 import type {
@@ -16,6 +17,7 @@ import type {
   LeaveType,
   OvertimeRecord,
   PeopleData,
+  PeopleViewer,
   TimeOffRequest,
 } from './types';
 
@@ -76,7 +78,7 @@ export type ApprovalRow = {
 export function pendingApprovals(
   leave: LeaveRequest[],
   claims: Claim[],
-  overtime: OvertimeRecord[],
+  overtime: Pick<OvertimeRecord, 'id' | 'status' | 'employee_name' | 'hours' | 'work_date' | 'created_at'>[],
   timeOff: TimeOffRequest[],
 ): ApprovalRow[] {
   const waiting = <T extends { status: string }>(rows: T[]) => rows.filter((r) => r.status === 'pending');
@@ -223,10 +225,11 @@ export type AttendanceCounts = {
   late: number;
   absent: number;
   on_leave: number;
-  /** Present or late. */
-  at_work: number;
-  /** Share of those expected (not on leave) who came in. Null when nobody was expected. */
-  rate_pct: number | null;
+  /**
+   * Present or late with a clock-in. There is no rate for a day that is still going: the nightly job does not close
+   * today, so the rows of today are only the people who have clocked in, and a share of those would read 100%.
+   */
+  clocked_in: number;
 };
 
 export function attendanceOn(days: AttendanceDay[], date: string): AttendanceCounts {
@@ -236,8 +239,7 @@ export function attendanceOn(days: AttendanceDay[], date: string): AttendanceCou
     late: counts.late,
     absent: counts.absent,
     on_leave: counts.on_leave,
-    at_work: counts.present + counts.late,
-    rate_pct: counts.rate_pct,
+    clocked_in: days.filter((d) => d.work_date === date && (d.status === 'present' || d.status === 'late') && d.clock_in !== null).length,
   };
 }
 
@@ -246,8 +248,8 @@ export type PeopleOverviewModel = {
   totals: {
     headcount: number;
     departments: number;
-    at_work_today: number;
-    attendance_rate_pct: number | null;
+    /** Present or late with a clock-in today. Never a rate: see {@link AttendanceCounts}. */
+    clocked_in_so_far: number;
     on_leave_today: number;
     pending_approvals: number;
   };
@@ -259,9 +261,18 @@ export type PeopleOverviewModel = {
   occasions: Occasion[];
 };
 
-export async function buildPeopleOverviewModel(data: PeopleData, now: Date): Promise<PeopleOverviewModel> {
+/**
+ * `ctx` is given by `loadPeople`. With it, a viewer who is not a team viewer (a manager) sees their own rows only:
+ * the database also hands a manager their reports', and the Overview is not a team screen. Without it, or for a
+ * team viewer, every row the data holds is used.
+ */
+export async function buildPeopleOverviewModel(
+  data: PeopleData,
+  now: Date,
+  ctx?: { viewer: PeopleViewer },
+): Promise<PeopleOverviewModel> {
   const today = todayInMalaysia(now);
-  const [employees, leave, claims, overtime, timeOff, attendance] = await Promise.all([
+  const [employees, allLeave, allClaims, allOvertime, allTimeOff, allAttendance] = await Promise.all([
     data.listEmployees(),
     data.listLeaveRequests(),
     data.listClaims(),
@@ -269,6 +280,13 @@ export async function buildPeopleOverviewModel(data: PeopleData, now: Date): Pro
     data.listTimeOffRequests(),
     data.listAttendance(today, today),
   ]);
+  const narrow = ctx !== undefined && !isTeamView(ctx.viewer);
+  const mine = <T extends { employee_id: string }>(rows: T[]): T[] => (narrow ? ownRows(rows, ctx.viewer) : rows);
+  const leave = mine(allLeave);
+  const claims = mine(allClaims);
+  const overtime = mine(allOvertime);
+  const timeOff = mine(allTimeOff);
+  const attendance = mine(allAttendance);
   const departments = headcountByDepartment(employees);
   const away = onLeaveOn(leave, today);
   const approvals = pendingApprovals(leave, claims, overtime, timeOff);
@@ -278,8 +296,7 @@ export async function buildPeopleOverviewModel(data: PeopleData, now: Date): Pro
     totals: {
       headcount: employees.filter((e) => e.status === 'active').length,
       departments: departments.length,
-      at_work_today: counts.at_work,
-      attendance_rate_pct: counts.rate_pct,
+      clocked_in_so_far: counts.clocked_in,
       on_leave_today: away.length,
       pending_approvals: approvals.length,
     },

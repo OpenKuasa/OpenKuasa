@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { overtimeModel } from '@/lib/people/overtime';
+import { overtimeAmountText, overtimeCalculated, overtimeCancelOffered, overtimeModel, overtimePaidText, paidOvertimeById } from '@/lib/people/overtime';
 import { createSeedPeopleData } from '@/lib/people/seed';
 import type { OvertimeRecord } from '@/lib/people/types';
 
@@ -9,7 +9,7 @@ const data = createSeedPeopleData(NOW);
 
 const record = (over: Partial<OvertimeRecord>): OvertimeRecord => ({
   id: 'r', employee_id: 'e1', employee_name: 'E', work_date: '2026-10-02', hours: 1, rate_multiplier: 1.5,
-  amount_cents: 3750, status: 'approved', created_at: '2026-10-02T00:00:00Z', ...over,
+  amount_cents: 3750, hourly_rate_cents: 2500, day_kind: null, reason: null, decision_note: null, status: 'approved', created_at: '2026-10-02T00:00:00Z', paid_month: null, ...over,
 });
 
 describe('overtimeModel on the sample data', () => {
@@ -77,5 +77,42 @@ describe('overtimeModel on other rows', () => {
     const model = overtimeModel([record({ status: 'pending', work_date: '2026-08-14', hours: 3 })], [], TODAY);
     expect(model.month).toMatchObject({ hours: 0, pending_hours: 3, pending_count: 1 });
     expect(model.by_month.find((b) => b.label === 'Aug')!.value).toBe(3);
+  });
+});
+
+describe('overtimeCalculated', () => {
+  it('is false only when there is no rate and no amount', () => {
+    expect(overtimeCalculated({ hourly_rate_cents: null, amount_cents: 0 })).toBe(false);
+    expect(overtimeCalculated({ hourly_rate_cents: null, amount_cents: 7500 })).toBe(true);
+    expect(overtimeCalculated({ hourly_rate_cents: 2500, amount_cents: 7500 })).toBe(true);
+    expect(overtimeCalculated({ hourly_rate_cents: 0, amount_cents: 0 })).toBe(true);
+  });
+
+  it('words the amount: a row made before the rate was stored keeps its amount', () => {
+    expect(overtimeAmountText(record({ hourly_rate_cents: null, amount_cents: 7500 }))).toBe('RM 75.00');
+    expect(overtimeAmountText(record({ hourly_rate_cents: null, amount_cents: 0 }))).toBe('Not calculated');
+  });
+});
+
+describe('a record a paid payroll run took', () => {
+  it('reads "Paid" with the month, and nothing when no paid run took it', () => {
+    expect(overtimePaidText({ paid_month: '2026-10' })).toBe('Paid, October 2026');
+    expect(overtimePaidText({ paid_month: '2026-01' })).toBe('Paid, January 2026');
+    expect(overtimePaidText({ paid_month: null })).toBeNull();
+  });
+
+  it('maps only the paid records by id', () => {
+    const map = paidOvertimeById([
+      record({ id: 'a', paid_month: '2026-09' }),
+      record({ id: 'b', paid_month: null }),
+    ]);
+    expect([...map]).toEqual([['a', 'Paid, September 2026']]);
+  });
+
+  it('offers no Cancel on a paid record, even one whose status would allow it', () => {
+    expect(overtimeCancelOffered(true, 'Paid, October 2026')).toBe(false);
+    expect(overtimeCancelOffered(true, null)).toBe(true);
+    expect(overtimeCancelOffered(true, undefined)).toBe(true);
+    expect(overtimeCancelOffered(false, null)).toBe(false);
   });
 });

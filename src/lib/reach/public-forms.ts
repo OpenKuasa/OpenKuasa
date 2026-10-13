@@ -6,7 +6,9 @@
  * A visitor has no access to any table. Each call here goes through one of the
  * three database functions made for the purpose (`get_public_form`,
  * `record_form_view`, `submit_public_form`), which decide for themselves what a
- * stranger may see and do.
+ * stranger may see and do. Reading is done with a client that carries no
+ * session; the two that write are called by the server as itself, which is the
+ * only caller the database allows them.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
@@ -49,15 +51,44 @@ export async function getPublicForm(
   return { accepting: true, name: row.form_name, orgName: row.org_name };
 }
 
+/** Who is looking, when the server counts a view as itself. */
+export type FormViewer = {
+  /** The signed-in visitor's id, or null: the database leaves out members of the form's workspace. */
+  viewerId: string | null;
+  /**
+   * The client carrying the visitor's own session. Used once, to count the way
+   * views were counted before, when the database answers that it has not been
+   * moved on to the server-only function yet.
+   */
+  legacy?: SupabaseClient;
+};
+
+/** The database has no such function (yet), or does not let this caller run it (yet). */
+const NOT_MOVED_ON = new Set(['PGRST202', '42501']);
+
 /**
- * Counts one view. Pass the client that carries the visitor's own session, if
- * they have one: the database leaves out members of the form's workspace. A
- * count that fails never fails the page.
+ * Counts one view. With `viewer`, `client` is the server's own and the visitor
+ * is named; without it, `client` carries the visitor's session and the
+ * database reads who they are from that. A count that fails never fails the
+ * page.
  */
-export async function recordFormView(client: SupabaseClient, formId: string): Promise<void> {
+export async function recordFormView(
+  client: SupabaseClient,
+  formId: string,
+  viewer?: FormViewer,
+): Promise<void> {
   try {
-    const { error } = await client.rpc('record_form_view', { p_form_id: formId });
-    if (error) console.error('[public-forms] record_form_view failed:', error);
+    const { error } = await client.rpc(
+      'record_form_view',
+      viewer ? { p_form_id: formId, p_viewer: viewer.viewerId } : { p_form_id: formId },
+    );
+    if (!error) return;
+    // Only these two: after any other failure the view may have been counted.
+    if (viewer?.legacy && NOT_MOVED_ON.has(String(error.code))) {
+      await recordFormView(viewer.legacy, formId);
+      return;
+    }
+    console.error('[public-forms] record_form_view failed:', error);
   } catch (error) {
     console.error('[public-forms] record_form_view failed:', error);
   }

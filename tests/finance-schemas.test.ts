@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { billIdInput, saveBillInput } from '@/lib/finance/bills';
+import { cashReceiptIdInput, saveCashReceiptInput } from '@/lib/finance/cash-receipts';
 import { createContactInput, updateContactInput } from '@/lib/finance/contacts';
-import { markPaymentPaidInput, paymentIdInput, recordPaymentOutInput } from '@/lib/finance/money';
+import { creditNoteIdInput, saveCreditNoteInput } from '@/lib/finance/credit-notes';
+import { invoiceIdInput, saveInvoiceInput, setEInvoiceInput } from '@/lib/finance/invoices';
+import { markPaymentPaidInput, paymentIdInput, recordPaymentInInput, recordPaymentOutInput } from '@/lib/finance/money';
 import { createProductInput, updateProductInput } from '@/lib/finance/products';
+import { quotationIdInput, saveQuotationInput } from '@/lib/finance/quotations';
+import { recordRefundInput } from '@/lib/finance/refunds';
 
 const ID = '11111111-1111-4111-8111-111111111111';
 
@@ -47,6 +52,68 @@ const cases: [string, { parse: (v: unknown) => unknown }, unknown][] = [
     supplier_id: ID, bill_date: '2026-10-01', due_date: '2026-10-31',
     lines: [{ description: 'Gloves', quantity: 1, unit_price: 10, sst_rate: 1.005 }, { description: 'Ink', quantity: 1, unit_price: 10, sst_rate: 0.145 }],
   }],
+  ['saveInvoiceInput', saveInvoiceInput, {
+    customer_id: ID, invoice_date: '2026-10-01', due_date: '2026-10-31', notes: '',
+    lines: [{ description: ' Design work ', quantity: 1.23456, unit_price: 0.123456, uom: '', product_id: '' }],
+  }],
+  ['saveInvoiceInput (smallest quantity, an SST rate with three decimals)', saveInvoiceInput, {
+    customer_id: ID, invoice_date: '2026-10-01', due_date: '2026-10-31',
+    lines: [{ description: 'Design work', quantity: 0.0005, unit_price: 10, sst_rate: 1.005 }, { description: 'Hosting', quantity: 1, unit_price: 10, sst_rate: 0.145 }],
+  }],
+  ['saveInvoiceInput (a draft being changed, with a product)', saveInvoiceInput, {
+    id: ID, customer_id: ID, invoice_date: '2026-10-01', due_date: '2026-10-01', notes: ' Net 30 ',
+    lines: [{ product_id: ID, description: 'Ink', quantity: 2, uom: ' box ', pack_size: ' box of 4 ', unit_price: 14.5, sst_rate: 6 }],
+  }],
+  ['invoiceIdInput', invoiceIdInput, { id: ID }],
+  ['recordPaymentInInput', recordPaymentInInput, {
+    account_id: ID, txn_date: '2026-10-05', method: 'fpx', reference: ' ',
+    allocations: [{ invoice_id: ID, amount: 32.506 }],
+  }],
+  ['recordPaymentInInput (smallest amount)', recordPaymentInInput, {
+    account_id: ID, txn_date: '2026-10-05', method: 'fpx',
+    allocations: [{ invoice_id: ID, amount: 0.005 }],
+  }],
+  ['recordPaymentInInput (two invoices, a reference and a note)', recordPaymentInInput, {
+    account_id: ID, txn_date: '2026-10-20', method: 'cheque', reference: ' CHQ 001 ', notes: ' banked ',
+    allocations: [{ invoice_id: ID, amount: 10.005 }, { invoice_id: '22222222-2222-4222-8222-222222222222', amount: 5 }],
+  }],
+  ['setEInvoiceInput', setEInvoiceInput, { id: ID, einvoice_status: 'validated', einvoice_uuid: ' F9D425P6DS7D8IU ' }],
+  ['setEInvoiceInput (no status, an empty UUID box)', setEInvoiceInput, { id: ID, einvoice_status: 'none', einvoice_uuid: '  ' }],
+  ['setEInvoiceInput (a status and no UUID yet)', setEInvoiceInput, { id: ID, einvoice_status: 'pending' }],
+  ['saveQuotationInput', saveQuotationInput, {
+    customer_id: ID, quote_date: '2026-10-01', valid_until: '2026-10-31', notes: '',
+    lines: [{ description: ' Design work ', quantity: 1.23456, unit_price: 0.123456, uom: '', product_id: '' }],
+  }],
+  ['saveQuotationInput (a draft being changed, valid for the day, an SST rate with three decimals)', saveQuotationInput, {
+    id: ID, customer_id: ID, quote_date: '2026-10-01', valid_until: '2026-10-01', notes: ' Valid 30 days ',
+    lines: [{ product_id: ID, description: 'Ink', quantity: 0.0005, uom: ' box ', unit_price: 14.5, sst_rate: 1.005 }],
+  }],
+  ['quotationIdInput', quotationIdInput, { id: ID }],
+  ['saveCreditNoteInput', saveCreditNoteInput, { invoice_id: ID, credit_date: '2026-10-06', reason: 'returns', amount: 240.005, notes: ' ' }],
+  ['saveCreditNoteInput (a draft being changed, the smallest amount)', saveCreditNoteInput, {
+    id: ID, invoice_id: ID, credit_date: '2026-10-06', reason: 'other', amount: 0.005, notes: ' Two returned ',
+  }],
+  ['creditNoteIdInput', creditNoteIdInput, { id: ID }],
+  ['recordRefundInput (against an invoice)', recordRefundInput, {
+    invoice_id: ID, account_id: ID, txn_date: '2026-10-06', method: 'fpx', reason: 'damaged_goods', amount: 240.005, reference: ' ',
+  }],
+  ['recordRefundInput (pending, against a credit note, the invoice box left empty)', recordRefundInput, {
+    invoice_id: '', credit_note_id: ID, account_id: ID, txn_date: '2026-10-06', method: 'cheque', reason: 'other', amount: 0.005,
+    reference: ' CHQ 001 ', notes: ' Collected in person ', scheduled: true,
+  }],
+  ['saveCashReceiptInput (income, a typed payer)', saveCashReceiptInput, {
+    kind: 'income', account_id: ID, txn_date: '2026-10-06', method: 'cash', category_id: ID, amount: 32.506,
+    party_name: ' Walk-in ', contact_id: '', reference: ' ',
+  }],
+  ['saveCashReceiptInput (income, a draft being changed, a contact, the smallest amount)', saveCashReceiptInput, {
+    kind: 'income', id: ID, account_id: ID, txn_date: '2026-10-06', method: 'cheque', category_id: ID, amount: 0.005,
+    contact_id: ID, party_name: ' ', reference: ' CHQ 001 ', notes: ' Deposit ',
+  }],
+  ['saveCashReceiptInput (two invoices)', saveCashReceiptInput, {
+    kind: 'invoice', account_id: ID, txn_date: '2026-10-20', method: 'fpx', notes: ' banked ',
+    allocations: [{ invoice_id: ID, amount: 10.005 }, { invoice_id: '22222222-2222-4222-8222-222222222222', amount: 5 }],
+  }],
+  ['cashReceiptIdInput', cashReceiptIdInput, { id: ID }],
 ];
 
 describe('finance schemas parse their own output unchanged', () => {

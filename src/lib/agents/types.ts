@@ -45,6 +45,19 @@ export type AgentRunAsset = {
 
 export const WEEKLY_STUDIO = 'weekly-studio';
 
+/**
+ * Thrown when a run cannot start because the workspace already has one in
+ * progress. The database allows a single 'running' row per workspace, so the
+ * insert that starts a run is also the claim: of any number of concurrent
+ * starts, exactly one wins and the rest get this.
+ */
+export class RunInProgressError extends Error {
+  constructor() {
+    super('A run is already in progress.');
+    this.name = 'RunInProgressError';
+  }
+}
+
 export type AgentSchedule = {
   id: string;
   org_id: string;
@@ -63,4 +76,27 @@ export type AgentSchedule = {
   paused_reason: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export const PROPOSAL_STATUSES = ['pending', 'approved', 'rejected', 'expired', 'failed'] as const;
+export type ProposalStatus = (typeof PROPOSAL_STATUSES)[number];
+
+/** One queued, owner-approvable change an autonomous run proposed. */
+export type AgentProposal = {
+  id: string;
+  org_id: string;
+  run_id: string | null;
+  agent_key: string;
+  product: string;
+  action: string;
+  input: unknown;
+  title: string;
+  detail: string | null;
+  rationale: string | null;
+  status: ProposalStatus;
+  result: unknown;
+  created_at: string;
+  decided_at: string | null;
+  decided_by: string | null;
+  expires_at: string;
 };

@@ -1,6 +1,7 @@
-import { afterAll, beforeAll, expect, test, type TestContext } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { beforeAll, expect, test, type TestContext } from 'vitest';
+import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { createOrg, joinDemo, liveClient, beforeCleanup, signInAnon, signInOwner } from './helpers/live-workspaces';
 import { formsTableMissing, formsTableSkipReason } from './helpers/forms-table';
 import { createSupabaseReachData } from '@/lib/reach/supabase';
 import { createForm, deleteForm, setFormStatus } from '@/lib/reach/capabilities';
@@ -8,20 +9,17 @@ import { createForm, deleteForm, setFormStatus } from '@/lib/reach/capabilities'
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const client = (): SupabaseClient =>
-  createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
+const client = liveClient;
 
 async function signedIn() {
   const c = client();
-  const { error } = await c.auth.signInAnonymously();
+  const { error } = await signInOwner(c);
   expect(error, error?.message).toBeNull();
   return c;
 }
 
 async function ownedOrg(c: SupabaseClient, name: string) {
-  const { data: orgId, error } = await c.rpc('create_org_for_current_user', { org_name: name });
+  const { data: orgId, error } = await createOrg(c, name);
   expect(error, error?.message).toBeNull();
   return { c, orgId: orgId as string };
 }
@@ -44,11 +42,14 @@ beforeAll(async () => {
   owner = await ownedOrg(first, 'Forms Writer Sdn Bhd');
   other = await ownedOrg(await signedIn(), 'Forms Other Sdn Bhd');
 });
-afterAll(async () => {
-  if (owner) await owner.c.from('forms').delete().eq('org_id', owner.orgId);
-  if (other) await other.c.from('forms').delete().eq('org_id', other.orgId);
-  await owner?.c.auth.signOut();
-  await other?.c.auth.signOut();
+// If the cleanup cannot delete the workspaces (no key, migration not applied), they must not keep
+// active public forms, so this pauses the forms this file created, first inside the helper's cleanup,
+// while the owners' sessions are still valid (nothing signs them out earlier).
+beforeCleanup(async () => {
+  for (const org of [owner, other]) {
+    if (!org) continue;
+    await org.c.from('forms').update({ status: 'paused' }).eq('org_id', org.orgId);
+  }
 });
 
 /** Skips a test, visibly, while the table is not there yet. */
@@ -168,8 +169,11 @@ testWithSupabase('another workspace sees nothing and can change nothing', async 
 
 testWithSupabase('a viewer (demo member) reads the six demo forms and cannot write', async (ctx) => {
   needsFormsTable(ctx);
-  const v = await signedIn();
-  const { data: demoId, error: joinError } = await v.rpc('join_demo_org');
+  // A demo guest: an anonymous sign-in, the only kind of session the demo takes.
+  const v = client();
+  const guest = await signInAnon(v);
+  expect(guest.error, guest.error?.message).toBeNull();
+  const { data: demoId, error: joinError } = await joinDemo(v);
   expect(joinError, joinError?.message).toBeNull();
 
   // Through the same seam the page and the chat read.

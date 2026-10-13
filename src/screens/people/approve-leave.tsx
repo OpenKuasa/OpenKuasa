@@ -3,7 +3,7 @@ import { isTeamView } from '@/lib/people/own';
 import { ApprovalsScreen } from './approvals-screen';
 import { loadPeople } from './parts';
 
-/** Owners and admins only: anyone else gets the notice and nothing is read. */
+/** Owners and admins, and a manager for their direct reports: anyone else gets the notice and nothing is read. */
 export default async function ApproveLeaveScreen() {
   const { model, viewer } = await loadPeople('approve-leave', async (data, now, ctx) => ({
     queue: await leaveApprovals(data, ctx.viewer, now),

@@ -9,6 +9,7 @@ import { ConfirmRow } from '@/components/finance/confirm-row';
 import { downloadCsv } from '@/components/finance/download-csv';
 import { PaymentFormCard, type RecordPayment } from '@/components/finance/payment-form-card';
 import { RowMenu, type RowMenuItem } from '@/components/finance/row-menu';
+import { type AttachedReceiptLinkOf, AttachedReceipts } from '@/components/finance/attached-receipts';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
@@ -19,6 +20,7 @@ import { LiveDot } from '@/components/ui/live-dot';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { localIsoDate } from '@/lib/finance/bill-math';
+import type { BillOrderOption } from '@/lib/finance/bill-form';
 import type { BillDetail, BillDisplayStatus, BillListRow } from '@/lib/finance/bills';
 import type { FinanceContact } from '@/lib/finance/contacts';
 import { csvFileName } from '@/lib/finance/csv';
@@ -35,6 +37,7 @@ import {
   displayDate,
   filterBills,
 } from '@/lib/finance/purchase-views';
+import type { ReceiptsByDocument } from '@/lib/finance/receipt-match';
 import type { FinResult } from '@/lib/finance/result';
 import { cn } from '@/lib/utils';
 
@@ -54,6 +57,12 @@ export type BillsWriter = {
   suppliers: FinanceContact[];
   /** Active products and services. */
   products: FinanceProduct[];
+  /** Approved purchase orders, and those the drafts are linked to, for the bill form's picker. */
+  orders: BillOrderOption[];
+  /** Active expense categories for the bill form's picker. */
+  categories: { id: string; name: string }[];
+  /** The category a new bill starts in. */
+  defaultCategoryId: string;
   accounts: FinanceAccount[];
   /** Every payment row, to know what scheduled payments already hold of each bill. */
   payments: PaymentOutRow[];
@@ -86,10 +95,16 @@ export function BillsView({
   rows,
   view,
   held,
+  receipts,
+  receiptLinkOf,
   writer,
 }: {
   /** Every bill, newest first; drafts and void ones included. */
   rows: BillListRow[];
+  /** The receipts tied to each bill, by the bill's id, from the Receipts Inbox. Absent with no database. */
+  receipts?: ReceiptsByDocument;
+  /** Makes a one-minute link to a receipt's file, for anyone who can see it. */
+  receiptLinkOf?: AttachedReceiptLinkOf;
   view: BillsViewData;
   /** What payments not yet paid already hold of each bill, by bill id, from `heldByBill`. */
   held: Record<string, number>;
@@ -104,7 +119,7 @@ export function BillsView({
 
   const matching = filterBills(rows, query, filter);
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
-  const columns = writer ? 8 : 7;
+  const columns = writer ? 10 : 9;
   const billCount = view.byStatus.reduce((n, s) => n + s.value, 0);
   const payable = writer ? payableBills(rows, writer.payments) : [];
   const asking = open && (open.kind === 'post' || open.kind === 'void' || open.kind === 'delete') ? open : null;
@@ -249,6 +264,10 @@ export function BillsView({
           key={open.nonce}
           suppliers={writer.suppliers}
           products={writer.products}
+          orders={writer.orders}
+          categories={writer.categories}
+          defaultCategoryId={writer.defaultCategoryId}
+          rows={rows}
           today={open.today}
           actions={actions}
           onClose={close}
@@ -263,6 +282,10 @@ export function BillsView({
           editing={open.detail}
           suppliers={writer.suppliers}
           products={writer.products}
+          orders={writer.orders}
+          categories={writer.categories}
+          defaultCategoryId={writer.defaultCategoryId}
+          rows={rows}
           today={open.today}
           actions={actions}
           onClose={close}
@@ -306,7 +329,7 @@ export function BillsView({
   const tableError = confirm.error && asking && !askingInView ? confirm.error : null;
 
   return (
-    <ScreenContainer>
+    <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader
         title="Supplier Bills"
         subtitle="Bills payable to your suppliers, Saudara."
@@ -419,6 +442,8 @@ export function BillsView({
                   <TableHead className="text-right">Total</TableHead>
                   <TableHead className="text-right">Balance</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Purchase order</TableHead>
+                  <TableHead className="hidden 2xl:table-cell">Category</TableHead>
                   {writer ? (
                     <TableHead className="w-10">
                       <span className="sr-only">Actions</span>
@@ -445,7 +470,10 @@ export function BillsView({
                   const scheduled = b.display_status === 'pending' || b.display_status === 'overdue' ? (held[b.id] ?? 0) : 0;
                   return (
                     <TableRow key={b.id} className={cn(b.display_status === 'void' && 'opacity-60')}>
-                      <TableCell className="whitespace-nowrap font-medium">{b.bill_no ?? '—'}</TableCell>
+                      <TableCell className="min-w-36 font-medium">
+                        <span className="whitespace-nowrap">{b.bill_no ?? '—'}</span>
+                        <AttachedReceipts receipts={receipts?.[b.id]} linkOf={receiptLinkOf} />
+                      </TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(b.bill_date)}</TableCell>
                       <TableCell className="whitespace-nowrap">{b.supplier_name}</TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(b.due_date)}</TableCell>
@@ -453,7 +481,7 @@ export function BillsView({
                       <TableCell className="whitespace-nowrap text-right tabular-nums">
                         {rm(b.balance)}
                         {scheduled > 0 ? (
-                          <span className="block text-xs text-muted-foreground">{rm(scheduled)} scheduled</span>
+                          <span className="block text-xs text-muted-foreground">{rm(scheduled)} in payments not yet paid</span>
                         ) : null}
                       </TableCell>
                       <TableCell>
@@ -469,6 +497,8 @@ export function BillsView({
                           </span>
                         </span>
                       </TableCell>
+                      <TableCell className="whitespace-nowrap text-muted-foreground">{b.purchase_order_no ?? '—'}</TableCell>
+                      <TableCell className="hidden whitespace-nowrap text-muted-foreground 2xl:table-cell">{b.category_name ?? '—'}</TableCell>
                       {writer ? (
                         <TableCell>
                           {items.length ? (

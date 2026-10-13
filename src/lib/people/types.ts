@@ -15,9 +15,16 @@ export const DEMO_ORG_SLUG = 'rimba-ventures-demo';
 export type EmploymentType = 'full_time' | 'part_time' | 'contract' | 'intern';
 export type EmployeeStatus = 'active' | 'inactive';
 export type RequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
+/** A claim can also be paid once approved; no other request has that step. */
+export type ClaimStatus = RequestStatus | 'paid';
+export type OvertimeDayKind = 'weekday' | 'rest_day' | 'public_holiday';
 export type LeaveType = 'annual' | 'medical' | 'emergency' | 'unpaid' | 'maternity' | 'paternity';
 export type ClaimCategory = 'medical' | 'travel' | 'meals' | 'equipment' | 'other';
 export type AttendanceStatus = 'present' | 'late' | 'absent' | 'on_leave';
+/** A day of the work week, as `hr_settings.work_week` stores it. */
+export type Weekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+/** Monday first, the order the database stores a work week in. */
+export const WEEKDAYS: readonly Weekday[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 export type ShiftKind = 'morning' | 'night' | 'off';
 
 export type Department = { id: string; name: string; created_at: string };
@@ -34,7 +41,8 @@ export type Employee = {
   department_name: string | null;
   designation: string | null;
   employment_type: EmploymentType;
-  is_manager: boolean;
+  /** The employee this one reports to, if any. Visible to every member. */
+  reports_to: string | null;
   join_date: string | null;
   status: EmployeeStatus;
   date_of_birth_day: number | null;
@@ -108,8 +116,16 @@ export type Claim = {
   amount_cents: number;
   claim_date: string;
   description: string | null;
+  /** True when a receipt was attached, as a file or (in the sample company) just ticked. */
   has_receipt: boolean;
-  status: RequestStatus;
+  status: ClaimStatus;
+  /** Why an owner or admin rejected it, when they said. */
+  decision_note: string | null;
+  /** The receipt file in the private bucket; null when there is none. Never shown, never logged. */
+  receipt_path: string | null;
+  /** The date it was paid, when the status is paid. */
+  paid_on: string | null;
+  paid_reference: string | null;
   created_at: string;
 };
 
@@ -120,8 +136,40 @@ export type OvertimeRecord = {
   work_date: string;
   hours: number;
   rate_multiplier: number;
+  /** Fixed when the record was made; 0 while `hourly_rate_cents` is null. */
   amount_cents: number;
+  /** Null when no salary was on file: the amount is then not calculated. */
+  hourly_rate_cents: number | null;
+  day_kind: OvertimeDayKind | null;
+  reason: string | null;
+  decision_note: string | null;
   status: RequestStatus;
+  created_at: string;
+  /** `YYYY-MM` of the payroll run that paid this, once that run is paid and the viewer can read its payslip; otherwise null. */
+  paid_month: string | null;
+};
+
+/**
+ * An overtime request as a manager reads it, through `hr_team_overtime`. It has no pay fields at all (no hourly
+ * rate, no amount, no payslip, no paid month): they are absent, not zero, so a screen cannot show them. The name is
+ * not in it either: join it from the employee list.
+ */
+export type TeamOvertimeRow = {
+  id: string;
+  org_id: string;
+  employee_id: string;
+  work_date: string;
+  hours: number;
+  /** Null on a row made before the day kind was kept. */
+  day_kind: OvertimeDayKind | null;
+  /** The workspace-wide multiplier for that kind of day, not anyone's pay. Null on an old row. */
+  rate_multiplier: number | null;
+  reason: string | null;
+  status: RequestStatus;
+  requested_by: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+  decision_note: string | null;
   created_at: string;
 };
 
@@ -132,6 +180,10 @@ export type AttendanceDay = {
   clock_in: string | null;
   clock_out: string | null;
   status: AttendanceStatus;
+  /** An owner or admin set this day (told by `corrected_at`, which outlives the corrector's account). */
+  corrected: boolean;
+  /** Why it was corrected, when they said. */
+  correction_note: string | null;
 };
 
 export type TimesheetEntry = {
@@ -158,7 +210,25 @@ export type PayrollRun = {
   period_month: string;
   status: 'draft' | 'paid';
   paid_at: string | null;
+  /** Who marked it paid. Null when unknown: the app has no way to turn the user id into a name. */
+  paid_by_name: string | null;
 };
+
+/** `unpaid` lines subtract from gross, `earning` lines add to it, `deduction` lines come off net. */
+export type PayslipLineKind = 'earning' | 'unpaid' | 'deduction';
+/** `hr` lines are written by an owner or admin; the rest are worked out by the system. */
+export type PayslipLineSource = 'hr' | 'overtime' | 'unpaid_leave' | 'joiner';
+export type PayslipLine = {
+  id: string;
+  payslip_id: string;
+  kind: PayslipLineKind;
+  source: PayslipLineSource;
+  label: string;
+  amount_cents: number;
+  /** An overtime line: the day the work was done. Null (or absent) for every other line. */
+  work_date?: string | null;
+};
+export type StatutoryField = 'epf' | 'socso' | 'eis' | 'pcb';
 
 export type Payslip = {
   id: string;
@@ -166,12 +236,20 @@ export type Payslip = {
   employee_name: string;
   payroll_run_id: string;
   period_month: string;
+  /** The salary the payslip started from. */
+  basic_cents: number;
   gross_cents: number;
   epf_cents: number;
   socso_cents: number;
   eis_cents: number;
   pcb_cents: number;
+  /** The sum of the payslip's deduction lines. */
+  other_deductions_cents: number;
   net_cents: number;
+  /** Which of the four figures an owner or admin typed over, in the order epf, socso, eis, pcb. */
+  set_by_hr: StatutoryField[];
+  /** System lines first (joiner, unpaid leave, overtime), then the owner's own, each in the order made. */
+  lines: PayslipLine[];
   status: 'pending' | 'paid';
 };
 
@@ -185,26 +263,36 @@ export type Goal = {
   status: 'on_track' | 'at_risk' | 'done';
 };
 
-export type Scorecard = {
-  id: string;
-  employee_id: string;
-  employee_name: string;
-  period: string;
-  score: number;
-  competencies: Record<string, number>;
-};
+/** The four competencies a review scores, each 1 to 5 in half steps. The spelling is the database's. */
+export const COMPETENCIES = ['Delivery', 'Teamwork', 'Ownership', 'Communication'] as const;
+export type Competency = (typeof COMPETENCIES)[number];
+export type ReviewStatus = 'draft' | 'released';
 
+/**
+ * One record behind both the Scorecard and the Review Scores screens. A draft is read only by owners and admins
+ * (and in the demo); the person it is about reads it once it is released.
+ */
 export type Review = {
   id: string;
   employee_id: string;
   employee_name: string;
   period: string;
+  /**
+   * The four scores. A review written before the competencies existed (the demo's, until its next re-seed) has `{}`:
+   * read them through `Object.entries`, never by key.
+   */
+  competencies: Record<Competency, number>;
   rating: 'exceeds' | 'meets' | 'below';
+  /** The average of the competencies, set by the database. Never worked out in the app. */
   score: number;
+  comment: string | null;
+  status: ReviewStatus;
+  released_at: string | null;
   reviewer_name: string | null;
   reviewed_at: string | null;
 };
 
+/** A course. Its status is worked out from its dates by `courseStatus`; nothing reads the stored column. */
 export type Training = {
   id: string;
   title: string;
@@ -212,7 +300,6 @@ export type Training = {
   provider: string | null;
   starts_on: string | null;
   ends_on: string | null;
-  status: 'upcoming' | 'in_progress' | 'completed';
 };
 
 export type TrainingEnrolment = {
@@ -220,6 +307,8 @@ export type TrainingEnrolment = {
   employee_id: string;
   training_id: string;
   completed: boolean;
+  /** When an owner or admin marked it; null when not completed (or marked before the time was kept). */
+  completed_at: string | null;
 };
 
 export type Announcement = {
@@ -227,33 +316,77 @@ export type Announcement = {
   title: string;
   body: string;
   category: 'general' | 'holiday' | 'benefits' | 'strategy' | 'policy';
-  published_at: string;
+  /** A draft is read only by owners and admins (and in the demo). */
+  status: 'draft' | 'published';
+  /** Null on a draft. */
+  published_at: string | null;
+  /** Null on a draft that has never been published. */
   author_name: string | null;
+  /** Set when a published announcement is changed; cleared when it is published again. */
+  edited_at: string | null;
+  /** For the caller: published, not marked read, and published after they joined. Always false on a draft. */
+  unread: boolean;
 };
 
-export type DocumentType = 'payslip' | 'contract' | 'letter' | 'tax' | 'benefits';
-export type DocumentStatus = 'signed' | 'pending_signature' | 'available' | 'expiring';
+/** What a document is. An employee adds only the four in {@link EMPLOYEE_DOCUMENT_TYPES}. */
+export const DOCUMENT_TYPES = ['contract', 'tax', 'benefits', 'identity', 'medical', 'certificate', 'other'] as const;
+export type DocumentType = (typeof DOCUMENT_TYPES)[number];
+export const EMPLOYEE_DOCUMENT_TYPES = ['identity', 'medical', 'certificate', 'other'] as const;
+export const LETTER_TYPES = ['offer', 'confirmation', 'promotion', 'warning', 'contract_renewal', 'other'] as const;
+export type LetterType = (typeof LETTER_TYPES)[number];
+/** The languages a letter template can be in: English, or Bahasa Malaysia. */
+export const LETTER_LANGS = ['en', 'ms'] as const;
+export type LetterLang = (typeof LETTER_LANGS)[number];
 
+/**
+ * A document of one employee. There is no status: "expiring" and "expired" are worked out from `expires_on` by
+ * `expiryState`. The file's path is never part of this (it is read on the server only, to sign a link);
+ * `has_file` says whether one is attached, and `file_size` / `file_type` are what storage recorded when it did.
+ * The demo's documents have no file.
+ */
 export type HrDocument = {
   id: string;
   employee_id: string;
   employee_name: string;
   title: string;
   doc_type: DocumentType;
-  status: DocumentStatus;
-  issued_on: string | null;
   expires_on: string | null;
+  file_name: string | null;
+  file_size: number | null;
+  file_type: string | null;
+  /** `hr` for one an owner or admin added, `employee` for the employee's own upload. */
+  source: 'hr' | 'employee';
+  /** An owner or admin asked the employee to acknowledge it. Never true for an employee's own upload. */
+  ack_requested: boolean;
+  /** When the employee said they had read it. */
+  acknowledged_at: string | null;
+  created_at: string;
+  has_file: boolean;
 };
 
 export type Letter = {
   id: string;
   employee_id: string;
   employee_name: string;
-  letter_type: string;
+  letter_type: LetterType;
   title: string;
+  body: string;
   status: 'draft' | 'issued';
   issued_on: string | null;
+  ack_requested: boolean;
+  acknowledged_at: string | null;
   created_at: string;
+};
+
+/** A reusable letter. Owners and admins only. The placeholders in the title and body are filled when a letter is started. */
+export type LetterTemplate = {
+  id: string;
+  name: string;
+  letter_type: LetterType;
+  title: string;
+  body: string;
+  /** The language the dates and the salary are written in when a letter is started from it. */
+  lang: LetterLang;
 };
 
 export type PaymentVoucher = {
@@ -267,7 +400,12 @@ export type PaymentVoucher = {
 };
 
 export type PeopleSettings = {
-  work_week: string[];
+  /** Monday first. */
+  work_week: Weekday[];
+  /** `HH:MM`, Malaysia time. */
+  work_start_time: string;
+  /** Minutes after the start time that still count as on time. */
+  late_grace_minutes: number;
   default_annual_leave_days: number;
   default_medical_leave_days: number;
   default_emergency_leave_days: number;
@@ -278,6 +416,8 @@ export type PeopleSettings = {
 /** What a workspace with no settings row has: the table's own defaults. */
 export const DEFAULT_PEOPLE_SETTINGS: PeopleSettings = {
   work_week: ['mon', 'tue', 'wed', 'thu', 'fri'],
+  work_start_time: '09:00',
+  late_grace_minutes: 15,
   default_annual_leave_days: 14,
   default_medical_leave_days: 14,
   default_emergency_leave_days: 3,
@@ -306,17 +446,21 @@ export type PeopleData = {
   listShifts(fromDate: string, toDate: string): Promise<Shift[]>;
   listPublicHolidays(): Promise<PublicHoliday[]>;
   listPayrollRuns(): Promise<PayrollRun[]>;
-  listPayslips(): Promise<Payslip[]>;
+  /** Every payslip the caller may read, or (with `employeeId`) that one employee's only. */
+  listPayslips(employeeId?: string): Promise<Payslip[]>;
   listGoals(): Promise<Goal[]>;
-  listScorecards(): Promise<Scorecard[]>;
+  /** Every review for an owner or admin (drafts too); only their own released ones for anyone else. */
   listReviews(): Promise<Review[]>;
   listTrainings(): Promise<Training[]>;
   listTrainingEnrolments(): Promise<TrainingEnrolment[]>;
+  /** Drafts too for an owner or admin; `unread` is the caller's own. */
   listAnnouncements(): Promise<Announcement[]>;
-  /** hr_documents, newest `issued_on` first. */
+  /** hr_documents, newest `created_at` first. */
   listDocuments(): Promise<HrDocument[]>;
-  /** hr_letters, newest `created_at` first. */
+  /** hr_letters, newest `created_at` first. Drafts too: the database decides who reads one, and models filter again. */
   listLetters(): Promise<Letter[]>;
+  /** hr_letter_templates, by name. Owners and admins (and the demo) only: anyone else gets none. */
+  listLetterTemplates(): Promise<LetterTemplate[]>;
   /** hr_payment_vouchers, newest `issued_date` first. HR only: anyone else gets none. */
   listPaymentVouchers(): Promise<PaymentVoucher[]>;
   /** The workspace's settings, or {@link DEFAULT_PEOPLE_SETTINGS} when there is no row or the caller may not read it. */
@@ -331,6 +475,16 @@ export type PeopleViewer = {
   employeeName?: string;
   /** Owner or admin of the workspace. */
   isHr: boolean;
+  /**
+   * The workspace's owner, who may decide and pay their own requests; an admin may not. Left out for everyone
+   * else, and when unknown, which reads as "not the owner".
+   */
+  isOwner?: boolean;
   /** The current workspace is the demo workspace. */
   isDemo: boolean;
+  /**
+   * Has at least one report they have access to. Left out, not false, for everyone else: callers compare viewers
+   * whole. Never set for an owner or admin, or in the demo.
+   */
+  managesTeam?: boolean;
 };

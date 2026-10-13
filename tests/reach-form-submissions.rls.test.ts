@@ -1,31 +1,30 @@
-import { afterAll, beforeAll, expect, test, type TestContext } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { beforeAll, expect, test, type TestContext } from 'vitest';
+import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { createOrg, joinDemo, liveClient, beforeCleanup, signInAnon, signInOwner } from './helpers/live-workspaces';
 import {
   formSubmissionsMissing,
   formSubmissionsSkipReason,
 } from './helpers/form-submissions-table';
+import { publicWriter } from './helpers/public-writer';
 import { createSupabaseReachData } from '@/lib/reach/supabase';
 import { deleteFormSubmission } from '@/lib/reach/capabilities';
-import { getPublicForm, recordFormView, submitPublicForm } from '@/lib/reach/public-forms';
+import { getPublicForm, submitPublicForm } from '@/lib/reach/public-forms';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const client = (): SupabaseClient =>
-  createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
+const client = liveClient;
 
 async function signedIn() {
   const c = client();
-  const { error } = await c.auth.signInAnonymously();
+  const { error } = await signInOwner(c);
   expect(error, error?.message).toBeNull();
   return c;
 }
 
 async function ownedOrg(c: SupabaseClient, name: string) {
-  const { data: orgId, error } = await c.rpc('create_org_for_current_user', { org_name: name });
+  const { data: orgId, error } = await createOrg(c, name);
   expect(error, error?.message).toBeNull();
   return { c, orgId: orgId as string };
 }
@@ -35,6 +34,10 @@ let owner: Owned;
 let other: Owned;
 /** Someone who is not signed in: what a visitor to a public form is. */
 const visitor = client();
+/** Who sends a response and counts a view: the server once the database lets nobody else, else the visitor. */
+let writer: SupabaseClient = visitor;
+/** True once those functions are the server's alone. */
+let serverOnly = false;
 /** True until the public lead forms migration has been applied to the database. */
 let migrationMissing = false;
 
@@ -50,16 +53,17 @@ beforeAll(async () => {
     await first.auth.signOut();
     return;
   }
+  ({ writer, serverOnly } = await publicWriter(visitor));
   owner = await ownedOrg(first, ORG_NAME);
   other = await ownedOrg(await signedIn(), 'Public Forms Other Sdn Bhd');
 });
-afterAll(async () => {
+// If the cleanup cannot delete the workspaces (no key, migration not applied), they must not keep
+// active public forms, so this pauses the forms this file created, first inside the helper's cleanup,
+// while the owners' sessions are still valid (nothing signs them out earlier).
+beforeCleanup(async () => {
   for (const org of [owner, other]) {
     if (!org) continue;
-    // Deleting a form deletes its submissions; the contacts they made go separately.
-    await org.c.from('forms').delete().eq('org_id', org.orgId);
-    await org.c.from('crm_contacts').delete().eq('org_id', org.orgId);
-    await org.c.auth.signOut();
+    await org.c.from('forms').update({ status: 'paused' }).eq('org_id', org.orgId);
   }
 });
 
@@ -82,7 +86,7 @@ async function makeForm(org: Owned, name: string, status: 'draft' | 'active' | '
 }
 
 const submit = (formId: string, fields: { name?: string | null; email?: string | null; phone?: string | null; message?: string | null; honeypot?: string }) =>
-  visitor.rpc('submit_public_form', {
+  writer.rpc('submit_public_form', {
     p_form_id: formId,
     p_name: fields.name === undefined ? 'Siti Aisyah' : fields.name,
     p_email: fields.email === undefined ? email('visitor') : fields.email,
@@ -90,6 +94,21 @@ const submit = (formId: string, fields: { name?: string | null; email?: string |
     p_message: fields.message ?? null,
     p_honeypot: fields.honeypot ?? null,
   });
+
+/**
+ * Counts one view by `who` (a signed-in client, or null for someone signed out). The server names the
+ * viewer; on a database from before that, the viewer's own client makes the call.
+ */
+async function viewAs(who: SupabaseClient | null, formId: string) {
+  let res;
+  if (serverOnly) {
+    const viewerId = who ? ((await who.auth.getUser()).data.user?.id ?? null) : null;
+    res = await writer.rpc('record_form_view', { p_form_id: formId, p_viewer: viewerId });
+  } else {
+    res = await (who ?? visitor).rpc('record_form_view', { p_form_id: formId });
+  }
+  expect(res.error, res.error?.message).toBeNull();
+}
 
 const counters = async (formId: string) => {
   const { data, error } = await owner.c.from('forms').select('views_count, submissions_count').eq('id', formId).single();
@@ -291,7 +310,7 @@ testWithSupabase('the throttle refuses the 31st submission to one form within a 
   expect((await submit(formId, { name: 'Flood 31', email: address })).data).toBe('throttled');
   expect((await submit(formId, { name: 'Flood 32', email: email('flood-other') })).data).toBe('throttled');
   // Through the module the page uses.
-  expect(await submitPublicForm(visitor, formId, { name: 'Flood 33', email: address, phone: null, message: null }))
+  expect(await submitPublicForm(writer, formId, { name: 'Flood 33', email: address, phone: null, message: null }))
     .toEqual({ kind: 'throttled' });
 
   expect(await submissionsOf(formId)).toHaveLength(30);
@@ -308,23 +327,21 @@ testWithSupabase('a view is counted for a visitor and an outsider, not for a mem
   const formId = await makeForm(owner, 'Views');
   const draft = await makeForm(owner, 'Views Draft', 'draft');
 
-  await recordFormView(visitor, formId);
-  await recordFormView(visitor, formId);
+  await viewAs(null, formId);
+  await viewAs(null, formId);
   expect((await counters(formId)).views_count).toBe(2);
 
   // The workspace's own member previewing the form.
-  const mine = await owner.c.rpc('record_form_view', { p_form_id: formId });
-  expect(mine.error, mine.error?.message).toBeNull();
+  await viewAs(owner.c, formId);
   expect((await counters(formId)).views_count).toBe(2);
 
   // Someone signed in to another workspace is a visitor like any other.
-  await recordFormView(other.c, formId);
+  await viewAs(other.c, formId);
   expect((await counters(formId)).views_count).toBe(3);
 
-  await recordFormView(visitor, draft);
+  await viewAs(null, draft);
   expect((await counters(draft)).views_count).toBe(0);
-  const unknown = await visitor.rpc('record_form_view', { p_form_id: UNKNOWN });
-  expect(unknown.error).toBeNull();
+  await viewAs(null, UNKNOWN);
 });
 
 testWithSupabase('a member of another workspace sees no submissions or contacts and can delete none', async (ctx) => {
@@ -411,8 +428,11 @@ testWithSupabase('deleting a form deletes its submissions but not their contacts
 
 testWithSupabase('the demo workspace takes no public submissions, and a demo guest (a viewer) can delete nothing', async (ctx) => {
   needsMigration(ctx);
-  const v = await signedIn();
-  const { data: demoId, error: joinError } = await v.rpc('join_demo_org');
+  // A demo guest: an anonymous sign-in, the only kind of session the demo takes.
+  const v = client();
+  const guest = await signInAnon(v);
+  expect(guest.error, guest.error?.message).toBeNull();
+  const { data: demoId, error: joinError } = await joinDemo(v);
   expect(joinError, joinError?.message).toBeNull();
   const forms = await v.from('forms').select('id, status, views_count, submissions_count').eq('org_id', demoId).eq('status', 'active');
   expect(forms.error, forms.error?.message).toBeNull();
@@ -423,7 +443,7 @@ testWithSupabase('the demo workspace takes no public submissions, and a demo gue
   const looked = await visitor.rpc('get_public_form', { p_form_id: demoForm.id });
   expect(looked.data).toEqual([{ form_name: null, org_name: null, accepting: false }]);
   expect((await submit(demoForm.id, {})).data).toBe('closed');
-  await recordFormView(visitor, demoForm.id);
+  await viewAs(null, demoForm.id);
   const after = await v.from('forms').select('views_count, submissions_count').eq('id', demoForm.id).single();
   expect(after.data).toEqual({ views_count: demoForm.views_count, submissions_count: demoForm.submissions_count });
 

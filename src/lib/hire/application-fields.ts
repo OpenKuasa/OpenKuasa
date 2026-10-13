@@ -14,7 +14,42 @@ export const APPLY_FIELDS = [
 export type ApplyField = (typeof APPLY_FIELDS)[number];
 /** What the form holds, as typed. */
 export type ApplyValues = Record<Exclude<ApplyField, 'consent'>, string> & { consent: boolean };
-export type ApplyErrors = Partial<Record<ApplyField, string>>;
+export type ApplyErrors = Partial<Record<ApplyField | 'cv_file', string>>;
+
+/** The name of the file input, and the most a CV file may weigh. */
+export const CV_FILE_FIELD = 'cv_file';
+export const CV_MAX_BYTES = 5 * 1024 * 1024;
+
+/** What the rules need to know about a chosen file: never its bytes. */
+export type CvFileInfo = { name: string; size: number; type: string };
+
+/** `7.2 MB` (one decimal) or `480 KB` (whole). */
+export function fileSizeLabel(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${Math.round(bytes / 1024)} KB`;
+}
+
+/**
+ * The file a form post carries, or null. A file input nobody touched still
+ * posts an empty, nameless file, which is no file at all.
+ */
+export function chosenFile(value: unknown): CvFileInfo | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { name, size, type } = value as { name?: unknown; size?: unknown; type?: unknown };
+  if (typeof size !== 'number' || typeof name !== 'string') return null;
+  if (size === 0 && name === '') return null;
+  return { name, size, type: typeof type === 'string' ? type : '' };
+}
+
+/** What is wrong with a chosen CV file, judged by its name, declared type and size. Null for no file. */
+export function cvFileProblem(file: CvFileInfo | null): string | null {
+  if (!file) return null;
+  if (file.size === 0) return APPLY_MESSAGES.cvFileType;
+  // A PDF by its name or by its declared type: browsers disagree on the type, and the server reads the bytes.
+  if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) return APPLY_MESSAGES.cvFileType;
+  if (file.size > CV_MAX_BYTES) return APPLY_MESSAGES.cvFileTooBig(fileSizeLabel(file.size));
+  return null;
+}
 
 export const EMPTY_APPLY_VALUES: ApplyValues = {
   name: '', email: '', phone: '', cv_url: '', cover_letter: '', portfolio_url: '', expected_salary: '', consent: false,
@@ -40,7 +75,13 @@ export const APPLY_MESSAGES = {
   emailInvalid: 'Enter an email address like name@example.com.',
   emailTooLong: `Keep the email address to ${APPLY_LIMITS.email} characters or fewer.`,
   phoneTooLong: `Keep the phone number to ${APPLY_LIMITS.phone} characters or fewer.`,
-  cvRequired: 'Add a link to your CV.',
+  cvRequired: 'Upload a PDF or paste a link to your CV.',
+  cvFileType: 'Choose a PDF file.',
+  cvFileTooBig: (sizeLabel: string) => `This file is ${sizeLabel}. Choose one under 5 MB.`,
+  cvUploadFailed: "We couldn't upload your CV, so your application wasn't sent. Please try again.",
+  /** The workspace may not be sent files (nobody with a real sign-in owns it). A link still works. */
+  cvFilesOff: "This employer can't take uploaded files yet. Paste a link to your CV instead.",
+  cvFileAgain: 'Choose your CV file again before sending.',
   coverLetterRequired: 'Write a short cover letter.',
   coverLetterTooLong: 'Keep the cover letter to 4,000 characters or fewer.',
   urlInvalid: 'Enter a link that starts with https://',
@@ -57,11 +98,11 @@ export const APPLY_MESSAGES = {
   formChanged: 'This form has just changed. Please check the new fields below and send again.',
 } as const;
 
-/** The fields this workspace's form shows. A CV link and a cover letter appear only when required. */
+/** The fields this workspace's form shows. The CV group is always there; a cover letter appears only when required. */
 export function shownFields(form: ApplicationFormValues): ApplyField[] {
   const shown: Record<ApplyField, boolean> = {
     name: true, email: true, phone: true,
-    cv_url: form.require_cv,
+    cv_url: true,
     cover_letter: form.require_cover_letter,
     portfolio_url: form.ask_portfolio,
     expected_salary: form.ask_expected_salary,
@@ -112,7 +153,12 @@ function linkProblem(value: string, required: boolean, missing: string): string 
 }
 
 /** What is wrong with one field, or null. A field the form does not show is never wrong. */
-export function fieldProblem(field: ApplyField, values: ApplyValues, form: ApplicationFormValues): string | null {
+export function fieldProblem(
+  field: ApplyField,
+  values: ApplyValues,
+  form: ApplicationFormValues,
+  hasCvFile = false,
+): string | null {
   if (!shownFields(form).includes(field)) return null;
   switch (field) {
     case 'name': {
@@ -129,7 +175,7 @@ export function fieldProblem(field: ApplyField, values: ApplyValues, form: Appli
     case 'phone':
       return countCharacters(oneLine(values.phone)) > APPLY_LIMITS.phone ? APPLY_MESSAGES.phoneTooLong : null;
     case 'cv_url':
-      return linkProblem(values.cv_url, form.require_cv, APPLY_MESSAGES.cvRequired);
+      return linkProblem(values.cv_url, form.require_cv && !hasCvFile, APPLY_MESSAGES.cvRequired);
     case 'cover_letter': {
       const letter = values.cover_letter.trim();
       if (letter === '') return form.require_cover_letter ? APPLY_MESSAGES.coverLetterRequired : null;
@@ -145,10 +191,10 @@ export function fieldProblem(field: ApplyField, values: ApplyValues, form: Appli
 }
 
 /** Every field with a problem, each with its own message. */
-export function applyProblems(values: ApplyValues, form: ApplicationFormValues): ApplyErrors {
+export function applyProblems(values: ApplyValues, form: ApplicationFormValues, hasCvFile = false): ApplyErrors {
   const errors: ApplyErrors = {};
   for (const field of APPLY_FIELDS) {
-    const problem = fieldProblem(field, values, form);
+    const problem = fieldProblem(field, values, form, hasCvFile);
     if (problem) errors[field] = problem;
   }
   return errors;

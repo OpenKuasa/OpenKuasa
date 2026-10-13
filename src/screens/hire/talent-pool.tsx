@@ -4,8 +4,6 @@ import {
   Filter,
   MapPin,
   PieChart,
-  Plus,
-  Search,
   Star,
   Users,
 } from 'lucide-react';
@@ -16,7 +14,6 @@ import { BarGroup, DonutStat, type Series, type Slice } from '@/components/chart
 import { LiveDot } from '@/components/ui/live-dot';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
@@ -33,6 +30,11 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
+import { can } from '@/lib/auth/permissions';
+import { getViewer } from '@/lib/auth/viewer';
+import { DeletionNotice } from '@/screens/hire/delete-dialog';
+import { AddToPool, PoolFooter, PoolRowControls, PoolSearch } from '@/screens/hire/pool-actions';
+import { POOL_READ_CAPPED, poolFooter, poolNoMatch, poolSearchText } from '@/lib/hire/pool';
 import { buildPoolModel, type PoolModel } from '@/lib/hire/lists';
 import { LOAD_FAILED, Muted, loadHire, topSlices } from '@/screens/hire/parts';
 
@@ -91,9 +93,19 @@ function Rating({ value }: { value: number | null }) {
   );
 }
 
-export default async function TalentPoolScreen() {
-  const { model } = await loadHire('talent-pool', (data) => buildPoolModel(data));
-  const capped = model ? model.size > model.rows.length : false;
+export default async function TalentPoolScreen({
+  searchParams,
+}: {
+  /** The page's query string: `q` is what the table is searched for. Optional, so the screen can be drawn without one. */
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+} = {}) {
+  const search = poolSearchText(((await searchParams) ?? {}).q);
+  const [{ model }, viewer] = await Promise.all([
+    loadHire('talent-pool', (data) => buildPoolModel(data, search)),
+    getViewer(),
+  ]);
+  // Worked out once for the screen. Each action checks again on the server, so this only decides what is drawn.
+  const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
   const roleSlices: Slice[] = topSlices(
     model?.byTitle ?? [],
     (r) => r.value,
@@ -101,6 +113,11 @@ export default async function TalentPoolScreen() {
   ).map((slice, index) => ({ ...slice, color: SKILL_COLORS[index % SKILL_COLORS.length] }));
   const statusCount = (key: Status) =>
     model ? (model.statusCounts.find((s) => s.key === key)?.value ?? 0) : '—';
+  // How many are shown or match; or, when a search matched nobody, the sentence that stands in for the table.
+  const footer = model
+    ? (poolFooter({ search: model.search, matched: model.matched, shown: model.rows.length, size: model.size })
+      ?? poolNoMatch(model.search ?? ''))
+    : '';
 
   return (
     <ScreenContainer>
@@ -108,32 +125,23 @@ export default async function TalentPoolScreen() {
         className="mb-3"
         title="Talent Pool"
         subtitle="Saved candidates for future roles, Saudara."
-        actions={
-          <Button size="sm" disabled title="Coming soon">
-            <Plus className="size-4" />
-            Add to Pool
-          </Button>
-        }
+        actions={canEdit ? <AddToPool /> : null}
       />
 
       <BentoGrid>
-        {/* KPI row: every figure is counted over the whole pool */}
-        <BentoCard tone="primary" className="col-span-1 md:col-span-3">
+        {/* KPI row: every figure is counted over the whole pool, whatever is searched for. The four statuses add up to the size. */}
+        <BentoCard tone="primary" className="col-span-2 md:col-span-4">
           <BentoStat
             label="Talent pool size"
             value={model ? model.size.toLocaleString() : '—'}
             onPrimary
           />
         </BentoCard>
-        <BentoCard className="col-span-1 md:col-span-3">
-          <BentoStat label="Shortlisted" value={statusCount('Shortlisted')} />
-        </BentoCard>
-        <BentoCard className="col-span-1 md:col-span-3">
-          <BentoStat label="Passive" value={statusCount('Passive')} />
-        </BentoCard>
-        <BentoCard className="col-span-1 md:col-span-3">
-          <BentoStat label="Re-engaged" value={statusCount('Re-engaged')} />
-        </BentoCard>
+        {(['Available', 'Shortlisted', 'Passive', 'Re-engaged'] as const).map((key) => (
+          <BentoCard key={key} className="col-span-1 md:col-span-2">
+            <BentoStat label={key} value={statusCount(key)} />
+          </BentoCard>
+        ))}
 
         {/* Skill mix + source breakdown */}
         <BentoCard
@@ -174,21 +182,17 @@ export default async function TalentPoolScreen() {
         {/* Candidate table */}
         <BentoCard
           title="Pool candidates"
-          subtitle="Most recently added first"
+          subtitle="Newest on file first"
           icon={Users}
           flush
           className="col-span-2 md:col-span-12"
         >
+          {/* Where a change is said ("Added …", "Removed …", "Deleted …"): the row it was said about may have gone. Only for someone who may edit. */}
+          {canEdit ? <DeletionNotice className="px-4 pb-2" /> : null}
+          {model?.readCapped ? <p className="px-4 pb-2 text-xs text-muted-foreground">{POOL_READ_CAPPED}</p> : null}
           <div className="flex flex-wrap items-center gap-2 px-4">
-            <div className="relative w-full sm:max-w-xs">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Search by name or skill…"
-                className="h-8 pl-8 text-sm"
-                disabled
-                title="Coming soon"
-              />
-            </div>
+            {/* For everyone, viewers included: it changes nothing, it only finds. */}
+            <PoolSearch search={model?.search ?? search} />
             <Select defaultValue="all" disabled>
               <SelectTrigger size="sm" title="Coming soon" className="w-full sm:w-44">
                 <SelectValue />
@@ -206,10 +210,11 @@ export default async function TalentPoolScreen() {
               <ChevronDown className="size-4" />
             </Button>
           </div>
-          {!model ? LOAD_FAILED : model.rows.length === 0 ? (
+          {!model ? LOAD_FAILED : model.size === 0 ? (
             <Muted>No one in the talent pool yet</Muted>
           ) : (
           <>
+            {model.rows.length > 0 ? (
             <div className="mt-3 overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -264,24 +269,21 @@ export default async function TalentPoolScreen() {
                         <StatusPill status={c.status} />
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button variant="outline" size="sm" disabled title="Coming soon">
-                          Move to pipeline
-                        </Button>
+                        {/* An id, a name and the two statuses: nothing else goes to the browser. Only for someone who may edit; each action checks again. */}
+                        {canEdit ? (
+                          <PoolRowControls
+                            candidate={{ id: c.id, name: c.name, poolStatus: c.poolStatus, label: c.status }}
+                            jobs={model.jobs}
+                          />
+                        ) : null}
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
             </div>
-            <div className="border-t px-4 py-3 text-sm text-muted-foreground">
-              {capped ? (
-                <span className="text-xs text-muted-foreground">
-                  Showing the newest {model.rows.length} of {model.size.toLocaleString()}
-                </span>
-              ) : (
-                `Showing ${model.rows.length} candidates`
-              )}
-            </div>
+            ) : null}
+            <PoolFooter className="border-t px-4 py-3" line={footer} />
           </>
           )}
         </BentoCard>

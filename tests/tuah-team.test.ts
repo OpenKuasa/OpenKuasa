@@ -62,7 +62,7 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
           seen.workerTools.push((options.tools ?? []).map((t) => t.name));
           const all = JSON.stringify(options.prompt);
           seen.workerPrompts.push(all);
-          const id = /proposalId\\?":\\?"(\w{8})/.exec(all)?.[1];
+          const id = /proposalId\\?":\\?"([\w-]{36})/.exec(all)?.[1];
           if (id) return text('w', `Prepared the contact. proposalId ${id}`);
           if (all.includes('Never guess an id')) return text('w', 'I could not find that stage.');
           return seen.workerCall
@@ -78,7 +78,7 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
       return model((options) => {
         seen.tuahTools.push((options.tools ?? []).map((t) => t.name));
         const all = JSON.stringify(options.prompt);
-        const id = /proposalId (\w{8})/.exec(all)?.[1];
+        const id = /proposalId ([\w-]{36})/.exec(all)?.[1];
         if (all.includes('call-applyChange')) return text('t', 'Done.');
         return id
           ? call('applyChange', { proposalId: id })
@@ -89,12 +89,21 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
 });
 
 const { runTuah } = await import('@/lib/ai/agents/orchestrator');
+// After this file's mocks and the values they use are in place: the helpers load the tools too.
+const { storeOf, withTuah } = await import('./helpers/approvals');
 const { createTeamTools, delegationForModel } = await import('@/lib/ai/agents/specialists');
 const { crmProduct, reachProduct } = await import('@/lib/ai/products');
+const { createSeedPeopleData } = await import('@/lib/people/seed');
 const { proposalsIn, transcriptOf, usesSpecialists } = await import('@/lib/chat/delegation');
 
 const reach = () => ({ data: createSeedReachData() });
 const crm = (canWrite = true) => ({ client: {} as never, orgId: 'org1', userId: 'u1', canWrite });
+const people = () => ({
+  data: createSeedPeopleData(),
+  viewer: { employeeId: null, isHr: true, isDemo: false },
+  write: { ctx: { client: {} as never, orgId: 'org1' }, tier: 'hr' as const, employeeId: null, receipt: null, userId: 'u1' },
+});
+const finance = () => ({ client: {} as never, orgId: 'org1', canWrite: true });
 const ask = [{ role: 'user' as const, content: 'Add Ali Hassan, ali@example.com, as a contact' }];
 const team = () => ({ transcript: 'User: Add Ali Hassan', proposals: new Map<string, Proposal>() });
 
@@ -103,7 +112,7 @@ describe('Tuah with its team', () => {
     seen.tuahTools = [];
     seen.workerTools = [];
     seen.layers = [];
-    await runTuah(ask, reach(), undefined, undefined, null, crm(), team()).consumeStream();
+    await runTuah(...withTuah(ask, reach(), undefined, undefined, null, crm(), team())).consumeStream();
 
     expect(seen.tuahTools[0].sort()).toEqual(['applyChange', 'askJebat', 'askKasturi']);
     expect(seen.workerTools[0]).toContain('listCrmContacts');
@@ -116,7 +125,7 @@ describe('Tuah with its team', () => {
   it('a change a specialist prepares is not saved, and reaches the user as one approval', async () => {
     seen.creates = 0;
     const context = team();
-    const result = runTuah(ask, reach(), undefined, undefined, null, crm(), context);
+    const result = runTuah(...withTuah(ask, reach(), undefined, undefined, null, crm(), context));
     await result.consumeStream();
 
     expect(seen.creates).toBe(0);
@@ -136,7 +145,7 @@ describe('Tuah with its team', () => {
 
   it('gives the specialist the conversation, since it does not see it otherwise', async () => {
     seen.workerPrompts = [];
-    await runTuah(ask, reach(), undefined, undefined, null, crm(), team()).consumeStream();
+    await runTuah(...withTuah(ask, reach(), undefined, undefined, null, crm(), team())).consumeStream();
     expect(seen.workerPrompts[0]).toContain('User: Add Ali Hassan');
     expect(seen.workerPrompts[0]).toContain('Task from Tuah');
   });
@@ -149,7 +158,7 @@ describe('Tuah with its team', () => {
     // The deal's id is known from an earlier turn; the stage's is not.
     const context = { ...team(), names: { [`deal:${deal}`]: 'Oven lease' } };
     try {
-      await runTuah(ask, reach(), undefined, undefined, null, crm(), context).consumeStream();
+      await runTuah(...withTuah(ask, reach(), undefined, undefined, null, crm(), context)).consumeStream();
     } finally {
       seen.workerCall = null;
     }
@@ -163,9 +172,29 @@ describe('Tuah with its team', () => {
   it('a viewer gets no applyChange, and the specialist no change tools', async () => {
     seen.tuahTools = [];
     seen.workerTools = [];
-    await runTuah(ask, reach(), undefined, undefined, null, crm(false), team()).consumeStream();
+    await runTuah(...withTuah(ask, reach(), undefined, undefined, null, crm(false), team())).consumeStream();
     expect(seen.tuahTools[0]).not.toContain('applyChange');
     expect(seen.workerTools[0] ?? []).not.toContain('createContact');
+  });
+
+  it('adds Lekiu to the roster when HR is passed, and not otherwise', async () => {
+    seen.tuahTools = [];
+    await runTuah(...withTuah(ask, reach(), undefined, undefined, null, crm(), team(), null, people())).consumeStream();
+    expect(seen.tuahTools[0]).toContain('askLekiu');
+
+    seen.tuahTools = [];
+    await runTuah(...withTuah(ask, reach(), undefined, undefined, null, crm(), team())).consumeStream();
+    expect(seen.tuahTools[0]).not.toContain('askLekiu');
+  });
+
+  it('adds Bendahara to the roster when finance is passed, and not otherwise', async () => {
+    seen.tuahTools = [];
+    await runTuah(...withTuah(ask, reach(), undefined, undefined, null, crm(), team(), null, null, finance())).consumeStream();
+    expect(seen.tuahTools[0]).toContain('askBendahara');
+
+    seen.tuahTools = [];
+    await runTuah(...withTuah(ask, reach(), undefined, undefined, null, crm(), team())).consumeStream();
+    expect(seen.tuahTools[0]).not.toContain('askBendahara');
   });
 });
 
@@ -208,7 +237,7 @@ describe('applying a prepared change without another model call', () => {
   it('makes one model call for Tuah on a change, not two', async () => {
     // `tuahTools` gets one entry each time Tuah's model is actually called.
     seen.tuahTools = [];
-    const result = runTuah(ask, reach(), undefined, undefined, null, crm(), team());
+    const result = runTuah(...withTuah(ask, reach(), undefined, undefined, null, crm(), team()));
     await result.consumeStream();
     expect(seen.tuahTools).toHaveLength(1);
     // The change still reaches the user as an approval.
@@ -235,6 +264,8 @@ describe('applyChange', () => {
     const { tools, toolApproval } = createTeamTools(products(), {
       transcript: '',
       proposals: new Map(p ? [[p.id, p]] : []),
+      // What the server recorded when the change was prepared: the change that runs comes from here.
+      store: storeOf(p ? [p] : []),
     });
     expect(toolApproval).toEqual({ applyChange: 'user-approval' });
     const execute = (tools.applyChange as { execute: (i: unknown, o: unknown) => Promise<unknown> })

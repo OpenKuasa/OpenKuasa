@@ -9,10 +9,15 @@ import {
   deleteEmployee,
   linkEmployeeToMember,
   setEmployeeStatus,
+  setReportsTo,
+  setReportsToInput,
   updateDepartment,
   updateEmployee,
   updateEmployeeInput,
+  WRITE_FAILED,
+  writeOutcome,
 } from '@/lib/people/capabilities';
+import { REPORTS_TO_REFUSALS } from '@/lib/people/reporting-refusals';
 import { fakeSupabase } from './setup/fake-supabase';
 
 const ORG = 'org-1';
@@ -20,6 +25,21 @@ const DEPT = '11111111-1111-4111-8111-111111111111';
 const ctxOf = (client: never) => ({ client, orgId: ORG });
 
 afterEach(() => vi.restoreAllMocks());
+
+describe('writeOutcome', () => {
+  it('is saved for an ok result', () => {
+    expect(writeOutcome({ ok: true, data: null })).toBe('saved');
+  });
+
+  it('is unknown for the generic failure (a lost call may have been saved), so a form keeps its file', () => {
+    expect(writeOutcome({ ok: false, error: WRITE_FAILED })).toBe('unknown');
+  });
+
+  it('is refused for any sentence the rules produced', () => {
+    expect(writeOutcome({ ok: false, error: 'That receipt cannot be used.' })).toBe('refused');
+    expect(writeOutcome({ ok: false, error: '' })).toBe('refused');
+  });
+});
 
 describe('department schemas', () => {
   it('refuses a blank name with a message for the person typing', () => {
@@ -247,11 +267,16 @@ describe('createEmployee', () => {
       'hr_employees.select': { data: [] },
       'hr_employees.insert': { data: saved },
       'hr_employee_private.insert': { error: { code: '42501', message: 'permission denied' } },
+      'rpc.hr_delete_employee': { data: { id: EMP, name: 'Farah Idris', document_paths: [] } },
     });
     const result = await createEmployee(ctxOf(client), { name: 'Farah Idris', private: { base_salary: 3000 } });
     expect(result).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
-    const undo = calls.find((c) => c.table === 'hr_employees' && c.op === 'delete')!;
-    expect(undo.filters).toEqual({ id: EMP, org_id: ORG });
+    // Through the function, never a delete on the table: signed-in users hold no DELETE on hr_employees.
+    expect(calls.filter((c) => c.op === 'delete')).toEqual([]);
+    const undo = calls.filter((c) => c.op === 'rpc');
+    expect(undo).toHaveLength(1);
+    expect(undo[0]).toMatchObject({ fn: 'hr_delete_employee', args: { p_org: ORG, p_employee: EMP } });
+    expect(calls.at(-1)).toBe(undo[0]);
   });
 
   it('names the clash when the employee number or email is taken', async () => {
@@ -379,15 +404,91 @@ describe('setEmployeeStatus, deleteEmployee', () => {
     expect(calls.find((c) => c.op === 'update')!.values).toEqual({ status: 'inactive' });
   });
 
-  it('deletes within the workspace and hands back who it was', async () => {
-    const { client, calls } = fakeSupabase({ 'hr_employees.delete': { data: { id: EMP, name: 'Farah Idris' } } });
+  it('deletes through the database function in the session workspace and hands back who it was', async () => {
+    const { client, calls } = fakeSupabase({
+      'rpc.hr_delete_employee': { data: { id: EMP, name: 'Farah Idris', document_paths: [] } },
+    });
     expect(await deleteEmployee(ctxOf(client), { id: EMP })).toEqual({ ok: true, data: { id: EMP, name: 'Farah Idris' } });
-    expect(calls[0].filters).toEqual({ id: EMP, org_id: ORG });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ fn: 'hr_delete_employee', args: { p_org: ORG, p_employee: EMP } });
+    expect(Object.keys(calls[0].args!).sort()).toEqual(['p_employee', 'p_org']);
   });
 
-  it('says when the employee is not there', async () => {
-    const { client } = fakeSupabase({ 'hr_employees.delete': { data: null } });
+  it('removes each document file the database returned, one path at a time and after the delete, and never returns them', async () => {
+    const A = '11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/abcdef01-aaaa-4bbb-8ccc-0123456789ab.pdf';
+    const B = '11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/abcdef02-aaaa-4bbb-8ccc-0123456789ab.png';
+    const { client } = fakeSupabase({
+      'rpc.hr_delete_employee': { data: { id: EMP, name: 'Farah Idris', document_paths: [A, B] } },
+    });
+    const removed: string[][] = [];
+    const result = await deleteEmployee(ctxOf(client), { id: EMP }, async (paths) => void removed.push([...paths]));
+    expect(removed).toEqual([[A, B]]);
+    expect(result).toEqual({ ok: true, data: { id: EMP, name: 'Farah Idris' } });
+    expect(JSON.stringify(result)).not.toContain('abcdef01');
+  });
+
+  it('removes nothing for an employee with no files', async () => {
+    const { client } = fakeSupabase({ 'rpc.hr_delete_employee': { data: { id: EMP, name: 'Farah Idris', document_paths: [] } } });
+    const removeFiles = vi.fn(async () => {});
+    await deleteEmployee(ctxOf(client), { id: EMP }, removeFiles);
+    expect(removeFiles).not.toHaveBeenCalled();
+  });
+
+  it('does not remove a file when the delete is refused or finds nobody', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const removeFiles = vi.fn(async () => {});
+    for (const reply of [
+      { data: null },
+      { error: { code: 'P0001', message: 'HR_EMPLOYEE_HAS_PAID_PAYSLIPS' } },
+      { error: { code: 'XX000', message: 'boom' } },
+    ]) {
+      const { client } = fakeSupabase({ 'rpc.hr_delete_employee': reply });
+      await deleteEmployee(ctxOf(client), { id: EMP }, removeFiles);
+    }
+    expect(removeFiles).not.toHaveBeenCalled();
+  });
+
+  it('is not failed by a file that cannot be removed, and logs no path', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const PATH = '11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/abcdef01-aaaa-4bbb-8ccc-0123456789ab.pdf';
+    const { client } = fakeSupabase({ 'rpc.hr_delete_employee': { data: { id: EMP, name: 'Farah Idris', document_paths: [PATH] } } });
+    const result = await deleteEmployee(ctxOf(client), { id: EMP }, async () => {
+      throw new Error(`boom ${PATH}`);
+    });
+    expect(result).toEqual({ ok: true, data: { id: EMP, name: 'Farah Idris' } });
+    expect(JSON.stringify(log.mock.calls)).not.toContain(PATH);
+  });
+
+  it('refuses an employee with a paid payslip in the payroll sentence, and logs nothing', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { client } = fakeSupabase({
+      'rpc.hr_delete_employee': { error: { code: 'P0001', message: 'HR_EMPLOYEE_HAS_PAID_PAYSLIPS' } },
+    });
+    expect(await deleteEmployee(ctxOf(client), { id: EMP })).toEqual({
+      ok: false,
+      error: 'This employee has paid payslips. Make them inactive instead.',
+    });
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it('answers any other delete error generically', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { client } = fakeSupabase({
+      'rpc.hr_delete_employee': { error: { code: 'P0001', message: 'something about HR_EMPLOYEE_HAS_PAID_PAYSLIPS elsewhere' } },
+    });
+    const result = await deleteEmployee(ctxOf(client), { id: EMP });
+    expect(result).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
+  });
+
+  it('says when the employee is not there (the function answers null)', async () => {
+    const { client } = fakeSupabase({ 'rpc.hr_delete_employee': { data: null } });
     expect(await deleteEmployee(ctxOf(client), { id: EMP })).toEqual({ ok: false, error: 'That employee was not found.' });
+  });
+
+  it('treats a reply that is not an employee as a failed save', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { client } = fakeSupabase({ 'rpc.hr_delete_employee': { data: { id: 5 } } });
+    expect(await deleteEmployee(ctxOf(client), { id: EMP })).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
   });
 });
 
@@ -449,7 +550,7 @@ describe('ids and bad input', () => {
       'hr_employees.select': { data: [] },
       'hr_employees.insert': { data: saved },
       'hr_employee_private.insert': { error: { code: '42501', message: 'permission denied' } },
-      'hr_employees.delete': { error: { code: '57014', message: 'canceling statement' } },
+      'rpc.hr_delete_employee': { error: { code: '57014', message: 'canceling statement' } },
     });
     const result = await createEmployee(ctxOf(client), { name: 'Farah Idris', private: { base_salary: 3000 } });
     expect(result).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
@@ -457,5 +558,106 @@ describe('ids and bad input', () => {
     expect(logged).toContain('rollback');
     expect(logged).toContain('57014');
     expect(logged).not.toContain('3000');
+  });
+  it('logs it when the rollback of a half-made employee removes nothing', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { client } = fakeSupabase({
+      'hr_employees.select': { data: [] },
+      'hr_employees.insert': { data: saved },
+      'hr_employee_private.insert': { error: { code: '42501', message: 'permission denied' } },
+      'rpc.hr_delete_employee': { data: null },
+    });
+    const result = await createEmployee(ctxOf(client), { name: 'Farah Idris', private: { base_salary: 3000 } });
+    expect(result).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
+    const rollback = log.mock.calls.filter((c) => String(c[0]).includes('rollback'));
+    expect(rollback).toHaveLength(1);
+    expect(JSON.stringify(rollback)).toContain('the employee was not removed');
+  });
+});
+
+describe('setReportsTo', () => {
+  const MANAGER = '44444444-4444-4444-8444-444444444444';
+
+  it('calls the function once with the ids and answers its id and reports_to', async () => {
+    const { client, calls } = fakeSupabase({ 'rpc.hr_set_reports_to': { data: { id: EMP, reports_to: MANAGER, extra: 'ignored' } } });
+    expect(await setReportsTo(ctxOf(client), { id: EMP, manager_id: MANAGER })).toEqual({
+      ok: true,
+      data: { id: EMP, reports_to: MANAGER },
+    });
+    const rpc = calls.filter((c) => c.op === 'rpc');
+    expect(rpc).toHaveLength(1);
+    expect(rpc[0]).toMatchObject({ fn: 'hr_set_reports_to', args: { p_employee: EMP, p_manager: MANAGER } });
+  });
+
+  it('sends null for nobody', async () => {
+    const { client, calls } = fakeSupabase({ 'rpc.hr_set_reports_to': { data: { id: EMP, reports_to: null } } });
+    expect(await setReportsTo(ctxOf(client), { id: EMP, manager_id: null })).toEqual({
+      ok: true,
+      data: { id: EMP, reports_to: null },
+    });
+    expect(calls[0]).toMatchObject({ fn: 'hr_set_reports_to', args: { p_employee: EMP, p_manager: null } });
+  });
+
+  it.each([
+    ['an id that is not a uuid', { id: 'nope', manager_id: MANAGER }],
+    ['a manager that is not a uuid', { id: EMP, manager_id: 'nope' }],
+    ['a manager left out', { id: EMP }],
+  ])('refuses %s at the schema, calling nothing', async (_name, input) => {
+    expect(setReportsToInput.safeParse(input).success).toBe(false);
+    const { client, calls } = fakeSupabase({});
+    const result = await setReportsTo(ctxOf(client), input as never);
+    expect(result.ok).toBe(false);
+    expect(calls).toEqual([]);
+  });
+
+  it.each([
+    ['EMP_BAD_MANAGER', REPORTS_TO_REFUSALS.EMP_BAD_MANAGER],
+    ['EMP_NOT_FOUND', REPORTS_TO_REFUSALS.EMP_NOT_FOUND],
+    ['EMP_NOT_ALLOWED', REPORTS_TO_REFUSALS.EMP_NOT_ALLOWED],
+    ['EMP_BAD_MANAGER\nCONTEXT: PL/pgSQL function hr_set_reports_to line 9', REPORTS_TO_REFUSALS.EMP_BAD_MANAGER],
+  ])("answers the database's %j in its own sentence", async (message, sentence) => {
+    const { client } = fakeSupabase({ 'rpc.hr_set_reports_to': { error: { code: 'P0001', message } } });
+    expect(await setReportsTo(ctxOf(client), { id: EMP, manager_id: MANAGER })).toEqual({ ok: false, error: sentence });
+  });
+
+  it('answers any other error generically and logs the function and code, not the ids', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { client } = fakeSupabase({
+      'rpc.hr_set_reports_to': { error: { code: '57014', message: 'canceling statement' } },
+    });
+    expect(await setReportsTo(ctxOf(client), { id: EMP, manager_id: MANAGER })).toEqual({ ok: false, error: WRITE_FAILED });
+    const text = JSON.stringify(log.mock.calls);
+    expect(text).toContain('setReportsTo');
+    expect(text).toContain('57014');
+    expect(text).not.toContain(EMP);
+    expect(text).not.toContain(MANAGER);
+  });
+
+  it.each([['a string', 'ok'], ['null', null], ['an object with no id', { reports_to: null }], ['a number', 5]])(
+    'treats %s as a failed save',
+    async (_name, data) => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const { client } = fakeSupabase({ 'rpc.hr_set_reports_to': { data } });
+      expect(await setReportsTo(ctxOf(client), { id: EMP, manager_id: MANAGER })).toEqual({ ok: false, error: WRITE_FAILED });
+    },
+  );
+});
+
+describe('the employee schemas no longer know the manager flag or the line', () => {
+  it('strips is_manager', () => {
+    const created = createEmployeeInput.safeParse({ name: 'A', is_manager: true });
+    expect(created.success).toBe(true);
+    if (created.success) expect(created.data).not.toHaveProperty('is_manager');
+    const updated = updateEmployeeInput.safeParse({ id: EMP, is_manager: true });
+    expect(updated.success).toBe(true);
+    if (updated.success) expect(updated.data).not.toHaveProperty('is_manager');
+  });
+
+  it('has no reports_to or manager_id key', () => {
+    for (const schema of [createEmployeeInput, updateEmployeeInput]) {
+      expect(Object.keys(schema.shape)).not.toContain('reports_to');
+      expect(Object.keys(schema.shape)).not.toContain('manager_id');
+      expect(Object.keys(schema.shape)).not.toContain('is_manager');
+    }
   });
 });

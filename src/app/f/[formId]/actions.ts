@@ -10,6 +10,8 @@ import {
   parseSubmission,
 } from '@/lib/reach/form-submissions';
 import { createAnonymousClient, submitPublicForm } from '@/lib/reach/public-forms';
+import { formSubmitLimited } from '@/lib/security/limits';
+import { serverWriteClient } from '@/lib/supabase/server-writer';
 
 /** What the public form shows after a submission has been tried. */
 export type PublicFormState =
@@ -61,7 +63,13 @@ export async function submitPublicFormAction(
     return { error: SUBMISSION_MESSAGES.failed, values };
   }
 
-  const outcome = await submitPublicForm(createAnonymousClient(), formId, parsed.input);
+  // Counted only now, so a post that was never going to be sent uses up nothing. A check a
+  // visitor has to pass (a challenge token) would be verified here too, before anything is written.
+  const limited = await formSubmitLimited();
+  if (limited) return { error: limited, values };
+
+  // Sent by the server as itself: the database takes a response from nobody else.
+  const outcome = await submitPublicForm(serverWriteClient(createAnonymousClient), formId, parsed.input);
   switch (outcome.kind) {
     case 'ok':
       return { done: true };

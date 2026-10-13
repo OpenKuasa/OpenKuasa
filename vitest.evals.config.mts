@@ -5,7 +5,11 @@ import { defineConfig } from 'vitest/config';
 // `pnpm test`. Run them with `pnpm eval:tuah`.
 export default defineConfig({
   resolve: {
-    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+      // Next provides `server-only` in prod; vitest's node runtime cannot resolve it (as in vitest.config.mts).
+      'server-only': fileURLToPath(new URL('./tests/stubs/server-only.ts', import.meta.url)),
+    },
   },
   test: {
     environment: 'node',

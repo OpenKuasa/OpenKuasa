@@ -53,12 +53,30 @@ export function isChatLocked(status: ChatStatusForViewer | null): boolean {
   );
 }
 
+/** Shown when a turn is refused with code `daily_limit` (the per-user limit on a workspace key). */
+export const DAILY_LIMIT_NOTICE =
+  'That question was not sent: you have reached today\u2019s chat limit. It resets at midnight UTC (8 am Malaysia time).';
+
 /** The chat endpoints answer `{ error, code }`; the SDK surfaces that body as the error message. */
 export function chatErrorCode(error: Error | undefined): string | null {
   if (!error) return null;
   try {
     const body = JSON.parse(error.message) as { code?: unknown };
     return typeof body.code === 'string' ? body.code : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Why the server turned a question's files away (code `attachment_limit`), in
+ * the server's own sentence, or null for any other error. Shown as plain text.
+ */
+export function attachmentRefusal(error: Error | undefined): string | null {
+  if (!error || chatErrorCode(error) !== 'attachment_limit') return null;
+  try {
+    const body = JSON.parse(error.message) as { error?: unknown };
+    return typeof body.error === 'string' && body.error.trim() ? `That question was not sent. ${body.error}` : null;
   } catch {
     return null;
   }

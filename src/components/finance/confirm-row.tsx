@@ -42,21 +42,35 @@ export function ConfirmRow({
         <div
           role="group"
           aria-label={label}
-          // Stays in view when the table has been scrolled sideways on a phone.
-          className="sticky left-2 flex max-w-[calc(100vw-4rem)] flex-wrap items-center gap-3 py-1 whitespace-normal md:max-w-none"
+          // Stays in view when the table has been scrolled sideways, at any width: never wider than
+          // the part of the table that shows (cqw is measured on the table's scrolling box).
+          className="sticky left-2 flex max-w-[calc(100cqw-1rem)] flex-wrap items-center gap-3 py-1 whitespace-normal"
           onKeyDown={(event) => {
             if (event.key !== 'Escape' || pending) return;
             event.stopPropagation();
             onCancel();
           }}
         >
-          <div className="min-w-48 flex-1 text-sm">{children}</div>
-          {error ? (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          ) : null}
-          <Button type="button" variant={destructive ? 'destructive' : 'default'} size="sm" onClick={onConfirm} disabled={pending}>
+          {/* The refusal sits under the question, so a long sentence cannot squeeze the question into a narrow column. */}
+          <div className="min-w-48 flex-1 space-y-1 text-sm">
+            <div>{children}</div>
+            {error ? (
+              <p role="alert" className="text-destructive">
+                {error}
+              </p>
+            ) : null}
+          </div>
+          {/* aria-disabled rather than disabled: a disabled button drops focus to the page, and Escape then no longer reaches this row. */}
+          <Button
+            type="button"
+            variant={destructive ? 'destructive' : 'default'}
+            size="sm"
+            aria-disabled={pending}
+            className="aria-disabled:pointer-events-none aria-disabled:opacity-50"
+            onClick={() => {
+              if (!pending) onConfirm();
+            }}
+          >
             <Icon className="size-4" />
             {pending ? pendingLabel : confirmLabel}
           </Button>

@@ -47,19 +47,21 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
 });
 
 const { runLekiu } = await import('@/lib/ai/agents/orchestrator');
+// After this file's mocks and the values they use are in place: the helpers load the tools too.
+const { withLekiu } = await import('./helpers/approvals');
 const { createSeedPeopleData } = await import('@/lib/people/seed');
 
 const people = {
   data: createSeedPeopleData(new Date('2026-10-09T04:00:00Z')),
   viewer: { employeeId: null, isHr: true, isDemo: false },
-  write: { ctx: { client: {} as never, orgId: 'org1' }, tier: 'hr' as const, employeeId: null },
+  write: { ctx: { client: {} as never, orgId: 'org1' }, tier: 'hr' as const, employeeId: null, receipt: null, userId: 'u1' },
 };
 const ask = [{ role: 'user' as const, content: 'Tambah department Legal' }];
 
 describe('Lekiu’s changes require approval', () => {
   it('a change does not run until it is approved', async () => {
     executed.creates = 0;
-    const result = runLekiu(ask, people);
+    const result = runLekiu(...withLekiu(ask, people));
     await result.consumeStream();
     expect(executed.creates).toBe(0);
     const parts = (await result.content) as { type: string }[];
@@ -68,7 +70,7 @@ describe('Lekiu’s changes require approval', () => {
 
   // The history the client sends after the person taps Approve or Reject.
   const resume = (approved: boolean) =>
-    runLekiu(
+    runLekiu(...withLekiu(
       [
         ...ask,
         {
@@ -81,7 +83,7 @@ describe('Lekiu’s changes require approval', () => {
         { role: 'tool', content: [{ type: 'tool-approval-response', approvalId: 'a1', approved }] },
       ],
       people,
-    );
+    ));
 
   it('approve: the resumed turn adds the department', async () => {
     executed.creates = 0;

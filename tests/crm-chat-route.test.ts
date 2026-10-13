@@ -13,22 +13,46 @@ const ctl = vi.hoisted(() => ({
   /** The key each model was built with: undefined means the platform key. */
   usedKeys: [] as (string | undefined)[],
   /** The system prompt and tool names each model call was given. */
-  calls: [] as { system: string; tools: string[] }[],
+  calls: [] as { system: string; tools: string[]; systemParts?: { content: string; marked: boolean }[] }[],
   freeConsumed: 0,
+  /** What consume_ai_quota answers on a workspace key: turns left today, or -1 when used up. */
+  dailyRemaining: 100 as number,
+  dailyConsumed: 0,
 }));
 
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({
     auth: { getUser: async () => ({ data: { user: ctl.user }, error: null }) },
     rpc: async (name: string) => {
-      if (name === 'org_ai_key_ciphertext') {
-        return { data: ctl.sealedKey, error: null };
+      if (name === 'org_ai_key_status') {
+        return { data: ctl.sealedKey ? [{ key_hint: 'sk-or-…aaaa' }] : [], error: null };
       }
       if (name === 'consume_free_question') {
         ctl.freeConsumed += 1;
         return { data: ctl.freeRemaining, error: null };
       }
+      if (name === 'consume_ai_quota') {
+        ctl.dailyConsumed += 1;
+        return { data: ctl.dailyRemaining, error: null };
+      }
       return { data: null, error: { message: `unexpected rpc ${name}` } };
+    },
+  }),
+}));
+
+// The sealed key is read on the server, by the service-role client.
+vi.mock('@/lib/supabase/service', () => ({
+  serviceClient: () => ({
+    from: () => {
+      const query = {
+        select: () => query,
+        eq: () => query,
+        maybeSingle: async () => ({
+          data: ctl.sealedKey ? { ciphertext: ctl.sealedKey } : null,
+          error: null,
+        }),
+      };
+      return query;
     },
   }),
 }));
@@ -57,7 +81,11 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
           tools?: { name: string }[];
         }) => {
           ctl.calls.push({
-            system: String(options.prompt.find((m) => m.role === 'system')?.content ?? ''),
+            // The fixed prompt and today's date are two system messages (the first is marked for the provider's cache).
+            system: options.prompt.filter((m) => m.role === 'system').map((m) => String(m.content)).join('\n\n'),
+            systemParts: options.prompt
+              .filter((m) => m.role === 'system')
+              .map((m) => ({ content: String(m.content), marked: JSON.stringify((m as { providerOptions?: unknown }).providerOptions ?? {}).includes('ephemeral') })),
             tools: (options.tools ?? []).map((tool) => tool.name),
           });
           return {
@@ -80,6 +108,13 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
 
 const SECRET = 'test-secret-for-sealing-workspace-keys-0123456789';
 const { encryptApiKey } = await import('@/lib/ai/key-crypto');
+
+const KEY_ORG = '11111111-1111-4111-8111-111111111111';
+/** Stores a key sealed for the caller's workspace, as the server does. */
+const sealForWorkspace = () => {
+  ctl.org = { orgId: KEY_ORG, role: 'owner' };
+  return encryptApiKey('sk-or-v1-workspace-key-aaaaaaaaaaaa', KEY_ORG);
+};
 const { CRM_WRITE_TOOL_NAMES } = await import('@/lib/ai/crm-tools');
 const { KASTURI_SHARED_TOOL_NAMES, REACH_WRITE_TOOL_NAMES } = await import('@/lib/ai/products');
 
@@ -106,6 +141,8 @@ beforeEach(() => {
   ctl.usedKeys = [];
   ctl.calls = [];
   ctl.freeConsumed = 0;
+  ctl.dailyRemaining = 100;
+  ctl.dailyConsumed = 0;
   process.env.AI_KEYS_ENCRYPTION_SECRET = SECRET;
 });
 
@@ -135,7 +172,7 @@ describe('POST /api/crm/chat gating', () => {
   });
 
   it('fails closed when the workspace key cannot be opened on this server', async () => {
-    ctl.sealedKey = encryptApiKey('sk-or-v1-workspace-key-aaaaaaaaaaaa');
+    ctl.sealedKey = sealForWorkspace();
     process.env.AI_KEYS_ENCRYPTION_SECRET = 'a-different-secret-than-the-one-used-to-seal-it';
     const res = await POST(post(validBody));
     expect(res.status).toBe(503);
@@ -169,9 +206,16 @@ describe('POST /api/crm/chat happy path', () => {
     expect(call.tools).toEqual(
       expect.arrayContaining(['listFollowUps', 'getCalendar', ...KASTURI_SHARED_TOOL_NAMES]),
     );
+    expect(call.tools).toEqual(expect.arrayContaining(['getBillingSummary', 'listBillingInvoices']));
     expect(call.system).toContain('TODAY');
+    // The fixed prompt is marked for the provider's cache; the date and time, which change every minute, are not.
+    expect(call.systemParts).toHaveLength(2);
+    expect(call.systemParts?.[0].marked).toBe(true);
+    expect(call.systemParts?.[0].content).not.toContain('TODAY');
+    expect(call.systemParts?.[1].marked).toBe(false);
+    expect(call.systemParts?.[1].content).toMatch(/^TODAY\n- It is /);
     // Appointments and lead forms are Kasturi screens too; ads and leads are not.
-    expect(call.tools).toHaveLength(4 + 2 + CRM_WRITE_TOOL_NAMES.length + KASTURI_SHARED_TOOL_NAMES.length);
+    expect(call.tools).toHaveLength(4 + 2 + 2 + CRM_WRITE_TOOL_NAMES.length + KASTURI_SHARED_TOOL_NAMES.length);
     expect(call.tools).not.toContain('getCampaigns');
     expect(call.tools).not.toContain('createLead');
     expect(call.tools).not.toContain('promoteLeadToContact');
@@ -193,7 +237,7 @@ describe('POST /api/crm/chat happy path', () => {
   });
 
   it('runs on the workspace key without touching the free allowance', async () => {
-    ctl.sealedKey = encryptApiKey('sk-or-v1-workspace-key-aaaaaaaaaaaa');
+    ctl.sealedKey = sealForWorkspace();
     // Even with the free questions used up and no platform key at all.
     ctl.freeRemaining = -1;
     ctl.providerKey = false;
@@ -201,6 +245,7 @@ describe('POST /api/crm/chat happy path', () => {
     expect(res.status).toBe(200);
     await res.text();
     expect(ctl.freeConsumed).toBe(0);
+    expect(ctl.dailyConsumed).toBe(1);
     expect(ctl.usedKeys).toEqual(['sk-or-v1-workspace-key-aaaaaaaaaaaa']);
   });
 });

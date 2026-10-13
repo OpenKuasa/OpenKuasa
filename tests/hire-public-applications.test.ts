@@ -46,6 +46,10 @@ describe('applyOutcome', () => {
     expect(applyOutcome('not_found')).toEqual({ kind: 'closed' });
     expect(applyOutcome('throttled')).toEqual({ kind: 'throttled' });
   });
+  it('reads a repeat application as a duplicate and a refused file path as a failure', () => {
+    expect(applyOutcome('ok_duplicate')).toEqual({ kind: 'duplicate' });
+    expect(applyOutcome('invalid_cv_path')).toEqual({ kind: 'failed' });
+  });
   it.each([
     ['name_too_long', 'name', 'nameTooLong'],
     ['invalid_name', 'name', 'name'],
@@ -88,7 +92,7 @@ describe('submitPublicApplication', () => {
     const c = client();
     await submitPublicApplication(c.asClient, ORG, JOB, full, OFF);
     expect(c.rpc).toHaveBeenCalledWith('submit_public_application', expect.objectContaining({
-      p_cv_url: null, p_cover_letter: null, p_portfolio_url: null, p_expected_salary_cents: null,
+      p_cv_url: 'https://example.com/cv', p_cover_letter: null, p_portfolio_url: null, p_expected_salary_cents: null,
     }));
   });
   it('never sends values that fail the checks', async () => {
@@ -118,6 +122,27 @@ describe('submitPublicApplication', () => {
     expect(logged).toContain('42501');
     for (const secret of ['Aina', 'example.com', '012 345', 'Hello']) expect(logged).not.toContain(secret);
     spy.mockRestore();
+  });
+});
+
+describe('a CV file path', () => {
+  const PATH = `${ORG}/${JOB}/33333333-3333-4333-8333-333333333333.pdf`;
+  it('is sent as p_cv_path, and meets a required CV with no link', async () => {
+    const c = client();
+    const values = { ...good, cover_letter: 'Hello.' };
+    expect(await submitPublicApplication(c.asClient, ORG, JOB, values, ALL, null, PATH)).toEqual({ kind: 'ok' });
+    expect(c.rpc).toHaveBeenCalledWith('submit_public_application', expect.objectContaining({ p_cv_path: PATH }));
+  });
+  it('is left out of the arguments when none is given', async () => {
+    const c = client();
+    await submitPublicApplication(c.asClient, ORG, JOB, good, OFF);
+    expect(c.rpc.mock.calls[0][1]).not.toHaveProperty('p_cv_path');
+  });
+  it('does not meet a required CV when there is no path', async () => {
+    const c = client();
+    const result = await submitPublicApplication(c.asClient, ORG, JOB, { ...good, cover_letter: 'Hello.' }, ALL);
+    expect(result).toEqual({ kind: 'invalid', errors: { cv_url: APPLY_MESSAGES.cvRequired } });
+    expect(c.rpc).not.toHaveBeenCalled();
   });
 });
 

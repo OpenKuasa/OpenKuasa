@@ -17,6 +17,7 @@ import { getCurrentOrg } from '@/lib/auth/current-org';
 import { collectNames, type KnownNames } from '@/lib/chat/change-titles';
 import { APPLY_TOOL, ASK_PREFIX, isDelegation, type Proposal } from '@/lib/chat/delegation';
 import { createSupabaseHireData } from '@/lib/hire/supabase';
+import type { Application, Candidate, Interview, Job } from '@/lib/hire/types';
 import { createSupabaseReachData } from '@/lib/reach/supabase';
 
 /** Marks every row an eval creates, so cleanup never touches anything else. */
@@ -94,6 +95,8 @@ export type Turn = {
   steps: string[];
   /** The changes now waiting for a yes or no. */
   pending: Proposal[];
+  /** The line each waiting card carries from the server for the person deciding (which of two same-named people it is), where it has one. */
+  notes: string[];
   /** What each change that ran this turn returned. */
   applied: { proposal: Proposal; output: unknown }[];
 };
@@ -103,6 +106,10 @@ type Approval = { approvalId: string; proposal: Proposal | undefined };
 type ContentPart = {
   type: string;
   approvalId?: string;
+  /** Set on a request the server answered itself: that one is not waiting for anybody. */
+  isAutomatic?: boolean;
+  /** A line the server put on the request for the person deciding. */
+  reason?: string;
   toolCall?: { toolName?: string; input?: unknown };
 };
 
@@ -118,6 +125,11 @@ export class Conversation {
     private workspace: Workspace,
     /** Run as someone who can look but not change, whatever the account's role. */
     private viewer = false,
+    /**
+     * Extra applications, candidates, jobs, interviews and one CV a case supplies, so no
+     * row or file is written anywhere. Without a CV, Lekir gets no CV reader.
+     */
+    private hire?: { applications?: Application[]; cv?: Uint8Array; candidates?: Candidate[]; jobs?: Job[]; interviews?: Interview[] },
   ) {}
 
   async ask(text: string): Promise<Turn> {
@@ -144,6 +156,10 @@ export class Conversation {
     await turnSlot();
     const { client, orgId, userId } = this.workspace;
     const canWrite = !this.viewer && this.workspace.role !== 'viewer';
+    const realHire = createSupabaseHireData(client, orgId);
+    const extra = this.hire;
+    const extraApplications = extra?.applications ?? [];
+    const extraCv = extra?.cv;
     const result = runTuah(
       this.messages,
       {
@@ -160,7 +176,40 @@ export class Conversation {
         names: this.names,
       },
       {
-        data: createSupabaseHireData(client, orgId),
+        data: extra
+          ? {
+              ...realHire,
+              // The made-up rows are in no database: the same-name check before a deletion must read these lists, not the database.
+              namesakes: undefined,
+              // The same for a person's pool status: read from the lists below, which hold the made-up people.
+              poolStatusOf: undefined,
+              // The same for the one interview a change is about: read from the lists below, which hold the made-up interviews.
+              interviewCard: undefined,
+              // Made-up interviews come first, then the workspace's own.
+              listInterviews: async () => [...(extra.interviews ?? []), ...(await realHire.listInterviews())],
+              listJobs: async () => [...(extra.jobs ?? []), ...(await realHire.listJobs())],
+              listApplications: async () => [...extraApplications, ...(await realHire.listApplications())],
+              // An application has a candidate behind it: a lookup by name must find the person too.
+              listCandidates: async () => [
+                ...(extra.candidates ?? []),
+                ...extraApplications.map((a) => ({
+                  id: a.candidate_id, name: a.candidate_name, email: null, phone: null, headline: null, location: null,
+                  skills: [], source: a.source, pool_status: 'none' as const, created_at: a.created_at,
+                })),
+                ...(await realHire.listCandidates()),
+              ],
+            }
+          : realHire,
+        files: extraCv
+          ? {
+              readCv: async (id) => {
+                const found = extraApplications.find((a) => a.id === id);
+                return found
+                  ? { state: 'ok', bytes: extraCv, candidate: found.candidate_name, job: found.job_title }
+                  : { state: 'missing' };
+              },
+            }
+          : undefined,
         origin: 'https://example.test',
         write: canWrite ? { ctx: { client, orgId }, canWrite: true } : undefined,
       },
@@ -179,7 +228,7 @@ export class Conversation {
       .join('\n');
     if (text) this.lines.push(`Tuah: ${text.replace(/\s+/g, ' ')}`);
 
-    const turn: Turn = { text, asked: [], steps: [], pending: [], applied: [] };
+    const turn: Turn = { text, asked: [], steps: [], pending: [], notes: [], applied: [] };
     this.approvals = [];
     for (const step of steps) {
       for (const result of step.toolResults as { toolName: string; input: unknown; output: unknown }[]) {
@@ -206,13 +255,17 @@ export class Conversation {
         }
       }
       for (const part of step.content as ContentPart[]) {
-        if (part.type !== 'tool-approval-request' || !part.approvalId) continue;
+        if (part.type !== 'tool-approval-request' || !part.approvalId || part.isAutomatic) continue;
+        if (part.reason) turn.notes.push(part.reason);
         const id = (part.toolCall?.input as { proposalId?: string } | null)?.proposalId;
         const proposal = id ? this.proposals.get(id) : undefined;
         this.approvals.push({ approvalId: part.approvalId, proposal });
         if (proposal) turn.pending.push(proposal);
       }
     }
+    // `EVAL_DEBUG=1` also shows what Tuah said at the end of the turn: a check that passed prints nothing, and a
+    // loose pattern can pass on the wrong sentence.
+    if (process.env.EVAL_DEBUG) console.log('said:', JSON.stringify(turn.text));
     return turn;
   }
 }

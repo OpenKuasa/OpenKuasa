@@ -5,8 +5,20 @@
  */
 import { z } from 'zod';
 import {
+  DOCUMENT_LINES_MAX,
+  DOCUMENT_LINE_COLUMNS,
+  type DocumentLineRow,
+  LINE_MESSAGES,
+  documentLine,
+  isoDate,
+  optionalText,
+  toDocumentLine,
+} from './document-lines';
+import {
   type FinResult,
   type FinanceWriteContext,
+  FIN_SIGN_OFF,
+  NEEDS_SIGN_OFF,
   NOT_ALLOWED,
   PG_FORBIDDEN,
   PG_FOREIGN_KEY,
@@ -17,93 +29,63 @@ import {
   writeFailed,
 } from './result';
 
-export const BILL_LINES_MAX = 100;
+// Defined in document-lines.ts, which invoices share; exported from here for this module's existing importers.
+export { isIsoDate, roundRate } from './document-lines';
+
+export const BILL_LINES_MAX = DOCUMENT_LINES_MAX;
 /** Bills loaded for a screen, a page at a time. */
 export const BILL_PAGE_SIZE = 1000;
 
 export const BILL_MESSAGES = {
   supplier: 'Choose a supplier.',
-  date: 'Enter a valid date.',
+  date: LINE_MESSAGES.date,
   dates: 'The due date cannot be before the bill date.',
-  lines: 'Add at least one line.',
+  lines: LINE_MESSAGES.lines,
   tooManyLines: `A bill can have at most ${BILL_LINES_MAX} lines.`,
-  description: 'Describe each line.',
-  quantity: 'Enter a quantity above 0.',
-  price: 'Enter a unit price of 0 or more.',
-  sst: 'Enter an SST rate between 0 and 100.',
-  tooLong: 'That is too long. Keep it to 200 characters or fewer.',
+  description: LINE_MESSAGES.description,
+  quantity: LINE_MESSAGES.quantity,
+  price: LINE_MESSAGES.price,
+  sst: LINE_MESSAGES.sst,
+  tooLong: LINE_MESSAGES.tooLong,
   gone: 'That bill no longer exists.',
   locked: 'This bill is posted and can no longer be changed. Void it instead.',
   hasPayments: 'This bill has payments. Void or delete them before voiding it.',
   empty: 'A bill needs at least one line with an amount.',
   numberTaken: 'That bill number is already used.',
   missing: 'The supplier or a product on this bill no longer exists.',
-  product: 'Choose a product from the list, or leave it empty.',
+  product: LINE_MESSAGES.product,
+  // FIN21
+  order: 'Choose an approved purchase order from this supplier, or none.',
+  // FIN26
+  category: 'Choose an expense category for the bill.',
 } as const;
 
 const M = BILL_MESSAGES;
 
-/** YYYY-MM-DD that is a real calendar date from 1900 to 2200; a slipped key gives year 0202. */
-export function isIsoDate(value: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const year = Number(value.slice(0, 4));
-  if (year < 1900 || year > 2200) return false;
-  const d = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
-}
-
-const round = (places: number) => (v: number) => {
-  const f = 10 ** places;
-  return Math.round(v * f) / f;
-};
-
-/**
- * An SST rate as the column numeric(5,2) stores it: two decimals, half away
- * from zero, rounded on the figure as written. 1.005 is 1.01 here and in the
- * database, where `Math.round(1.005 * 100)` and `(1.005).toFixed(2)` both
- * give 1.00, because the nearest floating point number is a hair below 1.005.
- * Something that is not a number comes back as it was.
- */
-export function roundRate(value: number): number {
-  if (!Number.isFinite(value)) return value;
-  // The shortest digits that give this number back, e.g. "1.005e+0": shift the point two places in the text.
-  const [digits, exponent] = Math.abs(value).toExponential().split('e');
-  const hundredths = Math.round(Number(`${digits}e${Number(exponent) + 2}`));
-  return (Math.sign(value) * hundredths) / 100;
-}
-
-const date = z.string({ error: M.date }).refine(isIsoDate, M.date);
-const text = z
-  .string({ error: M.tooLong })
-  .trim()
-  .max(200, M.tooLong)
-  .transform((v) => (v === '' ? null : v))
-  .nullable();
-/** An id, or nothing chosen (an empty string from a select). */
-const optionalId = z
-  .union([z.string().uuid(M.product), z.literal(''), z.null()], { error: M.product })
+/** The purchase order a bill is raised against: an id, or an empty box or null for none. */
+const purchaseOrderLink = z
+  .union([z.string().uuid(M.order), z.literal(''), z.null()], { error: M.order })
   .transform((v) => (v === '' ? null : v));
 
-const line = z.object({
-  product_id: optionalId.default(null),
-  description: z.string({ error: M.description }).trim().min(1, M.description).max(200, M.tooLong),
-  quantity: z.number({ error: M.quantity }).transform(round(3)).pipe(z.number().gt(0, M.quantity).max(99_999_999, M.quantity)),
-  uom: text.default(null),
-  pack_size: text.default(null),
-  unit_price: z.number({ error: M.price }).min(0, M.price).max(999_999_999, M.price).transform(round(4)),
-  sst_rate: z.number({ error: M.sst }).transform(roundRate).pipe(z.number().min(0, M.sst).max(100, M.sst)).default(0),
-});
+/** The expense category a bill's cost lands in: an id, or an empty box or null to take the workspace's default. */
+const categoryLink = z
+  .union([z.string().uuid(M.category), z.literal(''), z.null()], { error: M.category })
+  .transform((v) => (v === '' ? null : v));
 
 export const saveBillInput = z
   .object({
     /** Present to change a draft; absent to create one. */
     id: z.string({ error: M.gone }).uuid(M.gone).optional(),
     supplier_id: z.string({ error: M.supplier }).uuid(M.supplier),
-    supplier_ref: text.default(null),
-    bill_date: date,
-    due_date: date,
-    notes: text.default(null),
-    lines: z.array(line, { error: M.lines }).min(1, M.lines).max(BILL_LINES_MAX, M.tooManyLines),
+    supplier_ref: optionalText.default(null),
+    bill_date: isoDate,
+    due_date: isoDate,
+    /** Left out when the input has none, so changing a draft keeps the order it is linked to. */
+    purchase_order_id: purchaseOrderLink.optional(),
+    /** Left out when the input has none: a new bill then gets Purchases and a draft keeps the category it has. */
+    category_id: categoryLink.optional(),
+    notes: optionalText.default(null),
+    lines: z.array(documentLine, { error: M.lines }).min(1, M.lines).max(BILL_LINES_MAX, M.tooManyLines),
   })
   .refine((v) => v.due_date >= v.bill_date, { message: M.dates, path: ['due_date'] });
 
@@ -114,9 +96,12 @@ const REFUSALS: Record<string, string> = {
   FIN02: M.hasPayments,
   FIN10: M.empty,
   FIN11: M.gone,
+  FIN21: M.order,
+  FIN26: M.category,
   [PG_UNIQUE]: M.numberTaken,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_FORBIDDEN]: NOT_ALLOWED,
+  [FIN_SIGN_OFF]: NEEDS_SIGN_OFF,
   [PG_OUT_OF_RANGE]: TOO_LARGE,
 };
 
@@ -140,20 +125,18 @@ export type BillListRow = {
   paid: number;
   balance: number;
   display_status: BillDisplayStatus;
+  /** The purchase order the bill is raised against, with its number; null when it has none. */
+  purchase_order_id: string | null;
+  purchase_order_no: string | null;
+  /**
+   * The expense category the bill's cost lands in, with its name. Every bill has one; null only if it could
+   * not be read.
+   */
+  category_id: string | null;
+  category_name: string | null;
 };
 
-export type BillLine = {
-  id: string;
-  product_id: string | null;
-  description: string;
-  quantity: number;
-  uom: string | null;
-  pack_size: string | null;
-  unit_price: number;
-  sst_rate: number;
-  amount: number;
-  sst_amount: number;
-};
+export type BillLine = DocumentLineRow;
 
 export type BillDetail = BillListRow & { supplier_ref: string | null; notes: string | null; lines: BillLine[] };
 
@@ -166,9 +149,85 @@ export type SaveAndPostResult = FinResult<{ id: string; bill_no: string }> & { d
 
 const LIST_COLUMNS = 'id,bill_no,supplier_id,supplier_name,bill_date,due_date,total,paid,balance,display_status';
 
-function toListRow(row: Record<string, unknown>): BillListRow {
+/** Who a bill's order is: bill id → the order's id and number. */
+type BillOrderLinks = Map<string, { id: string; no: string | null }>;
+
+/**
+ * The order of each linked bill, read from its own view because the totals view the list reads does not carry
+ * it. `billId` narrows the read to one bill. Like the other reads here it throws when it fails: a list that
+ * quietly showed every bill as unlinked would be wrong, not just incomplete.
+ */
+async function readOrderLinks(ctx: FinanceWriteContext, billId?: string): Promise<BillOrderLinks> {
+  const links: BillOrderLinks = new Map();
+  for (let from = 0; ; from += BILL_PAGE_SIZE) {
+    let query = ctx.client.from('finance_bill_purchase_orders').select('bill_id,purchase_order_id,po_no').eq('org_id', ctx.orgId);
+    if (billId) query = query.eq('bill_id', billId);
+    const { data, error } = await query.order('bill_id', { ascending: true }).range(from, from + BILL_PAGE_SIZE - 1);
+    if (error) throw error;
+    const page = (data ?? []) as unknown as { bill_id: string; purchase_order_id: string; po_no: string | null }[];
+    for (const l of page) links.set(l.bill_id, { id: l.purchase_order_id, no: l.po_no });
+    if (page.length < BILL_PAGE_SIZE) return links;
+  }
+}
+
+export type ExpenseCategory = { id: string; name: string };
+
+/** The workspace's active expense categories, by name, for the bill form's picker. */
+export async function listExpenseCategories(ctx: FinanceWriteContext): Promise<ExpenseCategory[]> {
+  const { data, error } = await ctx.client
+    .from('finance_categories')
+    .select('id,name')
+    .eq('org_id', ctx.orgId)
+    .eq('kind', 'expense')
+    .eq('active', true)
+    .order('name', { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as unknown as ExpenseCategory[];
+}
+
+/** Each bill's category: bill id → the category's id and name. */
+type BillCategories = Map<string, { id: string; name: string | null }>;
+
+/**
+ * The category of each bill, read from the bills themselves because the totals view the list reads does not
+ * carry it, and the names from the categories. `billId` narrows the bill read to one bill. Throws when a read
+ * fails, like the others here.
+ */
+async function readCategories(ctx: FinanceWriteContext, billId?: string): Promise<BillCategories> {
+  const names = new Map<string, string>();
+  for (let from = 0; ; from += BILL_PAGE_SIZE) {
+    const { data, error } = await ctx.client
+      .from('finance_categories')
+      .select('id,name')
+      .eq('org_id', ctx.orgId)
+      .order('id', { ascending: true })
+      .range(from, from + BILL_PAGE_SIZE - 1);
+    if (error) throw error;
+    const page = (data ?? []) as unknown as { id: string; name: string }[];
+    for (const c of page) names.set(c.id, c.name);
+    if (page.length < BILL_PAGE_SIZE) break;
+  }
+  const categories: BillCategories = new Map();
+  for (let from = 0; ; from += BILL_PAGE_SIZE) {
+    let query = ctx.client.from('supplier_bills').select('id,category_id').eq('org_id', ctx.orgId);
+    if (billId) query = query.eq('id', billId);
+    const { data, error } = await query.order('id', { ascending: true }).range(from, from + BILL_PAGE_SIZE - 1);
+    if (error) throw error;
+    const page = (data ?? []) as unknown as { id: string; category_id: string | null }[];
+    for (const b of page) if (b.category_id) categories.set(b.id, { id: b.category_id, name: names.get(b.category_id) ?? null });
+    if (page.length < BILL_PAGE_SIZE) return categories;
+  }
+}
+
+function toListRow(row: Record<string, unknown>, links: BillOrderLinks, categories: BillCategories): BillListRow {
+  const order = links.get(row.id as string);
+  const category = categories.get(row.id as string);
   return {
     ...(row as unknown as BillListRow),
+    purchase_order_id: order?.id ?? null,
+    purchase_order_no: order?.no ?? null,
+    category_id: category?.id ?? null,
+    category_name: category?.name ?? null,
     total: Number(row.total),
     paid: Number(row.paid),
     balance: Number(row.balance),
@@ -178,6 +237,8 @@ function toListRow(row: Record<string, unknown>): BillListRow {
 /** Every bill in the workspace, newest first, read a page at a time. */
 export async function listBills(ctx: FinanceWriteContext): Promise<BillListRow[]> {
   const rows: BillListRow[] = [];
+  const links = await readOrderLinks(ctx);
+  const categories = await readCategories(ctx);
   for (let from = 0; ; from += BILL_PAGE_SIZE) {
     const { data, error } = await ctx.client
       .from('supplier_bill_totals')
@@ -188,7 +249,7 @@ export async function listBills(ctx: FinanceWriteContext): Promise<BillListRow[]
       .range(from, from + BILL_PAGE_SIZE - 1);
     if (error) throw error;
     const page = (data ?? []) as unknown as Record<string, unknown>[];
-    rows.push(...page.map(toListRow));
+    rows.push(...page.map((r) => toListRow(r, links, categories)));
     if (page.length < BILL_PAGE_SIZE) return rows;
   }
 }
@@ -207,25 +268,20 @@ export async function getBill(ctx: FinanceWriteContext, id: string): Promise<Bil
   if (!bill) return null;
   const { data: lines, error: linesError } = await ctx.client
     .from('supplier_bill_lines')
-    .select('id,product_id,description,quantity,uom,pack_size,unit_price,sst_rate,amount,sst_amount')
+    .select(DOCUMENT_LINE_COLUMNS)
     .eq('org_id', ctx.orgId)
     .eq('bill_id', id)
     .order('created_at', { ascending: true })
     .order('id', { ascending: true });
   if (linesError) throw linesError;
+  const links = await readOrderLinks(ctx, id);
+  const categories = await readCategories(ctx, id);
   const header = bill as unknown as Record<string, unknown>;
   return {
-    ...toListRow(header),
+    ...toListRow(header, links, categories),
     supplier_ref: (header.supplier_ref as string | null) ?? null,
     notes: (header.notes as string | null) ?? null,
-    lines: ((lines ?? []) as unknown as Record<string, unknown>[]).map((l) => ({
-      ...(l as unknown as BillLine),
-      quantity: Number(l.quantity),
-      unit_price: Number(l.unit_price),
-      sst_rate: Number(l.sst_rate),
-      amount: Number(l.amount),
-      sst_amount: Number(l.sst_amount),
-    })),
+    lines: ((lines ?? []) as unknown as Record<string, unknown>[]).map(toDocumentLine),
   };
 }
 

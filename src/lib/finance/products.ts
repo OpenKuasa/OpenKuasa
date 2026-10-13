@@ -3,6 +3,7 @@
  * schema and one function per write; org_id comes from the context.
  */
 import { z } from 'zod';
+import { roundRate } from './bills';
 import {
   type FinResult,
   type FinanceWriteContext,
@@ -67,7 +68,8 @@ const cost = z
   .min(0, M.cost)
   .max(MAX_COST, M.cost)
   .transform((v) => Math.round(v * 10000) / 10000);
-const sst = z.number({ error: M.sst }).min(0, M.sst).max(100, M.sst);
+// Rounded as the column numeric(5,2) stores it, then checked, as on a bill line.
+const sst = z.number({ error: M.sst }).transform(roundRate).pipe(z.number().min(0, M.sst).max(100, M.sst));
 const uom = z
   .string({ error: M.tooLong })
   .trim()

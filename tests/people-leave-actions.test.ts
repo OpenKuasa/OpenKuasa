@@ -10,7 +10,13 @@ const ctl = vi.hoisted(() => ({
     role: string;
     isDemo: boolean;
   },
-  people: { employeeId: 'emp-own' as string | null, isHr: true, isDemo: false },
+  people: { employeeId: 'emp-own', isHr: true, isDemo: false } as {
+    employeeId: string | null;
+    isHr: boolean;
+    isDemo: boolean;
+    managesTeam?: boolean;
+  },
+  lookupFails: false,
   client: {} as unknown,
   result: { ok: true as boolean },
   ran: [] as { fn: string; orgId: string; input: unknown }[],
@@ -20,7 +26,12 @@ const ctl = vi.hoisted(() => ({
 vi.mock('@/lib/auth/viewer', () => ({ getViewer: async () => ctl.viewer }));
 vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ctl.client }));
 vi.mock('next/cache', () => ({ revalidatePath: (path: string) => ctl.revalidated.push(path) }));
-vi.mock('@/lib/people/viewer', () => ({ getPeopleViewer: async () => ctl.people }));
+vi.mock('@/lib/people/viewer', () => ({
+  getPeopleViewer: async () => {
+    if (ctl.lookupFails) throw new Error('lookup failed');
+    return ctl.people;
+  },
+}));
 vi.mock('@/lib/people/leave', async (orig) => {
   const actual = await orig<typeof import('@/lib/people/leave')>();
   const record = (fn: string) => async (ctx: { orgId: string }, input: unknown) => {
@@ -67,6 +78,12 @@ const ADMIN: [string, (input: unknown) => Promise<unknown>, unknown][] = [
   ['setLeaveEntitlementAction', actions.setLeaveEntitlementAction, { employee_id: EMP, leave_type: 'annual', year: 2026, days: 18 }],
   ['loadLeaveEntitlementsAction', actions.loadLeaveEntitlementsAction, { employee_id: EMP }],
 ];
+
+const DECIDE: [string, (input: unknown) => Promise<unknown>, unknown, string][] = [
+  ['decideLeaveAction', actions.decideLeaveAction, { id: REQ, approve: true }, 'decideLeave'],
+  ['decideTimeOffAction', actions.decideTimeOffAction, { id: REQ, approve: false, note: 'Busy' }, 'decideTimeOff'],
+];
+const DECIDE_FORBIDDEN = { ok: false, error: "Only owners, admins and the employee's manager can do that." };
 
 const as = (role: Role, linked = true) => {
   ctl.viewer = { userId: 'u1', orgId: 'org1', role, isDemo: false };
@@ -189,7 +206,10 @@ describe('owner and admin actions', () => {
 
   it.each(['member', 'viewer'] as Role[])('refuse a %s on every one before anything runs', async (role) => {
     as(role);
-    for (const [name, action, input] of ADMIN) expect(await action(input), name).toEqual(FORBIDDEN);
+    for (const [name, action, input] of ADMIN) {
+      // The two decide actions are open to a manager, so they refuse with their own sentence.
+      expect(await action(input), name).toEqual(DECIDE.some(([n]) => n === name) ? DECIDE_FORBIDDEN : FORBIDDEN);
+    }
     expect(ctl.ran).toEqual([]);
   });
 
@@ -217,6 +237,75 @@ describe('owner and admin actions', () => {
     await actions.decideLeaveAction({ id: REQ, approve: true });
     await actions.setLeaveEntitlementAction(ADMIN[4][2]);
     expect(ctl.revalidated).toEqual([...PEOPLE_PATHS, ...PEOPLE_PATHS]);
+  });
+});
+
+describe('the decide actions, open to a manager', () => {
+  const asManager = () => {
+    as('member');
+    ctl.people = { employeeId: 'emp-own', isHr: false, isDemo: false, managesTeam: true };
+  };
+
+  it.each(DECIDE)('%s: a member who manages a team gets through, once, with the input', async (_name, action, input, fn) => {
+    asManager();
+    expect(((await action(input)) as { ok: boolean }).ok).toBe(true);
+    expect(ctl.ran).toEqual([{ fn, orgId: 'org1', input }]);
+  });
+
+  it.each(DECIDE)('%s: a member with no team is refused before anything runs', async (_name, action, input) => {
+    as('member');
+    expect(await action(input)).toEqual(DECIDE_FORBIDDEN);
+    expect(ctl.ran).toEqual([]);
+  });
+
+  it.each(DECIDE)('%s: an owner and an admin go through, as today', async (_name, action, input) => {
+    for (const role of ['owner', 'admin'] as Role[]) {
+      as(role);
+      expect(((await action(input)) as { ok: boolean }).ok).toBe(true);
+    }
+    expect(ctl.ran).toHaveLength(2);
+  });
+
+  it.each(DECIDE)('%s: the demo account is refused before the viewer is looked up', async (_name, action, input) => {
+    asManager();
+    ctl.viewer.isDemo = true;
+    expect(await action(input)).toEqual(DEMO);
+    expect(ctl.ran).toEqual([]);
+  });
+
+  it.each(DECIDE)('%s: a manager in a workspace that is the demo is refused', async (_name, action, input) => {
+    asManager();
+    ctl.people = { ...ctl.people, isDemo: true };
+    expect(await action(input)).toEqual(DEMO);
+    expect(ctl.ran).toEqual([]);
+  });
+
+  it.each(DECIDE)('%s: a failed viewer lookup is a plain failure and runs nothing', async (_name, action, input) => {
+    asManager();
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    ctl.lookupFails = true;
+    try {
+      expect(await action(input)).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
+    } finally {
+      ctl.lookupFails = false;
+      spy.mockRestore();
+    }
+    expect(ctl.ran).toEqual([]);
+  });
+
+  it.each(DECIDE)("%s: the database's own refusal reaches the manager unchanged", async (_name, action, input) => {
+    asManager();
+    ctl.result = { ok: false };
+    expect(await action(input)).toEqual({ ok: false, error: 'No.' });
+  });
+
+  it('still keeps the HR-only actions HR-only for a manager', async () => {
+    asManager();
+    for (const [name, action, input] of ADMIN) {
+      if (DECIDE.some(([n]) => n === name)) continue;
+      expect(await action(input), name).toEqual(FORBIDDEN);
+    }
+    expect(ctl.ran).toEqual([]);
   });
 });
 

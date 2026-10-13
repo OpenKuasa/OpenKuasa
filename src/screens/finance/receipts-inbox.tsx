@@ -1,197 +1,137 @@
-import { Upload, Inbox, Receipt, PieChart, ScanLine } from 'lucide-react';
-import { ScreenContainer } from '@/components/screen/screen-container';
-import { PageHeader } from '@/components/screen/page-header';
-import { BentoGrid, BentoCard, BentoStat } from '@/components/bento/bento';
-import { DonutStat, Sparkline, type Slice } from '@/components/charts';
-import { LiveDot } from '@/components/ui/live-dot';
-import { Button } from '@/components/ui/button';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { cn } from '@/lib/utils';
+  attachReceiptAction,
+  deleteReceiptAction,
+  detachReceiptAction,
+  readReceiptAction,
+  receiptLinkAction,
+  receiptToBillAction,
+  receiptToExpenseAction,
+  registerReceiptAction,
+  reviewReceiptAction,
+} from '@/app/(app)/finance/receipt-inbox-actions';
+import type { ReceiptMatchActions } from '@/components/finance/receipt-match-cards';
+import { type ReceiptInboxActions, ReceiptsInboxView } from '@/components/finance/receipts-inbox-view';
+import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
+import { listBills } from '@/lib/finance/bills';
+import { listContacts } from '@/lib/finance/contacts';
+import { listExpenseCategories, listExpenses } from '@/lib/finance/expenses';
+import { purchasesCategoryId } from '@/lib/finance/ledger';
+import { listProducts } from '@/lib/finance/products';
+import {
+  attachCandidates,
+  listAttachedReceipts,
+  matchedDocuments,
+  offeredContacts,
+  receiptInboxPlan,
+} from '@/lib/finance/receipt-match';
+import { receiptModelId, workspaceKeyState } from '@/lib/finance/receipt-reader';
+import { receiptReadingPlan } from '@/lib/finance/receipt-reading';
+import { receiptsInboxView } from '@/lib/finance/receipt-views';
+import { listInboxReceipts } from '@/lib/finance/receipts';
+import { todayUtc } from '@/lib/finance/view-helpers';
+import { createClient } from '@/lib/supabase/server';
+import { SAMPLE_INBOX_RECEIPTS } from './receipts-sample';
+import { SAMPLE_TODAY } from './sales-sample';
 
-/* ---- mock data (Rimba Ventures Sdn Bhd) --------------------------- */
-
-type ReceiptStatus = 'Matched' | 'Review' | 'Unmatched';
-
-type InboxReceipt = {
-  id: string;
-  file: string;
-  vendor: string;
-  date: string;
-  amount: string;
-  status: ReceiptStatus;
+const ACTIONS: ReceiptInboxActions = {
+  register: registerReceiptAction,
+  review: reviewReceiptAction,
+  remove: deleteReceiptAction,
 };
 
-const RECEIPTS: InboxReceipt[] = [
-  { id: '1', file: 'receipt-0042.jpg', vendor: 'Shell', date: '03 Oct 2026', amount: 'RM 142.50', status: 'Matched' },
-  { id: '2', file: 'receipt-0041.jpg', vendor: 'TNB', date: '02 Oct 2026', amount: 'RM 318.20', status: 'Matched' },
-  { id: '3', file: 'receipt-0040.png', vendor: 'Grab', date: '02 Oct 2026', amount: 'RM 36.00', status: 'Matched' },
-  { id: '4', file: 'receipt-0039.jpg', vendor: 'Lazada', date: '01 Oct 2026', amount: 'RM 249.90', status: 'Review' },
-  { id: '5', file: 'receipt-0038.pdf', vendor: 'Printhub', date: '30 Sep 2026', amount: 'RM 310.00', status: 'Matched' },
-  { id: '6', file: 'receipt-0037.jpg', vendor: 'Kedai Runcit', date: '29 Sep 2026', amount: 'RM 123.40', status: 'Review' },
-  { id: '7', file: 'receipt-0036.pdf', vendor: 'Nusantara Logistics', date: '28 Sep 2026', amount: 'RM 540.00', status: 'Unmatched' },
-  { id: '8', file: 'receipt-0035.jpg', vendor: 'Lim Hardware', date: '27 Sep 2026', amount: 'RM 88.60', status: 'Matched' },
-];
-
-const STATUS_STYLES: Record<ReceiptStatus, string> = {
-  Matched: 'bg-emerald-500/15 text-emerald-600',
-  Review: 'bg-amber-500/15 text-amber-600',
-  Unmatched: 'bg-red-500/15 text-red-600',
+const MATCH_ACTIONS: ReceiptMatchActions = {
+  toExpense: receiptToExpenseAction,
+  toBill: receiptToBillAction,
+  attach: attachReceiptAction,
+  detach: detachReceiptAction,
 };
 
-/* KPI sparkline trends ------------------------------------------------ */
-const SPARK_REVIEW = [1, 3, 2, 4, 3, 2, 3, 2];
-const SPARK_MATCHED = [2, 3, 3, 4, 4, 5, 4, 5];
-const SPARK_UNMATCHED = [0, 1, 0, 2, 1, 1, 0, 1];
-
-/** Inbox by match status — sums to 8. */
-const BY_STATUS: Slice[] = [
-  { key: 'matched', label: 'Matched', value: 5, color: 'var(--chart-2)' },
-  { key: 'review', label: 'To review', value: 2, color: 'var(--chart-3)' },
-  { key: 'unmatched', label: 'Unmatched', value: 1, color: 'var(--chart-4)' },
-];
-
-/* ------------------------------------------------------------------ */
-
-export default function ReceiptsInboxScreen() {
-  return (
-    <ScreenContainer>
-      <PageHeader
-        title="Receipts Inbox"
-        subtitle="Snap, upload and auto-extract receipts, Saudara."
-        actions={
-          <Button size="sm">
-            <Upload className="size-4" />
-            Upload Receipt
-          </Button>
-        }
+/**
+ * Every receipt in the inbox. Anyone who may edit adds receipts, reviews
+ * them, makes an expense or a draft bill from one, ties one to an expense or
+ * a bill that exists, unties it, and deletes one that is tied to nothing; the
+ * bucket and the database decide the same again. Untying from an approved
+ * expense or a posted bill is an owner's or admin's (`sign-off-finance`, the
+ * same people the database's `finance_may_decide` names). Anyone who can see
+ * a receipt can download its file. A viewer and the demo workspace read: the
+ * demo's guests are anonymous accounts, which the bucket refuses, so they get
+ * no upload area and are told why. A session that still owes a second factor
+ * never gets this far (`getViewer` sends it to verify first).
+ *
+ * With no receipt there is nothing to match, so the expenses, the bills and
+ * what the forms offer are read only once the inbox holds one.
+ *
+ * Anyone who may edit is also handed the action that sends a receipt to be
+ * read by AI, with what the card needs to ask first: whether this server
+ * names a model for receipts, and whether the workspace has an AI key (asked
+ * as the caller, and only when some receipt on the page could be read). The
+ * page itself reads no receipt and sends nothing: only the card's button does.
+ */
+export default async function ReceiptsInboxScreen() {
+  if (!hasSupabaseEnv()) {
+    return (
+      <ReceiptsInboxView
+        rows={SAMPLE_INBOX_RECEIPTS}
+        view={receiptsInboxView(SAMPLE_INBOX_RECEIPTS)}
+        today={SAMPLE_TODAY}
+        followClock={false}
       />
-
-      <BentoGrid>
-        {/* KPI row + small status donut */}
-        <BentoCard tone="primary" className="col-span-1 md:col-span-3">
-          <BentoStat
-            label="To review"
-            value="2"
-            delta="-1"
-            onPrimary
-            chart={
-              <Sparkline data={SPARK_REVIEW} color="var(--primary-foreground)" height={36} />
+    );
+  }
+  const viewer = await getViewer();
+  const ctx = { client: await createClient(), orgId: viewer.orgId };
+  const rows = await listInboxReceipts(ctx);
+  const plan = receiptInboxPlan(viewer, rows.length > 0);
+  const readingPlan = receiptReadingPlan(viewer, rows);
+  // How each matched receipt's document stands is shown to everyone; the forms and the picker are a writer's.
+  const [attached, expenses, bills, contacts, categories, products, defaultCategoryId, keyState] = await Promise.all([
+    plan.readsDocuments ? listAttachedReceipts(ctx) : [],
+    plan.readsDocuments ? listExpenses(ctx) : [],
+    plan.readsDocuments ? listBills(ctx) : [],
+    plan.readsForms ? listContacts(ctx) : [],
+    plan.readsForms ? listExpenseCategories(ctx) : [],
+    plan.readsForms ? listProducts(ctx) : [],
+    plan.readsForms ? purchasesCategoryId(ctx) : null,
+    // Not asked: the card shows the question, and the action answers when it is pressed.
+    readingPlan.readsKeyState ? workspaceKeyState(ctx.client) : ('unknown' as const),
+  ]);
+  const offered = offeredContacts(contacts);
+  return (
+    <ReceiptsInboxView
+      rows={rows}
+      view={receiptsInboxView(rows)}
+      today={todayUtc()}
+      linkOf={receiptLinkAction}
+      documents={matchedDocuments(attached, expenses, bills)}
+      writer={
+        plan.canEdit
+          ? {
+              orgId: viewer.orgId,
+              actions: ACTIONS,
+              match: {
+                actions: MATCH_ACTIONS,
+                // Decided here, on the server, and nowhere else.
+                canDecide: plan.canDecide,
+                // Only what the forms read goes to the browser.
+                contacts: offered.contacts,
+                categories,
+                suppliers: offered.suppliers,
+                products: products.filter((p) => p.active),
+                defaultCategoryId: defaultCategoryId ?? '',
+                candidates: attachCandidates(expenses, bills),
+              },
+              reading: readingPlan.offered
+                ? {
+                    read: readReceiptAction,
+                    setUp: receiptModelId() !== null,
+                    keyState,
+                    canManageKey: readingPlan.canManageKey,
+                  }
+                : undefined,
             }
-          />
-        </BentoCard>
-        <BentoCard className="col-span-1 md:col-span-3">
-          <BentoStat
-            label="Matched"
-            value="5"
-            delta="+1"
-            deltaTone="up"
-            chart={<Sparkline data={SPARK_MATCHED} color="var(--chart-2)" height={36} />}
-          />
-        </BentoCard>
-        <BentoCard className="col-span-1 md:col-span-3">
-          <BentoStat
-            label="Unmatched"
-            value="1"
-            delta="+1"
-            deltaTone="down"
-            chart={<Sparkline data={SPARK_UNMATCHED} color="var(--chart-4)" height={36} />}
-          />
-        </BentoCard>
-        <BentoCard
-          title="By status"
-          subtitle="Current inbox"
-          icon={PieChart}
-          className="col-span-1 md:col-span-3"
-        >
-          <DonutStat
-            data={BY_STATUS}
-            height={150}
-            showLegend={false}
-            centerValue="8"
-            centerLabel="receipts"
-          />
-        </BentoCard>
-
-        {/* Inbox table with upload affordance */}
-        <BentoCard
-          title="Receipt inbox"
-          subtitle="Auto-extracted, pending e-Invois match"
-          icon={Inbox}
-          flush
-          className="col-span-2 md:col-span-12"
-        >
-          <div className="px-4">
-            <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-muted/30 px-4 py-6 text-center">
-              <div className="grid size-10 place-items-center rounded-full bg-primary/10 text-primary">
-                <ScanLine className="size-5" />
-              </div>
-              <p className="text-sm font-medium">
-                Drag and drop receipts here, or snap a photo
-              </p>
-              <p className="text-xs text-muted-foreground">
-                JPG, PNG or PDF — auto-extracted and matched to bills and expenses
-              </p>
-              <Button variant="outline" size="sm" className="mt-1">
-                <Upload className="size-4" />
-                Browse files
-              </Button>
-            </div>
-          </div>
-          <div className="mt-3 overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/40">
-                  <TableHead>Receipt</TableHead>
-                  <TableHead>Vendor</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {RECEIPTS.map((r) => (
-                  <TableRow key={r.id}>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <div className="grid size-8 shrink-0 place-items-center rounded bg-muted">
-                          <Receipt className="size-4 text-muted-foreground" />
-                        </div>
-                        <span className="whitespace-nowrap font-medium">{r.file}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap">{r.vendor}</TableCell>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">{r.date}</TableCell>
-                    <TableCell className="whitespace-nowrap text-right font-medium tabular-nums">{r.amount}</TableCell>
-                    <TableCell>
-                      <span className="flex items-center gap-2">
-                        <LiveDot active={r.status === 'Matched'} />
-                        <span
-                          className={cn(
-                            'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium',
-                            STATUS_STYLES[r.status],
-                          )}
-                        >
-                          {r.status}
-                        </span>
-                      </span>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-          <div className="flex items-center justify-between border-t px-4 py-3 text-sm text-muted-foreground">
-            <span>Showing {RECEIPTS.length} receipts</span>
-          </div>
-        </BentoCard>
-      </BentoGrid>
-    </ScreenContainer>
+          : undefined
+      }
+      demo={viewer.isDemo}
+    />
   );
 }

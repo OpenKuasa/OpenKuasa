@@ -1,19 +1,18 @@
 import { afterAll, beforeAll, expect } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { createOrg, joinDemo, signInAnon, liveClient, signInOwner } from './helpers/live-workspaces';
 import { test } from 'vitest';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const client = (): SupabaseClient =>
-  createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
+const client = liveClient;
 
-async function anonUser() {
+// The owner is a signed-up account (only those may create a workspace); everyone
+// else is an anonymous sign-in.
+async function anonUser(signIn: typeof signInAnon | typeof signInOwner = signInAnon) {
   const c = client();
-  const { data, error } = await c.auth.signInAnonymously();
+  const { data, error } = await signIn(c);
   expect(error, error?.message).toBeNull();
   return { c, uid: data.user!.id };
 }
@@ -22,10 +21,8 @@ let owner: Awaited<ReturnType<typeof anonUser>> & { orgId: string };
 
 beforeAll(async () => {
   if (!hasSupabaseEnv) return;
-  const o = await anonUser();
-  const { data: orgId, error } = await o.c.rpc('create_org_for_current_user', {
-    org_name: 'Reach Test Sdn Bhd',
-  });
+  const o = await anonUser(signInOwner);
+  const { data: orgId, error } = await createOrg(o.c, 'Reach Test Sdn Bhd');
   expect(error, error?.message).toBeNull();
   owner = { ...o, orgId: orgId as string };
 });
@@ -54,7 +51,7 @@ testWithSupabase('an owner can now insert a campaign (writes enabled in slice 2)
 
 testWithSupabase('the demo org is seeded and a demo viewer can read it', async () => {
   const d = await anonUser();
-  const { data: demoId, error } = await d.c.rpc('join_demo_org');
+  const { data: demoId, error } = await joinDemo(d.c);
   expect(error, error?.message).toBeNull();
 
   const campaigns = await d.c.from('campaigns').select('id').eq('org_id', demoId);
@@ -80,7 +77,7 @@ testWithSupabase('the demo org is seeded and a demo viewer can read it', async (
 
 testWithSupabase('demo leads honor the exact channel and stage marginals', async () => {
   const d = await anonUser();
-  const { data: demoId, error } = await d.c.rpc('join_demo_org');
+  const { data: demoId, error } = await joinDemo(d.c);
   expect(error, error?.message).toBeNull();
 
   const { data, error: leadsError } = await d.c

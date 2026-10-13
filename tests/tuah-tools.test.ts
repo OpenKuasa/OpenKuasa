@@ -70,20 +70,33 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
 });
 
 const { runTuah } = await import('@/lib/ai/agents/orchestrator');
+// After this file's mocks and the values they use are in place: the helpers load the tools too.
+const { withTuah } = await import('./helpers/approvals');
+const { createSeedPeopleData } = await import('@/lib/people/seed');
 
 const member = () => ({
   data: createSeedReachData(),
   write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true },
 });
 const viewer = () => ({ data: createSeedReachData() });
+const peopleData = () => createSeedPeopleData();
+const peopleHr = () => ({
+  data: peopleData(),
+  viewer: { employeeId: null, isHr: true, isDemo: false },
+  write: { ctx: { client: {} as never, orgId: 'org1' }, tier: 'hr' as const, employeeId: null, receipt: null, userId: 'u1' },
+});
+const peopleReadOnly = () => ({
+  data: peopleData(),
+  viewer: { employeeId: null, isHr: false, isDemo: false },
+});
 const ask = [{ role: 'user' as const, content: 'delete the Brand Awareness campaign' }];
 
 describe('Tuah has the marketing tools', () => {
   it('gives the model the lookups, and the changes only to someone who may make them', async () => {
     seen.toolNames = [];
     seen.layers = [];
-    await runTuah(ask, member()).consumeStream();
-    await runTuah(ask, viewer()).consumeStream();
+    await runTuah(...withTuah(ask, member())).consumeStream();
+    await runTuah(...withTuah(ask, viewer())).consumeStream();
 
     const [forMember, forViewer] = seen.toolNames;
     expect(forMember).toContain('getLeadSummary');
@@ -96,19 +109,36 @@ describe('Tuah has the marketing tools', () => {
     expect(seen.layers.every((layer) => layer === 'orchestrator')).toBe(true);
   });
 
+  it('holds the HR tools when HR is passed, with changes only for someone who may make them', async () => {
+    seen.toolNames = [];
+    // Single-agent Tuah (no team): reach + HR tools combined into one set.
+    await runTuah(...withTuah(ask, member(), undefined, undefined, undefined, undefined, undefined, undefined, peopleHr())).consumeStream();
+    await runTuah(...withTuah(ask, member(), undefined, undefined, undefined, undefined, undefined, undefined, peopleReadOnly())).consumeStream();
+
+    const [withHrWrite, hrReadOnly] = seen.toolNames;
+    expect(withHrWrite).toContain('listEmployees');
+    expect(withHrWrite).toContain('getPayrollSummary');
+    expect(withHrWrite).toContain('decideLeave');
+    // Reach and HR share one set without a name clash.
+    expect(withHrWrite).toContain('getCampaigns');
+    expect(hrReadOnly).toContain('listEmployees');
+    expect(hrReadOnly).not.toContain('decideLeave');
+    expect(hrReadOnly).not.toContain('createEmployee');
+  });
+
   it('tells the model where the user is asking from', async () => {
     seen.systems = [];
-    await runTuah(ask, viewer(), undefined, undefined, {
+    await runTuah(...withTuah(ask, viewer(), undefined, undefined, {
       key: 'crm',
       product: 'Kasturi',
       item: 'Contacts',
-    }).consumeStream();
+    })).consumeStream();
     expect(seen.systems[0]).toContain('Kasturi › Contacts');
   });
 
   it('a change does not run until it is approved', async () => {
     seen.deletes = 0;
-    const result = runTuah(ask, member());
+    const result = runTuah(...withTuah(ask, member()));
     await result.consumeStream();
     expect(seen.deletes).toBe(0);
     const parts = (await result.content) as { type: string }[];
@@ -116,7 +146,7 @@ describe('Tuah has the marketing tools', () => {
   });
 
   const resume = (approved: boolean) =>
-    runTuah(
+    runTuah(...withTuah(
       [
         ...ask,
         {
@@ -137,7 +167,7 @@ describe('Tuah has the marketing tools', () => {
         },
       ],
       member(),
-    );
+    ));
 
   it('approve: the resumed turn makes the change', async () => {
     seen.deletes = 0;

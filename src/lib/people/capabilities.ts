@@ -12,6 +12,8 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
+import { PAYROLL_REFUSALS } from './payroll-refusals';
+import { REPORTS_TO_REFUSALS } from './reporting-refusals';
 import type { Department } from './types';
 
 export type PeopleWriteContext = { client: SupabaseClient; orgId: string };
@@ -19,6 +21,17 @@ export type CapResult<T> = { ok: true; data: T } | { ok: false; error: string };
 export type Refusal = { ok: false; error: string };
 
 export const WRITE_FAILED = 'That change could not be saved. Please try again.';
+
+/**
+ * What a write answered. `unknown` is the generic {@link WRITE_FAILED} sentence: the database error, a lost
+ * network call or an unmapped failure, so the change may or may not have been saved. Any other refusal is a
+ * sentence the rules produced and is definite. A form with something to undo on refusal (a receipt upload)
+ * must undo only on `refused`.
+ */
+export function writeOutcome(result: CapResult<unknown>): 'saved' | 'refused' | 'unknown' {
+  if (result.ok) return 'saved';
+  return result.error === WRITE_FAILED ? 'unknown' : 'refused';
+}
 
 type DbError = { code?: string; message?: string } | null | undefined;
 
@@ -199,7 +212,6 @@ const directoryFields = {
   department_id: id.nullable().optional().describe('The department, by its id from listDepartments.'),
   designation: text(120).describe('Job title, such as Sales Executive.'),
   employment_type: z.enum(['full_time', 'part_time', 'contract', 'intern']).optional(),
-  is_manager: z.boolean().optional(),
   join_date: day('Join date'),
   status: z.enum(['active', 'inactive']).optional(),
   private: privateFields.optional(),
@@ -236,7 +248,6 @@ function directoryValues(input: DirectoryInput): CapResult<Record<string, unknow
   if (input.department_id !== undefined) out.department_id = input.department_id;
   if (input.designation !== undefined) out.designation = blankToNull(input.designation);
   if (input.employment_type !== undefined) out.employment_type = input.employment_type;
-  if (input.is_manager !== undefined) out.is_manager = input.is_manager;
   if (input.join_date !== undefined) {
     if (input.join_date !== null && !isRealDay(input.join_date)) {
       return refuse('Join date must be a real date, as YYYY-MM-DD.');
@@ -329,9 +340,12 @@ export async function createEmployee(
       .from('hr_employee_private')
       .insert({ ...priv, employee_id: saved.id, org_id: ctx.orgId });
     if (privateError) {
-      // Two tables, no transaction: take the employee back out so nothing is left half-made.
-      const undo = await ctx.client.from('hr_employees').delete().eq('id', saved.id).eq('org_id', ctx.orgId);
+      // Two tables, no transaction: take the employee back out so nothing is left half-made. Through the
+      // function, as every delete of an employee is: signed-in users hold no DELETE on the table.
+      const undo = await ctx.client.rpc('hr_delete_employee', { p_org: ctx.orgId, p_employee: saved.id });
       if (undo.error) writeFailed('createEmployee (rollback)', undo.error);
+      // null: the function deleted nothing, so the employee is still there.
+      else if (!undo.data) writeFailed('createEmployee (rollback)', { message: 'the employee was not removed' });
       return writeFailed('createEmployee (private details)', privateError);
     }
   }
@@ -418,24 +432,39 @@ export async function setEmployeeStatus(
   return updateEmployee(ctx, { id: target, status });
 }
 
-/** Deletes an employee. Their leave, claims, payslips and every other HR row go with them. */
+/**
+ * Deletes an employee. Their leave, claims, payslips and every other HR row go with them. It goes through
+ * `hr_delete_employee`, which hands back the paths of the employee's document files (already released); each is
+ * then removed by `removeFiles` (the server's `removeDocumentFiles`, one path at a time). A file that cannot be
+ * removed never fails the delete: the sweep will find it. Without `removeFiles` the files stay for the sweep.
+ * The paths are never part of the reply.
+ */
 export async function deleteEmployee(
   ctx: PeopleWriteContext,
   input: z.infer<typeof deleteEmployeeInput>,
+  removeFiles?: (paths: readonly string[]) => Promise<void>,
 ): Promise<CapResult<{ id: string; name: string }>> {
   const parsed = parseInput(deleteEmployeeInput, input);
   if (!parsed.ok) return parsed;
   const { id: target } = parsed.data;
-  const { data, error } = await ctx.client
-    .from('hr_employees')
-    .delete()
-    .eq('id', target)
-    .eq('org_id', ctx.orgId)
-    .select('id,name')
-    .maybeSingle();
+  const { data, error } = await ctx.client.rpc('hr_delete_employee', { p_org: ctx.orgId, p_employee: target });
+  // A trigger refuses an employee with a paid payslip; its message is the bare code.
+  if (error?.message === 'HR_EMPLOYEE_HAS_PAID_PAYSLIPS') return refuse(PAYROLL_REFUSALS.HR_EMPLOYEE_HAS_PAID_PAYSLIPS);
   if (error) return writeFailed('deleteEmployee', error);
-  if (!data) return refuse(EMPLOYEE_MISSING);
-  return { ok: true, data: data as { id: string; name: string } };
+  // null: nothing was deleted (no such employee here, or the caller may not delete it).
+  if (!data || typeof data !== 'object') return refuse(EMPLOYEE_MISSING);
+  const row = data as { id?: unknown; name?: unknown; document_paths?: unknown };
+  if (typeof row.id !== 'string' || typeof row.name !== 'string') return writeFailed('deleteEmployee', { message: 'unexpected reply' });
+  const paths = Array.isArray(row.document_paths) ? row.document_paths.filter((p): p is string => typeof p === 'string') : [];
+  if (removeFiles && paths.length > 0) {
+    try {
+      await removeFiles(paths);
+    } catch {
+      // The employee is gone; a leftover file is unreachable and the sweep finds it. Logged without any path.
+      console.error('[people-capability] deleteEmployee: document files could not be removed.');
+    }
+  }
+  return { ok: true, data: { id: row.id, name: row.name } };
 }
 
 /** Links an employee record to a workspace member's account, or unlinks it with `user_id: null`. */
@@ -460,7 +489,52 @@ export async function linkEmployeeToMember(
   if (violates(error, 'P0001', 'not a member of this workspace') || violates(error, FOREIGN_KEY)) {
     return refuse('That person is not a member of this workspace.');
   }
+  // Only an account that has signed up and confirmed its email address can be linked (same trigger).
+  if (violates(error, 'P0001', 'has not confirmed their email')) {
+    return refuse('That member has not confirmed their email address yet, so their account cannot be linked.');
+  }
   if (error) return writeFailed('linkEmployeeToMember', error);
   if (!data) return refuse(EMPLOYEE_MISSING);
   return { ok: true, data: data as { id: string; name: string; user_id: string | null } };
+}
+
+// ---- Reporting lines -------------------------------------------------------------
+
+export const setReportsToInput = z.object({
+  id: employeeId,
+  manager_id: id
+    .nullable()
+    .describe('The employee they report to, by their id from listEmployees, or null for nobody.'),
+});
+
+/** The leading `EMP_...` code of a database message, or null when it does not begin with one. */
+const leadingEmpCode = (message: string | undefined): string | null => /^EMP_[A-Z_]+/.exec(message ?? '')?.[0] ?? null;
+
+/**
+ * Who an employee reports to, through `hr_set_reports_to`: the column is not writable any other way, and the
+ * database refuses a loop, another workspace's manager and anyone who is not an owner or admin. Only the
+ * reply's `id` and `reports_to` are read.
+ */
+export async function setReportsTo(
+  ctx: PeopleWriteContext,
+  input: z.infer<typeof setReportsToInput>,
+): Promise<CapResult<{ id: string; reports_to: string | null }>> {
+  const parsed = parseInput(setReportsToInput, input);
+  if (!parsed.ok) return parsed;
+  const { data, error } = await ctx.client.rpc('hr_set_reports_to', {
+    p_employee: parsed.data.id,
+    p_manager: parsed.data.manager_id,
+  });
+  if (error) {
+    const code = leadingEmpCode(error.message);
+    if (code && Object.hasOwn(REPORTS_TO_REFUSALS, code)) {
+      return refuse(REPORTS_TO_REFUSALS[code as keyof typeof REPORTS_TO_REFUSALS]);
+    }
+    return writeFailed('setReportsTo', error);
+  }
+  const row = data as { id?: unknown; reports_to?: unknown } | null;
+  if (!row || typeof row !== 'object' || typeof row.id !== 'string') {
+    return writeFailed('setReportsTo', { message: 'unexpected reply' });
+  }
+  return { ok: true, data: { id: row.id, reports_to: typeof row.reports_to === 'string' ? row.reports_to : null } };
 }

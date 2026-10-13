@@ -1,4 +1,4 @@
-import { Filter, Plus, Search, Star, TrendingUp, Users } from 'lucide-react';
+import { Filter, Search, Star, TrendingUp, Users } from 'lucide-react';
 import { ScreenContainer } from '@/components/screen/screen-container';
 import { PageHeader } from '@/components/screen/page-header';
 import { BentoGrid, BentoCard, BentoStat } from '@/components/bento/bento';
@@ -13,8 +13,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { can } from '@/lib/auth/permissions';
+import { getViewer } from '@/lib/auth/viewer';
 import { cn } from '@/lib/utils';
+import { klDateOf } from '@/lib/hire/interview-time';
 import { buildBoardModel, type BoardModel } from '@/lib/hire/lists';
+import { ApplicationMenu } from '@/screens/hire/application-actions';
+import { AddCandidate } from '@/screens/hire/candidate-forms';
+import { DeletionNotice } from '@/screens/hire/delete-dialog';
+import { InterviewDialogHost } from '@/screens/hire/interview-dialog';
 import { FUNNEL_COLOR, LOAD_FAILED, Muted, loadHire } from '@/screens/hire/parts';
 
 type Candidate = BoardModel['stages'][number]['candidates'][number];
@@ -34,7 +41,8 @@ const APPLICATIONS_SERIES: Series[] = [
 
 function Stars({ rating }: { rating: number }) {
   return (
-    <div className="flex items-center gap-0.5" title={`Rating ${rating}/5`}>
+    // The rating in words for a screen reader: the stars are not the only signal.
+    <div className="flex items-center gap-0.5" role="img" aria-label={`Rated ${rating} out of 5`} title={`Rated ${rating} out of 5`}>
       {Array.from({ length: 5 }, (_, i) => (
         <Star
           key={i}
@@ -50,10 +58,14 @@ function Stars({ rating }: { rating: number }) {
   );
 }
 
-function CandidateCard({ candidate }: { candidate: Candidate }) {
+/** The id of a board column's heading: where focus goes when a card leaves that column for good. */
+const headingId = (stage: string) => `hire-stage-${stage}`;
+
+function CandidateCard({ candidate, canEdit }: { candidate: Candidate; canEdit: boolean }) {
   return (
     <div className="space-y-2 rounded-xl border bg-card p-3 shadow-sm transition-colors hover:border-primary/40">
-      <div className="flex items-center gap-2">
+      {/* Wraps, so the menu's "Moving…" line and any refusal take a line of their own inside the card. */}
+      <div className="flex flex-wrap items-center gap-2">
         <span className="grid size-7 shrink-0 place-items-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary">
           {candidate.name.charAt(0)}
         </span>
@@ -66,6 +78,16 @@ function CandidateCard({ candidate }: { candidate: Candidate }) {
           </p>
         </div>
         <LiveDot active={candidate.active} />
+        {/* Ids, names and where the application stands: nothing else goes to the browser. */}
+        <ApplicationMenu
+          application={{
+            id: candidate.id, candidateId: candidate.candidateId, name: candidate.name, job: candidate.role,
+            stage: candidate.stage, outcome: candidate.outcome, rating: candidate.rating, rejectReason: candidate.rejectReason,
+            poolStatus: candidate.poolStatus,
+          }}
+          canEdit={canEdit}
+          columnHeadingId={headingId(candidate.stage)}
+        />
       </div>
       <div className="flex items-center justify-between gap-2">
         {candidate.rating === null ? (
@@ -84,8 +106,19 @@ function CandidateCard({ candidate }: { candidate: Candidate }) {
   );
 }
 
+/**
+ * The server's clock for the interview form: the instant itself (the form's checks tell the time from it) and
+ * today in Kuala Lumpur for the date field. The browser's own clock and its "today" can be wrong.
+ */
+const serverClock = () => {
+  const serverNow = new Date().toISOString();
+  return { serverNow, today: klDateOf(serverNow) };
+};
+
 export default async function CandidatesScreen() {
-  const { model } = await loadHire('candidates', buildBoardModel);
+  const [{ model }, viewer] = await Promise.all([loadHire('candidates', buildBoardModel), getViewer()]);
+  // Worked out once for the screen. The actions check again on the server, so this only decides what is drawn.
+  const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
   const funnel: Slice[] = (model?.funnel ?? []).map((f) => ({
     key: f.key,
     label: f.label,
@@ -103,14 +136,16 @@ export default async function CandidatesScreen() {
             <Button variant="outline" size="sm" disabled title="Coming soon">
               Export
             </Button>
-            <Button size="sm" disabled title="Coming soon">
-              <Plus className="size-4" />
-              Add Candidate
-            </Button>
+            {/* Only for someone who may edit; the action checks again. The jobs it can pick: ids and titles, nothing else. */}
+            {canEdit ? <AddCandidate jobs={model?.jobs ?? []} /> : null}
           </>
         }
       />
 
+      {/* Where "Deleted …" is said: the card it was said about has gone. Only for someone who may edit. */}
+      {canEdit ? <DeletionNotice className="mb-3" /> : null}
+      {/* The screen's one interview dialog, closed until a card's menu opens it. It is not the card's: a card that moves column is drawn again. */}
+      {canEdit ? <InterviewDialogHost {...serverClock()} /> : null}
       <BentoGrid className="mb-6">
         {/* KPI row: headline figures only, the tables hold no history to chart */}
         <BentoCard tone="primary" className="col-span-1 md:col-span-3">
@@ -203,7 +238,14 @@ export default async function CandidatesScreen() {
             >
               <div className="mb-2 flex items-center gap-2 px-2 py-1.5">
                 <span className={`size-2 rounded-full ${STAGE_DOT[stage.key]}`} />
-                <span className="text-sm font-semibold">{stage.name}</span>
+                {/* Focusable by script only: a rejected or withdrawn card hands focus here as it leaves. */}
+                <h3
+                  id={headingId(stage.key)}
+                  tabIndex={-1}
+                  className="rounded-sm text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  {stage.name}
+                </h3>
                 <span className="ml-auto flex items-center gap-1.5 rounded-full bg-background px-2 text-xs text-muted-foreground">
                   <Users className="size-3" />
                   {stage.count}
@@ -214,7 +256,7 @@ export default async function CandidatesScreen() {
                   <Muted>None</Muted>
                 ) : (
                   stage.candidates.map((candidate) => (
-                    <CandidateCard key={candidate.id} candidate={candidate} />
+                    <CandidateCard key={candidate.id} candidate={candidate} canEdit={canEdit} />
                   ))
                 )}
               </div>

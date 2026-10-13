@@ -4,6 +4,8 @@
  * every comparison starts from {@link todayInMalaysia} and stays in strings.
  */
 
+import type { Weekday } from './types';
+
 /** Malaysia is UTC+8 all year, with no daylight saving, so no locale data is needed. */
 const MALAYSIA_OFFSET = 8 * 3_600_000;
 const DAY = 86_400_000;
@@ -27,6 +29,11 @@ export function isRealDate(value: string): boolean {
 /** Today's date in Kuala Lumpur. */
 export function todayInMalaysia(now: Date): string {
   return iso(now.getTime() + MALAYSIA_OFFSET);
+}
+
+/** The time now in Kuala Lumpur, as `HH:MM`. */
+export function timeInMalaysia(now: Date): string {
+  return clockTime(now.toISOString());
 }
 
 /** The `YYYY-MM-DD` an instant falls on in Malaysia. */
@@ -83,6 +90,13 @@ export function formatDate(date: string): string {
 /** `October 2026`. */
 export function monthYearLabel(date: string): string {
   return `${MONTH_NAMES[Number(date.slice(5, 7)) - 1]} ${date.slice(0, 4)}`;
+}
+
+const WEEKDAY_KEYS: Weekday[] = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+
+/** `fri`: the key `hr_settings.work_week` uses for the date's weekday. */
+export function weekdayKey(date: string): Weekday {
+  return WEEKDAY_KEYS[new Date(ms(date)).getUTCDay()];
 }
 
 /** `Friday`. */

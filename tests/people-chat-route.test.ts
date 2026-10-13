@@ -11,12 +11,35 @@ const ctl = vi.hoisted(() => ({
   usedKeys: [] as (string | undefined)[],
   calls: [] as { system: string; tools: string[] }[],
   freeConsumed: 0,
+  /** What consume_ai_quota answers on a workspace key: turns left today, or -1 when used up. */
+  dailyRemaining: 100 as number,
+  dailyConsumed: 0,
   /** Tables the provider read, to prove which data the tools were given. */
   tablesRead: [] as string[],
   /** What the route handed to the runner. */
   captured: null as null | import('@/lib/ai/products').PeopleAccess,
   orgFails: false,
   orgLookups: 0,
+  /** What the claim write path was given, and what the receipt upload was given. */
+  submitted: [] as unknown[],
+  uploaded: [] as { userId: string; bytes: string; mediaType: string }[],
+  /** The ids hr_my_team answers: the signed-in person's direct reports. */
+  team: [] as string[],
+}));
+
+vi.mock('@/lib/people/pay-requests', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/people/pay-requests')>()),
+  submitClaim: async (_ctx: unknown, input: unknown) => {
+    ctl.submitted.push(input);
+    return { ok: true as const, data: { id: 'c1', status: 'pending', has_receipt: true } };
+  },
+}));
+vi.mock('@/lib/people/receipts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/people/receipts')>()),
+  uploadReceipt: async (_client: unknown, userId: string, body: Buffer, mediaType: string) => {
+    ctl.uploaded.push({ userId, bytes: body.toString(), mediaType });
+    return { ok: true as const, data: { path: `${userId}/uploaded.png` } };
+  },
 }));
 
 vi.mock('@/lib/ai/agents/orchestrator', async (importOriginal) => {
@@ -34,10 +57,17 @@ vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({
     auth: { getUser: async () => ({ data: { user: ctl.user }, error: null }) },
     rpc: async (name: string) => {
-      if (name === 'org_ai_key_ciphertext') return { data: ctl.sealedKey, error: null };
+      if (name === 'org_ai_key_status') {
+        return { data: ctl.sealedKey ? [{ key_hint: 'sk-or-…aaaa' }] : [], error: null };
+      }
       if (name === 'consume_free_question') {
         ctl.freeConsumed += 1;
         return { data: ctl.freeRemaining, error: null };
+      }
+      if (name === 'hr_my_team') return { data: ctl.team, error: null };
+      if (name === 'consume_ai_quota') {
+        ctl.dailyConsumed += 1;
+        return { data: ctl.dailyRemaining, error: null };
       }
       return { data: null, error: { message: `unexpected rpc ${name}` } };
     },
@@ -52,6 +82,23 @@ vi.mock('@/lib/supabase/server', () => ({
         range: async () => ({ data: [], error: null }),
         maybeSingle: async () => ({
           data: table === 'orgs' ? { slug: ctl.slug } : table === 'hr_employees' ? ctl.linkedEmployee : null,
+          error: null,
+        }),
+      };
+      return query;
+    },
+  }),
+}));
+
+// The sealed key is read on the server, by the service-role client.
+vi.mock('@/lib/supabase/service', () => ({
+  serviceClient: () => ({
+    from: () => {
+      const query = {
+        select: () => query,
+        eq: () => query,
+        maybeSingle: async () => ({
+          data: ctl.sealedKey ? { ciphertext: ctl.sealedKey } : null,
           error: null,
         }),
       };
@@ -108,13 +155,39 @@ vi.mock('@/lib/ai/provider', async (importOriginal) => {
 
 const SECRET = 'test-secret-for-sealing-workspace-keys-0123456789';
 const { encryptApiKey } = await import('@/lib/ai/key-crypto');
+
+const KEY_ORG = '11111111-1111-4111-8111-111111111111';
+/** Stores a key sealed for the caller's workspace, as the server does. */
+const sealForWorkspace = () => {
+  ctl.org = { orgId: KEY_ORG, role: 'owner' };
+  return encryptApiKey('sk-or-v1-workspace-key-aaaaaaaaaaaa', KEY_ORG);
+};
 const { PEOPLE_TOOL_NAMES } = await import('@/lib/ai/people-tools');
 const { PEOPLE_WRITE_TOOL_NAMES } = await import('@/lib/ai/products');
+// The route answers an approval from the server's record of the change. Here that record is what an earlier
+// request would have left: every change call the conversation holds, kept as proposed.
+vi.mock('@/lib/chat/approvals', async () => {
+  const { proposedBefore } = await import('./helpers/approvals');
+  return { chatApprovals: async (chat: { messages: never[] }) => proposedBefore(chat.messages) };
+});
+
 const { POST } = await import('@/app/api/people/chat/route');
 const { DEMO_ORG_SLUG } = await import('@/lib/people/types');
 
 /** What a linked member holds besides the lookups: their own leave, and nothing that decides. */
-const SELF_TOOLS = ['previewLeave', 'applyLeave', 'applyTimeOff', 'cancelLeaveRequest', 'cancelTimeOffRequest'];
+const SELF_TOOLS = [
+  'previewLeave', 'previewOvertime', 'applyLeave', 'applyTimeOff', 'cancelLeaveRequest', 'cancelTimeOffRequest',
+  'submitClaim', 'cancelClaim', 'submitOvertime', 'cancelOvertime',
+  'clockIn', 'clockOut', 'getMyAttendanceToday',
+  'saveGoal', 'removeGoal', 'enrolInTraining', 'withdrawFromTraining',
+];
+/** Anyone linked to an employee record holds these, an owner or admin included. */
+const CLOCK_TOOLS = ['clockIn', 'clockOut', 'getMyAttendanceToday'];
+/** What an owner or admin with no employee record holds: every change tool but the clock ones, and the settings lookup. */
+const UNLINKED_OWNER_TOOLS = [
+  ...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getAttendanceSettings', 'listLetterTemplates',
+  ...PEOPLE_WRITE_TOOL_NAMES.filter((name) => name !== 'clockIn' && name !== 'clockOut'),
+];
 
 function post(body: unknown): Request {
   return new Request('http://localhost/api/people/chat', {
@@ -139,10 +212,15 @@ beforeEach(() => {
   ctl.usedKeys = [];
   ctl.calls = [];
   ctl.freeConsumed = 0;
+  ctl.dailyRemaining = 100;
+  ctl.dailyConsumed = 0;
   ctl.tablesRead = [];
   ctl.captured = null;
   ctl.orgFails = false;
   ctl.orgLookups = 0;
+  ctl.submitted = [];
+  ctl.uploaded = [];
+  ctl.team = [];
   process.env.AI_KEYS_ENCRYPTION_SECRET = SECRET;
 });
 
@@ -172,7 +250,7 @@ describe('POST /api/people/chat gating', () => {
   });
 
   it('fails closed when the workspace key cannot be opened on this server', async () => {
-    ctl.sealedKey = encryptApiKey('sk-or-v1-workspace-key-aaaaaaaaaaaa');
+    ctl.sealedKey = sealForWorkspace();
     process.env.AI_KEYS_ENCRYPTION_SECRET = 'a-different-secret-than-the-one-used-to-seal-it';
     const res = await POST(post(validBody));
     expect(res.status).toBe(503);
@@ -198,7 +276,8 @@ describe('POST /api/people/chat gating', () => {
     expect(JSON.parse(text)).toMatchObject({ code: 'data_unavailable' });
     expect(text).not.toContain('secret db detail');
     expect(ctl.usedKeys).toEqual([]);
-    expect(spy).toHaveBeenCalledWith('[ask-lekiu] could not load the workspace:', 'secret db detail');
+    expect(spy).toHaveBeenCalledWith('[ask-lekiu] could not load the workspace:', 'Error');
+    expect(JSON.stringify(spy.mock.calls)).not.toContain('secret db detail');
     spy.mockRestore();
   });
 });
@@ -212,7 +291,7 @@ describe('POST /api/people/chat happy path', () => {
 
     const [call] = ctl.calls;
     expect(call.system).toMatch(/^You are Lekiu/);
-    expect(call.tools.sort()).toEqual([...PEOPLE_TOOL_NAMES, 'previewLeave', ...PEOPLE_WRITE_TOOL_NAMES].sort());
+    expect(call.tools.sort()).toEqual([...UNLINKED_OWNER_TOOLS].sort());
     expect(call.tools).not.toContain('getCampaigns');
     expect(call.tools).not.toContain('listDeals');
     expect(call.tools).not.toContain('listJobs');
@@ -224,7 +303,8 @@ describe('POST /api/people/chat happy path', () => {
 
   it('tells the tools an owner is HR', async () => {
     await (await POST(post(validBody))).text();
-    expect(ctl.captured!.viewer).toEqual({ employeeId: null, isHr: true, isDemo: false });
+    // An owner, and marked as one: the owner alone may decide their own request.
+    expect(ctl.captured!.viewer).toEqual({ employeeId: null, isHr: true, isDemo: false, isOwner: true });
   });
 
   it('tells the tools a member is not HR, and which employee they are', async () => {
@@ -261,7 +341,7 @@ describe('POST /api/people/chat happy path', () => {
   it.each(['owner', 'admin'])('gives an %s the change tools, bound to their own workspace', async (role) => {
     ctl.org = { orgId: 'org1', role };
     await (await POST(post({ ...validBody, orgId: 'someone-elses-org' }))).text();
-    for (const name of PEOPLE_WRITE_TOOL_NAMES) expect(ctl.calls[0].tools).toContain(name);
+    for (const name of UNLINKED_OWNER_TOOLS) expect(ctl.calls[0].tools).toContain(name);
     expect(ctl.captured!.write?.tier).toBe('hr');
     expect(ctl.captured!.write?.ctx.orgId).toBe('org1');
   });
@@ -281,9 +361,55 @@ describe('POST /api/people/chat happy path', () => {
     expect(ctl.captured!.write).toMatchObject({ tier: 'self', employeeId: 'emp-7' });
     expect(ctl.captured!.write?.ctx.orgId).toBe('org1');
     expect(ctl.calls[0].tools.sort()).toEqual([...PEOPLE_TOOL_NAMES, ...SELF_TOOLS].sort());
-    for (const name of ['decideLeave', 'decideTimeOff', 'setLeaveEntitlement', 'createEmployee', 'deleteDepartment']) {
+    for (const name of ['decideLeave', 'decideTimeOff', 'setLeaveEntitlement', 'createEmployee', 'deleteDepartment', 'decideClaim', 'decideOvertime', 'markClaimPaid', 'unmarkClaimPaid']) {
       expect(ctl.calls[0].tools).not.toContain(name);
     }
+    // Linked, so the clock tools are theirs; never the owner tools for corrections, holidays and settings.
+    for (const name of CLOCK_TOOLS) expect(ctl.calls[0].tools).toContain(name);
+    for (const name of ['correctAttendance', 'saveHoliday', 'removeHoliday', 'saveAttendanceSettings', 'getAttendanceSettings']) {
+      expect(ctl.calls[0].tools).not.toContain(name);
+    }
+  });
+
+  it('gives a linked member with people reporting to them the manager tier', async () => {
+    ctl.org = { orgId: 'org1', role: 'member' };
+    ctl.linkedEmployee = { id: 'emp-7' };
+    ctl.team = ['emp-8', 'emp-9'];
+    await (await POST(post(validBody))).text();
+    expect(ctl.captured!.viewer.managesTeam).toBe(true);
+    expect(ctl.captured!.write).toMatchObject({ tier: 'manager', employeeId: 'emp-7' });
+    for (const name of ['listMyTeam', 'getWaitingForMe', 'decideLeave', 'decideTimeOff', 'decideClaim', 'decideOvertime']) {
+      expect(ctl.calls[0].tools).toContain(name);
+    }
+    for (const name of ['markClaimPaid', 'correctAttendance', 'setReportsTo', 'setLeaveEntitlement', 'runPayroll']) {
+      expect(ctl.calls[0].tools).not.toContain(name);
+    }
+  });
+
+  it('keeps the hr tier for an owner who also has people reporting to them', async () => {
+    ctl.org = { orgId: 'org1', role: 'owner' };
+    ctl.linkedEmployee = { id: 'emp-3' };
+    ctl.team = ['emp-8'];
+    await (await POST(post(validBody))).text();
+    expect(ctl.captured!.write).toMatchObject({ tier: 'hr', employeeId: 'emp-3' });
+    expect(ctl.calls[0].tools).not.toContain('listMyTeam');
+  });
+
+  it('gives a manager no change tool in the demo workspace', async () => {
+    ctl.org = { orgId: 'org1', role: 'member' };
+    ctl.slug = DEMO_ORG_SLUG;
+    ctl.linkedEmployee = { id: 'emp-7' };
+    ctl.team = ['emp-8'];
+    await (await POST(post(validBody))).text();
+    expect(ctl.captured!.write).toBeUndefined();
+  });
+
+  it('takes the tier from the viewer, not from the request body', async () => {
+    ctl.org = { orgId: 'org1', role: 'member' };
+    ctl.linkedEmployee = { id: 'emp-7' };
+    await (await POST(post({ ...validBody, tier: 'hr', managesTeam: true, write: { tier: 'hr' } }))).text();
+    expect(ctl.captured!.write).toMatchObject({ tier: 'self' });
+    expect(ctl.captured!.viewer.managesTeam).toBeUndefined();
   });
 
   it('gives a member in the demo workspace the lookups only, even with a linked record', async () => {
@@ -308,6 +434,17 @@ describe('POST /api/people/chat happy path', () => {
     ctl.linkedEmployee = { id: 'emp-3' };
     await (await POST(post(validBody))).text();
     expect(ctl.captured!.write).toMatchObject({ tier: 'hr', employeeId: 'emp-3' });
+    // Their own record is linked, so they hold the clock tools too, for that record.
+    for (const name of CLOCK_TOOLS) expect(ctl.calls[0].tools).toContain(name);
+  });
+
+  it('gives an owner with no employee record the owner tools but no clock tool', async () => {
+    ctl.org = { orgId: 'org1', role: 'owner' };
+    await (await POST(post(validBody))).text();
+    for (const name of CLOCK_TOOLS) expect(ctl.calls[0].tools).not.toContain(name);
+    for (const name of ['correctAttendance', 'saveHoliday', 'removeHoliday', 'saveAttendanceSettings', 'getAttendanceSettings']) {
+      expect(ctl.calls[0].tools).toContain(name);
+    }
   });
 
   it('tells the tools the name of the employee who is asking', async () => {
@@ -318,13 +455,332 @@ describe('POST /api/people/chat happy path', () => {
   });
 
   it('runs on the workspace key without touching the free allowance', async () => {
-    ctl.sealedKey = encryptApiKey('sk-or-v1-workspace-key-aaaaaaaaaaaa');
+    ctl.sealedKey = sealForWorkspace();
     ctl.freeRemaining = -1;
     ctl.providerKey = false;
     const res = await POST(post(validBody));
     expect(res.status).toBe(200);
     await res.text();
     expect(ctl.freeConsumed).toBe(0);
+    expect(ctl.dailyConsumed).toBe(1);
     expect(ctl.usedKeys).toEqual(['sk-or-v1-workspace-key-aaaaaaaaaaaa']);
+  });
+});
+
+describe('POST /api/people/chat claims and overtime', () => {
+  const MEMBER_PAY = ['previewOvertime', 'submitClaim', 'submitOvertime', 'cancelClaim', 'cancelOvertime'];
+  const DECIDING = ['decideClaim', 'decideOvertime', 'markClaimPaid', 'unmarkClaimPaid'];
+  const toolsOf = async (body: unknown = validBody) => {
+    await (await POST(post(body))).text();
+    return ctl.calls[0].tools;
+  };
+
+  it.each(['owner', 'admin'])('gives an %s every claim and overtime tool, deciding and paid marks included', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    const held = await toolsOf();
+    for (const name of [...MEMBER_PAY, ...DECIDING]) expect(held, name).toContain(name);
+  });
+
+  it.each(['member', 'viewer'])('gives a linked %s the submit and cancel tools for themselves, and nothing that decides', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    ctl.linkedEmployee = { id: 'emp-7' };
+    const held = await toolsOf();
+    for (const name of MEMBER_PAY) expect(held, name).toContain(name);
+    for (const name of DECIDING) expect(held, name).not.toContain(name);
+  });
+
+  it('gives an unlinked member none of them', async () => {
+    ctl.org = { orgId: 'org1', role: 'member' };
+    const held = await toolsOf();
+    for (const name of [...MEMBER_PAY, ...DECIDING]) expect(held, name).not.toContain(name);
+  });
+
+  it.each(['owner', 'member'])('gives a %s in the demo workspace none of them', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    ctl.slug = DEMO_ORG_SLUG;
+    ctl.linkedEmployee = { id: 'emp-7' };
+    const held = await toolsOf();
+    for (const name of [...MEMBER_PAY, ...DECIDING]) expect(held, name).not.toContain(name);
+  });
+
+  // A real PNG's first bytes: the server tells a file's type from them, not from its label.
+  const PHOTO_BYTES = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('the photo')]);
+  const PHOTO = 'data:image/png;base64,' + PHOTO_BYTES.toString('base64');
+  const question = {
+    id: 'm1',
+    role: 'user',
+    parts: [
+      { type: 'text', text: 'tuntut teksi RM 85' },
+      { type: 'file', mediaType: 'image/png', url: PHOTO, filename: 'receipt.png' },
+    ],
+  };
+
+  it('hands the tools the photo on the newest question, bound to the signed-in user', async () => {
+    ctl.org = { orgId: 'org1', role: 'member' };
+    ctl.linkedEmployee = { id: 'emp-7' };
+    await (await POST(post({ messages: [question] }))).text();
+    const write = ctl.captured!.write!;
+    expect(write.userId).toBe('u1');
+    expect(write.receipt?.mediaType).toBe('image/png');
+    expect(write.receipt?.bytes.toString()).toBe(PHOTO_BYTES.toString());
+  });
+
+  it('hands the tools no receipt when the newest question has no file, and none from the request body', async () => {
+    ctl.org = { orgId: 'org1', role: 'owner' };
+    await (await POST(post({ ...validBody, receipt: { bytes: 'x', mediaType: 'image/png' }, receipt_path: 'u/x.png' }))).text();
+    expect(ctl.captured!.write!.receipt).toBeNull();
+  });
+
+  it('still has the receipt when the approval is answered in a later request, and attaches it', async () => {
+    ctl.org = { orgId: 'org1', role: 'member' };
+    ctl.linkedEmployee = { id: 'emp-7' };
+    const input = { category: 'travel', amount_cents: 8500, claim_date: '2026-10-09', description: 'Teksi' };
+    const card = (state: 'approval-requested' | 'approval-responded') => ({
+      id: 'a1',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-submitClaim',
+          toolCallId: 't1',
+          state,
+          input,
+          approval: state === 'approval-responded' ? { id: 'ap1', approved: true } : { id: 'ap1' },
+        },
+      ],
+    });
+    // The first request proposes the claim: nothing is saved while the card waits.
+    await (await POST(post({ messages: [question, card('approval-requested')] }))).text();
+    expect(ctl.captured!.write!.receipt?.bytes.toString()).toBe(PHOTO_BYTES.toString());
+    expect(ctl.submitted).toEqual([]);
+    // The second request carries the answer. The newest user message is still the question with the photo.
+    ctl.captured = null;
+    await (await POST(post({ messages: [question, card('approval-responded')] }))).text();
+    expect(ctl.captured!.write!.receipt?.bytes.toString()).toBe(PHOTO_BYTES.toString());
+    expect(ctl.uploaded).toEqual([{ userId: 'u1', bytes: PHOTO_BYTES.toString(), mediaType: 'image/png' }]);
+    expect(ctl.submitted).toEqual([
+      expect.objectContaining({ employee_id: 'emp-7', amount_cents: 8500, receipt_path: 'u1/uploaded.png' }),
+    ]);
+  });
+
+  it('keeps a claim’s receipt as the file on ITS question: a newer question with another file, or none, is not picked up', async () => {
+    ctl.org = { orgId: 'org1', role: 'member' };
+    ctl.linkedEmployee = { id: 'emp-7' };
+    const input = { category: 'travel', amount_cents: 8500, claim_date: '2026-10-09' };
+    const waiting = {
+      id: 'a1',
+      role: 'assistant',
+      parts: [{ type: 'tool-submitClaim', toolCallId: 't1', state: 'approval-requested', input, approval: { id: 'ap1' } }],
+    };
+    const newerWithFile = {
+      id: 'm2',
+      role: 'user',
+      parts: [
+        { type: 'text', text: 'dan satu lagi' },
+        { type: 'file', mediaType: 'application/pdf', url: 'data:application/pdf;base64,' + Buffer.from('%PDF-1.4 newer file').toString('base64') },
+      ],
+    };
+    await (await POST(post({ messages: [question, waiting, newerWithFile] }))).text();
+    expect(ctl.captured!.write!.receipt?.bytes.toString()).toBe(PHOTO_BYTES.toString());
+    expect(ctl.captured!.write!.receipt?.mediaType).toBe('image/png');
+    ctl.captured = null;
+    await (await POST(post({ messages: [question, waiting, { id: 'm3', role: 'user', parts: [{ type: 'text', text: 'hello' }] }] }))).text();
+    expect(ctl.captured!.write!.receipt?.bytes.toString()).toBe(PHOTO_BYTES.toString());
+    // And a claim whose own question had no file never takes a newer question's file.
+    ctl.captured = null;
+    const plain = { id: 'm0', role: 'user', parts: [{ type: 'text', text: 'tuntut teksi' }] };
+    await (await POST(post({ messages: [plain, waiting, newerWithFile] }))).text();
+    expect(ctl.captured!.write!.receipt).toBeNull();
+  });
+});
+
+describe('POST /api/people/chat payroll tools', () => {
+  const PAYROLL_TOOLS = ['runPayroll', 'recalculatePayroll', 'savePayslipLine', 'removePayslipLine', 'setPayslipStatutory', 'removePayslip'];
+  const held = async () => {
+    const res = await POST(post(validBody));
+    expect(res.status).toBe(200);
+    await res.text();
+    return ctl.calls[0].tools;
+  };
+
+  it.each(['owner', 'admin'])('gives an %s all six, linked to an employee record or not', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    for (const linked of [null, { id: 'emp-3' }]) {
+      ctl.calls = [];
+      ctl.linkedEmployee = linked;
+      const tools = await held();
+      for (const name of PAYROLL_TOOLS) expect(tools, name).toContain(name);
+    }
+  });
+
+  it.each(['member', 'viewer'])('gives a %s none, linked to an employee record or not: absent, not disabled', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    for (const linked of [null, { id: 'emp-7' }]) {
+      ctl.calls = [];
+      ctl.linkedEmployee = linked;
+      const tools = await held();
+      for (const name of PAYROLL_TOOLS) expect(tools, name).not.toContain(name);
+    }
+  });
+
+  it.each(['owner', 'admin', 'member', 'viewer'])('gives a %s in the demo workspace none, linked or not', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    ctl.slug = DEMO_ORG_SLUG;
+    for (const linked of [null, { id: 'emp-7' }]) {
+      ctl.calls = [];
+      ctl.linkedEmployee = linked;
+      const tools = await held();
+      for (const name of PAYROLL_TOOLS) expect(tools, name).not.toContain(name);
+    }
+  });
+
+  it('gives nobody a tool for marking a run paid, undoing paid, reopening or deleting a draft', async () => {
+    ctl.org = { orgId: 'org1', role: 'owner' };
+    ctl.linkedEmployee = { id: 'emp-3' };
+    const tools = await held();
+    for (const name of tools) {
+      if (/payroll|payslip|run/i.test(name)) expect(name, name).not.toMatch(/paid|reopen|undo|delete/i);
+    }
+    expect(tools.filter((name: string) => /payroll|payslip/i.test(name)).sort()).toEqual(
+      [...PAYROLL_TOOLS, 'getPayrollSummary', 'listPayslips'].sort(),
+    );
+  });
+
+  it('every payroll change tool is on the list of tools that wait for approval', () => {
+    for (const name of PAYROLL_TOOLS) expect(PEOPLE_WRITE_TOOL_NAMES).toContain(name);
+  });
+
+  it('sends the model the payroll rules and no longer says payroll cannot be run', async () => {
+    ctl.org = { orgId: 'org1', role: 'owner' };
+    await held();
+    expect(ctl.calls[0].system).toContain('\nPAYROLL\n');
+    expect(ctl.calls[0].system).not.toContain('You cannot run payroll');
+  });
+});
+
+describe('POST /api/people/chat performance, training and announcement tools', () => {
+  const OWN_TOOLS = ['saveGoal', 'removeGoal', 'enrolInTraining', 'withdrawFromTraining'];
+  const HR_TOOLS = [
+    'saveReview', 'deleteReview', 'releaseReview', 'saveTraining', 'removeTraining', 'setTrainingCompleted',
+    'saveAnnouncement', 'removeAnnouncement', 'publishAnnouncement', 'unpublishAnnouncement',
+  ];
+  const LOOKUPS = ['listGoals', 'listReviews', 'listTrainings', 'listAnnouncements', 'getPerformanceSummary'];
+  const held = async () => {
+    const res = await POST(post(validBody));
+    expect(res.status).toBe(200);
+    await res.text();
+    return ctl.calls[0].tools;
+  };
+
+  it.each(['owner', 'admin'])('gives an %s all fourteen, linked to an employee record or not', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    for (const linked of [null, { id: 'emp-3' }]) {
+      ctl.calls = [];
+      ctl.linkedEmployee = linked;
+      const tools = await held();
+      for (const name of [...OWN_TOOLS, ...HR_TOOLS]) expect(tools, name).toContain(name);
+    }
+  });
+
+  it.each(['member', 'viewer'])('gives a linked %s the four own-record tools and none of the rest', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    ctl.linkedEmployee = { id: 'emp-7' };
+    const tools = await held();
+    for (const name of OWN_TOOLS) expect(tools, name).toContain(name);
+    for (const name of HR_TOOLS) expect(tools, name).not.toContain(name);
+    expect(ctl.captured!.write).toMatchObject({ tier: 'self', employeeId: 'emp-7' });
+  });
+
+  it.each(['member', 'viewer'])('gives an unlinked %s none: absent, not disabled', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    ctl.linkedEmployee = null;
+    const tools = await held();
+    for (const name of [...OWN_TOOLS, ...HR_TOOLS]) expect(tools, name).not.toContain(name);
+  });
+
+  it.each(['owner', 'admin', 'member', 'viewer'])('gives a %s in the demo workspace none, linked or not', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    ctl.slug = DEMO_ORG_SLUG;
+    for (const linked of [null, { id: 'emp-7' }]) {
+      ctl.calls = [];
+      ctl.linkedEmployee = linked;
+      const tools = await held();
+      for (const name of [...OWN_TOOLS, ...HR_TOOLS]) expect(tools, name).not.toContain(name);
+    }
+  });
+
+  it('gives everyone the lookups, and nobody a tool for pulling a review back to draft', async () => {
+    for (const role of ['owner', 'member']) {
+      ctl.calls = [];
+      ctl.org = { orgId: 'org1', role };
+      ctl.linkedEmployee = { id: 'emp-3' };
+      const tools = await held();
+      for (const name of LOOKUPS) expect(tools, name).toContain(name);
+      expect(tools.filter((name: string) => /Review/.test(name)).sort()).toEqual(role === 'owner' ? ['deleteReview', 'listReviews', 'releaseReview', 'saveReview'] : ['listReviews']);
+    }
+  });
+
+  it('every one of them is on the list of tools that wait for approval', () => {
+    for (const name of [...OWN_TOOLS, ...HR_TOOLS]) expect(PEOPLE_WRITE_TOOL_NAMES).toContain(name);
+  });
+
+  it('sends the model the performance rules in a section of their own, ahead of payroll', async () => {
+    ctl.org = { orgId: 'org1', role: 'owner' };
+    await held();
+    const system = ctl.calls[0].system;
+    expect(system).toContain('\nPERFORMANCE, TRAINING AND ANNOUNCEMENTS\n');
+    expect(system.indexOf('\nPERFORMANCE, TRAINING AND ANNOUNCEMENTS\n')).toBeLessThan(system.indexOf('\nPAYROLL\n'));
+    expect(system).not.toContain('You cannot post an announcement');
+  });
+});
+
+describe('POST /api/people/chat letter and document tools', () => {
+  const HR_TOOLS = ['saveLetter', 'startLetterFromTemplate', 'issueLetter', 'requestAcknowledgement', 'listLetterTemplates'];
+  const held = async () => {
+    const res = await POST(post(validBody));
+    expect(res.status).toBe(200);
+    await res.text();
+    return ctl.calls[0].tools;
+  };
+
+  it.each(['owner', 'admin'])('gives an %s all of them, linked to an employee record or not', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    for (const linked of [null, { id: 'emp-3' }]) {
+      ctl.calls = [];
+      ctl.linkedEmployee = linked;
+      const tools = await held();
+      for (const name of HR_TOOLS) expect(tools, name).toContain(name);
+    }
+  });
+
+  it.each(['member', 'viewer'])('gives a linked or unlinked %s none of them: absent, not disabled', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    for (const linked of [null, { id: 'emp-7' }]) {
+      ctl.calls = [];
+      ctl.linkedEmployee = linked;
+      const tools = await held();
+      for (const name of HR_TOOLS) expect(tools, name).not.toContain(name);
+    }
+  });
+
+  it.each(['owner', 'admin', 'member', 'viewer'])('gives a %s in the demo workspace none of them', async (role) => {
+    ctl.org = { orgId: 'org1', role };
+    ctl.slug = DEMO_ORG_SLUG;
+    const tools = await held();
+    for (const name of HR_TOOLS) expect(tools, name).not.toContain(name);
+  });
+
+  it('gives everyone the two lookups, and sends the model the rules in a section of their own', async () => {
+    for (const role of ['owner', 'member']) {
+      ctl.calls = [];
+      ctl.org = { orgId: 'org1', role };
+      ctl.linkedEmployee = { id: 'emp-3' };
+      const tools = await held();
+      for (const name of ['listDocuments', 'listLetters']) expect(tools, name).toContain(name);
+      expect(ctl.calls[0].system).toContain('\nLETTERS AND DOCUMENTS\n');
+    }
+  });
+
+  it('every change tool is on the list of tools that wait for approval', () => {
+    for (const name of HR_TOOLS.filter((n) => n !== 'listLetterTemplates')) expect(PEOPLE_WRITE_TOOL_NAMES).toContain(name);
   });
 });

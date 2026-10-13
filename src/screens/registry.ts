@@ -43,12 +43,14 @@ import AnnouncementsScreen from '@/screens/people/announcements';
 import MyAttendanceScreen from '@/screens/people/my-attendance';
 import MyGoalsScreen from '@/screens/people/my-goals';
 import MyDocumentsScreen from '@/screens/people/my-documents';
+import MyPayslipsScreen from '@/screens/people/my-payslips';
 import RecordsScreen from '@/screens/people/records';
 import LeaveScreen from '@/screens/people/leave';
 import TimeOffScreen from '@/screens/people/time-off';
 import ClaimsScreen from '@/screens/people/claims';
 import OtClaimsScreen from '@/screens/people/ot-claims';
 import EmployeesScreen from '@/screens/people/employees';
+import TeamAttendanceScreen from '@/screens/people/attendance';
 import ApproveLeaveScreen from '@/screens/people/approve-leave';
 import ApproveClaimsScreen from '@/screens/people/approve-claims';
 import ApproveOvertimeScreen from '@/screens/people/approve-overtime';
@@ -84,6 +86,8 @@ import CashReceiptsScreen from '@/screens/finance/cash-receipts';
 import FinPaymentVouchersScreen from '@/screens/finance/payment-vouchers';
 import InvoicesScreen from '@/screens/finance/invoices';
 import QuotationsScreen from '@/screens/finance/quotations';
+import RfqsScreen from '@/screens/finance/rfqs';
+import PurchaseOrdersScreen from '@/screens/finance/purchase-orders';
 import CreditNotesScreen from '@/screens/finance/credit-notes';
 import PaymentsInScreen from '@/screens/finance/payments-in';
 import RefundsScreen from '@/screens/finance/refunds';
@@ -145,12 +149,14 @@ export const SCREENS: Record<string, ComponentType> = {
   'people/my-attendance': MyAttendanceScreen,
   'people/my-goals': MyGoalsScreen,
   'people/my-documents': MyDocumentsScreen,
+  'people/my-payslips': MyPayslipsScreen,
   'people/records': RecordsScreen,
   'people/leave': LeaveScreen,
   'people/time-off': TimeOffScreen,
   'people/claims': ClaimsScreen,
   'people/ot-claims': OtClaimsScreen,
   'people/employees': EmployeesScreen,
+  'people/attendance': TeamAttendanceScreen,
   'people/approve-leave': ApproveLeaveScreen,
   'people/approve-claims': ApproveClaimsScreen,
   'people/approve-overtime': ApproveOvertimeScreen,
@@ -186,6 +192,8 @@ export const SCREENS: Record<string, ComponentType> = {
   'finance/payment-vouchers': FinPaymentVouchersScreen,
   'finance/invoices': InvoicesScreen,
   'finance/quotations': QuotationsScreen,
+  'finance/rfqs': RfqsScreen,
+  'finance/purchase-orders': PurchaseOrdersScreen,
   'finance/credit-notes': CreditNotesScreen,
   'finance/payments-in': PaymentsInScreen,
   'finance/refunds': RefundsScreen,

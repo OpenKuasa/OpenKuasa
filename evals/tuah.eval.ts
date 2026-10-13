@@ -61,7 +61,8 @@ beforeAll(async () => {
 afterAll(async () => {
   if (!ready) return;
   await cleanUp(workspace);
-  await workspace.client.auth.signOut();
+  // Local: the default ends every session of the account, a browser's included.
+  await workspace.client.auth.signOut({ scope: 'local' });
 
   const lines = results.map((r) => {
     const scored = r.runs.filter((run) => !run.unscored);

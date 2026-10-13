@@ -2,13 +2,14 @@
 
 import { useMemo, useState, useTransition } from 'react';
 import { Dialog } from 'radix-ui';
-import { Pencil, Plus, Search, Trash2, UserCheck, UserX } from 'lucide-react';
+import { FileText, Pencil, Plus, Search, Target, Trash2, UserCheck, UserX } from 'lucide-react';
 import {
   createEmployeeAction,
   deleteEmployeeAction,
   linkEmployeeToMemberAction,
   loadEmployeePrivateAction,
   setEmployeeStatusAction,
+  setReportsToAction,
   updateEmployeeAction,
 } from '@/app/(app)/people/actions';
 import { loadLeaveEntitlementsAction, setLeaveEntitlementAction } from '@/app/(app)/people/leave-actions';
@@ -17,14 +18,41 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatDay, todayInMalaysia } from '@/lib/people/dates';
-import { EMPLOYMENT_LABEL, type EmployeeFilter, filterEmployees, linkableMembers } from '@/lib/people/employees';
+import type { EmployeeDocumentRow } from '@/lib/people/documents';
+import { showsEmployeeDocumentsAction } from '@/lib/people/documents-screens';
+import { type GoalLike, showGoalsAction } from '@/lib/people/goals-training';
+import {
+  EMPLOYMENT_LABEL,
+  type EmployeeFilter,
+  type EmployeesControls,
+  directoryExtras,
+  filterEmployees,
+  linkableMembers,
+  type StepResult,
+  reportsToBaseline,
+  reportsToRefusal,
+  runSave,
+  suggestedMember,
+} from '@/lib/people/employees';
 import type { WorkspaceMember } from '@/lib/people/members';
 import type { Department, Employee } from '@/lib/people/types';
 import { cn } from '@/lib/utils';
 import { type EditingEmployee, EmployeeForm } from './employee-form';
+import { EmployeeDocuments } from './employee-documents';
+import { EmployeeGoals } from './employee-goals';
 import type { EntitlementChange } from './entitlements-fields';
 
-type ActionResult = { ok: boolean; error?: string };
+type ActionResult = {
+  ok: boolean;
+  error?: string;
+  /** Shown after the form has closed: the employee was added, but the reporting line was refused. */
+  notice?: string;
+  /** The reporting line was refused on an edit; the form's control goes back to the saved value. */
+  lineRefused?: boolean;
+  /** The reporting line was saved though a later step failed: the manager now in the database (null for nobody). */
+  baseline?: string | null;
+};
+type ReportsToChange = { changed: boolean; managerId: string | null };
 
 const NOT_LINKED = 'none';
 
@@ -46,29 +74,56 @@ export function EmployeesTable({
   employees,
   departments,
   members,
+  goals = null,
+  documents = null,
+  orgId = null,
   canEdit,
+  controls,
+  viewerEmployeeId = null,
 }: {
   employees: Employee[];
   departments: Department[];
   /** The workspace's members, for the account link. Empty for someone who cannot edit. */
   members: WorkspaceMember[];
+  /** Each employee's goals, by employee id, for the "Goals" action (owners and admins). Null hides the action. */
+  goals?: Record<string, GoalLike[]> | null;
+  /** Each employee's documents, by employee id, for the "Documents" action (owners and admins). Null hides the action. */
+  documents?: Record<string, EmployeeDocumentRow[]> | null;
+  /** The workspace id, to build a file's path. */
+  orgId?: string | null;
   canEdit: boolean;
+  /** What this viewer is offered beyond the list: the "Reports to" field and the "My team" filter. */
+  controls: EmployeesControls;
+  /** The viewer's own employee record, for "My team". */
+  viewerEmployeeId?: string | null;
 }) {
   const [pending, start] = useTransition();
-  const [filter, setFilter] = useState<EmployeeFilter>({ query: '', departmentId: 'all', status: 'all' });
+  const [filter, setFilter] = useState<EmployeeFilter>({ query: '', departmentId: 'all', status: 'all', team: 'all' });
+  const [reportsToResets, setReportsToResets] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<EditingEmployee | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [goalsFor, setGoalsFor] = useState<Employee | null>(null);
+  const [documentsFor, setDocumentsFor] = useState<Employee | null>(null);
+  const showDocuments = showsEmployeeDocumentsAction(canEdit, documents, orgId);
 
-  const shown = useMemo(() => filterEmployees(employees, filter), [employees, filter]);
+  const shown = useMemo(() => filterEmployees(employees, filter, viewerEmployeeId), [employees, filter, viewerEmployeeId]);
+  const extras = useMemo(() => directoryExtras(employees), [employees]);
   const formOpen = canEdit && (creating || editing !== null);
-  const columns = canEdit ? 9 : 7;
+  const columns = canEdit ? 10 : 8;
 
   function act(result: Promise<ActionResult>) {
     start(async () => {
       const res = await result;
-      setError(res.ok ? null : (res.error ?? 'Something went wrong.'));
+      setError(res.ok ? (res.notice ?? null) : (res.error ?? 'Something went wrong.'));
+      if (res.lineRefused) setReportsToResets((count) => count + 1);
+      if (res.baseline !== undefined) {
+        const managerId = res.baseline;
+        setEditing((current) =>
+          current ? { ...current, employee: { ...current.employee, reports_to: managerId } } : current,
+        );
+      }
       if (res.ok) {
         setCreating(false);
         setEditing(null);
@@ -97,15 +152,63 @@ export function EmployeesTable({
     });
   }
 
-  /** Saves the employee, then each changed entitlement, stopping at the first refusal. */
-  async function saveEdit(id: string, input: Record<string, unknown>, changes: EntitlementChange[]): Promise<ActionResult> {
-    const saved = await updateEmployeeAction({ id, ...input });
-    if (!saved.ok) return saved;
-    for (const change of changes) {
-      const res = await setLeaveEntitlementAction({ employee_id: id, ...change });
-      if (!res.ok) return { ok: false, error: `The employee was saved, but an entitlement was not: ${res.error}` };
-    }
-    return { ok: true };
+  /** The reporting line, a separate request: only run when it changed, so a phone-number edit never takes its lock. */
+  async function lineStep(id: string, managerId: string | null): Promise<StepResult> {
+    const res = await setReportsToAction({ id, manager_id: managerId });
+    return res.ok ? { ok: true } : { ok: false, error: reportsToRefusal(res.error, id, managerId ?? '', employees) };
+  }
+
+  /** Saves in SAVE_ORDER (details, the reporting line when it changed, each changed entitlement), stopping at the first refusal. */
+  async function saveEdit(
+    id: string,
+    input: Record<string, unknown>,
+    changes: EntitlementChange[],
+    reportsTo: ReportsToChange,
+  ): Promise<ActionResult> {
+    const outcome = await runSave(reportsTo.changed, {
+      details: async () => {
+        const res = await updateEmployeeAction({ id, ...input });
+        return res.ok ? { ok: true } : { ok: false, error: res.error };
+      },
+      reports_to: () => lineStep(id, reportsTo.managerId),
+      entitlements: async () => {
+        for (const change of changes) {
+          const res = await setLeaveEntitlementAction({ employee_id: id, ...change });
+          if (!res.ok) return { ok: false, error: res.error };
+        }
+        return { ok: true };
+      },
+    });
+    if (outcome.ok) return { ok: true };
+    const lineSaved = outcome.done.includes('reports_to');
+    return {
+      ok: false,
+      error: outcome.error,
+      lineRefused: outcome.step === 'reports_to',
+      // The line is in the database now, so the form's baseline moves with it.
+      ...(lineSaved ? { baseline: reportsToBaseline(null, outcome, reportsTo.managerId) } : {}),
+    };
+  }
+
+  /** Adds the employee, then sets the reporting line. A refusal there never undoes the new employee: the form closes and the table says so. */
+  async function saveNew(input: Record<string, unknown>, reportsTo: ReportsToChange): Promise<ActionResult> {
+    let createdId = '';
+    let createError = 'Something went wrong.';
+    const outcome = await runSave(reportsTo.changed, {
+      details: async () => {
+        const created = await createEmployeeAction(input);
+        if (!created.ok) {
+          createError = created.error;
+          return { ok: false, error: created.error };
+        }
+        createdId = created.data.id;
+        return { ok: true };
+      },
+      reports_to: () => lineStep(createdId, reportsTo.managerId),
+      entitlements: async () => ({ ok: true }),
+    });
+    if (outcome.ok) return { ok: true };
+    return outcome.step === 'details' ? { ok: false, error: createError } : { ok: true, notice: outcome.error };
   }
 
   return (
@@ -151,6 +254,20 @@ export function EmployeesTable({
             <SelectItem value="inactive">Inactive</SelectItem>
           </SelectContent>
         </Select>
+        {controls.myTeamFilter ? (
+          <Select
+            value={filter.team}
+            onValueChange={(value) => setFilter((current) => ({ ...current, team: value as EmployeeFilter['team'] }))}
+          >
+            <SelectTrigger aria-label="Team" className="w-full sm:w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Everyone</SelectItem>
+              <SelectItem value="mine">My team</SelectItem>
+            </SelectContent>
+          </Select>
+        ) : null}
         {canEdit ? (
           <Button
             type="button"
@@ -185,6 +302,7 @@ export function EmployeesTable({
               <TableHead>Employee no.</TableHead>
               <TableHead>Department</TableHead>
               <TableHead>Designation</TableHead>
+              <TableHead>Reports to</TableHead>
               <TableHead>Type</TableHead>
               <TableHead className="whitespace-nowrap">Join date</TableHead>
               <TableHead>Status</TableHead>
@@ -193,7 +311,9 @@ export function EmployeesTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {shown.map((employee) => (
+            {shown.map((employee) => {
+              const suggestion = canEdit ? suggestedMember(members, employees, employee) : null;
+              return (
               <TableRow key={employee.id}>
                 <TableCell>
                   <div className="flex items-center gap-3">
@@ -203,8 +323,10 @@ export function EmployeesTable({
                     <div className="min-w-0">
                       <p className="truncate font-medium">
                         {employee.name}
-                        {employee.is_manager ? (
-                          <span className="ml-2 text-xs font-normal text-muted-foreground">Manager</span>
+                        {extras.get(employee.id)?.manages ? (
+                          <span className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                            Manager
+                          </span>
                         ) : null}
                       </p>
                       <p className="truncate text-xs text-muted-foreground">{employee.work_email ?? '—'}</p>
@@ -214,6 +336,7 @@ export function EmployeesTable({
                 <TableCell className="whitespace-nowrap tabular-nums">{employee.employee_no}</TableCell>
                 <TableCell className="whitespace-nowrap">{employee.department_name ?? '—'}</TableCell>
                 <TableCell className="whitespace-nowrap">{employee.designation ?? '—'}</TableCell>
+                <TableCell className="whitespace-nowrap">{extras.get(employee.id)?.reportsTo ?? '—'}</TableCell>
                 <TableCell className="whitespace-nowrap">{EMPLOYMENT_LABEL[employee.employment_type]}</TableCell>
                 <TableCell className="whitespace-nowrap text-muted-foreground">
                   {employee.join_date ? `${formatDay(employee.join_date)} ${employee.join_date.slice(0, 4)}` : '—'}
@@ -257,6 +380,20 @@ export function EmployeesTable({
                         ) : null}
                       </SelectContent>
                     </Select>
+                    {/* A member who signs in with this record's work email: offered, never linked without a click. */}
+                    {suggestion ? (
+                      <Button
+                        type="button"
+                        variant="link"
+                        size="sm"
+                        className="mt-1 h-auto max-w-44 justify-start p-0 text-xs"
+                        disabled={pending}
+                        title={`${suggestion.email} signs in with this employee's work email`}
+                        onClick={() => act(linkEmployeeToMemberAction({ id: employee.id, user_id: suggestion.userId }))}
+                      >
+                        <span className="truncate">Link {suggestion.email}</span>
+                      </Button>
+                    ) : null}
                   </TableCell>
                 ) : null}
                 {canEdit ? (
@@ -266,6 +403,32 @@ export function EmployeesTable({
                         <Pencil className="size-4" />
                         Edit
                       </Button>
+                      {showGoalsAction(canEdit, goals) ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          disabled={pending}
+                          aria-label={`Goals for ${employee.name}`}
+                          onClick={() => setGoalsFor(employee)}
+                        >
+                          <Target className="size-4" />
+                          Goals
+                        </Button>
+                      ) : null}
+                      {showDocuments ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          disabled={pending}
+                          aria-label={`Documents for ${employee.name}`}
+                          onClick={() => setDocumentsFor(employee)}
+                        >
+                          <FileText className="size-4" />
+                          Documents
+                        </Button>
+                      ) : null}
                       <Button
                         type="button"
                         variant="ghost"
@@ -318,13 +481,14 @@ export function EmployeesTable({
                     </div>
                     {confirmingId === employee.id ? (
                       <p role="alert" className="mt-1 text-right text-xs text-destructive">
-                        Their leave, claims, payslips and every other HR record are deleted too. This cannot be undone.
+                        Their leave, claims, draft payslips and every other HR record are deleted too, including their documents, the files attached to them and their letters. This cannot be undone. Someone with a paid payslip cannot be deleted: make them inactive instead.
                       </p>
                     ) : null}
                   </TableCell>
                 ) : null}
               </TableRow>
-            ))}
+              );
+            })}
             {shown.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={columns} className="py-8 text-center text-sm text-muted-foreground">
@@ -368,6 +532,9 @@ export function EmployeesTable({
                 key={editing?.employee.id ?? 'new'}
                 initial={editing}
                 departments={departments}
+                employees={employees}
+                showReportsTo={controls.reportsToField}
+                reportsToResets={reportsToResets}
                 disabled={pending}
                 error={error}
                 onCancel={() => {
@@ -375,9 +542,47 @@ export function EmployeesTable({
                   setEditing(null);
                   setError(null);
                 }}
-                onSubmit={(input, changes) =>
-                  act(editing ? saveEdit(editing.employee.id, input, changes) : createEmployeeAction(input))
+                onSubmit={(input, changes, reportsTo) =>
+                  act(editing ? saveEdit(editing.employee.id, input, changes, reportsTo) : saveNew(input, reportsTo))
                 }
+              />
+            ) : null}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      <Dialog.Root open={showGoalsAction(canEdit, goals) && goalsFor !== null} onOpenChange={(open) => !open && setGoalsFor(null)}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+          <Dialog.Content className="fixed top-1/2 left-1/2 z-50 max-h-[90vh] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border bg-background p-5 shadow-lg outline-none">
+            <Dialog.Title className="text-base font-semibold">{goalsFor ? `${goalsFor.name}’s goals` : 'Goals'}</Dialog.Title>
+            <Dialog.Description className="mb-4 text-sm text-muted-foreground">
+              Add, change or remove this employee’s goals.
+            </Dialog.Description>
+            {goalsFor && goals ? (
+              <EmployeeGoals key={goalsFor.id} employeeId={goalsFor.id} name={goalsFor.name} goals={goals[goalsFor.id] ?? []} />
+            ) : null}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      <Dialog.Root open={showDocuments && documentsFor !== null} onOpenChange={(open) => !open && setDocumentsFor(null)}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+          <Dialog.Content className="fixed top-1/2 left-1/2 z-50 max-h-[90vh] w-[calc(100%-2rem)] max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border bg-background p-5 shadow-lg outline-none">
+            <Dialog.Title className="text-base font-semibold">
+              {documentsFor ? `${documentsFor.name}’s documents` : 'Documents'}
+            </Dialog.Title>
+            <Dialog.Description className="mb-4 text-sm text-muted-foreground">
+              Add, change, replace or remove this employee’s documents, and ask them to acknowledge one.
+            </Dialog.Description>
+            {documentsFor && documents && orgId ? (
+              <EmployeeDocuments
+                key={documentsFor.id}
+                orgId={orgId}
+                employeeId={documentsFor.id}
+                name={documentsFor.name}
+                rows={documents[documentsFor.id] ?? []}
               />
             ) : null}
           </Dialog.Content>

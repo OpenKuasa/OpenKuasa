@@ -65,7 +65,7 @@ export function ProductsView({ view, actions }: { view: ProductsViewData; action
   ];
 
   return (
-    <ScreenContainer>
+    <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader
         title="Products & Services"
         subtitle="Items you sell & buy, Saudara."

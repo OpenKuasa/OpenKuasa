@@ -6,21 +6,32 @@ import { getProfile } from '@/lib/account/data';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { createClient } from '@/lib/supabase/server';
 
-// An email change that was requested but not yet confirmed from the new inbox.
-async function getPendingEmail(): Promise<string | null> {
-  if (!hasSupabaseEnv()) return null;
+// What the sign-in email card needs from the auth user: an email change that
+// was requested but not yet confirmed from the new inbox, and whether changing
+// it will also ask for an authenticator code.
+async function getEmailChangeContext(): Promise<{
+  pendingEmail: string | null;
+  hasAuthenticator: boolean;
+}> {
+  if (!hasSupabaseEnv()) return { pendingEmail: null, hasAuthenticator: false };
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  return user?.new_email || null;
+  return {
+    pendingEmail: user?.new_email || null,
+    hasAuthenticator:
+      user?.factors?.some(
+        (f) => f.factor_type === 'totp' && f.status === 'verified',
+      ) ?? false,
+  };
 }
 
 export default async function ProfilePage() {
-  const [viewer, profile, pendingEmail] = await Promise.all([
+  const [viewer, profile, emailChange] = await Promise.all([
     getViewer(),
     getProfile(),
-    getPendingEmail(),
+    getEmailChangeContext(),
   ]);
 
   return (
@@ -47,7 +58,8 @@ export default async function ProfilePage() {
         <ProfileForm profile={profile} readOnly={viewer.isDemo} />
         <ProfileEmailForm
           email={profile.email}
-          pendingEmail={pendingEmail}
+          pendingEmail={emailChange.pendingEmail}
+          hasAuthenticator={emailChange.hasAuthenticator}
           readOnly={viewer.isDemo}
         />
       </div>

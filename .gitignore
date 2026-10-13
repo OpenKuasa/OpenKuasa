@@ -54,3 +54,6 @@ next-env.d.ts
 # superpowers SDD workspace + local MCP scratch (not shipped)
 .superpowers/
 .playwright-mcp/
+
+# planning notes stay local (not shipped)
+docs/superpowers/

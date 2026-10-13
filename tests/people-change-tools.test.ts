@@ -22,6 +22,7 @@ vi.mock('@/lib/people/capabilities', async (orig) => {
     setEmployeeStatus: record('setEmployeeStatus'),
     deleteEmployee: record('deleteEmployee'),
     linkEmployeeToMember: record('linkEmployeeToMember'),
+    setReportsTo: record('setReportsTo'),
     createDepartment: record('createDepartment'),
     updateDepartment: record('updateDepartment'),
     deleteDepartment: record('deleteDepartment'),
@@ -37,7 +38,7 @@ const HR = { employeeId: null, isHr: true, isDemo: false };
 const MEMBER = { employeeId: 'seed-emp-2', isHr: false, isDemo: false };
 const data = createSeedPeopleData(NOW);
 const EMP = '22222222-2222-4222-8222-222222222222';
-const write = () => ({ ctx: { client: {} as never, orgId: 'org-1' }, tier: 'hr' as const, employeeId: null });
+const write = () => ({ ctx: { client: {} as never, orgId: 'org-1' }, tier: 'hr' as const, employeeId: null, receipt: null, userId: 'u1' });
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Loose = any;
@@ -54,24 +55,45 @@ beforeEach(() => {
 });
 
 describe('Lekiu change tools', () => {
-  it('are the eight employee and department changes then the leave ones, after the lookups', () => {
+  it('are the eight employee and department changes, then leave, claims and overtime, attendance, payroll, goals, reviews, training and announcements, after the lookups', () => {
     expect([...PEOPLE_WRITE_TOOL_NAMES]).toEqual([
       'createEmployee', 'updateEmployee', 'setEmployeeStatus', 'deleteEmployee', 'linkEmployeeToMember',
       'createDepartment', 'updateDepartment', 'deleteDepartment',
       'applyLeave', 'applyTimeOff', 'cancelLeaveRequest', 'cancelTimeOffRequest',
       'decideLeave', 'decideTimeOff', 'setLeaveEntitlement',
+      'submitClaim', 'cancelClaim', 'submitOvertime', 'cancelOvertime',
+      'decideClaim', 'markClaimPaid', 'unmarkClaimPaid', 'decideOvertime',
+      'clockIn', 'clockOut', 'correctAttendance', 'saveHoliday', 'removeHoliday', 'saveAttendanceSettings',
+      'runPayroll', 'recalculatePayroll', 'savePayslipLine', 'removePayslipLine', 'setPayslipStatutory', 'removePayslip',
+      'saveGoal', 'removeGoal', 'enrolInTraining', 'withdrawFromTraining',
+      'saveReview', 'deleteReview', 'releaseReview', 'saveTraining', 'removeTraining', 'setTrainingCompleted',
+      'saveAnnouncement', 'removeAnnouncement', 'publishAnnouncement', 'unpublishAnnouncement',
+      'saveLetter', 'startLetterFromTemplate', 'issueLetter', 'requestAcknowledgement',
+      'setReportsTo',
     ]);
-    expect(Object.keys(createPeopleTools(data, HR, NOW, write()))).toEqual([
-      ...PEOPLE_TOOL_NAMES,
-      'previewLeave',
-      ...PEOPLE_WRITE_TOOL_NAMES,
-    ]);
+    expect(PEOPLE_WRITE_TOOL_NAMES).toHaveLength(54);
+    // An owner with no linked employee record holds no clock tool; one with a record holds every one.
+    const unlinked = Object.keys(createPeopleTools(data, HR, NOW, write())).sort();
+    expect(unlinked).toEqual(
+      [...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getAttendanceSettings', 'listLetterTemplates', ...PEOPLE_WRITE_TOOL_NAMES]
+        .filter((name) => name !== 'clockIn' && name !== 'clockOut')
+        .sort(),
+    );
+    const linked = Object.keys(
+      createPeopleTools(data, { ...HR, employeeId: EMP }, NOW, { ...write(), employeeId: EMP }),
+    ).sort();
+    expect(linked).toEqual(
+      [...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getMyAttendanceToday', 'getAttendanceSettings', 'listLetterTemplates', ...PEOPLE_WRITE_TOOL_NAMES].sort(),
+    );
   });
 
   it('every one of them waits for approval, and none is a lookup', () => {
-    const kit = peopleProduct({ data, viewer: HR, write: write() });
+    const linked = { ...write(), employeeId: EMP };
+    const kit = peopleProduct({ data, viewer: { ...HR, employeeId: EMP }, write: linked });
     expect(Object.keys(kit.write).sort()).toEqual([...PEOPLE_WRITE_TOOL_NAMES].sort());
-    expect(Object.keys(kit.read).sort()).toEqual([...PEOPLE_TOOL_NAMES, 'previewLeave'].sort());
+    expect(Object.keys(kit.read).sort()).toEqual(
+      [...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getMyAttendanceToday', 'getAttendanceSettings', 'listLetterTemplates'].sort(),
+    );
     const { toolApproval } = combineToolkits([kit]);
     for (const name of PEOPLE_WRITE_TOOL_NAMES) expect(toolApproval?.[name]).toBe('user-approval');
   });
@@ -136,5 +158,111 @@ describe('Lekiu change tools', () => {
     });
     expect((await call('linkEmployeeToMember', { id: EMP, memberEmail: '  ' })).ok).toBe(false);
     expect(ctl.ran).toEqual([]);
+  });
+});
+
+describe('Lekiu change tools for goals, reviews, training and announcements', () => {
+  const OWN = ['saveGoal', 'removeGoal', 'enrolInTraining', 'withdrawFromTraining'];
+  const HR_ONLY = [
+    'saveReview', 'deleteReview', 'releaseReview', 'saveTraining', 'removeTraining', 'setTrainingCompleted',
+    'saveAnnouncement', 'removeAnnouncement', 'publishAnnouncement', 'unpublishAnnouncement',
+  ];
+
+  it('are all in the list of tools that wait for approval, once each, after the payroll tools', () => {
+    const names = [...PEOPLE_WRITE_TOOL_NAMES];
+    expect(new Set(names).size).toBe(names.length);
+    expect(names.slice(-19, -5)).toEqual([...OWN, 'saveReview', 'deleteReview', 'releaseReview', 'saveTraining', 'removeTraining', 'setTrainingCompleted', 'saveAnnouncement', 'removeAnnouncement', 'publishAnnouncement', 'unpublishAnnouncement']);
+    expect(names.slice(-5)).toEqual(['saveLetter', 'startLetterFromTemplate', 'issueLetter', 'requestAcknowledgement', 'setReportsTo']);
+    const kit = peopleProduct({ data, viewer: { ...HR, employeeId: EMP }, write: { ...write(), employeeId: EMP } });
+    const { toolApproval } = combineToolkits([kit]);
+    for (const name of [...OWN, ...HR_ONLY]) {
+      expect(kit.write, name).toHaveProperty(name);
+      expect(kit.read, name).not.toHaveProperty(name);
+      expect(toolApproval?.[name], name).toBe('user-approval');
+    }
+  });
+
+  it('a linked member’s changes are exactly their own: leave, claims, overtime, the clock, their goals and their training', () => {
+    const kit = peopleProduct({ data, viewer: { ...MEMBER, employeeId: EMP }, write: { ...write(), tier: 'self' as const, employeeId: EMP } });
+    expect(Object.keys(kit.write).sort()).toEqual(
+      [
+        'applyLeave', 'applyTimeOff', 'cancelLeaveRequest', 'cancelTimeOffRequest', 'submitClaim', 'cancelClaim', 'submitOvertime', 'cancelOvertime',
+        'clockIn', 'clockOut', ...OWN,
+      ].sort(),
+    );
+    const { toolApproval } = combineToolkits([kit]);
+    for (const name of OWN) expect(toolApproval?.[name], name).toBe('user-approval');
+  });
+
+  it('an owner who is not linked to an employee record still holds all fourteen, and names the employee', () => {
+    const kit = peopleProduct({ data, viewer: HR, write: write() });
+    for (const name of [...OWN, ...HR_ONLY]) expect(kit.write, name).toHaveProperty(name);
+  });
+
+  it('nothing here is in the lookups, and every lookup is outside the write list', () => {
+    for (const name of [...OWN, ...HR_ONLY]) expect(PEOPLE_TOOL_NAMES as readonly string[], name).not.toContain(name);
+    for (const name of ['listGoals', 'listReviews', 'listTrainings', 'listAnnouncements']) {
+      expect(PEOPLE_TOOL_NAMES as readonly string[], name).toContain(name);
+      expect(PEOPLE_WRITE_TOOL_NAMES as readonly string[], name).not.toContain(name);
+    }
+  });
+});
+
+describe("Lekiu's three tool sets", () => {
+  const MANAGER_VIEWER = { employeeId: 'seed-emp-12', isHr: false, isDemo: false, managesTeam: true };
+  const asTier = (tier: 'self' | 'manager', employeeId: string | null = 'seed-emp-12') => ({
+    ctx: { client: {} as never, orgId: 'org-1' }, tier, employeeId, receipt: null, userId: 'u1',
+  });
+  const SELF_SET = [
+    ...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getMyAttendanceToday',
+    'applyLeave', 'applyTimeOff', 'cancelLeaveRequest', 'cancelTimeOffRequest', 'submitClaim', 'cancelClaim', 'submitOvertime', 'cancelOvertime',
+    'clockIn', 'clockOut', 'saveGoal', 'removeGoal', 'enrolInTraining', 'withdrawFromTraining',
+  ];
+  const DECIDE = ['decideLeave', 'decideTimeOff', 'decideClaim', 'decideOvertime'];
+  const TEAM_READS = ['listMyTeam', 'getWaitingForMe'];
+  const namesFor = (tier: 'self' | 'manager', employeeId: string | null = 'seed-emp-12') =>
+    Object.keys(createPeopleTools(data, MANAGER_VIEWER, NOW, asTier(tier, employeeId))).sort();
+
+  it("a manager holds exactly a member's tools, the four decide tools and the two team reads", () => {
+    expect(namesFor('manager')).toEqual([...SELF_SET, ...DECIDE, ...TEAM_READS].sort());
+  });
+
+  it("a member's set is unchanged: no decide tool, no team read", () => {
+    expect(namesFor('self')).toEqual([...SELF_SET].sort());
+  });
+
+  it('an owner holds the old set plus setReportsTo, and neither team read', () => {
+    const owner = Object.keys(createPeopleTools(data, HR, NOW, write())).sort();
+    expect(owner).toContain('setReportsTo');
+    for (const name of TEAM_READS) expect(owner).not.toContain(name);
+  });
+
+  it('a manager holds none of the owner-only tools', () => {
+    const names = namesFor('manager');
+    for (const name of [
+      'markClaimPaid', 'unmarkClaimPaid', 'setLeaveEntitlement', 'correctAttendance', 'runPayroll', 'saveLetter', 'saveReview',
+      'setReportsTo', 'updateEmployee', 'createEmployee', 'deleteEmployee', 'listLetterTemplates', 'issueLetter', 'saveAnnouncement',
+    ]) {
+      expect(names, name).not.toContain(name);
+    }
+  });
+
+  it("every change in a manager's set waits for approval, and the decide tools take no employee", () => {
+    const kit = peopleProduct({ data, viewer: MANAGER_VIEWER, write: asTier('manager') });
+    const { toolApproval } = combineToolkits([kit]);
+    for (const name of Object.keys(kit.write)) {
+      expect(PEOPLE_WRITE_TOOL_NAMES as readonly string[], name).toContain(name);
+      expect(toolApproval?.[name], name).toBe('user-approval');
+    }
+    for (const name of DECIDE) expect(kit.write, name).toHaveProperty(name);
+    for (const name of TEAM_READS) expect(kit.read, name).toHaveProperty(name);
+    for (const name of DECIDE) {
+      const { shape } = (kit.write[name] as unknown as { inputSchema: { shape: Record<string, unknown> } }).inputSchema;
+      expect(Object.keys(shape).sort(), name).toEqual(['approve', 'id', 'note']);
+    }
+  });
+
+  it('a manager with no employee record gets the lookups only', () => {
+    expect(namesFor('manager', null)).toEqual([...PEOPLE_TOOL_NAMES].sort());
   });
 });

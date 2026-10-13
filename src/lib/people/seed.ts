@@ -5,7 +5,7 @@
  * stable. `private.reseed_demo_people()` writes the same people in SQL.
  */
 
-import { addDays, addMonths, isWeekday, monthStart, todayInMalaysia, weekStart } from './dates';
+import { addDays, addMonths, isWeekday, monthLabel, monthStart, todayInMalaysia, weekStart } from './dates';
 import {
   DEMO_EMPLOYEE_ID,
   type Announcement,
@@ -23,16 +23,17 @@ import {
   type LeaveRequest,
   type LeaveType,
   type Letter,
+  type LetterTemplate,
   type OvertimeRecord,
   type PayrollRun,
   type Payslip,
+  type PayslipLine,
   type PaymentVoucher,
   type PeopleData,
   type PeopleSettings,
   type PublicHoliday,
   type RequestStatus,
   type Review,
-  type Scorecard,
   type Shift,
   type TimeOffRequest,
   type TimesheetEntry,
@@ -146,40 +147,61 @@ const GOALS: [string, number, number][] = [
   ['Mentor one new hire', 55, 75],
 ];
 
-/** title, category, provider, first and last day from today, status. */
-const TRAININGS: [string, string, string, number, number, Training['status']][] = [
-  ['Workplace safety refresher', 'Compliance', 'In-house', -60, -59, 'completed'],
-  ['PDPA for customer data', 'Compliance', 'In-house', -30, -30, 'completed'],
-  ['Consultative selling', 'Sales', 'External trainer', -3, 4, 'in_progress'],
-  ['Excel for finance teams', 'Skills', 'Online course', 12, 13, 'upcoming'],
-  ['First-time manager programme', 'Leadership', 'External trainer', 30, 32, 'upcoming'],
+/** title, category, provider, first and last day from today. A course's status follows its dates. */
+const TRAININGS: [string, string, string, number, number][] = [
+  ['Workplace safety refresher', 'Compliance', 'In-house', -60, -59],
+  ['PDPA for customer data', 'Compliance', 'In-house', -30, -30],
+  ['Consultative selling', 'Sales', 'External trainer', -3, 4],
+  ['Excel for finance teams', 'Skills', 'Online course', 12, 13],
+  ['First-time manager programme', 'Leadership', 'External trainer', 30, 32],
 ];
 
-const ANNOUNCEMENTS: [string, string, Announcement['category'], number][] = [
-  ['Office closed for National Day', 'The office is closed on 31 August. Support runs a skeleton shift.', 'holiday', 4],
-  ['New panel clinics added', 'Three more panel clinics are available under the medical benefit.', 'benefits', 9],
-  ['Quarterly town hall', 'Join the town hall this Friday at 3pm in the main meeting room.', 'general', 13],
-  ['Updated leave policy', 'Annual leave may now be carried forward up to five days.', 'policy', 21],
-  ['Second-half priorities', 'Leadership has shared the three priorities for the second half.', 'strategy', 34],
+/** title, text, category, status, days since it was published (0 for a draft). The last one is still a draft. */
+const ANNOUNCEMENTS: [string, string, Announcement['category'], Announcement['status'], number][] = [
+  ['Office closed for National Day', 'The office is closed on 31 August. Support runs a skeleton shift.', 'holiday', 'published', 4],
+  ['New panel clinics added', 'Three more panel clinics are available under the medical benefit.', 'benefits', 'published', 9],
+  ['Quarterly town hall', 'Join the town hall this Friday at 3pm in the main meeting room.', 'general', 'published', 13],
+  ['Updated leave policy', 'Annual leave may now be carried forward up to five days.', 'policy', 'published', 21],
+  ['Second-half priorities', 'Leadership has shared the three priorities for the second half.', 'strategy', 'published', 34],
+  ['Year-end dinner', 'Save the date for the year-end dinner. Venue and time to be confirmed.', 'general', 'draft', 0],
 ];
 
-/** title, document type, status, issued day from today, expiry day from today. All employee 1's, as in the demo. */
-const OWN_DOCUMENTS: [string, HrDocument['doc_type'], HrDocument['status'], number, number | null][] = [
-  ['Payslip, last month', 'payslip', 'available', -8, null],
-  ['Payslip, two months ago', 'payslip', 'available', -38, null],
-  ['Payslip, three months ago', 'payslip', 'available', -69, null],
-  ['EA form', 'tax', 'available', -150, null],
-  ['Confirmation letter', 'letter', 'pending_signature', -2, null],
-  ['Medical card', 'benefits', 'expiring', -340, 25],
+/** title, document type, day added from today, expiry day from today, asks for acknowledgement. All employee 1's, as in the demo. */
+const OWN_DOCUMENTS: [string, HrDocument['doc_type'], number, number | null, boolean][] = [
+  ['EA form', 'tax', -150, null, false],
+  ['Code of conduct', 'contract', -6, null, true],
+  ['Medical card', 'benefits', -340, 25, false],
+  ['Insurance certificate', 'benefits', -375, -10, false],
 ];
 
-/** employee, type, title, status, issued day from today. */
-const LETTERS: [number, string, string, Letter['status'], number][] = [
-  [1, 'Confirmation', 'Confirmation of employment', 'issued', -2],
-  [13, 'Offer', 'Offer of employment', 'issued', -330],
-  [10, 'Warning', 'Late attendance reminder', 'draft', 0],
-  [9, 'Promotion', 'Promotion to Content Lead', 'issued', -120],
-  [16, 'Contract renewal', 'Contract renewal', 'draft', 0],
+/** employee, type, title, status, issued day from today, asks for acknowledgement, body. As the demo's. */
+const LETTERS: [number, Letter['letter_type'], string, Letter['status'], number, boolean, string][] = [
+  [1, 'confirmation', 'Confirmation of employment', 'issued', -2, true,
+    'Following the end of your probation, we are pleased to confirm your employment as Sales Executive. The other terms of your employment stay as they are.'],
+  [13, 'offer', 'Offer of employment', 'issued', -330, false,
+    'We are pleased to offer you the position of Account Executive in the Sales department. Your salary and benefits are set out in your employment contract.'],
+  [10, 'warning', 'Late attendance reminder', 'draft', 0, false,
+    'Our records show several late arrivals this month. Please make sure you are at work by the start of the working day from now on.'],
+  [9, 'promotion', 'Promotion to Content Lead', 'issued', -120, false,
+    'We are pleased to tell you that you have been promoted to Content Lead in the Marketing department. Congratulations.'],
+  [16, 'contract_renewal', 'Contract renewal', 'draft', 0, false,
+    'We are pleased to renew your contract as Technician in the Operations department for a further twelve months.'],
+];
+
+/** The starter templates every workspace gets (the same six as `private.hr_seed_letter_templates`). */
+const TEMPLATES: [LetterTemplate['letter_type'], string, string, string][] = [
+  ['offer', 'Offer of employment', 'Offer of employment',
+    '{today}\n\nDear {employee_name},\n\nWe are pleased to offer you the position of {designation} in the {department} department of {company_name}, starting on {join_date}.\n\nYour salary, benefits and other terms of employment are set out in your employment contract. Please read it with this letter.\n\nWe look forward to working with you.\n\nYours sincerely,\n{company_name}'],
+  ['confirmation', 'Confirmation of employment', 'Confirmation of employment',
+    '{today}\n\nDear {employee_name} ({employee_no}),\n\nFollowing the end of your probation, we are pleased to confirm your employment as {designation} in the {department} department of {company_name}. You joined us on {join_date}.\n\nThe other terms of your employment stay as they are.\n\nCongratulations, and thank you for your work so far.\n\nYours sincerely,\n{company_name}'],
+  ['promotion', 'Promotion', 'Letter of promotion',
+    '{today}\n\nDear {employee_name},\n\nWe are pleased to tell you that you have been promoted to {designation} in the {department} department.\n\nThis recognises your contribution to {company_name} since you joined on {join_date}. Any change to your pay will be confirmed to you separately.\n\nCongratulations.\n\nYours sincerely,\n{company_name}'],
+  ['warning', 'Warning', 'Warning letter',
+    '{today}\n\nDear {employee_name} ({employee_no}),\n\nThis letter is a formal warning about the matter discussed with you. [Describe what happened, and when.]\n\nWe expect this to improve from now on. [Describe what is expected, and by when.] If it does not, further action may follow.\n\nPlease speak to us if anything in this letter is unclear.\n\nYours sincerely,\n{company_name}'],
+  ['contract_renewal', 'Contract renewal', 'Renewal of contract',
+    '{today}\n\nDear {employee_name} ({employee_no}),\n\nWe are pleased to renew your contract as {designation} in the {department} department of {company_name}.\n\nThe renewed contract runs from [start date] to [end date]. The other terms of your contract stay as they are.\n\nThank you for your continued work.\n\nYours sincerely,\n{company_name}'],
+  ['other', 'General letter', 'To whom it may concern',
+    "{today}\n\nTo whom it may concern,\n\nThis is to confirm that {employee_name} ({employee_no}) has been employed by {company_name} as {designation} in the {department} department since {join_date}.\n\nThis letter is issued at the employee's request.\n\nYours sincerely,\n{company_name}"],
 ];
 
 /** number, payee, type, amount in cents, day from today, status. */
@@ -195,6 +217,8 @@ const VOUCHERS: [number, string, string, number, number, PaymentVoucher['status'
 /** The demo workspace's one settings row: only the notifications are set. */
 const SETTINGS: PeopleSettings = {
   work_week: ['mon', 'tue', 'wed', 'thu', 'fri'],
+  work_start_time: '09:00',
+  late_grace_minutes: 15,
   default_annual_leave_days: 14,
   default_medical_leave_days: 14,
   default_emergency_leave_days: 3,
@@ -233,7 +257,13 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
     created_at: ago(3000),
   }));
 
-  const employees: Employee[] = PEOPLE.map(([n, name, handle, dept, designation, type, manager, tenure, bday]) => {
+  // Each department's lead; the others in it report to them. Kept in step with the demo re-seed in
+  // supabase/migrations/*_people_reporting_lines.sql (a test reads both).
+  const LEADS: Record<string, number> = { Sales: 12, Operations: 3, Marketing: 9, Finance: 18 };
+  const leadOf = (n: number, dept: string): string | null =>
+    LEADS[dept] !== undefined && LEADS[dept] !== n ? employeeId(LEADS[dept]) : null;
+
+  const employees: Employee[] = PEOPLE.map(([n, name, handle, dept, designation, type, , tenure, bday]) => {
     const birthday = addDays(today, bday);
     return {
       id: employeeId(n),
@@ -245,7 +275,7 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
       department_name: dept,
       designation,
       employment_type: type,
-      is_manager: manager,
+      reports_to: leadOf(n, dept),
       join_date: addDays(today, -tenure),
       status: 'active',
       date_of_birth_day: Number(birthday.slice(8, 10)),
@@ -330,6 +360,10 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
     description,
     has_receipt: receipt,
     status,
+    decision_note: null,
+    receipt_path: null,
+    paid_on: null,
+    paid_reference: null,
     created_at: ago(-day),
   }));
 
@@ -341,8 +375,13 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
     hours,
     rate_multiplier: rate,
     amount_cents: Math.round(hours * rate * 2500),
+    hourly_rate_cents: 2500,
+    day_kind: null,
+    reason: null,
+    decision_note: null,
     status,
     created_at: ago(-day),
+    paid_month: null,
   }));
 
   // Every weekday of the last eight weeks. h is a stable 0..39 per employee and
@@ -371,6 +410,8 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
           : null,
         clock_out: worked && date !== today ? new Date(nine + (9 * 60 + (h % 30)) * 60_000).toISOString() : null,
         status,
+        corrected: false,
+        correction_note: null,
       });
       if (worked) {
         const hours = 7.5 + ((n + back) % 3) * 0.5;
@@ -414,28 +455,94 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
       period_month: period,
       status: m === 0 ? 'draft' : 'paid',
       paid_at: m === 0 ? null : new Date(Date.parse(`${addDays(period, 27)}T02:00:00Z`)).toISOString(),
+      paid_by_name: null,
     };
   });
+
+  // SAMPLE DATA ONLY, NOT THE PAYROLL RULE. This copy makes the demo look like what the demo re-seed produces; the
+  // rule lives in the database (`hr_run_payroll` and friends) and nothing should read this as it. It does NOT
+  // model: public holidays (working days are plain weekdays, so a joiner's cut can differ by a day), unpaid leave
+  // (there are no unpaid-leave lines), overtime paid late (every overtime line is on its own month's payslip),
+  // or a figure set by hand (`set_by_hr` is always empty).
+  const lastDay = (month: string) => addDays(addMonths(month, 1), -1);
+  const workingDays = (from: string, to: string) => {
+    let n = 0;
+    for (let d = from; d <= to; d = addDays(d, 1)) if (isWeekday(d)) n += 1;
+    return n;
+  };
+  const dayLabel = (date: string) => `${Number(date.slice(8, 10))} ${monthLabel(date)} ${date.slice(0, 4)}`;
+  // Lines an owner or admin added by hand: this month and last month. n, months ago, kind, name, amount.
+  const HAND_LINES: [number, number, 'earning' | 'deduction', string, number][] = [
+    [12, 0, 'earning', 'Sales commission', 85000],
+    [12, 1, 'earning', 'Sales commission', 72000],
+    [1, 1, 'earning', 'Sales commission', 45000],
+    [19, 0, 'earning', 'Project bonus', 100000],
+    [10, 0, 'deduction', 'Salary advance', 30000],
+    [5, 1, 'deduction', 'Uniform', 6000],
+  ];
+  const paidMonth = new Map<string, string>();
 
   const payslips: Payslip[] = runs.flatMap((run) =>
     employees
       .filter((employee) => employee.join_date! < addMonths(run.period_month, 1))
       .map((employee): Payslip => {
-        const gross = privates.find((p) => p.employee_id === employee.id)!.base_salary_cents!;
+        const basic = privates.find((p) => p.employee_id === employee.id)!.base_salary_cents!;
+        const id = `seed-slip-${run.id}-${employee.id}`;
+        const lines: PayslipLine[] = [];
+        const add = (kind: PayslipLine['kind'], source: PayslipLine['source'], label: string, amount: number) =>
+          lines.push({ id: `seed-line-${id}-${lines.length + 1}`, payslip_id: id, kind, source, label, amount_cents: amount });
+
+        if (employee.join_date! > run.period_month) {
+          const last = lastDay(run.period_month);
+          const month = workingDays(run.period_month, last);
+          const after = workingDays(employee.join_date!, last);
+          const cut = month === 0 ? 0 : basic - Math.round((basic * after) / month);
+          if (cut > 0) add('unpaid', 'joiner', `Joined ${dayLabel(employee.join_date!)}`, cut);
+        }
+        for (const record of overtime
+          .filter(
+            (o) =>
+              o.employee_id === employee.id &&
+              o.status === 'approved' &&
+              o.amount_cents > 0 &&
+              o.work_date.slice(0, 7) === run.period_month.slice(0, 7),
+          )
+          .sort((a, b) => a.work_date.localeCompare(b.work_date))) {
+          add('earning', 'overtime', `Overtime, ${dayLabel(record.work_date)}, ${record.hours} h`, record.amount_cents);
+          if (run.status === 'paid') paidMonth.set(record.id, run.period_month.slice(0, 7));
+        }
+        for (const [n, back, kind, label, amount] of HAND_LINES) {
+          if (employeeId(n) === employee.id && addMonths(thisMonth, -back) === run.period_month) add(kind, 'hr', label, amount);
+        }
+
+        const earnings = lines.filter((l) => l.kind === 'earning').reduce((t, l) => t + l.amount_cents, 0);
+        const unpaid = lines.filter((l) => l.kind === 'unpaid').reduce((t, l) => t + l.amount_cents, 0);
+        const other = lines.filter((l) => l.kind === 'deduction').reduce((t, l) => t + l.amount_cents, 0);
+        const gross = Math.max(0, basic + earnings - unpaid);
         const cut = deductions(gross);
+        // The illustrative PCB follows the salary, as the database's re-seed has it.
+        const pcb_cents = deductions(basic).pcb_cents;
         return {
-          id: `seed-slip-${run.id}-${employee.id}`,
+          id,
           employee_id: employee.id,
           employee_name: employee.name,
           payroll_run_id: run.id,
           period_month: run.period_month,
+          basic_cents: basic,
           gross_cents: gross,
-          ...cut,
-          net_cents: gross - cut.epf_cents - cut.socso_cents - cut.eis_cents - cut.pcb_cents,
+          epf_cents: cut.epf_cents,
+          socso_cents: cut.socso_cents,
+          eis_cents: cut.eis_cents,
+          pcb_cents,
+          other_deductions_cents: other,
+          net_cents: gross - cut.epf_cents - cut.socso_cents - cut.eis_cents - pcb_cents - other,
+          set_by_hr: [],
+          lines,
           status: run.status === 'paid' ? 'paid' : 'pending',
         };
       }),
   );
+  const overtimeOut = overtime.map((o) => ({ ...o, paid_month: paidMonth.get(o.id) ?? null }));
 
   const goals: Goal[] = PEOPLE.filter(([n]) => n <= 10).flatMap(([n, name]) =>
     GOALS.map(([title, base, due], index): Goal => {
@@ -452,62 +559,80 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
     }),
   );
 
-  const scorecards: Scorecard[] = PEOPLE.map(([n, name]) => ({
-    id: `seed-score-${n}`,
-    employee_id: employeeId(n),
-    employee_name: name,
-    period: `H1 ${year}`,
-    score: 3 + ((n * 7) % 19) / 10,
-    competencies: {
-      Delivery: 3 + ((n * 3) % 20) / 10,
-      Teamwork: 3 + ((n * 5) % 20) / 10,
-      Ownership: 3 + ((n * 11) % 20) / 10,
-      Communication: 3 + ((n * 13) % 20) / 10,
-    },
-  }));
+  // Reviews as the demo's re-seed writes them: four scores in half steps, the overall score their average, all
+  // released but two (employees 10 and 16), which are still drafts.
+  const reviews: Review[] = PEOPLE.map(([n, name]) => {
+    const competencies = {
+      Delivery: 3 + ((n * 3) % 5) * 0.5,
+      Teamwork: 3 + ((n * 5) % 4) * 0.5,
+      Ownership: 2.5 + ((n * 11) % 5) * 0.5,
+      Communication: 3 + ((n * 13) % 5) * 0.5,
+    };
+    const mean = (competencies.Delivery + competencies.Teamwork + competencies.Ownership + competencies.Communication) / 4;
+    const rating: Review['rating'] = mean >= 4.3 ? 'exceeds' : mean >= 3.4 ? 'meets' : 'below';
+    const draft = n === 10 || n === 16;
+    return {
+      id: `seed-review-${n}`,
+      employee_id: employeeId(n),
+      employee_name: name,
+      period: `H1 ${year}`,
+      competencies,
+      rating,
+      score: Math.round(mean * 100) / 100,
+      comment:
+        rating === 'exceeds'
+          ? 'Consistently ahead of plan, and a steady hand for the team.'
+          : rating === 'meets'
+            ? 'A solid half. Keep building on ownership of the bigger pieces.'
+            : 'Below what the role needs this half. A plan for the next quarter is agreed.',
+      status: draft ? 'draft' : 'released',
+      released_at: draft ? null : ago(40),
+      reviewer_name: 'Kavitha Nair',
+      reviewed_at: addDays(today, -45),
+    };
+  });
 
-  const reviews: Review[] = scorecards.map((card) => ({
-    id: card.id.replace('score', 'review'),
-    employee_id: card.employee_id,
-    employee_name: card.employee_name,
-    period: card.period,
-    rating: card.score >= 4.3 ? 'exceeds' : card.score >= 3.4 ? 'meets' : 'below',
-    score: card.score,
-    reviewer_name: 'Kavitha Nair',
-    reviewed_at: addDays(today, -45),
-  }));
-
-  const trainings: Training[] = TRAININGS.map(([title, category, provider, from, to, status], index) => ({
+  const trainings: Training[] = TRAININGS.map(([title, category, provider, from, to], index) => ({
     id: `seed-training-${index + 1}`,
     title,
     category,
     provider,
     starts_on: addDays(today, from),
     ends_on: addDays(today, to),
-    status,
   }));
 
+  // Whoever is marked completed carries the time: the end of the course's last day, Malaysia time.
   const enrolments: TrainingEnrolment[] = PEOPLE.flatMap(([n]) =>
     trainings
       .map((training, index) => ({ training, k: index + 1 }))
       .filter(({ k }) => (n + k) % 3 === 0 || (n === 1 && k <= 3))
-      .map(({ training }): TrainingEnrolment => ({
-        id: `seed-enrol-${n}-${training.id}`,
-        employee_id: employeeId(n),
-        training_id: training.id,
-        completed: training.status === 'completed',
-      })),
+      .map(({ training }): TrainingEnrolment => {
+        const done = (training.ends_on ?? today) < today;
+        return {
+          id: `seed-enrol-${n}-${training.id}`,
+          employee_id: employeeId(n),
+          training_id: training.id,
+          completed: done,
+          completed_at: done ? `${training.ends_on}T10:00:00.000Z` : null,
+        };
+      }),
   );
 
-  const announcements: Announcement[] = ANNOUNCEMENTS.map(([title, body, category, days], index) => ({
+  const announcements: Announcement[] = ANNOUNCEMENTS.map(([title, body, category, status, days], index) => ({
     id: `seed-announcement-${index + 1}`,
     title,
     body,
     category,
-    published_at: ago(days),
-    author_name: 'Siti Lestari',
+    status,
+    published_at: status === 'published' ? ago(days) : null,
+    author_name: status === 'published' ? 'Siti Lestari' : null,
+    edited_at: null,
+    // The sample company is the demo: nobody in it has read marks, and its unread count is always zero.
+    unread: false,
   }));
 
+  // None of the demo's documents has a file: the screens say "Sample document, no file".
+  const noFile = { file_name: null, file_size: null, file_type: null, has_file: false, source: 'hr' as const };
   const documents: HrDocument[] = [
     ...employees.map((e, index): HrDocument => ({
       id: `seed-doc-contract-${index + 1}`,
@@ -515,31 +640,47 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
       employee_name: e.name,
       title: 'Employment contract',
       doc_type: 'contract',
-      status: 'signed',
-      issued_on: e.join_date,
       expires_on: null,
+      ack_requested: false,
+      acknowledged_at: null,
+      created_at: `${e.join_date}T00:00:00.000Z`,
+      ...noFile,
     })),
-    ...OWN_DOCUMENTS.map(([title, doc_type, status, issued, expires], index): HrDocument => ({
+    ...OWN_DOCUMENTS.map(([title, doc_type, added, expires, ack], index): HrDocument => ({
       id: `seed-doc-own-${index + 1}`,
       employee_id: employeeId(1),
       employee_name: nameOf.get(1)!,
       title,
       doc_type,
-      status,
-      issued_on: addDays(today, issued),
       expires_on: expires === null ? null : addDays(today, expires),
+      ack_requested: ack,
+      acknowledged_at: null,
+      created_at: ago(-added),
+      ...noFile,
     })),
-  ].sort((a, b) => (b.issued_on ?? '').localeCompare(a.issued_on ?? ''));
+  ].sort((a, b) => b.created_at.localeCompare(a.created_at));
 
-  const letters: Letter[] = LETTERS.map(([n, letter_type, title, status, day], index) => ({
+  const letters: Letter[] = LETTERS.map(([n, letter_type, title, status, day, ack, body], index) => ({
     id: `seed-letter-${index + 1}`,
     employee_id: employeeId(n),
     employee_name: nameOf.get(n)!,
     letter_type,
     title,
+    body: `Dear ${nameOf.get(n)!},\n\n${body}\n\nYours sincerely,\nRimba Ventures`,
     status,
     issued_on: status === 'issued' ? addDays(today, day) : null,
+    ack_requested: ack,
+    acknowledged_at: null,
     created_at: ago(-day),
+  }));
+
+  const templates: LetterTemplate[] = TEMPLATES.map(([letter_type, name, title, body], index) => ({
+    id: `seed-template-${index + 1}`,
+    name,
+    letter_type,
+    title,
+    body,
+    lang: 'en',
   }));
 
   const vouchers: PaymentVoucher[] = VOUCHERS.map(([no, payee, voucher_type, amount_cents, day, status]) => ({
@@ -563,21 +704,22 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
     listLeaveBalances: async (wanted) => balances.filter((b) => b.year === wanted),
     listTimeOffRequests: async () => newestFirst(timeOff),
     listClaims: async () => newestFirst(claims),
-    listOvertime: async () => newestFirst(overtime),
+    listOvertime: async () => newestFirst(overtimeOut),
     listAttendance: async (from, to) => attendance.filter((d) => between(d.work_date, from, to)),
     listTimesheet: async (from, to) => timesheet.filter((d) => between(d.work_date, from, to)),
     listShifts: async (from, to) => shifts.filter((s) => between(s.work_date, from, to)),
     listPublicHolidays: async () => holidays,
     listPayrollRuns: async () => runs,
-    listPayslips: async () => payslips,
+    listPayslips: async (employeeId) =>
+      employeeId ? payslips.filter((p) => p.employee_id === employeeId) : payslips,
     listGoals: async () => goals,
-    listScorecards: async () => scorecards,
     listReviews: async () => reviews,
     listTrainings: async () => trainings,
     listTrainingEnrolments: async () => enrolments,
     listAnnouncements: async () => announcements,
     listDocuments: async () => documents,
     listLetters: async () => newestFirst(letters),
+    listLetterTemplates: async () => templates,
     listPaymentVouchers: async () => vouchers,
     getSettings: async () => structuredClone(SETTINGS),
   };

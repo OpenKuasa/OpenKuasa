@@ -9,10 +9,13 @@
  * instead of being answered from nothing.
  */
 
+import { streamErrorHandler } from '@/lib/ai/call-log';
 import { chatJson, prepareChat } from '@/lib/ai/chat-request';
 import { runKasturi } from '@/lib/ai/agents/orchestrator';
+import { ensureCrmPipeline } from '@/lib/ai/crm-tools';
 import { getCurrentOrg } from '@/lib/auth/current-org';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
+import { chatApprovals } from '@/lib/chat/approvals';
 import { getReachData } from '@/lib/reach/supabase';
 
 export const dynamic = 'force-dynamic';
@@ -33,6 +36,8 @@ export async function POST(request: Request) {
 
   // Only a non-viewer member gets change tools (and each still needs approval).
   const canWrite = org.role !== 'viewer';
+  // A new workspace gets its starting pipeline here, as on the Deals screen: the lookups themselves never write.
+  if (canWrite) await ensureCrmPipeline(chat.supabase, org.orgId);
   const result = runKasturi(
     chat.messages,
     { client: chat.supabase, orgId: org.orgId, userId: chat.userId, canWrite },
@@ -43,12 +48,11 @@ export async function POST(request: Request) {
     },
     request.signal,
     chat.apiKey,
+    // An approval is answered from the server's record of the change, never from what the browser sent back.
+    await chatApprovals(chat, org.orgId),
   );
 
   return result.toUIMessageStreamResponse({
-    onError: (error) => {
-      console.error('[ask-kasturi] stream error:', error);
-      return 'Kasturi ran into a problem. Please try again in a moment.';
-    },
+    onError: streamErrorHandler('ask-kasturi', 'Kasturi ran into a problem. Please try again in a moment.'),
   });
 }

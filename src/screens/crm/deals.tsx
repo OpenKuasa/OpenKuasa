@@ -31,6 +31,7 @@ import type { CrmDeal, CrmDealContactChoice } from '@/lib/crm/deals';
 import type { CrmDealActions } from '@/lib/crm/form-state';
 import type { CrmPipeline } from '@/lib/crm/pipelines';
 import { DealBoard, useDealMoves } from './deal-board';
+import type { DealInvoiceChoice } from '@/lib/crm/invoice-links';
 import { DealFormCard } from './deal-parts';
 import { ManagePipelinesCard } from './deal-pipelines';
 import { DailyReportCard } from './deal-report';
@@ -70,6 +71,8 @@ type DealsScreenProps = {
   totalDeals?: number;
   /** The contacts a deal can be for. */
   contacts?: CrmDealContactChoice[];
+  /** Bendahara's invoices, to link to a deal on its edit form. */
+  invoices?: DealInvoiceChoice[];
   /** Present only when the signed-in person may change deals. */
   actions?: CrmDealActions;
   /** When the page was put together, as an ISO string: "today" for the report and the trend. */
@@ -81,6 +84,7 @@ export default function DealsScreen({
   deals,
   totalDeals,
   contacts,
+  invoices,
   actions,
   now,
 }: DealsScreenProps = {}) {
@@ -261,6 +265,7 @@ export default function DealsScreen({
             editing={editing}
             stages={stages}
             contacts={contacts ?? []}
+            invoices={invoices}
             // An edit is finished once saved. After adding, the cleared form
             // stays for the next deal until it is closed.
             onSaved={() => {

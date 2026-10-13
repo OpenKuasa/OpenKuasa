@@ -5,7 +5,8 @@
  * otherwise one of the user's free weekly questions on the platform key.
  *
  * Tuah works through a team: it asks a specialist per product (Jebat for
- * marketing, Kasturi for the CRM, Lekir for hiring) and carries out the changes they prepare.
+ * marketing, Kasturi for the CRM, Lekir for hiring, Lekiu for HR, Bendahara for
+ * finance) and carries out the changes they prepare.
  * Lookups run on their own; changes wait for the user's approval. A chat can
  * ask for the single agent that holds every tool itself with `team: false`.
  *
@@ -14,13 +15,22 @@
  */
 
 import { readUIMessageStream, type UIMessage } from 'ai';
+import { errorCodeOf, modelErrorCode } from '@/lib/ai/call-log';
 import { prepareChat } from '@/lib/ai/chat-request';
-import { runTuah } from '@/lib/ai/agents/orchestrator';
+import { ensureCrmPipeline } from '@/lib/ai/crm-tools';
+import { runTuah, type HireAccess, type PeopleAccess } from '@/lib/ai/agents/orchestrator';
+import { receiptFromMessages, type PeopleWrite } from '@/lib/ai/people-tools';
 import { getCurrentOrg } from '@/lib/auth/current-org';
+import { can } from '@/lib/auth/permissions';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
+import { chatApprovals, recordedProposals } from '@/lib/chat/approvals';
 import { answersWithTeam, namesIn, proposalsIn, transcriptOf } from '@/lib/chat/delegation';
+import { touchedPeople, withoutPeopleTurns } from '@/lib/chat/hr-privacy';
 import { saveAnswer, saveQuestion } from '@/lib/chat/store';
+import { createCvReader } from '@/lib/hire/cv-read';
 import { getHireData } from '@/lib/hire/supabase';
+import { createSupabasePeopleData } from '@/lib/people/supabase';
+import { getPeopleViewer } from '@/lib/people/viewer';
 import { originFromHeaders } from '@/lib/reach/form-submissions';
 import { getReachData } from '@/lib/reach/supabase';
 
@@ -34,28 +44,35 @@ export async function POST(request: Request) {
   if (!chat.ok) return chat.response;
 
   const { supabase, threadId, lastMessage } = chat;
-  // Saved alongside the answer rather than before it, so history never
-  // delays the first words. A turn that resumes after an approval has no new
-  // question: its thread already exists, and only the answer is added.
-  const questionSaved = !threadId
-    ? Promise.resolve(false)
-    : lastMessage.role === 'user'
-      ? saveQuestion(supabase, chat.userId, threadId, lastMessage.parts)
-      : Promise.resolve(true);
 
   const org = hasSupabaseEnv() ? await getCurrentOrg(supabase) : null;
   const data = await getReachData(supabase);
   // Only a non-viewer member gets change tools (and each still needs approval).
+  // Scheduling the agent commits the workspace to spend, so that one is owner/admin only.
   const write =
     org && org.role !== 'viewer'
-      ? { ctx: { client: supabase, orgId: org.orgId }, canWrite: true }
+      ? {
+          ctx: { client: supabase, orgId: org.orgId },
+          canWrite: true,
+          canManageAgents: can(org.role, 'manage-agents'),
+        }
       : undefined;
+  // Tuah answers with its team unless the chat asked for the single agent.
+  // A turn resuming after an approval stays with whichever one started it.
+  const withTeam = answersWithTeam(chat.team, lastMessage);
+  const hireData = await getHireData(supabase);
   // Lekir's change tools need the same write access as Jebat's.
-  const hire = {
-    data: await getHireData(supabase),
+  const hireBase = {
+    data: hireData,
     write,
     origin: originFromHeaders((name) => request.headers.get(name)),
   };
+  // Only Lekir, asked as a specialist, reads a CV: the single agent is given no way to.
+  // The file is read with the member's own client, never the service role, and waits on a
+  // shelf that belongs to this request alone until Lekir's model is shown it.
+  const hire: HireAccess = withTeam
+    ? { ...hireBase, files: createCvReader(hasSupabaseEnv() ? supabase : null, hireData), cvShelf: [] }
+    : hireBase;
   const crm = org
     ? {
         client: supabase,
@@ -65,13 +82,54 @@ export async function POST(request: Request) {
       }
     : null;
 
-  // Tuah answers with its team unless the chat asked for the single agent.
-  // A turn resuming after an approval stays with whichever one started it.
-  const withTeam = answersWithTeam(chat.team, lastMessage);
+  // A new workspace gets its starting pipeline here, as on the Deals screen: the lookups themselves never write.
+  if (crm?.canWrite) await ensureCrmPipeline(supabase, crm.orgId);
+
+  // HR is workspace-only, like the CRM: no workspace, no HR this turn (never the
+  // sample data, and never a crash — a failed viewer load just drops HR).
+  // Rows are the caller's own session's, so the database decides who sees what;
+  // the change tier (`hr` for an owner or admin, `self` for a linked member,
+  // none in the demo) and the employee id come from the viewer, never the model.
+  let people: PeopleAccess | null = null;
+  if (org) {
+    try {
+      const viewer = await getPeopleViewer(supabase, org);
+      const data = createSupabasePeopleData(supabase, org.orgId);
+      const receipt = receiptFromMessages(chat.uiMessages);
+      let write: PeopleWrite | undefined;
+      if (viewer.isDemo) {
+        write = undefined;
+      } else if (can(org.role, 'approve')) {
+        write = { ctx: { client: supabase, orgId: org.orgId }, tier: 'hr', employeeId: viewer.employeeId, receipt, userId: chat.userId };
+      } else if (viewer.employeeId !== null) {
+        write = { ctx: { client: supabase, orgId: org.orgId }, tier: 'self', employeeId: viewer.employeeId, receipt, userId: chat.userId };
+      }
+      people = { data, viewer, write };
+    } catch (error) {
+      console.error('[tuah] HR unavailable this turn:', errorCodeOf(error));
+      people = null;
+    }
+  }
+
+  // Finance is workspace-only, like the CRM: a non-viewer member gets the change tools (each still approved).
+  const finance = org ? { client: supabase, orgId: org.orgId, canWrite: org.role !== 'viewer' } : null;
+
+  // An approval is answered from the server's record of the change, never from what the browser sent back.
+  const approvals = await chatApprovals(chat, org?.orgId ?? null);
+  // Prepared changes so far, by id, as the server recorded them: what the team gates on and applies.
+  const recorded = withTeam ? await recordedProposals(approvals.store, chat.uiMessages) : new Map();
+  // For the HR-privacy check only (spotting an applyChange on an HR proposal), what the conversation itself says
+  // is kept as well: a change prepared before records were kept, or whose record has since been cleared, must
+  // still mark its turn as HR. Where the server has a record, the record wins. Read when needed, so changes
+  // prepared during this request (added to `recorded`) count too.
+  const described = proposalsIn(chat.uiMessages);
+  const conversationProposals = () => new Map([...described, ...recorded]);
   const team = withTeam
     ? {
-        transcript: transcriptOf(chat.uiMessages.slice(-8)),
-        proposals: proposalsIn(chat.uiMessages),
+        // HR turns are kept out of the shared transcript: an HR answer must not
+        // reach the other specialists' models (see hr-privacy).
+        transcript: transcriptOf(withoutPeopleTurns(chat.uiMessages.slice(-8), conversationProposals())),
+        proposals: recorded,
         names: namesIn(chat.uiMessages),
       }
     : null;
@@ -88,6 +146,9 @@ export async function POST(request: Request) {
     crm,
     team,
     hire,
+    people,
+    finance,
+    approvals,
   );
   void result.consumeStream();
 
@@ -105,19 +166,27 @@ export async function POST(request: Request) {
       })) {
         answer = message;
       }
-      if (!answer || !(await questionSaved)) return;
+      if (!answer) return;
+      // HR privacy: a turn that consulted HR is never written to history. Ask-Lekiu
+      // saves nothing, and Tuah matches that for any turn that touched HR data.
+      // The check runs on the finished answer, so the question is saved only now
+      // (after the answer), and an HR turn leaves no trace of question or answer.
+      if (touchedPeople(answer.parts, conversationProposals())) return;
+      const questionSaved =
+        lastMessage.role === 'user'
+          ? await saveQuestion(supabase, chat.userId, threadId, lastMessage.parts)
+          : true;
+      if (!questionSaved) return;
       await saveAnswer(supabase, threadId, answer.parts);
     })().catch((error) => {
-      console.error(
-        '[tuah] answer not saved:',
-        error instanceof Error ? error.message : error,
-      );
+      console.error('[tuah] answer not saved:', errorCodeOf(error));
     });
   }
 
   return result.toUIMessageStreamResponse({
     onError: (error) => {
-      console.error('[tuah] stream error:', error);
+      // The code only: after a CV read, a provider's error holds the request, file and all.
+      console.error('[tuah] stream error:', modelErrorCode(error));
       return 'Tuah ran into a problem. Please try again in a moment.';
     },
   });

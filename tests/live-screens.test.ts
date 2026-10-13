@@ -13,7 +13,7 @@ describe('live screens', () => {
 
   it('marks a screen that is not connected as sample', () => {
     expect(isSampleScreen('/people/calendar')).toBe(true);
-    expect(isSampleScreen('/crm/broadcast')).toBe(true);
+    expect(isSampleScreen('/crm/plugins')).toBe(true);
   });
 
   it('leaves connected screens and Tuah alone', () => {
@@ -28,6 +28,23 @@ describe('live screens', () => {
       expect(isSampleScreen(`/hire/${slug}`), slug).toBe(false);
     }
     expect(isSampleScreen('/hire/settings')).toBe(true);
+  });
+
+  it('counts Invoices and Payments In as live', () => {
+    expect(isSampleScreen('/finance/invoices')).toBe(false);
+    expect(isSampleScreen('/finance/payments-in')).toBe(false);
+  });
+
+  it('counts Quotations, Credit Notes and Refunds as live', () => {
+    for (const slug of ['quotations', 'credit-notes', 'refunds']) {
+      expect(isSampleScreen(`/finance/${slug}`), slug).toBe(false);
+    }
+  });
+
+  it('counts Cash Receipts, Payment Vouchers, Expenses, Banking and Receipts Inbox as live', () => {
+    for (const slug of ['cash-receipts', 'payment-vouchers', 'expenses', 'banking', 'receipts-inbox']) {
+      expect(isSampleScreen(`/finance/${slug}`), slug).toBe(false);
+    }
   });
 
   it('ignores paths that are not a screen', () => {

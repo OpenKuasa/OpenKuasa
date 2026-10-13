@@ -41,10 +41,17 @@ const MEMBER_VIEWER: PeopleViewer = { employeeId: ME, employeeName: 'Faiz Hakim'
 const DEMO_VIEWER: PeopleViewer = { employeeId: ME, isHr: false, isDemo: true };
 const base = createSeedPeopleData(NOW);
 
-const hr = () => ({ ctx: { client: {} as never, orgId: 'org-1' }, tier: 'hr' as const, employeeId: null });
-const self = (employeeId: string | null = ME) => ({ ctx: { client: {} as never, orgId: 'org-1' }, tier: 'self' as const, employeeId });
+const hr = () => ({ ctx: { client: {} as never, orgId: 'org-1' }, tier: 'hr' as const, employeeId: null as string | null, receipt: null, userId: 'u1' });
+const self = (employeeId: string | null = ME) => ({ ctx: { client: {} as never, orgId: 'org-1' }, tier: 'self' as const, employeeId, receipt: null, userId: 'u1' });
 
-const SELF_TOOLS = ['previewLeave', 'applyLeave', 'applyTimeOff', 'cancelLeaveRequest', 'cancelTimeOffRequest'];
+const SELF_TOOLS = [
+  'previewLeave', 'previewOvertime', 'applyLeave', 'applyTimeOff', 'cancelLeaveRequest', 'cancelTimeOffRequest',
+  'submitClaim', 'cancelClaim', 'submitOvertime', 'cancelOvertime',
+  // Anyone linked to an employee record can clock in and out for themselves, and ask whether they have.
+  'clockIn', 'clockOut', 'getMyAttendanceToday',
+  // ... and keep their own goals and enrol in training.
+  'saveGoal', 'removeGoal', 'enrolInTraining', 'withdrawFromTraining',
+];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Loose = any;
@@ -68,13 +75,19 @@ beforeEach(() => {
 
 describe('who holds which leave tools', () => {
   it('an owner or admin holds every change tool, and the preview', () => {
-    expect(Object.keys(tools(HR_VIEWER, hr()))).toEqual([...PEOPLE_TOOL_NAMES, 'previewLeave', ...PEOPLE_WRITE_TOOL_NAMES]);
+    // This owner has no linked employee record, so the clock tools (and "have I clocked in?") are not theirs.
+    const held = Object.keys(tools(HR_VIEWER, hr()));
+    expect(held.sort()).toEqual(
+      [...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getAttendanceSettings', 'listLetterTemplates', ...PEOPLE_WRITE_TOOL_NAMES]
+        .filter((name) => !['clockIn', 'clockOut'].includes(name))
+        .sort(),
+    );
     for (const name of ['decideLeave', 'decideTimeOff', 'setLeaveEntitlement']) expect(PEOPLE_WRITE_TOOL_NAMES).toContain(name);
   });
 
   it('a linked member holds the preview, apply and cancel for themselves, and nothing that decides', () => {
     const held = Object.keys(tools(MEMBER_VIEWER, self()));
-    expect(held).toEqual([...PEOPLE_TOOL_NAMES, ...SELF_TOOLS]);
+    expect(held.sort()).toEqual([...PEOPLE_TOOL_NAMES, ...SELF_TOOLS].sort());
     for (const name of ['decideLeave', 'decideTimeOff', 'setLeaveEntitlement', 'createEmployee', 'linkEmployeeToMember', 'deleteDepartment']) {
       expect(held, name).not.toContain(name);
     }
@@ -93,10 +106,15 @@ describe('who holds which leave tools', () => {
       expect(Object.keys(kit.write).sort()).toEqual(Object.keys(toolApproval ?? {}).sort());
       for (const name of Object.keys(kit.write)) expect(toolApproval?.[name], name).toBe('user-approval');
       expect(kit.read).toHaveProperty('previewLeave');
+      expect(kit.read).toHaveProperty('previewOvertime');
       expect(toolApproval).not.toHaveProperty('previewLeave');
+      expect(toolApproval).not.toHaveProperty('previewOvertime');
     }
     const member = peopleProduct({ data: base, viewer: MEMBER_VIEWER, write: self() });
-    expect(Object.keys(member.write).sort()).toEqual(['applyLeave', 'applyTimeOff', 'cancelLeaveRequest', 'cancelTimeOffRequest']);
+    expect(Object.keys(member.write).sort()).toEqual([
+      'applyLeave', 'applyTimeOff', 'cancelClaim', 'cancelLeaveRequest', 'cancelOvertime', 'cancelTimeOffRequest',
+      'clockIn', 'clockOut', 'enrolInTraining', 'removeGoal', 'saveGoal', 'submitClaim', 'submitOvertime', 'withdrawFromTraining',
+    ]);
   });
 });
 
@@ -234,8 +252,11 @@ describe('leave lookups carry what a change needs', () => {
 
   it('give a member the id of their own requests only, and no over_balance', async () => {
     const { requests } = await runWith(lookupData, 'listLeaveRequests', MEMBER_VIEWER, self());
+    // The source holds another person's request too; a member's answer is narrowed to their own before anything is shown.
+    expect(requests).toHaveLength(1);
     expect(requests[0].id).toBe('55555555-5555-4555-8555-555555555555');
-    expect(requests[1]).not.toHaveProperty('id');
+    expect(requests[0].employee).toBe('Faiz Hakim');
+    expect(JSON.stringify(requests)).not.toContain('66666666-6666-4666-8666-666666666666');
     for (const r of requests) expect(r).not.toHaveProperty('over_balance');
   });
 
@@ -276,8 +297,9 @@ describe('leave lookups carry what a change needs', () => {
     expect(hrRows.map((r: Loose) => r.id)).toEqual(['77777777-7777-4777-8777-777777777777', '88888888-8888-4888-8888-888888888888']);
     expect(hrRows[0]).toMatchObject({ off_date: '2026-10-20', start_time: '14:00', end_time: '16:00', employee: 'Faiz Hakim' });
     const memberRows = (await runWith(lookupData, 'listTimeOffRequests', MEMBER_VIEWER, self())).requests;
+    expect(memberRows).toHaveLength(1);
     expect(memberRows[0].id).toBe('77777777-7777-4777-8777-777777777777');
-    expect(memberRows[1]).not.toHaveProperty('id');
+    expect(JSON.stringify(memberRows)).not.toContain('88888888-8888-4888-8888-888888888888');
     const none = (await runWith(lookupData, 'listTimeOffRequests', MEMBER_VIEWER)).requests;
     for (const r of none) expect(r).not.toHaveProperty('id');
   });
@@ -311,5 +333,65 @@ describe('a change that fails', () => {
     expect(JSON.stringify(log.mock.calls)).not.toContain('mother');
     expect(log).toHaveBeenCalledWith('[lekiu] applyLeave failed:', 'Error');
     log.mockRestore();
+  });
+});
+
+describe('an owner or admin’s own requests', () => {
+  const NO_ONE = 'Say which employee this is for. Your own account is not linked to an employee record.';
+  const linked = (employeeId: string | null) => ({ ...hr(), employeeId });
+  const LEAVE = { leave_type: 'annual', start_date: '2026-10-20', end_date: '2026-10-22' };
+  const OFF = { off_date: '2026-10-20', start_time: '14:00', end_time: '16:00' };
+  const CALLS: [string, Record<string, unknown>][] = [
+    ['previewLeave', LEAVE],
+    ['applyLeave', LEAVE],
+    ['applyTimeOff', OFF],
+  ];
+
+  it('make the employee optional in the schema, and say what leaving it out means', () => {
+    for (const [name] of CALLS) {
+      const schema = (tools(HR_VIEWER, hr())[name] as unknown as { inputSchema: { safeParse: (v: unknown) => { success: boolean }; shape: { employee_id: { description?: string } } } })
+        .inputSchema;
+      expect(schema.safeParse({ ...(name === 'applyTimeOff' ? OFF : LEAVE) }).success, name).toBe(true);
+      expect(schema.shape.employee_id.description, name).toContain('leave it out when the request is for the person you are talking to');
+    }
+  });
+
+  it('act for their own linked employee when none is named', async () => {
+    for (const [name, input] of CALLS) await run(name, input, HR_VIEWER, linked(ME));
+    expect(ctl.ran.map((r) => r.fn)).toEqual(['previewLeave', 'applyLeave', 'applyTimeOff']);
+    for (const r of ctl.ran) expect(r.input).toMatchObject({ employee_id: ME });
+  });
+
+  it('refuse, without touching the database, when none is named and their account is linked to no one', async () => {
+    for (const [name, input] of CALLS) {
+      expect(await run(name, input, HR_VIEWER, linked(null)), name).toEqual({ ok: false, error: NO_ONE });
+    }
+    expect(ctl.ran).toEqual([]);
+  });
+
+  it('let an employee they name win over their own', async () => {
+    for (const [name, input] of CALLS) await run(name, { ...input, employee_id: OTHER }, HR_VIEWER, linked(ME));
+    for (const r of ctl.ran) expect(r.input).toMatchObject({ employee_id: OTHER });
+    expect(ctl.ran).toHaveLength(3);
+  });
+
+  it('treat an employee sent as null like one left out', async () => {
+    for (const [name, input] of CALLS) await run(name, { ...input, employee_id: null }, HR_VIEWER, linked(ME));
+    expect(ctl.ran).toHaveLength(3);
+    for (const r of ctl.ran) expect(r.input).toMatchObject({ employee_id: ME });
+  });
+
+  it('refuse when their own employee is undefined, never writing it as an id', async () => {
+    const unset = { ...hr(), employeeId: undefined as unknown as null };
+    for (const [name, input] of CALLS) {
+      expect(await run(name, input, HR_VIEWER, unset), name).toEqual({ ok: false, error: NO_ONE });
+    }
+    expect(ctl.ran).toEqual([]);
+  });
+
+  it('leave a member’s tools as they were: no employee field, always their own', async () => {
+    for (const [name] of CALLS) expect(shapeOf(name, self()), name).not.toContain('employee_id');
+    await run('applyLeave', { ...LEAVE, employee_id: OTHER }, MEMBER_VIEWER, self());
+    expect(ctl.ran[0].input).toMatchObject({ employee_id: ME });
   });
 });

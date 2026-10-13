@@ -4,6 +4,7 @@
  * effort: a failure is logged and the conversation carries on unsaved.
  */
 
+import { errorCodeOf } from '@/lib/ai/call-log';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getCurrentOrg } from '@/lib/auth/current-org';
 import { storeQuestionFiles } from '@/lib/chat/attachment-store';
@@ -26,7 +27,7 @@ export async function listThreads(
     .order('updated_at', { ascending: false })
     .limit(THREAD_LIMIT);
   if (error) {
-    console.error('[chat] could not list threads:', error.message);
+    console.error('[chat] could not list threads:', errorCodeOf(error));
     return null;
   }
   return (data ?? []).map((row) => ({
@@ -45,7 +46,7 @@ async function insertMessage(
   const { error } = await supabase
     .from('chat_messages')
     .insert({ thread_id: threadId, role, parts });
-  if (error) console.error('[chat] could not save a message:', error.message);
+  if (error) console.error('[chat] could not save a message:', errorCodeOf(error));
   return !error;
 }
 
@@ -99,10 +100,7 @@ export async function saveQuestion(
 
     return await insertMessage(supabase, threadId, 'user', question);
   } catch (error) {
-    console.error(
-      '[chat] could not save the question:',
-      error instanceof Error ? error.message : error,
-    );
+    console.error('[chat] could not save the question:', errorCodeOf(error));
     return false;
   }
 }

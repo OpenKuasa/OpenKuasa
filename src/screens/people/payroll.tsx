@@ -1,32 +1,100 @@
 import { PieChart, ReceiptText, TrendingUp, Users } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { AreaTrend, DonutStat, type Series, type Slice } from '@/components/charts';
+import { PayslipDetail } from '@/components/people/payslip-detail';
+import { PayslipEditor } from '@/components/people/payslip-editor';
+import { PayslipDialog, RunActions, RunPayrollDialog, RunPicker } from '@/components/people/payroll-run-controls';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
+import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { readPayroll } from '@/lib/people/payroll';
-import { rm } from '@/lib/reach/format';
+import { todayInMalaysia } from '@/lib/people/dates';
+import {
+  DRAFT_BANNER,
+  NO_MONTH_TO_RUN,
+  draftBlocksRun,
+  earlierOvertimeCount,
+  earlierOvertimeLine,
+  emptyRunNote,
+  headcountNote,
+  notOnRun,
+  notOnRunLine,
+  paidLine,
+  readPayroll,
+  runControls,
+  runIdFromParam,
+  runMonthChoice,
+} from '@/lib/people/payroll';
+import { centsToRinggit } from '@/lib/people/payroll-forms';
+import type { StatutoryField } from '@/lib/people/types';
 import { HrOnlyScreen, LOAD_FAILED, LaterButton, Muted, StatusPill, loadPeople } from './parts';
 
 const COST_SERIES: Series[] = [{ key: 'value', label: 'Gross (RM)', color: 'var(--chart-1)' }];
-const DEDUCTION_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)'];
+const DEDUCTION_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)'];
 
 const STATUS_LABEL = { draft: 'Draft', paid: 'Paid', pending: 'Pending' } as const;
 
-/** The latest payroll run and its payslips, as recorded. Owners and admins only; nothing here changes data yet. */
-export default async function PayrollScreen() {
-  const { model, viewer } = await loadPeople('payroll', (data, _now, ctx) => readPayroll(data, ctx.viewer));
+const FIGURE_CELL = 'whitespace-nowrap text-right tabular-nums text-muted-foreground';
+
+/** A statutory figure in the table, with a small mark when an owner typed over the proposed amount. */
+function Figure({ cents, field, setByHr }: { cents: number; field: StatutoryField; setByHr: StatutoryField[] }) {
+  return (
+    <TableCell className={FIGURE_CELL}>
+      {setByHr.includes(field) ? (
+        <span
+          title="Set by HR"
+          className="mr-1.5 rounded bg-muted px-1 py-0.5 align-middle text-[0.65rem] text-muted-foreground"
+        >
+          set by HR
+        </span>
+      ) : null}
+      {centsToRinggit(cents)}
+    </TableCell>
+  );
+}
+
+/**
+ * The payroll run chosen with `?run=` (else the newest) and its payslips. Owners and admins only. A draft can be
+ * recalculated, marked as paid or deleted, and each payslip opens to be adjusted; a paid run can be undone.
+ * In the demo the same screen is read-only.
+ */
+export default async function PayrollScreen({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const runId = runIdFromParam(((await searchParams) ?? {}).run);
+  const { model: loaded, viewer } = await loadPeople('payroll', async (data, _now, ctx) => {
+    const payroll = await readPayroll(data, ctx.viewer, runId);
+    // Who is not on a draft: the directory is readable by the team, and a draft is the only run that can change.
+    const employees = payroll?.latest?.status === 'draft' ? await data.listEmployees() : [];
+    return { payroll, employees };
+  });
+  const model = loaded?.payroll ?? null;
   if (!viewer.isHr && !viewer.isDemo) return <HrOnlyScreen title="Payroll" />;
 
   const latest = model?.latest ?? null;
+  const controls = runControls(latest, viewer);
   const dash = '—';
-  const slices: Slice[] = (model?.deductions ?? []).map((d, index) => ({
+  // "Other" is left out of the donut and its legend when it is nothing.
+  const slices: Slice[] = (model?.deductions ?? []).filter((d) => d.key !== 'other' || d.value > 0).map((d, index) => ({
     key: d.key,
     label: d.label,
     value: d.value / 100,
     color: DEDUCTION_COLORS[index % DEDUCTION_COLORS.length],
   }));
   const noRun = <Muted>No payroll run yet</Muted>;
+  const blocked = draftBlocksRun(model?.runs ?? []);
+  const monthChoice = runMonthChoice(model?.runs ?? [], todayInMalaysia(new Date()));
+  // Facts about the draft itself, worked out from its payslips each time the page loads, so they outlast the dialog.
+  const draftNotes =
+    latest && latest.status === 'draft'
+      ? [
+          earlierOvertimeLine(earlierOvertimeCount(latest.slips, latest.period_month)),
+          notOnRunLine(notOnRun(loaded?.employees ?? [], latest.slips, latest.run_id, latest.period_month)),
+        ].filter((note): note is string => note !== null)
+      : [];
+  const emptyNote = latest ? emptyRunNote(latest) : null;
 
   return (
     <ScreenContainer>
@@ -35,17 +103,53 @@ export default async function PayrollScreen() {
         subtitle={latest ? `${latest.label} · ${STATUS_LABEL[latest.status]}` : 'Monthly payroll runs'}
         actions={
           <>
+            {model ? <RunPicker runs={model.runs} currentId={latest?.run_id ?? null} /> : null}
             <LaterButton variant="outline" size="sm" compact>Export</LaterButton>
-            <LaterButton size="sm">Run payroll</LaterButton>
+            {viewer.isDemo || !model ? (
+              <LaterButton size="sm">Run payroll</LaterButton>
+            ) : blocked !== null || monthChoice === null ? (
+              <span className="inline-flex items-center gap-2">
+                <Button type="button" size="sm" disabled>
+                  Run payroll
+                </Button>
+                <span className="text-xs text-muted-foreground">{blocked ?? NO_MONTH_TO_RUN}</span>
+              </span>
+            ) : (
+              <RunPayrollDialog choice={monthChoice} />
+            )}
           </>
         }
       />
 
       <BentoGrid>
+        {latest && (latest.status === 'draft' || latest.paid_at) ? (
+          <BentoCard className="col-span-2 md:col-span-12">
+            <div className="space-y-3">
+              <p className="text-sm font-medium">
+                {latest.status === 'draft' ? `${latest.label}: ${DRAFT_BANNER}` : `${latest.label}: ${paidLine(latest)}`}
+              </p>
+              {emptyNote ? <p className="text-sm text-muted-foreground">{emptyNote}</p> : null}
+              {draftNotes.map((note) => (
+                <p key={note} className="text-sm text-muted-foreground">
+                  {note}
+                </p>
+              ))}
+              {controls.recalculate || controls.undoPaid ? (
+                <RunActions
+                  runId={latest.run_id}
+                  monthText={latest.label}
+                  headcount={latest.headcount}
+                  controls={controls}
+                />
+              ) : null}
+            </div>
+          </BentoCard>
+        ) : null}
+
         <BentoCard tone="primary" className="col-span-1 md:col-span-3">
           <BentoStat
             label="Gross payroll"
-            value={model ? (latest ? rm(latest.gross_cents) : dash) : dash}
+            value={model ? (latest ? centsToRinggit(latest.gross_cents) : dash) : dash}
             delta={latest?.label}
             deltaTone="flat"
             onPrimary
@@ -54,7 +158,7 @@ export default async function PayrollScreen() {
         <BentoCard className="col-span-1 md:col-span-3">
           <BentoStat
             label="Net pay"
-            value={model ? (latest ? rm(latest.net_cents) : dash) : dash}
+            value={model ? (latest ? centsToRinggit(latest.net_cents) : dash) : dash}
             delta={latest ? STATUS_LABEL[latest.status] : undefined}
             deltaTone="flat"
           />
@@ -62,8 +166,8 @@ export default async function PayrollScreen() {
         <BentoCard className="col-span-1 md:col-span-3">
           <BentoStat
             label="Deductions"
-            value={model ? (latest ? rm(latest.deductions_cents) : dash) : dash}
-            delta={latest ? 'EPF, SOCSO, EIS, PCB' : undefined}
+            value={model ? (latest ? centsToRinggit(latest.deductions_cents) : dash) : dash}
+            delta={latest ? 'EPF, SOCSO, EIS, PCB, other' : undefined}
             deltaTone="flat"
           />
         </BentoCard>
@@ -71,7 +175,7 @@ export default async function PayrollScreen() {
           <BentoStat
             label="Headcount paid"
             value={model ? (latest ? latest.headcount : dash) : dash}
-            delta={latest ? `${latest.paid_count} of ${latest.headcount} payslips paid` : undefined}
+            delta={latest ? headcountNote(latest) : undefined}
             deltaTone="flat"
           />
         </BentoCard>
@@ -98,7 +202,7 @@ export default async function PayrollScreen() {
             <DonutStat
               data={slices}
               height={240}
-              centerValue={rm(latest.deductions_cents)}
+              centerValue={centsToRinggit(latest.deductions_cents)}
               centerLabel="deductions"
             />
           )}
@@ -106,7 +210,7 @@ export default async function PayrollScreen() {
 
         <BentoCard
           title="Payslips"
-          subtitle={latest ? `${latest.label} · as recorded on each payslip` : 'Latest run'}
+          subtitle={latest ? `${latest.label} · open a name to see the payslip` : 'Latest run'}
           icon={ReceiptText}
           flush
           className="col-span-2 md:col-span-12"
@@ -125,6 +229,7 @@ export default async function PayrollScreen() {
                       <TableHead className="text-right">SOCSO</TableHead>
                       <TableHead className="text-right">EIS</TableHead>
                       <TableHead className="text-right">PCB</TableHead>
+                      <TableHead className="text-right">Other</TableHead>
                       <TableHead className="text-right">Deductions</TableHead>
                       <TableHead className="text-right">Net</TableHead>
                       <TableHead>Status</TableHead>
@@ -133,25 +238,28 @@ export default async function PayrollScreen() {
                   <TableBody>
                     {latest.slips.map((s) => (
                       <TableRow key={s.id}>
-                        <TableCell className="whitespace-nowrap font-medium">{s.employee_name}</TableCell>
-                        <TableCell className="whitespace-nowrap text-right tabular-nums">{rm(s.gross_cents)}</TableCell>
-                        <TableCell className="whitespace-nowrap text-right tabular-nums text-muted-foreground">
-                          {rm(s.epf_cents)}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap text-right tabular-nums text-muted-foreground">
-                          {rm(s.socso_cents)}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap text-right tabular-nums text-muted-foreground">
-                          {rm(s.eis_cents)}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap text-right tabular-nums text-muted-foreground">
-                          {rm(s.pcb_cents)}
+                        <TableCell className="whitespace-nowrap font-medium">
+                          <PayslipDialog name={s.employee_name} monthText={latest.label}>
+                            {controls.recalculate ? (
+                              <PayslipEditor payslip={s} />
+                            ) : (
+                              <PayslipDetail payslip={s} editable={false} />
+                            )}
+                          </PayslipDialog>
                         </TableCell>
                         <TableCell className="whitespace-nowrap text-right tabular-nums">
-                          {rm(s.deductions_cents)}
+                          {centsToRinggit(s.gross_cents)}
+                        </TableCell>
+                        <Figure cents={s.epf_cents} field="epf" setByHr={s.set_by_hr} />
+                        <Figure cents={s.socso_cents} field="socso" setByHr={s.set_by_hr} />
+                        <Figure cents={s.eis_cents} field="eis" setByHr={s.set_by_hr} />
+                        <Figure cents={s.pcb_cents} field="pcb" setByHr={s.set_by_hr} />
+                        <TableCell className={FIGURE_CELL}>{centsToRinggit(s.other_deductions_cents)}</TableCell>
+                        <TableCell className="whitespace-nowrap text-right tabular-nums">
+                          {centsToRinggit(s.deductions_cents)}
                         </TableCell>
                         <TableCell className="whitespace-nowrap text-right font-semibold tabular-nums">
-                          {rm(s.net_cents)}
+                          {centsToRinggit(s.net_cents)}
                         </TableCell>
                         <TableCell>
                           <StatusPill tone={s.status === 'paid' ? 'good' : 'pending'}>

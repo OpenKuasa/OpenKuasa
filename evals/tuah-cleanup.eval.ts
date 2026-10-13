@@ -15,5 +15,6 @@ const account = evalAccount();
 (account && process.env.NEXT_PUBLIC_SUPABASE_URL ? test : test.skip)('removes rows left by the accuracy check', async () => {
   const workspace = await openWorkspace(account!);
   await cleanUp(workspace);
-  await workspace.client.auth.signOut();
+  // Local: the default ends every session of the account, a browser's included.
+  await workspace.client.auth.signOut({ scope: 'local' });
 });

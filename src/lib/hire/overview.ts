@@ -1,6 +1,6 @@
 // src/lib/hire/overview.ts
-import { formatWhen } from '@/lib/reach/overview';
 import { STAGE_LABEL, funnelCounts, stageRank } from './applications-view';
+import { shortWhen } from './interview-time';
 import {
   APPLICATION_STAGES,
   type Application,
@@ -32,7 +32,7 @@ export function overviewTotals(jobs: Job[], apps: Application[], interviews: Int
       return i.status === 'scheduled' && at >= t && at < t + 7 * DAY;
     }).length,
     offers_out: apps.filter((a) => a.outcome === 'active' && a.stage === 'offer').length,
-    hires_last_30_days: apps.filter((a) => a.hired_at !== null && Date.parse(a.hired_at) <= t && t - Date.parse(a.hired_at) <= 30 * DAY).length,
+    hires_last_30_days: apps.filter((a) => a.hired_at !== null && a.outcome === 'active' && Date.parse(a.hired_at) <= t && t - Date.parse(a.hired_at) <= 30 * DAY).length,
   };
 }
 
@@ -58,7 +58,7 @@ export function sourceBreakdown(apps: Application[]): SourceRow[] {
     const source = a.source?.trim() || 'Unknown';
     const row = bySource.get(source) ?? { source, applications: 0, hires: 0 };
     row.applications += 1;
-    if (a.stage === 'hired') row.hires += 1;
+    if (a.stage === 'hired' && a.outcome === 'active') row.hires += 1;
     bySource.set(source, row);
   }
   return [...bySource.values()].sort(
@@ -122,7 +122,9 @@ export async function buildHireOverviewModel(data: HireData, now: Date): Promise
     interviews: upcomingInterviews(interviews, now, 3).map((i) => ({
       name: i.candidate_name,
       role: i.job_title,
-      when: formatWhen(i.scheduled_at, now),
+      // With its date and its year ("Tue 20 Oct 2026, 3:00 pm"): an interview can be a year off, and a weekday alone
+      // would be read as this week's.
+      when: shortWhen(i.scheduled_at),
       via: KIND_LABEL[i.kind],
       soon: Date.parse(i.scheduled_at) - now.getTime() < 2 * DAY,
     })),

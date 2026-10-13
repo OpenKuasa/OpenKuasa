@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ApplicationFormValues } from '@/lib/hire/application-form';
 import {
-  APPLY_HONEYPOT, APPLY_MESSAGES, EMPTY_APPLY_VALUES, isRequired, shownFields, type ApplyField,
+  APPLY_HONEYPOT, APPLY_MESSAGES, CV_FILE_FIELD, EMPTY_APPLY_VALUES, isRequired, shownFields, type ApplyField,
 } from '@/lib/hire/application-fields';
 import type { ApplyState } from '@/app/careers/[orgId]/[jobId]/actions';
 
@@ -43,10 +43,11 @@ const ALL = FORMS['all on'];
 const ORG_NAME = 'Tanjung Trading';
 
 const LABELS: Record<ApplyField, string> = {
-  name: 'Full name', email: 'Email', phone: 'Phone', cv_url: 'CV link', cover_letter: 'Cover letter',
+  name: 'Full name', email: 'Email', phone: 'Phone', cv_url: 'Link to your CV', cover_letter: 'Cover letter',
   portfolio_url: 'Portfolio link', expected_salary: 'Expected monthly salary',
   consent: "I agree that Tanjung Trading may store and use the details I've given to consider me for this role, "
-    + 'and that they are processed through OpenKuasa.',
+    + 'that they are processed through OpenKuasa, and that they may be reviewed with the help of an AI assistant, which sends '
+    + 'them to an AI service provider and may give the employer a recommendation.',
 };
 
 const action = async (): Promise<ApplyState> => undefined;
@@ -107,8 +108,11 @@ describe.each(Object.entries(FORMS))('a form with %s', (_name, form) => {
 
   it('has exactly the fields this form shows, in order, and the honeypot', () => {
     const names = controls(html).map((item) => attr(item.attrs, 'name'));
-    expect(names.filter((name) => name !== APPLY_HONEYPOT)).toEqual(shown);
+    expect(names.filter((name) => name !== APPLY_HONEYPOT && name !== CV_FILE_FIELD)).toEqual(shown);
     expect(names.filter((name) => name === APPLY_HONEYPOT)).toHaveLength(1);
+    // The file input is the CV group's first control: it comes once, straight before the link.
+    expect(names.filter((name) => name === CV_FILE_FIELD)).toHaveLength(1);
+    expect(names.indexOf(CV_FILE_FIELD)).toBe(names.indexOf('cv_url') - 1);
   });
 
   it('ties a label to every input, the honeypot included', () => {
@@ -125,6 +129,8 @@ describe.each(Object.entries(FORMS))('a form with %s', (_name, form) => {
       const { attrs } = control(html, field);
       const label = labelFor(html, attr(attrs, 'id')!)!;
       expect(text(label)).toContain(LABELS[field]);
+      // The link is half of the CV group: the group's legend says whether a CV is required, not the link's label.
+      if (field === 'cv_url') continue;
       if (isRequired(field, form)) {
         expect(label).toMatch(/<span[^>]*aria-hidden="true"[^>]*>\*<\/span>/);
         expect(label).not.toContain('(optional)');
@@ -327,6 +333,8 @@ describe('the form after the server found problems (no script needed)', () => {
 
   it('puts each message under its own field, tied to it, and marks the field invalid', () => {
     for (const field of shownFields(ALL)) {
+      // A missing CV is the CV group's problem, under its legend: see "the CV group".
+      if (field === 'cv_url') continue;
       const { attrs } = control(html, field);
       const message = byId(html, `${attr(attrs, 'id')}-error`);
       if (field in errors) {
@@ -351,8 +359,9 @@ describe('the form after the server found problems (no script needed)', () => {
     expect(text(html)).toContain('4 things need fixing');
     const summary = html.slice(html.indexOf('4 things need fixing'), html.indexOf('* Required'));
     const links = [...summary.matchAll(/<a[^>]*\shref="#([^"]+)"[^>]*>([\s\S]*?)<\/a>/g)];
+    // A missing CV links to the CV group's first control, the file input.
     expect(links.map((link) => link[1])).toEqual(
-      (['email', 'cv_url', 'expected_salary', 'consent'] as const).map((field) => attr(control(html, field).attrs, 'id')),
+      (['email', CV_FILE_FIELD, 'expected_salary', 'consent'] as const).map((field) => attr(control(html, field).attrs, 'id')),
     );
     expect(links.map((link) => text(link[2]))).toEqual(Object.values(errors));
     expect(html.indexOf('4 things need fixing')).toBeGreaterThan(html.indexOf('<form'));
@@ -371,9 +380,275 @@ describe('the form after the server found problems (no script needed)', () => {
   });
 
   it('shows no message for a field this form does not have', () => {
-    const none = render(FORMS['all off'], { errors: { cv_url: APPLY_MESSAGES.cvRequired }, values });
-    expect(none).not.toContain(APPLY_MESSAGES.cvRequired);
+    const none = render(FORMS['all off'], { errors: { cover_letter: APPLY_MESSAGES.coverLetterRequired }, values });
+    expect(none).not.toContain(APPLY_MESSAGES.coverLetterRequired);
     expect(none).not.toMatch(/needs? fixing/);
+  });
+});
+
+describe('the CV group', () => {
+  const fieldset = (html: string) => /<fieldset([^>]*)>([\s\S]*?)<\/fieldset>/.exec(html)!;
+  const legend = (html: string) => /<legend[^>]*>([\s\S]*?)<\/legend>/.exec(fieldset(html)[2])![1];
+  const values = { ...EMPTY_APPLY_VALUES, name: 'Aisyah Rahman', email: 'aisyah@example.com', consent: true };
+  const described = (html: string, name: string) => (attr(control(html, name).attrs, 'aria-describedby') ?? '').split(' ');
+
+  describe.each(Object.entries(FORMS))('on a form with %s', (_name, form) => {
+    const html = render(form);
+
+    it('is one fieldset, there whatever the workspace asks for, holding the file input and the link and nothing else', () => {
+      expect(count(html, /<fieldset[\s>]/g)).toBe(1);
+      expect(controls(fieldset(html)[2]).map((item) => attr(item.attrs, 'name'))).toEqual([CV_FILE_FIELD, 'cv_url']);
+    });
+
+    it('is named "CV" by its legend, which says whether a CV is required', () => {
+      expect(text(legend(html))).toMatch(/^CV\b/);
+      if (form.require_cv) {
+        expect(legend(html)).toMatch(/<span[^>]*aria-hidden="true"[^>]*>\*<\/span>/);
+        expect(legend(html)).not.toContain('(optional)');
+        // The asterisk is not read out; these words are.
+        expect(text(legend(html))).toBe('CV * (required)');
+      } else {
+        expect(text(legend(html))).toBe('CV (optional)');
+        expect(legend(html)).not.toContain('*');
+      }
+    });
+
+    it('requires neither of its two inputs alone, because either one will do', () => {
+      for (const name of [CV_FILE_FIELD, 'cv_url']) {
+        const { attrs } = control(html, name);
+        expect(has(attrs, 'required')).toBe(false);
+        expect(has(attrs, 'aria-required')).toBe(false);
+      }
+      for (const name of [CV_FILE_FIELD, 'cv_url']) {
+        expect(labelFor(html, attr(control(html, name).attrs, 'id')!)).not.toMatch(/\*|\(optional\)/);
+      }
+    });
+  });
+
+  describe('before anything is chosen', () => {
+    const html = render();
+
+    it('says "Upload a PDF or paste a link." under the legend, tied to the group', () => {
+      const [, attrs, body] = fieldset(html);
+      const helper = byId(html, 'apply-cv-help')!;
+      expect(text(helper[3])).toBe('Upload a PDF or paste a link.');
+      expect(attr(attrs, 'aria-describedby')).toBe('apply-cv-help');
+      expect(body.indexOf(helper[0])).toBeGreaterThan(body.indexOf('</legend>'));
+      expect(body.indexOf(helper[0])).toBeLessThan(body.indexOf(`name="${CV_FILE_FIELD}"`));
+    });
+
+    it('has a real file input for PDFs, labelled "Upload a PDF"', () => {
+      const { tag, attrs } = control(html, CV_FILE_FIELD);
+      expect(tag).toBe('input');
+      expect(attr(attrs, 'type')).toBe('file');
+      expect(attr(attrs, 'name')).toBe('cv_file');
+      expect(attr(attrs, 'accept')).toBe('application/pdf,.pdf');
+      expect(has(attrs, 'multiple')).toBe(false);
+      expect(has(attrs, 'value')).toBe(false);
+      expect(text(labelFor(html, attr(attrs, 'id')!)!)).toBe('Upload a PDF');
+    });
+
+    it('leaves the file input where everyone can see, reach and focus it', () => {
+      const { attrs } = control(html, CV_FILE_FIELD);
+      expect(has(attrs, 'hidden')).toBe(false);
+      expect(has(attrs, 'tabindex')).toBe(false);
+      expect(has(attrs, 'disabled')).toBe(false);
+      expect(has(attrs, 'style')).toBe(false);
+      const classes = attr(attrs, 'class')!.split(' ');
+      for (const gone of ['hidden', 'sr-only', 'invisible', 'opacity-0', 'absolute', 'size-0', 'w-0', 'h-0']) {
+        expect(classes).not.toContain(gone);
+      }
+      // As tall as a finger needs, and it shows where the keyboard is.
+      expect(classes).toContain('h-11');
+      expect(classes.some((name) => name.startsWith('focus-visible:ring'))).toBe(true);
+    });
+
+    it('says "PDF, up to 5 MB" by the file input, tied to it', () => {
+      const hint = byId(html, 'apply-cv_file-hint')!;
+      expect(text(hint[3])).toBe('PDF, up to 5 MB');
+      expect(described(html, CV_FILE_FIELD)).toEqual(['apply-cv_file-hint']);
+      expect(html.indexOf(hint[0])).toBeLessThan(html.indexOf('name="cv_url"'));
+    });
+
+    it('puts the word "or" between the file input and the link', () => {
+      const body = fieldset(html)[2];
+      const between = body.slice(body.indexOf(`name="${CV_FILE_FIELD}"`), body.indexOf('for="apply-cv_url"'));
+      expect(between).toMatch(/<p[^>]*>or<\/p>/);
+      expect(count(body, />or</g)).toBe(1);
+    });
+
+    it('labels the link "Link to your CV" and keeps its own helper under it', () => {
+      expect(text(labelFor(html, 'apply-cv_url')!)).toBe('Link to your CV');
+      expect(described(html, 'cv_url')).toEqual(['apply-cv_url-help']);
+    });
+
+    it('shows no chosen file, no "Remove" and no reminder: only the script knows of a file', () => {
+      expect(html).not.toContain('Remove');
+      expect(html).not.toContain(APPLY_MESSAGES.cvFileAgain);
+      expect(count(html, /<button[\s>]/g)).toBe(1);
+    });
+
+    it('posts as a form with files in it: React writes the encoding for a function action, so the form sets none', () => {
+      // A server action's form gets `encType="multipart/form-data"` from React; one set here would only be overridden.
+      expect(html).not.toMatch(/<form[^>]*\senctype=/i);
+    });
+  });
+
+  describe('when a CV is required and there is neither a file nor a link', () => {
+    const html = render(FORMS['CV only'], { errors: { cv_url: APPLY_MESSAGES.cvRequired }, values });
+
+    it('says so once, under the legend and above both inputs, as an alert', () => {
+      const body = fieldset(html)[2];
+      const message = byId(html, 'apply-cv-error')!;
+      expect(text(message[3])).toBe('Upload a PDF or paste a link to your CV.');
+      expect(attr(message[2], 'role')).toBe('alert');
+      expect(body.indexOf(message[0])).toBeGreaterThan(body.indexOf('</legend>'));
+      expect(body.indexOf(message[0])).toBeLessThan(body.indexOf(`name="${CV_FILE_FIELD}"`));
+      expect(count(html.slice(html.indexOf('* Required')), /Upload a PDF or paste a link to your CV\./g)).toBe(1);
+    });
+
+    it('ties it to the group and to both inputs, and calls neither input wrong on its own', () => {
+      expect(attr(fieldset(html)[1], 'aria-describedby')).toBe('apply-cv-help apply-cv-error');
+      expect(described(html, CV_FILE_FIELD)).toEqual(['apply-cv_file-hint', 'apply-cv-error']);
+      expect(described(html, 'cv_url')).toEqual(['apply-cv_url-help', 'apply-cv-error']);
+      expect(has(control(html, CV_FILE_FIELD).attrs, 'aria-invalid')).toBe(false);
+      expect(has(control(html, 'cv_url').attrs, 'aria-invalid')).toBe(false);
+      expect(byId(html, 'apply-cv_url-error')).toBeNull();
+      expect(byId(html, 'apply-cv_file-error')).toBeNull();
+    });
+
+    it('lists it in the summary, linked to the group\'s first control', () => {
+      expect(text(html)).toContain('1 thing needs fixing');
+      const summary = html.slice(html.indexOf('1 thing needs fixing'), html.indexOf('* Required'));
+      const links = [...summary.matchAll(/<a[^>]*\shref="#([^"]+)"[^>]*>([\s\S]*?)<\/a>/g)];
+      expect(links.map((link) => [link[1], text(link[2])])).toEqual([['apply-cv_file', APPLY_MESSAGES.cvRequired]]);
+    });
+
+    it('is not said when a CV is not required', () => {
+      const none = render(FORMS['all off'], { errors: { email: APPLY_MESSAGES.email }, values });
+      expect(none).not.toContain(APPLY_MESSAGES.cvRequired);
+      expect(byId(none, 'apply-cv-error')).toBeNull();
+    });
+  });
+
+  describe('when the link itself is wrong', () => {
+    const html = render(ALL, { errors: { cv_url: APPLY_MESSAGES.urlInvalid }, values: { ...values, cv_url: 'drive' } });
+
+    it('says so under the link, not under the legend, and marks the link', () => {
+      const message = byId(html, 'apply-cv_url-error')!;
+      expect(text(message[3])).toBe(APPLY_MESSAGES.urlInvalid);
+      expect(attr(message[2], 'role')).toBe('alert');
+      expect(html.indexOf(message[0])).toBeGreaterThan(html.indexOf('name="cv_url"'));
+      expect(attr(control(html, 'cv_url').attrs, 'aria-invalid')).toBe('true');
+      expect(described(html, 'cv_url')).toEqual(['apply-cv_url-help', 'apply-cv_url-error']);
+      expect(byId(html, 'apply-cv-error')).toBeNull();
+      expect(attr(fieldset(html)[1], 'aria-describedby')).toBe('apply-cv-help');
+      expect(has(control(html, CV_FILE_FIELD).attrs, 'aria-invalid')).toBe(false);
+    });
+
+    it('links the summary to the link input', () => {
+      const summary = html.slice(html.indexOf('1 thing needs fixing'), html.indexOf('* Required'));
+      expect(summary).toMatch(/<a[^>]*\shref="#apply-cv_url"/);
+    });
+  });
+
+  describe('when the file is wrong', () => {
+    const tooBig = APPLY_MESSAGES.cvFileTooBig('7.2 MB');
+    const state: ApplyState = { errors: { cv_file: tooBig }, values, fileDropped: true };
+    const html = render(ALL, state);
+
+    it('says so under the file input, as an alert tied to it, and marks the input', () => {
+      const message = byId(html, 'apply-cv_file-error')!;
+      expect(text(message[3])).toBe('This file is 7.2 MB. Choose one under 5 MB.');
+      expect(attr(message[2], 'role')).toBe('alert');
+      expect(html.indexOf(message[0])).toBeGreaterThan(html.indexOf(`name="${CV_FILE_FIELD}"`));
+      expect(html.indexOf(message[0])).toBeLessThan(html.indexOf('name="cv_url"'));
+      expect(attr(control(html, CV_FILE_FIELD).attrs, 'aria-invalid')).toBe('true');
+      expect(described(html, CV_FILE_FIELD)).toEqual(['apply-cv_file-hint', 'apply-cv_file-error']);
+      expect(has(control(html, 'cv_url').attrs, 'aria-invalid')).toBe(false);
+    });
+
+    it('lists it in the summary, linked to the file input', () => {
+      expect(text(html)).toContain('1 thing needs fixing');
+      const summary = html.slice(html.indexOf('1 thing needs fixing'), html.indexOf('* Required'));
+      const links = [...summary.matchAll(/<a[^>]*\shref="#([^"]+)"[^>]*>([\s\S]*?)<\/a>/g)];
+      expect(links.map((link) => [link[1], text(link[2])])).toEqual([['apply-cv_file', tooBig]]);
+    });
+
+    it('does not also say to choose the file again: the message already asks for another file', () => {
+      expect(html).not.toContain(APPLY_MESSAGES.cvFileAgain);
+    });
+
+    it('comes in the summary where the CV group is, before the link\'s own problem', () => {
+      const both = render(ALL, {
+        errors: {
+          consent: APPLY_MESSAGES.consent, cover_letter: APPLY_MESSAGES.coverLetterRequired,
+          cv_url: APPLY_MESSAGES.urlInvalid, cv_file: APPLY_MESSAGES.cvFileType, email: APPLY_MESSAGES.email,
+        },
+        values,
+        fileDropped: true,
+      });
+      expect(text(both)).toContain('5 things need fixing');
+      const summary = both.slice(both.indexOf('5 things need fixing'), both.indexOf('* Required'));
+      const links = [...summary.matchAll(/<a[^>]*\shref="#([^"]+)"[^>]*>([\s\S]*?)<\/a>/g)];
+      expect(links.map((link) => [link[1], text(link[2])])).toEqual([
+        ['apply-email', APPLY_MESSAGES.email],
+        ['apply-cv_file', APPLY_MESSAGES.cvFileType],
+        ['apply-cv_url', APPLY_MESSAGES.urlInvalid],
+        ['apply-cover_letter', APPLY_MESSAGES.coverLetterRequired],
+        ['apply-consent', APPLY_MESSAGES.consent],
+      ]);
+    });
+
+    it('is shown on a form with every switch off, where it is the only problem', () => {
+      const off = render(FORMS['all off'], { errors: { cv_file: APPLY_MESSAGES.cvFileType }, values, fileDropped: true });
+      expect(text(byId(off, 'apply-cv_file-error')![3])).toBe('Choose a PDF file.');
+      expect(text(off)).toContain('1 thing needs fixing');
+    });
+  });
+
+  describe('when the server drew the form again and a file had come with the post', () => {
+    it.each([
+      ['a problem with a field', { errors: { email: APPLY_MESSAGES.emailInvalid }, values, fileDropped: true as const }],
+      ['a problem with the whole application', { error: APPLY_MESSAGES.throttled, values, fileDropped: true as const }],
+      ['an upload that failed', { error: APPLY_MESSAGES.cvUploadFailed, values, fileDropped: true as const }],
+    ])('says to choose the file again, under the file input and tied to it, after %s', (_what, state) => {
+      const html = render(ALL, state);
+      const again = byId(html, 'apply-cv_file-again')!;
+      expect(text(again[3])).toBe('Choose your CV file again before sending.');
+      expect(html.indexOf(again[0])).toBeGreaterThan(html.indexOf(`name="${CV_FILE_FIELD}"`));
+      expect(html.indexOf(again[0])).toBeLessThan(html.indexOf('name="cv_url"'));
+      expect(described(html, CV_FILE_FIELD)).toEqual(['apply-cv_file-hint', 'apply-cv_file-again']);
+      // It is not a problem with the file input: nothing is counted, and the input is not marked wrong.
+      expect(has(control(html, CV_FILE_FIELD).attrs, 'aria-invalid')).toBe(false);
+      expect(count(html, /Choose your CV file again before sending\./g)).toBe(1);
+      // The file input is empty, as the browser left it; everything typed is still there.
+      expect(has(control(html, CV_FILE_FIELD).attrs, 'value')).toBe(false);
+      expect(attr(control(html, 'name').attrs, 'value')).toBe('Aisyah Rahman');
+    });
+
+    it('does not say it when no file had come', () => {
+      const html = render(ALL, { errors: { email: APPLY_MESSAGES.emailInvalid }, values });
+      expect(html).not.toContain(APPLY_MESSAGES.cvFileAgain);
+      expect(byId(html, 'apply-cv_file-again')).toBeNull();
+    });
+
+    it('says the upload failure above the button, and by the file that it must be chosen again', () => {
+      const html = render(ALL, { error: APPLY_MESSAGES.cvUploadFailed, values, fileDropped: true });
+      const alerts = [...html.matchAll(/<p[^>]*\srole="alert"[^>]*>([\s\S]*?)<\/p>/g)].map((match) => text(match[1]));
+      // Two things are said: what to do about the file, by the file, and what happened, above the button.
+      expect(alerts).toEqual(['Choose your CV file again before sending.', "We couldn't upload your CV, so your application wasn't sent. Please try again."]);
+    });
+  });
+
+  it('uses no purple or violet, and no colour of its own, in any of its states', () => {
+    for (const state of [
+      { errors: { cv_url: APPLY_MESSAGES.cvRequired }, values },
+      { errors: { cv_file: APPLY_MESSAGES.cvFileType, cv_url: APPLY_MESSAGES.urlInvalid }, values, fileDropped: true as const },
+      { error: APPLY_MESSAGES.cvUploadFailed, values, fileDropped: true as const },
+    ]) {
+      expect(render(ALL, state)).not.toMatch(/purple|violet|indigo|fuchsia|chart-5|#[0-9a-f]{3,8}\b|rgb\(|oklch\(|hsl\(/i);
+    }
   });
 });
 
@@ -399,7 +674,7 @@ describe('the form after its requirements changed while it was open', () => {
   const state = { error: APPLY_MESSAGES.formChanged, errors: { cv_url: APPLY_MESSAGES.cvRequired }, values };
 
   it('says the form changed above the button while the new field is still on its way', () => {
-    const html = render(FORMS['all off'], state);
+    const html = render(FORMS['all off'], { ...state, errors: { cover_letter: APPLY_MESSAGES.coverLetterRequired } });
     const alerts = [...html.matchAll(/<p[^>]*\srole="alert"[^>]*>([\s\S]*?)<\/p>/g)].map((match) => text(match[1]));
     expect(alerts).toEqual([APPLY_MESSAGES.formChanged]);
     expect(attr(control(html, 'name').attrs, 'value')).toBe('Aisyah Rahman');
@@ -408,15 +683,13 @@ describe('the form after its requirements changed while it was open', () => {
 
   it('shows the new field with its problem under it once the page has the current form, with or without a script', () => {
     const html = render(FORMS['CV only'], state);
-    const { attrs } = control(html, 'cv_url');
-    expect(attr(attrs, 'aria-invalid')).toBe('true');
-    expect(text(byId(html, `${attr(attrs, 'id')}-error`)![3])).toBe(APPLY_MESSAGES.cvRequired);
+    expect(text(byId(html, 'apply-cv-error')![3])).toBe(APPLY_MESSAGES.cvRequired);
     expect(text(html)).toContain('1 thing needs fixing');
     expect(text(html)).toContain(APPLY_MESSAGES.formChanged);
     expect(attr(control(html, 'name').attrs, 'value')).toBe('Aisyah Rahman');
     // Without a script the answer carries no such notice; the field and its problem are there all the same.
     const posted = render(FORMS['CV only'], { errors: state.errors, values });
-    expect(text(byId(posted, 'apply-cv_url-error')![3])).toBe(APPLY_MESSAGES.cvRequired);
+    expect(text(byId(posted, 'apply-cv-error')![3])).toBe(APPLY_MESSAGES.cvRequired);
   });
 });
 

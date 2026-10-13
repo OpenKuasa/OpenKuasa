@@ -1,32 +1,54 @@
-import { AlarmClock, CalendarCheck, Clock, LogIn, TrendingUp, Umbrella } from 'lucide-react';
+import { AlarmClock, CalendarCheck, Clock, LogIn, LogOut, TrendingUp, Umbrella } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { AreaTrend, DonutStat, HeatGrid, type Series, type Slice } from '@/components/charts';
+import { ClockButtons } from '@/components/people/clock-buttons';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
+import { Button } from '@/components/ui/button';
 import { LiveDot } from '@/components/ui/live-dot';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { attendanceWindowStart, buildMyAttendance } from '@/lib/people/attendance';
-import { todayInMalaysia } from '@/lib/people/dates';
-import { LOAD_FAILED, LaterButton, Muted, NotLinkedCard, StatusPill, loadPeople } from './parts';
+import { attendanceWindowStart, buildMyAttendance, clockButtonLabel, ownDayToday, workWeekFor } from '@/lib/people/attendance';
+import { clockAction, todayLine, todayState, type TodayState } from '@/lib/people/attendance-forms';
+import { timeInMalaysia, todayInMalaysia } from '@/lib/people/dates';
+import { LOAD_FAILED, Muted, NotLinkedCard, StatusPill, loadPeople } from './parts';
+import { DEMO_SIGN_UP_NOTE } from './my-requests';
 
 const HOURS_SERIES: Series[] = [{ key: 'hours', label: 'Hours worked', color: 'var(--chart-1)' }];
 const LEAVE_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-4)', 'var(--chart-5)', 'var(--chart-3)', 'var(--muted-foreground)'];
 
 /** The signed-in employee's own attendance. An owner's is the owner's, never the team's. */
 export default async function MyAttendanceScreen() {
-  const { model } = await loadPeople('my-attendance', async (data, now, ctx) => {
+  const { model: loaded, viewer } = await loadPeople('my-attendance', async (data, now, ctx) => {
     const today = todayInMalaysia(now);
     // Not linked to an employee: nothing to read, the builder answers "not linked".
     if (ctx.viewer.employeeId === null) {
-      return buildMyAttendance({ days: [], leave: [], balances: [], viewer: ctx.viewer, today });
+      const model = buildMyAttendance({ days: [], leave: [], balances: [], viewer: ctx.viewer, today });
+      return { model, state: { kind: 'not_linked' } as TodayState };
     }
-    const [days, leave, balances] = await Promise.all([
+    // Only HR (and the sample company) may read the work week; `workWeekFor` says what anyone else gets.
+    const knowsWeek = ctx.viewer.isHr || ctx.viewer.isDemo;
+    const [days, leave, balances, holidays, settings] = await Promise.all([
       data.listAttendance(attendanceWindowStart(today), today),
       data.listLeaveRequests(),
       data.listLeaveBalances(Number(today.slice(0, 4))),
+      data.listPublicHolidays(),
+      knowsWeek ? data.getSettings() : Promise.resolve(null),
     ]);
-    return buildMyAttendance({ days, leave, balances, viewer: ctx.viewer, today });
+    const model = buildMyAttendance({ days, leave, balances, viewer: ctx.viewer, today });
+    const state = todayState({
+      today,
+      day: ownDayToday(days, ctx.viewer, today),
+      workWeek: workWeekFor(settings),
+      holidays,
+      leave,
+      employeeId: ctx.viewer.employeeId,
+      nowHm: timeInMalaysia(now),
+    });
+    return { model, state };
   });
+  const model = loaded?.model ?? null;
+  const state = loaded?.state ?? null;
+  const action = state ? clockAction(state) : null;
 
   const dash = '—';
   const leaveMix: Slice[] = (model?.leave_by_type ?? []).map((row, index) => ({
@@ -41,11 +63,6 @@ export default async function MyAttendanceScreen() {
       <PageHeader
         title="My Attendance"
         subtitle="Your clock-ins, hours and leave balance."
-        actions={
-          <LaterButton icon={LogIn} size="sm">
-            Clock In
-          </LaterButton>
-        }
       />
 
       <BentoGrid>
@@ -53,6 +70,28 @@ export default async function MyAttendanceScreen() {
           <NotLinkedCard />
         ) : (
           <>
+            {state ? (
+              <BentoCard title="Today" icon={LogIn} className="col-span-2 md:col-span-12">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <p className="text-sm font-medium" data-testid="today-line">
+                    {todayLine(state)}
+                  </p>
+                  {viewer.isDemo ? (
+                    <span className="flex flex-col items-start gap-1 md:items-end">
+                      {action ? (
+                        <Button type="button" size="sm" disabled>
+                          {action === 'in' ? <LogIn aria-hidden /> : <LogOut aria-hidden />}
+                          {clockButtonLabel(action, false)}
+                        </Button>
+                      ) : null}
+                      <span className="text-xs text-muted-foreground">{DEMO_SIGN_UP_NOTE}</span>
+                    </span>
+                  ) : (
+                    <ClockButtons action={action} />
+                  )}
+                </div>
+              </BentoCard>
+            ) : null}
             <BentoCard tone="primary" className="col-span-1 md:col-span-3">
               <BentoStat
                 label="Days present"
@@ -175,10 +214,26 @@ export default async function MyAttendanceScreen() {
                               {row.clock_in ?? dash}
                             </span>
                           </TableCell>
-                          <TableCell className="tabular-nums">{row.clock_out ?? dash}</TableCell>
+                          <TableCell className="tabular-nums">
+                            {row.no_clock_out ? (
+                              <span className="text-xs text-amber-600">No clock-out</span>
+                            ) : (
+                              (row.clock_out ?? dash)
+                            )}
+                          </TableCell>
                           <TableCell className="tabular-nums">{row.hours === null ? dash : row.hours.toFixed(1)}</TableCell>
                           <TableCell>
-                            <StatusPill tone={row.tone}>{row.status_label}</StatusPill>
+                            <span className="flex flex-col items-start gap-1">
+                              <span className="flex items-center gap-2">
+                                <StatusPill tone={row.tone}>{row.status_label}</StatusPill>
+                                {row.corrected ? <StatusPill tone="neutral">Corrected</StatusPill> : null}
+                              </span>
+                              {row.corrected && row.correction_note ? (
+                                <span className="max-w-56 whitespace-normal text-xs text-muted-foreground">
+                                  Note: {row.correction_note}
+                                </span>
+                              ) : null}
+                            </span>
                           </TableCell>
                         </TableRow>
                       ))}

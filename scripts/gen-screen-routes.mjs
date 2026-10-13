@@ -42,13 +42,19 @@ const SERVER_PAGES = {
   'crm/deals': '@/screens/crm/deals-page',
   // The registry's Calendar is the sample the People product still shows.
   'crm/calendar': '@/screens/crm/calendar-page',
+  'crm/billings': '@/screens/crm/billings-page',
+  'crm/landing-page': '@/screens/crm/landing-pages-page',
+  'crm/broadcast': '@/screens/crm/broadcasts-page',
+  'crm/automations': '@/screens/crm/automations-page',
+  'crm/chatbot': '@/screens/crm/chatbot-page',
+  'crm/settings': '@/screens/crm/settings-page',
 };
 
 /**
  * Routes whose screen reads the URL's query string (a range filter, the month
- * shown): the page hands its `searchParams` through to the screen.
+ * shown, a search): the page hands its `searchParams` through to the screen.
  */
-const SEARCH_PARAM_PAGES = new Set(['crm/reports', 'crm/calendar']);
+const SEARCH_PARAM_PAGES = new Set(['crm/reports', 'crm/calendar', 'people/attendance', 'people/payroll', 'hire/talent-pool']);
 
 /** `product/item` for every item in the nav. */
 function navRoutes() {

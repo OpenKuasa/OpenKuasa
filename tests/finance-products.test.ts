@@ -59,6 +59,12 @@ describe('product schemas', () => {
   });
   it('keeps the SST rate between 0 and 100', () => {
     expect(first(createProductInput, { ...valid, sst_rate: 101 })).toBe('Enter an SST rate between 0 and 100.');
+    // The column is numeric(5,2): 1.005 is stored as 1.01, so that is what the write carries.
+    const rounded = createProductInput.parse({ ...valid, sst_rate: 1.005 });
+    expect(rounded.sst_rate).toBe(1.01);
+    expect(createProductInput.parse(rounded).sst_rate).toBe(1.01);
+    expect(updateProductInput.parse({ id: ID, sst_rate: 0.145 }).sst_rate).toBe(0.15);
+    expect(first(createProductInput, { ...valid, sst_rate: 100.005 })).toBe('Enter an SST rate between 0 and 100.');
   });
   it('fills the defaults and turns an empty SKU into null', () => {
     expect(createProductInput.parse({ ...valid, sku: '  ' })).toMatchObject({

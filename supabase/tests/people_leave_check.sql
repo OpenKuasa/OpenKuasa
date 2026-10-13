@@ -145,6 +145,8 @@ begin
   values (org, 'I', 'Inactive One', 'inactive') returning id into ei;
   insert into public.hr_employees (org_id, employee_no, name, work_email)
   values (org, 'V', 'Viewer V', mv || '@leave-check.openkuasa-test.dev') returning id into ev;
+  -- Linked by hand, as an owner or admin links them: a matching email links nobody (20261101134500_employee_account_link).
+  update public.hr_employees e set user_id = v.u from (values (ea, ma), (eb, mb), (ev, mv)) as v(e, u) where e.id = v.e;
   select count(*) into n from public.hr_employees where id in (ea, eb, ev) and user_id in (ma, mb, mv);
   if n <> 3 then fails := array_append(fails, 'the members were not linked to their employee records'); end if;
 

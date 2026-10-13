@@ -39,6 +39,10 @@ const bill = (n: number, b: Partial<BillListRow> = {}): BillListRow => ({
   paid: 0,
   balance: 100,
   display_status: 'pending',
+  purchase_order_id: null,
+  purchase_order_no: null,
+  category_id: null,
+  category_name: null,
   ...b,
 });
 
@@ -87,6 +91,14 @@ describe('payableBills', () => {
     expect(payable.map((b) => [b.bill_no, b.overdue, b.payable])).toEqual([
       ['BILL-0002', true, 100],
       ['BILL-0001', false, 100],
+    ]);
+  });
+
+  it('carries the purchase order a bill is raised against, for the order notes', () => {
+    const payable = payableBills([bill(1, { purchase_order_id: 'po-1', purchase_order_no: 'PO-0003' }), bill(2)], []);
+    expect(payable.map((b) => [b.bill_no, b.purchase_order_id])).toEqual([
+      ['BILL-0001', 'po-1'],
+      ['BILL-0002', null],
     ]);
   });
 

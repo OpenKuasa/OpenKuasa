@@ -21,9 +21,19 @@ import type { LeaveBalance, LeaveRequest, LeaveType, RequestStatus } from './typ
 
 // ---- Sentences ---------------------------------------------------------------
 
+/**
+ * What an admin is told when the request they are deciding, or marking as paid, is their own. The database
+ * raises LEAVE_OWN_REQUEST or PAY_OWN_REQUEST; the same sentence answers both, and the approval screens show
+ * it in place of the buttons.
+ */
+export const OWN_REQUEST_REFUSAL =
+  "You can't approve, reject or pay your own request. Ask the workspace owner or another admin.";
+
 /** Each refusal code the leave functions raise, and what the person is told. */
 export const LEAVE_REFUSALS: Record<string, string> = {
   LEAVE_NOT_ALLOWED: "You can't make that change.",
+  // An admin deciding their own request; the workspace's owner may.
+  LEAVE_OWN_REQUEST: OWN_REQUEST_REFUSAL,
   LEAVE_OVERLAP: 'That overlaps leave already applied for on those dates.',
   LEAVE_NO_WORKING_DAY: 'Those dates have no working day in them.',
   LEAVE_NOT_PENDING: 'That request has already been decided or cancelled.',

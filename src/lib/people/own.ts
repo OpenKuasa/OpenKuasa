@@ -8,18 +8,27 @@ import { leaveLabel } from './overview';
 import { average } from './series';
 import type {
   ClaimCategory,
-  DocumentStatus,
+  ClaimStatus,
   DocumentType,
   Employee,
   LeaveRequest,
+  LetterLang,
+  LetterType,
   LeaveType,
   PeopleViewer,
-  RequestStatus,
 } from './types';
 
 /** HR, or anyone in the demo workspace: the people for whom the database returns the whole team. */
 export function isTeamView(viewer: PeopleViewer): boolean {
   return viewer.isHr || viewer.isDemo;
+}
+
+/**
+ * The people the approval screens and team attendance are for: HR, the demo, and a manager. Not `isTeamView`:
+ * a manager's rows are their own and their direct reports', never the whole workspace's.
+ */
+export function canApproveTeam(viewer: PeopleViewer): boolean {
+  return isTeamView(viewer) || viewer.managesTeam === true;
 }
 
 /** The rows that belong to the viewer's own employee record. None when the account is not linked. */
@@ -60,9 +69,10 @@ export function departmentAverages(
     .sort((a, b) => b.average - a.average || a.department.localeCompare(b.department));
 }
 
-export const REQUEST_STATUS_LABEL: Record<RequestStatus, string> = {
+export const REQUEST_STATUS_LABEL: Record<ClaimStatus, string> = {
   pending: 'Pending',
   approved: 'Approved',
+  paid: 'Paid',
   rejected: 'Rejected',
   cancelled: 'Cancelled',
 };
@@ -76,16 +86,23 @@ export const CLAIM_CATEGORY_LABEL: Record<ClaimCategory, string> = {
 };
 
 export const DOCUMENT_TYPE_LABEL: Record<DocumentType, string> = {
-  payslip: 'Payslip',
   contract: 'Contract',
-  letter: 'Letter',
   tax: 'Tax form',
   benefits: 'Benefits',
+  identity: 'Identity',
+  medical: 'Medical',
+  certificate: 'Certificate',
+  other: 'Other',
 };
 
-export const DOCUMENT_STATUS_LABEL: Record<DocumentStatus, string> = {
-  signed: 'Signed',
-  pending_signature: 'Pending signature',
-  available: 'Available',
-  expiring: 'Expiring',
+export const LETTER_TYPE_LABEL: Record<LetterType, string> = {
+  offer: 'Offer',
+  confirmation: 'Confirmation',
+  promotion: 'Promotion',
+  warning: 'Warning',
+  contract_renewal: 'Contract renewal',
+  other: 'Other',
 };
+
+/** A letter template's language, as a person reads it. */
+export const LETTER_LANG_LABEL: Record<LetterLang, string> = { en: 'English', ms: 'Bahasa Malaysia' };

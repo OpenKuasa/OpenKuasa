@@ -8,7 +8,7 @@ const ACCOUNT = '66666666-6666-4666-8666-666666666666';
 type Answer = { ok: true; data: unknown } | { ok: false; error: string };
 
 const ctl = vi.hoisted(() => ({
-  viewer: { userId: 'u1', orgId: 'org1', role: 'member', isDemo: false } as {
+  viewer: { userId: 'u1', orgId: 'org1', role: 'admin', isDemo: false } as {
     userId: string; orgId: string; role: string; isDemo: boolean;
   },
   /** Every data-layer call, in order: the function, the workspace it was given, and its input. */
@@ -64,7 +64,16 @@ vi.mock('@/lib/finance/money', async (orig) => {
 
 const actions = await import('@/app/(app)/finance/actions');
 
-const PATHS = ['/finance/supplier-bills', '/finance/payments-out', '/finance/customers-suppliers'];
+// A payment to a supplier is a voucher: Payment Vouchers lists every movement of money out.
+const PATHS = [
+  '/finance/supplier-bills', '/finance/payments-out', '/finance/customers-suppliers', '/finance/payment-vouchers',
+  '/finance/banking',
+  // Every document that posts, voids or pays also moves the books.
+  '/finance/chart-of-accounts', '/finance/journals', '/finance/reports',
+];
+// A bill saved, posted, voided or deleted also changes the billed total of the purchase order it is raised against,
+// and what Receipts Inbox says of a receipt tied to it.
+const BILL_PATHS = [...PATHS, '/finance/purchase-orders', '/finance/receipts-inbox'];
 const FORBIDDEN = { ok: false, error: 'You do not have permission to make changes here.' };
 
 const bill = {
@@ -93,7 +102,8 @@ const writes: [string, (input: unknown) => Promise<Answer>, unknown, string][] =
 ];
 
 beforeEach(() => {
-  ctl.viewer = { userId: 'u1', orgId: 'org1', role: 'member', isDemo: false };
+  // An admin: posting, paying and voiding need an owner or admin. What a member may do is at the end.
+  ctl.viewer = { userId: 'u1', orgId: 'org1', role: 'admin', isDemo: false };
   ctl.calls = [];
   ctl.revalidated = [];
   ctl.answers = {};
@@ -123,7 +133,7 @@ describe('each write action', () => {
       ctl.revalidated = [];
       expect((await action(input)).ok, name).toBe(true);
       expect(ctl.calls.map((c) => [c.fn, c.orgId]), name).toEqual([[fn, 'org1']]);
-      expect(ctl.revalidated, name).toEqual(PATHS);
+      expect(ctl.revalidated, name).toEqual(name.includes('Bill') ? BILL_PATHS : PATHS);
     }
   });
 
@@ -151,7 +161,7 @@ describe('each write action', () => {
     // The bill was posted in another tab while this one still had its draft open.
     ctl.answers.saveBill = { ok: false, error: 'This bill is posted and can no longer be changed. Void it instead.' };
     expect(await actions.saveBillAction({ ...bill, id: BILL })).toEqual(ctl.answers.saveBill);
-    expect(ctl.revalidated).toEqual(PATHS);
+    expect(ctl.revalidated).toEqual(BILL_PATHS);
 
     ctl.revalidated = [];
     ctl.answers.voidPayment = { ok: false, error: 'That payment no longer exists.' };
@@ -165,14 +175,14 @@ describe('saveAndPostBillAction', () => {
     expect(await actions.saveAndPostBillAction(bill)).toEqual({ ok: true, data: { id: BILL, bill_no: 'BILL-0007' } });
     expect(ctl.calls.map((c) => c.fn)).toEqual(['saveBill', 'postBill']);
     expect(ctl.calls[1].input).toEqual({ id: BILL });
-    expect(ctl.revalidated).toEqual(PATHS);
+    expect(ctl.revalidated).toEqual(BILL_PATHS);
   });
 
   it('does not post when the save is refused', async () => {
     ctl.answers.saveBill = { ok: false, error: 'The supplier or a product on this bill no longer exists.' };
     expect(await actions.saveAndPostBillAction(bill)).toEqual(ctl.answers.saveBill);
     expect(ctl.calls.map((c) => c.fn)).toEqual(['saveBill']);
-    expect(ctl.revalidated).toEqual(PATHS);
+    expect(ctl.revalidated).toEqual(BILL_PATHS);
   });
 
   it('keeps the draft when the post is refused, and says which draft it is', async () => {
@@ -183,7 +193,7 @@ describe('saveAndPostBillAction', () => {
       draftId: BILL,
     });
     expect(ctl.calls.map((c) => c.fn)).toEqual(['saveBill', 'postBill']);
-    expect(ctl.revalidated).toEqual(PATHS);
+    expect(ctl.revalidated).toEqual(BILL_PATHS);
   });
 
   it('answers with the schema’s sentence and saves nothing when the form is refused', async () => {
@@ -205,7 +215,7 @@ describe('getBillAction', () => {
 
   it('says the bill is gone, and refreshes the list, when it was deleted meanwhile', async () => {
     expect(await actions.getBillAction({ id: BILL })).toEqual({ ok: false, error: 'That bill no longer exists.' });
-    expect(ctl.revalidated).toEqual(PATHS);
+    expect(ctl.revalidated).toEqual(BILL_PATHS);
   });
 
   it('says the bill is locked, and refreshes the list, when it was posted meanwhile', async () => {
@@ -214,7 +224,7 @@ describe('getBillAction', () => {
       ok: false,
       error: 'This bill is posted and can no longer be changed. Void it instead.',
     });
-    expect(ctl.revalidated).toEqual(PATHS);
+    expect(ctl.revalidated).toEqual(BILL_PATHS);
   });
 
   it('says the bill is gone for an id that is not an id, without reading', async () => {
@@ -229,5 +239,47 @@ describe('getBillAction', () => {
     expect(await actions.getBillAction({ id: BILL })).toEqual({ ok: false, error: 'That could not be loaded. Please try again.' });
     expect(logged).toHaveBeenCalled();
     logged.mockRestore();
+  });
+});
+
+describe('a member, who may write but not sign off', () => {
+  const NEEDS = { ok: false, error: 'Only an owner or admin can post, pay or void. Ask one of them to do this.' };
+  beforeEach(() => {
+    ctl.viewer = { userId: 'u1', orgId: 'org1', role: 'member', isDemo: false };
+  });
+
+  it('saves and deletes drafts, and schedules a payment or deletes a scheduled one', async () => {
+    expect((await actions.saveBillAction(bill)).ok).toBe(true);
+    expect((await actions.deleteBillAction({ id: BILL })).ok).toBe(true);
+    expect((await actions.recordPaymentOutAction({ ...payment, scheduled: true })).ok).toBe(true);
+    expect((await actions.deleteScheduledPaymentAction({ id: TXN })).ok).toBe(true);
+    expect(ctl.calls.map((c) => c.fn)).toEqual(['saveBill', 'deleteBill', 'recordPaymentOut', 'deleteScheduledPayment']);
+  });
+
+  it('is told who can post, pay or void, before anything is read or written', async () => {
+    expect(await actions.postBillAction({ id: BILL })).toEqual(NEEDS);
+    expect(await actions.voidBillAction({ id: BILL })).toEqual(NEEDS);
+    expect(await actions.markPaymentPaidAction({ id: TXN, paid_on: '2026-10-09' })).toEqual(NEEDS);
+    expect(await actions.voidPaymentAction({ id: TXN })).toEqual(NEEDS);
+    expect(ctl.calls).toEqual([]);
+    expect(ctl.revalidated).toEqual([]);
+  });
+
+  it('cannot record a payment as paid now, and is told to schedule it', async () => {
+    expect(await actions.recordPaymentOutAction(payment)).toEqual({
+      ok: false,
+      error: 'Only an owner or admin can record this as paid. Save it as scheduled or pending instead.',
+    });
+    expect(ctl.calls).toEqual([]);
+  });
+
+  it('keeps the draft from "save and post", without trying the post', async () => {
+    expect(await actions.saveAndPostBillAction(bill)).toEqual({
+      ok: false,
+      error: 'Saved as a draft. Only an owner or admin can post or issue it.',
+      draftId: BILL,
+    });
+    expect(ctl.calls.map((c) => c.fn)).toEqual(['saveBill']);
+    expect(ctl.revalidated).toEqual(BILL_PATHS);
   });
 });

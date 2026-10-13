@@ -1,10 +1,14 @@
 import { AlertTriangle, CircleCheck, Flag, Gauge, Plus, Target, TrendingUp } from 'lucide-react';
+import { deleteMyGoalAction, saveMyGoalAction } from '@/app/(app)/people/performance-actions';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { BarGroup, RadialGauge, type Series } from '@/components/charts';
+import { GoalCardControls } from '@/components/people/goal-card-controls';
+import { AddGoal } from '@/components/people/goal-form';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
 import { Progress } from '@/components/ui/progress';
 import { formatDate } from '@/lib/people/dates';
+import { myGoalsControls } from '@/lib/people/goals-training';
 import { type GoalRow, buildGoalsModel } from '@/lib/people/performance';
 import { LOAD_FAILED, LaterButton, Muted, NotLinkedCard, StatusPill, loadPeople } from './parts';
 
@@ -19,20 +23,26 @@ const STATUS_TONE = { on_track: 'good', at_risk: 'pending', done: 'neutral' } as
 const STATUS_ICON = { on_track: Target, at_risk: AlertTriangle, done: CircleCheck } as const;
 
 export default async function MyGoalsScreen() {
-  const { model } = await loadPeople('my-goals', async (data, _now, ctx) => {
+  const { model, viewer } = await loadPeople('my-goals', async (data, _now, ctx) => {
     // Not linked to an employee: nothing to read, the builder answers "not linked".
     if (ctx.viewer.employeeId === null) return buildGoalsModel([], ctx.viewer);
     return buildGoalsModel(await data.listGoals(), ctx.viewer);
   });
   const dash = '—';
+  // Every new control is absent in the demo (the server refuses there); the placeholder stays for the visitor.
+  const controls = myGoalsControls(viewer, model ? { linked: model.linked } : null);
   const header = (
     <PageHeader
       title="My Goals"
       subtitle="Your objectives and how far along they are"
       actions={
-        <LaterButton icon={Plus} size="sm">
-          Add Goal
-        </LaterButton>
+        controls.placeholder ? (
+          <LaterButton icon={Plus} size="sm">
+            Add Goal
+          </LaterButton>
+        ) : controls.add ? (
+          <AddGoal save={saveMyGoalAction} />
+        ) : null
       }
     />
   );
@@ -127,6 +137,14 @@ export default async function MyGoalsScreen() {
                       <Flag className="size-3.5" />
                       <span>Due {formatDate(g.due_date)}</span>
                     </div>
+                  ) : null}
+                  {controls.cards ? (
+                    <GoalCardControls
+                      key={`${g.id}-${g.progress}-${g.status}-${g.title}-${g.due_date}`}
+                      goal={g}
+                      save={saveMyGoalAction}
+                      remove={deleteMyGoalAction}
+                    />
                   ) : null}
                 </div>
               </BentoCard>

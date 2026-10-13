@@ -17,6 +17,9 @@ import {
   setLeaveEntitlement,
 } from '@/lib/people/leave';
 import { PEOPLE_PATHS } from '@/lib/people/paths';
+import { DECIDE_FORBIDDEN } from '@/lib/people/reporting-refusals';
+import { mayDecideRequests } from '@/lib/people/tier';
+import type { PeopleViewer } from '@/lib/people/types';
 import { getPeopleViewer } from '@/lib/people/viewer';
 import { createClient } from '@/lib/supabase/server';
 
@@ -63,6 +66,27 @@ async function asAdmin(): Promise<Guarded | CapResult<never>> {
     return { ok: false, error: WRITE_FAILED };
   }
   if (!can(viewer.role, 'approve')) return FORBIDDEN;
+  return { ctx: { client, orgId: viewer.orgId }, employeeId: null };
+}
+
+/**
+ * The decide actions only: an owner or admin, or someone who manages a team, outside the demo. Whether this
+ * caller may decide THIS request is the database's call (the request's own manager, or HR); this saves a refused
+ * round trip for everyone else.
+ */
+async function asDecider(): Promise<Guarded | CapResult<never>> {
+  const viewer = await getViewer();
+  if (viewer.isDemo) return DEMO;
+  const client = await createClient();
+  let people: PeopleViewer;
+  try {
+    people = await getPeopleViewer(client, { orgId: viewer.orgId, role: viewer.role });
+  } catch (error) {
+    console.error('[people/leave-actions] could not look up the viewer:', error instanceof Error ? error.name : 'error');
+    return { ok: false, error: WRITE_FAILED };
+  }
+  if (people.isDemo) return DEMO;
+  if (!mayDecideRequests(people)) return { ok: false, error: DECIDE_FORBIDDEN };
   return { ctx: { client, orgId: viewer.orgId }, employeeId: null };
 }
 
@@ -131,13 +155,13 @@ export async function applyLeaveForAction(input: unknown) {
 }
 
 export async function decideLeaveAction(input: unknown) {
-  const guard = await asAdmin();
+  const guard = await asDecider();
   if (refused(guard)) return guard;
   return changed(await decideLeave(guard.ctx, input as never));
 }
 
 export async function decideTimeOffAction(input: unknown) {
-  const guard = await asAdmin();
+  const guard = await asDecider();
   if (refused(guard)) return guard;
   return changed(await decideTimeOff(guard.ctx, input as never));
 }

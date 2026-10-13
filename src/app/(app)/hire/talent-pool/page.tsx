@@ -3,8 +3,12 @@
 import { connection } from 'next/server';
 import Screen from '@/screens/hire/talent-pool';
 
-export default async function Page() {
+export default async function Page({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   // Rendered for each request, never frozen at build time.
   await connection();
-  return <Screen />;
+  return <Screen searchParams={searchParams} />;
 }

@@ -39,6 +39,8 @@ import { ReplyCard, type CardType } from '@/components/command/reply-cards';
 import { useViewer } from '@/components/app/viewer-context';
 import {
   ChatKeyNotice,
+  DAILY_LIMIT_NOTICE,
+  attachmentRefusal,
   chatErrorCode,
   isChatLocked,
   useChatStatus,
@@ -68,6 +70,7 @@ import {
   hasVisibleContent,
   isText,
   proposalFor,
+  rowFinder,
   toPendingApproval,
   toSpecialistWork,
   toToolStep,
@@ -1082,6 +1085,7 @@ function ChatPane({
                                   key={pending.approvalId}
                                   approval={pending}
                                   named={nameFinder(chat.messages)}
+                                  before={rowFinder(chat.messages)}
                                   proposal={proposalFor(pending.input, chat.messages)}
                                   onDecide={(approved) => {
                                     setAttachNote(null);
@@ -1137,7 +1141,9 @@ function ChatPane({
                   <p role="alert" className="text-sm text-muted-foreground">
                     {keyRequired
                       ? 'That question was not sent: your free questions are used up.'
-                      : 'Tuah could not respond just now. Please try again.'}
+                      : chatErrorCode(chat.error) === 'daily_limit'
+                        ? DAILY_LIMIT_NOTICE
+                        : (attachmentRefusal(chat.error) ?? 'Tuah could not respond just now. Please try again.')}
                   </p>
                 ) : null}
                 <div ref={endRef} />

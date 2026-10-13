@@ -9,8 +9,10 @@
 
 import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { isLiveChatAllowed } from '@/lib/ai/access';
-import { decryptApiKey, hasKeySecret } from '@/lib/ai/key-crypto';
 import { hasProviderKey } from '@/lib/ai/provider';
+import { readWorkspaceKey, type WorkspaceKey } from '@/lib/ai/workspace-key';
+import { getCurrentOrg } from '@/lib/auth/current-org';
+import { serviceClient } from '@/lib/supabase/service';
 
 export const FREE_QUESTIONS_PER_WEEK = 3;
 
@@ -25,7 +27,8 @@ export type ChatLockCode =
   | 'sign_in'
   | 'demo'
   | 'key_required'
-  | 'key_unavailable';
+  | 'key_unavailable'
+  | 'attachment_limit';
 
 const locked = (
   status: number,
@@ -34,36 +37,71 @@ const locked = (
 ): ChatAccess => ({ kind: 'locked', status, code, error });
 
 /**
+ * The stored key of the session's own workspace. The sealed value is read on
+ * the server with the service-role client and never passes through the
+ * caller's session. The workspace id comes from the verified session:
+ * `getCurrentOrg` reads `profiles` and `org_members` as the caller, and both
+ * carry the `mfa_required` restrictive policy, so a session that owes a second
+ * factor resolves to no workspace and no key is read for it.
+ */
+async function readSessionWorkspaceKey(supabase: SupabaseClient): Promise<WorkspaceKey> {
+  try {
+    const org = await getCurrentOrg(supabase);
+    if (!org) return { status: 'unusable' };
+    const stored = await readWorkspaceKey(serviceClient(), org.orgId);
+    // A key is known to be set, so finding none for this workspace is a
+    // mismatch to refuse, not a reason to use the platform key.
+    return stored.status === 'none' ? { status: 'unusable' } : stored;
+  } catch {
+    // No service role on this host, or the workspace lookup failed.
+    console.error('[chat] could not read the workspace key on the server.');
+    return { status: 'error' };
+  }
+}
+
+/**
  * Decides how this request may reach a model, consuming one free question when
  * it runs on the platform key. Call once per chat turn, before the model.
  */
 export async function resolveChatAccess(
   supabase: SupabaseClient,
   user: User | null | undefined,
+  options?: {
+    /**
+     * Asked once the turn is known to be a free question, before one is used up:
+     * a refusal returned here (a request too heavy for the platform key) costs
+     * the caller nothing.
+     */
+    beforeFree?: () => { status: number; code: ChatLockCode; error: string } | null;
+  },
 ): Promise<ChatAccess> {
   if (!user) return locked(401, 'sign_in', 'Please sign in to chat.');
   if (!isLiveChatAllowed(user)) {
     return locked(403, 'demo', 'Sign up for a free account to chat.');
   }
 
-  const { data: sealed, error } = await supabase.rpc('org_ai_key_ciphertext');
+  // Whether the caller's workspace has a key is asked as the caller. The
+  // database answers for `private.current_org(auth.uid())`, which is null for
+  // a session that still owes a second factor, so such a session is told
+  // "no key" here and is then refused a free question too.
+  const { data: status, error } = await supabase.rpc('org_ai_key_status');
   if (error) {
     console.error('[chat] could not read the workspace key:', error.message);
     return locked(503, 'key_unavailable', 'Chat is unavailable right now. Please try again.');
   }
 
-  if (typeof sealed === 'string' && sealed) {
+  if (Array.isArray(status) ? status.length > 0 : Boolean(status)) {
     // Fail closed: a workspace that set its own key must never fall back to
-    // the platform key because this server cannot open it.
-    const apiKey = hasKeySecret() ? decryptApiKey(sealed) : null;
-    if (!apiKey) {
-      return locked(
-        503,
-        'key_unavailable',
-        'Your workspace key could not be used on this server. Ask an owner to save it again.',
-      );
-    }
-    return { kind: 'byok', apiKey };
+    // the platform key because this server cannot read or open it.
+    const stored = await readSessionWorkspaceKey(supabase);
+    if (stored.status === 'ok') return { kind: 'byok', apiKey: stored.apiKey };
+    return stored.status === 'error'
+      ? locked(503, 'key_unavailable', 'Chat is unavailable right now. Please try again.')
+      : locked(
+          503,
+          'key_unavailable',
+          'Your workspace key could not be used on this server. Ask an owner to save it again.',
+        );
   }
 
   const needsKey = locked(
@@ -72,6 +110,9 @@ export async function resolveChatAccess(
     'Add your OpenRouter key to keep chatting.',
   );
   if (!hasProviderKey()) return needsKey;
+
+  const tooHeavy = options?.beforeFree?.();
+  if (tooHeavy) return { kind: 'locked', ...tooHeavy };
 
   const { data: remaining, error: quotaErr } = await supabase.rpc(
     'consume_free_question',

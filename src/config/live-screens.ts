@@ -26,9 +26,19 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'crm/appointments',
   // Shared with People (registry 'people/calendar'), which still shows the sample.
   'crm/calendar',
+  // Reads Bendahara's invoices; they are created and changed on finance/invoices.
+  'crm/billings',
+  'crm/landing-page',
+  // Sends by email through the workspace's own Resend key.
+  'crm/broadcast',
+  'crm/automations',
+  // Set-up and a signed-in preview; the bot does not answer customers yet.
+  'crm/chatbot',
   // Shared with Jebat's analytics (registry 'reach/reports'); /reach/reports
   // is not a nav item, so the screen is served at /crm/reports.
   'crm/reports',
+  // The deal rule, the person's own notifications and the contacts export; the rest links to where it is set.
+  'crm/settings',
 
   // Lekir (read-only for now; Settings joins in a later slice)
   'hire/assistant',
@@ -47,12 +57,14 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'people/my-attendance',
   'people/my-goals',
   'people/my-documents',
+  'people/my-payslips',
   'people/records',
   'people/leave',
   'people/time-off',
   'people/claims',
   'people/ot-claims',
   'people/employees',
+  'people/attendance',
   'people/approve-leave',
   'people/approve-claims',
   'people/approve-overtime',
@@ -72,8 +84,23 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   // Bendahara
   'finance/customers-suppliers',
   'finance/products',
+  'finance/invoices',
+  'finance/payments-in',
+  'finance/quotations',
+  'finance/rfqs',
+  'finance/purchase-orders',
+  'finance/credit-notes',
+  'finance/refunds',
   'finance/supplier-bills',
   'finance/payments-out',
+  'finance/cash-receipts',
+  'finance/payment-vouchers',
+  'finance/expenses',
+  'finance/banking',
+  'finance/receipts-inbox',
+  'finance/chart-of-accounts',
+  'finance/journals',
+  'finance/reports',
 ]);
 
 /** Whether the app path is a screen that is not connected to live data yet. */

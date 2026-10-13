@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createSeedHireData, seedRow } from '@/lib/hire/seed';
 import { APPLICATION_STAGES } from '@/lib/hire/types';
+import { interviewCardFromLists } from '@/lib/hire/namesakes';
 
 const NOW = new Date('2026-10-10T04:00:00Z');
 const data = createSeedHireData(NOW);
@@ -54,6 +55,35 @@ describe('hire seed', () => {
     for (const i of interviews) {
       expect(apps.get(i.application_id)).toMatchObject({ stage: 'interview', outcome: 'active' });
     }
+  });
+
+  it('gives every interview an hour, no place, no notes, and the stage and outcome of its application', async () => {
+    const apps = new Map((await data.listApplications()).map((a) => [a.id, a]));
+    const interviews = await data.listInterviews();
+    for (const i of interviews) {
+      expect(i, i.id).toMatchObject({ duration_minutes: 60, place: null, notes: null });
+      // Never changed since it was made: its calendar file is number 0.
+      expect(i.updated_at, i.id).toBe(i.created_at);
+      expect([i.application_stage, i.application_outcome], i.id).toEqual([apps.get(i.application_id)!.stage, apps.get(i.application_id)!.outcome]);
+    }
+    expect(await createSeedHireData(NOW).listInterviews()).toEqual(interviews);
+  });
+
+  it('can say which interview a card is about from its own list', async () => {
+    const interviews = await data.listInterviews();
+    const one = interviews[0];
+    expect(interviewCardFromLists(one.id, interviews)).toEqual({
+      target: {
+        id: one.id, application_id: one.application_id, candidate: one.candidate_name, job: one.job_title, scheduled_at: one.scheduled_at, kind: one.kind,
+        status: one.status, duration_minutes: one.duration_minutes, place: one.place,
+      },
+      // Every sample candidate has a name of their own, and each has one interview.
+      others: [],
+      cut: false,
+      also: [],
+      alsoClosed: [],
+      application_outcome: one.application_outcome,
+    });
   });
 
   it('is the same for the same now', async () => {

@@ -18,6 +18,8 @@ import Link from 'next/link';
 import { useChat } from '@ai-sdk/react';
 import {
   ChatKeyNotice,
+  DAILY_LIMIT_NOTICE,
+  attachmentRefusal,
   chatErrorCode,
   isChatLocked,
   useChatStatus,
@@ -46,12 +48,17 @@ import {
   hasVisibleContent,
   isText,
   nameFinder,
+  receiptStateFor,
+  rowFinder,
   toPendingApproval,
   toToolStep,
   toolMeta,
   type AnyPart,
   type ToolStep,
 } from '@/components/chat/tool-parts';
+import { ReplyText, TypedText } from '@/components/chat/reply-text';
+import { ChangeList } from '@/components/chat/tool-cards';
+import { changeHeading, changeRows } from '@/lib/chat/change-rows';
 
 /** Who answers in the card, and where its questions go. Plain strings, so a server screen can pass it. */
 export type AskPersona = {
@@ -350,11 +357,8 @@ function Thread({
                   )}
                 </div>
               )}
-              {textOf(m).trim() && (
-                <div className="whitespace-pre-wrap leading-relaxed text-primary-foreground">
-                  {textOf(m)}
-                </div>
-              )}
+              {/* The person's own words: as typed, never read for marks. */}
+              {textOf(m).trim() && <TypedText text={textOf(m)} />}
             </div>
           );
         }
@@ -365,21 +369,25 @@ function Thread({
             <div className="flex flex-col gap-2">
               {m.parts.map((part, i) => {
                 if (isText(part)) {
+                  // The assistant's words: a heading, bold, a list or a rule it wrote is drawn, the rest is text.
+                  // `arriving`: the last piece of the last message while the reply is still being written.
                   return part.text.trim() ? (
-                    <div key={i} className="whitespace-pre-wrap leading-relaxed text-primary-foreground">
-                      {part.text}
-                    </div>
+                    <ReplyText key={i} text={part.text} arriving={busy && m === messages[messages.length - 1] && i === m.parts.length - 1} />
                   ) : null;
                 }
                 const pending = toPendingApproval(part);
                 if (pending) {
-                  const detail = approvalDetail(pending.toolName, pending.input);
+                  const detail = approvalDetail(pending.toolName, pending.input, receiptStateFor(messages, pending.approvalId), named);
                   return (
                     <div
                       key={`appr-${pending.approvalId}`}
                       className="rounded-lg border border-border bg-card p-3 text-sm text-card-foreground"
                     >
-                      <p className="font-medium">{approvalTitle(pending.toolName, pending.input, named)}</p>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Change to approve · {changeHeading(pending.toolName)}
+                      </p>
+                      <p className="mt-1 font-medium">{approvalTitle(pending.toolName, pending.input, named)}</p>
+                      <ChangeList rows={changeRows(pending.toolName, pending.input, named, rowFinder(messages))} />
                       {detail && <p className="mt-1 text-muted-foreground">{detail}</p>}
                       <div className="mt-3 flex gap-2">
                         <button
@@ -426,7 +434,9 @@ function Thread({
             ? 'That question was not sent: your free questions are used up. Add an OpenRouter key to keep chatting.'
             : chatErrorCode(error) === 'no_workspace'
               ? `${persona.name} needs a workspace to look at. Create or join one first.`
-              : `${persona.name} couldn’t respond just now. Please try again.`}
+              : chatErrorCode(error) === 'daily_limit'
+                ? DAILY_LIMIT_NOTICE
+              : (attachmentRefusal(error) ?? `${persona.name} couldn’t respond just now. Please try again.`)}
         </div>
       )}
     </div>
@@ -442,7 +452,8 @@ function ToolCard({
   open: boolean;
   onToggle: () => void;
 }) {
-  const { label, Icon } = toolMeta(step.name);
+  const { label, Icon, detail } = toolMeta(step.name);
+  const about = detail?.(step.output) ?? null;
   const canExpand = !step.running && step.output != null;
   return (
     <div
@@ -464,6 +475,7 @@ function ToolCard({
           <Icon className="size-3" />
         </span>
         <span className="font-medium text-primary-foreground">{label}</span>
+        {about ? <span className="min-w-0 truncate text-primary-foreground">{about}</span> : null}
         <span className="min-w-0 flex-1 truncate text-primary-foreground/60">
           {step.running ? 'running…' : 'done'}
         </span>

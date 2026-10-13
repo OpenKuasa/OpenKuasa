@@ -2,25 +2,20 @@
 //
 // Live checks of public.submit_public_application and of what a signed-out visitor can and cannot do.
 //
-// What stays behind in the live database, and why: the rows this file creates through the function
-// (candidates, applications, notifications, and the private rate-limit ticks) cannot be removed by a
-// user. An owner can read candidates and applications but not insert, update or delete them (they are
-// read-only inside the app until a later slice). So they stay in the throwaway workspaces this run
-// makes, which stay too, as in the other RLS files. afterAll switches every board and form switch this
-// run turned on back off, deletes the jobs that have no applications, and sets the jobs that have
-// applications to closed (a job with applications cannot be deleted).
-import { afterAll, beforeAll, expect, test } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+// The rows this file creates through the function (candidates, applications, notifications, rate-limit
+// ticks) cannot be removed by a user, so they go with their throwaway workspaces: the shared
+// live-workspaces helper deletes those (and the anonymous users) when the file finishes.
+import { beforeAll, expect, test } from 'vitest';
+import { type SupabaseClient } from '@supabase/supabase-js';
 import { createAnonymousClient } from '@/lib/supabase/anonymous';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { createOrg, joinDemo, signInAnon, liveClient, beforeCleanup, signInOwner } from './helpers/live-workspaces';
+import { publicWriter } from './helpers/public-writer';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const client = (): SupabaseClient =>
-  createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
+const client = liveClient;
 
 const PREFIX = 'RLS apply job';
 const OWNER_ORG_NAME = 'Hire Apply Owner Sdn Bhd';
@@ -38,9 +33,9 @@ const uniqueEmail = () => `rls-${RUN}-${++emailCounter}@example.com`;
 
 async function ownedOrg(name: string) {
   const c = client();
-  const { error: e1 } = await c.auth.signInAnonymously();
+  const { error: e1 } = await signInOwner(c);
   expect(e1, e1?.message).toBeNull();
-  const { data: orgId, error } = await c.rpc('create_org_for_current_user', { org_name: name });
+  const { data: orgId, error } = await createOrg(c, name);
   expect(error, error?.message).toBeNull();
   return { c, orgId: orgId as string };
 }
@@ -51,6 +46,8 @@ let owner: Owned;
 let other: Owned;
 let viewer: SupabaseClient;
 let visitor: SupabaseClient;
+/** Who sends an application: the server once the database takes them from nobody else, else the visitor. */
+let writer: SupabaseClient;
 let demoId: string;
 
 let openJob: { id: string; title: string };
@@ -59,9 +56,6 @@ let reqJob: { id: string; title: string };
 let draftJob: { id: string; title: string };
 let pastJob: { id: string; title: string };
 let otherJob: { id: string; title: string };
-
-// Every job this run makes, so afterAll can delete or close it.
-const made: Array<{ who: Owned; id: string }> = [];
 
 async function newJob(who: Owned, title: string, fields: Record<string, unknown> = {}) {
   const full = `${PREFIX} ${title}`;
@@ -72,7 +66,6 @@ async function newJob(who: Owned, title: string, fields: Record<string, unknown>
     .single();
   expect(ins.error, ins.error?.message).toBeNull();
   const created = { id: (ins.data as { id: string }).id, title: full };
-  made.push({ who, id: created.id });
   return created;
 }
 
@@ -115,9 +108,9 @@ type Params = Partial<{
   p_honeypot: string | null;
 }>;
 
-/** Calls the function as the signed-out visitor, with good defaults a case can override. */
+/** Calls the function the way the careers page does, with good defaults a case can override. */
 const apply = (overrides: Params = {}) =>
-  visitor.rpc('submit_public_application', {
+  writer.rpc('submit_public_application', {
     p_org_id: owner.orgId,
     p_job_id: openJob.id,
     p_name: NAME,
@@ -197,11 +190,12 @@ beforeAll(async () => {
   owner = await ownedOrg(OWNER_ORG_NAME);
   other = await ownedOrg('Hire Apply Other Sdn Bhd');
   viewer = client();
-  await viewer.auth.signInAnonymously();
-  const { data, error } = await viewer.rpc('join_demo_org');
+  await signInAnon(viewer);
+  const { data, error } = await joinDemo(viewer);
   expect(error, error?.message).toBeNull();
   demoId = data as string;
   visitor = createAnonymousClient();
+  ({ writer } = await publicWriter(visitor));
 
   // Both boards on, the owner's form switches all off.
   await switchBoardOn(owner);
@@ -215,24 +209,14 @@ beforeAll(async () => {
   otherJob = await newJob(other, 'other open', openFields());
 }, 30_000);
 
-afterAll(async () => {
-  if (!hasSupabaseEnv || !owner) return;
-  // Switch every board and form switch this run turned on back off (a settings row cannot be deleted by a user).
+// If the cleanup cannot delete the workspaces (no key, migration not applied), they must not
+// keep a public board or an open application form, so this runs first inside the helper's cleanup.
+beforeCleanup(async () => {
   for (const who of [owner, other]) {
-    await who?.c.from('hire_settings').update({ careers_enabled: false, ...ALL_OFF }).eq('org_id', who.orgId);
+    if (!who) continue;
+    await who.c.from('hire_settings').update({ careers_enabled: false, ...ALL_OFF }).eq('org_id', who.orgId);
   }
-  // A job with applications cannot be deleted: close it. The rest are deleted.
-  for (const { who, id } of made) {
-    const applications = await who.c.from('hire_applications').select('*', { count: 'exact', head: true }).eq('job_id', id);
-    if (applications.error || (applications.count ?? 0) > 0) {
-      await who.c.from('hire_jobs').update({ status: 'closed', closed_at: new Date().toISOString() }).eq('id', id);
-    } else {
-      await who.c.from('hire_jobs').delete().eq('id', id);
-    }
-  }
-  for (const who of [owner, other]) await who?.c.auth.signOut();
-  await viewer?.auth.signOut();
-}, 120_000);
+});
 
 // The cases run in file order: later ones read what earlier ones wrote.
 

@@ -12,9 +12,9 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import type { ApplicationFormValues } from '@/lib/hire/application-form';
 import {
-  APPLY_HONEYPOT, APPLY_LIMITS, APPLY_MESSAGES, applyProblems, countCharacters, fieldProblem, isRequired, isStaleForm,
-  shownFields,
-  type ApplyErrors, type ApplyField, type ApplyValues,
+  APPLY_HONEYPOT, APPLY_LIMITS, APPLY_MESSAGES, CV_FILE_FIELD, applyProblems, chosenFile, countCharacters,
+  cvFileProblem, fieldProblem, fileSizeLabel, isRequired, isStaleForm, shownFields,
+  type ApplyErrors, type ApplyField, type ApplyValues, type CvFileInfo,
 } from '@/lib/hire/application-fields';
 import type { ApplyState } from './actions';
 
@@ -36,13 +36,23 @@ import type { ApplyState } from './actions';
  * The whole-form message (`state.error`) is the server's for a refusal, and
  * the script's own for the two things only it can know: that no answer came,
  * and that the form on screen is no longer the one the workspace asks for.
+ *
+ * The CV is one group of two inputs, a PDF to upload or a link to paste, and
+ * either one meets a required CV. The file input is not one of the form's
+ * fields (`APPLY_FIELDS`): it sits in the group, in front of the link, and its
+ * problem is reported there. The form posts as `multipart/form-data` in both
+ * layers with nothing set here: React writes that encoding itself for a form
+ * whose `action` is a server function, and the script sends the same
+ * `FormData`, file included. A file cannot be put back into a form the server
+ * draws again, so layer 1 says when one has to be chosen again; layer 2 never
+ * loses it, because a form sent from the script is not reset.
  */
 
 const LABELS: Record<Exclude<ApplyField, 'consent'>, string> = {
   name: 'Full name',
   email: 'Email',
   phone: 'Phone',
-  cv_url: 'CV link',
+  cv_url: 'Link to your CV',
   cover_letter: 'Cover letter',
   portfolio_url: 'Portfolio link',
   expected_salary: 'Expected monthly salary',
@@ -51,9 +61,32 @@ const LABELS: Record<Exclude<ApplyField, 'consent'>, string> = {
 const CV_HELP =
   'Paste a link to your CV, for example Google Drive or LinkedIn. Make sure anyone with the link can view it.';
 
+/** What a problem can be about: one of the form's fields, or the file in the CV group. */
+type ProblemKey = ApplyField | typeof CV_FILE_FIELD;
+
 /** One form to a page, so plain ids: the summary's links point at them. */
-const fieldId = (field: ApplyField) => `apply-${field}`;
-const errorId = (field: ApplyField) => `${fieldId(field)}-error`;
+const fieldId = (field: ProblemKey) => `apply-${field}`;
+const errorId = (field: ProblemKey) => `${fieldId(field)}-error`;
+/** The CV group's own ids: its helper text, and its problem when a CV is required and there is none. */
+const CV_GROUP_HELP = 'apply-cv-help';
+const CV_GROUP_ERROR = 'apply-cv-error';
+
+/** Everything with a problem, in the order the form shows it: the file comes where the CV group is, before the link. */
+const problemKeys = (errors: ApplyErrors, shown: readonly ApplyField[]): ProblemKey[] =>
+  shown
+    .flatMap((field): ProblemKey[] => (field === 'cv_url' ? [CV_FILE_FIELD, field] : [field]))
+    .filter((key) => errors[key]);
+
+/** True when the CV group's problem is that there is no CV at all, which is neither input's problem alone. */
+const isMissingCv = (errors: ApplyErrors) => errors.cv_url === APPLY_MESSAGES.cvRequired;
+
+/**
+ * The control a problem's summary link and the focus go to. A missing CV goes
+ * to the group's first control, the file input: its message is just above it,
+ * and focus there does not open a phone's keyboard over that message.
+ */
+const controlFor = (key: ProblemKey, errors: ApplyErrors): ProblemKey =>
+  key === 'cv_url' && isMissingCv(errors) ? CV_FILE_FIELD : key;
 
 /** 44px tall with 16px text at every width, so a phone neither misses the tap nor zooms in. */
 const CONTROL = 'h-11 text-base md:text-base motion-reduce:transition-none';
@@ -83,6 +116,13 @@ function typed(formElement: HTMLFormElement): ApplyValues {
   };
 }
 
+/**
+ * The file in the form's CV input as it stands, read the way the action reads
+ * a post, or null. Only what the rules need of it: its bytes are never read here.
+ */
+const chosenIn = (formElement: HTMLFormElement): CvFileInfo | null =>
+  chosenFile(new FormData(formElement).get(CV_FILE_FIELD));
+
 type Action = (prev: ApplyState, formData: FormData) => Promise<ApplyState>;
 
 /**
@@ -91,7 +131,8 @@ type Action = (prev: ApplyState, formData: FormData) => Promise<ApplyState>;
  * be caught (a failure replaces the whole page with an error screen), and
  * when it finishes React resets the form. Called from a submit handler that
  * has stopped the browser's own post, neither happens: a failure is caught
- * here, and no field is touched.
+ * here, and no field is touched: a chosen file stays chosen through a refusal
+ * or a failure, to be sent again.
  *
  * One answer needs more than showing: a problem with a field this form does
  * not have. The workspace started asking for it after the page was loaded.
@@ -157,8 +198,18 @@ function useLiveChecks(
   const live = checks && checks.after === state ? checks : fromServer(state);
   /** True from the moment the form is sent until the answer, or the failure, comes back. */
   const sending = useRef(false);
-  /** The field to move to once the page has been redrawn with its problems. */
-  const wanted = useRef<ApplyField | null>(null);
+  /** The control to move to once the page has been redrawn with its problems. */
+  const wanted = useRef<ProblemKey | null>(null);
+  /**
+   * The file in the CV input, as far as the script has seen: its name and size
+   * are shown from here. Null on the server and before a file is chosen.
+   */
+  const [picked, setPicked] = useState<CvFileInfo | null>(null);
+  /**
+   * True once the visitor has chosen or removed a file with the script running.
+   * From then on the file input is as they left it, and nothing was lost from it.
+   */
+  const [fileHandled, setFileHandled] = useState(false);
   /** True while the send button is being pressed, which a phone does not always show by moving focus to it. */
   const pressing = useRef(false);
   const letGo = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -167,8 +218,8 @@ function useLiveChecks(
   useEffect(() => {
     sending.current = false;
     const errors = state?.errors;
-    const first = errors ? shownFields(form).find((field) => errors[field]) : undefined;
-    if (first) document.getElementById(fieldId(first))?.focus();
+    const first = errors ? problemKeys(errors, shownFields(form))[0] : undefined;
+    if (errors && first) document.getElementById(fieldId(controlFor(first, errors)))?.focus();
   }, [state, form]);
 
   // The browser stopped a post: after the summary is drawn, so the field is scrolled to where it ends up.
@@ -178,14 +229,64 @@ function useLiveChecks(
     wanted.current = null;
   });
 
-  const check = (field: ApplyField, formElement: HTMLFormElement) => {
-    const problem = fieldProblem(field, typed(formElement), form);
+  /** Changes the problems on show, starting from the server's when nothing has been checked since it answered. */
+  const amend = (change: (errors: ApplyErrors) => void) => {
     setChecks((previous) => {
       const base = previous && previous.after === state ? previous : fromServer(state);
       const errors = { ...base.errors };
+      change(errors);
+      return { ...base, errors };
+    });
+  };
+
+  const check = (field: ApplyField, formElement: HTMLFormElement) => {
+    // A chosen file meets a required CV, so the link is checked knowing whether there is one.
+    const problem = fieldProblem(field, typed(formElement), form, chosenIn(formElement) !== null);
+    amend((errors) => {
       if (problem) errors[field] = problem;
       else delete errors[field];
-      return { ...base, errors };
+    });
+  };
+
+  /**
+   * Choosing a file checks it at once, by what it says of itself: there is
+   * nothing to leave a file input for. A problem is said under the input and
+   * the input keeps focus, to choose again. Any file, good or not, answers
+   * "there is no CV".
+   */
+  const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = chosenFile(input.files?.[0]);
+    const problem = cvFileProblem(file);
+    setPicked(file);
+    setFileHandled(true);
+    amend((errors) => {
+      if (problem) errors[CV_FILE_FIELD] = problem;
+      else delete errors[CV_FILE_FIELD];
+      if (file && isMissingCv(errors)) delete errors.cv_url;
+    });
+    // Where the browser's file picker leaves focus differs from one browser to the next.
+    input.focus();
+  };
+
+  /** Empties the file input, which a visitor cannot do in every browser, and goes back to it. */
+  const onRemoveFile = () => {
+    const input = document.getElementById(fieldId(CV_FILE_FIELD));
+    if (input instanceof HTMLInputElement) input.value = '';
+    setPicked(null);
+    setFileHandled(true);
+    amend((errors) => {
+      delete errors[CV_FILE_FIELD];
+    });
+    // The button is gone with the file: focus must not be left on nothing.
+    input?.focus();
+  };
+
+  /** Typing a link answers "there is no CV" at once. The link itself is checked on leaving it, like any field. */
+  const onLinkChange = (event: ChangeEvent<HTMLInputElement>) => {
+    if (!isMissingCv(live.errors) || event.currentTarget.value.trim() === '') return;
+    amend((errors) => {
+      if (isMissingCv(errors)) delete errors.cv_url;
     });
   };
 
@@ -238,21 +339,29 @@ function useLiveChecks(
     event.preventDefault();
     if (sending.current) return;
     const values = typed(event.currentTarget);
-    const errors = applyProblems(values, form);
-    const first = shownFields(form).find((field) => errors[field]);
+    const file = chosenIn(event.currentTarget);
+    const errors = applyProblems(values, form, file !== null);
+    const fileProblem = cvFileProblem(file);
+    if (fileProblem) errors[CV_FILE_FIELD] = fileProblem;
+    const first = problemKeys(errors, shownFields(form))[0];
+    // The input is the truth: a file chosen before the script was running, or put back by the browser, is seen here.
+    setPicked(file);
     setChecks({ after: state, errors, summarised: true, retried: true });
     if (first) {
-      wanted.current = first;
+      wanted.current = controlFor(first, errors);
       return;
     }
     sending.current = true;
-    send(new FormData(event.currentTarget), values, () => {
+    const formData = new FormData(event.currentTarget);
+    // An untouched file input stands in the form as an empty, nameless file. It is no file, so it is not sent.
+    if (!file) formData.delete(CV_FILE_FIELD);
+    send(formData, values, () => {
       sending.current = false;
     });
   };
 
   /** A summary link goes to its field and puts the cursor in it. Without the script it only scrolls there. */
-  const goTo = (field: ApplyField) => (event: MouseEvent<HTMLAnchorElement>) => {
+  const goTo = (field: ProblemKey) => (event: MouseEvent<HTMLAnchorElement>) => {
     const target = document.getElementById(fieldId(field));
     if (!target) return;
     event.preventDefault();
@@ -264,7 +373,9 @@ function useLiveChecks(
     summarised: live.summarised,
     /** The server's message about the whole application, until the visitor tries again. */
     notice: live.retried ? undefined : state?.error,
-    onBlur, onConsentChange, onSubmit, goTo, press,
+    picked,
+    fileHandled,
+    onBlur, onConsentChange, onFileChange, onRemoveFile, onLinkChange, onSubmit, goTo, press,
   };
 }
 
@@ -299,10 +410,10 @@ function Mark({ required }: { required: boolean }) {
   );
 }
 
-function Problem({ field, children }: { field: ApplyField; children: string | undefined }) {
+function Problem({ field, id, children }: { field?: ProblemKey; id?: string; children: string | undefined }) {
   if (!children) return null;
   return (
-    <p id={errorId(field)} role="alert" className="text-sm font-medium break-words text-destructive">
+    <p id={id ?? (field ? errorId(field) : undefined)} role="alert" className="text-sm font-medium break-words text-destructive">
       {children}
     </p>
   );
@@ -345,7 +456,8 @@ export function ApplyForm({
   const pending = posting || sent.pending;
   const values = state?.values;
   const {
-    errors, summarised, notice, onBlur, onConsentChange, onSubmit, goTo, press,
+    errors, summarised, notice, picked, fileHandled, onBlur, onConsentChange, onFileChange, onRemoveFile, onLinkChange,
+    onSubmit, goTo, press,
   } = useLiveChecks(state, form, sent.send);
   /** Null until the visitor types in the cover letter; until then the count is of what the server sent back. */
   const [letterCount, setLetterCount] = useState<number | null>(null);
@@ -362,7 +474,23 @@ export function ApplyForm({
 
   const shown = shownFields(form);
   /** A problem with a field this form does not have cannot be shown here; `useSending` fetches the form that has it. */
-  const problems = shown.filter((field) => errors[field]);
+  const problems = problemKeys(errors, shown);
+
+  /** A CV is required and there is neither a file nor a link: the group's problem, said under its legend. */
+  const missingCv = isMissingCv(errors);
+  const cvRequired = isRequired('cv_url', form);
+  /**
+   * The server drew the form again after a post that carried a file, and a
+   * form drawn again holds no file. Not said while the input holds one, not
+   * once the visitor has chosen or removed a file here (an input they emptied
+   * themselves has lost nothing), and not beside a message about the file
+   * itself, which already asks for another.
+   */
+  const chooseAgain = state?.fileDropped === true && !picked && !fileHandled && !errors[CV_FILE_FIELD];
+  const fileAgainId = `${fieldId(CV_FILE_FIELD)}-again`;
+  const fileHintId = `${fieldId(CV_FILE_FIELD)}-hint`;
+  const linkHelpId = `${fieldId('cv_url')}-help`;
+  const ids = (...list: (string | false | undefined)[]) => list.filter(Boolean).join(' ');
   const counted = letterCount ?? letterLength(values?.cover_letter ?? '');
 
   /** What every field's input shares: its name, whether it is required, and its message when it has one. */
@@ -407,20 +535,88 @@ export function ApplyForm({
         <Problem field="phone">{errors.phone}</Problem>
       </Field>
     ),
+    // The CV group stands where the link always stood: a PDF to upload, or the link. Either one is a CV.
     cv_url: () => (
-      <Field field="cv_url" form={form}>
-        <Input
-          {...wiring('cv_url', `${fieldId('cv_url')}-help`)}
-          type="url"
-          inputMode="url"
-          autoCapitalize="none"
-          spellCheck={false}
-          defaultValue={values?.cv_url}
-          className={CONTROL}
-        />
-        <p id={`${fieldId('cv_url')}-help`} className="text-sm text-muted-foreground">{CV_HELP}</p>
-        <Problem field="cv_url">{errors.cv_url}</Problem>
-      </Field>
+      <fieldset
+        aria-describedby={ids(CV_GROUP_HELP, missingCv && CV_GROUP_ERROR)}
+        // A fieldset is by default as wide as its widest word; a long file name must wrap, not widen the page.
+        className="min-w-0 space-y-3"
+      >
+        {/* Plain inline text: a legend laid out as a flex row is not drawn the same in every browser. */}
+        <legend className="p-0 text-sm leading-normal font-medium">
+          CV <Mark required={cvRequired} />
+          {/* Neither input is required alone, so neither can say it: the group's name does. */}
+          {cvRequired ? <span className="sr-only">(required)</span> : null}
+        </legend>
+        <p id={CV_GROUP_HELP} className="text-sm text-muted-foreground">Upload a PDF or paste a link.</p>
+        <Problem id={CV_GROUP_ERROR}>{missingCv ? errors.cv_url : undefined}</Problem>
+
+        <div className="space-y-1.5">
+          <Label htmlFor={fieldId(CV_FILE_FIELD)} className="flex-wrap leading-normal">Upload a PDF</Label>
+          <Input
+            // The browser's own file input, in plain sight: it works without the script, takes focus and shows it.
+            id={fieldId(CV_FILE_FIELD)}
+            name={CV_FILE_FIELD}
+            type="file"
+            accept="application/pdf,.pdf"
+            aria-invalid={errors[CV_FILE_FIELD] ? true : undefined}
+            aria-describedby={ids(
+              fileHintId,
+              errors[CV_FILE_FIELD] && errorId(CV_FILE_FIELD),
+              chooseAgain && fileAgainId,
+              missingCv && CV_GROUP_ERROR,
+            )}
+            onChange={onFileChange}
+            className={`${CONTROL} cursor-pointer py-1 file:mr-3 file:h-8 file:cursor-pointer file:rounded-md file:border file:border-solid file:border-input file:bg-muted file:px-3`}
+          />
+          <p id={fileHintId} className="text-sm text-muted-foreground">PDF, up to 5 MB</p>
+          <Problem field={CV_FILE_FIELD}>{errors[CV_FILE_FIELD]}</Problem>
+          {chooseAgain ? (
+            <p id={fileAgainId} role="alert" className="text-sm font-medium break-words text-destructive">
+              {APPLY_MESSAGES.cvFileAgain}
+            </p>
+          ) : null}
+          {picked ? (
+            <div className="flex items-center gap-3">
+              {/* A file name can be one long word: it breaks anywhere rather than push the page sideways. */}
+              <p className="min-w-0 flex-1 text-sm break-all">
+                {picked.name} <span className="whitespace-nowrap text-muted-foreground">({fileSizeLabel(picked.size)})</span>
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                aria-label={`Remove ${picked.name}`}
+                onClick={onRemoveFile}
+                className="h-11 shrink-0 px-4 text-base motion-reduce:transition-none"
+              >
+                Remove
+              </Button>
+            </div>
+          ) : null}
+        </div>
+
+        <p className="text-sm text-muted-foreground">or</p>
+
+        <div className="space-y-1.5">
+          <Label htmlFor={fieldId('cv_url')} className="flex-wrap leading-normal">{LABELS.cv_url}</Label>
+          <Input
+            id={fieldId('cv_url')}
+            name="cv_url"
+            type="url"
+            inputMode="url"
+            autoCapitalize="none"
+            spellCheck={false}
+            defaultValue={values?.cv_url}
+            // Wrong only for what is in it. With no CV at all the group is what is wrong, and says so above.
+            aria-invalid={errors.cv_url && !missingCv ? true : undefined}
+            aria-describedby={ids(linkHelpId, errors.cv_url && (missingCv ? CV_GROUP_ERROR : errorId('cv_url')))}
+            onChange={onLinkChange}
+            className={CONTROL}
+          />
+          <p id={linkHelpId} className="text-sm text-muted-foreground">{CV_HELP}</p>
+          <Problem field="cv_url">{missingCv ? undefined : errors.cv_url}</Problem>
+        </div>
+      </fieldset>
     ),
     cover_letter: () => (
       <Field field="cover_letter" form={form}>
@@ -488,8 +684,9 @@ export function ApplyForm({
             className={`mt-0.5 size-5 shrink-0 rounded-sm accent-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background ${CAREERS_LINK_FOCUS}`}
           />
           <span className="min-w-0 break-words">
-            I agree that {orgName} may store and use the details I&apos;ve given to consider me for this role, and
-            that they are processed through OpenKuasa. <Mark required />
+            I agree that {orgName} may store and use the details I&apos;ve given to consider me for this role,
+            that they are processed through OpenKuasa, and that they may be reviewed with the help of an AI assistant, which sends
+            them to an AI service provider and may give the employer a recommendation. <Mark required />
           </span>
         </label>
         <Problem field="consent">{errors.consent}</Problem>
@@ -525,8 +722,8 @@ export function ApplyForm({
             {problems.map((field) => (
               <li key={field}>
                 <a
-                  href={`#${fieldId(field)}`}
-                  onClick={goTo(field)}
+                  href={`#${fieldId(controlFor(field, errors))}`}
+                  onClick={goTo(controlFor(field, errors))}
                   className={`inline-flex min-h-11 items-center rounded-sm font-medium break-words underline underline-offset-4 ${CAREERS_LINK_FOCUS}`}
                 >
                   {errors[field]}

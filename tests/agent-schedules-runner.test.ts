@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/lib/agents/weekly-studio', () => ({
-  runWeeklyStudio: vi.fn(async () => ({ runId: 'r1', status: 'done' })),
+vi.mock('@/lib/agents/run-agent', () => ({
+  runAgent: vi.fn(async () => ({ runId: 'r1', status: 'done' })),
 }));
 vi.mock('@/lib/agents/openrouter-media', () => ({ checkVideo: vi.fn() }));
 vi.mock('@/lib/ai/key-crypto', () => ({ hasKeySecret: () => true, decryptApiKey: () => 'k' }));
 
 import { runSchedules } from '@/lib/agents/runner';
-import { runWeeklyStudio } from '@/lib/agents/weekly-studio';
+import { RunInProgressError } from '@/lib/agents/types';
+import { runAgent } from '@/lib/agents/run-agent';
 
 const ORG = 'org-1';
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
@@ -29,7 +30,7 @@ type Sched = {
 const sched = (over: Partial<Sched> = {}): Sched => ({
   id: 's1',
   org_id: ORG,
-  agent_key: 'weekly_studio',
+  agent_key: 'weekly-studio',
   interval_seconds: 3600,
   next_run_at: ago(1000),
   last_run_at: null,
@@ -61,19 +62,25 @@ type Write = {
 
 function fakeClient(schedules: Sched[], opts: Opts = {}) {
   const writes: Write[] = [];
-  const gteArgs: string[] = [];
-  const gtCalls: [string, unknown][] = [];
+  const rpcCalls: { name: string; args: { p_org_id: string; p_since: string } }[] = [];
+  let runRowListReads = 0;
   const o = { claim: true, cfg: null, recentRuns: [], runCost: 0, newData: false, ...opts };
   const client = {
+    // The workspace spend is one database-side sum per window, never a row fetch.
+    async rpc(name: string, args: { p_org_id: string; p_since: string }) {
+      rpcCalls.push({ name, args });
+      if (o.spendError) return { data: null, error: { message: 'x' } };
+      const rows = o.runsFor ? o.runsFor(Date.now() - new Date(args.p_since).getTime()) : o.recentRuns;
+      return { data: rows.reduce((n, r) => n + r.cost_cents, 0), error: null };
+    },
     from(table: string) {
       return {
         select() {
           const q: Record<string, unknown> = {};
           const eqs: [string, unknown][] = [];
           q.eq = (c: string, v: unknown) => (eqs.push([c, v]), q);
-          let since = '';
-          q.gte = (_c: string, v: string) => (gteArgs.push(v), (since = v), q);
-          q.gt = (c: string, v: unknown) => (gtCalls.push([c, v]), q);
+          q.gte = () => q;
+          q.gt = () => q;
           q.lte = () => q;
           q.limit = () => q;
           q.maybeSingle = async () => {
@@ -84,9 +91,8 @@ function fakeClient(schedules: Sched[], opts: Opts = {}) {
           q.then = (res: (v: unknown) => void) => {
             if (table === 'agent_schedules') return res({ data: schedules, error: null });
             if (table === 'agent_runs') {
-              if (o.spendError) return res({ data: null, error: { message: 'x' } });
-              const rows = o.runsFor ? o.runsFor(Date.now() - new Date(since).getTime()) : o.recentRuns;
-              return res({ data: rows, error: null });
+              runRowListReads += 1;
+              return res({ data: [], error: null });
             }
             return res({ data: [], error: null });
           };
@@ -110,14 +116,14 @@ function fakeClient(schedules: Sched[], opts: Opts = {}) {
       };
     },
   };
-  return { client: client as never, writes, gteArgs, gtCalls };
+  return { client: client as never, writes, rpcCalls, runRowListReads: () => runRowListReads };
 }
 
 const schedUpdates = (writes: Write[]) => writes.filter((w) => w.table === 'agent_schedules' && w.kind === 'update');
 
 beforeEach(() => {
-  vi.mocked(runWeeklyStudio).mockClear();
-  vi.mocked(runWeeklyStudio).mockResolvedValue({ runId: 'r1', status: 'done' });
+  vi.mocked(runAgent).mockClear();
+  vi.mocked(runAgent).mockResolvedValue({ runId: 'r1', status: 'done' });
   vi.stubEnv('AGENTS_ENABLED', 'true');
 });
 afterEach(() => vi.unstubAllEnvs());
@@ -129,14 +135,22 @@ describe('runSchedules', () => {
     await runSchedules(client);
     vi.stubEnv('AGENTS_ENABLED', 'false');
     await runSchedules(client);
-    expect(runWeeklyStudio).not.toHaveBeenCalled();
+    expect(runAgent).not.toHaveBeenCalled();
     expect(writes).toHaveLength(0);
+  });
+
+  it('skips a schedule whose agent_key has no definition, without running, claiming or writing', async () => {
+    const { client, writes } = fakeClient([sched({ agent_key: 'ghost-agent' })]);
+    const out = await runSchedules(client);
+    expect(runAgent).not.toHaveBeenCalled();
+    expect(writes).toHaveLength(0);
+    expect(out).toMatchObject({ skipped: 1, ran: 0, paused: 0, completed: 0, failed: 0 });
   });
 
   it('marks a schedule past max_runs completed without running', async () => {
     const { client, writes } = fakeClient([sched({ max_runs: 3, runs_used: 3 })]);
     const out = await runSchedules(client);
-    expect(runWeeklyStudio).not.toHaveBeenCalled();
+    expect(runAgent).not.toHaveBeenCalled();
     const u = schedUpdates(writes);
     expect(u).toHaveLength(1);
     expect(u[0].patch).toMatchObject({ status: 'completed' });
@@ -146,17 +160,20 @@ describe('runSchedules', () => {
   });
 
   it('pauses the org schedules with a reason when over the weekly ceiling, without running', async () => {
-    const { client, writes, gteArgs, gtCalls } = fakeClient([sched()], {
+    const { client, writes, rpcCalls, runRowListReads } = fakeClient([sched()], {
       cfg: { daily_cap_cents: 5000, weekly_cap_cents: 1000 },
       recentRuns: [{ cost_cents: 1500 }],
     });
     const out = await runSchedules(client);
-    expect(runWeeklyStudio).not.toHaveBeenCalled();
-    expect(gteArgs).toHaveLength(2);
-    const ages = gteArgs.map((v) => Date.now() - new Date(v).getTime());
+    expect(runAgent).not.toHaveBeenCalled();
+    // One database-side sum per window (day, then week), scoped to the schedule's org.
+    expect(rpcCalls).toHaveLength(2);
+    expect(rpcCalls.every((c) => c.name === 'agent_spend_cents' && c.args.p_org_id === ORG)).toBe(true);
+    const ages = rpcCalls.map((c) => Date.now() - new Date(c.args.p_since).getTime());
     expect(Math.abs(ages[0] - 24 * 3600_000)).toBeLessThan(5000);
     expect(Math.abs(ages[1] - 7 * 24 * 3600_000)).toBeLessThan(5000);
-    expect(gtCalls).toContainEqual(['cost_cents', 0]);
+    // Run rows are never fetched to be added up in the app (a row cap would undercount).
+    expect(runRowListReads()).toBe(0);
     const u = schedUpdates(writes);
     expect(u).toHaveLength(1);
     expect(u[0].patch).toMatchObject({ status: 'paused', paused_reason: 'weekly budget reached' });
@@ -171,7 +188,7 @@ describe('runSchedules', () => {
       runsFor: (age) => (age < 2 * 24 * 3600_000 ? [{ cost_cents: 150 }] : [{ cost_cents: 50 }]),
     });
     const out = await runSchedules(client);
-    expect(runWeeklyStudio).not.toHaveBeenCalled();
+    expect(runAgent).not.toHaveBeenCalled();
     expect(schedUpdates(writes)[0].patch).toMatchObject({ status: 'paused', paused_reason: 'daily budget reached' });
     expect(out.paused).toBe(1);
   });
@@ -179,7 +196,7 @@ describe('runSchedules', () => {
   it('fails closed (counts failed, no run, no pause) when the spend query errors', async () => {
     const { client, writes } = fakeClient([sched()], { spendError: true });
     const out = await runSchedules(client);
-    expect(runWeeklyStudio).not.toHaveBeenCalled();
+    expect(runAgent).not.toHaveBeenCalled();
     expect(schedUpdates(writes)).toHaveLength(0);
     expect(out).toMatchObject({ failed: 1, ran: 0, paused: 0 });
   });
@@ -187,7 +204,7 @@ describe('runSchedules', () => {
   it('does not run when the conditional claim returns no row (double-tick safety)', async () => {
     const { client, writes } = fakeClient([sched()], { claim: false });
     const out = await runSchedules(client);
-    expect(runWeeklyStudio).not.toHaveBeenCalled();
+    expect(runAgent).not.toHaveBeenCalled();
     expect(writes.filter((w) => w.table === 'agent_runs')).toHaveLength(0);
     const claim = schedUpdates(writes).find((w) => 'next_run_at' in w.patch)!;
     expect(claim.eqs).toContainEqual(['status', 'active']);
@@ -201,7 +218,7 @@ describe('runSchedules', () => {
       newData: false,
     });
     const out = await runSchedules(client);
-    expect(runWeeklyStudio).not.toHaveBeenCalled();
+    expect(runAgent).not.toHaveBeenCalled();
     const ins = writes.filter((w) => w.table === 'agent_runs' && w.kind === 'insert');
     expect(ins).toHaveLength(1);
     expect(ins[0].patch).toMatchObject({
@@ -217,16 +234,21 @@ describe('runSchedules', () => {
   it('runs when there is new data since the last run', async () => {
     const { client } = fakeClient([sched({ last_run_at: ago(3600_000) })], { newData: true });
     const out = await runSchedules(client);
-    expect(runWeeklyStudio).toHaveBeenCalledTimes(1);
+    expect(runAgent).toHaveBeenCalledTimes(1);
     expect(out.ran).toBe(1);
   });
 
-  it('happy run: calls runWeeklyStudio with the row org and advances spent/runs_used', async () => {
+  it('happy run: dispatches the reach agent with the row org and advances spent/runs_used', async () => {
     const { client, writes } = fakeClient([sched({ org_id: 'org-9', runs_used: 2, spent_cents: 100 })], {
       runCost: 40,
     });
     const out = await runSchedules(client);
-    expect(runWeeklyStudio).toHaveBeenCalledWith(client, 'org-9', 'schedule');
+    expect(runAgent).toHaveBeenCalledWith(
+      client,
+      'org-9',
+      'schedule',
+      expect.objectContaining({ agentKey: 'weekly-studio', product: 'reach' }),
+    );
     const last = schedUpdates(writes).at(-1)!;
     expect(last.patch).toMatchObject({ runs_used: 3, spent_cents: 140 });
     expect(last.patch).not.toHaveProperty('status');
@@ -238,7 +260,7 @@ describe('runSchedules', () => {
   it('claims (pushes next_run_at forward) before running', async () => {
     const { client, writes } = fakeClient([sched()]);
     let claimedBeforeRun = false;
-    vi.mocked(runWeeklyStudio).mockImplementationOnce(async () => {
+    vi.mocked(runAgent).mockImplementationOnce(async () => {
       claimedBeforeRun = schedUpdates(writes).some((w) => 'next_run_at' in w.patch);
       return { runId: 'r1', status: 'done' };
     });
@@ -249,7 +271,7 @@ describe('runSchedules', () => {
   it('completes the schedule when this run reaches max_runs', async () => {
     const { client, writes } = fakeClient([sched({ max_runs: 2, runs_used: 1 })]);
     await runSchedules(client);
-    expect(runWeeklyStudio).toHaveBeenCalledTimes(1);
+    expect(runAgent).toHaveBeenCalledTimes(1);
     expect(schedUpdates(writes).at(-1)!.patch).toMatchObject({ runs_used: 2, status: 'completed' });
   });
 
@@ -258,7 +280,7 @@ describe('runSchedules', () => {
       cfg: { enabled: false, daily_cap_cents: 500, weekly_cap_cents: 2000 },
     });
     const out = await runSchedules(client);
-    expect(runWeeklyStudio).not.toHaveBeenCalled();
+    expect(runAgent).not.toHaveBeenCalled();
     expect(schedUpdates(writes)).toHaveLength(0);
     expect(writes).toHaveLength(0);
     expect(out).toMatchObject({ skipped: 1, ran: 0, paused: 0, failed: 0 });
@@ -286,11 +308,25 @@ describe('runSchedules', () => {
     expect(claim.patch).toHaveProperty('paused_reason', null);
   });
 
+  it('a run already in progress for the workspace skips this tick and hands the slot back', async () => {
+    vi.mocked(runAgent).mockRejectedValueOnce(new RunInProgressError());
+    const due = sched();
+    const { client, writes } = fakeClient([due]);
+    const out = await runSchedules(client);
+    expect(out).toMatchObject({ ran: 0, skipped: 1, failed: 0 });
+    const last = schedUpdates(writes).at(-1)!;
+    // The claim pushed next_run_at forward; it is put back so the next tick retries.
+    expect(last.patch).toMatchObject({ next_run_at: due.next_run_at });
+    expect(last.patch).not.toHaveProperty('runs_used');
+    expect(last.eqs).toContainEqual(['id', 's1']);
+    expect(last.eqs).toContainEqual(['org_id', ORG]);
+  });
+
   it('keeps looping when one schedule throws', async () => {
-    vi.mocked(runWeeklyStudio).mockRejectedValueOnce(new Error('boom sk-or-secret'));
+    vi.mocked(runAgent).mockRejectedValueOnce(new Error('boom sk-or-secret'));
     const { client } = fakeClient([sched({ id: 's1' }), sched({ id: 's2', org_id: 'org-2' })]);
     const out = await runSchedules(client);
-    expect(runWeeklyStudio).toHaveBeenCalledTimes(2);
+    expect(runAgent).toHaveBeenCalledTimes(2);
     expect(out).toMatchObject({ ran: 1, failed: 1 });
   });
 });

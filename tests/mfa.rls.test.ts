@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { type SupabaseClient } from '@supabase/supabase-js';
 import { hashRecoveryCode } from '@/lib/auth/mfa';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
+import { signInAnon, liveClient } from './helpers/live-workspaces';
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 
@@ -11,17 +12,13 @@ if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 // has not passed a second factor (every anonymous test identity) must not be
 // able to mint codes, read them, or guess them without being locked out.
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 let c: SupabaseClient;
 
 beforeAll(async () => {
   if (!hasSupabaseEnv) return;
-  c = createClient(url, anon, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const { error } = await c.auth.signInAnonymously();
+  c = liveClient();
+  const { error } = await signInAnon(c);
   expect(error, error?.message).toBeNull();
 });
 

@@ -4,6 +4,7 @@
  * action parses with it, so the two surfaces cannot diverge. org_id always comes
  * from the ReachWriteContext (the caller's session), never from the input.
  */
+import { errorCodeOf } from '@/lib/ai/call-log';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { createCrmContact, type CrmContactInsert } from '@/lib/crm/contacts';
@@ -43,9 +44,10 @@ export const deleteCampaignInput = z.object({ id: z.string().uuid() });
 
 const WRITE_FAILED = 'That change could not be saved. Please try again.';
 
-/** Logs the DB error for triage; callers only ever see the generic user-facing message. */
+/** Logs the DB error's code for triage; callers only ever see the generic user-facing message. */
 function writeFailed(fnName: string, error: unknown): { ok: false; error: string } {
-  console.error(`[reach-capability] ${fnName} failed:`, error);
+  // The code only: a database error's message and details quote the values it refused.
+  console.error(`[reach-capability] ${fnName} failed:`, errorCodeOf(error));
   return { ok: false, error: WRITE_FAILED };
 }
 
@@ -344,7 +346,7 @@ export async function promoteLeadToContact(
     .eq('id', id)
     .eq('org_id', ctx.orgId);
   // The contact exists; a re-promote would duplicate it (rare, low-harm), so log and succeed.
-  if (stampErr) console.error('[reach-capability] promoteLeadToContact.stamp failed:', stampErr);
+  if (stampErr) console.error('[reach-capability] promoteLeadToContact.stamp failed:', errorCodeOf(stampErr));
   // The contact is returned by name too, so a later change to it can say who it is about.
   return { ok: true, data: { contact_id: contactId, contact: { id: contactId, name: l.name.trim() } } };
 }

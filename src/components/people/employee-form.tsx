@@ -9,6 +9,10 @@ import {
   EMPLOYMENT_TYPES,
   type EmployeeFormValues,
   employeeFormValues,
+  reportsToChange,
+  reportsToOptions,
+  reportsToProblem,
+  searchReportsTo,
   toEmployeeInput,
 } from '@/lib/people/employees';
 import type { Department, Employee, EmployeePrivate, EmployeeStatus, EmploymentType } from '@/lib/people/types';
@@ -31,6 +35,7 @@ export type EditingEmployee = {
 };
 
 const NO_DEPARTMENT = 'none';
+const NOBODY = 'nobody';
 
 type TextKey = {
   [K in keyof EmployeeFormValues]: EmployeeFormValues[K] extends string ? K : never;
@@ -39,6 +44,9 @@ type TextKey = {
 export function EmployeeForm({
   initial,
   departments,
+  employees,
+  showReportsTo,
+  reportsToResets = 0,
   disabled,
   error,
   onCancel,
@@ -46,11 +54,21 @@ export function EmployeeForm({
 }: {
   initial: EditingEmployee | null;
   departments: Department[];
+  /** Everyone in the workspace, for the "Reports to" choices and the loop check. */
+  employees: Employee[];
+  /** Owners and admins outside the demo only; nobody else is shown the field. */
+  showReportsTo: boolean;
+  /** Goes up each time the table has a reporting line refused; the control then returns to the saved value. */
+  reportsToResets?: number;
   disabled: boolean;
   /** What the server said about the last attempt. */
   error: string | null;
   onCancel: () => void;
-  onSubmit: (input: Record<string, unknown>, entitlements: EntitlementChange[]) => void;
+  onSubmit: (
+    input: Record<string, unknown>,
+    entitlements: EntitlementChange[],
+    reportsTo: { changed: boolean; managerId: string | null },
+  ) => void;
 }) {
   const [values, setValues] = useState<EmployeeFormValues>(() =>
     employeeFormValues(initial?.employee ?? null, initial?.private ?? null),
@@ -60,6 +78,18 @@ export function EmployeeForm({
     initial ? entitlementValues(initial.entitlements.rows, initial.entitlements.year) : null,
   );
   const [entitlements, setEntitlements] = useState(initialEntitlements);
+  const initialManager = initial?.employee.reports_to ?? null;
+  const [reportsTo, setReportsTo] = useState(initialManager ?? '');
+  const [reportsToSearch, setReportsToSearch] = useState('');
+  // A refused reporting line puts the control back to the value the employee had (the other details stay as typed: they were saved).
+  const [seenResets, setSeenResets] = useState(reportsToResets);
+  if (seenResets !== reportsToResets) {
+    setSeenResets(reportsToResets);
+    setReportsTo(initialManager ?? '');
+    setReportsToSearch('');
+  }
+  const options = reportsToOptions(employees, initial?.employee.id ?? null, initialManager);
+  const shownOptions = searchReportsTo(options, reportsToSearch, reportsTo);
   // A new employee can always be given private details. For an edit, only when they loaded:
   // sending them unloaded would blank what is saved.
   const includePrivate = initial ? initial.privateLoaded : true;
@@ -93,8 +123,16 @@ export function EmployeeForm({
           if (!checked.ok) return setInvalid(checked.error);
           changes = checked.changes;
         }
+        if (showReportsTo) {
+          const problem = reportsToProblem(initial?.employee.id ?? null, reportsTo, employees);
+          if (problem) return setInvalid(problem);
+        }
         setInvalid(null);
-        onSubmit(result.input, changes);
+        onSubmit(
+          result.input,
+          changes,
+          showReportsTo ? reportsToChange(initialManager, reportsTo) : { changed: false, managerId: null },
+        );
       }}
     >
       <div className="grid gap-3 sm:grid-cols-2">
@@ -149,16 +187,41 @@ export function EmployeeForm({
           </Field>
         ) : null}
       </div>
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          className="size-4 accent-primary"
-          checked={values.is_manager}
-          onChange={(event) => set('is_manager', event.target.checked)}
-        />
-        Manages other people
-      </label>
-
+      {showReportsTo ? (
+        <Field label="Reports to">
+          {/* Outside the select: a text input inside the list would lose its keystrokes to the list's type-ahead. */}
+          <Input
+            aria-label="Search people to report to"
+            placeholder="Search by name"
+            value={reportsToSearch}
+            onChange={(event) => setReportsToSearch(event.target.value)}
+          />
+          {reportsToSearch.trim() !== '' && searchReportsTo(options, reportsToSearch, '').length === 0 ? (
+            <p role="status" className="text-xs text-muted-foreground">
+              No one matches
+            </p>
+          ) : null}
+          <Select
+            value={reportsTo || NOBODY}
+            onValueChange={(value) => {
+              setReportsTo(value === NOBODY ? '' : value);
+              setReportsToSearch('');
+            }}
+          >
+            <SelectTrigger aria-label="Reports to" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NOBODY}>Nobody</SelectItem>
+              {shownOptions.map((option) => (
+                <SelectItem key={option.id} value={option.id}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      ) : null}
       <div className="space-y-3 border-t pt-4">
         <div>
           <p className="text-sm font-medium">Private details</p>

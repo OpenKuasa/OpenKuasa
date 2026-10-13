@@ -12,16 +12,24 @@ import {
   groupByStage,
   type ApplicationLabel,
 } from './applications-view';
+import type { RejectReason } from './application-changes';
 import { ago } from './dashboard';
+import type { Feedback } from './interview-feedback';
+import { clock12, durationText, klDateOf } from './interview-time';
+import { needsOutcome } from './interviews';
 import { applicantsByJob, applicationsPerWeek } from './overview';
+import { POOL_LABEL, matchesPoolSearch, poolSearchText, type InPool } from './pool';
 import { ringgit } from './public-careers';
 import {
   APPLICATION_STAGES,
+  HIRE_READ_CAP,
   type Application,
+  type ApplicationOutcome,
   type ApplicationStage,
   type EmploymentType,
   type HireData,
   type HireSettings,
+  type Interview,
   type InterviewKind,
   type InterviewStatus,
   type Job,
@@ -47,9 +55,6 @@ const KIND_LABEL: Record<InterviewKind, 'Video' | 'Onsite' | 'Phone'> = {
 const INTERVIEW_STATUS_LABEL: Record<InterviewStatus, 'Scheduled' | 'Completed' | 'Cancelled' | 'No-show'> = {
   scheduled: 'Scheduled', completed: 'Completed', cancelled: 'Cancelled', no_show: 'No-show',
 };
-const POOL_LABEL: Record<Exclude<PoolStatus, 'none'>, 'Available' | 'Passive' | 'Re-engaged'> = {
-  available: 'Available', passive: 'Passive', re_engaged: 'Re-engaged',
-};
 
 // A fixed list: a locale's own short month names vary ("Sep" or "Sept").
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -59,18 +64,10 @@ function klDate(iso: string): { day: string; month: string; year: string } {
   return { day, month: MONTHS[Number(month) - 1], year };
 }
 /** "08 Oct 2026", in Kuala Lumpur. */
-const fullDate = (iso: string) => {
+export const fullDate = (iso: string) => {
   const d = klDate(iso);
   return `${d.day} ${d.month} ${d.year}`;
 };
-/** "08 Oct". */
-const shortDate = (iso: string) => {
-  const d = klDate(iso);
-  return `${d.day} ${d.month}`;
-};
-/** "14:00". */
-const clock = (iso: string) =>
-  new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: TZ });
 
 export type JobsModel = {
   isEmpty: boolean;
@@ -167,6 +164,23 @@ export async function buildCareersModel(data: HireData): Promise<CareersModel> {
   };
 }
 
+/**
+ * What the controls that change an application need to know about it. Plain
+ * values only: this goes to the browser, so no storage path and no contact details.
+ */
+export type ApplicationState = {
+  stage: ApplicationStage;
+  outcome: ApplicationOutcome;
+  /** 1 to 5, or null when not rated. */
+  rating: number | null;
+  /** Why it was rejected or withdrawn, when a reason was given. */
+  rejectReason: RejectReason | null;
+};
+
+const applicationState = (a: Application): ApplicationState => ({
+  stage: a.stage, outcome: a.outcome, rating: a.rating, rejectReason: a.reject_reason,
+});
+
 export type BoardModel = {
   isEmpty: boolean;
   stages: {
@@ -174,8 +188,11 @@ export type BoardModel = {
     name: string;
     /** Live applications in this stage, over all applications (the list below is cut at ROWS_SHOWN). */
     count: number;
-    candidates: { id: string; name: string; role: string; source: string; rating: number | null; lastTouch: string; active: boolean }[];
+    /** `id` is the application's; `candidateId` the person's, for the Edit candidate form; `poolStatus` their stored talent pool status. No contact details. */
+    candidates: ({ id: string; candidateId: string; poolStatus?: PoolStatus; name: string; role: string; source: string; lastTouch: string; active: boolean } & ApplicationState)[];
   }[];
+  /** The jobs a new application can be for (open and paused), by title: the Add Candidate form's picker. */
+  jobs: { id: string; title: string }[];
   total: number;
   hired: number;
   inPipeline: number;
@@ -186,7 +203,7 @@ export type BoardModel = {
 };
 
 export async function buildBoardModel(data: HireData, now: Date): Promise<BoardModel> {
-  const apps = await data.listApplications();
+  const [jobs, apps] = await Promise.all([data.listJobs(), data.listApplications()]);
   const groups = groupByStage(apps);
   const board = boardCounts(apps);
   const funnel = funnelCounts(apps);
@@ -199,14 +216,20 @@ export async function buildBoardModel(data: HireData, now: Date): Promise<BoardM
       count: board[key],
       candidates: groups[key].slice(0, ROWS_SHOWN).map((a) => ({
         id: a.id,
+        candidateId: a.candidate_id,
+        poolStatus: a.candidate_pool_status ?? 'none',
         name: a.candidate_name,
         role: a.job_title,
         source: a.source ?? 'Unknown',
-        rating: a.rating,
+        ...applicationState(a),
         lastTouch: `${ago(a.hired_at ?? a.offered_at ?? a.applied_at, now)} ago`,
         active: now.getTime() - Date.parse(a.applied_at) < 7 * DAY,
       })),
     })),
+    jobs: jobs
+      .filter((job) => job.status === 'open' || job.status === 'paused')
+      .map((job) => ({ id: job.id, title: job.title }))
+      .sort((a, b) => a.title.localeCompare(b.title)),
     total,
     hired: board.hired,
     inPipeline: total - board.hired,
@@ -239,6 +262,8 @@ export function safeLink(url: string | null): SafeLink | null {
 export type ApplicationDetails = {
   coverLetter: string | null;
   cv: SafeLink | null;
+  /** True when a PDF was uploaded. The path to it stays on the server. */
+  hasCvFile: boolean;
   portfolio: SafeLink | null;
   expectedSalary: string | null;
 };
@@ -247,34 +272,146 @@ function applicationDetails(a: Application): ApplicationDetails | null {
   const details: ApplicationDetails = {
     coverLetter: a.cover_letter?.trim() ? a.cover_letter : null,
     cv: safeLink(a.cv_url),
+    hasCvFile: a.cv_path !== null,
     portfolio: safeLink(a.portfolio_url),
     expectedSalary: a.expected_salary_cents === null ? null : `${ringgit(a.expected_salary_cents)} a month`,
   };
-  return details.coverLetter || details.cv || details.portfolio || details.expectedSalary ? details : null;
+  return details.coverLetter || details.cv || details.hasCvFile || details.portfolio || details.expectedSalary ? details : null;
+}
+
+/**
+ * One interview as the screens need it: what is drawn (`date`, `time`, `type`, `status`, `interviewer`), and the
+ * stored values the row's menu, the reschedule form, the invitation and the calendar file are made from. The
+ * candidate's name and the job's title are all it says of a person: no contact details.
+ */
+export type InterviewRow = {
+  id: string;
+  name: string;
+  role: string;
+  /** "12 Oct 2026", in Kuala Lumpur. With the year: the list runs from a year back to a year ahead. */
+  date: string;
+  /** "3:00 pm", in Kuala Lumpur: a time reads the same in the table as in the invitation. */
+  time: string;
+  /** The interviewer's name, or a dash. */
+  interviewer: string;
+  type: 'Video' | 'Onsite' | 'Phone';
+  status: 'Scheduled' | 'Completed' | 'Cancelled' | 'No-show';
+  applicationId: string;
+  statusKey: InterviewStatus;
+  /** The start, as the instant stored. */
+  scheduledAt: string;
+  durationMinutes: number;
+  /** The length in words: "1 hour 30 minutes". */
+  length: string;
+  kind: InterviewKind;
+  /** The place or link as typed. */
+  place: string | null;
+  /** The place as a link, only when `safeLink` accepts it. */
+  placeLink: SafeLink | null;
+  interviewerName: string | null;
+  /** For the team only. */
+  notes: string | null;
+  createdAt: string;
+  /** What the reschedule form sends back, so a stale form saves nothing. */
+  updatedAt: string;
+  applicationStage: ApplicationStage;
+  applicationOutcome: ApplicationOutcome;
+  /** Scheduled, and its start has passed: tagged "Needs an outcome". */
+  needsOutcome: boolean;
+  /** The interview's feedback, comments included: every member may read it. Present only when the interview has some. */
+  feedback?: Feedback;
+};
+
+const startOf = (i: Interview) => Date.parse(i.scheduled_at);
+const soonestFirst = (a: Interview, b: Interview) => startOf(a) - startOf(b);
+const latestFirst = (a: Interview, b: Interview) => startOf(b) - startOf(a);
+
+/** Each field is named: nothing of an interview reaches the browser by riding along. */
+function interviewRow(i: Interview, now: Date): InterviewRow {
+  return {
+    id: i.id,
+    name: i.candidate_name,
+    role: i.job_title,
+    // `fullDate`, already in this file ("12 Oct 2026"). `shortDate` ("12 Oct") had this one use: delete that
+    // helper from the file, or lint reports it unused.
+    date: fullDate(i.scheduled_at),
+    time: clock12(i.scheduled_at),
+    interviewer: i.interviewer_name ?? '—',
+    type: KIND_LABEL[i.kind],
+    status: INTERVIEW_STATUS_LABEL[i.status],
+    applicationId: i.application_id,
+    statusKey: i.status,
+    scheduledAt: i.scheduled_at,
+    durationMinutes: i.duration_minutes,
+    length: durationText(i.duration_minutes),
+    kind: i.kind,
+    place: i.place,
+    placeLink: safeLink(i.place),
+    interviewerName: i.interviewer_name,
+    notes: i.notes,
+    createdAt: i.created_at,
+    updatedAt: i.updated_at,
+    applicationStage: i.application_stage,
+    applicationOutcome: i.application_outcome,
+    needsOutcome: needsOutcome(i.status, i.scheduled_at, now),
+    ...(i.feedback ? { feedback: i.feedback } : {}),
+  };
+}
+
+/**
+ * An interview as the Applications panel lists it: a row without the team's notes. The panel is a client component
+ * that everyone who can open the screen gets, viewers included, and it never draws the notes: so they are not sent.
+ * Notes are shown in one place only, the interview form's Notes field, to someone who may edit.
+ */
+export type PanelInterview = Omit<InterviewRow, 'notes'>;
+
+function panelInterview(i: Interview, now: Date): PanelInterview {
+  // The key is dropped, not blanked: nothing that reads this type can come to rely on it.
+  const { notes: _team, ...rest } = interviewRow(i, now);
+  void _team;
+  return rest;
 }
 
 export type ApplicationsModel = {
   isEmpty: boolean;
   total: number;
-  rows: { id: string; name: string; job: string; source: string; status: ApplicationLabel; applied: string; details: ApplicationDetails | null }[];
+  rows: ({
+    /** `id` is the application's; `candidateId` the person's, for the Edit candidate form. */
+    id: string; candidateId: string; poolStatus?: PoolStatus; name: string; job: string; source: string; status: ApplicationLabel; applied: string;
+    details: ApplicationDetails | null;
+    /** The application's interviews, all of them: the ones ahead first (soonest first), then the past ones (latest first). */
+    interviews: PanelInterview[];
+  } & ApplicationState)[];
   statusMix: { key: ApplicationLabel; value: number }[];
   byJob: { label: string; applications: number }[];
 };
 
-export async function buildApplicationsModel(data: HireData): Promise<ApplicationsModel> {
-  const [jobs, apps] = await Promise.all([data.listJobs(), data.listApplications()]);
+export async function buildApplicationsModel(data: HireData, now: Date = new Date()): Promise<ApplicationsModel> {
+  const [jobs, apps, interviews] = await Promise.all([data.listJobs(), data.listApplications(), data.listInterviews()]);
   const labelled = apps.map((a) => ({ a, status: applicationLabel(a.stage, a.outcome) }));
+  const byApplication = new Map<string, Interview[]>();
+  for (const i of interviews) byApplication.set(i.application_id, [...(byApplication.get(i.application_id) ?? []), i]);
+  const interviewsOf = (applicationId: string): PanelInterview[] => {
+    const own = byApplication.get(applicationId) ?? [];
+    const ahead = own.filter((i) => startOf(i) >= now.getTime());
+    const past = own.filter((i) => !(startOf(i) >= now.getTime()));
+    return [...ahead.sort(soonestFirst), ...past.sort(latestFirst)].map((i) => panelInterview(i, now));
+  };
   return {
     isEmpty: apps.length === 0,
     total: apps.length,
     rows: labelled.slice(0, ROWS_SHOWN).map(({ a, status }) => ({
       id: a.id,
+      candidateId: a.candidate_id,
+      poolStatus: a.candidate_pool_status ?? 'none',
       name: a.candidate_name,
       job: a.job_title,
       source: a.source ?? 'Unknown',
       status,
+      ...applicationState(a),
       applied: fullDate(a.applied_at),
       details: applicationDetails(a),
+      interviews: interviewsOf(a.id),
     })),
     statusMix: LABELS.map((key) => ({ key, value: labelled.filter((row) => row.status === key).length })),
     byJob: applicantsByJob(jobs, apps)
@@ -286,60 +423,79 @@ export async function buildApplicationsModel(data: HireData): Promise<Applicatio
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
 
+/** One application as the schedule form's picker lists it: who, for which job, and where it stands. No contact details. */
+export type PickerApplication = { id: string; name: string; job: string; stage: ApplicationStage; outcome: ApplicationOutcome };
+
 export type InterviewsModel = {
   isEmpty: boolean;
-  rows: {
-    id: string; name: string; role: string; date: string; time: string; interviewer: string;
-    type: 'Video' | 'Onsite' | 'Phone'; status: 'Scheduled' | 'Completed' | 'Cancelled' | 'No-show';
-  }[];
+  /**
+   * "All interviews": scheduled ones whose start has passed first (they need an outcome), then the scheduled ones
+   * still ahead, soonest first, then the cancelled, completed and no-show ones, latest first. Cut at ROWS_SHOWN.
+   */
+  rows: InterviewRow[];
+  /** "Upcoming interviews": scheduled AND still ahead, soonest first. Cut at ROWS_SHOWN. */
+  upcoming: InterviewRow[];
+  /** Every scheduled interview, whether or not its start has passed. */
   scheduled: number;
+  /** How many are scheduled AND still ahead: what `upcoming` lists, counted before its cut. */
+  ahead: number;
   completed: number;
   noShow: number;
   /** Scheduled interviews in the next 7 days: the same number the Overview and the chat give. */
   next7Days: number;
   /** Those interviews by weekday, Monday to Friday only (for the chart; weekend ones are not in it). */
   weekLoad: { label: string; count: number }[];
+  /**
+   * Every application that was read, by name: the schedule form lists the active ones, and the form for an
+   * interview that already took place lists them all.
+   */
+  applications: PickerApplication[];
+  /** True when the applications read came back with its full HIRE_READ_CAP rows: an older application may be missing. */
+  applicationsCut: boolean;
+  /** Today in Kuala Lumpur, as YYYY-MM-DD: the date field's `min` or `max`. The browser's own today can be another day. */
+  today: string;
 };
 
 export async function buildInterviewsModel(data: HireData, now: Date): Promise<InterviewsModel> {
-  const interviews = await data.listInterviews();
+  const [interviews, apps] = await Promise.all([data.listInterviews(), data.listApplications()]);
   const count = (status: InterviewStatus) => interviews.filter((i) => i.status === status).length;
   const ahead = interviews.filter((i) => {
     const at = Date.parse(i.scheduled_at);
     return i.status === 'scheduled' && at >= now.getTime() && at < now.getTime() + 7 * DAY;
   });
   const weekday = (iso: string) => new Date(iso).toLocaleDateString('en-US', { weekday: 'short', timeZone: TZ });
-  // Scheduled first (soonest first), then the past ones, latest first.
-  const ordered = [
-    ...interviews.filter((i) => i.status === 'scheduled'),
-    ...interviews.filter((i) => i.status !== 'scheduled').reverse(),
-  ];
+  // Sorted here, not left to the provider's order.
+  const overdue = interviews.filter((i) => needsOutcome(i.status, i.scheduled_at, now)).sort(soonestFirst);
+  const coming = interviews.filter((i) => i.status === 'scheduled' && !needsOutcome(i.status, i.scheduled_at, now)).sort(soonestFirst);
+  const closed = interviews.filter((i) => i.status !== 'scheduled').sort(latestFirst);
   return {
     isEmpty: interviews.length === 0,
-    rows: ordered.slice(0, ROWS_SHOWN).map((i) => ({
-      id: i.id,
-      name: i.candidate_name,
-      role: i.job_title,
-      date: shortDate(i.scheduled_at),
-      time: clock(i.scheduled_at),
-      interviewer: i.interviewer_name ?? '—',
-      type: KIND_LABEL[i.kind],
-      status: INTERVIEW_STATUS_LABEL[i.status],
-    })),
+    rows: [...overdue, ...coming, ...closed].slice(0, ROWS_SHOWN).map((i) => interviewRow(i, now)),
+    upcoming: coming.slice(0, ROWS_SHOWN).map((i) => interviewRow(i, now)),
     scheduled: count('scheduled'),
+    ahead: coming.length,
     completed: count('completed'),
     noShow: count('no_show'),
     next7Days: ahead.length,
     weekLoad: WEEKDAYS.map((label) => ({ label, count: ahead.filter((i) => weekday(i.scheduled_at) === label).length })),
+    // Each field is named: an email, a phone, a CV link or a path can never ride along.
+    applications: apps
+      .map((a) => ({ id: a.id, name: a.candidate_name, job: a.job_title, stage: a.stage, outcome: a.outcome }))
+      .sort((a, b) => a.name.localeCompare(b.name) || a.job.localeCompare(b.job)),
+    applicationsCut: apps.length >= HIRE_READ_CAP,
+    today: klDateOf(now.toISOString()),
   };
 }
 
 export type PoolModel = {
   isEmpty: boolean;
+  /** Everyone in the pool, whatever is being searched for. */
   size: number;
   rows: {
     id: string; name: string; title: string; skills: string[]; location: string; source: string;
     rating: number | null; status: 'Available' | 'Shortlisted' | 'Passive' | 'Re-engaged';
+    /** The stored status, which the row's menu shows and changes. `status` is the label drawn. */
+    poolStatus: InPool;
   }[];
   /** The whole pool by status: always the four keys, in this order. */
   statusCounts: { key: 'Available' | 'Shortlisted' | 'Passive' | 'Re-engaged'; value: number }[];
@@ -347,6 +503,14 @@ export type PoolModel = {
   byTitle: { label: string; value: number }[];
   /** The whole pool by source, largest first. */
   bySource: { label: string; value: number }[];
+  /** The jobs a pool member can be moved to (open and paused), by title: the Move to pipeline dialog's picker. */
+  jobs: { id: string; title: string; status: 'open' | 'paused' }[];
+  /** The text the rows were searched for, or null. */
+  search: string | null;
+  /** How many pool members fit the search, before the cut to ROWS_SHOWN. The pool's size when nothing is searched for. */
+  matched: number;
+  /** True when the read came back with its full HIRE_READ_CAP candidates: an older pool member may be missing. */
+  readCapped: boolean;
 };
 
 /** Groups `items` by `pick`, largest group first (ties keep first-seen order). */
@@ -356,8 +520,14 @@ function tally<T>(items: T[], pick: (item: T) => string): { label: string; value
   return [...counts.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
 }
 
-export async function buildPoolModel(data: HireData): Promise<PoolModel> {
-  const [candidates, apps] = await Promise.all([data.listCandidates(), data.listApplications()]);
+/**
+ * The talent pool. `search` (from the page's address) is applied to the WHOLE
+ * pool and only then are the rows cut to ROWS_SHOWN: that is what makes every
+ * pool member reachable by name. The size, the status counts and the two
+ * tallies are always figures for the whole pool.
+ */
+export async function buildPoolModel(data: HireData, search?: string | null): Promise<PoolModel> {
+  const [candidates, apps, jobs] = await Promise.all([data.listCandidates(), data.listApplications(), data.listJobs()]);
   const pool = candidates.filter((c) => c.pool_status !== 'none');
   // "Shortlisted": has a live application at interview or beyond. Best rating across their applications.
   const shortlisted = new Set<string>();
@@ -367,12 +537,15 @@ export async function buildPoolModel(data: HireData): Promise<PoolModel> {
     if (a.rating !== null) rating.set(a.candidate_id, Math.max(rating.get(a.candidate_id) ?? 0, a.rating));
   }
   const statusOf = (c: (typeof pool)[number]) =>
-    shortlisted.has(c.id) ? ('Shortlisted' as const) : POOL_LABEL[c.pool_status as Exclude<PoolStatus, 'none'>];
+    shortlisted.has(c.id) ? ('Shortlisted' as const) : POOL_LABEL[c.pool_status as InPool];
   const STATUS_KEYS = ['Available', 'Shortlisted', 'Passive', 'Re-engaged'] as const;
+  const text = poolSearchText(search);
+  // Before the cut, over everyone in the pool that was read.
+  const matches = text === null ? pool : pool.filter((c) => matchesPoolSearch(c, text));
   return {
     isEmpty: pool.length === 0,
     size: pool.length,
-    rows: pool.slice(0, ROWS_SHOWN).map((c) => ({
+    rows: matches.slice(0, ROWS_SHOWN).map((c) => ({
       id: c.id,
       name: c.name,
       title: c.headline ?? '—',
@@ -381,9 +554,37 @@ export async function buildPoolModel(data: HireData): Promise<PoolModel> {
       source: c.source ?? 'Unknown',
       rating: rating.get(c.id) ?? null,
       status: statusOf(c),
+      poolStatus: c.pool_status as InPool,
     })),
     statusCounts: STATUS_KEYS.map((key) => ({ key, value: pool.filter((c) => statusOf(c) === key).length })),
     byTitle: tally(pool, (c) => c.headline ?? '—'),
     bySource: tally(pool, (c) => c.source ?? 'Unknown'),
+    jobs: jobs
+      .flatMap((job) => (job.status === 'open' || job.status === 'paused' ? [{ id: job.id, title: job.title, status: job.status }] : []))
+      .sort((a, b) => a.title.localeCompare(b.title)),
+    search: text,
+    matched: matches.length,
+    readCapped: candidates.length >= HIRE_READ_CAP,
+  };
+}
+
+/** One person the "Add to Pool" picker can offer: who they are, and nothing to contact them by. */
+export type PickerPerson = {
+  id: string; name: string; headline: string | null; location: string | null; skills: string[]; source: string | null;
+};
+export type PoolPicker = {
+  people: PickerPerson[];
+  /** True when the read came back with its full HIRE_READ_CAP candidates: someone added long ago may be missing. */
+  capped: boolean;
+};
+
+/** Everyone on file who is not in the pool, newest on file first. Each field is named: an email or a phone can never ride along. */
+export async function buildPoolPicker(data: HireData): Promise<PoolPicker> {
+  const candidates = await data.listCandidates();
+  return {
+    people: candidates
+      .filter((c) => c.pool_status === 'none')
+      .map((c) => ({ id: c.id, name: c.name, headline: c.headline, location: c.location, skills: c.skills, source: c.source })),
+    capped: candidates.length >= HIRE_READ_CAP,
   };
 }
