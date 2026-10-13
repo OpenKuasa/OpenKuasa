@@ -40,6 +40,10 @@ const accounts = [
 const categories = [{ id: CATEGORY, name: 'Utilities' }];
 
 const filled: VoucherForm = {
+  id: null,
+  kind: 'category',
+  supplierId: '',
+  amounts: {},
   payee: TYPED_PAYEE,
   payeeName: ' Tenaga Nasional ',
   categoryId: CATEGORY,
@@ -78,6 +82,7 @@ const text = (parts: { text: string }[]) => parts.map((p) => p.text).join('');
 describe('the voucher form', () => {
   it('starts from the first bank account, today, with the only category chosen and a typed payee', () => {
     expect(newVoucherForm(accounts, categories, TODAY)).toEqual({
+      id: null, kind: 'category', supplierId: '', amounts: {},
       payee: TYPED_PAYEE, payeeName: '', categoryId: CATEGORY, amount: '', accountId: ACCOUNT, date: TODAY,
       method: 'bank_transfer', reference: '', notes: '',
     });
@@ -110,10 +115,10 @@ describe('the voucher form', () => {
     expect(voucherFormError({ ...filled, notes: 'x'.repeat(201) })).toBe(M.tooLong);
   });
   it('says before the save what saving does for this person', () => {
-    expect(voucherSaveHint(true)).toBe(
+    expect(voucherSaveHint(true)[0]).toBe(
       'A voucher you save is approved at once and reads To be paid: you are an owner or admin. Nothing is paid until it is marked paid.',
     );
-    expect(voucherSaveHint(false)).toBe(
+    expect(voucherSaveHint(false)[0]).toBe(
       'This voucher waits as Pending approval until an owner or admin approves or rejects it. Until then it cannot be changed, only deleted.',
     );
     expect(voucherSubmitLabel(true)).toBe('Save voucher');
@@ -126,7 +131,8 @@ describe('what a row offers', () => {
     expect(voucherActions(row(), true)).toEqual(['approve', 'reject', 'delete']);
     expect(voucherActions(row(), false)).toEqual(['delete']);
     expect(voucherActions(row({ kind: 'expense' }), false)).toEqual(['delete']);
-    for (const status of ['draft', 'scheduled', 'rejected'] as const) {
+    // A draft has Edit and Send for approval too: see finance-voucher-bills-form.test.ts.
+    for (const status of ['scheduled', 'rejected'] as const) {
       expect(voucherActions(row({ status }), true), status).toEqual(['delete']);
       expect(voucherActions(row({ status }), false), status).toEqual(['delete']);
     }
@@ -138,7 +144,7 @@ describe('what a row offers', () => {
     for (const kind of ['bill', 'refund'] as const) {
       expect(voucherActions(row({ kind }), true), kind).toEqual(['approve', 'reject', 'delete']);
       expect(voucherActions(row({ kind }), false), kind).toEqual(['delete']);
-      expect(voucherActions(row({ kind, status: 'draft' }), true), kind).toEqual(['delete']);
+      expect(voucherActions(row({ kind, status: 'draft' }), true), kind).toEqual(kind === 'bill' ? ['edit', 'submit', 'delete'] : ['delete']);
       expect(voucherActions(row({ kind, status: 'rejected' }), false), kind).toEqual(['delete']);
       for (const status of ['scheduled', 'posted', 'void'] as const) {
         expect(voucherActions(row({ kind, status }), true), `${kind} ${status}`).toEqual([]);
