@@ -264,6 +264,18 @@ describe('how a matched receipt’s document stands', () => {
   });
 });
 
+describe('the sentences a person reads when a match is refused', () => {
+  // By their words, once: the other tests compare against these constants, which would follow a reworded sentence.
+  it('FIN23: someone matched the receipt meanwhile', () => {
+    expect(M.alreadyMatched).toBe('This receipt is already matched. Untie it first.');
+  });
+  it('FIN14: a member untying from an approved expense or a posted bill', () => {
+    expect(M.needsDecider).toBe(
+      'Only an owner or admin can untie a receipt from an approved expense or a posted bill. Ask one of them to do this.',
+    );
+  });
+});
+
 describe('the forms, pre-filled from a receipt', () => {
   const contacts = [
     { id: 'c1', name: 'Shell Bangsar', payment_terms_days: 14 },
@@ -339,8 +351,12 @@ describe('the attach picker', () => {
   it('warns someone who could not untie afterwards, and only them', () => {
     const lockedExpense = all.find((c) => c.id === 'e-approved');
     const lockedBill = all.find((c) => c.id === 'b-posted');
-    expect(attachLockNote(lockedExpense, false)).toContain('This expense is approved');
-    expect(attachLockNote(lockedBill, false)).toContain('This bill is posted');
+    expect(attachLockNote(lockedExpense, false)).toBe(
+      'This expense is approved: once the receipt is attached, only an owner or admin can untie it.',
+    );
+    expect(attachLockNote(lockedBill, false)).toBe(
+      'This bill is posted: once the receipt is attached, only an owner or admin can untie it.',
+    );
     expect(attachLockNote(lockedExpense, true)).toBeNull();
     expect(attachLockNote(all.find((c) => c.id === 'e-pending'), false)).toBeNull();
     expect(attachLockNote(undefined, false)).toBeNull();
