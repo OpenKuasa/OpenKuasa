@@ -37,7 +37,10 @@ export function TransferFormCard({
   record,
   onClose,
   onRecorded,
+  initial,
 }: {
+  /** What the form starts with besides the date. Only the tests set it: a person always starts with an empty form. */
+  initial?: Partial<TransferForm>;
   /** Every account; only the active ones are offered. */
   accounts: BankAccountRow[];
   /** The person's own date when the form was opened, YYYY-MM-DD. */
@@ -48,7 +51,7 @@ export function TransferFormCard({
   onRecorded: (written: RecordedTransferNote) => void;
 }) {
   const id = useId();
-  const [form, setForm] = useState<TransferForm>(() => newTransferForm(today));
+  const [form, setForm] = useState<TransferForm>(() => ({ ...newTransferForm(today), ...initial }));
   const save = useFinanceAction();
   const set = (patch: Partial<TransferForm>) => setForm((f) => ({ ...f, ...patch }));
   const fromOptions = transferAccounts(accounts);

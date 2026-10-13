@@ -56,6 +56,7 @@ import {
   closeOwnVoid,
   visibleOpen,
   voidMenuWaits,
+  voidPayload,
   voidQuestionGone,
 } from '@/lib/finance/banking-open';
 import { cn } from '@/lib/utils';
@@ -110,7 +111,10 @@ export function BankingView({
   today: serverToday,
   followClock = true,
   writer,
+  initialOpen = null,
 }: {
+  /** What is open when the screen first draws. Only the tests set it: a person always starts with nothing open. */
+  initialOpen?: Open;
   /** Absent for a viewer, the demo workspace and the sample: then nothing here changes data. */
   writer?: BankingWriter;
   /** Every account, bank accounts first. */
@@ -127,7 +131,7 @@ export function BankingView({
   const [accountId, setAccountId] = useState('all');
   const [filter, setFilter] = useState<BankFilter>('all');
   const [showAll, setShowAll] = useState(false);
-  const [opened, setOpened] = useState<Open>(null);
+  const [opened, setOpened] = useState<Open>(initialOpen);
   const [note, setNote] = useState<Note>(null);
   const voiding = useFinanceAction();
 
@@ -402,7 +406,7 @@ export function BankingView({
                         icon={Ban}
                         onConfirm={() =>
                           voiding.run(
-                            () => transfers.void({ transfer_id: r.transfer_id }),
+                            () => transfers.void(voidPayload(r)),
                             () => {
                               // Only its own question: a form opened since is left as it is.
                               setOpened((o) => closeOwnVoid(o, r.transaction_id));

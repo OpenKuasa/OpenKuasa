@@ -6,8 +6,8 @@ import {
   voidTransferAction,
 } from '@/app/(app)/finance/actions';
 import { type BankingActions, BankingView, type TransferActions } from '@/components/finance/banking-view';
-import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
+import { bankingAccess } from '@/lib/finance/banking-access';
 import { listBankAccountNumbers } from '@/lib/finance/bank-accounts';
 import { listBankAccounts, listBankTransactions } from '@/lib/finance/banking';
 import { todayUtc } from '@/lib/finance/view-helpers';
@@ -37,19 +37,22 @@ export default async function BankingScreen() {
   }
   const viewer = await getViewer();
   const ctx = { client: await createClient(), orgId: viewer.orgId };
-  const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
-  const canSignOff = canEdit && can(viewer.role, 'sign-off-finance');
+  const access = bankingAccess(viewer.role, viewer.isDemo);
   const [accounts, rows, numbers] = await Promise.all([
     listBankAccounts(ctx),
     listBankTransactions(ctx),
-    canEdit ? listBankAccountNumbers(ctx) : {},
+    access.readsNumbers ? listBankAccountNumbers(ctx) : {},
   ]);
   return (
     <BankingView
       accounts={accounts}
       rows={rows}
       today={todayUtc()}
-      writer={canEdit ? { actions: ACTIONS, canSignOff, transfers: canSignOff ? TRANSFERS : undefined, numbers } : undefined}
+      writer={
+        access.canEdit
+          ? { actions: ACTIONS, canSignOff: access.canSignOff, transfers: access.canTransfer ? TRANSFERS : undefined, numbers }
+          : undefined
+      }
     />
   );
 }
