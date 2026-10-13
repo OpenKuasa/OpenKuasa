@@ -234,8 +234,10 @@ export function expensePayError(row: ExpenseRow, form: ExpensePayForm, accounts:
  * What the card says under its fields: what is still to pay, what already
  * stands against the expense, and what marking paid records. "To be paid" is
  * a payment that is recorded and not made yet (scheduled, or waiting on
- * Payment Vouchers). An expense that can no longer be paid (the list
- * refreshed under the open card) says only that.
+ * Payment Vouchers). It ends with where a wrong payment is undone: the card
+ * is an owner's or admin's, who can void the voucher on Payment Vouchers. An
+ * expense that can no longer be paid (the list refreshed under the open card)
+ * says only that.
  */
 export function expensePayHint(row: ExpenseRow, gone = false): string {
   if (gone) return M.gone;
@@ -248,7 +250,7 @@ export function expensePayHint(row: ExpenseRow, gone = false): string {
   const still = `${rm(left)} is still to pay on this expense`;
   return (
     `${against.length ? `${still}: ${against.join(' and ')}.` : `${still}.`} Paying less leaves the rest for another payment. ` +
-    'This records a payment voucher, paid now: it shows on Payment Vouchers and Banking.'
+    'This records a payment voucher, paid now: it shows on Payment Vouchers and Banking. To undo a wrong one, void it on Payment Vouchers.'
   );
 }
 

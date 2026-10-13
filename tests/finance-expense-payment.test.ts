@@ -212,7 +212,7 @@ describe('the Mark paid card', () => {
     expect(expensePayError(approved(), form({ reference: 'x'.repeat(201) }), ACCOUNTS)).toBe('That is too long. Keep it to 200 characters or fewer.');
   });
   it('says what is still to pay, what already stands against the expense, and what marking paid records', () => {
-    const VOUCHER = ' This records a payment voucher, paid now: it shows on Payment Vouchers and Banking.';
+    const VOUCHER = ' This records a payment voucher, paid now: it shows on Payment Vouchers and Banking. To undo a wrong one, void it on Payment Vouchers.';
     expect(expensePayHint(approved())).toBe(`RM 120.00 is still to pay on this expense. Paying less leaves the rest for another payment.${VOUCHER}`);
     expect(expensePayHint(approved({ paid: 30 }))).toBe(
       `RM 90.00 is still to pay on this expense: RM 30.00 is paid. Paying less leaves the rest for another payment.${VOUCHER}`,
