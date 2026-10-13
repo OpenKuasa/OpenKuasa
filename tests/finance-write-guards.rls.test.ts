@@ -622,6 +622,8 @@ const vouchersFor = async (party: string) => {
     .select('kind, status, number, amount, party_name, category_name, contact_id')
     .eq('org_id', orgId)
     .eq('party_name', party)
+    // Earlier tests in this file leave a bill payment to the same supplier: this reads the expenses' vouchers only.
+    .eq('kind', 'expense')
     .order('amount', { ascending: true });
   expect(error, error?.message).toBeNull();
   return data ?? [];
