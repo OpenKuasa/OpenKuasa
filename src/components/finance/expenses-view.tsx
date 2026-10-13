@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { Ban, Banknote, Check, Download, FileText, Pencil, PieChart, Plus, Search, Trash2, TrendingUp } from 'lucide-react';
+import { Ban, Banknote, Check, Download, FileText, Pencil, PieChart, Plus, Search, Tags, Trash2, TrendingUp } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { AreaTrend, DonutStat, type Series } from '@/components/charts';
+import { type CategoryActions, CategoriesCard } from '@/components/finance/categories-card';
 import { ConfirmRow } from '@/components/finance/confirm-row';
 import { downloadCsv } from '@/components/finance/download-csv';
 import { type ExpenseFormActions, ExpenseFormCard } from '@/components/finance/expense-form-card';
@@ -31,6 +32,7 @@ import {
   expensesView,
   filterExpenses,
 } from '@/lib/finance/cash-book-views';
+import type { CategoryRow } from '@/lib/finance/categories';
 import { csvFileName } from '@/lib/finance/csv';
 import {
   type ExpenseAction,
@@ -77,6 +79,8 @@ export type ExpensesWriter = {
   categories: ExpenseCategory[];
   /** Active bank and cash accounts, for Mark paid; empty for someone who may not decide. */
   accounts: FinanceAccount[];
+  /** Every category, both kinds, archived ones included, and the Categories card's three writes: an owner or admin only; absent for anyone else. */
+  categoryAdmin?: { rows: CategoryRow[]; actions: CategoryActions };
 };
 
 const SPEND_SERIES: Series[] = [
@@ -91,10 +95,11 @@ const STATUS_STYLES: Record<ExpenseDisplayStatus, string> = {
   rejected: 'bg-red-500/15 text-red-600',
 };
 
-/** One thing open at a time: the expense form, new or for one expense, the Mark paid card for one expense, or a question in one row. */
+/** One thing open at a time: the expense form, new or for one expense, the Mark paid card for one expense, the Categories card, or a question in one row. */
 type Open =
   | { kind: 'form'; today: string; editing?: ExpenseRow }
   | { kind: 'pay'; today: string; row: ExpenseRow }
+  | { kind: 'categories' }
   | { kind: 'approve' | 'reject' | 'delete'; row: ExpenseRow }
   | null;
 
@@ -151,9 +156,9 @@ export function ExpensesView({
     : null;
 
   const { newButton, actionsColumn, columns } = expenseControls(Boolean(writer));
-  const asking = open && open.kind !== 'form' && open.kind !== 'pay' ? open : null;
-  // A card holds what was typed, so nothing else opens over it: it is closed with its own Cancel first.
-  const locked = confirm.pending || open?.kind === 'form' || open?.kind === 'pay';
+  const asking = open && open.kind !== 'form' && open.kind !== 'pay' && open.kind !== 'categories' ? open : null;
+  // A card holds what was typed, so nothing else opens over it: it is closed with its own Cancel, or Done, first.
+  const locked = confirm.pending || open?.kind === 'form' || open?.kind === 'pay' || open?.kind === 'categories';
   // The expense being paid, as the list has it now: a refresh may have moved what is left of it.
   const paying = open?.kind === 'pay' ? expensePayCurrent(open.row, rows) : null;
   // A row that is gone after a refresh takes its question with it; the message still has to be seen.
@@ -299,20 +304,37 @@ export function ExpensesView({
         subtitle="Business expenses and spending, Saudara."
         actions={
           newButton ? (
-            <Button
-              size="sm"
-              aria-expanded={open?.kind === 'form'}
-              disabled={locked}
-              onClick={() => ask({ kind: 'form', today: localIsoDate(new Date()) })}
-            >
-              <Plus className="size-4" />
-              New expense
-            </Button>
+            <>
+              {writer?.categoryAdmin ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-expanded={open?.kind === 'categories'}
+                  disabled={locked}
+                  onClick={() => ask({ kind: 'categories' })}
+                >
+                  <Tags className="size-4" />
+                  Categories
+                </Button>
+              ) : null}
+              <Button
+                size="sm"
+                aria-expanded={open?.kind === 'form'}
+                disabled={locked}
+                onClick={() => ask({ kind: 'form', today: localIsoDate(new Date()) })}
+              >
+                <Plus className="size-4" />
+                New expense
+              </Button>
+            </>
           ) : undefined
         }
       />
 
       <BentoGrid>
+        {writer?.categoryAdmin && open?.kind === 'categories' ? (
+          <CategoriesCard rows={writer.categoryAdmin.rows} actions={writer.categoryAdmin.actions} onClose={close} />
+        ) : null}
         {writer && open?.kind === 'form' ? (
           <ExpenseFormCard
             // A different expense is a different form.
