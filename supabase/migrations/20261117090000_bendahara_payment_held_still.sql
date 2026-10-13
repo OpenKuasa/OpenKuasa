@@ -48,6 +48,8 @@
 -- five are closed to the authenticated role by column grants, and an UPDATE
 -- that touches only those never calls the function: the trigger has a WHEN
 -- clause. org_id and transfer_id have their own guards (FIN09, FIN16).
+-- (A change of transfer_id together with a held column is answered FIN28 now,
+-- where FIN16 answered it before: this trigger sorts first.)
 --
 -- How the triggers fit what is there. Nothing live is replaced: two new
 -- functions, two new triggers. BEFORE ROW triggers fire in the order of their
@@ -74,12 +76,22 @@
 -- write in the workspace and adds a row to the split of a payment of it that
 -- is not a draft can be answered FIN28 rather than 42501; nothing is written
 -- either way. An UPDATE or DELETE by such a person finds no row, as before.
+-- (In practice that person is answered FIN04, not FIN28: finance_allocation_guard
+-- runs as the caller and fires first, so the person never reaches the split's
+-- function. If that guard is ever made a definer, or renamed to sort later, the
+-- split's function must ask private.is_org_writer(new.org_id) itself before it
+-- reads the payment.)
 --
 -- They step aside when nobody is signed in (auth.uid() is null): a migration
 -- or the SQL editor, run by the database owner, as the other finance guards
 -- do. The split's trigger also steps aside when the payment is not found
 -- (the payment itself is being deleted and its split goes with it) and when
 -- the workspace is gone (it is being deleted with everything in it).
+--
+-- Applying it. Send the file as ONE call (one transaction): the lock table ...
+-- nowait line below only means something inside it. Behind a payment writer, or
+-- an autovacuum of either table, it fails at once with 55P03, nothing is
+-- created, and it is simply sent again.
 --
 -- What changes for the deployed code. Nothing it does: no screen, action or
 -- assistant tool edits a payment that is not a draft or sends one back to
@@ -156,6 +168,7 @@ create trigger finance_transaction_still
   execute function private.finance_transaction_still_guard();
 
 -- ---- its split ------------------------------------------------------------------
+-- Not an oracle: finance_allocation_guard (invoker, sorts first) answers FIN04 to anyone who cannot write the workspace, so this definer function is only reached by someone who can already read the payment.
 create function private.finance_allocation_still_guard()
 returns trigger
 language plpgsql
