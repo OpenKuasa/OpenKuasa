@@ -400,7 +400,10 @@ export function PaymentVouchersView({
                 e.preventDefault();
                 confirmPaid();
               }}
-              onChange={(e) => setOpen({ kind: 'markPaid', row, paidOn: e.target.value })}
+              onChange={(e) => {
+                confirm.clear();
+                setOpen({ kind: 'markPaid', row, paidOn: e.target.value });
+              }}
             />
           </label>
           <p className="mt-1 text-muted-foreground">{voucherPaidEffect(row)}</p>
