@@ -1,6 +1,6 @@
 'use client';
 
-import { type FormEvent, useId, useState } from 'react';
+import { type FormEvent, useEffect, useId, useRef, useState } from 'react';
 import { Banknote } from 'lucide-react';
 import { BentoCard } from '@/components/bento/bento';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
@@ -55,6 +55,11 @@ export function ExpensePayCard({
   const id = useId();
   const [form, setForm] = useState<ExpensePayForm>(() => newExpensePayForm(row, accounts, today));
   const save = useFinanceAction();
+  const alert = useRef<HTMLParagraphElement>(null);
+  // The card can be taller than a phone's window and the refusal sits beside the buttons at its foot: bring it into view.
+  useEffect(() => {
+    if (save.error) alert.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [save.error]);
   // A change by the person answers the last refusal, so its sentence goes.
   const edit: typeof setForm = (next) => {
     save.clear();
@@ -164,7 +169,7 @@ export function ExpensePayCard({
             Cancel
           </Button>
           {save.error ? (
-            <p role="alert" className="text-sm text-destructive">
+            <p ref={alert} role="alert" className="text-sm text-destructive">
               {save.error}
             </p>
           ) : null}
