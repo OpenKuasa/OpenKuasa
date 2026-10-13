@@ -1430,8 +1430,16 @@ this order, each refusal costing nothing and sending nothing:
     sentence "The receipt could not be read." **with the four values the
     receipt held sent back**, because the function sets all four from what
     it is given and an error alone would clear what a person had typed. When
-    the provider refuses the key (401) or says there is no credit (402)
-    nothing is written. If the function answers false (someone reviewed or
+    the provider refuses the key (401) or says there is no credit (402), or
+    cannot do the reading just now (busy, down, a model that takes no file,
+    no connection, too slow), nothing is written: the receipt was not found
+    unreadable, and the turn already counted is not given back, as a chat turn
+    that fails is not. A model answer that is not the five fields, or has
+    none of vendor, date and amount, is stored as a failed reading, except on
+    a receipt a model has already read: there a failed new reading writes
+    nothing, so the earlier figures, their "Read by AI" mark and the caution
+    above the forms stay, and the person is told the earlier reading is still
+    shown. If the function answers false (someone reviewed or
     matched the receipt during the call) the reading is dropped.
 
 What was read is a suggestion. After a reading the review card opens on the
@@ -2649,12 +2657,21 @@ with no date).
 - Reading a receipt with AI sends the whole file, with whatever a phone wrote
   into it (the question says so), and the names of up to sixty expense
   categories. It is one call with no retry: a model slower than 45 seconds
-  counts as "nothing could be read" and has still used a turn of the daily
-  limit and possibly credit. The limit is the person's 200 turns a day on
-  the workspace's key, shared with chat; a workspace has no ceiling of its
-  own. A multi-page PDF is sent whole. How well the configured model reads a
+  is told as "could not do the reading just now", nothing is stored, and the
+  press has still used a turn of the daily limit and possibly credit.
+  What is bounded today: the file (10 MB at most, a JPG, PNG or PDF), the
+  answer (300 tokens), the time (45 seconds), and the person's 200 turns a
+  day on the workspace's key, shared with chat. What is not: a PDF has no
+  page limit and is sent whole, so a long one costs more input than a photo,
+  and a workspace has no ceiling of its own across its people (an owner's
+  decision, not built). How well the configured model reads a
   Malaysian receipt, and whether it takes a PDF, is the model's: a model
-  that cannot answers "nothing could be read".
+  that cannot is told as "could not do the reading just now" or, if it answers
+  something that is not the five fields, "nothing could be read".
+- A reading's answer is shown only if the person still has that receipt's
+  question open when it arrives. If they opened something else meanwhile,
+  nothing new opens; what was stored shows on the row, and a refusal is said
+  in a note above the table.
 - A suggested category is kept on the screen only. Reloading the page, or
   opening the inbox elsewhere, forgets it; the four details are stored.
   Storing it would need a column on `finance_receipts`, so a migration. If
