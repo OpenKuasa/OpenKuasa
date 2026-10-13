@@ -12,7 +12,7 @@ import type { PaymentVoucherRow } from './cash-book';
 import { type CashBookPeriod, type PaymentVoucherFilter, inPeriod, voucherHome } from './cash-book-views';
 import type { ExpenseCategory } from './expenses';
 import { rm, typedNumber } from './format';
-import type { FinanceAccount, PaymentMethod, PaymentOutRow } from './money';
+import { PAYMENT_METHOD_LABELS, type FinanceAccount, type PaymentMethod, type PaymentOutRow } from './money';
 import { type OrderBilling, orderNotesForBills } from './purchase-views';
 import { displayDate } from './view-helpers';
 import { VOUCHER_MESSAGES, recordVoucherInput } from './vouchers';
@@ -209,6 +209,21 @@ export function voucherQuestion(kind: VoucherAction, row: PaymentVoucherRow): Qu
   const held = row.status === 'rejected' ? null : row.kind === 'expense' ? 'expenses' : row.kind === 'bill' ? 'bills' : null;
   const frees = held ? ` What it held of its ${held} is freed.` : '';
   return [{ text: 'Delete ' }, ...what, { text: `${DELETE_STATE[row.status]}? Nothing has been paid.${frees} This cannot be undone.` }];
+}
+
+/**
+ * What a decision is matched on and the table does not draw: the voucher's
+ * category, its method, and its reference and notes when they hold
+ * something. One line under the Approve and the Reject question, so the
+ * person decides on all of it. Plain text; the caller renders it as text.
+ */
+export function voucherDetailsLine(row: PaymentVoucherRow): string {
+  const parts: string[] = [];
+  if (row.category_name) parts.push(`Category: ${row.category_name}`);
+  parts.push(`Method: ${PAYMENT_METHOD_LABELS[row.method]}`);
+  if (row.reference?.trim()) parts.push(`Reference: ${row.reference.trim()}`);
+  if (row.notes?.trim()) parts.push(`Notes: ${row.notes.trim()}`);
+  return parts.join(' · ');
 }
 
 /** How a voucher is named to a screen reader: "the payment of RM 300.00 to Tenaga Nasional". */

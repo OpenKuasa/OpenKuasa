@@ -57,6 +57,7 @@ import {
   voucherDecisionPayload,
   voucherHiddenNote,
   voucherName,
+  voucherDetailsLine,
   voucherQuestion,
   writtenVoucherTitle,
 } from '@/lib/finance/voucher-form';
@@ -234,6 +235,11 @@ export function PaymentVouchersView({
       ),
     );
 
+  /** What the decision is matched on and the table does not draw, as text that wraps. */
+  const details = (row: PaymentVoucherRow) => (
+    <p className="mt-1 break-words text-xs text-muted-foreground">{voucherDetailsLine(row)}</p>
+  );
+
   const question = (row: PaymentVoucherRow) => {
     if (!writer || !asking || asking.row.transaction_id !== row.transaction_id) return null;
     const { actions } = writer;
@@ -255,6 +261,7 @@ export function PaymentVouchersView({
           onCancel={close}
         >
           {words(voucherQuestion('approve', row))}
+          {details(row)}
           {orderNotes.length ? (
             <div className="mt-1">
               <OrderNotes notes={orderNotes} />
@@ -278,6 +285,7 @@ export function PaymentVouchersView({
           onCancel={close}
         >
           {words(voucherQuestion('reject', row))}
+          {details(row)}
         </ConfirmRow>
       );
     }

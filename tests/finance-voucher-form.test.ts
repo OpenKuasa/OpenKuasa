@@ -14,6 +14,7 @@ import {
   voucherDecisionPayload,
   voucherFormError,
   voucherHiddenNote,
+  voucherDetailsLine,
   voucherName,
   voucherPayload,
   voucherQuestion,
@@ -164,6 +165,23 @@ describe('a decision', () => {
     for (const kept of [M.needsDecider, M.accountArchivedSince, M.cannotDelete, 'That change could not be saved. Please try again.']) {
       expect(voucherAnswerIsStale(kept)).toBe(false);
     }
+  });
+});
+
+describe('the line under an Approve or Reject question', () => {
+  it('names the category, the method, the reference and the notes', () => {
+    expect(voucherDetailsLine(row({ notes: 'January bill, as agreed' }))).toBe(
+      'Category: Utilities · Method: FPX · Reference: ACC 1 · Notes: January bill, as agreed',
+    );
+  });
+
+  it('leaves out a reference and notes that hold nothing, or only spaces', () => {
+    expect(voucherDetailsLine(row({ reference: null, notes: null }))).toBe('Category: Utilities · Method: FPX');
+    expect(voucherDetailsLine(row({ reference: '  ', notes: '' }))).toBe('Category: Utilities · Method: FPX');
+  });
+
+  it('leaves out the category of a voucher for bills, which has none', () => {
+    expect(voucherDetailsLine(row({ kind: 'bill', category_id: null, category_name: null, reference: null }))).toBe('Method: FPX');
   });
 });
 
