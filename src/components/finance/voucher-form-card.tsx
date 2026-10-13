@@ -144,7 +144,7 @@ export function VoucherFormCard({
       icon={Wallet}
       className="col-span-2 md:col-span-12"
     >
-      <form onSubmit={submit} noValidate className="grid gap-3 md:grid-cols-12">
+      <form onSubmit={submit} noValidate className="grid grid-cols-1 gap-3 md:grid-cols-12">
         <div className="space-y-1.5 md:col-span-3">
           <Label htmlFor={`${id}-kind`}>What it is for</Label>
           <Select value={form.kind} onValueChange={(v) => edit((f) => chooseVoucherKind(f, v as VoucherFormKind))}>
@@ -162,8 +162,9 @@ export function VoucherFormCard({
           <>
             <div className="space-y-1.5 md:col-span-5">
               <Label htmlFor={`${id}-supplier`}>Supplier</Label>
-              <Select value={form.supplierId} onValueChange={(v) => edit((f) => chooseVoucherSupplier(f, v))}>
-                <SelectTrigger id={`${id}-supplier`} className="w-full">
+              {/* The key keeps this select apart from "Paid to" (the first child of the other branch): React would otherwise reuse one Radix select across a change of kind, and it answers the change with an empty value. */}
+              <Select key="supplier" value={form.supplierId} onValueChange={(v) => edit((f) => chooseVoucherSupplier(f, v))}>
+                <SelectTrigger id={`${id}-supplier`} className="w-full min-w-0">
                   <SelectValue placeholder={suppliers.length ? 'Choose a supplier' : 'No supplier has a bill to pay'} />
                 </SelectTrigger>
                 <SelectContent>
@@ -263,8 +264,8 @@ export function VoucherFormCard({
           <>
             <div className="space-y-1.5 md:col-span-3">
               <Label htmlFor={`${id}-payee`}>Paid to</Label>
-              <Select value={form.payee} onValueChange={(v) => edit((f) => ({ ...f, payee: v }))}>
-                <SelectTrigger id={`${id}-payee`} className="w-full">
+              <Select key="payee" value={form.payee} onValueChange={(v) => edit((f) => ({ ...f, payee: v }))}>
+                <SelectTrigger id={`${id}-payee`} className="w-full min-w-0">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

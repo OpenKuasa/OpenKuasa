@@ -80,6 +80,18 @@ describe('the form, for a supplier’s bills', () => {
     expect(fresh).toMatchObject({ kind: 'bills', accountId: ACCOUNT, date: TODAY });
     expect(chooseVoucherKind(fresh, 'bills')).toBe(fresh);
   });
+  it('keeps the category side as it was typed when the kind goes to bills and back (the payee and the Name box stay usable)', () => {
+    const typed = { ...newVoucherForm(accounts, categories, TODAY), payee: TYPED_PAYEE, payeeName: 'Tenaga Nasional', categoryId: CATEGORY, amount: '40' };
+    const back = chooseVoucherKind(chooseVoucherKind(typed, 'bills'), 'category');
+    expect(back).toEqual(typed);
+    expect(back.payee).toBe(TYPED_PAYEE);
+    expect(back.payeeName).toBe('Tenaga Nasional');
+    // A contact chosen as the payee survives the same way.
+    const contact = { ...typed, payee: MAJU, payeeName: '' };
+    expect(chooseVoucherKind(chooseVoucherKind(contact, 'bills'), 'category').payee).toBe(MAJU);
+    // And an edited bills draft switched to a category lands with the typed-name choice and an empty box, not a blank select.
+    expect(chooseVoucherKind(draftVoucherForm(row(), payments, bills, accounts), 'category')).toMatchObject({ kind: 'category', payee: TYPED_PAYEE });
+  });
   it('starts the ticks again for another supplier, and drops a ticked bill that is no longer offered', () => {
     expect(chooseVoucherSupplier(ticked, JAYA).amounts).toEqual({});
     expect(chooseVoucherSupplier(ticked, MAJU)).toBe(ticked);
