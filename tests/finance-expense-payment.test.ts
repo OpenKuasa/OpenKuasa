@@ -188,6 +188,9 @@ describe('the Mark paid card', () => {
   it('refuses more than is left, counting what is paid and what is to be paid', () => {
     expect(expensePayError(approved(), form({ amount: '120.01' }), ACCOUNTS)).toBe('That is more than is still to pay on this expense.');
     expect(expensePayError(approved({ paid: 30, held: 20 }), form({ amount: '70.01' }), ACCOUNTS)).toBe('That is more than is still to pay on this expense.');
+    // Too big for the column is still more than is left: the card says so, not "above 0".
+    expect(expensePayError(approved(), form({ amount: '99999999999999' }), ACCOUNTS)).toBe('That is more than is still to pay on this expense.');
+    expect(expensePayError(approved(), form({ amount: '1000000000000' }), ACCOUNTS)).toBe('That is more than is still to pay on this expense.');
     expect(expensePayError(approved({ paid: 120, display_status: 'paid' }), form(), ACCOUNTS)).toBe('Nothing is left to pay on this expense.');
     expect(expensePayError(approved({ held: 120 }), form(), ACCOUNTS)).toBe('Nothing is left to pay on this expense.');
   });

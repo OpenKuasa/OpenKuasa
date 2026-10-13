@@ -209,6 +209,9 @@ export function expensePayError(row: ExpenseRow, form: ExpensePayForm, accounts:
   if (!parsed.success && parsed.error.issues[0]?.path[0] === 'txn_date') return parsed.error.issues[0].message;
   const typed = moneyBoxError(form.amount, M.amountFormat, M.amountDecimals);
   if (typed) return typed;
+  // More than is left is said before the schema's amount sentence: a number too big for the column is above 0, and more than is left.
+  const typedAmount = typedNumber(form.amount);
+  if (typedAmount !== null && Number.isFinite(typedAmount) && Math.round(typedAmount * 100) > Math.round(left * 100)) return M.tooMuch;
   if (!parsed.success) return parsed.error.issues[0]?.message ?? M.invalid;
   return parsed.data.amount > left ? M.tooMuch : null;
 }
