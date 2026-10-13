@@ -273,6 +273,10 @@ begin
     format('insert into public.finance_transactions (org_id, direction, account_id, amount, method, category_id) values (%L, ''in'', %L, 5, ''cash'', %L)', org, old, sales));
   fails := fails || public.bendahara_archived_account_try('an outsider starts a draft on an active account', '42501',
     format('insert into public.finance_transactions (org_id, direction, account_id, amount, method, category_id) values (%L, ''in'', %L, 5, ''cash'', %L)', org, bank, sales));
+  -- A writer of another workspace naming this workspace's archived account is told it does not exist: the guard
+  -- reads the account by the payment's own workspace and id, so it steps aside and the foreign key answers.
+  fails := fails || public.bendahara_archived_account_try('an outsider in their own workspace names this workspace''s archived account', '23503',
+    format('insert into public.finance_transactions (org_id, direction, account_id, amount, method) values (%L, ''in'', %L, 5, ''cash'')', other_org, old));
   update public.finance_transactions set status = 'scheduled' where id = d_old;
   reset role;
   select count(*) into n from public.finance_transactions
