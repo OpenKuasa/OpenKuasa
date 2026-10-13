@@ -654,7 +654,8 @@ themselves, so no caller gets round it.
   raised its amount above its split was written down as approving the rest;
   that path is now closed to every signed-in person (`FIN28`). An allocation
   of such a payment cannot be deleted, or lowered so that the payment is more
-  than its split (`FIN14`), or changed in any other way (`FIN28`): the payment
+  than its split (`FIN14`), or changed in any other way (`FIN28`, or the older
+  guard's `FIN03` or `FIN09` where it answers first): the payment
   is deleted and recorded again. So no signed-in person can leave a
   scheduled payment out that is neither approved by an owner or admin of its
   own workspace nor settling documents for its whole amount. Two kinds of row
@@ -705,7 +706,14 @@ trigger sorts after the guards that were there
 `FIN28` is new for is the scheduled payment nobody had to approve.
 `finance_transaction_still` sorts before `finance_use_account_update`, so an
 edit it refuses never takes the lock on the account that an archive waits
-for. A change of nothing but `updated_at` is let through on both tables.
+for. A change of nothing but `updated_at` is let through by both new triggers
+(the older guards still refuse it on a waiting, rejected, paid or void payment
+and on the split of every payment but a draft and a scheduled one nobody
+approved). `finance_allocation_guard` runs as the caller and fires first, so
+someone who cannot write the workspace is answered `FIN04` there and never
+reaches `finance_allocation_still_guard`; if that guard is ever made a definer
+or renamed to sort later, this function must ask `private.is_org_writer(new.org_id)`
+itself before it reads the payment.
 What the database itself writes on a payment that is not a draft (`number`,
 `approved_by`, `approved_at`, `voided_at`, and `created_by` cleared when a
 user is deleted) is in neither list and never calls the function.
@@ -718,7 +726,8 @@ for it (`FIN_HELD_STILL`, `HELD_STILL`: "This is waiting to be paid, so it
 can no longer be changed. Delete it and record it again."); no map lists it,
 because no write in `src/lib/finance` can meet it, and
 `tests/finance-payment-held-still.test.ts` fails if one starts to edit a
-payment directly. `supabase/tests/bendahara_payment_held_still_check.sql`
+payment with a direct `.from('finance_transactions').update(…)`, and pins how
+many `.update(` calls each file that names the table makes. `supabase/tests/bendahara_payment_held_still_check.sql`
 goes through every column, role and status.
 
 **Who writes `approved_by` and `approved_at`.** The guards do, and nobody
@@ -1882,6 +1891,11 @@ with no date).
   bills' supplier and is exactly its split is still only what the functions
   write, not something the database asks when it is sent for approval. A
   session with no signed-in user (a migration, the SQL editor) is not held.
+  A change of `transfer_id` together with a held column on a scheduled payment
+  is answered `FIN28` now, where `FIN16` answered it before, because the new
+  trigger sorts first. The migration is applied as one call: it takes its table
+  locks with `nowait`, so behind a payment writer, or an autovacuum of either
+  table, it fails at once with `55P03` and nothing is created; send it again.
 - A scheduled payment cannot be edited: delete it and schedule it again.
 - Supplier Bills and Payments Out load every bill and payment and filter in the
   browser. The product picker on a bill line is a plain list with no search.
