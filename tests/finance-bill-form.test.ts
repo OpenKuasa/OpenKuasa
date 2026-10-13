@@ -396,13 +396,13 @@ describe('billOrderWarnings', () => {
   it('warns when the bills would pass what has arrived', () => {
     const arrived = order({ received_total: 350 });
     // 300 + 125 = 425 > 350, but within 1200
-    expect(billOrderWarnings(lines, arrived, 0)).toEqual(['This is more than has arrived on PO-0003 so far (RM 350.00).']);
+    expect(billOrderWarnings(lines, arrived, 0)).toEqual(['This is more than has been received on PO-0003 so far (RM 350.00).']);
   });
   it('gives both, the total first', () => {
     const both = order({ received_total: 400 });
     expect(billOrderWarnings(big, both, 0)).toEqual([
       'This takes the bills for PO-0003 over its total of RM 1,200.00.',
-      'This is more than has arrived on PO-0003 so far (RM 400.00).',
+      'This is more than has been received on PO-0003 so far (RM 400.00).',
     ]);
   });
   it('does not count the bill’s own saved total twice when it is the linked draft', () => {

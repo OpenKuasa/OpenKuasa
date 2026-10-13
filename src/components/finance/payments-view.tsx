@@ -419,9 +419,9 @@ export function PaymentsView({
                       <TableCell className="whitespace-nowrap text-right tabular-nums">
                         <span className="inline-flex items-center justify-end gap-1.5">
                           {flagged.has(p.allocation_id) ? (
-                            <span title="This bill’s purchase order is billed over its total or for more than has arrived" className="text-amber-600">
+                            <span title="This bill’s purchase order is billed over its total or for more than has been received" className="text-amber-600">
                               <TriangleAlert className="size-4" aria-hidden />
-                              <span className="sr-only">This bill’s purchase order is billed over its total or for more than has arrived</span>
+                              <span className="sr-only">This bill’s purchase order is billed over its total or for more than has been received</span>
                             </span>
                           ) : null}
                           {rm(p.amount)}

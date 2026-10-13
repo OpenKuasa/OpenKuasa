@@ -86,9 +86,9 @@ begin
   -- Every trigger on payments, in name order, which is the order BEFORE ROW triggers fire in.
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where not tgisinternal and tgrelid = 'public.finance_transactions'::regclass and tgenabled = 'O';
-  if t is distinct from 'finance_transaction_guard,finance_transaction_insert_guard,finance_transaction_sign_off,finance_transaction_unmatch,'
-       || 'finance_transfer_id_guard,finance_transfer_pair_delete,finance_transfer_pair_insert,finance_transfer_pair_update,'
-       || 'finance_use_account_insert,finance_use_account_update,finance_void_stamp' then
+  if t is distinct from 'finance_transaction_guard,finance_transaction_insert_guard,finance_transaction_sign_off,finance_transaction_still,'
+       || 'finance_transaction_unmatch,finance_transfer_id_guard,finance_transfer_pair_delete,finance_transfer_pair_insert,'
+       || 'finance_transfer_pair_update,finance_use_account_insert,finance_use_account_update,finance_void_stamp' then
     fails := fails || format('triggers on finance_transactions are: %s', t);
   end if;
   select pg_get_triggerdef(oid) into t from pg_trigger

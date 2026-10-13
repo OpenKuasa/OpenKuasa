@@ -49,7 +49,7 @@ the data layer, with unit tests; the client components only draw them.
 | `receipt-inbox.ts` | The inbox's writes and its review form: record an upload (`registerReceipt`), review (`reviewReceipt`), delete (`deleteInboxReceipt`), read a receipt's path and sign a download link, and the sentences for `FIN11`, `FIN23`, `FIN24` |
 | `receipt-files-server.ts` | Server only: reads a stored file's first bytes before it is opened (`storedFileCheck`), removes a deleted receipt's file (`removeReleasedReceiptFile`) and runs the clean-up (`cleanReceiptFiles`) |
 | `receipt-match.ts` | Matching a receipt: the schemas and writes that make an expense or a draft bill from one (`receiptToExpense`, `receiptToBill`), tie it to a document that exists (`attachReceipt`) and untie it (`detachReceipt`); the read behind the paperclip on Expenses and Supplier Bills (`listAttachedReceipts`, `receiptsByDocument`); how a matched receipt's document stands (`matchedDocuments`), what a row offers (`receiptMatchActions`), the two forms pre-filled from a receipt, the attach picker's list, and the three lists of screens its actions refresh |
-| `rfqs.ts` | RFQs (requests for quotation). Described here only for the link a copied RFQ keeps: `saveRfqInput` takes `source_rfq_id`, the RFQ a new draft was copied from, which must be an id, and `saveRfq` sends it to `finance_save_rfq`; a list row carries `source_rfq_id` (the first RFQ of its group, or null) and one RFQ read with its lines carries `quoted_at` (when the supplier's answer was recorded); `getRfqGroup` reads the RFQs of one RFQ's group that have gone to their supplier, with their lines, in the order they were made. `saveRfq` words `FIN11` on a new copy with a sentence of its own (`RFQ_MESSAGES.copiedFromGone`) |
+| `rfqs.ts` | RFQs (requests for quotation). Described here only for the link a copied RFQ keeps: `saveRfqInput` takes `source_rfq_id`, the RFQ a new draft was copied from, which must be an id, and `saveRfq` sends it to `finance_save_rfq`; a list row carries `source_rfq_id` (the first RFQ of its group, or null) and `quoted_at` (when the supplier's answer was recorded; until then the list and its export show no total, as prices the buyer typed are not a quote); `getRfqGroup` reads the RFQs of one RFQ's group that have gone to their supplier, with their lines, in the order they were made. `saveRfq` words `FIN11` on a new copy with a sentence of its own (`RFQ_MESSAGES.copiedFromGone`) |
 | `rfq-form.ts` | The RFQ form. A form opened by Copy to another supplier (`rfqFormCopiedFrom`) remembers the RFQ it was copied from, and `rfqPayload` sends it with the new draft. When that save is refused because the RFQ it was copied from is gone, `rfqFormAfterRefusal` drops the link, so saving again saves the RFQ on its own; the shared card applies it through `DocumentFormKind.afterRefusal`, which no other form has |
 | `rfq-compare.ts` | Compare quotes, pure. A group is the first RFQ and every RFQ that names it (`rfqGroupId`); an RFQ can be compared once it and at least one other of its group have gone to their supplier (`comparableRfqIds`), and `rfqActions(row, comparable)` in `purchase-views.ts` then offers Compare quotes in every status but draft. `compareQuotes` lays the group out as a row for each item and a cell for each RFQ: lines are matched by product, or else by description, in the same unit and pack size; only an RFQ whose answer was recorded (`quoted_at`) has prices; the lowest price is for one unit with SST added, compared to four decimals, marked on every supplier tied at it and only when at least two priced the line; a cell worded differently from its row keeps its own description. Also the question the card asks before making an order (`orderableRfq`) and what deleting a draft costs the RFQs copied from it (`rfqCopyCount`, `rfqDeleteWarning`) |
 | `csv.ts` | CSV text for Export: RFC 4180, a UTF-8 byte-order mark, and a guard against spreadsheet formulas |
@@ -424,7 +424,7 @@ reference and notes when they hold something, drawn as text.
 At **Approve**, a voucher that pays supplier bills shows the same advice
 Payments Out shows before a payment is marked paid: `OrderNotes` with the
 sentences of `orderNotesForBills`, for each purchase order behind its bills
-that is billed for more than its total or for more than has arrived
+that is billed for more than its total or for more than has been received
 (`orderNotesByVoucher`). The bills and purchase orders are read only for
 someone who may approve, and only while such a voucher is waiting. No screen
 can send a supplier payment for approval yet (Payments Out schedules or pays
@@ -645,12 +645,17 @@ themselves, so no caller gets round it.
   write. Its amount, its direction, its account, its category, who is paid
   and every other column are frozen, and so is its split (`FIN09`): what is
   paid is what was approved. It can still be deleted.
-- A scheduled payment out that nobody had to approve stays covered by its
-  split. Raising its amount above its split where it stands, or turning
-  scheduled money in into money out, needs an owner or admin exactly as
-  scheduling it would have, and an owner or admin who does it is written down
-  as approving it. An allocation of such a payment cannot be deleted, or
-  lowered so that the payment is more than its split (`FIN14`): the payment
+- A scheduled payment out that nobody had to approve (a payment for a
+  supplier's bills, a pending refund, a voucher for approved expenses: money
+  out that is exactly its split) is held still too, since
+  `20261117090000_bendahara_payment_held_still`: see "A payment that has left
+  draft is held still" below. Before that file anyone who may write could
+  edit it where it stood or send it back to draft, and an owner or admin who
+  raised its amount above its split was written down as approving the rest;
+  that path is now closed to every signed-in person (`FIN28`). An allocation
+  of such a payment cannot be deleted, or lowered so that the payment is more
+  than its split (`FIN14`), or changed in any other way (`FIN28`, or the older
+  guard's `FIN03` or `FIN09` where it answers first): the payment
   is deleted and recorded again. So no signed-in person can leave a
   scheduled payment out that is neither approved by an owner or admin of its
   own workspace nor settling documents for its whole amount. Two kinds of row
@@ -671,13 +676,67 @@ themselves, so no caller gets round it.
   it of the workspace the row is in before the write and of the one it is in
   after it.
 
+**A payment that has left draft is held still**
+(`20261117090000_bendahara_payment_held_still`). Once a payment is not a
+draft (`pending_approval`, `scheduled`, `posted`, `rejected`, `void`), for
+every signed-in person and by whatever path:
+
+- only its status moves. `direction`, `account_id`, `txn_date`, `amount`,
+  `method`, `reference`, `contact_id`, `party_name`, `category_id` and `notes`
+  stay as they are, with or without a change of status. The one exception is
+  `txn_date` in the move from `scheduled` to `posted`, which is how
+  `finance_mark_payment_paid` writes the day it was paid;
+- it does not go back to `draft`, whoever asks: an owner and an admin are
+  held as a member is. No screen ever offered it; the way to change a payment
+  that is to be paid is to delete it and record it again;
+- its split is not changed: no row of `finance_allocations` is added to it,
+  taken from it, moved onto or off it, or edited.
+
+`FIN28`, from `private.finance_transaction_still_guard` (trigger
+`finance_transaction_still`, BEFORE UPDATE with a WHEN clause that names
+those columns) and `private.finance_allocation_still_guard` (trigger
+`finance_allocation_still`, BEFORE INSERT, UPDATE and DELETE). Both run as
+their owner, change nothing, and step aside when nobody is signed in; the
+split's also steps aside when its payment is being deleted with it and when
+the workspace is. Posted, void, waiting, rejected and approved payments were
+held already and still answer `FIN09` or `FIN14` first, because each new
+trigger sorts after the guards that were there
+(`finance_transaction_still` after `finance_transaction_sign_off`,
+`finance_allocation_still` after `finance_allocation_guard`): the one payment
+`FIN28` is new for is the scheduled payment nobody had to approve.
+`finance_transaction_still` sorts before `finance_use_account_update`, so an
+edit it refuses never takes the lock on the account that an archive waits
+for. A change of nothing but `updated_at` is let through by both new triggers
+(the older guards still refuse it on a waiting, rejected, paid or void payment
+and on the split of every payment but a draft and a scheduled one nobody
+approved). `finance_allocation_guard` runs as the caller and fires first, so
+someone who cannot write the workspace is answered `FIN04` there and never
+reaches `finance_allocation_still_guard`; if that guard is ever made a definer
+or renamed to sort later, this function must ask `private.is_org_writer(new.org_id)`
+itself before it reads the payment.
+What the database itself writes on a payment that is not a draft (`number`,
+`approved_by`, `approved_at`, `voided_at`, and `created_by` cleared when a
+user is deleted) is in neither list and never calls the function.
+
+Nothing the app does is refused: every function that records money inserts a
+draft, writes its split while it is a draft and then moves its status once;
+approving, rejecting, marking paid and voiding change status and nothing
+else; deleting is not an update. `result.ts` names the code and a sentence
+for it (`FIN_HELD_STILL`, `HELD_STILL`: "This is waiting to be paid, so it
+can no longer be changed. Delete it and record it again."); no map lists it,
+because no write in `src/lib/finance` can meet it, and
+`tests/finance-payment-held-still.test.ts` fails if one starts to edit a
+payment with a direct `.from('finance_transactions').update(…)`, and pins how
+many `.update(` calls each file that names the table makes. `supabase/tests/bendahara_payment_held_still_check.sql`
+goes through every column, role and status.
+
 **Who writes `approved_by` and `approved_at`.** The guards do, and nobody
-else. On a payment they are written in four cases: when an owner or admin
-approves a waiting payment, when one of them rejects a payment, when one of
-them schedules or pays money out that is above its split, and when one of
-them changes a scheduled payment that nobody approved so that it is then
-money out above its split, which is what raising its amount or turning
-scheduled money in into money out does. On an
+else. On a payment they are written in three cases: when an owner or admin
+approves a waiting payment, when one of them rejects a payment, and when one
+of them schedules or pays money out that is above its split. (The guard still
+holds a fourth, for a scheduled payment that nobody approved and that is
+changed so that it is then money out above its split. Since
+`20261117090000` no signed-in person can make that change: `FIN28`.) On an
 expense they are written when an owner or admin approves or rejects it. In
 each case, when the caller is a signed-in person, the guard writes the
 caller's own id and the time of the update; for a session with no signed-in
@@ -1687,6 +1746,7 @@ quotation, a credit note or a refund by the file that made the call.
 | `FIN23` | A receipt's state does not allow it: it starts in review, tied to nothing; it does not move to another workspace; its file, name, type, size, uploader and upload time do not change; a matched receipt is untied before it is deleted (the guard, for any delete), and `finance_attach_receipt`, `finance_receipt_to_expense` and `finance_receipt_to_bill` refuse a receipt that is already matched. A plain update of `expense_id` or `bill_id` by a writer is allowed by the grants, and the guard moves the receipt to the new document (with `FIN14` when it leaves an approved expense or a posted bill and the writer cannot decide). `receipt-inbox.ts` words it for deleting a matched receipt. |
 | `FIN24` | The file of a receipt: there is none; it is not in the bucket; it was uploaded more than 30 minutes ago or is waiting to be removed; it is already a receipt; it is not the type its name says; its path names none of the five types. `receipt-inbox.ts` words it for recording an upload. |
 | `FIN25` | A void bill takes no receipt. `receipt-match.ts`: "A void bill takes no receipt. Choose another bill." |
+| `FIN28` | A payment that has left draft is held still (`20261117090000`): none of its direction, account, date, amount, method, reference, payee, category or notes changes (the date may, as a scheduled payment is marked paid); it does not go back to draft, whoever asks; and its split is not added to, taken from, moved or edited. Raised only for a scheduled payment nobody had to approve: every other payment that is not a draft answers `FIN09` or `FIN14` first. `result.ts` has a sentence for it (`HELD_STILL`); no data layer lists it, because no write of the app can meet it. |
 | `FIN30` | An account with payments still to be paid or waiting for approval is not archived. `bank-accounts.ts`: "This account has payments that are still to be paid or waiting for approval. Pay, reject or delete them, then archive it." (`FIN14` on an account is an opening balance from someone who is not an owner or admin, or an owner who has not given their second factor: "Only an owner or admin can set or change an opening balance. If you are one, sign in again with your second step." The guard counts payments in both directions; the screen's archive question warns about money out only.) |
 | `FIN37` | Money does not move on an archived account: a payment is not started on one, moved onto one, or sent for approval, approved, scheduled, posted or marked paid while its account is archived. `result.ts` has the one sentence (`ACCOUNT_ARCHIVED`), which `money.ts`, `refunds.ts` and `cash-receipts.ts` each list in their own map; `transfers.ts` words it as it words `FIN16`. A member recording a payment in, a refund or a paid-now payment out on an archived account is answered `FIN37` (the draft is refused before the sign-off rule), where before this rule they were answered `FIN14`; posting, approving and marking paid by a member still answer `FIN14`. |
 
@@ -1818,15 +1878,24 @@ with no date).
   marked paid on Payment Vouchers yet (part 5d-2). No screen sends a payment to
   a supplier for approval, so the over-billing note at Approve shows only for
   one made by a direct call.
-- A payment that is "To be paid" and that nobody had to approve (a supplier
-  payment a member scheduled, a voucher for expenses a member scheduled) can
-  still be changed by any writer with a direct call until it is paid, in
-  everything but its amount: who is paid and its category (`contact_id`,
-  `party_name`, `category_id`), its account, method, date, reference and notes
-  (`finance_transaction_guard` checks only that the amount stays within the
-  split). `finance_mark_payment_paid`
-  compares nothing: what is marked paid is the payment as it is then, not as
-  the row showed it. An approved payment cannot be changed at all.
+- **A payment that is to be paid is held still as a row, not as an intention**
+  (`20261117090000`). Anyone who may write can still delete a payment that
+  is to be paid and record another in its place, for another amount or on
+  another account, which is what Payments Out, Refunds and Payment Vouchers
+  offer. The new row says who made it and when (`created_by` and `created_at`
+  are the database's), and paying it is still an owner's or admin's.
+  `finance_mark_payment_paid` still
+  compares nothing with what the person was shown: it does not need to while
+  the row cannot change between the list and the click, and a payment deleted
+  and recorded again has another id. Whether a voucher for bills names the
+  bills' supplier and is exactly its split is still only what the functions
+  write, not something the database asks when it is sent for approval. A
+  session with no signed-in user (a migration, the SQL editor) is not held.
+  A change of `transfer_id` together with a held column on a scheduled payment
+  is answered `FIN28` now, where `FIN16` answered it before, because the new
+  trigger sorts first. The migration is applied as one call: it takes its table
+  locks with `nowait`, so behind a payment writer, or an autovacuum of either
+  table, it fails at once with `55P03` and nothing is created; send it again.
 - A scheduled payment cannot be edited: delete it and schedule it again.
 - Supplier Bills and Payments Out load every bill and payment and filter in the
   browser. The product picker on a bill line is a plain list with no search.

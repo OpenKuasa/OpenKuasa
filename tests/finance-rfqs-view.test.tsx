@@ -60,7 +60,7 @@ const row = (over: Partial<RfqListRow> = {}): RfqListRow => ({
   status: 'sent',
   line_count: 2,
   total: 0,
-  fully_priced: false,
+  quoted_at: null,
   purchase_order_id: null,
   purchase_order_no: null,
   source_rfq_id: null,
@@ -106,8 +106,8 @@ describe('the RFQs list', () => {
   });
 
   it('offers a quoted RFQ with no order Make purchase order and Close, and one with an order only Close', () => {
-    expect(items(render([row({ status: 'quoted', total: 100, fully_priced: true })]))).toEqual(['Make purchase order', 'Copy to another supplier', 'Close RFQ']);
-    const ordered = render([row({ status: 'quoted', fully_priced: true, purchase_order_id: 'po-1', purchase_order_no: 'PO-0007' })]);
+    expect(items(render([row({ status: 'quoted', total: 100, quoted_at: '2026-10-02T09:00:00Z' })]))).toEqual(['Make purchase order', 'Copy to another supplier', 'Close RFQ']);
+    const ordered = render([row({ status: 'quoted', quoted_at: '2026-10-02T09:00:00Z', purchase_order_id: 'po-1', purchase_order_no: 'PO-0007' })]);
     expect(items(ordered)).not.toContain('Make purchase order');
     expect(items(ordered)).toEqual(['Copy to another supplier', 'Close RFQ']);
   });
@@ -128,15 +128,18 @@ describe('the RFQs list', () => {
     expect(rfqActions(row({ status: 'closed' }))).toEqual(['copy']);
   });
 
-  it('shows a dash for the total until every line is priced, and the order number when there is one', () => {
-    expect(text(render([row({ status: 'quoted', total: 120, fully_priced: false })]))).toContain('—');
-    const priced = text(render([row({ status: 'quoted', total: 1234.5, fully_priced: true, purchase_order_no: 'PO-0007' })]));
+  it('shows a dash for the total until the supplier answers, and the order number when there is one', () => {
+    // Prices the buyer typed before sending are not a quote.
+    const typed = text(render([row({ status: 'sent', total: 120 })]));
+    expect(typed).toContain('—');
+    expect(typed).not.toContain('120.00');
+    const priced = text(render([row({ status: 'quoted', total: 1234.5, quoted_at: '2026-10-02T09:00:00Z', purchase_order_no: 'PO-0007' })]));
     expect(priced).toContain('1,234.50');
     expect(priced).toContain('PO-0007');
   });
 
   it('offers Compare quotes on an RFQ that went out with a copy to another supplier, and not on a draft copy', () => {
-    const first = row({ id: 'first', status: 'quoted', fully_priced: true });
+    const first = row({ id: 'first', status: 'quoted', quoted_at: '2026-10-02T09:00:00Z' });
     const copy = row({ id: 'copy', rfq_no: 'RFQ-0002', status: 'sent', source_rfq_id: 'first' });
     const draft = row({ id: 'draft', rfq_no: null, status: 'draft', source_rfq_id: 'first' });
     expect(items(render([first, copy]))).toEqual([
@@ -182,11 +185,19 @@ describe('the RFQ form', () => {
     expect(html).toMatch(/<span data-option="sup-gone">Archived Traders/);
     expect(html).toMatch(/<span data-option="sup-1">Kopi Hulu Supplies/);
   });
+
+  it('says the supplier fills in the price', () => {
+    const html = renderToStaticMarkup(
+      <RfqFormCard suppliers={[{ id: 'sup-1', name: 'Kopi Hulu Supplies' } as FinanceContact]} products={[]} today={TODAY} actions={actions} onClose={() => {}} />,
+    );
+    expect(html).toContain('placeholder="Supplier price"');
+    expect(html).not.toContain('placeholder="0.00"');
+  });
 });
 
 describe('a copied RFQ form', () => {
   const source: RfqDetail = {
-    ...row({ status: 'quoted', supplier_id: 'sup-1', supplier_name: 'Kopi Hulu Supplies', fully_priced: true, total: 106 }),
+    ...row({ status: 'quoted', supplier_id: 'sup-1', supplier_name: 'Kopi Hulu Supplies', total: 106 }),
     subtotal: 100,
     sst_total: 6,
     notes: 'Deliver before noon',
@@ -262,7 +273,7 @@ describe('the prices card', () => {
 
 describe('Compare quotes', () => {
   const rfq = (id: string, supplier_name: string, over: Partial<RfqDetail>): RfqDetail => ({
-    ...row({ id, rfq_no: `RFQ-${id}`, supplier_name, status: 'quoted', fully_priced: true }),
+    ...row({ id, rfq_no: `RFQ-${id}`, supplier_name, status: 'quoted' }),
     subtotal: 0,
     sst_total: 0,
     notes: null,
@@ -281,7 +292,6 @@ describe('Compare quotes', () => {
     }),
     rfq('2', 'Biji Segar', {
       status: 'sent',
-      fully_priced: false,
       quoted_at: null,
       lines: [
         { ...line, id: 'b1', description: 'Arabica beans', quantity: 20, unit_price: null },

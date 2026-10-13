@@ -117,9 +117,9 @@ describe('the other inputs', () => {
     expect(said({ id: ID, receipts })).toBeUndefined();
     expect(receivePurchaseOrderInput.parse({ id: ID, receipts: [{ line_id: LINE, received_quantity: 0 }] }).receipts[0].received_quantity).toBe(0);
     expect(receivePurchaseOrderInput.parse({ id: ID, receipts: [{ line_id: LINE, received_quantity: 1.23456 }] }).receipts[0].received_quantity).toBe(1.235);
-    expect(said({ id: ID, receipts: [] })).toBe('Enter how much has arrived for each line, 0 or more.');
-    expect(said({ id: ID, receipts: [{ line_id: LINE, received_quantity: -1 }] })).toBe('Enter how much has arrived for each line, 0 or more.');
-    expect(said({ id: ID, receipts: [{ line_id: LINE, received_quantity: Number.NaN }] })).toBe('Enter how much has arrived for each line, 0 or more.');
+    expect(said({ id: ID, receipts: [] })).toBe('Enter how much has been received for each line, 0 or more.');
+    expect(said({ id: ID, receipts: [{ line_id: LINE, received_quantity: -1 }] })).toBe('Enter how much has been received for each line, 0 or more.');
+    expect(said({ id: ID, receipts: [{ line_id: LINE, received_quantity: Number.NaN }] })).toBe('Enter how much has been received for each line, 0 or more.');
     expect(said({ id: ID, receipts: [{ line_id: 'nope', received_quantity: 1 }] })).toBe('That purchase order no longer exists.');
   });
   it('a bill needs an order and a real bill date', () => {
@@ -302,7 +302,7 @@ describe('purchase order writes', () => {
     const { ctx } = fakeFinance({ data: null, error: { code: 'FIN10' } });
     expect(await decidePurchaseOrder(ctx, { id: ID, approve: true })).toEqual({ ok: false, error: 'Say why the order is rejected.' });
     expect(await receivePurchaseOrder(ctx, { id: ID, receipts: [{ line_id: LINE, received_quantity: 1 }] })).toEqual({
-      ok: false, error: 'Enter how much has arrived for each line, 0 or more.',
+      ok: false, error: 'Enter how much has been received for each line, 0 or more.',
     });
   });
   it('hides any other database error behind the general message and logs it', async () => {

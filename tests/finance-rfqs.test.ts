@@ -98,7 +98,7 @@ describe('RFQ reads', () => {
   const row = (n: number, extra: Record<string, unknown> = {}) => ({
     id: `rfq-${n}`, rfq_no: `RFQ-${n}`, supplier_id: 's1', supplier_name: 'Syarikat Kertas',
     rfq_date: '2026-10-01', reply_by: '2026-10-31', supplier_ref: null, status: 'quoted',
-    line_count: 2, total: '132.50', fully_priced: true, purchase_order_id: null, purchase_order_no: null, source_rfq_id: null, ...extra,
+    line_count: 2, total: '132.50', quoted_at: '2026-10-02T09:00:00+00:00', purchase_order_id: null, purchase_order_no: null, source_rfq_id: null, ...extra,
   });
   const read = (n: number, extra: Record<string, unknown> = {}) => ({ ...row(n), line_count: 2, total: 132.5, ...extra });
 

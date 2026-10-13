@@ -13,7 +13,7 @@ const row = (id: string, over: Partial<RfqListRow> = {}): RfqListRow => ({
   status: 'sent',
   line_count: 1,
   total: 0,
-  fully_priced: false,
+  quoted_at: null,
   purchase_order_id: null,
   purchase_order_no: null,
   source_rfq_id: null,

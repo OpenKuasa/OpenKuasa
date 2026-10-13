@@ -20,7 +20,7 @@ const rfq = (
   status,
   line_count,
   total,
-  fully_priced: status === 'quoted',
+  quoted_at: status === 'quoted' ? `${rfq_date}T09:00:00Z` : null,
   purchase_order_id: null,
   purchase_order_no: null,
   source_rfq_id: null,

@@ -26,6 +26,7 @@ export function LineItemsEditor({
   lines,
   products,
   withProduct,
+  pricePlaceholder = '0.00',
   onChange,
 }: {
   lines: LineDraft[];
@@ -33,6 +34,8 @@ export function LineItemsEditor({
   products: FinanceProduct[];
   /** What choosing a product fills in: a bill takes its cost, an invoice its price. */
   withProduct: (line: LineDraft, product: FinanceProduct | null) => LineDraft;
+  /** What an empty price box says. */
+  pricePlaceholder?: string;
   onChange: (lines: LineDraft[]) => void;
 }) {
   const id = useId();
@@ -156,7 +159,7 @@ export function LineItemsEditor({
                   inputMode="decimal"
                   min={0}
                   step="any"
-                  placeholder="0.00"
+                  placeholder={pricePlaceholder}
                   className="tabular-nums"
                   value={line.unit_price}
                   aria-label={`Unit price for line ${n}`}

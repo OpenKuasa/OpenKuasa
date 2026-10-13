@@ -550,7 +550,7 @@ export function RfqsView({
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-right tabular-nums">{r.line_count}</TableCell>
                       <TableCell className="whitespace-nowrap text-right tabular-nums">
-                        {r.fully_priced ? rm(r.total) : '—'}
+                        {r.quoted_at ? rm(r.total) : '—'}
                       </TableCell>
                       <TableCell>
                         <span className="flex items-center gap-2">

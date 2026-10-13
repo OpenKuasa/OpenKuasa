@@ -669,16 +669,17 @@ begin
     from public.finance_transactions where id = v3;
   if t is distinct from 'scheduled/no number/' || owner_id then fails := fails || format('a voucher scheduled by an owner reads %s', t); end if;
 
-  -- An owner who raises a scheduled payment above its bill is approving the rest, and is written down for it.
+  -- An owner who raised a scheduled payment above its bill was approving the rest, and was written down for it.
+  -- Since 20261117090000 a payment that has left draft is not edited by anyone (FIN28): it stays as it was scheduled.
   stray := public.finance_record_payment_out(org,
     jsonb_build_object('account_id', bank, 'method', 'fpx', 'status', 'scheduled'),
     jsonb_build_array(jsonb_build_object('bill_id', bill1, 'amount', 3)));
-  fails := fails || public.bendahara_check_try('an owner raises a scheduled payment above its bill', 'ok',
+  fails := fails || public.bendahara_check_try('an owner raises a scheduled payment above its bill', 'FIN28',
     format('update public.finance_transactions set amount = 8 where id = %L', stray));
   select status || '/' || amount || '/' || coalesce(approved_by::text, 'nobody') || '/' || (approved_at is not null) into t
     from public.finance_transactions where id = stray;
-  if t is distinct from 'scheduled/8.00/' || owner_id || '/true' then
-    fails := fails || format('a scheduled payment raised by an owner reads %s', t);
+  if t is distinct from 'scheduled/3.00/nobody/false' then
+    fails := fails || format('a scheduled payment an owner tried to raise reads %s', t);
   end if;
   delete from public.finance_transactions where id = stray;
 

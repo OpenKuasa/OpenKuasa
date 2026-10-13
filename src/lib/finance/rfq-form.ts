@@ -188,6 +188,7 @@ export const RFQ_FORM_KIND: DocumentFormKind<RfqForm> = {
   withDate: withRfqDate,
   secondDate: { label: 'Reply by (optional)', optional: true, get: (form) => form.reply_by, set: withReplyBy },
   words: RFQ_FORM_WORDS,
+  pricePlaceholder: 'Supplier price',
   withProduct: withRfqProduct,
   error: rfqFormError,
   payload: rfqPayload,

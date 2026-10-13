@@ -234,7 +234,7 @@ export type OrderBilling = Pick<
 
 /**
  * One sentence for each purchase order, among the ones these bills are raised against, that is billed for more
- * than its total or for more than has arrived, in the order the bills come. When several of the bills belong to
+ * than its total or for more than has been received, in the order the bills come. When several of the bills belong to
  * the same order the first is named and the rest counted. Advice only: it blocks nothing. An order that is not
  * in `orders` (cancelled ones may not be passed) says nothing.
  */
@@ -257,7 +257,7 @@ export function orderNotesForBills(
     notes.push(
       order.over_billed
         ? `${subject} against ${po}, whose bills come to ${rm(order.billed_total)}, over its total of ${rm(order.total)}.`
-        : `${subject} against ${po}, which is billed ${rm(order.billed_total)} with ${rm(order.received_total)} arrived so far.`,
+        : `${subject} against ${po}, which is billed ${rm(order.billed_total)} with ${rm(order.received_total)} received so far.`,
     );
   }
   return notes;
@@ -373,7 +373,7 @@ export function rfqsView(rows: RfqListRow[], today: string): RfqsViewData {
   return { counts, awaitingReply: counts.sent + counts.overdue, overdue: counts.overdue };
 }
 
-/** The RFQs table as a CSV file. The total is a number, and empty until every line is priced. */
+/** The RFQs table as a CSV file. The total is a number, and empty until the supplier's answer is recorded. */
 export function rfqsCsv(rows: RfqListRow[], today: string): string {
   return toCsv(
     ['No.', 'Date', 'Supplier', 'Reply by', 'Supplier ref', 'Lines', 'Total', 'Status', 'Purchase order'],
@@ -384,8 +384,8 @@ export function rfqsCsv(rows: RfqListRow[], today: string): string {
       r.reply_by,
       r.supplier_ref,
       r.line_count,
-      // Empty until every line is priced, like the dash on the screen: a part-priced total would read as the whole.
-      r.fully_priced ? r.total : null,
+      // Empty until the supplier's answer is recorded, like the dash on the screen: prices the buyer typed are not a quote.
+      r.quoted_at ? r.total : null,
       RFQ_STATUS_LABELS[rfqDisplayStatus(r, today)],
       r.purchase_order_no,
     ]),

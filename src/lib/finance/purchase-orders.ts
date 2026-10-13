@@ -66,7 +66,7 @@ export const PURCHASE_ORDER_MESSAGES = {
   ownOrder: 'You raised or submitted this purchase order, so someone else has to approve it.',
   // FIN20
   hasBills: 'This purchase order has bills against it. Void those bills, or delete them if they are drafts, first.',
-  received: 'Enter how much has arrived for each line, 0 or more.',
+  received: 'Enter how much has been received for each line, 0 or more.',
   // FIN21
   billFailed: 'A bill can only be raised against an approved purchase order.',
   numberTaken: 'That purchase order number is already used.',
@@ -197,7 +197,7 @@ export type PurchaseOrderListRow = {
   billed_total: number;
   /** Billed for more than the order is worth. */
   over_billed: boolean;
-  /** Billed for more than has arrived. */
+  /** Billed for more than has been received. */
   billed_over_received: boolean;
 };
 

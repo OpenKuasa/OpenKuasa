@@ -152,7 +152,11 @@ export type RfqListRow = {
   line_count: number;
   /** Priced lines only. */
   total: number;
-  fully_priced: boolean;
+  /**
+   * When the supplier's answer was recorded (Record prices); null until then. A price on an RFQ
+   * that has none was typed by the buyer, not quoted by the supplier.
+   */
+  quoted_at: string | null;
   /** The purchase order made from this RFQ, if one stands: a cancelled order does not count. */
   purchase_order_id: string | null;
   /** null when there is no order, and while that order is still a draft. */
@@ -180,11 +184,6 @@ export type RfqDetail = RfqListRow & {
   subtotal: number;
   sst_total: number;
   notes: string | null;
-  /**
-   * When the supplier's answer was recorded (Record prices); null until then. A price on an RFQ
-   * that has none was typed by the buyer, not quoted by the supplier.
-   */
-  quoted_at: string | null;
   lines: RfqLine[];
 };
 
@@ -196,7 +195,7 @@ export type RfqDetail = RfqListRow & {
 export type SaveAndSendRfqResult = FinResult<{ id: string; rfq_no: string }> & { draftId?: string };
 
 const LIST_COLUMNS =
-  'id,rfq_no,supplier_id,supplier_name,rfq_date,reply_by,supplier_ref,status,line_count,total,fully_priced,purchase_order_id,purchase_order_no,source_rfq_id';
+  'id,rfq_no,supplier_id,supplier_name,rfq_date,reply_by,supplier_ref,status,line_count,total,quoted_at,purchase_order_id,purchase_order_no,source_rfq_id';
 
 const LINE_COLUMNS = 'id,product_id,description,quantity,uom,pack_size,unit_price,sst_rate';
 
@@ -205,6 +204,7 @@ function toListRow(row: Record<string, unknown>): RfqListRow {
     ...(row as unknown as RfqListRow),
     line_count: Number(row.line_count),
     total: Number(row.total),
+    quoted_at: (row.quoted_at as string | null) ?? null,
     purchase_order_id: (row.purchase_order_id as string | null) ?? null,
     purchase_order_no: (row.purchase_order_no as string | null) ?? null,
     source_rfq_id: (row.source_rfq_id as string | null) ?? null,
@@ -245,7 +245,7 @@ export async function getRfq(ctx: FinanceWriteContext, id: string): Promise<RfqD
   if (!rfqIdInput.safeParse({ id }).success) return null;
   const { data: rfq, error } = await ctx.client
     .from('finance_rfq_totals')
-    .select(`${LIST_COLUMNS},subtotal,sst_total,notes,quoted_at`)
+    .select(`${LIST_COLUMNS},subtotal,sst_total,notes`)
     .eq('org_id', ctx.orgId)
     .eq('id', id)
     .maybeSingle();
@@ -259,13 +259,12 @@ export async function getRfq(ctx: FinanceWriteContext, id: string): Promise<RfqD
     .order('position', { ascending: true })
     .order('id', { ascending: true });
   if (linesError) throw linesError;
-  const { subtotal, sst_total, notes, quoted_at, ...header } = rfq as unknown as Record<string, unknown>;
+  const { subtotal, sst_total, notes, ...header } = rfq as unknown as Record<string, unknown>;
   return {
     ...toListRow(header),
     subtotal: Number(subtotal),
     sst_total: Number(sst_total),
     notes: (notes as string | null) ?? null,
-    quoted_at: (quoted_at as string | null) ?? null,
     lines: ((lines ?? []) as unknown as Record<string, unknown>[]).map(toRfqLine),
   };
 }

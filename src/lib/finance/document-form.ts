@@ -202,6 +202,8 @@ export type DocumentFormKind<F extends DocumentFormState> = {
   }[];
   /** A second text box beside the party: the supplier's own reference on a bill. An invoice has none. */
   reference?: { label: string; placeholder: string; get: (form: F) => string; set: (form: F, value: string) => F };
+  /** What an empty price box says. Absent, `0.00`; an RFQ's says the supplier fills it in. */
+  pricePlaceholder?: string;
   withProduct: (line: LineDraft, product: FinanceProduct | null) => LineDraft;
   /** The first thing wrong with the form, or null. `posting` also refuses a total of nothing. */
   error: (form: F, posting?: boolean) => string | null;

@@ -188,7 +188,7 @@ export function billOrderWarnings(lines: LineDraft[], order: BillOrderOption | n
   const no = order.po_no ?? 'this order';
   const warnings: string[] = [];
   if (afterThis > cents(order.total)) warnings.push(`This takes the bills for ${no} over its total of ${rm(order.total)}.`);
-  if (afterThis > cents(order.received_total)) warnings.push(`This is more than has arrived on ${no} so far (${rm(order.received_total)}).`);
+  if (afterThis > cents(order.received_total)) warnings.push(`This is more than has been received on ${no} so far (${rm(order.received_total)}).`);
   return warnings;
 }
 

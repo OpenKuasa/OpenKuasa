@@ -215,11 +215,11 @@ describe('recording what has arrived', () => {
     const drafts = receiptDrafts(detail);
     expect(submitReceipts(PO, drafts)).toEqual({ payload: receivePayload(PO, drafts) });
     expect(submitReceipts(PO, [{ ...drafts[0], received: '' }, drafts[1]])).toEqual({
-      error: 'Enter how much has arrived for each line, 0 or more.',
+      error: 'Enter how much has been received for each line, 0 or more.',
     });
-    expect(submitReceipts(PO, [{ ...drafts[0], received: '1,000' }])).toEqual({ error: 'Enter how much has arrived for each line, 0 or more.' });
-    expect(submitReceipts(PO, [{ ...drafts[0], received: '-1' }])).toEqual({ error: 'Enter how much has arrived for each line, 0 or more.' });
-    expect(submitReceipts(PO, [])).toEqual({ error: 'Enter how much has arrived for each line, 0 or more.' });
+    expect(submitReceipts(PO, [{ ...drafts[0], received: '1,000' }])).toEqual({ error: 'Enter how much has been received for each line, 0 or more.' });
+    expect(submitReceipts(PO, [{ ...drafts[0], received: '-1' }])).toEqual({ error: 'Enter how much has been received for each line, 0 or more.' });
+    expect(submitReceipts(PO, [])).toEqual({ error: 'Enter how much has been received for each line, 0 or more.' });
   });
   it('accepts 0 and more than was ordered: suppliers over-deliver', () => {
     const drafts = receiptDrafts(detail);
