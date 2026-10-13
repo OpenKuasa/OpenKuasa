@@ -24,6 +24,7 @@ import {
   filterAttachCandidates,
   sameAmount,
 } from '@/lib/finance/receipt-match';
+import { type SuggestedCategory, readingCaution } from '@/lib/finance/receipt-reading';
 import type { InboxReceiptRow } from '@/lib/finance/receipts';
 import type { FinResult } from '@/lib/finance/result';
 import { displayDate } from '@/lib/finance/view-helpers';
@@ -250,21 +251,28 @@ function ReceiptAttachCard({ open, match, onClose, onDone }: { open: MatchOpen; 
  * the bill form, each started from what the receipt shows and saved through
  * the function that makes the document and the match in one transaction, or
  * the picker of documents that exist. Above a form, one line says which
- * receipt it is for. `onDone` is told what was written; `onClose` is Cancel.
+ * receipt it is for, and when its figures were read by AI or its category
+ * was suggested by AI, says so. `suggestion` is a category a reading
+ * suggested: the expense form starts with it chosen, for the person to
+ * check or change. `onDone` is told what was written; `onClose` is Cancel.
  */
 export function ReceiptMatchCard({
   open,
   match,
+  suggestion = null,
   onClose,
   onDone,
 }: {
   open: MatchOpen;
   match: ReceiptMatchData;
+  /** A category a reading by AI suggested for this receipt, if one still stands. */
+  suggestion?: SuggestedCategory | null;
   onClose: () => void;
   onDone: (written: MatchWritten) => void;
 }) {
   const { row, today } = open;
   if (open.kind === 'attach') return <ReceiptAttachCard open={open} match={match} onClose={onClose} onDone={onDone} />;
+  const caution = readingCaution(row, open.kind, suggestion);
   return (
     <>
       <p className="col-span-2 rounded-xl border border-dashed px-4 py-3 text-sm text-muted-foreground md:col-span-12">
@@ -273,10 +281,11 @@ export function ReceiptMatchCard({
         {open.kind === 'expense'
           ? 'Check the figures against the receipt: saving the expense matches the receipt to it.'
           : 'The receipt’s amount is on one line, with its SST inside it. Choose the supplier and finish the lines: saving makes a draft and matches the receipt to it. Nothing is posted from here.'}
+        {caution ? ` ${caution}` : ''}
       </p>
       {open.kind === 'expense' ? (
         <ExpenseFormCard
-          initial={expenseFormFromReceipt(row, match.contacts, today)}
+          initial={{ ...expenseFormFromReceipt(row, match.contacts, today), ...(suggestion ? { categoryId: suggestion.id } : {}) }}
           contacts={match.contacts}
           categories={match.categories}
           today={today}
