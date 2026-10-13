@@ -962,9 +962,13 @@ active accounts.
 form can cause first (the same account twice; an amount that is not above 0)
 and `FIN16` from the database is worded for what is left: "One of those
 accounts has been archived or no longer exists. Choose another, then try
-again." `FIN37` (an account archived in the moment between the function's own
-question and the write) gets the same sentence. `FIN09` is "This transfer has
-already been voided." and `FIN11` "That transfer no longer exists."
+again." `FIN37` is not raised by anything yet. `transfers.ts` already gives it
+the same sentence, for the archived-account rule planned for
+`finance_transactions`. `FIN09` is "This transfer has already been voided." and
+`FIN11` "That transfer no longer exists." Both leave the row, which the refresh
+after a refusal takes out of the table (it lists posted movements only), so a
+refused void is also said at the top of the page in a note titled "Transfer not
+voided", where it outlasts the question it was asked in.
 
 A transfer for more than the From account holds is taken; the form says what
 it leaves the account at before it is recorded ("Main Bank holds RM 300.00.
@@ -982,8 +986,12 @@ the business. A transfer is on no other screen.
 
 Banking keeps one thing open at a time: the account form, the transfer form,
 an archive question or a void question. The header's buttons wait while any of
-them is open, a menu choice replaces a question with what it opens, and a
-question whose row has left the screen is closed.
+them is open or a void is under way, a menu choice replaces a question with
+what it opens, and a void question whose row has left the table (a search or
+filter hid it, or the refresh took it away) is closed for good: it does not
+come back when the filter is cleared. A void that finishes closes only its own
+question. Who is given the transfer actions is `bankingAccess` in
+`banking-access.ts`: an owner or admin, never the demo workspace.
 
 ## Receipts Inbox
 

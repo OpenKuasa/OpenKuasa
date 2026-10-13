@@ -31,7 +31,7 @@ import {
 /** Not two different active accounts of the workspace, or not an amount: `finance_record_transfer`. */
 const FIN_TRANSFER_SHAPE = 'FIN16';
 /**
- * Money does not move on an archived account (20261116110000). `finance_record_transfer` asks whether both
+ * Money does not move on an archived account (a rule planned for `finance_transactions`, not raised by anything yet). `finance_record_transfer` asks whether both
  * accounts are active itself (FIN16); this is the same answer from the rule on payments, for an account that
  * was archived in the moment between that question and the write.
  */
