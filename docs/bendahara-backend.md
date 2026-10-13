@@ -2123,7 +2123,11 @@ with no date).
   too ("Receipt RC-0012 was posted. Clear the search or choose View all to see
   it."). The note is worked out each time the screen draws, from the rows
   listed then, so changing the period, the filter or the search updates or
-  removes it; Close and the next action remove it too.
+  removes it; Close and the next action remove it too. A receipt that was
+  listed when it was posted or voided gets no note later: the first change of
+  the period, the filter, the search or "View all" forgets it, so a note
+  never turns up by itself under the control being used (Payment Vouchers and
+  Expenses do the same).
 - Categories cannot be added, renamed or archived from the app yet: every
   workspace has the ten it started with until the Categories card on Expenses
   is built. The database is ready for it: only an owner or admin may change

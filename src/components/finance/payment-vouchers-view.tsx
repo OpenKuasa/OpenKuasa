@@ -205,6 +205,14 @@ export function PaymentVouchersView({
     setWritten(null);
     setOpen(next);
   };
+  /**
+   * Forgets an earlier write when the list changes under a note that is not showing, so a note never turns up later
+   * by itself. It would take the focus from the filter or the search being used: the Enter that chose a filter then
+   * pressed the note's Close as well, and the letters typed next went to that button.
+   */
+  const listChanged = () => {
+    if (!hiddenNote) setWritten(null);
+  };
   /** Closes whatever is open, and the message that went with it. */
   const close = () => {
     confirm.clear();
@@ -360,7 +368,13 @@ export function PaymentVouchersView({
         subtitle="Money paid out to suppliers, customers and expenses, Saudara."
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <Select value={period} onValueChange={(v) => setPeriod(v as CashBookPeriod)}>
+            <Select
+              value={period}
+              onValueChange={(v) => {
+                listChanged();
+                setPeriod(v as CashBookPeriod);
+              }}
+            >
               <SelectTrigger className="w-40" aria-label="Period">
                 <SelectValue />
               </SelectTrigger>
@@ -439,7 +453,15 @@ export function PaymentVouchersView({
           flush
           action={
             matching.length > LATEST_ROWS ? (
-              <Button variant="outline" size="sm" aria-pressed={showAll} onClick={() => setShowAll((v) => !v)}>
+              <Button
+                variant="outline"
+                size="sm"
+                aria-pressed={showAll}
+                onClick={() => {
+                  listChanged();
+                  setShowAll((v) => !v);
+                }}
+              >
                 {showAll ? 'Show latest' : 'View all'}
               </Button>
             ) : undefined
@@ -455,10 +477,19 @@ export function PaymentVouchersView({
                 placeholder="Search payees, numbers or categories…"
                 className="pl-8"
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => {
+                  listChanged();
+                  setQuery(e.target.value);
+                }}
               />
             </div>
-            <Select value={filter} onValueChange={(v) => setFilter(v as PaymentVoucherFilter)}>
+            <Select
+              value={filter}
+              onValueChange={(v) => {
+                listChanged();
+                setFilter(v as PaymentVoucherFilter);
+              }}
+            >
               <SelectTrigger className="w-44" aria-label="Status">
                 <SelectValue />
               </SelectTrigger>
@@ -471,7 +502,13 @@ export function PaymentVouchersView({
                 <SelectItem value="void">Void</SelectItem>
               </SelectContent>
             </Select>
-            <Select value={kind} onValueChange={(v) => setKind(v as 'all' | PaymentVoucherKind)}>
+            <Select
+              value={kind}
+              onValueChange={(v) => {
+                listChanged();
+                setKind(v as 'all' | PaymentVoucherKind);
+              }}
+            >
               <SelectTrigger className="w-44" aria-label="Kind">
                 <SelectValue />
               </SelectTrigger>

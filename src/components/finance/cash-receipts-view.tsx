@@ -168,6 +168,14 @@ export function CashReceiptsView({
     setWritten(null);
     setOpen(next);
   };
+  /**
+   * Forgets an earlier write when the list changes under a note that is not showing, so a note never turns up later
+   * by itself. It would take the focus from the filter or the search being used: the Enter that chose a filter then
+   * pressed the note's Close as well, and the letters typed next went to that button.
+   */
+  const listChanged = () => {
+    if (!hiddenNote) setWritten(null);
+  };
   /** Closes whatever is open, and the message that went with it. */
   const close = () => {
     confirm.clear();
@@ -284,7 +292,10 @@ export function CashReceiptsView({
           <div className="flex flex-wrap items-center gap-2">
             <Select
               value={period}
-              onValueChange={(v) => setPeriod(v as CashBookPeriod)}
+              onValueChange={(v) => {
+                listChanged();
+                setPeriod(v as CashBookPeriod);
+              }}
             >
               <SelectTrigger className="w-40" aria-label="Period">
                 <SelectValue />
@@ -367,7 +378,15 @@ export function CashReceiptsView({
           flush
           action={
             matching.length > LATEST_ROWS ? (
-              <Button variant="outline" size="sm" aria-pressed={showAll} onClick={() => setShowAll((v) => !v)}>
+              <Button
+                variant="outline"
+                size="sm"
+                aria-pressed={showAll}
+                onClick={() => {
+                  listChanged();
+                  setShowAll((v) => !v);
+                }}
+              >
                 {showAll ? 'Show latest' : 'View all'}
               </Button>
             ) : undefined
@@ -383,12 +402,18 @@ export function CashReceiptsView({
                 placeholder="Search payers, numbers or invoices…"
                 className="pl-8"
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => {
+                  listChanged();
+                  setQuery(e.target.value);
+                }}
               />
             </div>
             <Select
               value={filter}
-              onValueChange={(v) => setFilter(v as CashReceiptFilter)}
+              onValueChange={(v) => {
+                listChanged();
+                setFilter(v as CashReceiptFilter);
+              }}
             >
               <SelectTrigger className="w-40" aria-label="Status">
                 <SelectValue />
