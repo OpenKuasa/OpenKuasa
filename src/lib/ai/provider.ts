@@ -67,3 +67,15 @@ export function getModel(layer: AgentLayer, apiKey?: string): LanguageModel {
   const provider = apiKey ? createProvider(apiKey) : getPlatformProvider();
   return provider(pickModelId(layer));
 }
+
+/**
+ * A model named by the caller, on a workspace's own key and never the
+ * platform's: for a feature that takes its model id from its own environment
+ * variable and has no fallback id in code (reading a receipt). An empty key or
+ * id is refused rather than handed to the provider.
+ */
+export function getWorkspaceModelById(modelId: string, apiKey: string): LanguageModel {
+  if (!apiKey.trim() || !modelId.trim()) throw new Error('A workspace model needs a key and a model id.');
+  // Built per request so keys are never cached.
+  return createProvider(apiKey)(modelId.trim());
+}
