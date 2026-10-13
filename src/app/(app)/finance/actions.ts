@@ -16,6 +16,15 @@ import {
   updateBankAccountInput,
 } from '@/lib/finance/bank-accounts';
 import {
+  CATEGORY_MESSAGES,
+  createCategory,
+  createCategoryInput,
+  renameCategory,
+  renameCategoryInput,
+  setCategoryActive,
+  setCategoryActiveInput,
+} from '@/lib/finance/categories';
+import {
   BILL_MESSAGES,
   type BillDetail,
   type SaveAndPostResult,
@@ -912,6 +921,39 @@ export async function deleteExpenseAction(input: unknown) {
  */
 export async function markExpensePaidAction(input: unknown) {
   return run(EXPENSE_PATHS, markExpensePaidInput, input, markExpensePaid, SIGN_OFF);
+}
+
+/* ---- categories (the Categories card on Expenses) ----------------------- */
+
+// A category's name is in the picker of every form that files something under one, and on every row that names
+// one: Expenses (the form, the filter, each row, the chart), Cash Receipts (the income picker and each row),
+// Supplier Bills (a bill's category), Payment Vouchers and Banking (a voucher's category), and Receipts Inbox
+// (the expense a receipt is tied to, and the two forms it opens). An added, renamed, archived or restored
+// category must appear, change or go there. The three ledger screens end the list: each category has an account
+// in the Chart of Accounts that is made, renamed and archived with it, and Journals and Reports name that account.
+const CATEGORY_PATHS = [
+  '/finance/expenses',
+  '/finance/cash-receipts',
+  '/finance/supplier-bills',
+  '/finance/payment-vouchers',
+  '/finance/banking',
+  '/finance/receipts-inbox',
+  ...LEDGER_PATHS,
+];
+/** Adding, renaming, archiving and restoring a category: an owner or admin only, told so in the category's own words. */
+const CATEGORY_SIGN_OFF = { signOff: true, signOffError: CATEGORY_MESSAGES.needsSignOff } as const;
+
+/** Adds an expense or income category. The database makes its account in the Chart of Accounts in the same write. */
+export async function createCategoryAction(input: unknown) {
+  return run(CATEGORY_PATHS, createCategoryInput, input, createCategory, CATEGORY_SIGN_OFF);
+}
+/** Renames a category. Everything filed under it shows the new name. */
+export async function renameCategoryAction(input: unknown) {
+  return run(CATEGORY_PATHS, renameCategoryInput, input, renameCategory, CATEGORY_SIGN_OFF);
+}
+/** Archives or restores a category. The two the books lean on are not archived, which the data layer sees to. */
+export async function setCategoryActiveAction(input: unknown) {
+  return run(CATEGORY_PATHS, setCategoryActiveInput, input, setCategoryActive, CATEGORY_SIGN_OFF);
 }
 
 /* ---- payment vouchers -------------------------------------------------- */
