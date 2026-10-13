@@ -1,11 +1,12 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { Download, FileText, Pencil, PieChart, Receipt, Search, Trash2 } from 'lucide-react';
+import { Download, FilePlus, FileText, Link2, Link2Off, Pencil, PieChart, Receipt, Search, Trash2, Wallet } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { DonutStat } from '@/components/charts';
 import { ConfirmRow } from '@/components/finance/confirm-row';
 import { downloadCsv } from '@/components/finance/download-csv';
+import { type MatchOpen, ReceiptMatchCard, type ReceiptMatchData } from '@/components/finance/receipt-match-cards';
 import { type ReceiptLinkOf, ReceiptReviewCard, type ReviewReceipt } from '@/components/finance/receipt-review-card';
 import { ReceiptUploadCard, type RegisterReceipt } from '@/components/finance/receipt-upload-card';
 import { RowMenu, type RowMenuItem } from '@/components/finance/row-menu';
@@ -26,6 +27,15 @@ import { csvFileName } from '@/lib/finance/csv';
 import { rm } from '@/lib/finance/format';
 import { canPreview } from '@/lib/finance/receipt-files';
 import { type InboxWritten, RECEIPT_INBOX_MESSAGES, inboxHiddenNote } from '@/lib/finance/receipt-inbox';
+import {
+  type MatchWritten,
+  type MatchedDocument,
+  type ReceiptMatchAction,
+  UNTIE_NEEDS_DECIDER,
+  matchHiddenNote,
+  matchNote,
+  receiptMatchActions,
+} from '@/lib/finance/receipt-match';
 import {
   INBOX_READING_NOTES,
   INBOX_STATUS_LABELS,
@@ -58,8 +68,12 @@ export type ReceiptInboxActions = {
 /**
  * Receipts Inbox: the three counts, the donut and the table, with search, a
  * status filter, "View all" and Export. Someone who may edit also gets the
- * upload area, and on each receipt that is tied to nothing "Review" and
- * "Delete"; anyone who can see a receipt that has a file can download it. A
+ * upload area, and on each receipt that is tied to nothing "Review",
+ * "Create expense", "Create draft bill", "Attach to expense or bill" and
+ * "Delete", and on a matched one "Untie" (from an approved expense or a posted
+ * bill, an owner or admin only); anyone who can see a receipt that has a file
+ * can download it. Under "Matched to" a second line says how the document
+ * stands. A
  * viewer and the demo workspace change nothing, and the demo is told why it
  * has no upload area. A file name is whatever the uploader's device called
  * the file, so it is only ever drawn as text. A row says "Read by AI" only
@@ -72,6 +86,7 @@ export function ReceiptsInboxView({
   today,
   followClock = true,
   linkOf,
+  documents,
   writer,
   demo = false,
 }: {
@@ -83,8 +98,10 @@ export function ReceiptsInboxView({
   followClock?: boolean;
   /** Makes a one-minute link to a receipt's file. Absent when there is no database behind the screen. */
   linkOf?: ReceiptLinkOf;
-  /** Present only for someone who may add, review and delete receipts. */
-  writer?: { orgId: string; actions: ReceiptInboxActions };
+  /** For each matched receipt, by its id: the document it is tied to and how that stands. Absent with no database. */
+  documents?: Record<string, MatchedDocument>;
+  /** Present only for someone who may add, review, match and delete receipts. `match` is what matching needs. */
+  writer?: { orgId: string; actions: ReceiptInboxActions; match?: ReceiptMatchData };
   /** The shared demo workspace: it is told why there is no upload area. */
   demo?: boolean;
 }) {
@@ -96,8 +113,13 @@ export function ReceiptsInboxView({
   const [deleted, setDeleted] = useState<InboxReceiptRow | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [written, setWritten] = useState<InboxWritten | null>(null);
+  // Matching: the card that is open for one receipt, the receipt being asked about untying, and what was last matched or untied.
+  const [matchOpen, setMatchOpen] = useState<MatchOpen | null>(null);
+  const [untying, setUntying] = useState<string | null>(null);
+  const [matched, setMatched] = useState<MatchWritten | null>(null);
   const localToday = useLocalToday(today, followClock);
   const remove = useFinanceAction();
+  const untie = useFinanceAction();
   // The download has its own state, so a slow file does not hold the page's other actions in "pending".
   const open = useReceiptDownload(async (input) => (linkOf ? linkOf(input) : { ok: false, error: '' }));
 
@@ -108,6 +130,24 @@ export function ReceiptsInboxView({
   // Someone else deleted or matched it while the card was open: the card stays, says so, and keeps what was typed.
   const blocked = reviewing ? (!live ? RECEIPT_INBOX_MESSAGES.gone : live.status === 'matched' ? RECEIPT_INBOX_MESSAGES.matched : null) : null;
   const hiddenNote = written ? inboxHiddenNote(written, rows, shown, filter) : null;
+  const matchedNote = matched ? matchNote(matched) : null;
+  const matchedHidden = matched ? matchHiddenNote(matched, rows, shown) : null;
+  const match = writer?.match;
+  /** What matching offers on a receipt; nothing for someone who may not edit. */
+  const offeredFor = (r: InboxReceiptRow): ReceiptMatchAction[] => (match ? receiptMatchActions(r, documents?.[r.id], match.canDecide) : []);
+  // Said once, above the table, when a matched receipt on screen is one this person may not untie.
+  const untieNote = match && !match.canDecide && shown.some((r) => r.status === 'matched' && offeredFor(r).length === 0);
+  /** One thing open at a time: whatever card, question or note is up goes before the next opens. */
+  const closeAll = () => {
+    remove.clear();
+    untie.clear();
+    setReviewing(null);
+    setDeleting(null);
+    setDeleted(null);
+    setMatchOpen(null);
+    setUntying(null);
+    setMatched(null);
+  };
   // Someone who cannot change anything has a menu only where a file can be downloaded: the demo's sample receipts have none.
   const columns = writer || (linkOf && rows.some((r) => r.has_file)) ? 7 : 6;
 
@@ -124,27 +164,47 @@ export function ReceiptsInboxView({
         onSelect: () => void open.start(r.id, r.file_name),
       });
     }
+    if (!writer) return items;
+    const tied = r.status === 'matched';
     // A matched receipt is its document's evidence: it is untied before it is changed or deleted.
-    if (writer && r.status !== 'matched') {
+    if (!tied) {
       items.push({
         label: r.status === 'review' ? 'Review' : 'Edit details',
         icon: Pencil,
         opens: true,
         onSelect: () => {
-          setDeleting(null);
-          setDeleted(null);
+          closeAll();
           setReviewing(r);
         },
       });
+    }
+    const offered = offeredFor(r);
+    const openMatch = (kind: MatchOpen['kind']) => () => {
+      closeAll();
+      setMatchOpen({ kind, row: r, today: localToday });
+    };
+    if (offered.includes('expense')) items.push({ label: 'Create expense', icon: Wallet, opens: true, onSelect: openMatch('expense') });
+    if (offered.includes('bill')) items.push({ label: 'Create draft bill', icon: FilePlus, opens: true, onSelect: openMatch('bill') });
+    if (offered.includes('attach')) items.push({ label: 'Attach to expense or bill', icon: Link2, opens: true, onSelect: openMatch('attach') });
+    if (offered.includes('untie')) {
+      items.push({
+        label: 'Untie',
+        icon: Link2Off,
+        opens: true,
+        onSelect: () => {
+          closeAll();
+          setUntying(r.id);
+        },
+      });
+    }
+    if (!tied) {
       items.push({
         label: 'Delete',
         icon: Trash2,
         destructive: true,
         opens: true,
         onSelect: () => {
-          remove.clear();
-          setReviewing(null);
-          setDeleted(null);
+          closeAll();
           setDeleting(r.id);
         },
       });
@@ -172,6 +232,31 @@ export function ReceiptsInboxView({
               setWritten({ kind: 'reviewed', ids: [id] });
             }}
           />
+        ) : null}
+        {match && matchOpen ? (
+          <ReceiptMatchCard
+            // A fresh card for each receipt and each way of matching it.
+            key={`${matchOpen.kind}-${matchOpen.row.id}`}
+            open={matchOpen}
+            match={match}
+            onClose={() => setMatchOpen(null)}
+            onDone={(done) => {
+              setMatchOpen(null);
+              setMatched(done);
+            }}
+          />
+        ) : null}
+        {matched && matchedNote ? (
+          <SavedNoteCard
+            // A second match gets a note of its own, which takes focus again.
+            key={`${matched.kind}-${matched.receiptId}`}
+            title={matchedNote.title}
+            subtitle={matched.fileName}
+            onClose={() => setMatched(null)}
+          >
+            {matchedNote.body}
+            {matchedHidden ? ` ${matchedHidden}` : ''}
+          </SavedNoteCard>
         ) : null}
         {deleted ? (
           <SavedNoteCard title="Receipt deleted" subtitle={deleted.file_name} onClose={() => setDeleted(null)}>
@@ -250,6 +335,7 @@ export function ReceiptsInboxView({
               {hiddenNote}
             </p>
           ) : null}
+          {untieNote ? <p className="mt-2 px-4 text-sm text-muted-foreground">{UNTIE_NEEDS_DECIDER}</p> : null}
           {open.busyWith !== null ? (
             <p role="status" className="mt-2 px-4 text-sm text-muted-foreground">
               Preparing the download of {open.busyWith}…
@@ -319,7 +405,39 @@ export function ReceiptsInboxView({
                       </ConfirmRow>
                     );
                   }
+                  if (match && untying === r.id) {
+                    return (
+                      <ConfirmRow
+                        key={r.id}
+                        colSpan={columns}
+                        label={`Untie ${r.file_name}`}
+                        confirmLabel="Untie"
+                        pendingLabel="Untying…"
+                        tone="default"
+                        pending={untie.pending}
+                        error={untie.error}
+                        onConfirm={() =>
+                          untie.run(
+                            () => match.actions.detach({ id: r.id }),
+                            () => {
+                              setUntying(null);
+                              setMatched({ kind: 'untied', receiptId: r.id, fileName: r.file_name });
+                            },
+                          )
+                        }
+                        onCancel={() => {
+                          untie.clear();
+                          setUntying(null);
+                        }}
+                      >
+                        Untie <span className="break-words font-medium">{r.file_name}</span> from{' '}
+                        {r.document_kind ? inboxDocument(r) : 'its expense or bill'}? The receipt goes back to Unmatched. The
+                        expense or bill is not changed.
+                      </ConfirmRow>
+                    );
+                  }
                   const menu = menuFor(r);
+                  const document = documents?.[r.id];
                   return (
                     <TableRow key={r.id}>
                       <TableCell>
@@ -353,7 +471,10 @@ export function ReceiptsInboxView({
                       <TableCell className="whitespace-nowrap text-right font-medium tabular-nums">
                         {r.amount === null ? '—' : rm(r.amount)}
                       </TableCell>
-                      <TableCell className="whitespace-nowrap text-muted-foreground">{inboxDocument(r)}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        <p className="whitespace-nowrap">{inboxDocument(r)}</p>
+                        {r.status === 'matched' && document?.label ? <p className="whitespace-nowrap text-xs">{document.label}</p> : null}
+                      </TableCell>
                       <TableCell>
                         <span className="flex items-center gap-2">
                           <LiveDot active={r.status === 'matched'} />
