@@ -40,10 +40,17 @@ export function logModelCall(agent: string, model: string) {
  * was given to read, so the error itself and its message are never logged.
  */
 export function modelErrorCode(error: unknown): { code: unknown } {
-  const { statusCode, code, name } = (
+  const { statusCode, code, name, data } = (
     error && typeof error === 'object' ? error : {}
-  ) as { statusCode?: unknown; code?: unknown; name?: unknown };
-  const first = statusCode ?? code ?? name;
+  ) as { statusCode?: unknown; code?: unknown; name?: unknown; data?: unknown };
+  // OpenRouter can answer HTTP 200 with an error in the body: the SDK throws that with statusCode 200 and the body as
+  // `data`. A 200 says nothing of what went wrong, so the body's own class (its code) is used instead. Only a number or
+  // a short label of plain characters is taken from it: its message could echo the prompt or the file.
+  const bodyCode = typeof data === 'object' && data !== null ? (data as { code?: unknown }).code : undefined;
+  const fromBody =
+    typeof bodyCode === 'number' || (typeof bodyCode === 'string' && /^[A-Za-z0-9_.:-]{1,64}$/.test(bodyCode)) ? bodyCode : undefined;
+  const succeeded = typeof statusCode === 'number' && statusCode >= 200 && statusCode < 300;
+  const first = succeeded ? (fromBody ?? code ?? name) : (statusCode ?? code ?? name);
   // A status or a short label only: an object here could be anything, and a string is cut.
   if (typeof first === 'number') return { code: first };
   return { code: typeof first === 'string' ? first.slice(0, 64) : undefined };
