@@ -17,6 +17,19 @@ import {
   reviewReceiptInput,
   signReceiptLink,
 } from '@/lib/finance/receipt-inbox';
+import {
+  RECEIPT_BILL_PATHS,
+  RECEIPT_EXPENSE_PATHS,
+  RECEIPT_TIE_PATHS,
+  attachReceipt,
+  attachReceiptInput,
+  detachReceipt,
+  receiptToBill,
+  receiptToBillInput,
+  receiptToExpense,
+  receiptToExpenseInput,
+} from '@/lib/finance/receipt-match';
+import type { SavedExpense } from '@/lib/finance/expenses';
 import { type FinResult, type FinanceWriteContext, NOT_ALLOWED } from '@/lib/finance/result';
 import { createClient } from '@/lib/supabase/server';
 import { serviceClient } from '@/lib/supabase/service';
@@ -33,7 +46,8 @@ import { serviceClient } from '@/lib/supabase/service';
  */
 
 const FORBIDDEN: FinResult<never> = { ok: false, error: NOT_ALLOWED };
-// Only the inbox shows a receipt until one can be matched; then the expense and bill screens join this list.
+// Recording, reviewing and deleting touch a receipt that is tied to nothing, which only the inbox shows. The four
+// actions that match and untie refresh more: their lists are in receipt-match.ts.
 const RECEIPT_INBOX_PATHS = ['/finance/receipts-inbox'];
 
 /** A write context, or null when the viewer may not change this workspace's data. */
@@ -43,8 +57,8 @@ async function writeCtx(): Promise<FinanceWriteContext | null> {
   return { client: await createClient(), orgId: viewer.orgId };
 }
 
-function refresh() {
-  for (const path of RECEIPT_INBOX_PATHS) revalidatePath(path);
+function refresh(paths: string[] = RECEIPT_INBOX_PATHS) {
+  for (const path of paths) revalidatePath(path);
 }
 
 function firstMessage(error: { issues: { message: string }[] }): string {
@@ -121,4 +135,61 @@ export async function receiptLinkAction(input: unknown): Promise<FinResult<Recei
     return { ok: false, error: RECEIPT_INBOX_MESSAGES.notWhatItSays };
   }
   return { ok: true, data: { url: link.data.url, type: file.data.type, preview: canPreview(file.data.type) } };
+}
+
+/* ---- matching ---------------------------------------------------------- */
+
+/**
+ * Makes an expense from a receipt and ties the receipt to it. Anyone who may edit: the database approves the
+ * expense in the same call when an owner or admin is saving and leaves it pending otherwise, and the answer says
+ * which. Refreshes what saving an expense refreshes.
+ */
+export async function receiptToExpenseAction(input: unknown): Promise<FinResult<SavedExpense>> {
+  const ctx = await writeCtx();
+  if (!ctx) return FORBIDDEN;
+  const parsed = receiptToExpenseInput.safeParse(input);
+  if (!parsed.success) return { ok: false, error: firstMessage(parsed.error) };
+  const result = await receiptToExpense(ctx, parsed.data);
+  refresh(RECEIPT_EXPENSE_PATHS);
+  return result;
+}
+
+/**
+ * Makes a draft supplier bill from a receipt and ties the receipt to it. Anyone who may edit: a draft is not a
+ * sign-off. Nothing here posts, and there is no action that makes a bill from a receipt and posts it.
+ */
+export async function receiptToBillAction(input: unknown): Promise<FinResult<{ id: string }>> {
+  const ctx = await writeCtx();
+  if (!ctx) return FORBIDDEN;
+  const parsed = receiptToBillInput.safeParse(input);
+  if (!parsed.success) return { ok: false, error: firstMessage(parsed.error) };
+  const result = await receiptToBill(ctx, parsed.data);
+  refresh(RECEIPT_BILL_PATHS);
+  return result;
+}
+
+/** Ties a receipt that is tied to nothing to an expense or a bill of the workspace. Anyone who may edit. */
+export async function attachReceiptAction(input: unknown): Promise<FinResult<{ id: string }>> {
+  const ctx = await writeCtx();
+  if (!ctx) return FORBIDDEN;
+  const parsed = attachReceiptInput.safeParse(input);
+  if (!parsed.success) return { ok: false, error: firstMessage(parsed.error) };
+  const result = await attachReceipt(ctx, parsed.data);
+  refresh(RECEIPT_TIE_PATHS);
+  return result;
+}
+
+/**
+ * Unties a matched receipt. Anyone who may edit, except from an approved expense or a posted bill, which only an
+ * owner or admin unties: the receipt's own guard decides that (FIN14), since only the database knows how the
+ * document stands at that moment.
+ */
+export async function detachReceiptAction(input: unknown): Promise<FinResult<{ id: string }>> {
+  const ctx = await writeCtx();
+  if (!ctx) return FORBIDDEN;
+  const parsed = receiptIdInput.safeParse(input);
+  if (!parsed.success) return { ok: false, error: firstMessage(parsed.error) };
+  const result = await detachReceipt(ctx, parsed.data);
+  refresh(RECEIPT_TIE_PATHS);
+  return result;
 }

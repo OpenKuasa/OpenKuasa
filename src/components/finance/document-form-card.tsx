@@ -52,6 +52,7 @@ export function DocumentFormCard<F extends DocumentFormState>({
   products,
   partyChoice,
   extraChoices,
+  draftOnly = false,
   actions,
   onClose,
 }: {
@@ -65,6 +66,12 @@ export function DocumentFormCard<F extends DocumentFormState>({
   partyChoice?: PartyChoice<F>;
   /** More choices drawn beside the first: the bill form's category. Absent for every other form. */
   extraChoices?: PartyChoice<F>[];
+  /**
+   * True for a form that only ever saves a draft: the second button (the kind's own word for posting or
+   * sending) is not drawn and `actions.saveAndPost` is never called. The bill form opened from a receipt:
+   * nothing made from a receipt leaves draft here.
+   */
+  draftOnly?: boolean;
   actions: DocumentFormActions;
   onClose: () => void;
 }) {
@@ -285,12 +292,14 @@ export function DocumentFormCard<F extends DocumentFormState>({
         </div>
 
         <div className="flex flex-wrap items-center gap-3 md:col-span-12">
-          <Button type="submit" size="sm" variant="outline" disabled={save.pending}>
+          <Button type="submit" size="sm" variant={draftOnly ? 'default' : 'outline'} disabled={save.pending}>
             {save.pending && !posting ? 'Saving…' : 'Save draft'}
           </Button>
-          <Button type="button" size="sm" disabled={save.pending} onClick={() => send(true)}>
-            {save.pending && posting ? words.posting : words.post}
-          </Button>
+          {draftOnly ? null : (
+            <Button type="button" size="sm" disabled={save.pending} onClick={() => send(true)}>
+              {save.pending && posting ? words.posting : words.post}
+            </Button>
+          )}
           <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={save.pending}>
             Cancel
           </Button>

@@ -29,6 +29,8 @@ export type BillFormActions = {
  */
 export function BillFormCard({
   editing,
+  initial,
+  draftOnly,
   suppliers,
   products,
   orders,
@@ -41,6 +43,10 @@ export function BillFormCard({
 }: {
   /** The draft being changed, with its lines; absent for a new bill. */
   editing?: BillDetail;
+  /** What a new bill's form starts with, in place of an empty one: a receipt's details. Ignored when `editing`. */
+  initial?: BillForm;
+  /** True when the form may only save a draft: it has no button that posts. A bill made from a receipt. */
+  draftOnly?: boolean;
   /** Active suppliers, by name. */
   suppliers: FinanceContact[];
   /** Active products and services. */
@@ -94,12 +100,13 @@ export function BillFormCard({
   return (
     <DocumentFormCard
       kind={BILL_FORM_KIND}
-      initial={() => (editing ? billFormFromDetail(editing) : newBillForm(today, 'new-0', defaultCategoryId ?? ''))}
+      initial={() => (editing ? billFormFromDetail(editing) : (initial ?? newBillForm(today, 'new-0', defaultCategoryId ?? '')))}
       // A supplier archived since the draft was saved is still this bill's supplier.
       parties={withCurrentParty(suppliers, editing && { id: editing.supplier_id, name: editing.supplier_name })}
       products={products}
       partyChoice={partyChoice}
       extraChoices={categoryChoice ? [categoryChoice] : undefined}
+      draftOnly={draftOnly}
       actions={actions}
       onClose={onClose}
     />

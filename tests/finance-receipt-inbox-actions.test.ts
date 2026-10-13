@@ -190,13 +190,24 @@ describe('how the code is kept safe', () => {
     'src/components/finance/receipts-inbox-view.tsx',
     'src/components/finance/receipt-review-card.tsx',
     'src/components/finance/receipt-upload-card.tsx',
+    'src/components/finance/receipt-match-cards.tsx',
+    'src/components/finance/attached-receipts.tsx',
     'src/components/finance/receipt-upload.ts',
     'src/components/finance/receipt-heic.ts',
   ];
 
   it('exports only async functions from the actions file', async () => {
     const actions = await import('@/app/(app)/finance/receipt-inbox-actions');
-    expect(Object.keys(actions).sort()).toEqual(['deleteReceiptAction', 'receiptLinkAction', 'registerReceiptAction', 'reviewReceiptAction']);
+    expect(Object.keys(actions).sort()).toEqual([
+      'attachReceiptAction',
+      'deleteReceiptAction',
+      'detachReceiptAction',
+      'receiptLinkAction',
+      'receiptToBillAction',
+      'receiptToExpenseAction',
+      'registerReceiptAction',
+      'reviewReceiptAction',
+    ]);
     for (const [name, value] of Object.entries(actions)) {
       expect(typeof value, name).toBe('function');
       expect((value as { constructor: { name: string } }).constructor.name, name).toBe('AsyncFunction');
