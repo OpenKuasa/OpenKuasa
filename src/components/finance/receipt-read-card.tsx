@@ -6,7 +6,7 @@ import { BentoCard } from '@/components/bento/bento';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { Button } from '@/components/ui/button';
 import { escapeClosesCard } from '@/lib/finance/receipt-inbox';
-import { type ReceiptKeyState, type ReceiptRead, readingBlocker, readingQuestion } from '@/lib/finance/receipt-reading';
+import { RECEIPT_READING_MESSAGES, type ReceiptKeyState, type ReceiptRead, readingBlocker, readingQuestion } from '@/lib/finance/receipt-reading';
 import type { InboxReceiptRow } from '@/lib/finance/receipts';
 import type { FinResult } from '@/lib/finance/result';
 
@@ -37,12 +37,15 @@ export function ReceiptReadCard({
   reading,
   onClose,
   onRead,
+  onRefused,
 }: {
   row: InboxReceiptRow;
   reading: ReceiptReadingData;
   onClose: () => void;
   /** Told what was read once it is stored: the screen opens the review card on it. */
   onRead: (read: ReceiptRead) => void;
+  /** Told what the server refused with (or that the answer was lost), so the screen can say it if this card has gone by then. */
+  onRefused: (message: string) => void;
 }) {
   const sending = useFinanceAction();
   const blocker = readingBlocker(row, reading);
@@ -50,7 +53,17 @@ export function ReceiptReadCard({
 
   // The one place a receipt is sent from: this button's press.
   const send = () => {
-    sending.run(() => reading.read({ id: row.id }), onRead);
+    sending.run(async () => {
+      try {
+        const result = await reading.read({ id: row.id });
+        if (!result.ok) onRefused(result.error);
+        return result;
+      } catch {
+        // The answer never came back: not a failed save. The file may have been sent, so it is not told as one.
+        onRefused(RECEIPT_READING_MESSAGES.lostAnswer);
+        return { ok: false as const, error: RECEIPT_READING_MESSAGES.lostAnswer };
+      }
+    }, onRead);
   };
 
   return (

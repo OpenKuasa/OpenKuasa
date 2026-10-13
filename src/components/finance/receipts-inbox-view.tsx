@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, FilePlus, FileText, Link2, Link2Off, Pencil, PieChart, Receipt, Search, Sparkles, Trash2, Wallet } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { DonutStat } from '@/components/charts';
@@ -37,7 +37,7 @@ import {
   matchNote,
   receiptMatchActions,
 } from '@/lib/finance/receipt-match';
-import { type SuggestedCategory, canOfferReading, reviewCardKey, standingSuggestion } from '@/lib/finance/receipt-reading';
+import { type SuggestedCategory, canOfferReading, readAnswerFate, reviewCardKey, standingSuggestion } from '@/lib/finance/receipt-reading';
 import {
   INBOX_READING_NOTES,
   INBOX_STATUS_LABELS,
@@ -128,6 +128,14 @@ export function ReceiptsInboxView({
   // suggested as its category (null for none). Kept here only: a reload forgets it.
   const [asking, setAsking] = useState<InboxReceiptRow | null>(null);
   const [readHere, setReadHere] = useState<Record<string, SuggestedCategory | null>>({});
+  // Which receipt's question is the open thing, for an answer that arrives later; and a refusal that arrived after
+  // the question had gone, so that it is said and not lost.
+  const askingId = useRef<string | null>(null);
+  useEffect(() => {
+    // Whatever closes or opens the question (a menu action, Cancel, the answer) changes `asking`; this follows it.
+    askingId.current = asking?.id ?? null;
+  }, [asking]);
+  const [readRefusal, setReadRefusal] = useState<{ fileName: string; message: string } | null>(null);
   const localToday = useLocalToday(today, followClock);
   const remove = useFinanceAction();
   const untie = useFinanceAction();
@@ -162,6 +170,7 @@ export function ReceiptsInboxView({
     setUntying(null);
     setMatched(null);
     setAsking(null);
+    setReadRefusal(null);
   };
   // Someone who cannot change anything has a menu only where a file can be downloaded: the demo's sample receipts have none.
   const columns = writer || (linkOf && rows.some((r) => r.has_file)) ? 7 : 6;
@@ -268,7 +277,13 @@ export function ReceiptsInboxView({
             row={rows.find((r) => r.id === asking.id) ?? asking}
             reading={writer.reading}
             onClose={() => setAsking(null)}
+            onRefused={(message) => {
+              if (readAnswerFate(askingId.current, asking.id) === 'drop') setReadRefusal({ fileName: asking.file_name, message });
+            }}
             onRead={(read) => {
+              // The person opened something else while the file was being read: nothing opens beside it.
+              // What was stored shows on the row.
+              if (readAnswerFate(askingId.current, read.id) === 'drop') return;
               setReadHere((was) => ({ ...was, [read.id]: read.category }));
               setAsking(null);
               // What was read is a suggestion: it opens in the review card, for the person to check.
@@ -300,6 +315,11 @@ export function ReceiptsInboxView({
           >
             {matchedNote.body}
             {matchedHidden ? ` ${matchedHidden}` : ''}
+          </SavedNoteCard>
+        ) : null}
+        {readRefusal ? (
+          <SavedNoteCard title="Receipt not read" subtitle={readRefusal.fileName} onClose={() => setReadRefusal(null)}>
+            {readRefusal.message}
           </SavedNoteCard>
         ) : null}
         {deleted ? (

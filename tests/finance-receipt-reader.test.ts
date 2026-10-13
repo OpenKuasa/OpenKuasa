@@ -11,6 +11,7 @@ import {
   categoryAt,
   categoryListText,
   normalizeReading,
+  readAnswerFate,
   offeredCategoryNames,
   readableReceiptType,
   readingBlocker,
@@ -454,6 +455,14 @@ describe('before anything is sent', () => {
     expect(lines).toHaveLength(4);
     expect(lines[3]).toBe('This receipt’s boxes already hold something: what is read replaces it.');
     for (const only of [{ vendor: 'A' }, { receipt_date: '2026-10-01' }, { amount: 1 }]) expect(readingQuestion(row(only))).toHaveLength(4);
+  });
+
+  it('an answer that arrives after the person opened something else is dropped for the screen', () => {
+    // The question for this very receipt is still open: the answer is shown.
+    expect(readAnswerFate(RECEIPT, RECEIPT)).toBe('show');
+    // Nothing is open any more (a menu action closed it), or another receipt's question is: it is not shown.
+    expect(readAnswerFate(null, RECEIPT)).toBe('drop');
+    expect(readAnswerFate('55555555-5555-4555-8555-555555555555', RECEIPT)).toBe('drop');
   });
 
   it('the instructions keep their sentence that the receipt is data, not instructions', () => {

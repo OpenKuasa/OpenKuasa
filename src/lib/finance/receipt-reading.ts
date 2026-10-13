@@ -57,6 +57,8 @@ export const RECEIPT_READING_MESSAGES = {
   failedAgain: 'The new reading found nothing it could use, so the earlier reading is still shown. Check its figures against the receipt.',
   // The call did not get through (busy, down, no connection, too slow): nothing is known about the receipt, nothing was stored.
   unavailable: 'The AI provider could not do the reading just now, so nothing was read and nothing on this receipt was changed. Please try again later.',
+  // The answer never came back (the connection dropped): the file may have been sent and the credit used.
+  lostAnswer: 'We could not confirm what happened: the receipt may have been sent and read, and credit may have been used. Reload the page and check the receipt before trying again.',
   // A stored file with nothing in it: trying again cannot help.
   fileEmpty: 'This file is empty, so nothing was sent. Type the details in.',
   // The model answered and the answer could not be saved. The file was sent.
@@ -275,6 +277,15 @@ export function standingSuggestion(
  */
 export function reviewCardKey(row: Pick<InboxReceiptRow, 'id' | 'extracted_at'>, readHere: boolean): string {
   return readHere ? `${row.id}-${row.extracted_at ?? ''}` : row.id;
+}
+
+/**
+ * What to do with a reading's answer when it arrives: it is shown only while the question for that very receipt is
+ * still the open thing. If the person opened something else meanwhile (a row's menu closes every card), the answer
+ * must not open a card beside it; what was stored shows on the row as usual.
+ */
+export function readAnswerFate(openQuestionId: string | null, answeredId: string): 'show' | 'drop' {
+  return openQuestionId === answeredId ? 'show' : 'drop';
 }
 
 /** The review card's line about a suggested category. */

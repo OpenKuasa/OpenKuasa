@@ -44,7 +44,7 @@ describe('a receipt is sent only by the press of one button', () => {
     expect(view).toContain('writer.reading && canOfferReading(r)');
     expect(view).toContain('setAsking(r);');
     // The question is one of the things `closeAll` closes, so it is never open beside another card.
-    expect(view).toContain('setAsking(null);\n  };');
+    expect(view).toMatch(/const closeAll = \(\) => \{[^}]*setAsking\(null\);/);
   });
 
   it('uploading reads nothing, and no other screen is given the action', () => {
@@ -54,6 +54,30 @@ describe('a receipt is sent only by the press of one button', () => {
     for (const file of ['src/screens/finance/expenses.tsx', 'src/screens/finance/supplier-bills.tsx']) {
       expect(read(file), file).not.toContain('readReceiptAction');
     }
+  });
+});
+
+describe('a reading that is still under way', () => {
+  it('holds the send and the cancel buttons, and the card tells a refusal to the view', () => {
+    const card = read(CARD);
+    expect(card).toContain('<Button type="button" size="sm" disabled={sending.pending} onClick={send}>');
+    expect(card).toMatch(/onClick=\{onClose\} disabled=\{sending\.pending\}/);
+    expect(card).toContain('onRefused(');
+    // A lost answer is not told as a failed save: the file may have been sent.
+    expect(card).toContain('RECEIPT_READING_MESSAGES.lostAnswer');
+  });
+
+  it('the view shows an answer only while the question for that receipt is still the thing open', () => {
+    const view = read(VIEW);
+    expect(view).toContain("readAnswerFate(askingId.current, read.id) === 'drop'");
+    expect(view).toContain("readAnswerFate(askingId.current, asking.id) === 'drop'");
+    // A dropped answer opens no card and sets no suggestion; a refusal is said above the table, not lost.
+    expect(view).toContain('setReadRefusal({ fileName: asking.file_name, message })');
+    expect(view).toContain('title="Receipt not read"');
+    // Whatever closes the cards forgets the question and the note.
+    expect(view).toMatch(/const closeAll = \(\) => \{[^}]*setAsking\(null\);\s*setReadRefusal\(null\);/);
+    // The open question's id follows the state, so a menu action that closes the card also forgets it.
+    expect(view).toContain('askingId.current = asking?.id ?? null;');
   });
 });
 
