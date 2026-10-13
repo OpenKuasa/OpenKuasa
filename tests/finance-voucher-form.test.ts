@@ -8,6 +8,7 @@ import {
   hasBillVoucherWaiting,
   newVoucherForm,
   orderNotesByVoucher,
+  voucherAccess,
   voucherActions,
   voucherAnswerIsStale,
   voucherControls,
@@ -108,8 +109,12 @@ describe('the voucher form', () => {
     expect(voucherFormError({ ...filled, notes: 'x'.repeat(201) })).toBe(M.tooLong);
   });
   it('says before the save what saving does for this person', () => {
-    expect(voucherSaveHint(true)).toContain('approved at once and reads To be paid');
-    expect(voucherSaveHint(false)).toContain('waits as Pending approval');
+    expect(voucherSaveHint(true)).toBe(
+      'A voucher you save is approved at once and reads To be paid: you are an owner or admin. Nothing is paid until it is marked paid.',
+    );
+    expect(voucherSaveHint(false)).toBe(
+      'This voucher waits as Pending approval until an owner or admin approves or rejects it. Until then it cannot be changed, only deleted.',
+    );
     expect(voucherSubmitLabel(true)).toBe('Save voucher');
     expect(voucherSubmitLabel(false)).toBe('Send for approval');
   });
@@ -164,6 +169,34 @@ describe('a decision', () => {
     for (const stale of [M.changed, M.alreadyApproved, M.alreadyRejected, M.movedOn, M.gone]) expect(voucherAnswerIsStale(stale)).toBe(true);
     for (const kept of [M.needsDecider, M.accountArchivedSince, M.cannotDelete, 'That change could not be saved. Please try again.']) {
       expect(voucherAnswerIsStale(kept)).toBe(false);
+    }
+  });
+});
+
+describe('what the loader reads and gives, by role', () => {
+  const waitingBill = [{ kind: 'bill' as const, status: 'pending_approval' as const }];
+  const waitingOther = [{ kind: 'other' as const, status: 'pending_approval' as const }];
+  const paidBill = [{ kind: 'bill' as const, status: 'posted' as const }];
+
+  it('gives an owner and an admin the form and the decisions, and the orders only while a supplier payment waits', () => {
+    for (const role of ['owner', 'admin'] as const) {
+      expect(voucherAccess({ isDemo: false, role }, waitingBill)).toEqual({ writer: true, canDecide: true, readsForm: true, readsOrders: true });
+      expect(voucherAccess({ isDemo: false, role }, waitingOther)).toEqual({ writer: true, canDecide: true, readsForm: true, readsOrders: false });
+      expect(voucherAccess({ isDemo: false, role }, paidBill).readsOrders).toBe(false);
+    }
+  });
+
+  it('gives a member the form but no decision and never reads the orders', () => {
+    expect(voucherAccess({ isDemo: false, role: 'member' }, waitingBill)).toEqual({ writer: true, canDecide: false, readsForm: true, readsOrders: false });
+  });
+
+  it('gives a viewer nothing', () => {
+    expect(voucherAccess({ isDemo: false, role: 'viewer' }, waitingBill)).toEqual({ writer: false, canDecide: false, readsForm: false, readsOrders: false });
+  });
+
+  it('gives the demo workspace nothing, whatever its role', () => {
+    for (const role of ['owner', 'admin', 'member', 'viewer'] as const) {
+      expect(voucherAccess({ isDemo: true, role }, waitingBill)).toEqual({ writer: false, canDecide: false, readsForm: false, readsOrders: false });
     }
   });
 });

@@ -7,6 +7,8 @@
  * vouchers that pay supplier bills; and what the screen says about a voucher
  * that was just written and is not in the list. Pure.
  */
+import type { OrgRole } from '@/lib/auth/current-org';
+import { can } from '@/lib/auth/permissions';
 import { defaultAccount } from './allocation-form';
 import type { PaymentVoucherRow } from './cash-book';
 import { type CashBookPeriod, type PaymentVoucherFilter, inPeriod, voucherHome } from './cash-book-views';
@@ -332,4 +334,24 @@ export function voucherHiddenNote(
     return `${what} ${did(written)}. Clear the search and the Kind filter to see it.`;
   }
   return `${what} ${did(written)}. Clear the search and the filters to see it.`;
+}
+
+/* ---- what the loader gives a person ---------------------------------- */
+
+/**
+ * What the Payment Vouchers loader reads and hands over for someone: whether
+ * they get a `writer` (the form, Delete) at all, whether they may approve and
+ * reject, whether the form's accounts, contacts and categories are read, and
+ * whether the bills and purchase orders behind a waiting supplier payment are
+ * read for the over-billing note. The demo workspace is only ever read.
+ * Someone who cannot decide is never asked a question the note belongs to,
+ * and nothing is read for the note while no supplier payment waits.
+ */
+export function voucherAccess(
+  viewer: { isDemo: boolean; role: OrgRole },
+  rows: Pick<PaymentVoucherRow, 'kind' | 'status'>[],
+): { writer: boolean; canDecide: boolean; readsForm: boolean; readsOrders: boolean } {
+  const writer = !viewer.isDemo && can(viewer.role, 'edit-data');
+  const canDecide = writer && can(viewer.role, 'sign-off-finance');
+  return { writer, canDecide, readsForm: writer, readsOrders: canDecide && hasBillVoucherWaiting(rows) };
 }

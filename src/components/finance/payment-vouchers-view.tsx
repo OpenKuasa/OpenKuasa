@@ -120,6 +120,7 @@ export function PaymentVouchersView({
   today: serverToday,
   followClock = true,
   writer,
+  initialAsk,
 }: {
   /** Every voucher, newest first; waiting, rejected and void ones included. */
   rows: PaymentVoucherRow[];
@@ -128,6 +129,8 @@ export function PaymentVouchersView({
   /** False for sample data, which keeps its own fixed date. */
   followClock?: boolean;
   writer?: VouchersWriter;
+  /** Opens a question on a row at the start. Only for tests, which cannot press a menu item. */
+  initialAsk?: { kind: VoucherAction; id: string };
 }) {
   const today = useLocalToday(serverToday, followClock);
   const [period, setPeriod] = useState<CashBookPeriod>('month');
@@ -135,7 +138,10 @@ export function PaymentVouchersView({
   const [filter, setFilter] = useState<PaymentVoucherFilter>('open');
   const [kind, setKind] = useState<'all' | PaymentVoucherKind>('all');
   const [showAll, setShowAll] = useState(false);
-  const [open, setOpen] = useState<Open>(null);
+  const [open, setOpen] = useState<Open>(() => {
+    const row = initialAsk ? rows.find((v) => v.transaction_id === initialAsk.id) : undefined;
+    return initialAsk && row ? { kind: initialAsk.kind, row } : null;
+  });
   // The voucher just recorded, approved or rejected; whether to say anything about it is decided at render, from the rows listed now.
   const [written, setWritten] = useState<WrittenVoucher | null>(null);
   const confirm = useFinanceAction();

@@ -5,7 +5,6 @@ import {
   rejectVoucherAction,
 } from '@/app/(app)/finance/actions';
 import { PaymentVouchersView, type VoucherActions } from '@/components/finance/payment-vouchers-view';
-import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { listBills } from '@/lib/finance/bills';
 import { listPaymentVouchers } from '@/lib/finance/cash-book';
@@ -14,7 +13,7 @@ import { listExpenseCategories } from '@/lib/finance/expenses';
 import { listAccounts, listPaymentsOut } from '@/lib/finance/money';
 import { listPurchaseOrders } from '@/lib/finance/purchase-orders';
 import { todayUtc } from '@/lib/finance/view-helpers';
-import { hasBillVoucherWaiting, orderNotesByVoucher } from '@/lib/finance/voucher-form';
+import { orderNotesByVoucher, voucherAccess } from '@/lib/finance/voucher-form';
 import { createClient } from '@/lib/supabase/server';
 import { SAMPLE_PAYMENT_VOUCHERS } from './cash-book-sample';
 import { SAMPLE_TODAY } from './sales-sample';
@@ -38,19 +37,17 @@ export default async function PaymentVouchersScreen() {
   }
   const viewer = await getViewer();
   const ctx = { client: await createClient(), orgId: viewer.orgId };
-  const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
-  const canDecide = canEdit && can(viewer.role, 'sign-off-finance');
   // The form offers accounts, contacts and expense categories; anyone without the form has none of those reads made for them.
-  const [rows, accounts, contacts, categories] = await Promise.all([
-    listPaymentVouchers(ctx),
-    canEdit ? listAccounts(ctx) : [],
-    canEdit ? listContacts(ctx) : [],
-    canEdit ? listExpenseCategories(ctx) : [],
+  const rows = await listPaymentVouchers(ctx);
+  const access = voucherAccess(viewer, rows);
+  const [accounts, contacts, categories] = await Promise.all([
+    access.readsForm ? listAccounts(ctx) : [],
+    access.readsForm ? listContacts(ctx) : [],
+    access.readsForm ? listExpenseCategories(ctx) : [],
   ]);
   // The purchase orders behind the bills a waiting voucher pays are read only for someone who can approve it,
   // and only when such a voucher is waiting: the same three reads Payments Out makes for its own note.
-  const adviseOnOrders = canDecide && hasBillVoucherWaiting(rows);
-  const [payments, bills, orders] = adviseOnOrders
+  const [payments, bills, orders] = access.readsOrders
     ? await Promise.all([listPaymentsOut(ctx), listBills(ctx), listPurchaseOrders(ctx)])
     : [[], [], []];
   return (
@@ -58,10 +55,10 @@ export default async function PaymentVouchersScreen() {
       rows={rows}
       today={todayUtc()}
       writer={
-        canEdit
+        access.writer
           ? {
               actions: ACTIONS,
-              canDecide,
+              canDecide: access.canDecide,
               accounts,
               // Only what the form reads goes to the browser.
               contacts: contacts.filter((c) => c.active).map((c) => ({ id: c.id, name: c.name })),
