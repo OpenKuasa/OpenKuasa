@@ -21,6 +21,17 @@
  * the table's `updated_at` is not moved by the database, so it proves
  * nothing. A voucher that has not been paid is deleted; a paid one is not.
  *
+ * Paying and voiding are a sign-off: an owner or admin only (FIN14 for anyone
+ * else). A new voucher for a category can be recorded as paid now. One that is
+ * "To be paid" is marked paid by `finance_mark_payment_paid`, which gives it
+ * its PV- number and the date it was paid and changes nothing else; it needs
+ * no match on what was shown, because the database holds a payment still from
+ * the moment it leaves draft (FIN14 on an approved one, FIN28 on any other),
+ * so the voucher paid is the voucher the row showed. A paid voucher is voided
+ * by one change of status: what it paid of its expenses is owed again, and
+ * the books reverse it. Both are kept to the two kinds that belong to this
+ * screen, a voucher for a category and one that pays expenses.
+ *
  * A payment to a supplier and a refund are vouchers too, recorded, paid,
  * voided and deleted on Payments Out and Refunds (money.ts, refunds.ts). The
  * money-out side of a transfer between accounts is not a voucher: every
@@ -29,12 +40,13 @@
  */
 import { z } from 'zod';
 import type { CashBookStatus } from './cash-book';
-import { LINE_MESSAGES, isoDate, optionalText, ringgitAmount } from './document-lines';
+import { LINE_MESSAGES, isIsoDate, isoDate, optionalText, ringgitAmount } from './document-lines';
 import { PAYMENT_BILLS_MAX, PAYMENT_METHODS } from './money';
 import {
   type FinResult,
   type FinanceWriteContext,
   FIN_SIGN_OFF,
+  NEEDS_SIGN_OFF,
   NOT_ALLOWED,
   PG_CHECK,
   PG_FORBIDDEN,
@@ -105,6 +117,28 @@ export const VOUCHER_MESSAGES = {
   // FIN37 from sending a draft from its row: its account was archived after the draft was saved.
   accountArchivedDraft:
     'The account this draft is paid from has been archived, so it cannot be sent for approval. Edit it and choose another account.',
+  // A new voucher sent as paid now by someone who is not an owner or admin. The form offers them no such choice, so only a direct call does.
+  paidNowNeedsSignOff: 'Only an owner or admin can record a voucher as paid. Send it for approval instead.',
+  // Marking paid with no date, or with one that is not a date.
+  paidOn: 'Enter the date it was paid.',
+  // Marking paid or voiding a payment to a supplier or a refund. The screen offers neither, so only a direct call does.
+  notHere: 'A payment to a supplier is paid and voided on Payments Out, and a refund on Refunds.',
+  // FIN09 from marking paid, when the voucher now reads Paid: someone else marked it paid meanwhile. Said of one
+  // recorded as paid too, by a direct call, so it does not say "marked".
+  alreadyPaid: 'This voucher has already been paid.',
+  // The same when it now reads Void, and a void that matched no row when it reads Void: it was voided meanwhile.
+  alreadyVoided: 'This voucher has already been voided.',
+  // FIN09 from marking paid a voucher that is a draft, waits or was rejected. The menu offers Mark as paid only on
+  // one that is To be paid, and none of those three comes after that, so only a direct call does.
+  notToBePaid: 'Only a voucher that is To be paid can be marked paid.',
+  // A void that matched no row while the voucher is not paid. The menu offers Void only on a paid one, and a paid
+  // voucher only becomes void, so only a direct call does.
+  notPaid: 'Only a paid voucher can be voided. One that has not been paid is deleted instead.',
+  // FIN04 or FIN05 from marking paid: the guard on what a voucher pays refused. Not met while this was written.
+  cannotPay: 'What this voucher pays can no longer take this payment, so it was not marked paid. Delete the voucher and record it again.',
+  // FIN37 from marking paid. An account with a voucher still to be paid cannot be archived (FIN30), so only a race or a direct call does.
+  accountArchivedPay:
+    'The account this voucher is paid from has been archived, so it cannot be marked paid. Restore the account on Banking, then try again.',
 } as const;
 
 const M = VOUCHER_MESSAGES;
@@ -125,7 +159,9 @@ const optionalContact = z
 /**
  * A voucher for money that settles no document. It carries no status: the
  * database decides whether it waits for approval or is approved, by who is
- * recording it. Whoever is paid is a contact or a typed name, exactly one.
+ * recording it. `paid_now` asks for it to be recorded as paid, which only an
+ * owner or admin is given. Whoever is paid is a contact or a typed name,
+ * exactly one.
  */
 export const recordVoucherInput = z
   .object(
@@ -139,6 +175,9 @@ export const recordVoucherInput = z
       party_name: optionalText.default(null),
       reference: optionalText.default(null),
       notes: optionalText.default(null),
+      // True when it has been paid already, on `txn_date`: an owner or admin only, which the action asks first.
+      // Left out, it is not in what is parsed either.
+      paid_now: z.boolean({ error: M.invalid }).optional(),
     },
     { error: M.invalid },
   )
@@ -241,6 +280,15 @@ export const deleteVoucherInput = z.object(
   { error: M.gone },
 );
 
+/** The voucher to mark paid, and the day it was paid: the person's own date, as typed. */
+export const markVoucherPaidInput = z.object(
+  { id, paid_on: z.string({ error: M.paidOn }).refine(isIsoDate, M.paidOn) },
+  { error: M.gone },
+);
+
+/** The voucher to void. */
+export const voidVoucherInput = z.object({ id }, { error: M.gone });
+
 /** The voucher that was recorded, and how the database left it; null when it could not be read back. */
 export type RecordedVoucher = { id: string; status: CashBookStatus | null };
 
@@ -292,6 +340,19 @@ const DELETE_REFUSALS: Record<string, string> = {
   FIN09: M.cannotDelete,
   [PG_FORBIDDEN]: NOT_ALLOWED,
 };
+/** Marking paid. FIN09 is not here: what it means depends on what the voucher now reads, which one more read tells. */
+const PAY_REFUSALS: Record<string, string> = {
+  FIN04: M.cannotPay,
+  FIN05: M.cannotPay,
+  FIN11: M.gone,
+  [FIN_SIGN_OFF]: NEEDS_SIGN_OFF,
+  [FIN_ARCHIVED_ACCOUNT]: M.accountArchivedPay,
+  [PG_FORBIDDEN]: NOT_ALLOWED,
+};
+const VOID_REFUSALS: Record<string, string> = {
+  [FIN_SIGN_OFF]: NEEDS_SIGN_OFF,
+  [PG_FORBIDDEN]: NOT_ALLOWED,
+};
 
 function voucherWriteFailed(fnName: string, error: unknown, refusals: Record<string, string>): { ok: false; error: string } {
   const refusal = refusals[pgCode(error) ?? ''];
@@ -319,24 +380,45 @@ async function statusNow(
   return { status: row?.status, approved: Boolean(row?.approved_at) };
 }
 
+/**
+ * Paying and voiding here are for a voucher for a category and one that pays
+ * expenses. Null when the voucher is one of those; otherwise the refusal: it
+ * is not there, or it is a payment to a supplier or a refund, which have
+ * screens of their own. What a voucher pays cannot change once it has left
+ * draft, so the kind read here is the kind of the voucher that is written.
+ */
+async function refusalUnlessOurs(ctx: FinanceWriteContext, fnName: string, txnId: string): Promise<{ ok: false; error: string } | null> {
+  const { data, error } = await ctx.client
+    .from('finance_payment_vouchers')
+    .select('kind')
+    .eq('org_id', ctx.orgId)
+    .eq('transaction_id', txnId)
+    .maybeSingle();
+  if (error) return writeFailed(fnName, error);
+  const kind = (data as { kind?: string } | null)?.kind;
+  if (!kind) return { ok: false, error: M.gone };
+  return kind === 'expense' || kind === 'other' ? null : { ok: false, error: M.notHere };
+}
+
 /* ---- writes ----------------------------------------------------------- */
 
 /**
- * Records a voucher for a category. The database is asked for "To be paid"
- * and decides the rest by who is asking: an owner's or admin's is approved
- * and scheduled in the same call; anyone else's waits for approval whatever
- * was asked. The status is read back and answered with the id, so the screen
- * says which it was. A read that fails after a save that worked answers
- * `status: null`; the voucher is recorded either way.
+ * Records a voucher for a category. The database is asked for "To be paid",
+ * or for paid when `paid_now`, and decides the rest by who is asking: an
+ * owner's or admin's is approved and scheduled, or paid and numbered, in the
+ * same call; anyone else's waits for approval whatever was asked. The status
+ * is read back and answered with the id, so the screen says which it was. A
+ * read that fails after a save that worked answers `status: null`; the
+ * voucher is recorded either way.
  */
 export async function recordVoucher(
   ctx: FinanceWriteContext,
   input: z.input<typeof recordVoucherInput>,
 ): Promise<FinResult<RecordedVoucher>> {
-  const voucher = recordVoucherInput.parse(input);
+  const { paid_now, ...voucher } = recordVoucherInput.parse(input);
   const { data, error } = await ctx.client.rpc('finance_record_voucher', {
     target_org: ctx.orgId,
-    voucher: { ...voucher, status: 'scheduled' },
+    voucher: { ...voucher, status: paid_now ? 'posted' : 'scheduled' },
     allocations: [],
   });
   if (error || !data) return voucherWriteFailed('recordVoucher', error, RECORD_REFUSALS);
@@ -511,4 +593,65 @@ export async function deleteVoucher(
   if (now.error) return voucherWriteFailed('deleteVoucher', now.error, DELETE_REFUSALS);
   if (now.status === undefined) return { ok: false, error: M.gone };
   return { ok: false, error: M.movedOn };
+}
+
+/**
+ * A voucher that is "To be paid" has now been paid, on `paid_on`: it gets its
+ * PV- number and that date, and nothing else of it changes. What it holds of
+ * its expenses is then paid. An owner or admin only (FIN14 for anyone else).
+ * The database refuses one that is not "To be paid" (FIN09); one more read
+ * tells whether it was paid or voided meanwhile.
+ */
+export async function markVoucherPaid(
+  ctx: FinanceWriteContext,
+  input: z.input<typeof markVoucherPaidInput>,
+): Promise<FinResult<{ id: string; number: string }>> {
+  const { id: txnId, paid_on } = markVoucherPaidInput.parse(input);
+  const refusal = await refusalUnlessOurs(ctx, 'markVoucherPaid', txnId);
+  if (refusal) return refusal;
+  const { data, error } = await ctx.client.rpc('finance_mark_payment_paid', {
+    target_org: ctx.orgId,
+    target_txn: txnId,
+    paid_on,
+  });
+  if (!error && data) return { ok: true, data: { id: txnId, number: data as string } };
+  if (pgCode(error) !== 'FIN09') return voucherWriteFailed('markVoucherPaid', error, PAY_REFUSALS);
+  const now = await statusNow(ctx, txnId);
+  if (now.error) return voucherWriteFailed('markVoucherPaid', now.error, PAY_REFUSALS);
+  if (now.status === undefined) return { ok: false, error: M.gone };
+  if (now.status === 'posted') return { ok: false, error: M.alreadyPaid };
+  if (now.status === 'void') return { ok: false, error: M.alreadyVoided };
+  return { ok: false, error: M.notToBePaid };
+}
+
+/**
+ * Voids a paid voucher: one change of status, matched while it is still
+ * paid. What it paid of its expenses is owed again (an expense reads paid
+ * only while posted money covers it), and the books reverse it. It keeps its
+ * number and stays in the list as Void. An owner or admin only (FIN14 for
+ * anyone else). When no row matches, one more read tells why.
+ */
+export async function voidVoucher(
+  ctx: FinanceWriteContext,
+  input: z.input<typeof voidVoucherInput>,
+): Promise<FinResult<{ id: string }>> {
+  const { id: txnId } = voidVoucherInput.parse(input);
+  const refusal = await refusalUnlessOurs(ctx, 'voidVoucher', txnId);
+  if (refusal) return refusal;
+  const { data, error } = await ctx.client
+    .from('finance_transactions')
+    .update({ status: 'void', updated_at: new Date().toISOString() })
+    .eq('id', txnId)
+    .eq('org_id', ctx.orgId)
+    .eq('direction', 'out')
+    .is('transfer_id', null)
+    .eq('status', 'posted')
+    .select('id')
+    .maybeSingle();
+  if (error) return voucherWriteFailed('voidVoucher', error, VOID_REFUSALS);
+  if (data) return { ok: true, data: { id: (data as { id: string }).id } };
+  const now = await statusNow(ctx, txnId);
+  if (now.error) return voucherWriteFailed('voidVoucher', now.error, VOID_REFUSALS);
+  if (now.status === undefined) return { ok: false, error: M.gone };
+  return { ok: false, error: now.status === 'void' ? M.alreadyVoided : M.notPaid };
 }
