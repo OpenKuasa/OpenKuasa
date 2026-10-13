@@ -120,15 +120,17 @@ begin
     fails := array_append(fails, 'service_role or anon can write finance_expenses');
   end if;
   -- Categories: the four policies they had, the second-factor policy, and the three new ones.
-  select string_agg(policyname || ' ' || permissive || ' ' || cmd || ' ' || coalesce(qual, '-') || ' ' || coalesce(with_check, '-'), '; ' order by policyname)
+  select string_agg(policyname || ' ' || permissive || ' ' || cmd || ' ' || coalesce(qual, '-') || ' ' || coalesce(with_check, '-')
+                    -- The three restrictive sign-off policies also pin who they apply to: a variant `to public` fails by name.
+                    || case when policyname like 'finance_categories_sign_off_%' then ' ' || roles::text else '' end, '; ' order by policyname)
     into t from pg_policies where schemaname = 'public' and tablename = 'finance_categories';
   if t is distinct from
        'finance_categories_delete PERMISSIVE DELETE private.is_org_writer(org_id) -; '
     || 'finance_categories_insert PERMISSIVE INSERT - private.is_org_writer(org_id); '
     || 'finance_categories_select PERMISSIVE SELECT private.is_org_member(org_id) -; '
-    || 'finance_categories_sign_off_delete RESTRICTIVE DELETE private.finance_may_sign_off(org_id) -; '
-    || 'finance_categories_sign_off_insert RESTRICTIVE INSERT - private.finance_may_sign_off(org_id); '
-    || 'finance_categories_sign_off_update RESTRICTIVE UPDATE private.finance_may_sign_off(org_id) private.finance_may_sign_off(org_id); '
+    || 'finance_categories_sign_off_delete RESTRICTIVE DELETE private.finance_may_sign_off(org_id) - {authenticated}; '
+    || 'finance_categories_sign_off_insert RESTRICTIVE INSERT - private.finance_may_sign_off(org_id) {authenticated}; '
+    || 'finance_categories_sign_off_update RESTRICTIVE UPDATE private.finance_may_sign_off(org_id) private.finance_may_sign_off(org_id) {authenticated}; '
     || 'finance_categories_update PERMISSIVE UPDATE private.is_org_writer(org_id) private.is_org_writer(org_id); '
     || 'mfa_required RESTRICTIVE ALL ( SELECT private.mfa_ok() AS mfa_ok) ( SELECT private.mfa_ok() AS mfa_ok)' then
     fails := fails || format('policies on finance_categories are: %s', t);
