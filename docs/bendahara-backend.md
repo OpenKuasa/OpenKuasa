@@ -1958,6 +1958,9 @@ with no date).
   fields, not on its bills: a draft's split can be changed by any writer until
   it is sent. From then on nothing of it can change (`FIN09` for its split,
   `FIN14` or `FIN28` for its fields).
+- Payment Vouchers: saving a draft that someone else changed meanwhile
+  replaces their change, with no warning, as saving a draft receipt does on
+  Cash Receipts: the form is not compared with the draft as it now is.
 - Payment Vouchers: an owner's or admin's draft is not approved by saving it;
   it is sent for approval and approved from its row, in two steps.
 - **A payment that is to be paid is held still as a row, not as an intention**
