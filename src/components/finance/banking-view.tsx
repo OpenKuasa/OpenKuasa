@@ -49,6 +49,7 @@ import {
   voidTransferEffect,
 } from '@/lib/finance/transfer-form';
 import type { RecordedTransfer } from '@/lib/finance/transfers';
+import { type BankingOpen as Open, VOID_REFUSED_TITLE, visibleOpen, voidQuestionGone } from '@/lib/finance/banking-open';
 import { cn } from '@/lib/utils';
 
 export type BankingActions = BankAccountFormActions & {
@@ -71,18 +72,6 @@ export type BankingWriter = {
   /** Account numbers by account id, read with finance_account_numbers; an account with none is absent. */
   numbers: Record<string, string>;
 };
-
-/**
- * The one thing that is open on the screen: a form (it holds what was typed) or a question in a row. Opening
- * another replaces it, and the header's buttons wait while anything is open. `today` is the person's own date
- * when a form was opened.
- */
-type Open =
-  | { kind: 'account'; today: string; editing: BankAccountRow | null }
-  | { kind: 'transfer'; today: string }
-  | { kind: 'archive'; accountId: string }
-  | { kind: 'void'; transactionId: string }
-  | null;
 
 /** What was just done, said at the top of the page until it is closed or something else opens. */
 type Note = { kind: 'text'; title: string; text: string } | { kind: 'recorded'; written: RecordedTransferNote } | null;
@@ -139,12 +128,22 @@ export function BankingView({
   const matching = filterLedger(ledger, query, accountId, filter);
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
 
+  const shownIds = shown.map((r) => r.transaction_id);
   // A question whose row has left the screen (a filter changed, or someone else voided or removed it) is not open.
-  const open: Open =
-    (opened?.kind === 'void' && !shown.some((r) => r.transaction_id === opened.transactionId)) ||
-    (opened?.kind === 'archive' && !accounts.some((a) => a.id === opened.accountId))
-      ? null
-      : opened;
+  const open: Open = visibleOpen(
+    opened,
+    shownIds,
+    accounts.map((a) => a.id),
+  );
+  // A void question whose row has left the table is closed for good, so it does not come back, or take the focus,
+  // when a filter is cleared. If the void had been refused, its sentence is said at the top of the page: the
+  // refresh that follows a refusal takes a row that was already voided away, and the question with it.
+  const gone = voidQuestionGone(opened, shownIds, voiding.pending, voiding.error);
+  if (gone.close) {
+    setOpened(null);
+    if (gone.refusal) setNote({ kind: 'text', title: VOID_REFUSED_TITLE, text: gone.refusal });
+    voiding.clear();
+  }
   const formOpen = open?.kind === 'account' || open?.kind === 'transfer';
   /** Opens a form or a question in place of whatever was open, and takes the last note away. */
   const openOnly = (next: Open) => {
