@@ -2659,12 +2659,14 @@ with no date).
   categories. It is one call with no retry: a model slower than 45 seconds
   is told as "could not do the reading just now", nothing is stored, and the
   press has still used a turn of the daily limit and possibly credit.
-  What is bounded today: the file (10 MB at most, a JPG, PNG or PDF), the
-  answer (300 tokens), the time (45 seconds), and the person's 200 turns a
-  day on the workspace's key, shared with chat. What is not: a PDF has no
-  page limit and is sent whole, so a long one costs more input than a photo,
-  and a workspace has no ceiling of its own across its people (an owner's
-  decision, not built). How well the configured model reads a
+  What is bounded today: the file (10 MB at most, a JPG, PNG or PDF; a PDF
+  over 4 MB, `RECEIPT_PDF_MAX_BYTES`, is not sent, decided from the stored
+  size before the key is opened, the file fetched or a turn counted, and
+  again on the bytes if no size was recorded), the answer (300 tokens), the
+  time (45 seconds), and the person's 200 turns a day on the workspace's key,
+  shared with chat. What is not: a PDF's pages are not counted, so a
+  many-page PDF under 4 MB costs more input than a photo, and a workspace
+  has no ceiling of its own across its people. How well the configured model reads a
   Malaysian receipt, and whether it takes a PDF, is the model's: a model
   that cannot is told as "could not do the reading just now" or, if it answers
   something that is not the five fields, "nothing could be read".
