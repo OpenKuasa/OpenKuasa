@@ -15,9 +15,9 @@
 --   * an owner pays an approved expense through finance_record_voucher, in
 --     part and then in full, a member cannot, and an amount of NaN is refused
 --     by name.
--- bendahara_cash_book_check.sql and bendahara_expense_amounts_check.sql must
--- still pass beside it. It leaves nothing behind either way: the block always
--- ends with RAISE, so every row and the helper function below are rolled
+-- bendahara_cash_book_check.sql, bendahara_expense_amounts_check.sql and
+-- bendahara_rfq_source_check.sql must still pass beside it. It leaves nothing
+-- behind either way: the block always ends with RAISE, so every row and the helper function below are rolled
 -- back. Read the message:
 --   BENDAHARA_EXPENSE_RULES_CHECK PASSED ...   or   BENDAHARA_EXPENSE_RULES_CHECK FAILED: <what went wrong>
 -- It makes its own workspace and acts as each person the way the app does:
