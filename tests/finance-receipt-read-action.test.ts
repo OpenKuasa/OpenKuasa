@@ -144,7 +144,7 @@ beforeEach(() => {
   ctl.clients = 0;
   ctl.serviceThrows = false;
   ctl.modelId = 'vendor/reader:free';
-  ctl.receipt = { ok: true, data: { status: 'review', file: { path: PATH, type: 'image/jpeg' }, details: { ...TYPED } } };
+  ctl.receipt = { ok: true, data: { status: 'review', file: { path: PATH, type: 'image/jpeg' }, details: { ...TYPED }, extractedAt: null } };
   ctl.keyState = 'set';
   ctl.stored = { status: 'ok', apiKey: WORKSPACE_KEY };
   ctl.link = { ok: true, data: { url: 'https://store.example/signed' } };
@@ -372,6 +372,38 @@ describe('a reading that failed', () => {
       expect((write[0].input as { outcome: unknown }).outcome).toEqual({ failed: true, keep: TYPED });
       expect(ctl.revalidated).toEqual(['/finance/receipts-inbox']);
     }
+  });
+
+  it('a reading already on the receipt is left alone by a failed new one: nothing is written, and the person is told the earlier one is still shown', async () => {
+    ctl.receipt = {
+      ok: true,
+      data: { status: 'review', file: { path: PATH, type: 'image/jpeg' }, details: { ...TYPED }, extractedAt: '2026-10-12T02:00:00Z' },
+    };
+    for (const reason of ['nothing', 'failed']) {
+      ctl.calls = [];
+      ctl.revalidated = [];
+      ctl.reading = { ok: false, reason };
+      expect(await readReceiptAction({ id: RECEIPT }), reason).toEqual({ ok: false, error: M.failedAgain });
+      expect(called('setReceiptExtraction'), reason).toEqual([]);
+    }
+    expect(M.failedAgain).toContain('earlier reading is still shown');
+  });
+
+  it('a provider that is busy, down or never reached writes nothing about the receipt and does not say it was sent', async () => {
+    ctl.reading = { ok: false, reason: 'unavailable' };
+    expect(await readReceiptAction({ id: RECEIPT })).toEqual({ ok: false, error: M.unavailable });
+    expect(called('setReceiptExtraction')).toEqual([]);
+    expect(M.unavailable).toMatch(/try again later/i);
+    expect(M.unavailable).not.toMatch(/was sent|could not be read/i);
+    // The turn was counted before the call and is not given back, as a chat turn that fails is not.
+    expect(called('consumeDailyQuota')).toHaveLength(1);
+  });
+
+  it('an empty file is not a reason to try again', async () => {
+    ctl.bytes = new Uint8Array(0);
+    expect(await readReceiptAction({ id: RECEIPT })).toEqual({ ok: false, error: M.fileEmpty });
+    expect(M.fileEmpty).not.toMatch(/try again/i);
+    nothingSpent();
   });
 
   it('the provider refused the key, or says there is no credit: nothing is written about the receipt', async () => {

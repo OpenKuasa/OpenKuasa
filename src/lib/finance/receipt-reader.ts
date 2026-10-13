@@ -51,6 +51,8 @@ export function receiptModelId(env: EnvLike = process.env): string | null {
 
 /** How long a reading may take before it counts as failed. */
 export const RECEIPT_READ_TIMEOUT_MS = 45_000;
+/** The most a reading may say back: five short fields. */
+export const RECEIPT_READ_MAX_OUTPUT_TOKENS = 300;
 /** How long fetching the stored file may take. */
 const FILE_FETCH_TIMEOUT_MS = 15_000;
 
@@ -79,6 +81,8 @@ export type ReceiptForReading = {
   /** Null when the receipt has no file, or its path is not this workspace's. The path stays on the server. */
   file: { path: string; type: InboxReceiptType } | null;
   details: { vendor: string | null; receipt_date: string | null; amount: number | null; sst_amount: number | null };
+  /** When a reading was last stored; null when no model has read this receipt. A failed new reading leaves such a reading alone. */
+  extractedAt: string | null;
 };
 
 const numberOrNull = (value: unknown): number | null => (value === null || value === undefined ? null : Number(value));
@@ -87,7 +91,7 @@ const numberOrNull = (value: unknown): number | null => (value === null || value
 export async function getReceiptForReading(ctx: FinanceWriteContext, receiptId: string): Promise<FinResult<ReceiptForReading>> {
   const { data, error } = await ctx.client
     .from('finance_receipts')
-    .select('status,file_path,mime_type,vendor,receipt_date,amount,sst_amount')
+    .select('status,file_path,mime_type,vendor,receipt_date,amount,sst_amount,extracted_at')
     .eq('org_id', ctx.orgId)
     .eq('id', receiptId)
     .limit(1);
@@ -104,6 +108,7 @@ export async function getReceiptForReading(ctx: FinanceWriteContext, receiptId: 
         receipt_date: string | null;
         amount: unknown;
         sst_amount: unknown;
+        extracted_at?: string | null;
       }
     | undefined;
   if (!row) return { ok: false, error: RECEIPT_READING_MESSAGES.gone };
@@ -119,6 +124,7 @@ export async function getReceiptForReading(ctx: FinanceWriteContext, receiptId: 
         amount: numberOrNull(row.amount),
         sst_amount: numberOrNull(row.sst_amount),
       },
+      extractedAt: row.extracted_at ?? null,
     },
   };
 }
@@ -166,7 +172,8 @@ export async function setReceiptExtraction(
 
 /**
  * The whole stored file, through a link signed as the caller, or null when it
- * could not be fetched or is larger than a receipt may be. The bytes are
+ * could not be fetched or is larger than a receipt may be; an empty file
+ * answers empty. The bytes are
  * counted as they arrive, so a store that served something huge is cut off.
  */
 export async function receiptBytes(
@@ -190,7 +197,8 @@ export async function receiptBytes(
       }
       chunks.push(value);
     }
-    if (total === 0) return null;
+    // Empty is returned as empty, not as a failed fetch: the caller says a different thing about a file that will never open.
+    if (total === 0) return new Uint8Array(0);
     const out = new Uint8Array(total);
     let at = 0;
     for (const chunk of chunks) {
@@ -217,9 +225,14 @@ export type ReceiptReading =
   | ({ ok: true } & ReceiptReadingFields)
   /**
    * `nothing`: the model answered and no field survived the checks. `key`: the provider refused the key (401).
-   * `credit`: it says there is no credit (402). `failed`: anything else, a timeout included.
+   * `credit`: it says there is no credit (402). `failed`: the model answered and the answer was not the five fields.
+   * `unavailable`: the provider could not do it just now (busy, down, a model that takes no file, no connection, a
+   * timeout): nothing is known about the receipt, so nothing is stored about it.
    */
-  | { ok: false; reason: 'nothing' | 'key' | 'credit' | 'failed' };
+  | { ok: false; reason: 'nothing' | 'key' | 'credit' | 'failed' | 'unavailable' };
+
+/** An error that is the model's answer not fitting the schema, as opposed to the call not going through. */
+const ANSWER_NOT_FIT = /NoObjectGenerated|TypeValidation|JSONParse|NoOutput/;
 
 /**
  * One call to the model, with the file. `model` is built by the caller from
@@ -256,7 +269,7 @@ export async function readReceiptWithModel(input: {
         },
       ],
       output: Output.object({ schema: receiptReadingSchema }),
-      maxOutputTokens: 300,
+      maxOutputTokens: RECEIPT_READ_MAX_OUTPUT_TOKENS,
       // One press is one call: a retry would spend the workspace's credit twice without the person asking.
       maxRetries: 0,
       abortSignal: AbortSignal.timeout(input.timeoutMs ?? RECEIPT_READ_TIMEOUT_MS),
@@ -269,6 +282,7 @@ export async function readReceiptWithModel(input: {
     console.error('[ai] receipt-reader model call failed:', failure);
     if (failure.code === 401) return { ok: false, reason: 'key' };
     if (failure.code === 402) return { ok: false, reason: 'credit' };
-    return { ok: false, reason: 'failed' };
+    if (typeof failure.code === 'string' && ANSWER_NOT_FIT.test(failure.code)) return { ok: false, reason: 'failed' };
+    return { ok: false, reason: 'unavailable' };
   }
 }

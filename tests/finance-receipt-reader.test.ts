@@ -22,6 +22,8 @@ import {
   suggestedCategoryLine,
 } from '@/lib/finance/receipt-reading';
 import {
+  RECEIPT_READ_MAX_OUTPUT_TOKENS,
+  RECEIPT_READ_TIMEOUT_MS,
   getReceiptForReading,
   readReceiptWithModel,
   receiptBytes,
@@ -211,13 +213,33 @@ describe('what comes back', () => {
     expect(await read(stub({ text: 'I cannot read this.' }))).toEqual({ ok: false, reason: 'failed' });
     expect(await read(stub({ error: Object.assign(new Error('bad key sk-or-secret'), { statusCode: 401 }) }))).toEqual({ ok: false, reason: 'key' });
     expect(await read(stub({ error: Object.assign(new Error('no credit'), { statusCode: 402 }) }))).toEqual({ ok: false, reason: 'credit' });
-    expect(await read(stub({ error: Object.assign(new Error('boom'), { statusCode: 500, requestBodyValues: { file: 'BYTES' } }) }))).toEqual({ ok: false, reason: 'failed' });
+    expect(await read(stub({ error: Object.assign(new Error('boom'), { statusCode: 500, requestBodyValues: { file: 'BYTES' } }) }))).toEqual({ ok: false, reason: 'unavailable' });
     // A status code only: never the message, never the request (which carries the file).
     const logged = JSON.stringify(error.mock.calls);
     expect(logged).not.toMatch(/sk-or-secret|BYTES|boom/);
   });
 
-  it('a model that takes longer than allowed is a failed reading', async () => {
+  it('a provider that is busy, down, or never reached is its own reason, not a receipt that could not be read', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    for (const statusCode of [408, 429, 500, 502, 503, 400, 404]) {
+      expect(await read(stub({ error: Object.assign(new Error('x'), { statusCode }) })), String(statusCode)).toEqual({ ok: false, reason: 'unavailable' });
+    }
+    // A connection that never opened has no status at all.
+    expect(await read(stub({ error: new TypeError('fetch failed') }))).toEqual({ ok: false, reason: 'unavailable' });
+  });
+
+  it('the time limit and the output cap are named constants', () => {
+    expect(RECEIPT_READ_TIMEOUT_MS).toBe(45_000);
+    expect(RECEIPT_READ_MAX_OUTPUT_TOKENS).toBe(300);
+    const source = readFileSync('src/lib/finance/receipt-reader.ts', 'utf8');
+    expect(source).toContain('maxOutputTokens: RECEIPT_READ_MAX_OUTPUT_TOKENS');
+    expect(source).toContain('timeoutMs ?? RECEIPT_READ_TIMEOUT_MS');
+    expect(source).toContain("cache: 'no-store'");
+    expect(source).toMatch(/signal: AbortSignal\.timeout\(timeoutMs\)/);
+  });
+
+  it('a model that takes longer than allowed is not a receipt that could not be read', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const slow = new MockLanguageModelV4({
       doGenerate: async ({ abortSignal }: { abortSignal?: AbortSignal }) =>
@@ -226,7 +248,7 @@ describe('what comes back', () => {
         }),
     } as unknown as ConstructorParameters<typeof MockLanguageModelV4>[0]);
     const result = await readReceiptWithModel({ model: slow as never, modelId: 'stub/model', bytes: JPG, mediaType: 'image/jpeg', today: TODAY, timeoutMs: 20 });
-    expect(result).toEqual({ ok: false, reason: 'failed' });
+    expect(result).toEqual({ ok: false, reason: 'unavailable' });
   });
 });
 
@@ -443,7 +465,8 @@ describe('fetching the stored file', () => {
 
   it('reads the whole file, and nothing for an empty one, a refused one or one that is too large', async () => {
     expect(await receiptBytes('https://store.example/signed', respond(PDF))).toEqual(PDF);
-    expect(await receiptBytes('https://store.example/signed', respond(new Uint8Array(0)))).toBeNull();
+    // An empty file is told apart from a failed fetch: trying again will not help.
+    expect(await receiptBytes('https://store.example/signed', respond(new Uint8Array(0)))).toEqual(new Uint8Array(0));
     expect(await receiptBytes('https://store.example/signed', respond(PDF, false))).toBeNull();
     expect(await receiptBytes('https://store.example/signed', respond(new Uint8Array(10 * 1024 * 1024 + 1)))).toBeNull();
     const failing = (async () => {
@@ -468,8 +491,12 @@ describe('the receipt and the key, read as the caller', () => {
         status: 'review',
         file: { path: PATH, type: 'image/jpeg' },
         details: { vendor: 'Typed Sdn Bhd', receipt_date: null, amount: 12.5, sst_amount: null },
+        extractedAt: null,
       },
     });
+    // A reading already on the receipt is known to the action, so a failed second one can leave it alone.
+    const readBefore = await getReceiptForReading(fake({ data: [{ ...stored, extracted_at: '2026-10-12T02:00:00Z' }], error: null }).ctx, RECEIPT);
+    expect(readBefore).toMatchObject({ ok: true, data: { extractedAt: '2026-10-12T02:00:00Z' } });
     expect(calls[0]).toMatchObject({ name: 'finance_receipts', op: 'select', filters: { org_id: ORG, id: RECEIPT }, limit: 1 });
   });
 

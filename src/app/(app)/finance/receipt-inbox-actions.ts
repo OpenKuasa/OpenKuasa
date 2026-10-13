@@ -277,6 +277,7 @@ export async function readReceiptAction(input: unknown): Promise<FinResult<Recei
   if (!link.ok) return refused(R.fileUnavailable);
   const bytes = await receiptBytes(link.data.url);
   if (!bytes) return refused(R.fileUnavailable);
+  if (bytes.length === 0) return refused(R.fileEmpty);
   if (sendableAs(bytes, file.type) !== 'ok') {
     console.error('[finance/receipts] a stored file is not the type its receipt says.');
     return refused(R.notWhatItSays);
@@ -305,6 +306,13 @@ export async function readReceiptAction(input: unknown): Promise<FinResult<Recei
   // The provider turned the key away: the receipt was not found unreadable, so nothing is written about it.
   if (!reading.ok && reading.reason === 'key') return refused(R.keyRefused);
   if (!reading.ok && reading.reason === 'credit') return refused(R.noCredit);
+  // The call did not get through: the receipt was not found unreadable, so nothing is written about it. The turn
+  // counted above is not given back: a chat turn that fails is not either, and the request did reach the provider.
+  if (!reading.ok && reading.reason === 'unavailable') return refused(R.unavailable);
+  if (!reading.ok && receipt.data.extractedAt !== null) {
+    // A reading already stands: a failed new one writes nothing, so its figures, its mark and the caution above the forms stay.
+    return refused(R.failedAgain);
+  }
   if (!reading.ok) {
     // The values the receipt held go back with the error: the function would otherwise clear what a person typed.
     await setReceiptExtraction(ctx, id, { failed: true, keep: receipt.data.details });

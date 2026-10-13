@@ -51,8 +51,14 @@ export const RECEIPT_READING_MESSAGES = {
   // The stored bytes are not the type the receipt says: nothing is sent.
   notWhatItSays: 'This file is not the kind of file its receipt says it is, so it was not sent.',
   fileUnavailable: 'The file could not be opened, so nothing was sent. Please try again.',
-  // The model was reached and gave nothing usable, or the call failed. The file was sent.
+  // The model was reached and gave nothing usable. The file was sent.
   failed: 'The receipt was sent, and nothing could be read from it. Type the details in.',
+  // The same, on a receipt a model has read before: that reading was not touched.
+  failedAgain: 'The new reading found nothing it could use, so the earlier reading is still shown. Check its figures against the receipt.',
+  // The call did not get through (busy, down, no connection, too slow): nothing is known about the receipt, nothing was stored.
+  unavailable: 'The AI provider could not do the reading just now, so nothing was read and nothing on this receipt was changed. Please try again later.',
+  // A stored file with nothing in it: trying again cannot help.
+  fileEmpty: 'This file is empty, so nothing was sent. Type the details in.',
   // The model answered and the answer could not be saved. The file was sent.
   notSaved: 'The receipt was sent and read, but what was read could not be saved. Type the details in, or try again.',
   gone: 'That receipt no longer exists.',
