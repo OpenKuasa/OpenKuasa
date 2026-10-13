@@ -9,6 +9,7 @@
 import { type ExpenseCategory, EXPENSE_MESSAGES, type ExpenseRow, type ExpenseStatus, saveExpenseInput } from './expenses';
 import { can } from '@/lib/auth/permissions';
 import type { OrgRole } from '@/lib/auth/current-org';
+import { localIsoDate } from './bill-math';
 import { rm, typedNumber } from './format';
 import { displayDate } from './view-helpers';
 
@@ -185,6 +186,11 @@ export function expensesScreenPlan(role: OrgRole, isDemo: boolean) {
   const canEdit = canEditExpenses(role, isDemo);
   const canDecide = canEdit && can(role, 'sign-off-finance');
   return { canEdit, canDecide, readsContacts: canEdit, readsCategories: canEdit, readsAccounts: canDecide };
+}
+
+/** Opening the Mark paid card for a row: its default date is the person's own date, read from their clock when they open it, never the server's. */
+export function payCardOpening(row: ExpenseRow, now: Date = new Date()) {
+  return { kind: 'pay' as const, today: localIsoDate(now), row };
 }
 
 /** The Mark paid card is drawn only for a writer who may decide, and only while it is the card that is open. */

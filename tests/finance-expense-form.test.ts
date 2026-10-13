@@ -16,6 +16,7 @@ import {
   expensePayload,
   expensePaymentNote,
   expensesScreenPlan,
+  payCardOpening,
   showsPayCard,
   expenseSaveHint,
   isPartPaid,
@@ -344,5 +345,12 @@ describe('who the Expenses screen reads for, and who is drawn the Mark paid card
     expect(showsPayCard(undefined, 'pay')).toBe(false);
     expect(showsPayCard(writer(true), 'form')).toBe(false);
     expect(showsPayCard(writer(true), undefined)).toBe(false);
+  });
+  it('opens the card with the date on the person\'s own clock, not the server\'s', () => {
+    // Built from local parts, so whatever zone the machine is in, it is the 14th for the person.
+    const late = new Date(2026, 9, 14, 23, 30);
+    const early = new Date(2026, 9, 14, 0, 30);
+    expect(payCardOpening(row(), late)).toEqual({ kind: 'pay', today: '2026-10-14', row: row() });
+    expect(payCardOpening(row(), early).today).toBe('2026-10-14');
   });
 });

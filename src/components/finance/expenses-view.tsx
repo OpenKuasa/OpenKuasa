@@ -45,6 +45,7 @@ import {
   expensePaymentNote,
   expenseQuestion,
   isPartPaid,
+  payCardOpening,
   showsPayCard,
   writtenExpenseTitle,
 } from '@/lib/finance/expense-form';
@@ -207,7 +208,7 @@ export function ExpensesView({
           label: 'Mark paid',
           icon: Banknote,
           opens: true,
-          onSelect: () => ask({ kind: 'pay', today: localIsoDate(new Date()), row }),
+          onSelect: () => ask(payCardOpening(row)),
         };
     }
   };
