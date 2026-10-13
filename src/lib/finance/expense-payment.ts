@@ -244,7 +244,7 @@ export function expensePayHint(row: ExpenseRow, gone = false): string {
   if (left <= 0) return M.nothingLeft;
   const against: string[] = [];
   if (row.paid > 0) against.push(`${rm(row.paid)} is paid`);
-  if (row.held > 0) against.push(`${rm(row.held)} is in a payment to be paid`);
+  if (row.held > 0) against.push(`${rm(row.held)} is in a payment not yet paid`);
   const still = `${rm(left)} is still to pay on this expense`;
   return (
     `${against.length ? `${still}: ${against.join(' and ')}.` : `${still}.`} Paying less leaves the rest for another payment. ` +

@@ -218,10 +218,10 @@ describe('the Mark paid card', () => {
       `RM 90.00 is still to pay on this expense: RM 30.00 is paid. Paying less leaves the rest for another payment.${VOUCHER}`,
     );
     expect(expensePayHint(approved({ held: 20 }))).toBe(
-      `RM 100.00 is still to pay on this expense: RM 20.00 is in a payment to be paid. Paying less leaves the rest for another payment.${VOUCHER}`,
+      `RM 100.00 is still to pay on this expense: RM 20.00 is in a payment not yet paid. Paying less leaves the rest for another payment.${VOUCHER}`,
     );
     expect(expensePayHint(approved({ paid: 30, held: 20 }))).toBe(
-      `RM 70.00 is still to pay on this expense: RM 30.00 is paid and RM 20.00 is in a payment to be paid. Paying less leaves the rest for another payment.${VOUCHER}`,
+      `RM 70.00 is still to pay on this expense: RM 30.00 is paid and RM 20.00 is in a payment not yet paid. Paying less leaves the rest for another payment.${VOUCHER}`,
     );
     // An expense that can no longer be paid says only that: nothing about a voucher that will not be recorded.
     expect(expensePayHint(approved({ paid: 120, display_status: 'paid' }))).toBe('Nothing is left to pay on this expense.');
