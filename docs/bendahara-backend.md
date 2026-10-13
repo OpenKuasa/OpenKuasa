@@ -49,6 +49,8 @@ the data layer, with unit tests; the client components only draw them.
 | `receipt-inbox.ts` | The inbox's writes and its review form: record an upload (`registerReceipt`), review (`reviewReceipt`), delete (`deleteInboxReceipt`), read a receipt's path and sign a download link, and the sentences for `FIN11`, `FIN23`, `FIN24` |
 | `receipt-files-server.ts` | Server only: reads a stored file's first bytes before it is opened (`storedFileCheck`), removes a deleted receipt's file (`removeReleasedReceiptFile`) and runs the clean-up (`cleanReceiptFiles`) |
 | `receipt-match.ts` | Matching a receipt: the schemas and writes that make an expense or a draft bill from one (`receiptToExpense`, `receiptToBill`), tie it to a document that exists (`attachReceipt`) and untie it (`detachReceipt`); the read behind the paperclip on Expenses and Supplier Bills (`listAttachedReceipts`, `receiptsByDocument`); how a matched receipt's document stands (`matchedDocuments`), what a row offers (`receiptMatchActions`), the two forms pre-filled from a receipt, the attach picker's list, and the three lists of screens its actions refresh |
+| `receipt-reading.ts` | Reading a receipt with AI, the rules that are not the model's, pure: who is offered it (`receiptReadingPlan`, `canOfferReading`), what the person is asked before anything is sent (`readingQuestion`) or told when it cannot start (`readingBlocker`), every refusal's sentence, the model's instructions and the schema of its answer, what is kept of an answer (`normalizeReading`), the category list as the model sees it (names only) and how its number is turned back into a category (`categoryAt`), and how long a suggested category stands on the screen (`standingSuggestion`) |
+| `receipt-reader.ts` | Server only: which model reads receipts (`receiptModelId`, from the environment, no id in code), whether the workspace has a key (`workspaceKeyState`), the receipt as the reading needs it (`getReceiptForReading`), the whole stored file through the caller's link (`receiptBytes`, `sendableAs`), the one call to the model (`readReceiptWithModel`: no tool, no retry, 45 seconds), and the write of what came back (`setReceiptExtraction`) |
 | `rfqs.ts` | RFQs (requests for quotation). Described here only for the link a copied RFQ keeps: `saveRfqInput` takes `source_rfq_id`, the RFQ a new draft was copied from, which must be an id, and `saveRfq` sends it to `finance_save_rfq`; a list row carries `source_rfq_id` (the first RFQ of its group, or null) and `quoted_at` (when the supplier's answer was recorded; until then the list and its export show no total, as prices the buyer typed are not a quote); `getRfqGroup` reads the RFQs of one RFQ's group that have gone to their supplier, with their lines, in the order they were made. `saveRfq` words `FIN11` on a new copy with a sentence of its own (`RFQ_MESSAGES.copiedFromGone`) |
 | `rfq-form.ts` | The RFQ form. A form opened by Copy to another supplier (`rfqFormCopiedFrom`) remembers the RFQ it was copied from, and `rfqPayload` sends it with the new draft. When that save is refused because the RFQ it was copied from is gone, `rfqFormAfterRefusal` drops the link, so saving again saves the RFQ on its own; the shared card applies it through `DocumentFormKind.afterRefusal`, which no other form has |
 | `rfq-compare.ts` | Compare quotes, pure. A group is the first RFQ and every RFQ that names it (`rfqGroupId`); an RFQ can be compared once it and at least one other of its group have gone to their supplier (`comparableRfqIds`), and `rfqActions(row, comparable)` in `purchase-views.ts` then offers Compare quotes in every status but draft. `compareQuotes` lays the group out as a row for each item and a cell for each RFQ: lines are matched by product, or else by description, in the same unit and pack size; only an RFQ whose answer was recorded (`quoted_at`) has prices; the lowest price is for one unit with SST added, compared to four decimals, marked on every supplier tied at it and only when at least two priced the line; a cell worded differently from its row keeps its own description. Also the question the card asks before making an order (`orderableRfq`) and what deleting a draft costs the RFQs copied from it (`rfqCopyCount`, `rfqDeleteWarning`) |
@@ -1325,7 +1327,8 @@ question. Who is given the transfer actions is `bankingAccess` in
 A receipt is a photo or a PDF in the private storage bucket
 `finance-receipts`, and one row of `finance_receipts` that says what was read
 from it and what it backs. The screen uploads, opens, reviews, matches and
-deletes; nothing reads a receipt with a model yet (stage 7c). The migration
+deletes, and on a person's press sends one receipt to a model to be read
+("Reading with AI", below). The migration
 creates new objects only: it replaces nothing the write guards or Banking
 defined, and no function here posts, numbers, pays or voids.
 
@@ -1376,6 +1379,76 @@ while the receipt is in review, and stamps `extracted_at` when the reading
 worked (a failed one clears it): the screen says "Read by AI" from that stamp
 alone, and only until it leaves review; `finance_review_receipt` is a person's and
 moves a receipt in review to unmatched.
+
+**Reading with AI.** No migration: the function and the columns above are the
+whole of what the database has for it. "Read with AI" is in the row menu of a
+receipt that is in review and has a file, for anyone who may edit (never a
+viewer, never the demo). It opens a card that says what will be sent, to
+whom, and on whose key and credit; **nothing is sent until "Send to be read"
+is pressed**, and nothing else in the app calls `readReceiptAction`: no
+upload, page load, effect or scheduled run reads a receipt. The action, in
+this order, each refusal costing nothing and sending nothing:
+
+1. refuses the demo and anyone who may not edit, before a client is made;
+2. finds the model id in the environment: `OPENKUASA_MODEL_RECEIPTS`, else
+   `OPENKUASA_MODEL_WORKER`, else "Reading receipts is not set up on this
+   server." No model id is written in code for this feature, and the
+   fallback ids of `src/lib/ai/provider.ts` are not used. The model must take
+   images and PDFs;
+3. reads the receipt as the caller: gone, no longer in review, no file, or a
+   stored HEIC or HEIF (never sent) each stop here;
+4. asks as the caller whether the workspace has an AI key
+   (`org_ai_key_status`), then opens the sealed key on the server for the
+   session's own workspace (`readWorkspaceKey`). **The workspace's own key
+   or nothing**: the platform's key (`OPENROUTER_API_KEY`) and the free chat
+   questions (`consume_free_question`) are never used for a receipt, so a
+   workspace with no key is told to add one whether or not the person has
+   free questions left;
+5. signs a one-minute link as the caller, fetches the whole file (10 MB at
+   most, counted as it arrives) and checks its first bytes against the
+   receipt's type;
+6. reads the workspace's active expense categories as the caller. Their
+   names, the first sixty, go to the model as a numbered list; **no id of
+   anything is sent**. If they cannot be read the receipt is read without a
+   list;
+7. counts one turn of the person's daily 200 on the workspace's key
+   (`consume_ai_quota`, shared with chat), last, so no refusal above uses a
+   turn;
+8. calls the model once (`generateText` with `Output.object`): the
+   instructions, one sentence, the category list and the file as a file part
+   of the user's message. No tool, no history, no retry, 45 seconds at most.
+   One log line with the call's size (`agent=receipt-reader`) and nothing of
+   the receipt;
+9. checks the answer field by field (`normalizeReading`): a vendor cleaned
+   and at most 200 characters; a real date from 2000 on and not after
+   tomorrow; an amount above 0, to the sen, within the column; SST no more
+   than the amount; a category number that is a whole number within the
+   list. A field that fails is dropped; an answer with no vendor, date or
+   amount is a failed reading. Anything else the model says is discarded;
+10. writes as the caller with `finance_set_receipt_extraction`: a reading's
+    four details (stamping `extracted_at`), or for a failed reading the fixed
+    sentence "The receipt could not be read." **with the four values the
+    receipt held sent back**, because the function sets all four from what
+    it is given and an error alone would clear what a person had typed. When
+    the provider refuses the key (401) or says there is no credit (402)
+    nothing is written. If the function answers false (someone reviewed or
+    matched the receipt during the call) the reading is dropped.
+
+What was read is a suggestion. After a reading the review card opens on the
+receipt, with "Read by AI. Check the figures before you use them." above its
+boxes, and the receipt stays in "To review" until a person saves the review
+or makes an expense or a bill from it. The suggested category is not stored
+anywhere: the action answers with it (the server turns the model's number
+back into a category from its own list), the screen keeps it until the page
+is reloaded, the review card names it, and "Create expense" starts with it
+chosen and says "the category was suggested by AI". A draft bill is not given
+it. A receipt's own words cannot steer anything: the model has no tool, sees
+nothing of the workspace but category names, and only the five checked
+fields of its answer are used, each drawn as text.
+
+Pressing "Read with AI" on a receipt that was sent before says so, and that
+it uses credit again, before it is sent again; a new reading replaces the
+old one while the receipt is in review.
 
 **Matching.** A receipt names one expense or one bill of its workspace, or
 neither, and its status is `matched` exactly while it names one (a check
@@ -2573,10 +2646,28 @@ with no date).
   migration up to `20261031090300` applied. Two parts of it run as the
   database owner with a person's id in the claims, because posting two sides
   by hand is no longer something a signed-in person can try.
-- The Receipts Inbox uploads, opens, reviews, matches and deletes. Nothing
-  reads a receipt with a model yet: `finance_set_receipt_extraction` is proven
-  by `supabase/tests/bendahara_receipts_check.sql` and nothing in TypeScript
-  calls it.
+- Reading a receipt with AI sends the whole file, with whatever a phone wrote
+  into it (the question says so), and the names of up to sixty expense
+  categories. It is one call with no retry: a model slower than 45 seconds
+  counts as "nothing could be read" and has still used a turn of the daily
+  limit and possibly credit. The limit is the person's 200 turns a day on
+  the workspace's key, shared with chat; a workspace has no ceiling of its
+  own. A multi-page PDF is sent whole. How well the configured model reads a
+  Malaysian receipt, and whether it takes a PDF, is the model's: a model
+  that cannot answers "nothing could be read".
+- A suggested category is kept on the screen only. Reloading the page, or
+  opening the inbox elsewhere, forgets it; the four details are stored.
+  Storing it would need a column on `finance_receipts`, so a migration. If
+  someone else has the same receipt read again meanwhile, this screen keeps
+  showing the category from its own reading until it is reloaded.
+- The inbox's route file is generated and carries no `maxDuration`, so on a
+  host that limits how long a server action may run, a reading must fit that
+  host's default. The production host is a persistent server with no such
+  limit.
+- While a receipt is being read (up to a minute), the other actions of that
+  browser tab may wait: the framework today sends a page's server actions one at a
+  time, so a download, a review or an upload's recording started meanwhile
+  begins when the reading ends. The card says so.
 - Matching: a receipt matched while still in review keeps whatever its four
   details held, so a matched row can show dashes. The picker lists eight
   documents at a time and searches what the page loaded. An expense's row has
@@ -2667,14 +2758,20 @@ with no date).
   runs as the caller, so the columns cannot be closed without making it run as
   its owner, and it could then be called by hand all the same.
 - `finance_set_receipt_extraction` stamps `extracted_at` for any reading given
-  with no error, an empty one included. Whoever calls it (the reader, when it
-  exists) must report a reading that found nothing as a failure.
+  with no error, an empty one included. Whoever calls it must report a
+  reading that found nothing as a failure; the reader does
+  (`normalizeReading` answers nothing, and the action writes a failure).
+- `finance_set_receipt_extraction` sets all four details from what it is
+  given, error or not, so a failure written with the error alone clears what
+  a person typed. The action sends the values the receipt held back with the
+  error; any other caller must do the same.
 - `finance_set_receipt_extraction` runs as the caller, like every finance
   function, so someone who may edit can call it by hand and a receipt would
   then read "Read by AI". The app only calls it with a model's answer.
 - A HEIC or HEIF that could not be turned into a JPEG is stored as it is. No
-  browser but Safari draws one, so it is a download, and it is not read by a
-  model unless the configured model is known to take it.
+  browser but Safari draws one, so it is a download, and it is never sent to
+  a model: "Read with AI" on one says to type the details in or upload it
+  again as a JPG or PNG.
 - A bill made from a receipt is a draft with no number, so the inbox reads
   "Draft bill" until it is posted.
 - The demo's receipts have no file.
@@ -2687,7 +2784,10 @@ with no date).
   "Read by AI", so a model's figures can sit on a matched row with no caution.
   Stage 7d makes this the usual path for an expense or a bill made from a
   receipt, where the person has just checked the figures in the form; for a
-  plain attach nobody has. Stage 7c decides whether the caution should stay.
+  plain attach nobody has. The forms that make an expense or a draft bill from
+  a receipt say "These figures were read by AI: check them against the
+  receipt." while the reading still waits for a person; a plain attach copies
+  no figure into the document and says nothing.
 - The room limits (1 GB a workspace, 20 GB the bucket) add up every object in
   the bucket on each upload. That is one index scan today; it wants a stored
   total if the bucket grows to hundreds of thousands of files.
