@@ -57,6 +57,21 @@ describe('the bills list', () => {
     const cells = html.match(/<td[^>]*>[^<]*<\/td>/g) ?? [];
     expect(cells.filter((c) => c.includes('PO-0003'))).toHaveLength(1);
   });
+
+  it('draws the paperclip in the row of a bill that has a receipt, as a button and not a link, in a column wide enough for its name', () => {
+    const rows = [bill('a'), bill('b', { bill_no: 'BILL-0002' })];
+    const receipts = {
+      a: [{ id: 'r1', file_name: 'kedai-kertas.pdf', mime_type: 'application/pdf' as const, has_file: true, expense_id: null, bill_id: 'a' }],
+    };
+    const linkOf = vi.fn(async () => ({ ok: false as const, error: 'unused' }));
+    const html = renderToStaticMarkup(
+      <BillsView rows={rows} view={billsView(rows, [], '2026-10-09')} held={{}} receipts={receipts} receiptLinkOf={linkOf} />,
+    );
+    expect(html).toContain('aria-label="Download the receipt kedai-kertas.pdf"');
+    expect(html.match(/Download the receipt/g)).toHaveLength(1);
+    expect(html).not.toContain('<a ');
+    expect(html).toMatch(/<td[^>]*class="[^"]*\bmin-w-36\b[^"]*"[^>]*><span[^>]*>BILL-0001<\/span>/);
+  });
 });
 
 const supplier = (id: string, name: string): FinanceContact =>

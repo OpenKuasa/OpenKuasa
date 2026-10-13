@@ -30,6 +30,19 @@ describe('the Expenses screen', () => {
     expect(html).not.toContain('Actions');
     expect(html).not.toContain('aria-haspopup');
   });
+  it('draws the paperclip in the row of an expense that has a receipt, as a button and not a link', () => {
+    const receipts = {
+      [SAMPLE_EXPENSES[0].id]: [
+        { id: 'r1', file_name: 'petrol-5-oct.png', mime_type: 'image/png' as const, has_file: true, expense_id: SAMPLE_EXPENSES[0].id, bill_id: null },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      <ExpensesView rows={SAMPLE_EXPENSES} today={SAMPLE_TODAY} followClock={false} receipts={receipts} receiptLinkOf={never} />,
+    );
+    expect(html).toContain('aria-label="Download the receipt petrol-5-oct.png"');
+    expect(html.match(/Download the receipt/g)).toHaveLength(1);
+    expect(html).not.toContain('<a ');
+  });
   it('has them for a writer (so the test above would notice them)', () => {
     const html = render(writer);
     expect(html).toContain('New expense');
