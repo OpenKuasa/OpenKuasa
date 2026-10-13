@@ -47,6 +47,7 @@ the data layer, with unit tests; the client components only draw them.
 | `receipt-files.ts` | What is decided about a file before it is uploaded: its type from its first bytes (`sniffReceiptType`), the path it is stored at, the name kept to show (`cleanFileName`), what a refused upload means, and the upload queue's states |
 | `receipt-inbox.ts` | The inbox's writes and its review form: record an upload (`registerReceipt`), review (`reviewReceipt`), delete (`deleteInboxReceipt`), read a receipt's path and sign a download link, and the sentences for `FIN11`, `FIN23`, `FIN24` |
 | `receipt-files-server.ts` | Server only: reads a stored file's first bytes before it is opened (`storedFileCheck`), removes a deleted receipt's file (`removeReleasedReceiptFile`) and runs the clean-up (`cleanReceiptFiles`) |
+| `receipt-match.ts` | Matching a receipt: the schemas and writes that make an expense or a draft bill from one (`receiptToExpense`, `receiptToBill`), tie it to a document that exists (`attachReceipt`) and untie it (`detachReceipt`); the read behind the paperclip on Expenses and Supplier Bills (`listAttachedReceipts`, `receiptsByDocument`); how a matched receipt's document stands (`matchedDocuments`), what a row offers (`receiptMatchActions`), the two forms pre-filled from a receipt, the attach picker's list, and the three lists of screens its actions refresh |
 | `rfqs.ts` | RFQs (requests for quotation). Described here only for the link a copied RFQ keeps: `saveRfqInput` takes `source_rfq_id`, the RFQ a new draft was copied from, which must be an id, and `saveRfq` sends it to `finance_save_rfq`; a list row carries `source_rfq_id` (the first RFQ of its group, or null) and one RFQ read with its lines carries `quoted_at` (when the supplier's answer was recorded); `getRfqGroup` reads the RFQs of one RFQ's group that have gone to their supplier, with their lines, in the order they were made. `saveRfq` words `FIN11` on a new copy with a sentence of its own (`RFQ_MESSAGES.copiedFromGone`) |
 | `rfq-form.ts` | The RFQ form. A form opened by Copy to another supplier (`rfqFormCopiedFrom`) remembers the RFQ it was copied from, and `rfqPayload` sends it with the new draft. When that save is refused because the RFQ it was copied from is gone, `rfqFormAfterRefusal` drops the link, so saving again saves the RFQ on its own; the shared card applies it through `DocumentFormKind.afterRefusal`, which no other form has |
 | `rfq-compare.ts` | Compare quotes, pure. A group is the first RFQ and every RFQ that names it (`rfqGroupId`); an RFQ can be compared once it and at least one other of its group have gone to their supplier (`comparableRfqIds`), and `rfqActions(row, comparable)` in `purchase-views.ts` then offers Compare quotes in every status but draft. `compareQuotes` lays the group out as a row for each item and a cell for each RFQ: lines are matched by product, or else by description, in the same unit and pack size; only an RFQ whose answer was recorded (`quoted_at`) has prices; the lowest price is for one unit with SST added, compared to four decimals, marked on every supplier tied at it and only when at least two priced the line; a cell worded differently from its row keeps its own description. Also the question the card asks before making an order (`orderableRfq`) and what deleting a draft costs the RFQs copied from it (`rfqCopyCount`, `rfqDeleteWarning`) |
@@ -132,10 +133,17 @@ The Receipts Inbox has its own actions file,
 `reviewReceiptAction`, `deleteReceiptAction` and `receiptLinkAction`. The
 first three use the same guard as every finance action and refresh
 `/finance/receipts-inbox` only; the last is a read, open to anyone who can see
-the receipt. When matching arrives, deleting a pending expense or a draft
-bill, and posting a bill (which gives it the number the inbox shows), will
-have to refresh `/finance/receipts-inbox` too, and the receipt actions the
-expense and bill screens.
+the receipt. Four more match a receipt, behind the same guard:
+`receiptToExpenseAction` refreshes what saving an expense refreshes
+(`RECEIPT_EXPENSE_PATHS`), `receiptToBillAction` what saving a bill refreshes
+(`RECEIPT_BILL_PATHS`), and `attachReceiptAction` and `detachReceiptAction`
+the inbox, Expenses and Supplier Bills (`RECEIPT_TIE_PATHS`). A `'use server'`
+file may export only async functions, so the first two lists are written a
+second time in `receipt-match.ts`; `tests/finance-receipt-match.test.ts` fails
+if either differs from `EXPENSE_PATHS` or `BILL_PATHS` in `actions.ts`.
+`BILL_PATHS` includes `/finance/receipts-inbox`: posting a bill gives it the
+number the inbox shows, and deleting a draft sends its receipt back to
+Unmatched (`EXPENSE_PATHS` has had the inbox since the expense forms).
 
 Every action refuses a viewer and the demo workspace before the data layer is
 reached. Without that, a viewer's void or delete would come back from the
@@ -543,7 +551,10 @@ For the Receipts Inbox (stage 7d): `ExpenseFormCard` takes `initial` (fields
 to start a new form with) and `actions.save` (whatever saves it), so "Create
 expense" opens the same card pre-filled and saves through
 `finance_receipt_to_expense`; `saveExpenseInput` without its `id` is what
-that function is given; "Attach receipt" is one more `ExpenseAction`.
+that function is given. That is built: see "Matching, on the screen" under
+Receipts Inbox. Attaching starts from the receipt, in the inbox; an expense's
+row shows a paperclip for each receipt tied to it and has no "Attach receipt"
+item of its own.
 
 The view `finance_expense_totals` adds the category's and the vendor's name,
 `paid` (posted money out allocated to the expense), `held` (what payments not
@@ -998,8 +1009,8 @@ question. Who is given the transfer actions is `bankingAccess` in
 
 A receipt is a photo or a PDF in the private storage bucket
 `finance-receipts`, and one row of `finance_receipts` that says what was read
-from it and what it backs. Nothing in the app writes either yet: the screen
-reads `finance_receipt_inbox`, and the functions below wait for their buttons. The migration
+from it and what it backs. The screen uploads, opens, reviews, matches and
+deletes; nothing reads a receipt with a model yet (stage 7c). The migration
 creates new objects only: it replaces nothing the write guards or Banking
 defined, and no function here posts, numbers, pays or voids.
 
@@ -1064,6 +1075,58 @@ approved expense or a posted bill is for an owner or admin
 (`private.finance_may_decide`, `FIN14`); from a pending or rejected expense or
 a draft bill, for anyone who may edit. A matched receipt is untied before it
 is deleted (`FIN23`).
+
+**Matching, on the screen.** `receipt-match.ts` holds the writes and the
+rules, `receipt-match-cards.tsx` the cards, and the inbox's row menu offers
+them. A receipt tied to nothing (in review or unmatched) offers "Create
+expense", "Create draft bill" and "Attach to expense or bill"; a matched one
+offers "Untie". None of this needed a migration.
+
+| | Owner, admin | Member | Viewer, demo |
+|---|---|---|---|
+| Create expense from a receipt | Yes: approved in the same call | Yes: waits as Pending approval | No menu; the action answers "You do not have permission to make changes here." |
+| Create draft bill from a receipt | Yes, a draft | Yes, a draft; posting it on Supplier Bills is refused (`FIN14`) | No |
+| Attach to a pending or approved expense, or a draft or posted bill | Yes | Yes; told that an approved expense or a posted bill keeps the receipt | No |
+| Untie from a pending or rejected expense, or a draft or void bill | Yes | Yes | No |
+| Untie from an approved expense or a posted bill | Yes | Not offered; one line above the table says who can. A direct call answers `FIN14`: "Only an owner or admin can untie a receipt from an approved expense or a posted bill. Ask one of them to do this." | No |
+| Download a receipt from its expense's or bill's row (the paperclip) | Yes | Yes | A viewer yes; the demo's receipts have no file |
+
+- "Create expense" opens the expense form (`ExpenseFormCard`) started from the
+  receipt (`expenseFormFromReceipt`: its date, or the person's own today; its
+  vendor as a typed name, or as the contact when exactly one active contact
+  has that very name; its amount and SST) and saves through
+  `finance_receipt_to_expense`. The schema is the expense's own
+  (`saveExpenseInput`), so `NaN`, an amount of 0 and SST over the amount are
+  refused in the expense's sentences before the database is asked; an `id` is
+  never sent.
+- "Create draft bill" opens the bill form (`BillFormCard`, with `initial` and
+  `draftOnly`) with one line: unit price the receipt's amount, SST rate 0
+  (a receipt's amount has its SST inside it, a bill line's goes on top), the
+  supplier chosen when exactly one active supplier has the vendor's name. It
+  saves through `finance_receipt_to_bill`. **Nothing made from a receipt is
+  posted:** the form has no second button (`draftOnly` on
+  `DocumentFormCard`), and neither `receipt-match.ts` nor the actions file
+  names a function that posts (a unit test reads both files).
+- "Attach to expense or bill" lists expenses that are pending or approved and
+  bills that are not void (`attachCandidates`), those of the receipt's own
+  amount first. A rejected expense is not offered though the database would
+  take it.
+- A receipt in review can be matched without being reviewed first: the form
+  is the review. The receipt keeps its own four details as they were.
+- Under "Matched to", a second line says how the document stands
+  (`matchedDocuments`: Pending approval, Approved, Paid, Rejected, Draft,
+  Posted, Posted, overdue, Void). For that the inbox's loader reads the
+  workspace's expenses and bills for everyone, once the inbox holds a receipt.
+- Expenses and Supplier Bills each make one more read
+  (`listAttachedReceipts`) and draw `AttachedReceipts` in the vendor's and the
+  bill number's cell. The paperclip calls `receiptLinkAction`: the same
+  one-minute link, signed as the person, after the server has read the file's
+  first bytes, saved as a download.
+- When a pending or rejected expense or a draft bill is deleted, its receipts
+  go back to Unmatched (the foreign key clears the column and the guard sets
+  the status); the receipts and their files are kept. An approved expense and
+  a posted bill cannot be deleted. A bill that is voided keeps its receipts,
+  which anyone who may edit can then untie.
 
 **When the document goes.** The two foreign keys are
 `ON DELETE SET NULL (expense_id)` and `(bill_id)`: deleting a pending or
@@ -1563,7 +1626,7 @@ quotation, a credit note or a refund by the file that made the call.
 | `FIN15` | A receipt, a voucher or an expense names the wrong thing: a receipt is for invoices or for an income category, a voucher for expenses or for an expense category, never both and never neither; a receipt for invoices that is being posted must be exactly its split and carry no category; an expense needs an expense category of its own workspace. `cash-receipts.ts` words it for a receipt: "A receipt needs either invoices that add up to its amount, or an income category that still exists. Edit it and try again." The voucher and the expense meet it with their forms |
 | `FIN23` | A receipt's state does not allow it: it starts in review, tied to nothing; it does not move to another workspace; its file, name, type, size, uploader and upload time do not change; a matched receipt is untied before it is deleted (the guard, for any delete), and `finance_attach_receipt`, `finance_receipt_to_expense` and `finance_receipt_to_bill` refuse a receipt that is already matched. A plain update of `expense_id` or `bill_id` by a writer is allowed by the grants, and the guard moves the receipt to the new document (with `FIN14` when it leaves an approved expense or a posted bill and the writer cannot decide). `receipt-inbox.ts` words it for deleting a matched receipt. |
 | `FIN24` | The file of a receipt: there is none; it is not in the bucket; it was uploaded more than 30 minutes ago or is waiting to be removed; it is already a receipt; it is not the type its name says; its path names none of the five types. `receipt-inbox.ts` words it for recording an upload. |
-| `FIN25` | A void bill takes no receipt. Not worded yet. |
+| `FIN25` | A void bill takes no receipt. `receipt-match.ts`: "A void bill takes no receipt. Choose another bill." |
 | `FIN30` | An account with payments still to be paid or waiting for approval is not archived. `bank-accounts.ts`: "This account has payments that are still to be paid or waiting for approval. Pay, reject or delete them, then archive it." (`FIN14` on an account is an opening balance from someone who is not an owner or admin, or an owner who has not given their second factor: "Only an owner or admin can set or change an opening balance. If you are one, sign in again with your second step." The guard counts payments in both directions; the screen's archive question warns about money out only.) |
 | `FIN37` | Money does not move on an archived account: a payment is not started on one, moved onto one, or sent for approval, approved, scheduled, posted or marked paid while its account is archived. `result.ts` has the one sentence (`ACCOUNT_ARCHIVED`), which `money.ts`, `refunds.ts` and `cash-receipts.ts` each list in their own map; `transfers.ts` words it as it words `FIN16`. A member recording a payment in, a refund or a paid-now payment out on an archived account is answered `FIN37` (the draft is refused before the sign-off rule), where before this rule they were answered `FIN14`; posting, approving and marking paid by a member still answer `FIN14`. |
 
@@ -2126,11 +2189,19 @@ with no date).
   migration up to `20261031090300` applied. Two parts of it run as the
   database owner with a person's id in the claims, because posting two sides
   by hand is no longer something a signed-in person can try.
-- The Receipts Inbox uploads, opens, reviews and deletes. Nothing reads a
-  receipt with a model yet, and nothing ties one to an expense or a bill: the
-  database functions for both are proven by
-  `supabase/tests/bendahara_receipts_check.sql` and
-  `tests/bendahara-receipts.test.ts`, and nothing in TypeScript calls them.
+- The Receipts Inbox uploads, opens, reviews, matches and deletes. Nothing
+  reads a receipt with a model yet: `finance_set_receipt_extraction` is proven
+  by `supabase/tests/bendahara_receipts_check.sql` and nothing in TypeScript
+  calls it.
+- Matching: a receipt matched while still in review keeps whatever its four
+  details held, so a matched row can show dashes. The picker lists eight
+  documents at a time and searches what the page loaded. An expense's row has
+  no "Attach receipt" item: attaching starts from the receipt. Two people
+  matching one receipt at the same moment: the second is told "This receipt is
+  already matched. Untie it first." A receipt can stay matched to a rejected
+  expense or a void bill until someone unties it; the second line under
+  "Matched to" is what shows it. The inbox's loader reads every expense and
+  every bill of the workspace once the inbox holds a receipt.
 - The browser's check of a file's first bytes can be skipped by someone who
   calls the storage API themselves. Such a file is stored under one of the
   five types; the server's own check then refuses to open it, and it is never
@@ -2230,7 +2301,9 @@ with no date).
 - A receipt that leaves review without a person's review (tied by
   `finance_attach_receipt`, or turned into an expense or a bill) stops saying
   "Read by AI", so a model's figures can sit on a matched row with no caution.
-  To be decided in 7c and 7d.
+  Stage 7d makes this the usual path for an expense or a bill made from a
+  receipt, where the person has just checked the figures in the form; for a
+  plain attach nobody has. Stage 7c decides whether the caution should stay.
 - The room limits (1 GB a workspace, 20 GB the bucket) add up every object in
   the bucket on each upload. That is one index scan today; it wants a stored
   total if the bucket grows to hundreds of thousands of files.
