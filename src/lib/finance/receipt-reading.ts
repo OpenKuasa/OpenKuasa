@@ -166,7 +166,7 @@ const CATEGORY_NAME_MAX = 80;
  * back into the category on the server.
  */
 export function offeredCategoryNames(categories: { name: string }[]): string[] {
-  return categories.slice(0, RECEIPT_CATEGORY_MAX).map((c) => cleanTypedText(c.name).slice(0, CATEGORY_NAME_MAX));
+  return categories.slice(0, RECEIPT_CATEGORY_MAX).map((c) => Array.from(cleanTypedText(c.name)).slice(0, CATEGORY_NAME_MAX).join(''));
 }
 
 /** The numbered list in the user's turn, or null when the workspace has no category to offer. */
@@ -224,7 +224,7 @@ const round2 = (v: number) => Math.round(v * 100) / 100;
 export function normalizeReading(raw: unknown, today: string, categoryCount = 0): ReceiptReadingFields | null {
   const parsed = receiptReadingSchema.safeParse(raw);
   if (!parsed.success) return null;
-  const cleaned = parsed.data.vendor === null ? '' : cleanTypedText(parsed.data.vendor);
+  const cleaned = parsed.data.vendor === null ? '' : cleanTypedText(parsed.data.vendor.replace(/\s+/g, ' '));
   const vendor = cleaned !== '' && cleaned.length <= RECEIPT_NAME_MAX ? cleaned : null;
   const date = parsed.data.receipt_date;
   const receipt_date = date !== null && isIsoDate(date) && date >= EARLIEST_DATE && date <= addDays(today, 1) ? date : null;
@@ -279,7 +279,7 @@ export function reviewCardKey(row: Pick<InboxReceiptRow, 'id' | 'extracted_at'>,
 
 /** The review card's line about a suggested category. */
 export function suggestedCategoryLine(suggestion: SuggestedCategory): string {
-  return `AI suggested the category ${suggestion.name}. It is chosen for you if you make an expense from this receipt, and you can change it there.`;
+  return `AI suggested the category ${suggestion.name}. It is chosen for you if you make an expense from this receipt, and you can change it there. This suggestion is for this visit only: if you reload the page, it is gone.`;
 }
 
 /**
