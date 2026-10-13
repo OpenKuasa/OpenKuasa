@@ -267,6 +267,23 @@ requests the public pages, every account screen and every product screen, and fa
 any of them answers with something other than a page or a redirect. It works
 without a Supabase project. Set `SMOKE_PORT` if port 3100 is taken.
 
+### Keeping the database migrated
+
+After every pull from main, bring the Supabase project in `.env.local` up to
+date with `supabase/migrations`:
+
+```bash
+pnpm db:migrate           # lists what the project has not had; changes nothing
+pnpm db:migrate --apply   # applies those, oldest first
+```
+
+Code that needs a table or column the database lacks fails, and some pages then
+quietly show their samples instead of your data. The script uses
+`OPENKUASA_SUPABASE_TOKEN` and the Supabase Management API, so no database
+password is needed. Each migration is applied in one transaction with its
+record in `supabase_migrations.schema_migrations`, and the run stops at the
+first one that fails.
+
 ### Testing against a live Supabase project
 
 Some tests (`tests/*.rls.test.ts` and a few others) run against the Supabase

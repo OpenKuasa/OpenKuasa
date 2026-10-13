@@ -17,7 +17,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "eval:tuah": "vitest run --config vitest.evals.config.mts",
-    "smoke:routes": "node scripts/smoke-routes.mjs"
+    "smoke:routes": "node scripts/smoke-routes.mjs",
+    "db:migrate": "node scripts/db-migrate.mjs"
   },
   "dependencies": {
     "@ai-sdk/react": "^4.0.136",
