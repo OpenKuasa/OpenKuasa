@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import { type SupabaseClient, createClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
-import { beforeCleanup, createOrg, joinDemo, liveClient, signInAnon, signInOwner } from './helpers/live-workspaces';
+import { beforeCleanup, createConfirmedTestUser, createOrg, joinDemo, liveClient, signInAnon, signInOwner } from './helpers/live-workspaces';
 import { RECEIPT_FILE_MESSAGES, RECEIPT_SNIFF_BYTES, inboxReceiptPath, uploadFailure } from '@/lib/finance/receipt-files';
 import { cleanReceiptFiles, removeReleasedReceiptFile, storedFileCheck } from '@/lib/finance/receipt-files-server';
 import {
@@ -13,6 +13,16 @@ import {
   reviewReceiptInput,
   signReceiptLink,
 } from '@/lib/finance/receipt-inbox';
+import {
+  RECEIPT_MATCH_MESSAGES,
+  attachReceipt,
+  detachReceipt,
+  listAttachedReceipts,
+  receiptToBill,
+  receiptToExpense,
+  receiptToExpenseInput,
+  receiptsByDocument,
+} from '@/lib/finance/receipt-match';
 
 // The Receipts Inbox against the hosted database and the hosted storage
 // service. Run by the controller only, after the receipts inbox migration is
@@ -658,4 +668,140 @@ testWithStorage('the clean-up run removes a deleted receipt’s file, and leaves
   for (const fn of ['finance_receipt_queue_orphans', 'finance_receipt_deletions_due']) {
     expect((await a.c.rpc(fn)).error?.code, fn).toBe('42501');
   }
+}, 120_000);
+
+/* ---- matching (stage 7d): through the screen's own functions ------------------------------------ */
+
+const MEMBER_PASSWORD = `Qa-${crypto.randomUUID()}`;
+
+/** A workspace with its owner and a member (role `member`: may edit, may not sign off), and one supplier. */
+async function ownerAndMember(orgName: string) {
+  const a = await confirmedOwner(orgName);
+  // A member needs an address to accept an invite sent to it; see finance-write-guards.rls.test.ts.
+  const m = liveClient();
+  const signUp = await createConfirmedTestUser(m, MEMBER_PASSWORD);
+  const invite = await a.c.rpc('create_invite', { p_email: signUp.email, p_role: 'member' });
+  expect(invite.error, invite.error?.message).toBeNull();
+  const accepted = await m.rpc('accept_invite', { p_token: invite.data });
+  expect(accepted.error, accepted.error?.message).toBeNull();
+  const made = await a.c
+    .from('finance_contacts')
+    .insert({ org_id: a.orgId, name: 'Pembekal Resit', is_customer: false, is_supplier: true })
+    .select('id')
+    .single();
+  expect(made.error, made.error?.message).toBeNull();
+  return { a, owner: { client: a.c, orgId: a.orgId }, member: { client: m, orgId: a.orgId }, supplier: made.data!.id as string };
+}
+
+const today = () => new Date().toISOString().slice(0, 10);
+const expenseFor = (category: string, amount: number) => ({
+  expense_date: today(), category_id: category, vendor_id: null, vendor_name: 'Kedai Resit', amount, sst_amount: 0, notes: '',
+});
+const billFor = (supplier: string) => ({
+  supplier_id: supplier, supplier_ref: '', bill_date: today(), due_date: today(), purchase_order_id: '', category_id: '', notes: '',
+  lines: [{ product_id: '', description: 'Receipt', quantity: 1, uom: '', pack_size: '', unit_price: 42.4, sst_rate: 0 }],
+});
+
+testWithStorage('an owner’s expense from a receipt is approved, a member’s waits, and each receipt shows under its expense', async () => {
+  const { a, owner, member } = await ownerAndMember('Receipts Match A');
+  const first = await receipt(a, 'owner.png');
+  const second = await receipt(a, 'member.png');
+
+  const byOwner = await receiptToExpense(owner, { receipt_id: first.id, expense: expenseFor(a.rent, 42.4) });
+  expect(byOwner).toMatchObject({ ok: true, data: { status: 'approved' } });
+  const byMember = await receiptToExpense(member, { receipt_id: second.id, expense: expenseFor(a.rent, 12) });
+  expect(byMember).toMatchObject({ ok: true, data: { status: 'pending' } });
+  if (!byOwner.ok || !byMember.ok) return;
+
+  // A second expense from a receipt that is matched is refused, in the screen's sentence, and makes nothing.
+  expect(await receiptToExpense(member, { receipt_id: first.id, expense: expenseFor(a.rent, 1) })).toEqual({
+    ok: false, error: RECEIPT_MATCH_MESSAGES.alreadyMatched,
+  });
+  // NaN never reaches the database: the schema refuses it first.
+  expect(receiptToExpenseInput.safeParse({ receipt_id: second.id, expense: expenseFor(a.rent, Number.NaN) }).success).toBe(false);
+  expect((await a.c.from('finance_expenses').select('id').eq('org_id', a.orgId)).data).toHaveLength(2);
+
+  // What the Expenses screen reads for the paperclip, as the member (a viewer reads the same view).
+  const by = receiptsByDocument(await listAttachedReceipts(member));
+  expect(by[byOwner.data.id].map((r) => r.id)).toEqual([first.id]);
+  expect(by[byMember.data.id]).toMatchObject([{ id: second.id, file_name: 'member.png', mime_type: 'image/png', has_file: true }]);
+  expect(JSON.stringify(by)).not.toContain(a.orgId);
+
+  // The owner's is approved, so a member may not untie it; the member's own pending one they may.
+  expect(await detachReceipt(member, { id: first.id })).toEqual({ ok: false, error: RECEIPT_MATCH_MESSAGES.needsDecider });
+  expect(await detachReceipt(member, { id: second.id })).toEqual({ ok: true, data: { id: second.id } });
+  expect(await detachReceipt(owner, { id: first.id })).toEqual({ ok: true, data: { id: first.id } });
+  const left = await a.c.from('finance_receipts').select('status, expense_id').eq('org_id', a.orgId);
+  expect(left.data).toEqual([{ status: 'unmatched', expense_id: null }, { status: 'unmatched', expense_id: null }]);
+  // Untying changed neither expense.
+  expect((await a.c.from('finance_expenses').select('status').eq('org_id', a.orgId).order('amount')).data).toEqual([{ status: 'pending' }, { status: 'approved' }]);
+
+  // Deleting the pending expense sends a receipt tied to it back to Unmatched, and keeps the receipt and its file.
+  expect(await attachReceipt(member, { receipt_id: second.id, kind: 'expense', document_id: byMember.data.id })).toMatchObject({ ok: true });
+  expect((await member.client.from('finance_expenses').delete().eq('org_id', a.orgId).eq('id', byMember.data.id).select('id')).data).toHaveLength(1);
+  const after = await a.c.from('finance_receipts').select('status, expense_id').eq('id', second.id).single();
+  expect(after.data).toEqual({ status: 'unmatched', expense_id: null });
+  expect(await objectExists(second.path)).toBe(true);
+  await member.client.auth.signOut();
+}, 120_000);
+
+testWithStorage('a member’s bill from a receipt is a draft; once posted only an owner unties; a void bill takes no receipt', async () => {
+  const { a, owner, member, supplier } = await ownerAndMember('Receipts Match B');
+  const first = await receipt(a, 'bill.png');
+  const second = await receipt(a, 'other.png');
+
+  const made = await receiptToBill(member, { receipt_id: first.id, bill: billFor(supplier) });
+  expect(made.ok, made.ok ? '' : made.error).toBe(true);
+  if (!made.ok) return;
+  const draft = await a.c.from('supplier_bills').select('status, bill_no').eq('id', made.data.id).single();
+  expect(draft.data).toEqual({ status: 'draft', bill_no: null });
+  // The member cannot post it: that is a sign-off.
+  expect((await member.client.rpc('finance_post_bill', { target_org: a.orgId, target_bill: made.data.id })).error?.code).toBe('FIN14');
+  // While it is a draft the member may untie and attach again.
+  expect(await detachReceipt(member, { id: first.id })).toMatchObject({ ok: true });
+  expect(await attachReceipt(member, { receipt_id: first.id, kind: 'bill', document_id: made.data.id })).toMatchObject({ ok: true });
+  // A second receipt goes on the same bill: a document may hold several.
+  expect(await attachReceipt(member, { receipt_id: second.id, kind: 'bill', document_id: made.data.id })).toMatchObject({ ok: true });
+  expect(receiptsByDocument(await listAttachedReceipts(owner))[made.data.id].map((r) => r.id).sort()).toEqual([first.id, second.id].sort());
+
+  // The owner posts it. Now it is evidence: a member's untie is refused, in the screen's sentence.
+  expect((await a.c.rpc('finance_post_bill', { target_org: a.orgId, target_bill: made.data.id })).error).toBeNull();
+  expect(await detachReceipt(member, { id: second.id })).toEqual({ ok: false, error: RECEIPT_MATCH_MESSAGES.needsDecider });
+  expect(await detachReceipt(owner, { id: second.id })).toMatchObject({ ok: true });
+
+  // Refusals of attach, each in its sentence: already matched, a bill of nowhere, and a void bill.
+  expect(await attachReceipt(member, { receipt_id: first.id, kind: 'bill', document_id: made.data.id })).toEqual({
+    ok: false, error: RECEIPT_MATCH_MESSAGES.alreadyMatched,
+  });
+  expect(await attachReceipt(member, { receipt_id: second.id, kind: 'bill', document_id: crypto.randomUUID() })).toEqual({
+    ok: false, error: RECEIPT_MATCH_MESSAGES.documentGone,
+  });
+  const other = await a.c.rpc('finance_save_bill', {
+    target_org: a.orgId, bill: { supplier_id: supplier, bill_date: today(), due_date: today() }, lines: billFor(supplier).lines,
+  });
+  expect(other.error, other.error?.message).toBeNull();
+  expect((await a.c.rpc('finance_post_bill', { target_org: a.orgId, target_bill: other.data })).error).toBeNull();
+  expect((await a.c.from('supplier_bills').update({ status: 'void' }).eq('id', other.data as string)).error).toBeNull();
+  expect(await attachReceipt(member, { receipt_id: second.id, kind: 'bill', document_id: other.data as string })).toEqual({
+    ok: false, error: RECEIPT_MATCH_MESSAGES.voidBill,
+  });
+  await member.client.auth.signOut();
+}, 120_000);
+
+testWithStorage('another workspace can match nothing here, and reads none of its matched receipts', async () => {
+  const { a, owner } = await ownerAndMember('Receipts Match C');
+  const b = await confirmedOwner('Receipts Match Outsider');
+  const outsiderHere = { client: b.c, orgId: a.orgId };
+  const one = await receipt(a, 'mine.png');
+  const made = await receiptToExpense(owner, { receipt_id: one.id, expense: expenseFor(a.rent, 5) });
+  expect(made.ok).toBe(true);
+  // Pointed at A's workspace with B's session: the receipt cannot be locked, so each answers "no longer exists".
+  expect(await detachReceipt(outsiderHere, { id: one.id })).toEqual({ ok: false, error: RECEIPT_MATCH_MESSAGES.gone });
+  expect(await receiptToExpense(outsiderHere, { receipt_id: one.id, expense: expenseFor(b.rent, 5) })).toEqual({
+    ok: false, error: RECEIPT_MATCH_MESSAGES.gone,
+  });
+  expect(await listAttachedReceipts(outsiderHere)).toEqual([]);
+  expect(await listAttachedReceipts({ client: b.c, orgId: b.orgId })).toEqual([]);
+  // And the receipt is still where it was.
+  expect((await a.c.from('finance_receipts').select('status').eq('id', one.id).single()).data).toEqual({ status: 'matched' });
 }, 120_000);
