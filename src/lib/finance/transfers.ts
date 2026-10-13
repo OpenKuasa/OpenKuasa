@@ -19,6 +19,7 @@ import { LINE_MESSAGES, isoDate, optionalText, ringgitAmount } from './document-
 import {
   type FinResult,
   type FinanceWriteContext,
+  FIN_ACCOUNT_ARCHIVED,
   FIN_SIGN_OFF,
   NOT_ALLOWED,
   PG_FORBIDDEN,
@@ -30,12 +31,6 @@ import {
 
 /** Not two different active accounts of the workspace, or not an amount: `finance_record_transfer`. */
 const FIN_TRANSFER_SHAPE = 'FIN16';
-/**
- * Money does not move on an archived account (a rule planned for `finance_transactions`, not raised by anything yet). `finance_record_transfer` asks whether both
- * accounts are active itself (FIN16); this is the same answer from the rule on payments, for an account that
- * was archived in the moment between that question and the write.
- */
-const FIN_TRANSFER_ACCOUNT_ARCHIVED = 'FIN37';
 const FIN_GONE = 'FIN11';
 const FIN_NOT_POSTED = 'FIN09';
 
@@ -75,7 +70,11 @@ export const voidTransferInput = z.object({ transfer_id: z.string({ error: M.gon
 
 const REFUSALS: Record<string, string> = {
   [FIN_TRANSFER_SHAPE]: M.accounts,
-  [FIN_TRANSFER_ACCOUNT_ARCHIVED]: M.accounts,
+  // The archived-account rule on finance_transactions: finance_record_transfer asks whether both accounts are
+  // active itself (FIN16), and this is the same answer from the rule, for an account archived in the moment
+  // between that question and the write. For a transfer the cause is "one of those accounts", so it is worded
+  // as FIN16 is, not with the shared sentence for a payment's account.
+  [FIN_ACCOUNT_ARCHIVED]: M.accounts,
   [FIN_SIGN_OFF]: M.needsSignOff,
   [FIN_GONE]: M.gone,
   [FIN_NOT_POSTED]: M.alreadyVoid,

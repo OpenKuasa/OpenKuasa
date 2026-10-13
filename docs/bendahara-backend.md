@@ -962,9 +962,10 @@ active accounts.
 form can cause first (the same account twice; an amount that is not above 0)
 and `FIN16` from the database is worded for what is left: "One of those
 accounts has been archived or no longer exists. Choose another, then try
-again." `FIN37` is not raised by anything yet. `transfers.ts` already gives it
-the same sentence, for the archived-account rule planned for
-`finance_transactions`. `FIN09` is "This transfer has already been voided." and
+again." The archived-account rule on `finance_transactions` raises `FIN37` when
+an account is archived in the moment between `finance_record_transfer`'s own
+question (which answers `FIN16`) and the write, and `transfers.ts` gives it the
+same sentence as `FIN16`. `FIN09` is "This transfer has already been voided." and
 `FIN11` "That transfer no longer exists." Both leave the row, which the refresh
 after a refusal takes out of the table (it lists posted movements only), so a
 refused void is also said at the top of the page in a note titled "Transfer not
@@ -1564,7 +1565,7 @@ quotation, a credit note or a refund by the file that made the call.
 | `FIN24` | The file of a receipt: there is none; it is not in the bucket; it was uploaded more than 30 minutes ago or is waiting to be removed; it is already a receipt; it is not the type its name says; its path names none of the five types. `receipt-inbox.ts` words it for recording an upload. |
 | `FIN25` | A void bill takes no receipt. Not worded yet. |
 | `FIN30` | An account with payments still to be paid or waiting for approval is not archived. `bank-accounts.ts`: "This account has payments that are still to be paid or waiting for approval. Pay, reject or delete them, then archive it." (`FIN14` on an account is an opening balance from someone who is not an owner or admin, or an owner who has not given their second factor: "Only an owner or admin can set or change an opening balance. If you are one, sign in again with your second step." The guard counts payments in both directions; the screen's archive question warns about money out only.) |
-| `FIN37` | Money does not move on an archived account: a payment is not started on one, moved onto one, or sent for approval, approved, scheduled, posted or marked paid while its account is archived. `result.ts` has the one sentence (`ACCOUNT_ARCHIVED`), which `money.ts`, `refunds.ts` and `cash-receipts.ts` each list in their own map. A member recording a payment in, a refund or a paid-now payment out on an archived account is answered `FIN37` (the draft is refused before the sign-off rule), where before this rule they were answered `FIN14`; posting, approving and marking paid by a member still answer `FIN14`. |
+| `FIN37` | Money does not move on an archived account: a payment is not started on one, moved onto one, or sent for approval, approved, scheduled, posted or marked paid while its account is archived. `result.ts` has the one sentence (`ACCOUNT_ARCHIVED`), which `money.ts`, `refunds.ts` and `cash-receipts.ts` each list in their own map; `transfers.ts` words it as it words `FIN16`. A member recording a payment in, a refund or a paid-now payment out on an archived account is answered `FIN37` (the draft is refused before the sign-off rule), where before this rule they were answered `FIN14`; posting, approving and marking paid by a member still answer `FIN14`. |
 
 `FIN23`, `FIN24` and `FIN25` are not the Receipts Inbox's alone. The ledger
 migrations (`20261108091500` to `20261108094500`) raise `FIN23` to `FIN27` with
