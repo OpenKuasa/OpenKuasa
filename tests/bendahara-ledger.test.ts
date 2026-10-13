@@ -344,12 +344,12 @@ testWithSupabase('a new workspace has its chart, and bank accounts and categorie
   expect(Object.keys(zero)).toHaveLength(ch.rows.length);
   expect(Object.values(zero).every((b) => b === 0)).toBe(true);
 
-  // A new bank account and a new category each get one. A member adds the category: the account is the
-  // database's to make, though a member may not write the chart.
-  const member = await join(o, 'member');
+  // A new bank account and a new category each get one. The owner adds the category (categories are an owner's or
+  // admin's to write since bendahara_expense_stamp_and_category_writers; a member's insert is 42501): the account is
+  // the database's to make, though nobody writes the chart by hand.
   const savings = await o.c.from('finance_accounts').insert({ org_id: o.orgId, name: 'Savings', kind: 'bank' }).select('id').single();
   expect(savings.error, savings.error?.message).toBeNull();
-  const freight = await member.c.from('finance_categories').insert({ org_id: o.orgId, name: 'Freight', kind: 'expense' }).select('id').single();
+  const freight = await o.c.from('finance_categories').insert({ org_id: o.orgId, name: 'Freight', kind: 'expense' }).select('id').single();
   expect(freight.error, freight.error?.message).toBeNull();
   ch = await chart(o);
   expect(ch.ofBank(savings.data!.id)).toMatchObject({ code: '1110', name: 'Savings', type: 'asset', active: true });
