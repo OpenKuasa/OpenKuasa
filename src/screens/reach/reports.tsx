@@ -23,7 +23,7 @@ import {
 import { createClient } from '@/lib/supabase/server';
 import { getReachData } from '@/lib/reach/supabase';
 import { deriveReportsModel, type ReportRange } from '@/lib/reach/reports';
-import { LEAD_STAGES, type Channel, type LeadStage } from '@/lib/reach/types';
+import { LEAD_STAGES, type LeadChannel, type LeadStage } from '@/lib/reach/types';
 
 const RANGES: readonly ReportRange[] = ['7d', '30d', '90d'];
 const RANGE_LABEL: Record<ReportRange, string> = {
@@ -31,17 +31,19 @@ const RANGE_LABEL: Record<ReportRange, string> = {
   '30d': 'Last 30 days',
   '90d': 'Last 90 days',
 };
-const CHANNEL_LABEL: Record<Channel, string> = {
+const CHANNEL_LABEL: Record<LeadChannel, string> = {
   whatsapp: 'WhatsApp',
   facebook: 'Facebook',
   instagram: 'Instagram',
   tiktok: 'TikTok',
+  web: 'Website',
 };
-const CHANNEL_COLOR: Record<Channel, string> = {
+const CHANNEL_COLOR: Record<LeadChannel, string> = {
   whatsapp: 'var(--chart-1)',
   facebook: 'var(--chart-2)',
   instagram: 'var(--chart-5)',
   tiktok: 'var(--chart-3)',
+  web: 'var(--chart-4)',
 };
 const STAGE_LABEL: Record<LeadStage, string> = {
   lead: 'Leads',

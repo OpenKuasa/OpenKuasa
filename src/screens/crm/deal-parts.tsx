@@ -65,6 +65,7 @@ export function DealFormCard({
   stages,
   contacts,
   invoices,
+  newDealContactId,
   onSaved,
   onClose,
   firstFieldRef,
@@ -72,6 +73,8 @@ export function DealFormCard({
   action: CrmFormAction;
   /** The deal being edited; null to add a new one. */
   editing: CrmDeal | null;
+  /** The contact a new deal starts with, as when it is made from a contact's row. */
+  newDealContactId?: string | null;
   /** Bendahara's invoices, to link to the deal being edited. Absent: the picker is not shown. */
   invoices?: DealInvoiceChoice[];
   /** The stages of the pipeline the deal is in, or is being added to. */
@@ -85,7 +88,7 @@ export function DealFormCard({
   firstFieldRef: RefObject<HTMLElement | null>;
 }) {
   const { formAction, pending, error, values } = useCrmForm(action, onSaved);
-  const v = values ?? editing?.form ?? {};
+  const v = values ?? editing?.form ?? (newDealContactId ? { contactId: newDealContactId } : {});
 
   // The contact of a deal being edited is always offered, even when it is
   // beyond the contacts that were loaded.

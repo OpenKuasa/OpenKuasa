@@ -2,8 +2,9 @@
 
 import { useState, useTransition } from 'react';
 import { Dialog } from 'radix-ui';
-import { Pencil, Plus, Trash2, UserPlus } from 'lucide-react';
-import type { Channel, Lead, LeadStage } from '@/lib/reach/types';
+import Link from 'next/link';
+import { ExternalLink, Pencil, Plus, Trash2, UserPlus } from 'lucide-react';
+import type { Channel, Lead, LeadChannel, LeadStage } from '@/lib/reach/types';
 import {
   createLeadAction,
   deleteLeadAction,
@@ -32,11 +33,12 @@ import {
 const CHANNELS: readonly Channel[] = ['whatsapp', 'facebook', 'instagram', 'tiktok'];
 const STAGES: readonly LeadStage[] = ['lead', 'contacted', 'qualified', 'booked', 'won'];
 
-const CHANNEL_LABEL: Record<Channel, string> = {
+const CHANNEL_LABEL: Record<LeadChannel, string> = {
   whatsapp: 'WhatsApp',
   facebook: 'Facebook',
   instagram: 'Instagram',
   tiktok: 'TikTok',
+  web: 'Website',
 };
 const STAGE_LABEL: Record<LeadStage, string> = {
   lead: 'Lead',
@@ -129,7 +131,8 @@ export function LeadFunnelTable({ leads, canEdit }: { leads: Lead[]; canEdit: bo
                   {CHANNEL_LABEL[l.channel] ?? l.channel}
                 </TableCell>
                 <TableCell>
-                  {canEdit ? (
+                  {/* A Kasturi contact's stage is its status there, changed in Kasturi. */}
+                  {canEdit && l.origin !== 'crm' ? (
                     <Select
                       value={l.stage}
                       disabled={pending}
@@ -161,7 +164,19 @@ export function LeadFunnelTable({ leads, canEdit }: { leads: Lead[]; canEdit: bo
                 <TableCell className="whitespace-nowrap tabular-nums">
                   {formatDate(l.created_at)}
                 </TableCell>
-                {canEdit && (
+                {canEdit && l.origin === 'crm' && (
+                  <TableCell>
+                    <div className="flex justify-end">
+                      <Button asChild variant="ghost" size="sm">
+                        <Link href="/crm/contacts">
+                          <ExternalLink className="size-4" />
+                          Open in Kasturi
+                        </Link>
+                      </Button>
+                    </div>
+                  </TableCell>
+                )}
+                {canEdit && l.origin !== 'crm' && (
                   <TableCell>
                     <div className="flex justify-end gap-1">
                       {l.promoted_contact_id ? (
@@ -309,7 +324,9 @@ function LeadForm({
   onSubmit: (v: FormValues) => void;
 }) {
   const [name, setName] = useState(initial?.name ?? '');
-  const [channel, setChannel] = useState<Channel>(initial?.channel ?? 'whatsapp');
+  const [channel, setChannel] = useState<Channel>(
+    initial && initial.channel !== 'web' ? initial.channel : 'whatsapp',
+  );
   const [stage, setStage] = useState<LeadStage>(initial?.stage ?? 'lead');
   const [source, setSource] = useState(initial?.source ?? '');
 

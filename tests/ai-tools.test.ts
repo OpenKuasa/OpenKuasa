@@ -48,7 +48,7 @@ describe('deriveLeadSummary', () => {
 
   it('derives channel mix and total', () => {
     expect(summary.total_leads).toBe(342);
-    expect(summary.by_channel).toEqual({ whatsapp: 142, facebook: 96, instagram: 68, tiktok: 36 });
+    expect(summary.by_channel).toEqual({ whatsapp: 142, facebook: 96, instagram: 68, tiktok: 36, web: 0 });
   });
 
   it('computes conversion rate (won ÷ total)', () => {

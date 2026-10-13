@@ -16,6 +16,12 @@ import { getCurrentOrg } from '@/lib/auth/current-org';
 import { createSeedReachData } from './seed';
 import { FORM_COLUMNS } from './forms';
 import {
+  CAPTURED_CONTACT_COLUMNS,
+  CAPTURED_CONTACT_TAGS,
+  type CapturedContactRow,
+  mergeCapturedLeads,
+} from './crm-leads';
+import {
   FORM_SUBMISSION_COLUMNS,
   type FormSubmissionRow,
   SUBMISSIONS_SHOWN,
@@ -50,8 +56,23 @@ export function createSupabaseReachData(client: SupabaseClient, orgId: string): 
       rows<Campaign>('campaigns', 'id,name,channel,status,leads_count,spend_cents,cpl_cents,created_at', {
         col: 'created_at', asc: false,
       }),
-    listLeads: () =>
-      rows<Lead>('leads', 'id,name,channel,stage,source,promoted_contact_id,created_at', { col: 'created_at', asc: false }),
+    listLeads: async () => {
+      const [leads, captured] = await Promise.all([
+        rows<Lead>('leads', 'id,name,channel,stage,source,promoted_contact_id,created_at', { col: 'created_at', asc: false }),
+        // Form, landing page and chatbot leads live only in Kasturi.
+        client
+          .from('crm_contacts')
+          .select(CAPTURED_CONTACT_COLUMNS)
+          .eq('org_id', orgId)
+          .overlaps('tags', CAPTURED_CONTACT_TAGS)
+          .order('created_at', { ascending: false })
+          .then(({ data, error }) => {
+            if (error) throw error;
+            return (data ?? []) as CapturedContactRow[];
+          }),
+      ]);
+      return mergeCapturedLeads(leads, captured);
+    },
     listAppointments: () =>
       rows<Appointment>('appointments', 'id,contact_name,kind,scheduled_at,via,status,created_at', {
         col: 'scheduled_at', asc: true,

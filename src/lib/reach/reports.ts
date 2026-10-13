@@ -1,18 +1,17 @@
-import type { Appointment, Campaign, Channel, Lead, LeadStage } from '@/lib/reach/types';
+import { LEAD_CHANNELS, type Appointment, type Campaign, type LeadChannel, type Lead, type LeadStage } from '@/lib/reach/types';
 import { deriveLeadSummary } from '@/lib/ai/tools';
 
 export type ReportRange = '7d' | '30d' | '90d';
 const RANGE_DAYS: Record<ReportRange, number> = { '7d': 7, '30d': 30, '90d': 90 };
 const QUALIFIED_OR_BEYOND: LeadStage[] = ['qualified', 'booked', 'won'];
-const CHANNELS: Channel[] = ['whatsapp', 'facebook', 'instagram', 'tiktok'];
 
 export type ReportsModel = {
   range: ReportRange;
   totalLeads: number;
   leadsTrend: { label: string; leads: number; qualified: number }[];
-  leadsByChannel: { channel: Channel; leads: number }[];
+  leadsByChannel: { channel: LeadChannel; leads: number }[];
   funnel: ReturnType<typeof deriveLeadSummary>['funnel'];
-  topChannels: { channel: Channel; leads: number; qualified: number; conv_pct: number }[];
+  topChannels: { channel: LeadChannel; leads: number; qualified: number; conv_pct: number }[];
   appointmentStats: {
     scheduled: number; completed: number; cancelled: number; no_show: number;
     show_rate_pct: number | null;
@@ -48,12 +47,12 @@ export function deriveReportsModel(
     return { label: `Wk ${i + 1}`, leads: wk.length, qualified: wk.filter(qualified).length };
   });
 
-  const leadsByChannel = CHANNELS.map((channel) => ({
+  const leadsByChannel = LEAD_CHANNELS.map((channel) => ({
     channel,
     leads: ls.filter((l) => l.channel === channel).length,
   })).filter((r) => r.leads > 0);
 
-  const topChannels = CHANNELS.map((channel) => {
+  const topChannels = LEAD_CHANNELS.map((channel) => {
     const chLeads = ls.filter((l) => l.channel === channel);
     const q = chLeads.filter(qualified).length;
     return { channel, leads: chLeads.length, qualified: q, conv_pct: pct(q, chLeads.length) };

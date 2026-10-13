@@ -10,13 +10,14 @@ import { clearDanglingPromotions } from '@/lib/reach/leads-view';
 import { getViewer } from '@/lib/auth/viewer';
 import { can } from '@/lib/auth/permissions';
 import { deriveLeadSummary } from '@/lib/ai/tools';
-import { LEAD_STAGES, type Channel, type Lead, type LeadStage } from '@/lib/reach/types';
+import { LEAD_STAGES, type Lead, type LeadChannel, type LeadStage } from '@/lib/reach/types';
 
-const CHANNEL_LABEL: Record<Channel, string> = {
+const CHANNEL_LABEL: Record<LeadChannel, string> = {
   whatsapp: 'WhatsApp',
   facebook: 'Facebook',
   instagram: 'Instagram',
   tiktok: 'TikTok',
+  web: 'Website',
 };
 
 const STAGE_LABEL: Record<LeadStage, string> = {
@@ -57,7 +58,9 @@ export default async function LeadsScreen() {
   // A promoted lead stores the contact's id, but the contact can be deleted in
   // Kasturi (no FK). Show such a lead as promotable again — otherwise its
   // "Promoted ✓" sticks forever even though the contact is gone.
+  // Leads read from Kasturi are contacts themselves, so they need no check.
   const promotedIds = leads
+    .filter((l) => l.origin !== 'crm')
     .map((l) => l.promoted_contact_id)
     .filter((id): id is string => id !== null);
   let existingContactIds: ReadonlySet<string> = new Set();
@@ -76,7 +79,7 @@ export default async function LeadsScreen() {
     value: summary.funnel[stage],
     color: STAGE_COLOR[stage],
   }));
-  const byChannel = (Object.keys(CHANNEL_LABEL) as Channel[])
+  const byChannel = (Object.keys(CHANNEL_LABEL) as LeadChannel[])
     .map((ch) => ({ label: CHANNEL_LABEL[ch], leads: summary.by_channel[ch] }))
     .filter((r) => r.leads > 0);
 
@@ -84,7 +87,7 @@ export default async function LeadsScreen() {
     <ScreenContainer>
       <PageHeader
         title="Lead Funnel"
-        subtitle="Track leads from first touch to won, and promote them to CRM contacts."
+        subtitle="Track leads from first touch to won. Ad leads are promoted to Kasturi contacts; form, landing page and chatbot leads are Kasturi contacts already."
       />
 
       <BentoGrid>

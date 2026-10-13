@@ -151,6 +151,8 @@ Every form asks for the same four fields: name and email (required), phone and m
 
 On the Lead Forms page, "New today" and "Submissions over time" are counted from `form_submissions.created_at`, with a day being the calendar day in Asia/Kuala_Lumpur. They count stored rows, so a deleted submission leaves them, while "Total leads" is the sum of `submissions_count` and does not go down; the two can differ after a deletion. The funnel stays hidden: a form start is not recorded.
 
+**Jebat sees these leads without a copy.** The contact is the only record. Jebat's leads (Overview, Lead Funnel, Reports, CSV export and Jebat's AI) are the rows of `leads` plus every contact tagged `lead-form` or `chatbot`, which covers lead forms, landing pages and the chatbot (`src/lib/reach/crm-leads.ts`). Such a contact shows up under the channel `web` ("Website"). Its stage comes from its Kasturi status (customer is Won), and an archived contact is left out. Jebat never changes or promotes it: the Lead Funnel links to Kasturi instead.
+
 ### Abuse limits, and what they do not stop
 
 - **Honeypot.** A field people cannot see. A script that fills in every field is thanked and discarded. A script written for this form simply leaves it empty.

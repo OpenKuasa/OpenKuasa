@@ -613,6 +613,7 @@ export default function ContactsScreen({
                       <TableCell>
                         <ContactRowMenu
                           label={c.email || c.first}
+                          dealHref={`/crm/deals?contact=${encodeURIComponent(c.id)}`}
                           onEdit={() => startEdit(c)}
                           onClosed={menuClosed}
                           onDelete={() => {
