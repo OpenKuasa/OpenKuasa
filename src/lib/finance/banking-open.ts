@@ -1,4 +1,5 @@
 import type { BankAccountRow } from './banking';
+import { canTransfer } from './transfer-form';
 
 /**
  * The one thing that is open on Banking: a form (it holds what was typed) or a question in a row. Opening
@@ -37,4 +38,41 @@ export function voidQuestionGone(
 ): { close: boolean; refusal: string | null } {
   const gone = opened?.kind === 'void' && !pending && !shownIds.includes(opened.transactionId);
   return gone ? { close: true, refusal: error } : { close: false, refusal: null };
+}
+
+/** A void that finished closes its own question and nothing else: a form opened meanwhile stays. */
+export function closeOwnVoid(opened: BankingOpen, transactionId: string): BankingOpen {
+  return opened?.kind === 'void' && opened.transactionId === transactionId ? null : opened;
+}
+
+/** What the header offers, and whether it waits. */
+export function bankingOffers(input: {
+  hasWriter: boolean;
+  hasTransfers: boolean;
+  accounts: BankAccountRow[];
+  open: BankingOpen;
+  voidPending: boolean;
+}): { newReceipt: boolean; transfer: boolean; addAccount: boolean; headerDisabled: boolean; actionsColumn: boolean } {
+  return {
+    newReceipt: input.hasWriter,
+    transfer: input.hasWriter && input.hasTransfers && canTransfer(input.accounts),
+    addAccount: input.hasWriter,
+    headerDisabled: input.open !== null || input.voidPending,
+    actionsColumn: input.hasWriter && input.hasTransfers,
+  };
+}
+
+/** Whether a row's Void menu is drawn: it waits while a form or the other table's question is open, or a void is under way. */
+export function voidMenuWaits(open: BankingOpen, voidPending: boolean): boolean {
+  return voidPending || (open !== null && open.kind !== 'void');
+}
+
+/** The Accounts table's menus wait while a form is open, a void question is open, or a void is under way. */
+export function accountsLocked(open: BankingOpen, voidPending: boolean): boolean {
+  return voidPending || (open !== null && open.kind !== 'archive');
+}
+
+/** What voiding sends: the transfer's own id, never the row's. */
+export function voidPayload(row: { transfer_id: string | null }): { transfer_id: string | null } {
+  return { transfer_id: row.transfer_id };
 }

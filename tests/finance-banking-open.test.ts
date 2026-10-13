@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { VOID_REFUSED_TITLE, visibleOpen, voidQuestionGone } from '@/lib/finance/banking-open';
+import {
+  VOID_REFUSED_TITLE,
+  accountsLocked,
+  bankingOffers,
+  closeOwnVoid,
+  visibleOpen,
+  voidMenuWaits,
+  voidQuestionGone,
+} from '@/lib/finance/banking-open';
 
 const ASKING = { kind: 'void', transactionId: 'tx-1' } as const;
 const REFUSED = 'This transfer has already been voided.';
@@ -49,5 +57,49 @@ describe('voidQuestionGone', () => {
 
   it('names the note the way the screen titles it', () => {
     expect(VOID_REFUSED_TITLE).toBe('Transfer not voided');
+  });
+});
+
+describe('closeOwnVoid', () => {
+  it('closes the question that was being answered', () => {
+    expect(closeOwnVoid(ASKING, 'tx-1')).toBeNull();
+  });
+
+  it('leaves a form opened meanwhile, and another row\'s question, alone', () => {
+    const form = { kind: 'transfer', today: '2026-10-13' } as const;
+    expect(closeOwnVoid(form, 'tx-1')).toEqual(form);
+    expect(closeOwnVoid({ kind: 'account', today: '2026-10-13', editing: null }, 'tx-1')).toMatchObject({ kind: 'account' });
+    expect(closeOwnVoid({ kind: 'void', transactionId: 'tx-2' }, 'tx-1')).toEqual({ kind: 'void', transactionId: 'tx-2' });
+    expect(closeOwnVoid({ kind: 'archive', accountId: 'tx-1' }, 'tx-1')).toEqual({ kind: 'archive', accountId: 'tx-1' });
+    expect(closeOwnVoid(null, 'tx-1')).toBeNull();
+  });
+});
+
+describe('what waits while something is open or a void is under way', () => {
+  it('waits in the header over any form or question, and while a void is pending', () => {
+    const base = { hasWriter: true, hasTransfers: true, accounts: [], voidPending: false };
+    expect(bankingOffers({ ...base, open: null }).headerDisabled).toBe(false);
+    for (const open of [
+      { kind: 'account', today: 'x', editing: null },
+      { kind: 'transfer', today: 'x' },
+      { kind: 'archive', accountId: 'a' },
+      { kind: 'void', transactionId: 't' },
+    ] as const) {
+      expect(bankingOffers({ ...base, open }).headerDisabled).toBe(true);
+    }
+    expect(bankingOffers({ ...base, open: null, voidPending: true }).headerDisabled).toBe(true);
+  });
+
+  it('keeps the menus away during a pending void, over a form, and over the other table\'s question', () => {
+    expect(voidMenuWaits(null, false)).toBe(false);
+    expect(voidMenuWaits({ kind: 'void', transactionId: 't' }, false)).toBe(false);
+    expect(voidMenuWaits(null, true)).toBe(true);
+    expect(voidMenuWaits({ kind: 'transfer', today: 'x' }, false)).toBe(true);
+    expect(voidMenuWaits({ kind: 'archive', accountId: 'a' }, false)).toBe(true);
+    expect(accountsLocked(null, false)).toBe(false);
+    expect(accountsLocked({ kind: 'archive', accountId: 'a' }, false)).toBe(false);
+    expect(accountsLocked(null, true)).toBe(true);
+    expect(accountsLocked({ kind: 'void', transactionId: 't' }, false)).toBe(true);
+    expect(accountsLocked({ kind: 'account', today: 'x', editing: null }, false)).toBe(true);
   });
 });

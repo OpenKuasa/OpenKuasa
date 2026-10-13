@@ -42,14 +42,22 @@ import type { FinResult } from '@/lib/finance/result';
 import {
   type RecordedTransferNote,
   bankRowActions,
-  canTransfer,
   transferName,
   transferRecordedNote,
   transferVoidedNote,
   voidTransferEffect,
 } from '@/lib/finance/transfer-form';
 import type { RecordedTransfer } from '@/lib/finance/transfers';
-import { type BankingOpen as Open, VOID_REFUSED_TITLE, visibleOpen, voidQuestionGone } from '@/lib/finance/banking-open';
+import {
+  type BankingOpen as Open,
+  VOID_REFUSED_TITLE,
+  accountsLocked,
+  bankingOffers,
+  closeOwnVoid,
+  visibleOpen,
+  voidMenuWaits,
+  voidQuestionGone,
+} from '@/lib/finance/banking-open';
 import { cn } from '@/lib/utils';
 
 export type BankingActions = BankAccountFormActions & {
@@ -152,7 +160,8 @@ export function BankingView({
     setOpened(next);
   };
   const transfers = writer?.transfers;
-  const columns = transfers ? 9 : 8;
+  const offers = bankingOffers({ hasWriter: !!writer, hasTransfers: !!transfers, accounts, open, voidPending: voiding.pending });
+  const columns = offers.actionsColumn ? 9 : 8;
   const noteText =
     note?.kind === 'recorded'
       ? transferRecordedNote(
@@ -173,12 +182,12 @@ export function BankingView({
               <Button variant="outline" size="sm" asChild>
                 <Link href="/finance/cash-receipts">New receipt</Link>
               </Button>
-              {transfers && canTransfer(accounts) ? (
+              {offers.transfer ? (
                 <Button
                   variant="outline"
                   size="sm"
                   aria-expanded={open?.kind === 'transfer'}
-                  disabled={open !== null}
+                  disabled={offers.headerDisabled}
                   // The date is the person's own, taken when the form opens, never the server's.
                   onClick={() => openOnly({ kind: 'transfer', today: localIsoDate(new Date()) })}
                 >
@@ -190,7 +199,7 @@ export function BankingView({
                 size="sm"
                 aria-expanded={open?.kind === 'account' && open.editing === null}
                 // Nothing else opens over a form, which holds what was typed, or over a question that is being asked.
-                disabled={open !== null}
+                disabled={offers.headerDisabled}
                 // The date is the person's own, taken when the form opens, never the server's.
                 onClick={() => openOnly({ kind: 'account', today: localIsoDate(new Date()), editing: null })}
               >
@@ -282,7 +291,7 @@ export function BankingView({
                   archiving: open?.kind === 'archive' ? open.accountId : null,
                   onArchiving: (id) => (id ? openOnly({ kind: 'archive', accountId: id }) : setOpened(null)),
                   // Its menus wait while a form is open, or while a question is being asked in the other table.
-                  locked: open !== null && open.kind !== 'archive',
+                  locked: accountsLocked(open, voiding.pending),
                 }
               : undefined
           }
@@ -359,7 +368,7 @@ export function BankingView({
                   <TableHead className="text-right">Money Out</TableHead>
                   <TableHead className="text-right">Account balance</TableHead>
                   <TableHead>Status</TableHead>
-                  {transfers ? (
+                  {offers.actionsColumn ? (
                     <TableHead className="w-10">
                       <span className="sr-only">Actions</span>
                     </TableHead>
@@ -395,7 +404,8 @@ export function BankingView({
                           voiding.run(
                             () => transfers.void({ transfer_id: r.transfer_id }),
                             () => {
-                              setOpened(null);
+                              // Only its own question: a form opened since is left as it is.
+                              setOpened((o) => closeOwnVoid(o, r.transaction_id));
                               setNote({ kind: 'text', title: 'Transfer voided', text: transferVoidedNote(r) });
                             },
                           )
@@ -447,10 +457,10 @@ export function BankingView({
                           <span className="text-muted-foreground">—</span>
                         )}
                       </TableCell>
-                      {transfers ? (
+                      {offers.actionsColumn ? (
                         <TableCell>
                           {/* Its menus wait while a form is open, a void is under way, or a question is being asked in the other table. */}
-                          {bankRowActions(r, true).length === 0 || voiding.pending || (open !== null && open.kind !== 'void') ? null : (
+                          {bankRowActions(r, true).length === 0 || voidMenuWaits(open, voiding.pending) ? null : (
                             <RowMenu
                               label={transferName(r)}
                               items={[
