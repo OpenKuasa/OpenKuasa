@@ -57,6 +57,8 @@ declare
   s_in uuid;
   s_in_split uuid;
   d_in uuid;
+  d_in_split uuid;
+  s_in0 uuid;
   rc_draft uuid;
   tr uuid;
   n integer;
@@ -239,6 +241,11 @@ begin
   update public.finance_transactions set status = 'scheduled' where id = s_in;
   insert into public.finance_transactions (org_id, direction, account_id, amount, method, contact_id)
   values (org, 'in', bank, 5, 'cash', cust) returning id into d_in;
+  insert into public.finance_allocations (org_id, transaction_id, invoice_id, amount) values (org, d_in, inv3, 1) returning id into d_in_split;
+  -- Scheduled money in with no split: the older guard lets an owner turn it into money out and approves it.
+  insert into public.finance_transactions (org_id, direction, account_id, amount, method, contact_id)
+  values (org, 'in', bank, 5, 'cash', cust) returning id into s_in0;
+  update public.finance_transactions set status = 'scheduled' where id = s_in0;
 
   perform set_config('request.jwt.claims', owner_claims, true);
   fails := fails || public.bendahara_held_still_try('the owner approves a waiting voucher', 'ok',
@@ -282,9 +289,9 @@ begin
     format('update public.finance_allocations set transaction_id = %L where id = %L', d_out, s_bill_split));
   -- A change of nothing but the time is let through, on the payment and on its split.
   fails := fails || public.bendahara_held_still_try('a member touches updated_at of a scheduled payment', 'ok',
-    format('update public.finance_transactions set updated_at = now() where id = %L', s_bill));
+    format('update public.finance_transactions set updated_at = now() + interval ''1 second'' where id = %L', s_bill));
   fails := fails || public.bendahara_held_still_try('a member touches updated_at of the split of a scheduled payment', 'ok',
-    format('update public.finance_allocations set updated_at = now() where id = %L', s_bill_split));
+    format('update public.finance_allocations set updated_at = now() + interval ''1 second'' where id = %L', s_bill_split));
   -- What the older guards refuse they still refuse first, with the code they had.
   fails := fails || public.bendahara_held_still_try('a member lowers a scheduled payment under its split', 'FIN03',
     format('update public.finance_transactions set amount = 60 where id = %L', s_bill));
@@ -324,6 +331,12 @@ begin
     format('delete from public.finance_allocations where id = %L', s_in_split));
   fails := fails || public.bendahara_held_still_try('a member raises scheduled money in', 'FIN28',
     format('update public.finance_transactions set amount = 50 where id = %L', s_in));
+  fails := fails || public.bendahara_held_still_try('a member moves the split of a draft onto scheduled money in', 'FIN28',
+    format('update public.finance_allocations set transaction_id = %L where id = %L', s_in, d_in_split));
+  fails := fails || public.bendahara_held_still_try('a member gives the split of scheduled money in another id', 'FIN28',
+    format('update public.finance_allocations set id = gen_random_uuid() where id = %L', s_in_split));
+  fails := fails || public.bendahara_held_still_try('a member changes when the split of a scheduled payment was made', 'FIN28',
+    format('update public.finance_allocations set created_at = now() - interval ''1 day'' where id = %L', s_bill_split));
   -- Waiting, approved and paid payments were held already, and answer as they did.
   fails := fails || public.bendahara_held_still_try('a member changes the notes of a waiting voucher', 'FIN14',
     format('update public.finance_transactions set notes = ''x'' where id = %L', v_pend));
@@ -353,6 +366,10 @@ begin
       format('update public.finance_transactions set account_id = %L where id = %L', till, s_bill));
     fails := fails || public.bendahara_held_still_try(format('an %s raises a scheduled payment above its split', who), 'FIN28',
       format('update public.finance_transactions set amount = 120 where id = %L', s_bill));
+    fails := fails || public.bendahara_held_still_try(format('an %s raises a scheduled payment by one sen', who), 'FIN28',
+      format('update public.finance_transactions set amount = 100.01 where id = %L', s_bill));
+    fails := fails || public.bendahara_held_still_try(format('an %s turns scheduled money in with no split into money out', who), 'FIN28',
+      format('update public.finance_transactions set direction = ''out'' where id = %L', s_in0));
     fails := fails || public.bendahara_held_still_try(format('an %s changes the payee of a scheduled payment', who), 'FIN28',
       format('update public.finance_transactions set contact_id = %L where id = %L', sup2, s_bill));
     fails := fails || public.bendahara_held_still_try(format('an %s changes the notes of a scheduled payment', who), 'FIN28',
