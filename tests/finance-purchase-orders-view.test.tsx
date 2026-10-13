@@ -150,9 +150,9 @@ describe('the purchase orders list', () => {
   it('warns when billed over the order, and when billed over what has arrived', () => {
     const over = render([row({ billed_total: 1200, over_billed: true })]);
     expect(over).toContain('Billed more than the order');
-    expect(over).not.toContain('Billed more than has arrived');
+    expect(over).not.toContain('Billed more than has been received');
     const early = render([row({ delivery: 'partial', received_total: 400, billed_total: 600, billed_over_received: true })]);
-    expect(early).toContain('Billed more than has arrived');
+    expect(early).toContain('Billed more than has been received');
     expect(early).not.toContain('Billed more than the order');
     const fine = render([row({ billed_total: 500 })]);
     expect(fine).not.toContain('Billed more than');
@@ -249,7 +249,7 @@ describe('the receive card', () => {
   it('says to enter the total so far, and shows each line with what was ordered', () => {
     const html = renderToStaticMarkup(<PurchaseOrderReceiveCard order={order} receive={actions.receive} onClose={() => {}} />);
     const t = text(html);
-    expect(t).toContain('Enter the total that has arrived so far, not just this delivery.');
+    expect(t).toContain('Enter the total received so far, not just this delivery.');
     expect(t).toContain('Arabica beans');
     expect(t).toContain('Paper cups');
     expect(t).toContain('5 kg');

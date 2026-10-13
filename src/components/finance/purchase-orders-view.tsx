@@ -588,9 +588,9 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
                             </span>
                           ) : null}
                           {r.billed_over_received ? (
-                            <span title="Billed more than has arrived" className="text-amber-600">
+                            <span title="Billed more than has been received" className="text-amber-600">
                               <PackageX className="size-4" aria-hidden />
-                              <span className="sr-only">Billed more than has arrived</span>
+                              <span className="sr-only">Billed more than has been received</span>
                             </span>
                           ) : null}
                           {rm(r.billed_total)}

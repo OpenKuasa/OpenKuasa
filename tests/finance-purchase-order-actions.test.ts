@@ -150,7 +150,7 @@ describe('each write action', () => {
     });
     expect(await actions.decidePurchaseOrderAction({ id: PO, approve: false })).toEqual({ ok: false, error: 'Say why the order is rejected.' });
     expect(await actions.receivePurchaseOrderAction({ id: PO, receipts: [] })).toEqual({
-      ok: false, error: 'Enter how much has arrived for each line, 0 or more.',
+      ok: false, error: 'Enter how much has been received for each line, 0 or more.',
     });
     for (const action of [
       actions.submitPurchaseOrderAction, actions.withdrawPurchaseOrderAction, actions.closePurchaseOrderAction,

@@ -424,7 +424,7 @@ reference and notes when they hold something, drawn as text.
 At **Approve**, a voucher that pays supplier bills shows the same advice
 Payments Out shows before a payment is marked paid: `OrderNotes` with the
 sentences of `orderNotesForBills`, for each purchase order behind its bills
-that is billed for more than its total or for more than has arrived
+that is billed for more than its total or for more than has been received
 (`orderNotesByVoucher`). The bills and purchase orders are read only for
 someone who may approve, and only while such a voucher is waiting. No screen
 can send a supplier payment for approval yet (Payments Out schedules or pays

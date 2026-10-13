@@ -60,7 +60,7 @@ export function PurchaseOrderReceiveCard({
         <fieldset className="space-y-1.5 md:col-span-12">
           <legend className="text-sm font-medium leading-none">Received so far</legend>
           <p id={`${id}-help`} className="text-sm text-muted-foreground">
-            Enter the total that has arrived so far, not just this delivery.
+            Enter the total received so far, not just this delivery.
           </p>
           <ul className="divide-y rounded-lg border">
             {drafts.map((d, index) => {

@@ -185,7 +185,7 @@ export const PURCHASE_ORDER_FORM_KIND: DocumentFormKind<PurchaseOrderForm> = {
 
 /* ---- recording what has arrived --------------------------------------- */
 
-/** One line of the "Record delivery" form: what was ordered, and the box for the total that has arrived so far. */
+/** One line of the "Record delivery" form: what was ordered, and the box for the total received so far. */
 export type ReceiptDraft = {
   line_id: string;
   description: string;

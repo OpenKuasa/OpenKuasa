@@ -29,7 +29,7 @@ vi.mock('@/components/ui/select', () => {
 
 const TODAY = '2026-10-10';
 const SUPPLIER = '44444444-4444-4444-8444-444444444444';
-const MARK = "This bill’s purchase order is billed over its total or for more than has arrived";
+const MARK = "This bill’s purchase order is billed over its total or for more than has been received";
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 
 const bill = (id: string, extra: Partial<BillListRow> = {}): BillListRow => ({

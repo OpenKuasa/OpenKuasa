@@ -751,9 +751,9 @@ describe('orderNotesForBills', () => {
       'BILL-0001 is against PO-0003, whose bills come to RM 1,250.50, over its total of RM 1,000.00.',
     ]);
   });
-  it('says the order is billed for more than has arrived', () => {
+  it('says the order is billed for more than has been received', () => {
     expect(orderNotesForBills([against('BILL-0001')], [order({ billed_over_received: true, billed_total: 800, received_total: 300 })])).toEqual([
-      'BILL-0001 is against PO-0003, which is billed RM 800.00 with RM 300.00 arrived so far.',
+      'BILL-0001 is against PO-0003, which is billed RM 800.00 with RM 300.00 received so far.',
     ]);
   });
   it('gives only the over-the-total sentence when both flags are set', () => {

@@ -234,7 +234,7 @@ export type OrderBilling = Pick<
 
 /**
  * One sentence for each purchase order, among the ones these bills are raised against, that is billed for more
- * than its total or for more than has arrived, in the order the bills come. When several of the bills belong to
+ * than its total or for more than has been received, in the order the bills come. When several of the bills belong to
  * the same order the first is named and the rest counted. Advice only: it blocks nothing. An order that is not
  * in `orders` (cancelled ones may not be passed) says nothing.
  */
@@ -257,7 +257,7 @@ export function orderNotesForBills(
     notes.push(
       order.over_billed
         ? `${subject} against ${po}, whose bills come to ${rm(order.billed_total)}, over its total of ${rm(order.total)}.`
-        : `${subject} against ${po}, which is billed ${rm(order.billed_total)} with ${rm(order.received_total)} arrived so far.`,
+        : `${subject} against ${po}, which is billed ${rm(order.billed_total)} with ${rm(order.received_total)} received so far.`,
     );
   }
   return notes;
