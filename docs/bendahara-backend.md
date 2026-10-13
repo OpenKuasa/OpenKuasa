@@ -2362,6 +2362,12 @@ with no date).
   then a write, not one statement.
 - Two people renaming or archiving the same category at once: the last write
   stands. Nothing compares what the person was shown.
+- The Categories card does not show whether a category is in use, so
+  archiving one gives no warning about what is filed under it; what is
+  filed under it keeps it and goes on posting.
+- Chart of Accounts can archive a category's ledger account by itself, and
+  nothing then archives the category: it stays active in the pickers, and
+  the card goes on saying "Active".
 - A payment voucher draft whose category was archived since opens its form
   with that category in the box, marked "(archived)" (`voucherCategoryChoices`);
   a new voucher is offered the active categories only.
