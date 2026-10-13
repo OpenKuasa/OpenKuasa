@@ -68,8 +68,9 @@ const split: PaymentOutRow[] = [
 const billsDraft = draftVoucherForm(draftRow, split, bills, accounts);
 const newCategory = { ...newVoucherForm(accounts, categories, TODAY), payeeName: 'Tenaga', categoryId: CATEGORY, amount: '40' };
 
-const record = vi.fn(async () => ({ ok: true as const, data: { id: VOUCHER, status: 'scheduled' as const } }));
-const save = vi.fn(async () => ({ ok: true as const, data: { id: VOUCHER, status: 'draft' as const } }));
+type Done = { ok: true; data: { id: string; status: 'draft' | 'pending_approval' | 'scheduled' } };
+const record = vi.fn<(input: unknown) => Promise<Done>>(async () => ({ ok: true, data: { id: VOUCHER, status: 'scheduled' } }));
+const save = vi.fn<(input: unknown) => Promise<Done>>(async () => ({ ok: true, data: { id: VOUCHER, status: 'draft' } }));
 
 const props = (draft?: ReturnType<typeof newVoucherForm>) => ({
   accounts, contacts: [], categories, payable, orders, today: TODAY, canDecide: true, draft, actions: { record, save }, onClose: () => {},
@@ -77,19 +78,20 @@ const props = (draft?: ReturnType<typeof newVoucherForm>) => ({
 const card = (draft?: ReturnType<typeof newVoucherForm>) => VoucherFormCard(props(draft)) as ReactElement;
 
 /** Every element under a node, depth first. Components are not rendered: their props.children are what the card handed them. */
-function elements(node: ReactNode): ReactElement<Record<string, any>>[] {
+type El = ReactElement<{ children?: ReactNode; [prop: string]: unknown }>;
+function elements(node: ReactNode): El[] {
   if (Array.isArray(node)) return node.flatMap(elements);
   if (!isValidElement(node)) return [];
-  const el = node as ReactElement<Record<string, any>>;
+  const el = node as El;
   return [el, ...elements(el.props.children)];
 }
 const all = (draft?: ReturnType<typeof newVoucherForm>) => elements(card(draft));
-const labelOf = (el: ReactElement<Record<string, any>>) => (Array.isArray(el.props.children) ? el.props.children.join('') : String(el.props.children));
+const labelOf = (el: El) => (Array.isArray(el.props.children) ? el.props.children.join('') : String(el.props.children));
 const buttons = (draft?: ReturnType<typeof newVoucherForm>) => all(draft).filter((e) => e.type === Button);
 const button = (draft: ReturnType<typeof newVoucherForm> | undefined, label: string) => buttons(draft).find((b) => labelOf(b) === label)!;
-const press = (draft: ReturnType<typeof newVoucherForm> | undefined, label: string) => button(draft, label).props.onClick();
+const press = (draft: ReturnType<typeof newVoucherForm> | undefined, label: string) => (button(draft, label).props.onClick as () => void)();
 const submitForm = (draft?: ReturnType<typeof newVoucherForm>) =>
-  all(draft).find((e) => e.type === 'form')!.props.onSubmit({ preventDefault: () => {} });
+  (all(draft).find((e) => e.type === 'form')!.props.onSubmit as (e: unknown) => void)({ preventDefault: () => {} });
 
 beforeEach(() => {
   vi.clearAllMocks();

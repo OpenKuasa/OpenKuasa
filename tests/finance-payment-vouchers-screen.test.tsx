@@ -48,11 +48,19 @@ vi.mock('@/components/finance/payment-vouchers-view', () => ({ PaymentVouchersVi
 
 import PaymentVouchersScreen from '@/screens/finance/payment-vouchers';
 
+type Writer = {
+  actions: Record<string, unknown>;
+  orders: { id: string }[];
+  contacts: unknown[];
+  orderNotes: Record<string, string[]>;
+  bills: unknown[];
+  payments: unknown[];
+};
 const waiting = { kind: 'bill', status: 'pending_approval' } as PaymentVoucherRow;
 const load = async (role: string, rows: unknown[] = [waiting], isDemo = false) => {
   lists.viewer = { orgId: 'org', role, isDemo };
   lists.rows = rows;
-  const element = (await PaymentVouchersScreen()) as { props: { writer?: Record<string, any> } };
+  const element = (await PaymentVouchersScreen()) as { props: { writer?: Writer } };
   return element.props.writer;
 };
 
@@ -76,13 +84,13 @@ describe('the Payment Vouchers loader', () => {
 
   it('passes the form only the approved and closed purchase orders, and only the active contacts', async () => {
     const writer = await load('member');
-    expect(writer?.orders.map((o: { id: string }) => o.id)).toEqual(['po-ok', 'po-closed']);
+    expect(writer?.orders.map((o) => o.id)).toEqual(['po-ok', 'po-closed']);
     expect(writer?.contacts).toEqual([{ id: 'c1', name: 'Maju' }]);
   });
 
   it('works out the over-billing notes only for someone who may approve, and only while a bill voucher waits', async () => {
-    expect(Object.keys((await load('owner'))?.orderNotes)).toEqual(['v1']);
-    expect(Object.keys((await load('admin'))?.orderNotes)).toEqual(['v1']);
+    expect(Object.keys((await load('owner'))?.orderNotes ?? {})).toEqual(['v1']);
+    expect(Object.keys((await load('admin'))?.orderNotes ?? {})).toEqual(['v1']);
     expect((await load('member'))?.orderNotes).toEqual({});
     expect((await load('owner', [{ kind: 'bill', status: 'draft' }]))?.orderNotes).toEqual({});
     expect((await load('owner', [{ kind: 'expense', status: 'pending_approval' }]))?.orderNotes).toEqual({});
