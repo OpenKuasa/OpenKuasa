@@ -789,7 +789,8 @@ testWithStorage('a member’s bill from a receipt is a draft; once posted only a
 }, 120_000);
 
 testWithStorage('another workspace can match nothing here, and reads none of its matched receipts', async () => {
-  const { a, owner } = await ownerAndMember('Receipts Match C');
+  const a = await confirmedOwner('Receipts Match C');
+  const owner = { client: a.c, orgId: a.orgId };
   const b = await confirmedOwner('Receipts Match Outsider');
   const outsiderHere = { client: b.c, orgId: a.orgId };
   const one = await receipt(a, 'mine.png');
