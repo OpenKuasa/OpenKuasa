@@ -98,18 +98,22 @@ const voucher = (over: Partial<PaymentVoucherRow> = {}): PaymentVoucherRow => ({
 const record = vi.fn(async () => ({ ok: false as const, error: 'no' }));
 const approve = vi.fn(async () => ({ ok: true as const, data: { id: ID } }));
 const reject = vi.fn(async () => ({ ok: true as const, data: { id: ID } }));
+const submit = vi.fn(async () => ({ ok: true as const, data: { id: ID } }));
 const remove = vi.fn(async () => ({ ok: true as const, data: { id: ID } }));
 const never = async () => ({ ok: false as const, error: 'no' });
 const writer = (canDecide: boolean, orderNotes: Record<string, string[]> = {}): VouchersWriter => ({
-  actions: { record: never, approve, reject, remove },
+  actions: { record: never, save: never, submit, approve, reject, remove },
   canDecide,
   accounts: [],
   contacts: [],
   categories: [],
+  bills: [],
+  payments: [],
+  orders: [],
   orderNotes,
 });
 
-const render = (w?: VouchersWriter, rows: PaymentVoucherRow[] = SAMPLE_PAYMENT_VOUCHERS, initialAsk?: { kind: 'approve' | 'reject' | 'delete'; id: string }) =>
+const render = (w?: VouchersWriter, rows: PaymentVoucherRow[] = SAMPLE_PAYMENT_VOUCHERS, initialAsk?: { kind: 'submit' | 'approve' | 'reject' | 'delete'; id: string }) =>
   renderToStaticMarkup(<PaymentVouchersView rows={rows} today={SAMPLE_TODAY} followClock={false} writer={w} initialAsk={initialAsk} />);
 
 /** How many row menus the markup holds. */
@@ -161,6 +165,18 @@ describe('a waiting voucher\'s menu', () => {
   });
 });
 
+describe('a draft\'s menu', () => {
+  const rows = [voucher({ status: 'draft' })];
+
+  it('offers an owner and a member Edit, Send for approval and Delete', () => {
+    expect(items(render(writer(true), rows))).toEqual(['Edit', 'Send for approval', 'Delete']);
+    expect(items(render(writer(false), rows))).toEqual(['Edit', 'Send for approval', 'Delete']);
+  });
+  it('offers a viewer nothing', () => {
+    expect(items(render(undefined, rows))).toEqual([]);
+  });
+});
+
 describe('the Kind link', () => {
   it('says "Managed on Payments Out" only once the supplier payment is to be paid', () => {
     expect(render(writer(true), [voucher({ status: 'scheduled', approved_at: '2026-10-06T00:00:00Z' })])).toContain('title="Managed on Payments Out"');
@@ -200,6 +216,21 @@ describe('the questions', () => {
     expect(text(render(writer(true), rows, { kind: 'delete', id: ID }))).not.toContain('Reference: ACC 1');
   });
 
+  it('shows the same line under the Send question of a draft, and no over-billing note', () => {
+    const html = render(writer(false, notes), [voucher({ status: 'draft' })], { kind: 'submit', id: ID });
+    expect(text(html)).toContain('Method: FPX · Reference: ACC 1 · Notes: Paid late once already');
+    expect(html).not.toContain('role="status"');
+  });
+
+  it('presses Send for approval with the draft as it was shown', () => {
+    const draft = voucher({ status: 'draft' });
+    render(writer(false), [draft], { kind: 'submit', id: ID });
+    expect(asked[0].confirmLabel).toBe('Send for approval');
+    asked[0].onConfirm();
+    expect(submit).toHaveBeenCalledWith(voucherDecisionPayload(draft));
+    expect(approve).not.toHaveBeenCalled();
+  });
+
   it('presses Approve with the voucher as it was shown', () => {
     render(writer(true), rows, { kind: 'approve', id: ID });
     asked[0].onConfirm();
@@ -231,7 +262,17 @@ describe('the voucher form card', () => {
   const card = (canDecide: boolean) =>
     text(
       renderToStaticMarkup(
-        <VoucherFormCard accounts={[]} contacts={[]} categories={[]} today="2026-10-12" canDecide={canDecide} actions={{ record }} onClose={() => {}} />,
+        <VoucherFormCard
+          accounts={[]}
+          contacts={[]}
+          categories={[]}
+          payable={[]}
+          orders={[]}
+          today="2026-10-12"
+          canDecide={canDecide}
+          actions={{ record, save: record }}
+          onClose={() => {}}
+        />,
       ),
     );
 
@@ -239,10 +280,12 @@ describe('the voucher form card', () => {
     const html = card(true);
     expect(html).toContain('A voucher you save is approved at once and reads To be paid: you are an owner or admin. Nothing is paid until it is marked paid.');
     expect(html).toContain('Save voucher');
+    expect(html).toContain('Save as draft');
   });
   it('says what it does for a member, and names the button', () => {
     const html = card(false);
     expect(html).toContain('This voucher waits as Pending approval until an owner or admin approves or rejects it. Until then it cannot be changed, only deleted.');
     expect(html).toContain('Send for approval');
+    expect(html).toContain('Save as draft');
   });
 });

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Ban, Check, Download, PieChart, Plus, Search, Trash2, TrendingUp, Wallet } from 'lucide-react';
+import { Ban, Check, Download, Pencil, PieChart, Plus, Search, Send, Trash2, TrendingUp, Wallet } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { AreaTrend, DonutStat, type Series } from '@/components/charts';
 import { ConfirmRow } from '@/components/finance/confirm-row';
@@ -22,6 +22,7 @@ import { LiveDot } from '@/components/ui/live-dot';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { localIsoDate } from '@/lib/finance/bill-math';
+import type { BillListRow } from '@/lib/finance/bills';
 import type { PaymentVoucherKind, PaymentVoucherRow } from '@/lib/finance/cash-book';
 import {
   CASH_BOOK_PERIODS,
@@ -43,13 +44,15 @@ import {
 import { csvFileName } from '@/lib/finance/csv';
 import type { ExpenseCategory } from '@/lib/finance/expenses';
 import { rm } from '@/lib/finance/format';
-import type { FinanceAccount } from '@/lib/finance/money';
+import type { FinanceAccount, PaymentOutRow } from '@/lib/finance/money';
+import type { OrderBilling } from '@/lib/finance/purchase-views';
 import type { FinResult } from '@/lib/finance/result';
 import { LATEST_ROWS, displayDate } from '@/lib/finance/view-helpers';
 import {
   type QuestionPart,
   type VoucherAction,
   type WrittenVoucher,
+  draftVoucherForm,
   voucherActions,
   voucherAnswerIsStale,
   voucherControls,
@@ -58,12 +61,14 @@ import {
   voucherKindLink,
   voucherName,
   voucherDetailsLine,
+  voucherPayableBills,
   voucherQuestion,
   writtenVoucherTitle,
 } from '@/lib/finance/voucher-form';
 import { cn } from '@/lib/utils';
 
 export type VoucherActions = VoucherFormActions & {
+  submit: (input: unknown) => Promise<FinResult<{ id: string }>>;
   approve: (input: unknown) => Promise<FinResult<{ id: string }>>;
   reject: (input: unknown) => Promise<FinResult<{ id: string }>>;
   remove: (input: unknown) => Promise<FinResult<{ id: string }>>;
@@ -78,6 +83,12 @@ export type VouchersWriter = {
   accounts: FinanceAccount[];
   contacts: { id: string; name: string }[];
   categories: ExpenseCategory[];
+  /** Every bill, to find the ones a voucher can still pay. */
+  bills: BillListRow[];
+  /** One row per bill a payment out pays: what each bill has held against it, and the bills of a draft being edited. */
+  payments: PaymentOutRow[];
+  /** Approved and closed purchase orders, to advise on the bills ticked on the form. */
+  orders: OrderBilling[];
   /**
    * By voucher id, the advice about the purchase orders behind the bills a waiting voucher pays
    * (`orderNotesByVoucher`). Empty for someone who may not decide: they are never asked to approve.
@@ -98,8 +109,11 @@ const STATUS_STYLES: Record<PaymentVoucherRow['status'], string> = {
   void: 'bg-muted text-muted-foreground line-through',
 };
 
-/** One thing open at a time: the voucher form, or a question in one row. */
-type Open = { kind: 'form'; today: string } | { kind: VoucherAction; row: PaymentVoucherRow } | null;
+/** One thing open at a time: the voucher form (new, or for the draft of one row), or a question in one row. */
+type Open =
+  | { kind: 'form'; today: string; draft?: PaymentVoucherRow }
+  | { kind: Exclude<VoucherAction, 'edit'>; row: PaymentVoucherRow }
+  | null;
 
 /**
  * Payment Vouchers: every movement of money out, one row each. The chosen
@@ -107,7 +121,9 @@ type Open = { kind: 'form'; today: string } | { kind: VoucherAction; row: Paymen
  * waiting for approval or still to be paid stay in every period, as their
  * cards count them), with search, status and kind filters, "View all" and
  * Export working on top of it; Export gives what the table would show with
- * "View all". A person who may edit (`writer`) also gets New voucher, and
+ * "View all". A person who may edit (`writer`) also gets New voucher (for a
+ * category or for a supplier's bills, saved as a draft or sent for approval),
+ * Edit and Send for approval on a draft, and
  * Delete on a voucher that is not yet "To be paid", or that is and is of
  * a kind that belongs to this screen; an owner or
  * admin also gets Approve and Reject on one that is waiting. Each row's menu
@@ -130,7 +146,7 @@ export function PaymentVouchersView({
   followClock?: boolean;
   writer?: VouchersWriter;
   /** Opens a question on a row at the start. Only for tests, which cannot press a menu item. */
-  initialAsk?: { kind: VoucherAction; id: string };
+  initialAsk?: { kind: Exclude<VoucherAction, 'edit'>; id: string };
 }) {
   const today = useLocalToday(serverToday, followClock);
   const [period, setPeriod] = useState<CashBookPeriod>('month');
@@ -201,6 +217,10 @@ export function PaymentVouchersView({
 
   const menuItem = (row: PaymentVoucherRow, action: VoucherAction): RowMenuItem => {
     switch (action) {
+      case 'edit':
+        return { label: 'Edit', icon: Pencil, opens: true, onSelect: () => ask({ kind: 'form', today: localIsoDate(new Date()), draft: row }) };
+      case 'submit':
+        return { label: 'Send for approval', icon: Send, opens: true, onSelect: () => ask({ kind: 'submit', row }) };
       case 'approve':
         return { label: 'Approve', icon: Check, opens: true, onSelect: () => ask({ kind: 'approve', row }) };
       case 'reject':
@@ -221,7 +241,7 @@ export function PaymentVouchersView({
       return result;
     }, done);
 
-  const decided = (row: PaymentVoucherRow, status: 'scheduled' | 'rejected'): WrittenVoucher => ({
+  const decided = (row: PaymentVoucherRow, status: 'pending_approval' | 'scheduled' | 'rejected'): WrittenVoucher => ({
     id: row.transaction_id,
     status,
     recorded: false,
@@ -241,7 +261,7 @@ export function PaymentVouchersView({
       ),
     );
 
-  /** What the decision is matched on and the table does not draw, as text that wraps. */
+  /** What sending and a decision are matched on and the table does not draw, as text that wraps. */
   const details = (row: PaymentVoucherRow) => (
     <p className="mt-1 break-words text-xs text-muted-foreground">{voucherDetailsLine(row)}</p>
   );
@@ -249,6 +269,26 @@ export function PaymentVouchersView({
   const question = (row: PaymentVoucherRow) => {
     if (!writer || !asking || asking.row.transaction_id !== row.transaction_id) return null;
     const { actions } = writer;
+    if (asking.kind === 'submit') {
+      return (
+        <ConfirmRow
+          key={row.transaction_id}
+          colSpan={columns}
+          tone="default"
+          icon={Send}
+          label={`Send ${voucherName(row)} for approval`}
+          confirmLabel="Send for approval"
+          pendingLabel="Sending…"
+          pending={confirm.pending}
+          error={confirm.error}
+          onConfirm={() => settle(() => actions.submit(voucherDecisionPayload(row)), () => closeSaying(decided(row, 'pending_approval')))}
+          onCancel={close}
+        >
+          {words(voucherQuestion('submit', row))}
+          {details(row)}
+        </ConfirmRow>
+      );
+    }
     if (asking.kind === 'approve') {
       // The same advice, in the same words, as Payments Out gives before a supplier payment is marked paid.
       const orderNotes = writer.orderNotes[row.transaction_id] ?? [];
@@ -349,11 +389,17 @@ export function PaymentVouchersView({
       <BentoGrid>
         {writer && open?.kind === 'form' ? (
           <VoucherFormCard
+            // A different draft, or a new voucher after one, starts the card again.
+            key={open.draft?.transaction_id ?? 'new'}
             accounts={writer.accounts}
             contacts={writer.contacts}
             categories={writer.categories}
+            // What the draft being edited holds of its bills is its own to take again.
+            payable={voucherPayableBills(writer.bills, writer.payments, open.draft?.transaction_id ?? null)}
+            orders={writer.orders}
             today={open.today}
             canDecide={writer.canDecide}
+            draft={open.draft ? draftVoucherForm(open.draft, writer.payments, writer.bills, writer.accounts) : undefined}
             actions={writer.actions}
             onClose={(recorded) => (recorded ? closeSaying({ ...recorded, recorded: true }) : close())}
           />

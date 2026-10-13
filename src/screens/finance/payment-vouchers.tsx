@@ -3,6 +3,8 @@ import {
   deleteVoucherAction,
   recordVoucherAction,
   rejectVoucherAction,
+  saveVoucherAction,
+  submitVoucherAction,
 } from '@/app/(app)/finance/actions';
 import { PaymentVouchersView, type VoucherActions } from '@/components/finance/payment-vouchers-view';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
@@ -20,6 +22,8 @@ import { SAMPLE_TODAY } from './sales-sample';
 
 const ACTIONS: VoucherActions = {
   record: recordVoucherAction,
+  save: saveVoucherAction,
+  submit: submitVoucherAction,
   approve: approveVoucherAction,
   reject: rejectVoucherAction,
   remove: deleteVoucherAction,
@@ -27,7 +31,8 @@ const ACTIONS: VoucherActions = {
 
 /**
  * Every movement of money out. Anyone who may edit can record a voucher for
- * a category and delete one that has not been paid; approving and rejecting
+ * a category, save one for a category or for a supplier's bills as a draft,
+ * send a draft for approval, and delete one that has not been paid; approving and rejecting
  * one that is waiting are an owner's or admin's (`sign-off-finance`), as the
  * database enforces. A viewer and the demo workspace read.
  */
@@ -37,19 +42,21 @@ export default async function PaymentVouchersScreen() {
   }
   const viewer = await getViewer();
   const ctx = { client: await createClient(), orgId: viewer.orgId };
-  // The form offers accounts, contacts and expense categories; anyone without the form has none of those reads made for them.
   const rows = await listPaymentVouchers(ctx);
   const access = voucherAccess(viewer, rows);
-  const [accounts, contacts, categories] = await Promise.all([
+  // The form offers accounts, contacts, expense categories and the bills that can still be paid, with the advice
+  // about their purchase orders: the same three reads Payments Out makes for its own form. Anyone without the
+  // form has none of those reads made for them.
+  const [accounts, contacts, categories, payments, bills, allOrders] = await Promise.all([
     access.readsForm ? listAccounts(ctx) : [],
     access.readsForm ? listContacts(ctx) : [],
     access.readsForm ? listExpenseCategories(ctx) : [],
+    access.readsForm ? listPaymentsOut(ctx) : [],
+    access.readsForm ? listBills(ctx) : [],
+    access.readsForm ? listPurchaseOrders(ctx) : [],
   ]);
-  // The purchase orders behind the bills a waiting voucher pays are read only for someone who can approve it,
-  // and only when such a voucher is waiting: the same three reads Payments Out makes for its own note.
-  const [payments, bills, orders] = access.readsOrders
-    ? await Promise.all([listPaymentsOut(ctx), listBills(ctx), listPurchaseOrders(ctx)])
-    : [[], [], []];
+  // A closed order can still have unpaid bills; a draft, pending or cancelled one has none that matter.
+  const orders = allOrders.filter((o) => o.status === 'approved' || o.status === 'closed');
   return (
     <PaymentVouchersView
       rows={rows}
@@ -63,12 +70,11 @@ export default async function PaymentVouchersScreen() {
               // Only what the form reads goes to the browser.
               contacts: contacts.filter((c) => c.active).map((c) => ({ id: c.id, name: c.name })),
               categories,
-              // A closed order can still have unpaid bills; a draft, pending or cancelled one has none that matter.
-              orderNotes: orderNotesByVoucher(
-                payments,
-                bills,
-                orders.filter((o) => o.status === 'approved' || o.status === 'closed'),
-              ),
+              bills,
+              payments,
+              orders,
+              // Worked out only for someone who can approve, and only when a voucher for bills waits.
+              orderNotes: access.readsOrders ? orderNotesByVoucher(payments, bills, orders) : {},
             }
           : undefined
       }
