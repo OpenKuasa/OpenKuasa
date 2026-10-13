@@ -6,6 +6,7 @@ import { setBankAccountActive } from '@/lib/finance/bank-accounts';
 import { listBankAccounts, listBankTransactions } from '@/lib/finance/banking';
 import { withRunningBalance } from '@/lib/finance/banking-views';
 import { bankRowActions, transferName } from '@/lib/finance/transfer-form';
+import { NOT_ALLOWED } from '@/lib/finance/result';
 import { TRANSFER_MESSAGES, recordTransfer, voidTransfer } from '@/lib/finance/transfers';
 
 // Transfers between accounts against the hosted database, through the app's own data layer with a real client.
@@ -13,8 +14,8 @@ import { TRANSFER_MESSAGES, recordTransfer, voidTransfer } from '@/lib/finance/t
 // finance_void_transfer are used as they are on main (supabase/tests/bendahara_banking_check.sql proves them as
 // each role). This file adds what only the API shows: that the payload the form sends is taken by PostgREST,
 // that the number is read back, that both sides arrive in the rows the Transactions table is built from, and
-// that each refusal arrives as the sentence the screen shows, for an owner and for a member. The browser smoke
-// test runs as an owner, so the member's answers are covered here and nowhere else. The helper deletes the
+// that each refusal arrives as the sentence the screen shows, for an owner, a member and a viewer. The browser smoke
+// test runs as an owner, so the member and viewer answers are covered here and nowhere else. The helper deletes the
 // workspace it makes.
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
@@ -23,8 +24,8 @@ if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
 
 type Ctx = { client: SupabaseClient; orgId: string };
 
-/** A new signed-up user and the workspace they own, and a member invited into it. */
-async function ownerAndMember(orgName: string): Promise<{ owner: Ctx; member: Ctx }> {
+/** A new signed-up user and the workspace they own, and a member and a viewer invited into it. */
+async function ownerAndMember(orgName: string): Promise<{ owner: Ctx; member: Ctx; viewer: Ctx }> {
   const c = liveClient();
   const { error: authErr } = await signInOwner(c);
   expect(authErr, authErr?.message).toBeNull();
@@ -36,11 +37,21 @@ async function ownerAndMember(orgName: string): Promise<{ owner: Ctx; member: Ct
   expect(invite.error, invite.error?.message).toBeNull();
   const accepted = await m.rpc('accept_invite', { p_token: invite.data });
   expect(accepted.error, accepted.error?.message).toBeNull();
-  return { owner: { client: c, orgId: orgId as string }, member: { client: m, orgId: orgId as string } };
+  const v = liveClient();
+  const viewerSignUp = await createConfirmedTestUser(v, 'transfers-viewer-pass-123');
+  const viewerInvite = await c.rpc('create_invite', { p_email: viewerSignUp.email, p_role: 'viewer' });
+  expect(viewerInvite.error, viewerInvite.error?.message).toBeNull();
+  const viewerAccepted = await v.rpc('accept_invite', { p_token: viewerInvite.data });
+  expect(viewerAccepted.error, viewerAccepted.error?.message).toBeNull();
+  return {
+    owner: { client: c, orgId: orgId as string },
+    member: { client: m, orgId: orgId as string },
+    viewer: { client: v, orgId: orgId as string },
+  };
 }
 
 testWithSupabase('an owner records a transfer and voids it; a member is told who can; refusals read as sentences', async () => {
-  const { owner, member } = await ownerAndMember(`Transfers ${Date.now()}`);
+  const { owner, member, viewer } = await ownerAndMember(`Transfers ${Date.now()}`);
   // A new workspace is seeded with a bank account and cash.
   const accounts = await listBankAccounts(owner);
   const bank = accounts.find((a) => a.kind === 'bank')!;
@@ -50,6 +61,9 @@ testWithSupabase('an owner records a transfer and voids it; a member is told who
 
   // A member: told who can, by the database (the action says the same before it gets this far). Nothing is written.
   expect(await recordTransfer(member, transfer)).toEqual({ ok: false, error: TRANSFER_MESSAGES.needsSignOff });
+  expect((await listBankTransactions(owner)).filter((r) => r.kind === 'transfer')).toEqual([]);
+  // A viewer: not allowed to write at all (42501). Nothing is written.
+  expect(await recordTransfer(viewer, transfer)).toEqual({ ok: false, error: NOT_ALLOWED });
   expect((await listBankTransactions(owner)).filter((r) => r.kind === 'transfer')).toEqual([]);
 
   // The owner: recorded whole, numbered, and both sides are in the rows the table is built from.
@@ -91,6 +105,9 @@ testWithSupabase('an owner records a transfer and voids it; a member is told who
 
   // Voiding: a member is told who can; the owner voids both sides, with one account archived.
   expect(await voidTransfer(member, { transfer_id: recorded.data.transfer_id })).toEqual({ ok: false, error: TRANSFER_MESSAGES.needsSignOff });
+  // A viewer cannot see the rows to lock (FIN11): the transfer is "no longer there" to them, and stays posted.
+  expect(await voidTransfer(viewer, { transfer_id: recorded.data.transfer_id })).toEqual({ ok: false, error: TRANSFER_MESSAGES.gone });
+  expect((await listBankTransactions(owner)).filter((r) => r.transfer_id === recorded.data.transfer_id).map((r) => r.status)).toEqual(['posted', 'posted']);
   expect(await voidTransfer(owner, { transfer_id: recorded.data.transfer_id })).toEqual({ ok: true, data: { transfer_id: recorded.data.transfer_id } });
   expect(await voidTransfer(owner, { transfer_id: recorded.data.transfer_id })).toEqual({ ok: false, error: TRANSFER_MESSAGES.alreadyVoid });
   expect(await voidTransfer(owner, { transfer_id: '00000000-0000-4000-8000-000000000000' })).toEqual({ ok: false, error: TRANSFER_MESSAGES.gone });
