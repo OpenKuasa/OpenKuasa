@@ -45,7 +45,11 @@ vi.mock('@/lib/finance/vouchers', async (orig) => {
 
 const actions = await import('@/app/(app)/finance/actions');
 
-/** Pinned: the screens a voucher shows on. Nothing in this part posts, pays or voids, so the ledger screens are not among them. */
+/**
+ * Pinned: the screens a voucher shows on, and the ones that count a draft or waiting refund as credit held (Invoices,
+ * Credit Notes, Payments In, Customers & Suppliers). Nothing in this part posts, pays or voids, so the ledger screens
+ * are not among them.
+ */
 const PATHS = [
   '/finance/payment-vouchers',
   '/finance/banking',
@@ -53,6 +57,10 @@ const PATHS = [
   '/finance/supplier-bills',
   '/finance/payments-out',
   '/finance/refunds',
+  '/finance/invoices',
+  '/finance/credit-notes',
+  '/finance/payments-in',
+  '/finance/customers-suppliers',
 ];
 /** What the row showed when the owner pressed Approve or Reject. */
 const DECIDE = {

@@ -882,7 +882,9 @@ export async function deleteExpenseAction(input: unknown) {
 // leave, which Banking will not archive while it does. A voucher that pays expenses holds its part of each, which
 // Expenses shows; one that pays supplier bills holds its part of each bill, which Supplier Bills and Payments
 // Out show, and once approved it is a payment still to be paid on Payments Out; a refund that was waiting is on
-// Refunds. Nothing here posts, pays or voids, so the books do not move and the ledger screens are not in the list.
+// Refunds. A refund that is a draft or waiting holds credit on its invoice, which Invoices, Credit Notes,
+// Payments In and Customers & Suppliers count (the same four CREDIT_PATHS lists), so deleting or rejecting one
+// refreshes them. Nothing here posts, pays or voids, so the books do not move and the ledger screens are not in the list.
 const VOUCHER_PATHS = [
   '/finance/payment-vouchers',
   '/finance/banking',
@@ -890,6 +892,10 @@ const VOUCHER_PATHS = [
   '/finance/supplier-bills',
   '/finance/payments-out',
   '/finance/refunds',
+  '/finance/invoices',
+  '/finance/credit-notes',
+  '/finance/payments-in',
+  '/finance/customers-suppliers',
 ];
 /** Approving or rejecting a voucher: an owner or admin only, told so in the voucher's own words. */
 const VOUCHER_DECIDE = { signOff: true, signOffError: VOUCHER_MESSAGES.needsDecider } as const;
