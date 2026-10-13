@@ -7,10 +7,9 @@ import {
 } from '@/app/(app)/finance/actions';
 import { receiptLinkAction } from '@/app/(app)/finance/receipt-inbox-actions';
 import { type ExpenseActions, ExpensesView } from '@/components/finance/expenses-view';
-import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { listContacts } from '@/lib/finance/contacts';
-import { canEditExpenses } from '@/lib/finance/expense-form';
+import { expensesScreenPlan } from '@/lib/finance/expense-form';
 import { listExpenseCategories, listExpenses } from '@/lib/finance/expenses';
 import { listAccounts } from '@/lib/finance/money';
 import { attachedReceiptsOrNone, listAttachedReceipts, receiptsByDocument } from '@/lib/finance/receipt-match';
@@ -41,9 +40,8 @@ export default async function ExpensesScreen() {
   }
   const viewer = await getViewer();
   const ctx = { client: await createClient(), orgId: viewer.orgId };
-  const canEdit = canEditExpenses(viewer.role, viewer.isDemo);
-  // Decided here, on the server, and nowhere else.
-  const canDecide = canEdit && can(viewer.role, 'sign-off-finance');
+  // Decided here, on the server, and nowhere else (a function of its own, so a test can pin it).
+  const plan = expensesScreenPlan(viewer.role, viewer.isDemo);
   // The form offers contacts and expense categories; anyone without the form has neither read made for them.
   // The receipts tied to an expense show in its row, for everyone who can see it.
   // The accounts are for Mark paid, which only someone who may decide is given.
@@ -51,9 +49,9 @@ export default async function ExpensesScreen() {
     listExpenses(ctx),
     // Without the paperclips the page still loads: a failed read is logged and shows none.
     attachedReceiptsOrNone(() => listAttachedReceipts(ctx)),
-    canEdit ? listContacts(ctx) : [],
-    canEdit ? listExpenseCategories(ctx) : [],
-    canDecide ? listAccounts(ctx) : [],
+    plan.readsContacts ? listContacts(ctx) : [],
+    plan.readsCategories ? listExpenseCategories(ctx) : [],
+    plan.readsAccounts ? listAccounts(ctx) : [],
   ]);
   return (
     <ExpensesView
@@ -62,10 +60,10 @@ export default async function ExpensesScreen() {
       receipts={receiptsByDocument(attached)}
       receiptLinkOf={receiptLinkAction}
       writer={
-        canEdit
+        plan.canEdit
           ? {
               actions: ACTIONS,
-              canDecide,
+              canDecide: plan.canDecide,
               // Only what the form reads goes to the browser.
               contacts: contacts.filter((c) => c.active).map((c) => ({ id: c.id, name: c.name })),
               categories,

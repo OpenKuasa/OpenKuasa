@@ -15,6 +15,8 @@ import {
   expenseName,
   expensePayload,
   expensePaymentNote,
+  expensesScreenPlan,
+  showsPayCard,
   expenseSaveHint,
   isPartPaid,
   newExpenseForm,
@@ -304,5 +306,43 @@ describe('an expense just written that is not in the list', () => {
     expect(writtenExpenseTitle(written('rejected'))).toBe('Expense rejected');
     expect(writtenExpenseTitle(written('pending'))).toBe('Expense sent for approval');
     expect(writtenExpenseTitle(written(null))).toBe('Expense saved');
+  });
+});
+
+describe('who the Expenses screen reads for, and who is drawn the Mark paid card', () => {
+  it('gives an owner or admin the form, the card and the accounts', () => {
+    for (const role of ['owner', 'admin'] as const) {
+      expect(expensesScreenPlan(role, false), role).toEqual({
+        canEdit: true,
+        canDecide: true,
+        readsContacts: true,
+        readsCategories: true,
+        readsAccounts: true,
+      });
+    }
+  });
+  it('gives a member the form and no accounts, and no card', () => {
+    expect(expensesScreenPlan('member', false)).toEqual({
+      canEdit: true,
+      canDecide: false,
+      readsContacts: true,
+      readsCategories: true,
+      readsAccounts: false,
+    });
+  });
+  it('gives a viewer, and anyone in the demo workspace, nothing to write and no read for it', () => {
+    const none = { canEdit: false, canDecide: false, readsContacts: false, readsCategories: false, readsAccounts: false };
+    expect(expensesScreenPlan('viewer', false)).toEqual(none);
+    expect(expensesScreenPlan('owner', true)).toEqual(none);
+    expect(expensesScreenPlan('admin', true)).toEqual(none);
+    expect(expensesScreenPlan('member', true)).toEqual(none);
+  });
+  it('draws the card only for a writer who may decide, and only while it is the card that is open', () => {
+    const writer = (canDecide: boolean) => ({ canDecide });
+    expect(showsPayCard(writer(true), 'pay')).toBe(true);
+    expect(showsPayCard(writer(false), 'pay')).toBe(false);
+    expect(showsPayCard(undefined, 'pay')).toBe(false);
+    expect(showsPayCard(writer(true), 'form')).toBe(false);
+    expect(showsPayCard(writer(true), undefined)).toBe(false);
   });
 });

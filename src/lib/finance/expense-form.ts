@@ -176,6 +176,22 @@ export function canEditExpenses(role: OrgRole, isDemo: boolean): boolean {
   return !isDemo && can(role, 'edit-data');
 }
 
+/**
+ * What the Expenses screen reads and what it lets each person do, decided on the server and nowhere else. The form's
+ * contacts and categories are read only for someone who has the form; the accounts only for someone who may decide
+ * (an owner or admin, who also mark an expense paid), so a member, a viewer and the demo are handed none.
+ */
+export function expensesScreenPlan(role: OrgRole, isDemo: boolean) {
+  const canEdit = canEditExpenses(role, isDemo);
+  const canDecide = canEdit && can(role, 'sign-off-finance');
+  return { canEdit, canDecide, readsContacts: canEdit, readsCategories: canEdit, readsAccounts: canDecide };
+}
+
+/** The Mark paid card is drawn only for a writer who may decide, and only while it is the card that is open. */
+export function showsPayCard(writer: { canDecide: boolean } | undefined, openKind: string | undefined): boolean {
+  return Boolean(writer && writer.canDecide && openKind === 'pay');
+}
+
 /** True for the answers that mean the expense is no longer as the row showed it: the question is closed and the row refreshed. */
 export function decisionIsStale(error: string): boolean {
   return ([M.changed, M.alreadyApproved, M.alreadyRejected, M.pendingAgain] as string[]).includes(error);

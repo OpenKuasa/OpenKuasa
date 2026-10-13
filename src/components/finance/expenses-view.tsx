@@ -45,6 +45,7 @@ import {
   expensePaymentNote,
   expenseQuestion,
   isPartPaid,
+  showsPayCard,
   writtenExpenseTitle,
 } from '@/lib/finance/expense-form';
 import { type ExpensePaidNote, expensePaidText, expensePaidTitle } from '@/lib/finance/expense-payment';
@@ -324,7 +325,7 @@ export function ExpensesView({
             onClose={(saved) => (saved ? closeSaying(saved) : close())}
           />
         ) : null}
-        {writer && writer.canDecide && open?.kind === 'pay' && paying ? (
+        {open?.kind === 'pay' && showsPayCard(writer, open.kind) && writer && paying ? (
           <ExpensePayCard
             // A different expense is a different card.
             key={paying.id}
