@@ -187,6 +187,12 @@ begin
     format('update public.finance_expenses set amount = 120, updated_at = %L where id = %L', seen, pending));
   select count(*) into n from public.finance_expenses where id = pending and amount = 120 and updated_at > seen;
   if n <> 1 then fails := array_append(fails, 'a direct update that sent the old updated_at kept it'); end if;
+  select updated_at into seen from public.finance_expenses where id = pending;
+  fails := fails || public.bendahara_expense_rules_try('a member changes a pending expense and sends an updated_at a day ahead', 'ok', null,
+    format('update public.finance_expenses set amount = 120, updated_at = now() + interval ''1 day'' where id = %L', pending));
+  select count(*) into n from public.finance_expenses
+   where id = pending and amount = 120 and updated_at > seen and updated_at < now() + interval '1 hour';
+  if n <> 1 then fails := array_append(fails, 'a direct update kept an updated_at from the future, or did not move it'); end if;
   fails := fails || public.bendahara_expense_rules_try('a member inserts an expense with an updated_at of their own', 'ok', null,
     format('insert into public.finance_expenses (id, org_id, category_id, vendor_name, amount, updated_at) values (%L, %L, %L, ''X'', 5, ''2020-01-01'')',
       by_hand, org, rent));
