@@ -21,12 +21,14 @@ import {
   categoryAddError,
   categoryAddedNote,
   categoryArchiveEffect,
+  categoryArchivePayload,
   categoryArchivedNote,
   categoryLists,
   categoryMark,
   categoryPayload,
   categoryRenameError,
   categoryRenamedNote,
+  categoryRestorePayload,
   categoryRestoredNote,
   newCategoryForm,
   renameChangesNothing,
@@ -130,7 +132,7 @@ export function CategoriesCard({ rows, actions, onClose }: { rows: CategoryRow[]
           onSelect: () => {
             ask(null);
             restore.run(
-              () => actions.setActive({ id: row.id, active: true }),
+              () => actions.setActive(categoryRestorePayload(row)),
               (saved) => setNote(categoryRestoredNote(saved)),
             );
           },
@@ -193,7 +195,7 @@ export function CategoriesCard({ rows, actions, onClose }: { rows: CategoryRow[]
         icon={Archive}
         onConfirm={() =>
           write.run(
-            () => actions.setActive({ id: row.id, active: false }),
+            () => actions.setActive(categoryArchivePayload(row)),
             (saved) => {
               setAsking(null);
               setNote(categoryArchivedNote(saved));

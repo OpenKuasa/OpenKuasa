@@ -106,6 +106,50 @@ describe('the Expenses loader', () => {
   });
 });
 
+/**
+ * What a press does is in the card's handlers, and the suite has no DOM, so the wiring that matters is read from
+ * the source, as the loader's is: what Archive and Restore send, the checks before a write, and what waits.
+ */
+describe('the card’s wiring', () => {
+  const source = readFileSync('src/components/finance/categories-card.tsx', 'utf8');
+
+  it('Restore sends the restore payload and Archive the archive payload', () => {
+    expect(source).toContain('actions.setActive(categoryRestorePayload(row))');
+    expect(source).toContain('actions.setActive(categoryArchivePayload(row))');
+    expect(source).not.toMatch(/active: (true|false)/);
+  });
+
+  it('checks the name against the list before it sends an add or a rename', () => {
+    expect(source.indexOf('categoryAddError(form, rows)')).toBeGreaterThan(-1);
+    expect(source.indexOf('categoryAddError(form, rows)')).toBeLessThan(source.indexOf('actions.create('));
+    expect(source.indexOf('categoryRenameError(row, typed, rows)')).toBeGreaterThan(-1);
+    expect(source.indexOf('categoryRenameError(row, typed, rows)')).toBeLessThan(source.indexOf('actions.rename('));
+    expect(source.indexOf('renameChangesNothing(row, typed)')).toBeLessThan(source.indexOf('categoryRenameError(row, typed, rows)'));
+  });
+
+  it('keeps one thing open at a time: the add form waits for a question, and nothing is sent twice or mid-write', () => {
+    expect(source).toContain('inert={asked !== null}');
+    expect(source).toContain('if (busy || asked) return;');
+    expect(source).toContain('if (write.pending) return;');
+    expect(source).toContain('onClick={onClose} disabled={busy}');
+    expect(source).toContain('{busy ? null : <RowMenu');
+    expect(source).toContain('setForm(newCategoryForm(saved.kind))');
+    expect(source).toContain('data-finance-focus');
+  });
+});
+
+describe('the Expenses page while the card is open', () => {
+  const source = readFileSync('src/components/finance/expenses-view.tsx', 'utf8');
+
+  it('locks the rest of the page, as an open form does, and does not count the card as a row question', () => {
+    expect(source).toMatch(/const locked = [^;]*open\?\.kind === 'categories'/);
+    expect(source).toMatch(/const asking = open && [^;]*open\.kind !== 'categories'/);
+    expect(source).toContain('aria-expanded={open?.kind === \'categories\'}');
+    expect(source.match(/disabled=\{locked\}/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(source).toContain('<span inert={locked}');
+  });
+});
+
 describe('the Categories button on Expenses', () => {
   const expenseActions = { save: never, approve: never, reject: never, remove: never, pay: never };
   const member: ExpensesWriter = { actions: expenseActions, canDecide: false, contacts: [], categories: [], accounts: [] };

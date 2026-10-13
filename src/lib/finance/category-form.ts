@@ -107,6 +107,16 @@ export function categoryRenameError(row: CategoryRow, typed: string, rows: Categ
     : `An archived ${kindWords(clash.kind)} is already called ${clash.name}. Choose another name.`;
 }
 
+/** What Archive sends. */
+export function categoryArchivePayload(row: Pick<CategoryRow, 'id'>): { id: string; active: false } {
+  return { id: row.id, active: false };
+}
+
+/** What Restore sends. */
+export function categoryRestorePayload(row: Pick<CategoryRow, 'id'>): { id: string; active: true } {
+  return { id: row.id, active: true };
+}
+
 /** Under the new-name box: what renaming reaches. */
 export const CATEGORY_RENAME_HELP =
   'Everything filed under it shows the new name. Its account in the Chart of Accounts is renamed too, unless that one was renamed there.';

@@ -9,7 +9,9 @@ import {
   categoryArchivedNote,
   categoryLists,
   categoryMark,
+  categoryArchivePayload,
   categoryNameClash,
+  categoryRestorePayload,
   categoryPayload,
   categoryRenameError,
   categoryRenamedNote,
@@ -196,5 +198,12 @@ describe('who manages categories on the Expenses screen', () => {
     for (const role of ['owner', 'admin', 'member', 'viewer'] as const) {
       expect(expensesScreenPlan(role, true).managesCategories, role).toBe(false);
     }
+  });
+});
+
+describe('what Archive and Restore send', () => {
+  it('Archive sends active false and Restore sends active true, with the id and nothing else', () => {
+    expect(categoryArchivePayload({ id: 'e1' })).toEqual({ id: 'e1', active: false });
+    expect(categoryRestorePayload({ id: 'e1' })).toEqual({ id: 'e1', active: true });
   });
 });
