@@ -109,7 +109,7 @@ describe('who may pay and void', () => {
     // The database would not refuse a member's "paid now": it would quietly make the voucher wait. So the action must.
     expect(await actions.recordVoucherAction(PAID_NOW)).toEqual({
       ok: false,
-      error: 'Only an owner or admin can record a voucher as paid. Send it for approval instead.',
+      error: 'Only an owner or admin can record a voucher as paid.',
     });
     expect(await actions.markVoucherPaidAction(PAY)).toEqual(NEEDS);
     expect(await actions.voidVoucherAction({ id: VOUCHER })).toEqual(NEEDS);

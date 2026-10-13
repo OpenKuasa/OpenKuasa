@@ -222,7 +222,7 @@ describe('paying and voiding', () => {
   it('asks before voiding, by number, and presses Void with the id only', () => {
     const html = render(writer(true), [paid], { kind: 'void', id: ID });
     expect(text(html)).toMatch(/Void PV-0007 , the payment of RM 300\.00 to Syarikat Maju , paid on 05 Oct 2026 from Maybank Current \? The money counts as back in the account/);
-    expect(text(html)).toContain('It stays in the list as Void, and this cannot be undone.');
+    expect(text(html)).toContain('It is kept as Void (find it under Void in the status filter), and this cannot be undone.');
     expect(asked[0].confirmLabel).toBe('Void voucher');
     asked[0].onConfirm();
     expect(voidVoucher).toHaveBeenCalledWith({ id: ID });

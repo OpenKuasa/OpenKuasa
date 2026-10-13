@@ -545,7 +545,7 @@ supplier is paid and voided on Payments Out, and a refund on Refunds.").
 call, dated the form's date ("Date paid"). The database does not refuse a
 member who asks for this: it leaves their voucher waiting for approval. So
 `recordVoucherAction` refuses them first ("Only an owner or admin can record a
-voucher as paid. Send it for approval instead."), and the form does not offer
+voucher as paid."), and the form does not offer
 them the choice. A draft and a voucher for bills are never paid from the form.
 
 **Mark as paid** is on a voucher of those two kinds that is "To be paid". The
@@ -565,7 +565,7 @@ can be marked paid."
 **Void** is on a paid voucher of those two kinds: one update of `status` to
 `void`, matched on `status = 'posted'`, money out, no side of a transfer.
 `finance_void_stamp` writes `voided_at`. The voucher keeps its number and
-stays in the list as Void (the status filter's first choice leaves void ones
+is kept as Void, found under Void in the status filter (its first choice leaves void ones
 out; the note after the write says so). In the books it is its original entry
 and, on the day it was voided, the same entry the other way round
 (`payment_out:<id>:void`), so it leaves nothing on any account. A voucher that

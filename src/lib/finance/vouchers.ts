@@ -118,7 +118,7 @@ export const VOUCHER_MESSAGES = {
   accountArchivedDraft:
     'The account this draft is paid from has been archived, so it cannot be sent for approval. Edit it and choose another account.',
   // A new voucher sent as paid now by someone who is not an owner or admin. The form offers them no such choice, so only a direct call does.
-  paidNowNeedsSignOff: 'Only an owner or admin can record a voucher as paid. Send it for approval instead.',
+  paidNowNeedsSignOff: 'Only an owner or admin can record a voucher as paid.',
   // Marking paid with no date, or with one that is not a date.
   paidOn: 'Enter the date it was paid.',
   // Marking paid or voiding a payment to a supplier or a refund. The screen offers neither, so only a direct call does.

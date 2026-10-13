@@ -119,11 +119,11 @@ describe('the questions', () => {
   it('asks before voiding, by number, and says the expenses are owed again only for a voucher that paid expenses', () => {
     const paid = row({ status: 'posted', number: 'PV-0007' });
     expect(text(voucherQuestion('void', paid))).toBe(
-      'Void PV-0007, the payment of RM 300.00 to Tenaga Nasional, paid on 05 Oct 2026 from Maybank Current? The money counts as back in the account and the books reverse it. It stays in the list as Void, and this cannot be undone.',
+      'Void PV-0007, the payment of RM 300.00 to Tenaga Nasional, paid on 05 Oct 2026 from Maybank Current? The money counts as back in the account and the books reverse it. It is kept as Void (find it under Void in the status filter), and this cannot be undone.',
     );
     expect(strong(voucherQuestion('void', paid))).toEqual(['PV-0007', 'RM 300.00', 'Tenaga Nasional', 'Maybank Current']);
     expect(text(voucherQuestion('void', { ...paid, kind: 'expense', category_id: null }))).toBe(
-      'Void PV-0007, the payment of RM 300.00 to Tenaga Nasional, paid on 05 Oct 2026 from Maybank Current? The money counts as back in the account and the books reverse it. The expenses it paid are owed that amount again, and can be marked paid again on Expenses. It stays in the list as Void, and this cannot be undone.',
+      'Void PV-0007, the payment of RM 300.00 to Tenaga Nasional, paid on 05 Oct 2026 from Maybank Current? The money counts as back in the account and the books reverse it. The expenses it paid are owed that amount again, and can be marked paid again on Expenses. It is kept as Void (find it under Void in the status filter), and this cannot be undone.',
     );
   });
   it('closes the question when the voucher was paid or voided by someone else meanwhile', () => {
@@ -166,7 +166,7 @@ describe('"Paid now" on the form', () => {
     expect(voucherDateLabel(false)).toBe('Date to pay');
     expect(voucherSaveHint(true, paid)[0]).toBe(PAID_NOW_HINT);
     expect(PAID_NOW_HINT).toBe(
-      'A voucher you save as paid is approved and paid at once, on the date above: you are an owner or admin. It gets its payment voucher number and moves the books, and from then on it cannot be changed or deleted, only voided.',
+      'A voucher you save as paid is approved and paid at once, on the date above: you are an owner or admin. It gets its payment voucher number and moves the books, and from then on it cannot be changed or deleted, only voided. A draft is not paid.',
     );
     // Unchanged for everyone else, and for an owner who leaves it To be paid.
     expect(voucherSaveHint(true, form)).toEqual(voucherSaveHint(true));

@@ -238,7 +238,7 @@ export const BILLS_HINT =
 export const DRAFT_HINT =
   'A draft is yours to change until it is sent for approval. After that it cannot be changed, only approved, rejected or deleted.';
 export const PAID_NOW_HINT =
-  'A voucher you save as paid is approved and paid at once, on the date above: you are an owner or admin. It gets its payment voucher number and moves the books, and from then on it cannot be changed or deleted, only voided.';
+  'A voucher you save as paid is approved and paid at once, on the date above: you are an owner or admin. It gets its payment voucher number and moves the books, and from then on it cannot be changed or deleted, only voided. A draft is not paid.';
 
 /**
  * What the form says under its fields, before anything is written: what its
@@ -397,7 +397,7 @@ export function voucherQuestion(kind: Exclude<VoucherAction, 'edit'>, row: Payme
       ...what,
       { text: `, paid on ${displayDate(row.txn_date)} from ` },
       { text: row.account_name, strong: true },
-      { text: `? The money counts as back in the account and the books reverse it.${owed} It stays in the list as Void, and this cannot be undone.` },
+      { text: `? The money counts as back in the account and the books reverse it.${owed} It is kept as Void (find it under Void in the status filter), and this cannot be undone.` },
     ];
   }
   if (kind === 'submit') {
