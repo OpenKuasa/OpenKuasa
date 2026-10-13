@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-// @ts-expect-error — plain .mjs build script, no type declarations.
 import { navEntries, parseNavSource } from '../scripts/nav-routes.mjs';
 
 // Mirrors the shape of src/config/nav.ts: a top-level array whose entries open
