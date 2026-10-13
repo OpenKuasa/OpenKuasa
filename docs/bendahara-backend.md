@@ -2115,13 +2115,10 @@ with no date).
   (`update finance_transactions set status = 'void'`).
 - A member is offered nothing on an approved expense: scheduling a payment of
   it is the voucher form's.
-- A payment can be recorded from an archived account by a direct call: the
-  database does not ask whether the account is active. The Mark paid card
-  offers active accounts only.
-  A payment from an account that was archived a moment before is accepted,
-  and the note names the account. When the rule that refuses it (`FIN37`) has
-  merged, the card gets its own sentence for that refusal; until then the
-  data layer words it as the general "could not be saved" sentence.
+- A payment from an account archived after the Mark paid card was opened is
+  refused by the database (`FIN37`), and the card shows the shared sentence
+  for it: "The account this is on has been archived. Restore it on Banking, or
+  use another account, then try again." The card offers active accounts only.
 - Two part payments of one expense made at the same moment that together fit
   what is left both go through: the database checks each payment against what
   is left when it runs (`FIN05`), so too much together is refused, but a
