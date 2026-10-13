@@ -819,11 +819,18 @@ testWithStorage('a reading is written by an owner and by a member while the rece
   const second = await receipt(a, 'read-member.png');
   const reading = { vendor: 'Shell Bangsar', receipt_date: '2026-10-03', amount: 142.5, sst_amount: 8.07 };
 
-  // What the action reads first, as the caller: the state, the file and the four boxes.
+  // What the action reads first, as the caller: the state, the file with its stored size, the four boxes, and
+  // whether a reading already stands.
   const before = await getReceiptForReading(member, second.id);
   expect(before).toEqual({
     ok: true,
-    data: { status: 'review', file: { path: second.path, type: 'image/png' }, details: { vendor: null, receipt_date: null, amount: null, sst_amount: null } },
+    data: {
+      status: 'review',
+      file: { path: second.path, type: 'image/png' },
+      sizeBytes: PNG.length,
+      extractedAt: null,
+      details: { vendor: null, receipt_date: null, amount: null, sst_amount: null },
+    },
   });
 
   for (const [who, id] of [[owner, first.id], [member, second.id]] as const) {
