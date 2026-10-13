@@ -6,17 +6,12 @@ import { BentoCard } from '@/components/bento/bento';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { rm } from '@/lib/finance/format';
+import { rm, unitPrice } from '@/lib/finance/format';
 import { RFQ_STATUS_LABELS, rfqActions } from '@/lib/finance/purchase-views';
 import { compareQuotes, orderableRfq } from '@/lib/finance/rfq-compare';
 import type { RfqDetail } from '@/lib/finance/rfqs';
 import type { FinResult } from '@/lib/finance/result';
 import { cn } from '@/lib/utils';
-
-/** A unit price keeps up to 4 decimals, so two prices that differ only there do not read the same. */
-function unitPrice(n: number) {
-  return `RM ${n.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
-}
 
 /**
  * The quotes for one request side by side: a row for each item, a column for each supplier asked, the

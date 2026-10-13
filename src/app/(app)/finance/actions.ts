@@ -780,6 +780,13 @@ export async function getApprovedPurchaseOrderAction(input: unknown): Promise<Fi
   );
 }
 
+/** One purchase order awaiting approval with its lines, for the Approve and Reject cards; see `documentInStatus`. */
+export async function getPendingPurchaseOrderAction(input: unknown): Promise<FinResult<PurchaseOrderDetail>> {
+  return documentInStatus(
+    PURCHASE_ORDER_PATHS, purchaseOrderIdInput, input, getPurchaseOrder, PURCHASE_ORDER_MESSAGES, 'purchase order', 'pending_approval',
+  );
+}
+
 /* ---- credit notes ------------------------------------------------------ */
 
 /** Creates a draft credit note, or changes one. A draft moves nothing but its own list. */

@@ -115,6 +115,7 @@ describe('who may write', () => {
       expect(await actions.getPurchaseOrderAction({ id: PO })).toEqual(FORBIDDEN);
       expect(await actions.getApprovedPurchaseOrderAction({ id: PO })).toEqual(FORBIDDEN);
       expect(await actions.getApprovedPurchaseOrderAction({ id: 'nope' })).toEqual(FORBIDDEN);
+      expect(await actions.getPendingPurchaseOrderAction({ id: PO })).toEqual(FORBIDDEN);
     }
     expect(ctl.calls).toEqual([]);
     expect(ctl.revalidated).toEqual([]);
@@ -282,9 +283,10 @@ describe('billFromPurchaseOrderAction', () => {
   });
 });
 
-/** The two reads: a draft for the Edit form, an approved order for the delivery card. */
+/** The three reads: a draft for the Edit form, an order awaiting approval for Approve and Reject, an approved order for the delivery card. */
 describe.each([
   ['getPurchaseOrderAction', 'draft', ['pending_approval', 'approved', 'closed', 'cancelled']],
+  ['getPendingPurchaseOrderAction', 'pending_approval', ['draft', 'approved', 'closed', 'cancelled']],
   ['getApprovedPurchaseOrderAction', 'approved', ['draft', 'pending_approval', 'closed', 'cancelled']],
 ] as const)('%s', (name, wanted, others) => {
   const read = (input: unknown) => actions[name](input);

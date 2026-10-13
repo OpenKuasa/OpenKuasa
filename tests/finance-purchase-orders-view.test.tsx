@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { DocumentFormCard } from '@/components/finance/document-form-card';
+import { PurchaseOrderApproveCard } from '@/components/finance/purchase-order-approve-card';
 import { PurchaseOrderFormCard } from '@/components/finance/purchase-order-form-card';
 import { PurchaseOrderReceiveCard } from '@/components/finance/purchase-order-receive-card';
 import { PurchaseOrderRejectCard } from '@/components/finance/purchase-order-reject-card';
@@ -90,6 +91,7 @@ const actions: PurchaseOrderActions = {
   billFrom: done({ id: 'x', bill_id: 'y' }),
   get: vi.fn(async () => ({ ok: false as const, error: 'unused' })),
   getApproved: vi.fn(async () => ({ ok: false as const, error: 'unused' })),
+  getPending: vi.fn(async () => ({ ok: false as const, error: 'unused' })),
 };
 const writerFor = (viewer = member) => ({ viewer, actions, suppliers: [], products: [] });
 
@@ -218,9 +220,48 @@ describe('the purchase order form', () => {
   });
 });
 
+const LINES: PurchaseOrderDetail['lines'] = [
+  { id: '11111111-1111-4111-8111-1111111111a1', product_id: null, description: 'Arabica beans', quantity: 5, uom: 'kg', pack_size: null, unit_price: 100, sst_rate: 0, amount: 500, sst_amount: 0, received_quantity: 2 },
+  { id: '11111111-1111-4111-8111-1111111111a2', product_id: null, description: 'Paper cups', quantity: 200, uom: 'pcs', pack_size: '50 per sleeve', unit_price: 2, sst_rate: 6, amount: 400, sst_amount: 24, received_quantity: 0 },
+];
+const pending: PurchaseOrderDetail = {
+  ...row({ status: 'pending_approval', total: 924 }),
+  subtotal: 900,
+  sst_total: 24,
+  notes: null,
+  lines: LINES,
+};
+
+describe('the approve card', () => {
+  it('shows each line with its quantity, unit price and amount, then the totals, before Approve', () => {
+    const html = renderToStaticMarkup(<PurchaseOrderApproveCard order={pending} decide={actions.decide} onClose={() => {}} />);
+    const t = text(html);
+    expect(t).toContain('PO-0001 to Kopi Hulu Supplies');
+    expect(t).toContain('Arabica beans 5 kg at RM 100.00 RM 500.00');
+    expect(t).toContain('Paper cups 200 pcs (50 per sleeve) at RM 2.00, SST 6% RM 400.00');
+    expect(t).toContain('Subtotal RM 900.00 SST RM 24.00 Total RM 924.00');
+    expect(t.indexOf('Total RM 924.00')).toBeLessThan(t.indexOf('Approve', t.indexOf('Total')));
+    expect(t).toContain('Cancel');
+  });
+
+  it('shows a unit price to 4 decimals, and only the total when there is no SST', () => {
+    const plain = { ...pending, subtotal: 12.35, sst_total: 0, total: 12.35, lines: [{ ...LINES[0], quantity: 1, unit_price: 12.3456, amount: 12.35 }] };
+    const t = text(renderToStaticMarkup(<PurchaseOrderApproveCard order={plain} decide={actions.decide} onClose={() => {}} />));
+    expect(t).toContain('at RM 12.3456');
+    expect(t).not.toContain('Subtotal');
+    expect(t).toContain('Total RM 12.35');
+  });
+});
+
 describe('the reject card', () => {
+  it('shows the lines above the reason', () => {
+    const t = text(renderToStaticMarkup(<PurchaseOrderRejectCard order={pending} decide={actions.decide} onClose={() => {}} />));
+    expect(t).toContain('Arabica beans 5 kg at RM 100.00 RM 500.00');
+    expect(t.indexOf('Total RM 924.00')).toBeLessThan(t.indexOf('Reason'));
+  });
+
   it('asks for a reason of up to 200 characters, with Reject and Cancel', () => {
-    const html = renderToStaticMarkup(<PurchaseOrderRejectCard order={row({ status: 'pending_approval' })} decide={actions.decide} onClose={() => {}} />);
+    const html = renderToStaticMarkup(<PurchaseOrderRejectCard order={pending} decide={actions.decide} onClose={() => {}} />);
     expect(text(html)).toContain('Reason');
     expect(html).toContain('maxLength="200"');
     expect(text(html)).toContain('Reject');
@@ -228,7 +269,7 @@ describe('the reject card', () => {
   });
 
   it('says the order goes to the supplier', () => {
-    const html = renderToStaticMarkup(<PurchaseOrderRejectCard order={row({ status: 'pending_approval' })} decide={actions.decide} onClose={() => {}} />);
+    const html = renderToStaticMarkup(<PurchaseOrderRejectCard order={pending} decide={actions.decide} onClose={() => {}} />);
     expect(text(html)).toContain('PO-0001 to Kopi Hulu Supplies');
     expect(text(html)).not.toContain('from Kopi Hulu Supplies');
   });
@@ -236,14 +277,8 @@ describe('the reject card', () => {
 
 describe('the receive card', () => {
   const order: PurchaseOrderDetail = {
-    ...row({ status: 'approved' }),
-    subtotal: 1000,
-    sst_total: 0,
-    notes: null,
-    lines: [
-      { id: '11111111-1111-4111-8111-1111111111a1', product_id: null, description: 'Arabica beans', quantity: 5, uom: 'kg', pack_size: null, unit_price: 100, sst_rate: 0, amount: 500, sst_amount: 0, received_quantity: 2 },
-      { id: '11111111-1111-4111-8111-1111111111a2', product_id: null, description: 'Paper cups', quantity: 200, uom: 'pcs', pack_size: null, unit_price: 2, sst_rate: 6, amount: 400, sst_amount: 24, received_quantity: 0 },
-    ],
+    ...pending,
+    status: 'approved',
   };
 
   it('says to enter the total so far, and shows each line with what was ordered', () => {

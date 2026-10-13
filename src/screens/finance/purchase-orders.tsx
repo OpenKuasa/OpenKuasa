@@ -5,6 +5,7 @@ import {
   decidePurchaseOrderAction,
   deletePurchaseOrderAction,
   getApprovedPurchaseOrderAction,
+  getPendingPurchaseOrderAction,
   getPurchaseOrderAction,
   receivePurchaseOrderAction,
   saveAndSubmitPurchaseOrderAction,
@@ -34,6 +35,7 @@ const ACTIONS: PurchaseOrderActions = {
   billFrom: billFromPurchaseOrderAction,
   get: getPurchaseOrderAction,
   getApproved: getApprovedPurchaseOrderAction,
+  getPending: getPendingPurchaseOrderAction,
 };
 
 export default async function PurchaseOrdersScreen() {

@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { ConfirmRow } from '@/components/finance/confirm-row';
+import { PurchaseOrderApproveCard } from '@/components/finance/purchase-order-approve-card';
 import { downloadCsv } from '@/components/finance/download-csv';
 import { PurchaseOrderFormCard, type PurchaseOrderFormActions } from '@/components/finance/purchase-order-form-card';
 import { type ReceivePurchaseOrder, PurchaseOrderReceiveCard } from '@/components/finance/purchase-order-receive-card';
@@ -72,6 +73,8 @@ export type PurchaseOrderActions = PurchaseOrderFormActions & {
   get: (input: unknown) => Promise<FinResult<PurchaseOrderDetail>>;
   /** Reads one approved order with its lines, for Record delivery. */
   getApproved: (input: unknown) => Promise<FinResult<PurchaseOrderDetail>>;
+  /** Reads one order awaiting approval with its lines, for Approve and Reject. */
+  getPending: (input: unknown) => Promise<FinResult<PurchaseOrderDetail>>;
 };
 
 /** What only a person who may edit is given: who they are, the actions, and what the form offers. */
@@ -94,7 +97,7 @@ const STATUS_STYLES: Record<PurchaseOrderStatus, string> = {
 };
 
 /** A question asked in an order's own row. The rest open a card, or (Create bill, with nothing billed yet) just happen. */
-type Question = Extract<PurchaseOrderAction, 'submit' | 'delete' | 'approve' | 'withdraw' | 'close' | 'cancel' | 'createBill'>;
+type Question = Extract<PurchaseOrderAction, 'submit' | 'delete' | 'withdraw' | 'close' | 'cancel' | 'createBill'>;
 
 /** One thing open at a time: a form card, or a question in one row. */
 type Open =
@@ -103,7 +106,8 @@ type Open =
   | { kind: 'edit'; order: PurchaseOrderListRow; detail: PurchaseOrderDetail | null; today: string }
   /** `detail` is null while the approved order's lines are being read. */
   | { kind: 'receive'; order: PurchaseOrderListRow; detail: PurchaseOrderDetail | null }
-  | { kind: 'reject'; order: PurchaseOrderListRow }
+  /** `detail` is null while the order's lines are being read, for the person deciding. */
+  | { kind: 'approve' | 'reject'; order: PurchaseOrderListRow; detail: PurchaseOrderDetail | null }
   /** A draft bill has just been made from this order, dated `date`. */
   | { kind: 'billed'; order: PurchaseOrderListRow; date: string }
   | { kind: Question; order: PurchaseOrderListRow }
@@ -136,11 +140,18 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
   const columns = writer ? 10 : 9;
   const asking =
-    open && open.kind !== 'new' && open.kind !== 'edit' && open.kind !== 'receive' && open.kind !== 'reject' && open.kind !== 'billed'
+    open &&
+    open.kind !== 'new' &&
+    open.kind !== 'edit' &&
+    open.kind !== 'receive' &&
+    open.kind !== 'approve' &&
+    open.kind !== 'reject' &&
+    open.kind !== 'billed'
       ? open
       : null;
   // A form holds what was typed, so nothing else opens over it: it is closed with its own Cancel first.
-  const formOpen = open?.kind === 'new' || open?.kind === 'edit' || open?.kind === 'receive' || open?.kind === 'reject';
+  const formOpen =
+    open?.kind === 'new' || open?.kind === 'edit' || open?.kind === 'receive' || open?.kind === 'approve' || open?.kind === 'reject';
   // A row that is gone after a refresh takes its question with it; the message still has to be seen.
   const askingInView = asking ? shown.some((r) => r.id === asking.order.id) : false;
   const locked = confirm.pending || formOpen;
@@ -154,6 +165,16 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
   const close = () => {
     confirm.clear();
     setOpen(null);
+  };
+
+  /** Opens Approve or Reject, then reads the order's lines into it. */
+  const decide = (kind: 'approve' | 'reject', order: PurchaseOrderListRow, actions: PurchaseOrderActions) => {
+    loader.clear();
+    ask({ kind, order, detail: null });
+    loader.run(
+      () => actions.getPending({ id: order.id }),
+      (detail) => setOpen((cur) => (cur?.kind === kind && cur.order.id === order.id ? { ...cur, detail } : cur)),
+    );
   };
 
   const menuItem = (order: PurchaseOrderListRow, action: PurchaseOrderAction, actions: PurchaseOrderActions): RowMenuItem => {
@@ -188,7 +209,7 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
           },
         };
       case 'reject':
-        return { label: 'Reject', icon: X, opens: true, onSelect: () => ask({ kind: 'reject', order }) };
+        return { label: 'Reject', icon: X, opens: true, onSelect: () => decide('reject', order, actions) };
       case 'createBill':
         return {
           label: 'Create bill',
@@ -199,7 +220,7 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
       case 'submit':
         return { label: 'Submit for approval', icon: Send, opens: true, onSelect: () => ask({ kind: 'submit', order }) };
       case 'approve':
-        return { label: 'Approve', icon: Check, opens: true, onSelect: () => ask({ kind: 'approve', order }) };
+        return { label: 'Approve', icon: Check, opens: true, onSelect: () => decide('approve', order, actions) };
       case 'withdraw':
         return { label: 'Withdraw', icon: Undo2, opens: true, onSelect: () => ask({ kind: 'withdraw', order }) };
       case 'close':
@@ -264,21 +285,6 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
             you has to approve it before anything is bought.
           </ConfirmRow>
         );
-      case 'approve':
-        return (
-          <ConfirmRow
-            key={order.id}
-            {...shared}
-            tone="default"
-            icon={Check}
-            label={`Approve ${name}`}
-            confirmLabel="Approve"
-            pendingLabel="Approving…"
-            onConfirm={() => confirm.run(() => actions.decide({ ...id, approve: true }), close)}
-          >
-            Approve {number} to {who} ({rm(order.total)})? Deliveries can then be recorded and bills raised against it.
-          </ConfirmRow>
-        );
       case 'withdraw':
         return (
           <ConfirmRow
@@ -339,7 +345,7 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
     }
   };
 
-  /** The card that stands in while a draft or an approved order is read, or says it could not be. */
+  /** The card that stands in while an order is read, or says it could not be. */
   const loading = (title: string, subtitle: string) => (
     <BentoCard title={title} subtitle={subtitle} icon={ClipboardCheck} className="col-span-2 md:col-span-12">
       <div className="flex flex-wrap items-center gap-3">
@@ -397,8 +403,19 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
         loading('Record delivery', `${open.order.po_no ?? 'The order'} from ${open.order.supplier_name}`)
       );
     }
+    if (open.kind === 'approve') {
+      return open.detail ? (
+        <PurchaseOrderApproveCard key={open.detail.id} order={open.detail} decide={actions.decide} onClose={close} />
+      ) : (
+        loading('Approve purchase order', `${open.order.po_no ?? 'The order'} to ${open.order.supplier_name}`)
+      );
+    }
     if (open.kind === 'reject') {
-      return <PurchaseOrderRejectCard key={open.order.id} order={open.order} decide={actions.decide} onClose={close} />;
+      return open.detail ? (
+        <PurchaseOrderRejectCard key={open.detail.id} order={open.detail} decide={actions.decide} onClose={close} />
+      ) : (
+        loading('Reject purchase order', `${open.order.po_no ?? 'The order'} to ${open.order.supplier_name}`)
+      );
     }
     if (open.kind === 'billed') {
       return (
