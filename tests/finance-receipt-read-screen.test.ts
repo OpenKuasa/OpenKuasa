@@ -81,6 +81,12 @@ describe('a reading that is still under way', () => {
   });
 });
 
+describe('the card’s header', () => {
+  it('lets the subtitle wrap instead of cutting it with an ellipsis', () => {
+    expect(read(CARD)).toContain('subtitle={<span className="block whitespace-normal break-words">');
+  });
+});
+
 describe('how the screen is kept safe', () => {
   it('nothing on the screen reaches for the platform’s key, the free questions or a model', () => {
     for (const file of [CARD, VIEW, LOADER, MATCH_CARDS, REVIEW_CARD]) {

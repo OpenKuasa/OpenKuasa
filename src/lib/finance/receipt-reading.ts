@@ -57,6 +57,11 @@ export const RECEIPT_READING_MESSAGES = {
   failedAgain: 'The new reading found nothing it could use, so the earlier reading is still shown. Check its figures against the receipt.',
   // A PDF over the bound: not sent, nothing counted.
   pdfTooBig: 'This PDF is larger than 4 MB, so it was not sent to be read. Type the details in, or upload a smaller file.',
+  // The model refused the request itself (400, 404, 422): a model with no PDF input, or no endpoint for this file.
+  // Trying again will not change that, so it is not said to be a matter of time. The file reached the provider's edge
+  // and was not read; the sentence does not say whether it was sent.
+  unsupported:
+    'The AI model chosen on this server did not accept this file, so nothing was read and nothing on this receipt was changed. Type the details in; a PDF can be read only by a model that takes PDFs directly.',
   // The call did not get through (busy, down, no connection, too slow): nothing is known about the receipt, nothing was stored.
   unavailable: 'The AI provider could not do the reading just now, so nothing was read and nothing on this receipt was changed. Please try again later.',
   // The answer never came back (the connection dropped): the file may have been sent and the credit used.
@@ -150,7 +155,9 @@ export function readingQuestion(
   const size = fileSizeLabel(row.size_bytes);
   const what = size === '—' ? `this file (${INBOX_TYPE_LABELS[row.mime_type]})` : `this file (${INBOX_TYPE_LABELS[row.mime_type]}, ${size})`;
   const lines = [
-    `Send ${what} to be read? The whole file, with anything a phone wrote into it such as where the photo was taken, goes to OpenRouter, your workspace’s AI provider, and on to the AI model that reads it.`,
+    row.mime_type === 'application/pdf'
+      ? `Send ${what} to be read? The whole file, as it is, with everything inside it, goes to OpenRouter, your workspace’s AI provider, and on to the AI model that reads it.`
+      : `Send ${what} to be read? The whole file, with anything a phone wrote into it such as where the photo was taken, goes to OpenRouter, your workspace’s AI provider, and on to the AI model that reads it.`,
     'It is read on your workspace’s own AI key and uses that key’s credit. Your workspace’s expense category names, up to sixty of them, are sent with it, so that one can be suggested. Nothing else from your workspace is sent, and the file’s name is not sent.',
     'What comes back fills the vendor, date, amount and SST boxes as a suggestion, and may suggest a category. Nothing is saved to an expense or a bill until you check the figures and choose to.',
   ];

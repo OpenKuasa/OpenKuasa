@@ -25,6 +25,7 @@ import {
   suggestedCategoryLine,
 } from '@/lib/finance/receipt-reading';
 import {
+  RECEIPT_PDF_ENGINE,
   RECEIPT_READ_MAX_OUTPUT_TOKENS,
   RECEIPT_READ_TIMEOUT_MS,
   getReceiptForReading,
@@ -145,6 +146,24 @@ describe('what is sent', () => {
     expect(parts[1]).toMatchObject({ mediaType: 'image/png', filename: 'receipt.png' });
   });
 
+  it('a PDF is read by the model’s own PDF input only: the request names the native engine, never a paid OCR one', async () => {
+    expect(RECEIPT_PDF_ENGINE).toBe('native');
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    const json = '{"vendor":"Shell","receipt_date":null,"amount":50,"sst_amount":null,"category_number":null}';
+    const pdf = stub({ text: json });
+    await read(pdf, PDF, 'application/pdf');
+    expect((pdf.doGenerateCalls[0] as { providerOptions?: unknown }).providerOptions).toEqual({
+      openrouter: { plugins: [{ id: 'file-parser', pdf: { engine: 'native' } }] },
+    });
+    // An image has no file parser to choose: no plugin at all.
+    for (const [bytes, type] of [[JPG, 'image/jpeg'], [PNG, 'image/png']] as const) {
+      const image = stub({ text: json });
+      await read(image, bytes, type);
+      expect(JSON.stringify((image.doGenerateCalls[0] as { providerOptions?: unknown }).providerOptions ?? {})).not.toContain('plugins');
+    }
+    expect(RECEIPT_PDF_ENGINE).not.toMatch(/ocr|pdf-text/);
+  });
+
   it('the categories go as names in a numbered list in the user’s turn, never an id, and the answer is a place in that list', async () => {
     const model = stub({ text: '{"vendor":"Shell","receipt_date":null,"amount":50,"sst_amount":null,"category_number":2}' });
     vi.spyOn(console, 'info').mockImplementation(() => {});
@@ -225,9 +244,19 @@ describe('what comes back', () => {
   it('a provider that is busy, down, or never reached is its own reason, not a receipt that could not be read', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'info').mockImplementation(() => {});
-    for (const statusCode of [408, 429, 500, 502, 503, 400, 404]) {
+    for (const statusCode of [408, 429, 500, 502, 503]) {
       expect(await read(stub({ error: Object.assign(new Error('x'), { statusCode }) })), String(statusCode)).toEqual({ ok: false, reason: 'unavailable' });
     }
+    // A model that does not take this file (no PDF input, no endpoint for it) will not take it later either.
+    for (const statusCode of [400, 404, 422]) {
+      expect(await read(stub({ error: Object.assign(new Error('x'), { statusCode }) })), String(statusCode)).toEqual({ ok: false, reason: 'unsupported' });
+    }
+    // The provider can answer 200 with an error in the body: that error's own class counts, not the 200.
+    const inBody = (data: unknown) => stub({ error: Object.assign(new Error('x'), { statusCode: 200, data }) });
+    expect(await read(inBody({ code: 429, message: 'slow down' }))).toEqual({ ok: false, reason: 'unavailable' });
+    expect(await read(inBody({ code: 404, message: 'No endpoints found that support input' }))).toEqual({ ok: false, reason: 'unsupported' });
+    expect(await read(inBody({ code: 401 }))).toEqual({ ok: false, reason: 'key' });
+    expect(await read(inBody({ code: 402 }))).toEqual({ ok: false, reason: 'credit' });
     // A connection that never opened has no status at all.
     expect(await read(stub({ error: new TypeError('fetch failed') }))).toEqual({ ok: false, reason: 'unavailable' });
   });
@@ -451,6 +480,16 @@ describe('before anything is sent', () => {
     expect(readingBlocker(row({ mime_type: 'application/pdf', size_bytes: null }), ready)).toBeNull();
     expect(readingBlocker(row({ mime_type: 'image/jpeg', size_bytes: 9_000_000 }), ready)).toBeNull();
     expect(M.pdfTooBig).toBe('This PDF is larger than 4 MB, so it was not sent to be read. Type the details in, or upload a smaller file.');
+  });
+
+  it('the question says what is true of the kind of file: a photo may carry where it was taken, a PDF is sent as it is', () => {
+    const photo = readingQuestion(row())[0];
+    expect(photo).toContain('anything a phone wrote into it such as where the photo was taken');
+    const pdf = readingQuestion(row({ mime_type: 'application/pdf' }))[0];
+    expect(pdf).toContain('The whole file, as it is, with everything inside it');
+    expect(pdf).not.toMatch(/photo|phone/);
+    expect(pdf).toContain('OpenRouter');
+    expect(photo).not.toContain('as it is, with everything inside it');
   });
 
   it('the question says what is sent, to whom, and on whose key and credit', () => {

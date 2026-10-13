@@ -2673,9 +2673,15 @@ with no date).
   shared with chat. What is not: a PDF's pages are not counted, so a
   many-page PDF under 4 MB costs more input than a photo, and a workspace
   has no ceiling of its own across its people. How well the configured model reads a
-  Malaysian receipt, and whether it takes a PDF, is the model's: a model
-  that cannot is told as "could not do the reading just now" or, if it answers
-  something that is not the five fields, "nothing could be read".
+  Malaysian receipt is the model's. A PDF is read only by a model that takes
+  PDFs natively: the request names OpenRouter's `native` file-parser engine
+  (`RECEIPT_PDF_ENGINE`), so OpenRouter's own parsers, one of which is billed
+  per page even when the model is free, are never used. A model without PDF
+  input answers with an error (400, 404 or 422, also when it comes in the body
+  of a 200), told as "The AI model chosen on this server did not accept this
+  file…" with nothing written. A busy or unreachable provider is told as
+  "could not do the reading just now", and an answer that is not the five
+  fields as "nothing could be read".
 - A reading's answer is shown only if the person still has that receipt's
   question open when it arrives. If they opened something else meanwhile,
   nothing new opens; what was stored shows on the row, and a refusal is said

@@ -399,6 +399,15 @@ describe('a reading that failed', () => {
     expect(called('consumeDailyQuota')).toHaveLength(1);
   });
 
+  it('a model that does not take the file writes nothing and says so truly', async () => {
+    ctl.reading = { ok: false, reason: 'unsupported' };
+    expect(await readReceiptAction({ id: RECEIPT })).toEqual({ ok: false, error: M.unsupported });
+    expect(called('setReceiptExtraction')).toEqual([]);
+    expect(M.unsupported).toContain('did not accept this file');
+    expect(M.unsupported).toContain('a PDF can be read only by a model that takes PDFs directly');
+    expect(M.unsupported).not.toMatch(/was sent|could not be read/i);
+  });
+
   it('a PDF over 4 MB is refused from its stored size: no key opened, no download, no turn, nothing written', async () => {
     const PDF_PATH = PATH.replace('.jpg', '.pdf');
     const pdf = (sizeBytes: number | null) => ({

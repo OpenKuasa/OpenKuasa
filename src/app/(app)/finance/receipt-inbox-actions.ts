@@ -314,6 +314,8 @@ export async function readReceiptAction(input: unknown): Promise<FinResult<Recei
   // The call did not get through: the receipt was not found unreadable, so nothing is written about it. The turn
   // counted above is not given back: a chat turn that fails is not either, and the provider may have received and billed the request.
   if (!reading.ok && reading.reason === 'unavailable') return refused(R.unavailable);
+  // The model does not take this file: nothing is known about the receipt, so nothing is written, and a retry cannot help.
+  if (!reading.ok && reading.reason === 'unsupported') return refused(R.unsupported);
   if (!reading.ok && receipt.data.extractedAt !== null) {
     // A reading already stands: a failed new one writes nothing, so its figures, its mark and the caution above the forms stay.
     return refused(R.failedAgain);

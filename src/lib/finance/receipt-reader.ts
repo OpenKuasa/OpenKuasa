@@ -51,6 +51,13 @@ export function receiptModelId(env: EnvLike = process.env): string | null {
 
 /** How long a reading may take before it counts as failed. */
 export const RECEIPT_READ_TIMEOUT_MS = 45_000;
+/**
+ * How OpenRouter reads a PDF. `native` is the model's own PDF input and costs only the model's tokens. The others
+ * (`mistral-ocr`, and `pdf-text`) are OpenRouter's own parsers, one of which is billed per page to the account even
+ * when the model is free; OpenRouter picks one of them when a model has no PDF input and none is named. Naming this
+ * one means a model that cannot take a PDF answers with an error instead (see `unsupported`), and nothing is billed.
+ */
+export const RECEIPT_PDF_ENGINE = 'native';
 /** The most a reading may say back: five short fields. */
 export const RECEIPT_READ_MAX_OUTPUT_TOKENS = 300;
 /** How long fetching the stored file may take. */
@@ -233,7 +240,7 @@ export type ReceiptReading =
    * `unavailable`: the provider could not do it just now (busy, down, a model that takes no file, no connection, a
    * timeout): nothing is known about the receipt, so nothing is stored about it.
    */
-  | { ok: false; reason: 'nothing' | 'key' | 'credit' | 'failed' | 'unavailable' };
+  | { ok: false; reason: 'nothing' | 'key' | 'credit' | 'failed' | 'unavailable' | 'unsupported' };
 
 /** An error that is the model's answer not fitting the schema, as opposed to the call not going through. */
 const ANSWER_NOT_FIT = /NoObjectGenerated|TypeValidation|JSONParse|NoOutput/;
@@ -273,6 +280,10 @@ export async function readReceiptWithModel(input: {
         },
       ],
       output: Output.object({ schema: receiptReadingSchema }),
+      // Only a PDF has a parser to choose, and it is never a paid one.
+      ...(input.mediaType === 'application/pdf'
+        ? { providerOptions: { openrouter: { plugins: [{ id: 'file-parser', pdf: { engine: RECEIPT_PDF_ENGINE } }] } } }
+        : {}),
       maxOutputTokens: RECEIPT_READ_MAX_OUTPUT_TOKENS,
       // One press is one call: a retry would spend the workspace's credit twice without the person asking.
       maxRetries: 0,
@@ -286,6 +297,8 @@ export async function readReceiptWithModel(input: {
     console.error('[ai] receipt-reader model call failed:', failure);
     if (failure.code === 401) return { ok: false, reason: 'key' };
     if (failure.code === 402) return { ok: false, reason: 'credit' };
+    // The request itself was refused: this model takes no such file. A retry cannot help.
+    if (failure.code === 400 || failure.code === 404 || failure.code === 422) return { ok: false, reason: 'unsupported' };
     if (typeof failure.code === 'string' && ANSWER_NOT_FIT.test(failure.code)) return { ok: false, reason: 'failed' };
     return { ok: false, reason: 'unavailable' };
   }

@@ -69,7 +69,7 @@ export function ReceiptReadCard({
   return (
     <BentoCard
       title="Read with AI"
-      subtitle="Have a model fill in the vendor, date, amount and SST for you to check"
+      subtitle={<span className="block whitespace-normal break-words">Have a model fill in the vendor, date, amount and SST for you to check</span>}
       icon={Sparkles}
       className="col-span-2 md:col-span-12"
     >
