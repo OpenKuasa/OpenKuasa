@@ -53,6 +53,8 @@ the data layer, with unit tests; the client components only draw them.
 | `rfq-form.ts` | The RFQ form. A form opened by Copy to another supplier (`rfqFormCopiedFrom`) remembers the RFQ it was copied from, and `rfqPayload` sends it with the new draft. When that save is refused because the RFQ it was copied from is gone, `rfqFormAfterRefusal` drops the link, so saving again saves the RFQ on its own; the shared card applies it through `DocumentFormKind.afterRefusal`, which no other form has |
 | `rfq-compare.ts` | Compare quotes, pure. A group is the first RFQ and every RFQ that names it (`rfqGroupId`); an RFQ can be compared once it and at least one other of its group have gone to their supplier (`comparableRfqIds`), and `rfqActions(row, comparable)` in `purchase-views.ts` then offers Compare quotes in every status but draft. `compareQuotes` lays the group out as a row for each item and a cell for each RFQ: lines are matched by product, or else by description, in the same unit and pack size; only an RFQ whose answer was recorded (`quoted_at`) has prices; the lowest price is for one unit with SST added, compared to four decimals, marked on every supplier tied at it and only when at least two priced the line; a cell worded differently from its row keeps its own description. Also the question the card asks before making an order (`orderableRfq`) and what deleting a draft costs the RFQs copied from it (`rfqCopyCount`, `rfqDeleteWarning`) |
 | `csv.ts` | CSV text for Export: RFC 4180, a UTF-8 byte-order mark, and a guard against spreadsheet formulas |
+| `categories.ts` | Expense and income categories, for the Categories card on Expenses: `listCategories` (both kinds, archived ones included, each with its mark when the books lean on it), `createCategoryInput` and `createCategory`, `renameCategoryInput` and `renameCategory`, `setCategoryActiveInput` and `setCategoryActive` (archive and restore; the two marked categories are not archived), and `CATEGORY_MESSAGES`. Nothing deletes a category. The forms' own pickers (`listExpenseCategories`, `listIncomeCategories`: active ones of one kind) stay where they were |
+| `category-form.ts` | The Categories card's rules, pure: the two lists (`categoryLists`), what a row shows and offers (`categoryMark`, `categoryActions`), a name that is taken (`categoryNameClash`, `categoryAddError`, `categoryRenameError`), and every sentence the card says |
 
 The forms validate by running the write's own Zod schema on what they are about
 to send, so the browser and the server say the same sentences.
@@ -129,6 +131,14 @@ moves them. Approve and reject are refused to anyone who may not sign off,
 before anything is read, in the expense's own sentence. Payment Vouchers has
 no action of its own yet: it is read-only for everyone.
 
+The three category actions (`createCategoryAction`, `renameCategoryAction`,
+`setCategoryActiveAction`) refresh `CATEGORY_PATHS`: Expenses, Cash Receipts,
+Supplier Bills, Payment Vouchers, Banking and Receipts Inbox (every screen
+whose forms offer a category or whose rows name one), then `LEDGER_PATHS`
+(each category has an account in the Chart of Accounts, renamed and archived
+with it). All three are refused to anyone who may not sign off, before
+anything is parsed or read, in the category's own sentence.
+
 The Receipts Inbox has its own actions file,
 `src/app/(app)/finance/receipt-inbox-actions.ts`: `registerReceiptAction`,
 `reviewReceiptAction`, `deleteReceiptAction` and `receiptLinkAction`. The
@@ -162,7 +172,7 @@ policy.
 | `finance_contacts` | Customers and suppliers. `is_customer` and `is_supplier` can both be true. |
 | `finance_products` | Products and services for document lines. `cost` keeps four decimals, `price` two. |
 | `finance_accounts` | Bank and cash accounts. Every workspace starts with "Main Bank" and "Cash in hand". Banking lists them with their balances; they have no form yet. |
-| `finance_categories` | Expense and income categories, each with a ledger account of its own. Every workspace starts with ten. Every member reads them; only an owner or admin adds, changes or deletes one (three restrictive policies beside the writer ones: `finance_categories_sign_off_insert`, `_update`, `_delete`). A name is 1 to 80 characters with no space at either end (`finance_categories_name_check`). No screen yet. |
+| `finance_categories` | Expense and income categories, each with a ledger account of its own. Every workspace starts with ten. Every member reads them; only an owner or admin adds, changes or deletes one (three restrictive policies beside the writer ones: `finance_categories_sign_off_insert`, `_update`, `_delete`). A name is 1 to 80 characters with no space at either end (`finance_categories_name_check`). Managed on the Categories card on Expenses ("The Categories card", under Expenses), which adds, renames, archives and restores, and never deletes. |
 | `finance_sequences` | The next document number per type. |
 | `supplier_bills`, `supplier_bill_lines` | Supplier bills and their lines. A draft has no `bill_no`. |
 | `finance_invoices`, `finance_invoice_lines` | Sales invoices and their lines. A draft has no `invoice_no`. Lines keep the order they were entered in (`position`). `quotation_id` is the quotation an invoice was made from, if any. |
@@ -761,6 +771,54 @@ and `display_status`: `pending`, `rejected`, `approved`, or `paid` once
 Money out pays an approved expense, and everything standing against it never
 exceeds its amount; the expense row is locked while that is checked. Paying
 an approved expense needs no second approval: the expense was the approval.
+
+### The Categories card
+
+"Categories", beside "New expense" on `/finance/expenses`, opens a card
+(`categories-card.tsx`) for an owner or admin only: the loader hands
+`writer.categoryAdmin` (every category, and the three actions) to nobody
+else, so a member, a viewer and the demo workspace have no button and are
+sent no list. It is one of the things the screen keeps open one at a time:
+while it is open, "New expense" and every row menu wait, and it is closed
+with "Done".
+
+The card lists both kinds, expense and income, each kind's active categories
+by name and then its archived ones. Income categories are managed here too:
+Cash Receipts only picks one. A row shows the name, "Active" or "Archived",
+and, on the two categories the books lean on, "Invoices post here" or "Bills
+default here". Those two are found by their mark
+(`finance_ledger_accounts.default_for`, `sales` and `purchases`), not by
+their names, so they can be renamed.
+
+| What | How | What the database does with it |
+|---|---|---|
+| Add | Name and kind, in the form at the top. The kind is chosen once | One insert. A trigger makes the category's account in the Chart of Accounts (4000 and up for income, 6000 and up for an expense), named after it, or "Name (2)" when another account has that name |
+| Rename | Asked in the row, in a box | One update of `name`. Everything filed under the category names it by id, so every expense, bill, voucher and receipt, posted ones included, shows the new name. Its account in the Chart of Accounts is renamed too, unless someone renamed that account there |
+| Archive | Asked in the row. Not offered on the two marked categories, and refused for them by `setCategoryActive`, which reads the mark first | One update of `active`. The category leaves the pickers of new expenses, bills and vouchers (or receipts); what is filed under it keeps it and goes on posting to its account; the account is archived with it, so a manual journal can no longer use it (`FIN24`) |
+| Restore | From the row's menu, at once | One update of `active`; the account is restored with it |
+
+**Nothing deletes a category.** The database would refuse a delete of one
+that an expense, a payment or a bill names (`23503`: the three foreign keys
+have no delete rule) and of the two marked ones (`FIN25`), and would let an
+unused one go with its account; the app archives instead, so no sentence
+for either code is needed.
+
+A name is unique within its kind, capitals aside, archived categories
+included. The card refuses a name it can see is taken before anything is
+sent, and says which case it is ("There is already an expense category
+called Rent."; for an archived one, to restore it instead); the database's
+own refusal (`23505`), met only when two people add the same name at once,
+reads "Another category of the same kind already has that name. …".
+
+An update by someone who may not change categories raises nothing in the
+database: it touches no row. `renameCategory` and `setCategoryActive`
+therefore read the category when no row came back, and answer "Only an owner
+or admin can add or change categories. Ask one of them to do this." when it
+is still there and "That category no longer exists." when it is not. Through
+the app a member never gets that far: the server action tells them first.
+
+`tests/bendahara-categories.test.ts` runs all of this against the hosted
+database, as an owner and as a member.
 
 ## Approval
 
@@ -2208,10 +2266,25 @@ with no date).
   the period, the filter, the search or "View all" forgets it, so a note
   never turns up by itself under the control being used (Payment Vouchers and
   Expenses do the same).
-- Categories cannot be added, renamed or archived from the app yet: every
-  workspace has the ten it started with until the Categories card on Expenses
-  is built. The database is ready for it: only an owner or admin may change
-  one.
+- A category cannot be deleted from the app, only archived, and the card
+  does not say how many expenses, bills or payments are filed under one.
+- The Categories card is closed to a member: they see a category only in a
+  picker or on a row, and an archived one that nothing they can see uses, not
+  at all.
+- Renaming a category renames it on everything already filed under it,
+  posted documents and past reports included: a document stores the
+  category's id, never its name as it was.
+- The database lets an owner or admin archive the category invoices post to
+  and the one bills default to by a direct call (invoices and bills go on
+  posting to them: the default is found by its mark, not by `active`). The
+  app refuses, in `setCategoryActive`, after reading the mark: a read and
+  then a write, not one statement.
+- Two people renaming or archiving the same category at once: the last write
+  stands. Nothing compares what the person was shown.
+- A payment voucher draft whose category was archived since opens its form
+  with the category box empty (the voucher form lists active categories
+  only, where the expense, receipt and bill forms add the draft's own);
+  saving it unchanged keeps the category.
 - A category name that ends in a tab, or is made of a newline, is accepted:
   the rule trims spaces only (`finance_categories_name_check`).
 - An expense whose typed vendor is an empty string can be made only by a
@@ -2373,8 +2446,10 @@ with no date).
 - An expense's category can be one that was archived since; the form keeps
   it in its picker for that expense only. `finance_save_expense` accepts an
   archived expense category from a direct call, for a new expense too: it
-  checks the category's kind, not whether it is active. Categories have no
-  screen yet, and only an owner or admin can archive one.
+  checks the category's kind, not whether it is active. So an expense form
+  that was open when an owner or admin archived its category on the
+  Categories card still saves under it; the receipt, voucher and bill
+  functions check the kind only, in the same way.
 - A rejected expense that a voided payment still names cannot be deleted
   (the allocation's foreign key); it stays in the list.
 - A payment to a supplier or a refund recorded by someone who is not an owner
