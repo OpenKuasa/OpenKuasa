@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { CATEGORY_NAME_MAX, type CategoryKind, type CategoryRow, type SavedCategory } from '@/lib/finance/categories';
+import { type CategoryKind, type CategoryRow, type SavedCategory } from '@/lib/finance/categories';
 import {
   CATEGORY_KIND_LABELS,
   CATEGORY_RENAME_HELP,
@@ -164,7 +164,6 @@ export function CategoriesCard({ rows, actions, onClose }: { rows: CategoryRow[]
             id={`${id}-rename`}
             className="mt-1.5"
             value={asked.name}
-            maxLength={CATEGORY_NAME_MAX}
             autoComplete="off"
             // The menu hands focus to the first element that carries this: the box, not the Cancel button after it.
             data-finance-focus
@@ -265,7 +264,7 @@ export function CategoriesCard({ rows, actions, onClose }: { rows: CategoryRow[]
   return (
     <BentoCard
       title="Categories"
-      subtitle="Both kinds, archived ones included"
+      subtitle={<span className="block whitespace-normal">Both kinds, archived ones included</span>}
       icon={ListTree}
       flush
       action={
@@ -282,7 +281,6 @@ export function CategoriesCard({ rows, actions, onClose }: { rows: CategoryRow[]
           <Input
             id={`${id}-name`}
             value={form.name}
-            maxLength={CATEGORY_NAME_MAX}
             placeholder="Fuel"
             autoComplete="off"
             autoFocus
@@ -315,20 +313,21 @@ export function CategoriesCard({ rows, actions, onClose }: { rows: CategoryRow[]
           </p>
         ) : null}
       </form>
-      <div className="grid gap-6 border-t pt-4 md:grid-cols-2 md:gap-0 md:divide-x">
-        {list('expense')}
-        {list('income')}
-      </div>
+      {/* What just happened is said here, under the form the person was using, not at the foot of two long lists. */}
       {restore.error ? (
-        <p role="alert" className="border-t px-4 py-3 text-sm text-destructive">
+        <p role="alert" className="px-4 pb-4 text-sm text-destructive">
           {restore.error}
         </p>
       ) : null}
       {note ? (
-        <p role="status" className="border-t px-4 py-3 text-sm text-muted-foreground">
+        <p role="status" className="px-4 pb-4 text-sm text-muted-foreground">
           {note}
         </p>
       ) : null}
+      <div className="grid gap-6 border-t pt-4 md:grid-cols-2 md:gap-0 md:divide-x">
+        {list('expense')}
+        {list('income')}
+      </div>
     </BentoCard>
   );
 }

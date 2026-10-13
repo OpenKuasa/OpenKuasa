@@ -50,10 +50,11 @@ describe('the Categories card', () => {
     expect(html.match(/Bills default here/g)).toHaveLength(1);
   });
 
-  it('has the add form, with a name box that takes 80 characters, and a way out; nothing is asked until a menu is used', () => {
+  it('has the add form, with a name box, and a way out; nothing is asked until a menu is used', () => {
     const html = card();
     expect(html).toContain('New category');
-    expect(html).toContain('maxLength="80"');
+    // No maxLength: it counts UTF-16 units and the table counts characters, so 80 emoji would be stopped at 40.
+    expect(html).not.toContain('maxLength');
     expect(html).toContain('Add category');
     expect(html).toContain('>Done<');
     expect(html).not.toContain('role="group"');
@@ -125,6 +126,21 @@ describe('the card’s wiring', () => {
     expect(source.indexOf('categoryRenameError(row, typed, rows)')).toBeGreaterThan(-1);
     expect(source.indexOf('categoryRenameError(row, typed, rows)')).toBeLessThan(source.indexOf('actions.rename('));
     expect(source.indexOf('renameChangesNothing(row, typed)')).toBeLessThan(source.indexOf('categoryRenameError(row, typed, rows)'));
+  });
+
+  it('says what happened under the add form, in view, and not at the foot under both lists', () => {
+    const jsx = source.slice(source.indexOf('  return (\n    <BentoCard'));
+    const form = jsx.indexOf('</form>');
+    expect(form).toBeGreaterThan(-1);
+    for (const shown of ['role="status"', '{restore.error}', '{note}']) {
+      expect(jsx.indexOf(shown)).toBeGreaterThan(form);
+      expect(jsx.indexOf(shown)).toBeLessThan(jsx.indexOf("{list('expense')}"));
+    }
+    expect(jsx).toContain('role="alert"');
+  });
+
+  it('lets the subtitle wrap at a narrow width instead of cutting it', () => {
+    expect(source).toMatch(/subtitle=\{<span className="block whitespace-normal">/);
   });
 
   it('keeps one thing open at a time: the add form waits for a question, and nothing is sent twice or mid-write', () => {
