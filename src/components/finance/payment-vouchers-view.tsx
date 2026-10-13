@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Ban, Check, Download, Pencil, PieChart, Plus, Search, Send, Trash2, TrendingUp, Wallet } from 'lucide-react';
+import { Ban, Check, CircleCheck, Download, Pencil, PieChart, Plus, Search, Send, Trash2, TrendingUp, Wallet } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { AreaTrend, DonutStat, type Series } from '@/components/charts';
 import { ConfirmRow } from '@/components/finance/confirm-row';
@@ -61,23 +61,27 @@ import {
   voucherKindLink,
   voucherName,
   voucherDetailsLine,
+  voucherPaidEffect,
   voucherPayableBills,
   voucherQuestion,
   writtenVoucherTitle,
 } from '@/lib/finance/voucher-form';
+import { markVoucherPaidInput } from '@/lib/finance/vouchers';
 import { cn } from '@/lib/utils';
 
 export type VoucherActions = VoucherFormActions & {
   submit: (input: unknown) => Promise<FinResult<{ id: string }>>;
   approve: (input: unknown) => Promise<FinResult<{ id: string }>>;
   reject: (input: unknown) => Promise<FinResult<{ id: string }>>;
+  markPaid: (input: unknown) => Promise<FinResult<{ id: string; number: string }>>;
   remove: (input: unknown) => Promise<FinResult<{ id: string }>>;
+  voidVoucher: (input: unknown) => Promise<FinResult<{ id: string }>>;
 };
 
 /** What only a person who may edit is given: the actions, whether they may decide, and what the voucher form offers. */
 export type VouchersWriter = {
   actions: VoucherActions;
-  /** True for an owner or admin: they approve and reject, and what they save is approved. */
+  /** True for an owner or admin: they approve, reject, mark paid and void, and what they save is approved. */
   canDecide: boolean;
   /** Active accounts, contacts and expense categories, for the form. */
   accounts: FinanceAccount[];
@@ -112,7 +116,9 @@ const STATUS_STYLES: Record<PaymentVoucherRow['status'], string> = {
 /** One thing open at a time: the voucher form (new, or for the draft of one row), or a question in one row. */
 type Open =
   | { kind: 'form'; today: string; draft?: PaymentVoucherRow }
-  | { kind: Exclude<VoucherAction, 'edit'>; row: PaymentVoucherRow }
+  | { kind: Exclude<VoucherAction, 'edit' | 'markPaid'>; row: PaymentVoucherRow }
+  // Marking paid asks the day it was paid, in the question itself.
+  | { kind: 'markPaid'; row: PaymentVoucherRow; paidOn: string }
   | null;
 
 /**
@@ -126,7 +132,9 @@ type Open =
  * Edit and Send for approval on a draft, and
  * Delete on a voucher that is not yet "To be paid", or that is and is of
  * a kind that belongs to this screen; an owner or
- * admin also gets Approve and Reject on one that is waiting. Each row's menu
+ * admin also gets Approve and Reject on one that is waiting, Mark as paid on
+ * one of this screen's kinds that is "To be paid", and Void on a paid one of
+ * those kinds. Each row's menu
  * holds only what the database will let that person do (`voucherActions`).
  * From "To be paid" on, a payment to a supplier is paid, voided and deleted on Payments Out and a
  * refund on Refunds, and each such row links there.
@@ -157,9 +165,10 @@ export function PaymentVouchersView({
   const [open, setOpen] = useState<Open>(() => {
     const row = initialAsk ? rows.find((v) => v.transaction_id === initialAsk.id) : undefined;
     if (!initialAsk || !row) return null;
-    return initialAsk.kind === 'edit' ? { kind: 'form', today: serverToday, draft: row } : { kind: initialAsk.kind, row };
+    if (initialAsk.kind === 'edit') return { kind: 'form', today: serverToday, draft: row };
+    return initialAsk.kind === 'markPaid' ? { kind: 'markPaid', row, paidOn: serverToday } : { kind: initialAsk.kind, row };
   });
-  // The voucher just recorded, approved or rejected; whether to say anything about it is decided at render, from the rows listed now.
+  // The voucher just recorded, approved, rejected, marked paid or voided; whether to say anything about it is decided at render, from the rows listed now.
   const [written, setWritten] = useState<WrittenVoucher | null>(null);
   const confirm = useFinanceAction();
 
@@ -234,8 +243,13 @@ export function PaymentVouchersView({
         return { label: 'Approve', icon: Check, opens: true, onSelect: () => ask({ kind: 'approve', row }) };
       case 'reject':
         return { label: 'Reject', icon: Ban, destructive: true, opens: true, onSelect: () => ask({ kind: 'reject', row }) };
+      case 'markPaid':
+        // The day it was paid starts as the person's own today.
+        return { label: 'Mark as paid', icon: CircleCheck, opens: true, onSelect: () => ask({ kind: 'markPaid', row, paidOn: localIsoDate(new Date()) }) };
       case 'delete':
         return { label: 'Delete', icon: Trash2, destructive: true, opens: true, onSelect: () => ask({ kind: 'delete', row }) };
+      case 'void':
+        return { label: 'Void', icon: Ban, destructive: true, opens: true, onSelect: () => ask({ kind: 'void', row }) };
     }
   };
 
@@ -243,20 +257,25 @@ export function PaymentVouchersView({
    * Runs a write on the voucher as the row shows it now. If it was decided, changed or deleted since, the
    * question closes and the refreshed row (or its absence) says what it holds; the sentence stays above the table.
    */
-  const settle = (call: () => Promise<FinResult<{ id: string }>>, done: () => void) =>
+  const settle = <T extends { id: string }>(call: () => Promise<FinResult<T>>, done: () => void) =>
     confirm.run(async () => {
       const result = await call();
       if (!result.ok && voucherAnswerIsStale(result.error)) setOpen(null);
       return result;
     }, done);
 
-  const decided = (row: PaymentVoucherRow, status: 'pending_approval' | 'scheduled' | 'rejected'): WrittenVoucher => ({
+  /** The voucher after a write from its row; `date` is given when the write moved it (the day it was paid). */
+  const decided = (
+    row: PaymentVoucherRow,
+    status: 'pending_approval' | 'scheduled' | 'rejected' | 'posted' | 'void',
+    date = row.txn_date,
+  ): WrittenVoucher => ({
     id: row.transaction_id,
     status,
     recorded: false,
     payee: row.party_name,
     amount: row.amount,
-    date: row.txn_date,
+    date,
   });
 
   const words = (parts: QuestionPart[]) =>
@@ -341,6 +360,69 @@ export function PaymentVouchersView({
         >
           {words(voucherQuestion('reject', row))}
           {details(row)}
+        </ConfirmRow>
+      );
+    }
+    if (asking.kind === 'markPaid') {
+      const paidOn = asking.paidOn;
+      const confirmPaid = () => {
+        if (confirm.pending) return;
+        const parsed = markVoucherPaidInput.safeParse({ id: row.transaction_id, paid_on: paidOn });
+        if (!parsed.success) {
+          confirm.fail(parsed.error.issues[0]?.message ?? 'Enter the date it was paid.');
+          return;
+        }
+        // Paying moves the voucher's date to the day it was paid, so that is the date the note names.
+        settle(() => actions.markPaid(parsed.data), () => closeSaying(decided(row, 'posted', parsed.data.paid_on)));
+      };
+      return (
+        <ConfirmRow
+          key={row.transaction_id}
+          colSpan={columns}
+          tone="default"
+          icon={CircleCheck}
+          label={`Mark ${voucherName(row)} as paid`}
+          confirmLabel="Mark as paid"
+          pendingLabel="Saving…"
+          pending={confirm.pending}
+          error={confirm.error}
+          onConfirm={confirmPaid}
+          onCancel={close}
+        >
+          <label className="flex flex-wrap items-center gap-2">
+            <span>{words(voucherQuestion('markPaid', row))}</span>
+            <Input
+              type="date"
+              className="w-40"
+              value={paidOn}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter') return;
+                e.preventDefault();
+                confirmPaid();
+              }}
+              onChange={(e) => setOpen({ kind: 'markPaid', row, paidOn: e.target.value })}
+            />
+          </label>
+          <p className="mt-1 text-muted-foreground">{voucherPaidEffect(row)}</p>
+          {details(row)}
+        </ConfirmRow>
+      );
+    }
+    if (asking.kind === 'void') {
+      return (
+        <ConfirmRow
+          key={row.transaction_id}
+          colSpan={columns}
+          icon={Ban}
+          label={`Void ${voucherName(row)}`}
+          confirmLabel="Void voucher"
+          pendingLabel="Voiding…"
+          pending={confirm.pending}
+          error={confirm.error}
+          onConfirm={() => settle(() => actions.voidVoucher({ id: row.transaction_id }), () => closeSaying(decided(row, 'void')))}
+          onCancel={close}
+        >
+          {words(voucherQuestion('void', row))}
         </ConfirmRow>
       );
     }

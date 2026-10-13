@@ -132,13 +132,15 @@ describe('what a row offers', () => {
     expect(voucherActions(row(), false)).toEqual(['delete']);
     expect(voucherActions(row({ kind: 'expense' }), false)).toEqual(['delete']);
     // A draft has Edit and Send for approval too: see finance-voucher-bills-form.test.ts.
+    expect(voucherActions(row({ status: 'rejected' }), true)).toEqual(['delete']);
     for (const status of ['scheduled', 'rejected'] as const) {
-      expect(voucherActions(row({ status }), true), status).toEqual(['delete']);
       expect(voucherActions(row({ status }), false), status).toEqual(['delete']);
     }
-    for (const status of ['posted', 'void'] as const) {
-      expect(voucherActions(row({ status }), true), status).toEqual([]);
-    }
+    // Mark as paid on one that is To be paid, and Void on a paid one, are an owner's or admin's: see finance-voucher-pay-void-form.test.ts.
+    expect(voucherActions(row({ status: 'scheduled' }), true)).toEqual(['markPaid', 'delete']);
+    expect(voucherActions(row({ status: 'posted' }), true)).toEqual(['void']);
+    expect(voucherActions(row({ status: 'posted' }), false)).toEqual([]);
+    expect(voucherActions(row({ status: 'void' }), true)).toEqual([]);
   });
   it('leaves a supplier payment and a refund to their own screens from To be paid onward, and has them before that, where those screens offer nothing', () => {
     for (const kind of ['bill', 'refund'] as const) {

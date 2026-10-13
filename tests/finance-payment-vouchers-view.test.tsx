@@ -100,9 +100,11 @@ const approve = vi.fn(async () => ({ ok: true as const, data: { id: ID } }));
 const reject = vi.fn(async () => ({ ok: true as const, data: { id: ID } }));
 const submit = vi.fn(async () => ({ ok: true as const, data: { id: ID } }));
 const remove = vi.fn(async () => ({ ok: true as const, data: { id: ID } }));
+const markPaid = vi.fn(async () => ({ ok: true as const, data: { id: ID, number: 'PV-0007' } }));
+const voidVoucher = vi.fn(async () => ({ ok: true as const, data: { id: ID } }));
 const never = async () => ({ ok: false as const, error: 'no' });
 const writer = (canDecide: boolean, orderNotes: Record<string, string[]> = {}): VouchersWriter => ({
-  actions: { record: never, save: never, submit, approve, reject, remove },
+  actions: { record: never, save: never, submit, approve, reject, markPaid, remove, voidVoucher },
   canDecide,
   accounts: [],
   contacts: [],
@@ -113,7 +115,7 @@ const writer = (canDecide: boolean, orderNotes: Record<string, string[]> = {}): 
   orderNotes,
 });
 
-const render = (w?: VouchersWriter, rows: PaymentVoucherRow[] = SAMPLE_PAYMENT_VOUCHERS, initialAsk?: { kind: 'edit' | 'submit' | 'approve' | 'reject' | 'delete'; id: string }) =>
+const render = (w?: VouchersWriter, rows: PaymentVoucherRow[] = SAMPLE_PAYMENT_VOUCHERS, initialAsk?: { kind: 'edit' | 'submit' | 'approve' | 'reject' | 'markPaid' | 'delete' | 'void'; id: string }) =>
   renderToStaticMarkup(<PaymentVouchersView rows={rows} today={SAMPLE_TODAY} followClock={false} writer={w} initialAsk={initialAsk} />);
 
 /** How many row menus the markup holds. */
@@ -140,9 +142,11 @@ describe('the Payment Vouchers screen', () => {
     expect(html).toContain('Actions');
     expect(menus(html)).toBeGreaterThan(0);
   });
-  it('gives a member a menu on the same rows as an owner: what differs is inside it', () => {
-    // Every waiting row of the sample is of a kind that belongs here, so it has Delete for both.
-    expect(menus(render(writer(false)))).toBe(menus(render(writer(true))));
+  it('gives a member a menu on every row that is not yet paid and belongs here, and an owner one more on each paid row that does', () => {
+    // Every waiting row of the sample is of a kind that belongs here, so it has Delete for both. A paid row has Void, for an owner or admin only.
+    const paidHere = SAMPLE_PAYMENT_VOUCHERS.slice(0, 10).filter((v) => v.status === 'posted' && (v.kind === 'expense' || v.kind === 'other')).length;
+    expect(paidHere).toBeGreaterThan(0);
+    expect(menus(render(writer(true)))).toBe(menus(render(writer(false))) + paidHere);
   });
   it('still links a supplier payment and a refund to their own screens', () => {
     const html = render(writer(true));
@@ -185,6 +189,45 @@ describe('the Kind link', () => {
       expect(html).toContain('href="/finance/payments-out"');
       expect(html).not.toContain('Managed on');
     }
+  });
+});
+
+describe('paying and voiding', () => {
+  const toPay = voucher({ kind: 'other', status: 'scheduled', documents: null, category_name: 'Utilities' });
+  const paid = { ...toPay, status: 'posted' as const, number: 'PV-0007' };
+
+  it('offers an owner Mark as paid and Delete on a To be paid voucher that belongs here, and a member Delete only', () => {
+    expect(items(render(writer(true), [toPay]))).toEqual(['Mark as paid', 'Delete']);
+    expect(items(render(writer(false), [toPay]))).toEqual(['Delete']);
+  });
+  it('offers an owner Void on a paid one, a member no menu, and nobody one on a paid supplier payment', () => {
+    expect(items(render(writer(true), [paid]))).toEqual(['Void']);
+    expect(menus(render(writer(false), [paid]))).toBe(0);
+    expect(menus(render(writer(true), [{ ...paid, kind: 'bill' }]))).toBe(0);
+  });
+  it('asks the day it was paid, starting from today, and presses Mark as paid with the id and that day only', () => {
+    const html = render(writer(true), [toPay], { kind: 'markPaid', id: ID });
+    expect(html).toContain('type="date"');
+    expect(html).toContain(`value="${SAMPLE_TODAY}"`);
+    // The amount, the payee and the account are drawn in bold, each in an element of its own.
+    expect(text(html)).toMatch(/Mark the payment of RM 300\.00 to Syarikat Maju , from Maybank Current , as paid on/);
+    expect(text(html)).toContain('It gets its payment voucher number and moves the books on that date. After this it cannot be changed or deleted, only voided.');
+    expect(text(html)).toContain('Category: Utilities · Method: FPX');
+    expect(asked[0].confirmLabel).toBe('Mark as paid');
+    asked[0].onConfirm();
+    expect(markPaid).toHaveBeenCalledWith({ id: ID, paid_on: SAMPLE_TODAY });
+    expect(voidVoucher).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+  });
+  it('asks before voiding, by number, and presses Void with the id only', () => {
+    const html = render(writer(true), [paid], { kind: 'void', id: ID });
+    expect(text(html)).toMatch(/Void PV-0007 , the payment of RM 300\.00 to Syarikat Maju , paid on 05 Oct 2026 from Maybank Current \? The money counts as back in the account/);
+    expect(text(html)).toContain('It stays in the list as Void, and this cannot be undone.');
+    expect(asked[0].confirmLabel).toBe('Void voucher');
+    asked[0].onConfirm();
+    expect(voidVoucher).toHaveBeenCalledWith({ id: ID });
+    expect(markPaid).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
   });
 });
 

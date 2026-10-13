@@ -9,10 +9,12 @@ import type { PaymentVoucherRow } from '@/lib/finance/cash-book';
 const actions = vi.hoisted(() => ({
   approveVoucherAction: vi.fn(),
   deleteVoucherAction: vi.fn(),
+  markVoucherPaidAction: vi.fn(),
   recordVoucherAction: vi.fn(),
   rejectVoucherAction: vi.fn(),
   saveVoucherAction: vi.fn(),
   submitVoucherAction: vi.fn(),
+  voidVoucherAction: vi.fn(),
 }));
 vi.mock('@/app/(app)/finance/actions', () => actions);
 
@@ -77,9 +79,13 @@ describe('the Payment Vouchers loader', () => {
       submit: actions.submitVoucherAction,
       approve: actions.approveVoucherAction,
       reject: actions.rejectVoucherAction,
+      markPaid: actions.markVoucherPaidAction,
       remove: actions.deleteVoucherAction,
+      voidVoucher: actions.voidVoucherAction,
     });
     expect(writer?.actions.submit).not.toBe(actions.approveVoucherAction);
+    // Void is the voucher's own, never a delete.
+    expect(writer?.actions.voidVoucher).not.toBe(actions.deleteVoucherAction);
   });
 
   it('passes the form only the approved and closed purchase orders, and only the active contacts', async () => {

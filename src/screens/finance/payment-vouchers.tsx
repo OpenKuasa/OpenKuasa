@@ -1,10 +1,12 @@
 import {
   approveVoucherAction,
   deleteVoucherAction,
+  markVoucherPaidAction,
   recordVoucherAction,
   rejectVoucherAction,
   saveVoucherAction,
   submitVoucherAction,
+  voidVoucherAction,
 } from '@/app/(app)/finance/actions';
 import { PaymentVouchersView, type VoucherActions } from '@/components/finance/payment-vouchers-view';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
@@ -26,14 +28,17 @@ const ACTIONS: VoucherActions = {
   submit: submitVoucherAction,
   approve: approveVoucherAction,
   reject: rejectVoucherAction,
+  markPaid: markVoucherPaidAction,
   remove: deleteVoucherAction,
+  voidVoucher: voidVoucherAction,
 };
 
 /**
  * Every movement of money out. Anyone who may edit can record a voucher for
  * a category, save one for a category or for a supplier's bills as a draft,
  * send a draft for approval, and delete one that has not been paid; approving and rejecting
- * one that is waiting are an owner's or admin's (`sign-off-finance`), as the
+ * one that is waiting, recording one as paid, marking one paid and voiding a
+ * paid one are an owner's or admin's (`sign-off-finance`), as the
  * database enforces. A viewer and the demo workspace read.
  */
 export default async function PaymentVouchersScreen() {

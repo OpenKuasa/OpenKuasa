@@ -26,10 +26,12 @@ import {
   keepVoucherBills,
   newVoucherForm,
   voucherBillOwed,
+  voucherDateLabel,
   voucherDraftLabel,
   voucherFirstWrite,
   voucherFormError,
   voucherPayload,
+  voucherPaysNow,
   voucherSaveHint,
   voucherSavePayload,
   voucherSubmitLabel,
@@ -38,7 +40,7 @@ import {
 import type { RecordedVoucher } from '@/lib/finance/vouchers';
 
 export type VoucherFormActions = {
-  /** Records a new voucher for a category at once: approved for an owner or admin, waiting for anyone else. */
+  /** Records a new voucher for a category at once: approved, or paid when asked, for an owner or admin; waiting for anyone else. */
   record: (input: unknown) => Promise<FinResult<RecordedVoucher>>;
   /** Saves a draft, new or changed, and sends it for approval in the same call when asked. */
   save: (input: unknown) => Promise<FinResult<RecordedVoucher>>;
@@ -54,10 +56,10 @@ export type RecordedVoucherNote = RecordedVoucher & { payee: string; amount: num
  * their sum). Either can be saved as a draft. A voucher for bills, and any
  * draft, is sent for approval by the first button, whoever presses it; a new
  * voucher for a category is recorded at once, which approves it when the
- * person is an owner or admin (`canDecide`). The card says which before the
- * save. Nothing is scheduled or paid here: a supplier payment that needs no
- * approval is recorded on Payments Out. The rules are in
- * src/lib/finance/voucher-form.ts.
+ * person is an owner or admin (`canDecide`), who may also record it as paid
+ * now. The card says which before the save. No supplier payment is scheduled
+ * or paid here: one that needs no approval is recorded on Payments Out. The
+ * rules are in src/lib/finance/voucher-form.ts.
  */
 export function VoucherFormCard({
   accounts,
@@ -81,7 +83,7 @@ export function VoucherFormCard({
   orders: OrderBilling[];
   /** The default date, YYYY-MM-DD: the person's own local date. */
   today: string;
-  /** True for an owner or admin: a new category voucher they save is approved. */
+  /** True for an owner or admin: a new category voucher they save is approved, and they may record it as paid now. */
   canDecide: boolean;
   /** The draft being edited, as a form (`draftVoucherForm`); absent for a new voucher. */
   draft?: VoucherForm;
@@ -101,6 +103,9 @@ export function VoucherFormCard({
   const form = keepVoucherBills(typedForm, payable);
   const typed = form.payee === TYPED_PAYEE;
   const forBills = form.kind === 'bills';
+  // "When" is offered where the first button records: a new voucher for a category, to someone who may sign off.
+  const offersWhen = canDecide && voucherFirstWrite(form) === 'record';
+  const paysNow = voucherPaysNow(canDecide, form);
   const suppliers = paymentSuppliers(payable);
   const offered = billsOf(payable, form.supplierId);
   const tickedCount = Object.keys(form.amounts).length;
@@ -126,7 +131,7 @@ export function VoucherFormCard({
     const note = { payee, amount: voucherTotal(form), date: form.date };
     const call =
       send && voucherFirstWrite(form) === 'record'
-        ? () => actions.record(voucherPayload(form))
+        ? () => actions.record(voucherPayload(form, paysNow))
         : () => actions.save(voucherSavePayload(form, send));
     save.run(call, (recorded) => onClose({ ...recorded, ...note }));
   };
@@ -341,7 +346,7 @@ export function VoucherFormCard({
           </Select>
         </div>
         <div className="space-y-1.5 md:col-span-3">
-          <Label htmlFor={`${id}-date`}>Date to pay</Label>
+          <Label htmlFor={`${id}-date`}>{voucherDateLabel(paysNow)}</Label>
           <Input
             id={`${id}-date`}
             type="date"
@@ -386,6 +391,34 @@ export function VoucherFormCard({
             onChange={(e) => edit((f) => ({ ...f, notes: e.target.value }))}
           />
         </div>
+
+        {offersWhen ? (
+          <fieldset className="space-y-1.5 md:col-span-12">
+            <legend className="text-sm font-medium leading-none">When</legend>
+            <div className="flex min-h-8 flex-wrap items-center gap-x-4 gap-y-1">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name={`${id}-when`}
+                  className="size-4 accent-primary"
+                  checked={!form.paidNow}
+                  onChange={() => edit((f) => ({ ...f, paidNow: false }))}
+                />
+                To be paid
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name={`${id}-when`}
+                  className="size-4 accent-primary"
+                  checked={form.paidNow === true}
+                  onChange={() => edit((f) => ({ ...f, paidNow: true }))}
+                />
+                Paid now
+              </label>
+            </div>
+          </fieldset>
+        ) : null}
 
         <div className="space-y-1 md:col-span-12">
           {voucherSaveHint(canDecide, form).map((line) => (

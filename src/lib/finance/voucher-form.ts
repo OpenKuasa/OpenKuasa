@@ -5,7 +5,7 @@
  * being edited), what is wrong with it and what is sent to
  * recordVoucherAction or saveVoucherAction; what a row's menu offers each
  * person; what a decision sends of the row it was
- * asked on; the words of the three questions; the over-billing notes for the
+ * asked on; the words of the questions; the over-billing notes for the
  * vouchers that pay supplier bills; and what the screen says about a voucher
  * that was just written and is not in the list. Pure.
  */
@@ -49,6 +49,8 @@ export type VoucherForm = {
   method: PaymentMethod;
   reference: string;
   notes: string;
+  /** "Paid now" on a new voucher for a category: recorded as paid on `date`. Only an owner or admin is offered it; absent means "To be paid". */
+  paidNow?: boolean;
 };
 
 /** A fresh form: from the first bank account, by bank transfer, dated today (the person's own date); the category chosen when there is only one. */
@@ -151,6 +153,15 @@ export function voucherFirstWrite(form: Pick<VoucherForm, 'kind' | 'id'>): 'reco
 }
 
 /**
+ * Whether the first button records the voucher as paid: "Paid now" was
+ * chosen, on a new voucher for a category, by someone who may sign off. A
+ * draft and a voucher for bills are never paid from the form.
+ */
+export function voucherPaysNow(canDecide: boolean, form: Pick<VoucherForm, 'kind' | 'id' | 'paidNow'>): boolean {
+  return canDecide && form.paidNow === true && voucherFirstWrite(form) === 'record';
+}
+
+/**
  * What is sent to saveVoucherAction: the voucher as a draft, or, with `send`,
  * saved and sent for approval. Every field is sent every time, so a field
  * that was emptied is stored empty. An amount box that is not a number goes
@@ -177,11 +188,13 @@ export function voucherSavePayload(form: VoucherForm, send: boolean) {
  * What is sent to recordVoucherAction. The amount is a number: a box that is
  * not a number (a number input drops a typed comma, so "1,200.50" arrives
  * empty) goes as NaN and is refused. Whoever is paid is a contact or a typed
- * name, never both. No status is sent: the database decides it.
+ * name, never both. No status is sent: the database decides it. `paid_now`
+ * is sent only when the voucher is to be recorded as paid (`voucherPaysNow`).
  */
-export function voucherPayload(form: VoucherForm) {
+export function voucherPayload(form: VoucherForm, paidNow = false) {
   const typed = form.payee === TYPED_PAYEE;
   return {
+    ...(paidNow ? { paid_now: true } : {}),
     account_id: form.accountId,
     txn_date: form.date,
     method: form.method,
@@ -224,6 +237,8 @@ export const BILLS_HINT =
   'Sending this for approval is a choice: it waits as Pending approval until an owner or admin approves or rejects it, and once approved it is To be paid on Payments Out. To schedule a supplier payment without approval, record it on Payments Out instead.';
 export const DRAFT_HINT =
   'A draft is yours to change until it is sent for approval. After that it cannot be changed, only approved, rejected or deleted.';
+export const PAID_NOW_HINT =
+  'A voucher you save as paid is approved and paid at once, on the date above: you are an owner or admin. It gets its payment voucher number and moves the books, and from then on it cannot be changed or deleted, only voided.';
 
 /**
  * What the form says under its fields, before anything is written: what its
@@ -231,9 +246,10 @@ export const DRAFT_HINT =
  * the first button sends for approval whoever presses it; for a new category
  * voucher it does what recording does for this person.
  */
-export function voucherSaveHint(canDecide: boolean, form?: Pick<VoucherForm, 'kind' | 'id'>): string[] {
+export function voucherSaveHint(canDecide: boolean, form?: Pick<VoucherForm, 'kind' | 'id' | 'paidNow'>): string[] {
   if (form?.kind === 'bills') return [BILLS_HINT, DRAFT_HINT];
   if (form?.id) return [DRAFT_HINT];
+  if (form && voucherPaysNow(canDecide, form)) return [PAID_NOW_HINT, DRAFT_HINT];
   return [
     canDecide
       ? 'A voucher you save is approved at once and reads To be paid: you are an owner or admin. Nothing is paid until it is marked paid.'
@@ -242,9 +258,15 @@ export function voucherSaveHint(canDecide: boolean, form?: Pick<VoucherForm, 'ki
   ];
 }
 
-/** The form's first button, by what it does for this person: only a new category voucher is approved by an owner's or admin's save. */
-export function voucherSubmitLabel(canDecide: boolean, form?: Pick<VoucherForm, 'kind' | 'id'>): string {
+/** The form's first button, by what it does for this person: only a new category voucher is approved, or paid, by an owner's or admin's save. */
+export function voucherSubmitLabel(canDecide: boolean, form?: Pick<VoucherForm, 'kind' | 'id' | 'paidNow'>): string {
+  if (form && voucherPaysNow(canDecide, form)) return 'Save as paid';
   return canDecide && (!form || voucherFirstWrite(form) === 'record') ? 'Save voucher' : 'Send for approval';
+}
+
+/** The date field's label: the day it was paid when it is recorded as paid, the day it is planned for otherwise. */
+export function voucherDateLabel(paysNow: boolean): string {
+  return paysNow ? 'Date paid' : 'Date to pay';
 }
 
 /** The form's second button: a new voucher is saved as a draft, a draft being edited is saved. */
@@ -254,7 +276,7 @@ export function voucherDraftLabel(form: Pick<VoucherForm, 'id'>): string {
 
 /* ---- the row ---------------------------------------------------------- */
 
-export type VoucherAction = 'edit' | 'submit' | 'approve' | 'reject' | 'delete';
+export type VoucherAction = 'edit' | 'submit' | 'approve' | 'reject' | 'markPaid' | 'delete' | 'void';
 
 /** Before "To be paid": the statuses Payments Out and Refunds offer nothing on, so a voucher in one of them is changed here whatever it pays. */
 const BEFORE_TO_BE_PAID: ReadonlySet<PaymentVoucherRow['status']> = new Set(['draft', 'pending_approval', 'rejected']);
@@ -272,16 +294,23 @@ const BEFORE_TO_BE_PAID: ReadonlySet<PaymentVoucherRow['status']> = new Set(['dr
  *    deletes it, whoever recorded it. Payments Out and Refunds offer nothing
  *    on a payment before it is "To be paid", so without this a rejected
  *    payment to a supplier could never be removed;
- *  - "To be paid": deleted here only when it is of a kind that belongs here.
- *    A payment to a supplier and a refund are then marked paid or deleted on
- *    their own screens (`voucherHome`), so their rows offer nothing here;
- *  - paid or void: nothing here yet.
+ *  - "To be paid", of a kind that belongs here (for a category, or paying
+ *    expenses): an owner or admin marks it paid, and anyone who may write
+ *    deletes it. A payment to a supplier and a refund are then marked paid or
+ *    deleted on their own screens (`voucherHome`), so their rows offer
+ *    nothing here;
+ *  - paid, of a kind that belongs here: an owner or admin voids it. A paid
+ *    payment to a supplier or refund is voided on its own screen;
+ *  - void: nothing. It is final.
  */
 export function voucherActions(row: PaymentVoucherRow, canDecide: boolean): VoucherAction[] {
   const actions: VoucherAction[] = [];
+  const ours = voucherHome(row.kind) === null;
   if (row.status === 'draft' && (row.kind === 'bill' || row.kind === 'other')) actions.push('edit', 'submit');
   if (row.status === 'pending_approval' && canDecide) actions.push('approve', 'reject');
-  if (BEFORE_TO_BE_PAID.has(row.status) || (row.status === 'scheduled' && voucherHome(row.kind) === null)) actions.push('delete');
+  if (row.status === 'scheduled' && ours && canDecide) actions.push('markPaid');
+  if (BEFORE_TO_BE_PAID.has(row.status) || (row.status === 'scheduled' && ours)) actions.push('delete');
+  if (row.status === 'posted' && ours && canDecide) actions.push('void');
   return actions;
 }
 
@@ -313,7 +342,12 @@ export function voucherDecisionPayload(row: PaymentVoucherRow) {
 
 /** True for the answers that mean the voucher is no longer as the row showed it: the question is closed and the row refreshed. */
 export function voucherAnswerIsStale(error: string): boolean {
-  return ([M.changed, M.alreadyApproved, M.alreadyRejected, M.movedOn, M.gone, M.draftChanged, M.notDraftSend] as string[]).includes(error);
+  return (
+    [
+      M.changed, M.alreadyApproved, M.alreadyRejected, M.movedOn, M.gone, M.draftChanged, M.notDraftSend,
+      M.alreadyPaid, M.alreadyVoided,
+    ] as string[]
+  ).includes(error);
 }
 
 /** One run of a question's words; `strong` ones are drawn in bold. */
@@ -336,14 +370,36 @@ const DELETE_STATE: Record<PaymentVoucherRow['status'], string> = {
   void: '',
 };
 
+/** What marking a voucher paid does, said under the question before it is done. */
+export function voucherPaidEffect(row: Pick<PaymentVoucherRow, 'kind'>): string {
+  const expenses = row.kind === 'expense' ? ' What it holds of its expenses is then paid.' : '';
+  return `It gets its payment voucher number and moves the books on that date.${expenses} After this it cannot be changed or deleted, only voided.`;
+}
+
 /**
- * The question asked in a voucher's row before it is approved, rejected or
- * deleted. The figures are the row's, as it is now. A voucher that pays
- * documents names them, and deleting one that holds part of expenses or
- * bills says they are freed.
+ * The question asked in a voucher's row before it is sent, approved,
+ * rejected, marked paid, deleted or voided. The figures are the row's, as it
+ * is now. A voucher that pays documents names them, and deleting one that
+ * holds part of expenses or bills says they are freed. The question for
+ * marking paid ends where the date field follows it: "… as paid on".
  */
 export function voucherQuestion(kind: Exclude<VoucherAction, 'edit'>, row: PaymentVoucherRow): QuestionPart[] {
   const what = paymentOf(row);
+  if (kind === 'markPaid') {
+    return [{ text: 'Mark ' }, ...what, { text: ', from ' }, { text: row.account_name, strong: true }, { text: ', as paid on' }];
+  }
+  if (kind === 'void') {
+    // Only posted money counts as paid on an expense, so voiding puts back what this voucher paid of each.
+    const owed = row.kind === 'expense' ? ' The expenses it paid are owed that amount again, and can be marked paid again on Expenses.' : '';
+    return [
+      { text: 'Void ' },
+      ...(row.number ? [{ text: row.number, strong: true }, { text: ', ' }] : []),
+      ...what,
+      { text: `, paid on ${displayDate(row.txn_date)} from ` },
+      { text: row.account_name, strong: true },
+      { text: `? The money counts as back in the account and the books reverse it.${owed} It stays in the list as Void, and this cannot be undone.` },
+    ];
+  }
   if (kind === 'submit') {
     return [
       { text: 'Send ' },
@@ -452,15 +508,16 @@ export function hasBillVoucherWaiting(rows: Pick<PaymentVoucherRow, 'kind' | 'st
 
 /* ---- after a write ---------------------------------------------------- */
 
-/** A voucher the person just recorded, approved or rejected, kept so the screen can tell whether it is in the list. */
+/** A voucher the person just recorded, approved, rejected, marked paid or voided, kept so the screen can tell whether it is in the list. */
 export type WrittenVoucher = {
   id: string;
   /** How the database left it; null when a save could not read it back. */
   status: PaymentVoucherRow['status'] | null;
-  /** Whether the person recorded it just now (true) or decided it (false). */
+  /** Whether the person recorded it just now (true) or decided, paid or voided it (false). */
   recorded: boolean;
   payee: string | null;
   amount: number;
+  /** Its date as the list now has it: for one just marked paid, the day it was paid. */
   date: string;
 };
 
@@ -470,6 +527,8 @@ function did(written: WrittenVoucher): string {
   if (written.status === 'rejected') return 'was rejected';
   if (written.status === 'pending_approval') return 'was sent and waits for approval';
   if (written.status === 'scheduled') return written.recorded ? 'was saved and is To be paid' : 'was approved and is To be paid';
+  if (written.status === 'posted') return written.recorded ? 'was saved as paid' : 'was marked paid';
+  if (written.status === 'void') return 'was voided';
   return 'was saved';
 }
 
@@ -479,8 +538,21 @@ export function writtenVoucherTitle(written: WrittenVoucher): string {
   if (written.status === 'rejected') return 'Voucher rejected';
   if (written.status === 'pending_approval') return 'Voucher sent for approval';
   if (written.status === 'scheduled') return written.recorded ? 'Voucher saved' : 'Voucher approved';
+  if (written.status === 'posted') return written.recorded ? 'Voucher saved as paid' : 'Voucher marked paid';
+  if (written.status === 'void') return 'Voucher voided';
   return 'Voucher saved';
 }
+
+/**
+ * Where a rejected, a paid and a void voucher are listed: under which status
+ * filters, and what to choose when the one chosen is not among them. Each is
+ * also left out of a period its date is not in.
+ */
+const LISTED_UNDER: Partial<Record<PaymentVoucherRow['status'], { filters: PaymentVoucherFilter[]; choose: string }>> = {
+  rejected: { filters: ['rejected'], choose: 'Rejected' },
+  posted: { filters: ['open', 'posted'], choose: 'All but void and rejected' },
+  void: { filters: ['void'], choose: 'Void' },
+};
 
 /**
  * What to say about the voucher just written when it is not among the rows
@@ -492,9 +564,10 @@ export function writtenVoucherTitle(written: WrittenVoucher): string {
  * list only in a period its date is in, and under no status filter but the
  * first. A voucher that is
  * waiting or "To be paid" is in every period; a rejected one is left out of
- * the list until Rejected is chosen, and out of a period its date is not in,
- * so each of those is said in so many words. Anything else that hides it is
- * the search, a filter or the ten-row limit.
+ * the list until Rejected is chosen, a void one until Void is, a paid one
+ * while a status that is not its own is, and each of the three out of a
+ * period its date is not in, so each of those is said in so many words.
+ * Anything else that hides it is the search, a filter or the ten-row limit.
  */
 export function voucherHiddenNote(
   written: WrittenVoucher,
@@ -507,13 +580,14 @@ export function voucherHiddenNote(
   if (inShown) return null;
   const what = `The payment of ${rm(written.amount)}${written.payee ? ` to ${written.payee}` : ''}, dated ${displayDate(written.date)},`;
   if (inMatching) return `${what} ${did(written)}. Choose View all to see it.`;
-  if (written.status === 'rejected') {
+  const listed = written.status ? LISTED_UNDER[written.status] : undefined;
+  if (listed) {
     const outside = !inPeriod(written.date, today, period);
-    if (filter !== 'rejected') {
-      return `${what} ${did(written)}. Choose Rejected in the status filter${outside ? ' and a longer period' : ''} to see it.`;
+    if (!listed.filters.includes(filter)) {
+      return `${what} ${did(written)}. Choose ${listed.choose} in the status filter${outside ? ' and a longer period' : ''} to see it.`;
     }
     if (outside) return `${what} ${did(written)}. Choose a longer period to see it.`;
-    // Rejected is chosen and its date is in the period: only the search or the Kind filter can be hiding it.
+    // Its status is chosen and its date is in the period: only the search or the Kind filter can be hiding it.
     return `${what} ${did(written)}. Clear the search and the Kind filter to see it.`;
   }
   if (written.status === 'draft') {
