@@ -193,6 +193,7 @@ import {
   rejectVoucher,
   voucherDecisionInput,
 } from '@/lib/finance/vouchers';
+import { TRANSFER_MESSAGES, recordTransfer, recordTransferInput, voidTransfer, voidTransferInput } from '@/lib/finance/transfers';
 import { createClient } from '@/lib/supabase/server';
 
 const FORBIDDEN: FinResult<never> = { ok: false, error: NOT_ALLOWED };
@@ -306,6 +307,10 @@ const BANK_ACCOUNT_PATHS = [
   '/finance/payment-vouchers',
   ...LEDGER_PATHS,
 ];
+// A transfer between two accounts is on Banking, where both balances move, and in the books: one entry, debit the
+// account it reached and credit the one it left, and a second entry that reverses it when it is voided. It is on
+// no other screen: Cash Receipts and Payment Vouchers leave both sides of a transfer out, and no document is paid.
+const TRANSFER_PATHS = ['/finance/banking', ...LEDGER_PATHS];
 // A bill or a payment changes what is owed, which Customers & Suppliers shows as Payable. A payment to a
 // supplier is also a voucher: Payment Vouchers lists every movement of money out.
 const PURCHASE_PATHS = [
@@ -516,6 +521,20 @@ export async function updateBankAccountAction(input: unknown) {
 /** Archives or restores an account. The database refuses an archive while money is still to be paid from it. */
 export async function setBankAccountActiveAction(input: unknown) {
   return run(BANK_ACCOUNT_PATHS, setBankAccountActiveInput, input, setBankAccountActive);
+}
+
+/* ---- transfers between accounts (Banking) ------------------------------- */
+
+/** Recording and voiding a transfer: an owner or admin only, told so in the transfer's own words. */
+const TRANSFER_SIGN_OFF = { signOff: true, signOffError: TRANSFER_MESSAGES.needsSignOff } as const;
+
+/** Moves money between two active accounts: both sides are posted at once with one TR- number. */
+export async function recordTransferAction(input: unknown) {
+  return run(TRANSFER_PATHS, recordTransferInput, input, recordTransfer, TRANSFER_SIGN_OFF);
+}
+/** Voids both sides of a posted transfer. */
+export async function voidTransferAction(input: unknown) {
+  return run(TRANSFER_PATHS, voidTransferInput, input, voidTransfer, TRANSFER_SIGN_OFF);
 }
 
 /* ---- supplier bills ---------------------------------------------------- */
