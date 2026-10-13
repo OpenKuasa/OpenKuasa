@@ -147,4 +147,15 @@ test('nothing in src edits a payment that is not a draft, sends one back to draf
   // And no update of a payment is built any other way (a variable, a spread) that the scan above would not see.
   const all = sources.flatMap(({ path, code }) => [...code.matchAll(/from\('finance_transactions'\)\s*(?:\/\/[^\n]*\n\s*)*\.update\(/g)].map(() => path));
   expect(all).toHaveLength(updates.length);
+  // Whatever the spelling: every file that names the table, with how many times it calls .update( on anything.
+  const writers = sources
+    .filter(({ code }) => /finance_transactions/.test(code) && /\.(update|upsert)\(/.test(code))
+    .map(({ path, code }) => `${path}: ${[...code.matchAll(/\.(update|upsert)\(/g)].length}`)
+    .sort();
+  expect(writers).toEqual([
+    'src/lib/finance/cash-receipts.ts: 1',
+    'src/lib/finance/money.ts: 2',
+    'src/lib/finance/refunds.ts: 1',
+    'src/lib/finance/vouchers.ts: 1',
+  ]);
 });
