@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { PaymentVoucherRow } from '@/lib/finance/cash-book';
 import { orderNotesForBills, type OrderBilling } from '@/lib/finance/purchase-views';
@@ -11,6 +12,7 @@ import {
   voucherAccess,
   voucherActions,
   voucherAnswerIsStale,
+  voucherCategoryChoices,
   voucherControls,
   voucherDecisionPayload,
   voucherFormError,
@@ -369,5 +371,35 @@ describe('after a write', () => {
     expect(voucherHiddenNote(old, TODAY, 'month', 'rejected', false, false)).toBe(`${OLD} was rejected. Choose a longer period to see it.`);
     expect(voucherHiddenNote(old, TODAY, 'all', 'open', false, false)).toBe(`${OLD} was rejected. Choose Rejected in the status filter to see it.`);
     expect(voucherHiddenNote(rejected, TODAY, 'month', 'rejected', false, false)).toBe(`${WHAT} was rejected. Clear the search and the Kind filter to see it.`);
+  });
+});
+
+describe('the expense categories a voucher form offers', () => {
+  const ARCHIVED = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+  it('offers a new voucher the active categories only', () => {
+    expect(voucherCategoryChoices(categories, null)).toEqual(categories);
+  });
+
+  it('keeps a draft’s own category in the box when it was archived since, marked as archived, and offers it first', () => {
+    const choices = voucherCategoryChoices(categories, row({ category_id: ARCHIVED, category_name: 'Old fuel' }));
+    expect(choices).toEqual([{ id: ARCHIVED, name: 'Old fuel (archived)' }, ...categories]);
+  });
+
+  it('says "Archived category" when the draft’s row has no name for it', () => {
+    expect(voucherCategoryChoices(categories, row({ category_id: ARCHIVED, category_name: null }))[0]).toEqual({
+      id: ARCHIVED,
+      name: 'Archived category',
+    });
+  });
+
+  it('is what the screen hands the form, for the draft being edited', () => {
+    const view = readFileSync('src/components/finance/payment-vouchers-view.tsx', 'utf8');
+    expect(view).toContain('categories={voucherCategoryChoices(writer.categories, open.draft ?? null)}');
+  });
+
+  it('adds nothing for a draft whose category is still active, or that has none (a draft for bills)', () => {
+    expect(voucherCategoryChoices(categories, row())).toBe(categories);
+    expect(voucherCategoryChoices(categories, row({ category_id: null, category_name: null }))).toBe(categories);
   });
 });

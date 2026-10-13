@@ -85,6 +85,21 @@ export function voucherPayableBills(bills: BillListRow[], payments: PaymentOutRo
 }
 
 /**
+ * The expense categories the form's box offers: the active ones, and, for a
+ * draft being edited whose category was archived since, that category too,
+ * first and marked "(archived)", so the box shows what the draft is filed
+ * under and it can be kept or changed. A new voucher is offered the active
+ * ones only. The same list when the draft has no category or it is offered.
+ */
+export function voucherCategoryChoices(
+  categories: ExpenseCategory[],
+  draft: Pick<PaymentVoucherRow, 'category_id' | 'category_name'> | null,
+): ExpenseCategory[] {
+  if (!draft?.category_id || categories.some((c) => c.id === draft.category_id)) return categories;
+  return [{ id: draft.category_id, name: draft.category_name ? `${draft.category_name} (archived)` : 'Archived category' }, ...categories];
+}
+
+/**
  * The form for a draft being edited, from its row and, for one that pays
  * bills, the Payments Out rows that name its bills. An account that has been
  * archived since is not among `accounts` and is left unchosen, so the form

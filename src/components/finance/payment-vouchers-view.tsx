@@ -53,6 +53,7 @@ import {
   type VoucherAction,
   type WrittenVoucher,
   draftVoucherForm,
+  voucherCategoryChoices,
   voucherActions,
   voucherAnswerIsStale,
   voucherControls,
@@ -493,7 +494,7 @@ export function PaymentVouchersView({
             key={open.draft?.transaction_id ?? 'new'}
             accounts={writer.accounts}
             contacts={writer.contacts}
-            categories={writer.categories}
+            categories={voucherCategoryChoices(writer.categories, open.draft ?? null)}
             // What the draft being edited holds of its bills is its own to take again.
             payable={voucherPayableBills(writer.bills, writer.payments, open.draft?.transaction_id ?? null)}
             orders={writer.orders}

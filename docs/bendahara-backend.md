@@ -2282,9 +2282,8 @@ with no date).
 - Two people renaming or archiving the same category at once: the last write
   stands. Nothing compares what the person was shown.
 - A payment voucher draft whose category was archived since opens its form
-  with the category box empty (the voucher form lists active categories
-  only, where the expense, receipt and bill forms add the draft's own);
-  saving it unchanged keeps the category.
+  with that category in the box, marked "(archived)" (`voucherCategoryChoices`);
+  a new voucher is offered the active categories only.
 - A category name that ends in a tab, or is made of a newline, is accepted:
   the rule trims spaces only (`finance_categories_name_check`), and the
   Categories card's schema trims spaces only and counts the 80 characters by
