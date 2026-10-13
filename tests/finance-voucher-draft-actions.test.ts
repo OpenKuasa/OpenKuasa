@@ -42,7 +42,7 @@ vi.mock('@/lib/finance/vouchers', async (orig) => {
 
 const actions = await import('@/app/(app)/finance/actions');
 
-/** The screens a voucher shows on: the same ten every voucher action refreshes (pinned in finance-voucher-actions.test.ts). */
+/** The screens a voucher shows on and the ledger screens: the same thirteen every voucher action refreshes (pinned in finance-voucher-actions.test.ts). */
 const PATHS = [
   '/finance/payment-vouchers',
   '/finance/banking',
@@ -54,6 +54,9 @@ const PATHS = [
   '/finance/credit-notes',
   '/finance/payments-in',
   '/finance/customers-suppliers',
+  '/finance/chart-of-accounts',
+  '/finance/journals',
+  '/finance/reports',
 ];
 const DRAFT = {
   kind: 'bills', account_id: ACCOUNT, txn_date: '2026-10-05', method: 'fpx', reference: '', notes: '',
