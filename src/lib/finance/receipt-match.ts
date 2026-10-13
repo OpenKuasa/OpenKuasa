@@ -589,3 +589,19 @@ export function offeredContacts<C extends { id: string; name: string; active: bo
     suppliers: active.filter((c) => c.is_supplier),
   };
 }
+
+/**
+ * Expenses and Supplier Bills show a paperclip for each receipt tied to a row, but they must load without it:
+ * a failed read of the inbox's view gives no paperclips, says so in the server log, and nothing else changes.
+ */
+export async function attachedReceiptsOrNone(
+  read: () => Promise<AttachedReceipt[]>,
+  log: (message: string, error: unknown) => void = console.error,
+): Promise<AttachedReceipt[]> {
+  try {
+    return await read();
+  } catch (error) {
+    log('[finance] the receipts tied to documents could not be read:', error);
+    return [];
+  }
+}

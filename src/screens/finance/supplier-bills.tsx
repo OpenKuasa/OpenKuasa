@@ -18,7 +18,7 @@ import { type PaymentOutRow, listAccounts, listPaymentsOut } from '@/lib/finance
 import { heldByBill } from '@/lib/finance/payment-form';
 import { listPurchaseOrders } from '@/lib/finance/purchase-orders';
 import { listProducts } from '@/lib/finance/products';
-import { listAttachedReceipts, receiptsByDocument } from '@/lib/finance/receipt-match';
+import { attachedReceiptsOrNone, listAttachedReceipts, receiptsByDocument } from '@/lib/finance/receipt-match';
 import { billsView, todayUtc } from '@/lib/finance/purchase-views';
 import { createClient } from '@/lib/supabase/server';
 
@@ -111,7 +111,8 @@ export default async function SupplierBillsScreen() {
   const [rows, payments, attached, contacts, products, accounts, orders, categories, defaultCategoryId] = await Promise.all([
     listBills(ctx),
     listPaymentsOut(ctx),
-    listAttachedReceipts(ctx),
+    // Without the paperclips the page still loads: a failed read is logged and shows none.
+    attachedReceiptsOrNone(() => listAttachedReceipts(ctx)),
     canEdit ? listContacts(ctx) : [],
     canEdit ? listProducts(ctx) : [],
     canEdit ? listAccounts(ctx) : [],

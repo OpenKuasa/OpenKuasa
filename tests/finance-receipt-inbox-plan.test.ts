@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { OrgRole } from '@/lib/auth/current-org';
-import { offeredContacts, receiptInboxPlan } from '@/lib/finance/receipt-match';
+import { type AttachedReceipt, attachedReceiptsOrNone, offeredContacts, receiptInboxPlan } from '@/lib/finance/receipt-match';
 
 const read = (path: string) => readFileSync(path, 'utf8');
 
@@ -49,6 +49,35 @@ describe('which contacts the forms offer', () => {
       { id: 'c', name: 'Active customer' },
     ]);
     expect(offered.suppliers.map((c) => c.id)).toEqual(['a']);
+  });
+});
+
+describe('a failed read of the paperclips', () => {
+  const one: AttachedReceipt = {
+    id: 'r1',
+    file_name: 'a.png',
+    mime_type: 'image/png',
+    has_file: true,
+    expense_id: 'e1',
+    bill_id: null,
+  };
+
+  it('gives what was read when it works', async () => {
+    const log = vi.fn();
+    expect(await attachedReceiptsOrNone(async () => [one], log)).toEqual([one]);
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it('gives no paperclips and logs on the server when it throws, so the page still loads', async () => {
+    const log = vi.fn();
+    const boom = new Error('view unreadable');
+    expect(
+      await attachedReceiptsOrNone(async () => {
+        throw boom;
+      }, log),
+    ).toEqual([]);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls[0][1]).toBe(boom);
   });
 });
 

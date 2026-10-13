@@ -15,7 +15,8 @@ describe('the paperclip is wired on the two document screens', () => {
   ] as const) {
     it(`${name} reads the tied receipts, groups them by document and passes the link action`, () => {
       const source = read(file);
-      expect(source).toContain('listAttachedReceipts(ctx)');
+      // A failed read of the tied receipts costs the paperclips and nothing else (attachedReceiptsOrNone, tested).
+      expect(source).toContain('attachedReceiptsOrNone(() => listAttachedReceipts(ctx))');
       expect(source).toContain('receipts={receiptsByDocument(attached)}');
       expect(source).toContain('receiptLinkOf={receiptLinkAction}');
       expect(source).toContain("import { receiptLinkAction } from '@/app/(app)/finance/receipt-inbox-actions';");

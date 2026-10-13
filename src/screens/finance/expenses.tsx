@@ -11,7 +11,7 @@ import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { listContacts } from '@/lib/finance/contacts';
 import { canEditExpenses } from '@/lib/finance/expense-form';
 import { listExpenseCategories, listExpenses } from '@/lib/finance/expenses';
-import { listAttachedReceipts, receiptsByDocument } from '@/lib/finance/receipt-match';
+import { attachedReceiptsOrNone, listAttachedReceipts, receiptsByDocument } from '@/lib/finance/receipt-match';
 import { todayUtc } from '@/lib/finance/view-helpers';
 import { createClient } from '@/lib/supabase/server';
 import { SAMPLE_EXPENSES } from './cash-book-sample';
@@ -42,7 +42,8 @@ export default async function ExpensesScreen() {
   // The receipts tied to an expense show in its row, for everyone who can see it.
   const [rows, attached, contacts, categories] = await Promise.all([
     listExpenses(ctx),
-    listAttachedReceipts(ctx),
+    // Without the paperclips the page still loads: a failed read is logged and shows none.
+    attachedReceiptsOrNone(() => listAttachedReceipts(ctx)),
     canEdit ? listContacts(ctx) : [],
     canEdit ? listExpenseCategories(ctx) : [],
   ]);
