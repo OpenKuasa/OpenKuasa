@@ -32,7 +32,6 @@ describe('createCategoryInput', () => {
   it.each([
     [{ kind: 'expense' }, M.name],
     [{ name: '   ', kind: 'expense' }, M.name],
-    [{ name: '\t\n', kind: 'expense' }, M.name],
     [{ name: 7, kind: 'expense' }, M.name],
     [{ name: 'x'.repeat(81), kind: 'expense' }, M.nameTooLong],
     [{ name: 'Fuel' }, M.kind],
@@ -41,6 +40,18 @@ describe('createCategoryInput', () => {
     const parsed = createCategoryInput.safeParse(input);
     expect(parsed.success).toBe(false);
     expect(parsed.error?.issues[0]?.message).toBe(message);
+  });
+
+  // The table trims spaces only (`name = btrim(name)`) and counts code points (`char_length`).
+  it('holds a name to the table’s own rule: spaces are trimmed, other whitespace is not', () => {
+    expect(createCategoryInput.parse({ name: 'Fuel\t', kind: 'expense' }).name).toBe('Fuel\t');
+    expect(createCategoryInput.parse({ name: ' \tFuel ', kind: 'expense' }).name).toBe('\tFuel');
+    expect(createCategoryInput.safeParse({ name: '\t', kind: 'expense' }).success).toBe(true);
+  });
+
+  it('counts the 80 characters as the table does: by code point, not by UTF-16 unit', () => {
+    expect(createCategoryInput.safeParse({ name: '😀'.repeat(80), kind: 'expense' }).success).toBe(true);
+    expect(createCategoryInput.safeParse({ name: '😀'.repeat(81), kind: 'expense' }).error?.issues[0]?.message).toBe(M.nameTooLong);
   });
 
   it('drops anything that is not a new category’s to send', () => {
@@ -58,11 +69,15 @@ describe('renameCategoryInput and setCategoryActiveInput', () => {
     expect(setCategoryActiveInput.parse({ id: ID, active: false, name: 'x', kind: 'income' })).toEqual({ id: ID, active: false });
   });
 
-  it('answers "no longer exists" for an id that is not one, and for an archive that does not say which way', () => {
+  it('answers "no longer exists" for an id that is not one', () => {
     expect(renameCategoryInput.safeParse({ id: 'nope', name: 'A' }).error?.issues[0]?.message).toBe(M.gone);
     expect(setCategoryActiveInput.safeParse({ id: 'nope', active: true }).error?.issues[0]?.message).toBe(M.gone);
-    expect(setCategoryActiveInput.safeParse({ id: ID }).error?.issues[0]?.message).toBe(M.gone);
-    expect(setCategoryActiveInput.safeParse({ id: ID, active: 'no' }).error?.issues[0]?.message).toBe(M.gone);
+    expect(setCategoryActiveInput.safeParse({ id: ID }).error?.issues[0]?.message).toBe(M.active);
+  });
+
+  it('answers an active that is not true or false in the validation sentence, not "no longer exists"', () => {
+    expect(setCategoryActiveInput.safeParse({ id: ID, active: 'no' }).error?.issues[0]?.message).toBe(M.active);
+    expect(setCategoryActiveInput.safeParse({ id: ID, active: null }).error?.issues[0]?.message).toBe(M.active);
   });
 
   it('refuses an empty or over-long new name in the name’s own sentences', () => {

@@ -94,6 +94,8 @@ describe('a name that is taken', () => {
     expect(categoryNameClash(ROWS, 'income', 'Rent')).toBeNull();
     expect(categoryNameClash(ROWS, 'expense', 'Sales')).toBeNull();
     expect(categoryNameClash(ROWS, 'expense', 'Ren')).toBeNull();
+    // Spaces are trimmed as the table does; a tab is part of the name, so it is not the same name.
+    expect(categoryNameClash(ROWS, 'expense', 'Rent\t')).toBeNull();
   });
 
   it('is not the category’s own name when it is being renamed', () => {
@@ -138,6 +140,8 @@ describe('a new name', () => {
   it('that is the name it has changes nothing, outer spaces aside; a change of capitals is a change', () => {
     expect(renameChangesNothing(rent, 'Rent')).toBe(true);
     expect(renameChangesNothing(rent, ' Rent ')).toBe(true);
+    // The table trims spaces only: a name that now ends in a tab is a different name.
+    expect(renameChangesNothing(rent, 'Rent\t')).toBe(false);
     expect(renameChangesNothing(rent, 'rent')).toBe(false);
     expect(renameChangesNothing(rent, '')).toBe(false);
   });

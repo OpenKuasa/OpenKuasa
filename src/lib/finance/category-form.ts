@@ -10,6 +10,7 @@ import {
   type SavedCategory,
   createCategoryInput,
   renameCategoryInput,
+  trimSpaces,
 } from './categories';
 
 /** What the add form holds. */
@@ -69,7 +70,7 @@ export function categoryActions(row: Pick<CategoryRow, 'active' | 'default_for'>
  * lets the card say which case it is without a second read.
  */
 export function categoryNameClash(rows: CategoryRow[], kind: CategoryKind, name: string, exceptId?: string): CategoryRow | null {
-  const wanted = name.trim().toLowerCase();
+  const wanted = trimSpaces(name).toLowerCase();
   return rows.find((r) => r.kind === kind && r.id !== exceptId && r.name.toLowerCase() === wanted) ?? null;
 }
 
@@ -91,7 +92,7 @@ export function categoryPayload(form: CategoryForm): { name: string; kind: Categ
 
 /** True when the typed name is the name the category already has: nothing is sent, and the question closes. */
 export function renameChangesNothing(row: Pick<CategoryRow, 'name'>, typed: string): boolean {
-  return typed.trim() === row.name;
+  return trimSpaces(typed) === row.name;
 }
 
 /** What is wrong with a new name for `row`, in the sentence to show, or null when it can be sent. */

@@ -37,6 +37,7 @@ export const CATEGORY_MESSAGES = {
   name: 'Enter a name for the category.',
   nameTooLong: `Keep the name to ${CATEGORY_NAME_MAX} characters or fewer.`,
   kind: 'Choose Expense or Income.',
+  active: 'Choose whether to archive or restore the category.',
   gone: 'That category no longer exists.',
   // 23505. The card refuses a name it can see is taken, in fuller words, before anything is sent; this is the race.
   nameTaken: 'Another category of the same kind already has that name. Archived categories keep their names.',
@@ -52,7 +53,13 @@ export const CATEGORY_MESSAGES = {
 const M = CATEGORY_MESSAGES;
 
 const id = z.string({ error: M.gone }).uuid(M.gone);
-const name = z.string({ error: M.name }).trim().min(1, M.name).max(CATEGORY_NAME_MAX, M.nameTooLong);
+/** What the table trims: spaces only (`btrim`), not tabs or newlines. */
+export const trimSpaces = (s: string) => s.replace(/^ +| +$/g, '');
+/** The table's own rule (`finance_categories_name_check`): 1 to 80 characters, counted as `char_length` does, by code point. */
+const name = z
+  .string({ error: M.name })
+  .transform(trimSpaces)
+  .pipe(z.string().min(1, M.name).max(CATEGORY_NAME_MAX, M.nameTooLong));
 const kind = z.enum(['expense', 'income'], { error: M.kind });
 
 /** A new category. Its kind is chosen here and never changes. */
@@ -60,7 +67,7 @@ export const createCategoryInput = z.object({ name, kind });
 /** A new name for a category, and nothing else: whether it is archived is not this write's to say. */
 export const renameCategoryInput = z.object({ id, name });
 /** Archiving (`active: false`) or restoring a category, and nothing else: its name is not this write's to say. */
-export const setCategoryActiveInput = z.object({ id, active: z.boolean({ error: M.gone }) }, { error: M.gone });
+export const setCategoryActiveInput = z.object({ id, active: z.boolean({ error: M.active }) }, { error: M.gone });
 
 const REFUSALS: Record<string, string> = {
   [PG_UNIQUE]: M.nameTaken,

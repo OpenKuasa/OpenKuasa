@@ -111,7 +111,7 @@ describe('what the category actions do', () => {
     expect(await actions.createCategoryAction({ name: 'Fuel', kind: 'asset' })).toEqual({ ok: false, error: 'Choose Expense or Income.' });
     expect(await actions.renameCategoryAction({ id: 'nope', name: 'A' })).toEqual({ ok: false, error: 'That category no longer exists.' });
     expect(await actions.renameCategoryAction({ id: CATEGORY, name: 'x'.repeat(81) })).toEqual({ ok: false, error: 'Keep the name to 80 characters or fewer.' });
-    expect(await actions.setCategoryActiveAction({ id: CATEGORY })).toEqual({ ok: false, error: 'That category no longer exists.' });
+    expect(await actions.setCategoryActiveAction({ id: CATEGORY })).toEqual({ ok: false, error: 'Choose whether to archive or restore the category.' });
     expect(ctl.calls).toEqual([]);
     expect(ctl.revalidated).toEqual([]);
   });
