@@ -49,7 +49,7 @@ import {
   showsPayCard,
   writtenExpenseTitle,
 } from '@/lib/finance/expense-form';
-import { type ExpensePaidNote, expensePaidText, expensePaidTitle } from '@/lib/finance/expense-payment';
+import { type ExpensePaidNote, expensePaidText, expensePaidTitle, expensePayCurrent } from '@/lib/finance/expense-payment';
 import type { ExpenseCategory, ExpenseDisplayStatus, ExpenseRow } from '@/lib/finance/expenses';
 import { rm } from '@/lib/finance/format';
 import type { FinanceAccount } from '@/lib/finance/money';
@@ -155,7 +155,7 @@ export function ExpensesView({
   // A card holds what was typed, so nothing else opens over it: it is closed with its own Cancel first.
   const locked = confirm.pending || open?.kind === 'form' || open?.kind === 'pay';
   // The expense being paid, as the list has it now: a refresh may have moved what is left of it.
-  const paying = open?.kind === 'pay' ? (rows.find((e) => e.id === open.row.id) ?? open.row) : null;
+  const paying = open?.kind === 'pay' ? expensePayCurrent(open.row, rows) : null;
   // A row that is gone after a refresh takes its question with it; the message still has to be seen.
   const askingInView = asking ? shown.some((e) => e.id === asking.row.id) : false;
 
@@ -329,8 +329,9 @@ export function ExpensesView({
         {open?.kind === 'pay' && showsPayCard(writer, open.kind) && writer && paying ? (
           <ExpensePayCard
             // A different expense is a different card.
-            key={paying.id}
-            row={paying}
+            key={paying.row.id}
+            row={paying.row}
+            gone={paying.gone}
             accounts={writer.accounts}
             today={open.today}
             pay={writer.actions.pay}

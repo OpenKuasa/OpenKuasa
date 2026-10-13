@@ -36,6 +36,7 @@ export type ExpensePayAction = (input: unknown) => Promise<FinResult<PaidExpense
  */
 export function ExpensePayCard({
   row,
+  gone = false,
   accounts,
   today,
   pay,
@@ -43,6 +44,8 @@ export function ExpensePayCard({
 }: {
   /** The expense, as the screen has it now: it follows a refresh. */
   row: ExpenseRow;
+  /** True when the list no longer holds the expense: the hint says so and nothing is sent. */
+  gone?: boolean;
   /** Active bank and cash accounts. */
   accounts: FinanceAccount[];
   /** The default date paid, YYYY-MM-DD: the person's own local date. */
@@ -68,7 +71,7 @@ export function ExpensePayCard({
   const submit = (event: FormEvent<HTMLFormElement>) => {
     // Handled here rather than as a form action, so a refused form keeps what was typed.
     event.preventDefault();
-    const problem = expensePayError(row, form, accounts);
+    const problem = expensePayError(row, form, accounts, gone);
     if (problem) {
       save.fail(problem);
       return;
@@ -158,7 +161,7 @@ export function ExpensePayCard({
           />
         </div>
 
-        <p className="text-xs text-muted-foreground md:col-span-12">{expensePayHint(row)}</p>
+        <p className="text-xs text-muted-foreground md:col-span-12">{expensePayHint(row, gone)}</p>
 
         <div className="flex flex-wrap items-center gap-3 md:col-span-12">
           <Button type="submit" size="sm" disabled={save.pending}>

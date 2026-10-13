@@ -3,6 +3,7 @@ import {
   type ExpensePayForm,
   expensePaidText,
   expensePaidTitle,
+  expensePayCurrent,
   expensePayError,
   expensePayHint,
   expensePayPayload,
@@ -225,6 +226,18 @@ describe('the Mark paid card', () => {
     expect(expensePayHint(approved({ held: 120 }))).toBe('Nothing is left to pay on this expense.');
     expect(expensePayHint(approved({ status: 'rejected', display_status: 'rejected' }))).toBe('This expense is not approved any more, so it cannot be paid.');
     expect(expensePayHint(approved({ status: 'pending', display_status: 'pending' }))).toBe('This expense is not approved any more, so it cannot be paid.');
+  });
+  it('follows the list under the open card, and says so when the expense is gone from it', () => {
+    const opened = approved();
+    const now = approved({ paid: 30 });
+    expect(expensePayCurrent(opened, [approved({ id: 'other' }), now])).toEqual({ row: now, gone: false });
+    expect(expensePayCurrent(opened, [approved({ id: 'other' })])).toEqual({ row: opened, gone: true });
+    expect(expensePayCurrent(opened, [])).toEqual({ row: opened, gone: true });
+    // Gone, the hint and the refusal both say so: never "still to pay", never a payment sent.
+    expect(expensePayHint(opened, true)).toBe('That expense no longer exists.');
+    expect(expensePayError(opened, form(), ACCOUNTS, true)).toBe('That expense no longer exists.');
+    expect(expensePayHint(opened, false)).toBe(expensePayHint(opened));
+    expect(expensePayError(opened, form(), ACCOUNTS, false)).toBeNull();
   });
   it('words the note for a payment in full and in part, with and without the number', () => {
     const note = { expenseId: EXPENSE, amount: 120, paidBefore: 0, vendor: 'Kedai Ali', account: 'Main Bank', number: 'PV-0007' };

@@ -193,12 +193,22 @@ export function expensePayPayload(row: ExpenseRow, form: ExpensePayForm) {
 }
 
 /**
+ * The expense the card is for, as the list reads now: a refresh may have moved what is left of it, or taken it out of
+ * the list altogether (rejected and deleted by someone else). `gone` is true then, and `row` is the one the card opened with.
+ */
+export function expensePayCurrent(opened: ExpenseRow, rows: ExpenseRow[]): { row: ExpenseRow; gone: boolean } {
+  const now = rows.find((e) => e.id === opened.id);
+  return now ? { row: now, gone: false } : { row: opened, gone: true };
+}
+
+/**
  * The first thing wrong with the form, in the sentence the schema or the
  * database would use, or null when it can be sent. `row` is the expense as
  * the screen has it now, so a payment someone else recorded meanwhile is
  * counted once the screen has refreshed.
  */
-export function expensePayError(row: ExpenseRow, form: ExpensePayForm, accounts: FinanceAccount[]): string | null {
+export function expensePayError(row: ExpenseRow, form: ExpensePayForm, accounts: FinanceAccount[], gone = false): string | null {
+  if (gone) return M.gone;
   if (row.status !== 'approved') return M.notApproved;
   const left = expenseLeft(row);
   if (left <= 0) return M.nothingLeft;
@@ -223,7 +233,8 @@ export function expensePayError(row: ExpenseRow, form: ExpensePayForm, accounts:
  * Payment Vouchers). An expense that can no longer be paid (the list
  * refreshed under the open card) says only that.
  */
-export function expensePayHint(row: ExpenseRow): string {
+export function expensePayHint(row: ExpenseRow, gone = false): string {
+  if (gone) return M.gone;
   if (row.status !== 'approved') return M.notApproved;
   const left = expenseLeft(row);
   if (left <= 0) return M.nothingLeft;
