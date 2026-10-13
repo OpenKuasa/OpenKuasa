@@ -24,11 +24,17 @@ export function visibleOpen(opened: BankingOpen, shownIds: string[], accountIds:
 export const VOID_REFUSED_TITLE = 'Transfer not voided';
 
 /**
- * What to do when the open void question's row is no longer in the table (a search or filter hides it, or the
- * refresh after a refusal took it away because it was already voided or is gone). The question is closed for
- * good, so it does not come back, or take the focus, when a filter is cleared. If the void had been refused,
- * its sentence is returned so that it is said at the top of the page, where it outlives the question it was
- * in. While the void is still under way nothing is closed: its answer is still to come.
+ * When the open void question is closed for good, and what is then said at the top of the page.
+ *
+ * A refused void closes it as the refusal arrives, and its sentence is returned for a note: the refresh that
+ * follows a refusal can take the row away (already voided, or gone), so the row is no place to keep it. It is
+ * never left in the row to be moved to the note later, by a search or a filter that hides the row: the note
+ * takes the focus as it appears, and appearing inside the key press that chose a filter it was closed by that
+ * same Enter, unread.
+ *
+ * A question whose row is no longer in the table (a search or filter hides it) is closed too, with nothing to
+ * say, so it does not come back, or take the focus, when the filter is cleared. While the void is still under
+ * way nothing is closed: its answer is still to come.
  */
 export function voidQuestionGone(
   opened: BankingOpen,
@@ -36,7 +42,7 @@ export function voidQuestionGone(
   pending: boolean,
   error: string | null,
 ): { close: boolean; refusal: string | null } {
-  const gone = opened?.kind === 'void' && !pending && !shownIds.includes(opened.transactionId);
+  const gone = opened?.kind === 'void' && !pending && (error !== null || !shownIds.includes(opened.transactionId));
   return gone ? { close: true, refusal: error } : { close: false, refusal: null };
 }
 

@@ -1162,8 +1162,10 @@ question (which answers `FIN16`) and the write, and `transfers.ts` gives it the
 same sentence as `FIN16`. `FIN09` is "This transfer has already been voided." and
 `FIN11` "That transfer no longer exists." Both leave the row, which the refresh
 after a refusal takes out of the table (it lists posted movements only), so a
-refused void is also said at the top of the page in a note titled "Transfer not
-voided", where it outlasts the question it was asked in.
+refused void is said at the top of the page in a note titled "Transfer not
+voided", and its question closes, as the refusal arrives (`voidQuestionGone`).
+The sentence is not kept in the row: a search or a filter that hid the row
+later would raise the note under the control being used.
 
 A transfer for more than the From account holds is taken; the form says what
 it leaves the account at before it is recorded ("Main Bank holds RM 300.00.

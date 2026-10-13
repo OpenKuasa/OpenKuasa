@@ -32,11 +32,17 @@ describe('visibleOpen', () => {
 });
 
 describe('voidQuestionGone', () => {
-  it('keeps the question while its row is in the table', () => {
-    expect(voidQuestionGone(ASKING, ['tx-1'], false, REFUSED)).toEqual({ close: false, refusal: null });
+  it('keeps the question while its row is in the table and no answer has come', () => {
+    expect(voidQuestionGone(ASKING, ['tx-1'], false, null)).toEqual({ close: false, refusal: null });
   });
 
-  it('closes it when the row has left, and hands back the refusal so it is still said', () => {
+  // The refusal is said in a note as it arrives. Kept in the row, it was moved to that note by whatever hid the row
+  // later, and the note took the focus inside the keypress that chose the filter: the same Enter closed it unread.
+  it('closes it as soon as the void is refused, with its row still in the table, and hands back the refusal', () => {
+    expect(voidQuestionGone(ASKING, ['tx-1'], false, REFUSED)).toEqual({ close: true, refusal: REFUSED });
+  });
+
+  it('does the same when the refresh after the refusal has already taken the row away', () => {
     expect(voidQuestionGone(ASKING, ['tx-2'], false, REFUSED)).toEqual({ close: true, refusal: REFUSED });
   });
 

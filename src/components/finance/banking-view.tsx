@@ -147,9 +147,9 @@ export function BankingView({
     shownIds,
     accounts.map((a) => a.id),
   );
-  // A void question whose row has left the table is closed for good, so it does not come back, or take the focus,
-  // when a filter is cleared. If the void had been refused, its sentence is said at the top of the page: the
-  // refresh that follows a refusal takes a row that was already voided away, and the question with it.
+  // A refused void closes its question as the answer arrives, and its sentence is said at the top of the page: the
+  // refresh that follows a refusal takes a row that was already voided away. A void question whose row a search or
+  // a filter has hidden is closed for good too, so it does not come back, or take the focus, when that is cleared.
   const gone = voidQuestionGone(opened, shownIds, voiding.pending, voiding.error);
   if (gone.close) {
     setOpened(null);
