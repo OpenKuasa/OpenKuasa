@@ -239,17 +239,28 @@ export function expensePayHint(row: ExpenseRow): string {
 
 /** What was just paid, for the note the screen shows afterwards. */
 export type ExpensePaidNote = {
+  /** The expense that was paid. */
+  expenseId: string;
   amount: number;
   vendor: string;
   account: string;
   /** The voucher's PV- number; null when it could not be read back. */
   number: string | null;
-  /** True when the payment covered all that was left. */
-  inFull: boolean;
+  /** What was paid on the expense before this payment, as the card showed it. */
+  paidBefore: number;
 };
 
-export function expensePaidTitle(note: ExpensePaidNote): string {
-  return note.inFull ? 'Expense paid' : 'Part of the expense paid';
+const cents = (n: number) => Math.round(n * 100);
+
+/**
+ * "Expense paid" or "Part of the expense paid" is said only from the list as it reads now, once it includes this
+ * payment: the row the card opened with can be out of date (a payment held against the expense may have been
+ * deleted since), and what the write answers does not say what is left. Until the list shows the payment, or when the
+ * expense cannot be found in it, the note says only that a payment was recorded.
+ */
+export function expensePaidTitle(note: ExpensePaidNote, current?: ExpenseRow | null): string {
+  if (!current || cents(current.paid) < cents(note.paidBefore + note.amount)) return 'Payment recorded';
+  return cents(current.paid) >= cents(current.amount) ? 'Expense paid' : 'Part of the expense paid';
 }
 
 /** The note's sentence. The payment is a voucher: it is on Payment Vouchers and Banking, which is where the link goes. */

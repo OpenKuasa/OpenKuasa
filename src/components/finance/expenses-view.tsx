@@ -347,7 +347,7 @@ export function ExpensesView({
         ) : null}
         {paid ? (
           <SavedNoteCard
-            title={expensePaidTitle(paid)}
+            title={expensePaidTitle(paid, rows.find((e) => e.id === paid.expenseId))}
             subtitle="Recorded as a payment voucher"
             href="/finance/payment-vouchers"
             linkLabel="Payment Vouchers"

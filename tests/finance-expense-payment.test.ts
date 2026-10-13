@@ -227,10 +227,26 @@ describe('the Mark paid card', () => {
     expect(expensePayHint(approved({ status: 'pending', display_status: 'pending' }))).toBe('This expense is not approved any more, so it cannot be paid.');
   });
   it('words the note for a payment in full and in part, with and without the number', () => {
-    const note = { amount: 120, vendor: 'Kedai Ali', account: 'Main Bank', number: 'PV-0007', inFull: true };
-    expect(expensePaidTitle(note)).toBe('Expense paid');
-    expect(expensePaidTitle({ ...note, inFull: false })).toBe('Part of the expense paid');
+    const note = { expenseId: EXPENSE, amount: 120, paidBefore: 0, vendor: 'Kedai Ali', account: 'Main Bank', number: 'PV-0007' };
     expect(expensePaidText(note)).toBe('RM 120.00 to Kedai Ali was paid from Main Bank as PV-0007. The payment is on Banking and on');
     expect(expensePaidText({ ...note, number: null })).toBe('RM 120.00 to Kedai Ali was paid from Main Bank. The payment is on Banking and on');
+  });
+  it('titles the note from the refreshed row, never from the row as the card opened', () => {
+    const note = { expenseId: EXPENSE, amount: 100, paidBefore: 0, vendor: 'Kedai Ali', account: 'Main Bank', number: 'PV-0007' };
+    // In full: the list now reads the expense paid.
+    expect(expensePaidTitle(note, approved({ amount: 100, paid: 100, display_status: 'paid' }))).toBe('Expense paid');
+    // In part: the list reads some of it paid.
+    expect(expensePaidTitle({ ...note, amount: 30 }, approved({ amount: 100, paid: 30 }))).toBe('Part of the expense paid');
+    // Money held for a payment not made yet is not paid: paying the rest of a part-held expense is only a part.
+    expect(expensePaidTitle({ ...note, amount: 100 }, approved({ amount: 126, paid: 100, held: 26 }))).toBe('Part of the expense paid');
+    // The stale case: a held payment was deleted meanwhile, so 100 was not all that was owed. Before the list refreshes, or if the
+    // row cannot be found, the note says only that a payment was recorded; it never says the expense is paid.
+    expect(expensePaidTitle(note, approved({ amount: 126, paid: 0, held: 26 }))).toBe('Payment recorded');
+    expect(expensePaidTitle(note, approved({ amount: 100, paid: 0 }))).toBe('Payment recorded');
+    expect(expensePaidTitle(note, undefined)).toBe('Payment recorded');
+    // Refreshed, with the held payment gone: 100 of 126 is paid and 26 is still owed.
+    expect(expensePaidTitle(note, approved({ amount: 126, paid: 100 }))).toBe('Part of the expense paid');
+    // Paid before by someone else: what was paid then counts.
+    expect(expensePaidTitle({ ...note, amount: 70, paidBefore: 30 }, approved({ amount: 100, paid: 100, display_status: 'paid' }))).toBe('Expense paid');
   });
 });

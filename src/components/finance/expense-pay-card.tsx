@@ -8,7 +8,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { expenseLeft } from '@/lib/finance/expense-form';
 import {
   type ExpensePaidNote,
   type ExpensePayForm,
@@ -75,7 +74,6 @@ export function ExpensePayCard({
       return;
     }
     const payload = expensePayPayload(row, form);
-    const left = expenseLeft(row);
     const account = accounts.find((a) => a.id === form.accountId)?.name ?? '—';
     save.run(
       () => pay(payload),
@@ -85,7 +83,8 @@ export function ExpensePayCard({
           vendor: row.vendor_name,
           account,
           number: paid.number,
-          inFull: Math.round(payload.amount * 100) >= Math.round(left * 100),
+          expenseId: row.id,
+          paidBefore: row.paid,
         }),
     );
   };
