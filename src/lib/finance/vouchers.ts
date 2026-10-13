@@ -180,16 +180,25 @@ function voucherWriteFailed(fnName: string, error: unknown, refusals: Record<str
   return refusal ? { ok: false, error: refusal } : writeFailed(fnName, error);
 }
 
-/** The voucher's status as the screen's own view has it now; `undefined` when it is not there, an error when the read failed. */
-async function statusNow(ctx: FinanceWriteContext, txnId: string): Promise<{ status?: CashBookStatus; error?: unknown }> {
+/**
+ * The voucher's status as the screen's own view has it now, and whether an owner or admin ever approved or rejected
+ * it (`approved_at`, read only when `withApproval`, which only a decision needs); `status` is `undefined` when it is
+ * not there, `error` set when the read failed.
+ */
+async function statusNow(
+  ctx: FinanceWriteContext,
+  txnId: string,
+  withApproval = false,
+): Promise<{ status?: CashBookStatus; approved?: boolean; error?: unknown }> {
   const { data, error } = await ctx.client
     .from('finance_payment_vouchers')
-    .select('status')
+    .select(withApproval ? 'status,approved_at' : 'status')
     .eq('org_id', ctx.orgId)
     .eq('transaction_id', txnId)
     .maybeSingle();
   if (error) return { error };
-  return { status: (data as { status?: CashBookStatus } | null)?.status };
+  const row = data as { status?: CashBookStatus; approved_at?: string | null } | null;
+  return { status: row?.status, approved: Boolean(row?.approved_at) };
 }
 
 /* ---- writes ----------------------------------------------------------- */
@@ -255,12 +264,16 @@ async function decide(
   const { data, error } = await update.select('id').maybeSingle();
   if (error) return voucherWriteFailed(fnName, error, refusals);
   if (data) return { ok: true, data: { id: (data as { id: string }).id } };
-  const now = await statusNow(ctx, seen.id);
+  const now = await statusNow(ctx, seen.id, true);
   if (now.error) return voucherWriteFailed(fnName, now.error, refusals);
   if (now.status === undefined) return { ok: false, error: M.gone };
   if (now.status === 'rejected') return { ok: false, error: M.alreadyRejected };
-  // From "Pending approval" a voucher only becomes "To be paid" by being approved; paid and void come after that.
-  if (now.status === 'scheduled' || now.status === 'posted' || now.status === 'void') return { ok: false, error: M.alreadyApproved };
+  // From "Pending approval" a voucher only becomes "To be paid" by being approved; paid and void come after that. One
+  // that is "To be paid" or later and was never approved (a supplier payment a member scheduled) was not approved
+  // meanwhile: it is simply not as shown.
+  if ((now.status === 'scheduled' || now.status === 'posted' || now.status === 'void') && now.approved) {
+    return { ok: false, error: M.alreadyApproved };
+  }
   return { ok: false, error: M.changed };
 }
 

@@ -196,14 +196,20 @@ describe('approveVoucher, rejectVoucher', () => {
       contact_id: CONTACT, 'party_name is': null, 'category_id is': null, 'reference is': null, 'notes is': null,
     });
   });
+  const APPROVED = '2026-10-12T03:00:00.000Z';
   /** An update that changes no row, then the read of what the voucher is now. */
   const changesNothing = (now: FinanceAnswer) => fakeFinance((call: FinanceCall) => (call.op === 'update' ? { data: null, error: null } : now));
   it('say what happened when no row matched: gone, decided meanwhile, or not as shown', async () => {
     const cases: [FinanceAnswer, string][] = [
       [{ data: null, error: null }, 'That voucher no longer exists.'],
-      [{ data: { status: 'scheduled' }, error: null }, 'This voucher has already been approved.'],
-      [{ data: { status: 'posted' }, error: null }, 'This voucher has already been approved.'],
-      [{ data: { status: 'void' }, error: null }, 'This voucher has already been approved.'],
+      [{ data: { status: 'scheduled', approved_at: APPROVED }, error: null }, 'This voucher has already been approved.'],
+      [{ data: { status: 'posted', approved_at: APPROVED }, error: null }, 'This voucher has already been approved.'],
+      [{ data: { status: 'void', approved_at: APPROVED }, error: null }, 'This voucher has already been approved.'],
+      // "To be paid" or later with nobody having approved it (a supplier payment a member scheduled): nothing was approved meanwhile.
+      [{ data: { status: 'scheduled', approved_at: null }, error: null }, CHANGED],
+      [{ data: { status: 'posted', approved_at: null }, error: null }, CHANGED],
+      [{ data: { status: 'void', approved_at: null }, error: null }, CHANGED],
+      [{ data: { status: 'scheduled' }, error: null }, CHANGED],
       [{ data: { status: 'rejected' }, error: null }, 'This voucher has already been rejected.'],
       [{ data: { status: 'pending_approval' }, error: null }, CHANGED],
       [{ data: { status: 'draft' }, error: null }, CHANGED],
