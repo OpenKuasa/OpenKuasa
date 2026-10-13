@@ -2,13 +2,17 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Banknote, ChartColumn, Download, Landmark, Plus, Search, TrendingUp } from 'lucide-react';
+import { ArrowLeftRight, Ban, Banknote, ChartColumn, Download, Landmark, Plus, Search, TrendingUp } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { AreaTrend, RadialGauge, type Series } from '@/components/charts';
 import { BankAccountFormCard, type BankAccountFormActions } from '@/components/finance/bank-account-form-card';
 import { BankAccountsCard } from '@/components/finance/bank-accounts-card';
+import { ConfirmRow } from '@/components/finance/confirm-row';
 import { downloadCsv } from '@/components/finance/download-csv';
+import { RowMenu } from '@/components/finance/row-menu';
 import { SavedNoteCard } from '@/components/finance/saved-note-card';
+import { TransferFormCard } from '@/components/finance/transfer-form-card';
+import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { useLocalToday } from '@/components/finance/use-local-today';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
@@ -35,10 +39,26 @@ import { rm } from '@/lib/finance/format';
 import { LATEST_ROWS, displayDate } from '@/lib/finance/view-helpers';
 import type { SavedBankAccount } from '@/lib/finance/bank-accounts';
 import type { FinResult } from '@/lib/finance/result';
+import {
+  type RecordedTransferNote,
+  bankRowActions,
+  canTransfer,
+  transferName,
+  transferRecordedNote,
+  transferVoidedNote,
+  voidTransferEffect,
+} from '@/lib/finance/transfer-form';
+import type { RecordedTransfer } from '@/lib/finance/transfers';
 import { cn } from '@/lib/utils';
 
 export type BankingActions = BankAccountFormActions & {
   setActive: (input: unknown) => Promise<FinResult<SavedBankAccount>>;
+};
+
+/** Recording and voiding a transfer between accounts. */
+export type TransferActions = {
+  record: (input: unknown) => Promise<FinResult<RecordedTransfer>>;
+  void: (input: unknown) => Promise<FinResult<{ transfer_id: string }>>;
 };
 
 /** What only a person who may edit is given: the actions, whether they may sign off, and the account numbers. */
@@ -46,12 +66,26 @@ export type BankingWriter = {
   actions: BankingActions;
   /** True for an owner or admin: they set and change an opening balance. Decided on the server. */
   canSignOff: boolean;
+  /** Present for an owner or admin only, decided on the server: nobody else is offered "Transfer" or "Void transfer". */
+  transfers?: TransferActions;
   /** Account numbers by account id, read with finance_account_numbers; an account with none is absent. */
   numbers: Record<string, string>;
 };
 
-/** The account form: for a new account, or for one being changed. `today` is the person's own date when it was opened. */
-type OpenForm = { today: string; editing: BankAccountRow | null } | null;
+/**
+ * The one thing that is open on the screen: a form (it holds what was typed) or a question in a row. Opening
+ * another replaces it, and the header's buttons wait while anything is open. `today` is the person's own date
+ * when a form was opened.
+ */
+type Open =
+  | { kind: 'account'; today: string; editing: BankAccountRow | null }
+  | { kind: 'transfer'; today: string }
+  | { kind: 'archive'; accountId: string }
+  | { kind: 'void'; transactionId: string }
+  | null;
+
+/** What was just done, said at the top of the page until it is closed or something else opens. */
+type Note = { kind: 'text'; title: string; text: string } | { kind: 'recorded'; written: RecordedTransferNote } | null;
 
 const CASH_SERIES: Series[] = [{ key: 'balance', label: 'Cash position (RM k)', color: 'var(--chart-1)' }];
 
@@ -67,9 +101,11 @@ const STATUS_STYLES = {
  * reconciliation filter, "View all" and Export. A person who may edit
  * (`writer`) also gets "Add account", a link to Cash Receipts for a new
  * receipt, and Edit, Archive and Restore on each account; the opening
- * balance in the account form is an owner's or admin's. Transfers and
- * statements get their forms later, and a payment is changed on the screen
- * that recorded it.
+ * balance in the account form is an owner's or admin's. An owner or admin
+ * (`writer.transfers`) also gets "Transfer" and, on either side of a
+ * transfer in the table, "Void transfer". One thing is open at a time: a
+ * form or a question. Statements get their forms later, and any other
+ * payment is changed on the screen that recorded it.
  */
 export function BankingView({
   accounts,
@@ -94,14 +130,38 @@ export function BankingView({
   const [accountId, setAccountId] = useState('all');
   const [filter, setFilter] = useState<BankFilter>('all');
   const [showAll, setShowAll] = useState(false);
-  const [form, setForm] = useState<OpenForm>(null);
-  /** What was just saved on the account form, until it is closed or another form opens. */
-  const [saved, setSaved] = useState<{ title: string; note: string } | null>(null);
+  const [opened, setOpened] = useState<Open>(null);
+  const [note, setNote] = useState<Note>(null);
+  const voiding = useFinanceAction();
 
   const view = bankingView(accounts, rows, today);
   const ledger = withRunningBalance(accounts, rows);
   const matching = filterLedger(ledger, query, accountId, filter);
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
+
+  // A question whose row has left the screen (a filter changed, or someone else voided or removed it) is not open.
+  const open: Open =
+    (opened?.kind === 'void' && !shown.some((r) => r.transaction_id === opened.transactionId)) ||
+    (opened?.kind === 'archive' && !accounts.some((a) => a.id === opened.accountId))
+      ? null
+      : opened;
+  const formOpen = open?.kind === 'account' || open?.kind === 'transfer';
+  /** Opens a form or a question in place of whatever was open, and takes the last note away. */
+  const openOnly = (next: Open) => {
+    voiding.clear();
+    setNote(null);
+    setOpened(next);
+  };
+  const transfers = writer?.transfers;
+  const columns = transfers ? 9 : 8;
+  const noteText =
+    note?.kind === 'recorded'
+      ? transferRecordedNote(
+          note.written,
+          shown.filter((r) => r.transfer_id === note.written.transferId).length,
+          ledger.filter((r) => r.transfer_id === note.written.transferId).length,
+        )
+      : note?.text;
 
   return (
     <ScreenContainer className="pb-24 sm:pb-24">
@@ -114,15 +174,26 @@ export function BankingView({
               <Button variant="outline" size="sm" asChild>
                 <Link href="/finance/cash-receipts">New receipt</Link>
               </Button>
+              {transfers && canTransfer(accounts) ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-expanded={open?.kind === 'transfer'}
+                  disabled={open !== null}
+                  // The date is the person's own, taken when the form opens, never the server's.
+                  onClick={() => openOnly({ kind: 'transfer', today: localIsoDate(new Date()) })}
+                >
+                  <ArrowLeftRight className="size-4" />
+                  Transfer
+                </Button>
+              ) : null}
               <Button
                 size="sm"
-                aria-expanded={form !== null && form.editing === null}
-                disabled={form !== null}
+                aria-expanded={open?.kind === 'account' && open.editing === null}
+                // Nothing else opens over a form, which holds what was typed, or over a question that is being asked.
+                disabled={open !== null}
                 // The date is the person's own, taken when the form opens, never the server's.
-                onClick={() => {
-                  setSaved(null);
-                  setForm({ today: localIsoDate(new Date()), editing: null });
-                }}
+                onClick={() => openOnly({ kind: 'account', today: localIsoDate(new Date()), editing: null })}
               >
                 <Plus className="size-4" />
                 Add account
@@ -133,24 +204,36 @@ export function BankingView({
       />
 
       <BentoGrid>
-        {writer && form ? (
+        {writer && open?.kind === 'account' ? (
           <BankAccountFormCard
-            key={form.editing?.id ?? 'new'}
-            editing={form.editing}
-            accountNo={form.editing ? writer.numbers[form.editing.id] : undefined}
-            today={form.today}
+            key={open.editing?.id ?? 'new'}
+            editing={open.editing}
+            accountNo={open.editing ? writer.numbers[open.editing.id] : undefined}
+            today={open.today}
             canSignOff={writer.canSignOff}
             actions={writer.actions}
-            onClose={() => setForm(null)}
-            onSaved={(note) => {
-              setSaved({ title: form.editing ? 'Account saved' : 'Account added', note });
-              setForm(null);
+            onClose={() => setOpened(null)}
+            onSaved={(text) => {
+              setNote({ kind: 'text', title: open.editing ? 'Account saved' : 'Account added', text });
+              setOpened(null);
             }}
           />
         ) : null}
-        {writer && !form && saved ? (
-          <SavedNoteCard title={saved.title} subtitle="Banking" onClose={() => setSaved(null)}>
-            {saved.note}
+        {transfers && open?.kind === 'transfer' ? (
+          <TransferFormCard
+            accounts={accounts}
+            today={open.today}
+            record={transfers.record}
+            onClose={() => setOpened(null)}
+            onRecorded={(written) => {
+              setNote({ kind: 'recorded', written });
+              setOpened(null);
+            }}
+          />
+        ) : null}
+        {writer && !formOpen && note && noteText ? (
+          <SavedNoteCard title={note.kind === 'recorded' ? 'Transfer recorded' : note.title} subtitle="Banking" onClose={() => setNote(null)}>
+            {noteText}
           </SavedNoteCard>
         ) : null}
         <BentoCard tone="primary" className="col-span-2 md:col-span-6 xl:col-span-3">
@@ -196,11 +279,11 @@ export function BankingView({
               ? {
                   numbers: writer.numbers,
                   setActive: writer.actions.setActive,
-                  onEdit: (account) => {
-                    setSaved(null);
-                    setForm({ today: localIsoDate(new Date()), editing: account });
-                  },
-                  locked: form !== null,
+                  onEdit: (account) => openOnly({ kind: 'account', today: localIsoDate(new Date()), editing: account }),
+                  archiving: open?.kind === 'archive' ? open.accountId : null,
+                  onArchiving: (id) => (id ? openOnly({ kind: 'archive', accountId: id }) : setOpened(null)),
+                  // Its menus wait while a form is open, or while a question is being asked in the other table.
+                  locked: open !== null && open.kind !== 'archive',
                 }
               : undefined
           }
@@ -277,22 +360,57 @@ export function BankingView({
                   <TableHead className="text-right">Money Out</TableHead>
                   <TableHead className="text-right">Account balance</TableHead>
                   <TableHead>Status</TableHead>
+                  {transfers ? (
+                    <TableHead className="w-10">
+                      <span className="sr-only">Actions</span>
+                    </TableHead>
+                  ) : null}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {shown.length === 0 &&
                   (ledger.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                      <TableCell colSpan={columns} className="py-8 text-center text-muted-foreground">
                         No money has moved yet. A payment recorded on any finance screen shows here.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    <NoMatchesRow colSpan={8} />
+                    <NoMatchesRow colSpan={columns} />
                   ))}
                 {shown.map((r) => {
                   const status = reconcileLabel(r);
                   const description = bankDescription(r);
+                  if (transfers && open?.kind === 'void' && open.transactionId === r.transaction_id) {
+                    return (
+                      <ConfirmRow
+                        key={r.transaction_id}
+                        colSpan={columns}
+                        label={`Void transfer ${transferName(r)}`}
+                        confirmLabel="Void transfer"
+                        pendingLabel="Voiding…"
+                        pending={voiding.pending}
+                        error={voiding.error}
+                        icon={Ban}
+                        onConfirm={() =>
+                          voiding.run(
+                            () => transfers.void({ transfer_id: r.transfer_id }),
+                            () => {
+                              setOpened(null);
+                              setNote({ kind: 'text', title: 'Transfer voided', text: transferVoidedNote(r) });
+                            },
+                          )
+                        }
+                        onCancel={() => {
+                          voiding.clear();
+                          setOpened(null);
+                        }}
+                      >
+                        Void transfer <span className="font-medium">{transferName(r)}</span>, dated {displayDate(r.txn_date)}?{' '}
+                        {voidTransferEffect(r, rows)}
+                      </ConfirmRow>
+                    );
+                  }
                   return (
                     <TableRow key={r.transaction_id}>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(r.txn_date)}</TableCell>
@@ -330,6 +448,25 @@ export function BankingView({
                           <span className="text-muted-foreground">—</span>
                         )}
                       </TableCell>
+                      {transfers ? (
+                        <TableCell>
+                          {/* Its menus wait while a form is open, a void is under way, or a question is being asked in the other table. */}
+                          {bankRowActions(r, true).length === 0 || voiding.pending || (open !== null && open.kind !== 'void') ? null : (
+                            <RowMenu
+                              label={transferName(r)}
+                              items={[
+                                {
+                                  label: 'Void transfer',
+                                  icon: Ban,
+                                  destructive: true,
+                                  opens: true,
+                                  onSelect: () => openOnly({ kind: 'void', transactionId: r.transaction_id }),
+                                },
+                              ]}
+                            />
+                          )}
+                        </TableCell>
+                      ) : null}
                     </TableRow>
                   );
                 })}

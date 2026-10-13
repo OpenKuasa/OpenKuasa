@@ -20,7 +20,11 @@ export type BankAccountsCardWriter = {
   setActive: (input: unknown) => Promise<FinResult<SavedBankAccount>>;
   /** Opens the account form for this account. */
   onEdit: (account: BankAccountRow) => void;
-  /** True while the account form is open: it holds what was typed, so nothing else opens over it. */
+  /** The account whose archive question is open, or null. Held by the screen, which keeps one thing open at a time. */
+  archiving: string | null;
+  /** Opens the archive question for an account, or closes it (null). */
+  onArchiving: (accountId: string | null) => void;
+  /** True while a form is open (it holds what was typed) or a question is being asked elsewhere on the screen: no menu opens over either. */
   locked: boolean;
 };
 
@@ -29,10 +33,12 @@ export type BankAccountsCardWriter = {
  * archived account with nothing in it can be seen and restored. Everyone
  * reads it. A person who may write (`writer`) also sees the end of each
  * account number and gets a menu: Edit, and Archive or Restore. Archive is
- * asked in the row; Restore loses nothing and is done at once.
+ * asked in the row; Restore loses nothing and is done at once. Which
+ * account is being asked about is the screen's to hold (`writer.archiving`),
+ * so that the header's buttons and the other table wait while it is.
  */
 export function BankAccountsCard({ accounts, writer }: { accounts: BankAccountRow[]; writer?: BankAccountsCardWriter }) {
-  const [archiving, setArchiving] = useState<string | null>(null);
+  const archiving = writer?.archiving ?? null;
   const [note, setNote] = useState<string | null>(null);
   const archive = useFinanceAction();
   const restore = useFinanceAction();
@@ -49,7 +55,7 @@ export function BankAccountsCard({ accounts, writer }: { accounts: BankAccountRo
           icon: Pencil,
           opens: true,
           onSelect: () => {
-            setArchiving(null);
+            // The form takes the question's place: the screen keeps one thing open.
             setNote(null);
             writer?.onEdit(account);
           },
@@ -63,7 +69,7 @@ export function BankAccountsCard({ accounts, writer }: { accounts: BankAccountRo
             archive.clear();
             restore.clear();
             setNote(null);
-            setArchiving(account.id);
+            writer?.onArchiving(account.id);
           },
         };
       case 'restore':
@@ -131,14 +137,14 @@ export function BankAccountsCard({ accounts, writer }: { accounts: BankAccountRo
                       archive.run(
                         () => writer.setActive({ id: row.id, active: false }),
                         (saved) => {
-                          setArchiving(null);
+                          writer.onArchiving(null);
                           setNote(bankAccountArchivedNote(saved.name));
                         },
                       )
                     }
                     onCancel={() => {
                       archive.clear();
-                      setArchiving(null);
+                      writer.onArchiving(null);
                     }}
                   >
                     Archive <span className="font-medium">{row.name}</span>? {bankAccountArchiveEffect(account)}
