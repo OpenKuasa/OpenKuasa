@@ -324,7 +324,9 @@ const PURCHASE_PATHS = [
 ];
 // A bill saved, posted, voided or deleted changes the billed total of the purchase order it is raised against
 // (drafts count), so Purchase Orders refreshes with the purchase screens. A payment does not, so it keeps PURCHASE_PATHS.
-const BILL_PATHS = [...PURCHASE_PATHS, '/finance/purchase-orders'];
+// Receipts Inbox names the bill a receipt is tied to: posting gives a draft its number, and deleting a draft sends
+// its receipt back to Unmatched. KEEP IN STEP with RECEIPT_BILL_PATHS in src/lib/finance/receipt-match.ts.
+const BILL_PATHS = [...PURCHASE_PATHS, '/finance/purchase-orders', '/finance/receipts-inbox'];
 // An invoice or a payment in changes what customers owe, which Customers & Suppliers shows as Receivable.
 // It also shows on the three follow-on screens: Quotations names the invoice made from a quotation, Credit
 // Notes names each note's invoice, and Refunds adds up what customers are in credit from the invoices.
@@ -864,6 +866,7 @@ export async function saveAndPostCashReceiptAction(input: unknown): Promise<Save
 // a voucher pays, which changes when a rejected expense that a voided voucher still names is edited. An approved
 // expense is two lines of the books (its category's account and Accrued Expenses), so approving or rejecting one
 // moves Chart of Accounts, Journals and Reports (LEDGER_PATHS): they end the list, as every action that changes the books does.
+// KEEP IN STEP with RECEIPT_EXPENSE_PATHS in src/lib/finance/receipt-match.ts.
 const EXPENSE_PATHS = [
   '/finance/expenses',
   '/finance/receipts-inbox',
