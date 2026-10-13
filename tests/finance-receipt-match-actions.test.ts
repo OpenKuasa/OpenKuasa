@@ -157,6 +157,10 @@ describe('how the code is kept safe', () => {
     const cards = read('src/components/finance/receipt-match-cards.tsx');
     // The bill form from a receipt is draft-only, and the shared card draws no second button for one.
     expect(cards).toMatch(/<BillFormCard\s+initial=\{billFormFromReceipt\([^)]*\)\}\s+draftOnly\s/);
+    // The bill card hands the flag on to the shared card: without it the button would be drawn.
+    expect(read('src/components/finance/bill-form-card.tsx')).toContain('draftOnly={draftOnly}');
+    // And were the button ever pressed, the form's post action answers an error and calls nothing.
+    expect(cards).toContain("saveAndPost: async () => ({ ok: false, error: 'A bill made from a receipt is saved as a draft.' })");
     const shared = read('src/components/finance/document-form-card.tsx');
     expect(shared).toContain('{draftOnly ? null : (');
     expect(shared.match(/send\(true\)/g)).toHaveLength(1);
