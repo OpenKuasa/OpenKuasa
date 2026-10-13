@@ -16,6 +16,8 @@
  * rules below.
  */
 import { z } from 'zod';
+import { can } from '@/lib/auth/permissions';
+import type { OrgRole } from '@/lib/auth/current-org';
 import { type BillForm, newBillForm, withSupplier } from './bill-form';
 import { BILL_MESSAGES, type BillDisplayStatus, type BillListRow, saveBillInput } from './bills';
 import { emptyLine } from './document-form';
@@ -557,4 +559,33 @@ export function matchHiddenNote(written: MatchWritten, listed: { id: string }[],
   if (!listed.some((r) => r.id === written.receiptId) || shown.some((r) => r.id === written.receiptId)) return null;
   const where = written.kind === 'untied' ? 'Unmatched' : 'Matched';
   return `It is not in the rows below: choose ${where} or All receipts in the status filter, clear the search, or choose View all.`;
+}
+
+/* ---- what the inbox's screen reads and offers --------------------------- */
+
+/**
+ * What the Receipts Inbox screen reads and who is given what, worked out in one place so a test can pin it.
+ * `canEdit` is the writer's menu, forms and picker: anyone who may edit data in a real workspace, never the
+ * demo and never a viewer. `canDecide` only chooses what to offer (Untie from an approved expense or a posted
+ * bill); the database decides again. With no receipt there is nothing to match, so no document is read.
+ */
+export function receiptInboxPlan(viewer: { role: OrgRole; isDemo: boolean }, hasReceipts: boolean) {
+  const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
+  return {
+    canEdit,
+    canDecide: canEdit && can(viewer.role, 'sign-off-finance'),
+    readsDocuments: hasReceipts,
+    readsForms: hasReceipts && canEdit,
+  };
+}
+
+/** What the forms and the picker are offered of the contacts: an archived contact is offered nowhere. */
+export function offeredContacts<C extends { id: string; name: string; active: boolean; is_supplier: boolean }>(
+  contacts: C[],
+) {
+  const active = contacts.filter((c) => c.active);
+  return {
+    contacts: active.map((c) => ({ id: c.id, name: c.name })),
+    suppliers: active.filter((c) => c.is_supplier),
+  };
 }

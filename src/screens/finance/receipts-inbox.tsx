@@ -10,14 +10,19 @@ import {
 } from '@/app/(app)/finance/receipt-inbox-actions';
 import type { ReceiptMatchActions } from '@/components/finance/receipt-match-cards';
 import { type ReceiptInboxActions, ReceiptsInboxView } from '@/components/finance/receipts-inbox-view';
-import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { listBills } from '@/lib/finance/bills';
 import { listContacts } from '@/lib/finance/contacts';
 import { listExpenseCategories, listExpenses } from '@/lib/finance/expenses';
 import { purchasesCategoryId } from '@/lib/finance/ledger';
 import { listProducts } from '@/lib/finance/products';
-import { attachCandidates, listAttachedReceipts, matchedDocuments } from '@/lib/finance/receipt-match';
+import {
+  attachCandidates,
+  listAttachedReceipts,
+  matchedDocuments,
+  offeredContacts,
+  receiptInboxPlan,
+} from '@/lib/finance/receipt-match';
 import { receiptsInboxView } from '@/lib/finance/receipt-views';
 import { listInboxReceipts } from '@/lib/finance/receipts';
 import { todayUtc } from '@/lib/finance/view-helpers';
@@ -67,18 +72,18 @@ export default async function ReceiptsInboxScreen() {
   const viewer = await getViewer();
   const ctx = { client: await createClient(), orgId: viewer.orgId };
   const rows = await listInboxReceipts(ctx);
-  const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
-  const any = rows.length > 0;
+  const plan = receiptInboxPlan(viewer, rows.length > 0);
   // How each matched receipt's document stands is shown to everyone; the forms and the picker are a writer's.
   const [attached, expenses, bills, contacts, categories, products, defaultCategoryId] = await Promise.all([
-    any ? listAttachedReceipts(ctx) : [],
-    any ? listExpenses(ctx) : [],
-    any ? listBills(ctx) : [],
-    any && canEdit ? listContacts(ctx) : [],
-    any && canEdit ? listExpenseCategories(ctx) : [],
-    any && canEdit ? listProducts(ctx) : [],
-    any && canEdit ? purchasesCategoryId(ctx) : null,
+    plan.readsDocuments ? listAttachedReceipts(ctx) : [],
+    plan.readsDocuments ? listExpenses(ctx) : [],
+    plan.readsDocuments ? listBills(ctx) : [],
+    plan.readsForms ? listContacts(ctx) : [],
+    plan.readsForms ? listExpenseCategories(ctx) : [],
+    plan.readsForms ? listProducts(ctx) : [],
+    plan.readsForms ? purchasesCategoryId(ctx) : null,
   ]);
+  const offered = offeredContacts(contacts);
   return (
     <ReceiptsInboxView
       rows={rows}
@@ -87,18 +92,18 @@ export default async function ReceiptsInboxScreen() {
       linkOf={receiptLinkAction}
       documents={matchedDocuments(attached, expenses, bills)}
       writer={
-        canEdit
+        plan.canEdit
           ? {
               orgId: viewer.orgId,
               actions: ACTIONS,
               match: {
                 actions: MATCH_ACTIONS,
                 // Decided here, on the server, and nowhere else.
-                canDecide: can(viewer.role, 'sign-off-finance'),
+                canDecide: plan.canDecide,
                 // Only what the forms read goes to the browser.
-                contacts: contacts.filter((c) => c.active).map((c) => ({ id: c.id, name: c.name })),
+                contacts: offered.contacts,
                 categories,
-                suppliers: contacts.filter((c) => c.is_supplier && c.active),
+                suppliers: offered.suppliers,
                 products: products.filter((p) => p.active),
                 defaultCategoryId: defaultCategoryId ?? '',
                 candidates: attachCandidates(expenses, bills),
