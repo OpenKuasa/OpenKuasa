@@ -192,6 +192,9 @@ import {
   recordVoucher,
   recordVoucherInput,
   rejectVoucher,
+  saveVoucher,
+  saveVoucherInput,
+  submitVoucher,
   voucherDecisionInput,
 } from '@/lib/finance/vouchers';
 import { TRANSFER_MESSAGES, recordTransfer, recordTransferInput, voidTransfer, voidTransferInput } from '@/lib/finance/transfers';
@@ -937,6 +940,17 @@ const VOUCHER_DECIDE = { signOff: true, signOffError: VOUCHER_MESSAGES.needsDeci
  */
 export async function recordVoucherAction(input: unknown) {
   return run(VOUCHER_PATHS, recordVoucherInput, input, recordVoucher);
+}
+/**
+ * Saves a voucher for a category or for a supplier's bills as a draft, or changes a draft, and sends it for approval
+ * in the same call when asked. Anyone who may write can do this: it never schedules, pays or approves.
+ */
+export async function saveVoucherAction(input: unknown) {
+  return run(VOUCHER_PATHS, saveVoucherInput, input, saveVoucher);
+}
+/** Sends a draft for approval from its row, as the person was shown it. Anyone who may write can do this. */
+export async function submitVoucherAction(input: unknown) {
+  return run(VOUCHER_PATHS, voucherDecisionInput, input, submitVoucher);
 }
 /** Approves a voucher that is waiting, as the person was shown it (every field the row showed): an owner or admin only, which the guard on payments enforces. */
 export async function approveVoucherAction(input: unknown) {
