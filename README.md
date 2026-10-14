@@ -274,15 +274,18 @@ date with `supabase/migrations`:
 
 ```bash
 pnpm db:migrate           # lists what the project has not had; changes nothing
-pnpm db:migrate --apply   # applies those, oldest first
+pnpm db:migrate --apply   # applies those, oldest first, once you type the project ref
 ```
 
 Code that needs a table or column the database lacks fails, and some pages then
 quietly show their samples instead of your data. The script uses
 `OPENKUASA_SUPABASE_TOKEN` and the Supabase Management API, so no database
-password is needed. Each migration is applied in one transaction with its
-record in `supabase_migrations.schema_migrations`, and the run stops at the
-first one that fails.
+password is needed. It reads both variables from `.env.local` only, never from
+your shell, and `--apply` asks you to type the project ref it is about to write
+to (without a terminal, pass `--confirm=<ref>`). Each migration is applied in
+one transaction with its record in `supabase_migrations.schema_migrations`
+(created if the project has none yet), and the run stops at the first one that
+fails.
 
 ### Testing against a live Supabase project
 
