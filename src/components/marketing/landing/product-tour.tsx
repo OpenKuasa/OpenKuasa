@@ -1,14 +1,14 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
-import { animate, createScope, onScroll } from 'animejs';
 import { PRODUCT_CARDS } from '@/config/marketing';
 import { cn } from '@/lib/utils';
 import { BrowserFrame } from './browser-frame';
 import { LEGEND } from './legend';
+import { useAnimeEffect } from './use-anime-effect';
 
 const SHOT_ALT: Record<string, string> = {
   command: 'Tuah, the AI command center, ready for a question',
@@ -29,7 +29,7 @@ export function ProductTour() {
   const [active, setActive] = useState(0);
   const count = PRODUCT_CARDS.length;
 
-  useEffect(() => {
+  useAnimeEffect(({ animate, createScope, onScroll }) => {
     const scope = createScope({ root }).add(() => {
       animate('[data-tour-progress]', {
         scaleX: [0, 1],

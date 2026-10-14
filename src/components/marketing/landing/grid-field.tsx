@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
-import { animate, stagger, utils } from 'animejs';
+import { useRef } from 'react';
 import { cn } from '@/lib/utils';
+import { useAnimeEffect } from './use-anime-effect';
 
 type GridFieldProps = {
   cols: number;
@@ -17,7 +17,7 @@ type GridFieldProps = {
 export function GridField({ cols, rows, className }: GridFieldProps) {
   const root = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  useAnimeEffect(({ animate, stagger, utils }) => {
     const el = root.current;
     if (!el) return;
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;

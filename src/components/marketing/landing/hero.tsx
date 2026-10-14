@@ -1,22 +1,15 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
-import {
-  animate,
-  createScope,
-  createTimeline,
-  onScroll,
-  splitText,
-  stagger,
-} from 'animejs';
 import { Button } from '@/components/ui/button';
 import { GitHubIcon } from '@/components/brand/github-icon';
 import { PRODUCT_CARDS, REPO_URL } from '@/config/marketing';
 import { BrowserFrame } from './browser-frame';
 import { GridField } from './grid-field';
+import { useAnimeEffect } from './use-anime-effect';
 
 /**
  * Pinned hero. The section is several screens tall and its panel sticks, so
@@ -27,7 +20,7 @@ import { GridField } from './grid-field';
 export function Hero() {
   const root = useRef<HTMLElement>(null);
 
-  useEffect(() => {
+  useAnimeEffect(({ animate, createScope, createTimeline, onScroll, splitText, stagger }) => {
     const scope = createScope({
       root,
       mediaQueries: { reduceMotion: '(prefers-reduced-motion: reduce)' },
@@ -86,7 +79,7 @@ export function Hero() {
     });
 
     return () => scope.revert();
-  }, []);
+  });
 
   return (
     <section
