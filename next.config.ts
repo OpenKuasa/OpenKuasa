@@ -19,9 +19,6 @@ const nextConfig: NextConfig = {
     // recharts are already optimized by Next's defaults.
     optimizePackageImports: ["radix-ui", "zod", "ai", "@ai-sdk/react", "@animateicons/react"],
   },
-  // Serve AVIF (smaller than WebP) for next/image — including the homepage's LCP
-  // hero image — falling back to WebP. First encode per variant is slower; cached after.
-  images: { formats: ["image/avif", "image/webp"] },
   // The fixed security headers, on every path. The full Content-Security-Policy carries a per-request nonce,
   // so src/proxy.ts sets it.
   async headers() {
