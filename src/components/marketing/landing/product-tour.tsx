@@ -83,7 +83,7 @@ export function ProductTour() {
                     'text-2xl font-bold tracking-tight transition-all duration-500 motion-reduce:transition-none sm:text-3xl lg:text-5xl',
                     i === active
                       ? 'text-(--pc) lg:translate-x-3'
-                      : 'text-mk-fg/20',
+                      : 'text-mk-subtle',
                   )}
                 >
                   {p.name}

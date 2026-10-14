@@ -29,7 +29,7 @@ export function ScrollWords({
 
       const { words } = splitText(el, { words: true });
       animate(words, {
-        opacity: [0.12, 1],
+        opacity: [0, 1],
         y: [14, 0],
         ease: 'linear',
         delay: stagger(60),
