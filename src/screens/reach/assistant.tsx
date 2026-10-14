@@ -69,6 +69,7 @@ const CHANNEL_COLOR: Record<string, string> = {
   facebook: 'var(--chart-2)',
   instagram: 'var(--chart-5)',
   tiktok: 'var(--chart-3)',
+  web: 'var(--chart-4)',
 };
 const FUNNEL_COLOR: Record<string, string> = {
   lead: 'var(--chart-1)',

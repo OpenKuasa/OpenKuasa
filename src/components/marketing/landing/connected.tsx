@@ -1,14 +1,14 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { ArrowUpRight } from 'lucide-react';
-import { animate, createScope, onScroll, stagger, svg } from 'animejs';
 import { PRODUCT_CARDS } from '@/config/marketing';
 import { cn } from '@/lib/utils';
 import { LEGEND } from './legend';
 import { ScrollWords } from './scroll-words';
+import { useAnimeEffect } from './use-anime-effect';
 
 // Diagram space is 1200 × 700. Three products flank the keris on each side;
 // each connector runs from a point on the blade out to its card's inner edge.
@@ -31,7 +31,7 @@ const COURT = PRODUCT_CARDS.map((p, i) => {
 export function Connected() {
   const root = useRef<HTMLElement>(null);
 
-  useEffect(() => {
+  useAnimeEffect(({ animate, createScope, onScroll, stagger, svg }) => {
     const scope = createScope({
       root,
       mediaQueries: { reduceMotion: '(prefers-reduced-motion: reduce)' },
@@ -94,7 +94,7 @@ export function Connected() {
     });
 
     return () => scope.revert();
-  }, []);
+  });
 
   return (
     <section ref={root} className="overflow-hidden bg-mk-bg text-mk-fg">

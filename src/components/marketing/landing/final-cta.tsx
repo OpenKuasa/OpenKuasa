@@ -1,19 +1,19 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
-import { animate, createScope, onScroll } from 'animejs';
 import { Button } from '@/components/ui/button';
 import { GitHubIcon } from '@/components/brand/github-icon';
 import { REPO_URL } from '@/config/marketing';
 import { ScrollWords } from './scroll-words';
+import { useAnimeEffect } from './use-anime-effect';
 
 export function FinalCta() {
   const root = useRef<HTMLElement>(null);
 
-  useEffect(() => {
+  useAnimeEffect(({ animate, createScope, onScroll }) => {
     const scope = createScope({
       root,
       mediaQueries: { reduceMotion: '(prefers-reduced-motion: reduce)' },
@@ -36,7 +36,7 @@ export function FinalCta() {
     });
 
     return () => scope.revert();
-  }, []);
+  });
 
   return (
     <section

@@ -49,7 +49,8 @@ export function opportunityScan(leads: Lead[], appts: Appointment[], now: Date):
       out.push(make('promoteLeadToContact', { id: l.id }));
     }
     // A lead that has met (a completed appointment) but is still short of 'booked' → advance it.
-    if (LEAD_STAGES.indexOf(l.stage) < bookedIndex && metByName.has(l.name)) {
+    // Not a Kasturi contact: its stage is its status there, which Jebat does not change.
+    if (l.origin !== 'crm' && LEAD_STAGES.indexOf(l.stage) < bookedIndex && metByName.has(l.name)) {
       out.push(make('setLeadStage', { id: l.id, stage: 'booked' }));
     }
     if ((l.stage === 'qualified' || l.stage === 'booked') && !upcomingByName.has(l.name)) {
