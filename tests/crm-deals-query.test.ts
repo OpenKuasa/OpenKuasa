@@ -4,12 +4,17 @@ import { contactLabel, listCrmDealContacts, listCrmDeals, mapCrmDeal } from '@/l
 
 type Result = { data: unknown[] | null; count?: number | null; error: unknown };
 
-function createClient(rows: Result, profiles: Result = { data: [], error: null }) {
+function createClient(
+  rows: Result,
+  profiles: Result = { data: [], error: null },
+  one: { data: unknown; error: unknown } = { data: null, error: null },
+) {
   const query = {
     select: vi.fn(() => query),
     eq: vi.fn(() => query),
     order: vi.fn(() => query),
     limit: vi.fn(async () => rows),
+    maybeSingle: vi.fn(async () => one),
   };
   const profilesQuery = {
     select: vi.fn(() => profilesQuery),
@@ -196,6 +201,38 @@ describe('contactLabel', () => {
 });
 
 describe('listCrmDealContacts', () => {
+  test('adds the contact a new deal starts with when it is beyond those loaded', async () => {
+    const { client, query } = createClient(
+      { data: [{ id: 'c-1', company: 'Teratak Kopi', first_name: null, last_name: null }], error: null },
+      undefined,
+      { data: { id: 'c-9', company: 'Bumi Hijau', first_name: null, last_name: null }, error: null },
+    );
+
+    const choices = await listCrmDealContacts(client, 'org-1', 1, 'c-9');
+
+    expect(query.eq).toHaveBeenCalledWith('id', 'c-9');
+    expect(choices).toEqual([
+      { id: 'c-9', label: 'Bumi Hijau' },
+      { id: 'c-1', label: 'Teratak Kopi' },
+    ]);
+  });
+
+  test('does not look again for a contact already loaded, or one that is not found', async () => {
+    const loaded = createClient({ data: [{ id: 'c-1', company: 'Teratak Kopi', first_name: null, last_name: null }], error: null });
+    expect(await listCrmDealContacts(loaded.client, 'org-1', 1000, 'c-1')).toHaveLength(1);
+    expect(loaded.query.maybeSingle).not.toHaveBeenCalled();
+
+    // Fewer than the limit came back, so every contact of the workspace is already here.
+    const short = createClient({ data: [], error: null });
+    expect(await listCrmDealContacts(short.client, 'org-1', 1000, 'c-gone')).toEqual([]);
+    expect(short.query.maybeSingle).not.toHaveBeenCalled();
+
+    const gone = createClient(
+      { data: [{ id: 'c-1', company: 'Teratak Kopi', first_name: null, last_name: null }], error: null },
+    );
+    expect(await listCrmDealContacts(gone.client, 'org-1', 1, 'c-gone')).toHaveLength(1);
+  });
+
   test('lists the org contacts as labelled choices, A to Z', async () => {
     const { client, from, query } = createClient({
       data: [

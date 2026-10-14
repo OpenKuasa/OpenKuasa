@@ -252,7 +252,17 @@ const ACTIONS: CrmDealActions = {
   removeStage: removeStageAction,
 };
 
-export default async function CrmDealsPage() {
+/** The contact a new deal starts with: Create deal on a contact's row opens this page with `?contact=<id>`. */
+function contactParam(value: string | string[] | undefined): string | null {
+  return typeof value === 'string' && UUID.test(value) ? value : null;
+}
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export default async function CrmDealsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+} = {}) {
   // No project configured (dev / preview / tests): the sample view.
   if (!hasSupabaseEnv()) return <DealsScreen />;
 
@@ -278,7 +288,7 @@ export default async function CrmDealsPage() {
       listCrmDeals(supabase, orgId, DEALS_LOADED),
       // Only the form needs these; the board still shows if they cannot load.
       canWrite
-        ? listCrmDealContacts(supabase, orgId, CONTACTS_OFFERED).catch((error) => {
+        ? listCrmDealContacts(supabase, orgId, CONTACTS_OFFERED, contactParam((await searchParams)?.contact)).catch((error) => {
             console.error('[crm/deals] could not load contacts', error);
             return [];
           })

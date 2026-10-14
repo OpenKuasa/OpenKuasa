@@ -367,11 +367,24 @@ export async function listCrmDeals(
   };
 }
 
-/** The contacts a deal can be for, in the order the select lists them. */
+type DealContactRow = {
+  id: string;
+  company: string | null;
+  first_name: string | null;
+  last_name: string | null;
+};
+
+/**
+ * The contacts a deal can be for, in the order the select lists them.
+ * `include` is the contact a new deal starts with (Create deal on a contact's
+ * row): it is added when it is beyond the `limit` newest, so the form can
+ * show it chosen.
+ */
 export async function listCrmDealContacts(
   client: SupabaseClient,
   orgId: string,
   limit = 1000,
+  include: string | null = null,
 ): Promise<CrmDealContactChoice[]> {
   const { data, error } = await client
     .from('crm_contacts')
@@ -382,12 +395,17 @@ export async function listCrmDealContacts(
 
   if (error) throw error;
 
-  const rows = (data ?? []) as unknown as {
-    id: string;
-    company: string | null;
-    first_name: string | null;
-    last_name: string | null;
-  }[];
+  const rows = (data ?? []) as unknown as DealContactRow[];
+  if (include && rows.length >= limit && !rows.some((row) => row.id === include)) {
+    const { data: extra, error: extraError } = await client
+      .from('crm_contacts')
+      .select('id,company,first_name,last_name')
+      .eq('org_id', orgId)
+      .eq('id', include)
+      .maybeSingle();
+    if (extraError) throw extraError;
+    if (extra) rows.push(extra as unknown as DealContactRow);
+  }
   return rows
     .map((row) => ({
       id: row.id,
