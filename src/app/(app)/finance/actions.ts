@@ -174,6 +174,7 @@ import {
   decidePurchaseOrder,
   decidePurchaseOrderInput,
   deletePurchaseOrder,
+  getPrintablePurchaseOrder,
   getPurchaseOrder,
   purchaseOrderIdInput,
   receivePurchaseOrder,
@@ -183,6 +184,7 @@ import {
   submitPurchaseOrder,
   withdrawPurchaseOrder,
 } from '@/lib/finance/purchase-orders';
+import type { PrintablePurchaseOrder } from '@/lib/finance/purchase-order-print';
 import { deleteRefund, markRefundPaid, recordRefund, recordRefundInput, voidRefund } from '@/lib/finance/refunds';
 import {
   DRAFT_NEEDS_SIGN_OFF,
@@ -449,20 +451,21 @@ async function documentInStatus<D extends { display_status?: string; status?: st
   get: (ctx: FinanceWriteContext, id: string) => Promise<D | null>,
   messages: { gone: string; locked: string },
   label: 'bill' | 'invoice' | 'quotation' | 'RFQ' | 'purchase order' | 'journal',
-  wanted: string | null,
+  wanted: string | readonly string[] | null,
 ): Promise<FinResult<D>> {
   const ctx = await writeCtx();
   if (!ctx) return FORBIDDEN;
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { ok: false, error: messages.gone };
+  const statuses = wanted === null ? null : [wanted].flat();
   try {
     const document = await get(ctx, parsed.data.id);
     // A bill, an invoice or a quotation has a display status; an RFQ or an order has only its stored one, and a draft is a draft in both.
-    if (document && (wanted === null || (document.display_status ?? document.status) === wanted)) return { ok: true, data: document };
+    if (document && (statuses === null || statuses.includes(document.display_status ?? document.status ?? ''))) return { ok: true, data: document };
     refresh(paths);
     return { ok: false, error: document ? messages.locked : messages.gone };
   } catch (error) {
-    console.error(`[finance] ${wanted === null ? 'a' : `a ${wanted}`} ${label} could not be read:`, error);
+    console.error(`[finance] ${statuses === null ? 'a' : `a ${statuses.join(' or ')}`} ${label} could not be read:`, error);
     return { ok: false, error: READ_FAILED };
   }
 }
@@ -793,6 +796,13 @@ export async function getPurchaseOrderAction(input: unknown): Promise<FinResult<
 export async function getApprovedPurchaseOrderAction(input: unknown): Promise<FinResult<PurchaseOrderDetail>> {
   return documentInStatus(
     PURCHASE_ORDER_PATHS, purchaseOrderIdInput, input, getPurchaseOrder, PURCHASE_ORDER_MESSAGES, 'purchase order', 'approved',
+  );
+}
+
+/** One approved or closed purchase order with what its printout needs; see `documentInStatus`. */
+export async function getPrintablePurchaseOrderAction(input: unknown): Promise<FinResult<PrintablePurchaseOrder>> {
+  return documentInStatus(
+    PURCHASE_ORDER_PATHS, purchaseOrderIdInput, input, getPrintablePurchaseOrder, PURCHASE_ORDER_MESSAGES, 'purchase order', ['approved', 'closed'],
   );
 }
 

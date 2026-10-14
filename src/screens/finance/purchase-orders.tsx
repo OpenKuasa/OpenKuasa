@@ -6,6 +6,7 @@ import {
   deletePurchaseOrderAction,
   getApprovedPurchaseOrderAction,
   getPendingPurchaseOrderAction,
+  getPrintablePurchaseOrderAction,
   getPurchaseOrderAction,
   receivePurchaseOrderAction,
   saveAndSubmitPurchaseOrderAction,
@@ -14,11 +15,13 @@ import {
   withdrawPurchaseOrderAction,
 } from '@/app/(app)/finance/actions';
 import { type PurchaseOrderActions, PurchaseOrdersView } from '@/components/finance/purchase-orders-view';
+import { LetterheadProvider } from '@/components/people/letter-head';
 import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { listContacts } from '@/lib/finance/contacts';
 import { listProducts } from '@/lib/finance/products';
 import { listPurchaseOrders } from '@/lib/finance/purchase-orders';
+import { getLetterhead } from '@/lib/people/letterhead-data';
 import { createClient } from '@/lib/supabase/server';
 import { SAMPLE_PURCHASE_ORDERS } from './purchases-sample';
 
@@ -36,6 +39,7 @@ const ACTIONS: PurchaseOrderActions = {
   get: getPurchaseOrderAction,
   getApproved: getApprovedPurchaseOrderAction,
   getPending: getPendingPurchaseOrderAction,
+  getPrintable: getPrintablePurchaseOrderAction,
 };
 
 export default async function PurchaseOrdersScreen() {
@@ -45,29 +49,32 @@ export default async function PurchaseOrdersScreen() {
   const viewer = await getViewer();
   const ctx = { client: await createClient(), orgId: viewer.orgId };
   const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
-  // The form offers suppliers and products; a viewer has no form, so neither is read for them.
-  const [rows, contacts, products] = await Promise.all([
+  // The form offers suppliers and products, and Print the letterhead; a viewer has none of them, so none is read for them.
+  const [rows, contacts, products, letterhead] = await Promise.all([
     listPurchaseOrders(ctx),
     canEdit ? listContacts(ctx) : [],
     canEdit ? listProducts(ctx) : [],
+    canEdit ? getLetterhead({ ...ctx, isDemo: viewer.isDemo }) : null,
   ]);
   return (
-    <PurchaseOrdersView
-      rows={rows}
-      writer={
-        canEdit
-          ? {
-              viewer: {
-                userId: viewer.userId,
-                canSignOff: can(viewer.role, 'sign-off-finance'),
-                isOwner: viewer.role === 'owner',
-              },
-              actions: ACTIONS,
-              suppliers: contacts.filter((c) => c.is_supplier && c.active),
-              products: products.filter((p) => p.active),
-            }
-          : undefined
-      }
-    />
+    <LetterheadProvider head={letterhead} workspaceName={viewer.orgName}>
+      <PurchaseOrdersView
+        rows={rows}
+        writer={
+          canEdit
+            ? {
+                viewer: {
+                  userId: viewer.userId,
+                  canSignOff: can(viewer.role, 'sign-off-finance'),
+                  isOwner: viewer.role === 'owner',
+                },
+                actions: ACTIONS,
+                suppliers: contacts.filter((c) => c.is_supplier && c.active),
+                products: products.filter((p) => p.active),
+              }
+            : undefined
+        }
+      />
+    </LetterheadProvider>
   );
 }

@@ -12,6 +12,7 @@ import {
   PackageX,
   Pencil,
   Plus,
+  Printer,
   Search,
   Send,
   Trash2,
@@ -22,6 +23,7 @@ import {
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { ConfirmRow } from '@/components/finance/confirm-row';
 import { PurchaseOrderApproveCard } from '@/components/finance/purchase-order-approve-card';
+import { PurchaseOrderPrintDialog } from '@/components/finance/purchase-order-print-dialog';
 import { downloadCsv } from '@/components/finance/download-csv';
 import { PurchaseOrderFormCard, type PurchaseOrderFormActions } from '@/components/finance/purchase-order-form-card';
 import { type ReceivePurchaseOrder, PurchaseOrderReceiveCard } from '@/components/finance/purchase-order-receive-card';
@@ -53,6 +55,7 @@ import {
   purchaseOrdersCsv,
   purchaseOrdersView,
 } from '@/lib/finance/purchase-views';
+import type { PrintablePurchaseOrder } from '@/lib/finance/purchase-order-print';
 import type { PurchaseOrderDetail, PurchaseOrderListRow, PurchaseOrderStatus } from '@/lib/finance/purchase-orders';
 import type { FinResult } from '@/lib/finance/result';
 import { LATEST_ROWS, displayDate } from '@/lib/finance/view-helpers';
@@ -75,6 +78,8 @@ export type PurchaseOrderActions = PurchaseOrderFormActions & {
   getApproved: (input: unknown) => Promise<FinResult<PurchaseOrderDetail>>;
   /** Reads one order awaiting approval with its lines, for Approve and Reject. */
   getPending: (input: unknown) => Promise<FinResult<PurchaseOrderDetail>>;
+  /** Reads one approved or closed order with what its printout needs. */
+  getPrintable: (input: unknown) => Promise<FinResult<PrintablePurchaseOrder>>;
 };
 
 /** What only a person who may edit is given: who they are, the actions, and what the form offers. */
@@ -108,6 +113,8 @@ type Open =
   | { kind: 'receive'; order: PurchaseOrderListRow; detail: PurchaseOrderDetail | null }
   /** `detail` is null while the order's lines are being read, for the person deciding. */
   | { kind: 'approve' | 'reject'; order: PurchaseOrderListRow; detail: PurchaseOrderDetail | null }
+  /** `detail` is null while the order and the people named on it are being read. */
+  | { kind: 'print'; order: PurchaseOrderListRow; detail: PrintablePurchaseOrder | null }
   /** A draft bill has just been made from this order, dated `date`. */
   | { kind: 'billed'; order: PurchaseOrderListRow; date: string }
   | { kind: Question; order: PurchaseOrderListRow }
@@ -146,12 +153,18 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
     open.kind !== 'receive' &&
     open.kind !== 'approve' &&
     open.kind !== 'reject' &&
+    open.kind !== 'print' &&
     open.kind !== 'billed'
       ? open
       : null;
   // A form holds what was typed, so nothing else opens over it: it is closed with its own Cancel first.
   const formOpen =
-    open?.kind === 'new' || open?.kind === 'edit' || open?.kind === 'receive' || open?.kind === 'approve' || open?.kind === 'reject';
+    open?.kind === 'new' ||
+    open?.kind === 'edit' ||
+    open?.kind === 'receive' ||
+    open?.kind === 'approve' ||
+    open?.kind === 'reject' ||
+    open?.kind === 'print';
   // A row that is gone after a refresh takes its question with it; the message still has to be seen.
   const askingInView = asking ? shown.some((r) => r.id === asking.order.id) : false;
   const locked = confirm.pending || formOpen;
@@ -179,6 +192,20 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
 
   const menuItem = (order: PurchaseOrderListRow, action: PurchaseOrderAction, actions: PurchaseOrderActions): RowMenuItem => {
     switch (action) {
+      case 'print':
+        return {
+          label: 'Print',
+          icon: Printer,
+          opens: true,
+          onSelect: () => {
+            loader.clear();
+            ask({ kind: 'print', order, detail: null });
+            loader.run(
+              () => actions.getPrintable({ id: order.id }),
+              (detail) => setOpen((cur) => (cur?.kind === 'print' && cur.order.id === order.id ? { ...cur, detail } : cur)),
+            );
+          },
+        };
       case 'edit':
         return {
           label: 'Edit',
@@ -415,6 +442,13 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
         <PurchaseOrderRejectCard key={open.detail.id} order={open.detail} decide={actions.decide} onClose={close} />
       ) : (
         loading('Reject purchase order', `${open.order.po_no ?? 'The order'} to ${open.order.supplier_name}`)
+      );
+    }
+    if (open.kind === 'print') {
+      return open.detail ? (
+        <PurchaseOrderPrintDialog key={open.detail.id} order={open.detail} onClose={close} />
+      ) : (
+        loading('Print purchase order', `${open.order.po_no ?? 'The order'} to ${open.order.supplier_name}`)
       );
     }
     if (open.kind === 'billed') {

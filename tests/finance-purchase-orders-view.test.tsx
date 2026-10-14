@@ -92,6 +92,7 @@ const actions: PurchaseOrderActions = {
   get: vi.fn(async () => ({ ok: false as const, error: 'unused' })),
   getApproved: vi.fn(async () => ({ ok: false as const, error: 'unused' })),
   getPending: vi.fn(async () => ({ ok: false as const, error: 'unused' })),
+  getPrintable: vi.fn(async () => ({ ok: false as const, error: 'unused' })),
 };
 const writerFor = (viewer = member) => ({ viewer, actions, suppliers: [], products: [] });
 
@@ -115,13 +116,13 @@ describe('the purchase orders list', () => {
     expect(items(render([row({ status: 'draft', po_no: null, created_by: ME })]))).toEqual(['Edit', 'Submit for approval', 'Delete']);
     expect(items(render([row({ status: 'draft', po_no: 'PO-0004', created_by: OTHER })]))).toEqual(['Edit', 'Submit for approval']);
     expect(items(render([row({ status: 'pending_approval', created_by: ME })]))).toEqual(['Withdraw', 'Cancel order']);
-    expect(items(render([row({ status: 'approved' })]))).toEqual(['Record delivery', 'Create bill']);
+    expect(items(render([row({ status: 'approved' })]))).toEqual(['Print', 'Record delivery', 'Create bill']);
     expect(items(render([row({ status: 'closed' })], member))).toEqual([]);
   });
 
   it('offers a sign-off viewer approve, reject, close and cancel', () => {
     expect(items(render([row({ status: 'pending_approval' })], admin))).toEqual(['Approve', 'Reject', 'Withdraw', 'Cancel order']);
-    expect(items(render([row({ status: 'approved' })], admin))).toEqual(['Record delivery', 'Create bill', 'Close order', 'Cancel order']);
+    expect(items(render([row({ status: 'approved' })], admin))).toEqual(['Print', 'Record delivery', 'Create bill', 'Close order', 'Cancel order']);
   });
 
   it('does not offer a sign-off viewer to approve an order they raised, unless they own the workspace', () => {
