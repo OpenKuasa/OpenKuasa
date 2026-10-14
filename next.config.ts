@@ -14,10 +14,6 @@ const nextConfig: NextConfig = {
     // to `dynamic` seconds old until the next full load. `static` covers prefetched pages
     // and loading.tsx boundaries.
     staleTimes: { dynamic: 30, static: 180 },
-    // Inline the (small, Tailwind) global CSS into the HTML so it stops being a
-    // render-blocking <link> request (~300ms on the landing page). Global and
-    // production-only; the CSP's style-src already allows inline styles.
-    inlineCss: true,
     // Rewrite barrel imports to per-module imports so they tree-shake. radix-ui
     // is one big re-export barrel imported across the app; lucide-react and
     // recharts are already optimized by Next's defaults.
