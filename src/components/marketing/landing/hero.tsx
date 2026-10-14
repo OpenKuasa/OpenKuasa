@@ -200,7 +200,7 @@ export function Hero() {
                 alt="The Kasturi CRM deals screen: pipeline value, win rate and a deal board"
                 width={1440}
                 height={900}
-                priority
+                loading="lazy"
                 sizes="(min-width: 1280px) 1152px, 92vw"
                 className="h-auto w-full"
               />
