@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { PaymentVoucherRow } from '@/lib/finance/cash-book';
 import { orderNotesForBills, type OrderBilling } from '@/lib/finance/purchase-views';
@@ -11,6 +12,7 @@ import {
   voucherAccess,
   voucherActions,
   voucherAnswerIsStale,
+  voucherCategoryChoices,
   voucherControls,
   voucherDecisionPayload,
   voucherFormError,
@@ -40,6 +42,10 @@ const accounts = [
 const categories = [{ id: CATEGORY, name: 'Utilities' }];
 
 const filled: VoucherForm = {
+  id: null,
+  kind: 'category',
+  supplierId: '',
+  amounts: {},
   payee: TYPED_PAYEE,
   payeeName: ' Tenaga Nasional ',
   categoryId: CATEGORY,
@@ -78,6 +84,7 @@ const text = (parts: { text: string }[]) => parts.map((p) => p.text).join('');
 describe('the voucher form', () => {
   it('starts from the first bank account, today, with the only category chosen and a typed payee', () => {
     expect(newVoucherForm(accounts, categories, TODAY)).toEqual({
+      id: null, kind: 'category', supplierId: '', amounts: {},
       payee: TYPED_PAYEE, payeeName: '', categoryId: CATEGORY, amount: '', accountId: ACCOUNT, date: TODAY,
       method: 'bank_transfer', reference: '', notes: '',
     });
@@ -110,10 +117,10 @@ describe('the voucher form', () => {
     expect(voucherFormError({ ...filled, notes: 'x'.repeat(201) })).toBe(M.tooLong);
   });
   it('says before the save what saving does for this person', () => {
-    expect(voucherSaveHint(true)).toBe(
+    expect(voucherSaveHint(true)[0]).toBe(
       'A voucher you save is approved at once and reads To be paid: you are an owner or admin. Nothing is paid until it is marked paid.',
     );
-    expect(voucherSaveHint(false)).toBe(
+    expect(voucherSaveHint(false)[0]).toBe(
       'This voucher waits as Pending approval until an owner or admin approves or rejects it. Until then it cannot be changed, only deleted.',
     );
     expect(voucherSubmitLabel(true)).toBe('Save voucher');
@@ -126,19 +133,22 @@ describe('what a row offers', () => {
     expect(voucherActions(row(), true)).toEqual(['approve', 'reject', 'delete']);
     expect(voucherActions(row(), false)).toEqual(['delete']);
     expect(voucherActions(row({ kind: 'expense' }), false)).toEqual(['delete']);
-    for (const status of ['draft', 'scheduled', 'rejected'] as const) {
-      expect(voucherActions(row({ status }), true), status).toEqual(['delete']);
+    // A draft has Edit and Send for approval too: see finance-voucher-bills-form.test.ts.
+    expect(voucherActions(row({ status: 'rejected' }), true)).toEqual(['delete']);
+    for (const status of ['scheduled', 'rejected'] as const) {
       expect(voucherActions(row({ status }), false), status).toEqual(['delete']);
     }
-    for (const status of ['posted', 'void'] as const) {
-      expect(voucherActions(row({ status }), true), status).toEqual([]);
-    }
+    // Mark as paid on one that is To be paid, and Void on a paid one, are an owner's or admin's: see finance-voucher-pay-void-form.test.ts.
+    expect(voucherActions(row({ status: 'scheduled' }), true)).toEqual(['markPaid', 'delete']);
+    expect(voucherActions(row({ status: 'posted' }), true)).toEqual(['void']);
+    expect(voucherActions(row({ status: 'posted' }), false)).toEqual([]);
+    expect(voucherActions(row({ status: 'void' }), true)).toEqual([]);
   });
   it('leaves a supplier payment and a refund to their own screens from To be paid onward, and has them before that, where those screens offer nothing', () => {
     for (const kind of ['bill', 'refund'] as const) {
       expect(voucherActions(row({ kind }), true), kind).toEqual(['approve', 'reject', 'delete']);
       expect(voucherActions(row({ kind }), false), kind).toEqual(['delete']);
-      expect(voucherActions(row({ kind, status: 'draft' }), true), kind).toEqual(['delete']);
+      expect(voucherActions(row({ kind, status: 'draft' }), true), kind).toEqual(kind === 'bill' ? ['edit', 'submit', 'delete'] : ['delete']);
       expect(voucherActions(row({ kind, status: 'rejected' }), false), kind).toEqual(['delete']);
       for (const status of ['scheduled', 'posted', 'void'] as const) {
         expect(voucherActions(row({ kind, status }), true), `${kind} ${status}`).toEqual([]);
@@ -361,5 +371,35 @@ describe('after a write', () => {
     expect(voucherHiddenNote(old, TODAY, 'month', 'rejected', false, false)).toBe(`${OLD} was rejected. Choose a longer period to see it.`);
     expect(voucherHiddenNote(old, TODAY, 'all', 'open', false, false)).toBe(`${OLD} was rejected. Choose Rejected in the status filter to see it.`);
     expect(voucherHiddenNote(rejected, TODAY, 'month', 'rejected', false, false)).toBe(`${WHAT} was rejected. Clear the search and the Kind filter to see it.`);
+  });
+});
+
+describe('the expense categories a voucher form offers', () => {
+  const ARCHIVED = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+  it('offers a new voucher the active categories only', () => {
+    expect(voucherCategoryChoices(categories, null)).toEqual(categories);
+  });
+
+  it('keeps a draft’s own category in the box when it was archived since, marked as archived, and offers it first', () => {
+    const choices = voucherCategoryChoices(categories, row({ category_id: ARCHIVED, category_name: 'Old fuel' }));
+    expect(choices).toEqual([{ id: ARCHIVED, name: 'Old fuel (archived)' }, ...categories]);
+  });
+
+  it('says "Archived category" when the draft’s row has no name for it', () => {
+    expect(voucherCategoryChoices(categories, row({ category_id: ARCHIVED, category_name: null }))[0]).toEqual({
+      id: ARCHIVED,
+      name: 'Archived category',
+    });
+  });
+
+  it('is what the screen hands the form, for the draft being edited', () => {
+    const view = readFileSync('src/components/finance/payment-vouchers-view.tsx', 'utf8');
+    expect(view).toContain('categories={voucherCategoryChoices(writer.categories, open.draft ?? null)}');
+  });
+
+  it('adds nothing for a draft whose category is still active, or that has none (a draft for bills)', () => {
+    expect(voucherCategoryChoices(categories, row())).toBe(categories);
+    expect(voucherCategoryChoices(categories, row({ category_id: null, category_name: null }))).toBe(categories);
   });
 });

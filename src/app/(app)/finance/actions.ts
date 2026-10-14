@@ -16,6 +16,15 @@ import {
   updateBankAccountInput,
 } from '@/lib/finance/bank-accounts';
 import {
+  CATEGORY_MESSAGES,
+  createCategory,
+  createCategoryInput,
+  renameCategory,
+  renameCategoryInput,
+  setCategoryActive,
+  setCategoryActiveInput,
+} from '@/lib/finance/categories';
+import {
   BILL_MESSAGES,
   type BillDetail,
   type SaveAndPostResult,
@@ -189,9 +198,16 @@ import {
   approveVoucher,
   deleteVoucher,
   deleteVoucherInput,
+  markVoucherPaid,
+  markVoucherPaidInput,
   recordVoucher,
   recordVoucherInput,
   rejectVoucher,
+  saveVoucher,
+  saveVoucherInput,
+  submitVoucher,
+  voidVoucher,
+  voidVoucherInput,
   voucherDecisionInput,
 } from '@/lib/finance/vouchers';
 import { TRANSFER_MESSAGES, recordTransfer, recordTransferInput, voidTransfer, voidTransferInput } from '@/lib/finance/transfers';
@@ -242,22 +258,22 @@ function firstMessage(error: { issues: { message: string }[] }): string {
  * message shows it as it now is.
  *
  * `needs.signOff` marks an action that posts, pays or voids. Someone who may write but not sign off is told
- * so before anything is read or written, in `needs.signOffError` when the action has its own sentence for it. `needs.paidNow` is for the two forms that either pay now or
- * schedule: it is asked of the parsed input, and only paying now needs the sign-off.
+ * so before anything is read or written, in `needs.signOffError` when the action has its own sentence for it. `needs.paidNow` is for the forms that either pay now or
+ * schedule: it is asked of the parsed input, and only paying now needs the sign-off (`needs.paidNowError` when the form has its own sentence for it).
  */
 async function run<I, O>(
   paths: string[],
   schema: ZodType<I>,
   input: unknown,
   fn: (ctx: FinanceWriteContext, parsed: I) => Promise<FinResult<O>>,
-  needs: { signOff?: boolean; signOffError?: string; paidNow?: (parsed: I) => boolean } = {},
+  needs: { signOff?: boolean; signOffError?: string; paidNow?: (parsed: I) => boolean; paidNowError?: string } = {},
 ): Promise<FinResult<O>> {
   const access = await writeAccess();
   if (!access) return FORBIDDEN;
   if (needs.signOff && !access.signOff) return { ok: false, error: needs.signOffError ?? NEEDS_SIGN_OFF };
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { ok: false, error: firstMessage(parsed.error) };
-  if (needs.paidNow?.(parsed.data) && !access.signOff) return { ok: false, error: PAID_NOW_NEEDS_SIGN_OFF };
+  if (needs.paidNow?.(parsed.data) && !access.signOff) return { ok: false, error: needs.paidNowError ?? PAID_NOW_NEEDS_SIGN_OFF };
   const result = await fn(access.ctx, parsed.data);
   refresh(paths);
   return result;
@@ -914,6 +930,39 @@ export async function markExpensePaidAction(input: unknown) {
   return run(EXPENSE_PATHS, markExpensePaidInput, input, markExpensePaid, SIGN_OFF);
 }
 
+/* ---- categories (the Categories card on Expenses) ----------------------- */
+
+// A category's name is in the picker of every form that files something under one, and on every row that names
+// one: Expenses (the form, the filter, each row, the chart), Cash Receipts (the income picker and each row),
+// Supplier Bills (a bill's category), Payment Vouchers and Banking (a voucher's category), and Receipts Inbox
+// (the expense a receipt is tied to, and the two forms it opens). An added, renamed, archived or restored
+// category must appear, change or go there. The three ledger screens end the list: each category has an account
+// in the Chart of Accounts that is made, renamed and archived with it, and Journals and Reports name that account.
+const CATEGORY_PATHS = [
+  '/finance/expenses',
+  '/finance/cash-receipts',
+  '/finance/supplier-bills',
+  '/finance/payment-vouchers',
+  '/finance/banking',
+  '/finance/receipts-inbox',
+  ...LEDGER_PATHS,
+];
+/** Adding, renaming, archiving and restoring a category: an owner or admin only, told so in the category's own words. */
+const CATEGORY_SIGN_OFF = { signOff: true, signOffError: CATEGORY_MESSAGES.needsSignOff } as const;
+
+/** Adds an expense or income category. The database makes its account in the Chart of Accounts in the same write. */
+export async function createCategoryAction(input: unknown) {
+  return run(CATEGORY_PATHS, createCategoryInput, input, createCategory, CATEGORY_SIGN_OFF);
+}
+/** Renames a category. Everything filed under it shows the new name. */
+export async function renameCategoryAction(input: unknown) {
+  return run(CATEGORY_PATHS, renameCategoryInput, input, renameCategory, CATEGORY_SIGN_OFF);
+}
+/** Archives or restores a category. The two the books lean on are not archived, which the data layer sees to. */
+export async function setCategoryActiveAction(input: unknown) {
+  return run(CATEGORY_PATHS, setCategoryActiveInput, input, setCategoryActive, CATEGORY_SIGN_OFF);
+}
+
 /* ---- payment vouchers -------------------------------------------------- */
 
 // A voucher is on Payment Vouchers. One that is waiting or still to be paid stands against the account it will
@@ -922,7 +971,8 @@ export async function markExpensePaidAction(input: unknown) {
 // Out show, and once approved it is a payment still to be paid on Payments Out; a refund that was waiting is on
 // Refunds. A refund that is a draft or waiting holds credit on its invoice, which Invoices, Credit Notes,
 // Payments In and Customers & Suppliers count (the same four CREDIT_PATHS lists), so deleting or rejecting one
-// refreshes them. Nothing here posts, pays or voids, so the books do not move and the ledger screens are not in the list.
+// refreshes them. A voucher recorded as paid, marked paid or voided moves the books (LEDGER_PATHS): they end the
+// list, as every action that changes the books does.
 const VOUCHER_PATHS = [
   '/finance/payment-vouchers',
   '/finance/banking',
@@ -934,6 +984,7 @@ const VOUCHER_PATHS = [
   '/finance/credit-notes',
   '/finance/payments-in',
   '/finance/customers-suppliers',
+  ...LEDGER_PATHS,
 ];
 /** Approving or rejecting a voucher: an owner or admin only, told so in the voucher's own words. */
 const VOUCHER_DECIDE = { signOff: true, signOffError: VOUCHER_MESSAGES.needsDecider } as const;
@@ -941,9 +992,25 @@ const VOUCHER_DECIDE = { signOff: true, signOffError: VOUCHER_MESSAGES.needsDeci
 /**
  * Records a voucher for a category. Anyone who may write can do this. The database approves it in the same call
  * when the person recording it is an owner or admin, and makes it wait for approval otherwise; the answer says which.
+ * Recording it as paid now (`paid_now`) is a sign-off: an owner or admin only, asked here before anything is
+ * written, because the database would quietly make a member's wait for approval instead.
  */
 export async function recordVoucherAction(input: unknown) {
-  return run(VOUCHER_PATHS, recordVoucherInput, input, recordVoucher);
+  return run(VOUCHER_PATHS, recordVoucherInput, input, recordVoucher, {
+    paidNow: (voucher) => voucher.paid_now === true,
+    paidNowError: VOUCHER_MESSAGES.paidNowNeedsSignOff,
+  });
+}
+/**
+ * Saves a voucher for a category or for a supplier's bills as a draft, or changes a draft, and sends it for approval
+ * in the same call when asked. Anyone who may write can do this: it never schedules, pays or approves.
+ */
+export async function saveVoucherAction(input: unknown) {
+  return run(VOUCHER_PATHS, saveVoucherInput, input, saveVoucher);
+}
+/** Sends a draft for approval from its row, as the person was shown it. Anyone who may write can do this. */
+export async function submitVoucherAction(input: unknown) {
+  return run(VOUCHER_PATHS, voucherDecisionInput, input, submitVoucher);
 }
 /** Approves a voucher that is waiting, as the person was shown it (every field the row showed): an owner or admin only, which the guard on payments enforces. */
 export async function approveVoucherAction(input: unknown) {
@@ -956,6 +1023,20 @@ export async function rejectVoucherAction(input: unknown) {
 /** Deletes a voucher that has not been paid, while it still has the status the person was shown. */
 export async function deleteVoucherAction(input: unknown) {
   return run(VOUCHER_PATHS, deleteVoucherInput, input, deleteVoucher);
+}
+/**
+ * Marks a voucher that is "To be paid" as paid on the day given: a voucher for a category or one that pays expenses.
+ * Paying is a sign-off: an owner or admin only, which the database enforces (FIN14).
+ */
+export async function markVoucherPaidAction(input: unknown) {
+  return run(VOUCHER_PATHS, markVoucherPaidInput, input, markVoucherPaid, SIGN_OFF);
+}
+/**
+ * Voids a paid voucher of those two kinds, which is also how a wrong "Mark paid" on Expenses is undone: the expense
+ * is owed that amount again. Voiding is a sign-off: an owner or admin only.
+ */
+export async function voidVoucherAction(input: unknown) {
+  return run(VOUCHER_PATHS, voidVoucherInput, input, voidVoucher, SIGN_OFF);
 }
 
 /* ---- chart of accounts and journals ------------------------------------ */

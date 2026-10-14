@@ -19,6 +19,7 @@ import { z } from 'zod';
 import { can } from '@/lib/auth/permissions';
 import type { OrgRole } from '@/lib/auth/current-org';
 import { type BillForm, newBillForm, withSupplier } from './bill-form';
+import { amountText } from './allocation-form';
 import { BILL_MESSAGES, type BillDisplayStatus, type BillListRow, saveBillInput } from './bills';
 import { emptyLine } from './document-form';
 import { type ExpenseForm, TYPED_VENDOR } from './expense-form';
@@ -380,8 +381,8 @@ export const UNTIE_NEEDS_DECIDER = 'Only an owner or admin can untie a receipt f
 /* ---- the forms, pre-filled from a receipt ------------------------------ */
 
 const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
-/** An amount as a form's box holds it: to the sen, and nothing for none. */
-const amountText = (value: number | null) => (value === null || !(value > 0) ? '' : String(Math.round(value * 100) / 100));
+/** An amount as a form's box holds it: to the sen, as the other forms show one they open, and nothing for none. */
+const boxText = (value: number | null) => (value === null || !(value > 0) ? '' : amountText(value));
 
 type ReceiptDetails = Pick<InboxReceiptRow, 'vendor' | 'receipt_date' | 'amount' | 'sst_amount'>;
 
@@ -401,8 +402,8 @@ export function expenseFormFromReceipt(
     date: row.receipt_date ?? today,
     vendor: named.length === 1 ? named[0].id : TYPED_VENDOR,
     vendorName: named.length === 1 ? '' : (row.vendor ?? ''),
-    amount: amountText(row.amount),
-    sst: amountText(row.sst_amount),
+    amount: boxText(row.amount),
+    sst: boxText(row.sst_amount),
   };
 }
 
@@ -425,7 +426,7 @@ export function billFormFromReceipt(
 ): BillForm {
   const form = newBillForm(row.receipt_date ?? today, 'receipt-0', defaultCategoryId);
   const description = (row.vendor ? `Receipt: ${row.vendor}` : 'Receipt').slice(0, LINE_DESCRIPTION_MAX);
-  const withLine: BillForm = { ...form, lines: [{ ...emptyLine('receipt-0'), description, unit_price: amountText(row.amount) }] };
+  const withLine: BillForm = { ...form, lines: [{ ...emptyLine('receipt-0'), description, unit_price: boxText(row.amount) }] };
   const named = row.vendor ? suppliers.filter((s) => sameName(s.name, row.vendor ?? '')) : [];
   return named.length === 1 ? withSupplier(withLine, named[0]) : withLine;
 }

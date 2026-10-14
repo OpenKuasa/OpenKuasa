@@ -2,6 +2,7 @@ import {
   attachReceiptAction,
   deleteReceiptAction,
   detachReceiptAction,
+  readReceiptAction,
   receiptLinkAction,
   receiptToBillAction,
   receiptToExpenseAction,
@@ -23,6 +24,8 @@ import {
   offeredContacts,
   receiptInboxPlan,
 } from '@/lib/finance/receipt-match';
+import { receiptModelId, workspaceKeyState } from '@/lib/finance/receipt-reader';
+import { receiptReadingPlan } from '@/lib/finance/receipt-reading';
 import { receiptsInboxView } from '@/lib/finance/receipt-views';
 import { listInboxReceipts } from '@/lib/finance/receipts';
 import { todayUtc } from '@/lib/finance/view-helpers';
@@ -57,6 +60,12 @@ const MATCH_ACTIONS: ReceiptMatchActions = {
  *
  * With no receipt there is nothing to match, so the expenses, the bills and
  * what the forms offer are read only once the inbox holds one.
+ *
+ * Anyone who may edit is also handed the action that sends a receipt to be
+ * read by AI, with what the card needs to ask first: whether this server
+ * names a model for receipts, and whether the workspace has an AI key (asked
+ * as the caller, and only when some receipt on the page could be read). The
+ * page itself reads no receipt and sends nothing: only the card's button does.
  */
 export default async function ReceiptsInboxScreen() {
   if (!hasSupabaseEnv()) {
@@ -73,8 +82,9 @@ export default async function ReceiptsInboxScreen() {
   const ctx = { client: await createClient(), orgId: viewer.orgId };
   const rows = await listInboxReceipts(ctx);
   const plan = receiptInboxPlan(viewer, rows.length > 0);
+  const readingPlan = receiptReadingPlan(viewer, rows);
   // How each matched receipt's document stands is shown to everyone; the forms and the picker are a writer's.
-  const [attached, expenses, bills, contacts, categories, products, defaultCategoryId] = await Promise.all([
+  const [attached, expenses, bills, contacts, categories, products, defaultCategoryId, keyState] = await Promise.all([
     plan.readsDocuments ? listAttachedReceipts(ctx) : [],
     plan.readsDocuments ? listExpenses(ctx) : [],
     plan.readsDocuments ? listBills(ctx) : [],
@@ -82,6 +92,8 @@ export default async function ReceiptsInboxScreen() {
     plan.readsForms ? listExpenseCategories(ctx) : [],
     plan.readsForms ? listProducts(ctx) : [],
     plan.readsForms ? purchasesCategoryId(ctx) : null,
+    // Not asked: the card shows the question, and the action answers when it is pressed.
+    readingPlan.readsKeyState ? workspaceKeyState(ctx.client) : ('unknown' as const),
   ]);
   const offered = offeredContacts(contacts);
   return (
@@ -108,6 +120,14 @@ export default async function ReceiptsInboxScreen() {
                 defaultCategoryId: defaultCategoryId ?? '',
                 candidates: attachCandidates(expenses, bills),
               },
+              reading: readingPlan.offered
+                ? {
+                    read: readReceiptAction,
+                    setUp: receiptModelId() !== null,
+                    keyState,
+                    canManageKey: readingPlan.canManageKey,
+                  }
+                : undefined,
             }
           : undefined
       }

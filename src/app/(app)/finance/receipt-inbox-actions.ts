@@ -29,20 +29,44 @@ import {
   receiptToExpense,
   receiptToExpenseInput,
 } from '@/lib/finance/receipt-match';
-import type { SavedExpense } from '@/lib/finance/expenses';
-import { type FinResult, type FinanceWriteContext, NOT_ALLOWED } from '@/lib/finance/result';
+import { getWorkspaceModelById } from '@/lib/ai/provider';
+import { consumeDailyQuota } from '@/lib/ai/rate-limit';
+import { readWorkspaceKey } from '@/lib/ai/workspace-key';
+import { type ExpenseCategory, type SavedExpense, listExpenseCategories } from '@/lib/finance/expenses';
+import {
+  getReceiptForReading,
+  readReceiptWithModel,
+  receiptBytes,
+  receiptModelId,
+  sendableAs,
+  setReceiptExtraction,
+  workspaceKeyState,
+} from '@/lib/finance/receipt-reader';
+import {
+  RECEIPT_READING_MESSAGES,
+  type ReceiptRead,
+  categoryAt,
+  offeredCategoryNames,
+  pdfTooLarge,
+  readableReceiptType,
+} from '@/lib/finance/receipt-reading';
+import { type FinResult, type FinanceWriteContext, NOT_ALLOWED, pgCode } from '@/lib/finance/result';
+import { todayUtc } from '@/lib/finance/view-helpers';
 import { createClient } from '@/lib/supabase/server';
 import { serviceClient } from '@/lib/supabase/service';
 
 /**
  * The Receipts Inbox's server actions. They are in a file of their own, not
- * in `actions.ts`, because two of them are not the usual guard → parse →
- * write: opening a file reads and signs, and deleting a receipt is followed
- * by removing its file with the service client. The guard is the same one:
- * a viewer and the demo workspace change nothing.
+ * in `actions.ts`, because some of them are not the usual guard → parse →
+ * write: opening a file reads and signs, deleting a receipt is followed by
+ * removing its file with the service client, and reading a receipt with AI
+ * sends its file to a model. The guard is the same one: a viewer and the demo
+ * workspace change nothing, and send nothing.
  *
- * No file passes through here. The browser uploads straight to the private
- * bucket; `registerReceiptAction` is told only where the file is.
+ * No upload passes through here. The browser uploads straight to the private
+ * bucket; `registerReceiptAction` is told only where the file is. The one
+ * action that holds a receipt's bytes is `readReceiptAction`, which fetches
+ * them from the bucket through a link signed as the caller.
  */
 
 const FORBIDDEN: FinResult<never> = { ok: false, error: NOT_ALLOWED };
@@ -192,4 +216,120 @@ export async function detachReceiptAction(input: unknown): Promise<FinResult<{ i
   const result = await detachReceipt(ctx, parsed.data);
   refresh(RECEIPT_TIE_PATHS);
   return result;
+}
+
+/* ---- reading with AI --------------------------------------------------- */
+
+const R = RECEIPT_READING_MESSAGES;
+const refused = (error: string): FinResult<never> => ({ ok: false, error });
+
+/**
+ * Sends one receipt's file to a model to be read, on the workspace's own AI
+ * key, and stores what came back in the receipt's four boxes as a suggestion.
+ * Called by one button, after the person has been told what is sent; nothing
+ * else in the app calls it. Anyone who may edit, never a viewer or the demo.
+ *
+ * The order matters: every refusal comes before anything is counted or sent.
+ * The receipt and the workspace's categories are read as the caller, the file
+ * is fetched through a link signed as the caller and its first bytes checked,
+ * and the daily allowance is counted last, immediately before the one call.
+ * The platform's key and the free chat questions are never used. The model is
+ * given no tool; its answer is checked field by field (`normalizeReading`) and
+ * the category it picked is a number in the list of names it was shown, which
+ * is turned back into a category here. Only the four details are written, by
+ * `finance_set_receipt_extraction`, which writes only while the receipt is
+ * still in review; the category goes back to the screen and is stored nowhere.
+ */
+export async function readReceiptAction(input: unknown): Promise<FinResult<ReceiptRead>> {
+  const viewer = await getViewer();
+  if (viewer.isDemo || !can(viewer.role, 'edit-data')) return FORBIDDEN;
+  const parsed = receiptIdInput.safeParse(input);
+  if (!parsed.success) return refused(firstMessage(parsed.error));
+  const { id } = parsed.data;
+  const modelId = receiptModelId();
+  if (!modelId) return refused(R.notSetUp);
+
+  const ctx: FinanceWriteContext = { client: await createClient(), orgId: viewer.orgId };
+  const receipt = await getReceiptForReading(ctx, id);
+  if (!receipt.ok) return receipt;
+  if (receipt.data.status !== 'review') return refused(R.notInReview);
+  const file = receipt.data.file;
+  if (!file) return refused(R.noFile);
+  if (!readableReceiptType(file.type)) return refused(R.heic);
+  // A PDF over the bound is refused on its stored size, before a key is opened, a file fetched or a turn counted.
+  if (pdfTooLarge(file.type, receipt.data.sizeBytes)) return refused(R.pdfTooBig);
+
+  // The workspace's own key, or nothing. Whether there is one is asked as the caller; the sealed key is opened on
+  // the server for the session's own workspace, as chat does.
+  const keyState = await workspaceKeyState(ctx.client);
+  if (keyState === 'unknown') return refused(R.keyUnknown);
+  if (keyState === 'none') return refused(can(viewer.role, 'manage-ai-key') ? R.noKeyCanAdd : R.noKey);
+  let model: ReturnType<typeof getWorkspaceModelById>;
+  try {
+    const stored = await readWorkspaceKey(serviceClient(), viewer.orgId);
+    // A key is known to be set, so finding none here is a mismatch to refuse, never a reason to use another key.
+    if (stored.status !== 'ok') return refused(R.keyUnusable);
+    model = getWorkspaceModelById(modelId, stored.apiKey);
+  } catch {
+    // No service key on this server.
+    console.error('[finance/receipts] the workspace key could not be read on the server.');
+    return refused(R.keyUnusable);
+  }
+
+  const link = await signReceiptLink(ctx, file);
+  if (!link.ok) return refused(R.fileUnavailable);
+  const bytes = await receiptBytes(link.data.url);
+  if (!bytes) return refused(R.fileUnavailable);
+  if (bytes.length === 0) return refused(R.fileEmpty);
+  // No size was recorded: the bytes themselves decide, still before anything is counted or sent.
+  if (pdfTooLarge(file.type, bytes.length)) return refused(R.pdfTooBig);
+  if (sendableAs(bytes, file.type) !== 'ok') {
+    console.error('[finance/receipts] a stored file is not the type its receipt says.');
+    return refused(R.notWhatItSays);
+  }
+
+  // The categories the forms offer, read as the caller. Without them the receipt is still read; no category is suggested.
+  let categories: ExpenseCategory[] = [];
+  try {
+    categories = await listExpenseCategories(ctx);
+  } catch (error) {
+    console.error('[finance/receipts] the expense categories could not be read:', pgCode(error) ?? 'no code');
+  }
+
+  // Counted last, so no refusal above uses a turn of the person's daily allowance on the workspace's key.
+  const quota = await consumeDailyQuota(ctx.client);
+  if (!quota.allowed) return refused(quota.reason === 'limit' ? R.dailyLimit : R.limitUnavailable);
+
+  const reading = await readReceiptWithModel({
+    model,
+    modelId,
+    bytes,
+    mediaType: file.type,
+    today: todayUtc(),
+    categoryNames: offeredCategoryNames(categories),
+  });
+  // The provider turned the key away: the receipt was not found unreadable, so nothing is written about it.
+  if (!reading.ok && reading.reason === 'key') return refused(R.keyRefused);
+  if (!reading.ok && reading.reason === 'credit') return refused(R.noCredit);
+  // The call did not get through: the receipt was not found unreadable, so nothing is written about it. The turn
+  // counted above is not given back: a chat turn that fails is not either, and the provider may have received and billed the request.
+  if (!reading.ok && reading.reason === 'unavailable') return refused(R.unavailable);
+  // The model does not take this file: nothing is known about the receipt, so nothing is written, and a retry cannot help.
+  if (!reading.ok && reading.reason === 'unsupported') return refused(R.unsupported);
+  if (!reading.ok && receipt.data.extractedAt !== null) {
+    // A reading already stands: a failed new one writes nothing, so its figures, its mark and the caution above the forms stay.
+    return refused(R.failedAgain);
+  }
+  if (!reading.ok) {
+    // The values the receipt held go back with the error: the function would otherwise clear what a person typed.
+    await setReceiptExtraction(ctx, id, { failed: true, keep: receipt.data.details });
+    refresh();
+    return refused(R.failed);
+  }
+  const wrote = await setReceiptExtraction(ctx, id, { read: reading });
+  refresh();
+  if (!wrote.ok) return wrote;
+  // Someone reviewed or matched the receipt while the model was reading: their work stands and the reading is dropped.
+  if (!wrote.data.written) return refused(R.notInReview);
+  return { ok: true, data: { id, category: categoryAt(categories, reading.category_index) } };
 }

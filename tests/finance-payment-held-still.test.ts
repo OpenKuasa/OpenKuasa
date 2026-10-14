@@ -136,12 +136,14 @@ test('nothing in src edits a payment that is not a draft, sends one back to draf
       expect(m[1], path).not.toMatch(/status:\s*'draft'/);
     }
   }
-  // The direct updates there are: four voids (status 'void') and the voucher decision (the status it is given).
+  // The direct updates there are: five voids (status 'void'; the fifth is a paid voucher's, on Payment Vouchers) and
+  // the voucher decision (the status it is given).
   expect(updates.sort()).toEqual([
     'src/lib/finance/cash-receipts.ts: status,updated_at',
     'src/lib/finance/money.ts: status,updated_at',
     'src/lib/finance/money.ts: status,updated_at',
     'src/lib/finance/refunds.ts: status,updated_at',
+    'src/lib/finance/vouchers.ts: status,updated_at',
     'src/lib/finance/vouchers.ts: status,updated_at',
   ]);
   // And no update of a payment is built any other way (a variable, a spread) that the scan above would not see.
@@ -156,6 +158,6 @@ test('nothing in src edits a payment that is not a draft, sends one back to draf
     'src/lib/finance/cash-receipts.ts: 1',
     'src/lib/finance/money.ts: 2',
     'src/lib/finance/refunds.ts: 1',
-    'src/lib/finance/vouchers.ts: 1',
+    'src/lib/finance/vouchers.ts: 2',
   ]);
 });

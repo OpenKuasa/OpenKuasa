@@ -26,6 +26,18 @@ describe('modelErrorCode', () => {
     expect(json).not.toContain('Aisyah');
   });
 
+  it('an error the provider put in the body of a 200 is told by its own class, never its words', () => {
+    const inBody = (data: unknown) => Object.assign(new Error('echo Aisyah Rahman JVBERi0'), { statusCode: 200, data });
+    expect(modelErrorCode(inBody({ code: 429, message: 'echo Aisyah' }))).toEqual({ code: 429 });
+    expect(modelErrorCode(inBody({ code: 'rate_limit_exceeded', message: 'echo Aisyah' }))).toEqual({ code: 'rate_limit_exceeded' });
+    // A string with spaces or marks could be someone's words: it is not used, and the error’s name stands in.
+    expect(modelErrorCode(inBody({ code: 'Aisyah Rahman said hello', message: 'x' }))).toEqual({ code: 'Error' });
+    expect(modelErrorCode(inBody({ message: 'echo Aisyah' }))).toEqual({ code: 'Error' });
+    expect(modelErrorCode(inBody('a string'))).toEqual({ code: 'Error' });
+    // A real error status is still the status, whatever the body says.
+    expect(modelErrorCode(Object.assign(new Error('x'), { statusCode: 500, data: { code: 429 } }))).toEqual({ code: 500 });
+  });
+
   it('falls back to an error’s own code, then to its name', () => {
     expect(modelErrorCode(Object.assign(new Error('socket hang up on /a/path.pdf'), { code: 'ECONNRESET' }))).toEqual({
       code: 'ECONNRESET',

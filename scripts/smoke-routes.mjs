@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { navEntries } from './nav-routes.mjs';
 
 const root = process.cwd();
 const host = process.env.SMOKE_HOST || '127.0.0.1';
@@ -20,21 +21,11 @@ function listAccountRoutes() {
 }
 
 function listProductRoutes() {
-  const navPath = join(root, 'src/config/nav.ts');
-  const source = readFileSync(navPath, 'utf8');
-  const blocks = source.split(/\n  \{\n    key: '/).slice(1);
   const routes = [];
-
-  for (const block of blocks) {
-    const key = block.slice(0, block.indexOf("'"));
-    if (!key) continue;
-
+  for (const { key, slugs } of navEntries(root)) {
     routes.push(`/${key}`);
-
-    const slugs = [...block.matchAll(/slug: '([^']+)'/g)].map((match) => match[1]);
     for (const slug of slugs) routes.push(`/${key}/${slug}`);
   }
-
   return routes;
 }
 

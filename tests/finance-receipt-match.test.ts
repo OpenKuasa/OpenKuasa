@@ -285,15 +285,25 @@ describe('the forms, pre-filled from a receipt', () => {
 
   it('starts the expense form with the receipt’s details, and the contact only when exactly one has that name', () => {
     expect(expenseFormFromReceipt({ vendor: ' shell bangsar ', receipt_date: '2026-10-03', amount: 142.5, sst_amount: 8.07 }, contacts, '2026-10-12')).toEqual({
-      date: '2026-10-03', vendor: 'c1', vendorName: '', amount: '142.5', sst: '8.07',
+      date: '2026-10-03', vendor: 'c1', vendorName: '', amount: '142.50', sst: '8.07',
     });
     // Two contacts with the name: the name is typed, and the person chooses.
     expect(expenseFormFromReceipt({ vendor: 'Printhub', receipt_date: null, amount: 310, sst_amount: 0 }, contacts, '2026-10-12')).toEqual({
-      date: '2026-10-12', vendor: TYPED_VENDOR, vendorName: 'Printhub', amount: '310', sst: '',
+      date: '2026-10-12', vendor: TYPED_VENDOR, vendorName: 'Printhub', amount: '310.00', sst: '',
     });
     expect(expenseFormFromReceipt({ vendor: null, receipt_date: null, amount: null, sst_amount: null }, contacts, '2026-10-12')).toEqual({
       date: '2026-10-12', vendor: TYPED_VENDOR, vendorName: '', amount: '', sst: '',
     });
+  });
+
+  it('shows money to the sen in the boxes, typed or read: 21.2 as 21.20, 1.2 as 1.20, 5 as 5.00, none as empty', () => {
+    const form = expenseFormFromReceipt({ vendor: null, receipt_date: null, amount: 21.2, sst_amount: 1.2 }, contacts, '2026-10-12');
+    expect([form.amount, form.sst]).toEqual(['21.20', '1.20']);
+    expect(expenseFormFromReceipt({ vendor: null, receipt_date: null, amount: 5, sst_amount: null }, contacts, '2026-10-12')).toMatchObject({ amount: '5.00', sst: '' });
+    expect(expenseFormFromReceipt({ vendor: null, receipt_date: null, amount: null, sst_amount: null }, contacts, '2026-10-12')).toMatchObject({ amount: '', sst: '' });
+    for (const [amount, text] of [[21.2, '21.20'], [5, '5.00'], [null, '']] as const) {
+      expect(billFormFromReceipt({ vendor: null, receipt_date: null, amount, sst_amount: null }, contacts, '2026-10-12').lines[0].unit_price).toBe(text);
+    }
   });
 
   it('starts the bill form with one line for the receipt’s amount, SST rate 0, and never an id', () => {
@@ -301,7 +311,7 @@ describe('the forms, pre-filled from a receipt', () => {
     expect(form.id).toBeUndefined();
     expect(form).toMatchObject({ supplier_id: 'c1', bill_date: '2026-10-03', due_date: '2026-10-17', dueEdited: false, purchase_order_id: '', category_id: 'cat-default' });
     expect(form.lines).toEqual([
-      { key: 'receipt-0', product_id: '', description: 'Receipt: Shell Bangsar', quantity: '1', uom: '', pack_size: '', unit_price: '142.5', sst_rate: '0' },
+      { key: 'receipt-0', product_id: '', description: 'Receipt: Shell Bangsar', quantity: '1', uom: '', pack_size: '', unit_price: '142.50', sst_rate: '0' },
     ]);
     const bare = billFormFromReceipt({ vendor: null, receipt_date: null, amount: null, sst_amount: null }, contacts, '2026-10-12');
     expect(bare).toMatchObject({ supplier_id: '', bill_date: '2026-10-12', due_date: '2026-10-12', category_id: '' });

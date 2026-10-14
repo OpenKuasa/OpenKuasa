@@ -1,12 +1,13 @@
 'use client';
 
-import { useCallback, useState } from 'react';
-import { Download, FilePlus, FileText, Link2, Link2Off, Pencil, PieChart, Receipt, Search, Trash2, Wallet } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Download, FilePlus, FileText, Link2, Link2Off, Pencil, PieChart, Receipt, Search, Sparkles, Trash2, Wallet } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { DonutStat } from '@/components/charts';
 import { ConfirmRow } from '@/components/finance/confirm-row';
 import { downloadCsv } from '@/components/finance/download-csv';
 import { type MatchOpen, ReceiptMatchCard, type ReceiptMatchData } from '@/components/finance/receipt-match-cards';
+import { ReceiptReadCard, type ReceiptReadingData } from '@/components/finance/receipt-read-card';
 import { type ReceiptLinkOf, ReceiptReviewCard, type ReviewReceipt } from '@/components/finance/receipt-review-card';
 import { ReceiptUploadCard, type RegisterReceipt } from '@/components/finance/receipt-upload-card';
 import { RowMenu, type RowMenuItem } from '@/components/finance/row-menu';
@@ -36,6 +37,7 @@ import {
   matchNote,
   receiptMatchActions,
 } from '@/lib/finance/receipt-match';
+import { type SuggestedCategory, canOfferReading, readAnswerFate, reviewCardKey, standingSuggestion } from '@/lib/finance/receipt-reading';
 import {
   INBOX_READING_NOTES,
   INBOX_STATUS_LABELS,
@@ -71,8 +73,10 @@ export type ReceiptInboxActions = {
  * upload area, and on each receipt that is tied to nothing "Review",
  * "Create expense", "Create draft bill", "Attach to expense or bill" and
  * "Delete", and on a matched one "Untie" (from an approved expense or a posted
- * bill, an owner or admin only); anyone who can see a receipt that has a file
- * can download it. Under "Matched to" a second line says how the document
+ * bill, an owner or admin only); on a receipt still in review that has a file,
+ * "Read with AI" opens a card that asks before anything is sent, and after a
+ * reading the review card opens on what was read. Anyone who can see a receipt
+ * that has a file can download it. Under "Matched to" a second line says how the document
  * stands. A
  * viewer and the demo workspace change nothing, and the demo is told why it
  * has no upload area. A file name is whatever the uploader's device called
@@ -100,8 +104,11 @@ export function ReceiptsInboxView({
   linkOf?: ReceiptLinkOf;
   /** For each matched receipt, by its id: the document it is tied to and how that stands. Absent with no database. */
   documents?: Record<string, MatchedDocument>;
-  /** Present only for someone who may add, review, match and delete receipts. `match` is what matching needs. */
-  writer?: { orgId: string; actions: ReceiptInboxActions; match?: ReceiptMatchData };
+  /**
+   * Present only for someone who may add, review, match and delete receipts. `match` is what matching needs,
+   * `reading` what having a receipt read by AI needs.
+   */
+  writer?: { orgId: string; actions: ReceiptInboxActions; match?: ReceiptMatchData; reading?: ReceiptReadingData };
   /** The shared demo workspace: it is told why there is no upload area. */
   demo?: boolean;
 }) {
@@ -117,6 +124,18 @@ export function ReceiptsInboxView({
   const [matchOpen, setMatchOpen] = useState<MatchOpen | null>(null);
   const [untying, setUntying] = useState<string | null>(null);
   const [matched, setMatched] = useState<MatchWritten | null>(null);
+  // Reading with AI: the receipt the question is open for, and, by receipt id, what a reading made from this screen
+  // suggested as its category (null for none). Kept here only: a reload forgets it.
+  const [asking, setAsking] = useState<InboxReceiptRow | null>(null);
+  const [readHere, setReadHere] = useState<Record<string, SuggestedCategory | null>>({});
+  // Which receipt's question is the open thing, for an answer that arrives later; and a refusal that arrived after
+  // the question had gone, so that it is said and not lost.
+  const askingId = useRef<string | null>(null);
+  useEffect(() => {
+    // Whatever closes or opens the question (a menu action, Cancel, the answer) changes `asking`; this follows it.
+    askingId.current = asking?.id ?? null;
+  }, [asking]);
+  const [readRefusal, setReadRefusal] = useState<{ fileName: string; message: string } | null>(null);
   const localToday = useLocalToday(today, followClock);
   const remove = useFinanceAction();
   const untie = useFinanceAction();
@@ -137,6 +156,9 @@ export function ReceiptsInboxView({
   const offeredFor = (r: InboxReceiptRow): ReceiptMatchAction[] => (match ? receiptMatchActions(r, documents?.[r.id], match.canDecide) : []);
   // Said once, above the table, when a matched receipt on screen is one this person may not untie.
   const untieNote = match && !match.canDecide && shown.some((r) => r.status === 'matched' && offeredFor(r).length === 0);
+  /** The category a reading suggested for a receipt, while it still stands; null otherwise. */
+  const suggestionFor = (id: string) =>
+    standingSuggestion(rows.find((r) => r.id === id), readHere[id] ?? undefined, match?.categories ?? []);
   /** One thing open at a time: whatever card, question or note is up goes before the next opens. */
   const closeAll = () => {
     remove.clear();
@@ -147,6 +169,8 @@ export function ReceiptsInboxView({
     setMatchOpen(null);
     setUntying(null);
     setMatched(null);
+    setAsking(null);
+    setReadRefusal(null);
   };
   // Someone who cannot change anything has a menu only where a file can be downloaded: the demo's sample receipts have none.
   const columns = writer || (linkOf && rows.some((r) => r.has_file)) ? 7 : 6;
@@ -175,6 +199,18 @@ export function ReceiptsInboxView({
         onSelect: () => {
           closeAll();
           setReviewing(r);
+        },
+      });
+    }
+    // Opens the question only: nothing is sent until the card's own button is pressed.
+    if (writer.reading && canOfferReading(r)) {
+      items.push({
+        label: 'Read with AI',
+        icon: Sparkles,
+        opens: true,
+        onSelect: () => {
+          closeAll();
+          setAsking(r);
         },
       });
     }
@@ -219,9 +255,10 @@ export function ReceiptsInboxView({
       <BentoGrid>
         {writer && linkOf && reviewed ? (
           <ReceiptReviewCard
-            // A fresh card, with fresh boxes, for each receipt.
-            key={reviewed.id}
+            // A fresh card, with fresh boxes, for each receipt, and again when a reading made here arrives.
+            key={reviewCardKey(reviewed, reviewed.id in readHere)}
             row={reviewed}
+            suggestion={suggestionFor(reviewed.id)}
             blocked={blocked}
             today={localToday}
             review={writer.actions.review}
@@ -233,12 +270,34 @@ export function ReceiptsInboxView({
             }}
           />
         ) : null}
+        {writer?.reading && asking ? (
+          <ReceiptReadCard
+            key={asking.id}
+            // The receipt as the list has it now, so the question is about what would be replaced now.
+            row={rows.find((r) => r.id === asking.id) ?? asking}
+            reading={writer.reading}
+            onClose={() => setAsking(null)}
+            onRefused={(message) => {
+              if (readAnswerFate(askingId.current, asking.id) === 'drop') setReadRefusal({ fileName: asking.file_name, message });
+            }}
+            onRead={(read) => {
+              // The person opened something else while the file was being read: nothing opens beside it.
+              // What was stored shows on the row.
+              if (readAnswerFate(askingId.current, read.id) === 'drop') return;
+              setReadHere((was) => ({ ...was, [read.id]: read.category }));
+              setAsking(null);
+              // What was read is a suggestion: it opens in the review card, for the person to check.
+              setReviewing(asking);
+            }}
+          />
+        ) : null}
         {match && matchOpen ? (
           <ReceiptMatchCard
             // A fresh card for each receipt and each way of matching it.
             key={`${matchOpen.kind}-${matchOpen.row.id}`}
             open={matchOpen}
             match={match}
+            suggestion={suggestionFor(matchOpen.row.id)}
             onClose={() => setMatchOpen(null)}
             onDone={(done) => {
               setMatchOpen(null);
@@ -256,6 +315,11 @@ export function ReceiptsInboxView({
           >
             {matchedNote.body}
             {matchedHidden ? ` ${matchedHidden}` : ''}
+          </SavedNoteCard>
+        ) : null}
+        {readRefusal ? (
+          <SavedNoteCard title="Receipt not read" subtitle={readRefusal.fileName} onClose={() => setReadRefusal(null)}>
+            {readRefusal.message}
           </SavedNoteCard>
         ) : null}
         {deleted ? (

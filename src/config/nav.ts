@@ -326,8 +326,8 @@ export const PRODUCTS: Product[] = [
       {
         label: 'Sales',
         items: [
-          { label: 'Invoices', slug: 'invoices', icon: FileText },
           { label: 'Quotations', slug: 'quotations', icon: ClipboardList },
+          { label: 'Invoices', slug: 'invoices', icon: FileText },
           { label: 'Credit Notes', slug: 'credit-notes', icon: RotateCcw },
           { label: 'Payments In', slug: 'payments-in', icon: CircleDollarSign },
           { label: 'Refunds', slug: 'refunds', icon: ArrowLeftRight },

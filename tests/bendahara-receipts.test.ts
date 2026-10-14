@@ -23,6 +23,8 @@ import {
   receiptToExpenseInput,
   receiptsByDocument,
 } from '@/lib/finance/receipt-match';
+import { getReceiptForReading, receiptBytes, sendableAs, setReceiptExtraction, workspaceKeyState } from '@/lib/finance/receipt-reader';
+import { RECEIPT_READING_MESSAGES } from '@/lib/finance/receipt-reading';
 
 // The Receipts Inbox against the hosted database and the hosted storage
 // service. Run by the controller only, after the receipts inbox migration is
@@ -805,4 +807,105 @@ testWithStorage('another workspace can match nothing here, and reads none of its
   expect(await listAttachedReceipts({ client: b.c, orgId: b.orgId })).toEqual([]);
   // And the receipt is still where it was.
   expect((await a.c.from('finance_receipts').select('status').eq('id', one.id).single()).data).toEqual({ status: 'matched' });
+}, 120_000);
+
+// ---- reading with AI (stage 7c) ---------------------------------------------
+// No model is called here and no key is used: these are the reads and the one write that surround the call,
+// against the real database and the real storage service.
+
+testWithStorage('a reading is written by an owner and by a member while the receipt is in review, and never after', async () => {
+  const { a, owner, member } = await ownerAndMember('Receipts Read A');
+  const first = await receipt(a, 'read-owner.png');
+  const second = await receipt(a, 'read-member.png');
+  const reading = { vendor: 'Shell Bangsar', receipt_date: '2026-10-03', amount: 142.5, sst_amount: 8.07 };
+
+  // What the action reads first, as the caller: the state, the file with its stored size, the four boxes, and
+  // whether a reading already stands.
+  const before = await getReceiptForReading(member, second.id);
+  expect(before).toEqual({
+    ok: true,
+    data: {
+      status: 'review',
+      file: { path: second.path, type: 'image/png' },
+      sizeBytes: PNG.length,
+      extractedAt: null,
+      details: { vendor: null, receipt_date: null, amount: null, sst_amount: null },
+    },
+  });
+
+  for (const [who, id] of [[owner, first.id], [member, second.id]] as const) {
+    expect(await setReceiptExtraction(who, id, { read: reading })).toEqual({ ok: true, data: { written: true } });
+    const row = await a.c.from('finance_receipts').select('vendor, receipt_date, amount, sst_amount, status, extraction_error, extracted_at').eq('id', id).single();
+    expect(row.data).toMatchObject({ vendor: 'Shell Bangsar', receipt_date: '2026-10-03', status: 'review', extraction_error: null });
+    expect(Number(row.data!.amount)).toBe(142.5);
+    expect(Number(row.data!.sst_amount)).toBe(8.07);
+    // Stamped: the only ground the screen has for saying "Read by AI".
+    expect(row.data!.extracted_at).not.toBeNull();
+  }
+
+  // A person reviews the first: from then on a reading writes nothing, and the receipt keeps the person's figures.
+  expect(await reviewReceipt(owner, reviewReceiptInput.parse({ id: first.id, vendor: 'Typed by a person', amount: 9 }))).toMatchObject({ ok: true });
+  expect(await setReceiptExtraction(member, first.id, { read: reading })).toEqual({ ok: true, data: { written: false } });
+  expect(await setReceiptExtraction(member, first.id, { failed: true, keep: reading })).toEqual({ ok: true, data: { written: false } });
+  const kept = await a.c.from('finance_receipts').select('vendor, amount, status, extraction_error').eq('id', first.id).single();
+  expect(kept.data).toMatchObject({ vendor: 'Typed by a person', status: 'unmatched', extraction_error: null });
+  expect(Number(kept.data!.amount)).toBe(9);
+  expect(await getReceiptForReading(member, first.id)).toMatchObject({ ok: true, data: { status: 'unmatched' } });
+  await member.client.auth.signOut();
+}, 120_000);
+
+testWithStorage('a failed reading keeps what a person typed, clears the stamp, and the next reading replaces it', async () => {
+  const { a, owner, member } = await ownerAndMember('Receipts Read B');
+  const one = await receipt(a, 'typed.png');
+  // Typed straight into the boxes of a receipt still in review (a direct update, as a person's half-finished work).
+  expect((await a.c.from('finance_receipts').update({ vendor: 'Typed Sdn Bhd', amount: 12.5 }).eq('id', one.id)).error).toBeNull();
+  const held = await getReceiptForReading(member, one.id);
+  expect(held).toMatchObject({ ok: true, data: { details: { vendor: 'Typed Sdn Bhd', receipt_date: null, amount: 12.5, sst_amount: null } } });
+  if (!held.ok) return;
+
+  // The failure goes in with the values the receipt held: the function sets all four from what it is given.
+  expect(await setReceiptExtraction(member, one.id, { failed: true, keep: held.data.details })).toEqual({ ok: true, data: { written: true } });
+  const failed = await a.c.from('finance_receipts').select('vendor, amount, status, extraction_error, extracted_at').eq('id', one.id).single();
+  expect(failed.data).toMatchObject({ vendor: 'Typed Sdn Bhd', status: 'review', extraction_error: 'The receipt could not be read.', extracted_at: null });
+  expect(Number(failed.data!.amount)).toBe(12.5);
+
+  // Asked again, and this time something is read: it replaces what was there and clears the error.
+  expect(await setReceiptExtraction(owner, one.id, { read: { vendor: 'Read Sdn Bhd', receipt_date: null, amount: 20, sst_amount: null } })).toEqual({
+    ok: true, data: { written: true },
+  });
+  const read = await a.c.from('finance_receipts').select('vendor, amount, extraction_error, extracted_at').eq('id', one.id).single();
+  expect(read.data).toMatchObject({ vendor: 'Read Sdn Bhd', extraction_error: null });
+  expect(read.data!.extracted_at).not.toBeNull();
+  await member.client.auth.signOut();
+}, 120_000);
+
+testWithStorage('the file the model would be sent is fetched whole through the caller’s own link, and another workspace can do none of it', async () => {
+  const a = await confirmedOwner('Receipts Read C');
+  const owner = { client: a.c, orgId: a.orgId };
+  const b = await confirmedOwner('Receipts Read Outsider');
+  const outsiderHere = { client: b.c, orgId: a.orgId };
+  const one = await receipt(a, 'whole.png');
+
+  const file = await getReceiptFile(owner, one.id);
+  expect(file.ok).toBe(true);
+  if (!file.ok) return;
+  const link = await signReceiptLink(owner, file.data);
+  expect(link.ok).toBe(true);
+  if (!link.ok) return;
+  const bytes = await receiptBytes(link.data.url);
+  expect(bytes).not.toBeNull();
+  expect(Buffer.from(bytes!).equals(PNG)).toBe(true);
+  expect(sendableAs(bytes!, 'image/png')).toBe('ok');
+  // The same bytes under a receipt that said JPG would not be sent.
+  expect(sendableAs(bytes!, 'image/jpeg')).toBe('mismatch');
+
+  // Pointed at A's workspace with B's session: the receipt is not theirs to read, and nothing is written.
+  expect(await getReceiptForReading(outsiderHere, one.id)).toEqual({ ok: false, error: RECEIPT_READING_MESSAGES.gone });
+  expect(await setReceiptExtraction(outsiderHere, one.id, { read: { vendor: 'Outsider', receipt_date: null, amount: 1, sst_amount: null } })).toEqual({
+    ok: true, data: { written: false },
+  });
+  expect((await a.c.from('finance_receipts').select('vendor, extracted_at').eq('id', one.id).single()).data).toEqual({ vendor: null, extracted_at: null });
+  // Neither test workspace has an AI key, and the question is answered for the caller's own workspace.
+  expect(await workspaceKeyState(a.c)).toBe('none');
+  expect(await workspaceKeyState(b.c)).toBe('none');
 }, 120_000);

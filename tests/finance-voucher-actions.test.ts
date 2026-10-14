@@ -47,8 +47,8 @@ const actions = await import('@/app/(app)/finance/actions');
 
 /**
  * Pinned: the screens a voucher shows on, and the ones that count a draft or waiting refund as credit held (Invoices,
- * Credit Notes, Payments In, Customers & Suppliers). Nothing in this part posts, pays or voids, so the ledger screens
- * are not among them.
+ * Credit Notes, Payments In, Customers & Suppliers), then the three ledger screens: a voucher recorded as paid, marked
+ * paid or voided moves the books, and every voucher action refreshes the one list.
  */
 const PATHS = [
   '/finance/payment-vouchers',
@@ -61,6 +61,9 @@ const PATHS = [
   '/finance/credit-notes',
   '/finance/payments-in',
   '/finance/customers-suppliers',
+  '/finance/chart-of-accounts',
+  '/finance/journals',
+  '/finance/reports',
 ];
 /** What the row showed when the owner pressed Approve or Reject. */
 const DECIDE = {

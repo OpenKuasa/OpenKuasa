@@ -180,12 +180,13 @@ export function canEditExpenses(role: OrgRole, isDemo: boolean): boolean {
 /**
  * What the Expenses screen reads and what it lets each person do, decided on the server and nowhere else. The form's
  * contacts and categories are read only for someone who has the form; the accounts only for someone who may decide
- * (an owner or admin, who also mark an expense paid), so a member, a viewer and the demo are handed none.
+ * (an owner or admin, who also mark an expense paid), so a member, a viewer and the demo are handed none. The
+ * Categories card, and the read of every category behind it, are an owner's or admin's too (`managesCategories`).
  */
 export function expensesScreenPlan(role: OrgRole, isDemo: boolean) {
   const canEdit = canEditExpenses(role, isDemo);
   const canDecide = canEdit && can(role, 'sign-off-finance');
-  return { canEdit, canDecide, readsContacts: canEdit, readsCategories: canEdit, readsAccounts: canDecide };
+  return { canEdit, canDecide, readsContacts: canEdit, readsCategories: canEdit, readsAccounts: canDecide, managesCategories: canDecide };
 }
 
 /** Opening the Mark paid card for a row: its default date is the person's own date, read from their clock when they open it, never the server's. */

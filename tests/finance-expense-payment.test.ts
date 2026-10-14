@@ -212,16 +212,16 @@ describe('the Mark paid card', () => {
     expect(expensePayError(approved(), form({ reference: 'x'.repeat(201) }), ACCOUNTS)).toBe('That is too long. Keep it to 200 characters or fewer.');
   });
   it('says what is still to pay, what already stands against the expense, and what marking paid records', () => {
-    const VOUCHER = ' This records a payment voucher, paid now: it shows on Payment Vouchers and Banking.';
+    const VOUCHER = ' This records a payment voucher, paid now: it shows on Payment Vouchers and Banking. To undo a wrong one, void it on Payment Vouchers.';
     expect(expensePayHint(approved())).toBe(`RM 120.00 is still to pay on this expense. Paying less leaves the rest for another payment.${VOUCHER}`);
     expect(expensePayHint(approved({ paid: 30 }))).toBe(
       `RM 90.00 is still to pay on this expense: RM 30.00 is paid. Paying less leaves the rest for another payment.${VOUCHER}`,
     );
     expect(expensePayHint(approved({ held: 20 }))).toBe(
-      `RM 100.00 is still to pay on this expense: RM 20.00 is in a payment to be paid. Paying less leaves the rest for another payment.${VOUCHER}`,
+      `RM 100.00 is still to pay on this expense: RM 20.00 is in a payment not yet paid. Paying less leaves the rest for another payment.${VOUCHER}`,
     );
     expect(expensePayHint(approved({ paid: 30, held: 20 }))).toBe(
-      `RM 70.00 is still to pay on this expense: RM 30.00 is paid and RM 20.00 is in a payment to be paid. Paying less leaves the rest for another payment.${VOUCHER}`,
+      `RM 70.00 is still to pay on this expense: RM 30.00 is paid and RM 20.00 is in a payment not yet paid. Paying less leaves the rest for another payment.${VOUCHER}`,
     );
     // An expense that can no longer be paid says only that: nothing about a voucher that will not be recorded.
     expect(expensePayHint(approved({ paid: 120, display_status: 'paid' }))).toBe('Nothing is left to pay on this expense.');

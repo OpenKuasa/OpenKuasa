@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Ban, Check, Download, PieChart, Plus, Search, Trash2, TrendingUp, Wallet } from 'lucide-react';
+import { Ban, Check, CircleCheck, Download, Pencil, PieChart, Plus, Search, Send, Trash2, TrendingUp, Wallet } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { AreaTrend, DonutStat, type Series } from '@/components/charts';
 import { ConfirmRow } from '@/components/finance/confirm-row';
@@ -22,6 +22,7 @@ import { LiveDot } from '@/components/ui/live-dot';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { localIsoDate } from '@/lib/finance/bill-math';
+import type { BillListRow } from '@/lib/finance/bills';
 import type { PaymentVoucherKind, PaymentVoucherRow } from '@/lib/finance/cash-book';
 import {
   CASH_BOOK_PERIODS,
@@ -43,13 +44,16 @@ import {
 import { csvFileName } from '@/lib/finance/csv';
 import type { ExpenseCategory } from '@/lib/finance/expenses';
 import { rm } from '@/lib/finance/format';
-import type { FinanceAccount } from '@/lib/finance/money';
+import type { FinanceAccount, PaymentOutRow } from '@/lib/finance/money';
+import type { OrderBilling } from '@/lib/finance/purchase-views';
 import type { FinResult } from '@/lib/finance/result';
 import { LATEST_ROWS, displayDate } from '@/lib/finance/view-helpers';
 import {
   type QuestionPart,
   type VoucherAction,
   type WrittenVoucher,
+  draftVoucherForm,
+  voucherCategoryChoices,
   voucherActions,
   voucherAnswerIsStale,
   voucherControls,
@@ -58,26 +62,38 @@ import {
   voucherKindLink,
   voucherName,
   voucherDetailsLine,
+  voucherPaidEffect,
+  voucherPayableBills,
   voucherQuestion,
   writtenVoucherTitle,
 } from '@/lib/finance/voucher-form';
+import { markVoucherPaidInput } from '@/lib/finance/vouchers';
 import { cn } from '@/lib/utils';
 
 export type VoucherActions = VoucherFormActions & {
+  submit: (input: unknown) => Promise<FinResult<{ id: string }>>;
   approve: (input: unknown) => Promise<FinResult<{ id: string }>>;
   reject: (input: unknown) => Promise<FinResult<{ id: string }>>;
+  markPaid: (input: unknown) => Promise<FinResult<{ id: string; number: string }>>;
   remove: (input: unknown) => Promise<FinResult<{ id: string }>>;
+  voidVoucher: (input: unknown) => Promise<FinResult<{ id: string }>>;
 };
 
 /** What only a person who may edit is given: the actions, whether they may decide, and what the voucher form offers. */
 export type VouchersWriter = {
   actions: VoucherActions;
-  /** True for an owner or admin: they approve and reject, and what they save is approved. */
+  /** True for an owner or admin: they approve, reject, mark paid and void, and what they save is approved. */
   canDecide: boolean;
   /** Active accounts, contacts and expense categories, for the form. */
   accounts: FinanceAccount[];
   contacts: { id: string; name: string }[];
   categories: ExpenseCategory[];
+  /** Every bill, to find the ones a voucher can still pay. */
+  bills: BillListRow[];
+  /** One row per bill a payment out pays: what each bill has held against it, and the bills of a draft being edited. */
+  payments: PaymentOutRow[];
+  /** Approved and closed purchase orders, to advise on the bills ticked on the form. */
+  orders: OrderBilling[];
   /**
    * By voucher id, the advice about the purchase orders behind the bills a waiting voucher pays
    * (`orderNotesByVoucher`). Empty for someone who may not decide: they are never asked to approve.
@@ -98,8 +114,13 @@ const STATUS_STYLES: Record<PaymentVoucherRow['status'], string> = {
   void: 'bg-muted text-muted-foreground line-through',
 };
 
-/** One thing open at a time: the voucher form, or a question in one row. */
-type Open = { kind: 'form'; today: string } | { kind: VoucherAction; row: PaymentVoucherRow } | null;
+/** One thing open at a time: the voucher form (new, or for the draft of one row), or a question in one row. */
+type Open =
+  | { kind: 'form'; today: string; draft?: PaymentVoucherRow }
+  | { kind: Exclude<VoucherAction, 'edit' | 'markPaid'>; row: PaymentVoucherRow }
+  // Marking paid asks the day it was paid, in the question itself.
+  | { kind: 'markPaid'; row: PaymentVoucherRow; paidOn: string }
+  | null;
 
 /**
  * Payment Vouchers: every movement of money out, one row each. The chosen
@@ -107,10 +128,14 @@ type Open = { kind: 'form'; today: string } | { kind: VoucherAction; row: Paymen
  * waiting for approval or still to be paid stay in every period, as their
  * cards count them), with search, status and kind filters, "View all" and
  * Export working on top of it; Export gives what the table would show with
- * "View all". A person who may edit (`writer`) also gets New voucher, and
+ * "View all". A person who may edit (`writer`) also gets New voucher (for a
+ * category or for a supplier's bills, saved as a draft or sent for approval),
+ * Edit and Send for approval on a draft, and
  * Delete on a voucher that is not yet "To be paid", or that is and is of
  * a kind that belongs to this screen; an owner or
- * admin also gets Approve and Reject on one that is waiting. Each row's menu
+ * admin also gets Approve and Reject on one that is waiting, Mark as paid on
+ * one of this screen's kinds that is "To be paid", and Void on a paid one of
+ * those kinds. Each row's menu
  * holds only what the database will let that person do (`voucherActions`).
  * From "To be paid" on, a payment to a supplier is paid, voided and deleted on Payments Out and a
  * refund on Refunds, and each such row links there.
@@ -129,7 +154,7 @@ export function PaymentVouchersView({
   /** False for sample data, which keeps its own fixed date. */
   followClock?: boolean;
   writer?: VouchersWriter;
-  /** Opens a question on a row at the start. Only for tests, which cannot press a menu item. */
+  /** Opens a question on a row, or (`edit`) the form on a draft, at the start. Only for tests, which cannot press a menu item. */
   initialAsk?: { kind: VoucherAction; id: string };
 }) {
   const today = useLocalToday(serverToday, followClock);
@@ -140,9 +165,11 @@ export function PaymentVouchersView({
   const [showAll, setShowAll] = useState(false);
   const [open, setOpen] = useState<Open>(() => {
     const row = initialAsk ? rows.find((v) => v.transaction_id === initialAsk.id) : undefined;
-    return initialAsk && row ? { kind: initialAsk.kind, row } : null;
+    if (!initialAsk || !row) return null;
+    if (initialAsk.kind === 'edit') return { kind: 'form', today: serverToday, draft: row };
+    return initialAsk.kind === 'markPaid' ? { kind: 'markPaid', row, paidOn: serverToday } : { kind: initialAsk.kind, row };
   });
-  // The voucher just recorded, approved or rejected; whether to say anything about it is decided at render, from the rows listed now.
+  // The voucher just recorded, approved, rejected, marked paid or voided; whether to say anything about it is decided at render, from the rows listed now.
   const [written, setWritten] = useState<WrittenVoucher | null>(null);
   const confirm = useFinanceAction();
 
@@ -188,6 +215,14 @@ export function PaymentVouchersView({
     setWritten(null);
     setOpen(next);
   };
+  /**
+   * Forgets an earlier write when the list changes under a note that is not showing, so a note never turns up later
+   * by itself. It would take the focus from the filter or the search being used: the Enter that chose a filter then
+   * pressed the note's Close as well, and the letters typed next went to that button.
+   */
+  const listChanged = () => {
+    if (!hiddenNote) setWritten(null);
+  };
   /** Closes whatever is open, and the message that went with it. */
   const close = () => {
     confirm.clear();
@@ -201,12 +236,21 @@ export function PaymentVouchersView({
 
   const menuItem = (row: PaymentVoucherRow, action: VoucherAction): RowMenuItem => {
     switch (action) {
+      case 'edit':
+        return { label: 'Edit', icon: Pencil, opens: true, onSelect: () => ask({ kind: 'form', today: localIsoDate(new Date()), draft: row }) };
+      case 'submit':
+        return { label: 'Send for approval', icon: Send, opens: true, onSelect: () => ask({ kind: 'submit', row }) };
       case 'approve':
         return { label: 'Approve', icon: Check, opens: true, onSelect: () => ask({ kind: 'approve', row }) };
       case 'reject':
         return { label: 'Reject', icon: Ban, destructive: true, opens: true, onSelect: () => ask({ kind: 'reject', row }) };
+      case 'markPaid':
+        // The day it was paid starts as the person's own today.
+        return { label: 'Mark as paid', icon: CircleCheck, opens: true, onSelect: () => ask({ kind: 'markPaid', row, paidOn: localIsoDate(new Date()) }) };
       case 'delete':
         return { label: 'Delete', icon: Trash2, destructive: true, opens: true, onSelect: () => ask({ kind: 'delete', row }) };
+      case 'void':
+        return { label: 'Void', icon: Ban, destructive: true, opens: true, onSelect: () => ask({ kind: 'void', row }) };
     }
   };
 
@@ -214,20 +258,25 @@ export function PaymentVouchersView({
    * Runs a write on the voucher as the row shows it now. If it was decided, changed or deleted since, the
    * question closes and the refreshed row (or its absence) says what it holds; the sentence stays above the table.
    */
-  const settle = (call: () => Promise<FinResult<{ id: string }>>, done: () => void) =>
+  const settle = <T extends { id: string }>(call: () => Promise<FinResult<T>>, done: () => void) =>
     confirm.run(async () => {
       const result = await call();
       if (!result.ok && voucherAnswerIsStale(result.error)) setOpen(null);
       return result;
     }, done);
 
-  const decided = (row: PaymentVoucherRow, status: 'scheduled' | 'rejected'): WrittenVoucher => ({
+  /** The voucher after a write from its row; `date` is given when the write moved it (the day it was paid). */
+  const decided = (
+    row: PaymentVoucherRow,
+    status: 'pending_approval' | 'scheduled' | 'rejected' | 'posted' | 'void',
+    date = row.txn_date,
+  ): WrittenVoucher => ({
     id: row.transaction_id,
     status,
     recorded: false,
     payee: row.party_name,
     amount: row.amount,
-    date: row.txn_date,
+    date,
   });
 
   const words = (parts: QuestionPart[]) =>
@@ -241,7 +290,7 @@ export function PaymentVouchersView({
       ),
     );
 
-  /** What the decision is matched on and the table does not draw, as text that wraps. */
+  /** What sending and a decision are matched on and the table does not draw, as text that wraps. */
   const details = (row: PaymentVoucherRow) => (
     <p className="mt-1 break-words text-xs text-muted-foreground">{voucherDetailsLine(row)}</p>
   );
@@ -249,6 +298,26 @@ export function PaymentVouchersView({
   const question = (row: PaymentVoucherRow) => {
     if (!writer || !asking || asking.row.transaction_id !== row.transaction_id) return null;
     const { actions } = writer;
+    if (asking.kind === 'submit') {
+      return (
+        <ConfirmRow
+          key={row.transaction_id}
+          colSpan={columns}
+          tone="default"
+          icon={Send}
+          label={`Send ${voucherName(row)} for approval`}
+          confirmLabel="Send for approval"
+          pendingLabel="Sending…"
+          pending={confirm.pending}
+          error={confirm.error}
+          onConfirm={() => settle(() => actions.submit(voucherDecisionPayload(row)), () => closeSaying(decided(row, 'pending_approval')))}
+          onCancel={close}
+        >
+          {words(voucherQuestion('submit', row))}
+          {details(row)}
+        </ConfirmRow>
+      );
+    }
     if (asking.kind === 'approve') {
       // The same advice, in the same words, as Payments Out gives before a supplier payment is marked paid.
       const orderNotes = writer.orderNotes[row.transaction_id] ?? [];
@@ -295,6 +364,72 @@ export function PaymentVouchersView({
         </ConfirmRow>
       );
     }
+    if (asking.kind === 'markPaid') {
+      const paidOn = asking.paidOn;
+      const confirmPaid = () => {
+        if (confirm.pending) return;
+        const parsed = markVoucherPaidInput.safeParse({ id: row.transaction_id, paid_on: paidOn });
+        if (!parsed.success) {
+          confirm.fail(parsed.error.issues[0]?.message ?? 'Enter the date it was paid.');
+          return;
+        }
+        // Paying moves the voucher's date to the day it was paid, so that is the date the note names.
+        settle(() => actions.markPaid(parsed.data), () => closeSaying(decided(row, 'posted', parsed.data.paid_on)));
+      };
+      return (
+        <ConfirmRow
+          key={row.transaction_id}
+          colSpan={columns}
+          tone="default"
+          icon={CircleCheck}
+          label={`Mark ${voucherName(row)} as paid`}
+          confirmLabel="Mark as paid"
+          pendingLabel="Saving…"
+          pending={confirm.pending}
+          error={confirm.error}
+          onConfirm={confirmPaid}
+          onCancel={close}
+        >
+          <label className="flex flex-wrap items-center gap-2">
+            <span>{words(voucherQuestion('markPaid', row))}</span>
+            <Input
+              type="date"
+              className="w-40"
+              value={paidOn}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter') return;
+                e.preventDefault();
+                confirmPaid();
+              }}
+              onChange={(e) => {
+                confirm.clear();
+                setOpen({ kind: 'markPaid', row, paidOn: e.target.value });
+              }}
+            />
+          </label>
+          <p className="mt-1 text-muted-foreground">{voucherPaidEffect(row)}</p>
+          {details(row)}
+        </ConfirmRow>
+      );
+    }
+    if (asking.kind === 'void') {
+      return (
+        <ConfirmRow
+          key={row.transaction_id}
+          colSpan={columns}
+          icon={Ban}
+          label={`Void ${voucherName(row)}`}
+          confirmLabel="Void voucher"
+          pendingLabel="Voiding…"
+          pending={confirm.pending}
+          error={confirm.error}
+          onConfirm={() => settle(() => actions.voidVoucher({ id: row.transaction_id }), () => closeSaying(decided(row, 'void')))}
+          onCancel={close}
+        >
+          {words(voucherQuestion('void', row))}
+        </ConfirmRow>
+      );
+    }
     return (
       <ConfirmRow
         key={row.transaction_id}
@@ -319,7 +454,13 @@ export function PaymentVouchersView({
         subtitle="Money paid out to suppliers, customers and expenses, Saudara."
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <Select value={period} onValueChange={(v) => setPeriod(v as CashBookPeriod)}>
+            <Select
+              value={period}
+              onValueChange={(v) => {
+                listChanged();
+                setPeriod(v as CashBookPeriod);
+              }}
+            >
               <SelectTrigger className="w-40" aria-label="Period">
                 <SelectValue />
               </SelectTrigger>
@@ -349,11 +490,17 @@ export function PaymentVouchersView({
       <BentoGrid>
         {writer && open?.kind === 'form' ? (
           <VoucherFormCard
+            // A different draft, or a new voucher after one, starts the card again.
+            key={open.draft?.transaction_id ?? 'new'}
             accounts={writer.accounts}
             contacts={writer.contacts}
-            categories={writer.categories}
+            categories={voucherCategoryChoices(writer.categories, open.draft ?? null)}
+            // What the draft being edited holds of its bills is its own to take again.
+            payable={voucherPayableBills(writer.bills, writer.payments, open.draft?.transaction_id ?? null)}
+            orders={writer.orders}
             today={open.today}
             canDecide={writer.canDecide}
+            draft={open.draft ? draftVoucherForm(open.draft, writer.payments, writer.bills, writer.accounts) : undefined}
             actions={writer.actions}
             onClose={(recorded) => (recorded ? closeSaying({ ...recorded, recorded: true }) : close())}
           />
@@ -392,7 +539,15 @@ export function PaymentVouchersView({
           flush
           action={
             matching.length > LATEST_ROWS ? (
-              <Button variant="outline" size="sm" aria-pressed={showAll} onClick={() => setShowAll((v) => !v)}>
+              <Button
+                variant="outline"
+                size="sm"
+                aria-pressed={showAll}
+                onClick={() => {
+                  listChanged();
+                  setShowAll((v) => !v);
+                }}
+              >
                 {showAll ? 'Show latest' : 'View all'}
               </Button>
             ) : undefined
@@ -408,10 +563,19 @@ export function PaymentVouchersView({
                 placeholder="Search payees, numbers or categories…"
                 className="pl-8"
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => {
+                  listChanged();
+                  setQuery(e.target.value);
+                }}
               />
             </div>
-            <Select value={filter} onValueChange={(v) => setFilter(v as PaymentVoucherFilter)}>
+            <Select
+              value={filter}
+              onValueChange={(v) => {
+                listChanged();
+                setFilter(v as PaymentVoucherFilter);
+              }}
+            >
               <SelectTrigger className="w-44" aria-label="Status">
                 <SelectValue />
               </SelectTrigger>
@@ -424,7 +588,13 @@ export function PaymentVouchersView({
                 <SelectItem value="void">Void</SelectItem>
               </SelectContent>
             </Select>
-            <Select value={kind} onValueChange={(v) => setKind(v as 'all' | PaymentVoucherKind)}>
+            <Select
+              value={kind}
+              onValueChange={(v) => {
+                listChanged();
+                setKind(v as 'all' | PaymentVoucherKind);
+              }}
+            >
               <SelectTrigger className="w-44" aria-label="Kind">
                 <SelectValue />
               </SelectTrigger>

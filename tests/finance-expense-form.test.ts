@@ -319,6 +319,7 @@ describe('who the Expenses screen reads for, and who is drawn the Mark paid card
         readsContacts: true,
         readsCategories: true,
         readsAccounts: true,
+        managesCategories: true,
       });
     }
   });
@@ -329,10 +330,11 @@ describe('who the Expenses screen reads for, and who is drawn the Mark paid card
       readsContacts: true,
       readsCategories: true,
       readsAccounts: false,
+      managesCategories: false,
     });
   });
   it('gives a viewer, and anyone in the demo workspace, nothing to write and no read for it', () => {
-    const none = { canEdit: false, canDecide: false, readsContacts: false, readsCategories: false, readsAccounts: false };
+    const none = { canEdit: false, canDecide: false, readsContacts: false, readsCategories: false, readsAccounts: false, managesCategories: false };
     expect(expensesScreenPlan('viewer', false)).toEqual(none);
     expect(expensesScreenPlan('owner', true)).toEqual(none);
     expect(expensesScreenPlan('admin', true)).toEqual(none);

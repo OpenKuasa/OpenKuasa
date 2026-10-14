@@ -17,6 +17,7 @@ import {
   reviewFormOf,
   reviewFormProblem,
 } from '@/lib/finance/receipt-inbox';
+import { type SuggestedCategory, suggestedCategoryLine } from '@/lib/finance/receipt-reading';
 import { INBOX_READING_NOTES, INBOX_TYPE_LABELS, fileSizeLabel, inboxReadingNote } from '@/lib/finance/receipt-views';
 import type { InboxReceiptRow } from '@/lib/finance/receipts';
 import type { FinResult } from '@/lib/finance/result';
@@ -93,7 +94,9 @@ function ReceiptPreview({ row, linkOf }: { row: InboxReceiptRow; linkOf: Receipt
  * The review card: the receipt's file beside the four details a person types
  * (vendor, date, amount with its SST inside it, SST). Saving takes a receipt
  * out of "To review". Every box may be left empty. A PDF and a stored HEIC
- * are not previewed: they are downloads.
+ * are not previewed: they are downloads. When a reading by AI suggested a
+ * category, a line says which: the card has no category box, so it is only
+ * told here and chosen on the expense form.
  */
 export function ReceiptReviewCard({
   row,
@@ -101,10 +104,13 @@ export function ReceiptReviewCard({
   review,
   linkOf,
   blocked,
+  suggestion = null,
   onClose,
   onSaved,
 }: {
   row: InboxReceiptRow;
+  /** A category a reading by AI suggested for this receipt, if one still stands. Its name is drawn as text. */
+  suggestion?: SuggestedCategory | null;
   /** Why this receipt can no longer be saved (someone else deleted or matched it), or null. The card stays, with what was typed. */
   blocked: string | null;
   /** The person's own date: a receipt is not dated after it. */
@@ -197,6 +203,9 @@ export function ReceiptReviewCard({
             <p className="text-sm text-muted-foreground md:col-span-6">
               {note === 'failed' ? INBOX_READING_FAILED_REVIEW : INBOX_READING_NOTES[note]}
             </p>
+          ) : null}
+          {suggestion ? (
+            <p className="whitespace-normal break-words text-sm text-muted-foreground md:col-span-6">{suggestedCategoryLine(suggestion)}</p>
           ) : null}
           <div className="space-y-1.5 md:col-span-6">
             <Label htmlFor={`${id}-vendor`}>Vendor</Label>

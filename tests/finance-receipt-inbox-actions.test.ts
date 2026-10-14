@@ -202,6 +202,7 @@ describe('how the code is kept safe', () => {
       'attachReceiptAction',
       'deleteReceiptAction',
       'detachReceiptAction',
+      'readReceiptAction',
       'receiptLinkAction',
       'receiptToBillAction',
       'receiptToExpenseAction',

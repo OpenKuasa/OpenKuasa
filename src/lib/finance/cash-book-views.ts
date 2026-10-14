@@ -55,8 +55,8 @@ export function emptyPeriodText(noun: 'receipts' | 'vouchers', period: CashBookP
  * The line under the table. `shown` of `matching` rows are on screen; `total`
  * is every row the table holds for the period before search and filters, and
  * `keptEarlier` / `keptLater` how many of those are dated outside the period
- * and kept in it anyway (drafts for receipts, money still waiting for
- * vouchers). Null when the workspace has no rows at all, because the table
+ * and kept in it anyway (drafts for receipts, money still waiting, and
+ * drafts, for vouchers). Null when the workspace has no rows at all, because the table
  * already says so.
  */
 export function cashBookCountLine(args: {
@@ -80,7 +80,7 @@ export function cashBookCountLine(args: {
     if (noun === 'receipts') {
       keptText = which ? `${kept} ${which} ${kept === 1 ? 'draft' : 'drafts'}` : `${kept} more ${kept === 1 ? 'draft' : 'drafts'} dated outside it`;
     } else {
-      keptText = which ? `${kept} ${which} ${kept === 1 ? 'one' : 'ones'} still waiting` : `${kept} more dated outside it, still waiting`;
+      keptText = which ? `${kept} ${which} ${kept === 1 ? 'one' : 'ones'} still waiting or in draft` : `${kept} more dated outside it, still waiting or in draft`;
     }
   }
   const filtered = matching !== total;
@@ -434,14 +434,16 @@ export function paymentVouchersView(rows: PaymentVoucherRow[], today: string, pe
 /**
  * The vouchers the table lists for a period: the same "is it in the period"
  * test as the cards (`inPeriod` on the voucher's date), so a figure on a card
- * is always found in the table with the same period selected. The exception
- * is money still waiting: the Pending approval card and the "more to be paid"
- * line on the Vouchers card count those whatever date they carry (what is
- * waiting is waiting now), so a voucher waiting for approval or still to be
- * paid stays in the table in every period.
+ * is always found in the table with the same period selected. The exceptions
+ * are money still waiting and a draft. The Pending approval card and the "more
+ * to be paid" line on the Vouchers card count the first whatever date they
+ * carry (what is waiting is waiting now), so a voucher waiting for approval or
+ * still to be paid stays in the table in every period. A draft stays in it too,
+ * as a receipt's does: it holds its part of a bill until it is sent or deleted,
+ * so it must be findable however old its date. No figure counts a draft.
  */
 export function paymentVouchersInPeriod(rows: PaymentVoucherRow[], today: string, period: CashBookPeriod): PaymentVoucherRow[] {
-  return rows.filter((v) => isWaitingVoucher(v) || v.status === 'scheduled' || inPeriod(v.txn_date, today, period));
+  return rows.filter((v) => v.status === 'draft' || isWaitingVoucher(v) || v.status === 'scheduled' || inPeriod(v.txn_date, today, period));
 }
 
 /** `open` is every voucher that is neither void nor rejected: what the table shows until a status is chosen. */
