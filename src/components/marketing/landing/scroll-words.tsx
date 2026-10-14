@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
-import { animate, createScope, onScroll, splitText, stagger } from 'animejs';
+import { useRef } from 'react';
+import { useAnimeEffect } from './use-anime-effect';
 
 /**
  * Text whose words light up one after another as it scrolls up the viewport.
@@ -18,7 +18,7 @@ export function ScrollWords({
 }) {
   const ref = useRef<HTMLHeadingElement & HTMLParagraphElement>(null);
 
-  useEffect(() => {
+  useAnimeEffect(({ animate, createScope, onScroll, splitText, stagger }) => {
     const el = ref.current;
     if (!el) return;
 
@@ -29,7 +29,7 @@ export function ScrollWords({
 
       const { words } = splitText(el, { words: true });
       animate(words, {
-        opacity: [0.12, 1],
+        opacity: [0, 1],
         y: [14, 0],
         ease: 'linear',
         delay: stagger(60),
@@ -43,7 +43,7 @@ export function ScrollWords({
     });
 
     return () => scope.revert();
-  }, []);
+  });
 
   return (
     <Tag ref={ref} className={className}>

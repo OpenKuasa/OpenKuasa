@@ -1,13 +1,13 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
-import { animate, createScope, onScroll, splitText, stagger, utils } from 'animejs';
 import { Button } from '@/components/ui/button';
 import { GitHubIcon } from '@/components/brand/github-icon';
 import { REPO_URL } from '@/config/marketing';
 import { ScrollWords } from './scroll-words';
+import { useAnimeEffect } from './use-anime-effect';
 
 const STATS = [
   { value: 6, suffix: '', label: 'products' },
@@ -34,7 +34,7 @@ const POINTS = [
 export function OpenSource() {
   const root = useRef<HTMLElement>(null);
 
-  useEffect(() => {
+  useAnimeEffect(({ animate, createScope, onScroll, splitText, stagger, utils }) => {
     const scope = createScope({
       root,
       mediaQueries: { reduceMotion: '(prefers-reduced-motion: reduce)' },
@@ -89,7 +89,7 @@ export function OpenSource() {
     });
 
     return () => scope.revert();
-  }, []);
+  });
 
   return (
     <section
