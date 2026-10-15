@@ -220,7 +220,7 @@ describe('each write action', () => {
     expect(ctl.calls[0].input).toEqual({
       ...quotation,
       notes: null,
-      lines: [{ product_id: null, description: 'Design work', quantity: 1.235, uom: null, pack_size: null, unit_price: 12.5, sst_rate: 0 }],
+      lines: [{ product_id: null, description: 'Design work', quantity: 1.235, uom: null, pack_size: null, unit_price: 12.5, sst_rate: 0, discount_pct: null, discount_amount: null }],
     });
   });
 

@@ -73,7 +73,7 @@ describe('a saved draft, as the form shows it', () => {
     expect(purchaseOrderFormFromDetail(detail)).toEqual({
       id: PO, supplier_id: SUPPLIER, po_date: '2026-10-01', expected_date: '', payment_terms_days: '', termsEdited: true,
       delivery_address: 'Lot 3, Shah Alam', notes: '',
-      lines: [{ key: LINE_1, product_id: PRODUCT, description: 'Printer paper', quantity: '5', uom: 'ream', pack_size: 'box of 5', unit_price: '12.5', sst_rate: '6' }],
+      lines: [{ key: LINE_1, product_id: PRODUCT, description: 'Printer paper', quantity: '5', uom: 'ream', pack_size: 'box of 5', unit_price: '12.5', sst_rate: '6', discount_pct: '', discount_amount: '' }],
     });
     expect(purchaseOrderFormFromDetail({ ...detail, payment_terms_days: 0, expected_date: '2026-10-20' })).toMatchObject({
       payment_terms_days: '0', expected_date: '2026-10-20',

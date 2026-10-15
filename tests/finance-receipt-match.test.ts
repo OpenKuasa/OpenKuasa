@@ -311,7 +311,7 @@ describe('the forms, pre-filled from a receipt', () => {
     expect(form.id).toBeUndefined();
     expect(form).toMatchObject({ supplier_id: 'c1', bill_date: '2026-10-03', due_date: '2026-10-17', dueEdited: false, purchase_order_id: '', category_id: 'cat-default' });
     expect(form.lines).toEqual([
-      { key: 'receipt-0', product_id: '', description: 'Receipt: Shell Bangsar', quantity: '1', uom: '', pack_size: '', unit_price: '142.50', sst_rate: '0' },
+      { key: 'receipt-0', product_id: '', description: 'Receipt: Shell Bangsar', quantity: '1', uom: '', pack_size: '', unit_price: '142.50', sst_rate: '0', discount_pct: '', discount_amount: '' },
     ]);
     const bare = billFormFromReceipt({ vendor: null, receipt_date: null, amount: null, sst_amount: null }, contacts, '2026-10-12');
     expect(bare).toMatchObject({ supplier_id: '', bill_date: '2026-10-12', due_date: '2026-10-12', category_id: '' });

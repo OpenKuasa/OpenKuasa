@@ -63,8 +63,8 @@ describe('a saved draft, as the form shows it', () => {
     expect(rfqFormFromDetail(detail)).toEqual({
       id: RFQ, supplier_id: SUPPLIER, rfq_date: '2026-10-01', reply_by: '', notes: '',
       lines: [
-        { key: LINE_1, product_id: PRODUCT, description: 'Printer paper', quantity: '5', uom: 'ream', pack_size: 'box of 5', unit_price: '', sst_rate: '6' },
-        { key: LINE_2, product_id: '', description: 'Sample', quantity: '1', uom: '', pack_size: '', unit_price: '0', sst_rate: '0' },
+        { key: LINE_1, product_id: PRODUCT, description: 'Printer paper', quantity: '5', uom: 'ream', pack_size: 'box of 5', unit_price: '', sst_rate: '6', discount_pct: '', discount_amount: '' },
+        { key: LINE_2, product_id: '', description: 'Sample', quantity: '1', uom: '', pack_size: '', unit_price: '0', sst_rate: '0', discount_pct: '', discount_amount: '' },
       ],
     });
   });
@@ -90,8 +90,8 @@ describe('a copy of an RFQ, for another supplier', () => {
     const form = rfqFormCopiedFrom(priced, today);
     expect(form.notes).toBe('Deliver to the back door');
     expect(form.lines.map((line) => ({ ...line, key: undefined }))).toEqual([
-      { key: undefined, product_id: PRODUCT, description: 'Printer paper', quantity: '5', uom: 'ream', pack_size: 'box of 5', unit_price: '', sst_rate: '6' },
-      { key: undefined, product_id: '', description: 'Sample', quantity: '1', uom: '', pack_size: '', unit_price: '', sst_rate: '0' },
+      { key: undefined, product_id: PRODUCT, description: 'Printer paper', quantity: '5', uom: 'ream', pack_size: 'box of 5', unit_price: '', sst_rate: '6', discount_pct: '', discount_amount: '' },
+      { key: undefined, product_id: '', description: 'Sample', quantity: '1', uom: '', pack_size: '', unit_price: '', sst_rate: '0', discount_pct: '', discount_amount: '' },
     ]);
   });
   it('gives the lines new keys, none of them the source line ids, and no two the same', () => {

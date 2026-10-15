@@ -130,7 +130,7 @@ describe('quotation writes', () => {
     expect(calls[0].args).toEqual({
       target_org: 'org-1',
       quotation: { id: ID, customer_id: CUSTOMER, quote_date: '2026-10-01', valid_until: '2026-10-31', notes: null },
-      lines: [{ product_id: null, description: 'Design work', quantity: 10, uom: null, pack_size: null, unit_price: 12.5, sst_rate: 0 }],
+      lines: [{ product_id: null, description: 'Design work', quantity: 10, uom: null, pack_size: null, unit_price: 12.5, sst_rate: 0, discount_pct: null, discount_amount: null }],
     });
   });
   it('sends and returns the number', async () => {

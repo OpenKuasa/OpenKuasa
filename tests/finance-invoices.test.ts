@@ -54,7 +54,7 @@ describe('saveInvoiceInput', () => {
     });
     expect(parsed.notes).toBeNull();
     expect(parsed.lines[0]).toEqual({
-      product_id: null, description: 'Design work', quantity: 1.235, uom: null, pack_size: null, unit_price: 0.1235, sst_rate: 1.01,
+      product_id: null, description: 'Design work', quantity: 1.235, uom: null, pack_size: null, unit_price: 0.1235, sst_rate: 1.01, discount_pct: null, discount_amount: null,
     });
     expect(saveInvoiceInput.parse({ ...valid, lines: [{ ...line, quantity: 0.0005 }] }).lines[0].quantity).toBe(0.001);
   });
@@ -134,7 +134,7 @@ describe('invoice writes', () => {
     expect(calls[0].args).toEqual({
       target_org: 'org-1',
       invoice: { id: ID, customer_id: CUSTOMER, invoice_date: '2026-10-01', due_date: '2026-10-31', notes: null },
-      lines: [{ product_id: null, description: 'Design work', quantity: 10, uom: null, pack_size: null, unit_price: 12.5, sst_rate: 0 }],
+      lines: [{ product_id: null, description: 'Design work', quantity: 10, uom: null, pack_size: null, unit_price: 12.5, sst_rate: 0, discount_pct: null, discount_amount: null }],
     });
   });
   it('posts and returns the number', async () => {
