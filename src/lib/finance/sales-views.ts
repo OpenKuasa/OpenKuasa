@@ -260,12 +260,13 @@ export function invoiceActions(invoice: InvoiceListRow, can: InvoiceCan): Invoic
 
 /**
  * The invoices table as a CSV file. Amounts are numbers, so a spreadsheet can
- * add them up: Total − Paid − Credited + Refunded is the Balance, which is
- * below zero for a customer in credit.
+ * add them up: Total − Paid − Credited + Refunded − Set off is the Balance,
+ * which is below zero for a customer in credit. Set off (what contra entries
+ * set off) is the last column, so the columns before it keep their places.
  */
 export function invoicesCsv(invoices: InvoiceListRow[]): string {
   return toCsv(
-    ['No.', 'Date', 'Customer', 'Due', 'Total', 'Paid', 'Credited', 'Refunded', 'Set off', 'Balance', 'Status', 'e-Invois'],
+    ['No.', 'Date', 'Customer', 'Due', 'Total', 'Paid', 'Credited', 'Refunded', 'Balance', 'Status', 'e-Invois', 'Set off'],
     invoices.map((i) => [
       i.invoice_no,
       i.invoice_date,
@@ -275,10 +276,10 @@ export function invoicesCsv(invoices: InvoiceListRow[]): string {
       i.paid,
       i.credited,
       i.refunded,
-      i.set_off ?? 0,
       owed(i),
       INVOICE_STATUS_LABELS[i.display_status],
       EINVOICE_STATUS_LABELS[i.einvoice_status],
+      i.set_off ?? 0,
     ]),
   );
 }
