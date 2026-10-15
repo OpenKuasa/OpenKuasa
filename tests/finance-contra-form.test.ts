@@ -80,7 +80,7 @@ describe('who and what a contra entry can set off', () => {
   });
 
   it('keeps the contact of a draft being edited even when it has nothing left to set off', () => {
-    expect(contraParties(contacts, [], [], TAN).map((p) => p.id)).toEqual([TAN]);
+    expect(contraParties(contacts, [], [], [TAN]).map((p) => p.id)).toEqual([TAN]);
     expect(contraParties(contacts, [], []).map((p) => p.id)).toEqual([]);
   });
 });

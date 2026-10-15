@@ -56,16 +56,17 @@ export type ContraParty = { id: string; name: string; invoices: ContraDocument[]
 
 /**
  * The contacts the form offers, by name: active, both a customer and a supplier, and with at least one invoice and
- * one bill that can be set off. `keep` is the contact of a draft being edited, offered even when it no longer
- * qualifies, so the form shows what the draft holds. `invoices` and `bills` are what Payments In and Payments Out
+ * one bill that can be set off. `keep` are the contacts of the drafts, offered even when one no longer qualifies,
+ * so the form for a draft shows what it holds. `invoices` and `bills` are what Payments In and Payments Out
  * would offer (`receivableInvoices`, `payableBills`).
  */
 export function contraParties(
   contacts: ContraContact[],
   invoices: ReceivableInvoice[],
   bills: PayableBill[],
-  keep?: string,
+  keep: string[] = [],
 ): ContraParty[] {
+  const kept = new Set(keep);
   const both = new Set(contacts.filter((c) => c.active && c.is_customer && c.is_supplier).map((c) => c.id));
   const doc = (d: { id: string; due_date: string; overdue: boolean; balance: number; payable: number }, number: string, held: number): ContraDocument => ({
     id: d.id,
@@ -77,14 +78,14 @@ export function contraParties(
     payable: d.payable,
   });
   return contacts
-    .filter((c) => c.id === keep || both.has(c.id))
+    .filter((c) => kept.has(c.id) || both.has(c.id))
     .map((c) => ({
       id: c.id,
       name: c.name,
       invoices: invoices.filter((i) => i.customer_id === c.id).map((i) => doc(i, i.invoice_no, i.held)),
       bills: bills.filter((b) => b.supplier_id === c.id).map((b) => doc(b, b.bill_no, b.scheduled)),
     }))
-    .filter((p) => p.id === keep || (p.invoices.length > 0 && p.bills.length > 0))
+    .filter((p) => kept.has(p.id) || (p.invoices.length > 0 && p.bills.length > 0))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
