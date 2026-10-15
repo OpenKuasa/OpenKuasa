@@ -46,6 +46,16 @@ import {
   voidCashReceipt,
 } from '@/lib/finance/cash-receipts';
 import {
+  CONTRA_MESSAGES,
+  type SaveAndPostContraResult,
+  contraIdInput,
+  deleteContra,
+  postContra,
+  saveContra,
+  saveContraInput,
+  voidContra,
+} from '@/lib/finance/contras';
+import {
   createContact,
   createContactInput,
   deleteContact,
@@ -1105,4 +1115,58 @@ export async function getJournalAction(input: unknown): Promise<FinResult<Journa
   const refused = await ledgerGate();
   if (refused) return refused;
   return draftForEditing(LEDGER_PATHS, journalIdInput, input, getJournal, LEDGER_MESSAGES, 'journal');
+}
+
+/* ---- contra entries ---------------------------------------------------- */
+
+// Every contra entry action is an owner's or admin's (a member and a viewer only read them), and says so before
+// anything is parsed or called, in the contra entry's own words. The database asks again (FIN14).
+const CONTRA_SIGN_OFF = { signOff: true, signOffError: CONTRA_MESSAGES.needsSignOff } as const;
+// A draft holds nothing of its invoices and bills and is not in the books: saving or deleting one moves no figure
+// anywhere but on Contra Entries.
+const CONTRA_DRAFT_PATHS = ['/finance/contra-entries'];
+// Posting or voiding one changes what its invoices and bills owe, as a payment would, with no money moving. That
+// shows on Invoices and Supplier Bills (Balance, status, Set off), in every form that offers an invoice or a bill
+// for what it still owes (Payments In, Cash Receipts, Credit Notes, Refunds, Payments Out, Payment Vouchers), on
+// Customers & Suppliers (Receivable and Payable) and in the books (LEDGER_PATHS: one entry on Accounts Receivable
+// and Accounts Payable, and its reversal when voided). Banking is not here: no bank or cash account moves.
+const CONTRA_PATHS = [
+  '/finance/contra-entries',
+  '/finance/invoices',
+  '/finance/payments-in',
+  '/finance/cash-receipts',
+  '/finance/credit-notes',
+  '/finance/refunds',
+  '/finance/supplier-bills',
+  '/finance/payments-out',
+  '/finance/payment-vouchers',
+  '/finance/customers-suppliers',
+  ...LEDGER_PATHS,
+];
+
+/** Creates a draft contra entry, or changes one. Nothing is set off and nothing reaches the books until it is posted. */
+export async function saveContraAction(input: unknown) {
+  return run(CONTRA_DRAFT_PATHS, saveContraInput, input, saveContra, CONTRA_SIGN_OFF);
+}
+/** Posts a draft: it gets its CT- number, lowers what each of its invoices and bills owes, and enters the books. */
+export async function postContraAction(input: unknown) {
+  return run(CONTRA_PATHS, contraIdInput, input, postContra, CONTRA_SIGN_OFF);
+}
+/** Voids a posted contra entry: its invoices and bills owe again what it set off, and the books reverse it. */
+export async function voidContraAction(input: unknown) {
+  return run(CONTRA_PATHS, contraIdInput, input, voidContra, CONTRA_SIGN_OFF);
+}
+export async function deleteContraAction(input: unknown) {
+  return run(CONTRA_DRAFT_PATHS, contraIdInput, input, deleteContra, CONTRA_SIGN_OFF);
+}
+
+/**
+ * Saves the contra entry as a draft, then posts it; see `saveThenPost`. Someone who may not sign off is refused
+ * before anything is saved: a member does not keep a draft either. A draft is kept when posting is refused.
+ */
+export async function saveAndPostContraAction(input: unknown): Promise<SaveAndPostContraResult> {
+  const access = await writeAccess();
+  if (!access) return FORBIDDEN;
+  if (!access.signOff) return { ok: false, error: CONTRA_MESSAGES.needsSignOff };
+  return saveThenPost(CONTRA_PATHS, saveContraInput, input, saveContra, postContra);
 }
