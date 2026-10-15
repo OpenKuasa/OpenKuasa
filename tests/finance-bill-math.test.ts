@@ -45,6 +45,42 @@ describe('lineAmounts', () => {
   });
 });
 
+describe('lineAmounts with a discount (sales lines only)', () => {
+  it('takes a percentage off the line before SST', () => {
+    expect(lineAmounts({ quantity: 1, unit_price: 100, sst_rate: 6, discount_pct: 5 })).toEqual({ amount: 95, sst: 5.7 });
+  });
+
+  it('takes a fixed ringgit amount off the line before SST', () => {
+    expect(lineAmounts({ quantity: 1, unit_price: 100, sst_rate: 6, discount_amount: 10 })).toEqual({ amount: 90, sst: 5.4 });
+  });
+
+  it('rounds the net to the sen on an awkward percentage', () => {
+    // 3 x 9.99 = 29.97; less 5% = 28.4715 -> 28.47.
+    expect(lineAmounts({ quantity: 3, unit_price: 9.99, sst_rate: 0, discount_pct: 5 }).amount).toBe(28.47);
+  });
+
+  it('is identical to no discount when the discount is zero or absent', () => {
+    const base = { quantity: 100, unit_price: 1.005, sst_rate: 8 };
+    const plain = lineAmounts(base);
+    expect(lineAmounts({ ...base, discount_pct: 0 })).toEqual(plain);
+    expect(lineAmounts({ ...base, discount_amount: 0 })).toEqual(plain);
+    expect(lineAmounts({ ...base, discount_pct: null, discount_amount: null })).toEqual(plain);
+  });
+
+  it('never goes below zero when a fixed discount is larger than the line', () => {
+    expect(lineAmounts({ quantity: 1, unit_price: 100, sst_rate: 6, discount_amount: 150 })).toEqual({ amount: 0, sst: 0 });
+  });
+
+  it('sums net-of-discount lines in a total', () => {
+    expect(
+      billTotals([
+        { quantity: 1, unit_price: 100, sst_rate: 6, discount_pct: 5 }, // 95.00 + 5.70
+        { quantity: 1, unit_price: 50, sst_rate: 0, discount_amount: 10 }, // 40.00 + 0
+      ]),
+    ).toEqual({ subtotal: 135, sst: 5.7, total: 140.7 });
+  });
+});
+
 describe('billTotals', () => {
   it('adds each line after rounding it, so the total matches the sum of the lines shown', () => {
     // Three lines of 0.335 each round to 0.34: 1.02, not round(1.005) = 1.01.
