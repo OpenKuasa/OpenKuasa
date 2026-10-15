@@ -58,6 +58,7 @@ const READ_NAMES = [
   'listBillBalances',
   'listPaymentsIn',
   'listPaymentsOut',
+  'listContraEntries',
   'listFinanceContacts',
   'listFinanceItems',
   'listAccounts',
@@ -67,6 +68,12 @@ describe('Bendahara read tools', () => {
   it('exposes every finance lookup', () => {
     const tools = createBendaharaTools(viewer());
     for (const name of READ_NAMES) expect(Object.keys(tools), name).toContain(name);
+  });
+
+  it('reads contra entries, and has no tool that writes one', () => {
+    const names = Object.keys(createBendaharaTools(writer()));
+    expect(names).toContain('listContraEntries');
+    expect(names.filter((n) => /contra/i.test(n))).toEqual(['listContraEntries']);
   });
 
   it('gives a viewer no change tools at all', () => {

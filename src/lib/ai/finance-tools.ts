@@ -106,6 +106,7 @@ import {
   voidPayment,
   voidPaymentIn,
 } from '@/lib/finance/money';
+import { listContras } from '@/lib/finance/contras';
 import type { FinanceWriteContext } from '@/lib/finance/result';
 
 /** Who is asking, and whether they may change anything. */
@@ -239,6 +240,15 @@ export function createBendaharaTools(access: FinanceAccess) {
       description: 'Payments made to suppliers.',
       inputSchema: z.object({}),
       execute: async () => listPaymentsOut(ctx),
+    }),
+    listContraEntries: tool({
+      description:
+        'Contra entries: a contact who is both a customer and a supplier has invoices set off against bills, with no ' +
+        'money moving. Each with its number (CT-), date, contact, amount in ringgit, status (draft/posted/void) and ' +
+        'the invoices and bills it sets off with the amount on each. Read only: contra entries are recorded on the ' +
+        'Contra Entries screen by an owner or admin.',
+      inputSchema: z.object({}),
+      execute: async () => listContras(ctx),
     }),
     listFinanceContacts: tool({
       description: 'Finance contacts: customers and suppliers, with their kind and contact details.',
