@@ -81,20 +81,26 @@ export function fxRateRow(code: string, perUnit: number, day: z.infer<typeof rat
 export type BnmReading = { kind: 'rates'; rows: FxRateInsert[] } | { kind: 'none' } | { kind: 'unusable' };
 
 /** The latest rates of every currency (`/exchange-rate?session=1700`). */
-export function readLatestAnswer(body: unknown): BnmReading {
+export function readLatestAnswer(body: unknown, today?: string): BnmReading {
   if (noRecords.safeParse(body).success) return { kind: 'none' };
   const parsed = latestAnswer.safeParse(body);
   if (!parsed.success) return { kind: 'unusable' };
+  // Nothing is ever replaced once stored, so a date from the future is refused rather than kept.
+  if (today !== undefined && parsed.data.data.some((item) => item.rate.date > today)) return { kind: 'unusable' };
   const rows = parsed.data.data.map((item) => fxRateRow(item.currency_code, item.unit, item.rate));
   return { kind: 'rates', rows: rows.filter((row): row is FxRateInsert => row !== null) };
 }
 
 /** One currency's rates for one month (`/exchange-rate/{code}/year/{y}/month/{m}?session=1700`). */
-export function readMonthAnswer(body: unknown, expectedCurrency: string): BnmReading {
+export function readMonthAnswer(body: unknown, expectedCurrency: string, month?: string, today?: string): BnmReading {
   if (noRecords.safeParse(body).success) return { kind: 'none' };
   const parsed = monthAnswer.safeParse(body);
   if (!parsed.success || parsed.data.data.currency_code !== expectedCurrency) return { kind: 'unusable' };
   const { currency_code, unit: perUnit, rate } = parsed.data.data;
+  // Every day must fall in the month asked for and not after today (Malaysian date), or the answer is refused whole.
+  if (rate.some((day) => (month !== undefined && day.date.slice(0, 7) !== month) || (today !== undefined && day.date > today))) {
+    return { kind: 'unusable' };
+  }
   const rows = rate.map((day) => fxRateRow(currency_code, perUnit, day));
   return { kind: 'rates', rows: rows.filter((row): row is FxRateInsert => row !== null) };
 }

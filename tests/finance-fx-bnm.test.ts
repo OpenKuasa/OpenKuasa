@@ -119,3 +119,18 @@ describe('fx-dates', () => {
     expect(addMonths('2026-01', -1)).toBe('2025-12');
   });
 });
+
+describe('the dates BNM gives', () => {
+  const read = (name: string) => JSON.parse(readFileSync(join(process.cwd(), 'tests/fixtures/bnm', name), 'utf8')) as unknown;
+  it('must fall in the month asked for, and not after today', () => {
+    const month = read('jpy-1700-2026-09.json');
+    expect(readMonthAnswer(month, 'JPY', '2026-09', '2026-10-15').kind).toBe('rates');
+    expect(readMonthAnswer(month, 'JPY', '2026-08', '2026-10-15').kind).toBe('unusable');
+    expect(readMonthAnswer(month, 'JPY', '2026-09', '2026-09-02').kind).toBe('unusable');
+  });
+  it('a latest answer dated after today is refused', () => {
+    const latest = read('latest-1700-2026-10-15.json');
+    expect(readLatestAnswer(latest, '2026-10-15').kind).toBe('rates');
+    expect(readLatestAnswer(latest, '2026-10-14').kind).toBe('unusable');
+  });
+});
