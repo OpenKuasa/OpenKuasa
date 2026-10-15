@@ -27,12 +27,14 @@ import {
   contraDeleteQuestion,
   contraDocuments,
   contraHiddenNote,
+  contraAnswerIsStale,
   contraName,
   contraPostQuestion,
   contraStats,
   contraVoidQuestion,
   contrasCsv,
   filterContras,
+  newContraParties,
 } from '@/lib/finance/contra-form';
 import { type ContraAction, type ContraRow, type ContraStatus, contraActions } from '@/lib/finance/contras';
 import { csvFileName } from '@/lib/finance/csv';
@@ -136,6 +138,17 @@ export function ContrasView({
   };
   const after = (row: ContraRow, status: ContraStatus): WrittenContra => ({ id: row.id, status, contact: row.contact_name, amount: row.amount });
 
+  /**
+   * Runs a write on the contra entry as the row shows it now. If it was posted, voided or deleted since, the question
+   * closes and the refreshed row (or its absence) says what it holds; the sentence stays above the table.
+   */
+  const settle = <T,>(call: () => Promise<FinResult<T>>, done: () => void) =>
+    confirm.run(async () => {
+      const result = await call();
+      if (!result.ok && contraAnswerIsStale(result.error)) setOpen(null);
+      return result;
+    }, done);
+
   const menuItem = (row: ContraRow, action: ContraAction): RowMenuItem => {
     switch (action) {
       case 'edit':
@@ -168,7 +181,7 @@ export function ContrasView({
           label={`Post ${contraName(row)}`}
           confirmLabel="Post contra entry"
           pendingLabel="Posting…"
-          onConfirm={() => confirm.run(() => actions.post({ id: row.id }), () => closeSaying(after(row, 'posted')))}
+          onConfirm={() => settle(() => actions.post({ id: row.id }), () => closeSaying(after(row, 'posted')))}
         >
           {contraPostQuestion(row)}
         </ConfirmRow>
@@ -183,7 +196,7 @@ export function ContrasView({
           label={`Void ${contraName(row)}`}
           confirmLabel="Void contra entry"
           pendingLabel="Voiding…"
-          onConfirm={() => confirm.run(() => actions.voidContra({ id: row.id }), () => closeSaying(after(row, 'void')))}
+          onConfirm={() => settle(() => actions.voidContra({ id: row.id }), () => closeSaying(after(row, 'void')))}
         >
           {contraVoidQuestion(row)}
         </ConfirmRow>
@@ -196,7 +209,7 @@ export function ContrasView({
         label={`Delete ${contraName(row)}`}
         confirmLabel="Delete draft"
         pendingLabel="Deleting…"
-        onConfirm={() => confirm.run(() => actions.remove({ id: row.id }), close)}
+        onConfirm={() => settle(() => actions.remove({ id: row.id }), close)}
       >
         {contraDeleteQuestion(row)}
       </ConfirmRow>
@@ -233,7 +246,8 @@ export function ContrasView({
             // A different draft, or a new contra entry after one, starts the card again.
             key={open.draft?.id ?? `new-${open.nonce}`}
             editing={open.draft}
-            parties={writer.parties}
+            // A draft's Edit form also offers that draft's contact; the New form only contacts with something to set off.
+            parties={open.draft ? writer.parties : newContraParties(writer.parties)}
             today={open.today}
             actions={writer.actions}
             onClose={closeSaying}
@@ -246,7 +260,7 @@ export function ContrasView({
         ) : null}
 
         <BentoCard tone="primary" className="col-span-1 md:col-span-4">
-          <BentoStat label="Posted this month" value={String(stats.postedThisMonth)} delta={`of ${rows.length} in all`} deltaTone="flat" onPrimary />
+          <BentoStat label="Posted this month" value={String(stats.postedThisMonth)} delta={`${stats.postedInAll} posted in all`} deltaTone="flat" onPrimary />
         </BentoCard>
         <BentoCard className="col-span-1 md:col-span-4">
           <BentoStat label="Set off this month" value={rm(stats.setOffThisMonth)} />

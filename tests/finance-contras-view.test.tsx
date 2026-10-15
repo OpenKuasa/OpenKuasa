@@ -92,6 +92,7 @@ describe('the contra list', () => {
   it('counts this month’s posted ones, what they set off, and the drafts', () => {
     const html = text(render());
     expect(html).toContain('Posted this month 1');
+    expect(html).toContain('2 posted in all');
     expect(html).toContain('Set off this month RM 1,800.00');
     expect(html).toContain('Drafts 1');
   });
@@ -126,13 +127,13 @@ describe('the contra list', () => {
 
   it('asks before voiding, saying what is owed again', () => {
     const html = text(render({ writer: true, ask: { kind: 'void', id: 'sample-contra-5' } }));
-    expect(html).toContain('Void CT-0005? Its invoices and bills owe again the RM 1,800.00 it set off on each side, and the books reverse it. This cannot be undone.');
+    expect(html).toContain('Void CT-0005? Lim Hardware will owe you RM 1,800.00 again on INV-0027, INV-0029, and you will owe them RM 1,800.00 again on BILL-0017. The books reverse it. This cannot be undone.');
     expect(html).toContain('Void contra entry');
   });
 
   it('asks before posting a draft, saying what it sets off', () => {
     const html = text(render({ writer: true, ask: { kind: 'post', id: 'sample-contra-6' } }));
-    expect(html).toContain('Together INV-0031 will owe RM 2,750.00 less, and so will BILL-0019');
+    expect(html).toContain('They will owe you RM 2,750.00 less on INV-0031, and you will owe them RM 2,750.00 less on BILL-0019.');
     expect(html).toContain('Post contra entry');
   });
 });
@@ -149,7 +150,7 @@ describe('the contra form', () => {
     const html = card([party]);
     expect(html).toContain('Lim Hardware (1 invoice, 1 bill)');
     expect(html).toContain('INV-0040 RM 500.00 owed · due 31 Oct 2026');
-    expect(html).toContain('BILL-0030 RM 200.00 can be set off (RM 300.00 owed, RM 100.00 in payments not yet posted) · due 20 Oct 2026, overdue');
+    expect(html).toContain('BILL-0030 RM 200.00 can be set off (RM 300.00 owed, RM 100.00 in payments not yet paid) · due 20 Oct 2026, overdue');
     expect(html).toContain('Invoices RM 0.00 of RM 0.00 · Bills RM 0.00 of RM 0.00');
     expect(html).toContain('Save draft');
     expect(html).toContain('Save and post');

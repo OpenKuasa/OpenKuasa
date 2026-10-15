@@ -152,7 +152,7 @@ export function ContraFormCard({
                   />
                   <span className="min-w-0">
                     <span className="font-medium">{d.number}</span>
-                    <span className="block text-xs text-muted-foreground tabular-nums [overflow-wrap:anywhere]">{contraOwedLine(d)}</span>
+                    <span className="block text-xs text-muted-foreground tabular-nums [overflow-wrap:anywhere]">{contraOwedLine(d, side)}</span>
                   </span>
                 </label>
                 {ticked ? (
@@ -235,7 +235,7 @@ export function ContraFormCard({
           <p className={cn('text-sm tabular-nums', !sides.ready && 'text-muted-foreground')} aria-live="polite">
             {contraSidesLine(form)}
           </p>
-          {!form.amount.trim() && (Object.keys(form.invoices).length > 0 || Object.keys(form.bills).length > 0) ? (
+          {!form.amount.trim() && sides.invoiceSide > 0 && sides.billSide > 0 ? (
             <Button type="button" variant="ghost" size="xs" onClick={() => edit(amountFromSides)}>
               Use the smaller side as the amount
             </Button>
