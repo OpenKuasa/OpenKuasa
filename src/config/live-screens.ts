@@ -32,7 +32,8 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   // Sends by email through the workspace's own Resend key.
   'crm/broadcast',
   'crm/automations',
-  // Set-up and a signed-in preview; the bot does not answer customers yet.
+  // Set-up and a signed-in preview; on a public landing page the bot answers visitors
+  // (/api/p/<page id>/chat). WhatsApp, Instagram and Messenger are not connected.
   'crm/chatbot',
   // Shared with Jebat's analytics (registry 'reach/reports'); /reach/reports
   // is not a nav item, so the screen is served at /crm/reports.
@@ -40,7 +41,8 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   // The deal rule, the person's own notifications and the contacts export; the rest links to where it is set.
   'crm/settings',
 
-  // Lekir (read-only for now; Settings joins in a later slice)
+  // Lekir: jobs, applications, candidates, interviews and the talent pool can be changed.
+  // Settings stays sample: only its application-form card is real so far.
   'hire/assistant',
   'hire/dashboard',
   'hire/jobs',
@@ -81,7 +83,8 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'people/training',
   'people/settings',
 
-  // Bendahara
+  // Bendahara. Its Overview stays sample: half its cards have no source yet, and the
+  // demo shows fixed figures there.
   'finance/customers-suppliers',
   'finance/products',
   'finance/invoices',
