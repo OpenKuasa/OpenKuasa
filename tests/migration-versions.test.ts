@@ -13,7 +13,6 @@ const KNOWN_SHARED_VERSIONS: Record<string, string[]> = {
   '20261012160000': ['20261012160000_agent_runs.sql', '20261012160000_bendahara_purchases.sql'],
   '20261012170000': ['20261012170000_agent_assets_storage_policy.sql', '20261012170000_bendahara_foundation.sql'],
   '20261013090000': ['20261013090000_agent_schedules.sql', '20261013090000_hire_foundation.sql'],
-  '20261028090000': ['20261028090000_hire_deletions.sql', '20261028090000_people_performance_writes.sql'],
 };
 
 /** The files that share a version, by version; `allowed` are the ones permitted to. */
@@ -54,16 +53,16 @@ describe('migration versions', () => {
     ]);
     expect(
       sharedVersionProblems(
-        [...KNOWN_SHARED_VERSIONS['20261028090000'], '20261028090000_something_new.sql'],
+        [...KNOWN_SHARED_VERSIONS['20261013090000'], '20261013090000_something_new.sql'],
         KNOWN_SHARED_VERSIONS,
       ),
-    ).toEqual(['20261028090000_something_new.sql: version 20261028090000 is already used by another migration']);
-    // A known pair that has since been given separate versions is simply not a pair any more.
-    expect(sharedVersionProblems(['20261028090000_hire_deletions.sql'], KNOWN_SHARED_VERSIONS)).toEqual([]);
+    ).toEqual(['20261013090000_something_new.sql: version 20261013090000 is already used by another migration']);
+    // A single file on a known-pair version, passed alone, is not a reuse.
+    expect(sharedVersionProblems(['20261013090000_agent_schedules.sql'], KNOWN_SHARED_VERSIONS)).toEqual([]);
   });
 
-  test('the known pairs are exactly four, two files each', () => {
-    expect(Object.keys(KNOWN_SHARED_VERSIONS)).toHaveLength(4);
+  test('the known pairs are exactly three, two files each', () => {
+    expect(Object.keys(KNOWN_SHARED_VERSIONS)).toHaveLength(3);
     for (const [version, pair] of Object.entries(KNOWN_SHARED_VERSIONS)) {
       expect(pair).toHaveLength(2);
       for (const file of pair) expect(file.startsWith(`${version}_`)).toBe(true);
