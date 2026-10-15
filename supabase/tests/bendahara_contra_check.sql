@@ -34,6 +34,10 @@ declare
   co uuid;
   co2 uuid;
   cz uuid;
+  ix uuid;
+  iy uuid;
+  bx uuid;
+  bz uuid;
   cu uuid;
   su uuid;
   i1 uuid;
@@ -545,6 +549,55 @@ begin
     jsonb_build_object('credit_note_id', cn, 'account_id', bank, 'method', 'bank_transfer', 'reason', 'damaged_goods', 'amount', 17.5));
   fails := fails || public.bendahara_contra_try('void a contra that a refund depends on', 'FIN33',
     format('select public.finance_void_contra(%L, %L)', org, c2));
+  reset role;
+
+  -- ==== a second posted contra on the same bill, or the same invoice ===========================
+  -- The post counts what other posted contras already took. ix, iy: invoices of RM 132.50; bx, by: bills of RM 132.50.
+  perform set_config('request.jwt.claims', owner_claims, true);
+  set local role authenticated;
+  ix := public.finance_save_invoice(org, jsonb_build_object('customer_id', co, 'invoice_date', current_date, 'due_date', current_date + 30), one_line);
+  perform public.finance_post_invoice(org, ix);
+  iy := public.finance_save_invoice(org, jsonb_build_object('customer_id', co, 'invoice_date', current_date, 'due_date', current_date + 30), one_line);
+  perform public.finance_post_invoice(org, iy);
+  bx := public.finance_save_bill(org, jsonb_build_object('supplier_id', co, 'bill_date', current_date, 'due_date', current_date + 30), one_line);
+  perform public.finance_post_bill(org, bx);
+  bz := public.finance_save_bill(org, jsonb_build_object('supplier_id', co, 'bill_date', current_date, 'due_date', current_date + 30), one_line);
+  perform public.finance_post_bill(org, bz);
+  -- A takes RM 100 of ix and bx and is posted.
+  c4 := public.finance_save_contra(org, jsonb_build_object('contact_id', co, 'amount', 100),
+    jsonb_build_array(jsonb_build_object('invoice_id', ix, 'amount', 100), jsonb_build_object('bill_id', bx, 'amount', 100)));
+  perform public.finance_post_contra(org, c4);
+  -- B would take another RM 100 of bx (the invoice is a fresh one): the bill has RM 32.50 left.
+  c3 := public.finance_save_contra(org, jsonb_build_object('contact_id', co, 'amount', 100),
+    jsonb_build_array(jsonb_build_object('invoice_id', iy, 'amount', 100), jsonb_build_object('bill_id', bx, 'amount', 100)));
+  fails := fails || public.bendahara_contra_try('a second contra takes more of a bill than the first left', 'FIN05',
+    format('select public.finance_post_contra(%L, %L)', org, c3));
+  c3 := public.finance_save_contra(org, jsonb_build_object('contact_id', co, 'amount', 32.51),
+    jsonb_build_array(jsonb_build_object('invoice_id', iy, 'amount', 32.51), jsonb_build_object('bill_id', bx, 'amount', 32.51)));
+  fails := fails || public.bendahara_contra_try('a second contra takes one sen more than the bill has left', 'FIN05',
+    format('select public.finance_post_contra(%L, %L)', org, c3));
+  c3 := public.finance_save_contra(org, jsonb_build_object('contact_id', co, 'amount', 32.5),
+    jsonb_build_array(jsonb_build_object('invoice_id', iy, 'amount', 32.5), jsonb_build_object('bill_id', bx, 'amount', 32.5)));
+  fails := fails || public.bendahara_contra_try('a second contra takes exactly what the bill has left', 'ok',
+    format('select public.finance_post_contra(%L, %L)', org, c3));
+  -- C would take another RM 100 of ix (the bill is a fresh one): the invoice has RM 32.50 left.
+  c3 := public.finance_save_contra(org, jsonb_build_object('contact_id', co, 'amount', 100),
+    jsonb_build_array(jsonb_build_object('invoice_id', ix, 'amount', 100), jsonb_build_object('bill_id', bz, 'amount', 100)));
+  fails := fails || public.bendahara_contra_try('a second contra takes more of an invoice than the first left', 'FIN05',
+    format('select public.finance_post_contra(%L, %L)', org, c3));
+  c3 := public.finance_save_contra(org, jsonb_build_object('contact_id', co, 'amount', 32.5),
+    jsonb_build_array(jsonb_build_object('invoice_id', ix, 'amount', 32.5), jsonb_build_object('bill_id', bz, 'amount', 32.5)));
+  fails := fails || public.bendahara_contra_try('a second contra takes exactly what the invoice has left', 'ok',
+    format('select public.finance_post_contra(%L, %L)', org, c3));
+  -- Posted for real, the two contras leave the bill and the invoice at nothing, never below.
+  perform public.finance_post_contra(org, c3);
+  c3 := public.finance_save_contra(org, jsonb_build_object('contact_id', co, 'amount', 32.5),
+    jsonb_build_array(jsonb_build_object('invoice_id', iy, 'amount', 32.5), jsonb_build_object('bill_id', bx, 'amount', 32.5)));
+  perform public.finance_post_contra(org, c3);
+  select balance into r from public.finance_invoice_totals where id = ix;
+  if r.balance <> 0 then fails := fails || format('an invoice set off twice has balance %s, not 0', r.balance); end if;
+  select balance into r from public.supplier_bill_totals where id = bx;
+  if r.balance <> 0 then fails := fails || format('a bill set off twice has balance %s, not 0', r.balance); end if;
   reset role;
 
   -- ==== a user and a workspace are deleted =========================================================
