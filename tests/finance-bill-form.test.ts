@@ -62,7 +62,9 @@ describe('newBillForm', () => {
       notes: '',
       purchase_order_id: '',
       category_id: '',
-      lines: [{ key: 'k1', product_id: '', description: '', quantity: '1', uom: '', pack_size: '', unit_price: '', sst_rate: '0' }],
+      lines: [
+        { key: 'k1', product_id: '', description: '', quantity: '1', uom: '', pack_size: '', unit_price: '', sst_rate: '0', discount_pct: '', discount_amount: '' },
+      ],
     });
   });
 });
@@ -135,6 +137,8 @@ describe('withProduct', () => {
       pack_size: '100 pcs',
       unit_price: '12.5',
       sst_rate: '6',
+      discount_pct: '',
+      discount_amount: '',
     });
   });
   it('only clears the link when "no product" is chosen', () => {
@@ -145,7 +149,13 @@ describe('withProduct', () => {
 
 describe('lineNumbers', () => {
   it('reads the boxes as numbers, with an empty SST box as 0', () => {
-    expect(lineNumbers({ ...emptyLine('k'), quantity: '2.5', unit_price: '10', sst_rate: '' })).toEqual({ quantity: 2.5, unit_price: 10, sst_rate: 0 });
+    expect(lineNumbers({ ...emptyLine('k'), quantity: '2.5', unit_price: '10', sst_rate: '' })).toEqual({
+      quantity: 2.5,
+      unit_price: 10,
+      sst_rate: 0,
+      discount_pct: null,
+      discount_amount: null,
+    });
   });
   it('rounds the SST rate to two decimals, so what is sent is what the total was worked out with', () => {
     expect(lineNumbers({ ...emptyLine('k'), sst_rate: '1.005' }).sst_rate).toBe(1.01);
@@ -213,7 +223,9 @@ describe('billPayload', () => {
       filled({
         supplier_ref: ' INV 88 ',
         notes: '',
-        lines: [{ key: 'k1', product_id: PRODUCT, description: ' Gloves ', quantity: '10', uom: 'box', pack_size: '', unit_price: '12.50', sst_rate: '6' }],
+        lines: [
+          { key: 'k1', product_id: PRODUCT, description: ' Gloves ', quantity: '10', uom: 'box', pack_size: '', unit_price: '12.50', sst_rate: '6', discount_pct: '', discount_amount: '' },
+        ],
       }),
     );
     expect(payload).toEqual({
@@ -271,8 +283,8 @@ describe('billFormFromDetail', () => {
     const form = billFormFromDetail(detail);
     expect(form).toMatchObject({ id: BILL, supplier_id: SUPPLIER, supplier_ref: '', due_date: '2026-10-15', dueEdited: true, notes: 'urgent', purchase_order_id: '' });
     expect(form.lines).toEqual([
-      { key: 'line-1', product_id: PRODUCT, description: 'Nitrile Gloves (Box)', quantity: '10', uom: 'box', pack_size: '100 pcs', unit_price: '12.5', sst_rate: '6' },
-      { key: 'line-2', product_id: '', description: 'Delivery', quantity: '1', uom: '', pack_size: '', unit_price: '0', sst_rate: '0' },
+      { key: 'line-1', product_id: PRODUCT, description: 'Nitrile Gloves (Box)', quantity: '10', uom: 'box', pack_size: '100 pcs', unit_price: '12.5', sst_rate: '6', discount_pct: '', discount_amount: '' },
+      { key: 'line-2', product_id: '', description: 'Delivery', quantity: '1', uom: '', pack_size: '', unit_price: '0', sst_rate: '0', discount_pct: '', discount_amount: '' },
     ]);
   });
   it('saves back what it loaded: nothing is lost by opening and saving a draft', () => {

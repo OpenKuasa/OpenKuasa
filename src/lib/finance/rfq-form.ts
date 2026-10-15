@@ -58,6 +58,8 @@ export function rfqFormFromDetail(rfq: RfqDetail): RfqForm {
       pack_size: line.pack_size ?? '',
       unit_price: line.unit_price === null ? '' : String(line.unit_price),
       sst_rate: String(line.sst_rate),
+      discount_pct: '',
+      discount_amount: '',
     })),
   };
 }
@@ -85,6 +87,8 @@ export function rfqFormCopiedFrom(rfq: RfqDetail, today: string): RfqForm {
       pack_size: line.pack_size ?? '',
       unit_price: '',
       sst_rate: String(line.sst_rate),
+      discount_pct: '',
+      discount_amount: '',
     })),
   };
 }

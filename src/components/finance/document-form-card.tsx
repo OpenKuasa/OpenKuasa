@@ -277,6 +277,7 @@ export function DocumentFormCard<F extends DocumentFormState>({
             products={products}
             withProduct={kind.withProduct}
             pricePlaceholder={kind.pricePlaceholder}
+            discount={kind.discount}
             onChange={(lines) => edit((f) => ({ ...f, lines }))}
           />
         </fieldset>

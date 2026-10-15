@@ -22,10 +22,28 @@ export type LineDraft = {
   pack_size: string;
   unit_price: string;
   sst_rate: string;
+  /**
+   * Sales documents only (invoices, quotations): a percentage of the line, or a
+   * fixed ringgit amount off it. Empty on other documents, whose editor hides
+   * them and whose schema drops them.
+   */
+  discount_pct: string;
+  discount_amount: string;
 };
 
 export function emptyLine(key: string): LineDraft {
-  return { key, product_id: '', description: '', quantity: '1', uom: '', pack_size: '', unit_price: '', sst_rate: '0' };
+  return {
+    key,
+    product_id: '',
+    description: '',
+    quantity: '1',
+    uom: '',
+    pack_size: '',
+    unit_price: '',
+    sst_rate: '0',
+    discount_pct: '',
+    discount_amount: '',
+  };
 }
 
 /** A saved line, as the form shows it. */
@@ -39,6 +57,8 @@ export function lineDraft(line: DocumentLineRow): LineDraft {
     pack_size: line.pack_size ?? '',
     unit_price: String(line.unit_price),
     sst_rate: String(line.sst_rate),
+    discount_pct: line.discount_pct != null ? String(line.discount_pct) : '',
+    discount_amount: line.discount_amount != null ? String(line.discount_amount) : '',
   };
 }
 
@@ -65,24 +85,30 @@ function sstRate(text: string): number {
   return text.trim() === '' ? 0 : roundRate(typedNumber(text) ?? Number.NaN);
 }
 
+/** An empty discount box means no discount (null); anything else is its number, NaN if unreadable. */
+function discountValue(text: string): number | null {
+  return text.trim() === '' ? null : (typedNumber(text) ?? Number.NaN);
+}
+
 /** The line's figures for the live total; a box that is not a number is NaN, which counts as nothing. */
 export function lineNumbers(line: LineDraft): LineNumbers {
   return {
     quantity: typedNumber(line.quantity) ?? Number.NaN,
     unit_price: typedNumber(line.unit_price) ?? Number.NaN,
     sst_rate: sstRate(line.sst_rate),
+    discount_pct: discountValue(line.discount_pct),
+    discount_amount: discountValue(line.discount_amount),
   };
 }
 
 /** One line as it is sent. Figures are numbers; a box that is not a number goes as NaN and is refused. */
 export function linePayload(line: LineDraft) {
-  return {
-    product_id: line.product_id,
-    description: line.description,
-    uom: line.uom,
-    pack_size: line.pack_size,
-    ...lineNumbers(line),
-  };
+  const { discount_pct, discount_amount, ...numbers } = lineNumbers(line);
+  const base = { product_id: line.product_id, description: line.description, uom: line.uom, pack_size: line.pack_size, ...numbers };
+  // A discount rides along only on a sales line that has one; other documents send neither key.
+  if (discount_pct != null) return { ...base, discount_pct };
+  if (discount_amount != null) return { ...base, discount_amount };
+  return base;
 }
 
 /** The document's date plus the other party's payment terms; with no party yet, the date itself. */
@@ -204,6 +230,8 @@ export type DocumentFormKind<F extends DocumentFormState> = {
   reference?: { label: string; placeholder: string; get: (form: F) => string; set: (form: F, value: string) => F };
   /** What an empty price box says. Absent, `0.00`; an RFQ's says the supplier fills it in. */
   pricePlaceholder?: string;
+  /** Sales documents (invoices, quotations) show a per-line discount; others do not. */
+  discount?: boolean;
   withProduct: (line: LineDraft, product: FinanceProduct | null) => LineDraft;
   /** The first thing wrong with the form, or null. `posting` also refuses a total of nothing. */
   error: (form: F, posting?: boolean) => string | null;

@@ -131,6 +131,7 @@ export const INVOICE_FORM_KIND: DocumentFormKind<InvoiceForm> = {
   withParty: withCustomer,
   withDate: withInvoiceDate,
   secondDate: { label: 'Due date', get: (form) => form.due_date, set: withDueDate },
+  discount: true,
   withProduct: withSoldProduct,
   error: invoiceFormError,
   payload: invoicePayload,

@@ -56,7 +56,9 @@ describe('newInvoiceForm', () => {
       due_date: today,
       dueEdited: false,
       notes: '',
-      lines: [{ key: 'k1', product_id: '', description: '', quantity: '1', uom: '', pack_size: '', unit_price: '', sst_rate: '0' }],
+      lines: [
+        { key: 'k1', product_id: '', description: '', quantity: '1', uom: '', pack_size: '', unit_price: '', sst_rate: '0', discount_pct: '', discount_amount: '' },
+      ],
     });
   });
 });
@@ -98,6 +100,8 @@ describe('withSoldProduct', () => {
       pack_size: '100 pcs',
       unit_price: '24.9',
       sst_rate: '6',
+      discount_pct: '',
+      discount_amount: '',
     });
   });
   it('only clears the link when "no product" is chosen', () => {
@@ -150,7 +154,7 @@ describe('invoicePayload', () => {
       filled({
         notes: ' Net 30 ',
         lines: [
-          { key: 'k1', product_id: PRODUCT, description: ' Gloves ', quantity: '10', uom: 'box', pack_size: '', unit_price: '24.90', sst_rate: '6' },
+          { key: 'k1', product_id: PRODUCT, description: ' Gloves ', quantity: '10', uom: 'box', pack_size: '', unit_price: '24.90', sst_rate: '6', discount_pct: '', discount_amount: '' },
           { ...emptyLine('k2'), description: 'Delivery', unit_price: '20' },
         ],
       }),
@@ -173,6 +177,23 @@ describe('invoicePayload', () => {
     expect(payload.id).toBe(INVOICE);
     expect(Object.keys(payload).sort()).toEqual(['customer_id', 'due_date', 'id', 'invoice_date', 'lines', 'notes']);
     expect(Object.keys(payload.lines[0]).sort()).toEqual(['description', 'pack_size', 'product_id', 'quantity', 'sst_rate', 'unit_price', 'uom']);
+  });
+
+  it('carries a line discount, nets the total, and passes the schema', () => {
+    const form = filled({
+      lines: [{ ...emptyLine('k1'), description: 'Widget', quantity: '2', unit_price: '50', sst_rate: '6', discount_pct: '5' }],
+    });
+    expect(invoiceFormError(form)).toBeNull();
+    expect(invoicePayload(form).lines[0]).toMatchObject({ discount_pct: 5 });
+    // 2 x 50 = 100.00, less 5% = 95.00; SST 6% of 95 = 5.70.
+    expect(billTotals(form.lines.map(lineNumbers))).toEqual({ subtotal: 95, sst: 5.7, total: 100.7 });
+  });
+
+  it('shows the discount validation message when a line is discounted past its value', () => {
+    const form = filled({
+      lines: [{ ...emptyLine('k1'), description: 'Widget', quantity: '2', unit_price: '50', sst_rate: '0', discount_amount: '150' }],
+    });
+    expect(invoiceFormError(form)).toMatch(/more than the line/i);
   });
 });
 
@@ -215,8 +236,8 @@ describe('invoiceFormFromDetail', () => {
     const parsed = saveInvoiceInput.parse(invoicePayload(form));
     expect(parsed.id).toBe(INVOICE);
     expect(parsed.lines).toEqual([
-      { product_id: PRODUCT, description: 'Nitrile Gloves (Box)', quantity: 10, uom: 'box', pack_size: '100 pcs', unit_price: 24.9, sst_rate: 6 },
-      { product_id: null, description: 'Delivery', quantity: 1, uom: null, pack_size: null, unit_price: 0, sst_rate: 0 },
+      { product_id: PRODUCT, description: 'Nitrile Gloves (Box)', quantity: 10, uom: 'box', pack_size: '100 pcs', unit_price: 24.9, sst_rate: 6, discount_pct: null, discount_amount: null },
+      { product_id: null, description: 'Delivery', quantity: 1, uom: null, pack_size: null, unit_price: 0, sst_rate: 0, discount_pct: null, discount_amount: null },
     ]);
     expect(billTotals(form.lines.map(lineNumbers))).toEqual({ subtotal: 249, sst: 14.94, total: 263.94 });
   });

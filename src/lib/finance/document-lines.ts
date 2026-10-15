@@ -88,6 +88,38 @@ export const documentLine = z.object({
   sst_rate: z.number({ error: M.sst }).transform(roundRate).pipe(z.number().min(0, M.sst).max(100, M.sst)).default(0),
 });
 
+export const DISCOUNT_MESSAGES = {
+  pct: 'Enter a discount between 0 and 100%.',
+  amount: 'Enter a discount of RM 0 or more.',
+  both: 'Give a percentage discount or a ringgit discount, not both.',
+  over: 'A discount cannot be more than the line.',
+} as const;
+
+const D = DISCOUNT_MESSAGES;
+
+/**
+ * A sales line (invoice or quotation) is a document line that may carry a
+ * discount: a percentage of the line, or a fixed ringgit amount off it, but
+ * not both. An empty or zero discount is stored as none. The amount cannot be
+ * more than the line; the database checks the same, net of the discount.
+ * Bills, RFQs and purchase orders use the plain `documentLine` and have none.
+ */
+export const salesDocumentLine = documentLine
+  .extend({
+    discount_pct: z.number({ error: D.pct }).min(0, D.pct).max(100, D.pct).transform(round(2)).nullable().default(null),
+    discount_amount: z.number({ error: D.amount }).min(0, D.amount).max(999_999_999_999.99, D.amount).transform(round(2)).nullable().default(null),
+  })
+  .transform((l) => ({
+    ...l,
+    discount_pct: l.discount_pct && l.discount_pct > 0 ? l.discount_pct : null,
+    discount_amount: l.discount_amount && l.discount_amount > 0 ? l.discount_amount : null,
+  }))
+  .refine((l) => !(l.discount_pct !== null && l.discount_amount !== null), { message: D.both, path: ['discount_amount'] })
+  .refine((l) => l.discount_amount === null || l.discount_amount <= round(2)(l.quantity * l.unit_price), {
+    message: D.over,
+    path: ['discount_amount'],
+  });
+
 /** A saved line, as it is read back: the amounts are the database's generated columns. */
 export type DocumentLineRow = {
   id: string;
@@ -100,13 +132,19 @@ export type DocumentLineRow = {
   sst_rate: number;
   amount: number;
   sst_amount: number;
+  /** Present only on sales lines (invoices, quotations). At most one is non-null. */
+  discount_pct?: number | null;
+  discount_amount?: number | null;
 };
 
 export const DOCUMENT_LINE_COLUMNS = 'id,product_id,description,quantity,uom,pack_size,unit_price,sst_rate,amount,sst_amount';
 
+/** The columns above plus the sales-only discount; use for invoices and quotations. */
+export const SALES_LINE_COLUMNS = `${DOCUMENT_LINE_COLUMNS},discount_pct,discount_amount`;
+
 /** A line as read from the database, with its figures as numbers whatever form they arrived in. */
 export function toDocumentLine(row: Record<string, unknown>): DocumentLineRow {
-  return {
+  const line: DocumentLineRow = {
     ...(row as unknown as DocumentLineRow),
     quantity: Number(row.quantity),
     unit_price: Number(row.unit_price),
@@ -114,4 +152,8 @@ export function toDocumentLine(row: Record<string, unknown>): DocumentLineRow {
     amount: Number(row.amount),
     sst_amount: Number(row.sst_amount),
   };
+  // Only sales lines are read with the discount columns; leave the field off other documents.
+  if ('discount_pct' in row) line.discount_pct = row.discount_pct == null ? null : Number(row.discount_pct);
+  if ('discount_amount' in row) line.discount_amount = row.discount_amount == null ? null : Number(row.discount_amount);
+  return line;
 }

@@ -27,6 +27,7 @@ export function LineItemsEditor({
   products,
   withProduct,
   pricePlaceholder = '0.00',
+  discount = false,
   onChange,
 }: {
   lines: LineDraft[];
@@ -36,6 +37,8 @@ export function LineItemsEditor({
   withProduct: (line: LineDraft, product: FinanceProduct | null) => LineDraft;
   /** What an empty price box says. */
   pricePlaceholder?: string;
+  /** Sales documents show a per-line discount (a percentage or a ringgit amount); others do not. */
+  discount?: boolean;
   onChange: (lines: LineDraft[]) => void;
 }) {
   const id = useId();
@@ -73,7 +76,10 @@ export function LineItemsEditor({
             <li
               key={line.key}
               aria-label={`Line ${n}`}
-              className="grid grid-cols-2 gap-2 rounded-lg border p-3 md:grid-cols-12 md:items-end md:border-0 md:p-0"
+              className={cn(
+                'grid grid-cols-2 gap-2 rounded-lg border p-3 md:items-end md:border-0 md:p-0',
+                discount ? 'md:grid-cols-[repeat(14,minmax(0,1fr))]' : 'md:grid-cols-12',
+              )}
             >
               <div className="col-span-2 space-y-1 md:col-span-2">
                 <Label htmlFor={field('product')} className={label}>
@@ -184,6 +190,52 @@ export function LineItemsEditor({
                   onChange={(e) => change(line.key, (l) => ({ ...l, sst_rate: e.target.value }))}
                 />
               </div>
+              {discount ? (
+                <div className="col-span-2 space-y-1 md:col-span-2">
+                  <Label htmlFor={field('discount')} className={label}>
+                    Discount
+                  </Label>
+                  <div className="flex gap-1">
+                    <Input
+                      id={field('discount')}
+                      type="number"
+                      onWheel={(e) => e.currentTarget.blur()}
+                      inputMode="decimal"
+                      min={0}
+                      step="any"
+                      className="tabular-nums"
+                      value={line.discount_amount.trim() !== '' ? line.discount_amount : line.discount_pct}
+                      aria-label={`Discount for line ${n}`}
+                      onChange={(e) =>
+                        change(line.key, (l) =>
+                          l.discount_amount.trim() !== ''
+                            ? { ...l, discount_amount: e.target.value, discount_pct: '' }
+                            : { ...l, discount_pct: e.target.value, discount_amount: '' },
+                        )
+                      }
+                    />
+                    <Select
+                      value={line.discount_amount.trim() !== '' ? 'rm' : 'pct'}
+                      onValueChange={(u) =>
+                        change(line.key, (l) => {
+                          const current = l.discount_amount.trim() !== '' ? l.discount_amount : l.discount_pct;
+                          return u === 'rm'
+                            ? { ...l, discount_amount: current, discount_pct: '' }
+                            : { ...l, discount_pct: current, discount_amount: '' };
+                        })
+                      }
+                    >
+                      <SelectTrigger className="w-16 shrink-0" aria-label={`Discount unit for line ${n}`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="pct">%</SelectItem>
+                        <SelectItem value="rm">RM</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              ) : null}
               <div className="col-span-2 flex items-end justify-between gap-2 md:col-span-2">
                 <div className="min-w-0 space-y-1">
                   <span className={cn('block', label)}>Amount</span>

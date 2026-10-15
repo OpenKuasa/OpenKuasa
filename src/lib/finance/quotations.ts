@@ -8,12 +8,12 @@
 import { z } from 'zod';
 import {
   DOCUMENT_LINES_MAX,
-  DOCUMENT_LINE_COLUMNS,
   type DocumentLineRow,
   LINE_MESSAGES,
-  documentLine,
+  SALES_LINE_COLUMNS,
   isoDate,
   optionalText,
+  salesDocumentLine,
   toDocumentLine,
 } from './document-lines';
 import {
@@ -72,7 +72,7 @@ export const saveQuotationInput = z
     quote_date: isoDate,
     valid_until: isoDate,
     notes: optionalText.default(null),
-    lines: z.array(documentLine, { error: M.lines }).min(1, M.lines).max(QUOTATION_LINES_MAX, M.tooManyLines),
+    lines: z.array(salesDocumentLine, { error: M.lines }).min(1, M.lines).max(QUOTATION_LINES_MAX, M.tooManyLines),
   })
   .refine((v) => v.valid_until >= v.quote_date, { message: M.dates, path: ['valid_until'] });
 
@@ -202,7 +202,7 @@ export async function getQuotation(ctx: FinanceWriteContext, id: string): Promis
   if (!quotation) return null;
   const { data: lines, error: linesError } = await ctx.client
     .from('finance_quotation_lines')
-    .select(DOCUMENT_LINE_COLUMNS)
+    .select(SALES_LINE_COLUMNS)
     .eq('org_id', ctx.orgId)
     .eq('quotation_id', id)
     .order('position', { ascending: true })

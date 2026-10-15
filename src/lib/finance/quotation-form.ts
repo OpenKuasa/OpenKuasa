@@ -148,6 +148,7 @@ export const QUOTATION_FORM_KIND: DocumentFormKind<QuotationForm> = {
   withDate: withQuoteDate,
   secondDate: { label: 'Valid until', get: (form) => form.valid_until, set: withValidUntil },
   words: QUOTATION_FORM_WORDS,
+  discount: true,
   withProduct: withQuotedProduct,
   error: quotationFormError,
   payload: quotationPayload,

@@ -87,8 +87,8 @@ describe('the valid-until date', () => {
     expect(form).toEqual({
       id: detail.id, customer_id: CUSTOMER, quote_date: '2026-10-01', valid_until: '2026-10-08', validEdited: true, notes: '',
       lines: [
-        { key: 'line-1', product_id: PRODUCT, description: 'Gloves', quantity: '5', uom: 'box', pack_size: 'box of 4', unit_price: '24.9', sst_rate: '6' },
-        { key: 'line-2', product_id: '', description: 'Design work', quantity: '10', uom: '', pack_size: '', unit_price: '12.5', sst_rate: '0' },
+        { key: 'line-1', product_id: PRODUCT, description: 'Gloves', quantity: '5', uom: 'box', pack_size: 'box of 4', unit_price: '24.9', sst_rate: '6', discount_pct: '', discount_amount: '' },
+        { key: 'line-2', product_id: '', description: 'Design work', quantity: '10', uom: '', pack_size: '', unit_price: '12.5', sst_rate: '0', discount_pct: '', discount_amount: '' },
       ],
     });
     expect(withQuoteDate(form, '2026-10-05').valid_until).toBe('2026-10-08');

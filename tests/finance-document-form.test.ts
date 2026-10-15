@@ -59,6 +59,8 @@ describe('what the bill form and the invoice form share', () => {
       pack_size: '100 pcs',
       unit_price: '24.9',
       sst_rate: '6',
+      discount_pct: '',
+      discount_amount: '',
     });
     expect(filledFromProduct(line, null, 0)).toEqual({ ...line, product_id: '' });
   });
@@ -66,7 +68,7 @@ describe('what the bill form and the invoice form share', () => {
   it('shows a saved line as text, with nothing for what was left empty', () => {
     expect(
       lineDraft({ id: 'line-2', product_id: null, description: 'Delivery', quantity: 1.5, uom: null, pack_size: null, unit_price: 0, sst_rate: 8, amount: 0, sst_amount: 0 }),
-    ).toEqual({ key: 'line-2', product_id: '', description: 'Delivery', quantity: '1.5', uom: '', pack_size: '', unit_price: '0', sst_rate: '8' });
+    ).toEqual({ key: 'line-2', product_id: '', description: 'Delivery', quantity: '1.5', uom: '', pack_size: '', unit_price: '0', sst_rate: '8', discount_pct: '', discount_amount: '' });
   });
 
   it('sends a line as numbers, without its key', () => {

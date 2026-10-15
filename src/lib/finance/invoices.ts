@@ -7,12 +7,12 @@
 import { z } from 'zod';
 import {
   DOCUMENT_LINES_MAX,
-  DOCUMENT_LINE_COLUMNS,
   type DocumentLineRow,
   LINE_MESSAGES,
-  documentLine,
+  SALES_LINE_COLUMNS,
   isoDate,
   optionalText,
+  salesDocumentLine,
   toDocumentLine,
 } from './document-lines';
 import {
@@ -78,7 +78,7 @@ export const saveInvoiceInput = z
     invoice_date: isoDate,
     due_date: isoDate,
     notes: optionalText.default(null),
-    lines: z.array(documentLine, { error: M.lines }).min(1, M.lines).max(INVOICE_LINES_MAX, M.tooManyLines),
+    lines: z.array(salesDocumentLine, { error: M.lines }).min(1, M.lines).max(INVOICE_LINES_MAX, M.tooManyLines),
   })
   .refine((v) => v.due_date >= v.invoice_date, { message: M.dates, path: ['due_date'] });
 
@@ -220,7 +220,7 @@ export async function getInvoice(ctx: FinanceWriteContext, id: string): Promise<
   if (!invoice) return null;
   const { data: lines, error: linesError } = await ctx.client
     .from('finance_invoice_lines')
-    .select(DOCUMENT_LINE_COLUMNS)
+    .select(SALES_LINE_COLUMNS)
     .eq('org_id', ctx.orgId)
     .eq('invoice_id', id)
     .order('position', { ascending: true })
