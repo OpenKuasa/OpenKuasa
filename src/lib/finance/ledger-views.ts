@@ -35,6 +35,7 @@ export const SOURCE_LABELS: Record<LedgerSource, string> = {
   transfer: 'Transfer',
   opening: 'Opening balance',
   journal: 'Manual journal',
+  contra: 'Contra entry',
 };
 
 /**
@@ -53,6 +54,7 @@ export const SOURCE_PATHS: Record<LedgerSource, string | null> = {
   transfer: '/finance/banking',
   opening: '/finance/banking',
   journal: null,
+  contra: '/finance/contra-entries',
 };
 
 /* ---- Chart of Accounts ------------------------------------------------ */

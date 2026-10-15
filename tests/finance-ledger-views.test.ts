@@ -39,12 +39,12 @@ describe('the words', () => {
   it('name every source and send the person to the screen it came from', () => {
     expect(SOURCE_LABELS).toEqual({
       invoice: 'Invoice', credit_note: 'Credit note', payment_in: 'Receipt', refund: 'Refund', bill: 'Supplier bill',
-      payment_out: 'Payment', expense: 'Expense', transfer: 'Transfer', opening: 'Opening balance', journal: 'Manual journal',
+      payment_out: 'Payment', expense: 'Expense', transfer: 'Transfer', opening: 'Opening balance', journal: 'Manual journal', contra: 'Contra entry',
     });
     expect(SOURCE_PATHS).toEqual({
       invoice: '/finance/invoices', credit_note: '/finance/credit-notes', payment_in: '/finance/cash-receipts', refund: '/finance/refunds',
       bill: '/finance/supplier-bills', payment_out: '/finance/payment-vouchers', expense: '/finance/expenses', transfer: '/finance/banking',
-      opening: '/finance/banking', journal: null,
+      opening: '/finance/banking', journal: null, contra: '/finance/contra-entries',
     });
   });
 });

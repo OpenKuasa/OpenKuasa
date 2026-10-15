@@ -50,6 +50,8 @@ export const BILL_MESSAGES = {
   gone: 'That bill no longer exists.',
   locked: 'This bill is posted and can no longer be changed. Void it instead.',
   hasPayments: 'This bill has payments. Void or delete them before voiding it.',
+  // FIN32
+  hasContra: 'A contra entry sets this off. Void the contra entry first.',
   empty: 'A bill needs at least one line with an amount.',
   numberTaken: 'That bill number is already used.',
   missing: 'The supplier or a product on this bill no longer exists.',
@@ -94,6 +96,7 @@ export const billIdInput = z.object({ id: z.string({ error: M.gone }).uuid(M.gon
 const REFUSALS: Record<string, string> = {
   FIN01: M.locked,
   FIN02: M.hasPayments,
+  FIN32: M.hasContra,
   FIN10: M.empty,
   FIN11: M.gone,
   FIN21: M.order,

@@ -57,6 +57,8 @@ export const INVOICE_MESSAGES = {
   locked: 'This invoice has been posted or voided, so that can no longer be done.',
   // FIN02. Money in against the invoice, or a refund put against the invoice itself.
   hasPayments: 'This invoice has payments or refunds. Void the payments on Payments In, and void or delete the refunds on Refunds, before voiding it.',
+  // FIN32
+  hasContra: 'A contra entry sets this off. Void the contra entry first.',
   // FIN12. A draft credit note holds the invoice as much as an issued one does.
   hasCreditNotes: 'This invoice has credit notes. Void them on Credit Notes, or delete the drafts, before voiding it.',
   empty: 'An invoice needs at least one line with an amount.',
@@ -106,6 +108,7 @@ export const setEInvoiceInput = z
 const REFUSALS: Record<string, string> = {
   FIN01: M.locked,
   FIN02: M.hasPayments,
+  FIN32: M.hasContra,
   FIN10: M.empty,
   FIN11: M.gone,
   FIN12: M.hasCreditNotes,
