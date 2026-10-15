@@ -2027,6 +2027,23 @@ invoice that refunds do not depend on, and never allows one it should refuse.
 Posting with nobody signed in (a migration) asks no rule, as for journals. No
 activity-log line is written on post or void.
 
+The screen. Contra Entries (`src/screens/finance/contra-entries.tsx`,
+`contras-view.tsx`, `contra-form-card.tsx`, rules in `contra-form.ts`) lists
+every contra entry with search, a status filter and Export for everybody. An
+owner or admin also gets New contra entry and, by status, Edit, Post and
+Delete on a draft and Void on a posted one; a member reads and is told only an
+owner or admin records them; a viewer and the demo workspace read. The form
+offers each invoice for what it owes less money in recorded but not posted,
+and each bill for what it owes less payments not yet paid (`receivableInvoices`
+and `payableBills`), which is what a post asks. The five actions in
+`src/app/(app)/finance/actions.ts` refuse anyone who is not an owner or admin
+before anything is read; saving or deleting a draft refreshes Contra Entries
+only, and posting or voiding refreshes every screen that shows what an invoice
+or bill owes, Customers & Suppliers and the three ledger screens, not Banking.
+Invoices and Supplier Bills say "Set off RM x" under a balance a contra entry
+lowered, and the invoices export has a Set off column. The assistant reads
+them with `listContraEntries`; it has no tool that writes one.
+
 ## Database functions
 
 Most run as the caller, so RLS decides who may write. Eight run as their
