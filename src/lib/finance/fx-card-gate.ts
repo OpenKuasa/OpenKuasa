@@ -9,6 +9,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
  * workspace has at least one contact whose default currency is not MYR or at least one quotation whose currency
  * is not MYR. Until then the card is built, tested and never drawn on a live screen.
  */
+// The arguments are what stage 2 will read with; stage 1 answers without them.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function workspaceUsesForeignCurrency(_client: SupabaseClient, _orgId: string): Promise<boolean> {
   return false;
 }
