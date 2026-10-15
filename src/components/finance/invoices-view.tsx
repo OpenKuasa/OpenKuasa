@@ -587,7 +587,13 @@ export function InvoicesView({
                       <TableCell className="whitespace-nowrap">{i.customer_name}</TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(i.due_date)}</TableCell>
                       <TableCell className="whitespace-nowrap text-right tabular-nums">{rm(i.total)}</TableCell>
-                      <TableCell className="whitespace-nowrap text-right tabular-nums">{balanceText(i)}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums">
+                        {balanceText(i)}
+                        {/* A balance that dropped with no money in says why: a contra entry set part of it off. */}
+                        {(i.set_off ?? 0) > 0 ? (
+                          <span className="block text-xs text-muted-foreground">Set off {rm(i.set_off ?? 0)}</span>
+                        ) : null}
+                      </TableCell>
                       <TableCell>
                         <span className="flex items-center gap-2">
                           <LiveDot active={i.display_status === 'paid'} />

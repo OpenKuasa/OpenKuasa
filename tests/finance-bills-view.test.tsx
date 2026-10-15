@@ -72,6 +72,13 @@ describe('the bills list', () => {
     expect(html).not.toContain('<a ');
     expect(html).toMatch(/<td[^>]*class="[^"]*\bmin-w-36\b[^"]*"[^>]*><span[^>]*>BILL-0001<\/span>/);
   });
+
+  it('says under the balance how much a contra entry set off, and nothing on a bill with none', () => {
+    const rows = [bill('a', { set_off: 40, balance: 60 }), bill('b', { bill_no: 'BILL-0002' })];
+    const html = renderToStaticMarkup(<BillsView rows={rows} view={billsView(rows, [], '2026-10-09')} held={{}} />);
+    expect(html.match(/Set off RM/g)).toHaveLength(1);
+    expect(html).toContain('Set off RM 40.00');
+  });
 });
 
 const supplier = (id: string, name: string): FinanceContact =>

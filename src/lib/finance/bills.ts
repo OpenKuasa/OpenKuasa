@@ -126,6 +126,12 @@ export type BillListRow = {
   due_date: string;
   total: number;
   paid: number;
+  /**
+   * Set off by posted contra entries: no money moved, and it is not in `paid`. The reads always give it; it is
+   * optional so that rows made by hand (samples, tests) need not.
+   */
+  set_off?: number;
+  /** total − paid − set_off. */
   balance: number;
   display_status: BillDisplayStatus;
   /** The purchase order the bill is raised against, with its number; null when it has none. */
@@ -150,7 +156,7 @@ export type BillDetail = BillListRow & { supplier_ref: string | null; notes: str
  */
 export type SaveAndPostResult = FinResult<{ id: string; bill_no: string }> & { draftId?: string };
 
-const LIST_COLUMNS = 'id,bill_no,supplier_id,supplier_name,bill_date,due_date,total,paid,balance,display_status';
+const LIST_COLUMNS = 'id,bill_no,supplier_id,supplier_name,bill_date,due_date,total,paid,set_off,balance,display_status';
 
 /** Who a bill's order is: bill id → the order's id and number. */
 type BillOrderLinks = Map<string, { id: string; no: string | null }>;
@@ -233,6 +239,7 @@ function toListRow(row: Record<string, unknown>, links: BillOrderLinks, categori
     category_name: category?.name ?? null,
     total: Number(row.total),
     paid: Number(row.paid),
+    set_off: Number(row.set_off ?? 0),
     balance: Number(row.balance),
   };
 }

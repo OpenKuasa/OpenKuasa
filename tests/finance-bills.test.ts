@@ -256,6 +256,13 @@ describe('listBills with purchase orders', () => {
     const { ctx } = tableClient({ supplier_bill_totals: { rows: [billRow('b1')] }, finance_bill_purchase_orders: { error: { code: 'x' } } });
     await expect(listBills(ctx)).rejects.toEqual({ code: 'x' });
   });
+  it('reads what posted contra entries set off, apart from what was paid', async () => {
+    const { ctx } = tableClient({
+      supplier_bill_totals: { rows: [billRow('b1', { set_off: '40.00', balance: '60.00', display_status: 'pending' })] },
+      finance_bill_purchase_orders: { rows: [] },
+    });
+    expect(await listBills(ctx)).toMatchObject([{ paid: 0, set_off: 40, balance: 60 }]);
+  });
 });
 
 describe('getBill with purchase orders', () => {

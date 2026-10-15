@@ -152,7 +152,12 @@ export type InvoiceListRow = {
   credited: number;
   /** Posted refunds, put against the invoice itself or against one of its credit notes. */
   refunded: number;
-  /** total − paid − credited + refunded. Below zero, the customer is in credit by that much. */
+  /**
+   * Set off by posted contra entries against the customer's bills: no money moved, and it is not in `paid`. The
+   * reads always give it; it is optional so that rows made by hand (samples, tests) need not.
+   */
+  set_off?: number;
+  /** total − paid − credited + refunded − set_off. Below zero, the customer is in credit by that much. */
   balance: number;
   display_status: InvoiceDisplayStatus;
   einvoice_status: EInvoiceStatus;
@@ -177,7 +182,7 @@ export type InvoiceDetail = InvoiceListRow & {
 export type SaveAndPostInvoiceResult = FinResult<{ id: string; invoice_no: string }> & { draftId?: string };
 
 const LIST_COLUMNS =
-  'id,invoice_no,customer_id,customer_name,invoice_date,due_date,total,paid,credited,refunded,balance,display_status,einvoice_status,einvoice_uuid';
+  'id,invoice_no,customer_id,customer_name,invoice_date,due_date,total,paid,credited,refunded,set_off,balance,display_status,einvoice_status,einvoice_uuid';
 
 function toListRow(row: Record<string, unknown>): InvoiceListRow {
   return {
@@ -186,6 +191,7 @@ function toListRow(row: Record<string, unknown>): InvoiceListRow {
     paid: Number(row.paid),
     credited: Number(row.credited),
     refunded: Number(row.refunded),
+    set_off: Number(row.set_off ?? 0),
     balance: Number(row.balance),
     einvoice_uuid: (row.einvoice_uuid as string | null) ?? null,
   };

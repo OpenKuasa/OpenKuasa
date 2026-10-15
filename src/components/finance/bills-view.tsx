@@ -483,6 +483,10 @@ export function BillsView({
                         {scheduled > 0 ? (
                           <span className="block text-xs text-muted-foreground">{rm(scheduled)} in payments not yet paid</span>
                         ) : null}
+                        {/* A balance that dropped with no money out says why: a contra entry set part of it off. */}
+                        {(b.set_off ?? 0) > 0 ? (
+                          <span className="block text-xs text-muted-foreground">Set off {rm(b.set_off ?? 0)}</span>
+                        ) : null}
                       </TableCell>
                       <TableCell>
                         <span className="flex items-center gap-2">

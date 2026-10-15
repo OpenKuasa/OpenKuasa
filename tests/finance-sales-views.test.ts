@@ -423,9 +423,9 @@ describe('CSV export', () => {
       invoice({ invoice_no: null, customer_name: 'Lim, Tan & Co', total: 80, balance: 80, display_status: 'draft' }),
     ]);
     expect(csv).toBe(
-      '\uFEFFNo.,Date,Customer,Due,Total,Paid,Credited,Refunded,Balance,Status,e-Invois\r\n' +
-        "INV-0007,2026-10-01,'=cmd|calc,2026-10-31,1250.5,1000,0,0,250.5,Sent,Validated\r\n" +
-        ',2026-10-01,"Lim, Tan & Co",2026-10-31,80,0,0,0,,Draft,\r\n',
+      '\uFEFFNo.,Date,Customer,Due,Total,Paid,Credited,Refunded,Set off,Balance,Status,e-Invois\r\n' +
+        "INV-0007,2026-10-01,'=cmd|calc,2026-10-31,1250.5,1000,0,0,0,250.5,Sent,Validated\r\n" +
+        ',2026-10-01,"Lim, Tan & Co",2026-10-31,80,0,0,0,0,,Draft,\r\n',
     );
   });
 
@@ -435,9 +435,14 @@ describe('CSV export', () => {
       invoice({ invoice_no: 'INV-0009', total: 100, credited: 30, balance: 70 }),
     ]);
     expect(csv.split('\r\n').slice(1, 3)).toEqual([
-      'INV-0008,2026-10-01,Aisyah Trading,2026-10-31,100,100,30,10,-20,Paid,',
-      'INV-0009,2026-10-01,Aisyah Trading,2026-10-31,100,0,30,0,70,Sent,',
+      'INV-0008,2026-10-01,Aisyah Trading,2026-10-31,100,100,30,10,0,-20,Paid,',
+      'INV-0009,2026-10-01,Aisyah Trading,2026-10-31,100,0,30,0,0,70,Sent,',
     ]);
+  });
+
+  it('writes what contra entries set off in its own column, so the columns still add up', () => {
+    const csv = invoicesCsv([invoice({ invoice_no: 'INV-0010', total: 100, paid: 20, set_off: 50, balance: 30 })]);
+    expect(csv.split('\r\n')[1]).toBe('INV-0010,2026-10-01,Aisyah Trading,2026-10-31,100,20,0,0,50,30,Sent,');
   });
 
   it('leaves the balance empty for a draft and a void invoice, and fills it for the rest', () => {
@@ -448,10 +453,10 @@ describe('CSV export', () => {
       invoice({ invoice_no: 'INV-0004', total: 60, paid: 60, balance: 0, display_status: 'paid' }),
     ]);
     expect(csv.split('\r\n').slice(1, 5)).toEqual([
-      ',2026-10-01,Aisyah Trading,2026-10-31,80,0,0,0,,Draft,',
-      'INV-0002,2026-10-01,Aisyah Trading,2026-10-31,90,0,0,0,,Void,',
-      'INV-0003,2026-10-01,Aisyah Trading,2026-10-31,70,20,0,0,50,Overdue,',
-      'INV-0004,2026-10-01,Aisyah Trading,2026-10-31,60,60,0,0,0,Paid,',
+      ',2026-10-01,Aisyah Trading,2026-10-31,80,0,0,0,0,,Draft,',
+      'INV-0002,2026-10-01,Aisyah Trading,2026-10-31,90,0,0,0,0,,Void,',
+      'INV-0003,2026-10-01,Aisyah Trading,2026-10-31,70,20,0,0,0,50,Overdue,',
+      'INV-0004,2026-10-01,Aisyah Trading,2026-10-31,60,60,0,0,0,0,Paid,',
     ]);
   });
 

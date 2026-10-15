@@ -68,12 +68,12 @@ describe('invoice reads', () => {
   const row = (n: number) => ({
     id: `inv-${n}`, invoice_no: `INV-${n}`, customer_id: 'c1', customer_name: 'Aisyah Trading',
     invoice_date: '2026-10-01', due_date: '2026-10-31', total: '132.50', paid: '100.00', credited: '20.00', refunded: '0.00',
-    balance: '12.50', display_status: 'sent', einvoice_status: 'none', einvoice_uuid: null,
+    set_off: '0.00', balance: '12.50', display_status: 'sent', einvoice_status: 'none', einvoice_uuid: null,
   });
 
   it('lists from the totals view, in the caller’s workspace, newest first, with amounts as numbers', async () => {
     const { ctx, calls } = fakeFinance({ data: [row(1)], error: null });
-    expect(await listInvoices(ctx)).toEqual([{ ...row(1), total: 132.5, paid: 100, credited: 20, refunded: 0, balance: 12.5 }]);
+    expect(await listInvoices(ctx)).toEqual([{ ...row(1), total: 132.5, paid: 100, credited: 20, refunded: 0, set_off: 0, balance: 12.5 }]);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
       name: 'finance_invoice_totals',
@@ -86,6 +86,12 @@ describe('invoice reads', () => {
     expect(calls[0].columns).toContain('einvoice_uuid');
     expect(calls[0].columns).toContain('credited');
     expect(calls[0].columns).toContain('refunded');
+    expect(calls[0].columns).toContain('set_off');
+  });
+  it('reads what posted contra entries set off, apart from what was paid', async () => {
+    const setOff = { ...row(3), paid: '0.00', credited: '0.00', set_off: '100.00', balance: '32.50' };
+    const { ctx } = fakeFinance({ data: [setOff], error: null });
+    expect(await listInvoices(ctx)).toMatchObject([{ paid: 0, set_off: 100, balance: 32.5 }]);
   });
   it('reads a customer in credit as a balance below zero', async () => {
     const inCredit = { ...row(2), paid: '132.50', credited: '30.00', refunded: '10.00', balance: '-20.00', display_status: 'paid' };
