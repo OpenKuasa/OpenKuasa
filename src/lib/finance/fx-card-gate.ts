@@ -1,16 +1,24 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { BASE_CURRENCY } from './currencies';
 
 /**
  * Whether this workspace deals in a currency other than ringgit, which is the only time Banking shows the
  * "Exchange rates" card: a ringgit-only workspace has no use for the rates and sees no new card.
  *
- * Stage 1 (the rates) adds neither a contact's default currency nor a quotation's currency, so no workspace can
- * deal in another currency yet and this answers false for every workspace. Stage 2 implements it: true when the
- * workspace has at least one contact whose default currency is not MYR or at least one quotation whose currency
- * is not MYR. Until then the card is built, tested and never drawn on a live screen.
+ * True when the workspace has at least one contact whose default currency is not MYR or at least one quotation
+ * whose currency is not MYR (a contact with no default currency counts as ringgit). Two cheap one-row reads; if
+ * either cannot be answered the card is left off and the reason is logged, because this is a side card and
+ * Banking must still open.
  */
-// The arguments are what stage 2 will read with; stage 1 answers without them.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export async function workspaceUsesForeignCurrency(_client: SupabaseClient, _orgId: string): Promise<boolean> {
-  return false;
+export async function workspaceUsesForeignCurrency(client: SupabaseClient, orgId: string): Promise<boolean> {
+  const [contacts, quotations] = await Promise.all([
+    client.from('finance_contacts').select('id').eq('org_id', orgId).neq('default_currency', BASE_CURRENCY).limit(1),
+    client.from('finance_quotations').select('id').eq('org_id', orgId).neq('currency', BASE_CURRENCY).limit(1),
+  ]);
+  const error = contacts.error ?? quotations.error;
+  if (error) {
+    console.error('[finance] could not tell whether the workspace uses another currency:', error);
+    return false;
+  }
+  return (contacts.data?.length ?? 0) > 0 || (quotations.data?.length ?? 0) > 0;
 }

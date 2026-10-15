@@ -45,7 +45,7 @@ export default async function BankingScreen() {
     listBankAccounts(ctx),
     listBankTransactions(ctx),
     access.readsNumbers ? listBankAccountNumbers(ctx) : {},
-    // The rates are a side card, drawn only for a workspace that deals in another currency (none can yet): a
+    // The rates are a side card, drawn only for a workspace that deals in another currency: a
     // ringgit-only workspace's Banking does not read them. If they cannot be read, Banking still opens and the
     // card says so.
     workspaceUsesForeignCurrency(ctx.client, ctx.orgId).then((uses) =>
