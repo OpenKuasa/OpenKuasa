@@ -103,6 +103,7 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'finance/receipts-inbox',
   'finance/chart-of-accounts',
   'finance/journals',
+  'finance/contra-entries',
   'finance/reports',
 ]);
 

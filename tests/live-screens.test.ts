@@ -47,6 +47,10 @@ describe('live screens', () => {
     }
   });
 
+  it('counts Contra Entries as live', () => {
+    expect(isSampleScreen('/finance/contra-entries')).toBe(false);
+  });
+
   it('ignores paths that are not a screen', () => {
     expect(isSampleScreen('/reach')).toBe(false);
     expect(isSampleScreen('/nope/nothing')).toBe(false);
