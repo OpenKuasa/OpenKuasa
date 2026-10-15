@@ -101,7 +101,17 @@ const saveQuotationBase = z.object({
     // quotation in ringgit. The database stores rate 1 for ringgit whatever is sent.
     currency: z.string({ error: M.currency }).refine(isDocumentCurrency, M.currency).optional(),
     /** Ringgit per one unit; null on a draft in another currency whose rate is not known yet. */
-    fx_rate: z.number({ error: M.rate }).positive(M.rate).max(1_000_000_000, M.rate).nullable().optional(),
+    // A number (a direct caller) or exact decimal text (the form: no digit lost to a float).
+    fx_rate: z
+      .union([
+        z.number({ error: M.rate }).positive(M.rate).max(1_000_000_000, M.rate),
+        z
+          .string({ error: M.rate })
+          .regex(/^\d{1,10}(\.\d{1,10})?$/, M.rate)
+          .refine((t) => Number(t) > 0 && Number(t) <= 1_000_000_000, M.rate),
+      ], { error: M.rate })
+      .nullable()
+      .optional(),
     fx_rate_source: z.enum(['bnm', 'manual'], { error: M.rate }).nullable().optional(),
     fx_rate_date: isoDate.nullable().optional(),
   });

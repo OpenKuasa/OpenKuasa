@@ -28,6 +28,11 @@ describe('saveQuotationInput, with a currency', () => {
     expect(first({ ...valid, currency: 'USD', fx_rate: null, fx_rate_source: null, fx_rate_date: null })).toBeUndefined();
     expect(first({ ...valid, currency: 'KWD' })).toBe('Choose a currency.');
     expect(first({ ...valid, currency: 'usd' })).toBe('Choose a currency.');
+    // The form sends the rate as exact text.
+    expect(first({ ...valid, currency: 'USD', fx_rate: '4.0123456789' })).toBeUndefined();
+    for (const bad of ['0', '0.0', 'abc', '1e3', '-1', '4.', '12345678901']) {
+      expect(first({ ...valid, currency: 'USD', fx_rate: bad }), bad).toBe('Enter the exchange rate as a number above 0, such as 4.0815.');
+    }
     expect(first({ ...valid, currency: 'USD', fx_rate: 0 })).toBe('Enter the exchange rate as a number above 0, such as 4.0815.');
     expect(first({ ...valid, currency: 'USD', fx_rate: Number.NaN })).toBe('Enter the exchange rate as a number above 0, such as 4.0815.');
     expect(first({ ...valid, currency: 'USD', fx_rate: 4, fx_rate_source: 'guess' })).toBe('Enter the exchange rate as a number above 0, such as 4.0815.');

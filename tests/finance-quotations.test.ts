@@ -127,8 +127,10 @@ describe('quotation writes', () => {
   it('saves through the database function, in the caller’s workspace', async () => {
     const { ctx, calls } = fakeFinance({ data: ID, error: null });
     expect(await saveQuotation(ctx, { ...valid, id: ID })).toEqual({ ok: true, data: { id: ID } });
-    expect(calls[0]).toMatchObject({ kind: 'rpc', name: 'finance_save_quotation' });
-    expect(calls[0].args).toEqual({
+    // An existing draft sent with no currency: its own currency is read first (for the whole-units rule).
+    expect(calls[0]).toMatchObject({ kind: 'table', name: 'finance_quotations' });
+    expect(calls[1]).toMatchObject({ kind: 'rpc', name: 'finance_save_quotation' });
+    expect(calls[1].args).toEqual({
       target_org: 'org-1',
       quotation: { id: ID, customer_id: CUSTOMER, quote_date: '2026-10-01', valid_until: '2026-10-31', notes: null },
       lines: [{ product_id: null, description: 'Design work', quantity: 10, uom: null, pack_size: null, unit_price: 12.5, sst_rate: 0, discount_pct: null, discount_amount: null }],

@@ -75,12 +75,12 @@ describe('choosing a currency', () => {
 
 describe('the rate box', () => {
   it('sends BNM’s rate as BNM’s, per one unit, with its date', () => {
-    expect(currencyPayload(answered('JPY', JPY))).toEqual({ currency: 'JPY', fx_rate: 0.025857, fx_rate_source: 'bnm', fx_rate_date: '2026-10-15' });
+    expect(currencyPayload(answered('JPY', JPY))).toEqual({ currency: 'JPY', fx_rate: '0.025857', fx_rate_source: 'bnm', fx_rate_date: '2026-10-15' });
   });
 
   it('marks a typed rate as typed by hand, and BNM’s own figure typed back as BNM’s again', () => {
     const typed = withRateTyped(answered('USD', USD), '4.1');
-    expect(currencyPayload(typed)).toEqual({ currency: 'USD', fx_rate: 4.1, fx_rate_source: 'manual', fx_rate_date: null });
+    expect(currencyPayload(typed)).toEqual({ currency: 'USD', fx_rate: '4.1', fx_rate_source: 'manual', fx_rate_date: null });
     expect(rateNotes(typed, DATE)).toEqual(["Typed by hand. Bank Negara Malaysia's rate is RM 4.0815 per USD, 15 October 2026."]);
     expect(currencyPayload(withRateTyped(typed, '4.0815')).fx_rate_source).toBe('bnm');
   });
@@ -160,6 +160,18 @@ describe('the ringgit total', () => {
     expect(ringgitTotal(withRateTyped(answered('USD', USD), '4.0123456789'), [line('1000')])).toBe(4012.35);
   });
 
+  // The same document, with the same numbers, is in supabase/tests/bendahara_quotation_currency_check.sql, where the
+  // database's total_myr must read 5.05: that is what holds this function and the generated columns together.
+  it('agrees with the database on half-sen lines and on discounted foreign lines', () => {
+    const usd = withRateTyped(answered('USD', USD), '1.005');
+    const lines = [
+      line('1.00'), // 1.00 → 1.005 → 1.01 (half up)
+      { ...line('0.33', '3', '8'), discount_pct: '10' }, // net 0.891: 0.89 + SST 0.07 → 0.89 + 0.07
+      { ...line('1.50', '2', '6'), discount_amount: '0.10' }, // net 2.90 + SST 0.17 → 2.91 + 0.17
+    ];
+    expect(ringgitTotal(usd, lines)).toBe(5.05);
+  });
+
   it('is not shown without a rate', () => {
     expect(ringgitTotalNote(answered('USD', null), [line('1000')])).toBeNull();
   });
@@ -182,10 +194,10 @@ describe('whole units', () => {
     expect(rateText(4.0123456789, 'USD')).toBe('4.0123456789');
     expect(rateText(0.0123456789, 'JPY')).toBe('1.23456789');
     const reopened = savedFields({ currency: 'USD', fx_rate: 4.0123456789, fx_rate_source: 'manual', fx_rate_date: null });
-    expect(currencyPayload(reopened).fx_rate).toBe(4.0123456789);
-    expect(currencyPayload(withRateTyped(withCurrency(ringgitFields(), 'JPY', true), '2.5857')).fx_rate).toBe(0.025857);
+    expect(currencyPayload(reopened).fx_rate).toBe('4.0123456789');
+    expect(currencyPayload(withRateTyped(withCurrency(ringgitFields(), 'JPY', true), '2.5857')).fx_rate).toBe('0.025857');
     // 0.07 per 100 JPY is 0.0007 per yen, with no float slop in the rate that is sent.
-    expect(currencyPayload(withRateTyped(withCurrency(ringgitFields(), 'JPY', true), '0.07')).fx_rate).toBe(0.0007);
+    expect(currencyPayload(withRateTyped(withCurrency(ringgitFields(), 'JPY', true), '0.07')).fx_rate).toBe('0.0007');
   });
 
   it('refuses a rate the database cannot hold', () => {

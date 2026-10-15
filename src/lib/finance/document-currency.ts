@@ -10,7 +10,7 @@
  * BNM's. The box itself takes ringgit per the unit BNM quotes (1 USD, 100
  * JPY), so the figure typed is the figure BNM publishes.
  */
-import { lineAmounts } from './bill-math';
+import { lineSen } from './bill-math';
 import { BASE_CURRENCY, minorUnits, quoteUnit } from './currencies';
 import { type LineDraft, lineNumbers } from './document-form';
 import { isIsoDate } from './document-lines';
@@ -171,8 +171,14 @@ export function ratePerOne(fields: CurrencyFields): number | null {
   if (fields.currency === BASE_CURRENCY) return 1;
   const scaled = rateScaled(fields);
   if (scaled === null) return null;
-  // The number is only a carrier for the exact decimal text, which JSON writes back unchanged.
   return scaled === undefined ? Number.NaN : Number(scaledText(scaled));
+}
+
+/** The rate per one unit as exact decimal text (what the save is sent, so no digit is lost to a float): null when empty, 'NaN' when unusable. */
+function ratePerOneText(fields: CurrencyFields): string | null {
+  if (fields.currency === BASE_CURRENCY) return '1';
+  const scaled = rateScaled(fields);
+  return scaled === null ? null : scaled === undefined ? 'NaN' : scaledText(scaled);
 }
 
 /** True when the box holds exactly BNM's rate. */
@@ -218,7 +224,7 @@ export function currencyPayload(fields: CurrencyFields) {
   if (fields.currency === BASE_CURRENCY) {
     return { currency: BASE_CURRENCY, fx_rate: null, fx_rate_source: null, fx_rate_date: null };
   }
-  const perOne = ratePerOne(fields);
+  const perOne = ratePerOneText(fields);
   // A rate is BNM's only while the box holds the figure of a BNM date the form knows.
   const bnm = fields.rateSource === 'bnm' && fields.rateDate !== null && perOne !== null;
   return {
@@ -312,13 +318,10 @@ export function ringgitTotal(fields: CurrencyFields, lines: LineDraft[]): number
   const rate = rateScaled(fields);
   if (fields.currency === BASE_CURRENCY || rate === null || rate === undefined) return null;
   // round(amount * rate, 2) on a two-decimal amount: the amount in sen times the rate, rounded half up.
-  const sen = (n: number) => {
-    const product = BigInt(Math.round(n * 100)) * rate;
-    return (product + RATE_ONE / BigInt(2)) / RATE_ONE;
-  };
+  const sen = (amountSen: bigint) => (amountSen * rate + RATE_ONE / BigInt(2)) / RATE_ONE;
   let total = BigInt(0);
   for (const line of lines) {
-    const { amount, sst } = lineAmounts(lineNumbers(line));
+    const { amount, sst } = lineSen(lineNumbers(line));
     total += sen(amount) + sen(sst);
   }
   return Number(total) / 100;

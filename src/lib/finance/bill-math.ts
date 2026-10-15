@@ -33,7 +33,7 @@ function divideRounded(value: bigint, by: bigint): bigint {
   return (value + by / BigInt(2)) / by;
 }
 
-function lineSen(line: LineNumbers): { amount: bigint; sst: bigint } {
+export function lineSen(line: LineNumbers): { amount: bigint; sst: bigint } {
   // Quantity keeps 3 decimals, unit price 4 and the SST rate 2, as saveBillInput rounds them.
   const product = units(line.quantity, 3) * units(line.unit_price, 4); // qty * price, in 10^-7 ringgit
   const rate = units(roundRate(line.sst_rate), 2);
