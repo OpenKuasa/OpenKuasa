@@ -85,9 +85,17 @@ function sstRate(text: string): number {
   return text.trim() === '' ? 0 : roundRate(typedNumber(text) ?? Number.NaN);
 }
 
-/** An empty discount box means no discount (null); anything else is its number, NaN if unreadable. */
+/**
+ * A discount box as a number, or null for no discount. Empty and an explicit 0
+ * are both "no discount", so the live total and the payload agree and a 0 in one
+ * box never shadows a real amount in the other. A box that is not a number is
+ * NaN, which the schema refuses.
+ */
 function discountValue(text: string): number | null {
-  return text.trim() === '' ? null : (typedNumber(text) ?? Number.NaN);
+  if (text.trim() === '') return null;
+  const n = typedNumber(text);
+  if (n === undefined) return Number.NaN;
+  return n === 0 ? null : n;
 }
 
 /** The line's figures for the live total; a box that is not a number is NaN, which counts as nothing. */
