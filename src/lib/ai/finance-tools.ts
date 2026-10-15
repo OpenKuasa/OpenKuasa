@@ -46,8 +46,8 @@ import {
   deleteQuotation,
   listQuotations,
   quotationIdInput,
-  saveQuotation,
-  saveQuotationInput,
+  saveQuotationInRinggit,
+  saveQuotationToolInput,
   sendQuotation,
 } from '@/lib/finance/quotations';
 import {
@@ -69,7 +69,7 @@ import {
 } from '@/lib/finance/refunds';
 import {
   createContact,
-  createContactInput,
+  createContactToolInput,
   deleteContact,
   deleteContactInput,
   listBillBalances,
@@ -78,7 +78,7 @@ import {
   setContactActive,
   setContactActiveInput,
   updateContact,
-  updateContactInput,
+  updateContactToolInput,
 } from '@/lib/finance/contacts';
 import {
   createProduct,
@@ -301,8 +301,8 @@ export function createBendaharaTools(access: FinanceAccess) {
     // Quotations
     saveQuotation: tool({
       description: 'Create or edit a DRAFT sales quotation. Omit id to create.',
-      inputSchema: saveQuotationInput,
-      execute: async (input) => saveQuotation(ctx, input),
+      inputSchema: saveQuotationToolInput,
+      execute: async (input) => saveQuotationInRinggit(ctx, input),
     }),
     sendQuotation: tool({
       description: 'Mark a quotation as sent to the customer.',
@@ -426,13 +426,13 @@ export function createBendaharaTools(access: FinanceAccess) {
     // Contacts (customers / suppliers)
     createFinanceContact: tool({
       description: 'Add a finance contact (a customer or a supplier).',
-      inputSchema: createContactInput,
-      execute: async (input) => createContact(ctx, input),
+      inputSchema: createContactToolInput,
+      execute: async (input) => createContact(ctx, createContactToolInput.parse(input)),
     }),
     updateFinanceContact: tool({
       description: 'Edit a finance contact.',
-      inputSchema: updateContactInput,
-      execute: async (input) => updateContact(ctx, input),
+      inputSchema: updateContactToolInput,
+      execute: async (input) => updateContact(ctx, updateContactToolInput.parse(input)),
     }),
     setFinanceContactActive: tool({
       description: 'Activate or deactivate a finance contact.',

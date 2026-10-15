@@ -72,8 +72,7 @@ const id = z.string({ error: M.gone }).uuid(M.gone);
 /** An ISO 4217 code a document may carry, or null for none. */
 const currency = z.string({ error: M.currency }).refine(isDocumentCurrency, M.currency).nullable();
 
-export const createContactInput = z
-  .object({
+const createContactBase = z.object({
     name,
     is_customer: z.boolean({ error: M.role }),
     is_supplier: z.boolean({ error: M.role }),
@@ -83,11 +82,20 @@ export const createContactInput = z
     tin: text.default(null),
     payment_terms_days: terms.default(30),
     default_currency: currency.default(null),
-  })
-  .refine((v) => v.is_customer || v.is_supplier, { message: M.role, path: ['is_customer'] });
+  });
+const hasRole = (v: { is_customer: boolean; is_supplier: boolean }) => v.is_customer || v.is_supplier;
 
-export const updateContactInput = z
-  .object({
+export const createContactInput = createContactBase.refine(hasRole, { message: M.role, path: ['is_customer'] });
+
+/**
+ * What the finance assistant may send: no default currency. It writes ringgit only, so the key is not in the
+ * schema the model sees and a call that carries it is stripped (a new contact has none).
+ */
+export const createContactToolInput = createContactBase
+  .omit({ default_currency: true })
+  .refine(hasRole, { message: M.role, path: ['is_customer'] });
+
+const updateContactBase = z.object({
     id,
     name: name.optional(),
     is_customer: z.boolean({ error: M.role }).optional(),
@@ -99,16 +107,22 @@ export const updateContactInput = z
     payment_terms_days: terms.optional(),
     // Absent leaves it as it is: the finance assistant changes contacts without knowing of it.
     default_currency: currency.optional(),
-  })
-  // The two ticks travel together, so the rule can be checked before the database does.
-  .refine((v) => (v.is_customer === undefined) === (v.is_supplier === undefined), {
-    message: M.role,
-    path: ['is_customer'],
-  })
-  .refine((v) => v.is_customer === undefined || v.is_customer || v.is_supplier, {
-    message: M.role,
-    path: ['is_customer'],
   });
+
+type RolesTicked = { is_customer?: boolean; is_supplier?: boolean };
+// The two ticks travel together, so the rule can be checked before the database does.
+const ticksTravelTogether = (v: RolesTicked) => (v.is_customer === undefined) === (v.is_supplier === undefined);
+const hasARole = (v: RolesTicked) => v.is_customer === undefined || v.is_customer || !!v.is_supplier;
+
+export const updateContactInput = updateContactBase
+  .refine(ticksTravelTogether, { message: M.role, path: ['is_customer'] })
+  .refine(hasARole, { message: M.role, path: ['is_customer'] });
+
+/** As `updateContactInput`, without the default currency: the finance assistant leaves it alone. */
+export const updateContactToolInput = updateContactBase
+  .omit({ default_currency: true })
+  .refine(ticksTravelTogether, { message: M.role, path: ['is_customer'] })
+  .refine(hasARole, { message: M.role, path: ['is_customer'] });
 
 export const setContactActiveInput = z.object({ id, active: z.boolean() });
 export const deleteContactInput = z.object({ id });

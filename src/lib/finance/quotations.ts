@@ -79,14 +79,16 @@ export const QUOTATION_MESSAGES = {
   notBnmRate: "That rate is not the one Bank Negara Malaysia published for that day. Type it in again and save; it is kept as typed by hand.",
   // FIN40. The row menu does not offer "Make invoice" on such a quotation, so this is met only by a direct call
   // or a menu opened before the list was refreshed.
+  // The assistant never edits a draft in another currency: its lines would be read as ringgit.
+  foreignDraftByAssistant:
+    'This quotation is not in ringgit. Edit it on the Quotations screen, where its currency and exchange rate are shown.',
   foreignToInvoice:
     'This quotation is not in ringgit, and invoices in other currencies are not available yet. Make the invoice in ringgit on Invoices instead.',
 } as const;
 
 const M = QUOTATION_MESSAGES;
 
-export const saveQuotationInput = z
-  .object({
+const saveQuotationBase = z.object({
     /** Present to change a draft; absent to create one. */
     id: z.string({ error: M.gone }).uuid(M.gone).optional(),
     customer_id: z.string({ error: M.customer }).uuid(M.customer),
@@ -102,12 +104,24 @@ export const saveQuotationInput = z
     fx_rate: z.number({ error: M.rate }).positive(M.rate).max(1_000_000_000, M.rate).nullable().optional(),
     fx_rate_source: z.enum(['bnm', 'manual'], { error: M.rate }).nullable().optional(),
     fx_rate_date: isoDate.nullable().optional(),
-  })
-  .refine((v) => v.valid_until >= v.quote_date, { message: M.dates, path: ['valid_until'] })
+  });
+const validUntilNotBefore = (v: { quote_date: string; valid_until: string }) => v.valid_until >= v.quote_date;
+
+export const saveQuotationInput = saveQuotationBase
+  .refine(validUntilNotBefore, { message: M.dates, path: ['valid_until'] })
   .superRefine((v, ctx) => {
+    // With no currency sent the draft keeps its own; saveQuotation checks that case against the stored one.
     const problem = wholeUnitsError(v.currency ?? BASE_CURRENCY, v.lines);
     if (problem) ctx.addIssue({ code: 'custom', message: problem, path: ['lines'] });
   });
+
+/**
+ * What the finance assistant may send: the form's fields without a currency or a rate. It writes ringgit only,
+ * so those keys are not in the schema the model sees and a call that carries them has them stripped.
+ */
+export const saveQuotationToolInput = saveQuotationBase
+  .omit({ currency: true, fx_rate: true, fx_rate_source: true, fx_rate_date: true })
+  .refine(validUntilNotBefore, { message: M.dates, path: ['valid_until'] });
 
 export const quotationIdInput = z.object({ id: z.string({ error: M.gone }).uuid(M.gone) });
 
@@ -281,6 +295,13 @@ export async function saveQuotation(
   input: z.input<typeof saveQuotationInput>,
 ): Promise<FinResult<{ id: string }>> {
   const { lines, ...quotation } = saveQuotationInput.parse(input);
+  // No currency sent for an existing draft: it keeps its own, so the whole-units rule is its own too.
+  if (quotation.id && quotation.currency === undefined) {
+    const stored = await storedCurrency(ctx, quotation.id);
+    if (!stored.ok) return stored;
+    const problem = stored.data ? wholeUnitsError(stored.data, lines) : null;
+    if (problem) return { ok: false, error: problem };
+  }
   const { data, error } = await ctx.client.rpc('finance_save_quotation', {
     target_org: ctx.orgId,
     quotation,
@@ -288,6 +309,32 @@ export async function saveQuotation(
   });
   if (error || !data) return quotationWriteFailed('saveQuotation', error);
   return { ok: true, data: { id: data as string } };
+}
+
+/** The currency a quotation is stored in; null when it is not there (the save then says so). */
+async function storedCurrency(ctx: FinanceWriteContext, id: string): Promise<FinResult<string | null>> {
+  const { data, error } = await ctx.client
+    .from('finance_quotations')
+    .select('currency')
+    .eq('org_id', ctx.orgId)
+    .eq('id', id)
+    .maybeSingle();
+  if (error) return quotationWriteFailed('saveQuotation', error);
+  return { ok: true, data: (data as { currency?: string } | null)?.currency ?? null };
+}
+
+/**
+ * The finance assistant's save: ringgit only. A new quotation is in ringgit; a draft that is in another
+ * currency is refused, because the lines the assistant writes are in ringgit.
+ */
+export async function saveQuotationInRinggit(ctx: FinanceWriteContext, input: unknown): Promise<FinResult<{ id: string }>> {
+  const parsed = saveQuotationToolInput.parse(input);
+  if (parsed.id) {
+    const stored = await storedCurrency(ctx, parsed.id);
+    if (!stored.ok) return stored;
+    if (stored.data !== null && stored.data !== BASE_CURRENCY) return { ok: false, error: M.foreignDraftByAssistant };
+  }
+  return saveQuotation(ctx, parsed);
 }
 
 /** Marks a draft as sent: it gets its number and can no longer be edited. Nothing is emailed. */
