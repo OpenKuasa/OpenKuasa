@@ -27,6 +27,13 @@
  * Supabase's rate limit (429) refuses a request before anything runs, so that
  * one is waited out and sent again.
  *
+ * Because of that wrapper, a statement that cannot run inside a transaction
+ * (CREATE INDEX CONCURRENTLY, ALTER TYPE ... ADD VALUE then used in the same
+ * file, VACUUM/REINDEX) fails here with 25001/55P04. No migration does that
+ * today; the first that must should be applied with the Supabase CLI/MCP, or
+ * this script given a per-file no-transaction escape hatch (a deferred
+ * follow-up).
+ *
  * Needs OPENKUASA_SUPABASE_TOKEN (a Supabase access token, see .env.example)
  * and NEXT_PUBLIC_SUPABASE_URL in `.env.local`. It talks to the Management API,
  * so no database password is needed. Without a terminal to type the ref into,
