@@ -45,7 +45,6 @@ import {
   CircleDollarSign,
   RotateCcw,
   ArrowUpRight,
-  Coins,
   type LucideIcon,
 } from 'lucide-react';
 import type { OrgRole } from '@/lib/auth/current-org';
@@ -371,7 +370,7 @@ export const PRODUCTS: Product[] = [
           { label: 'Journals', slug: 'journals', icon: BookOpen },
           { label: 'Chart of Accounts', slug: 'chart-of-accounts', icon: ListTree },
           { label: 'Contra Entries', slug: 'contra-entries', icon: ArrowLeftRight },
-          { label: 'FX Revaluation', slug: 'fx-revaluation', icon: Coins },
+          // FX Revaluation returns when Bendahara has currencies to revalue (#224).
         ],
       },
       {
