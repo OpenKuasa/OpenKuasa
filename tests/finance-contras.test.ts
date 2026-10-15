@@ -2,11 +2,13 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  CONTRA_ID_CHUNK,
   CONTRA_MESSAGES as M,
   contraActions,
   contraContacts,
   contraSides,
   deleteContra,
+  listContras,
   postContra,
   saveContra,
   saveContraInput,
@@ -313,5 +315,50 @@ describe('the ledger knows a contra, and the Cash Flow never sees one', () => {
       credit,
     });
     expect(cashMovements([line('ap', 100, 0), line('ar', 0, 100)], accounts)).toEqual([]);
+  });
+});
+
+describe('listContras keeps every request short', () => {
+  it('sends the ids of many contras in chunks, never in one filter', async () => {
+    const N = 250;
+    const contras = Array.from({ length: N }, (_, i) => ({
+      id: UUID(1000 + i), contra_no: `CT-${i}`, contra_date: '2026-10-15', contact_id: UUID(2000 + i), amount: 10,
+      reference: null, notes: null, status: 'posted', posted_at: null, voided_at: null,
+    }));
+    const lines = contras.flatMap((c, i) => [
+      { id: UUID(3000 + i), contra_id: c.id, invoice_id: UUID(4000 + i), bill_id: null, amount: 10 },
+      { id: UUID(5000 + i), contra_id: c.id, invoice_id: null, bill_id: UUID(6000 + i), amount: 10 },
+    ]);
+    const filters: { table: string; size: number }[] = [];
+    const client = {
+      from: (table: string) => {
+        let ids: string[] | null = null;
+        const chain = {
+          select: () => chain,
+          eq: () => chain,
+          in: (_c: string, values: string[]) => {
+            ids = values;
+            filters.push({ table, size: values.length });
+            return chain;
+          },
+          order: () => chain,
+          range: async () => {
+            if (table === 'finance_contras') return { data: contras, error: null };
+            if (table === 'finance_contra_lines') return { data: lines, error: null };
+            if (table === 'finance_contacts') return { data: (ids ?? []).map((id) => ({ id, name: 'N' })), error: null };
+            if (table === 'finance_invoices') return { data: (ids ?? []).map((id) => ({ id, invoice_no: 'INV' })), error: null };
+            return { data: (ids ?? []).map((id) => ({ id, bill_no: 'BILL' })), error: null };
+          },
+        };
+        return chain;
+      },
+    };
+    const rows = await listContras({ client, orgId: UUID(9) } as unknown as FinanceWriteContext);
+    expect(rows).toHaveLength(N);
+    expect(rows[0].invoices[0].document_no).toBe('INV');
+    expect(rows[0].contact_name).toBe('N');
+    expect(filters.length).toBeGreaterThan(3);
+    expect(Math.max(...filters.map((f) => f.size))).toBeLessThanOrEqual(CONTRA_ID_CHUNK);
+    expect(filters.filter((f) => f.table === 'finance_invoices').reduce((t, f) => t + f.size, 0)).toBe(N);
   });
 });

@@ -169,6 +169,9 @@ const LINE_COLUMNS = 'id,contra_id,invoice_id,bill_id,amount';
 
 /* ---- reads ------------------------------------------------------------ */
 
+/** Most ids sent in one `in (...)` filter, so no request line grows with the number of contras. */
+export const CONTRA_ID_CHUNK = 100;
+
 /** Every row of a workspace table, a page at a time. Throws when a read fails, like the ledger's reads. */
 async function readAll(
   ctx: FinanceWriteContext,
@@ -176,7 +179,22 @@ async function readAll(
   columns: string,
   narrow?: { column: string; values: string[] },
 ): Promise<Record<string, unknown>[]> {
-  if (narrow && narrow.values.length === 0) return [];
+  if (!narrow) return readPages(ctx, table, columns);
+  const rows: Record<string, unknown>[] = [];
+  // Ids go CONTRA_ID_CHUNK at a time: the length of a request never depends on how many contras exist.
+  for (let at = 0; at < narrow.values.length; at += CONTRA_ID_CHUNK) {
+    const values = narrow.values.slice(at, at + CONTRA_ID_CHUNK);
+    rows.push(...(await readPages(ctx, table, columns, { column: narrow.column, values })));
+  }
+  return rows;
+}
+
+async function readPages(
+  ctx: FinanceWriteContext,
+  table: string,
+  columns: string,
+  narrow?: { column: string; values: string[] },
+): Promise<Record<string, unknown>[]> {
   const rows: Record<string, unknown>[] = [];
   for (let from = 0; ; from += CONTRA_PAGE_SIZE) {
     let query = ctx.client.from(table).select(columns).eq('org_id', ctx.orgId);
