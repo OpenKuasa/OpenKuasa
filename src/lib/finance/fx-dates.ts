@@ -43,6 +43,18 @@ export function daysBetween(from: string, to: string): number {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 }
 
+/**
+ * Whether a Monday-to-Friday lies strictly between two YYYY-MM-DD dates: Friday to Monday has none, Tuesday to
+ * Thursday has Wednesday. (A public holiday counts as a working day here; the worst it costs is a needless look.)
+ */
+export function hasWeekdayBetween(from: string, to: string): boolean {
+  for (let d = 1; d < daysBetween(from, to); d += 1) {
+    const day = new Date(Date.parse(`${from}T00:00:00Z`) + d * 86_400_000).getUTCDay();
+    if (day >= 1 && day <= 5) return true;
+  }
+  return false;
+}
+
 /** The month of a YYYY-MM-DD date, as YYYY-MM. */
 export function monthOfDate(date: string): string {
   return date.slice(0, 7);

@@ -2,7 +2,7 @@ import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { type BnmAnswer, type BnmGet, bnmGet } from './bnm-client';
 import { type BnmReading, type FxRateInsert, LATEST_PATH, monthPath, readLatestAnswer, readMonthAnswer } from './fx-bnm';
-import { addMonths, daysBetween, malaysiaClock, monthOfDate } from './fx-dates';
+import { addMonths, daysBetween, hasWeekdayBetween, malaysiaClock, monthOfDate } from './fx-dates';
 
 /**
  * Fetching Bank Negara Malaysia's rates into finance_fx_rates, for the
@@ -13,10 +13,14 @@ import { addMonths, daysBetween, malaysiaClock, monthOfDate } from './fx-dates';
  * cron is asked after 17:30 Malaysian time on a weekday, once the newest rate
  * stored is not today's, and at most once an hour (a public holiday answers
  * with the last working day's rates, so a holiday costs about seven calls).
- * Before any rate is stored it is asked at once, whatever the time.
+ * Before any rate is stored it is asked at once, whatever the time (and then
+ * also at most once an hour).
  *
  * The back-fill. A currency with no rate in the last 7 days (every currency
- * on the first run, or after an outage) gets its missing months fetched one
+ * on the first run, or after an outage), or whose newest stored rate is
+ * followed by a missed working day before the latest answer's date (one bad
+ * evening is enough: the latest request only ever returns the newest day),
+ * gets its missing months fetched one
  * at a time, oldest first: from 24 months back on the first run, otherwise
  * from the month of its newest rate. The month reached is kept in
  * finance_fx_fetch_state, so the work goes on across calls. One call does at
@@ -157,19 +161,22 @@ export async function fetchFxRates(
   const empty = newestDate === null;
   const weekday = clock.weekday >= 1 && clock.weekday <= 5;
   const triedLately = lastAttempt !== null && started - Date.parse(lastAttempt) < FX_RETRY_MS;
-  const due = empty || (weekday && clock.minutes >= FX_CUTOFF_MINUTES && newestDate !== clock.date && !triedLately);
+  const due = !triedLately && (empty || (weekday && clock.minutes >= FX_CUTOFF_MINUTES && newestDate !== clock.date));
 
   if (due && canCall()) {
     lastAttempt = new Date(started).toISOString();
     try {
-      const answer = reading(await ask(LATEST_PATH), readLatestAnswer);
+      const answer = reading(await ask(LATEST_PATH), (body) => readLatestAnswer(body, clock.date));
       if (answer.kind === 'rates') {
         // Which currencies need their past months, decided before today's rows go in.
         for (const row of answer.rows) {
           const last = newest[row.currency];
           if (backfill[row.currency]) continue;
           if (last === undefined) backfill[row.currency] = addMonths(month, -FX_BACKFILL_MONTHS);
-          else if (daysBetween(last, clock.date) > FX_STALE_DAYS) backfill[row.currency] = monthOfDate(last);
+          else if (daysBetween(last, clock.date) > FX_STALE_DAYS || hasWeekdayBetween(last, row.rate_date)) {
+            // Out for a week, or a working day lies between the newest stored rate and this answer's day.
+            backfill[row.currency] = monthOfDate(last);
+          }
         }
         stored += await store.insert(answer.rows);
       } else if (answer.kind === 'unusable') {
@@ -192,7 +199,7 @@ export async function fetchFxRates(
       }
       if (!ok || !canCall()) break outer;
       try {
-        const answer = reading(await ask(monthPath(code, next)), (body) => readMonthAnswer(body, code));
+        const answer = reading(await ask(monthPath(code, next)), (body) => readMonthAnswer(body, code, next, clock.date));
         if (answer.kind === 'unusable') {
           ok = false;
           console.error(`[fx-rates] BNM's ${code} rates for ${next} could not be read (status ${answer.status}).`);

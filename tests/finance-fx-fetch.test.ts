@@ -111,6 +111,12 @@ describe('the latest rates', () => {
     expect(paths).toEqual(['/exchange-rate?session=1700']);
   });
 
+  it('are asked for at most once an hour even when no rate is stored yet', async () => {
+    const { store } = memoryStore([], { last_attempt_at: '2026-10-15T09:31:00.000Z', backfill: {} });
+    await fetchFxRates(store, { get: recorded(() => HTML), now: THURSDAY_1745 });
+    expect(paths).toEqual([]);
+  });
+
   it('are not asked for on a weekend', async () => {
     const { store } = memoryStore(allUpTo('2026-10-16'));
     await fetchFxRates(store, { get: recorded(() => ok(LATEST)), now: SATURDAY_1900 });
@@ -140,6 +146,54 @@ describe('the latest rates', () => {
     const { store, table } = memoryStore([rate('USD', '2026-10-15', '4.1000000000')]);
     await fetchFxRates(store, { get: recorded(() => ok(LATEST)), now: THURSDAY_1000 });
     expect(table.get('USD|2026-10-15|1700')?.rate).toBe('4.1000000000');
+  });
+});
+
+describe('a missed working day', () => {
+  const answer = (path: string) => (path === '/exchange-rate?session=1700' ? ok(LATEST) : NONE);
+
+  it('is back-filled on the next call: stored up to Tuesday, the latest answer is Thursday', async () => {
+    const { store, saved } = memoryStore(allUpTo('2026-10-13'));
+    const result = await fetchFxRates(store, { get: recorded(answer), now: THURSDAY_1745 });
+    expect(paths[0]).toBe('/exchange-rate?session=1700');
+    expect(paths[1]).toBe('/exchange-rate/AED/year/2026/month/10?session=1700');
+    // One month call for each of the 27 currencies, all in the current month, and the latest request.
+    expect(paths).toHaveLength(28);
+    expect(result.ok).toBe(true);
+    expect(result.pending).toBe(0);
+    expect(saved.state.backfill).toEqual({});
+  });
+
+  it('is fetched by the month call and stored', async () => {
+    const stored = [...allUpTo('2026-10-14').filter((r) => r.currency !== 'JPY'), rate('JPY', '2026-10-13')];
+    const { store, table } = memoryStore(stored);
+    const wednesday = JSON.parse(JSON.stringify(JPY_SEPTEMBER)) as { data: { rate: { date: string }[] } };
+    wednesday.data.rate = [{ ...wednesday.data.rate[0], date: '2026-10-14' }];
+    await fetchFxRates(store, {
+      get: recorded((path) =>
+        path === '/exchange-rate?session=1700' ? ok(LATEST) : path.includes('/JPY/year/2026/month/10?') ? ok(wednesday) : NONE,
+      ),
+      now: THURSDAY_1745,
+    });
+    expect(paths).toEqual(['/exchange-rate?session=1700', '/exchange-rate/JPY/year/2026/month/10?session=1700']);
+    expect(table.has('JPY|2026-10-14|1700')).toBe(true);
+  });
+
+  it('is not looked for over an ordinary weekend: Friday stored, Monday answered', async () => {
+    const latestMonday = JSON.parse(JSON.stringify(LATEST).replaceAll('2026-10-15', '2026-10-19')) as unknown;
+    const { store, saved } = memoryStore(allUpTo('2026-10-16'));
+    const result = await fetchFxRates(store, { get: recorded(() => ok(latestMonday)), now: at('2026-10-19T09:45:00Z') });
+    expect(paths).toEqual(['/exchange-rate?session=1700']);
+    expect(result).toEqual({ ok: true, stored: 27, calls: 1, pending: 0 });
+    expect(saved.state.backfill).toEqual({});
+  });
+
+  it('still holds to the call limit: the rest waits for the next call', async () => {
+    const { store, saved } = memoryStore(allUpTo('2026-09-28'));
+    const result = await fetchFxRates(store, { get: recorded(answer), now: THURSDAY_1745 });
+    expect(result.calls).toBe(FX_MAX_CALLS);
+    expect(result.pending).toBe(Object.keys(saved.state.backfill).length);
+    expect(result.pending).toBeGreaterThan(0);
   });
 });
 
