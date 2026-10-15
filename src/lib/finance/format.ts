@@ -1,6 +1,19 @@
+import { BASE_CURRENCY, minorUnits } from './currencies';
+
 /** RM 1,240.00 */
 export function rm(n: number) {
   return `RM ${n.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/**
+ * An amount in its own currency: exactly `rm` for ringgit (so every ringgit
+ * figure reads as it always has), "USD 1,000.00" for a two-decimal currency
+ * and "JPY 150,000" for one with no minor unit.
+ */
+export function money(n: number, currency: string = BASE_CURRENCY) {
+  if (currency === BASE_CURRENCY) return rm(n);
+  const digits = minorUnits(currency) ?? 2;
+  return `${currency} ${n.toLocaleString('en-MY', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 }
 
 /** A unit price keeps up to 4 decimals, so two prices that differ only there do not read the same. */

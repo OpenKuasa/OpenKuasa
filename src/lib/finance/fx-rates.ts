@@ -6,6 +6,9 @@
  * session; the rest are pure.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { z } from 'zod';
+import { isDocumentCurrency } from './currencies';
+import { isIsoDate } from './document-lines';
 import { daysBetween } from './fx-dates';
 
 /** A rate older than this, against the date it is wanted for, is offered with a warning. */
@@ -90,4 +93,57 @@ export function fxRatesCardView(rates: FxLatestRate[], today: string): FxRatesCa
         ? `These rates have not been updated since ${longDate(newest)}.`
         : null,
   };
+}
+
+/* ---- stage 2: the rate a document is offered ------------------------------ */
+
+/** BNM's rate a document dated D is offered: the latest 1700 middle rate on or before D. */
+export type FxDefault = {
+  /** Ringgit per one unit. */
+  rate: number;
+  /** The date BNM gave it for; before D on a weekend, a holiday, or when BNM has nothing newer. */
+  rate_date: string;
+  unit: number;
+  /** Ringgit per `unit`, as published. */
+  middle_rate: number;
+};
+
+export const FX_RATE_MESSAGES = {
+  currency: 'Choose a currency.',
+  date: 'Enter a valid date (YYYY-MM-DD).',
+} as const;
+
+/** What a form sends to ask for BNM's rate. */
+export const fxRateForInput = z.object({
+  currency: z.string({ error: FX_RATE_MESSAGES.currency }).refine(isDocumentCurrency, FX_RATE_MESSAGES.currency),
+  date: z.string({ error: FX_RATE_MESSAGES.date }).refine(isIsoDate, FX_RATE_MESSAGES.date),
+});
+
+/**
+ * The rate offered for a document in `currency` dated `date`: the newest BNM
+ * 1700 rate on or before it, so a weekend or a public holiday takes the last
+ * working day's and a future date the latest. null when there is none (a
+ * currency BNM does not publish, or a date before the first rate stored).
+ * Read with the person's own session.
+ */
+export async function defaultFxRate(client: SupabaseClient, currency: string, date: string): Promise<FxDefault | null> {
+  const { data, error } = await client
+    .from('finance_fx_rates')
+    .select('rate, rate_date, unit, middle_rate')
+    .eq('source', 'bnm')
+    .eq('session', '1700')
+    .eq('currency', currency)
+    .lte('rate_date', date)
+    .order('rate_date', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  const row = data as Record<string, unknown>;
+  return { rate: Number(row.rate), rate_date: row.rate_date as string, unit: Number(row.unit), middle_rate: Number(row.middle_rate) };
+}
+
+/** "The latest rate is from 2 October 2026." when the rate offered is more than seven days before the document's date. */
+export function staleRateNote(rateDate: string, documentDate: string): string | null {
+  return daysBetween(rateDate, documentDate) > FX_STALE_AFTER_DAYS ? `The latest rate is from ${longDate(rateDate)}.` : null;
 }
