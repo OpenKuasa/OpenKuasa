@@ -1611,6 +1611,41 @@ wrong, unset or shorter than 32 characters.
 accounts, which the bucket refuses, so the demo has no upload area and a
 sentence saying why.
 
+## Exchange rates
+
+Stage 1 of multi-currency. `finance_fx_rates` holds Bank Negara Malaysia's
+published rates, one row per currency, rate date and session, shared by every
+workspace; `finance_fx_latest_rates` is the newest 1700 rate of each currency
+(it reads as its caller); `finance_fx_fetch_state` is the route's memory (when
+it last asked BNM, and the next month each currency's back-fill will fetch).
+Every signed-in person reads the rates; nobody signed in does. Only
+`service_role` writes them, and only by INSERT: it has no update, delete or
+truncate, so a stored rate never changes under a document that used it. The
+three relations are the only finance ones `service_role` holds anything on
+(`bendahara_archived_account_check.sql` names them as its exceptions).
+
+`POST /api/finance/fx-rates/fetch` (`fetchFxRates`) must be called by the
+operator's scheduler, authorized like the other scheduled endpoints
+(`isTriggerAuthorized`; a `401` means the secret is wrong, unset or shorter
+than 32 characters). It reads nothing from the request, reaches BNM only when
+a rate is missing (the one network call is `bnmGet`), spends at most 20
+seconds and 30 requests a call, and resumes its back-fill on the next call. It
+answers `{"ok", "stored", "pending"}`: how many rates it stored and how many
+currency back-fills are left. `ok: false` with status 200 means something was
+left for the next call; status 500 `{"ok":false,"stored":0,"pending":null}`
+means the state or the rates table could not be read or written. Neither is
+an alert unless it stays so for many calls in a row.
+
+Retry rule: after 17:30 Malaysian time, Monday to Friday, at most once an hour
+until that day's rate is stored (a public holiday costs about seven calls);
+never on a Saturday or Sunday once rates exist. Call it every few minutes or
+hourly; it does nothing when nothing is missing.
+
+The "Exchange rates" card on Banking is read-only and is drawn only for a
+workspace that deals in another currency (`workspaceUsesForeignCurrency`).
+Stage 1 adds no currency to any contact or document, so that is false for
+every workspace and the card is never drawn; stage 2 implements the check.
+
 ## Invoices
 
 A sales invoice is a `finance_invoices` row with its lines in
