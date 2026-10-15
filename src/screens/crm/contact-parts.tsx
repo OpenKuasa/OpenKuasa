@@ -1,7 +1,8 @@
 'use client';
 
 import { type RefObject } from 'react';
-import { Check, FileText, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
+import Link from 'next/link';
+import { Check, FileText, Handshake, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
 import { BentoCard } from '@/components/bento/bento';
 import { Button } from '@/components/ui/button';
 import {
@@ -213,11 +214,14 @@ export function ContactTags({ tags }: { tags: string[] }) {
 /** The "⋯" menu at the end of a contact's row. */
 export function ContactRowMenu({
   label,
+  dealHref,
   onEdit,
   onDelete,
   onClosed,
 }: {
   label: string;
+  /** Where Create deal goes: the Deals page, its form open for this contact. */
+  dealHref?: string;
   onEdit: () => void;
   onDelete: () => void;
   /** Called once the menu has gone, when focus is free to move. */
@@ -240,6 +244,14 @@ export function ContactRowMenu({
           onClosed();
         }}
       >
+        {dealHref ? (
+          <DropdownMenuItem asChild>
+            <Link href={dealHref}>
+              <Handshake />
+              Create deal
+            </Link>
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuItem onSelect={onEdit}>
           <Pencil />
           Edit

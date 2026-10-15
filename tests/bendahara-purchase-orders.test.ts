@@ -2,6 +2,7 @@ import { expect, test } from 'vitest';
 import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import { createConfirmedTestUser, createOrg, liveClient, signInOwner } from './helpers/live-workspaces';
+import { getPrintablePurchaseOrder } from '@/lib/finance/purchase-orders';
 
 // Bendahara RFQs and purchase orders (20261103090000 to 20261103100000, and 20261106090000),
 // against the live project. Each test makes its own workspace; the helper
@@ -455,4 +456,26 @@ testWithSupabase('an order carries its own terms and address, values what has ar
     .insert({ org_id: o.orgId, actor_name: 'x', action: 'Approved a purchase order', category: 'data' })
     .select('id');
   expect(forged.error).not.toBeNull();
+});
+
+testWithSupabase("a member reads an approved order for printing, with the supplier's details and the preparer's and approver's names, titles and roles", async () => {
+  const o = await ownerWithOrg(`PO print ${Date.now()}`);
+  const ownerId = (await o.c.auth.getUser()).data.user!.id;
+  const member = await join(o, 'member');
+  const named = await member.c.from('profiles').update({ full_name: 'Aisyah Rahman', job_title: 'Purchasing Executive' }).eq('user_id', member.userId!);
+  expect(named.error, named.error?.message).toBeNull();
+  const contact = await o.c.from('finance_contacts').update({ ssm_no: '201901000123', phone: '03-1234 5678' }).eq('id', o.supplier);
+  expect(contact.error, contact.error?.message).toBeNull();
+  const id = await approvedPo(member, o);
+
+  const printable = await getPrintablePurchaseOrder({ client: member.c, orgId: o.orgId }, id);
+  expect(printable?.status).toBe('approved');
+  expect(printable?.submitted_by).toBe(member.userId);
+  expect(printable?.submitted_at).not.toBeNull();
+  expect(printable?.approved_by).toBe(ownerId);
+  expect(printable?.approved_at).not.toBeNull();
+  expect(printable?.supplier).toMatchObject({ ssm_no: '201901000123', phone: '03-1234 5678' });
+  expect(printable?.people[member.userId!]).toMatchObject({ full_name: 'Aisyah Rahman', job_title: 'Purchasing Executive', role: 'member' });
+  expect(printable?.people[ownerId]).toMatchObject({ role: 'owner' });
+  expect(printable?.lines).toHaveLength(2);
 });

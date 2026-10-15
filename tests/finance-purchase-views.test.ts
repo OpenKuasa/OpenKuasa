@@ -661,22 +661,21 @@ describe('purchaseOrderActions', () => {
   });
   describe('approved', () => {
     const approved = po({ status: 'approved' });
-    it('lets anyone who may write record a delivery and raise a bill', () => {
+    it('lets anyone who may write print it, record a delivery and raise a bill', () => {
       for (const viewer of [member, otherMember]) {
-        expect(purchaseOrderActions(approved, viewer), JSON.stringify(viewer)).toEqual(['receive', 'createBill']);
+        expect(purchaseOrderActions(approved, viewer), JSON.stringify(viewer)).toEqual(['print', 'receive', 'createBill']);
       }
     });
     it('lets an admin or the owner also close or cancel it', () => {
       for (const viewer of [raisingAdmin, otherAdmin, owner]) {
-        expect(purchaseOrderActions(approved, viewer), JSON.stringify(viewer)).toEqual(['receive', 'createBill', 'close', 'cancel']);
+        expect(purchaseOrderActions(approved, viewer), JSON.stringify(viewer)).toEqual(['print', 'receive', 'createBill', 'close', 'cancel']);
       }
     });
   });
-  it('offers nothing on a closed or a cancelled order', () => {
-    for (const status of ['closed', 'cancelled'] as const) {
-      for (const viewer of [member, otherAdmin, owner]) {
-        expect(purchaseOrderActions(po({ status }), viewer), `${status} ${JSON.stringify(viewer)}`).toEqual([]);
-      }
+  it('offers a closed order only to be printed again, and nothing on a cancelled one', () => {
+    for (const viewer of [member, otherAdmin, owner]) {
+      expect(purchaseOrderActions(po({ status: 'closed' }), viewer), JSON.stringify(viewer)).toEqual(['print']);
+      expect(purchaseOrderActions(po({ status: 'cancelled' }), viewer), JSON.stringify(viewer)).toEqual([]);
     }
   });
   it('names an order by its number, or as a draft', () => {

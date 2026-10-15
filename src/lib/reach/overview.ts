@@ -5,7 +5,7 @@ import {
   filterUpcomingAppointments,
   summarizeCampaigns,
 } from '@/lib/ai/tools';
-import type { Channel, LeadStage, ReachData } from './types';
+import type { LeadChannel, LeadStage, ReachData } from './types';
 
 export type OverviewModel = {
   isEmpty: boolean;
@@ -16,15 +16,15 @@ export type OverviewModel = {
     conversionPct: number;
   };
   leadsTrend: { label: string; leads: number; qualified: number }[];
-  channelMix: { key: Channel; label: string; value: number }[];
+  channelMix: { key: LeadChannel; label: string; value: number }[];
   spendByChannel: { label: string; spend: number }[];
   funnel: { key: LeadStage; label: string; value: number }[];
   topCampaigns: { name: string; leads: number; cpl: string; status: 'Active' | 'Paused' }[];
   appointments: { name: string; kind: string; when: string; via: string }[];
 };
 
-const CHANNEL_LABEL: Record<Channel, string> = {
-  whatsapp: 'WhatsApp', facebook: 'Facebook', instagram: 'Instagram', tiktok: 'TikTok',
+const CHANNEL_LABEL: Record<LeadChannel, string> = {
+  whatsapp: 'WhatsApp', facebook: 'Facebook', instagram: 'Instagram', tiktok: 'TikTok', web: 'Website',
 };
 const STAGE_LABEL: Record<LeadStage, string> = {
   lead: 'Leads', contacted: 'Contacted', qualified: 'Qualified', booked: 'Booked', won: 'Won',
@@ -65,7 +65,7 @@ export async function buildOverviewModel(data: ReachData, now: Date): Promise<Ov
     leadsTrend: summary.weekly_trend.map((w) => ({
       label: `Wk${8 - w.weeks_ago}`, leads: w.leads, qualified: w.qualified,
     })),
-    channelMix: (Object.entries(summary.by_channel) as [Channel, number][])
+    channelMix: (Object.entries(summary.by_channel) as [LeadChannel, number][])
       .map(([key, value]) => ({ key, label: CHANNEL_LABEL[key], value })),
     spendByChannel: spend.by_channel.map((c) => ({ label: CHANNEL_LABEL[c.channel], spend: Math.round(c.spend_cents / 100) })),
     funnel: (Object.keys(summary.funnel) as LeadStage[]).map((key) => ({ key, label: STAGE_LABEL[key], value: summary.funnel[key] })),

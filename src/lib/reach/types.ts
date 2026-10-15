@@ -10,6 +10,12 @@
  */
 
 export type Channel = 'whatsapp' | 'facebook' | 'instagram' | 'tiktok';
+/**
+ * Where a lead came in: an ad channel, or `web` for someone who filled in a
+ * lead form, a landing page or the chatbot (they are Kasturi contacts).
+ */
+export type LeadChannel = Channel | 'web';
+export const LEAD_CHANNELS: readonly LeadChannel[] = ['whatsapp', 'facebook', 'instagram', 'tiktok', 'web'];
 export type CampaignStatus = 'active' | 'paused';
 export type LeadStage = 'lead' | 'contacted' | 'qualified' | 'booked' | 'won';
 
@@ -38,13 +44,19 @@ export type Campaign = {
 export type Lead = {
   id: string;
   name: string;
-  channel: Channel;
+  channel: LeadChannel;
   /** Furthest stage this lead has reached. */
   stage: LeadStage;
   source: string;
   created_at: string;
   /** Set when the lead was promoted to a CRM contact; no FK (module-decoupled). */
   promoted_contact_id: string | null;
+  /**
+   * `crm` when this lead is a Kasturi contact read as a lead (see
+   * `crm-leads.ts`): its id is the contact's, and it is changed in Kasturi,
+   * never through the Jebat lead writes. Absent on rows of the `leads` table.
+   */
+  origin?: 'crm';
 };
 
 export type AppointmentStatus = 'scheduled' | 'completed' | 'cancelled' | 'no_show';

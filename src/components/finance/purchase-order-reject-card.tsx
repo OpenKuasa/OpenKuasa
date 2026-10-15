@@ -3,26 +3,27 @@
 import { type FormEvent, useId, useState } from 'react';
 import { X } from 'lucide-react';
 import { BentoCard } from '@/components/bento/bento';
+import { PurchaseOrderLines } from '@/components/finance/purchase-order-approve-card';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { PURCHASE_ORDER_MESSAGES, type PurchaseOrderListRow } from '@/lib/finance/purchase-orders';
+import { PURCHASE_ORDER_MESSAGES, type PurchaseOrderDetail } from '@/lib/finance/purchase-orders';
 import type { FinResult } from '@/lib/finance/result';
 
 export type DecidePurchaseOrder = (input: unknown) => Promise<FinResult<{ id: string }>>;
 
 /**
- * Sends an order awaiting approval back to draft with the reason the person
- * gives, which the raiser then sees under the order's status. An empty reason
- * is refused here, before any call.
+ * Shows an order awaiting approval with its lines, and sends it back to draft
+ * with the reason the person gives, which the raiser then sees under the
+ * order's status. An empty reason is refused here, before any call.
  */
 export function PurchaseOrderRejectCard({
   order,
   decide,
   onClose,
 }: {
-  order: PurchaseOrderListRow;
+  order: PurchaseOrderDetail;
   decide: DecidePurchaseOrder;
   onClose: () => void;
 }) {
@@ -48,6 +49,9 @@ export function PurchaseOrderRejectCard({
       className="col-span-2 md:col-span-12"
     >
       <form onSubmit={submit} noValidate className="grid gap-3 md:grid-cols-12">
+        <div className="md:col-span-12">
+          <PurchaseOrderLines order={order} />
+        </div>
         <div className="space-y-1.5 md:col-span-8">
           <Label htmlFor={`${id}-reason`}>Reason</Label>
           <Input

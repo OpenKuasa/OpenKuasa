@@ -26,6 +26,11 @@ export function LetterheadProvider({
   return <LetterheadContext.Provider value={{ head, workspaceName }}>{children}</LetterheadContext.Provider>;
 }
 
+/** The letterhead handed down by `LetterheadProvider`, for a printout that needs more of it than `LetterHead` draws. */
+export function useLetterhead(): Letterhead | null {
+  return useContext(LetterheadContext).head;
+}
+
 /** The logo, name, registration number and address, on screen and in print. It stays together on one page. */
 export function LetterHead({ fallbackName = '' }: { fallbackName?: string }) {
   const { head, workspaceName } = useContext(LetterheadContext);

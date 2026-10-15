@@ -424,6 +424,7 @@ export function filterPurchaseOrders(rows: PurchaseOrderListRow[], query: string
 }
 
 export type PurchaseOrderAction =
+  | 'print'
   | 'edit'
   | 'submit'
   | 'delete'
@@ -441,6 +442,7 @@ export type PurchaseOrderAction =
  * `raiser` created the order; `mine` also covers whoever submitted it, and neither may approve it unless they
  * own the workspace. A draft that was never numbered is deleted; a numbered one (rejected or withdrawn) is
  * cancelled, since its number was given out. Closing and cancelling an approved order are an owner's or admin's.
+ * An approved or closed order can be printed, to send to the supplier; a cancelled one cannot.
  */
 export function purchaseOrderActions(
   row: PurchaseOrderListRow,
@@ -463,7 +465,9 @@ export function purchaseOrderActions(
       return actions;
     }
     case 'approved':
-      return viewer.canSignOff ? ['receive', 'createBill', 'close', 'cancel'] : ['receive', 'createBill'];
+      return viewer.canSignOff ? ['print', 'receive', 'createBill', 'close', 'cancel'] : ['print', 'receive', 'createBill'];
+    case 'closed':
+      return ['print'];
     default:
       return [];
   }

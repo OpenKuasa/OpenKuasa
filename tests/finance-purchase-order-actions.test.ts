@@ -54,6 +54,11 @@ vi.mock('@/lib/finance/purchase-orders', async (orig) => {
       if (ctl.order instanceof Error) throw ctl.order;
       return ctl.order;
     },
+    getPrintablePurchaseOrder: async (ctx: { orgId: string }, orderId: string) => {
+      ctl.calls.push({ fn: 'getPrintablePurchaseOrder', orgId: ctx.orgId, input: orderId });
+      if (ctl.order instanceof Error) throw ctl.order;
+      return ctl.order;
+    },
   };
 });
 
@@ -115,6 +120,8 @@ describe('who may write', () => {
       expect(await actions.getPurchaseOrderAction({ id: PO })).toEqual(FORBIDDEN);
       expect(await actions.getApprovedPurchaseOrderAction({ id: PO })).toEqual(FORBIDDEN);
       expect(await actions.getApprovedPurchaseOrderAction({ id: 'nope' })).toEqual(FORBIDDEN);
+      expect(await actions.getPendingPurchaseOrderAction({ id: PO })).toEqual(FORBIDDEN);
+      expect(await actions.getPrintablePurchaseOrderAction({ id: PO })).toEqual(FORBIDDEN);
     }
     expect(ctl.calls).toEqual([]);
     expect(ctl.revalidated).toEqual([]);
@@ -282,9 +289,10 @@ describe('billFromPurchaseOrderAction', () => {
   });
 });
 
-/** The two reads: a draft for the Edit form, an approved order for the delivery card. */
+/** The three reads: a draft for the Edit form, an order awaiting approval for Approve and Reject, an approved order for the delivery card. */
 describe.each([
   ['getPurchaseOrderAction', 'draft', ['pending_approval', 'approved', 'closed', 'cancelled']],
+  ['getPendingPurchaseOrderAction', 'pending_approval', ['draft', 'approved', 'closed', 'cancelled']],
   ['getApprovedPurchaseOrderAction', 'approved', ['draft', 'pending_approval', 'closed', 'cancelled']],
 ] as const)('%s', (name, wanted, others) => {
   const read = (input: unknown) => actions[name](input);
@@ -324,5 +332,32 @@ describe.each([
     ctl.viewer = { userId: 'u1', orgId: 'org1', role: 'member', isDemo: false };
     ctl.order = found;
     expect((await read({ id: PO })).ok).toBe(true);
+  });
+});
+
+/** The read for printing: an approved or a closed order, never one that was not approved or was cancelled. */
+describe('getPrintablePurchaseOrderAction', () => {
+  const read = (input: unknown) => actions.getPrintablePurchaseOrderAction(input);
+
+  it('returns an approved or a closed order, without refreshing anything', async () => {
+    for (const status of ['approved', 'closed']) {
+      ctl.calls = [];
+      ctl.order = { id: PO, status, lines: [] };
+      expect(await read({ id: PO }), status).toEqual({ ok: true, data: ctl.order });
+      expect(ctl.calls, status).toEqual([{ fn: 'getPrintablePurchaseOrder', orgId: 'org1', input: PO }]);
+    }
+    expect(ctl.revalidated).toEqual([]);
+  });
+  it('says it can no longer be done, and refreshes the list, for a draft, an order awaiting approval or a cancelled one', async () => {
+    for (const status of ['draft', 'pending_approval', 'cancelled']) {
+      ctl.revalidated = [];
+      ctl.order = { id: PO, status, lines: [] };
+      expect(await read({ id: PO }), status).toEqual({ ok: false, error: LOCKED });
+      expect(ctl.revalidated, status).toEqual(POS);
+    }
+  });
+  it('says the order is gone when it was deleted meanwhile, or for an id that is not an id', async () => {
+    expect(await read({ id: PO })).toEqual(GONE);
+    expect(await read({ id: 'nope' })).toEqual(GONE);
   });
 });

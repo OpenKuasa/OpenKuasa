@@ -65,6 +65,7 @@ import {
   type Broadcast,
   type Campaign,
   type Channel,
+  type LeadChannel,
   type Creative,
   type CreativeType,
   type Form,
@@ -92,7 +93,7 @@ export type LeadSummary = {
   total_leads: number;
   /** Count of leads that *reached* each stage (the funnel). */
   funnel: Record<LeadStage, number>;
-  by_channel: Record<Channel, number>;
+  by_channel: Record<LeadChannel, number>;
   /** won ÷ total, as a 0–100 percentage rounded to 1 dp. */
   conversion_pct: number;
   /** Oldest → newest, 8 buckets. `qualified` = reached qualified+ that week. */
@@ -119,7 +120,7 @@ export function deriveLeadSummary(
       acc[l.channel] = (acc[l.channel] ?? 0) + 1;
       return acc;
     },
-    { whatsapp: 0, facebook: 0, instagram: 0, tiktok: 0 } as Record<Channel, number>,
+    { whatsapp: 0, facebook: 0, instagram: 0, tiktok: 0, web: 0 } as Record<LeadChannel, number>,
   );
 
   const total = scoped.length;
@@ -258,7 +259,7 @@ export function deriveAdsOverview(campaigns: Campaign[]): AdsOverview {
 /** CRM contacts derived from leads, newest first, optionally filtered. */
 export function deriveContacts(
   leads: Lead[],
-  opts: { stage?: LeadStage; channel?: Channel; limit?: number } = {},
+  opts: { stage?: LeadStage; channel?: LeadChannel; limit?: number } = {},
 ) {
   const { stage, channel, limit = 10 } = opts;
   return leads
@@ -274,6 +275,8 @@ export function deriveContacts(
       source: l.source,
       promoted_contact_id: l.promoted_contact_id,
       created_at: l.created_at,
+      // A Kasturi contact: Jebat cannot change or promote it.
+      ...(l.origin === 'crm' ? { managed_in: 'kasturi' as const } : {}),
     }));
 }
 
@@ -405,10 +408,10 @@ export function createReachTools(
 
     listContacts: tool({
       description:
-        'Recent CRM contacts (derived from leads), newest first: name, channel, stage, source, created_at. Optionally filter by stage or channel.',
+        'Recent leads, newest first: name, channel, stage, source, created_at. Ad leads plus everyone who came in through a lead form, landing page or the chatbot (channel "web"); those are Kasturi contacts, marked managed_in "kasturi", and are changed in Kasturi, not with the lead tools. Optionally filter by stage or channel.',
       inputSchema: z.object({
         stage: z.enum(LEAD_STAGES as [LeadStage, ...LeadStage[]]).optional().describe('Only contacts at this stage.'),
-        channel: z.enum(['whatsapp', 'facebook', 'instagram', 'tiktok']).optional().describe('Only contacts from this channel.'),
+        channel: z.enum(['whatsapp', 'facebook', 'instagram', 'tiktok', 'web']).optional().describe('Only leads from this channel; web = lead forms, landing pages and the chatbot.'),
         limit: limitSchema('Max contacts to return (default 10, at most 50).'),
       }),
       execute: async ({ stage, channel, limit }) =>

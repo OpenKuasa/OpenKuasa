@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { BarChart3, Filter, Plus, TrendingUp } from 'lucide-react';
 import { ScreenContainer } from '@/components/screen/screen-container';
 import { PageHeader } from '@/components/screen/page-header';
@@ -106,8 +107,14 @@ export default function DealsScreen({
   // Search, owner and the status view all work on the deals already loaded.
   const [filters, setFilters] = useState<DealFilters>(live ? DEFAULT_DEAL_FILTERS : SAMPLE_FILTERS);
 
+  // Create deal on a contact's row comes here as ?contact=<id>: the form
+  // opens with that contact chosen.
+  const pathname = usePathname();
+  const contactParam = useSearchParams()?.get('contact') ?? null;
+  const [newDealContactId, setNewDealContactId] = useState(actions ? contactParam : null);
+
   // One thing is open at a time: the form card, or a question on one deal.
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState(newDealContactId !== null);
   const [editing, setEditing] = useState<CrmDeal | null>(null);
   const [asking, setAsking] = useState<{ kind: 'delete' | 'lost'; id: string } | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
@@ -157,10 +164,14 @@ export default function DealsScreen({
 
   // New Deal and Daily Report are plain buttons: what they open is focused
   // once it is on the page.
-  const [formOpened, setFormOpened] = useState(0);
+  const [formOpened, setFormOpened] = useState(newDealContactId !== null ? 1 : 0);
   useEffect(() => {
     if (formOpened > 0) focusForm();
   }, [formOpened]);
+  // Once read, the contact leaves the address, so a reload does not reopen the form.
+  useEffect(() => {
+    if (contactParam && pathname) window.history.replaceState(null, '', pathname);
+  }, [contactParam, pathname]);
   useEffect(() => {
     if (reportOpen) reportCloseRef.current?.focus();
   }, [reportOpen]);
@@ -169,12 +180,14 @@ export default function DealsScreen({
   }, [managing]);
 
   const startAdd = () => {
+    setNewDealContactId(null);
     setAdding(true);
     setEditing(null);
     setAsking(null);
     setFormOpened((n) => n + 1);
   };
   const closeForm = () => {
+    setNewDealContactId(null);
     setAdding(false);
     setEditing(null);
   };
@@ -263,6 +276,7 @@ export default function DealsScreen({
             key={editing?.id ?? 'new'}
             action={actions.save}
             editing={editing}
+            newDealContactId={newDealContactId}
             stages={stages}
             contacts={contacts ?? []}
             invoices={invoices}

@@ -7,6 +7,7 @@
  * org_id comes from the context.
  */
 import { z } from 'zod';
+import type { OrgRole } from '@/lib/auth/current-org';
 import { addDaysIso } from './bill-math';
 import { BILL_MESSAGES, saveBill } from './bills';
 import {
@@ -32,6 +33,7 @@ import {
   pgCode,
   writeFailed,
 } from './result';
+import type { PrintablePurchaseOrder, PrintPerson } from './purchase-order-print';
 
 export const PURCHASE_ORDER_LINES_MAX = DOCUMENT_LINES_MAX;
 /** Purchase orders loaded for a screen, a page at a time. */
@@ -280,6 +282,47 @@ export async function getPurchaseOrder(ctx: FinanceWriteContext, id: string): Pr
     sst_total: Number(sst_total),
     notes: (notes as string | null) ?? null,
     lines: ((lines ?? []) as unknown as Record<string, unknown>[]).map(toOrderLine),
+  };
+}
+
+/**
+ * One order with what its printout needs besides: when it was submitted and approved and by whom, the supplier's
+ * SSM no., phone and email, and the preparer's and approver's names, job titles and roles. A person who has left the
+ * workspace cannot be read (profiles are shared only within a workspace), so they are simply missing from `people`.
+ */
+export async function getPrintablePurchaseOrder(ctx: FinanceWriteContext, id: string): Promise<PrintablePurchaseOrder | null> {
+  const order = await getPurchaseOrder(ctx, id);
+  if (!order) return null;
+  const [stamps, supplier] = await Promise.all([
+    ctx.client.from('finance_purchase_orders').select('submitted_at,approved_by,approved_at').eq('org_id', ctx.orgId).eq('id', id).maybeSingle(),
+    ctx.client.from('finance_contacts').select('name,ssm_no,phone,email').eq('org_id', ctx.orgId).eq('id', order.supplier_id).maybeSingle(),
+  ]);
+  if (stamps.error) throw stamps.error;
+  if (supplier.error) throw supplier.error;
+  if (!stamps.data) return null;
+  const { submitted_at, approved_by, approved_at } = stamps.data as { submitted_at: string | null; approved_by: string | null; approved_at: string | null };
+  // Everyone `purchaseOrderPrint` may name; it decides who prepared the order.
+  const ids = [...new Set([order.submitted_by, order.created_by, approved_by].filter((u): u is string => !!u))];
+  const people: Record<string, PrintPerson> = {};
+  if (ids.length > 0) {
+    const [profiles, members] = await Promise.all([
+      ctx.client.from('profiles').select('user_id,full_name,email,job_title').in('user_id', ids),
+      ctx.client.from('org_members').select('user_id,role').eq('org_id', ctx.orgId).in('user_id', ids),
+    ]);
+    if (profiles.error) throw profiles.error;
+    if (members.error) throw members.error;
+    const roles = new Map(((members.data ?? []) as { user_id: string; role: OrgRole }[]).map((m) => [m.user_id, m.role]));
+    for (const p of (profiles.data ?? []) as { user_id: string; full_name: string | null; email: string | null; job_title: string | null }[]) {
+      people[p.user_id] = { full_name: p.full_name, email: p.email, job_title: p.job_title, role: roles.get(p.user_id) ?? null };
+    }
+  }
+  return {
+    ...order,
+    submitted_at,
+    approved_by,
+    approved_at,
+    supplier: (supplier.data as PrintablePurchaseOrder['supplier'] | null) ?? { name: order.supplier_name, ssm_no: null, phone: null, email: null },
+    people,
   };
 }
 

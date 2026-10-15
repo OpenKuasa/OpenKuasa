@@ -14,7 +14,7 @@ import { LetterHead } from './letter-head';
  * with its rail, nav, topbar and assistant button, and the overlay), and inside the dialog the elements marked
  * `data-letter-noprint` (the draft note and the button row). The letter (`article[data-letter-print]`) stays.
  */
-const PRINT_CSS = `
+export const PRINT_CSS = `
 @media print {
   /* The dialog's content is a direct child of <body> (Radix portal). Everything else directly under <body> is the
      app (rail, sidebar, topbar, main, assistant button) or the dialog's overlay: removed from the layout so no
