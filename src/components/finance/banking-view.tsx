@@ -115,12 +115,15 @@ export function BankingView({
   writer,
   initialOpen = null,
   fxRates,
+  fxToday,
 }: {
   /**
    * Bank Negara Malaysia's newest rates, for the read-only card at the foot of the screen; null when they could
    * not be read. Absent (the sample) draws no card.
    */
   fxRates?: FxLatestRate[] | null;
+  /** The Malaysian date, which BNM dates its rates by, for the card's "not updated since" note; defaults to `today`. */
+  fxToday?: string;
   /** What is open when the screen first draws. Only the tests set it: a person always starts with nothing open. */
   initialOpen?: Open;
   /** Absent for a viewer, the demo workspace and the sample: then nothing here changes data. */
@@ -501,7 +504,7 @@ export function BankingView({
             </div>
           )}
         </BentoCard>
-        {fxRates !== undefined ? <FxRatesCard rates={fxRates} today={today} /> : null}
+        {fxRates !== undefined ? <FxRatesCard rates={fxRates} today={fxToday ?? today} /> : null}
       </BentoGrid>
     </ScreenContainer>
   );

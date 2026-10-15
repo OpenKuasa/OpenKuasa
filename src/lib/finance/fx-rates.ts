@@ -33,6 +33,7 @@ export async function listLatestFxRates(client: SupabaseClient): Promise<FxLates
   return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
     currency: r.currency as string,
     rate_date: r.rate_date as string,
+    // Display only: a stage that multiplies money by a rate must keep the exact numeric string, not these numbers.
     unit: Number(r.unit),
     middle_rate: Number(r.middle_rate),
     rate: Number(r.rate),

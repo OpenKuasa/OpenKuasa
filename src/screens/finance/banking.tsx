@@ -10,6 +10,7 @@ import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { bankingAccess } from '@/lib/finance/banking-access';
 import { listBankAccountNumbers } from '@/lib/finance/bank-accounts';
 import { listBankAccounts, listBankTransactions } from '@/lib/finance/banking';
+import { malaysiaClock } from '@/lib/finance/fx-dates';
 import { workspaceUsesForeignCurrency } from '@/lib/finance/fx-card-gate';
 import { type FxLatestRate, listLatestFxRates } from '@/lib/finance/fx-rates';
 import { todayUtc } from '@/lib/finance/view-helpers';
@@ -62,6 +63,7 @@ export default async function BankingScreen() {
       rows={rows}
       today={todayUtc()}
       fxRates={fxRates}
+      fxToday={malaysiaClock(new Date()).date}
       writer={
         access.canEdit
           ? { actions: ACTIONS, canSignOff: access.canSignOff, transfers: access.canTransfer ? TRANSFERS : undefined, numbers }
