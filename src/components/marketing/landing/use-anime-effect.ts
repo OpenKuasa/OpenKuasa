@@ -16,11 +16,14 @@ export function useAnimeEffect(
   deps: DependencyList = [],
 ) {
   // Re-run only when `deps` change, but always call the latest setup closure, so
-  // it reads current props without re-importing animejs on every render.
+  // it reads current props without re-importing animejs on every render. The ref
+  // is updated in an effect, not during render; effects run in the order they are
+  // declared, so it is current before the import below can resolve.
   const setupRef = useRef(setup);
-  setupRef.current = setup;
+  useEffect(() => {
+    setupRef.current = setup;
+  });
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     let cancelled = false;
     let cleanup: (() => void) | void;
@@ -31,5 +34,7 @@ export function useAnimeEffect(
       cancelled = true;
       cleanup?.();
     };
+    // The caller's deps, by design: the setup closure is read from the ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 }
