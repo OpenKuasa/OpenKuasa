@@ -116,11 +116,12 @@ begin
   if t is distinct from 'finance_allocations_amount_check,finance_allocations_one_document_check,finance_allocations_reason_check' then
     fails := fails || format('check constraints on finance_allocations are: %s', t);
   end if;
-  -- The live view keeps its columns in their order; the two new ones are at the end.
+  -- The live view keeps its columns in their order; the two new ones are at the end,
+  -- and set_off after them (20261119100000, contra entries).
   select string_agg(attname, ',' order by attnum) into t from pg_attribute
    where attrelid = 'public.finance_invoice_totals'::regclass and attnum > 0 and not attisdropped;
   if t is distinct from 'id,org_id,customer_id,customer_name,invoice_no,invoice_date,due_date,notes,status,posted_at,'
-       || 'einvoice_status,einvoice_uuid,created_by,created_at,updated_at,subtotal,sst,total,paid,balance,display_status,credited,refunded' then
+       || 'einvoice_status,einvoice_uuid,created_by,created_at,updated_at,subtotal,sst,total,paid,balance,display_status,credited,refunded,set_off' then
     fails := fails || format('finance_invoice_totals has the columns: %s', t);
   end if;
   -- One function answers the call with a date and the call without one. A second
