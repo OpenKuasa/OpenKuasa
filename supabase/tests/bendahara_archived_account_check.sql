@@ -105,9 +105,12 @@ begin
        || 'EXECUTE FUNCTION private.finance_transaction_account_guard()' then
     fails := fails || format('finance_use_account_update is: %s', t);
   end if;
-  -- service_role is in no finance relation's privileges, and all 43 are there.
+  -- service_role is in no finance relation's privileges but the three exchange-rate ones, which the rates
+  -- route writes (20261119150000_bendahara_fx_rates.sql, checked by bendahara_fx_rates_check.sql), and all 43
+  -- are there.
   select count(*), string_agg(c.relname, ',' order by c.relname)
-           filter (where exists (select 1 from aclexplode(c.relacl) a where a.grantee = 'service_role'::regrole))
+           filter (where c.relname not in ('finance_fx_rates', 'finance_fx_latest_rates', 'finance_fx_fetch_state')
+                     and exists (select 1 from aclexplode(c.relacl) a where a.grantee = 'service_role'::regrole))
     into n, t
     from pg_class c
    where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p', 'v', 'm')
