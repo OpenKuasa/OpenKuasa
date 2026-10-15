@@ -326,3 +326,38 @@ testWithSupabase('a contra that a refund depends on is not voided', async () => 
   // Without the contra the customer would owe 132.50 - 30 + 30: the refund depends on it.
   expect(await voidContra(o.ctx, { id })).toEqual({ ok: false, error: M.refundsDepend });
 });
+
+testWithSupabase('a second contra takes only what the first left of a bill or an invoice', async () => {
+  const o = await ownerWithOrg('Contra Twice Sdn Bhd');
+  const invoiceA = await postedInvoice(o); // 132.50
+  const invoiceB = await postedInvoice(o);
+  const billA = await postedBill(o, [PAPER]); // 132.50
+  const billB = await postedBill(o, [PAPER]);
+  const draft = async (invoice: string, bill: string, amount: number) => {
+    const saved = await saveContra(o.ctx, {
+      contact_id: o.both,
+      contra_date: today(),
+      amount,
+      reference: null,
+      notes: null,
+      invoices: [{ invoice_id: invoice, amount }],
+      bills: [{ bill_id: bill, amount }],
+    });
+    expect(saved).toMatchObject({ ok: true });
+    return saved.ok ? saved.data.id : '';
+  };
+
+  // The first takes 100 of invoice A and bill A.
+  expect(await postContra(o.ctx, { id: await draft(invoiceA, billA, 100) })).toMatchObject({ ok: true });
+
+  // A second one for the same bill: 100 is too much, one sen over what is left is too much, what is left is not.
+  expect(await postContra(o.ctx, { id: await draft(invoiceB, billA, 100) })).toEqual({ ok: false, error: M.tooMuch });
+  expect(await postContra(o.ctx, { id: await draft(invoiceB, billA, 32.51) })).toEqual({ ok: false, error: M.tooMuch });
+  expect(await postContra(o.ctx, { id: await draft(invoiceB, billA, 32.5) })).toMatchObject({ ok: true });
+  expect(await billRow(o, billA)).toMatchObject({ balance: 0, set_off: 13250 });
+
+  // The same for an invoice: invoice A has 32.50 left.
+  expect(await postContra(o.ctx, { id: await draft(invoiceA, billB, 100) })).toEqual({ ok: false, error: M.tooMuch });
+  expect(await postContra(o.ctx, { id: await draft(invoiceA, billB, 32.5) })).toMatchObject({ ok: true });
+  expect(await invoiceRow(o, invoiceA)).toMatchObject({ balance: 0, set_off: 13250 });
+});
