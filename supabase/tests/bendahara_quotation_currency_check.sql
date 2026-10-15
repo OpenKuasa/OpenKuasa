@@ -16,6 +16,7 @@ declare
   q_myr uuid;
   q_usd uuid;
   q_none uuid;
+  q_half uuid;
   n integer;
   t text;
   r record;
@@ -74,6 +75,8 @@ begin
   insert into public.finance_contacts (org_id, name, is_customer) values (org, 'Acme Pte Ltd', true) returning id into cust;
   insert into public.finance_fx_rates (currency, rate_date, session, unit, middle_rate, rate)
   values ('USD', date '1999-01-04', '1700', 1, 4.0815, 4.0815);
+  insert into public.finance_fx_rates (currency, rate_date, session, unit, middle_rate, rate)
+  values ('USD', date '1999-01-04', '1200', 1, 4.2222, 4.2222);
 
   perform set_config('request.jwt.claims', json_build_object('sub', owner_id, 'role', 'authenticated', 'aal', 'aal2')::text, true);
   set local role authenticated;
@@ -104,9 +107,33 @@ begin
   select total_myr into r from public.finance_quotation_totals where id = q_usd;
   if r.total_myr <> 4.82 then fails := fails || format('after the rate became 4.5 the ringgit total is %s, not 4.82', r.total_myr); end if;
 
+  -- ==== half-sen lines and discounts, at rate 1.005 ================================
+  -- Mirrored by tests/finance-document-currency.test.ts ('agrees with the database'), which must read the same 5.05.
+  --   1.00                          x 1.005 = 1.005    -> 1.01 (half up)
+  --   3 x 0.33, 10% off, SST 8%     net 0.891: 0.89 + 0.07 -> 0.89 + 0.07
+  --   2 x 1.50, 0.10 off, SST 6%    net 2.90:  2.90 + 0.17 -> 2.91 + 0.17
+  q_half := public.finance_save_quotation(org,
+    jsonb_build_object('customer_id', cust, 'quote_date', current_date, 'valid_until', current_date + 30,
+      'currency', 'USD', 'fx_rate', '1.005', 'fx_rate_source', 'manual'),
+    '[{"description":"a","quantity":1,"unit_price":1.00,"sst_rate":0},
+      {"description":"b","quantity":3,"unit_price":0.33,"sst_rate":8,"discount_pct":10},
+      {"description":"c","quantity":2,"unit_price":1.50,"sst_rate":6,"discount_amount":0.10}]'::jsonb);
+  select * into r from public.finance_quotation_totals where id = q_half;
+  if r.subtotal <> 4.79 or r.sst <> 0.24 or r.total <> 5.03
+     or r.subtotal_myr <> 4.81 or r.sst_myr <> 0.24 or r.total_myr <> 5.05 then
+    fails := fails || format('the half-sen quotation reads %s + %s = %s, ringgit %s + %s = %s, not 4.79 + 0.24 = 5.03, ringgit 4.81 + 0.24 = 5.05',
+      r.subtotal, r.sst, r.total, r.subtotal_myr, r.sst_myr, r.total_myr);
+  end if;
+  delete from public.finance_quotations where id = q_half;
+
   -- ==== refusals ==============================================================
   fails := fails || public.bendahara_check_try('a rate marked as BNM''s that BNM did not publish', 'FIN39',
     format('update public.finance_quotations set fx_rate = 4.2, fx_rate_source = %L, fx_rate_date = %L where id = %L', 'bnm', '1999-01-04', q_usd));
+  -- BNM's figure under a date BNM has no row for, and a figure that only the 1200 session published.
+  fails := fails || public.bendahara_check_try('BNM''s rate under a date it has no row for', 'FIN39',
+    format('update public.finance_quotations set fx_rate = 4.0815, fx_rate_source = %L, fx_rate_date = %L where id = %L', 'bnm', '1999-01-05', q_usd));
+  fails := fails || public.bendahara_check_try('a rate only the 1200 session published, marked as BNM''s', 'FIN39',
+    format('update public.finance_quotations set fx_rate = 4.2222, fx_rate_source = %L, fx_rate_date = %L where id = %L', 'bnm', '1999-01-04', q_usd));
   fails := fails || public.bendahara_check_try('a currency off the list', '23514',
     format('update public.finance_quotations set currency = %L where id = %L', 'KWD', q_usd));
   fails := fails || public.bendahara_check_try('a NaN rate', '23514',
