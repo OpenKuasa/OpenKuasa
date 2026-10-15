@@ -139,6 +139,11 @@ const quotation = (
   accepted_on,
   invoice_id: null,
   invoice_no: null,
+  currency: 'MYR',
+  fx_rate: 1,
+  fx_rate_source: null,
+  fx_rate_date: null,
+  total_myr: total,
 });
 
 /** Newest first, as the real list is. */

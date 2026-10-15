@@ -58,13 +58,14 @@ describe('quotation reads', () => {
   const row = (n: number, extra: Record<string, unknown> = {}) => ({
     id: `qt-${n}`, quotation_no: `QT-${n}`, customer_id: 'c1', customer_name: 'Aisyah Trading',
     quote_date: '2026-10-01', valid_until: '2026-10-31', total: '132.50', display_status: 'sent',
-    accepted_at: null, invoice_id: null, invoice_no: null, ...extra,
+    accepted_at: null, invoice_id: null, invoice_no: null,
+    currency: 'MYR', fx_rate: '1.0000000000', fx_rate_source: null, fx_rate_date: null, total_myr: '132.50', ...extra,
   });
   /** The row as the data layer hands it on: `accepted_at` becomes the date `accepted_on`. */
   const read = (n: number, extra: Record<string, unknown> = {}) => {
     const rest: Record<string, unknown> = { ...row(n) };
     delete rest.accepted_at;
-    return { ...rest, total: 132.5, accepted_on: null, ...extra };
+    return { ...rest, total: 132.5, fx_rate: 1, total_myr: 132.5, accepted_on: null, ...extra };
   };
 
   it('lists from the totals view, in the caller’s workspace, newest first, with the total as a number', async () => {

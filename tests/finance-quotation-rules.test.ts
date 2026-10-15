@@ -14,6 +14,11 @@ const quotation = (display_status: QuotationDisplayStatus, q: Partial<QuotationL
   accepted_on: display_status === 'accepted' ? '2026-10-08' : null,
   invoice_id: null,
   invoice_no: null,
+  currency: 'MYR',
+  fx_rate: 1,
+  fx_rate_source: null,
+  fx_rate_date: null,
+  total_myr: 132.5,
   ...q,
 });
 

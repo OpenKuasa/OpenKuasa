@@ -41,7 +41,7 @@ function fakeClient(answer: { data: unknown; error: unknown }) {
 const contact: FinanceContact = {
   id: ID, name: 'Lim Hardware Sdn Bhd', is_customer: false, is_supplier: true,
   email: 'sales@limhardware.com.my', phone: null, ssm_no: null, tin: null,
-  payment_terms_days: 30, active: true,
+  payment_terms_days: 30, active: true, default_currency: null,
 };
 
 let logged: ReturnType<typeof vi.spyOn>;

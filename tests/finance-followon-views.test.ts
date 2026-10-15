@@ -48,6 +48,11 @@ const quotation = (q: Partial<QuotationListRow> = {}): QuotationListRow => {
     accepted_on: null,
     invoice_id: null,
     invoice_no: null,
+    currency: 'MYR',
+    fx_rate: 1,
+    fx_rate_source: null,
+    fx_rate_date: null,
+    total_myr: q.total ?? 100,
     ...q,
   };
 };

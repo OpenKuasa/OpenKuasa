@@ -29,6 +29,7 @@ function fakeListClient(pages: Page[]) {
 }
 
 const contact = (c: Partial<FinanceContact>): FinanceContact => ({
+  default_currency: null,
   id: 'c1',
   name: 'Aisyah Trading',
   is_customer: true,

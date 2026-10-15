@@ -4,6 +4,7 @@
  * from the FinanceWriteContext, never from the input.
  */
 import { z } from 'zod';
+import { isDocumentCurrency } from './currencies';
 import {
   type FinResult,
   type FinanceWriteContext,
@@ -24,10 +25,12 @@ export type FinanceContact = {
   tin: string | null;
   payment_terms_days: number;
   active: boolean;
+  /** The currency a new quotation for this contact starts in; null for none (ringgit). Fills forms only. */
+  default_currency: string | null;
 };
 
 export const CONTACT_COLUMNS =
-  'id,name,is_customer,is_supplier,email,phone,ssm_no,tin,payment_terms_days,active';
+  'id,name,is_customer,is_supplier,email,phone,ssm_no,tin,payment_terms_days,active,default_currency';
 
 export const CONTACT_NAME_MAX = 160;
 /** Contacts loaded for the screen; the footer says so when there are more. */
@@ -44,6 +47,7 @@ export const CONTACT_MESSAGES = {
   inUse: 'This contact is used on bills or other documents. Archive it instead.',
   hasBills: 'This contact has supplier bills, so it has to stay a supplier.',
   hasInvoices: 'This contact has invoices or quotations, so it has to stay a customer.',
+  currency: 'Choose a currency from the list, or none.',
 } as const;
 
 const M = CONTACT_MESSAGES;
@@ -65,6 +69,8 @@ const email = z
   .nullable();
 const terms = z.number({ error: M.terms }).int(M.terms).min(0, M.terms).max(365, M.terms);
 const id = z.string({ error: M.gone }).uuid(M.gone);
+/** An ISO 4217 code a document may carry, or null for none. */
+const currency = z.string({ error: M.currency }).refine(isDocumentCurrency, M.currency).nullable();
 
 export const createContactInput = z
   .object({
@@ -76,6 +82,7 @@ export const createContactInput = z
     ssm_no: text.default(null),
     tin: text.default(null),
     payment_terms_days: terms.default(30),
+    default_currency: currency.default(null),
   })
   .refine((v) => v.is_customer || v.is_supplier, { message: M.role, path: ['is_customer'] });
 
@@ -90,6 +97,8 @@ export const updateContactInput = z
     ssm_no: text.optional(),
     tin: text.optional(),
     payment_terms_days: terms.optional(),
+    // Absent leaves it as it is: the finance assistant changes contacts without knowing of it.
+    default_currency: currency.optional(),
   })
   // The two ticks travel together, so the rule can be checked before the database does.
   .refine((v) => (v.is_customer === undefined) === (v.is_supplier === undefined), {
@@ -109,6 +118,10 @@ function contactWriteFailed(fnName: string, error: unknown): { ok: false; error:
   if (code === PG_FOREIGN_KEY) return { ok: false, error: M.inUse };
   if (code === 'FIN07') return { ok: false, error: M.hasBills };
   if (code === 'FIN08') return { ok: false, error: M.hasInvoices };
+  // The domain public.finance_currency refuses a code the list in currencies.ts would have refused first.
+  if (code === PG_CHECK && /finance_currency/.test(String((error as { message?: unknown } | null)?.message ?? ''))) {
+    return { ok: false, error: M.currency };
+  }
   if (code === PG_CHECK) return { ok: false, error: M.role };
   return writeFailed(fnName, error);
 }

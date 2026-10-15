@@ -4,8 +4,16 @@
  * is emailed. After that only the customer's answer is recorded: accepted or
  * declined. An accepted quotation becomes a draft invoice with the same
  * lines. org_id comes from the context.
+ *
+ * A quotation may be in another currency (stage 2 of multi-currency): its
+ * lines are typed in that currency, and its rate (ringgit per one unit) gives
+ * the ringgit figures beside them, worked out by the database. A quotation
+ * posts nothing, so those figures are only indicative. Until invoices carry
+ * a currency, a quotation in another currency cannot be made into one.
  */
 import { z } from 'zod';
+import { BASE_CURRENCY, isDocumentCurrency } from './currencies';
+import { CURRENCY_MESSAGES, wholeUnitsError } from './document-currency';
 import {
   DOCUMENT_LINES_MAX,
   type DocumentLineRow,
@@ -60,6 +68,19 @@ export const QUOTATION_MESSAGES = {
   empty: 'A quotation needs at least one line with an amount.',
   numberTaken: 'That quotation number is already used.',
   missing: 'The customer or a product on this quotation no longer exists.',
+  currency: 'Choose a currency.',
+  rate: CURRENCY_MESSAGES.rate,
+  // FIN38. The form says it first; the database says it for a direct call, or a draft saved without a rate in
+  // another tab and then marked as sent from the list.
+  rateBeforeSending: CURRENCY_MESSAGES.rateBeforeSending,
+  // FIN39. The form marks a rate as Bank Negara's only when it is the figure BNM gave for that date, so this is
+  // met only by a direct call, or by a form left open across a change to the rates table (which never happens:
+  // a stored rate is never replaced). It says what to do, not what happened.
+  notBnmRate: "That rate is not the one Bank Negara Malaysia published for that day. Type it in again and save; it is kept as typed by hand.",
+  // FIN40. The row menu does not offer "Make invoice" on such a quotation, so this is met only by a direct call
+  // or a menu opened before the list was refreshed.
+  foreignToInvoice:
+    'This quotation is not in ringgit, and invoices in other currencies are not available yet. Make the invoice in ringgit on Invoices instead.',
 } as const;
 
 const M = QUOTATION_MESSAGES;
@@ -73,8 +94,20 @@ export const saveQuotationInput = z
     valid_until: isoDate,
     notes: optionalText.default(null),
     lines: z.array(salesDocumentLine, { error: M.lines }).min(1, M.lines).max(QUOTATION_LINES_MAX, M.tooManyLines),
+    // The four below travel together and are all optional, with no default: a caller that sends no currency
+    // (the finance assistant, which writes ringgit) leaves a draft's currency and rate as they are, and a new
+    // quotation in ringgit. The database stores rate 1 for ringgit whatever is sent.
+    currency: z.string({ error: M.currency }).refine(isDocumentCurrency, M.currency).optional(),
+    /** Ringgit per one unit; null on a draft in another currency whose rate is not known yet. */
+    fx_rate: z.number({ error: M.rate }).positive(M.rate).max(1_000_000_000, M.rate).nullable().optional(),
+    fx_rate_source: z.enum(['bnm', 'manual'], { error: M.rate }).nullable().optional(),
+    fx_rate_date: isoDate.nullable().optional(),
   })
-  .refine((v) => v.valid_until >= v.quote_date, { message: M.dates, path: ['valid_until'] });
+  .refine((v) => v.valid_until >= v.quote_date, { message: M.dates, path: ['valid_until'] })
+  .superRefine((v, ctx) => {
+    const problem = wholeUnitsError(v.currency ?? BASE_CURRENCY, v.lines);
+    if (problem) ctx.addIssue({ code: 'custom', message: problem, path: ['lines'] });
+  });
 
 export const quotationIdInput = z.object({ id: z.string({ error: M.gone }).uuid(M.gone) });
 
@@ -91,6 +124,9 @@ const REFUSALS: Record<string, string> = {
   FIN10: M.empty,
   FIN11: M.gone,
   FIN13: M.hasInvoice,
+  FIN38: M.rateBeforeSending,
+  FIN39: M.notBnmRate,
+  FIN40: M.foreignToInvoice,
   [PG_UNIQUE]: M.numberTaken,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_FORBIDDEN]: NOT_ALLOWED,
@@ -137,6 +173,16 @@ export type QuotationListRow = {
   invoice_id: string | null;
   /** null when there is no invoice, and while that invoice is still a draft. */
   invoice_no: string | null;
+  /** ISO 4217 code. MYR for every quotation made before stage 2. */
+  currency: string;
+  /** Ringgit per one unit: 1 for ringgit; null on a draft in another currency with no rate yet. */
+  fx_rate: number | null;
+  /** null for ringgit and while there is no rate. */
+  fx_rate_source: 'bnm' | 'manual' | null;
+  /** The date of BNM's rate when it is BNM's; null otherwise. */
+  fx_rate_date: string | null;
+  /** The total in ringgit at the quotation's rate (indicative: a quotation posts nothing); null while there is no rate. */
+  total_myr: number | null;
 };
 
 export type QuotationLine = DocumentLineRow;
@@ -156,7 +202,11 @@ export type QuotationDetail = QuotationListRow & {
 export type SaveAndSendQuotationResult = FinResult<{ id: string; quotation_no: string }> & { draftId?: string };
 
 const LIST_COLUMNS =
-  'id,quotation_no,customer_id,customer_name,quote_date,valid_until,total,display_status,accepted_at,invoice_id,invoice_no';
+  'id,quotation_no,customer_id,customer_name,quote_date,valid_until,total,display_status,accepted_at,invoice_id,invoice_no,' +
+  'currency,fx_rate,fx_rate_source,fx_rate_date,total_myr';
+
+/** A numeric column as a number, keeping null. */
+const numberOrNull = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 
 function toListRow(row: Record<string, unknown>): QuotationListRow {
   const { accepted_at, ...rest } = row;
@@ -167,6 +217,11 @@ function toListRow(row: Record<string, unknown>): QuotationListRow {
     accepted_on: typeof accepted_at === 'string' ? accepted_at.slice(0, 10) : null,
     invoice_id: (row.invoice_id as string | null) ?? null,
     invoice_no: (row.invoice_no as string | null) ?? null,
+    currency: (row.currency as string | undefined) ?? BASE_CURRENCY,
+    fx_rate: numberOrNull(row.fx_rate),
+    fx_rate_source: (row.fx_rate_source as 'bnm' | 'manual' | null | undefined) ?? null,
+    fx_rate_date: (row.fx_rate_date as string | null | undefined) ?? null,
+    total_myr: numberOrNull(row.total_myr),
   };
 }
 

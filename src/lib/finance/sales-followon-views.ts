@@ -68,6 +68,18 @@ function quarterOf(iso: string): string {
 /** Sent at some point: everything but a draft. */
 const wasSent = (q: QuotationListRow) => q.display_status !== 'draft';
 
+/**
+ * What a quotation adds to a ringgit figure: its ringgit total, which for a ringgit quotation is its total. A
+ * quotation in another currency counts at its own rate; a draft in another currency with no rate yet counts
+ * nothing until it has one.
+ */
+const ringgit = (q: QuotationListRow) => q.total_myr ?? 0;
+
+/** True once any quotation is in another currency: only then do the list and the export show currencies. */
+export function quotationsHaveForeign(rows: QuotationListRow[]): boolean {
+  return rows.some((q) => q.currency !== 'MYR');
+}
+
 export function quotationsView(rows: QuotationListRow[], today: string): QuotationsViewData {
   const open = rows.filter((q) => q.display_status === 'sent');
   const drafts = rows.filter((q) => q.display_status === 'draft');
@@ -84,8 +96,8 @@ export function quotationsView(rows: QuotationListRow[], today: string): Quotati
     if (quotedInMonth.length > 0 || acceptedInMonth.length > 0) hasTrend = true;
     return {
       label,
-      quoted: thousands(sum(quotedInMonth, (q) => q.total)),
-      accepted: thousands(sum(acceptedInMonth, (q) => q.total)),
+      quoted: thousands(sum(quotedInMonth, ringgit)),
+      accepted: thousands(sum(acceptedInMonth, ringgit)),
     };
   });
 
@@ -93,15 +105,15 @@ export function quotationsView(rows: QuotationListRow[], today: string): Quotati
 
   return {
     stats: [
-      { label: 'Open quotes', value: rmShort(sum(open, (q) => q.total)), delta: count(open.length, 'open quote'), deltaTone: 'flat' },
-      { label: 'Accepted (MTD)', value: rmShort(sum(acceptedMtd, (q) => q.total)), delta: count(acceptedMtd.length, 'quotation'), deltaTone: 'flat' },
+      { label: 'Open quotes', value: rmShort(sum(open, ringgit)), delta: count(open.length, 'open quote'), deltaTone: 'flat' },
+      { label: 'Accepted (MTD)', value: rmShort(sum(acceptedMtd, ringgit)), delta: count(acceptedMtd.length, 'quotation'), deltaTone: 'flat' },
       {
         label: 'Conversion',
         value: decided.length ? `${Math.round((accepted.length / decided.length) * 100)}%` : '—',
         delta: `${accepted.length} of ${decided.length} decided`,
         deltaTone: 'flat',
       },
-      { label: 'Pipeline value', value: rmShort(sum(pipeline, (q) => q.total)), delta: `${count(pipeline.length, 'quotation')}, drafts included`, deltaTone: 'flat' },
+      { label: 'Pipeline value', value: rmShort(sum(pipeline, ringgit)), delta: `${count(pipeline.length, 'quotation')}, drafts included`, deltaTone: 'flat' },
     ],
     trend,
     hasTrend,
@@ -163,7 +175,8 @@ export function quotationActions(row: QuotationListRow): QuotationAction[] {
     case 'expired':
       return ['accept', 'decline'];
     case 'accepted':
-      return ['convert', 'decline'];
+      // Invoices have no currency until stage 3: a quotation in another currency cannot become one yet (FIN40).
+      return row.currency === 'MYR' ? ['convert', 'decline'] : ['decline'];
     case 'declined':
       return ['accept'];
     default:
@@ -178,17 +191,22 @@ export function quotationName(row: QuotationListRow): string {
 
 /** The quotations table as a CSV file, its columns in the table's order. The total is a number, so a spreadsheet can add it up. */
 export function quotationsCsv(rows: QuotationListRow[]): string {
+  const base = ['No.', 'Date', 'Customer', 'Total', 'Valid until', 'Status', 'Invoice'];
+  const row = (q: QuotationListRow) => [
+    q.quotation_no,
+    q.quote_date,
+    q.customer_name,
+    q.total,
+    q.valid_until,
+    QUOTATION_STATUS_LABELS[q.display_status],
+    quotationInvoice(q),
+  ];
+  // A ringgit-only workspace's export is what it was. Once any quotation is in another currency, every row
+  // says its currency, its rate (ringgit per one unit), its ringgit total and whether the rate was typed.
+  if (!quotationsHaveForeign(rows)) return toCsv(base, rows.map(row));
   return toCsv(
-    ['No.', 'Date', 'Customer', 'Total', 'Valid until', 'Status', 'Invoice'],
-    rows.map((q) => [
-      q.quotation_no,
-      q.quote_date,
-      q.customer_name,
-      q.total,
-      q.valid_until,
-      QUOTATION_STATUS_LABELS[q.display_status],
-      quotationInvoice(q),
-    ]),
+    [...base, 'Currency', 'Rate (RM per unit)', 'Total (RM)', 'Rate typed by hand'],
+    rows.map((q) => [...row(q), q.currency, q.fx_rate, q.total_myr, q.fx_rate_source === 'manual' ? 'yes' : '']),
   );
 }
 
