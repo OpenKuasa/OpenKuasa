@@ -89,11 +89,23 @@ export function contraParties(
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** The line under a document's number: what it can take, and why that may be less than its balance. */
-export function contraOwedLine(document: ContraDocument): string {
+/**
+ * The contacts the New form offers: only those with an invoice and a bill to set off. The contact of a draft that
+ * no longer has both is offered to that draft's Edit form only.
+ */
+export function newContraParties(parties: ContraParty[]): ContraParty[] {
+  return parties.filter((p) => p.invoices.length > 0 && p.bills.length > 0);
+}
+
+/**
+ * The line under a document's number: what it can take, and why that may be less than its balance. Money in on an
+ * invoice is "posted"; a payment on a bill is "paid", as Supplier Bills says.
+ */
+export function contraOwedLine(document: ContraDocument, side: ContraSide): string {
   const due = `due ${displayDate(document.due_date)}${document.overdue ? ', overdue' : ''}`;
   if (document.held > 0) {
-    return `${rm(document.payable)} can be set off (${rm(document.balance)} owed, ${rm(document.held)} in payments not yet posted) · ${due}`;
+    const held = side === 'invoices' ? 'in payments not yet posted' : 'in payments not yet paid';
+    return `${rm(document.payable)} can be set off (${rm(document.balance)} owed, ${rm(document.held)} ${held}) · ${due}`;
   }
   return `${rm(document.balance)} owed · ${due}`;
 }
@@ -175,7 +187,8 @@ export function chooseContraContact(form: ContraForm, contactId: string): Contra
 
 /**
  * Ticks an invoice or a bill, or unticks it. A tick fills in what the document can take, or what its side still
- * lacks of the amount typed when that is less, so ticking down a list makes the side add up.
+ * lacks of the amount typed when that is less, so ticking down a list makes the side add up. When the side already
+ * adds up to the amount, the box is left empty for the person to fill.
  */
 export function toggleContraDocument(form: ContraForm, side: ContraSide, document: ContraDocument, on: boolean): ContraForm {
   const amounts = { ...form[side] };
@@ -185,6 +198,10 @@ export function toggleContraDocument(form: ContraForm, side: ContraSide, documen
   }
   const amount = typedNumber(form.amount);
   const lacking = amount !== null ? (sen(amount) - sen(amountsTotal(form[side]))) / 100 : 0;
+  if (amount !== null && sen(amount) > 0 && lacking <= 0) {
+    amounts[document.id] = '';
+    return { ...form, [side]: amounts };
+  }
   amounts[document.id] = amountText(lacking > 0 && lacking < document.payable ? lacking : document.payable);
   return { ...form, [side]: amounts };
 }
@@ -286,11 +303,16 @@ export function filterContras(rows: ContraRow[], query: string, filter: ContraFi
 }
 
 /** The figures over the list: posted this month, what they set off, and the drafts waiting. */
-export function contraStats(rows: ContraRow[], today: string): { postedThisMonth: number; setOffThisMonth: number; drafts: number } {
+export function contraStats(
+  rows: ContraRow[],
+  today: string,
+): { postedThisMonth: number; postedInAll: number; setOffThisMonth: number; drafts: number } {
   const month = today.slice(0, 7);
-  const posted = rows.filter((r) => r.status === 'posted' && r.contra_date.startsWith(month));
+  const postedInAll = rows.filter((r) => r.status === 'posted');
+  const posted = postedInAll.filter((r) => r.contra_date.startsWith(month));
   return {
     postedThisMonth: posted.length,
+    postedInAll: postedInAll.length,
     setOffThisMonth: posted.reduce((t, r) => t + sen(r.amount), 0) / 100,
     drafts: rows.filter((r) => r.status === 'draft').length,
   };
@@ -316,16 +338,33 @@ export function contrasCsv(rows: ContraRow[]): string {
 
 /* ---- the questions ------------------------------------------------------- */
 
-/** Posting a draft from its row. */
+/**
+ * Posting a draft from its row. A draft may have been saved unfinished; then the question says it cannot be posted
+ * yet and how to finish it, instead of promising what posting would refuse (FIN29).
+ */
 export function contraPostQuestion(row: ContraRow): string {
-  const invoices = contraDocuments(row.invoices) || 'its invoices';
-  const bills = contraDocuments(row.bills) || 'its bills';
-  return `Post ${contraName(row)}? Together ${invoices} will owe ${rm(row.amount)} less, and so will ${bills}; the books record the set-off. It gets its number and cannot be edited afterwards: a posted contra entry is undone by voiding it.`;
+  const sides = contraSides(row);
+  if (!sides.ready) {
+    return `Post ${contraName(row)}? It cannot be posted yet: it needs at least one invoice and one bill, each side adding up to ${rm(row.amount)}. Use Edit to finish it first.`;
+  }
+  return `Post ${contraName(row)}? ${theyOwe(row, 'less')} It gets its number and can't be edited after; to undo it, void it.`;
 }
 
-/** Voiding a posted one: what it set off is owed again, and the books reverse it. */
+/** Voiding a posted one: what it set off is owed again, both ways, and the books reverse it. */
 export function contraVoidQuestion(row: ContraRow): string {
-  return `Void ${contraName(row)}? Its invoices and bills owe again the ${rm(row.amount)} it set off on each side, and the books reverse it. This cannot be undone.`;
+  return `Void ${contraName(row)}? ${theyOwe(row, 'again', row.contact_name)} The books reverse it. This cannot be undone.`;
+}
+
+/** Who owes whom, and on which documents: the contact on the invoices, you on the bills. */
+function theyOwe(row: ContraRow, how: 'less' | 'again', name?: string): string {
+  const who = name || 'They';
+  const amount = rm(row.amount);
+  return `${who} will owe you ${amount} ${how} on ${contraDocuments(row.invoices)}, and you will owe them ${amount} ${how} on ${contraDocuments(row.bills)}.`;
+}
+
+/** An answer that says the row changed under the question (posted, voided or deleted elsewhere): the question closes. */
+export function contraAnswerIsStale(error: string | null): boolean {
+  return error === M.locked || error === M.gone;
 }
 
 /** Deleting a draft. */

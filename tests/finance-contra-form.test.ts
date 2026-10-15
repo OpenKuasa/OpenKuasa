@@ -17,6 +17,8 @@ import {
   droppedLinesNote,
   filterContras,
   newContraForm,
+  newContraParties,
+  contraAnswerIsStale,
   submitContra,
   toggleContraDocument,
   typedContraAmount,
@@ -75,12 +77,16 @@ describe('who and what a contra entry can set off', () => {
     const [lim] = parties;
     expect(lim.invoices.map((d) => [d.number, d.payable])).toEqual([['INV-0001', 132.5], ['INV-0002', 30]]);
     expect(lim.bills.map((d) => [d.number, d.held, d.payable])).toEqual([['BILL-0001', 30, 70]]);
-    expect(contraOwedLine(lim.invoices[0])).toBe('RM 132.50 owed · due 31 Oct 2026');
-    expect(contraOwedLine(lim.bills[0])).toBe('RM 70.00 can be set off (RM 100.00 owed, RM 30.00 in payments not yet posted) · due 20 Oct 2026, overdue');
+    expect(contraOwedLine(lim.invoices[0], 'invoices')).toBe('RM 132.50 owed · due 31 Oct 2026');
+    expect(contraOwedLine(lim.bills[0], 'bills')).toBe('RM 70.00 can be set off (RM 100.00 owed, RM 30.00 in payments not yet paid) · due 20 Oct 2026, overdue');
+    expect(contraOwedLine({ ...lim.bills[0] }, 'invoices')).toContain('in payments not yet posted');
   });
 
-  it('keeps the contact of a draft being edited even when it has nothing left to set off', () => {
-    expect(contraParties(contacts, [], [], [TAN]).map((p) => p.id)).toEqual([TAN]);
+  it('keeps the contact of a draft being edited even when it has nothing left to set off, but not for a new one', () => {
+    const kept = contraParties(contacts, [], [], [TAN]);
+    expect(kept.map((p) => p.id)).toEqual([TAN]);
+    expect(newContraParties(kept)).toEqual([]);
+    expect(newContraParties(parties).map((p) => p.id)).toEqual([LIM]);
     expect(contraParties(contacts, [], []).map((p) => p.id)).toEqual([]);
   });
 });
@@ -103,6 +109,8 @@ describe('the contra form', () => {
     form = toggleContraDocument(form, 'bills', lim.bills[0], true);
     expect(form.bills).toEqual({ [BILL_1]: '70.00' });
     expect(toggleContraDocument(form, 'invoices', lim.invoices[0], false).invoices).toEqual({ [INV_2]: '17.50' });
+    // A side that already adds up to the amount leaves another ticked box empty, for the person to fill.
+    expect(toggleContraDocument({ ...form, amount: '70' }, 'bills', { ...lim.bills[0], id: 'other' }, true).bills.other).toBe('');
   });
 
   it('starts the documents again when another contact is chosen', () => {
@@ -183,7 +191,7 @@ describe('the contra list', () => {
   });
 
   it('counts this month’s posted ones, what they set off, and the drafts', () => {
-    expect(contraStats(rows, '2026-10-16')).toEqual({ postedThisMonth: 1, setOffThisMonth: 100.1, drafts: 1 });
+    expect(contraStats(rows, '2026-10-16')).toEqual({ postedThisMonth: 1, postedInAll: 2, setOffThisMonth: 100.1, drafts: 1 });
   });
 
   it('exports the table, with a formula-looking name made harmless', () => {
@@ -193,13 +201,31 @@ describe('the contra list', () => {
     );
   });
 
-  it('asks before posting and voiding, saying what moves', () => {
+  it('asks before posting and voiding, saying who will owe whom on which documents', () => {
     expect(contraPostQuestion(row())).toBe(
-      'Post the draft for Lim Hardware? Together INV-0001 will owe RM 70.00 less, and so will BILL-0001; the books record the set-off. It gets its number and cannot be edited afterwards: a posted contra entry is undone by voiding it.',
+      "Post the draft for Lim Hardware? They will owe you RM 70.00 less on INV-0001, and you will owe them RM 70.00 less on BILL-0001. It gets its number and can't be edited after; to undo it, void it.",
     );
-    expect(contraVoidQuestion(row({ contra_no: 'CT-0003', status: 'posted', amount: 100 }))).toBe(
-      'Void CT-0003? Its invoices and bills owe again the RM 100.00 it set off on each side, and the books reverse it. This cannot be undone.',
+    expect(contraVoidQuestion(row({ contra_no: 'CT-0003', status: 'posted', amount: 100, invoices: [...row().invoices, { id: 'l9', kind: 'invoice', document_id: INV_2, document_no: 'INV-0002', amount: 30 }] }))).toBe(
+      'Void CT-0003? Lim Hardware will owe you RM 100.00 again on INV-0001, INV-0002, and you will owe them RM 100.00 again on BILL-0001. The books reverse it. This cannot be undone.',
     );
+  });
+
+  it('says plainly that an unfinished draft cannot be posted yet, instead of promising a set-off', () => {
+    const noBill = contraPostQuestion(row({ bills: [] }));
+    const uneven = contraPostQuestion(row({ amount: 80 }));
+    for (const q of [noBill, uneven]) {
+      expect(q).toContain('It cannot be posted yet');
+      expect(q).not.toContain('will owe');
+    }
+    expect(uneven).toBe(
+      'Post the draft for Lim Hardware? It cannot be posted yet: it needs at least one invoice and one bill, each side adding up to RM 80.00. Use Edit to finish it first.',
+    );
+  });
+
+  it('closes a question whose row changed under it', () => {
+    expect(contraAnswerIsStale(CONTRA_MESSAGES.locked)).toBe(true);
+    expect(contraAnswerIsStale(CONTRA_MESSAGES.gone)).toBe(true);
+    expect(contraAnswerIsStale(CONTRA_MESSAGES.refundsDepend)).toBe(false);
   });
 
   it('says where a row just written went when the list does not show it', () => {
