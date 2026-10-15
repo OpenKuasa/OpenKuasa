@@ -1,16 +1,27 @@
 'use client';
 
-import { type FormEvent, useId, useState } from 'react';
+import { type FormEvent, useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import { FileText, Plus } from 'lucide-react';
 import { BentoCard } from '@/components/bento/bento';
+import { CurrencyFields } from '@/components/finance/currency-fields';
 import { LineItemsEditor } from '@/components/finance/line-items-editor';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  farRateQuestion,
+  rateKey,
+  ringgitTotalNote,
+  withCurrency,
+  withRateAnswer,
+  withRateConfirmed,
+  withRateTyped,
+} from '@/lib/finance/document-currency';
 import { type DocumentFormKind, type DocumentFormState, type DocumentParty, documentFormWords } from '@/lib/finance/document-form';
+import type { FxDefault } from '@/lib/finance/fx-rates';
 import type { FinanceProduct } from '@/lib/finance/products';
 import type { FinResult } from '@/lib/finance/result';
 
@@ -18,6 +29,8 @@ export type DocumentFormActions = {
   save: (input: unknown) => Promise<FinResult<{ id: string }>>;
   /** When the draft was saved but posting it was refused, the answer carries the draft's id. */
   saveAndPost: (input: unknown) => Promise<FinResult<unknown> & { draftId?: string }>;
+  /** Bank Negara's rate for `{ currency, date }`, for a kind that has `currency`; null when it has none. */
+  fxRate?: (input: unknown) => Promise<FinResult<FxDefault | null>>;
 };
 
 /**
@@ -79,10 +92,42 @@ export function DocumentFormCard<F extends DocumentFormState>({
   const [form, setForm] = useState(initial);
   const [posting, setPosting] = useState(false);
   const save = useFinanceAction();
-  // A change by the person answers the last refusal, so its sentence goes.
-  const edit: typeof setForm = (next) => {
+  const fx = kind.currency;
+  /** The currency and date Bank Negara's rate was last asked for: an answer for any other is dropped. */
+  const asked = useRef<string | null>(null);
+
+  /**
+   * Asks for Bank Negara's rate when the currency or the date of `next` is not the one last asked about. With
+   * `offer`, a rate box that still holds BNM's rate (or nothing) takes the answer; a typed rate is kept.
+   */
+  const askRate = (next: F, offer: boolean) => {
+    const fetchRate = actions.fxRate;
+    if (!fx || !fetchRate) return;
+    const key = rateKey(fx.get(next), kind.date(next));
+    if (key === null || key === asked.current) return;
+    asked.current = key;
+    const [currency, date] = key.split('|');
+    const answered = (answer: { ok: true; rate: FxDefault | null } | { ok: false }) =>
+      setForm((f) => fx.set(f, withRateAnswer(fx.get(f), kind.date(f), key, answer, offer)));
+    fetchRate({ currency, date }).then(
+      (result) => answered(result.ok ? { ok: true, rate: result.data } : { ok: false }),
+      () => answered({ ok: false }),
+    );
+  };
+
+  // A saved draft in another currency: note BNM's rate beside the one saved, without changing it.
+  useEffect(() => {
+    askRate(form, false);
+    // Once, for the draft the form opened with; every later change asks from `edit`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // A change by the person answers the last refusal, so its sentence goes. A new currency or date asks BNM.
+  const edit = (change: (f: F) => F) => {
     save.clear();
+    const next = change(form);
     setForm(next);
+    askRate(next, true);
   };
 
   const { noun, party, reference, secondDate } = kind;
@@ -93,6 +138,13 @@ export function DocumentFormCard<F extends DocumentFormState>({
     const problem = kind.error(form, post);
     if (problem) {
       save.fail(problem);
+      return;
+    }
+    // A rate far from Bank Negara's is asked about once; pressing the button again keeps it.
+    const question = fx ? farRateQuestion(fx.get(form)) : null;
+    if (fx && question) {
+      setForm((f) => fx.set(f, withRateConfirmed(fx.get(f))));
+      save.fail(question);
       return;
     }
     const payload = kind.payload(form);
@@ -209,6 +261,15 @@ export function DocumentFormCard<F extends DocumentFormState>({
             onChange={(e) => edit((f) => secondDate.set(f, e.target.value))}
           />
         </div>
+        {fx ? (
+          <CurrencyFields
+            id={id}
+            fields={fx.get(form)}
+            date={kind.date(form)}
+            onCurrency={(code) => edit((f) => fx.set(f, withCurrency(fx.get(f), code, true)))}
+            onRate={(text) => edit((f) => fx.set(f, withRateTyped(fx.get(f), text)))}
+          />
+        ) : null}
         {[...(partyChoice ? [partyChoice] : []), ...(extraChoices ?? [])].map((choice, index, all) => {
           // Alone, a choice takes the row at half width; beside another, each takes half the row.
           const beside = all.length > 1;
@@ -278,8 +339,14 @@ export function DocumentFormCard<F extends DocumentFormState>({
             withProduct={kind.withProduct}
             pricePlaceholder={kind.pricePlaceholder}
             discount={kind.discount}
+            currency={fx ? fx.get(form).currency : undefined}
             onChange={(lines) => edit((f) => ({ ...f, lines }))}
           />
+          {fx ? (
+            <p className="text-right text-xs text-muted-foreground" aria-live="polite">
+              {ringgitTotalNote(fx.get(form), form.lines)}
+            </p>
+          ) : null}
         </fieldset>
 
         <div className="space-y-1.5 md:col-span-12">

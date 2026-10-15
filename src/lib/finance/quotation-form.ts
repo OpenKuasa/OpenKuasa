@@ -6,6 +6,7 @@
  * in document-form.ts.
  */
 import { addDaysIso, billTotals } from './bill-math';
+import { type CurrencyFields, currencyError, currencyPayload, ringgitFields, savedFields, withPartyCurrency } from './document-currency';
 import {
   type DocumentFormKind,
   type DocumentFormWords,
@@ -34,6 +35,8 @@ export type QuotationForm = {
   validEdited: boolean;
   notes: string;
   lines: LineDraft[];
+  /** The currency and rate. Ringgit for a new form until the person or the customer's default says otherwise. */
+  fx: CurrencyFields;
 };
 
 /** The quotation date plus thirty days. A customer's payment terms say when an invoice is due, not how long a price holds. */
@@ -50,6 +53,7 @@ export function newQuotationForm(today: string, lineKey: string): QuotationForm 
     validEdited: false,
     notes: '',
     lines: [emptyLine(lineKey)],
+    fx: ringgitFields(),
   };
 }
 
@@ -63,12 +67,20 @@ export function quotationFormFromDetail(quotation: QuotationDetail): QuotationFo
     validEdited: true,
     notes: quotation.notes ?? '',
     lines: quotation.lines.map(lineDraft),
+    fx: savedFields(quotation),
   };
 }
 
-/** Choosing a customer changes nothing else: how long the quotation is valid does not depend on who it is for. */
-export function withQuotationCustomer(form: QuotationForm, customer: { id: string }): QuotationForm {
-  return { ...form, customer_id: customer.id };
+/**
+ * Choosing a customer changes nothing else but, on a new quotation whose currency the person has not picked,
+ * the currency: the customer's default, when they have one. How long the quotation is valid does not depend on
+ * who it is for.
+ */
+export function withQuotationCustomer(
+  form: QuotationForm,
+  customer: { id: string; default_currency?: string | null },
+): QuotationForm {
+  return { ...form, customer_id: customer.id, fx: withPartyCurrency(form.fx, customer.default_currency, !form.id) };
 }
 
 /**
@@ -107,6 +119,7 @@ export function quotationPayload(form: QuotationForm) {
     valid_until: form.valid_until,
     notes: form.notes,
     lines: form.lines.map(linePayload),
+    ...currencyPayload(form.fx),
   };
 }
 
@@ -117,6 +130,9 @@ export function quotationPayload(form: QuotationForm) {
  * refuse to send.
  */
 export function quotationFormError(form: QuotationForm, sending = false): string | null {
+  // The rate box first: a rate that is not a number goes as NaN and would read as the schema's word for it.
+  const rate = currencyError(form.fx, sending);
+  if (rate) return rate;
   const parsed = saveQuotationInput.safeParse(quotationPayload(form));
   if (!parsed.success) return parsed.error.issues[0]?.message ?? QUOTATION_MESSAGES.lines;
   if (sending && billTotals(form.lines.map(lineNumbers)).total <= 0) return QUOTATION_MESSAGES.empty;
@@ -149,6 +165,7 @@ export const QUOTATION_FORM_KIND: DocumentFormKind<QuotationForm> = {
   secondDate: { label: 'Valid until', get: (form) => form.valid_until, set: withValidUntil },
   words: QUOTATION_FORM_WORDS,
   discount: true,
+  currency: { get: (form) => form.fx, set: (form, fx) => ({ ...form, fx }) },
   withProduct: withQuotedProduct,
   error: quotationFormError,
   payload: quotationPayload,

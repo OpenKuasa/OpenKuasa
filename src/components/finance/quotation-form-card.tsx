@@ -3,6 +3,7 @@
 import { DocumentFormCard } from '@/components/finance/document-form-card';
 import type { FinanceContact } from '@/lib/finance/contacts';
 import { withCurrentParty } from '@/lib/finance/document-form';
+import type { FxDefault } from '@/lib/finance/fx-rates';
 import type { FinanceProduct } from '@/lib/finance/products';
 import { QUOTATION_FORM_KIND, newQuotationForm, quotationFormFromDetail } from '@/lib/finance/quotation-form';
 import type { QuotationDetail, SaveAndSendQuotationResult } from '@/lib/finance/quotations';
@@ -12,6 +13,8 @@ export type QuotationFormActions = {
   save: (input: unknown) => Promise<FinResult<{ id: string }>>;
   /** Saves the draft, then marks it as sent. The shared card calls its second button's action `saveAndPost`. */
   saveAndPost: (input: unknown) => Promise<SaveAndSendQuotationResult>;
+  /** Bank Negara's rate for a currency and a date, read with the person's session. */
+  fxRate: (input: unknown) => Promise<FinResult<FxDefault | null>>;
 };
 
 /**

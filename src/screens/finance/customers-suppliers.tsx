@@ -39,6 +39,7 @@ const sample = (
   tin: null,
   payment_terms_days: 30,
   active,
+  default_currency: null,
 });
 
 const SAMPLE_CONTACTS: FinanceContact[] = [

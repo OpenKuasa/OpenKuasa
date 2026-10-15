@@ -85,6 +85,7 @@ import {
   saveExpense,
   saveExpenseInput,
 } from '@/lib/finance/expenses';
+import { type FxDefault, defaultFxRate, fxRateForInput } from '@/lib/finance/fx-rates';
 import {
   INVOICE_MESSAGES,
   type InvoiceDetail,
@@ -673,6 +674,24 @@ export async function convertQuotationAction(input: unknown) {
 /** Saves the quotation as a draft, then marks it as sent; see `saveThenPost`. */
 export async function saveAndSendQuotationAction(input: unknown): Promise<SaveAndSendQuotationResult> {
   return saveThenPost(QUOTATION_PATHS, saveQuotationInput, input, saveQuotation, sendQuotation);
+}
+
+/**
+ * Bank Negara Malaysia's rate for a currency on a date: the newest 1700 middle rate on or before it, or null
+ * when there is none. A read with the person's own session (every signed-in person may read the rates); only
+ * a person who may edit has a form that asks, so only they are answered. Nothing is refreshed.
+ */
+export async function fxRateForAction(input: unknown): Promise<FinResult<FxDefault | null>> {
+  const ctx = await writeCtx();
+  if (!ctx) return FORBIDDEN;
+  const parsed = fxRateForInput.safeParse(input);
+  if (!parsed.success) return { ok: false, error: firstMessage(parsed.error) };
+  try {
+    return { ok: true, data: await defaultFxRate(ctx.client, parsed.data.currency, parsed.data.date) };
+  } catch (error) {
+    console.error('[finance] an exchange rate could not be read:', error);
+    return { ok: false, error: READ_FAILED };
+  }
 }
 
 /** One draft quotation with its lines, for the Edit form; see `draftForEditing`. */

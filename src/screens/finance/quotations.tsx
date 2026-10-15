@@ -3,6 +3,7 @@ import {
   convertQuotationAction,
   declineQuotationAction,
   deleteQuotationAction,
+  fxRateForAction,
   getQuotationAction,
   saveAndSendQuotationAction,
   saveQuotationAction,
@@ -28,6 +29,7 @@ const ACTIONS: QuotationActions = {
   remove: deleteQuotationAction,
   get: getQuotationAction,
   convert: convertQuotationAction,
+  fxRate: fxRateForAction,
 };
 
 export default async function QuotationsScreen() {

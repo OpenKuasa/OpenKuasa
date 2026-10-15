@@ -24,6 +24,7 @@ import {
   type ContactsViewData,
   type FinanceContact,
 } from '@/lib/finance/contacts';
+import { BASE_CURRENCY, currencyOptions } from '@/lib/finance/currencies';
 import { rm, rmShort } from '@/lib/finance/format';
 import type { FinResult } from '@/lib/finance/result';
 import { cn } from '@/lib/utils';
@@ -312,6 +313,10 @@ export function ContactsView({ view, actions }: { view: ContactsViewData; action
   );
 }
 
+/** Radix Select has no empty value: "no default currency" is a word that never leaves the form. */
+const NO_CURRENCY = 'none';
+const CURRENCY_CHOICES = currencyOptions().filter((code) => code !== BASE_CURRENCY);
+
 function ContactFormCard({
   editing,
   actions,
@@ -331,6 +336,7 @@ function ContactFormCard({
   const [ssm, setSsm] = useState(editing?.ssm_no ?? '');
   const [tin, setTin] = useState(editing?.tin ?? '');
   const [terms, setTerms] = useState(String(editing?.payment_terms_days ?? 30));
+  const [currency, setCurrency] = useState(editing?.default_currency ?? NO_CURRENCY);
   const save = useFinanceAction();
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -350,6 +356,7 @@ function ContactFormCard({
       ssm_no: ssm,
       tin,
       payment_terms_days: days,
+      default_currency: currency === NO_CURRENCY ? null : currency,
     };
     save.run(
       () => (editing ? actions.update({ id: editing.id, ...fields }) : actions.create(fields)),
@@ -444,6 +451,25 @@ function ContactFormCard({
             value={terms}
             onChange={(e) => setTerms(e.target.value)}
           />
+        </div>
+        <div className="space-y-1.5 md:col-span-3">
+          <Label htmlFor={`${id}-currency`}>Default currency</Label>
+          <Select value={currency} onValueChange={setCurrency}>
+            <SelectTrigger id={`${id}-currency`} className="w-full min-w-28" aria-describedby={`${id}-currency-hint`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NO_CURRENCY}>None (ringgit)</SelectItem>
+              {CURRENCY_CHOICES.map((code) => (
+                <SelectItem key={code} value={code}>
+                  {code}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p id={`${id}-currency-hint`} className="text-xs text-muted-foreground">
+            A new quotation for this contact starts in it.
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-3 md:col-span-12">
           <Button type="submit" size="sm" disabled={save.pending}>

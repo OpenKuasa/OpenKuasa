@@ -8,6 +8,7 @@
 import { addDaysIso, type LineNumbers } from './bill-math';
 import { type DocumentLineRow, isIsoDate, roundRate } from './document-lines';
 import { typedNumber } from './format';
+import type { CurrencyFields } from './document-currency';
 import type { FinanceProduct } from './products';
 import { WRITE_FAILED } from './result';
 
@@ -185,8 +186,11 @@ export function documentFormWords(kind: { words?: DocumentFormWords }): Document
   return kind.words ?? POSTING_WORDS;
 }
 
-/** The customer or supplier a document is for, as its picker lists it. */
-export type DocumentParty = { id: string; name: string; payment_terms_days: number };
+/**
+ * The customer or supplier a document is for, as its picker lists it. `default_currency` fills the currency of
+ * a new document for that party, on a form that has one.
+ */
+export type DocumentParty = { id: string; name: string; payment_terms_days: number; default_currency?: string | null };
 
 /**
  * The parties a form's picker offers. `parties` are the active ones; a draft
@@ -212,7 +216,7 @@ export type DocumentFormKind<F extends DocumentFormState> = {
   dateLabel: string;
   partyId: (form: F) => string;
   date: (form: F) => string;
-  withParty: (form: F, party: { id: string; payment_terms_days: number }) => F;
+  withParty: (form: F, party: { id: string; payment_terms_days: number; default_currency?: string | null }) => F;
   withDate: (form: F, date: string, termsDays: number | undefined) => F;
   /**
    * The second date box: when a bill or an invoice is due, or until when a quotation is valid. `optional`
@@ -240,6 +244,12 @@ export type DocumentFormKind<F extends DocumentFormState> = {
   pricePlaceholder?: string;
   /** Sales documents (invoices, quotations) show a per-line discount; others do not. */
   discount?: boolean;
+  /**
+   * A document that may be in another currency (a quotation, from stage 2): the card draws the currency picker
+   * and the rate, asks for Bank Negara's rate when the currency or the date changes, and shows the lines in that
+   * currency. Absent, the document is in ringgit and nothing changes.
+   */
+  currency?: { get: (form: F) => CurrencyFields; set: (form: F, fields: CurrencyFields) => F };
   withProduct: (line: LineDraft, product: FinanceProduct | null) => LineDraft;
   /** The first thing wrong with the form, or null. `posting` also refuses a total of nothing. */
   error: (form: F, posting?: boolean) => string | null;

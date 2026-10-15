@@ -9,7 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { billTotals, lineAmounts } from '@/lib/finance/bill-math';
 import { type LineDraft, emptyLine, lineNumbers } from '@/lib/finance/document-form';
 import { DOCUMENT_LINES_MAX } from '@/lib/finance/document-lines';
-import { rm } from '@/lib/finance/format';
+import { currencyLabel } from '@/lib/finance/currencies';
+import { money } from '@/lib/finance/format';
 import type { FinanceProduct } from '@/lib/finance/products';
 import { cn } from '@/lib/utils';
 
@@ -28,8 +29,11 @@ export function LineItemsEditor({
   withProduct,
   pricePlaceholder = '0.00',
   discount = false,
+  currency = 'MYR',
   onChange,
 }: {
+  /** The document's currency: its amounts and labels read in it. Ringgit when absent, exactly as before. */
+  currency?: string;
   lines: LineDraft[];
   /** Active products and services, for the optional picker. */
   products: FinanceProduct[];
@@ -156,7 +160,7 @@ export function LineItemsEditor({
               </div>
               <div className="space-y-1 md:col-span-2">
                 <Label htmlFor={field('price')} className={label}>
-                  Unit price (RM)
+                  Unit price ({currencyLabel(currency)})
                 </Label>
                 <Input
                   id={field('price')}
@@ -230,7 +234,7 @@ export function LineItemsEditor({
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="pct">%</SelectItem>
-                        <SelectItem value="rm">RM</SelectItem>
+                        <SelectItem value="rm">{currencyLabel(currency)}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -244,7 +248,7 @@ export function LineItemsEditor({
                     aria-label={`Amount for line ${n}`}
                     className="flex h-8 items-center truncate text-sm font-medium tabular-nums"
                   >
-                    {rm(lineAmounts(lineNumbers(line)).amount)}
+                    {money(lineAmounts(lineNumbers(line)).amount, currency)}
                   </output>
                 </div>
                 <Button
@@ -270,11 +274,11 @@ export function LineItemsEditor({
         </Button>
         <dl className="grid w-full grid-cols-[1fr_auto] gap-x-6 gap-y-1 text-sm sm:w-64" aria-live="polite">
           <dt className="text-muted-foreground">Subtotal</dt>
-          <dd className="text-right tabular-nums">{rm(totals.subtotal)}</dd>
+          <dd className="text-right tabular-nums">{money(totals.subtotal, currency)}</dd>
           <dt className="text-muted-foreground">SST</dt>
-          <dd className="text-right tabular-nums">{rm(totals.sst)}</dd>
+          <dd className="text-right tabular-nums">{money(totals.sst, currency)}</dd>
           <dt className="font-semibold">Total</dt>
-          <dd className="text-right font-semibold tabular-nums">{rm(totals.total)}</dd>
+          <dd className="text-right font-semibold tabular-nums">{money(totals.total, currency)}</dd>
         </dl>
       </div>
     </div>

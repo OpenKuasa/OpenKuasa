@@ -21,7 +21,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { localIsoDate } from '@/lib/finance/bill-math';
 import type { FinanceContact } from '@/lib/finance/contacts';
 import { csvFileName } from '@/lib/finance/csv';
-import { rm } from '@/lib/finance/format';
+import { money, rm } from '@/lib/finance/format';
 import type { FinanceProduct } from '@/lib/finance/products';
 import type { QuotationDetail, QuotationDisplayStatus, QuotationListRow } from '@/lib/finance/quotations';
 import type { FinResult } from '@/lib/finance/result';
@@ -36,6 +36,7 @@ import {
   quotationInvoice,
   quotationName,
   quotationsCsv,
+  quotationsHaveForeign,
 } from '@/lib/finance/sales-followon-views';
 import { customerChoice } from '@/lib/finance/sales-views';
 import { LATEST_ROWS, displayDate } from '@/lib/finance/view-helpers';
@@ -123,6 +124,8 @@ export function QuotationsView({
   const matching = filterQuotations(rows, query, filter, customer);
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
   const columns = writer ? 8 : 7;
+  // Only once a quotation is in another currency does a total carry its ringgit beside it.
+  const foreign = quotationsHaveForeign(rows);
   const asking = open && open.kind !== 'new' && open.kind !== 'edit' && open.kind !== 'converted' ? open : null;
   // A form holds what was typed, so nothing else opens over it: it is closed with its own Cancel first.
   const formOpen = open?.kind === 'new' || open?.kind === 'edit';
@@ -193,7 +196,7 @@ export function QuotationsView({
             pendingLabel="Marking…"
             onConfirm={() => confirm.run(() => actions.send(id), close)}
           >
-            Mark this quotation to {who} ({rm(quotation.total)}) as sent? It gets its number and can no longer be edited or
+            Mark this quotation to {who} ({money(quotation.total, quotation.currency)}) as sent? It gets its number and can no longer be edited or
             deleted: after this, only the customer’s answer is recorded. Nothing is emailed from here.
           </ConfirmRow>
         );
@@ -209,7 +212,7 @@ export function QuotationsView({
             pendingLabel="Saving…"
             onConfirm={() => confirm.run(() => actions.accept(id), close)}
           >
-            Record that {who} accepted {number} ({rm(quotation.total)})?
+            Record that {who} accepted {number} ({money(quotation.total, quotation.currency)})?
             {quotation.display_status === 'expired' ? ' It is past its valid-until date; accepting it is still your call.' : ''}{' '}
             The answer can be changed until an invoice is made from the quotation.
           </ConfirmRow>
@@ -226,7 +229,7 @@ export function QuotationsView({
             pendingLabel="Saving…"
             onConfirm={() => confirm.run(() => actions.decline(id), close)}
           >
-            Record {number} to {who} ({rm(quotation.total)}) as declined? Use this too for a quotation that is no longer
+            Record {number} to {who} ({money(quotation.total, quotation.currency)}) as declined? Use this too for a quotation that is no longer
             wanted: a quotation cannot be voided. The answer can be changed until an invoice is made from the quotation.
           </ConfirmRow>
         );
@@ -250,7 +253,7 @@ export function QuotationsView({
               );
             }}
           >
-            Make a draft invoice from {number} to {who} ({rm(quotation.total)})? It gets the same customer, notes and
+            Make a draft invoice from {number} to {who} ({money(quotation.total, quotation.currency)})? It gets the same customer, notes and
             lines, is dated today, and stays a draft on Invoices until it is posted.
           </ConfirmRow>
         );
@@ -264,7 +267,7 @@ export function QuotationsView({
             pendingLabel="Deleting…"
             onConfirm={() => confirm.run(() => actions.remove(id), close)}
           >
-            Delete the draft quotation to {who} ({rm(quotation.total)})? This cannot be undone.
+            Delete the draft quotation to {who} ({money(quotation.total, quotation.currency)})? This cannot be undone.
           </ConfirmRow>
         );
     }
@@ -513,7 +516,15 @@ export function QuotationsView({
                       <TableCell className="whitespace-nowrap font-medium">{q.quotation_no ?? '—'}</TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(q.quote_date)}</TableCell>
                       <TableCell className="whitespace-nowrap">{q.customer_name}</TableCell>
-                      <TableCell className="whitespace-nowrap text-right tabular-nums">{rm(q.total)}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums">
+                        {money(q.total, q.currency)}
+                        {foreign && q.currency !== 'MYR' ? (
+                          <span className="block text-xs text-muted-foreground">
+                            {q.total_myr === null ? 'No rate yet' : `≈ ${rm(q.total_myr)}`}
+                            {q.fx_rate_source === 'manual' ? ', rate typed' : ''}
+                          </span>
+                        ) : null}
+                      </TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(q.valid_until)}</TableCell>
                       <TableCell>
                         <span className="flex items-center gap-2">
