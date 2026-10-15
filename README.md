@@ -32,52 +32,79 @@ which stays open source under AGPL-3.0.
 ## What's inside
 
 Six modules and a cross-app assistant, named after the Malay warriors and court
-of Melaka. **83 module screens** are built so far.
+of Melaka. **77 of the 90 menu screens read and write your workspace's own
+data** in Supabase. The rest still show sample data and carry a
+work-in-progress banner.
 
-| Module | What it does | Alternative to | Route | Screens |
+| Module | What it does | Alternative to | Route | Live / menu screens |
 | --- | --- | --- | --- | --- |
 | **Tuah** | AI command center — chat with your whole business | AI business copilots | `/command` | chat |
-| **Jebat** | Ads — ad studio, creative bank, lead forms, reports | ad platforms & agencies | `/reach` | 10 |
-| **Kasturi** | CRM — contacts, deals kanban, broadcast, chatbot, automations | CRM tools | `/crm` | 11 |
-| **Lekiu** | Team — employees, attendance, leave, claims, payroll, performance | HR & payroll suites | `/people` | 27 |
-| **Lekir** | Recruit — jobs, candidates, applications, interviews, talent pool | recruiting (ATS) | `/hire` | 9 |
-| **Bendahara** | Finance — invoicing, expenses, banking, e-Invoice, SST, ledgers | accounting software | `/finance` | 26 |
+| **Jebat** | Ads & marketing — ad studio, creative bank, leads, lead forms, an autonomous weekly agent | ad platforms & agencies | `/reach` | 8 / 8 |
+| **Kasturi** | CRM — contacts, deals, broadcast, automations, landing pages, chatbot | CRM tools | `/crm` | 13 / 15 |
+| **Lekiu** | Team — employees, attendance, leave, claims, payroll, performance | HR & payroll suites | `/people` | 29 / 30 |
+| **Lekir** | Recruit — jobs, careers page, candidates, interviews, talent pool | recruiting (ATS) | `/hire` | 8 / 9 |
+| **Bendahara** | Finance — sales, purchases, cash book, banking, double-entry ledger, reports | accounting software | `/finance` | 19 / 28 |
 | **Taming Sari** | "Sari", the assistant available from every screen | — | everywhere | — |
 
-The full menu for each module lives in `src/config/nav.ts`. The screens are in
-`src/screens/` and are listed in `src/screens/registry.ts`; each one is served by
-its own route file under `src/app/(app)/`, written by `pnpm gen:routes` (see
+The menus live in `src/config/nav.ts`, and `src/config/live-screens.ts` lists
+the screens that use live data. The screens are in `src/screens/` and are
+listed in `src/screens/registry.ts`; each one is served by its own route file
+under `src/app/(app)/`, written by `pnpm gen:routes` (see
 [Adding a screen](CONTRIBUTING.md#adding-a-screen)).
 
-### Module highlights
+### What works today
 
-- **Tuah** — a command chat with rich reply cards, plus an Ask Sari
-  conversation view.
-- **Jebat** — overview dashboard, AI agents, Ad Studio, Creative Bank, reports,
-  contacts, lead forms, appointments, ad settings and an account health check.
-- **Kasturi** — CMO assistant, deals pipeline as a kanban board, broadcasts, AI
-  chatbot, automations, landing pages, calendar, billings, plugins and reports.
-- **Lekiu** — employee self-service (attendance, goals, documents), leave /
-  time-off / claims / overtime applications with a matching approvals queue,
-  timesheets, shift calendar, payroll, payment vouchers, scorecards and
-  training.
-- **Lekir** — recruiter assistant, hiring dashboard, jobs, candidates kanban,
-  applications, interviews, talent pool and a careers page builder.
-- **Bendahara** — cash book, quotations, invoices, credit notes, refunds,
-  supplier bills, receipts inbox, banking, e-Invoice LHDN, SST report, audit
-  trail, journals, chart of accounts, contra entries and FX revaluation.
+- **Tuah and Sari** — chat on OpenRouter through the Vercel AI SDK. Tuah hands
+  each question to a specialist per module (`askJebat`, `askKasturi`, …) and
+  can read across every module. Reads run on their own; **every change the
+  assistant proposes shows an Approve / Reject card and nothing is saved until
+  you approve.** A workspace can bring its own OpenRouter key (stored
+  encrypted); without one, each signed-up user gets 3 free questions a week.
+- **Jebat** — campaigns, creatives, leads (with stages and promotion to a
+  Kasturi contact), public lead forms at `/f/<id>`, appointments and ad
+  settings. The **Weekly Studio** agent runs on a schedule you set: it reads
+  the last 7 days, researches marketing angles, writes a digest, makes images
+  (and optionally a video), and suggests changes that wait in an approve /
+  apply queue. Runs are held to per-run, daily and weekly budget caps.
+- **Kasturi** — contacts with CSV import and export, deals on a kanban with
+  your own pipelines and stages, follow-ups, a calendar, automations (rules on
+  contact, form and deal events), public landing pages at `/p/<id>`, email
+  broadcasts through the workspace's own Resend key (with one-click
+  unsubscribe), billings read from Bendahara invoices, and reports. The
+  chatbot answers visitors on your landing pages using the workspace's AI key.
+- **Lekiu** — staff self-service (attendance, goals, documents, payslips),
+  leave / time-off / claims / overtime applications with approval queues,
+  reporting lines (a manager approves for their direct reports only),
+  timesheets, shift calendar, payroll runs and payslips, payment vouchers,
+  letters on your letterhead in English or Malay, scorecards,
+  reviews and training.
+- **Lekir** — jobs from draft to open, a public careers page with an apply
+  form and PDF CV upload, a candidate pipeline, applications, interviews with
+  calendar invites and feedback, and a talent pool.
+- **Bendahara** — quotations into invoices, credit notes (with a reason),
+  payments in, refunds, cash receipts, supplier bills, payment vouchers that
+  pay several bills, payments out, expenses with approval, RFQs with quote
+  comparison, purchase orders with approval and a printable copy, a receipts
+  inbox (optional AI reading), banking with transfers, customers & suppliers,
+  products, an editable chart of accounts, journals on a double-entry ledger,
+  and profit & loss, balance sheet and trial balance reports with CSV export.
 
 ### Platform
 
+- **Workspaces and roles** — sign-up, login, password reset and multi-step
+  onboarding; each workspace has owner, admin, member and viewer roles, with
+  row-level security in Postgres. Two-factor sign-in with recovery codes; once
+  a person turns it on, their changes need the second factor.
+- **Demo workspace** — an optional, read-only sample workspace behind a "Try
+  the demo" button on the login page (`NEXT_PUBLIC_DEMO_ENABLED=1`).
 - **App shell** — a two-level sidebar (product rail + collapsible per-module
   menu), responsive down to mobile.
 - **Marketing site** — landing page with a products mega-menu, pricing and
   privacy pages.
-- **Auth flow** — login and a multi-step onboarding.
-- **Account area** — 19 pages: profile, company, team, clients, security,
-  notifications, plan, subscriptions, add-ons, payment methods, transactions,
-  connected apps, developers, activity, changelog, docs, support and feedback.
-- **Polish** — loading skeletons, empty states and not-found pages throughout.
+- **Account area** — 20 pages: profile, company, team, clients, security, AI
+  key, notifications, plan, subscriptions, add-ons, payment methods,
+  transactions, connected apps, developers, activity, changelog, docs, support
+  and feedback.
 
 ## Screenshots
 
@@ -94,16 +121,22 @@ A look at the running app (sample data):
 
 OpenKuasa OS is in early development. Being upfront about where it stands:
 
-- **Built** — the complete product surface listed above: every screen,
-  navigation, layout and interaction, running on sample data.
-- **Not wired up yet** — a live backend. Screens do not read from or write to a
-  database, the AI assistants and agents do not call a model, and integrations
-  such as ad platforms, WhatsApp, payroll filings and LHDN MyInvois submission
-  are not connected. Supabase is scaffolded for auth and data but nothing
-  depends on it yet.
+- **Working** — the screens listed above read and write real workspace data,
+  and the assistants call real models.
+- **Still sample data** — Bendahara's overview, dashboard, AI agents, e-Invoice LHDN,
+  SST report, audit trail, contra entries, FX revaluation and accounting
+  settings; Kasturi's AI agents and plugins; Lekir's settings (only the
+  application form card is real); and the Lekiu copy of the calendar.
+- **Not connected** — ad platforms (Meta and others), WhatsApp, Instagram and
+  Messenger, payment gateways, bank feeds, LHDN MyInvois submission, and
+  EPF / SOCSO / EIS / PCB filing or bank payment files.
+- **Payroll figures are proposals** — EPF, SOCSO and EIS are worked out from
+  flat rates and PCB is carried from the last payslip; a person checks and
+  confirms every figure. The official SOCSO table and PCB schedule are not
+  built in.
 
-It is not ready to run a real business on. Contributions towards the backend
-are very welcome.
+Check the figures before relying on it to run a real business. Contributions
+are very welcome — see the open issues.
 
 ## Contributing
 
@@ -130,11 +163,14 @@ repository stays available under AGPL-3.0.
 - **Next.js 16** (App Router, Turbopack) + **React 19**
 - **TypeScript**, **Tailwind CSS v4**
 - **shadcn/ui** (Radix primitives, `radix-nova` preset)
-- **Supabase** (`@supabase/ssr`) for data, auth, and tenancy
+- **Supabase** (`@supabase/ssr`) for data, auth, tenancy and file storage,
+  with row-level security on every table
+- **Vercel AI SDK** with **OpenRouter** for the assistants and agents
+- **Vitest** for tests
 
 ## Getting Started
 
-Requires Node 20+ and [pnpm](https://pnpm.io).
+Requires Node 22+ and [pnpm](https://pnpm.io).
 
 ```bash
 git clone https://github.com/OpenKuasa/OpenKuasaOS.git
@@ -143,7 +179,10 @@ pnpm install
 pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000). With no Supabase project
+set, it opens in preview mode on sample data (see below). To use your own
+project, set the variables below, then run `pnpm db:migrate --apply` once to
+create the tables (see [Keeping the database migrated](#keeping-the-database-migrated)).
 
 ## Environment variables
 
@@ -189,9 +228,27 @@ instances or a serverless host and set neither secret, set
 
 ## Self-hosting setup
 
-Beyond the environment variables above (see `.env.example` for the full list:
-the Supabase URL and anon/publishable key; the OpenRouter key is for a later
-slice), a fresh Supabase project needs these Auth settings (Supabase dashboard →
+`.env.example` has the full list. Beyond the two Supabase values above, these
+turn on the rest of the app:
+
+| Variable | What it is for |
+| --- | --- |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-only work: scheduled agents, file clean-ups, reading a workspace's stored keys, test clean-up. Never expose it to the browser. |
+| `AI_KEYS_ENCRYPTION_SECRET` | 32+ characters. Seals each workspace's OpenRouter and Resend keys; without it a workspace cannot save its own keys. Use the same value on every host, because changing it makes stored keys unreadable. |
+| `OPENROUTER_API_KEY` | The platform key behind the 3 free questions a week for workspaces without their own key. Optional. |
+| `OPENKUASA_MODEL_ORCHESTRATOR`, `OPENKUASA_MODEL_WORKER` | Models for Tuah and its specialists. `OPENKUASA_MODEL_RECEIPTS` and `OPENKUASA_MODEL_AGENT_*` override the receipt reader and the Weekly Studio steps. |
+| `AI_GATEWAY_BASE_URL` | Optional gateway in front of OpenRouter. |
+| `AGENTS_ENABLED` | `true` lets scheduled agent runs happen. Off by default. |
+| `CRON_SECRET` | 32+ characters. Authorises the scheduled endpoints below. |
+| `NEXT_PUBLIC_DEMO_ENABLED` | `1` shows the "Try the demo" button on the login page. |
+| `PUBLIC_SITE_URL` | The lasting address written into broadcast unsubscribe links. |
+| `RATE_LIMIT_PEPPER` | Keys the hashes the rate limiter stores, so they cannot be tested against guesses. |
+| `OPENKUASA_SUPABASE_TOKEN` | A Supabase access token, used only by `pnpm db:migrate`. |
+
+Email broadcasts use each workspace's own Resend key, entered in the app, so
+there is no email variable to set.
+
+A fresh Supabase project also needs these Auth settings (Supabase dashboard →
 Authentication) for sign-in and signup to work:
 
 - **Enable Anonymous sign-ins** — powers the demo workspace and the tests.
@@ -207,7 +264,7 @@ Authentication) for sign-in and signup to work:
 
 ### Scheduled triggers (cron)
 
-Four endpoints do background work and are meant to be called by a scheduler
+Five endpoints do background work and are meant to be called by a scheduler
 you run (for example a cron job every five minutes), not by a browser:
 
 | Endpoint | What it does |
@@ -216,6 +273,11 @@ you run (for example a cron job every five minutes), not by a browser:
 | `POST /api/agents/poll` | Finishes pending videos, fails stuck runs, expires old proposals |
 | `POST /api/hire/cv-cleanup` | Removes stored CV files of deleted applications |
 | `POST /api/finance/receipt-cleanup` | Removes Receipts Inbox files of deleted receipts, and uploads nobody recorded within the hour |
+| `POST /api/maintenance/sweep-files` | Removes document and logo files nothing points at (once a day is plenty) |
+
+Agent runs also need `AGENTS_ENABLED=true`; without it `/api/agents/run` does
+nothing. Database-side jobs (nightly attendance close, yearly leave balances,
+demo data reseeds) run on `pg_cron` inside Supabase and need no scheduler.
 
 They take no body and no parameters. Each call must carry a dedicated secret:
 
@@ -259,7 +321,14 @@ pnpm lint          # eslint
 pnpm test          # run the tests once (vitest)
 pnpm test:watch    # run the tests again on every change
 pnpm smoke:routes  # check that every screen responds
+pnpm gen:routes    # write the route files for the screen registry (runs before dev and build)
+pnpm db:migrate    # list migrations the Supabase project lacks; --apply applies them
+pnpm eval:tuah     # run the assistant evals against real models (spends credits)
 ```
+
+`pnpm eval:tuah` is not part of `pnpm test`. It calls real models and writes
+to a real workspace, so it bills the OpenRouter key; `EVAL_RUNS` sets how many
+times each case runs (3 by default).
 
 `pnpm smoke:routes` needs a production build, so run `pnpm build` first.
 Nothing else needs to be running: it starts its own server on `127.0.0.1:3100`,
