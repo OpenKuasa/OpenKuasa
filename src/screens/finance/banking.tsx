@@ -10,6 +10,8 @@ import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { bankingAccess } from '@/lib/finance/banking-access';
 import { listBankAccountNumbers } from '@/lib/finance/bank-accounts';
 import { listBankAccounts, listBankTransactions } from '@/lib/finance/banking';
+import { workspaceUsesForeignCurrency } from '@/lib/finance/fx-card-gate';
+import { type FxLatestRate, listLatestFxRates } from '@/lib/finance/fx-rates';
 import { todayUtc } from '@/lib/finance/view-helpers';
 import { createClient } from '@/lib/supabase/server';
 import { SAMPLE_BANK_ACCOUNTS, SAMPLE_BANK_TRANSACTIONS } from './banking-sample';
@@ -38,16 +40,28 @@ export default async function BankingScreen() {
   const viewer = await getViewer();
   const ctx = { client: await createClient(), orgId: viewer.orgId };
   const access = bankingAccess(viewer.role, viewer.isDemo);
-  const [accounts, rows, numbers] = await Promise.all([
+  const [accounts, rows, numbers, fxRates] = await Promise.all([
     listBankAccounts(ctx),
     listBankTransactions(ctx),
     access.readsNumbers ? listBankAccountNumbers(ctx) : {},
+    // The rates are a side card, drawn only for a workspace that deals in another currency (none can yet): a
+    // ringgit-only workspace's Banking does not read them. If they cannot be read, Banking still opens and the
+    // card says so.
+    workspaceUsesForeignCurrency(ctx.client, ctx.orgId).then((uses) =>
+      uses
+        ? listLatestFxRates(ctx.client).catch((error: unknown): FxLatestRate[] | null => {
+            console.error('[finance] the exchange rates could not be read:', error);
+            return null;
+          })
+        : undefined,
+    ),
   ]);
   return (
     <BankingView
       accounts={accounts}
       rows={rows}
       today={todayUtc()}
+      fxRates={fxRates}
       writer={
         access.canEdit
           ? { actions: ACTIONS, canSignOff: access.canSignOff, transfers: access.canTransfer ? TRANSFERS : undefined, numbers }
