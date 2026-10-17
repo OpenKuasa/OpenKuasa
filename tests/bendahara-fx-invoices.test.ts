@@ -61,16 +61,24 @@ testWithSupabase('a USD invoice at a typed rate posts its ringgit, and nothing c
   expect(posted.ok).toBe(true);
 
   // Worked example A: Dr Receivable 4,536.00; Cr Sales 4,200.00; Cr SST Payable 336.00.
+  // The view has no foreign key to embed through: the accounts are read on their own.
   const { data: ledger, error } = await ctx.client
     .from('finance_ledger_lines')
-    .select('debit, credit, finance_ledger_accounts!inner(system_key)')
+    .select('account_id, debit, credit')
     .eq('org_id', ctx.orgId)
     .eq('source', 'invoice')
     .eq('source_id', id);
   expect(error, error?.message).toBeNull();
-  const rows = (ledger ?? []) as unknown as { debit: string; credit: string; finance_ledger_accounts: { system_key: string | null } }[];
+  const { data: accounts, error: accountsError } = await ctx.client
+    .from('finance_ledger_accounts')
+    .select('id, system_key')
+    .eq('org_id', ctx.orgId);
+  expect(accountsError, accountsError?.message).toBeNull();
+  const keyOf = new Map(((accounts ?? []) as { id: string; system_key: string | null }[]).map((a) => [a.id, a.system_key]));
+  const rows = (ledger ?? []) as { account_id: string; debit: string; credit: string }[];
+  // In sen, so the sums are exact.
   const on = (key: string | null, side: 'debit' | 'credit') =>
-    rows.filter((r) => r.finance_ledger_accounts.system_key === key).reduce((n, r) => n + Number(r[side]), 0);
+    rows.filter((r) => (keyOf.get(r.account_id) ?? null) === key).reduce((n, r) => n + Math.round(Number(r[side]) * 100), 0) / 100;
   expect(on('receivable', 'debit')).toBe(4536);
   expect(on(null, 'credit')).toBe(4200);
   expect(on('sst_payable', 'credit')).toBe(336);
