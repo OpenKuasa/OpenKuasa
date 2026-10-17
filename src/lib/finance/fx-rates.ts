@@ -97,15 +97,24 @@ export function fxRatesCardView(rates: FxLatestRate[], today: string): FxRatesCa
 
 /* ---- stage 2: the rate a document is offered ------------------------------ */
 
-/** BNM's rate a document dated D is offered: the latest 1700 middle rate on or before D. */
+/**
+ * BNM's rate a document dated D is offered: the latest 1700 rate on or before D. A quotation is offered the
+ * middle rate (stage 2); an invoice the SST rule's selling rate (src/lib/finance/sst-rate.ts).
+ */
 export type FxDefault = {
-  /** Ringgit per one unit. */
+  /** Ringgit per one unit. For display; when `rate_text` is there, money is worked from it. */
   rate: number;
+  /** Ringgit per one unit as the database's exact decimal text (the selling rate, from stage 3). */
+  rate_text?: string;
   /** The date BNM gave it for; before D on a weekend, a holiday, or when BNM has nothing newer. */
   rate_date: string;
   unit: number;
-  /** Ringgit per `unit`, as published. */
-  middle_rate: number;
+  /** Ringgit per `unit`, as published: the middle rate (absent when `figure` is selling). */
+  middle_rate?: number;
+  /** Ringgit per `unit` as BNM printed the figure the rate is (the selling rate for an invoice). */
+  published_rate?: number;
+  /** Which BNM figure this is; absent means the middle rate (stage 2). */
+  figure?: 'middle' | 'selling';
 };
 
 export const FX_RATE_MESSAGES = {

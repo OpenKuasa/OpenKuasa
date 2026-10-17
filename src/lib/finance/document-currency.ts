@@ -5,10 +5,13 @@
  *
  * The rule (spec, "Data model"): the person types amounts in the document's
  * currency; the rate is ringgit per one unit, and is Bank Negara Malaysia's
- * 1700 middle rate for the document's date (the newest on or before it)
- * until the person types another, which then reads "Typed by hand" beside
- * BNM's. The box itself takes ringgit per the unit BNM quotes (1 USD, 100
- * JPY), so the figure typed is the figure BNM publishes.
+ * 1700 rate for the document's date (the newest on or before it) until the
+ * person types another, which then reads "Typed by hand" beside BNM's. A
+ * quotation is offered the middle rate; an invoice the SST rule's selling
+ * rate for its date of supply (src/lib/finance/sst-rate.ts), and a rate typed
+ * on an invoice names its source. The box itself takes ringgit per the unit
+ * BNM quotes (1 USD, 100 JPY), so the figure typed is the figure BNM
+ * publishes.
  */
 import { lineSen } from './bill-math';
 import { BASE_CURRENCY, minorUnits, quoteUnit } from './currencies';
@@ -16,11 +19,14 @@ import { type LineDraft, lineNumbers } from './document-form';
 import { isIsoDate } from './document-lines';
 import { rm } from './format';
 import { type FxDefault, longDate, staleRateNote } from './fx-rates';
+import { PROVIDER_NEEDS_REFERENCE, type RateProvider } from './sst-rate';
 
 /** A rate this far from BNM's, either way, is asked about once before it is saved. */
 export const FAR_FROM_BNM = 0.2;
 
 export type RateSource = 'bnm' | 'manual';
+/** Which of BNM's figures a kind of document is offered: quotations the middle rate, invoices the selling rate. */
+export type RateFigure = 'middle' | 'selling';
 
 export type CurrencyFields = {
   currency: string;
@@ -40,12 +46,20 @@ export type CurrencyFields = {
   lookupFailed: boolean;
   /** The rate box text the person has been asked about and kept, far from BNM's. */
   confirmedRate: string | null;
+  /** Where a rate typed by hand came from (invoices only; a quotation never sends it). */
+  provider: RateProvider | null;
+  /** The bank's or central bank's name, or Customs' approval reference, as typed. */
+  reference: string;
 };
 
 export const CURRENCY_MESSAGES = {
   rate: 'Enter the exchange rate as a number above 0, such as 4.0815.',
   // FIN38's sentence, also said before the database is asked.
   rateBeforeSending: 'Enter the exchange rate before marking it as sent.',
+  // FIN38's sentence for an invoice.
+  rateBeforePosting: 'Enter the exchange rate before posting.',
+  // FIN43's sentence, said by the form first.
+  rateSource: 'Say where this rate comes from: choose a source, and name the bank or the approval reference.',
   wholeUnits: (code: string) => `${code} has no cents: enter whole amounts.`,
 } as const;
 
@@ -61,6 +75,8 @@ export function ringgitFields(): CurrencyFields {
     bnm: null,
     lookupFailed: false,
     confirmedRate: null,
+    provider: null,
+    reference: '',
   };
 }
 
@@ -125,26 +141,66 @@ function rateScaled(fields: CurrencyFields): bigint | null | undefined {
   return scaled > BigInt(0) && scaled < RATE_LIMIT ? scaled : undefined;
 }
 
-/** BNM's rate per one unit in 10^-10 units. */
-function bnmScaled(bnm: FxDefault): bigint {
-  return BigInt(bnm.rate.toFixed(RATE_PLACES).replace('.', ''));
+/**
+ * Exact decimal text per one unit (the database's numeric as text) in 10^-10 units, digit by digit and rounded
+ * half up past ten places; undefined when it is not such text. No unit shift: the text is already per one.
+ */
+function scaledFromText(text: string): bigint | undefined {
+  const m = /^(\d+)(?:\.(\d*))?$/.exec(text.trim());
+  if (!m) return undefined;
+  const fraction = m[2] ?? '';
+  const digits = BigInt(`${m[1]}${fraction}`);
+  if (fraction.length <= RATE_PLACES) return digits * BigInt(10) ** BigInt(RATE_PLACES - fraction.length);
+  const by = BigInt(10) ** BigInt(fraction.length - RATE_PLACES);
+  return (digits + by / BigInt(2)) / by;
 }
 
-/** A saved draft's currency, as the form shows it. */
+/** BNM's rate per one unit in 10^-10 units: from its exact text when the read gave it, else from the number. */
+function bnmScaled(bnm: FxDefault): bigint {
+  const exact = bnm.rate_text === undefined ? undefined : scaledFromText(bnm.rate_text);
+  return exact ?? BigInt(bnm.rate.toFixed(RATE_PLACES).replace('.', ''));
+}
+
+/** The box's text for exact per-one text: per 100 for a currency BNM quotes per 100, trailing zeros dropped. */
+function boxTextFromPerOne(text: string, currency: string): string {
+  const exact = text.includes('.') ? text : `${text}.0`;
+  const shown = quoteUnit(currency) === 100 ? timesHundred(exact) : exact;
+  return shown.includes('.') ? shown.replace(/\.?0+$/, '') : shown;
+}
+
+/** The box's text for BNM's rate: from its exact text when the read gave it. */
+function bnmBoxText(bnm: FxDefault, currency: string): string {
+  return bnm.rate_text !== undefined && scaledFromText(bnm.rate_text) !== undefined
+    ? boxTextFromPerOne(bnm.rate_text, currency)
+    : rateText(bnm.rate, currency);
+}
+
+/** A saved draft's currency, as the form shows it. `fx_rate_text` (exact, from the database) wins over `fx_rate`. */
 export function savedFields(saved: {
   currency: string;
   fx_rate: number | null;
+  fx_rate_text?: string | null;
   fx_rate_source: RateSource | null;
   fx_rate_date: string | null;
+  fx_rate_provider?: RateProvider | null;
+  fx_rate_reference?: string | null;
 }): CurrencyFields {
   if (saved.currency === BASE_CURRENCY) return ringgitFields();
+  const exact = saved.fx_rate_text ?? null;
   return {
     ...ringgitFields(),
     currency: saved.currency,
     currencyEdited: true,
-    rate: saved.fx_rate === null ? '' : rateText(saved.fx_rate, saved.currency),
+    rate:
+      exact !== null && scaledFromText(exact) !== undefined
+        ? boxTextFromPerOne(exact, saved.currency)
+        : saved.fx_rate === null
+          ? ''
+          : rateText(saved.fx_rate, saved.currency),
     rateSource: saved.fx_rate_source ?? 'bnm',
     rateDate: saved.fx_rate_source === 'bnm' ? saved.fx_rate_date : null,
+    provider: saved.fx_rate_source === 'manual' ? (saved.fx_rate_provider ?? null) : null,
+    reference: saved.fx_rate_source === 'manual' ? (saved.fx_rate_reference ?? '') : '',
   };
 }
 
@@ -206,7 +262,7 @@ export function withRateAnswer(
   const next = { ...fields, answered: key, bnm: answer.rate, lookupFailed: false };
   if (!offer || fields.rateSource === 'manual') return next;
   return answer.rate
-    ? { ...next, rate: rateText(answer.rate.rate, fields.currency), rateSource: 'bnm', rateDate: answer.rate.rate_date }
+    ? { ...next, rate: bnmBoxText(answer.rate, fields.currency), rateSource: 'bnm', rateDate: answer.rate.rate_date }
     : { ...next, rate: '', rateSource: 'bnm', rateDate: null };
 }
 
@@ -235,12 +291,52 @@ export function currencyPayload(fields: CurrencyFields) {
   };
 }
 
-/** The first thing wrong with the currency part, or null. Sending (or posting) needs a rate. */
-export function currencyError(fields: CurrencyFields, sending: boolean): string | null {
+/**
+ * What an invoice's save is sent: the currency part and, for a rate typed by hand, where it came from
+ * (null otherwise). Quotations send `currencyPayload` alone.
+ */
+export function currencyPayloadWithSource(fields: CurrencyFields) {
+  const payload = currencyPayload(fields);
+  const manual = payload.fx_rate_source === 'manual';
+  const reference = fields.reference.trim();
+  return {
+    ...payload,
+    fx_rate_provider: manual ? fields.provider : null,
+    fx_rate_reference: manual && reference !== '' ? reference : null,
+  };
+}
+
+/**
+ * The first thing wrong with the currency part, or null. Sending (or posting) needs a rate; `missing` is the
+ * kind's own sentence for that (a quotation is sent, an invoice posted).
+ */
+export function currencyError(
+  fields: CurrencyFields,
+  sending: boolean,
+  missing: string = CURRENCY_MESSAGES.rateBeforeSending,
+): string | null {
   const perOne = ratePerOne(fields);
   if (perOne !== null && Number.isNaN(perOne)) return CURRENCY_MESSAGES.rate;
-  if (sending && perOne === null) return CURRENCY_MESSAGES.rateBeforeSending;
+  if (sending && perOne === null) return missing;
   return null;
+}
+
+/** A rate typed by hand on an invoice with no source, or a source that needs a name or reference without one. */
+export function sourceError(fields: CurrencyFields): string | null {
+  if (fields.currency === BASE_CURRENCY || fields.rate.trim() === '' || fields.rateSource !== 'manual') return null;
+  if (fields.provider === null) return CURRENCY_MESSAGES.rateSource;
+  if (PROVIDER_NEEDS_REFERENCE.has(fields.provider) && fields.reference.trim() === '') return CURRENCY_MESSAGES.rateSource;
+  return null;
+}
+
+/** The person chose where a typed rate came from. */
+export function withRateProvider(fields: CurrencyFields, provider: RateProvider | null): CurrencyFields {
+  return { ...fields, provider };
+}
+
+/** The person typed the bank's name or the approval reference. */
+export function withRateReference(fields: CurrencyFields, reference: string): CurrencyFields {
+  return { ...fields, reference };
 }
 
 /**
@@ -267,7 +363,7 @@ export function withRateConfirmed(fields: CurrencyFields): CurrencyFields {
 function bnmWords(bnm: FxDefault, currency: string): string {
   const unit = quoteUnit(currency);
   const per = unit === 1 ? currency : `${unit} ${currency}`;
-  return `RM ${rateText(bnm.rate, currency)} per ${per}, ${longDate(bnm.rate_date)}`;
+  return `RM ${bnmBoxText(bnm, currency)} per ${per}, ${longDate(bnm.rate_date)}`;
 }
 
 /**
@@ -275,12 +371,12 @@ function bnmWords(bnm: FxDefault, currency: string): string {
  * is true in every case that reaches it: a lookup still out says nothing
  * about BNM, and "no rate" names the date it was asked for.
  */
-export function rateNotes(fields: CurrencyFields, date: string): string[] {
+export function rateNotes(fields: CurrencyFields, date: string, figure: RateFigure = 'middle'): string[] {
   if (fields.currency === BASE_CURRENCY) return [];
   const key = rateKey(fields, date);
   const notes: string[] = [];
   if (fields.rateSource === 'bnm' && fields.rateDate !== null && fields.rate.trim() !== '') {
-    notes.push(`Bank Negara Malaysia's 5 pm middle rate of ${longDate(fields.rateDate)}.`);
+    notes.push(`Bank Negara Malaysia's 5 pm ${figure} rate of ${longDate(fields.rateDate)}.`);
     if (isIsoDate(date)) {
       const stale = staleRateNote(fields.rateDate, date);
       if (stale) notes.push(stale);
