@@ -159,6 +159,18 @@ describe('the ringgit total of a foreign invoice', () => {
   });
 });
 
+describe('discounted foreign lines', () => {
+  it('agree with the database: RM 11,694.75 (supabase/tests/bendahara_invoice_currency_check.sql, case 29)', () => {
+    const fx = withRateTyped(answeredForm('USD', null).fx, '4.2555');
+    const lines = [
+      { ...line('a', '3', '33.33', '8'), discount_pct: '10' },
+      { ...line('b', '2', '1250.505', '6'), discount_amount: '0.10' },
+    ];
+    // 89.99 + 7.20 -> 382.95 + 30.64; 2500.91 + 150.05 -> 10,642.62 + 638.54.
+    expect(ringgitTotal(fx, lines)).toBe(11694.75);
+  });
+});
+
 describe('opening a saved foreign draft', () => {
   it('shows the rate from its exact text, its source and its date of supply', () => {
     const detail: InvoiceDetail = ringgitRow({

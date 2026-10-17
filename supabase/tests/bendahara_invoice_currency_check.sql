@@ -30,6 +30,7 @@ declare
   i_none uuid;
   i_post uuid;
   i_sw uuid;
+  i_disc uuid;
   b1 uuid;
   c1 uuid;
   q_usd uuid;
@@ -256,6 +257,52 @@ begin
   perform public.finance_post_invoice(org, i_sw);
   fails := fails || public.bendahara_check_try('17: a contra on an invoice that became foreign is posted', 'FIN42',
     format('select public.finance_post_contra(%L, %L)', org, c1));
+
+  -- ==== 28: voiding the posted USD invoice reverses the same ringgit figures ======
+  -- It has no payment, credit note or contra entry (all refused above), so the void goes through. The
+  -- reversal is dated the day it was voided (UTC) and swaps each line: Dr Sales 4,200.00, Dr SST 336.00,
+  -- Cr Receivable 4,536.00.
+  fails := fails || public.bendahara_check_try('28: the posted USD invoice is voided', 'ok',
+    format('update public.finance_invoices set status = %L, updated_at = now() where id = %L', 'void', i_usd));
+  select coalesce(sum(l.debit) filter (where a.system_key is null), 0) as sales,
+         coalesce(sum(l.debit) filter (where a.system_key = 'sst_payable'), 0) as sst,
+         coalesce(sum(l.credit) filter (where a.system_key = 'receivable'), 0) as rec,
+         sum(l.debit) as dr, sum(l.credit) as cr,
+         count(*) filter (where l.entry_date is distinct from (now() at time zone 'UTC')::date) as off_day,
+         count(*) as n
+    into r
+    from public.finance_ledger_lines l join public.finance_ledger_accounts a on a.org_id = l.org_id and a.id = l.account_id
+   where l.org_id = org and l.source = 'invoice' and l.source_id = i_usd and l.entry_key = 'invoice:' || i_usd || ':void';
+  if r.n = 0 or r.sales <> 4200.00 or r.sst <> 336.00 or r.rec <> 4536.00 or r.dr <> r.cr or r.off_day <> 0 then
+    fails := fails || format('28: the void reverses Dr Sales %s, Dr SST %s, Cr Receivable %s (Dr %s, Cr %s; %s of %s lines on another day)',
+      r.sales, r.sst, r.rec, r.dr, r.cr, r.off_day, r.n);
+  end if;
+  -- The original entry stands beside it, unchanged.
+  select coalesce(sum(l.debit), 0) as dr into r from public.finance_ledger_lines l
+   where l.org_id = org and l.source = 'invoice' and l.source_id = i_usd and l.entry_key = 'invoice:' || i_usd;
+  if r.dr <> 4536.00 then fails := fails || format('28: after the void the original entry debits %s, not 4536.00', r.dr); end if;
+
+  -- ==== 29: discounted foreign lines, as the database stores them ================
+  -- Mirrored by tests/finance-invoice-currency.test.ts ('discounted foreign lines'), which must read the same
+  -- 11,694.75. At a typed 4.2555:
+  --   3 x 33.33, 10% off, SST 8%        net 89.991:   89.99 + 7.20   -> RM 382.95 + 30.64
+  --   2 x 1250.505, 0.10 off, SST 6%    net 2500.91:  2500.91 + 150.05 -> RM 10,642.62 + 638.54
+  i_disc := public.finance_save_invoice(org,
+    jsonb_build_object('customer_id', cust, 'invoice_date', '1999-01-10', 'due_date', '1999-02-10',
+      'currency', 'USD', 'fx_rate', '4.2555', 'fx_rate_source', 'manual', 'fx_rate_provider', 'oanda'),
+    '[{"description":"a","quantity":3,"unit_price":33.33,"sst_rate":8,"discount_pct":10},
+      {"description":"b","quantity":2,"unit_price":1250.505,"sst_rate":6,"discount_amount":0.10}]'::jsonb);
+  select count(*) filter (where amount_myr = round(amount * fx_rate, 2) and sst_amount_myr = round(sst_amount * fx_rate, 2)) as good,
+         count(*) as all_lines,
+         string_agg(amount || '/' || sst_amount || '/' || amount_myr || '/' || sst_amount_myr, ' ' order by position) as got
+    into r from public.finance_invoice_lines where invoice_id = i_disc;
+  if r.good <> 2 or r.all_lines <> 2 or r.got is distinct from '89.99/7.20/382.95/30.64 2500.91/150.05/10642.62/638.54' then
+    fails := fails || format('29: discounted lines are %s (%s of %s at round(x * rate, 2))', r.got, r.good, r.all_lines);
+  end if;
+  select subtotal_myr, sst_myr, total_myr into r from public.finance_invoice_totals where id = i_disc;
+  if r.subtotal_myr <> 11025.57 or r.sst_myr <> 669.18 or r.total_myr <> 11694.75 then
+    fails := fails || format('29: the discounted invoice reads RM %s + %s = %s, not 11025.57 + 669.18 = 11694.75', r.subtotal_myr, r.sst_myr, r.total_myr);
+  end if;
 
   -- ==== 20-22b: converting quotations ============================================
   q_usd := public.finance_save_quotation(org,
