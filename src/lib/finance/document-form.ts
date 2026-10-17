@@ -8,7 +8,7 @@
 import { addDaysIso, type LineNumbers } from './bill-math';
 import { type DocumentLineRow, isIsoDate, roundRate } from './document-lines';
 import { typedNumber } from './format';
-import type { CurrencyFields } from './document-currency';
+import type { CurrencyFields, RateFigure } from './document-currency';
 import type { FinanceProduct } from './products';
 import { WRITE_FAILED } from './result';
 
@@ -245,11 +245,25 @@ export type DocumentFormKind<F extends DocumentFormState> = {
   /** Sales documents (invoices, quotations) show a per-line discount; others do not. */
   discount?: boolean;
   /**
-   * A document that may be in another currency (a quotation, from stage 2): the card draws the currency picker
-   * and the rate, asks for Bank Negara's rate when the currency or the date changes, and shows the lines in that
-   * currency. Absent, the document is in ringgit and nothing changes.
+   * A document that may be in another currency (a quotation from stage 2, an invoice from stage 3a): the card
+   * draws the currency picker and the rate, asks for Bank Negara's rate when the currency or the rate's date
+   * changes, and shows the lines in that currency. Absent, the document is in ringgit and nothing changes.
+   * `figure` is which of BNM's rates the kind is offered (absent: the middle rate); `sources` draws, for a rate
+   * typed by hand, where it came from (an invoice's: Customs Public Ruling 3/2026).
    */
-  currency?: { get: (form: F) => CurrencyFields; set: (form: F, fields: CurrencyFields) => F };
+  currency?: {
+    get: (form: F) => CurrencyFields;
+    set: (form: F, fields: CurrencyFields) => F;
+    figure?: RateFigure;
+    sources?: boolean;
+  };
+  /** The date the rate is for, when it is not `date`: an invoice's date of supply. */
+  rateDate?: (form: F) => string;
+  /**
+   * An optional date drawn under the dates while the document is in another currency, because it only drives
+   * the rate: an invoice's date of supply. Absent for every other kind.
+   */
+  supplyDate?: { label: string; hint: string; get: (form: F) => string; set: (form: F, value: string) => F };
   withProduct: (line: LineDraft, product: FinanceProduct | null) => LineDraft;
   /** The first thing wrong with the form, or null. `posting` also refuses a total of nothing. */
   error: (form: F, posting?: boolean) => string | null;

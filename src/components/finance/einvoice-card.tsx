@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { einvoiceCurrencyLines } from '@/lib/finance/einvoice-fields';
 import { eInvoiceForm, eInvoiceFormError, eInvoicePayload, withEInvoiceStatus } from '@/lib/finance/invoice-form';
 import { EINVOICE_STATUSES, EINVOICE_UUID_MAX, type EInvoiceStatus, type InvoiceListRow } from '@/lib/finance/invoices';
 import type { FinResult } from '@/lib/finance/result';
@@ -30,6 +31,8 @@ export function EInvoiceCard({
 }) {
   const id = useId();
   const [form, setForm] = useState(() => eInvoiceForm(invoice));
+  // An invoice in another currency: what a submission would carry, read only. Nothing for ringgit.
+  const currencyLines = einvoiceCurrencyLines(invoice);
   const action = useFinanceAction();
   // A change by the person answers the last refusal, so its sentence goes.
   const edit: typeof setForm = (next) => {
@@ -56,6 +59,13 @@ export function EInvoiceCard({
       className="col-span-2 md:col-span-12"
     >
       <form onSubmit={submit} noValidate className="grid gap-3 md:grid-cols-12">
+        {currencyLines.length > 0 ? (
+          <ul className="space-y-0.5 text-sm text-muted-foreground md:col-span-12">
+            {currencyLines.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        ) : null}
         <div className="space-y-1.5 md:col-span-3">
           <Label htmlFor={`${id}-status`}>Status</Label>
           <Select value={form.status} onValueChange={(v) => edit((f) => withEInvoiceStatus(f, v as EInvoiceStatus))}>

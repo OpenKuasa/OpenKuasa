@@ -43,7 +43,7 @@ import type { FinanceContact } from '@/lib/finance/contacts';
 import { type CreditNoteSaved, creditNoteSavedNote, creditableInvoices } from '@/lib/finance/credit-note-form';
 import type { CreditNoteRow } from '@/lib/finance/credit-notes';
 import { csvFileName } from '@/lib/finance/csv';
-import { rm } from '@/lib/finance/format';
+import { money, rm } from '@/lib/finance/format';
 import type { EInvoiceStatus, InvoiceDetail, InvoiceDisplayStatus, InvoiceListRow } from '@/lib/finance/invoices';
 import type { FinanceAccount, PaymentInRow } from '@/lib/finance/money';
 import type { FinanceProduct } from '@/lib/finance/products';
@@ -64,6 +64,7 @@ import {
   invoiceCan,
   invoiceCustomers,
   invoicesCsv,
+  invoicesHaveForeign,
 } from '@/lib/finance/sales-views';
 import { LATEST_ROWS, displayDate } from '@/lib/finance/view-helpers';
 import { cn } from '@/lib/utils';
@@ -173,6 +174,8 @@ export function InvoicesView({
   const matching = filterInvoices(rows, query, filter, customer);
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
   const columns = writer ? 9 : 8;
+  // Only once an invoice is in another currency does a total carry its ringgit beside it.
+  const foreign = invoicesHaveForeign(rows);
   const receivable = writer ? receivableInvoices(rows, writer.payments) : [];
   // A credit note is decided from the invoice rows alone, so it does not wait on the follow-on reads.
   const creditable = writer ? creditableInvoices(rows) : [];
@@ -257,7 +260,7 @@ export function InvoicesView({
           onConfirm={() => confirm.run(() => actions.post({ id: invoice.id }), close)}
           onCancel={close}
         >
-          Post this invoice to <span className="font-medium">{invoice.customer_name}</span> ({rm(invoice.total)})? It
+          Post this invoice to <span className="font-medium">{invoice.customer_name}</span> ({money(invoice.total, invoice.currency)})? It
           gets its number and can no longer be edited, only voided.
         </ConfirmRow>
       );
@@ -277,7 +280,7 @@ export function InvoicesView({
           onCancel={close}
         >
           Void <span className="font-medium">{invoice.invoice_no}</span> to{' '}
-          <span className="font-medium">{invoice.customer_name}</span> ({rm(invoice.total)})? It stays in the list as
+          <span className="font-medium">{invoice.customer_name}</span> ({money(invoice.total, invoice.currency)})? It stays in the list as
           Void and nothing more is owed on it. This cannot be undone. An invoice cannot be voided while it has payments,
           refunds or credit notes: void payments on Payments In, and void or delete refunds and credit notes on their
           own screens.
@@ -296,7 +299,7 @@ export function InvoicesView({
         onConfirm={() => confirm.run(() => actions.remove({ id: invoice.id }), close)}
         onCancel={close}
       >
-        Delete the draft invoice to <span className="font-medium">{invoice.customer_name}</span> ({rm(invoice.total)})?
+        Delete the draft invoice to <span className="font-medium">{invoice.customer_name}</span> ({money(invoice.total, invoice.currency)})?
         This cannot be undone.
       </ConfirmRow>
     );
@@ -586,12 +589,20 @@ export function InvoicesView({
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(i.invoice_date)}</TableCell>
                       <TableCell className="whitespace-nowrap">{i.customer_name}</TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(i.due_date)}</TableCell>
-                      <TableCell className="whitespace-nowrap text-right tabular-nums">{rm(i.total)}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums">
+                        {money(i.total, i.currency)}
+                        {foreign && i.currency !== 'MYR' ? (
+                          <span className="block text-xs text-muted-foreground">
+                            {i.total_myr === null ? 'No rate yet' : `≈ ${rm(i.total_myr)}`}
+                            {i.fx_rate_source === 'manual' ? ', rate typed' : ''}
+                          </span>
+                        ) : null}
+                      </TableCell>
                       <TableCell className="whitespace-nowrap text-right tabular-nums">
                         {balanceText(i)}
                         {/* A balance that dropped with no money in says why: a contra entry set part of it off. */}
                         {(i.set_off ?? 0) > 0 ? (
-                          <span className="block text-xs text-muted-foreground">Set off {rm(i.set_off ?? 0)}</span>
+                          <span className="block text-xs text-muted-foreground">Set off {money(i.set_off ?? 0, i.currency)}</span>
                         ) : null}
                       </TableCell>
                       <TableCell>

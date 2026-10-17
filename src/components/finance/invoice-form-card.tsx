@@ -5,12 +5,15 @@ import type { FinanceContact } from '@/lib/finance/contacts';
 import { withCurrentParty } from '@/lib/finance/document-form';
 import { INVOICE_FORM_KIND, invoiceFormFromDetail, newInvoiceForm } from '@/lib/finance/invoice-form';
 import type { InvoiceDetail, SaveAndPostInvoiceResult } from '@/lib/finance/invoices';
+import type { FxDefault } from '@/lib/finance/fx-rates';
 import type { FinanceProduct } from '@/lib/finance/products';
 import type { FinResult } from '@/lib/finance/result';
 
 export type InvoiceFormActions = {
   save: (input: unknown) => Promise<FinResult<{ id: string }>>;
   saveAndPost: (input: unknown) => Promise<SaveAndPostInvoiceResult>;
+  /** The SST rule's rate (Bank Negara's 5 pm selling rate) for a currency and a date of supply, read with the person's session. */
+  fxRate: (input: unknown) => Promise<FinResult<FxDefault | null>>;
 };
 
 /**

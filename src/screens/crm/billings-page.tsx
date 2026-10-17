@@ -19,7 +19,7 @@ import { getCurrentOrg } from '@/lib/auth/current-org';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
 import { loadCrmBillings, type BillingsModel } from '@/lib/crm/billings';
 import { formatDay } from '@/lib/crm/deal-stats';
-import { rm, rmShort } from '@/lib/finance/format';
+import { money, rm, rmShort } from '@/lib/finance/format';
 import type { InvoiceDisplayStatus } from '@/lib/finance/invoices';
 import { INVOICE_STATUS_LABELS } from '@/lib/finance/sales-views';
 import { cn } from '@/lib/utils';
@@ -258,11 +258,12 @@ export default async function BillingsPage() {
                         {formatDay(invoice.due_date)}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-right tabular-nums">
-                        {rm(invoice.total)}
+                        {/* In the invoice's own currency; every sum on this page is in ringgit. */}
+                        {money(invoice.total, invoice.currency)}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-right tabular-nums">
                         {/* Nothing is owed on a void invoice, whatever it totalled. */}
-                        {invoice.display_status === 'void' ? '—' : rm(invoice.balance)}
+                        {invoice.display_status === 'void' ? '—' : money(invoice.balance, invoice.currency)}
                       </TableCell>
                       <TableCell>
                         <span className="flex items-center gap-2">

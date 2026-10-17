@@ -23,7 +23,14 @@ import type { FinanceContact } from '@/lib/finance/contacts';
 import { csvFileName } from '@/lib/finance/csv';
 import { money, rm } from '@/lib/finance/format';
 import type { FinanceProduct } from '@/lib/finance/products';
-import type { QuotationDetail, QuotationDisplayStatus, QuotationListRow } from '@/lib/finance/quotations';
+import { longDate } from '@/lib/finance/fx-rates';
+import {
+  type ConvertedInvoice,
+  type QuotationDetail,
+  type QuotationDisplayStatus,
+  type QuotationListRow,
+  convertedInvoiceNote,
+} from '@/lib/finance/quotations';
 import type { FinResult } from '@/lib/finance/result';
 import {
   QUOTATION_STATUS_LABELS,
@@ -49,7 +56,7 @@ export type QuotationActions = QuotationFormActions & {
   remove: (input: unknown) => Promise<FinResult<{ id: string }>>;
   /** Reads one draft with its lines, for the Edit form. */
   get: (input: unknown) => Promise<FinResult<QuotationDetail>>;
-  convert: (input: unknown) => Promise<FinResult<{ id: string; invoice_id: string }>>;
+  convert: (input: unknown) => Promise<FinResult<{ id: string; invoice_id: string; invoice: ConvertedInvoice }>>;
 };
 
 /** What only a person who may edit is given: the actions, and what the form offers. */
@@ -83,7 +90,7 @@ type Open =
   /** `detail` is null while the draft's lines are being read. */
   | { kind: 'edit'; quotation: QuotationListRow; detail: QuotationDetail | null; today: string }
   /** A draft invoice has just been made from this quotation, dated `date`. */
-  | { kind: 'converted'; quotation: QuotationListRow; date: string }
+  | { kind: 'converted'; quotation: QuotationListRow; date: string; invoice: ConvertedInvoice }
   | { kind: Question; quotation: QuotationListRow }
   | null;
 
@@ -249,7 +256,7 @@ export function QuotationsView({
               confirm.run(
                 () => actions.convert({ ...id, invoice_date: date }),
                 // The row's question goes; the note at the top of the page says where the invoice is.
-                () => ask({ kind: 'converted', quotation, date }),
+                (made) => ask({ kind: 'converted', quotation, date, invoice: made.invoice }),
               );
             }}
           >
@@ -325,6 +332,7 @@ export function QuotationsView({
       );
     }
     if (open.kind === 'converted') {
+      const currencyNote = convertedInvoiceNote(open.invoice, longDate);
       return (
         <BentoCard
           title="Draft invoice made"
@@ -334,7 +342,8 @@ export function QuotationsView({
         >
           <div className="flex flex-wrap items-center gap-3">
             <p id="converted-note" role="status" className="text-sm text-muted-foreground">
-              It has the quotation’s customer, notes and lines, and is dated {displayDate(open.date)}. It is a draft:
+              {currencyNote ? `${currencyNote} ` : ''}It has the quotation’s customer, notes and lines, and is dated{' '}
+              {displayDate(open.date)}. It is a draft:
               check it, then post it, on{' '}
               <Link
                 ref={invoicesLink}

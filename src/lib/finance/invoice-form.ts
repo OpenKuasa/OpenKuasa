@@ -6,6 +6,17 @@
  * shares is in document-form.ts.
  */
 import { billTotals } from './bill-math';
+import { BASE_CURRENCY } from './currencies';
+import {
+  CURRENCY_MESSAGES,
+  type CurrencyFields,
+  currencyError,
+  currencyPayloadWithSource,
+  ringgitFields,
+  savedFields,
+  sourceError,
+  withPartyCurrency,
+} from './document-currency';
 import {
   type DocumentFormKind,
   type LineDraft,
@@ -27,6 +38,7 @@ import {
   setEInvoiceInput,
 } from './invoices';
 import type { FinanceProduct } from './products';
+import { rateDateFor } from './sst-rate';
 
 export type InvoiceForm = {
   /** Present when a saved draft is being changed. */
@@ -38,6 +50,10 @@ export type InvoiceForm = {
   dueEdited: boolean;
   notes: string;
   lines: LineDraft[];
+  /** The currency, the rate and, for a typed rate, its source. Ringgit for a new form until the person or the customer's default says otherwise. */
+  fx: CurrencyFields;
+  /** The date of supply as typed; empty means the invoice date. Only drawn, and only sent, for another currency. */
+  supplyDate: string;
 };
 
 /** A new invoice dated today with one empty line. The due date follows once a customer is chosen. */
@@ -49,6 +65,8 @@ export function newInvoiceForm(today: string, lineKey: string): InvoiceForm {
     dueEdited: false,
     notes: '',
     lines: [emptyLine(lineKey)],
+    fx: ringgitFields(),
+    supplyDate: '',
   };
 }
 
@@ -62,15 +80,34 @@ export function invoiceFormFromDetail(invoice: InvoiceDetail): InvoiceForm {
     dueEdited: true,
     notes: invoice.notes ?? '',
     lines: invoice.lines.map(lineDraft),
+    fx: savedFields(invoice),
+    supplyDate: invoice.supply_date ?? '',
   };
 }
 
-/** Choosing a customer moves the due date to their payment terms, unless it was set by hand. */
-export function withCustomer(form: InvoiceForm, customer: { id: string; payment_terms_days: number }): InvoiceForm {
+/** The date the invoice's rate is for: the date of supply when one is typed, else the invoice date. */
+export function invoiceRateDate(form: InvoiceForm): string {
+  return rateDateFor(form.invoice_date, form.fx.currency === BASE_CURRENCY ? '' : form.supplyDate);
+}
+
+/** The date of supply was typed or cleared. */
+export function withSupplyDate(form: InvoiceForm, supplyDate: string): InvoiceForm {
+  return { ...form, supplyDate };
+}
+
+/**
+ * Choosing a customer moves the due date to their payment terms, unless it was set by hand, and on a new invoice
+ * whose currency the person has not picked, the currency to the customer's default, when they have one.
+ */
+export function withCustomer(
+  form: InvoiceForm,
+  customer: { id: string; payment_terms_days: number; default_currency?: string | null },
+): InvoiceForm {
   return {
     ...form,
     customer_id: customer.id,
     due_date: followedDueDate(form, form.invoice_date, customer.payment_terms_days),
+    fx: withPartyCurrency(form.fx, customer.default_currency, !form.id),
   };
 }
 
@@ -91,8 +128,12 @@ export function withSoldProduct(line: LineDraft, product: FinanceProduct | null)
   return filledFromProduct(line, product, product?.price ?? 0);
 }
 
-/** What is sent to saveInvoiceAction. Figures are numbers; a box that is not a number goes as NaN and is refused. */
+/**
+ * What is sent to saveInvoiceAction. Figures are numbers; a box that is not a number goes as NaN and is refused.
+ * The currency part always goes (a ringgit invoice as MYR); the date of supply only for another currency.
+ */
 export function invoicePayload(form: InvoiceForm) {
+  const supply = form.supplyDate.trim();
   return {
     ...(form.id ? { id: form.id } : {}),
     customer_id: form.customer_id,
@@ -100,6 +141,8 @@ export function invoicePayload(form: InvoiceForm) {
     due_date: form.due_date,
     notes: form.notes,
     lines: form.lines.map(linePayload),
+    ...currencyPayloadWithSource(form.fx),
+    supply_date: form.fx.currency === BASE_CURRENCY || supply === '' ? null : supply,
   };
 }
 
@@ -110,6 +153,9 @@ export function invoicePayload(form: InvoiceForm) {
  * post.
  */
 export function invoiceFormError(form: InvoiceForm, posting = false): string | null {
+  // The rate box first: a rate that is not a number goes as NaN and would read as the schema's word for it.
+  const rate = currencyError(form.fx, posting, CURRENCY_MESSAGES.rateBeforePosting) ?? sourceError(form.fx);
+  if (rate) return rate;
   const parsed = saveInvoiceInput.safeParse(invoicePayload(form));
   if (!parsed.success) return parsed.error.issues[0]?.message ?? INVOICE_MESSAGES.lines;
   if (posting && billTotals(form.lines.map(lineNumbers)).total <= 0) return INVOICE_MESSAGES.empty;
@@ -132,6 +178,15 @@ export const INVOICE_FORM_KIND: DocumentFormKind<InvoiceForm> = {
   withDate: withInvoiceDate,
   secondDate: { label: 'Due date', get: (form) => form.due_date, set: withDueDate },
   discount: true,
+  // One rate per invoice, the SST rule's: Bank Negara's 5 pm selling rate for the date of supply.
+  currency: { get: (form) => form.fx, set: (form, fx) => ({ ...form, fx }), figure: 'selling', sources: true },
+  rateDate: invoiceRateDate,
+  supplyDate: {
+    label: 'Date of supply (if not the invoice date)',
+    hint: 'When the goods were sold or the service provided. The exchange rate is for this date.',
+    get: (form) => form.supplyDate,
+    set: withSupplyDate,
+  },
   withProduct: withSoldProduct,
   error: invoiceFormError,
   payload: invoicePayload,

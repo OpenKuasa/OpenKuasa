@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { BASE_CURRENCY } from '@/lib/finance/currencies';
 import {
   farRateQuestion,
   rateKey,
@@ -18,6 +19,8 @@ import {
   withCurrency,
   withRateAnswer,
   withRateConfirmed,
+  withRateProvider,
+  withRateReference,
   withRateTyped,
 } from '@/lib/finance/document-currency';
 import { type DocumentFormKind, type DocumentFormState, type DocumentParty, documentFormWords } from '@/lib/finance/document-form';
@@ -93,6 +96,8 @@ export function DocumentFormCard<F extends DocumentFormState>({
   const [posting, setPosting] = useState(false);
   const save = useFinanceAction();
   const fx = kind.currency;
+  /** The date the rate is for: the document's date, or (an invoice) its date of supply. */
+  const rateDateOf = (f: F) => (kind.rateDate ? kind.rateDate(f) : kind.date(f));
   /** The currency and date Bank Negara's rate was last asked for: an answer for any other is dropped. */
   const asked = useRef<string | null>(null);
 
@@ -103,12 +108,12 @@ export function DocumentFormCard<F extends DocumentFormState>({
   const askRate = (next: F, offer: boolean) => {
     const fetchRate = actions.fxRate;
     if (!fx || !fetchRate) return;
-    const key = rateKey(fx.get(next), kind.date(next));
+    const key = rateKey(fx.get(next), rateDateOf(next));
     if (key === null || key === asked.current) return;
     asked.current = key;
     const [currency, date] = key.split('|');
     const answered = (answer: { ok: true; rate: FxDefault | null } | { ok: false }) =>
-      setForm((f) => fx.set(f, withRateAnswer(fx.get(f), kind.date(f), key, answer, offer)));
+      setForm((f) => fx.set(f, withRateAnswer(fx.get(f), rateDateOf(f), key, answer, offer)));
     fetchRate({ currency, date }).then(
       (result) => answered(result.ok ? { ok: true, rate: result.data } : { ok: false }),
       () => answered({ ok: false }),
@@ -261,11 +266,38 @@ export function DocumentFormCard<F extends DocumentFormState>({
             onChange={(e) => edit((f) => secondDate.set(f, e.target.value))}
           />
         </div>
+        {fx && kind.supplyDate && fx.get(form).currency !== BASE_CURRENCY ? (
+          <div className="space-y-1.5 md:col-span-6">
+            <Label htmlFor={`${id}-supply`}>{kind.supplyDate.label}</Label>
+            <Input
+              id={`${id}-supply`}
+              type="date"
+              value={kind.supplyDate.get(form)}
+              aria-describedby={`${id}-supply-hint`}
+              onChange={(e) => {
+                const supply = kind.supplyDate;
+                if (supply) edit((f) => supply.set(f, e.target.value));
+              }}
+            />
+            <p id={`${id}-supply-hint`} className="text-xs text-muted-foreground">
+              {kind.supplyDate.hint}
+            </p>
+          </div>
+        ) : null}
         {fx ? (
           <CurrencyFields
             id={id}
             fields={fx.get(form)}
-            date={kind.date(form)}
+            date={rateDateOf(form)}
+            figure={fx.figure}
+            sources={
+              fx.sources
+                ? {
+                    onProvider: (provider) => edit((f) => fx.set(f, withRateProvider(fx.get(f), provider))),
+                    onReference: (text) => edit((f) => fx.set(f, withRateReference(fx.get(f), text))),
+                  }
+                : undefined
+            }
             onCurrency={(code) => edit((f) => fx.set(f, withCurrency(fx.get(f), code, true)))}
             onRate={(text) => edit((f) => fx.set(f, withRateTyped(fx.get(f), text)))}
           />

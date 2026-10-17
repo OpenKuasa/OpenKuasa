@@ -22,7 +22,7 @@ import {
   readDealInvoiceIds,
   setDealInvoices,
 } from '@/lib/crm/invoice-links';
-import { rm } from '@/lib/finance/format';
+import { money } from '@/lib/finance/format';
 import { listInvoices } from '@/lib/finance/invoices';
 import {
   addCrmPipelineStage,
@@ -330,7 +330,7 @@ export default async function CrmDealsPage({
     <DealsScreen
       pipelines={live.pipelines}
       deals={live.deals.deals.map((deal) => (totals[deal.id] ? { ...deal, billing: totals[deal.id] } : deal))}
-      invoices={canWrite && billing ? dealInvoiceChoices(billing.invoices, billing.links, rm) : undefined}
+      invoices={canWrite && billing ? dealInvoiceChoices(billing.invoices, billing.links, money) : undefined}
       totalDeals={live.deals.total}
       contacts={live.contacts}
       actions={canWrite ? ACTIONS : undefined}
