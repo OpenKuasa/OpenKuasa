@@ -2991,3 +2991,10 @@ with no date).
   deployed. The RFQs list reads `source_rfq_id` from `finance_rfq_totals`,
   and without the column the screen does not load. The other order is safe:
   the code before it sends no link and reads the view's columns by name.
+- Invoices in another currency (`20261120100000`): a rate marked as Bank
+  Negara Malaysia's is accepted for any BNM 17:00 selling rate dated on or
+  before the date of supply (or the invoice date), not only the newest one
+  (`FIN39` checks that the figure is BNM's for its own date, and that the
+  date is not after the date of supply). The form offers the newest and asks
+  again whenever the date changes, and says when the rate it holds is more
+  than seven days old; a direct call can still post at an older BNM rate.
