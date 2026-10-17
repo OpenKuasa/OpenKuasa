@@ -122,9 +122,17 @@ begin
   end if;
 
   -- ==== 4-5: a USD draft at the rule's rate; its lines follow ======================
-  i_draft := public.finance_save_invoice(org,
-    jsonb_build_object('customer_id', cust, 'invoice_date', '1999-01-10', 'due_date', '1999-02-10',
-      'currency', 'USD', 'fx_rate', '4.083', 'fx_rate_source', 'bnm', 'fx_rate_date', '1999-01-08'), two_lines);
+  -- Saved through the try, so a refusal here is reported by name with the cases above it.
+  fails := fails || public.bendahara_check_try('4: a USD draft at the rule''s rate, marked as BNM''s', 'ok',
+    format('select public.finance_save_invoice(%L, %L, %L)', org,
+      jsonb_build_object('customer_id', cust, 'invoice_date', '1999-01-10', 'due_date', '1999-02-10', 'notes', 'case 4',
+        'currency', 'USD', 'fx_rate', '4.083', 'fx_rate_source', 'bnm', 'fx_rate_date', '1999-01-08'), two_lines));
+  select id into i_draft from public.finance_invoices where org_id = org and notes = 'case 4';
+  if i_draft is null then
+    -- Nothing below can run without it.
+    fails := array_remove(fails, null);
+    raise exception 'BENDAHARA_INVOICE_CURRENCY_CHECK FAILED: %', array_to_string(fails, ' | ');
+  end if;
   select count(*) filter (where fx_rate = 4.083 and amount_myr = round(amount * 4.083, 2)
                             and sst_amount_myr = round(sst_amount * 4.083, 2)) as good, count(*) as all_lines
     into r from public.finance_invoice_lines where invoice_id = i_draft;
@@ -255,9 +263,12 @@ begin
       'currency', 'USD', 'fx_rate', '4.5', 'fx_rate_source', 'manual'), two_lines);
   perform public.finance_send_quotation(org, q_usd);
   update public.finance_quotations set status = 'accepted', accepted_at = now() where id = q_usd;
-  i_post := public.finance_convert_quotation(org, q_usd, date '1999-01-10');
+  fails := fails || public.bendahara_check_try('20: an accepted USD quotation is made into an invoice', 'ok',
+    format('select public.finance_convert_quotation(%L, %L, %L)', org, q_usd, '1999-01-10'));
+  select id into i_post from public.finance_invoices where quotation_id = q_usd;
   select currency, fx_rate::text as rate, fx_rate_source, fx_rate_date, status into r from public.finance_invoices where id = i_post;
-  if r.currency <> 'USD' or r.rate <> '4.0830000000' or r.fx_rate_source <> 'bnm' or r.fx_rate_date <> date '1999-01-08' or r.status <> 'draft' then
+  if r.currency is distinct from 'USD' or r.rate is distinct from '4.0830000000' or r.fx_rate_source is distinct from 'bnm'
+     or r.fx_rate_date is distinct from date '1999-01-08' or r.status is distinct from 'draft' then
     fails := fails || format('20: the USD quotation became %s at %s (%s, %s), %s', r.currency, r.rate, r.fx_rate_source, r.fx_rate_date, r.status);
   end if;
   select count(*) into n from public.finance_invoice_lines where invoice_id = i_post and fx_rate = 4.083;
@@ -267,9 +278,10 @@ begin
       'currency', 'THB', 'fx_rate', '0.13', 'fx_rate_source', 'manual'), one_line);
   perform public.finance_send_quotation(org, q_thb);
   update public.finance_quotations set status = 'accepted', accepted_at = now() where id = q_thb;
-  i_post := public.finance_convert_quotation(org, q_thb, date '1999-01-10');
-  select currency, fx_rate, fx_rate_source, fx_rate_date into r from public.finance_invoices where id = i_post;
-  if r.currency <> 'THB' or r.fx_rate is not null or r.fx_rate_source is not null or r.fx_rate_date is not null then
+  fails := fails || public.bendahara_check_try('21: an accepted THB quotation is made into an invoice', 'ok',
+    format('select public.finance_convert_quotation(%L, %L, %L)', org, q_thb, '1999-01-10'));
+  select currency, fx_rate, fx_rate_source, fx_rate_date into r from public.finance_invoices where quotation_id = q_thb;
+  if r.currency is distinct from 'THB' or r.fx_rate is not null or r.fx_rate_source is not null or r.fx_rate_date is not null then
     fails := fails || format('21: the THB quotation became %s at %s (%s, %s)', r.currency, r.fx_rate, r.fx_rate_source, r.fx_rate_date);
   end if;
   q_myr := public.finance_save_quotation(org,
