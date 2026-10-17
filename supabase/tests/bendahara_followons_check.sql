@@ -121,7 +121,9 @@ begin
   select string_agg(attname, ',' order by attnum) into t from pg_attribute
    where attrelid = 'public.finance_invoice_totals'::regclass and attnum > 0 and not attisdropped;
   if t is distinct from 'id,org_id,customer_id,customer_name,invoice_no,invoice_date,due_date,notes,status,posted_at,'
-       || 'einvoice_status,einvoice_uuid,created_by,created_at,updated_at,subtotal,sst,total,paid,balance,display_status,credited,refunded,set_off' then
+       || 'einvoice_status,einvoice_uuid,created_by,created_at,updated_at,subtotal,sst,total,paid,balance,display_status,credited,refunded,set_off,'
+       || 'currency,fx_rate,fx_rate_source,fx_rate_date,fx_rate_provider,fx_rate_reference,supply_date,'
+       || 'subtotal_myr,sst_myr,total_myr,balance_myr' then
     fails := fails || format('finance_invoice_totals has the columns: %s', t);
   end if;
   -- One function answers the call with a date and the call without one. A second

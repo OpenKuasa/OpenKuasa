@@ -73,8 +73,9 @@ begin
   insert into public.orgs (id, name) values (org, 'Quotation Currency Check Sdn Bhd');
   insert into public.org_members (org_id, user_id, role) values (org, owner_id, 'owner'), (org, viewer_id, 'viewer');
   insert into public.finance_contacts (org_id, name, is_customer) values (org, 'Acme Pte Ltd', true) returning id into cust;
-  insert into public.finance_fx_rates (currency, rate_date, session, unit, middle_rate, rate)
-  values ('USD', date '1999-01-04', '1700', 1, 4.0815, 4.0815);
+  -- Its selling rate is what an invoice made from the quotation takes (20261120100000).
+  insert into public.finance_fx_rates (currency, rate_date, session, unit, middle_rate, selling_rate, rate)
+  values ('USD', date '1999-01-04', '1700', 1, 4.0815, 4.083, 4.0815);
   insert into public.finance_fx_rates (currency, rate_date, session, unit, middle_rate, rate)
   values ('USD', date '1999-01-04', '1200', 1, 4.2222, 4.2222);
 
@@ -186,8 +187,15 @@ begin
   fails := fails || public.bendahara_check_try('a sent quotation''s line rate is changed', 'FIN01',
     format('update public.finance_quotation_lines set fx_rate = 4.6 where quotation_id = %L', q_usd));
   update public.finance_quotations set status = 'accepted', accepted_at = now() where id = q_usd;
-  fails := fails || public.bendahara_check_try('a USD quotation is made into an invoice', 'FIN40',
-    format('select public.finance_convert_quotation(%L, %L, current_date)', org, q_usd));
+  -- Since 20261120100000 (FIN40 retired): the invoice keeps the currency and takes BNM's 17:00 selling rate
+  -- for its own date (a Wednesday after the Monday of the stored rate), not the quotation's 4.5.
+  fails := fails || public.bendahara_check_try('a USD quotation is made into an invoice', 'ok',
+    format('select public.finance_convert_quotation(%L, %L, %L)', org, q_usd, '1999-01-06'));
+  select currency, fx_rate, fx_rate_source, fx_rate_date into r from public.finance_invoices where quotation_id = q_usd;
+  if r.currency is distinct from 'USD' or r.fx_rate is distinct from 4.083 or r.fx_rate_source is distinct from 'bnm'
+     or r.fx_rate_date is distinct from date '1999-01-04' then
+    fails := fails || format('the invoice made from the USD quotation is %s at %s (%s, %s)', r.currency, r.fx_rate, r.fx_rate_source, r.fx_rate_date);
+  end if;
   perform public.finance_send_quotation(org, q_myr);
   update public.finance_quotations set status = 'accepted', accepted_at = now() where id = q_myr;
   fails := fails || public.bendahara_check_try('a ringgit quotation is made into an invoice', 'ok',

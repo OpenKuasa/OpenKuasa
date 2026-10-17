@@ -98,12 +98,13 @@ begin
   -- ---- structure ------------------------------------------------------------
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where not tgisinternal and tgrelid = 'public.finance_allocations'::regclass and tgenabled = 'O';
-  if t is distinct from 'finance_allocation_guard,finance_allocation_less_contra,finance_allocation_still' then
+  if t is distinct from 'finance_allocation_currency,finance_allocation_guard,finance_allocation_less_contra,finance_allocation_still' then
     fails := fails || format('triggers on finance_allocations are: %s', t);
   end if;
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where not tgisinternal and tgrelid = 'public.finance_invoices'::regclass and tgenabled = 'O';
-  if t is distinct from 'finance_invoice_guard,finance_invoice_sign_off,finance_invoice_void_contra,finance_void_stamp' then
+  if t is distinct from 'finance_invoice_guard,finance_invoice_rate_to_lines,finance_invoice_sign_off,finance_invoice_to_ringgit,'
+       || 'finance_invoice_void_contra,finance_void_stamp' then
     fails := fails || format('triggers on finance_invoices are: %s', t);
   end if;
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
@@ -113,12 +114,12 @@ begin
   end if;
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where not tgisinternal and tgrelid = 'public.finance_contras'::regclass and tgenabled = 'O';
-  if t is distinct from 'finance_contra_guard,finance_void_stamp' then
+  if t is distinct from 'finance_contra_guard,finance_contra_ringgit,finance_void_stamp' then
     fails := fails || format('triggers on finance_contras are: %s', t);
   end if;
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where not tgisinternal and tgrelid = 'public.finance_contra_lines'::regclass and tgenabled = 'O';
-  if t is distinct from 'finance_contra_line_guard' then
+  if t is distinct from 'finance_contra_line_guard,finance_contra_line_ringgit' then
     fails := fails || format('triggers on finance_contra_lines are: %s', t);
   end if;
   if not exists (select 1 from pg_proc p where p.oid = 'public.finance_next_number(uuid, text)'::regprocedure
@@ -133,7 +134,9 @@ begin
   select string_agg(attname, ',' order by attnum) into t from pg_attribute
    where attrelid = 'public.finance_invoice_totals'::regclass and attnum > 0 and not attisdropped;
   if t is distinct from 'id,org_id,customer_id,customer_name,invoice_no,invoice_date,due_date,notes,status,posted_at,'
-       || 'einvoice_status,einvoice_uuid,created_by,created_at,updated_at,subtotal,sst,total,paid,balance,display_status,credited,refunded,set_off' then
+       || 'einvoice_status,einvoice_uuid,created_by,created_at,updated_at,subtotal,sst,total,paid,balance,display_status,credited,refunded,set_off,'
+       || 'currency,fx_rate,fx_rate_source,fx_rate_date,fx_rate_provider,fx_rate_reference,supply_date,'
+       || 'subtotal_myr,sst_myr,total_myr,balance_myr' then
     fails := fails || format('columns of finance_invoice_totals are: %s', t);
   end if;
   select string_agg(attname, ',' order by attnum) into t from pg_attribute
