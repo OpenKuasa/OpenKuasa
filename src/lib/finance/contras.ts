@@ -26,6 +26,9 @@ export const CONTRA_PAGE_SIZE = 1000;
 
 export const CONTRA_MESSAGES = {
   contact: 'Choose a contact who is both a customer and a supplier.',
+  // FIN42. The form's invoice picker lists ringgit invoices only; met at "Post" when an invoice on a draft contra
+  // entry was changed to another currency and posted since, or by a direct call.
+  foreignInvoice: 'A contra entry can only set off invoices in ringgit.',
   date: 'Enter a valid date.',
   // FIN29 on save; Zod says it first.
   amount: 'Enter an amount above zero for the contra entry and for each invoice and bill.',
@@ -113,6 +116,7 @@ const REFUSALS: Record<string, string> = {
   FIN29: M.unbalanced,
   FIN31: M.wrongContact,
   FIN33: M.refundsDepend,
+  FIN42: M.foreignInvoice,
   [PG_OUT_OF_RANGE]: TOO_LARGE,
 };
 

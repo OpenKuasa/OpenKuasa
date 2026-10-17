@@ -90,6 +90,8 @@ export function refundTargets(invoices: InvoiceListRow[], creditNotes: CreditNot
     (x, y) => x.customer_name.localeCompare(y.customer_name) || byNumber(x.invoice_no, y.invoice_no),
   );
   for (const invoice of ordered) {
+    // Ringgit invoices only: nothing settles an invoice in another currency yet (FIN41, stage 3a).
+    if (invoice.currency !== 'MYR') continue;
     const free = sen(inCredit(invoice)) - (pendingOnInvoice.get(invoice.id) ?? 0);
     if (free <= 0) continue;
     const shared = { invoice_id: invoice.id, invoice_no: invoice.invoice_no ?? '—', customer_name: invoice.customer_name };

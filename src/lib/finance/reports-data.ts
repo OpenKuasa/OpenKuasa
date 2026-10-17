@@ -8,7 +8,8 @@ import type { FinanceWriteContext } from './result';
 
 export const OPEN_PAGE_SIZE = 1000;
 
-const INVOICE_COLUMNS = 'customer_id,customer_name,due_date,balance,display_status';
+// An aged table adds invoices up, so its balance is the invoice's balance in ringgit (its own balance for ringgit).
+const INVOICE_COLUMNS = 'customer_id,customer_name,due_date,balance:balance_myr,display_status';
 const BILL_COLUMNS = 'supplier_id,supplier_name,due_date,balance,display_status';
 
 /** Every posted invoice with a balance that is not zero (a negative one is a customer in credit), a page at a time. Throws when a read fails. */
@@ -19,7 +20,7 @@ export async function listOpenInvoices(ctx: FinanceWriteContext): Promise<Invoic
       .from('finance_invoice_totals')
       .select(INVOICE_COLUMNS)
       .eq('org_id', ctx.orgId)
-      .neq('balance', 0)
+      .neq('balance_myr', 0)
       .in('display_status', ['sent', 'overdue', 'paid'])
       .order('due_date', { ascending: true })
       .order('id', { ascending: true })

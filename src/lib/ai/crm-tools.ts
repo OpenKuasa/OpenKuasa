@@ -530,10 +530,13 @@ export function createCrmTools(access: CrmAccess) {
               customer: invoice.customer_name,
               invoice_date: invoice.invoice_date,
               due_date: invoice.due_date,
-              total_rm: invoice.total,
+              // In ringgit: an invoice in another currency at its own rate (null while a draft has no rate).
+              total_rm: invoice.total_myr,
               paid_rm: invoice.paid,
               // Nothing is owed on a void invoice, whatever it totalled.
-              balance_rm: invoice.display_status === 'void' ? 0 : invoice.balance,
+              balance_rm: invoice.display_status === 'void' ? 0 : invoice.balance_myr,
+              // An invoice in another currency also says its own currency and total.
+              ...(invoice.currency === 'MYR' ? {} : { currency: invoice.currency, total_in_currency: invoice.total }),
               status: invoice.display_status,
               deal: linked ? (titles.get(linked) ?? null) : null,
             };

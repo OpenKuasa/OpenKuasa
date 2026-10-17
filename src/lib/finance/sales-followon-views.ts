@@ -175,8 +175,8 @@ export function quotationActions(row: QuotationListRow): QuotationAction[] {
     case 'expired':
       return ['accept', 'decline'];
     case 'accepted':
-      // Invoices have no currency until stage 3: a quotation in another currency cannot become one yet (FIN40).
-      return row.currency === 'MYR' ? ['convert', 'decline'] : ['decline'];
+      // A quotation in another currency becomes an invoice in that currency (stage 3a).
+      return ['convert', 'decline'];
     case 'declined':
       return ['accept'];
     default:

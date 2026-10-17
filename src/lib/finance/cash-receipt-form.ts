@@ -60,7 +60,10 @@ export function receivableFor(invoices: InvoiceListRow[], payments: PaymentInRow
  * because they are still posted and still owe.
  */
 export function receiptInvoicesForForm(invoices: InvoiceListRow[]): InvoiceListRow[] {
-  return invoices.filter((i) => (i.display_status === 'sent' || i.display_status === 'overdue') && i.balance > 0);
+  // Ringgit invoices only: nothing settles an invoice in another currency yet (FIN41, stage 3a).
+  return invoices.filter(
+    (i) => i.currency === 'MYR' && (i.display_status === 'sent' || i.display_status === 'overdue') && i.balance > 0,
+  );
 }
 
 /**

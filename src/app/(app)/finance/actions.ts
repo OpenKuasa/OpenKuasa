@@ -86,6 +86,7 @@ import {
   saveExpenseInput,
 } from '@/lib/finance/expenses';
 import { type FxDefault, defaultFxRate, fxRateForInput } from '@/lib/finance/fx-rates';
+import { fxSstRate } from '@/lib/finance/sst-rate';
 import {
   INVOICE_MESSAGES,
   type InvoiceDetail,
@@ -688,6 +689,24 @@ export async function fxRateForAction(input: unknown): Promise<FinResult<FxDefau
   if (!parsed.success) return { ok: false, error: firstMessage(parsed.error) };
   try {
     return { ok: true, data: await defaultFxRate(ctx.client, parsed.data.currency, parsed.data.date) };
+  } catch (error) {
+    console.error('[finance] an exchange rate could not be read:', error);
+    return { ok: false, error: READ_FAILED };
+  }
+}
+
+/**
+ * The rate an invoice in a currency, supplied on a date, is offered: the SST rule's (src/lib/finance/sst-rate.ts),
+ * Bank Negara Malaysia's 17:00 selling rate on or before it, as exact text; or null when there is none. Read and
+ * answered as fxRateForAction is.
+ */
+export async function fxSstRateForAction(input: unknown): Promise<FinResult<FxDefault | null>> {
+  const ctx = await writeCtx();
+  if (!ctx) return FORBIDDEN;
+  const parsed = fxRateForInput.safeParse(input);
+  if (!parsed.success) return { ok: false, error: firstMessage(parsed.error) };
+  try {
+    return { ok: true, data: await fxSstRate(ctx.client, parsed.data.currency, parsed.data.date) };
   } catch (error) {
     console.error('[finance] an exchange rate could not be read:', error);
     return { ok: false, error: READ_FAILED };

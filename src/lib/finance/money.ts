@@ -65,6 +65,9 @@ const M = MONEY_MESSAGES;
 /** The sentences of a payment in. Where a payment out says the same thing, it is the same sentence. */
 export const RECEIPT_MESSAGES = {
   account: 'Choose the account the money went into.',
+  // FIN41. The Invoices menu and the payment form offer ringgit invoices only (stage 3a), so this is met from a
+  // tab opened before an invoice went into another currency, or a direct call.
+  foreignNotYet: 'Payments on invoices in other currencies are not available yet.',
   date: M.date,
   method: M.method,
   invoices: 'Choose at least one invoice this payment is for.',
@@ -167,6 +170,7 @@ const RECEIPT_REFUSALS: Record<string, string> = {
   FIN05: R.tooMuch,
   FIN06: R.oneCustomer,
   FIN09: R.locked,
+  FIN41: R.foreignNotYet,
   [PG_FOREIGN_KEY]: R.missing,
   // The same invoice twice on one payment; see RECORD_OUT_REFUSALS.
   [PG_UNIQUE]: R.duplicate,

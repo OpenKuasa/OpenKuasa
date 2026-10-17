@@ -193,7 +193,8 @@ export async function listBillBalances(ctx: FinanceWriteContext): Promise<BillBa
  * figures: the invoices that are "Sent" or "Overdue", read the same way.
  */
 export async function listInvoiceBalances(ctx: FinanceWriteContext): Promise<InvoiceBalance[]> {
-  return listOpenBalances<InvoiceBalance>(ctx, 'finance_invoice_totals', 'customer_id, balance, display_status', ['sent', 'overdue']);
+  // In ringgit: these are added up per customer, and an invoice in another currency counts at its rate.
+  return listOpenBalances<InvoiceBalance>(ctx, 'finance_invoice_totals', 'customer_id, balance:balance_myr, display_status', ['sent', 'overdue']);
 }
 
 export async function createContact(

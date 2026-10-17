@@ -8,8 +8,9 @@
  * A quotation may be in another currency (stage 2 of multi-currency): its
  * lines are typed in that currency, and its rate (ringgit per one unit) gives
  * the ringgit figures beside them, worked out by the database. A quotation
- * posts nothing, so those figures are only indicative. Until invoices carry
- * a currency, a quotation in another currency cannot be made into one.
+ * posts nothing, so those figures are only indicative. A quotation in
+ * another currency becomes an invoice in that currency, at the SST rule's
+ * rate for the invoice's own date (stage 3a), not at the quotation's rate.
  */
 import { z } from 'zod';
 import { BASE_CURRENCY, isDocumentCurrency } from './currencies';
@@ -77,13 +78,9 @@ export const QUOTATION_MESSAGES = {
   // met only by a direct call, or by a form left open across a change to the rates table (which never happens:
   // a stored rate is never replaced). It says what to do, not what happened.
   notBnmRate: "That rate is not the one Bank Negara Malaysia published for that day. Type it in again and save; it is kept as typed by hand.",
-  // FIN40. The row menu does not offer "Make invoice" on such a quotation, so this is met only by a direct call
-  // or a menu opened before the list was refreshed.
   // The assistant never edits a draft in another currency: its lines would be read as ringgit.
   foreignDraftByAssistant:
     'This quotation is not in ringgit. Edit it on the Quotations screen, where its currency and exchange rate are shown.',
-  foreignToInvoice:
-    'This quotation is not in ringgit, and invoices in other currencies are not available yet. Make the invoice in ringgit on Invoices instead.',
 } as const;
 
 const M = QUOTATION_MESSAGES;
@@ -150,7 +147,6 @@ const REFUSALS: Record<string, string> = {
   FIN13: M.hasInvoice,
   FIN38: M.rateBeforeSending,
   FIN39: M.notBnmRate,
-  FIN40: M.foreignToInvoice,
   [PG_UNIQUE]: M.numberTaken,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_FORBIDDEN]: NOT_ALLOWED,
@@ -416,15 +412,21 @@ export async function deleteQuotation(
   return { ok: true, data: { id: data.id } };
 }
 
+/** The new invoice's currency and rate, as the database set them; null when it could not be read back. */
+export type ConvertedInvoice = { currency: string; has_rate: boolean; rate_date: string | null } | null;
+
 /**
  * Makes a draft invoice from an accepted quotation, with the same lines, dated
  * `invoice_date` and due after the customer's payment terms counted from it.
- * Answers with the invoice's id.
+ * A quotation in another currency gives an invoice in that currency at the
+ * SST rule's rate for that date, when Bank Negara has one. Answers with the
+ * invoice's id and, read back from the invoice, its currency and rate, so
+ * what the screen says of it is what was made.
  */
 export async function convertQuotation(
   ctx: FinanceWriteContext,
   input: z.input<typeof convertQuotationInput>,
-): Promise<FinResult<{ id: string; invoice_id: string }>> {
+): Promise<FinResult<{ id: string; invoice_id: string; invoice: ConvertedInvoice }>> {
   const { id, invoice_date } = convertQuotationInput.parse(input);
   const { data, error } = await ctx.client.rpc('finance_convert_quotation', {
     target_org: ctx.orgId,
@@ -432,5 +434,30 @@ export async function convertQuotation(
     invoice_date,
   });
   if (error || !data) return quotationWriteFailed('convertQuotation', error, CONVERT_REFUSALS);
-  return { ok: true, data: { id, invoice_id: data as string } };
+  const invoiceId = data as string;
+  // The invoice is made; a failed read-back only leaves the note without its currency.
+  const { data: made, error: readError } = await ctx.client
+    .from('finance_invoices')
+    .select('currency,fx_rate,fx_rate_date')
+    .eq('org_id', ctx.orgId)
+    .eq('id', invoiceId)
+    .maybeSingle();
+  const row = readError ? null : (made as { currency?: string; fx_rate?: unknown; fx_rate_date?: string | null } | null);
+  const invoice: ConvertedInvoice = row?.currency
+    ? { currency: row.currency, has_rate: row.fx_rate !== null && row.fx_rate !== undefined, rate_date: row.fx_rate_date ?? null }
+    : null;
+  return { ok: true, data: { id, invoice_id: invoiceId, invoice } };
+}
+
+/**
+ * What the screen says of the invoice a quotation became, beyond where to find it: for one in another
+ * currency, the currency and the rate it was given, or that it needs one. Each is true only of the case that
+ * reaches it; a ringgit invoice, or one that could not be read back, gets nothing.
+ */
+export function convertedInvoiceNote(invoice: ConvertedInvoice, longDate: (iso: string) => string): string | null {
+  if (!invoice || invoice.currency === BASE_CURRENCY) return null;
+  if (invoice.has_rate && invoice.rate_date) {
+    return `Invoice drafted in ${invoice.currency} at Bank Negara Malaysia's selling rate of ${longDate(invoice.rate_date)}.`;
+  }
+  return `Invoice drafted in ${invoice.currency}. Enter its exchange rate before posting.`;
 }

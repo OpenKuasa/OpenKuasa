@@ -49,8 +49,9 @@ export type CreditNoteForm = {
  * unless it is no longer posted.
  */
 export function creditableInvoices(invoices: InvoiceListRow[], keepId?: string): CreditableInvoice[] {
+  // Ringgit invoices only: nothing settles an invoice in another currency yet (FIN41, stage 3a).
   return invoices
-    .filter((i) => i.display_status === 'sent' || i.display_status === 'overdue' || i.display_status === 'paid')
+    .filter((i) => i.currency === 'MYR' && (i.display_status === 'sent' || i.display_status === 'overdue' || i.display_status === 'paid'))
     .map((i) => ({
       id: i.id,
       invoice_no: i.invoice_no ?? '—',

@@ -38,6 +38,9 @@ export const CREDIT_NOTE_PAGE_SIZE = 1000;
 
 export const CREDIT_NOTE_MESSAGES = {
   invoice: 'Choose the invoice this credit note is against.',
+  // FIN41. The Invoices menu and the credit note form offer ringgit invoices only (stage 3a): met from a stale
+  // tab or a direct call.
+  foreignNotYet: 'Credit notes on invoices in other currencies are not available yet.',
   date: LINE_MESSAGES.date,
   reason: 'Choose a reason.',
   amount: 'Enter an amount above 0.',
@@ -78,6 +81,7 @@ const REFUSALS: Record<string, string> = {
   FIN04: M.notPosted,
   FIN05: M.tooMuch,
   FIN11: M.gone,
+  FIN41: M.foreignNotYet,
   [PG_UNIQUE]: M.numberTaken,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_FORBIDDEN]: NOT_ALLOWED,

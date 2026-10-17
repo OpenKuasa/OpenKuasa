@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { CrmContactFormError } from '@/lib/crm/contacts';
-import type { InvoiceListRow } from '@/lib/finance/invoices';
+import { type InvoiceListRow, invoiceRinggit } from '@/lib/finance/invoices';
 
 /**
  * Kasturi's links to Bendahara's invoices. A contact is billed through one of
@@ -77,10 +77,10 @@ function sum(amounts: number[]) {
 
 const BILLED: ReadonlySet<string> = new Set(['sent', 'overdue', 'paid']);
 
-/** Each deal's linked invoices, added up. Deals with no link are absent. */
+/** Each deal's linked invoices, added up in ringgit (an invoice in another currency at its rate). Deals with no link are absent. */
 export function dealBilling(
   links: DealInvoiceLink[],
-  invoices: Pick<InvoiceListRow, 'id' | 'total' | 'balance' | 'display_status'>[],
+  invoices: Pick<InvoiceListRow, 'id' | 'total_myr' | 'balance_myr' | 'display_status'>[],
 ): Record<string, DealBilling> {
   const byId = new Map(invoices.map((invoice) => [invoice.id, invoice] as const));
   const rows = new Map<string, (typeof invoices)[number][]>();
@@ -94,29 +94,29 @@ export function dealBilling(
     const billed = linked.filter((invoice) => BILLED.has(invoice.display_status));
     result[dealId] = {
       count: linked.length,
-      billed: sum(billed.map((invoice) => invoice.total)),
+      billed: sum(billed.map((invoice) => invoiceRinggit(invoice).total)),
       outstanding: sum(
         billed
           .filter((invoice) => invoice.display_status !== 'paid')
-          .map((invoice) => Math.max(invoice.balance, 0)),
+          .map((invoice) => Math.max(invoiceRinggit(invoice).balance, 0)),
       ),
     };
   }
   return result;
 }
 
-/** The invoices the deal form offers, newest first; void ones are left out unless already linked. */
+/** The invoices the deal form offers, newest first; void ones are left out unless already linked. Each total is in its own currency. */
 export function dealInvoiceChoices(
   invoices: InvoiceListRow[],
   links: DealInvoiceLink[],
-  format: (amount: number) => string,
+  format: (amount: number, currency: string) => string,
 ): DealInvoiceChoice[] {
   const dealOf = new Map(links.map((link) => [link.invoiceId, link.dealId] as const));
   return invoices
     .filter((invoice) => invoice.display_status !== 'void' || dealOf.has(invoice.id))
     .map((invoice) => ({
       id: invoice.id,
-      label: `${invoice.invoice_no ?? 'Draft'} · ${invoice.customer_name} · ${format(invoice.total)}`,
+      label: `${invoice.invoice_no ?? 'Draft'} · ${invoice.customer_name} · ${format(invoice.total, invoice.currency)}`,
       customerId: invoice.customer_id,
       dealId: dealOf.get(invoice.id) ?? null,
     }));

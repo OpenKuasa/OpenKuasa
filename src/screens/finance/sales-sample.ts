@@ -43,6 +43,18 @@ const invoice = (
   display_status,
   einvoice_status,
   einvoice_uuid: null,
+  // The sample is in ringgit: its ringgit figures are its figures.
+  currency: 'MYR',
+  fx_rate: 1,
+  fx_rate_text: '1.0000000000',
+  fx_rate_source: null,
+  fx_rate_date: null,
+  fx_rate_provider: null,
+  fx_rate_reference: null,
+  supply_date: null,
+  total_myr: total,
+  balance_myr: total - paid - credited + refunded,
+  sst_myr: null,
 });
 
 /** Earlier months, so the trend has a shape: [month, invoiced and since paid in full]. */

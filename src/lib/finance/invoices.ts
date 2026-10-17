@@ -3,8 +3,17 @@
  * function, so a failure cannot leave half an invoice. Posting gives the
  * invoice its number and locks it; after that it can only be voided, and only
  * while no money is allocated to it. org_id comes from the context.
+ *
+ * An invoice may be in another currency (stage 3a of multi-currency): its
+ * lines are typed in that currency, and its one rate (ringgit per one unit,
+ * the SST rule's: src/lib/finance/sst-rate.ts) gives the ringgit figures the
+ * books, the SST and the e-Invoice use, worked out by the database. Nothing
+ * settles a foreign invoice yet: payments, credit notes and refunds on one
+ * arrive in the next stages.
  */
 import { z } from 'zod';
+import { BASE_CURRENCY, isDocumentCurrency } from './currencies';
+import { CURRENCY_MESSAGES, type RateSource, wholeUnitsError } from './document-currency';
 import {
   DOCUMENT_LINES_MAX,
   type DocumentLineRow,
@@ -30,6 +39,7 @@ import {
   pgCode,
   writeFailed,
 } from './result';
+import { PROVIDER_NEEDS_REFERENCE, RATE_PROVIDERS, RATE_REFERENCE_MAX, type RateProvider } from './sst-rate';
 
 export const INVOICE_LINES_MAX = DOCUMENT_LINES_MAX;
 /** Invoices loaded for a screen, a page at a time. */
@@ -68,21 +78,96 @@ export const INVOICE_MESSAGES = {
   einvoiceUuid: `Keep the UUID to ${EINVOICE_UUID_MAX} characters or fewer.`,
   einvoiceNone: 'An invoice with no e-Invois status has no UUID. Clear the UUID, or choose a status.',
   einvoiceDraft: 'e-Invois details can be recorded once the invoice is posted.',
+  currency: 'Choose a currency.',
+  rate: CURRENCY_MESSAGES.rate,
+  // FIN38. The form says it first; the database says it for a direct call, or a draft saved without a rate and
+  // then posted from the list.
+  rateBeforePosting: CURRENCY_MESSAGES.rateBeforePosting,
+  // FIN39. The form marks a rate as Bank Negara's only when it is the rule's own answer for the date it asked,
+  // so this is met by a direct call, or a draft whose date of supply was moved before its BNM date by one. It
+  // says what to do, not what happened.
+  notBnmRate:
+    "That rate is not Bank Negara Malaysia's 5 pm selling rate for the date of supply. Type it in again with its source, and save.",
+  // FIN43. The form says it first.
+  rateSource: CURRENCY_MESSAGES.rateSource,
+  referenceTooLong: `Keep the bank's name or the reference to ${RATE_REFERENCE_MAX} characters or fewer.`,
+  // The assistant never edits a draft in another currency: its lines would be read as ringgit.
+  foreignDraftByAssistant:
+    'This invoice is not in ringgit. Edit it on the Invoices screen, where its currency and exchange rate are shown.',
 } as const;
 
 const M = INVOICE_MESSAGES;
 
-export const saveInvoiceInput = z
-  .object({
-    /** Present to change a draft; absent to create one. */
-    id: z.string({ error: M.gone }).uuid(M.gone).optional(),
-    customer_id: z.string({ error: M.customer }).uuid(M.customer),
-    invoice_date: isoDate,
-    due_date: isoDate,
-    notes: optionalText.default(null),
-    lines: z.array(salesDocumentLine, { error: M.lines }).min(1, M.lines).max(INVOICE_LINES_MAX, M.tooManyLines),
+const saveInvoiceBase = z.object({
+  /** Present to change a draft; absent to create one. */
+  id: z.string({ error: M.gone }).uuid(M.gone).optional(),
+  customer_id: z.string({ error: M.customer }).uuid(M.customer),
+  invoice_date: isoDate,
+  due_date: isoDate,
+  notes: optionalText.default(null),
+  lines: z.array(salesDocumentLine, { error: M.lines }).min(1, M.lines).max(INVOICE_LINES_MAX, M.tooManyLines),
+  // The keys below are all optional, with no default: a caller that sends no currency (the finance assistant,
+  // which writes ringgit, and the code deployed before stage 3a) leaves a draft's currency, rate and date of
+  // supply as they are, and a new invoice in ringgit. The database stores rate 1 for ringgit whatever is sent.
+  currency: z.string({ error: M.currency }).refine(isDocumentCurrency, M.currency).optional(),
+  /** Ringgit per one unit; null on a draft in another currency whose rate is not known yet. */
+  // A number (a direct caller) or exact decimal text (the form: no digit lost to a float).
+  fx_rate: z
+    .union([
+      z.number({ error: M.rate }).positive(M.rate).max(1_000_000_000, M.rate),
+      z
+        .string({ error: M.rate })
+        .regex(/^\d{1,10}(\.\d{1,10})?$/, M.rate)
+        .refine((t) => Number(t) > 0 && Number(t) <= 1_000_000_000, M.rate),
+    ], { error: M.rate })
+    .nullable()
+    .optional(),
+  fx_rate_source: z.enum(['bnm', 'manual'], { error: M.rate }).nullable().optional(),
+  fx_rate_date: isoDate.nullable().optional(),
+  /** Where a rate typed by hand came from (Customs Public Ruling 3/2026 para 3.3). */
+  fx_rate_provider: z.enum(RATE_PROVIDERS, { error: M.rateSource }).nullable().optional(),
+  /** The bank's or central bank's name, or Customs' approval reference; trimmed, empty is none. */
+  fx_rate_reference: z
+    .string({ error: M.rateSource })
+    .trim()
+    .max(RATE_REFERENCE_MAX, M.referenceTooLong)
+    .transform((v) => (v === '' ? null : v))
+    .nullable()
+    .optional(),
+  /** The date the goods were sold or the service provided, when not the invoice date. It sets the rate's date. */
+  supply_date: isoDate.nullable().optional(),
+});
+const dueNotBefore = (v: { invoice_date: string; due_date: string }) => v.due_date >= v.invoice_date;
+
+export const saveInvoiceInput = saveInvoiceBase
+  .refine(dueNotBefore, { message: M.dates, path: ['due_date'] })
+  .superRefine((v, ctx) => {
+    // With no currency sent the draft keeps its own; saveInvoice checks that case against the stored one.
+    const problem = wholeUnitsError(v.currency ?? BASE_CURRENCY, v.lines);
+    if (problem) ctx.addIssue({ code: 'custom', message: problem, path: ['lines'] });
+    // A rate typed by hand names its source, and a bank, a central bank or a Customs approval its name.
+    const manual = v.currency !== undefined && v.currency !== BASE_CURRENCY && v.fx_rate != null && v.fx_rate_source !== 'bnm';
+    if (manual && (!v.fx_rate_provider || (PROVIDER_NEEDS_REFERENCE.has(v.fx_rate_provider) && !v.fx_rate_reference))) {
+      ctx.addIssue({ code: 'custom', message: M.rateSource, path: ['fx_rate_provider'] });
+    }
+  });
+
+/**
+ * What the finance assistant may send: the form's fields without a currency, a rate or a date of supply. It
+ * writes ringgit only, so those keys are not in the schema the model sees and a call that carries them has
+ * them stripped.
+ */
+export const saveInvoiceToolInput = saveInvoiceBase
+  .omit({
+    currency: true,
+    fx_rate: true,
+    fx_rate_source: true,
+    fx_rate_date: true,
+    fx_rate_provider: true,
+    fx_rate_reference: true,
+    supply_date: true,
   })
-  .refine((v) => v.due_date >= v.invoice_date, { message: M.dates, path: ['due_date'] });
+  .refine(dueNotBefore, { message: M.dates, path: ['due_date'] });
 
 export const invoiceIdInput = z.object({ id: z.string({ error: M.gone }).uuid(M.gone) });
 
@@ -112,6 +197,9 @@ const REFUSALS: Record<string, string> = {
   FIN10: M.empty,
   FIN11: M.gone,
   FIN12: M.hasCreditNotes,
+  FIN38: M.rateBeforePosting,
+  FIN39: M.notBnmRate,
+  FIN43: M.rateSource,
   [PG_UNIQUE]: M.numberTaken,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_FORBIDDEN]: NOT_ALLOWED,
@@ -163,7 +251,37 @@ export type InvoiceListRow = {
   einvoice_status: EInvoiceStatus;
   /** The UUID LHDN gave the e-Invois, as a person typed it in; null when none was recorded. */
   einvoice_uuid: string | null;
+  /** ISO 4217 code: the currency the amounts above are in. MYR for every invoice made before stage 3a. */
+  currency: string;
+  /** Ringgit per one unit: 1 for ringgit; null on a draft in another currency with no rate yet. For display. */
+  fx_rate: number | null;
+  /** The same rate as the database's exact text ("4.0830000000"): what money and the e-Invoice are worked from. */
+  fx_rate_text: string | null;
+  /** null for ringgit and while there is no rate. */
+  fx_rate_source: RateSource | null;
+  /** The date of BNM's rate when it is BNM's; null otherwise. */
+  fx_rate_date: string | null;
+  /** Where a rate typed by hand came from; null otherwise. */
+  fx_rate_provider: RateProvider | null;
+  /** The bank's or central bank's name, or Customs' approval reference. */
+  fx_rate_reference: string | null;
+  /** The date of supply, when not the invoice date. */
+  supply_date: string | null;
+  /** The total in ringgit at the invoice's rate; null while a foreign draft has no rate. Equal to `total` for ringgit. */
+  total_myr: number | null;
+  /** What is still owed, in ringgit; null while a foreign draft has no rate. Equal to `balance` for ringgit. */
+  balance_myr: number | null;
+  /** The SST in ringgit (the e-Invoice's tax total in MYR); null while a foreign draft has no rate. */
+  sst_myr: number | null;
 };
+
+/**
+ * An invoice's total and balance in ringgit, for every figure that adds invoices up. A foreign draft with no
+ * rate yet counts nothing: it is a draft.
+ */
+export function invoiceRinggit(row: Pick<InvoiceListRow, 'total_myr' | 'balance_myr'>): { total: number; balance: number } {
+  return { total: row.total_myr ?? 0, balance: row.balance_myr ?? 0 };
+}
 
 export type InvoiceLine = DocumentLineRow;
 
@@ -182,7 +300,13 @@ export type InvoiceDetail = InvoiceListRow & {
 export type SaveAndPostInvoiceResult = FinResult<{ id: string; invoice_no: string }> & { draftId?: string };
 
 const LIST_COLUMNS =
-  'id,invoice_no,customer_id,customer_name,invoice_date,due_date,total,paid,credited,refunded,set_off,balance,display_status,einvoice_status,einvoice_uuid';
+  'id,invoice_no,customer_id,customer_name,invoice_date,due_date,total,paid,credited,refunded,set_off,balance,display_status,einvoice_status,einvoice_uuid,' +
+  // The rate twice: as a number to show, and as exact text (PostgREST's cast) to work money and the e-Invoice from.
+  'currency,fx_rate,fx_rate_text:fx_rate::text,fx_rate_source,fx_rate_date,fx_rate_provider,fx_rate_reference,supply_date,' +
+  'total_myr,balance_myr,sst_myr';
+
+/** A numeric column as a number, keeping null. */
+const numberOrNull = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 
 function toListRow(row: Record<string, unknown>): InvoiceListRow {
   return {
@@ -194,6 +318,17 @@ function toListRow(row: Record<string, unknown>): InvoiceListRow {
     set_off: Number(row.set_off ?? 0),
     balance: Number(row.balance),
     einvoice_uuid: (row.einvoice_uuid as string | null) ?? null,
+    currency: (row.currency as string | undefined) ?? BASE_CURRENCY,
+    fx_rate: numberOrNull(row.fx_rate),
+    fx_rate_text: (row.fx_rate_text as string | null | undefined) ?? null,
+    fx_rate_source: (row.fx_rate_source as RateSource | null | undefined) ?? null,
+    fx_rate_date: (row.fx_rate_date as string | null | undefined) ?? null,
+    fx_rate_provider: (row.fx_rate_provider as RateProvider | null | undefined) ?? null,
+    fx_rate_reference: (row.fx_rate_reference as string | null | undefined) ?? null,
+    supply_date: (row.supply_date as string | null | undefined) ?? null,
+    total_myr: numberOrNull(row.total_myr),
+    balance_myr: numberOrNull(row.balance_myr),
+    sst_myr: numberOrNull(row.sst_myr),
   };
 }
 
@@ -253,6 +388,13 @@ export async function saveInvoice(
   input: z.input<typeof saveInvoiceInput>,
 ): Promise<FinResult<{ id: string }>> {
   const { lines, ...invoice } = saveInvoiceInput.parse(input);
+  // No currency sent for an existing draft: it keeps its own, so the whole-units rule is its own too.
+  if (invoice.id && invoice.currency === undefined) {
+    const stored = await storedCurrency(ctx, invoice.id);
+    if (!stored.ok) return stored;
+    const problem = stored.data ? wholeUnitsError(stored.data, lines) : null;
+    if (problem) return { ok: false, error: problem };
+  }
   const { data, error } = await ctx.client.rpc('finance_save_invoice', {
     target_org: ctx.orgId,
     invoice,
@@ -260,6 +402,32 @@ export async function saveInvoice(
   });
   if (error || !data) return invoiceWriteFailed('saveInvoice', error);
   return { ok: true, data: { id: data as string } };
+}
+
+/** The currency an invoice is stored in; null when it is not there (the save then says so). */
+async function storedCurrency(ctx: FinanceWriteContext, id: string): Promise<FinResult<string | null>> {
+  const { data, error } = await ctx.client
+    .from('finance_invoices')
+    .select('currency')
+    .eq('org_id', ctx.orgId)
+    .eq('id', id)
+    .maybeSingle();
+  if (error) return invoiceWriteFailed('saveInvoice', error);
+  return { ok: true, data: (data as { currency?: string } | null)?.currency ?? null };
+}
+
+/**
+ * The finance assistant's save: ringgit only. A new invoice is in ringgit; a draft that is in another currency
+ * is refused, because the lines the assistant writes are in ringgit.
+ */
+export async function saveInvoiceInRinggit(ctx: FinanceWriteContext, input: unknown): Promise<FinResult<{ id: string }>> {
+  const parsed = saveInvoiceToolInput.parse(input);
+  if (parsed.id) {
+    const stored = await storedCurrency(ctx, parsed.id);
+    if (!stored.ok) return stored;
+    if (stored.data !== null && stored.data !== BASE_CURRENCY) return { ok: false, error: M.foreignDraftByAssistant };
+  }
+  return saveInvoice(ctx, parsed);
 }
 
 /** Posts a draft: it gets its number and can no longer be edited. */

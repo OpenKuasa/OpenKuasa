@@ -47,6 +47,9 @@ export const REFUND_REASON_LABELS: Record<RefundReason, string> = {
 
 export const REFUND_MESSAGES = {
   document: 'Choose the invoice or the credit note this refund is for.',
+  // FIN41. The Invoices menu and the refund form offer ringgit invoices only (stage 3a): met from a stale tab or
+  // a direct call.
+  foreignNotYet: 'Refunds on invoices in other currencies are not available yet.',
   account: 'Choose the account the money leaves.',
   date: LINE_MESSAGES.date,
   method: 'Choose how it was paid.',
@@ -109,6 +112,7 @@ const REFUSALS: Record<string, string> = {
   FIN06: M.notFound,
   FIN09: M.locked,
   FIN11: M.gone,
+  FIN41: M.foreignNotYet,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_FORBIDDEN]: NOT_ALLOWED,
   [FIN_SIGN_OFF]: NEEDS_SIGN_OFF,

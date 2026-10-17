@@ -5,8 +5,9 @@
  */
 import type { Slice } from '@/components/charts';
 import { toCsv } from './csv';
-import { rm, rmShort } from './format';
-import type { EInvoiceStatus, InvoiceDisplayStatus, InvoiceListRow } from './invoices';
+import { money, rmShort } from './format';
+import { type EInvoiceStatus, type InvoiceDisplayStatus, type InvoiceListRow, invoiceRinggit } from './invoices';
+import { PROVIDER_LABELS } from './sst-rate';
 import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentInRow, type PaymentMethod } from './money';
 import {
   ELECTRONIC,
@@ -84,6 +85,7 @@ function isIssued(invoice: InvoiceListRow): boolean {
  * What a customer still owes on an invoice: its balance once it has gone out,
  * nothing (null) on a draft or a void one. Below zero, the customer is in
  * credit: they have paid, or been credited, more than the invoice came to.
+ * In the invoice's own currency; `invoiceRinggit` gives it in ringgit.
  */
 export function owed(invoice: InvoiceListRow): number | null {
   return isIssued(invoice) ? invoice.balance : null;
@@ -96,15 +98,24 @@ export function inCredit(invoice: InvoiceListRow): number {
 }
 
 /**
- * The Balance cell of an invoice row. A draft or a void invoice owes nothing
- * and shows a dash. A customer in credit is never shown as a negative amount:
- * the cell says how much they are in credit.
+ * The Balance cell of an invoice row, in the invoice's currency. A draft or a
+ * void invoice owes nothing and shows a dash. A customer in credit is never
+ * shown as a negative amount: the cell says how much they are in credit.
  */
 export function balanceText(invoice: InvoiceListRow): string {
   const balance = owed(invoice);
   if (balance === null) return '—';
-  return balance < 0 ? `${rm(-balance)} in credit` : rm(balance);
+  return balance < 0 ? `${money(-balance, invoice.currency)} in credit` : money(balance, invoice.currency);
 }
+
+/** True once any invoice is in another currency: only then do the list and the export show currencies. */
+export function invoicesHaveForeign(rows: InvoiceListRow[]): boolean {
+  return rows.some((i) => i.currency !== 'MYR');
+}
+
+/** What a total or a balance adds to a ringgit figure: its ringgit, which for a ringgit invoice is itself. */
+const ringgitTotal = (i: InvoiceListRow) => invoiceRinggit(i).total;
+const ringgitBalance = (i: InvoiceListRow) => invoiceRinggit(i).balance;
 
 /** Only money that has actually arrived counts: not voided, not half-written. */
 function received(rows: PaymentInRow[]): PaymentInRow[] {
@@ -129,7 +140,7 @@ export function invoicesView(invoices: InvoiceListRow[], payments: PaymentInRow[
     if (invoicedInMonth.length > 0 || receivedInMonth.length > 0) hasTrend = true;
     return {
       label,
-      invoiced: thousands(sum(invoicedInMonth, (i) => i.total)),
+      invoiced: thousands(sum(invoicedInMonth, ringgitTotal)),
       received: thousands(sum(receivedInMonth, (p) => p.amount)),
     };
   });
@@ -139,9 +150,10 @@ export function invoicesView(invoices: InvoiceListRow[], payments: PaymentInRow[
   return {
     stats: [
       // Relies on the database: an invoice that reads Sent or Overdue always has a balance above zero (one in credit reads Paid).
-      { label: 'Total receivable', value: rmShort(sum(open, (i) => i.balance)), delta: count(open.length, 'open invoice'), deltaTone: 'flat' },
-      { label: 'Due this week', value: rmShort(sum(dueThisWeek, (i) => i.balance)), delta: count(dueThisWeek.length, 'invoice'), deltaTone: 'flat' },
-      { label: 'Overdue', value: rmShort(sum(overdue, (i) => i.balance)), delta: count(overdue.length, 'invoice'), deltaTone: overdue.length ? 'down' : 'flat' },
+      // In ringgit: an invoice in another currency counts its ringgit balance.
+      { label: 'Total receivable', value: rmShort(sum(open, ringgitBalance)), delta: count(open.length, 'open invoice'), deltaTone: 'flat' },
+      { label: 'Due this week', value: rmShort(sum(dueThisWeek, ringgitBalance)), delta: count(dueThisWeek.length, 'invoice'), deltaTone: 'flat' },
+      { label: 'Overdue', value: rmShort(sum(overdue, ringgitBalance)), delta: count(overdue.length, 'invoice'), deltaTone: overdue.length ? 'down' : 'flat' },
       { label: 'Received (MTD)', value: rmShort(sum(receivedMtd, (p) => p.amount)), delta: count(paymentCount(receivedMtd), 'payment'), deltaTone: 'flat' },
     ],
     trend,
@@ -262,26 +274,53 @@ export function invoiceActions(invoice: InvoiceListRow, can: InvoiceCan): Invoic
  * The invoices table as a CSV file. Amounts are numbers, so a spreadsheet can
  * add them up: Total − Paid − Credited + Refunded − Set off is the Balance,
  * which is below zero for a customer in credit. Set off (what contra entries
- * set off) is the last column, so the columns before it keep their places.
+ * set off) is the last column, so the columns before it keep their places. A
+ * ringgit-only workspace's export is what it was; once any invoice is in
+ * another currency, every row also says its currency (the amounts before are
+ * in it), its rate (ringgit per one unit), its ringgit total and balance, and
+ * where a rate typed by hand came from.
  */
 export function invoicesCsv(invoices: InvoiceListRow[]): string {
+  const base = ['No.', 'Date', 'Customer', 'Due', 'Total', 'Paid', 'Credited', 'Refunded', 'Balance', 'Status', 'e-Invois', 'Set off'];
+  const row = (i: InvoiceListRow) => [
+    i.invoice_no,
+    i.invoice_date,
+    i.customer_name,
+    i.due_date,
+    i.total,
+    i.paid,
+    i.credited,
+    i.refunded,
+    owed(i),
+    INVOICE_STATUS_LABELS[i.display_status],
+    EINVOICE_STATUS_LABELS[i.einvoice_status],
+    i.set_off ?? 0,
+  ];
+  if (!invoicesHaveForeign(invoices)) return toCsv(base, invoices.map(row));
   return toCsv(
-    ['No.', 'Date', 'Customer', 'Due', 'Total', 'Paid', 'Credited', 'Refunded', 'Balance', 'Status', 'e-Invois', 'Set off'],
+    [...base, 'Currency', 'Rate (RM per unit)', 'Total (RM)', 'Balance (RM)', 'Rate source'],
     invoices.map((i) => [
-      i.invoice_no,
-      i.invoice_date,
-      i.customer_name,
-      i.due_date,
-      i.total,
-      i.paid,
-      i.credited,
-      i.refunded,
-      owed(i),
-      INVOICE_STATUS_LABELS[i.display_status],
-      EINVOICE_STATUS_LABELS[i.einvoice_status],
-      i.set_off ?? 0,
+      ...row(i),
+      i.currency,
+      // The exact text, so a spreadsheet gets every digit the invoice was posted at.
+      i.fx_rate_text ?? i.fx_rate,
+      i.total_myr,
+      owed(i) === null ? null : i.balance_myr,
+      rateSourceWords(i),
     ]),
   );
+}
+
+/**
+ * Where an invoice's rate came from, in words: "Bank Negara Malaysia 5 pm selling, 15 October 2026" is not
+ * built here (the date is the e-Invoice card's), only the source: BNM's rule, or the source of a typed rate
+ * with its name or reference. Empty for ringgit and while there is no rate.
+ */
+export function rateSourceWords(i: Pick<InvoiceListRow, 'currency' | 'fx_rate_source' | 'fx_rate_provider' | 'fx_rate_reference'>): string {
+  if (i.currency === 'MYR' || i.fx_rate_source === null) return '';
+  if (i.fx_rate_source === 'bnm') return 'Bank Negara Malaysia, 5 pm selling';
+  const provider = i.fx_rate_provider ? PROVIDER_LABELS[i.fx_rate_provider] : 'Typed by hand';
+  return i.fx_rate_reference ? `${provider}: ${i.fx_rate_reference}` : provider;
 }
 
 /* ---- Payments In --------------------------------------------------- */

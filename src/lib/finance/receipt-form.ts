@@ -68,8 +68,9 @@ export function heldByInvoice(payments: PaymentInRow[]): Record<string, number> 
  */
 export function receivableInvoices(invoices: InvoiceListRow[], payments: PaymentInRow[]): ReceivableInvoice[] {
   const heldNow = heldByInvoice(payments);
+  // Ringgit invoices only: nothing settles an invoice in another currency yet (FIN41; a contra entry, FIN42, stage 3a).
   return invoices
-    .filter((i) => (i.display_status === 'sent' || i.display_status === 'overdue') && i.balance > 0)
+    .filter((i) => i.currency === 'MYR' && (i.display_status === 'sent' || i.display_status === 'overdue') && i.balance > 0)
     .map((i) => {
       const held = heldNow[i.id] ?? 0;
       return {

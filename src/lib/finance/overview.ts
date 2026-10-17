@@ -1,5 +1,5 @@
 import type { BillListRow } from './bills';
-import type { EInvoiceStatus, InvoiceListRow } from './invoices';
+import { type EInvoiceStatus, type InvoiceListRow, invoiceRinggit } from './invoices';
 import { round2 } from './view-helpers';
 
 /** How many rows each list on the Ask Bendahara dashboard shows. */
@@ -55,7 +55,8 @@ function daysBetween(from: string, to: string): number {
 
 /**
  * The dashboard figures of the Ask Bendahara screen, from the invoices and
- * bills already read. Pure: money stays in ringgit (never converted), and a
+ * bills already read. Pure: money is in ringgit (an invoice in another
+ * currency counts its ringgit balance, worked out by the database), and a
  * document only counts while it is open (invoice sent/overdue, bill
  * pending/overdue) with something left to pay; a customer in credit is not
  * netted off what others owe.
@@ -68,7 +69,9 @@ export function buildFinanceOverview(
 ): FinanceOverview {
   const limit = options.limit ?? OVERVIEW_LIST_LIMIT;
 
-  const openInvoices = invoices.filter(
+  // Every figure below adds invoices up, so each invoice's balance is its balance in ringgit.
+  const inRinggit = invoices.map((i) => ({ ...i, balance: invoiceRinggit(i).balance }));
+  const openInvoices = inRinggit.filter(
     (i) => (i.display_status === 'sent' || i.display_status === 'overdue') && i.balance > 0,
   );
   const overdueInvoices = openInvoices.filter((i) => i.display_status === 'overdue');

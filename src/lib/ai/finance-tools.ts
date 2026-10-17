@@ -22,8 +22,8 @@ import {
   invoiceIdInput,
   listInvoices,
   postInvoice,
-  saveInvoice,
-  saveInvoiceInput,
+  saveInvoiceInRinggit,
+  saveInvoiceToolInput,
   setEInvoice,
   setEInvoiceInput,
   voidInvoice,
@@ -187,17 +187,23 @@ export function createBendaharaTools(access: FinanceAccess) {
       },
     }),
     listInvoices: tool({
-      description: "The workspace's sales invoices with status and totals.",
+      description:
+        "The workspace's sales invoices with status and totals. total, paid, credited, refunded and balance are in the " +
+        "invoice's currency (its currency field); total_myr and balance_myr are the same in ringgit. Add up ringgit only.",
       inputSchema: z.object({}),
       execute: async () => listInvoices(ctx),
     }),
     getInvoice: tool({
-      description: 'One sales invoice in full, by id, with its lines.',
+      description:
+        "One sales invoice in full, by id, with its lines. Amounts are in the invoice's currency; total_myr, sst_myr and " +
+        'balance_myr are in ringgit.',
       inputSchema: idInput,
       execute: async ({ id }) => getInvoice(ctx, id),
     }),
     listInvoiceBalances: tool({
-      description: 'Outstanding receivable balance per customer, with a display status (open/overdue/paid).',
+      description:
+        'Outstanding receivable balance per invoice with its customer and a display status (open/overdue/paid). ' +
+        'Balances are in ringgit (an invoice in another currency at its own rate).',
       inputSchema: z.object({}),
       execute: async () => listInvoiceBalances(ctx),
     }),
@@ -274,9 +280,11 @@ export function createBendaharaTools(access: FinanceAccess) {
   const write = {
     // Invoices
     saveInvoice: tool({
-      description: 'Create or edit a DRAFT sales invoice (customer, dates, line items). Omit id to create.',
-      inputSchema: saveInvoiceInput,
-      execute: async (input) => saveInvoice(ctx, input),
+      description:
+        'Create or edit a DRAFT sales invoice in ringgit (customer, dates, line items). Omit id to create. An invoice in ' +
+        'another currency is edited on the Invoices screen.',
+      inputSchema: saveInvoiceToolInput,
+      execute: async (input) => saveInvoiceInRinggit(ctx, input),
     }),
     postInvoice: tool({
       description: 'Post (finalise) a draft invoice: it gets an invoice number and can no longer be edited. Carries e-Invoice/LHDN weight.',
@@ -320,7 +328,9 @@ export function createBendaharaTools(access: FinanceAccess) {
       execute: async (input) => declineQuotation(ctx, input),
     }),
     convertQuotation: tool({
-      description: 'Convert an accepted quotation into a draft invoice dated as given.',
+      description:
+        'Convert an accepted quotation into a draft invoice dated as given. A quotation in another currency becomes an ' +
+        "invoice in that currency at Bank Negara Malaysia's selling rate for that date.",
       inputSchema: convertQuotationInput,
       execute: async (input) => convertQuotation(ctx, input),
     }),

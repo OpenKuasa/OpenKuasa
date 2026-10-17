@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { klDay } from '@/lib/crm/deal-stats';
 import { listDealInvoiceLinks } from '@/lib/crm/invoice-links';
-import { listInvoices, type InvoiceDisplayStatus, type InvoiceListRow } from '@/lib/finance/invoices';
+import { listInvoices, type InvoiceDisplayStatus, type InvoiceListRow, invoiceRinggit } from '@/lib/finance/invoices';
 
 /** How many invoices the "Recent invoices" table shows. */
 export const RECENT_LISTED = 8;
@@ -65,9 +65,14 @@ function monthName(month: string, options: Intl.DateTimeFormatOptions) {
   );
 }
 
-/** What is still owed on an invoice; a customer in credit owes nothing. */
+/** What is still owed on an invoice, in ringgit; a customer in credit owes nothing. */
 function owed(invoice: InvoiceListRow) {
-  return Math.max(invoice.balance, 0);
+  return Math.max(invoiceRinggit(invoice).balance, 0);
+}
+
+/** What an invoice was billed for, in ringgit (an invoice in another currency at its own rate). */
+function billedOn(invoice: InvoiceListRow) {
+  return invoiceRinggit(invoice).total;
 }
 
 /** The figures on Kasturi's Billings page, from the workspace's invoices. */
@@ -83,7 +88,7 @@ export function buildBillings(
   const overdue = open.filter((invoice) => invoice.display_status === 'overdue');
   const thisMonth = issued.filter((invoice) => invoice.invoice_date.slice(0, 7) === month);
 
-  const billed = sum(issued.map((invoice) => invoice.total));
+  const billed = sum(issued.map(billedOn));
   const received = sum(issued.map((invoice) => invoice.paid));
 
   const months = Array.from({ length: TREND_MONTHS }, (_, i) => shiftMonth(month, i - (TREND_MONTHS - 1)));
@@ -102,7 +107,7 @@ export function buildBillings(
   return {
     monthTitle: monthName(month, { month: 'long', year: 'numeric' }),
     stats: {
-      billedThisMonth: sum(thisMonth.map((invoice) => invoice.total)),
+      billedThisMonth: sum(thisMonth.map(billedOn)),
       billedThisMonthCount: thisMonth.length,
       outstanding: sum(open.map(owed)),
       outstandingCount: open.length,
@@ -114,7 +119,7 @@ export function buildBillings(
     trend: months.map((m) => ({
       month: m,
       label: monthName(m, { month: 'short' }),
-      billed: sum(issued.filter((invoice) => invoice.invoice_date.slice(0, 7) === m).map((invoice) => invoice.total)),
+      billed: sum(issued.filter((invoice) => invoice.invoice_date.slice(0, 7) === m).map(billedOn)),
     })),
     byStatus: BILLING_STATUSES.map((status) => ({
       status,
@@ -124,7 +129,7 @@ export function buildBillings(
       .map(({ id, name, rows }) => ({
         id,
         name,
-        billed: sum(rows.map((invoice) => invoice.total)),
+        billed: sum(rows.map(billedOn)),
         outstanding: sum(rows.filter((invoice) => invoice.display_status !== 'paid').map(owed)),
       }))
       .sort((a, b) => b.billed - a.billed || a.name.localeCompare(b.name))
