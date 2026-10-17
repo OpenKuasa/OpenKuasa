@@ -8,6 +8,9 @@ import type { InvoiceListRow } from './invoices';
 import { PROVIDER_LABELS } from './sst-rate';
 import { displayDate } from './view-helpers';
 
+/** CalculationRate is at most this many characters (LHDN SDK Invoice v1.1; the invoices table checks it too). */
+export const EINVOICE_RATE_MAX = 15;
+
 export type EInvoiceCurrencyFields = {
   /** cbc:DocumentCurrencyCode */
   documentCurrencyCode: string;

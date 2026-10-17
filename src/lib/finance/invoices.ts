@@ -14,6 +14,7 @@
 import { z } from 'zod';
 import { BASE_CURRENCY, isDocumentCurrency } from './currencies';
 import { CURRENCY_MESSAGES, type RateSource, wholeUnitsError } from './document-currency';
+import { EINVOICE_RATE_MAX, calculationRateText } from './einvoice-fields';
 import {
   DOCUMENT_LINES_MAX,
   type DocumentLineRow,
@@ -90,6 +91,8 @@ export const INVOICE_MESSAGES = {
     "That rate is not Bank Negara Malaysia's 5 pm selling rate for the date of supply. Type it in again with its source, and save.",
   // FIN43. The form says it first.
   rateSource: CURRENCY_MESSAGES.rateSource,
+  // The table's e-Invoice check (23514) says it for a direct call; the schema says it first.
+  rateTooLong: `Enter an exchange rate of at most ${EINVOICE_RATE_MAX} characters, as the e-Invoice takes it (such as 4.0815).`,
   referenceTooLong: `Keep the bank's name or the reference to ${RATE_REFERENCE_MAX} characters or fewer.`,
   // The assistant never edits a draft in another currency: its lines would be read as ringgit.
   foreignDraftByAssistant:
@@ -114,11 +117,16 @@ const saveInvoiceBase = z.object({
   // A number (a direct caller) or exact decimal text (the form: no digit lost to a float).
   fx_rate: z
     .union([
-      z.number({ error: M.rate }).positive(M.rate).max(1_000_000_000, M.rate),
+      z
+        .number({ error: M.rate })
+        .positive(M.rate)
+        .max(1_000_000_000, M.rate)
+        .refine((n) => calculationRateText(String(n)).length <= EINVOICE_RATE_MAX, M.rateTooLong),
       z
         .string({ error: M.rate })
         .regex(/^\d{1,10}(\.\d{1,10})?$/, M.rate)
-        .refine((t) => Number(t) > 0 && Number(t) <= 1_000_000_000, M.rate),
+        .refine((t) => Number(t) > 0 && Number(t) <= 1_000_000_000, M.rate)
+        .refine((t) => calculationRateText(t).length <= EINVOICE_RATE_MAX, M.rateTooLong),
     ], { error: M.rate })
     .nullable()
     .optional(),

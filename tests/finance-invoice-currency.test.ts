@@ -138,6 +138,18 @@ describe('a rate typed by hand names its source', () => {
     expect(said({ currency: 'USD', fx_rate: '4.083', fx_rate_source: 'bnm', fx_rate_date: '2026-10-15' })).toBeUndefined();
     expect(said({ currency: 'USD', fx_rate: null })).toBeUndefined();
     expect(said({ currency: 'MYR' })).toBeUndefined();
+    // Longer than the e-Invoice's 15 characters: its own sentence, not the database's generic refusal.
+    expect(said({ currency: 'USD', fx_rate: '12345.1234567891', fx_rate_source: 'manual', fx_rate_provider: 'oanda' })).toBe(INVOICE_MESSAGES.rateTooLong);
+    expect(said({ currency: 'USD', fx_rate: '1234.1234567891', fx_rate_source: 'manual', fx_rate_provider: 'oanda' })).toBeUndefined();
+    expect(said({ currency: 'USD', fx_rate: '4.2000000000', fx_rate_source: 'manual', fx_rate_provider: 'oanda' })).toBeUndefined();
+  });
+});
+
+describe('a typed rate too long for the e-Invoice', () => {
+  it('is refused by the form with its own sentence', () => {
+    const usd = answeredForm('USD', null);
+    const form = { ...usd, lines: [line('Work', '1', '100')], fx: withRateProvider(withRateTyped(usd.fx, '12345.1234567891'), 'oanda') };
+    expect(invoiceFormError(form)).toBe(INVOICE_MESSAGES.rateTooLong);
   });
 });
 
