@@ -6,7 +6,7 @@ import { createContact } from '@/lib/finance/contacts';
 import { emptyLine } from '@/lib/finance/document-form';
 import { withRateProvider, withRateTyped } from '@/lib/finance/document-currency';
 import { invoicePayload, newInvoiceForm, withCustomer } from '@/lib/finance/invoice-form';
-import { getInvoice, listInvoices, postInvoice, saveInvoice } from '@/lib/finance/invoices';
+import { getInvoice, listInvoices, postInvoice, saveInvoice, voidInvoice } from '@/lib/finance/invoices';
 import { NEEDS_SIGN_OFF } from '@/lib/finance/result';
 import { RECEIPT_MESSAGES, listAccounts, recordPaymentIn } from '@/lib/finance/money';
 
@@ -81,6 +81,24 @@ testWithSupabase('a USD invoice at a typed rate posts its ringgit, and nothing c
     account_id: bank.id, txn_date: today, method: 'fpx', allocations: [{ invoice_id: id, amount: 100 }],
   });
   expect(paid).toEqual({ ok: false, error: RECEIPT_MESSAGES.foreignNotYet });
+
+  // Voided: the reversal swaps the same ringgit figures, so the invoice nets to nothing in the books.
+  expect((await voidInvoice(ctx, { id })).ok).toBe(true);
+  const { data: after, error: afterError } = await ctx.client
+    .from('finance_ledger_lines')
+    .select('entry_key, account_id, debit, credit')
+    .eq('org_id', ctx.orgId)
+    .eq('source', 'invoice')
+    .eq('source_id', id);
+  expect(afterError, afterError?.message).toBeNull();
+  const reversal = ((after ?? []) as { entry_key: string; account_id: string; debit: string; credit: string }[]).filter((r) =>
+    r.entry_key.endsWith(':void'),
+  );
+  const swapped = (key: string | null, side: 'debit' | 'credit') =>
+    reversal.filter((r) => (keyOf.get(r.account_id) ?? null) === key).reduce((n, r) => n + Math.round(Number(r[side]) * 100), 0) / 100;
+  expect(swapped('receivable', 'credit')).toBe(4536);
+  expect(swapped(null, 'debit')).toBe(4200);
+  expect(swapped('sst_payable', 'debit')).toBe(336);
 });
 
 testWithSupabase('a ringgit invoice in the same workspace reads exactly as before', async () => {
