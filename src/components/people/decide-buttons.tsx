@@ -17,8 +17,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { CapResult } from '@/lib/people/capabilities';
-import { LEAVE_REFUSALS } from '@/lib/people/leave';
-import { PAY_REFUSALS } from '@/lib/people/pay-requests';
+import { LEAVE_REFUSALS, PAY_REFUSALS } from '@/lib/people/refusals';
 import { RowPrompt, usePromptId } from './request-row';
 
 export type DecideKind = 'leave' | 'time_off' | 'claim' | 'overtime';

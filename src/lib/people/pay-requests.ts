@@ -20,30 +20,18 @@ import {
 } from './capabilities';
 import { isRealDate } from './dates';
 import { PAYROLL_REFUSALS } from './payroll-refusals';
+import { PAY_REFUSALS } from './refusals';
 import type { Claim, OvertimeDayKind } from './types';
 
-import { OWN_REQUEST_REFUSAL, decideInput, requestIdInput } from './leave';
+import { decideInput, requestIdInput } from './leave';
 
 // Defined once, in leave.ts; re-exported so a caller of this file needs one import.
 export { decideInput, requestIdInput };
 
 // ---- Sentences ---------------------------------------------------------------
 
-/** Each refusal code the claim and overtime functions raise, and what the person is told. */
-export const PAY_REFUSALS: Record<string, string> = {
-  PAY_NOT_ALLOWED: "You can't make that change.",
-  // An admin deciding, or marking as paid, their own claim or overtime; the workspace's owner may.
-  PAY_OWN_REQUEST: OWN_REQUEST_REFUSAL,
-  PAY_NOT_FOUND: 'That request was not found.',
-  PAY_NOT_PENDING: 'That request has already been decided or cancelled.',
-  PAY_NOT_APPROVED: 'Only an approved claim can be marked as paid.',
-  PAY_NOT_PAID: 'That claim is not marked as paid.',
-  PAY_ALREADY_PAID: 'That claim is marked as paid. Undo the paid mark first.',
-  PAY_INACTIVE_EMPLOYEE: 'That employee is inactive.',
-  PAY_TOO_MANY_HOURS: 'That would be more than 24 hours of overtime on one day.',
-  PAY_BAD_RECEIPT: 'That receipt could not be attached. Please upload it again.',
-  PAY_BAD_INPUT: "That request isn't valid. Check the details and try again.",
-};
+// The sentences live in refusals.ts, a leaf module, so the approval buttons can read one without loading zod.
+export { PAY_REFUSALS };
 
 type DbError = { code?: string; message?: string } | null | undefined;
 
