@@ -12,8 +12,9 @@ import {
   siblingInvoices,
 } from '@/lib/finance/sales-views';
 import { alsoCoversSentence } from '@/lib/finance/view-helpers';
+import { ringgitRow } from './helpers/invoice-rows';
 
-const invoice = (display_status: InvoiceDisplayStatus, i: Partial<InvoiceListRow> = {}): InvoiceListRow => ({
+const invoice = (display_status: InvoiceDisplayStatus, i: Partial<InvoiceListRow> = {}): InvoiceListRow => ringgitRow({
   id: `invoice-${display_status}`,
   invoice_no: display_status === 'draft' ? null : 'INV-0001',
   customer_id: 'aisyah',

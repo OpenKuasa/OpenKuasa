@@ -162,10 +162,12 @@ describe('quotation writes', () => {
   });
   it('converts through the database function, handing it the person’s date, and answers with the new invoice', async () => {
     const { ctx, calls } = fakeFinance({ data: INVOICE, error: null });
-    expect(await convertQuotation(ctx, CONVERT)).toEqual({ ok: true, data: { id: ID, invoice_id: INVOICE } });
+    // The read-back of the new invoice's currency gets the fake's answer, which has none: the note then says nothing of it.
+    expect(await convertQuotation(ctx, CONVERT)).toEqual({ ok: true, data: { id: ID, invoice_id: INVOICE, invoice: null } });
     expect(calls[0]).toMatchObject({ kind: 'rpc', name: 'finance_convert_quotation' });
     // The date is the person's, not the database's: before 08:00 in Malaysia the database is still on the day before.
     expect(calls[0].args).toEqual({ target_org: 'org-1', target_quotation: ID, invoice_date: '2026-10-12' });
+    expect(calls[1]).toMatchObject({ name: 'finance_invoices', op: 'select', filters: { org_id: 'org-1', id: INVOICE } });
   });
   it('asks a conversion for a quotation and a real date', () => {
     const said = (value: unknown) => convertQuotationInput.safeParse(value).error?.issues[0]?.message;

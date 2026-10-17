@@ -14,12 +14,13 @@ import {
 import { type CreditNoteRow, saveCreditNoteInput } from '@/lib/finance/credit-notes';
 import type { InvoiceListRow } from '@/lib/finance/invoices';
 import { WRITE_FAILED } from '@/lib/finance/result';
+import { ringgitRow } from './helpers/invoice-rows';
 
 const SENT = '11111111-1111-4111-8111-111111111111';
 const PAID = '22222222-2222-4222-8222-222222222222';
 const DRAFT_NOTE = '33333333-3333-4333-8333-333333333333';
 
-const invoice = (i: Partial<InvoiceListRow> = {}): InvoiceListRow => ({
+const invoice = (i: Partial<InvoiceListRow> = {}): InvoiceListRow => ringgitRow({
   id: SENT,
   invoice_no: 'INV-0007',
   customer_id: 'aisyah',

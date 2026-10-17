@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { billTotals } from '@/lib/finance/bill-math';
+import { ringgitFields } from '@/lib/finance/document-currency';
 import { emptyLine, lineNumbers } from '@/lib/finance/document-form';
 import {
   INVOICE_FORM_KIND,
@@ -20,6 +21,7 @@ import {
 import { INVOICE_MESSAGES, type InvoiceDetail, saveInvoiceInput, setEInvoiceInput } from '@/lib/finance/invoices';
 import type { FinanceProduct } from '@/lib/finance/products';
 import { WRITE_FAILED } from '@/lib/finance/result';
+import { ringgitRow } from './helpers/invoice-rows';
 
 const INVOICE = '33333333-3333-4333-8333-333333333333';
 const CUSTOMER = '44444444-4444-4444-8444-444444444444';
@@ -59,6 +61,9 @@ describe('newInvoiceForm', () => {
       lines: [
         { key: 'k1', product_id: '', description: '', quantity: '1', uom: '', pack_size: '', unit_price: '', sst_rate: '0', discount_pct: '', discount_amount: '' },
       ],
+      // In ringgit until the person or the customer's default says otherwise; no date of supply.
+      fx: ringgitFields(),
+      supplyDate: '',
     });
   });
 });
@@ -168,6 +173,14 @@ describe('invoicePayload', () => {
         { product_id: PRODUCT, description: ' Gloves ', uom: 'box', pack_size: '', quantity: 10, unit_price: 24.9, sst_rate: 6 },
         { product_id: '', description: 'Delivery', uom: '', pack_size: '', quantity: 1, unit_price: 20, sst_rate: 0 },
       ],
+      // A ringgit invoice sends its code alone (the database stores rate 1), and no date of supply.
+      currency: 'MYR',
+      fx_rate: null,
+      fx_rate_source: null,
+      fx_rate_date: null,
+      fx_rate_provider: null,
+      fx_rate_reference: null,
+      supply_date: null,
     });
     expect('id' in payload).toBe(false);
     expect(saveInvoiceInput.parse(payload)).toMatchObject({ notes: 'Net 30', lines: [{ description: 'Gloves' }, { description: 'Delivery', product_id: null }] });
@@ -175,7 +188,10 @@ describe('invoicePayload', () => {
   it('sends the id when a draft is being changed, and never the line keys, the dueEdited flag or a workspace', () => {
     const payload = invoicePayload(filled({ id: INVOICE }));
     expect(payload.id).toBe(INVOICE);
-    expect(Object.keys(payload).sort()).toEqual(['customer_id', 'due_date', 'id', 'invoice_date', 'lines', 'notes']);
+    expect(Object.keys(payload).sort()).toEqual([
+      'currency', 'customer_id', 'due_date', 'fx_rate', 'fx_rate_date', 'fx_rate_provider', 'fx_rate_reference', 'fx_rate_source',
+      'id', 'invoice_date', 'lines', 'notes', 'supply_date',
+    ]);
     expect(Object.keys(payload.lines[0]).sort()).toEqual(['description', 'pack_size', 'product_id', 'quantity', 'sst_rate', 'unit_price', 'uom']);
   });
 
@@ -198,7 +214,7 @@ describe('invoicePayload', () => {
 });
 
 describe('invoiceFormFromDetail', () => {
-  const detail: InvoiceDetail = {
+  const detail: InvoiceDetail = ringgitRow({
     id: INVOICE,
     invoice_no: null,
     customer_id: CUSTOMER,
@@ -220,7 +236,7 @@ describe('invoiceFormFromDetail', () => {
       { id: 'line-1', product_id: PRODUCT, description: 'Nitrile Gloves (Box)', quantity: 10, uom: 'box', pack_size: '100 pcs', unit_price: 24.9, sst_rate: 6, amount: 249, sst_amount: 14.94 },
       { id: 'line-2', product_id: null, description: 'Delivery', quantity: 1, uom: null, pack_size: null, unit_price: 0, sst_rate: 0, amount: 0, sst_amount: 0 },
     ],
-  };
+  });
 
   it('shows a saved draft as it was saved, in the order of its lines, and keeps its due date', () => {
     const form = invoiceFormFromDetail(detail);

@@ -45,7 +45,7 @@ describe('saveQuotationInput, with a currency', () => {
 });
 
 describe('the database’s answers', () => {
-  it('turns FIN38, FIN39 and FIN40 into sentences', async () => {
+  it('turns FIN38 and FIN39 into sentences; FIN40 is retired (stage 3a)', async () => {
     const answer = async (code: string) => {
       const { ctx } = fakeFinance({ data: null, error: { code } });
       return [await saveQuotation(ctx, valid), await sendQuotation(ctx, { id: ID }), await convertQuotation(ctx, { id: ID, invoice_date: '2026-10-12' })];
@@ -59,11 +59,10 @@ describe('the database’s answers', () => {
         error: "That rate is not the one Bank Negara Malaysia published for that day. Type it in again and save; it is kept as typed by hand.",
       });
     }
+    // Nothing raises FIN40 since 20261120100000: it has no sentence of its own, and reads as any unknown refusal.
     for (const result of await answer('FIN40')) {
-      expect(result).toEqual({
-        ok: false,
-        error: 'This quotation is not in ringgit, and invoices in other currencies are not available yet. Make the invoice in ringgit on Invoices instead.',
-      });
+      expect(result.ok).toBe(false);
+      expect(result.ok ? '' : result.error).not.toMatch(/not in ringgit/);
     }
   });
 });
@@ -117,9 +116,9 @@ describe('the list', () => {
     expect(view.stats.find((s) => s.label === 'Pipeline value')?.value).toBe('RM 5,082');
   });
 
-  it('does not offer "Make invoice" for an accepted quotation in another currency', () => {
+  it('offers "Make invoice" for an accepted quotation in any currency (stage 3a)', () => {
     expect(quotationActions(row({ display_status: 'accepted' }))).toEqual(['convert', 'decline']);
-    expect(quotationActions(row({ display_status: 'accepted', currency: 'USD', fx_rate: 4.08, fx_rate_source: 'manual' }))).toEqual(['decline']);
+    expect(quotationActions(row({ display_status: 'accepted', currency: 'USD', fx_rate: 4.08, fx_rate_source: 'manual' }))).toEqual(['convert', 'decline']);
   });
 
   it('exports as before for a ringgit-only workspace, and with currency columns once one is foreign', () => {

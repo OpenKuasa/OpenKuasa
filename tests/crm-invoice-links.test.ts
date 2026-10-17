@@ -11,6 +11,7 @@ import {
   setDealInvoices,
 } from '@/lib/crm/invoice-links';
 import type { InvoiceListRow } from '@/lib/finance/invoices';
+import { ringgitRow } from './helpers/invoice-rows';
 
 const CUSTOMER = '11111111-1111-4111-8111-111111111111';
 const DEAL = '22222222-2222-4222-8222-222222222222';
@@ -23,7 +24,7 @@ function form(entries: [string, string][]) {
 }
 
 function invoice(id: string, status: InvoiceListRow['display_status'], total: number, balance: number): InvoiceListRow {
-  return {
+  return ringgitRow({
     id,
     invoice_no: status === 'draft' ? null : `INV-${id.slice(-2)}`,
     customer_id: CUSTOMER,
@@ -38,7 +39,7 @@ function invoice(id: string, status: InvoiceListRow['display_status'], total: nu
     display_status: status,
     einvoice_status: 'none',
     einvoice_uuid: null,
-  };
+  });
 }
 
 type Result = { data?: unknown; error?: { code?: string } | null };

@@ -78,7 +78,9 @@ testWithSupabase('a USD quotation with a typed rate: ringgit per line, sent, acc
 
   expect((await sendQuotation(ctx, { id: saved.data.id })).ok).toBe(true);
   expect((await acceptQuotation(ctx, { id: saved.data.id })).ok).toBe(true);
-  expect(await convertQuotation(ctx, { id: saved.data.id, invoice_date: today })).toEqual({ ok: false, error: QUOTATION_MESSAGES.foreignToInvoice });
+  // Since stage 3a (FIN40 retired) it becomes a draft invoice in USD, at BNM's selling rate for today when one is stored.
+  const converted = await convertQuotation(ctx, { id: saved.data.id, invoice_date: today });
+  expect(converted.ok && converted.data.invoice?.currency).toBe('USD');
 
   // The contact's default can be cleared, and an update that does not name it leaves it.
   const renamed = await updateContact(ctx, { id: acme.data.id, name: 'Acme Asia Pte Ltd' });

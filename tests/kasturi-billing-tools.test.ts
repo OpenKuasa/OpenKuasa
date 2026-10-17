@@ -37,6 +37,12 @@ function invoiceRow(n: number, status: string, total: number, paid: number, cust
     display_status: status,
     einvoice_status: 'none',
     einvoice_uuid: null,
+    // A ringgit invoice: its ringgit figures are its figures.
+    currency: 'MYR',
+    fx_rate: '1.0000000000',
+    fx_rate_text: '1.0000000000',
+    total_myr: total.toFixed(2),
+    balance_myr: (total - paid).toFixed(2),
   };
 }
 

@@ -71,7 +71,8 @@ describe('listInvoiceBalances', () => {
     expect(requests).toEqual([
       {
         view: 'finance_invoice_totals',
-        columns: 'customer_id, balance, display_status',
+        // In ringgit (stage 3a): the view's balance_myr, read under the name balance.
+        columns: 'customer_id, balance:balance_myr, display_status',
         filters: { org_id: 'org-1' },
         within: { display_status: ['sent', 'overdue'] },
         range: [0, 999],

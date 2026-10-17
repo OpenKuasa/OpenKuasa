@@ -18,6 +18,7 @@ import {
   toggleAllInvoices,
   toggleInvoice,
 } from '@/lib/finance/receipt-form';
+import { ringgitRow } from './helpers/invoice-rows';
 
 const AISYAH = '11111111-1111-4111-8111-111111111111';
 const ZAKI = '22222222-2222-4222-8222-222222222222';
@@ -28,7 +29,7 @@ const today = '2026-10-11';
 /** 1 → a valid uuid ending in 000000000001. */
 const invoiceId = (n: number) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(n).padStart(12, '0')}`;
 
-const invoice = (n: number, i: Partial<InvoiceListRow> = {}): InvoiceListRow => ({
+const invoice = (n: number, i: Partial<InvoiceListRow> = {}): InvoiceListRow => ringgitRow({
   id: invoiceId(n),
   invoice_no: `INV-${String(n).padStart(4, '0')}`,
   customer_id: AISYAH,

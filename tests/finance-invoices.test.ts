@@ -69,11 +69,16 @@ describe('invoice reads', () => {
     id: `inv-${n}`, invoice_no: `INV-${n}`, customer_id: 'c1', customer_name: 'Aisyah Trading',
     invoice_date: '2026-10-01', due_date: '2026-10-31', total: '132.50', paid: '100.00', credited: '20.00', refunded: '0.00',
     set_off: '0.00', balance: '12.50', display_status: 'sent', einvoice_status: 'none', einvoice_uuid: null,
+    // Stage 3a: a ringgit invoice, as the view gives it (numbers as text).
+    currency: 'MYR', fx_rate: '1.0000000000', fx_rate_text: '1.0000000000', fx_rate_source: null, fx_rate_date: null,
+    fx_rate_provider: null, fx_rate_reference: null, supply_date: null, total_myr: '132.50', balance_myr: '12.50', sst_myr: '7.50',
   });
 
   it('lists from the totals view, in the caller’s workspace, newest first, with amounts as numbers', async () => {
     const { ctx, calls } = fakeFinance({ data: [row(1)], error: null });
-    expect(await listInvoices(ctx)).toEqual([{ ...row(1), total: 132.5, paid: 100, credited: 20, refunded: 0, set_off: 0, balance: 12.5 }]);
+    expect(await listInvoices(ctx)).toEqual([
+      { ...row(1), total: 132.5, paid: 100, credited: 20, refunded: 0, set_off: 0, balance: 12.5, fx_rate: 1, total_myr: 132.5, balance_myr: 12.5, sst_myr: 7.5 },
+    ]);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
       name: 'finance_invoice_totals',
@@ -87,6 +92,10 @@ describe('invoice reads', () => {
     expect(calls[0].columns).toContain('credited');
     expect(calls[0].columns).toContain('refunded');
     expect(calls[0].columns).toContain('set_off');
+    // The rate as exact text beside the number, and the ringgit figures.
+    expect(calls[0].columns).toContain('fx_rate_text:fx_rate::text');
+    expect(calls[0].columns).toContain('total_myr');
+    expect(calls[0].columns).toContain('balance_myr');
   });
   it('reads what posted contra entries set off, apart from what was paid', async () => {
     const setOff = { ...row(3), paid: '0.00', credited: '0.00', set_off: '100.00', balance: '32.50' };
@@ -136,8 +145,10 @@ describe('invoice writes', () => {
   it('saves through the database function, in the caller’s workspace', async () => {
     const { ctx, calls } = fakeFinance({ data: ID, error: null });
     expect(await saveInvoice(ctx, { ...valid, id: ID })).toEqual({ ok: true, data: { id: ID } });
-    expect(calls[0]).toMatchObject({ kind: 'rpc', name: 'finance_save_invoice' });
-    expect(calls[0].args).toEqual({
+    // A draft saved with no currency keeps its own, so its currency is read first (the whole-units rule is its own).
+    expect(calls[0]).toMatchObject({ name: 'finance_invoices', op: 'select', filters: { org_id: 'org-1', id: ID } });
+    expect(calls[1]).toMatchObject({ kind: 'rpc', name: 'finance_save_invoice' });
+    expect(calls[1].args).toEqual({
       target_org: 'org-1',
       invoice: { id: ID, customer_id: CUSTOMER, invoice_date: '2026-10-01', due_date: '2026-10-31', notes: null },
       lines: [{ product_id: null, description: 'Design work', quantity: 10, uom: null, pack_size: null, unit_price: 12.5, sst_rate: 0, discount_pct: null, discount_amount: null }],

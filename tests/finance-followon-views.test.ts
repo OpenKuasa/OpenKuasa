@@ -30,6 +30,7 @@ import {
   SAMPLE_REFUNDS,
   SAMPLE_TODAY,
 } from '@/screens/finance/sales-sample';
+import { ringgitRow } from './helpers/invoice-rows';
 
 const today = '2026-10-09';
 
@@ -104,7 +105,7 @@ const refund = (r: Partial<RefundRow> = {}): RefundRow => {
 
 const invoice = (i: Partial<InvoiceListRow> = {}): InvoiceListRow => {
   seq += 1;
-  return {
+  return ringgitRow({
     id: `invoice-${seq}`,
     invoice_no: `INV-${String(seq).padStart(4, '0')}`,
     customer_id: 'aisyah',
@@ -120,7 +121,7 @@ const invoice = (i: Partial<InvoiceListRow> = {}): InvoiceListRow => {
     einvoice_status: 'none',
     einvoice_uuid: null,
     ...i,
-  };
+  });
 };
 
 describe('quotationsView', () => {

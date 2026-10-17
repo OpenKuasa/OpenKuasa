@@ -17,6 +17,7 @@ import {
   refundTargets,
 } from '@/lib/finance/refund-form';
 import { type RefundRow, recordRefundInput } from '@/lib/finance/refunds';
+import { ringgitRow } from './helpers/invoice-rows';
 
 const INVOICE = '11111111-1111-4111-8111-111111111111';
 const NOTE = '22222222-2222-4222-8222-222222222222';
@@ -25,7 +26,7 @@ const BANK = '44444444-4444-4444-8444-444444444444';
 const CASH = '55555555-5555-4555-8555-555555555555';
 
 /** RM 100 invoiced and paid, then RM 30 credited: the customer is RM 30 in credit. */
-const invoice = (i: Partial<InvoiceListRow> = {}): InvoiceListRow => ({
+const invoice = (i: Partial<InvoiceListRow> = {}): InvoiceListRow => ringgitRow({
   id: INVOICE,
   invoice_no: 'INV-0007',
   customer_id: 'aisyah',

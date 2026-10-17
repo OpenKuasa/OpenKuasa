@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { RECENT_LISTED, TOP_CUSTOMERS_LISTED, buildBillings } from '@/lib/crm/billings';
 import type { InvoiceDisplayStatus, InvoiceListRow } from '@/lib/finance/invoices';
+import { ringgitRow } from './helpers/invoice-rows';
 
 /** 10 Oct 2026, mid-morning in Kuala Lumpur. */
 const NOW = new Date('2026-10-10T02:00:00.000Z');
@@ -13,7 +14,7 @@ function invoice(
   over: Partial<InvoiceListRow> = {},
 ): InvoiceListRow {
   seq += 1;
-  return {
+  return ringgitRow({
     id: `inv-${String(seq).padStart(3, '0')}`,
     invoice_no: status === 'draft' ? null : `INV-${seq}`,
     customer_id: 'c1',
@@ -29,7 +30,7 @@ function invoice(
     einvoice_status: 'none',
     einvoice_uuid: null,
     ...over,
-  };
+  });
 }
 
 describe('Kasturi’s Billings figures', () => {

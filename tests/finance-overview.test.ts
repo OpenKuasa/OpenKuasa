@@ -2,11 +2,12 @@ import { describe, expect, it } from 'vitest';
 import type { BillListRow } from '@/lib/finance/bills';
 import type { InvoiceListRow } from '@/lib/finance/invoices';
 import { buildFinanceOverview } from '@/lib/finance/overview';
+import { ringgitRow } from './helpers/invoice-rows';
 
 const TODAY = '2026-10-12';
 
 function invoice(over: Partial<InvoiceListRow>): InvoiceListRow {
-  return {
+  return ringgitRow({
     id: 'i',
     invoice_no: 'INV-1',
     customer_id: 'c1',
@@ -22,7 +23,7 @@ function invoice(over: Partial<InvoiceListRow>): InvoiceListRow {
     einvoice_status: 'none',
     einvoice_uuid: null,
     ...over,
-  };
+  });
 }
 
 function bill(over: Partial<BillListRow>): BillListRow {
