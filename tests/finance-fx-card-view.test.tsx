@@ -5,23 +5,23 @@ import { workspaceUsesForeignCurrency } from '@/lib/finance/fx-card-gate';
 
 /**
  * The real gate: a workspace deals in another currency when one contact's default currency, or one quotation's
- * currency, is not ringgit. A ringgit-only workspace's Banking does not draw the rates card.
+ * or invoice's currency, is not ringgit. A ringgit-only workspace's Banking does not draw the rates card.
  */
 
 type Answer = { data: { id: string }[] | null; error: { message: string } | null };
 
 /** A client whose two reads answer as given, and which records the filters each was asked with. */
-function fakeClient(answers: { finance_contacts: Answer; finance_quotations: Answer }) {
+function fakeClient(answers: { finance_contacts: Answer; finance_quotations: Answer; finance_invoices?: Answer }) {
   const calls: { table: string; filters: [string, string, string][]; limit: number | null }[] = [];
   const client = {
-    from(table: 'finance_contacts' | 'finance_quotations') {
+    from(table: 'finance_contacts' | 'finance_quotations' | 'finance_invoices') {
       const call = { table, filters: [] as [string, string, string][], limit: null as number | null };
       calls.push(call);
       const query = {
         select: () => query,
         eq: (column: string, value: string) => (call.filters.push(['eq', column, value]), query),
         neq: (column: string, value: string) => (call.filters.push(['neq', column, value]), query),
-        limit: (n: number) => ((call.limit = n), Promise.resolve(answers[table])),
+        limit: (n: number) => ((call.limit = n), Promise.resolve(answers[table] ?? none)),
       };
       return query;
     },
@@ -43,7 +43,13 @@ describe('the exchange-rates card on Banking', () => {
     expect(calls).toEqual([
       { table: 'finance_contacts', filters: [['eq', 'org_id', 'org'], ['neq', 'default_currency', 'MYR']], limit: 1 },
       { table: 'finance_quotations', filters: [['eq', 'org_id', 'org'], ['neq', 'currency', 'MYR']], limit: 1 },
+      { table: 'finance_invoices', filters: [['eq', 'org_id', 'org'], ['neq', 'currency', 'MYR']], limit: 1 },
     ]);
+  });
+
+  it('is asked for once an invoice is in another currency (stage 3a)', async () => {
+    const { client } = fakeClient({ finance_contacts: none, finance_quotations: none, finance_invoices: one });
+    expect(await workspaceUsesForeignCurrency(client, 'org')).toBe(true);
   });
 
   it('is asked for once a contact has a default currency that is not ringgit', async () => {
