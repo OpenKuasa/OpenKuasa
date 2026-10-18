@@ -49,7 +49,7 @@ async function usdDraft(ctx: Ctx) {
   return saved.data.id;
 }
 
-testWithSupabase('a USD invoice at a typed rate posts its ringgit, and nothing can pay it yet', async () => {
+testWithSupabase('a USD invoice at a typed rate posts its ringgit, and a payment without the ringgit received is refused', async () => {
   const ctx = await owner(`Invoice USD ${Date.now()}`);
   const id = await usdDraft(ctx);
   expect(await getInvoice(ctx, id)).toMatchObject({
