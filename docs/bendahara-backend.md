@@ -2998,3 +2998,9 @@ with no date).
   date is not after the date of supply). The form offers the newest and asks
   again whenever the date changes, and says when the rate it holds is more
   than seven days old; a direct call can still post at an older BNM rate.
+- Payments in on invoices in another currency (`20261120110000`, stage 3b):
+  Cash Receipts offers ringgit invoices only, but a draft cash receipt naming
+  an invoice in another currency can still be saved by a direct call (before
+  3b that save was refused with `FIN41`). It holds its part of the invoice
+  until it is deleted, and posting it is refused with `FIN45`: such an invoice
+  is paid with Record payment on Invoices, which takes the ringgit received.
