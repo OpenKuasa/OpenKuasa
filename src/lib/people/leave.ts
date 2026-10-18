@@ -17,13 +17,16 @@ import {
   writeFailed,
 } from './capabilities';
 import { isRealDate } from './dates';
-import { LEAVE_REFUSALS, OWN_REQUEST_REFUSAL } from './refusals';
+import { LEAVE_REFUSALS } from './refusals';
 import type { LeaveBalance, LeaveRequest, LeaveType, RequestStatus } from './types';
 
 // ---- Sentences ---------------------------------------------------------------
 
 // The sentences live in refusals.ts, a leaf module, so the approval buttons can read one without loading zod.
-export { LEAVE_REFUSALS, OWN_REQUEST_REFUSAL };
+// LEAVE_REFUSALS is used below and re-exported; OWN_REQUEST_REFUSAL is only re-exported (approvals-screen reads
+// it from here), so it stays a straight re-export rather than an unused local binding.
+export { LEAVE_REFUSALS };
+export { OWN_REQUEST_REFUSAL } from './refusals';
 
 type DbError = { code?: string; message?: string } | null | undefined;
 
