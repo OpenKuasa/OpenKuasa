@@ -183,7 +183,7 @@ import {
 } from '@/lib/people/types';
 import { rm } from '@/lib/reach/format';
 import { managerLabel, reportsOf, teamIds } from '@/lib/people/reporting';
-import { type PeopleTier } from '@/lib/people/tier';
+import { type PeopleTier, peopleTier } from '@/lib/people/tier';
 import { readTeamOvertime } from '@/lib/people/supabase';
 import { readWaitingCountsStrict, waitingTotal } from '@/lib/people/waiting-counts';
 import { ownRows } from '@/lib/people/own';
@@ -236,6 +236,30 @@ export type PeopleWrite = {
   receipt: ReceiptFile | null;
   userId: string;
 };
+
+/**
+ * The HR write access for one request, from the viewer — or `undefined` when there is none.
+ * The one place both chat routes (Tuah's `/api/chat` and Ask-Lekiu's `/api/people/chat`) decide
+ * who may change HR data, so they cannot drift apart.
+ *
+ * Nobody in the demo workspace (the database refuses every change there). Otherwise the tier is
+ * the same fact the screens and Lekiu use: `hr` for an owner or admin, `manager` for a member with
+ * reports, else `self`. An owner or admin gets the tools whether or not they are linked to an
+ * employee; anyone else needs a linked employee record — an unlinked non-admin gets none. The tier
+ * and the employee id come from the viewer, never the model or the request, and the database
+ * enforces the same rules. Each change the tools prepare still waits for approval.
+ */
+export function peopleWriteFor(
+  viewer: Pick<PeopleViewer, 'isDemo' | 'isHr' | 'managesTeam' | 'employeeId'>,
+  ctx: PeopleWriteContext,
+  receipt: ReceiptFile | null,
+  userId: string,
+): PeopleWrite | undefined {
+  if (viewer.isDemo) return undefined;
+  const tier = peopleTier(viewer);
+  if (tier !== 'hr' && viewer.employeeId === null) return undefined;
+  return { ctx, tier, employeeId: viewer.employeeId, receipt, userId };
+}
 
 /** The bytes of a base64 data URL, or null for anything else (a link is never fetched). */
 function dataUrlBytes(url: string): Buffer | null {
