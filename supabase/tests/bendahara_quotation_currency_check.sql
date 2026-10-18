@@ -136,6 +136,7 @@ begin
     format('update public.finance_quotations set fx_rate = 4.0815, fx_rate_source = %L, fx_rate_date = %L where id = %L', 'bnm', '1999-01-04', q_usd));
   fails := fails || public.bendahara_check_try('case 30: the selling rate marked as BNM''s', 'ok',
     format('update public.finance_quotations set fx_rate = 4.083, fx_rate_source = %L, fx_rate_date = %L where id = %L', 'bnm', '1999-01-04', q_usd));
+  update public.finance_quotations set fx_rate = 4.5, fx_rate_source = 'manual', fx_rate_date = null where id = q_usd;
   -- A draft from before PR 3q, holding the middle rate under the BNM mark (made with the guard off, as it
   -- was made then): saved again with the rate left alone, or marked as sent, it is not refused; change its
   -- rate or its currency and keep the mark, and FIN39 answers.
