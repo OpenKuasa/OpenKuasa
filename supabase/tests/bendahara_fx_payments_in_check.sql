@@ -27,6 +27,7 @@ declare
   i_a uuid;
   i_b uuid;
   i_jpy uuid;
+  i_idr uuid;
   i_u uuid;
   i_s uuid;
   i_myr uuid;
@@ -277,6 +278,43 @@ begin
   select a.amount_myr, a.carried_myr into r from public.finance_allocations a where a.invoice_id = i_jpy;
   if r.amount_myr is distinct from 2880.00 or r.carried_myr is distinct from 2900.00 then
     fails := fails || format('JPY: amount_myr %s, carried %s, not 2880.00 / 2900.00', r.amount_myr, r.carried_myr);
+  end if;
+
+  -- ==== the cap: lines that each round down; a part never carries more than is open ==
+  -- IDR at 0.00028: two lines of IDR 1,000,015.00 are RM 280.0042 each, so RM 280.00 + 280.00 = 560.00 (the
+  -- foreign total at the rate is 560.0084). IDR 2,000,029.00 (not closing) is round(560.00812) = 560.01 at the
+  -- rate, more than the 560.00 open: it carries 560.00. The last IDR 1.00 closes and carries the 0.00 left.
+  -- Without the cap: 560.01, then |-0.01| = 0.01, and Receivable is left at -0.02 for ever.
+  i_idr := public.finance_save_invoice(org,
+    jsonb_build_object('customer_id', cust, 'invoice_date', '1999-01-10', 'due_date', '1999-02-10',
+      'currency', 'IDR', 'fx_rate', '0.00028', 'fx_rate_source', 'manual', 'fx_rate_provider', 'oanda'),
+    '[{"description":"a","quantity":1,"unit_price":1000015,"sst_rate":0},
+      {"description":"b","quantity":1,"unit_price":1000015,"sst_rate":0}]'::jsonb);
+  perform public.finance_post_invoice(org, i_idr);
+  select total_myr into r from public.finance_invoice_totals where id = i_idr;
+  if r.total_myr <> 560.00 then fails := fails || format('IDR cap: the invoice is RM %s, not 560.00', r.total_myr); end if;
+  -- Through the try, so a refusal is reported by name (the split is above the ringgit: FIN03 must not answer).
+  fails := fails || public.bendahara_check_try('IDR cap: IDR 2,000,029.00 received as RM 560.00', 'ok',
+    format('select public.finance_record_payment_in(%L, %L, %L)', org,
+      jsonb_build_object('account_id', bank, 'method', 'fpx', 'txn_date', '1999-01-12', 'amount_myr', '560'),
+      jsonb_build_array(jsonb_build_object('invoice_id', i_idr, 'amount', 2000029))));
+  fails := fails || public.bendahara_check_try('IDR cap: the last IDR 1.00 received as RM 0.01', 'ok',
+    format('select public.finance_record_payment_in(%L, %L, %L)', org,
+      jsonb_build_object('account_id', bank, 'method', 'fpx', 'txn_date', '1999-01-13', 'amount_myr', '0.01'),
+      jsonb_build_array(jsonb_build_object('invoice_id', i_idr, 'amount', 1))));
+  select string_agg(a.carried_myr::text, ' ' order by t.txn_date) into t
+    from public.finance_allocations a join public.finance_transactions t on t.id = a.transaction_id where a.invoice_id = i_idr;
+  if t is distinct from '560.00 0.00' then
+    fails := fails || format('IDR cap: carried %s, not 560.00 0.00', t);
+  end if;
+  select (select coalesce(sum(l.debit - l.credit) filter (where a.system_key = 'receivable'), 0)
+            from public.finance_ledger_lines l join public.finance_ledger_accounts a on a.org_id = l.org_id and a.id = l.account_id
+           where l.org_id = org and (l.source_id = i_idr or l.source_id in (
+             select x.transaction_id from public.finance_allocations x where x.invoice_id = i_idr))) as rec,
+         (select balance_myr from public.finance_invoice_totals where id = i_idr) as open_myr
+    into r;
+  if r.rec <> 0 or r.open_myr <> 0 then
+    fails := fails || format('IDR cap: Receivable ends at %s (balance_myr %s), not 0.00', r.rec, r.open_myr);
   end if;
 
   -- ==== refusals ====================================================================
