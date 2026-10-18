@@ -144,8 +144,9 @@ function rateScaled(fields: CurrencyFields): bigint | null | undefined {
 /**
  * Exact decimal text per one unit (the database's numeric as text) in 10^-10 units, digit by digit and rounded
  * half up past ten places; undefined when it is not such text. No unit shift: the text is already per one.
+ * Also what a payment's realised preview reads an invoice's stored rate with (fx-settlement.ts).
  */
-function scaledFromText(text: string): bigint | undefined {
+export function scaledFromText(text: string): bigint | undefined {
   const m = /^(\d+)(?:\.(\d*))?$/.exec(text.trim());
   if (!m) return undefined;
   const fraction = m[2] ?? '';
