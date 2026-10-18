@@ -49,7 +49,10 @@ export type CashReceiptForm = {
  * against it. `editingId` is that draft's transaction id.
  */
 export function receivableFor(invoices: InvoiceListRow[], payments: PaymentInRow[], editingId?: string): ReceivableInvoice[] {
-  return receivableInvoices(invoices, editingId ? payments.filter((p) => p.transaction_id !== editingId) : payments);
+  // Ringgit invoices only: an invoice in another currency is paid with Record payment on Invoices (FIN45).
+  return receivableInvoices(invoices, editingId ? payments.filter((p) => p.transaction_id !== editingId) : payments).filter(
+    (i) => i.currency === 'MYR',
+  );
 }
 
 /**
@@ -60,7 +63,8 @@ export function receivableFor(invoices: InvoiceListRow[], payments: PaymentInRow
  * because they are still posted and still owe.
  */
 export function receiptInvoicesForForm(invoices: InvoiceListRow[]): InvoiceListRow[] {
-  // Ringgit invoices only: nothing settles an invoice in another currency yet (FIN41, stage 3a).
+  // Ringgit invoices only: a receipt for an invoice in another currency is recorded with Record payment on
+  // Invoices, which takes the ringgit received (FIN45, stage 3b).
   return invoices.filter(
     (i) => i.currency === 'MYR' && (i.display_status === 'sent' || i.display_status === 'overdue') && i.balance > 0,
   );

@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { AllocationFormKind, AllocationFormState, Payable } from '@/lib/finance/allocation-form';
-import { rm } from '@/lib/finance/format';
+import { money } from '@/lib/finance/format';
 import { type FinanceAccount, PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentMethod } from '@/lib/finance/money';
 import type { FinResult } from '@/lib/finance/result';
 import { displayDate } from '@/lib/finance/view-helpers';
@@ -60,7 +60,11 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
   const parties = kind.parties(documents);
   // A ticked document that was paid off since a refresh is dropped from everything below.
   const form = kind.keep(typed, documents);
-  const offered = kind.documentsOf(documents, kind.partyId(form));
+  // One currency at a time when documents may be in another (money in): the ticked ones' currency.
+  const offered = kind.currency ? kind.currency.offered(form, documents) : kind.documentsOf(documents, kind.partyId(form));
+  const code = kind.currency?.of(form) ?? 'MYR';
+  const ringgit = kind.currency?.ringgit;
+  const askRinggit = ringgit?.needed(form) ?? false;
   const tickedCount = Object.keys(form.amounts).length;
   const scheduled = kind.schedule?.is(form) ?? false;
 
@@ -143,7 +147,7 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
                     {ticked ? (
                       <div className="flex items-center gap-2">
                         <span className="text-sm text-muted-foreground" aria-hidden>
-                          RM
+                          {code === 'MYR' ? 'RM' : code}
                         </span>
                         <Input
                           type="number"
@@ -170,7 +174,7 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
           {notes ? <OrderNotes notes={notes(form)} /> : null}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm" aria-live="polite">
-              Total <span className="font-semibold tabular-nums">{rm(kind.total(form))}</span>
+              Total <span className="font-semibold tabular-nums">{money(kind.total(form), code)}</span>
               {tickedCount ? (
                 <span className="text-muted-foreground">
                   {' '}
@@ -190,6 +194,38 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
             ) : null}
           </div>
         </fieldset>
+
+        {ringgit && askRinggit ? (
+          <div className="space-y-1.5 md:col-span-12">
+            <Label htmlFor={`${id}-ringgit`}>{ringgit.label}</Label>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground" aria-hidden>
+                RM
+              </span>
+              <Input
+                id={`${id}-ringgit`}
+                inputMode="decimal"
+                autoComplete="off"
+                className="w-40 text-right tabular-nums"
+                aria-describedby={`${id}-ringgit-hint`}
+                // Enter in the box does not record the payment half typed.
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') e.preventDefault();
+                }}
+                value={ringgit.value(form)}
+                onChange={(e) => edit((f) => ringgit.set(f, e.target.value))}
+              />
+            </div>
+            <p id={`${id}-ringgit-hint`} className="text-xs text-muted-foreground">
+              {ringgit.hint}
+            </p>
+            {ringgit.notes(form, documents).map((note) => (
+              <p key={note} className="text-sm text-muted-foreground" aria-live="polite">
+                {note}
+              </p>
+            ))}
+          </div>
+        ) : null}
 
         <div className="space-y-1.5 md:col-span-3">
           <Label htmlFor={`${id}-account`}>{words.account}</Label>

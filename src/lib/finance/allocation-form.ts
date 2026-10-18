@@ -186,4 +186,22 @@ export type AllocationFormKind<F extends AllocationFormState, D extends Payable>
   payload: (form: F) => unknown;
   /** Present when the payment can be scheduled for later: only money out. */
   schedule?: { is: (form: F) => boolean; set: (form: F, scheduled: boolean) => F };
+  /**
+   * Present when documents may be in another currency (money in, stage 3b): the currency the amounts are in,
+   * the documents listed (one currency at a time), and the ringgit-received box with what it comes to. Absent,
+   * every amount is ringgit and every document of the party is listed.
+   */
+  currency?: {
+    of: (form: F) => string;
+    offered: (form: F, documents: D[]) => D[];
+    ringgit: {
+      needed: (form: F) => boolean;
+      value: (form: F) => string;
+      set: (form: F, text: string) => F;
+      label: string;
+      hint: string;
+      /** Sentences under the box: the realised difference, as "about". */
+      notes: (form: F, documents: D[]) => string[];
+    };
+  };
 };

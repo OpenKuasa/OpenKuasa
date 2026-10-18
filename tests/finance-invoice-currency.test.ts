@@ -304,9 +304,10 @@ describe('adding invoices up', () => {
   });
 });
 
-describe('nothing settles a foreign invoice yet (FIN41, FIN42)', () => {
-  it('leaves it out of every settling form: payments, receipts, credit notes, refunds and contra entries', () => {
-    expect(receivableInvoices(BOTH, []).map((i) => i.id)).toEqual(['inv-myr']);
+describe('what settles a foreign invoice (3b: payments in; FIN41, FIN42, FIN45 for the rest)', () => {
+  it('offers it to the payment form only, not to receipts, credit notes, refunds or contra entries', () => {
+    // 3b: Record payment takes it, with the ringgit received (tests/finance-fx-payments-in.test.ts).
+    expect(receivableInvoices(BOTH, []).map((i) => i.id)).toEqual(['inv-myr', 'inv-usd']);
     expect(receiptInvoicesForForm(BOTH).map((i) => i.id)).toEqual(['inv-myr']);
     expect(creditableInvoices(BOTH).map((i) => i.id)).toEqual(['inv-myr']);
     const inCredit = BOTH.map((i) => ({ ...i, balance: -10, balance_myr: -10, display_status: 'paid' as const }));

@@ -176,6 +176,9 @@ describe('newReceiptForm', () => {
       method: 'bank_transfer',
       reference: '',
       notes: '',
+      // Stage 3b: the currency of what is ticked (ringgit until something is), and the ringgit received.
+      currency: 'MYR',
+      ringgit: '',
     });
   });
   it('chooses the customer when there is only one', () => {
