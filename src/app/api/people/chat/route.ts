@@ -11,11 +11,10 @@
 
 import { errorCodeOf } from '@/lib/ai/call-log';
 import { chatJson, prepareChat } from '@/lib/ai/chat-request';
-import { receiptFromMessages, type PeopleWrite } from '@/lib/ai/people-tools';
+import { peopleWriteFor, receiptFromMessages } from '@/lib/ai/people-tools';
 import { runLekiu } from '@/lib/ai/agents/orchestrator';
 import { getCurrentOrg } from '@/lib/auth/current-org';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
-import { peopleTier } from '@/lib/people/tier';
 import { createSupabasePeopleData, getPeopleData } from '@/lib/people/supabase';
 import type { PeopleData, PeopleViewer } from '@/lib/people/types';
 import { streamErrorName } from '@/lib/people/stream-error';
@@ -55,37 +54,19 @@ export async function POST(request: Request) {
       code: 'data_unavailable',
     });
   }
-  // Change tools: an owner or admin holds all of them (`hr`); a member linked to an employee record, outside the
-  // demo, holds leave, time-off, claim, overtime and clock tools for that employee alone (`self`), whatever their role;
-  // a member with direct reports (`manager`) also decides those reports' requests. The tier and the employee id come
-  // from the viewer, never from the request. The database enforces the same rules. Each change needs approval.
-  // The clock tools (clock in, clock out, "have I clocked in?") go to anyone with a linked employee, an owner or admin
-  // included: `write.employeeId` is the viewer's own record for both tiers, and null for an unlinked owner or admin,
-  // who then gets no clock tool (the tool set decides this, not the route).
-  // Nothing is revalidated here, as in the other chat routes: every /people page is rendered per request,
-  // and only a server action can refresh the page the person is already looking at.
-  let write: PeopleWrite | undefined;
-  // A receipt is the file on the user message just before the message that proposed the claim (the first request:
-  // the newest user message), found here from the request itself and never from the model. An approval is answered
-  // in a later request, but the claim's proposal is still in the history, so it still takes the file that
-  // message carried and never a newer message's.
+  // The write access for the HR tools comes from `peopleWriteFor`, the one decision both chat
+  // routes share: never in the demo, `hr` for an owner or admin, else a linked member's own tier
+  // (`self`, or `manager` for someone with reports), none for an unlinked non-admin. Without a
+  // workspace (the read-only sample data) there is none. The clock tools then go to anyone with a
+  // linked employee — an unlinked owner or admin gets none — which the tool set decides from
+  // `write.employeeId`, not the route. The tier and employee id come from the viewer, never the
+  // request, and the database enforces the same rules; each change still needs approval.
+  // A receipt is the file on the user message just before the message that proposed the claim (the
+  // first request: the newest user message), found here from the request itself and never from the
+  // model. An approval is answered in a later request, but the claim's proposal is still in the
+  // history, so it still takes the file that message carried and never a newer message's.
   const receipt = receiptFromMessages(chat.uiMessages);
-  // The demo workspace is read-only: the database refuses every change there, so no change tool is offered.
-  if (!org || viewer.isDemo) {
-    write = undefined;
-  } else {
-    // The same fact the screens use: hr for an owner or admin, manager for someone with a report, else self.
-    const tier = peopleTier(viewer);
-    if (tier === 'hr' || viewer.employeeId !== null) {
-      write = {
-        ctx: { client: chat.supabase, orgId: org.orgId },
-        tier,
-        employeeId: viewer.employeeId,
-        receipt,
-        userId: chat.userId,
-      };
-    }
-  }
+  const write = org ? peopleWriteFor(viewer, { client: chat.supabase, orgId: org.orgId }, receipt, chat.userId) : undefined;
   // An approval is answered from the server's record of the change, never from what the browser sent back.
   const approvals = await chatApprovals(chat, org?.orgId ?? null);
   const result = runLekiu(chat.messages, { data, viewer, write }, request.signal, chat.apiKey, approvals);
