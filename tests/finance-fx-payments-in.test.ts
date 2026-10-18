@@ -19,6 +19,7 @@ import {
 import {
   PAYMENT_IN_KIND,
   type ReceiptForm,
+  currencyListNotes,
   newReceiptForm,
   offeredInvoices,
   receiptFormError,
@@ -92,6 +93,14 @@ describe('the payment form, one currency at a time', () => {
     expect(offeredInvoices(cleared, receivable)).toHaveLength(5);
     // Tick all ticks the offered currency's invoices only.
     expect(Object.keys(toggleAllInvoices(form, offeredInvoices(form, receivable), true).amounts)).toEqual([USD_ID, USD2_ID]);
+  });
+
+  it('says what Tick all does while nothing is ticked over invoices in several currencies', () => {
+    expect(currencyListNotes(fresh(), receivable)).toEqual([
+      'One payment settles invoices in one currency: Tick all ticks the MYR invoices, and ticking one invoice lists only those in its currency.',
+    ]);
+    expect(currencyListNotes(toggleInvoice(fresh(), usd, true), receivable)).toEqual([]);
+    expect(currencyListNotes(fresh(), receivable.filter((i) => i.currency === 'USD'))).toEqual([]);
   });
 
   it('starts again when an invoice in another currency is ticked', () => {

@@ -2,7 +2,7 @@
 
 import { AllocationFormCard, type RecordPayment } from '@/components/finance/allocation-form-card';
 import type { FinanceAccount } from '@/lib/finance/money';
-import { PAYMENT_IN_KIND, type ReceivableInvoice } from '@/lib/finance/receipt-form';
+import { PAYMENT_IN_KIND, type ReceivableInvoice, currencyListNotes } from '@/lib/finance/receipt-form';
 
 /**
  * Records a payment received from one customer, split across their open
@@ -36,6 +36,7 @@ export function ReceiptFormCard({
       accounts={accounts}
       today={today}
       preselect={preselect ? { partyId: preselect.customerId, documentId: preselect.invoiceId } : undefined}
+      notes={(form) => currencyListNotes(form, receivable)}
       record={record}
       onClose={onClose}
     />

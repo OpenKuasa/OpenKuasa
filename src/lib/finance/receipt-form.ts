@@ -206,6 +206,19 @@ export function toggleAllInvoices(form: ReceiptForm, invoices: ReceivableInvoice
   return tickedAll({ ...form, currency }, on ? invoices.filter((i) => i.currency === currency) : invoices, on);
 }
 
+/**
+ * Under the list, while nothing is ticked and the customer's invoices are in more than one currency: what "Tick
+ * all" will do, since one payment settles one currency (it ticks the first invoice's currency). Empty otherwise.
+ */
+export function currencyListNotes(form: ReceiptForm, receivable: ReceivableInvoice[]): string[] {
+  if (receiptCurrency(form) !== null) return [];
+  const offered = offeredInvoices(form, receivable);
+  if (new Set(offered.map((i) => i.currency)).size < 2) return [];
+  return [
+    `One payment settles invoices in one currency: Tick all ticks the ${offered[0].currency} invoices, and ticking one invoice lists only those in its currency.`,
+  ];
+}
+
 /** The ringgit box, as typed. */
 export function withRinggit(form: ReceiptForm, text: string): ReceiptForm {
   return { ...form, ringgit: text };
