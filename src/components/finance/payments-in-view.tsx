@@ -21,7 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { localIsoDate } from '@/lib/finance/bill-math';
 import { csvFileName } from '@/lib/finance/csv';
-import { rm } from '@/lib/finance/format';
+import { money, rm } from '@/lib/finance/format';
 import type { InvoiceListRow } from '@/lib/finance/invoices';
 import { type FinanceAccount, PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentInRow } from '@/lib/finance/money';
 import { receivableInvoices } from '@/lib/finance/receipt-form';
@@ -307,7 +307,23 @@ export function PaymentsInView({
                           {PAYMENT_METHOD_LABELS[p.method]}
                         </Badge>
                       </TableCell>
-                      <TableCell className="whitespace-nowrap text-right tabular-nums">{rm(p.amount)}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums">
+                        {(p.currency ?? 'MYR') === 'MYR' ? (
+                          rm(p.amount)
+                        ) : (
+                          // An invoice in another currency: the part it settled, the ringgit it brought, and the
+                          // realised difference when there is one.
+                          <>
+                            {money(p.amount, p.currency)}
+                            {p.amount_myr !== null && p.amount_myr !== undefined ? ` · ${rm(p.amount_myr)}` : ''}
+                            {p.realised_myr ? (
+                              <span className="block text-xs text-muted-foreground">
+                                Realised {p.realised_myr > 0 ? 'gain' : 'loss'} {rm(Math.abs(p.realised_myr))}
+                              </span>
+                            ) : null}
+                          </>
+                        )}
+                      </TableCell>
                       <TableCell>
                         <span className="flex items-center gap-2">
                           <LiveDot active={p.status === 'posted'} />

@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { klDay } from '@/lib/crm/deal-stats';
 import { listDealInvoiceLinks } from '@/lib/crm/invoice-links';
-import { listInvoices, type InvoiceDisplayStatus, type InvoiceListRow, invoiceRinggit } from '@/lib/finance/invoices';
+import { listInvoices, type InvoiceDisplayStatus, type InvoiceListRow, invoicePaidRinggit, invoiceRinggit } from '@/lib/finance/invoices';
 
 /** How many invoices the "Recent invoices" table shows. */
 export const RECENT_LISTED = 8;
@@ -89,7 +89,8 @@ export function buildBillings(
   const thisMonth = issued.filter((invoice) => invoice.invoice_date.slice(0, 7) === month);
 
   const billed = sum(issued.map(billedOn));
-  const received = sum(issued.map((invoice) => invoice.paid));
+  // In ringgit: an invoice in another currency counts what its payments carried off it.
+  const received = sum(issued.map((invoice) => invoicePaidRinggit(invoice)));
 
   const months = Array.from({ length: TREND_MONTHS }, (_, i) => shiftMonth(month, i - (TREND_MONTHS - 1)));
 

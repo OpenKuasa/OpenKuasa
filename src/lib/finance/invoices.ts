@@ -281,6 +281,11 @@ export type InvoiceListRow = {
   balance_myr: number | null;
   /** The SST in ringgit (the e-Invoice's tax total in MYR); null while a foreign draft has no rate. */
   sst_myr: number | null;
+  /**
+   * Posted money in, in ringgit: what each payment carried off the invoice (stage 3b); equal to `paid` for
+   * ringgit. The reads always give it; it is optional so that rows made by hand (samples, tests) need not.
+   */
+  paid_myr?: number | null;
 };
 
 /**
@@ -289,6 +294,12 @@ export type InvoiceListRow = {
  */
 export function invoiceRinggit(row: Pick<InvoiceListRow, 'total_myr' | 'balance_myr'>): { total: number; balance: number } {
   return { total: row.total_myr ?? 0, balance: row.balance_myr ?? 0 };
+}
+
+/** Posted money in on an invoice, in ringgit, for every figure that adds payments received up. */
+export function invoicePaidRinggit(row: Pick<InvoiceListRow, 'paid' | 'paid_myr' | 'currency'>): number {
+  if (row.paid_myr !== undefined && row.paid_myr !== null) return row.paid_myr;
+  return row.currency === BASE_CURRENCY ? row.paid : 0;
 }
 
 export type InvoiceLine = DocumentLineRow;
@@ -311,7 +322,7 @@ const LIST_COLUMNS =
   'id,invoice_no,customer_id,customer_name,invoice_date,due_date,total,paid,credited,refunded,set_off,balance,display_status,einvoice_status,einvoice_uuid,' +
   // The rate twice: as a number to show, and as exact text (PostgREST's cast) to work money and the e-Invoice from.
   'currency,fx_rate,fx_rate_text:fx_rate::text,fx_rate_source,fx_rate_date,fx_rate_provider,fx_rate_reference,supply_date,' +
-  'total_myr,balance_myr,sst_myr';
+  'total_myr,balance_myr,sst_myr,paid_myr';
 
 /** A numeric column as a number, keeping null. */
 const numberOrNull = (v: unknown) => (v === null || v === undefined ? null : Number(v));
@@ -337,6 +348,7 @@ function toListRow(row: Record<string, unknown>): InvoiceListRow {
     total_myr: numberOrNull(row.total_myr),
     balance_myr: numberOrNull(row.balance_myr),
     sst_myr: numberOrNull(row.sst_myr),
+    paid_myr: numberOrNull(row.paid_myr),
   };
 }
 

@@ -77,7 +77,8 @@ describe('invoice reads', () => {
   it('lists from the totals view, in the caller’s workspace, newest first, with amounts as numbers', async () => {
     const { ctx, calls } = fakeFinance({ data: [row(1)], error: null });
     expect(await listInvoices(ctx)).toEqual([
-      { ...row(1), total: 132.5, paid: 100, credited: 20, refunded: 0, set_off: 0, balance: 12.5, fx_rate: 1, total_myr: 132.5, balance_myr: 12.5, sst_myr: 7.5 },
+      // paid_myr: null when the read gives none (a row made before 3b's view, or by hand).
+      { ...row(1), total: 132.5, paid: 100, credited: 20, refunded: 0, set_off: 0, balance: 12.5, fx_rate: 1, total_myr: 132.5, balance_myr: 12.5, sst_myr: 7.5, paid_myr: null },
     ]);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({

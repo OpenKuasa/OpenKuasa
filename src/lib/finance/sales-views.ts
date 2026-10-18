@@ -8,7 +8,7 @@ import { toCsv } from './csv';
 import { money, rmShort } from './format';
 import { type EInvoiceStatus, type InvoiceDisplayStatus, type InvoiceListRow, invoiceRinggit } from './invoices';
 import { PROVIDER_LABELS } from './sst-rate';
-import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentInRow, type PaymentMethod } from './money';
+import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentInRow, type PaymentMethod, paymentInRinggit } from './money';
 import {
   ELECTRONIC,
   METHOD_COLORS,
@@ -141,7 +141,8 @@ export function invoicesView(invoices: InvoiceListRow[], payments: PaymentInRow[
     return {
       label,
       invoiced: thousands(sum(invoicedInMonth, ringgitTotal)),
-      received: thousands(sum(receivedInMonth, (p) => p.amount)),
+      // In ringgit: a payment of an invoice in another currency counts the ringgit it brought.
+      received: thousands(sum(receivedInMonth, paymentInRinggit)),
     };
   });
 
@@ -154,7 +155,7 @@ export function invoicesView(invoices: InvoiceListRow[], payments: PaymentInRow[
       { label: 'Total receivable', value: rmShort(sum(open, ringgitBalance)), delta: count(open.length, 'open invoice'), deltaTone: 'flat' },
       { label: 'Due this week', value: rmShort(sum(dueThisWeek, ringgitBalance)), delta: count(dueThisWeek.length, 'invoice'), deltaTone: 'flat' },
       { label: 'Overdue', value: rmShort(sum(overdue, ringgitBalance)), delta: count(overdue.length, 'invoice'), deltaTone: overdue.length ? 'down' : 'flat' },
-      { label: 'Received (MTD)', value: rmShort(sum(receivedMtd, (p) => p.amount)), delta: count(paymentCount(receivedMtd), 'payment'), deltaTone: 'flat' },
+      { label: 'Received (MTD)', value: rmShort(sum(receivedMtd, paymentInRinggit)), delta: count(paymentCount(receivedMtd), 'payment'), deltaTone: 'flat' },
     ],
     trend,
     hasTrend,
@@ -328,21 +329,22 @@ export function rateSourceWords(i: Pick<InvoiceListRow, 'currency' | 'fx_rate_so
 export function paymentsInView(rows: PaymentInRow[], today: string): PaymentsInViewData {
   const posted = received(rows);
   const mtd = posted.filter((p) => monthOf(p.txn_date) === monthOf(today));
-  const mtdTotal = sum(mtd, (p) => p.amount);
+  // In ringgit throughout: a payment of an invoice in another currency counts the ringgit it brought.
+  const mtdTotal = sum(mtd, paymentInRinggit);
   const mtdCount = paymentCount(mtd);
-  const electronicMtd = sum(mtd.filter((p) => ELECTRONIC.has(p.method)), (p) => p.amount);
+  const electronicMtd = sum(mtd.filter((p) => ELECTRONIC.has(p.method)), paymentInRinggit);
 
   let hasTrend = false;
   const trend = lastMonths(today).map(({ key, label }) => {
     const inMonth = posted.filter((p) => monthOf(p.txn_date) === key);
     if (inMonth.length > 0) hasTrend = true;
-    return { label, received: thousands(sum(inMonth, (p) => p.amount)) };
+    return { label, received: thousands(sum(inMonth, paymentInRinggit)) };
   });
 
   const methods: Slice[] = PAYMENT_METHODS.map((method) => ({
     key: method,
     label: PAYMENT_METHOD_LABELS[method],
-    value: sum(mtd.filter((p) => p.method === method), (p) => p.amount),
+    value: sum(mtd.filter((p) => p.method === method), paymentInRinggit),
     color: METHOD_COLORS[method],
   }));
   const used = methods.filter((slice) => slice.value > 0);
@@ -407,19 +409,32 @@ export function alsoCoversInvoices(rows: PaymentInRow[], row: PaymentInRow): str
   return alsoCoversSentence(siblingInvoices(rows, row));
 }
 
-/** The payments table as a CSV file: one line per invoice a payment pays. Amounts are numbers. */
+/**
+ * The payments table as a CSV file: one line per invoice a payment pays. Amounts are numbers. Once a payment
+ * of an invoice in another currency exists, four columns follow: the currency `Amount` is in, the ringgit
+ * received for the line, what the invoice carried, and the realised difference.
+ */
 export function paymentsInCsv(rows: PaymentInRow[]): string {
+  const base = ['Date', 'No.', 'Customer', 'Invoice', 'Account', 'Method', 'Amount', 'Status'];
+  const row = (p: PaymentInRow) => [
+    p.txn_date,
+    p.number,
+    p.customer_name,
+    p.invoice_no,
+    p.account_name,
+    PAYMENT_METHOD_LABELS[p.method],
+    p.amount,
+    PAYMENT_IN_STATUS_LABELS[p.status],
+  ];
+  if (!rows.some((p) => (p.currency ?? 'MYR') !== 'MYR')) return toCsv(base, rows.map(row));
   return toCsv(
-    ['Date', 'No.', 'Customer', 'Invoice', 'Account', 'Method', 'Amount', 'Status'],
+    [...base, 'Currency', 'Amount (RM)', 'Carried (RM)', 'Realised (RM)'],
     rows.map((p) => [
-      p.txn_date,
-      p.number,
-      p.customer_name,
-      p.invoice_no,
-      p.account_name,
-      PAYMENT_METHOD_LABELS[p.method],
-      p.amount,
-      PAYMENT_IN_STATUS_LABELS[p.status],
+      ...row(p),
+      p.currency ?? 'MYR',
+      (p.currency ?? 'MYR') === 'MYR' ? (p.amount_myr ?? p.amount) : (p.amount_myr ?? null),
+      (p.currency ?? 'MYR') === 'MYR' ? (p.carried_myr ?? p.amount) : (p.carried_myr ?? null),
+      (p.currency ?? 'MYR') === 'MYR' ? (p.realised_myr ?? 0) : (p.realised_myr ?? null),
     ]),
   );
 }

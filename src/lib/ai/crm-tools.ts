@@ -32,7 +32,7 @@ import {
 import { buildBillings } from '@/lib/crm/billings';
 import { loadCrmCalendar, parseMonth } from '@/lib/crm/calendar';
 import { listDealInvoiceLinks } from '@/lib/crm/invoice-links';
-import { listInvoices } from '@/lib/finance/invoices';
+import { invoicePaidRinggit, listInvoices } from '@/lib/finance/invoices';
 import { klDay } from '@/lib/crm/deal-stats';
 import { completeFollowUp, createFollowUp, parseFollowUpForm } from '@/lib/crm/follow-ups';
 import {
@@ -532,7 +532,7 @@ export function createCrmTools(access: CrmAccess) {
               due_date: invoice.due_date,
               // In ringgit: an invoice in another currency at its own rate (null while a draft has no rate).
               total_rm: invoice.total_myr,
-              paid_rm: invoice.paid,
+              paid_rm: invoicePaidRinggit(invoice),
               // Nothing is owed on a void invoice, whatever it totalled.
               balance_rm: invoice.display_status === 'void' ? 0 : invoice.balance_myr,
               // An invoice in another currency also says its own currency and total.
