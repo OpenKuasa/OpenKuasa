@@ -65,9 +65,14 @@ const M = MONEY_MESSAGES;
 /** The sentences of a payment in. Where a payment out says the same thing, it is the same sentence. */
 export const RECEIPT_MESSAGES = {
   account: 'Choose the account the money went into.',
-  // FIN41. The Invoices menu and the payment form offer ringgit invoices only (stage 3a), so this is met from a
-  // tab opened before an invoice went into another currency, or a direct call.
-  foreignNotYet: 'Payments on invoices in other currencies are not available yet.',
+  // FIN44. The payment form offers one currency's invoices at a time (the first ticked sets it), so this is met
+  // from a direct call.
+  oneCurrency: 'One payment can only settle invoices in one currency. Record a separate payment for each currency.',
+  // FIN46, and what the form says first: an invoice in another currency is paid in ringgit, and the payment is
+  // the ringgit that arrived.
+  ringgitReceived: 'Enter the ringgit that arrived in the account.',
+  // The finance assistant records payments in ringgit only; it says this before the database is asked.
+  foreignByAssistant: 'This invoice is not in ringgit. Record its payment on the Invoices screen.',
   date: M.date,
   method: M.method,
   invoices: 'Choose at least one invoice this payment is for.',
@@ -123,19 +128,40 @@ export const recordPaymentOutInput = z.object({
     .refine((rows) => eachOnce(rows.map((r) => r.bill_id)), M.duplicate),
 });
 
-/** Money received from one customer, split across that customer's posted invoices. It is posted at once. */
-export const recordPaymentInInput = z.object({
+/**
+ * The ringgit that arrived, as decimal text with at most two places ("2883.50"), so no float stands between
+ * the box and the database. Above 0.
+ */
+const ringgitText = z
+  .string({ error: R.ringgitReceived })
+  .trim()
+  .regex(/^\d{1,12}(\.\d{1,2})?$/, R.ringgitReceived)
+  .refine((v) => /[1-9]/.test(v), R.ringgitReceived);
+
+const paymentInBase = z.object({
   account_id: z.string({ error: R.account }).uuid(R.account),
   txn_date: date,
   method: z.enum(PAYMENT_METHODS, { error: R.method }),
   reference: text.default(null),
   notes: text.default(null),
+  /**
+   * For invoices in another currency: the ringgit that arrived in the account (every account is ringgit until
+   * stage 5); the amounts below are then in the invoices' currency. Left out for ringgit invoices, whose
+   * payment is the sum of its split. The database asks for it when an invoice is foreign (FIN46).
+   */
+  amount_myr: ringgitText.optional(),
   allocations: z
     .array(z.object({ invoice_id: z.string({ error: R.invoices }).uuid(R.invoices), amount }), { error: R.invoices })
     .min(1, R.invoices)
     .max(PAYMENT_INVOICES_MAX, R.tooManyInvoices)
     .refine((rows) => eachOnce(rows.map((r) => r.invoice_id)), R.duplicate),
 });
+
+/** Money received from one customer, split across that customer's posted invoices. It is posted at once. */
+export const recordPaymentInInput = paymentInBase;
+
+/** What the finance assistant may send: ringgit invoices only, so no ringgit-received figure. */
+export const recordPaymentInToolInput = paymentInBase.omit({ amount_myr: true });
 
 export const markPaymentPaidInput = z.object({ id, paid_on: date });
 export const paymentIdInput = z.object({ id });
@@ -170,7 +196,8 @@ const RECEIPT_REFUSALS: Record<string, string> = {
   FIN05: R.tooMuch,
   FIN06: R.oneCustomer,
   FIN09: R.locked,
-  FIN41: R.foreignNotYet,
+  FIN44: R.oneCurrency,
+  FIN46: R.ringgitReceived,
   [PG_FOREIGN_KEY]: R.missing,
   // The same invoice twice on one payment; see RECORD_OUT_REFUSALS.
   [PG_UNIQUE]: R.duplicate,
@@ -243,12 +270,29 @@ export type PaymentInRow = {
   invoice_id: string;
   invoice_no: string | null;
   customer_name: string;
+  /**
+   * The invoice's currency, which `amount` is in; `transaction_amount` is always ringgit. The reads always give
+   * these four; they are optional so that rows made by hand (samples, tests) need not, and are then ringgit.
+   */
+  currency?: string;
+  /** What this row used of the ringgit received; `amount` for a ringgit invoice; null until a foreign split is settled. */
+  amount_myr?: number | null;
+  /** The ringgit the invoice carried for the part paid; `amount` for a ringgit invoice. */
+  carried_myr?: number | null;
+  /** amount_myr − carried_myr: realised gain (above 0) or loss; 0 for a ringgit invoice. */
+  realised_myr?: number | null;
 };
+
+/** What a payment-in row adds to a ringgit figure: its ringgit, which for a ringgit invoice is its amount. */
+export function paymentInRinggit(row: Pick<PaymentInRow, 'amount' | 'currency' | 'amount_myr'>): number {
+  if (row.amount_myr !== undefined && row.amount_myr !== null) return row.amount_myr;
+  return (row.currency ?? 'MYR') === 'MYR' ? row.amount : 0;
+}
 
 const PAYMENT_COLUMNS =
   'allocation_id,transaction_id,number,txn_date,method,amount,transaction_amount,status,reference,account_id,account_name';
 const PAYMENT_OUT_COLUMNS = `${PAYMENT_COLUMNS},bill_id,bill_no,supplier_name`;
-const PAYMENT_IN_COLUMNS = `${PAYMENT_COLUMNS},invoice_id,invoice_no,customer_name`;
+const PAYMENT_IN_COLUMNS = `${PAYMENT_COLUMNS},invoice_id,invoice_no,customer_name,currency,amount_myr,carried_myr,realised_myr`;
 
 /** Every row of one of the two payment views, newest first, read a page at a time. */
 async function listPaymentRows<T extends { amount: number; transaction_amount: number }>(
@@ -272,6 +316,14 @@ async function listPaymentRows<T extends { amount: number; transaction_amount: n
         ...(r as unknown as T),
         amount: Number(r.amount),
         transaction_amount: Number(r.transaction_amount),
+        // Payments in only: the ringgit figures, kept null where the view says null.
+        ...('amount_myr' in r
+          ? {
+              amount_myr: r.amount_myr === null ? null : Number(r.amount_myr),
+              carried_myr: r.carried_myr === null ? null : Number(r.carried_myr),
+              realised_myr: r.realised_myr === null ? null : Number(r.realised_myr),
+            }
+          : {}),
       })),
     );
     if (page.length < PAYMENT_PAGE_SIZE) return rows;
@@ -352,12 +404,17 @@ export async function recordPaymentOut(
   return { ok: true, data: { id: data as string } };
 }
 
-/** Records money received from one customer, split across that customer's posted invoices. It is posted at once. */
+/**
+ * Records money received from one customer, split across that customer's posted invoices. It is posted at once.
+ * For invoices in another currency `amount_myr` is the ringgit that arrived, and the amounts are in their currency.
+ */
 export async function recordPaymentIn(
   ctx: FinanceWriteContext,
   input: z.input<typeof recordPaymentInInput>,
 ): Promise<FinResult<{ id: string }>> {
-  const { allocations, ...payment } = recordPaymentInInput.parse(input);
+  const { allocations, amount_myr, ...rest } = recordPaymentInInput.parse(input);
+  // The key is sent only when there is a figure: the database reads a missing key as "none".
+  const payment = amount_myr === undefined ? rest : { ...rest, amount_myr };
   const { data, error } = await ctx.client.rpc('finance_record_payment_in', {
     target_org: ctx.orgId,
     payment,
@@ -365,6 +422,25 @@ export async function recordPaymentIn(
   });
   if (error || !data) return moneyWriteFailed('recordPaymentIn', error, RECEIPT_REFUSALS);
   return { ok: true, data: { id: data as string } };
+}
+
+/**
+ * The finance assistant's payment in: ringgit invoices only. An invoice in another currency is refused in its
+ * own words before the database is asked, since the assistant has no ringgit-received figure to send.
+ */
+export async function recordPaymentInRinggit(ctx: FinanceWriteContext, input: unknown): Promise<FinResult<{ id: string }>> {
+  const parsed = recordPaymentInToolInput.parse(input);
+  const ids = parsed.allocations.map((a) => a.invoice_id);
+  const { data, error } = await ctx.client
+    .from('finance_invoices')
+    .select('id,currency')
+    .eq('org_id', ctx.orgId)
+    .in('id', ids);
+  if (error) return moneyWriteFailed('recordPaymentInRinggit', error, RECEIPT_REFUSALS);
+  if ((data ?? []).some((row) => (row as { currency?: string }).currency !== 'MYR')) {
+    return { ok: false, error: R.foreignByAssistant };
+  }
+  return recordPaymentIn(ctx, parsed);
 }
 
 /** A scheduled payment has now been made: it gets its number and reduces the bill. */

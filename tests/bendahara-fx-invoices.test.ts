@@ -83,12 +83,13 @@ testWithSupabase('a USD invoice at a typed rate posts its ringgit, and nothing c
   expect(on(null, 'credit')).toBe(4200);
   expect(on('sst_payable', 'credit')).toBe(336);
 
-  // A payment against it is refused with the payment form's sentence (FIN41).
+  // A payment against it with no ringgit received is refused with the payment form's sentence (FIN46, stage 3b;
+  // tests/bendahara-fx-payments-in.test.ts records one).
   const [bank] = (await listAccounts(ctx)).filter((a) => a.kind === 'bank');
   const paid = await recordPaymentIn(ctx, {
     account_id: bank.id, txn_date: today, method: 'fpx', allocations: [{ invoice_id: id, amount: 100 }],
   });
-  expect(paid).toEqual({ ok: false, error: RECEIPT_MESSAGES.foreignNotYet });
+  expect(paid).toEqual({ ok: false, error: RECEIPT_MESSAGES.ringgitReceived });
 
   // Voided: the reversal swaps the same ringgit figures, so the invoice nets to nothing in the books.
   expect((await voidInvoice(ctx, { id })).ok).toBe(true);

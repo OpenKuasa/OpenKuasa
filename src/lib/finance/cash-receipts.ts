@@ -37,9 +37,11 @@ import {
 
 export const CASH_RECEIPT_MESSAGES = {
   kind: 'Choose what this receipt is for: a customer’s invoices, or other income.',
-  // FIN41. The receipt form offers ringgit invoices only (stage 3a), so this is met from a
-  // tab opened before an invoice went into another currency, or a direct call.
-  foreignNotYet: 'Payments on invoices in other currencies are not available yet.',
+  // FIN45 when such a draft is posted, and FIN44 when one receipt names invoices in two currencies. The receipt
+  // form offers ringgit invoices only (an invoice in another currency is paid with the ringgit received, which
+  // this form does not ask for), so these are met from a tab opened before an invoice went into another
+  // currency, or a direct call.
+  foreignInvoice: 'A receipt for an invoice in another currency is recorded with Record payment on Invoices.',
   account: 'Choose the account the money went into.',
   date: LINE_MESSAGES.date,
   method: 'Choose how it was paid.',
@@ -154,7 +156,8 @@ const REFUSALS: Record<string, string> = {
   FIN09: M.locked,
   FIN11: M.gone,
   FIN15: M.shape,
-  FIN41: M.foreignNotYet,
+  FIN44: M.foreignInvoice,
+  FIN45: M.foreignInvoice,
   [FIN_SIGN_OFF]: NEEDS_SIGN_OFF,
   // The account was archived after the form was opened or the draft was saved.
   [FIN_ACCOUNT_ARCHIVED]: ACCOUNT_ARCHIVED,

@@ -99,8 +99,8 @@ import {
   markPaymentPaid,
   markPaymentPaidInput,
   paymentIdInput,
-  recordPaymentIn,
-  recordPaymentInInput,
+  recordPaymentInRinggit,
+  recordPaymentInToolInput,
   recordPaymentOut,
   recordPaymentOutInput,
   voidPayment,
@@ -404,9 +404,11 @@ export function createBendaharaTools(access: FinanceAccess) {
     }),
     // Payments
     recordPaymentIn: tool({
-      description: 'Record a payment received from a customer against their invoices.',
-      inputSchema: recordPaymentInInput,
-      execute: async (input) => recordPaymentIn(ctx, input),
+      description:
+        'Record a payment received from a customer against their invoices, in ringgit. Invoices in ringgit only: ' +
+        'a payment of an invoice in another currency is recorded on the Invoices screen, where the ringgit received is entered.',
+      inputSchema: recordPaymentInToolInput,
+      execute: async (input) => recordPaymentInRinggit(ctx, input),
     }),
     recordPaymentOut: tool({
       description: 'Record a payment made to a supplier against their bills.',
