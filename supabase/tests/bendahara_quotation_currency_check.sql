@@ -1,12 +1,12 @@
 -- Bendahara quotation-currency check. Run it after
--- 20261119160000_bendahara_quotation_currency.sql (and 20261119150000 before
--- it), in the same transaction for a dry run, or by itself once applied. It
+-- 20261120105000_bendahara_quotation_selling_rate.sql (and 20261119160000,
+-- 20261119150000 and 20261120100000 before it), in the same transaction for a dry run, or by itself once applied. It
 -- leaves nothing behind either way: the block always ends with RAISE, so
 -- every row and the helper function below are rolled back. Read the message:
 --   BENDAHARA_QUOTATION_CURRENCY_CHECK PASSED ...   or   ... FAILED: <what went wrong>
 -- It acts as a workspace's owner and viewer the way the app does (the
 -- authenticated role with that person's id in request.jwt.claims). The BNM
--- rate it relies on is dated 1999-01-04, a day no stored rate has.
+-- rate it relies on (selling 4.083, middle 4.0815) is dated 1999-01-04, a day no stored rate has.
 do $$
 declare
   org uuid := gen_random_uuid();
@@ -17,6 +17,7 @@ declare
   q_usd uuid;
   q_none uuid;
   q_half uuid;
+  q_old uuid;
   n integer;
   t text;
   r record;
@@ -76,8 +77,8 @@ begin
   -- Its selling rate is what an invoice made from the quotation takes (20261120100000).
   insert into public.finance_fx_rates (currency, rate_date, session, unit, middle_rate, selling_rate, rate)
   values ('USD', date '1999-01-04', '1700', 1, 4.0815, 4.083, 4.0815);
-  insert into public.finance_fx_rates (currency, rate_date, session, unit, middle_rate, rate)
-  values ('USD', date '1999-01-04', '1200', 1, 4.2222, 4.2222);
+  insert into public.finance_fx_rates (currency, rate_date, session, unit, middle_rate, selling_rate, rate)
+  values ('USD', date '1999-01-04', '1200', 1, 4.2222, 4.2222, 4.2222);
 
   perform set_config('request.jwt.claims', json_build_object('sub', owner_id, 'role', 'authenticated', 'aal', 'aal2')::text, true);
   set local role authenticated;
@@ -93,16 +94,16 @@ begin
   -- ==== a USD quotation at BNM's rate: lines carry it, ringgit is per line ====
   q_usd := public.finance_save_quotation(org,
     jsonb_build_object('customer_id', cust, 'quote_date', current_date, 'valid_until', current_date + 30,
-      'currency', 'USD', 'fx_rate', 4.0815, 'fx_rate_source', 'bnm', 'fx_rate_date', '1999-01-04'), one_line);
+      'currency', 'USD', 'fx_rate', 4.083, 'fx_rate_source', 'bnm', 'fx_rate_date', '1999-01-04'), one_line);
   select * into r from public.finance_quotation_totals where id = q_usd;
-  -- 3 × 0.33 = 0.99 USD → RM 4.04 (4.040685); SST 8% of 0.99 = 0.08 USD → RM 0.33 (0.32652).
+  -- At the selling rate (PR 3q): 3 × 0.33 = 0.99 USD → RM 4.04 (4.04217); SST 8% of 0.99 = 0.08 USD → RM 0.33 (0.32664).
   if r.total <> 1.07 or r.subtotal_myr <> 4.04 or r.sst_myr <> 0.33 or r.total_myr <> 4.37 or r.fx_rate_source <> 'bnm' then
     fails := fails || format('the USD quotation reads total %s, ringgit %s + %s = %s, source %s', r.total, r.subtotal_myr, r.sst_myr, r.total_myr, r.fx_rate_source);
   end if;
   fails := fails || public.bendahara_check_try('a line''s rate sent by hand is the quotation''s', 'ok',
     format('update public.finance_quotation_lines set fx_rate = 9 where quotation_id = %L', q_usd));
   select max(fx_rate) into r from public.finance_quotation_lines where quotation_id = q_usd;
-  if r.max <> 4.0815 then fails := fails || format('a line took the rate %s', r.max); end if;
+  if r.max <> 4.083 then fails := fails || format('a line took the rate %s', r.max); end if;
   -- The draft's rate changes: its lines follow.
   update public.finance_quotations set fx_rate = 4.5, fx_rate_source = 'manual', fx_rate_date = null where id = q_usd;
   select total_myr into r from public.finance_quotation_totals where id = q_usd;
@@ -130,6 +131,36 @@ begin
   -- ==== refusals ==============================================================
   fails := fails || public.bendahara_check_try('a rate marked as BNM''s that BNM did not publish', 'FIN39',
     format('update public.finance_quotations set fx_rate = 4.2, fx_rate_source = %L, fx_rate_date = %L where id = %L', 'bnm', '1999-01-04', q_usd));
+  -- PR 3q: BNM's MIDDLE rate for that very day is no longer BNM's figure for a quotation, the selling rate is.
+  fails := fails || public.bendahara_check_try('case 30: the middle rate marked as BNM''s', 'FIN39',
+    format('update public.finance_quotations set fx_rate = 4.0815, fx_rate_source = %L, fx_rate_date = %L where id = %L', 'bnm', '1999-01-04', q_usd));
+  fails := fails || public.bendahara_check_try('case 30: the selling rate marked as BNM''s', 'ok',
+    format('update public.finance_quotations set fx_rate = 4.083, fx_rate_source = %L, fx_rate_date = %L where id = %L', 'bnm', '1999-01-04', q_usd));
+  -- A draft from before PR 3q, holding the middle rate under the BNM mark (made with the guard off, as it
+  -- was made then): saved again with the rate left alone, or marked as sent, it is not refused; change its
+  -- rate or its currency and keep the mark, and FIN39 answers.
+  q_old := public.finance_save_quotation(org,
+    jsonb_build_object('customer_id', cust, 'quote_date', current_date, 'valid_until', current_date + 30,
+      'currency', 'USD', 'fx_rate', 4.0815, 'fx_rate_source', 'manual'), one_line);
+  reset role;
+  alter table public.finance_quotations disable trigger finance_quotation_rate_guard;
+  update public.finance_quotations set fx_rate_source = 'bnm', fx_rate_date = date '1999-01-04' where id = q_old;
+  alter table public.finance_quotations enable trigger finance_quotation_rate_guard;
+  set local role authenticated;
+  fails := fails || public.bendahara_check_try('case 31: an old middle-rate draft re-saved as it was', 'ok',
+    format('select public.finance_save_quotation(%L, %L, %L)', org,
+      jsonb_build_object('id', q_old, 'customer_id', cust, 'quote_date', current_date, 'valid_until', current_date + 30,
+        'currency', 'USD', 'fx_rate', 4.0815, 'fx_rate_source', 'bnm', 'fx_rate_date', '1999-01-04'), one_line));
+  fails := fails || public.bendahara_check_try('case 31: an old middle-rate draft''s currency changed, the mark kept', 'FIN39',
+    format('update public.finance_quotations set currency = %L where id = %L', 'SGD', q_old));
+  fails := fails || public.bendahara_check_try('case 31: an old middle-rate draft''s rate changed, the mark kept', 'FIN39',
+    format('update public.finance_quotations set fx_rate = 4.0816 where id = %L', q_old));
+  fails := fails || public.bendahara_check_try('case 31: an old middle-rate draft is marked as sent', 'ok',
+    format('select public.finance_send_quotation(%L, %L)', org, q_old));
+  select fx_rate, fx_rate_source into r from public.finance_quotations where id = q_old;
+  if r.fx_rate <> 4.0815 or r.fx_rate_source <> 'bnm' then
+    fails := fails || format('case 31: the old draft was rewritten to %s (%s)', r.fx_rate, r.fx_rate_source);
+  end if;
   -- BNM's figure under a date BNM has no row for, and a figure that only the 1200 session published.
   fails := fails || public.bendahara_check_try('BNM''s rate under a date it has no row for', 'FIN39',
     format('update public.finance_quotations set fx_rate = 4.0815, fx_rate_source = %L, fx_rate_date = %L where id = %L', 'bnm', '1999-01-05', q_usd));
@@ -213,7 +244,7 @@ begin
     format('select public.finance_save_quotation(%L, %L, %L)', org,
       jsonb_build_object('customer_id', cust, 'quote_date', current_date, 'valid_until', current_date + 30, 'currency', 'USD', 'fx_rate', 4), one_line));
   select count(*) into n from public.finance_quotation_totals where org_id = org and currency <> 'MYR';
-  if n <> 2 then fails := fails || format('a viewer reads %s quotations in another currency, not 2', n); end if;
+  if n <> 3 then fails := fails || format('a viewer reads %s quotations in another currency, not 3', n); end if;
 
   -- ==== the workspace is deleted =================================================
   reset role;
