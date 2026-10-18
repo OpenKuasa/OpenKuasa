@@ -315,7 +315,7 @@ begin
   values (org, 'in', bank, '1999-01-15', 50, 'fpx', cust, 'draft') returning id into draft_in;
   insert into public.finance_allocations (org_id, transaction_id, invoice_id, amount) values (org, draft_in, i_u, 10);
   fails := fails || public.bendahara_check_try('FIN46: a USD split posted by hand', 'FIN46',
-    format('update public.finance_transactions set status = %L, number = %L where id = %L', 'posted', 'RC-HAND', draft_in));
+    format('update public.finance_transactions set status = %L where id = %L', 'posted', draft_in));
   fails := fails || public.bendahara_check_try('FIN46: a USD split moved to scheduled by hand', 'FIN46',
     format('update public.finance_transactions set status = %L where id = %L', 'scheduled', draft_in));
   fails := fails || public.bendahara_check_try('a signed-in person writes amount_myr', '42501',

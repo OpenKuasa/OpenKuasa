@@ -80,7 +80,9 @@ begin
   select string_agg(conname, ',' order by conname) into t from pg_constraint
    where conrelid = 'public.finance_allocations'::regclass and contype = 'c';
   -- The sales follow-ons migration adds the third, so this check needs that migration applied.
-  if t is distinct from 'finance_allocations_amount_check,finance_allocations_one_document_check,finance_allocations_reason_check' then
+  -- 20261120110000 (3b) adds the three on amount_myr and carried_myr.
+  if t is distinct from 'finance_allocations_amount_check,finance_allocations_amount_myr_check,finance_allocations_carried_myr_check,'
+       || 'finance_allocations_myr_pair_check,finance_allocations_one_document_check,finance_allocations_reason_check' then
     fails := fails || format('check constraints on finance_allocations are: %s', t);
   end if;
   foreach t in array array[
