@@ -74,10 +74,11 @@ export const QUOTATION_MESSAGES = {
   // FIN38. The form says it first; the database says it for a direct call, or a draft saved without a rate in
   // another tab and then marked as sent from the list.
   rateBeforeSending: CURRENCY_MESSAGES.rateBeforeSending,
-  // FIN39. The form marks a rate as Bank Negara's only when it is the figure BNM gave for that date, so this is
-  // met only by a direct call, or by a form left open across a change to the rates table (which never happens:
-  // a stored rate is never replaced). It says what to do, not what happened.
-  notBnmRate: "That rate is not the one Bank Negara Malaysia published for that day. Type it in again and save; it is kept as typed by hand.",
+  // FIN39. The form marks a rate as Bank Negara's only when it is the rule's own answer for the date it asked
+  // (the 5 pm selling rate), so this is met by a direct call, or by a draft from before PR 3q (it carries a
+  // middle rate) whose currency or rate was changed while it kept the Bank Negara mark. It says what to do,
+  // not what happened.
+  notBnmRate: "That rate is not Bank Negara Malaysia's 5 pm selling rate for that day. Type it in again and save; it is kept as typed by hand.",
   // The assistant never edits a draft in another currency: its lines would be read as ringgit.
   foreignDraftByAssistant:
     'This quotation is not in ringgit. Edit it on the Quotations screen, where its currency and exchange rate are shown.',

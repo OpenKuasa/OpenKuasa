@@ -98,8 +98,9 @@ export function fxRatesCardView(rates: FxLatestRate[], today: string): FxRatesCa
 /* ---- stage 2: the rate a document is offered ------------------------------ */
 
 /**
- * BNM's rate a document dated D is offered: the latest 1700 rate on or before D. A quotation is offered the
- * middle rate (stage 2); an invoice the SST rule's selling rate (src/lib/finance/sst-rate.ts).
+ * BNM's rate a document dated D is offered: the latest 1700 rate on or before D. Quotations and invoices are
+ * both offered the SST rule's selling rate (src/lib/finance/sst-rate.ts); the middle rate was a quotation's
+ * until PR 3q, and is what a test can still build here.
  */
 export type FxDefault = {
   /** Ringgit per one unit. For display; when `rate_text` is there, money is worked from it. */
@@ -127,30 +128,6 @@ export const fxRateForInput = z.object({
   currency: z.string({ error: FX_RATE_MESSAGES.currency }).refine(isDocumentCurrency, FX_RATE_MESSAGES.currency),
   date: z.string({ error: FX_RATE_MESSAGES.date }).refine(isIsoDate, FX_RATE_MESSAGES.date),
 });
-
-/**
- * The rate offered for a document in `currency` dated `date`: the newest BNM
- * 1700 rate on or before it, so a weekend or a public holiday takes the last
- * working day's and a future date the latest. null when there is none (a
- * currency BNM does not publish, or a date before the first rate stored).
- * Read with the person's own session.
- */
-export async function defaultFxRate(client: SupabaseClient, currency: string, date: string): Promise<FxDefault | null> {
-  const { data, error } = await client
-    .from('finance_fx_rates')
-    .select('rate, rate_date, unit, middle_rate')
-    .eq('source', 'bnm')
-    .eq('session', '1700')
-    .eq('currency', currency)
-    .lte('rate_date', date)
-    .order('rate_date', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) return null;
-  const row = data as Record<string, unknown>;
-  return { rate: Number(row.rate), rate_date: row.rate_date as string, unit: Number(row.unit), middle_rate: Number(row.middle_rate) };
-}
 
 /** "The latest rate is from 2 October 2026." when the rate offered is more than seven days before the document's date. */
 export function staleRateNote(rateDate: string, documentDate: string): string | null {

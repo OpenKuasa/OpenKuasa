@@ -7,9 +7,9 @@
  * currency; the rate is ringgit per one unit, and is Bank Negara Malaysia's
  * 1700 rate for the document's date (the newest on or before it) until the
  * person types another, which then reads "Typed by hand" beside BNM's. A
- * quotation is offered the middle rate; an invoice the SST rule's selling
- * rate for its date of supply (src/lib/finance/sst-rate.ts), and a rate typed
- * on an invoice names its source. The box itself takes ringgit per the unit
+ * quotation or an invoice is offered the SST rule's selling rate
+ * (src/lib/finance/sst-rate.ts) for its date (an invoice's date of supply), and
+ * a rate typed on an invoice names its source. The box itself takes ringgit per the unit
  * BNM quotes (1 USD, 100 JPY), so the figure typed is the figure BNM
  * publishes.
  */
@@ -25,7 +25,7 @@ import { PROVIDER_NEEDS_REFERENCE, type RateProvider } from './sst-rate';
 export const FAR_FROM_BNM = 0.2;
 
 export type RateSource = 'bnm' | 'manual';
-/** Which of BNM's figures a kind of document is offered: quotations the middle rate, invoices the selling rate. */
+/** Which of BNM's figures a kind of document is offered: the selling rate for both; 'middle' is what a bare call defaults to. */
 export type RateFigure = 'middle' | 'selling';
 
 export type CurrencyFields = {

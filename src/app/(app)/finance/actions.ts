@@ -85,7 +85,7 @@ import {
   saveExpense,
   saveExpenseInput,
 } from '@/lib/finance/expenses';
-import { type FxDefault, defaultFxRate, fxRateForInput } from '@/lib/finance/fx-rates';
+import { type FxDefault, fxRateForInput } from '@/lib/finance/fx-rates';
 import { fxSstRate } from '@/lib/finance/sst-rate';
 import {
   INVOICE_MESSAGES,
@@ -678,27 +678,9 @@ export async function saveAndSendQuotationAction(input: unknown): Promise<SaveAn
 }
 
 /**
- * Bank Negara Malaysia's rate for a currency on a date: the newest 1700 middle rate on or before it, or null
- * when there is none. A read with the person's own session (every signed-in person may read the rates); only
- * a person who may edit has a form that asks, so only they are answered. Nothing is refreshed.
- */
-export async function fxRateForAction(input: unknown): Promise<FinResult<FxDefault | null>> {
-  const ctx = await writeCtx();
-  if (!ctx) return FORBIDDEN;
-  const parsed = fxRateForInput.safeParse(input);
-  if (!parsed.success) return { ok: false, error: firstMessage(parsed.error) };
-  try {
-    return { ok: true, data: await defaultFxRate(ctx.client, parsed.data.currency, parsed.data.date) };
-  } catch (error) {
-    console.error('[finance] an exchange rate could not be read:', error);
-    return { ok: false, error: READ_FAILED };
-  }
-}
-
-/**
- * The rate an invoice in a currency, supplied on a date, is offered: the SST rule's (src/lib/finance/sst-rate.ts),
+ * The rate a quotation or an invoice in a currency, supplied on a date, is offered: the SST rule's (src/lib/finance/sst-rate.ts),
  * Bank Negara Malaysia's 17:00 selling rate on or before it, as exact text; or null when there is none. Read and
- * answered as fxRateForAction is.
+ * answered to a person who may edit.
  */
 export async function fxSstRateForAction(input: unknown): Promise<FinResult<FxDefault | null>> {
   const ctx = await writeCtx();

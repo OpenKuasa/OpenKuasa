@@ -56,7 +56,7 @@ describe('the database’s answers', () => {
     for (const result of await answer('FIN39')) {
       expect(result).toEqual({
         ok: false,
-        error: "That rate is not the one Bank Negara Malaysia published for that day. Type it in again and save; it is kept as typed by hand.",
+        error: "That rate is not Bank Negara Malaysia's 5 pm selling rate for that day. Type it in again and save; it is kept as typed by hand.",
       });
     }
     // Nothing raises FIN40 since 20261120100000: it has no sentence of its own, and reads as any unknown refusal.

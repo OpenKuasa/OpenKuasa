@@ -3,7 +3,7 @@ import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import { createOrg, liveClient, signInOwner } from './helpers/live-workspaces';
 import { createContact, updateContact } from '@/lib/finance/contacts';
-import { defaultFxRate } from '@/lib/finance/fx-rates';
+import { fxSstRate } from '@/lib/finance/sst-rate';
 import { quotationPayload, newQuotationForm, withQuotationCustomer } from '@/lib/finance/quotation-form';
 import { QUOTATION_MESSAGES, acceptQuotation, convertQuotation, getQuotation, listQuotations, saveQuotation, sendQuotation } from '@/lib/finance/quotations';
 import { emptyLine } from '@/lib/finance/document-form';
@@ -89,9 +89,9 @@ testWithSupabase('a USD quotation with a typed rate: ringgit per line, sent, acc
   expect(cleared.ok && cleared.data.default_currency).toBeNull();
 });
 
-testWithSupabase('BNM’s rate is offered and taken as BNM’s, once the route has stored one', async () => {
+testWithSupabase('BNM’s selling rate is offered and taken as BNM’s, once the route has stored one', async () => {
   const ctx = await owner(`Quotation BNM ${Date.now()}`);
-  const bnm = await defaultFxRate(ctx.client, 'USD', today);
+  const bnm = await fxSstRate(ctx.client, 'USD', today);
   if (bnm === null) {
     console.warn('No USD rate stored yet: run POST /api/finance/fx-rates/fetch first. The BNM case is skipped.');
     return;
@@ -101,9 +101,9 @@ testWithSupabase('BNM’s rate is offered and taken as BNM’s, once the route h
   const saved = await saveQuotation(ctx, {
     customer_id: acme.data.id, quote_date: today, valid_until: today,
     lines: [{ description: 'Design work', quantity: 1, unit_price: 100 }],
-    currency: 'USD', fx_rate: bnm.rate, fx_rate_source: 'bnm', fx_rate_date: bnm.rate_date,
+    currency: 'USD', fx_rate: bnm.rate_text ?? bnm.rate, fx_rate_source: 'bnm', fx_rate_date: bnm.rate_date,
   });
   expect(saved.ok).toBe(true);
   if (!saved.ok) return;
-  expect(await getQuotation(ctx, saved.data.id)).toMatchObject({ fx_rate: bnm.rate, fx_rate_source: 'bnm', fx_rate_date: bnm.rate_date });
+  expect(await getQuotation(ctx, saved.data.id)).toMatchObject({ fx_rate: Number(bnm.rate_text ?? bnm.rate), fx_rate_source: 'bnm', fx_rate_date: bnm.rate_date });
 });

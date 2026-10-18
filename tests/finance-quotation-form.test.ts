@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ringgitFields } from '@/lib/finance/document-currency';
+import { rateNotes, ringgitFields } from '@/lib/finance/document-currency';
 import { documentFormWords, emptyLine } from '@/lib/finance/document-form';
 import type { FinanceProduct } from '@/lib/finance/products';
 import {
@@ -201,6 +201,11 @@ describe('the quotation form, as the shared card draws it', () => {
       posting: 'Marking as sent…',
     });
     expect(Object.values(words).join(' ').toLowerCase()).not.toContain('post');
+  });
+  it('is offered Bank Negara’s selling rate, as an invoice is (PR 3q)', () => {
+    expect(QUOTATION_FORM_KIND.currency?.figure).toBe('selling');
+    expect(rateNotes({ ...ringgitFields(), currency: 'USD', rate: '4.0830', rateSource: 'bnm', rateDate: '2026-10-15' }, today, QUOTATION_FORM_KIND.currency?.figure))
+      .toContain('Bank Negara Malaysia\'s 5 pm selling rate of 15 October 2026.');
   });
   it('ignores the customer’s payment terms when the date changes', () => {
     expect(QUOTATION_FORM_KIND.withDate(newQuotationForm(today, 'k1'), '2026-12-01', 90).valid_until).toBe('2026-12-31');
