@@ -131,7 +131,9 @@ begin
   select string_agg(attname, ',' order by attnum) into t from pg_attribute
    where attrelid = 'public.finance_cash_receipts'::regclass and attnum > 0 and not attisdropped;
   if t is distinct from 'transaction_id,org_id,number,txn_date,method,amount,status,reference,notes,account_id,account_name,'
-       || 'account_kind,contact_id,party_name,kind,category_id,category_name,documents,created_by,created_at' then
+       || 'account_kind,contact_id,party_name,kind,category_id,category_name,documents,created_by,created_at,'
+       -- 20261120110000 (3b) appends the ringgit figures.
+       || 'currency,amount_myr,carried_myr,realised_myr' then
     fails := fails || format('finance_cash_receipts has the columns: %s', t);
   end if;
   select string_agg(attname, ',' order by attnum) into t from pg_attribute

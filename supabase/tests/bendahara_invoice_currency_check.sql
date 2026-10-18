@@ -202,7 +202,9 @@ begin
   fails := fails || public.bendahara_check_try('12: a posted invoice''s line rate is changed', 'FIN01',
     format('update public.finance_invoice_lines set fx_rate = 4.3 where invoice_id = %L', i_usd));
   select count(*) into n from public.finance_transactions where org_id = org;
-  fails := fails || public.bendahara_check_try('13: money in on a foreign invoice', 'FIN41',
+  -- 3b: money in on a foreign invoice is taken with the ringgit received (FIN46 without it);
+  -- bendahara_fx_payments_in_check.sql has the rest.
+  fails := fails || public.bendahara_check_try('13: money in on a foreign invoice, no ringgit received', 'FIN46',
     format('select public.finance_record_payment_in(%L, %L, %L)', org, jsonb_build_object('account_id', bank, 'method', 'fpx'),
       jsonb_build_array(jsonb_build_object('invoice_id', i_usd, 'amount', 10))));
   select n - count(*) into n from public.finance_transactions where org_id = org;

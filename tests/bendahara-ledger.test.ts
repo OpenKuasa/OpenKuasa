@@ -319,8 +319,8 @@ testWithSupabase('a new workspace has its chart, and bank accounts and categorie
   const o = await ownerWithOrg(`Ledger chart ${Date.now()}`);
   let ch = await chart(o);
 
-  // The seven system accounts, at the codes of the design.
-  const system = { receivable: ['1200', 'asset'], payable: ['2000', 'liability'], accrued_expenses: ['2050', 'liability'], sst_payable: ['2100', 'liability'], owner_equity: ['3000', 'equity'], retained_earnings: ['3100', 'equity'], opening_equity: ['3900', 'equity'] };
+  // The eight system accounts, at the codes of the design (fx_realised: 20261120110000, stage 3b).
+  const system = { receivable: ['1200', 'asset'], payable: ['2000', 'liability'], accrued_expenses: ['2050', 'liability'], sst_payable: ['2100', 'liability'], owner_equity: ['3000', 'equity'], retained_earnings: ['3100', 'equity'], opening_equity: ['3900', 'equity'], fx_realised: ['4900', 'income'] };
   for (const [key, [code, type]] of Object.entries(system)) {
     expect(ch.system(key), key).toMatchObject({ code, type, active: true, bank_account_id: null, category_id: null });
   }
@@ -337,7 +337,7 @@ testWithSupabase('a new workspace has its chart, and bank accounts and categorie
   expect(ch.ofCategory(o.sales)).toMatchObject({ code: '4000', default_for: 'sales' });
   expect(ch.ofCategory(o.rent).code).toMatch(/^6\d{3}$/);
   expect(ch.system('accrued_expenses').name).toBe('Accrued Expenses');
-  expect(ch.rows).toHaveLength(7 + 2 + categories!.length);
+  expect(ch.rows).toHaveLength(8 + 2 + categories!.length);
   expect(new Set(ch.rows.map((a) => a.code)).size).toBe(ch.rows.length);
   // Nothing has been posted: every account is there, at zero.
   const zero = await balances(o);

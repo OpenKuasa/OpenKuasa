@@ -136,7 +136,7 @@ begin
   if t is distinct from 'id,org_id,customer_id,customer_name,invoice_no,invoice_date,due_date,notes,status,posted_at,'
        || 'einvoice_status,einvoice_uuid,created_by,created_at,updated_at,subtotal,sst,total,paid,balance,display_status,credited,refunded,set_off,'
        || 'currency,fx_rate,fx_rate_source,fx_rate_date,fx_rate_provider,fx_rate_reference,supply_date,'
-       || 'subtotal_myr,sst_myr,total_myr,balance_myr' then
+       || 'subtotal_myr,sst_myr,total_myr,balance_myr,paid_myr' then
     fails := fails || format('columns of finance_invoice_totals are: %s', t);
   end if;
   select string_agg(attname, ',' order by attnum) into t from pg_attribute
