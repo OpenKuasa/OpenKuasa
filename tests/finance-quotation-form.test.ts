@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { rateNotes, ringgitFields } from '@/lib/finance/document-currency';
+import { rateNotes, ringgitFields, withRateAnswer } from '@/lib/finance/document-currency';
+import type { FxDefault } from '@/lib/finance/fx-rates';
 import { documentFormWords, emptyLine } from '@/lib/finance/document-form';
 import type { FinanceProduct } from '@/lib/finance/products';
 import {
@@ -206,6 +207,20 @@ describe('the quotation form, as the shared card draws it', () => {
     expect(QUOTATION_FORM_KIND.currency?.figure).toBe('selling');
     expect(rateNotes({ ...ringgitFields(), currency: 'USD', rate: '4.0830', rateSource: 'bnm', rateDate: '2026-10-15' }, today, QUOTATION_FORM_KIND.currency?.figure))
       .toContain('Bank Negara Malaysia\'s 5 pm selling rate of 15 October 2026.');
+  });
+  it('does not call a middle rate saved before PR 3q the selling rate, and offers the selling rate', () => {
+    const selling: FxDefault = { rate: 4.083, rate_text: '4.0830000000', rate_date: '2026-10-15', unit: 1, published_rate: 4.083, figure: 'selling' };
+    const old = { ...ringgitFields(), currency: 'USD', rate: '4.0815', rateSource: 'bnm' as const, rateDate: '2026-10-15' };
+    const opened = withRateAnswer(old, '2026-10-15', 'USD|2026-10-15', { ok: true, rate: selling }, false);
+    expect(opened.rate).toBe('4.0815');
+    const notes = rateNotes(opened, '2026-10-15', 'selling');
+    expect(notes[0]).toBe(
+      "Bank Negara Malaysia's rate of 15 October 2026, saved before quotations used the 5 pm selling rate. The selling rate is RM 4.083 per USD, 15 October 2026; change the currency or the date to use it.",
+    );
+    expect(notes.join(' ')).not.toContain('5 pm selling rate of');
+    // The selling rate itself keeps the plain label.
+    const fresh = withRateAnswer({ ...old, rate: '4.083' }, '2026-10-15', 'USD|2026-10-15', { ok: true, rate: selling }, false);
+    expect(rateNotes(fresh, '2026-10-15', 'selling')[0]).toBe("Bank Negara Malaysia's 5 pm selling rate of 15 October 2026.");
   });
   it('ignores the customer’s payment terms when the date changes', () => {
     expect(QUOTATION_FORM_KIND.withDate(newQuotationForm(today, 'k1'), '2026-12-01', 90).valid_until).toBe('2026-12-31');

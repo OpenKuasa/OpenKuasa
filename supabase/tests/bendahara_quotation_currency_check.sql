@@ -143,6 +143,9 @@ begin
   q_old := public.finance_save_quotation(org,
     jsonb_build_object('customer_id', cust, 'quote_date', current_date, 'valid_until', current_date + 30,
       'currency', 'USD', 'fx_rate', 4.0815, 'fx_rate_source', 'manual'), one_line);
+  -- Local or clone databases only: the ALTER TABLE below holds an exclusive lock on finance_quotations until
+  -- this block ends, so on a live database every quotation read and write would wait. It fails fast instead.
+  set local lock_timeout = '5s';
   reset role;
   alter table public.finance_quotations disable trigger finance_quotation_rate_guard;
   update public.finance_quotations set fx_rate_source = 'bnm', fx_rate_date = date '1999-01-04' where id = q_old;
@@ -164,7 +167,7 @@ begin
   end if;
   -- BNM's figure under a date BNM has no row for, and a figure that only the 1200 session published.
   fails := fails || public.bendahara_check_try('BNM''s rate under a date it has no row for', 'FIN39',
-    format('update public.finance_quotations set fx_rate = 4.0815, fx_rate_source = %L, fx_rate_date = %L where id = %L', 'bnm', '1999-01-05', q_usd));
+    format('update public.finance_quotations set fx_rate = 4.083, fx_rate_source = %L, fx_rate_date = %L where id = %L', 'bnm', '1999-01-05', q_usd));
   fails := fails || public.bendahara_check_try('a rate only the 1200 session published, marked as BNM''s', 'FIN39',
     format('update public.finance_quotations set fx_rate = 4.2222, fx_rate_source = %L, fx_rate_date = %L where id = %L', 'bnm', '1999-01-04', q_usd));
   fails := fails || public.bendahara_check_try('a currency off the list', '23514',

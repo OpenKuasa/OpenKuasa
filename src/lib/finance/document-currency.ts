@@ -376,7 +376,17 @@ export function rateNotes(fields: CurrencyFields, date: string, figure: RateFigu
   const key = rateKey(fields, date);
   const notes: string[] = [];
   if (fields.rateSource === 'bnm' && fields.rateDate !== null && fields.rate.trim() !== '') {
-    notes.push(`Bank Negara Malaysia's 5 pm ${figure} rate of ${longDate(fields.rateDate)}.`);
+    // A draft saved before quotations took the selling rate holds another BNM figure under the BNM mark.
+    // Say what it is, and offer the figure the rule gives now.
+    const typed = rateScaled(fields);
+    const other =
+      fields.bnm !== null && fields.answered === key && fields.bnm.rate_date === fields.rateDate &&
+      fields.bnm.figure === 'selling' && typed !== null && typed !== undefined && typed !== bnmScaled(fields.bnm);
+    notes.push(
+      other && fields.bnm
+        ? `Bank Negara Malaysia's rate of ${longDate(fields.rateDate)}, saved before quotations used the 5 pm selling rate. The selling rate is ${bnmWords(fields.bnm, fields.currency)}; change the currency or the date to use it.`
+        : `Bank Negara Malaysia's 5 pm ${figure} rate of ${longDate(fields.rateDate)}.`,
+    );
     if (isIsoDate(date)) {
       const stale = staleRateNote(fields.rateDate, date);
       if (stale) notes.push(stale);
