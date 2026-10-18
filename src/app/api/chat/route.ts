@@ -30,6 +30,7 @@ import { saveAnswer, saveQuestion } from '@/lib/chat/store';
 import { createCvReader } from '@/lib/hire/cv-read';
 import { getHireData } from '@/lib/hire/supabase';
 import { createSupabasePeopleData } from '@/lib/people/supabase';
+import { peopleTier } from '@/lib/people/tier';
 import { getPeopleViewer } from '@/lib/people/viewer';
 import { originFromHeaders } from '@/lib/reach/form-submissions';
 import { getReachData } from '@/lib/reach/supabase';
@@ -88,8 +89,10 @@ export async function POST(request: Request) {
   // HR is workspace-only, like the CRM: no workspace, no HR this turn (never the
   // sample data, and never a crash — a failed viewer load just drops HR).
   // Rows are the caller's own session's, so the database decides who sees what;
-  // the change tier (`hr` for an owner or admin, `self` for a linked member,
-  // none in the demo) and the employee id come from the viewer, never the model.
+  // the change tier (`hr` for an owner or admin, `manager` for someone with a
+  // report, `self` for a linked member, none in the demo) and the employee id
+  // come from the viewer, never the model. It is the same call the screens and
+  // Lekiu's own chat make, so a manager gets their team's decide tools here too.
   let people: PeopleAccess | null = null;
   if (org) {
     try {
@@ -97,12 +100,11 @@ export async function POST(request: Request) {
       const data = createSupabasePeopleData(supabase, org.orgId);
       const receipt = receiptFromMessages(chat.uiMessages);
       let write: PeopleWrite | undefined;
-      if (viewer.isDemo) {
-        write = undefined;
-      } else if (can(org.role, 'approve')) {
-        write = { ctx: { client: supabase, orgId: org.orgId }, tier: 'hr', employeeId: viewer.employeeId, receipt, userId: chat.userId };
-      } else if (viewer.employeeId !== null) {
-        write = { ctx: { client: supabase, orgId: org.orgId }, tier: 'self', employeeId: viewer.employeeId, receipt, userId: chat.userId };
+      if (!viewer.isDemo) {
+        const tier = peopleTier(viewer);
+        if (tier === 'hr' || viewer.employeeId !== null) {
+          write = { ctx: { client: supabase, orgId: org.orgId }, tier, employeeId: viewer.employeeId, receipt, userId: chat.userId };
+        }
       }
       people = { data, viewer, write };
     } catch (error) {
