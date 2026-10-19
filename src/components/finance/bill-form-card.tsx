@@ -3,6 +3,7 @@
 import { DocumentFormCard, type PartyChoice } from '@/components/finance/document-form-card';
 import {
   BILL_FORM_KIND,
+  BILL_FORM_KIND_RINGGIT,
   type BillForm,
   type BillOrderOption,
   billFormFromDetail,
@@ -11,16 +12,20 @@ import {
   ordersForSupplier,
   withCategory,
   ownCountedTotal,
+  withPurchaseOrder,
 } from '@/lib/finance/bill-form';
 import { withCurrentParty } from '@/lib/finance/document-form';
 import type { BillDetail, BillListRow, SaveAndPostResult } from '@/lib/finance/bills';
 import type { FinanceContact } from '@/lib/finance/contacts';
+import type { FxDefault } from '@/lib/finance/fx-rates';
 import type { FinanceProduct } from '@/lib/finance/products';
 import type { FinResult } from '@/lib/finance/result';
 
 export type BillFormActions = {
   save: (input: unknown) => Promise<FinResult<{ id: string }>>;
   saveAndPost: (input: unknown) => Promise<SaveAndPostResult>;
+  /** Bank Negara's 5 pm selling rate for `{ currency, date }` (the SST rule's); null when it has none. */
+  fxRate?: (input: unknown) => Promise<FinResult<FxDefault | null>>;
 };
 
 /**
@@ -31,6 +36,7 @@ export function BillFormCard({
   editing,
   initial,
   draftOnly,
+  ringgitOnly = false,
   suppliers,
   products,
   orders,
@@ -47,6 +53,11 @@ export function BillFormCard({
   initial?: BillForm;
   /** True when the form may only save a draft: it has no button that posts. A bill made from a receipt. */
   draftOnly?: boolean;
+  /**
+   * True when the bill is in ringgit and the form offers no currency: a bill made from a receipt, whose amount is
+   * ringgit (what it sends carries no currency, so the database makes a ringgit draft).
+   */
+  ringgitOnly?: boolean;
   /** Active suppliers, by name. */
   suppliers: FinanceContact[];
   /** Active products and services. */
@@ -75,7 +86,8 @@ export function BillFormCard({
     noneLabel: 'No purchase order',
     options: (form) => ordersForSupplier(orders, form.supplier_id, form.purchase_order_id),
     get: (form) => form.purchase_order_id,
-    set: (form, id) => ({ ...form, purchase_order_id: id }),
+    // A bill against an order is in the order's currency (every order is in ringgit for now).
+    set: (form, id) => withPurchaseOrder(form, id),
     notes: (form) => {
       const chosen = orders.find((o) => o.id === form.purchase_order_id && o.supplier_id === form.supplier_id) ?? null;
       // The bill's own saved total is already in the order's billed figure; the saved row for the form's current id says how much.
@@ -99,7 +111,7 @@ export function BillFormCard({
   };
   return (
     <DocumentFormCard
-      kind={BILL_FORM_KIND}
+      kind={ringgitOnly ? BILL_FORM_KIND_RINGGIT : BILL_FORM_KIND}
       initial={() => (editing ? billFormFromDetail(editing) : (initial ?? newBillForm(today, 'new-0', defaultCategoryId ?? '')))}
       // A supplier archived since the draft was saved is still this bill's supplier.
       parties={withCurrentParty(suppliers, editing && { id: editing.supplier_id, name: editing.supplier_name })}

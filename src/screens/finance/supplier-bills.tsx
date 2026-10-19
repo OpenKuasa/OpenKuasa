@@ -1,5 +1,6 @@
 import {
   deleteBillAction,
+  fxSstRateForAction,
   getBillAction,
   postBillAction,
   recordPaymentOutAction,
@@ -49,6 +50,18 @@ const sample = (
   purchase_order_no: null,
   category_id: 'sample-purchases',
   category_name: 'Purchases',
+  // In ringgit, as every sample bill is.
+  currency: 'MYR',
+  fx_rate: 1,
+  fx_rate_text: '1.0000000000',
+  fx_rate_source: null,
+  fx_rate_date: null,
+  fx_rate_provider: null,
+  fx_rate_reference: null,
+  subtotal_myr: total,
+  sst_myr: 0,
+  total_myr: total,
+  balance_myr: display_status === 'paid' ? 0 : total,
 });
 
 const SAMPLE_BILLS: BillListRow[] = [
@@ -91,6 +104,8 @@ const ACTIONS: BillActions = {
   remove: deleteBillAction,
   get: getBillAction,
   recordPayment: recordPaymentOutAction,
+  // The bill form's rate: the SST rule's (Bank Negara Malaysia's 5 pm selling rate), as invoices are offered.
+  fxRate: fxSstRateForAction,
 };
 
 export default async function SupplierBillsScreen() {

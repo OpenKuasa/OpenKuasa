@@ -24,7 +24,7 @@ import type { BillOrderOption } from '@/lib/finance/bill-form';
 import type { BillDetail, BillDisplayStatus, BillListRow } from '@/lib/finance/bills';
 import type { FinanceContact } from '@/lib/finance/contacts';
 import { csvFileName } from '@/lib/finance/csv';
-import { rm } from '@/lib/finance/format';
+import { money, rm } from '@/lib/finance/format';
 import type { FinanceAccount, PaymentOutRow } from '@/lib/finance/money';
 import { payableBills } from '@/lib/finance/payment-form';
 import type { FinanceProduct } from '@/lib/finance/products';
@@ -34,6 +34,7 @@ import {
   type BillsViewData,
   LATEST_ROWS,
   billsCsv,
+  billsHaveForeign,
   displayDate,
   filterBills,
 } from '@/lib/finance/purchase-views';
@@ -120,6 +121,8 @@ export function BillsView({
   const matching = filterBills(rows, query, filter);
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
   const columns = writer ? 10 : 9;
+  // Only once a bill is in another currency does an amount carry its ringgit beside it.
+  const foreign = billsHaveForeign(rows);
   const billCount = view.byStatus.reduce((n, s) => n + s.value, 0);
   const payable = writer ? payableBills(rows, writer.payments) : [];
   const asking = open && (open.kind === 'post' || open.kind === 'void' || open.kind === 'delete') ? open : null;
@@ -231,7 +234,7 @@ export function BillsView({
           onCancel={close}
         >
           Void <span className="font-medium">{bill.bill_no}</span> from{' '}
-          <span className="font-medium">{bill.supplier_name}</span> ({rm(bill.total)})? It stays in the list as Void and
+          <span className="font-medium">{bill.supplier_name}</span> ({money(bill.total, bill.currency)})? It stays in the list as Void and
           nothing more is owed on it. This cannot be undone. A bill that has payments cannot be voided until they are
           voided or deleted.
         </ConfirmRow>
@@ -249,7 +252,7 @@ export function BillsView({
         onConfirm={() => confirm.run(() => actions.remove({ id: bill.id }), close)}
         onCancel={close}
       >
-        Delete the draft bill from <span className="font-medium">{bill.supplier_name}</span> ({rm(bill.total)})? This
+        Delete the draft bill from <span className="font-medium">{bill.supplier_name}</span> ({money(bill.total, bill.currency)})? This
         cannot be undone.
       </ConfirmRow>
     );
@@ -477,9 +480,20 @@ export function BillsView({
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(b.bill_date)}</TableCell>
                       <TableCell className="whitespace-nowrap">{b.supplier_name}</TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(b.due_date)}</TableCell>
-                      <TableCell className="whitespace-nowrap text-right tabular-nums">{rm(b.total)}</TableCell>
                       <TableCell className="whitespace-nowrap text-right tabular-nums">
-                        {rm(b.balance)}
+                        {money(b.total, b.currency)}
+                        {foreign && b.currency !== 'MYR' ? (
+                          <span className="block text-xs text-muted-foreground">
+                            {b.total_myr === null ? 'No rate yet' : `≈ ${rm(b.total_myr)}`}
+                            {b.fx_rate_source === 'manual' ? ', rate typed' : ''}
+                          </span>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums">
+                        {money(b.balance, b.currency)}
+                        {foreign && b.currency !== 'MYR' && (b.display_status === 'pending' || b.display_status === 'overdue') && b.balance_myr !== null ? (
+                          <span className="block text-xs text-muted-foreground">≈ {rm(b.balance_myr)}</span>
+                        ) : null}
                         {scheduled > 0 ? (
                           <span className="block text-xs text-muted-foreground">{rm(scheduled)} in payments not yet paid</span>
                         ) : null}

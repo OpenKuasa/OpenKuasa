@@ -290,6 +290,7 @@ export function DocumentFormCard<F extends DocumentFormState>({
             fields={fx.get(form)}
             date={rateDateOf(form)}
             figure={fx.figure}
+            lockedNote={fx.locked ? fx.locked(form) : null}
             sources={
               fx.sources
                 ? {

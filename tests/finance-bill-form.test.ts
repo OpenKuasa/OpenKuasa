@@ -23,6 +23,8 @@ import { billTotals } from '@/lib/finance/bill-math';
 import { WRITE_FAILED } from '@/lib/finance/result';
 import { BILL_MESSAGES, type BillDetail, saveBillInput } from '@/lib/finance/bills';
 import type { FinanceProduct } from '@/lib/finance/products';
+import { ringgitFields } from '@/lib/finance/document-currency';
+import { ringgitBill } from './helpers/bill-rows';
 
 const BILL = '33333333-3333-4333-8333-333333333333';
 const SUPPLIER = '44444444-4444-4444-8444-444444444444';
@@ -65,6 +67,8 @@ describe('newBillForm', () => {
       lines: [
         { key: 'k1', product_id: '', description: '', quantity: '1', uom: '', pack_size: '', unit_price: '', sst_rate: '0', discount_pct: '', discount_amount: '' },
       ],
+      // In ringgit until the person or the supplier's default says otherwise (stage 4a).
+      fx: ringgitFields(),
     });
   });
 });
@@ -237,6 +241,13 @@ describe('billPayload', () => {
       category_id: '',
       notes: '',
       lines: [{ product_id: PRODUCT, description: ' Gloves ', uom: 'box', pack_size: '', quantity: 10, unit_price: 12.5, sst_rate: 6 }],
+      // The currency part always goes: a ringgit bill as MYR alone (stage 4a).
+      currency: 'MYR',
+      fx_rate: null,
+      fx_rate_source: null,
+      fx_rate_date: null,
+      fx_rate_provider: null,
+      fx_rate_reference: null,
     });
     expect('id' in payload).toBe(false);
     expect(saveBillInput.parse(payload)).toMatchObject({
@@ -250,13 +261,16 @@ describe('billPayload', () => {
   });
   it('never carries the line keys, the dueEdited flag or a workspace', () => {
     const payload = billPayload(filled({ id: BILL }));
-    expect(Object.keys(payload).sort()).toEqual(['bill_date', 'category_id', 'due_date', 'id', 'lines', 'notes', 'purchase_order_id', 'supplier_id', 'supplier_ref']);
+    expect(Object.keys(payload).sort()).toEqual([
+      'bill_date', 'category_id', 'currency', 'due_date', 'fx_rate', 'fx_rate_date', 'fx_rate_provider', 'fx_rate_reference',
+      'fx_rate_source', 'id', 'lines', 'notes', 'purchase_order_id', 'supplier_id', 'supplier_ref',
+    ]);
     expect(Object.keys(payload.lines[0]).sort()).toEqual(['description', 'pack_size', 'product_id', 'quantity', 'sst_rate', 'unit_price', 'uom']);
   });
 });
 
 describe('billFormFromDetail', () => {
-  const detail: BillDetail = {
+  const detail: BillDetail = ringgitBill({
     id: BILL,
     bill_no: null,
     supplier_id: SUPPLIER,
@@ -277,7 +291,7 @@ describe('billFormFromDetail', () => {
       { id: 'line-1', product_id: PRODUCT, description: 'Nitrile Gloves (Box)', quantity: 10, uom: 'box', pack_size: '100 pcs', unit_price: 12.5, sst_rate: 6, amount: 125, sst_amount: 7.5 },
       { id: 'line-2', product_id: null, description: 'Delivery', quantity: 1, uom: null, pack_size: null, unit_price: 0, sst_rate: 0, amount: 0, sst_amount: 0 },
     ],
-  };
+  });
 
   it('shows a saved draft as it was saved, and keeps its due date', () => {
     const form = billFormFromDetail(detail);
@@ -315,7 +329,7 @@ describe('savedNotPosted', () => {
 });
 
 const PO = '88888888-8888-4888-8888-888888888888';
-const detailFor = (): BillDetail => ({
+const detailFor = (): BillDetail => ringgitBill({
   id: BILL,
   bill_no: null,
   supplier_id: SUPPLIER,

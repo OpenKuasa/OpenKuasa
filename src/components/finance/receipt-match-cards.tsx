@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { FinanceContact } from '@/lib/finance/contacts';
 import type { ExpenseCategory, SavedExpense } from '@/lib/finance/expenses';
-import { rm } from '@/lib/finance/format';
+import { money, rm } from '@/lib/finance/format';
 import type { FinanceProduct } from '@/lib/finance/products';
 import {
   ATTACH_LIST_MAX,
@@ -74,6 +74,8 @@ function BillFromReceipt({ open, match, onClose, onDone }: { open: MatchOpen; ma
     <BillFormCard
       initial={billFormFromReceipt(row, match.suppliers, today, match.defaultCategoryId)}
       draftOnly
+      // A receipt's amount is ringgit, and so is the bill made from it.
+      ringgitOnly
       suppliers={match.suppliers}
       products={match.products}
       categories={match.categories}
@@ -203,7 +205,7 @@ function ReceiptAttachCard({ open, match, onClose, onDone }: { open: MatchOpen; 
                       <span className="block whitespace-normal break-words text-xs text-muted-foreground">{c.detail}</span>
                     </span>
                     <span className="shrink-0 text-right">
-                      <span className="block whitespace-nowrap font-medium tabular-nums">{rm(c.amount)}</span>
+                      <span className="block whitespace-nowrap font-medium tabular-nums">{money(c.amount, c.currency)}</span>
                       {sameAmount(c, row.amount) ? (
                         <span className="inline-flex whitespace-nowrap rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-semibold text-emerald-600">
                           Same amount

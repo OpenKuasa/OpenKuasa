@@ -6,6 +6,7 @@ import { BillsView } from '@/components/finance/bills-view';
 import type { BillDetail, BillListRow } from '@/lib/finance/bills';
 import type { FinanceContact } from '@/lib/finance/contacts';
 import { billsView } from '@/lib/finance/purchase-views';
+import { ringgitBill } from './helpers/bill-rows';
 
 /**
  * The Supplier Bills screen as the server sends it: rendered to a string and
@@ -30,7 +31,7 @@ const OTHER = '55555555-5555-4555-8555-555555555555';
 const PO = '88888888-8888-4888-8888-888888888888';
 const PO_2 = '77777777-7777-4777-8777-777777777777';
 
-const bill = (id: string, extra: Partial<BillListRow> = {}): BillListRow => ({
+const bill = (id: string, extra: Partial<BillListRow> = {}): BillListRow => ringgitBill({
   id,
   bill_no: 'BILL-0001',
   supplier_id: SUPPLIER,
@@ -84,7 +85,7 @@ describe('the bills list', () => {
 const supplier = (id: string, name: string): FinanceContact =>
   ({ id, name, is_supplier: true, is_customer: false, active: true, payment_terms_days: 30 }) as unknown as FinanceContact;
 
-const detail = (extra: Partial<BillDetail> = {}): BillDetail => ({
+const detail = (extra: Partial<BillDetail> = {}): BillDetail => ringgitBill({
   ...bill('d', { display_status: 'draft', bill_no: null }),
   supplier_ref: null,
   notes: null,
@@ -176,5 +177,59 @@ describe('the bills list category column', () => {
     const html = renderToStaticMarkup(<BillsView rows={rows} view={billsView(rows, [], '2026-10-09')} held={{}} />);
     expect(html).toMatch(/<th[^>]*hidden[^>]*2xl:table-cell[^>]*>Category<\/th>/);
     expect(html).toMatch(/<td[^>]*hidden[^>]*2xl:table-cell[^>]*>Utilities<\/td>/);
+  });
+});
+
+describe('a bill in another currency (stage 4a)', () => {
+  const usd = (extra: Partial<BillListRow> = {}) =>
+    bill('u', {
+      bill_no: 'BILL-0009', total: 1080, balance: 1080, currency: 'USD', fx_rate: 4.2, fx_rate_text: '4.2000000000',
+      fx_rate_source: 'manual', fx_rate_provider: 'malaysian_bank', fx_rate_reference: 'Maybank',
+      subtotal_myr: 4200, sst_myr: 336, total_myr: 4536, balance_myr: 4536, ...extra,
+    });
+  it('lists its amounts in its own currency with the ringgit under them, and a ringgit bill as before', () => {
+    const rows = [usd(), bill('m', { bill_no: 'BILL-0010' })];
+    const html = renderToStaticMarkup(<BillsView rows={rows} view={billsView(rows, [], '2026-10-09')} held={{}} />);
+    expect(html).toContain('USD 1,080.00');
+    expect(html).toContain('≈ RM 4,536.00, rate typed');
+    expect(html).toContain('RM 100.00');
+    // The KPIs add ringgit: RM 4,536.00 + RM 100.00.
+    expect(html).toContain('RM 4,636');
+  });
+  it('says a foreign draft has no rate yet', () => {
+    const rows = [
+      usd({
+        display_status: 'draft', bill_no: null, fx_rate: null, fx_rate_text: null, fx_rate_source: null, fx_rate_provider: null,
+        fx_rate_reference: null, total_myr: null, balance_myr: null, subtotal_myr: null, sst_myr: null,
+      }),
+    ];
+    const html = renderToStaticMarkup(<BillsView rows={rows} view={billsView(rows, [], '2026-10-09')} held={{}} />);
+    expect(html).toContain('No rate yet');
+  });
+  it('draws no currency note on a list of ringgit bills', () => {
+    const rows = [bill('m')];
+    expect(renderToStaticMarkup(<BillsView rows={rows} view={billsView(rows, [], '2026-10-09')} held={{}} />)).not.toContain('≈');
+  });
+  it('offers a currency on the form, and keeps a linked bill in the order’s currency with the picker shut', () => {
+    const free = card({ editing: detail(), orders });
+    expect(free).toContain('Currency');
+    expect(free).not.toContain('In the order’s currency.');
+    const linked = card({ editing: detail({ purchase_order_id: PO, purchase_order_no: 'PO-0003' }), orders });
+    expect(linked).toContain('In the order’s currency.');
+  });
+  it('shows a saved foreign draft’s rate and where it came from', () => {
+    const html = card({
+      editing: detail({
+        currency: 'USD', fx_rate: 4.2, fx_rate_text: '4.2000000000', fx_rate_source: 'manual', fx_rate_provider: 'malaysian_bank',
+        fx_rate_reference: 'Maybank',
+      }),
+    });
+    expect(html).toContain('data-chosen="USD"');
+    expect(html).toContain('Exchange rate (RM per USD)');
+    expect(html).toContain('value="4.2"');
+    expect(html).toContain('Maybank');
+  });
+  it('offers no currency on a bill made from a receipt', () => {
+    expect(card({ ringgitOnly: true, draftOnly: true })).not.toContain('Currency');
   });
 });

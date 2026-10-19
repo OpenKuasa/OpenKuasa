@@ -6,6 +6,18 @@
  */
 import { billTotals } from './bill-math';
 import { type BillDetail, BILL_MESSAGES, saveBillInput } from './bills';
+import { BASE_CURRENCY } from './currencies';
+import {
+  CURRENCY_MESSAGES,
+  type CurrencyFields,
+  currencyError,
+  currencyPayloadWithSource,
+  ringgitFields,
+  savedFields,
+  sourceError,
+  withCurrency,
+  withPartyCurrency,
+} from './document-currency';
 import { rm } from './format';
 import {
   type DocumentFormKind,
@@ -40,6 +52,11 @@ export type BillForm = {
   /** The expense category the bill's cost lands in; '' for the workspace's default. */
   category_id: string;
   lines: LineDraft[];
+  /**
+   * The currency, the rate and, for a typed rate, its source. Ringgit for a new form until the person or the
+   * supplier's default says otherwise; a bill with a purchase order is in the order's currency.
+   */
+  fx: CurrencyFields;
 };
 
 /**
@@ -57,6 +74,7 @@ export function newBillForm(today: string, lineKey: string, defaultCategoryId = 
     purchase_order_id: '',
     category_id: defaultCategoryId,
     lines: [emptyLine(lineKey)],
+    fx: ringgitFields(),
   };
 }
 
@@ -73,23 +91,45 @@ export function billFormFromDetail(bill: BillDetail): BillForm {
     purchase_order_id: bill.purchase_order_id ?? '',
     category_id: bill.category_id ?? '',
     lines: bill.lines.map(lineDraft),
+    fx: savedFields(bill),
   };
 }
 
 /**
- * Choosing a supplier moves the due date to their terms, unless it was set by hand.
+ * Choosing a supplier moves the due date to their terms, unless it was set by hand, and on a new bill whose
+ * currency the person has not picked and that has no purchase order, the currency to the supplier's default.
  * The due-date rule is deliberately its own: it blanks the due date when the bill
  * date is empty, which the invoice form's `withCustomer` does not do. Do not
  * "tidy" it onto `followedDueDate`.
  */
-export function withSupplier(form: BillForm, supplier: { id: string; payment_terms_days: number }): BillForm {
+export function withSupplier(
+  form: BillForm,
+  supplier: { id: string; payment_terms_days: number; default_currency?: string | null },
+): BillForm {
+  // An order belongs to one supplier, so choosing another one leaves it behind.
+  const purchase_order_id = supplier.id === form.supplier_id ? form.purchase_order_id : '';
   return {
     ...form,
     supplier_id: supplier.id,
-    // An order belongs to one supplier, so choosing another one leaves it behind.
-    purchase_order_id: supplier.id === form.supplier_id ? form.purchase_order_id : '',
+    purchase_order_id,
     due_date: form.dueEdited ? form.due_date : defaultDueDate(form.bill_date, supplier.payment_terms_days),
+    fx: purchase_order_id ? form.fx : withPartyCurrency(form.fx, supplier.default_currency, !form.id),
   };
+}
+
+/**
+ * Choosing the purchase order the bill is raised against. A bill against an order is in the order's currency
+ * (the database says so too: FIN49), so choosing one puts the bill in it; every order is in ringgit until
+ * orders carry a currency. Choosing none leaves the currency where it is, free to change again.
+ */
+export function withPurchaseOrder(form: BillForm, id: string, orderCurrency: string = BASE_CURRENCY): BillForm {
+  if (!id) return { ...form, purchase_order_id: '' };
+  return { ...form, purchase_order_id: id, fx: withCurrency(form.fx, orderCurrency, true) };
+}
+
+/** Said beside a currency picker that cannot change: a bill with a purchase order is in the order's currency. */
+export function billCurrencyLock(form: Pick<BillForm, 'purchase_order_id'>): string | null {
+  return form.purchase_order_id ? 'In the order’s currency.' : null;
 }
 
 /**
@@ -118,7 +158,10 @@ export function withProduct(line: LineDraft, product: FinanceProduct | null): Li
   return filledFromProduct(line, product, product?.cost ?? 0);
 }
 
-/** What is sent to saveBillAction. Figures are numbers; a box that is not a number goes as NaN and is refused. */
+/**
+ * What is sent to saveBillAction. Figures are numbers; a box that is not a number goes as NaN and is refused.
+ * The currency part always goes (a ringgit bill as MYR), with a typed rate's source.
+ */
 export function billPayload(form: BillForm) {
   return {
     ...(form.id ? { id: form.id } : {}),
@@ -132,6 +175,7 @@ export function billPayload(form: BillForm) {
     category_id: form.category_id,
     notes: form.notes,
     lines: form.lines.map(linePayload),
+    ...currencyPayloadWithSource(form.fx),
   };
 }
 
@@ -198,6 +242,9 @@ export function billOrderWarnings(lines: LineDraft[], order: BillOrderOption | n
  * and saying so here saves a draft the database would then refuse to post.
  */
 export function billFormError(form: BillForm, posting = false): string | null {
+  // The rate box first: a rate that is not a number goes as NaN and would read as the schema's word for it.
+  const rate = currencyError(form.fx, posting, CURRENCY_MESSAGES.rateBeforePosting) ?? sourceError(form.fx);
+  if (rate) return rate;
   const parsed = saveBillInput.safeParse(billPayload(form));
   if (!parsed.success) return parsed.error.issues[0]?.message ?? BILL_MESSAGES.lines;
   if (posting && billTotals(form.lines.map(lineNumbers)).total <= 0) return BILL_MESSAGES.empty;
@@ -225,8 +272,26 @@ export const BILL_FORM_KIND: DocumentFormKind<BillForm> = {
     get: (form) => form.supplier_ref,
     set: (form, value) => ({ ...form, supplier_ref: value }),
   },
+  // One rate per bill, the rule's: Bank Negara's 5 pm selling rate for the bill date, or one typed with its source.
+  currency: {
+    get: (form) => form.fx,
+    set: (form, fx) => ({ ...form, fx }),
+    figure: 'selling',
+    sources: true,
+    locked: billCurrencyLock,
+  },
   withProduct,
   error: billFormError,
   payload: billPayload,
   savedNotPosted,
+};
+
+/**
+ * The bill form with no currency: a bill made from a receipt, whose amount is ringgit. No picker is drawn, and
+ * choosing a supplier leaves the form in ringgit whatever their default currency.
+ */
+export const BILL_FORM_KIND_RINGGIT: DocumentFormKind<BillForm> = {
+  ...BILL_FORM_KIND,
+  currency: undefined,
+  withParty: (form, supplier) => ({ ...withSupplier(form, supplier), fx: form.fx }),
 };

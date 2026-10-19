@@ -31,6 +31,7 @@ export function CurrencyFields({
   fields,
   date,
   figure = 'middle',
+  lockedNote = null,
   sources,
   onCurrency,
   onRate,
@@ -41,6 +42,8 @@ export function CurrencyFields({
   date: string;
   /** Which of Bank Negara's rates the kind is offered. */
   figure?: RateFigure;
+  /** Why the currency cannot be changed (a bill with a purchase order); null when it can. */
+  lockedNote?: string | null;
   /** Present for a kind whose typed rate names its source. */
   sources?: { onProvider: (provider: RateProvider | null) => void; onReference: (text: string) => void };
   onCurrency: (code: string) => void;
@@ -55,8 +58,12 @@ export function CurrencyFields({
     <>
       <div className="space-y-1.5 md:col-span-3">
         <Label htmlFor={`${id}-currency`}>Currency</Label>
-        <Select value={fields.currency} onValueChange={onCurrency}>
-          <SelectTrigger id={`${id}-currency`} className="w-full min-w-28">
+        <Select value={fields.currency} onValueChange={onCurrency} disabled={lockedNote !== null}>
+          <SelectTrigger
+            id={`${id}-currency`}
+            className="w-full min-w-28"
+            aria-describedby={lockedNote !== null ? `${id}-currency-locked` : undefined}
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -67,6 +74,11 @@ export function CurrencyFields({
             ))}
           </SelectContent>
         </Select>
+        {lockedNote !== null ? (
+          <p id={`${id}-currency-locked`} className="text-xs text-muted-foreground">
+            {lockedNote}
+          </p>
+        ) : null}
       </div>
       {foreign ? (
         <div className="space-y-1.5 md:col-span-9">

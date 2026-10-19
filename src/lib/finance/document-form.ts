@@ -249,13 +249,15 @@ export type DocumentFormKind<F extends DocumentFormState> = {
    * draws the currency picker and the rate, asks for Bank Negara's rate when the currency or the rate's date
    * changes, and shows the lines in that currency. Absent, the document is in ringgit and nothing changes.
    * `figure` is which of BNM's rates the kind is offered (absent: the middle rate); `sources` draws, for a rate
-   * typed by hand, where it came from (an invoice's: Customs Public Ruling 3/2026).
+   * typed by hand, where it came from (an invoice's: Customs Public Ruling 3/2026). `locked` says, when the
+   * currency cannot be changed, why (a bill with a purchase order is in the order's currency); absent, it can.
    */
   currency?: {
     get: (form: F) => CurrencyFields;
     set: (form: F, fields: CurrencyFields) => F;
     figure?: RateFigure;
     sources?: boolean;
+    locked?: (form: F) => string | null;
   };
   /** The date the rate is for, when it is not `date`: an invoice's date of supply. */
   rateDate?: (form: F) => string;
