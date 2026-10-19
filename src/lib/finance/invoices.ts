@@ -12,9 +12,10 @@
  * arrive in the next stages.
  */
 import { z } from 'zod';
-import { BASE_CURRENCY, isDocumentCurrency } from './currencies';
+import { BASE_CURRENCY } from './currencies';
 import { CURRENCY_MESSAGES, type RateSource, wholeUnitsError } from './document-currency';
-import { EINVOICE_RATE_MAX, calculationRateText } from './einvoice-fields';
+import { CURRENCY_INPUT_KEYS, currencyInputIssues, currencyInputKeys } from './document-currency-input';
+import { EINVOICE_RATE_MAX } from './einvoice-fields';
 import {
   DOCUMENT_LINES_MAX,
   type DocumentLineRow,
@@ -40,7 +41,7 @@ import {
   pgCode,
   writeFailed,
 } from './result';
-import { PROVIDER_NEEDS_REFERENCE, RATE_PROVIDERS, RATE_REFERENCE_MAX, type RateProvider } from './sst-rate';
+import { RATE_REFERENCE_MAX, type RateProvider } from './sst-rate';
 
 export const INVOICE_LINES_MAX = DOCUMENT_LINES_MAX;
 /** Invoices loaded for a screen, a page at a time. */
@@ -109,39 +110,10 @@ const saveInvoiceBase = z.object({
   due_date: isoDate,
   notes: optionalText.default(null),
   lines: z.array(salesDocumentLine, { error: M.lines }).min(1, M.lines).max(INVOICE_LINES_MAX, M.tooManyLines),
-  // The keys below are all optional, with no default: a caller that sends no currency (the finance assistant,
+  // The currency keys, all optional with no default: a caller that sends no currency (the finance assistant,
   // which writes ringgit, and the code deployed before stage 3a) leaves a draft's currency, rate and date of
-  // supply as they are, and a new invoice in ringgit. The database stores rate 1 for ringgit whatever is sent.
-  currency: z.string({ error: M.currency }).refine(isDocumentCurrency, M.currency).optional(),
-  /** Ringgit per one unit; null on a draft in another currency whose rate is not known yet. */
-  // A number (a direct caller) or exact decimal text (the form: no digit lost to a float).
-  fx_rate: z
-    .union([
-      z
-        .number({ error: M.rate })
-        .positive(M.rate)
-        .max(1_000_000_000, M.rate)
-        .refine((n) => calculationRateText(String(n)).length <= EINVOICE_RATE_MAX, M.rateTooLong),
-      z
-        .string({ error: M.rate })
-        .regex(/^\d{1,10}(\.\d{1,10})?$/, M.rate)
-        .refine((t) => Number(t) > 0 && Number(t) <= 1_000_000_000, M.rate)
-        .refine((t) => calculationRateText(t).length <= EINVOICE_RATE_MAX, M.rateTooLong),
-    ], { error: M.rate })
-    .nullable()
-    .optional(),
-  fx_rate_source: z.enum(['bnm', 'manual'], { error: M.rate }).nullable().optional(),
-  fx_rate_date: isoDate.nullable().optional(),
-  /** Where a rate typed by hand came from (Customs Public Ruling 3/2026 para 3.3). */
-  fx_rate_provider: z.enum(RATE_PROVIDERS, { error: M.rateSource }).nullable().optional(),
-  /** The bank's or central bank's name, or Customs' approval reference; trimmed, empty is none. */
-  fx_rate_reference: z
-    .string({ error: M.rateSource })
-    .trim()
-    .max(RATE_REFERENCE_MAX, M.referenceTooLong)
-    .transform((v) => (v === '' ? null : v))
-    .nullable()
-    .optional(),
+  // supply as they are, and a new invoice in ringgit (document-currency-input.ts).
+  ...currencyInputKeys(M),
   /** The date the goods were sold or the service provided, when not the invoice date. It sets the rate's date. */
   supply_date: isoDate.nullable().optional(),
 });
@@ -149,16 +121,8 @@ const dueNotBefore = (v: { invoice_date: string; due_date: string }) => v.due_da
 
 export const saveInvoiceInput = saveInvoiceBase
   .refine(dueNotBefore, { message: M.dates, path: ['due_date'] })
-  .superRefine((v, ctx) => {
-    // With no currency sent the draft keeps its own; saveInvoice checks that case against the stored one.
-    const problem = wholeUnitsError(v.currency ?? BASE_CURRENCY, v.lines);
-    if (problem) ctx.addIssue({ code: 'custom', message: problem, path: ['lines'] });
-    // A rate typed by hand names its source, and a bank, a central bank or a Customs approval its name.
-    const manual = v.currency !== undefined && v.currency !== BASE_CURRENCY && v.fx_rate != null && v.fx_rate_source !== 'bnm';
-    if (manual && (!v.fx_rate_provider || (PROVIDER_NEEDS_REFERENCE.has(v.fx_rate_provider) && !v.fx_rate_reference))) {
-      ctx.addIssue({ code: 'custom', message: M.rateSource, path: ['fx_rate_provider'] });
-    }
-  });
+  // Whole units, and a typed rate's source; with no currency sent saveInvoice checks the stored one.
+  .superRefine(currencyInputIssues(M));
 
 /**
  * What the finance assistant may send: the form's fields without a currency, a rate or a date of supply. It
@@ -166,15 +130,7 @@ export const saveInvoiceInput = saveInvoiceBase
  * them stripped.
  */
 export const saveInvoiceToolInput = saveInvoiceBase
-  .omit({
-    currency: true,
-    fx_rate: true,
-    fx_rate_source: true,
-    fx_rate_date: true,
-    fx_rate_provider: true,
-    fx_rate_reference: true,
-    supply_date: true,
-  })
+  .omit({ ...CURRENCY_INPUT_KEYS, supply_date: true })
   .refine(dueNotBefore, { message: M.dates, path: ['due_date'] });
 
 export const invoiceIdInput = z.object({ id: z.string({ error: M.gone }).uuid(M.gone) });

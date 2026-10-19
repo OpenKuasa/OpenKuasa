@@ -3,7 +3,8 @@
  * done in whole numbers, so the figure on the form is the figure the database
  * stores, to the sen.
  */
-import { isIsoDate, roundRate } from './bills';
+// From document-lines.ts itself (bills.ts re-exports them), so bills.ts can use the document-currency helpers.
+import { isIsoDate, roundRate } from './document-lines';
 
 export type LineNumbers = {
   quantity: number;
