@@ -107,6 +107,7 @@ import {
   voidPaymentIn,
 } from '@/lib/finance/money';
 import { listContras } from '@/lib/finance/contras';
+import { getRfq, getRfqGroup, listRfqs } from '@/lib/finance/rfqs';
 import type { FinanceWriteContext } from '@/lib/finance/result';
 
 /** Who is asking, and whether they may change anything. */
@@ -260,6 +261,21 @@ export function createBendaharaTools(access: FinanceAccess) {
       description: 'Finance contacts: customers and suppliers, with their kind and contact details.',
       inputSchema: z.object({}),
       execute: async () => listContacts(ctx),
+    }),
+    listRfqs: tool({
+      description: 'Requests for quotation (RFQs) with status (draft/sent/quoted/closed) and the supplier being asked.',
+      inputSchema: z.object({}),
+      execute: async () => listRfqs(ctx),
+    }),
+    getRfq: tool({
+      description: 'One RFQ in full, by id, with its lines and any prices recorded.',
+      inputSchema: idInput,
+      execute: async ({ id }) => getRfq(ctx, id),
+    }),
+    getRfqGroup: tool({
+      description: 'All the sent RFQs copied from one request, by the id of any of them, to compare suppliers\u2019 quotes side by side.',
+      inputSchema: idInput,
+      execute: async ({ id }) => getRfqGroup(ctx, id),
     }),
     listFinanceItems: tool({
       description: 'Sellable/purchasable items (products and services) with their default prices.',

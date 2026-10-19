@@ -129,4 +129,11 @@ describe('Bendahara write tools', () => {
       expect(names, clash).not.toContain(clash);
     }
   });
+
+  it('offers the RFQ read tools to everyone', () => {
+    const tools = createBendaharaTools({ client: {} as never, orgId: 'org-1', canWrite: false });
+    expect(tools).toHaveProperty('listRfqs');
+    expect(tools).toHaveProperty('getRfq');
+    expect(tools).toHaveProperty('getRfqGroup');
+  });
 });
