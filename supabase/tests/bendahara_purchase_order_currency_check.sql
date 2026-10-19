@@ -164,6 +164,12 @@ begin
       jsonb_build_object('supplier_id', sup, 'rfq_date', '1999-01-10', 'currency', 'USD', 'fx_rate', '4.083',
         'fx_rate_source', 'bnm', 'fx_rate_date', '1999-01-08'), rfq_lines));
 
+  -- The same function behind the orders' trigger.
+  fails := fails || public.bendahara_check_try('2: an order marked BNM''s with the middle figure', 'FIN39',
+    format('select public.finance_save_purchase_order(%L, %L, %L)', org,
+      jsonb_build_object('supplier_id', sup, 'po_date', '1999-01-10', 'currency', 'USD', 'fx_rate', '4.0815',
+        'fx_rate_source', 'bnm', 'fx_rate_date', '1999-01-08'), p_lines));
+
   -- ==== 3: a USD order with no rate is not submitted (FIN38); it may be cancelled ==========
   po_none := public.finance_save_purchase_order(org, jsonb_build_object('supplier_id', sup, 'po_date', current_date,
     'notes', 'case 3', 'currency', 'USD', 'fx_rate', ''), p_lines);
@@ -308,6 +314,11 @@ begin
     format('select public.finance_save_bill(%L, %L, %L)', org,
       jsonb_build_object('id', b_myr, 'supplier_id', sup, 'bill_date', current_date, 'due_date', current_date + 30,
         'currency', 'USD', 'fx_rate', '4.2', 'fx_rate_source', 'manual', 'fx_rate_provider', 'oanda'), myr_line));
+  -- The USD bill moved from the USD order to the ringgit one (the link changes): FIN49 on the new order's currency.
+  fails := fails || public.bendahara_check_try('8: the USD bill re-linked to the ringgit order', 'FIN49',
+    format('select public.finance_save_bill(%L, %L, %L)', org,
+      jsonb_build_object('id', b_usd, 'supplier_id', sup, 'bill_date', current_date, 'due_date', current_date + 30,
+        'purchase_order_id', po_myr), p_lines));
   fails := fails || public.bendahara_check_try('8: the ringgit bill is posted', 'ok',
     format('select public.finance_post_bill(%L, %L)', org, b_myr));
 
