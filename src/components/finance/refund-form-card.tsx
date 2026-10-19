@@ -8,18 +8,22 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { rm } from '@/lib/finance/format';
+import { money } from '@/lib/finance/format';
 import { type FinanceAccount, PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentMethod } from '@/lib/finance/money';
 import {
   type RefundSaved,
   type RefundTarget,
   chooseRefundTarget,
+  foreignRefundTarget,
   keepRefundTarget,
   newRefundForm,
+  refundAmountLabel,
   refundFormError,
   refundPayload,
+  refundPreviewNotes,
   refundSaved,
   refundTargetLabel,
+  withRefundRinggit,
 } from '@/lib/finance/refund-form';
 import { REFUND_REASONS, REFUND_REASON_LABELS, type RefundReason } from '@/lib/finance/refunds';
 import type { FinResult } from '@/lib/finance/result';
@@ -33,7 +37,9 @@ const SUBTITLE = 'Money paid back to a customer who is in credit';
  * against one of its issued credit notes: paid out now, or left pending.
  * Used on Refunds, on Invoices from an invoice's Refund choice and on Credit
  * Notes from a credit note's (`preselect`). A refund is one payment for one
- * document with a reason, so it has its own card. The rules are in
+ * document with a reason, so it has its own card. On an invoice in another
+ * currency the amount is in its currency, the ringgit that left the account
+ * is asked for, and it is paid out now (no "Pay later"). The rules are in
  * src/lib/finance/refund-form.ts.
  */
 export function RefundFormCard({
@@ -72,6 +78,8 @@ export function RefundFormCard({
   // A choice that was refunded in another tab since a refresh is dropped from everything below.
   const form = keepRefundTarget(typed, targets);
   const chosen = targets.find((t) => t.key === form.target);
+  // An invoice in another currency: refunded in its currency, paid out in ringgit, now.
+  const foreign = foreignRefundTarget(form, targets);
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     // Handled here rather than as a form action, so a refused form keeps what was typed.
@@ -135,12 +143,12 @@ export function RefundFormCard({
           </Select>
           <p className="text-xs text-muted-foreground tabular-nums" aria-live="polite">
             {chosen
-              ? `Up to ${rm(chosen.refundable)}: what the customer is in credit on ${chosen.invoice_no}, less refunds still to be paid${chosen.kind === 'credit_note' ? `, and no more than is left of ${chosen.number}` : ''}.`
+              ? `Up to ${money(chosen.refundable, chosen.currency)}: what the customer is in credit on ${chosen.invoice_no}, less refunds still to be paid${chosen.kind === 'credit_note' ? `, and no more than is left of ${chosen.number}` : ''}.`
               : 'An invoice whose customer is in credit, or one of its issued credit notes.'}
           </p>
         </div>
         <div className="space-y-1.5 md:col-span-3">
-          <Label htmlFor={`${id}-amount`}>Amount (RM)</Label>
+          <Label htmlFor={`${id}-amount`}>{refundAmountLabel(form, targets)}</Label>
           <Input
             id={`${id}-amount`}
             type="number"
@@ -172,6 +180,38 @@ export function RefundFormCard({
             </SelectContent>
           </Select>
         </div>
+
+        {foreign ? (
+          <div className="space-y-1.5 md:col-span-12">
+            <Label htmlFor={`${id}-ringgit`}>Ringgit paid out</Label>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground" aria-hidden>
+                RM
+              </span>
+              <Input
+                id={`${id}-ringgit`}
+                inputMode="decimal"
+                autoComplete="off"
+                className="w-40 text-right tabular-nums"
+                aria-describedby={`${id}-ringgit-hint`}
+                // Enter in the box does not record the refund half typed.
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') e.preventDefault();
+                }}
+                value={form.ringgit}
+                onChange={(e) => edit((f) => withRefundRinggit(f, e.target.value))}
+              />
+            </div>
+            <p id={`${id}-ringgit-hint`} className="text-xs text-muted-foreground">
+              What left the account, in RM. The amount above is in {foreign.currency}, the invoice’s currency.
+            </p>
+            {refundPreviewNotes(form, targets).map((note) => (
+              <p key={note} className="text-sm text-muted-foreground" aria-live="polite">
+                {note}
+              </p>
+            ))}
+          </div>
+        ) : null}
 
         <div className="space-y-1.5 md:col-span-3">
           <Label htmlFor={`${id}-account`}>Paid from</Label>
@@ -248,16 +288,19 @@ export function RefundFormCard({
               />
               Pay out now
             </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="radio"
-                name={`${id}-when`}
-                className="size-4 accent-primary"
-                checked={form.scheduled}
-                onChange={() => edit((f) => ({ ...f, scheduled: true }))}
-              />
-              Pay later
-            </label>
+            {/* A refund on an invoice in another currency is paid out now: its exchange difference is decided then. */}
+            {foreign ? null : (
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name={`${id}-when`}
+                  className="size-4 accent-primary"
+                  checked={form.scheduled}
+                  onChange={() => edit((f) => ({ ...f, scheduled: true }))}
+                />
+                Pay later
+              </label>
+            )}
           </div>
         </fieldset>
 

@@ -69,11 +69,14 @@ describe('refund reads', () => {
     amount: '240.00', transaction_amount: '240.00', status: 'posted', reference: null, reason: 'damaged_goods', notes: null,
     account_id: 'bank', account_name: 'Main Bank', invoice_id: 'inv-1', invoice_no: 'INV-1042',
     credit_note_id: 'cn-1', credit_note_no: 'CN-0034', customer_id: 'c1', customer_name: 'Aisyah Trading',
+    currency: 'MYR', amount_myr: '240.00', carried_myr: '240.00', realised_myr: '0.00',
   });
 
   it('lists from the refunds view, in the caller’s workspace, newest first, with amounts as numbers', async () => {
     const { ctx, calls } = fakeFinance({ data: [row(1)], error: null });
-    expect(await listRefunds(ctx)).toEqual([{ ...row(1), amount: 240, transaction_amount: 240 }]);
+    expect(await listRefunds(ctx)).toEqual([
+      { ...row(1), amount: 240, transaction_amount: 240, amount_myr: 240, carried_myr: 240, realised_myr: 0 },
+    ]);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
       name: 'finance_refunds',

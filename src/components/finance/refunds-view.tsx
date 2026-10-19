@@ -20,7 +20,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { localIsoDate } from '@/lib/finance/bill-math';
 import type { CreditNoteRow } from '@/lib/finance/credit-notes';
 import { csvFileName } from '@/lib/finance/csv';
-import { rm } from '@/lib/finance/format';
+import { money, rm } from '@/lib/finance/format';
 import type { InvoiceListRow } from '@/lib/finance/invoices';
 import { type FinanceAccount, markPaymentPaidInput } from '@/lib/finance/money';
 import { refundTargets } from '@/lib/finance/refund-form';
@@ -139,7 +139,7 @@ export function RefundsView({
     const id = row.transaction_id;
     const name = refundName(row);
     const who = <span className="font-medium">{row.customer_name}</span>;
-    const amount = <span className="font-medium">{rm(row.amount)}</span>;
+    const amount = <span className="font-medium">{money(row.amount, row.currency)}</span>;
     const invoice = <span className="font-medium">{row.invoice_no ?? 'the invoice'}</span>;
     const shared = { colSpan: columns, pending: confirm.pending, error: confirm.error, onCancel: close };
     const confirmPaid = () => {
@@ -369,7 +369,23 @@ export function RefundsView({
                       <TableCell className="whitespace-nowrap text-muted-foreground">{r.invoice_no ?? '—'}</TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{r.credit_note_no ?? '—'}</TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{REFUND_REASON_LABELS[r.reason]}</TableCell>
-                      <TableCell className="whitespace-nowrap text-right tabular-nums">{rm(r.amount)}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums">
+                        {(r.currency ?? 'MYR') === 'MYR' ? (
+                          rm(r.amount)
+                        ) : (
+                          // An invoice in another currency: the part refunded, the ringgit paid out, and the realised
+                          // difference when there is one.
+                          <>
+                            {money(r.amount, r.currency)}
+                            {r.amount_myr !== null && r.amount_myr !== undefined ? ` · ${rm(r.amount_myr)}` : ''}
+                            {r.realised_myr ? (
+                              <span className="block text-xs text-muted-foreground">
+                                Realised {r.realised_myr > 0 ? 'gain' : 'loss'} {rm(Math.abs(r.realised_myr))}
+                              </span>
+                            ) : null}
+                          </>
+                        )}
+                      </TableCell>
                       <TableCell>
                         <span className="flex items-center gap-2">
                           <LiveDot active={r.status === 'posted'} />

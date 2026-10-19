@@ -97,10 +97,12 @@ describe('refundTargets: what can be refunded, and how much', () => {
       {
         key: invoiceTargetKey(INVOICE), kind: 'invoice', id: INVOICE, number: 'INV-0007',
         invoice_id: INVOICE, invoice_no: 'INV-0007', customer_name: 'Aisyah Trading', refundable: 30,
+        currency: 'MYR', fx_rate_text: '1.0000000000', credit: 30, credit_myr: 30,
       },
       {
         key: noteTargetKey(NOTE), kind: 'credit_note', id: NOTE, number: 'CN-0003',
         invoice_id: INVOICE, invoice_no: 'INV-0007', customer_name: 'Aisyah Trading', refundable: 30,
+        currency: 'MYR', fx_rate_text: '1.0000000000', credit: 30, credit_myr: 30,
       },
     ]);
   });
@@ -237,6 +239,7 @@ describe('a new refund form', () => {
     expect(newRefundForm(two, accounts, '2026-10-09')).toEqual({
       target: '',
       amount: '',
+      ringgit: '',
       reason: '',
       accountId: BANK,
       date: '2026-10-09',
@@ -387,7 +390,7 @@ describe('the note that a refund was recorded', () => {
     expect(refundFormError(changed, offered)).toBeNull();
 
     const saved = refundSaved(changed, offered);
-    expect(saved).toEqual({ target: other, amount: 45, scheduled: false });
+    expect(saved).toEqual({ target: other, amount: 45, ringgit: null, scheduled: false });
     // What the note says is what was sent.
     expect(refundPayload(changed, offered)).toMatchObject({ invoice_id: OTHER, credit_note_id: null, amount: 45 });
     const said = refundSavedNote(saved!);
