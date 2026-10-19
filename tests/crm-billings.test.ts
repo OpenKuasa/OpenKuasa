@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { RECENT_LISTED, TOP_CUSTOMERS_LISTED, buildBillings } from '@/lib/crm/billings';
 import type { InvoiceDisplayStatus, InvoiceListRow } from '@/lib/finance/invoices';
+import type { PaymentInRow } from '@/lib/finance/money';
 import { ringgitRow } from './helpers/invoice-rows';
 
 /** 10 Oct 2026, mid-morning in Kuala Lumpur. */
@@ -142,5 +143,73 @@ describe('Kasturi’s Billings figures', () => {
     expect(model.topCustomers).toEqual([]);
     expect(model.recent).toEqual([]);
     expect(model.trend).toHaveLength(6);
+  });
+});
+
+/** A posted payment in against an invoice; the ringgit that arrived is `amount_myr`. */
+function payment(invoiceId: string, amount: number, over: Partial<PaymentInRow> = {}): PaymentInRow {
+  seq += 1;
+  return {
+    allocation_id: `al-${seq}`,
+    transaction_id: `tx-${seq}`,
+    number: `PV-${seq}`,
+    txn_date: '2026-10-06',
+    method: 'bank_transfer',
+    amount,
+    transaction_amount: amount,
+    status: 'posted',
+    reference: null,
+    account_id: 'acc1',
+    account_name: 'Maybank',
+    invoice_id: invoiceId,
+    invoice_no: null,
+    customer_name: 'Aisyah Trading',
+    ...over,
+  };
+}
+
+describe('Kasturi’s Billings received figure (what arrived, as Bendahara shows it)', () => {
+  // Worked example: worth RM 1,680 at its rate; the customer pays and RM 1,658 arrives (carried 1,680, loss 22).
+  const usd = () =>
+    invoice('paid', 400, 400, {
+      currency: 'USD',
+      fx_rate: 4.2,
+      fx_rate_text: '4.2000000000',
+      total_myr: 1680,
+      balance_myr: 0,
+      balance: 0,
+      paid_myr: 1680,
+    });
+  const arrived = { currency: 'USD', amount_myr: 1658, carried_myr: 1680, realised_myr: -22 };
+
+  it('counts the ringgit that arrived for a foreign invoice, and still owes nothing', () => {
+    const row = usd();
+    const model = buildBillings([row], NOW, new Map(), [payment(row.id, 400, arrived)]);
+    expect(model.stats.received).toBe(1658);
+    expect(model.stats.outstanding).toBe(0);
+    expect(model.stats.billedThisMonth).toBe(1680);
+    expect(model.topCustomers[0]).toMatchObject({ billed: 1680, outstanding: 0 });
+  });
+
+  it('leaves out a voided payment', () => {
+    const row = usd();
+    const model = buildBillings([row], NOW, new Map(), [payment(row.id, 400, { ...arrived, status: 'void' })]);
+    expect(model.stats.received).toBe(0);
+  });
+
+  it('is unchanged for a ringgit invoice: the amount paid', () => {
+    const row = invoice('sent', 500, 200);
+    const model = buildBillings([row], NOW, new Map(), [
+      payment(row.id, 200, { amount_myr: 200, carried_myr: 200, realised_myr: 0 }),
+    ]);
+    expect(model.stats.received).toBe(200);
+    expect(model.stats.outstanding).toBe(300);
+    expect(model.stats.collectionRate).toBe(40);
+  });
+
+  it('counts only payments of issued invoices', () => {
+    const draft = invoice('draft', 500, 0);
+    const model = buildBillings([draft], NOW, new Map(), [payment(draft.id, 50)]);
+    expect(model.stats.received).toBe(0);
   });
 });

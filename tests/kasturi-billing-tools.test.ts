@@ -72,8 +72,34 @@ function tools(tables: Record<string, Record<string, unknown>[]>, canWrite = fal
     ].execute(input, { toolCallId: 't1', messages: [] });
 }
 
+/** A payment-in view row (the database sends numbers as text); the ringgit that arrived is `amountMyr`. */
+function paymentRow(n: number, invoiceId: string, amount: number, amountMyr: number, status = 'posted') {
+  return {
+    allocation_id: `al-${n}`,
+    transaction_id: `tx-${n}`,
+    number: `RV-${n}`,
+    txn_date: '2026-10-02',
+    method: 'bank_transfer',
+    amount: amount.toFixed(2),
+    transaction_amount: amountMyr.toFixed(2),
+    status,
+    reference: null,
+    account_id: 'a1',
+    account_name: 'Maybank',
+    invoice_id: invoiceId,
+    invoice_no: null,
+    customer_name: 'Aisyah Trading',
+    currency: 'MYR',
+    amount_myr: amountMyr.toFixed(2),
+    carried_myr: amountMyr.toFixed(2),
+    realised_myr: '0.00',
+  };
+}
+const PAYMENTS = [paymentRow(1, 'inv-1', 100, 100), paymentRow(2, 'inv-2', 50, 50)];
+
 const TABLES = {
   finance_invoice_totals: INVOICES,
+  finance_payments_in: PAYMENTS,
   crm_deal_invoices: [{ deal_id: DEAL, invoice_id: 'inv-1' }],
   crm_deals: [DEAL_ROW],
   crm_contacts: [{ id: CONTACT, finance_customer_id: CUSTOMER }],
@@ -149,5 +175,39 @@ describe('Kasturi’s billing lookups', () => {
     expect(Object.keys(all).filter((name) => /invoice/i.test(name))).toEqual(['listBillingInvoices']);
     const viewer = createCrmTools({ client: fakeClient(TABLES), orgId: 'org1', userId: 'user1', canWrite: false });
     expect(Object.keys(viewer)).toEqual(expect.arrayContaining(['getBillingSummary', 'listBillingInvoices']));
+  });
+});
+
+describe('Kasturi’s billing lookups for an invoice in another currency', () => {
+  // USD 400 worth RM 1,680 at the invoice's rate; RM 1,658 arrived (carried 1,680, loss 22); nothing is owed.
+  const usd = {
+    ...invoiceRow(5, 'paid', 400, 400),
+    currency: 'USD',
+    fx_rate: '4.2000000000',
+    fx_rate_text: '4.2000000000',
+    total_myr: '1680.00',
+    balance_myr: '0.00',
+    paid_myr: '1680.00',
+  };
+  const arrived = { ...paymentRow(9, 'inv-5', 400, 1658), currency: 'USD', carried_myr: '1680.00', realised_myr: '-22.00' };
+  const tables = { ...TABLES, finance_invoice_totals: [usd], finance_payments_in: [arrived] };
+
+  it('report the ringgit that arrived as received, with nothing outstanding', async () => {
+    expect(await tools(tables)('getBillingSummary', {})).toMatchObject({
+      received_rm: 1658,
+      outstanding_rm: 0,
+      billed_this_month_rm: 1680,
+    });
+  });
+
+  it('give paid_rm as the ringgit that arrived and balance_rm from the balance', async () => {
+    const result = (await tools(tables)('listBillingInvoices', {})) as { invoices: Record<string, unknown>[] };
+    expect(result.invoices[0]).toMatchObject({ total_rm: 1680, paid_rm: 1658, balance_rm: 0, currency: 'USD', status: 'paid' });
+  });
+
+  it('leave out a voided payment', async () => {
+    const voided = { ...tables, finance_payments_in: [{ ...arrived, status: 'void' }] };
+    const result = (await tools(voided)('listBillingInvoices', {})) as { invoices: Record<string, unknown>[] };
+    expect(result.invoices[0]).toMatchObject({ paid_rm: 0 });
   });
 });
