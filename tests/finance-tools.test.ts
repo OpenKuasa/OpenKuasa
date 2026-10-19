@@ -182,6 +182,17 @@ describe('Bendahara write tools', () => {
     }
   });
 
+  it('adds the manual journal write tools for a writer, none for a viewer', () => {
+    const names = ['saveJournal', 'postJournal', 'reverseJournal'];
+    const w = createBendaharaTools({ client: {} as never, orgId: 'o', canWrite: true });
+    const v = createBendaharaTools({ client: {} as never, orgId: 'o', canWrite: false });
+    for (const name of names) {
+      expect(w).toHaveProperty(name);
+      expect(FINANCE_WRITE_TOOL_NAMES).toContain(name);
+      expect(v).not.toHaveProperty(name);
+    }
+  });
+
   it('relays a refused purchase-order approval verbatim: nothing swallowed, no success claimed', async () => {
     const tools = createBendaharaTools(writer()) as Record<string, unknown>;
     const out = await exec(tools.decidePurchaseOrder, { id: '11111111-1111-4111-8111-111111111111', approve: true });

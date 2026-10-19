@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { FINANCE_REVALIDATE } from '@/lib/ai/finance-revalidate';
+import { FINANCE_WRITE_TOOL_NAMES } from '@/lib/ai/finance-tools';
 import { FINANCE_ID_GATED, FINANCE_SAVE_GATED } from '@/lib/ai/finance-id-gate';
 
 /**
  * The finance write actions whose tools arrive in Tasks 7-10. Their revalidation paths are pinned here now,
- * so a later task that adds a tool but forgets its screen path fails loudly. This asserts the map's SHAPE only:
- * the `FINANCE_WRITE_TOOL_NAMES.toContain(name)` cross-check the plan sketches is deferred to Task 10, when
- * those write tools exist (asserting it now would fail, since none are registered yet).
+ * so a later task that adds a tool but forgets its screen path fails loudly.
  */
 const WRITE_ACTIONS = [
   'saveRfq',
@@ -40,6 +39,13 @@ describe('finance revalidation map', () => {
     for (const [action, paths] of Object.entries(FINANCE_REVALIDATE)) {
       expect(Array.isArray(paths) && paths.length > 0, action).toBe(true);
       expect(paths.every((p) => p.startsWith('/finance')), action).toBe(true);
+    }
+  });
+
+  it('every new write tool is registered as a finance write tool AND has a revalidation entry', () => {
+    for (const action of WRITE_ACTIONS) {
+      expect(FINANCE_WRITE_TOOL_NAMES, action).toContain(action);
+      expect(FINANCE_REVALIDATE[action], action).toBeDefined();
     }
   });
 

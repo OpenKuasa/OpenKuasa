@@ -87,6 +87,7 @@ function labelOf(row: Record<string, unknown>, kind?: ItemKind): string | null {
   if (kind === 'quotation') return text(row.quotation_no) ?? text(row.customer_name);
   if (kind === 'rfq') return text(row.rfq_no) ?? text(row.supplier_name);
   if (kind === 'purchase-order') return text(row.po_no) ?? text(row.supplier_name);
+  if (kind === 'journal') return text(row.journal_no) ?? text(row.description);
   if (kind === 'bill') return text(row.bill_no) ?? text(row.supplier_name);
   if (kind === 'credit-note') return text(row.credit_note_no) ?? text(row.customer_name);
   if (kind === 'finance-contact' || kind === 'item') return text(row.name);
@@ -152,6 +153,7 @@ export type ItemKind =
   | 'quotation'
   | 'rfq'
   | 'purchase-order'
+  | 'journal'
   | 'bill'
   | 'credit-note'
   | 'finance-contact'
@@ -302,6 +304,9 @@ const KIND_OF_TOOL: Record<string, ItemKind> = {
   decidePurchaseOrder: 'purchase-order',
   closePurchaseOrder: 'purchase-order',
   cancelPurchaseOrder: 'purchase-order',
+  saveJournal: 'journal',
+  postJournal: 'journal',
+  reverseJournal: 'journal',
   listBills: 'bill',
   getBill: 'bill',
   saveBill: 'bill',
@@ -1914,6 +1919,9 @@ export function approvalTitle(
     case 'decidePurchaseOrder': return `${i.approve === false ? 'Reject' : 'Approve'} ${the('purchase order', 'purchase-order')}?`;
     case 'closePurchaseOrder': return `Close ${the('purchase order', 'purchase-order')}?`;
     case 'cancelPurchaseOrder': return `Cancel ${the('purchase order', 'purchase-order')}?`;
+    case 'saveJournal': return i.id ? `Save changes to ${the('journal', 'journal')}?` : 'Create a draft journal?';
+    case 'postJournal': return `Post ${the('journal', 'journal')} to the books?`;
+    case 'reverseJournal': return `Create the reversing draft of ${the('journal', 'journal')}?`;
     case 'closeRfq': return `Close ${the('request for quotation', 'rfq')}?`;
     case 'saveBill': return i.id ? `Save changes to ${the('supplier bill', 'bill')}?` : 'Create a draft supplier bill?';
     case 'postBill': return `Post ${the('supplier bill', 'bill')}?`;

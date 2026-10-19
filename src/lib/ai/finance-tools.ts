@@ -107,7 +107,19 @@ import {
   voidPaymentIn,
 } from '@/lib/finance/money';
 import { listContras } from '@/lib/finance/contras';
-import { getJournal, listJournals, listLedgerAccounts, listLedgerLines, type LedgerAccount } from '@/lib/finance/ledger';
+import {
+  getJournal,
+  journalIdInput,
+  listJournals,
+  listLedgerAccounts,
+  listLedgerLines,
+  postJournal,
+  reverseJournal,
+  reverseJournalInput,
+  saveJournal,
+  saveJournalInput,
+  type LedgerAccount,
+} from '@/lib/finance/ledger';
 import { filterEntries, groupEntries } from '@/lib/finance/ledger-views';
 import { getPurchaseOrder, listPurchaseOrders } from '@/lib/finance/purchase-orders';
 import { listOpenBills, listOpenInvoices } from '@/lib/finance/reports-data';
@@ -184,6 +196,9 @@ export const FINANCE_WRITE_TOOL_NAMES = [
   'decidePurchaseOrder',
   'closePurchaseOrder',
   'cancelPurchaseOrder',
+  'saveJournal',
+  'postJournal',
+  'reverseJournal',
   'saveCreditNote',
   'issueCreditNote',
   'voidCreditNote',
@@ -574,6 +589,22 @@ export function createBendaharaTools(access: FinanceAccess) {
       description: 'Cancel a purchase order.',
       inputSchema: purchaseOrderIdInput,
       execute: async (input) => cancelPurchaseOrder(ctx, input),
+    }),
+    // Manual journals
+    saveJournal: tool({
+      description: 'Create or edit a DRAFT manual journal (balanced debit and credit lines). Omit id to create.',
+      inputSchema: saveJournalInput,
+      execute: async (input) => saveJournal(ctx, input),
+    }),
+    postJournal: tool({
+      description: 'Post a draft manual journal to the books (it gets its number and locks). Owner or admin only (the books enforce it).',
+      inputSchema: journalIdInput,
+      execute: async (input) => postJournal(ctx, input),
+    }),
+    reverseJournal: tool({
+      description: 'Create the reversing draft of a posted journal (post it separately to undo the entry).',
+      inputSchema: reverseJournalInput,
+      execute: async (input) => reverseJournal(ctx, input),
     }),
     // Credit notes
     saveCreditNote: tool({
