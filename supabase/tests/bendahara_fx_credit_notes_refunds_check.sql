@@ -40,6 +40,13 @@ declare
   rf_x uuid;
   rf_myr uuid;
   draft_out uuid;
+  i_s2 uuid;
+  i_sst uuid;
+  i_idr2 uuid;
+  i_myr2 uuid;
+  pay2 uuid;
+  cn2 uuid;
+  rf2 uuid;
   n integer;
   t text;
   r record;
@@ -216,6 +223,16 @@ begin
   if r.rec <> 0 or r.open_foreign <> 0 or r.open_myr <> 0 then
     fails := fails || format('C2 leaves Receivable at %s, the invoice USD %s / RM %s open', r.rec, r.open_foreign, r.open_myr);
   end if;
+  -- Voided, its ringgit is not worked out again (it would be round(99.99 x 4.2555) = 425.51 against the
+  -- invoice as it stands then), and the reversal is the issue's numbers.
+  fails := fails || public.bendahara_check_try('C2: voided', 'ok',
+    format('update public.finance_credit_notes set status = %L, updated_at = now() where id = %L', 'void', cn));
+  select amount_myr into r from public.finance_credit_notes where id = cn;
+  if r.amount_myr is distinct from 425.52 then fails := fails || format('C2 voided keeps RM %s, not 425.52', r.amount_myr); end if;
+  select * into r from public.bendahara_check_entry(cn, ':void');
+  if r.rec_dr <> 425.52 or r.dr <> r.cr then
+    fails := fails || format('the void of C2 posts Dr Receivable %s (Dr %s, Cr %s)', r.rec_dr, r.dr, r.cr);
+  end if;
 
   -- ==== D: paid in full, credited USD 108.00, refunded RM 445.00: gain 8.60 ======
   i_d := public.finance_save_invoice(org, jsonb_build_object('customer_id', cust) || dates || usd_at_4_2, usd_line);
@@ -333,9 +350,11 @@ begin
     fails := fails || format('past zero the invoice reads USD %s / RM %s, not -10.01 / -42.60', r.balance, r.balance_myr);
   end if;
   -- Refunded against the invoice itself, RM 42.00 out: closing, carried 42.60, gain 0.60. Receivable 0.00.
-  rf_x := public.finance_record_refund(org,
-    jsonb_build_object('invoice_id', i_x, 'account_id', bank, 'method', 'fpx', 'txn_date', '1999-01-21', 'reason', 'overpayment',
-                       'amount', 10.01, 'amount_myr', '42'));
+  fails := fails || public.bendahara_check_try('past zero: USD 10.01 refunded as RM 42.00', 'ok',
+    format('select public.finance_record_refund(%L, %L)', org,
+      jsonb_build_object('invoice_id', i_x, 'account_id', bank, 'method', 'fpx', 'txn_date', '1999-01-21', 'reason', 'overpayment',
+                         'amount', 10.01, 'amount_myr', '42', 'notes', 'past zero')));
+  select id into rf_x from public.finance_transactions where org_id = org and notes = 'past zero';
   select a.amount_myr, a.carried_myr into r from public.finance_allocations a where a.transaction_id = rf_x;
   if r.amount_myr is distinct from 42.00 or r.carried_myr is distinct from 42.60 then
     fails := fails || format('the refund past zero is RM %s carried %s, not 42.00 / 42.60', r.amount_myr, r.carried_myr);
@@ -400,6 +419,141 @@ begin
   fails := fails || public.bendahara_check_try('the ringgit of a USD refund draft lowered', 'ok',
     format('update public.finance_transactions set amount = 5 where id = %L', draft_out));
   delete from public.finance_transactions where id = draft_out;
+
+  -- ==== a refund that does not clear the credit: at the rate, never more than is in credit ===
+  -- D again (in credit USD 108.00 / RM 453.60 since its refund was voided). USD 50.00 refunded as RM 205.00:
+  -- carried round(50 x 4.2) = 210.00, gain 5.00. Then the USD 58.00 left as RM 240.00: closing, carried the
+  -- 243.60 still in credit, gain 3.60. Receivable 0.00.
+  -- Through the try, so a refusal is reported by name.
+  fails := fails || public.bendahara_check_try('a partial USD refund: USD 50.00 as RM 205.00', 'ok',
+    format('select public.finance_record_refund(%L, %L)', org,
+      jsonb_build_object('credit_note_id', cn_d, 'account_id', bank, 'method', 'fpx', 'txn_date', '1999-01-23',
+                         'reason', 'damaged_goods', 'amount', 50, 'amount_myr', '205', 'notes', 'partial 1')));
+  select id into rf2 from public.finance_transactions where org_id = org and notes = 'partial 1';
+  select a.amount_myr, a.carried_myr into r from public.finance_allocations a where a.transaction_id = rf2;
+  if r.amount_myr is distinct from 205.00 or r.carried_myr is distinct from 210.00 then
+    fails := fails || format('a partial USD refund is RM %s carried %s, not 205.00 / 210.00', r.amount_myr, r.carried_myr);
+  end if;
+  select * into r from public.bendahara_check_entry(rf2);
+  if r.rec_dr <> 210.00 or r.bank_cr <> 205.00 or r.fx_cr <> 5.00 or r.dr <> r.cr then
+    fails := fails || format('a partial USD refund posts Dr Receivable %s, Cr Bank %s, Cr Realised %s', r.rec_dr, r.bank_cr, r.fx_cr);
+  end if;
+  rf2 := null;
+  fails := fails || public.bendahara_check_try('the rest of the USD credit: USD 58.00 as RM 240.00', 'ok',
+    format('select public.finance_record_refund(%L, %L)', org,
+      jsonb_build_object('credit_note_id', cn_d, 'account_id', bank, 'method', 'fpx', 'txn_date', '1999-01-24',
+                         'reason', 'damaged_goods', 'amount', 58, 'amount_myr', '240', 'notes', 'partial 2')));
+  select id into rf2 from public.finance_transactions where org_id = org and notes = 'partial 2';
+  select a.carried_myr, a.amount_myr into r from public.finance_allocations a where a.transaction_id = rf2;
+  if r.carried_myr is distinct from 243.60 or r.amount_myr is distinct from 240.00 then
+    fails := fails || format('the rest of the USD credit refunded carries %s (RM %s), not 243.60 / 240.00', r.carried_myr, r.amount_myr);
+  end if;
+  select * into r from public.bendahara_check_receivable(i_d);
+  if r.rec <> 0 or r.open_foreign <> 0 or r.open_myr <> 0 then
+    fails := fails || format('D refunded in two parts leaves Receivable at %s, the invoice USD %s / RM %s', r.rec, r.open_foreign, r.open_myr);
+  end if;
+
+  -- ==== the cap, for refunds: IDR credits whose ringgit each rounded down ==================
+  -- IDR 2,000,030.00 at 0.00028 (RM 560.00) paid in full as RM 560.00, then two credit notes of IDR 1,000,015.00
+  -- on the paid invoice, each round(280.0042) = 280.00: in credit IDR 2,000,030.00 / RM 560.00. A refund of
+  -- IDR 2,000,029.00 does not clear it: round(560.00812) = 560.01 at the rate, more than the 560.00 in credit,
+  -- so it carries 560.00. The last IDR 1.00 carries the 0.00 left. Receivable 0.00.
+  i_idr2 := public.finance_save_invoice(org,
+    jsonb_build_object('customer_id', cust, 'currency', 'IDR', 'fx_rate', '0.00028', 'fx_rate_source', 'manual',
+                       'fx_rate_provider', 'oanda') || dates,
+    '[{"description":"a","quantity":1,"unit_price":1000015,"sst_rate":0},
+      {"description":"b","quantity":1,"unit_price":1000015,"sst_rate":0}]'::jsonb);
+  perform public.finance_post_invoice(org, i_idr2);
+  fails := fails || public.bendahara_check_try('IDR: paid in full as RM 560.00', 'ok',
+    format('select public.finance_record_payment_in(%L, %L, %L)', org,
+      jsonb_build_object('account_id', bank, 'method', 'fpx', 'txn_date', '1999-01-12', 'amount_myr', '560'),
+      jsonb_build_array(jsonb_build_object('invoice_id', i_idr2, 'amount', 2000030))));
+  perform public.finance_issue_credit_note(org, public.finance_save_credit_note(org,
+    jsonb_build_object('invoice_id', i_idr2, 'credit_date', '1999-01-15', 'reason', 'returns', 'amount', 1000015)));
+  perform public.finance_issue_credit_note(org, public.finance_save_credit_note(org,
+    jsonb_build_object('invoice_id', i_idr2, 'credit_date', '1999-01-16', 'reason', 'returns', 'amount', 1000015)));
+  select balance, balance_myr into r from public.finance_invoice_totals where id = i_idr2;
+  if r.balance <> -2000030 or r.balance_myr <> -560.00 then
+    fails := fails || format('IDR credits read IDR %s / RM %s, not -2000030 / -560.00', r.balance, r.balance_myr);
+  end if;
+  fails := fails || public.bendahara_check_try('IDR: IDR 2,000,029.00 refunded as RM 560.00', 'ok',
+    format('select public.finance_record_refund(%L, %L)', org,
+      jsonb_build_object('invoice_id', i_idr2, 'account_id', bank, 'method', 'fpx', 'txn_date', '1999-01-20',
+                         'reason', 'overpayment', 'amount', 2000029, 'amount_myr', '560')));
+  fails := fails || public.bendahara_check_try('IDR: the last IDR 1.00 refunded as RM 0.01', 'ok',
+    format('select public.finance_record_refund(%L, %L)', org,
+      jsonb_build_object('invoice_id', i_idr2, 'account_id', bank, 'method', 'fpx', 'txn_date', '1999-01-21',
+                         'reason', 'overpayment', 'amount', 1, 'amount_myr', '0.01')));
+  select string_agg(a.carried_myr::text, ' ' order by t.txn_date) into t
+    from public.finance_allocations a join public.finance_transactions t on t.id = a.transaction_id
+   where a.invoice_id = i_idr2 and t.direction = 'out';
+  if t is distinct from '560.00 0.00' then
+    fails := fails || format('IDR refunds carry %s, not 560.00 0.00', t);
+  end if;
+  select * into r from public.bendahara_check_receivable(i_idr2);
+  if r.rec <> 0 or r.open_foreign <> 0 or r.open_myr <> 0 then
+    fails := fails || format('IDR refunds leave Receivable at %s, the invoice IDR %s / RM %s', r.rec, r.open_foreign, r.open_myr);
+  end if;
+
+  -- ==== the SST share from the ringgit lines =============================================
+  -- Ten lines of 1 x USD 0.07 at 8% SST, rate 4.2555: each SST round(0.0056) = 0.01, amount_myr
+  -- round(0.297885) = 0.30, sst_amount_myr round(0.042555) = 0.04. USD 0.80 with SST 0.10; RM 3.40 with SST
+  -- 0.40. A credit note of USD 0.80 clears it (RM 3.40); its SST share is round(3.40 x 0.40 / 3.40) = 0.40
+  -- (from the USD lines it would be round(3.40 x 0.10 / 0.80) = 0.43).
+  i_sst := public.finance_save_invoice(org, jsonb_build_object('customer_id', cust) || dates || usd_at_4_2555,
+    (select jsonb_agg(jsonb_build_object('description', 'Bolt ' || g, 'quantity', 1, 'unit_price', 0.07, 'sst_rate', 8))
+       from generate_series(1, 10) g));
+  perform public.finance_post_invoice(org, i_sst);
+  select total, sst, total_myr, sst_myr into r from public.finance_invoice_totals where id = i_sst;
+  if r.total <> 0.80 or r.sst <> 0.10 or r.total_myr <> 3.40 or r.sst_myr <> 0.40 then
+    fails := fails || format('the ten-line invoice is USD %s (SST %s), RM %s (SST %s)', r.total, r.sst, r.total_myr, r.sst_myr);
+  end if;
+  cn := public.finance_save_credit_note(org, jsonb_build_object('invoice_id', i_sst, 'credit_date', '1999-01-15', 'reason', 'returns', 'amount', 0.80));
+  perform public.finance_issue_credit_note(org, cn);
+  select * into r from public.bendahara_check_entry(cn);
+  if r.rec_cr <> 3.40 or r.sst_dr <> 0.40 or r.sales_dr <> 3.00 then
+    fails := fails || format('the ten-line credit note posts Cr Receivable %s, Dr SST %s, Dr Sales %s (not 3.40 / 0.40 / 3.00)',
+      r.rec_cr, r.sst_dr, r.sales_dr);
+  end if;
+
+  -- ==== FIN48: a payment a later credit note leans on is not voided =======================
+  -- The three-line invoice (RM 425.52) paid in full, USD 99.99 as RM 430.00 (closing: carried 425.52). A credit
+  -- note of USD 99.99 on the paid invoice takes round(99.99 x 4.2555) = 425.51. Voiding the payment then would
+  -- leave RM 0.01 on Receivable for ever, so it is refused. The way through: void the credit note, void the
+  -- payment, issue the credit note again (it clears the invoice: 425.52). Receivable 0.00.
+  i_s2 := public.finance_save_invoice(org, jsonb_build_object('customer_id', cust) || dates || usd_at_4_2555, three_lines);
+  perform public.finance_post_invoice(org, i_s2);
+  pay2 := public.finance_record_payment_in(org,
+    jsonb_build_object('account_id', bank, 'method', 'fpx', 'txn_date', '1999-01-12', 'amount_myr', '430'),
+    jsonb_build_array(jsonb_build_object('invoice_id', i_s2, 'amount', 99.99)));
+  cn2 := public.finance_save_credit_note(org, jsonb_build_object('invoice_id', i_s2, 'credit_date', '1999-01-15', 'reason', 'returns', 'amount', 99.99));
+  perform public.finance_issue_credit_note(org, cn2);
+  select amount_myr into r from public.finance_credit_notes where id = cn2;
+  if r.amount_myr is distinct from 425.51 then fails := fails || format('FIN48 case: the credit note takes RM %s, not 425.51', r.amount_myr); end if;
+  fails := fails || public.bendahara_check_try('FIN48: the payment is voided under a later credit note', 'FIN48',
+    format('update public.finance_transactions set status = %L, updated_at = now() where id = %L', 'void', pay2));
+  fails := fails || public.bendahara_check_try('FIN48 way through: the credit note voided', 'ok',
+    format('update public.finance_credit_notes set status = %L, updated_at = now() where id = %L', 'void', cn2));
+  fails := fails || public.bendahara_check_try('FIN48 way through: the payment voided', 'ok',
+    format('update public.finance_transactions set status = %L, updated_at = now() where id = %L', 'void', pay2));
+  cn2 := public.finance_save_credit_note(org, jsonb_build_object('invoice_id', i_s2, 'credit_date', '1999-01-16', 'reason', 'returns', 'amount', 99.99));
+  perform public.finance_issue_credit_note(org, cn2);
+  select amount_myr into r from public.finance_credit_notes where id = cn2;
+  if r.amount_myr is distinct from 425.52 then fails := fails || format('FIN48 way through: the credit note again takes RM %s, not 425.52', r.amount_myr); end if;
+  select * into r from public.bendahara_check_receivable(i_s2);
+  if r.rec <> 0 or r.open_foreign <> 0 or r.open_myr <> 0 then
+    fails := fails || format('FIN48 way through leaves Receivable at %s, the invoice USD %s / RM %s', r.rec, r.open_foreign, r.open_myr);
+  end if;
+  -- A ringgit payment with a later credit note is voided as before.
+  i_myr2 := public.finance_save_invoice(org,
+    jsonb_build_object('customer_id', cust, 'invoice_date', current_date, 'due_date', current_date + 30), myr_line);
+  perform public.finance_post_invoice(org, i_myr2);
+  pay2 := public.finance_record_payment_in(org, jsonb_build_object('account_id', bank, 'method', 'fpx'),
+    jsonb_build_array(jsonb_build_object('invoice_id', i_myr2, 'amount', 132.50)));
+  perform public.finance_issue_credit_note(org, public.finance_save_credit_note(org,
+    jsonb_build_object('invoice_id', i_myr2, 'credit_date', current_date + 1, 'reason', 'returns', 'amount', 10)));
+  fails := fails || public.bendahara_check_try('a ringgit payment voided under a later credit note', 'ok',
+    format('update public.finance_transactions set status = %L, updated_at = now() where id = %L', 'void', pay2));
 
   -- ==== ringgit: a credit note and a refund are what they always were ==============
   i_myr := public.finance_save_invoice(org,
