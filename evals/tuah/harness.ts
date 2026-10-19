@@ -213,6 +213,10 @@ export class Conversation {
         origin: 'https://example.test',
         write: canWrite ? { ctx: { client, orgId }, canWrite: true } : undefined,
       },
+      null, // people (position 9) — HR is not exercised in this eval
+      // finance (position 10). `team` (position 7) is set, so finance writes go through the team-mode applyGate
+      // and the id-existence gate before they run; a non-viewer may write.
+      canWrite ? { client, orgId, canWrite: true } : { client, orgId, canWrite: false },
     );
     // A model call that breaks partway leaves a half answer; that is not Tuah's answer.
     let broke: unknown;
@@ -304,4 +308,37 @@ export async function cleanUp({ client, orgId }: Workspace): Promise<void> {
   await client.from('hire_jobs').delete().eq('org_id', orgId).ilike('title', like);
   await client.from('hire_settings').update({ careers_enabled: false, require_cv: false, require_cover_letter: false, ask_portfolio: false, ask_expected_salary: false }).eq('org_id', orgId);
   await client.from('forms').delete().eq('org_id', orgId).ilike('name', like);
+
+  // --- Finance (Bendahara) ------------------------------------------------
+  // KEEP IN STEP with the finance cases' seeds (Task 12) — a seeded table missing here leaks rows into prod.
+  // Documents come out before the contacts they point at: finance_rfqs/finance_purchase_orders.supplier_id is
+  // ON DELETE NO ACTION, so a supplier that still has a document on it cannot be removed. Line rows
+  // (finance_rfq_lines, finance_purchase_order_lines, finance_journal_lines) are ON DELETE CASCADE from their
+  // header, so deleting the header takes its lines with it. Tuah writes the documents, so their own fields
+  // carry no reliable tag; the RFQ and the PO are matched through the tagged supplier the case seeds, and a
+  // journal through its tagged description.
+  //
+  // The books refuse to DELETE a numbered or posted finance row while the workspace exists
+  // (finance_rfq_guard / finance_purchase_order_guard / finance_journal_guard): a SENT RFQ, a SUBMITTED or
+  // APPROVED purchase order, and a POSTED journal cannot be removed from here. These deletes still run, so a
+  // draft is always cleaned, and a guard refusal is logged rather than swallowed so a leak is visible. Only
+  // `finance-rfq-send` (which drafts an RFQ) is removable; the other finance cases are kept out of a default
+  // run for this reason (see LEAVES_PROD_ROWS_IDS in cases.ts and the Task 12 report).
+  const logFinance = (what: string, error: unknown) => {
+    if (error) {
+      const message = (error as { message?: string }).message ?? String(error);
+      console.warn(`cleanUp: finance ${what} not removed (a books guard likely refused a non-draft row): ${message}`);
+    }
+  };
+  const { data: suppliers } = await client.from('finance_contacts').select('id').eq('org_id', orgId).ilike('name', like);
+  const supplierIds = (suppliers ?? []).map((row) => (row as { id: string }).id);
+  if (supplierIds.length > 0) {
+    // RFQ and PO line rows cascade from their header, so deleting the header suffices.
+    logFinance('RFQs', (await client.from('finance_rfqs').delete().eq('org_id', orgId).in('supplier_id', supplierIds)).error);
+    logFinance('purchase orders', (await client.from('finance_purchase_orders').delete().eq('org_id', orgId).in('supplier_id', supplierIds)).error);
+  }
+  // Journals carry the tag in their description; their lines cascade with the header.
+  logFinance('journals', (await client.from('finance_journals').delete().eq('org_id', orgId).ilike('description', like)).error);
+  // Suppliers (and any other tagged finance contacts) come out last, once their documents are gone.
+  logFinance('contacts', (await client.from('finance_contacts').delete().eq('org_id', orgId).ilike('name', like)).error);
 }

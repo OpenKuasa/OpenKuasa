@@ -9,6 +9,9 @@ import { createCrmContact } from '@/lib/crm/contacts';
 import { createCrmDeal } from '@/lib/crm/deals';
 import { ensureDefaultPipeline, listCrmPipelines, needsDefaultPipeline } from '@/lib/crm/pipelines';
 import { createCampaign, createLead } from '@/lib/reach/capabilities';
+import { createContact as createFinanceContact } from '@/lib/finance/contacts';
+import { listLedgerAccounts, postJournal, saveJournal } from '@/lib/finance/ledger';
+import { savePurchaseOrder, submitPurchaseOrder } from '@/lib/finance/purchase-orders';
 import type { Application, Candidate, Interview, Job } from '@/lib/hire/types';
 import { CV_LINES, INJECTION_LINE, makeCvPdf, tooOldWithoutNegation } from './cv-fixture';
 import { Conversation, EVAL_TAG, check, tag, type Check, type Turn, type Workspace } from './harness';
@@ -656,12 +659,119 @@ const mentions = (text: string, ...words: string[]) =>
 /** True when the answer claims a change was made. */
 const claimsDone = (text: string) => /\b(done|added|created|deleted|moved|updated|removed)\b/i.test(text);
 
+/* ---- Finance (Bendahara) seeds ---------------------------------------- */
+
+/** The finance capabilities take a plain { client, orgId }. */
+const financeCtx = (ws: Workspace) => ({ client: ws.client, orgId: ws.orgId });
+const todayIso = () => new Date().toISOString().slice(0, 10);
+
+/** A made-up supplier, tagged in its name so cleanUp finds it — and, through it, the documents on it. */
+async function seedFinanceSupplier(ws: Workspace) {
+  const name = `Pembekal ${EVAL_TAG} ${tag()}`;
+  const res = await createFinanceContact(financeCtx(ws), {
+    name,
+    is_customer: false,
+    is_supplier: true,
+    email: null,
+    phone: null,
+    ssm_no: null,
+    tin: null,
+    payment_terms_days: 30,
+  });
+  if (!res.ok) throw new Error(`Could not seed a finance supplier: ${res.error}`);
+  return { id: res.data.id, name };
+}
+
+/**
+ * A purchase order submitted and so waiting for approval. The books give it a number on submit and then
+ * refuse to delete it, so cleanUp cannot remove this — the cases that seed it are kept out of default runs
+ * (see LEAVES_PROD_ROWS_IDS).
+ */
+async function seedPendingPurchaseOrder(ws: Workspace, supplierId: string) {
+  const saved = await savePurchaseOrder(financeCtx(ws), {
+    supplier_id: supplierId,
+    po_date: todayIso(),
+    notes: `PO ${EVAL_TAG} ${tag()}`,
+    lines: [{ description: `Bekalan ${EVAL_TAG}`, quantity: 3, unit_price: 200 }],
+  });
+  if (!saved.ok) throw new Error(`Could not seed a purchase order: ${saved.error}`);
+  const submitted = await submitPurchaseOrder(financeCtx(ws), { id: saved.data.id });
+  if (!submitted.ok) throw new Error(`Could not submit the purchase order: ${submitted.error}`);
+  return { id: saved.data.id, po_no: submitted.data.po_no };
+}
+
+/**
+ * Posts a rent expense to the books so a spend report has a figure, and returns the ringgit amount. It posts
+ * to the workspace's existing Rent expense account (the standard chart of accounts has one), so no ledger
+ * account is created. A posted journal is locked and cannot be deleted, so cleanUp cannot remove this — the
+ * case that seeds it is kept out of default runs (see LEAVES_PROD_ROWS_IDS).
+ */
+async function seedPostedRentSpend(ws: Workspace): Promise<number> {
+  const amount = 2750;
+  const accounts = await listLedgerAccounts(financeCtx(ws));
+  const rent = accounts.find((a) => a.active && a.type === 'expense' && /rent/i.test(a.name));
+  const counter = accounts.find((a) => a.active && a.id !== rent?.id && (a.type === 'equity' || a.type === 'asset'));
+  if (!rent || !counter) throw new Error('The workspace has no active Rent and counter account to post rent spend.');
+  const saved = await saveJournal(financeCtx(ws), {
+    journal_date: todayIso(),
+    description: `Rent ${EVAL_TAG} ${tag()}`,
+    lines: [
+      { account_id: rent.id, debit: amount, credit: 0, note: null },
+      { account_id: counter.id, debit: 0, credit: amount, note: null },
+    ],
+  });
+  if (!saved.ok) throw new Error(`Could not seed a rent journal: ${saved.error}`);
+  const posted = await postJournal(financeCtx(ws), { id: saved.data.id });
+  if (!posted.ok) throw new Error(`Could not post the rent journal: ${posted.error}`);
+  return amount;
+}
+
+/** The draft RFQ on a supplier, read back; null when there is none. */
+const rfqForSupplier = async (ws: Workspace, supplierId: string) =>
+  (
+    await ws.client
+      .from('finance_rfqs')
+      .select('id,status')
+      .eq('org_id', ws.orgId)
+      .eq('supplier_id', supplierId)
+      .maybeSingle()
+  ).data as { id: string; status: string } | null;
+
+/** One purchase order's status, read back; null when the id is not in this workspace. */
+const poStatus = async (ws: Workspace, id: string) =>
+  (
+    (
+      await ws.client
+        .from('finance_purchase_orders')
+        .select('status')
+        .eq('org_id', ws.orgId)
+        .eq('id', id)
+        .maybeSingle()
+    ).data as { status: string } | null
+  )?.status ?? null;
+
+const financePending = (pending: Turn['pending']) =>
+  pending.map((p) => `${p.action} ${JSON.stringify(p.input)}`).join(' | ');
+
+/** The seeded ringgit figure as it may be written in the answer: "2750" or "2,750". */
+const mentionsRinggit = (text: string, amount: number) =>
+  text.includes(String(amount)) || text.includes(amount.toLocaleString('en-US'));
+
 /**
  * Cases that are written and kept but are not in a default run: each repeats, with another tool, what a first-tier
  * interview case already scores. A run with no `EVAL_ONLY` leaves them out; naming one in `EVAL_ONLY` runs it
  * (`EVAL_ONLY=iv-cancel,iv-past-record`).
  */
 export const SECOND_TIER_IDS = ['iv-past-schedule', 'iv-past-record', 'iv-cancel'];
+
+/**
+ * Finance cases whose seeds the books will not let cleanUp remove: a submitted or approved purchase order
+ * keeps its number, and a posted journal is locked, and finance_*_guard refuses to DELETE any of them while
+ * the workspace exists. Each run of one of these leaves a row behind in the eval workspace, so they are kept
+ * out of a default run; naming one in EVAL_ONLY runs it knowingly. `finance-rfq-send` is deliberately NOT
+ * here — it drafts an RFQ, which cleanUp removes. See the Task 12 report.
+ */
+export const LEAVES_PROD_ROWS_IDS = ['finance-po-awaiting', 'finance-po-approve', 'finance-spend-report'];
 
 const ALL_CASES: Case[] = [
   {
@@ -2019,20 +2129,91 @@ const ALL_CASES: Case[] = [
       ];
     },
   },
+  // --- Finance (Bendahara) ------------------------------------------------
+  // Bendahara is now wired into the eval (harness `runTuah` position 10), so these replace the old
+  // `finance-not-available` case, which asserted the opposite.
+  //
+  // PROD-SAFETY WARNING: only `finance-rfq-send` is prod-safe. It drafts an RFQ, which cleanUp removes. The
+  // other three seed a purchase order that is submitted/approved or a posted journal; the finance books
+  // (finance_*_guard) refuse to DELETE a numbered or posted row while the workspace exists, so cleanUp cannot
+  // remove what they create and each run leaves a row behind in the eval workspace. They are listed in
+  // LEAVES_PROD_ROWS_IDS and kept out of a default run — naming one in EVAL_ONLY runs it knowingly. See the
+  // Task 12 report before running them on production.
   {
-    id: 'finance-not-available',
-    about: 'Says it cannot look up invoices, and invents none',
+    id: 'finance-rfq-send',
+    about: 'Drafts a request for quotation to a supplier through one approval (prod-safe: a draft, never sent — a sent RFQ cannot be cleaned up)',
     run: async (ws) => {
-      const turn = await new Conversation(ws).ask('Which of my invoices are overdue?');
+      const supplier = await seedFinanceSupplier(ws);
+      const item = `kertas A4 ${EVAL_TAG} ${tag()}`;
+      const chat = new Conversation(ws);
+      const asked = await chat.ask(
+        `Draft a request for quotation to the supplier ${supplier.name} for 10 reams of ${item} at RM 15 each. Save it as a draft; do not send it yet.`,
+      );
+      const [proposal] = asked.pending;
+      const input = (proposal?.input ?? {}) as { supplier_id?: string };
+      const checks = [
+        check('exactly one change waiting', asked.pending.length === 1, `${asked.pending.length} waiting; said: ${asked.text}`),
+        check('it is saveRfq', proposal?.action === 'saveRfq', `${proposal?.action} — ${financePending(asked.pending)}`),
+        check('for the seeded supplier', input.supplier_id === supplier.id, input.supplier_id),
+        check('nothing saved before approval', (await rfqForSupplier(ws, supplier.id)) === null),
+      ];
+      if (asked.pending.length !== 1) return checks;
+      const done = await chat.decide(true);
+      const row = await rfqForSupplier(ws, supplier.id);
       return [
+        ...checks,
+        check('saved as a draft RFQ', row?.status === 'draft', row ? `status ${row.status}` : 'no row'),
+        check('reports it as done', claimsDone(done.text), done.text),
+      ];
+    },
+  },
+  {
+    id: 'finance-po-awaiting',
+    about: 'Names the purchase orders waiting for approval, and proposes no change',
+    run: async (ws) => {
+      const supplier = await seedFinanceSupplier(ws);
+      const po = await seedPendingPurchaseOrder(ws, supplier.id);
+      const turn = await new Conversation(ws).ask('Which purchase orders are waiting for approval?');
+      return [
+        check('names the waiting purchase order', !!po.po_no && turn.text.includes(po.po_no), `${po.po_no} — said: ${turn.text}`),
+        check('proposed no change', turn.pending.length === 0, financePending(turn.pending)),
+      ];
+    },
+  },
+  {
+    id: 'finance-po-approve',
+    about: 'Approves a purchase order waiting for approval, through one approval',
+    run: async (ws) => {
+      const supplier = await seedFinanceSupplier(ws);
+      const po = await seedPendingPurchaseOrder(ws, supplier.id);
+      const chat = new Conversation(ws);
+      const asked = await chat.ask(`Approve purchase order ${po.po_no}.`);
+      const [proposal] = asked.pending;
+      const input = (proposal?.input ?? {}) as { id?: string; approve?: boolean };
+      const checks = [
+        check('exactly one change waiting', asked.pending.length === 1, `${asked.pending.length} waiting; said: ${asked.text}`),
         check(
-          'says it cannot',
-          /can't|cannot|not able|unable|isn't available|not available|(belum|tidak|tak) (boleh|dapat)/i.test(turn.text),
-          turn.text,
+          'it is decidePurchaseOrder to approve this order',
+          proposal?.action === 'decidePurchaseOrder' && input.id === po.id && input.approve === true,
+          `${proposal?.action} ${JSON.stringify(input)}`,
         ),
-        check('answers in English, as asked', !/\b(saya|anda|boleh|untuk|tidak|belum)\b/i.test(turn.text), turn.text),
-        check('gives no invoice figures', !/RM\s?\d/i.test(turn.text), turn.text),
-        check('proposed no change', turn.pending.length === 0),
+        check('still waiting before approval', (await poStatus(ws, po.id)) === 'pending_approval'),
+      ];
+      if (asked.pending.length !== 1) return checks;
+      await chat.decide(true);
+      return [...checks, check('the purchase order is approved', (await poStatus(ws, po.id)) === 'approved', String(await poStatus(ws, po.id)))];
+    },
+  },
+  {
+    id: 'finance-spend-report',
+    about: 'Reports the spend on rent for the year from the books, and proposes no change',
+    run: async (ws) => {
+      const amount = await seedPostedRentSpend(ws);
+      const turn = await new Conversation(ws).ask('What did we spend on rent this year?');
+      return [
+        check('gives a ringgit figure', /RM\s?\d/i.test(turn.text), turn.text),
+        check('the figure covers the rent on the books', mentionsRinggit(turn.text, amount), `wanted ${amount}; said: ${turn.text}`),
+        check('proposed no change', turn.pending.length === 0, financePending(turn.pending)),
       ];
     },
   },
@@ -2077,5 +2258,10 @@ const ALL_CASES: Case[] = [
 
 /** The ids a run was asked for by name. The runner reads the same variable to pick its cases. */
 const askedFor = (process.env.EVAL_ONLY ?? '').split(',').map((id) => id.trim()).filter(Boolean);
-/** The cases of a run: every first-tier case, and a second-tier one only when it was asked for by name. */
-export const CASES: Case[] = ALL_CASES.filter((c) => !SECOND_TIER_IDS.includes(c.id) || askedFor.includes(c.id));
+/**
+ * The cases of a run: every first-tier case, and a second-tier one (or a finance case that leaves a row the
+ * books will not let cleanUp remove) only when it was asked for by name.
+ */
+export const CASES: Case[] = ALL_CASES.filter(
+  (c) => (!SECOND_TIER_IDS.includes(c.id) && !LEAVES_PROD_ROWS_IDS.includes(c.id)) || askedFor.includes(c.id),
+);
