@@ -109,7 +109,9 @@ begin
   end if;
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where not tgisinternal and tgrelid = 'public.supplier_bills'::regclass and tgenabled = 'O';
-  if t is distinct from 'finance_bill_category,finance_bill_guard,finance_bill_po_link,finance_bill_sign_off,finance_bill_void_contra,finance_void_stamp' then
+  -- finance_bill_rate_to_lines, finance_bill_to_ringgit: 20261121100000 (bills in another currency).
+  if t is distinct from 'finance_bill_category,finance_bill_guard,finance_bill_po_link,finance_bill_rate_to_lines,finance_bill_sign_off,'
+       || 'finance_bill_to_ringgit,finance_bill_void_contra,finance_void_stamp' then
     fails := fails || format('triggers on supplier_bills are: %s', t);
   end if;
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
@@ -142,7 +144,9 @@ begin
   select string_agg(attname, ',' order by attnum) into t from pg_attribute
    where attrelid = 'public.supplier_bill_totals'::regclass and attnum > 0 and not attisdropped;
   if t is distinct from 'id,org_id,bill_no,supplier_ref,supplier_id,bill_date,due_date,status,notes,created_at,updated_at,posted_at,'
-       || 'supplier_name,total,paid,balance,display_status,set_off' then
+       || 'supplier_name,total,paid,balance,display_status,set_off,'
+       || 'currency,fx_rate,fx_rate_source,fx_rate_date,fx_rate_provider,fx_rate_reference,'
+       || 'subtotal_myr,sst_myr,total_myr,balance_myr,paid_myr' then
     fails := fails || format('columns of supplier_bill_totals are: %s', t);
   end if;
   foreach who in array array['public.finance_contras', 'public.finance_contra_lines', 'public.finance_invoice_totals',
