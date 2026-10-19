@@ -140,6 +140,7 @@ describe('every change tool has a card that lists what it will change', () => {
 describe('the rows of a change', () => {
   const CONTACT = '33333333-3333-4333-8333-333333333333';
   const STAGE = '44444444-4444-4444-8444-444444444444';
+  const LINE = '55555555-5555-4555-8555-555555555555';
   const results = [
     {
       tool: 'listCrmContacts',
@@ -221,6 +222,32 @@ describe('the rows of a change', () => {
     const description = 'We are hiring. '.repeat(200);
     const [, row] = changeRows('updateJob', { id: UUID, description });
     expect(row.to).toBe(description);
+  });
+
+  // A finance tool's nested `line_id` is a quote or receipt line, never a payroll line. The HR alias
+  // `line → payslip-line` must not fire on a finance card: the row falls back to the neutral field name.
+  it('labels a finance quote or receipt line neutrally, never as an HR "Payslip line"', () => {
+    const rfqRows = changeRows('quoteRfq', { id: UUID, prices: [{ line_id: LINE, unit_price: 12.5 }] });
+    expect(rfqRows.some((r) => r.label.includes('Payslip line'))).toBe(false);
+    expect(rfqRows.find((r) => r.key === 'prices.0.line_id')?.label).toBe('Prices 1 › Line');
+
+    const poRows = changeRows('receivePurchaseOrder', { id: UUID, receipts: [{ line_id: LINE, received_quantity: 3 }] });
+    expect(poRows.some((r) => r.label.includes('Payslip line'))).toBe(false);
+    expect(poRows.find((r) => r.key === 'receipts.0.line_id')?.label).toBe('Receipts 1 › Line');
+  });
+
+  it('still labels an HR payslip line as "Payslip line" (no finance regression)', () => {
+    const rows = changeRows('savePayslipLine', { payslip_id: UUID, line_id: LINE, kind: 'earning', label: 'Bonus', amount: 500 });
+    const lineRow = rows.find((r) => r.key === 'line_id');
+    expect(lineRow?.kind).toBe('record');
+    expect(lineRow?.label).toBe('Payslip line');
+  });
+
+  it('names finance subjects "RFQ" and "Purchase order", not the literal "Rfq"/"Purchase-order"', () => {
+    const [rfqSubject] = changeRows('quoteRfq', { id: UUID, prices: [{ line_id: LINE, unit_price: 1 }] });
+    expect(rfqSubject.label).toBe('RFQ');
+    const [poSubject] = changeRows('receivePurchaseOrder', { id: UUID, receipts: [{ line_id: LINE, received_quantity: 1 }] });
+    expect(poSubject.label).toBe('Purchase order');
   });
 });
 

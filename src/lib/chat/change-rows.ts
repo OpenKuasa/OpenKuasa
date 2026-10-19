@@ -129,11 +129,21 @@ const ITEM_KINDS: ReadonlySet<string> = new Set<ItemKind>([
   'payslip-line', 'payroll-run', 'goal', 'review', 'training', 'announcement', 'rfq', 'purchase-order', 'journal',
 ]);
 
-/** The kind of row an id argument points at, from its name: `contactId` and `contact_id` → contact. */
-function kindOfKey(key: string): ItemKind | undefined {
+/** Finance subjects whose nested `line_id`/`run_id` mean a quote, receipt or journal line — never a payroll row. */
+const FINANCE_KINDS: ReadonlySet<ItemKind> = new Set<ItemKind>(['rfq', 'purchase-order', 'journal']);
+/** Id-name aliases that only ever mean a payroll row; on a finance card they must not fire, so the row keeps its field name. */
+const HR_ONLY_ALIASES: ReadonlySet<string> = new Set(['line', 'run']);
+
+/**
+ * The kind of row an id argument points at, from its name: `contactId` and `contact_id` → contact. `subjectKind` is
+ * the kind of the change as a whole: on a finance card the payroll-only aliases (`line`, `run`) are suppressed, so a
+ * finance `line_id` falls back to its humanised field name ("Line") instead of the HR term "Payslip line".
+ */
+function kindOfKey(key: string, subjectKind?: ItemKind): ItemKind | undefined {
   const stem = key.replace(/(_id|Id)$/, '').replace(/([a-z])([A-Z])/g, '$1-$2').replace(/_/g, '-').toLowerCase();
   const alias: Record<string, ItemKind> = { line: 'payslip-line', run: 'payroll-run', 'payroll-run': 'payroll-run', course: 'training', manager: 'employee', supplier: 'finance-contact' };
-  if (Object.hasOwn(alias, stem)) return alias[stem];
+  const hrAliasBlocked = subjectKind !== undefined && FINANCE_KINDS.has(subjectKind) && HR_ONLY_ALIASES.has(stem);
+  if (Object.hasOwn(alias, stem) && !hrAliasBlocked) return alias[stem];
   return ITEM_KINDS.has(stem) ? (stem as ItemKind) : undefined;
 }
 
@@ -149,6 +159,8 @@ const KIND_WORDS: Partial<Record<ItemKind, string>> = {
   'payroll-run': 'Payroll run',
   training: 'Course',
   schedule: 'Schedule',
+  rfq: 'RFQ',
+  'purchase-order': 'Purchase order',
 };
 const kindLabel = (kind: ItemKind | undefined): string =>
   kind ? (KIND_WORDS[kind] ?? kind.charAt(0).toUpperCase() + kind.slice(1)) : 'Record';
@@ -215,7 +227,7 @@ export function changeRows(toolName: string, input: unknown, find?: NameFinder, 
       const label = [...labels, fieldLabel(key)].join(' › ');
       if (isIdKey(key) && typeof inner === 'string' && inner.trim() !== '') {
         const subject = path.length === 0 && key === 'id';
-        const kind = subject ? subjectKind : kindOfKey(key);
+        const kind = subject ? subjectKind : kindOfKey(key, subjectKind);
         // Named by a lookup; else, for the row the change is about, by what that row calls itself.
         const shown = subject && current ? [current.name, current.title, current.contact_name].find((v) => typeof v === 'string') : null;
         const name = recordName(find?.(inner, kind) ?? null) ?? recordName(typeof shown === 'string' ? shown : null);
