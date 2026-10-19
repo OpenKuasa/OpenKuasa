@@ -289,6 +289,20 @@ export function paymentInRinggit(row: Pick<PaymentInRow, 'amount' | 'currency' |
   return (row.currency ?? 'MYR') === 'MYR' ? row.amount : 0;
 }
 
+/**
+ * The ringgit that actually arrived for each invoice: the sum, in whole sen, of its posted payments' ringgit
+ * (`paymentInRinggit`). This is Bendahara's "received", which for a foreign invoice differs from what the
+ * payments carried off the invoice (`paid_myr`); the balance still counts the carried amount.
+ */
+export function receivedRinggitByInvoice(rows: PaymentInRow[]): Map<string, number> {
+  const sen = new Map<string, number>();
+  for (const row of rows) {
+    if (row.status !== 'posted') continue;
+    sen.set(row.invoice_id, (sen.get(row.invoice_id) ?? 0) + Math.round(paymentInRinggit(row) * 100));
+  }
+  return new Map([...sen].map(([id, s]) => [id, s / 100] as const));
+}
+
 const PAYMENT_COLUMNS =
   'allocation_id,transaction_id,number,txn_date,method,amount,transaction_amount,status,reference,account_id,account_name';
 const PAYMENT_OUT_COLUMNS = `${PAYMENT_COLUMNS},bill_id,bill_no,supplier_name`;

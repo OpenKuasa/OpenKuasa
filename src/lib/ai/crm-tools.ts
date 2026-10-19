@@ -32,7 +32,8 @@ import {
 import { buildBillings } from '@/lib/crm/billings';
 import { loadCrmCalendar, parseMonth } from '@/lib/crm/calendar';
 import { listDealInvoiceLinks } from '@/lib/crm/invoice-links';
-import { invoicePaidRinggit, listInvoices } from '@/lib/finance/invoices';
+import { listInvoices } from '@/lib/finance/invoices';
+import { listPaymentsIn, receivedRinggitByInvoice } from '@/lib/finance/money';
 import { klDay } from '@/lib/crm/deal-stats';
 import { completeFollowUp, createFollowUp, parseFollowUpForm } from '@/lib/crm/follow-ups';
 import {
@@ -455,7 +456,11 @@ export function createCrmTools(access: CrmAccess) {
         'billed the most. Drafts and void invoices are not counted as billed. Invoices are read-only here.',
       inputSchema: z.object({}),
       execute: async () => {
-        const model = buildBillings(await listInvoices({ client, orgId }), new Date());
+        const [invoices, payments] = await Promise.all([
+          listInvoices({ client, orgId }),
+          listPaymentsIn({ client, orgId }),
+        ]);
+        const model = buildBillings(invoices, new Date(), new Map(), payments);
         return {
           month: model.monthTitle,
           billed_this_month_rm: model.stats.billedThisMonth,
@@ -509,11 +514,14 @@ export function createCrmTools(access: CrmAccess) {
           }
         }
 
-        const [invoices, links, { deals }] = await Promise.all([
+        const [invoices, payments, links, { deals }] = await Promise.all([
           listInvoices({ client, orgId }),
+          listPaymentsIn({ client, orgId }),
           listDealInvoiceLinks(client, orgId),
           listCrmDeals(client, orgId, 500),
         ]);
+        // What actually arrived, as Bendahara shows it; the balance below still counts what the payments carried.
+        const arrived = receivedRinggitByInvoice(payments);
         const dealOf = new Map(links.map((link) => [link.invoiceId, link.dealId] as const));
         const titles = new Map(deals.map((deal) => [deal.id, deal.title] as const));
 
@@ -532,7 +540,7 @@ export function createCrmTools(access: CrmAccess) {
               due_date: invoice.due_date,
               // In ringgit: an invoice in another currency at its own rate (null while a draft has no rate).
               total_rm: invoice.total_myr,
-              paid_rm: invoicePaidRinggit(invoice),
+              paid_rm: arrived.get(invoice.id) ?? 0,
               // Nothing is owed on a void invoice, whatever it totalled.
               balance_rm: invoice.display_status === 'void' ? 0 : invoice.balance_myr,
               // An invoice in another currency also says its own currency and total.

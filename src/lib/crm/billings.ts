@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { klDay } from '@/lib/crm/deal-stats';
 import { listDealInvoiceLinks } from '@/lib/crm/invoice-links';
 import { listInvoices, type InvoiceDisplayStatus, type InvoiceListRow, invoicePaidRinggit, invoiceRinggit } from '@/lib/finance/invoices';
+import { listPaymentsIn, type PaymentInRow, receivedRinggitByInvoice } from '@/lib/finance/money';
 
 /** How many invoices the "Recent invoices" table shows. */
 export const RECENT_LISTED = 8;
@@ -81,6 +82,13 @@ export function buildBillings(
   now: Date,
   /** The title of the deal each linked invoice belongs to, by invoice id. */
   dealTitles: ReadonlyMap<string, string> = new Map(),
+  /**
+   * The workspace's payments in. "Received" is the ringgit that actually arrived, as Bendahara shows it; for an
+   * invoice in another currency that can differ from what the payments carried off it (the exchange gain or
+   * loss), so Billed, Received and Outstanding need not add up. Left out, received falls back to what the
+   * invoices' paid figures carried.
+   */
+  payments?: PaymentInRow[],
 ): BillingsModel {
   const month = klDay(now).slice(0, 7);
   const issued = invoices.filter((invoice) => ISSUED.has(invoice.display_status));
@@ -89,8 +97,9 @@ export function buildBillings(
   const thisMonth = issued.filter((invoice) => invoice.invoice_date.slice(0, 7) === month);
 
   const billed = sum(issued.map(billedOn));
-  // In ringgit: an invoice in another currency counts what its payments carried off it.
-  const received = sum(issued.map((invoice) => invoicePaidRinggit(invoice)));
+  // In ringgit, what arrived (Outstanding comes from each invoice's balance, never from Billed less Received).
+  const arrived = payments ? receivedRinggitByInvoice(payments) : null;
+  const received = sum(issued.map((invoice) => (arrived ? (arrived.get(invoice.id) ?? 0) : invoicePaidRinggit(invoice))));
 
   const months = Array.from({ length: TREND_MONTHS }, (_, i) => shiftMonth(month, i - (TREND_MONTHS - 1)));
 
@@ -151,15 +160,16 @@ export function buildBillings(
 
 /** Reads a workspace's invoices and builds the Billings page from them. */
 export async function loadCrmBillings(client: SupabaseClient, orgId: string, now: Date): Promise<BillingsModel> {
-  const [invoices, dealTitles] = await Promise.all([
+  const [invoices, payments, dealTitles] = await Promise.all([
     listInvoices({ client, orgId }),
+    listPaymentsIn({ client, orgId }),
     // The deal column is an extra; the figures still show if it cannot load.
     linkedDealTitles(client, orgId).catch((error) => {
       console.error('[crm/billings] could not load linked deals', error);
       return new Map<string, string>();
     }),
   ]);
-  return buildBillings(invoices, now, dealTitles);
+  return buildBillings(invoices, now, dealTitles, payments);
 }
 
 /** The title of the deal each linked invoice belongs to, by invoice id. */
