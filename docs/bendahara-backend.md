@@ -3021,3 +3021,25 @@ with no date).
   (or dated) after it stands on that invoice (`FIN48`): void the credit note
   first, then the payment, and issue the credit note again, which then takes
   the closing figure, so Receivable ends at 0.00.
+- Supplier bills in another currency (`20261121100000`, stage 4a): a bill
+  takes invoices' columns (`currency`, `fx_rate`, `fx_rate_source`,
+  `fx_rate_date`, `fx_rate_provider`, `fx_rate_reference`) and its lines a
+  copy of the rate with generated `amount_myr` and `sst_amount_myr`. The rate
+  is the one rule's (Bank Negara Malaysia's 17:00 selling rate, newest on or
+  before the bill date: `private.finance_sst_fx_rate`), or one typed by hand
+  with its source (`FIN43`); posting needs a rate (`FIN38`), and a rate marked
+  as BNM's must be the rule's for a date not after the bill date (`FIN39`).
+  The ledger posts the bill's ringgit (the category debited and Payable
+  credited with the sum of its rounded ringgit lines; SST stays part of the
+  cost), and every payable figure (Overview, Supplier Bills KPIs, Contacts,
+  the payables ageing, the assistant's payables) adds `balance_myr`. Nothing
+  pays a foreign bill in this stage: a payment out or a payment voucher
+  naming one is refused with `FIN41` (the payment form and the voucher picker
+  offer ringgit bills only), and a contra entry never sets one off (`FIN42`,
+  which now names bills too, through all of stage 4). A bill raised against a
+  purchase order is in the order's currency (`FIN49`); every order is in
+  ringgit until orders carry a currency. The finance assistant saves bills in
+  ringgit only, and a bill made from a receipt is a ringgit draft.
+  `finance_ledger_lines` already carries the payment-out realised line the
+  next stage needs; it reads only allocations' `amount_myr`/`carried_myr`,
+  which nothing writes on a bill allocation yet, so it is 0.
