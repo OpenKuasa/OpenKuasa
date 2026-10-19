@@ -367,12 +367,18 @@ export function createBendaharaTools(access: FinanceAccess) {
       execute: async () => listRfqs(ctx),
     }),
     getRfq: tool({
-      description: 'One RFQ in full, by id, with its lines and any prices recorded.',
+      description:
+        "One RFQ in full, by id, with its lines and any prices recorded. Prices and totals are in the RFQ's currency " +
+        "(its currency field), not necessarily ringgit; total_myr is the total in ringgit at the RFQ's indicative rate, " +
+        'null when it has none.',
       inputSchema: idInput,
       execute: async ({ id }) => getRfq(ctx, id),
     }),
     getRfqGroup: tool({
-      description: 'All the sent RFQs copied from one request, by the id of any of them, to compare suppliers\u2019 quotes side by side.',
+      description:
+        'All the sent RFQs copied from one request, by the id of any of them, to compare suppliers\u2019 quotes side by side. ' +
+        "Each RFQ's prices are in its own currency (its currency field); compare across currencies by total_myr only, " +
+        'and not at all for an RFQ whose total_myr is null.',
       inputSchema: idInput,
       execute: async ({ id }) => getRfqGroup(ctx, id),
     }),
@@ -389,7 +395,10 @@ export function createBendaharaTools(access: FinanceAccess) {
       },
     }),
     getPurchaseOrder: tool({
-      description: 'One purchase order in full, by id, with its lines and received quantities.',
+      description:
+        "One purchase order in full, by id, with its lines and received quantities. Prices and totals are in the order's " +
+        "currency (its currency field), not necessarily ringgit; total_myr is the total in ringgit at the order's " +
+        'indicative rate, null when it has none.',
       inputSchema: idInput,
       execute: async ({ id }) => getPurchaseOrder(ctx, id),
     }),
@@ -566,7 +575,8 @@ export function createBendaharaTools(access: FinanceAccess) {
     convertRfq: tool({
       description:
         "Make a draft purchase order from a quoted RFQ. An RFQ in another currency becomes an order in that currency at " +
-        "Bank Negara Malaysia's selling rate for today.",
+        "Bank Negara Malaysia's selling rate for today when it has one; otherwise with no rate, which the order needs " +
+        'before it is submitted.',
       inputSchema: rfqIdInput,
       execute: async (input) => convertRfq(ctx, input),
     }),
