@@ -234,19 +234,20 @@ begin
       r.total, r.total_myr, r.subtotal_myr, r.sst_myr, r.balance, r.balance_myr, r.paid_myr);
   end if;
 
-  -- ==== 12-15: nothing pays a foreign bill yet (FIN41), and nothing is left behind =====
+  -- ==== 12-15: since 20261121110000 (4b) a foreign bill is paid now, with the ringgit paid out; FIN41 is gone =====
+  -- (4a answered FIN41 to each. bendahara_fx_payments_out_check.sql works the payments themselves.)
   select count(*) into n0 from public.finance_transactions where org_id = org;
-  fails := fails || public.bendahara_check_try('12: a payment out of the USD bill, paid now', 'FIN41',
+  fails := fails || public.bendahara_check_try('12: a payment out of the USD bill, paid now, with no ringgit paid out', 'FIN46',
     format('select public.finance_record_payment_out(%L, %L, %L)', org, jsonb_build_object('account_id', bank, 'method', 'bank_transfer'),
       jsonb_build_array(jsonb_build_object('bill_id', b_usd, 'amount', 10))));
-  fails := fails || public.bendahara_check_try('13: a payment out of the USD bill, scheduled', 'FIN41',
+  fails := fails || public.bendahara_check_try('13: a payment out of the USD bill, scheduled', 'FIN47',
     format('select public.finance_record_payment_out(%L, %L, %L)', org,
       jsonb_build_object('account_id', bank, 'method', 'bank_transfer', 'status', 'scheduled'),
       jsonb_build_array(jsonb_build_object('bill_id', b_usd, 'amount', 10))));
-  fails := fails || public.bendahara_check_try('14: a voucher draft naming the USD bill', 'FIN41',
+  fails := fails || public.bendahara_check_try('14: a voucher draft naming the USD bill', 'FIN47',
     format('select public.finance_save_voucher(%L, %L, %L)', org, jsonb_build_object('account_id', bank, 'method', 'bank_transfer'),
       jsonb_build_array(jsonb_build_object('bill_id', b_usd, 'amount', 10))));
-  fails := fails || public.bendahara_check_try('14: a voucher sent for approval naming the USD bill', 'FIN41',
+  fails := fails || public.bendahara_check_try('14: a voucher sent for approval naming the USD bill', 'FIN47',
     format('select public.finance_save_voucher(%L, %L, %L)', org,
       jsonb_build_object('account_id', bank, 'method', 'bank_transfer', 'status', 'pending_approval'),
       jsonb_build_array(jsonb_build_object('bill_id', b_usd, 'amount', 10))));
@@ -254,7 +255,8 @@ begin
   if n <> 0 then fails := fails || format('12-14: refused payments left %s transactions', n); end if;
   insert into public.finance_transactions (org_id, direction, account_id, amount, method, contact_id)
   values (org, 'out', bank, 10, 'bank_transfer', sup) returning id into tx;
-  fails := fails || public.bendahara_check_try('15: a draft written by hand names the USD bill', 'FIN41',
+  -- A split row is written; the draft leaves draft only settled (FIN46, finance_transaction_to_ringgit).
+  fails := fails || public.bendahara_check_try('15: a draft written by hand names the USD bill', 'ok',
     format('insert into public.finance_allocations (org_id, transaction_id, bill_id, amount) values (%L, %L, %L, 10)', org, tx, b_usd));
   delete from public.finance_transactions where id = tx;
 
