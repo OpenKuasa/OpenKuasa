@@ -5,8 +5,16 @@
  * as rows and its suppliers as columns, and marks the lowest price on each
  * line. It marks figures only: the cheapest is not always the supplier chosen
  * (delivery time, past service), so the choice is the person's. Pure.
+ *
+ * Quotes may be in different currencies (stage 4p). Each is shown in its own
+ * currency; what is compared is ringgit, at each RFQ's own indicative rate.
+ * A quote with no exchange rate is shown but not compared: there is no
+ * ringgit to compare it by. Quotes all in one currency are compared in it.
  */
 import { lineAmounts } from './bill-math';
+import { BASE_CURRENCY } from './currencies';
+import { scaledFromText } from './document-currency';
+import { money, rm } from './format';
 import { rfqActions } from './purchase-views';
 import type { RfqDetail, RfqListRow } from './rfqs';
 
@@ -109,6 +117,51 @@ function unitCost(price: number, rate: number): bigint {
   return BigInt(Math.round(price * 10 ** 4)) * BigInt(Math.round((100 + rate) * 100));
 }
 
+/** One unit of the RFQ's currency in ringgit, in 10^-10 units: exact, from the rate's text; null with no rate. */
+function ringgitPerUnit(rfq: Pick<RfqListRow, 'currency' | 'fx_rate' | 'fx_rate_text'>): bigint | null {
+  if (rfq.currency === BASE_CURRENCY) return BigInt(10) ** BigInt(10);
+  if (rfq.fx_rate_text !== null) return scaledFromText(rfq.fx_rate_text) ?? null;
+  return rfq.fx_rate === null ? null : (scaledFromText(rfq.fx_rate.toFixed(10)) ?? null);
+}
+
+/** One supplier's total, as the comparison's last rows show it. */
+export type QuoteTotal = {
+  /** The total in the RFQ's own currency; null until the supplier's answer is recorded. */
+  total: string | null;
+  /** "≈ RM …" beside a total in another currency, "No exchange rate" when it has none; null for ringgit and unquoted. */
+  ringgit: string | null;
+  /**
+   * The lowest ringgit total, when the quotes are in more than one currency and at least two have a ringgit total.
+   * Every quote tied at the lowest is marked. Quotes all in one currency are read side by side as they always were.
+   */
+  lowest: boolean;
+};
+
+/**
+ * Each RFQ's total in its own currency, its ringgit beside it when it is foreign, and, across currencies, the
+ * lowest ringgit total marked. Only a quote whose answer was recorded counts; a foreign one with no rate is shown
+ * but not ranked.
+ */
+export function quoteTotals(rfqs: RfqDetail[]): QuoteTotal[] {
+  const mixed = new Set(rfqs.map((r) => r.currency)).size > 1;
+  const ringgit = rfqs.map((r) => {
+    if (r.quoted_at === null) return null;
+    const myr = r.currency === BASE_CURRENCY ? (r.total_myr ?? r.total) : r.total_myr;
+    // Whole sen, to compare: the figures are the database's, already rounded to the sen.
+    return myr === null ? null : Math.round(myr * 100);
+  });
+  const ranked = ringgit.filter((sen): sen is number => sen !== null);
+  const lowest = mixed && ranked.length >= 2 ? Math.min(...ranked) : null;
+  return rfqs.map((r, i) => {
+    if (r.quoted_at === null) return { total: null, ringgit: null, lowest: false };
+    return {
+      total: money(r.total, r.currency),
+      ringgit: r.currency === BASE_CURRENCY ? null : r.total_myr === null ? 'No exchange rate' : `≈ ${rm(r.total_myr)}`,
+      lowest: lowest !== null && ringgit[i] === lowest,
+    };
+  });
+}
+
 /**
  * The group's lines as rows, in the order the first RFQ lists them and then any line only a later RFQ
  * has, with one cell per RFQ. Only an RFQ whose answer was recorded (`quoted_at`) has prices here: the
@@ -137,12 +190,18 @@ export function compareQuotes(rfqs: RfqDetail[]): ComparisonRow[] {
     });
   });
 
+  // One currency throughout: prices compare as they are. Else each in ringgit at its RFQ's rate, and a price
+  // whose RFQ has no rate is left out (it cannot be put into ringgit).
+  const oneCurrency = new Set(rfqs.map((r) => r.currency)).size <= 1;
+  const perUnit = rfqs.map((r) => (oneCurrency ? BigInt(1) : ringgitPerUnit(r)));
   for (const row of rows.values()) {
-    const priced = row.cells.filter((c): c is QuoteCell & { unit_price: number } => c !== null && c.unit_price !== null);
+    const priced = row.cells
+      .map((c, column) => ({ c, rate: perUnit[column] }))
+      .filter((p): p is { c: QuoteCell & { unit_price: number }; rate: bigint } => p.c !== null && p.c.unit_price !== null && p.rate !== null);
     if (priced.length < 2) continue;
-    const costs = priced.map((c) => unitCost(c.unit_price, c.sst_rate));
+    const costs = priced.map(({ c, rate }) => unitCost(c.unit_price, c.sst_rate) * rate);
     const lowest = costs.reduce((a, b) => (b < a ? b : a));
-    priced.forEach((c, i) => {
+    priced.forEach(({ c }, i) => {
       c.lowest = costs[i] === lowest;
     });
   }

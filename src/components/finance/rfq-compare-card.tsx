@@ -6,9 +6,9 @@ import { BentoCard } from '@/components/bento/bento';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { rm, unitPrice } from '@/lib/finance/format';
+import { money, unitPrice } from '@/lib/finance/format';
 import { RFQ_STATUS_LABELS, rfqActions } from '@/lib/finance/purchase-views';
-import { compareQuotes, orderableRfq } from '@/lib/finance/rfq-compare';
+import { compareQuotes, orderableRfq, quoteTotals } from '@/lib/finance/rfq-compare';
 import type { RfqDetail } from '@/lib/finance/rfqs';
 import type { FinResult } from '@/lib/finance/result';
 import { cn } from '@/lib/utils';
@@ -46,6 +46,8 @@ export function RfqCompareCard({
   onClose: () => void;
 }) {
   const rows = compareQuotes(rfqs);
+  const totals = quoteTotals(rfqs);
+  const mixed = new Set(rfqs.map((r) => r.currency)).size > 1;
   const [confirming, setConfirming] = useState<RfqDetail | null>(null);
   const action = useFinanceAction();
   // The question is asked of the group as it now reads, not as it read when the question was opened.
@@ -123,10 +125,10 @@ export function RfqCompareCard({
                               Lowest
                             </span>
                           ) : null}
-                          <span className={cn(cell.lowest && 'font-semibold')}>{unitPrice(cell.unit_price)}</span>
+                          <span className={cn(cell.lowest && 'font-semibold')}>{unitPrice(cell.unit_price, rfqs[i].currency)}</span>
                         </span>
                         <span className="block text-xs text-muted-foreground">
-                          Qty {cell.quantity} · {cell.sst_rate ? `SST ${cell.sst_rate}%` : 'No SST'} · {rm(cell.total)}
+                          Qty {cell.quantity} · {cell.sst_rate ? `SST ${cell.sst_rate}%` : 'No SST'} · {money(cell.total, rfqs[i].currency)}
                         </span>
                       </>
                     )}
@@ -142,11 +144,29 @@ export function RfqCompareCard({
               <TableHead scope="row" className="h-auto p-2">
                 Total
               </TableHead>
-              {rfqs.map((r) => (
-                <TableCell key={r.id} className="whitespace-nowrap text-right tabular-nums">
-                  {r.quoted_at ? rm(r.total) : <span className="font-normal text-muted-foreground">Not quoted</span>}
-                </TableCell>
-              ))}
+              {rfqs.map((r, i) => {
+                const t = totals[i];
+                return (
+                  <TableCell key={r.id} className="whitespace-nowrap text-right tabular-nums">
+                    {t.total === null ? (
+                      <span className="font-normal text-muted-foreground">Not quoted</span>
+                    ) : (
+                      <>
+                        <span className="flex items-center justify-end gap-1.5">
+                          {t.lowest ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-semibold text-emerald-600">
+                              <BadgeCheck className="size-3" aria-hidden />
+                              Lowest
+                            </span>
+                          ) : null}
+                          <span>{t.total}</span>
+                        </span>
+                        {t.ringgit ? <span className="block text-xs font-normal text-muted-foreground">{t.ringgit}</span> : null}
+                      </>
+                    )}
+                  </TableCell>
+                );
+              })}
             </TableRow>
             <TableRow>
               <TableHead scope="row" className="h-auto p-2">
@@ -196,7 +216,7 @@ export function RfqCompareCard({
           >
             <p className="basis-full">
               Make a draft purchase order from <span className="font-medium">{asked.rfq_no}</span> to{' '}
-              <span className="font-medium">{asked.supplier_name}</span> ({rm(asked.total)})? It gets the same supplier
+              <span className="font-medium">{asked.supplier_name}</span> ({money(asked.total, asked.currency)})? It gets the same supplier
               and lines, at the prices quoted, and stays a draft on Purchase Orders until it is submitted for approval. The
               other RFQs stay as they are.
             </p>
@@ -240,8 +260,9 @@ export function RfqCompareCard({
         ) : null}
         <div className="flex flex-wrap items-center gap-3">
           <p className="flex-1 text-muted-foreground">
-            Lowest is the lowest price for one unit once SST is added. The lowest price is not always the best choice:
-            delivery time and past service count too.
+            Lowest is the lowest price for one unit once SST is added
+            {mixed ? ', and the lowest total, compared in ringgit at each RFQ’s own exchange rate' : ''}. The lowest price
+            is not always the best choice: delivery time and past service count too.
           </p>
           <Button type="button" size="sm" variant="outline" onClick={onClose} disabled={action.pending} ref={closeButton}>
             Close

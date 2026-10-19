@@ -16,9 +16,14 @@ export function money(n: number, currency: string = BASE_CURRENCY) {
   return `${currency} ${n.toLocaleString('en-MY', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 }
 
-/** A unit price keeps up to 4 decimals, so two prices that differ only there do not read the same. */
-export function unitPrice(n: number) {
-  return `RM ${n.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+/**
+ * A unit price keeps up to 4 decimals, so two prices that differ only there do not read the same. In another
+ * currency it is named by its code ("USD 33.33"), with as few decimals as that currency has at the least.
+ */
+export function unitPrice(n: number, currency: string = BASE_CURRENCY) {
+  if (currency === BASE_CURRENCY) return `RM ${n.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+  const digits = minorUnits(currency) ?? 2;
+  return `${currency} ${n.toLocaleString('en-MY', { minimumFractionDigits: digits, maximumFractionDigits: 4 })}`;
 }
 
 /** Short money for KPI cards: RM 2,600 / RM 12.7k. */
