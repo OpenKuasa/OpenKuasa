@@ -5,10 +5,18 @@
  * saveCreditNoteAction. Pure. A credit note is one amount against one posted
  * invoice, with a reason: it has no lines and moves no money, so it shares
  * neither the document card nor the payment card.
+ *
+ * An invoice in another currency (stage 3c) takes a credit note in its own
+ * currency, at its own rate: the amount is typed in that currency (whole
+ * units for one with no cents), and the form shows about what it takes off in
+ * ringgit, worked as the database works it (fx-settlement.ts).
  */
 import { amountText, round2, sen } from './allocation-form';
 import { CREDIT_NOTE_MESSAGES, type CreditNoteReason, type CreditNoteRow, saveCreditNoteInput } from './credit-notes';
-import { rm, typedNumber } from './format';
+import { BASE_CURRENCY, minorUnits } from './currencies';
+import { CURRENCY_MESSAGES } from './document-currency';
+import { money, rm, typedNumber } from './format';
+import { creditNoteRinggit } from './fx-settlement';
 import type { InvoiceListRow } from './invoices';
 import { WRITE_FAILED } from './result';
 
@@ -24,6 +32,14 @@ export type CreditableInvoice = {
   credited: number;
   /** What a new credit note may be for: the total less what is already credited. */
   creditable: number;
+  /** The invoice's currency: total, credited, creditable and balance are in it. */
+  currency: string;
+  /** The invoice's rate as the database's exact text; "1.0000000000" for ringgit. */
+  fx_rate_text: string | null;
+  /** What is still owed (posted money in, credit notes and refunds counted), in its currency; below 0 in credit. */
+  balance: number;
+  /** The same in ringgit: what the invoice still carries. */
+  balance_myr: number;
 };
 
 export type CreditNoteForm = {
@@ -49,9 +65,14 @@ export type CreditNoteForm = {
  * unless it is no longer posted.
  */
 export function creditableInvoices(invoices: InvoiceListRow[], keepId?: string): CreditableInvoice[] {
-  // Ringgit invoices only: nothing settles an invoice in another currency yet (FIN41, stage 3a).
+  // Any currency (stage 3c): a credit note on an invoice in another currency is in its currency, at its rate. A
+  // posted invoice always has its rate.
   return invoices
-    .filter((i) => i.currency === 'MYR' && (i.display_status === 'sent' || i.display_status === 'overdue' || i.display_status === 'paid'))
+    .filter(
+      (i) =>
+        (i.display_status === 'sent' || i.display_status === 'overdue' || i.display_status === 'paid') &&
+        (i.currency === BASE_CURRENCY || i.fx_rate_text !== null),
+    )
     .map((i) => ({
       id: i.id,
       invoice_no: i.invoice_no ?? '—',
@@ -60,6 +81,10 @@ export function creditableInvoices(invoices: InvoiceListRow[], keepId?: string):
       total: i.total,
       credited: i.credited,
       creditable: Math.max(round2(i.total - i.credited), 0),
+      currency: i.currency,
+      fx_rate_text: i.fx_rate_text,
+      balance: i.balance,
+      balance_myr: i.balance_myr ?? i.balance,
     }))
     .filter((i) => i.creditable > 0 || i.id === keepId)
     // By number as a number: INV-9999 comes before INV-10000.
@@ -70,7 +95,7 @@ export function creditableInvoices(invoices: InvoiceListRow[], keepId?: string):
 
 /** How the form's picker lists an invoice: its number, its customer, and what it has left to credit. */
 export function creditableLabel(invoice: CreditableInvoice): string {
-  return `${invoice.invoice_no} · ${invoice.customer_name} · ${rm(invoice.creditable)} left to credit`;
+  return `${invoice.invoice_no} · ${invoice.customer_name} · ${money(invoice.creditable, invoice.currency)} left to credit`;
 }
 
 /**
@@ -125,7 +150,31 @@ export function creditNoteFormError(form: CreditNoteForm, creditable: Creditable
   if (!parsed.success) return parsed.error.issues[0]?.message ?? M.amount;
   const invoice = creditable.find((i) => i.id === form.invoiceId);
   if (!invoice) return M.notPosted;
+  if (minorUnits(invoice.currency) === 0 && !Number.isInteger(parsed.data.amount)) return CURRENCY_MESSAGES.wholeUnits(invoice.currency);
   return sen(parsed.data.amount) > sen(invoice.creditable) ? M.tooMuch : null;
+}
+
+/** The invoice the form is on, when it is in another currency; null for a ringgit one or none chosen. */
+export function foreignCreditable(form: CreditNoteForm, creditable: CreditableInvoice[]): CreditableInvoice | null {
+  const invoice = creditable.find((i) => i.id === form.invoiceId);
+  return invoice && invoice.currency !== BASE_CURRENCY ? invoice : null;
+}
+
+/** The amount box's label: in the chosen invoice's currency. */
+export function creditNoteAmountLabel(form: CreditNoteForm, creditable: CreditableInvoice[]): string {
+  return `Amount (${foreignCreditable(form, creditable)?.currency ?? 'RM'})`;
+}
+
+/**
+ * Under the amount, for an invoice in another currency: about what the credit note takes off in ringgit, worked
+ * as the database works it when it is issued (at the invoice's rate, or exactly what is still open when it clears
+ * the invoice). Null for a ringgit invoice and while the amount is not a number.
+ */
+export function creditNoteRinggitNote(form: CreditNoteForm, creditable: CreditableInvoice[]): string | null {
+  const invoice = foreignCreditable(form, creditable);
+  if (!invoice) return null;
+  const ringgit = creditNoteRinggit(form.amount.replace(/,/g, '').trim(), invoice.fx_rate_text, invoice.balance, invoice.balance_myr);
+  return ringgit === null ? null : `≈ ${rm(ringgit)} at the invoice’s rate. No exchange gain or loss.`;
 }
 
 /** What a credit note that was just saved is: what the form held when it was sent, not the row it was opened from. */
@@ -134,6 +183,8 @@ export type CreditNoteSaved = {
   invoice_no: string;
   customer_name: string;
   amount: number;
+  /** The invoice's currency, which the amount is in. */
+  currency: string;
   /** True when it was saved and issued, false when it was saved as a draft. */
   issued: boolean;
 };
@@ -149,7 +200,13 @@ export function creditNoteSaved(form: CreditNoteForm, creditable: CreditableInvo
   const invoice = creditable.find((i) => i.id === form.invoiceId);
   const parsed = saveCreditNoteInput.safeParse(creditNotePayload(form));
   if (!invoice || !parsed.success) return null;
-  return { invoice_no: invoice.invoice_no, customer_name: invoice.customer_name, amount: parsed.data.amount, issued };
+  return {
+    invoice_no: invoice.invoice_no,
+    customer_name: invoice.customer_name,
+    amount: parsed.data.amount,
+    currency: invoice.currency,
+    issued,
+  };
 }
 
 /**
@@ -167,8 +224,8 @@ export function creditNoteSavedNote(saved: CreditNoteSaved): { title: string; su
     title: saved.issued ? 'Credit note issued' : 'Credit note saved',
     subtitle: `${numbered ? saved.invoice_no : 'The invoice'} to ${saved.customer_name}`,
     lead: saved.issued
-      ? `A credit note of ${rm(saved.amount)} was issued against ${invoice}. It can be voided, or refunded while the customer is in credit, on`
-      : `A draft credit note of ${rm(saved.amount)} was saved against ${invoice}. It is issued, changed or deleted on`,
+      ? `A credit note of ${money(saved.amount, saved.currency)} was issued against ${invoice}. It can be voided, or refunded while the customer is in credit, on`
+      : `A draft credit note of ${money(saved.amount, saved.currency)} was saved against ${invoice}. It is issued, changed or deleted on`,
   };
 }
 

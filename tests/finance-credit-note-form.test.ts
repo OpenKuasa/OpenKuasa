@@ -217,7 +217,7 @@ describe('the note that a credit note was saved', () => {
     expect(creditNoteFormError(changed, offered)).toBeNull();
 
     const saved = creditNoteSaved(changed, offered, false);
-    expect(saved).toEqual({ invoice_no: 'INV-0009', customer_name: 'Bakar Enterprise', amount: 25, issued: false });
+    expect(saved).toEqual({ invoice_no: 'INV-0009', customer_name: 'Bakar Enterprise', amount: 25, currency: 'MYR', issued: false });
     // What the note says is what was sent.
     expect(creditNotePayload(changed)).toMatchObject({ invoice_id: PAID, amount: 25 });
     const said = creditNoteSavedNote(saved!);

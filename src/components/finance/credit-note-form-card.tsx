@@ -10,9 +10,11 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   type CreditNoteSaved,
+  creditNoteAmountLabel,
   creditNoteFormError,
   creditNoteFormFromRow,
   creditNotePayload,
+  creditNoteRinggitNote,
   creditNoteSaved,
   creditNoteSavedNotIssued,
   creditableInvoices,
@@ -26,7 +28,7 @@ import {
   type CreditNoteRow,
   type SaveAndIssueCreditNoteResult,
 } from '@/lib/finance/credit-notes';
-import { rm } from '@/lib/finance/format';
+import { money } from '@/lib/finance/format';
 import type { InvoiceListRow } from '@/lib/finance/invoices';
 import type { FinResult } from '@/lib/finance/result';
 
@@ -84,6 +86,8 @@ export function CreditNoteFormCard({
   // The form's own invoice stays offered with nothing left, so the form can say that is why.
   const offered = creditableInvoices(invoices, form.invoiceId);
   const chosen = offered.find((i) => i.id === form.invoiceId);
+  // An invoice in another currency: the amount is in its currency, and the form says about what it takes in ringgit.
+  const ringgitNote = creditNoteRinggitNote(form, offered);
 
   const send = (issue: boolean) => {
     const problem = creditNoteFormError(form, offered);
@@ -157,7 +161,7 @@ export function CreditNoteFormCard({
           </Select>
           <p className="text-xs text-muted-foreground tabular-nums" aria-live="polite">
             {chosen
-              ? `Total ${rm(chosen.total)} · ${rm(chosen.credited)} already credited · ${rm(chosen.creditable)} left to credit`
+              ? `Total ${money(chosen.total, chosen.currency)} · ${money(chosen.credited, chosen.currency)} already credited · ${money(chosen.creditable, chosen.currency)} left to credit`
               : 'A posted invoice. What has been paid on it does not limit a credit note.'}
           </p>
         </div>
@@ -172,7 +176,7 @@ export function CreditNoteFormCard({
           />
         </div>
         <div className="space-y-1.5 md:col-span-3">
-          <Label htmlFor={`${id}-amount`}>Amount (RM)</Label>
+          <Label htmlFor={`${id}-amount`}>{creditNoteAmountLabel(form, offered)}</Label>
           <Input
             id={`${id}-amount`}
             type="number"
@@ -186,8 +190,14 @@ export function CreditNoteFormCard({
               if (e.key === 'Enter') e.preventDefault();
             }}
             value={form.amount}
+            aria-describedby={ringgitNote ? `${id}-amount-ringgit` : undefined}
             onChange={(e) => edit((f) => ({ ...f, amount: e.target.value }))}
           />
+          {ringgitNote ? (
+            <p id={`${id}-amount-ringgit`} className="text-xs text-muted-foreground tabular-nums" aria-live="polite">
+              {ringgitNote}
+            </p>
+          ) : null}
         </div>
         <div className="space-y-1.5 md:col-span-4">
           <Label htmlFor={`${id}-reason`}>Reason</Label>

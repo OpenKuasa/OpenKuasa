@@ -58,12 +58,12 @@ describe('credit note reads', () => {
   const row = (n: number) => ({
     id: `cn-${n}`, credit_note_no: `CN-${n}`, invoice_id: 'inv-1', invoice_no: 'INV-1042', customer_id: 'c1',
     customer_name: 'Aisyah Trading', credit_date: '2026-10-06', reason: 'returns', amount: '240.00', refunded: '100.00',
-    status: 'issued', notes: null,
+    status: 'issued', notes: null, currency: 'MYR', fx_rate: '1.0000000000', amount_myr: '240.00',
   });
 
   it('lists from the totals view, in the caller’s workspace, newest first, with amounts as numbers', async () => {
     const { ctx, calls } = fakeFinance({ data: [row(1)], error: null });
-    expect(await listCreditNotes(ctx)).toEqual([{ ...row(1), amount: 240, refunded: 100 }]);
+    expect(await listCreditNotes(ctx)).toEqual([{ ...row(1), amount: 240, refunded: 100, fx_rate: 1, amount_myr: 240 }]);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
       name: 'finance_credit_note_totals',
