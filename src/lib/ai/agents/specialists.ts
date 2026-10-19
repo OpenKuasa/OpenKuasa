@@ -60,6 +60,7 @@ import {
 } from '@/lib/ai/hire-interview-gate';
 import type { ProductToolkit } from '@/lib/ai/products';
 import { FINANCE_ID_GATED, FINANCE_SAVE_GATED } from '@/lib/ai/finance-id-gate';
+import { revalidateFinance } from '@/lib/ai/finance-revalidate';
 import { logModelCall, logModelError, modelErrorCode } from '@/lib/ai/call-log';
 import { getModel, pickModelId } from '@/lib/ai/provider';
 import { changeRows } from '@/lib/chat/change-rows';
@@ -682,6 +683,9 @@ async function apply(
   }
   const output = await run(parsed.data, options);
   if (team.names) collectNames([{ tool: proposal.action, output }], team.names);
+  // An AI-applied finance write bypasses the finance forms' own revalidatePath calls, so refresh the screens
+  // it changed here — only on success, and only for finance (see finance-revalidate.ts).
+  if (proposal.product === 'finance' && (output as { ok?: unknown } | null)?.ok) revalidateFinance(proposal.action);
   return output;
 }
 
