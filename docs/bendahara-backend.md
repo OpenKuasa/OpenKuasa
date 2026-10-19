@@ -3061,4 +3061,16 @@ with no date).
   ringgit bills only), so a member cannot pay one. Every Payments Out figure
   (Paid this month, the trend, the method donut, To be paid) and Supplier
   Bills' Paid this month add `paymentOutRinggit`. The finance assistant pays
-  ringgit bills only (`recordPaymentOutInRinggit`).
+  ringgit bills only (`recordPaymentOutInRinggit`). Lines of
+  `20261121110000` that `supabase/tests/bendahara_fx_payments_out_check.sql`
+  cannot pin (a single session cannot observe them), kept by review of the
+  text:
+  - `bill_id` in `finance_fx_settle`'s tie key (inserts are in bill-id order).
+  - The up-front `for update` bill lock in `finance_record_payment_out`.
+  - The `for update` read of the bill's currency in
+    `finance_allocation_currency_guard` (a plain read is not observably
+    different alone).
+  - The bill lock in `finance_fx_settle` (nearly equivalent: the allocation
+    guard has already locked the bills).
+  - The FIN04 arm of `finance_fx_carried_bill` (unreachable: it runs only on a
+    posted bill, which always has a rate).
