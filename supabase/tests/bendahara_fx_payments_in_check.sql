@@ -341,12 +341,15 @@ begin
       jsonb_build_array(jsonb_build_object('invoice_id', i_u, 'amount', 10))));
   select n - count(*) into n from public.finance_transactions where org_id = org;
   if n <> 0 then fails := fails || format('refused payments left %s transactions', -n); end if;
-  fails := fails || public.bendahara_check_try('FIN41: a refund on a USD invoice', 'FIN41',
+  -- 3c lifted FIN41: a refund on a USD invoice needs the ringgit paid out (FIN46), and a credit note on one is
+  -- saved (deleted again here). bendahara_fx_credit_notes_refunds_check.sql has the rest.
+  fails := fails || public.bendahara_check_try('a refund on a USD invoice, no ringgit paid out', 'FIN46',
     format('select public.finance_record_refund(%L, %L)', org,
       jsonb_build_object('invoice_id', i_a, 'account_id', bank, 'method', 'fpx', 'reason', 'overpayment', 'amount', 10)));
-  fails := fails || public.bendahara_check_try('FIN41: a credit note on a USD invoice', 'FIN41',
+  fails := fails || public.bendahara_check_try('a credit note on a USD invoice', 'ok',
     format('select public.finance_save_credit_note(%L, %L)', org,
       jsonb_build_object('invoice_id', i_u, 'reason', 'returns', 'amount', 10)));
+  delete from public.finance_credit_notes where invoice_id = i_u and status = 'draft';
 
   -- A draft written by hand with a USD split: not posted unsettled, its ringgit columns not writable.
   insert into public.finance_transactions (org_id, direction, account_id, txn_date, amount, method, contact_id, status)

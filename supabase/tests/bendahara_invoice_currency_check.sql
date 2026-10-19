@@ -209,12 +209,22 @@ begin
       jsonb_build_array(jsonb_build_object('invoice_id', i_usd, 'amount', 10))));
   select n - count(*) into n from public.finance_transactions where org_id = org;
   if n <> 0 then fails := fails || '13: a refused payment left a transaction'::text; end if;
-  fails := fails || public.bendahara_check_try('14: a credit note on a foreign invoice', 'FIN41',
+  -- 3c: a credit note on a foreign invoice is saved, in the invoice's currency (deleted again: 18 reads the
+  -- invoice's entry alone); a refund on one needs the ringgit paid out (FIN46), and then a customer in credit
+  -- (FIN04). bendahara_fx_credit_notes_refunds_check.sql has the rest.
+  fails := fails || public.bendahara_check_try('14: a credit note on a foreign invoice', 'ok',
     format('select public.finance_save_credit_note(%L, %L)', org,
       jsonb_build_object('invoice_id', i_usd, 'reason', 'returns', 'amount', 10)));
-  fails := fails || public.bendahara_check_try('15: a refund on a foreign invoice', 'FIN41',
+  select count(*) into n from public.finance_credit_notes where invoice_id = i_usd and currency = 'USD' and fx_rate = 4.2;
+  if n <> 1 then fails := fails || format('14: %s draft credit notes on the USD invoice are in USD at 4.2', n); end if;
+  delete from public.finance_credit_notes where invoice_id = i_usd and status = 'draft';
+  fails := fails || public.bendahara_check_try('15: a refund on a foreign invoice, no ringgit paid out', 'FIN46',
     format('select public.finance_record_refund(%L, %L)', org,
       jsonb_build_object('invoice_id', i_usd, 'account_id', bank, 'method', 'fpx', 'reason', 'overpayment', 'amount', 10)));
+  fails := fails || public.bendahara_check_try('15: a refund on a foreign invoice that is owed', 'FIN04',
+    format('select public.finance_record_refund(%L, %L)', org,
+      jsonb_build_object('invoice_id', i_usd, 'account_id', bank, 'method', 'fpx', 'reason', 'overpayment', 'amount', 10,
+                         'amount_myr', '42')));
 
   -- 18: the ledger in ringgit.
   select coalesce(sum(l.debit) filter (where a.system_key = 'receivable'), 0) as rec,
