@@ -41,6 +41,10 @@ declare
   tx uuid;
   rcpt uuid;
   pay uuid;
+  b_bnm uuid;
+  b_typed uuid;
+  p1 uuid;
+  p2 uuid;
   n integer;
   n0 integer;
   t text;
@@ -373,6 +377,33 @@ begin
     fails := fails || format('20: the bill made from a receipt is %s at %s, %s', r.currency, r.fx_rate, r.status);
   end if;
 
+  -- A typed rate sent with a date keeps no date: the date is BNM's only (finance_save_bill's b_rate_date).
+  fails := fails || public.bendahara_check_try('19: a typed rate sent with a date', 'ok',
+    format('select public.finance_save_bill(%L, %L, %L)', org,
+      jsonb_build_object('supplier_id', sup, 'bill_date', '1999-01-10', 'due_date', '1999-02-10', 'notes', 'typed with a date',
+        'currency', 'USD', 'fx_rate', '4.2', 'fx_rate_source', 'manual', 'fx_rate_date', '1999-01-08', 'fx_rate_provider', 'reuters'), myr_line));
+  select id into b_typed from public.supplier_bills where org_id = org and notes = 'typed with a date';
+  select fx_rate_source, fx_rate_date into r from public.supplier_bills where id = b_typed;
+  if b_typed is null or r.fx_rate_source is distinct from 'manual' or r.fx_rate_date is not null then
+    fails := fails || format('19: a typed rate sent with a date is %s, dated %s', r.fx_rate_source, r.fx_rate_date);
+  end if;
+
+  -- ==== a posted BNM-rate bill is voided after BNM's row for its day is corrected ======
+  -- The rate guard looks only at drafts (its early return for a posted bill), so a later change to the rate
+  -- table never makes a posted bill unvoidable.
+  b_bnm := public.finance_save_bill(org,
+    jsonb_build_object('supplier_id', sup, 'bill_date', '1999-01-10', 'due_date', '1999-02-10',
+      'currency', 'USD', 'fx_rate', '4.083', 'fx_rate_source', 'bnm', 'fx_rate_date', '1999-01-08'), one_line);
+  perform public.finance_post_bill(org, b_bnm);
+  reset role;
+  update public.finance_fx_rates set selling_rate = 4.090 where currency = 'USD' and rate_date = date '1999-01-08' and session = '1700';
+  set local role authenticated;
+  fails := fails || public.bendahara_check_try('a posted BNM-rate bill voided after BNM''s rate was corrected', 'ok',
+    format('update public.supplier_bills set status = %L, updated_at = now() where id = %L', 'void', b_bnm));
+  reset role;
+  update public.finance_fx_rates set selling_rate = 4.083 where currency = 'USD' and rate_date = date '1999-01-08' and session = '1700';
+  set local role authenticated;
+
   -- ==== 21-22: the rate's form =======================================================
   fails := fails || public.bendahara_check_try('21: a rate longer than the e-Invoice takes', '23514',
     format('update public.supplier_bills set fx_rate = 12345.1234567891, fx_rate_source = %L, fx_rate_provider = %L where id = %L',
@@ -437,6 +468,83 @@ begin
   if n <> 0 then fails := fails || format('25: %s ledger lines of the ringgit bill are not its plain figures', n); end if;
   -- (The migration itself compares every workspace's ledger, bills, payments out, orders, bank balances and
   -- allocations before and after, row for row.)
+
+  -- ==== B4 through 4a's views: the payment-out realised line ===========================
+  -- Nothing writes a bill allocation's ringgit figures until 20261121110000 (its finance_fx_settle), but the
+  -- views 4a ships already read them. Worked example B4 on the posted A4 bill (USD 1,080.00 at 4.2, RM 4,536.00),
+  -- written past the guards as that function will write it (inside this rolled-back block):
+  --   payment 1: USD 400.00 paid with RM 1,700.00, carried RM 1,680.00 -> Dr Payable 1,680.00, Dr realised 20.00, Cr Bank 1,700.00
+  --   payment 2: USD 680.00 paid with RM 2,800.00, carried RM 2,856.00 -> Dr Payable 2,856.00, Cr realised 56.00, Cr Bank 2,800.00
+  reset role;
+  alter table public.finance_transactions disable trigger user;
+  alter table public.finance_allocations disable trigger user;
+  insert into public.finance_transactions (org_id, direction, account_id, amount, method, contact_id, status, number, txn_date)
+  values (org, 'out', bank, 1700, 'bank_transfer', sup, 'posted', 'B4-1', current_date) returning id into p1;
+  insert into public.finance_allocations (org_id, transaction_id, bill_id, amount, amount_myr, carried_myr)
+  values (org, p1, b_usd, 400, 1700, 1680);
+  insert into public.finance_transactions (org_id, direction, account_id, amount, method, contact_id, status, number, txn_date)
+  values (org, 'out', bank, 2800, 'bank_transfer', sup, 'posted', 'B4-2', current_date) returning id into p2;
+  insert into public.finance_allocations (org_id, transaction_id, bill_id, amount, amount_myr, carried_myr)
+  values (org, p2, b_usd, 680, 2800, 2856);
+  alter table public.finance_transactions enable trigger user;
+  alter table public.finance_allocations enable trigger user;
+  set local role authenticated;
+  for r in
+    select l.source_id,
+           coalesce(sum(l.debit) filter (where a.system_key = 'payable'), 0) as pay_dr,
+           coalesce(sum(l.debit) filter (where a.system_key = 'fx_realised'), 0) as fx_dr,
+           coalesce(sum(l.credit) filter (where a.system_key = 'fx_realised'), 0) as fx_cr,
+           coalesce(sum(l.credit) filter (where a.bank_account_id is not null), 0) as bank_cr,
+           sum(l.debit) as dr, sum(l.credit) as cr, count(*) as n
+      from public.finance_ledger_lines l join public.finance_ledger_accounts a on a.org_id = l.org_id and a.id = l.account_id
+     where l.org_id = org and l.source = 'payment_out' and l.source_id in (p1, p2)
+     group by l.source_id
+  loop
+    if r.source_id = p1 and (r.pay_dr is distinct from 1680.00 or r.fx_dr is distinct from 20.00 or r.fx_cr is distinct from 0
+                             or r.bank_cr is distinct from 1700.00 or r.dr is distinct from r.cr or r.n is distinct from 3) then
+      fails := fails || format('B4 payment 1 posts Dr Payable %s, Dr realised %s, Cr realised %s, Cr Bank %s (Dr %s, Cr %s, %s lines)',
+        r.pay_dr, r.fx_dr, r.fx_cr, r.bank_cr, r.dr, r.cr, r.n);
+    end if;
+    if r.source_id = p2 and (r.pay_dr is distinct from 2856.00 or r.fx_dr is distinct from 0 or r.fx_cr is distinct from 56.00
+                             or r.bank_cr is distinct from 2800.00 or r.dr is distinct from r.cr or r.n is distinct from 3) then
+      fails := fails || format('B4 payment 2 posts Dr Payable %s, Dr realised %s, Cr realised %s, Cr Bank %s (Dr %s, Cr %s, %s lines)',
+        r.pay_dr, r.fx_dr, r.fx_cr, r.bank_cr, r.dr, r.cr, r.n);
+    end if;
+  end loop;
+  select count(distinct l.source_id) into n from public.finance_ledger_lines l
+   where l.org_id = org and l.source = 'payment_out' and l.source_id in (p1, p2);
+  if n is distinct from 2 then fails := fails || format('B4: %s of 2 payments post as payments out', n); end if;
+  -- Payable for the bill and its two payments: 4,536.00 credited, 1,680.00 + 2,856.00 debited.
+  select coalesce(sum(l.debit - l.credit), 0) as payable into r
+    from public.finance_ledger_lines l join public.finance_ledger_accounts a on a.org_id = l.org_id and a.id = l.account_id
+   where l.org_id = org and a.system_key = 'payable' and l.source_id in (b_usd, p1, p2);
+  if r.payable is distinct from 0.00 then fails := fails || format('B4: Payable for the bill ends at %s, not 0.00', r.payable); end if;
+  select paid, paid_myr, balance, balance_myr, display_status into r from public.supplier_bill_totals where id = b_usd;
+  if r.paid is distinct from 1080.00 or r.paid_myr is distinct from 4536.00 or r.balance is distinct from 0.00
+     or r.balance_myr is distinct from 0.00 or r.display_status is distinct from 'paid' then
+    fails := fails || format('B4: the bill reads paid %s / RM %s, balance %s / RM %s, %s', r.paid, r.paid_myr, r.balance, r.balance_myr, r.display_status);
+  end if;
+  select string_agg(number || ' ' || amount || ' ' || amount_myr || ' ' || carried_myr || ' ' || realised_myr, '; ' order by number) into t
+    from public.finance_payments_out where bill_id = b_usd;
+  if t is distinct from 'B4-1 400.00 1700.00 1680.00 -20.00; B4-2 680.00 2800.00 2856.00 56.00' then
+    fails := fails || format('B4: finance_payments_out reads %s', t);
+  end if;
+  -- Void payment 2: its reversal swaps the same figures, and the bill is open again for USD 680.00 / RM 2,856.00.
+  reset role;
+  alter table public.finance_transactions disable trigger user;
+  update public.finance_transactions set status = 'void', voided_at = now() where id = p2;
+  alter table public.finance_transactions enable trigger user;
+  set local role authenticated;
+  select count(*) as n, sum(debit) as dr, sum(credit) as cr into r from public.finance_ledger_lines where org_id = org and source_id = p2;
+  if r.n is distinct from 6 or r.dr is distinct from 5712.00 or r.cr is distinct from 5712.00 then
+    fails := fails || format('B4: payment 2 voided has %s lines, Dr %s, Cr %s (not 6, 5,712.00 each)', r.n, r.dr, r.cr);
+  end if;
+  select balance, balance_myr into r from public.supplier_bill_totals where id = b_usd;
+  if r.balance is distinct from 680.00 or r.balance_myr is distinct from 2856.00 then
+    fails := fails || format('B4: after the void the bill owes %s / RM %s, not 680.00 / RM 2,856.00', r.balance, r.balance_myr);
+  end if;
+  select coalesce(sum(debit), 0) - coalesce(sum(credit), 0) as diff into r from public.finance_ledger_lines where org_id = org;
+  if r.diff is distinct from 0.00 then fails := fails || format('B4: the workspace ledger is out by %s', r.diff); end if;
 
   -- ==== 23: a viewer; an outsider =====================================================
   perform set_config('request.jwt.claims', viewer_claims, true);
