@@ -2161,7 +2161,10 @@ const ALL_CASES: Case[] = [
         check('for the seeded supplier', input.supplier_id === supplier.id, input.supplier_id),
         check('nothing saved before approval', (await rfqForSupplier(ws, supplier.id)) === null),
       ];
-      if (asked.pending.length !== 1) return checks;
+      // Only commit when the single pending change is a saveRfq against the SEEDED tagged supplier: cleanUp
+      // matches the RFQ through that supplier, so a draft against any other supplier would be an unmatched
+      // row it cannot remove. Otherwise report the checks and stop, committing nothing.
+      if (asked.pending.length !== 1 || proposal?.action !== 'saveRfq' || input.supplier_id !== supplier.id) return checks;
       const done = await chat.decide(true);
       const row = await rfqForSupplier(ws, supplier.id);
       return [
