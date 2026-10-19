@@ -7,7 +7,7 @@
  * refund on such an invoice, which the same closing rule carries (stage 3c,
  * 20261120120000_bendahara_fx_credit_notes_refunds.sql); and a ringgit payment of
  * supplier bills in another currency (stage 4b, private.finance_fx_carried_bill in
- * 20261121110000_bendahara_fx_payments_out.sql, the bill side of the same rule:
+ * 20261121111000_bendahara_fx_payments_out.sql, the bill side of the same rule:
  * carriedSen answers it too). Pure, and in whole numbers
  * only: money is a bigint count of sen (every amount column keeps two
  * decimals, a currency with no cents included) and a rate a bigint count of

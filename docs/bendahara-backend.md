@@ -3043,7 +3043,7 @@ with no date).
   `finance_ledger_lines` already carries the payment-out realised line the
   next stage needs; it reads only allocations' `amount_myr`/`carried_myr`,
   which nothing writes on a bill allocation yet, so it is 0.
-- Payments out of bills in another currency (`20261121110000`, stage 4b):
+- Payments out of bills in another currency (`20261121111000`, stage 4b):
   `FIN41` is no longer raised. A foreign bill is paid from a ringgit account
   on Payments Out, now: `finance_record_payment_out` takes the ringgit that
   left the account as `payment->>'amount_myr'` (`FIN46` when it is missing,
@@ -3062,7 +3062,7 @@ with no date).
   (Paid this month, the trend, the method donut, To be paid) and Supplier
   Bills' Paid this month add `paymentOutRinggit`. The finance assistant pays
   ringgit bills only (`recordPaymentOutInRinggit`). Lines of
-  `20261121110000` that `supabase/tests/bendahara_fx_payments_out_check.sql`
+  `20261121111000` that `supabase/tests/bendahara_fx_payments_out_check.sql`
   cannot pin (a single session cannot observe them), kept by review of the
   text:
   - `bill_id` in `finance_fx_settle`'s tie key (inserts are in bill-id order).

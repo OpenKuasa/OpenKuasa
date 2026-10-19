@@ -1,5 +1,5 @@
 -- Bendahara foreign payments-out check (stage 4b). Run it after
--- 20261121110000_bendahara_fx_payments_out.sql, in the same transaction for a
+-- 20261121111000_bendahara_fx_payments_out.sql, in the same transaction for a
 -- dry run, or by itself once applied. It leaves nothing behind either way:
 -- the block always ends with RAISE, so every row and the helper functions
 -- below are rolled back. Read the message:

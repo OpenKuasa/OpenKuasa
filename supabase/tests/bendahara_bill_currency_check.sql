@@ -234,7 +234,7 @@ begin
       r.total, r.total_myr, r.subtotal_myr, r.sst_myr, r.balance, r.balance_myr, r.paid_myr);
   end if;
 
-  -- ==== 12-15: since 20261121110000 (4b) a foreign bill is paid now, with the ringgit paid out; FIN41 is gone =====
+  -- ==== 12-15: since 20261121111000 (4b) a foreign bill is paid now, with the ringgit paid out; FIN41 is gone =====
   -- (4a answered FIN41 to each. bendahara_fx_payments_out_check.sql works the payments themselves.)
   select count(*) into n0 from public.finance_transactions where org_id = org;
   fails := fails || public.bendahara_check_try('12: a payment out of the USD bill, paid now, with no ringgit paid out', 'FIN46',
@@ -472,7 +472,7 @@ begin
   -- allocations before and after, row for row.)
 
   -- ==== B4 through 4a's views: the payment-out realised line ===========================
-  -- Nothing writes a bill allocation's ringgit figures until 20261121110000 (its finance_fx_settle), but the
+  -- Nothing writes a bill allocation's ringgit figures until 20261121111000 (its finance_fx_settle), but the
   -- views 4a ships already read them. Worked example B4 on the posted A4 bill (USD 1,080.00 at 4.2, RM 4,536.00),
   -- written past the guards as that function will write it (inside this rolled-back block):
   --   payment 1: USD 400.00 paid with RM 1,700.00, carried RM 1,680.00 -> Dr Payable 1,680.00, Dr realised 20.00, Cr Bank 1,700.00

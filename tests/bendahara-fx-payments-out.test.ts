@@ -16,7 +16,7 @@ import {
 } from '@/lib/finance/money';
 import { newPaymentForm, payableBills, paymentPayload, paymentPreview, toggleBill, withRinggit } from '@/lib/finance/payment-form';
 
-// Payments out of supplier bills in another currency (stage 4b, 20261121110000_bendahara_fx_payments_out) against
+// Payments out of supplier bills in another currency (stage 4b, 20261121111000_bendahara_fx_payments_out) against
 // the hosted database, through the app's own data layer and the payment form's own rules with a real client. Run
 // by the controller only, after the migration is applied. Every role cell and every refusal is proved by
 // supabase/tests/bendahara_fx_payments_out_check.sql; this file adds what only the API shows: the form's payload is
