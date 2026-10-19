@@ -40,10 +40,11 @@
 -- or FIN47 (scheduled), and a credit note is saved.
 --
 -- REPLACED (each restated from its newest text on main, named where it is):
---   private.finance_fx_carried                 a credit note past zero (ruling; payments read as before)
+--   private.finance_fx_carried                 a credit note past zero (ruling; payments read as before);
+--                                              the ringgit open taken with its sign, not abs()
 --   private.finance_credit_note_currency_guard 3a's FIN41 gone; writes currency, fx_rate, amount_myr
 --   private.finance_allocation_currency_guard  3b's FIN41 gone; FIN44 kept
---   private.finance_transaction_guard          the split compared in the payment's own currency
+--   private.finance_transaction_guard          the split compared in the payment's own currency; FIN48
 --   public.finance_record_refund               the ringgit paid out; FIN47; settles
 --   public.finance_invoice_totals              credited_myr from amount_myr
 --   public.finance_ledger_lines                the credit note branch in ringgit
@@ -52,9 +53,24 @@
 -- NEW: finance_credit_notes.currency, fx_rate, amount_myr (and their checks),
 -- private.finance_split_in_payment_terms.
 --
--- Error codes, new: FIN47 (a refund on a foreign invoice asked as scheduled).
--- FIN41 is no longer raised by anything. FIN46 now also means the ringgit
--- paid out is missing on a foreign refund.
+-- Error codes, new: FIN47 (a refund on a foreign invoice asked as scheduled);
+-- FIN48 (money in on a foreign invoice voided while a credit note issued or
+-- dated after it stands on that invoice: void the credit note first, then the
+-- payment, and issue the credit note again). FIN41 is no longer raised by
+-- anything. FIN46 now also means the ringgit paid out is missing on a foreign
+-- refund. A ringgit void is as it was (FIN48 looks at foreign invoices only).
+--
+-- Known limits:
+--   * Deploy window: from this file until the 3c app is deployed, the 3b
+--     finance assistant's saveCreditNote/issueCreditNote check no currency, so
+--     it could draft and issue a credit note on a foreign invoice with an
+--     amount meant in ringgit (its refund tool sends no ringgit paid out and is
+--     answered FIN46). Apply and deploy back to back.
+--   * finance_credit_notes.currency, fx_rate and amount_myr keep the table's
+--     grants to authenticated: whatever a caller writes on a draft is
+--     overwritten by finance_credit_note_to_ringgit, and an issued or void
+--     credit note is locked whole by finance_credit_note_guard (FIN01). No
+--     column revoke, unlike 3b's allocation columns.
 --
 -- Nothing here is granted to service_role.
 --
@@ -69,6 +85,19 @@ lock table
   public.finance_credit_notes,
   public.finance_transactions,
   public.finance_allocations
+  in access exclusive mode nowait;
+-- The four views this file replaces, so no reader holds one while "create or
+-- replace view" waits for it (a reader that started after the table locks
+-- would hold the view and wait on a table this file holds). After the tables
+-- above and before the rest: every lock here is nowait, so this file never
+-- waits and cannot be one side of a deadlock. Locking a view locks what it
+-- reads in the same mode, so every table the four views read is held access
+-- exclusive (reads wait) until this file commits.
+lock table
+  public.finance_invoice_totals,
+  public.finance_ledger_lines,
+  public.finance_credit_note_totals,
+  public.finance_refunds
   in access exclusive mode nowait;
 -- Every other table the compared views read, held against writes (reads go
 -- on) so the comparison at the end sees only what this file did. The two
@@ -106,6 +135,10 @@ create temp table fx3c_refunds_before on commit drop as
   select * from public.finance_refunds;
 create temp table fx3c_balances_before on commit drop as
   select * from public.finance_account_balances;
+-- Every allocation's figures, settled foreign ones included (3b is live: a
+-- foreign payment in may exist when this runs), compared at the end.
+create temp table fx3c_allocations_before on commit drop as
+  select id, amount, amount_myr, carried_myr from public.finance_allocations;
 
 -- ============================================================================
 -- 1. A credit note's currency, rate and ringgit
@@ -143,7 +176,11 @@ alter table public.finance_credit_notes
 -- The text of 20261120110000_bendahara_fx_payments_in.sql lines 291 to 313
 -- (3b; language plpgsql, stable, security invoker, search_path ''; revoked
 -- from public, anon, service_role, granted to authenticated, both said again
--- below), with one change. 3b's text caps a part that does not close the
+-- below), with two changes. First, the ringgit still open is taken with its
+-- sign (balance_myr, or -balance_myr for a refund) where 3b took abs(): the
+-- same figure whenever the invoice's two balances agree in sign, and a loud
+-- refusal (the ">= 0" checks) instead of a doubled residue when they do not.
+-- Second: 3b's text caps a part that does not close the
 -- invoice at the ringgit still open (least(...)), which is right for every
 -- movement toward zero, and the only movements 3b has are: money in is held
 -- to the invoice's balance and a refund to the customer's credit (FIN05). A
@@ -165,14 +202,21 @@ set search_path = ''
 as $$
 declare
   v record;
+  open_myr numeric;
 begin
   select balance, balance_myr, fx_rate into v
   from public.finance_invoice_totals where org_id = target_org and id = target_invoice;
   if not found or v.fx_rate is null then
     raise exception 'a payment can only go against a posted invoice' using errcode = 'FIN04';
   end if;
+  -- 20261120120000: the ringgit still open, with its sign: what is owed (balance_myr) for money in and a credit
+  -- note, what the customer is in credit (-balance_myr) for a refund. 3b took the absolute value, which is the
+  -- same figure whenever the invoice's two balances have the same sign; when they do not, the sign now reaches
+  -- the ">= 0" checks on carried_myr and amount_myr and the write is refused, instead of a residue being
+  -- doubled silently.
+  open_myr := case when refund then -v.balance_myr else v.balance_myr end;
   if (not refund and v.balance = part) or (refund and v.balance = -part) then
-    return abs(v.balance_myr);
+    return open_myr;
   end if;
   -- 20261120120000: a credit note is the one movement that can take an invoice past zero (money in is held to
   -- the balance and a refund to the credit, both FIN05). On an invoice that owes nothing, or is in credit,
@@ -183,9 +227,9 @@ begin
     return round(part * v.fx_rate, 2);
   end if;
   if not refund and part > v.balance then
-    return abs(v.balance_myr) + round((part - v.balance) * v.fx_rate, 2);
+    return open_myr + round((part - v.balance) * v.fx_rate, 2);
   end if;
-  return least(round(part * v.fx_rate, 2), abs(v.balance_myr));
+  return least(round(part * v.fx_rate, 2), open_myr);
 end $$;
 revoke all on function private.finance_fx_carried(uuid, uuid, numeric, boolean) from public, anon, service_role;
 -- The credit note trigger of 3c runs as the caller and calls it; the private schema is not reachable through the API.
@@ -294,8 +338,9 @@ grant execute on function private.finance_split_in_payment_terms(uuid, uuid, num
 
 -- The text of 20261028100000_bendahara_cash_book.sql lines 512 to 779, the
 -- newest definition on main (security invoker, search_path ''; revoked from
--- public, anon, authenticated at line 1007, said again below), with exactly
--- three changes: the three places that compare the payment with its split
+-- public, anon, authenticated at line 1007, said again below), with four
+-- changes. FIN48, before the posted-to-void return (see the comment there;
+-- foreign invoices only). And the three places that compare the payment with its split
 -- ("the split is more than the payment", FIN03; "money out that settles no
 -- document", when a draft is scheduled or paid and when a scheduled one is
 -- changed where it stands) read private.finance_split_in_payment_terms
@@ -350,6 +395,25 @@ begin
     return new;
   end if;
 
+  -- 20261120120000: money in that settled an invoice in another currency is not voided while a credit note
+  -- issued (or dated) after it stands on that invoice (FIN48). That credit note's ringgit was worked out against
+  -- the balance the payment left; with the payment gone it would be the movement that clears the invoice, and
+  -- the sen of line rounding would stay on Receivable for ever. Void the credit note first, then the payment,
+  -- and issue the credit note again: it then takes the closing figure. "Issued after" is issued_at at or after
+  -- the payment's created_at (a payment in is recorded and posted in one call), so a credit note issued in the
+  -- same transaction counts too. Only invoices in another currency are looked at: a ringgit void is as it was.
+  if old.status = 'posted' and new.status = 'void' and old.direction = 'in' and exists (
+    select 1
+    from public.finance_allocations a
+    join public.finance_invoices i on i.org_id = a.org_id and i.id = a.invoice_id
+    join public.finance_credit_notes n on n.org_id = i.org_id and n.invoice_id = i.id
+    where a.org_id = old.org_id and a.transaction_id = old.id
+      and i.currency <> 'MYR'
+      and n.status = 'issued'
+      and (n.issued_at >= old.created_at or n.credit_date > old.txn_date)
+  ) then
+    raise exception 'void the credit note first, then the payment; issue the credit note again after' using errcode = 'FIN48';
+  end if;
   if old.status = 'posted' and new.status = 'void'
      and (to_jsonb(new) - 'status' - 'updated_at') is not distinct from (to_jsonb(old) - 'status' - 'updated_at') then
     return new;
@@ -1368,10 +1432,16 @@ begin
   if n <> 0 then
     raise exception '% credit notes are not ringgit credit notes on ringgit invoices', n;
   end if;
-  -- No allocation was settled by this file: every one is still a ringgit one.
-  select count(*) into n from public.finance_allocations where amount_myr is not null or carried_myr is not null;
+  -- No allocation's figures were touched by this file, ringgit or settled foreign, row for row, both ways.
+  select count(*) into n from (
+    (select id, amount, amount_myr, carried_myr from public.finance_allocations
+     except all select * from fx3c_allocations_before)
+    union all
+    (select * from fx3c_allocations_before
+     except all select id, amount, amount_myr, carried_myr from public.finance_allocations)
+  ) d;
   if n <> 0 then
-    raise exception '% allocations carry ringgit figures', n;
+    raise exception '% allocations do not read as they did', n;
   end if;
 
   -- Every invoice reads as it did, all 36 columns, both ways.
@@ -1468,6 +1538,7 @@ begin
 
   -- Who may call what.
   if has_function_privilege('anon', 'public.finance_record_refund(uuid, jsonb)', 'execute')
+     or has_function_privilege('service_role', 'public.finance_record_refund(uuid, jsonb)', 'execute')
      or not has_function_privilege('authenticated', 'public.finance_record_refund(uuid, jsonb)', 'execute') then
     raise exception 'public.finance_record_refund is not callable by exactly the signed-in';
   end if;
