@@ -72,7 +72,8 @@ function atRateSen(partSen: bigint, rateScaled: bigint): bigint {
  * What an invoice carried, in ringgit, for a part of its foreign balance, as private.finance_fx_carried works it
  * (supabase/migrations/20261120120000_bendahara_fx_credit_notes_refunds.sql). `openForeignSen` is what is still
  * open in the direction the part moves (what is owed, for money in or a credit note; what the customer is in
- * credit, for a refund), and `openRinggitSen` the same in ringgit.
+ * credit, for a refund), and `openRinggitSen` the same in ringgit, with its sign (the database stopped taking
+ * its absolute value in 3c: a sign that disagrees is refused there, not doubled).
  *   * The part is all that is still open: the ringgit still open, so an invoice settled in full leaves nothing.
  *   * Nothing is open (a credit note on a paid invoice, or one already in credit): the part at the rate.
  *   * The part is more than is open (a credit note past zero): what is open, and the rest at the rate.
@@ -80,7 +81,7 @@ function atRateSen(partSen: bigint, rateScaled: bigint): bigint {
  * Money in and refunds never reach the second and third (they are held to what is open).
  */
 export function carriedSen(partSen: bigint, rateScaled: bigint, openForeignSen: bigint, openRinggitSen: bigint): bigint {
-  const open = openRinggitSen < ZERO ? -openRinggitSen : openRinggitSen;
+  const open = openRinggitSen;
   if (partSen === openForeignSen) return open;
   if (openForeignSen <= ZERO) return atRateSen(partSen, rateScaled);
   if (partSen > openForeignSen) return open + atRateSen(partSen - openForeignSen, rateScaled);
