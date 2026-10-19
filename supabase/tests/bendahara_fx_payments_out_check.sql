@@ -473,6 +473,18 @@ begin
   fails := fails || public.bendahara_check_try('12: a voucher for the ringgit bill', 'ok',
     format('select public.finance_save_voucher(%L, %L, %L)', org, paid_now || jsonb_build_object('notes', 'E4 ringgit voucher'),
       jsonb_build_array(jsonb_build_object('bill_id', b_myr, 'amount', 10))));
+  -- Editing that draft to name the USD bill, alone or beside the ringgit bill: FIN47 too, and its split stays as it was.
+  select id into tx from public.finance_transactions where org_id = org and notes = 'E4 ringgit voucher';
+  fails := fails || public.bendahara_check_try('12: a draft voucher edited to name only the USD bill', 'FIN47',
+    format('select public.finance_save_voucher(%L, %L, %L)', org, paid_now || jsonb_build_object('id', tx, 'notes', 'E4 ringgit voucher'),
+      jsonb_build_array(jsonb_build_object('bill_id', b_usd, 'amount', 10))));
+  fails := fails || public.bendahara_check_try('12: a draft voucher edited to name the ringgit bill and the USD bill', 'FIN47',
+    format('select public.finance_save_voucher(%L, %L, %L)', org, paid_now || jsonb_build_object('id', tx, 'notes', 'E4 ringgit voucher'),
+      jsonb_build_array(jsonb_build_object('bill_id', b_myr, 'amount', 10), jsonb_build_object('bill_id', b_usd, 'amount', 10))));
+  select string_agg(a.bill_id::text || ' ' || a.amount, '; ') into t from public.finance_allocations a where a.transaction_id = tx;
+  if tx is null or t is distinct from b_myr::text || ' 10.00' then
+    fails := fails || format('12: after the refused edits the draft voucher''s split is %s, not the ringgit bill at 10.00', t);
+  end if;
 
   -- ==== 16: worked example E4: ringgit payments out post what they did =====================
   -- A ringgit bill paid by a ringgit payment: Dr Payable 50.00, Cr Bank 50.00, no realised line, no figures on the split.
