@@ -107,9 +107,22 @@ import {
   voidPaymentIn,
 } from '@/lib/finance/money';
 import { listContras } from '@/lib/finance/contras';
-import { getJournal, listJournals, listLedgerAccounts, listLedgerLines } from '@/lib/finance/ledger';
+import { getJournal, listJournals, listLedgerAccounts, listLedgerLines, type LedgerAccount } from '@/lib/finance/ledger';
 import { filterEntries, groupEntries } from '@/lib/finance/ledger-views';
 import { getPurchaseOrder, listPurchaseOrders } from '@/lib/finance/purchase-orders';
+import { listOpenBills, listOpenInvoices } from '@/lib/finance/reports-data';
+import {
+  aged,
+  balanceSheet,
+  cashFlow,
+  cashMovements,
+  monthlyTotals,
+  openPayables,
+  openReceivables,
+  periodFor,
+  profitAndLoss,
+  trialBalance,
+} from '@/lib/finance/reports';
 import { getRfq, getRfqGroup, listRfqs } from '@/lib/finance/rfqs';
 import type { FinanceWriteContext } from '@/lib/finance/result';
 
@@ -165,6 +178,21 @@ const idInput = z.object({ id: z.string().describe('The row id from a lookup.') 
 
 export function createBendaharaTools(access: FinanceAccess) {
   const ctx: FinanceWriteContext = { client: access.client, orgId: access.orgId };
+
+  // Report assembly mirrors src/screens/finance/reports.tsx; the tools return the library's
+  // statement objects verbatim, so the chat can never disagree with the Reports screen.
+  const reportAccounts = (accounts: LedgerAccount[]) => accounts.map(({ id, code, name, type }) => ({ id, code, name, type }));
+  const todayIso = () => new Date().toISOString().slice(0, 10);
+  const periodInput = z.object({
+    period: z
+      .enum(['this_month', 'last_month', 'this_quarter', 'this_year', 'last_year', 'all_time'])
+      .describe('Which period to report on.'),
+  });
+  const statementData = async () => {
+    const [lines, ledgerAccounts] = await Promise.all([listLedgerLines(ctx), listLedgerAccounts(ctx)]);
+    const { totals } = monthlyTotals(lines);
+    return { lines, ledgerAccounts, totals };
+  };
 
   const read = {
     getFinanceOverview: tool({
@@ -326,6 +354,48 @@ export function createBendaharaTools(access: FinanceAccess) {
       description: 'One manual journal in full, by id, with its debit and credit lines.',
       inputSchema: idInput,
       execute: async ({ id }) => getJournal(ctx, id),
+    }),
+    profitAndLoss: tool({
+      description: 'Profit and loss (income statement) for a period. Returns the statement the books compute; amounts in ringgit.',
+      inputSchema: periodInput,
+      execute: async ({ period }) => {
+        const { ledgerAccounts, totals } = await statementData();
+        return profitAndLoss(reportAccounts(ledgerAccounts), totals, periodFor(period, todayIso(), totals));
+      },
+    }),
+    balanceSheet: tool({
+      description: 'Balance sheet as at the end of a period.',
+      inputSchema: periodInput,
+      execute: async ({ period }) => {
+        const { ledgerAccounts, totals } = await statementData();
+        return balanceSheet(reportAccounts(ledgerAccounts), totals, periodFor(period, todayIso(), totals));
+      },
+    }),
+    trialBalance: tool({
+      description: 'Trial balance for a period.',
+      inputSchema: periodInput,
+      execute: async ({ period }) => {
+        const { ledgerAccounts, totals } = await statementData();
+        return trialBalance(reportAccounts(ledgerAccounts), totals, periodFor(period, todayIso(), totals));
+      },
+    }),
+    agedReceivables: tool({
+      description: 'Aged receivables: what customers owe, by how overdue.',
+      inputSchema: z.object({}),
+      execute: async () => aged(openReceivables(await listOpenInvoices(ctx)), todayIso()),
+    }),
+    agedPayables: tool({
+      description: 'Aged payables: what the business owes suppliers, by how overdue.',
+      inputSchema: z.object({}),
+      execute: async () => aged(openPayables(await listOpenBills(ctx)), todayIso()),
+    }),
+    cashFlow: tool({
+      description: 'Cash flow for a period.',
+      inputSchema: periodInput,
+      execute: async ({ period }) => {
+        const { lines, ledgerAccounts, totals } = await statementData();
+        return cashFlow(cashMovements(lines, ledgerAccounts), periodFor(period, todayIso(), totals));
+      },
     }),
     listFinanceItems: tool({
       description: 'Sellable/purchasable items (products and services) with their default prices.',
