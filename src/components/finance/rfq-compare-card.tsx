@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { money, unitPrice } from '@/lib/finance/format';
 import { RFQ_STATUS_LABELS, rfqActions } from '@/lib/finance/purchase-views';
-import { compareQuotes, orderableRfq, quoteTotals } from '@/lib/finance/rfq-compare';
+import { compareQuotes, orderableRfq, quoteTotals, quotesInSeveralCurrencies } from '@/lib/finance/rfq-compare';
 import type { RfqDetail } from '@/lib/finance/rfqs';
 import type { FinResult } from '@/lib/finance/result';
 import { cn } from '@/lib/utils';
@@ -47,7 +47,7 @@ export function RfqCompareCard({
 }) {
   const rows = compareQuotes(rfqs);
   const totals = quoteTotals(rfqs);
-  const mixed = new Set(rfqs.map((r) => r.currency)).size > 1;
+  const mixed = quotesInSeveralCurrencies(rfqs);
   const [confirming, setConfirming] = useState<RfqDetail | null>(null);
   const action = useFinanceAction();
   // The question is asked of the group as it now reads, not as it read when the question was opened.

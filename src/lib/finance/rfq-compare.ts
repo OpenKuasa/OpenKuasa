@@ -124,6 +124,14 @@ function ringgitPerUnit(rfq: Pick<RfqListRow, 'currency' | 'fx_rate' | 'fx_rate_
   return rfq.fx_rate === null ? null : (scaledFromText(rfq.fx_rate.toFixed(10)) ?? null);
 }
 
+/**
+ * True when the RFQs whose answer was recorded are in more than one currency. An RFQ not yet quoted has no
+ * figure to compare, so its currency does not make a ringgit-only comparison a mixed one.
+ */
+export function quotesInSeveralCurrencies(rfqs: Pick<RfqListRow, 'currency' | 'quoted_at'>[]): boolean {
+  return new Set(rfqs.filter((r) => r.quoted_at !== null).map((r) => r.currency)).size > 1;
+}
+
 /** One supplier's total, as the comparison's last rows show it. */
 export type QuoteTotal = {
   /** The total in the RFQ's own currency; null until the supplier's answer is recorded. */
@@ -143,7 +151,7 @@ export type QuoteTotal = {
  * but not ranked.
  */
 export function quoteTotals(rfqs: RfqDetail[]): QuoteTotal[] {
-  const mixed = new Set(rfqs.map((r) => r.currency)).size > 1;
+  const mixed = quotesInSeveralCurrencies(rfqs);
   const ringgit = rfqs.map((r) => {
     if (r.quoted_at === null) return null;
     const myr = r.currency === BASE_CURRENCY ? (r.total_myr ?? r.total) : r.total_myr;
@@ -192,7 +200,7 @@ export function compareQuotes(rfqs: RfqDetail[]): ComparisonRow[] {
 
   // One currency throughout: prices compare as they are. Else each in ringgit at its RFQ's rate, and a price
   // whose RFQ has no rate is left out (it cannot be put into ringgit).
-  const oneCurrency = new Set(rfqs.map((r) => r.currency)).size <= 1;
+  const oneCurrency = !quotesInSeveralCurrencies(rfqs);
   const perUnit = rfqs.map((r) => (oneCurrency ? BigInt(1) : ringgitPerUnit(r)));
   for (const row of rows.values()) {
     const priced = row.cells
