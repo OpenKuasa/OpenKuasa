@@ -55,7 +55,7 @@ import {
   deleteCreditNote,
   issueCreditNote,
   listCreditNotes,
-  saveCreditNote,
+  saveCreditNoteInRinggit,
   saveCreditNoteInput,
   voidCreditNote,
 } from '@/lib/finance/credit-notes';
@@ -63,8 +63,8 @@ import {
   deleteRefund,
   listRefunds,
   markRefundPaid,
-  recordRefund,
-  recordRefundInput,
+  recordRefundInRinggit,
+  recordRefundToolInput,
   voidRefund,
 } from '@/lib/finance/refunds';
 import {
@@ -213,12 +213,16 @@ export function createBendaharaTools(access: FinanceAccess) {
       execute: async () => listQuotations(ctx),
     }),
     listCreditNotes: tool({
-      description: 'Credit notes issued against invoices, with status and totals.',
+      description:
+        "Credit notes issued against invoices, with status and totals. amount and refunded are in the invoice's currency " +
+        '(its currency field); amount_myr is what it took off in ringgit. Add up ringgit only.',
       inputSchema: z.object({}),
       execute: async () => listCreditNotes(ctx),
     }),
     listRefunds: tool({
-      description: 'Refunds to customers, with status and amount.',
+      description:
+        "Refunds to customers, with status and amount. amount is in the invoice's currency (its currency field); " +
+        'transaction_amount and amount_myr are the ringgit paid out. Add up ringgit only.',
       inputSchema: z.object({}),
       execute: async () => listRefunds(ctx),
     }),
@@ -341,9 +345,11 @@ export function createBendaharaTools(access: FinanceAccess) {
     }),
     // Credit notes
     saveCreditNote: tool({
-      description: 'Create or edit a DRAFT credit note against an invoice. Omit id to create.',
+      description:
+        'Create or edit a DRAFT credit note against an invoice, in ringgit. Omit id to create. Invoices in ringgit only: ' +
+        'a credit note on an invoice in another currency is recorded on the Credit Notes screen.',
       inputSchema: saveCreditNoteInput,
-      execute: async (input) => saveCreditNote(ctx, input),
+      execute: async (input) => saveCreditNoteInRinggit(ctx, input),
     }),
     issueCreditNote: tool({
       description: 'Issue (finalise) a draft credit note.',
@@ -362,9 +368,11 @@ export function createBendaharaTools(access: FinanceAccess) {
     }),
     // Refunds
     recordRefund: tool({
-      description: 'Record a refund to a customer (money paid back).',
-      inputSchema: recordRefundInput,
-      execute: async (input) => recordRefund(ctx, input),
+      description:
+        'Record a refund to a customer (money paid back), in ringgit. Invoices in ringgit only: a refund on an invoice ' +
+        'in another currency is recorded on the Refunds screen, where the ringgit paid out is entered.',
+      inputSchema: recordRefundToolInput,
+      execute: async (input) => recordRefundInRinggit(ctx, input),
     }),
     markRefundPaid: tool({
       description: 'Mark a refund as paid, from a bank or cash account.',
