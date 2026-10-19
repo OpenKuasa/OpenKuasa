@@ -129,14 +129,18 @@ export const recordPaymentOutInput = z.object({
 });
 
 /**
- * The ringgit that arrived, as decimal text with at most two places ("2883.50"), so no float stands between
- * the box and the database. Above 0.
+ * A ringgit figure (what arrived, or what left: a refund in stage 3c), as decimal text with at most two places
+ * ("2883.50"), so no float stands between the box and the database. Above 0.
  */
-const ringgitText = z
-  .string({ error: R.ringgitReceived })
-  .trim()
-  .regex(/^\d{1,12}(\.\d{1,2})?$/, R.ringgitReceived)
-  .refine((v) => /[1-9]/.test(v), R.ringgitReceived);
+export function ringgitTextInput(message: string) {
+  return z
+    .string({ error: message })
+    .trim()
+    .regex(/^\d{1,12}(\.\d{1,2})?$/, message)
+    .refine((v) => /[1-9]/.test(v), message);
+}
+
+const ringgitText = ringgitTextInput(R.ringgitReceived);
 
 const paymentInBase = z.object({
   account_id: z.string({ error: R.account }).uuid(R.account),

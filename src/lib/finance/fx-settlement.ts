@@ -3,7 +3,9 @@
  * works it (private.finance_fx_settle and private.finance_fx_carried in
  * supabase/migrations/20261120110000_bendahara_fx_payments_in.sql): the
  * ringgit received shared over the invoices, what each invoice carried for
- * the part paid, and the realised gain or loss. Pure, and in whole numbers
+ * the part paid, and the realised gain or loss; and a credit note or a
+ * refund on such an invoice, which the same closing rule carries (stage 3c,
+ * 20261120120000_bendahara_fx_credit_notes_refunds.sql). Pure, and in whole numbers
  * only: money is a bigint count of sen (every amount column keeps two
  * decimals, a currency with no cents included) and a rate a bigint count of
  * 10^-10, as document-currency.ts works them. The payment form shows the
@@ -61,15 +63,28 @@ export function shareRinggit(totalSen: bigint, parts: { id: string; sen: bigint 
   return shares;
 }
 
+/** A part at a rate, in sen, rounded half up (the parts are never below 0). */
+function atRateSen(partSen: bigint, rateScaled: bigint): bigint {
+  return (partSen * rateScaled + RATE_ONE / TWO) / RATE_ONE;
+}
+
 /**
- * What an invoice carried, in ringgit, for a part of its foreign balance: the part at the invoice's rate,
- * rounded to the sen and never more than the ringgit still open on it; when the part is all that is still
- * open, the ringgit still open, so an invoice paid in full leaves nothing behind.
+ * What an invoice carried, in ringgit, for a part of its foreign balance, as private.finance_fx_carried works it
+ * (supabase/migrations/20261120120000_bendahara_fx_credit_notes_refunds.sql). `openForeignSen` is what is still
+ * open in the direction the part moves (what is owed, for money in or a credit note; what the customer is in
+ * credit, for a refund), and `openRinggitSen` the same in ringgit.
+ *   * The part is all that is still open: the ringgit still open, so an invoice settled in full leaves nothing.
+ *   * Nothing is open (a credit note on a paid invoice, or one already in credit): the part at the rate.
+ *   * The part is more than is open (a credit note past zero): what is open, and the rest at the rate.
+ *   * Otherwise the part at the invoice's rate, rounded to the sen, never more than the ringgit still open.
+ * Money in and refunds never reach the second and third (they are held to what is open).
  */
 export function carriedSen(partSen: bigint, rateScaled: bigint, openForeignSen: bigint, openRinggitSen: bigint): bigint {
   const open = openRinggitSen < ZERO ? -openRinggitSen : openRinggitSen;
   if (partSen === openForeignSen) return open;
-  const atRate = (partSen * rateScaled + RATE_ONE / TWO) / RATE_ONE;
+  if (openForeignSen <= ZERO) return atRateSen(partSen, rateScaled);
+  if (partSen > openForeignSen) return open + atRateSen(partSen - openForeignSen, rateScaled);
+  const atRate = atRateSen(partSen, rateScaled);
   return atRate < open ? atRate : open;
 }
 
@@ -124,4 +139,45 @@ export function settlementPreview(received: string, parts: SettledPart[]): Settl
     return { id: p.id, ringgit: ringgitOf(shares[i]), carried: ringgitOf(carried), realised: ringgitOf(difference) };
   });
   return { parts: out, carried: ringgitOf(carriedAll), realised: ringgitOf(realised) };
+}
+
+/**
+ * The ringgit a credit note on an invoice in another currency takes off it (stage 3c): `carriedSen` of its
+ * amount against what the invoice still owes (its posted balance, which may be 0 or below) and the ringgit
+ * still open. Null while the amount or the rate is not a number yet. "About": a payment posted first can
+ * change what the invoice still carries; the database works it out when the credit note is issued.
+ */
+export function creditNoteRinggit(amount: string, rateText: string | null, owedForeign: number, owedRinggit: number): number | null {
+  const part = senFromText(amount);
+  const rate = rateText === null ? undefined : scaledFromText(rateText);
+  if (part === null || part <= ZERO || rate === undefined) return null;
+  return ringgitOf(carriedSen(part, rate, senFromNumber(owedForeign), senFromNumber(owedRinggit)));
+}
+
+export type RefundPreview = {
+  /** What the invoice carried for the part refunded. */
+  carried: number;
+  /** Carried less the ringgit paid out: above 0 a gain, below 0 a loss. */
+  realised: number;
+};
+
+/**
+ * What the database will make of a refund on an invoice in another currency, paid out in ringgit (stage 3c):
+ * what the invoice carried for the part refunded (`carriedSen` against what the customer is in credit there, in
+ * its currency and in ringgit) and the realised difference, carried less paid out (spec "The difference"). Null
+ * while a figure is not a number yet.
+ */
+export function refundPreview(
+  paidOut: string,
+  amount: string,
+  rateText: string | null,
+  creditForeign: number,
+  creditRinggit: number,
+): RefundPreview | null {
+  const paid = senFromText(paidOut);
+  const part = senFromText(amount);
+  const rate = rateText === null ? undefined : scaledFromText(rateText);
+  if (paid === null || paid <= ZERO || part === null || part <= ZERO || rate === undefined) return null;
+  const carried = carriedSen(part, rate, senFromNumber(creditForeign), senFromNumber(creditRinggit));
+  return { carried: ringgitOf(carried), realised: ringgitOf(carried - paid) };
 }
