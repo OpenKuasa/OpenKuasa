@@ -83,6 +83,9 @@ export const VOUCHER_MESSAGES = {
   notPosted: 'A voucher can only pay a posted bill.',
   // FIN06: a bill is not in the workspace any more, or the bills are two suppliers' (the form offers one supplier's).
   oneSupplier: 'The bills on one voucher must all be one supplier’s, and must still exist.',
+  // FIN41 (stage 4a): a bill in another currency. The form offers ringgit bills only, so only a stale tab or a
+  // direct call meets it.
+  foreignBillNotYet: 'Payments on bills in other currencies are not available yet.',
   // FIN09 from saving a change to a draft: it was sent, approved, rejected or paid meanwhile.
   notDraft: 'This voucher is no longer a draft, so it cannot be changed. Check it again.',
   // Sending a draft from its row matched no row while it is still a draft: some field is not what the row showed.
@@ -314,6 +317,7 @@ const SAVE_REFUSALS: Record<string, string> = {
   FIN09: M.notDraft,
   FIN11: M.gone,
   FIN15: M.categoryGone,
+  FIN41: M.foreignBillNotYet,
   [FIN_ARCHIVED_ACCOUNT]: M.accountArchived,
   [PG_UNIQUE]: M.duplicate,
   [PG_FOREIGN_KEY]: M.missing,

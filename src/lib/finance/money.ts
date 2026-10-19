@@ -58,6 +58,11 @@ export const MONEY_MESSAGES = {
   oneSupplier: 'One payment can only pay bills from one supplier.',
   locked: 'This payment is posted and can no longer be changed. Void it instead.',
   missing: 'The account or a bill on this payment no longer exists.',
+  // FIN41 (stage 4a). The payment form offers ringgit bills only, and a foreign bill's row offers no Record
+  // payment, so this is met from a stale tab or a direct call. The next stage takes these payments.
+  foreignBillNotYet: 'Payments on bills in other currencies are not available yet.',
+  // FIN44: one payment's split names documents in two currencies. Met from a direct call.
+  oneCurrency: 'One payment can only settle bills in one currency. Record a separate payment for each currency.',
 } as const;
 
 const M = MONEY_MESSAGES;
@@ -194,7 +199,12 @@ const REFUSALS: Record<string, string> = {
  * twice on one payment: the number comes from finance_next_number under a
  * lock. Marking a payment paid or voiding it keeps the plain map.
  */
-const RECORD_OUT_REFUSALS: Record<string, string> = { ...REFUSALS, [PG_UNIQUE]: M.duplicate };
+const RECORD_OUT_REFUSALS: Record<string, string> = {
+  ...REFUSALS,
+  [PG_UNIQUE]: M.duplicate,
+  FIN41: M.foreignBillNotYet,
+  FIN44: M.oneCurrency,
+};
 
 /** The same database codes, worded for money in: the documents are invoices and the party is a customer. */
 const RECEIPT_REFUSALS: Record<string, string> = {

@@ -34,8 +34,8 @@ import {
   getBill,
   listBills,
   postBill,
-  saveBill,
-  saveBillInput,
+  saveBillInRinggit,
+  saveBillToolInput,
   voidBill,
 } from '@/lib/finance/bills';
 import {
@@ -312,17 +312,23 @@ export function createBendaharaTools(access: FinanceAccess) {
       execute: async () => listRefunds(ctx),
     }),
     listBills: tool({
-      description: "The workspace's supplier bills (purchases) with status and totals.",
+      description:
+        "The workspace's supplier bills (purchases) with status and totals. total, paid and balance are in the bill's " +
+        "currency (its currency field); total_myr and balance_myr are the same in ringgit. Add up ringgit only.",
       inputSchema: z.object({}),
       execute: async () => listBills(ctx),
     }),
     getBill: tool({
-      description: 'One supplier bill in full, by id, with its lines.',
+      description:
+        "One supplier bill in full, by id, with its lines. Amounts are in the bill's currency; total_myr, sst_myr and " +
+        'balance_myr are in ringgit.',
       inputSchema: idInput,
       execute: async ({ id }) => getBill(ctx, id),
     }),
     listBillBalances: tool({
-      description: 'Outstanding payable balance per supplier, with a display status (open/overdue/paid).',
+      description:
+        'Outstanding payable balance per supplier, with a display status (open/overdue/paid). Balances are in ringgit ' +
+        '(a bill in another currency at its own rate).',
       inputSchema: z.object({}),
       execute: async () => listBillBalances(ctx),
     }),
@@ -658,9 +664,11 @@ export function createBendaharaTools(access: FinanceAccess) {
     }),
     // Bills (purchases)
     saveBill: tool({
-      description: 'Create or edit a DRAFT supplier bill. Omit id to create.',
-      inputSchema: saveBillInput,
-      execute: async (input) => saveBill(ctx, input),
+      description:
+        'Create or edit a DRAFT supplier bill in ringgit. Omit id to create. A bill in another currency is edited on ' +
+        'the Supplier Bills screen.',
+      inputSchema: saveBillToolInput,
+      execute: async (input) => saveBillInRinggit(ctx, input),
     }),
     postBill: tool({
       description: 'Post (finalise) a draft supplier bill.',
@@ -686,7 +694,7 @@ export function createBendaharaTools(access: FinanceAccess) {
       execute: async (input) => recordPaymentInRinggit(ctx, input),
     }),
     recordPaymentOut: tool({
-      description: 'Record a payment made to a supplier against their bills.',
+      description: 'Record a payment made to a supplier against their bills (bills in ringgit).',
       inputSchema: recordPaymentOutInput,
       execute: async (input) => recordPaymentOut(ctx, input),
     }),

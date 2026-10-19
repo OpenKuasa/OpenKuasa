@@ -143,12 +143,14 @@ describe('bill writes', () => {
   it('saves through the database function, in the caller’s workspace', async () => {
     const { ctx, calls } = fakeClient({ data: ID, error: null });
     expect(await saveBill(ctx, { ...valid, id: ID })).toEqual({ ok: true, data: { id: ID } });
-    expect(calls[0]).toMatchObject({ kind: 'rpc', name: 'finance_save_bill' });
-    expect(calls[0].args).toMatchObject({
+    // A draft saved with no currency keeps its own: it is read first, for the whole-units rule (stage 4a).
+    expect(calls[0]).toMatchObject({ kind: 'table', name: 'supplier_bills' });
+    expect(calls[1]).toMatchObject({ kind: 'rpc', name: 'finance_save_bill' });
+    expect(calls[1].args).toMatchObject({
       target_org: 'org-1',
       bill: { id: ID, supplier_id: SUPPLIER, bill_date: '2026-10-01', due_date: '2026-10-31' },
     });
-    expect((calls[0].args!.lines as unknown[]).length).toBe(1);
+    expect((calls[1].args!.lines as unknown[]).length).toBe(1);
   });
   it('posts and returns the number', async () => {
     const { ctx, calls } = fakeClient({ data: 'BILL-0007', error: null });
