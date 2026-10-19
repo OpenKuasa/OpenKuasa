@@ -100,7 +100,8 @@ export const savePurchaseOrderInput = z
     /** Present to change a draft; absent to create one. */
     id: orderId.optional(),
     supplier_id: z.string({ error: M.supplier }).uuid(M.supplier),
-    po_date: isoDate,
+    // Defaults to today when the request does not give a date (a purchase order is usually raised the day it is drafted).
+    po_date: isoDate.default(() => new Date().toISOString().slice(0, 10)),
     expected_date: expectedDate.default(null),
     payment_terms_days: paymentTerms.default(null),
     delivery_address: deliveryAddress.default(null),
@@ -136,7 +137,10 @@ export const receivePurchaseOrderInput = purchaseOrderIdInput.extend({
     .min(1, M.received),
 });
 
-export const billFromPurchaseOrderInput = purchaseOrderIdInput.extend({ bill_date: isoDate });
+export const billFromPurchaseOrderInput = purchaseOrderIdInput.extend({
+  // Defaults to today when the request does not give a date (the bill is raised the day it is drafted).
+  bill_date: isoDate.default(() => new Date().toISOString().slice(0, 10)),
+});
 
 const REFUSALS: Record<string, string> = {
   FIN01: M.locked,

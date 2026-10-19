@@ -108,13 +108,17 @@ const journalId = z.string({ error: M.gone }).uuid(M.gone);
 export const saveJournalInput = z.object({
   /** Present to change a draft; absent to create one. */
   id: journalId.optional(),
-  journal_date: isoDate,
+  // Defaults to today when the request does not give a date (a manual journal is usually dated the day it is drafted).
+  journal_date: isoDate.default(() => new Date().toISOString().slice(0, 10)),
   description: z.string({ error: M.description }).trim().min(1, M.description).max(200, M.description),
   lines: z.array(journalLine, { error: M.lines }).min(1, M.lines).max(JOURNAL_LINES_MAX, M.tooManyLines),
 });
 
 export const journalIdInput = z.object({ id: journalId });
-export const reverseJournalInput = journalIdInput.extend({ reversal_date: isoDate });
+export const reverseJournalInput = journalIdInput.extend({
+  // Defaults to today when the request does not give a date (the reversal is dated the day it is drafted).
+  reversal_date: isoDate.default(() => new Date().toISOString().slice(0, 10)),
+});
 
 /* ---- refusals --------------------------------------------------------- */
 

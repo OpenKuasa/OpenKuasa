@@ -70,12 +70,15 @@ const M = RFQ_MESSAGES;
  * not answered yet. A typed price, 0 included, is rounded to 4 places.
  */
 export const rfqLine = documentLine.extend({
+  // A request for quotation has no prices yet — the supplier quotes them. So a line's price may be given (0 included,
+  // rounded to 4 places), set to null, or omitted entirely (which means "no price yet", the same as null).
   unit_price: z
     .number({ error: M.price })
     .min(0, M.price)
     .max(999_999_999, M.price)
     .transform((v) => Math.round(v * 10 ** 4) / 10 ** 4)
-    .nullable(),
+    .nullable()
+    .default(null),
 });
 
 /** The reply-by date is optional: a real date, or an empty box, or nothing. */
@@ -90,7 +93,8 @@ export const saveRfqInput = z
     /** The RFQ a new draft was copied from. Only creating a draft sets it; the database then never changes it. */
     source_rfq_id: z.string({ error: M.gone }).uuid(M.gone).optional(),
     supplier_id: z.string({ error: M.supplier }).uuid(M.supplier),
-    rfq_date: isoDate,
+    // Defaults to today when the request does not give a date (an RFQ is usually raised the day it is drafted).
+    rfq_date: isoDate.default(() => new Date().toISOString().slice(0, 10)),
     reply_by: replyBy.default(null),
     notes: optionalText.default(null),
     lines: z.array(rfqLine, { error: M.lines }).min(1, M.lines).max(RFQ_LINES_MAX, M.tooManyLines),
