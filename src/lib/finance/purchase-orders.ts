@@ -5,11 +5,20 @@
  * draft with a reason. Once approved it records what has arrived and is
  * billed against, then it is closed. Unlike an RFQ, every line has a price.
  * org_id comes from the context.
+ *
+ * An order may be in another currency (stage 4p of multi-currency): its lines
+ * are in that currency, and its rate (ringgit per one unit) is indicative (an
+ * order posts nothing) but needed before it is submitted. A bill raised
+ * against it is in its currency (the database's FIN49), at the SST rule's rate
+ * for the bill's own date.
  */
 import { z } from 'zod';
 import type { OrgRole } from '@/lib/auth/current-org';
 import { addDaysIso } from './bill-math';
 import { BILL_MESSAGES, saveBill } from './bills';
+import { BASE_CURRENCY, isDocumentCurrency } from './currencies';
+import { CURRENCY_MESSAGES, type RateSource, wholeUnitsError } from './document-currency';
+import { fxSstRate } from './sst-rate';
 import {
   DOCUMENT_LINES_MAX,
   DOCUMENT_LINE_COLUMNS,
@@ -73,6 +82,20 @@ export const PURCHASE_ORDER_MESSAGES = {
   billFailed: 'A bill can only be raised against an approved purchase order.',
   numberTaken: 'That purchase order number is already used.',
   missing: 'The supplier or a product on this purchase order no longer exists.',
+  currency: 'Choose a currency.',
+  rate: CURRENCY_MESSAGES.rate,
+  // FIN38. The form says it first; the database says it for a direct call, or a draft saved without a rate and
+  // then submitted from the list.
+  rateBeforeSubmitting: 'Enter the exchange rate before submitting the order.',
+  // FIN39. The form marks a rate as Bank Negara's only when it is the rule's own answer for the date it asked, so
+  // this is met by a direct call.
+  notBnmRate: "That rate is not Bank Negara Malaysia's 5 pm selling rate for that day. Type it in again, and save.",
+  // The assistant never edits a draft in another currency: its prices would be read as ringgit.
+  foreignDraftByAssistant:
+    'This purchase order is not in ringgit. Edit it on the Purchase Orders screen, where its currency and exchange rate are shown.',
+  // Nor makes a bill from one: the bill would be in that currency.
+  foreignOrderByAssistant:
+    'This purchase order is not in ringgit, so its bill is too. Make the bill on the Purchase Orders screen, where its currency and exchange rate are shown.',
 } as const;
 
 const M = PURCHASE_ORDER_MESSAGES;
@@ -95,7 +118,7 @@ const deliveryAddress = z
 
 const orderId = z.string({ error: M.gone }).uuid(M.gone);
 
-export const savePurchaseOrderInput = z
+const savePurchaseOrderBase = z
   .object({
     /** Present to change a draft; absent to create one. */
     id: orderId.optional(),
@@ -107,8 +130,42 @@ export const savePurchaseOrderInput = z
     delivery_address: deliveryAddress.default(null),
     notes: optionalText.default(null),
     lines: z.array(documentLine, { error: M.lines }).min(1, M.lines).max(PURCHASE_ORDER_LINES_MAX, M.tooManyLines),
-  })
-  .refine((v) => v.expected_date === null || v.expected_date >= v.po_date, { message: M.dates, path: ['expected_date'] });
+    // The four below travel together and are all optional, with no default, as a quotation's: a caller that sends
+    // no currency (the finance assistant, which writes ringgit) leaves a draft's currency and rate as they are,
+    // and a new order in ringgit. The database stores rate 1 for ringgit whatever is sent.
+    currency: z.string({ error: M.currency }).refine(isDocumentCurrency, M.currency).optional(),
+    /** Ringgit per one unit; null on a draft in another currency whose rate is not known yet. */
+    // A number (a direct caller) or exact decimal text (the form: no digit lost to a float).
+    fx_rate: z
+      .union([
+        z.number({ error: M.rate }).positive(M.rate).max(1_000_000_000, M.rate),
+        z
+          .string({ error: M.rate })
+          .regex(/^\d{1,10}(\.\d{1,10})?$/, M.rate)
+          .refine((t) => Number(t) > 0 && Number(t) <= 1_000_000_000, M.rate),
+      ], { error: M.rate })
+      .nullable()
+      .optional(),
+    fx_rate_source: z.enum(['bnm', 'manual'], { error: M.rate }).nullable().optional(),
+    fx_rate_date: isoDate.nullable().optional(),
+  });
+const expectedNotBefore = (v: { expected_date: string | null; po_date: string }) => v.expected_date === null || v.expected_date >= v.po_date;
+
+export const savePurchaseOrderInput = savePurchaseOrderBase
+  .refine(expectedNotBefore, { message: M.dates, path: ['expected_date'] })
+  .superRefine((v, ctx) => {
+    // With no currency sent the draft keeps its own; savePurchaseOrder checks that case against the stored one.
+    const problem = wholeUnitsError(v.currency ?? BASE_CURRENCY, v.lines);
+    if (problem) ctx.addIssue({ code: 'custom', message: problem, path: ['lines'] });
+  });
+
+/**
+ * What the finance assistant may send: the form's fields without a currency or a rate. It writes ringgit only,
+ * so those keys are not in the schema the model sees and a call that carries them has them stripped.
+ */
+export const savePurchaseOrderToolInput = savePurchaseOrderBase
+  .omit({ currency: true, fx_rate: true, fx_rate_source: true, fx_rate_date: true })
+  .refine(expectedNotBefore, { message: M.dates, path: ['expected_date'] });
 
 export const purchaseOrderIdInput = z.object({ id: orderId });
 
@@ -150,6 +207,8 @@ const REFUSALS: Record<string, string> = {
   FIN18: M.ownOrder,
   FIN20: M.hasBills,
   FIN21: M.billFailed,
+  FIN38: M.rateBeforeSubmitting,
+  FIN39: M.notBnmRate,
   [PG_UNIQUE]: M.numberTaken,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_FORBIDDEN]: NOT_ALLOWED,
@@ -205,6 +264,18 @@ export type PurchaseOrderListRow = {
   over_billed: boolean;
   /** Billed for more than has been received. */
   billed_over_received: boolean;
+  /** ISO 4217 code. MYR for every order made before stage 4p. Total, received and billed are in it. */
+  currency: string;
+  /** Ringgit per one unit: 1 for ringgit; null while a draft in another currency has no rate. */
+  fx_rate: number | null;
+  /** The same rate as exact text (the database's numeric), for working money from; null with no rate. */
+  fx_rate_text: string | null;
+  /** null for ringgit and while there is no rate. */
+  fx_rate_source: RateSource | null;
+  /** The date of BNM's rate when it is BNM's; null otherwise. */
+  fx_rate_date: string | null;
+  /** The total in ringgit at the order's rate (indicative: an order posts nothing); null while there is no rate. */
+  total_myr: number | null;
 };
 
 export type PurchaseOrderLine = DocumentLineRow & { received_quantity: number };
@@ -224,7 +295,12 @@ export type PurchaseOrderDetail = PurchaseOrderListRow & {
 export type SaveAndSubmitPurchaseOrderResult = FinResult<{ id: string; po_no: string }> & { draftId?: string };
 
 const LIST_COLUMNS =
-  'id,po_no,supplier_id,supplier_name,rfq_id,rfq_no,po_date,expected_date,status,created_by,submitted_by,rejection_reason,payment_terms_days,delivery_address,total,delivery,received_total,billed_total,over_billed,billed_over_received';
+  'id,po_no,supplier_id,supplier_name,rfq_id,rfq_no,po_date,expected_date,status,created_by,submitted_by,rejection_reason,payment_terms_days,delivery_address,total,delivery,received_total,billed_total,over_billed,billed_over_received,' +
+  // The rate twice: as a number to show, and as exact text (PostgREST's cast) to work money from.
+  'currency,fx_rate,fx_rate_text:fx_rate::text,fx_rate_source,fx_rate_date,total_myr';
+
+/** A numeric column as a number, keeping null. */
+const numberOrNull = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 
 function toListRow(row: Record<string, unknown>): PurchaseOrderListRow {
   return {
@@ -234,6 +310,12 @@ function toListRow(row: Record<string, unknown>): PurchaseOrderListRow {
     total: Number(row.total),
     received_total: Number(row.received_total),
     billed_total: Number(row.billed_total),
+    currency: (row.currency as string | undefined) ?? BASE_CURRENCY,
+    fx_rate: numberOrNull(row.fx_rate),
+    fx_rate_text: (row.fx_rate_text as string | null | undefined) ?? null,
+    fx_rate_source: (row.fx_rate_source as RateSource | null | undefined) ?? null,
+    fx_rate_date: (row.fx_rate_date as string | null | undefined) ?? null,
+    total_myr: numberOrNull(row.total_myr),
   };
 }
 
@@ -338,6 +420,13 @@ export async function savePurchaseOrder(
   input: z.input<typeof savePurchaseOrderInput>,
 ): Promise<FinResult<{ id: string }>> {
   const { lines, ...purchase_order } = savePurchaseOrderInput.parse(input);
+  // No currency sent for an existing draft: it keeps its own, so the whole-units rule is its own too.
+  if (purchase_order.id && purchase_order.currency === undefined) {
+    const stored = await storedCurrency(ctx, purchase_order.id);
+    if (!stored.ok) return stored;
+    const problem = stored.data ? wholeUnitsError(stored.data, lines) : null;
+    if (problem) return { ok: false, error: problem };
+  }
   const { data, error } = await ctx.client.rpc('finance_save_purchase_order', {
     target_org: ctx.orgId,
     purchase_order,
@@ -345,6 +434,32 @@ export async function savePurchaseOrder(
   });
   if (error || !data) return orderWriteFailed('savePurchaseOrder', error);
   return { ok: true, data: { id: data as string } };
+}
+
+/** The currency an order is stored in; null when it is not there (the save then says so). */
+async function storedCurrency(ctx: FinanceWriteContext, id: string): Promise<FinResult<string | null>> {
+  const { data, error } = await ctx.client
+    .from('finance_purchase_orders')
+    .select('currency')
+    .eq('org_id', ctx.orgId)
+    .eq('id', id)
+    .maybeSingle();
+  if (error) return orderWriteFailed('savePurchaseOrder', error);
+  return { ok: true, data: (data as { currency?: string } | null)?.currency ?? null };
+}
+
+/**
+ * The finance assistant's save: ringgit only. A new order is in ringgit; a draft that is in another currency is
+ * refused, because the prices the assistant writes are in ringgit.
+ */
+export async function savePurchaseOrderInRinggit(ctx: FinanceWriteContext, input: unknown): Promise<FinResult<{ id: string }>> {
+  const parsed = savePurchaseOrderToolInput.parse(input);
+  if (parsed.id) {
+    const stored = await storedCurrency(ctx, parsed.id);
+    if (!stored.ok) return stored;
+    if (stored.data !== null && stored.data !== BASE_CURRENCY) return { ok: false, error: M.foreignDraftByAssistant };
+  }
+  return savePurchaseOrder(ctx, parsed);
 }
 
 /** Sends a draft for approval. It gets its number the first time; a rejected order keeps it. */
@@ -462,6 +577,11 @@ export async function deletePurchaseOrder(
  * order's prices, the order's id, dated `bill_date` and due after the order's
  * payment terms, else its supplier's (none of either means due that day). The bill is a draft; the person
  * edits and posts it on Supplier Bills.
+ *
+ * An order in another currency gives a bill in that currency (the database refuses any other, FIN49), at the
+ * SST rule's rate for the bill's own date (the order's was indicative), marked as Bank Negara's; with no rate
+ * when the rule has none, and the bill form asks for one before it is posted. A ringgit order's bill is sent no
+ * currency at all, exactly as before.
  */
 export async function billFromPurchaseOrder(
   ctx: FinanceWriteContext,
@@ -470,6 +590,38 @@ export async function billFromPurchaseOrder(
   const { id, bill_date } = billFromPurchaseOrderInput.parse(input);
   const order = await getPurchaseOrder(ctx, id);
   if (!order) return { ok: false, error: M.gone };
+  return billFromOrder(ctx, order, bill_date);
+}
+
+/**
+ * The finance assistant's "make a bill": ringgit only. An order in another currency would give a bill in that
+ * currency, so it is refused before anything is written.
+ */
+export async function billFromPurchaseOrderInRinggit(
+  ctx: FinanceWriteContext,
+  input: z.input<typeof billFromPurchaseOrderInput>,
+): Promise<FinResult<{ id: string; bill_id: string }>> {
+  const { id, bill_date } = billFromPurchaseOrderInput.parse(input);
+  const order = await getPurchaseOrder(ctx, id);
+  if (!order) return { ok: false, error: M.gone };
+  if (order.currency !== BASE_CURRENCY) return { ok: false, error: M.foreignOrderByAssistant };
+  return billFromOrder(ctx, order, bill_date);
+}
+
+/** What the order's currency gives its bill: nothing for ringgit, else the currency and the rule's rate for the bill date. */
+async function billCurrency(ctx: FinanceWriteContext, currency: string, billDate: string) {
+  if (currency === BASE_CURRENCY) return {};
+  const rate = await fxSstRate(ctx.client, currency, billDate);
+  if (!rate) return { currency, fx_rate: null };
+  return { currency, fx_rate: rate.rate_text ?? String(rate.rate), fx_rate_source: 'bnm' as const, fx_rate_date: rate.rate_date };
+}
+
+async function billFromOrder(
+  ctx: FinanceWriteContext,
+  order: PurchaseOrderDetail,
+  bill_date: string,
+): Promise<FinResult<{ id: string; bill_id: string }>> {
+  const id = order.id;
   if (order.status !== 'approved') return { ok: false, error: M.billFailed };
   // An order saved with its terms box empty takes its supplier's terms (as the form says); only when those cannot be read is it due that day.
   let terms = order.payment_terms_days;
@@ -483,11 +635,19 @@ export async function billFromPurchaseOrder(
     const read = (data as { payment_terms_days?: unknown } | null)?.payment_terms_days;
     terms = typeof read === 'number' ? read : null;
   }
+  let currency: Awaited<ReturnType<typeof billCurrency>>;
+  try {
+    currency = await billCurrency(ctx, order.currency, bill_date);
+  } catch (error) {
+    // The rate could not be read: no bill is made, rather than one in the wrong currency or at no rate unawares.
+    return writeFailed('billFromPurchaseOrder', error);
+  }
   const saved = await saveBill(ctx, {
     supplier_id: order.supplier_id,
     bill_date,
     due_date: addDaysIso(bill_date, terms ?? 0),
     purchase_order_id: order.id,
+    ...currency,
     lines: order.lines.map((line) => ({
       product_id: line.product_id,
       description: line.description,

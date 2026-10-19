@@ -98,9 +98,11 @@ describe('RFQ reads', () => {
   const row = (n: number, extra: Record<string, unknown> = {}) => ({
     id: `rfq-${n}`, rfq_no: `RFQ-${n}`, supplier_id: 's1', supplier_name: 'Syarikat Kertas',
     rfq_date: '2026-10-01', reply_by: '2026-10-31', supplier_ref: null, status: 'quoted',
-    line_count: 2, total: '132.50', quoted_at: '2026-10-02T09:00:00+00:00', purchase_order_id: null, purchase_order_no: null, source_rfq_id: null, ...extra,
+    line_count: 2, total: '132.50', quoted_at: '2026-10-02T09:00:00+00:00', purchase_order_id: null, purchase_order_no: null, source_rfq_id: null,
+    currency: 'MYR', fx_rate: '1.0000000000', fx_rate_text: '1.0000000000', fx_rate_source: null, fx_rate_date: null, total_myr: '132.50',
+    ...extra,
   });
-  const read = (n: number, extra: Record<string, unknown> = {}) => ({ ...row(n), line_count: 2, total: 132.5, ...extra });
+  const read = (n: number, extra: Record<string, unknown> = {}) => ({ ...row(n), line_count: 2, total: 132.5, fx_rate: 1, total_myr: 132.5, ...extra });
 
   it('lists from the totals view, in the caller’s workspace, newest first, with the figures as numbers', async () => {
     const { ctx, calls } = fakeFinance({ data: [row(1)], error: null });
@@ -178,8 +180,10 @@ describe('RFQ writes', () => {
   it('saves through the database function, in the caller’s workspace, sending a missing price as null', async () => {
     const { ctx, calls } = fakeFinance({ data: ID, error: null });
     expect(await saveRfq(ctx, { ...valid, id: ID })).toEqual({ ok: true, data: { id: ID } });
-    expect(calls[0]).toMatchObject({ kind: 'rpc', name: 'finance_save_rfq' });
-    expect(calls[0].args).toEqual({
+    // A draft saved with no currency keeps its own, so its stored currency is read first (the whole-units rule).
+    expect(calls[0]).toMatchObject({ kind: 'table', name: 'finance_rfqs', filters: { org_id: 'org-1', id: ID } });
+    expect(calls[1]).toMatchObject({ kind: 'rpc', name: 'finance_save_rfq' });
+    expect(calls[1].args).toEqual({
       target_org: 'org-1',
       rfq: { id: ID, supplier_id: SUPPLIER, rfq_date: '2026-10-01', reply_by: '2026-10-31', notes: null },
       lines: [{ product_id: null, description: 'Printer paper', quantity: 10, uom: null, pack_size: null, unit_price: null, sst_rate: 0 }],

@@ -137,10 +137,11 @@ describe('purchase order reads', () => {
     po_date: '2026-10-01', expected_date: '2026-10-20', status: 'approved', created_by: 'u1', submitted_by: 'u1',
     rejection_reason: null, payment_terms_days: 30, delivery_address: null,
     total: '132.50', delivery: 'partial', received_total: '50.00', billed_total: '40.00', over_billed: false, billed_over_received: false,
+    currency: 'MYR', fx_rate: '1.0000000000', fx_rate_text: '1.0000000000', fx_rate_source: null, fx_rate_date: null, total_myr: '132.50',
     ...extra,
   });
   const read = (n: number, extra: Record<string, unknown> = {}) => ({
-    ...row(n), total: 132.5, received_total: 50, billed_total: 40, ...extra,
+    ...row(n), total: 132.5, received_total: 50, billed_total: 40, fx_rate: 1, total_myr: 132.5, ...extra,
   });
 
   it('lists from the totals view, in the caller’s workspace, newest first, with the figures as numbers', async () => {
@@ -215,8 +216,10 @@ describe('purchase order writes', () => {
     expect(
       await savePurchaseOrder(ctx, { ...valid, id: ID, payment_terms_days: 14, delivery_address: 'Lot 3' }),
     ).toEqual({ ok: true, data: { id: ID } });
-    expect(calls[0]).toMatchObject({ kind: 'rpc', name: 'finance_save_purchase_order' });
-    expect(calls[0].args).toEqual({
+    // A draft saved with no currency keeps its own, so its stored currency is read first (the whole-units rule).
+    expect(calls[0]).toMatchObject({ kind: 'table', name: 'finance_purchase_orders', filters: { org_id: 'org-1', id: ID } });
+    expect(calls[1]).toMatchObject({ kind: 'rpc', name: 'finance_save_purchase_order' });
+    expect(calls[1].args).toEqual({
       target_org: 'org-1',
       purchase_order: {
         id: ID, supplier_id: SUPPLIER, po_date: '2026-10-01', expected_date: '2026-10-31',

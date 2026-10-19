@@ -678,7 +678,7 @@ export async function saveAndSendQuotationAction(input: unknown): Promise<SaveAn
 }
 
 /**
- * The rate a quotation or an invoice in a currency, supplied on a date, is offered: the SST rule's (src/lib/finance/sst-rate.ts),
+ * The rate a quotation, an invoice, a bill, an RFQ or a purchase order in a currency, on a date, is offered: the SST rule's (src/lib/finance/sst-rate.ts),
  * Bank Negara Malaysia's 17:00 selling rate on or before it, as exact text; or null when there is none. Read and
  * answered to a person who may edit.
  */

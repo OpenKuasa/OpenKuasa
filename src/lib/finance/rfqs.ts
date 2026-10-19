@@ -5,8 +5,15 @@
  * then the RFQ is quoted. Unlike a quotation, a line may have no price until
  * the supplier answers, so an RFQ stores no amounts: the totals view works
  * them out for the priced lines. org_id comes from the context.
+ *
+ * An RFQ may be in another currency (stage 4p of multi-currency): its prices
+ * are in that currency, and its rate (ringgit per one unit) is optional and
+ * only indicative, there to compare quotes in ringgit; the totals view works
+ * the ringgit out. A quoted RFQ becomes a purchase order in its currency.
  */
 import { z } from 'zod';
+import { BASE_CURRENCY, isDocumentCurrency } from './currencies';
+import { CURRENCY_MESSAGES, type RateSource, wholeUnitsError } from './document-currency';
 import {
   DOCUMENT_LINES_MAX,
   LINE_MESSAGES,
@@ -61,6 +68,13 @@ export const RFQ_MESSAGES = {
   hasOrder: 'This RFQ already has a purchase order. Cancel that order first to make another.',
   // Compare quotes, when the group came apart since the page was loaded.
   nothingToCompare: 'There are no other quotes for this request to compare it with.',
+  currency: 'Choose a currency.',
+  rate: CURRENCY_MESSAGES.rate,
+  // FIN39. The form marks a rate as Bank Negara's only when it is the rule's own answer for the date it asked, so
+  // this is met by a direct call.
+  notBnmRate: "That rate is not Bank Negara Malaysia's 5 pm selling rate for that day. Type it in again, and save.",
+  // The assistant never edits a draft in another currency: its prices would be read as ringgit.
+  foreignDraftByAssistant: 'This RFQ is not in ringgit. Edit it on the RFQs screen, where its currency and exchange rate are shown.',
 } as const;
 
 const M = RFQ_MESSAGES;
@@ -86,7 +100,7 @@ const replyBy = z
   .union([isoDate, z.literal(''), z.null()], { error: M.date })
   .transform((v) => (v === '' ? null : v));
 
-export const saveRfqInput = z
+const saveRfqBase = z
   .object({
     /** Present to change a draft; absent to create one. */
     id: z.string({ error: M.gone }).uuid(M.gone).optional(),
@@ -98,8 +112,45 @@ export const saveRfqInput = z
     reply_by: replyBy.default(null),
     notes: optionalText.default(null),
     lines: z.array(rfqLine, { error: M.lines }).min(1, M.lines).max(RFQ_LINES_MAX, M.tooManyLines),
-  })
-  .refine((v) => v.reply_by === null || v.reply_by >= v.rfq_date, { message: M.dates, path: ['reply_by'] });
+    // The four below travel together and are all optional, with no default, as a quotation's: a caller that sends
+    // no currency (the finance assistant, which writes ringgit) leaves a draft's currency and rate as they are,
+    // and a new RFQ in ringgit. The database stores rate 1 for ringgit whatever is sent. The rate may be absent
+    // throughout: an RFQ posts nothing, and its rate only puts the quotes into ringgit to compare them.
+    currency: z.string({ error: M.currency }).refine(isDocumentCurrency, M.currency).optional(),
+    /** Ringgit per one unit; null while it is not known. */
+    // A number (a direct caller) or exact decimal text (the form: no digit lost to a float).
+    fx_rate: z
+      .union([
+        z.number({ error: M.rate }).positive(M.rate).max(1_000_000_000, M.rate),
+        z
+          .string({ error: M.rate })
+          .regex(/^\d{1,10}(\.\d{1,10})?$/, M.rate)
+          .refine((t) => Number(t) > 0 && Number(t) <= 1_000_000_000, M.rate),
+      ], { error: M.rate })
+      .nullable()
+      .optional(),
+    fx_rate_source: z.enum(['bnm', 'manual'], { error: M.rate }).nullable().optional(),
+    fx_rate_date: isoDate.nullable().optional(),
+  });
+const replyNotBefore = (v: { reply_by: string | null; rfq_date: string }) => v.reply_by === null || v.reply_by >= v.rfq_date;
+/** An RFQ's line may have no price yet: that is whole in every currency. */
+const pricedLines = (lines: { unit_price: number | null }[]) => lines.map((l) => ({ unit_price: l.unit_price ?? 0 }));
+
+export const saveRfqInput = saveRfqBase
+  .refine(replyNotBefore, { message: M.dates, path: ['reply_by'] })
+  .superRefine((v, ctx) => {
+    // With no currency sent the draft keeps its own; saveRfq checks that case against the stored one.
+    const problem = wholeUnitsError(v.currency ?? BASE_CURRENCY, pricedLines(v.lines));
+    if (problem) ctx.addIssue({ code: 'custom', message: problem, path: ['lines'] });
+  });
+
+/**
+ * What the finance assistant may send: the form's fields without a currency or a rate. It writes ringgit only,
+ * so those keys are not in the schema the model sees and a call that carries them has them stripped.
+ */
+export const saveRfqToolInput = saveRfqBase
+  .omit({ currency: true, fx_rate: true, fx_rate_source: true, fx_rate_date: true })
+  .refine(replyNotBefore, { message: M.dates, path: ['reply_by'] });
 
 export const rfqIdInput = z.object({ id: z.string({ error: M.gone }).uuid(M.gone) });
 
@@ -124,6 +175,7 @@ const REFUSALS: Record<string, string> = {
   FIN10: M.empty,
   FIN11: M.gone,
   FIN19: M.unpriced,
+  FIN39: M.notBnmRate,
   [PG_UNIQUE]: M.numberTaken,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_FORBIDDEN]: NOT_ALLOWED,
@@ -170,6 +222,18 @@ export type RfqListRow = {
    * names the first too. null for the first RFQ itself, and for one that was never copied.
    */
   source_rfq_id: string | null;
+  /** ISO 4217 code. MYR for every RFQ made before stage 4p. */
+  currency: string;
+  /** Ringgit per one unit: 1 for ringgit; null while an RFQ in another currency has no rate. */
+  fx_rate: number | null;
+  /** The same rate as exact text (the database's numeric), for working money from; null with no rate. */
+  fx_rate_text: string | null;
+  /** null for ringgit and while there is no rate. */
+  fx_rate_source: RateSource | null;
+  /** The date of BNM's rate when it is BNM's; null otherwise. */
+  fx_rate_date: string | null;
+  /** The priced lines' total in ringgit at the RFQ's rate (indicative: an RFQ posts nothing); null while there is no rate. */
+  total_myr: number | null;
 };
 
 export type RfqLine = {
@@ -199,7 +263,12 @@ export type RfqDetail = RfqListRow & {
 export type SaveAndSendRfqResult = FinResult<{ id: string; rfq_no: string }> & { draftId?: string };
 
 const LIST_COLUMNS =
-  'id,rfq_no,supplier_id,supplier_name,rfq_date,reply_by,supplier_ref,status,line_count,total,quoted_at,purchase_order_id,purchase_order_no,source_rfq_id';
+  'id,rfq_no,supplier_id,supplier_name,rfq_date,reply_by,supplier_ref,status,line_count,total,quoted_at,purchase_order_id,purchase_order_no,source_rfq_id,' +
+  // The rate twice: as a number to show, and as exact text (PostgREST's cast) to work money from.
+  'currency,fx_rate,fx_rate_text:fx_rate::text,fx_rate_source,fx_rate_date,total_myr';
+
+/** A numeric column as a number, keeping null. */
+const numberOrNull = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 
 const LINE_COLUMNS = 'id,product_id,description,quantity,uom,pack_size,unit_price,sst_rate';
 
@@ -212,6 +281,12 @@ function toListRow(row: Record<string, unknown>): RfqListRow {
     purchase_order_id: (row.purchase_order_id as string | null) ?? null,
     purchase_order_no: (row.purchase_order_no as string | null) ?? null,
     source_rfq_id: (row.source_rfq_id as string | null) ?? null,
+    currency: (row.currency as string | undefined) ?? BASE_CURRENCY,
+    fx_rate: numberOrNull(row.fx_rate),
+    fx_rate_text: (row.fx_rate_text as string | null | undefined) ?? null,
+    fx_rate_source: (row.fx_rate_source as RateSource | null | undefined) ?? null,
+    fx_rate_date: (row.fx_rate_date as string | null | undefined) ?? null,
+    total_myr: numberOrNull(row.total_myr),
   };
 }
 
@@ -308,6 +383,13 @@ export async function saveRfq(
   input: z.input<typeof saveRfqInput>,
 ): Promise<FinResult<{ id: string }>> {
   const { lines, ...rfq } = saveRfqInput.parse(input);
+  // No currency sent for an existing draft: it keeps its own, so the whole-units rule is its own too.
+  if (rfq.id && rfq.currency === undefined) {
+    const stored = await storedCurrency(ctx, rfq.id);
+    if (!stored.ok) return stored;
+    const problem = stored.data ? wholeUnitsError(stored.data, pricedLines(lines)) : null;
+    if (problem) return { ok: false, error: problem };
+  }
   const { data, error } = await ctx.client.rpc('finance_save_rfq', {
     target_org: ctx.orgId,
     rfq,
@@ -318,6 +400,32 @@ export async function saveRfq(
     return rfqWriteFailed('saveRfq', error);
   }
   return { ok: true, data: { id: data as string } };
+}
+
+/** The currency an RFQ is stored in; null when it is not there (the save then says so). */
+async function storedCurrency(ctx: FinanceWriteContext, id: string): Promise<FinResult<string | null>> {
+  const { data, error } = await ctx.client
+    .from('finance_rfqs')
+    .select('currency')
+    .eq('org_id', ctx.orgId)
+    .eq('id', id)
+    .maybeSingle();
+  if (error) return rfqWriteFailed('saveRfq', error);
+  return { ok: true, data: (data as { currency?: string } | null)?.currency ?? null };
+}
+
+/**
+ * The finance assistant's save: ringgit only. A new RFQ is in ringgit; a draft that is in another currency is
+ * refused, because the prices the assistant writes are in ringgit.
+ */
+export async function saveRfqInRinggit(ctx: FinanceWriteContext, input: unknown): Promise<FinResult<{ id: string }>> {
+  const parsed = saveRfqToolInput.parse(input);
+  if (parsed.id) {
+    const stored = await storedCurrency(ctx, parsed.id);
+    if (!stored.ok) return stored;
+    if (stored.data !== null && stored.data !== BASE_CURRENCY) return { ok: false, error: M.foreignDraftByAssistant };
+  }
+  return saveRfq(ctx, parsed);
 }
 
 /** Marks a draft as sent: it gets its number and can no longer be edited. Nothing is emailed. */
@@ -387,7 +495,8 @@ export async function deleteRfq(
 
 /**
  * Makes a draft purchase order from a quoted RFQ: the same supplier, notes and
- * lines, dated today. The RFQ stays quoted. Refused while a purchase order
+ * lines, dated today, in the RFQ's currency at the SST rule's rate for that
+ * day when Bank Negara has one (the RFQ's rate was indicative). The RFQ stays quoted. Refused while a purchase order
  * made from it stands; a cancelled one frees it.
  */
 export async function convertRfq(

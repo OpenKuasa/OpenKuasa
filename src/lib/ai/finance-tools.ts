@@ -136,7 +136,7 @@ import {
   trialBalance,
 } from '@/lib/finance/reports';
 import {
-  billFromPurchaseOrder,
+  billFromPurchaseOrderInRinggit,
   billFromPurchaseOrderInput,
   cancelPurchaseOrder,
   closePurchaseOrder,
@@ -145,8 +145,8 @@ import {
   purchaseOrderIdInput,
   receivePurchaseOrder,
   receivePurchaseOrderInput,
-  savePurchaseOrder,
-  savePurchaseOrderInput,
+  savePurchaseOrderInRinggit,
+  savePurchaseOrderToolInput,
   submitPurchaseOrder,
 } from '@/lib/finance/purchase-orders';
 import {
@@ -158,8 +158,8 @@ import {
   quoteRfq,
   quoteRfqInput,
   rfqIdInput,
-  saveRfq,
-  saveRfqInput,
+  saveRfqInRinggit,
+  saveRfqToolInput,
   sendRfq,
 } from '@/lib/finance/rfqs';
 import type { FinanceWriteContext } from '@/lib/finance/result';
@@ -359,7 +359,10 @@ export function createBendaharaTools(access: FinanceAccess) {
       execute: async () => listContacts(ctx),
     }),
     listRfqs: tool({
-      description: 'Requests for quotation (RFQs) with status (draft/sent/quoted/closed) and the supplier being asked.',
+      description:
+        'Requests for quotation (RFQs) with status (draft/sent/quoted/closed) and the supplier being asked. Each total is ' +
+        "in the RFQ's currency (its currency field); total_myr is the same in ringgit at the RFQ's indicative rate, null " +
+        'when it has none. Compare or add up ringgit only.',
       inputSchema: z.object({}),
       execute: async () => listRfqs(ctx),
     }),
@@ -376,7 +379,9 @@ export function createBendaharaTools(access: FinanceAccess) {
     listPurchaseOrders: tool({
       description:
         'Purchase orders with status (draft/pending_approval/approved/closed/cancelled), delivery (pending/partial/delivered), ' +
-        'and total, received and billed figures in ringgit. Set awaiting_approval to list only those waiting for approval.',
+        "and total, received and billed figures in the order's currency (its currency field); total_myr is the total in " +
+        "ringgit at the order's indicative rate, null when it has none. Add up ringgit only. Set awaiting_approval to " +
+        'list only those waiting for approval.',
       inputSchema: z.object({ awaiting_approval: z.boolean().optional().describe('Only orders waiting for approval.') }),
       execute: async ({ awaiting_approval }) => {
         const rows = await listPurchaseOrders(ctx);
@@ -542,9 +547,11 @@ export function createBendaharaTools(access: FinanceAccess) {
     }),
     // Requests for quotation
     saveRfq: tool({
-      description: 'Create or edit a DRAFT request for quotation (supplier, lines). Omit id to create.',
-      inputSchema: saveRfqInput,
-      execute: async (input) => saveRfq(ctx, input),
+      description:
+        'Create or edit a DRAFT request for quotation in ringgit (supplier, lines). Omit id to create. An RFQ in another ' +
+        'currency is edited on the RFQs screen.',
+      inputSchema: saveRfqToolInput,
+      execute: async (input) => saveRfqInRinggit(ctx, input),
     }),
     sendRfq: tool({
       description: 'Mark a draft RFQ as sent to the supplier (it gets its number).',
@@ -557,7 +564,9 @@ export function createBendaharaTools(access: FinanceAccess) {
       execute: async (input) => quoteRfq(ctx, input),
     }),
     convertRfq: tool({
-      description: 'Make a draft purchase order from a quoted RFQ.',
+      description:
+        "Make a draft purchase order from a quoted RFQ. An RFQ in another currency becomes an order in that currency at " +
+        "Bank Negara Malaysia's selling rate for today.",
       inputSchema: rfqIdInput,
       execute: async (input) => convertRfq(ctx, input),
     }),
@@ -568,9 +577,11 @@ export function createBendaharaTools(access: FinanceAccess) {
     }),
     // Purchase orders (decide/close/cancel are sign-off tools, added separately)
     savePurchaseOrder: tool({
-      description: 'Create or edit a DRAFT purchase order (supplier, lines). Omit id to create.',
-      inputSchema: savePurchaseOrderInput,
-      execute: async (input) => savePurchaseOrder(ctx, input),
+      description:
+        'Create or edit a DRAFT purchase order in ringgit (supplier, lines). Omit id to create. An order in another ' +
+        'currency is edited on the Purchase Orders screen.',
+      inputSchema: savePurchaseOrderToolInput,
+      execute: async (input) => savePurchaseOrderInRinggit(ctx, input),
     }),
     submitPurchaseOrder: tool({
       description: 'Submit a draft purchase order for approval (it gets its number).',
@@ -583,9 +594,11 @@ export function createBendaharaTools(access: FinanceAccess) {
       execute: async (input) => receivePurchaseOrder(ctx, input),
     }),
     billFromPurchaseOrder: tool({
-      description: 'Create a DRAFT supplier bill from an approved purchase order.',
+      description:
+        'Create a DRAFT supplier bill from an approved purchase order in ringgit. A bill from an order in another ' +
+        'currency is made on the Purchase Orders screen.',
       inputSchema: billFromPurchaseOrderInput,
-      execute: async (input) => billFromPurchaseOrder(ctx, input),
+      execute: async (input) => billFromPurchaseOrderInRinggit(ctx, input),
     }),
     decidePurchaseOrder: tool({
       description: 'Approve or reject a purchase order waiting for approval. Set approve false and give a reason to reject. The business’s owner or an admin only, and never your own order (the books enforce both).',
