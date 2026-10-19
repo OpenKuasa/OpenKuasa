@@ -44,6 +44,11 @@ declare
   i_sst uuid;
   i_idr2 uuid;
   i_myr2 uuid;
+  i_r2 uuid;
+  i_r3 uuid;
+  rf3 uuid;
+  pay3 uuid;
+  cn3 uuid;
   pay2 uuid;
   cn2 uuid;
   rf2 uuid;
@@ -554,6 +559,41 @@ begin
     jsonb_build_object('invoice_id', i_myr2, 'credit_date', current_date + 1, 'reason', 'returns', 'amount', 10)));
   fails := fails || public.bendahara_check_try('a ringgit payment voided under a later credit note', 'ok',
     format('update public.finance_transactions set status = %L, updated_at = now() where id = %L', 'void', pay2));
+  -- FIN48 is about money in only: a foreign REFUND voided under a credit note issued after it is voided as
+  -- before. USD 100.00 at 4.2 paid in full, credited USD 20.00 (on the paid invoice: RM 84.00), USD 10.00 refunded
+  -- against the invoice as RM 40.00, then another credit note of USD 10.00 issued: the refund is still voided.
+  i_r2 := public.finance_save_invoice(org, jsonb_build_object('customer_id', cust) || dates || usd_at_4_2, hundred);
+  perform public.finance_post_invoice(org, i_r2);
+  perform public.finance_record_payment_in(org,
+    jsonb_build_object('account_id', bank, 'method', 'fpx', 'txn_date', '1999-01-12', 'amount_myr', '420'),
+    jsonb_build_array(jsonb_build_object('invoice_id', i_r2, 'amount', 100)));
+  perform public.finance_issue_credit_note(org, public.finance_save_credit_note(org,
+    jsonb_build_object('invoice_id', i_r2, 'credit_date', '1999-01-13', 'reason', 'returns', 'amount', 20)));
+  rf3 := public.finance_record_refund(org,
+    jsonb_build_object('invoice_id', i_r2, 'account_id', bank, 'method', 'fpx', 'txn_date', '1999-01-14',
+                       'reason', 'overpayment', 'amount', 10, 'amount_myr', '40'));
+  perform public.finance_issue_credit_note(org, public.finance_save_credit_note(org,
+    jsonb_build_object('invoice_id', i_r2, 'credit_date', '1999-01-15', 'reason', 'returns', 'amount', 10)));
+  fails := fails || public.bendahara_check_try('a foreign refund voided under a later credit note', 'ok',
+    format('update public.finance_transactions set status = %L, updated_at = now() where id = %L', 'void', rf3));
+  -- The date arm: a credit note issued BEFORE the payment (issued_at a day earlier) but DATED after it still
+  -- refuses the payment's void (FIN48). USD 100.00 at 4.2, credit note USD 10.00 dated 1999-02-01 and issued
+  -- yesterday while the invoice was unpaid, then USD 90.00 paid on 1999-01-20 as RM 378.00.
+  i_r3 := public.finance_save_invoice(org, jsonb_build_object('customer_id', cust) || dates || usd_at_4_2, hundred);
+  perform public.finance_post_invoice(org, i_r3);
+  cn3 := public.finance_save_credit_note(org, jsonb_build_object('invoice_id', i_r3, 'credit_date', '1999-02-01', 'reason', 'returns', 'amount', 10));
+  fails := fails || public.bendahara_check_try('the date arm: a credit note issued yesterday', 'ok',
+    format('update public.finance_credit_notes set status = %L, credit_note_no = %L, issued_at = now() - interval %L, updated_at = now() where id = %L',
+      'issued', 'CN-FX3C-DATE', '1 day', cn3));
+  select status, amount_myr into r from public.finance_credit_notes where id = cn3;
+  if r.status is distinct from 'issued' or r.amount_myr is distinct from 42.00 then
+    fails := fails || format('the date-arm credit note is %s with RM %s, not issued with 42.00', r.status, r.amount_myr);
+  end if;
+  pay3 := public.finance_record_payment_in(org,
+    jsonb_build_object('account_id', bank, 'method', 'fpx', 'txn_date', '1999-01-20', 'amount_myr', '378'),
+    jsonb_build_array(jsonb_build_object('invoice_id', i_r3, 'amount', 90)));
+  fails := fails || public.bendahara_check_try('FIN48: a payment voided under a credit note issued before it but dated after', 'FIN48',
+    format('update public.finance_transactions set status = %L, updated_at = now() where id = %L', 'void', pay3));
 
   -- ==== ringgit: a credit note and a refund are what they always were ==============
   i_myr := public.finance_save_invoice(org,
