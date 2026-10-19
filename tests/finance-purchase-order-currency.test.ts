@@ -31,7 +31,7 @@ import {
   submitPurchaseOrder,
 } from '@/lib/finance/purchase-orders';
 import { orderNotesForBills, purchaseOrdersCsv, rfqsCsv } from '@/lib/finance/purchase-views';
-import { compareQuotes, quoteTotals } from '@/lib/finance/rfq-compare';
+import { compareQuotes, quoteTotals, quotesInSeveralCurrencies } from '@/lib/finance/rfq-compare';
 import { RFQ_FORM_KIND, newRfqForm, rfqFormError, rfqPayload } from '@/lib/finance/rfq-form';
 import {
   RFQ_MESSAGES,
@@ -206,6 +206,19 @@ describe('billFromPurchaseOrder keeps the order’s currency', () => {
     expect(billOf(calls)).not.toHaveProperty('currency');
     expect(calls.map((c) => c.name)).not.toContain('finance_fx_rate_for_invoice');
   });
+  it('makes no bill when the rate cannot be read, rather than a foreign bill with no rate unawares', async () => {
+    const { ctx, calls } = fakeFinance((call) => {
+      if (call.name === 'finance_purchase_order_totals') return { data: { ...orderRow(), subtotal: '666.70', sst_total: '0', notes: null }, error: null };
+      if (call.name === 'finance_purchase_order_lines') return { data: poLines, error: null };
+      if (call.name === 'finance_fx_rate_for_invoice') return { data: null, error: { code: 'XX000', message: 'boom' } };
+      return { data: BILL, error: null };
+    });
+    expect(await billFromPurchaseOrder(ctx, { id: ID, bill_date: '2026-10-18' })).toEqual({
+      ok: false, error: 'That change could not be saved. Please try again.',
+    });
+    expect(calls.map((c) => c.name)).not.toContain('finance_save_bill');
+    expect(logged).toHaveBeenCalled();
+  });
   it('is not done by the assistant for an order in another currency', async () => {
     const { ctx, calls } = answering({ ...orderRow(), subtotal: '666.70', sst_total: '0', notes: null }, []);
     expect(await billFromPurchaseOrderInRinggit(ctx, { id: ID, bill_date: '2026-10-18' })).toEqual({
@@ -302,6 +315,16 @@ describe('comparing quotes in different currencies', () => {
     expect(totals.map((t) => t.lowest)).toEqual([false, true, false]);
     const [row] = compareQuotes([none, myr, other]);
     expect(row.cells.map((c) => c?.lowest)).toEqual([false, true, false]);
+  });
+  it('reads an all-ringgit comparison as before when a foreign RFQ in the group is not quoted yet', () => {
+    const a = quoted('a', 'MYR', 4100, 4100, 4100, '1');
+    const b = quoted('b', 'MYR', 4050, 4050, 4050, '1');
+    const waiting = { ...quoted('c', 'USD', 0, null, 0, null), status: 'sent', quoted_at: null } as RfqDetail;
+    expect(quotesInSeveralCurrencies([a, b, waiting])).toBe(false);
+    expect(quoteTotals([a, b, waiting]).map((t) => t.lowest)).toEqual([false, false, false]);
+    expect(quoteTotals([a, b, waiting])[2]).toEqual({ total: null, ringgit: null, lowest: false });
+    // Once it is quoted, the comparison is across currencies and is ranked in ringgit.
+    expect(quotesInSeveralCurrencies([a, b, quoted('c', 'USD', 900, 3600, 900, '4')])).toBe(true);
   });
   it('compares prices in their own currency when every quote is in the same one', () => {
     const a = quoted('a', 'USD', 1000, null, 1000, null);
