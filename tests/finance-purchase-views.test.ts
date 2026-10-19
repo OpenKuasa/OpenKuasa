@@ -418,6 +418,12 @@ const rfq = (r: Partial<RfqListRow>): RfqListRow => {
     purchase_order_id: null,
     purchase_order_no: null,
     source_rfq_id: null,
+    currency: 'MYR',
+    fx_rate: 1,
+    fx_rate_text: '1.0000000000',
+    fx_rate_source: null,
+    fx_rate_date: null,
+    total_myr: 0,
     ...r,
   };
 };
@@ -566,6 +572,12 @@ const po = (r: Partial<PurchaseOrderListRow>): PurchaseOrderListRow => {
     billed_total: 0,
     over_billed: false,
     billed_over_received: false,
+    currency: 'MYR',
+    fx_rate: 1,
+    fx_rate_text: '1.0000000000',
+    fx_rate_source: null,
+    fx_rate_date: null,
+    total_myr: 100,
     ...r,
   };
 };
@@ -731,6 +743,7 @@ describe('orderNotesForBills', () => {
     received_total: 400,
     over_billed: false,
     billed_over_received: false,
+    currency: 'MYR',
     ...o,
   });
   const against = (bill_no: string | null, purchase_order_id: string | null = 'po-1') => ({ bill_no, purchase_order_id });
@@ -785,8 +798,8 @@ describe('orderNotesForBills', () => {
 
 describe('paymentRowsAgainstFlaggedOrders', () => {
   const orders = [
-    { id: 'po-1', po_no: 'PO-0003', total: 100, billed_total: 150, received_total: 100, over_billed: true, billed_over_received: false },
-    { id: 'po-2', po_no: 'PO-0004', total: 100, billed_total: 50, received_total: 50, over_billed: false, billed_over_received: false },
+    { id: 'po-1', po_no: 'PO-0003', total: 100, billed_total: 150, received_total: 100, over_billed: true, billed_over_received: false, currency: 'MYR' },
+    { id: 'po-2', po_no: 'PO-0004', total: 100, billed_total: 50, received_total: 50, over_billed: false, billed_over_received: false, currency: 'MYR' },
   ];
   const bills = [
     bill({ id: 'b1', purchase_order_id: 'po-1' }),

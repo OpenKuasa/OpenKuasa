@@ -76,6 +76,7 @@ const order = (extra: Partial<OrderBilling> = {}): OrderBilling => ({
   received_total: 1000,
   over_billed: true,
   billed_over_received: false,
+  currency: 'MYR',
   ...extra,
 });
 

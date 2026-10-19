@@ -18,7 +18,7 @@ import {
   withCurrency,
   withPartyCurrency,
 } from './document-currency';
-import { rm } from './format';
+import { money } from './format';
 import {
   type DocumentFormKind,
   type LineDraft,
@@ -119,8 +119,9 @@ export function withSupplier(
 
 /**
  * Choosing the purchase order the bill is raised against. A bill against an order is in the order's currency
- * (the database says so too: FIN49), so choosing one puts the bill in it; every order is in ringgit until
- * orders carry a currency. Choosing none leaves the currency where it is, free to change again.
+ * (the database says so too: FIN49), so choosing one puts the bill in it (stage 4p: orders carry a currency;
+ * the rate is then asked of Bank Negara for the bill date, as for any change of currency). Choosing none leaves
+ * the currency where it is, free to change again.
  */
 export function withPurchaseOrder(form: BillForm, id: string, orderCurrency: string = BASE_CURRENCY): BillForm {
   if (!id) return { ...form, purchase_order_id: '' };
@@ -188,6 +189,8 @@ export type BillOrderOption = {
   total: number;
   billed_total: number;
   received_total: number;
+  /** The order's currency: its figures are in it, and so is every bill raised against it (FIN49). */
+  currency: string;
 };
 
 /**
@@ -199,7 +202,10 @@ export function ordersForSupplier(orders: BillOrderOption[], supplierId: string,
   if (!supplierId) return [];
   return orders
     .filter((o) => o.supplier_id === supplierId && (o.status === 'approved' || o.id === currentId))
-    .map((o) => ({ id: o.id, label: `${o.po_no ?? 'Purchase order'} · ${rm(o.total)} · billed ${rm(o.billed_total)}` }));
+    .map((o) => ({
+      id: o.id,
+      label: `${o.po_no ?? 'Purchase order'} · ${money(o.total, o.currency)} · billed ${money(o.billed_total, o.currency)}`,
+    }));
 }
 
 /**
@@ -231,8 +237,10 @@ export function billOrderWarnings(lines: LineDraft[], order: BillOrderOption | n
   const afterThis = cents(total) + cents(order.billed_total) - cents(ownBilled);
   const no = order.po_no ?? 'this order';
   const warnings: string[] = [];
-  if (afterThis > cents(order.total)) warnings.push(`This takes the bills for ${no} over its total of ${rm(order.total)}.`);
-  if (afterThis > cents(order.received_total)) warnings.push(`This is more than has been received on ${no} so far (${rm(order.received_total)}).`);
+  // The bill is in the order's currency (FIN49), so its total and the order's figures are in the same units.
+  const m = (n: number) => money(n, order.currency);
+  if (afterThis > cents(order.total)) warnings.push(`This takes the bills for ${no} over its total of ${m(order.total)}.`);
+  if (afterThis > cents(order.received_total)) warnings.push(`This is more than has been received on ${no} so far (${m(order.received_total)}).`);
   return warnings;
 }
 

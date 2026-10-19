@@ -7,7 +7,7 @@ import type { Slice } from '@/components/charts';
 import { type BillDisplayStatus, type BillListRow, billRinggit } from './bills';
 import { BASE_CURRENCY } from './currencies';
 import { toCsv } from './csv';
-import { rm, rmShort } from './format';
+import { money, rmShort } from './format';
 import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentMethod, type PaymentOutRow, paymentOutRinggit } from './money';
 import type { PurchaseOrderDelivery, PurchaseOrderListRow, PurchaseOrderStatus } from './purchase-orders';
 import type { RfqDisplayStatus, RfqListRow } from './rfqs';
@@ -255,7 +255,7 @@ export function alsoCovers(rows: PaymentOutRow[], row: PaymentOutRow): string {
 /** What a payment's bills are checked against: the billing figures and flags of a purchase order. */
 export type OrderBilling = Pick<
   PurchaseOrderListRow,
-  'id' | 'po_no' | 'total' | 'billed_total' | 'received_total' | 'over_billed' | 'billed_over_received'
+  'id' | 'po_no' | 'total' | 'billed_total' | 'received_total' | 'over_billed' | 'billed_over_received' | 'currency'
 >;
 
 /**
@@ -280,10 +280,12 @@ export function orderNotesForBills(
     const [first, ...others] = names;
     const subject = others.length === 0 ? `${first} is` : `${first} and ${others.length} more are`;
     const po = order.po_no ?? 'its purchase order';
+    // The order's figures are in its currency, as every bill on it is (FIN49).
+    const m = (n: number) => money(n, order.currency);
     notes.push(
       order.over_billed
-        ? `${subject} against ${po}, whose bills come to ${rm(order.billed_total)}, over its total of ${rm(order.total)}.`
-        : `${subject} against ${po}, which is billed ${rm(order.billed_total)} with ${rm(order.received_total)} received so far.`,
+        ? `${subject} against ${po}, whose bills come to ${m(order.billed_total)}, over its total of ${m(order.total)}.`
+        : `${subject} against ${po}, which is billed ${m(order.billed_total)} with ${m(order.received_total)} received so far.`,
     );
   }
   return notes;
@@ -415,22 +417,37 @@ export function rfqsView(rows: RfqListRow[], today: string): RfqsViewData {
   return { counts, awaitingReply: counts.sent + counts.overdue, overdue: counts.overdue };
 }
 
-/** The RFQs table as a CSV file. The total is a number, and empty until the supplier's answer is recorded. */
+/** True once any RFQ or order is in another currency: its list and its CSV then show the currency. */
+export function purchasesHaveForeign(rows: { currency: string }[]): boolean {
+  return rows.some((r) => r.currency !== BASE_CURRENCY);
+}
+
+/** The columns a foreign RFQ or order adds to its CSV. */
+const CURRENCY_CSV_COLUMNS = ['Currency', 'Rate (RM per unit)', 'Total (RM)'];
+
+/**
+ * The RFQs table as a CSV file. The total is a number, in the RFQ's own currency, and empty until the
+ * supplier's answer is recorded; once an RFQ is foreign, the currency, the exact rate and the ringgit total follow.
+ */
 export function rfqsCsv(rows: RfqListRow[], today: string): string {
+  const base = ['No.', 'Date', 'Supplier', 'Reply by', 'Supplier ref', 'Lines', 'Total', 'Status', 'Purchase order'];
+  const row = (r: RfqListRow) => [
+    r.rfq_no,
+    r.rfq_date,
+    r.supplier_name,
+    r.reply_by,
+    r.supplier_ref,
+    r.line_count,
+    // Empty until the supplier's answer is recorded, like the dash on the screen: prices the buyer typed are not a quote.
+    r.quoted_at ? r.total : null,
+    RFQ_STATUS_LABELS[rfqDisplayStatus(r, today)],
+    r.purchase_order_no,
+  ];
+  if (!purchasesHaveForeign(rows)) return toCsv(base, rows.map(row));
   return toCsv(
-    ['No.', 'Date', 'Supplier', 'Reply by', 'Supplier ref', 'Lines', 'Total', 'Status', 'Purchase order'],
-    rows.map((r) => [
-      r.rfq_no,
-      r.rfq_date,
-      r.supplier_name,
-      r.reply_by,
-      r.supplier_ref,
-      r.line_count,
-      // Empty until the supplier's answer is recorded, like the dash on the screen: prices the buyer typed are not a quote.
-      r.quoted_at ? r.total : null,
-      RFQ_STATUS_LABELS[rfqDisplayStatus(r, today)],
-      r.purchase_order_no,
-    ]),
+    [...base, ...CURRENCY_CSV_COLUMNS],
+    // The exact text, so a spreadsheet gets every digit of the rate.
+    rows.map((r) => [...row(r), r.currency, r.fx_rate_text ?? r.fx_rate, r.quoted_at ? r.total_myr : null]),
   );
 }
 
@@ -537,23 +554,28 @@ export function purchaseOrdersView(rows: PurchaseOrderListRow[]): PurchaseOrders
 }
 
 /**
- * The purchase orders table as a CSV file. Amounts are numbers. The delivery column is empty for an order
- * that was never approved: "Not delivered" would read as a late delivery.
+ * The purchase orders table as a CSV file. Amounts are numbers, in each order's own currency. The delivery column
+ * is empty for an order that was never approved: "Not delivered" would read as a late delivery. Once an order is
+ * foreign, the currency, the exact rate and the ringgit total follow.
  */
 export function purchaseOrdersCsv(rows: PurchaseOrderListRow[]): string {
+  const base = ['No.', 'Date', 'Supplier', 'RFQ', 'Expected delivery', 'Total', 'Received', 'Billed', 'Delivery', 'Status'];
+  const row = (r: PurchaseOrderListRow) => [
+    r.po_no,
+    r.po_date,
+    r.supplier_name,
+    r.rfq_no,
+    r.expected_date,
+    r.total,
+    r.received_total,
+    r.billed_total,
+    r.status === 'approved' || r.status === 'closed' ? PO_DELIVERY_LABELS[r.delivery] : null,
+    PO_STATUS_LABELS[r.status],
+  ];
+  if (!purchasesHaveForeign(rows)) return toCsv(base, rows.map(row));
   return toCsv(
-    ['No.', 'Date', 'Supplier', 'RFQ', 'Expected delivery', 'Total', 'Received', 'Billed', 'Delivery', 'Status'],
-    rows.map((r) => [
-      r.po_no,
-      r.po_date,
-      r.supplier_name,
-      r.rfq_no,
-      r.expected_date,
-      r.total,
-      r.received_total,
-      r.billed_total,
-      r.status === 'approved' || r.status === 'closed' ? PO_DELIVERY_LABELS[r.delivery] : null,
-      PO_STATUS_LABELS[r.status],
-    ]),
+    [...base, ...CURRENCY_CSV_COLUMNS],
+    // The exact text, so a spreadsheet gets every digit of the rate.
+    rows.map((r) => [...row(r), r.currency, r.fx_rate_text ?? r.fx_rate, r.total_myr]),
   );
 }

@@ -154,7 +154,7 @@ export default async function SupplierBillsScreen() {
               products: products.filter((p) => p.active),
               orders: orders
                 .filter((o) => o.status === 'approved' || linked.has(o.id))
-                .map(({ id, po_no, supplier_id, status, total, billed_total, received_total }) => ({
+                .map(({ id, po_no, supplier_id, status, total, billed_total, received_total, currency }) => ({
                   id,
                   po_no,
                   supplier_id,
@@ -162,6 +162,7 @@ export default async function SupplierBillsScreen() {
                   total,
                   billed_total,
                   received_total,
+                  currency,
                 })),
               categories,
               defaultCategoryId: defaultCategoryId ?? '',

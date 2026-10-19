@@ -1,6 +1,6 @@
 import type { OrgRole } from '@/lib/auth/current-org';
 import { roleLabel } from '@/lib/auth/permissions';
-import { rm, unitPrice } from '@/lib/finance/format';
+import { money, unitPrice } from '@/lib/finance/format';
 import type { PurchaseOrderDetail } from '@/lib/finance/purchase-orders';
 import { count, displayDate } from '@/lib/finance/view-helpers';
 import type { Letterhead } from '@/lib/people/letterhead-data';
@@ -65,9 +65,14 @@ function signature(label: 'Prepared by' | 'Approved by', person: PrintPerson | u
   return { label, name, designation, date: malaysianTime(at) };
 }
 
-/** The wording of a printed purchase order. `head` is the workspace's letterhead, null when it could not be read. */
+/**
+ * The wording of a printed purchase order. `head` is the workspace's letterhead, null when it could not be read.
+ * Every figure is in the order's own currency ("USD 1,000.00"; a ringgit order reads "RM" as it always has): the
+ * order goes to the supplier, so its indicative ringgit is not printed.
+ */
 export function purchaseOrderPrint(order: PrintablePurchaseOrder, head: Letterhead | null): PurchaseOrderPrint {
   const { supplier } = order;
+  const amount = (n: number) => money(n, order.currency);
   const contact = [supplier.phone, supplier.email].filter(filled).join(' · ');
   return {
     po_no: order.po_no ?? '',
@@ -86,14 +91,14 @@ export function purchaseOrderPrint(order: PrintablePurchaseOrder, head: Letterhe
       description: line.description,
       quantity: line.quantity.toLocaleString('en-MY', { maximumFractionDigits: 4 }),
       unit: [line.uom, ...(filled(line.pack_size) ? [`(${line.pack_size})`] : [])].filter(filled).join(' '),
-      unit_price: unitPrice(line.unit_price),
+      unit_price: unitPrice(line.unit_price, order.currency),
       sst: line.sst_rate > 0 ? `${line.sst_rate}%` : '—',
-      amount: rm(line.amount),
+      amount: amount(line.amount),
     })),
     totals: [
-      { label: 'Subtotal', value: rm(order.subtotal) },
-      { label: 'SST', value: rm(order.sst_total) },
-      { label: 'Total', value: rm(order.total) },
+      { label: 'Subtotal', value: amount(order.subtotal) },
+      { label: 'SST', value: amount(order.sst_total) },
+      { label: 'Total', value: amount(order.total) },
     ],
     notes: filled(order.notes) ? order.notes.trim() : null,
     quote_line: `Please quote ${order.po_no} on your delivery order and invoice.`,

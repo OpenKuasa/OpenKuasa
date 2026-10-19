@@ -22,7 +22,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import type { FinanceContact } from '@/lib/finance/contacts';
 import { csvFileName } from '@/lib/finance/csv';
-import { rm } from '@/lib/finance/format';
+import { BASE_CURRENCY } from '@/lib/finance/currencies';
+import { money, rm } from '@/lib/finance/format';
 import type { FinanceProduct } from '@/lib/finance/products';
 import {
   RFQ_STATUS_LABELS,
@@ -262,8 +263,9 @@ export function RfqsView({
               )
             }
           >
-            Make a draft purchase order from {number} to {who} ({rm(rfq.total)})? It gets the same supplier and lines, at the
-            prices quoted, and stays a draft on Purchase Orders until it is submitted for approval.
+            Make a draft purchase order from {number} to {who} ({money(rfq.total, rfq.currency)})? It gets the same supplier and
+            lines, at the prices quoted{rfq.currency !== BASE_CURRENCY ? `, in ${rfq.currency} at Bank Negara Malaysia's selling rate for today` : ''},
+            and stays a draft on Purchase Orders until it is submitted for approval.
           </ConfirmRow>
         );
       case 'close':
@@ -550,7 +552,12 @@ export function RfqsView({
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-right tabular-nums">{r.line_count}</TableCell>
                       <TableCell className="whitespace-nowrap text-right tabular-nums">
-                        {r.quoted_at ? rm(r.total) : '—'}
+                        {r.quoted_at ? money(r.total, r.currency) : '—'}
+                        {r.quoted_at && r.currency !== BASE_CURRENCY ? (
+                          <span className="block text-xs text-muted-foreground">
+                            {r.total_myr === null ? 'No exchange rate' : `≈ ${rm(r.total_myr)}`}
+                          </span>
+                        ) : null}
                       </TableCell>
                       <TableCell>
                         <span className="flex items-center gap-2">

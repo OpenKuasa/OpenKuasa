@@ -95,8 +95,8 @@ const detail = (extra: Partial<BillDetail> = {}): BillDetail => ringgitBill({
 
 const actions = { save: vi.fn(), saveAndPost: vi.fn() };
 const orders = [
-  { id: PO, po_no: 'PO-0003', supplier_id: SUPPLIER, status: 'approved', total: 1200, billed_total: 300, received_total: 1200 },
-  { id: PO_2, po_no: 'PO-0009', supplier_id: OTHER, status: 'approved', total: 50, billed_total: 0, received_total: 0 },
+  { id: PO, po_no: 'PO-0003', supplier_id: SUPPLIER, status: 'approved', total: 1200, billed_total: 300, received_total: 1200, currency: 'MYR' },
+  { id: PO_2, po_no: 'PO-0009', supplier_id: OTHER, status: 'approved', total: 50, billed_total: 0, received_total: 0, currency: 'MYR' },
 ];
 
 const card = (props: Partial<Parameters<typeof BillFormCard>[0]> = {}) =>
@@ -116,7 +116,7 @@ describe('the bill form’s purchase order picker', () => {
     expect(card({ editing: detail() })).not.toContain('Purchase order');
   });
   it('marks the linked order as chosen, and still offers it when it has since been closed', () => {
-    const html = card({ editing: detail({ purchase_order_id: PO_2, purchase_order_no: 'PO-0002' }), orders: [{ id: PO_2, po_no: 'PO-0002', supplier_id: SUPPLIER, status: 'closed', total: 500, billed_total: 500, received_total: 500 }] });
+    const html = card({ editing: detail({ purchase_order_id: PO_2, purchase_order_no: 'PO-0002' }), orders: [{ id: PO_2, po_no: 'PO-0002', supplier_id: SUPPLIER, status: 'closed', total: 500, billed_total: 500, received_total: 500, currency: 'MYR' }] });
     expect(html).toContain('data-chosen="' + PO_2 + '"');
     expect(html).toContain('PO-0002 · RM 500.00 · billed RM 500.00');
   });

@@ -64,6 +64,12 @@ const row = (over: Partial<RfqListRow> = {}): RfqListRow => ({
   purchase_order_id: null,
   purchase_order_no: null,
   source_rfq_id: null,
+  currency: 'MYR',
+  fx_rate: 1,
+  fx_rate_text: '1.0000000000',
+  fx_rate_source: null,
+  fx_rate_date: null,
+  total_myr: 0,
   ...over,
 });
 

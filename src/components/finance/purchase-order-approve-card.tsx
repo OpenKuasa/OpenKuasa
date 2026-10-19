@@ -4,7 +4,8 @@ import { Check, CircleCheck } from 'lucide-react';
 import { BentoCard } from '@/components/bento/bento';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { Button } from '@/components/ui/button';
-import { rm, unitPrice } from '@/lib/finance/format';
+import { BASE_CURRENCY } from '@/lib/finance/currencies';
+import { money, rm, unitPrice } from '@/lib/finance/format';
 import type { PurchaseOrderDetail } from '@/lib/finance/purchase-orders';
 import type { DecidePurchaseOrder } from '@/components/finance/purchase-order-reject-card';
 
@@ -12,8 +13,11 @@ import type { DecidePurchaseOrder } from '@/components/finance/purchase-order-re
  * What is being ordered, for the person deciding: each line's item, quantity,
  * unit price and amount, then the order's subtotal, SST and total. A list, not
  * a table, so a long description wraps at phone width instead of scrolling.
+ * Every figure is in the order's currency; a foreign total has its ringgit
+ * at the order's rate beneath it.
  */
 export function PurchaseOrderLines({ order }: { order: PurchaseOrderDetail }) {
+  const amount = (n: number) => money(n, order.currency);
   return (
     <div className="space-y-2 text-sm">
       <ul aria-label={`Lines of ${order.po_no ?? 'the order'}`} className="divide-y rounded-lg border">
@@ -24,11 +28,11 @@ export function PurchaseOrderLines({ order }: { order: PurchaseOrderDetail }) {
               <span className="block text-xs text-muted-foreground tabular-nums">
                 {line.quantity}
                 {line.uom ? ` ${line.uom}` : ''}
-                {line.pack_size ? ` (${line.pack_size})` : ''} at {unitPrice(line.unit_price)}
+                {line.pack_size ? ` (${line.pack_size})` : ''} at {unitPrice(line.unit_price, order.currency)}
                 {line.sst_rate > 0 ? `, SST ${line.sst_rate}%` : ''}
               </span>
             </div>
-            <span className="ml-auto tabular-nums">{rm(line.amount)}</span>
+            <span className="ml-auto tabular-nums">{amount(line.amount)}</span>
           </li>
         ))}
       </ul>
@@ -36,13 +40,19 @@ export function PurchaseOrderLines({ order }: { order: PurchaseOrderDetail }) {
         {order.sst_total > 0 ? (
           <>
             <dt className="text-muted-foreground">Subtotal</dt>
-            <dd className="text-right">{rm(order.subtotal)}</dd>
+            <dd className="text-right">{amount(order.subtotal)}</dd>
             <dt className="text-muted-foreground">SST</dt>
-            <dd className="text-right">{rm(order.sst_total)}</dd>
+            <dd className="text-right">{amount(order.sst_total)}</dd>
           </>
         ) : null}
         <dt className="font-medium">Total</dt>
-        <dd className="text-right font-medium">{rm(order.total)}</dd>
+        <dd className="text-right font-medium">{amount(order.total)}</dd>
+        {order.currency !== BASE_CURRENCY && order.total_myr !== null ? (
+          <>
+            <dt className="text-muted-foreground">In ringgit</dt>
+            <dd className="text-right text-muted-foreground">≈ {rm(order.total_myr)}</dd>
+          </>
+        ) : null}
       </dl>
     </div>
   );

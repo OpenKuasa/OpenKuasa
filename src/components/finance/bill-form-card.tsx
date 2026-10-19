@@ -86,8 +86,8 @@ export function BillFormCard({
     noneLabel: 'No purchase order',
     options: (form) => ordersForSupplier(orders, form.supplier_id, form.purchase_order_id),
     get: (form) => form.purchase_order_id,
-    // A bill against an order is in the order's currency (every order is in ringgit for now).
-    set: (form, id) => withPurchaseOrder(form, id),
+    // A bill against an order is in the order's currency (FIN49).
+    set: (form, id) => withPurchaseOrder(form, id, orders.find((o) => o.id === id)?.currency),
     notes: (form) => {
       const chosen = orders.find((o) => o.id === form.purchase_order_id && o.supplier_id === form.supplier_id) ?? null;
       // The bill's own saved total is already in the order's billed figure; the saved row for the form's current id says how much.

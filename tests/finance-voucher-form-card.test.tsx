@@ -53,7 +53,7 @@ const bills: BillListRow[] = [
   },
 ].map((b) => ringgitBill(b));
 const payable = voucherPayableBills(bills, [], null);
-const orders = [{ id: 'po1', po_no: 'PO-0001', total: 10000, billed_total: 12400, received_total: 0, over_billed: true, billed_over_received: false }];
+const orders = [{ id: 'po1', po_no: 'PO-0001', total: 10000, billed_total: 12400, received_total: 0, over_billed: true, billed_over_received: false, currency: 'MYR' }];
 const draftRow: PaymentVoucherRow = {
   transaction_id: VOUCHER, number: null, txn_date: '2026-10-05', method: 'cheque', amount: 132.5, status: 'draft', reference: null, notes: null,
   account_id: ACCOUNT, account_name: 'Maybank Current', account_kind: 'bank', contact_id: MAJU, party_name: 'Syarikat Maju', kind: 'bill',

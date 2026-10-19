@@ -42,7 +42,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { localIsoDate } from '@/lib/finance/bill-math';
 import type { FinanceContact } from '@/lib/finance/contacts';
 import { csvFileName } from '@/lib/finance/csv';
-import { rm } from '@/lib/finance/format';
+import { BASE_CURRENCY } from '@/lib/finance/currencies';
+import { money, rm } from '@/lib/finance/format';
 import type { FinanceProduct } from '@/lib/finance/products';
 import {
   PO_DELIVERY_LABELS,
@@ -126,7 +127,7 @@ type Open =
  */
 export function createBillQuestion(order: PurchaseOrderListRow): string | null {
   if (!(order.billed_total > 0)) return null;
-  return `${order.po_no ?? 'This order'} already has ${rm(order.billed_total)} billed. Make another draft bill for the full order?`;
+  return `${order.po_no ?? 'This order'} already has ${money(order.billed_total, order.currency)} billed. Make another draft bill for the full order?`;
 }
 
 /**
@@ -308,7 +309,7 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
             pendingLabel="Submitting…"
             onConfirm={() => confirm.run(() => actions.submit(id), close)}
           >
-            Submit the order to {who} ({rm(order.total)}) for approval? It gets its number, and an owner or admin other than
+            Submit the order to {who} ({money(order.total, order.currency)}) for approval? It gets its number, and an owner or admin other than
             you has to approve it before anything is bought.
           </ConfirmRow>
         );
@@ -608,7 +609,14 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
                       <TableCell className="hidden whitespace-nowrap text-muted-foreground 2xl:table-cell">
                         {r.expected_date ? displayDate(r.expected_date) : '—'}
                       </TableCell>
-                      <TableCell className="whitespace-nowrap text-right tabular-nums">{rm(r.total)}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums">
+                        {money(r.total, r.currency)}
+                        {r.currency !== BASE_CURRENCY ? (
+                          <span className="block text-xs text-muted-foreground">
+                            {r.total_myr === null ? 'No rate yet' : `≈ ${rm(r.total_myr)}`}
+                          </span>
+                        ) : null}
+                      </TableCell>
                       <TableCell>
                         <span className="flex items-center gap-2">
                           <LiveDot active={r.status === 'approved'} />
@@ -644,7 +652,7 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
                               <span className="sr-only">Billed more than has been received</span>
                             </span>
                           ) : null}
-                          {rm(r.billed_total)}
+                          {money(r.billed_total, r.currency)}
                         </span>
                       </TableCell>
                       <TableCell className="hidden whitespace-nowrap text-muted-foreground 2xl:table-cell">{r.rfq_no ?? '—'}</TableCell>

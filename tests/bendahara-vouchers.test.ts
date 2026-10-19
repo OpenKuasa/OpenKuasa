@@ -184,7 +184,7 @@ testWithSupabase('a payment to a supplier that waits (made by hand) is approved 
   const notes = orderNotesByVoucher(
     payments,
     bills.map((b) => ({ ...b, purchase_order_id: 'stand-in' })),
-    [{ id: 'stand-in', po_no: 'PO-0001', total: 100, billed_total: 132.5, received_total: 100, over_billed: true, billed_over_received: false }],
+    [{ id: 'stand-in', po_no: 'PO-0001', total: 100, billed_total: 132.5, received_total: 100, over_billed: true, billed_over_received: false, currency: 'MYR' }],
   );
   expect(Object.keys(notes)).toEqual([voucherId]);
   expect(notes[voucherId][0]).toContain('against PO-0001, whose bills come to RM 132.50, over its total of RM 100.00.');

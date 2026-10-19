@@ -24,6 +24,12 @@ const rfq = (
   purchase_order_id: null,
   purchase_order_no: null,
   source_rfq_id: null,
+  currency: 'MYR',
+  fx_rate: 1,
+  fx_rate_text: '1.0000000000',
+  fx_rate_source: null,
+  fx_rate_date: null,
+  total_myr: total,
 });
 
 /** Newest first, as the real list is: one RFQ for each status a person can see on a first visit. */
@@ -59,6 +65,13 @@ const order = (
   billed_total: 0,
   over_billed: false,
   billed_over_received: false,
+  currency: 'MYR',
+  fx_rate: 1,
+  fx_rate_text: '1.0000000000',
+  fx_rate_source: null,
+  fx_rate_date: null,
+  // A ringgit order's ringgit total is its total.
+  total_myr: over.total ?? 0,
   ...over,
 });
 

@@ -74,6 +74,12 @@ const row = (over: Partial<PurchaseOrderListRow> = {}): PurchaseOrderListRow => 
   billed_total: 0,
   over_billed: false,
   billed_over_received: false,
+  currency: 'MYR',
+  fx_rate: 1,
+  fx_rate_text: '1.0000000000',
+  fx_rate_source: null,
+  fx_rate_date: null,
+  total_myr: 1000,
   ...over,
 });
 

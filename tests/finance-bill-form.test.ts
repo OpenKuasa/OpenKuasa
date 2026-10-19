@@ -360,6 +360,7 @@ const order = (o: Partial<BillOrderOption> = {}): BillOrderOption => ({
   total: 1200,
   billed_total: 300,
   received_total: 1200,
+  currency: 'MYR',
   ...o,
 });
 

@@ -292,7 +292,7 @@ describe('the questions', () => {
 
 describe('the over-billing note at Approve', () => {
   const order = (over: Partial<OrderBilling>): OrderBilling => ({
-    id: 'po-1', po_no: 'PO-0007', total: 10000, billed_total: 12400, received_total: 10000, over_billed: true, billed_over_received: false, ...over,
+    id: 'po-1', po_no: 'PO-0007', total: 10000, billed_total: 12400, received_total: 10000, over_billed: true, billed_over_received: false, currency: 'MYR', ...over,
   });
   const bills = [
     { id: 'b1', bill_no: 'BILL-0007', purchase_order_id: 'po-1' },
