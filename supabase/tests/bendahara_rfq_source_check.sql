@@ -62,7 +62,8 @@ begin
   select attname into t from pg_attribute
    where attrelid = 'public.finance_rfq_totals'::regclass and attnum > 0 and not attisdropped
    order by attnum desc limit 1;
-  if t is distinct from 'source_rfq_id' then fails := fails || format('the last column of finance_rfq_totals is %s', t); end if;
+  -- 20261121120000 (stage 4p) appended the currency columns after source_rfq_id; total_myr is last.
+  if t is distinct from 'total_myr' then fails := fails || format('the last column of finance_rfq_totals is %s', t); end if;
   select count(*) into n from pg_class c join pg_namespace s on s.oid = c.relnamespace
    where s.nspname = 'public' and c.relname = 'finance_rfq_totals'
      and c.reloptions::text ilike '%security_invoker=true%';
