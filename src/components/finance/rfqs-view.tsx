@@ -264,7 +264,7 @@ export function RfqsView({
             }
           >
             Make a draft purchase order from {number} to {who} ({money(rfq.total, rfq.currency)})? It gets the same supplier and
-            lines, at the prices quoted{rfq.currency !== BASE_CURRENCY ? `, in ${rfq.currency} at Bank Negara Malaysia's selling rate for today` : ''},
+            lines, at the prices quoted{rfq.currency !== BASE_CURRENCY ? `, in ${rfq.currency} at Bank Negara Malaysia's selling rate for today when it has one` : ''},
             and stays a draft on Purchase Orders until it is submitted for approval.
           </ConfirmRow>
         );
