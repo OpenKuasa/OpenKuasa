@@ -4,14 +4,22 @@
  * views and the tests both use it. `today` is always a YYYY-MM-DD date.
  */
 import type { Slice } from '@/components/charts';
-import { CREDIT_NOTE_REASONS, CREDIT_NOTE_REASON_LABELS, type CreditNoteReason, type CreditNoteRow, type CreditNoteStatus } from './credit-notes';
+import {
+  CREDIT_NOTE_REASONS,
+  CREDIT_NOTE_REASON_LABELS,
+  type CreditNoteReason,
+  type CreditNoteRow,
+  type CreditNoteStatus,
+  creditNoteRinggit,
+} from './credit-notes';
+import { BASE_CURRENCY } from './currencies';
 import { toCsv } from './csv';
 import { rmShort } from './format';
 import type { InvoiceListRow } from './invoices';
 import { PAYMENT_METHOD_LABELS } from './money';
 import type { QuotationDisplayStatus, QuotationListRow } from './quotations';
-import { REFUND_REASONS, REFUND_REASON_LABELS, type RefundReason, type RefundRow } from './refunds';
-import { inCredit } from './sales-views';
+import { REFUND_REASONS, REFUND_REASON_LABELS, type RefundReason, type RefundRow, refundRinggit } from './refunds';
+import { inCreditRinggit } from './sales-views';
 import { type Stat, count, lastMonths, monthOf, paymentCount, sum, thousands } from './view-helpers';
 
 /** The customers the rows name, by name, for a customer filter. Two customers with one name stay two choices. */
@@ -240,7 +248,8 @@ const CREDIT_REASON_COLORS: Record<CreditNoteReason, string> = {
 };
 
 export function creditNotesView(rows: CreditNoteRow[], today: string): CreditNotesViewData {
-  // Only an issued credit note has credited anything: not a draft, not a void one.
+  // Only an issued credit note has credited anything: not a draft, not a void one. Every figure is in ringgit: a
+  // credit note on an invoice in another currency counts at what it took off (amount_myr, stage 3c).
   const issued = rows.filter((n) => n.status === 'issued');
   const drafts = rows.filter((n) => n.status === 'draft');
   const mtd = issued.filter((n) => monthOf(n.credit_date) === monthOf(today));
@@ -250,12 +259,12 @@ export function creditNotesView(rows: CreditNoteRow[], today: string): CreditNot
   const trend = lastMonths(today).map(({ key, label }) => {
     const inMonth = issued.filter((n) => monthOf(n.credit_date) === key);
     if (inMonth.length > 0) hasTrend = true;
-    return { label, credited: thousands(sum(inMonth, (n) => n.amount)) };
+    return { label, credited: thousands(sum(inMonth, creditNoteRinggit)) };
   });
 
   return {
     stats: [
-      { label: 'Credited (MTD)', value: rmShort(sum(mtd, (n) => n.amount)), delta: count(mtd.length, 'credit note'), deltaTone: 'flat' },
+      { label: 'Credited (MTD)', value: rmShort(sum(mtd, creditNoteRinggit)), delta: count(mtd.length, 'credit note'), deltaTone: 'flat' },
       { label: 'Issued', value: String(issued.length), delta: 'in all', deltaTone: 'flat' },
       { label: 'Drafts', value: String(drafts.length), delta: 'not yet issued', deltaTone: 'flat' },
       { label: 'Invoices affected', value: String(new Set(issued.map((n) => n.invoice_id)).size), delta: 'with an issued credit note', deltaTone: 'flat' },
@@ -263,10 +272,10 @@ export function creditNotesView(rows: CreditNoteRow[], today: string): CreditNot
     trend,
     hasTrend,
     byReason: reasonSlices(CREDIT_NOTE_REASONS, CREDIT_NOTE_REASON_LABELS, CREDIT_REASON_COLORS, (reason) =>
-      sum(ytd.filter((n) => n.reason === reason), (n) => n.amount),
+      sum(ytd.filter((n) => n.reason === reason), creditNoteRinggit),
     ),
     hasReasons: ytd.length > 0,
-    creditedYtd: rmShort(sum(ytd, (n) => n.amount)),
+    creditedYtd: rmShort(sum(ytd, creditNoteRinggit)),
   };
 }
 
@@ -309,19 +318,36 @@ export function creditNoteName(note: CreditNoteRow): string {
   return `${note.credit_note_no ?? 'the draft credit note'} to ${note.customer_name}`;
 }
 
-/** The credit notes table as a CSV file. Amounts are numbers. */
+/** True once any credit note is on an invoice in another currency: only then do the list and the export show currencies. */
+export function creditNotesHaveForeign(rows: CreditNoteRow[]): boolean {
+  return rows.some((n) => (n.currency ?? BASE_CURRENCY) !== BASE_CURRENCY);
+}
+
+/**
+ * The credit notes table as a CSV file. Amounts are numbers. A ringgit-only workspace's export is what it was;
+ * once any credit note is in another currency, every row also says its currency (Amount and Refunded are in
+ * it), the invoice's rate and what it took off in ringgit (empty for a draft in another currency).
+ */
 export function creditNotesCsv(rows: CreditNoteRow[]): string {
+  const base = ['No.', 'Date', 'Customer', 'Invoice', 'Reason', 'Amount', 'Refunded', 'Status'];
+  const row = (n: CreditNoteRow) => [
+    n.credit_note_no,
+    n.credit_date,
+    n.customer_name,
+    n.invoice_no,
+    CREDIT_NOTE_REASON_LABELS[n.reason],
+    n.amount,
+    refundedOnNote(n),
+    CREDIT_NOTE_STATUS_LABELS[n.status],
+  ];
+  if (!creditNotesHaveForeign(rows)) return toCsv(base, rows.map(row));
   return toCsv(
-    ['No.', 'Date', 'Customer', 'Invoice', 'Reason', 'Amount', 'Refunded', 'Status'],
+    [...base, 'Currency', 'Rate (RM per unit)', 'Amount (RM)'],
     rows.map((n) => [
-      n.credit_note_no,
-      n.credit_date,
-      n.customer_name,
-      n.invoice_no,
-      CREDIT_NOTE_REASON_LABELS[n.reason],
-      n.amount,
-      refundedOnNote(n),
-      CREDIT_NOTE_STATUS_LABELS[n.status],
+      ...row(n),
+      n.currency ?? BASE_CURRENCY,
+      n.fx_rate ?? 1,
+      (n.currency ?? BASE_CURRENCY) === BASE_CURRENCY ? n.amount : (n.amount_myr ?? null),
     ]),
   );
 }
@@ -402,21 +428,23 @@ export function refundsView(rows: RefundRow[], invoices: InvoiceListRow[], today
   const pending = rows.filter(isPendingRefund);
   const mtd = paid.filter((r) => monthOf(r.txn_date) === monthOf(today));
   const ytd = paid.filter((r) => yearOf(r.txn_date) === yearOf(today));
-  const credits = invoices.map(inCredit).filter((amount) => amount > 0);
+  // In ringgit: a refund on an invoice in another currency counts at the ringgit paid out, and a credit on one
+  // at the ringgit it carries (stage 3c).
+  const credits = invoices.map(inCreditRinggit).filter((amount) => amount > 0);
 
   let hasTrend = false;
   const trend = lastMonths(today).map(({ key, label }) => {
     const inMonth = paid.filter((r) => monthOf(r.txn_date) === key);
     if (inMonth.length > 0) hasTrend = true;
-    return { label, refunded: thousands(sum(inMonth, (r) => r.amount)) };
+    return { label, refunded: thousands(sum(inMonth, refundRinggit)) };
   });
 
   return {
     stats: [
-      { label: 'Refunded (MTD)', value: rmShort(sum(mtd, (r) => r.amount)), delta: count(paymentCount(mtd), 'refund'), deltaTone: 'flat' },
+      { label: 'Refunded (MTD)', value: rmShort(sum(mtd, refundRinggit)), delta: count(paymentCount(mtd), 'refund'), deltaTone: 'flat' },
       {
         label: 'To be paid',
-        value: rmShort(sum(pending, (r) => r.amount)),
+        value: rmShort(sum(pending, refundRinggit)),
         delta: count(paymentCount(pending), 'refund'),
         deltaTone: pending.length ? 'down' : 'flat',
       },
@@ -426,10 +454,10 @@ export function refundsView(rows: RefundRow[], invoices: InvoiceListRow[], today
     trend,
     hasTrend,
     byReason: reasonSlices(REFUND_REASONS, REFUND_REASON_LABELS, REFUND_REASON_COLORS, (reason) =>
-      sum(ytd.filter((r) => r.reason === reason), (r) => r.amount),
+      sum(ytd.filter((r) => r.reason === reason), refundRinggit),
     ),
     hasReasons: ytd.length > 0,
-    refundedYtd: rmShort(sum(ytd, (r) => r.amount)),
+    refundedYtd: rmShort(sum(ytd, refundRinggit)),
   };
 }
 
@@ -448,21 +476,40 @@ export function filterRefunds(rows: RefundRow[], query: string, filter: RefundFi
   );
 }
 
-/** The refunds table as a CSV file. Amounts are numbers. */
+/** True once any refund is on an invoice in another currency: only then do the list and the export show currencies. */
+export function refundsHaveForeign(rows: RefundRow[]): boolean {
+  return rows.some((r) => (r.currency ?? BASE_CURRENCY) !== BASE_CURRENCY);
+}
+
+/**
+ * The refunds table as a CSV file. Amounts are numbers. A ringgit-only workspace's export is what it was; once
+ * any refund is on an invoice in another currency, every row also says its currency (Amount is in it), the
+ * ringgit paid out, what the invoice carried for it and the realised difference (carried less paid out).
+ */
 export function refundsCsv(rows: RefundRow[]): string {
+  const base = ['Date', 'No.', 'Customer', 'Invoice', 'Credit note', 'Reason', 'Account', 'Method', 'Amount', 'Status'];
+  const row = (r: RefundRow) => [
+    r.txn_date,
+    r.number,
+    r.customer_name,
+    r.invoice_no,
+    r.credit_note_no,
+    REFUND_REASON_LABELS[r.reason],
+    r.account_name,
+    PAYMENT_METHOD_LABELS[r.method],
+    r.amount,
+    REFUND_STATUS_LABELS[r.status],
+  ];
+  if (!refundsHaveForeign(rows)) return toCsv(base, rows.map(row));
+  const ringgit = (r: RefundRow) => (r.currency ?? BASE_CURRENCY) === BASE_CURRENCY;
   return toCsv(
-    ['Date', 'No.', 'Customer', 'Invoice', 'Credit note', 'Reason', 'Account', 'Method', 'Amount', 'Status'],
+    [...base, 'Currency', 'Amount (RM)', 'Carried (RM)', 'Realised (RM)'],
     rows.map((r) => [
-      r.txn_date,
-      r.number,
-      r.customer_name,
-      r.invoice_no,
-      r.credit_note_no,
-      REFUND_REASON_LABELS[r.reason],
-      r.account_name,
-      PAYMENT_METHOD_LABELS[r.method],
-      r.amount,
-      REFUND_STATUS_LABELS[r.status],
+      ...row(r),
+      r.currency ?? BASE_CURRENCY,
+      ringgit(r) ? r.amount : (r.amount_myr ?? null),
+      ringgit(r) ? r.amount : (r.carried_myr ?? null),
+      ringgit(r) ? 0 : (r.realised_myr ?? null),
     ]),
   );
 }

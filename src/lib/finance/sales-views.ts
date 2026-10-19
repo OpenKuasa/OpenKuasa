@@ -91,10 +91,21 @@ export function owed(invoice: InvoiceListRow): number | null {
   return isIssued(invoice) ? invoice.balance : null;
 }
 
-/** How much the customer is in credit on an invoice: 0 unless its balance is below zero. */
+/** How much the customer is in credit on an invoice: 0 unless its balance is below zero. In its own currency. */
 export function inCredit(invoice: InvoiceListRow): number {
   const balance = owed(invoice);
   return balance !== null && balance < 0 ? round2(-balance) : 0;
+}
+
+/**
+ * The same in ringgit, for every figure that adds credits up: what the invoice still carries in ringgit for the
+ * credit (its balance_myr below zero), which for a ringgit invoice is `inCredit`. Stage 3c: a credit note can put
+ * a customer in credit on an invoice in another currency.
+ */
+export function inCreditRinggit(invoice: InvoiceListRow): number {
+  if (inCredit(invoice) === 0) return 0;
+  const balance = invoiceRinggit(invoice).balance;
+  return balance < 0 ? round2(-balance) : 0;
 }
 
 /**
