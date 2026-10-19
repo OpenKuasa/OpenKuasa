@@ -42,6 +42,10 @@ export const CASH_RECEIPT_MESSAGES = {
   // this form does not ask for), so these are met from a tab opened before an invoice went into another
   // currency, or a direct call.
   foreignInvoice: 'A receipt for an invoice in another currency is recorded with Record payment on Invoices.',
+  // FIN48, when a receipt for an invoice in another currency is voided while a credit note issued after it
+  // stands on that invoice (stage 3c).
+  creditNoteAfter:
+    'A credit note on this invoice was issued after this payment. Void the credit note first, then the payment; issue the credit note again after.',
   account: 'Choose the account the money went into.',
   date: LINE_MESSAGES.date,
   method: 'Choose how it was paid.',
@@ -172,7 +176,7 @@ const REFUSALS: Record<string, string> = {
 };
 // A clash from posting could only be on the receipt's number, never on an invoice appearing twice.
 const POST_REFUSALS: Record<string, string> = Object.fromEntries(Object.entries(REFUSALS).filter(([code]) => code !== PG_UNIQUE));
-const VOID_REFUSALS: Record<string, string> = { ...REFUSALS, FIN09: M.cannotVoid };
+const VOID_REFUSALS: Record<string, string> = { ...REFUSALS, FIN09: M.cannotVoid, FIN48: M.creditNoteAfter };
 const DELETE_REFUSALS: Record<string, string> = { ...REFUSALS, FIN09: M.cannotDelete };
 
 function receiptWriteFailed(

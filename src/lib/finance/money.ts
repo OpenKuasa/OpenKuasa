@@ -71,6 +71,10 @@ export const RECEIPT_MESSAGES = {
   // FIN46, and what the form says first: an invoice in another currency is paid in ringgit, and the payment is
   // the ringgit that arrived.
   ringgitReceived: 'Enter the ringgit that arrived in the account.',
+  // FIN48, when a payment in on an invoice in another currency is voided while a credit note issued after it
+  // stands on that invoice (stage 3c): the credit note's ringgit was worked out against what the payment left.
+  creditNoteAfter:
+    'A credit note on this invoice was issued after this payment. Void the credit note first, then the payment; issue the credit note again after.',
   // The finance assistant records payments in ringgit only; it says this before the database is asked.
   foreignByAssistant: 'This invoice is not in ringgit. Record its payment on the Invoices screen.',
   date: M.date,
@@ -202,6 +206,7 @@ const RECEIPT_REFUSALS: Record<string, string> = {
   FIN09: R.locked,
   FIN44: R.oneCurrency,
   FIN46: R.ringgitReceived,
+  FIN48: R.creditNoteAfter,
   [PG_FOREIGN_KEY]: R.missing,
   // The same invoice twice on one payment; see RECORD_OUT_REFUSALS.
   [PG_UNIQUE]: R.duplicate,

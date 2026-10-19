@@ -14,7 +14,8 @@ import {
 import { CREDIT_NOTE_MESSAGES, type CreditNoteRow, creditNoteRinggit, saveCreditNoteInRinggit } from '@/lib/finance/credit-notes';
 import { carriedSen, creditNoteRinggit as creditNoteRinggitPreview, refundPreview } from '@/lib/finance/fx-settlement';
 import type { InvoiceListRow } from '@/lib/finance/invoices';
-import type { FinanceAccount } from '@/lib/finance/money';
+import { CASH_RECEIPT_MESSAGES, voidCashReceipt } from '@/lib/finance/cash-receipts';
+import { type FinanceAccount, RECEIPT_MESSAGES, voidPaymentIn } from '@/lib/finance/money';
 import {
   type RefundForm,
   chooseRefundTarget,
@@ -112,7 +113,8 @@ describe('what a credit note carries (private.finance_fx_carried, 3c)', () => {
     expect(carriedSen(sen(1), rate('0.00028'), sen(1), sen(0))).toBe(sen(0));
   });
   it('a refund of a credit balance: closing takes the ringgit in credit (D: 453.60)', () => {
-    expect(carriedSen(sen(108), rate('4.2'), sen(108), sen(-453.6))).toBe(sen(453.6));
+    // For a refund what is open is the credit, in both currencies (the caller passes it as a positive figure).
+    expect(carriedSen(sen(108), rate('4.2'), sen(108), sen(453.6))).toBe(sen(453.6));
   });
 });
 
@@ -368,5 +370,28 @@ describe('credit notes and refunds added up', () => {
     expect(refunds[1]).toContain(',20,Refunded,MYR,20,20,0');
     expect(refunds[2]).toContain(',108,Refunded,USD,445,453.6,8.6');
     expect(refundsCsv([MYR_REFUND]).replace(/^﻿/, '').split(/\r?\n/)[0]).toBe('Date,No.,Customer,Invoice,Credit note,Reason,Account,Method,Amount,Status');
+  });
+});
+
+/* ---- FIN48: a payment in that a later credit note leans on is not voided ------------ */
+
+/** A client whose pre-void lookup finds the payment and whose void is answered with `code`. */
+function voidClient(code: string) {
+  const q: Record<string, unknown> = {};
+  for (const name of ['select', 'eq', 'update']) q[name] = () => q;
+  q.limit = () => Promise.resolve({ data: [{ transaction_id: 't1' }], error: null });
+  q.maybeSingle = () => Promise.resolve({ data: null, error: { code, message: 'x' } });
+  return { from: () => q } as never;
+}
+
+describe('voiding a payment in that a later credit note leans on (FIN48)', () => {
+  const sentence =
+    'A credit note on this invoice was issued after this payment. Void the credit note first, then the payment; issue the credit note again after.';
+  it('says what to do, on Payments In and on Cash Receipts', async () => {
+    const id = '77777777-7777-4777-8777-777777777777';
+    expect(RECEIPT_MESSAGES.creditNoteAfter).toBe(sentence);
+    expect(CASH_RECEIPT_MESSAGES.creditNoteAfter).toBe(sentence);
+    expect(await voidPaymentIn({ client: voidClient('FIN48'), orgId: 'org1' }, { id })).toEqual({ ok: false, error: sentence });
+    expect(await voidCashReceipt({ client: voidClient('FIN48'), orgId: 'org1' }, { id })).toEqual({ ok: false, error: sentence });
   });
 });
