@@ -42,7 +42,7 @@
 --   public.finance_rfq_totals            20261116090000_bendahara_rfq_source.sql lines 218-252: five columns appended
 --   public.finance_purchase_order_totals 20261106090000_bendahara_purchase_order_terms_and_log.sql lines 160-201:
 --                                        p.* written out as its 23 columns, five columns appended
---   public.finance_save_rfq              20261116090000 lines 153-212 (grants 211-212): the currency
+--   public.finance_save_rfq              20261116090000 lines 153-209 (grants 211-212): the currency
 --   public.finance_save_purchase_order   20261106090000 lines 35-107 (grants 20261103094500 DO block): the currency
 --   public.finance_convert_rfq           20261106090000 lines 111-153 (grants 20261103093000 DO block): the currency
 --   private.finance_bill_po_link_guard   20261121100000_bendahara_bill_currency.sql lines 410-447: the order's currency
@@ -58,6 +58,17 @@
 -- ledger, compared row for row, every workspace, both ways, at the end of
 -- this file); the deployed code never sends the key `currency` on either, and
 -- every bill linked to an order is ringgit, as every order is.
+--
+-- Known limits:
+--   * Deploy window: from this file until the 4p app is deployed, the old app
+--     offers no currency on an RFQ or an order, so nothing foreign can be
+--     made through it, and its "Make bill" (which sends no currency) meets
+--     only ringgit orders. Apply and deploy back to back anyway.
+--   * finance_rfqs' and finance_purchase_orders' new columns keep the tables'
+--     grants to authenticated (a caller may write them on a draft, which is
+--     theirs to write; the checks and finance_purchase_rate_guard hold what
+--     may be stored, and the guards copy the old row on every move out of
+--     draft), as quotations' do.
 --
 -- Nothing here is granted to service_role.
 --
