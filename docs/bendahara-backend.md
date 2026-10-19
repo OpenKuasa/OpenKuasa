@@ -3043,3 +3043,22 @@ with no date).
   `finance_ledger_lines` already carries the payment-out realised line the
   next stage needs; it reads only allocations' `amount_myr`/`carried_myr`,
   which nothing writes on a bill allocation yet, so it is 0.
+- Payments out of bills in another currency (`20261121110000`, stage 4b):
+  `FIN41` is no longer raised. A foreign bill is paid from a ringgit account
+  on Payments Out, now: `finance_record_payment_out` takes the ringgit that
+  left the account as `payment->>'amount_myr'` (`FIN46` when it is missing,
+  not above 0, or NaN), refuses one asked as scheduled (`FIN47`), and asks one
+  currency per payment before anything is written (`FIN44`). The split stays
+  in the bills' currency; `private.finance_fx_settle` shares the ringgit over
+  it (in proportion, to the sen, the remainder to the largest, ties to the
+  lowest document id) and writes each allocation's `amount_myr` and
+  `carried_myr`, which `private.finance_fx_carried_bill` works out: the part at
+  the bill's rate, never more than the ringgit still open, or, for the payment
+  that brings the bill to zero, exactly the ringgit still open, so a bill paid
+  in full leaves Payable at 0.00. Carried less paid out is the realised gain
+  (above 0) or loss, posted to Realised Exchange Gain or Loss. A payment
+  voucher never names a foreign bill (`FIN47`; the voucher picker offers
+  ringgit bills only), so a member cannot pay one. Every Payments Out figure
+  (Paid this month, the trend, the method donut, To be paid) and Supplier
+  Bills' Paid this month add `paymentOutRinggit`. The finance assistant pays
+  ringgit bills only (`recordPaymentOutInRinggit`).
