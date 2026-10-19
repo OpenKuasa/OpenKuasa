@@ -126,13 +126,13 @@ const isPlain = (value: unknown): value is Record<string, unknown> =>
 const ITEM_KINDS: ReadonlySet<string> = new Set<ItemKind>([
   'campaign', 'creative', 'form', 'lead', 'contact', 'deal', 'stage', 'follow-up', 'schedule', 'job', 'application',
   'candidate', 'employee', 'department', 'leave', 'time-off', 'claim', 'overtime', 'holiday', 'settings', 'payslip',
-  'payslip-line', 'payroll-run', 'goal', 'review', 'training', 'announcement',
+  'payslip-line', 'payroll-run', 'goal', 'review', 'training', 'announcement', 'rfq',
 ]);
 
 /** The kind of row an id argument points at, from its name: `contactId` and `contact_id` → contact. */
 function kindOfKey(key: string): ItemKind | undefined {
   const stem = key.replace(/(_id|Id)$/, '').replace(/([a-z])([A-Z])/g, '$1-$2').replace(/_/g, '-').toLowerCase();
-  const alias: Record<string, ItemKind> = { line: 'payslip-line', run: 'payroll-run', 'payroll-run': 'payroll-run', course: 'training', manager: 'employee' };
+  const alias: Record<string, ItemKind> = { line: 'payslip-line', run: 'payroll-run', 'payroll-run': 'payroll-run', course: 'training', manager: 'employee', supplier: 'finance-contact' };
   if (Object.hasOwn(alias, stem)) return alias[stem];
   return ITEM_KINDS.has(stem) ? (stem as ItemKind) : undefined;
 }

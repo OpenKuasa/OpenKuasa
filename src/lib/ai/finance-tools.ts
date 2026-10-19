@@ -123,7 +123,19 @@ import {
   profitAndLoss,
   trialBalance,
 } from '@/lib/finance/reports';
-import { getRfq, getRfqGroup, listRfqs } from '@/lib/finance/rfqs';
+import {
+  closeRfq,
+  convertRfq,
+  getRfq,
+  getRfqGroup,
+  listRfqs,
+  quoteRfq,
+  quoteRfqInput,
+  rfqIdInput,
+  saveRfq,
+  saveRfqInput,
+  sendRfq,
+} from '@/lib/finance/rfqs';
 import type { FinanceWriteContext } from '@/lib/finance/result';
 
 /** Who is asking, and whether they may change anything. */
@@ -146,6 +158,11 @@ export const FINANCE_WRITE_TOOL_NAMES = [
   'declineQuotation',
   'convertQuotation',
   'deleteQuotation',
+  'saveRfq',
+  'sendRfq',
+  'quoteRfq',
+  'convertRfq',
+  'closeRfq',
   'saveCreditNote',
   'issueCreditNote',
   'voidCreditNote',
@@ -474,6 +491,32 @@ export function createBendaharaTools(access: FinanceAccess) {
       description: 'Delete a draft quotation.',
       inputSchema: quotationIdInput,
       execute: async (input) => deleteQuotation(ctx, input),
+    }),
+    // Requests for quotation
+    saveRfq: tool({
+      description: 'Create or edit a DRAFT request for quotation (supplier, lines). Omit id to create.',
+      inputSchema: saveRfqInput,
+      execute: async (input) => saveRfq(ctx, input),
+    }),
+    sendRfq: tool({
+      description: 'Mark a draft RFQ as sent to the supplier (it gets its number).',
+      inputSchema: rfqIdInput,
+      execute: async (input) => sendRfq(ctx, input),
+    }),
+    quoteRfq: tool({
+      description: "Record the supplier's prices per line on a sent RFQ and mark it quoted.",
+      inputSchema: quoteRfqInput,
+      execute: async (input) => quoteRfq(ctx, input),
+    }),
+    convertRfq: tool({
+      description: 'Make a draft purchase order from a quoted RFQ.',
+      inputSchema: rfqIdInput,
+      execute: async (input) => convertRfq(ctx, input),
+    }),
+    closeRfq: tool({
+      description: 'Close an RFQ that was declined or not taken up.',
+      inputSchema: rfqIdInput,
+      execute: async (input) => closeRfq(ctx, input),
     }),
     // Credit notes
     saveCreditNote: tool({

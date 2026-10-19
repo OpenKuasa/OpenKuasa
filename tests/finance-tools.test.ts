@@ -137,6 +137,17 @@ describe('Bendahara write tools', () => {
     expect(tools).toHaveProperty('getRfqGroup');
   });
 
+  it('adds the RFQ write tools for a writer, none for a viewer', () => {
+    const names = ['saveRfq', 'sendRfq', 'quoteRfq', 'convertRfq', 'closeRfq'];
+    const w = createBendaharaTools({ client: {} as never, orgId: 'o', canWrite: true });
+    const v = createBendaharaTools({ client: {} as never, orgId: 'o', canWrite: false });
+    for (const name of names) {
+      expect(w).toHaveProperty(name);
+      expect(FINANCE_WRITE_TOOL_NAMES).toContain(name);
+      expect(v).not.toHaveProperty(name);
+    }
+  });
+
   it('lists chart-of-accounts, filtered ledger entries, and journals', () => {
     const tools = createBendaharaTools({ client: {} as never, orgId: 'org-1', canWrite: false });
     for (const name of ['listLedgerAccounts', 'listLedgerEntries', 'listJournals', 'getJournal']) {
