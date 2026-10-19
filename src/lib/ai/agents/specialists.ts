@@ -59,6 +59,7 @@ import {
   sameInterviewTarget,
 } from '@/lib/ai/hire-interview-gate';
 import type { ProductToolkit } from '@/lib/ai/products';
+import { FINANCE_ID_GATED, FINANCE_SAVE_GATED } from '@/lib/ai/finance-id-gate';
 import { logModelCall, logModelError, modelErrorCode } from '@/lib/ai/call-log';
 import { getModel, pickModelId } from '@/lib/ai/provider';
 import { changeRows } from '@/lib/chat/change-rows';
@@ -653,6 +654,14 @@ async function apply(
     const seen = (await team.store.peek([proposalId])).get(proposalId);
     if (!seen) return { ok: false, error: NOT_WAITING };
     if (limitedKind(seen.action)) return { ok: false, error: CHANGE_NOT_CHECKED };
+    // Finance is not a limited kind, but its id-safety is the existence check `applyGate` runs, and the gate runs
+    // it only for a record it saw in `team.proposals`. A record it did not see (the read/take disagreement above)
+    // would otherwise reach `claim` on an id the gate never checked. So an id-gated finance write is left waiting
+    // too, exactly as a limited kind is. A pure create (a save with no id) has no row to check and is let through.
+    const financeIdGated =
+      seen.action in FINANCE_ID_GATED ||
+      (seen.action in FINANCE_SAVE_GATED && (seen.input as { id?: unknown } | null)?.id != null);
+    if (financeIdGated) return { ok: false, error: CHANGE_NOT_CHECKED };
   }
   const stored = await team.store.claim({ id: proposalId });
   if (!stored) return { ok: false, error: NOT_WAITING };
