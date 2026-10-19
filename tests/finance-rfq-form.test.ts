@@ -18,6 +18,12 @@ import {
 } from '@/lib/finance/rfq-form';
 import { RFQ_MESSAGES, type RfqDetail, quoteRfqInput, saveRfqInput } from '@/lib/finance/rfqs';
 import { WRITE_FAILED } from '@/lib/finance/result';
+import { ringgitFields } from '@/lib/finance/document-currency';
+
+/** A saved RFQ in ringgit: the currency columns as stage 4p reads them. */
+const RINGGIT = {
+  currency: 'MYR', fx_rate: 1, fx_rate_text: '1.0000000000', fx_rate_source: null, fx_rate_date: null, total_myr: 0,
+} as const;
 
 const SUPPLIER = '44444444-4444-4444-8444-444444444444';
 const PRODUCT = '99999999-9999-4999-8999-999999999999';
@@ -40,7 +46,7 @@ const filled = (form: Partial<RfqForm> = {}): RfqForm => ({
 describe('a new RFQ form', () => {
   it('is dated today, with no reply-by date, no supplier and one empty line', () => {
     expect(newRfqForm(today, 'k1')).toEqual({
-      supplier_id: '', rfq_date: today, reply_by: '', notes: '', lines: [emptyLine('k1')],
+      supplier_id: '', rfq_date: today, reply_by: '', notes: '', lines: [emptyLine('k1')], fx: ringgitFields(),
     });
   });
   it('does not move the reply-by date when the RFQ date changes', () => {
@@ -54,7 +60,7 @@ describe('a saved draft, as the form shows it', () => {
     const detail: RfqDetail = {
       id: RFQ, rfq_no: null, supplier_id: SUPPLIER, supplier_name: 'Syarikat Kertas', rfq_date: '2026-10-01', reply_by: null,
       supplier_ref: null, status: 'draft', line_count: 2, total: 0, purchase_order_id: null, purchase_order_no: null, source_rfq_id: null,
-      subtotal: 0, sst_total: 0, notes: null, quoted_at: null,
+      subtotal: 0, sst_total: 0, notes: null, quoted_at: null, ...RINGGIT,
       lines: [
         { id: LINE_1, product_id: PRODUCT, description: 'Printer paper', quantity: 5, uom: 'ream', pack_size: 'box of 5', unit_price: null, sst_rate: 6 },
         { id: LINE_2, product_id: null, description: 'Sample', quantity: 1, uom: null, pack_size: null, unit_price: 0, sst_rate: 0 },
@@ -66,6 +72,7 @@ describe('a saved draft, as the form shows it', () => {
         { key: LINE_1, product_id: PRODUCT, description: 'Printer paper', quantity: '5', uom: 'ream', pack_size: 'box of 5', unit_price: '', sst_rate: '6', discount_pct: '', discount_amount: '' },
         { key: LINE_2, product_id: '', description: 'Sample', quantity: '1', uom: '', pack_size: '', unit_price: '0', sst_rate: '0', discount_pct: '', discount_amount: '' },
       ],
+      fx: ringgitFields(),
     });
   });
 });
@@ -74,7 +81,7 @@ describe('a copy of an RFQ, for another supplier', () => {
   const priced: RfqDetail = {
     id: RFQ, rfq_no: 'RFQ-0004', supplier_id: SUPPLIER, supplier_name: 'Syarikat Kertas', rfq_date: '2026-09-01', reply_by: '2026-09-15',
     supplier_ref: 'Q-77', status: 'quoted', line_count: 2, total: 130, purchase_order_id: 'po-1', purchase_order_no: 'PO-0003', source_rfq_id: null,
-    subtotal: 125, sst_total: 5, notes: 'Deliver to the back door', quoted_at: '2026-10-02T09:00:00Z',
+    subtotal: 125, sst_total: 5, notes: 'Deliver to the back door', quoted_at: '2026-10-02T09:00:00Z', ...RINGGIT,
     lines: [
       { id: LINE_1, product_id: PRODUCT, description: 'Printer paper', quantity: 5, uom: 'ream', pack_size: 'box of 5', unit_price: 24.9, sst_rate: 6 },
       { id: LINE_2, product_id: null, description: 'Sample', quantity: 1, uom: null, pack_size: null, unit_price: 0, sst_rate: 0 },
@@ -152,6 +159,8 @@ describe('what the RFQ form sends', () => {
     expect(rfqPayload(filled({ notes: ' Urgent ' }))).toEqual({
       supplier_id: SUPPLIER, rfq_date: today, reply_by: '', notes: ' Urgent ',
       lines: [{ product_id: '', description: 'Printer paper', uom: '', pack_size: '', quantity: 10, unit_price: null, sst_rate: 0 }],
+      // A ringgit RFQ sends its code alone, as a quotation does; the database stores rate 1.
+      currency: 'MYR', fx_rate: null, fx_rate_source: null, fx_rate_date: null,
     });
     expect(rfqPayload(filled())).not.toHaveProperty('id');
     expect(rfqPayload(filled({ id: 'abc' }))).toMatchObject({ id: 'abc' });

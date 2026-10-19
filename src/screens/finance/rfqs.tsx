@@ -2,6 +2,7 @@ import {
   closeRfqAction,
   convertRfqAction,
   deleteRfqAction,
+  fxSstRateForAction,
   getRfqAction,
   getRfqComparisonAction,
   getRfqForCopyAction,
@@ -25,6 +26,7 @@ import { SAMPLE_TODAY } from './sales-sample';
 const ACTIONS: RfqActions = {
   save: saveRfqAction,
   saveAndPost: saveAndSendRfqAction,
+  fxRate: fxSstRateForAction,
   send: sendRfqAction,
   quote: quoteRfqAction,
   close: closeRfqAction,

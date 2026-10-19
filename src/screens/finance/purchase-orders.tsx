@@ -4,6 +4,7 @@ import {
   closePurchaseOrderAction,
   decidePurchaseOrderAction,
   deletePurchaseOrderAction,
+  fxSstRateForAction,
   getApprovedPurchaseOrderAction,
   getPendingPurchaseOrderAction,
   getPrintablePurchaseOrderAction,
@@ -28,6 +29,7 @@ import { SAMPLE_PURCHASE_ORDERS } from './purchases-sample';
 const ACTIONS: PurchaseOrderActions = {
   save: savePurchaseOrderAction,
   saveAndPost: saveAndSubmitPurchaseOrderAction,
+  fxRate: fxSstRateForAction,
   submit: submitPurchaseOrderAction,
   decide: decidePurchaseOrderAction,
   withdraw: withdrawPurchaseOrderAction,

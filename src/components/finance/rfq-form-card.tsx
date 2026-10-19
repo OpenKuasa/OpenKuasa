@@ -3,6 +3,7 @@
 import { DocumentFormCard } from '@/components/finance/document-form-card';
 import type { FinanceContact } from '@/lib/finance/contacts';
 import { withCurrentParty } from '@/lib/finance/document-form';
+import type { FxDefault } from '@/lib/finance/fx-rates';
 import type { FinanceProduct } from '@/lib/finance/products';
 import { RFQ_FORM_KIND, newRfqForm, rfqFormCopiedFrom, rfqFormFromDetail } from '@/lib/finance/rfq-form';
 import type { RfqDetail, SaveAndSendRfqResult } from '@/lib/finance/rfqs';
@@ -12,6 +13,8 @@ export type RfqFormActions = {
   save: (input: unknown) => Promise<FinResult<{ id: string }>>;
   /** Saves the draft, then marks it as sent. The shared card calls its second button's action `saveAndPost`. */
   saveAndPost: (input: unknown) => Promise<SaveAndSendRfqResult>;
+  /** Bank Negara's rate for a currency and a date, read with the person's session; absent, none is offered. */
+  fxRate?: (input: unknown) => Promise<FinResult<FxDefault | null>>;
 };
 
 /**

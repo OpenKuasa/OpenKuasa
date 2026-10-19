@@ -17,6 +17,7 @@ import {
 } from '@/lib/finance/purchase-order-form';
 import { type PurchaseOrderDetail, receivePurchaseOrderInput, savePurchaseOrderInput } from '@/lib/finance/purchase-orders';
 import { WRITE_FAILED } from '@/lib/finance/result';
+import { ringgitFields } from '@/lib/finance/document-currency';
 
 const SUPPLIER = '44444444-4444-4444-8444-444444444444';
 const PRODUCT = '99999999-9999-4999-8999-999999999999';
@@ -40,7 +41,7 @@ describe('a new purchase order form', () => {
   it('is dated today, with no expected date, no terms, no address, no supplier and one empty line', () => {
     expect(newPurchaseOrderForm(today, 'k1')).toEqual({
       supplier_id: '', po_date: today, expected_date: '', payment_terms_days: '', termsEdited: false,
-      delivery_address: '', notes: '', lines: [emptyLine('k1')],
+      delivery_address: '', notes: '', lines: [emptyLine('k1')], fx: ringgitFields(),
     });
   });
 });
@@ -65,6 +66,7 @@ describe('a saved draft, as the form shows it', () => {
     po_date: '2026-10-01', expected_date: null, status: 'draft', created_by: 'u1', submitted_by: null, rejection_reason: null,
     payment_terms_days: null, delivery_address: 'Lot 3, Shah Alam', total: 0, delivery: 'pending', received_total: 0,
     billed_total: 0, over_billed: false, billed_over_received: false, subtotal: 0, sst_total: 0, notes: null,
+    currency: 'MYR', fx_rate: 1, fx_rate_text: '1.0000000000', fx_rate_source: null, fx_rate_date: null, total_myr: 0,
     lines: [
       { id: LINE_1, product_id: PRODUCT, description: 'Printer paper', quantity: 5, uom: 'ream', pack_size: 'box of 5', unit_price: 12.5, sst_rate: 6, amount: 62.5, sst_amount: 3.75, received_quantity: 0 },
     ],
@@ -74,6 +76,7 @@ describe('a saved draft, as the form shows it', () => {
       id: PO, supplier_id: SUPPLIER, po_date: '2026-10-01', expected_date: '', payment_terms_days: '', termsEdited: true,
       delivery_address: 'Lot 3, Shah Alam', notes: '',
       lines: [{ key: LINE_1, product_id: PRODUCT, description: 'Printer paper', quantity: '5', uom: 'ream', pack_size: 'box of 5', unit_price: '12.5', sst_rate: '6', discount_pct: '', discount_amount: '' }],
+      fx: ringgitFields(),
     });
     expect(purchaseOrderFormFromDetail({ ...detail, payment_terms_days: 0, expected_date: '2026-10-20' })).toMatchObject({
       payment_terms_days: '0', expected_date: '2026-10-20',
@@ -86,6 +89,8 @@ describe('what the purchase order form sends', () => {
     expect(purchaseOrderPayload(filled({ notes: ' Urgent ', delivery_address: ' Lot 3 ' }))).toEqual({
       supplier_id: SUPPLIER, po_date: today, expected_date: '', payment_terms_days: 30, delivery_address: ' Lot 3 ', notes: ' Urgent ',
       lines: [{ product_id: '', description: 'Printer paper', uom: '', pack_size: '', quantity: 10, unit_price: 12.5, sst_rate: 0 }],
+      // A ringgit order sends its code alone, as a quotation does; the database stores rate 1.
+      currency: 'MYR', fx_rate: null, fx_rate_source: null, fx_rate_date: null,
     });
     expect(purchaseOrderPayload(filled())).not.toHaveProperty('id');
     expect(purchaseOrderPayload(filled({ id: 'abc' }))).toMatchObject({ id: 'abc' });

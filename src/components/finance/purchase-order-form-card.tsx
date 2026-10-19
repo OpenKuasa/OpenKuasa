@@ -3,6 +3,7 @@
 import { DocumentFormCard } from '@/components/finance/document-form-card';
 import type { FinanceContact } from '@/lib/finance/contacts';
 import { withCurrentParty } from '@/lib/finance/document-form';
+import type { FxDefault } from '@/lib/finance/fx-rates';
 import type { FinanceProduct } from '@/lib/finance/products';
 import { PURCHASE_ORDER_FORM_KIND, newPurchaseOrderForm, purchaseOrderFormFromDetail } from '@/lib/finance/purchase-order-form';
 import type { PurchaseOrderDetail, SaveAndSubmitPurchaseOrderResult } from '@/lib/finance/purchase-orders';
@@ -12,6 +13,8 @@ export type PurchaseOrderFormActions = {
   save: (input: unknown) => Promise<FinResult<{ id: string }>>;
   /** Saves the draft, then submits it for approval. The shared card calls its second button's action `saveAndPost`. */
   saveAndPost: (input: unknown) => Promise<SaveAndSubmitPurchaseOrderResult>;
+  /** Bank Negara's rate for a currency and a date, read with the person's session; absent, none is offered. */
+  fxRate?: (input: unknown) => Promise<FinResult<FxDefault | null>>;
 };
 
 /**

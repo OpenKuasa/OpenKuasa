@@ -8,7 +8,13 @@
  *
  * Unlike every other document, an RFQ line may have no price: an empty price
  * box is sent as null, not as a figure that is refused.
+ *
+ * An RFQ may be in another currency (stage 4p): the currency part is the
+ * quotation's (document-currency.ts), offered the SST rule's selling rate for
+ * the RFQ date. The rate is only there to compare quotes in ringgit, so it is
+ * never required, not even to mark the RFQ as sent.
  */
+import { type CurrencyFields, currencyError, currencyPayload, ringgitFields, savedFields, withPartyCurrency } from './document-currency';
 import {
   type DocumentFormKind,
   type DocumentFormWords,
@@ -34,11 +40,13 @@ export type RfqForm = {
   reply_by: string;
   notes: string;
   lines: LineDraft[];
+  /** The currency and rate. Ringgit for a new form until the person or the supplier's default says otherwise. */
+  fx: CurrencyFields;
 };
 
 /** A new RFQ dated today, with no reply-by date and one empty line. */
 export function newRfqForm(today: string, lineKey: string): RfqForm {
-  return { supplier_id: '', rfq_date: today, reply_by: '', notes: '', lines: [emptyLine(lineKey)] };
+  return { supplier_id: '', rfq_date: today, reply_by: '', notes: '', lines: [emptyLine(lineKey)], fx: ringgitFields() };
 }
 
 /** A saved draft, as the form shows it. A line with no price shows an empty box. */
@@ -61,6 +69,7 @@ export function rfqFormFromDetail(rfq: RfqDetail): RfqForm {
       discount_pct: '',
       discount_amount: '',
     })),
+    fx: savedFields(rfq),
   };
 }
 
@@ -69,7 +78,8 @@ export function rfqFormFromDetail(rfq: RfqDetail): RfqForm {
  * draft; no supplier; dated today with no reply-by date; the same notes and lines, every price box empty
  * (the first supplier's prices are not the next one's). The lines get keys of their own. It remembers
  * the RFQ it came from, so the quotes can be compared; the database follows a copy of a copy back to
- * the first RFQ.
+ * the first RFQ. It asks in the same currency, at the same indicative rate, as the RFQ it copies; the
+ * person may change either.
  */
 export function rfqFormCopiedFrom(rfq: RfqDetail, today: string): RfqForm {
   return {
@@ -90,12 +100,16 @@ export function rfqFormCopiedFrom(rfq: RfqDetail, today: string): RfqForm {
       discount_pct: '',
       discount_amount: '',
     })),
+    fx: savedFields(rfq),
   };
 }
 
-/** Choosing a supplier changes nothing else: when a reply is wanted does not depend on who is asked. */
-export function withRfqSupplier(form: RfqForm, supplier: { id: string }): RfqForm {
-  return { ...form, supplier_id: supplier.id };
+/**
+ * Choosing a supplier changes nothing else but, on a new RFQ whose currency the person has not picked, the
+ * currency: the supplier's default, when they have one. When a reply is wanted does not depend on who is asked.
+ */
+export function withRfqSupplier(form: RfqForm, supplier: { id: string; default_currency?: string | null }): RfqForm {
+  return { ...form, supplier_id: supplier.id, fx: withPartyCurrency(form.fx, supplier.default_currency, !form.id) };
 }
 
 /** The reply-by date is the person's to set; it does not follow the RFQ date. */
@@ -141,15 +155,20 @@ export function rfqPayload(form: RfqForm) {
         sst_rate,
       };
     }),
+    ...currencyPayload(form.fx),
   };
 }
 
 /**
  * The first thing wrong with the form, in the schema's own sentence, or null
- * when it can be sent. Sending needs no amount: an RFQ may have no prices, so
- * unlike a quotation there is no stricter check for "mark as sent".
+ * when it can be sent. Sending needs no amount and no rate: an RFQ may have no
+ * prices, and its rate only compares quotes, so unlike a quotation there is no
+ * stricter check for "mark as sent".
  */
 export function rfqFormError(form: RfqForm): string | null {
+  // The rate box first: a rate that is not a number goes as NaN and would read as the schema's word for it.
+  const rate = currencyError(form.fx, false);
+  if (rate) return rate;
   const parsed = saveRfqInput.safeParse(rfqPayload(form));
   if (!parsed.success) return parsed.error.issues[0]?.message ?? RFQ_MESSAGES.lines;
   return null;
@@ -192,6 +211,7 @@ export const RFQ_FORM_KIND: DocumentFormKind<RfqForm> = {
   withDate: withRfqDate,
   secondDate: { label: 'Reply by (optional)', optional: true, get: (form) => form.reply_by, set: withReplyBy },
   words: RFQ_FORM_WORDS,
+  currency: { get: (form) => form.fx, set: (form, fx) => ({ ...form, fx }), figure: 'selling' },
   pricePlaceholder: 'Supplier price',
   withProduct: withRfqProduct,
   error: rfqFormError,

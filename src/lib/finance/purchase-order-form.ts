@@ -9,8 +9,14 @@
  * An order's lines are priced, like a bill's, and a product fills a line from
  * its cost. The order also carries payment terms (which start from the
  * supplier's) and a delivery address.
+ *
+ * An order may be in another currency (stage 4p): the currency part is the
+ * quotation's (document-currency.ts), offered the SST rule's selling rate for
+ * the order date. The rate is indicative and may be empty on a draft, but an
+ * order is not submitted without one (the database's FIN38).
  */
 import { billTotals } from './bill-math';
+import { type CurrencyFields, currencyError, currencyPayload, ringgitFields, savedFields, withPartyCurrency } from './document-currency';
 import {
   type DocumentFormKind,
   type DocumentFormWords,
@@ -45,6 +51,8 @@ export type PurchaseOrderForm = {
   delivery_address: string;
   notes: string;
   lines: LineDraft[];
+  /** The currency and rate. Ringgit for a new form until the person or the supplier's default says otherwise. */
+  fx: CurrencyFields;
 };
 
 /** A new order dated today, with no expected date, no terms yet and one empty line. */
@@ -58,6 +66,7 @@ export function newPurchaseOrderForm(today: string, lineKey: string): PurchaseOr
     delivery_address: '',
     notes: '',
     lines: [emptyLine(lineKey)],
+    fx: ringgitFields(),
   };
 }
 
@@ -73,15 +82,23 @@ export function purchaseOrderFormFromDetail(order: PurchaseOrderDetail): Purchas
     delivery_address: order.delivery_address ?? '',
     notes: order.notes ?? '',
     lines: order.lines.map(lineDraft),
+    fx: savedFields(order),
   };
 }
 
-/** Choosing a supplier fills the payment terms from theirs, unless the person set them by hand. */
-export function withOrderSupplier(form: PurchaseOrderForm, supplier: { id: string; payment_terms_days: number }): PurchaseOrderForm {
+/**
+ * Choosing a supplier fills the payment terms from theirs, unless the person set them by hand, and, on a new
+ * order whose currency the person has not picked, the currency: the supplier's default, when they have one.
+ */
+export function withOrderSupplier(
+  form: PurchaseOrderForm,
+  supplier: { id: string; payment_terms_days: number; default_currency?: string | null },
+): PurchaseOrderForm {
   return {
     ...form,
     supplier_id: supplier.id,
     payment_terms_days: form.termsEdited ? form.payment_terms_days : String(supplier.payment_terms_days),
+    fx: withPartyCurrency(form.fx, supplier.default_currency, !form.id),
   };
 }
 
@@ -120,16 +137,20 @@ export function purchaseOrderPayload(form: PurchaseOrderForm) {
     delivery_address: form.delivery_address,
     notes: form.notes,
     lines: form.lines.map(linePayload),
+    ...currencyPayload(form.fx),
   };
 }
 
 /**
  * The first thing wrong with the form, in the schema's own sentence, or null
- * when it can be sent. A draft may total nothing; an order being submitted
- * may not, and saying so here saves a draft the database would then refuse
- * to submit.
+ * when it can be sent. A draft may total nothing, and may have no rate yet; an
+ * order being submitted may not, and saying so here saves a draft the
+ * database would then refuse to submit.
  */
 export function purchaseOrderFormError(form: PurchaseOrderForm, submitting = false): string | null {
+  // The rate box first: a rate that is not a number goes as NaN and would read as the schema's word for it.
+  const rate = currencyError(form.fx, submitting, PURCHASE_ORDER_MESSAGES.rateBeforeSubmitting);
+  if (rate) return rate;
   const parsed = savePurchaseOrderInput.safeParse(purchaseOrderPayload(form));
   if (!parsed.success) return parsed.error.issues[0]?.message ?? PURCHASE_ORDER_MESSAGES.lines;
   if (submitting && billTotals(form.lines.map(lineNumbers)).total <= 0) return PURCHASE_ORDER_MESSAGES.empty;
@@ -177,6 +198,7 @@ export const PURCHASE_ORDER_FORM_KIND: DocumentFormKind<PurchaseOrderForm> = {
     },
   ],
   words: PURCHASE_ORDER_FORM_WORDS,
+  currency: { get: (form) => form.fx, set: (form, fx) => ({ ...form, fx }), figure: 'selling' },
   withProduct: withOrderProduct,
   error: purchaseOrderFormError,
   payload: purchaseOrderPayload,
