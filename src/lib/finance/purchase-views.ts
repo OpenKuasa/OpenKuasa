@@ -8,7 +8,7 @@ import { type BillDisplayStatus, type BillListRow, billRinggit } from './bills';
 import { BASE_CURRENCY } from './currencies';
 import { toCsv } from './csv';
 import { rm, rmShort } from './format';
-import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentMethod, type PaymentOutRow } from './money';
+import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentMethod, type PaymentOutRow, paymentOutRinggit } from './money';
 import type { PurchaseOrderDelivery, PurchaseOrderListRow, PurchaseOrderStatus } from './purchase-orders';
 import type { RfqDisplayStatus, RfqListRow } from './rfqs';
 import { rateSourceWords } from './sales-views';
@@ -96,7 +96,8 @@ export function billsView(rows: BillListRow[], paid: PaymentOutRow[], today: str
       { label: 'Total payable', value: rmShort(sum(open, (b) => b.balance)), delta: count(open.length, 'open bill'), deltaTone: 'flat' },
       { label: 'Due this week', value: rmShort(sum(dueThisWeek, (b) => b.balance)), delta: count(dueThisWeek.length, 'bill'), deltaTone: 'flat' },
       { label: 'Overdue', value: rmShort(sum(overdue, (b) => b.balance)), delta: count(overdue.length, 'bill'), deltaTone: overdue.length ? 'down' : 'flat' },
-      { label: 'Paid (MTD)', value: rmShort(sum(paidMtd, (p) => p.amount)), delta: count(paymentCount(paidMtd), 'payment'), deltaTone: 'flat' },
+      // In ringgit: a payment of a bill in another currency counts the ringgit that left (stage 4b).
+      { label: 'Paid (MTD)', value: rmShort(sum(paidMtd, paymentOutRinggit)), delta: count(paymentCount(paidMtd), 'payment'), deltaTone: 'flat' },
     ],
     bySupplier,
     byStatus: [
@@ -161,15 +162,17 @@ export function billsCsv(bills: BillListRow[]): string {
 /* ---- Payments Out ------------------------------------------------- */
 
 export function paymentsView(rows: PaymentOutRow[], today: string): PaymentsViewData {
+  // Every figure below adds payments up, so each row counts its ringgit: for a bill in another currency, its share
+  // of the ringgit that left the account (stage 4b); a scheduled payment is always ringgit (FIN47).
   const month = today.slice(0, 7);
   const paid = rows.filter((p) => p.status === 'posted');
   const paidMtd = paid.filter((p) => p.txn_date.slice(0, 7) === month);
-  const paidMtdTotal = sum(paidMtd, (p) => p.amount);
-  const electronicMtd = sum(paidMtd.filter((p) => ELECTRONIC.has(p.method)), (p) => p.amount);
+  const paidMtdTotal = sum(paidMtd, paymentOutRinggit);
+  const electronicMtd = sum(paidMtd.filter((p) => ELECTRONIC.has(p.method)), paymentOutRinggit);
   const scheduled = rows.filter((p) => p.status === 'scheduled');
 
   // Last 8 months, oldest first, in RM thousands.
-  const paidK = (list: PaymentOutRow[]) => thousands(sum(list, (p) => p.amount));
+  const paidK = (list: PaymentOutRow[]) => thousands(sum(list, paymentOutRinggit));
   let hasTrend = false;
   const trend = lastMonths(today).map(({ key, label }) => {
     const inMonth = paid.filter((p) => monthOf(p.txn_date) === key);
@@ -184,7 +187,7 @@ export function paymentsView(rows: PaymentOutRow[], today: string): PaymentsView
   const methods: Slice[] = PAYMENT_METHODS.map((method) => ({
     key: method,
     label: PAYMENT_METHOD_LABELS[method],
-    value: sum(paidMtd.filter((p) => p.method === method), (p) => p.amount),
+    value: sum(paidMtd.filter((p) => p.method === method), paymentOutRinggit),
     color: METHOD_COLORS[method],
   }));
   const used = methods.filter((slice) => slice.value > 0);
@@ -199,7 +202,7 @@ export function paymentsView(rows: PaymentOutRow[], today: string): PaymentsView
         delta: 'of paid MTD',
         deltaTone: 'flat',
       },
-      { label: 'To be paid', value: rmShort(sum(scheduled, (p) => p.amount)), delta: count(paymentCount(scheduled), 'payment'), deltaTone: 'flat' },
+      { label: 'To be paid', value: rmShort(sum(scheduled, paymentOutRinggit)), delta: count(paymentCount(scheduled), 'payment'), deltaTone: 'flat' },
     ],
     trend,
     hasTrend,
@@ -303,20 +306,36 @@ export function paymentRowsAgainstFlaggedOrders(
   return new Set(rows.filter((r) => NOT_YET_PAID.has(r.status) && flaggedBills.has(r.bill_id)).map((r) => r.allocation_id));
 }
 
-/** The payments table as a CSV file. Amounts are numbers, so a spreadsheet can add them up. */
+/**
+ * The payments table as a CSV file. Amounts are numbers, so a spreadsheet can add them up. Amount is in each bill's
+ * own currency; once a payment is of a bill in another currency (stage 4b), the currency, the ringgit paid out for
+ * it, what the bill carried and the realised difference follow.
+ */
 export function paymentsCsv(rows: PaymentOutRow[]): string {
+  const base = ['Date', 'No.', 'Supplier', 'Bill', 'Account', 'Method', 'Amount', 'Status'];
+  const row = (p: PaymentOutRow) => [
+    p.txn_date,
+    p.number,
+    p.supplier_name,
+    p.bill_no,
+    p.account_name,
+    PAYMENT_METHOD_LABELS[p.method],
+    p.amount,
+    PAYMENT_STATUS_LABELS[p.status],
+  ];
+  if (!rows.some((p) => (p.currency ?? BASE_CURRENCY) !== BASE_CURRENCY)) return toCsv(base, rows.map(row));
   return toCsv(
-    ['Date', 'No.', 'Supplier', 'Bill', 'Account', 'Method', 'Amount', 'Status'],
-    rows.map((p) => [
-      p.txn_date,
-      p.number,
-      p.supplier_name,
-      p.bill_no,
-      p.account_name,
-      PAYMENT_METHOD_LABELS[p.method],
-      p.amount,
-      PAYMENT_STATUS_LABELS[p.status],
-    ]),
+    [...base, 'Currency', 'Amount (RM)', 'Carried (RM)', 'Realised (RM)'],
+    rows.map((p) => {
+      const ringgit = (p.currency ?? BASE_CURRENCY) === BASE_CURRENCY;
+      return [
+        ...row(p),
+        p.currency ?? BASE_CURRENCY,
+        ringgit ? (p.amount_myr ?? p.amount) : (p.amount_myr ?? null),
+        ringgit ? (p.carried_myr ?? p.amount) : (p.carried_myr ?? null),
+        ringgit ? (p.realised_myr ?? 0) : (p.realised_myr ?? null),
+      ];
+    }),
   );
 }
 

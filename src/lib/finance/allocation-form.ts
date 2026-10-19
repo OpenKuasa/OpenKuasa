@@ -184,10 +184,13 @@ export type AllocationFormKind<F extends AllocationFormState, D extends Payable>
   total: (form: F) => number;
   error: (form: F, documents: D[]) => string | null;
   payload: (form: F) => unknown;
-  /** Present when the payment can be scheduled for later: only money out. */
-  schedule?: { is: (form: F) => boolean; set: (form: F, scheduled: boolean) => F };
   /**
-   * Present when documents may be in another currency (money in, stage 3b): the currency the amounts are in,
+   * Present when the payment can be scheduled for later: only money out. `offered` false hides the choice for this
+   * form as it stands (a bill in another currency is paid now, stage 4b); absent, it is always offered.
+   */
+  schedule?: { is: (form: F) => boolean; set: (form: F, scheduled: boolean) => F; offered?: (form: F) => boolean };
+  /**
+   * Present when documents may be in another currency (money in, stage 3b; money out, 4b): the currency the amounts are in,
    * the documents listed (one currency at a time), and the ringgit-received box with what it comes to. Absent,
    * every amount is ringgit and every document of the party is listed.
    */

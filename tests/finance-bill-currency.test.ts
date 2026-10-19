@@ -258,11 +258,11 @@ describe('adding bills up', () => {
   });
 });
 
-describe('what may pay a foreign bill in stage 4a', () => {
-  it('Payments Out, a voucher and a contra entry offer ringgit bills only', () => {
-    expect(payableBills(BOTH, NO_PAYMENTS).map((b) => b.id)).toEqual([MYR_BILL.id]);
+describe('what may pay a foreign bill in stage 4', () => {
+  it('Payments Out offers it (stage 4b); a voucher and a contra entry offer ringgit bills only', () => {
+    expect(payableBills(BOTH, NO_PAYMENTS).map((b) => b.id).sort()).toEqual([MYR_BILL.id, USD_BILL.id].sort());
     expect(voucherPayableBills(BOTH, NO_PAYMENTS, null).map((b) => b.id)).toEqual([MYR_BILL.id]);
-    const payable = payableBills(BOTH, NO_PAYMENTS);
+    const payable = payableBills(BOTH, NO_PAYMENTS).filter((b) => b.currency === 'MYR');
     expect(payable[0].currency).toBe('MYR');
     // Even if a foreign bill were offered to the contra form, it would not take it.
     const withForeign = [...payable, { ...payable[0], id: USD_BILL.id, currency: 'USD' }];
@@ -273,20 +273,20 @@ describe('what may pay a foreign bill in stage 4a', () => {
     );
     expect(parties[0].bills.map((b) => b.id)).toEqual([MYR_BILL.id]);
   });
-  it('words FIN41 and FIN44 on Payments Out, FIN41 on a voucher, FIN42 on a contra entry', async () => {
+  // Stage 4b retired FIN41: a foreign bill is paid now on Payments Out (FIN46/FIN47), never through a voucher (FIN47).
+  it('words FIN47 and FIN44 on Payments Out, FIN47 on a voucher, FIN42 on a contra entry', async () => {
     const payment = { account_id: ACCOUNT, txn_date: TODAY, method: 'fpx' as const, allocations: [{ bill_id: USD_BILL.id, amount: 10 }] };
-    expect(await recordPaymentOut(fakeFinance({ data: null, error: { code: 'FIN41' } }).ctx, payment)).toEqual({
-      ok: false, error: 'Payments on bills in other currencies are not available yet.',
+    expect(await recordPaymentOut(fakeFinance({ data: null, error: { code: 'FIN47' } }).ctx, payment)).toEqual({
+      ok: false, error: MONEY_MESSAGES.payNow,
     });
     expect(await recordPaymentOut(fakeFinance({ data: null, error: { code: 'FIN44' } }).ctx, payment)).toEqual({
       ok: false, error: MONEY_MESSAGES.oneCurrency,
     });
     expect(MONEY_MESSAGES.oneCurrency).toBe('One payment can only settle bills in one currency. Record a separate payment for each currency.');
     const voucher = { kind: 'bills' as const, account_id: ACCOUNT, txn_date: TODAY, method: 'fpx' as const, allocations: [{ bill_id: USD_BILL.id, amount: 10 }] };
-    expect(await saveVoucher(fakeFinance({ data: null, error: { code: 'FIN41' } }).ctx, voucher)).toEqual({
-      ok: false, error: VOUCHER_MESSAGES.foreignBillNotYet,
+    expect(await saveVoucher(fakeFinance({ data: null, error: { code: 'FIN47' } }).ctx, voucher)).toEqual({
+      ok: false, error: VOUCHER_MESSAGES.foreignBill,
     });
-    expect(VOUCHER_MESSAGES.foreignBillNotYet).toBe('Payments on bills in other currencies are not available yet.');
     expect(CONTRA_MESSAGES.foreignInvoice).toBe('A contra entry can only set off invoices and bills in ringgit.');
     const contra = { contact_id: SUPPLIER, contra_date: TODAY, amount: 10, invoices: [{ invoice_id: DRAFT, amount: 10 }], bills: [{ bill_id: USD_BILL.id, amount: 10 }] };
     expect(await saveContra(fakeFinance({ data: null, error: { code: 'FIN42' } }).ctx, contra)).toEqual({

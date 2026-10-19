@@ -66,7 +66,9 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
   const ringgit = kind.currency?.ringgit;
   const askRinggit = ringgit?.needed(form) ?? false;
   const tickedCount = Object.keys(form.amounts).length;
-  const scheduled = kind.schedule?.is(form) ?? false;
+  // A payment that cannot wait (a bill in another currency) is offered no "Schedule for later".
+  const schedule = kind.schedule && (kind.schedule.offered?.(form) ?? true) ? kind.schedule : undefined;
+  const scheduled = schedule?.is(form) ?? false;
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     // Handled here rather than as a form action, so a refused form keeps what was typed.
@@ -279,7 +281,7 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
             onChange={(e) => edit((f) => ({ ...f, reference: e.target.value }))}
           />
         </div>
-        <div className={kind.schedule ? 'space-y-1.5 md:col-span-7' : 'space-y-1.5 md:col-span-12'}>
+        <div className={schedule ? 'space-y-1.5 md:col-span-7' : 'space-y-1.5 md:col-span-12'}>
           <Label htmlFor={`${id}-notes`}>Notes</Label>
           <Input
             id={`${id}-notes`}
@@ -289,7 +291,7 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
             onChange={(e) => edit((f) => ({ ...f, notes: e.target.value }))}
           />
         </div>
-        {kind.schedule ? (
+        {schedule ? (
           <fieldset className="space-y-1.5 md:col-span-5">
             <legend className="text-sm font-medium leading-none">When</legend>
             <div className="flex h-8 flex-wrap items-center gap-4">
@@ -299,7 +301,7 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
                   name={`${id}-when`}
                   className="size-4 accent-primary"
                   checked={!scheduled}
-                  onChange={() => edit((f) => kind.schedule?.set(f, false) ?? f)}
+                  onChange={() => edit((f) => schedule.set(f, false))}
                 />
                 Pay now
               </label>
@@ -309,7 +311,7 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
                   name={`${id}-when`}
                   className="size-4 accent-primary"
                   checked={scheduled}
-                  onChange={() => edit((f) => kind.schedule?.set(f, true) ?? f)}
+                  onChange={() => edit((f) => schedule.set(f, true))}
                 />
                 Schedule for later
               </label>

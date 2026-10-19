@@ -22,7 +22,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { localIsoDate } from '@/lib/finance/bill-math';
 import type { BillListRow } from '@/lib/finance/bills';
 import { csvFileName } from '@/lib/finance/csv';
-import { rm } from '@/lib/finance/format';
+import { money, rm } from '@/lib/finance/format';
 import {
   type FinanceAccount,
   PAYMENT_METHODS,
@@ -424,7 +424,21 @@ export function PaymentsView({
                               <span className="sr-only">This bill’s purchase order is billed over its total or for more than has been received</span>
                             </span>
                           ) : null}
-                          {rm(p.amount)}
+                          {(p.currency ?? 'MYR') === 'MYR' ? (
+                            rm(p.amount)
+                          ) : (
+                            // A bill in another currency: the part it settled, the ringgit paid out for it, and the
+                            // realised difference when there is one.
+                            <span>
+                              {money(p.amount, p.currency)}
+                              {p.amount_myr !== null && p.amount_myr !== undefined ? ` · ${rm(p.amount_myr)}` : ''}
+                              {p.realised_myr ? (
+                                <span className="block text-xs text-muted-foreground">
+                                  Realised {p.realised_myr > 0 ? 'gain' : 'loss'} {rm(Math.abs(p.realised_myr))}
+                                </span>
+                              ) : null}
+                            </span>
+                          )}
                         </span>
                       </TableCell>
                       <TableCell>

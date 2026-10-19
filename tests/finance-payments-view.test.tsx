@@ -189,3 +189,54 @@ describe('the Record Payment form', () => {
     expect(text(html)).not.toContain('is against PO-0003');
   });
 });
+
+describe('a bill in another currency on Payments Out (stage 4b)', () => {
+  // Worked example B4: USD 1,080.00 at 4.2 (RM 4,536.00), USD 400.00 paid with RM 1,700.00.
+  const usd = bill('u', {
+    currency: 'USD', fx_rate: 4.2, fx_rate_text: '4.2000000000', fx_rate_source: 'manual', fx_rate_provider: 'reuters',
+    total: 1080, balance: 680, paid: 400, total_myr: 4536, balance_myr: 2856,
+  });
+  const usdPaid: PaymentOutRow = {
+    ...payment(1, 'u', 'posted'), amount: 400, transaction_amount: 1700, currency: 'USD', amount_myr: 1700, carried_myr: 1680, realised_myr: -20,
+  };
+  const myrPaid: PaymentOutRow = { ...payment(2, 'a', 'posted'), amount: 50, transaction_amount: 50 };
+
+  it('shows the part in its currency, the ringgit paid out for it, and the realised difference', () => {
+    const html = render([usdPaid, myrPaid], [usd, bill('a')], []);
+    const row = text(html.split('<tr').find((r) => r.includes('BILL-u')) ?? '');
+    expect(row).toContain('USD 400.00 · RM 1,700.00 Realised loss RM 20.00');
+    expect(text(html.split('<tr').find((r) => r.includes('BILL-a')) ?? '')).toContain('RM 50.00');
+    // Paid this month in ringgit: RM 50.00 + RM 1,700.00.
+    expect(text(html)).toContain('RM 1,750');
+  });
+
+  it('asks for the ringgit paid out, and offers no "Schedule for later", once a USD bill is ticked', () => {
+    const html = renderToStaticMarkup(
+      <PaymentFormCard
+        payable={payableBills([usd], [])}
+        accounts={accounts}
+        today={TODAY}
+        preselect={{ supplierId: SUPPLIER, billId: 'u' }}
+        orders={[]}
+        record={vi.fn()}
+        onClose={() => {}}
+      />,
+    );
+    expect(text(html)).toContain('Ringgit paid out');
+    expect(text(html)).toContain('USD 680.00 to pay (≈ RM 2,856.00 still carried)');
+    expect(text(html)).not.toContain('Schedule for later');
+    const ringgit = renderToStaticMarkup(
+      <PaymentFormCard
+        payable={payableBills([bill('a')], [])}
+        accounts={accounts}
+        today={TODAY}
+        preselect={{ supplierId: SUPPLIER, billId: 'a' }}
+        orders={[]}
+        record={vi.fn()}
+        onClose={() => {}}
+      />,
+    );
+    expect(text(ringgit)).toContain('Schedule for later');
+    expect(text(ringgit)).not.toContain('Ringgit paid out');
+  });
+});

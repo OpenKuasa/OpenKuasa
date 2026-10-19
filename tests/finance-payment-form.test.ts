@@ -196,6 +196,8 @@ describe('newPaymentForm', () => {
     expect(newPaymentForm(payable, accounts, today)).toEqual({
       supplierId: '',
       amounts: {},
+      currency: 'MYR',
+      ringgit: '',
       accountId: BANK,
       date: today,
       method: 'bank_transfer',
@@ -317,6 +319,8 @@ describe('paymentPayload', () => {
     const filled: PaymentForm = {
       supplierId: LIM,
       amounts: { [payable[0].id]: '200.50', [payable[1].id]: ' 80 ' },
+      currency: 'MYR',
+      ringgit: '',
       accountId: BANK,
       date: '2026-10-20',
       method: 'cheque',

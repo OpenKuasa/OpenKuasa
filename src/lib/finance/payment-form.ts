@@ -3,6 +3,13 @@
  * tested: which bills can still take a payment, what each defaults to, what
  * is wrong with the form, and what is sent to recordPaymentOutAction. Pure.
  * What a payment in shares is in allocation-form.ts.
+ *
+ * A bill in another currency (stage 4b) is paid from a ringgit account, now:
+ * the amounts ticked are in the bill's currency, and the form also asks for
+ * the ringgit that left the account. One payment is in one currency: the first
+ * bill ticked sets it, and only that currency's bills are offered until every
+ * tick is cleared. Ticking a foreign bill takes the payment off "Schedule for
+ * later" (FIN47), and the card does not offer it for one.
  */
 import {
   type AllocationFormKind,
@@ -19,8 +26,10 @@ import {
   typedAmounts,
 } from './allocation-form';
 import { BILL_MESSAGES, type BillListRow } from './bills';
-import { BASE_CURRENCY } from './currencies';
-import { rm } from './format';
+import { BASE_CURRENCY, minorUnits } from './currencies';
+import { CURRENCY_MESSAGES } from './document-currency';
+import { money, rm, typedNumber } from './format';
+import { billPaymentPreview } from './fx-settlement';
 import {
   type FinanceAccount,
   MONEY_MESSAGES,
@@ -39,7 +48,7 @@ export type PayableBill = {
   supplier_name: string;
   /** The purchase order the bill is raised against; null when it has none. */
   purchase_order_id: string | null;
-  /** ISO 4217 code: the currency of the figures below (ringgit only, until payments of foreign bills arrive). */
+  /** ISO 4217 code: the currency of the figures below. */
   currency: string;
   due_date: string;
   overdue: boolean;
@@ -49,12 +58,22 @@ export type PayableBill = {
   scheduled: number;
   /** What a new payment may take: the balance less what is already scheduled. */
   payable: number;
+  /**
+   * The bill's rate as the database's exact text, and what is still owed in ringgit (posted payments only): what
+   * the payment that clears it carries (stage 4b). Absent, the bill is taken to be ringgit: rate 1, its balance.
+   */
+  fx_rate_text?: string | null;
+  balance_myr?: number;
 };
 
 export type PaymentForm = {
   supplierId: string;
-  /** The ticked bills, each with the amount as typed. */
+  /** The ticked bills, each with the amount as typed, in `currency`. */
   amounts: Record<string, string>;
+  /** The currency of the ticked bills: the first one ticked sets it. Read only while something is ticked. */
+  currency: string;
+  /** For bills in another currency: the ringgit that left the account, as typed. */
+  ringgit: string;
   accountId: string;
   date: string;
   method: PaymentMethod;
@@ -76,16 +95,19 @@ export function heldByBill(payments: PaymentOutRow[]): Record<string, number> {
 /**
  * The bills a payment can be recorded against: posted, not fully paid, and not
  * already covered by scheduled payments. The database refuses a payment for
- * more than balance − scheduled, so that is what the form offers. Bills in
- * ringgit only: a payment of a bill in another currency is not available yet
- * (FIN41, stage 4a; the next stage opens it on Payments Out).
+ * more than balance − scheduled, so that is what the form offers. Any currency
+ * (stage 4b): a bill in another currency is paid now from a ringgit account
+ * with the ringgit that left it. A posted bill always has its rate. A payment
+ * voucher and a contra entry filter these to ringgit bills themselves.
  */
 export function payableBills(bills: BillListRow[], payments: PaymentOutRow[]): PayableBill[] {
   const held = heldByBill(payments);
   return bills
     .filter(
       (b) =>
-        (b.display_status === 'pending' || b.display_status === 'overdue') && b.balance > 0 && b.currency === BASE_CURRENCY,
+        (b.display_status === 'pending' || b.display_status === 'overdue') &&
+        b.balance > 0 &&
+        (b.currency === BASE_CURRENCY || b.fx_rate_text !== null),
     )
     .map((b) => {
       const scheduled = held[b.id] ?? 0;
@@ -101,6 +123,8 @@ export function payableBills(bills: BillListRow[], payments: PaymentOutRow[]): P
         balance: b.balance,
         scheduled,
         payable: round2(b.balance - scheduled),
+        fx_rate_text: b.fx_rate_text,
+        balance_myr: b.balance_myr ?? b.balance,
       };
     })
     .filter((b) => b.payable > 0)
@@ -142,6 +166,8 @@ export function newPaymentForm(
   return {
     supplierId: preselect?.supplierId ?? (suppliers.length === 1 ? suppliers[0].id : ''),
     amounts: bill ? { [bill.id]: amountText(bill.payable) } : {},
+    currency: bill?.currency ?? BASE_CURRENCY,
+    ringgit: '',
     accountId: defaultAccount(accounts),
     date: today,
     method: 'bank_transfer',
@@ -153,17 +179,54 @@ export function newPaymentForm(
 
 /** Choosing another supplier starts the ticks again: one payment pays one supplier. */
 export function chooseSupplier(form: PaymentForm, supplierId: string): PaymentForm {
-  return supplierId === form.supplierId ? form : { ...form, supplierId, amounts: {} };
+  return supplierId === form.supplierId ? form : { ...form, supplierId, amounts: {}, ringgit: '' };
 }
 
-/** Ticks a bill for all it can still take, or unticks it. */
+/** The currency the ticked amounts are in; null while nothing is ticked. */
+export function paymentCurrency(form: PaymentForm): string | null {
+  return Object.keys(form.amounts).length > 0 ? form.currency : null;
+}
+
+/** True when the ticked bills are in another currency, so the ringgit paid out is asked for and it is paid now. */
+export function needsRinggit(form: PaymentForm): boolean {
+  const currency = paymentCurrency(form);
+  return currency !== null && currency !== BASE_CURRENCY;
+}
+
+/**
+ * The chosen supplier's bills the form lists: all of them while nothing is ticked, then only those in the ticked
+ * bills' currency (one payment, one currency: FIN44).
+ */
+export function offeredBills(form: PaymentForm, payable: PayableBill[]): PayableBill[] {
+  const mine = billsOf(payable, form.supplierId);
+  const currency = paymentCurrency(form);
+  return currency === null ? mine : mine.filter((b) => b.currency === currency);
+}
+
+/** A foreign bill is paid now (FIN47): a payment of one is never left on "Schedule for later". */
+function paidNowIfForeign(form: PaymentForm): PaymentForm {
+  return needsRinggit(form) && form.scheduled ? { ...form, scheduled: false } : form;
+}
+
+/**
+ * Ticks a bill for all it can still take, or unticks it. The first bill ticked sets the payment's currency; a bill
+ * in another currency than the ones ticked starts the ticks again with it.
+ */
 export function toggleBill(form: PaymentForm, bill: PayableBill, on: boolean): PaymentForm {
-  return ticked(form, bill, on);
+  const current = paymentCurrency(form);
+  const base = on && current !== null && current !== bill.currency ? { ...form, amounts: {}, ringgit: '' } : form;
+  return paidNowIfForeign(ticked(on ? { ...base, currency: bill.currency } : base, bill, on));
 }
 
-/** Ticks every bill of the chosen supplier, or clears them all. */
+/** Ticks every bill given (the ones offered, so of one currency), or clears them all. */
 export function toggleAll(form: PaymentForm, bills: PayableBill[], on: boolean): PaymentForm {
-  return tickedAll(form, bills, on);
+  const currency = on ? (paymentCurrency(form) ?? bills[0]?.currency ?? form.currency) : form.currency;
+  return paidNowIfForeign(tickedAll({ ...form, currency }, on ? bills.filter((b) => b.currency === currency) : bills, on));
+}
+
+/** The ringgit box, as typed. */
+export function withRinggit(form: PaymentForm, text: string): PaymentForm {
+  return { ...form, ringgit: text };
 }
 
 /**
@@ -180,7 +243,11 @@ export function paymentTotal(form: PaymentForm): number {
   return amountsTotal(form.amounts);
 }
 
-/** What is sent to recordPaymentOutAction. Amounts are numbers; a box that is not a number goes as NaN and is refused. */
+/**
+ * What is sent to recordPaymentOutAction. Amounts are numbers; a box that is not a number goes as NaN and is
+ * refused. For bills in another currency the ringgit paid out goes as the text typed (commas dropped), so no float
+ * stands between the box and the database.
+ */
 export function paymentPayload(form: PaymentForm) {
   return {
     account_id: form.accountId,
@@ -189,8 +256,33 @@ export function paymentPayload(form: PaymentForm) {
     reference: form.reference,
     notes: form.notes,
     scheduled: form.scheduled,
+    ...(needsRinggit(form) ? { amount_myr: form.ringgit.replace(/,/g, '').trim() } : {}),
     allocations: typedAmounts(form.amounts).map(({ id, amount }) => ({ bill_id: id, amount })),
   };
+}
+
+/**
+ * Under the ringgit box: what the database will make of the payment, worked in whole sen (fx-settlement.ts), as
+ * "about" (a payment posted first can change it). Empty for ringgit and while a figure is not a number.
+ */
+export function paymentPreview(form: PaymentForm, payable: PayableBill[]): string[] {
+  if (!needsRinggit(form)) return [];
+  const parts = Object.entries(form.amounts).map(([id, amount]) => {
+    const bill = payable.find((b) => b.id === id);
+    return {
+      id,
+      amount: amount.replace(/,/g, ''),
+      rateText: bill?.fx_rate_text ?? null,
+      openForeign: bill?.balance ?? 0,
+      openRinggit: bill?.balance_myr ?? 0,
+    };
+  });
+  const preview = billPaymentPreview(form.ringgit.replace(/,/g, ''), parts);
+  if (!preview) return [];
+  const at = `The ${preview.parts.length === 1 ? 'bill carries' : 'bills carry'} about ${rm(preview.carried)} for what is paid.`;
+  if (preview.realised === 0) return [at, 'No exchange gain or loss.'];
+  const word = preview.realised > 0 ? 'gain' : 'loss';
+  return [at, `Realised exchange ${word} of about ${rm(Math.abs(preview.realised))}.`];
 }
 
 /**
@@ -201,8 +293,15 @@ export function paymentFormError(form: PaymentForm, payable: PayableBill[]): str
   if (!form.supplierId) return BILL_MESSAGES.supplier;
   if (Object.keys(form.amounts).length === 0) return MONEY_MESSAGES.bills;
   // A bill that is no longer payable was paid or voided since the form opened.
-  const problem = amountsError(form.amounts, billsOf(payable, form.supplierId), MONEY_MESSAGES);
+  const problem = amountsError(form.amounts, offeredBills(form, payable), MONEY_MESSAGES);
   if (problem) return problem;
+  const currency = paymentCurrency(form);
+  if (currency !== null && minorUnits(currency) === 0) {
+    const whole = Object.values(form.amounts).every((text) => Number.isInteger(typedNumber(text)));
+    if (!whole) return CURRENCY_MESSAGES.wholeUnits(currency);
+  }
+  // A bill in another currency is paid now (FIN47); the form never offers scheduling one.
+  if (needsRinggit(form) && form.scheduled) return MONEY_MESSAGES.payNow;
   const parsed = recordPaymentOutInput.safeParse(paymentPayload(form));
   return parsed.success ? null : (parsed.error.issues[0]?.message ?? MONEY_MESSAGES.amount);
 }
@@ -232,7 +331,11 @@ export const PAYMENT_OUT_KIND: AllocationFormKind<PaymentForm, PayableBill> = {
   documentsOf: billsOf,
   number: (bill) => bill.bill_no,
   owed: (bill) =>
-    `${rm(bill.payable)} to pay${bill.scheduled > 0 ? ` · ${rm(bill.scheduled)} of ${rm(bill.balance)} in payments not yet paid` : ''}`,
+    `${money(bill.payable, bill.currency)} to pay` +
+    (bill.currency === BASE_CURRENCY ? '' : ` (≈ ${rm(bill.balance_myr ?? bill.balance)} still carried)`) +
+    (bill.scheduled > 0
+      ? ` · ${money(bill.scheduled, bill.currency)} of ${money(bill.balance, bill.currency)} in payments not yet paid`
+      : ''),
   amountLabel: (bill) => `Amount to pay on ${bill.bill_no}`,
   toggle: toggleBill,
   toggleAll,
@@ -240,5 +343,22 @@ export const PAYMENT_OUT_KIND: AllocationFormKind<PaymentForm, PayableBill> = {
   total: paymentTotal,
   error: paymentFormError,
   payload: paymentPayload,
-  schedule: { is: (form) => form.scheduled, set: (form, scheduled) => ({ ...form, scheduled }) },
+  schedule: {
+    is: (form) => form.scheduled,
+    set: (form, scheduled) => ({ ...form, scheduled }),
+    // A bill in another currency is paid now (FIN47): the realised difference is decided when the money moves.
+    offered: (form) => !needsRinggit(form),
+  },
+  currency: {
+    of: (form) => paymentCurrency(form) ?? BASE_CURRENCY,
+    offered: offeredBills,
+    ringgit: {
+      needed: needsRinggit,
+      value: (form) => form.ringgit,
+      set: withRinggit,
+      label: 'Ringgit paid out',
+      hint: 'What left the account, in RM. The amounts above are in the bills’ currency. A bill in another currency is paid now.',
+      notes: paymentPreview,
+    },
+  },
 };
