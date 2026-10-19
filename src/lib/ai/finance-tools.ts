@@ -101,8 +101,8 @@ import {
   paymentIdInput,
   recordPaymentInRinggit,
   recordPaymentInToolInput,
-  recordPaymentOut,
-  recordPaymentOutInput,
+  recordPaymentOutInRinggit,
+  recordPaymentOutToolInput,
   voidPayment,
   voidPaymentIn,
 } from '@/lib/finance/money';
@@ -338,7 +338,9 @@ export function createBendaharaTools(access: FinanceAccess) {
       execute: async () => listPaymentsIn(ctx),
     }),
     listPaymentsOut: tool({
-      description: 'Payments made to suppliers.',
+      description:
+        'Payments made to suppliers, one row per bill a payment pays. amount is in the bill\'s currency (currency); ' +
+        'amount_myr is the ringgit paid for it, and transaction_amount the ringgit of the whole payment. Add up ringgit only.',
       inputSchema: z.object({}),
       execute: async () => listPaymentsOut(ctx),
     }),
@@ -694,9 +696,11 @@ export function createBendaharaTools(access: FinanceAccess) {
       execute: async (input) => recordPaymentInRinggit(ctx, input),
     }),
     recordPaymentOut: tool({
-      description: 'Record a payment made to a supplier against their bills (bills in ringgit).',
-      inputSchema: recordPaymentOutInput,
-      execute: async (input) => recordPaymentOut(ctx, input),
+      description:
+        'Record a payment made to a supplier against their bills, in ringgit. Bills in ringgit only: a payment of a ' +
+        'bill in another currency is recorded on the Payments Out screen, where the ringgit paid out is entered.',
+      inputSchema: recordPaymentOutToolInput,
+      execute: async (input) => recordPaymentOutInRinggit(ctx, input),
     }),
     markPaymentPaid: tool({
       description: 'Mark a scheduled payment out as paid.',

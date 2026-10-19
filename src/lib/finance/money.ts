@@ -58,11 +58,17 @@ export const MONEY_MESSAGES = {
   oneSupplier: 'One payment can only pay bills from one supplier.',
   locked: 'This payment is posted and can no longer be changed. Void it instead.',
   missing: 'The account or a bill on this payment no longer exists.',
-  // FIN41 (stage 4a). The payment form offers ringgit bills only, and a foreign bill's row offers no Record
-  // payment, so this is met from a stale tab or a direct call. The next stage takes these payments.
-  foreignBillNotYet: 'Payments on bills in other currencies are not available yet.',
-  // FIN44: one payment's split names documents in two currencies. Met from a direct call.
+  // FIN44: one payment's split names documents in two currencies. The payment form offers one currency's bills at a
+  // time (the first ticked sets it), so this is met from a direct call.
   oneCurrency: 'One payment can only settle bills in one currency. Record a separate payment for each currency.',
+  // FIN46, and what the form says first (stage 4b): a bill in another currency is paid from a ringgit account,
+  // and the payment is the ringgit that left it.
+  ringgitPaidOut: 'Enter the ringgit that left the account.',
+  // FIN47 (stage 4b): a payment of a bill in another currency asked as scheduled. The form offers only paying now
+  // for one, so this is met from a direct call.
+  payNow: 'A payment of a bill in another currency is recorded as paid, on the day the money leaves.',
+  // The finance assistant records payments out in ringgit only; it says this before the database is asked.
+  foreignBillByAssistant: 'This bill is not in ringgit. Record its payment on the Payments Out screen.',
 } as const;
 
 const M = MONEY_MESSAGES;
@@ -122,7 +128,7 @@ function eachOnce(ids: string[]): boolean {
   return new Set(ids.map((value) => value.toLowerCase())).size === ids.length;
 }
 
-export const recordPaymentOutInput = z.object({
+const paymentOutBase = z.object({
   account_id: z.string({ error: M.account }).uuid(M.account),
   txn_date: date,
   method: z.enum(PAYMENT_METHODS, { error: M.method }),
@@ -130,12 +136,24 @@ export const recordPaymentOutInput = z.object({
   notes: text.default(null),
   /** True for a payment to be made later; it does not reduce the bill until marked paid. */
   scheduled: z.boolean().default(false),
+  /**
+   * For bills in another currency (stage 4b): the ringgit that left the account (every account is ringgit until
+   * stage 5); the amounts below are then in the bills' currency, and the payment is paid now (FIN47). Left out for
+   * ringgit bills, whose payment is the sum of its split. The database asks for it when a bill is foreign (FIN46).
+   */
+  amount_myr: ringgitTextInput(M.ringgitPaidOut).optional(),
   allocations: z
     .array(z.object({ bill_id: z.string({ error: M.bills }).uuid(M.bills), amount }), { error: M.bills })
     .min(1, M.bills)
     .max(PAYMENT_BILLS_MAX, M.tooManyBills)
     .refine((rows) => eachOnce(rows.map((r) => r.bill_id)), M.duplicate),
 });
+
+/** A payment to one supplier, split across that supplier's posted bills, paid now or scheduled. */
+export const recordPaymentOutInput = paymentOutBase;
+
+/** What the finance assistant may send: ringgit bills only, so no ringgit-paid-out figure. */
+export const recordPaymentOutToolInput = paymentOutBase.omit({ amount_myr: true });
 
 /**
  * A ringgit figure (what arrived, or what left: a refund in stage 3c), as decimal text with at most two places
@@ -202,8 +220,9 @@ const REFUSALS: Record<string, string> = {
 const RECORD_OUT_REFUSALS: Record<string, string> = {
   ...REFUSALS,
   [PG_UNIQUE]: M.duplicate,
-  FIN41: M.foreignBillNotYet,
   FIN44: M.oneCurrency,
+  FIN46: M.ringgitPaidOut,
+  FIN47: M.payNow,
 };
 
 /** The same database codes, worded for money in: the documents are invoices and the party is a customer. */
@@ -266,7 +285,26 @@ export type PaymentOutRow = {
   bill_id: string;
   bill_no: string | null;
   supplier_name: string;
+  /**
+   * The bill's currency, which `amount` is in; `transaction_amount` is always ringgit (stage 4b). The reads always
+   * give these four; they are optional so that rows made by hand (samples, tests) need not, and are then ringgit.
+   */
+  currency?: string;
+  /** What this row used of the ringgit paid out; `amount` for a ringgit bill; null until a foreign split is settled. */
+  amount_myr?: number | null;
+  /** The ringgit the bill carried for the part paid; `amount` for a ringgit bill. */
+  carried_myr?: number | null;
+  /** carried_myr − amount_myr: realised gain (above 0) or loss; 0 for a ringgit bill. */
+  realised_myr?: number | null;
 };
+
+/**
+ * What a payment out paid of one bill, in ringgit: the amount for a ringgit bill, its share of the ringgit paid out
+ * otherwise (0 until a foreign split is settled, which a posted one always is).
+ */
+export function paymentOutRinggit(row: Pick<PaymentOutRow, 'amount' | 'currency' | 'amount_myr'>): number {
+  return (row.currency ?? 'MYR') === 'MYR' ? row.amount : (row.amount_myr ?? 0);
+}
 
 /**
  * One row per invoice a payment in pays. `allocation_id` is the row's key: a
@@ -324,7 +362,7 @@ export function receivedRinggitByInvoice(rows: PaymentInRow[]): Map<string, numb
 
 const PAYMENT_COLUMNS =
   'allocation_id,transaction_id,number,txn_date,method,amount,transaction_amount,status,reference,account_id,account_name';
-const PAYMENT_OUT_COLUMNS = `${PAYMENT_COLUMNS},bill_id,bill_no,supplier_name`;
+const PAYMENT_OUT_COLUMNS = `${PAYMENT_COLUMNS},bill_id,bill_no,supplier_name,currency,amount_myr,carried_myr,realised_myr`;
 const PAYMENT_IN_COLUMNS = `${PAYMENT_COLUMNS},invoice_id,invoice_no,customer_name,currency,amount_myr,carried_myr,realised_myr`;
 
 /** Every row of one of the two payment views, newest first, read a page at a time. */
@@ -349,7 +387,7 @@ async function listPaymentRows<T extends { amount: number; transaction_amount: n
         ...(r as unknown as T),
         amount: Number(r.amount),
         transaction_amount: Number(r.transaction_amount),
-        // Payments in only: the ringgit figures, kept null where the view says null.
+        // The ringgit figures, kept null where the view says null.
         ...('amount_myr' in r
           ? {
               amount_myr: r.amount_myr === null ? null : Number(r.amount_myr),
@@ -422,19 +460,39 @@ async function refusalUnlessPaymentIn(
 
 /* ---- writes ----------------------------------------------------------- */
 
-/** Records a payment out, paid now or scheduled, split across one supplier's bills. */
+/**
+ * Records a payment out, paid now or scheduled, split across one supplier's bills. For bills in another currency
+ * `amount_myr` is the ringgit that left the account, the amounts are in their currency, and it is paid now.
+ */
 export async function recordPaymentOut(
   ctx: FinanceWriteContext,
   input: z.input<typeof recordPaymentOutInput>,
 ): Promise<FinResult<{ id: string }>> {
-  const { allocations, scheduled, ...payment } = recordPaymentOutInput.parse(input);
+  const { allocations, scheduled, amount_myr, ...rest } = recordPaymentOutInput.parse(input);
+  // The key is sent only when there is a figure: the database reads a missing key as "none".
+  const payment = { ...rest, status: scheduled ? 'scheduled' : 'posted', ...(amount_myr === undefined ? {} : { amount_myr }) };
   const { data, error } = await ctx.client.rpc('finance_record_payment_out', {
     target_org: ctx.orgId,
-    payment: { ...payment, status: scheduled ? 'scheduled' : 'posted' },
+    payment,
     allocations,
   });
   if (error || !data) return moneyWriteFailed('recordPaymentOut', error, RECORD_OUT_REFUSALS);
   return { ok: true, data: { id: data as string } };
+}
+
+/**
+ * The finance assistant's payment out: ringgit bills only. A bill in another currency is refused in its own words
+ * before the database is asked, since the assistant has no ringgit-paid-out figure to send.
+ */
+export async function recordPaymentOutInRinggit(ctx: FinanceWriteContext, input: unknown): Promise<FinResult<{ id: string }>> {
+  const parsed = recordPaymentOutToolInput.parse(input);
+  const ids = parsed.allocations.map((a) => a.bill_id);
+  const { data, error } = await ctx.client.from('supplier_bills').select('id,currency').eq('org_id', ctx.orgId).in('id', ids);
+  if (error) return moneyWriteFailed('recordPaymentOutInRinggit', error, RECORD_OUT_REFUSALS);
+  if ((data ?? []).some((row) => (row as { currency?: string }).currency !== 'MYR')) {
+    return { ok: false, error: M.foreignBillByAssistant };
+  }
+  return recordPaymentOut(ctx, parsed);
 }
 
 /**

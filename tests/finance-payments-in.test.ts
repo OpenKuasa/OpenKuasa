@@ -198,12 +198,13 @@ describe('payment reads', () => {
     expect(await listPaymentsIn(ctx)).toHaveLength(PAYMENT_PAGE_SIZE);
     expect(calls).toHaveLength(2);
   });
-  it('still lists payments out from their own view with the same columns as before', async () => {
+  it('still lists payments out from their own view, with the ringgit figures stage 4b reads', async () => {
     const { ctx, calls } = fakeFinance({ data: [], error: null });
     expect(await listPaymentsOut(ctx)).toEqual([]);
     expect(calls[0]).toMatchObject({ name: 'finance_payments_out', order: ['txn_date desc', 'allocation_id asc'] });
     expect(calls[0].columns).toBe(
-      'allocation_id,transaction_id,number,txn_date,method,amount,transaction_amount,status,reference,account_id,account_name,bill_id,bill_no,supplier_name',
+      'allocation_id,transaction_id,number,txn_date,method,amount,transaction_amount,status,reference,account_id,account_name,bill_id,bill_no,supplier_name,' +
+        'currency,amount_myr,carried_myr,realised_myr',
     );
   });
   it('throws a read error for the screen’s error page', async () => {

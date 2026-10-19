@@ -5,7 +5,10 @@
  * ringgit received shared over the invoices, what each invoice carried for
  * the part paid, and the realised gain or loss; and a credit note or a
  * refund on such an invoice, which the same closing rule carries (stage 3c,
- * 20261120120000_bendahara_fx_credit_notes_refunds.sql). Pure, and in whole numbers
+ * 20261120120000_bendahara_fx_credit_notes_refunds.sql); and a ringgit payment of
+ * supplier bills in another currency (stage 4b, private.finance_fx_carried_bill in
+ * 20261121110000_bendahara_fx_payments_out.sql, the bill side of the same rule:
+ * carriedSen answers it too). Pure, and in whole numbers
  * only: money is a bigint count of sen (every amount column keeps two
  * decimals, a currency with no cents included) and a rate a bigint count of
  * 10^-10, as document-currency.ts works them. The payment form shows the
@@ -116,11 +119,15 @@ export type SettlementPreview = {
 };
 
 /**
- * What the database will make of a ringgit payment of these parts, or null while something is not a number
- * yet (the ringgit received, an amount, or a rate).
+ * The shared working of the two previews below: the ringgit shared over the parts, what each part carried,
+ * and `difference(share, carried)` for each. Null while a figure is not a number yet.
  */
-export function settlementPreview(received: string, parts: SettledPart[]): SettlementPreview | null {
-  const total = senFromText(received);
+function previewOf(
+  ringgit: string,
+  parts: SettledPart[],
+  difference: (shareSen: bigint, carried: bigint) => bigint,
+): SettlementPreview | null {
+  const total = senFromText(ringgit);
   if (total === null || total <= ZERO || parts.length === 0) return null;
   const read: { id: string; sen: bigint; rate: bigint; open: bigint; openMyr: bigint }[] = [];
   for (const p of parts) {
@@ -134,12 +141,36 @@ export function settlementPreview(received: string, parts: SettledPart[]): Settl
   let carriedAll = ZERO;
   const out = read.map((p, i) => {
     const carried = carriedSen(p.sen, p.rate, p.open, p.openMyr);
-    const difference = realisedSen(shares[i], carried);
-    realised += difference;
+    const d = difference(shares[i], carried);
+    realised += d;
     carriedAll += carried;
-    return { id: p.id, ringgit: ringgitOf(shares[i]), carried: ringgitOf(carried), realised: ringgitOf(difference) };
+    return { id: p.id, ringgit: ringgitOf(shares[i]), carried: ringgitOf(carried), realised: ringgitOf(d) };
   });
   return { parts: out, carried: ringgitOf(carriedAll), realised: ringgitOf(realised) };
+}
+
+/**
+ * What the database will make of a ringgit payment of these parts, or null while something is not a number
+ * yet (the ringgit received, an amount, or a rate).
+ */
+export function settlementPreview(received: string, parts: SettledPart[]): SettlementPreview | null {
+  return previewOf(received, parts, (share, carried) => realisedSen(share, carried));
+}
+
+/** Realised on money out (a bill paid): what the bill carried less the ringgit paid out. Above 0 a gain. */
+export function realisedOutSen(carried: bigint, paidSen: bigint): bigint {
+  return carried - paidSen;
+}
+
+/**
+ * What the database will make of a ringgit payment of these bills (stage 4b: private.finance_fx_settle and
+ * private.finance_fx_carried_bill): the ringgit paid out shared over the bills as `shareRinggit` shares it, what
+ * each carried (`carriedSen`: the closing figure, or the part at the rate capped at the ringgit still open), and
+ * the realised difference, carried less paid out. Null while something is not a number yet. "About": a payment
+ * posted first can change what a bill still carries; the database's figure is the one kept.
+ */
+export function billPaymentPreview(paidOut: string, parts: SettledPart[]): SettlementPreview | null {
+  return previewOf(paidOut, parts, (share, carried) => realisedOutSen(carried, share));
 }
 
 /**

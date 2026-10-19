@@ -49,7 +49,7 @@ async function usdDraft(ctx: Ctx) {
   return { id: saved.data.id, supplierId: acme.data.id };
 }
 
-testWithSupabase('a USD bill at a typed rate posts its ringgit, and a payment of it is not available yet', async () => {
+testWithSupabase('a USD bill at a typed rate posts its ringgit, and a payment of it needs the ringgit paid out', async () => {
   const ctx = await owner(`Bill USD ${Date.now()}`);
   const { id } = await usdDraft(ctx);
   expect(await getBill(ctx, id)).toMatchObject({
@@ -87,12 +87,13 @@ testWithSupabase('a USD bill at a typed rate posts its ringgit, and a payment of
   const balances = await listBillBalances(ctx);
   expect(balances.find((b) => b.balance === 4536)).toBeTruthy();
 
-  // A payment of it is refused with the payment form's sentence (FIN41, until stage 4b).
+  // A payment of it with no ringgit paid out is refused with the payment form's sentence (FIN46; stage 4b pays it,
+  // tests/bendahara-fx-payments-out.test.ts).
   const [bank] = (await listAccounts(ctx)).filter((a) => a.kind === 'bank');
   const paid = await recordPaymentOut(ctx, {
     account_id: bank.id, txn_date: today, method: 'bank_transfer', allocations: [{ bill_id: id, amount: 100 }],
   });
-  expect(paid).toEqual({ ok: false, error: MONEY_MESSAGES.foreignBillNotYet });
+  expect(paid).toEqual({ ok: false, error: MONEY_MESSAGES.ringgitPaidOut });
 });
 
 testWithSupabase('the assistant does not edit a foreign draft; a ringgit bill in the same workspace reads as before', async () => {
