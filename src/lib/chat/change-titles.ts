@@ -86,6 +86,7 @@ function labelOf(row: Record<string, unknown>, kind?: ItemKind): string | null {
   if (kind === 'invoice') return text(row.invoice_no) ?? text(row.customer_name);
   if (kind === 'quotation') return text(row.quotation_no) ?? text(row.customer_name);
   if (kind === 'rfq') return text(row.rfq_no) ?? text(row.supplier_name);
+  if (kind === 'purchase-order') return text(row.po_no) ?? text(row.supplier_name);
   if (kind === 'bill') return text(row.bill_no) ?? text(row.supplier_name);
   if (kind === 'credit-note') return text(row.credit_note_no) ?? text(row.customer_name);
   if (kind === 'finance-contact' || kind === 'item') return text(row.name);
@@ -150,6 +151,7 @@ export type ItemKind =
   | 'invoice'
   | 'quotation'
   | 'rfq'
+  | 'purchase-order'
   | 'bill'
   | 'credit-note'
   | 'finance-contact'
@@ -293,6 +295,10 @@ const KIND_OF_TOOL: Record<string, ItemKind> = {
   quoteRfq: 'rfq',
   convertRfq: 'rfq',
   closeRfq: 'rfq',
+  savePurchaseOrder: 'purchase-order',
+  submitPurchaseOrder: 'purchase-order',
+  receivePurchaseOrder: 'purchase-order',
+  billFromPurchaseOrder: 'purchase-order',
   listBills: 'bill',
   getBill: 'bill',
   saveBill: 'bill',
@@ -1898,6 +1904,10 @@ export function approvalTitle(
     case 'sendRfq': return `Mark ${the('request for quotation', 'rfq')} as sent to the supplier?`;
     case 'quoteRfq': return `Record the supplier's quote on ${the('request for quotation', 'rfq')}?`;
     case 'convertRfq': return `Make a draft purchase order from ${the('request for quotation', 'rfq')}?`;
+    case 'savePurchaseOrder': return i.id ? `Save changes to ${the('purchase order', 'purchase-order')}?` : 'Create a draft purchase order?';
+    case 'submitPurchaseOrder': return `Submit ${the('purchase order', 'purchase-order')} for approval?`;
+    case 'receivePurchaseOrder': return `Record this delivery against ${the('purchase order', 'purchase-order')}?`;
+    case 'billFromPurchaseOrder': return `Create a draft supplier bill from ${the('purchase order', 'purchase-order')}?`;
     case 'closeRfq': return `Close ${the('request for quotation', 'rfq')}?`;
     case 'saveBill': return i.id ? `Save changes to ${the('supplier bill', 'bill')}?` : 'Create a draft supplier bill?';
     case 'postBill': return `Post ${the('supplier bill', 'bill')}?`;

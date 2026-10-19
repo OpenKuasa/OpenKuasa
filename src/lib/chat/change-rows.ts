@@ -126,7 +126,7 @@ const isPlain = (value: unknown): value is Record<string, unknown> =>
 const ITEM_KINDS: ReadonlySet<string> = new Set<ItemKind>([
   'campaign', 'creative', 'form', 'lead', 'contact', 'deal', 'stage', 'follow-up', 'schedule', 'job', 'application',
   'candidate', 'employee', 'department', 'leave', 'time-off', 'claim', 'overtime', 'holiday', 'settings', 'payslip',
-  'payslip-line', 'payroll-run', 'goal', 'review', 'training', 'announcement', 'rfq',
+  'payslip-line', 'payroll-run', 'goal', 'review', 'training', 'announcement', 'rfq', 'purchase-order',
 ]);
 
 /** The kind of row an id argument points at, from its name: `contactId` and `contact_id` → contact. */

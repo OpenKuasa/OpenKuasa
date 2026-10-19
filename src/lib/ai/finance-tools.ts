@@ -124,6 +124,16 @@ import {
   trialBalance,
 } from '@/lib/finance/reports';
 import {
+  billFromPurchaseOrder,
+  billFromPurchaseOrderInput,
+  purchaseOrderIdInput,
+  receivePurchaseOrder,
+  receivePurchaseOrderInput,
+  savePurchaseOrder,
+  savePurchaseOrderInput,
+  submitPurchaseOrder,
+} from '@/lib/finance/purchase-orders';
+import {
   closeRfq,
   convertRfq,
   getRfq,
@@ -163,6 +173,10 @@ export const FINANCE_WRITE_TOOL_NAMES = [
   'quoteRfq',
   'convertRfq',
   'closeRfq',
+  'savePurchaseOrder',
+  'submitPurchaseOrder',
+  'receivePurchaseOrder',
+  'billFromPurchaseOrder',
   'saveCreditNote',
   'issueCreditNote',
   'voidCreditNote',
@@ -517,6 +531,27 @@ export function createBendaharaTools(access: FinanceAccess) {
       description: 'Close an RFQ that was declined or not taken up.',
       inputSchema: rfqIdInput,
       execute: async (input) => closeRfq(ctx, input),
+    }),
+    // Purchase orders (decide/close/cancel are sign-off tools, added separately)
+    savePurchaseOrder: tool({
+      description: 'Create or edit a DRAFT purchase order (supplier, lines). Omit id to create.',
+      inputSchema: savePurchaseOrderInput,
+      execute: async (input) => savePurchaseOrder(ctx, input),
+    }),
+    submitPurchaseOrder: tool({
+      description: 'Submit a draft purchase order for approval (it gets its number).',
+      inputSchema: purchaseOrderIdInput,
+      execute: async (input) => submitPurchaseOrder(ctx, input),
+    }),
+    receivePurchaseOrder: tool({
+      description: 'Record a delivery against an approved purchase order (received quantity per line).',
+      inputSchema: receivePurchaseOrderInput,
+      execute: async (input) => receivePurchaseOrder(ctx, input),
+    }),
+    billFromPurchaseOrder: tool({
+      description: 'Create a DRAFT supplier bill from an approved purchase order.',
+      inputSchema: billFromPurchaseOrderInput,
+      execute: async (input) => billFromPurchaseOrder(ctx, input),
     }),
     // Credit notes
     saveCreditNote: tool({
