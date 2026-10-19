@@ -14,6 +14,7 @@ import { inUsersLanguage } from '@/lib/ai/reply-language';
 import type { CrmAccess } from '@/lib/ai/crm-tools';
 import { prepareCvStep } from '@/lib/ai/hire-tools';
 import { guardDeletions } from '@/lib/ai/hire-deletions';
+import { guardFinanceWrites } from '@/lib/ai/finance-id-gate';
 import { guardInterviewChanges } from '@/lib/ai/hire-interview-gate';
 import { cachedInstructions } from '@/lib/ai/prompt-cache';
 import { guardPoolChanges } from '@/lib/ai/hire-pool-gate';
@@ -64,13 +65,17 @@ function boundToolkit(products: ProductToolkit[], messages: ModelMessage[], appr
   const kit = combineToolkits(products);
   // The first deletion of a turn, the first talent pool change and the first interview change go to the user as a
   // card; any other of its kind is denied before a card exists, and so is one for an id nobody looked up. Deletions
-  // first, then the pool, then interviews, as before.
-  const toolApproval = guardInterviewChanges(
-    guardPoolChanges(
-      guardDeletions(kit.toolApproval, products.find((p) => p.checkDeletion)?.checkDeletion),
-      products.find((p) => p.checkPoolChange)?.checkPoolChange,
+  // first, then the pool, then interviews, as before. Finance writes are gated last: `guardFinanceWrites` only
+  // touches finance tool names, so it is orthogonal to the hire guards and denies a finance write on an id no read
+  // returned this conversation (issue #225), before a card.
+  const toolApproval = guardFinanceWrites(
+    guardInterviewChanges(
+      guardPoolChanges(
+        guardDeletions(kit.toolApproval, products.find((p) => p.checkDeletion)?.checkDeletion),
+        products.find((p) => p.checkPoolChange)?.checkPoolChange,
+      ),
+      products.find((p) => p.checkInterviewChange)?.checkInterviewChange,
     ),
-    products.find((p) => p.checkInterviewChange)?.checkInterviewChange,
   );
   return bindApprovals({ tools: kit.tools, toolApproval }, products, approvals ?? requestOnlyBinding(messages));
 }

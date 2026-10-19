@@ -247,6 +247,20 @@ function applyGate(products: ProductToolkit[], team: TeamContext, turn: TurnStat
   return async (input, { toolCallId, messages }) => {
     const id = (input as { proposalId?: unknown } | null)?.proposalId;
     const proposal = typeof id === 'string' ? team.proposals.get(id) : undefined;
+    // A finance write acts on a row the caller must have looked up (issue #225). The row id is in the stored
+    // proposal, not in the messages here, so it is checked on the server by reading the row: a hallucinated or
+    // foreign id fails this read before any card is drawn. Finance is not a limited kind, so without this it would
+    // fall straight through the early return below to a card. A settled or lapsed proposal (input === null) is left
+    // to `apply`'s own NOT_WAITING: reading `undefined` would otherwise mislabel it "that row does not exist".
+    if (proposal && proposal.input != null) {
+      const tk = products.find((p) => p.key === proposal.product);
+      if (tk?.checkFinanceId) {
+        const target = (proposal.input as { id?: unknown } | null)?.id;
+        if (!(await tk.checkFinanceId(proposal.action, target))) {
+          return { type: 'denied', reason: 'That row does not exist for you. Look it up first, then prepare the change again.' };
+        }
+      }
+    }
     const kind = proposal ? limitedKind(proposal.action) : null;
     // A change of no limited kind has no check here: its record was seen, and it goes to the user as before.
     if (proposal && !kind) gated.add(proposal.id);
@@ -756,11 +770,15 @@ export function createTeamTools(
   });
   return {
     tools,
-    // Only a team that can prepare a change held to one a turn needs the gate; any other keeps the plain card.
+    // A team that can prepare a change held to one a turn needs the gate; so does one with finance writes, whose
+    // id-safety is the server check `applyGate` runs (finance is not a limited kind, so this install condition must
+    // name it or the check never runs). Any other team keeps the plain card.
     toolApproval: {
-      [APPLY_TOOL]: products.some((p) => Object.keys(p.write).some((name) => limitedKind(name) !== null))
-        ? applyGate(products, team, turn, gated)
-        : 'user-approval',
+      [APPLY_TOOL]:
+        products.some((p) => Object.keys(p.write).some((name) => limitedKind(name) !== null)) ||
+        products.some((p) => p.checkFinanceId)
+          ? applyGate(products, team, turn, gated)
+          : 'user-approval',
     },
     prepareStep: ({ steps }) => {
       const proposal = changeToApply(steps[steps.length - 1]);
