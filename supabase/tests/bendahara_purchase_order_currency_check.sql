@@ -211,6 +211,47 @@ begin
     fails := fails || format('4b: the RFQ of three lines of USD 33.33 at 4.2555 reads RM %s (not 425.52)', r.total_myr);
   end if;
 
+  -- ==== 4d: an order with SST: each line and its SST converted on their own, then added ======
+  -- 1 x USD 33.33 at 10% (SST 3.33) and 3 x USD 0.15 at 8% (0.45, SST 0.04), at 4.2555:
+  -- 141.84 + 14.17 + 1.91 + 0.17 = 158.09; converting each line with its SST added first would give 158.10.
+  perform public.finance_save_purchase_order(org, jsonb_build_object('supplier_id', sup, 'po_date', current_date,
+    'notes', 'case 4d', 'currency', 'USD', 'fx_rate', '4.2555', 'fx_rate_source', 'manual'),
+    '[{"description":"Gauge","quantity":1,"unit_price":33.33,"sst_rate":10},
+      {"description":"Washers","quantity":3,"unit_price":0.15,"sst_rate":8}]'::jsonb);
+  select total, total_myr into r from public.finance_purchase_order_totals where org_id = org and notes = 'case 4d';
+  if r.total is distinct from 37.15 or r.total_myr is distinct from 158.09 then
+    fails := fails || format('4d: an order with SST reads USD %s, RM %s (not 37.15 / 158.09)', r.total, r.total_myr);
+  end if;
+
+  -- ==== 4e: a rate typed by hand keeps no date, whatever is sent ===========================
+  fails := fails || public.bendahara_check_try('4e: an order with a typed rate sent with a date', 'ok',
+    format('select public.finance_save_purchase_order(%L, %L, %L)', org,
+      jsonb_build_object('supplier_id', sup, 'po_date', current_date, 'notes', 'case 4e', 'currency', 'USD', 'fx_rate', '4.2',
+        'fx_rate_source', 'manual', 'fx_rate_date', '1999-01-08'), p_lines));
+  fails := fails || public.bendahara_check_try('4e: an RFQ with a typed rate sent with a date', 'ok',
+    format('select public.finance_save_rfq(%L, %L, %L)', org,
+      jsonb_build_object('supplier_id', sup, 'rfq_date', current_date, 'notes', 'case 4e', 'currency', 'USD', 'fx_rate', '4.2',
+        'fx_rate_source', 'manual', 'fx_rate_date', '1999-01-08'), rfq_lines));
+  select count(*) into n from (
+    select fx_rate_source, fx_rate_date from public.finance_purchase_orders where org_id = org and notes = 'case 4e'
+    union all
+    select fx_rate_source, fx_rate_date from public.finance_rfqs where org_id = org and notes = 'case 4e'
+  ) x where fx_rate_source = 'manual' and fx_rate_date is null;
+  if n <> 2 then fails := fails || format('4e: %s of 2 typed rates sent with a date are stored manual with no date', n); end if;
+
+  -- ==== 4f: a BNM-marked draft switched to another currency, rate and date kept: FIN39 =====
+  po_keep := public.finance_save_purchase_order(org, jsonb_build_object('supplier_id', sup, 'po_date', '1999-01-10',
+    'notes', 'case 4f', 'currency', 'USD', 'fx_rate', '4.083', 'fx_rate_source', 'bnm', 'fx_rate_date', '1999-01-08'), p_lines);
+  fails := fails || public.bendahara_check_try('4f: a BNM-marked order switched to SGD, keeping USD''s rate', 'FIN39',
+    format('update public.finance_purchase_orders set currency = %L where id = %L', 'SGD', po_keep));
+  fails := fails || public.bendahara_check_try('4f: a BNM-marked RFQ switched to SGD, keeping USD''s rate', 'FIN39',
+    format('update public.finance_rfqs set currency = %L where org_id = %L and rfq_date = %L and fx_rate_source = %L',
+      'SGD', org, '1999-01-10', 'bnm'));
+  fails := fails || public.bendahara_check_try('4f: the same draft saved again, nothing about its rate changed', 'ok',
+    -- status is in the trigger's column list, so the guard is asked, and finds no rate being set.
+    format('update public.finance_purchase_orders set status = %L, currency = %L, notes = %L where id = %L',
+      'draft', 'USD', 'case 4f again', po_keep));
+
   -- ==== 4c: a saved BNM rate is not asked again when the order is submitted and approved ====
   -- BNM's row for the day is corrected after the order was saved (a refetch that changes a published figure).
   reset role;
@@ -341,8 +382,10 @@ begin
     fails := fails || format('9: an RFQ saved with no currency is %s at %s (%s)', r.currency, r.fx_rate, r.fx_rate_source);
   end if;
   -- And a draft switched back to ringgit is rate 1 with nothing else, whatever is sent.
-  perform public.finance_save_purchase_order(org, jsonb_build_object('id', po_keep, 'supplier_id', sup, 'po_date', current_date,
-    'currency', 'MYR', 'fx_rate', '9', 'fx_rate_source', 'bnm', 'fx_rate_date', '1999-01-08'), p_lines);
+  fails := fails || public.bendahara_check_try('9: a draft switched to ringgit with a rate, a BNM mark and a date sent', 'ok',
+    format('select public.finance_save_purchase_order(%L, %L, %L)', org,
+      jsonb_build_object('id', po_keep, 'supplier_id', sup, 'po_date', current_date,
+        'currency', 'MYR', 'fx_rate', '9', 'fx_rate_source', 'bnm', 'fx_rate_date', '1999-01-08'), p_lines));
   select currency, fx_rate, fx_rate_source, fx_rate_date into r from public.finance_purchase_orders where id = po_keep;
   if r.currency is distinct from 'MYR' or r.fx_rate is distinct from 1 or r.fx_rate_source is not null or r.fx_rate_date is not null then
     fails := fails || format('9: an order switched to ringgit is %s at %s (%s, %s)', r.currency, r.fx_rate, r.fx_rate_source, r.fx_rate_date);
