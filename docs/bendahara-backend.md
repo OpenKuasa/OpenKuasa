@@ -3017,3 +3017,7 @@ with no date).
   ringgit account with the ringgit paid out (`FIN46` without it) and is paid
   out now: asked as scheduled it is refused with `FIN47`. The finance
   assistant records credit notes and refunds on ringgit invoices only.
+  A payment in on such an invoice is not voided while a credit note issued
+  (or dated) after it stands on that invoice (`FIN48`): void the credit note
+  first, then the payment, and issue the credit note again, which then takes
+  the closing figure, so Receivable ends at 0.00.
