@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-const seen = vi.hoisted(() => ({ postInput: null as unknown }));
+const seen = vi.hoisted(() => ({ postInput: null as unknown, decideInput: null as unknown }));
 
 // Keep the real Zod input schemas; override only the fns we invoke.
 vi.mock('@/lib/finance/invoices', async (importOriginal) => {
@@ -11,6 +11,18 @@ vi.mock('@/lib/finance/invoices', async (importOriginal) => {
     postInvoice: async (_ctx: unknown, input: unknown) => {
       seen.postInput = input;
       return { ok: false as const, error: 'posting blocked' };
+    },
+  };
+});
+
+// Sign-off: the capability refuses (FIN14-style); the tool must hand that refusal back untouched.
+vi.mock('@/lib/finance/purchase-orders', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/finance/purchase-orders')>();
+  return {
+    ...actual,
+    decidePurchaseOrder: async (_ctx: unknown, input: unknown) => {
+      seen.decideInput = input;
+      return { ok: false as const, error: 'Only the business owner or an admin can approve a purchase order.' };
     },
   };
 });
@@ -157,6 +169,25 @@ describe('Bendahara write tools', () => {
       expect(FINANCE_WRITE_TOOL_NAMES).toContain(name);
       expect(v).not.toHaveProperty(name);
     }
+  });
+
+  it('adds the purchase-order sign-off tools for a writer, none for a viewer', () => {
+    const names = ['decidePurchaseOrder', 'closePurchaseOrder', 'cancelPurchaseOrder'];
+    const w = createBendaharaTools({ client: {} as never, orgId: 'o', canWrite: true });
+    const v = createBendaharaTools({ client: {} as never, orgId: 'o', canWrite: false });
+    for (const name of names) {
+      expect(w).toHaveProperty(name);
+      expect(FINANCE_WRITE_TOOL_NAMES).toContain(name);
+      expect(v).not.toHaveProperty(name);
+    }
+  });
+
+  it('relays a refused purchase-order approval verbatim: nothing swallowed, no success claimed', async () => {
+    const tools = createBendaharaTools(writer()) as Record<string, unknown>;
+    const out = await exec(tools.decidePurchaseOrder, { id: '11111111-1111-4111-8111-111111111111', approve: true });
+    expect(out).toEqual({ ok: false, error: 'Only the business owner or an admin can approve a purchase order.' });
+    expect(out).not.toHaveProperty('data');
+    expect(seen.decideInput).toMatchObject({ approve: true });
   });
 
   it('lists chart-of-accounts, filtered ledger entries, and journals', () => {

@@ -126,6 +126,10 @@ import {
 import {
   billFromPurchaseOrder,
   billFromPurchaseOrderInput,
+  cancelPurchaseOrder,
+  closePurchaseOrder,
+  decidePurchaseOrder,
+  decidePurchaseOrderInput,
   purchaseOrderIdInput,
   receivePurchaseOrder,
   receivePurchaseOrderInput,
@@ -177,6 +181,9 @@ export const FINANCE_WRITE_TOOL_NAMES = [
   'submitPurchaseOrder',
   'receivePurchaseOrder',
   'billFromPurchaseOrder',
+  'decidePurchaseOrder',
+  'closePurchaseOrder',
+  'cancelPurchaseOrder',
   'saveCreditNote',
   'issueCreditNote',
   'voidCreditNote',
@@ -552,6 +559,21 @@ export function createBendaharaTools(access: FinanceAccess) {
       description: 'Create a DRAFT supplier bill from an approved purchase order.',
       inputSchema: billFromPurchaseOrderInput,
       execute: async (input) => billFromPurchaseOrder(ctx, input),
+    }),
+    decidePurchaseOrder: tool({
+      description: 'Approve or reject a purchase order waiting for approval. Set approve false and give a reason to reject. The business’s owner or an admin only, and never your own order (the books enforce both).',
+      inputSchema: decidePurchaseOrderInput,
+      execute: async (input) => decidePurchaseOrder(ctx, input),
+    }),
+    closePurchaseOrder: tool({
+      description: 'Close an approved purchase order.',
+      inputSchema: purchaseOrderIdInput,
+      execute: async (input) => closePurchaseOrder(ctx, input),
+    }),
+    cancelPurchaseOrder: tool({
+      description: 'Cancel a purchase order.',
+      inputSchema: purchaseOrderIdInput,
+      execute: async (input) => cancelPurchaseOrder(ctx, input),
     }),
     // Credit notes
     saveCreditNote: tool({

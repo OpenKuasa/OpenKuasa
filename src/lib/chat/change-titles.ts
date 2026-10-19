@@ -299,6 +299,9 @@ const KIND_OF_TOOL: Record<string, ItemKind> = {
   submitPurchaseOrder: 'purchase-order',
   receivePurchaseOrder: 'purchase-order',
   billFromPurchaseOrder: 'purchase-order',
+  decidePurchaseOrder: 'purchase-order',
+  closePurchaseOrder: 'purchase-order',
+  cancelPurchaseOrder: 'purchase-order',
   listBills: 'bill',
   getBill: 'bill',
   saveBill: 'bill',
@@ -1908,6 +1911,9 @@ export function approvalTitle(
     case 'submitPurchaseOrder': return `Submit ${the('purchase order', 'purchase-order')} for approval?`;
     case 'receivePurchaseOrder': return `Record this delivery against ${the('purchase order', 'purchase-order')}?`;
     case 'billFromPurchaseOrder': return `Create a draft supplier bill from ${the('purchase order', 'purchase-order')}?`;
+    case 'decidePurchaseOrder': return `${i.approve === false ? 'Reject' : 'Approve'} ${the('purchase order', 'purchase-order')}?`;
+    case 'closePurchaseOrder': return `Close ${the('purchase order', 'purchase-order')}?`;
+    case 'cancelPurchaseOrder': return `Cancel ${the('purchase order', 'purchase-order')}?`;
     case 'closeRfq': return `Close ${the('request for quotation', 'rfq')}?`;
     case 'saveBill': return i.id ? `Save changes to ${the('supplier bill', 'bill')}?` : 'Create a draft supplier bill?';
     case 'postBill': return `Post ${the('supplier bill', 'bill')}?`;
