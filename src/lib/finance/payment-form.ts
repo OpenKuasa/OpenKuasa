@@ -19,6 +19,7 @@ import {
   typedAmounts,
 } from './allocation-form';
 import { BILL_MESSAGES, type BillListRow } from './bills';
+import { BASE_CURRENCY } from './currencies';
 import { rm } from './format';
 import {
   type FinanceAccount,
@@ -38,6 +39,8 @@ export type PayableBill = {
   supplier_name: string;
   /** The purchase order the bill is raised against; null when it has none. */
   purchase_order_id: string | null;
+  /** ISO 4217 code: the currency of the figures below (ringgit only, until payments of foreign bills arrive). */
+  currency: string;
   due_date: string;
   overdue: boolean;
   /** Still owed after every paid payment. */
@@ -73,12 +76,17 @@ export function heldByBill(payments: PaymentOutRow[]): Record<string, number> {
 /**
  * The bills a payment can be recorded against: posted, not fully paid, and not
  * already covered by scheduled payments. The database refuses a payment for
- * more than balance − scheduled, so that is what the form offers.
+ * more than balance − scheduled, so that is what the form offers. Bills in
+ * ringgit only: a payment of a bill in another currency is not available yet
+ * (FIN41, stage 4a; the next stage opens it on Payments Out).
  */
 export function payableBills(bills: BillListRow[], payments: PaymentOutRow[]): PayableBill[] {
   const held = heldByBill(payments);
   return bills
-    .filter((b) => (b.display_status === 'pending' || b.display_status === 'overdue') && b.balance > 0)
+    .filter(
+      (b) =>
+        (b.display_status === 'pending' || b.display_status === 'overdue') && b.balance > 0 && b.currency === BASE_CURRENCY,
+    )
     .map((b) => {
       const scheduled = held[b.id] ?? 0;
       return {
@@ -87,6 +95,7 @@ export function payableBills(bills: BillListRow[], payments: PaymentOutRow[]): P
         supplier_id: b.supplier_id,
         supplier_name: b.supplier_name,
         purchase_order_id: b.purchase_order_id,
+        currency: b.currency,
         due_date: b.due_date,
         overdue: b.display_status === 'overdue',
         balance: b.balance,

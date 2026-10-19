@@ -117,7 +117,7 @@ describe('what the two payment forms share', () => {
 });
 
 describe('the payment-out form, as the shared card draws it', () => {
-  const bill = (n: number, b: Partial<PayableBill> = {}): PayableBill => ({
+  const bill = (n: number, b: Partial<PayableBill> = {}): PayableBill => ({ currency: 'MYR',
     id: `bill-${n}`,
     bill_no: `BILL-000${n}`,
     supplier_id: LIM,

@@ -10,7 +10,9 @@ export const OPEN_PAGE_SIZE = 1000;
 
 // An aged table adds invoices up, so its balance is the invoice's balance in ringgit (its own balance for ringgit).
 const INVOICE_COLUMNS = 'customer_id,customer_name,due_date,balance:balance_myr,display_status';
-const BILL_COLUMNS = 'supplier_id,supplier_name,due_date,balance,display_status';
+// And for bills (stage 4a). The open filter below stays on the bill's own balance column: PostgREST filters by
+// column, not by the alias.
+const BILL_COLUMNS = 'supplier_id,supplier_name,due_date,balance:balance_myr,display_status';
 
 /** Every posted invoice with a balance that is not zero (a negative one is a customer in credit), a page at a time. Throws when a read fails. */
 export async function listOpenInvoices(ctx: FinanceWriteContext): Promise<InvoiceBalance[]> {

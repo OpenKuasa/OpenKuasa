@@ -7,6 +7,7 @@ import type { PaymentVoucherRow } from '@/lib/finance/cash-book';
 import { voucherDecisionPayload } from '@/lib/finance/voucher-form';
 import { SAMPLE_PAYMENT_VOUCHERS } from '@/screens/finance/cash-book-sample';
 import { SAMPLE_TODAY } from '@/screens/finance/sales-sample';
+import { ringgitBill } from './helpers/bill-rows';
 
 /**
  * The Payment Vouchers screen as the server sends it: rendered to a string and read as markup (no DOM here). A
@@ -317,7 +318,7 @@ describe('Edit on a draft', () => {
   const editor = (): VouchersWriter => ({
     ...writer(false),
     accounts: [{ id: ACCOUNT, name: 'Maybank Current', kind: 'bank', bank_name: 'Maybank' }],
-    bills: [bill],
+    bills: [ringgitBill(bill)],
     payments: [held(ID, 100, 'draft'), held('other', 10, 'pending_approval')],
   });
   const html = () => render(editor(), [draft], { kind: 'edit', id: ID });

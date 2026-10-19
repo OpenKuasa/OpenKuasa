@@ -92,12 +92,13 @@ describe('listInvoiceBalances', () => {
     const { ctx } = fakeListClient([{ data: null, error: failure }]);
     await expect(listInvoiceBalances(ctx)).rejects.toBe(failure);
   });
-  it('leaves the bills read as it was: its own view, its own column, its own statuses', async () => {
+  it('reads the bills from their own view and statuses, in ringgit (stage 4a)', async () => {
     const { ctx, requests } = fakeListClient([{ data: [], error: null }]);
     expect(await listBillBalances(ctx)).toEqual([]);
     expect(requests[0]).toMatchObject({
       view: 'supplier_bill_totals',
-      columns: 'supplier_id, balance, display_status',
+      // In ringgit: the view's balance_myr, read under the name balance.
+      columns: 'supplier_id, balance:balance_myr, display_status',
       within: { display_status: ['pending', 'overdue'] },
     });
   });

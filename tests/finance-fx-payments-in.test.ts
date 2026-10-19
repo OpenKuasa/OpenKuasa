@@ -157,7 +157,7 @@ describe('the forms that do not take a foreign invoice in 3b', () => {
     const parties = contraParties(
       [{ id: AISYAH, name: 'Aisyah Trading', is_customer: true, is_supplier: true, active: true }],
       receivable,
-      [{ id: 'b1', bill_no: 'BILL-1', supplier_id: AISYAH, supplier_name: 'Aisyah Trading', purchase_order_id: null, due_date: '2026-10-30', overdue: false, balance: 50, scheduled: 0, payable: 50 }],
+      [{ id: 'b1', bill_no: 'BILL-1', supplier_id: AISYAH, supplier_name: 'Aisyah Trading', purchase_order_id: null, currency: 'MYR', due_date: '2026-10-30', overdue: false, balance: 50, scheduled: 0, payable: 50 }],
     );
     expect(parties[0].invoices.map((i) => i.id)).toEqual([MYR_ID]);
   });

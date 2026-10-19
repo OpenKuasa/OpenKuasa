@@ -46,7 +46,8 @@ describe('listOpenBills', () => {
     expect(calls[0]).toMatchObject({
       name: 'supplier_bill_totals',
       op: 'select',
-      columns: 'supplier_id,supplier_name,due_date,balance,display_status',
+      // In ringgit (stage 4a): the view's balance_myr, read under the name balance; the filter stays on balance.
+      columns: 'supplier_id,supplier_name,due_date,balance:balance_myr,display_status',
       filters: { org_id: ctx.orgId, 'balance gt': 0, 'display_status in': ['pending', 'overdue'] },
       range: [0, OPEN_PAGE_SIZE - 1],
     });

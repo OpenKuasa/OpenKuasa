@@ -3,6 +3,7 @@ import type { BillListRow } from '@/lib/finance/bills';
 import type { InvoiceListRow } from '@/lib/finance/invoices';
 import { buildFinanceOverview } from '@/lib/finance/overview';
 import { ringgitRow } from './helpers/invoice-rows';
+import { ringgitBill } from './helpers/bill-rows';
 
 const TODAY = '2026-10-12';
 
@@ -27,7 +28,7 @@ function invoice(over: Partial<InvoiceListRow>): InvoiceListRow {
 }
 
 function bill(over: Partial<BillListRow>): BillListRow {
-  return {
+  return ringgitBill({
     id: 'b',
     bill_no: 'BILL-1',
     supplier_id: 's1',
@@ -43,7 +44,7 @@ function bill(over: Partial<BillListRow>): BillListRow {
     category_id: null,
     category_name: null,
     ...over,
-  };
+  });
 }
 
 describe('buildFinanceOverview', () => {

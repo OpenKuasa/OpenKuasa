@@ -14,6 +14,7 @@ import { can } from '@/lib/auth/permissions';
 import { amountText, amountsError, amountsTotal, defaultAccount, keptOffered, typedAmounts } from './allocation-form';
 import type { BillListRow } from './bills';
 import type { PaymentVoucherRow } from './cash-book';
+import { BASE_CURRENCY } from './currencies';
 import { type CashBookPeriod, type PaymentVoucherFilter, inPeriod, voucherHome } from './cash-book-views';
 import type { ExpenseCategory } from './expenses';
 import { rm, typedNumber } from './format';
@@ -76,10 +77,13 @@ export function newVoucherForm(accounts: FinanceAccount[], categories: ExpenseCa
  * The bills a voucher can be saved against. A bill can take what is owed on
  * it less what payments, drafts and waiting vouchers already hold; the draft
  * being edited (`draftId`) holds its own part, which it may take again.
+ * Bills in ringgit only, through all of stage 4: a bill in another currency is
+ * paid on Payments Out on the day the money leaves, never through a voucher
+ * that waits for approval (FIN41 in stage 4a, FIN47 after).
  */
 export function voucherPayableBills(bills: BillListRow[], payments: PaymentOutRow[], draftId: string | null): PayableBill[] {
   return payableBills(
-    bills,
+    bills.filter((b) => b.currency === BASE_CURRENCY),
     draftId ? payments.filter((p) => p.transaction_id !== draftId) : payments,
   );
 }

@@ -30,13 +30,14 @@ import {
   rfqsView,
   siblingBills,
 } from '@/lib/finance/purchase-views';
+import { ringgitBill } from './helpers/bill-rows';
 
 const today = '2026-10-09';
 
 let seq = 0;
 const bill = (b: Partial<BillListRow>): BillListRow => {
   seq += 1;
-  return {
+  return ringgitBill({
     id: `bill-${seq}`,
     bill_no: `BILL-${String(seq).padStart(4, '0')}`,
     supplier_id: 'lim',
@@ -52,7 +53,7 @@ const bill = (b: Partial<BillListRow>): BillListRow => {
     category_id: null,
     category_name: null,
     ...b,
-  };
+  });
 };
 
 const payment = (p: Partial<PaymentOutRow>): PaymentOutRow => {

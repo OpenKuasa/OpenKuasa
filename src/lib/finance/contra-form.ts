@@ -17,6 +17,7 @@ import {
   typedAmounts,
 } from './allocation-form';
 import { type ContraContact, type ContraRow, type ContraStatus, CONTRA_MESSAGES, contraSides } from './contras';
+import { BASE_CURRENCY } from './currencies';
 import { toCsv } from './csv';
 import { isIsoDate } from './document-lines';
 import { rm, typedNumber } from './format';
@@ -58,8 +59,9 @@ export type ContraParty = { id: string; name: string; invoices: ContraDocument[]
  * The contacts the form offers, by name: active, both a customer and a supplier, and with at least one invoice and
  * one bill that can be set off. `keep` are the contacts of the drafts, offered even when one no longer qualifies,
  * so the form for a draft shows what it holds. `invoices` and `bills` are what Payments In and Payments Out
- * would offer (`receivableInvoices`, `payableBills`), less invoices in another currency: a contra entry sets off
- * ringgit only for all of stage 3 (FIN42), while Payments In takes them from stage 3b.
+ * would offer (`receivableInvoices`, `payableBills`), less invoices and bills in another currency: a contra entry
+ * sets off ringgit only (FIN42) through stages 3 and 4, while Payments In takes foreign invoices from stage 3b and
+ * Payments Out foreign bills from stage 4b.
  */
 export function contraParties(
   contacts: ContraContact[],
@@ -84,7 +86,7 @@ export function contraParties(
       id: c.id,
       name: c.name,
       invoices: invoices.filter((i) => i.customer_id === c.id && i.currency === 'MYR').map((i) => doc(i, i.invoice_no, i.held)),
-      bills: bills.filter((b) => b.supplier_id === c.id).map((b) => doc(b, b.bill_no, b.scheduled)),
+      bills: bills.filter((b) => b.supplier_id === c.id && b.currency === BASE_CURRENCY).map((b) => doc(b, b.bill_no, b.scheduled)),
     }))
     .filter((p) => kept.has(p.id) || (p.invoices.length > 0 && p.bills.length > 0))
     .sort((a, b) => a.name.localeCompare(b.name));

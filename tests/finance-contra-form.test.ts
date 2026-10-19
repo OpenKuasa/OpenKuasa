@@ -42,7 +42,7 @@ const invoice = (id: string, customer: string, no: string, balance: number, held
   id, invoice_no: no, customer_id: customer, customer_name: '', due_date: '2026-10-31', overdue: false, balance, held, payable: balance - held,
   currency: 'MYR', fx_rate_text: '1.0000000000', balance_myr: balance,
 });
-const bill = (id: string, supplier: string, no: string, balance: number, scheduled = 0): PayableBill => ({
+const bill = (id: string, supplier: string, no: string, balance: number, scheduled = 0): PayableBill => ({ currency: 'MYR',
   id, bill_no: no, supplier_id: supplier, supplier_name: '', purchase_order_id: null, due_date: '2026-10-20', overdue: true, balance, scheduled, payable: balance - scheduled,
 });
 

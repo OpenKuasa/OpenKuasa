@@ -7,6 +7,7 @@ import type { BillListRow } from '@/lib/finance/bills';
 import type { PaymentOutRow } from '@/lib/finance/money';
 import { draftVoucherForm, newVoucherForm, voucherPayableBills } from '@/lib/finance/voucher-form';
 import type { PaymentVoucherRow } from '@/lib/finance/cash-book';
+import { ringgitBill } from './helpers/bill-rows';
 
 /**
  * The voucher form card, read without a DOM. Its hooks are given fixed values, so the card can be called as a plain
@@ -48,9 +49,9 @@ const categories = [{ id: CATEGORY, name: 'Utilities' }];
 const bills: BillListRow[] = [
   {
     id: BILL, bill_no: 'BILL-0007', supplier_id: MAJU, supplier_name: 'Syarikat Maju', bill_date: '2026-10-01', due_date: '2026-10-31', total: 132.5, paid: 0,
-    balance: 132.5, display_status: 'pending', purchase_order_id: 'po1', purchase_order_no: 'PO-0001', category_id: null, category_name: null,
+    balance: 132.5, display_status: 'pending' as const, purchase_order_id: 'po1', purchase_order_no: 'PO-0001', category_id: null, category_name: null,
   },
-];
+].map((b) => ringgitBill(b));
 const payable = voucherPayableBills(bills, [], null);
 const orders = [{ id: 'po1', po_no: 'PO-0001', total: 10000, billed_total: 12400, received_total: 0, over_billed: true, billed_over_received: false }];
 const draftRow: PaymentVoucherRow = {

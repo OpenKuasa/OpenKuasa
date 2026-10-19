@@ -4,12 +4,14 @@
  * and the tests both use it. `today` is always a YYYY-MM-DD date.
  */
 import type { Slice } from '@/components/charts';
-import type { BillDisplayStatus, BillListRow } from './bills';
+import { type BillDisplayStatus, type BillListRow, billRinggit } from './bills';
+import { BASE_CURRENCY } from './currencies';
 import { toCsv } from './csv';
 import { rm, rmShort } from './format';
 import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentMethod, type PaymentOutRow } from './money';
 import type { PurchaseOrderDelivery, PurchaseOrderListRow, PurchaseOrderStatus } from './purchase-orders';
 import type { RfqDisplayStatus, RfqListRow } from './rfqs';
+import { rateSourceWords } from './sales-views';
 import {
   ELECTRONIC,
   METHOD_COLORS,
@@ -66,7 +68,9 @@ export const PAYMENT_STATUS_LABELS: Record<PaymentOutRow['status'], string> = {
 
 /* ---- Supplier Bills ----------------------------------------------- */
 
-export function billsView(bills: BillListRow[], paid: PaymentOutRow[], today: string): BillsViewData {
+export function billsView(rows: BillListRow[], paid: PaymentOutRow[], today: string): BillsViewData {
+  // Every figure below adds bills up, so each bill's balance is its balance in ringgit (stage 4a).
+  const bills = rows.map((b) => ({ ...b, balance: billRinggit(b).balance }));
   const open = bills.filter((b) => b.display_status === 'pending' || b.display_status === 'overdue');
   const overdue = open.filter((b) => b.display_status === 'overdue');
   const weekEnd = addDays(today, 7);
@@ -117,20 +121,39 @@ export function filterBills(bills: BillListRow[], query: string, filter: BillFil
   );
 }
 
-/** The bills table as a CSV file. Amounts are numbers, so a spreadsheet can add them up. */
+/** True once any bill is in another currency: the list and the CSV then show the currency. */
+export function billsHaveForeign(rows: Pick<BillListRow, 'currency'>[]): boolean {
+  return rows.some((b) => b.currency !== BASE_CURRENCY);
+}
+
+/**
+ * The bills table as a CSV file. Amounts are numbers, so a spreadsheet can add them up. Total and balance are in
+ * each bill's own currency; once a bill is foreign, the currency, rate and ringgit columns follow.
+ */
 export function billsCsv(bills: BillListRow[]): string {
+  const base = ['No.', 'Date', 'Supplier', 'Due', 'Total', 'Balance', 'Status', 'Purchase order', 'Category'];
+  const row = (b: BillListRow) => [
+    b.bill_no,
+    b.bill_date,
+    b.supplier_name,
+    b.due_date,
+    b.total,
+    b.balance,
+    BILL_STATUS_LABELS[b.display_status],
+    b.purchase_order_no,
+    b.category_name,
+  ];
+  if (!billsHaveForeign(bills)) return toCsv(base, bills.map(row));
   return toCsv(
-    ['No.', 'Date', 'Supplier', 'Due', 'Total', 'Balance', 'Status', 'Purchase order', 'Category'],
+    [...base, 'Currency', 'Rate (RM per unit)', 'Total (RM)', 'Balance (RM)', 'Rate source'],
     bills.map((b) => [
-      b.bill_no,
-      b.bill_date,
-      b.supplier_name,
-      b.due_date,
-      b.total,
-      b.balance,
-      BILL_STATUS_LABELS[b.display_status],
-      b.purchase_order_no,
-      b.category_name,
+      ...row(b),
+      b.currency,
+      // The exact text, so a spreadsheet gets every digit the bill was posted at.
+      b.fx_rate_text ?? b.fx_rate,
+      b.total_myr,
+      b.balance_myr,
+      rateSourceWords(b),
     ]),
   );
 }

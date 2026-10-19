@@ -34,6 +34,7 @@ import {
 } from '@/lib/finance/receipt-match';
 import { NOT_ALLOWED, TOO_LARGE, WRITE_FAILED } from '@/lib/finance/result';
 import { type FinanceCall, fakeFinance } from './setup/fake-finance';
+import { ringgitBill } from './helpers/bill-rows';
 
 const RECEIPT = '44444444-4444-4444-8444-444444444444';
 const EXPENSE = '55555555-5555-4555-8555-555555555555';
@@ -59,7 +60,7 @@ const expense = (over: Partial<ExpenseRow>): ExpenseRow => ({
   paid_on: null, updated_at: '2026-10-03T09:00:00+00:00',
   ...over,
 });
-const bill = (over: Partial<BillListRow>): BillListRow => ({
+const bill = (over: Partial<BillListRow>): BillListRow => ringgitBill({
   id: BILL, bill_no: null, supplier_id: SUPPLIER, supplier_name: 'Printhub', bill_date: '2026-10-01', due_date: '2026-10-31',
   total: 310, paid: 0, balance: 310, display_status: 'draft', purchase_order_id: null, purchase_order_no: null,
   category_id: CATEGORY, category_name: 'Purchases',
@@ -339,7 +340,7 @@ describe('the attach picker', () => {
   it('offers pending and approved expenses and bills that are not void, newest first', () => {
     expect(all.map((c) => c.id)).toEqual(['e-approved', 'b-posted', 'e-pending', 'b-draft', 'e-paid']);
     expect(all.find((c) => c.id === 'e-pending')).toEqual({
-      kind: 'expense', id: 'e-pending', title: 'Expense · Travel', detail: 'Shell · 03 Oct 2026 · Pending approval', amount: 142.5, date: '2026-10-03', locked: false,
+      kind: 'expense', id: 'e-pending', title: 'Expense · Travel', detail: 'Shell · 03 Oct 2026 · Pending approval', amount: 142.5, currency: 'MYR', date: '2026-10-03', locked: false,
     });
     expect(all.find((c) => c.id === 'b-posted')).toMatchObject({ title: 'Bill BILL-0007', detail: 'Printhub · 04 Oct 2026 · Posted, overdue', locked: true });
     expect(all.find((c) => c.id === 'b-draft')).toMatchObject({ title: 'Draft bill', locked: false });

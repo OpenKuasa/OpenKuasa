@@ -51,7 +51,7 @@ vi.mock('@/lib/finance/invoices', async (importOriginal) => ({
 vi.mock('@/lib/finance/bills', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   listBills: reading('listBills', [
-    { id: 'b1', bill_no: 'BILL-0001', supplier_id: '11111111-1111-4111-8111-111111111111', supplier_name: 'Lim Hardware', purchase_order_id: null, due_date: '2026-10-31', balance: 80, display_status: 'pending' },
+    { id: 'b1', bill_no: 'BILL-0001', supplier_id: '11111111-1111-4111-8111-111111111111', supplier_name: 'Lim Hardware', purchase_order_id: null, due_date: '2026-10-31', balance: 80, display_status: 'pending', currency: 'MYR' },
   ]),
 }));
 vi.mock('@/lib/finance/money', async (importOriginal) => ({

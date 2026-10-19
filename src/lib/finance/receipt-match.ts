@@ -21,6 +21,7 @@ import type { OrgRole } from '@/lib/auth/current-org';
 import { type BillForm, newBillForm, withSupplier } from './bill-form';
 import { amountText } from './allocation-form';
 import { BILL_MESSAGES, type BillDisplayStatus, type BillListRow, saveBillInput } from './bills';
+import { BASE_CURRENCY } from './currencies';
 import { emptyLine } from './document-form';
 import { type ExpenseForm, TYPED_VENDOR } from './expense-form';
 import {
@@ -31,7 +32,7 @@ import {
   type SavedExpense,
   saveExpenseInput,
 } from './expenses';
-import { rm } from './format';
+import { money } from './format';
 import { RECEIPT_INBOX_MESSAGES, receiptIdInput } from './receipt-inbox';
 import { INBOX_RECEIPT_PAGE_SIZE, type InboxReceiptRow, type InboxReceiptType } from './receipts';
 import {
@@ -428,7 +429,8 @@ export function billFormFromReceipt(
   const description = (row.vendor ? `Receipt: ${row.vendor}` : 'Receipt').slice(0, LINE_DESCRIPTION_MAX);
   const withLine: BillForm = { ...form, lines: [{ ...emptyLine('receipt-0'), description, unit_price: boxText(row.amount) }] };
   const named = row.vendor ? suppliers.filter((s) => sameName(s.name, row.vendor ?? '')) : [];
-  return named.length === 1 ? withSupplier(withLine, named[0]) : withLine;
+  // A receipt's amount is ringgit: the supplier's default currency does not move it.
+  return named.length === 1 ? { ...withSupplier(withLine, named[0]), fx: withLine.fx } : withLine;
 }
 
 /* ---- the attach picker ------------------------------------------------- */
@@ -441,7 +443,10 @@ export type AttachCandidate = {
   title: string;
   /** Who, when and how it stands, as text. */
   detail: string;
+  /** In `currency`: an expense is ringgit; a bill is in its own currency. */
   amount: number;
+  /** ISO 4217 code. A receipt is ringgit, so only a ringgit document can be "the same amount". */
+  currency: string;
   date: string;
   /** An approved expense or a posted bill: once attached, only an owner or admin unties it. */
   locked: boolean;
@@ -462,6 +467,7 @@ export function attachCandidates(expenses: ExpenseRow[], bills: BillListRow[]): 
       title: `Expense · ${e.category_name}`,
       detail: `${e.vendor_name} · ${displayDate(e.expense_date)} · ${EXPENSE_STATE_LABELS[e.display_status]}`,
       amount: e.amount,
+      currency: BASE_CURRENCY,
       date: e.expense_date,
       locked: e.status === 'approved',
     }));
@@ -473,6 +479,7 @@ export function attachCandidates(expenses: ExpenseRow[], bills: BillListRow[]): 
       title: b.bill_no ? `Bill ${b.bill_no}` : 'Draft bill',
       detail: `${b.supplier_name} · ${displayDate(b.bill_date)} · ${BILL_STATE_LABELS[b.display_status]}`,
       amount: b.total,
+      currency: b.currency,
       date: b.bill_date,
       locked: b.display_status !== 'draft',
     }));
@@ -481,9 +488,12 @@ export function attachCandidates(expenses: ExpenseRow[], bills: BillListRow[]): 
 
 const sen = (n: number) => Math.round(n * 100);
 
-/** True when the document's amount is the receipt's, to the sen. */
+/**
+ * True when the document's amount is the receipt's, to the sen. A receipt is ringgit, so a bill in another
+ * currency is never the same amount, whatever its figure.
+ */
 export function sameAmount(candidate: AttachCandidate, receiptAmount: number | null): boolean {
-  return receiptAmount !== null && sen(candidate.amount) === sen(receiptAmount);
+  return candidate.currency === BASE_CURRENCY && receiptAmount !== null && sen(candidate.amount) === sen(receiptAmount);
 }
 
 /** How many candidates the picker lists at once; the rest are found by searching. */
@@ -502,7 +512,7 @@ export function filterAttachCandidates(
 ): AttachCandidate[] {
   const q = query.trim().toLowerCase();
   const kept = candidates.filter(
-    (c) => c.kind === kind && `${c.title} ${c.detail} ${rm(c.amount)} ${c.amount.toFixed(2)}`.toLowerCase().includes(q),
+    (c) => c.kind === kind && `${c.title} ${c.detail} ${money(c.amount, c.currency)} ${c.amount.toFixed(2)}`.toLowerCase().includes(q),
   );
   return [...kept.filter((c) => sameAmount(c, receiptAmount)), ...kept.filter((c) => !sameAmount(c, receiptAmount))];
 }

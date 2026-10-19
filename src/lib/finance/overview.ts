@@ -1,4 +1,4 @@
-import type { BillListRow } from './bills';
+import { type BillListRow, billRinggit } from './bills';
 import { type EInvoiceStatus, type InvoiceListRow, invoiceRinggit } from './invoices';
 import { round2 } from './view-helpers';
 
@@ -75,7 +75,9 @@ export function buildFinanceOverview(
     (i) => (i.display_status === 'sent' || i.display_status === 'overdue') && i.balance > 0,
   );
   const overdueInvoices = openInvoices.filter((i) => i.display_status === 'overdue');
-  const openBills = bills.filter(
+  // The same for bills: each balance in ringgit (a foreign draft with no rate counts nothing; it is a draft).
+  const billsInRinggit = bills.map((b) => ({ ...b, balance: billRinggit(b).balance }));
+  const openBills = billsInRinggit.filter(
     (b) => (b.display_status === 'pending' || b.display_status === 'overdue') && b.balance > 0,
   );
   const overdueBills = openBills.filter((b) => b.display_status === 'overdue');

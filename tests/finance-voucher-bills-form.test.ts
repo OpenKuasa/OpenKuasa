@@ -29,6 +29,7 @@ import {
   writtenVoucherTitle,
 } from '@/lib/finance/voucher-form';
 import { VOUCHER_MESSAGES as M, saveVoucherInput } from '@/lib/finance/vouchers';
+import { ringgitBill } from './helpers/bill-rows';
 
 const ACCOUNT = '11111111-1111-4111-8111-111111111111';
 const CATEGORY = '99999999-9999-4999-8999-999999999999';
@@ -42,7 +43,7 @@ const TODAY = '2026-10-12';
 
 const accounts = [{ id: ACCOUNT, name: 'Maybank Current', kind: 'bank' as const, bank_name: 'Maybank' }];
 const categories = [{ id: CATEGORY, name: 'Utilities' }];
-const bill = (id: string, no: string, supplier: string, name: string, balance: number): BillListRow => ({
+const bill = (id: string, no: string, supplier: string, name: string, balance: number): BillListRow => ringgitBill({
   id, bill_no: no, supplier_id: supplier, supplier_name: name, bill_date: '2026-10-01', due_date: '2026-10-31', total: balance, paid: 0, balance,
   display_status: 'pending', purchase_order_id: null, purchase_order_no: null, category_id: null, category_name: null,
 });

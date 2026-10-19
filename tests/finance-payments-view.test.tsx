@@ -8,6 +8,7 @@ import type { BillListRow } from '@/lib/finance/bills';
 import type { FinanceAccount, PaymentOutRow } from '@/lib/finance/money';
 import { type OrderBilling, paymentsView } from '@/lib/finance/purchase-views';
 import { payableBills } from '@/lib/finance/payment-form';
+import { ringgitBill } from './helpers/bill-rows';
 
 /**
  * The Payments Out screen as the server sends it: rendered to a string and read as markup (no DOM here, so
@@ -32,7 +33,7 @@ const SUPPLIER = '44444444-4444-4444-8444-444444444444';
 const MARK = "This bill’s purchase order is billed over its total or for more than has been received";
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 
-const bill = (id: string, extra: Partial<BillListRow> = {}): BillListRow => ({
+const bill = (id: string, extra: Partial<BillListRow> = {}): BillListRow => ringgitBill({
   id,
   bill_no: `BILL-${id}`,
   supplier_id: SUPPLIER,

@@ -185,7 +185,8 @@ async function listOpenBalances<T extends { balance: number }>(
  * every open bill, a page at a time, so the money figures are never cut short.
  */
 export async function listBillBalances(ctx: FinanceWriteContext): Promise<BillBalance[]> {
-  return listOpenBalances<BillBalance>(ctx, 'supplier_bill_totals', 'supplier_id, balance, display_status', ['pending', 'overdue']);
+  // In ringgit: these are added up per supplier, and a bill in another currency counts at its rate.
+  return listOpenBalances<BillBalance>(ctx, 'supplier_bill_totals', 'supplier_id, balance:balance_myr, display_status', ['pending', 'overdue']);
 }
 
 /**

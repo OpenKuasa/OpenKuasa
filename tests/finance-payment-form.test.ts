@@ -18,6 +18,7 @@ import {
   toggleAll,
   toggleBill,
 } from '@/lib/finance/payment-form';
+import { ringgitBill } from './helpers/bill-rows';
 
 const LIM = '11111111-1111-4111-8111-111111111111';
 const MAJU = '22222222-2222-4222-8222-222222222222';
@@ -28,7 +29,7 @@ const today = '2026-10-11';
 /** 1 → a valid uuid ending in 000000000001. */
 const billId = (n: number) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(n).padStart(12, '0')}`;
 
-const bill = (n: number, b: Partial<BillListRow> = {}): BillListRow => ({
+const bill = (n: number, b: Partial<BillListRow> = {}): BillListRow => ringgitBill({
   id: billId(n),
   bill_no: `BILL-${String(n).padStart(4, '0')}`,
   supplier_id: LIM,
