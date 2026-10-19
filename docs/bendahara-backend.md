@@ -3004,3 +3004,16 @@ with no date).
   3b that save was refused with `FIN41`). It holds its part of the invoice
   until it is deleted, and posting it is refused with `FIN45`: such an invoice
   is paid with Record payment on Invoices, which takes the ringgit received.
+- Credit notes and refunds on invoices in another currency (`20261120120000`,
+  stage 3c): `FIN41` is no longer raised. A credit note is in its invoice's
+  currency at its invoice's rate (the database writes `currency`, `fx_rate`
+  and, when it is issued, `amount_myr`, whatever the caller sent), so it
+  makes no exchange difference. A credit note is the one movement that can
+  take an invoice past zero; on a paid invoice it takes its amount at the
+  rate, and on one that owes less than the amount it takes exactly what is
+  open plus the rest at the rate (`private.finance_fx_carried`). Its
+  `amount_myr` may be 0.00 (a few units of a currency worth very little). A
+  refund on such an invoice, or on a credit note of one, is paid from a
+  ringgit account with the ringgit paid out (`FIN46` without it) and is paid
+  out now: asked as scheduled it is refused with `FIN47`. The finance
+  assistant records credit notes and refunds on ringgit invoices only.
