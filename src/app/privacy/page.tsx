@@ -6,7 +6,7 @@ import { GitHubIcon } from '@/components/brand/github-icon';
 import { REPO_URL } from '@/config/marketing';
 
 export const metadata: Metadata = {
-  title: 'Privacy · OpenKuasa OS',
+  title: 'Privacy · OpenKuasa',
 };
 
 type Section = {
@@ -18,7 +18,7 @@ type Section = {
 const SECTIONS: Section[] = [
   {
     h: 'The short version',
-    p: 'OpenKuasa OS is free, open-source software that you host yourself. When you self-host, the OpenKuasa project does not run your instance and does not collect, receive or store any of your data.',
+    p: 'OpenKuasa is free, open-source software that you host yourself. When you self-host, the OpenKuasa project does not run your instance and does not collect, receive or store any of your data.',
   },
   {
     h: 'What the project collects',

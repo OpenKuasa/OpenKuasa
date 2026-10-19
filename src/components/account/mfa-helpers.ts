@@ -81,7 +81,7 @@ export function formatSecret(secret: string): string {
 /** Contents of the downloaded recovery-codes text file. */
 export function recoveryCodesFileText(codes: string[]): string {
   return [
-    'OpenKuasa OS recovery codes',
+    'OpenKuasa recovery codes',
     '',
     'Each code works once. If you lose your phone, a recovery code signs you',
     'in. Using one turns two-factor authentication off, so you will need to',

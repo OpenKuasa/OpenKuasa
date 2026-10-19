@@ -1,4 +1,4 @@
-# OpenKuasa OS
+# OpenKuasa
 
 **The open-source business OS for Malaysian SMEs — one self-hostable app
 instead of a stack of separate CRM, HR, payroll and accounting subscriptions.**
@@ -13,7 +13,7 @@ would rather not run it themselves. It is built on the code in this repository,
 which stays open source under AGPL-3.0.
 
 <p align="center">
-  <img src="docs/screenshots/dashboard.png" alt="OpenKuasa OS — the Jebat (Ads) module overview; every module has a dashboard like this" width="900">
+  <img src="docs/screenshots/dashboard.png" alt="OpenKuasa — the Jebat (Ads) module overview; every module has a dashboard like this" width="900">
 </p>
 
 > [!IMPORTANT]
@@ -119,7 +119,7 @@ A look at the running app (sample data):
 
 ## Status
 
-OpenKuasa OS is in early development. Being upfront about where it stands:
+OpenKuasa is in early development. Being upfront about where it stands:
 
 - **Working** — the screens listed above read and write real workspace data,
   and the assistants call real models.
@@ -145,9 +145,9 @@ docs, translations, bug reports and ideas are all welcome. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for how to get started.
 
 - Report a bug or suggest a feature:
-  [open an issue](https://github.com/OpenKuasa/OpenKuasaOS/issues/new/choose)
+  [open an issue](https://github.com/OpenKuasa/OpenKuasa/issues/new/choose)
 - Looking for something to pick up:
-  [good first issues](https://github.com/OpenKuasa/OpenKuasaOS/labels/good%20first%20issue)
+  [good first issues](https://github.com/OpenKuasa/OpenKuasa/labels/good%20first%20issue)
 - Found a security problem: follow the [security policy](SECURITY.md)
 - Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md)
 
@@ -173,8 +173,8 @@ repository stays available under AGPL-3.0.
 Requires Node 22+ and [pnpm](https://pnpm.io).
 
 ```bash
-git clone https://github.com/OpenKuasa/OpenKuasaOS.git
-cd OpenKuasaOS
+git clone https://github.com/OpenKuasa/OpenKuasa.git
+cd OpenKuasa
 pnpm install
 pnpm dev
 ```
@@ -375,7 +375,7 @@ the live project. A test file is live when its name contains `.rls.` or
 
 ## License
 
-[AGPL-3.0](LICENSE). You are free to use, modify and self-host OpenKuasa OS. If
+[AGPL-3.0](LICENSE). You are free to use, modify and self-host OpenKuasa. If
 you run a modified version as a network service, you must make your source
 available to its users under the same license.
 

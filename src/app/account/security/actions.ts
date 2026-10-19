@@ -65,7 +65,7 @@ export async function startMfaSetupAction(): Promise<MfaStartResult> {
 
   const { data, error } = await supabase.auth.mfa.enroll({
     factorType: 'totp',
-    issuer: 'OpenKuasa OS',
+    issuer: 'OpenKuasa',
     // Reusing a name fails, even for a factor that was never confirmed.
     friendlyName: `Authenticator ${new Date().toISOString()}`,
   });

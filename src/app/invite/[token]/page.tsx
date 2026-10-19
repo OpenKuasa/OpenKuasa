@@ -16,7 +16,7 @@ import { createClient } from '@/lib/supabase/server';
 import { signOutToInviteAction } from './actions';
 
 export const metadata: Metadata = {
-  title: 'Join a workspace · OpenKuasa OS',
+  title: 'Join a workspace · OpenKuasa',
 };
 
 function Heading({ title, children }: { title: string; children: React.ReactNode }) {
@@ -76,7 +76,7 @@ export default async function InvitePage({
   return (
     <AuthShell>
       <Heading title={`Join ${invite.orgName}`}>
-        You have been invited to {invite.orgName} on OpenKuasa OS.
+        You have been invited to {invite.orgName} on OpenKuasa.
       </Heading>
 
       <dl className="divide-y rounded-lg border text-sm">

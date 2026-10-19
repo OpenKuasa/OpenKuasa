@@ -6,7 +6,7 @@ import { GoogleNotEnabledButton } from '@/components/auth/google-not-enabled-but
 import { LoginForm } from '@/components/auth/login-form';
 
 export const metadata: Metadata = {
-  title: 'Sign in · OpenKuasa OS',
+  title: 'Sign in · OpenKuasa',
 };
 
 const NOTICES: Record<string, string> = {

@@ -67,7 +67,7 @@ export default async function PaymentMethodsPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Payment methods</h1>
           <p className="text-sm text-muted-foreground">
-            How you pay for OpenKuasa OS.
+            How you pay for OpenKuasa.
           </p>
         </div>
         <Button size="sm">

@@ -65,7 +65,7 @@ export const NOTIFY_EVENTS = [
   { id: 'hr_request_decided', name: 'Decisions on your requests', help: 'When your leave, time-off, claim or overtime is approved or rejected' },
   { id: 'hiring', name: 'Hiring', help: 'When someone applies to one of your jobs' },
   { id: 'weekly_summary', name: 'Weekly summary', help: 'A Monday digest of last week across your workspace' },
-  { id: 'product_updates', name: 'Product updates', help: 'New features and improvements to OpenKuasa OS' },
+  { id: 'product_updates', name: 'Product updates', help: 'New features and improvements to OpenKuasa' },
 ] as const;
 export type NotifyEventId = (typeof NOTIFY_EVENTS)[number]['id'];
 

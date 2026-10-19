@@ -10,7 +10,7 @@
 export const AI_CATALOG = {
   specVersion: '1.0',
   host: {
-    displayName: 'OpenKuasa OS',
+    displayName: 'OpenKuasa',
     identifier: 'did:web:openkuasa.com',
   },
   entries: [] as unknown[],

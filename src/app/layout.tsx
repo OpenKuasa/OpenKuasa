@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const title = 'OpenKuasa OS';
+const title = 'OpenKuasa';
 const description = 'The community-built, open-source operating system for your business.';
 
 // The share image comes from the opengraph-image file convention, so no `images` here.

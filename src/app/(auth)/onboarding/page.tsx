@@ -352,7 +352,7 @@ export default function OnboardingPage() {
                   </p>
                 ) : null}
                 <p className="text-sm text-muted-foreground">
-                  OpenKuasa OS is a work in progress. Some screens work with
+                  OpenKuasa is a work in progress. Some screens work with
                   your own data and the rest still show sample data, so do not
                   rely on it to run your business yet.
                 </p>

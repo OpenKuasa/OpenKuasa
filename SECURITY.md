@@ -8,7 +8,7 @@ discussion.
 Report them privately through GitHub instead:
 
 1. Go to the repository's
-   [Security tab](https://github.com/OpenKuasa/OpenKuasaOS/security).
+   [Security tab](https://github.com/OpenKuasa/OpenKuasa/security).
 2. Choose **Report a vulnerability**.
 3. Describe the problem, how to reproduce it, and what an attacker could do
    with it.
@@ -24,9 +24,9 @@ or in another person's browser.
 
 Ordinary bugs, including ones in the sign-in screens that have no security
 impact, belong in a normal
-[bug report](https://github.com/OpenKuasa/OpenKuasaOS/issues/new/choose).
+[bug report](https://github.com/OpenKuasa/OpenKuasa/issues/new/choose).
 
 ## Supported versions
 
-OpenKuasa OS has no numbered releases yet. Fixes are made on `main` only, so
+OpenKuasa has no numbered releases yet. Fixes are made on `main` only, so
 self-hosted installs should stay up to date with it.

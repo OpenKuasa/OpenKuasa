@@ -39,7 +39,7 @@ const VIDEO_MODEL = () =>
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
 
 function provider(apiKey: string) {
-  return createOpenRouter({ apiKey, appName: 'OpenKuasa OS', appUrl: 'https://openkuasa.com' });
+  return createOpenRouter({ apiKey, appName: 'OpenKuasa', appUrl: 'https://openkuasa.com' });
 }
 
 /** The cost the provider attached to a call, or null when it attached none. */

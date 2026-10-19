@@ -4,7 +4,7 @@ import { AuthShell } from '@/components/auth/auth-shell';
 import { ForgotPasswordForm } from '@/components/auth/forgot-password-form';
 
 export const metadata: Metadata = {
-  title: 'Reset password · OpenKuasa OS',
+  title: 'Reset password · OpenKuasa',
 };
 
 export default function ForgotPasswordPage() {

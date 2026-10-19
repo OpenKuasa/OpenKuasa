@@ -1,4 +1,4 @@
-# Netlify build configuration for OpenKuasa OS (Next.js 16, App Router).
+# Netlify build configuration for OpenKuasa (Next.js 16, App Router).
 #
 # The site's dashboard build settings were left unset when the repo was
 # linked, so Netlify published the raw repo with no build and the Next.js

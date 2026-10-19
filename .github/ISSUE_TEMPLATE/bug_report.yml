@@ -34,7 +34,7 @@ body:
     id: area
     attributes:
       label: Area
-      description: Which part of OpenKuasa OS is this in?
+      description: Which part of OpenKuasa is this in?
       options:
         - Tuah (command centre)
         - Jebat (reach and marketing)

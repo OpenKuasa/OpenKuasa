@@ -61,7 +61,7 @@ export function AccountSidebar() {
           className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
         >
           <Home className="size-[18px] shrink-0" />
-          OpenKuasa OS home
+          OpenKuasa home
         </Link>
         <SignOutButton className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground">
           <LogOut className="size-[18px] shrink-0" />

@@ -161,4 +161,4 @@ export const PRODUCT_CARDS: ProductCard[] = [
 ];
 
 /** Source repository. */
-export const REPO_URL = 'https://github.com/OpenKuasa/OpenKuasaOS';
+export const REPO_URL = 'https://github.com/OpenKuasa/OpenKuasa';

@@ -1,11 +1,11 @@
 // Served at /llms.txt (https://llmstxt.org/): a Markdown summary for LLMs/agents.
 // A metadata/route handler is needed because, without it, /llms.txt falls through
 // to the [product] dynamic route and returns HTML.
-const BODY = `# OpenKuasa OS
+const BODY = `# OpenKuasa
 
 > Free and open-source (AGPL-3.0) all-in-one business suite for Malaysian SMEs — six products on one login, powered by Taming Sari AI.
 
-OpenKuasa OS is a crowd-sourced, self-hostable platform covering marketing (Jebat), sales/CRM (Kasturi), hiring (Lekir), people & HR (Lekiu) and finance (Bendahara), orchestrated by the Tuah AI command center. The products are named for the court of Melaka.
+OpenKuasa is a crowd-sourced, self-hostable platform covering marketing (Jebat), sales/CRM (Kasturi), hiring (Lekir), people & HR (Lekiu) and finance (Bendahara), orchestrated by the Tuah AI command center. The products are named for the court of Melaka.
 
 ## Pages
 - [Home](https://openkuasa.com/): product overview
@@ -13,7 +13,7 @@ OpenKuasa OS is a crowd-sourced, self-hostable platform covering marketing (Jeba
 - [Privacy](https://openkuasa.com/privacy): privacy policy
 
 ## Source
-- [GitHub](https://github.com/OpenKuasa/OpenKuasaOS): AGPL-3.0 source code
+- [GitHub](https://github.com/OpenKuasa/OpenKuasa): AGPL-3.0 source code
 `;
 
 export const dynamic = 'force-static';

@@ -1,6 +1,6 @@
-# Contributing to OpenKuasa OS
+# Contributing to OpenKuasa
 
-OpenKuasa OS is a crowd-sourced, open-source project — it exists because people
+OpenKuasa is a crowd-sourced, open-source project — it exists because people
 contribute. Thank you for being one of them.
 
 The maintainers plan to offer a paid hosted version alongside the free
@@ -33,7 +33,7 @@ reproducing someone else's implementation of it is not.
 
 ### Licensing
 
-OpenKuasa OS is licensed under [AGPL-3.0](LICENSE). Contributions are accepted
+OpenKuasa is licensed under [AGPL-3.0](LICENSE). Contributions are accepted
 under the Contributor License Agreement below. Please read it before opening a
 pull request.
 
@@ -89,14 +89,14 @@ You do not have to write code. Bug reports, ideas, design, documentation and
 testing on real devices are all useful.
 
 - **Found a bug?** Open a
-  [bug report](https://github.com/OpenKuasa/OpenKuasaOS/issues/new/choose).
+  [bug report](https://github.com/OpenKuasa/OpenKuasa/issues/new/choose).
 - **Have an idea, or want to build something?** Open a
-  [feature request](https://github.com/OpenKuasa/OpenKuasaOS/issues/new/choose).
+  [feature request](https://github.com/OpenKuasa/OpenKuasa/issues/new/choose).
 - **Found a security problem?** Do not open an issue. Follow the
   [security policy](SECURITY.md).
 - **Want something to work on?** Look for issues labelled
-  [`good first issue`](https://github.com/OpenKuasa/OpenKuasaOS/labels/good%20first%20issue)
-  or [`help wanted`](https://github.com/OpenKuasa/OpenKuasaOS/labels/help%20wanted).
+  [`good first issue`](https://github.com/OpenKuasa/OpenKuasa/labels/good%20first%20issue)
+  or [`help wanted`](https://github.com/OpenKuasa/OpenKuasa/labels/help%20wanted).
 
 Everyone taking part is expected to follow the
 [Code of Conduct](CODE_OF_CONDUCT.md).

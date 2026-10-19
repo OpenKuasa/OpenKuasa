@@ -7,7 +7,7 @@ import { MFA_RECOVER_PATH, safeNextPath } from '@/lib/auth/mfa';
 import { requireMfaChallenge } from '../guard';
 
 export const metadata: Metadata = {
-  title: 'Two-factor authentication · OpenKuasa OS',
+  title: 'Two-factor authentication · OpenKuasa',
 };
 
 export default async function MfaVerifyPage({

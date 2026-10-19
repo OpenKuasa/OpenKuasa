@@ -7,7 +7,7 @@ import { MFA_VERIFY_PATH } from '@/lib/auth/mfa';
 import { requireMfaChallenge } from '../guard';
 
 export const metadata: Metadata = {
-  title: 'Use a recovery code · OpenKuasa OS',
+  title: 'Use a recovery code · OpenKuasa',
 };
 
 export default async function MfaRecoverPage() {

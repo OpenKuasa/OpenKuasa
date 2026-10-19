@@ -42,7 +42,7 @@ function createProvider(apiKey: string) {
     apiKey,
     // Optional second intermediary (Cloudflare AI Gateway); off unless configured.
     baseURL: process.env.AI_GATEWAY_BASE_URL?.trim() || undefined,
-    appName: 'OpenKuasa OS',
+    appName: 'OpenKuasa',
     appUrl: 'https://openkuasa.com',
   });
 }
