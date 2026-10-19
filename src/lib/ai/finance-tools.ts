@@ -107,6 +107,8 @@ import {
   voidPaymentIn,
 } from '@/lib/finance/money';
 import { listContras } from '@/lib/finance/contras';
+import { getJournal, listJournals, listLedgerAccounts, listLedgerLines } from '@/lib/finance/ledger';
+import { filterEntries, groupEntries } from '@/lib/finance/ledger-views';
 import { getPurchaseOrder, listPurchaseOrders } from '@/lib/finance/purchase-orders';
 import { getRfq, getRfqGroup, listRfqs } from '@/lib/finance/rfqs';
 import type { FinanceWriteContext } from '@/lib/finance/result';
@@ -292,6 +294,38 @@ export function createBendaharaTools(access: FinanceAccess) {
       description: 'One purchase order in full, by id, with its lines and received quantities.',
       inputSchema: idInput,
       execute: async ({ id }) => getPurchaseOrder(ctx, id),
+    }),
+    listLedgerAccounts: tool({
+      description:
+        'The chart of accounts with each account\u2019s balance (debit_total, credit_total, balance in ringgit), its type and what it stands for. ' +
+        'This is the books\u2019 accounts, not the bank/cash accounts in listAccounts.',
+      inputSchema: z.object({}),
+      execute: async () => listLedgerAccounts(ctx),
+    }),
+    listLedgerEntries: tool({
+      description:
+        'Ledger entries, grouped by document/journal, optionally for one account and/or a date range. account is a ledger-account id from listLedgerAccounts; ' +
+        'from/to are YYYY-MM-DD.',
+      inputSchema: z.object({
+        account: z.string().optional().describe('A ledger-account id from listLedgerAccounts.'),
+        from: z.string().optional().describe('Start date, YYYY-MM-DD.'),
+        to: z.string().optional().describe('End date, YYYY-MM-DD.'),
+      }),
+      execute: async ({ account, from, to }) => {
+        const [lines, accounts] = await Promise.all([listLedgerLines(ctx), listLedgerAccounts(ctx)]);
+        const entries = groupEntries(lines, accounts);
+        return filterEntries(entries, { query: '', source: 'all', from: from ?? '', to: to ?? '', account: account ?? '' });
+      },
+    }),
+    listJournals: tool({
+      description: 'Manual journal entries with status (draft/posted/void) and their number.',
+      inputSchema: z.object({}),
+      execute: async () => listJournals(ctx),
+    }),
+    getJournal: tool({
+      description: 'One manual journal in full, by id, with its debit and credit lines.',
+      inputSchema: idInput,
+      execute: async ({ id }) => getJournal(ctx, id),
     }),
     listFinanceItems: tool({
       description: 'Sellable/purchasable items (products and services) with their default prices.',

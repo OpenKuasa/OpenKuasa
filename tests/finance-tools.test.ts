@@ -136,4 +136,11 @@ describe('Bendahara write tools', () => {
     expect(tools).toHaveProperty('getRfq');
     expect(tools).toHaveProperty('getRfqGroup');
   });
+
+  it('lists chart-of-accounts, filtered ledger entries, and journals', () => {
+    const tools = createBendaharaTools({ client: {} as never, orgId: 'org-1', canWrite: false });
+    for (const name of ['listLedgerAccounts', 'listLedgerEntries', 'listJournals', 'getJournal']) {
+      expect(tools).toHaveProperty(name);
+    }
+  });
 });
