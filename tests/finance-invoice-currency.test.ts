@@ -304,13 +304,14 @@ describe('adding invoices up', () => {
   });
 });
 
-describe('what settles a foreign invoice (3b: payments in; FIN41, FIN42, FIN45 for the rest)', () => {
-  it('offers it to the payment form only, not to receipts, credit notes, refunds or contra entries', () => {
-    // 3b: Record payment takes it, with the ringgit received (tests/finance-fx-payments-in.test.ts).
+describe('what settles a foreign invoice (3b: payments in; 3c: credit notes, refunds; FIN42, FIN45 for the rest)', () => {
+  it('offers it to the payment, credit note and refund forms, not to receipts or contra entries', () => {
+    // 3b: Record payment takes it, with the ringgit received (tests/finance-fx-payments-in.test.ts); 3c: a credit
+    // note and a refund (tests/finance-fx-credit-notes-refunds.test.ts).
     expect(receivableInvoices(BOTH, []).map((i) => i.id)).toEqual(['inv-myr', 'inv-usd']);
     expect(receiptInvoicesForForm(BOTH).map((i) => i.id)).toEqual(['inv-myr']);
-    expect(creditableInvoices(BOTH).map((i) => i.id)).toEqual(['inv-myr']);
+    expect(creditableInvoices(BOTH).map((i) => i.id)).toEqual(['inv-myr', 'inv-usd']);
     const inCredit = BOTH.map((i) => ({ ...i, balance: -10, balance_myr: -10, display_status: 'paid' as const }));
-    expect(refundTargets(inCredit, [], []).map((t) => t.id)).toEqual(['inv-myr']);
+    expect(refundTargets(inCredit, [], []).map((t) => t.id)).toEqual(['inv-myr', 'inv-usd']);
   });
 });
