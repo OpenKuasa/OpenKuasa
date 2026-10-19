@@ -107,6 +107,7 @@ import {
   voidPaymentIn,
 } from '@/lib/finance/money';
 import { listContras } from '@/lib/finance/contras';
+import { getPurchaseOrder, listPurchaseOrders } from '@/lib/finance/purchase-orders';
 import { getRfq, getRfqGroup, listRfqs } from '@/lib/finance/rfqs';
 import type { FinanceWriteContext } from '@/lib/finance/result';
 
@@ -276,6 +277,21 @@ export function createBendaharaTools(access: FinanceAccess) {
       description: 'All the sent RFQs copied from one request, by the id of any of them, to compare suppliers\u2019 quotes side by side.',
       inputSchema: idInput,
       execute: async ({ id }) => getRfqGroup(ctx, id),
+    }),
+    listPurchaseOrders: tool({
+      description:
+        'Purchase orders with status (draft/pending_approval/approved/closed/cancelled), delivery (pending/partial/delivered), ' +
+        'and total, received and billed figures in ringgit. Set awaiting_approval to list only those waiting for approval.',
+      inputSchema: z.object({ awaiting_approval: z.boolean().optional().describe('Only orders waiting for approval.') }),
+      execute: async ({ awaiting_approval }) => {
+        const rows = await listPurchaseOrders(ctx);
+        return awaiting_approval ? rows.filter((r) => r.status === 'pending_approval') : rows;
+      },
+    }),
+    getPurchaseOrder: tool({
+      description: 'One purchase order in full, by id, with its lines and received quantities.',
+      inputSchema: idInput,
+      execute: async ({ id }) => getPurchaseOrder(ctx, id),
     }),
     listFinanceItems: tool({
       description: 'Sellable/purchasable items (products and services) with their default prices.',
