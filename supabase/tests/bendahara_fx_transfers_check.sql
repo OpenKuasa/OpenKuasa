@@ -404,7 +404,9 @@ begin
          (org, 'in', sgd, date '1999-01-20', 134, 'bank_transfer', hand, 'draft', 3.2835820896, 'transfer', 440.00);
   fails := fails || public.bendahara_check_try('5: a hand-made USD to SGD pair, posted', 'FIN52',
     format('update public.finance_transactions set status = %L, number = %L where transfer_id = %L', 'posted', 'TR-H02', hand));
-  delete from public.finance_transactions where transfer_id = hand;
+  -- The refused pair is still two drafts, so it can go (a posted one could not: the check would say so here).
+  fails := fails || public.bendahara_check_try('5: the refused hand-made pair is removed', 'ok',
+    format('delete from public.finance_transactions where transfer_id = %L', hand));
   -- A side with source 'transfer' that is not a side of a transfer.
   fails := fails || public.bendahara_check_try('a lone row with source transfer', 'FIN16',
     format('insert into public.finance_transactions (org_id, direction, account_id, txn_date, amount, method, status, fx_rate, '
