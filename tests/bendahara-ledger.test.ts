@@ -319,8 +319,9 @@ testWithSupabase('a new workspace has its chart, and bank accounts and categorie
   const o = await ownerWithOrg(`Ledger chart ${Date.now()}`);
   let ch = await chart(o);
 
-  // The eight system accounts, at the codes of the design (fx_realised: 20261120110000, stage 3b).
-  const system = { receivable: ['1200', 'asset'], payable: ['2000', 'liability'], accrued_expenses: ['2050', 'liability'], sst_payable: ['2100', 'liability'], owner_equity: ['3000', 'equity'], retained_earnings: ['3100', 'equity'], opening_equity: ['3900', 'equity'], fx_realised: ['4900', 'income'] };
+  // The nine system accounts, at the codes of the design (fx_realised: 20261120110000, stage 3b; fx_unrealised:
+  // 20261123100000, stage 6a).
+  const system = { receivable: ['1200', 'asset'], payable: ['2000', 'liability'], accrued_expenses: ['2050', 'liability'], sst_payable: ['2100', 'liability'], owner_equity: ['3000', 'equity'], retained_earnings: ['3100', 'equity'], opening_equity: ['3900', 'equity'], fx_realised: ['4900', 'income'], fx_unrealised: ['4910', 'income'] };
   for (const [key, [code, type]] of Object.entries(system)) {
     expect(ch.system(key), key).toMatchObject({ code, type, active: true, bank_account_id: null, category_id: null });
   }

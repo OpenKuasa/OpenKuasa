@@ -867,6 +867,43 @@ describe('cash flow', () => {
       }
       expect(cashFlow(MOVES, per('2026-04', '2026-04')).closing).toBe(10784.5);
     });
+
+    // Stage 6a (20261123100000), worked example R3: a USD account opened at RM 44,620.00, USD 1,000.00 of it sold for
+    // RM 4,380.00 into the ringgit bank (a transfer, no cash flow), revalued at the month end: Dr USD account 80.00,
+    // Cr Unrealised 80.00, reversed on 1 November.
+    it('shows the revaluation of foreign cash on its own line, and still closes on the balance sheet at the month end (R3)', () => {
+      const USD = bank('1110', 'USD Account');
+      const UNREALISED = account('4910', 'Unrealised Exchange Gain or Loss', 'income');
+      const book = [...BOOK, USD, UNREALISED];
+      const lines: LedgerLine[] = [
+        ...src('opening:usd', '2026-10-01', 'opening', [[USD, 44620, 0], [CAPITAL, 0, 44620]]),
+        ...src('transfer:c52', '2026-10-15', 'transfer', [[MAIN, 4380, 0], [USD, 0, 4380]]),
+        ...src('fx_revaluation:r', '2026-10-31', 'fx_revaluation', [[USD, 80, 0], [UNREALISED, 0, 80]]),
+        ...src('fx_revaluation:r:reverse', '2026-11-01', 'fx_revaluation', [[UNREALISED, 80, 0], [USD, 0, 80]]),
+      ];
+      const moves = cashMovements(lines, book);
+      const october = cashFlow(moves, per('2026-10', '2026-10'));
+      expect(october.lines).toEqual([
+        { key: 'opening', label: 'Opening balances brought in', in: 44620, out: 0, net: 44620 },
+        { key: 'fx_revaluation', label: 'Exchange rate changes on foreign cash (no money moved)', in: 80, out: 0, net: 80 },
+      ]);
+      // USD account 40,320.00 (its revalued figure) + Main Bank 4,380.00.
+      expect(october.closing).toBe(44700);
+      const { totals } = monthlyTotals(lines);
+      const bankIds = new Set([USD.id, MAIN.id]);
+      for (const month of ['2026-10', '2026-11']) {
+        const sheet = balanceSheet(book, totals, only(month))
+          .assets.filter((l) => bankIds.has(l.account_id))
+          .reduce((t, l) => t + Math.round(l.amount * 100), 0);
+        expect(Math.round(cashFlow(moves, per('2026-10', month)).closing * 100), month).toBe(sheet);
+      }
+      // November: the reversal, as money out on the same line; the cash is back at its booked 44,620.00.
+      const november = cashFlow(moves, per('2026-11', '2026-11'));
+      expect(november.lines).toEqual([
+        { key: 'fx_revaluation', label: 'Exchange rate changes on foreign cash (no money moved)', in: 0, out: 80, net: -80 },
+      ]);
+      expect(november.closing).toBe(44620);
+    });
   });
 
   describe('cashFlowCsv', () => {

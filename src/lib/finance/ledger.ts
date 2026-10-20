@@ -187,7 +187,9 @@ export type LedgerSource =
   | 'transfer'
   | 'opening'
   | 'journal'
-  | 'contra';
+  | 'contra'
+  // 20261123100000 (stage 6a): a month-end FX revaluation, dated the month end, and its reversal the next day.
+  | 'fx_revaluation';
 
 export type LedgerLine = {
   entry_key: string;

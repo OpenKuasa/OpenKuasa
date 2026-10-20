@@ -36,6 +36,7 @@ export const SOURCE_LABELS: Record<LedgerSource, string> = {
   opening: 'Opening balance',
   journal: 'Manual journal',
   contra: 'Contra entry',
+  fx_revaluation: 'FX revaluation',
 };
 
 /**
@@ -55,6 +56,8 @@ export const SOURCE_PATHS: Record<LedgerSource, string | null> = {
   opening: '/finance/banking',
   journal: null,
   contra: '/finance/contra-entries',
+  // The FX Revaluation screen comes back in stage 6b; until then an entry links nowhere.
+  fx_revaluation: null,
 };
 
 /* ---- Chart of Accounts ------------------------------------------------ */

@@ -618,6 +618,10 @@ const CASH_GROUPS: { key: string; label: string; sources: LedgerSource[] }[] = [
   // An approved expense accrues (its category against Accrued Expenses) and never touches a bank account; paying it is a payment out.
   { key: 'payment_out', label: 'Paid to suppliers and for expenses', sources: ['payment_out'] },
   { key: 'opening', label: 'Opening balances brought in', sources: ['opening'] },
+  // 20261123100000: a month-end revaluation of a foreign bank or cash account, and its reversal the next day. No money
+  // moves, but the line is counted so the closing cash still equals the balance sheet's bank balances at a revalued
+  // month end.
+  { key: 'fx_revaluation', label: 'Exchange rate changes on foreign cash (no money moved)', sources: ['fx_revaluation'] },
   { key: 'journal', label: 'Manual journals', sources: ['journal'] },
 ];
 
