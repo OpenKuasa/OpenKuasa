@@ -105,6 +105,28 @@ export function monthEndLabel(month: Month): string {
   return `${lastDayOfMonth(month).slice(8)} ${MONTH_NAMES[index]} ${year}`;
 }
 
+/**
+ * The note under the Balance Sheet when its month end holds foreign-currency balances that are not revalued
+ * (stage 6b, plan decision 16): the workspace had a foreign item in its books on or before that month end, and no
+ * FX revaluation is posted for it. Null otherwise, and when what the books hold could not be read (`books` null).
+ * Approximate by design: a run made stale by a later entry dated in its month is not noticed here; FX
+ * Revaluation lists that as something to post. `today` is YYYY-MM-DD: a month not yet ended cannot be revalued yet.
+ */
+export function revaluationNote(
+  asAt: Month,
+  books: { firstForeignDate: string | null; revaluedMonthEnds: string[] } | null,
+  today: string,
+): string | null {
+  if (!books || books.firstForeignDate === null) return null;
+  const end = lastDayOfMonth(asAt);
+  if (end < books.firstForeignDate || books.revaluedMonthEnds.includes(end)) return null;
+  const label = monthEndLabel(asAt);
+  if (end > today) {
+    return `Foreign-currency balances at ${label} are at the rates they were booked at until the month ends and is revalued, on FX Revaluation.`;
+  }
+  return `Foreign-currency balances at ${label} are at the rates they were booked at: no FX revaluation is posted for that month end. The balance sheet is right at a month end once its revaluation is posted, on FX Revaluation.`;
+}
+
 /** "October 2026", "January to October 2026" or "July 2025 to June 2026". */
 export function periodLabel(period: Period): string {
   const from = parts(period.from);

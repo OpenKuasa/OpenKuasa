@@ -48,10 +48,12 @@ import {
   profitAndLoss,
   profitAndLossCsv,
   rangeMessage,
+  revaluationNote,
   sliceTotal,
   trialBalance,
   trialBalanceCsv,
 } from '@/lib/finance/reports';
+import type { FxBooks } from '@/lib/finance/reports-data';
 import { round2 } from '@/lib/finance/view-helpers';
 import { cn } from '@/lib/utils';
 
@@ -199,7 +201,7 @@ function ProfitAndLossCard({ pl, period, today }: { pl: ProfitAndLoss; period: P
   );
 }
 
-function BalanceSheetCard({ bs, today }: { bs: BalanceSheet; today: string }) {
+function BalanceSheetCard({ bs, today, note }: { bs: BalanceSheet; today: string; note?: string | null }) {
   const empty = bs.assets.length === 0 && bs.liabilities.length === 0 && bs.equity.length === 0 && bs.currentEarnings === 0;
   const liabilitiesAndEquity = round2(bs.totalLiabilities + bs.totalEquity);
   return (
@@ -248,6 +250,14 @@ function BalanceSheetCard({ bs, today }: { bs: BalanceSheet; today: string }) {
       <div className="border-t px-4 py-3">
         <BooksBalance balanced={bs.balanced} difference={round2(bs.totalAssets - liabilitiesAndEquity)} what="assets against liabilities and equity" />
       </div>
+      {note ? (
+        <p className="border-t px-4 py-3 text-sm text-muted-foreground">
+          {note}{' '}
+          <Link href="/finance/fx-revaluation" className="underline underline-offset-2">
+            Open FX Revaluation
+          </Link>
+        </p>
+      ) : null}
     </BentoCard>
   );
 }
@@ -549,6 +559,7 @@ export function ReportsView({
   receivables,
   payables,
   unassigned = 0,
+  fxBooks = null,
   today: serverToday,
   followClock = true,
 }: {
@@ -563,6 +574,11 @@ export function ReportsView({
   payables: OpenDocument[] | null;
   /** Ledger lines left out because their account could not be found. */
   unassigned?: number;
+  /**
+   * When foreign money first entered the books and which month ends have a posted FX revaluation, for the note
+   * under the Balance Sheet. Null (or absent: the sample) when unknown, and then there is no note.
+   */
+  fxBooks?: FxBooks | null;
   /** The date the periods are worked out from, YYYY-MM-DD. */
   today: string;
   /** False for the sample, whose day is fixed. */
@@ -694,7 +710,7 @@ export function ReportsView({
         </BentoCard>
 
         <ProfitAndLossCard pl={pl} period={period} today={today} />
-        <BalanceSheetCard bs={bs} today={today} />
+        <BalanceSheetCard bs={bs} today={today} note={revaluationNote(bs.asAt, fxBooks, today)} />
         <TrialBalanceCard tb={tb} period={period} today={today} />
 
         <BentoCard title="General ledger" icon={BookOpen} className="col-span-2 md:col-span-4">

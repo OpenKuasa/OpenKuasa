@@ -53,3 +53,38 @@ export async function listOpenBills(ctx: FinanceWriteContext): Promise<BillBalan
     if (page.length < OPEN_PAGE_SIZE) return rows;
   }
 }
+
+/**
+ * What the Balance Sheet's note and the FX Revaluation screen need to know about foreign money in the books
+ * (stage 6b): the first date a foreign item entered them (a posted or voided foreign invoice or bill, a foreign
+ * account's opening balance, a posted or voided movement on a foreign account), and the month ends that have a
+ * posted FX revaluation (20261123100000). Four one-row reads ordered by date, and the runs' month ends. Throws
+ * when a read fails; a caller then shows nothing for it.
+ */
+export type FxBooks = { firstForeignDate: string | null; revaluedMonthEnds: string[] };
+
+export async function readFxBooks(ctx: FinanceWriteContext): Promise<FxBooks> {
+  const foreign = (table: string, column: string) =>
+    ctx.client.from(table).select(column).eq('org_id', ctx.orgId).neq('currency', 'MYR');
+  const [invoices, bills, accounts, movements, runs] = await Promise.all([
+    foreign('finance_invoices', 'invoice_date').in('status', ['posted', 'void']).order('invoice_date', { ascending: true }).limit(1),
+    foreign('supplier_bills', 'bill_date').in('status', ['posted', 'void']).order('bill_date', { ascending: true }).limit(1),
+    foreign('finance_accounts', 'opening_date').neq('opening_balance', 0).order('opening_date', { ascending: true }).limit(1),
+    // A movement's currency is its account's (20261122110000), so this is money on a foreign account.
+    foreign('finance_transactions', 'txn_date').in('status', ['posted', 'void']).order('txn_date', { ascending: true }).limit(1),
+    ctx.client.from('finance_fx_revaluations').select('period_end').eq('org_id', ctx.orgId).order('period_end', { ascending: false }),
+  ]);
+  const error = invoices.error ?? bills.error ?? accounts.error ?? movements.error ?? runs.error;
+  if (error) throw error;
+  const dateOf = (rows: unknown, column: string) => ((rows ?? []) as Record<string, string>[]).map((r) => r[column]);
+  const dates = [
+    ...dateOf(invoices.data, 'invoice_date'),
+    ...dateOf(bills.data, 'bill_date'),
+    ...dateOf(accounts.data, 'opening_date'),
+    ...dateOf(movements.data, 'txn_date'),
+  ].sort();
+  return {
+    firstForeignDate: dates[0] ?? null,
+    revaluedMonthEnds: [...new Set(dateOf(runs.data, 'period_end'))],
+  };
+}

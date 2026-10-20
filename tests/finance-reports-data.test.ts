@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { listOpenBills, listOpenInvoices, OPEN_PAGE_SIZE } from '@/lib/finance/reports-data';
+import { listOpenBills, listOpenInvoices, OPEN_PAGE_SIZE, readFxBooks } from '@/lib/finance/reports-data';
 import { fakeFinance } from './setup/fake-finance';
 
 const invoice = (n: number) => ({ customer_id: `c${n}`, customer_name: `Customer ${n}`, due_date: '2026-10-01', balance: '12.50', display_status: 'sent' });
@@ -64,5 +64,30 @@ describe('listOpenBills', () => {
   });
   it('throws a read error', async () => {
     await expect(listOpenBills(fakeFinance({ data: null, error: { code: 'XX000' } }).ctx)).rejects.toMatchObject({ code: 'XX000' });
+  });
+});
+
+describe('readFxBooks', () => {
+  const answers: Record<string, unknown[]> = {
+    finance_invoices: [{ invoice_date: '2026-10-05' }],
+    supplier_bills: [{ bill_date: '2026-10-12' }],
+    finance_accounts: [{ opening_date: '2026-09-01' }],
+    finance_transactions: [{ txn_date: '2026-10-15' }],
+    finance_fx_revaluations: [{ period_end: '2026-10-31' }, { period_end: '2026-10-31' }, { period_end: '2026-09-30' }],
+  };
+  it('reads the first date of each kind of foreign item, one row each, and the month ends of the posted runs', async () => {
+    const { ctx, calls } = fakeFinance((call) => ({ data: answers[call.name] ?? [], error: null }));
+    expect(await readFxBooks(ctx)).toEqual({ firstForeignDate: '2026-09-01', revaluedMonthEnds: ['2026-10-31', '2026-09-30'] });
+    expect(calls.map((c) => [c.name, c.columns, c.filters, c.order, c.limit])).toEqual([
+      ['finance_invoices', 'invoice_date', { org_id: 'org-1', 'currency neq': 'MYR', 'status in': ['posted', 'void'] }, ['invoice_date asc'], 1],
+      ['supplier_bills', 'bill_date', { org_id: 'org-1', 'currency neq': 'MYR', 'status in': ['posted', 'void'] }, ['bill_date asc'], 1],
+      ['finance_accounts', 'opening_date', { org_id: 'org-1', 'currency neq': 'MYR', 'opening_balance neq': 0 }, ['opening_date asc'], 1],
+      ['finance_transactions', 'txn_date', { org_id: 'org-1', 'currency neq': 'MYR', 'status in': ['posted', 'void'] }, ['txn_date asc'], 1],
+      ['finance_fx_revaluations', 'period_end', { org_id: 'org-1' }, ['period_end desc'], undefined],
+    ]);
+  });
+  it('has no first date for a ringgit-only workspace, and throws a read error', async () => {
+    expect(await readFxBooks(fakeFinance({ data: [], error: null }).ctx)).toEqual({ firstForeignDate: null, revaluedMonthEnds: [] });
+    await expect(readFxBooks(fakeFinance({ data: null, error: { code: 'XX000' } }).ctx)).rejects.toMatchObject({ code: 'XX000' });
   });
 });
