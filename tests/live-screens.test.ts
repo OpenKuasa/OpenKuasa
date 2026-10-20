@@ -51,6 +51,10 @@ describe('live screens', () => {
     expect(isSampleScreen('/finance/contra-entries')).toBe(false);
   });
 
+  it('counts FX Revaluation as live', () => {
+    expect(isSampleScreen('/finance/fx-revaluation')).toBe(false);
+  });
+
   it('ignores paths that are not a screen', () => {
     expect(isSampleScreen('/reach')).toBe(false);
     expect(isSampleScreen('/nope/nothing')).toBe(false);

@@ -104,6 +104,8 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'finance/chart-of-accounts',
   'finance/journals',
   'finance/contra-entries',
+  // Month-end revaluation of foreign-currency balances (#224).
+  'finance/fx-revaluation',
   'finance/reports',
 ]);
 

@@ -46,8 +46,7 @@ describe('the words', () => {
       invoice: '/finance/invoices', credit_note: '/finance/credit-notes', payment_in: '/finance/cash-receipts', refund: '/finance/refunds',
       bill: '/finance/supplier-bills', payment_out: '/finance/payment-vouchers', expense: '/finance/expenses', transfer: '/finance/banking',
       opening: '/finance/banking', journal: null, contra: '/finance/contra-entries',
-      // 20261123100000: the FX Revaluation screen is linked in stage 6b.
-      fx_revaluation: null,
+      fx_revaluation: '/finance/fx-revaluation',
     });
   });
 });
