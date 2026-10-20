@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ringgitFields } from '@/lib/finance/document-currency';
 import type { InvoiceListRow } from '@/lib/finance/invoices';
 import { type FinanceAccount, type PaymentInRow, recordPaymentInInput } from '@/lib/finance/money';
 import {
@@ -179,6 +180,8 @@ describe('newReceiptForm', () => {
       // Stage 3b: the currency of what is ticked (ringgit until something is), and the ringgit received.
       currency: 'MYR',
       ringgit: '',
+      // Stage 5b: a ringgit account, with no rate.
+      fx: ringgitFields(),
     });
   });
   it('chooses the customer when there is only one', () => {

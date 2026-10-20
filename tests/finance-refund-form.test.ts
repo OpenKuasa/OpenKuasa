@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ringgitFields } from '@/lib/finance/document-currency';
 import type { CreditNoteRow } from '@/lib/finance/credit-notes';
 import type { InvoiceListRow } from '@/lib/finance/invoices';
 import type { FinanceAccount } from '@/lib/finance/money';
@@ -247,6 +248,8 @@ describe('a new refund form', () => {
       reference: '',
       notes: '',
       scheduled: false,
+      // Stage 5b: a ringgit account, with no rate.
+      fx: ringgitFields(),
     });
     expect(newRefundForm(two, [], '2026-10-09').accountId).toBe('');
   });

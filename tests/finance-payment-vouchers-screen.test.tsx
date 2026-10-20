@@ -15,6 +15,7 @@ const actions = vi.hoisted(() => ({
   saveVoucherAction: vi.fn(),
   submitVoucherAction: vi.fn(),
   voidVoucherAction: vi.fn(),
+  fxSstRateForAction: vi.fn(),
 }));
 vi.mock('@/app/(app)/finance/actions', () => actions);
 
@@ -33,7 +34,7 @@ vi.mock('@/lib/finance/contacts', async (importOriginal) => ({
 vi.mock('@/lib/finance/expenses', async (importOriginal) => ({ ...(await importOriginal<object>()), listExpenseCategories: async () => [{ id: 'k1', name: 'Utilities' }] }));
 vi.mock('@/lib/finance/money', async (importOriginal) => ({
   ...(await importOriginal<object>()),
-  listRinggitAccounts: async () => [{ id: 'a1', name: 'Maybank', currency: 'MYR' }],
+  listAccounts: async () => [{ id: 'a1', name: 'Maybank', currency: 'MYR' }],
   listPaymentsOut: async () => [{ transaction_id: 'v1', bill_id: 'b1', status: 'pending_approval' }],
 }));
 vi.mock('@/lib/finance/bills', async (importOriginal) => ({
@@ -82,6 +83,7 @@ describe('the Payment Vouchers loader', () => {
       markPaid: actions.markVoucherPaidAction,
       remove: actions.deleteVoucherAction,
       voidVoucher: actions.voidVoucherAction,
+      fxRate: actions.fxSstRateForAction,
     });
     expect(writer?.actions.submit).not.toBe(actions.approveVoucherAction);
     // Void is the voucher's own, never a delete.

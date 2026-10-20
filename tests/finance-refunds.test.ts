@@ -75,7 +75,17 @@ describe('refund reads', () => {
   it('lists from the refunds view, in the caller’s workspace, newest first, with amounts as numbers', async () => {
     const { ctx, calls } = fakeFinance({ data: [row(1)], error: null });
     expect(await listRefunds(ctx)).toEqual([
-      { ...row(1), amount: 240, transaction_amount: 240, amount_myr: 240, carried_myr: 240, realised_myr: 0 },
+      {
+        ...row(1),
+        amount: 240,
+        transaction_amount: 240,
+        amount_myr: 240,
+        carried_myr: 240,
+        realised_myr: 0,
+        // Stage 5b: the movement's currency and its ringgit (ringgit, the amount, when the view gives none).
+        transaction_currency: 'MYR',
+        transaction_amount_myr: 240,
+      },
     ]);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({

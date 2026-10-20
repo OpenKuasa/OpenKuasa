@@ -786,3 +786,34 @@ describe('what the screen says when a receipt just written is not in the list', 
     expect(receiptHiddenNote(posted('2026-10-30'), today, 'month', 'open', true, false)).toBe(sentence('posted'));
   });
 });
+
+describe('the cash book on an account in another currency (stage 5b)', () => {
+  const usdInterest = () =>
+    receipt({ amount: 3.17, transaction_currency: 'USD', amount_myr: 14.14, kind: 'income', category_name: 'Interest' });
+  it('adds up ringgit, never a currency amount: RM 50.00 and USD 3.17 (RM 14.14) received is RM 64.14', () => {
+    const rows = [receipt({ amount: 50 }), usdInterest()];
+    const view = cashReceiptsView(rows, today, 'month');
+    expect(sum(rows, (r) => r.amount_myr ?? r.amount)).toBe(64.14);
+    // RM 64, never the RM 53 that adding USD 3.17 as ringgit would give.
+    expect(stat(view.stats, 'Received').value).toBe(rmShort(64.14));
+    expect(view.byAccount.reduce((total, s) => total + s.value, 0)).toBe(64.14);
+  });
+  it('adds a voucher’s ringgit: RM 100.00 and USD 25.00 (RM 111.55) paid is RM 211.55', () => {
+    const rows = [
+      voucher({ amount: 100, status: 'posted' }),
+      voucher({ amount: 25, status: 'posted', currency: 'USD', amount_myr: 111.55 }),
+    ];
+    expect(stat(paymentVouchersView(rows, today, 'month').stats, 'Paid').value).toBe(rmShort(211.55));
+  });
+  it('keeps each CSV row’s amount as it is, and adds its currency and ringgit once a row in another currency is listed', () => {
+    expect(cashReceiptsCsv([receipt({ amount: 50 })])).not.toContain('Ringgit');
+    const [head, myr, usd] = cashReceiptsCsv([receipt({ amount: 50 }), usdInterest()]).replace(CSV_BOM, '').trim().split(/\r?\n/);
+    expect(head.endsWith('Status,Currency,Ringgit')).toBe(true);
+    expect(myr.endsWith(',MYR,50')).toBe(true);
+    expect(usd).toContain(',3.17,');
+    expect(usd.endsWith(',USD,14.14')).toBe(true);
+    const vouchers = paymentVouchersCsv([voucher({ amount: 25, currency: 'USD', amount_myr: 111.55 })]);
+    expect(vouchers).toContain('Currency,Ringgit');
+    expect(vouchers).toContain(',USD,111.55');
+  });
+});

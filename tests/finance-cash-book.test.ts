@@ -9,11 +9,15 @@ const receiptRow = {
   transaction_id: 't1', number: 'RC-0001', txn_date: '2026-10-05', method: 'cash', amount: '80.00', status: 'posted',
   reference: null, notes: null, account_id: 'a1', account_name: 'Cash in hand', account_kind: 'cash', contact_id: null,
   party_name: 'Walk-in', kind: 'income', category_id: 'c1', category_name: 'Sales', documents: null,
+  // Stage 5b: the movement's currency and its ringgit.
+  transaction_currency: 'MYR', amount_myr: '80.00',
 };
 const voucherRow = {
   transaction_id: 't2', number: null, txn_date: '2026-10-06', method: 'fpx', amount: '300.00', status: 'pending_approval',
   reference: 'ACC 1', notes: null, account_id: 'a2', account_name: 'Main Bank', account_kind: 'bank', contact_id: null,
   party_name: 'Water board', kind: 'other', category_id: 'c2', category_name: 'Utilities', documents: null, approved_at: null,
+  // Stage 5b: the movement's currency and its ringgit.
+  currency: 'MYR', amount_myr: '300.00',
 };
 const expenseRow = {
   id: 'e1', expense_date: '2026-10-04', category_id: 'c3', category_name: 'Rent', vendor_id: null, vendor_name: 'Landlord',
@@ -24,7 +28,7 @@ const expenseRow = {
 describe('listCashReceipts', () => {
   it('reads the receipts view for the workspace, newest first, with amounts as numbers', async () => {
     const { ctx, calls } = fakeFinance({ data: [receiptRow], error: null });
-    expect(await listCashReceipts(ctx)).toEqual([{ ...receiptRow, amount: 80 }]);
+    expect(await listCashReceipts(ctx)).toEqual([{ ...receiptRow, amount: 80, amount_myr: 80 }]);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
       kind: 'table', name: 'finance_cash_receipts', op: 'select', filters: { org_id: 'org-1' },
@@ -32,6 +36,12 @@ describe('listCashReceipts', () => {
     });
     // Every column the row type has, and nothing the view does not have.
     expect(calls[0].columns!.split(',').sort()).toEqual(Object.keys(receiptRow).sort());
+  });
+  it('reads a receipt on an account in another currency in its currency, with its ringgit as a number (stage 5b)', async () => {
+    const usd = { ...receiptRow, amount: '3.17', transaction_currency: 'USD', amount_myr: '14.14' };
+    expect(await listCashReceipts(fakeFinance({ data: [usd], error: null }).ctx)).toEqual([
+      { ...usd, amount: 3.17, amount_myr: 14.14 },
+    ]);
   });
   it('reads on until a page comes back short', async () => {
     const full = Array.from({ length: PAYMENT_PAGE_SIZE }, (_, i) => ({ ...receiptRow, transaction_id: `t${i}` }));
@@ -49,7 +59,7 @@ describe('listCashReceipts', () => {
 describe('listPaymentVouchers', () => {
   it('reads the vouchers view, with when it was approved', async () => {
     const { ctx, calls } = fakeFinance({ data: [voucherRow], error: null });
-    expect(await listPaymentVouchers(ctx)).toEqual([{ ...voucherRow, amount: 300 }]);
+    expect(await listPaymentVouchers(ctx)).toEqual([{ ...voucherRow, amount: 300, amount_myr: 300 }]);
     expect(calls[0]).toMatchObject({
       name: 'finance_payment_vouchers', filters: { org_id: 'org-1' }, order: ['txn_date desc', 'transaction_id asc'],
     });

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ringgitFields } from '@/lib/finance/document-currency';
 import type { CashReceiptRow } from '@/lib/finance/cash-book';
 import {
   cashReceiptActions,
@@ -126,6 +127,8 @@ describe('a new form', () => {
     expect(newCashReceiptForm(accounts, categories, today)).toEqual({
       kind: 'income', customerId: '', amounts: {}, payer: TYPED_PAYER, payerName: '', categoryId: '', amount: '',
       accountId: BANK, date: today, method: 'bank_transfer', reference: '', notes: '',
+      // Stage 5b: a ringgit account, with no rate.
+      fx: ringgitFields(),
     });
   });
   it('chooses the category when there is only one, and no account when there is none', () => {

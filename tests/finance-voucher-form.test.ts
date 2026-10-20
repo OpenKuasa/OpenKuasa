@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { ringgitFields } from '@/lib/finance/document-currency';
 import type { PaymentVoucherRow } from '@/lib/finance/cash-book';
 import { orderNotesForBills, type OrderBilling } from '@/lib/finance/purchase-views';
 import {
@@ -87,6 +88,8 @@ describe('the voucher form', () => {
       id: null, kind: 'category', supplierId: '', amounts: {},
       payee: TYPED_PAYEE, payeeName: '', categoryId: CATEGORY, amount: '', accountId: ACCOUNT, date: TODAY,
       method: 'bank_transfer', reference: '', notes: '',
+      // Stage 5b: a ringgit account, with no rate.
+      fx: ringgitFields(),
     });
     expect(newVoucherForm([], [...categories, { id: CONTACT, name: 'Rent' }], TODAY)).toMatchObject({ categoryId: '', accountId: '' });
   });

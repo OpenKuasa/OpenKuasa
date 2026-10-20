@@ -189,7 +189,7 @@ describe('payment reads', () => {
     });
     expect(calls[0].columns).toBe(
       'allocation_id,transaction_id,number,txn_date,method,amount,transaction_amount,status,reference,account_id,account_name,invoice_id,invoice_no,customer_name,' +
-        'currency,amount_myr,carried_myr,realised_myr',
+        'currency,amount_myr,carried_myr,realised_myr,transaction_currency,transaction_amount_myr',
     );
   });
   it('reads on past a full page', async () => {
@@ -204,7 +204,7 @@ describe('payment reads', () => {
     expect(calls[0]).toMatchObject({ name: 'finance_payments_out', order: ['txn_date desc', 'allocation_id asc'] });
     expect(calls[0].columns).toBe(
       'allocation_id,transaction_id,number,txn_date,method,amount,transaction_amount,status,reference,account_id,account_name,bill_id,bill_no,supplier_name,' +
-        'currency,amount_myr,carried_myr,realised_myr',
+        'currency,amount_myr,carried_myr,realised_myr,transaction_currency,transaction_amount_myr',
     );
   });
   it('throws a read error for the screen’s error page', async () => {
