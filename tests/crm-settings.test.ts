@@ -157,8 +157,10 @@ describe('the contacts export', () => {
     expect(line).toContain(`,"'-1",`);
   });
 
-  it('leaves a phone number with a country code as it is, so the file imports again unchanged', () => {
-    expect(contactsCsv([{ ...contact, phone: '+60 12-345 6789' }]).split('\r\n')[1]).toContain(',"+60 12-345 6789",');
+  it('marks a phone number with a country code as text, so a spreadsheet shows it instead of working it out', () => {
+    for (const phone of ['+60 12-345 6789', '+60-12-3456789', '+60123456789']) {
+      expect(contactsCsv([{ ...contact, phone }]).split('\r\n')[1]).toContain(`,"'${phone}",`);
+    }
   });
 
   it('dates a contact by the day in Malaysia', () => {

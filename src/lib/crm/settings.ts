@@ -182,17 +182,15 @@ export type ExportContact = {
 
 const EXPORT_COLUMNS = 'first_name,last_name,email,phone,company,country,status,source,tags,created_at';
 
-/** A phone number written with its country code: digits and spacing after a plus, nothing a spreadsheet would run. */
-const PLUS_PHONE = /^\+[\d\s()-]+$/;
-
 /**
  * One CSV cell, always in quotes so no spreadsheet setting can split it. A
- * value a spreadsheet would run as a formula is made plain text first: names
- * and companies come from public forms. A phone number that begins with a
- * plus is left as it is, so the file can be imported again unchanged.
+ * value a spreadsheet would work out is made plain text with an apostrophe in
+ * front: names and companies come from public forms, and a phone number such
+ * as +60-12-345 6789 would otherwise show as a sum. The contacts import drops
+ * that apostrophe again, so the file imports unchanged.
  */
 function cell(value: string): string {
-  const safe = /^[=+\-@\t\r]/.test(value) && !PLUS_PHONE.test(value) ? `'${value}` : value;
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
   return `"${safe.replace(/"/g, '""')}"`;
 }
 
