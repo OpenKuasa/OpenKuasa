@@ -588,7 +588,8 @@ revoke all on function private.finance_allocation_guard() from public, anon, aut
 -- on an account in another currency it is the amount_myr that
 -- finance_transaction_to_currency wrote from the rate. The 3b arithmetic and
 -- the closing rule are unchanged, so a document paid in full still leaves
--- Receivable or Payable at 0.00.
+-- Receivable or Payable at 0.00. On an account in another currency the
+-- payment must be exactly its split (FIN03 otherwise, whoever wrote it).
 create or replace function private.finance_fx_settle(target_org uuid, target_txn uuid)
 returns void
 language plpgsql
@@ -645,6 +646,12 @@ begin
 
   select sum(amount) into foreign_total from public.finance_allocations
   where org_id = target_org and transaction_id = target_txn;
+  -- 20261122110000: a payment on an account in another currency is exactly its split, in that currency, whoever
+  -- wrote it: its whole ringgit is shared over the split, so a remainder that settles no document would be
+  -- carried into the documents' realised difference instead of staying on Receivable or Payable (FIN03).
+  if t.currency <> 'MYR' and foreign_total is distinct from t.amount then
+    raise exception 'the split is not the payment' using errcode = 'FIN03';
+  end if;
 
   for a in
     select x.id, x.amount, coalesce(x.invoice_id, n.invoice_id) as invoice_id, x.bill_id
@@ -943,6 +950,9 @@ begin
     if want <> 'posted' then
       raise exception 'money on an account in another currency is recorded as paid, on the day it moves' using errcode = 'FIN47';
     end if;
+    -- Each part rounded to the sen before it is added, as each allocation is when it is stored (and as
+    -- finance_record_payment_in does), so the payment is exactly its split. A ringgit account keeps 4b's sum.
+    select coalesce(sum(round((a->>'amount')::numeric, 2)), 0) into total from jsonb_array_elements(allocations) as a;
   -- 20261122110000: the ringgit paid out for a foreign split, on a ringgit account only.
   elsif foreign_split then
     if want <> 'posted' then
