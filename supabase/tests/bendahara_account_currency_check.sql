@@ -260,7 +260,8 @@ begin
 
   -- ==== 10: no money moves on an account in another currency yet ===========================
   -- 20261122110000 (5b) opens money in and out on it, recorded with its rate: a record function sent no rate is now
-  -- FIN38 (private.finance_movement_rate, before anything is written); a draft and a side of a transfer stay FIN50.
+  -- FIN38 (private.finance_movement_rate, before anything is written); a draft stays FIN50. 20261122120000 (5c) opens
+  -- transfers with it: one sent no to_amount (what arrived) is FIN16, before anything is written.
   fails := fails || public.bendahara_check_try('10: a payment in to the USD account, no rate', 'FIN38',
     format('select public.finance_record_payment_in(%L, %L, %L)', org, jsonb_build_object('account_id', usd, 'method', 'fpx'),
       jsonb_build_array(jsonb_build_object('invoice_id', inv, 'amount', 10))));
@@ -268,9 +269,9 @@ begin
     format('select public.finance_record_voucher(%L, %L, ''[]'')', org,
       jsonb_build_object('account_id', usd, 'method', 'bank_transfer', 'amount', 5, 'party_name', 'Bank', 'category_id', utilities,
                          'status', 'posted')));
-  fails := fails || public.bendahara_check_try('10: a transfer into the USD account', 'FIN50',
+  fails := fails || public.bendahara_check_try('10: a transfer into the USD account, no to_amount', 'FIN16',
     format('select public.finance_record_transfer(%L, %L)', org, jsonb_build_object('from_account_id', bank, 'to_account_id', usd, 'amount', 3)));
-  fails := fails || public.bendahara_check_try('10: a transfer out of the USD account', 'FIN50',
+  fails := fails || public.bendahara_check_try('10: a transfer out of the USD account, no to_amount', 'FIN16',
     format('select public.finance_record_transfer(%L, %L)', org, jsonb_build_object('from_account_id', usd, 'to_account_id', bank, 'amount', 3)));
   fails := fails || public.bendahara_check_try('10: a draft receipt saved on the USD account', 'FIN50',
     format('select public.finance_save_cash_receipt(%L, %L, ''[]'')', org,

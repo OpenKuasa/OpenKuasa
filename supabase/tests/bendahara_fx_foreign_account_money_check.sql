@@ -588,10 +588,10 @@ begin
     fails := fails || format('13: the ringgit draft reads %s', r);
   end if;
   delete from public.finance_transactions where id = draft;
-  -- ==== 20: a transfer naming the USD account ==========================================================
-  fails := fails || public.bendahara_check_try('20: a transfer into the USD account', 'FIN50',
+  -- ==== 20: a transfer naming the USD account (20261122120000, 5c: with no to_amount, FIN16) ==================
+  fails := fails || public.bendahara_check_try('20: a transfer into the USD account, no to_amount', 'FIN16',
     format('select public.finance_record_transfer(%L, %L)', org, jsonb_build_object('from_account_id', bank, 'to_account_id', usd2, 'amount', 3)));
-  fails := fails || public.bendahara_check_try('20: a transfer out of the USD account', 'FIN50',
+  fails := fails || public.bendahara_check_try('20: a transfer out of the USD account, no to_amount', 'FIN16',
     format('select public.finance_record_transfer(%L, %L)', org, jsonb_build_object('from_account_id', usd2, 'to_account_id', bank, 'amount', 3)));
   select count(*) - n0 into n from public.finance_transactions where org_id = org;
   if n <> 0 then fails := fails || format('13, 20: refused drafts and transfers left %s movements', n); end if;
