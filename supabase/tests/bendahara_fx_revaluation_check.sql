@@ -127,10 +127,15 @@ begin
   -- What the preview says a run would post, as the expected figures the screen sends.
   execute $f$
     create function public.bendahara_check_expected(target_org uuid, pe date, rates jsonb) returns jsonb
-    language sql security invoker set search_path = '' as $g$
-      select jsonb_build_object('lines', count(*), 'net_gain', coalesce(sum(p.gain), 0)::text)
-      from public.finance_fx_revaluation_preview(target_org, pe, rates) p
-    $g$
+    language plpgsql security invoker set search_path = '' as $g$
+    declare x jsonb;
+    begin
+      select jsonb_build_object('lines', count(*), 'net_gain', coalesce(sum(p.gain), 0)::text) into x
+      from public.finance_fx_revaluation_preview(target_org, pe, rates) p;
+      return x;
+    exception when others then
+      return jsonb_build_object('error', sqlstate || ' ' || sqlerrm);
+    end $g$
   $f$;
   execute 'grant execute on function public.bendahara_check_expected(uuid, date, jsonb) to authenticated';
   -- One stored line of a run: "foreign carried rate revalued difference earlier posted gain".
@@ -147,14 +152,33 @@ begin
   -- One item as the preview shows it: "foreign carried rate source revalued difference earlier posted gain".
   execute $f$
     create function public.bendahara_check_item(target_org uuid, pe date, rates jsonb, item uuid) returns text
-    language sql security invoker set search_path = '' as $g$
+    language plpgsql security invoker set search_path = '' as $g$
+    declare t text;
+    begin
       select format('%s %s %s %s %s %s %s %s %s', p.foreign_balance, p.carried_myr, coalesce(p.rate_text, '-'),
                     coalesce(p.rate_source, '-'), coalesce(p.revalued_myr::text, '-'), coalesce(p.difference::text, '-'),
-                    p.earlier_myr, coalesce(p.posted_myr::text, '-'), coalesce(p.gain::text, '-'))
-      from public.finance_fx_revaluation_preview(target_org, pe, rates) p where p.item_id = item
-    $g$
+                    p.earlier_myr, coalesce(p.posted_myr::text, '-'), coalesce(p.gain::text, '-')) into t
+      from public.finance_fx_revaluation_preview(target_org, pe, rates) p where p.item_id = item;
+      return t;
+    exception when others then
+      return 'ERROR ' || sqlstate || ' ' || sqlerrm;
+    end $g$
   $f$;
   execute 'grant execute on function public.bendahara_check_item(uuid, date, jsonb, uuid) to authenticated';
+  -- How many rows a preview has (with item, how many are that item), or why it was refused.
+  execute $f$
+    create function public.bendahara_check_rows(target_org uuid, pe date, rates jsonb, item uuid default null) returns text
+    language plpgsql security invoker set search_path = '' as $g$
+    declare n integer;
+    begin
+      select count(*) into n from public.finance_fx_revaluation_preview(target_org, pe, rates) p
+      where item is null or p.item_id = item;
+      return n::text;
+    exception when others then
+      return 'ERROR ' || sqlstate || ' ' || sqlerrm;
+    end $g$
+  $f$;
+  execute 'grant execute on function public.bendahara_check_rows(uuid, date, jsonb, uuid) to authenticated';
   -- A ledger account's debit balance on a day (debits less credits of every line dated on or before it).
   execute $f$
     create function public.bendahara_check_on(target_org uuid, acct uuid, on_day date) returns numeric
@@ -313,6 +337,8 @@ begin
     raise exception 'roll back' using errcode = 'P0099';
   exception when sqlstate 'P0099' then
     null;
+  when others then
+    fails := fails || format('9: V1/V2 stopped: %s %s', sqlstate, sqlerrm);
   end;
   perform set_config('request.jwt.claims', owner_claims, true);
   set local role authenticated;
@@ -558,8 +584,8 @@ begin
   rinv := public.finance_save_invoice(rorg, jsonb_build_object('customer_id', rcust, 'invoice_date', '1999-01-05', 'due_date', '1999-02-05'),
     '[{"description":"Parts","quantity":10,"unit_price":12.50,"sst_rate":6}]');
   perform public.finance_post_invoice(rorg, rinv);
-  select count(*) into n from public.finance_fx_revaluation_preview(rorg, e, '{}');
-  if n <> 0 then fails := fails || format('15: a ringgit workspace''s preview has %s rows', n); end if;
+  t := public.bendahara_check_rows(rorg, e, '{}');
+  if t is distinct from '0' then fails := fails || format('15: a ringgit workspace''s preview has %s rows', t); end if;
   fails := fails || public.bendahara_check_try('8/15: a ringgit workspace posts', 'FIN56', format(
     'select public.finance_post_fx_revaluation(%L, %L)', rorg, jsonb_build_object('period_end', e, 'rates', '{}'::jsonb,
       'expected', jsonb_build_object('lines', 0, 'net_gain', '0'))));
@@ -582,12 +608,14 @@ begin
     raise exception 'roll back' using errcode = 'P0099';
   exception when sqlstate 'P0099' then
     null;
+  when others then
+    fails := fails || format('7: stopped: %s %s', sqlstate, sqlerrm);
   end;
 
   -- ==== 13: a viewer previews and reads; an outsider reads nothing ===========================================
   perform set_config('request.jwt.claims', viewer_claims, true);
-  select count(*) into n from public.finance_fx_revaluation_preview(org, e, rates1);
-  if n <> 6 then fails := fails || format('13: a viewer''s preview has %s rows', n); end if;
+  t := public.bendahara_check_rows(org, e, rates1);
+  if t is distinct from '6' then fails := fails || format('13: a viewer''s preview has %s rows', t); end if;
   select (select count(*) from public.finance_fx_revaluations where org_id = org)
        || ' ' || (select count(*) from public.finance_fx_revaluation_rates where org_id = org)
        || ' ' || (select count(*) from public.finance_fx_revaluation_lines where org_id = org) into t;
@@ -640,9 +668,8 @@ begin
   j1 := public.finance_save_journal(org, jsonb_build_object('journal_date', '1999-02-15', 'description', 'J1: SGD remainder to realised'),
     jsonb_build_array(jsonb_build_object('account_id', la_sgd, 'debit', 30), jsonb_build_object('account_id', la_real, 'credit', 30)));
   perform public.finance_post_journal(org, j1);
-  select count(*) into n from public.finance_fx_revaluation_preview(org, date '1999-02-28', '{"USD":{"rate":"4.5","source":"manual"},"SGD":{"rate":"3.5","source":"manual"}}') p
-   where p.item_id = sgd;
-  if n <> 0 then fails := fails || '10: after J1 the SGD account is still listed at 1999-02-28'::text; end if;
+  t := public.bendahara_check_rows(org, date '1999-02-28', '{"USD":{"rate":"4.5","source":"manual"},"SGD":{"rate":"3.5","source":"manual"}}', sgd);
+  if t is distinct from '0' then fails := fails || format('10: after J1 the SGD account is listed %s times at 1999-02-28', t); end if;
   x := public.bendahara_check_expected(org, date '1999-02-28', '{"USD":{"rate":"4.5","source":"manual"},"SGD":{"rate":"3.5","source":"manual"}}');
   select * into r from public.bendahara_check_call(format('select id from public.finance_post_fx_revaluation(%L, %L)', org,
     jsonb_build_object('period_end', '1999-02-28', 'rates', '{"USD":{"rate":"4.5","source":"manual"},"SGD":{"rate":"3.5","source":"manual"}}'::jsonb,
