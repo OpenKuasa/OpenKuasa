@@ -466,6 +466,22 @@ describe('planImport', () => {
 
     expect(plan.rows[0]).toMatchObject({ phone: null, tags: [] });
   });
+
+  test('drops the apostrophe the contacts export puts before a value a spreadsheet would work out', () => {
+    const plan = planImport(
+      [
+        ['First', 'Email', 'Phone', 'Company'],
+        ["'Ah", 'ahkow@example.com', "'+60-12-345 6789", "'=Rimba"],
+        ['Mei', 'mei@example.com', '012-345 6789', "Mei's Kitchen"],
+      ],
+      { ...UNMAPPED, firstName: 0, email: 1, phone: 2, company: 3 },
+    );
+
+    expect(plan.skipped).toEqual([]);
+    // Only an apostrophe in front of = + - or @ is the export's: anything else is part of the value.
+    expect(plan.rows[0]).toMatchObject({ first_name: "'Ah", phone: '+60-12-345 6789', company: '=Rimba' });
+    expect(plan.rows[1]).toMatchObject({ phone: '012-345 6789', company: "Mei's Kitchen" });
+  });
 });
 
 describe('importCrmContacts', () => {

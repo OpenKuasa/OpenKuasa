@@ -169,7 +169,10 @@ export function guessMapping(headers: string[]): ImportMapping {
 /** The trimmed text of the cell a field is mapped to; '' when unmapped or missing. */
 function readCell(row: string[], index: number | null) {
   if (index === null) return '';
-  return String(row[index] ?? '').trim();
+  const value = String(row[index] ?? '').trim();
+  // The contacts export puts an apostrophe before a value a spreadsheet would work out (+60…, =…), so it shows
+  // as text. Dropped here so an exported file imports unchanged; any other apostrophe is part of the value.
+  return /^'[=+\-@]/.test(value) ? value.slice(1) : value;
 }
 
 /**
