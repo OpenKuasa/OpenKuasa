@@ -5,17 +5,20 @@
  * invoices. A posted payment is locked and can only be voided; a scheduled
  * payment out can be deleted. Money in is never scheduled: it is recorded
  * once it has arrived.
+ *
+ * Stage 5b: money may move on an account in another currency, in that currency, paid now, for documents in that
+ * currency, with the movement's rate (movement-rate.ts). The database puts it into ringgit at the rate.
  */
 import { z } from 'zod';
 import { isIsoDate } from './bills';
 import { BASE_CURRENCY } from './currencies';
+import { MOVEMENT_MESSAGES, movementRateFields, movementRateKeys } from './movement-rate';
 import {
   type FinResult,
   type FinanceWriteContext,
   ACCOUNT_ARCHIVED,
   FIN_ACCOUNT_ARCHIVED,
   FIN_FOREIGN_ACCOUNT,
-  FOREIGN_ACCOUNT_NOT_YET,
   FIN_SIGN_OFF,
   NEEDS_SIGN_OFF,
   NOT_ALLOWED,
@@ -72,8 +75,15 @@ export const MONEY_MESSAGES = {
   payNow: 'A payment of a bill in another currency is recorded as paid, on the day the money leaves.',
   // The finance assistant records payments out in ringgit only; it says this before the database is asked.
   foreignBillByAssistant: 'This bill is not in ringgit. Record its payment on the Payments Out screen.',
-  // FIN50 (stage 5a): money on a bank or cash account in another currency. Every picker lists ringgit accounts.
-  foreignAccount: FOREIGN_ACCOUNT_NOT_YET,
+  // FIN50 (narrowed in stage 5b): a draft on an account in another currency, or one moved onto it. Payments are
+  // recorded paid there, with their rate; the draft forms list ringgit accounts.
+  foreignAccount: MOVEMENT_MESSAGES.draft,
+  // FIN38, FIN39 and FIN47 on an account in another currency (stage 5b): the form says the first and the last first.
+  rate: MOVEMENT_MESSAGES.rate,
+  notBnmRate: MOVEMENT_MESSAGES.notBnmRate,
+  payNowAccount: MOVEMENT_MESSAGES.payNow,
+  // FIN51 (stage 5b): the form offers only the account's currency's bills, so this is met from a direct call.
+  foreignAccountBills: 'Money out of an account in another currency can only pay bills in that currency.',
   // The finance assistant moves money on ringgit accounts only; it says this before the database is asked.
   foreignAccountByAssistant: 'This account is not in ringgit. Record this on the screen, where its currency and rate are shown.',
 } as const;
@@ -95,6 +105,8 @@ export const RECEIPT_MESSAGES = {
     'A credit note on this invoice was issued after this payment. Void the credit note first, then the payment; issue the credit note again after.',
   // The finance assistant records payments in ringgit only; it says this before the database is asked.
   foreignByAssistant: 'This invoice is not in ringgit. Record its payment on the Invoices screen.',
+  // FIN51 (stage 5b): the form offers only the account's currency's invoices, so this is met from a direct call.
+  foreignAccountInvoices: 'Money into an account in another currency can only pay invoices in that currency.',
   date: M.date,
   method: M.method,
   invoices: 'Choose at least one invoice this payment is for.',
@@ -149,6 +161,11 @@ const paymentOutBase = z.object({
    * ringgit bills, whose payment is the sum of its split. The database asks for it when a bill is foreign (FIN46).
    */
   amount_myr: ringgitTextInput(M.ringgitPaidOut).optional(),
+  /**
+   * Stage 5b: on an account in another currency, the movement's rate (per one unit, exact text), BNM's with its
+   * date or typed. The payment is then in the account's currency, the sum of its split, and paid now.
+   */
+  ...movementRateFields,
   allocations: z
     .array(z.object({ bill_id: z.string({ error: M.bills }).uuid(M.bills), amount }), { error: M.bills })
     .min(1, M.bills)
@@ -159,8 +176,13 @@ const paymentOutBase = z.object({
 /** A payment to one supplier, split across that supplier's posted bills, paid now or scheduled. */
 export const recordPaymentOutInput = paymentOutBase;
 
-/** What the finance assistant may send: ringgit bills only, so no ringgit-paid-out figure. */
-export const recordPaymentOutToolInput = paymentOutBase.omit({ amount_myr: true });
+/** What the finance assistant may send: ringgit bills on a ringgit account only, so no ringgit-paid-out figure or rate. */
+export const recordPaymentOutToolInput = paymentOutBase.omit({
+  amount_myr: true,
+  fx_rate: true,
+  fx_rate_source: true,
+  fx_rate_date: true,
+});
 
 /**
  * A ringgit figure (what arrived, or what left: a refund in stage 3c), as decimal text with at most two places
@@ -188,6 +210,8 @@ const paymentInBase = z.object({
    * payment is the sum of its split. The database asks for it when an invoice is foreign (FIN46).
    */
   amount_myr: ringgitText.optional(),
+  /** Stage 5b: on an account in another currency, the movement's rate; the payment is then its split, in that currency. */
+  ...movementRateFields,
   allocations: z
     .array(z.object({ invoice_id: z.string({ error: R.invoices }).uuid(R.invoices), amount }), { error: R.invoices })
     .min(1, R.invoices)
@@ -198,8 +222,13 @@ const paymentInBase = z.object({
 /** Money received from one customer, split across that customer's posted invoices. It is posted at once. */
 export const recordPaymentInInput = paymentInBase;
 
-/** What the finance assistant may send: ringgit invoices only, so no ringgit-received figure. */
-export const recordPaymentInToolInput = paymentInBase.omit({ amount_myr: true });
+/** What the finance assistant may send: ringgit invoices into a ringgit account only, so no ringgit-received figure or rate. */
+export const recordPaymentInToolInput = paymentInBase.omit({
+  amount_myr: true,
+  fx_rate: true,
+  fx_rate_source: true,
+  fx_rate_date: true,
+});
 
 export const markPaymentPaidInput = z.object({ id, paid_on: date });
 export const paymentIdInput = z.object({ id });
@@ -216,8 +245,11 @@ const REFUSALS: Record<string, string> = {
   [FIN_SIGN_OFF]: NEEDS_SIGN_OFF,
   // The account was archived after the form was opened or the draft was saved.
   [FIN_ACCOUNT_ARCHIVED]: ACCOUNT_ARCHIVED,
-  // Stage 5a: an account in another currency, from a stale tab or a direct call (every picker lists ringgit ones).
-  [FIN_FOREIGN_ACCOUNT]: FOREIGN_ACCOUNT_NOT_YET,
+  // Stage 5b: on an account in another currency. FIN50 is a draft there (a stale tab or a direct call); FIN38 a
+  // movement there with no rate; FIN39 a rate marked BNM's that is not its figure for the day.
+  [FIN_FOREIGN_ACCOUNT]: M.foreignAccount,
+  FIN38: M.rate,
+  FIN39: M.notBnmRate,
   [PG_OUT_OF_RANGE]: TOO_LARGE,
 };
 
@@ -232,7 +264,11 @@ const RECORD_OUT_REFUSALS: Record<string, string> = {
   FIN44: M.oneCurrency,
   FIN46: M.ringgitPaidOut,
   FIN47: M.payNow,
+  FIN51: M.foreignAccountBills,
 };
+
+/** A payment out on an account in another currency (stage 5b): FIN47 is that account's "paid now", not a bill's. */
+const RECORD_OUT_ACCOUNT_REFUSALS: Record<string, string> = { ...RECORD_OUT_REFUSALS, FIN47: M.payNowAccount };
 
 /** The same database codes, worded for money in: the documents are invoices and the party is a customer. */
 const RECEIPT_REFUSALS: Record<string, string> = {
@@ -245,6 +281,7 @@ const RECEIPT_REFUSALS: Record<string, string> = {
   FIN44: R.oneCurrency,
   FIN46: R.ringgitReceived,
   FIN48: R.creditNoteAfter,
+  FIN51: R.foreignAccountInvoices,
   [PG_FOREIGN_KEY]: R.missing,
   // The same invoice twice on one payment; see RECORD_OUT_REFUSALS.
   [PG_UNIQUE]: R.duplicate,
@@ -278,14 +315,14 @@ export async function listAccounts(ctx: FinanceWriteContext): Promise<FinanceAcc
 }
 
 /**
- * The accounts a form that moves ringgit may offer (stage 5a: every money form). Money on an account in another
- * currency is not available yet (FIN50), so no picker lists one.
+ * The accounts a form that moves ringgit only may offer: the expense payment, the transfer form, and the draft
+ * forms (stage 5b: a draft on an account in another currency is FIN50).
  */
 export function ringgitAccounts<A extends { currency: string }>(accounts: A[]): A[] {
   return accounts.filter((a) => a.currency === BASE_CURRENCY);
 }
 
-/** The workspace's active ringgit accounts, for the "paid from" and "paid into" pickers. */
+/** The workspace's active ringgit accounts, for the pickers of the forms that move ringgit only. */
 export async function listRinggitAccounts(ctx: FinanceWriteContext): Promise<FinanceAccount[]> {
   return ringgitAccounts(await listAccounts(ctx));
 }
@@ -330,8 +367,10 @@ export type PaymentOutRow = {
   bill_no: string | null;
   supplier_name: string;
   /**
-   * The bill's currency, which `amount` is in; `transaction_amount` is always ringgit (stage 4b). The reads always
-   * give these four; they are optional so that rows made by hand (samples, tests) need not, and are then ringgit.
+   * The bill's currency, which `amount` is in. `transaction_amount` is in the account's currency,
+   * `transaction_currency` (ringgit until stage 5b put money on accounts in other currencies), and
+   * `transaction_amount_myr` is the whole movement in ringgit. The reads always give these; they are optional so
+   * that rows made by hand (samples, tests) need not, and are then ringgit.
    */
   currency?: string;
   /** What this row used of the ringgit paid out; `amount` for a ringgit bill; null until a foreign split is settled. */
@@ -340,6 +379,10 @@ export type PaymentOutRow = {
   carried_myr?: number | null;
   /** carried_myr − amount_myr: realised gain (above 0) or loss; 0 for a ringgit bill. */
   realised_myr?: number | null;
+  /** The account's currency, which `transaction_amount` is in (stage 5b). */
+  transaction_currency?: string;
+  /** The whole movement in ringgit: `transaction_amount` on a ringgit account. */
+  transaction_amount_myr?: number;
 };
 
 /**
@@ -372,8 +415,9 @@ export type PaymentInRow = {
   invoice_no: string | null;
   customer_name: string;
   /**
-   * The invoice's currency, which `amount` is in; `transaction_amount` is always ringgit. The reads always give
-   * these four; they are optional so that rows made by hand (samples, tests) need not, and are then ringgit.
+   * The invoice's currency, which `amount` is in. `transaction_amount` is in the account's currency,
+   * `transaction_currency` (stage 5b), and `transaction_amount_myr` is the whole movement in ringgit. The reads
+   * always give these; they are optional so that rows made by hand (samples, tests) need not, and are then ringgit.
    */
   currency?: string;
   /** What this row used of the ringgit received; `amount` for a ringgit invoice; null until a foreign split is settled. */
@@ -382,6 +426,10 @@ export type PaymentInRow = {
   carried_myr?: number | null;
   /** amount_myr − carried_myr: realised gain (above 0) or loss; 0 for a ringgit invoice. */
   realised_myr?: number | null;
+  /** The account's currency, which `transaction_amount` is in (stage 5b). */
+  transaction_currency?: string;
+  /** The whole movement in ringgit: `transaction_amount` on a ringgit account. */
+  transaction_amount_myr?: number;
 };
 
 /** What a payment-in row adds to a ringgit figure: its ringgit, which for a ringgit invoice is its amount. */
@@ -406,8 +454,12 @@ export function receivedRinggitByInvoice(rows: PaymentInRow[]): Map<string, numb
 
 const PAYMENT_COLUMNS =
   'allocation_id,transaction_id,number,txn_date,method,amount,transaction_amount,status,reference,account_id,account_name';
-const PAYMENT_OUT_COLUMNS = `${PAYMENT_COLUMNS},bill_id,bill_no,supplier_name,currency,amount_myr,carried_myr,realised_myr`;
-const PAYMENT_IN_COLUMNS = `${PAYMENT_COLUMNS},invoice_id,invoice_no,customer_name,currency,amount_myr,carried_myr,realised_myr`;
+const PAYMENT_OUT_COLUMNS =
+  `${PAYMENT_COLUMNS},bill_id,bill_no,supplier_name,currency,amount_myr,carried_myr,realised_myr,` +
+  'transaction_currency,transaction_amount_myr';
+const PAYMENT_IN_COLUMNS =
+  `${PAYMENT_COLUMNS},invoice_id,invoice_no,customer_name,currency,amount_myr,carried_myr,realised_myr,` +
+  'transaction_currency,transaction_amount_myr';
 
 /** Every row of one of the two payment views, newest first, read a page at a time. */
 async function listPaymentRows<T extends { amount: number; transaction_amount: number }>(
@@ -437,6 +489,13 @@ async function listPaymentRows<T extends { amount: number; transaction_amount: n
               amount_myr: r.amount_myr === null ? null : Number(r.amount_myr),
               carried_myr: r.carried_myr === null ? null : Number(r.carried_myr),
               realised_myr: r.realised_myr === null ? null : Number(r.realised_myr),
+            }
+          : {}),
+        // The movement's currency and its ringgit (stage 5b).
+        ...('transaction_amount_myr' in r
+          ? {
+              transaction_currency: (r.transaction_currency as string | null) ?? BASE_CURRENCY,
+              transaction_amount_myr: Number(r.transaction_amount_myr),
             }
           : {}),
       })),
@@ -506,21 +565,31 @@ async function refusalUnlessPaymentIn(
 
 /**
  * Records a payment out, paid now or scheduled, split across one supplier's bills. For bills in another currency
- * `amount_myr` is the ringgit that left the account, the amounts are in their currency, and it is paid now.
+ * paid from a ringgit account `amount_myr` is the ringgit that left the account, the amounts are in their
+ * currency, and it is paid now. From an account in another currency (stage 5b) the bills are in its currency, the
+ * rate is sent, and it is paid now.
  */
 export async function recordPaymentOut(
   ctx: FinanceWriteContext,
   input: z.input<typeof recordPaymentOutInput>,
 ): Promise<FinResult<{ id: string }>> {
-  const { allocations, scheduled, amount_myr, ...rest } = recordPaymentOutInput.parse(input);
-  // The key is sent only when there is a figure: the database reads a missing key as "none".
-  const payment = { ...rest, status: scheduled ? 'scheduled' : 'posted', ...(amount_myr === undefined ? {} : { amount_myr }) };
+  const { allocations, scheduled, amount_myr, fx_rate, fx_rate_source, fx_rate_date, ...rest } =
+    recordPaymentOutInput.parse(input);
+  // Each key is sent only when there is a figure: the database reads a missing key as "none".
+  const payment = {
+    ...rest,
+    status: scheduled ? 'scheduled' : 'posted',
+    ...(amount_myr === undefined ? {} : { amount_myr }),
+    ...movementRateKeys({ fx_rate, fx_rate_source, fx_rate_date }),
+  };
   const { data, error } = await ctx.client.rpc('finance_record_payment_out', {
     target_org: ctx.orgId,
     payment,
     allocations,
   });
-  if (error || !data) return moneyWriteFailed('recordPaymentOut', error, RECORD_OUT_REFUSALS);
+  // A rate is sent only for an account in another currency, whose FIN47 is its own "paid now".
+  const refusals = fx_rate === undefined ? RECORD_OUT_REFUSALS : RECORD_OUT_ACCOUNT_REFUSALS;
+  if (error || !data) return moneyWriteFailed('recordPaymentOut', error, refusals);
   return { ok: true, data: { id: data as string } };
 }
 
@@ -550,9 +619,13 @@ export async function recordPaymentIn(
   ctx: FinanceWriteContext,
   input: z.input<typeof recordPaymentInInput>,
 ): Promise<FinResult<{ id: string }>> {
-  const { allocations, amount_myr, ...rest } = recordPaymentInInput.parse(input);
-  // The key is sent only when there is a figure: the database reads a missing key as "none".
-  const payment = amount_myr === undefined ? rest : { ...rest, amount_myr };
+  const { allocations, amount_myr, fx_rate, fx_rate_source, fx_rate_date, ...rest } = recordPaymentInInput.parse(input);
+  // Each key is sent only when there is a figure: the database reads a missing key as "none".
+  const payment = {
+    ...rest,
+    ...(amount_myr === undefined ? {} : { amount_myr }),
+    ...movementRateKeys({ fx_rate, fx_rate_source, fx_rate_date }),
+  };
   const { data, error } = await ctx.client.rpc('finance_record_payment_in', {
     target_org: ctx.orgId,
     payment,

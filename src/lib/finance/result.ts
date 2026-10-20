@@ -41,12 +41,13 @@ export const ACCOUNT_ARCHIVED =
   'The account this is on has been archived. Restore it on Banking, or use another account, then try again.';
 
 /**
- * The database refused money on a bank or cash account in another currency (`private.finance_transaction_currency_guard`,
- * 20261122100000): any movement inserted on one, or a draft moved onto one. Every money picker lists ringgit
- * accounts only, so a person meets it from a stale tab or a direct call. Each data layer maps the code itself.
+ * The database refused money on a bank or cash account in another currency (`private.finance_transaction_currency_guard`):
+ * from 20261122110000 (stage 5b), a draft inserted on one (it carries no rate), a draft moved between accounts in
+ * different currencies, or a side of a transfer (until stage 5c). Payments there are recorded paid, with their rate,
+ * and the draft forms list ringgit accounts, so a person meets it from a stale tab or a direct call. Each data
+ * layer maps the code to its own sentence (movement-rate.ts `MOVEMENT_MESSAGES.draft`; transfers their own).
  */
 export const FIN_FOREIGN_ACCOUNT = 'FIN50';
-export const FOREIGN_ACCOUNT_NOT_YET = 'Payments on accounts in other currencies are not available yet.';
 
 /**
  * The database refused a change to a payment that has left draft, or to its split

@@ -6,6 +6,7 @@
  * This file only reads. A receipt's writes are in cash-receipts.ts and a
  * voucher's in vouchers.ts. org_id comes from the context.
  */
+import { BASE_CURRENCY } from './currencies';
 import { PAYMENT_PAGE_SIZE, type PaymentInRow, type PaymentMethod } from './money';
 import type { FinanceWriteContext } from './result';
 
@@ -36,6 +37,13 @@ export type CashReceiptRow = {
   category_name: string | null;
   /** The numbers of the invoices it pays, in order, separated by ", ". */
   documents: string | null;
+  /**
+   * `amount` is in the account's currency, `transaction_currency` (stage 5b); `amount_myr` is the ringgit received
+   * (`amount` on a ringgit account). The reads always give them; they are optional so that rows made by hand
+   * (samples, tests) need not, and are then ringgit.
+   */
+  transaction_currency?: string;
+  amount_myr?: number;
 };
 
 /**
@@ -80,13 +88,34 @@ export type PaymentVoucherRow = {
   documents: string | null;
   /** When an owner or admin approved or rejected it; null for a payment nobody had to approve. */
   approved_at: string | null;
+  /**
+   * `amount` is in the account's currency, `currency` (stage 5b); `amount_myr` is the ringgit that left (`amount` on
+   * a ringgit account). The reads always give them; optional so that rows made by hand need not, and are then ringgit.
+   */
+  currency?: string;
+  amount_myr?: number;
 };
+
+/** What a cash-book row adds to a ringgit figure: its ringgit, which on a ringgit account is its amount. */
+export function cashBookRinggit(row: { amount: number; amount_myr?: number }): number {
+  return row.amount_myr ?? row.amount;
+}
+
+/**
+ * The currency a cash-book row's `amount` is in: the account's. A receipt reads it as `transaction_currency` (its
+ * view's `currency` is the invoices'), a voucher as `currency`.
+ */
+export function cashBookCurrency(row: { transaction_currency?: string; currency?: string }): string {
+  return row.transaction_currency ?? row.currency ?? BASE_CURRENCY;
+}
 
 const SHARED_COLUMNS =
   'transaction_id,number,txn_date,method,amount,status,reference,notes,account_id,account_name,account_kind,' +
   'contact_id,party_name,kind,category_id,category_name,documents';
-const CASH_RECEIPT_COLUMNS = SHARED_COLUMNS;
-const PAYMENT_VOUCHER_COLUMNS = `${SHARED_COLUMNS},approved_at`;
+// Stage 5b: the movement's currency and its ringgit. A receipt's `currency` is the invoices' (3b); its movement's is
+// `transaction_currency`. A voucher's `currency` is its movement's.
+const CASH_RECEIPT_COLUMNS = `${SHARED_COLUMNS},transaction_currency,amount_myr`;
+const PAYMENT_VOUCHER_COLUMNS = `${SHARED_COLUMNS},approved_at,currency,amount_myr`;
 
 /** Every row of one of the two cash book views, newest first, read a page at a time. */
 async function listCashBookRows<T extends { amount: number }>(
@@ -105,7 +134,13 @@ async function listCashBookRows<T extends { amount: number }>(
       .range(from, from + PAYMENT_PAGE_SIZE - 1);
     if (error) throw error;
     const page = (data ?? []) as unknown as Record<string, unknown>[];
-    rows.push(...page.map((row) => ({ ...(row as unknown as T), amount: Number(row.amount) })));
+    rows.push(
+      ...page.map((row) => ({
+        ...(row as unknown as T),
+        amount: Number(row.amount),
+        ...('amount_myr' in row && row.amount_myr !== null ? { amount_myr: Number(row.amount_myr) } : {}),
+      })),
+    );
     if (page.length < PAYMENT_PAGE_SIZE) return rows;
   }
 }

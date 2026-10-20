@@ -37,17 +37,21 @@
  * money-out side of a transfer between accounts is not a voucher: every
  * write here that is given an id is kept to money out that is no side of a
  * transfer, which is what the view `finance_payment_vouchers` shows.
+ *
+ * Stage 5b: a category voucher may be paid from an account in another currency, in that currency, with the
+ * movement's rate, recorded paid by an owner or admin (FIN47 otherwise: nothing waits for approval there). Drafts,
+ * and vouchers for expenses, stay on ringgit accounts (FIN50, FIN51).
  */
 import { z } from 'zod';
 import type { CashBookStatus } from './cash-book';
 import { LINE_MESSAGES, isIsoDate, isoDate, optionalText, ringgitAmount } from './document-lines';
 import { PAYMENT_BILLS_MAX, PAYMENT_METHODS } from './money';
+import { MOVEMENT_MESSAGES, movementRateFields, movementRateKeys } from './movement-rate';
 import {
   type FinResult,
   type FinanceWriteContext,
   FIN_FOREIGN_ACCOUNT,
   FIN_SIGN_OFF,
-  FOREIGN_ACCOUNT_NOT_YET,
   NEEDS_SIGN_OFF,
   NOT_ALLOWED,
   PG_CHECK,
@@ -145,6 +149,15 @@ export const VOUCHER_MESSAGES = {
   // FIN37 from marking paid. An account with a voucher still to be paid cannot be archived (FIN30), so only a race or a direct call does.
   accountArchivedPay:
     'The account this voucher is paid from has been archived, so it cannot be marked paid. Restore the account on Banking, then try again.',
+  // Stage 5b, an account in another currency. FIN50: a draft there (the draft form lists ringgit accounts).
+  foreignAccount: MOVEMENT_MESSAGES.draft,
+  // FIN47 there: a voucher that would wait for approval, or be paid later. The form says it to a member first.
+  payNowAccount: 'A payment from an account in another currency is recorded paid, by an owner or admin.',
+  // FIN51 there: expenses are paid from a ringgit account.
+  expensesInRinggit: 'Expenses are paid from a ringgit account.',
+  // FIN38 and FIN39 there.
+  rate: MOVEMENT_MESSAGES.rate,
+  notBnmRate: MOVEMENT_MESSAGES.notBnmRate,
 } as const;
 
 const M = VOUCHER_MESSAGES;
@@ -184,6 +197,9 @@ export const recordVoucherInput = z
       // True when it has been paid already, on `txn_date`: an owner or admin only, which the action asks first.
       // Left out, it is not in what is parsed either.
       paid_now: z.boolean({ error: M.invalid }).optional(),
+      // Stage 5b: from an account in another currency, the movement's rate; the amount is then in that currency,
+      // and the voucher is paid now by an owner or admin (FIN47 otherwise).
+      ...movementRateFields,
     },
     { error: M.invalid },
   )
@@ -301,8 +317,13 @@ export type RecordedVoucher = { id: string; status: CashBookStatus | null };
 const RECORD_REFUSALS: Record<string, string> = {
   FIN15: M.categoryGone,
   [FIN_ARCHIVED_ACCOUNT]: M.accountArchived,
-  // Stage 5a: an account in another currency, from a stale tab or a direct call (the picker lists ringgit ones).
-  [FIN_FOREIGN_ACCOUNT]: FOREIGN_ACCOUNT_NOT_YET,
+  // Stage 5b, an account in another currency: a draft there (FIN50), a voucher there that would wait or be paid
+  // later (FIN47), with no rate (FIN38), with a rate marked BNM's that is not its figure (FIN39).
+  [FIN_FOREIGN_ACCOUNT]: M.foreignAccount,
+  FIN47: M.payNowAccount,
+  FIN51: M.expensesInRinggit,
+  FIN38: M.rate,
+  FIN39: M.notBnmRate,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_CHECK]: M.invalid,
   [PG_NOT_NULL]: M.invalid,
@@ -324,7 +345,8 @@ const SAVE_REFUSALS: Record<string, string> = {
   FIN15: M.categoryGone,
   FIN47: M.foreignBill,
   [FIN_ARCHIVED_ACCOUNT]: M.accountArchived,
-  [FIN_FOREIGN_ACCOUNT]: FOREIGN_ACCOUNT_NOT_YET,
+  // Stage 5b: a draft on an account in another currency.
+  [FIN_FOREIGN_ACCOUNT]: M.foreignAccount,
   [PG_UNIQUE]: M.duplicate,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_CHECK]: M.invalid,
@@ -425,10 +447,15 @@ export async function recordVoucher(
   ctx: FinanceWriteContext,
   input: z.input<typeof recordVoucherInput>,
 ): Promise<FinResult<RecordedVoucher>> {
-  const { paid_now, ...voucher } = recordVoucherInput.parse(input);
+  const { paid_now, fx_rate, fx_rate_source, fx_rate_date, ...voucher } = recordVoucherInput.parse(input);
   const { data, error } = await ctx.client.rpc('finance_record_voucher', {
     target_org: ctx.orgId,
-    voucher: { ...voucher, status: paid_now ? 'posted' : 'scheduled' },
+    // Each rate key is sent only when there is a figure: the database reads a missing key as "none".
+    voucher: {
+      ...voucher,
+      status: paid_now ? 'posted' : 'scheduled',
+      ...movementRateKeys({ fx_rate, fx_rate_source, fx_rate_date }),
+    },
     allocations: [],
   });
   if (error || !data) return voucherWriteFailed('recordVoucher', error, RECORD_REFUSALS);

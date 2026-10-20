@@ -28,7 +28,6 @@ import {
   type FinanceWriteContext,
   FIN_ACCOUNT_ARCHIVED,
   FIN_FOREIGN_ACCOUNT,
-  FOREIGN_ACCOUNT_NOT_YET,
   FIN_SIGN_OFF,
   NEEDS_SIGN_OFF,
   NOT_ALLOWED,
@@ -63,6 +62,9 @@ export const EXPENSE_PAYMENT_MESSAGES = {
   missing: 'That account no longer exists. Choose another account.',
   // 23514 and 23502: a check or a required column. The schema refuses everything that could meet one.
   invalid: 'Check the account, the method and the amount, then try again.',
+  // Stage 5b: an expense is paid from a ringgit account. The card lists ringgit accounts, so an account in another
+  // currency (FIN51; FIN38 first when no rate is sent, which the card never sends; FIN50) is a stale tab or a direct call.
+  ringgitAccount: 'Expenses are paid from a ringgit account. Choose a ringgit account.',
 } as const;
 
 const M = EXPENSE_PAYMENT_MESSAGES;
@@ -100,8 +102,10 @@ const REFUSALS: Record<string, string> = {
   [FIN_SIGN_OFF]: NEEDS_SIGN_OFF,
   // The account was archived after the card was opened.
   [FIN_ACCOUNT_ARCHIVED]: ACCOUNT_ARCHIVED,
-  // Stage 5a: an account in another currency, from a stale tab or a direct call (every picker lists ringgit ones).
-  [FIN_FOREIGN_ACCOUNT]: FOREIGN_ACCOUNT_NOT_YET,
+  // Stage 5b: an account in another currency, from a stale tab or a direct call (the card lists ringgit ones).
+  [FIN_FOREIGN_ACCOUNT]: M.ringgitAccount,
+  FIN38: M.ringgitAccount,
+  FIN51: M.ringgitAccount,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_CHECK]: M.invalid,
   [PG_NOT_NULL]: M.invalid,

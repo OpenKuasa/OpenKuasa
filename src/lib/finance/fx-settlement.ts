@@ -8,7 +8,10 @@
  * 20261120120000_bendahara_fx_credit_notes_refunds.sql); and a ringgit payment of
  * supplier bills in another currency (stage 4b, private.finance_fx_carried_bill in
  * 20261121111000_bendahara_fx_payments_out.sql, the bill side of the same rule:
- * carriedSen answers it too). Pure, and in whole numbers
+ * carriedSen answers it too); and money on a bank or cash account in another currency (stage 5b,
+ * 20261122110000_bendahara_fx_foreign_account_money.sql: finance_transaction_to_currency puts the movement into
+ * ringgit at its rate, movementRinggitSen, and that ringgit is shared over the documents as a ringgit payment's
+ * is). Pure, and in whole numbers
  * only: money is a bigint count of sen (every amount column keeps two
  * decimals, a currency with no cents included) and a rate a bigint count of
  * 10^-10, as document-currency.ts works them. The payment form shows the
@@ -69,6 +72,30 @@ export function shareRinggit(totalSen: bigint, parts: { id: string; sen: bigint 
 /** A part at a rate, in sen, rounded half up (the parts are never below 0). */
 function atRateSen(partSen: bigint, rateScaled: bigint): bigint {
   return (partSen * rateScaled + RATE_ONE / TWO) / RATE_ONE;
+}
+
+/**
+ * A movement's ringgit on an account in another currency: its amount at its rate, to the sen, as
+ * finance_transaction_to_currency writes amount_myr (round(amount x rate, 2), half away from zero; the amount is
+ * never below 0). `rateScaled` is the rate per one unit in 10^-10 units.
+ */
+export function movementRinggitSen(amountSen: bigint, rateScaled: bigint): bigint {
+  return atRateSen(amountSen, rateScaled);
+}
+
+/**
+ * The ringgit of a same-currency payment (USD from a USD account), as two-decimal text, for settlementPreview,
+ * billPaymentPreview and refundPreview to share: `amount` is decimal text with at most two places, `rateText`
+ * the rate per one unit as exact decimal text ("4.1500000000"). Null while either is not such a number above 0.
+ */
+export function movementRinggitText(amount: string, rateText: string): string | null {
+  const amountSen = senFromText(amount);
+  const rate = scaledFromText(rateText);
+  if (amountSen === null || amountSen <= ZERO || rate === undefined || rate <= ZERO) return null;
+  const ringgit = movementRinggitSen(amountSen, rate);
+  const whole = ringgit / HUNDRED;
+  const cents = (ringgit % HUNDRED).toString().padStart(2, '0');
+  return `${whole}.${cents}`;
 }
 
 /**

@@ -13,17 +13,22 @@
  * accounts are money in too and are not receipts: every write here that is
  * given an id asks the view `finance_cash_receipts` first and refuses
  * anything it does not show, without writing.
+ *
+ * Stage 5b: on an account in another currency a draft cannot carry a rate (FIN50), so income received there is
+ * recorded and posted in one call, with its rate (`recordCashReceipt`, `finance_record_cash_receipt`), by an owner
+ * or admin (posting a receipt is a sign-off: FIN14). An invoice in another currency is still paid with Record
+ * payment on Invoices.
  */
 import { z } from 'zod';
 import { LINE_MESSAGES, isoDate, optionalText, ringgitAmount } from './document-lines';
 import { PAYMENT_INVOICES_MAX, PAYMENT_METHODS } from './money';
+import { MOVEMENT_MESSAGES, movementRateFields, movementRateKeys } from './movement-rate';
 import {
   type FinResult,
   type FinanceWriteContext,
   ACCOUNT_ARCHIVED,
   FIN_ACCOUNT_ARCHIVED,
   FIN_FOREIGN_ACCOUNT,
-  FOREIGN_ACCOUNT_NOT_YET,
   FIN_SIGN_OFF,
   NEEDS_SIGN_OFF,
   NOT_ALLOWED,
@@ -82,6 +87,16 @@ export const CASH_RECEIPT_MESSAGES = {
   missing: 'The account, the contact or an invoice on this receipt no longer exists.',
   // 23514: a check constraint. The schema refuses everything that could meet one, so only a direct call does.
   invalid: 'Check the amount, the method and who it is from, then try again.',
+  // FIN50 (narrowed in stage 5b): a draft on an account in another currency, or a draft moved onto one. The draft
+  // form lists ringgit accounts, so this is met from a stale tab or a direct call.
+  foreignAccount: MOVEMENT_MESSAGES.draft,
+  // FIN38 and FIN39 from recording income on an account in another currency (stage 5b).
+  rate: MOVEMENT_MESSAGES.rate,
+  notBnmRate: MOVEMENT_MESSAGES.notBnmRate,
+  // What the form says on an account in another currency: invoices there are paid on Invoices.
+  invoicesOnInvoices: (code: string) => `Record a payment of an invoice in ${code} on Invoices.`,
+  // A member on an account in another currency, said by the form before anything is sent (FIN14 at posting).
+  postedByDecider: 'Income on an account in another currency is recorded as received, by an owner or admin.',
 } as const;
 
 const M = CASH_RECEIPT_MESSAGES;
@@ -152,6 +167,23 @@ export const saveCashReceiptInput = z.discriminatedUnion(
 
 export const cashReceiptIdInput = z.object({ id }, { error: M.gone });
 
+/**
+ * Income received and recorded in one call (stage 5b, `finance_record_cash_receipt`): for an account in another
+ * currency, where a draft cannot carry a rate. The amount is in the account's currency; the rate goes with it.
+ * Posting it is a sign-off (FIN14 for a member, and nothing is left).
+ */
+export const recordCashReceiptInput = z
+  .object({
+    ...shared,
+    category_id: z.string({ error: M.category }).uuid(M.category),
+    amount: ringgitAmount(M.amount),
+    contact_id: optionalContact,
+    party_name: optionalText.default(null),
+    ...movementRateFields,
+  })
+  .omit({ id: true })
+  .refine((v) => v.contact_id === null || v.party_name === null, { message: M.payer, path: ['party_name'] });
+
 export type SaveAndPostCashReceiptResult = FinResult<{ id: string; number: string }> & { draftId?: string };
 
 const REFUSALS: Record<string, string> = {
@@ -167,8 +199,11 @@ const REFUSALS: Record<string, string> = {
   [FIN_SIGN_OFF]: NEEDS_SIGN_OFF,
   // The account was archived after the form was opened or the draft was saved.
   [FIN_ACCOUNT_ARCHIVED]: ACCOUNT_ARCHIVED,
-  // Stage 5a: an account in another currency, from a stale tab or a direct call (every picker lists ringgit ones).
-  [FIN_FOREIGN_ACCOUNT]: FOREIGN_ACCOUNT_NOT_YET,
+  // Stage 5b: FIN50 is a draft on an account in another currency (a stale tab or a direct call); FIN38 and FIN39
+  // the rate of income recorded on one.
+  [FIN_FOREIGN_ACCOUNT]: M.foreignAccount,
+  FIN38: M.rate,
+  FIN39: M.notBnmRate,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_CHECK]: M.invalid,
   // A required column was left out: the schema asks for every one, so only a direct call meets it.
@@ -262,6 +297,22 @@ export async function saveCashReceipt(
     allocations,
   });
   if (error || !data) return receiptWriteFailed('saveCashReceipt', error);
+  return { ok: true, data: { id: data as string } };
+}
+
+/**
+ * Records income received and posts it in one call, with its RC- number (stage 5b): what Cash Receipts uses on an
+ * account in another currency, with the movement's rate. An owner or admin only (FIN14 for anyone else).
+ */
+export async function recordCashReceipt(
+  ctx: FinanceWriteContext,
+  input: z.input<typeof recordCashReceiptInput>,
+): Promise<FinResult<{ id: string }>> {
+  const { fx_rate, fx_rate_source, fx_rate_date, ...rest } = recordCashReceiptInput.parse(input);
+  // Each rate key is sent only when there is a figure: the database reads a missing key as "none".
+  const receipt = { ...rest, ...movementRateKeys({ fx_rate, fx_rate_source, fx_rate_date }) };
+  const { data, error } = await ctx.client.rpc('finance_record_cash_receipt', { target_org: ctx.orgId, receipt });
+  if (error || !data) return receiptWriteFailed('recordCashReceipt', error, POST_REFUSALS);
   return { ok: true, data: { id: data as string } };
 }
 
