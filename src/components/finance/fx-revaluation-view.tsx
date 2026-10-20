@@ -341,6 +341,7 @@ export function FxRevaluationView({
         } catch (error) {
           // The answer was lost: it may have posted. Close the question and look again; the hook says so.
           setConfirming(false);
+          setPreview(null);
           ask(end, again, false);
           throw error;
         }
@@ -348,7 +349,11 @@ export function FxRevaluationView({
           // Any refusal closes the question, so the same figures are not offered again as they were.
           setConfirming(false);
           // The figures moved under the page: show the new ones, and say so.
-          if (result.error === FX_REVALUATION_MESSAGES.changed) ask(end, again, false);
+          if (result.error === FX_REVALUATION_MESSAGES.changed) {
+            // The old preview's digest no longer posts: drop it while the new one loads, so Post stays off.
+            setPreview(null);
+            ask(end, again, false);
+          }
         }
         return result;
       },
@@ -356,6 +361,8 @@ export function FxRevaluationView({
         setConfirming(false);
         setPosted({ number: data.revaluation_no, periodEnd: end });
         // What is left to post at this month end is now nothing (the history refreshes with the page).
+        // The preview just posted is spent: drop it while the new one loads, so Post cannot enable on its digest.
+        setPreview(null);
         ask(end, again, false);
       },
     );
