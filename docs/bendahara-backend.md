@@ -3132,3 +3132,32 @@ with no date).
   side of a transfer. The form asks for both amounts when the currencies
   differ, shows the rate they say, and hides foreign accounts from "To" when
   "From" is foreign; Banking names the other side's amount on a transfer row.
+- Month-end FX revaluation (`20261123100000`, stage 6a): every workspace has
+  Unrealised Exchange Gain or Loss (`fx_unrealised`, 4910, income). At a month
+  end E (the last day of a month, on or before today in Malaysia: `FIN53`)
+  `private.finance_fx_revaluation_items` works out every foreign item in the
+  books on E (an open foreign invoice, an open foreign bill, a foreign bank or
+  cash account, archived ones included) from the stored figures, with the
+  ledger's own rule for what is in the books on a day, voids included
+  (`private.finance_fx_weight`): its foreign balance, the ringgit it carries
+  (an account's book value includes posted journals on its ledger account),
+  what it revalues to at the closing rate (`round(balance x rate, 2)`; 0 for
+  a balance of 0, which needs no rate), the difference, what earlier runs for
+  E already posted, and what this run posts. The closing rate is BNM's 17:00
+  selling rate per one unit, the newest on or before E
+  (`private.finance_fx_closing_rate`, never the stored middle `rate`), or
+  typed (`manual`); a `bnm` rate that is not the rule's figure and date is
+  `FIN39`, a missing or unusable one `FIN38`. `finance_fx_revaluation_preview`
+  (any member) shows the items and fills BNM's rate where none is sent;
+  `finance_post_fx_revaluation` (an owner or admin, `FIN14`) works them out
+  again under a lock and posts them only if the number of lines and the net
+  gain are what the caller saw (`FIN55`), never for an earlier month end than
+  one already posted (`FIN54`) and never with nothing to post (`FIN56`; no
+  number is used). A run (`FX-0001`) with its rates and lines is written whole
+  and never changed or deleted (`FIN01`, even by the table owner); the three
+  tables grant the signed-in select only. `finance_ledger_lines` posts each run
+  net per ledger account (Receivable, Payable the other way round, each
+  revalued bank account) with one Unrealised line that balances it, dated E,
+  and the same lines swapped on E + 1 (`fx_revaluation:<id>:reverse`); Cash
+  Flow shows a bank account's line as "Exchange rate changes on foreign cash
+  (no money moved)". A second run for E posts only the change, item by item.
