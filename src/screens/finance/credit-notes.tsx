@@ -11,7 +11,7 @@ import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { listCreditNotes } from '@/lib/finance/credit-notes';
 import { listInvoices } from '@/lib/finance/invoices';
-import { listAccounts } from '@/lib/finance/money';
+import { listRinggitAccounts } from '@/lib/finance/money';
 import { listRefunds } from '@/lib/finance/refunds';
 import { creditNotesView } from '@/lib/finance/sales-followon-views';
 import { todayUtc } from '@/lib/finance/view-helpers';
@@ -40,7 +40,7 @@ export default async function CreditNotesScreen() {
     listCreditNotes(ctx),
     canEdit ? listInvoices(ctx) : [],
     canEdit ? listRefunds(ctx) : [],
-    canEdit ? listAccounts(ctx) : [],
+    canEdit ? listRinggitAccounts(ctx) : [],
   ]);
   return (
     <CreditNotesView

@@ -36,8 +36,8 @@ const VOUCHER = '55555555-5555-4555-8555-555555555555';
 const TODAY = '2026-10-12';
 
 const accounts = [
-  { id: CASH, name: 'Cash in hand', kind: 'cash' as const, bank_name: null },
-  { id: ACCOUNT, name: 'Maybank Current', kind: 'bank' as const, bank_name: 'Maybank' },
+  { id: CASH, name: 'Cash in hand', kind: 'cash' as const, bank_name: null, currency: 'MYR' },
+  { id: ACCOUNT, name: 'Maybank Current', kind: 'bank' as const, bank_name: 'Maybank', currency: 'MYR' },
 ];
 const categories = [{ id: CATEGORY, name: 'Utilities' }];
 

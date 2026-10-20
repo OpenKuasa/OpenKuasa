@@ -43,7 +43,7 @@ vi.mock('@/lib/finance/money', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/finance/money')>();
   return {
     ...actual,
-    listAccounts: async () => [{ id: 'a1', name: 'Maybank', kind: 'bank', bank_name: 'Maybank Berhad' }],
+    listAccounts: async () => [{ id: 'a1', name: 'Maybank', kind: 'bank', bank_name: 'Maybank Berhad', currency: 'MYR' }],
   };
 });
 
@@ -111,7 +111,7 @@ describe('Bendahara read tools', () => {
     expect(out.receivables).toEqual({ total: 16900.5, overdue_count: 1 });
     expect(out.payables).toEqual({ total: 9300, overdue_count: 0 });
     expect(out).not.toHaveProperty('receivables.total_sen');
-    expect(out.accounts).toEqual([{ id: 'a1', name: 'Maybank', kind: 'bank' }]);
+    expect(out.accounts).toEqual([{ id: 'a1', name: 'Maybank', kind: 'bank', currency: 'MYR' }]);
     // The description must not claim sen.
     expect(String(tools.getFinanceOverview.description).toLowerCase()).not.toContain('sen');
     expect(String(tools.getFinanceOverview.description).toLowerCase()).toContain('ringgit');

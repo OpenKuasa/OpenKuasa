@@ -32,8 +32,8 @@ const BANK = '66666666-6666-4666-8666-666666666666';
 const CASH = '77777777-7777-4777-8777-777777777777';
 
 const accounts: FinanceAccount[] = [
-  { id: CASH, name: 'Cash in hand', kind: 'cash', bank_name: null },
-  { id: BANK, name: 'Main Bank', kind: 'bank', bank_name: 'Maybank' },
+  { id: CASH, name: 'Cash in hand', kind: 'cash', bank_name: null, currency: 'MYR' },
+  { id: BANK, name: 'Main Bank', kind: 'bank', bank_name: 'Maybank', currency: 'MYR' },
 ];
 
 const doc = (id: string, payable: number) => ({ id, payable });
@@ -74,6 +74,10 @@ describe('what the two payment forms share', () => {
     expect(defaultAccount(accounts)).toBe(BANK);
     expect(defaultAccount([accounts[0]])).toBe(CASH);
     expect(defaultAccount([])).toBe('');
+    // Stage 5a: an account in another currency is never the default, even ahead of the ringgit ones.
+    const usd: FinanceAccount = { id: 'usd', name: 'A USD account', kind: 'bank', bank_name: 'HSBC', currency: 'USD' };
+    expect(defaultAccount([usd, ...accounts])).toBe(BANK);
+    expect(defaultAccount([usd])).toBe('');
   });
 
   it('ticks a document for all it can take, unticks it, and ticks or clears them all, keeping the rest of the form', () => {

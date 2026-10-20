@@ -13,7 +13,7 @@ import { receiptInvoicesForForm, receiptPaymentsForForm } from '@/lib/finance/ca
 import { listIncomeCategories } from '@/lib/finance/cash-receipts';
 import { listContacts } from '@/lib/finance/contacts';
 import { listInvoices } from '@/lib/finance/invoices';
-import { listAccounts, listPaymentsIn } from '@/lib/finance/money';
+import { listRinggitAccounts, listPaymentsIn } from '@/lib/finance/money';
 import { todayUtc } from '@/lib/finance/view-helpers';
 import { createClient } from '@/lib/supabase/server';
 import { SAMPLE_CASH_RECEIPTS } from './cash-book-sample';
@@ -46,7 +46,7 @@ export default async function CashReceiptsScreen() {
     listCashReceipts(ctx),
     canEdit ? listInvoices(ctx) : [],
     canEdit ? listPaymentsIn(ctx) : [],
-    canEdit ? listAccounts(ctx) : [],
+    canEdit ? listRinggitAccounts(ctx) : [],
     canEdit ? listContacts(ctx) : [],
     canEdit ? listIncomeCategories(ctx) : [],
   ]);

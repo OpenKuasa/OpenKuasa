@@ -66,8 +66,8 @@ const paid = (n: number, p: Partial<PaymentOutRow> = {}): PaymentOutRow => ({
 });
 
 const accounts: FinanceAccount[] = [
-  { id: CASH, name: 'Cash in hand', kind: 'cash', bank_name: null },
-  { id: BANK, name: 'Main Bank', kind: 'bank', bank_name: 'Maybank' },
+  { id: CASH, name: 'Cash in hand', kind: 'cash', bank_name: null, currency: 'MYR' },
+  { id: BANK, name: 'Main Bank', kind: 'bank', bank_name: 'Maybank', currency: 'MYR' },
 ];
 
 const form = (payable: PayableBill[], f: Partial<PaymentForm> = {}): PaymentForm => ({

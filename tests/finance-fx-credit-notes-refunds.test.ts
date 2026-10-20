@@ -175,7 +175,7 @@ describe('the credit note form, on an invoice in another currency', () => {
 /* ---- the refund form ---------------------------------------------------------------- */
 
 describe('the refund form, on an invoice in another currency', () => {
-  const accounts: FinanceAccount[] = [{ id: BANK, name: 'Main Bank', kind: 'bank', bank_name: 'Maybank' }];
+  const accounts: FinanceAccount[] = [{ id: BANK, name: 'Main Bank', kind: 'bank', bank_name: 'Maybank', currency: 'MYR' }];
   const targets = refundTargets([D_ROW, MYR_ROW], [D_NOTE], []);
   const onNote = targets.find((t) => t.key === noteTargetKey(NOTE_D))!;
   const opened = (): RefundForm => ({ ...newRefundForm(targets, accounts, TODAY, noteTargetKey(NOTE_D)), reason: 'damaged_goods' });
@@ -228,7 +228,7 @@ describe('the refund form, on an invoice in another currency', () => {
 
 /* ---- the data layer and the assistant ------------------------------------------ */
 
-function fakeClient(rows: { invoices?: Record<string, string>; notes?: Record<string, string> } = {}) {
+function fakeClient(rows: { invoices?: Record<string, string>; notes?: Record<string, string>; accounts?: Record<string, string> } = {}) {
   const calls: { kind: string; payload: unknown }[] = [];
   const client = {
     rpc: async (name: string, args: unknown) => {
@@ -245,6 +245,8 @@ function fakeClient(rows: { invoices?: Record<string, string>; notes?: Record<st
       };
       q.maybeSingle = () => {
         calls.push({ kind: `read:${table}`, payload: id });
+        // Stage 5a: the assistant reads the account's currency first.
+        if (table === 'finance_accounts') return Promise.resolve({ data: { id, currency: rows.accounts?.[id] ?? 'MYR' }, error: null });
         if (table === 'finance_invoices') {
           const currency = rows.invoices?.[id];
           return Promise.resolve({ data: currency ? { currency } : null, error: null });
@@ -300,13 +302,24 @@ describe('the assistant records credit notes and refunds in ringgit only', () =>
       ok: false,
       error: 'This invoice is not in ringgit. Record its refund on the Refunds screen.',
     });
-    expect(calls.map((c) => c.kind)).toEqual(['read:finance_credit_notes', 'read:finance_invoices', 'read:finance_invoices']);
+    expect(calls.map((c) => c.kind)).toEqual([
+      'read:finance_accounts', 'read:finance_credit_notes', 'read:finance_invoices', 'read:finance_accounts', 'read:finance_invoices',
+    ]);
   });
 
   it('records a ringgit refund', async () => {
     const { client, calls } = fakeClient({ invoices: { [MYR_ID]: 'MYR' } });
     expect(await recordRefundInRinggit({ client, orgId: 'org1' }, { ...refundInput, invoice_id: MYR_ID })).toEqual({ ok: true, data: { id: 'new-1' } });
-    expect(calls.map((c) => c.kind)).toEqual(['read:finance_invoices', 'rpc:finance_record_refund']);
+    expect(calls.map((c) => c.kind)).toEqual(['read:finance_accounts', 'read:finance_invoices', 'rpc:finance_record_refund']);
+  });
+
+  it('refuses a refund from an account in another currency in its own words, before anything else (stage 5a)', async () => {
+    const { client, calls } = fakeClient({ invoices: { [MYR_ID]: 'MYR' }, accounts: { [BANK]: 'USD' } });
+    expect(await recordRefundInRinggit({ client, orgId: 'org1' }, { ...refundInput, invoice_id: MYR_ID })).toEqual({
+      ok: false,
+      error: 'This account is not in ringgit. Record this on the screen, where its currency and rate are shown.',
+    });
+    expect(calls.map((c) => c.kind)).toEqual(['read:finance_accounts']);
   });
 
   it('refuses a credit note on a foreign invoice in its own words, and saves a ringgit one', async () => {

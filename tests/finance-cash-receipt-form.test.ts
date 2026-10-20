@@ -102,8 +102,8 @@ const receipt = (r: Partial<CashReceiptRow> = {}): CashReceiptRow => ({
 });
 
 const accounts: FinanceAccount[] = [
-  { id: TILL, name: 'Cash in Hand', kind: 'cash', bank_name: null },
-  { id: BANK, name: 'Main Bank', kind: 'bank', bank_name: 'Maybank' },
+  { id: TILL, name: 'Cash in Hand', kind: 'cash', bank_name: null, currency: 'MYR' },
+  { id: BANK, name: 'Main Bank', kind: 'bank', bank_name: 'Maybank', currency: 'MYR' },
 ];
 const categories = [{ id: OTHER, name: 'Other income' }, { id: SALES, name: 'Sales' }];
 

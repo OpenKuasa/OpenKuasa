@@ -68,7 +68,7 @@ const JPY_ROW: InvoiceListRow = {
 };
 const ALL = [MYR_ROW, USD_ROW, USD2_ROW, SGD_ROW, JPY_ROW];
 
-const accounts: FinanceAccount[] = [{ id: BANK, name: 'Main Bank', kind: 'bank', bank_name: 'Maybank' }];
+const accounts: FinanceAccount[] = [{ id: BANK, name: 'Main Bank', kind: 'bank', bank_name: 'Maybank', currency: 'MYR' }];
 const receivable = receivableInvoices(ALL, []);
 const fresh = (): ReceiptForm => ({ ...newReceiptForm(receivable, accounts, TODAY), customerId: AISYAH });
 const usd = receivable.find((i) => i.id === USD_ID)!;
@@ -165,7 +165,7 @@ describe('the forms that do not take a foreign invoice in 3b', () => {
 
 /* ---- the data layer and the assistant ------------------------------------------ */
 
-function fakeClient(currencies: Record<string, string>) {
+function fakeClient(currencies: Record<string, string>, accounts: Record<string, string> = {}) {
   const calls: { kind: string; payload: unknown }[] = [];
   const client = {
     rpc: async (name: string, args: unknown) => {
@@ -175,8 +175,17 @@ function fakeClient(currencies: Record<string, string>) {
     from: (table: string) => {
       const q: Record<string, unknown> = {};
       let ids: string[] = [];
+      let id = '';
       q.select = () => q;
-      q.eq = () => q;
+      q.eq = (column: string, value: string) => {
+        if (column === 'id') id = value;
+        return q;
+      };
+      q.maybeSingle = () => {
+        // Stage 5a: the assistant reads the account's currency first.
+        calls.push({ kind: `read:${table}`, payload: id });
+        return Promise.resolve({ data: { id, currency: accounts[id] ?? 'MYR' }, error: null });
+      };
       q.in = (_col: string, values: string[]) => {
         ids = values;
         calls.push({ kind: `read:${table}`, payload: values });
@@ -228,7 +237,7 @@ describe('the assistant records payments in ringgit only', () => {
     expect(
       await recordPaymentInRinggit({ client, orgId: 'org1' }, { ...payment, allocations: [{ invoice_id: MYR_ID, amount: 1 }, { invoice_id: USD_ID, amount: 1 }] }),
     ).toEqual({ ok: false, error: 'This invoice is not in ringgit. Record its payment on the Invoices screen.' });
-    expect(calls.map((c) => c.kind)).toEqual(['read:finance_invoices']);
+    expect(calls.map((c) => c.kind)).toEqual(['read:finance_accounts', 'read:finance_invoices']);
   });
 
   it('records a ringgit one', async () => {
@@ -237,7 +246,16 @@ describe('the assistant records payments in ringgit only', () => {
       ok: true,
       data: { id: 'txn-1' },
     });
-    expect(calls.map((c) => c.kind)).toEqual(['read:finance_invoices', 'rpc:finance_record_payment_in']);
+    expect(calls.map((c) => c.kind)).toEqual(['read:finance_accounts', 'read:finance_invoices', 'rpc:finance_record_payment_in']);
+  });
+
+  it('refuses money into an account in another currency in its own words, before anything else (stage 5a)', async () => {
+    const { client, calls } = fakeClient({ [MYR_ID]: 'MYR' }, { [BANK]: 'USD' });
+    expect(await recordPaymentInRinggit({ client, orgId: 'org1' }, { ...payment, allocations: [{ invoice_id: MYR_ID, amount: 100 }] })).toEqual({
+      ok: false,
+      error: 'This account is not in ringgit. Record this on the screen, where its currency and rate are shown.',
+    });
+    expect(calls.map((c) => c.kind)).toEqual(['read:finance_accounts']);
   });
 });
 

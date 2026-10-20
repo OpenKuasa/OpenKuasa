@@ -18,7 +18,7 @@ import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { listContacts } from '@/lib/finance/contacts';
 import { listCreditNotes } from '@/lib/finance/credit-notes';
 import { listInvoices } from '@/lib/finance/invoices';
-import { listAccounts, listPaymentsIn } from '@/lib/finance/money';
+import { listRinggitAccounts, listPaymentsIn } from '@/lib/finance/money';
 import { listProducts } from '@/lib/finance/products';
 import { listRefunds } from '@/lib/finance/refunds';
 import { invoicesView } from '@/lib/finance/sales-views';
@@ -72,7 +72,7 @@ export default async function InvoicesScreen() {
     listPaymentsIn(ctx),
     canEdit ? listContacts(ctx) : [],
     canEdit ? listProducts(ctx) : [],
-    canEdit ? listAccounts(ctx) : [],
+    canEdit ? listRinggitAccounts(ctx) : [],
     canEdit ? readFollowOn(ctx) : null,
   ]);
   return (

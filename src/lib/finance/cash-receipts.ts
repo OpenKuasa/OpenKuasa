@@ -22,6 +22,8 @@ import {
   type FinanceWriteContext,
   ACCOUNT_ARCHIVED,
   FIN_ACCOUNT_ARCHIVED,
+  FIN_FOREIGN_ACCOUNT,
+  FOREIGN_ACCOUNT_NOT_YET,
   FIN_SIGN_OFF,
   NEEDS_SIGN_OFF,
   NOT_ALLOWED,
@@ -165,6 +167,8 @@ const REFUSALS: Record<string, string> = {
   [FIN_SIGN_OFF]: NEEDS_SIGN_OFF,
   // The account was archived after the form was opened or the draft was saved.
   [FIN_ACCOUNT_ARCHIVED]: ACCOUNT_ARCHIVED,
+  // Stage 5a: an account in another currency, from a stale tab or a direct call (every picker lists ringgit ones).
+  [FIN_FOREIGN_ACCOUNT]: FOREIGN_ACCOUNT_NOT_YET,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_CHECK]: M.invalid,
   // A required column was left out: the schema asks for every one, so only a direct call meets it.

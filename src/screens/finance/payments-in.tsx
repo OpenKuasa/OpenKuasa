@@ -3,7 +3,7 @@ import { type PaymentInActions, PaymentsInView } from '@/components/finance/paym
 import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { listInvoices } from '@/lib/finance/invoices';
-import { listAccounts, listPaymentsIn } from '@/lib/finance/money';
+import { listRinggitAccounts, listPaymentsIn } from '@/lib/finance/money';
 import { paymentsInView } from '@/lib/finance/sales-views';
 import { todayUtc } from '@/lib/finance/view-helpers';
 import { createClient } from '@/lib/supabase/server';
@@ -27,7 +27,7 @@ export default async function PaymentsInScreen() {
   const [rows, invoices, accounts] = await Promise.all([
     listPaymentsIn(ctx),
     canEdit ? listInvoices(ctx) : [],
-    canEdit ? listAccounts(ctx) : [],
+    canEdit ? listRinggitAccounts(ctx) : [],
   ]);
   return (
     <PaymentsInView

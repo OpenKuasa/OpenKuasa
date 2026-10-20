@@ -139,7 +139,7 @@ const SGD_BILL = foreign({ id: SGD_ID, bill_no: 'BILL-4', currency: 'SGD', fx_ra
 const JPY_BILL = foreign({ id: JPY_ID, bill_no: 'BILL-5', currency: 'JPY', fx_rate_text: '0.0290000000', total: 100000, balance: 100000, total_myr: 2900, balance_myr: 2900 });
 const ALL = [MYR_BILL, USD_BILL, USD2_BILL, SGD_BILL, JPY_BILL];
 
-const accounts: FinanceAccount[] = [{ id: BANK, name: 'Main Bank', kind: 'bank', bank_name: 'Maybank' }];
+const accounts: FinanceAccount[] = [{ id: BANK, name: 'Main Bank', kind: 'bank', bank_name: 'Maybank', currency: 'MYR' }];
 const payable = payableBills(ALL, []);
 const fresh = (): PaymentForm => ({ ...newPaymentForm(payable, accounts, TODAY), supplierId: LIM });
 const usd = payable.find((b) => b.id === USD_ID)!;
@@ -217,7 +217,7 @@ describe('the payment-out form, one currency at a time', () => {
 
 /* ---- the data layer and the assistant ----------------------------------------------- */
 
-function fakeClient(currencies: Record<string, string>) {
+function fakeClient(currencies: Record<string, string>, accounts: Record<string, string> = {}) {
   const calls: { kind: string; payload: unknown }[] = [];
   const client = {
     rpc: async (name: string, args: unknown) => {
@@ -226,8 +226,17 @@ function fakeClient(currencies: Record<string, string>) {
     },
     from: (table: string) => {
       const q: Record<string, unknown> = {};
+      let id = '';
       q.select = () => q;
-      q.eq = () => q;
+      q.eq = (column: string, value: string) => {
+        if (column === 'id') id = value;
+        return q;
+      };
+      q.maybeSingle = () => {
+        // Stage 5a: the assistant reads the account's currency first.
+        calls.push({ kind: `read:${table}`, payload: id });
+        return Promise.resolve({ data: { id, currency: accounts[id] ?? 'MYR' }, error: null });
+      };
       q.in = (_col: string, values: string[]) => {
         calls.push({ kind: `read:${table}`, payload: values });
         return Promise.resolve({ data: values.map((id) => ({ id, currency: currencies[id] })), error: null });
@@ -284,7 +293,7 @@ describe('the assistant records payments out in ringgit only', () => {
     expect(
       await recordPaymentOutInRinggit({ client, orgId: 'org1' }, { ...payment, allocations: [{ bill_id: MYR_ID, amount: 1 }, { bill_id: USD_ID, amount: 1 }] }),
     ).toEqual({ ok: false, error: 'This bill is not in ringgit. Record its payment on the Payments Out screen.' });
-    expect(calls.map((c) => c.kind)).toEqual(['read:supplier_bills']);
+    expect(calls.map((c) => c.kind)).toEqual(['read:finance_accounts', 'read:supplier_bills']);
   });
   it('records a ringgit one', async () => {
     const { client, calls } = fakeClient({ [MYR_ID]: 'MYR' });
@@ -292,7 +301,15 @@ describe('the assistant records payments out in ringgit only', () => {
       ok: true,
       data: { id: 'txn-1' },
     });
-    expect(calls.map((c) => c.kind)).toEqual(['read:supplier_bills', 'rpc:finance_record_payment_out']);
+    expect(calls.map((c) => c.kind)).toEqual(['read:finance_accounts', 'read:supplier_bills', 'rpc:finance_record_payment_out']);
+  });
+  it('refuses money out of an account in another currency in its own words, before anything else (stage 5a)', async () => {
+    const { client, calls } = fakeClient({ [MYR_ID]: 'MYR' }, { [BANK]: 'USD' });
+    expect(await recordPaymentOutInRinggit({ client, orgId: 'org1' }, { ...payment, allocations: [{ bill_id: MYR_ID, amount: 100 }] })).toEqual({
+      ok: false,
+      error: 'This account is not in ringgit. Record this on the screen, where its currency and rate are shown.',
+    });
+    expect(calls.map((c) => c.kind)).toEqual(['read:finance_accounts']);
   });
 });
 

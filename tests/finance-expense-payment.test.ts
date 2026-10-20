@@ -24,8 +24,8 @@ const VOUCHER = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const SEEN = '2026-10-12T09:15:22.123456+00:00';
 
 const ACCOUNTS: FinanceAccount[] = [
-  { id: CASH, name: 'Petty Cash', kind: 'cash', bank_name: null },
-  { id: BANK, name: 'Main Bank', kind: 'bank', bank_name: 'Maybank' },
+  { id: CASH, name: 'Petty Cash', kind: 'cash', bank_name: null, currency: 'MYR' },
+  { id: BANK, name: 'Main Bank', kind: 'bank', bank_name: 'Maybank', currency: 'MYR' },
 ];
 
 function approved(over: Partial<ExpenseRow> = {}): ExpenseRow {

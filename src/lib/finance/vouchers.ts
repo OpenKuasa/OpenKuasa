@@ -45,7 +45,9 @@ import { PAYMENT_BILLS_MAX, PAYMENT_METHODS } from './money';
 import {
   type FinResult,
   type FinanceWriteContext,
+  FIN_FOREIGN_ACCOUNT,
   FIN_SIGN_OFF,
+  FOREIGN_ACCOUNT_NOT_YET,
   NEEDS_SIGN_OFF,
   NOT_ALLOWED,
   PG_CHECK,
@@ -299,6 +301,8 @@ export type RecordedVoucher = { id: string; status: CashBookStatus | null };
 const RECORD_REFUSALS: Record<string, string> = {
   FIN15: M.categoryGone,
   [FIN_ARCHIVED_ACCOUNT]: M.accountArchived,
+  // Stage 5a: an account in another currency, from a stale tab or a direct call (the picker lists ringgit ones).
+  [FIN_FOREIGN_ACCOUNT]: FOREIGN_ACCOUNT_NOT_YET,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_CHECK]: M.invalid,
   [PG_NOT_NULL]: M.invalid,
@@ -320,6 +324,7 @@ const SAVE_REFUSALS: Record<string, string> = {
   FIN15: M.categoryGone,
   FIN47: M.foreignBill,
   [FIN_ARCHIVED_ACCOUNT]: M.accountArchived,
+  [FIN_FOREIGN_ACCOUNT]: FOREIGN_ACCOUNT_NOT_YET,
   [PG_UNIQUE]: M.duplicate,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_CHECK]: M.invalid,

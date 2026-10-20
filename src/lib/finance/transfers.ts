@@ -20,6 +20,7 @@ import {
   type FinResult,
   type FinanceWriteContext,
   FIN_ACCOUNT_ARCHIVED,
+  FIN_FOREIGN_ACCOUNT,
   FIN_SIGN_OFF,
   NOT_ALLOWED,
   PG_FORBIDDEN,
@@ -49,6 +50,9 @@ export const TRANSFER_MESSAGES = {
   gone: 'That transfer no longer exists.',
   // FIN09: voided in another tab or by someone else. (A pair made by hand and never posted would get it too.)
   alreadyVoid: 'This transfer has already been voided.',
+  // FIN50 (stage 5a): an account in another currency. The form lists ringgit accounts only, so a stale tab or a
+  // direct call meets it.
+  foreignAccount: 'Transfers with an account in another currency are not available yet. Choose two ringgit accounts.',
 } as const;
 
 const M = TRANSFER_MESSAGES;
@@ -75,6 +79,7 @@ const REFUSALS: Record<string, string> = {
   // between that question and the write. For a transfer the cause is "one of those accounts", so it is worded
   // as FIN16 is, not with the shared sentence for a payment's account.
   [FIN_ACCOUNT_ARCHIVED]: M.accounts,
+  [FIN_FOREIGN_ACCOUNT]: M.foreignAccount,
   [FIN_SIGN_OFF]: M.needsSignOff,
   [FIN_GONE]: M.gone,
   [FIN_NOT_POSTED]: M.alreadyVoid,

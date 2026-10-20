@@ -80,7 +80,7 @@ const order = (extra: Partial<OrderBilling> = {}): OrderBilling => ({
   ...extra,
 });
 
-const accounts: FinanceAccount[] = [{ id: 'bank', name: 'Main Bank', kind: 'bank', bank_name: 'Maybank' }];
+const accounts: FinanceAccount[] = [{ id: 'bank', name: 'Main Bank', kind: 'bank', bank_name: 'Maybank', currency: 'MYR' }];
 const actions: PaymentActions = {
   record: vi.fn(),
   markPaid: vi.fn(),

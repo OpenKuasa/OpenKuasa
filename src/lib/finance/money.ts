@@ -8,11 +8,14 @@
  */
 import { z } from 'zod';
 import { isIsoDate } from './bills';
+import { BASE_CURRENCY } from './currencies';
 import {
   type FinResult,
   type FinanceWriteContext,
   ACCOUNT_ARCHIVED,
   FIN_ACCOUNT_ARCHIVED,
+  FIN_FOREIGN_ACCOUNT,
+  FOREIGN_ACCOUNT_NOT_YET,
   FIN_SIGN_OFF,
   NEEDS_SIGN_OFF,
   NOT_ALLOWED,
@@ -69,6 +72,10 @@ export const MONEY_MESSAGES = {
   payNow: 'A payment of a bill in another currency is recorded as paid, on the day the money leaves.',
   // The finance assistant records payments out in ringgit only; it says this before the database is asked.
   foreignBillByAssistant: 'This bill is not in ringgit. Record its payment on the Payments Out screen.',
+  // FIN50 (stage 5a): money on a bank or cash account in another currency. Every picker lists ringgit accounts.
+  foreignAccount: FOREIGN_ACCOUNT_NOT_YET,
+  // The finance assistant moves money on ringgit accounts only; it says this before the database is asked.
+  foreignAccountByAssistant: 'This account is not in ringgit. Record this on the screen, where its currency and rate are shown.',
 } as const;
 
 const M = MONEY_MESSAGES;
@@ -209,6 +216,8 @@ const REFUSALS: Record<string, string> = {
   [FIN_SIGN_OFF]: NEEDS_SIGN_OFF,
   // The account was archived after the form was opened or the draft was saved.
   [FIN_ACCOUNT_ARCHIVED]: ACCOUNT_ARCHIVED,
+  // Stage 5a: an account in another currency, from a stale tab or a direct call (every picker lists ringgit ones).
+  [FIN_FOREIGN_ACCOUNT]: FOREIGN_ACCOUNT_NOT_YET,
   [PG_OUT_OF_RANGE]: TOO_LARGE,
 };
 
@@ -252,19 +261,54 @@ function moneyWriteFailed(
 
 /* ---- reads ------------------------------------------------------------ */
 
-export type FinanceAccount = { id: string; name: string; kind: 'bank' | 'cash'; bank_name: string | null };
+/** An active bank or cash account. `currency` is the one it was added in (stage 5a): MYR for ringgit. */
+export type FinanceAccount = { id: string; name: string; kind: 'bank' | 'cash'; bank_name: string | null; currency: string };
 
-/** The workspace's active accounts, for the "paid from" picker. */
+/** The workspace's active accounts, each with its currency. */
 export async function listAccounts(ctx: FinanceWriteContext): Promise<FinanceAccount[]> {
   const { data, error } = await ctx.client
     .from('finance_accounts')
-    .select('id,name,kind,bank_name')
+    .select('id,name,kind,bank_name,currency')
     .eq('org_id', ctx.orgId)
     .eq('active', true)
     .order('kind', { ascending: true })
     .order('name', { ascending: true });
   if (error) throw error;
-  return (data ?? []) as unknown as FinanceAccount[];
+  return ((data ?? []) as unknown as FinanceAccount[]).map((a) => ({ ...a, currency: a.currency ?? BASE_CURRENCY }));
+}
+
+/**
+ * The accounts a form that moves ringgit may offer (stage 5a: every money form). Money on an account in another
+ * currency is not available yet (FIN50), so no picker lists one.
+ */
+export function ringgitAccounts<A extends { currency: string }>(accounts: A[]): A[] {
+  return accounts.filter((a) => a.currency === BASE_CURRENCY);
+}
+
+/** The workspace's active ringgit accounts, for the "paid from" and "paid into" pickers. */
+export async function listRinggitAccounts(ctx: FinanceWriteContext): Promise<FinanceAccount[]> {
+  return ringgitAccounts(await listAccounts(ctx));
+}
+
+/**
+ * The assistant's refusal of a payment on an account in another currency, read before the database is asked;
+ * null when the account is in ringgit or is not the workspace's (the database answers that one).
+ */
+export async function foreignAccountRefusal(
+  ctx: FinanceWriteContext,
+  accountId: string,
+  fnName: string,
+  refusals: Record<string, string>,
+): Promise<{ ok: false; error: string } | null> {
+  const { data, error } = await ctx.client
+    .from('finance_accounts')
+    .select('id,currency')
+    .eq('org_id', ctx.orgId)
+    .eq('id', accountId)
+    .maybeSingle();
+  if (error) return moneyWriteFailed(fnName, error, refusals);
+  const code = (data as { currency?: string } | null)?.currency;
+  return code !== undefined && code !== BASE_CURRENCY ? { ok: false, error: M.foreignAccountByAssistant } : null;
 }
 
 type TransactionStatus = 'draft' | 'pending_approval' | 'scheduled' | 'posted' | 'rejected' | 'void';
@@ -486,6 +530,9 @@ export async function recordPaymentOut(
  */
 export async function recordPaymentOutInRinggit(ctx: FinanceWriteContext, input: unknown): Promise<FinResult<{ id: string }>> {
   const parsed = recordPaymentOutToolInput.parse(input);
+  // Stage 5a: the account first. Money on an account in another currency is the screen's, with its rate.
+  const foreign = await foreignAccountRefusal(ctx, parsed.account_id, 'recordPaymentOutInRinggit', RECORD_OUT_REFUSALS);
+  if (foreign) return foreign;
   const ids = parsed.allocations.map((a) => a.bill_id);
   const { data, error } = await ctx.client.from('supplier_bills').select('id,currency').eq('org_id', ctx.orgId).in('id', ids);
   if (error) return moneyWriteFailed('recordPaymentOutInRinggit', error, RECORD_OUT_REFUSALS);
@@ -521,6 +568,9 @@ export async function recordPaymentIn(
  */
 export async function recordPaymentInRinggit(ctx: FinanceWriteContext, input: unknown): Promise<FinResult<{ id: string }>> {
   const parsed = recordPaymentInToolInput.parse(input);
+  // Stage 5a: the account first. Money on an account in another currency is the screen's, with its rate.
+  const foreign = await foreignAccountRefusal(ctx, parsed.account_id, 'recordPaymentInRinggit', RECEIPT_REFUSALS);
+  if (foreign) return foreign;
   const ids = parsed.allocations.map((a) => a.invoice_id);
   const { data, error } = await ctx.client
     .from('finance_invoices')

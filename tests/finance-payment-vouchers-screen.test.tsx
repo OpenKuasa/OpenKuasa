@@ -33,7 +33,7 @@ vi.mock('@/lib/finance/contacts', async (importOriginal) => ({
 vi.mock('@/lib/finance/expenses', async (importOriginal) => ({ ...(await importOriginal<object>()), listExpenseCategories: async () => [{ id: 'k1', name: 'Utilities' }] }));
 vi.mock('@/lib/finance/money', async (importOriginal) => ({
   ...(await importOriginal<object>()),
-  listAccounts: async () => [{ id: 'a1', name: 'Maybank' }],
+  listRinggitAccounts: async () => [{ id: 'a1', name: 'Maybank', currency: 'MYR' }],
   listPaymentsOut: async () => [{ transaction_id: 'v1', bill_id: 'b1', status: 'pending_approval' }],
 }));
 vi.mock('@/lib/finance/bills', async (importOriginal) => ({

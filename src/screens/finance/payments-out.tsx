@@ -8,7 +8,7 @@ import { type PaymentActions, PaymentsView } from '@/components/finance/payments
 import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { listBills } from '@/lib/finance/bills';
-import { type PaymentMethod, type PaymentOutRow, listAccounts, listPaymentsOut } from '@/lib/finance/money';
+import { type PaymentMethod, type PaymentOutRow, listRinggitAccounts, listPaymentsOut } from '@/lib/finance/money';
 import { listPurchaseOrders } from '@/lib/finance/purchase-orders';
 import { paymentsView, todayUtc } from '@/lib/finance/purchase-views';
 import { createClient } from '@/lib/supabase/server';
@@ -87,7 +87,7 @@ export default async function PaymentsOutScreen() {
   const [rows, bills, accounts, orders] = await Promise.all([
     listPaymentsOut(ctx),
     canEdit ? listBills(ctx) : [],
-    canEdit ? listAccounts(ctx) : [],
+    canEdit ? listRinggitAccounts(ctx) : [],
     canEdit ? listPurchaseOrders(ctx) : [],
   ]);
   return (

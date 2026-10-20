@@ -317,7 +317,7 @@ describe('Edit on a draft', () => {
   });
   const editor = (): VouchersWriter => ({
     ...writer(false),
-    accounts: [{ id: ACCOUNT, name: 'Maybank Current', kind: 'bank', bank_name: 'Maybank' }],
+    accounts: [{ id: ACCOUNT, name: 'Maybank Current', kind: 'bank', bank_name: 'Maybank', currency: 'MYR' }],
     bills: [ringgitBill(bill)],
     payments: [held(ID, 100, 'draft'), held('other', 10, 'pending_approval')],
   });

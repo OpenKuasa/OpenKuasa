@@ -22,6 +22,7 @@ import {
   PAYMENT_PAGE_SIZE,
   type PaymentInRow,
   type PaymentMethod,
+  foreignAccountRefusal,
   markPaymentPaidInput,
   paymentIdInput,
   ringgitTextInput,
@@ -31,6 +32,8 @@ import {
   type FinanceWriteContext,
   ACCOUNT_ARCHIVED,
   FIN_ACCOUNT_ARCHIVED,
+  FIN_FOREIGN_ACCOUNT,
+  FOREIGN_ACCOUNT_NOT_YET,
   FIN_SIGN_OFF,
   NEEDS_SIGN_OFF,
   NOT_ALLOWED,
@@ -147,6 +150,8 @@ const REFUSALS: Record<string, string> = {
   [FIN_SIGN_OFF]: NEEDS_SIGN_OFF,
   // The account was archived after the form was opened or the draft was saved.
   [FIN_ACCOUNT_ARCHIVED]: ACCOUNT_ARCHIVED,
+  // Stage 5a: an account in another currency, from a stale tab or a direct call (every picker lists ringgit ones).
+  [FIN_FOREIGN_ACCOUNT]: FOREIGN_ACCOUNT_NOT_YET,
   [PG_OUT_OF_RANGE]: TOO_LARGE,
 };
 
@@ -298,6 +303,9 @@ export async function recordRefund(
  */
 export async function recordRefundInRinggit(ctx: FinanceWriteContext, input: unknown): Promise<FinResult<{ id: string }>> {
   const parsed = recordRefundToolInput.parse(input);
+  // Stage 5a: the account first. Money on an account in another currency is the screen's, with its rate.
+  const foreign = await foreignAccountRefusal(ctx, parsed.account_id, 'recordRefundInRinggit', REFUSALS);
+  if (foreign) return foreign;
   let invoiceId = parsed.invoice_id;
   if (parsed.credit_note_id !== null) {
     const { data, error } = await ctx.client

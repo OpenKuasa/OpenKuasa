@@ -36,7 +36,7 @@ const VOUCHER = '55555555-5555-4555-8555-555555555555';
 const BILL = 'b1111111-1111-4111-8111-111111111111';
 const TODAY = '2026-10-12';
 
-const accounts = [{ id: ACCOUNT, name: 'Maybank Current', kind: 'bank' as const, bank_name: 'Maybank' }];
+const accounts = [{ id: ACCOUNT, name: 'Maybank Current', kind: 'bank' as const, bank_name: 'Maybank', currency: 'MYR' }];
 const categories = [{ id: CATEGORY, name: 'Utilities' }];
 const bills: BillListRow[] = [
   {

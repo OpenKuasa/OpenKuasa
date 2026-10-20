@@ -16,7 +16,7 @@ import { listCategories } from '@/lib/finance/categories';
 import { listContacts } from '@/lib/finance/contacts';
 import { expensesScreenPlan } from '@/lib/finance/expense-form';
 import { listExpenseCategories, listExpenses } from '@/lib/finance/expenses';
-import { listAccounts } from '@/lib/finance/money';
+import { listRinggitAccounts } from '@/lib/finance/money';
 import { attachedReceiptsOrNone, listAttachedReceipts, receiptsByDocument } from '@/lib/finance/receipt-match';
 import { todayUtc } from '@/lib/finance/view-helpers';
 import { createClient } from '@/lib/supabase/server';
@@ -64,7 +64,7 @@ export default async function ExpensesScreen() {
     attachedReceiptsOrNone(() => listAttachedReceipts(ctx)),
     plan.readsContacts ? listContacts(ctx) : [],
     plan.readsCategories ? listExpenseCategories(ctx) : [],
-    plan.readsAccounts ? listAccounts(ctx) : [],
+    plan.readsAccounts ? listRinggitAccounts(ctx) : [],
     // Every category, both kinds, archived ones included, for the Categories card: an owner's or admin's only.
     plan.managesCategories ? listCategories(ctx) : [],
   ]);

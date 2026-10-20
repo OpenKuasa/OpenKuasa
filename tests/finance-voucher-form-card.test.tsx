@@ -44,7 +44,7 @@ const BILL = 'b1111111-1111-4111-8111-111111111111';
 const TODAY = '2026-10-12';
 const OVER_BILLED = 'BILL-0007 is against PO-0001, whose bills come to RM 12,400.00, over its total of RM 10,000.00.';
 
-const accounts = [{ id: ACCOUNT, name: 'Maybank Current', kind: 'bank' as const, bank_name: 'Maybank' }];
+const accounts = [{ id: ACCOUNT, name: 'Maybank Current', kind: 'bank' as const, bank_name: 'Maybank', currency: 'MYR' }];
 const categories = [{ id: CATEGORY, name: 'Utilities' }];
 const bills: BillListRow[] = [
   {

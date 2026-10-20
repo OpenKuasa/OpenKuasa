@@ -6,6 +6,7 @@
  * as the text the person typed and added up in whole sen.
  */
 import { typedNumber } from './format';
+import { BASE_CURRENCY } from './currencies';
 import type { FinanceAccount, PaymentMethod, PaymentOutRow } from './money';
 
 /** What the form needs to know of a document that can take a payment. */
@@ -69,9 +70,14 @@ export function amountText(amount: number): string {
   return amount.toFixed(2);
 }
 
-/** The first bank account, or the first account of any kind. */
+/**
+ * The first ringgit bank account, or the first ringgit account of any kind. The screens hand every money form
+ * ringgit accounts only (`listRinggitAccounts`, stage 5a); an account in another currency is never the default
+ * even if one is passed.
+ */
 export function defaultAccount(accounts: FinanceAccount[]): string {
-  return (accounts.find((a) => a.kind === 'bank') ?? accounts[0])?.id ?? '';
+  const ringgit = accounts.filter((a) => a.currency === BASE_CURRENCY);
+  return (ringgit.find((a) => a.kind === 'bank') ?? ringgit[0])?.id ?? '';
 }
 
 /** Ticks a document for all it can still take, or unticks it. */

@@ -251,7 +251,8 @@ export function createBendaharaTools(access: FinanceAccess) {
     getFinanceOverview: tool({
       description:
         'A money snapshot for the owner: total receivables (money owed to the business) and payables ' +
-        '(money it owes), how many of each are overdue, and the bank and cash accounts. Amounts in ringgit.',
+        '(money it owes), how many of each are overdue, and the bank and cash accounts. Amounts in ringgit. ' +
+        'Accounts may be in another currency (currency field); amounts on them are in that currency.',
       inputSchema: z.object({}),
       execute: async () => {
         const [receivable, payable, accounts] = await Promise.all([
@@ -267,7 +268,7 @@ export function createBendaharaTools(access: FinanceAccess) {
         return {
           receivables: { total: total(receivable), overdue_count: overdue(receivable) },
           payables: { total: total(payable), overdue_count: overdue(payable) },
-          accounts: accounts.map((a) => ({ id: a.id, name: a.name, kind: a.kind })),
+          accounts: accounts.map((a) => ({ id: a.id, name: a.name, kind: a.kind, currency: a.currency })),
         };
       },
     }),
@@ -482,7 +483,9 @@ export function createBendaharaTools(access: FinanceAccess) {
       execute: async () => listProducts(ctx),
     }),
     listAccounts: tool({
-      description: 'Bank and cash accounts money is received into or paid out of.',
+      description:
+        'Bank and cash accounts money is received into or paid out of. Accounts may be in another currency ' +
+        '(currency field); amounts on them are in that currency. Record payments only on ringgit (MYR) accounts.',
       inputSchema: z.object({}),
       execute: async () => listAccounts(ctx),
     }),

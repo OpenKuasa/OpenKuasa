@@ -41,6 +41,14 @@ export const ACCOUNT_ARCHIVED =
   'The account this is on has been archived. Restore it on Banking, or use another account, then try again.';
 
 /**
+ * The database refused money on a bank or cash account in another currency (`private.finance_transaction_currency_guard`,
+ * 20261122100000): any movement inserted on one, or a draft moved onto one. Every money picker lists ringgit
+ * accounts only, so a person meets it from a stale tab or a direct call. Each data layer maps the code itself.
+ */
+export const FIN_FOREIGN_ACCOUNT = 'FIN50';
+export const FOREIGN_ACCOUNT_NOT_YET = 'Payments on accounts in other currencies are not available yet.';
+
+/**
  * The database refused a change to a payment that has left draft, or to its split
  * (`private.finance_transaction_still_guard` and `private.finance_allocation_still_guard`, 20261117090000). A payment
  * that is posted, void, waiting for approval, rejected or approved was held already and still answers `FIN09` or

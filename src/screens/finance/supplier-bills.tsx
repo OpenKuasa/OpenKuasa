@@ -15,7 +15,7 @@ import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { type BillDisplayStatus, type BillListRow, listBills, listExpenseCategories } from '@/lib/finance/bills';
 import { listContacts } from '@/lib/finance/contacts';
 import { purchasesCategoryId } from '@/lib/finance/ledger';
-import { type PaymentOutRow, listAccounts, listPaymentsOut } from '@/lib/finance/money';
+import { type PaymentOutRow, listRinggitAccounts, listPaymentsOut } from '@/lib/finance/money';
 import { heldByBill } from '@/lib/finance/payment-form';
 import { listPurchaseOrders } from '@/lib/finance/purchase-orders';
 import { listProducts } from '@/lib/finance/products';
@@ -130,7 +130,7 @@ export default async function SupplierBillsScreen() {
     attachedReceiptsOrNone(() => listAttachedReceipts(ctx)),
     canEdit ? listContacts(ctx) : [],
     canEdit ? listProducts(ctx) : [],
-    canEdit ? listAccounts(ctx) : [],
+    canEdit ? listRinggitAccounts(ctx) : [],
     canEdit ? listPurchaseOrders(ctx) : [],
     canEdit ? listExpenseCategories(ctx) : [],
     // The ledger account behind purchases says which category a new bill starts in.

@@ -115,7 +115,8 @@ export function CashReceiptFormCard({
   // A draft may name an account, a contact, a category or a customer that is no longer offered: it stays the draft's.
   const accountChoices = withCurrent(
     accounts,
-    editing ? { id: editing.account_id, name: editing.account_name, kind: editing.account_kind, bank_name: null } : null,
+    // A draft is on a ringgit account: none is ever saved on one in another currency (FIN50).
+    editing ? { id: editing.account_id, name: editing.account_name, kind: editing.account_kind, bank_name: null, currency: 'MYR' } : null,
   );
   const income = editing && editing.kind === 'income' ? editing : null;
   const payerChoices = withCurrent(
