@@ -30,7 +30,7 @@ const ctl = vi.hoisted(() => ({
   },
   /** The viewer the mocked getPeopleViewer returns, or 'throw' to make it fail. */
   peopleViewer: { employeeId: null, isHr: true, isDemo: false } as
-    | { employeeId: string | null; isHr: boolean; isDemo: boolean }
+    | { employeeId: string | null; isHr: boolean; isDemo: boolean; managesTeam?: boolean }
     | 'throw',
   /** When set, the model call throws this instead of answering. */
   fails: null as unknown,
@@ -438,9 +438,9 @@ describe('POST /api/chat (Tuah) HR access', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     });
-  const run = async () => {
+  const run = async (body: unknown = validBody) => {
     const { POST: tuah } = await import('@/app/api/chat/route');
-    await (await tuah(tuahPost(validBody))).text();
+    await (await tuah(tuahPost(body))).text();
     return ctl.tuah!.people;
   };
 
@@ -458,6 +458,16 @@ describe('POST /api/chat (Tuah) HR access', () => {
     const people = await run();
     expect(people!.write?.tier).toBe('self');
     expect(people!.write?.employeeId).toBe('emp-1');
+  });
+
+  it('gives a linked member with people reporting to them the manager tier', async () => {
+    ctl.org = { orgId: 'org1', role: 'member' };
+    ctl.peopleViewer = { employeeId: 'emp-7', isHr: false, isDemo: false, managesTeam: true };
+    // The single agent holds the HR tools itself, so its one model call shows what a manager is handed.
+    const people = await run({ ...validBody, team: false });
+    expect(people!.write).toMatchObject({ tier: 'manager', employeeId: 'emp-7' });
+    expect(ctl.calls[0].tools).toEqual(expect.arrayContaining(['decideLeave', 'listMyTeam', 'getWaitingForMe']));
+    expect(ctl.calls[0].tools).not.toContain('markClaimPaid');
   });
 
   it('gives the demo workspace no HR change tools', async () => {
