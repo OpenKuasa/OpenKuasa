@@ -124,7 +124,9 @@ testWithSupabase('worked example A5: a USD account opened at a typed rate posts 
   }
 });
 
-testWithSupabase('no money moves on an account in another currency yet: a payment in names it and hears FIN50 in the screen\'s words', async () => {
+// 20261122110000 (stage 5b) opens money on an account in another currency, recorded with its rate: a payment in that
+// names one with no rate now hears FIN38 (the rate is asked for before anything is written), not 5a's FIN50.
+testWithSupabase('a payment in naming an account in another currency with no rate hears FIN38 in the screen\'s words, and writes nothing', async () => {
   const { owner } = await workspace(`FX accounts money ${Date.now()}`);
   const usd = await createBankAccount(owner, { name: 'USD Current', kind: 'bank', bank_name: null, account_no: null, currency: 'USD' });
   if (!usd.ok) throw new Error(usd.error);
@@ -139,7 +141,7 @@ testWithSupabase('no money moves on an account in another currency yet: a paymen
 
   expect(
     await recordPaymentIn(owner, { account_id: usd.data.id, txn_date: today, method: 'bank_transfer', allocations: [{ invoice_id: saved.data.id, amount: 100 }] }),
-  ).toEqual({ ok: false, error: MONEY_MESSAGES.foreignAccount });
+  ).toEqual({ ok: false, error: MONEY_MESSAGES.rate });
   const { count, error } = await owner.client
     .from('finance_transactions')
     .select('id', { count: 'exact', head: true })
