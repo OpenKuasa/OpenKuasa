@@ -3094,3 +3094,24 @@ with no date).
   `finance_bank_transactions` the movement's currency, rate and ringgit;
   Banking shows each account in its own currency and adds ringgit for Total
   cash and the trend.
+- Money on an account in another currency (`20261122110000`, stage 5b): Record
+  payment on Invoices, Payments Out and Refunds take an account in another
+  currency for documents in that currency (`FIN51` for any other, an expense
+  included), and a category voucher and an income receipt (the new
+  `finance_record_cash_receipt`, record and post in one call) are paid from or
+  into one. The movement is in the account's currency, with its rate (the one
+  rule's for its date, or typed; `FIN38` without one, `FIN39` for a `bnm` rate
+  that is not the rule's figure or is dated after the movement), paid now by an
+  owner or admin (`FIN47` for scheduled or waiting for approval). The trigger
+  writes `amount_myr = round(amount x rate, 2)`; `private.finance_fx_settle`
+  shares that ringgit over the documents as for a ringgit account, so a
+  document paid in full leaves Receivable or Payable at 0.00 and the realised
+  difference posts on `fx_realised`. `FIN03` and "money out that settles no
+  document" compare a document in the payment's own currency with it.
+  `finance_transactions.fx_rate` has no default any more: a draft on such an
+  account (the draft functions write no rate) is `FIN50`, as is a draft moved
+  between accounts in different currencies and, until 5c, a side of a
+  transfer; a ringgit row still gets rate 1 from the trigger. The five payment
+  and cash-book views append the movement's currency and ringgit
+  (`transaction_currency`, `transaction_amount_myr`; `finance_payment_vouchers`
+  `currency`, `amount_myr`), and every cash-book total adds ringgit.
