@@ -487,9 +487,12 @@ begin
     if not exists (select 1 from public.orgs where id = old.org_id) then
       return old;
     end if;
-  elsif tg_table_name = 'finance_fx_revaluations' and pg_trigger_depth() > 1
-        and (to_jsonb(new) - 'posted_by') = (to_jsonb(old) - 'posted_by') and new.posted_by is null then
-    return new;
+  elsif tg_table_name = 'finance_fx_revaluations' and pg_trigger_depth() > 1 then
+    -- Asked apart: only the run has posted_by (an AND is not evaluated in order, and new.posted_by on a rate or a
+    -- line would be an unknown field).
+    if (to_jsonb(new) - 'posted_by') = (to_jsonb(old) - 'posted_by') and to_jsonb(new)->'posted_by' = 'null'::jsonb then
+      return new;
+    end if;
   end if;
   raise exception 'a posted FX revaluation is not changed' using errcode = 'FIN01';
 end $$;
@@ -764,14 +767,14 @@ chosen as (
   left join sent s on s.currency = nd.currency
   left join lateral (select cr.rate, cr.rate_date from private.finance_fx_closing_rate(nd.currency, as_at) cr) c on true
 )
-select it.kind, it.id, it.reference, it.party, it.currency, it.fb, it.carried, coalesce(e.myr, 0),
+select it.kind, it.id, it.reference, it.party, it.currency, it.fb, it.carried, coalesce(e.myr, 0.00),
        ch.rate, ch.source, ch.rate_date, ch.bnm_rate, ch.bnm_rate_date,
-       v.revalued, v.revalued - it.carried, v.revalued - it.carried - coalesce(e.myr, 0)
+       v.revalued, v.revalued - it.carried, v.revalued - it.carried - coalesce(e.myr, 0.00)
 from items it
 left join earlier e on e.kind = it.kind and e.item_id = it.id
 left join chosen ch on ch.currency = it.currency
 cross join lateral (select case when it.fb = 0 then 0.00 else round(it.fb * ch.rate, 2) end as revalued) v
-where it.fb <> 0 or it.carried <> 0 or coalesce(e.myr, 0) <> 0;
+where it.fb <> 0 or it.carried <> 0 or coalesce(e.myr, 0.00) <> 0;
 $$;
 revoke all on function private.finance_fx_revaluation_items(uuid, date, jsonb, boolean)
   from public, anon, authenticated, service_role;
