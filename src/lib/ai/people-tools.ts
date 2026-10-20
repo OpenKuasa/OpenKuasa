@@ -331,7 +331,7 @@ const days = z.number().optional().describe('How many days back to cover, counti
 
 /** Appended to the description of every tool whose result carries `scope`. */
 const SCOPE_NOTE =
-  ' The result says whose records it covers in "scope": for someone who is not an HR admin that is their own records only, so never present it as the whole team.';
+  ' The result says whose records it covers in "scope": everyone for an HR admin; for a manager, their own and their direct reports\' where "scope" says so; otherwise their own records only. Never present a narrower scope as the whole team.';
 
 /** What an owner or admin hears when they name no employee and their own account is linked to none. */
 const NO_EMPLOYEE_GIVEN = 'Say which employee this is for. Your own account is not linked to an employee record.';

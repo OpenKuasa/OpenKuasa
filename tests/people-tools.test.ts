@@ -303,7 +303,7 @@ describe('people tools', () => {
 
   it('explains "scope" in exactly the tools that return it', async () => {
     const sentence =
-      ' The result says whose records it covers in "scope": for someone who is not an HR admin that is their own records only, so never present it as the whole team.';
+      ' The result says whose records it covers in "scope": everyone for an HR admin; for a manager, their own and their direct reports\' where "scope" says so; otherwise their own records only. Never present a narrower scope as the whole team.';
     const tools = createPeopleTools(data, HR, NOW);
     for (const name of PEOPLE_TOOL_NAMES) {
       const description = (tools[name] as unknown as { description: string }).description;
@@ -409,7 +409,7 @@ describe('people tools', () => {
   it('explains a null attendance rate in the overview description', () => {
     const description = (createPeopleTools(data, HR, NOW).getPeopleOverview as unknown as { description: string }).description;
     expect(description).toContain('clocked_in_so_far counts only people who have clocked in so far today');
-    expect(description.endsWith('their own records only, so never present it as the whole team.')).toBe(true);
+    expect(description.endsWith('Never present a narrower scope as the whole team.')).toBe(true);
   });
 
   it('gives each employee an id, and says whether an account is linked, but never the account itself', async () => {
