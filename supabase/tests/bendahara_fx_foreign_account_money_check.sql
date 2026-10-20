@@ -48,6 +48,8 @@ declare
   b_10 uuid;
   b_myr uuid;
   b_jpy uuid;
+  b_x uuid[];
+  i_y uuid[];
   cn uuid;
   ex uuid;
   p1 uuid;
@@ -61,6 +63,7 @@ declare
   fails text[] := '{}';
   usd_1000 jsonb := '[{"description":"Consulting","quantity":1,"unit_price":1000,"sst_rate":0}]';
   usd_10 jsonb := '[{"description":"Support","quantity":1,"unit_price":10,"sst_rate":0}]';
+  usd_100 jsonb := '[{"description":"Parts","quantity":1,"unit_price":100,"sst_rate":0}]';
   usd_a4 jsonb := '[{"description":"Machine","quantity":1,"unit_price":1000,"sst_rate":8}]';
   myr_line jsonb := '[{"description":"Stock","quantity":10,"unit_price":12.50,"sst_rate":6}]';
   jpy_line jsonb := '[{"description":"Tools","quantity":1,"unit_price":100000,"sst_rate":0}]';
@@ -358,6 +361,45 @@ begin
   if t is distinct from 'USD 1080.00 4428.00 bill' then fails := fails || format('17: finance_payment_vouchers reads %s for B5.2', t); end if;
   fails := fails || public.bendahara_check_tb(org, 'B5.2');
 
+  -- ==== 4b (review B1): parts with three decimals sent by a direct call: the payment is exactly its split ====
+  -- Two USD 100.00 bills at 4.20, paid USD 10.004 + 10.004 at 4.0 from the USD account. Each part is stored at 10.00, so
+  -- the payment must be USD 20.00 (RM 80.00), not 20.01: Dr Payable 84.00, Cr Bank 80.00, Cr Realised 4.00.
+  b_x := array[
+    public.finance_save_bill(org, bill_dated || typed || jsonb_build_object('supplier_id', sup, 'currency', 'USD', 'fx_rate', '4.2'), usd_100),
+    public.finance_save_bill(org, bill_dated || typed || jsonb_build_object('supplier_id', sup, 'currency', 'USD', 'fx_rate', '4.2'), usd_100)];
+  perform public.finance_post_bill(org, x) from unnest(b_x) as x;
+  select * into r from public.bendahara_check_call(format('select public.finance_record_payment_out(%L, %L, %L)', org,
+    on_usd2 || jsonb_build_object('fx_rate', '4.0'),
+    jsonb_build_array(jsonb_build_object('bill_id', b_x[1], 'amount', 10.004), jsonb_build_object('bill_id', b_x[2], 'amount', 10.004))));
+  px := r.id;
+  if r.err is not null then fails := fails || format('4b: the three-decimal payment out refused: %s', r.err); end if;
+  select t.amount, t.amount_myr as t_myr, t.approved_at, sum(a.amount) as split, sum(a.amount_myr) as split_myr into r
+    from public.finance_transactions t join public.finance_allocations a on a.transaction_id = t.id where t.id = px
+   group by t.amount, t.amount_myr, t.approved_at;
+  if r.amount is distinct from 20.00 or r.t_myr is distinct from 80.00 or r.split is distinct from 20.00
+     or r.split_myr is distinct from 80.00 or r.approved_at is not null then
+    fails := fails || format('4b: the three-decimal payment out reads %s', r);
+  end if;
+  select * into r from public.bendahara_check_entry(px);
+  if r.pay_dr is distinct from 84.00 or r.bank_cr is distinct from 80.00 or r.fx_cr is distinct from 4.00 or r.dr is distinct from r.cr then
+    fails := fails || format('4b: the three-decimal payment out posts Dr Payable %s, Cr Bank %s, Cr realised %s', r.pay_dr, r.bank_cr, r.fx_cr);
+  end if;
+  -- The same call on money in (finance_record_payment_in rounds each part too): USD 20.00, RM 80.00, a loss of 4.00.
+  i_y := array[
+    public.finance_save_invoice(org, jsonb_build_object('customer_id', cust) || inv_dated || jsonb_build_object('currency', 'USD', 'fx_rate', '4.2') || typed, usd_100),
+    public.finance_save_invoice(org, jsonb_build_object('customer_id', cust) || inv_dated || jsonb_build_object('currency', 'USD', 'fx_rate', '4.2') || typed, usd_100)];
+  perform public.finance_post_invoice(org, x) from unnest(i_y) as x;
+  select * into r from public.bendahara_check_call(format('select public.finance_record_payment_in(%L, %L, %L)', org,
+    on_usd2 || jsonb_build_object('fx_rate', '4.0'),
+    jsonb_build_array(jsonb_build_object('invoice_id', i_y[1], 'amount', 10.004), jsonb_build_object('invoice_id', i_y[2], 'amount', 10.004))));
+  px := r.id;
+  if r.err is not null then fails := fails || format('4b: the three-decimal payment in refused: %s', r.err); end if;
+  select * into r from public.bendahara_check_entry(px);
+  if r.bank_dr is distinct from 80.00 or r.recv_cr is distinct from 84.00 or r.fx_dr is distinct from 4.00 or r.dr is distinct from r.cr then
+    fails := fails || format('4b: the three-decimal payment in posts Dr Bank %s, Cr Receivable %s, Dr realised %s', r.bank_dr, r.recv_cr, r.fx_dr);
+  end if;
+  fails := fails || public.bendahara_check_tb(org, '4b');
+
   -- ==== 5: B5.4: an invoice paid in full into the USD account at 4.25, a credit note of USD 100.00, refunded at 4.30 ====
   i_b54 := public.finance_save_invoice(org, jsonb_build_object('customer_id', cust) || inv_dated
     || jsonb_build_object('currency', 'USD', 'fx_rate', '4.2') || typed, usd_1000);
@@ -519,6 +561,12 @@ begin
     format('update public.finance_transactions set amount = 350 where id = %L', draft));
   select amount_myr into r from public.finance_transactions where id = draft;
   if r.amount_myr is distinct from 1452.50 then fails := fails || format('9: the USD draft at 350.00 reads RM %s, not 1,452.50', r.amount_myr); end if;
+  -- (review B1) Settling a USD draft that is not exactly its split (USD 350.00 over a USD 300.00 split) is FIN03,
+  -- whoever asks: the database owner here, as a function that runs as the owner would.
+  reset role;
+  fails := fails || public.bendahara_check_try('9: settling a USD draft above its USD split', 'FIN03',
+    format('select private.finance_fx_settle(%L, %L)', org, draft));
+  set local role authenticated;
   delete from public.finance_allocations where transaction_id = draft;
   delete from public.finance_transactions where id = draft;
 
