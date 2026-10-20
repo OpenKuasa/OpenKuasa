@@ -977,16 +977,27 @@ describe('openPayables', () => {
 
 describe('the note under the Balance Sheet about FX revaluation (stage 6b)', () => {
   const books = { firstForeignDate: '2026-10-05', revaluedMonthEnds: ['2026-11-30'] };
-  it('says a month end with foreign balances and no posted run is at the booked rates', () => {
+  it('says a month end with foreign items and no posted run is at the booked rates, if anything is open', () => {
     expect(revaluationNote('2026-10', books, '2026-11-20')).toBe(
-      'Foreign-currency balances at 31 October 2026 are at the rates they were booked at: no FX revaluation is posted for that month end. ' +
-        'The balance sheet is right at a month end once its revaluation is posted, on FX Revaluation.',
+      'Foreign-currency items open at 31 October 2026, if any, are at the rates they were booked at: no FX revaluation is posted for that month end. ' +
+        'FX Revaluation shows whether there is anything to post.',
     );
   });
-  it('says a month not yet ended is revalued once it ends', () => {
+  it('says a month not yet ended is revalued once it ends, if anything is open', () => {
     expect(revaluationNote('2026-12', books, '2026-12-10')).toBe(
-      'Foreign-currency balances at 31 December 2026 are at the rates they were booked at until the month ends and is revalued, on FX Revaluation.',
+      'Foreign-currency items open at 31 December 2026, if any, are at the rates they were booked at until the month ends and they are revalued. ' +
+        'FX Revaluation shows whether there is anything to post.',
     );
+  });
+  it('never claims something is open or asks for a run: a workspace whose foreign items are all settled can read it as true', () => {
+    // One USD invoice in March, paid in April: every later month end keeps the note, which must stay true.
+    const settled = { firstForeignDate: '2026-03-10', revaluedMonthEnds: [] };
+    for (const [month, today] of [['2026-05', '2026-06-02'], ['2026-06', '2026-06-20']]) {
+      const note = revaluationNote(month, settled, today) as string;
+      expect(note).toContain(', if any, are at the rates they were booked at');
+      expect(note).toContain('FX Revaluation shows whether there is anything to post.');
+      expect(note).not.toMatch(/is right at a month end once|balances at \d/);
+    }
   });
   it('says nothing for a revalued month end, one before the first foreign item, a ringgit-only workspace, or books that could not be read', () => {
     expect(revaluationNote('2026-11', books, '2026-12-10')).toBeNull();

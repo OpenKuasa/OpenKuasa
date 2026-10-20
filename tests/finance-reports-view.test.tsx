@@ -324,7 +324,8 @@ describe('the Reports screen', () => {
       <ReportsView accounts={accounts} totals={sampleTotals} cash={sampleCash} receivables={SAMPLE_RECEIVABLES} payables={SAMPLE_PAYABLES} fxBooks={books} today={SAMPLE_TODAY} followClock={false} />,
     );
     expect(text(html)).toContain(
-      'Foreign-currency balances at 31 October 2026 are at the rates they were booked at until the month ends and is revalued, on FX Revaluation. Open FX Revaluation',
+      'Foreign-currency items open at 31 October 2026, if any, are at the rates they were booked at until the month ends and they are revalued. ' +
+        'FX Revaluation shows whether there is anything to post. Open FX Revaluation',
     );
     expect(html).toContain('href="/finance/fx-revaluation"');
   });
