@@ -16,6 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { localIsoDate } from '@/lib/finance/bill-math';
 import { csvFileName } from '@/lib/finance/csv';
 import { money, rm } from '@/lib/finance/format';
+import { malaysiaClock } from '@/lib/finance/fx-dates';
 import { longDate } from '@/lib/finance/fx-rates';
 import { FX_REVALUATION_MESSAGES, type RevaluationItem, type RevaluationRun } from '@/lib/finance/fx-revaluation';
 import {
@@ -557,7 +558,7 @@ export function FxRevaluationView({
                           <TableCell className="min-w-24 max-w-56 whitespace-normal break-words text-muted-foreground">
                             {(run.posted_by && postedBy[run.posted_by]) || '—'}
                           </TableCell>
-                          <TableCell className="whitespace-nowrap text-muted-foreground">{shortDay(run.posted_at.slice(0, 10))}</TableCell>
+                          <TableCell className="whitespace-nowrap text-muted-foreground">{shortDay(malaysiaClock(new Date(run.posted_at)).date)}</TableCell>
                           <GainCell gain={run.net_gain} />
                           <TableCell className="whitespace-nowrap text-right">
                             <Button variant="ghost" size="sm" aria-expanded={open} onClick={() => setOpenRun(open ? null : run.id)}>
