@@ -2,6 +2,7 @@
 
 import {
   useRef,
+  useState,
   useTransition,
   type HTMLAttributes,
   type ReactNode,
@@ -39,6 +40,7 @@ import { formatDay, formatRM } from '@/lib/crm/deal-stats';
 import {
   MAX_DEAL_TITLE_LENGTH,
   MAX_LOST_REASON_LENGTH,
+  lostReasonProblem,
   type CrmDeal,
   type CrmDealContactChoice,
 } from '@/lib/crm/deals';
@@ -578,19 +580,31 @@ export function LostDealConfirm({
   action,
   onClose,
   focusRef,
+  requireReason = false,
 }: {
   deal: CrmDeal;
   action: CrmFormAction;
   onClose: () => void;
   /** Takes focus once the menu that opened this has closed. */
   focusRef: RefObject<HTMLElement | null>;
+  /** The workspace's rule that a deal marked lost needs a reason (Kasturi > Settings). */
+  requireReason?: boolean;
 }) {
-  const { formAction, pending, error, values } = useCrmForm(action, onClose);
+  const { formAction, pending, error: sentError, values } = useCrmForm(action, onClose);
+  // Said before sending: a reason of only spaces passes `required`, and the database would refuse it.
+  const [blankError, setBlankError] = useState<string | null>(null);
+  const error = blankError ?? sentError;
   const reasonId = `lost-reason-${deal.id}`;
 
   return (
     <form
       action={formAction}
+      onSubmit={(event) => {
+        const reason = new FormData(event.currentTarget).get('lostReason');
+        const problem = lostReasonProblem(typeof reason === 'string' ? reason : '', requireReason);
+        setBlankError(problem);
+        if (problem) event.preventDefault();
+      }}
       className="space-y-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3"
     >
       <input type="hidden" name="dealId" value={deal.id} />
@@ -599,7 +613,7 @@ export function LostDealConfirm({
         and counts against the win rate. You can reopen it later.
       </p>
       <div className="space-y-1.5">
-        <Label htmlFor={reasonId}>Reason</Label>
+        <Label htmlFor={reasonId}>{requireReason ? 'Reason' : 'Reason (optional)'}</Label>
         <Input
           ref={focusRef as RefObject<HTMLInputElement | null>}
           id={reasonId}
@@ -607,6 +621,9 @@ export function LostDealConfirm({
           placeholder="Chose another vendor"
           defaultValue={values?.lostReason}
           maxLength={MAX_LOST_REASON_LENGTH}
+          required={requireReason}
+          aria-invalid={blankError ? true : undefined}
+          onChange={() => setBlankError(null)}
           className="bg-background"
         />
       </div>

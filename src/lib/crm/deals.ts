@@ -284,6 +284,14 @@ export function readLostReason(formData: FormData): string | null {
 }
 
 /**
+ * What is wrong with a lost reason under the workspace's rule, or null. With the rule on, a reason of nothing but
+ * spaces counts as none: the form says so before sending, and the database refuses it either way.
+ */
+export function lostReasonProblem(reason: string, required: boolean): string | null {
+  return required && !reason.trim() ? LOST_REASON_REQUIRED_MESSAGE : null;
+}
+
+/**
  * What a change of stage does to a deal's status. Going into the stage called
  * "Won" wins the deal, whatever it was before. Leaving it puts a won deal
  * back to open. A lost deal stays lost when it moves between other stages;

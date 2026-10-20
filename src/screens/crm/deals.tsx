@@ -76,6 +76,8 @@ type DealsScreenProps = {
   invoices?: DealInvoiceChoice[];
   /** Present only when the signed-in person may change deals. */
   actions?: CrmDealActions;
+  /** The workspace's rule that a deal marked lost needs a reason (Kasturi > Settings). */
+  requireLostReason?: boolean;
   /** When the page was put together, as an ISO string: "today" for the report and the trend. */
   now?: string;
 };
@@ -87,6 +89,7 @@ export default function DealsScreen({
   contacts,
   invoices,
   actions,
+  requireLostReason = false,
   now,
 }: DealsScreenProps = {}) {
   // With live deals every figure comes from them. The sample screen keeps
@@ -446,6 +449,7 @@ export default function DealsScreen({
             columns={columns}
             stages={stages}
             actions={actions}
+            requireLostReason={requireLostReason}
             moves={moves}
             asking={asking}
             onEdit={startEdit}

@@ -44,6 +44,7 @@ import {
   updateCrmPipelineStage,
 } from '@/lib/crm/pipelines';
 import { runCrmWrite } from '@/lib/crm/run-write';
+import { loadCrmSettings } from '@/lib/crm/settings';
 import { createClient } from '@/lib/supabase/server';
 import DealsScreen from './deals';
 
@@ -280,10 +281,11 @@ export default async function CrmDealsPage({
       invoices: Awaited<ReturnType<typeof listInvoices>>;
       links: Awaited<ReturnType<typeof listDealInvoiceLinks>>;
     } | null;
+    requireLostReason: boolean;
   } | null = null;
   try {
     // Fetched together: each trip to the database costs about the same.
-    const [pipelines, deals, contacts, billing] = await Promise.all([
+    const [pipelines, deals, contacts, billing, requireLostReason] = await Promise.all([
       listCrmPipelines(supabase, orgId),
       listCrmDeals(supabase, orgId, DEALS_LOADED),
       // Only the form needs these; the board still shows if they cannot load.
@@ -300,8 +302,18 @@ export default async function CrmDealsPage({
           console.error('[crm/deals] could not load linked invoices', error);
           return null;
         }),
+      // Only the lost-deal form needs the rule. If it cannot be read the form treats the reason as optional; the
+      // database still refuses a lost deal with no reason when the rule is on.
+      canWrite
+        ? loadCrmSettings(supabase, orgId)
+            .then((settings) => settings.requireLostReason)
+            .catch((error) => {
+              console.error('[crm/deals] could not load the Kasturi settings', error);
+              return false;
+            })
+        : false,
     ]);
-    live = { pipelines, deals, contacts, billing };
+    live = { pipelines, deals, contacts, billing, requireLostReason };
   } catch (error) {
     // The CRM migration is applied to a database separately from a deploy, so
     // the tables can be missing for a while. Keep the page up meanwhile.
@@ -334,6 +346,7 @@ export default async function CrmDealsPage({
       totalDeals={live.deals.total}
       contacts={live.contacts}
       actions={canWrite ? ACTIONS : undefined}
+      requireLostReason={live.requireLostReason}
       now={new Date().toISOString()}
     />
   );

@@ -12,7 +12,7 @@
 import { streamErrorHandler } from '@/lib/ai/call-log';
 import { chatJson, prepareChat } from '@/lib/ai/chat-request';
 import { runKasturi } from '@/lib/ai/agents/orchestrator';
-import { ensureCrmPipeline } from '@/lib/ai/crm-tools';
+import { ensureCrmPipeline, loadRequireLostReason } from '@/lib/ai/crm-tools';
 import { getCurrentOrg } from '@/lib/auth/current-org';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
 import { chatApprovals } from '@/lib/chat/approvals';
@@ -38,9 +38,11 @@ export async function POST(request: Request) {
   const canWrite = org.role !== 'viewer';
   // A new workspace gets its starting pipeline here, as on the Deals screen: the lookups themselves never write.
   if (canWrite) await ensureCrmPipeline(chat.supabase, org.orgId);
+  // The workspace's lost-reason rule, so Kasturi asks for a reason before offering to mark a deal lost.
+  const requireLostReason = canWrite ? await loadRequireLostReason(chat.supabase, org.orgId) : false;
   const result = runKasturi(
     chat.messages,
-    { client: chat.supabase, orgId: org.orgId, userId: chat.userId, canWrite },
+    { client: chat.supabase, orgId: org.orgId, userId: chat.userId, canWrite, requireLostReason },
     // Appointments and lead forms: the screens Kasturi shares with Jebat.
     {
       data: await getReachData(chat.supabase),

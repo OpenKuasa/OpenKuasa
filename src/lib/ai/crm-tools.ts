@@ -42,6 +42,7 @@ import {
   needsDefaultPipeline,
   type CrmPipeline,
 } from '@/lib/crm/pipelines';
+import { LOST_REASON_REQUIRED_MESSAGE, loadCrmSettings } from '@/lib/crm/settings';
 import { limitSchema, rowLimit } from '@/lib/ai/limits';
 import { rm } from '@/lib/reach/format';
 
@@ -51,6 +52,12 @@ export type CrmAccess = {
   orgId: string;
   userId: string;
   canWrite: boolean;
+  /**
+   * The workspace's rule that a deal marked lost needs a reason (Kasturi > Settings). Off when left out. With it
+   * on, `markDealLost` refuses a call with no reason at its input check, so no Approve card is shown for a change
+   * the database would refuse. The database enforces the rule either way.
+   */
+  requireLostReason?: boolean;
 };
 
 /** Tools that change CRM data: each one pauses for the user's approval before running. */
@@ -237,6 +244,20 @@ export async function ensureCrmPipeline(client: SupabaseClient, orgId: string): 
     if (needsDefaultPipeline(await listCrmPipelines(client, orgId))) await ensureDefaultPipeline(client, orgId);
   } catch (error) {
     console.error('[tuah] could not set up the default pipeline:', errorCodeOf(error));
+  }
+}
+
+/**
+ * Whether the workspace requires a reason to mark a deal lost, for `CrmAccess.requireLostReason`. A chat route
+ * reads it once, for someone who may edit, before the assistant runs. Never throws: if it cannot be read the rule
+ * counts as off here, and the database still refuses a lost deal with no reason.
+ */
+export async function loadRequireLostReason(client: SupabaseClient, orgId: string): Promise<boolean> {
+  try {
+    return (await loadCrmSettings(client, orgId)).requireLostReason;
+  } catch (error) {
+    console.error('[tuah] could not read the Kasturi settings:', errorCodeOf(error));
+    return false;
   }
 }
 
@@ -717,10 +738,20 @@ export function createCrmTools(access: CrmAccess) {
     }),
 
     markDealLost: tool({
-      description: 'Mark a deal as lost, by id, with a short reason if one was given. Needs approval.',
+      // A call that fails this input check gets no Approve card: with the rule on, one without a reason is
+      // refused here, and the model is told to ask the user for the reason instead.
+      description: access.requireLostReason
+        ? 'Mark a deal as lost, by id, with a short reason. This workspace requires a reason to mark a deal lost: ' +
+          'if the user has not given one, ask them why the deal was lost before calling this. Needs approval.'
+        : 'Mark a deal as lost, by id, with a short reason if one was given. Needs approval.',
       inputSchema: z.object({
         id: idSchema,
-        reason: z.string().max(MAX_LOST_REASON_LENGTH).optional(),
+        reason: access.requireLostReason
+          ? z
+              .string(LOST_REASON_REQUIRED_MESSAGE)
+              .max(MAX_LOST_REASON_LENGTH)
+              .refine((reason) => reason.trim().length > 0, LOST_REASON_REQUIRED_MESSAGE)
+          : z.string().max(MAX_LOST_REASON_LENGTH).optional(),
       }),
       execute: async ({ id, reason }) =>
         attempt(async () => {

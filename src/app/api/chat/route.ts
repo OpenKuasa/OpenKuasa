@@ -17,7 +17,7 @@
 import { readUIMessageStream, type UIMessage } from 'ai';
 import { errorCodeOf, modelErrorCode } from '@/lib/ai/call-log';
 import { prepareChat } from '@/lib/ai/chat-request';
-import { ensureCrmPipeline } from '@/lib/ai/crm-tools';
+import { ensureCrmPipeline, loadRequireLostReason } from '@/lib/ai/crm-tools';
 import { runTuah, type HireAccess, type PeopleAccess } from '@/lib/ai/agents/orchestrator';
 import { peopleWriteFor, receiptFromMessages } from '@/lib/ai/people-tools';
 import { getCurrentOrg } from '@/lib/auth/current-org';
@@ -79,6 +79,8 @@ export async function POST(request: Request) {
         orgId: org.orgId,
         userId: chat.userId,
         canWrite: org.role !== 'viewer',
+        // The workspace's lost-reason rule, so Tuah asks for a reason before offering to mark a deal lost.
+        requireLostReason: org.role !== 'viewer' ? await loadRequireLostReason(supabase, org.orgId) : false,
       }
     : null;
 

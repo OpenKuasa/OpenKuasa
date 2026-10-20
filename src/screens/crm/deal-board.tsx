@@ -93,6 +93,7 @@ export function DealBoard({
   columns,
   stages,
   actions,
+  requireLostReason = false,
   moves,
   asking,
   onEdit,
@@ -106,6 +107,8 @@ export function DealBoard({
   stages: CrmPipelineStage[];
   /** Present only when the signed-in person may change deals. */
   actions?: CrmDealActions;
+  /** The workspace's rule that a deal marked lost needs a reason (Kasturi > Settings). */
+  requireLostReason?: boolean;
   moves: DealMoves;
   /** The deal a question is being asked about, in place of its card. */
   asking: { kind: 'delete' | 'lost'; id: string } | null;
@@ -194,6 +197,7 @@ export function DealBoard({
                       action={actions.markLost}
                       onClose={onAskClosed}
                       focusRef={askingRef}
+                      requireReason={requireLostReason}
                     />
                   )
                 ) : actions ? (
