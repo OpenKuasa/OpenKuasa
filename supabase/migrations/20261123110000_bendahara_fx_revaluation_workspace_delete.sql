@@ -52,15 +52,19 @@ set local lock_timeout = '5s';
 
 create temp table fx6d_started on commit drop as select clock_timestamp() as started_at;
 
--- The table whose foreign keys change, and the four it names (adding a foreign key takes SHARE ROW EXCLUSIVE on the
--- table it references), at once and without waiting. If anything holds one, nothing is applied; run again.
-lock table public.finance_fx_revaluation_lines in access exclusive mode nowait;
+-- The table whose foreign keys change, and the four it names, in ACCESS EXCLUSIVE mode, at once and without
+-- waiting. Dropping a foreign key drops its triggers on the table it references, which takes ACCESS EXCLUSIVE there
+-- (adding one only needs SHARE ROW EXCLUSIVE): asking for less up front would let the ALTER below wait for the upgrade
+-- behind a reader, hold up every reader and writer of invoices, bills and accounts behind it, and make this file one
+-- side of a deadlock. As it is, a busy table fails the apply at once (55P03, "could not obtain lock"); run again. The
+-- whole file holds them for about 10 ms. finance_fx_revaluations is not touched (no foreign key to or from it changes).
 lock table
+  public.finance_fx_revaluation_lines,
   public.finance_fx_revaluation_rates,
   public.finance_invoices,
   public.supplier_bills,
   public.finance_accounts
-  in share row exclusive mode nowait;
+  in access exclusive mode nowait;
 
 -- What the three tables hold and are, before.
 create temp table fx6d_rows_before on commit drop as
@@ -109,16 +113,20 @@ declare
   n bigint;
   started timestamptz := clock_timestamp();
 begin
-  -- No row moved.
+  -- No row moved: the three tables' counts and hashes, before and after, both ways.
+  create temp table fx6d_rows_after on commit drop as
+    select 'runs' as t, count(*) as n, md5(coalesce(string_agg(r::text, ',' order by r.id), '')) as h
+      from public.finance_fx_revaluations r
+    union all
+    select 'rates', count(*), md5(coalesce(string_agg(r::text, ',' order by r.revaluation_id, r.currency), ''))
+      from public.finance_fx_revaluation_rates r
+    union all
+    select 'lines', count(*), md5(coalesce(string_agg(l::text, ',' order by l.id), ''))
+      from public.finance_fx_revaluation_lines l;
   select count(*) into n from (
-    (select * from fx6d_rows_before
-     except
-     select 'runs', count(*), md5(coalesce(string_agg(r::text, ',' order by r.id), '')) from public.finance_fx_revaluations r
-     except
-     select 'rates', count(*), md5(coalesce(string_agg(r::text, ',' order by r.revaluation_id, r.currency), ''))
-       from public.finance_fx_revaluation_rates r
-     except
-     select 'lines', count(*), md5(coalesce(string_agg(l::text, ',' order by l.id), '')) from public.finance_fx_revaluation_lines l)
+    (select * from fx6d_rows_before except select * from fx6d_rows_after)
+    union all
+    (select * from fx6d_rows_after except select * from fx6d_rows_before)
   ) d;
   if n <> 0 then
     raise exception 'the revaluation tables do not read as they did (% differ)', n;
@@ -146,22 +154,31 @@ begin
     raise exception '% constraints differ from before (4 expected: the lines'' four foreign keys)', n;
   end if;
 
-  -- Pinned: every foreign key of the three tables, by name, as it now reads. None is NO ACTION: a workspace delete
-  -- reaches every row however the cascades are ordered.
-  select string_agg(c.conname || ' ' || pg_get_constraintdef(c.oid), ' | ' order by c.conname) into t
+  -- Pinned: every foreign key of the three tables, by name, from the catalog (schema-qualified tables, the columns in
+  -- key order, the delete and update actions, the match type), so no search_path changes what it reads. None is NO
+  -- ACTION on delete: a workspace delete reaches every row however the cascades are ordered.
+  select string_agg(format('%s %s.%s(%s) -> %s.%s(%s) del=%s upd=%s match=%s', c.conname, cn.nspname, cr.relname,
+             (select string_agg(a.attname, ',' order by k.i) from unnest(c.conkey) with ordinality as k(n, i)
+                join pg_catalog.pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.n),
+             fn.nspname, fr.relname,
+             (select string_agg(a.attname, ',' order by k.i) from unnest(c.confkey) with ordinality as k(n, i)
+                join pg_catalog.pg_attribute a on a.attrelid = c.confrelid and a.attnum = k.n),
+             c.confdeltype, c.confupdtype, c.confmatchtype), ' | ' order by c.conname) into t
     from pg_catalog.pg_constraint c
+    join pg_catalog.pg_class cr on cr.oid = c.conrelid join pg_catalog.pg_namespace cn on cn.oid = cr.relnamespace
+    join pg_catalog.pg_class fr on fr.oid = c.confrelid join pg_catalog.pg_namespace fn on fn.oid = fr.relnamespace
    where c.contype = 'f'
      and c.conrelid in ('public.finance_fx_revaluations'::regclass, 'public.finance_fx_revaluation_rates'::regclass,
                         'public.finance_fx_revaluation_lines'::regclass);
   if t is distinct from
-       'finance_fx_revaluation_lines_org_id_account_id_fkey FOREIGN KEY (org_id, account_id) REFERENCES finance_accounts(org_id, id) ON DELETE CASCADE'
-    || ' | finance_fx_revaluation_lines_org_id_bill_id_fkey FOREIGN KEY (org_id, bill_id) REFERENCES supplier_bills(org_id, id) ON DELETE CASCADE'
-    || ' | finance_fx_revaluation_lines_org_id_invoice_id_fkey FOREIGN KEY (org_id, invoice_id) REFERENCES finance_invoices(org_id, id) ON DELETE CASCADE'
-    || ' | finance_fx_revaluation_lines_org_id_revaluation_id_currenc_fkey FOREIGN KEY (org_id, revaluation_id, currency, rate) REFERENCES finance_fx_revaluation_rates(org_id, revaluation_id, currency, rate) ON DELETE CASCADE'
-    || ' | finance_fx_revaluation_lines_org_id_revaluation_id_fkey FOREIGN KEY (org_id, revaluation_id) REFERENCES finance_fx_revaluations(org_id, id) ON DELETE CASCADE'
-    || ' | finance_fx_revaluation_rates_org_id_revaluation_id_fkey FOREIGN KEY (org_id, revaluation_id) REFERENCES finance_fx_revaluations(org_id, id) ON DELETE CASCADE'
-    || ' | finance_fx_revaluations_org_id_fkey FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE CASCADE'
-    || ' | finance_fx_revaluations_posted_by_fkey FOREIGN KEY (posted_by) REFERENCES auth.users(id) ON DELETE SET NULL' then
+       'finance_fx_revaluation_lines_org_id_account_id_fkey public.finance_fx_revaluation_lines(org_id,account_id) -> public.finance_accounts(org_id,id) del=c upd=a match=s'
+    || ' | finance_fx_revaluation_lines_org_id_bill_id_fkey public.finance_fx_revaluation_lines(org_id,bill_id) -> public.supplier_bills(org_id,id) del=c upd=a match=s'
+    || ' | finance_fx_revaluation_lines_org_id_invoice_id_fkey public.finance_fx_revaluation_lines(org_id,invoice_id) -> public.finance_invoices(org_id,id) del=c upd=a match=s'
+    || ' | finance_fx_revaluation_lines_org_id_revaluation_id_currenc_fkey public.finance_fx_revaluation_lines(org_id,revaluation_id,currency,rate) -> public.finance_fx_revaluation_rates(org_id,revaluation_id,currency,rate) del=c upd=a match=s'
+    || ' | finance_fx_revaluation_lines_org_id_revaluation_id_fkey public.finance_fx_revaluation_lines(org_id,revaluation_id) -> public.finance_fx_revaluations(org_id,id) del=c upd=a match=s'
+    || ' | finance_fx_revaluation_rates_org_id_revaluation_id_fkey public.finance_fx_revaluation_rates(org_id,revaluation_id) -> public.finance_fx_revaluations(org_id,id) del=c upd=a match=s'
+    || ' | finance_fx_revaluations_org_id_fkey public.finance_fx_revaluations(org_id) -> public.orgs(id) del=c upd=a match=s'
+    || ' | finance_fx_revaluations_posted_by_fkey public.finance_fx_revaluations(posted_by) -> auth.users(id) del=n upd=a match=s' then
     raise exception 'the revaluation tables'' foreign keys are: %', t;
   end if;
   select count(*) into n from pg_catalog.pg_constraint c
