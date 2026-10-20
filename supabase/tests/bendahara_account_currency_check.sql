@@ -118,6 +118,10 @@ begin
   select count(*) into n from public.finance_accounts
    where org_id = org and (currency <> 'MYR' or opening_rate is distinct from 1 or opening_rate_source is not null);
   if n <> 0 then fails := fails || format('%s seeded accounts are not ringgit at rate 1', n); end if;
+  -- No rate is defaulted on the server (plan decision 8).
+  select pg_get_expr(d.adbin, d.adrelid) into t from pg_attrdef d join pg_attribute a on a.attrelid = d.adrelid and a.attnum = d.adnum
+   where d.adrelid = 'public.finance_accounts'::regclass and a.attname = 'opening_rate';
+  if t is not null then fails := fails || format('finance_accounts.opening_rate defaults to %s', t); end if;
   insert into public.finance_fx_rates (currency, rate_date, session, unit, buying_rate, selling_rate, middle_rate, rate)
   values ('USD', date '1999-01-15', '1700', 1, 4.455000, 4.462000, 4.458500, 4.458500),
          ('IDR', date '1999-01-15', '1700', 100, 0.028000, 0.028123, 0.028061, 0.028061);
@@ -181,6 +185,15 @@ begin
   fails := fails || public.bendahara_check_try('4: the owner adds a USD balance with no rate', 'FIN38',
     format('insert into public.finance_accounts (org_id, name, kind, currency, opening_balance) values (%L, %L, %L, %L, 100)',
            org, 'No Rate', 'bank', 'USD'));
+  -- A source with no rate: the column has no default, so nothing stands in for the rate (plan decision 8).
+  fails := fails || public.bendahara_check_try('4: the owner adds a USD balance with a source and no rate', 'FIN38',
+    format('insert into public.finance_accounts (org_id, name, kind, currency, opening_balance, opening_date, opening_rate_source) '
+           || 'values (%L, %L, %L, %L, 10000, %L, %L)', org, 'Source No Rate', 'bank', 'USD', '1999-01-17', 'manual'));
+  select count(*) into n from public.finance_accounts where org_id = org and name = 'Source No Rate';
+  if n <> 0 then fails := fails || '4: a USD balance with a source and no rate was stored'::text; end if;
+  fails := fails || public.bendahara_check_try('4: the owner adds a USD balance with a BNM source and date, and no rate', 'FIN38',
+    format('insert into public.finance_accounts (org_id, name, kind, currency, opening_balance, opening_date, opening_rate_source, '
+           || 'opening_rate_date) values (%L, %L, %L, %L, 10000, %L, %L, %L)', org, 'BNM No Rate', 'bank', 'USD', '1999-01-17', 'bnm', '1999-01-15'));
   fails := fails || public.bendahara_check_try('4: the owner gives the empty USD account a balance with no rate', 'FIN38',
     format('update public.finance_accounts set opening_balance = 100 where id = %L', usd_empty));
 
@@ -384,6 +397,12 @@ begin
   select count(*) into n from public.finance_accounts where org_id = org and name = 'Ringgit Sent Rate'
      and currency = 'MYR' and opening_rate = 1 and opening_rate_source is null and opening_rate_date is null and opening_balance_myr = 100;
   if n <> 1 then fails := fails || 'a ringgit account sent a rate is not stored at 1'::text; end if;
+  -- The deployed app's insert: a ringgit balance and no rate key at all is stored at 1 (the guard, not a default).
+  insert into public.finance_accounts (org_id, name, kind, opening_balance, opening_date)
+  values (org, 'Old App Ringgit', 'bank', 50, date '1999-01-17');
+  select count(*) into n from public.finance_accounts where org_id = org and name = 'Old App Ringgit'
+     and currency = 'MYR' and opening_rate = 1 and opening_rate_source is null and opening_balance_myr = 50;
+  if n <> 1 then fails := fails || '15: the old app''s ringgit insert is not stored at rate 1'::text; end if;
   -- A USD account's balance set back to 0 forgets its rate.
   update public.finance_accounts set opening_balance = 0 where id = od;
   select count(*) into n from public.finance_accounts where id = od and opening_rate is null and opening_rate_source is null
