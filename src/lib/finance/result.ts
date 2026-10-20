@@ -42,10 +42,10 @@ export const ACCOUNT_ARCHIVED =
 
 /**
  * The database refused money on a bank or cash account in another currency (`private.finance_transaction_currency_guard`):
- * from 20261122110000 (stage 5b), a draft inserted on one (it carries no rate), a draft moved between accounts in
- * different currencies, or a side of a transfer (until stage 5c). Payments there are recorded paid, with their rate,
- * and the draft forms list ringgit accounts, so a person meets it from a stale tab or a direct call. Each data
- * layer maps the code to its own sentence (movement-rate.ts `MOVEMENT_MESSAGES.draft`; transfers their own).
+ * from 20261122110000 (stage 5b), a draft inserted on one (it carries no rate), or a draft moved between accounts in
+ * different currencies (20261122120000, stage 5c, opened transfers with one). Payments there are recorded paid, with
+ * their rate, and the draft forms list ringgit accounts, so a person meets it from a stale tab or a direct call. Each
+ * data layer maps the code to its own sentence (movement-rate.ts `MOVEMENT_MESSAGES.draft`).
  */
 export const FIN_FOREIGN_ACCOUNT = 'FIN50';
 

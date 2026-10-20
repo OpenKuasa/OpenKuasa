@@ -31,7 +31,13 @@ export const BANK_KIND_LABELS: Record<BankTransactionKind, string> = {
 export function bankDescription(row: BankTransactionRow): string {
   if (row.kind === 'transfer') {
     const other = row.other_account_name ?? 'another account';
-    return row.direction === 'out' ? `Transfer to ${other}` : `Transfer from ${other}`;
+    // Stage 5c: a transfer between a ringgit account and one in another currency names what the other side moved,
+    // in its own currency: "Transfer to USD Account (USD 1,000.00)".
+    const otherSide =
+      row.other_currency && row.other_currency !== row.currency && row.other_amount !== null
+        ? ` (${money(row.other_amount, row.other_currency)})`
+        : '';
+    return row.direction === 'out' ? `Transfer to ${other}${otherSide}` : `Transfer from ${other}${otherSide}`;
   }
   const what = row.documents ?? row.category_name;
   const who = row.party_name ?? BANK_KIND_LABELS[row.kind];

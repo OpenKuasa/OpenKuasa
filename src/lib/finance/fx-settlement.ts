@@ -11,7 +11,8 @@
  * carriedSen answers it too); and money on a bank or cash account in another currency (stage 5b,
  * 20261122110000_bendahara_fx_foreign_account_money.sql: finance_transaction_to_currency puts the movement into
  * ringgit at its rate, movementRinggitSen, and that ringgit is shared over the documents as a ringgit payment's
- * is). Pure, and in whole numbers
+ * is); and the rate a transfer between a ringgit account and one in another currency derives (stage 5c,
+ * 20261122120000_bendahara_fx_transfers.sql, transferRateScaled). Pure, and in whole numbers
  * only: money is a bigint count of sen (every amount column keeps two
  * decimals, a currency with no cents included) and a rate a bigint count of
  * 10^-10, as document-currency.ts works them. The payment form shows the
@@ -81,6 +82,15 @@ function atRateSen(partSen: bigint, rateScaled: bigint): bigint {
  */
 export function movementRinggitSen(amountSen: bigint, rateScaled: bigint): bigint {
   return atRateSen(amountSen, rateScaled);
+}
+
+/**
+ * Stage 5c (20261122120000): the rate a transfer between a ringgit account and an account in another currency
+ * derives for the side in that currency, as finance_record_transfer writes it: round(ringgit / foreign, 10), in
+ * 10^-10 units. Both amounts in sen, above 0.
+ */
+export function transferRateScaled(ringgitSen: bigint, foreignSen: bigint): bigint {
+  return roundDiv(ringgitSen * RATE_ONE, foreignSen);
 }
 
 /**

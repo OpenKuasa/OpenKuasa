@@ -13,6 +13,17 @@
  * the schema here refuses the two a form can cause first, each with its own
  * sentence); only a posted transfer is voided (FIN09). A statement line
  * matched to either side goes back to unmatched when the transfer is voided.
+ *
+ * Stage 5c (20261122120000): a transfer goes between a ringgit account and an
+ * account in another currency, either way, or between two ringgit accounts.
+ * With an account in another currency it moves two amounts: `amount` leaves
+ * the "From" account in its currency and `to_amount` arrives in the "To"
+ * account's (FIN16 when it is missing or not above 0; the form asks first).
+ * Both sides hold one ringgit figure, the ringgit side's amount, and the other
+ * side's rate is derived from it; no gain or loss is posted. Between two
+ * ringgit accounts `to_amount` is left out, as before. Two accounts not in
+ * ringgit, the same currency included, are refused (FIN52; the form's "To"
+ * list hides them).
  */
 import { z } from 'zod';
 import { LINE_MESSAGES, isoDate, optionalText, ringgitAmount } from './document-lines';
@@ -20,7 +31,6 @@ import {
   type FinResult,
   type FinanceWriteContext,
   FIN_ACCOUNT_ARCHIVED,
-  FIN_FOREIGN_ACCOUNT,
   FIN_SIGN_OFF,
   NOT_ALLOWED,
   PG_FORBIDDEN,
@@ -34,6 +44,8 @@ import {
 const FIN_TRANSFER_SHAPE = 'FIN16';
 const FIN_GONE = 'FIN11';
 const FIN_NOT_POSTED = 'FIN09';
+/** Stage 5c: a transfer between two accounts that are both not in ringgit. */
+const FIN_TWO_FOREIGN = 'FIN52';
 
 export const TRANSFER_MESSAGES = {
   from: 'Choose the account the money leaves.',
@@ -50,19 +62,28 @@ export const TRANSFER_MESSAGES = {
   gone: 'That transfer no longer exists.',
   // FIN09: voided in another tab or by someone else. (A pair made by hand and never posted would get it too.)
   alreadyVoid: 'This transfer has already been voided.',
-  // FIN50 (stage 5a): an account in another currency. The form lists ringgit accounts only, so a stale tab or a
-  // direct call meets it.
-  foreignAccount: 'Transfers with an account in another currency are not available yet. Choose two ringgit accounts.',
+  // Stage 5c: the amount that arrived, on a transfer with an account in another currency (the form asks it first;
+  // FIN16 from the database says the accounts' sentence above).
+  toAmount: 'Enter the amount that arrived, in the receiving account’s currency.',
+  // FIN52: two accounts not in ringgit. The form's "To" list hides them when "From" is in another currency, so a
+  // stale tab or a direct call meets it.
+  twoForeign:
+    'A transfer goes between a ringgit account and another account. Move money between two accounts in other currencies through a ringgit account.',
 } as const;
 
 const M = TRANSFER_MESSAGES;
 
-/** A transfer to record. Both sides are posted at once, dated `txn_date`. */
+/**
+ * A transfer to record. Both sides are posted at once, dated `txn_date`. `amount` is in the "From" account's
+ * currency; `to_amount`, in the "To" account's, only when the two differ.
+ */
 export const recordTransferInput = z
   .object({
     from_account_id: z.string({ error: M.from }).uuid(M.from),
     to_account_id: z.string({ error: M.to }).uuid(M.to),
     amount: ringgitAmount(M.amount),
+    // Stage 5c: what arrived, in the "To" account's currency; sent only when the two accounts' currencies differ.
+    to_amount: ringgitAmount(M.toAmount).optional(),
     txn_date: isoDate,
     reference: optionalText.default(null),
     notes: optionalText.default(null),
@@ -79,7 +100,7 @@ const REFUSALS: Record<string, string> = {
   // between that question and the write. For a transfer the cause is "one of those accounts", so it is worded
   // as FIN16 is, not with the shared sentence for a payment's account.
   [FIN_ACCOUNT_ARCHIVED]: M.accounts,
-  [FIN_FOREIGN_ACCOUNT]: M.foreignAccount,
+  [FIN_TWO_FOREIGN]: M.twoForeign,
   [FIN_SIGN_OFF]: M.needsSignOff,
   [FIN_GONE]: M.gone,
   [FIN_NOT_POSTED]: M.alreadyVoid,
