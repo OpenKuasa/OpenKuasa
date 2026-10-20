@@ -48,6 +48,19 @@ declare
   a2 uuid;
   i_jpy uuid;
   i_e2 uuid;
+  org3 uuid := gen_random_uuid();
+  usd3 uuid;
+  bank3 uuid;
+  charges3 uuid;
+  cust3 uuid;
+  i_x uuid;
+  i_z uuid;
+  b_y uuid;
+  run3a uuid;
+  run3b uuid;
+  q1 uuid;
+  rates_back jsonb;
+  x2 jsonb;
   rinv uuid;
   run1 uuid;
   run2 uuid;
@@ -130,7 +143,7 @@ begin
     language plpgsql security invoker set search_path = '' as $g$
     declare x jsonb;
     begin
-      select jsonb_build_object('lines', count(*), 'net_gain', coalesce(sum(p.gain), 0)::text) into x
+      select jsonb_build_object('lines', count(*), 'net_gain', coalesce(sum(p.gain), 0)::text, 'digest', max(p.digest)) into x
       from public.finance_fx_revaluation_preview(target_org, pe, rates) p;
       return x;
     exception when others then
@@ -165,6 +178,28 @@ begin
     end $g$
   $f$;
   execute 'grant execute on function public.bendahara_check_item(uuid, date, jsonb, uuid) to authenticated';
+  -- The rates a preview chose, sent back unchanged (rate_text per one unit, its source and, for bnm, its date).
+  execute $f$
+    create function public.bendahara_check_rates_back(target_org uuid, pe date, rates jsonb) returns jsonb
+    language sql security invoker set search_path = '' as $g$
+      select coalesce(jsonb_object_agg(q.currency, jsonb_strip_nulls(jsonb_build_object('rate', q.rate_text,
+               'source', q.rate_source, 'rate_date', q.rate_date))), '{}'::jsonb)
+      from (select distinct p.currency, p.rate_text, p.rate_source, p.rate_date
+            from public.finance_fx_revaluation_preview(target_org, pe, rates) p where p.rate_text is not null) q
+    $g$
+  $f$;
+  execute 'grant execute on function public.bendahara_check_rates_back(uuid, date, jsonb) to authenticated';
+  -- One ledger account's debit balance on a day, by system key (or by the bank account it stands for).
+  execute $f$
+    create function public.bendahara_check_key_on(target_org uuid, key text, bank uuid, on_day date) returns numeric
+    language sql security invoker set search_path = '' as $g$
+      select coalesce(sum(l.debit - l.credit), 0) from public.finance_ledger_lines l
+      join public.finance_ledger_accounts a on a.org_id = l.org_id and a.id = l.account_id
+      where l.org_id = target_org and l.entry_date <= on_day
+        and (a.system_key = key or (bank is not null and a.bank_account_id = bank))
+    $g$
+  $f$;
+  execute 'grant execute on function public.bendahara_check_key_on(uuid, text, uuid, date) to authenticated';
   -- How many rows a preview has (with item, how many are that item), or why it was refused.
   execute $f$
     create function public.bendahara_check_rows(target_org uuid, pe date, rates jsonb, item uuid default null) returns text
@@ -206,7 +241,7 @@ begin
      and a.attname in ('rate', 'rate_source', 'rate_date', 'foreign_balance', 'carried_myr', 'revalued_myr', 'difference',
                        'earlier_myr', 'posted_myr');
   if t is not null then fails := fails || format('these have a column default: %s', t); end if;
-  -- Preview and post: the owner's, for the signed-in only. The five private ones: nobody's.
+  -- Preview and post: the owner's, for the signed-in only. The seven private ones: nobody's.
   select count(*) into n from pg_proc p
    where p.oid in ('public.finance_fx_revaluation_preview(uuid, date, jsonb)'::regprocedure,
                    'public.finance_post_fx_revaluation(uuid, jsonb)'::regprocedure)
@@ -217,10 +252,11 @@ begin
   select count(*) into n from pg_proc p join pg_namespace s on s.oid = p.pronamespace
    where s.nspname = 'private'
      and p.proname in ('finance_fx_weight', 'finance_fx_closing_rate', 'finance_fx_closing_rates',
-                       'finance_fx_revaluation_items', 'finance_fx_revaluation_locked')
+                       'finance_fx_revaluation_items', 'finance_fx_revaluation_locked', 'finance_fx_digest_line',
+                       'finance_fx_fits')
      and not p.prosecdef and not has_function_privilege('authenticated', p.oid, 'execute')
      and not has_function_privilege('anon', p.oid, 'execute') and not has_function_privilege('service_role', p.oid, 'execute');
-  if n <> 5 then fails := fails || format('%s of the five private functions run as the caller for nobody', n); end if;
+  if n <> 7 then fails := fails || format('%s of the seven private functions run as the caller for nobody', n); end if;
   -- service_role holds nothing on the three tables.
   select count(*) into n from pg_class c cross join lateral aclexplode(c.relacl) a
    where c.oid in ('public.finance_fx_revaluations'::regclass, 'public.finance_fx_revaluation_rates'::regclass,
@@ -393,6 +429,20 @@ begin
     fails := fails || public.bendahara_check_try(format('post expecting %s', x->'expected'), 'FIN55', format(
       'select public.finance_post_fx_revaluation(%L, %L)', org, x));
   end loop;
+  -- The right number of lines and net gain, but no digest, or another one: FIN55.
+  x := public.bendahara_check_expected(org, e, rates1);
+  fails := fails || public.bendahara_check_try('post with no digest', 'FIN55', format(
+    'select public.finance_post_fx_revaluation(%L, %L)', org,
+    jsonb_build_object('period_end', e, 'rates', rates1, 'expected', x - 'digest')));
+  fails := fails || public.bendahara_check_try('post with another digest', 'FIN55', format(
+    'select public.finance_post_fx_revaluation(%L, %L)', org,
+    jsonb_build_object('period_end', e, 'rates', rates1, 'expected', x || jsonb_build_object('digest', md5('another')))));
+  -- A rate the books cannot hold the figures of: FIN38 by name, not an overflow.
+  fails := fails || public.bendahara_check_try('a rate of 9999999999 (preview)', 'FIN38', format(
+    'select public.finance_fx_revaluation_preview(%L, %L, %L)', org, e, '{"USD":{"rate":"9999999999","source":"manual"}}'));
+  fails := fails || public.bendahara_check_try('a rate of 9999999999 (post)', 'FIN38', format(
+    'select public.finance_post_fx_revaluation(%L, %L)', org, jsonb_build_object('period_end', e,
+      'rates', '{"USD":{"rate":"9999999999","source":"manual"},"SGD":{"rate":"3.45","source":"manual"}}'::jsonb, 'expected', x)));
   select count(*) into n from public.finance_fx_revaluations where org_id = org;
   select count(*) into n0 from public.finance_sequences where org_id = org and doc_type = 'fx_revaluation';
   if n <> 0 or n0 <> 0 then fails := fails || format('refused posts left %s runs and %s sequences', n, n0); end if;
@@ -409,6 +459,13 @@ begin
   fails := fails || public.bendahara_check_try('5: post at a month end after today', 'FIN53', format(
     'select public.finance_post_fx_revaluation(%L, %L)', org, jsonb_build_object('period_end', t, 'rates', rates1,
       'expected', jsonb_build_object('lines', 5, 'net_gain', '-52.40'))));
+  foreach t in array array['infinity', '-infinity'] loop
+    fails := fails || public.bendahara_check_try(format('5: preview at %s', t), 'FIN53', format(
+      'select public.finance_fx_revaluation_preview(%L, %L, %L)', org, t, rates1));
+    fails := fails || public.bendahara_check_try(format('5: post at %s', t), 'FIN53', format(
+      'select public.finance_post_fx_revaluation(%L, %L)', org, jsonb_build_object('period_end', t, 'rates', rates1,
+        'expected', jsonb_build_object('lines', 5, 'net_gain', '-52.40'))));
+  end loop;
   fails := fails || public.bendahara_check_try('5: post at a day that is not a date', 'FIN53', format(
     'select public.finance_post_fx_revaluation(%L, %L)', org, jsonb_build_object('period_end', '1999-02-30', 'rates', rates1,
       'expected', jsonb_build_object('lines', 5, 'net_gain', '-52.40'))));
@@ -439,15 +496,65 @@ begin
       'expected', jsonb_build_object('lines', 5, 'net_gain', '-52.40'))));
   perform set_config('request.jwt.claims', owner_claims, true);
 
+  -- ==== S2a: two late entries that offset exactly (lines and net gain unchanged): FIN55 by the digest =========
+  begin
+    x := public.bendahara_check_expected(org, e, rates1);
+    -- USD 100.00 received on A and USD 100.00 paid on B, both dated E: A's gain falls by 28.00 (448.00 revalued less,
+    -- 420.00 carried less) and B's rises by 28.00.
+    perform public.finance_record_payment_in(org, jsonb_build_object('account_id', bank, 'method', 'fpx', 'txn_date', '1999-01-31',
+      'amount_myr', '440'), jsonb_build_array(jsonb_build_object('invoice_id', i_a, 'amount', 100)));
+    perform public.finance_record_payment_out(org, jsonb_build_object('account_id', bank, 'method', 'bank_transfer',
+      'txn_date', '1999-01-31', 'amount_myr', '440'), jsonb_build_array(jsonb_build_object('bill_id', b_b, 'amount', 100)));
+    x2 := public.bendahara_check_expected(org, e, rates1);
+    if (x2 - 'digest') is distinct from (x - 'digest') or x2->>'digest' = x->>'digest' then
+      fails := fails || format('S2a: the offsetting entries read %s against %s', x2, x);
+    end if;
+    fails := fails || public.bendahara_check_try('S2a: post with the figures shown before two offsetting entries', 'FIN55', format(
+      'select public.finance_post_fx_revaluation(%L, %L)', org, jsonb_build_object('period_end', e, 'rates', rates1, 'expected', x)));
+    raise exception 'roll back' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then
+    null;
+  when others then
+    fails := fails || format('S2a: stopped: %s %s', sqlstate, sqlerrm);
+  end;
+  -- ==== S2b: one item swapped for another (lines and net gain unchanged): FIN55 by the digest ==============
+  begin
+    -- Q1, USD 100.00 at the closing 4.48: listed, posting 0.00.
+    q1 := public.finance_save_invoice(org, jsonb_build_object('customer_id', cust, 'invoice_date', '1999-01-26',
+      'due_date', '1999-02-26', 'currency', 'USD', 'fx_rate', '4.48') || typed,
+      '[{"description":"Q1","quantity":1,"unit_price":100,"sst_rate":0}]');
+    perform public.finance_post_invoice(org, q1);
+    x := public.bendahara_check_expected(org, e, rates1);
+    -- Q1 paid in full on E (it drops out) and Q2, USD 50.00 at 4.48, comes in (posting 0.00).
+    perform public.finance_record_payment_in(org, jsonb_build_object('account_id', bank, 'method', 'fpx', 'txn_date', '1999-01-31',
+      'amount_myr', '448'), jsonb_build_array(jsonb_build_object('invoice_id', q1, 'amount', 100)));
+    q1 := public.finance_save_invoice(org, jsonb_build_object('customer_id', cust, 'invoice_date', '1999-01-27',
+      'due_date', '1999-02-27', 'currency', 'USD', 'fx_rate', '4.48') || typed,
+      '[{"description":"Q2","quantity":1,"unit_price":50,"sst_rate":0}]');
+    perform public.finance_post_invoice(org, q1);
+    x2 := public.bendahara_check_expected(org, e, rates1);
+    if (x2 - 'digest') is distinct from (x - 'digest') or (x - 'digest') is distinct from '{"lines": 6, "net_gain": "-52.40"}'::jsonb
+       or x2->>'digest' = x->>'digest' then
+      fails := fails || format('S2b: the swapped item reads %s against %s', x2, x);
+    end if;
+    fails := fails || public.bendahara_check_try('S2b: post with the figures shown before an item was swapped', 'FIN55', format(
+      'select public.finance_post_fx_revaluation(%L, %L)', org, jsonb_build_object('period_end', e, 'rates', rates1, 'expected', x)));
+    raise exception 'roll back' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then
+    null;
+  when others then
+    fails := fails || format('S2b: stopped: %s %s', sqlstate, sqlerrm);
+  end;
+
   -- ==== 1: run 1 for 1999-01-31 (R1-R5): FX-0001 ============================================================
   -- A rate for a currency with no open item (EUR) is checked and not used.
   x := public.bendahara_check_expected(org, e, rates1);
-  if x is distinct from '{"lines": 5, "net_gain": "-52.40"}'::jsonb then
+  if (x - 'digest') is distinct from '{"lines": 5, "net_gain": "-52.40"}'::jsonb or x->>'digest' !~ '^[0-9a-f]{32}$' then
     fails := fails || format('1: the preview expects %s', x);
   end if;
   select * into r from public.bendahara_check_call(format('select id from public.finance_post_fx_revaluation(%L, %L)', org,
     jsonb_build_object('period_end', e, 'rates', rates1 || jsonb_build_object('EUR', '{"rate":"5","source":"manual"}'::jsonb),
-      'expected', jsonb_build_object('lines', 5, 'net_gain', '-52.40'))));
+      'expected', x)));
   run1 := r.id;
   if run1 is null then
     -- Nothing below can run without it.
@@ -531,9 +638,9 @@ begin
     'currency', 'SGD', 'fx_rate', '3.4') || typed, '[{"description":"Parts","quantity":1,"unit_price":500,"sst_rate":0}]');
   perform public.finance_post_bill(org, b_d);
   x := public.bendahara_check_expected(org, e, rates1);
-  if x is distinct from '{"lines": 6, "net_gain": "-25.00"}'::jsonb then fails := fails || format('3: the preview of run 2 expects %s', x); end if;
+  if (x - 'digest') is distinct from '{"lines": 6, "net_gain": "-25.00"}'::jsonb then fails := fails || format('3: the preview of run 2 expects %s', x); end if;
   select * into r from public.bendahara_check_call(format('select id from public.finance_post_fx_revaluation(%L, %L)', org,
-    jsonb_build_object('period_end', e, 'rates', rates1, 'expected', jsonb_build_object('lines', 6, 'net_gain', '-25.00'))));
+    jsonb_build_object('period_end', e, 'rates', rates1, 'expected', x)));
   run2 := r.id;
   if run2 is null then
     fails := fails || format('3: run 2 refused: %s', r.err);
@@ -572,10 +679,10 @@ begin
   -- ==== 8: FIN56: a third run straight after run 2; a ringgit workspace; no number taken =====================
   select next_number into n0 from public.finance_sequences where org_id = org and doc_type = 'fx_revaluation';
   x := public.bendahara_check_expected(org, e, rates1);
-  if x is distinct from '{"lines": 6, "net_gain": "0.00"}'::jsonb then fails := fails || format('8: the preview after run 2 expects %s', x); end if;
+  if (x - 'digest') is distinct from '{"lines": 6, "net_gain": "0.00"}'::jsonb then fails := fails || format('8: the preview after run 2 expects %s', x); end if;
   fails := fails || public.bendahara_check_try('8: a third run for E', 'FIN56', format(
     'select public.finance_post_fx_revaluation(%L, %L)', org, jsonb_build_object('period_end', e, 'rates', rates1,
-      'expected', jsonb_build_object('lines', 6, 'net_gain', '0.00'))));
+      'expected', x)));
   select next_number into n from public.finance_sequences where org_id = org and doc_type = 'fx_revaluation';
   if n <> n0 then fails := fails || format('8: FIN56 took a number (%s, was %s)', n, n0); end if;
 
@@ -726,9 +833,11 @@ begin
     'reason', 'returns', 'amount', 0.01));
   perform public.finance_issue_credit_note(org2, cn);
   -- Run a: USD typed at 4.5000 (a wrong rate), JPY BNM's 0.0295.
+  x := public.bendahara_check_expected(org2, e, jsonb_build_object('USD', '{"rate":"4.5000000000","source":"manual"}'::jsonb, 'JPY', jpy_bnm));
+  if (x - 'digest') is distinct from '{"lines": 3, "net_gain": "241.72"}'::jsonb then fails := fails || format('4: run a expects %s', x); end if;
   select * into r from public.bendahara_check_call(format('select id from public.finance_post_fx_revaluation(%L, %L)', org2,
     jsonb_build_object('period_end', e, 'rates', jsonb_build_object('USD', '{"rate":"4.5000000000","source":"manual"}'::jsonb, 'JPY', jpy_bnm),
-      'expected', jsonb_build_object('lines', 3, 'net_gain', '241.72'))));
+      'expected', x)));
   run_a := r.id;
   if run_a is null then
     fails := fails || format('4: run a refused: %s', r.err);
@@ -743,10 +852,20 @@ begin
       fails := fails || format('16: a half sen in credit reads %s', public.bendahara_check_line(run_a, i_e2));
     end if;
   end if;
-  -- Run b: the right rate, BNM's 4.4800: A's difference is 168.00, 180.00 already posted, so it posts -12.00.
+  -- Run b: the right rate, BNM's 4.4800: A's difference is 168.00, 180.00 already posted, so it posts -12.00. The
+  -- preview fills both currencies with BNM's closing rate (none is sent); those rates, sent back unchanged (JPY per
+  -- ONE unit, 0.0295000000), post exactly what the preview showed.
+  rates_back := public.bendahara_check_rates_back(org2, e, '{}');
+  if rates_back is distinct from jsonb_build_object('JPY', jpy_bnm, 'USD', usd_bnm) then
+    fails := fails || format('4: the preview''s rates read %s', rates_back);
+  end if;
+  x := public.bendahara_check_expected(org2, e, '{}');
+  x2 := public.bendahara_check_expected(org2, e, rates_back);
+  if (x - 'digest') is distinct from '{"lines": 3, "net_gain": "-11.99"}'::jsonb or x2 is distinct from x then
+    fails := fails || format('4: run b expects %s, and %s with the rates sent back', x, x2);
+  end if;
   select * into r from public.bendahara_check_call(format('select id from public.finance_post_fx_revaluation(%L, %L)', org2,
-    jsonb_build_object('period_end', e, 'rates', jsonb_build_object('USD', usd_bnm, 'JPY', jpy_bnm),
-      'expected', jsonb_build_object('lines', 3, 'net_gain', '-11.99'))));
+    jsonb_build_object('period_end', e, 'rates', rates_back, 'expected', x)));
   run_b := r.id;
   if run_b is null then
     fails := fails || format('4: run b refused: %s', r.err);
@@ -760,6 +879,116 @@ begin
     end if;
   end if;
   fails := fails || public.bendahara_check_tb(org2, 'R6b');
+
+  -- ==== S1: SST on a foreign invoice, a refund through a credit note, a foreign bill paid in part ==============
+  -- (the review's probe 1, every flow through a USD account). Rates typed: USD 4.48.
+  reset role;
+  insert into public.orgs (id, name) values (org3, 'FX Revaluation Flows Sdn Bhd');
+  insert into public.org_members (org_id, user_id, role) values (org3, owner_id, 'owner');
+  select id into bank3 from public.finance_accounts where org_id = org3 and kind = 'bank' order by created_at limit 1;
+  select id into charges3 from public.finance_categories where org_id = org3 and kind = 'expense' order by name limit 1;
+  perform set_config('request.jwt.claims', owner_claims, true);
+  set local role authenticated;
+  begin
+    insert into public.finance_contacts (org_id, name, is_customer, is_supplier) values (org3, 'Abroad', true, true) returning id into cust3;
+    insert into public.finance_accounts (org_id, name, kind, currency, opening_balance, opening_date, opening_rate, opening_rate_source)
+    values (org3, 'USD Acct', 'bank', 'USD', 5000, date '1999-01-01', 4.40, 'manual') returning id into usd3;
+    -- X: USD 1,000.00 + 3 x 33.33, 8% SST, at 4.2; USD 300.00 received into the USD account at 4.30.
+    i_x := public.finance_save_invoice(org3, jsonb_build_object('customer_id', cust3, 'invoice_date', '1999-01-05',
+      'due_date', '1999-02-05', 'currency', 'USD', 'fx_rate', '4.2') || typed,
+      '[{"description":"A","quantity":1,"unit_price":1000,"sst_rate":8},{"description":"B","quantity":3,"unit_price":33.33,"sst_rate":8}]');
+    perform public.finance_post_invoice(org3, i_x);
+    perform public.finance_record_payment_in(org3, jsonb_build_object('account_id', usd3, 'method', 'bank_transfer',
+      'txn_date', '1999-01-20', 'fx_rate', '4.3', 'fx_rate_source', 'manual'),
+      jsonb_build_array(jsonb_build_object('invoice_id', i_x, 'amount', 300)));
+    -- Z: USD 100.00 at 4.1, paid in full at 4.2; credited USD 30.00; USD 30.00 refunded through the credit note at 4.5.
+    i_z := public.finance_save_invoice(org3, jsonb_build_object('customer_id', cust3, 'invoice_date', '1999-01-06',
+      'due_date', '1999-02-06', 'currency', 'USD', 'fx_rate', '4.1') || typed,
+      '[{"description":"Z","quantity":1,"unit_price":100,"sst_rate":0}]');
+    perform public.finance_post_invoice(org3, i_z);
+    perform public.finance_record_payment_in(org3, jsonb_build_object('account_id', usd3, 'method', 'bank_transfer',
+      'txn_date', '1999-01-07', 'fx_rate', '4.2', 'fx_rate_source', 'manual'),
+      jsonb_build_array(jsonb_build_object('invoice_id', i_z, 'amount', 100)));
+    cn := public.finance_save_credit_note(org3, jsonb_build_object('invoice_id', i_z, 'credit_date', '1999-01-09',
+      'reason', 'returns', 'amount', 30));
+    perform public.finance_issue_credit_note(org3, cn);
+    perform public.finance_record_refund(org3, jsonb_build_object('credit_note_id', cn, 'account_id', usd3,
+      'method', 'bank_transfer', 'txn_date', '1999-01-22', 'reason', 'damaged_goods', 'amount', 30, 'fx_rate', '4.5',
+      'fx_rate_source', 'manual'));
+    -- Y: bill USD 500.00 + 6% SST at 4.2; USD 200.00 paid from the USD account at 4.35.
+    b_y := public.finance_save_bill(org3, jsonb_build_object('supplier_id', cust3, 'bill_date', '1999-01-12',
+      'due_date', '1999-02-12', 'currency', 'USD', 'fx_rate', '4.2') || typed,
+      '[{"description":"M","quantity":1,"unit_price":500,"sst_rate":6}]');
+    perform public.finance_post_bill(org3, b_y);
+    perform public.finance_record_payment_out(org3, jsonb_build_object('account_id', usd3, 'method', 'bank_transfer',
+      'txn_date', '1999-01-25', 'fx_rate', '4.35', 'fx_rate_source', 'manual'),
+      jsonb_build_array(jsonb_build_object('bill_id', b_y, 'amount', 200)));
+    -- A bank charge of USD 25.00 at 4.46; USD 100.00 sold for RM 440.00 on 1999-01-15 and voided today (after E).
+    perform public.finance_record_voucher(org3, jsonb_build_object('account_id', usd3, 'method', 'bank_transfer',
+      'txn_date', '1999-01-18', 'amount', 25, 'party_name', 'The bank', 'category_id', charges3, 'status', 'posted',
+      'fx_rate', '4.46', 'fx_rate_source', 'manual'), '[]');
+    perform public.finance_void_transfer(org3, public.finance_record_transfer(org3, jsonb_build_object(
+      'from_account_id', usd3, 'to_account_id', bank3, 'amount', 100, 'to_amount', 440, 'txn_date', '1999-01-15')));
+
+    t := public.bendahara_check_item(org3, e, '{"USD":{"rate":"4.48","source":"manual"}}', i_x);
+    if t is distinct from '887.99 3729.56 4.4800000000 manual 3978.20 248.64 0.00 248.64 248.64' then
+      fails := fails || format('S1: X (SST, part paid) reads %s', t);
+    end if;
+    t := public.bendahara_check_item(org3, e, '{"USD":{"rate":"4.48","source":"manual"}}', b_y);
+    if t is distinct from '330.00 1386.00 4.4800000000 manual 1478.40 92.40 0.00 92.40 -92.40' then
+      fails := fails || format('S1: Y (SST, part paid) reads %s', t);
+    end if;
+    t := public.bendahara_check_item(org3, e, '{"USD":{"rate":"4.48","source":"manual"}}', usd3);
+    if t is distinct from '5045.00 22153.50 4.4800000000 manual 22601.60 448.10 0.00 448.10 448.10' then
+      fails := fails || format('S1: the USD account reads %s', t);
+    end if;
+    t := public.bendahara_check_rows(org3, e, '{"USD":{"rate":"4.48","source":"manual"}}', i_z);
+    if t is distinct from '0' then fails := fails || format('S1: Z (paid, credited and refunded) is listed %s times', t); end if;
+    x := public.bendahara_check_expected(org3, e, '{"USD":{"rate":"4.48","source":"manual"}}');
+    if (x - 'digest') is distinct from '{"lines": 3, "net_gain": "604.34"}'::jsonb then fails := fails || format('S1: run 1 expects %s', x); end if;
+    select * into r from public.bendahara_check_call(format('select id from public.finance_post_fx_revaluation(%L, %L)', org3,
+      jsonb_build_object('period_end', e, 'rates', '{"USD":{"rate":"4.48","source":"manual"}}'::jsonb, 'expected', x)));
+    run3a := r.id;
+    if run3a is null then fails := fails || format('S1: run 1 refused: %s', r.err); end if;
+    -- The identities on E: Receivable, Payable and the USD account read their revalued figures.
+    t := format('%s %s %s', public.bendahara_check_key_on(org3, 'receivable', null, e),
+                public.bendahara_check_key_on(org3, 'payable', null, e), public.bendahara_check_key_on(org3, null, usd3, e));
+    if t is distinct from '3978.20 -1478.40 22601.60' then fails := fails || format('S1: after run 1 the books on E read %s', t); end if;
+    t := format('%s %s', public.bendahara_check_key_on(org3, 'fx_unrealised', null, e),
+                public.bendahara_check_key_on(org3, 'fx_unrealised', null, e + 1));
+    if t is distinct from '-604.34 0.00' then fails := fails || format('S1: Unrealised reads %s on E and E + 1', t); end if;
+    -- A late receipt dated E (X: USD 300.00 at 4.5), then run 2 posts only the change.
+    perform public.finance_record_payment_in(org3, jsonb_build_object('account_id', usd3, 'method', 'bank_transfer',
+      'txn_date', '1999-01-31', 'fx_rate', '4.5', 'fx_rate_source', 'manual'),
+      jsonb_build_array(jsonb_build_object('invoice_id', i_x, 'amount', 300)));
+    x := public.bendahara_check_expected(org3, e, '{"USD":{"rate":"4.48","source":"manual"}}');
+    if (x - 'digest') is distinct from '{"lines": 3, "net_gain": "-90.00"}'::jsonb then fails := fails || format('S1: run 2 expects %s', x); end if;
+    select * into r from public.bendahara_check_call(format('select id from public.finance_post_fx_revaluation(%L, %L)', org3,
+      jsonb_build_object('period_end', e, 'rates', '{"USD":{"rate":"4.48","source":"manual"}}'::jsonb, 'expected', x)));
+    run3b := r.id;
+    if run3b is null then
+      fails := fails || format('S1: run 2 refused: %s', r.err);
+    else
+      if public.bendahara_check_line(run3b, i_x) is distinct from '587.99 2469.56 4.4800000000 2634.20 164.64 248.64 -84.00 -84.00' then
+        fails := fails || format('S1: X in run 2 reads %s', public.bendahara_check_line(run3b, i_x));
+      end if;
+      if public.bendahara_check_line(run3b, usd3) is distinct from '5345.00 23503.50 4.4800000000 23945.60 442.10 448.10 -6.00 -6.00' then
+        fails := fails || format('S1: the USD account in run 2 reads %s', public.bendahara_check_line(run3b, usd3));
+      end if;
+    end if;
+    t := format('%s %s %s', public.bendahara_check_key_on(org3, 'receivable', null, e),
+                public.bendahara_check_key_on(org3, 'payable', null, e), public.bendahara_check_key_on(org3, null, usd3, e));
+    if t is distinct from '2634.20 -1478.40 23945.60' then fails := fails || format('S1: after run 2 the books on E read %s', t); end if;
+    -- After the reversals, Receivable on E + 1 is what the invoices carry now.
+    select sum(balance_myr) into r from public.finance_invoice_totals where org_id = org3;
+    if public.bendahara_check_key_on(org3, 'receivable', null, e + 1) <> 2469.56 or r.sum <> 2469.56 then
+      fails := fails || format('S1: Receivable on E + 1 reads %s against the invoices'' %s',
+        public.bendahara_check_key_on(org3, 'receivable', null, e + 1), r.sum);
+    end if;
+    fails := fails || public.bendahara_check_tb(org3, 'S1');
+  exception when others then
+    fails := fails || format('S1: stopped: %s %s', sqlstate, sqlerrm);
+  end;
 
   -- ==== 18: the user who posted is deleted; then the workspace =================================================
   reset role;
