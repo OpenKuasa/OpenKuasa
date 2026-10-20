@@ -338,7 +338,9 @@ testWithSupabase('a new workspace has its chart, and bank accounts and categorie
   expect(ch.ofCategory(o.sales)).toMatchObject({ code: '4000', default_for: 'sales' });
   expect(ch.ofCategory(o.rent).code).toMatch(/^6\d{3}$/);
   expect(ch.system('accrued_expenses').name).toBe('Accrued Expenses');
-  expect(ch.rows).toHaveLength(8 + 2 + categories!.length);
+  // The nine system accounts, the two seeded bank and cash accounts, and one per category.
+  expect(ch.rows).toHaveLength(Object.keys(system).length + 2 + categories!.length);
+  expect(Object.keys(system)).toHaveLength(9);
   expect(new Set(ch.rows.map((a) => a.code)).size).toBe(ch.rows.length);
   // Nothing has been posted: every account is there, at zero.
   const zero = await balances(o);
