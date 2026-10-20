@@ -89,6 +89,15 @@ import {
   saveExpenseInput,
 } from '@/lib/finance/expenses';
 import { type FxDefault, fxRateForInput } from '@/lib/finance/fx-rates';
+import {
+  FX_REVALUATION_MESSAGES,
+  type RevaluationItem,
+  fxRevaluationRefusal,
+  postFxRevaluation,
+  postFxRevaluationInput,
+  previewFxRevaluation,
+  previewFxRevaluationInput,
+} from '@/lib/finance/fx-revaluation';
 import { fxSstRate } from '@/lib/finance/sst-rate';
 import {
   INVOICE_MESSAGES,
@@ -1204,4 +1213,38 @@ export async function saveAndPostContraAction(input: unknown): Promise<SaveAndPo
   if (!access) return FORBIDDEN;
   if (!access.signOff) return { ok: false, error: CONTRA_MESSAGES.needsSignOff };
   return saveThenPost(CONTRA_PATHS, saveContraInput, input, saveContra, postContra);
+}
+
+/* ---- FX revaluation (20261123100000) ----------------------------------- */
+
+// Posting is an owner's or admin's (a member reads and previews), said before anything is parsed or called, in the
+// revaluation's own words. The database asks again (FIN14).
+const FX_REVALUATION_SIGN_OFF = { signOff: true, signOffError: FX_REVALUATION_MESSAGES.needsSignOff } as const;
+// A posted run is an entry on its month end and its reversal the next day: on Receivable, Payable, each revalued bank
+// or cash account and Unrealised Exchange Gain or Loss. That shows on the FX Revaluation screen (its history) and in the
+// books (LEDGER_PATHS: Reports, Chart of Accounts, Journals). No document's balance and no bank movement changes.
+const FX_REVALUATION_PATHS = ['/finance/fx-revaluation', '/finance/reports', '/finance/chart-of-accounts', '/finance/journals'];
+
+/**
+ * What a run for a month end would post, at the rates typed so far (BNM's closing rate fills any not typed). Read
+ * only, for anyone who can see the workspace (viewers and demo guests included); the database asks
+ * `is_org_member` itself.
+ */
+export async function previewFxRevaluationAction(input: unknown): Promise<FinResult<RevaluationItem[]>> {
+  const viewer = await getViewer();
+  const parsed = previewFxRevaluationInput.safeParse(input);
+  if (!parsed.success) return { ok: false, error: firstMessage(parsed.error) };
+  try {
+    return { ok: true, data: await previewFxRevaluation({ client: await createClient(), orgId: viewer.orgId }, parsed.data) };
+  } catch (error) {
+    const refusal = fxRevaluationRefusal(error);
+    if (refusal) return { ok: false, error: refusal };
+    console.error('[finance] an FX revaluation preview could not be read:', error);
+    return { ok: false, error: READ_FAILED };
+  }
+}
+
+/** Posts a run for a month end, only if the figures are still what the preview showed. An owner or admin only. */
+export async function postFxRevaluationAction(input: unknown) {
+  return run(FX_REVALUATION_PATHS, postFxRevaluationInput, input, postFxRevaluation, FX_REVALUATION_SIGN_OFF);
 }

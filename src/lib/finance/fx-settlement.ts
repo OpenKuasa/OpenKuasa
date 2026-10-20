@@ -12,7 +12,8 @@
  * 20261122110000_bendahara_fx_foreign_account_money.sql: finance_transaction_to_currency puts the movement into
  * ringgit at its rate, movementRinggitSen, and that ringgit is shared over the documents as a ringgit payment's
  * is); and the rate a transfer between a ringgit account and one in another currency derives (stage 5c,
- * 20261122120000_bendahara_fx_transfers.sql, transferRateScaled). Pure, and in whole numbers
+ * 20261122120000_bendahara_fx_transfers.sql, transferRateScaled); and a foreign balance revalued at a month end's
+ * closing rate (stage 6, 20261123100000_bendahara_fx_revaluation.sql: revaluedSen, revaluationLine). Pure, and in whole numbers
  * only: money is a bigint count of sen (every amount column keeps two
  * decimals, a currency with no cents included) and a rate a bigint count of
  * 10^-10, as document-currency.ts works them. The payment form shows the
@@ -249,4 +250,40 @@ export function refundPreview(
   if (paid === null || paid <= ZERO || part === null || part <= ZERO || rate === undefined) return null;
   const carried = carriedSen(part, rate, senFromNumber(creditForeign), senFromNumber(creditRinggit));
   return { carried: ringgitOf(carried), realised: ringgitOf(carried - paid) };
+}
+
+/* ---- stage 6, 20261123100000: month-end revaluation ------------------------------------------------------ */
+
+/** What a revaluation line is of: a foreign invoice, a foreign supplier bill, or a bank or cash account. */
+export type RevaluationKind = 'invoice' | 'bill' | 'account';
+
+/**
+ * A foreign balance at a closing rate, in sen, as private.finance_fx_revaluation_items works it:
+ * round(balance x rate, 2), half away from zero, either sign (a customer in credit and an overdraft revalue with
+ * their sign). `rateScaled` is the rate per one unit in 10^-10 units.
+ */
+export function revaluedSen(foreignSen: bigint, rateScaled: bigint): bigint {
+  const negative = foreignSen < ZERO;
+  const at = atRateSen(negative ? -foreignSen : foreignSen, rateScaled);
+  return negative ? -at : at;
+}
+
+/**
+ * One line as the database works it: the balance revalued (0 when the foreign balance is 0, with no rate
+ * needed), the difference from what the books carry, what this run posts (the difference less what earlier
+ * runs for the same month end posted) and the gain (bills the other way round: owing more is a loss). Null when
+ * a foreign balance has no rate to revalue it at (the post function refuses that, FIN38).
+ */
+export function revaluationLine(
+  kind: RevaluationKind,
+  foreignSen: bigint,
+  carriedSen: bigint,
+  earlierSen: bigint,
+  rateScaled: bigint | null,
+): { revalued: bigint; difference: bigint; posted: bigint; gain: bigint } | null {
+  if (foreignSen !== ZERO && rateScaled === null) return null;
+  const revalued = foreignSen === ZERO || rateScaled === null ? ZERO : revaluedSen(foreignSen, rateScaled);
+  const difference = revalued - carriedSen;
+  const posted = difference - earlierSen;
+  return { revalued, difference, posted, gain: kind === 'bill' ? -posted : posted };
 }
