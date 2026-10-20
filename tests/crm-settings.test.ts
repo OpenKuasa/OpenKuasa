@@ -4,8 +4,10 @@ import { CrmContactFormError } from '@/lib/crm/contacts';
 import { markCrmDealLost } from '@/lib/crm/deals';
 import {
   DEFAULT_CRM_SETTINGS,
+  EXPORT_CONTACTS_MAX,
   LOST_REASON_REQUIRED_MESSAGE,
   contactsCsv,
+  listContactsForExport,
   loadCrmSettings,
   myKasturiNotifications,
   parseCrmSettingsForm,
@@ -166,5 +168,59 @@ describe('the contacts export', () => {
 
   it('is only a heading when there are no contacts', () => {
     expect(contactsCsv([])).toBe('first_name,last_name,email,phone,company,country,status,source,tags,added_on');
+  });
+
+  /** A workspace holding `total` contacts that hands out at most `pageMax` rows a request, and notes each range asked for. */
+  function pagedClient(total: number, pageMax = 1000) {
+    const ranges: [number, number][] = [];
+    const from = () => {
+      let range: [number, number] = [0, -1];
+      const builder: Record<string, unknown> = {};
+      for (const pass of ['select', 'eq', 'order']) builder[pass] = () => builder;
+      builder.range = (start: number, end: number) => {
+        range = [start, end];
+        ranges.push(range);
+        return builder;
+      };
+      builder.then = (resolve: (value: unknown) => void) => {
+        const [start, end] = range;
+        const stop = Math.min(end + 1, total, start + pageMax);
+        const data = Array.from({ length: Math.max(0, stop - start) }, (_, i) => ({ ...contact, first_name: `c${start + i}` }));
+        resolve({ data, error: null });
+      };
+      return builder;
+    };
+    return { client: { from } as never, ranges };
+  }
+
+  it('reads every contact and calls the file complete when the workspace is under the limit', async () => {
+    const { client } = pagedClient(2500);
+    const read = await listContactsForExport(client, ORG);
+    expect(read.contacts).toHaveLength(2500);
+    expect(read.complete).toBe(true);
+  });
+
+  it('calls the file complete when the workspace holds exactly the limit', async () => {
+    const { client, ranges } = pagedClient(EXPORT_CONTACTS_MAX);
+    const read = await listContactsForExport(client, ORG);
+    expect(read.contacts).toHaveLength(EXPORT_CONTACTS_MAX);
+    expect(read.complete).toBe(true);
+    // It never asks for more than one row past the limit.
+    expect(Math.max(...ranges.map(([, end]) => end))).toBe(EXPORT_CONTACTS_MAX);
+  });
+
+  it('stops at the limit and says the file is not complete when there are more contacts', async () => {
+    const { client } = pagedClient(EXPORT_CONTACTS_MAX + 1);
+    const read = await listContactsForExport(client, ORG);
+    expect(read.contacts).toHaveLength(EXPORT_CONTACTS_MAX);
+    expect(read.contacts.at(-1)?.first_name).toBe(`c${EXPORT_CONTACTS_MAX - 1}`);
+    expect(read.complete).toBe(false);
+  });
+
+  it('keeps reading when the server hands out fewer rows a page than were asked for', async () => {
+    const { client } = pagedClient(EXPORT_CONTACTS_MAX, 700);
+    const read = await listContactsForExport(client, ORG);
+    expect(read.contacts).toHaveLength(EXPORT_CONTACTS_MAX);
+    expect(read.complete).toBe(true);
   });
 });

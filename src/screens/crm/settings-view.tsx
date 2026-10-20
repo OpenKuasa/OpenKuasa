@@ -17,6 +17,92 @@ import {
 import { cn } from '@/lib/utils';
 import { useCrmForm } from './crm-form';
 
+type ExportNote = { tone: 'error' | 'info'; text: string } | null;
+
+const EXPORT_FAILED = 'The export did not work. Please try again.';
+
+/** The route's own message for a refused export, or a plain one when it sent none. */
+async function exportError(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as { error?: unknown };
+    if (typeof body.error === 'string' && body.error) return body.error;
+  } catch {
+    // Not JSON: fall back to the plain message.
+  }
+  return EXPORT_FAILED;
+}
+
+/** Saves the file through the browser's own download: a blob, and a link to it that is clicked and removed. */
+function saveFile(name: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  link.hidden = true;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // Safari can cancel the download if the blob is let go of at once.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+/**
+ * Fetches the contacts file and saves it, so a refusal (a signed-out session,
+ * a member, the database away) shows its message here instead of being saved
+ * as a file, and a file cut off at the limit says so.
+ */
+function ExportContactsButton() {
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<ExportNote>(null);
+
+  const onExport = async () => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const response = await fetch('/api/crm/contacts/export', { cache: 'no-store' });
+      if (!response.ok) {
+        setNote({ tone: 'error', text: await exportError(response) });
+        return;
+      }
+      const name =
+        /filename="([^"]+)"/.exec(response.headers.get('Content-Disposition') ?? '')?.[1] ?? 'contacts.csv';
+      // The blob keeps the file's bytes as sent, byte-order mark and all (text() would drop it).
+      saveFile(name, await response.blob());
+      setNote(
+        response.headers.get('X-Export-Complete') === 'false'
+          ? {
+              tone: 'info',
+              text: `The workspace has more contacts than one file holds. This file has only the first ${EXPORT_CONTACTS_MAX.toLocaleString('en-MY')}.`,
+            }
+          : { tone: 'info', text: 'Your file is downloading.' },
+      );
+    } catch {
+      setNote({ tone: 'error', text: EXPORT_FAILED });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <Button type="button" size="sm" variant="outline" onClick={onExport} disabled={busy}>
+        <Download className="size-4" />
+        {busy ? 'Exporting…' : 'Export contacts (CSV)'}
+      </Button>
+      <p
+        aria-live="polite"
+        className={cn(
+          'text-sm',
+          note?.tone === 'error' ? 'text-destructive' : 'text-muted-foreground',
+          !note && 'sr-only',
+        )}
+      >
+        {note?.text ?? ''}
+      </p>
+    </div>
+  );
+}
+
 /** What the screen shows of things that are set elsewhere. A count that could not be read is null. */
 export type CrmSettingsOverview = {
   companyName: string;
@@ -357,13 +443,7 @@ export function CrmSettingsView({
               the day they were added.
             </p>
             {canExport ? (
-              <Button asChild size="sm" variant="outline">
-                {/* A plain link: the browser saves the file the server sends. */}
-                <a href="/api/crm/contacts/export" download>
-                  <Download className="size-4" />
-                  Export contacts (CSV)
-                </a>
-              </Button>
+              <ExportContactsButton />
             ) : (
               <p className="text-xs text-muted-foreground">Only an owner or admin can export the contacts.</p>
             )}

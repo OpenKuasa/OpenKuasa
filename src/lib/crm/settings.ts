@@ -225,14 +225,15 @@ export async function listContactsForExport(
 ): Promise<{ contacts: ExportContact[]; complete: boolean }> {
   const contacts: ExportContact[] = [];
   // Read until a page comes back empty: the server may hand out fewer rows a page than were asked for.
-  while (contacts.length < EXPORT_CONTACTS_MAX) {
+  // It reads one row past the limit, so a workspace with exactly the limit is still known to be complete.
+  while (contacts.length <= EXPORT_CONTACTS_MAX) {
     const { data, error } = await client
       .from('crm_contacts')
       .select(EXPORT_COLUMNS)
       .eq('org_id', orgId)
       .order('created_at', { ascending: true })
       .order('id', { ascending: true })
-      .range(contacts.length, contacts.length + EXPORT_PAGE_SIZE - 1);
+      .range(contacts.length, Math.min(contacts.length + EXPORT_PAGE_SIZE - 1, EXPORT_CONTACTS_MAX));
     if (error) throw error;
     const page = (data ?? []) as unknown as ExportContact[];
     if (page.length === 0) return { contacts, complete: true };
