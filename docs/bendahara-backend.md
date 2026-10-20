@@ -3074,3 +3074,23 @@ with no date).
     guard has already locked the bills).
   - The FIN04 arm of `finance_fx_carried_bill` (unreachable: it runs only on a
     posted bill, which always has a rate).
+- Bank and cash accounts in another currency (`20261122100000`, stage 5a): an
+  account's `currency` is chosen when it is added and never changes (granted
+  for insert only: `42501` on a change). Its opening balance is in that
+  currency and carries `opening_rate` (the one rule, BNM's 17:00 selling rate
+  for the opening date, marked `bnm` with its date, or typed, `manual`), set
+  by an owner or admin like the balance itself (`FIN14`); a balance in another
+  currency with no rate is `FIN38`, a `bnm` rate that is not the rule's figure
+  or is dated after the opening date `FIN39`. `opening_balance_myr` is
+  generated, and the opening entry posts it. `finance_transactions` carries
+  `currency`, `fx_rate`, `fx_rate_source`, `fx_rate_date` and `amount_myr`
+  (null on a ringgit account's movement, meaning the amount; every reader uses
+  `coalesce(amount_myr, amount)`), written only by
+  `finance_transaction_to_currency` and by functions that run as the owner. No
+  money moves on an account in another currency yet: any movement inserted on
+  one, or a draft moved onto one, is `FIN50`, and every money picker lists
+  ringgit accounts only. `finance_account_balances` appends the currency, the
+  rate and `balance_myr` (the ringgit book value), and
+  `finance_bank_transactions` the movement's currency, rate and ringgit;
+  Banking shows each account in its own currency and adds ringgit for Total
+  cash and the trend.
