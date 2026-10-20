@@ -260,6 +260,9 @@ describe('Payment Vouchers, from an account in another currency', () => {
     expect(voucherAccounts(base, ACCOUNTS)).toEqual(ACCOUNTS);
     expect(voucherAccounts({ ...base, kind: 'bills' }, ACCOUNTS)).toEqual([BANK]);
     expect(voucherAccounts({ ...base, id: '00000000-0000-4000-8000-00000000b002' }, ACCOUNTS)).toEqual([BANK]);
+    // Back on a ringgit account the voucher is To be paid again (review N3); one chosen paid now on ringgit keeps it.
+    expect(chooseVoucherAccount(onUsd, BANK).paidNow).toBeUndefined();
+    expect(chooseVoucherAccount({ ...base, paidNow: true }, BANK).paidNow).toBe(true);
     // A voucher for bills lets go of an account in another currency.
     expect(chooseVoucherKind(onUsd, 'bills')).toMatchObject({ kind: 'bills', accountId: '' });
   });

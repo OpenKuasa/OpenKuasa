@@ -171,10 +171,14 @@ export function voucherAccounts(form: Pick<VoucherForm, 'kind' | 'id' | 'account
   return accounts.filter((a) => a.currency === BASE_CURRENCY || a.id === form.accountId);
 }
 
-/** The account chosen. One in another currency takes the rate box in its currency, and is paid now. */
+/**
+ * The account chosen. One in another currency takes the rate box in its currency, and is paid now. Going back to a
+ * ringgit account from one lets go of the "Paid now" that account set: the voucher is To be paid again.
+ */
 export function chooseVoucherAccount(form: VoucherForm, account: FinanceAccount): VoucherForm {
   const fx = fxForAccount(form.fx, account.currency);
-  return { ...form, accountId: account.id, fx, ...(onForeignAccount(fx) ? { paidNow: true } : {}) };
+  if (onForeignAccount(fx)) return { ...form, accountId: account.id, fx, paidNow: true };
+  return { ...form, accountId: account.id, fx, ...(voucherOnForeignAccount(form) ? { paidNow: undefined } : {}) };
 }
 
 /** The rate part, as typed or as BNM's answer left it. */
