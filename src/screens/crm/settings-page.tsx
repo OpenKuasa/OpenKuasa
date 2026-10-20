@@ -13,10 +13,14 @@ import {
   saveMyKasturiNotifications,
 } from '@/lib/crm/settings';
 import { createClient } from '@/lib/supabase/server';
+import { PageHeader } from '@/components/screen/page-header';
+import { ScreenContainer } from '@/components/screen/screen-container';
 import SampleSettingsScreen from './settings';
 import { CrmSettingsView, type CrmSettingsOverview } from './settings-view';
 
 const SETTINGS_PATH = '/crm/settings';
+// Matches the live view's header, so a failed load still reads as this screen.
+const SUBTITLE = "Kasturi's own rules and notifications, and where the rest of your workspace is set.";
 
 async function saveRulesAction(_prev: CrmFormState, formData: FormData) {
   'use server';
@@ -49,8 +53,8 @@ async function count(query: PromiseLike<{ count: number | null; error: unknown }
 /**
  * Kasturi's Settings screen: the workspace's deal rule, the signed-in
  * person's Kasturi notifications, the contacts export, and where everything
- * else about the workspace is set. Falls back to the sample screen when no
- * database is configured.
+ * else about the workspace is set. Falls back to the sample screen only when
+ * no database is configured; once one is, a failed load says so instead.
  */
 export default async function CrmSettingsPage() {
   if (!hasSupabaseEnv()) return <SampleSettingsScreen />;
@@ -92,6 +96,10 @@ export default async function CrmSettingsPage() {
         supabase.rpc('org_ai_key_status'),
         getEmailKeyStatus(supabase),
       ]);
+    // A failed check is not an answer: "Not set" could lead an owner to
+    // replace a working key, and a missing name would show the wrong company.
+    if (aiKey.error) throw aiKey.error;
+    if (org.error) throw org.error;
     const company = org.data as { name?: string; registration_no?: string | null } | null;
     live = {
       settings,
@@ -114,12 +122,21 @@ export default async function CrmSettingsPage() {
       },
     };
   } catch (error) {
-    // The migration is applied to a database separately from a deploy, so the
-    // table can be missing for a while. Keep the page up meanwhile.
+    // The page stays up, but never with made-up settings in place of the
+    // workspace's own.
     console.error('[crm/settings] could not load the settings', error);
   }
 
-  if (!live) return <SampleSettingsScreen />;
+  if (!live) {
+    return (
+      <ScreenContainer>
+        <PageHeader title="Settings" subtitle={SUBTITLE} />
+        <p className="grid min-h-24 place-items-center text-center text-sm text-muted-foreground">
+          Couldn&apos;t load your settings — please refresh
+        </p>
+      </ScreenContainer>
+    );
+  }
   const admin = role === 'owner' || role === 'admin';
   return (
     <CrmSettingsView
