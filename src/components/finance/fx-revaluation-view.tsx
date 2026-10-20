@@ -294,6 +294,10 @@ export function FxRevaluationView({
     setNotice(null);
     posting.clear();
     stopWaiting();
+    // An answer still on its way is for rates no longer in the boxes: it is dropped, so it cannot replace the
+    // preview with figures at those rates after the boxes went back to the preview's own.
+    request.current += 1;
+    setLoading(false);
     const rates = previewRates(next);
     if (rates && preview && preview.periodEnd === periodEnd && !ratesMatch(preview.items, next)) {
       timer.current = setTimeout(() => ask(periodEnd, rates, false), PREVIEW_AFTER_MS);
