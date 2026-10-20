@@ -98,7 +98,7 @@ export function transferToOptions(accounts: BankAccountRow[], from: string): Ban
  * The form after "From" was chosen: "To" is cleared when it now names the same account, or when both would be in
  * other currencies, so the screen never holds a pair that cannot be sent.
  */
-export function withTransferFrom(form: TransferForm, from: string, accounts: AccountCurrency[] = []): TransferForm {
+export function withTransferFrom(form: TransferForm, from: string, accounts: AccountCurrency[]): TransferForm {
   const bothForeign =
     form.to !== '' && currencyOf(accounts, from) !== BASE_CURRENCY && currencyOf(accounts, form.to) !== BASE_CURRENCY;
   return { ...form, from, to: form.to === from || bothForeign ? '' : form.to };
@@ -109,17 +109,24 @@ export function needsTwoAmounts(form: Pick<TransferForm, 'from' | 'to'>, account
   return form.from !== '' && form.to !== '' && currencyOf(accounts, form.from) !== currencyOf(accounts, form.to);
 }
 
+/** A typed amount as sent: rounded to the sen from its text; anything else as typed (NaN for no number), for the schema. */
+function sentAmount(text: string): number {
+  const sen = typedSen(text);
+  return sen === null ? (typedNumber(text) ?? Number.NaN) : ringgitOf(sen);
+}
+
 /**
  * What is sent to recordTransferAction. A box that is not a number goes as NaN, which the schema refuses.
  * `to_amount` is sent only when the two accounts' currencies differ: between two ringgit accounts the payload is
- * what it always was.
+ * what it always was. A plain number is rounded to the sen from its text (half up, as the database rounds), so
+ * what is sent, what the notes say (recordedTransfer) and what is booked are one figure: "1.005" goes as 1.01.
  */
-export function transferPayload(form: TransferForm, accounts: AccountCurrency[] = []) {
+export function transferPayload(form: TransferForm, accounts: AccountCurrency[]) {
   return {
     from_account_id: form.from,
     to_account_id: form.to,
-    amount: typedNumber(form.amount) ?? Number.NaN,
-    ...(needsTwoAmounts(form, accounts) ? { to_amount: typedNumber(form.toAmount) ?? Number.NaN } : {}),
+    amount: sentAmount(form.amount),
+    ...(needsTwoAmounts(form, accounts) ? { to_amount: sentAmount(form.toAmount) } : {}),
     txn_date: form.date,
     reference: form.reference,
     notes: form.notes,
@@ -134,7 +141,7 @@ function wholeUnitsProblem(text: string, currency: string): string | null {
 }
 
 /** The first thing wrong with the form, in the schema's own sentence, or null when it can be sent. */
-export function transferFormError(form: TransferForm, accounts: AccountCurrency[] = []): string | null {
+export function transferFormError(form: TransferForm, accounts: AccountCurrency[]): string | null {
   if (!form.from) return M.from;
   if (!form.to) return M.to;
   const fromCurrency = currencyOf(accounts, form.from);

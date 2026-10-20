@@ -76,8 +76,8 @@ describe('the accounts a transfer can use', () => {
     expect(transferToOptions(ACCOUNTS, MAIN).map((a) => a.name)).toEqual(['Savings', 'Cash in hand']);
     expect(transferToOptions(ACCOUNTS, '').map((a) => a.name)).toEqual(['Main Bank', 'Savings', 'Cash in hand']);
     const form = { ...newTransferForm('2026-10-12'), from: MAIN, to: SAVINGS };
-    expect(withTransferFrom(form, SAVINGS)).toMatchObject({ from: SAVINGS, to: '' });
-    expect(withTransferFrom(form, TILL)).toMatchObject({ from: TILL, to: SAVINGS });
+    expect(withTransferFrom(form, SAVINGS, ACCOUNTS)).toMatchObject({ from: SAVINGS, to: '' });
+    expect(withTransferFrom(form, TILL, ACCOUNTS)).toMatchObject({ from: TILL, to: SAVINGS });
   });
 });
 
@@ -88,23 +88,29 @@ describe('the form', () => {
     expect(newTransferForm('2026-10-12')).toEqual({ from: '', to: '', amount: '', toAmount: '', date: '2026-10-12', reference: '', notes: '' });
   });
   it('sends what the schema takes', () => {
-    expect(transferPayload(filled)).toEqual({ from_account_id: MAIN, to_account_id: SAVINGS, amount: 500, txn_date: '2026-10-12', reference: ' TT-9 ', notes: '' });
+    expect(transferPayload(filled, ACCOUNTS)).toEqual({ from_account_id: MAIN, to_account_id: SAVINGS, amount: 500, txn_date: '2026-10-12', reference: ' TT-9 ', notes: '' });
     // Between two ringgit accounts no to_amount is sent, whatever the box holds: the payload is what it always was.
     expect(transferPayload({ ...filled, toAmount: '99' }, ACCOUNTS)).not.toHaveProperty('to_amount');
-    expect(recordTransferInput.parse(transferPayload(filled))).toMatchObject({ amount: 500, reference: 'TT-9', notes: null });
-    expect(transferFormError(filled)).toBeNull();
+    expect(recordTransferInput.parse(transferPayload(filled, ACCOUNTS))).toMatchObject({ amount: 500, reference: 'TT-9', notes: null });
+    expect(transferFormError(filled, ACCOUNTS)).toBeNull();
   });
   it('names the first thing wrong, in order: from, to, amount, date', () => {
-    expect(transferFormError({ ...filled, from: '', to: '', amount: '' })).toBe('Choose the account the money leaves.');
-    expect(transferFormError({ ...filled, to: '', amount: '' })).toBe('Choose the account the money goes to.');
-    expect(transferFormError({ ...filled, to: MAIN })).toBe('Choose two different accounts.');
+    expect(transferFormError({ ...filled, from: '', to: '', amount: '' }, ACCOUNTS)).toBe('Choose the account the money leaves.');
+    expect(transferFormError({ ...filled, to: '', amount: '' }, ACCOUNTS)).toBe('Choose the account the money goes to.');
+    expect(transferFormError({ ...filled, to: MAIN }, ACCOUNTS)).toBe('Choose two different accounts.');
     for (const amount of ['', '0', '-5', '1,500', 'abc', '0.004']) {
-      expect(transferFormError({ ...filled, amount }), amount).toBe('Enter an amount above 0.');
+      expect(transferFormError({ ...filled, amount }, ACCOUNTS), amount).toBe('Enter an amount above 0.');
     }
-    expect(transferFormError({ ...filled, date: '' })).toBe('Enter a valid date.');
+    expect(transferFormError({ ...filled, date: '' }, ACCOUNTS)).toBe('Enter a valid date.');
   });
   it('reads a typed comma as not a number, never as some other number', () => {
-    expect(Number.isNaN(transferPayload({ ...filled, amount: '1,500' }).amount)).toBe(true);
+    expect(Number.isNaN(transferPayload({ ...filled, amount: '1,500' }, ACCOUNTS).amount)).toBe(true);
+  });
+  it('sends, books and notes one figure for three decimals (half up from the text, as the database rounds)', () => {
+    const odd = { ...filled, amount: '1.005' };
+    expect(transferPayload(odd, ACCOUNTS).amount).toBe(1.01);
+    expect(recordTransferInput.parse(transferPayload(odd, ACCOUNTS)).amount).toBe(1.01);
+    expect(recordedTransfer(odd, ACCOUNTS, { transfer_id: TRANSFER, number: 'TR-0009' }).amount).toBe(1.01);
   });
 });
 
