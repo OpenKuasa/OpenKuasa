@@ -91,10 +91,14 @@
 -- is never voided; a multi-line document can differ by a sen at its booked
 -- rate; manual journals on Receivable or Payable are not revalued; Banking's
 -- "≈ RM" stays the book value; expenses, contra entries and the assistant stay
--- ringgit. "What you saw" is checked by the number of lines and the net gain:
--- two changes that offset each other exactly between preview and post are
--- not told apart (the posted run is still right for the books as they were
--- when it was posted).
+-- ringgit; the table owner (the SQL editor, never the app) can TRUNCATE the
+-- three tables, which no row trigger sees; a member can take FX- numbers by
+-- calling finance_next_number directly (the same as every document type),
+-- leaving gaps, though only an owner or admin posts a run. "What you saw" is
+-- checked item by item: the preview hands out a digest of every item (kind,
+-- id, currency, foreign balance, carried, revalued and posted figures), and
+-- the post refuses (FIN55) when the items it works out do not give the same
+-- digest, the number of lines or the net gain.
 --
 -- Nothing here is granted to service_role.
 --
@@ -111,11 +115,14 @@ create temp table fx6a_started on commit drop as select clock_timestamp() as sta
 lock table public.finance_ledger_accounts, public.finance_sequences in access exclusive mode nowait;
 -- The view this file replaces, so no reader holds it while "create or replace view" waits (20261120120000 N2).
 -- After the tables above and before the rest: every lock here is nowait, so this file never waits and cannot be one
--- side of a deadlock. Locking a view locks what it reads in the same mode.
+-- side of a deadlock. Locking a view locks every table it reads in the same mode, so this takes ACCESS EXCLUSIVE on
+-- all fourteen tables the ledger reads (the thirteen below and finance_ledger_accounts): every reader of invoices,
+-- bills, money, contacts and accounts waits for the whole file (0.1 s locally; nowait means a busy table fails the
+-- apply at once instead of queueing behind it).
 lock table public.finance_ledger_lines in access exclusive mode nowait;
--- Every other table the ledger reads (walked through pg_depend on a clone of main: these thirteen and
--- finance_ledger_accounts, above), held against writes so the comparison at the end sees only what this file did.
--- finance_categories is not read by the ledger; it is here because the seed may insert into it.
+-- The tables the ledger reads (walked through pg_depend on a clone of main). Already held in access exclusive mode
+-- by the view's lock above; this share lock only states the list, and holds finance_categories, which the ledger
+-- does not read but the seed may insert into.
 lock table
   public.finance_accounts,
   public.finance_allocations,
@@ -613,6 +620,38 @@ revoke all on function private.finance_fx_closing_rates(date, jsonb) from public
 -- posted, or void with voided_at and a number; bills: posted, or void with voided_at).
 -- When a needed currency has no rate, its items' revalued, difference and posted are null: the preview shows that;
 -- the post function refuses it (FIN38).
+-- One item as the digest reads it: kind, id, currency, foreign balance, carried, revalued and posted, each figure to
+-- two places, '-' for a figure not worked out (no rate). The preview hands out md5 over these lines, comma-joined in
+-- the order (kind, item id as text); the post works it out again and refuses a run whose items differ (FIN55).
+create function private.finance_fx_digest_line(kind text, item_id uuid, currency text, foreign_balance numeric,
+                                               carried_myr numeric, revalued_myr numeric, posted_myr numeric)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select concat_ws(':', kind, item_id::text, currency, round(foreign_balance, 2)::text, round(carried_myr, 2)::text,
+                   coalesce(round(revalued_myr, 2)::text, '-'), coalesce(round(posted_myr, 2)::text, '-'));
+$$;
+revoke all on function private.finance_fx_digest_line(text, uuid, text, numeric, numeric, numeric, numeric)
+  from public, anon, authenticated, service_role;
+
+-- A worked-out figure the books can hold (numeric(14,2): below 10^12 either way), or FIN38: a closing rate typed so
+-- large that the revalued figure does not fit is refused by name, not as a numeric overflow when the run is stored.
+create function private.finance_fx_fits(figure numeric)
+returns numeric
+language plpgsql
+immutable
+set search_path = ''
+as $$
+begin
+  if figure is not null and abs(figure) >= 1000000000000 then
+    raise exception 'a revalued figure is too large for the books: check the closing rate' using errcode = 'FIN38';
+  end if;
+  return figure;
+end $$;
+revoke all on function private.finance_fx_fits(numeric) from public, anon, authenticated, service_role;
+
 create function private.finance_fx_revaluation_items(target_org uuid, as_at date, rates jsonb, fill_defaults boolean)
 returns table (kind text, item_id uuid, reference text, party text, currency text,
                foreign_balance numeric, carried_myr numeric, earlier_myr numeric,
@@ -769,7 +808,8 @@ chosen as (
 )
 select it.kind, it.id, it.reference, it.party, it.currency, it.fb, it.carried, coalesce(e.myr, 0.00),
        ch.rate, ch.source, ch.rate_date, ch.bnm_rate, ch.bnm_rate_date,
-       v.revalued, v.revalued - it.carried, v.revalued - it.carried - coalesce(e.myr, 0.00)
+       private.finance_fx_fits(v.revalued), private.finance_fx_fits(v.revalued - it.carried),
+       private.finance_fx_fits(v.revalued - it.carried - coalesce(e.myr, 0.00))
 from items it
 left join earlier e on e.kind = it.kind and e.item_id = it.id
 left join chosen ch on ch.currency = it.currency
@@ -783,40 +823,53 @@ revoke all on function private.finance_fx_revaluation_items(uuid, date, jsonb, b
 -- 7. Preview (any member) and post (owner or admin)
 -- ============================================================================
 -- What a run for period_end would post, at the rates sent (or BNM's closing rate where none is sent). Read only.
--- Rates travel as text so nothing on the way rounds them.
+-- Rates travel as text so nothing on the way rounds them, per ONE unit both ways: rate_text sent back unchanged as
+-- the rate (with its source and, for bnm, its date) posts the same figures. digest is the same on every row: what
+-- the post must be sent back to post these items (FIN55 otherwise).
 create function public.finance_fx_revaluation_preview(target_org uuid, period_end date, rates jsonb default '{}'::jsonb)
 returns table (kind text, item_id uuid, reference text, party text, currency text,
                foreign_balance numeric, carried_myr numeric, earlier_myr numeric,
                rate_text text, rate_source text, rate_date date, bnm_rate_text text, bnm_rate_date date,
-               revalued_myr numeric, difference numeric, posted_myr numeric, gain numeric)
+               revalued_myr numeric, difference numeric, posted_myr numeric, gain numeric, digest text)
 language plpgsql
 stable
 security definer
 set search_path = ''
 as $$
+#variable_conflict use_column
 begin
   -- Runs as the owner: who the caller is, first.
   if not private.is_org_member(target_org) then
     raise exception 'not allowed' using errcode = '42501';
   end if;
-  if period_end is null
+  if period_end is null or not isfinite(period_end)
      or period_end <> (date_trunc('month', period_end) + interval '1 month' - interval '1 day')::date
      or period_end > (now() at time zone 'Asia/Kuala_Lumpur')::date then
     raise exception 'a revaluation is at a month end on or before today' using errcode = 'FIN53';
   end if;
   return query
+    with x as (
+      select * from private.finance_fx_revaluation_items(target_org, finance_fx_revaluation_preview.period_end, rates, true)
+    ),
+    d as (
+      select md5(coalesce(string_agg(private.finance_fx_digest_line(x.kind, x.item_id, x.currency, x.foreign_balance,
+                                       x.carried_myr, x.revalued_myr, x.posted_myr), ',' order by x.kind, x.item_id::text),
+                          '')) as digest
+      from x
+    )
     select x.kind, x.item_id, x.reference, x.party, x.currency, x.foreign_balance, x.carried_myr, x.earlier_myr,
            x.rate::text, x.rate_source, x.rate_date, x.bnm_rate::text, x.bnm_rate_date,
            x.revalued_myr, x.difference, x.posted_myr,
-           case when x.kind = 'bill' then -x.posted_myr else x.posted_myr end
-    from private.finance_fx_revaluation_items(target_org, finance_fx_revaluation_preview.period_end, rates, true) x
+           case when x.kind = 'bill' then -x.posted_myr else x.posted_myr end,
+           d.digest
+    from x cross join d
     order by x.kind, x.currency, x.reference, x.item_id;
 end $$;
 revoke all on function public.finance_fx_revaluation_preview(uuid, date, jsonb) from public, anon, service_role;
 grant execute on function public.finance_fx_revaluation_preview(uuid, date, jsonb) to authenticated;
 
 -- Posts a run: run = {"period_end": "2026-10-31", "rates": {...as above, BNM's or typed, never filled in here},
--- "expected": {"lines": 5, "net_gain": "-52.40"}}. Works the items out again, under a lock, and posts them only if
+-- "expected": {"lines": 5, "net_gain": "-52.40", "digest": "<the preview's digest>"}}. Works the items out again, under a lock, and posts them only if
 -- they are what the caller saw. Every figure stored is worked out here; the caller sends only the month end, the
 -- rates (rounded to the ten places the tables keep) and what it expects (compared, never stored).
 create function public.finance_post_fx_revaluation(target_org uuid, run jsonb)
@@ -835,6 +888,8 @@ declare
   missing text;
   exp_lines text;
   exp_net text;
+  exp_digest text;
+  dig text;
   net numeric;
   rid uuid := gen_random_uuid();
   no text;
@@ -853,7 +908,7 @@ begin
   exception when others then
     pe := null;
   end;
-  if pe is null
+  if pe is null or not isfinite(pe)
      or pe <> (date_trunc('month', pe) + interval '1 month' - interval '1 day')::date
      or pe > (now() at time zone 'Asia/Kuala_Lumpur')::date then
     raise exception 'a revaluation is at a month end on or before today' using errcode = 'FIN53';
@@ -873,8 +928,10 @@ begin
   end if;
 
   -- One statement, so one snapshot: every step below reads items, never the books again.
-  select coalesce(jsonb_agg(to_jsonb(x) order by x.kind, x.currency, x.reference, x.item_id), '[]'::jsonb)
-    into items
+  select coalesce(jsonb_agg(to_jsonb(x) order by x.kind, x.currency, x.reference, x.item_id), '[]'::jsonb),
+         md5(coalesce(string_agg(private.finance_fx_digest_line(x.kind, x.item_id, x.currency, x.foreign_balance,
+                                   x.carried_myr, x.revalued_myr, x.posted_myr), ',' order by x.kind, x.item_id::text), ''))
+    into items, dig
   from private.finance_fx_revaluation_items(target_org, pe, run->'rates', false) x;
 
   select string_agg(distinct e->>'currency', ', ') into missing
@@ -888,18 +945,22 @@ begin
     raise exception 'nothing to post: every foreign balance at % is already at these rates', pe using errcode = 'FIN56';
   end if;
 
-  -- What the caller saw: the number of lines and the net gain, to the sen. Missing, or not a whole number and a
-  -- signed amount of at most two decimals, is the same answer as different (FIN55).
+  -- What the caller saw: the digest of every item (the preview's), the number of lines and the net gain, to the sen.
+  -- Missing, or not an md5, a whole number and a signed amount of at most two decimals, is the same answer as
+  -- different (FIN55).
   exp_lines := run->'expected'->>'lines';
   exp_net := run->'expected'->>'net_gain';
+  exp_digest := run->'expected'->>'digest';
   select sum(case when e->>'kind' = 'bill' then -(e->>'posted_myr')::numeric else (e->>'posted_myr')::numeric end)
     into net
   from jsonb_array_elements(items) e;
   if jsonb_typeof(run->'expected') is distinct from 'object'
      or not coalesce(exp_lines ~ '^[0-9]{1,6}$', false)
      or not coalesce(exp_net ~ '^-?[0-9]{1,12}(\.[0-9]{1,2})?$', false)
+     or not coalesce(exp_digest ~ '^[0-9a-f]{32}$', false)
      or exp_lines::integer <> jsonb_array_length(items)
-     or exp_net::numeric <> net then
+     or exp_net::numeric <> net
+     or exp_digest <> dig then
     raise exception 'the figures changed since they were shown' using errcode = 'FIN55';
   end if;
 
@@ -927,12 +988,16 @@ begin
                                       foreign_balance numeric, rate numeric, carried_myr numeric,
                                       revalued_myr numeric, difference numeric, earlier_myr numeric, posted_myr numeric);
 
-  -- Backstop: read back as stored, the run is what was shown (its lines and net gain), and, for each of its items,
-  -- every run for this month end together posted exactly the item's full difference.
-  select count(*), coalesce(sum(ln.gain), 0) into n, net
+  -- Backstop: read back as stored, the run is what was shown (its digest, lines and net gain), and, for each of its
+  -- items, every run for this month end together posted exactly the item's full difference.
+  select count(*), coalesce(sum(ln.gain), 0),
+         md5(coalesce(string_agg(private.finance_fx_digest_line(ln.kind, coalesce(ln.invoice_id, ln.bill_id, ln.account_id),
+                                   ln.currency, ln.foreign_balance, ln.carried_myr, ln.revalued_myr, ln.posted_myr),
+                                 ',' order by ln.kind, coalesce(ln.invoice_id, ln.bill_id, ln.account_id)::text), ''))
+    into n, net, dig
   from public.finance_fx_revaluation_lines ln
   where ln.org_id = target_org and ln.revaluation_id = rid;
-  if n <> exp_lines::integer or net <> exp_net::numeric or exists (
+  if n <> exp_lines::integer or net <> exp_net::numeric or dig <> exp_digest or exists (
     select 1
     from public.finance_fx_revaluation_lines ln
     where ln.org_id = target_org and ln.revaluation_id = rid
@@ -1600,8 +1665,10 @@ begin
       raise exception '% is callable by public', fn;
     end if;
   end loop;
-  -- The five private ones: an empty search_path, callable by no API role (they run as the caller).
+  -- The seven private ones: an empty search_path, callable by no API role (they run as the caller).
   foreach fn in array array['private.finance_fx_weight(date, timestamptz, date)',
+                            'private.finance_fx_digest_line(text, uuid, text, numeric, numeric, numeric, numeric)',
+                            'private.finance_fx_fits(numeric)',
                             'private.finance_fx_closing_rate(text, date)',
                             'private.finance_fx_closing_rates(date, jsonb)',
                             'private.finance_fx_revaluation_items(uuid, date, jsonb, boolean)',
