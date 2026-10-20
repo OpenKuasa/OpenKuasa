@@ -98,9 +98,10 @@ export function BankAccountFormCard({
     );
   };
 
-  // An account in another currency opened for a change: note BNM's rate beside the saved one, without changing it.
+  // An account in another currency opened for a change: note BNM's rate beside a saved one, without changing it.
+  // With no saved rate (a foreign account added with no balance) BNM's rate fills the box, ready for a balance.
   useEffect(() => {
-    askRate(form, false);
+    askRate(form, form.fx.rate.trim() === '');
     // Once, for the account the form opened with; every later change asks from `set`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -174,15 +175,15 @@ export function BankAccountFormCard({
             </Select>
           )}
         </div>
+        {/* Editing a ringgit account shows nothing new: its form is what it always was. */}
+        {editing && !foreign ? null : (
         <div className="space-y-1.5 md:col-span-4">
           <Label id={`${id}-currency-label`} htmlFor={editing ? undefined : `${id}-currency`}>
             Currency
           </Label>
           {editing ? (
             <p role="group" aria-labelledby={`${id}-currency-label`} className="flex min-h-9 items-center text-sm text-muted-foreground">
-              {foreign
-                ? `In ${form.fx.currency}. The currency is chosen when the account is added.`
-                : 'Ringgit · set when it was added'}
+              {`In ${form.fx.currency}. The currency is chosen when the account is added.`}
             </p>
           ) : (
             <>
@@ -207,6 +208,7 @@ export function BankAccountFormCard({
             </>
           )}
         </div>
+        )}
         {atBank ? (
           <>
             <div className="space-y-1.5 md:col-span-4">
