@@ -130,7 +130,8 @@ begin
    where attrelid = 'public.finance_account_balances'::regclass and attnum > 0 and not attisdropped;
   -- No account_no: nobody signed in may read that column of finance_accounts, and the view runs as its reader.
   if t is distinct from 'id,org_id,name,kind,bank_name,opening_balance,opening_date,active,money_in,money_out,'
-       || 'balance,to_be_paid,last_import_at,unmatched_lines,created_at' then
+       || 'balance,to_be_paid,last_import_at,unmatched_lines,created_at,currency,opening_rate,opening_rate_source,'
+       || 'opening_rate_date,opening_balance_myr,balance_myr' then
     fails := fails || format('finance_account_balances has the columns: %s', t);
   end if;
   if has_column_privilege('authenticated', 'public.finance_accounts', 'account_no', 'select') then
@@ -140,7 +141,8 @@ begin
    where attrelid = 'public.finance_bank_transactions'::regclass and attnum > 0 and not attisdropped;
   if t is distinct from 'transaction_id,org_id,account_id,account_name,account_kind,direction,txn_date,amount,status,number,'
        || 'method,reference,notes,party_name,kind,category_name,documents,transfer_id,other_account_name,'
-       || 'statement_line_id,reconciled,created_at' then
+       || 'statement_line_id,reconciled,created_at,currency,fx_rate,fx_rate_source,amount_myr,other_currency,'
+       || 'other_amount' then
     fails := fails || format('finance_bank_transactions has the columns: %s', t);
   end if;
   foreach t in array array[
@@ -208,7 +210,7 @@ begin
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where not tgisinternal and tgrelid = 'public.finance_transactions'::regclass;
   if t is distinct from 'finance_transaction_guard,finance_transaction_insert_guard,finance_transaction_sign_off,finance_transaction_still,'
-       || 'finance_transaction_to_ringgit,finance_transaction_unmatch,finance_transfer_id_guard,finance_transfer_pair_delete,finance_transfer_pair_insert,'
+       || 'finance_transaction_to_currency,finance_transaction_to_ringgit,finance_transaction_unmatch,finance_transfer_id_guard,finance_transfer_pair_delete,finance_transfer_pair_insert,'
        || 'finance_transfer_pair_update,finance_use_account_insert,finance_use_account_update,finance_void_stamp' then
     fails := fails || format('triggers on finance_transactions are: %s', t);
   end if;

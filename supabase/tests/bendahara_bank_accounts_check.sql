@@ -97,7 +97,8 @@ begin
            ' ' order by attnum) into t
     from pg_attribute where attrelid = 'public.finance_accounts'::regclass and attnum > 0 and not attisdropped;
   if t is distinct from 'id:s-- org_id:si- name:siu kind:si- bank_name:siu account_no:-iu opening_balance:siu '
-       || 'opening_date:siu active:siu created_at:s-- updated_at:s-u' then
+       || 'opening_date:siu active:siu created_at:s-- updated_at:s-u currency:si- opening_rate:siu '
+       || 'opening_rate_source:siu opening_rate_date:siu opening_balance_myr:s--' then
     fails := fails || format('authenticated on finance_accounts: %s', t);
   end if;
   select string_agg(attname || ':'
