@@ -7,8 +7,9 @@
  * balance, the chart and the gauge are all built from posted rows.
  */
 import type { BankAccountRow, BankTransactionKind, BankTransactionRow } from './banking';
+import { BASE_CURRENCY } from './currencies';
 import { toCsv } from './csv';
-import { rm } from './format';
+import { money, rm } from './format';
 import { PAYMENT_METHOD_LABELS } from './money';
 import { type Stat, count, displayDate, lastMonths, monthOf, round2, sum, thousands } from './view-helpers';
 
@@ -37,9 +38,19 @@ export function bankDescription(row: BankTransactionRow): string {
   return what ? `${who} · ${what}` : who;
 }
 
-/** Money in adds to an account and money out takes from it. */
+/** Money in adds to an account and money out takes from it, in the account's own currency. */
 export function signedAmount(row: BankTransactionRow): number {
   return row.direction === 'in' ? row.amount : -row.amount;
+}
+
+/** The same in ringgit (stage 5a): what every total across accounts adds, since two accounts' currencies may differ. */
+export function signedRinggit(row: BankTransactionRow): number {
+  return row.direction === 'in' ? row.amount_myr : -row.amount_myr;
+}
+
+/** "≈ RM 44,620.00": an account's book value in ringgit, said under a balance in another currency; null for ringgit. */
+export function ringgitNote(account: Pick<BankAccountRow, 'currency' | 'balance_myr'>): string | null {
+  return account.currency === BASE_CURRENCY ? null : `≈ ${rm(account.balance_myr)}`;
 }
 
 export type Reconciliation = 'Reconciled' | 'Unreconciled';
@@ -115,23 +126,31 @@ export type BankingViewData = {
   gaugeEmpty: string;
 };
 
-function accountNote(account: BankAccountRow): string {
+function statementNote(account: BankAccountRow): string {
   if (account.kind === 'cash') return 'Cash account';
   if (!account.last_import_at) return 'No statement yet';
   const imported = `Last import ${displayDate(account.last_import_at.slice(0, 10))}`;
   return account.unmatched_lines ? `${imported} · ${account.unmatched_lines} to match` : imported;
 }
 
+/** Under a tile's balance: its ringgit book value first for an account in another currency, then its statements. */
+function accountNote(account: BankAccountRow): string {
+  const ringgit = ringgitNote(account);
+  return ringgit ? `${ringgit} · ${statementNote(account)}` : statementNote(account);
+}
+
 export function bankingView(accounts: BankAccountRow[], rows: BankTransactionRow[], today: string): BankingViewData {
   const posted = rows.filter((r) => r.status === 'posted');
-  const totalNow = sum(accounts, (a) => a.balance);
+  // Stage 5a: accounts may be in different currencies, so every total adds ringgit (each account's book value).
+  const totalNow = sum(accounts, (a) => a.balance_myr);
+  // Scheduled money out is on ringgit accounts only (a foreign one is paid now), so this is ringgit already.
   const toBePaid = sum(accounts, (a) => a.to_be_paid);
   const shown = accounts.filter((a) => a.active || a.balance !== 0);
 
   // The balance at the end of a month is today's balance with everything dated after that month taken back out.
   const trend = lastMonths(today).map(({ key, label }) => {
     const later = posted.filter((r) => monthOf(r.txn_date) > key);
-    return { label, balance: thousands(totalNow - sum(later, signedAmount)) };
+    return { label, balance: thousands(totalNow - sum(later, signedRinggit)) };
   });
 
   const month = lastMonths(today, 1)[0];
@@ -149,7 +168,7 @@ export function bankingView(accounts: BankAccountRow[], rows: BankTransactionRow
       delta: toBePaid > 0 ? `${rm(toBePaid)} to be paid` : count(shown.length, 'account'),
       deltaTone: 'flat',
     },
-    tiles: shown.map((a) => ({ id: a.id, name: a.name, kind: a.kind, balance: rm(a.balance), note: accountNote(a) })),
+    tiles: shown.map((a) => ({ id: a.id, name: a.name, kind: a.kind, balance: money(a.balance, a.currency), note: accountNote(a) })),
     trend,
     hasTrend: posted.length > 0 || accounts.some((a) => a.opening_balance !== 0),
     gauge: {
@@ -185,10 +204,18 @@ export function filterLedger(rows: LedgerRow[], query: string, accountId: string
   );
 }
 
-/** The table as a CSV file, its columns in the table's order. Amounts are numbers, so a spreadsheet can add them up. */
+/**
+ * The table as a CSV file, its columns in the table's order. Amounts are numbers, so a spreadsheet can add them up.
+ * Each amount is in its account's currency; once a movement in another currency is listed, a Currency and a
+ * Ringgit column are appended (a ringgit-only file reads as it always has).
+ */
 export function bankingCsv(rows: LedgerRow[]): string {
+  const foreign = rows.some((r) => r.currency !== BASE_CURRENCY);
   return toCsv(
-    ['Date', 'No.', 'Description', 'Account', 'Method', 'Reference', 'Money In', 'Money Out', 'Account balance', 'Status'],
+    [
+      'Date', 'No.', 'Description', 'Account', 'Method', 'Reference', 'Money In', 'Money Out', 'Account balance', 'Status',
+      ...(foreign ? ['Currency', 'Ringgit'] : []),
+    ],
     rows.map((r) => [
       r.txn_date,
       r.number,
@@ -200,6 +227,7 @@ export function bankingCsv(rows: LedgerRow[]): string {
       r.direction === 'out' ? r.amount : null,
       r.balance,
       reconcileLabel(r),
+      ...(foreign ? [r.currency, r.amount_myr] : []),
     ]),
   );
 }

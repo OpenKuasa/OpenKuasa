@@ -80,6 +80,12 @@ const account = (over: Partial<BankAccountRow> = {}): BankAccountRow => ({
   to_be_paid: 0,
   last_import_at: null,
   unmatched_lines: 0,
+  currency: 'MYR',
+  opening_rate_text: '1.0000000000',
+  opening_rate_source: null,
+  opening_rate_date: null,
+  opening_balance_myr: over.opening_balance ?? 0,
+  balance_myr: over.balance ?? 300,
   ...over,
 });
 const move = (over: Partial<BankTransactionRow> = {}): BankTransactionRow => ({
@@ -103,6 +109,12 @@ const move = (over: Partial<BankTransactionRow> = {}): BankTransactionRow => ({
   other_account_name: 'Savings',
   reconciled: false,
   created_at: '2026-10-05T01:00:00Z',
+  currency: 'MYR',
+  fx_rate_text: '1.0000000000',
+  fx_rate_source: null,
+  amount_myr: over.amount ?? 500,
+  other_currency: null,
+  other_amount: null,
   ...over,
 });
 

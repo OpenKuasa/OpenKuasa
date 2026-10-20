@@ -27,7 +27,9 @@ const TRANSFER = '55555555-5555-4555-8555-555555555555';
 
 const account = (id: string, name: string, balance: number, over: Partial<BankAccountRow> = {}): BankAccountRow => ({
   id, name, kind: 'bank', bank_name: null, opening_balance: 0, opening_date: '2026-01-01', active: true, balance,
-  to_be_paid: 0, last_import_at: null, unmatched_lines: 0, ...over,
+  to_be_paid: 0, last_import_at: null, unmatched_lines: 0, currency: 'MYR', opening_rate_text: '1.0000000000',
+  opening_rate_source: null, opening_rate_date: null, opening_balance_myr: over.opening_balance ?? 0,
+  balance_myr: over.balance ?? balance, ...over,
 });
 const ACCOUNTS = [account(MAIN, 'Main Bank', 300), account(SAVINGS, 'Savings', 0), account(OLD, 'Old', 50, { active: false }), account(TILL, 'Cash in hand', -20, { kind: 'cash' })];
 
@@ -37,7 +39,9 @@ const side = (direction: 'in' | 'out', over: Partial<BankTransactionRow> = {}): 
   account_name: direction === 'out' ? 'Main Bank' : 'Savings',
   account_kind: 'bank', direction, txn_date: '2026-10-01', amount: 500, status: 'posted', number: 'TR-0004', method: 'bank_transfer',
   reference: null, notes: null, party_name: null, kind: 'transfer', category_name: null, documents: null, transfer_id: TRANSFER,
-  other_account_name: direction === 'out' ? 'Savings' : 'Main Bank', reconciled: false, created_at: '2026-10-01T02:00:00Z', ...over,
+  other_account_name: direction === 'out' ? 'Savings' : 'Main Bank', reconciled: false, created_at: '2026-10-01T02:00:00Z',
+  currency: 'MYR', fx_rate_text: '1.0000000000', fx_rate_source: null, amount_myr: over.amount ?? 500, other_currency: 'MYR',
+  other_amount: over.amount ?? 500, ...over,
 });
 
 describe('the accounts a transfer can use', () => {
@@ -46,6 +50,12 @@ describe('the accounts a transfer can use', () => {
     expect(canTransfer(ACCOUNTS)).toBe(true);
     expect(canTransfer([account(MAIN, 'Main Bank', 1), account(OLD, 'Old', 1, { active: false })])).toBe(false);
     expect(canTransfer([])).toBe(false);
+  });
+  it('leave out an account in another currency (stage 5a: FIN50 until transfers with one arrive)', () => {
+    const usd = account('66666666-6666-4666-8666-666666666666', 'USD Current', 10000, { currency: 'USD', balance_myr: 44620 });
+    expect(transferAccounts([...ACCOUNTS, usd]).map((a) => a.name)).toEqual(['Main Bank', 'Savings', 'Cash in hand']);
+    expect(transferToOptions([...ACCOUNTS, usd], MAIN).map((a) => a.name)).not.toContain('USD Current');
+    expect(canTransfer([account(MAIN, 'Main Bank', 1), usd])).toBe(false);
   });
   it('“To” leaves out the account chosen in “From”, and choosing that account in “From” clears “To”', () => {
     expect(transferToOptions(ACCOUNTS, MAIN).map((a) => a.name)).toEqual(['Savings', 'Cash in hand']);

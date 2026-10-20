@@ -1,5 +1,6 @@
 import {
   createBankAccountAction,
+  fxSstRateForAction,
   recordTransferAction,
   setBankAccountActiveAction,
   updateBankAccountAction,
@@ -22,6 +23,7 @@ const ACTIONS: BankingActions = {
   create: createBankAccountAction,
   update: updateBankAccountAction,
   setActive: setBankAccountActiveAction,
+  fxRate: fxSstRateForAction,
 };
 const TRANSFERS: TransferActions = { record: recordTransferAction, void: voidTransferAction };
 

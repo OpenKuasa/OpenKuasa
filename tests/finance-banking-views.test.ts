@@ -8,6 +8,7 @@ import {
   filterLedger,
   reconcileLabel,
   signedAmount,
+  signedRinggit,
   withRunningBalance,
 } from '@/lib/finance/banking-views';
 import { CSV_BOM } from '@/lib/finance/csv';
@@ -17,47 +18,62 @@ import { SAMPLE_TODAY } from '@/screens/finance/sales-sample';
 
 const TODAY = '2026-10-10';
 
-const account = (id: string, patch: Partial<BankAccountRow> = {}): BankAccountRow => ({
-  id,
-  name: id === 'till' ? 'Cash in hand' : id === 'bank' ? 'Main Bank' : 'Savings',
-  kind: id === 'till' ? 'cash' : 'bank',
-  bank_name: null,
-  opening_balance: 0,
-  opening_date: '2026-01-01',
-  active: true,
-  balance: 0,
-  to_be_paid: 0,
-  last_import_at: null,
-  unmatched_lines: 0,
-  ...patch,
-});
+const account = (id: string, patch: Partial<BankAccountRow> = {}): BankAccountRow => {
+  const row = {
+    id,
+    name: id === 'till' ? 'Cash in hand' : id === 'bank' ? 'Main Bank' : 'Savings',
+    kind: id === 'till' ? ('cash' as const) : ('bank' as const),
+    bank_name: null,
+    opening_balance: 0,
+    opening_date: '2026-01-01',
+    active: true,
+    balance: 0,
+    to_be_paid: 0,
+    last_import_at: null,
+    unmatched_lines: 0,
+    currency: 'MYR',
+    opening_rate_text: '1.0000000000',
+    opening_rate_source: null,
+    opening_rate_date: null,
+    ...patch,
+  };
+  // A ringgit account's ringgit figures are its own unless a case says otherwise.
+  return { ...row, opening_balance_myr: patch.opening_balance_myr ?? row.opening_balance, balance_myr: patch.balance_myr ?? row.balance };
+};
 
 let made = 0;
 const txn = (patch: Partial<BankTransactionRow> = {}): BankTransactionRow => {
   made += 1;
-  return {
+  const row = {
     transaction_id: `t${String(made).padStart(3, '0')}`,
     account_id: 'bank',
     account_name: 'Main Bank',
-    account_kind: 'bank',
-    direction: 'in',
+    account_kind: 'bank' as const,
+    direction: 'in' as const,
     txn_date: '2026-10-05',
     amount: 100,
-    status: 'posted',
+    status: 'posted' as const,
     number: 'RC-0001',
-    method: 'fpx',
+    method: 'fpx' as const,
     reference: null,
     notes: null,
     party_name: 'Aisyah Trading',
-    kind: 'invoice',
+    kind: 'invoice' as const,
     category_name: null,
     documents: 'INV-0012',
     transfer_id: null,
     other_account_name: null,
     reconciled: false,
     created_at: '2026-10-05T02:00:00Z',
+    currency: 'MYR',
+    fx_rate_text: '1.0000000000',
+    fx_rate_source: null,
+    other_currency: null,
+    other_amount: null,
     ...patch,
   };
+  // A ringgit movement's ringgit is its amount unless a case says otherwise.
+  return { ...row, amount_myr: patch.amount_myr ?? row.amount };
 };
 
 describe('bankDescription', () => {
@@ -319,5 +335,44 @@ describe('the sample shown when there is no database', () => {
     expect(view.gauge.reconciled).toBeGreaterThan(0);
     expect(view.gauge.reconciled).toBeLessThan(view.gauge.total);
     expect(view.total.delta).toMatch(/to be paid$/);
+  });
+});
+
+describe('Banking with an account in another currency (stage 5a)', () => {
+  // Maybank RM 1,000.00 and a USD account of USD 10,000.00 opened at 4.4620 (RM 44,620.00): the plan's Review Focus 4.
+  const maybank = account('bank', { opening_balance: 1000, balance: 1000 });
+  const usd = account('usd', {
+    name: 'USD Current', currency: 'USD', opening_balance: 10000, balance: 10000, opening_rate_text: '4.4620000000',
+    opening_rate_source: 'bnm', opening_rate_date: '2026-10-16', opening_balance_myr: 44620, balance_myr: 44620,
+  });
+
+  it('adds ringgit for Total cash, never the currency balance', () => {
+    expect(bankingView([maybank, usd], [], TODAY).total.value).toBe('RM 45,620.00');
+  });
+
+  it('shows the tile in its own currency, with its ringgit book value beneath', () => {
+    const tile = bankingView([maybank, usd], [], TODAY).tiles.find((t) => t.id === 'usd')!;
+    expect(tile.balance).toBe('USD 10,000.00');
+    expect(tile.note).toBe('≈ RM 44,620.00 · No statement yet');
+    expect(bankingView([maybank, usd], [], TODAY).tiles.find((t) => t.id === 'bank')!).toMatchObject({ balance: 'RM 1,000.00', note: 'No statement yet' });
+  });
+
+  it('takes the trend back in ringgit: a later movement on a foreign account comes off at its ringgit', () => {
+    // A movement in USD the database would one day post (stage 5b): USD 100.00 in at 4.4620, RM 446.20, dated this month.
+    const later = txn({ account_id: 'usd', currency: 'USD', amount: 100, amount_myr: 446.2, txn_date: '2026-10-05' });
+    expect(signedRinggit(later)).toBe(446.2);
+    expect(signedRinggit({ ...later, direction: 'out' })).toBe(-446.2);
+    const withIt = { ...usd, balance: 10100, balance_myr: 45066.2 };
+    const trend = bankingView([maybank, withIt], [later], TODAY).trend;
+    // September's end: RM 46,066.20 now, less the RM 446.20 that arrived in October.
+    expect(trend[trend.length - 2].balance).toBe(45.6);
+    expect(trend[trend.length - 1].balance).toBe(46.1);
+  });
+
+  it('a ringgit-only workspace reads as it always did: the CSV has no Currency column', () => {
+    const ledger = withRunningBalance([maybank], [txn({ amount: 50 })]);
+    expect(bankingCsv(ledger)).not.toContain('Currency');
+    const foreign = withRunningBalance([usd], [txn({ account_id: 'usd', currency: 'USD', amount: 100, amount_myr: 446.2 })]);
+    expect(bankingCsv(foreign).split('\n')[0]).toContain('Currency,Ringgit');
   });
 });

@@ -16,6 +16,7 @@ import {
 } from '@/lib/finance/bank-account-form';
 import { BANK_ACCOUNT_MESSAGES, changesOpeningBalance, createBankAccountInput, setsOpeningBalance, updateBankAccountInput } from '@/lib/finance/bank-accounts';
 import type { BankAccountRow } from '@/lib/finance/banking';
+import { ringgitFields } from '@/lib/finance/document-currency';
 
 const M = BANK_ACCOUNT_MESSAGES;
 
@@ -32,13 +33,19 @@ function account(over: Partial<BankAccountRow> = {}): BankAccountRow {
     to_be_paid: 0,
     last_import_at: null,
     unmatched_lines: 0,
+    currency: 'MYR',
+    opening_rate_text: '1.0000000000',
+    opening_rate_source: null,
+    opening_rate_date: null,
+    opening_balance_myr: over.opening_balance ?? 0,
+    balance_myr: over.balance ?? 0,
     ...over,
   };
 }
 
 describe('the form', () => {
   it('starts as an empty bank account dated with the date it is given', () => {
-    expect(newBankAccountForm('2026-10-12')).toEqual({ kind: 'bank', name: '', bankName: '', accountNo: '', opening: '', openingDate: '2026-10-12' });
+    expect(newBankAccountForm('2026-10-12')).toEqual({ kind: 'bank', name: '', bankName: '', accountNo: '', opening: '', openingDate: '2026-10-12', fx: ringgitFields() });
   });
 
   it('opens an account with its own values, its number only when one was given', () => {
@@ -51,6 +58,7 @@ describe('the form', () => {
       accountNo: '8001234567',
       opening: '-250.5',
       openingDate: '2026-09-30',
+      fx: ringgitFields(),
     });
     expect(editBankAccountForm(account({ bank_name: null })).bankName).toBe('');
     expect(editBankAccountForm(account()).accountNo).toBe('');
@@ -111,7 +119,7 @@ describe('bankAccountOpeningChange', () => {
 });
 
 describe('what the screen says after a save', () => {
-  const change = (over: Partial<OpeningChange> = {}): OpeningChange => ({ balance: false, date: false, amount: 0, openingDate: '2026-10-01', ...over });
+  const change = (over: Partial<OpeningChange> = {}): OpeningChange => ({ balance: false, date: false, amount: 0, openingDate: '2026-10-01', currency: 'MYR', ...over });
 
   it('says only that it was added or saved when no opening balance changed', () => {
     expect(bankAccountSavedNote('Savings', true, change())).toBe('Savings is added.');

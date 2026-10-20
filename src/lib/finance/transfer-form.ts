@@ -7,6 +7,7 @@
  * given the form or the "Void transfer" menu; nothing here decides that.
  */
 import type { BankAccountRow, BankTransactionRow } from './banking';
+import { BASE_CURRENCY } from './currencies';
 import { rm, typedNumber } from './format';
 import { TRANSFER_MESSAGES, recordTransferInput } from './transfers';
 import { displayDate, round2 } from './view-helpers';
@@ -26,9 +27,12 @@ export type TransferForm = {
   notes: string;
 };
 
-/** The accounts a transfer can use: active ones, in the order the screen lists them. */
+/**
+ * The accounts a transfer can use: active ringgit ones, in the order the screen lists them. A transfer with an
+ * account in another currency is not available yet (FIN50, stage 5a; 20261122120000 brings it).
+ */
 export function transferAccounts(accounts: BankAccountRow[]): BankAccountRow[] {
-  return accounts.filter((a) => a.active);
+  return accounts.filter((a) => a.active && a.currency === BASE_CURRENCY);
 }
 
 /** A transfer needs two accounts to move money between. */

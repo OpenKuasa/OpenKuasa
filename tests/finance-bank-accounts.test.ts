@@ -76,6 +76,8 @@ describe('createBankAccountInput', () => {
       kind: 'bank',
       bank_name: null,
       account_no: null,
+      // Stage 5a: an account says no currency only when it is in ringgit.
+      currency: 'MYR',
     });
   });
 
@@ -109,7 +111,7 @@ describe('createBankAccountInput', () => {
 
   it('drops anything that is not an account’s to send', () => {
     const parsed = createBankAccountInput.parse({ name: 'A', kind: 'cash', org_id: 'other', id: ID, active: false, created_at: 'x' });
-    expect(Object.keys(parsed).sort()).toEqual(['account_no', 'bank_name', 'kind', 'name']);
+    expect(Object.keys(parsed).sort()).toEqual(['account_no', 'bank_name', 'currency', 'kind', 'name']);
   });
 });
 

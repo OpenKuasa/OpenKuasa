@@ -32,6 +32,19 @@ export type BankAccountRow = {
   last_import_at: string | null;
   /** Lines of its statements that no movement is matched to yet. */
   unmatched_lines: number;
+  /**
+   * Stage 5a. The account's currency, chosen when it was added. `opening_balance`, `balance` and `to_be_paid` are
+   * in it; ringgit is MYR.
+   */
+  currency: string;
+  /** The opening balance's rate per one unit, exact (`opening_rate::text`); "1.0000000000" on ringgit, null with no balance. */
+  opening_rate_text: string | null;
+  opening_rate_source: 'bnm' | 'manual' | null;
+  opening_rate_date: string | null;
+  /** The opening balance in ringgit at its rate. */
+  opening_balance_myr: number;
+  /** The book value in ringgit: the opening balance and every posted movement, each at its own rate. */
+  balance_myr: number;
 };
 
 /**
@@ -70,13 +83,25 @@ export type BankTransactionRow = {
   reconciled: boolean;
   /** When it was recorded: the order of two movements on one day. */
   created_at: string;
+  /** Stage 5a. The movement's currency, always its account's: `amount` is in it. */
+  currency: string;
+  /** Its rate per one unit, exact (`fx_rate::text`); "1.0000000000" on a ringgit account. */
+  fx_rate_text: string | null;
+  fx_rate_source: 'bnm' | 'manual' | 'transfer' | null;
+  /** The movement in ringgit: the amount itself on a ringgit account. */
+  amount_myr: number;
+  /** The other side of a transfer: its account's currency and its amount (equal to this side's between two ringgit accounts). */
+  other_currency: string | null;
+  other_amount: number | null;
 };
 
 const ACCOUNT_COLUMNS =
-  'id,name,kind,bank_name,opening_balance,opening_date,active,balance,to_be_paid,last_import_at,unmatched_lines';
+  'id,name,kind,bank_name,opening_balance,opening_date,active,balance,to_be_paid,last_import_at,unmatched_lines,' +
+  'currency,opening_rate_text:opening_rate::text,opening_rate_source,opening_rate_date,opening_balance_myr,balance_myr';
 const TRANSACTION_COLUMNS =
   'transaction_id,account_id,account_name,account_kind,direction,txn_date,amount,status,number,method,reference,notes,' +
-  'party_name,kind,category_name,documents,transfer_id,other_account_name,reconciled,created_at';
+  'party_name,kind,category_name,documents,transfer_id,other_account_name,reconciled,created_at,' +
+  'currency,fx_rate_text:fx_rate::text,fx_rate_source,amount_myr,other_currency,other_amount';
 
 /** Every account of the workspace, bank accounts first, then by name. */
 export async function listBankAccounts(ctx: FinanceWriteContext): Promise<BankAccountRow[]> {
@@ -93,6 +118,12 @@ export async function listBankAccounts(ctx: FinanceWriteContext): Promise<BankAc
     balance: Number(row.balance),
     to_be_paid: Number(row.to_be_paid),
     unmatched_lines: Number(row.unmatched_lines),
+    currency: (row.currency as string | null | undefined) ?? 'MYR',
+    opening_rate_text: (row.opening_rate_text as string | null | undefined) ?? null,
+    opening_rate_source: (row.opening_rate_source as 'bnm' | 'manual' | null | undefined) ?? null,
+    opening_rate_date: (row.opening_rate_date as string | null | undefined) ?? null,
+    opening_balance_myr: Number(row.opening_balance_myr ?? row.opening_balance),
+    balance_myr: Number(row.balance_myr ?? row.balance),
   }));
 }
 
@@ -109,7 +140,18 @@ export async function listBankTransactions(ctx: FinanceWriteContext): Promise<Ba
       .range(from, from + PAYMENT_PAGE_SIZE - 1);
     if (error) throw error;
     const page = (data ?? []) as unknown as Record<string, unknown>[];
-    rows.push(...page.map((row) => ({ ...(row as unknown as BankTransactionRow), amount: Number(row.amount) })));
+    rows.push(
+      ...page.map((row) => ({
+        ...(row as unknown as BankTransactionRow),
+        amount: Number(row.amount),
+        currency: (row.currency as string | null | undefined) ?? 'MYR',
+        fx_rate_text: (row.fx_rate_text as string | null | undefined) ?? null,
+        fx_rate_source: (row.fx_rate_source as BankTransactionRow['fx_rate_source'] | undefined) ?? null,
+        amount_myr: Number(row.amount_myr ?? row.amount),
+        other_currency: (row.other_currency as string | null | undefined) ?? null,
+        other_amount: row.other_amount === null || row.other_amount === undefined ? null : Number(row.other_amount),
+      })),
+    );
     if (page.length < PAYMENT_PAGE_SIZE) break;
   }
   // A movement recorded between two page requests can arrive on both: keep the first.

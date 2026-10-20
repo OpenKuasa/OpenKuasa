@@ -110,8 +110,8 @@ describe('an opening balance', () => {
       expect(await actions.createBankAccountAction(input)).toEqual(SAVED);
     }
     expect(ctl.calls.map((c) => c.input)).toEqual([
-      { name: 'Savings', kind: 'bank', bank_name: null, account_no: null, opening_balance: 1500, opening_date: '2026-09-30' },
-      { name: 'Savings', kind: 'bank', bank_name: null, account_no: null, opening_balance: 1500, opening_date: '2026-09-30' },
+      { name: 'Savings', kind: 'bank', bank_name: null, account_no: null, opening_balance: 1500, opening_date: '2026-09-30', currency: 'MYR' },
+      { name: 'Savings', kind: 'bank', bank_name: null, account_no: null, opening_balance: 1500, opening_date: '2026-09-30', currency: 'MYR' },
     ]);
   });
 

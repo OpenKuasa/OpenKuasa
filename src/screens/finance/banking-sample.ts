@@ -15,6 +15,15 @@ import { SAMPLE_CASH_RECEIPTS, SAMPLE_PAYMENT_VOUCHERS } from './cash-book-sampl
 const RECONCILED_UP_TO = '2026-10-06';
 const LAST_IMPORT_AT = '2026-10-07T03:00:00Z';
 
+/** Every sample account is a ringgit one: a movement's ringgit is its amount, at rate 1 (stage 5a). */
+const RINGGIT_MOVEMENT = {
+  currency: 'MYR',
+  fx_rate_text: '1.0000000000',
+  fx_rate_source: null,
+  other_currency: null,
+  other_amount: null,
+} as const;
+
 const movement = (row: CashReceiptRow | PaymentVoucherRow, direction: 'in' | 'out'): BankTransactionRow => ({
   transaction_id: row.transaction_id,
   account_id: row.account_id,
@@ -36,6 +45,8 @@ const movement = (row: CashReceiptRow | PaymentVoucherRow, direction: 'in' | 'ou
   other_account_name: null,
   reconciled: row.status === 'posted' && row.account_kind === 'bank' && row.txn_date <= RECONCILED_UP_TO,
   created_at: `${row.txn_date}T02:00:00Z`,
+  ...RINGGIT_MOVEMENT,
+  amount_myr: row.amount,
 });
 
 const ACCOUNT_NAMES = { bank: 'Main Bank', cash: 'Cash in hand', savings: 'Savings' } as const;
@@ -67,6 +78,10 @@ const transfer = (n: number, txn_date: string, from: AccountKey, to: AccountKey,
       other_account_name: ACCOUNT_NAMES[there],
       reconciled: here === 'bank' && txn_date <= RECONCILED_UP_TO,
       created_at: `${txn_date}T04:00:00Z`,
+      ...RINGGIT_MOVEMENT,
+      amount_myr: amount,
+      other_currency: 'MYR',
+      other_amount: amount,
     };
   });
 
@@ -91,6 +106,7 @@ const account = (
   const posted = mine.filter((t) => t.status === 'posted');
   const net = posted.reduce((total, t) => total + (t.direction === 'in' ? t.amount : -t.amount), 0);
   const toBePaid = mine.filter((t) => t.direction === 'out' && t.status === 'scheduled').reduce((total, t) => total + t.amount, 0);
+  const balance = Math.round((opening_balance + net) * 100) / 100;
   return {
     id,
     name: ACCOUNT_NAMES[id],
@@ -99,10 +115,17 @@ const account = (
     opening_balance,
     opening_date: '2026-03-01',
     active: true,
-    balance: Math.round((opening_balance + net) * 100) / 100,
+    balance,
     to_be_paid: Math.round(toBePaid * 100) / 100,
     last_import_at,
     unmatched_lines,
+    // A ringgit account: its rate is 1 and its ringgit figures are its own.
+    currency: 'MYR',
+    opening_rate_text: '1.0000000000',
+    opening_rate_source: null,
+    opening_rate_date: null,
+    opening_balance_myr: opening_balance,
+    balance_myr: balance,
   };
 };
 

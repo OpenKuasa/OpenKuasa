@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/app/(app)/finance/actions', () => ({
   createBankAccountAction: vi.fn(),
+  fxSstRateForAction: vi.fn(),
   recordTransferAction: vi.fn(),
   setBankAccountActiveAction: vi.fn(),
   updateBankAccountAction: vi.fn(),

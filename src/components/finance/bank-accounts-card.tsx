@@ -7,7 +7,15 @@ import { ConfirmRow } from '@/components/finance/confirm-row';
 import { RowMenu, type RowMenuItem } from '@/components/finance/row-menu';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { type BankAccountAction, bankAccountActions, bankAccountRows, bankAccountArchiveEffect, bankAccountArchivedNote, bankAccountRestoredNote } from '@/lib/finance/bank-account-form';
+import {
+  type BankAccountAction,
+  bankAccountActions,
+  bankAccountArchiveEffect,
+  bankAccountArchivedNote,
+  bankAccountRestoredNote,
+  bankAccountRows,
+  hasForeignAccount,
+} from '@/lib/finance/bank-account-form';
 import type { SavedBankAccount } from '@/lib/finance/bank-accounts';
 import type { BankAccountRow } from '@/lib/finance/banking';
 import type { FinResult } from '@/lib/finance/result';
@@ -45,7 +53,9 @@ export function BankAccountsCard({ accounts, writer }: { accounts: BankAccountRo
 
   const rows = bankAccountRows(accounts, writer?.numbers);
   const byId = new Map(accounts.map((a) => [a.id, a]));
-  const columns = writer ? 6 : 5;
+  // Stage 5a: a Currency column once any account is in another currency; a ringgit-only table is as it was.
+  const showCurrency = hasForeignAccount(accounts);
+  const columns = (writer ? 6 : 5) + (showCurrency ? 1 : 0);
 
   const menuItem = (account: BankAccountRow, action: BankAccountAction): RowMenuItem => {
     switch (action) {
@@ -101,6 +111,7 @@ export function BankAccountsCard({ accounts, writer }: { accounts: BankAccountRo
             <TableRow className="bg-muted/40">
               <TableHead>Account</TableHead>
               <TableHead>Bank</TableHead>
+              {showCurrency ? <TableHead>Currency</TableHead> : null}
               <TableHead>Opening balance</TableHead>
               <TableHead className="text-right">Balance</TableHead>
               <TableHead>Status</TableHead>
@@ -160,8 +171,18 @@ export function BankAccountsCard({ accounts, writer }: { accounts: BankAccountRo
                     </span>
                   </TableCell>
                   <TableCell className="min-w-32 max-w-64 whitespace-normal break-words text-muted-foreground">{row.bank}</TableCell>
+                  {showCurrency ? <TableCell className="whitespace-nowrap text-muted-foreground">{row.currency}</TableCell> : null}
                   <TableCell className="min-w-40 whitespace-normal text-muted-foreground">{row.opening}</TableCell>
-                  <TableCell className="whitespace-nowrap text-right tabular-nums">{row.balance}</TableCell>
+                  <TableCell className="whitespace-nowrap text-right tabular-nums">
+                    {row.ringgit ? (
+                      <span className="inline-flex flex-col items-end">
+                        <span>{row.balance}</span>
+                        <span className="text-xs text-muted-foreground">{row.ringgit}</span>
+                      </span>
+                    ) : (
+                      row.balance
+                    )}
+                  </TableCell>
                   <TableCell>
                     <span
                       className={cn(

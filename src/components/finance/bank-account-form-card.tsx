@@ -1,6 +1,6 @@
 'use client';
 
-import { type FormEvent, useId, useState } from 'react';
+import { type FormEvent, useEffect, useId, useRef, useState } from 'react';
 import { Wallet } from 'lucide-react';
 import { BentoCard } from '@/components/bento/bento';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
@@ -10,29 +10,40 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   type BankAccountForm,
+  asksOpeningRate,
   bankAccountFormError,
   bankAccountOpeningChange,
   bankAccountPayload,
   bankAccountSavedNote,
   editBankAccountForm,
+  isForeignAccountForm,
   newBankAccountForm,
+  openingRinggitNote,
 } from '@/lib/finance/bank-account-form';
 import { BANK_ACCOUNT_BANK_MAX, BANK_ACCOUNT_NAME_MAX, BANK_ACCOUNT_NUMBER_MAX, type BankAccountKind, type SavedBankAccount } from '@/lib/finance/bank-accounts';
 import type { BankAccountRow } from '@/lib/finance/banking';
-import { rm } from '@/lib/finance/format';
+import { BASE_CURRENCY, currencyLabel, currencyOptions } from '@/lib/finance/currencies';
+import { rateKey, rateLabel, rateNotes, withCurrency, withRateAnswer, withRateTyped } from '@/lib/finance/document-currency';
+import { money } from '@/lib/finance/format';
+import type { FxDefault } from '@/lib/finance/fx-rates';
 import type { FinResult } from '@/lib/finance/result';
 import { displayDate } from '@/lib/finance/view-helpers';
+
+const CURRENCIES = currencyOptions();
 
 export type BankAccountFormActions = {
   create: (input: unknown) => Promise<FinResult<SavedBankAccount>>;
   update: (input: unknown) => Promise<FinResult<SavedBankAccount>>;
+  /** Bank Negara's selling rate for `{ currency, date }` (the one rule); null when it has none. Absent on a read-only screen. */
+  fxRate?: (input: unknown) => Promise<FinResult<FxDefault | null>>;
 };
 
 /**
- * Adds a bank or cash account, or changes one. Bank or cash is chosen when
- * the account is added and only shown after that. The opening balance and
- * its date are an owner's or admin's (`canSignOff`): anyone else is not given
- * the two boxes, is told who sets them, and sends neither.
+ * Adds a bank or cash account, or changes one. Bank or cash, and the
+ * currency, are chosen when the account is added and only shown after that.
+ * The opening balance, its date and (in another currency) its rate are an
+ * owner's or admin's (`canSignOff`): anyone else is not given those boxes, is
+ * told who sets them, and sends none.
  */
 export function BankAccountFormCard({
   editing,
@@ -60,8 +71,45 @@ export function BankAccountFormCard({
     editing ? editBankAccountForm(editing, accountNo, today) : newBankAccountForm(today),
   );
   const save = useFinanceAction();
-  const set = (patch: Partial<BankAccountForm>) => setForm((f) => ({ ...f, ...patch }));
   const atBank = form.kind === 'bank';
+  const foreign = isForeignAccountForm(form);
+  const asksRate = asksOpeningRate(form, canSignOff);
+  const unit = currencyLabel(form.fx.currency);
+  /** The currency and date Bank Negara's rate was last asked for: an answer for any other is dropped. */
+  const asked = useRef<string | null>(null);
+
+  /**
+   * Asks for Bank Negara's selling rate when the currency or the opening date of `next` is not the one last asked
+   * about. With `offer`, a rate box that still holds BNM's rate (or nothing) takes the answer; a typed rate is kept.
+   * Only an owner's or admin's form has a rate box, so only theirs asks.
+   */
+  const askRate = (next: BankAccountForm, offer: boolean) => {
+    const fetchRate = actions.fxRate;
+    if (!canSignOff || !fetchRate) return;
+    const key = rateKey(next.fx, next.openingDate);
+    if (key === null || key === asked.current) return;
+    asked.current = key;
+    const [code, date] = key.split('|');
+    const answered = (answer: { ok: true; rate: FxDefault | null } | { ok: false }) =>
+      setForm((f) => ({ ...f, fx: withRateAnswer(f.fx, f.openingDate, key, answer, offer) }));
+    fetchRate({ currency: code, date }).then(
+      (result) => answered(result.ok ? { ok: true, rate: result.data } : { ok: false }),
+      () => answered({ ok: false }),
+    );
+  };
+
+  // An account in another currency opened for a change: note BNM's rate beside the saved one, without changing it.
+  useEffect(() => {
+    askRate(form, false);
+    // Once, for the account the form opened with; every later change asks from `set`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const set = (patch: Partial<BankAccountForm>) => {
+    const next = { ...form, ...patch };
+    setForm(next);
+    askRate(next, true);
+  };
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -126,6 +174,39 @@ export function BankAccountFormCard({
             </Select>
           )}
         </div>
+        <div className="space-y-1.5 md:col-span-4">
+          <Label id={`${id}-currency-label`} htmlFor={editing ? undefined : `${id}-currency`}>
+            Currency
+          </Label>
+          {editing ? (
+            <p role="group" aria-labelledby={`${id}-currency-label`} className="flex min-h-9 items-center text-sm text-muted-foreground">
+              {foreign
+                ? `In ${form.fx.currency}. The currency is chosen when the account is added.`
+                : 'Ringgit · set when it was added'}
+            </p>
+          ) : (
+            <>
+              <Select
+                value={form.fx.currency}
+                onValueChange={(code) => set({ fx: withCurrency(form.fx, code, true) })}
+              >
+                <SelectTrigger id={`${id}-currency`} className="w-full" aria-describedby={`${id}-currency-help`}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CURRENCIES.map((code) => (
+                    <SelectItem key={code} value={code}>
+                      {code === BASE_CURRENCY ? 'MYR (ringgit)' : code}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p id={`${id}-currency-help`} className="text-xs text-muted-foreground">
+                The currency the account holds. It cannot be changed once the account is added.
+              </p>
+            </>
+          )}
+        </div>
         {atBank ? (
           <>
             <div className="space-y-1.5 md:col-span-4">
@@ -155,7 +236,7 @@ export function BankAccountFormCard({
         {canSignOff ? (
           <>
             <div className="space-y-1.5 md:col-span-4">
-              <Label htmlFor={`${id}-opening`}>Opening balance (RM)</Label>
+              <Label htmlFor={`${id}-opening`}>Opening balance ({unit})</Label>
               {/* A text box, not a number box: a number box hands back nothing at all for "1,500", so the form could not say what is wrong. No inputMode: a phone's decimal keypad has no minus sign, and an overdraft needs one. */}
               <Input
                 id={`${id}-opening`}
@@ -174,11 +255,36 @@ export function BankAccountFormCard({
               What the account held before anything was recorded here. Leave it empty for none; use a minus sign for an
               overdraft. Every balance and the books change with it.
             </p>
+            {asksRate ? (
+              <div className="space-y-1.5 md:col-span-12">
+                <Label htmlFor={`${id}-rate`}>{rateLabel(form.fx.currency)}</Label>
+                <Input
+                  id={`${id}-rate`}
+                  className="md:w-48"
+                  value={form.fx.rate}
+                  inputMode="decimal"
+                  autoComplete="off"
+                  maxLength={20}
+                  aria-describedby={`${id}-rate-notes`}
+                  onChange={(e) => set({ fx: withRateTyped(form.fx, e.target.value) })}
+                />
+                {/* One container that is always there, so a reader announces a note when it appears. */}
+                <div id={`${id}-rate-notes`} role="status" className="space-y-1">
+                  {[...rateNotes(form.fx, form.openingDate, 'selling'), ...[openingRinggitNote(form)].filter((n) => n !== null)].map(
+                    (note) => (
+                      <p key={note} className="text-xs text-muted-foreground">
+                        {note}
+                      </p>
+                    ),
+                  )}
+                </div>
+              </div>
+            ) : null}
           </>
         ) : (
           <p className="text-sm text-muted-foreground md:col-span-12">
             {editing && editing.opening_balance !== 0
-              ? `Opening balance ${rm(editing.opening_balance)} as at ${displayDate(editing.opening_date)}. `
+              ? `Opening balance ${money(editing.opening_balance, editing.currency)} as at ${displayDate(editing.opening_date)}. `
               : ''}
             An owner or admin sets an opening balance.
           </p>

@@ -37,7 +37,8 @@ import {
 } from '@/lib/finance/banking-views';
 import { localIsoDate } from '@/lib/finance/bill-math';
 import { csvFileName } from '@/lib/finance/csv';
-import { rm } from '@/lib/finance/format';
+import { BASE_CURRENCY } from '@/lib/finance/currencies';
+import { money, rm } from '@/lib/finance/format';
 import { LATEST_ROWS, displayDate } from '@/lib/finance/view-helpers';
 import type { SavedBankAccount } from '@/lib/finance/bank-accounts';
 import type { FinResult } from '@/lib/finance/result';
@@ -449,12 +450,12 @@ export function BankingView({
                         </span>
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-right tabular-nums text-emerald-600">
-                        {r.direction === 'in' ? rm(r.amount) : ''}
+                        {r.direction === 'in' ? <AmountCell row={r} /> : ''}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-right tabular-nums text-red-600">
-                        {r.direction === 'out' ? rm(r.amount) : ''}
+                        {r.direction === 'out' ? <AmountCell row={r} /> : ''}
                       </TableCell>
-                      <TableCell className="whitespace-nowrap text-right tabular-nums">{rm(r.balance)}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums">{money(r.balance, r.currency)}</TableCell>
                       <TableCell>
                         {status ? (
                           <span className="flex items-center gap-2">
@@ -507,5 +508,16 @@ export function BankingView({
         {fxRates !== undefined ? <FxRatesCard rates={fxRates} today={fxToday ?? today} /> : null}
       </BentoGrid>
     </ScreenContainer>
+  );
+}
+
+/** An amount in its account's currency; under one in another currency, what it was in ringgit. */
+function AmountCell({ row }: { row: BankTransactionRow }) {
+  if (row.currency === BASE_CURRENCY) return <>{money(row.amount)}</>;
+  return (
+    <span className="inline-flex flex-col items-end">
+      <span>{money(row.amount, row.currency)}</span>
+      <span className="text-xs text-muted-foreground">≈ {rm(row.amount_myr)}</span>
+    </span>
   );
 }
