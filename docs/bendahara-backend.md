@@ -3115,3 +3115,20 @@ with no date).
   and cash-book views append the movement's currency and ringgit
   (`transaction_currency`, `transaction_amount_myr`; `finance_payment_vouchers`
   `currency`, `amount_myr`), and every cash-book total adds ringgit.
+- Transfers between a ringgit account and an account in another currency
+  (`20261122120000`, stage 5c): `finance_record_transfer` takes `to_amount`,
+  what arrived in the receiving account's currency (`FIN16` when it is
+  missing or not above 0; between two ringgit accounts it is left out, or must
+  equal the amount). Both sides hold one ringgit figure, the ringgit side's
+  amount: the other side keeps it as its `amount_myr` and its rate is
+  `round(ringgit / foreign, 10)`, source `transfer`, which
+  `finance_transaction_to_currency` keeps as written (never recomputed). The
+  pair check holds two sides in one currency to one amount and a ringgit side
+  and a foreign side to one ringgit figure (`FIN16`). The ledger posts that
+  figure on both lines and no gain or loss; a conversion at another rate than
+  book leaves a remainder in the account's ringgit book value for stage 6.
+  Two accounts not in ringgit, the same currency included, are `FIN52`
+  (`finance_record_transfer` and the pair check); `FIN50` no longer names a
+  side of a transfer. The form asks for both amounts when the currencies
+  differ, shows the rate they say, and hides foreign accounts from "To" when
+  "From" is foreign; Banking names the other side's amount on a transfer row.
