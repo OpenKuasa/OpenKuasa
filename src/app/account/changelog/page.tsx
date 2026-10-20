@@ -1,5 +1,16 @@
 const RELEASES = [
   {
+    version: 'v2.5',
+    date: '21 Oct 2026',
+    tag: 'New',
+    title: 'Finance — foreign currencies',
+    notes: [
+      'Quotations, invoices, bills, payments and bank accounts in other currencies',
+      'Bank Negara Malaysia exchange rates, with realised gains and losses',
+      'Month-end FX revaluation, posted and reversed the next day',
+    ],
+  },
+  {
     version: 'v2.4',
     date: '7 Oct 2026',
     tag: 'New',

@@ -3162,3 +3162,25 @@ with no date).
   and the same lines swapped on E + 1 (`fx_revaluation:<id>:reverse`); Cash
   Flow shows a bank account's line as "Exchange rate changes on foreign cash
   (no money moved)". A second run for E posts only the change, item by item.
+- The FX Revaluation screen (stage 6b, no migration; on `20261123100000`) is
+  back in the navigation and live. It offers every month end from the first
+  foreign item in the books (`readFxBooks`) to the last on or before today in
+  Malaysia, previews the newest, and lists the items by kind (foreign
+  balance, rate, carried, revalued, difference, earlier runs, to post, gain
+  or loss; a fully converted account reads "Converted: no USD left; …"),
+  the closing rate per currency with BNM's date and the stale note, and the
+  posted runs (who posted, the net, the lines, a CSV each). Every member
+  previews; an owner or admin also types closing rates and posts. A typed
+  rate is worked out at once in the browser (`withTypedRates`, the bigint
+  twin) and by the server half a second later; Post sends only what a
+  preview returned (`postPayload`: its rates back in the box's unit, which is
+  per 100 for JPY and the like, and its digest, lines and net gain unchanged),
+  so a figure the server has not shown cannot be posted, and `FIN55` reloads
+  the preview. A ringgit-only workspace is told "No foreign-currency
+  invoices, bills or accounts. Nothing to revalue." Reports adds a note under
+  the Balance Sheet when its month end had foreign items in the books and no
+  posted run (approximate: a run made stale by a later entry is not noticed
+  there). Ledger entries of source `fx_revaluation` link to the screen; the
+  assistant's balance sheet and ledger tools say foreign balances are at
+  booked rates except at a revalued month end; Banking's exchange-rates card
+  also shows for a workspace with a foreign supplier bill or account.
