@@ -134,14 +134,16 @@ begin
    where attrelid = 'public.finance_cash_receipts'::regclass and attnum > 0 and not attisdropped;
   if t is distinct from 'transaction_id,org_id,number,txn_date,method,amount,status,reference,notes,account_id,account_name,'
        || 'account_kind,contact_id,party_name,kind,category_id,category_name,documents,created_by,created_at,'
-       -- 20261120110000 (3b) appends the ringgit figures.
-       || 'currency,amount_myr,carried_myr,realised_myr' then
+       -- 20261120110000 (3b) appends the ringgit figures; 20261122110000 (5b) the movement's currency.
+       || 'currency,amount_myr,carried_myr,realised_myr,transaction_currency' then
     fails := fails || format('finance_cash_receipts has the columns: %s', t);
   end if;
   select string_agg(attname, ',' order by attnum) into t from pg_attribute
    where attrelid = 'public.finance_payment_vouchers'::regclass and attnum > 0 and not attisdropped;
   if t is distinct from 'transaction_id,org_id,number,txn_date,method,amount,status,reference,notes,account_id,account_name,'
-       || 'account_kind,contact_id,party_name,kind,category_id,category_name,documents,approved_at,created_by,created_at' then
+       || 'account_kind,contact_id,party_name,kind,category_id,category_name,documents,approved_at,created_by,created_at,'
+       -- 20261122110000 (5b) appends the movement's currency and its ringgit.
+       || 'currency,amount_myr' then
     fails := fails || format('finance_payment_vouchers has the columns: %s', t);
   end if;
   select string_agg(attname, ',' order by attnum) into t from pg_attribute

@@ -259,10 +259,12 @@ begin
   end if;
 
   -- ==== 10: no money moves on an account in another currency yet ===========================
-  fails := fails || public.bendahara_check_try('10: a payment in to the USD account', 'FIN50',
+  -- 20261122110000 (5b) opens money in and out on it, recorded with its rate: a record function sent no rate is now
+  -- FIN38 (private.finance_movement_rate, before anything is written); a draft and a side of a transfer stay FIN50.
+  fails := fails || public.bendahara_check_try('10: a payment in to the USD account, no rate', 'FIN38',
     format('select public.finance_record_payment_in(%L, %L, %L)', org, jsonb_build_object('account_id', usd, 'method', 'fpx'),
       jsonb_build_array(jsonb_build_object('invoice_id', inv, 'amount', 10))));
-  fails := fails || public.bendahara_check_try('10: a voucher paid from the USD account', 'FIN50',
+  fails := fails || public.bendahara_check_try('10: a voucher paid from the USD account, no rate', 'FIN38',
     format('select public.finance_record_voucher(%L, %L, ''[]'')', org,
       jsonb_build_object('account_id', usd, 'method', 'bank_transfer', 'amount', 5, 'party_name', 'Bank', 'category_id', utilities,
                          'status', 'posted')));
@@ -277,7 +279,7 @@ begin
     format('select public.finance_save_voucher(%L, %L, ''[]'')', org,
       jsonb_build_object('account_id', usd, 'method', 'cash', 'amount', 7, 'category_id', utilities, 'party_name', 'Shop')));
   perform set_config('request.jwt.claims', member_claims, true);
-  fails := fails || public.bendahara_check_try('10: a member''s voucher on the USD account (would wait for approval)', 'FIN50',
+  fails := fails || public.bendahara_check_try('10: a member''s voucher on the USD account (would wait for approval), no rate', 'FIN38',
     format('select public.finance_record_voucher(%L, %L, ''[]'')', org,
       jsonb_build_object('account_id', usd, 'method', 'bank_transfer', 'amount', 5, 'party_name', 'Bank', 'category_id', utilities)));
   perform set_config('request.jwt.claims', owner_claims, true);

@@ -480,12 +480,14 @@ begin
   reset role;
   alter table public.finance_transactions disable trigger user;
   alter table public.finance_allocations disable trigger user;
-  insert into public.finance_transactions (org_id, direction, account_id, amount, method, contact_id, status, number, txn_date)
-  values (org, 'out', bank, 1700, 'bank_transfer', sup, 'posted', 'B4-1', current_date) returning id into p1;
+  -- With every trigger off, fx_rate is written as finance_transaction_to_currency would write it on a ringgit account
+  -- (20261122110000 drops its column default).
+  insert into public.finance_transactions (org_id, direction, account_id, amount, method, contact_id, status, number, txn_date, fx_rate)
+  values (org, 'out', bank, 1700, 'bank_transfer', sup, 'posted', 'B4-1', current_date, 1) returning id into p1;
   insert into public.finance_allocations (org_id, transaction_id, bill_id, amount, amount_myr, carried_myr)
   values (org, p1, b_usd, 400, 1700, 1680);
-  insert into public.finance_transactions (org_id, direction, account_id, amount, method, contact_id, status, number, txn_date)
-  values (org, 'out', bank, 2800, 'bank_transfer', sup, 'posted', 'B4-2', current_date) returning id into p2;
+  insert into public.finance_transactions (org_id, direction, account_id, amount, method, contact_id, status, number, txn_date, fx_rate)
+  values (org, 'out', bank, 2800, 'bank_transfer', sup, 'posted', 'B4-2', current_date, 1) returning id into p2;
   insert into public.finance_allocations (org_id, transaction_id, bill_id, amount, amount_myr, carried_myr)
   values (org, p2, b_usd, 680, 2800, 2856);
   alter table public.finance_transactions enable trigger user;
