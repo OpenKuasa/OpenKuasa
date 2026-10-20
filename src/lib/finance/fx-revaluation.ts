@@ -250,7 +250,9 @@ function toItem(row: Record<string, unknown>): RevaluationItem {
 /** The currencies a FIN38 from the database named ("enter the closing rate for USD, SGD"), or null. */
 function namedCurrencies(error: unknown): string | null {
   const message = (error as { message?: string } | null)?.message ?? '';
-  const m = /closing rate for ([A-Z]{3}(?:, [A-Z]{3})*)\b/.exec(message);
+  // Only the post function's "enter the closing rate for USD, SGD" names the missing ones; FIN38's other messages
+  // (a typed rate with a date, a key that is not a currency) get the general sentence.
+  const m = /^enter the closing rate for ([A-Z]{3}(?:, [A-Z]{3})*)$/.exec(message);
   return m ? m[1] : null;
 }
 
