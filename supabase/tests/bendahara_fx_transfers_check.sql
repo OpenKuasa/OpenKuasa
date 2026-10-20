@@ -379,6 +379,31 @@ begin
     fails := fails || format('9: C5.3 after a member''s void reads %s', public.bendahara_check_sides(org, t53));
   end if;
 
+  -- ==== 8 (review N3): a pair made by hand by the signed-in owner, past finance_record_transfer =========
+  -- Nobody signed in may write a rate, so a side on the USD account inserted by hand has none: FIN50 (the currency
+  -- guard's insert arm), and nothing is written. A ringgit draft pair's in side moved onto the USD account by hand is
+  -- FIN50 too (the guard's "moved between currencies" arm).
+  hand := gen_random_uuid();
+  fails := fails || public.bendahara_check_try('8: the owner hand-makes a MYR-out / USD-in draft pair', 'FIN50',
+    format('insert into public.finance_transactions (org_id, direction, account_id, txn_date, amount, method, transfer_id, status) '
+           || 'values (%L, %L, %L, %L, 4462, %L, %L, %L), (%L, %L, %L, %L, 1000, %L, %L, %L)',
+           org, 'out', bank, '1999-01-20', 'bank_transfer', hand, 'draft',
+           org, 'in', usd2, '1999-01-20', 'bank_transfer', hand, 'draft'));
+  fails := fails || public.bendahara_check_try('8: the owner hand-makes a MYR/MYR draft pair', 'ok',
+    format('insert into public.finance_transactions (org_id, direction, account_id, txn_date, amount, method, transfer_id, status) '
+           || 'values (%L, %L, %L, %L, 50, %L, %L, %L), (%L, %L, %L, %L, 50, %L, %L, %L)',
+           org, 'out', bank, '1999-01-20', 'bank_transfer', hand, 'draft',
+           org, 'in', savings, '1999-01-20', 'bank_transfer', hand, 'draft'));
+  fails := fails || public.bendahara_check_try('8: the owner moves its in side onto the USD account', 'FIN50',
+    format('update public.finance_transactions set account_id = %L where transfer_id = %L and direction = %L', usd2, hand, 'in'));
+  select string_agg(format('%s %s', direction, currency), ', ' order by direction) into t
+    from public.finance_transactions where transfer_id = hand;
+  if t is distinct from 'in MYR, out MYR' then fails := fails || format('8: the hand-made pair reads %s', t); end if;
+  fails := fails || public.bendahara_check_try('8: the hand-made ringgit drafts are removed', 'ok',
+    format('delete from public.finance_transactions where transfer_id = %L', hand));
+  select count(*) - n0 into n from public.finance_transactions where org_id = org;
+  if n <> 0 then fails := fails || format('8: the signed-in owner''s hand-made sides left %s movements', n); end if;
+
   -- ==== 8: a pair made by hand (the session owner, nobody signed in) ===================================
   reset role;
   perform set_config('request.jwt.claims', '', true);
