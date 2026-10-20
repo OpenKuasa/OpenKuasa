@@ -66,6 +66,8 @@ export function TransferFormCard({
   const toOptions = transferToOptions(accounts, form.from);
   const overdraw = transferOverdrawNote(form, accounts);
   const twoAmounts = needsTwoAmounts(form, accounts);
+  // One row of twelve columns: From and To narrow to 3 when the second amount box shows (3 + 3 + 2 + 2 + 2).
+  const endsSpan = twoAmounts ? 'md:col-span-3' : 'md:col-span-4';
   const rateNote = transferRateNote(form, accounts);
   const currencyOf = (accountId: string) => accounts.find((a) => a.id === accountId)?.currency ?? BASE_CURRENCY;
   const fromCurrency = currencyOf(form.from);
@@ -88,7 +90,7 @@ export function TransferFormCard({
   return (
     <BentoCard title="Transfer" subtitle="Move money between two of your accounts" icon={ArrowLeftRight} className="col-span-2 md:col-span-12">
       <form onSubmit={submit} noValidate className="grid gap-3 md:grid-cols-12">
-        <div className="space-y-1.5 md:col-span-4">
+        <div className={`space-y-1.5 ${endsSpan}`}>
           <Label htmlFor={`${id}-from`}>From</Label>
           <Select value={form.from} onValueChange={(v) => setForm((f) => withTransferFrom(f, v, accounts))}>
             <SelectTrigger id={`${id}-from`} className="w-full" autoFocus data-finance-focus>
@@ -103,7 +105,7 @@ export function TransferFormCard({
             </SelectContent>
           </Select>
         </div>
-        <div className="space-y-1.5 md:col-span-4">
+        <div className={`space-y-1.5 ${endsSpan}`}>
           <Label htmlFor={`${id}-to`}>To</Label>
           <Select value={form.to} onValueChange={(v) => set({ to: v })}>
             <SelectTrigger id={`${id}-to`} className="w-full">
