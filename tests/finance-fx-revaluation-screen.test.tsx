@@ -147,7 +147,7 @@ describe('the FX Revaluation loader', () => {
     };
     const props = await load('viewer');
     expect(props.items).toBeNull();
-    expect(props.itemsError).toBe('You do not have permission to make changes here.');
+    expect(props.itemsError).toBe('You do not have access to this workspace’s books.');
     expect(props.runs).toBeNull();
     spy.mockRestore();
   });

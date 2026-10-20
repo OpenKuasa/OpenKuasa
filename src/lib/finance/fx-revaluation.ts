@@ -47,12 +47,14 @@ const FIN_RATE = 'FIN38';
 const FIN_NOT_BNM = 'FIN39';
 const FIN_LOCKED = 'FIN01';
 
-/** A date as the sentences show it: "30 Nov 2026". */
+/** Fixed names: Intl's short months vary by ICU version ("Sep" or "Sept"), and a sentence must not. */
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** A date as the sentences show it: "30 Nov 2026", "1 Sep 2026". */
 function shortDate(date: string): string {
   if (!isIsoDate(date)) return date;
-  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(
-    new Date(`${date}T00:00:00Z`),
-  );
+  const [y, m, d] = date.split('-');
+  return `${Number(d)} ${SHORT_MONTHS[Number(m) - 1]} ${y}`;
 }
 
 export const FX_REVALUATION_MESSAGES = {
@@ -75,6 +77,8 @@ export const FX_REVALUATION_MESSAGES = {
     'That rate is not Bank Negara Malaysia’s 5 pm selling rate for that month end. Type it in again, or reload the page.',
   // FIN14, and what the server action says before anything is sent.
   needsSignOff: 'Only an owner or admin can post an FX revaluation.',
+  // 42501 on a preview, which only reads: a stale session, or someone not in the workspace.
+  noAccess: 'You do not have access to this workspace’s books.',
   // FIN01.
   locked: 'A posted FX revaluation is not changed. Run the month end again to post a correction.',
   // The schema's own sentences.
@@ -309,9 +313,10 @@ function namedCurrencies(error: unknown): string | null {
 
 /**
  * The sentence for a refusal a preview or a post met, or null when it is not one this screen words. FIN54 and
- * FIN56 need more than the code: `postFxRevaluation` words those itself.
+ * FIN56 need more than the code: `postFxRevaluation` words those itself. `reading` is true for a preview, which
+ * changes nothing, so a 42501 there says the books cannot be read rather than that a change is not allowed.
  */
-export function fxRevaluationRefusal(error: unknown): string | null {
+export function fxRevaluationRefusal(error: unknown, reading = false): string | null {
   switch (pgCode(error)) {
     case FIN_MONTH_END:
       return M.monthEnd;
@@ -326,7 +331,7 @@ export function fxRevaluationRefusal(error: unknown): string | null {
     case FIN_LOCKED:
       return M.locked;
     case PG_FORBIDDEN:
-      return NOT_ALLOWED;
+      return reading ? M.noAccess : NOT_ALLOWED;
     default:
       return null;
   }

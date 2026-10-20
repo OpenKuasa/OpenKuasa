@@ -1237,7 +1237,7 @@ export async function previewFxRevaluationAction(input: unknown): Promise<FinRes
   try {
     return { ok: true, data: await previewFxRevaluation({ client: await createClient(), orgId: viewer.orgId }, parsed.data) };
   } catch (error) {
-    const refusal = fxRevaluationRefusal(error);
+    const refusal = fxRevaluationRefusal(error, true);
     if (refusal) return { ok: false, error: refusal };
     console.error('[finance] an FX revaluation preview could not be read:', error);
     return { ok: false, error: READ_FAILED };

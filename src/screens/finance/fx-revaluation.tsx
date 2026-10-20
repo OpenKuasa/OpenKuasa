@@ -31,7 +31,7 @@ async function firstPreview(ctx: FinanceWriteContext, periodEnd: string): Promis
   try {
     return { items: await previewFxRevaluation(ctx, { period_end: periodEnd, rates: {} }), error: null };
   } catch (error) {
-    const refusal = fxRevaluationRefusal(error);
+    const refusal = fxRevaluationRefusal(error, true);
     if (!refusal) console.error('[finance] FxRevaluationScreen: the preview could not be read:', error);
     return { items: null, error: refusal ?? READ_FAILED };
   }

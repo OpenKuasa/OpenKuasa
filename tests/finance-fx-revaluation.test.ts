@@ -381,5 +381,15 @@ describe('the data layer answers the database in words', () => {
     expect(fxRevaluationRefusal({ code: 'FIN53' })).toBe(M.monthEnd);
     expect(fxRevaluationRefusal({ code: 'XX000' })).toBeNull();
   });
-});
 
+  it('says a preview refused with 42501 cannot read the books, and a post that it is not allowed', () => {
+    expect(fxRevaluationRefusal({ code: '42501' }, true)).toBe('You do not have access to this workspace’s books.');
+    expect(fxRevaluationRefusal({ code: '42501' })).toBe(NOT_ALLOWED);
+  });
+
+  it('dates its sentences from a fixed month list, never ICU\'s "Sept"', () => {
+    expect(M.nothing('2026-09-30')).toBe('Nothing to post: every foreign-currency balance at 30 Sep 2026 is already at these rates.');
+    expect(M.laterRun('FX-0002', '2026-09-30')).toContain('FX-0002 for 30 Sep 2026 is already posted.');
+    expect(M.nothing('2027-01-01')).toContain('at 1 Jan 2027');
+  });
+});
