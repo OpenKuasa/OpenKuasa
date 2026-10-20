@@ -418,7 +418,8 @@ export function createBendaharaTools(access: FinanceAccess) {
     listLedgerEntries: tool({
       description:
         'Ledger entries, grouped by document/journal, optionally for one account and/or a date range. account is a ledger-account id from listLedgerAccounts; ' +
-        'from/to are YYYY-MM-DD.',
+        'from/to are YYYY-MM-DD. An fx_revaluation entry is a month-end FX revaluation (posted by an owner or admin on the FX Revaluation screen): ' +
+        'dated the month end, with its reversal on the next day, so it moves the books only on that month end.',
       inputSchema: z.object({
         account: z.string().optional().describe('A ledger-account id from listLedgerAccounts.'),
         from: z.string().optional().describe('Start date, YYYY-MM-DD.'),
@@ -449,7 +450,9 @@ export function createBendaharaTools(access: FinanceAccess) {
       },
     }),
     balanceSheet: tool({
-      description: 'Balance sheet as at the end of a period.',
+      description:
+        'Balance sheet as at the end of a period. Foreign-currency invoices, bills and bank or cash accounts are in ringgit at the rates they were booked at, ' +
+        'except at a month end with a posted FX revaluation, where they are at its closing rates (it reverses the next day). You cannot post a revaluation.',
       inputSchema: periodInput,
       execute: async ({ period }) => {
         const { ledgerAccounts, totals } = await statementData();
