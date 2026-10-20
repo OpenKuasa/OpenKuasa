@@ -258,6 +258,9 @@ export function FxRevaluationView({
         if (id !== request.current) return;
         setLoading(false);
         if (!result.ok) {
+          // The last preview no longer stands for this page: drop it (and its digest), so nothing can be posted
+          // from it. The card says why and offers to ask again.
+          setPreview(null);
           setLoadError(result.error);
           return;
         }
@@ -268,6 +271,7 @@ export function FxRevaluationView({
       () => {
         if (id !== request.current) return;
         setLoading(false);
+        setPreview(null);
         setLoadError(READ_FAILED);
       },
     );
@@ -331,11 +335,20 @@ export function FxRevaluationView({
     const again = previewRates(rows) ?? undefined;
     posting.run(
       async () => {
-        const result = await post(payload);
-        // The figures moved under the page: show the new ones, and say so.
-        if (!result.ok && result.error === FX_REVALUATION_MESSAGES.changed) {
+        let result: Awaited<ReturnType<typeof post>>;
+        try {
+          result = await post(payload);
+        } catch (error) {
+          // The answer was lost: it may have posted. Close the question and look again; the hook says so.
           setConfirming(false);
           ask(end, again, false);
+          throw error;
+        }
+        if (!result.ok) {
+          // Any refusal closes the question, so the same figures are not offered again as they were.
+          setConfirming(false);
+          // The figures moved under the page: show the new ones, and say so.
+          if (result.error === FX_REVALUATION_MESSAGES.changed) ask(end, again, false);
         }
         return result;
       },
@@ -434,9 +447,16 @@ export function FxRevaluationView({
         {current === null ? (
           <BentoCard className="col-span-2 md:col-span-12">
             {loadError && !loading ? (
-              <p role="alert" className="py-6 text-center text-sm text-destructive">
-                {loadError}
-              </p>
+              <div className="flex flex-col items-center gap-3 py-6">
+                <p role="alert" className="text-center text-sm text-destructive">
+                  {loadError}
+                </p>
+                {actions ? (
+                  <Button size="sm" variant="outline" onClick={() => ask(periodEnd, undefined, true)}>
+                    Try again
+                  </Button>
+                ) : null}
+              </div>
             ) : (
               <p role="status" className="py-6 text-center text-sm text-muted-foreground">
                 {`Working out the figures for ${longDate(periodEnd)}…`}

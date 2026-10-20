@@ -264,6 +264,14 @@ describe('posting', () => {
     expect(parsed.rates).toEqual({ USD: { rate: '4.4800000000', source: 'bnm', rate_date: '2026-10-30' } });
   });
 
+  it('sends no rate for a currency the screen shows no box for (a converted account at 0)', () => {
+    // The database joins the SGD closing rate to a zero-balance SGD account when it has one.
+    const converted = { ...SGD_ACCOUNT, rate_text: '3.4500000000', rate_source: 'bnm' as const, rate_date: '2026-10-30' };
+    expect(postPayload(E, [A, converted])!.rates).toEqual({ USD: { rate: '4.48', source: 'bnm', rate_date: '2026-10-30' } });
+    // Only a converted account: nothing needs a rate, and none is sent.
+    expect(postPayload(E, [converted])!.rates).toEqual({});
+  });
+
   it('takes a JPY rate typed per 100 through the preview to the post at the same rate per one yen', () => {
     // The box: 3 per 100 yen, typed.
     const rows = withRowTyped(rateRowsFrom([JPY], E), 'JPY', '3');

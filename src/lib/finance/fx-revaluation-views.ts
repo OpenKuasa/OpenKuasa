@@ -370,7 +370,11 @@ export const WORKING_OUT = 'Working out the figures at these rates…';
 export function postPayload(periodEnd: string, items: RevaluationItem[]) {
   const expected = expectedOf(items);
   if (expected === null) return null;
-  return { period_end: periodEnd, rates: ratesFromPreview(items), expected };
+  // Only the rates the screen shows a box for (a currency with a balance): one for a converted account at 0 is
+  // never sent, so a refusal can only be about a rate the person saw.
+  const needed = new Set(neededCurrencies(items));
+  const rates = Object.fromEntries(Object.entries(ratesFromPreview(items)).filter(([currency]) => needed.has(currency)));
+  return { period_end: periodEnd, rates, expected };
 }
 
 /** "Post FX revaluation for 31 October 2026? It is dated 31 Oct 2026 and reversed on 1 Nov 2026." */
