@@ -148,6 +148,11 @@ alter table public.finance_accounts
 alter table public.finance_accounts
   add column opening_balance_myr numeric(14,2)
     generated always as (round(opening_balance * coalesce(opening_rate, 1), 2)) stored;
+-- The default of 1 above gave every existing (ringgit) account its rate. From here on no rate is ever defaulted
+-- (plan decision 8): a foreign opening balance inserted with no rate reaches finance_bank_account_guard as null and
+-- is refused (FIN38), instead of being stored at 1 and posting the wrong ringgit. A ringgit account still gets 1:
+-- the guard sets it, whoever writes (the deployed app, finance_seed_accounts at sign-up, a migration).
+alter table public.finance_accounts alter column opening_rate drop default;
 
 -- finance_accounts is granted column by column (20261030123000 634-636, 20261114110000 150-154). A column not
 -- granted here could not be read through finance_account_balances, which runs as its reader (20261031090300's
@@ -228,15 +233,16 @@ begin
     end if;
   end if;
 
-  -- 20261122100000: an opening balance in another currency has its rate (FIN38): a rate and where it came from
-  -- (the column's default of 1, with no source, is not a rate anyone gave). One marked BNM's is the one rule's
-  -- figure for its date, dated on or before the opening date (FIN39). Asked when one of them is being set.
+  -- 20261122100000: an opening balance in another currency has its rate (FIN38). opening_rate has no column
+  -- default (section 1 drops it), so a rate that was not sent is null here: refused, never defaulted (plan
+  -- decision 8). A rate sent with no source is the check constraint's (23514). One marked BNM's is the one
+  -- rule's figure for its date, dated on or before the opening date (FIN39). Asked when one of them is being set.
   if new.currency <> 'MYR' and new.opening_balance <> 0 and (tg_op = 'INSERT'
        or new.opening_balance is distinct from old.opening_balance or new.opening_date is distinct from old.opening_date
        or new.opening_rate is distinct from old.opening_rate
        or new.opening_rate_source is distinct from old.opening_rate_source
        or new.opening_rate_date is distinct from old.opening_rate_date) then
-    if new.opening_rate is null or new.opening_rate_source is null then
+    if new.opening_rate is null then
       raise exception 'an opening balance in another currency needs its exchange rate' using errcode = 'FIN38';
     end if;
     if new.opening_rate_source = 'bnm' and (
@@ -296,6 +302,12 @@ begin
   select a.currency::text into acct from public.finance_accounts a
   where a.org_id = new.org_id and a.id = new.account_id;
   -- No such account in the workspace (or not this caller's): the foreign key or row-level security answers.
+  -- Nobody who may write a movement is unable to read its account (finance_accounts and finance_transactions carry
+  -- the same member/writer and mfa_required policies; the foreign key keeps the account in the workspace), so a
+  -- movement on an account in another currency cannot pass here. Raising here instead would pre-empt the archived
+  -- account rule's own code and row-level security's 42501 for an outsider (bendahara_archived_account_check.sql;
+  -- that check also pins which functions name the archived rule's code, so this comment does not name it).
+  -- 20261122110000 and 20261122120000 keep this so.
   if not found then
     return new;
   end if;
@@ -1054,6 +1066,11 @@ begin
        || 'opening_date:siu active:siu created_at:s-- updated_at:s-u currency:si- opening_rate:siu '
        || 'opening_rate_source:siu opening_rate_date:siu opening_balance_myr:s--' then
     raise exception 'the signed-in''s privileges on finance_accounts are: %', t;
+  end if;
+  -- No rate is defaulted on the server (plan decision 8): opening_rate has no column default.
+  if exists (select 1 from pg_catalog.pg_attrdef d join pg_catalog.pg_attribute a on a.attrelid = d.adrelid and a.attnum = d.adnum
+              where d.adrelid = 'public.finance_accounts'::regclass and a.attname = 'opening_rate') then
+    raise exception 'finance_accounts.opening_rate has a default';
   end if;
   -- Nobody signed in writes a movement's currency, rate or ringgit (plan decision 6).
   foreach t in array array['currency', 'fx_rate', 'fx_rate_source', 'fx_rate_date', 'amount_myr'] loop
