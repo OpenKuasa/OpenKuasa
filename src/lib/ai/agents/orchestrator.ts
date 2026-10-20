@@ -234,12 +234,12 @@ export function runBendahara(
 }
 
 /** What each specialist is for, as Tuah's instructions put it. */
-const TEAM_AREA = {
+export const TEAM_AREA = {
   reach:
     'marketing: ads and campaigns, spend, leads (finding, adding and editing them, and promoting a lead to a CRM contact), lead forms, creatives, appointments and ad settings',
   crm: 'the CRM: contacts, deals, pipelines and their stages, follow-ups (reminders to get back to a contact), the calendar, and looking up sales invoices and what customers owe. A lead is not a contact yet: anything about a lead goes to Jebat',
   hire: 'hiring: job openings, candidates and their applications, the hiring funnel, interviews, the talent pool and time to hire. Job openings can be created, edited, opened, paused, closed and deleted. Applications can be moved, rejected, reopened and rated, one at a time. Candidates can be added by hand and edited, one at a time. An application or a candidate can be deleted, one at a time. A candidate can be added to the talent pool, given a pool status, removed from the pool or moved to the pipeline for a job, one at a time. An interview can be scheduled, changed, cancelled, marked completed or a no-show, marked scheduled again, or recorded after it took place, one at a time. Feedback on a completed interview (a rating out of 5, a recommendation and comments) can be recorded or cleared, one at a time. Existing staff, leave and payroll are not hiring. It can read one candidate\'s uploaded CV and give a verdict on it',
-  people: 'HR: existing staff, leave, time-off, claims, overtime, attendance, payroll and performance. It looks these up (an owner or admin sees everyone; others see their own) and can prepare changes that wait for approval — deciding leave, claims and overtime, correcting attendance, and editing staff and departments, one change at a time. Hiring new people is not HR',
+  people: 'HR: existing staff, leave, time-off, claims, overtime, attendance, payroll and performance. It looks these up (an owner or admin sees everyone; a manager sees their own and their direct reports\' leave, time-off, claims, attendance and overtime; everyone else sees their own) and can prepare changes that wait for approval — deciding leave, time-off, claims and overtime (a manager decides their direct reports\' only), correcting attendance, and editing staff and departments, one change at a time. Hiring new people is not HR',
   finance: 'finance: sales invoices and quotations, supplier bills, payments in and out, credit notes, refunds, customers and suppliers, items, and bank and cash accounts, plus purchasing (requests for quotation and purchase orders), the chart of accounts, the ledger and manual journals, and financial reports (P&L, balance sheet, trial balance, cash flow, aged receivables and payables). It looks these up and can prepare changes that wait for approval — drafting, posting and voiding invoices and bills, recording payments, issuing credit notes and refunds, managing customers, suppliers and items, handling RFQs and purchase orders, and posting manual journals',
 } as const;
 
@@ -272,8 +272,8 @@ export function runTuah(
   hire?: HireAccess | null,
   /**
    * The workspace's HR data. The caller's own session decides which rows the
-   * lookups return; the change tools are added per the HR tier (`hr` or `self`)
-   * the route resolved, and each waits for the user's approval.
+   * lookups return; the change tools are added per the HR tier (`hr`, `manager` or `self`)
+   * the route resolved (a manager gets the four decide tools and the two team reads), and each waits for the user's approval.
    */
   people?: PeopleAccess | null,
   /**
