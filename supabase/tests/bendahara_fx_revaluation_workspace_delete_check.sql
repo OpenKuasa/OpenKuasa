@@ -12,7 +12,9 @@
 -- database's own order; case C recreates the runs' foreign key to orgs (the same definition) so that its cascade
 -- fires last, as the hosted database's oids had it, advancing the oid counter with large objects (rolled back, so
 -- none is left) when the new trigger would not sort last. If even 200,000 oids do not get it there, case C says so
--- in the PASSED line and does not count as a failure.
+-- in the PASSED line and does not count as a failure. Case C runs only on a local clone, with okos.local_only set to
+-- 'on' (it recreates a foreign key on orgs and may make large objects; a hosted dry run skips it, and its case B
+-- already runs in the hosted order). The PASSED line says whether this database's own order puts the runs last.
 --
 -- Every date is in 1999; every rate is typed (no BNM row is written).
 do $$
@@ -28,6 +30,7 @@ declare
   probe oid;
   burnt integer := 0;
   forced boolean := false;
+  native_last boolean;
   fails text[] := '{}';
   notes text[] := '{}';
 begin
@@ -108,20 +111,28 @@ begin
   $f$;
 
   -- ---- structure: every foreign key of the three tables cascades (or sets null); none is NO ACTION -----------
-  select string_agg(c.conname || ' ' || pg_get_constraintdef(c.oid), ' | ' order by c.conname) into t
-    from pg_constraint c
+  select string_agg(format('%s %s.%s(%s) -> %s.%s(%s) del=%s upd=%s match=%s', c.conname, cn.nspname, cr.relname,
+             (select string_agg(a.attname, ',' order by k.i) from unnest(c.conkey) with ordinality as k(n, i)
+                join pg_catalog.pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.n),
+             fn.nspname, fr.relname,
+             (select string_agg(a.attname, ',' order by k.i) from unnest(c.confkey) with ordinality as k(n, i)
+                join pg_catalog.pg_attribute a on a.attrelid = c.confrelid and a.attnum = k.n),
+             c.confdeltype, c.confupdtype, c.confmatchtype), ' | ' order by c.conname) into t
+    from pg_catalog.pg_constraint c
+    join pg_catalog.pg_class cr on cr.oid = c.conrelid join pg_catalog.pg_namespace cn on cn.oid = cr.relnamespace
+    join pg_catalog.pg_class fr on fr.oid = c.confrelid join pg_catalog.pg_namespace fn on fn.oid = fr.relnamespace
    where c.contype = 'f'
      and c.conrelid in ('public.finance_fx_revaluations'::regclass, 'public.finance_fx_revaluation_rates'::regclass,
                         'public.finance_fx_revaluation_lines'::regclass);
   if t is distinct from
-       'finance_fx_revaluation_lines_org_id_account_id_fkey FOREIGN KEY (org_id, account_id) REFERENCES finance_accounts(org_id, id) ON DELETE CASCADE'
-    || ' | finance_fx_revaluation_lines_org_id_bill_id_fkey FOREIGN KEY (org_id, bill_id) REFERENCES supplier_bills(org_id, id) ON DELETE CASCADE'
-    || ' | finance_fx_revaluation_lines_org_id_invoice_id_fkey FOREIGN KEY (org_id, invoice_id) REFERENCES finance_invoices(org_id, id) ON DELETE CASCADE'
-    || ' | finance_fx_revaluation_lines_org_id_revaluation_id_currenc_fkey FOREIGN KEY (org_id, revaluation_id, currency, rate) REFERENCES finance_fx_revaluation_rates(org_id, revaluation_id, currency, rate) ON DELETE CASCADE'
-    || ' | finance_fx_revaluation_lines_org_id_revaluation_id_fkey FOREIGN KEY (org_id, revaluation_id) REFERENCES finance_fx_revaluations(org_id, id) ON DELETE CASCADE'
-    || ' | finance_fx_revaluation_rates_org_id_revaluation_id_fkey FOREIGN KEY (org_id, revaluation_id) REFERENCES finance_fx_revaluations(org_id, id) ON DELETE CASCADE'
-    || ' | finance_fx_revaluations_org_id_fkey FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE CASCADE'
-    || ' | finance_fx_revaluations_posted_by_fkey FOREIGN KEY (posted_by) REFERENCES auth.users(id) ON DELETE SET NULL' then
+       'finance_fx_revaluation_lines_org_id_account_id_fkey public.finance_fx_revaluation_lines(org_id,account_id) -> public.finance_accounts(org_id,id) del=c upd=a match=s'
+    || ' | finance_fx_revaluation_lines_org_id_bill_id_fkey public.finance_fx_revaluation_lines(org_id,bill_id) -> public.supplier_bills(org_id,id) del=c upd=a match=s'
+    || ' | finance_fx_revaluation_lines_org_id_invoice_id_fkey public.finance_fx_revaluation_lines(org_id,invoice_id) -> public.finance_invoices(org_id,id) del=c upd=a match=s'
+    || ' | finance_fx_revaluation_lines_org_id_revaluation_id_currenc_fkey public.finance_fx_revaluation_lines(org_id,revaluation_id,currency,rate) -> public.finance_fx_revaluation_rates(org_id,revaluation_id,currency,rate) del=c upd=a match=s'
+    || ' | finance_fx_revaluation_lines_org_id_revaluation_id_fkey public.finance_fx_revaluation_lines(org_id,revaluation_id) -> public.finance_fx_revaluations(org_id,id) del=c upd=a match=s'
+    || ' | finance_fx_revaluation_rates_org_id_revaluation_id_fkey public.finance_fx_revaluation_rates(org_id,revaluation_id) -> public.finance_fx_revaluations(org_id,id) del=c upd=a match=s'
+    || ' | finance_fx_revaluations_org_id_fkey public.finance_fx_revaluations(org_id) -> public.orgs(id) del=c upd=a match=s'
+    || ' | finance_fx_revaluations_posted_by_fkey public.finance_fx_revaluations(posted_by) -> auth.users(id) del=n upd=a match=s' then
     fails := fails || format('the revaluation tables'' foreign keys are: %s', t);
   end if;
 
@@ -153,8 +164,6 @@ begin
     union all select 'a line', format('delete from public.finance_fx_revaluation_lines where org_id = %L', ws[1])
     union all select 'a posted invoice a run names', format('delete from public.finance_invoices where org_id = %L', ws[1])
     union all select 'a posted bill a run names', format('delete from public.supplier_bills where org_id = %L', ws[1])
-    union all select 'an account a run names', format(
-      'delete from public.finance_accounts where org_id = %L and currency = %L', ws[1], 'USD')
   loop
     begin
       execute r.q;
@@ -164,6 +173,10 @@ begin
       null;
     end;
   end loop;
+  -- The USD account has an opening balance and no movement, so the bank-account rules let its owner delete it; only a
+  -- run names it. The cascade reaches the line, and the line's lock refuses (FIN01).
+  fails := fails || public.bendahara_check_try('A: the owner deletes an account only a run names', 'FIN01', format(
+    'delete from public.finance_accounts where org_id = %L and currency = %L', ws[1], 'USD'));
   -- As the table owner, nobody signed in: the line's lock answers FIN01 for each, the cascade from a document or an
   -- account included (the document's own guards step aside for the table owner, or answer first).
   reset role;
@@ -207,6 +220,16 @@ begin
     from pg_trigger g join pg_constraint c on c.oid = g.tgconstraint
    where g.tgrelid = 'public.orgs'::regclass and g.tgname like 'RI\_ConstraintTrigger\_a\_%'
      and c.conrelid in ('public.finance_invoices'::regclass, 'public.supplier_bills'::regclass, 'public.finance_accounts'::regclass);
+  -- This database's own order: does the runs' cascade fire last (as on hosted)?
+  select bool_and(g.tgname collate "C" > last_parent collate "C") into native_last
+    from pg_trigger g join pg_constraint c on c.oid = g.tgconstraint
+   where g.tgrelid = 'public.orgs'::regclass and g.tgname like 'RI\_ConstraintTrigger\_a\_%'
+     and c.conrelid = 'public.finance_fx_revaluations'::regclass;
+  if coalesce(current_setting('okos.local_only', true), '') <> 'on' then
+    -- Not on a local clone: case C recreates a foreign key on orgs and may make large objects, which a dry run on the
+    -- hosted database must not. Case B there already runs in the hosted order.
+    notes := notes || 'C: skipped (set okos.local_only = on to run it on a local clone)'::text;
+  else
   begin
     loop
       probe := lo_create(0);
@@ -240,10 +263,12 @@ begin
     reset role;
     fails := fails || format('C: deleting a workspace with the runs'' cascade last (forced: %s): %s %s', forced, sqlstate, sqlerrm);
   end;
+  end if;
 
   fails := array_remove(fails, null);
   if array_length(fails, 1) is null then
-    raise exception 'BENDAHARA_FX_REVALUATION_WORKSPACE_DELETE_CHECK PASSED (everything rolled back; runs'' cascade forced last: %)',
+    raise exception 'BENDAHARA_FX_REVALUATION_WORKSPACE_DELETE_CHECK PASSED (everything rolled back; runs'' cascade last in this database''s own order: %; forced last: %)',
+      coalesce(native_last::text, 'unknown'),
       coalesce(forced::text, 'no') || case when cardinality(notes) > 0 then '; ' || array_to_string(notes, ' | ') else '' end;
   end if;
   raise exception 'BENDAHARA_FX_REVALUATION_WORKSPACE_DELETE_CHECK FAILED: %', array_to_string(fails, ' | ');
