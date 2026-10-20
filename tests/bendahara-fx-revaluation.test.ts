@@ -98,7 +98,7 @@ testWithSupabase('R1 and R2: a USD invoice and bill revalued at a month end, pos
     ['invoice', expect.any(String), 600, 2520, '4.4800000000', 'manual', 2688, 168],
   ]);
   const expected = expectedOf(preview);
-  expect(expected).toEqual({ lines: 2, net_gain: '-134.40' });
+  expect(expected).toEqual({ lines: 2, net_gain: '-134.40', digest: expect.stringMatching(/^[0-9a-f]{32}$/) });
 
   // A viewer previews too; a member may not post (FIN14, in the screen's words), and nothing is written.
   expect(await previewFxRevaluation(viewer, previewFxRevaluationInput.parse({ period_end: E, rates: USD_448 }))).toHaveLength(2);
@@ -149,7 +149,7 @@ testWithSupabase('R1 and R2: a USD invoice and bill revalued at a month end, pos
   // A second post for the same month end has nothing to post (FIN56), in the screen's words.
   const again = await previewFxRevaluation(owner, previewFxRevaluationInput.parse({ period_end: E, rates: USD_448 }));
   expect(again.map((p) => p.posted_myr)).toEqual([0, 0]);
-  expect(await postFxRevaluation(owner, postFxRevaluationInput.parse({ period_end: E, rates: USD_448, expected: { lines: 2, net_gain: '0.00' } }))).toEqual({
+  expect(await postFxRevaluation(owner, postFxRevaluationInput.parse({ period_end: E, rates: USD_448, expected: expectedOf(again) }))).toEqual({
     ok: false,
     error: M.nothing(E),
   });

@@ -3150,8 +3150,9 @@ with no date).
   `FIN39`, a missing or unusable one `FIN38`. `finance_fx_revaluation_preview`
   (any member) shows the items and fills BNM's rate where none is sent;
   `finance_post_fx_revaluation` (an owner or admin, `FIN14`) works them out
-  again under a lock and posts them only if the number of lines and the net
-  gain are what the caller saw (`FIN55`), never for an earlier month end than
+  again under a lock and posts them only if every item (the preview's digest of
+  each item's figures), the number of lines and the net gain are what the
+  caller saw (`FIN55`), never for an earlier month end than
   one already posted (`FIN54`) and never with nothing to post (`FIN56`; no
   number is used). A run (`FX-0001`) with its rates and lines is written whole
   and never changed or deleted (`FIN01`, even by the table owner); the three
