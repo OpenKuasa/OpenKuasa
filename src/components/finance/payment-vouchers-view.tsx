@@ -23,7 +23,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { localIsoDate } from '@/lib/finance/bill-math';
 import type { BillListRow } from '@/lib/finance/bills';
-import type { PaymentVoucherKind, PaymentVoucherRow } from '@/lib/finance/cash-book';
+import { type PaymentVoucherKind, type PaymentVoucherRow, cashBookCurrency, cashBookRinggit } from '@/lib/finance/cash-book';
 import {
   CASH_BOOK_PERIODS,
   CASH_BOOK_PERIOD_LABELS,
@@ -43,7 +43,7 @@ import {
 } from '@/lib/finance/cash-book-views';
 import { csvFileName } from '@/lib/finance/csv';
 import type { ExpenseCategory } from '@/lib/finance/expenses';
-import { rm } from '@/lib/finance/format';
+import { money, rm } from '@/lib/finance/format';
 import type { FinanceAccount, PaymentOutRow } from '@/lib/finance/money';
 import type { OrderBilling } from '@/lib/finance/purchase-views';
 import type { FinResult } from '@/lib/finance/result';
@@ -689,7 +689,13 @@ export function PaymentVouchersView({
                       </TableCell>
                       <TableCell className="min-w-24 whitespace-normal break-words text-muted-foreground">{voucherCategory(v)}</TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{v.account_name}</TableCell>
-                      <TableCell className="whitespace-nowrap text-right tabular-nums">{rm(v.amount)}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums">
+                        {money(v.amount, cashBookCurrency(v))}
+                        {/* Stage 5b: on an account in another currency, its ringgit under it. */}
+                        {cashBookCurrency(v) === 'MYR' ? null : (
+                          <span className="block text-xs text-muted-foreground">≈ {rm(cashBookRinggit(v))}</span>
+                        )}
+                      </TableCell>
                       <TableCell>
                         <span className="flex items-center gap-2">
                           <LiveDot active={v.status === 'posted'} />

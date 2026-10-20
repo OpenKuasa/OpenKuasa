@@ -308,7 +308,8 @@ export function createBendaharaTools(access: FinanceAccess) {
     listRefunds: tool({
       description:
         "Refunds to customers, with status and amount. amount is in the invoice's currency (its currency field); " +
-        'transaction_amount and amount_myr are the ringgit paid out. Add up ringgit only.',
+        'amount_myr is the ringgit paid out for it. transaction_amount is in transaction_currency (the account\'s ' +
+        'currency); transaction_amount_myr is its ringgit. Add up ringgit only.',
       inputSchema: z.object({}),
       execute: async () => listRefunds(ctx),
     }),
@@ -334,14 +335,18 @@ export function createBendaharaTools(access: FinanceAccess) {
       execute: async () => listBillBalances(ctx),
     }),
     listPaymentsIn: tool({
-      description: 'Payments received from customers.',
+      description:
+        "Payments received from customers, one row per invoice a payment pays. amount is in the invoice's currency " +
+        '(currency); amount_myr is the ringgit received for it. transaction_amount is in transaction_currency (the ' +
+        "account's currency); transaction_amount_myr is its ringgit. Add up ringgit only.",
       inputSchema: z.object({}),
       execute: async () => listPaymentsIn(ctx),
     }),
     listPaymentsOut: tool({
       description:
         'Payments made to suppliers, one row per bill a payment pays. amount is in the bill\'s currency (currency); ' +
-        'amount_myr is the ringgit paid for it, and transaction_amount the ringgit of the whole payment. Add up ringgit only.',
+        'amount_myr is the ringgit paid for it. transaction_amount is in transaction_currency (the account\'s ' +
+        'currency); transaction_amount_myr is its ringgit. Add up ringgit only.',
       inputSchema: z.object({}),
       execute: async () => listPaymentsOut(ctx),
     }),

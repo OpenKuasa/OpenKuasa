@@ -20,7 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useLocalToday } from '@/components/finance/use-local-today';
 import { localIsoDate } from '@/lib/finance/bill-math';
-import type { CashReceiptRow } from '@/lib/finance/cash-book';
+import { type CashReceiptRow, cashBookCurrency, cashBookRinggit } from '@/lib/finance/cash-book';
 import {
   CASH_BOOK_PERIODS,
   CASH_BOOK_PERIOD_LABELS,
@@ -46,7 +46,7 @@ import {
 } from '@/lib/finance/cash-book-views';
 import type { IncomeCategory } from '@/lib/finance/cash-receipts';
 import { csvFileName } from '@/lib/finance/csv';
-import { rm } from '@/lib/finance/format';
+import { money, rm } from '@/lib/finance/format';
 import type { InvoiceListRow } from '@/lib/finance/invoices';
 import { type FinanceAccount, PAYMENT_METHOD_LABELS, type PaymentInRow } from '@/lib/finance/money';
 import type { FinResult } from '@/lib/finance/result';
@@ -235,7 +235,7 @@ export function CashReceiptsView({
           }
           onCancel={close}
         >
-          Post this receipt of <span className="font-medium">{rm(row.amount)}</span>
+          Post this receipt of <span className="font-medium">{money(row.amount, cashBookCurrency(row))}</span>
           {from}, dated {displayDate(row.txn_date)}? It gets its number and can no longer be edited, only voided.
         </ConfirmRow>
       );
@@ -260,7 +260,7 @@ export function CashReceiptsView({
           onCancel={close}
         >
           Void receipt <span className="font-medium">{row.number}</span> of{' '}
-          <span className="font-medium">{rm(row.amount)}</span>
+          <span className="font-medium">{money(row.amount, cashBookCurrency(row))}</span>
           {from}? {receiptVoidEffect(row)} It stays in the list as Void and keeps its number. This cannot be undone.
         </ConfirmRow>
       );
@@ -277,7 +277,7 @@ export function CashReceiptsView({
         onConfirm={() => confirm.run(() => actions.remove({ id: row.transaction_id }), close)}
         onCancel={close}
       >
-        Delete the draft receipt of <span className="font-medium">{rm(row.amount)}</span>
+        Delete the draft receipt of <span className="font-medium">{money(row.amount, cashBookCurrency(row))}</span>
         {from}? {receiptDeleteEffect(row)}This cannot be undone.
       </ConfirmRow>
     );
@@ -496,7 +496,13 @@ export function CashReceiptsView({
                         </span>
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{PAYMENT_METHOD_LABELS[r.method]}</TableCell>
-                      <TableCell className="whitespace-nowrap text-right tabular-nums">{rm(r.amount)}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums">
+                        {money(r.amount, cashBookCurrency(r))}
+                        {/* Stage 5b: on an account in another currency, its ringgit under it. */}
+                        {cashBookCurrency(r) === 'MYR' ? null : (
+                          <span className="block text-xs text-muted-foreground">≈ {rm(cashBookRinggit(r))}</span>
+                        )}
+                      </TableCell>
                       <TableCell>
                         <span className="flex items-center gap-2">
                           <LiveDot active={r.status === 'posted'} />

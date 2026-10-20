@@ -26,6 +26,7 @@ import type { InvoiceListRow } from '@/lib/finance/invoices';
 import { type FinanceAccount, PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentInRow } from '@/lib/finance/money';
 import { receivableInvoices } from '@/lib/finance/receipt-form';
 import type { FinResult } from '@/lib/finance/result';
+import type { FxRateLookup } from '@/components/finance/movement-rate-fields';
 import {
   PAYMENT_IN_STATUS_LABELS,
   type PaymentInMethodFilter,
@@ -42,6 +43,8 @@ import { cn } from '@/lib/utils';
 export type PaymentInActions = {
   record: RecordPayment;
   voidPayment: (input: unknown) => Promise<FinResult<{ id: string }>>;
+  /** Bank Negara's selling rate, for a payment on an account in another currency (stage 5b). */
+  fxRate?: FxRateLookup;
 };
 
 /** What only a person who may edit is given: the actions, and what the payment form offers. */
@@ -136,7 +139,7 @@ export function PaymentsInView({
         onCancel={close}
       >
         Void payment <span className="font-medium">{row.number}</span> of{' '}
-        <span className="font-medium">{rm(row.transaction_amount)}</span> from{' '}
+        <span className="font-medium">{money(row.transaction_amount, row.transaction_currency ?? 'MYR')}</span> from{' '}
         <span className="font-medium">{row.customer_name}</span>? The invoices it paid will owe that amount again. This
         cannot be undone. {alsoCoversInvoices(rows, row)}
       </ConfirmRow>
@@ -170,6 +173,7 @@ export function PaymentsInView({
             accounts={writer.accounts}
             today={open.today}
             record={writer.actions.record}
+            fxRate={writer.actions.fxRate}
             onClose={close}
           />
         ) : null}

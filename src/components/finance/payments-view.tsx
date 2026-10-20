@@ -46,6 +46,7 @@ import {
   paymentsCsv,
 } from '@/lib/finance/purchase-views';
 import type { FinResult } from '@/lib/finance/result';
+import type { FxRateLookup } from '@/components/finance/movement-rate-fields';
 import { cn } from '@/lib/utils';
 
 export type PaymentActions = {
@@ -53,6 +54,8 @@ export type PaymentActions = {
   markPaid: (input: unknown) => Promise<FinResult<{ id: string; number: string }>>;
   voidPayment: (input: unknown) => Promise<FinResult<{ id: string }>>;
   remove: (input: unknown) => Promise<FinResult<{ id: string }>>;
+  /** Bank Negara's selling rate, for a payment on an account in another currency (stage 5b). */
+  fxRate?: FxRateLookup;
 };
 
 /** What only a person who may edit is given: the actions, and what the payment form offers. */
@@ -143,7 +146,8 @@ export function PaymentsView({
     if (!writer || !asking || asking.row.allocation_id !== row.allocation_id) return null;
     const { actions } = writer;
     const id = row.transaction_id;
-    const whole = rm(row.transaction_amount);
+    // The whole payment, in its account's currency (stage 5b).
+    const whole = money(row.transaction_amount, row.transaction_currency ?? 'MYR');
     const also = alsoCovers(rows, row);
     // The bills this payment settles are the rows that share its transaction.
     const settled = rows.filter((r) => r.transaction_id === row.transaction_id).map((r) => r.bill_id);
@@ -274,6 +278,7 @@ export function PaymentsView({
             accounts={writer.accounts}
             today={open.today}
             record={writer.actions.record}
+            fxRate={writer.actions.fxRate}
             onClose={() => setOpen(null)}
           />
         ) : null}

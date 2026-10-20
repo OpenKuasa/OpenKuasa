@@ -5,9 +5,20 @@
  * date. Cash Receipts and Payment Vouchers have a period selector, so their
  * figures, and the rows of their tables, are worked out again in the browser
  * when it changes.
+ *
+ * Stage 5b: a movement may be on an account in another currency, its `amount` in that currency. Every figure that
+ * adds rows up adds their ringgit (`cashBookRinggit`), never their amounts; the CSVs keep each row's amount as it is
+ * and add its currency and its ringgit once a row in another currency is listed.
  */
 import type { Slice } from '@/components/charts';
-import type { CashBookStatus, CashReceiptRow, PaymentVoucherKind, PaymentVoucherRow } from './cash-book';
+import {
+  type CashBookStatus,
+  type CashReceiptRow,
+  type PaymentVoucherKind,
+  type PaymentVoucherRow,
+  cashBookCurrency,
+  cashBookRinggit,
+} from './cash-book';
 import { toCsv } from './csv';
 import type { ExpenseDisplayStatus, ExpenseRow } from './expenses';
 import { rmShort } from './format';
@@ -177,8 +188,8 @@ export function cashReceiptsView(rows: CashReceiptRow[], today: string, period: 
   // Only money that has actually arrived counts: not a draft, not voided.
   const posted = rows.filter((r) => r.status === 'posted');
   const inRange = posted.filter((r) => inPeriod(r.txn_date, today, period));
-  const total = sum(inRange, (r) => r.amount);
-  const intoBank = sum(inRange.filter((r) => r.account_kind === 'bank'), (r) => r.amount);
+  const total = sum(inRange, cashBookRinggit);
+  const intoBank = sum(inRange.filter((r) => r.account_kind === 'bank'), cashBookRinggit);
   const drafts = rows.filter((r) => r.status === 'draft');
   const span = CASH_BOOK_PERIOD_LABELS[period].toLowerCase();
 
@@ -188,8 +199,8 @@ export function cashReceiptsView(rows: CashReceiptRow[], today: string, period: 
     if (inMonth.length > 0) hasTrend = true;
     return {
       label,
-      bank: thousands(sum(inMonth.filter((r) => r.account_kind === 'bank'), (r) => r.amount)),
-      cash: thousands(sum(inMonth.filter((r) => r.account_kind === 'cash'), (r) => r.amount)),
+      bank: thousands(sum(inMonth.filter((r) => r.account_kind === 'bank'), cashBookRinggit)),
+      cash: thousands(sum(inMonth.filter((r) => r.account_kind === 'cash'), cashBookRinggit)),
     };
   });
 
@@ -212,7 +223,7 @@ export function cashReceiptsView(rows: CashReceiptRow[], today: string, period: 
     ],
     trend,
     hasTrend,
-    byAccount: slices(totalsBy(inRange, (r) => r.account_id, (r) => r.account_name, (r) => r.amount), 'Other accounts'),
+    byAccount: slices(totalsBy(inRange, (r) => r.account_id, (r) => r.account_name, cashBookRinggit), 'Other accounts'),
     hasReceived: inRange.length > 0,
     received: rmShort(total),
   };
@@ -244,10 +255,22 @@ export function filterCashReceipts(rows: CashReceiptRow[], query: string, filter
   );
 }
 
-/** The receipts table as a CSV file, its columns in the table's order. Amounts are numbers, so a spreadsheet can add them up. */
+/** True when a listed row is on an account in another currency: the CSVs then add each row's currency and ringgit. */
+function anyForeign(rows: { transaction_currency?: string; currency?: string }[]): boolean {
+  return rows.some((r) => cashBookCurrency(r) !== 'MYR');
+}
+
+/**
+ * The receipts table as a CSV file, its columns in the table's order. Amounts are numbers, so a spreadsheet can add
+ * them up. Once a receipt in another currency is listed, its currency and its ringgit follow the status (stage 5b).
+ */
 export function cashReceiptsCsv(rows: CashReceiptRow[]): string {
+  const foreign = anyForeign(rows);
   return toCsv(
-    ['Date', 'No.', 'Received from', 'For', 'Account', 'Method', 'Reference', 'Amount', 'Status'],
+    [
+      'Date', 'No.', 'Received from', 'For', 'Account', 'Method', 'Reference', 'Amount', 'Status',
+      ...(foreign ? ['Currency', 'Ringgit'] : []),
+    ],
     rows.map((r) => [
       r.txn_date,
       r.number,
@@ -258,6 +281,7 @@ export function cashReceiptsCsv(rows: CashReceiptRow[]): string {
       r.reference,
       r.amount,
       CASH_RECEIPT_STATUS_LABELS[r.status],
+      ...(foreign ? [cashBookCurrency(r), cashBookRinggit(r)] : []),
     ]),
   );
 }
@@ -393,7 +417,7 @@ export function paymentVouchersView(rows: PaymentVoucherRow[], today: string, pe
   // Only money that has actually gone out counts: not waiting, not scheduled, not voided.
   const posted = rows.filter((v) => v.status === 'posted');
   const inRange = posted.filter((v) => inPeriod(v.txn_date, today, period));
-  const total = sum(inRange, (v) => v.amount);
+  const total = sum(inRange, cashBookRinggit);
   // What is waiting is waiting now, whatever date it carries.
   const waiting = rows.filter(isWaitingVoucher);
   const toPay = rows.filter((v) => v.status === 'scheduled');
@@ -403,7 +427,7 @@ export function paymentVouchersView(rows: PaymentVoucherRow[], today: string, pe
   const trend = lastMonths(today).map(({ key, label }) => {
     const inMonth = posted.filter((v) => monthOf(v.txn_date) === key);
     if (inMonth.length > 0) hasTrend = true;
-    return { label, paid: thousands(sum(inMonth, (v) => v.amount)) };
+    return { label, paid: thousands(sum(inMonth, cashBookRinggit)) };
   });
 
   return {
@@ -417,7 +441,7 @@ export function paymentVouchersView(rows: PaymentVoucherRow[], today: string, pe
       },
       {
         label: 'Pending approval',
-        value: rmShort(sum(waiting, (v) => v.amount)),
+        value: rmShort(sum(waiting, cashBookRinggit)),
         delta: count(waiting.length, 'voucher'),
         deltaTone: waiting.length ? 'down' : 'flat',
       },
@@ -425,7 +449,7 @@ export function paymentVouchersView(rows: PaymentVoucherRow[], today: string, pe
     ],
     trend,
     hasTrend,
-    byCategory: slices(totalsBy(inRange, voucherCategoryKey, voucherCategory, (v) => v.amount), 'Other categories'),
+    byCategory: slices(totalsBy(inRange, voucherCategoryKey, voucherCategory, cashBookRinggit), 'Other categories'),
     hasPaid: inRange.length > 0,
     paid: rmShort(total),
   };
@@ -477,10 +501,14 @@ export function filterPaymentVouchers(
   );
 }
 
-/** The vouchers table as a CSV file. Amounts are numbers. */
+/** The vouchers table as a CSV file. Amounts are numbers; currency and ringgit follow once one in another currency is listed. */
 export function paymentVouchersCsv(rows: PaymentVoucherRow[]): string {
+  const foreign = anyForeign(rows);
   return toCsv(
-    ['Date', 'No.', 'Paid to', 'Kind', 'Category', 'For', 'Account', 'Method', 'Reference', 'Amount', 'Status'],
+    [
+      'Date', 'No.', 'Paid to', 'Kind', 'Category', 'For', 'Account', 'Method', 'Reference', 'Amount', 'Status',
+      ...(foreign ? ['Currency', 'Ringgit'] : []),
+    ],
     rows.map((v) => [
       v.txn_date,
       v.number,
@@ -493,6 +521,7 @@ export function paymentVouchersCsv(rows: PaymentVoucherRow[]): string {
       v.reference,
       v.amount,
       PAYMENT_VOUCHER_STATUS_LABELS[v.status],
+      ...(foreign ? [cashBookCurrency(v), cashBookRinggit(v)] : []),
     ]),
   );
 }
