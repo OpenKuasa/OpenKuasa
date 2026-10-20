@@ -8,16 +8,20 @@
  *   * `previewFxRevaluation` (any member, read only): the items, what each carries, what it revalues to and what
  *     a run would post. With no rate sent for a currency it fills BNM's closing rate (`CLOSING_RATE_RULE`).
  *   * `postFxRevaluation` (an owner or admin): posts them in one call, only if the figures still equal what the
- *     preview showed (`expected`: the number of lines and the net gain, FIN55 otherwise). No draft is kept.
+ *     preview showed (`expected`: the preview's digest of every item, the number of lines and the net gain; FIN55
+ *     otherwise). No draft is kept.
  *   * `listFxRevaluations`: the posted runs, each with its rates and lines. A run is never changed (FIN01).
  *
- * Rates travel as exact decimal text both ways (`rate::text`), and the box is per 100 for a currency BNM quotes
- * per 100 (`quoteUnit`): the schema turns what was typed into text per ONE unit, ten decimals, as the tables
- * keep it. No money is worked out here in floating point: the net gain of a run is added in sen (bigint).
+ * Rates travel as exact decimal text both ways (`rate::text`). The database takes and gives them per ONE unit; the
+ * box (and so `closingRatesInput`) is per 100 for a currency BNM quotes per 100 (`quoteUnit`). The schema turns
+ * what was typed into text per one unit, ten decimals, as the tables keep it; a preview's rate goes back into the
+ * box's unit with `boxRateText` (or `ratesFromPreview`), never as `rate_text` itself, which for JPY would be read
+ * per 100 and post a rate 100 times too small. No money is worked out here in floating point: the net gain of a run is added in sen (bigint).
  */
 import { z } from 'zod';
 import { isIsoDate } from './document-lines';
 import { quoteUnit } from './currencies';
+import { scaledFromText } from './document-currency';
 import { type RevaluationKind, ringgitOf, senFromNumber } from './fx-settlement';
 import { type FinResult, type FinanceWriteContext, FIN_SIGN_OFF, NOT_ALLOWED, PG_FORBIDDEN, pgCode, writeFailed } from './result';
 
@@ -112,6 +116,21 @@ export function perOneRateText(typed: string, currency: string): string | undefi
   return `${whole}.${rest}`;
 }
 
+/**
+ * A rate per ONE unit, as the database gives it ("0.0295000000"), in the box's unit: per 100 for a currency BNM
+ * quotes per 100 ("2.95"), else as it is, trailing zeros dropped. Exact (whole numbers only); undefined when the
+ * text is not a plain decimal. `closingRatesInput` reads the answer back to the same rate per one unit.
+ */
+export function boxRateText(perOneText: string, currency: string): string | undefined {
+  const scaled = scaledFromText(perOneText);
+  if (scaled === undefined) return undefined;
+  const places = RATE_PLACES - (quoteUnit(currency) === 100 ? 2 : 0);
+  const unit = BigInt(10) ** BigInt(places);
+  const whole = scaled / unit;
+  const fraction = (scaled % unit).toString().padStart(places, '0').replace(/0+$/, '');
+  return fraction === '' ? whole.toString() : `${whole}.${fraction}`;
+}
+
 const monthEndDate = z.string({ error: M.monthEnd }).refine(isMonthEnd, M.monthEnd);
 
 const closingRate = z
@@ -153,6 +172,8 @@ export const postFxRevaluationInput = previewFxRevaluationInput.extend({
     {
       lines: z.number({ error: M.expected }).int(M.expected).min(1, M.expected),
       net_gain: z.string({ error: M.expected }).regex(/^-?\d{1,12}(\.\d{1,2})?$/, M.expected),
+      // The preview's digest of every item: the post refuses (FIN55) when its items differ from what was shown.
+      digest: z.string({ error: M.expected }).regex(/^[0-9a-f]{32}$/, M.expected),
     },
     { error: M.expected },
   ),
@@ -184,6 +205,8 @@ export type RevaluationItem = {
   difference: number | null;
   posted_myr: number | null;
   gain: number | null;
+  /** The preview's digest of every item (the same on each row); null on a stored line. Sent back as `expected.digest`. */
+  digest: string | null;
 };
 
 export type RevaluationRun = {
@@ -208,17 +231,44 @@ export function netGain(lines: Pick<RevaluationItem, 'gain'>[]): number | null {
   return ringgitOf(sum);
 }
 
-/** What the post function expects for these lines, as the preview showed them; null while a rate is missing. */
-export function expectedOf(lines: Pick<RevaluationItem, 'gain'>[]): { lines: number; net_gain: string } | null {
+/**
+ * What the post function expects for these lines, as the preview showed them: their digest, how many and the net
+ * gain. Null while a rate is missing, or when there is nothing (no digest) to post.
+ */
+export function expectedOf(
+  lines: Pick<RevaluationItem, 'gain' | 'digest'>[],
+): { lines: number; net_gain: string; digest: string } | null {
   let sum = BigInt(0);
   for (const l of lines) {
     if (l.gain === null) return null;
     sum += senFromNumber(l.gain);
   }
+  const digest = lines[0]?.digest ?? null;
+  if (digest === null) return null;
   const negative = sum < BigInt(0);
   const abs = negative ? -sum : sum;
   const text = `${negative ? '-' : ''}${abs / BigInt(100)}.${(abs % BigInt(100)).toString().padStart(2, '0')}`;
-  return { lines: lines.length, net_gain: text };
+  return { lines: lines.length, net_gain: text, digest };
+}
+
+/**
+ * The rates a preview used, by currency, in the box's unit (`boxRateText`), with their source and BNM's date: what
+ * `closingRatesInput` takes, so sending a preview's rates back posts exactly the same rates.
+ */
+export function ratesFromPreview(
+  items: Pick<RevaluationItem, 'currency' | 'rate_text' | 'rate_source' | 'rate_date'>[],
+): Record<string, { rate: string; source: 'bnm' | 'manual'; rate_date?: string }> {
+  const out: Record<string, { rate: string; source: 'bnm' | 'manual'; rate_date?: string }> = {};
+  for (const item of items) {
+    if (item.rate_text === null || item.rate_source === null || out[item.currency]) continue;
+    const rate = boxRateText(item.rate_text, item.currency);
+    if (rate === undefined) continue;
+    out[item.currency] =
+      item.rate_source === 'bnm' && item.rate_date
+        ? { rate, source: 'bnm', rate_date: item.rate_date }
+        : { rate, source: 'manual' };
+  }
+  return out;
 }
 
 const num = (v: unknown): number => Number(v);
@@ -244,6 +294,7 @@ function toItem(row: Record<string, unknown>): RevaluationItem {
     difference: numOrNull(row.difference),
     posted_myr: numOrNull(row.posted_myr),
     gain: numOrNull(row.gain),
+    digest: textOrNull(row.digest),
   };
 }
 

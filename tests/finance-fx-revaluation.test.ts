@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   CLOSING_RATE_RULE,
+  boxRateText,
+  ratesFromPreview,
   FX_REVALUATION_MESSAGES as M,
   closingRatesInput,
   expectedOf,
@@ -31,6 +33,7 @@ const body = sql
   .map((l) => l.replace(/--.*$/, ''))
   .join('\n');
 
+const DIGEST = '0123456789abcdef0123456789abcdef';
 const UUID = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const sen = (n: number) => BigInt(Math.round(n * 100));
 const rate = (text: string) => {
@@ -134,8 +137,8 @@ describe('the bigint twin of the arithmetic (worked examples)', () => {
       revaluationLine('account', sen(9000), sen(40240), sen(0), at448)!,
       revaluationLine('account', sen(0), sen(-30), sen(0), null)!,
       revaluationLine('invoice', sen(-100), sen(-420), sen(0), at448)!,
-    ].map((l) => ({ gain: Number(l.gain) / 100 }));
-    expect(expectedOf(gains)).toEqual({ lines: 5, net_gain: '-52.40' });
+    ].map((l) => ({ gain: Number(l.gain) / 100, digest: DIGEST }));
+    expect(expectedOf(gains)).toEqual({ lines: 5, net_gain: '-52.40', digest: DIGEST });
     expect(netGain(gains)).toBe(-52.4);
   });
   it('R6: a second run posts only the change: A posts 0, bill D (SGD 500.00 at 3.45) posts 25.00', () => {
@@ -169,7 +172,9 @@ describe('the bigint twin of the arithmetic (worked examples)', () => {
   });
   it('has no figure for a foreign balance with no rate', () => {
     expect(revaluationLine('invoice', sen(600), sen(2520), sen(0), null)).toBeNull();
-    expect(expectedOf([{ gain: 1 }, { gain: null }])).toBeNull();
+    expect(expectedOf([{ gain: 1, digest: DIGEST }, { gain: null, digest: DIGEST }])).toBeNull();
+    // Nothing to post has no digest to send.
+    expect(expectedOf([])).toBeNull();
     expect(netGain([{ gain: null }])).toBeNull();
   });
 });
@@ -224,13 +229,49 @@ describe('the inputs', () => {
       expect(closingRatesInput.safeParse(rates).success, JSON.stringify(rates)).toBe(false);
     }
   });
-  it('asks a post for what the preview showed: at least one line and a net gain to the sen', () => {
+  it('asks a post for what the preview showed: its digest, at least one line and a net gain to the sen', () => {
     const base = { period_end: '2026-10-31', rates: {} };
-    expect(postFxRevaluationInput.safeParse({ ...base, expected: { lines: 5, net_gain: '-52.40' } }).success).toBe(true);
-    for (const expected of [undefined, { lines: 0, net_gain: '0' }, { lines: 5, net_gain: '-52.400' }, { lines: 5.5, net_gain: '1' }, { lines: 5, net_gain: 'NaN' }]) {
+    expect(postFxRevaluationInput.safeParse({ ...base, expected: { lines: 5, net_gain: '-52.40', digest: DIGEST } }).success).toBe(true);
+    for (const expected of [
+      undefined,
+      { lines: 5, net_gain: '-52.40' },
+      { lines: 5, net_gain: '-52.40', digest: 'not an md5' },
+      { lines: 0, net_gain: '0', digest: DIGEST },
+      { lines: 5, net_gain: '-52.400', digest: DIGEST },
+      { lines: 5.5, net_gain: '1', digest: DIGEST },
+      { lines: 5, net_gain: 'NaN', digest: DIGEST },
+    ]) {
       const r = postFxRevaluationInput.safeParse({ ...base, expected });
       expect(r.success, JSON.stringify(expected)).toBe(false);
     }
+  });
+});
+
+describe('a preview\'s rates go back in the box\'s unit', () => {
+  it('writes a rate per one unit in the box: per 100 for JPY, as it is for USD, exactly', () => {
+    expect(boxRateText('0.0295000000', 'JPY')).toBe('2.95');
+    expect(boxRateText('0.0295000001', 'JPY')).toBe('2.95000001');
+    expect(boxRateText('4.4800000000', 'USD')).toBe('4.48');
+    expect(boxRateText('3', 'SGD')).toBe('3');
+    expect(boxRateText('abc', 'USD')).toBeUndefined();
+  });
+  it('sends a previewed JPY rate back unchanged: the same rate per one unit reaches the database', () => {
+    const items = [
+      { currency: 'JPY', rate_text: '0.0295000000', rate_source: 'bnm' as const, rate_date: '2026-10-30' },
+      { currency: 'JPY', rate_text: '0.0295000000', rate_source: 'bnm' as const, rate_date: '2026-10-30' },
+      { currency: 'USD', rate_text: '4.5000000000', rate_source: 'manual' as const, rate_date: null },
+      { currency: 'SGD', rate_text: null, rate_source: null, rate_date: null },
+    ];
+    expect(ratesFromPreview(items)).toEqual({
+      JPY: { rate: '2.95', source: 'bnm', rate_date: '2026-10-30' },
+      USD: { rate: '4.5', source: 'manual' },
+    });
+    expect(closingRatesInput.parse(ratesFromPreview(items))).toEqual({
+      JPY: { rate: '0.0295000000', source: 'bnm', rate_date: '2026-10-30' },
+      USD: { rate: '4.5000000000', source: 'manual' },
+    });
+    // The trap it closes: rate_text itself in the box would be read per 100.
+    expect(closingRatesInput.parse({ JPY: { rate: '0.0295000000', source: 'manual' } }).JPY.rate).toBe('0.0002950000');
   });
 });
 
@@ -255,7 +296,7 @@ describe('the data layer answers the database in words', () => {
   const post = postFxRevaluationInput.parse({
     period_end: '2026-10-31',
     rates: { USD: { rate: '4.48', source: 'bnm', rate_date: '2026-10-30' }, JPY: { rate: '2.95', source: 'manual' } },
-    expected: { lines: 5, net_gain: '-52.40' },
+    expected: { lines: 5, net_gain: '-52.40', digest: DIGEST },
   });
 
   it('sends the month end, the rates per one unit and the expected figures, and answers the run', async () => {
@@ -272,7 +313,7 @@ describe('the data layer answers the database in words', () => {
               USD: { rate: '4.4800000000', source: 'bnm', rate_date: '2026-10-30' },
               JPY: { rate: '0.0295000000', source: 'manual' },
             },
-            expected: { lines: 5, net_gain: '-52.40' },
+            expected: { lines: 5, net_gain: '-52.40', digest: DIGEST },
           },
         },
       },
@@ -328,7 +369,7 @@ describe('the data layer answers the database in words', () => {
       kind: 'invoice', item_id: UUID(2), reference: 'INV-0001', party: 'Overseas Ltd', currency: 'USD',
       foreign_balance: 600, carried_myr: 2520, earlier_myr: 0, rate_text: '4.4800000000', rate_source: 'bnm',
       rate_date: '2026-10-30', bnm_rate_text: '4.4800000000', bnm_rate_date: '2026-10-30',
-      revalued_myr: 2688, difference: 168, posted_myr: 168, gain: 168,
+      revalued_myr: 2688, difference: 168, posted_myr: 168, gain: 168, digest: DIGEST,
     };
     const { ctx, calls } = fake({ data: [row] });
     const input = previewFxRevaluationInput.parse({ period_end: '2026-10-31' });
