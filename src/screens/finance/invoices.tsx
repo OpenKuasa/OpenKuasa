@@ -18,7 +18,7 @@ import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { listContacts } from '@/lib/finance/contacts';
 import { listCreditNotes } from '@/lib/finance/credit-notes';
 import { listInvoices } from '@/lib/finance/invoices';
-import { listRinggitAccounts, listPaymentsIn } from '@/lib/finance/money';
+import { listAccounts, listPaymentsIn } from '@/lib/finance/money';
 import { listProducts } from '@/lib/finance/products';
 import { listRefunds } from '@/lib/finance/refunds';
 import { invoicesView } from '@/lib/finance/sales-views';
@@ -72,7 +72,8 @@ export default async function InvoicesScreen() {
     listPaymentsIn(ctx),
     canEdit ? listContacts(ctx) : [],
     canEdit ? listProducts(ctx) : [],
-    canEdit ? listRinggitAccounts(ctx) : [],
+    // Stage 5b: every active account; each form offers ringgit ones and those in its documents' currency.
+    canEdit ? listAccounts(ctx) : [],
     canEdit ? readFollowOn(ctx) : null,
   ]);
   return (

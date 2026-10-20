@@ -3,6 +3,7 @@
 import { type FormEvent, useId, useState } from 'react';
 import { Banknote } from 'lucide-react';
 import { BentoCard } from '@/components/bento/bento';
+import { type FxRateLookup, MovementRateFields, accountLabel } from '@/components/finance/movement-rate-fields';
 import { OrderNotes } from '@/components/finance/order-notes';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { Button } from '@/components/ui/button';
@@ -10,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { AllocationFormKind, AllocationFormState, Payable } from '@/lib/finance/allocation-form';
+import { withRateAnswer, withRateTyped } from '@/lib/finance/document-currency';
 import { money } from '@/lib/finance/format';
 import { type FinanceAccount, PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentMethod } from '@/lib/finance/money';
 import type { FinResult } from '@/lib/finance/result';
@@ -32,6 +34,7 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
   preselect,
   notes,
   record,
+  fxRate,
   onClose,
 }: {
   kind: AllocationFormKind<F, D>;
@@ -45,6 +48,8 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
   /** Advice on the documents ticked, as sentences shown under them; never a refusal. Absent for no advice. */
   notes?: (form: F) => string[];
   record: RecordPayment;
+  /** Bank Negara's selling rate for a date, for a payment on an account in another currency (stage 5b). */
+  fxRate?: FxRateLookup;
   onClose: () => void;
 }) {
   const id = useId();
@@ -69,6 +74,11 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
   // A payment that cannot wait (a bill in another currency) is offered no "Schedule for later".
   const schedule = kind.schedule && (kind.schedule.offered?.(form) ?? true) ? kind.schedule : undefined;
   const scheduled = schedule?.is(form) ?? false;
+  // Stage 5b: the accounts offered as the form stands, and the rate when the one chosen is in another currency.
+  const account = kind.account;
+  const offeredAccounts = account ? account.offered(form, accounts) : accounts;
+  const fx = account?.fx(form);
+  const rateAsked = account !== undefined && fx !== undefined && fx.currency !== 'MYR';
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     // Handled here rather than as a form action, so a refused form keeps what was typed.
@@ -231,15 +241,22 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
 
         <div className="space-y-1.5 md:col-span-3">
           <Label htmlFor={`${id}-account`}>{words.account}</Label>
-          <Select value={form.accountId} onValueChange={(v) => edit((f) => ({ ...f, accountId: v }))}>
+          <Select
+            value={form.accountId}
+            onValueChange={(v) =>
+              edit((f) => {
+                const chosen = accounts.find((a) => a.id === v);
+                return chosen && account ? account.choose(f, chosen) : { ...f, accountId: v };
+              })
+            }
+          >
             <SelectTrigger id={`${id}-account`} className="w-full">
               <SelectValue placeholder="Choose an account" />
             </SelectTrigger>
             <SelectContent>
-              {accounts.map((a) => (
+              {offeredAccounts.map((a) => (
                 <SelectItem key={a.id} value={a.id}>
-                  {a.name}
-                  {a.bank_name ? ` · ${a.bank_name}` : ''}
+                  {accountLabel(a)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -281,6 +298,20 @@ export function AllocationFormCard<F extends AllocationFormState, D extends Paya
             onChange={(e) => edit((f) => ({ ...f, reference: e.target.value }))}
           />
         </div>
+        {rateAsked && account && fx ? (
+          <MovementRateFields
+            id={id}
+            className="space-y-1.5 md:col-span-12"
+            fx={fx}
+            date={form.date}
+            fxRate={fxRate}
+            onAnswer={(key, answer) =>
+              setForm((f) => account.setFx(f, withRateAnswer(account.fx(f), f.date, key, answer, true)))
+            }
+            onTyped={(text) => edit((f) => account.setFx(f, withRateTyped(account.fx(f), text)))}
+            notes={account.notes(form, documents)}
+          />
+        ) : null}
         <div className={schedule ? 'space-y-1.5 md:col-span-7' : 'space-y-1.5 md:col-span-12'}>
           <Label htmlFor={`${id}-notes`}>Notes</Label>
           <Input

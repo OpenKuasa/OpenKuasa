@@ -307,13 +307,21 @@ export async function saveCashReceipt(
 export async function recordCashReceipt(
   ctx: FinanceWriteContext,
   input: z.input<typeof recordCashReceiptInput>,
-): Promise<FinResult<{ id: string }>> {
+): Promise<FinResult<{ id: string; number: string }>> {
   const { fx_rate, fx_rate_source, fx_rate_date, ...rest } = recordCashReceiptInput.parse(input);
   // Each rate key is sent only when there is a figure: the database reads a missing key as "none".
   const receipt = { ...rest, ...movementRateKeys({ fx_rate, fx_rate_source, fx_rate_date }) };
   const { data, error } = await ctx.client.rpc('finance_record_cash_receipt', { target_org: ctx.orgId, receipt });
   if (error || !data) return receiptWriteFailed('recordCashReceipt', error, POST_REFUSALS);
-  return { ok: true, data: { id: data as string } };
+  const id = data as string;
+  // Its RC- number, read back for the screen's note; the receipt is recorded either way.
+  const { data: row } = await ctx.client
+    .from('finance_transactions')
+    .select('number')
+    .eq('org_id', ctx.orgId)
+    .eq('id', id)
+    .maybeSingle();
+  return { ok: true, data: { id, number: (row as { number?: string | null } | null)?.number ?? '' } };
 }
 
 /** Posts a draft receipt: it gets its RC- number and is locked. An owner or admin only (FIN14 for anyone else). */

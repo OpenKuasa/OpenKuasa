@@ -365,6 +365,7 @@ export function InvoicesView({
           today={open.today}
           preselect={{ customerId: open.invoice.customer_id, invoiceId: open.invoice.id }}
           record={actions.recordPayment}
+          fxRate={actions.fxRate}
           onClose={close}
         />
       );
@@ -400,6 +401,7 @@ export function InvoicesView({
           today={open.today}
           preselect={invoiceTargetKey(invoice.id)}
           record={actions.recordRefund}
+          fxRate={actions.fxRate}
           onClose={close}
           // The refund is on Refunds; left pending it changes no figure on this screen.
           // The note says what the form recorded: the person may have picked something other than this row.

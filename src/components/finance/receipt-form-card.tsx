@@ -1,6 +1,7 @@
 'use client';
 
 import { AllocationFormCard, type RecordPayment } from '@/components/finance/allocation-form-card';
+import type { FxRateLookup } from '@/components/finance/movement-rate-fields';
 import type { FinanceAccount } from '@/lib/finance/money';
 import { PAYMENT_IN_KIND, type ReceivableInvoice, currencyListNotes } from '@/lib/finance/receipt-form';
 
@@ -17,6 +18,7 @@ export function ReceiptFormCard({
   today,
   preselect,
   record,
+  fxRate,
   onClose,
 }: {
   /** Every invoice that can still take a payment, from `receivableInvoices`. */
@@ -27,6 +29,8 @@ export function ReceiptFormCard({
   /** Opened from an invoice row: that customer chosen and that invoice ticked. */
   preselect?: { customerId: string; invoiceId: string };
   record: RecordPayment;
+  /** Bank Negara's selling rate, for a payment into an account in another currency (stage 5b). */
+  fxRate?: FxRateLookup;
   onClose: () => void;
 }) {
   return (
@@ -38,6 +42,7 @@ export function ReceiptFormCard({
       preselect={preselect ? { partyId: preselect.customerId, documentId: preselect.invoiceId } : undefined}
       notes={(form) => currencyListNotes(form, receivable)}
       record={record}
+      fxRate={fxRate}
       onClose={onClose}
     />
   );

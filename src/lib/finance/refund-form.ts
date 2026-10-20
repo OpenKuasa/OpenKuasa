@@ -17,9 +17,18 @@
 import { amountText, defaultAccount, sen } from './allocation-form';
 import type { CreditNoteRow } from './credit-notes';
 import { BASE_CURRENCY, minorUnits } from './currencies';
-import { CURRENCY_MESSAGES } from './document-currency';
+import { CURRENCY_MESSAGES, type CurrencyFields, ringgitFields } from './document-currency';
 import { money, rm, typedNumber } from './format';
 import { refundPreview } from './fx-settlement';
+import {
+  fxForAccount,
+  movementAccounts,
+  movementRateError,
+  movementRatePayload,
+  movementRinggit,
+  movementRinggitNote,
+  onForeignAccount,
+} from './movement-rate';
 import type { InvoiceListRow } from './invoices';
 import type { FinanceAccount, PaymentMethod } from './money';
 import { REFUND_MESSAGES, type RefundReason, type RefundRow, recordRefundInput } from './refunds';
@@ -68,6 +77,11 @@ export type RefundForm = {
   notes: string;
   /** True for a refund still to be paid out: it holds the customer's credit until it is marked paid or deleted. */
   scheduled: boolean;
+  /**
+   * The chosen account's currency and the movement's rate (stage 5b): from an account in another currency the
+   * refund is in that currency, for an invoice in it, paid out now. Absent (rows made by hand): ringgit.
+   */
+  fx?: CurrencyFields;
 };
 
 export const invoiceTargetKey = (invoiceId: string) => `invoice:${invoiceId}`;
@@ -176,6 +190,7 @@ export function newRefundForm(targets: RefundTarget[], accounts: FinanceAccount[
     reference: '',
     notes: '',
     scheduled: false,
+    fx: ringgitFields(),
   };
 }
 
@@ -185,7 +200,7 @@ export function newRefundForm(targets: RefundTarget[], accounts: FinanceAccount[
  */
 export function chooseRefundTarget(form: RefundForm, target: RefundTarget): RefundForm {
   if (target.key === form.target) return form;
-  const foreign = target.currency !== BASE_CURRENCY;
+  const foreign = target.currency !== BASE_CURRENCY || onForeignAccount(form.fx);
   return {
     ...form,
     target: target.key,
@@ -199,6 +214,47 @@ export function chooseRefundTarget(form: RefundForm, target: RefundTarget): Refu
 export function foreignRefundTarget(form: RefundForm, targets: RefundTarget[]): RefundTarget | null {
   const target = targets.find((t) => t.key === form.target);
   return target && target.currency !== BASE_CURRENCY ? target : null;
+}
+
+/** True when the refund is from an account in another currency (stage 5b): the rate is asked, and it is paid out now. */
+export function refundFromForeignAccount(form: Pick<RefundForm, 'fx'>): boolean {
+  return onForeignAccount(form.fx);
+}
+
+/** The ringgit box is asked for an invoice in another currency refunded from a ringgit account. */
+export function refundNeedsRinggit(form: RefundForm, targets: RefundTarget[]): boolean {
+  return foreignRefundTarget(form, targets) !== null && !refundFromForeignAccount(form);
+}
+
+/** What can be refunded as the form stands: from an account in another currency, invoices in that currency only (FIN51). */
+export function offeredRefundTargets(form: RefundForm, targets: RefundTarget[]): RefundTarget[] {
+  return refundFromForeignAccount(form) ? targets.filter((t) => t.currency === form.fx?.currency) : targets;
+}
+
+/**
+ * The accounts the form offers (stage 5b): the ringgit ones, and those in the chosen invoice's currency when it is
+ * another one (the account chosen stays offered).
+ */
+export function refundAccounts(form: RefundForm, targets: RefundTarget[], accounts: FinanceAccount[]): FinanceAccount[] {
+  return movementAccounts(accounts, targets.find((t) => t.key === form.target)?.currency ?? null, form.accountId);
+}
+
+/**
+ * The account chosen. One in another currency takes the rate box in its currency and is paid out now; an invoice in
+ * another currency than the account's is no longer the one chosen.
+ */
+export function chooseRefundAccount(form: RefundForm, account: FinanceAccount, targets: RefundTarget[]): RefundForm {
+  const fx = fxForAccount(form.fx, account.currency);
+  const next = { ...form, accountId: account.id, fx };
+  if (!onForeignAccount(fx)) return next;
+  const target = targets.find((t) => t.key === form.target);
+  const keep = target !== undefined && target.currency === account.currency;
+  return { ...next, ringgit: '', scheduled: false, ...(keep ? {} : { target: '', amount: '' }) };
+}
+
+/** The rate part, as typed or as BNM's answer left it. */
+export function withRefundFx(form: RefundForm, fx: CurrencyFields): RefundForm {
+  return { ...form, fx };
 }
 
 /** The ringgit box, as typed. */
@@ -219,18 +275,23 @@ export function refundAmountLabel(form: RefundForm, targets: RefundTarget[]): st
 export function refundPreviewNotes(form: RefundForm, targets: RefundTarget[]): string[] {
   const target = foreignRefundTarget(form, targets);
   if (!target) return [];
+  // Stage 5b: from an account in another currency, the ringgit is the amount at the movement's rate.
+  const onAccount = refundFromForeignAccount(form);
+  const ringgit = onAccount ? movementRinggit(form.amount, form.fx) : form.ringgit.replace(/,/g, '').trim();
+  const lead = onAccount ? [movementRinggitNote(form.amount, form.fx)].filter((n): n is string => n !== null) : [];
+  if (ringgit === null) return lead;
   const preview = refundPreview(
-    form.ringgit.replace(/,/g, '').trim(),
+    ringgit,
     form.amount.replace(/,/g, '').trim(),
     target.fx_rate_text,
     target.credit,
     target.credit_myr,
   );
-  if (!preview) return [];
+  if (!preview) return lead;
   const at = `The invoice carries about ${rm(preview.carried)} for what is refunded.`;
-  if (preview.realised === 0) return [at, 'No exchange gain or loss.'];
+  if (preview.realised === 0) return [...lead, at, 'No exchange gain or loss.'];
   const word = preview.realised > 0 ? 'gain' : 'loss';
-  return [at, `Realised exchange ${word} of about ${rm(Math.abs(preview.realised))}.`];
+  return [...lead, at, `Realised exchange ${word} of about ${rm(Math.abs(preview.realised))}.`];
 }
 
 /**
@@ -249,9 +310,10 @@ export function keepRefundTarget(form: RefundForm, targets: RefundTarget[]): Ref
  */
 export function refundPayload(form: RefundForm, targets: RefundTarget[]) {
   const target = targets.find((t) => t.key === form.target);
-  // For an invoice in another currency the ringgit paid out goes as the text typed (commas dropped), so no float
-  // stands between the box and the database.
-  const foreign = target !== undefined && target.currency !== BASE_CURRENCY;
+  // For an invoice in another currency refunded from a ringgit account the ringgit paid out goes as the text typed
+  // (commas dropped), so no float stands between the box and the database. From an account in another currency
+  // (stage 5b) the rate goes instead.
+  const foreign = target !== undefined && target.currency !== BASE_CURRENCY && !refundFromForeignAccount(form);
   return {
     invoice_id: target?.kind === 'invoice' ? target.id : null,
     credit_note_id: target?.kind === 'credit_note' ? target.id : null,
@@ -264,6 +326,7 @@ export function refundPayload(form: RefundForm, targets: RefundTarget[]) {
     notes: form.notes,
     scheduled: form.scheduled,
     ...(foreign ? { amount_myr: form.ringgit.replace(/,/g, '').trim() } : {}),
+    ...movementRatePayload(form.fx),
   };
 }
 
@@ -289,9 +352,9 @@ export type RefundSaved = {
 export function refundSaved(form: RefundForm, targets: RefundTarget[]): RefundSaved | null {
   const target = targets.find((t) => t.key === form.target);
   const parsed = recordRefundInput.safeParse(refundPayload(form, targets));
-  return target && parsed.success
-    ? { target, amount: parsed.data.amount, ringgit: parsed.data.amount_myr ?? null, scheduled: parsed.data.scheduled }
-    : null;
+  // From an account in another currency (stage 5b) the ringgit is the amount at the rate, as the database works it.
+  const ringgit = parsed.success ? (parsed.data.amount_myr ?? movementRinggit(form.amount, form.fx)) : null;
+  return target && parsed.success ? { target, amount: parsed.data.amount, ringgit, scheduled: parsed.data.scheduled } : null;
 }
 
 /**
@@ -326,6 +389,13 @@ export function refundSavedNote(saved: RefundSaved): { subtitle: string; lead: s
 export function refundFormError(form: RefundForm, targets: RefundTarget[]): string | null {
   const target = targets.find((t) => t.key === form.target);
   if (!target) return M.document;
+  // Stage 5b: from an account in another currency, an invoice in that currency, paid out now, with the rate.
+  if (refundFromForeignAccount(form)) {
+    if (form.scheduled) return M.payNowAccount;
+    if (target.currency !== form.fx?.currency) return M.foreignAccountInvoice;
+    const rate = movementRateError(form.fx);
+    if (rate) return rate;
+  }
   // An invoice in another currency is refunded now (FIN47): the difference is decided when the money moves.
   if (target.currency !== BASE_CURRENCY && form.scheduled) return M.payNow;
   const parsed = recordRefundInput.safeParse(refundPayload(form, targets));

@@ -3,6 +3,7 @@
 import { type FormEvent, useId, useState } from 'react';
 import { Banknote } from 'lucide-react';
 import { BentoCard } from '@/components/bento/bento';
+import { type FxRateLookup, MovementRateFields, accountLabel } from '@/components/finance/movement-rate-fields';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,21 +14,29 @@ import {
   type CashReceiptForm,
   TYPED_PAYER,
   afterRefusedReceiptSave,
+  cashReceiptAccounts,
   cashReceiptFormError,
   cashReceiptPayload,
+  cashReceiptRateNotes,
   cashReceiptTotal,
+  chooseCashReceiptAccount,
+  chooseCashReceiptKind,
   chooseReceiptCustomer,
   editCashReceiptForm,
   keepReceiptInvoices,
   leftOutInvoicesNote,
   newCashReceiptForm,
+  receiptOnForeignAccount,
   receiptSavedNotPosted,
   receivableFor,
+  recordCashReceiptPayload,
   toggleAllReceiptInvoices,
   toggleReceiptInvoice,
+  withCashReceiptFx,
   withCurrent,
 } from '@/lib/finance/cash-receipt-form';
-import type { IncomeCategory, SaveAndPostCashReceiptResult } from '@/lib/finance/cash-receipts';
+import { CASH_RECEIPT_MESSAGES, type IncomeCategory, type SaveAndPostCashReceiptResult } from '@/lib/finance/cash-receipts';
+import { ringgitFields, withRateAnswer, withRateTyped } from '@/lib/finance/document-currency';
 import { rm } from '@/lib/finance/format';
 import type { InvoiceListRow } from '@/lib/finance/invoices';
 import {
@@ -38,12 +47,16 @@ import {
   type PaymentMethod,
 } from '@/lib/finance/money';
 import { PAYMENT_IN_KIND, invoicesOf, receiptCustomers } from '@/lib/finance/receipt-form';
-import type { FinResult } from '@/lib/finance/result';
+import { type FinResult, WRITE_FAILED } from '@/lib/finance/result';
 import { displayDate } from '@/lib/finance/view-helpers';
 
 export type CashReceiptFormActions = {
   save: (input: unknown) => Promise<FinResult<{ id: string }>>;
   saveAndPost: (input: unknown) => Promise<SaveAndPostCashReceiptResult>;
+  /** Records income into an account in another currency and posts it at once, with its rate (stage 5b). */
+  record?: (input: unknown) => Promise<FinResult<{ id: string; number: string }>>;
+  /** Bank Negara's selling rate, for that rate. */
+  fxRate?: FxRateLookup;
 };
 
 const KIND_LABELS: Record<CashReceiptKind, string> = {
@@ -111,6 +124,9 @@ export function CashReceiptFormCard({
   const offered = invoicesOf(receivable, form.customerId);
   const tickedCount = Object.keys(form.amounts).length;
   const leftOut = leftOutInvoicesNote(typed, receivable);
+  // Stage 5b: into an account in another currency, income only, recorded at once with its rate.
+  const onAccount = receiptOnForeignAccount(form);
+  const fx = form.fx ?? ringgitFields();
 
   // A draft may name an account, a contact, a category or a customer that is no longer offered: it stays the draft's.
   const accountChoices = withCurrent(
@@ -135,13 +151,27 @@ export function CashReceiptFormCard({
   );
 
   const send = (post: boolean) => {
-    const problem = cashReceiptFormError(form, receivable);
+    const problem = cashReceiptFormError(form, receivable, canSignOff);
     if (problem) {
       save.fail(problem);
       return;
     }
-    const payload = cashReceiptPayload(form);
     const date = form.date;
+    // Into an account in another currency: recorded and posted in one call, never a draft (stage 5b).
+    if (onAccount) {
+      const record = actions.record;
+      if (!record) {
+        save.fail(WRITE_FAILED);
+        return;
+      }
+      setPosting(true);
+      save.run(
+        () => record(recordCashReceiptPayload(form)),
+        (posted) => onClose({ id: posted.id, number: posted.number, date }),
+      );
+      return;
+    }
+    const payload = cashReceiptPayload(form);
     setPosting(post);
     // A draft that someone deleted meanwhile is offered again as a new receipt.
     const forgetGone = <R extends FinResult<unknown>>(result: R): R => {
@@ -171,9 +201,10 @@ export function CashReceiptFormCard({
   };
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
-    // Handled here rather than as a form action, so a refused form keeps what was typed.
+    // Handled here rather than as a form action, so a refused form keeps what was typed. Into an account in another
+    // currency there is no draft: the one button records it.
     event.preventDefault();
-    send(false);
+    send(onAccount);
   };
 
   return (
@@ -194,7 +225,7 @@ export function CashReceiptFormCard({
                   name={`${id}-kind`}
                   className="size-4 accent-primary"
                   checked={form.kind === kind}
-                  onChange={() => edit((f) => ({ ...f, kind }))}
+                  onChange={() => edit((f) => chooseCashReceiptKind(f, kind))}
                   // The choice that is checked takes focus when a row's menu opens the card, so a key press does not change it.
                   autoFocus={form.kind === kind}
                   data-finance-focus={form.kind === kind ? '' : undefined}
@@ -203,6 +234,9 @@ export function CashReceiptFormCard({
               </label>
             ))}
           </div>
+          {onAccount ? (
+            <p className="text-xs text-muted-foreground">{CASH_RECEIPT_MESSAGES.invoicesOnInvoices(fx.currency)}</p>
+          ) : null}
         </fieldset>
 
         {forInvoices ? (
@@ -358,7 +392,7 @@ export function CashReceiptFormCard({
               </Select>
             </div>
             <div className="space-y-1.5 md:col-span-3">
-              <Label htmlFor={`${id}-amount`}>Amount (RM)</Label>
+              <Label htmlFor={`${id}-amount`}>Amount ({onAccount ? fx.currency : 'RM'})</Label>
               <Input
                 id={`${id}-amount`}
                 type="number"
@@ -380,15 +414,20 @@ export function CashReceiptFormCard({
 
         <div className="space-y-1.5 md:col-span-3">
           <Label htmlFor={`${id}-account`}>Paid into</Label>
-          <Select value={form.accountId} onValueChange={(v) => edit((f) => ({ ...f, accountId: v }))}>
+          <Select
+            value={form.accountId}
+            onValueChange={(v) => {
+              const chosen = accountChoices.find((a) => a.id === v);
+              if (chosen) edit((f) => chooseCashReceiptAccount(f, chosen));
+            }}
+          >
             <SelectTrigger id={`${id}-account`} className="w-full">
               <SelectValue placeholder="Choose an account" />
             </SelectTrigger>
             <SelectContent>
-              {accountChoices.map((a) => (
+              {cashReceiptAccounts(form, accountChoices).map((a) => (
                 <SelectItem key={a.id} value={a.id}>
-                  {a.name}
-                  {a.bank_name ? ` · ${a.bank_name}` : ''}
+                  {accountLabel(a)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -430,6 +469,20 @@ export function CashReceiptFormCard({
             onChange={(e) => edit((f) => ({ ...f, reference: e.target.value }))}
           />
         </div>
+        {onAccount ? (
+          <MovementRateFields
+            id={id}
+            className="space-y-1.5 md:col-span-12"
+            fx={fx}
+            date={form.date}
+            fxRate={actions.fxRate}
+            onAnswer={(key, answer) =>
+              setForm((f) => withCashReceiptFx(f, withRateAnswer(f.fx ?? ringgitFields(), f.date, key, answer, true)))
+            }
+            onTyped={(text) => edit((f) => withCashReceiptFx(f, withRateTyped(f.fx ?? ringgitFields(), text)))}
+            notes={cashReceiptRateNotes(form)}
+          />
+        ) : null}
         <div className="space-y-1.5 md:col-span-12">
           <Label htmlFor={`${id}-notes`}>Notes</Label>
           <Input
@@ -442,17 +495,29 @@ export function CashReceiptFormCard({
         </div>
 
         <p className="text-xs text-muted-foreground md:col-span-12">
-          {canSignOff
-            ? 'A draft has no number and counts as nothing received until it is posted.'
-            : 'You can save this as a draft. An owner or admin posts it: until then it has no number and counts as nothing received.'}
+          {onAccount
+            ? canSignOff
+              ? 'Income into an account in another currency is recorded as received and posted at once, at the rate above: there is no draft.'
+              : CASH_RECEIPT_MESSAGES.postedByDecider
+            : canSignOff
+              ? 'A draft has no number and counts as nothing received until it is posted.'
+              : 'You can save this as a draft. An owner or admin posts it: until then it has no number and counts as nothing received.'}
           {forInvoices ? ' While it is a draft it holds its part of each invoice, so nobody else can receive that part.' : ''}
         </p>
 
         <div className="flex flex-wrap items-center gap-3 md:col-span-12">
-          <Button type="submit" size="sm" variant={canSignOff ? 'outline' : 'default'} disabled={save.pending}>
-            {save.pending && !posting ? 'Saving…' : 'Save draft'}
-          </Button>
-          {canSignOff ? (
+          {onAccount ? (
+            canSignOff ? (
+              <Button type="submit" size="sm" disabled={save.pending}>
+                {save.pending ? 'Recording…' : 'Record receipt'}
+              </Button>
+            ) : null
+          ) : (
+            <Button type="submit" size="sm" variant={canSignOff ? 'outline' : 'default'} disabled={save.pending}>
+              {save.pending && !posting ? 'Saving…' : 'Save draft'}
+            </Button>
+          )}
+          {canSignOff && !onAccount ? (
             <Button type="button" size="sm" disabled={save.pending} onClick={() => send(true)}>
               {save.pending && posting ? 'Posting…' : 'Post receipt'}
             </Button>

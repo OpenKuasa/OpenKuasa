@@ -10,6 +10,10 @@
  * bill ticked sets it, and only that currency's bills are offered until every
  * tick is cleared. Ticking a foreign bill takes the payment off "Schedule for
  * later" (FIN47), and the card does not offer it for one.
+ *
+ * Stage 5b: bills in another currency may also be paid from an account in that currency. The account picker then
+ * lists it beside the ringgit ones; choosing it offers that currency's bills only, asks no ringgit but the
+ * movement's rate (BNM's selling rate for the date, or typed), and pays now.
  */
 import {
   type AllocationFormKind,
@@ -27,9 +31,18 @@ import {
 } from './allocation-form';
 import { BILL_MESSAGES, type BillListRow } from './bills';
 import { BASE_CURRENCY, minorUnits } from './currencies';
-import { CURRENCY_MESSAGES } from './document-currency';
+import { CURRENCY_MESSAGES, type CurrencyFields, ringgitFields } from './document-currency';
 import { money, rm, typedNumber } from './format';
 import { billPaymentPreview } from './fx-settlement';
+import {
+  fxForAccount,
+  movementAccounts,
+  movementRateError,
+  movementRatePayload,
+  movementRinggit,
+  movementRinggitNote,
+  onForeignAccount,
+} from './movement-rate';
 import {
   type FinanceAccount,
   MONEY_MESSAGES,
@@ -81,6 +94,8 @@ export type PaymentForm = {
   notes: string;
   /** False to pay now; true to schedule for later. */
   scheduled: boolean;
+  /** The chosen account's currency and the movement's rate (stage 5b); ringgit, with no rate, on a ringgit account. */
+  fx: CurrencyFields;
 };
 
 /**
@@ -174,6 +189,7 @@ export function newPaymentForm(
     reference: '',
     notes: '',
     scheduled: false,
+    fx: ringgitFields(),
   };
 }
 
@@ -187,10 +203,18 @@ export function paymentCurrency(form: PaymentForm): string | null {
   return Object.keys(form.amounts).length > 0 ? form.currency : null;
 }
 
-/** True when the ticked bills are in another currency, so the ringgit paid out is asked for and it is paid now. */
+/** True when the payment is from an account in another currency (stage 5b): the rate is asked, and it is paid now. */
+export function fromForeignAccount(form: Pick<PaymentForm, 'fx'>): boolean {
+  return onForeignAccount(form.fx);
+}
+
+/**
+ * True when the ticked bills are in another currency and paid from a ringgit account, so the ringgit paid out is
+ * asked for and it is paid now.
+ */
 export function needsRinggit(form: PaymentForm): boolean {
   const currency = paymentCurrency(form);
-  return currency !== null && currency !== BASE_CURRENCY;
+  return currency !== null && currency !== BASE_CURRENCY && !fromForeignAccount(form);
 }
 
 /**
@@ -199,13 +223,39 @@ export function needsRinggit(form: PaymentForm): boolean {
  */
 export function offeredBills(form: PaymentForm, payable: PayableBill[]): PayableBill[] {
   const mine = billsOf(payable, form.supplierId);
-  const currency = paymentCurrency(form);
+  // Stage 5b: from an account in another currency, that currency's bills only (FIN51).
+  const currency = fromForeignAccount(form) ? form.fx.currency : paymentCurrency(form);
   return currency === null ? mine : mine.filter((b) => b.currency === currency);
 }
 
-/** A foreign bill is paid now (FIN47): a payment of one is never left on "Schedule for later". */
+/** A foreign bill, or any payment from an account in another currency, is paid now (FIN47): never "Schedule for later". */
 function paidNowIfForeign(form: PaymentForm): PaymentForm {
-  return needsRinggit(form) && form.scheduled ? { ...form, scheduled: false } : form;
+  return (needsRinggit(form) || fromForeignAccount(form)) && form.scheduled ? { ...form, scheduled: false } : form;
+}
+
+/**
+ * The accounts the form offers (stage 5b): the ringgit ones, and those in the ticked bills' currency when it is
+ * another one (the account chosen stays offered).
+ */
+export function paymentAccounts(form: PaymentForm, accounts: FinanceAccount[]): FinanceAccount[] {
+  return movementAccounts(accounts, paymentCurrency(form), form.accountId);
+}
+
+/**
+ * The account chosen. One in another currency takes the rate box in its currency, keeps only the ticked bills in
+ * that currency, and pays now; a ringgit one drops the rate.
+ */
+export function choosePaymentAccount(form: PaymentForm, account: FinanceAccount): PaymentForm {
+  const fx = fxForAccount(form.fx, account.currency);
+  const next = { ...form, accountId: account.id, fx };
+  if (!onForeignAccount(fx)) return next;
+  const keep = paymentCurrency(form) === account.currency;
+  return paidNowIfForeign({ ...next, currency: account.currency, ringgit: '', ...(keep ? {} : { amounts: {} }) });
+}
+
+/** The rate part, as typed or as BNM's answer left it. */
+export function withPaymentFx(form: PaymentForm, fx: CurrencyFields): PaymentForm {
+  return { ...form, fx };
 }
 
 /**
@@ -257,17 +307,15 @@ export function paymentPayload(form: PaymentForm) {
     notes: form.notes,
     scheduled: form.scheduled,
     ...(needsRinggit(form) ? { amount_myr: form.ringgit.replace(/,/g, '').trim() } : {}),
+    // Stage 5b: from an account in another currency, the movement's rate.
+    ...movementRatePayload(form.fx),
     allocations: typedAmounts(form.amounts).map(({ id, amount }) => ({ bill_id: id, amount })),
   };
 }
 
-/**
- * Under the ringgit box: what the database will make of the payment, worked in whole sen (fx-settlement.ts), as
- * "about" (a payment posted first can change it). Empty for ringgit and while a figure is not a number.
- */
-export function paymentPreview(form: PaymentForm, payable: PayableBill[]): string[] {
-  if (!needsRinggit(form)) return [];
-  const parts = Object.entries(form.amounts).map(([id, amount]) => {
+/** The parts of a payment as the previews read them: each ticked bill's amount, rate and what is still open on it. */
+function previewParts(form: PaymentForm, payable: PayableBill[]) {
+  return Object.entries(form.amounts).map(([id, amount]) => {
     const bill = payable.find((b) => b.id === id);
     return {
       id,
@@ -277,12 +325,38 @@ export function paymentPreview(form: PaymentForm, payable: PayableBill[]): strin
       openRinggit: bill?.balance_myr ?? 0,
     };
   });
-  const preview = billPaymentPreview(form.ringgit.replace(/,/g, ''), parts);
-  if (!preview) return [];
+}
+
+/** The realised difference of a preview, in the form's words. */
+function previewWords(preview: { parts: unknown[]; carried: number; realised: number }): string[] {
   const at = `The ${preview.parts.length === 1 ? 'bill carries' : 'bills carry'} about ${rm(preview.carried)} for what is paid.`;
   if (preview.realised === 0) return [at, 'No exchange gain or loss.'];
   const word = preview.realised > 0 ? 'gain' : 'loss';
   return [at, `Realised exchange ${word} of about ${rm(Math.abs(preview.realised))}.`];
+}
+
+/**
+ * Under the rate box, on an account in another currency (stage 5b): what the payment comes to in ringgit at the
+ * rate, and what the database will make of it, worked in whole sen through the same preview as a ringgit payment
+ * of foreign bills, with the movement's ringgit (`movementRinggit`), as "about". Empty while a figure is not a number.
+ */
+export function paymentAccountNotes(form: PaymentForm, payable: PayableBill[]): string[] {
+  if (!fromForeignAccount(form) || paymentCurrency(form) === null) return [];
+  const total = amountText(paymentTotal(form));
+  const notes = [movementRinggitNote(total, form.fx)].filter((n): n is string => n !== null);
+  const ringgit = movementRinggit(total, form.fx);
+  const preview = ringgit === null ? null : billPaymentPreview(ringgit, previewParts(form, payable));
+  return preview ? [...notes, ...previewWords(preview)] : notes;
+}
+
+/**
+ * Under the ringgit box: what the database will make of the payment, worked in whole sen (fx-settlement.ts), as
+ * "about" (a payment posted first can change it). Empty for ringgit and while a figure is not a number.
+ */
+export function paymentPreview(form: PaymentForm, payable: PayableBill[]): string[] {
+  if (!needsRinggit(form)) return [];
+  const preview = billPaymentPreview(form.ringgit.replace(/,/g, ''), previewParts(form, payable));
+  return preview ? previewWords(preview) : [];
 }
 
 /**
@@ -302,6 +376,13 @@ export function paymentFormError(form: PaymentForm, payable: PayableBill[]): str
   }
   // A bill in another currency is paid now (FIN47); the form never offers scheduling one.
   if (needsRinggit(form) && form.scheduled) return MONEY_MESSAGES.payNow;
+  // Stage 5b: from an account in another currency it is paid now too, and needs its rate.
+  if (fromForeignAccount(form)) {
+    if (form.scheduled) return MONEY_MESSAGES.payNowAccount;
+    if (currency !== null && currency !== form.fx.currency) return MONEY_MESSAGES.foreignAccountBills;
+    const rate = movementRateError(form.fx);
+    if (rate) return rate;
+  }
   const parsed = recordPaymentOutInput.safeParse(paymentPayload(form));
   return parsed.success ? null : (parsed.error.issues[0]?.message ?? MONEY_MESSAGES.amount);
 }
@@ -346,11 +427,12 @@ export const PAYMENT_OUT_KIND: AllocationFormKind<PaymentForm, PayableBill> = {
   schedule: {
     is: (form) => form.scheduled,
     set: (form, scheduled) => ({ ...form, scheduled }),
-    // A bill in another currency is paid now (FIN47): the realised difference is decided when the money moves.
-    offered: (form) => !needsRinggit(form),
+    // A bill in another currency, or any payment from an account in another currency, is paid now (FIN47): the
+    // realised difference is decided when the money moves.
+    offered: (form) => !needsRinggit(form) && !fromForeignAccount(form),
   },
   currency: {
-    of: (form) => paymentCurrency(form) ?? BASE_CURRENCY,
+    of: (form) => (fromForeignAccount(form) ? form.fx.currency : (paymentCurrency(form) ?? BASE_CURRENCY)),
     offered: offeredBills,
     ringgit: {
       needed: needsRinggit,
@@ -360,5 +442,12 @@ export const PAYMENT_OUT_KIND: AllocationFormKind<PaymentForm, PayableBill> = {
       hint: 'What left the account, in RM. The amounts above are in the bills’ currency. A bill in another currency is paid now.',
       notes: paymentPreview,
     },
+  },
+  account: {
+    offered: paymentAccounts,
+    choose: choosePaymentAccount,
+    fx: (form) => form.fx,
+    setFx: withPaymentFx,
+    notes: paymentAccountNotes,
   },
 };

@@ -1,5 +1,6 @@
 import {
   deleteRefundAction,
+  fxSstRateForAction,
   markRefundPaidAction,
   recordRefundAction,
   voidRefundAction,
@@ -9,7 +10,7 @@ import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { listCreditNotes } from '@/lib/finance/credit-notes';
 import { listInvoices } from '@/lib/finance/invoices';
-import { listRinggitAccounts } from '@/lib/finance/money';
+import { listAccounts } from '@/lib/finance/money';
 import { listRefunds } from '@/lib/finance/refunds';
 import { refundsView } from '@/lib/finance/sales-followon-views';
 import { todayUtc } from '@/lib/finance/view-helpers';
@@ -21,6 +22,7 @@ const ACTIONS: RefundActions = {
   markPaid: markRefundPaidAction,
   voidRefund: voidRefundAction,
   remove: deleteRefundAction,
+  fxRate: fxSstRateForAction,
 };
 
 export default async function RefundsScreen() {
@@ -36,7 +38,8 @@ export default async function RefundsScreen() {
     listRefunds(ctx),
     listInvoices(ctx),
     canEdit ? listCreditNotes(ctx) : [],
-    canEdit ? listRinggitAccounts(ctx) : [],
+    // Stage 5b: every active account; each form offers ringgit ones and those in its documents' currency.
+    canEdit ? listAccounts(ctx) : [],
   ]);
   return (
     <RefundsView

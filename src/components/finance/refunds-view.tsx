@@ -26,6 +26,7 @@ import { type FinanceAccount, markPaymentPaidInput } from '@/lib/finance/money';
 import { refundTargets } from '@/lib/finance/refund-form';
 import { REFUND_REASON_LABELS, type RefundRow } from '@/lib/finance/refunds';
 import type { FinResult } from '@/lib/finance/result';
+import type { FxRateLookup } from '@/components/finance/movement-rate-fields';
 import {
   REFUND_STATUS_LABELS,
   type RefundAction,
@@ -44,6 +45,8 @@ export type RefundActions = {
   markPaid: (input: unknown) => Promise<FinResult<{ id: string; number: string }>>;
   voidRefund: (input: unknown) => Promise<FinResult<{ id: string }>>;
   remove: (input: unknown) => Promise<FinResult<{ id: string }>>;
+  /** Bank Negara's selling rate, for a payment on an account in another currency (stage 5b). */
+  fxRate?: FxRateLookup;
 };
 
 /** What only a person who may edit is given: the actions, and what the refund form offers. */
@@ -250,6 +253,7 @@ export function RefundsView({
             accounts={writer.accounts}
             today={open.today}
             record={writer.actions.record}
+            fxRate={writer.actions.fxRate}
             onClose={close}
           />
         ) : null}

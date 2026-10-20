@@ -6,13 +6,20 @@
  * customer's invoices or for an income category; the form holds both sides
  * while it is open, so switching between them loses nothing typed, and sends
  * only the side that is chosen.
+ *
+ * Stage 5b: a new receipt for income may go into an account in another currency, in that currency, with the
+ * movement's rate. A draft cannot carry a rate (FIN50), so such a receipt is recorded and posted at once
+ * (`recordCashReceipt`), by an owner or admin; invoices are not offered there (they are paid on Invoices).
  */
 import { amountText, amountsError, amountsTotal, defaultAccount, keptOffered, sen, ticked, tickedAll, typedAmounts } from './allocation-form';
 import type { CashReceiptKind, CashReceiptRow } from './cash-book';
-import { CASH_RECEIPT_MESSAGES, type IncomeCategory, saveCashReceiptInput } from './cash-receipts';
+import { CASH_RECEIPT_MESSAGES, type IncomeCategory, recordCashReceiptInput, saveCashReceiptInput } from './cash-receipts';
+import { BASE_CURRENCY } from './currencies';
+import { type CurrencyFields, ringgitFields } from './document-currency';
 import { typedNumber } from './format';
 import { INVOICE_MESSAGES, type InvoiceListRow } from './invoices';
 import type { FinanceAccount, PaymentInRow, PaymentMethod } from './money';
+import { fxForAccount, movementRateError, movementRatePayload, movementRinggitNote, onForeignAccount } from './movement-rate';
 import { type ReceivableInvoice, invoicesOf, receiptCustomers, receivableInvoices } from './receipt-form';
 import { DRAFT_NEEDS_SIGN_OFF, WRITE_FAILED } from './result';
 
@@ -39,6 +46,8 @@ export type CashReceiptForm = {
   method: PaymentMethod;
   reference: string;
   notes: string;
+  /** The chosen account's currency and the movement's rate (stage 5b). Absent, or ringgit: a ringgit account. */
+  fx?: CurrencyFields;
 };
 
 /**
@@ -103,6 +112,7 @@ export function newCashReceiptForm(
     method: 'bank_transfer',
     reference: '',
     notes: '',
+    fx: ringgitFields(),
   };
 }
 
@@ -141,6 +151,68 @@ export function editCashReceiptForm(row: CashReceiptRow, payments: PaymentInRow[
 export function withCurrent<T extends { id: string }>(items: T[], current?: T | null): T[] {
   if (!current || items.some((item) => item.id === current.id)) return items;
   return [current, ...items];
+}
+
+/** True when the receipt is into an account in another currency (stage 5b): income only, recorded at once with its rate. */
+export function receiptOnForeignAccount(form: Pick<CashReceiptForm, 'fx'>): boolean {
+  return onForeignAccount(form.fx);
+}
+
+/**
+ * The accounts the form offers (stage 5b): every account for a new receipt for income (one in another currency is
+ * recorded at once, with its rate); ringgit accounts for a receipt for invoices and for a draft being changed
+ * (FIN50 there), with the account already chosen.
+ */
+export function cashReceiptAccounts(form: Pick<CashReceiptForm, 'kind' | 'id' | 'accountId'>, accounts: FinanceAccount[]): FinanceAccount[] {
+  if (form.kind === 'income' && !form.id) return accounts;
+  return accounts.filter((a) => a.currency === BASE_CURRENCY || a.id === form.accountId);
+}
+
+/** The account chosen. One in another currency takes the rate box in its currency, and the receipt is for income. */
+export function chooseCashReceiptAccount(form: CashReceiptForm, account: FinanceAccount): CashReceiptForm {
+  const fx = fxForAccount(form.fx, account.currency);
+  return { ...form, accountId: account.id, fx, ...(onForeignAccount(fx) ? { kind: 'income' as const } : {}) };
+}
+
+/**
+ * Choosing what the receipt is for. Invoices go into a ringgit account (stage 5b): an account in another currency is
+ * let go, and one is chosen again.
+ */
+export function chooseCashReceiptKind(form: CashReceiptForm, kind: CashReceiptKind): CashReceiptForm {
+  if (kind === form.kind) return form;
+  if (kind === 'invoice' && receiptOnForeignAccount(form)) return { ...form, kind, accountId: '', fx: ringgitFields() };
+  return { ...form, kind };
+}
+
+/** The rate part, as typed or as BNM's answer left it. */
+export function withCashReceiptFx(form: CashReceiptForm, fx: CurrencyFields): CashReceiptForm {
+  return { ...form, fx };
+}
+
+/** Under the rate box: the receipt in ringgit at the rate, as "about". */
+export function cashReceiptRateNotes(form: CashReceiptForm): string[] {
+  const note = receiptOnForeignAccount(form) ? movementRinggitNote(form.amount, form.fx) : null;
+  return note === null ? [] : [note];
+}
+
+/**
+ * What is sent to recordCashReceiptAction (stage 5b): income received into an account in another currency,
+ * recorded and posted at once, with the movement's rate. A payer is a contact or a typed name, never both.
+ */
+export function recordCashReceiptPayload(form: CashReceiptForm) {
+  const typed = form.payer === TYPED_PAYER;
+  return {
+    account_id: form.accountId,
+    txn_date: form.date,
+    method: form.method,
+    reference: form.reference,
+    notes: form.notes,
+    category_id: form.categoryId,
+    amount: typedNumber(form.amount) ?? Number.NaN,
+    contact_id: typed ? null : form.payer,
+    party_name: typed ? form.payerName : null,
+    ...movementRatePayload(form.fx),
+  };
 }
 
 /** Choosing another customer starts the ticks again: one receipt is from one customer. */
@@ -207,7 +279,17 @@ export function cashReceiptPayload(form: CashReceiptForm) {
  * database would use, or null when it can be sent. What the receipt is for
  * comes first, as it is first on the form.
  */
-export function cashReceiptFormError(form: CashReceiptForm, receivable: ReceivableInvoice[]): string | null {
+export function cashReceiptFormError(form: CashReceiptForm, receivable: ReceivableInvoice[], canSignOff = true): string | null {
+  // Stage 5b: into an account in another currency, income only, recorded at once by an owner or admin, with its rate.
+  if (receiptOnForeignAccount(form)) {
+    if (!canSignOff) return M.postedByDecider;
+    if (form.kind !== 'income') return M.invoicesOnInvoices(form.fx?.currency ?? '');
+    if (!form.categoryId) return M.category;
+    const rate = movementRateError(form.fx);
+    if (rate) return rate;
+    const recorded = recordCashReceiptInput.safeParse(recordCashReceiptPayload(form));
+    return recorded.success ? null : (recorded.error.issues[0]?.message ?? M.amount);
+  }
   if (form.kind === 'invoice') {
     if (!form.customerId) return INVOICE_MESSAGES.customer;
     if (Object.keys(form.amounts).length === 0) return M.invoices;

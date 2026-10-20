@@ -321,6 +321,7 @@ export function BillsView({
           today={open.today}
           preselect={{ supplierId: open.bill.supplier_id, billId: open.bill.id }}
           record={actions.recordPayment}
+          fxRate={actions.fxRate}
           onClose={close}
         />
       );

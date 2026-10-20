@@ -1,6 +1,7 @@
 'use client';
 
 import { AllocationFormCard, type RecordPayment } from '@/components/finance/allocation-form-card';
+import type { FxRateLookup } from '@/components/finance/movement-rate-fields';
 import type { FinanceAccount } from '@/lib/finance/money';
 import { PAYMENT_OUT_KIND, type PayableBill } from '@/lib/finance/payment-form';
 import { type OrderBilling, orderNotesForBills } from '@/lib/finance/purchase-views';
@@ -20,6 +21,7 @@ export function PaymentFormCard({
   preselect,
   orders = [],
   record,
+  fxRate,
   onClose,
 }: {
   /** Every bill that can still take a payment, from `payableBills`. */
@@ -32,6 +34,8 @@ export function PaymentFormCard({
   /** The purchase orders the bills may be raised against, to advise on the bills ticked. */
   orders?: OrderBilling[];
   record: RecordPayment;
+  /** Bank Negara's selling rate, for a payment from an account in another currency (stage 5b). */
+  fxRate?: FxRateLookup;
   onClose: () => void;
 }) {
   return (
@@ -48,6 +52,7 @@ export function PaymentFormCard({
         )
       }
       record={record}
+      fxRate={fxRate}
       onClose={onClose}
     />
   );

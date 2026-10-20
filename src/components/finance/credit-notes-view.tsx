@@ -28,6 +28,7 @@ import type { FinanceAccount } from '@/lib/finance/money';
 import { type RefundSaved, noteTargetKey, refundSavedNote, refundTargets } from '@/lib/finance/refund-form';
 import type { RefundRow } from '@/lib/finance/refunds';
 import type { FinResult } from '@/lib/finance/result';
+import type { FxRateLookup } from '@/components/finance/movement-rate-fields';
 import {
   CREDIT_NOTE_STATUS_LABELS,
   type CreditNoteAction,
@@ -48,6 +49,8 @@ export type CreditNoteActions = CreditNoteFormActions & {
   remove: (input: unknown) => Promise<FinResult<{ id: string }>>;
   /** Records a refund against a credit note, from its row. */
   recordRefund: RecordRefund;
+  /** Bank Negara's selling rate, for a refund from an account in another currency (stage 5b). */
+  fxRate?: FxRateLookup;
 };
 
 /** What only a person who may edit is given: the actions, and what the two forms offer. */
@@ -237,6 +240,7 @@ export function CreditNotesView({
           today={open.today}
           preselect={noteTargetKey(note.id)}
           record={actions.recordRefund}
+          fxRate={actions.fxRate}
           onClose={close}
           // The refund is on Refunds; this row's Refunded figure moves only once it is paid out.
           // The note says what the form recorded: the person may have picked something other than this row.

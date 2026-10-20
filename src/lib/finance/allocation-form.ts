@@ -7,6 +7,7 @@
  */
 import { typedNumber } from './format';
 import { BASE_CURRENCY } from './currencies';
+import type { CurrencyFields } from './document-currency';
 import type { FinanceAccount, PaymentMethod, PaymentOutRow } from './money';
 
 /** What the form needs to know of a document that can take a payment. */
@@ -71,9 +72,8 @@ export function amountText(amount: number): string {
 }
 
 /**
- * The first ringgit bank account, or the first ringgit account of any kind. The screens hand every money form
- * ringgit accounts only (`listRinggitAccounts`, stage 5a); an account in another currency is never the default
- * even if one is passed.
+ * The first ringgit bank account, or the first ringgit account of any kind. An account in another currency is never
+ * the default (stage 5b: a payment form offers one for documents in its currency, chosen by the person).
  */
 export function defaultAccount(accounts: FinanceAccount[]): string {
   const ringgit = accounts.filter((a) => a.currency === BASE_CURRENCY);
@@ -212,5 +212,18 @@ export type AllocationFormKind<F extends AllocationFormState, D extends Payable>
       /** Sentences under the box: the realised difference, as "about". */
       notes: (form: F, documents: D[]) => string[];
     };
+  };
+  /**
+   * Present when the payment may be on an account in another currency (stage 5b): the accounts offered as the form
+   * stands, choosing one, and the rate part (ringgit while the account is). On such an account the documents
+   * offered are the account's currency's, no ringgit box is asked, it is paid now, and the rate is asked instead.
+   */
+  account?: {
+    offered: (form: F, accounts: FinanceAccount[]) => FinanceAccount[];
+    choose: (form: F, account: FinanceAccount) => F;
+    fx: (form: F) => CurrencyFields;
+    setFx: (form: F, fx: CurrencyFields) => F;
+    /** Sentences under the rate box: the movement's ringgit and the realised difference, as "about". */
+    notes: (form: F, documents: D[]) => string[];
   };
 };

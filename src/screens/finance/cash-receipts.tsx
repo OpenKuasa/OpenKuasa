@@ -1,6 +1,8 @@
 import {
   deleteCashReceiptAction,
+  fxSstRateForAction,
   postCashReceiptAction,
+  recordCashReceiptAction,
   saveAndPostCashReceiptAction,
   saveCashReceiptAction,
   voidCashReceiptAction,
@@ -13,7 +15,7 @@ import { receiptInvoicesForForm, receiptPaymentsForForm } from '@/lib/finance/ca
 import { listIncomeCategories } from '@/lib/finance/cash-receipts';
 import { listContacts } from '@/lib/finance/contacts';
 import { listInvoices } from '@/lib/finance/invoices';
-import { listRinggitAccounts, listPaymentsIn } from '@/lib/finance/money';
+import { listAccounts, listPaymentsIn } from '@/lib/finance/money';
 import { todayUtc } from '@/lib/finance/view-helpers';
 import { createClient } from '@/lib/supabase/server';
 import { SAMPLE_CASH_RECEIPTS } from './cash-book-sample';
@@ -25,6 +27,8 @@ const ACTIONS: CashReceiptActions = {
   post: postCashReceiptAction,
   voidReceipt: voidCashReceiptAction,
   remove: deleteCashReceiptAction,
+  record: recordCashReceiptAction,
+  fxRate: fxSstRateForAction,
 };
 
 /**
@@ -46,7 +50,8 @@ export default async function CashReceiptsScreen() {
     listCashReceipts(ctx),
     canEdit ? listInvoices(ctx) : [],
     canEdit ? listPaymentsIn(ctx) : [],
-    canEdit ? listRinggitAccounts(ctx) : [],
+    // Stage 5b: every active account; the form offers one in another currency for income recorded at once.
+    canEdit ? listAccounts(ctx) : [],
     canEdit ? listContacts(ctx) : [],
     canEdit ? listIncomeCategories(ctx) : [],
   ]);

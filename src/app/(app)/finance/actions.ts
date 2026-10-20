@@ -37,10 +37,13 @@ import {
   voidBill,
 } from '@/lib/finance/bills';
 import {
+  CASH_RECEIPT_MESSAGES,
   type SaveAndPostCashReceiptResult,
   cashReceiptIdInput,
   deleteCashReceipt,
   postCashReceipt,
+  recordCashReceipt,
+  recordCashReceiptInput,
   saveCashReceipt,
   saveCashReceiptInput,
   voidCashReceipt,
@@ -916,6 +919,18 @@ export async function voidCashReceiptAction(input: unknown) {
 }
 export async function deleteCashReceiptAction(input: unknown) {
   return run(SALES_PATHS, cashReceiptIdInput, input, deleteCashReceipt);
+}
+
+/**
+ * Records income received into an account in another currency and posts it in one call, with its rate (stage 5b:
+ * a draft there cannot carry one). Posting a receipt is a sign-off: an owner or admin only, told so before anything
+ * is written.
+ */
+export async function recordCashReceiptAction(input: unknown) {
+  return run(SALES_PATHS, recordCashReceiptInput, input, recordCashReceipt, {
+    signOff: true,
+    signOffError: CASH_RECEIPT_MESSAGES.postedByDecider,
+  });
 }
 
 /** Saves the receipt as a draft, then posts it; see `saveThenPost`. Someone who may not sign off keeps the draft. */

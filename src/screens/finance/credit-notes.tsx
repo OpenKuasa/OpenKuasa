@@ -1,5 +1,6 @@
 import {
   deleteCreditNoteAction,
+  fxSstRateForAction,
   issueCreditNoteAction,
   recordRefundAction,
   saveAndIssueCreditNoteAction,
@@ -11,7 +12,7 @@ import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { listCreditNotes } from '@/lib/finance/credit-notes';
 import { listInvoices } from '@/lib/finance/invoices';
-import { listRinggitAccounts } from '@/lib/finance/money';
+import { listAccounts } from '@/lib/finance/money';
 import { listRefunds } from '@/lib/finance/refunds';
 import { creditNotesView } from '@/lib/finance/sales-followon-views';
 import { todayUtc } from '@/lib/finance/view-helpers';
@@ -25,6 +26,7 @@ const ACTIONS: CreditNoteActions = {
   voidNote: voidCreditNoteAction,
   remove: deleteCreditNoteAction,
   recordRefund: recordRefundAction,
+  fxRate: fxSstRateForAction,
 };
 
 export default async function CreditNotesScreen() {
@@ -40,7 +42,8 @@ export default async function CreditNotesScreen() {
     listCreditNotes(ctx),
     canEdit ? listInvoices(ctx) : [],
     canEdit ? listRefunds(ctx) : [],
-    canEdit ? listRinggitAccounts(ctx) : [],
+    // Stage 5b: every active account; each form offers ringgit ones and those in its documents' currency.
+    canEdit ? listAccounts(ctx) : [],
   ]);
   return (
     <CreditNotesView

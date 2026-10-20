@@ -8,17 +8,29 @@
  * asked on; the words of the questions; the over-billing notes for the
  * vouchers that pay supplier bills; and what the screen says about a voucher
  * that was just written and is not in the list. Pure.
+ *
+ * Stage 5b: a new voucher for a category may be paid from an account in another currency, in that currency, with
+ * the movement's rate, recorded paid by an owner or admin (a member is told first: FIN47). Vouchers for bills and
+ * drafts list ringgit accounts (FIN50 on a draft there).
  */
 import type { OrgRole } from '@/lib/auth/current-org';
 import { can } from '@/lib/auth/permissions';
 import { amountText, amountsError, amountsTotal, defaultAccount, keptOffered, typedAmounts } from './allocation-form';
 import type { BillListRow } from './bills';
-import type { PaymentVoucherRow } from './cash-book';
+import { type PaymentVoucherRow, cashBookCurrency } from './cash-book';
 import { BASE_CURRENCY } from './currencies';
 import { type CashBookPeriod, type PaymentVoucherFilter, inPeriod, voucherHome } from './cash-book-views';
+import { type CurrencyFields, ringgitFields } from './document-currency';
 import type { ExpenseCategory } from './expenses';
-import { rm, typedNumber } from './format';
+import { money, rm, typedNumber } from './format';
 import { PAYMENT_METHOD_LABELS, type FinanceAccount, type PaymentMethod, type PaymentOutRow } from './money';
+import {
+  fxForAccount,
+  movementRateError,
+  movementRatePayload,
+  movementRinggitNote,
+  onForeignAccount,
+} from './movement-rate';
 import { type PayableBill, billsOf, payableBills } from './payment-form';
 import { type OrderBilling, orderNotesForBills } from './purchase-views';
 import { displayDate } from './view-helpers';
@@ -52,11 +64,14 @@ export type VoucherForm = {
   notes: string;
   /** "Paid now" on a new voucher for a category: recorded as paid on `date`. Only an owner or admin is offered it; absent means "To be paid". */
   paidNow?: boolean;
+  /** The chosen account's currency and the movement's rate (stage 5b). Absent, or ringgit: a ringgit account. */
+  fx?: CurrencyFields;
 };
 
 /** A fresh form: from the first bank account, by bank transfer, dated today (the person's own date); the category chosen when there is only one. */
 export function newVoucherForm(accounts: FinanceAccount[], categories: ExpenseCategory[], today: string): VoucherForm {
   return {
+    fx: ringgitFields(),
     id: null,
     kind: 'category',
     supplierId: '',
@@ -141,9 +156,48 @@ export function voucherBillOwed(bill: PayableBill): string {
   return `${rm(bill.payable)} to pay${held}`;
 }
 
-/** Choosing the other kind keeps the account, date, method, reference and notes. */
+/** True when the voucher is paid from an account in another currency (stage 5b). */
+export function voucherOnForeignAccount(form: Pick<VoucherForm, 'fx'>): boolean {
+  return onForeignAccount(form.fx);
+}
+
+/**
+ * The accounts the form offers (stage 5b): every account for a new voucher for a category (one in another currency
+ * is paid now, by an owner or admin); ringgit accounts for a voucher for bills and for a draft (FIN50 there), with
+ * the account already chosen.
+ */
+export function voucherAccounts(form: Pick<VoucherForm, 'kind' | 'id' | 'accountId'>, accounts: FinanceAccount[]): FinanceAccount[] {
+  if (form.kind === 'category' && form.id === null) return accounts;
+  return accounts.filter((a) => a.currency === BASE_CURRENCY || a.id === form.accountId);
+}
+
+/** The account chosen. One in another currency takes the rate box in its currency, and is paid now. */
+export function chooseVoucherAccount(form: VoucherForm, account: FinanceAccount): VoucherForm {
+  const fx = fxForAccount(form.fx, account.currency);
+  return { ...form, accountId: account.id, fx, ...(onForeignAccount(fx) ? { paidNow: true } : {}) };
+}
+
+/** The rate part, as typed or as BNM's answer left it. */
+export function withVoucherFx(form: VoucherForm, fx: CurrencyFields): VoucherForm {
+  return { ...form, fx };
+}
+
+/** Under the rate box: the voucher in ringgit at the rate, as "about". */
+export function voucherRateNotes(form: VoucherForm): string[] {
+  const note = voucherOnForeignAccount(form) ? movementRinggitNote(form.amount, form.fx) : null;
+  return note === null ? [] : [note];
+}
+
+/**
+ * Choosing the other kind keeps the account, date, method, reference and notes. A voucher for bills is paid from a
+ * ringgit account (stage 5b): an account in another currency is let go, and one is chosen again.
+ */
 export function chooseVoucherKind(form: VoucherForm, kind: VoucherFormKind): VoucherForm {
-  return kind === form.kind ? form : { ...form, kind };
+  if (kind === form.kind) return form;
+  if (kind === 'bills' && voucherOnForeignAccount(form)) {
+    return { ...form, kind, accountId: '', fx: ringgitFields(), paidNow: undefined };
+  }
+  return { ...form, kind };
 }
 
 /** Choosing another supplier starts the ticks again: one voucher pays one supplier. */
@@ -176,8 +230,10 @@ export function voucherFirstWrite(form: Pick<VoucherForm, 'kind' | 'id'>): 'reco
  * chosen, on a new voucher for a category, by someone who may sign off. A
  * draft and a voucher for bills are never paid from the form.
  */
-export function voucherPaysNow(canDecide: boolean, form: Pick<VoucherForm, 'kind' | 'id' | 'paidNow'>): boolean {
-  return canDecide && form.paidNow === true && voucherFirstWrite(form) === 'record';
+export function voucherPaysNow(canDecide: boolean, form: Pick<VoucherForm, 'kind' | 'id' | 'paidNow'> & { fx?: CurrencyFields }): boolean {
+  // Stage 5b: a voucher from an account in another currency is always paid now.
+  const now = form.paidNow === true || voucherOnForeignAccount(form);
+  return canDecide && now && voucherFirstWrite(form) === 'record';
 }
 
 /**
@@ -223,6 +279,8 @@ export function voucherPayload(form: VoucherForm, paidNow = false) {
     party_name: typed ? form.payeeName : null,
     reference: form.reference,
     notes: form.notes,
+    // Stage 5b: from an account in another currency, the movement's rate.
+    ...movementRatePayload(form.fx),
   };
 }
 
@@ -232,7 +290,7 @@ export function voucherPayload(form: VoucherForm, paidNow = false) {
  * category, the amount, then whatever the schema finds (the account, the
  * date, a text that is too long).
  */
-export function voucherFormError(form: VoucherForm, payable: PayableBill[] = []): string | null {
+export function voucherFormError(form: VoucherForm, payable: PayableBill[] = [], canDecide = true): string | null {
   if (form.kind === 'bills') {
     if (!form.supplierId) return M.supplier;
     if (Object.keys(form.amounts).length === 0) return M.bills;
@@ -248,6 +306,12 @@ export function voucherFormError(form: VoucherForm, payable: PayableBill[] = [])
   if (/[,$]|^\s*(rm|myr)/i.test(form.amount)) return M.amountFormat;
   if (/\.\d{3,}\s*$/.test(form.amount)) return M.amountDecimals;
   if (!form.accountId) return M.account;
+  // Stage 5b: from an account in another currency, recorded paid by an owner or admin (FIN47), with its rate.
+  if (voucherOnForeignAccount(form)) {
+    if (!canDecide) return M.payNowAccount;
+    const rate = movementRateError(form.fx);
+    if (rate) return rate;
+  }
   const parsed = recordVoucherInput.safeParse(voucherPayload(form));
   return parsed.success ? null : (parsed.error.issues[0]?.message ?? M.invalid);
 }
@@ -256,6 +320,8 @@ export const BILLS_HINT =
   'Sending this for approval is a choice: it waits as Pending approval until an owner or admin approves or rejects it, and once approved it is To be paid on Payments Out. To schedule a supplier payment without approval, record it on Payments Out instead.';
 export const DRAFT_HINT =
   'A draft is yours to change until it is sent for approval. After that it cannot be changed, only approved, rejected or deleted.';
+export const FOREIGN_ACCOUNT_HINT =
+  'A voucher from an account in another currency is recorded as paid, on the date above, in that currency at the rate below. It gets its payment voucher number and moves the books in ringgit, and from then on it can only be voided.';
 export const PAID_NOW_HINT =
   'A voucher you save as paid is approved and paid at once, on the date above: you are an owner or admin. It gets its payment voucher number and moves the books, and from then on it cannot be changed or deleted, only voided. A draft is not paid.';
 
@@ -265,7 +331,12 @@ export const PAID_NOW_HINT =
  * the first button sends for approval whoever presses it; for a new category
  * voucher it does what recording does for this person.
  */
-export function voucherSaveHint(canDecide: boolean, form?: Pick<VoucherForm, 'kind' | 'id' | 'paidNow'>): string[] {
+export function voucherSaveHint(
+  canDecide: boolean,
+  form?: Pick<VoucherForm, 'kind' | 'id' | 'paidNow'> & { fx?: CurrencyFields },
+): string[] {
+  // Stage 5b: an account in another currency is paid now, by an owner or admin; a member is told before sending.
+  if (form && voucherOnForeignAccount(form)) return canDecide ? [FOREIGN_ACCOUNT_HINT] : [M.payNowAccount];
   if (form?.kind === 'bills') return [BILLS_HINT, DRAFT_HINT];
   if (form?.id) return [DRAFT_HINT];
   if (form && voucherPaysNow(canDecide, form)) return [PAID_NOW_HINT, DRAFT_HINT];
@@ -278,7 +349,10 @@ export function voucherSaveHint(canDecide: boolean, form?: Pick<VoucherForm, 'ki
 }
 
 /** The form's first button, by what it does for this person: only a new category voucher is approved, or paid, by an owner's or admin's save. */
-export function voucherSubmitLabel(canDecide: boolean, form?: Pick<VoucherForm, 'kind' | 'id' | 'paidNow'>): string {
+export function voucherSubmitLabel(
+  canDecide: boolean,
+  form?: Pick<VoucherForm, 'kind' | 'id' | 'paidNow'> & { fx?: CurrencyFields },
+): string {
   if (form && voucherPaysNow(canDecide, form)) return 'Save as paid';
   return canDecide && (!form || voucherFirstWrite(form) === 'record') ? 'Save voucher' : 'Send for approval';
 }
@@ -374,7 +448,8 @@ export type QuestionPart = { text: string; strong?: boolean };
 
 /** "the payment of RM 300.00 to Tenaga Nasional", in parts; nobody is named when the voucher names nobody. */
 function paymentOf(row: PaymentVoucherRow): QuestionPart[] {
-  const parts: QuestionPart[] = [{ text: 'the payment of ' }, { text: rm(row.amount), strong: true }];
+  // In the account's currency (stage 5b).
+  const parts: QuestionPart[] = [{ text: 'the payment of ' }, { text: money(row.amount, cashBookCurrency(row)), strong: true }];
   if (row.party_name) parts.push({ text: ' to ' }, { text: row.party_name, strong: true });
   return parts;
 }

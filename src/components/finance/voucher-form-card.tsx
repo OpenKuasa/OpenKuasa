@@ -3,6 +3,7 @@
 import { type FormEvent, useId, useState } from 'react';
 import { Wallet } from 'lucide-react';
 import { BentoCard } from '@/components/bento/bento';
+import { type FxRateLookup, MovementRateFields, accountLabel } from '@/components/finance/movement-rate-fields';
 import { OrderNotes } from '@/components/finance/order-notes';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { Button } from '@/components/ui/button';
@@ -10,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ticked, tickedAll } from '@/lib/finance/allocation-form';
+import { ringgitFields, withRateAnswer, withRateTyped } from '@/lib/finance/document-currency';
 import type { ExpenseCategory } from '@/lib/finance/expenses';
 import { rm } from '@/lib/finance/format';
 import { type FinanceAccount, PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentMethod } from '@/lib/finance/money';
@@ -21,6 +23,7 @@ import {
   TYPED_PAYEE,
   type VoucherForm,
   type VoucherFormKind,
+  chooseVoucherAccount,
   chooseVoucherKind,
   chooseVoucherSupplier,
   keepVoucherBills,
@@ -28,14 +31,18 @@ import {
   voucherBillOwed,
   voucherDateLabel,
   voucherDraftLabel,
+  voucherAccounts,
   voucherFirstWrite,
   voucherFormError,
+  voucherOnForeignAccount,
   voucherPayload,
   voucherPaysNow,
+  voucherRateNotes,
   voucherSaveHint,
   voucherSavePayload,
   voucherSubmitLabel,
   voucherTotal,
+  withVoucherFx,
 } from '@/lib/finance/voucher-form';
 import type { RecordedVoucher } from '@/lib/finance/vouchers';
 
@@ -44,6 +51,8 @@ export type VoucherFormActions = {
   record: (input: unknown) => Promise<FinResult<RecordedVoucher>>;
   /** Saves a draft, new or changed, and sends it for approval in the same call when asked. */
   save: (input: unknown) => Promise<FinResult<RecordedVoucher>>;
+  /** Bank Negara's selling rate, for a voucher from an account in another currency (stage 5b). */
+  fxRate?: FxRateLookup;
 };
 
 /** What the card hands back after a save: the voucher, how the database left it, and what was typed, for the screen's note. */
@@ -103,8 +112,12 @@ export function VoucherFormCard({
   const form = keepVoucherBills(typedForm, payable);
   const typed = form.payee === TYPED_PAYEE;
   const forBills = form.kind === 'bills';
+  // Stage 5b: from an account in another currency, in that currency, paid now, with its rate.
+  const onAccount = voucherOnForeignAccount(form);
+  const fx = form.fx ?? ringgitFields();
   // "When" is offered where the first button records: a new voucher for a category, to someone who may sign off.
-  const offersWhen = canDecide && voucherFirstWrite(form) === 'record';
+  // Not from an account in another currency: that is paid now.
+  const offersWhen = canDecide && voucherFirstWrite(form) === 'record' && !onAccount;
   const paysNow = voucherPaysNow(canDecide, form);
   const suppliers = paymentSuppliers(payable);
   const offered = billsOf(payable, form.supplierId);
@@ -118,7 +131,7 @@ export function VoucherFormCard({
 
   /** `send` is the first button (record, or save and send for approval); otherwise the draft is saved and stays a draft. */
   const write = (send: boolean) => {
-    const problem = voucherFormError(form, payable);
+    const problem = voucherFormError(form, payable, canDecide);
     if (problem) {
       save.fail(problem);
       return;
@@ -313,7 +326,7 @@ export function VoucherFormCard({
               </Select>
             </div>
             <div className="space-y-1.5 md:col-span-3">
-              <Label htmlFor={`${id}-amount`}>Amount (RM)</Label>
+              <Label htmlFor={`${id}-amount`}>Amount ({onAccount ? fx.currency : 'RM'})</Label>
               <Input
                 id={`${id}-amount`}
                 // A text box, as on the expense form: a number box hands back nothing for "1,200.50", and the form could not say why.
@@ -331,15 +344,20 @@ export function VoucherFormCard({
 
         <div className="space-y-1.5 md:col-span-3">
           <Label htmlFor={`${id}-account`}>Paid from</Label>
-          <Select value={form.accountId} onValueChange={(v) => edit((f) => ({ ...f, accountId: v }))}>
+          <Select
+            value={form.accountId}
+            onValueChange={(v) => {
+              const chosen = accounts.find((a) => a.id === v);
+              if (chosen) edit((f) => chooseVoucherAccount(f, chosen));
+            }}
+          >
             <SelectTrigger id={`${id}-account`} className="w-full">
               <SelectValue placeholder={accounts.length ? 'Choose an account' : 'No account'} />
             </SelectTrigger>
             <SelectContent>
-              {accounts.map((a) => (
+              {voucherAccounts(form, accounts).map((a) => (
                 <SelectItem key={a.id} value={a.id}>
-                  {a.name}
-                  {a.bank_name ? ` · ${a.bank_name}` : ''}
+                  {accountLabel(a)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -381,6 +399,20 @@ export function VoucherFormCard({
             onChange={(e) => edit((f) => ({ ...f, reference: e.target.value }))}
           />
         </div>
+        {onAccount ? (
+          <MovementRateFields
+            id={id}
+            className="space-y-1.5 md:col-span-12"
+            fx={fx}
+            date={form.date}
+            fxRate={actions.fxRate}
+            onAnswer={(key, answer) =>
+              setForm((f) => withVoucherFx(f, withRateAnswer(f.fx ?? ringgitFields(), f.date, key, answer, true)))
+            }
+            onTyped={(text) => edit((f) => withVoucherFx(f, withRateTyped(f.fx ?? ringgitFields(), text)))}
+            notes={voucherRateNotes(form)}
+          />
+        ) : null}
         <div className="space-y-1.5 md:col-span-12">
           <Label htmlFor={`${id}-notes`}>Notes</Label>
           <Input
@@ -432,9 +464,12 @@ export function VoucherFormCard({
           <Button type="submit" size="sm" disabled={save.pending}>
             {save.pending ? 'Saving…' : voucherSubmitLabel(canDecide, form)}
           </Button>
-          <Button type="button" variant="outline" size="sm" onClick={() => write(false)} disabled={save.pending}>
-            {voucherDraftLabel(form)}
-          </Button>
+          {/* A draft cannot carry a rate (stage 5b): from an account in another currency it is recorded paid, or not at all. */}
+          {onAccount ? null : (
+            <Button type="button" variant="outline" size="sm" onClick={() => write(false)} disabled={save.pending}>
+              {voucherDraftLabel(form)}
+            </Button>
+          )}
           <Button type="button" variant="ghost" size="sm" onClick={() => onClose()} disabled={save.pending}>
             Cancel
           </Button>

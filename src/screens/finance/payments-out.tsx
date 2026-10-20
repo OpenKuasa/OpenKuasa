@@ -1,5 +1,6 @@
 import {
   deleteScheduledPaymentAction,
+  fxSstRateForAction,
   markPaymentPaidAction,
   recordPaymentOutAction,
   voidPaymentAction,
@@ -8,7 +9,7 @@ import { type PaymentActions, PaymentsView } from '@/components/finance/payments
 import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { listBills } from '@/lib/finance/bills';
-import { type PaymentMethod, type PaymentOutRow, listRinggitAccounts, listPaymentsOut } from '@/lib/finance/money';
+import { type PaymentMethod, type PaymentOutRow, listAccounts, listPaymentsOut } from '@/lib/finance/money';
 import { listPurchaseOrders } from '@/lib/finance/purchase-orders';
 import { paymentsView, todayUtc } from '@/lib/finance/purchase-views';
 import { createClient } from '@/lib/supabase/server';
@@ -73,6 +74,7 @@ const ACTIONS: PaymentActions = {
   markPaid: markPaymentPaidAction,
   voidPayment: voidPaymentAction,
   remove: deleteScheduledPaymentAction,
+  fxRate: fxSstRateForAction,
 };
 
 export default async function PaymentsOutScreen() {
@@ -87,7 +89,8 @@ export default async function PaymentsOutScreen() {
   const [rows, bills, accounts, orders] = await Promise.all([
     listPaymentsOut(ctx),
     canEdit ? listBills(ctx) : [],
-    canEdit ? listRinggitAccounts(ctx) : [],
+    // Stage 5b: every active account; each form offers ringgit ones and those in its documents' currency.
+    canEdit ? listAccounts(ctx) : [],
     canEdit ? listPurchaseOrders(ctx) : [],
   ]);
   return (

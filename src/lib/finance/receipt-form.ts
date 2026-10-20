@@ -10,6 +10,10 @@
  * for the ringgit that arrived. One payment is in one currency: the first
  * invoice ticked sets it, and only that currency's invoices are offered
  * until every tick is cleared.
+ *
+ * Stage 5b: invoices in another currency may also be paid into an account in that currency. The account picker
+ * then lists it beside the ringgit ones; choosing it offers that currency's invoices only and asks no ringgit but
+ * the movement's rate (BNM's selling rate for the date, or typed).
  */
 import {
   type AllocationFormKind,
@@ -26,9 +30,18 @@ import {
   typedAmounts,
 } from './allocation-form';
 import { BASE_CURRENCY, minorUnits } from './currencies';
-import { CURRENCY_MESSAGES } from './document-currency';
+import { CURRENCY_MESSAGES, type CurrencyFields, ringgitFields } from './document-currency';
 import { money, rm, typedNumber } from './format';
 import { settlementPreview } from './fx-settlement';
+import {
+  fxForAccount,
+  movementAccounts,
+  movementRateError,
+  movementRatePayload,
+  movementRinggit,
+  movementRinggitNote,
+  onForeignAccount,
+} from './movement-rate';
 import { INVOICE_MESSAGES, type InvoiceListRow } from './invoices';
 import {
   type FinanceAccount,
@@ -72,6 +85,8 @@ export type ReceiptForm = {
   method: PaymentMethod;
   reference: string;
   notes: string;
+  /** The chosen account's currency and the movement's rate (stage 5b); ringgit, with no rate, on a ringgit account. */
+  fx: CurrencyFields;
 };
 
 /** What payments in that are not yet posted hold of each invoice, to the sen, by invoice id. */
@@ -141,10 +156,15 @@ export function receiptCurrency(form: ReceiptForm): string | null {
   return Object.keys(form.amounts).length > 0 ? form.currency : null;
 }
 
-/** True when the ticked invoices are in another currency, so the ringgit received is asked for. */
+/** True when the payment is into an account in another currency (stage 5b): the rate is asked instead of the ringgit. */
+export function intoForeignAccount(form: Pick<ReceiptForm, 'fx'>): boolean {
+  return onForeignAccount(form.fx);
+}
+
+/** True when the ticked invoices are in another currency and paid into a ringgit account, so the ringgit received is asked for. */
 export function needsRinggit(form: ReceiptForm): boolean {
   const currency = receiptCurrency(form);
-  return currency !== null && currency !== BASE_CURRENCY;
+  return currency !== null && currency !== BASE_CURRENCY && !intoForeignAccount(form);
 }
 
 /**
@@ -153,8 +173,31 @@ export function needsRinggit(form: ReceiptForm): boolean {
  */
 export function offeredInvoices(form: ReceiptForm, receivable: ReceivableInvoice[]): ReceivableInvoice[] {
   const mine = invoicesOf(receivable, form.customerId);
-  const currency = receiptCurrency(form);
+  // Stage 5b: into an account in another currency, that currency's invoices only (FIN51).
+  const currency = intoForeignAccount(form) ? form.fx.currency : receiptCurrency(form);
   return currency === null ? mine : mine.filter((i) => i.currency === currency);
+}
+
+/**
+ * The accounts the form offers (stage 5b): the ringgit ones, and those in the ticked invoices' currency when it is
+ * another one (the account chosen stays offered).
+ */
+export function receiptAccounts(form: ReceiptForm, accounts: FinanceAccount[]): FinanceAccount[] {
+  return movementAccounts(accounts, receiptCurrency(form), form.accountId);
+}
+
+/** The account chosen. One in another currency takes the rate box in its currency and keeps only that currency's ticks. */
+export function chooseReceiptAccount(form: ReceiptForm, account: FinanceAccount): ReceiptForm {
+  const fx = fxForAccount(form.fx, account.currency);
+  const next = { ...form, accountId: account.id, fx };
+  if (!onForeignAccount(fx)) return next;
+  const keep = receiptCurrency(form) === account.currency;
+  return { ...next, currency: account.currency, ringgit: '', ...(keep ? {} : { amounts: {} }) };
+}
+
+/** The rate part, as typed or as BNM's answer left it. */
+export function withReceiptFx(form: ReceiptForm, fx: CurrencyFields): ReceiptForm {
+  return { ...form, fx };
 }
 
 /**
@@ -182,6 +225,7 @@ export function newReceiptForm(
     method: 'bank_transfer',
     reference: '',
     notes: '',
+    fx: ringgitFields(),
   };
 }
 
@@ -251,17 +295,15 @@ export function receiptPayload(form: ReceiptForm) {
     reference: form.reference,
     notes: form.notes,
     ...(needsRinggit(form) ? { amount_myr: form.ringgit.replace(/,/g, '').trim() } : {}),
+    // Stage 5b: into an account in another currency, the movement's rate.
+    ...movementRatePayload(form.fx),
     allocations: typedAmounts(form.amounts).map(({ id, amount }) => ({ invoice_id: id, amount })),
   };
 }
 
-/**
- * Under the ringgit box: what the database will make of the payment, worked in whole sen (fx-settlement.ts),
- * as "about" (a payment posted first can change it). Empty for ringgit and while a figure is not a number.
- */
-export function receiptPreview(form: ReceiptForm, receivable: ReceivableInvoice[]): string[] {
-  if (!needsRinggit(form)) return [];
-  const parts = Object.entries(form.amounts).map(([id, amount]) => {
+/** The parts of a payment as the previews read them: each ticked invoice's amount, rate and what is still open on it. */
+function receiptParts(form: ReceiptForm, receivable: ReceivableInvoice[]) {
+  return Object.entries(form.amounts).map(([id, amount]) => {
     const invoice = receivable.find((i) => i.id === id);
     return {
       id,
@@ -271,12 +313,37 @@ export function receiptPreview(form: ReceiptForm, receivable: ReceivableInvoice[
       openRinggit: invoice?.balance_myr ?? 0,
     };
   });
-  const preview = settlementPreview(form.ringgit.replace(/,/g, ''), parts);
-  if (!preview) return [];
+}
+
+/** The realised difference of a preview, in the form's words. */
+function receiptWords(preview: { parts: unknown[]; carried: number; realised: number }): string[] {
   const at = `The ${preview.parts.length === 1 ? 'invoice carries' : 'invoices carry'} about ${rm(preview.carried)} for what is paid.`;
   if (preview.realised === 0) return [at, 'No exchange gain or loss.'];
   const word = preview.realised > 0 ? 'gain' : 'loss';
   return [at, `Realised exchange ${word} of about ${rm(Math.abs(preview.realised))}.`];
+}
+
+/**
+ * Under the rate box, on an account in another currency (stage 5b): the payment in ringgit at the rate, and the
+ * realised difference worked through `settlementPreview` with that ringgit, as "about".
+ */
+export function receiptAccountNotes(form: ReceiptForm, receivable: ReceivableInvoice[]): string[] {
+  if (!intoForeignAccount(form) || receiptCurrency(form) === null) return [];
+  const total = amountText(receiptTotal(form));
+  const notes = [movementRinggitNote(total, form.fx)].filter((n): n is string => n !== null);
+  const ringgit = movementRinggit(total, form.fx);
+  const preview = ringgit === null ? null : settlementPreview(ringgit, receiptParts(form, receivable));
+  return preview ? [...notes, ...receiptWords(preview)] : notes;
+}
+
+/**
+ * Under the ringgit box: what the database will make of the payment, worked in whole sen (fx-settlement.ts),
+ * as "about" (a payment posted first can change it). Empty for ringgit and while a figure is not a number.
+ */
+export function receiptPreview(form: ReceiptForm, receivable: ReceivableInvoice[]): string[] {
+  if (!needsRinggit(form)) return [];
+  const preview = settlementPreview(form.ringgit.replace(/,/g, ''), receiptParts(form, receivable));
+  return preview ? receiptWords(preview) : [];
 }
 
 /**
@@ -293,6 +360,12 @@ export function receiptFormError(form: ReceiptForm, receivable: ReceivableInvoic
   if (currency !== null && minorUnits(currency) === 0) {
     const whole = Object.values(form.amounts).every((text) => Number.isInteger(typedNumber(text)));
     if (!whole) return CURRENCY_MESSAGES.wholeUnits(currency);
+  }
+  // Stage 5b: into an account in another currency, that currency's invoices with the movement's rate.
+  if (intoForeignAccount(form)) {
+    if (currency !== null && currency !== form.fx.currency) return RECEIPT_MESSAGES.foreignAccountInvoices;
+    const rate = movementRateError(form.fx);
+    if (rate) return rate;
   }
   const parsed = recordPaymentInInput.safeParse(receiptPayload(form));
   return parsed.success ? null : (parsed.error.issues[0]?.message ?? RECEIPT_MESSAGES.amount);
@@ -337,7 +410,7 @@ export const PAYMENT_IN_KIND: AllocationFormKind<ReceiptForm, ReceivableInvoice>
   error: receiptFormError,
   payload: receiptPayload,
   currency: {
-    of: (form) => receiptCurrency(form) ?? BASE_CURRENCY,
+    of: (form) => (intoForeignAccount(form) ? form.fx.currency : (receiptCurrency(form) ?? BASE_CURRENCY)),
     offered: offeredInvoices,
     ringgit: {
       needed: needsRinggit,
@@ -347,5 +420,12 @@ export const PAYMENT_IN_KIND: AllocationFormKind<ReceiptForm, ReceivableInvoice>
       hint: 'What arrived in the account, in RM. The amounts above are in the invoices’ currency.',
       notes: receiptPreview,
     },
+  },
+  account: {
+    offered: receiptAccounts,
+    choose: chooseReceiptAccount,
+    fx: (form) => form.fx,
+    setFx: withReceiptFx,
+    notes: receiptAccountNotes,
   },
 };

@@ -1,6 +1,7 @@
 import {
   approveVoucherAction,
   deleteVoucherAction,
+  fxSstRateForAction,
   markVoucherPaidAction,
   recordVoucherAction,
   rejectVoucherAction,
@@ -14,7 +15,7 @@ import { listBills } from '@/lib/finance/bills';
 import { listPaymentVouchers } from '@/lib/finance/cash-book';
 import { listContacts } from '@/lib/finance/contacts';
 import { listExpenseCategories } from '@/lib/finance/expenses';
-import { listRinggitAccounts, listPaymentsOut } from '@/lib/finance/money';
+import { listAccounts, listPaymentsOut } from '@/lib/finance/money';
 import { listPurchaseOrders } from '@/lib/finance/purchase-orders';
 import { todayUtc } from '@/lib/finance/view-helpers';
 import { orderNotesByVoucher, voucherAccess } from '@/lib/finance/voucher-form';
@@ -31,6 +32,7 @@ const ACTIONS: VoucherActions = {
   markPaid: markVoucherPaidAction,
   remove: deleteVoucherAction,
   voidVoucher: voidVoucherAction,
+  fxRate: fxSstRateForAction,
 };
 
 /**
@@ -53,7 +55,8 @@ export default async function PaymentVouchersScreen() {
   // about their purchase orders: the same three reads Payments Out makes for its own form. Anyone without the
   // form has none of those reads made for them.
   const [accounts, contacts, categories, payments, bills, allOrders] = await Promise.all([
-    access.readsForm ? listRinggitAccounts(ctx) : [],
+    // Stage 5b: every active account; the form offers one in another currency for a category voucher paid now.
+    access.readsForm ? listAccounts(ctx) : [],
     access.readsForm ? listContacts(ctx) : [],
     access.readsForm ? listExpenseCategories(ctx) : [],
     access.readsForm ? listPaymentsOut(ctx) : [],
