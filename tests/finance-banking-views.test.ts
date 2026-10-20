@@ -82,6 +82,20 @@ describe('bankDescription', () => {
     expect(bankDescription(out)).toBe('Transfer to Savings');
     expect(bankDescription({ ...out, direction: 'in', other_account_name: 'Main Bank' })).toBe('Transfer from Main Bank');
     expect(bankDescription({ ...out, other_account_name: null })).toBe('Transfer to another account');
+    // Two ringgit sides name no amount, whatever the row carries.
+    expect(bankDescription({ ...out, other_currency: 'MYR', other_amount: out.amount })).toBe('Transfer to Savings');
+  });
+  it('names what the other side moved when its currency differs (stage 5c)', () => {
+    const out = txn({
+      kind: 'transfer', direction: 'out', party_name: null, documents: null, other_account_name: 'USD Account', amount: 4462,
+      other_currency: 'USD', other_amount: 1000,
+    });
+    expect(bankDescription(out)).toBe('Transfer to USD Account (USD 1,000.00)');
+    const inn = txn({
+      kind: 'transfer', direction: 'in', party_name: null, documents: null, other_account_name: 'Maybank', amount: 1000, currency: 'USD',
+      amount_myr: 4462, other_currency: 'MYR', other_amount: 4462,
+    });
+    expect(bankDescription(inn)).toBe('Transfer from Maybank (RM 4,462.00)');
   });
   it('names who paid or was paid and what for, and falls back to the kind', () => {
     expect(bankDescription(txn())).toBe('Aisyah Trading · INV-0012');
