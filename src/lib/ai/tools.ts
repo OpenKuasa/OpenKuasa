@@ -514,12 +514,13 @@ export function createReachTools(
     }),
     createForm: tool({
       description:
-        'Create a lead form (name, optional category, link and status). Leave the link out to derive it from the name. Needs approval.',
+        'Create a lead form (name, optional category, link, status and consent sentence). Leave the link out to derive it from the name, and the consent sentence out to use the default. Needs approval.',
       inputSchema: createFormInput,
       execute: async (input) => capCreateForm(ctx, input),
     }),
     updateForm: tool({
-      description: 'Edit a lead form by id (name, category, link or status). Needs approval.',
+      description:
+        'Edit a lead form by id (name, category, link, status or the consent sentence visitors tick; {workspace} in it becomes the workspace name). Needs approval.',
       inputSchema: updateFormInput,
       execute: async (input) => capUpdateForm(ctx, input),
     }),
