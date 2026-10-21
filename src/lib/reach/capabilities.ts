@@ -512,6 +512,13 @@ export const updateFormInput = z.object({
   status: formStatus.optional(),
   consent_text: formConsent.optional(),
 });
+/**
+ * What Tuah's createForm and updateForm tools take: the same rules, without the
+ * consent sentence. The model is shown exactly what it was shown before the
+ * sentence existed, so a form it makes gets the database's default sentence.
+ */
+export const createFormToolInput = createFormInput.omit({ consent_text: true });
+export const updateFormToolInput = updateFormInput.omit({ consent_text: true });
 export const setFormStatusInput = z.object({ id: formId, status: formStatus });
 export const deleteFormInput = z.object({ id: formId });
 

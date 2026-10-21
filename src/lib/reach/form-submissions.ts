@@ -88,6 +88,26 @@ export const SUBMISSION_PROBLEM_ORDER: readonly (SubmissionField | 'consent')[] 
 /** The name of the consent box. A ticked native box posts "on". */
 export const CONSENT_FIELD = 'consent';
 
+/**
+ * The problems the public form shows, from the server's last answer and what
+ * the visitor has done with the consent box since:
+ * - `blocked`: the browser just stopped a send because the box was unticked,
+ *   so only that is shown (the server's answer is about an earlier send);
+ * - `tickedSince`: the box has been ticked since the server answered, so the
+ *   server's complaint about the box is out of date and is dropped. Its other
+ *   problems stay until the next send.
+ */
+export function shownSubmissionErrors(
+  server: SubmissionErrors | undefined,
+  { blocked, tickedSince }: { blocked: boolean; tickedSince: boolean },
+): SubmissionErrors | undefined {
+  if (blocked) return { consent: SUBMISSION_MESSAGES.consent };
+  if (!server || !tickedSince || !server.consent) return server;
+  const { consent: _stale, ...rest } = server;
+  void _stale;
+  return Object.keys(rest).length > 0 ? rest : undefined;
+}
+
 /** A checked submission, ready to send. */
 export type SubmissionInput = {
   name: string;

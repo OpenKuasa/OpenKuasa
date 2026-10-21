@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { LeadFormCard, SubmissionConsent } from '@/components/reach/lead-forms-view';
 import { PublicLeadForm } from '@/components/reach/public-lead-form';
 import { DEFAULT_FORM_CONSENT, FORM_CONSENT_MAX } from '@/lib/reach/forms';
-import { CONSENT_FIELD, submissionOutcome } from '@/lib/reach/form-submissions';
+import { CONSENT_FIELD, shownSubmissionErrors, submissionOutcome } from '@/lib/reach/form-submissions';
 import type { Form } from '@/lib/reach/types';
 
 /**
@@ -65,6 +65,29 @@ describe('the public form', () => {
 
   it('keeps the box before the button', () => {
     expect(html.indexOf('type="checkbox"')).toBeLessThan(html.indexOf('type="submit"'));
+  });
+});
+
+describe('what the public form shows after an answer', () => {
+  const box = 'Please tick the box to agree before sending.';
+  const server = { name: 'Enter your name.', consent: box };
+
+  it('shows the server\'s answer as it is until the box is touched', () => {
+    expect(shownSubmissionErrors(server, { blocked: false, tickedSince: false })).toBe(server);
+    expect(shownSubmissionErrors(undefined, { blocked: false, tickedSince: false })).toBeUndefined();
+  });
+
+  it('shows only the box when the browser stopped an unticked send', () => {
+    expect(shownSubmissionErrors(server, { blocked: true, tickedSince: false })).toEqual({ consent: box });
+    expect(shownSubmissionErrors(undefined, { blocked: true, tickedSince: true })).toEqual({ consent: box });
+  });
+
+  it('drops the server\'s old complaint about the box once it is ticked, and keeps the rest', () => {
+    // Refused unticked, stopped again in the browser, then ticked: the old box message must not come back.
+    expect(shownSubmissionErrors(server, { blocked: false, tickedSince: true })).toEqual({ name: 'Enter your name.' });
+    expect(shownSubmissionErrors({ consent: box }, { blocked: false, tickedSince: true })).toBeUndefined();
+    const other = { email: 'Enter your email address.' };
+    expect(shownSubmissionErrors(other, { blocked: false, tickedSince: true })).toBe(other);
   });
 });
 

@@ -23,7 +23,7 @@ import {
   createCreative as capCreateCreative,
   createCreativeInput,
   createForm as capCreateForm,
-  createFormInput,
+  createFormToolInput,
   createLead as capCreateLead,
   createLeadInput,
   deleteAppointment as capDeleteAppointment,
@@ -55,7 +55,7 @@ import {
   updateCreative as capUpdateCreative,
   updateCreativeInput,
   updateForm as capUpdateForm,
-  updateFormInput,
+  updateFormToolInput,
   updateLead as capUpdateLead,
   updateLeadInput,
 } from '@/lib/reach/capabilities';
@@ -515,12 +515,12 @@ export function createReachTools(
     createForm: tool({
       description:
         'Create a lead form (name, optional category, link and status). Leave the link out to derive it from the name. Needs approval.',
-      inputSchema: createFormInput,
+      inputSchema: createFormToolInput,
       execute: async (input) => capCreateForm(ctx, input),
     }),
     updateForm: tool({
       description: 'Edit a lead form by id (name, category, link or status). Needs approval.',
-      inputSchema: updateFormInput,
+      inputSchema: updateFormToolInput,
       execute: async (input) => capUpdateForm(ctx, input),
     }),
     setFormStatus: tool({

@@ -7,6 +7,7 @@ import {
   createCampaignInput,
   createCreativeInput,
   createFormInput,
+  createFormToolInput,
   createLeadInput,
   deleteAppointmentInput,
   deleteCampaignInput,
@@ -23,6 +24,7 @@ import {
   updateCampaignInput,
   updateCreativeInput,
   updateFormInput,
+  updateFormToolInput,
   updateLeadInput,
 } from '@/lib/reach/capabilities';
 import { WRITE_TOOL_NAMES } from '@/lib/ai/agents/orchestrator';
@@ -46,8 +48,9 @@ describe('AI write tools reuse the capability schemas (parity)', () => {
     expect(tools.updateCreative.inputSchema).toBe(updateCreativeInput);
     expect(tools.deleteCreative.inputSchema).toBe(deleteCreativeInput);
     expect(tools.updateAdSettings.inputSchema).toBe(updateAdSettingsInput);
-    expect(tools.createForm.inputSchema).toBe(createFormInput);
-    expect(tools.updateForm.inputSchema).toBe(updateFormInput);
+    // The form tools take the capability schema without the consent sentence (see below).
+    expect(tools.createForm.inputSchema).toBe(createFormToolInput);
+    expect(tools.updateForm.inputSchema).toBe(updateFormToolInput);
     expect(tools.setFormStatus.inputSchema).toBe(setFormStatusInput);
     expect(tools.deleteForm.inputSchema).toBe(deleteFormInput);
     expect(tools.createLead.inputSchema).toBe(createLeadInput);
@@ -76,6 +79,28 @@ describe('AI write tools reuse the capability schemas (parity)', () => {
     // Only the name is needed; the link is derived when it is left out.
     expect(create.required).toEqual(['name']);
     expect(Object.keys(create.properties).sort()).toEqual(['category', 'channel', 'consent_text', 'name', 'slug', 'status']);
+  });
+
+  it('shows the model the form tools exactly as before the consent sentence', () => {
+    const shown = (schema: z.ZodType) => z.toJSONSchema(schema, { io: 'input' }) as {
+      required?: string[]; properties: Record<string, unknown>;
+    };
+    const without = (schema: z.ZodType) => {
+      const full = shown(schema);
+      const { consent_text: _dropped, ...properties } = full.properties;
+      void _dropped;
+      return { ...full, properties };
+    };
+    for (const [tool, full] of [[tools.createForm, createFormInput], [tools.updateForm, updateFormInput]] as const) {
+      const seen = shown(tool.inputSchema as z.ZodType);
+      expect(seen.properties).not.toHaveProperty('consent_text');
+      // Byte for byte what the full schema gives, less that one property.
+      expect(JSON.stringify(seen)).toBe(JSON.stringify(without(full)));
+    }
+    expect(Object.keys(shown(tools.createForm.inputSchema as z.ZodType).properties))
+      .toEqual(['name', 'category', 'slug', 'channel', 'status']);
+    expect(Object.keys(shown(tools.updateForm.inputSchema as z.ZodType).properties))
+      .toEqual(['id', 'name', 'category', 'slug', 'channel', 'status']);
   });
 
   it('omits write tools when the caller cannot write', () => {

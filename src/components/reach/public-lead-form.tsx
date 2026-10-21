@@ -15,11 +15,9 @@ import {
   SUBMISSION_PHONE_MAX,
   SUBMISSION_PROBLEM_ORDER,
   type SubmissionErrors,
+  shownSubmissionErrors,
 } from '@/lib/reach/form-submissions';
 import type { PublicFormState } from '@/app/f/[formId]/actions';
-
-/** What is shown when the browser stops a send because the box was not ticked. */
-const CONSENT_ONLY: SubmissionErrors = { consent: SUBMISSION_MESSAGES.consent };
 
 /** The message shown in place of the fields, for both end states. */
 function Outcome({ title, children }: { title: string; children: string }) {
@@ -59,14 +57,27 @@ export function PublicLeadForm({
   const formRef = useRef<HTMLFormElement>(null);
   // Set in the browser when the box was left unticked; nothing was sent then.
   const [unticked, setUnticked] = useState<{ attempt: number } | null>(null);
+  // The server answer the box has been ticked after, if any: that answer's
+  // complaint about the box no longer applies. A new answer starts afresh.
+  const [tickedAfter, setTickedAfter] = useState<PublicFormState | null>(null);
   const values = state?.values;
-  // The server's answer, unless the browser has since stopped a send of its own.
-  const errors: SubmissionErrors | undefined = unticked ? CONSENT_ONLY : state?.errors;
+  const errors = shownSubmissionErrors(state?.errors, {
+    blocked: unticked != null,
+    tickedSince: tickedAfter === state,
+  });
 
-  // After a rejected attempt, go to the first field that needs changing.
-  // `unticked` is new on every stopped attempt, so the box is focused each time.
+  // After a rejected attempt, go to the first field that needs changing: once
+  // per server answer, and once per send the browser stopped. Ticking the box
+  // changes neither, so it never moves focus.
+  const focused = useRef<{ state: PublicFormState; attempt: number | null }>({ state: undefined, attempt: null });
   useEffect(() => {
-    const current = unticked ? CONSENT_ONLY : state?.errors;
+    const attempt = unticked?.attempt ?? null;
+    const last = focused.current;
+    focused.current = { state, attempt };
+    const newAnswer = state !== last.state;
+    const newBlock = attempt != null && attempt !== last.attempt;
+    if (!newAnswer && !newBlock) return;
+    const current = shownSubmissionErrors(state?.errors, { blocked: newBlock, tickedSince: false });
     if (!current) return;
     const first = SUBMISSION_PROBLEM_ORDER.find((field) => current[field]);
     if (first) formRef.current?.querySelector<HTMLElement>(`[name="${first}"]`)?.focus();
@@ -191,7 +202,9 @@ export function PublicLeadForm({
             aria-invalid={errors?.consent ? true : undefined}
             aria-describedby={describe('consent')}
             onChange={(event) => {
-              if (event.currentTarget.checked) setUnticked(null);
+              if (!event.currentTarget.checked) return;
+              setUnticked(null);
+              setTickedAfter(state);
             }}
             className="mt-0.5 size-5 shrink-0 rounded-sm accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           />
