@@ -43,28 +43,28 @@ import {
 
 const DEPARTMENTS = ['Sales', 'Operations', 'Marketing', 'Finance', 'Management'];
 
-/** n, name, email handle, department, designation, employment type, manager, days since joining, days to next birthday. */
-const PEOPLE: [number, string, string, string, string, EmploymentType, boolean, number, number][] = [
-  [1, 'Aisyah Rahim', 'aisyah', 'Sales', 'Sales Executive', 'full_time', false, 1730, 19],
-  [2, 'Faiz Hakim', 'faiz', 'Marketing', 'Designer', 'full_time', false, 1680, 143],
-  [3, 'Ahmad Zaki', 'zaki', 'Operations', 'Ops Lead', 'full_time', true, 1081, 201],
-  [4, 'Nurul Huda', 'nurul', 'Finance', 'Accountant', 'full_time', false, 960, 9],
-  [5, 'Siti Aminah', 'siti', 'Sales', 'Sales Executive', 'part_time', false, 850, 77],
-  [6, 'Lim Wei Jie', 'weijie', 'Operations', 'Technician', 'contract', false, 1060, 256],
-  [7, 'Siti Lestari', 'lestari', 'Management', 'HR Executive', 'full_time', false, 610, 310],
-  [8, 'Raj Kumar', 'raj', 'Finance', 'Finance Analyst', 'full_time', false, 470, 118],
-  [9, 'Tan Mei Ling', 'meiling', 'Marketing', 'Content Lead', 'full_time', true, 1240, 45],
-  [10, 'Hafiz Osman', 'hafiz', 'Sales', 'Business Development', 'full_time', false, 395, 170],
-  [11, 'Amirul Danial', 'amirul', 'Sales', 'Sales Executive', 'full_time', false, 720, 228],
-  [12, 'Farid Ismail', 'farid', 'Sales', 'Sales Manager', 'full_time', true, 2010, 284],
-  [13, 'Priya Devi', 'priya', 'Sales', 'Account Executive', 'full_time', false, 330, 61],
-  [14, 'Chong Wei Han', 'weihan', 'Operations', 'Logistics Coordinator', 'full_time', false, 890, 332],
-  [15, 'Zainab Yusof', 'zainab', 'Operations', 'Customer Support', 'full_time', false, 540, 97],
-  [16, 'Daniel Wong', 'daniel', 'Operations', 'Technician', 'contract', false, 210, 189],
-  [17, 'Syafiq Karim', 'syafiq', 'Marketing', 'Performance Marketer', 'full_time', false, 660, 131],
-  [18, 'Liyana Salleh', 'liyana', 'Finance', 'Finance Manager', 'full_time', true, 1520, 266],
-  [19, 'Kavitha Nair', 'kavitha', 'Management', 'Operations Director', 'full_time', true, 2300, 29],
-  [20, 'Hakim Abdullah', 'hakim', 'Management', 'Managing Director', 'full_time', true, 2800, 215],
+/** n, name, email handle, department, designation, employment type, days since joining, days to next birthday. */
+const PEOPLE: [number, string, string, string, string, EmploymentType, number, number][] = [
+  [1, 'Aisyah Rahim', 'aisyah', 'Sales', 'Sales Executive', 'full_time', 1730, 19],
+  [2, 'Faiz Hakim', 'faiz', 'Marketing', 'Designer', 'full_time', 1680, 143],
+  [3, 'Ahmad Zaki', 'zaki', 'Operations', 'Ops Lead', 'full_time', 1081, 201],
+  [4, 'Nurul Huda', 'nurul', 'Finance', 'Accountant', 'full_time', 960, 9],
+  [5, 'Siti Aminah', 'siti', 'Sales', 'Sales Executive', 'part_time', 850, 77],
+  [6, 'Lim Wei Jie', 'weijie', 'Operations', 'Technician', 'contract', 1060, 256],
+  [7, 'Siti Lestari', 'lestari', 'Management', 'HR Executive', 'full_time', 610, 310],
+  [8, 'Raj Kumar', 'raj', 'Finance', 'Finance Analyst', 'full_time', 470, 118],
+  [9, 'Tan Mei Ling', 'meiling', 'Marketing', 'Content Lead', 'full_time', 1240, 45],
+  [10, 'Hafiz Osman', 'hafiz', 'Sales', 'Business Development', 'full_time', 395, 170],
+  [11, 'Amirul Danial', 'amirul', 'Sales', 'Sales Executive', 'full_time', 720, 228],
+  [12, 'Farid Ismail', 'farid', 'Sales', 'Sales Manager', 'full_time', 2010, 284],
+  [13, 'Priya Devi', 'priya', 'Sales', 'Account Executive', 'full_time', 330, 61],
+  [14, 'Chong Wei Han', 'weihan', 'Operations', 'Logistics Coordinator', 'full_time', 890, 332],
+  [15, 'Zainab Yusof', 'zainab', 'Operations', 'Customer Support', 'full_time', 540, 97],
+  [16, 'Daniel Wong', 'daniel', 'Operations', 'Technician', 'contract', 210, 189],
+  [17, 'Syafiq Karim', 'syafiq', 'Marketing', 'Performance Marketer', 'full_time', 660, 131],
+  [18, 'Liyana Salleh', 'liyana', 'Finance', 'Finance Manager', 'full_time', 1520, 266],
+  [19, 'Kavitha Nair', 'kavitha', 'Management', 'Operations Director', 'full_time', 2300, 29],
+  [20, 'Hakim Abdullah', 'hakim', 'Management', 'Managing Director', 'full_time', 2800, 215],
 ];
 
 /** n, type, first day and last day from today, days, reason, status, applied days ago. */
@@ -231,8 +231,12 @@ const pad = (n: number, width: number) => String(n).padStart(width, '0');
 const employeeId = (n: number) => (n === 1 ? DEMO_EMPLOYEE_ID : `seed-emp-${n}`);
 const between = (date: string, from: string, to: string) => date >= from && date <= to;
 
-/** Base pay: RM 2,800 to RM 5,600 by position in the list; managers RM 3,000 more. */
-const salaryCents = (n: number, manager: boolean) => 280000 + ((n * 7) % 8) * 40000 + (manager ? 300000 : 0);
+/**
+ * Base pay: RM 2,800 to RM 5,600 by position in the list; a lead, manager or director (by title) RM 3,000 more,
+ * as the demo re-seed in supabase/migrations/*_people_drop_is_manager.sql has it.
+ */
+const salaryCents = (n: number, designation: string) =>
+  280000 + ((n * 7) % 8) * 40000 + (/ (Lead|Manager|Director)$/.test(designation) ? 300000 : 0);
 
 /** Illustrative round figures, not the official contribution tables. */
 function deductions(gross: number) {
@@ -263,7 +267,7 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
   const leadOf = (n: number, dept: string): string | null =>
     LEADS[dept] !== undefined && LEADS[dept] !== n ? employeeId(LEADS[dept]) : null;
 
-  const employees: Employee[] = PEOPLE.map(([n, name, handle, dept, designation, type, , tenure, bday]) => {
+  const employees: Employee[] = PEOPLE.map(([n, name, handle, dept, designation, type, tenure, bday]) => {
     const birthday = addDays(today, bday);
     return {
       id: employeeId(n),
@@ -284,7 +288,7 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
     };
   });
 
-  const privates: EmployeePrivate[] = PEOPLE.map(([n, name, , , , , manager, , bday]) => {
+  const privates: EmployeePrivate[] = PEOPLE.map(([n, name, , , designation, , , bday]) => {
     const birthday = addDays(today, bday);
     return {
       employee_id: employeeId(n),
@@ -292,7 +296,7 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
       date_of_birth: `${year - 26 - (n % 14)}-${birthday.slice(5, 7)}-${pad(Math.min(Number(birthday.slice(8, 10)), 28), 2)}`,
       phone: `+60 12-555 ${pad(1000 + n * 37, 4)}`,
       address: `${n} Jalan Rimba, 50450 Kuala Lumpur`,
-      base_salary_cents: salaryCents(n, manager),
+      base_salary_cents: salaryCents(n, designation),
       bank_name: ['Maybank', 'CIMB', 'Public Bank', 'RHB'][n % 4],
       bank_account: String(100000000 + n * 7919).padStart(12, '5'),
       epf_no: `EPF${pad(20000 + n, 8)}`,

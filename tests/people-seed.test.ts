@@ -200,6 +200,19 @@ describe('people seed reporting lines', () => {
     for (const employee of await data.listEmployees()) expect(employee).not.toHaveProperty('is_manager');
   });
 
+  it('pays a lead, manager or director RM 3,000 more by title, as the demo re-seed does, with no flag in the list', async () => {
+    const source = readFileSync(join(process.cwd(), 'src/lib/people/seed.ts'), 'utf8');
+    expect(source).not.toMatch(/'(full_time|part_time|contract)', (true|false),/);
+    const paidMore: number[] = [];
+    for (const e of await data.listEmployees()) {
+      const n = Number(e.employee_no.slice(4));
+      const bump = / (Lead|Manager|Director)$/.test(e.designation ?? '') ? 300000 : 0;
+      if (bump) paidMore.push(n);
+      expect((await data.getEmployeePrivate(e.id))?.base_salary_cents, e.name).toBe(280000 + ((n * 7) % 8) * 40000 + bump);
+    }
+    expect(paidMore.sort((a, b) => a - b)).toEqual([3, 9, 12, 18, 19, 20]);
+  });
+
   it('holds no loop', async () => {
     const employees = await data.listEmployees();
     for (const e of employees) {
