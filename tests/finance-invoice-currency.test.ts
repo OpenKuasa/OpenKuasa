@@ -89,10 +89,10 @@ describe('the rate an invoice is offered', () => {
     expect(invoiceRateDate(usd)).toBe(TODAY);
     expect(invoiceRateDate(withSupplyDate(usd, '2026-10-14'))).toBe('2026-10-14');
     expect(INVOICE_FORM_KIND.rateDate?.(withSupplyDate(usd, '2026-10-14'))).toBe('2026-10-14');
-    // A ringgit invoice has no rate, so a stray date of supply drives nothing and is not sent.
+    // A ringgit invoice has no rate, so its date of supply drives no rate date; it is still kept, for service tax.
     const myr = withSupplyDate(newInvoiceForm(TODAY, 'k1'), '2026-10-14');
     expect(invoiceRateDate(myr)).toBe(TODAY);
-    expect(invoicePayload(myr).supply_date).toBeNull();
+    expect(invoicePayload(myr).supply_date).toBe('2026-10-14');
     expect(invoicePayload(withSupplyDate(usd, '2026-10-14')).supply_date).toBe('2026-10-14');
   });
 

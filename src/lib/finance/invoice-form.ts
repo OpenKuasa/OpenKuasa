@@ -52,7 +52,7 @@ export type InvoiceForm = {
   lines: LineDraft[];
   /** The currency, the rate and, for a typed rate, its source. Ringgit for a new form until the person or the customer's default says otherwise. */
   fx: CurrencyFields;
-  /** The date of supply as typed; empty means the invoice date. Only drawn, and only sent, for another currency. */
+  /** The date of supply as typed; empty means the invoice date. Drawn and sent for every currency: service tax on an unpaid invoice falls due 12 months after it. */
   supplyDate: string;
 };
 
@@ -85,7 +85,7 @@ export function invoiceFormFromDetail(invoice: InvoiceDetail): InvoiceForm {
   };
 }
 
-/** The date the invoice's rate is for: the date of supply when one is typed, else the invoice date. */
+/** The date the invoice's rate is for: the date of supply when one is typed, else the invoice date. Ringgit has no rate, so its rate date stays the invoice date. */
 export function invoiceRateDate(form: InvoiceForm): string {
   return rateDateFor(form.invoice_date, form.fx.currency === BASE_CURRENCY ? '' : form.supplyDate);
 }
@@ -130,7 +130,7 @@ export function withSoldProduct(line: LineDraft, product: FinanceProduct | null)
 
 /**
  * What is sent to saveInvoiceAction. Figures are numbers; a box that is not a number goes as NaN and is refused.
- * The currency part always goes (a ringgit invoice as MYR); the date of supply only for another currency.
+ * The currency part always goes (a ringgit invoice as MYR), and so does the date of supply (empty means the invoice date).
  */
 export function invoicePayload(form: InvoiceForm) {
   const supply = form.supplyDate.trim();
@@ -142,7 +142,7 @@ export function invoicePayload(form: InvoiceForm) {
     notes: form.notes,
     lines: form.lines.map(linePayload),
     ...currencyPayloadWithSource(form.fx),
-    supply_date: form.fx.currency === BASE_CURRENCY || supply === '' ? null : supply,
+    supply_date: supply === '' ? null : supply,
   };
 }
 
@@ -183,7 +183,7 @@ export const INVOICE_FORM_KIND: DocumentFormKind<InvoiceForm> = {
   rateDate: invoiceRateDate,
   supplyDate: {
     label: 'Date of supply (if not the invoice date)',
-    hint: 'When the goods were sold or the service provided. The exchange rate is for this date.',
+    hint: 'When the goods were sold or the service provided. It sets the exchange rate on a foreign invoice and, for service tax, when the 12 months for an unpaid invoice start.',
     get: (form) => form.supplyDate,
     set: withSupplyDate,
   },

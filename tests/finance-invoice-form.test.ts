@@ -11,6 +11,7 @@ import {
   invoiceFormError,
   invoiceFormFromDetail,
   invoicePayload,
+  invoiceRateDate,
   invoiceSavedNotPosted,
   newInvoiceForm,
   withCustomer,
@@ -175,7 +176,7 @@ describe('invoicePayload', () => {
         { product_id: PRODUCT, description: ' Gloves ', uom: 'box', pack_size: '', quantity: 10, unit_price: 24.9, sst_rate: 6 },
         { product_id: '', description: 'Delivery', uom: '', pack_size: '', quantity: 1, unit_price: 20, sst_rate: 0 },
       ],
-      // A ringgit invoice sends its code alone (the database stores rate 1), and no date of supply.
+      // A ringgit invoice sends its code alone (the database stores rate 1); no date of supply typed means the invoice date.
       currency: 'MYR',
       fx_rate: null,
       fx_rate_source: null,
@@ -212,6 +213,22 @@ describe('invoicePayload', () => {
       lines: [{ ...emptyLine('k1'), description: 'Widget', quantity: '2', unit_price: '50', sst_rate: '0', discount_amount: '150' }],
     });
     expect(invoiceFormError(form)).toMatch(/more than the line/i);
+  });
+});
+
+describe('the date of supply on every invoice', () => {
+  it('is sent on a ringgit invoice, for the 12 months service tax allows an unpaid one', () => {
+    expect(invoicePayload(filled({ supplyDate: '2026-09-30' })).supply_date).toBe('2026-09-30');
+  });
+  it('goes as null when left empty, meaning the invoice date', () => {
+    expect(invoicePayload(filled({ supplyDate: '' })).supply_date).toBeNull();
+    expect(invoicePayload(filled({ supplyDate: '  ' })).supply_date).toBeNull();
+  });
+  it('still sets the rate date of a foreign invoice, and never that of a ringgit one', () => {
+    const usd = { ...ringgitFields(), currency: 'USD' };
+    expect(invoiceRateDate(filled({ fx: usd, supplyDate: '2026-09-30' }))).toBe('2026-09-30');
+    expect(invoiceRateDate(filled({ fx: usd, supplyDate: '' }))).toBe(today);
+    expect(invoiceRateDate(filled({ supplyDate: '2026-09-30' }))).toBe(today);
   });
 });
 

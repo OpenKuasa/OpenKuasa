@@ -11,7 +11,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { BASE_CURRENCY } from '@/lib/finance/currencies';
 import {
   farRateQuestion,
   rateKey,
@@ -266,7 +265,7 @@ export function DocumentFormCard<F extends DocumentFormState>({
             onChange={(e) => edit((f) => secondDate.set(f, e.target.value))}
           />
         </div>
-        {fx && kind.supplyDate && fx.get(form).currency !== BASE_CURRENCY ? (
+        {kind.supplyDate ? (
           <div className="space-y-1.5 md:col-span-6">
             <Label htmlFor={`${id}-supply`}>{kind.supplyDate.label}</Label>
             <Input
