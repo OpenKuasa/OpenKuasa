@@ -30,7 +30,7 @@ declare
   five text[] := array['hr_leave_requests', 'hr_leave_balances', 'hr_time_off_requests', 'hr_claims', 'hr_attendance_days'];
   cols text := 'id,org_id,employee_id,work_date,hours,day_kind,rate_multiplier,reason,status,requested_by,decided_by,decided_at,decision_note,created_at';
   kinds text[] := array['leave', 'time_off', 'claim', 'overtime'];
-  granted text[] := array['user_id', 'employee_no', 'name', 'work_email', 'department_id', 'designation', 'employment_type', 'is_manager', 'join_date', 'status', 'date_of_birth_day', 'date_of_birth_month'];
+  granted text[] := array['user_id', 'employee_no', 'name', 'work_email', 'department_id', 'designation', 'employment_type', 'join_date', 'status', 'date_of_birth_day', 'date_of_birth_month'];
   w uuid[]; x uuid; y uuid; z uuid; run uuid := gen_random_uuid(); slip uuid := gen_random_uuid(); trn uuid := gen_random_uuid(); dept uuid := gen_random_uuid();
   f_rep text; f_sub text; f_doc text; chain uuid[]; r record; c bigint; i int; k text; a text; b text; ctx text; fails text[] := '{}';
   zeros text := '={"leave":0,"time_off":0,"claims":0,"overtime":0}';
@@ -45,14 +45,16 @@ begin
   if i <> 1 or c <> 1 then fails := fails || format('reports_to is not a nullable uuid (%s of 1) that points at an employee and is blanked when that employee goes (%s of 1)', i, c); end if;
   select count(*) into i from pg_indexes x where x.schemaname = 'public' and x.indexname = 'hr_employees_reports_to_idx' and x.indexdef like '%(org_id, reports_to)';
   if i <> 1 then fails := fails || 'the index hr_employees_reports_to_idx on (org_id, reports_to) is missing'::text; end if;
+  select count(*) into i from information_schema.columns k where k.table_schema = 'public' and k.table_name = 'hr_employees' and k.column_name = 'is_manager';
+  if i <> 0 then fails := fails || 'the old is_manager column is still there'::text; end if;
   if not has_column_privilege('authenticated', 'public.hr_employees', 'reports_to', 'SELECT') or has_column_privilege('authenticated', 'public.hr_employees', 'reports_to', 'UPDATE')
      or has_column_privilege('anon', 'public.hr_employees', 'reports_to', 'SELECT') or has_column_privilege('anon', 'public.hr_employees', 'reports_to', 'UPDATE') then
     fails := fails || 'reports_to should be read by signed-in users and updated by none'::text;
   end if;
   select count(*) into i from unnest(granted) col where has_column_privilege('authenticated', 'public.hr_employees', col, 'UPDATE');
-  if i <> 12 or not has_table_privilege('authenticated', 'public.hr_employees', 'INSERT') or has_table_privilege('authenticated', 'public.hr_employees', 'UPDATE')
+  if i <> 11 or not has_table_privilege('authenticated', 'public.hr_employees', 'INSERT') or has_table_privilege('authenticated', 'public.hr_employees', 'UPDATE')
      or has_table_privilege('authenticated', 'public.hr_employees', 'DELETE') then
-    fails := fails || format('signed-in users should still update the twelve columns (%s) and insert, and hold no update of the whole table and no delete', i);
+    fails := fails || format('signed-in users should still update the eleven columns (%s) and insert, and hold no update of the whole table and no delete', i);
   end if;
   select count(*) into i from pg_proc p where p.oid in (to_regprocedure('public.hr_my_team(uuid)'), to_regprocedure('public.hr_set_reports_to(uuid,uuid)'), to_regprocedure('public.hr_waiting_counts(uuid)'),
       to_regprocedure('private.is_manager_of(uuid)'), to_regprocedure('public.hr_team_overtime(uuid)'))
@@ -404,13 +406,12 @@ begin
 
   -- ---- 9. the app before this release (org2: no line anywhere) -------------------------------------
   fails := fails
-    || pg_temp.t(m2, 'the old directory query still runs', format('(select count(*) from (select x.id, x.is_manager from public.hr_employees x where x.org_id = %L) q)', org2), '=3')
-    || pg_temp.t(adm2, 'an insert naming the columns the app names', format('insert into public.hr_employees (org_id, name, employee_no, work_email, department_id, designation, employment_type, is_manager, join_date, status, '
-        || 'date_of_birth_day, date_of_birth_month) values (%L, ''Old App'', ''B04'', ''old.app@reporting-check.openkuasa-test.dev'', null, ''Clerk'', ''full_time'', true, ''2026-01-05'', ''active'', 5, 1)', org2), 'ok');
+    || pg_temp.t(adm2, 'an insert naming the columns the app names', format('insert into public.hr_employees (org_id, name, employee_no, work_email, department_id, designation, employment_type, join_date, status, '
+        || 'date_of_birth_day, date_of_birth_month) values (%L, ''Old App'', ''B04'', ''old.app@reporting-check.openkuasa-test.dev'', null, ''Clerk'', ''full_time'', ''2026-01-05'', ''active'', 5, 1)', org2), 'ok');
   select id into z from public.hr_employees where org_id = org2 and employee_no = 'B04';
   if (select reports_to from public.hr_employees where id = z) is not null then fails := fails || 'an employee added the old way has a manager'::text; end if;
   for r in select * from (values ('user_id', 'null'), ('employee_no', '''B05'''), ('name', '''Old App Two'''), ('work_email', 'null'), ('department_id', 'null'), ('designation', '''Senior clerk'''),
-      ('employment_type', '''contract'''), ('is_manager', 'false'), ('join_date', '''2026-01-06'''), ('status', '''inactive'''), ('date_of_birth_day', '6'), ('date_of_birth_month', '2')) v(col, val) loop
+      ('employment_type', '''contract'''),('join_date', '''2026-01-06'''), ('status', '''inactive'''), ('date_of_birth_day', '6'), ('date_of_birth_month', '2')) v(col, val) loop
     fails := fails || pg_temp.t(adm2, format('an admin updates %s as before', r.col), format('update public.hr_employees set %I = %s where id = %L', r.col, r.val, z), 'ok');
   end loop;
   if pg_temp.locked(org2) then fails := fails || 'a write that names no manager took the reporting-line lock'::text; end if;

@@ -321,10 +321,12 @@ describe('the is_manager column is dropped (issue #234)', () => {
     expect(dropSql).not.toMatch(/\s~\*?\s|regexp_|similar to/i);
   });
 
-  test('no database check still expects the column', () => {
+  test('no database check still expects the column; the reporting check asserts it is gone', () => {
     const TESTS = join(process.cwd(), 'supabase/tests');
+    const ABSENT = "k.column_name = 'is_manager';\n  if i <> 0 then";
     for (const f of readdirSync(TESTS).filter((x) => x.endsWith('.sql'))) {
-      expect(readFileSync(join(TESTS, f), 'utf8'), f).not.toMatch(/\bis_manager\b/);
+      expect(readFileSync(join(TESTS, f), 'utf8').replace(ABSENT, '').replace('the old is_manager column', ''), f).not.toMatch(/\bis_manager\b/);
     }
+    expect(readFileSync(join(TESTS, 'people_reporting_check.sql'), 'utf8')).toContain(ABSENT);
   });
 });
