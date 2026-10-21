@@ -93,6 +93,11 @@ describe('settings I/O', () => {
     const { ctx } = fakeClient({ data: null, error: null });
     expect(await getSstSettings(ctx)).toBeNull();
   });
+  it('throws when the read fails, so a failed read never shows as nothing saved', async () => {
+    // A form shown empty after a failed read would, once saved, overwrite the stored registration numbers.
+    const { ctx } = fakeClient({ data: null, error: { code: '500', message: 'boom' } });
+    await expect(getSstSettings(ctx)).rejects.toEqual({ code: '500', message: 'boom' });
+  });
   it('upserts on org_id', async () => {
     const { ctx, seen } = fakeClient({ data: null, error: null });
     expect(await saveSstSettings(ctx, { period_start_month: 2, service_tax_no: ' A ' })).toEqual({ ok: true });

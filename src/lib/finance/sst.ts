@@ -110,17 +110,18 @@ export function sstPeriodLabel(p: SstPeriod): string {
 
 export const SST_NEEDS_SIGN_OFF = 'Only an owner or admin can change SST settings.';
 
-/** The workspace's SST settings, or null before anyone has saved them. */
+/**
+ * The workspace's SST settings, or null before anyone has saved them. A failed read throws rather than
+ * answering null: a settings form shown empty after a failed read would, once saved, overwrite the stored
+ * registration numbers. null means only "nothing saved yet".
+ */
 export async function getSstSettings(ctx: FinanceWriteContext): Promise<SstSettings | null> {
   const { data, error } = await ctx.client
     .from('finance_sst_settings')
     .select('period_start_month, service_tax_no, sales_tax_no, service_tax_basis')
     .eq('org_id', ctx.orgId)
     .maybeSingle();
-  if (error) {
-    console.error('[finance] getSstSettings failed:', error);
-    return null;
-  }
+  if (error) throw error;
   return (data as SstSettings | null) ?? null;
 }
 
