@@ -11,8 +11,8 @@ import {
   peopleProduct,
   reachProduct,
 } from '@/lib/ai/products';
-import { CLEARED, EMPTY, changeHeading, changeRows, fieldLabel, unchanged, valueText } from '@/lib/chat/change-rows';
-import { approvalDetail, nameIn, rowIn } from '@/lib/chat/change-titles';
+import { CLEARED, EMPTY, UNNAMED, changeHeading, changeRows, fieldLabel, unchanged, valueText } from '@/lib/chat/change-rows';
+import { approvalDetail, approvalTitle, kindOfTool, nameIn, rowIn } from '@/lib/chat/change-titles';
 import { createSeedHireData } from '@/lib/hire/seed';
 import { createSeedPeopleData } from '@/lib/people/seed';
 import { createSeedReachData } from '@/lib/reach/seed';
@@ -108,8 +108,9 @@ describe('every change tool has a card that lists what it will change', () => {
     for (const leaf of leaves(input)) {
       const row = byKey.get(leaf.path);
       expect(row, `${name}: no row for ${leaf.path}`).toBeDefined();
-      // The row carries the value itself, in the words the card uses for it.
-      const shown = leaf.value === UUID ? `id ${UUID}` : valueText(leaf.key, leaf.value);
+      // The row carries the value itself, in the words the card uses for it. A raw id no lookup named is never shown.
+      const shown = leaf.value === UUID ? UNNAMED : valueText(leaf.key, leaf.value);
+      expect(row!.to, `${name}: ${leaf.path} shows a raw id`).not.toContain(UUID);
       expect(row!.to, `${name}: ${leaf.path}`).toBe(shown);
       expect(row!.label.trim(), `${name}: ${leaf.path} has no label`).not.toBe('');
     }
@@ -167,12 +168,55 @@ describe('the rows of a change', () => {
     expect(rows.filter(unchanged).map((r) => r.key)).toEqual(['firstName']);
   });
 
-  it('names the rows a change points at, and shows the id itself when nothing named it', () => {
+  it('names the rows a change points at, and never shows a raw id when nothing named it', () => {
     const rows = changeRows('moveDeal', { id: UUID, stageId: STAGE }, nameIn(results), rowIn(results));
     expect(rows).toEqual([
-      { key: 'id', kind: 'record', label: 'Deal', to: `id ${UUID}` },
+      { key: 'id', kind: 'record', label: 'Deal', to: UNNAMED },
       { key: 'stageId', kind: 'record', label: 'Stage', to: 'Negotiation' },
     ]);
+  });
+
+  it('names a leave request the way the title does, not by its id', () => {
+    const LEAVE = '66666666-6666-4666-8666-666666666666';
+    const leave = [
+      {
+        tool: 'listLeaveRequests',
+        output: {
+          requests: [
+            { id: LEAVE, employee: 'Report B (test)', leave_type: 'annual', start_date: '2026-10-26', end_date: '2026-10-27', status: 'pending', reason: 'Trip' },
+          ],
+        },
+      },
+    ];
+    const input = { id: LEAVE, approve: true };
+    const rows = changeRows('decideLeave', input, nameIn(leave), rowIn(leave));
+    const title = approvalTitle('decideLeave', input, nameIn(leave));
+    expect(rows).toEqual([
+      { key: 'id', kind: 'record', label: 'Leave request', to: expect.stringContaining('Report B (test)') },
+      { key: 'approve', kind: 'field', label: 'Decision', to: 'Approve' },
+    ]);
+    // The row and the title name the same request.
+    expect(title).toContain(rows[0].to);
+    expect(rows.map((r) => r.to).join(' ')).not.toContain(LEAVE);
+    // Display only: the change itself still carries the id.
+    expect(input.id).toBe(LEAVE);
+  });
+
+  it.each([
+    ['decideLeave', 'leave'],
+    ['cancelLeaveRequest', 'leave'],
+    ['decideTimeOff', 'time-off'],
+    ['cancelTimeOffRequest', 'time-off'],
+    ['decideClaim', 'claim'],
+    ['cancelClaim', 'claim'],
+    ['markClaimPaid', 'claim'],
+    ['unmarkClaimPaid', 'claim'],
+    ['decideOvertime', 'overtime'],
+    ['cancelOvertime', 'overtime'],
+    ['removeHoliday', 'holiday'],
+  ])('%s: its card knows the kind of row it is about (%s)', (name, kind) => {
+    expect(kindOfTool(name)).toBe(kind);
+    expect(changeRows(name, { id: UUID })[0].label).not.toBe('Record');
   });
 
   it('a name from a record is one line of plain text, kept apart from every other row', () => {
@@ -191,7 +235,7 @@ describe('the rows of a change', () => {
       private: { base_salary: 4500, bank_account: '5123-4411', nric: null },
     });
     expect(rows.map((r) => [r.label, r.to])).toEqual([
-      ['Employee', `id ${UUID}`],
+      ['Employee', UNNAMED],
       ['Designation', CLEARED],
       ['Work email', EMPTY],
       ['Private › Base salary', '4500'],
