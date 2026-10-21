@@ -484,7 +484,8 @@ export type PeopleViewer = {
   isDemo: boolean;
   /**
    * Has at least one report they have access to. Left out, not false, for everyone else: callers compare viewers
-   * whole. Never set for an owner or admin, or in the demo.
+   * whole. Set for an owner or admin with reports too (they stay HR: see `peopleTier` and `hasReports`); never set
+   * in the demo or for an account with no linked employee record.
    */
   managesTeam?: boolean;
 };
