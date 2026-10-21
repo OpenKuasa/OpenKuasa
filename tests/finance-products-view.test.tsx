@@ -1,7 +1,14 @@
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { ProductFormCard, productTaxTypeFor, type ProductActions } from '@/components/finance/products-view';
+import {
+  ProductFormCard,
+  initialTaxTypeTouched,
+  onRateChange,
+  onTypeChange,
+  productTaxFields,
+  productTaxTypeFor,
+  type TaxTypeState, type ProductActions } from '@/components/finance/products-view';
 import type { FinanceProduct } from '@/lib/finance/products';
 
 // A closed select draws no options. Here its options are drawn in place, and the chosen one is marked.
@@ -40,6 +47,42 @@ describe('productTaxTypeFor', () => {
   });
   it('keeps the current type while the rate is not a number', () => {
     expect(productTaxTypeFor({ taxType: 'service', touched: false, sst: 'abc' })).toBe('service');
+  });
+});
+
+describe('the tax type across edits', () => {
+  const start = (p: FinanceProduct | null): TaxTypeState => ({ taxType: p ? p.tax_type : 'none', touched: initialTaxTypeTouched(p) });
+
+  it('a new item at rate 6 is service, then at 10 is sales', () => {
+    const s1 = onRateChange(start(null), '6');
+    expect(s1.taxType).toBe('service');
+    expect(onRateChange(s1, '10').taxType).toBe('sales');
+  });
+  it('an edited 6% sales item keeps sales when the rate becomes 8 or 7', () => {
+    const s = start({ ...base, tax_type: 'sales' });
+    expect(s.touched).toBe(true);
+    expect(onRateChange(s, '8').taxType).toBe('sales');
+    expect(onRateChange(s, '7').taxType).toBe('sales');
+  });
+  it('an edited 6% service item follows the rate to 10', () => {
+    const s = start(base);
+    expect(s.touched).toBe(false);
+    expect(onRateChange(s, '10').taxType).toBe('sales');
+  });
+  it('a stored null type follows the rate', () => {
+    const s = start({ ...base, tax_type: null, sst_rate: 7 });
+    expect(s.touched).toBe(false);
+    expect(onRateChange(s, '6').taxType).toBe('service');
+  });
+  it('once the person picks a type, rate changes no longer move it', () => {
+    const s = onTypeChange(start(null), 'sales');
+    expect(onRateChange(s, '6')).toEqual({ taxType: 'sales', touched: true });
+  });
+  it('the save sends no code for No SST or no type, and the trimmed code otherwise', () => {
+    expect(productTaxFields('none', 'X1')).toEqual({ tax_type: 'none', sst_code: null });
+    expect(productTaxFields(null, 'X1')).toEqual({ tax_type: null, sst_code: null });
+    expect(productTaxFields('sales', ' 8471 ')).toEqual({ tax_type: 'sales', sst_code: '8471' });
+    expect(productTaxFields('service', '')).toEqual({ tax_type: 'service', sst_code: '' });
   });
 });
 

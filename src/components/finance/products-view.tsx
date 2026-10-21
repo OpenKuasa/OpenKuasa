@@ -311,6 +311,28 @@ export function productTaxTypeFor(form: { taxType: SstTaxType | null; touched: b
   return rate === null ? form.taxType : taxTypeForRate(rate);
 }
 
+export type TaxTypeState = { taxType: SstTaxType | null; touched: boolean };
+
+/** On edit, a stored type that differs from what the rate would give was chosen by someone: it is never overwritten. */
+export function initialTaxTypeTouched(product: FinanceProduct | null | undefined): boolean {
+  return !!product && product.tax_type !== null && product.tax_type !== taxTypeForRate(product.sst_rate);
+}
+
+/** The rate was edited: the type follows it unless it was chosen. */
+export function onRateChange(state: TaxTypeState, sst: string): TaxTypeState {
+  return { ...state, taxType: productTaxTypeFor({ ...state, sst }) };
+}
+
+/** The person picked a type: it stays from now on. */
+export function onTypeChange(_state: TaxTypeState, taxType: SstTaxType): TaxTypeState {
+  return { taxType, touched: true };
+}
+
+/** The tax fields a save sends: no code for No SST or for no type. */
+export function productTaxFields(taxType: SstTaxType | null, code: string): { tax_type: SstTaxType | null; sst_code: string | null } {
+  return { tax_type: taxType, sst_code: taxType === null || taxType === 'none' ? null : code.trim() };
+}
+
 export function ProductFormCard({
   editing,
   actions,
@@ -330,14 +352,17 @@ export function ProductFormCard({
   const [cost, setCost] = useState(editing ? String(editing.cost) : '');
   const [sst, setSst] = useState(editing ? String(editing.sst_rate) : '0');
   // A new item starts at a rate of 0, so at No SST; an edited one keeps its stored type (null: no choice yet).
-  const [taxType, setTaxType] = useState<SstTaxType | null>(editing ? editing.tax_type : 'none');
-  const [taxTypeTouched, setTaxTypeTouched] = useState(false);
+  const [tax, setTax] = useState<TaxTypeState>({
+    taxType: editing ? editing.tax_type : 'none',
+    touched: initialTaxTypeTouched(editing),
+  });
+  const taxType = tax.taxType;
   const [sstCode, setSstCode] = useState(editing?.sst_code ?? '');
   const save = useFinanceAction();
 
   const changeSst = (value: string) => {
     setSst(value);
-    setTaxType(productTaxTypeFor({ taxType, touched: taxTypeTouched, sst: value }));
+    setTax((t) => onRateChange(t, value));
   };
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -359,8 +384,7 @@ export function ProductFormCard({
     }
     const fields = {
       name, type, sku, category, uom, price: priceValue, cost: costValue, sst_rate: sstValue,
-      tax_type: taxType,
-      sst_code: taxType === null || taxType === 'none' ? null : sstCode,
+      ...productTaxFields(taxType, sstCode),
     };
     save.run(
       () => (editing ? actions.update({ id: editing.id, ...fields }) : actions.create(fields)),
@@ -426,10 +450,7 @@ export function ProductFormCard({
           <Label htmlFor={`${id}-tax-type`}>Tax type</Label>
           <Select
             value={taxType ?? ''}
-            onValueChange={(v) => {
-              setTaxType(v as SstTaxType);
-              setTaxTypeTouched(true);
-            }}
+            onValueChange={(v) => setTax((t) => onTypeChange(t, v as SstTaxType))}
           >
             <SelectTrigger id={`${id}-tax-type`} className="w-full">
               <SelectValue placeholder="Choose a tax type" />
