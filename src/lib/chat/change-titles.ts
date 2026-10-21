@@ -336,12 +336,24 @@ export function kindOfTool(toolName: string): ItemKind | undefined {
   return Object.hasOwn(SUBJECT_ONLY, toolName) ? SUBJECT_ONLY[toolName] : undefined;
 }
 
-// Tools whose `id` is of a known kind but whose result names nothing (the row is gone).
+// Tools whose `id` is of a known kind but whose result is not read for names (the row is gone, or the
+// result is not a lookup row). Their card names the row the same way their title does.
 const SUBJECT_ONLY: Record<string, ItemKind> = {
   deleteCampaign: 'campaign',
   deleteCreative: 'creative',
   deleteForm: 'form',
   deleteLead: 'lead',
+  decideLeave: 'leave',
+  cancelLeaveRequest: 'leave',
+  decideTimeOff: 'time-off',
+  cancelTimeOffRequest: 'time-off',
+  decideClaim: 'claim',
+  cancelClaim: 'claim',
+  markClaimPaid: 'claim',
+  unmarkClaimPaid: 'claim',
+  decideOvertime: 'overtime',
+  cancelOvertime: 'overtime',
+  removeHoliday: 'holiday',
 };
 
 /** Names by `kind:id`, so a later turn can still say what an id refers to. */
