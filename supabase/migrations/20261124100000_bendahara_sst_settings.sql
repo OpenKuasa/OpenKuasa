@@ -165,7 +165,7 @@ begin
 end $$;
 
 create trigger finance_sst_settings_stamp
-  before update on public.finance_sst_settings
+  before insert or update on public.finance_sst_settings
   for each row execute function private.finance_sst_settings_stamp();
 
 revoke all on function private.finance_sst_settings_stamp() from public, anon, authenticated, service_role;

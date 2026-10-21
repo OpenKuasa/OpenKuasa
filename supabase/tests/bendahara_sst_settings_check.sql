@@ -150,10 +150,15 @@ begin
     format('update public.finance_invoice_lines set tax_type = null where id = %L', line));
 
   -- ==== settings: the owner saves and re-saves ======================================
+  -- The first save sends the member's id as updated_by; the stamp records the owner's.
   fails := fails || public.bendahara_check_try('the owner saves the settings', 'ok',
-    format('insert into public.finance_sst_settings (org_id, period_start_month, service_tax_no) values (%L, 1, %L)', org, 'W10-1808-32000001'));
+    format('insert into public.finance_sst_settings (org_id, period_start_month, service_tax_no, updated_by) values (%L, 1, %L, %L)',
+      org, 'W10-1808-32000001', member_id));
   select * into r from public.finance_sst_settings where org_id = org;
-  if r.service_tax_basis is distinct from 'payment' or r.updated_by is distinct from owner_id or r.sales_tax_no is not null then
+  if r.updated_by is distinct from owner_id then
+    fails := fails || format('the first save forged updated_by: it reads %s, not the owner', r.updated_by);
+  end if;
+  if r.service_tax_basis is distinct from 'payment' or r.sales_tax_no is not null then
     fails := fails || format('the saved settings read %s / %s / %s', r.service_tax_basis, r.updated_by, r.sales_tax_no);
   end if;
   fails := fails || public.bendahara_check_try('the owner re-saves the settings', 'ok',

@@ -1856,7 +1856,7 @@ starts), `service_tax_no` and `sales_tax_no` (the registration numbers: null,
 or 1 to 35 characters with no space at either end), `service_tax_basis`
 (`payment`, the default, when service tax is due on what the customer paid, or
 `invoice`, on what was invoiced), and `updated_by` / `updated_at`, which a
-trigger (`finance_sst_settings_stamp`) sets on every update whatever the caller
+trigger (`finance_sst_settings_stamp`) sets on every insert and update whatever the caller
 sent. Every member reads it; only an owner or admin inserts or updates it
 (`private.finance_may_sign_off`); there is no delete policy, and delete is not
 granted. It has the restrictive `mfa_required` policy like every finance table.
