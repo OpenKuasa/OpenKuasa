@@ -15,7 +15,7 @@ const save = vi.fn(async () => ({ ok: true as const, data: null }));
 describe('the SST settings card', () => {
   it('asks for the taxable period while nothing is saved, and offers no Save without the action', () => {
     const html = renderToStaticMarkup(<SstSettingsCard settings={null} suggestedNumber={null} today="2026-10-21" />);
-    expect(textOf(html)).toContain('Set your taxable period to see your returns.');
+    expect(textOf(html)).toContain('Set your taxable period before your returns can be worked out.');
     expect(html).not.toMatch(/>\s*Save/);
   });
 

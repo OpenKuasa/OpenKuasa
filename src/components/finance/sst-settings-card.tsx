@@ -21,7 +21,7 @@ const BASIS_LABELS: Record<SstBasis, string> = {
 };
 
 const NOT_REGISTERED = 'Not registered';
-const NOTHING_SAVED = 'Set your taxable period to see your returns.';
+const NOTHING_SAVED = 'Set your taxable period before your returns can be worked out.';
 
 const SELECT_CLASS =
   'h-8 w-full rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 dark:bg-input/30';
