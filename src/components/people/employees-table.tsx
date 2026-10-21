@@ -35,11 +35,13 @@ import {
   suggestedMember,
 } from '@/lib/people/employees';
 import type { WorkspaceMember } from '@/lib/people/members';
+import { REPORTS_TO_SET_FROM_ROW } from '@/lib/people/reporting-refusals';
 import type { Department, Employee } from '@/lib/people/types';
 import { cn } from '@/lib/utils';
 import { type EditingEmployee, EmployeeForm } from './employee-form';
 import { EmployeeDocuments } from './employee-documents';
 import { EmployeeGoals } from './employee-goals';
+import { EmployeesTableMessage } from './employees-table-message';
 import type { EntitlementChange } from './entitlements-fields';
 
 type ActionResult = {
@@ -101,6 +103,8 @@ export function EmployeesTable({
   const [filter, setFilter] = useState<EmployeeFilter>({ query: '', departmentId: 'all', status: 'all', team: 'all' });
   const [reportsToResets, setReportsToResets] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  /** Information after a save that went through, such as a new employee whose reporting line was refused. */
+  const [notice, setNotice] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<EditingEmployee | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
@@ -116,7 +120,8 @@ export function EmployeesTable({
   function act(result: Promise<ActionResult>) {
     start(async () => {
       const res = await result;
-      setError(res.ok ? (res.notice ?? null) : (res.error ?? 'Something went wrong.'));
+      setError(res.ok ? null : (res.error ?? 'Something went wrong.'));
+      setNotice(res.ok ? (res.notice ?? null) : null);
       if (res.lineRefused) setReportsToResets((count) => count + 1);
       if (res.baseline !== undefined) {
         const managerId = res.baseline;
@@ -134,6 +139,7 @@ export function EmployeesTable({
   /** Fetches the private details first, so they never travel with the directory. */
   function openEdit(employee: Employee) {
     setError(null);
+    setNotice(null);
     start(async () => {
       const [res, balances] = await Promise.all([
         loadEmployeePrivateAction({ id: employee.id }),
@@ -208,7 +214,9 @@ export function EmployeesTable({
       entitlements: async () => ({ ok: true }),
     });
     if (outcome.ok) return { ok: true };
-    return outcome.step === 'details' ? { ok: false, error: createError } : { ok: true, notice: outcome.error };
+    return outcome.step === 'details'
+      ? { ok: false, error: createError }
+      : { ok: true, notice: `${outcome.error} ${REPORTS_TO_SET_FROM_ROW}` };
   }
 
   return (
@@ -276,6 +284,7 @@ export function EmployeesTable({
             disabled={pending}
             onClick={() => {
               setError(null);
+              setNotice(null);
               setCreating(true);
             }}
           >
@@ -285,14 +294,8 @@ export function EmployeesTable({
         ) : null}
       </div>
 
-      {error && !formOpen ? (
-        <p
-          role="alert"
-          className="mx-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-        >
-          {error}
-        </p>
-      ) : null}
+      {error && !formOpen ? <EmployeesTableMessage message={{ tone: 'error', text: error }} /> : null}
+      {notice && !error && !formOpen ? <EmployeesTableMessage message={{ tone: 'notice', text: notice }} /> : null}
 
       <div className="overflow-x-auto">
         <Table>

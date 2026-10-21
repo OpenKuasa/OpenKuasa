@@ -1,3 +1,7 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
   SAVE_ORDER,
@@ -19,7 +23,8 @@ import {
   toEmployeeInput,
 } from '@/lib/people/employees';
 import { showsOwnerDocumentControls } from '@/lib/people/documents-screens';
-import { REPORTS_TO_REFUSALS, reportsToLoop } from '@/lib/people/reporting-refusals';
+import { REPORTS_TO_REFUSALS, REPORTS_TO_SET_FROM_ROW, reportsToLoop } from '@/lib/people/reporting-refusals';
+import { EmployeesTableMessage, type TableMessage } from '@/components/people/employees-table-message';
 import type { StepResult } from '@/lib/people/employees';
 import type { PeopleViewer } from '@/lib/people/types';
 import { entitlementChanges, entitlementValues } from '@/components/people/entitlements-fields';
@@ -458,5 +463,40 @@ describe('the entitlement fields', () => {
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.error).toContain('Annual');
     }
+  });
+});
+
+describe('the message under the employee list', () => {
+  const render = (message: TableMessage) => renderToStaticMarkup(createElement(EmployeesTableMessage, { message }));
+  const refused = `${saveFailure('reports_to', REPORTS_TO_REFUSALS.EMP_BAD_MANAGER)} ${REPORTS_TO_SET_FROM_ROW}`;
+
+  it('shows a refused reporting line on a new employee as information, not as a failure', () => {
+    const html = render({ tone: 'notice', text: refused });
+    expect(html).toContain('role="status"');
+    expect(html).not.toContain('role="alert"');
+    expect(html).not.toContain('destructive');
+    expect(html).toContain('text-muted-foreground');
+  });
+
+  it('keeps a real failure in the error style', () => {
+    const html = render({ tone: 'error', text: 'That employee number is already in use.' });
+    expect(html).toContain('role="alert"');
+    expect(html).toContain('text-destructive');
+    expect(html).not.toContain('role="status"');
+  });
+
+  it('says the employee was added, why the line was not set, and where to set it', () => {
+    expect(refused).toBe(
+      `The employee was saved, but "Reports to" was not: ${REPORTS_TO_REFUSALS.EMP_BAD_MANAGER} To set it, choose Edit on their row.`,
+    );
+  });
+
+  it('is what the table sends: the refusal as a notice, a failed add as an error', () => {
+    const source = readFileSync(resolve('src/components/people/employees-table.tsx'), 'utf8');
+    expect(source).toContain('REPORTS_TO_SET_FROM_ROW');
+    expect(source).toContain("tone: 'notice'");
+    expect(source).toContain("tone: 'error'");
+    expect(source).toContain('<EmployeesTableMessage');
+    expect(source).not.toMatch(/role="alert"\s+className="mx-4/);
   });
 });

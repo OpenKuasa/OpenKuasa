@@ -14,5 +14,8 @@ export const reportsToLoop = (managerName: string): string =>
 export const REPORTS_TO_SAVED_NOT_LINE = (reason: string): string =>
   `The employee was saved, but "Reports to" was not: ${reason}`;
 
+/** After a new employee was added but their reporting line was refused: where to set it. */
+export const REPORTS_TO_SET_FROM_ROW = 'To set it, choose Edit on their row.';
+
 /** A decide action called by someone who is neither HR nor a manager. */
 export const DECIDE_FORBIDDEN = "Only owners, admins and the employee's manager can do that.";
