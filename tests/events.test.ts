@@ -5,13 +5,24 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { EVENT_KEYS, eventKey, recordEvent } from '@/lib/events';
 
 const ROOT = process.cwd();
-const MIGRATION = readFileSync(
-  join(ROOT, 'supabase/migrations/20261101133000_activity_log_events.sql'),
-  'utf8',
-)
-  .split('\n')
-  .filter((line) => !line.trimStart().startsWith('--'))
-  .join('\n');
+const MIGRATIONS = join(ROOT, 'supabase/migrations');
+const LOG_EVENT = 'create or replace function public.log_event(p_key text)';
+
+/** A migration's text without its comment lines. */
+function migration(name: string): string {
+  return readFileSync(join(MIGRATIONS, name), 'utf8')
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('--'))
+    .join('\n');
+}
+
+const MIGRATION = migration('20261101133000_activity_log_events.sql');
+/** The newest migration that restates log_event(p_key): its text is the one in force. */
+const LOG_EVENT_FILE = readdirSync(MIGRATIONS)
+  .filter((name) => name.endsWith('.sql') && migration(name).includes(LOG_EVENT))
+  .sort()
+  .at(-1)!;
+const LOG_EVENT_MIGRATION = migration(LOG_EVENT_FILE);
 
 function fakeClient(result: { error: { message: string } | null } = { error: null }) {
   const rpc = vi.fn(async () => result);
@@ -29,9 +40,9 @@ function sources(dir: string): string[] {
 
 /** The body of public.log_event(p_key). */
 function logEventBody(): string {
-  const start = MIGRATION.indexOf('create or replace function public.log_event(p_key text)');
+  const start = LOG_EVENT_MIGRATION.indexOf(LOG_EVENT);
   expect(start).toBeGreaterThanOrEqual(0);
-  return MIGRATION.slice(start, MIGRATION.indexOf('$$;', start));
+  return LOG_EVENT_MIGRATION.slice(start, LOG_EVENT_MIGRATION.indexOf('$$;', start));
 }
 
 afterEach(() => vi.restoreAllMocks());
@@ -111,7 +122,10 @@ describe('the events the app records', () => {
     const callers = sources(join(ROOT, 'src')).filter((file) =>
       readFileSync(file, 'utf8').includes("rpc('log_event'"),
     );
-    expect(callers.map((file) => file.slice(ROOT.length + 1))).toEqual([
+    // The contacts export calls it itself: it must fail closed when the entry
+    // cannot be written, and recordEvent never fails.
+    expect(callers.map((file) => file.slice(ROOT.length + 1)).sort()).toEqual([
+      join('src', 'app', 'api', 'crm', 'contacts', 'export', 'route.ts'),
       join('src', 'lib', 'events.ts'),
     ]);
   });
@@ -138,6 +152,8 @@ describe('public.log_event(p_key)', () => {
     );
     expect(MIGRATION).toContain('revoke all on function public.log_event(text) from public, anon;');
     expect(MIGRATION).toContain('grant execute on function public.log_event(text) to authenticated;');
+    expect(LOG_EVENT_MIGRATION).toContain('revoke all on function public.log_event(text) from public, anon;');
+    expect(LOG_EVENT_MIGRATION).toContain('grant execute on function public.log_event(text) to authenticated;');
   });
 
   test('notifies only the caller, and writes nothing for a viewer', () => {
@@ -165,6 +181,24 @@ describe('public.log_event(p_key)', () => {
       expect(at, key).toBeGreaterThanOrEqual(0);
       expect(body.slice(at, at + 120), key).toContain(guard);
     }
+  });
+});
+
+describe('the contacts export entry', () => {
+  test('is restated in the newest log_event migration', () => {
+    expect(LOG_EVENT_FILE).toBe('20261124110000_activity_contacts_export.sql');
+  });
+
+  test('only an owner or admin records it, for admins, with the contact count read in the database', () => {
+    const body = logEventBody();
+    const at = body.indexOf("when 'contacts_exported' then");
+    expect(at).toBeGreaterThanOrEqual(0);
+    const branch = body.slice(at, body.indexOf('else', at));
+    expect(branch).toContain("if not private.is_org_admin(org) then raise exception 'not allowed'; end if;");
+    expect(branch).toContain("v_category := 'data';");
+    expect(branch).toContain("v_audience := 'admins';");
+    expect(branch).toContain('from public.crm_contacts where org_id = org;');
+    expect(branch).not.toContain('v_title');
   });
 });
 

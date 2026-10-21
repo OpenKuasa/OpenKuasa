@@ -8,8 +8,9 @@ export type ActivityCategory = 'auth' | 'team' | 'data' | 'security' | 'billing'
  * the key alone: the sentence, category, target and any notification are
  * built there (public.log_event), never sent from here.
  *
- * KEEP IN STEP with supabase/migrations/20261101133000_activity_log_events.sql;
- * tests/events.test.ts compares the two and checks every caller is listed.
+ * KEEP IN STEP with the newest file in supabase/migrations that restates log_event
+ * (20261124110000_activity_contacts_export.sql); tests/events.test.ts compares
+ * the two and checks every caller is listed.
  */
 export const EVENT_KEYS = {
   'Signed in': 'signed_in',
@@ -27,6 +28,9 @@ export const EVENT_KEYS = {
   'Turned off two-factor authentication': 'mfa_disabled',
   'Regenerated recovery codes': 'recovery_codes_regenerated',
   'Signed in with a recovery code': 'recovery_code_sign_in',
+  // Sent by the contacts export route itself, not through recordEvent: the
+  // export fails closed when it cannot be recorded.
+  'Exported contacts': 'contacts_exported',
 } as const satisfies Record<string, string>;
 
 export type EventKey = (typeof EVENT_KEYS)[keyof typeof EVENT_KEYS];
