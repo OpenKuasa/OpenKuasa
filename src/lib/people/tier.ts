@@ -9,6 +9,15 @@ export function peopleTier(viewer: Pick<PeopleViewer, 'isHr' | 'managesTeam'>): 
   return viewer.managesTeam === true ? 'manager' : 'self';
 }
 
+/**
+ * Has people reporting to them, outside the demo, whatever their tier: a manager, or an owner or admin who also has a
+ * team. Not a tier and never a permission: an admin with reports stays `hr` in {@link peopleTier}. It only decides the
+ * extras about one's own team, the Employees screen's "My team" filter and the dashboard's team card.
+ */
+export function hasReports(viewer: Pick<PeopleViewer, 'isDemo' | 'managesTeam'>): boolean {
+  return !viewer.isDemo && viewer.managesTeam === true;
+}
+
 /** What a team screen (the four approval screens, team attendance) is for this viewer. */
 export type TeamScreenView = 'hr' | 'manager' | 'demo' | 'none';
 
