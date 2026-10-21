@@ -41,13 +41,14 @@ function cardIcons(source: string): { cards: number; icons: string[] } {
 
 // Cards and cards with an icon in each file. A count that falls means the check read fewer cards than exist.
 const EXPECTED: Record<string, { cards: number; withIcon: number }> = {
-  'accounts-view': { cards: 4, withIcon: 2 },
-  'journals-view': { cards: 6, withIcon: 3 },
-  'reports-view': { cards: 12, withIcon: 8 },
+  'components/finance/accounts-view': { cards: 4, withIcon: 2 },
+  'components/finance/journals-view': { cards: 6, withIcon: 3 },
+  'components/finance/reports-view': { cards: 12, withIcon: 8 },
+  'screens/finance/sst-report': { cards: 11, withIcon: 6 },
 };
 
 describe.each(Object.keys(EXPECTED))('the icons %s gives its cards', (file) => {
-  const source = readFileSync(`src/components/finance/${file}.tsx`, 'utf8');
+  const source = readFileSync(`src/${file}.tsx`, 'utf8');
   const { cards, icons } = cardIcons(source);
   // icon={X} and icon={cond ? A : B}
   const names = icons.flatMap((expr) => expr.match(/[A-Z]\w+/g) ?? []);
