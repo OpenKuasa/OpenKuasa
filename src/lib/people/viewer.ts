@@ -30,8 +30,9 @@ export async function getPeopleViewer(client: SupabaseClient, org: CurrentOrg | 
     user
       ? client.from('hr_employees').select('id,name').eq('org_id', org.orgId).eq('user_id', user.id).maybeSingle()
       : Promise.resolve({ data: null, error: null }),
-    // Only a caller who is not an owner or admin can be a manager here. A failed read is "no team".
-    isHr ? Promise.resolve([] as string[]) : readMyTeam(client, org.orgId),
+    // Owners and admins too: one with reports keeps every HR control and also gets the team extras. A failed read is
+    // "no team".
+    readMyTeam(client, org.orgId),
   ]);
   if (workspace.error) throw workspace.error;
   if (linked.error) throw linked.error;
@@ -43,7 +44,8 @@ export async function getPeopleViewer(client: SupabaseClient, org: CurrentOrg | 
     isHr,
     isDemo,
     // Left out, not false, for everyone else: callers compare viewers whole.
-    ...(!isHr && !isDemo && linkedRow && team.length > 0 ? { managesTeam: true } : {}),
+    // An owner or admin with reports carries it as well; `peopleTier` still answers `hr` for them.
+    ...(!isDemo && linkedRow && team.length > 0 ? { managesTeam: true } : {}),
     // Left out, not false, for everyone but the owner: callers compare viewers whole.
     ...(org.role === 'owner' && !isDemo ? { isOwner: true } : {}),
     // Left out, not null, when unknown: callers compare viewers whole.

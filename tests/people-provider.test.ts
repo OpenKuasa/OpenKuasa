@@ -480,14 +480,45 @@ describe('getPeopleViewer', () => {
       expect('managesTeam' in viewer).toBe(false);
     });
 
-    it('never asks for the team of an owner or an admin', async () => {
+    it('marks a linked owner or admin with a team too, and they stay HR', async () => {
       SINGLE.orgs = { slug: 'acme' };
       SINGLE.hr_employees = { id: 'e7' };
       RPC.hr_my_team = { data: ['r1'] };
+      expect(await getPeopleViewer(client, { orgId: 'o1', role: 'admin' })).toEqual({
+        employeeId: 'e7', isHr: true, isDemo: false, managesTeam: true,
+      });
+      expect(await getPeopleViewer(client, { orgId: 'o1', role: 'owner' })).toEqual({
+        employeeId: 'e7', isHr: true, isDemo: false, managesTeam: true, isOwner: true,
+      });
+      expect(rpcCalls).toEqual([
+        ['hr_my_team', { p_org: 'o1' }],
+        ['hr_my_team', { p_org: 'o1' }],
+      ]);
+    });
+
+    it('gives an owner or admin with no team exactly the viewer they had before', async () => {
+      SINGLE.orgs = { slug: 'acme' };
+      SINGLE.hr_employees = { id: 'e7' };
+      RPC.hr_my_team = { data: [] };
       for (const role of ['owner', 'admin'] as const) {
         expect('managesTeam' in (await getPeopleViewer(client, { orgId: 'o1', role }))).toBe(false);
       }
-      expect(rpcCalls).toEqual([]);
+    });
+
+    it('does not mark an owner with no linked employee record, or one whose team read failed', async () => {
+      SINGLE.orgs = { slug: 'acme' };
+      RPC.hr_my_team = { data: ['r1'] };
+      expect('managesTeam' in (await getPeopleViewer(client, { orgId: 'o1', role: 'owner' }))).toBe(false);
+      SINGLE.hr_employees = { id: 'e7' };
+      RPC.hr_my_team = { __throw: true };
+      expect('managesTeam' in (await getPeopleViewer(client, { orgId: 'o1', role: 'owner' }))).toBe(false);
+    });
+
+    it('does not mark an admin in the demo workspace', async () => {
+      SINGLE.orgs = { slug: 'rimba-ventures-demo' };
+      SINGLE.hr_employees = { id: 'e7' };
+      RPC.hr_my_team = { data: ['r1'] };
+      expect('managesTeam' in (await getPeopleViewer(client, { orgId: 'demo', role: 'admin' }))).toBe(false);
     });
 
     it('does not mark a member in the demo workspace', async () => {
