@@ -30,6 +30,24 @@ export type SaveSstSettings = (input: unknown) => Promise<FinResult<null>>;
 
 type Form = { month: number | null; service: string; sales: string; basis: SstBasis };
 
+/**
+ * What pressing Save does before anything is sent: the "Saved." note of an earlier save is always dropped, so it
+ * never shows beside this attempt's refusal or lost answer; then either the form as it stands is sent, or the
+ * month is asked for first.
+ */
+export function sstSaveStart(form: Form): {
+  saved: false;
+  failure: string | null;
+  payload: { period_start_month: number; service_tax_no: string; sales_tax_no: string; service_tax_basis: SstBasis } | null;
+} {
+  if (form.month === null) return { saved: false, failure: 'Choose the month the first taxable period starts.', payload: null };
+  return {
+    saved: false,
+    failure: null,
+    payload: { period_start_month: form.month, service_tax_no: form.service, sales_tax_no: form.sales, service_tax_basis: form.basis },
+  };
+}
+
 const formOf = (s: SstSettings | null): Form => ({
   month: s?.period_start_month ?? null,
   service: s?.service_tax_no ?? '',
@@ -132,16 +150,13 @@ function SettingsForm({
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (form.month === null) {
-      action.fail('Choose the month the first taxable period starts.');
+    const start = sstSaveStart(form);
+    setSaved(start.saved);
+    const payload = start.payload;
+    if (payload === null) {
+      action.fail(start.failure);
       return;
     }
-    const payload = {
-      period_start_month: form.month,
-      service_tax_no: form.service,
-      sales_tax_no: form.sales,
-      service_tax_basis: form.basis,
-    };
     action.run(() => save(payload), () => setSaved(true));
   };
 

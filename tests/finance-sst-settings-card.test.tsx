@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { SstSettingsCard } from '@/components/finance/sst-settings-card';
+import { SstSettingsCard, sstSaveStart } from '@/components/finance/sst-settings-card';
 import type { SstSettings } from '@/lib/finance/sst';
 
 /**
@@ -67,5 +67,27 @@ describe('the SST settings card', () => {
     const html = renderToStaticMarkup(<SstSettingsCard settings={null} suggestedNumber="X1" today="2026-10-21" save={save} />);
     const text = textOf(html);
     for (const wrong of [/input/i, /net payable/i, /LHDN/, /file return/i, /collected/i]) expect(text, String(wrong)).not.toMatch(wrong);
+  });
+});
+
+describe('pressing Save', () => {
+  const form = { month: 9, service: ' W10-1 ', sales: '', basis: 'payment' as const };
+
+  it('drops an earlier "Saved." note, so it never shows beside this attempt\'s refusal or lost answer', () => {
+    expect(sstSaveStart(form).saved).toBe(false);
+    expect(sstSaveStart({ ...form, month: null }).saved).toBe(false);
+  });
+
+  it('sends the form as it stands, or asks for the month first', () => {
+    expect(sstSaveStart(form)).toEqual({
+      saved: false,
+      failure: null,
+      payload: { period_start_month: 9, service_tax_no: ' W10-1 ', sales_tax_no: '', service_tax_basis: 'payment' },
+    });
+    expect(sstSaveStart({ ...form, month: null })).toEqual({
+      saved: false,
+      failure: 'Choose the month the first taxable period starts.',
+      payload: null,
+    });
   });
 });
