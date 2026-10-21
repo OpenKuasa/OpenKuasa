@@ -13,6 +13,7 @@ import {
 } from '@/lib/crm/landing-pages';
 import { runCrmWrite } from '@/lib/crm/run-write';
 import { createClient } from '@/lib/supabase/server';
+import { CouldntLoad } from '@/components/crm/couldnt-load';
 import SampleLandingPageScreen from './landing-page';
 import { LandingPagesView } from './landing-pages-view';
 
@@ -62,11 +63,19 @@ export default async function LandingPagesPage() {
     live = { pages: await listLandingPages(supabase, orgId, forms), forms };
   } catch (error) {
     // The migration is applied to a database separately from a deploy, so the
-    // table can be missing for a while. Keep the page up meanwhile.
+    // table can be missing for a while. The page says so; it never shows sample data in its place.
     console.error('[crm/landing-page] could not load pages', error);
   }
 
-  if (!live) return <SampleLandingPageScreen />;
+  if (!live) {
+    return (
+      <CouldntLoad
+        title="Landing Pages"
+        subtitle="Public pages that put a lead form in front of visitors."
+        thing="landing pages"
+      />
+    );
+  }
   return (
     <LandingPagesView
       pages={live.pages}

@@ -27,6 +27,7 @@ import {
 import type { CrmContactActions, CrmFormState } from '@/lib/crm/form-state';
 import { runCrmWrite } from '@/lib/crm/run-write';
 import { createClient } from '@/lib/supabase/server';
+import { CouldntLoad } from '@/components/crm/couldnt-load';
 
 const CONTACTS_PATH = '/crm/contacts';
 
@@ -185,11 +186,19 @@ export default async function CrmContactsPage() {
     ]);
   } catch (error) {
     // The CRM migration is applied to a database separately from a deploy, so
-    // the table can be missing for a while. Keep the page up meanwhile.
+    // the table can be missing for a while. The page says so; it never shows sample data in its place.
     console.error('[crm/contacts] could not load contacts', error);
   }
 
-  if (!live) return <ContactsScreen />;
+  if (!live) {
+    return (
+      <CouldntLoad
+        title="Contacts"
+        subtitle="All your leads and customers in one place, Saudara."
+        thing="contacts"
+      />
+    );
+  }
   return (
     <ContactsScreen
       contacts={live.contacts}

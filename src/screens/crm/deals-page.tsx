@@ -46,6 +46,7 @@ import {
 import { runCrmWrite } from '@/lib/crm/run-write';
 import { loadCrmSettings } from '@/lib/crm/settings';
 import { createClient } from '@/lib/supabase/server';
+import { CouldntLoad } from '@/components/crm/couldnt-load';
 import DealsScreen from './deals';
 
 const DEALS_PATH = '/crm/deals';
@@ -316,11 +317,19 @@ export default async function CrmDealsPage({
     live = { pipelines, deals, contacts, billing, requireLostReason };
   } catch (error) {
     // The CRM migration is applied to a database separately from a deploy, so
-    // the tables can be missing for a while. Keep the page up meanwhile.
+    // the tables can be missing for a while. The page says so; it never shows sample data in its place.
     console.error('[crm/deals] could not load deals', error);
   }
 
-  if (!live) return <DealsScreen />;
+  if (!live) {
+    return (
+      <CouldntLoad
+        title="Deals"
+        subtitle="Your sales pipeline — move deals toward close, Saudara."
+        thing="deals"
+      />
+    );
+  }
 
   // A workspace needs a pipeline before it can hold deals. The first person
   // who can edit sets up the starting one by opening this page.

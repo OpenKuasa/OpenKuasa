@@ -16,6 +16,7 @@ import {
 import type { CrmFormState } from '@/lib/crm/form-state';
 import { runCrmWrite } from '@/lib/crm/run-write';
 import { createClient } from '@/lib/supabase/server';
+import { CouldntLoad } from '@/components/crm/couldnt-load';
 import SampleChatbotScreen from './chatbot';
 import { ChatbotView } from './chatbot-view';
 
@@ -100,11 +101,19 @@ export default async function ChatbotPage() {
     hasKey = Array.isArray(key.data) ? key.data.length > 0 : Boolean(key.data);
   } catch (error) {
     // The migration is applied to a database separately from a deploy, so the
-    // tables can be missing for a while. Keep the page up meanwhile.
+    // tables can be missing for a while. The page says so; it never shows sample data in its place.
     console.error('[crm/chatbot] could not load the bot', error);
   }
 
-  if (!bot || !activity) return <SampleChatbotScreen />;
+  if (!bot || !activity) {
+    return (
+      <CouldntLoad
+        title="AI Chatbot"
+        subtitle="A bot that answers your customers from what you write here, on the landing pages you switch it on for."
+        thing="chatbot"
+      />
+    );
+  }
   return (
     <ChatbotView
       settings={bot.settings}

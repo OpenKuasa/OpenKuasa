@@ -21,6 +21,7 @@ import { listLandingPageForms } from '@/lib/crm/landing-pages';
 import { listCrmPipelines } from '@/lib/crm/pipelines';
 import { runCrmWrite } from '@/lib/crm/run-write';
 import { createClient } from '@/lib/supabase/server';
+import { CouldntLoad } from '@/components/crm/couldnt-load';
 import SampleAutomationsScreen from './automations';
 import { AutomationsView } from './automations-view';
 
@@ -113,11 +114,19 @@ export default async function AutomationsPage() {
     };
   } catch (error) {
     // The migration is applied to a database separately from a deploy, so the
-    // tables can be missing for a while. Keep the page up meanwhile.
+    // tables can be missing for a while. The page says so; it never shows sample data in its place.
     console.error('[crm/automations] could not load automations', error);
   }
 
-  if (!live) return <SampleAutomationsScreen />;
+  if (!live) {
+    return (
+      <CouldntLoad
+        title="Automations"
+        subtitle="When something happens in Kasturi, do one thing about it, without anyone having to remember."
+        thing="automations"
+      />
+    );
+  }
   return (
     <AutomationsView
       {...live}
