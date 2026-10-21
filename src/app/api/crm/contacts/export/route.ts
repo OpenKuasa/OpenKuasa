@@ -14,9 +14,13 @@ import { getCurrentOrg } from '@/lib/auth/current-org';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
 import { contactsCsv, listContactsForExport } from '@/lib/crm/settings';
 import { klDay } from '@/lib/crm/deal-stats';
+import type { EventKey } from '@/lib/events';
 import { createClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
+
+// Typed, so a misspelt key fails the type check.
+const EXPORT_EVENT: EventKey = 'contacts_exported';
 
 const refuse = (status: number, error: string) => Response.json({ error }, { status });
 
@@ -49,9 +53,10 @@ export async function GET() {
   }
 
   // Recorded before the file leaves, and no file without the record. Not
-  // recordEvent: that one swallows its errors on purpose.
+  // recordEvent: that one swallows its errors on purpose. This relies on
+  // getCurrentOrg and private.current_org choosing the same workspace.
   try {
-    const { error } = await supabase.rpc('log_event', { p_key: 'contacts_exported' });
+    const { error } = await supabase.rpc('log_event', { p_key: EXPORT_EVENT });
     if (error) throw error;
   } catch (error) {
     console.error('[crm/contacts/export] could not record the export:', errorCodeOf(error));

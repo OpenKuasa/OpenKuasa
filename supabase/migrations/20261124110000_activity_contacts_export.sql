@@ -6,8 +6,9 @@
 --
 -- log_event(p_key) gains one key, contacts_exported:
 --   * only an owner or admin of the caller's current workspace may record it;
---     anyone else is refused ('not allowed'). A viewer, or a caller with no
---     current workspace, still returns early, as for every key;
+--     anyone else, a viewer or a caller with no current workspace included, is
+--     refused ('not allowed') rather than skipped, so the route returns no
+--     file. Every other key still returns early for them, as before;
 --   * the entry is 'data', for 'admins' (it says how much of the workspace's
 --     data left it);
 --   * its target is the number of contacts the workspace holds, counted here
@@ -42,6 +43,11 @@ declare
 begin
   if uid is null then raise exception 'not authenticated'; end if;
   org := private.current_org(uid);
+  -- The contacts export is refused, not skipped, for anyone who is not an
+  -- owner or admin of a current workspace: the route then returns no file.
+  if p_key = 'contacts_exported' and (org is null or not private.is_org_admin(org)) then
+    raise exception 'not allowed';
+  end if;
   if org is null then return; end if;
   if not exists (
     select 1 from public.org_members
@@ -156,7 +162,8 @@ begin
     raise exception 'public.log_event(text) should be callable by signed-in users only';
   end if;
   if pg_get_functiondef(f) not like '%when ''contacts_exported'' then%'
-     or pg_get_functiondef(f) not like '%v_action := ''Exported contacts''%' then
+     or pg_get_functiondef(f) not like '%v_action := ''Exported contacts''%'
+     or pg_get_functiondef(f) not like '%if p_key = ''contacts_exported'' and (org is null or not private.is_org_admin(org)) then%' then
     raise exception 'public.log_event(text) does not know contacts_exported';
   end if;
   if to_regprocedure('public.log_event(text, text, text, text, text, text, text, text)') is not null then

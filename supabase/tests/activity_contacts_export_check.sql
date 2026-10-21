@@ -83,10 +83,18 @@ begin
 
   got := pg_temp.c(mem, 'contacts_exported');
   if got <> 'not allowed' then fails := fails || format('a member should be refused ''not allowed'', got %s', got); end if;
+  -- Refused, not skipped: the route then returns no file.
   got := pg_temp.c(vie, 'contacts_exported');
-  if got <> 'ok' then fails := fails || format('a viewer''s call should return quietly, got %s', got); end if;
+  if got <> 'not allowed' then fails := fails || format('a viewer should be refused ''not allowed'', got %s', got); end if;
   got := pg_temp.c(mfa, 'contacts_exported');
-  if got <> 'ok' then fails := fails || format('an admin who owes a second factor should return quietly (no current workspace), got %s', got); end if;
+  if got <> 'not allowed' then fails := fails || format('an admin who owes a second factor (no current workspace) should be refused ''not allowed'', got %s', got); end if;
+  got := pg_temp.c(gen_random_uuid(), 'contacts_exported');
+  if got <> 'not allowed' then fails := fails || format('a caller in no workspace should be refused ''not allowed'', got %s', got); end if;
+  -- Any other key still returns quietly for them.
+  got := pg_temp.c(vie, 'signed_in');
+  if got <> 'ok' then fails := fails || format('a viewer''s signed_in should still return quietly, got %s', got); end if;
+  got := pg_temp.c(mfa, 'signed_in');
+  if got <> 'ok' then fails := fails || format('signed_in with no current workspace should still return quietly, got %s', got); end if;
   select count(*) into i from public.activity_log a where a.org_id = org and a.actor_id in (mem, vie, mfa);
   if i <> 0 then fails := fails || format('a member, a viewer and an admin owing a second factor should write nothing, wrote %s', i); end if;
   got := pg_temp.c(mfa, 'contacts_exported', '{"aal":"aal2"}');

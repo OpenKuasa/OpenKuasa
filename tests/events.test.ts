@@ -118,7 +118,7 @@ describe('the events the app records', () => {
     for (const action of found) expect(eventKey(action), action).not.toBeNull();
   });
 
-  test('nothing but recordEvent calls log_event', () => {
+  test('only recordEvent and the contacts export call log_event', () => {
     const callers = sources(join(ROOT, 'src')).filter((file) =>
       readFileSync(file, 'utf8').includes("rpc('log_event'"),
     );
@@ -162,7 +162,10 @@ describe('public.log_event(p_key)', () => {
     expect(body).toContain(
       "perform private.deliver_notification(uid, org, 'security', v_title, v_body, v_href);",
     );
+    // No lookup of the owners and admins to notify: the export's owner-or-admin
+    // rule goes through private.is_org_admin, and nothing here selects them.
     expect(body).not.toMatch(/role in \('owner','admin'\)/);
+    expect(body).not.toMatch(/deliver_notification\([^)]*\b(?:m|member|admin)\.user_id/);
     expect(body).toContain("where org_id = org and user_id = uid and role <> 'viewer'");
     expect(body.indexOf("role <> 'viewer'")).toBeLessThan(
       body.indexOf('insert into public.activity_log'),
@@ -199,6 +202,16 @@ describe('the contacts export entry', () => {
     expect(branch).toContain("v_audience := 'admins';");
     expect(branch).toContain('from public.crm_contacts where org_id = org;');
     expect(branch).not.toContain('v_title');
+  });
+
+  test('is refused, not skipped, before the early returns', () => {
+    const body = logEventBody();
+    const refusal = body.indexOf(
+      "if p_key = 'contacts_exported' and (org is null or not private.is_org_admin(org)) then\n    raise exception 'not allowed';",
+    );
+    expect(refusal).toBeGreaterThan(body.indexOf('org := private.current_org(uid);'));
+    expect(refusal).toBeLessThan(body.indexOf('if org is null then return; end if;'));
+    expect(refusal).toBeLessThan(body.indexOf("role <> 'viewer'"));
   });
 });
 
