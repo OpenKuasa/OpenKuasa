@@ -62,4 +62,10 @@ describe('the SST settings card', () => {
     expect(text).toMatch(/Save/);
     expect(text).toContain('1 Sep – 31 Oct 2026');
   });
+
+  it('keeps the words of GST and LHDN out of the form, as the screen does', () => {
+    const html = renderToStaticMarkup(<SstSettingsCard settings={null} suggestedNumber="X1" today="2026-10-21" save={save} />);
+    const text = textOf(html);
+    for (const wrong of [/input/i, /net payable/i, /LHDN/, /file return/i, /collected/i]) expect(text, String(wrong)).not.toMatch(wrong);
+  });
 });
