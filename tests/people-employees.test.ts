@@ -203,11 +203,15 @@ describe('employeesControls', () => {
   const cases: [string, PeopleViewer | null | undefined, { canEdit: boolean; reportsToField: boolean; myTeamFilter: boolean }][] = [
     ['owner', v({ isHr: true, isOwner: true }), { canEdit: true, reportsToField: true, myTeamFilter: false }],
     ['admin', v({ isHr: true }), { canEdit: true, reportsToField: true, myTeamFilter: false }],
+    ['owner with reports', v({ isHr: true, isOwner: true, managesTeam: true }), { canEdit: true, reportsToField: true, myTeamFilter: true }],
+    ['admin with reports', v({ isHr: true, managesTeam: true }), { canEdit: true, reportsToField: true, myTeamFilter: true }],
     ['manager', v({ managesTeam: true }), { canEdit: false, reportsToField: false, myTeamFilter: true }],
     ['member', v({}), none],
     ['unlinked manager', v({ managesTeam: true, employeeId: null }), none],
     ['demo', v({ isDemo: true }), none],
     ['demo hr', v({ isDemo: true, isHr: true }), none],
+    ['demo hr with the flag', v({ isDemo: true, isHr: true, managesTeam: true }), none],
+    ['demo with the flag', v({ isDemo: true, managesTeam: true }), none],
     ['null', null, none],
     ['undefined', undefined, none],
   ];

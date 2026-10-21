@@ -8,6 +8,7 @@ import type { WorkspaceMember } from './members';
 import { headcountByDepartment } from './overview';
 import { managerIdsOf, managerLabel, wouldLoop } from './reporting';
 import { REPORTS_TO_REFUSALS, REPORTS_TO_SAVED_NOT_LINE, reportsToLoop } from './reporting-refusals';
+import { hasReports } from './tier';
 import type { Department, Employee, EmployeePrivate, EmployeeStatus, EmploymentType, PeopleViewer } from './types';
 
 export const EMPLOYMENT_TYPES: readonly EmploymentType[] = ['full_time', 'part_time', 'contract', 'intern'];
@@ -162,8 +163,8 @@ export type EmployeesControls = { canEdit: boolean; reportsToField: boolean; myT
 
 export function employeesControls(viewer: PeopleViewer | null | undefined): EmployeesControls {
   const canEdit = showsOwnerDocumentControls(viewer);
-  const myTeamFilter =
-    !canEdit && viewer != null && !viewer.isHr && !viewer.isDemo && viewer.managesTeam === true && !!viewer.employeeId;
+  // A manager, or an owner or admin who also has a team: the filter is extra to whatever else they see.
+  const myTeamFilter = viewer != null && hasReports(viewer) && !!viewer.employeeId;
   return { canEdit, reportsToField: canEdit, myTeamFilter };
 }
 
