@@ -201,6 +201,24 @@ export async function readTeamOvertime(client: SupabaseClient, orgId: string): P
   return parseTeamOvertime(data);
 }
 
+/** A work week from the database: the known days in week order, or null when the value names none (or is no list). */
+export function parseWorkWeek(value: unknown): Weekday[] | null {
+  if (!Array.isArray(value)) return null;
+  const week = WEEKDAYS.filter((day) => value.includes(day));
+  return week.length > 0 ? week : null;
+}
+
+/**
+ * The workspace's work week through `hr_work_week`, which any member reads (a manager cannot read the settings
+ * table). Null for someone who is not a member. Like the other provider reads it throws when the database
+ * refuses, and the message holds the code and nothing else.
+ */
+export async function readWorkWeek(client: SupabaseClient, orgId: string): Promise<Weekday[] | null> {
+  const { data, error } = await client.rpc('hr_work_week', { p_org: orgId });
+  if (error) throw new Error(`hr_work_week failed: ${error.code ?? 'no-code'}`);
+  return parseWorkWeek(data);
+}
+
 /** True when `a` is a later instant than `b` (microseconds compared, not just milliseconds). */
 export function isAfter(a: string, b: string): boolean {
   const [ams, amicro] = instant(a);
@@ -288,9 +306,7 @@ const days = (value: number | null | undefined, fallback: number): number =>
  * database treats it as Monday to Friday, and so does this.
  */
 function weekOf(value: unknown, fallback: Weekday[]): Weekday[] {
-  if (!Array.isArray(value)) return [...fallback];
-  const week = WEEKDAYS.filter((day) => value.includes(day));
-  return week.length > 0 ? week : [...fallback];
+  return parseWorkWeek(value) ?? [...fallback];
 }
 
 /** `HH:MM:SS` from the database as `HH:MM`. */
