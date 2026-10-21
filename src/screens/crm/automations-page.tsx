@@ -20,6 +20,7 @@ import type { CrmFormState } from '@/lib/crm/form-state';
 import { listLandingPageForms } from '@/lib/crm/landing-pages';
 import { listCrmPipelines } from '@/lib/crm/pipelines';
 import { runCrmWrite } from '@/lib/crm/run-write';
+import { errorCodeOf } from '@/lib/ai/call-log';
 import { createClient } from '@/lib/supabase/server';
 import { CouldntLoad } from '@/components/crm/couldnt-load';
 import SampleAutomationsScreen from './automations';
@@ -115,7 +116,7 @@ export default async function AutomationsPage() {
   } catch (error) {
     // The migration is applied to a database separately from a deploy, so the
     // tables can be missing for a while. The page says so; it never shows sample data in its place.
-    console.error('[crm/automations] could not load automations', error);
+    console.error('[crm/automations] could not load automations', errorCodeOf(error));
   }
 
   if (!live) {

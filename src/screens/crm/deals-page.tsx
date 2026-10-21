@@ -45,6 +45,7 @@ import {
 } from '@/lib/crm/pipelines';
 import { runCrmWrite } from '@/lib/crm/run-write';
 import { loadCrmSettings } from '@/lib/crm/settings';
+import { errorCodeOf } from '@/lib/ai/call-log';
 import { createClient } from '@/lib/supabase/server';
 import { CouldntLoad } from '@/components/crm/couldnt-load';
 import DealsScreen from './deals';
@@ -292,7 +293,7 @@ export default async function CrmDealsPage({
       // Only the form needs these; the board still shows if they cannot load.
       canWrite
         ? listCrmDealContacts(supabase, orgId, CONTACTS_OFFERED, contactParam((await searchParams)?.contact)).catch((error) => {
-            console.error('[crm/deals] could not load contacts', error);
+            console.error('[crm/deals] could not load contacts', errorCodeOf(error));
             return [];
           })
         : [],
@@ -300,7 +301,7 @@ export default async function CrmDealsPage({
       Promise.all([listInvoices({ client: supabase, orgId }), listDealInvoiceLinks(supabase, orgId)])
         .then(([invoices, links]) => ({ invoices, links }))
         .catch((error) => {
-          console.error('[crm/deals] could not load linked invoices', error);
+          console.error('[crm/deals] could not load linked invoices', errorCodeOf(error));
           return null;
         }),
       // Only the lost-deal form needs the rule. If it cannot be read the form treats the reason as optional; the
@@ -309,7 +310,7 @@ export default async function CrmDealsPage({
         ? loadCrmSettings(supabase, orgId)
             .then((settings) => settings.requireLostReason)
             .catch((error) => {
-              console.error('[crm/deals] could not load the Kasturi settings', error);
+              console.error('[crm/deals] could not load the Kasturi settings', errorCodeOf(error));
               return false;
             })
         : false,
@@ -318,7 +319,7 @@ export default async function CrmDealsPage({
   } catch (error) {
     // The CRM migration is applied to a database separately from a deploy, so
     // the tables can be missing for a while. The page says so; it never shows sample data in its place.
-    console.error('[crm/deals] could not load deals', error);
+    console.error('[crm/deals] could not load deals', errorCodeOf(error));
   }
 
   if (!live) {
@@ -340,7 +341,7 @@ export default async function CrmDealsPage({
       live.pipelines = await listCrmPipelines(supabase, orgId, { fresh: true });
     } catch (error) {
       // The page says the pipeline could not be set up; it does not fail.
-      console.error('[crm/deals] could not set up the default pipeline', error);
+      console.error('[crm/deals] could not set up the default pipeline', errorCodeOf(error));
     }
   }
 

@@ -15,6 +15,7 @@ import {
 } from '@/lib/crm/chatbot';
 import type { CrmFormState } from '@/lib/crm/form-state';
 import { runCrmWrite } from '@/lib/crm/run-write';
+import { errorCodeOf } from '@/lib/ai/call-log';
 import { createClient } from '@/lib/supabase/server';
 import { CouldntLoad } from '@/components/crm/couldnt-load';
 import SampleChatbotScreen from './chatbot';
@@ -102,7 +103,7 @@ export default async function ChatbotPage() {
   } catch (error) {
     // The migration is applied to a database separately from a deploy, so the
     // tables can be missing for a while. The page says so; it never shows sample data in its place.
-    console.error('[crm/chatbot] could not load the bot', error);
+    console.error('[crm/chatbot] could not load the bot', errorCodeOf(error));
   }
 
   if (!bot || !activity) {
