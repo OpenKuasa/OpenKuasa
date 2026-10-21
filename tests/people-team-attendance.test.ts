@@ -1,13 +1,18 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { toCorrectionInput } from '@/lib/people/attendance-forms';
 import { PEOPLE_PATHS } from '@/lib/people/paths';
+import { parseWorkWeek } from '@/lib/people/supabase';
 import {
   attendanceControls,
   buildTeamAttendanceModel,
   loadTeamAttendance,
   parseDay,
   prefillClockOut,
+  workWeekSource,
 } from '@/lib/people/team-attendance';
+import { teamScreenView } from '@/lib/people/tier';
 import type { AttendanceDay, Employee, LeaveRequest, PeopleData, PeopleViewer, PublicHoliday } from '@/lib/people/types';
 
 const TODAY = '2026-10-09'; // Friday
@@ -296,6 +301,32 @@ describe('attendanceControls', () => {
   });
 });
 
+describe('parseWorkWeek', () => {
+  it('keeps the known days in week order, and says nothing for anything else', () => {
+    expect(parseWorkWeek(['sat', 'mon', 'xyz', 'tue'])).toEqual(['mon', 'tue', 'sat']);
+    expect(parseWorkWeek(['mon', 'tue', 'wed', 'thu', 'fri'])).toEqual(['mon', 'tue', 'wed', 'thu', 'fri']);
+    for (const bad of [null, undefined, [], ['xyz'], 'mon', 5, {}]) expect(parseWorkWeek(bad), JSON.stringify(bad)).toBeNull();
+  });
+});
+
+describe('workWeekSource', () => {
+  it('answers each of the four viewers', () => {
+    const view = (v: PeopleViewer) => workWeekSource(teamScreenView(v));
+    expect(view({ employeeId: null, isHr: true, isDemo: false })).toBe('settings');
+    expect(view({ employeeId: 'boss', isHr: false, isDemo: false, managesTeam: true })).toBe('team');
+    expect(view({ employeeId: 'e1', isHr: false, isDemo: false })).toBe('none');
+    expect(view({ employeeId: 'e1', isHr: false, isDemo: true })).toBe('settings');
+  });
+});
+
+describe('the team attendance screen', () => {
+  const screen = readFileSync(resolve('src/screens/people/attendance.tsx'), 'utf8');
+  it('hands the work week read to the loader', () => {
+    expect(screen).toContain("import { readWorkWeek } from '@/lib/people/supabase';");
+    expect(screen).toMatch(/loadTeamAttendance\([\s\S]*?readWorkWeek\(ctx\.client, ctx\.orgId\)/);
+  });
+});
+
 describe('loadTeamAttendance for a manager', () => {
   const MANAGER: PeopleViewer = { employeeId: 'boss', isHr: false, isDemo: false, managesTeam: true };
   const MEMBER: PeopleViewer = { employeeId: 'e1', isHr: false, isDemo: false };
@@ -344,6 +375,48 @@ describe('loadTeamAttendance for a manager', () => {
     expect(calls).toEqual([]);
     await loadTeamAttendance(fake(calls), OWNER, DAY, TODAY);
     expect(calls).toEqual(['getSettings']);
+  });
+
+  it('a manager on a Saturday sees "Not a working day", as HR does, from the work week read', async () => {
+    const SAT = '2026-10-10';
+    const data = { ...fake(), listAttendance: async () => [] } as unknown as PeopleData;
+    const asked: string[] = [];
+    const manager = await loadTeamAttendance(data, MANAGER, SAT, SAT, async () => (asked.push('week'), [...WEEK]));
+    if (manager.hr_only) throw new Error('hr_only');
+    expect(asked).toEqual(['week']);
+    expect(manager.workingDay).toBe(false);
+    expect(manager.nonWorkingReason).toBe('Not a working day');
+    expect(manager.rows.map((r) => r.label)).toEqual(['', '']);
+    const owner = await loadTeamAttendance(data, OWNER, SAT, SAT);
+    if (owner.hr_only) throw new Error('hr_only');
+    expect(owner.nonWorkingReason).toBe('Not a working day');
+  });
+
+  it('a manager on a weekday the workspace works still sees "Not clocked in yet"', async () => {
+    const data = { ...fake(), listAttendance: async () => [] } as unknown as PeopleData;
+    const model = await loadTeamAttendance(data, MANAGER, TODAY, TODAY, async () => [...WEEK]);
+    if (model.hr_only) throw new Error('hr_only');
+    expect(model.workingDay).toBe(true);
+    expect(model.rows.map((r) => r.label)).toEqual(['Not clocked in yet', 'Not clocked in yet']);
+  });
+
+  it('a manager whose work week cannot be read keeps every day a working day', async () => {
+    const SAT = '2026-10-10';
+    const data = { ...fake(), listAttendance: async () => [] } as unknown as PeopleData;
+    for (const read of [undefined, async () => null]) {
+      const model = await loadTeamAttendance(data, MANAGER, SAT, SAT, read);
+      if (model.hr_only) throw new Error('hr_only');
+      expect(model.workingDay).toBe(true);
+    }
+  });
+
+  it('never asks for the team work week for an owner, a member or the demo', async () => {
+    const asked: string[] = [];
+    const read = async () => (asked.push('week'), [...WEEK]);
+    await loadTeamAttendance(fake(), OWNER, DAY, TODAY, read);
+    await loadTeamAttendance(fake(), MEMBER, DAY, TODAY, read);
+    await loadTeamAttendance(fake(), { employeeId: 'e1', isHr: false, isDemo: true }, DAY, TODAY, read);
+    expect(asked).toEqual([]);
   });
 
   it('lists an inactive report only when the day has a row for them', async () => {

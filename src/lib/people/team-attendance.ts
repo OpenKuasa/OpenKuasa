@@ -98,6 +98,17 @@ export function attendanceControls(view: Exclude<TeamScreenView, 'none'>): Atten
   return { correct: true, disabled: view === 'demo', title: 'Team Attendance', emptyText: 'No active employees' };
 }
 
+/**
+ * Where the screen's work week comes from: HR and the demo read the workspace settings; a manager cannot, so they
+ * read the work week alone (`hr_work_week`); anyone else reads nothing.
+ */
+export type WorkWeekSource = 'settings' | 'team' | 'none';
+
+export function workWeekSource(view: TeamScreenView): WorkWeekSource {
+  if (view === 'manager') return 'team';
+  return view === 'none' ? 'none' : 'settings';
+}
+
 export type TeamAttendanceInput = {
   date: string;
   today: string;
@@ -268,24 +279,30 @@ export function buildTeamAttendanceModel(input: TeamAttendanceInput): TeamAttend
 
 /**
  * The screen's model for a viewer: the notice for anyone who is neither HR nor a manager (nothing is read for
- * them). A manager's rows and tiles are their direct reports' only, and they never read the workspace settings.
+ * them). A manager's rows and tiles are their direct reports' only, and they never read the workspace settings:
+ * their work week comes from `readTeamWorkWeek` (the screen passes `readWorkWeek`), and without one, or when it
+ * answers null, every day counts as a working day.
  */
 export async function loadTeamAttendance(
   data: PeopleData,
   viewer: PeopleViewer,
   rawDate: string | string[] | undefined,
   today: string,
+  readTeamWorkWeek: () => Promise<Weekday[] | null> = async () => null,
 ): Promise<TeamAttendanceModel | { hr_only: true }> {
   if (!canApproveTeam(viewer)) return { hr_only: true };
   const view = teamScreenView(viewer);
   if (view === 'none') return { hr_only: true };
+  const source = workWeekSource(view);
   const date = parseDay(rawDate, today);
   const [employees, attendance, leave, holidays, settings] = await Promise.all([
     data.listEmployees(),
     data.listAttendance(date, date),
     data.listLeaveRequests(),
     data.listPublicHolidays(),
-    view === 'manager' ? Promise.resolve(null) : data.getSettings(),
+    source === 'settings'
+      ? data.getSettings()
+      : readTeamWorkWeek().then((week) => (week ? { work_week: week } : null)),
   ]);
   return buildTeamAttendanceModel({
     date,

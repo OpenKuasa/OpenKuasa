@@ -9,6 +9,7 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { todayInMalaysia } from '@/lib/people/dates';
+import { readWorkWeek } from '@/lib/people/supabase';
 import { attendanceControls, loadTeamAttendance } from '@/lib/people/team-attendance';
 import { EmployeeCell, HrOnlyScreen, LOAD_FAILED, Muted, StatusPill, loadPeople } from './parts';
 
@@ -25,7 +26,10 @@ export default async function TeamAttendanceScreen({
 }) {
   const raw = ((await searchParams) ?? {}).date;
   const { model } = await loadPeople('attendance', (data, now, ctx) =>
-    loadTeamAttendance(data, ctx.viewer, raw, todayInMalaysia(now)),
+    // A manager cannot read the settings, so their work week comes from the members' function; asked only for them.
+    loadTeamAttendance(data, ctx.viewer, raw, todayInMalaysia(now), async () =>
+      ctx.orgId ? readWorkWeek(ctx.client, ctx.orgId) : null,
+    ),
   );
 
   if (model?.hr_only) return <HrOnlyScreen title="Team Attendance" />;
