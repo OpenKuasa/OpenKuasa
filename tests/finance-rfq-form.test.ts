@@ -33,7 +33,7 @@ const LINE_2 = '66666666-6666-4666-8666-666666666662';
 const today = '2026-10-11';
 
 const paper: FinanceProduct = {
-  id: PRODUCT, sku: 'PPR', name: 'Printer paper', type: 'product', category: null, uom: 'ream', price: 24.9, cost: 12.5, sst_rate: 6, active: true,
+  id: PRODUCT, sku: 'PPR', name: 'Printer paper', type: 'product', category: null, uom: 'ream', price: 24.9, cost: 12.5, sst_rate: 6, active: true, tax_type: 'service', sst_code: null,
 };
 
 /** A form a person has filled in: a supplier and one line of 10, no price yet. */

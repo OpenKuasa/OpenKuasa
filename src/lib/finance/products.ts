@@ -12,6 +12,7 @@ import {
   pgCode,
   writeFailed,
 } from './result';
+import { SST_CODE_MAX, SST_TAX_TYPES, type SstTaxType } from './sst';
 
 export type ProductType = 'product' | 'service';
 
@@ -25,10 +26,12 @@ export type FinanceProduct = {
   price: number;
   cost: number;
   sst_rate: number;
+  tax_type: SstTaxType | null;
+  sst_code: string | null;
   active: boolean;
 };
 
-export const PRODUCT_COLUMNS = 'id,sku,name,type,category,uom,price,cost,sst_rate,active';
+export const PRODUCT_COLUMNS = 'id,sku,name,type,category,uom,price,cost,sst_rate,active,tax_type,sst_code';
 export const PRODUCT_NAME_MAX = 160;
 export const PRODUCT_LIMIT = 1000;
 
@@ -40,6 +43,8 @@ export const PRODUCT_MESSAGES = {
   price: 'Enter a price of 0 or more.',
   cost: 'Enter a cost of 0 or more.',
   sst: 'Enter an SST rate between 0 and 100.',
+  taxType: 'Choose Sales tax, Service tax or No SST.',
+  sstCode: `Keep the code to ${SST_CODE_MAX} characters or fewer.`,
   skuTaken: 'Another product already uses that SKU.',
   gone: 'That item no longer exists.',
   inUse: 'This item is used on bills or other documents. Archive it instead.',
@@ -75,6 +80,13 @@ const uom = z
   .trim()
   .max(60, M.tooLong)
   .transform((v) => (v === '' ? 'unit' : v));
+const taxType = z.enum(SST_TAX_TYPES as [SstTaxType, ...SstTaxType[]], { error: M.taxType });
+const sstCode = z
+  .string({ error: M.sstCode })
+  .trim()
+  .max(SST_CODE_MAX, M.sstCode)
+  .transform((v) => (v === '' ? null : v))
+  .nullable();
 const id = z.string({ error: M.gone }).uuid(M.gone);
 
 export const createProductInput = z.object({
@@ -86,6 +98,9 @@ export const createProductInput = z.object({
   price,
   cost: cost.default(0),
   sst_rate: sst.default(0),
+  // Left out, the database proposes a type from the rate; null is the same.
+  tax_type: taxType.nullable().optional(),
+  sst_code: sstCode.default(null),
 });
 
 export const updateProductInput = z.object({
@@ -98,6 +113,8 @@ export const updateProductInput = z.object({
   price: price.optional(),
   cost: cost.optional(),
   sst_rate: sst.optional(),
+  tax_type: taxType.nullable().optional(),
+  sst_code: sstCode.optional(),
 });
 
 export const setProductActiveInput = z.object({ id, active: z.boolean() });

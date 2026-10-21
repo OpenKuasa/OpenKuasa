@@ -21,7 +21,7 @@ const sample = (
   price: number,
   sst_rate: number,
   active = true,
-): FinanceProduct => ({ id, name, sku, type, category, uom: type === 'service' ? 'job' : 'unit', price, cost: 0, sst_rate, active });
+): FinanceProduct => ({ id, name, sku, type, category, uom: type === 'service' ? 'job' : 'unit', price, cost: 0, sst_rate, active, tax_type: sst_rate > 0 ? 'service' : 'none', sst_code: null });
 
 const SAMPLE_PRODUCTS: FinanceProduct[] = [
   sample('1', 'Consultation — 1hr', 'SRV-001', 'service', 'Professional', 250, 6),

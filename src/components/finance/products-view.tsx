@@ -24,6 +24,7 @@ import {
   type ProductsViewData,
 } from '@/lib/finance/products';
 import { rm } from '@/lib/finance/format';
+import { SST_CODE_MAX, SST_TAX_TYPES, SST_TAX_TYPE_LABELS, type SstTaxType, taxTypeForRate } from '@/lib/finance/sst';
 import type { FinResult } from '@/lib/finance/result';
 import { cn } from '@/lib/utils';
 
@@ -300,7 +301,17 @@ function amount(value: string): number | null {
   return value.trim() === '' || !Number.isFinite(n) ? null : n;
 }
 
-function ProductFormCard({
+/**
+ * The tax type the form holds. Until the person chooses one it follows the rate (the same rule the database uses
+ * for a new product); once they choose, it stays. A rate that is not a number leaves it as it is.
+ */
+export function productTaxTypeFor(form: { taxType: SstTaxType | null; touched: boolean; sst: string }): SstTaxType | null {
+  if (form.touched) return form.taxType;
+  const rate = form.sst.trim() === '' ? 0 : amount(form.sst);
+  return rate === null ? form.taxType : taxTypeForRate(rate);
+}
+
+export function ProductFormCard({
   editing,
   actions,
   onClose,
@@ -318,7 +329,16 @@ function ProductFormCard({
   const [price, setPrice] = useState(editing ? String(editing.price) : '');
   const [cost, setCost] = useState(editing ? String(editing.cost) : '');
   const [sst, setSst] = useState(editing ? String(editing.sst_rate) : '0');
+  // A new item starts at a rate of 0, so at No SST; an edited one keeps its stored type (null: no choice yet).
+  const [taxType, setTaxType] = useState<SstTaxType | null>(editing ? editing.tax_type : 'none');
+  const [taxTypeTouched, setTaxTypeTouched] = useState(false);
+  const [sstCode, setSstCode] = useState(editing?.sst_code ?? '');
   const save = useFinanceAction();
+
+  const changeSst = (value: string) => {
+    setSst(value);
+    setTaxType(productTaxTypeFor({ taxType, touched: taxTypeTouched, sst: value }));
+  };
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -337,7 +357,11 @@ function ProductFormCard({
       save.fail('Enter an SST rate between 0 and 100.');
       return;
     }
-    const fields = { name, type, sku, category, uom, price: priceValue, cost: costValue, sst_rate: sstValue };
+    const fields = {
+      name, type, sku, category, uom, price: priceValue, cost: costValue, sst_rate: sstValue,
+      tax_type: taxType,
+      sst_code: taxType === null || taxType === 'none' ? null : sstCode,
+    };
     save.run(
       () => (editing ? actions.update({ id: editing.id, ...fields }) : actions.create(fields)),
       onClose,
@@ -396,8 +420,42 @@ function ProductFormCard({
         </div>
         <div className="space-y-1.5 md:col-span-3">
           <Label htmlFor={`${id}-sst`}>SST rate (%)</Label>
-          <Input id={`${id}-sst`} type="number" inputMode="decimal" min={0} max={100} step="0.01" value={sst} onChange={(e) => setSst(e.target.value)} />
+          <Input id={`${id}-sst`} type="number" inputMode="decimal" min={0} max={100} step="0.01" value={sst} onChange={(e) => changeSst(e.target.value)} />
         </div>
+        <div className="space-y-1.5 md:col-span-3">
+          <Label htmlFor={`${id}-tax-type`}>Tax type</Label>
+          <Select
+            value={taxType ?? ''}
+            onValueChange={(v) => {
+              setTaxType(v as SstTaxType);
+              setTaxTypeTouched(true);
+            }}
+          >
+            <SelectTrigger id={`${id}-tax-type`} className="w-full">
+              <SelectValue placeholder="Choose a tax type" />
+            </SelectTrigger>
+            <SelectContent>
+              {SST_TAX_TYPES.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {SST_TAX_TYPE_LABELS[t]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {taxType === 'sales' || taxType === 'service' ? (
+          <div className="space-y-1.5 md:col-span-3">
+            <Label htmlFor={`${id}-sst-code`}>{taxType === 'sales' ? 'Tariff code' : 'Service type code'}</Label>
+            <Input
+              id={`${id}-sst-code`}
+              value={sstCode}
+              maxLength={SST_CODE_MAX}
+              autoComplete="off"
+              className="font-mono"
+              onChange={(e) => setSstCode(e.target.value)}
+            />
+          </div>
+        ) : null}
         <div className="space-y-1.5 md:col-span-3">
           <Label htmlFor={`${id}-uom`}>Unit</Label>
           <Input id={`${id}-uom`} value={uom} placeholder="unit" autoComplete="off" onChange={(e) => setUom(e.target.value)} />

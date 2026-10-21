@@ -37,7 +37,7 @@ function fakeClient(answer: { data: unknown; error: unknown }) {
 
 const product: FinanceProduct = {
   id: ID, sku: 'PRD-010', name: 'Printer Ink', type: 'product', category: 'Office supplies',
-  uom: 'cartridge', price: 85, cost: 52, sst_rate: 6, active: true,
+  uom: 'cartridge', price: 85, cost: 52, sst_rate: 6, active: true, tax_type: 'service', sst_code: null,
 };
 
 let logged: ReturnType<typeof vi.spyOn>;
@@ -49,6 +49,29 @@ const first = (schema: { safeParse: (v: unknown) => { success: boolean; error?: 
 
 describe('product schemas', () => {
   const valid = { name: 'Printer Ink', type: 'product', price: 85 };
+
+  it('keeps an explicit tax type, even one the rate would not give', () => {
+    const parsed = createProductInput.parse({ ...valid, sst_rate: 6, tax_type: 'sales' });
+    expect(parsed.tax_type).toBe('sales');
+  });
+  it('leaves the tax type out when none is given, for the database to propose', () => {
+    expect('tax_type' in createProductInput.parse(valid)).toBe(false);
+  });
+  it('refuses an unknown tax type', () => {
+    expect(first(createProductInput, { ...valid, tax_type: 'gst' })).toBe('Choose Sales tax, Service tax or No SST.');
+  });
+  it('trims the SST code, turns an empty one into null and refuses 21 characters', () => {
+    expect(createProductInput.parse({ ...valid, sst_code: '  A1  ' }).sst_code).toBe('A1');
+    expect(createProductInput.parse({ ...valid, sst_code: '   ' }).sst_code).toBeNull();
+    expect(createProductInput.parse(valid).sst_code).toBeNull();
+    expect(createProductInput.parse({ ...valid, sst_code: 'x'.repeat(20) }).sst_code).toHaveLength(20);
+    expect(first(createProductInput, { ...valid, sst_code: 'x'.repeat(21) })).toBe('Keep the code to 20 characters or fewer.');
+  });
+  it('lets an update change the type and code, and clear them', () => {
+    const parsed = updateProductInput.parse({ id: ID, tax_type: null, sst_code: '' });
+    expect(parsed.tax_type).toBeNull();
+    expect(parsed.sst_code).toBeNull();
+  });
 
   it('asks for a name', () => {
     expect(first(createProductInput, { ...valid, name: '' })).toBe('Enter the item’s name.');

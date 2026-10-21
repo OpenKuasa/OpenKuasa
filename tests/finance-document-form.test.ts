@@ -39,6 +39,8 @@ const gloves: FinanceProduct = {
   cost: 12.5,
   sst_rate: 6,
   active: true,
+  tax_type: 'service',
+  sst_code: null,
 };
 
 describe('what the bill form and the invoice form share', () => {

@@ -42,6 +42,8 @@ const gloves: FinanceProduct = {
   cost: 12.5,
   sst_rate: 6,
   active: true,
+  tax_type: 'service',
+  sst_code: null,
 };
 
 /** A form that can be saved: a supplier and one line of 10 at RM 12.50. */

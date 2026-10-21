@@ -27,7 +27,7 @@ const PRODUCT = '99999999-9999-4999-8999-999999999999';
 const today = '2026-10-11';
 
 const gloves: FinanceProduct = {
-  id: PRODUCT, sku: 'GLV', name: 'Gloves', type: 'product', category: null, uom: 'box', price: 24.9, cost: 12.5, sst_rate: 6, active: true,
+  id: PRODUCT, sku: 'GLV', name: 'Gloves', type: 'product', category: null, uom: 'box', price: 24.9, cost: 12.5, sst_rate: 6, active: true, tax_type: 'service', sst_code: null,
 };
 
 /** A form a person has filled in: a customer and one line of 10 × 12.50. */
