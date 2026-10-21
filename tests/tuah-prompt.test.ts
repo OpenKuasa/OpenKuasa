@@ -43,6 +43,15 @@ describe('TUAH_SYSTEM', () => {
     expect(t).toContain('that card is the confirmation');
   });
 
+  it('words a gated change as prepared for approval, not as done', () => {
+    // A manager asked to approve a leave and was told "Approving now." while it sat pending.
+    expect(t).toContain('until they tap approve the change is not made');
+    expect(t).toContain('prepared it for them to approve on the card');
+    expect(t).toContain('before a change tool, that line says you are preparing the change for the user to approve');
+    expect(t).toContain('never "approving now", "done"');
+    expect(t).toContain('in the words the result gave');
+  });
+
   it('reads a rejected change as the user saying no, not as missing permission', () => {
     expect(t).toContain('the user tapped reject');
     expect(t).toContain('never a permissions problem');
