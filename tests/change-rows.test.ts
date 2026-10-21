@@ -11,7 +11,7 @@ import {
   peopleProduct,
   reachProduct,
 } from '@/lib/ai/products';
-import { CLEARED, EMPTY, UNNAMED, changeHeading, changeRows, fieldLabel, unchanged, valueText } from '@/lib/chat/change-rows';
+import { CLEARED, EMPTY, changeHeading, changeRows, fieldLabel, unchanged, unnamed, valueText } from '@/lib/chat/change-rows';
 import { approvalDetail, approvalTitle, kindOfTool, nameIn, rowIn } from '@/lib/chat/change-titles';
 import { createSeedHireData } from '@/lib/hire/seed';
 import { createSeedPeopleData } from '@/lib/people/seed';
@@ -108,8 +108,8 @@ describe('every change tool has a card that lists what it will change', () => {
     for (const leaf of leaves(input)) {
       const row = byKey.get(leaf.path);
       expect(row, `${name}: no row for ${leaf.path}`).toBeDefined();
-      // The row carries the value itself, in the words the card uses for it. A raw id no lookup named is never shown.
-      const shown = leaf.value === UUID ? UNNAMED : valueText(leaf.key, leaf.value);
+      // The row carries the value itself, in the words the card uses for it. A raw id no lookup named is never shown whole, only its short ref.
+      const shown = leaf.value === UUID ? unnamed(UUID) : valueText(leaf.key, leaf.value);
       expect(row!.to, `${name}: ${leaf.path} shows a raw id`).not.toContain(UUID);
       expect(row!.to, `${name}: ${leaf.path}`).toBe(shown);
       expect(row!.label.trim(), `${name}: ${leaf.path} has no label`).not.toBe('');
@@ -171,7 +171,7 @@ describe('the rows of a change', () => {
   it('names the rows a change points at, and never shows a raw id when nothing named it', () => {
     const rows = changeRows('moveDeal', { id: UUID, stageId: STAGE }, nameIn(results), rowIn(results));
     expect(rows).toEqual([
-      { key: 'id', kind: 'record', label: 'Deal', to: UNNAMED },
+      { key: 'id', kind: 'record', label: 'Deal', to: '(no name found · ref 22222222)' },
       { key: 'stageId', kind: 'record', label: 'Stage', to: 'Negotiation' },
     ]);
   });
@@ -200,6 +200,16 @@ describe('the rows of a change', () => {
     expect(rows.map((r) => r.to).join(' ')).not.toContain(LEAVE);
     // Display only: the change itself still carries the id.
     expect(input.id).toBe(LEAVE);
+  });
+
+  it('keeps two unnamed records apart by a short ref, never the whole id', () => {
+    const A = '3899431e-3ea7-4fd7-946e-5e99f47aa23c';
+    const B = '7a1c0b2d-3ea7-4fd7-946e-5e99f47aa23c';
+    const [a] = changeRows('deleteAppointment', { id: A });
+    const [b] = changeRows('deleteAppointment', { id: B });
+    expect(a.to).toBe('(no name found · ref 3899431e)');
+    expect(a.to).not.toBe(b.to);
+    expect(a.to).not.toContain(A);
   });
 
   it.each([
@@ -235,7 +245,7 @@ describe('the rows of a change', () => {
       private: { base_salary: 4500, bank_account: '5123-4411', nric: null },
     });
     expect(rows.map((r) => [r.label, r.to])).toEqual([
-      ['Employee', UNNAMED],
+      ['Employee', unnamed(UUID)],
       ['Designation', CLEARED],
       ['Work email', EMPTY],
       ['Private › Base salary', '4500'],
