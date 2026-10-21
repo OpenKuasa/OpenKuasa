@@ -9,10 +9,16 @@
 --   * finance_products.tax_type, sst_code: a product's tax type ('sales',
 --     'service', 'none') and its SST code (the schedule item, up to 20
 --     characters). Existing products take their type from their rate; a new
---     product without a type does too (trigger finance_product_tax_type).
+--     product without a type does too (trigger finance_product_tax_type). When
+--     a product's rate changes and the caller sends no new type, the type is
+--     proposed again from the new rate, but only if the old type was the old
+--     rate's proposal: a type a person chose stands.
 --   * finance_invoice_lines.tax_type, sst_code: what the return counts a line
 --     under. A line sent without a type takes its product's type and code, or,
---     with no product, the type of its rate and no code (trigger
+--     with no product, the type of its rate and no code. A line that charges
+--     SST (its rate is a sales or service tax rate) is never stored as 'none'
+--     from its product: when the product's type is 'none' or unset, the line
+--     takes its rate's type and no code (trigger
 --     finance_invoice_line_tax). It fires after finance_invoice_line_guard and
 --     finance_invoice_line_rate (same timing, name order), so a line of a
 --     posted invoice is still refused first with FIN01. finance_save_invoice and
@@ -62,21 +68,30 @@ update public.finance_products
    set tax_type = private.finance_sst_tax_type_for_rate(sst_rate)
  where tax_type is null;
 
--- A new product sent without a type takes its rate's.
+-- A new product sent without a type takes its rate's. On an update that changes
+-- the rate without changing the type, the type is proposed again from the new
+-- rate, but only when the old type was the old rate's proposal; a type a person
+-- chose (for example 'sales' at 6) stands. This is the product form's rule too.
 create function private.finance_product_tax_type()
 returns trigger
 language plpgsql
 set search_path = ''
 as $$
 begin
-  if new.tax_type is null then
+  if tg_op = 'INSERT' then
+    if new.tax_type is null then
+      new.tax_type := private.finance_sst_tax_type_for_rate(new.sst_rate);
+    end if;
+  elsif new.sst_rate is distinct from old.sst_rate
+        and new.tax_type is not distinct from old.tax_type
+        and old.tax_type is not distinct from private.finance_sst_tax_type_for_rate(old.sst_rate) then
     new.tax_type := private.finance_sst_tax_type_for_rate(new.sst_rate);
   end if;
   return new;
 end $$;
 
 create trigger finance_product_tax_type
-  before insert on public.finance_products
+  before insert or update on public.finance_products
   for each row execute function private.finance_product_tax_type();
 
 revoke all on function private.finance_product_tax_type() from public, anon, authenticated, service_role;
@@ -86,9 +101,12 @@ alter table public.finance_invoice_lines
   add column tax_type text check (tax_type in ('sales','service','none')),
   add column sst_code text check (sst_code is null or (char_length(sst_code) between 1 and 20 and sst_code = btrim(sst_code)));
 
--- A line sent without a type takes its product's type and code (both, even
--- when the product has no type), or with no product its rate's type and no
--- code. It runs as the owner so the product is read whatever the caller's
+-- A line sent without a type takes its product's type and code, or with no
+-- product its rate's type and no code. When the product's type is 'none' or
+-- unset but the line's rate is a sales or service tax rate, the line takes its
+-- rate's type and no code, so a line that charges SST is never stored as
+-- 'none' (and then locked by FIN01 once posted). A taxed product on a 0 line
+-- keeps its type (an exempt service), and a product's 'sales' at 6 stands. It runs as the owner so the product is read whatever the caller's
 -- grants; the product is looked up in the line's own workspace only, so no
 -- other workspace's product is ever read (the foreign key refuses such a line
 -- next anyway). Fires after finance_invoice_line_guard and
@@ -110,6 +128,11 @@ begin
       if found then
         new.tax_type := p.tax_type;
         new.sst_code := p.sst_code;
+      end if;
+      if (new.tax_type is null or new.tax_type = 'none')
+         and private.finance_sst_tax_type_for_rate(new.sst_rate) in ('sales', 'service') then
+        new.tax_type := private.finance_sst_tax_type_for_rate(new.sst_rate);
+        new.sst_code := null;
       end if;
     else
       new.tax_type := private.finance_sst_tax_type_for_rate(new.sst_rate);

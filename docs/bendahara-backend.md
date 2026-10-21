@@ -1871,10 +1871,19 @@ from a rate to a tax type: 5 and 10 are `sales`, 6 and 8 are `service`, 0 is
 took their type from their rate when the migration ran.
 
 **The triggers.** A product inserted without a `tax_type` takes its rate's
-(`finance_product_tax_type`, before insert). An invoice line saved without a
-`tax_type` takes its product's `tax_type` and `sst_code`, or, with no product,
-its rate's type and no code (`finance_invoice_line_tax`, before insert or
-update). A type sent on the line stands. Because `finance_save_invoice`
+(`finance_product_tax_type`, before insert or update). When an update changes
+a product's `sst_rate` and leaves its `tax_type` as it was, the type is
+proposed again from the new rate, but only if the old type was the old rate's
+proposal; a type a person chose (say `sales` at 6) stands, and an update that
+sends a new type keeps it. This is the same rule as the product form. An
+invoice line saved without a `tax_type` takes its product's `tax_type` and
+`sst_code`, or, with no product, its rate's type and no code
+(`finance_invoice_line_tax`, before insert or update). A line that charges SST
+is never stored as `none` from its product: when the product's type is `none`
+or null and the line's rate is a sales or service tax rate (5, 6, 8 or 10),
+the line takes its rate's type and no code. A taxed product on a 0% line keeps
+its type and code (an exempt service), and a product's own `sales` at 6 stays
+`sales`. A type sent on the line stands. Because `finance_save_invoice`
 deletes and re-inserts a draft's lines on every save, a draft re-saved after
 its product changed takes the product's new type. `finance_invoice_line_tax`
 fires after `finance_invoice_line_guard` and `finance_invoice_line_rate` (same

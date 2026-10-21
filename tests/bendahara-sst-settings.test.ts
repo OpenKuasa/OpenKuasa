@@ -163,6 +163,33 @@ testWithSupabase('invoice lines: a line takes its product\'s tax type and code',
   expect({ tax_type: withoutProduct.tax_type, sst_code: withoutProduct.sst_code }).toEqual({ tax_type: 'sales', sst_code: null });
 });
 
+testWithSupabase('invoice lines: a No SST product on a taxed line takes the line rate\'s type', async () => {
+  const o = await workspace('SST Settings H Sdn Bhd');
+  const p = await product(o, { sst_rate: 0 });
+  expect(p.tax_type).toBe('none');
+  const id = await saveInvoice(o, [
+    { product_id: p.id, description: 'Service at 8', quantity: 1, unit_price: 100, sst_rate: 8 },
+    { product_id: p.id, description: 'Goods at 10', quantity: 1, unit_price: 100, sst_rate: 10 },
+  ]);
+  const [at8, at10] = await lines(o, id);
+  expect({ tax_type: at8.tax_type, sst_code: at8.sst_code }).toEqual({ tax_type: 'service', sst_code: null });
+  expect({ tax_type: at10.tax_type, sst_code: at10.sst_code }).toEqual({ tax_type: 'sales', sst_code: null });
+});
+
+testWithSupabase('products: a rate raised without a type takes the new rate\'s type', async () => {
+  const o = await workspace('SST Settings I Sdn Bhd');
+  const p = await product(o, { sst_rate: 0 });
+  expect(p.tax_type).toBe('none');
+  const { data, error } = await o.c
+    .from('finance_products')
+    .update({ sst_rate: 8 })
+    .eq('id', p.id)
+    .select('tax_type')
+    .single();
+  expect(error, error?.message).toBeNull();
+  expect(data?.tax_type).toBe('service');
+});
+
 testWithSupabase('invoice lines: a draft re-saved after the product changed takes the new type', async () => {
   const o = await workspace('SST Settings E Sdn Bhd');
   const p = await product(o, { sst_rate: 8, tax_type: 'service', sst_code: 'G1' });

@@ -17,7 +17,11 @@ declare
   p_service uuid;
   p_explicit uuid;
   p_seven uuid;
+  p_none uuid;
+  p_svc0 uuid;
+  p_six uuid;
   inv uuid;
+  inv2 uuid;
   posted uuid;
   line uuid;
   n integer;
@@ -139,6 +143,49 @@ begin
   if r.tax_type is distinct from 'sales' or r.sst_code is distinct from 'S2' then
     fails := fails || format('the re-saved draft line reads %s / %s', r.tax_type, r.sst_code);
   end if;
+
+  -- ==== a line that charges SST is never stored as No SST ===========================
+  -- A 'none' product sold at 8 or 10 takes the line rate's type, with no code. A
+  -- taxed product sold at 0 keeps its type and code (an exempt service line). An
+  -- explicit 'sales' product at 6 keeps 'sales' on a 6 line.
+  insert into public.finance_products (org_id, name, sst_rate) values (org, 'Was free', 0) returning id into p_none;
+  insert into public.finance_products (org_id, name, sst_rate, tax_type, sst_code) values (org, 'Exempt service', 8, 'service', 'G2') returning id into p_svc0;
+  select public.finance_save_invoice(org,
+    jsonb_build_object('customer_id', cust, 'invoice_date', current_date, 'due_date', current_date + 30),
+    jsonb_build_array(
+      jsonb_build_object('product_id', p_none, 'description', 'None at 8', 'quantity', 1, 'unit_price', 10, 'sst_rate', 8),
+      jsonb_build_object('product_id', p_none, 'description', 'None at 10', 'quantity', 1, 'unit_price', 10, 'sst_rate', 10),
+      jsonb_build_object('product_id', p_svc0, 'description', 'Service at 0', 'quantity', 1, 'unit_price', 10, 'sst_rate', 0),
+      jsonb_build_object('product_id', p_explicit, 'description', 'Sales at 6', 'quantity', 1, 'unit_price', 10, 'sst_rate', 6)))
+  into inv2;
+  for r in select position, tax_type, sst_code from public.finance_invoice_lines where invoice_id = inv2 order by position loop
+    if (r.position = 1 and (r.tax_type is distinct from 'service' or r.sst_code is not null))
+       or (r.position = 2 and (r.tax_type is distinct from 'sales' or r.sst_code is not null))
+       or (r.position = 3 and (r.tax_type is distinct from 'service' or r.sst_code is distinct from 'G2'))
+       or (r.position = 4 and (r.tax_type is distinct from 'sales' or r.sst_code is not null)) then
+      fails := fails || format('a product-backed line %s reads %s / %s', r.position, r.tax_type, r.sst_code);
+    end if;
+  end loop;
+
+  -- ==== a product's rate changed without a type: the type follows only a proposal ====
+  -- (d) proposed 'none' at 0, raised to 8 without a type: 'service'.
+  update public.finance_products set sst_rate = 8 where id = p_none;
+  select tax_type into t from public.finance_products where id = p_none;
+  if t is distinct from 'service' then fails := fails || format('a 0 product raised to 8 reads %s', t); end if;
+  -- (e) explicit 'sales' at 6, raised to 8 without a type: stays 'sales'.
+  update public.finance_products set sst_rate = 8 where id = p_explicit;
+  select tax_type into t from public.finance_products where id = p_explicit;
+  if t is distinct from 'sales' then fails := fails || format('an explicit sales product raised to 8 reads %s', t); end if;
+  -- (f) proposed 'service' at 6, raised to 8 with 'sales' in the same update: 'sales'.
+  insert into public.finance_products (org_id, name, sst_rate) values (org, 'Six', 6) returning id into p_six;
+  update public.finance_products set sst_rate = 8, tax_type = 'sales' where id = p_six;
+  select tax_type into t from public.finance_products where id = p_six;
+  if t is distinct from 'sales' then fails := fails || format('a 6 product updated to 8 and sales reads %s', t); end if;
+  -- (g) an update that leaves the rate alone leaves the type alone.
+  update public.finance_products set tax_type = 'none' where id = p_six;
+  update public.finance_products set name = 'Six renamed' where id = p_six;
+  select tax_type into t from public.finance_products where id = p_six;
+  if t is distinct from 'none' then fails := fails || format('a product renamed reads %s, not its none', t); end if;
 
   -- ==== FIN01 still answers first on a posted line ==================================
   posted := inv;
