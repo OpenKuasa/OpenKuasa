@@ -107,6 +107,8 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   // Month-end revaluation of foreign-currency balances (#224).
   'finance/fx-revaluation',
   'finance/reports',
+  // SST settings are live (#222 stage 1); the return below them is still sample until stage 2.
+  'finance/sst-report',
 ]);
 
 /** Whether the app path is a screen that is not connected to live data yet. */

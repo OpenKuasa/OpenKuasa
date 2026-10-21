@@ -26,7 +26,16 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { saveSstSettingsAction } from '@/app/(app)/finance/actions';
+import { SstSettingsCard } from '@/components/finance/sst-settings-card';
+import { getCompany } from '@/lib/account/data';
+import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
+import { expensesScreenPlan } from '@/lib/finance/expense-form';
+import { type SstSettings, getSstSettings } from '@/lib/finance/sst';
+import { todayUtc } from '@/lib/finance/view-helpers';
+import { createClient } from '@/lib/supabase/server';
 import { cn } from '@/lib/utils';
+import { SAMPLE_TODAY } from './sales-sample';
 
 /*
  * Sample data, laid out item by item as the SST-02 return (form of 2 October 2026), as agreed in #222.
@@ -35,6 +44,14 @@ import { cn } from '@/lib/utils';
  */
 
 type FormLine = { item: string; label: string; value?: string; tax: string; typed?: boolean };
+
+/** The settings card without a database: read only, on the sample's own period (1 Sep – 31 Oct 2026). */
+const SAMPLE_SETTINGS: SstSettings = {
+  period_start_month: 9,
+  service_tax_no: 'W10-2608-32000123',
+  sales_tax_no: null,
+  service_tax_basis: 'payment',
+};
 
 /** Part A. */
 const PART_A: { label: string; value: string }[] = [
@@ -106,7 +123,41 @@ function FormRow({ line, strong }: { line: FormLine; strong?: boolean }) {
 
 /* ------------------------------------------------------------------ */
 
-export default function SstReportScreen() {
+/**
+ * The SST settings card, live: every member reads it; an owner or admin outside the demo is given Save, by the
+ * same check the Expenses screen offers Approve with (`sign-off-finance`). A failed settings read throws, so a
+ * form is never shown empty over numbers that are stored. The company's SST no. is only a suggestion.
+ */
+async function settingsCard() {
+  if (!hasSupabaseEnv()) {
+    return <SstSettingsCard settings={SAMPLE_SETTINGS} suggestedNumber={null} today={SAMPLE_TODAY} />;
+  }
+  const viewer = await getViewer();
+  const ctx = { client: await createClient(), orgId: viewer.orgId };
+  const maySave = expensesScreenPlan(viewer.role, viewer.isDemo).canDecide;
+  const [settings, suggestedNumber] = await Promise.all([
+    getSstSettings(ctx),
+    // Only a suggestion: when the company details cannot be read, the card is shown without one.
+    getCompany().then(
+      (company) => company.sstNo.trim() || null,
+      (error: unknown) => {
+        console.error('[finance] the company SST no. could not be read:', error);
+        return null;
+      },
+    ),
+  ]);
+  return (
+    <SstSettingsCard
+      settings={settings}
+      suggestedNumber={suggestedNumber}
+      today={todayUtc()}
+      save={maySave ? saveSstSettingsAction : undefined}
+    />
+  );
+}
+
+export default async function SstReportScreen() {
+  const card = await settingsCard();
   return (
     <ScreenContainer>
       <PageHeader
@@ -142,6 +193,14 @@ export default function SstReportScreen() {
       />
 
       <BentoGrid>
+        {card}
+
+        <BentoCard tone="muted" className="col-span-2 md:col-span-12">
+          <p className="text-sm text-muted-foreground">
+            The return below is sample figures. It will be worked out from your invoices in the next step.
+          </p>
+        </BentoCard>
+
         {/* Items 12, 13, 14 and the due date */}
         <BentoCard tone="primary" className="col-span-2 md:col-span-3">
           <BentoStat label="Total tax (item 12)" value="RM 1,900.00" delta="this period" deltaTone="flat" onPrimary />

@@ -99,6 +99,7 @@ import {
   previewFxRevaluationInput,
 } from '@/lib/finance/fx-revaluation';
 import { fxSstRate } from '@/lib/finance/sst-rate';
+import { SST_NEEDS_SIGN_OFF, saveSstSettings, sstSettingsInput } from '@/lib/finance/sst';
 import {
   INVOICE_MESSAGES,
   type InvoiceDetail,
@@ -1247,4 +1248,20 @@ export async function previewFxRevaluationAction(input: unknown): Promise<FinRes
 /** Posts a run for a month end, only if the figures are still what the preview showed. An owner or admin only. */
 export async function postFxRevaluationAction(input: unknown) {
   return run(FX_REVALUATION_PATHS, postFxRevaluationInput, input, postFxRevaluation, FX_REVALUATION_SIGN_OFF);
+}
+
+/* ------------------------------------------------------------------ SST settings (#222 stage 1) */
+
+const SST_SETTINGS_PATHS = ['/finance/sst-report'];
+const SST_SETTINGS_SIGN_OFF = { signOff: true, signOffError: SST_NEEDS_SIGN_OFF } as const;
+
+/**
+ * Saves the workspace's SST settings: the taxable period's start month, the two registration numbers and the
+ * service tax basis. An owner or admin only, as the table's own policy enforces (42501, told in the same words).
+ */
+export async function saveSstSettingsAction(input: unknown): Promise<FinResult<null>> {
+  return run(SST_SETTINGS_PATHS, sstSettingsInput, input, async (ctx, parsed) => {
+    const result = await saveSstSettings(ctx, parsed);
+    return result.ok ? { ok: true, data: null } : result;
+  }, SST_SETTINGS_SIGN_OFF);
 }
