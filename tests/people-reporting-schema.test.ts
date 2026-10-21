@@ -271,3 +271,60 @@ describe('the reporting-lines migration', () => {
     expect(sql).not.toMatch(/\s~\*?\s|regexp_|similar to/i);
   });
 });
+
+describe('the is_manager column is dropped (issue #234)', () => {
+  const DROP = '20261123110000_people_drop_is_manager.sql';
+  const PREVIOUS = '20261115133700_people_reporting_lines.sql';
+  const dropSql = files.includes(DROP) ? statements(DROP) : '';
+  const RESEED_HEAD = 'create or replace function private.reseed_demo_people(';
+  const MANAGER_PAY =
+    "case when e.designation like '% Lead' or e.designation like '% Manager' or e.designation like '% Director' then 300000 else 0 end";
+
+  test('one migration drops the column, after redefining the demo re-seed', () => {
+    expect(files).toContain(DROP);
+    const text = flat(dropSql);
+    expect(text).toContain('alter table public.hr_employees drop column if exists is_manager;');
+    expect(text.indexOf('drop column if exists is_manager')).toBeGreaterThan(text.indexOf(RESEED_HEAD));
+  });
+
+  test('the newest demo re-seed no longer names the column', () => {
+    const latest = files.filter((f) => statements(f).includes(RESEED_HEAD)).at(-1);
+    expect(latest).toBe(DROP);
+    expect(fn(dropSql, 'private.reseed_demo_people').body).not.toMatch(/\bis_manager\b/);
+    expect(flat(dropSql)).toContain('revoke all on function private.reseed_demo_people() from public, anon, authenticated;');
+    expect(dropSql).not.toMatch(/select\s+private\.reseed_demo_people\(\)/);
+  });
+
+  test('the re-seed is its newest body with only the column taken out and the pay bump read from the title', () => {
+    const now = fn(dropSql, 'private.reseed_demo_people');
+    const before = fn(statements(PREVIOUS), 'private.reseed_demo_people');
+    expect(now.header).toBe(before.header);
+    const expected = before.body
+      .replace('designation, employment_type, is_manager, join_date', 'designation, employment_type, join_date')
+      .replace('v.designation, v.etype, v.mgr,', 'v.designation, v.etype,')
+      .replace(/'(full_time|part_time|contract)', (true|false), /g, "'$1', ")
+      .replace('as v(n, name, handle, dept, designation, etype, mgr, tenure, bday)', 'as v(n, name, handle, dept, designation, etype, tenure, bday)')
+      .replace('case when e.is_manager then 300000 else 0 end', MANAGER_PAY);
+    expect(expected).not.toBe(before.body);
+    expect(now.body).toBe(expected);
+  });
+
+  test('the title rule pays exactly the six old managers more: the four leads and the two directors', () => {
+    const body = fn(dropSql, 'private.reseed_demo_people').body;
+    const rows = [...body.matchAll(/\((\d+), '[^']+', '[a-z]+', '[A-Za-z]+', '([^']+)', '(?:full_time|part_time|contract)', \d+, \d+\)/g)];
+    expect(rows).toHaveLength(20);
+    const paidMore = rows.filter(([, , title]) => / (Lead|Manager|Director)$/.test(title)).map(([, n]) => Number(n));
+    expect(paidMore).toEqual([3, 9, 12, 18, 19, 20]);
+  });
+
+  test('holds no regular expression', () => {
+    expect(dropSql).not.toMatch(/\s~\*?\s|regexp_|similar to/i);
+  });
+
+  test('no database check still expects the column', () => {
+    const TESTS = join(process.cwd(), 'supabase/tests');
+    for (const f of readdirSync(TESTS).filter((x) => x.endsWith('.sql'))) {
+      expect(readFileSync(join(TESTS, f), 'utf8'), f).not.toMatch(/\bis_manager\b/);
+    }
+  });
+});
