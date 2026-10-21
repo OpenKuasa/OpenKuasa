@@ -273,7 +273,7 @@ describe('the reporting-lines migration', () => {
 });
 
 describe('the is_manager column is dropped (issue #234)', () => {
-  const DROP = '20261123110000_people_drop_is_manager.sql';
+  const DROP = '20261123130000_people_drop_is_manager.sql';
   const PREVIOUS = '20261115133700_people_reporting_lines.sql';
   const dropSql = files.includes(DROP) ? statements(DROP) : '';
   const RESEED_HEAD = 'create or replace function private.reseed_demo_people(';
